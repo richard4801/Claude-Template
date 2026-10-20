@@ -65,13 +65,35 @@ Target quality: as close to perfect realism as possible. Known weak spots to wat
 **Bare minimum to start: ~$50**, then ~$25–40/month.
 **Paying from Nigeria:** RunPod and Vast.ai accept crypto (USDT/USDC). A virtual dollar card (Grey, Chipper, etc.) is the alternative.
 
-## 7. Free prep to do now
-- [ ] Create the new TikTok account; post a little manually to warm it up.
+## 7. Content, accounts & earning model (corrected 2026-10-20)
+
+**Content & accounts**
+- Each AI influencer has **their own page** (presented as the creator). Multiple accounts, each run by a different person (e.g. one by girlfriend).
+- Content: **trending sounds, dances, trending sayings/actions**, aimed at a **US/UK audience** (English trends, US/UK posting times and hashtags).
+- **Label every realistic AI video** with TikTok's "AI-generated" label (rule updated Sept 2026). Consider "AI creator" in the bio.
+
+**❌ Rejected: running a "UK" account from Nigeria to earn**
+- Creator Rewards payouts verify **real residency** (local ID, tax info, bank). VPN or borrowed details → ban + withheld earnings.
+- Creator Rewards only counts videos **over 1 minute**; trend clips (10–20s) don't qualify anyway.
+- Sources conflict on whether **fully AI-generated** videos can earn from Creator Rewards; one official TikTok program excludes videos "produced primarily by AI". Treat creator payouts as a bonus, not the plan.
+
+**❌ Rejected: undisclosed "casual" promotions**
+- Illegal: UK (ASA/CMA) and US (FTC) require clear disclosure (e.g. **#ad**). TikTok requires the **Branded content** toggle.
+- Instead: **natural but disclosed** promos, with the product built into the trend or a GRWM-style video, plus a small #ad.
+
+**✅ Earning model**
+1. **Brand deals & UGC orders** from US/UK companies, paid via Payoneer, Wise, or crypto (residency doesn't matter). Main income, and it becomes Phase 2.
+2. **Affiliate links** where available.
+3. **Canada partner (legit route to Creator Rewards):** a trusted person who **really lives in Canada** owns one account in **their own name, ID, and bank**, with a **written revenue-split agreement**. Canada appears on 2026 eligibility lists (confirm in TikTok Studio). They'd need long-form (1 min+) original content on that account to qualify. Thresholds: 18+, 10k followers, 100k views in 30 days, Personal account.
+
+## 8. Free prep to do now
+- [ ] Create the new TikTok account; post a little manually to warm it up (week 1: scroll in niche only; weeks 2–3: 1 simple post/day).
 - [ ] Build a **reference folder** of 20–50 images and clips showing the exact realism/look we want.
 - [ ] Sketch the first influencer: name, age, look, personality, niche.
-- [ ] Set up a payment route (USDT or a virtual dollar card).
+- [ ] Set up a payment route (USDT or a virtual dollar card), plus Payoneer/Wise for receiving brand payments.
+- [ ] Talk to the Canada contact about partnering on one account; draft a simple written split agreement.
 
-## 8. Steps when funds arrive
+## 9. Steps when funds arrive
 1. Create a RunPod account and fund $15–20.
 2. **Video test:** run MiniMax H3 Ref2VA on one of our clips plus one dedicated swap model for comparison. Judge realism, lip sync, and hands.
 3. **Image test:** compare 1–2 image models against the reference folder.
@@ -82,6 +104,11 @@ Target quality: as close to perfect realism as possible. Known weak spots to wat
 8. **Phase 2 gate:** re-check MiniMax's license for offering it *as a service to clients*, confirm the image model is commercially licensed, then design the subscription.
 
 ## Sources
+- [TikTok Creator Growth Challenge terms (official)](https://www.tiktok.com/legal/page/global/tiktok-creator-follower-challenge-program-terms-conditions/en)
+- [Storrito: TikTok AI rules & Creator Rewards](https://storrito.com/resources/what-tiktoks-ai-monetization-restrictions-signal-for-creator-income/)
+- [Storrito: TikTok AI labeling rules](https://storrito.com/resources/tiktoks-2026-ai-labeling-rules-and-what-they-signal-for-platform-governance/)
+- [Toptal: joining Creator Rewards (Canada listed)](https://www.toptal.com/creator/post/how-to-join-the-tiktok-creator-rewards-program)
+- [TT Calculator: Creator Fund countries 2026](https://ttcalculator.net/data/reference/creator-fund-countries/)
 - [RunPod: MiniMax H3 open-weight video model](https://www.runpod.io/blog/minimax-h3-the-open-weight-omni-modal-video-model-and-what-it-takes-to-run-it)
 - [Hugging Face: What is MiniMax H3 (Hailuo 3.0)?](https://huggingface.co/blog/ResterChed/minimax-h3-hailuo-3-0)
 - [Atoms: MiniMax H3 license limits](https://atoms.dev/blog/minimax-h3-open-weights-multimodal-video-model)
