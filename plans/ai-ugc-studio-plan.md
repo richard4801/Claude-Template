@@ -84,14 +84,14 @@ Target quality: as close to perfect realism as possible. Known weak spots to wat
 **✅ Earning model**
 1. **Brand deals & UGC orders** from US/UK companies, paid via Payoneer, Wise, or crypto (residency doesn't matter). Main income, and it becomes Phase 2.
 2. **Affiliate links** where available.
-3. **Canada partner (legit route to Creator Rewards):** a trusted person who **really lives in Canada** owns one account in **their own name, ID, and bank**, with a **written revenue-split agreement**. Canada appears on 2026 eligibility lists (confirm in TikTok Studio). They'd need long-form (1 min+) original content on that account to qualify. Thresholds: 18+, 10k followers, 100k views in 30 days, Personal account.
+3. **Optional: Canada partner (legit route to Creator Rewards).** _Update: the Creator will run their own account from Nigeria, focused on brand deals. Canada is a later option only._ a trusted person who **really lives in Canada** owns one account in **their own name, ID, and bank**, with a **written revenue-split agreement**. Canada appears on 2026 eligibility lists (confirm in TikTok Studio). They'd need long-form (1 min+) original content on that account to qualify. Thresholds: 18+, 10k followers, 100k views in 30 days, Personal account.
 
 ## 8. Free prep to do now
 - [ ] Create the new TikTok account; post a little manually to warm it up (week 1: scroll in niche only; weeks 2–3: 1 simple post/day).
 - [ ] Build a **reference folder** of 20–50 images and clips showing the exact realism/look we want.
 - [ ] Sketch the first influencer: name, age, look, personality, niche.
 - [ ] Set up a payment route (USDT or a virtual dollar card), plus Payoneer/Wise for receiving brand payments.
-- [ ] Talk to the Canada contact about partnering on one account; draft a simple written split agreement.
+- [ ] (Optional) Use `plans/influencer-account-partner-agreement.md` for any partner-run account (Canada contact, girlfriend's influencer, etc.).
 
 ## 9. Steps when funds arrive
 1. Create a RunPod account and fund $15–20.
