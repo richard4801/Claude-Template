@@ -6,6 +6,7 @@ _Status: **paused until funds are available** · Drafted 2026-10-20_
 Build our own system (no OpenArt or similar third-party apps) that can:
 - **Swap a full body and face** into a real recorded clip while keeping the original gestures, lip sync, and background (the style seen in @meerhustles' TikTok).
 - **Generate images** (AI influencers, promo stills) tuned to our standard of realism.
+- **Insert objects into scenes** (cars, houses, brand products) in real footage, as in @hamzzythecreator's Bugatti skit.
 
 **Phase 1 — Experiment:** Run a fresh TikTok account with AI influencer / UGC / promo content made by the system.
 **Phase 2 — Business (only if Phase 1 proves it works):** Offer a subscription so companies can create UGC videos.
@@ -33,11 +34,29 @@ Target quality: as close to perfect realism as possible. Known weak spots to wat
 - **Character library:** influencers made in Images are reused directly in Video.
 - ⚠️ **Licensing:** some image models are non-commercial (e.g. Flux **dev**). Before Phase 2, pick a commercially licensed model.
 
+## 4b. Insert object into scene (added 2026-10-22)
+Inspired by @hamzzythecreator's sponsored skit (Cardcosmic ad) where an AI Bugatti appears in the final shot.
+
+**Two workflows:**
+1. **Edit still → animate (default, easiest):** photo of the empty location → AI image editor adds the object with matched lighting → MiniMax H3 animates it ("man walks to car, opens door, gets in, static camera").
+2. **Insert into real video:** film the actor miming with the empty spot → video model adds the object into the footage (keeps real motion; harder; open option: Wan VACE-style editing; to be tested).
+
+**Open-source tools:** Qwen-Image-Edit or Flux Kontext for the image edit (⚠️ check commercial licences), MiniMax H3 for animation.
+
+**Tricks for realism (seen in the reference video):**
+- Static or near-static camera.
+- Keep people small/at a distance when touching the object.
+- Short AI shot (~5–10s) cut between real footage.
+- Dim/low-contrast colour grade; end on a held or frozen frame with overlay.
+
+**Business value:** drop a client's product into any scene, a strong UGC selling point for Phase 2.
+
 ## 5. Mac app features
 1. **Characters:** store each influencer (reference photos, LoRA, notes).
 2. **Images:** generate with the house style; save picks to a character.
 3. **New Video:** drag in a clip → pick character → choose number of takes → Generate.
 4. **Automation:** start GPU → upload → run model → upscale (+ optional face cleanup) → download → **shut GPU down**.
+4b. **Insert Object:** pick a scene photo/clip → describe or upload the object (car, product) → preview the edited still → animate.
 5. **Results:** compare takes side by side; export for TikTok/Reels.
 6. **Cost tracker:** cost per video and per month.
 
@@ -97,6 +116,7 @@ Target quality: as close to perfect realism as possible. Known weak spots to wat
 1. Create a RunPod account and fund $15–20.
 2. **Video test:** run MiniMax H3 Ref2VA on one of our clips plus one dedicated swap model for comparison. Judge realism, lip sync, and hands.
 3. **Image test:** compare 1–2 image models against the reference folder.
+3b. **Object-insertion test:** recreate a Bugatti-style shot with both workflows (edit-then-animate vs. insert-into-video).
 4. Pick the winners and lock in settings.
 5. Train the first character LoRA and the house style LoRA.
 6. Build the Mac app around the chosen pipeline.
