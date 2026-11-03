@@ -25,7 +25,8 @@ Target quality: as close to perfect realism as possible. Known weak spots to wat
 - **License:** MiniMax H3 Community License. Excludes US, EU, UK, South Korea. **Nigeria is not excluded.** Commercial use is free under $20M annual revenue, **with attribution**.
 - **Resolution:** open weights max out at **768p**. 2K is API-only. Plan: add an open-source upscaler step (768p → 1080p+).
 - **Unproven:** no public demo yet of H3 doing a true performance-preserving body/face swap on existing footage. It may instead *recreate* the clip with the character. **The test phase decides this.**
-- **Hardware need:** an 80GB GPU (H100 class).
+- **Hardware need (updated 2026-11-03):** official repo `MiniMaxAI/MiniMax-H3`. Ref2VA **INT8 checkpoint ~34GB** (BF16 ~66GB). INT8 should fit a 48GB card (L40S/A6000, cheaper) or one 80GB card; full BF16 needs 80GB+. Reported figures conflict, so confirm in the test.
+- **Commercial attribution:** the license reportedly requires commercial products to **display "MiniMax H3" in their UI**. Add this to the app (and to the Phase 2 subscription product).
 - **Rules:** the acceptable use policy bans using real people's likeness without consent. Use original AI characters or ourselves only. Label AI content on TikTok.
 
 ## 4. Image generation
