@@ -26,6 +26,7 @@ Target quality: as close to perfect realism as possible. Known weak spots to wat
 - **Resolution:** open weights max out at **768p**. 2K is API-only. Plan: add an open-source upscaler step (768p → 1080p+).
 - **Unproven:** no public demo yet of H3 doing a true performance-preserving body/face swap on existing footage. It may instead *recreate* the clip with the character. **The test phase decides this.**
 - **Hardware need (updated 2026-11-03):** official repo `MiniMaxAI/MiniMax-H3`. Ref2VA **INT8 checkpoint ~34GB** (BF16 ~66GB). INT8 should fit a 48GB card (L40S/A6000, cheaper) or one 80GB card; full BF16 needs 80GB+. Reported figures conflict, so confirm in the test.
+- **4-bit build (added 2026-11-03):** `DiffSynth-Studio/MiniMax-H3-NF4` (via the DiffSynth-Studio GitHub repo) runs on far less memory: 8GB minimum with heavy offloading (slow), 12–24GB more practical. Needs NVIDIA/CUDA, so **not the M1**. Lower quality than INT8/BF16 is expected. **Test NF4 on a cheap 24GB card (RTX 4090/3090) against INT8 on 48GB**; pick the cheapest that meets the realism bar.
 - **Commercial attribution:** the license reportedly requires commercial products to **display "MiniMax H3" in their UI**. Add this to the app (and to the Phase 2 subscription product).
 - **Rules:** the acceptable use policy bans using real people's likeness without consent. Use original AI characters or ourselves only. Label AI content on TikTok.
 
@@ -115,7 +116,8 @@ Inspired by @hamzzythecreator's sponsored skit (Cardcosmic ad) where an AI Bugat
 
 ## 9. Steps when funds arrive
 1. Create a RunPod account and fund $15–20.
-2. **Video test:** run MiniMax H3 Ref2VA on one of our clips plus one dedicated swap model for comparison. Judge realism, lip sync, and hands.
+2. **Video test:** include the NF4-vs-INT8 quality/cost comparison.
+    run MiniMax H3 Ref2VA on one of our clips plus one dedicated swap model for comparison. Judge realism, lip sync, and hands.
 3. **Image test:** compare 1–2 image models against the reference folder.
 3b. **Object-insertion test:** recreate a Bugatti-style shot with both workflows (edit-then-animate vs. insert-into-video).
 4. Pick the winners and lock in settings.
