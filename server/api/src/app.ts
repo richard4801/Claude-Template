@@ -22,13 +22,17 @@ import { seedDev } from './seed.js';
 import { TemplateService } from './templates/service.js';
 import { WarmService } from './services/warm.js';
 import { schemaState } from './db/client.js';
+import { ReplicateClient } from './replicate/client.js';
+import { ReplicateVideo } from './services/replicateVideo.js';
 
 declare module 'fastify' {
   interface FastifyRequest { user: AuthUser }
   interface FastifyContextConfig { public?: boolean; owner?: boolean }
 }
 
-export type BuildOptions = { db?: DbHandle; fetchFn?: typeof fetch; runpod?: RunpodApi; logger?: boolean; startLoops?: boolean };
+export type BuildOptions = { db?: DbHandle; fetchFn?: typeof fetch; runpod?: RunpodApi; logger?: boolean; startLoops?: boolean;
+  /** Tests: Replicate's backoff without real waiting. */
+  replicateTime?: { sleep: (ms: number) => Promise<void>; now: () => number } };
 export type App = { app: FastifyInstance; ctx: Ctx; close: () => Promise<void> };
 
 export async function buildApp(config: Config, opts: BuildOptions = {}): Promise<App> {
@@ -63,6 +67,9 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
       return t;
     },
   } as Ctx;
+  ctx.replicate = new ReplicateClient({ token: config.REPLICATE_API_TOKEN, base: config.REPLICATE_API_URL, fetchFn: opts.fetchFn, log: app.log,
+    ...(opts.replicateTime ?? {}) });
+  ctx.replicateVideo = new ReplicateVideo(ctx);
   ctx.money = new Money(ctx);
   ctx.images = new ImageService(ctx, opts.fetchFn);
   ctx.jobs = new JobService(ctx);
@@ -137,6 +144,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     ctx.jobs.stop();
     ctx.posts.stop();
     for (const t of timers) clearTimeout(t);
+    await ctx.replicateVideo.idle();
     await ctx.gpu.shutdown();
     await app.close();
     if (!opts.db) await dbh.close();

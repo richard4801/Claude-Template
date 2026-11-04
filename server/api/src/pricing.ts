@@ -11,24 +11,64 @@ export const LORA_SET_COST = 0.60, LORA_CANDIDATES = 30, LORA_MIN_KEEP = 20, LOR
 
 export type RenderReq = {
   engine?: string; steps?: number; use?: string; lipSync?: boolean; takes?: number; clipSeconds?: number | null;
+  /** Replicate only: the quality and the $/output-second it was priced at (stored on the job at submit time). */
+  quality?: string; pricePerSec?: number;
 };
+
+// ---- Replicate (hosted MiniMax H3): Draft / Standard / HD, billed per output second (plans/api.md "Pricing").
+export type Quality = 'draft' | 'standard' | 'hd';
+export const QUALITY_IDS: Quality[] = ['draft', 'standard', 'hd'];
+export const QUALITY_PRICE_DEFAULTS: Record<Quality, number> = { draft: 0.02, standard: 0.08, hd: 0.13 };
+export const QUALITY_INFO: Record<Quality, { label: string; resolution: '768P' | '2K'; detail: string }> = {
+  draft: { label: 'Draft', resolution: '768P', detail: '768P · lite' },
+  standard: { label: 'Standard', resolution: '768P', detail: '768P' },
+  hd: { label: 'HD', resolution: '2K', detail: '2K' },
+};
+export const EXACT_EDIT = { label: 'Exact edit', detail: 'Frame-by-frame · slower · GPU start-up' };
+export const REPLICATE_MIN_SEC = 4, REPLICATE_MAX_SEC = 15, SAMPLE_CLIP_SEC = 9.4;
+export const isReplicate = (r: RenderReq) => r.engine === 'replicate';
+/** A replicate job's quality (Draft when it names none, the default). */
+export const qualityOf = (r: RenderReq): Quality => (QUALITY_IDS as string[]).includes(r.quality ?? '') ? r.quality as Quality : 'draft';
+/** Whole output seconds Replicate renders for a clip: rounded up, 4–15 (no clip length = the 9.4 s sample). */
+export const replicateSeconds = (clipSeconds?: number | null) =>
+  Math.min(REPLICATE_MAX_SEC, Math.max(REPLICATE_MIN_SEC, Math.ceil((clipSeconds ?? SAMPLE_CLIP_SEC) - 0.001)));
+const pricePerSecOf = (r: RenderReq) => r.pricePerSec ?? QUALITY_PRICE_DEFAULTS[qualityOf(r)];
+/** Rough wall time of one Replicate take (queue + render + download + trim), for progress and ETAs only. */
+export const replicateTakeSeconds = (r: RenderReq) => 45 + 10 * replicateSeconds(r.clipSeconds) * (qualityOf(r) === 'hd' ? 1.5 : qualityOf(r) === 'draft' ? 0.6 : 1);
+/** "about $0.56 · 7 s" (+ " · 2 takes"): the price line under the quality picker. */
+export function priceLine(r: RenderReq) {
+  const n = Math.max(1, r.takes ?? 1);
+  return `about ${money(totalCost(r))} · ${replicateSeconds(r.clipSeconds)} s${n > 1 ? ` · ${n} takes` : ''}`;
+}
+/** "Video · Standard 768P · 7 s" (the ledger line); with several takes "Video · Standard 768P · 2 × 7 s". */
+export function videoNote(r: RenderReq, secondsPerTake: number[]) {
+  const q = QUALITY_INFO[qualityOf(r)];
+  const fmt = (v: number) => String(Math.round(v * 10) / 10);
+  const allSame = secondsPerTake.every(v => v === secondsPerTake[0]);
+  const secs = secondsPerTake.length > 1 ? (allSame ? `${secondsPerTake.length} × ${fmt(secondsPerTake[0]!)} s` : `${fmt(secondsPerTake.reduce((a, b) => a + b, 0))} s`)
+    : `${fmt(secondsPerTake[0] ?? replicateSeconds(r.clipSeconds))} s`;
+  return `Video · ${q.label} ${q.resolution} · ${secs}`;
+}
 
 export const secPerLen = (len: number) => SEC_PER_STEP_5S * Math.pow(len / BASE_LEN, 1.3);
 
 /** Seconds actually rendered: the first 5.2 s, or the whole clip (max 15 s). */
 export function lengthSec(r: RenderReq) {
   const clip = r.clipSeconds ?? null;
+  if (isReplicate(r)) return Math.min(clip ?? SAMPLE_CLIP_SEC, MAX_CLIP_SEC);
   if ((r.use ?? 'first') === 'full') return Math.min(clip ?? 9.4, MAX_CLIP_SEC);
   return Math.min(BASE_LEN, clip ?? BASE_LEN);
 }
 /** Minutes for one take. */
 export function estMin(r: RenderReq) {
+  if (isReplicate(r)) return replicateTakeSeconds(r) / 60;
   const L = lengthSec(r);
   if (r.engine === 'viggle') return VIGGLE_MIN_5S * (L / BASE_LEN);
   return (r.steps ?? STEPS_DEFAULT) * secPerLen(L) / 60 + GPU_STARTUP_MIN + (r.lipSync ? LIP_SYNC_MIN : 0);
 }
 /** Dollars for one take. */
 export function estCost(r: RenderReq) {
+  if (isReplicate(r)) return pricePerSecOf(r) * replicateSeconds(r.clipSeconds);
   const L = lengthSec(r);
   return r.engine === 'viggle' ? VIGGLE_COST_5S * (L / BASE_LEN) : estMin(r) / 60 * GPU_PER_HOUR;
 }
@@ -38,11 +78,14 @@ export const totalSeconds = (r: RenderReq) => estMin(r) * 60 * nTakes(r);
 export const totalCost = (r: RenderReq) => estCost(r) * nTakes(r);
 
 export const money = (v: number) => '$' + v.toFixed(2);
-export const engineLabel = (r: RenderReq) => r.engine === 'viggle' ? 'Fast · beta' : `Standard · ${r.steps ?? STEPS_DEFAULT} steps`;
-export const takeLabel = (r: RenderReq) => r.engine === 'viggle' ? 'Fast · beta' : `${r.steps ?? STEPS_DEFAULT} steps`;
+/** "Standard · 768P", "HD · 2K", "Exact edit · 10 steps", "Fast · beta". */
+export const engineLabel = (r: RenderReq) => isReplicate(r) ? `${QUALITY_INFO[qualityOf(r)].label} · ${QUALITY_INFO[qualityOf(r)].resolution}`
+  : r.engine === 'viggle' ? 'Fast · beta' : `${EXACT_EDIT.label} · ${r.steps ?? STEPS_DEFAULT} steps`;
+export const takeLabel = (r: RenderReq) => isReplicate(r) ? QUALITY_INFO[qualityOf(r)].label : r.engine === 'viggle' ? 'Fast · beta' : `${r.steps ?? STEPS_DEFAULT} steps`;
 
 /** "Generate · 10 min · $0.67" (the app's button label). */
 export function genLabel(r: RenderReq) {
+  if (isReplicate(r)) return `Generate · ${replicateSeconds(r.clipSeconds)} s · ${money(totalCost(r))}${nTakes(r) > 1 ? ` · ${nTakes(r)} takes` : ''}`;
   const m = totalMin(r);
   const time = m < 2 ? `${Math.round(m * 60)}s` : `${Math.round(m)} min`;
   return `Generate · ${time} · ${money(totalCost(r))}${nTakes(r) > 1 ? ` · ${nTakes(r)} takes` : ''}`;
@@ -69,11 +112,15 @@ export const loraTrainMinutes = () => LORA_PHOTO_MIN + LORA_VIDEO_MIN;
 export const loraTrainCost = () => Math.round(loraTrainMinutes() / 60 * GPU_PER_HOUR * 100) / 100; // $6.65
 
 const leftText = (s: number) => s >= 60 ? `~${Math.ceil(s / 60)} min left` : `~${Math.ceil(s)}s left`;
-export const totalStepsFor = (r: RenderReq) => r.engine === 'viggle' ? 4 : r.steps ?? STEPS_DEFAULT;
+export const totalStepsFor = (r: RenderReq) => isReplicate(r) ? nTakes(r) : r.engine === 'viggle' ? 4 : r.steps ?? STEPS_DEFAULT;
 
 /** Where a render is after `elapsed` GPU seconds (start-up, steps, lip sync per take). Same as the mock. */
 export function progressAt(r: RenderReq, elapsed: number) {
   const total = totalSeconds(r), n = nTakes(r), perTake = total / n;
+  if (isReplicate(r)) {
+    const e = Math.min(Math.max(elapsed, 0), total), take = Math.min(n, Math.floor(e / perTake) + 1);
+    return { progress: Math.min(100, e / total * 100), take, step: take - 1, totalSteps: n, phase: e >= total ? 'Done' : `${n > 1 ? `take ${take}/${n} · ` : ''}Rendering on Replicate · ${leftText(total - e)}`, secondsLeft: total - e };
+  }
   const viggle = r.engine === 'viggle';
   const totalSteps = totalStepsFor(r);
   const startup = viggle ? 0 : 30, lip = !viggle && r.lipSync ? 240 : 0;

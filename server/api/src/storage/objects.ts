@@ -33,3 +33,19 @@ export async function objectInfo(ctx: Pick<Ctx, 'db' | 'storage'>, key: string):
   if (u) await ctx.db.update(uploads).set({ bytes, sha256: sha, state: 'ready' }).where(eq(uploads.id, u.id));
   return { bytes, sha256: sha };
 }
+
+/** Store a file from disk (renders: streamed, never held in memory) and record it. */
+export async function putFile(ctx: Pick<Ctx, 'db' | 'storage'>, o: { key: string; file: string; studioId: string; kind: typeof uploads.$inferInsert['kind']; userId?: string | null; contentType?: string }) {
+  const fs = await import('node:fs');
+  const contentType = o.contentType ?? contentTypeFor(o.key);
+  const bytes = (await fs.promises.stat(o.file)).size;
+  const h = crypto.createHash('sha256');
+  for await (const chunk of fs.createReadStream(o.file)) h.update(chunk as Buffer);
+  const sha = h.digest('hex');
+  await ctx.storage.putStream(o.key, fs.createReadStream(o.file), contentType, bytes);
+  const row = { studioId: o.studioId, kind: o.kind, storageKey: o.key, contentType, bytes, sha256: sha, state: 'ready' as const, createdBy: o.userId ?? null, createdAt: Date.now() };
+  const [existing] = await ctx.db.select({ id: uploads.id }).from(uploads).where(eq(uploads.storageKey, o.key));
+  if (existing) await ctx.db.update(uploads).set(row).where(eq(uploads.id, existing.id));
+  else await ctx.db.insert(uploads).values({ id: uid('up'), ...row });
+  return { bytes, sha256: sha };
+}

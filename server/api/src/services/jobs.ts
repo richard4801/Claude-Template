@@ -12,7 +12,7 @@ import { ApiError, badRequest, notFound } from '../errors.js';
 import { compact, uid } from '../lib/util.js';
 import { whoOf } from '../money/money.js';
 import * as P from '../pricing.js';
-import { loraToken, videoSwap } from '../prompt/engine.js';
+import { loraToken, replicateSwap, videoSwap } from '../prompt/engine.js';
 import { gpuCanRun, type JobRow } from '../gpu/controller.js';
 import { pods } from '../db/schema.js';
 import { shotPromptFor } from '../templates/service.js';
@@ -22,7 +22,9 @@ export const JobRequestSchema = z.object({
   modelId: z.string(),
   outfitId: z.string().optional().default(''),
   clipId: z.string().optional().default(''),
-  engine: z.enum(['h3', 'viggle']).optional().default('h3'),
+  /** Absent: the server's default engine (VIDEO_ENGINE_DEFAULT). */
+  engine: z.enum(['replicate', 'h3', 'viggle']).optional(),
+  quality: z.enum(['draft', 'standard', 'hd']).optional(),
   steps: z.number().int().optional().default(P.STEPS_DEFAULT),
   use: z.enum(['first', 'full']).optional().default('first'),
   takes: z.number().int().optional().default(1),
@@ -44,8 +46,12 @@ export const PAUSED_PHASE = "Paused: the studio's GPU credit is low";
 
 type QueueInfo = { queuePosition: number; etaSeconds: number; startsInSeconds: number };
 
+const isRep = (j: { request: Record<string, any> }) => j.request?.engine === 'replicate';
+
 export class JobService {
   private queueInfo = new Map<string, QueueInfo>();
+  /** The Replicate line (kept apart: the GPU queue pass prunes queueInfo to the jobs it saw). */
+  private lineInfo = new Map<string, QueueInfo>();
   private loop: NodeJS.Timeout | null = null;
   private ticking = false;
   private current: Promise<void> | null = null;
@@ -56,13 +62,15 @@ export class JobService {
 
   // ------------------------------------------------------------------ views
   view(j: JobRow, takesOut?: unknown[]) {
-    const q = j.state === 'running' && j.gpuState === 'pending' ? this.queueInfo.get(j.id) : undefined;
+    const q = j.state === 'running' && j.gpuState === 'pending' ? this.queueInfo.get(j.id) ?? this.lineInfo.get(j.id) : undefined;
     return compact({
       id: j.id, title: j.title, modelId: j.modelId, modelName: j.modelName, outfitId: j.outfitId, request: j.request, state: j.state,
       progress: j.progress, take: j.take, step: j.step, totalSteps: j.totalSteps, phase: j.phase, secondsLeft: q ? q.etaSeconds : j.secondsLeft,
       totalSeconds: j.totalSeconds, cost: j.cost, refunded: j.refunded, error: j.error, createdAt: j.createdAt, finishedAt: j.finishedAt,
       prompt: j.prompt, seed: j.seed, thumb: j.thumb ?? undefined, queuePosition: q?.queuePosition, etaSeconds: q?.etaSeconds,
       blocked: j.blocked, userId: j.userId, warmupCost: j.warmupCost || undefined, warm: j.warmSessionId ? true : undefined,
+      engineLabel: j.kind === 'render' ? P.engineLabel(j.request) : undefined, errorCode: (j.stats as any)?.errorCode,
+      billedSeconds: j.state === 'done' ? (j.stats as any)?.replicate?.billedSeconds : undefined,
     });
   }
   emitJob(j: JobRow, extra: Record<string, unknown> = {}) {
@@ -81,12 +89,23 @@ export class JobService {
   async create(user: AuthUser, body: unknown) {
     const parsed = JobRequestSchema.safeParse(body);
     if (!parsed.success) throw badRequest(`Invalid job: ${parsed.error.issues[0]?.path.join('.')} ${parsed.error.issues[0]?.message}`);
-    const r = parsed.data;
+    const r = { ...parsed.data, engine: parsed.data.engine ?? this.ctx.config.videoEngineDefault };
     r.takes = Math.min(P.TAKES_MAX, Math.max(1, r.takes));
+    const replicate = r.engine === 'replicate';
+    if (replicate) {
+      if (!this.ctx.replicate.configured) throw new ApiError(400, 'engine_unavailable', "Replicate isn't set up on the server · use Exact edit");
+      if (r.lipSync) throw badRequest('Lip sync is only on Exact edit');
+      if (r.background === 'photo') throw badRequest('A new background photo is only on Exact edit for now');
+      if (!(await this.ctx.replicateVideo.toolsReady())) throw new ApiError(400, 'engine_unavailable', "The server can't prepare clips for Replicate (ffmpeg is missing) · use Exact edit");
+      r.use = 'full';
+      r.quality = r.quality ?? this.ctx.config.VIDEO_QUALITY_DEFAULT;
+      (r as P.RenderReq).pricePerSec = this.qualityPrice(r.quality);
+    } else delete r.quality;
     const [clip] = r.clipId ? await this.ctx.db.select().from(clips).where(and(eq(clips.id, r.clipId), eq(clips.studioId, user.studioId))) : [];
     if (clip && clip.checks.some(c => c.status === 'bad')) throw new ApiError(422, 'clip_failed_checks', 'Fix the clip checks first');
     if (r.engine === 'h3' && (r.steps < P.STEPS_MIN || r.steps > P.STEPS_MAX)) throw badRequest('Steps must be 4–30');
-    if (this.ctx.gpu.mode === 'runpod' && !clip?.storageKey) throw badRequest('Upload the clip file first: the GPU needs the video');
+    if (replicate && !clip?.storageKey) throw badRequest('Upload the clip file first: Replicate needs the video');
+    if (!replicate && this.ctx.gpu.mode === 'runpod' && !clip?.storageKey) throw badRequest('Upload the clip file first: the GPU needs the video');
     if (r.clipSeconds == null && clip) r.clipSeconds = clip.durationSec;
     const [m] = await this.ctx.db.select().from(models).where(and(eq(models.id, r.modelId), eq(models.studioId, user.studioId)));
     if (!m) throw notFound('Model');
@@ -95,11 +114,16 @@ export class JobService {
     const [l] = await this.ctx.db.select().from(loras).where(eq(loras.modelId, m.id));
     const lora = l && l.version > 0 && l.use ? loraToken(m.name, l.version) : null;
     const seed = r.seed ?? 1000 + Math.floor(Math.random() * 99000);
-    if (this.ctx.gpu.mode === 'runpod') this.requireCapabilities(r.engine === 'viggle' ? 'viggle' : 'h3', r.lipSync);
-    // References in the order the H3 setup was tested with (≤ 6): face front, face profile, then the outfit set's
-    // front, ¾ and back if it has them, otherwise the body slots. <Image n> in the prompt follows this order.
-    const references = referencesFor(m, o);
-    const prompt = videoSwap({
+    if (!replicate && this.ctx.gpu.mode === 'runpod') this.requireCapabilities(r.engine === 'viggle' ? 'viggle' : 'h3', r.lipSync);
+    // GPU: references in the order the H3 setup was tested with (≤ 6): face front, face profile, then the outfit set's
+    // front, ¾ and back if it has them, otherwise the body slots. Replicate: the five locked shots, then the outfit (≤ 9).
+    // <Image n> in the prompt follows this order.
+    const references = replicate ? replicateReferencesFor(m, o) : referencesFor(m, o);
+    const prompt = replicate ? replicateSwap({
+      identity: { name: m.name, look: m.look || `${m.age}-year-old woman`, neverAdd: m.neverAdd },
+      outfit: o ? { name: o.name, description: o.description, source: o.mode === 'describe' && !o.angles.some(Boolean) ? 'described' : 'reference-set' } : null,
+      referenceLabels: references.map(x => x.label), direction: r.direction,
+    }).text : videoSwap({
       identity: { name: m.name, look: m.look || `${m.age}-year-old woman`, referenceCount: Math.max(1, references.length), neverAdd: m.neverAdd, lora },
       referenceLabels: references.length ? references.map(x => x.label) : undefined,
       outfit: { name: o?.name ?? 'outfit' }, keepAudio: r.keepAudio, keepBackground: r.background === 'keep',
@@ -120,9 +144,18 @@ export class JobService {
     return this.view(await this.startNew(user, row));
   }
 
+  /** $ per output second for a Replicate quality (config). */
+  qualityPrice(q: string) {
+    const c = this.ctx.config;
+    return q === 'draft' ? c.REPLICATE_PRICE_DRAFT : q === 'hd' ? c.REPLICATE_PRICE_HD : c.REPLICATE_PRICE_STANDARD;
+  }
+  private holdNote(row: { kind?: string; request?: Record<string, any> }) {
+    return row.kind === 'render' && row.request && isRep(row as any) ? `${P.videoNote(row.request, [P.replicateSeconds(row.request.clipSeconds)])}${(row.request.takes ?? 1) > 1 ? ` · ${row.request.takes} takes` : ''} · hold` : undefined;
+  }
+
   /** Holds the price, then puts the job in the GPU queue. Nothing is written if the hold is refused. */
   private async startNew(user: AuthUser, row: typeof jobs.$inferInsert) {
-    const hold = await this.ctx.money.hold(whoOf(user), row.id!, row.cost!, { perJob: row.kind === 'render' });
+    const hold = await this.ctx.money.hold(whoOf(user), row.id!, row.cost!, { perJob: row.kind === 'render', note: this.holdNote(row) });
     try {
       const [ins] = await this.ctx.db.insert(jobs).values({ ...row, ...this.pendingFields(hold) }).returning();
       this.emitJob(ins!);
@@ -140,7 +173,7 @@ export class JobService {
 
   /** Starts a job that is already in the database (queued → running, or a LoRA training row). */
   async startExisting(user: AuthUser, j: JobRow) {
-    const hold = await this.ctx.money.hold(whoOf(user), j.id, j.cost, { perJob: j.kind === 'render' });
+    const hold = await this.ctx.money.hold(whoOf(user), j.id, j.cost, { perJob: j.kind === 'render', note: this.holdNote(j) });
     const [u] = await this.ctx.db.update(jobs).set(this.pendingFields(hold)).where(eq(jobs.id, j.id)).returning();
     this.emitJob(u!);
     this.kick();
@@ -176,9 +209,9 @@ export class JobService {
     const [u] = await this.ctx.db.update(jobs).set({ state: 'failed', gpuState: 'cancelled', error: why, refunded: j.cost, finishedAt: Date.now(), phase: why })
       .where(and(eq(jobs.id, j.id), eq(jobs.state, 'running'))).returning();
     if (!u) return;
-    await this.ctx.gpu.cancel(j.id);
+    if (isRep(j)) this.ctx.replicateVideo.cancel(j.id); else await this.ctx.gpu.cancel(j.id);
     if (u.userId) await this.ctx.money.release(u.studioId, u.userId, u.id, u.holdTokens, why);
-    this.queueInfo.delete(j.id);
+    this.queueInfo.delete(j.id); this.lineInfo.delete(j.id);
   }
 
   /** Capabilities of the pod image (runpod mode) or everything (simulated). */
@@ -189,8 +222,16 @@ export class JobService {
   /** What the apps can offer right now. Replace-audio isn't wired on the GPU yet (keepAudio:false gives a silent take). */
   features() {
     const caps = this.capabilities();
+    const replicate = this.ctx.replicate.configured;
+    const options = [
+      ...P.QUALITY_IDS.map(q => ({ id: q, label: P.QUALITY_INFO[q].label, detail: P.QUALITY_INFO[q].detail, engine: 'replicate', quality: q,
+        resolution: P.QUALITY_INFO[q].resolution, pricePerSec: this.qualityPrice(q), available: replicate })),
+      { id: 'exact', label: P.EXACT_EDIT.label, detail: P.EXACT_EDIT.detail, engine: 'h3', available: caps.includes('h3') },
+    ];
+    const video = { defaultEngine: this.ctx.config.videoEngineDefault === 'viggle' ? 'h3' : this.ctx.config.videoEngineDefault, defaultQuality: this.ctx.config.VIDEO_QUALITY_DEFAULT,
+      minSeconds: P.REPLICATE_MIN_SEC, maxSeconds: P.REPLICATE_MAX_SEC, options };
     return { standard: caps.includes('h3'), fastBeta: caps.includes('viggle'), lipSync: caps.includes('latentsync'), loraTraining: caps.includes('lora-train'),
-      replaceAudio: false, outputSize: { width: 768, height: 1344 }, maxClipSec: P.MAX_CLIP_SEC };
+      replaceAudio: false, outputSize: { width: 768, height: 1344 }, maxClipSec: P.MAX_CLIP_SEC, replicate, video };
   }
   /** Refuse before any GPU starts when the pod image can't run this. */
   requireCapabilities(kind: 'h3' | 'viggle' | 'lora-train', lipSync = false) {
@@ -216,7 +257,7 @@ export class JobService {
   async claimFor(pod: { id: string; assignedUserId: string | null; gpuType: string }, caps?: string[], anyUser = false): Promise<JobRow | null> {
     if (!pod.assignedUserId && !anyUser) return null;
     const can = (j: JobRow) => !caps || (caps.includes(this.workerKind(j)) && (!j.request.lipSync || caps.includes('latentsync')));
-    const mine = (await this.waitingJobs()).filter(j => (anyUser || j.userId === pod.assignedUserId) && !j.blocked
+    const mine = (await this.waitingJobs()).filter(j => !isRep(j) && (anyUser || j.userId === pod.assignedUserId) && !j.blocked
       && (anyUser || gpuCanRun(this.ctx.config, pod.gpuType, this.workerKind(j))) && can(j));
     for (const j of mine) {
       const c = await this.claim(j.id, pod.id);
@@ -230,6 +271,7 @@ export class JobService {
       .where(and(eq(jobs.id, jobId), eq(jobs.gpuState, 'pending'), eq(jobs.state, 'running'), isNull(jobs.blocked))).returning();
     if (!u) return null;
     this.queueInfo.delete(u.id);
+    this.lineInfo.delete(u.id);
     const p = u.kind === 'render' ? P.progressAt(u.request, 0) : { phase: 'Starting GPU' };
     const [v] = await this.ctx.db.update(jobs).set({ ...p, blocked: null }).where(eq(jobs.id, u.id)).returning();
     this.emitJob(v!);
@@ -249,11 +291,13 @@ export class JobService {
   }
 
   /** Finished: create takes, settle the hold to the actual cost. */
-  async complete(jobId: string, o: { outputs?: Record<string, unknown>[]; gpuSeconds?: number; costPerHr?: number; simulated?: boolean; stats?: Record<string, unknown> | null }) {
+  async complete(jobId: string, o: { outputs?: Record<string, unknown>[]; gpuSeconds?: number; costPerHr?: number; simulated?: boolean; stats?: Record<string, unknown> | null;
+    /** Hosted engines: the exact cost (Replicate: price × billed seconds) and the ledger line. */
+    actualCostUsd?: number; settleNote?: string }) {
     const now = Date.now();
     const j = await this.get(jobId);
     if (!j || j.state !== 'running') return null;
-    const full = o.simulated || o.gpuSeconds == null ? j.cost : o.gpuSeconds / 3600 * (o.costPerHr ?? this.ctx.config.GPU_HOURLY_USD);
+    const full = o.actualCostUsd != null ? o.actualCostUsd : o.simulated || o.gpuSeconds == null ? j.cost : o.gpuSeconds / 3600 * (o.costPerHr ?? this.ctx.config.GPU_HOURLY_USD);
     // On a warm GPU the "Warm GPU" line already pays the pod's time: only the part after the session ended is charged.
     const actual = await this.ctx.warm.uncoveredCost(j, full, now);
     const outputs = mergeOutputs(j.outputs ?? [], o.outputs ?? []);
@@ -262,15 +306,15 @@ export class JobService {
       finishedAt: now, gpuSeconds: o.gpuSeconds ?? null, actualCost: actual, outputs, stats: o.stats ?? null,
     }).where(and(eq(jobs.id, jobId), eq(jobs.state, 'running'))).returning();
     if (!u) return null;
-    if (u.userId) await this.ctx.money.settle(u.studioId, u.userId, u.id, u.holdTokens, actual);
+    if (u.userId) await this.ctx.money.settle(u.studioId, u.userId, u.id, u.holdTokens, actual, o.settleNote);
     if (u.kind === 'lora-train') { await this.ctx.lora.onDone(u); this.kick(); return u; }
     const n = u.request.takes ?? 1;
     const [o2] = u.outfitId ? await this.ctx.db.select().from(outfits).where(eq(outfits.id, u.outfitId)) : [];
     const angles = (o2?.angles ?? []).filter(Boolean) as ImageRef[];
     const rows = Array.from({ length: n }, (_, i) => ({
       id: `t_${u.id}_${i + 1}`, studioId: u.studioId, userId: u.userId, kind: 'take' as const, jobId: u.id, modelId: u.modelId, index: i + 1, of: n, title: u.title,
-      label: P.takeLabel(u.request), engineLabel: P.engineLabel(u.request), cost: u.cost / n, seed: u.seed + i, status: 'test' as const,
-      thumb: angles.length ? angles[i % angles.length]! : u.thumb, prompt: u.prompt,
+      label: P.takeLabel(u.request), engineLabel: P.engineLabel(u.request), cost: (o.actualCostUsd ?? u.cost) / n, seed: u.seed + i, status: 'test' as const,
+      thumb: (outputs.find(x => x.name === `take_${i + 1}.mp4`)?.thumb as ImageRef | undefined) ?? (angles.length ? angles[i % angles.length]! : u.thumb), prompt: u.prompt,
       mediaKey: (outputs.find(x => x.name === `take_${i + 1}.mp4`)?.key as string | undefined) ?? null,
       media: mediaOf(outputs.find(x => x.name === `take_${i + 1}.mp4`)), createdAt: now,
     }));
@@ -281,14 +325,15 @@ export class JobService {
   }
 
   /** Failed: the hold goes back in full; the apps get a failed job event and then a balance event. */
-  async fail(jobId: string, error: string, retryable = false) {
+  async fail(jobId: string, error: string, retryable = false, errorCode?: string) {
     const j = await this.get(jobId);
     if (!j || j.state !== 'running') return null;
     const [u] = await this.ctx.db.update(jobs).set({
-      state: 'failed', gpuState: 'failed', error, retryable, refunded: j.cost, finishedAt: Date.now(), phase: `Failed at step ${j.step}`,
+      state: 'failed', gpuState: 'failed', error, retryable, refunded: j.cost, finishedAt: Date.now(), phase: isRep(j) ? 'Failed' : `Failed at step ${j.step}`,
+      ...(errorCode ? { stats: { ...((j.stats as object | null) ?? {}), errorCode } } : {}),
     }).where(and(eq(jobs.id, jobId), eq(jobs.state, 'running'))).returning();
     if (!u) return null;
-    this.queueInfo.delete(u.id);
+    this.queueInfo.delete(u.id); this.lineInfo.delete(u.id);
     if (u.kind === 'lora-train') await this.ctx.lora.onFailed(u);
     else this.emitJob(u);
     if (u.userId) await this.ctx.money.release(u.studioId, u.userId, u.id, u.holdTokens, `failed: ${error}`);
@@ -322,7 +367,10 @@ export class JobService {
   private async pass(now: number) {
     this.ticking = true;
     try {
-      const waiting = await this.waitingJobs();
+      const all = await this.waitingJobs();
+      // Replicate jobs have their own line (services/replicateVideo.ts): no pod, no RunPod balance pause.
+      const waiting = all.filter(j => !isRep(j));
+      await this.ctx.replicateVideo.dispatch(all.filter(isRep));
       const studios = [...new Set(waiting.map(j => j.studioId))];
       // Low RunPod balance: pause new jobs for everyone until it recovers.
       const blockedStudios = new Set<string>();
@@ -341,7 +389,7 @@ export class JobService {
       await this.ctx.warm.tick(now);
       const pool = this.ctx.gpu as { activePods?: () => Promise<unknown[]> };
       const wasQuiet = this.quiet;
-      this.quiet = waiting.length === 0 && (pool.activePods ? (await pool.activePods()).length === 0 : false);
+      this.quiet = all.length === 0 && !this.ctx.replicateVideo.busy() && (pool.activePods ? (await pool.activePods()).length === 0 : false);
       if (this.quiet !== wasQuiet) this.ctx.log.debug({ quiet: this.quiet }, this.quiet ? 'dispatcher idle: slow polling' : 'dispatcher busy');
     } catch (e) {
       this.quiet = false;
@@ -357,7 +405,7 @@ export class JobService {
     const rp = await this.ctx.money.runpodBalance(studioId);
     if (rp.balance == null) return false; // unknown: caps still apply
     const [r] = await this.ctx.db.select({ s: sql<number>`coalesce(sum(${jobs.cost}), 0)` }).from(jobs)
-      .where(and(eq(jobs.studioId, studioId), eq(jobs.state, 'running')));
+      .where(and(eq(jobs.studioId, studioId), eq(jobs.state, 'running'), sql`coalesce(${jobs.request}->>'engine', '') <> 'replicate'`));
     const inFlight = Number(r?.s ?? 0);
     const low = rp.balance < inFlight + this.ctx.config.RUNPOD_MIN_BALANCE_USD;
     const s = await this.ctx.money.settings(studioId);
@@ -384,6 +432,17 @@ export class JobService {
       const wallet = await this.ctx.money.walletView({ id: o.id, studioId, role: 'owner' });
       this.ctx.hub.emitTo(o.id, { type: 'wallet', wallet, notice });
     }
+  }
+
+  /** The Replicate line's position for a waiting job (services/replicateVideo.ts); a job event goes out when it moves. */
+  async setLinePosition(j: JobRow, position: number, startsIn: number) {
+    const info = { queuePosition: position, startsInSeconds: startsIn, etaSeconds: startsIn + (j.totalSeconds || 0) };
+    const prev = this.lineInfo.get(j.id);
+    this.lineInfo.set(j.id, info);
+    if (prev && prev.queuePosition === position) return;
+    const phase = `Waiting for Replicate${position > 1 ? ` · ${ordinal(position)} in line` : ''}${startsIn > 0 ? ` · starts in ${mins(startsIn)}` : ''}`;
+    const [u] = await this.ctx.db.update(jobs).set({ phase, blocked: null }).where(and(eq(jobs.id, j.id), eq(jobs.gpuState, 'pending'))).returning();
+    if (u) this.emitJob(u);
   }
 
   /**
@@ -439,6 +498,21 @@ export function referencesFor(m: typeof models.$inferSelect, o?: typeof outfits.
   const outfitRefs = [[0, 'outfit, front'], [1, 'outfit, ¾'], [3, 'outfit, back']].filter(([i]) => angles[i as number]) as [number, string][];
   if (outfitRefs.length) for (const [i, l] of outfitRefs) push(l, angles[i]);
   else { push('body, front', slot('front')); push('body, ¾', slot('tq')); push('body, back', slot('back')); }
+  return out;
+}
+
+/** References for a Replicate render (≤ 9, fixed order): the model's locked shots, then the outfit set's angles. */
+export function replicateReferencesFor(m: typeof models.$inferSelect, o?: typeof outfits.$inferSelect) {
+  const slot = (k: string) => m.slots.find(s => s.key === k && s.image && !s.busy)?.image ?? null;
+  const out: { label: string; image: ImageRef }[] = [];
+  const push = (label: string, image: ImageRef | null | undefined) => { if (image && out.length < 9) out.push({ label, image }); };
+  push('face, front', slot('face'));
+  push('face, profile', slot('profile'));
+  push('body, front', slot('front'));
+  push('body, ¾', slot('tq'));
+  push('body, back', slot('back'));
+  const angles = o?.angles ?? [];
+  push('outfit, front', angles[0]); push('outfit, ¾', angles[1]); push('outfit, back', angles[3]); push('outfit, side', angles[2]);
   return out;
 }
 

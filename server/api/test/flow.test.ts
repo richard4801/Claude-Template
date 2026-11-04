@@ -33,7 +33,7 @@ describe('simulated studio flow (dev seed, like server/mock)', () => {
     expect(es.events.some(e => e.job?.id === job.id && /step \d+\/10/.test(e.job.phase))).toBe(true);
     const done = es.events.find(e => e.job?.id === job.id && e.job.state === 'done');
     expect(done.takes.length).toBe(2);
-    expect(done.takes[0]).toMatchObject({ kind: 'take', jobId: job.id, label: '10 steps', engineLabel: 'Standard · 10 steps', status: 'test' });
+    expect(done.takes[0]).toMatchObject({ kind: 'take', jobId: job.id, label: '10 steps', engineLabel: 'Exact edit · 10 steps', status: 'test' });
     expect(es.events.some(e => e.type === 'balance')).toBe(true);
     expect(es.events.some(e => e.type === 'wallet')).toBe(true);
     expect(job.prompt).toContain('<Image 1> (face, front)');

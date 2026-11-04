@@ -205,7 +205,8 @@ For fal.ai: create a key at **fal.ai** → **Dashboard** → **Keys**, and add i
 | `WORKER_HEARTBEAT_TIMEOUT_SEC`, `POD_BOOT_TIMEOUT_SEC` | `60`, `900` | Health checks |
 | `GPU_HOURLY_USD` | `3.99` | Rate used when a pod doesn't report its own |
 | `WORKER_TOKEN` | none | Optional static token for a hand-run dev worker |
-| `IMAGE_PROVIDER`, `IMAGE_MODEL`, `IMAGE_CUSTOM_URL` | `simulated` | The default image engine (studios override it in Settings) |
+| `IMAGE_PROVIDER`, `IMAGE_MODEL`, `IMAGE_CUSTOM_URL` | `replicate` with a Replicate token, else `simulated` | The default image engine (studios override it in Settings) |
+| `REPLICATE_API_TOKEN` (+ the `REPLICATE_*` and `VIDEO_ENGINE_DEFAULT` settings in `plans/backend.md` "Replicate") | none | Hosted MiniMax H3 video (Draft / Standard / HD, the default engine) and FLUX.2 / Qwen photos. Needs `ffmpeg` (in the Docker image) |
 | `FAL_KEY`, `FAL_COST_PER_IMAGE` | none, `0.03` | fal.ai |
 | `OWNER_INVITE_CODE`, `OWNER_EMAIL`, `STUDIO_NAME` | | First owner without a terminal (see above) |
 | `DEV_MODE`, `DEV_SEED` | off | Dev only: seed data, `/v1/dev/*`, sign-up without invite, simulated socials. **Never in production** |

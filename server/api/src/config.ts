@@ -115,8 +115,49 @@ const Env = z.object({
   WORKER_TOKEN: str(),
   PRESIGN_TTL_SEC: num(3600),
 
+  // Replicate (plans/backend.md "Replicate"): hosted MiniMax H3 video (Draft / Standard / HD) and photos.
+  REPLICATE_API_TOKEN: str(),
+  REPLICATE_API_URL: z.string().default('https://api.replicate.com/v1'),
+  /** Engine for a job that names none: "replicate" (falls back to "h3" without a token), "h3" or "viggle". */
+  VIDEO_ENGINE_DEFAULT: z.enum(['replicate', 'h3', 'viggle']).default('replicate'),
+  /** Quality for a replicate job that names none (owner's choice 2026-11-04: Draft). */
+  VIDEO_QUALITY_DEFAULT: z.enum(['draft', 'standard', 'hd']).default('draft'),
+  REPLICATE_VIDEO_MODEL: z.string().default('minimax/h3'),
+  REPLICATE_VIDEO_DRAFT_MODEL: z.string().default('minimax/h3-lite'),
+  /** Dollars per output second, per quality. */
+  REPLICATE_PRICE_DRAFT: num(0.02),
+  REPLICATE_PRICE_STANDARD: num(0.08),
+  REPLICATE_PRICE_HD: num(0.13),
+  /** Replicate jobs running at once, across the studio (Replicate allows a burst of 1 on a small balance). */
+  REPLICATE_MAX_CONCURRENT: num(1),
+  REPLICATE_POLL_MS: num(5000),
+  /** A video job fails (provider_rate_limited) only after waiting this long on 429s. */
+  REPLICATE_MAX_RATE_WAIT_SEC: num(1800),
+  /** A photo call gives up on 429s after this long (the charge is refunded). */
+  REPLICATE_IMAGE_MAX_WAIT_SEC: num(120),
+  REPLICATE_PREDICTION_TIMEOUT_SEC: num(1800),
+  /** Presigned R2 GET links handed to Replicate. */
+  REPLICATE_INPUT_URL_TTL_SEC: num(7200),
+  REPLICATE_IMAGE_MODEL: z.string().default('black-forest-labs/flux-2-pro'),
+  REPLICATE_IMAGE_EDIT_MODEL: z.string().default('qwen/qwen-image-edit-2511'),
+  /** FLUX.2 [pro] on Replicate: per run, plus per input and per output megapixel. */
+  REPLICATE_IMAGE_RUN_USD: num(0.015),
+  REPLICATE_IMAGE_MP_USD: num(0.015),
+  /** Qwen-Image-Edit 2511: per output image. */
+  REPLICATE_IMAGE_EDIT_USD: num(0.03),
+  REPLICATE_IMAGE_MAX_REFS: num(6),
+  /** References are shrunk to fit inside this many pixels per side before they're sent. */
+  REPLICATE_IMAGE_REF_MAX_PX: num(1024),
+  REPLICATE_IMAGE_SAFETY: num(2),
+  /** Photo LoRA hook (later): passed to the edit model as lora_weights when set. */
+  REPLICATE_IMAGE_LORA_URL: str(),
+  REPLICATE_IMAGE_LORA_SCALE: num(1),
+  FFMPEG_PATH: z.string().default('ffmpeg'),
+  FFPROBE_PATH: z.string().default('ffprobe'),
+
   // Images
-  IMAGE_PROVIDER: z.enum(['simulated', 'fal', 'custom-http']).default('simulated'),
+  /** Unset: "replicate" when REPLICATE_API_TOKEN is set, else "simulated". */
+  IMAGE_PROVIDER: z.enum(['simulated', 'fal', 'custom-http', 'replicate']).optional(),
   IMAGE_MODEL: z.string().default('fal-ai/bytedance/seedream/v4/edit'),
   IMAGE_CUSTOM_URL: str(),
   FAL_KEY: str(),
@@ -140,7 +181,10 @@ const Env = z.object({
   MIN_PASSWORD: num(8),
 });
 
-export type Config = z.infer<typeof Env> & {
+export type Config = Omit<z.infer<typeof Env>, 'IMAGE_PROVIDER'> & {
+  IMAGE_PROVIDER: 'simulated' | 'fal' | 'custom-http' | 'replicate';
+  /** The engine used when a job names none (VIDEO_ENGINE_DEFAULT, or h3 when Replicate isn't set up). */
+  videoEngineDefault: 'replicate' | 'h3' | 'viggle';
   storage: 'local' | 's3';
   balanceMode: 'runpod' | 'simulated';
   socialMode: 'simulated' | 'stub';
@@ -162,7 +206,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const storage = c.STORAGE ?? (c.R2_BUCKET ? 's3' : 'local');
   const balanceMode = c.BALANCE_MODE ?? (c.GPU_MODE === 'simulated' && c.DEV_MODE ? 'simulated' : 'runpod');
   const socialMode = c.SOCIAL_MODE ?? (c.DEV_MODE ? 'simulated' : 'stub');
-  return { ...c, storage, balanceMode, socialMode };
+  const IMAGE_PROVIDER = c.IMAGE_PROVIDER ?? (c.REPLICATE_API_TOKEN ? 'replicate' : 'simulated');
+  const videoEngineDefault = c.VIDEO_ENGINE_DEFAULT === 'replicate' && !c.REPLICATE_API_TOKEN ? 'h3' : c.VIDEO_ENGINE_DEFAULT;
+  return { ...c, IMAGE_PROVIDER, videoEngineDefault, storage, balanceMode, socialMode };
 }
 
 /** Safe summary for the start-up log: modes and which secrets are set (true/false), never their values. */
@@ -175,10 +221,12 @@ export function describeConfig(c: Config) {
     gpu: c.GPU_MODE,
     balance: c.balanceMode,
     imageProvider: c.IMAGE_PROVIDER,
+    videoEngine: c.videoEngineDefault,
     socials: c.socialMode,
     secrets: {
       RUNPOD_API_KEY: !!c.RUNPOD_API_KEY,
       FAL_KEY: !!c.FAL_KEY,
+      REPLICATE_API_TOKEN: !!c.REPLICATE_API_TOKEN,
       R2_SECRET_ACCESS_KEY: !!c.R2_SECRET_ACCESS_KEY,
       WORKER_TOKEN: !!c.WORKER_TOKEN,
       OWNER_INVITE_CODE: !!c.OWNER_INVITE_CODE,

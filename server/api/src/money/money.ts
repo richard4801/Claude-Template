@@ -146,7 +146,7 @@ export class Money {
   }
 
   /** Holds the estimate for a job. Throws insufficient_* or a cap error before anything starts. */
-  hold(u: Who, jobId: string, costUsd: number, opts: { perJob: boolean }) {
+  hold(u: Who, jobId: string, costUsd: number, opts: { perJob: boolean; note?: string }) {
     return this.lock.run(u.studioId, async () => {
       const tokens = this.toTokens(costUsd);
       await this.checkCaps(u, costUsd, opts);
@@ -156,7 +156,7 @@ export class Money {
         tokens: u.role === 'owner' ? wallets.tokens : sql`${wallets.tokens} - ${tokens}`,
         held: sql`${wallets.held} + ${tokens}`, updatedAt: Date.now(),
       }).where(eq(wallets.userId, u.id));
-      await this.row({ studioId: u.studioId, userId: u.id, actorId: u.id, jobId, kind: 'hold', tokens: -tokens, note: `hold $${costUsd.toFixed(4)}` });
+      await this.row({ studioId: u.studioId, userId: u.id, actorId: u.id, jobId, kind: 'hold', tokens: -tokens, note: opts.note ?? `hold $${costUsd.toFixed(4)}` });
       return tokens;
     }).finally(() => this.notify(u.studioId, [u.id]));
   }

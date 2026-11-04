@@ -64,11 +64,11 @@ export class LoraService {
     try {
       const sel = await this.ctx.images.selection(user.studioId);
       const identity = { name: m.name, look: m.look || `${m.age}-year-old woman`, neverAdd: m.neverAdd, referenceCount: Math.max(1, m.slots.filter(s => s.image).length) };
-      const refs = (await Promise.all(m.slots.map(s => this.ctx.images.loadableUrl(s.image)))).filter(Boolean) as string[];
+      const refs = m.slots.map(s => s.image);
       let images: ImageRef[];
       if (sel.provider === 'simulated') {
-        const r = await this.ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'lora-candidate', refId: m.id,
-          req: { prompt: characterSheetShot(identity, SHEET_ANGLES[2]).text, referenceImages: refs, width: 768, height: 1024, count: P.LORA_CANDIDATES, simAssets: LORA_POOL.map(p => p[0]) } });
+        const r = await this.ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'lora-candidate', refId: m.id, refs,
+          req: { prompt: characterSheetShot(identity, SHEET_ANGLES[2]).text, width: 768, height: 1024, count: P.LORA_CANDIDATES, simAssets: LORA_POOL.map(p => p[0]) } });
         images = r.images;
       } else {
         images = [];
@@ -76,8 +76,8 @@ export class LoraService {
           const batch = await Promise.all(Array.from({ length: Math.min(4, P.LORA_CANDIDATES - i) }, (_, k) => {
             const n = i + k, angle = SHEET_ANGLES[n % SHEET_ANGLES.length]!;
             const prompt = `${characterSheetShot(identity, angle).text}\nVariation: ${VARIATIONS[n % VARIATIONS.length]}.`;
-            return this.ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'lora-candidate', refId: m.id,
-              req: { prompt, referenceImages: refs, width: 768, height: 1024, count: 1, seed: 1000 + n } }).then(r => r.images[0]!);
+            return this.ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'lora-candidate', refId: m.id, refs,
+              req: { prompt, width: 768, height: 1024, count: 1, seed: 1000 + n } }).then(r => r.images[0]!);
           }));
           images.push(...batch);
         }

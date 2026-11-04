@@ -11,7 +11,7 @@ import { ApiError, badRequest, notFound } from '../errors.js';
 import { compact, dayStart, monthStart, uid } from '../lib/util.js';
 import { whoOf } from '../money/money.js';
 import * as P from '../pricing.js';
-import { characterSheetShot, outfitSet, photoshoot, sheetAngle, loraToken } from '../prompt/engine.js';
+import { characterSheetShot, outfitSet, photoshoot, sheetAngle, loraToken, OUTFIT_ANGLES } from '../prompt/engine.js';
 import { createInvite, revokeSession, signin, signup } from '../auth/auth.js';
 import { accountView, PLATFORMS, platformOf } from '../services/posts.js';
 import { takeView } from '../services/jobs.js';
@@ -76,7 +76,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     }
     const lastOkAt = dbStatus.lastOkAt || null;
     const body = { ok: db !== false, speed: ctx.config.SPEED, db, dbLastOkAt: lastOkAt, gpu: ctx.gpu.mode, storage: ctx.storage.kind,
-      imageEngine: ctx.images.defaultSelection().provider, version: '0.1.0',
+      imageEngine: ctx.images.defaultSelection().provider, videoEngine: ctx.config.videoEngineDefault, version: '0.1.0',
       build: ctx.boot.build, startedAt: ctx.boot.startedAt, migrations: ctx.boot.migrations, starters: ctx.boot.starters };
     reply.header('cache-control', 'no-store');
     return db === false ? reply.status(503).send(body) : body;
@@ -155,13 +155,13 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const user = req.user;
     void (async () => {
       const identity = await identityOf(u!);
-      const refs = (await Promise.all(m.slots.map(s => ctx.images.loadableUrl(s.image)))).filter(Boolean) as string[];
+      const refs = m.slots.map(s => s.image);
       const filled: Record<string, ImageRef | null> = {};
       let failed = 0;
       for (const s of missing) {
         try {
-          const r = await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'sheet', refId: m.id,
-            req: { prompt: characterSheetShot(identity, sheetAngle(s.key)!).text, referenceImages: refs, width: 768, height: 1024, count: 1, simAssets: [SLOT_SAMPLE[s.key]!] } });
+          const r = await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'sheet', refId: m.id, refs,
+            req: { prompt: characterSheetShot(identity, sheetAngle(s.key)!).text, width: 768, height: 1024, count: 1, simAssets: [SLOT_SAMPLE[s.key]!] } });
           filled[s.key] = r.images[0]!;
         } catch { filled[s.key] = null; failed++; }
       }
@@ -179,7 +179,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/v1/outfits', async req => (await db.select().from(outfits).where(eq(outfits.studioId, req.user.studioId)).orderBy(outfits.createdAt)).map(outfitView));
   app.post('/v1/outfits', async req => {
     const b = parse(z.object({ modelId: z.string(), name: z.string().max(80).optional(), mode: z.enum(['describe', 'photo', 'own']).optional(),
-      description: z.string().max(1000).optional(), images: z.array(ImageRefSchema).max(4).optional(), imageEngine: z.object({ provider: z.enum(PROVIDERS), model: z.string().optional() }).optional() }).passthrough(), req.body);
+      description: z.string().max(1000).optional(), images: z.array(ImageRefSchema).max(4).optional(), imageEngine: ImageEngineOverride.optional() }).passthrough(), req.body);
     const m = await model(req.user, b.modelId);
     const mode = b.mode ?? 'describe';
     const cost = mode === 'own' ? 0 : P.OUTFIT_SET_COST;
@@ -196,14 +196,27 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       if (mode === 'own' && b.images?.length) angles = [0, 1, 2, 3].map(i => (b.images![i] as ImageRef) ?? null);
       else {
         try {
-          const refs = [...(await Promise.all(m.slots.map(s => ctx.images.loadableUrl(s.image)))), ...(await Promise.all((b.images ?? []).map(i => ctx.images.loadableUrl(i as ImageRef))))].filter(Boolean) as string[];
+          // Most important first (Replicate sends at most REPLICATE_IMAGE_MAX_REFS): face, profile, the product photos, body.
+          const slot = (k: string) => m.slots.find(x => x.key === k)?.image;
+          const refs = [slot('face'), slot('profile'), ...((b.images ?? []) as ImageRef[]), slot('front'), slot('tq'), slot('back'), slot('side')];
           const sel = await ctx.images.selection(user.studioId, b.imageEngine);
           if (sel.provider === 'simulated') {
-            angles = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine,
-              req: { prompt: set[0]!.text, referenceImages: refs, width: 768, height: 1024, count: 4, seed: set[0]!.seed ?? undefined, simAssets: ['c_front', 'c_tq', 'c_face', 'c_front'] } })).images;
+            angles = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, refs,
+              req: { prompt: set[0]!.text, width: 768, height: 1024, count: 4, seed: set[0]!.seed ?? undefined, simAssets: ['c_front', 'c_tq', 'c_face', 'c_front'] } })).images;
+          } else if (sel.provider === 'replicate') {
+            // A new front shot, then the ¾, side and back as edits of it, so all four show the same clothes.
+            const front = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, refs,
+              req: { prompt: set[0]!.text, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0]!;
+            angles = [front];
+            for (const a of OUTFIT_ANGLES.slice(1)) {
+              const prompt = `Show the same person in exactly the same outfit, on the same plain studio background, as a ${a.words}. `
+                + 'Keep the face, hair, body and every detail of the clothes exactly the same. Realistic smartphone photo, natural skin texture.';
+              angles.push((await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine,
+                editOf: front, refs: [slot('face')], req: { prompt, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0]!);
+            }
           } else {
-            angles = await Promise.all(set.map(p => ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine,
-              req: { prompt: p.text, referenceImages: refs, width: 768, height: 1024, count: 1, seed: p.seed ?? undefined } }).then(r => r.images[0]!)));
+            angles = await Promise.all(set.map(p => ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, refs,
+              req: { prompt: p.text, width: 768, height: 1024, count: 1, seed: p.seed ?? undefined } }).then(r => r.images[0]!)));
           }
         } catch (e) {
           await ctx.money.refundCharge(whoOf(user), cost, 'outfit set failed', id);
@@ -357,9 +370,13 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     return o;
   };
   const outfitSpec = (o?: typeof outfits.$inferSelect) => o ? { name: o.name, description: o.description, source: o.mode === 'describe' && !o.angles.some(Boolean) ? 'described' as const : 'reference-set' as const } : null;
-  const shootRefs = async (m: typeof models.$inferSelect, o?: typeof outfits.$inferSelect, extra: (ImageRef | null | undefined)[] = []) =>
-    [...(await Promise.all(m.slots.map(s => ctx.images.loadableUrl(s.image)))), ...(await Promise.all((o?.angles ?? []).map(a => ctx.images.loadableUrl(a)))),
-      ...(await Promise.all(extra.map(a => ctx.images.loadableUrl(a))))].filter(Boolean) as string[];
+  /** References for a shot, most important first (Replicate sends only the first REPLICATE_IMAGE_MAX_REFS): face, profile,
+   * the outfit's front and ¾, a product photo, then the body shots and the outfit's other angles. */
+  const shootRefs = (m: typeof models.$inferSelect, o?: typeof outfits.$inferSelect, extra: (ImageRef | null | undefined)[] = []) => {
+    const slot = (k: string) => m.slots.find(x => x.key === k)?.image;
+    const a = o?.angles ?? [];
+    return [slot('face'), slot('profile'), a[0], a[1], ...extra, slot('front'), slot('tq'), a[3], a[2], slot('back'), slot('side')];
+  };
 
   app.post('/v1/shoots', async req => {
     const b = parse(z.object({ modelId: z.string(), outfitId: z.string().optional(), scene: z.string().max(200).optional(), prompt: z.string().max(4000).optional(),
@@ -375,11 +392,11 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const built = photoshoot({ identity: await identityOf(m), outfit: { name: o?.name ?? 'outfit' }, scene: b.scene?.split(' · ')[0], direction: b.direction, lockSeed: b.lockSeed });
     const prompt = b.prompt?.trim() || built.text;
     const seed = b.seed ?? built.seed ?? undefined;
-    const refs = await shootRefs(m, o);
+    const refs = shootRefs(m, o);
     let r;
     try {
-      r = await ctx.images.generate({ studioId: req.user.studioId, userId: req.user.id, purpose: 'shoot', refId: id, override: b.imageEngine,
-        req: { prompt, referenceImages: refs, width: 1080, height: 1920, count, seed, simAssets: [o?.angles?.[0]?.asset ?? 'g_front', 'c_face', 'face', 'g_tq'] } });
+      r = await ctx.images.generate({ studioId: req.user.studioId, userId: req.user.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs,
+        req: { prompt, width: 1080, height: 1920, count, seed, simAssets: [o?.angles?.[0]?.asset ?? 'g_front', 'c_face', 'face', 'g_tq'] } });
     } catch (e) {
       await ctx.money.refundCharge(whoOf(req.user), P.SHOOT_COST, 'photoshoot failed', id);
       throw e;
@@ -388,7 +405,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const layers = layersFromPrompt(built.text);
     const rows = r.images.map((img, n) => ({
       id: uid('s'), studioId: req.user.studioId, userId: req.user.id, kind: 'shot' as const, jobId: null, modelId: m.id, index: n + 1, of: r.images.length,
-      title: `Shoot · ${label}`, label: `${label} · ${n + 1}`, engineLabel: '', cost: P.SHOOT_COST / r.images.length, seed: r.seed ?? seed ?? 0, status: 'test' as const,
+      title: `Shoot · ${label}`, label: `${label} · ${n + 1}`, engineLabel: ctx.images.shotLabel(r.selection), cost: P.SHOOT_COST / r.images.length, seed: r.seed ?? seed ?? 0, status: 'test' as const,
       thumb: img, prompt, mediaKey: ctx.images.keyOf(img), layers, createdAt: Date.now() + n,
     }));
     const inserted = await db.insert(takes).values(rows).returning();
@@ -407,7 +424,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const shuffleSeed = b.shuffleSeed ?? randomSeed();
     const id = uid('shoot');
     await ctx.money.charge(whoOf(u), P.SHOOT_COST, 'photoshoot', id);
-    const refs = await shootRefs(m, o, [product]);
+    const refs = shootRefs(m, o, [product]);
     const now = Date.now();
     const rows: (typeof takes.$inferInsert)[] = [];
     try {
@@ -415,12 +432,12 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
         const p = buildTemplatePrompt({ templateId: t.id, templateName: t.name, layers: t.layers, pool: t.variationPool, identity, outfit: outfitSpec(o),
           direction: b.direction, shuffleSeed, index: n, lockSeed: b.lockSeed, seed: randomImageSeed(), hasProduct: !!product });
         const sim = [o?.angles?.[0]?.asset ?? 'g_front', 'c_face', 'face', 'g_tq'];
-        const r = await ctx.images.generate({ studioId: u.studioId, userId: u.id, purpose: 'shoot', refId: id, override: b.imageEngine,
-          req: { prompt: p.fullText, referenceImages: refs, width: 1080, height: 1920, count: 1, seed: p.seed ?? undefined, simAssets: [sim[n % sim.length]!] } });
+        const r = await ctx.images.generate({ studioId: u.studioId, userId: u.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs,
+          req: { prompt: p.fullText, width: 1080, height: 1920, count: 1, seed: p.seed ?? undefined, simAssets: [sim[n % sim.length]!] } });
         const fx = await ctx.templates.postProcess(r.images[0]!, t.layers, { studioId: u.studioId, userId: u.id });
         rows.push({
           id: uid('s'), studioId: u.studioId, userId: u.id, kind: 'shot', jobId: null, modelId: m.id, index: n + 1, of: count,
-          title: `Shoot · ${t.name}`.slice(0, 60), label: `${t.name.slice(0, 28)} · ${n + 1}`, engineLabel: '', cost: P.SHOOT_COST / count,
+          title: `Shoot · ${t.name}`.slice(0, 60), label: `${t.name.slice(0, 28)} · ${n + 1}`, engineLabel: ctx.images.shotLabel(r.selection), cost: P.SHOOT_COST / count,
           seed: p.seed ?? r.seed ?? 0, status: 'test', thumb: fx.ref, prompt: p.fullText, publicPrompt: p.visibleText, mediaKey: fx.key,
           layers: t.layers, templateId: t.id, templateName: t.name, templateOwnerId: t.ownerId, variation: p.variation, shuffleSeed, createdAt: now + n,
         });
@@ -531,7 +548,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
 
   // ------------------------------------------------------------------ settings
   const EngineBody = z.object({ provider: z.enum(PROVIDERS), model: z.string().min(1).max(200).optional(), url: z.string().url().max(500).optional() });
-  const engineView = async (studioId: string) => ({ ...(await ctx.images.selection(studioId)), available: ctx.images.available() });
+  const engineView = async (studioId: string) => { const sel = await ctx.images.selection(studioId); return { ...sel, label: ctx.images.label(sel), available: ctx.images.available() }; };
   app.get('/v1/settings/image-engine', async req => engineView(req.user.studioId));
   app.patch('/v1/settings/image-engine', async req => {
     const b = parse(EngineBody, req.body);
@@ -541,8 +558,10 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       if (req.user.role !== 'owner') throw new ApiError(403, 'owner_only', 'Only the studio owner can point MUSE at a custom engine');
     }
     if (b.provider === 'fal' && !ctx.config.FAL_KEY) throw badRequest('fal is not set up on the server (FAL_KEY)');
+    if (b.provider === 'replicate' && !ctx.replicate.configured) throw badRequest('Replicate is not set up on the server (REPLICATE_API_TOKEN)');
     const cur = await ctx.images.selection(req.user.studioId);
-    const next = { provider: b.provider, model: b.model ?? (b.provider === cur.provider ? cur.model : b.provider === 'simulated' ? 'bundled-stills' : ctx.config.IMAGE_MODEL), ...(b.url ? { url: b.url } : {}) };
+    const next = b.provider === 'replicate' ? { provider: b.provider, model: b.model ?? (cur.provider === 'replicate' ? cur.model : ctx.config.REPLICATE_IMAGE_MODEL) }
+      : { provider: b.provider, model: b.model ?? (b.provider === cur.provider ? cur.model : b.provider === 'simulated' ? 'bundled-stills' : ctx.config.IMAGE_MODEL), ...(b.url ? { url: b.url } : {}) };
     await ctx.money.settings(req.user.studioId);
     await db.update(studioSettings).set({ imageEngine: next }).where(eq(studioSettings.studioId, req.user.studioId));
     return engineView(req.user.studioId);

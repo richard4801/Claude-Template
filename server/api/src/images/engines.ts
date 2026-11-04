@@ -1,5 +1,6 @@
 // The image engine: one request shape, one adapter per provider (plans/backend.md, "Image engine contract").
 import { sleep } from '../lib/util.js';
+import { outputUrl, ReplicateError, SAFETY_RE, errorText, type ReplicateClient } from '../replicate/client.js';
 
 export type ImageRequest = {
   prompt: string;
@@ -12,17 +13,26 @@ export type ImageRequest = {
   count: number;
   /** Simulated engine only: which bundled stills to return, in order (cycled). */
   simAssets?: string[];
+  /** An edit of this photo (URL) rather than a new shot: Replicate uses its edit model. */
+  editOf?: string;
+  /** Replicate: megapixels of each reference (after shrinking), for the cost estimate. */
+  referenceMp?: number[];
 };
 export type EngineImage = { url?: string; b64?: string; asset?: string };
 export type ImageResult = { images: EngineImage[]; seed?: number; costUsd?: number };
-export type EngineSelection = { provider: 'simulated' | 'fal' | 'custom-http'; model: string; url?: string };
+export type EngineSelection = { provider: 'simulated' | 'fal' | 'custom-http' | 'replicate'; model: string; url?: string;
+  /** Replicate: the model for edits of an existing photo. */
+  editModel?: string };
 
 export interface ImageEngine {
   readonly provider: EngineSelection['provider'];
   generate(req: ImageRequest, sel: EngineSelection): Promise<ImageResult>;
 }
 
-export class ImageEngineError extends Error {}
+/** `code` turns into the API error: a safety refusal (422) or a rate limit that outlasted the wait (429). */
+export class ImageEngineError extends Error {
+  constructor(message: string, readonly code?: 'provider_refused' | 'provider_rate_limited' | 'engine_unavailable') { super(message); }
+}
 
 /** Returns the bundled reference stills (assets/ref/*.jpg, the same ones the apps bundle) after GEN_MS. Free. */
 export class SimulatedEngine implements ImageEngine {
@@ -90,5 +100,69 @@ export class FalEngine implements ImageEngine {
     const out = (await r.json()) as { images?: { url: string }[]; seed?: number };
     if (!out.images?.length) throw new ImageEngineError('fal returned no images');
     return { images: out.images.map(i => ({ url: i.url })), seed: out.seed ?? req.seed, costUsd: this.costPerImage * out.images.length };
+  }
+}
+
+export type ReplicateImageConfig = {
+  editModel: string; runUsd: number; mpUsd: number; editUsd: number; maxRefs: number; safety: number;
+  pollMs: number; timeoutMs: number; maxWaitMs: number; loraUrl?: string; loraScale: number;
+};
+const RATIOS: [string, number][] = [['9:16', 9 / 16], ['3:4', 3 / 4], ['2:3', 2 / 3], ['4:5', 4 / 5], ['1:1', 1], ['5:4', 5 / 4], ['4:3', 4 / 3], ['3:2', 3 / 2], ['16:9', 16 / 9]];
+/** The nearest aspect ratio FLUX.2 accepts. */
+export const aspectFor = (w: number, h: number) => RATIOS.reduce((a, b) => (Math.abs(Math.log(b[1] / (w / h))) < Math.abs(Math.log(a[1] / (w / h))) ? b : a))[0];
+
+/**
+ * Replicate (plans/backend.md "Replicate"): new shots on FLUX.2 [pro] with the model's reference shots, edits of an
+ * existing photo on Qwen-Image-Edit 2511. One prediction per image, through the shared rate-limit gate. The cost is
+ * an estimate from the model's published prices (FLUX.2 [pro]: per run + per input and output megapixel).
+ */
+export class ReplicateImageEngine implements ImageEngine {
+  readonly provider = 'replicate' as const;
+  constructor(private client: ReplicateClient, private cfg: () => ReplicateImageConfig) {}
+  async generate(req: ImageRequest, sel: EngineSelection): Promise<ImageResult> {
+    const c = this.cfg();
+    if (!this.client.configured) throw new ImageEngineError("Replicate isn't set up on the server", 'engine_unavailable');
+    const images: EngineImage[] = [];
+    let cost = 0;
+    for (let i = 0; i < req.count; i++) {
+      const seed = req.seed != null ? req.seed + i : undefined;
+      let model: string, input: Record<string, unknown>;
+      if (req.editOf) {
+        model = sel.editModel || c.editModel;
+        input = { prompt: req.prompt, image: [req.editOf, ...req.referenceImages.slice(0, 2)], aspect_ratio: 'match_input_image', output_format: 'jpg', output_quality: 95,
+          ...(seed != null ? { seed } : {}), ...(c.loraUrl ? { lora_weights: c.loraUrl, lora_scale: c.loraScale } : {}) };
+        cost += c.editUsd;
+      } else {
+        model = sel.model;
+        const refs = req.referenceImages.slice(0, c.maxRefs);
+        const outMp = req.width * req.height >= 1.5e6 ? 2 : 1;
+        input = { prompt: req.prompt, input_images: refs, aspect_ratio: aspectFor(req.width, req.height), resolution: `${outMp} MP`, output_format: 'jpg', output_quality: 95,
+          safety_tolerance: c.safety, ...(seed != null ? { seed } : {}) };
+        const inMp = refs.reduce((a, _, k) => a + (req.referenceMp?.[k] ?? 1), 0);
+        cost += c.runUsd + c.mpUsd * (outMp + inMp);
+      }
+      try {
+        const p = await this.client.create(model, input, { maxWaitMs: c.maxWaitMs });
+        const done = p.status === 'succeeded' ? p : await this.client.wait(p.id, { pollMs: c.pollMs, timeoutMs: c.timeoutMs });
+        if (done.status !== 'succeeded') {
+          const t = errorText(done.error);
+          if (SAFETY_RE.test(t)) throw new ImageEngineError("Replicate's safety filter refused this photo", 'provider_refused');
+          throw new ImageEngineError(`Replicate could not make the image${t ? `: ${t.slice(0, 200)}` : ''}`);
+        }
+        const url = outputUrl(done.output);
+        if (!url) throw new ImageEngineError('Replicate returned no image');
+        images.push({ url });
+      } catch (e) {
+        if (e instanceof ImageEngineError) throw e;
+        if (e instanceof ReplicateError) {
+          if (e.kind === 'refused') throw new ImageEngineError("Replicate's safety filter refused this photo", 'provider_refused');
+          if (e.kind === 'rate_limited') throw new ImageEngineError('Replicate is busy (rate limit) · try again in a minute', 'provider_rate_limited');
+          if (e.kind === 'unavailable') throw new ImageEngineError(e.message, 'engine_unavailable');
+          throw new ImageEngineError(e.message);
+        }
+        throw e;
+      }
+    }
+    return { images, seed: req.seed, costUsd: cost };
   }
 }

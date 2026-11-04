@@ -214,3 +214,67 @@ export function videoSwap(v: VideoSwapSpec): H3Prompt {
   return { subjectDefinitions: subjects, summary, retentionAnalysis: retention, detailedDescription: detailed,
     audioMode: keepAudio ? 'fully_copy' : 'replace', steps: v.steps ?? 10, seed: v.seed ?? 42, removed, text };
 }
+
+// ---- Replicate (hosted MiniMax H3): a SHORT prompt (plans/backend.md "Replicate").
+// The owner's tests showed that long prompts make H3 drop details, so this keeps the four sections of the tested v4
+// prompt (~230 words) and nothing else: identity, outfit, never-add, captions removed, and the exact framing and crop
+// (the hosted model tends to pull the camera back otherwise).
+
+/** Reference roles in the fixed order they are sent to Replicate (≤ 9). */
+export type RefRole = 'face, front' | 'face, profile' | 'body, front' | 'body, ¾' | 'body, back' | 'outfit, front' | 'outfit, ¾' | 'outfit, back' | 'outfit, side';
+export type ReplicateSwapSpec = {
+  identity: Identity; outfit?: OutfitSpec | null;
+  /** Roles of the images actually sent, in <Image n> order. */
+  referenceLabels: string[];
+  direction?: string | null;
+};
+
+/** "<Image 3>", "<Image 3> and <Image 4>", "<Image 3> to <Image 5>", "<Image 1>, <Image 3> and <Image 6>". */
+export function imageRange(ns: number[]): string {
+  if (!ns.length) return '';
+  const tag = (n: number) => `<Image ${n}>`;
+  if (ns.length === 1) return tag(ns[0]!);
+  const contiguous = ns.every((n, i) => i === 0 || n === ns[i - 1]! + 1);
+  if (contiguous && ns.length > 2) return `${tag(ns[0]!)} to ${tag(ns[ns.length - 1]!)}`;
+  return ns.slice(0, -1).map(tag).join(', ') + ' and ' + tag(ns[ns.length - 1]!);
+}
+
+export function replicateSwap(v: ReplicateSwapSpec): { text: string; removed: string[] } {
+  const id = v.identity;
+  const labels = v.referenceLabels.slice(0, 9);
+  const all = labels.map((_, i) => i + 1);
+  const where = (prefix: string) => labels.map((l, i) => (l.startsWith(prefix) ? i + 1 : 0)).filter(Boolean);
+  const faces = where('face'), body = where('body'), outfitRefs = where('outfit');
+  const never = neverList(id);
+  const { clean: dir, removed } = sanitizeDirection(v.direction, id);
+  const look = trimEndChars(id.look.trim(), '.');
+
+  const s2 = all.length ? `the person in ${imageRange(all)}: ${look}` : look;
+  const subjects = `<Subject 1> is the person in <Video 1>.\n<Subject 2> is ${s2}, no tattoos.\n<Video 1> is the source video.`;
+
+  const summary = '[video editing + character replacement] <Subject 1> is replaced by <Subject 2>. <Subject 2> copies '
+    + "<Subject 1>'s facial performance exactly, frame by frame and with the same intensity: every eye movement, side glance, blink, "
+    + 'eyebrow raise, mouth and lip movement and head turn, at the same moments, and the same body motion. The camera, the exact framing '
+    + 'and crop, the background and the lighting of <Video 1> stay unchanged. Any caption or on-screen text is removed.';
+
+  const o = v.outfit;
+  const outfitName = (o?.name ?? '').trim().toLowerCase();
+  let outfit: string;
+  if (outfitRefs.length) outfit = `${outfitName ? `the ${outfitName} outfit` : 'the outfit'} from ${imageRange(outfitRefs)}`;
+  else if (o && (o.source === 'described' || o.source === 'product-photo') && (o.description ?? '').trim())
+    outfit = `wearing ${trimEndChars(o.description!.trim(), '.')}${body.length ? `, not the clothes in ${imageRange(body)}` : ''}`;
+  else outfit = body.length ? `the outfit from ${imageRange(body)}` : 'an everyday outfit';
+  const parts = [faces.length ? `face and identity from ${imageRange(faces)}` : 'face and identity as described',
+    ...(body.length ? [`body shape from ${imageRange(body)}`] : []), outfit, `no ${never.join(', no ')}`];
+  const retention = '<Video 1>: fully_preserved - camera motion, framing and crop, background, lighting and timing.\n'
+    + "<Subject 1>: replaced - only the facial expressions, mouth movements and body motion are kept, not the face, hair, tattoos, jewellery or clothes.\n"
+    + `<Subject 2>: reference - ${parts.join('; ')}.`;
+
+  let detailed = 'Casual phone video, realistic. [Shot 1] <Subject 2> in the same place, framed exactly like <Subject 1>: keep the exact '
+    + 'framing and crop of <Video 1>, the camera does not pull back. The face is fully alive and mirrors every expression of <Subject 1> '
+    + `and the words being mouthed. Sharp face matching ${faces.length ? `<Image ${faces[0]}>` : 'the description'}, natural skin texture, no beauty filter. No text anywhere.`;
+  if (dir) detailed += ` ${dir}`;
+
+  const text = `subject_definitions:\n${subjects}\n\nsummary:\n${summary}\n\nretention_analysis:\n${retention}\n\ndetailed_description:\n${detailed}\n`;
+  return { text, removed };
+}
