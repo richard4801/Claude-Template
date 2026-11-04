@@ -8,7 +8,7 @@ _Added 2026-11-04._ Every generator in the app (character sheet, outfit set, pho
 | **Identity** | Model profile: look settings and locked references | "Sienna Vale: young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin. Identity from 6 locked reference images." |
 | **Outfit** | The selected outfit set (front, ¾, side, back) | "Wearing: green set (outfit reference set)." |
 | **Task** | Which generator is running | Photoshoot / identity shot / outfit angle / video swap |
-| **Scene** | Scene chip **or** custom text | "Scene: sunlit Lagos rooftop bar, string lights." |
+| **Scene** | Scene chip **or** custom text | "Scene: sunlit rooftop bar, string lights." |
 | **Camera** | Shot, lens, aperture (with lens-aware wording) | "Medium shot, 85mm, f/2.8, compressed background, creamy bokeh." |
 | **Light & grade** | Light chip and grade chip | "Golden hour; grade: phone-natural." |
 | **Direction** | The user's free text | "Laughing mid-step, holding an iced coffee." |
