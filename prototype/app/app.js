@@ -284,12 +284,12 @@ SCREENS.result = () => { const j=S.open||S.jobs[0];
    ${S.consent==='tests'&&!S.final.includes(j.id)?`<div class="note-box warn">${ic('shield',18)}<span>Performer consent is <b>tests only</b>, so this take stays in Tests and can't be exported.</span></div>`:`<div class="note-box">${ic('shield',18)}<span>Export adds the AI-generated label. Brand posts also need #ad.</span></div>`}
    <div class="row-g"><div class="cta-2 grow press" data-act="discard">Discard</div><div class="cta grow press" data-act="approve">${S.final.includes(j.id)?'Approved ✓':S.consent==='tests'?'Keep as test':'Approve'}</div></div></div>${home}</section>`; };
 
-SCREENS.gallery = () => { const tiles=[...S.jobs.filter(j=>j.id.length>3).map(j=>[j.img,j.title,j.id]),['vid_living','10 steps','g1'],['vid_kick','Viggle beta','j1'],['vid_bath','30 steps','j2'],['c_front','Shoot','g4'],['vid_living2','15 steps','g5'],['c_tq','Shoot','g6']];
+SCREENS.gallery = () => { const fresh=S.newShots||0; S.newShots=0; const tiles=[...(S.shots||[]).map(s=>[s[0],s[1]+'',s[2]]),...S.jobs.filter(j=>j.id.length>3).map(j=>[j.img,j.title,j.id]),['vid_living','10 steps','g1'],['vid_kick','Viggle beta','j1'],['vid_bath','30 steps','j2'],['c_front','Shoot','g4'],['vid_living2','15 steps','g5'],['c_tq','Shoot','g6']];
   const list = S.gallery==='final' ? tiles.filter(x=>S.final.includes(x[2])) : tiles;
   return `<section class="screen">${sbar()}<header class="top">${wm()}<span class="grow"></span><span class="tb-btn">${ic('grid')}</span></header>
   <div class="pad stack-14"><h2 class="h2">${T()==='a'?'<span class="cond" style="font-size:56px">Gallery</span>':'Gallery'}</h2>
    <div class="seg"><span class="${S.gallery==='tests'?'on':''}" data-act="gal-tests">Tests · ${tiles.length}</span><span class="${S.gallery==='final'?'on':''}" data-act="gal-final">Final · ${S.final.length}</span></div>
-   ${list.length?`<div class="gal">${list.map(([k,l],i)=>`<div class="gt pop-in" style="${bg(k)};animation-delay:${i*60}ms"><span class="gt-l">${l}</span></div>`).join('')}</div>`:`<div class="note-box">${ic('spark',18)}<span>Nothing approved yet. Approve a take to move it here.</span></div>`}
+   ${list.length?`<div class="gal">${list.map(([k,l],i)=>`<div class="gt pop-in" style="${bg(k)};animation-delay:${i*60}ms${i<fresh?';box-shadow:0 0 0 3px var(--accent)':''}"><span class="gt-l">${i<fresh?'New · ':''}${l}</span></div>`).join('')}</div>`:`<div class="note-box">${ic('spark',18)}<span>Nothing approved yet. Approve a take to move it here.</span></div>`}
    <p class="tiny muted">Tests never fill your final gallery.</p></div>${tabbar('direct')}${home}</section>`; };
 
 const THEMES=[['a','Editorial','#EFEBE3','#141210','#B5121B'],['b','Camera Body','#0D0E0F','#ECEAE5','#F2A93B'],['c','Soft Tactile','#E7E2D9','#23262A','#6E8465'],['d','Creator Pop','#1F4BFF','#FFF6EC','#FF7EB6']];
@@ -393,8 +393,10 @@ function act(a, el){
   if(a==='portraits'){ el.classList.add('shimmer'); el.textContent='Generating portraits…'; snd('go'); setTimeout(()=>{ snd('done'); go('create3'); }, 1400); return; }
   if(a==='upload'){ toast('Choose 6 separate images · not a character sheet'); return; }
   if(a==='model-saved'){ snd('done'); confetti(); toast('Saved · add 3 more shots to unlock video'); S.stack=[]; render('home',1); return; }
-  if(a==='shoot'){ el.classList.add('shimmer'); el.textContent='Shooting…'; snd('go'); if(S.theme==='b'){ const f=$('#flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); }
-    setTimeout(()=>{ snd('done'); el.classList.remove('shimmer'); el.textContent='4 shots ready · view in Gallery'; }, 1600); return; }
+  if(a==='shoot'){ if(el.dataset.busy) return; el.dataset.busy=1; el.classList.add('shimmer'); el.textContent='Shooting…'; snd('go'); if(S.theme==='b'){ const f=$('#flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); }
+    setTimeout(()=>{ const pool=[OUTFITS[S.outfit][0],'c_face','face','g_tq']; S.shots=[...pool.map((k,n)=>[k,(S.scene||'Rooftop · golden hour').split(' · ')[0]+' · '+(n+1),'s'+Date.now()+n]), ...(S.shots||[])];
+      S.balance=Math.max(0,S.balance-0.12); S.month+=0.12; S.newShots=4; snd('done'); confetti();
+      el.classList.remove('shimmer'); delete el.dataset.busy; el.removeAttribute('data-act'); el.dataset.go='gallery'; el.innerHTML=ic('grid',18)+' 4 shots ready · View in Gallery'; }, 1600); return; }
   if(a==='generate'){ startJob(el); return; }
   if(k==='open'){ const j=[S.running,...S.jobs].find(x=>x&&x.id===v); if(!j) return; if(j.state!=='done'){ toast('Still rendering · step '+Math.ceil(j.p/10)+' of 10'); return; } S.open=j; go('result'); return; }
   if(a==='approve'){ const j=S.open||S.jobs[0]; if(S.consent==='tests'&&!S.final.includes(j.id)){ toast('Kept in Tests · change consent to post'); back(); return; } if(!S.final.includes(j.id)) S.final.push(j.id); snd('done'); confetti(); refresh(); toast('Moved to Final gallery'); return; }
