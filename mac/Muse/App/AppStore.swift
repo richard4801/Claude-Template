@@ -140,6 +140,10 @@ final class AppStore {
     var notifyPhone: Bool { didSet { defaults.set(notifyPhone, forKey: "muse.notifyPhone") } }
     var warnOverBudget: Bool { didSet { defaults.set(warnOverBudget, forKey: "muse.warnBudget") } }
     var dataSource: DataSource { didSet { defaults.set(dataSource.rawValue, forKey: "muse.dataSource.v2") } }
+    /// "Remember me" on sign-in (default on). On: the session stays in the Keychain across launches and the email is pre-filled.
+    /// Off: the token lives in memory only (quitting signs out) and the email isn't saved. The password is never stored by MUSE;
+    /// macOS Passwords / iCloud Keychain offers to save it through the fields' content types.
+    var rememberMe: Bool { didSet { defaults.set(rememberMe, forKey: "muse.rememberMe") } }
     var baseURL: String { didSet { defaults.set(baseURL, forKey: "muse.baseURL.v2") } }
     /// Never-add edits not yet saved on the server (PATCH /v1/models/{id}); kept on this Mac when an older server doesn't have the endpoint.
     var neverOverrides: [String: [String]] { didSet { defaults.set(neverOverrides, forKey: "muse.never") } }
@@ -274,6 +278,7 @@ final class AppStore {
         dataSource = DataSource(rawValue: d.string(forKey: "muse.dataSource.v2") ?? "http") ?? .http
         baseURL = d.string(forKey: "muse.baseURL.v2") ?? defaultServerURL
         neverOverrides = d.dictionary(forKey: "muse.never") as? [String: [String]] ?? [:]
+        rememberMe = d.object(forKey: "muse.rememberMe") as? Bool ?? true
         steps = Pricing.clampSteps(ds)
         engine = Engine(id: d.string(forKey: "muse.defaultEngine") ?? "h3")
         let store = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("MUSE/uploads")
@@ -281,6 +286,7 @@ final class AppStore {
         api = fake
         d.removeObject(forKey: "muse.token") // older builds kept the token in UserDefaults; it lives in the Keychain now
         if let data = d.data(forKey: "muse.user"), let u = try? JSONDecoder().decode(User.self, from: data) { user = u }
+        if rememberMe, let email = d.string(forKey: "muse.rememberedEmail") { authEmail = email }
     }
 
     // MARK: Lifecycle
@@ -338,7 +344,7 @@ final class AppStore {
 
     private func setUser(_ u: User) {
         user = u
-        defaults.set(try? JSONEncoder().encode(u), forKey: "muse.user")
+        if rememberMe { defaults.set(try? JSONEncoder().encode(u), forKey: "muse.user") } else { defaults.removeObject(forKey: "muse.user") }
     }
 
     /// Switches between demo mode and a server, then restores that server's session (or asks to sign in).
@@ -575,7 +581,14 @@ final class AppStore {
 
     private func finishAuth(_ r: AuthResponse) async {
         await api.setToken(r.token)
-        if !isDemo { Keychain.setToken(r.token, for: serverKey) }
+        if rememberMe {
+            if !isDemo { Keychain.setToken(r.token, for: serverKey) }
+            defaults.set(r.user.email, forKey: "muse.rememberedEmail")
+        } else {
+            // Memory only: quitting MUSE signs out.
+            if !isDemo { Keychain.deleteToken(for: serverKey) }
+            defaults.removeObject(forKey: "muse.rememberedEmail")
+        }
         var u = r.user
         if isDemo && u.role == nil { u.role = "owner" }
         setUser(u)

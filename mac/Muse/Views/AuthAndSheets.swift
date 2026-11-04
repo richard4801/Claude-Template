@@ -63,9 +63,12 @@ struct AuthView: View {
                                 }
                             }
                             TextField("you@studio.com", text: $store.authEmail).fieldChrome().textContentType(.username)
-                            SecureField(up && !store.isDemo ? "Password (8 or more characters)" : "Password", text: $store.authPassword).fieldChrome()
-                                .textContentType(.password)
-                                .onSubmit { up ? store.signUp() : store.signIn() }
+                            PasswordField(placeholder: up && !store.isDemo ? "Password (8 or more characters)" : "Password", text: $store.authPassword, isNew: up) {
+                                up ? store.signUp() : store.signIn()
+                            }
+                            if !up {
+                                CheckBox(on: $store.rememberMe, label: "Remember me", hint: "Stay signed in on this Mac")
+                            }
                             if up {
                                 TextField(store.isDemo ? "Invite code (not needed in demo mode)" : "Invite code · MUSE-XXXX-XXXX-XXXX", text: $store.authInvite)
                                     .fieldChrome()
@@ -262,5 +265,74 @@ struct OutfitSheetView: View {
             store.outfitSheet?.images = photo ? [imgs[0]] : Array(imgs.prefix(4))
             return true
         } isTargeted: { targeted = $0 }
+    }
+}
+
+/// A password field with a trailing eye that swaps SecureField ↔ TextField, keeping the text and the focus. Hidden by default.
+/// The content type lets macOS Passwords / iCloud Keychain offer to save and AutoFill it; MUSE never stores the password.
+struct PasswordField: View {
+    @Environment(\.theme) private var t
+    var placeholder = "Password"
+    @Binding var text: String
+    /// Sign-up: `.newPassword`, so the password manager can suggest a strong one.
+    var isNew = false
+    var onSubmit: () -> Void = {}
+    @State private var shown = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Group {
+                if shown {
+                    TextField(placeholder, text: $text)
+                } else {
+                    SecureField(placeholder, text: $text)
+                }
+            }
+            .textContentType(isNew ? NSTextContentType.newPassword : NSTextContentType.password)
+            .focused($focused)
+            .onSubmit(onSubmit)
+            Button {
+                let had = focused
+                shown.toggle()
+                if had { DispatchQueue.main.async { focused = true } }
+            } label: {
+                Image(systemName: shown ? "eye.slash" : "eye").font(.system(size: 13)).foregroundStyle(t.muted)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(shown ? "Hide password" : "Show password")
+            .accessibilityLabel(shown ? "Hide password" : "Show password")
+        }
+        .fieldChrome(focused: focused)
+    }
+}
+
+/// A themed checkbox row.
+struct CheckBox: View {
+    @Environment(\.theme) private var t
+    @Binding var on: Bool
+    var label: String
+    var hint: String?
+
+    var body: some View {
+        Button { on.toggle() } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 5).fill(on ? t.accent : .clear)
+                    RoundedRectangle(cornerRadius: 5).strokeBorder(on ? t.accent : t.line, lineWidth: 1.5)
+                    if on { Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(t.accentInk) }
+                }
+                .frame(width: 20, height: 20)
+                Text(label).font(t.body(13)).foregroundStyle(t.ink)
+                if let hint { Text(hint).font(t.body(12)).foregroundStyle(t.muted) }
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityValue(on ? "On" : "Off")
     }
 }
