@@ -9,7 +9,11 @@ struct ShootView: View {
     var body: some View {
         HStack(spacing: 0) {
             ShootCanvas().frame(maxWidth: .infinity)
-            ShootInspector().frame(width: 344)
+            if store.shootTemplate != nil {
+                TemplateInspector().frame(width: 344)
+            } else {
+                ShootInspector().frame(width: 344)
+            }
         }
     }
 }
@@ -25,11 +29,17 @@ struct ShootCanvas: View {
         })
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                PageHeader(eyebrow: "Photoshoot", title: "\(model?.shortName ?? "Model") · \(store.currentOutfit?.name ?? "No outfit")") {
+                PageHeader(eyebrow: store.shootTemplate.map { "Photoshoot · Template: \($0.name)" } ?? "Photoshoot",
+                           title: "\(model?.shortName ?? "Model") · \(store.currentOutfit?.name ?? "No outfit")") {
+                    MButton("Templates", icon: "square.on.square.dashed") { store.openTemplates() }
                     MoreMenu {
-                        Button("Show prompt") { store.shootTab = .prompt }
-                        Button("Save as preset") { store.showToast("Saved as preset") }
-                        Button("Reset camera") { store.resetCamera() }
+                        if store.shootTemplate != nil {
+                            Button("Shoot without a template") { store.stopUsingTemplate() }
+                        } else {
+                            Button("Show prompt") { store.shootTab = .prompt }
+                            Button("Save as preset") { store.showToast("Saved as preset") }
+                            Button("Reset camera") { store.resetCamera() }
+                        }
                     }
                 }
                 HStack(spacing: 10) {
@@ -76,8 +86,13 @@ struct ShootCanvas: View {
                             store.galleryTab = .tests
                             store.go(.gallery)
                         }
-                        MButton("Shoot 4 more · \(Pricing.money(Pricing.shootCost))", icon: "arrow.triangle.2.circlepath") { store.startShoot() }
-                        if store.shoot.lockSeed { Muted("Lock look is on: retakes keep the same face and styling.") }
+                        if let tpl = store.shootTemplate {
+                            MButton("Shoot 4 more · \(Pricing.money(Pricing.shootCost))", icon: "arrow.triangle.2.circlepath") { store.startTemplateShoot() }
+                            Muted(store.templateLockLook ? "Lock look is on: the same seed for \(tpl.name) on this model." : "Same template, a new moment every shot.")
+                        } else {
+                            MButton("Shoot 4 more · \(Pricing.money(Pricing.shootCost))", icon: "arrow.triangle.2.circlepath") { store.startShoot() }
+                            if store.shoot.lockSeed { Muted("Lock look is on: retakes keep the same face and styling.") }
+                        }
                     }
                     .padding(.top, 18)
                 }

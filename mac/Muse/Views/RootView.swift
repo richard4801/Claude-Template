@@ -16,6 +16,7 @@ struct RootView: View {
             }
             if store.outfitSheet != nil { OutfitSheetView().transition(.opacity) }
             if store.postDraft != nil { PostSheetView().transition(.opacity) }
+            if store.templateForm != nil { TemplateSheetView().transition(.opacity) }
             if store.paletteOpen { PaletteView().transition(.opacity) }
             ToastView()
         }
@@ -77,6 +78,8 @@ struct Shell: View {
         case .lora: LoraView()
         case .posts: PostsView()
         case .members: MembersView()
+        case .templates: TemplatesView()
+        case .template: TemplateDetailView()
         }
     }
 }
@@ -221,6 +224,12 @@ struct Sidebar: View {
                 let q = store.activeJobs.count
                 NavRow(icon: item.icon, title: item.title, on: store.screen.navParent == item.screen, compact: compact,
                        trailing: item.screen == .queue && q > 0 ? .count(q) : .key("⌘\(item.key)")) { store.go(item.screen) }
+                if item.screen == .shoot {
+                    // Photoshoot → Templates
+                    NavRow(icon: "square.on.square.dashed", title: "Templates", on: store.screen.navParent == .templates, compact: compact,
+                           trailing: .key("⇧⌘T")) { store.openTemplates() }
+                        .padding(.leading, compact ? 0 : 14)
+                }
             }
             if !compact {
                 Text("CREATE").font(t.mono(10.5)).tracking(1).foregroundStyle(t.isD ? .white.opacity(0.75) : t.muted).padding(.horizontal, 10).padding(.top, 16).padding(.bottom, 6)

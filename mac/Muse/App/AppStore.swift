@@ -4,7 +4,7 @@ import Observation
 import SwiftUI
 
 enum Screen: String, CaseIterable {
-    case home, models, profile, create, studio, shoot, queue, gallery, result, settings, credits, lora, posts, members
+    case home, models, profile, create, studio, shoot, queue, gallery, result, settings, credits, lora, posts, members, templates, template
 
     /// Which sidebar item is highlighted.
     var navParent: Screen {
@@ -12,6 +12,7 @@ enum Screen: String, CaseIterable {
         case .profile, .create, .lora: return .models
         case .result: return .gallery
         case .credits: return .settings
+        case .template: return .templates
         default: return self
         }
     }
@@ -242,6 +243,30 @@ final class AppStore {
     /// "Edit as text": a hand-edited prompt used for the next shoot only.
     var promptOverride: String?
 
+    // MARK: Photo templates (plans/templates.md)
+
+    var templates: [MuseTemplate] = []
+    var templateScope: TemplateScope = .all
+    var templateQuery = ""
+    var templateTag: String?
+    /// The detail screen's template (GET /v1/templates/{id}, with recent results).
+    var openTemplateId: String?
+    var templateDetail: MuseTemplate?
+    /// Shooting with this template on the Photoshoot screen (nil = the Scene / Camera / Light inspector).
+    var shootTemplate: MuseTemplate?
+    var templateDirection = ""
+    /// Shuffle re-rolls this; the same value gives the same variation draws.
+    var templateShuffle: Int64 = TemplateEngine.newShuffleSeed()
+    /// "Lock look" for templates: off by default, so every shot gets a new seed.
+    var templateLockLook = false
+    /// Optional product photo for templates that take one (Product moment).
+    var templateProduct: ImageRef?
+    /// The prompt view (pro mode) from POST /v1/templates/{id}/prompt.
+    var templatePrompt: TemplatePrompt?
+    /// The template editor sheet (Save as template, Edit, New template).
+    var templateForm: TemplateForm?
+    var templateFormBusy = false
+
     // MARK: Gallery
 
     var galleryTab: GalleryTab = .tests
@@ -396,6 +421,7 @@ final class AppStore {
             if !models.contains(where: { $0.id == profileModelId }), let first = models.first { profileModelId = first.id }
             if clip == nil { await useSampleClip(bad: false, quiet: true) }
             await loadSocial()
+            await loadTemplates()
         } catch let e as ApiError where e.endsSession {
             endSession(e.friendlyMessage)
         } catch {
@@ -619,6 +645,11 @@ final class AppStore {
         studioSettings = nil
         imageEngine = nil
         lastInvite = nil
+        templates = []
+        shootTemplate = nil
+        templateDetail = nil
+        templatePrompt = nil
+        templateForm = nil
         authTab = .signIn
         attest = [false, false]
         authError = message

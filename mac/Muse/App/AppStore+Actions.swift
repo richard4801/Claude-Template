@@ -782,6 +782,8 @@ extension AppStore {
         var all: [PaletteCommand] = [
             PaletteCommand(title: "New video", icon: "video", shortcut: "⌘N") { [weak self] in self?.go(.studio) },
             PaletteCommand(title: "Photoshoot", icon: "camera", shortcut: "⌘4") { [weak self] in self?.go(.shoot) },
+            PaletteCommand(title: "Templates", icon: "square.on.square.dashed", shortcut: "⇧⌘T") { [weak self] in self?.openTemplates() },
+            PaletteCommand(title: "New template", icon: "plus.square.on.square", shortcut: "") { [weak self] in self?.newTemplate() },
             PaletteCommand(title: "New model", icon: "person.badge.plus", shortcut: "") { [weak self] in self?.go(.create) },
             PaletteCommand(title: "Home", icon: "house", shortcut: "⌘1") { [weak self] in self?.go(.home) },
             PaletteCommand(title: "Models", icon: "person", shortcut: "⌘2") { [weak self] in self?.go(.models) },

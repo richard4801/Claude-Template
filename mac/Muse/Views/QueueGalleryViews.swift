@@ -245,6 +245,9 @@ struct GalleryTile: View {
             Button(picked ? "Deselect" : "Select to compare") { store.togglePick(take.id) }
             Button(take.isFinal ? "Move back to Tests" : "Approve") { take.isFinal ? store.unapprove(take) : store.approve(take) }
             Button("Post…") { store.openPostSheet(take) }
+            if !take.isVideo && store.canSaveAsTemplate(take) {
+                Button("Save as template…") { store.saveAsTemplate(take) }
+            }
             Divider()
             Button("Delete take", role: .destructive) { store.discard(take) }
         }
@@ -320,6 +323,9 @@ struct ResultView: View {
                                     Button("Download") { store.export(take) }
                                     Button("Share…") { store.share(take) }
                                     Button("Copy prompt") { store.copy(take.prompt.isEmpty ? (job?.prompt ?? "") : take.prompt) }
+                                    if !take.isVideo {
+                                        Button("Save as template…") { store.saveAsTemplate(take) }.disabled(!store.canSaveAsTemplate(take))
+                                    }
                                     Button("Compare takes") { store.compareFromResult() }
                                     Button("Report a problem") { store.showToast("Thanks, we'll look at this take") }
                                     Divider()
@@ -327,14 +333,16 @@ struct ResultView: View {
                                 }
                             }
                             ListBox {
-                                let rows: [(String, String)] = [
+                                let base: [(String, String)] = [
                                     ("Model", job?.modelName ?? store.currentModel?.name ?? "—"),
                                     ("Outfit", outfit?.name ?? store.currentOutfit?.name ?? "—"),
                                     ("Engine", job?.engineName ?? (take.isVideo ? "Standard" : "Photo")),
                                     ("Steps", job.map { $0.engine == .viggle ? "4" : "\($0.request.steps)" } ?? (take.isVideo ? "10" : "—")),
                                     ("Cost", Pricing.money(take.cost) + (job?.warmupCost.map { " + \(Pricing.money($0)) warm-up" } ?? "")),
-                                    ("Seed", "\(take.seed)\(store.shoot.lockSeed || take.isVideo ? " · locked" : "")"),
+                                    ("Seed", "\(take.seed)\(take.isVideo || (!take.isTemplateShot && store.shoot.lockSeed) ? " · locked" : "")"),
                                 ]
+                                let templateRow: [(String, String)] = take.templateName.map { name in [("Template", name)] } ?? []
+                                let rows: [(String, String)] = base + templateRow
                                 let media: [(String, String)] = take.isVideo ? [
                                     ("Length", take.durationSec.map { "\(Pricing.trimNum($0))s" } ?? "—"),
                                     ("Size", take.width.flatMap { w in take.height.map { "\(w)×\($0)" } } ?? "—"),
@@ -354,6 +362,13 @@ struct ResultView: View {
                             }
                             let who = store.model(for: take)?.shortName ?? "her"
                             MButton("Post to \(who)'s accounts", icon: "paperplane", kind: .primary, fill: true) { store.openPostSheet(take) }
+                            if !take.isVideo {
+                                if store.canSaveAsTemplate(take) {
+                                    MButton("Save as template", icon: "square.on.square.dashed", fill: true) { store.saveAsTemplate(take) }
+                                } else {
+                                    Muted("Made with \(take.templateName ?? "someone else's template"). Its look stays with its creator, so it can't be saved as a new template.")
+                                }
+                            }
                             if let posted = store.posts(for: take).first(where: \.isOut) {
                                 VStack(alignment: .leading, spacing: 6) {
                                     Lbl(posted.state == "posted" ? "Posted" : "Handed off")
