@@ -68,6 +68,16 @@ interface MuseService {
     @PATCH("v1/takes/{id}") suspend fun setTake(@Path("id") id: String, @Body r: SetTakeStatusRequest): Take
     @DELETE("v1/takes/{id}") suspend fun deleteTake(@Path("id") id: String)
     @POST("v1/shoots") suspend fun shoot(@Body r: ShootRequest): List<Take>
+    @GET("v1/templates") suspend fun templates(@Query("scope") scope: String, @Query("q") q: String?, @Query("tag") tag: String?): List<Template>
+    @GET("v1/templates/{id}") suspend fun template(@Path("id") id: String): Template
+    @POST("v1/templates") suspend fun createTemplate(@Body r: CreateTemplateRequest): Template
+    @POST("v1/templates/draft") suspend fun templateDraft(@Body r: TemplateDraftRequest): TemplateDraft
+    @PATCH("v1/templates/{id}") suspend fun patchTemplate(@Path("id") id: String, @Body r: PatchTemplateRequest): Template
+    @DELETE("v1/templates/{id}") suspend fun deleteTemplate(@Path("id") id: String): retrofit2.Response<Unit>
+    @POST("v1/templates/{id}/duplicate") suspend fun duplicateTemplate(@Path("id") id: String): Template
+    @POST("v1/templates/{id}/favourite") suspend fun favourite(@Path("id") id: String): Template
+    @DELETE("v1/templates/{id}/favourite") suspend fun unfavourite(@Path("id") id: String): Template
+    @POST("v1/templates/{id}/prompt") suspend fun templatePrompt(@Path("id") id: String, @Body r: TemplatePromptRequest): TemplatePrompt
     @GET("v1/balance") suspend fun balance(): Balance
     @POST("v1/balance/topup") suspend fun topUp(@Body r: TopUpRequest): Balance
     @GET("v1/wallet") suspend fun wallet(): Wallet
@@ -222,6 +232,15 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun setTakeStatus(takeId: String, status: String) = call { setTake(takeId, SetTakeStatusRequest(status)) }.abs()
     override suspend fun deleteTake(takeId: String) = call { deleteTake(takeId) }
     override suspend fun shoot(req: ShootRequest) = call { shoot(req) }.map { it.abs() }
+    override suspend fun listTemplates(scope: String, q: String?, tag: String?) = call { templates(scope, q?.ifBlank { null }, tag?.ifBlank { null }) }.map { it.abs() }
+    override suspend fun template(id: String) = call { template(id) }.abs()
+    override suspend fun createTemplate(req: CreateTemplateRequest) = call { createTemplate(req) }.abs()
+    override suspend fun templateDraft(fromShotId: String) = call { templateDraft(TemplateDraftRequest(fromShotId)) }.let { it.copy(cover = it.cover?.abs()) }
+    override suspend fun patchTemplate(id: String, req: PatchTemplateRequest) = call { patchTemplate(id, req) }.abs()
+    override suspend fun deleteTemplate(id: String) { call { deleteTemplate(id).also { r -> if (!r.isSuccessful) throw HttpException(r) } } }
+    override suspend fun duplicateTemplate(id: String) = call { duplicateTemplate(id) }.abs()
+    override suspend fun favouriteTemplate(id: String, on: Boolean) = call { if (on) favourite(id) else unfavourite(id) }.abs()
+    override suspend fun templatePrompt(id: String, req: TemplatePromptRequest) = call { templatePrompt(id, req) }
     override suspend fun balance() = call { balance() }
     override suspend fun topUp(req: TopUpRequest) = call { topUp(req) }
     override suspend fun wallet() = call { wallet() }
@@ -263,6 +282,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     private fun Outfit.abs() = copy(angles = angles.map { it?.abs() })
     private fun Job.abs() = copy(thumb = thumb?.abs())
     private fun Take.abs() = copy(thumb = thumb?.abs(), videoUrl = videoUrl?.absUrl())
+    private fun Template.abs() = copy(cover = cover?.abs(), recent = recent?.map { it.copy(thumb = it.thumb?.abs()) })
 
     override fun events(): Flow<ApiEvent> = callbackFlow {
         val req = Request.Builder().url(base + "v1/events").apply { token?.let { header("Authorization", "Bearer $it") } }.build()

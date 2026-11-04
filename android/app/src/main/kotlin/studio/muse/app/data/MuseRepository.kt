@@ -24,6 +24,8 @@ data class StudioState(
     val posts: List<Post> = emptyList(),
     /** My token wallet (real API). Null in demo mode against an older server. */
     val wallet: Wallet? = null,
+    /** The template library (scope=all: mine + the studio's public ones). Tabs, search and tags filter it on the phone. */
+    val templates: List<Template> = emptyList(),
     val loaded: Boolean = false,
     val error: String? = null,
 ) {
@@ -281,6 +283,20 @@ class MuseRepository(
         _state.update { s -> s.copy(takes = shots + s.takes) }
         refreshBalance()
     }
+
+    // ---- photo templates
+    private fun putTemplate(t: Template) = _state.update { s -> s.copy(templates = s.templates.upsert(t) { it.id == t.id }) }
+    /** [quiet]: no toast on failure (the Photoshoot strip, against a server without templates). */
+    suspend fun loadTemplates(quiet: Boolean = false): List<Template>? =
+        (if (quiet) attemptInline { listTemplates("all") }.first else attempt { listTemplates("all") })?.also { l -> _state.update { it.copy(templates = l) } }
+    suspend fun template(id: String) = attemptInline { template(id) }.also { (t, _) -> t?.let { putTemplate(it.copy(recent = null)) } }
+    suspend fun templateDraft(shotId: String) = attemptInline { templateDraft(shotId) }
+    suspend fun createTemplate(req: CreateTemplateRequest) = attemptInline { createTemplate(req) }.also { (t, _) -> t?.let(::putTemplate) }
+    suspend fun patchTemplate(id: String, req: PatchTemplateRequest) = attempt { patchTemplate(id, req) }?.also(::putTemplate)
+    suspend fun duplicateTemplate(id: String) = attempt { duplicateTemplate(id) }?.also(::putTemplate)
+    suspend fun favouriteTemplate(id: String, on: Boolean) = attempt { favouriteTemplate(id, on) }?.also(::putTemplate)
+    suspend fun deleteTemplate(id: String) = attempt { deleteTemplate(id) }?.also { _state.update { s -> s.copy(templates = s.templates.filterNot { it.id == id }) } }
+    suspend fun templatePrompt(id: String, req: TemplatePromptRequest) = attemptInline { templatePrompt(id, req) }
 
     suspend fun topUp(amount: Double, method: String) = attempt { topUp(TopUpRequest(amount, method)) }?.also { b -> _state.update { it.copy(balance = b) } }
 

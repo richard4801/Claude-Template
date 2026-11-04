@@ -134,6 +134,7 @@ fun ResultScreen(id: String) {
                         MoreMenu(listOf(
                             MenuItem("export", "Download") { vm.export() },
                             MenuItem("upload", "Post") { take?.let { nav.go(Routes.post(it.id)) } },
+                            MenuItem("grid", "Save as template") { take?.let { if (it.shot) nav.go(Routes.saveTemplate(it.id)) else vm.toast("Templates are for photos · video templates come later") } },
                             MenuItem("spark", "Copy prompt") { clip.setText(AnnotatedString(take?.prompt?.ifBlank { null } ?: s.job?.prompt ?: "")); vm.toast("Prompt copied") },
                             MenuItem("grid", "Compare takes") { if (s.takes.size > 1) compare = !compare else vm.toast("Compare takes · needs 2+ takes") },
                             MenuItem("bell", "Report a problem") { vm.toast("Thanks · report sent with the prompt and seed") },
@@ -146,6 +147,7 @@ fun ResultScreen(id: String) {
                     SideAction("retry", if (s.job != null) "Retry · ${Pricing.money(s.retryCost)}" else "Retry") { vm.retry(nav) }
                     SideAction("export", "Export") { vm.export() }
                     SideAction("upload", "Post") { take?.let { nav.go(Routes.post(it.id)) } }
+                    if (take?.shot == true) SideAction("grid", "Save look") { nav.go(Routes.saveTemplate(take.id)) }
                 }
             }
             val shape = RoundedCornerShape(topStart = if (m.isA) 0.dp else m.t.rLg, topEnd = if (m.isA) 0.dp else m.t.rLg)
@@ -160,6 +162,7 @@ fun ResultScreen(id: String) {
                     RowB(align = Alignment.Top) {
                         Column(Modifier.weight(1f)) {
                             H3(take.title)
+                            take.templateName?.let { Tiny("Template: $it", weight = FontWeight.Bold) }
                             Tiny(listOf(take.engineLabel, Pricing.money(take.cost)).filter { it.isNotBlank() }.joinToString(" · "))
                             takeSpecs(take)?.let { T(it, m.type.mono.copy(fontSize = 11.5.sp), m.t.muted) }
                             s.job?.warmupCost?.takeIf { it > 0 }?.let { Tiny("GPU warm-up ${Pricing.money(it)} (charged with this render)") }

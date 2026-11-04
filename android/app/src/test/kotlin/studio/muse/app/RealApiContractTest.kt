@@ -18,6 +18,11 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import studio.muse.app.data.ApiException
 import studio.muse.app.data.CreateInviteRequest
+import studio.muse.app.data.CreateTemplateRequest
+import studio.muse.app.data.PatchTemplateRequest
+import studio.muse.app.data.PromptSlotView
+import studio.muse.app.data.ShootRequest
+import studio.muse.app.data.TemplatePromptRequest
 import studio.muse.app.data.ErrorText
 import studio.muse.app.data.HttpMuseApi
 import studio.muse.app.data.JobRequest
@@ -148,8 +153,44 @@ class RealApiContractTest {
         val take = member.listTakes().first { it.jobId == job.id }
         assertNull(take.videoUrl) // simulated GPU: no video, the app keeps the still
 
+        // ---- photo templates: hidden layers stay with the owner, the server builds the prompt
+        val ownerList = owner.listTemplates()
+        val mirrorOwn = ownerList.first { it.starter == "mirror-selfie" }
+        assertTrue(mirrorOwn.isOwner); assertNotNull(mirrorOwn.layers); assertTrue(mirrorOwn.variationPool!!.getValue("pose").isNotEmpty())
+        val secretStyle = mirrorOwn.layers!!.style!!
+        val mirror = member.listTemplates("public").first { it.starter == "mirror-selfie" }
+        assertTrue(!mirror.isOwner && mirror.public); assertNull(mirror.layers); assertNull(mirror.variationPool)
+        assertTrue(mirror.cover!!.url!!.startsWith(base.trimEnd('/')))
+        assertEquals(7, member.listTemplates().count { it.starter != null })
+        assertTrue(member.listTemplates(q = "faceless").any { it.id == mirror.id })
+        val view = member.templatePrompt(mirror.id, TemplatePromptRequest(SampleData.SIENNA, SampleData.GREEN, "sitting on the steps", 7))
+        assertEquals(PromptSlotView("template", "Template: Mirror selfie", true), view.slots.first { it.layer == "template" })
+        assertTrue(view.text, !view.text.contains(secretStyle) && view.text.contains("Direction: sitting on the steps."))
+        assertNull(view.variation)
+        val shots = member.shoot(ShootRequest(SampleData.SIENNA, SampleData.GREEN, "", "", count = 2, templateId = mirror.id, shuffleSeed = 11))
+        assertEquals(2, shots.size)
+        shots.forEach { assertEquals("Mirror selfie", it.templateName); assertTrue(it.prompt.contains("Template: Mirror selfie")); assertTrue(!it.prompt.contains(secretStyle)); assertNull(it.variation) }
+        val asOwner = owner.listTakes().first { it.id == shots[0].id }
+        assertTrue(asOwner.prompt.contains(secretStyle)); assertNotNull(asOwner.variation)
+        expectCode("template_hidden") { member.templateDraft(shots[0].id) }
+        assertTrue(member.favouriteTemplate(mirror.id, true).favourite)
+        assertEquals(listOf(mirror.id), member.listTemplates("favourites").map { it.id })
+        assertEquals(1, member.template(mirror.id).uses)
+        expectCode("owner_only") { member.patchTemplate(mirror.id, PatchTemplateRequest(name = "mine")) }
+        // Save as template from the member's own plain shoot: private by default, the pool editable
+        val plain = member.shoot(ShootRequest(SampleData.SIENNA, SampleData.GREEN, "Bedroom mirror", "", count = 1)).first()
+        val draft = member.templateDraft(plain.id)
+        assertTrue(draft.variationPool.getValue("pose").isNotEmpty())
+        val mine = member.createTemplate(CreateTemplateRequest("My mirror", listOf("Selfie"), variationPool = draft.variationPool + ("expression" to listOf("soft smile")), fromShotId = plain.id))
+        assertEquals("private", mine.visibility); assertEquals(listOf("soft smile"), mine.variationPool!!["expression"])
+        assertTrue(owner.listTemplates().none { it.id == mine.id })
+        assertEquals("public", member.patchTemplate(mine.id, PatchTemplateRequest(visibility = "public")).visibility)
+        owner.listTemplates().first { it.id == mine.id }.let { assertNull(it.layers); assertEquals(false, it.isOwner) }
+        member.deleteTemplate(mine.id)
+        expectCode("not_found") { member.template(mine.id) }
+
         // ---- take back what's left → insufficient_tokens
-        owner.reclaim(ReclaimRequest(me.id, after.tokens))
+        owner.reclaim(ReclaimRequest(me.id, member.wallet().tokens)) // after the template shoots too
         assertEquals(0L, member.wallet().tokens)
         val broke = expectCode("insufficient_tokens") { member.createJob(req) }
         assertEquals(ErrorText.NOT_ENOUGH_CREDIT, ErrorText.of(broke))

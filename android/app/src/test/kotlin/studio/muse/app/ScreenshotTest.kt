@@ -63,6 +63,9 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "queue_waiting", "result_specs",
             // Sign-in (2026-11-04): password eye shown/hidden, Remember me off, sign-up's eye.
             "signin_typed_server", "signin_shown_server", "signin_noremember_server", "signup_shown_server",
+            // Photo templates (plans/templates.md): library, detail (owner and someone else's), using one (locked prompt line), Save as template.
+            "templates", "templates_mine", "template_detail", "template_detail_other", "template_edit", "template_use", "template_use_prompt", "save_template",
+            "shoot_templates",
         )
 
         @JvmStatic
@@ -120,6 +123,10 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
                 it.copy(clip = Clip(SampleData.BAD_CLIP, "Mirror trend (download)", 22.0, 1080, 1920, 30, ClipRules.checks(SampleData.badMeta)), showBadExample = true)
             }
             "members_send" -> c.drafts.memberOpen.value = "u_maya"
+            "templates_mine" -> c.drafts.templateFilter.value = studio.muse.app.data.TemplateFilter(tab = "mine")
+            "template_use" -> c.drafts.templateUse.value = studio.muse.app.data.TemplateUseDraft("tpl_mirror-selfie")
+            "template_use_prompt" -> c.drafts.templateUse.value = studio.muse.app.data.TemplateUseDraft("tpl_maya_walk", direction = "sitting on the steps, looking back over her shoulder", shuffleSeed = 7, showPrompt = true)
+            "shoot_templates" -> c.drafts.shoot.update { it.copy(tool = "model") }
             "invite_code" -> c.drafts.lastInvite.value = InviteCreated("MUSE-7KQ2-XW9P-4HTD", "inv1", "maya@studio.com", "member", System.currentTimeMillis() + 14 * 86_400_000L,
                 shareText = "You're invited to MUSE, the AI model studio. 1) Download: https://muse.example/get 2) Sign up with this invite code: MUSE-7KQ2-XW9P-4HTD (email: maya@studio.com). The code works once and expires in 14 days.")
             "queue_waiting" -> runBlocking {
@@ -157,10 +164,16 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "queue_waiting" -> Routes.QUEUE
             "profile_lora" -> Routes.PROFILE
             "posts_posted" -> Routes.POSTS
+            "templates", "templates_mine" -> Routes.TEMPLATES
+            "template_detail", "template_detail_other", "template_edit", "template_use", "template_use_prompt", "save_template" -> Routes.HOME
+            "shoot_templates" -> Routes.SHOOT
             else -> if (screen.startsWith("lora")) Routes.LORA else screen
         }
         compose.mainClock.autoAdvance = false
-        val pending = when (screen) { "result" -> Routes.result("j1"); "result_specs" -> Routes.result("t_spec"); "post", "post_schedule" -> Routes.post("t_j1"); else -> null }
+        val pending = when (screen) { "result" -> Routes.result("j1"); "result_specs" -> Routes.result("t_spec"); "post", "post_schedule" -> Routes.post("t_j1")
+            "template_detail", "template_edit" -> Routes.template("tpl_mirror-selfie"); "template_detail_other" -> Routes.template("tpl_maya_walk")
+            "template_use" -> Routes.templateUse("tpl_mirror-selfie"); "template_use_prompt" -> Routes.templateUse("tpl_maya_walk")
+            "save_template" -> Routes.saveTemplate("t_g4"); else -> null }
         compose.setContent { MuseApp(c, route, pending) }
         repeat(6) { idle(); compose.mainClock.advanceTimeBy(400) }
         idle()
@@ -172,6 +185,12 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             if (screen != "signin_typed_server") compose.onNodeWithContentDescription("Show password").performClick()
         }
         if (screen == "signin_noremember_server") compose.onNodeWithText("Remember me").performClick()
+        if (screen == "template_edit") compose.onNodeWithText("Edit").performClick()
+        if (screen == "template_use_prompt") {
+            // The prompt view for someone else's template: one locked "Template: …" line, the hidden layers never arrive.
+            // (No compose waits here: the canvas animates, so the UI never goes idle with a paused clock.)
+            runBlocking { check(fake.templatePrompt("tpl_maya_walk", studio.muse.app.data.TemplatePromptRequest(SampleData.SIENNA)).text.contains("Template: Golden hour walk")) }
+        }
         repeat(2) { idle(); compose.mainClock.advanceTimeBy(400) }
         idle()
         when (screen) {

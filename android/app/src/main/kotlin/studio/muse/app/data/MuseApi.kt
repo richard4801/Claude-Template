@@ -55,6 +55,21 @@ interface MuseApi {
     suspend fun deleteTake(takeId: String)
     suspend fun shoot(req: ShootRequest): List<Take>
 
+    // Photo templates (plans/templates.md). Hidden layers come back only for the owner's own templates.
+    /** scope: all | mine | public | favourites. */
+    suspend fun listTemplates(scope: String = "all", q: String? = null, tag: String? = null): List<Template>
+    /** With `recent` (the newest shots made with it). */
+    suspend fun template(id: String): Template
+    suspend fun createTemplate(req: CreateTemplateRequest): Template
+    /** What "Save as template" would save from this shot, to show and edit first. Nothing is stored. */
+    suspend fun templateDraft(fromShotId: String): TemplateDraft
+    suspend fun patchTemplate(id: String, req: PatchTemplateRequest): Template
+    suspend fun deleteTemplate(id: String)
+    suspend fun duplicateTemplate(id: String): Template
+    suspend fun favouriteTemplate(id: String, on: Boolean): Template
+    /** The prompt view for a template shoot: non-owners get one locked "Template: <name>" line plus their own layers. */
+    suspend fun templatePrompt(id: String, req: TemplatePromptRequest): TemplatePrompt
+
     // Identity LoRA
     suspend fun lora(modelId: String): Lora
     /** Generates 30 candidates ($0.60). state=building; a lora event follows with state=review. */

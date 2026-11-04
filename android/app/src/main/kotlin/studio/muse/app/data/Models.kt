@@ -205,15 +205,112 @@ data class Take(
     val durationSec: Double? = null,
     val width: Int? = null,
     val height: Int? = null,
+    /** Template shots: the template's id and name, the variation draw seed, and (template owner only) what was drawn. */
+    val templateId: String? = null,
+    val templateName: String? = null,
+    val shuffleSeed: Long? = null,
+    val variation: Map<String, String>? = null,
 ) {
     val final get() = status == "final"
+    val shot get() = kind == "shot"
 }
 
 @Serializable
 data class SetTakeStatusRequest(val status: String)
 
 @Serializable
-data class ShootRequest(val modelId: String, val outfitId: String, val scene: String, val prompt: String, val seed: Long? = null, val count: Int = 4)
+data class ShootRequest(
+    val modelId: String, val outfitId: String, val scene: String, val prompt: String, val seed: Long? = null, val count: Int = 4,
+    /** With a template the server builds every prompt; scene/prompt/seed are ignored (plans/api.md "Photo templates"). */
+    val templateId: String? = null,
+    val direction: String? = null,
+    val shuffleSeed: Long? = null,
+    val lockSeed: Boolean? = null,
+    val productImage: ImageRef? = null,
+)
+
+// ---------------------------------------------------------------- photo templates (plans/templates.md)
+
+/** Post-generation edits the server runs on each still. grade: none|phone-natural|underexposed|moody-blue|golden|harsh-sun|faded|mono. */
+@Serializable
+data class TemplateAfterEffects(val faceMotionBlur: Double? = null, val blurAngle: Double? = null, val grade: String? = null, val grain: Double? = null)
+
+/** The hidden prompt layers. Only the template's owner ever receives them. */
+@Serializable
+data class TemplateLayers(
+    val style: String? = null, val scene: String? = null, val camera: String? = null, val light: String? = null,
+    val negative: String? = null, val product: String? = null, val afterEffects: TemplateAfterEffects? = null,
+)
+
+object PoolSlots {
+    val ALL = listOf("pose", "bodyAngle", "framing", "expression", "background", "hands", "timeOfDay")
+    fun label(k: String) = when (k) {
+        "pose" -> "Pose"; "bodyAngle" -> "Body angle"; "framing" -> "Framing"; "expression" -> "Expression"
+        "background" -> "Background detail"; "hands" -> "Hands"; "timeOfDay" -> "Time of day"; else -> k
+    }
+}
+
+@Serializable
+data class RecentShot(val id: String, val thumb: ImageRef? = null, val createdAt: Long = 0)
+
+@Serializable
+data class Template(
+    val id: String,
+    val name: String,
+    val tags: List<String> = emptyList(),
+    val visibility: String = "private",
+    val ownerId: String = "",
+    val ownerName: String = "",
+    val isOwner: Boolean = false,
+    val uses: Int = 0,
+    val favourite: Boolean = false,
+    val cover: ImageRef? = null,
+    val acceptsProduct: Boolean = false,
+    val starter: String? = null,
+    val createdFromShotId: String? = null,
+    val createdAt: Long = 0,
+    val updatedAt: Long = 0,
+    val layers: TemplateLayers? = null,
+    /** slot (see [PoolSlots]) → options. Owner only. */
+    val variationPool: Map<String, List<String>>? = null,
+    val recent: List<RecentShot>? = null,
+) {
+    val public get() = visibility == "public"
+}
+
+@Serializable
+data class TemplateDraft(
+    val name: String, val tags: List<String> = emptyList(), val layers: TemplateLayers = TemplateLayers(),
+    val variationPool: Map<String, List<String>> = emptyMap(), val cover: ImageRef? = null, val fromShotId: String = "",
+)
+
+@Serializable
+data class CreateTemplateRequest(
+    val name: String, val tags: List<String>? = null, val visibility: String? = null, val layers: TemplateLayers? = null,
+    val variationPool: Map<String, List<String>>? = null, val coverTakeId: String? = null, val fromShotId: String? = null,
+)
+
+@Serializable
+data class PatchTemplateRequest(
+    val name: String? = null, val tags: List<String>? = null, val visibility: String? = null, val layers: TemplateLayers? = null,
+    val variationPool: Map<String, List<String>>? = null,
+)
+
+@Serializable
+data class TemplateDraftRequest(val fromShotId: String)
+
+@Serializable
+data class TemplatePromptRequest(val modelId: String, val outfitId: String? = null, val direction: String? = null, val shuffleSeed: Long? = null, val lockSeed: Boolean? = null)
+
+/** One line of the prompt view. `locked` = the "Template: <name>" line non-owners see in place of the hidden layers. */
+@Serializable
+data class PromptSlotView(val layer: String, val text: String, val locked: Boolean = false)
+
+@Serializable
+data class TemplatePrompt(
+    val slots: List<PromptSlotView> = emptyList(), val text: String = "", val seed: Long? = null, val shuffleSeed: Long = 0,
+    val variation: Map<String, String>? = null, val removed: List<String>? = null,
+)
 
 /**
  * GET /v1/balance. Member: [balance] is their wallet in USD, today/month their own spend. Owner: [balance] is what they can

@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -80,6 +81,10 @@ class ShootViewModel(private val c: AppContainer) : ViewModel() {
         ShootState(d, model, s.models, outfits, outfit, prompt, ph)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, ShootState())
 
+    /** Templates for the strip on the Model tool (loaded once). */
+    val templates: StateFlow<List<studio.muse.app.data.Template>> = c.repo.state.map { it.templates }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    init { viewModelScope.launch { if (c.repo.state.value.templates.isEmpty()) c.repo.loadTemplates(quiet = true) } }
+
     fun edit(f: (ShootDraft) -> ShootDraft) { c.drafts.shoot.update(f); if (phase.value == "ready") phase.value = "idle" }
     fun outfit(id: String) { c.drafts.outfitId.value = id }
     fun resetCamera() = edit { it.copy(shot = "Medium", lens = 35, aperture = "f/2.8") }
@@ -118,12 +123,16 @@ fun ShootScreen() {
     ScreenBox {
         Column(Modifier.fillMaxSize()) {
             TopBar("Photoshoot", onBack = { nav.back() }) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                T("Templates", m.type.tiny.copy(fontWeight = FontWeight.Bold), if (m.isD) m.t.blue else m.t.accent, Modifier.press { nav.go(Routes.TEMPLATES) }.padding(8.dp))
                 MoreMenu(listOf(
+                    MenuItem("grid", "Templates") { nav.go(Routes.TEMPLATES) },
                     MenuItem("spark", "Show prompt") { vm.edit { it.copy(tool = "spark") } },
                     MenuItem("quality", "Save as preset") { vm.toast("Saved as preset \"${(d.scene ?: PromptEngine.DEFAULT_SCENE).substringBefore(" · ")} · ${d.lens}mm\"") },
                     MenuItem("retry", "Reset camera") { vm.resetCamera() },
                     MenuItem("model", "Change model") { vm.toast("Only Sienna is ready · Noor needs close-ups") },
                 ))
+                }
             }
             Canvas(220.dp) {
                 RefImage(s.outfit?.angles?.getOrNull(1) ?: s.outfit?.front, Modifier.fillMaxSize(), 20)
@@ -177,6 +186,8 @@ fun ShootScreen() {
                         }
                     }
                     else -> {
+                        val templates by vm.templates.collectAsState()
+                        if (templates.isNotEmpty()) TemplateStrip(templates, { t -> nav.go(Routes.template(t.id)) }, { nav.go(Routes.TEMPLATES) })
                         H3("Model")
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             s.models.forEach { md ->

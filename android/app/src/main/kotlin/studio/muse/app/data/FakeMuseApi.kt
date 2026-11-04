@@ -47,6 +47,7 @@ class FakeMuseApi(
     private val accounts = mutableMapOf<String, MutableMap<String, Account>>()
     private val posts = mutableListOf<Post>()
     private val postTimers = mutableMapOf<String, CoJob>()
+    private val tpl = FakeTemplates(now = now)
 
     override fun events(): Flow<ApiEvent> = events
     override fun setToken(token: String?) {}
@@ -461,7 +462,7 @@ class FakeMuseApi(
         runners.remove(jobId)?.cancel()
     }
 
-    override suspend fun listTakes() = lock.withLock { takes.toList() }
+    override suspend fun listTakes() = lock.withLock { takes.map { tpl.shotView(it) } }
 
     override suspend fun setTakeStatus(takeId: String, status: String): Take = lock.withLock {
         val i = takes.indexOfFirst { it.id == takeId }
@@ -476,6 +477,7 @@ class FakeMuseApi(
 
     override suspend fun shoot(req: ShootRequest): List<Take> {
         lock.withLock {
+            if (req.templateId != null) tpl.name(req.templateId) // not_found before charging
             if (Pricing.SHOOT_COST > balance.balance) throw ApiException("insufficient_balance", "Not enough balance · top up in Credits")
             charge(Pricing.SHOOT_COST)
         }
@@ -484,15 +486,49 @@ class FakeMuseApi(
         return lock.withLock {
             val o = outfits.firstOrNull { it.id == req.outfitId }
             val pool = listOf(o?.front?.asset ?: "g_front", "c_face", "face", "g_tq")
-            val label = req.scene.substringBefore(" · ").take(28)
             val t = now()
-            val shots = pool.take(req.count).mapIndexed { n, k ->
-                Take("s_${uid()}", "shot", null, n + 1, req.count, "Shoot · $label", "$label · ${n + 1}", "", Pricing.SHOOT_COST / req.count,
-                    req.seed ?: 0, "test", ImageRef.asset(k), req.prompt, t)
+            val shots = if (req.templateId != null) {
+                val name = tpl.name(req.templateId)
+                val m = model(req.modelId)
+                val shuffle = req.shuffleSeed ?: kotlin.random.Random.nextLong(1L shl 31)
+                pool.take(req.count).mapIndexed { n, k ->
+                    val b = tpl.prompt(req.templateId, identity(m, loras[m.id]), o?.name, req.direction, shuffle, req.lockSeed == true, n)
+                    val id = "s_${uid()}"
+                    tpl.recordShot(id, req.templateId, b.full, b.draws)
+                    // Stored with the public prompt; shotView() swaps in the full one for the template's owner.
+                    Take(id, "shot", null, n + 1, req.count, "Shoot · $name", "${name.take(28)} · ${n + 1}", "", Pricing.SHOOT_COST / req.count,
+                        b.shown.seed ?: 0, "test", ImageRef.asset(k), b.visible, t + n, templateId = req.templateId, templateName = name, shuffleSeed = shuffle)
+                }.also { tpl.bumpUses(req.templateId) }
+            } else {
+                val label = req.scene.substringBefore(" · ").take(28)
+                pool.take(req.count).mapIndexed { n, k ->
+                    Take("s_${uid()}", "shot", null, n + 1, req.count, "Shoot · $label", "$label · ${n + 1}", "", Pricing.SHOOT_COST / req.count,
+                        req.seed ?: 0, "test", ImageRef.asset(k), req.prompt, t)
+                }
             }
             takes.addAll(0, shots)
-            shots
+            shots.map { tpl.shotView(it) }
         }
+    }
+
+    // ---- photo templates (FakeTemplates holds the same owner-only rules as server/api)
+    override suspend fun listTemplates(scope: String, q: String?, tag: String?) = lock.withLock { tpl.list(scope, q, tag) }
+    override suspend fun template(id: String) = lock.withLock { tpl.detail(id, takes) }
+    override suspend fun createTemplate(req: CreateTemplateRequest) = lock.withLock {
+        val shot = req.fromShotId?.let { id -> takes.firstOrNull { it.id == id } ?: throw ApiException("not_found", "That shot isn't there any more") }
+        tpl.create(req, shot)
+    }
+    override suspend fun templateDraft(fromShotId: String) = lock.withLock {
+        tpl.draft(tpl.shotView(takes.firstOrNull { it.id == fromShotId } ?: throw ApiException("not_found", "That shot isn't there any more")))
+    }
+    override suspend fun patchTemplate(id: String, req: PatchTemplateRequest) = lock.withLock { tpl.patch(id, req) }
+    override suspend fun deleteTemplate(id: String) = lock.withLock { tpl.delete(id) }
+    override suspend fun duplicateTemplate(id: String) = lock.withLock { tpl.duplicate(id) }
+    override suspend fun favouriteTemplate(id: String, on: Boolean) = lock.withLock { tpl.favourite(id, on) }
+    override suspend fun templatePrompt(id: String, req: TemplatePromptRequest) = lock.withLock {
+        val m = model(req.modelId)
+        tpl.prompt(id, identity(m, loras[m.id]), req.outfitId?.let { oid -> outfits.firstOrNull { it.id == oid }?.name }, req.direction,
+            req.shuffleSeed ?: kotlin.random.Random.nextLong(1L shl 31), req.lockSeed == true).shown
     }
 
     override suspend fun balance() = lock.withLock { balance }

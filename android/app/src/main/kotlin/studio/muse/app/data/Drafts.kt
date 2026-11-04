@@ -39,6 +39,19 @@ data class ShootDraft(
     val lastShots: Int = 0,
 )
 
+/** Using a template: the user's own choices (the template's layers stay on the server). Lock look is off by default. */
+data class TemplateUseDraft(
+    val templateId: String? = null,
+    val direction: String = "",
+    val shuffleSeed: Long = kotlin.random.Random.nextLong(1L shl 31),
+    val lockSeed: Boolean = false,
+    val product: ImageRef? = null,
+    val showPrompt: Boolean = false,
+)
+
+/** Template library filters. tab: all | mine | public | favourites. */
+data class TemplateFilter(val tab: String = "all", val query: String = "", val tag: String? = null)
+
 /** New model, step 1. */
 data class ModelDraft(val name: String = "", val age: Int = 27, val niche: String = "Beauty")
 
@@ -57,6 +70,8 @@ class Drafts {
     val outfitId = MutableStateFlow(SampleData.GREEN)
     val video = MutableStateFlow(VideoDraft())
     val shoot = MutableStateFlow(ShootDraft())
+    val templateUse = MutableStateFlow(TemplateUseDraft())
+    val templateFilter = MutableStateFlow(TemplateFilter())
     val model = MutableStateFlow(ModelDraft())
     /** Owner screens: the member whose Send/Take back panel is open, and the last invite code made (shown once). */
     val memberOpen = MutableStateFlow<String?>(null)

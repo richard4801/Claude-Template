@@ -91,8 +91,12 @@ object Routes {
     const val SHOOT = "shoot"; const val SOURCE = "source"; const val DIRECT = "direct"; const val RESULT = "result/{id}"
     const val LORA = "lora"; const val ACCOUNTS = "accounts"; const val POST = "post/{id}"; const val POSTS = "posts"
     const val MEMBERS = "members"; const val INVITE = "invite"; const val STUDIO = "studio"
+    const val TEMPLATES = "templates"; const val TEMPLATE = "template/{id}"; const val TEMPLATE_USE = "template/{id}/use"; const val SAVE_TEMPLATE = "savetemplate/{id}"
     val TABS = setOf(HOME, GALLERY, QUEUE, SETTINGS)
     fun result(id: String) = "result/$id"
+    fun template(id: String) = "template/$id"
+    fun templateUse(id: String) = "template/$id/use"
+    fun saveTemplate(shotId: String) = "savetemplate/$shotId"
     fun post(takeId: String) = "post/$takeId"
 }
 
@@ -182,6 +186,10 @@ fun MuseApp(
                     composable(Routes.MEMBERS) { MembersScreen() }
                     composable(Routes.INVITE) { InviteScreen() }
                     composable(Routes.STUDIO) { StudioSettingsScreen() }
+                    composable(Routes.TEMPLATES) { TemplatesScreen() }
+                    composable(Routes.TEMPLATE) { e -> TemplateDetailScreen(e.arguments?.getString("id") ?: "") }
+                    composable(Routes.TEMPLATE_USE) { e -> TemplateUseScreen(e.arguments?.getString("id") ?: "") }
+                    composable(Routes.SAVE_TEMPLATE) { e -> SaveTemplateScreen(e.arguments?.getString("id") ?: "") }
                 }
                 val entry by nav.currentBackStackEntryAsState()
                 FlashOnNav(theme, entry)
