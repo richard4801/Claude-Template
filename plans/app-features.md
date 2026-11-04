@@ -35,10 +35,15 @@ Status tags: **[core]** needed for v1 · **[later]** after v1 · **[idea]** not 
   - length up to 15s (tested: H3 does up to 15s in one pass with no stitch)
   - a warning if the performer's lip sync looks off (tested: the output copies the performer's mistakes)
 - **[core]** Pick character → outfit → quality preset → Generate.
-- **[core]** **Quality presets** (from tested speeds on an H100):
-  - **Standard, 15 steps:** ~14.5 min per 5s. Slow content: talking, GRWM, products.
-  - **Dance, 20 steps:** ~19 min per 5s. Fast moves keep their timing.
-  - **Premium, 30 steps:** ~29 min per 5s. Hero content.
+- **[core]** **Steps setting**, a slider or number field (decided 2026-11-04 after testing):
+  - **Range 4–30, default and recommended: 10.** Max 30.
+  - Tested on the same clip and seed: 10, 15 and 20 steps looked identical, and step count did not change the motion timing.
+  - Show the estimated time and cost live next to the setting (H100 + FA3: ~58s per step for a 5s clip, so 10 steps ≈ 9.5 min ≈ $0.65).
+  - Show a hint that going above 10 is rarely worth it.
+- **[core]** **Engine choice:**
+  - **H3 (multi-reference)**: identity from the full reference set.
+  - **Viggle-Animate (fast, exact timing)**: identity from one repainted frame. Tested: ~95s per 5s clip on an H200 NVL, and fast moves stay in sync.
+  - See the test results file for the trade-offs.
 - **[core]** Keep the original audio (default) or replace it.
 - **[core]** The prompt is built automatically from the character, outfit, never-add list and preset. An advanced users' panel shows and edits it.
 - **[core]** Number of takes (different seeds), compared side by side.

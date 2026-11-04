@@ -19,9 +19,13 @@ All tests ran on rented RunPod GPUs and used one original AI influencer (honey-b
 | 4 | LatentSync 1.6 (lip sync on Test 2) | RTX 4090 | 768×1344 | 20 | 5.9s | 3–6m | ~$0.56 | Works. Redraws only the mouth, no seams. Mouth slightly softer |
 | 5 | H3 + Turbo LoRA (Ref2VA 4-step v0.1) | H100 | 768×1344 | 4 | **9.4s** | **13m** | ~$0.95 | 5× faster ✅. But it invented a different room, background slides/warps, dance drifts out of sync with the audio, weaker expressions ❌ |
 | 6 | Speed benchmark, 3 steps each | H100 | 768×1344 | 3 | 5.2s | — | $1.34 | BF16 94.5 s/step · Pruned FP8 83.2 s/step (1.14×) · Int8 ConvRot 85.6 s/step (1.10×) |
-| 7 | FlashAttention 3 benchmark | H100 | 768×1344 | 3 | 5.2s | — | _pending_ | _pending_ |
+| 7 | FlashAttention 3 benchmark | H100 | 768×1344 | 3 | 5.2s | — | ~$1.00 | **BF16 + FA3: 57.8 s/step (1.63× faster than 94.5)**. Same quality, attention was the bottleneck |
+| 8 | H3 + FA3, dancing clip | H100 | 768×1344 | **15** | 5.2s | 14.5m steady | ~$1.67 | Real room kept, clean face and expressions, no tattoos ✅. First fast kick ~0.5s late ❌ |
+| 9 | H3 + FA3, same seed | H100 | 768×1344 | **20** | 5.2s | 19.2m | ~$1.88 | **Identical to 15 steps**, same late kick. Steps don't change timing |
+| 10 | H3 + FA3, same seed | H100 | 768×1344 | **10** | 5.2s | **9.5m** | ~$1.45 | **Identical to 15/20** (checked face, hands, room). 10 steps is the standard |
+| 11 | **Viggle-Animate** (H3 fine-tune), repainted frame = first frame of Test 8 | **H200 NVL 143GB** | 768×1344 | 4 (fixed) | 5.2s | **95s** (+21s load) | ~$1.20 incl. setup | **Kick lands on time ✅**, real room kept, sharp. Hair slightly lighter/golden than the references. Peak VRAM 90.7GB |
 
-Spent on tests so far: **~$12.12** (plus Test 7). About $3 of that was lost to setup mistakes; the fixes are now written into the scripts (§5).
+Spent on all tests: **~$18.93** (balance $6.07 on 2026-11-04). About $3 of that was lost to setup mistakes; the fixes are now written into the scripts (§5).
 
 ## 3. Findings
 
@@ -73,14 +77,41 @@ Spent on tests so far: **~$12.12** (plus Test 7). About $3 of that was lost to s
 | BF16, PyTorch fallback attention | 94.5 | ~32 min | ~47 min |
 | Pruned FP8 | 83.2 | ~28 min | ~42 min |
 | Int8 ConvRot | 85.6 | ~29 min | ~43 min |
-| BF16 + FlashAttention 3 | _pending_ | | |
+| **BF16 + FlashAttention 3** | **57.8** | ~19 min | ~29 min |
+| **BF16 + FA3, 10 steps (standard)** | 57.8 | **~9.5 min at 10 steps** | |
+| **Viggle-Animate on H200 NVL** | — | **~95s per clip, fixed 4 steps** | |
+
+**Step count finding (Tests 8–10):**
+- 10, 15 and 20 steps give visually identical results with the same seed. The motion is fixed in the first few steps.
+- **Standard: 10 steps. App range 4–30, recommended 10.**
+- Turbo at 4 steps (LoRA v0.1) did break, so the safe minimum for plain H3 lies somewhere between 4 and 10.
+
+**Timing on very fast moves:**
+- H3 Ref2VA smooths a sharp kick that follows an arm move into a later move (~0.5s), at any step count.
+- **Viggle-Animate fixes this** (Test 11).
 
 Remaining speed levers, roughly best first:
-1. **FlashAttention 3** (Test 7).
-2. **Fewer steps (15–20).** This needs a quality run to check that timing stays exact.
+1. ~~FlashAttention 3~~ Done: 1.63×.
+2. ~~Fewer steps~~ Done: 10 is enough.
 3. **A faster GPU (B200).** About 2× faster at ~$6–9/hr.
 4. **Several GPUs in parallel.** This gives more clips per hour at the same cost per clip.
 5. A future Ref2VA Turbo v1.0.
+
+## 4b. Viggle-Animate (Test 11)
+- A full fine-tune of H3 Ref2VA for character replacement, distilled to 4 steps. MiniMax H3 licence, Apache-2.0 code. Model card: `Viggle/Viggle-Animate`.
+- **Inputs:** the driving clip plus **one frame of it repainted with our character**. Pose, framing, background and light must match that frame; where they disagree, the video wins.
+- **We used the first frame of an H3 output as the repainted frame, and it lined up almost perfectly.** Production idea: make that frame with a very short H3 run, or with a multi-reference image editor.
+- **Needs >80GB VRAM** (90.7GB peak at 768×1344×124 frames). Use an H200 NVL ($3.79/hr) or a B200; an H100 needs `--offload` (slow).
+- **Setup gotchas:**
+  - Pin diffusers `@d6726f3`.
+  - Also install `transformers accelerate peft`, which are missing from their quickstart.
+  - Upgrade torchvision/torchaudio to match the torch it installs.
+  - Pass `--audio` with the clip's audio, `--height 1344 --width 768`, and a 24fps 768×1344 driving clip.
+- **Cost:** ~2 min of GPU per 5s clip on an H200 NVL, so **~$0.13 per clip** plus the repainted frame.
+- **Weaknesses:**
+  - Identity comes from one frame (hair came out slightly lighter).
+  - Weak lip sync without `--audio`.
+  - One person per clip.
 
 ## 5. Setup gotchas (already built into the scripts)
 - `pip install -e DiffSynth-Studio[all]` pulls a CUDA-13 PyTorch build. On pods with a CUDA 12.4 driver, pin `torch==2.10.*` with the cu126 build. H100 pods have a CUDA-13 driver, so the cu130 build works there.
@@ -100,7 +131,7 @@ Remaining speed levers, roughly best first:
 - **Per 5s clip at the quality bar today:** ~$3. At 15 min per clip it would be ~$1. Add ~$0.05–0.10 when lip sync is used.
 
 ## 7. Next steps
-1. Finish the FlashAttention 3 benchmark and fill in §4.
-2. Run one quality test with the fastest setup at **15–20 steps** on the dancing clip. Check that the background stays put, the timing matches the audio, and the expressions are clean.
+1. ~~FA3 benchmark~~ and ~~step tests~~ are done: standard is **H3 + FA3, 10 steps**, or **Viggle-Animate** for exact timing.
+2. Decide the engine split (H3 vs Viggle) after comparing identity on 2–3 more clips, and build the repainted-frame step.
 3. Test a **new background** from a photo (location photo, vertical, same camera height and similar light).
 4. Then lock the settings, set up the network volume, and build the automation (§5 of the main plan).
