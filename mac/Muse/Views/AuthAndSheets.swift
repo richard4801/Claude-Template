@@ -89,6 +89,7 @@ struct AuthView: View {
                             }
                         }
                         Text("By continuing you agree to the MUSE Terms and Acceptable Use Policy.").font(t.body(12)).foregroundStyle(t.muted)
+                        Text("Build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?")").font(t.mono(11)).foregroundStyle(t.muted.opacity(0.7))
                     }
                     .frame(maxWidth: 420, alignment: .leading)
                     .padding(.horizontal, 56)

@@ -38,8 +38,16 @@ final class ImageCache {
     func sample(_ key: String) -> NSImage? {
         let k = "sample:" + key
         if let i = cache[k] { return i }
-        guard let u = Bundle.main.url(forResource: "ref_" + key, withExtension: "jpg", subdirectory: "Samples"),
-              let img = NSImage(contentsOf: u) else { return nil }
+        // Look in Resources/Samples first, then the Resources root, in case the folder is flattened.
+        let candidates = [
+            Bundle.main.url(forResource: "ref_" + key, withExtension: "jpg", subdirectory: "Samples"),
+            Bundle.main.url(forResource: "ref_" + key, withExtension: "jpg"),
+            Bundle.main.resourceURL?.appendingPathComponent("Samples/ref_\(key).jpg"),
+        ]
+        guard let img = candidates.compactMap({ $0 }).lazy.compactMap({ NSImage(contentsOf: $0) }).first else {
+            NSLog("MUSE: sample image ref_%@.jpg not found in %@", key, Bundle.main.bundlePath)
+            return nil
+        }
         cache[k] = img
         return img
     }

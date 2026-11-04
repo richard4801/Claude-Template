@@ -147,7 +147,7 @@ struct SettingsView: View {
         case .about:
             H2("About")
             ListBox {
-                ListRow(title: "Version") { MonoValue(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1") }
+                ListRow(title: "Version") { MonoValue("\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))") }
                 ListRow(title: "Video model") { Text("MiniMax H3").font(t.body(13)) }
                 ListRow(title: "Lip sync") { Text("LatentSync").font(t.body(13)) }
                 ListRow(title: "Fonts", hint: "Instrument Serif, Archivo, IBM Plex Mono, Barlow, JetBrains Mono, Outfit, DM Mono, Bricolage Grotesque, Figtree (SIL OFL) · Permanent Marker (Apache 2.0)") { EmptyView() }
