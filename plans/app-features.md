@@ -54,6 +54,7 @@ Status tags: **[core]** needed for v1 · **[later]** after v1 · **[idea]** not 
 - **[later]** "Lock motion" for very fast dances. Candidates: Viggle + face fix (Option A), the pose ControlNet (FL2VA only), or someday our own trained add-on (Option B).
 
 ## 3. Background
+- **[core]** **Replace background + Improve with AI** (planned 2026-11-04): reference photo + description; a deterministic prompt engine builds the H3 structure; a Claude scene-writer step (vision on one source frame) writes the scene and lighting. Gated on the first background-replacement test. See `plans/video-background-and-prompt-ai.md`.
 - **[core]** Keep the clip's real background (default, tested).
 - **[later]** **New background from a photo**, with a motion level:
   - **Still**
