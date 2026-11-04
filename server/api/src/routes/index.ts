@@ -552,15 +552,27 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const c = ctx.config;
     return { maxGpus: s.maxGpus ?? c.MAX_GPUS, overheadPayer: s.overheadPayer ?? 'user', capPerJob: s.capPerJob ?? c.CAP_PER_JOB_USD, capPerDay: s.capPerDay ?? c.CAP_PER_DAY_USD,
       capPerUserDay: s.capPerUserDay ?? c.CAP_PER_USER_DAY_USD, tokenUsd: c.TOKEN_USD, minRunpodBalance: c.RUNPOD_MIN_BALANCE_USD, lowBalance: !!s.lowBalanceSince,
+      warmGpuAllowed: s.warmGpuAllowed ?? 'everyone', warmIdleMinutes: s.warmIdleMinutes ?? c.WARM_IDLE_MINUTES, warmMaxMinutes: s.warmMaxMinutes ?? c.WARM_MAX_MINUTES,
       features: ctx.jobs.features(), gpu: await ctx.gpu.status() };
   };
   app.get('/v1/settings/studio', async req => studioSettingsView(req.user.studioId));
   app.patch('/v1/settings/studio', { config: { owner: true } }, async req => {
     const b = parse(z.object({ maxGpus: z.number().int().min(0).max(16).optional(), overheadPayer: z.enum(['user', 'owner']).optional(),
-      capPerJob: z.number().nonnegative().max(1000).optional(), capPerDay: z.number().nonnegative().max(10000).optional(), capPerUserDay: z.number().nonnegative().max(10000).optional() }), req.body);
+      capPerJob: z.number().nonnegative().max(1000).optional(), capPerDay: z.number().nonnegative().max(10000).optional(), capPerUserDay: z.number().nonnegative().max(10000).optional(),
+      warmGpuAllowed: z.enum(['owner', 'everyone']).optional(), warmIdleMinutes: z.number().int().min(5).max(120).optional(), warmMaxMinutes: z.number().int().min(30).max(480).optional() }), req.body);
     await ctx.money.settings(req.user.studioId);
     if (Object.keys(b).length) await db.update(studioSettings).set(b).where(eq(studioSettings.studioId, req.user.studioId));
     return studioSettingsView(req.user.studioId);
+  });
+
+  // ------------------------------------------------------------------ Keep GPU warm (services/warm.ts)
+  app.get('/v1/gpu/warm', async req => ctx.warm.view(whoOf(req.user)));
+  app.post('/v1/gpu/warm', async req => {
+    const b = parse(z.object({ on: z.boolean().optional(), extend: z.boolean().optional() }), req.body ?? {});
+    if (b.extend) return ctx.warm.extend(req.user);
+    if (b.on === true) return ctx.warm.turnOn(req.user);
+    if (b.on === false) return ctx.warm.turnOff(req.user);
+    throw badRequest('Send {on: true}, {on: false} or {extend: true}');
   });
 
   // ------------------------------------------------------------------ live events

@@ -1,6 +1,6 @@
 // Live events for GET /v1/events, scoped per studio (and per user for wallet/balance events).
 // In-memory: one API instance. A second instance would need Postgres LISTEN/NOTIFY behind the same interface.
-export type ApiEvent = { type: 'job' | 'balance' | 'model' | 'outfit' | 'lora' | 'post' | 'wallet'; [k: string]: unknown };
+export type ApiEvent = { type: 'job' | 'balance' | 'model' | 'outfit' | 'lora' | 'post' | 'wallet' | 'gpu'; [k: string]: unknown };
 type Client = { studioId: string; userId: string; send: (line: string) => void };
 
 export class EventHub {

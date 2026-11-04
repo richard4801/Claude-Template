@@ -62,7 +62,7 @@ export class JobService {
       progress: j.progress, take: j.take, step: j.step, totalSteps: j.totalSteps, phase: j.phase, secondsLeft: q ? q.etaSeconds : j.secondsLeft,
       totalSeconds: j.totalSeconds, cost: j.cost, refunded: j.refunded, error: j.error, createdAt: j.createdAt, finishedAt: j.finishedAt,
       prompt: j.prompt, seed: j.seed, thumb: j.thumb ?? undefined, queuePosition: q?.queuePosition, etaSeconds: q?.etaSeconds,
-      blocked: j.blocked, userId: j.userId, warmupCost: j.warmupCost || undefined,
+      blocked: j.blocked, userId: j.userId, warmupCost: j.warmupCost || undefined, warm: j.warmSessionId ? true : undefined,
     });
   }
   emitJob(j: JobRow, extra: Record<string, unknown> = {}) {
@@ -253,7 +253,9 @@ export class JobService {
     const now = Date.now();
     const j = await this.get(jobId);
     if (!j || j.state !== 'running') return null;
-    const actual = o.simulated || o.gpuSeconds == null ? j.cost : o.gpuSeconds / 3600 * (o.costPerHr ?? this.ctx.config.GPU_HOURLY_USD);
+    const full = o.simulated || o.gpuSeconds == null ? j.cost : o.gpuSeconds / 3600 * (o.costPerHr ?? this.ctx.config.GPU_HOURLY_USD);
+    // On a warm GPU the "Warm GPU" line already pays the pod's time: only the part after the session ended is charged.
+    const actual = await this.ctx.warm.uncoveredCost(j, full, now);
     const outputs = mergeOutputs(j.outputs ?? [], o.outputs ?? []);
     const [u] = await this.ctx.db.update(jobs).set({
       state: 'done', gpuState: 'done', progress: 100, step: j.totalSteps, take: j.kind === 'render' ? (j.request.takes ?? 1) : 1, phase: 'Done', secondsLeft: 0,
@@ -336,6 +338,7 @@ export class JobService {
       await this.updateQueueInfo(waiting);
       await this.ctx.gpu.dispatch(waiting.filter(j => !j.blocked), now);
       await this.ctx.gpu.tick(now);
+      await this.ctx.warm.tick(now);
       const pool = this.ctx.gpu as { activePods?: () => Promise<unknown[]> };
       const wasQuiet = this.quiet;
       this.quiet = waiting.length === 0 && (pool.activePods ? (await pool.activePods()).length === 0 : false);

@@ -79,6 +79,12 @@ export const studioSettings = pgTable('studio_settings', {
   overheadPayer: text('overhead_payer').$type<'user' | 'owner'>(),
   /** Set while new jobs are paused because the RunPod balance is low. */
   lowBalanceSince: ms('low_balance_since'),
+  /** Who may switch on "Keep GPU warm": "everyone" (null = default) or "owner". */
+  warmGpuAllowed: text('warm_gpu_allowed').$type<'owner' | 'everyone'>(),
+  /** Warm GPU auto-off after this many minutes without a render (null = WARM_IDLE_MINUTES). */
+  warmIdleMinutes: integer('warm_idle_minutes'),
+  /** Warm GPU session cap in minutes (null = WARM_MAX_MINUTES); "Keep warm" extends it once by the same amount. */
+  warmMaxMinutes: integer('warm_max_minutes'),
 });
 
 export const models = pgTable('models', {
@@ -171,6 +177,8 @@ export const jobs = pgTable('jobs', {
   holdTokens: bigint('hold_tokens', { mode: 'number' }).notNull().default(0),
   /** GPU warm-up and idle time charged with this job (user-pays mode). */
   warmupCost: money('warmup_cost').notNull().default(0),
+  /** Claimed on (or running when its user took) a warm GPU: GPU time inside the warm session is paid by the "Warm GPU" line. */
+  warmSessionId: text('warm_session_id'),
   error: text('error'),
   retryable: boolean('retryable'),
   prompt: text('prompt').notNull().default(''),
@@ -362,7 +370,36 @@ export const pods = pgTable('pods', {
   warmupCharged: boolean('warmup_charged').notNull().default(false),
   stoppedAt: ms('stopped_at'),
   error: text('error'),
+  /** Held by a "Keep GPU warm" session: no idle shutdown, no hand-over, no warm-up/idle lines (the session pays). */
+  warmSessionId: text('warm_session_id'),
 }, t => [index('pods_state_idx').on(t.state)]);
+
+/**
+ * "Keep GPU warm" sessions (plans/backend.md): a user holds a dedicated pod and pays its wall time per minute.
+ * One active session (state starting | warm | stopping) per user.
+ */
+export const warmSessions = pgTable('warm_sessions', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  userId: text('user_id').notNull(),
+  podId: text('pod_id'),
+  state: text('state').notNull().$type<'starting' | 'warm' | 'stopping' | 'off'>(),
+  startedAt: ms('started_at').notNull(),
+  readyAt: ms('ready_at'),
+  /** The idle clock: when it became ready, the last time a render was seen on it, or the last "Keep warm". */
+  lastActiveAt: ms('last_active_at'),
+  /** Wall time up to here is charged. */
+  settledUntil: ms('settled_until').notNull(),
+  costUsd: money('cost_usd').notNull().default(0),
+  ratePerHr: money('rate_per_hr').notNull(),
+  idleMinutes: integer('idle_minutes').notNull(),
+  maxMinutes: integer('max_minutes').notNull(),
+  extended: boolean('extended').notNull().default(false),
+  /** `<reason>:<autoOffAt>` of the last warning sent, so each one goes out once. */
+  warnedFor: text('warned_for'),
+  endedAt: ms('ended_at'),
+  endReason: text('end_reason'),
+}, t => [index('warm_sessions_user_idx').on(t.userId, t.startedAt), index('warm_sessions_state_idx').on(t.state)]);
 
 /**
  * Photo templates (plans/templates.md): a reusable look. `layers` and `variationPool` are hidden from everyone but the owner.

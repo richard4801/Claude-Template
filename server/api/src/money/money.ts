@@ -17,7 +17,7 @@ import { videosLeft } from '../pricing.js';
 export type RunpodBalance = { source: 'runpod' | 'simulated' | 'unavailable'; balance: number | null; spendPerHour?: number; reason?: string };
 type Who = { id: string; studioId: string; role: 'owner' | 'member' };
 
-const SPEND_KINDS = ['settle', 'charge', 'overhead', 'warmup'];
+const SPEND_KINDS = ['settle', 'charge', 'overhead', 'warmup', 'warm'];
 const EPS = 1e-9;
 
 class Mutex {
@@ -231,23 +231,32 @@ export class Money {
   }
 
   /**
-   * GPU warm-up and idle time on a user's own pod ("GPU warm-up" line). A member pays from their tokens, as far as they
-   * go (the rest is studio overhead); an owner's is their own spend.
+   * GPU warm-up and idle time on a user's own pod ("GPU warm-up" line), or a warm GPU's wall time (kind "warm", the
+   * "Warm GPU" line). A member pays from their tokens, as far as they go (the rest is studio overhead); an owner's is
+   * their own spend.
    */
-  gpuOverhead(studioId: string, userId: string, usd: number, jobId: string | null, note: string) {
+  gpuOverhead(studioId: string, userId: string, usd: number, jobId: string | null, note: string, kind: 'warmup' | 'warm' = 'warmup', wantTokens?: number) {
     return this.lock.run(studioId, async () => {
       const role = await this.roleOf(userId);
       let paid = usd, rest = 0, tokens = 0;
       if (role !== 'owner') {
+        // `wantTokens`: the caller rounds a running total (per-minute warm GPU lines), so small lines don't each round up.
+        const want = wantTokens ?? this.toTokens(usd);
         const w = await this.wallet(userId, studioId);
-        tokens = Math.min(this.toTokens(usd), Math.max(0, w.tokens));
-        paid = Math.min(usd, this.toUsd(tokens)); rest = usd - paid;
+        tokens = Math.min(want, Math.max(0, w.tokens));
+        if (tokens < want) { paid = Math.min(usd, this.toUsd(tokens)); rest = usd - paid; }
         if (tokens) await this.ctx.db.update(wallets).set({ tokens: sql`${wallets.tokens} - ${tokens}`, updatedAt: Date.now() }).where(eq(wallets.userId, userId));
       }
-      await this.row({ studioId, userId, actorId: userId, jobId, kind: 'warmup', tokens: -tokens, amountUsd: paid, note });
+      await this.row({ studioId, userId, actorId: userId, jobId, kind, tokens: -tokens, amountUsd: paid, note });
       if (rest > EPS) await this.row({ studioId, userId: null, actorId: userId, jobId, kind: 'overhead', amountUsd: rest, note: `${note}: over the member wallet` });
       await this.simSpend(studioId, usd);
     }).finally(() => this.notify(studioId, [userId]));
+  }
+
+  /** What this user can still spend in USD (member: wallet; owner: what the RunPod balance leaves). Null = unknown. */
+  async spendableUsd(u: Who): Promise<number | null> {
+    if (u.role === 'owner') return (await this.ownerAvailable(u.studioId)).usd;
+    return this.toUsd((await this.wallet(u.id, u.studioId)).tokens);
   }
 
   async clearFailNext(studioId: string) {

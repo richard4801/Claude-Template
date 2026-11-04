@@ -82,6 +82,13 @@ const Env = z.object({
   GPU_HOURLY_USD: num(3.99),
   /** Stop a pod this long after its last job. */
   IDLE_SHUTDOWN_SECONDS: num(180),
+  /** Keep GPU warm: auto-off after this many minutes without a render, and the session cap (owner can change both). */
+  WARM_IDLE_MINUTES: num(20),
+  WARM_MAX_MINUTES: num(120),
+  /** The warning goes out this long before an idle or cap auto-off. */
+  WARM_WARNING_MINUTES: num(5),
+  /** Warm GPU turns off when the user's credit can't cover this many more minutes. */
+  WARM_MIN_CREDIT_MINUTES: num(10),
   /** Most pods at once (the owner can change it in settings). */
   MAX_GPUS: num(3),
   /**

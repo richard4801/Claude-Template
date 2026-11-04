@@ -157,7 +157,7 @@ export async function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx) {
     // gpuSeconds − load_s; the load goes on the pod's "GPU warm-up" line (its user's, or the owner's overhead).
     const load = Math.min(b.gpuSeconds ?? 0, b.stats?.load_s ?? 0);
     const rate = pod.costPerHr || ctx.config.GPU_HOURLY_USD;
-    if (load > 0 && !manual) await pool.chargeWarmup(pod, load, j.id, 'GPU warm-up: model load');
+    if (load > 0 && !manual && !j.warmSessionId) await pool.chargeWarmup(pod, load, j.id, 'GPU warm-up: model load');
     await ctx.jobs.complete(j.id, { outputs: reported, gpuSeconds: b.gpuSeconds == null ? undefined : b.gpuSeconds - load, costPerHr: rate, stats: b.stats ?? null });
     await pool.jobEnded(pod.id, Date.now());
     return reply.status(204).send();

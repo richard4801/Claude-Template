@@ -22,6 +22,9 @@ export abstract class PodPool implements GpuController {
   /** Extra housekeeping (heartbeats). */
   protected async health(_now: number) {}
 
+  /** Why the last launch for this kind failed, if it did recently. */
+  launchFailure(kind: WorkKind) { return this.launchFailedAt.get(kind) ?? null; }
+
   async maxGpus(studioId: string) {
     const s = await this.ctx.money.settings(studioId);
     return s.maxGpus ?? this.ctx.config.MAX_GPUS;
@@ -38,8 +41,8 @@ export abstract class PodPool implements GpuController {
       const first = waiting.find(j => j.userId === u)!;
       const kind = workKindOf(first);
       if (active.some(p => p.assignedUserId === u && gpuCanRun(this.ctx.config, p.gpuType, kind))) continue;
-      // Warm reuse: an idle, ready pod whose user has nothing else it can run.
-      const idle = active.find(p => p.state === 'running' && !p.currentJobId && gpuCanRun(this.ctx.config, p.gpuType, kind)
+      // Warm reuse: an idle, ready pod whose user has nothing else it can run (never a pod held by "Keep GPU warm").
+      const idle = active.find(p => p.state === 'running' && !p.currentJobId && !p.warmSessionId && gpuCanRun(this.ctx.config, p.gpuType, kind)
         && !waiting.some(w => w.userId === p.assignedUserId && gpuCanRun(this.ctx.config, p.gpuType, workKindOf(w))));
       if (idle) {
         await this.chargeIdle(idle, now);
@@ -51,17 +54,19 @@ export abstract class PodPool implements GpuController {
       if (active.length >= (await this.maxGpus(first.studioId))) continue; // waits for the next free pod
       const failed = this.launchFailedAt.get(kind);
       if (failed && now - failed.at < this.launchBackoffMs) continue;
-      const pod = await this.startPod(first, kind, now);
+      const pod = await this.startPod({ studioId: first.studioId, userId: first.userId, jobId: first.id }, kind, now);
       if (pod) active.push(pod);
     }
     for (const p of active) if (p.state === 'running' && !p.currentJobId) await this.idlePod(p, now);
   }
 
-  private async startPod(job: JobRow, kind: WorkKind, now: number) {
+  /** Starts a pod for a user: for their waiting job, or (jobId null) for "Keep GPU warm" with `warmSessionId`. */
+  async startPod(job: { studioId: string; userId: string | null; jobId: string | null; warmSessionId?: string }, kind: WorkKind, now: number) {
     const token = randomToken();
     const [row] = await this.ctx.db.insert(pods).values({
       id: uid('pod'), studioId: job.studioId, simulated: this.mode === 'simulated', workerTokenHash: sha256(token), state: 'starting',
-      gpuType: gpuTable(this.ctx.config)[kind][0] ?? 'unknown', assignedUserId: job.userId, startedForJobId: job.id, startedAt: now,
+      gpuType: gpuTable(this.ctx.config)[kind][0] ?? 'unknown', assignedUserId: job.userId, startedForJobId: job.jobId, startedAt: now,
+      warmSessionId: job.warmSessionId ?? null, warmupCharged: !!job.warmSessionId,
     }).returning();
     let res: Awaited<ReturnType<PodPool['launch']>> = null;
     try { res = await this.launch(row!, kind, token); } catch (e) { this.ctx.log.error({ err: (e as Error).message }, 'pod launch failed'); }
@@ -77,7 +82,7 @@ export abstract class PodPool implements GpuController {
       runpodId: res.runpodId, gpuType: res.gpuType, costPerHr: res.costPerHr,
       ...(res.ready ? { state: 'running' as const, readyAt: now, idleSince: now, lastHeartbeatAt: now } : {}),
     }).where(eq(pods.id, row!.id)).returning();
-    this.ctx.log.info({ pod: up!.id, gpu: res.gpuType, user: job.userId }, 'pod started');
+    this.ctx.log.info({ pod: up!.id, gpu: res.gpuType, user: job.userId, warm: !!job.warmSessionId }, 'pod started');
     return up!;
   }
 
@@ -95,6 +100,12 @@ export abstract class PodPool implements GpuController {
     if (!job) {
       if (!pod.idleSince) await this.ctx.db.update(pods).set({ idleSince: now }).where(eq(pods.id, pod.id));
       return null;
+    }
+    if (pod.warmSessionId) {
+      // A warm GPU: its session pays the pod's wall time, so no idle or warm-up line, and the job's GPU time is covered.
+      await this.ctx.db.update(pods).set({ currentJobId: job.id, busy: true, idleSince: null, warmupCharged: true }).where(eq(pods.id, pod.id));
+      const [w] = await this.ctx.db.update(jobs).set({ warmSessionId: pod.warmSessionId }).where(eq(jobs.id, job.id)).returning();
+      return w ?? job;
     }
     // Idle time before this job, then the start-up time if this is the pod's first job.
     if (pod.idleSince && pod.warmupCharged) await this.charge(pod, (now - pod.idleSince) / 1000, job.id, 'GPU idle before the job');
@@ -114,14 +125,16 @@ export abstract class PodPool implements GpuController {
     await this.health(now);
     const idleMs = this.ctx.config.IDLE_SHUTDOWN_SECONDS * 1000;
     for (const p of await this.activePods()) {
-      if (p.state === 'running' && !p.currentJobId && p.idleSince && now - p.idleSince >= idleMs) await this.stopPod(p, now, 'idle');
+      // A warm GPU's own auto-off rules apply instead (services/warm.ts).
+      if (p.state === 'running' && !p.currentJobId && !p.warmSessionId && p.idleSince && now - p.idleSince >= idleMs) await this.stopPod(p, now, 'idle');
     }
   }
 
   async stopPod(p: PodRow, now: number, why: string) {
     const [u] = await this.ctx.db.update(pods).set({ state: 'stopping' }).where(and(eq(pods.id, p.id), inArray(pods.state, ['starting', 'running']))).returning();
     if (!u) return;
-    if (p.idleSince && p.warmupCharged) await this.chargeIdle(p, now);
+    if (u.warmSessionId) { /* the warm session settles its own wall time */ }
+    else if (p.idleSince && p.warmupCharged) await this.chargeIdle(p, now);
     else if (!p.warmupCharged && p.startedForJobId) await this.charge(p, ((p.readyAt ?? now) - p.startedAt) / 1000, p.startedForJobId, 'GPU start-up (no job ran)');
     try { await this.terminate(p); } catch (e) { this.ctx.log.error({ pod: p.id, err: (e as Error).message }, 'pod stop failed'); }
     await this.ctx.db.update(pods).set({ state: 'stopped', stoppedAt: now, busy: false }).where(eq(pods.id, p.id));
@@ -129,18 +142,18 @@ export abstract class PodPool implements GpuController {
   }
 
   /** Model load time reported by the worker: the pod's warm-up line. */
-  async chargeWarmup(pod: PodRow, seconds: number, jobId: string, note: string) { await this.charge(pod, seconds, jobId, note); }
+  async chargeWarmup(pod: PodRow, seconds: number, jobId: string, note: string) { if (!pod.warmSessionId) await this.charge(pod, seconds, jobId, note); }
 
   /** Idle time since `idleSince`, charged to the pod's current user with their most recent job on it. */
-  protected async chargeIdle(p: PodRow, now: number) {
-    if (!p.idleSince || !p.warmupCharged) return;
+  async chargeIdle(p: PodRow, now: number) {
+    if (!p.idleSince || !p.warmupCharged || p.warmSessionId) return;
     const [last] = await this.ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.podId, p.id), eq(jobs.userId, p.assignedUserId ?? ''))).orderBy(desc(jobs.claimedAt)).limit(1);
     await this.charge(p, (now - p.idleSince) / 1000, last?.id ?? null, 'GPU idle');
     await this.ctx.db.update(pods).set({ idleSince: now }).where(eq(pods.id, p.id));
   }
 
   /** Warm-up and idle time: the pod's user pays (default) or the owner, per studio setting. */
-  protected async charge(p: PodRow, seconds: number, jobId: string | null, note: string) {
+  async charge(p: PodRow, seconds: number, jobId: string | null, note: string) {
     const usd = Math.max(0, seconds) / 3600 * p.costPerHr;
     if (usd < 1e-6) return;
     const userId = p.assignedUserId;
@@ -162,7 +175,7 @@ export abstract class PodPool implements GpuController {
     const active = await this.activePods();
     return {
       mode: this.mode,
-      pods: active.map(p => ({ id: p.id, state: p.state, gpuType: p.gpuType, assignedUserId: p.assignedUserId, busy: !!p.currentJobId })),
+      pods: active.map(p => ({ id: p.id, state: p.state, gpuType: p.gpuType, assignedUserId: p.assignedUserId, busy: !!p.currentJobId, warm: !!p.warmSessionId })),
       noGpu: [...this.launchFailedAt.entries()].map(([kind, f]) => ({ kind, since: f.at, message: f.message })),
     };
   }
@@ -248,8 +261,9 @@ export class RunpodGpu extends PodPool {
             { key: 'POD_ID', value: pod.id },
             { key: 'WORKER_TOKEN', value: workerToken },
             // The worker's dead-man's switch: it terminates its own pod if this API can't (down, unreachable).
-            // Always later than the API's own idle shutdown, so the API normally stops the pod first.
-            { key: 'SELF_STOP_IDLE_SECONDS', value: String(Math.max(300, c.IDLE_SHUTDOWN_SECONDS + 120)) },
+            // Always later than the API's own idle shutdown and the warm GPU's idle auto-off (any pod can become a
+            // warm one), so the API normally stops the pod first. The unreachable clock (600 s) is the real backstop.
+            { key: 'SELF_STOP_IDLE_SECONDS', value: String(Math.max(300, c.IDLE_SHUTDOWN_SECONDS + 120, c.WARM_IDLE_MINUTES * 60 + 300)) },
           ],
         });
         return { runpodId: r.id, gpuType: gpuTypeId, costPerHr: Number(r.costPerHr ?? c.GPU_HOURLY_USD), ready: false };

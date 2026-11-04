@@ -8,6 +8,7 @@ This is the real backend for the MUSE Android and Mac apps. It speaks the same c
 - **GPU controller** (`src/gpu/`):
   - `simulated` (the default, free): renders run 24× faster than real time, like the mock.
   - `runpod`: one pod per user on the shared network volume, warm-pod reuse, idle shutdown, and the worker protocol at `/worker/v1/*`.
+  - **Keep GPU warm** (`src/services/warm.ts`, `POST /v1/gpu/warm`): a user holds a dedicated pod; its wall time is the "Warm GPU" ledger line, settled per minute, and their renders on it aren't charged GPU time again. It turns off after `WARM_IDLE_MINUTES` without a render, at the `WARM_MAX_MINUTES` cap (extended once by "Keep warm"), when their credit can't cover 10 more minutes, or when the RunPod balance drops below `RUNPOD_MIN_BALANCE_USD`. The studio setting `warmGpuAllowed` (default everyone) limits it to the owner.
 - **Image engine** (`src/images/`): `simulated` (the bundled reference stills), `fal` (fal.ai queue API) or `custom-http` (our small contract). It is chosen per studio in Settings.
 - **Prompt engine** (`src/prompt/`): a port of `android/core` `PromptEngine.kt`, checked against the same fixtures.
 - **Photo templates** (`src/templates/`, `plans/templates.md`): reusable looks with hidden prompt layers and a variation pool.
@@ -199,6 +200,8 @@ For fal.ai: create a key at **fal.ai** → **Dashboard** → **Keys**, and add i
 | `GPU_TABLE` | H3 → H100s then H200s; Viggle → H200 NVL, H200 | GPU types per job kind (JSON), best first |
 | `RUNPOD_WORKER_CAPABILITIES` | `h3,latentsync` | What the pod image can do; other jobs are refused at submit time |
 | `MAX_GPUS`, `IDLE_SHUTDOWN_SECONDS` | `3`, `180` | Pod cap and idle shutdown |
+| `WARM_IDLE_MINUTES`, `WARM_MAX_MINUTES` | `20`, `120` | Keep GPU warm: idle auto-off and the session cap (the owner can change both in studio settings) |
+| `WARM_WARNING_MINUTES`, `WARM_MIN_CREDIT_MINUTES` | `5`, `10` | The warning before an idle or cap auto-off; the credit a warm GPU must still cover |
 | `WORKER_HEARTBEAT_TIMEOUT_SEC`, `POD_BOOT_TIMEOUT_SEC` | `60`, `900` | Health checks |
 | `GPU_HOURLY_USD` | `3.99` | Rate used when a pod doesn't report its own |
 | `WORKER_TOKEN` | none | Optional static token for a hand-run dev worker |

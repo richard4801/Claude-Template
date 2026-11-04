@@ -20,6 +20,7 @@ import { registerRoutes } from './routes/index.js';
 import { registerWorkerRoutes } from './routes/worker.js';
 import { seedDev } from './seed.js';
 import { TemplateService } from './templates/service.js';
+import { WarmService } from './services/warm.js';
 import { schemaState } from './db/client.js';
 
 declare module 'fastify' {
@@ -68,6 +69,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   ctx.lora = new LoraService(ctx);
   ctx.posts = new PostScheduler(ctx);
   ctx.templates = new TemplateService(ctx);
+  ctx.warm = new WarmService(ctx);
   ctx.boot = { startedAt: Date.now(), build: (process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.KOYEB_GIT_SHA ?? process.env.GIT_SHA ?? '').slice(0, 12) || null,
     migrations: await schemaState(ctx.db) };
   ctx.gpu = config.GPU_MODE === 'runpod' ? new RunpodGpu(ctx, ctx.runpod) : new SimulatedGpu(ctx);
