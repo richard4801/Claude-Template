@@ -13,13 +13,24 @@ enum class Layer(val key: String) {
     DIRECTION("direction"), STYLE("style"), NEGATIVE("negative"), SEED("seed");
 }
 
-/** Who the model is. [look] is the written look; references are the locked character-sheet images. */
+/**
+ * Who the model is. [look] is the written look; references are the locked character-sheet images.
+ * [lora] is the Identity LoRA trigger token ("sienna_v1") when one is trained and switched on (plans/lora-training.md);
+ * null means references only.
+ */
 data class Identity(
     val name: String,
     val look: String,
     val referenceCount: Int = 6,
     val neverAdd: List<String> = emptyList(),
+    val lora: String? = null,
 )
+
+/** Identity LoRA naming: first name, lower case, plus the version ("sienna_v2"). */
+object LoraToken {
+    fun of(modelName: String, version: Int): String =
+        modelName.trim().split(Regex("\\s+")).first().lowercase().filter { it.isLetterOrDigit() }.ifEmpty { "model" } + "_v$version"
+}
 
 /** The selected outfit set. Either described in words, from a product photo, or an uploaded set. */
 data class OutfitSpec(
@@ -170,8 +181,9 @@ object PromptEngine {
         }
     }
 
+    /** The identity layer. With a LoRA on it reads "... 6 locked reference images + LoRA sienna_v1 (photo)." (prototype features.js). */
     private fun identitySlot(id: Identity) =
-        PromptSlot(Layer.IDENTITY, "${id.name}: ${id.look}. Identity from ${id.referenceCount} locked reference images.")
+        PromptSlot(Layer.IDENTITY, "${id.name}: ${id.look}. Identity from ${id.referenceCount} locked reference images${id.lora?.let { " + LoRA $it (photo)" } ?: ""}.")
 
     private fun negativeSlot(id: Identity) = PromptSlot(Layer.NEGATIVE, "Never add: ${neverList(id).joinToString(", ")}.")
 
@@ -255,7 +267,9 @@ object PromptEngine {
 
         val subjects = buildString {
             append("<Subject 1> is $performer in <Video 1>, in ${v.performer.setting}.\n")
-            append("<Subject 2> is ${id.name}: ${id.look}, with NO tattoos, shown in $refList.\n")
+            append("<Subject 2> is ${id.name}: ${id.look}, with NO tattoos, shown in $refList")
+            id.lora?.let { append(", with LoRA $it video") }
+            append(".\n")
             append("<Video 1> is the source video for the editing task.")
             if (v.keepAudio) append("\n<Audio 1> is the synchronized audio track of <Video 1>.")
         }

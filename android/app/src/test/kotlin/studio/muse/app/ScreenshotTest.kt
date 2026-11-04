@@ -14,7 +14,16 @@ import org.robolectric.ParameterizedRobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import studio.muse.app.data.Account
 import studio.muse.app.data.AppPrefs
+import studio.muse.app.data.ImageRef
+import studio.muse.app.data.Lora
+import studio.muse.app.data.LoraSim
+import studio.muse.app.data.Platform
+import studio.muse.app.data.Post
+import studio.muse.app.data.PostStats
+import studio.muse.app.data.TopUpRequest
+import studio.muse.app.ui.screens.PostTime
 import studio.muse.app.data.Clip
 import studio.muse.app.data.ClipRules
 import studio.muse.app.data.FakeMuseApi
@@ -39,6 +48,8 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
         val SCREENS = listOf(
             "splash", "welcome", "signin", "signup", "home", "profile", "create1", "create3", "outfit", "shoot", "shoot_prompt",
             "source", "source_bad", "direct", "queue", "queue_run", "result", "gallery", "settings", "credits",
+            "profile_lora", "lora_intro", "lora_gen", "lora_review", "lora_ready_to_train", "lora_training", "lora_done",
+            "accounts", "post", "post_schedule", "posts", "posts_posted",
         )
 
         @JvmStatic
@@ -55,6 +66,27 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
         val scope = MainScope()
         val fake = FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0)
         val c = AppContainer(scope, MemoryPrefs(AppPrefs(theme = theme, token = "t", studioName = "Jenne Studio", sound = false)), fake, null, soundsOn = false)
+        // Sienna has TikTok + Instagram linked, one scheduled post and one posted with stats (like the prototype review state).
+        runBlocking {
+            listOf(Platform.TIKTOK, Platform.INSTAGRAM).forEach { fake.debugPutAccount(Account(SampleData.SIENNA, it.id, "@sienna.vale", 0)) }
+            fake.debugPutPost(Post("p1", SampleData.SIENNA, "t_g1", "Living-room dance", ImageRef.asset("g_tq"), listOf("tiktok", "instagram"), "",
+                `when` = PostTime.iso(PostTime.slots().first()), state = "scheduled"))
+            fake.debugPutPost(Post("p2", SampleData.SIENNA, "t_j1", "Kick test", ImageRef.asset("g_front"), listOf("tiktok"), "", state = "posted",
+                postedAt = System.currentTimeMillis() - 7_200_000, stats = PostStats(1834, 201, 14)))
+        }
+        val cands = LoraSim.candidates()
+        val lora = when (screen) {
+            "lora_gen" -> Lora(SampleData.SIENNA, state = "building")
+            "lora_review" -> Lora(SampleData.SIENNA, state = "review", candidates = cands)
+            "lora_ready_to_train" -> Lora(SampleData.SIENNA, state = "review", candidates = cands)
+            "lora_training" -> LoraSim.parts(40.0).let { (ph, vi) -> Lora(SampleData.SIENNA, state = "training", candidates = cands, progress = 40.0, photo = ph, video = vi) }
+            "lora_done", "profile_lora" -> Lora(SampleData.SIENNA, 1, "ready", candidates = cands, progress = 100.0, trainedOn = 27)
+            else -> null
+        }
+        runBlocking {
+            lora?.let { fake.debugPutLora(it) }
+            if (screen == "lora_ready_to_train") fake.topUp(TopUpRequest(25.0))
+        }
         val sample = Clip(SampleData.SAMPLE_CLIP, "Living-room dance", 9.4, 1080, 1920, 30, ClipRules.checks(SampleData.sampleMeta))
         when (screen) {
             "create3" -> runBlocking {
@@ -63,6 +95,8 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
                     fake.setSlot(SampleData.NOOR, k, studio.muse.app.data.SetSlotRequest(studio.muse.app.data.ImageRef.asset(img)))
                 }
             }
+            "post_schedule" -> c.drafts.postStartScheduled.value = true
+            "posts_posted" -> c.drafts.postsTab.value = "posted"
             "shoot_prompt" -> c.drafts.shoot.update { it.copy(tool = "spark", direction = "laughing mid-step, hair blowing") }
             "source", "direct" -> c.drafts.video.update { it.copy(clip = sample) }
             "source_bad" -> c.drafts.video.update {
@@ -80,11 +114,14 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "shoot_prompt" -> Routes.SHOOT
             "source_bad" -> Routes.SOURCE
             "queue_run" -> Routes.QUEUE
-            "result" -> Routes.HOME
-            else -> screen
+            "result", "post", "post_schedule" -> Routes.HOME
+            "profile_lora" -> Routes.PROFILE
+            "posts_posted" -> Routes.POSTS
+            else -> if (screen.startsWith("lora")) Routes.LORA else screen
         }
         compose.mainClock.autoAdvance = false
-        compose.setContent { MuseApp(c, route, if (screen == "result") Routes.result("j1") else null) }
+        val pending = when (screen) { "result" -> Routes.result("j1"); "post", "post_schedule" -> Routes.post("t_j1"); else -> null }
+        compose.setContent { MuseApp(c, route, pending) }
         repeat(6) { idle(); compose.mainClock.advanceTimeBy(400) }
         idle()
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/${theme}_$screen.png")

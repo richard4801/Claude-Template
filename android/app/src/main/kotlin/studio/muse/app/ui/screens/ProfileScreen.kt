@@ -56,13 +56,16 @@ import studio.muse.app.ui.components.*
 import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
 
-data class ProfileState(val model: Model? = null, val outfits: List<Outfit> = emptyList(), val selected: Int = 0)
+data class ProfileState(
+    val model: Model? = null, val outfits: List<Outfit> = emptyList(), val selected: Int = 0,
+    val lora: studio.muse.app.data.Lora = studio.muse.app.data.Lora(""), val connected: Int = 0,
+)
 
 class ProfileViewModel(private val c: AppContainer) : ViewModel() {
     val state: StateFlow<ProfileState> = combine(c.repo.state, c.drafts.modelId, c.drafts.outfitId) { s, mid, oid ->
         val model = s.model(mid) ?: s.models.firstOrNull()
         val outfits = s.outfitsOf(model?.id)
-        ProfileState(model, outfits, outfits.indexOfFirst { it.id == oid }.coerceAtLeast(0))
+        ProfileState(model, outfits, outfits.indexOfFirst { it.id == oid }.coerceAtLeast(0), s.lora(model?.id), s.accountsOf(model?.id).size)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, ProfileState())
 
     fun select(i: Int) {
@@ -76,6 +79,7 @@ class ProfileViewModel(private val c: AppContainer) : ViewModel() {
 data class ProfileActions(
     val select: (Int) -> Unit = {}, val addOutfit: () -> Unit = {}, val video: () -> Unit = {}, val shoot: () -> Unit = {},
     val back: () -> Unit = {}, val settings: () -> Unit = {}, val sheet: () -> Unit = {}, val menu: Boolean = true,
+    val lora: () -> Unit = {}, val accounts: () -> Unit = {},
 )
 
 @Composable
@@ -89,6 +93,7 @@ fun ProfileScreen() {
         ProfileActions(
             select = vm::select, addOutfit = { nav.go(Routes.OUTFIT) }, video = { nav.go(Routes.SOURCE) }, shoot = { nav.go(Routes.SHOOT) },
             back = { nav.back() }, settings = { nav.tab(Routes.SETTINGS) }, sheet = { nav.go(Routes.CREATE3) },
+            lora = { nav.go(Routes.LORA) }, accounts = { nav.go(Routes.ACCOUNTS) },
         ),
     )
 }
@@ -100,7 +105,7 @@ fun sampleProfileState() = ProfileState(SampleData.models().first(), SampleData.
 fun ProfileContent(s: ProfileState, a: ProfileActions) {
     val m = muse
     val model = s.model ?: return ScreenBox {}
-    val menu = if (a.menu) profileMenu(a.sheet, a.addOutfit) else emptyList()
+    val menu = if (a.menu) profileMenu(a.sheet, a.addOutfit, a.lora, a.accounts) else emptyList()
     when {
         m.isA -> ProfileA(model, s, a, menu)
         m.isB -> ProfileB(model, s, a, menu)
@@ -168,6 +173,7 @@ private fun ProfileA(model: Model, s: ProfileState, a: ProfileActions, menu: Lis
                 val o = s.outfits.getOrNull(s.selected)
                 T("Outfits ${s.selected + 1} / ${s.outfits.size}${o?.let { " · " + it.name } ?: ""}", m.type.mono.copy(fontSize = 11.5.sp, letterSpacing = .12.em), m.t.ink, upper = true)
             }
+            ProfileExtras(s.lora, s.connected, a.lora, a.accounts)
         }
         ProfileDock(a)
     }
@@ -206,6 +212,7 @@ private fun ProfileB(model: Model, s: ProfileState, a: ProfileActions, menu: Lis
                 RowB { Lbl("Outfit"); T("${s.selected + 1} / ${s.outfits.size}", m.type.mono.copy(fontSize = 12.5.sp), m.t.muted) }
                 OutfitStrip(s, a)
             }
+            ProfileExtras(s.lora, s.connected, a.lora, a.accounts)
         }
         ProfileDock(a)
     }
@@ -253,6 +260,7 @@ private fun ProfileC(model: Model, s: ProfileState, a: ProfileActions, menu: Lis
                 Spacer(Modifier.weight(1f))
                 Box(Modifier.size(36.dp).softShadow(999.dp).clip(CircleShape).background(m.t.surface).press { a.select(s.selected + 1) }, contentAlignment = Alignment.Center) { Ic("chev", 16.dp) }
             }
+            ProfileExtras(s.lora, s.connected, a.lora, a.accounts)
         }
         ProfileDock(a)
     }
@@ -291,6 +299,7 @@ private fun ProfileD(model: Model, s: ProfileState, a: ProfileActions, menu: Lis
                 RowB { T("OUTFIT", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink); T("${s.outfits.size} LOOKS ›", m.type.tiny.copy(fontWeight = FontWeight.Bold), m.t.ink) }
                 OutfitStrip(s, a)
             }
+            ProfileExtras(s.lora, s.connected, a.lora, a.accounts)
         }
         ProfileDock(a)
     }

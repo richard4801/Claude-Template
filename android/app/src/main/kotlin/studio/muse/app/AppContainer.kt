@@ -28,6 +28,7 @@ class AppContainer(
     initialPrefs: AppPrefs = AppPrefs(),
     soundsOn: Boolean = true,
     sfxCacheDir: File? = null,
+    val postAlarms: studio.muse.app.platform.PostAlarms? = null,
 ) {
     val prefs: StateFlow<AppPrefs> = prefsStore.prefs.stateIn(scope, SharingStarted.Eagerly, initialPrefs)
     val repo = MuseRepository(scope, prefsStore, fake)
@@ -40,13 +41,18 @@ class AppContainer(
             notifier?.jobFinished(job)
             if (job.done) repo.toast("Render done · tap to watch", "result/${job.id}") else repo.toast("Render failed · ${studio.muse.core.Pricing.money(job.refunded)} refunded", "queue")
         }
+        repo.onLoraReady = { model, lora ->
+            sound.play(SoundFx.Kind.DONE)
+            notifier?.loraReady(model?.name ?: "Your model", lora.version)
+            repo.toast("Identity LoRA v${lora.version} is ready", "lora")
+        }
     }
 
     companion object {
         fun create(context: Context): AppContainer {
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
             val fake = FakeMuseApi(scope, File(context.filesDir, "uploads"))
-            return AppContainer(scope, DataStorePrefs(context), fake, Notifier(context), studio.muse.app.platform.MediaReader(context), sfxCacheDir = File(context.cacheDir, "sfx").apply { mkdirs() })
+            return AppContainer(scope, DataStorePrefs(context), fake, Notifier(context), studio.muse.app.platform.MediaReader(context), sfxCacheDir = File(context.cacheDir, "sfx").apply { mkdirs() }, postAlarms = studio.muse.app.platform.PostAlarms(context))
         }
     }
 }

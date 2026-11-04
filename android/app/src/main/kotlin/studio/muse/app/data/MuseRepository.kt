@@ -19,9 +19,15 @@ data class StudioState(
     val jobs: List<Job> = emptyList(),
     val takes: List<Take> = emptyList(),
     val balance: Balance = Balance(0.0, 0.0),
+    val loras: Map<String, Lora> = emptyMap(),
+    val accounts: Map<String, List<Account>> = emptyMap(),
+    val posts: List<Post> = emptyList(),
     val loaded: Boolean = false,
     val error: String? = null,
 ) {
+    fun lora(modelId: String?): Lora = loras[modelId] ?: Lora(modelId ?: "")
+    fun accountsOf(modelId: String?): List<Account> = accounts[modelId].orEmpty()
+    fun account(modelId: String?, platform: String) = accountsOf(modelId).firstOrNull { it.platform == platform }
     fun model(id: String?) = models.firstOrNull { it.id == id }
     fun outfit(id: String?) = outfits.firstOrNull { it.id == id }
     fun outfitsOf(modelId: String?): List<Outfit> = model(modelId)?.outfitIds?.mapNotNull { outfit(it) } ?: emptyList()
@@ -48,6 +54,8 @@ class MuseRepository(
     private val _toasts = MutableSharedFlow<Toast>(extraBufferCapacity = 16)
     val toasts: SharedFlow<Toast> = _toasts
     var listener: JobListener? = null
+    /** Called once when a LoRA training finishes (notification + toast). */
+    var onLoraReady: ((Model?, Lora) -> Unit)? = null
 
     @Volatile var api: MuseApi = fake
         private set
@@ -83,7 +91,11 @@ class MuseRepository(
             val jobs = a.listJobs()
             val takes = a.listTakes()
             val bal = a.balance()
-            _state.update { StudioState(models, outfits, jobs.sortedByDescending { it.createdAt }, takes, bal, loaded = true) }
+            // LoRAs, accounts and posts are newer endpoints: an older server without them still loads.
+            val loras = models.mapNotNull { m -> runCatching { a.lora(m.id) }.getOrNull()?.let { m.id to it } }.toMap()
+            val accounts = models.mapNotNull { m -> runCatching { a.listAccounts(m.id) }.getOrNull()?.let { m.id to it } }.toMap()
+            val posts = runCatching { a.listPosts() }.getOrDefault(emptyList())
+            _state.update { StudioState(models, outfits, jobs.sortedByDescending { it.createdAt }, takes, bal, loras, accounts, posts, loaded = true) }
         } catch (e: ApiException) {
             _state.update { it.copy(loaded = true, error = e.message) }
             toast(e.message ?: "Error")
@@ -94,12 +106,20 @@ class MuseRepository(
         ev.balance?.let { b -> _state.update { it.copy(balance = b) } }
         ev.model?.let { m -> _state.update { s -> s.copy(models = s.models.upsert(m) { it.id == m.id }) } }
         ev.outfit?.let { o -> _state.update { s -> s.copy(outfits = s.outfits.upsert(o) { it.id == o.id }) } }
+        ev.lora?.let { l -> putLora(l) }
+        ev.post?.let { p -> _state.update { s -> s.copy(posts = s.posts.upsert(p) { it.id == p.id }) } }
         if (ev.takes.isNotEmpty()) _state.update { s -> s.copy(takes = ev.takes + s.takes.filterNot { t -> ev.takes.any { it.id == t.id } }) }
         ev.job?.let { j ->
             val prev = _state.value.job(j.id)
             _state.update { s -> s.copy(jobs = s.jobs.upsert(j) { it.id == j.id }.sortedByDescending { it.createdAt }) }
             if ((prev == null || prev.running) && (j.done || j.failed)) listener?.onJobFinished(j)
         }
+    }
+
+    private fun putLora(l: Lora) {
+        val prev = _state.value.loras[l.modelId]
+        _state.update { s -> s.copy(loras = s.loras + (l.modelId to l)) }
+        if (prev?.state == "training" && l.state == "ready") onLoraReady?.invoke(_state.value.model(l.modelId), l)
     }
 
     private inline fun <T> List<T>.upsert(item: T, match: (T) -> Boolean): List<T> =
@@ -168,6 +188,47 @@ class MuseRepository(
     suspend fun topUp(amount: Double, method: String) = attempt { topUp(TopUpRequest(amount, method)) }?.also { b -> _state.update { it.copy(balance = b) } }
 
     suspend fun setFailNext(fail: Boolean) = attempt { setFailNext(fail) }
+
+    suspend fun runQueue() = attempt { runQueue() }?.also { started ->
+        _state.update { s -> started.fold(s.jobs) { acc, j -> acc.upsert(j) { it.id == j.id } }.let { s.copy(jobs = it.sortedByDescending { j -> j.createdAt }) } }
+        refreshBalance()
+    }
+
+    // ---- models
+    suspend fun updateModel(id: String, req: UpdateModelRequest) = attempt { updateModel(id, req) }?.also { m -> _state.update { s -> s.copy(models = s.models.upsert(m) { it.id == m.id }) } }
+
+    suspend fun deleteModel(id: String) = attempt { deleteModel(id) }?.also {
+        _state.update { s ->
+            s.copy(models = s.models.filterNot { it.id == id }, outfits = s.outfits.filterNot { it.modelId == id }, loras = s.loras - id, accounts = s.accounts - id,
+                posts = s.posts.filterNot { it.modelId == id && !it.out })
+        }
+    }
+
+    // ---- Identity LoRA
+    suspend fun buildLoraSet(modelId: String) = attempt { buildLoraSet(modelId) }?.also { putLora(it); refreshBalance() }
+
+    /** Optimistic: the tile flips at once, then the server's copy replaces it. */
+    suspend fun keepCandidate(modelId: String, cid: String, keep: Boolean): Lora? {
+        val l = _state.value.lora(modelId)
+        putLora(l.copy(candidates = l.candidates.map { if (it.id == cid) it.copy(keep = keep) else it }))
+        return attempt { keepCandidate(modelId, cid, keep) }?.also { putLora(it) } ?: run { putLora(l); null }
+    }
+
+    suspend fun trainLora(modelId: String) = attempt { trainLora(modelId) }?.also { putLora(it); refreshBalance() }
+    suspend fun setLoraUse(modelId: String, use: Boolean) = attempt { patchLora(modelId, PatchLoraRequest(use = use)) }?.also { putLora(it) }
+    suspend fun retrainLora(modelId: String) = attempt { patchLora(modelId, PatchLoraRequest(state = "review")) }?.also { putLora(it) }
+
+    // ---- accounts and posts
+    suspend fun connect(modelId: String, platform: String) = attempt { connectAccount(modelId, platform) }?.also { r ->
+        r.account?.let { a -> _state.update { s -> s.copy(accounts = s.accounts + (modelId to (s.accountsOf(modelId).filterNot { it.platform == a.platform } + a))) } }
+    }
+
+    suspend fun disconnect(modelId: String, platform: String) = attempt { disconnectAccount(modelId, platform) }?.also {
+        _state.update { s -> s.copy(accounts = s.accounts + (modelId to s.accountsOf(modelId).filterNot { it.platform == platform })) }
+    }
+
+    suspend fun createPost(req: CreatePostRequest) = attempt { createPost(req) }?.also { p -> _state.update { s -> s.copy(posts = s.posts.upsert(p) { it.id == p.id }) } }
+    suspend fun deletePost(id: String) = attempt { deletePost(id) }?.also { _state.update { s -> s.copy(posts = s.posts.filterNot { it.id == id }) } }
 
     private suspend fun refreshBalance() {
         runCatching { api.balance() }.onSuccess { b -> _state.update { it.copy(balance = b) } }

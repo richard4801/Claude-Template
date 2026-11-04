@@ -32,6 +32,10 @@ To use the server from the app, open Settings → Developer and turn off "In-app
 
 Developer settings also include "Fast · beta engine (Viggle)", which flags Fast · beta on or off, and "Next render fails", which demos the refund, Retry and failure notification.
 
+## Identity LoRA and social accounts
+- **Identity LoRA** (`plans/lora-training.md`): Profile → Identity LoRA. Build the 30-shot training set ($0.60), keep or drop shots (flagged ones start dropped, 20+ needed), then train both LoRAs ($6.65, blocked when the balance is too low). Training runs 120× faster in the demo and ends with a notification and a toast. When it's on, `PromptEngine` adds "+ LoRA sienna_v1 (photo)" to the identity layer and "with LoRA sienna_v1 video" to the H3 prompt.
+- **Accounts and posting** (`plans/socials.md`): Profile → Accounts connects TikTok, Instagram, Facebook, YouTube and X per model (the mock signs in after a short delay). Result → Post picks accounts, caption, the "Mark as AI-generated" and "Paid partnership" toggles (both off until the user turns them on) and Now or Schedule. Stage 1: "Now" copies the caption and sends `ACTION_SEND` to the platform's app (or the chooser when it isn't installed); the mock has no video file, so the take's still is shared as a placeholder. "Schedule" sets an inexact local alarm whose notification opens the same handoff. Alarms don't survive a reboot. Posts lists Scheduled and Posted with stats.
+
 ## Layout
 - `core/`: a pure Kotlin module (no Android) with `PromptEngine` (the layered prompt system in `plans/prompt-system.md`) and `Pricing` (steps 4–30, time and cost). Its tests use fixtures generated from the prototype's JS.
 - `app/data/`: the `MuseApi` interface, `FakeMuseApi` (in-process), `HttpMuseApi` (Retrofit + OkHttp SSE), the repository, DataStore prefs and the cross-screen drafts.

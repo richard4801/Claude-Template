@@ -70,6 +70,16 @@ object Pricing {
     /** Character sheet: fill one missing angle from the user's images. */
     const val FILL_ANGLE_COST = 0.02
 
+    // Identity LoRA (plans/lora-training.md). Estimates until one real training run is measured.
+    const val LORA_SET_COST = 0.60
+    const val LORA_CANDIDATES = 30
+    const val LORA_MIN_KEEP = 20
+    const val LORA_PHOTO_MIN = 25
+    const val LORA_VIDEO_MIN = 75
+    val loraTrainMinutes: Int get() = LORA_PHOTO_MIN + LORA_VIDEO_MIN
+    /** Photo + video training at the GPU rate, rounded to cents: (25 + 75) / 60 × 3.99 = $6.65. */
+    val loraTrainCost: Double get() = Math.round(loraTrainMinutes / 60.0 * GPU_PER_HOUR * 100) / 100.0
+
     /** Seconds per denoising step for a clip of [len] seconds. */
     fun secPerLen(len: Double): Double = SEC_PER_STEP_5S * (len / BASE_LEN).pow(1.3)
 

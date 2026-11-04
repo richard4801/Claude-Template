@@ -64,6 +64,10 @@ class Drafts {
     val freshShots = MutableStateFlow(0)
     /** Failed-job cards the user has dealt with (Retry). */
     val dismissedFails = MutableStateFlow(emptySet<String>())
+    /** Posts screen tab: scheduled | posted. */
+    val postsTab = MutableStateFlow("scheduled")
+    /** Starts the Post sheet in Schedule mode once (used by the Posts empty state and screenshot tests). */
+    val postStartScheduled = MutableStateFlow(false)
 
     /** Loads a past job's settings (Retry / Run again with same settings). */
     fun loadJob(job: Job) {

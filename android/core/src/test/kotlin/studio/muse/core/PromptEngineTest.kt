@@ -134,4 +134,27 @@ class PromptEngineTest {
         assertEquals(a.seed, b.seed)
         assertNull(PromptEngine.photoshoot(ShootSpec(sienna, OutfitSpec("Green set"))).seed)
     }
+
+    @Test fun loraTokenUsesTheFirstNameAndVersion() {
+        assertEquals("sienna_v1", LoraToken.of("Sienna Vale", 1))
+        assertEquals("noor_v3", LoraToken.of("  Noor Ellis", 3))
+    }
+
+    /** prototype features.js: the identity layer names the LoRA when it's on. */
+    @Test fun identityLayerAddsThePhotoLoraWhenOn() {
+        val on = PromptEngine.photoshoot(ShootSpec(sienna.copy(lora = LoraToken.of("Sienna Vale", 2)), OutfitSpec("Green set")))
+        assertTrue(on[Layer.IDENTITY]!!.endsWith("Identity from 6 locked reference images + LoRA sienna_v2 (photo)."))
+        val off = PromptEngine.photoshoot(ShootSpec(sienna, OutfitSpec("Green set")))
+        assertTrue(off[Layer.IDENTITY]!!.endsWith("Identity from 6 locked reference images."))
+        assertFalse(off.text.contains("LoRA"))
+        val sheet = PromptEngine.characterSheetShot(sienna.copy(lora = "sienna_v1"), SheetAngle.BODY_FRONT)
+        assertTrue(sheet[Layer.IDENTITY]!!.contains("+ LoRA sienna_v1 (photo)"))
+    }
+
+    @Test fun h3PromptAddsTheVideoLoraWhenOn() {
+        val on = PromptEngine.videoSwap(VideoSwapSpec(sienna.copy(lora = "sienna_v1"), OutfitSpec("Green set"))).text
+        assertTrue(on, on.contains("<Image 6> (body, back), with LoRA sienna_v1 video.\n<Video 1>"))
+        assertFalse(on.contains("(photo)"))
+        assertFalse(PromptEngine.videoSwap(VideoSwapSpec(sienna, OutfitSpec("Green set"))).text.contains("LoRA"))
+    }
 }

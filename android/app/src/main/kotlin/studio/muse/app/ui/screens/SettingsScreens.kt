@@ -66,12 +66,16 @@ import studio.muse.app.ui.theme.muse
 import studio.muse.core.Pricing
 import studio.muse.core.RenderSpec
 
-data class SettingsState(val prefs: AppPrefs = AppPrefs(), val balance: Balance = Balance(0.0, 0.0), val videos: Int = 0, val failNext: Boolean = false)
+data class SettingsState(
+    val prefs: AppPrefs = AppPrefs(), val balance: Balance = Balance(0.0, 0.0), val videos: Int = 0, val failNext: Boolean = false,
+    val modelName: String = "Sienna", val connected: Int = 0, val scheduled: Int = 0,
+)
 
 class SettingsViewModel(private val c: AppContainer) : ViewModel() {
     private val failNext = kotlinx.coroutines.flow.MutableStateFlow(false)
-    val state: StateFlow<SettingsState> = combine(c.prefs, c.repo.state, failNext) { p, s, f ->
-        SettingsState(p, s.balance, s.jobs.count { it.done } + 9, f)
+    val state: StateFlow<SettingsState> = combine(c.prefs, c.repo.state, failNext, c.drafts.modelId) { p, s, f, mid ->
+        val m = s.model(mid) ?: s.models.firstOrNull()
+        SettingsState(p, s.balance, s.jobs.count { it.done } + 9, f, m?.name?.split(" ")?.first() ?: "Model", s.accountsOf(m?.id).size, s.posts.count { it.scheduled })
     }.stateIn(viewModelScope, SharingStarted.Eagerly, SettingsState(c.prefs.value))
 
     private fun upd(f: (AppPrefs) -> AppPrefs) = viewModelScope.launch { c.prefsStore.update(f) }
@@ -128,6 +132,8 @@ fun SettingsScreen() {
                     Li("bell", "Render notifications", onClick = {
                         if (!notifOn && Build.VERSION.SDK_INT >= 33) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) else vm.toast(if (notifOn) "Notifications are on" else "Turn on notifications in system settings")
                     }) { Tiny(if (notifOn) "On" else "Off") }
+                    Li("export", "${s.modelName}'s accounts", onClick = { nav.go(Routes.ACCOUNTS) }) { Tiny("${s.connected}/5"); Ic("chev", 16.dp) }
+                    Li("queue", "Scheduled posts", onClick = { nav.go(Routes.POSTS) }) { Tiny("${s.scheduled}"); Ic("chev", 16.dp) }
                     Li("wallet", "Credits & billing", onClick = { nav.go(Routes.CREDITS) }) { Tiny(Pricing.money(s.balance.balance)); Ic("chev", 16.dp) }
                     Li("user", "Sign out", onClick = { vm.signOut { nav.reset(Routes.WELCOME) } }) { Ic("chev", 16.dp) }
                 }
@@ -181,7 +187,7 @@ fun ThemePreview(t: ThemeId, modifier: Modifier) {
 }
 
 @Composable
-private fun ListGroup(content: @Composable ColumnScope.() -> Unit) {
+fun ListGroup(content: @Composable ColumnScope.() -> Unit) {
     val m = muse
     val shape = RoundedCornerShape(m.t.r)
     var mod = Modifier.fillMaxWidth()
@@ -194,7 +200,7 @@ private fun ListGroup(content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-private fun Li(icon: String, label: String, onClick: () -> Unit, trailing: @Composable () -> Unit) {
+fun Li(icon: String, label: String, onClick: () -> Unit, trailing: @Composable () -> Unit) {
     val m = muse
     Row(
         Modifier.fillMaxWidth().height(54.dp).drawBehind { drawLine(m.t.line, Offset(0f, size.height), Offset(size.width, size.height), m.t.stroke.toPx()) }

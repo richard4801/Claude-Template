@@ -43,6 +43,10 @@ class FakeMuseApi(
     private var balance = SampleData.balance()
     private var failNext = false
     private val runners = mutableMapOf<String, CoJob>()
+    private val loras = mutableMapOf<String, Lora>()
+    private val accounts = mutableMapOf<String, MutableMap<String, Account>>()
+    private val posts = mutableListOf<Post>()
+    private val postTimers = mutableMapOf<String, CoJob>()
 
     override fun events(): Flow<ApiEvent> = events
     override fun setToken(token: String?) {}
@@ -106,7 +110,7 @@ class FakeMuseApi(
             charge(cost)
             val m = model(req.modelId)
             val spec = OutfitSpec(req.name, req.description, if (req.mode == "describe") OutfitSource.DESCRIBED else if (req.mode == "photo") OutfitSource.PRODUCT_PHOTO else OutfitSource.REFERENCE_SET)
-            val prompt = PromptEngine.outfitSet(identity(m), spec).first().text
+            val prompt = PromptEngine.outfitSet(identity(m, loras[m.id]), spec).first().text
             val o = Outfit("o_" + uid(), req.modelId, req.name.ifBlank { "New outfit" }, req.mode, req.description, listOf(null, null, null, null), "generating", prompt)
             outfits += o
             o
@@ -172,8 +176,15 @@ class FakeMuseApi(
             val m = model(req.modelId)
             val o = outfits.firstOrNull { it.id == req.outfitId }
             val seed = (1000..99999).random().toLong()
+            if (req.queue) {
+                val q = Job("j_" + uid(), req.title, m.id, m.name, req.outfitId, req, "queued", 0.0, 1, 0, JobClock.progress(req, 0.0).totalSteps, "Queued", Pricing.totalSeconds(spec),
+                    Pricing.totalSeconds(spec), cost, createdAt = now(), seed = seed, thumb = o?.front ?: m.cover,
+                    prompt = PromptEngine.videoSwap(VideoSwapSpec(identity(m, loras[m.id]), OutfitSpec(o?.name ?: "outfit"), SourcePerformer(), req.keepAudio, req.background == "keep", req.backgroundMotion, req.steps, seed)).text)
+                jobs += q
+                return@withLock q
+            }
             val prompt = PromptEngine.videoSwap(
-                VideoSwapSpec(identity(m), OutfitSpec(o?.name ?: "outfit"), SourcePerformer(), req.keepAudio, req.background == "keep", req.backgroundMotion, req.steps, seed),
+                VideoSwapSpec(identity(m, loras[m.id]), OutfitSpec(o?.name ?: "outfit"), SourcePerformer(), req.keepAudio, req.background == "keep", req.backgroundMotion, req.steps, seed),
             ).text
             charge(cost)
             val p = JobClock.progress(req, 0.0)
@@ -184,11 +195,218 @@ class FakeMuseApi(
             jobs += j
             j
         }
+        if (job.state == "queued") { events.tryEmit(ApiEvent("job", job = job)); return job }
         events.tryEmit(ApiEvent("balance", balance = balance))
         events.tryEmit(ApiEvent("job", job = job))
         run(job)
         return job
     }
+
+    override suspend fun runQueue(): List<Job> {
+        val started = lock.withLock {
+            val queued = jobs.filter { it.state == "queued" }.sortedBy { it.createdAt }
+            val out = mutableListOf<Job>()
+            for (q in queued) {
+                if (q.cost > balance.balance + 1e-9) break
+                charge(q.cost)
+                val p = JobClock.progress(q.request, 0.0)
+                val r = q.copy(state = "running", phase = p.phase, secondsLeft = p.secondsLeft)
+                replaceJob(r)
+                out += r
+            }
+            if (queued.isNotEmpty() && out.isEmpty()) throw ApiException("insufficient_balance", "Not enough balance · top up in Credits")
+            out
+        }
+        if (started.isNotEmpty()) events.tryEmit(ApiEvent("balance", balance = balance))
+        started.forEach { events.tryEmit(ApiEvent("job", job = it)); run(it) }
+        return started
+    }
+
+    // ---------------------------------------------------------------- models: edit / delete
+
+    override suspend fun updateModel(modelId: String, req: UpdateModelRequest): Model {
+        if (req.name != null && req.name.isBlank()) throw ApiException("bad_request", "Give her a name")
+        val m = lock.withLock {
+            val m0 = model(modelId)
+            val m = m0.copy(
+                name = req.name ?: m0.name, niche = req.niche ?: m0.niche, personality = req.personality ?: m0.personality, notes = req.notes ?: m0.notes,
+                neverAdd = req.neverAdd?.map { it.trim() }?.filter { it.isNotEmpty() } ?: m0.neverAdd,
+            )
+            replaceModel(m)
+            m
+        }
+        events.tryEmit(ApiEvent("model", model = m))
+        return m
+    }
+
+    override suspend fun deleteModel(modelId: String) {
+        lock.withLock {
+            model(modelId)
+            models.removeAll { it.id == modelId }
+            outfits.removeAll { it.modelId == modelId }
+            loras.remove(modelId); runners.remove("lora_$modelId")?.cancel()
+            accounts.remove(modelId)
+            posts.filter { it.modelId == modelId && !it.out }.forEach { postTimers.remove(it.id)?.cancel() }
+            posts.removeAll { it.modelId == modelId && !it.out }
+        }
+    }
+
+    // ---------------------------------------------------------------- Identity LoRA
+
+    override suspend fun lora(modelId: String): Lora = lock.withLock { loraOf(modelId) }
+
+    override suspend fun buildLoraSet(modelId: String): Lora {
+        val l = lock.withLock {
+            val l0 = loraOf(modelId)
+            if (l0.state == "building" || l0.state == "training") throw ApiException("busy", "Already working on it")
+            if (Pricing.LORA_SET_COST > balance.balance + 1e-9) throw ApiException("insufficient_balance", "Not enough balance · top up in Credits")
+            charge(Pricing.LORA_SET_COST)
+            l0.copy(state = "building", candidates = emptyList(), progress = 0.0, cost = Pricing.LORA_SET_COST).also { loras[modelId] = it }
+        }
+        events.tryEmit(ApiEvent("balance", balance = balance))
+        scope.launch {
+            delay(genDelayMs)
+            val r = lock.withLock {
+                val cur = loras[modelId] ?: return@launch
+                if (cur.state != "building") return@launch
+                cur.copy(state = "review", candidates = LoraSim.candidates()).also { loras[modelId] = it }
+            }
+            events.emit(ApiEvent("lora", lora = r))
+        }
+        return l
+    }
+
+    override suspend fun keepCandidate(modelId: String, candidateId: String, keep: Boolean): Lora = lock.withLock {
+        val l = loraOf(modelId)
+        if (l.candidates.none { it.id == candidateId }) throw ApiException("not_found", "Candidate not found")
+        if (l.state == "training") throw ApiException("busy", "Training is running")
+        l.copy(candidates = l.candidates.map { if (it.id == candidateId) it.copy(keep = keep) else it }).also { loras[modelId] = it }
+    }
+
+    override suspend fun trainLora(modelId: String): Lora {
+        val cost = Pricing.loraTrainCost
+        val l = lock.withLock {
+            val l0 = loraOf(modelId)
+            if (l0.state !in setOf("review", "ready") || l0.candidates.isEmpty()) throw ApiException("bad_request", "Build the training set first")
+            if (l0.kept < Pricing.LORA_MIN_KEEP) throw ApiException("bad_request", "Keep at least ${Pricing.LORA_MIN_KEEP} shots so the LoRA learns her well")
+            if (cost > balance.balance + 1e-9) throw ApiException("insufficient_balance", "Not enough balance · top up in Credits")
+            charge(cost)
+            val p = LoraSim.parts(0.0)
+            l0.copy(state = "training", progress = 0.0, photo = p.first, video = p.second, cost = l0.cost + cost).also { loras[modelId] = it }
+        }
+        events.tryEmit(ApiEvent("balance", balance = balance))
+        events.tryEmit(ApiEvent("lora", lora = l))
+        if (speed > 0) runners["lora_$modelId"] = scope.launch {
+            val t0 = now()
+            val total = Pricing.loraTrainMinutes * 60.0
+            while (true) {
+                delay(250)
+                val pr = ((now() - t0) / 1000.0 * speed * LoraSim.SPEEDUP / total * 100).coerceAtMost(100.0)
+                val upd = lock.withLock {
+                    val cur = loras[modelId]?.takeIf { it.state == "training" } ?: return@launch
+                    val (ph, vi) = LoraSim.parts(pr)
+                    val u = if (pr >= 100) cur.copy(state = "ready", progress = 100.0, photo = ph, video = vi, version = cur.version + 1, trainedOn = cur.kept)
+                    else cur.copy(progress = pr, photo = ph, video = vi)
+                    loras[modelId] = u
+                    u
+                }
+                events.emit(ApiEvent("lora", lora = upd))
+                if (upd.state == "ready") break
+            }
+        }
+        return l
+    }
+
+    override suspend fun patchLora(modelId: String, req: PatchLoraRequest): Lora {
+        val l = lock.withLock {
+            var l = loraOf(modelId)
+            if (req.use != null) l = l.copy(use = req.use)
+            if (req.state == "review") {
+                if (l.state != "ready") throw ApiException("bad_request", "Nothing to retrain yet")
+                l = l.copy(state = "review")
+            }
+            loras[modelId] = l
+            l
+        }
+        events.tryEmit(ApiEvent("lora", lora = l))
+        return l
+    }
+
+    // ---------------------------------------------------------------- social accounts and posts
+
+    override suspend fun listAccounts(modelId: String): List<Account> = lock.withLock {
+        model(modelId)
+        val a = accounts[modelId].orEmpty()
+        Platform.entries.mapNotNull { a[it.id] }
+    }
+
+    override suspend fun connectAccount(modelId: String, platform: String): ConnectResponse {
+        val p = Platform.of(platform) ?: throw ApiException("bad_request", "Unknown platform $platform")
+        lock.withLock { model(modelId) }
+        delay(minOf(genDelayMs, 900)) // "Signing in…"
+        return lock.withLock {
+            val m = model(modelId)
+            val a = Account(modelId, p.id, LoraSim.handle(p, m.name), now())
+            accounts.getOrPut(modelId) { mutableMapOf() }[p.id] = a
+            ConnectResponse(account = a)
+        }
+    }
+
+    override suspend fun disconnectAccount(modelId: String, platform: String) {
+        lock.withLock { accounts[modelId]?.remove(platform) }
+    }
+
+    override suspend fun listPosts(state: String?): List<Post> = lock.withLock { posts.filter { state == null || it.state == state } }
+
+    override suspend fun createPost(req: CreatePostRequest): Post {
+        val post = lock.withLock {
+            val m = model(req.modelId)
+            val t = takes.firstOrNull { it.id == req.takeId } ?: throw ApiException("not_found", "Take not found")
+            val platforms = req.platforms.distinct()
+            if (platforms.isEmpty()) throw ApiException("bad_request", "Pick at least one account")
+            platforms.forEach { if (Platform.of(it) == null) throw ApiException("bad_request", "Unknown platform $it") }
+            platforms.firstOrNull { accounts[m.id]?.containsKey(it) != true }?.let { throw ApiException("bad_request", "Connect $it first") }
+            val at = if (req.`when` == "now") now() else runCatching { java.time.Instant.parse(req.`when`).toEpochMilli() }.getOrNull()
+                ?: throw ApiException("bad_request", "when must be \"now\" or an ISO time")
+            val p = Post("p_" + uid(), m.id, t.id, t.title, t.thumb, platforms, req.caption, req.aiLabel, req.paidPartnership, req.`when`, "scheduled", now())
+            posts.add(0, p)
+            p to at
+        }
+        val (p, at) = post
+        if (p.`when` == "now") return handoff(p)
+        postTimers[p.id] = scope.launch {
+            delay((at - now()).coerceAtLeast(0))
+            val cur = lock.withLock { posts.firstOrNull { it.id == p.id && it.scheduled } } ?: return@launch
+            handoff(cur)
+        }
+        return p
+    }
+
+    /** Stage 1: the app opens each platform; then the mock "reads back" stats. */
+    private suspend fun handoff(p: Post): Post {
+        val h = lock.withLock { p.copy(state = "handoff").also { replacePost(it) } }
+        events.tryEmit(ApiEvent("post", post = h))
+        postTimers[p.id] = scope.launch {
+            delay(genDelayMs)
+            val done = lock.withLock {
+                if (posts.none { it.id == p.id }) return@launch
+                val views = 1240L + (0..900).random()
+                h.copy(state = "posted", postedAt = now(), stats = PostStats(views, views * 11 / 100, views * 8 / 1000)).also { replacePost(it) }
+            }
+            events.emit(ApiEvent("post", post = done))
+        }
+        return h
+    }
+
+    override suspend fun deletePost(postId: String) {
+        lock.withLock { posts.removeAll { it.id == postId } }
+        postTimers.remove(postId)?.cancel()
+    }
+
+    /** Test hooks: put the LoRA, an account or a post in a fixed state. */
+    suspend fun debugPutLora(l: Lora) = lock.withLock { loras[l.modelId] = l }
+    suspend fun debugPutAccount(a: Account) = lock.withLock { accounts.getOrPut(a.modelId) { mutableMapOf() }[a.platform] = a }
+    suspend fun debugPutPost(p: Post) = lock.withLock { posts.removeAll { it.id == p.id }; posts.add(p) }
 
     private fun run(job: Job) {
         if (speed <= 0) return
@@ -296,11 +514,11 @@ class FakeMuseApi(
 
     // ---- helpers (call under lock) ----
     private fun charge(cost: Double) {
-        balance = balance.copy(balance = (balance.balance - cost).coerceAtLeast(0.0), month = balance.month + cost)
+        balance = balance.copy(balance = (balance.balance - cost).coerceAtLeast(0.0), month = balance.month + cost, today = balance.today + cost)
     }
 
     private fun refund(cost: Double) {
-        balance = balance.copy(balance = balance.balance + cost, month = (balance.month - cost).coerceAtLeast(0.0))
+        balance = balance.copy(balance = balance.balance + cost, month = (balance.month - cost).coerceAtLeast(0.0), today = (balance.today - cost).coerceAtLeast(0.0))
     }
 
     private fun model(id: String) = models.firstOrNull { it.id == id } ?: throw ApiException("not_found", "Model not found")
@@ -308,9 +526,12 @@ class FakeMuseApi(
     private fun replaceModel(m: Model) { models[models.indexOfFirst { it.id == m.id }] = m }
     private fun replaceOutfit(o: Outfit) { outfits[outfits.indexOfFirst { it.id == o.id }] = o }
     private fun replaceJob(j: Job) { jobs[jobs.indexOfFirst { it.id == j.id }] = j }
+    private fun replacePost(p: Post) { posts.indexOfFirst { it.id == p.id }.takeIf { it >= 0 }?.let { posts[it] = p } }
+    private fun loraOf(modelId: String): Lora { model(modelId); return loras.getOrPut(modelId) { Lora(modelId) } }
     private fun uid() = UUID.randomUUID().toString().take(8)
 
     companion object {
-        fun identity(m: Model) = Identity(m.name, m.look.ifBlank { "${m.age}-year-old woman" }, m.filled.coerceAtLeast(1), m.neverAdd)
+        /** The prompt identity; names her Identity LoRA when it's trained and switched on. */
+        fun identity(m: Model, lora: Lora? = null) = Identity(m.name, m.look.ifBlank { "${m.age}-year-old woman" }, m.filled.coerceAtLeast(1), m.neverAdd, lora?.token(m.name))
     }
 }

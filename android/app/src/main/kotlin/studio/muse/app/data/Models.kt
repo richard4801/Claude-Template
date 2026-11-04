@@ -49,6 +49,8 @@ data class Model(
     val neverAdd: List<String> = emptyList(),
     val slots: List<SheetSlot> = emptyList(),
     val outfitIds: List<String> = emptyList(),
+    val personality: String? = null,
+    val notes: String? = null,
 ) {
     val filled: Int get() = slots.count { it.image != null && !it.busy }
     val locked: Boolean get() = filled == 6
@@ -125,6 +127,8 @@ data class JobRequest(
     val background: String = "keep",
     val backgroundMotion: String = "subtle",
     val clipSeconds: Double? = null,
+    /** true parks the job as "queued" (not charged) until [MuseApi.runQueue]. */
+    val queue: Boolean = false,
 ) {
     fun spec() = RenderSpec(Engine.fromId(engine), ClipUse.fromId(use), steps, lipSync, takes, clipSeconds)
 }
@@ -193,7 +197,7 @@ data class SetTakeStatusRequest(val status: String)
 data class ShootRequest(val modelId: String, val outfitId: String, val scene: String, val prompt: String, val seed: Long? = null, val count: Int = 4)
 
 @Serializable
-data class Balance(val balance: Double, val month: Double, val perJobLimit: Double = 5.0, val perDayLimit: Double = 15.0, val videos: Int = 0)
+data class Balance(val balance: Double, val month: Double, val today: Double = 0.0, val perJobLimit: Double = 5.0, val perDayLimit: Double = 15.0, val videos: Int = 0)
 
 @Serializable
 data class TopUpRequest(val amount: Double, val method: String = "card")
@@ -201,7 +205,7 @@ data class TopUpRequest(val amount: Double, val method: String = "card")
 @Serializable
 data class FillAnglesResponse(val model: Model, val cost: Double)
 
-/** Server-sent event on /v1/events. type: job | balance | model | outfit */
+/** Server-sent event on /v1/events. type: job | balance | model | outfit | lora | post */
 @Serializable
 data class ApiEvent(
     val type: String,
@@ -209,7 +213,120 @@ data class ApiEvent(
     val balance: Balance? = null,
     val model: Model? = null,
     val outfit: Outfit? = null,
+    val lora: Lora? = null,
+    val post: Post? = null,
     val takes: List<Take> = emptyList(),
+)
+
+/** PATCH /v1/models/{id}: only the fields sent change. */
+@Serializable
+data class UpdateModelRequest(
+    val name: String? = null,
+    val niche: String? = null,
+    val personality: String? = null,
+    val notes: String? = null,
+    val neverAdd: List<String>? = null,
+)
+
+// ---------------------------------------------------------------- Identity LoRA (plans/lora-training.md)
+
+/** One training-set candidate. Flagged ones (tattoo, ring, choker, face drift) start dropped, but the user can keep them. */
+@Serializable
+data class LoraCandidate(val id: String, val image: ImageRef, val label: String = "", val flag: String? = null, val keep: Boolean = true)
+
+/** One of the two trainings. state: none | waiting | training | ready */
+@Serializable
+data class LoraPart(val state: String = "none", val progress: Double = 0.0)
+
+/**
+ * A model's Identity LoRA. state: none | building | review | training | ready | failed.
+ * [version] is the last ready version (0 = never trained). It is applied when version ≥ 1 and [use] is on, also during a retrain.
+ */
+@Serializable
+data class Lora(
+    val modelId: String,
+    val version: Int = 0,
+    val state: String = "none",
+    val use: Boolean = true,
+    val candidates: List<LoraCandidate> = emptyList(),
+    val progress: Double = 0.0,
+    val photo: LoraPart = LoraPart(),
+    val video: LoraPart = LoraPart(),
+    val cost: Double = 0.0,
+    val trainedOn: Int? = null,
+) {
+    val kept: Int get() = candidates.count { it.keep }
+    val flagged: Int get() = candidates.count { it.flag != null }
+    val active: Boolean get() = version > 0 && use
+    fun token(modelName: String): String? = if (active) studio.muse.core.LoraToken.of(modelName, version) else null
+}
+
+@Serializable
+data class KeepRequest(val keep: Boolean)
+
+@Serializable
+data class PatchLoraRequest(val use: Boolean? = null, val state: String? = null)
+
+// ---------------------------------------------------------------- Social accounts and posts (plans/socials.md)
+
+/** The five platforms, in display order. Badges are coloured rounded squares with letters, not brand logos. */
+enum class Platform(val id: String, val label: String, val badge: String, val color: Long, val androidPackages: List<String>) {
+    TIKTOK("tiktok", "TikTok", "TT", 0xFF111111, listOf("com.zhiliaoapp.musically", "com.ss.android.ugc.trill")),
+    INSTAGRAM("instagram", "Instagram", "IG", 0xFFD62976, listOf("com.instagram.android")),
+    FACEBOOK("facebook", "Facebook", "f", 0xFF1877F2, listOf("com.facebook.katana")),
+    YOUTUBE("youtube", "YouTube", "YT", 0xFFFF0000, listOf("com.google.android.youtube")),
+    X("x", "X", "X", 0xFF111111, listOf("com.twitter.android"));
+
+    companion object {
+        fun of(id: String): Platform? = entries.firstOrNull { it.id == id }
+    }
+}
+
+/** A model's linked account. canPostDirect stays false until that platform approves MUSE (stage 2). */
+@Serializable
+data class Account(val modelId: String, val platform: String, val handle: String, val connectedAt: Long = 0, val canPostDirect: Boolean = false)
+
+/** The real backend returns an OAuth [authUrl]; the mock signs in and returns the [account]. */
+@Serializable
+data class ConnectResponse(val authUrl: String? = null, val account: Account? = null)
+
+@Serializable
+data class PostStats(val views: Long = 0, val likes: Long = 0, val comments: Long = 0)
+
+/** state: scheduled | handoff | posted | failed. when: "now" or an ISO-8601 time. */
+@Serializable
+data class Post(
+    val id: String,
+    val modelId: String,
+    val takeId: String,
+    val title: String = "",
+    val thumb: ImageRef? = null,
+    val platforms: List<String> = emptyList(),
+    val caption: String = "",
+    val aiLabel: Boolean = false,
+    val paidPartnership: Boolean = false,
+    val `when`: String = "now",
+    val state: String = "scheduled",
+    val createdAt: Long = 0,
+    val postedAt: Long? = null,
+    val stats: PostStats? = null,
+) {
+    val scheduled get() = state == "scheduled"
+    /** The Posted tab: handed off (stage 1) or posted. */
+    val out get() = state == "handoff" || state == "posted"
+    val whenMillis: Long? get() = if (`when` == "now") null else runCatching { java.time.Instant.parse(`when`).toEpochMilli() }.getOrNull()
+}
+
+/** Labels default to false and are only ever set by the user. */
+@Serializable
+data class CreatePostRequest(
+    val modelId: String,
+    val takeId: String,
+    val platforms: List<String>,
+    val caption: String,
+    val aiLabel: Boolean = false,
+    val paidPartnership: Boolean = false,
+    val `when`: String = "now",
 )
 
 @Serializable

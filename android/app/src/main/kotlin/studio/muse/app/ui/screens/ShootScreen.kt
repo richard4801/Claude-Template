@@ -77,7 +77,7 @@ class ShootViewModel(private val c: AppContainer) : ViewModel() {
         val model = s.model(mid)?.takeIf { it.locked } ?: s.models.firstOrNull { it.locked }
         val outfits = s.outfitsOf(model?.id)
         val outfit = outfits.firstOrNull { it.id == oid } ?: outfits.firstOrNull()
-        val prompt = model?.let { buildPrompt(it, outfit, d) }
+        val prompt = model?.let { buildPrompt(it, outfit, d, s.loras[it.id]) }
         ShootState(d, model, s.models, outfits, outfit, prompt, ph)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, ShootState())
 
@@ -102,8 +102,8 @@ class ShootViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     companion object {
-        fun buildPrompt(m: Model, o: Outfit?, d: ShootDraft): BuiltPrompt = PromptEngine.photoshoot(
-            ShootSpec(FakeMuseApi.identity(m), OutfitSpec(o?.name ?: "outfit"), d.scene, CameraSpec(d.shot, d.lens, d.aperture), d.light, d.grade, d.direction, d.lockSeed),
+        fun buildPrompt(m: Model, o: Outfit?, d: ShootDraft, lora: studio.muse.app.data.Lora? = null): BuiltPrompt = PromptEngine.photoshoot(
+            ShootSpec(FakeMuseApi.identity(m, lora), OutfitSpec(o?.name ?: "outfit"), d.scene, CameraSpec(d.shot, d.lens, d.aperture), d.light, d.grade, d.direction, d.lockSeed),
         )
     }
 }

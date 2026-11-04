@@ -56,7 +56,7 @@ object SampleData {
         Take("t_g6", "shot", null, 1, 1, "Shoot", "Shoot", "", 0.03, 0, "test", ImageRef.asset("c_tq"), createdAt = now - 97_000_000),
     )
 
-    fun balance() = Balance(balance = 6.07, month = 18.93, videos = 11)
+    fun balance() = Balance(balance = 6.07, month = 18.93, today = 0.13, videos = 11)
 
     /** The good sample clip and the failing-clip example (third-party footage is never bundled; thumbnails are placeholders). */
     val sampleMeta = ClipMeta("Living-room dance", 9.4, 1080, 1920, 30)
@@ -142,4 +142,40 @@ object JobClock {
     }
 
     fun clock(sec: Double) = formatClock(sec)
+}
+
+
+/** Identity LoRA and social-account rules shared with server/mock/sim.js. */
+object LoraSim {
+    /** LoRA training runs this much faster than renders in the demo (120× real time at the default 24×, like the prototype). */
+    const val SPEEDUP = 5.0
+
+    /** Only the bundled character reference images, cycled with labels (prototype features.js CAND_POOL). */
+    val POOL = listOf(
+        "g_front" to "Green set · front", "g_tq" to "Green set · ¾", "face" to "Close-up · window light", "c_front" to "Crystal dress · full",
+        "g_side" to "Green set · side", "profile" to "Profile · soft light", "c_tq" to "Crystal · ¾", "g_back" to "Back · physique",
+        "hero" to "Portrait · golden hour", "c_face" to "Close-up · choker",
+    )
+
+    /** 30 candidates; 3 are pre-flagged and start dropped. */
+    fun candidates(): List<LoraCandidate> = (0 until Pricing.LORA_CANDIDATES).map { i ->
+        val (asset, label) = POOL[i % POOL.size]
+        val flag = if (i in setOf(9, 19, 23)) (if (asset == "c_face") "choker" else "face drift") else null
+        LoraCandidate("c${i + 1}", ImageRef.asset(asset), label, flag, keep = flag == null)
+    }
+
+    /** Overall progress → (photo, video). Photo is the first 25 of 100 minutes. */
+    fun parts(p: Double): Pair<LoraPart, LoraPart> {
+        val split = 100.0 * Pricing.LORA_PHOTO_MIN / Pricing.loraTrainMinutes
+        val photo = (p / split * 100).coerceIn(0.0, 100.0)
+        val video = ((p - split) / (100 - split) * 100).coerceIn(0.0, 100.0)
+        return LoraPart(if (photo >= 100) "ready" else "training", photo) to
+            LoraPart(if (video >= 100) "ready" else if (video > 0) "training" else "waiting", video)
+    }
+
+    fun handle(p: Platform, name: String) = when (p) {
+        Platform.YOUTUBE -> name
+        Platform.FACEBOOK -> "$name (Page)"
+        else -> "@" + name.lowercase().trim().replace(Regex("\\s+"), ".")
+    }
 }

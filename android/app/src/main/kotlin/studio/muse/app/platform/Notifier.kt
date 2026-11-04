@@ -21,6 +21,9 @@ class Notifier(private val context: Context) {
     companion object {
         const val CHANNEL = "renders_v2" // v2: IMPORTANCE_HIGH (a channel's importance can't be raised after it exists)
         const val EXTRA_ROUTE = "muse.route"
+        /** Open the post handoff for this post id (scheduled post notification). */
+        const val EXTRA_HANDOFF = "muse.handoff"
+        const val CHANNEL_POSTS = "posts"
     }
 
     init {
@@ -31,6 +34,9 @@ class Notifier(private val context: Context) {
             ch.description = context.getString(R.string.channel_renders_desc)
             ch.enableVibration(true)
             nm?.createNotificationChannel(ch)
+            val posts = NotificationChannel(CHANNEL_POSTS, context.getString(R.string.channel_posts), NotificationManager.IMPORTANCE_HIGH)
+            posts.description = context.getString(R.string.channel_posts_desc)
+            nm?.createNotificationChannel(posts)
         }
     }
 
@@ -58,5 +64,39 @@ class Notifier(private val context: Context) {
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(job.id.hashCode(), n) }
+    }
+
+    private fun open(route: String, code: Int, handoff: String? = null): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(EXTRA_ROUTE, route)
+            handoff?.let { putExtra(EXTRA_HANDOFF, it) }
+        }
+        return PendingIntent.getActivity(context, code, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    }
+
+    private fun show(channel: String, id: Int, title: String, text: String, pi: PendingIntent) {
+        if (!canPost()) return
+        val n = NotificationCompat.Builder(context, channel)
+            .setSmallIcon(R.drawable.ic_stat_muse)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .build()
+        runCatching { NotificationManagerCompat.from(context).notify(id, n) }
+    }
+
+    /** Identity LoRA training finished. */
+    fun loraReady(modelName: String, version: Int) =
+        show(CHANNEL, "lora_$modelName".hashCode(), "Identity LoRA v$version is ready", "$modelName's face and physique are locked in for new photos and videos.", open("lora", "lora".hashCode()))
+
+    /** A scheduled post's time has come: tapping opens the handoff (each app with the caption ready). */
+    fun postDue(postId: String, title: String, platforms: List<String>) {
+        val names = platforms.mapNotNull { studio.muse.app.data.Platform.of(it)?.label }.joinToString(", ").ifEmpty { "your accounts" }
+        show(CHANNEL_POSTS, postId.hashCode(), "Time to post · $title", "Tap to open $names with the video and caption ready.", open("posts", postId.hashCode(), postId))
     }
 }

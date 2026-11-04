@@ -89,4 +89,11 @@ class RealClipPricingTest {
         assertEquals(3.0, RenderSpec(use = ClipUse.FIRST, clipSeconds = 3.0).lengthSec, 0.0)
         assertEquals(5.2, RenderSpec(use = ClipUse.FIRST, clipSeconds = 9.0).lengthSec, 0.0)
     }
+
+    @Test fun loraPricesMatchTheSpec() {
+        assertEquals("\$6.65", Pricing.money(Pricing.loraTrainCost))
+        assertEquals("\$0.60", Pricing.money(Pricing.LORA_SET_COST))
+        assertEquals("\$7.25", Pricing.money(Pricing.LORA_SET_COST + Pricing.loraTrainCost))
+        assertEquals(100, Pricing.loraTrainMinutes)
+    }
 }

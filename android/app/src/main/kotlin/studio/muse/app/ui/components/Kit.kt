@@ -544,17 +544,20 @@ private val ASSETS = mapOf(
     "c_front" to R.drawable.ref_c_front, "c_tq" to R.drawable.ref_c_tq, "c_face" to R.drawable.ref_c_face,
 )
 
+/** The drawable for a bundled sample image key, or null. */
+fun assetRes(key: String?): Int? = key?.let { ASSETS[it] }
+
 /** CSS `background-position: center Y%` as a Compose alignment. */
 fun topBias(pct: Int) = BiasAlignment(0f, pct / 50f - 1f)
 
 /** A reference image (bundled sample or uploaded). Crops to fill like `background-size: cover`. */
 @Composable
-fun RefImage(ref: ImageRef?, modifier: Modifier = Modifier, alignPct: Int = 15) {
+fun RefImage(ref: ImageRef?, modifier: Modifier = Modifier, alignPct: Int = 15, colorFilter: androidx.compose.ui.graphics.ColorFilter? = null) {
     val align = topBias(alignPct)
     val res = ref?.asset?.let { ASSETS[it] }
     when {
-        res != null -> Image(painterResource(res), null, modifier, alignment = align, contentScale = ContentScale.Crop)
-        ref?.url != null -> AsyncImage(ref.url, null, modifier.background(muse.t.surface2), alignment = align, contentScale = ContentScale.Crop)
+        res != null -> Image(painterResource(res), null, modifier, alignment = align, contentScale = ContentScale.Crop, colorFilter = colorFilter)
+        ref?.url != null -> AsyncImage(ref.url, null, modifier.background(muse.t.surface2), alignment = align, contentScale = ContentScale.Crop, colorFilter = colorFilter)
         else -> Box(modifier.background(muse.t.surface2))
     }
 }

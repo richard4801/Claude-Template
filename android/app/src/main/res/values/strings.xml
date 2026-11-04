@@ -2,4 +2,6 @@
     <string name="app_name">MUSE</string>
     <string name="channel_renders">Renders</string>
     <string name="channel_renders_desc">When a render finishes or fails</string>
+    <string name="channel_posts">Scheduled posts</string>
+    <string name="channel_posts_desc">When it\'s time to post a scheduled video</string>
 </resources>

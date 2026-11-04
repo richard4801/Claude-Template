@@ -122,4 +122,93 @@ class FakeMuseApiTest {
         assertEquals(6, after.filled)
         assertTrue(after.slots.all { it.source == "generated" })
     }
+
+    @Test fun loraBuildReviewTrainAndPrompt() = runTest {
+        val api = FakeMuseApi(backgroundScope, now = { testScheduler.currentTime }, genDelayMs = 1000)
+        assertEquals("none", api.lora(SampleData.SIENNA).state)
+        assertEquals("building", api.buildLoraSet(SampleData.SIENNA).state)
+        assertEquals(6.07 - 0.60, api.balance().balance, 1e-9)
+        advanceTimeBy(1500)
+        val review = api.lora(SampleData.SIENNA)
+        assertEquals("review", review.state)
+        assertEquals(30, review.candidates.size)
+        assertEquals(3, review.flagged)
+        assertTrue(review.candidates.filter { it.flag != null }.none { it.keep })
+        assertEquals(27, review.kept)
+        assertTrue(review.candidates.all { it.image.asset != null && !it.image.asset!!.startsWith("vid_") })
+        // $5.47 < $6.65: blocked
+        try { api.trainLora(SampleData.SIENNA); fail() } catch (e: ApiException) { assertEquals("insufficient_balance", e.code) }
+        api.topUp(TopUpRequest(25.0))
+        review.candidates.filter { it.keep }.take(8).forEach { api.keepCandidate(SampleData.SIENNA, it.id, false) }
+        try { api.trainLora(SampleData.SIENNA); fail() } catch (e: ApiException) { assertEquals("bad_request", e.code) }
+        val flagged = review.candidates.first { it.flag != null }
+        assertEquals(20, api.keepCandidate(SampleData.SIENNA, flagged.id, true).kept)
+        val before = api.balance().balance
+        val t = api.trainLora(SampleData.SIENNA)
+        assertEquals("training", t.state)
+        assertEquals(before - 6.65, api.balance().balance, 1e-9)
+        // 100 min at 24 × 5 = 120× → 50 s
+        advanceTimeBy(20_000)
+        val mid = api.lora(SampleData.SIENNA)
+        assertEquals(100.0, mid.photo.progress, 1e-9)
+        assertTrue(mid.video.progress in 1.0..99.0)
+        advanceTimeBy(40_000)
+        val done = api.lora(SampleData.SIENNA)
+        assertEquals("ready", done.state)
+        assertEquals(1, done.version)
+        assertEquals(20, done.trainedOn)
+        assertTrue(done.use)
+        api.uploadClip(SampleData.sampleMeta, null)
+        assertTrue(api.createJob(req()).prompt.contains("with LoRA sienna_v1 video"))
+        api.patchLora(SampleData.SIENNA, studio.muse.app.data.PatchLoraRequest(use = false))
+        assertFalse(api.createJob(req(steps = 4, engine = Engine.VIGGLE)).prompt.contains("LoRA"))
+        assertEquals("review", api.patchLora(SampleData.SIENNA, studio.muse.app.data.PatchLoraRequest(state = "review", use = true)).state)
+        api.trainLora(SampleData.SIENNA)
+        advanceTimeBy(60_000)
+        assertEquals(2, api.lora(SampleData.SIENNA).version)
+    }
+
+    @Test fun accountsAndPostsKeepLabelsOffByDefault() = runTest {
+        val api = FakeMuseApi(backgroundScope, now = { testScheduler.currentTime }, genDelayMs = 1000)
+        val req = studio.muse.app.data.CreatePostRequest(SampleData.SIENNA, "t_j1", listOf("tiktok"), "Kick #dance")
+        try { api.createPost(req); fail() } catch (e: ApiException) { assertEquals("bad_request", e.code) }
+        val a = api.connectAccount(SampleData.SIENNA, "tiktok").account!!
+        assertEquals("@sienna.vale", a.handle)
+        assertFalse(a.canPostDirect)
+        assertEquals("Sienna Vale (Page)", api.connectAccount(SampleData.SIENNA, "facebook").account!!.handle)
+        assertEquals(listOf("tiktok", "facebook"), api.listAccounts(SampleData.SIENNA).map { it.platform })
+        assertTrue(api.listAccounts(SampleData.NOOR).isEmpty())
+        api.disconnectAccount(SampleData.SIENNA, "facebook")
+        assertEquals(listOf("tiktok"), api.listAccounts(SampleData.SIENNA).map { it.platform })
+        val now = api.createPost(req)
+        assertEquals("handoff", now.state)
+        assertFalse(now.aiLabel); assertFalse(now.paidPartnership)
+        assertTrue(api.createPost(req.copy(aiLabel = true, paidPartnership = true)).let { it.aiLabel && it.paidPartnership })
+        val at = java.time.Instant.ofEpochMilli(testScheduler.currentTime + 3_600_000).toString()
+        val sched = api.createPost(req.copy(`when` = at))
+        assertEquals("scheduled", sched.state)
+        advanceTimeBy(1500)
+        assertTrue(api.listPosts("posted").first { it.id == now.id }.stats!!.views > 0)
+        assertEquals(listOf(sched.id), api.listPosts("scheduled").map { it.id })
+        advanceTimeBy(3_600_000)
+        assertEquals("posted", api.listPosts().first { it.id == sched.id }.state)
+        api.deletePost(sched.id)
+        assertTrue(api.listPosts().none { it.id == sched.id })
+    }
+
+    @Test fun queueRunAndModelEditDelete() = runTest {
+        val api = FakeMuseApi(backgroundScope, now = { testScheduler.currentTime })
+        val q = api.createJob(req().copy(queue = true))
+        assertEquals("queued", q.state)
+        assertEquals(6.07, api.balance().balance, 1e-9)
+        assertEquals(listOf(q.id), api.runQueue().map { it.id })
+        assertTrue(api.balance().balance < 6.07)
+        assertEquals(0.13 + q.cost, api.balance().today, 1e-9)
+        val m = api.updateModel(SampleData.SIENNA, studio.muse.app.data.UpdateModelRequest(personality = "Warm", notes = "No gym", neverAdd = listOf("tattoos", "rings", "chokers")))
+        assertEquals("Warm", m.personality); assertEquals("Sienna Vale", m.name)
+        api.connectAccount(SampleData.NOOR, "x")
+        api.deleteModel(SampleData.NOOR)
+        assertEquals(listOf("Sienna Vale"), api.listModels().map { it.name })
+        try { api.lora(SampleData.NOOR); fail() } catch (e: ApiException) { assertEquals("not_found", e.code) }
+    }
 }

@@ -62,10 +62,7 @@ import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
 import studio.muse.core.Pricing
 
-/** The single export line (no other consent or labelling UI anywhere). */
-const val EXPORT_LINE = "Exports carry the AI-generated label. Brand posts also need #ad."
-
-data class ResultState(val takes: List<Take> = emptyList(), val job: Job? = null, val retryCost: Double = 0.0)
+data class ResultState(val takes: List<Take> = emptyList(), val job: Job? = null, val retryCost: Double = 0.0, val posts: List<studio.muse.app.data.Post> = emptyList())
 
 class ResultViewModel(private val c: AppContainer, private val id: String) : ViewModel() {
     val state: StateFlow<ResultState> = c.repo.state.map { s ->
@@ -73,7 +70,7 @@ class ResultViewModel(private val c: AppContainer, private val id: String) : Vie
         val jobId = direct?.jobId ?: id
         val takes = if (direct != null && direct.jobId == null) listOf(direct) else s.takes.filter { it.jobId == jobId }.sortedBy { it.index }
         val job = s.job(jobId)
-        ResultState(takes, job, job?.let { Pricing.totalCost(it.request.spec()) } ?: 0.0)
+        ResultState(takes, job, job?.let { Pricing.totalCost(it.request.spec()) } ?: 0.0, s.posts.filter { p -> takes.any { it.id == p.takeId } })
     }.stateIn(viewModelScope, SharingStarted.Eagerly, ResultState())
 
     fun approve(t: Take, celebrate: () -> Unit) = viewModelScope.launch {
@@ -95,7 +92,7 @@ class ResultViewModel(private val c: AppContainer, private val id: String) : Vie
     }
 
     fun toast(s: String) = c.repo.toast(s)
-    fun export() = c.repo.toast("Exported 1080×1920 · AI label on")
+    fun export() = c.repo.toast("Exported 1080×1920")
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -131,6 +128,7 @@ fun ResultScreen(id: String) {
                     TopBar(if (s.takes.size > 0) "Take ${(take?.index ?: 1)} of ${take?.of ?: s.takes.size}" else "", onBack = { nav.back() }, over = true) {
                         MoreMenu(listOf(
                             MenuItem("export", "Download") { vm.export() },
+                            MenuItem("upload", "Post") { take?.let { nav.go(Routes.post(it.id)) } },
                             MenuItem("spark", "Copy prompt") { clip.setText(AnnotatedString(take?.prompt?.ifBlank { null } ?: s.job?.prompt ?: "")); vm.toast("Prompt copied") },
                             MenuItem("grid", "Compare takes") { if (s.takes.size > 1) compare = !compare else vm.toast("Compare takes · needs 2+ takes") },
                             MenuItem("bell", "Report a problem") { vm.toast("Thanks · report sent with the prompt and seed") },
@@ -142,6 +140,7 @@ fun ResultScreen(id: String) {
                 Column(Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     SideAction("retry", if (s.job != null) "Retry · ${Pricing.money(s.retryCost)}" else "Retry") { vm.retry(nav) }
                     SideAction("export", "Export") { vm.export() }
+                    SideAction("upload", "Post") { take?.let { nav.go(Routes.post(it.id)) } }
                 }
             }
             val shape = RoundedCornerShape(topStart = if (m.isA) 0.dp else m.t.rLg, topEnd = if (m.isA) 0.dp else m.t.rLg)
@@ -160,8 +159,11 @@ fun ResultScreen(id: String) {
                         }
                         Pill(if (take.final) "Final" else "Test", if (take.final) "good" else "")
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Top) {
-                        Ic("shield", 14.dp, m.t.muted); Tiny(EXPORT_LINE)
+                    s.posts.firstOrNull { it.takeId == take.id && it.stats != null }?.let { p ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            p.platforms.mapNotNull { studio.muse.app.data.Platform.of(it) }.forEach { PlatformBadge(it, 16.dp) }
+                            p.stats?.let { st -> T(" ${String.format(java.util.Locale.US, "%,d", st.views)} views · ${String.format(java.util.Locale.US, "%,d", st.likes)} likes", m.type.mono.copy(fontSize = 11.5.sp), m.t.muted) }
+                        }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Cta2("Discard", { vm.discard(take, nav) }, Modifier.weight(1f))

@@ -62,6 +62,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import studio.muse.app.AppContainer
 import studio.muse.app.data.Toast
@@ -90,8 +91,10 @@ object Routes {
     const val HOME = "home"; const val GALLERY = "gallery"; const val QUEUE = "queue"; const val SETTINGS = "settings"; const val CREDITS = "credits"
     const val PROFILE = "profile"; const val CREATE1 = "create1"; const val CREATE3 = "create3"; const val OUTFIT = "outfit"
     const val SHOOT = "shoot"; const val SOURCE = "source"; const val DIRECT = "direct"; const val RESULT = "result/{id}"
+    const val LORA = "lora"; const val ACCOUNTS = "accounts"; const val POST = "post/{id}"; const val POSTS = "posts"
     val TABS = setOf(HOME, GALLERY, QUEUE, SETTINGS)
     fun result(id: String) = "result/$id"
+    fun post(takeId: String) = "post/$takeId"
 }
 
 /** Navigation helpers (the prototype's go/back/tab). */
@@ -119,7 +122,10 @@ class Nav(val controller: NavHostController, private val sfx: (SoundFx.Kind) -> 
 }
 
 @Composable
-fun MuseApp(container: AppContainer, startRoute: String = Routes.SPLASH, pendingRoute: String? = null, onRouteConsumed: () -> Unit = {}) {
+fun MuseApp(
+    container: AppContainer, startRoute: String = Routes.SPLASH, pendingRoute: String? = null, onRouteConsumed: () -> Unit = {},
+    pendingHandoff: String? = null, onHandoffConsumed: () -> Unit = {},
+) {
     val prefs by container.prefs.collectAsState()
     val theme = ThemeId.fromKey(prefs.theme)
     MuseTheme(theme) {
@@ -130,6 +136,15 @@ fun MuseApp(container: AppContainer, startRoute: String = Routes.SPLASH, pending
         val celebrate: () -> Unit = remember { { sfx(SoundFx.Kind.DONE); confetti.add(System.nanoTime()) } }
         LaunchedEffect(pendingRoute) {
             if (pendingRoute != null) { delay(50); n.go(pendingRoute); onRouteConsumed() }
+        }
+        // A "time to post" notification was tapped: once the posts are loaded, open the first platform's handoff.
+        val context = androidx.compose.ui.platform.LocalContext.current
+        LaunchedEffect(pendingHandoff) {
+            val id = pendingHandoff ?: return@LaunchedEffect
+            val post = kotlinx.coroutines.withTimeoutOrNull(5000) { container.repo.state.first { s -> s.posts.any { it.id == id } } }?.posts?.first { it.id == id }
+            val platform = post?.platforms?.firstOrNull()?.let { studio.muse.app.data.Platform.of(it) }
+            if (post != null && platform != null) openHandoff(context, container, post, platform)
+            onHandoffConsumed()
         }
         CompositionLocalProvider(LocalContainer provides container, LocalNav provides n, LocalSfx provides sfx, LocalCelebrate provides celebrate) {
             Box(Modifier.fillMaxSize().background(muse.t.bg)) {
@@ -155,6 +170,10 @@ fun MuseApp(container: AppContainer, startRoute: String = Routes.SPLASH, pending
                     composable(Routes.SOURCE) { SourceScreen() }
                     composable(Routes.DIRECT) { DirectScreen() }
                     composable(Routes.RESULT) { e -> ResultScreen(e.arguments?.getString("id") ?: "") }
+                    composable(Routes.LORA) { LoraScreen() }
+                    composable(Routes.ACCOUNTS) { AccountsScreen() }
+                    composable(Routes.POST) { e -> PostScreen(e.arguments?.getString("id") ?: "") }
+                    composable(Routes.POSTS) { PostsScreen() }
                 }
                 val entry by nav.currentBackStackEntryAsState()
                 FlashOnNav(theme, entry)
