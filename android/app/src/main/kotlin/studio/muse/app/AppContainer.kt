@@ -27,11 +27,12 @@ class AppContainer(
     val media: studio.muse.app.platform.MediaReader? = null,
     initialPrefs: AppPrefs = AppPrefs(),
     soundsOn: Boolean = true,
+    sfxCacheDir: File? = null,
 ) {
     val prefs: StateFlow<AppPrefs> = prefsStore.prefs.stateIn(scope, SharingStarted.Eagerly, initialPrefs)
     val repo = MuseRepository(scope, prefsStore, fake)
     val drafts = Drafts()
-    val sound = SoundFx(enabled = { soundsOn && prefs.value.sound }, theme = { prefs.value.theme })
+    val sound = SoundFx(enabled = { soundsOn && prefs.value.sound }, theme = { prefs.value.theme }, cacheDir = sfxCacheDir)
 
     init {
         repo.listener = studio.muse.app.data.JobListener { job ->
@@ -45,7 +46,7 @@ class AppContainer(
         fun create(context: Context): AppContainer {
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
             val fake = FakeMuseApi(scope, File(context.filesDir, "uploads"))
-            return AppContainer(scope, DataStorePrefs(context), fake, Notifier(context), studio.muse.app.platform.MediaReader(context))
+            return AppContainer(scope, DataStorePrefs(context), fake, Notifier(context), studio.muse.app.platform.MediaReader(context), sfxCacheDir = File(context.cacheDir, "sfx").apply { mkdirs() })
         }
     }
 }

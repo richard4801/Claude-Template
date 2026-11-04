@@ -19,15 +19,18 @@ import studio.muse.core.Pricing
 /** Local "push" notification when a mock render finishes or fails. Needs POST_NOTIFICATIONS on Android 13+. */
 class Notifier(private val context: Context) {
     companion object {
-        const val CHANNEL = "renders"
+        const val CHANNEL = "renders_v2" // v2: IMPORTANCE_HIGH (a channel's importance can't be raised after it exists)
         const val EXTRA_ROUTE = "muse.route"
     }
 
     init {
         if (Build.VERSION.SDK_INT >= 26) {
-            val ch = NotificationChannel(CHANNEL, context.getString(R.string.channel_renders), NotificationManager.IMPORTANCE_DEFAULT)
+            val nm = context.getSystemService(NotificationManager::class.java)
+            nm?.deleteNotificationChannel("renders") // the old, quieter channel
+            val ch = NotificationChannel(CHANNEL, context.getString(R.string.channel_renders), NotificationManager.IMPORTANCE_HIGH)
             ch.description = context.getString(R.string.channel_renders_desc)
-            context.getSystemService(NotificationManager::class.java)?.createNotificationChannel(ch)
+            ch.enableVibration(true)
+            nm?.createNotificationChannel(ch)
         }
     }
 
@@ -51,6 +54,8 @@ class Notifier(private val context: Context) {
             .setAutoCancel(true)
             .setContentIntent(pi)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(job.id.hashCode(), n) }
     }

@@ -3,6 +3,10 @@ package studio.muse.app.platform
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.media.SoundPool
+import android.util.Log
+import java.io.File
+import java.io.RandomAccessFile
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import kotlin.math.PI
@@ -15,34 +19,91 @@ import kotlin.random.Random
 
 /**
  * The prototype's per-theme UI sounds (app.js SND), synthesised the same way: oscillators with exponential pitch
- * ramps and band-passed noise bursts, rendered to PCM once and played with AudioTrack.
+ * ramps and band-passed noise bursts.
+ *
+ * Every sound is rendered once to a small WAV in [cacheDir] and preloaded into a [SoundPool], which plays with low
+ * latency. Sounds use the media stream (USAGE_GAME), so they follow the media volume, like other apps' UI sounds,
+ * rather than the system/touch-sound volume, which is often muted. Each sound is normalised so it is clearly audible.
+ * With no [cacheDir] (tests), it falls back to a one-off AudioTrack.
  */
-class SoundFx(private val enabled: () -> Boolean, private val theme: () -> String) {
+class SoundFx(private val enabled: () -> Boolean, private val theme: () -> String, private val cacheDir: File? = null) {
     enum class Kind { TAP, TICK, NAV, GO, DONE, THEME }
 
     private val rate = 22050
     private val cache = ConcurrentHashMap<String, ShortArray>()
+    private val ids = ConcurrentHashMap<String, Int>()
+    private val ready = ConcurrentHashMap.newKeySet<Int>()
     private val pool = Executors.newFixedThreadPool(2) { r -> Thread(r, "muse-sfx").apply { isDaemon = true } }
+    private val attrs = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
+    private val soundPool: SoundPool? = cacheDir?.let {
+        SoundPool.Builder().setMaxStreams(6).setAudioAttributes(attrs).build().apply {
+            setOnLoadCompleteListener { _, id, status -> if (status == 0) ready.add(id) else Log.w(TAG, "load failed $id/$status") }
+        }
+    }
+
+    init {
+        // Preload every theme's sounds in the background, current theme first, so the first tap already plays.
+        if (soundPool != null) pool.execute {
+            val first = runCatching { theme() }.getOrDefault("a")
+            (listOf(first) + listOf("a", "b", "c", "d").filter { it != first }).forEach { t -> Kind.entries.forEach { k -> load(t, k) } }
+        }
+    }
+
+    private fun load(t: String, k: Kind): Int? {
+        val key = t + k.name
+        ids[key]?.let { return it }
+        val sp = soundPool ?: return null
+        return runCatching {
+            val f = File(cacheDir, "sfx_v2_$key.wav")
+            if (!f.exists()) writeWav(f, cache.getOrPut(key) { render(t, k) })
+            sp.load(f.path, 1).also { ids[key] = it }
+        }.onFailure { Log.w(TAG, "could not prepare $key", it) }.getOrNull()
+    }
 
     fun play(kind: Kind) {
         if (!enabled()) return
-        val key = theme() + kind.name
+        val t = theme()
+        val id = ids[t + kind.name]
+        if (soundPool != null && id != null && id in ready) {
+            soundPool.play(id, 1f, 1f, 1, 0, 1f)
+            return
+        }
         pool.execute {
             runCatching {
-                val pcm = cache.getOrPut(key) { render(theme(), kind) }
+                if (soundPool != null) load(t, kind)
+                val pcm = cache.getOrPut(t + kind.name) { render(t, kind) }
                 val track = AudioTrack.Builder()
-                    .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+                    .setAudioAttributes(attrs)
                     .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-                    .setBufferSizeInBytes(pcm.size * 2)
+                    .setBufferSizeInBytes(max(pcm.size * 2, 4096))
                     .setTransferMode(AudioTrack.MODE_STATIC)
                     .build()
-                track.write(pcm, 0, pcm.size)
+                val padded = if (pcm.size * 2 < 4096) pcm.copyOf(2048) else pcm
+                track.write(padded, 0, padded.size)
                 track.play()
-                Thread.sleep(pcm.size * 1000L / rate + 60)
+                Thread.sleep(padded.size * 1000L / rate + 60)
                 track.release()
-            }
+            }.onFailure { Log.w(TAG, "play failed", it) }
         }
     }
+
+    private fun writeWav(f: File, pcm: ShortArray) {
+        val tmp = File(f.path + ".tmp")
+        RandomAccessFile(tmp, "rw").use { r ->
+            r.setLength(0)
+            fun le32(v: Int) { r.write(byteArrayOf(v.toByte(), (v shr 8).toByte(), (v shr 16).toByte(), (v shr 24).toByte())) }
+            fun le16(v: Int) { r.write(byteArrayOf(v.toByte(), (v shr 8).toByte())) }
+            r.writeBytes("RIFF"); le32(36 + pcm.size * 2); r.writeBytes("WAVE")
+            r.writeBytes("fmt "); le32(16); le16(1); le16(1); le32(rate); le32(rate * 2); le16(2); le16(16)
+            r.writeBytes("data"); le32(pcm.size * 2)
+            val b = ByteArray(pcm.size * 2)
+            for (i in pcm.indices) { b[2 * i] = pcm[i].toInt().toByte(); b[2 * i + 1] = (pcm[i].toInt() shr 8).toByte() }
+            r.write(b)
+        }
+        tmp.renameTo(f)
+    }
+
+    private companion object { const val TAG = "MuseSfx" }
 
     private class Mix(val rate: Int) {
         var buf = FloatArray(rate)
@@ -143,8 +204,11 @@ class SoundFx(private val enabled: () -> Boolean, private val theme: () -> Strin
                 }
             }
         }
+        // Normalise: the browser sounds are mixed quietly on purpose; on a phone speaker they need a clear peak.
+        val peak = m.buf.maxOf { kotlin.math.abs(it) }.coerceAtLeast(1e-4f)
+        val gain = (if (k == Kind.TICK) 0.45f else 0.7f) / peak
         val out = ShortArray(m.buf.size)
-        for (i in m.buf.indices) out[i] = (m.buf[i].coerceIn(-1f, 1f) * 32767 * 1.6f).toInt().coerceIn(-32768, 32767).toShort()
+        for (i in m.buf.indices) out[i] = (m.buf[i] * gain * 32767).toInt().coerceIn(-32768, 32767).toShort()
         return out
     }
 }
