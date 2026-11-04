@@ -1,0 +1,459 @@
+<title>Muse Studio</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: phone = top bar + scrolling view + bottom tab bar; >=960px = left rail + view + sticky control column.
+   Direction: a dim photo studio — graphite walls, one jade "tally light" accent for go/active, paper-white type. */
+:root{
+  --bg:#f3f3f1; --surface:#ffffff; --surface-2:#ecedea; --line:#d9dbd6; --fg:#16181a; --muted:#5d625f;
+  --accent:#0d7a5f; --accent-ink:#ffffff; --accent-soft:#d5ece4; --warn:#a86400; --warn-soft:#f6e7cc; --bad:#b3261e; --bad-soft:#f6dcda; --good:#1f7a3a;
+  --display:"Bricolage Grotesque", "Arial Narrow", system-ui, sans-serif;
+  --body:"Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono:"JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --r:12px; --r-sm:8px;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#121414; --surface:#1a1d1d; --surface-2:#232727; --line:#2f3434; --fg:#eef0ee; --muted:#9aa29f;
+  --accent:#3fd3a6; --accent-ink:#06261d; --accent-soft:#163a31; --warn:#f0b35a; --warn-soft:#3a2b14; --bad:#ff8a80; --bad-soft:#3d1c1a; --good:#6fdc8c; color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#121414; --surface:#1a1d1d; --surface-2:#232727; --line:#2f3434; --fg:#eef0ee; --muted:#9aa29f;
+  --accent:#3fd3a6; --accent-ink:#06261d; --accent-soft:#163a31; --warn:#f0b35a; --warn-soft:#3a2b14; --bad:#ff8a80; --bad-soft:#3d1c1a; --good:#6fdc8c; color-scheme:dark }
+*{box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg); color:var(--fg); font-family:var(--body); font-size:15px; line-height:1.5}
+body::before{content:""; position:fixed; inset:0 0 auto; height:env(safe-area-inset-top,0px); z-index:30; background:var(--surface)}
+h1,h2,h3{font-family:var(--display); font-weight:700; line-height:1.15; margin:0; text-wrap:balance; letter-spacing:-.01em}
+h1{font-size:1.6rem} h2{font-size:1.15rem} h3{font-size:1rem}
+p{margin:0}
+button,input,select,textarea{font:inherit; color:inherit}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.mono{font-family:var(--mono); font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+.label{font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:600}
+
+/* Shell */
+.app{display:grid; grid-template-rows:auto 1fr auto; min-height:100%}
+.topbar{position:sticky; top:env(safe-area-inset-top,0px); z-index:20; background:var(--surface); border-bottom:1px solid var(--line);
+  padding-block:10px; padding-left:max(16px,env(safe-area-inset-left,0px)); padding-right:max(16px,env(safe-area-inset-right,0px));
+  display:flex; align-items:center; gap:12px}
+.brand{font-family:var(--display); font-weight:700; font-size:1.15rem; display:flex; align-items:center; gap:8px}
+.tally{width:10px; height:10px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+.topbar .spacer{flex:1}
+.balance{font-size:.8rem; padding:4px 10px; border:1px solid var(--line); border-radius:999px; white-space:nowrap}
+.rail{display:none}
+main{padding-block:16px 96px; padding-left:max(16px,env(safe-area-inset-left,0px)); padding-right:max(16px,env(safe-area-inset-right,0px)); min-width:0}
+.tabs{position:fixed; left:0; right:0; bottom:0; z-index:20; background:var(--surface); border-top:1px solid var(--line);
+  display:grid; grid-template-columns:repeat(5,1fr);
+  padding-bottom:env(safe-area-inset-bottom,0px); padding-left:env(safe-area-inset-left,0px); padding-right:env(safe-area-inset-right,0px)}
+.tab{background:none; border:0; padding:8px 2px 10px; display:flex; flex-direction:column; align-items:center; gap:3px; font-size:.7rem; color:var(--muted); cursor:pointer}
+.tab svg{width:22px; height:22px}
+.tab[aria-current="page"]{color:var(--accent)}
+@media (min-width:960px){
+  .app{grid-template-columns:220px 1fr; grid-template-rows:auto 1fr}
+  .topbar{grid-column:1 / -1}
+  .tabs{display:none}
+  .rail{display:flex; flex-direction:column; gap:4px; padding:16px 12px; border-right:1px solid var(--line); background:var(--surface);
+    position:sticky; top:calc(57px + env(safe-area-inset-top,0px)); height:calc(100vh - 57px); padding-left:max(12px,env(safe-area-inset-left,0px))}
+  .rail .tab{flex-direction:row; justify-content:flex-start; gap:10px; font-size:.9rem; padding:9px 12px; border-radius:var(--r-sm)}
+  .rail .tab[aria-current="page"]{background:var(--accent-soft)}
+  main{padding-block:24px 48px}
+}
+
+/* Shared pieces */
+.head{display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:16px}
+.head p{color:var(--muted); max-width:60ch}
+.card{background:var(--surface); border:1px solid var(--line); border-radius:var(--r); padding:16px}
+.stack{display:flex; flex-direction:column; gap:16px}
+.row{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+.btn{border:1px solid var(--line); background:var(--surface); border-radius:var(--r-sm); padding:9px 14px; cursor:pointer; font-weight:600; font-size:.9rem}
+.btn.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent)}
+.btn.ghost{background:transparent}
+.btn:disabled{opacity:.45; cursor:not-allowed}
+.chip{border:1px solid var(--line); background:var(--surface); border-radius:999px; padding:6px 12px; font-size:.85rem; cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--accent-soft); border-color:var(--accent); color:var(--fg)}
+.pill{display:inline-flex; align-items:center; gap:6px; font-size:.75rem; padding:3px 9px; border-radius:999px; font-weight:600}
+.pill.good{background:var(--accent-soft); color:var(--good)}
+.pill.warn{background:var(--warn-soft); color:var(--warn)}
+.pill.bad{background:var(--bad-soft); color:var(--bad)}
+.pill.neutral{background:var(--surface-2); color:var(--muted)}
+.field{display:flex; flex-direction:column; gap:6px; min-width:0}
+.field input[type=text], .field select, .field textarea{background:var(--surface); border:1px solid var(--line); border-radius:var(--r-sm); padding:9px 11px; width:100%}
+.field textarea{min-height:80px; resize:vertical}
+.grid2{display:grid; grid-template-columns:1fr; gap:12px}
+@media (min-width:600px){ .grid2{grid-template-columns:1fr 1fr} }
+input[type=range]{width:100%; accent-color:var(--accent)}
+.toggle{display:flex; align-items:center; justify-content:space-between; gap:12px}
+.switch{appearance:none; width:42px; height:24px; border-radius:999px; background:var(--line); position:relative; cursor:pointer; flex:none; border:0}
+.switch::after{content:""; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:var(--surface); transition:left .15s}
+.switch:checked{background:var(--accent)} .switch:checked::after{left:21px}
+.seg{display:inline-flex; border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden; flex-wrap:wrap}
+.seg button{border:0; background:var(--surface); padding:8px 12px; cursor:pointer; font-size:.85rem}
+.seg button[aria-pressed="true"]{background:var(--accent); color:var(--accent-ink); font-weight:600}
+.note{font-size:.82rem; color:var(--muted)}
+.callout{border-radius:var(--r-sm); padding:10px 12px; font-size:.85rem; display:flex; gap:8px; align-items:flex-start}
+.callout.warn{background:var(--warn-soft); color:var(--fg)} .callout.info{background:var(--surface-2)}
+.sample{font-size:.7rem; color:var(--muted); border:1px dashed var(--line); border-radius:999px; padding:2px 8px}
+details summary{cursor:pointer; font-weight:600}
+pre.prompt{white-space:pre-wrap; font-family:var(--mono); font-size:.75rem; background:var(--surface-2); border-radius:var(--r-sm); padding:12px; max-height:260px; overflow:auto; margin:8px 0 0}
+
+/* Studio layout: controls + summary column on desktop */
+.studio{display:grid; grid-template-columns:1fr; gap:16px}
+@media (min-width:1100px){ .studio{grid-template-columns:minmax(0,1fr) 340px; align-items:start} .studio .side{position:sticky; top:84px} }
+.studio>*,.card,.stack>*{min-width:0}
+.brand{white-space:nowrap}
+@media (max-width:520px){ .sample{display:none} }
+.section-title{display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin-bottom:12px}
+
+/* Model roster */
+.roster{display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:12px}
+.model{background:var(--surface); border:1px solid var(--line); border-radius:var(--r); overflow:hidden; cursor:pointer; text-align:left; padding:0; display:flex; flex-direction:column}
+.model .ph{aspect-ratio:3/4; background:var(--surface-2); max-width:100%; width:100%; object-fit:cover; display:block}
+.model .ph.empty{display:grid; place-items:center; font-family:var(--display); font-size:2rem; color:var(--muted)}
+.model .meta{padding:10px 12px; display:flex; flex-direction:column; gap:4px}
+.model.add{border-style:dashed; align-items:center; justify-content:center; min-height:220px; gap:8px; color:var(--muted)}
+.profile{display:grid; grid-template-columns:1fr; gap:16px}
+@media (min-width:760px){ .profile{grid-template-columns:260px minmax(0,1fr)} }
+.refs{display:grid; grid-template-columns:repeat(auto-fill,minmax(92px,1fr)); gap:8px}
+.ref{border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden; background:var(--surface-2); display:flex; flex-direction:column}
+.ref img{aspect-ratio:3/4; object-fit:cover; width:100%; display:block}
+.ref .slot{aspect-ratio:3/4; display:grid; place-items:center; font-size:.75rem; color:var(--muted); text-align:center; padding:6px; border-bottom:1px dashed var(--line)}
+.ref span{font-size:.72rem; padding:5px 7px; display:flex; justify-content:space-between; gap:4px}
+.outfits{display:flex; gap:10px; overflow-x:auto; padding-bottom:4px}
+.outfit{flex:none; width:120px; border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden; background:var(--surface); cursor:pointer; padding:0; text-align:left}
+.outfit img{width:100%; aspect-ratio:3/4; object-fit:cover; display:block}
+.outfit div{padding:6px 8px; font-size:.78rem}
+.outfit[aria-pressed="true"]{border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft)}
+
+/* Creation stepper */
+.stepper{display:flex; gap:6px; overflow-x:auto; padding-bottom:4px; margin-bottom:16px}
+.stepper button{flex:none; border:1px solid var(--line); background:var(--surface); border-radius:999px; padding:6px 12px; font-size:.82rem; cursor:pointer; display:flex; gap:6px; align-items:center}
+.stepper button[aria-current="step"]{border-color:var(--accent); background:var(--accent-soft); font-weight:600}
+.stepper .n{font-family:var(--mono); font-size:.72rem; color:var(--muted)}
+.look-grid{display:grid; grid-template-columns:1fr; gap:14px}
+@media (min-width:700px){ .look-grid{grid-template-columns:1fr 1fr} }
+.swatches{display:flex; gap:8px; flex-wrap:wrap}
+.sw{width:30px; height:30px; border-radius:50%; border:2px solid var(--surface); box-shadow:0 0 0 1px var(--line); cursor:pointer}
+.sw[aria-pressed="true"]{box-shadow:0 0 0 2px var(--accent)}
+
+/* Video */
+.clip{display:grid; grid-template-columns:72px minmax(0,1fr); gap:12px; align-items:start}
+.clip .thumb{aspect-ratio:9/16; border-radius:var(--r-sm); background:linear-gradient(160deg,var(--surface-2),var(--line)); display:grid; place-items:center; font-size:.7rem; color:var(--muted)}
+.checks{display:flex; flex-direction:column; gap:6px; font-size:.85rem}
+.checks div{display:flex; justify-content:space-between; gap:4px 8px; flex-wrap:wrap}
+.estimate{display:grid; grid-template-columns:repeat(3,1fr); gap:8px}
+.estimate div{background:var(--surface-2); border-radius:var(--r-sm); padding:10px}
+.estimate b{display:block; font-family:var(--mono); font-size:1.05rem}
+.steps-scale{display:flex; justify-content:space-between; font-size:.72rem; color:var(--muted); font-family:var(--mono)}
+
+/* Jobs */
+.jobs{display:flex; flex-direction:column; gap:10px}
+.job{display:grid; grid-template-columns:48px minmax(0,1fr) auto; gap:12px; align-items:center}
+.job img,.job .ph{width:48px; height:64px; object-fit:cover; border-radius:6px; background:var(--surface-2)}
+.bar{height:6px; border-radius:999px; background:var(--surface-2); overflow:hidden; margin-top:6px}
+.bar i{display:block; height:100%; background:var(--accent)}
+.kpis{display:grid; grid-template-columns:repeat(2,1fr); gap:10px}
+@media (min-width:700px){ .kpis{grid-template-columns:repeat(4,1fr)} }
+.kpi .v{font-family:var(--mono); font-size:1.3rem; font-weight:500}
+.gallery{display:grid; grid-template-columns:repeat(auto-fill,minmax(110px,1fr)); gap:8px}
+.gallery figure{margin:0; border-radius:var(--r-sm); overflow:hidden; background:var(--surface-2); position:relative}
+.gallery img{width:100%; aspect-ratio:9/16; object-fit:cover; display:block}
+.gallery figcaption{position:absolute; left:6px; bottom:6px; font-size:.68rem; background:rgba(0,0,0,.6); color:#fff; padding:2px 6px; border-radius:4px}
+.shots{display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:8px; margin-top:12px}
+.shots img{width:100%; aspect-ratio:4/5; object-fit:cover; border-radius:var(--r-sm); display:block}
+.toast{position:fixed; left:50%; transform:translateX(-50%); bottom:calc(80px + env(safe-area-inset-bottom,0px)); background:var(--fg); color:var(--bg); padding:10px 16px; border-radius:var(--r-sm); font-size:.9rem; z-index:40; max-width:calc(100% - 32px)}
+@media (min-width:960px){ .toast{bottom:24px} }
+@media (prefers-reduced-motion:reduce){ *{transition:none!important; animation:none!important} }
+</style>
+
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><span class="tally" aria-hidden="true"></span>Muse Studio</div>
+    <span class="sample">Prototype · sample data</span>
+    <div class="spacer"></div>
+    <span class="balance mono" title="RunPod balance">$6.07</span>
+  </header>
+  <nav class="rail" aria-label="Sections" id="rail"></nav>
+  <main id="view"></main>
+  <nav class="tabs" aria-label="Sections" id="tabs"></nav>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+const IMG = /*IMGS*/{};
+const ICONS = {
+  models:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.3-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><circle cx="17.5" cy="9" r="2.5"/><path d="M16 14.6c2.9-.3 4.9 1.4 5.5 4.4"/></svg>',
+  create:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>',
+  shoot:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h3l2-2.5h6L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>',
+  video:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/></svg>',
+  jobs:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h10M4 18h7"/><circle cx="18" cy="16" r="3"/><path d="M18 14.6V16l1 .8"/></svg>'
+};
+const SECTIONS = [['models','Models'],['create','Create'],['shoot','Photoshoot'],['video','Video'],['jobs','Jobs']];
+
+/* ---------- Sample state (examples, not real records) ---------- */
+const S = {
+  models:[
+    {id:'sienna', name:'Sienna Vale', age:24, niche:'Fashion & lifestyle', status:'Identity locked', cover:'green_front',
+     refs:{'Face · front':'face_front','Face · profile':'face_side','Body · front':'green_front','Body · ¾':'green_tq','Body · side':'green_side','Body · back':'green_back'},
+     outfits:[{n:'Green lounge set',img:'green_front'},{n:'Crystal mini dress',img:'crystal_front'}],
+     never:['Tattoos','Rings','Necklaces']},
+    {id:'noor', name:'Noor Adeyemi', age:27, niche:'Beauty & skincare', status:'Needs face close-ups', cover:null, refs:{}, outfits:[], never:['Tattoos']},
+    {id:'kai', name:'Kai Moreno', age:29, niche:'Fitness', status:'Draft', cover:null, refs:{}, outfits:[], never:[]}
+  ],
+  sel:'sienna',
+  jobs:[
+    {id:1, kind:'Video', model:'sienna', title:'Living-room dance · 5.2s', engine:'H3', steps:10, step:6, state:'running', eta:'~4 min left', cost:0.65, img:'green_front'},
+    {id:2, kind:'Photoshoot', model:'sienna', title:'Rooftop golden hour · 4 shots', engine:'Image', state:'done', cost:0.12, img:'crystal_front'},
+    {id:3, kind:'Video', model:'sienna', title:'Bathroom trend · 5.9s', engine:'H3', steps:30, state:'done', cost:3.05, img:'crystal_face'},
+    {id:4, kind:'Video', model:'sienna', title:'Kick test · 5.2s', engine:'Viggle (experimental)', state:'done', cost:0.13, img:'green_tq'}
+  ],
+  create:{step:0, name:'', age:24, niche:'', look:{}},
+  video:{model:'sienna', outfit:0, engine:'h3', steps:10, length:5.2, bg:'keep', motion:'subtle', audio:'keep', lipsync:false, takes:1, consent:'yes-test'},
+  shoot:{model:'sienna', outfit:0, scene:'Rooftop at golden hour', shot:'Medium', angle:'Eye level', lens:35, aperture:'f/2.8', light:'Golden hour', temp:4300, grade:'Phone-natural', realism:'Phone photo', count:4, ratio:'4:5', results:[]},
+  gallery:'test'
+};
+const model = id => S.models.find(m=>m.id===id);
+const esc = s => String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(t){const el=document.getElementById('toast'); el.textContent=t; el.hidden=false; clearTimeout(toast.t); toast.t=setTimeout(()=>el.hidden=true,2600)}
+
+/* ---------- Navigation (hash routes) ---------- */
+function nav(){
+  const cur = (location.hash||'#models').slice(1).split('-')[0];
+  const html = SECTIONS.map(([k,l])=>`<button class="tab" data-go="${k}" ${cur===k?'aria-current="page"':''}>${ICONS[k]}<span>${l}</span></button>`).join('');
+  document.getElementById('tabs').innerHTML = html; document.getElementById('rail').innerHTML = html;
+}
+document.addEventListener('click', e=>{ const g=e.target.closest('[data-go]'); if(g){ location.hash=g.dataset.go; } });
+window.addEventListener('hashchange', render);
+
+function render(){
+  nav();
+  const r = (location.hash||'#models').slice(1);
+  const v = document.getElementById('view');
+  const [sec, arg] = r.split('-');
+  if(sec==='models') v.innerHTML = arg ? viewProfile(arg) : viewModels();
+  else if(sec==='create') v.innerHTML = viewCreate();
+  else if(sec==='shoot') v.innerHTML = viewShoot();
+  else if(sec==='video') v.innerHTML = viewVideo();
+  else if(sec==='jobs') v.innerHTML = viewJobs();
+  else v.innerHTML = viewModels();
+  window.scrollTo(0,0);
+}
+
+/* ---------- Models ---------- */
+function statusPill(s){ return s==='Identity locked'?`<span class="pill good">● ${s}</span>`: s==='Draft'?`<span class="pill neutral">${s}</span>`:`<span class="pill warn">${s}</span>`; }
+function viewModels(){
+  return `<div class="head"><div><h1>Your models</h1><p>Original AI personas. Each one keeps a locked identity, outfits and a never-add list that every shoot and video uses.</p></div>
+  <button class="btn primary" data-go="create">New model</button></div>
+  <div class="roster">
+   ${S.models.map(m=>`<button class="model" data-go="models-${m.id}">
+      ${m.cover?`<img class="ph" src="${IMG[m.cover]}" alt="${esc(m.name)}">`:`<div class="ph empty">${esc(m.name[0])}</div>`}
+      <div class="meta"><h3>${esc(m.name)}</h3><span class="note">${esc(m.niche)} · ${m.age}</span>${statusPill(m.status)}</div></button>`).join('')}
+   <button class="model add" data-go="create"><span style="font-size:1.6rem">+</span><span>Create a model</span></button>
+  </div>`;
+}
+const REF_SLOTS = ['Face · front','Face · profile','Body · front','Body · ¾','Body · side','Body · back'];
+function viewProfile(id){
+  const m = model(id); if(!m) return viewModels();
+  const missing = REF_SLOTS.filter(k=>!m.refs[k]);
+  return `<button class="btn ghost" data-go="models" style="margin-bottom:12px">← Models</button>
+  <div class="profile">
+   <div class="stack">
+     ${m.cover?`<img src="${IMG[m.cover]}" alt="" style="width:100%;border-radius:var(--r);aspect-ratio:3/4;object-fit:cover">`:`<div class="card" style="aspect-ratio:3/4;display:grid;place-items:center;font-family:var(--display);font-size:3rem" class="muted">${esc(m.name[0])}</div>`}
+     <div class="row"><button class="btn primary" data-go="video">Make a video</button><button class="btn" data-go="shoot">Photoshoot</button></div>
+   </div>
+   <div class="stack">
+     <div><h1>${esc(m.name)}</h1><p class="muted">${esc(m.niche)} · age ${m.age} · ${statusPill(m.status)}</p></div>
+     <section class="card"><div class="section-title"><h2>Identity references</h2><span class="note mono">${6-missing.length}/6</span></div>
+       ${missing.length?`<div class="callout warn" style="margin-bottom:12px">Missing: ${missing.join(', ')}. Face close-ups matter most: without them the face comes out soft and drifts between videos.</div>`:''}
+       <div class="refs">${REF_SLOTS.map(k=>`<div class="ref">${m.refs[k]?`<img src="${IMG[m.refs[k]]}" alt="${k}">`:`<div class="slot">Add ${k.toLowerCase()}</div>`}<span>${k}${m.refs[k]?'<b style="color:var(--good)">✓</b>':''}</span></div>`).join('')}</div>
+       <p class="note" style="margin-top:10px">Upload separate images, not a character sheet. Front, side, three-quarter and back keep her consistent when she turns.</p>
+     </section>
+     <section class="card"><div class="section-title"><h2>Outfits</h2><button class="btn ghost" onclick="toast('Upload an outfit set: front, ¾, side and back')">Add outfit</button></div>
+       ${m.outfits.length?`<div class="outfits">${m.outfits.map(o=>`<div class="outfit"><img src="${IMG[o.img]}" alt=""><div>${esc(o.n)}</div></div>`).join('')}</div>`:`<p class="note">No outfits yet. Each outfit is its own reference set.</p>`}
+       <p class="note" style="margin-top:8px">Tip: plain, unbranded clothes. Visible logos (Nike, Crocs) show up in the video.</p>
+     </section>
+     <section class="card"><h2 style="margin-bottom:8px">Never add</h2><p class="note" style="margin-bottom:10px">Removed from every output, even when the performer in the source clip has them.</p>
+       <div class="row">${['Tattoos','Rings','Necklaces','Chokers','Piercings','Glasses'].map(t=>`<button class="chip" aria-pressed="${m.never.includes(t)}" onclick="toggleNever('${m.id}','${t}')">${t}</button>`).join('')}</div>
+     </section>
+   </div></div>`;
+}
+function toggleNever(id,t){ const m=model(id); m.never = m.never.includes(t)? m.never.filter(x=>x!==t) : [...m.never,t]; render(); }
+
+/* ---------- Create ---------- */
+const CREATE_STEPS = ['Basics','Look','Identity','Never add','Review'];
+const LOOK = [
+  ['Face shape',['Oval','Heart','Round','Square','Diamond']],
+  ['Eye colour',['Green','Hazel','Brown','Blue','Grey']],
+  ['Hair colour',['Honey blonde','Brunette','Black','Auburn','Platinum']],
+  ['Hair length',['Pixie','Shoulder','Mid-back','Waist']],
+  ['Hair texture',['Straight','Wavy','Curly','Coily']],
+  ['Skin details',['Freckles','Beauty marks','Clear','Natural texture']],
+  ['Body type',['Slim','Athletic','Curvy','Muscular']],
+  ['Height',['Petite','Average','Tall']],
+  ['Makeup',['Bare','Soft glam','Full glam','Editorial']],
+  ['Brows',['Natural','Bold','Thin','Bleached']],
+  ['Lips',['Thin','Medium','Full']],
+  ['Vibe',['Girl next door','Luxe','Sporty','Edgy','Soft']]
+];
+const SKIN = ['#f3d9c4','#e8c09c','#d4a275','#b07a50','#8a5a38','#5e3b24'];
+function viewCreate(){
+  const c = S.create, st = c.step;
+  const stepper = `<div class="stepper">${CREATE_STEPS.map((s,i)=>`<button ${i===st?'aria-current="step"':''} onclick="S.create.step=${i};render()"><span class="n">${i+1}</span>${s}</button>`).join('')}</div>`;
+  let body='';
+  if(st===0) body = `<div class="card stack"><div class="grid2">
+      <label class="field"><span class="label">Name</span><input type="text" id="c-name" value="${esc(c.name)}" placeholder="e.g. Noor Adeyemi" oninput="S.create.name=this.value"></label>
+      <label class="field"><span class="label">Niche</span><select id="c-niche" onchange="S.create.niche=this.value">${['','Fashion & lifestyle','Beauty & skincare','Fitness','Travel','Food','Tech & gadgets'].map(n=>`<option ${n===c.niche?'selected':''} value="${n}">${n||'Choose a niche'}</option>`).join('')}</select></label></div>
+      <label class="field"><span class="label">Age · <span class="mono" id="c-age-v">${c.age}</span></span><input type="range" id="c-age" min="18" max="45" value="${c.age}" oninput="S.create.age=+this.value;document.getElementById('c-age-v').textContent=this.value"></label>
+      <p class="note">Models are always 18 or older, and always original. The studio won't create lookalikes of real people.</p>
+      <label class="field"><span class="label">Personality and voice</span><textarea id="c-bio" placeholder="Warm, playful, talks to camera like a friend. Loves thrift finds and morning routines."></textarea></label></div>`;
+  if(st===1) body = `<div class="card"><div class="look-grid">
+      <div class="field"><span class="label">Skin tone</span><div class="swatches">${SKIN.map((s,i)=>`<button class="sw" style="background:${s}" aria-label="Skin tone ${i+1}" aria-pressed="${c.look.skin===i}" onclick="S.create.look.skin=${i};render()"></button>`).join('')}</div></div>
+      ${LOOK.map(([k,opts])=>`<div class="field"><span class="label">${k}</span><div class="row">${opts.map(o=>`<button class="chip" aria-pressed="${c.look[k]===o}" onclick="S.create.look['${k}']='${o}';render()">${o}</button>`).join('')}</div></div>`).join('')}
+    </div><p class="note" style="margin-top:12px">13 look settings. These write the first portrait; the identity step then locks it.</p></div>`;
+  if(st===2) body = `<div class="card stack"><div class="callout info">Generate a starting portrait from the look, or upload your own. Then add the six identity shots. Face close-ups are required.</div>
+      <div class="refs">${REF_SLOTS.map((k,i)=>`<div class="ref"><div class="slot">${i<2?'<b>Required</b><br>':''}${k}</div><span>Upload <b class="muted">○</b></span></div>`).join('')}</div>
+      <div class="row"><button class="btn primary" onclick="toast('Generating 4 starting portraits · ~$0.08')">Generate portraits</button><button class="btn" onclick="toast('Choose 6 separate images')">Upload images</button></div>
+      <p class="note">We'll warn you if an upload looks like a character sheet, has a watermark, or shows a face too small to use.</p></div>`;
+  if(st===3) body = `<div class="card stack"><p>Anything ticked here is removed from every photo and video of this model, even when the performer in your source clip has it.</p>
+      <div class="row">${['Tattoos','Rings','Necklaces','Chokers','Piercings','Glasses','Nail art','Logos on clothes'].map(t=>`<button class="chip" aria-pressed="${t==='Tattoos'||t==='Logos on clothes'}" onclick="this.setAttribute('aria-pressed', this.getAttribute('aria-pressed')!=='true')">${t}</button>`).join('')}</div></div>`;
+  if(st===4) body = `<div class="card stack"><h2>${esc(c.name||'Untitled model')}</h2><p class="muted">${esc(c.niche||'No niche yet')} · age ${c.age}</p>
+      <p>${Object.keys(c.look).length} look settings chosen. Identity shots: 0 of 6.</p>
+      <div class="callout warn">Add both face close-ups before this model can be used in video.</div>
+      <div class="row"><button class="btn primary" onclick="saveDraft()">Save as draft</button></div></div>`;
+  return `<div class="head"><div><h1>Create a model</h1><p>Build an original AI persona and lock her identity, so every shoot and video looks like the same person.</p></div></div>
+    ${stepper}${body}
+    <div class="row" style="margin-top:16px;justify-content:space-between"><button class="btn" ${st===0?'disabled':''} onclick="S.create.step--;render()">Back</button>${st<4?`<button class="btn primary" onclick="S.create.step++;render()">Next: ${CREATE_STEPS[st+1]}</button>`:''}</div>`;
+}
+function saveDraft(){ const c=S.create; const id='m'+Date.now(); S.models.push({id, name:c.name||'Untitled model', age:c.age, niche:c.niche||'No niche', status:'Draft', cover:null, refs:{}, outfits:[], never:['Tattoos']}); S.create={step:0,name:'',age:24,niche:'',look:{}}; toast('Saved as draft'); location.hash='models'; }
+
+/* ---------- Photoshoot ---------- */
+function opts(list, cur, key){ return list.map(o=>`<button class="chip" aria-pressed="${cur===o}" onclick="S.shoot['${key}']=${typeof o==='number'?o:`'${o}'`};render()">${o}${key==='lens'?'mm':''}</button>`).join(''); }
+function modelPicker(store, key){
+  return `<div class="outfits">${S.models.filter(m=>m.cover).map(m=>`<button class="outfit" aria-pressed="${store.model===m.id}" onclick="S.${key}.model='${m.id}';render()"><img src="${IMG[m.cover]}" alt=""><div>${esc(m.name)}</div></button>`).join('')}
+   ${S.models.filter(m=>!m.cover).map(m=>`<button class="outfit" disabled title="${esc(m.status)}" style="opacity:.5"><div style="aspect-ratio:3/4;display:grid;place-items:center;font-family:var(--display);font-size:1.6rem">${esc(m.name[0])}</div><div>${esc(m.name)} · ${esc(m.status)}</div></button>`).join('')}</div>`;
+}
+function outfitPicker(store,key){ const m=model(store.model); return `<div class="outfits">${m.outfits.map((o,i)=>`<button class="outfit" aria-pressed="${store.outfit===i}" onclick="S.${key}.outfit=${i};render()"><img src="${IMG[o.img]}" alt=""><div>${esc(o.n)}</div></button>`).join('')}</div>`; }
+function viewShoot(){
+  const s=S.shoot, m=model(s.model), cost=(s.count*0.03).toFixed(2);
+  return `<div class="head"><div><h1>Photoshoot</h1><p>Direct a still shoot like a photographer: scene, camera, light and grade. Identity and outfit come from the model.</p></div></div>
+  <div class="studio"><div class="stack">
+    <section class="card"><h2 style="margin-bottom:10px">Model and outfit</h2>${modelPicker(s,'shoot')}<div style="margin-top:12px">${outfitPicker(s,'shoot')}</div></section>
+    <section class="card stack"><h2>Scene</h2>
+      <label class="field"><span class="label">Describe the location</span><input type="text" id="s-scene" value="${esc(s.scene)}" oninput="S.shoot.scene=this.value"></label>
+      <div class="row">${['Rooftop at golden hour','Bedroom mirror selfie','Café window seat','Beach at noon','Gym locker room','City street at night'].map(o=>`<button class="chip" aria-pressed="${s.scene===o}" onclick="S.shoot.scene='${o}';render()">${o}</button>`).join('')}</div></section>
+    <section class="card stack"><h2>Camera</h2>
+      <div class="field"><span class="label">Shot</span><div class="row">${opts(['Close-up','Medium','Full body','Wide'],s.shot,'shot')}</div></div>
+      <div class="field"><span class="label">Angle</span><div class="row">${opts(['Low','Eye level','High','Selfie arm'],s.angle,'angle')}</div></div>
+      <div class="field"><span class="label">Lens</span><div class="row">${opts([16,24,35,50,85],s.lens,'lens')}</div></div>
+      <div class="field"><span class="label">Aperture</span><div class="row">${opts(['f/1.4','f/2.8','f/5.6','f/11'],s.aperture,'aperture')}</div></div></section>
+    <section class="card stack"><h2>Light and grade</h2>
+      <div class="field"><span class="label">Lighting</span><div class="row">${opts(['Golden hour','Overcast soft','Ring light','Window light','Flash','Neon night'],s.light,'light')}</div></div>
+      <label class="field"><span class="label">Colour temperature · <span class="mono" id="s-temp-v">${s.temp}K</span></span><input type="range" id="s-temp" min="2700" max="7500" step="100" value="${s.temp}" oninput="S.shoot.temp=+this.value;document.getElementById('s-temp-v').textContent=this.value+'K'"></label>
+      <div class="field"><span class="label">Grade</span><div class="row">${opts(['Phone-natural','Warm film','Clean editorial','Muted','High contrast'],s.grade,'grade')}</div></div>
+      <div class="field"><span class="label">Realism preset</span><div class="row">${opts(['Phone photo','DSLR','Disposable camera','Studio campaign'],s.realism,'realism')}</div></div></section>
+  </div>
+  <aside class="side stack"><section class="card stack"><h2>Output</h2>
+      <div class="field"><span class="label">Aspect</span><div class="seg">${['4:5','9:16','1:1','3:4'].map(o=>`<button aria-pressed="${s.ratio===o}" onclick="S.shoot.ratio='${o}';render()">${o}</button>`).join('')}</div></div>
+      <label class="field"><span class="label">Images · <span class="mono" id="s-count-v">${s.count}</span></span><input type="range" id="s-count" min="1" max="8" value="${s.count}" oninput="S.shoot.count=+this.value;render()"></label>
+      <div class="estimate"><div><span class="note">Time</span><b>~${s.count*8}s</b></div><div><span class="note">Cost</span><b>$${cost}</b></div><div><span class="note">Never add</span><b style="font-size:.8rem">${m.never.length?m.never.join(', '):'—'}</b></div></div>
+      <button class="btn primary" onclick="runShoot()">Shoot ${s.count} images</button>
+      <details><summary class="note">Show the prompt</summary><pre class="prompt">${esc(shootPrompt())}</pre></details></section>
+    ${s.results.length?`<section class="card"><h2>Latest shoot</h2><div class="shots">${s.results.map(r=>`<img src="${IMG[r]}" alt="">`).join('')}</div></section>`:''}
+  </aside></div>`;
+}
+function shootPrompt(){ const s=S.shoot, m=model(s.model), o=m.outfits[s.outfit]; return `${m.name}, ${m.niche.toLowerCase()} creator, wearing ${o?o.n.toLowerCase():'her outfit'}.
+Scene: ${s.scene}. ${s.shot} shot, ${s.angle.toLowerCase()} angle, ${s.lens}mm, ${s.aperture}.
+Light: ${s.light.toLowerCase()}, ${s.temp}K. Grade: ${s.grade.toLowerCase()}. Look: ${s.realism.toLowerCase()}, natural skin texture.
+Identity from 6 locked references. Never add: ${m.never.join(', ')||'none'}.`; }
+function runShoot(){ const s=S.shoot, m=model(s.model); const pool=[m.outfits[s.outfit].img,'crystal_face','face_front','green_tq']; s.results=Array.from({length:Math.min(s.count,4)},(_,i)=>pool[i%pool.length]); S.jobs.unshift({id:Date.now(),kind:'Photoshoot',model:m.id,title:`${s.scene} · ${s.count} shots`,engine:'Image',state:'done',cost:+(s.count*0.03).toFixed(2),img:pool[0]}); toast('Shoot done · sample images'); render(); }
+
+/* ---------- Video ---------- */
+const SEC_PER_STEP = 58 * (1/5.2); // H100 + FlashAttention 3, measured: 57.8s per step for a 5.2s clip
+function vEstimate(){ const v=S.video;
+  if(v.engine==='viggle') return {min:(95/60)*(v.length/5.2), cost:0.13*(v.length/5.2)*v.takes, gpu:'H200 NVL · $3.79/hr'};
+  let min = v.steps * SEC_PER_STEP * v.length * Math.max(1, v.length/5.2*0.6+0.4) / 60; // longer clips cost more than linearly
+  if(v.lipsync) min += 4; return {min, cost:(min/60)*3.99*v.takes, gpu:'H100 · $3.99/hr'}; }
+function viewVideo(){
+  const v=S.video, m=model(v.model), e=vEstimate();
+  return `<div class="head"><div><h1>Video studio</h1><p>Put your model into a real clip. The performer's motion, timing and room stay; face, body and outfit become your model.</p></div></div>
+  <div class="studio"><div class="stack">
+    <section class="card stack"><div class="section-title"><h2>Source clip</h2><button class="btn ghost" onclick="toast('Pick a clip from your camera roll')">Replace</button></div>
+      <div class="clip"><div class="thumb">9:16<br>9.4s</div><div class="checks">
+        <div><span>One person in frame</span><span class="pill good">✓ Yes</span></div>
+        <div><span>Watermark</span><span class="pill good">✓ None found</span></div>
+        <div><span>Resolution</span><span class="mono">1080×1920 · 30fps</span></div>
+        <div><span>Length</span><span class="mono">9.4s (max 15s)</span></div>
+        <div><span>Performer's lip sync</span><span class="pill warn">Not talking</span></div>
+      </div></div>
+      <label class="field"><span class="label">Use</span><select id="v-len" onchange="S.video.length=+this.value;render()">${[[5.2,'First 5.2s'],[9.4,'Full clip · 9.4s']].map(([x,l])=>`<option value="${x}" ${v.length===x?'selected':''}>${l}</option>`).join('')}</select></label>
+      <label class="field"><span class="label">Performer consent</span><select id="v-consent" onchange="S.video.consent=this.value;render()">
+        <option value="yes-test" ${v.consent==='yes-test'?'selected':''}>On file · private tests only</option>
+        <option value="yes-post" ${v.consent==='yes-post'?'selected':''}>On file · posting allowed</option>
+        <option value="none" ${v.consent==='none'?'selected':''}>No record</option></select></label>
+      ${v.consent==='none'?`<div class="callout warn">Add the performer's written okay before generating. Clips without consent can't be made.</div>`:v.consent==='yes-test'?`<p class="note">Results from this clip go to the test gallery and can't be exported for posting.</p>`:''}
+    </section>
+    <section class="card"><h2 style="margin-bottom:10px">Model and outfit</h2>${modelPicker(v,'video')}<div style="margin-top:12px">${outfitPicker(v,'video')}</div>
+      <p class="note" style="margin-top:8px">Never add: ${m.never.join(', ')||'nothing'} · removed automatically.</p></section>
+    <section class="card stack"><h2>Engine and quality</h2>
+      <div class="seg"><button aria-pressed="${v.engine==='h3'}" onclick="S.video.engine='h3';render()">H3 · reference set</button><button aria-pressed="${v.engine==='viggle'}" onclick="S.video.engine='viggle';render()">Viggle · experimental</button></div>
+      ${v.engine==='viggle'?`<div class="callout warn">Experimental. Motion timing is exact on fast moves, but the face is softer and can warp slightly. Identity comes from one repainted frame.</div>`:
+      `<div class="field"><span class="label">Steps · <span class="mono" id="v-steps-v">${v.steps}</span>${v.steps===10?' <span class="pill good">Recommended</span>':v.steps>10?' <span class="pill neutral">Rarely worth it</span>':' <span class="pill warn">Below tested range</span>'}</span>
+        <input type="range" id="v-steps" min="4" max="30" value="${v.steps}" oninput="S.video.steps=+this.value;render()" aria-describedby="v-steps-help">
+        <div class="steps-scale"><span>4</span><span>10</span><span>20</span><span>30</span></div>
+        <p class="note" id="v-steps-help">In our tests 10, 15 and 20 steps looked identical. More steps cost more time but don't change motion timing.</p></div>`}
+    </section>
+    <section class="card stack"><h2>Background</h2>
+      <div class="seg"><button aria-pressed="${v.bg==='keep'}" onclick="S.video.bg='keep';render()">Keep the real room</button><button aria-pressed="${v.bg==='photo'}" onclick="S.video.bg='photo';render()">New background photo</button></div>
+      ${v.bg==='photo'?`<div class="field"><span class="label">Motion in the background</span><div class="row">${['still','subtle','busy'].map(o=>`<button class="chip" aria-pressed="${v.motion===o}" onclick="S.video.motion='${o}';render()">${o==='still'?'Still':o==='subtle'?'Subtly alive (recommended)':'Busy'}</button>`).join('')}</div></div>
+        <p class="note">Use a vertical photo from the same camera height, with similar light. Not tested yet.</p>`:''}
+    </section>
+    <section class="card stack"><h2>Sound and lips</h2>
+      <div class="seg"><button aria-pressed="${v.audio==='keep'}" onclick="S.video.audio='keep';render()">Keep original audio</button><button aria-pressed="${v.audio==='new'}" onclick="S.video.audio='new';render()">Replace audio</button></div>
+      <label class="toggle"><span><b>Lip sync</b><br><span class="note">Only for talking or singing clips. Adds ~4 min.</span></span><input type="checkbox" class="switch" id="v-lip" ${v.lipsync?'checked':''} onchange="S.video.lipsync=this.checked;render()"></label>
+    </section>
+  </div>
+  <aside class="side stack"><section class="card stack"><h2>Render</h2>
+      <label class="field"><span class="label">Takes · <span class="mono">${v.takes}</span></span><input type="range" id="v-takes" min="1" max="4" value="${v.takes}" oninput="S.video.takes=+this.value;render()"></label>
+      <div class="estimate"><div><span class="note">Per take</span><b>${e.min<2?Math.round(e.min*60)+'s':'~'+e.min.toFixed(1)+'m'}</b></div><div><span class="note">Cost</span><b>$${e.cost.toFixed(2)}</b></div><div><span class="note">Size</span><b style="font-size:.8rem">768×1344</b></div></div>
+      <p class="note mono">${e.gpu}${v.engine==='h3'?' · FlashAttention 3':''}</p>
+      <button class="btn primary" ${v.consent==='none'?'disabled':''} onclick="runVideo()">Generate ${v.takes>1?v.takes+' takes':''}</button>
+      <details><summary class="note">Show the prompt</summary><pre class="prompt">${esc(videoPrompt())}</pre></details></section>
+    <section class="card"><p class="note">Every export gets the AI-generated label. Brand content also needs #ad and TikTok's Branded content toggle.</p></section>
+  </aside></div>`;
+}
+function videoPrompt(){ const v=S.video, m=model(v.model), o=m.outfits[v.outfit];
+  return `subject_definitions:
+<Subject 1> is the performer in <Video 1>.
+<Subject 2> is ${m.name}, shown in <Image 1>-<Image 6>.
+summary:
+[video editing + character replacement${v.audio==='keep'?' + audio reuse':''}] Replace <Subject 1> with <Subject 2>. Keep every movement, pose and expression at the same moment. ${v.bg==='keep'?'The room, camera and light of <Video 1> are unchanged.':'Move the scene into the location in <Image 7> ('+v.motion+' background).'}
+retention_analysis:
+<Subject 2>: outfit = ${o?o.n:'—'}. None of these appear: ${m.never.join(', ')||'—'}.
+${v.audio==='keep'?'<Audio 1>: fully_copy.':''}
+settings: steps=${v.engine==='h3'?v.steps:4}, engine=${v.engine==='h3'?'H3 Ref2VA':'Viggle-Animate'}, 768x1344, ${v.length}s`; }
+function runVideo(){ const v=S.video, m=model(v.model), e=vEstimate(); for(let t=0;t<v.takes;t++) S.jobs.unshift({id:Date.now()+t,kind:'Video',model:m.id,title:`New swap · ${v.length}s${v.takes>1?' · take '+(t+1):''}`,engine:v.engine==='h3'?'H3':'Viggle (experimental)',steps:v.steps,step:0,state:'queued',eta:'starting GPU',cost:+(e.cost/v.takes).toFixed(2),img:m.outfits[v.outfit].img}); toast('Queued · GPU starting'); location.hash='jobs'; }
+
+/* ---------- Jobs ---------- */
+function viewJobs(){
+  const spent = S.jobs.reduce((a,j)=>a+(j.cost||0),0);
+  return `<div class="head"><div><h1>Jobs and results</h1><p>Every render, what it cost, and where it landed. The GPU shuts down when the queue is empty.</p></div></div>
+  <div class="kpis" style="margin-bottom:16px">
+    <div class="card kpi"><span class="label">Balance</span><div class="v">$6.07</div></div>
+    <div class="card kpi"><span class="label">This month</span><div class="v">$${(18.93).toFixed(2)}</div></div>
+    <div class="card kpi"><span class="label">In queue</span><div class="v">${S.jobs.filter(j=>j.state!=='done').length}</div></div>
+    <div class="card kpi"><span class="label">GPU</span><div class="v" style="font-size:1rem">${S.jobs.some(j=>j.state!=='done')?'<span class="pill good">● H100 running</span>':'<span class="pill neutral">Off</span>'}</div></div>
+  </div>
+  <div class="studio"><section class="card"><h2 style="margin-bottom:12px">Queue and history</h2><div class="jobs">
+    ${S.jobs.map(j=>`<div class="job"><img src="${IMG[j.img]}" alt="">
+      <div style="min-width:0"><b>${esc(j.title)}</b><div class="note">${j.kind} · ${esc(j.engine)}${j.steps&&j.engine==='H3'?' · '+j.steps+' steps':''}</div>
+        ${j.state==='running'?`<div class="bar"><i style="width:${(j.step/j.steps)*100}%"></i></div><div class="note mono">step ${j.step}/${j.steps} · ${j.eta}</div>`:j.state==='queued'?`<div class="note mono">${j.eta}</div>`:''}</div>
+      <div style="text-align:right">${j.state==='done'?'<span class="pill good">Done</span>':j.state==='running'?'<span class="pill warn">Running</span>':'<span class="pill neutral">Queued</span>'}<div class="note mono">$${(j.cost||0).toFixed(2)}</div></div></div>`).join('')}
+  </div></section>
+  <aside class="side stack"><section class="card stack"><div class="section-title"><h2>Gallery</h2>
+      <div class="seg"><button aria-pressed="${S.gallery==='test'}" onclick="S.gallery='test';render()">Tests</button><button aria-pressed="${S.gallery==='final'}" onclick="S.gallery='final';render()">Final</button></div></div>
+      ${S.gallery==='test'?`<div class="gallery">${['green_front','green_tq','crystal_face','crystal_front'].map((k,i)=>`<figure><img src="${IMG[k]}" alt=""><figcaption>${['10 steps','Viggle','30 steps','Shoot'][i]}</figcaption></figure>`).join('')}</div>
+        <p class="note">Tests stay here and never fill your final gallery.</p>`:`<p class="note">Nothing approved yet. Approve a take to move it here and export for TikTok (1080×1920, AI label on).</p>`}
+    </section></aside></div>`;
+}
+render();
+</script>
