@@ -250,7 +250,7 @@ struct LoraView: View {
                 }
                 ListRow(title: "Trained on", last: true) { MonoValue("\(l.trainedOn ?? l.kept) shots · v\(l.version)") }
             }
-            MButton("Retrain with more shots · \(Pricing.money(LoraPricing.setCost))", fill: true) { store.retrainLora(m) }
+            MButton("Retrain with more shots", fill: true) { store.retrainLora(m) }
             MButton("Test it in a photoshoot", kind: .primary, size: .big) {
                 store.selectModel(m)
                 store.go(.shoot)
@@ -499,9 +499,9 @@ struct PostRow: View {
         let take = store.take(for: p)
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Media(ref: take?.thumb, ratio: 44.0 / 58.0, radius: t.isA ? 0 : 6).frame(width: 44)
+                Media(ref: take?.thumb ?? p.thumb, ratio: 44.0 / 58.0, radius: t.isA ? 0 : 6).frame(width: 44)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(take?.caption ?? "Take").font(t.body(14, .bold)).lineLimit(1)
+                    Text(take?.caption ?? (p.title.isEmpty ? "Take" : p.title)).font(t.body(14, .bold)).lineLimit(1)
                     Muted(p.caption.isEmpty ? "No caption" : p.caption)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

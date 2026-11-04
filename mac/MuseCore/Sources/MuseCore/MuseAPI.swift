@@ -29,6 +29,9 @@ public protocol MuseAPI: AnyObject, Sendable {
     /// Trains the photo and video LoRAs on the kept shots. Needs 20+ kept; charges the training price. Progress arrives as lora events.
     func trainLora(modelId: String) async throws -> Lora
     func setLoraUse(modelId: String, use: Bool) async throws -> Lora
+    /// Retrain (PATCH …/lora {state: "review"}): a ready LoRA goes back to the review grid with the same shots.
+    /// The current version stays in use until the next one is ready; training again makes v{n+1}.
+    func retrainLora(modelId: String) async throws -> Lora
 
     // Social accounts and posts (plans/socials.md)
     func listAccounts(modelId: String) async throws -> [Account]

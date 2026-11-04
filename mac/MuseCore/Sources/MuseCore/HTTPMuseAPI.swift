@@ -164,7 +164,9 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
         absolutize(try await call("PATCH", "v1/models/\(modelId)/lora/candidates/\(candidateId)", LoraCandidateRequest(keep: keep)))
     }
     public func trainLora(modelId: String) async throws -> Lora { absolutize(try await call("POST", "v1/models/\(modelId)/lora/train", Empty())) }
-    public func setLoraUse(modelId: String, use: Bool) async throws -> Lora { absolutize(try await call("PATCH", "v1/models/\(modelId)/lora", LoraUseRequest(use: use))) }
+    public func setLoraUse(modelId: String, use: Bool) async throws -> Lora { absolutize(try await call("PATCH", "v1/models/\(modelId)/lora", LoraPatchRequest(use: use))) }
+
+    public func retrainLora(modelId: String) async throws -> Lora { absolutize(try await call("PATCH", "v1/models/\(modelId)/lora", LoraPatchRequest(state: "review"))) }
 
     func absolutize(_ l: Lora) -> Lora {
         var out = l
@@ -182,10 +184,17 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
         _ = try await send(request("DELETE", "v1/models/\(modelId)/accounts/\(platform.rawValue)"))
     }
     public func listPosts(state: String?) async throws -> [Post] {
-        guard let state, let q = state.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return try await call("GET", "v1/posts") }
-        return try await call("GET", "v1/posts?state=\(q)")
+        let list: [Post]
+        if let state, let q = state.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) { list = try await call("GET", "v1/posts?state=\(q)") } else { list = try await call("GET", "v1/posts") }
+        return list.map(absolutize)
     }
-    public func createPost(_ req: CreatePostRequest) async throws -> Post { try await call("POST", "v1/posts", req) }
+    public func createPost(_ req: CreatePostRequest) async throws -> Post { absolutize(try await call("POST", "v1/posts", req)) }
+
+    func absolutize(_ p: Post) -> Post {
+        var out = p
+        out.thumb = p.thumb.map(absolutize)
+        return out
+    }
     public func deletePost(id: String) async throws { _ = try await send(request("DELETE", "v1/posts/\(id)")) }
 
     public func listJobs() async throws -> [Job] { try await call("GET", "v1/jobs") }
@@ -247,6 +256,7 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
             if b == 0x0A {
                 if let payload = parser.feed(String(decoding: line, as: UTF8.self)), let d = payload.data(using: .utf8), var e = try? decoder.decode(ApiEvent.self, from: d) {
                     if let l = e.lora { e.lora = absolutize(l) }
+                    if let p = e.post { e.post = absolutize(p) }
                     yield(e)
                 }
                 line.removeAll(keepingCapacity: true)

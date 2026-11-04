@@ -128,8 +128,11 @@ extension AppStore {
         }
     }
 
-    /// "Retrain with more shots": a new training set, reviewed and trained as v2, v3… Older versions are kept server-side.
-    func retrainLora(_ m: MuseModel) { buildTrainingSet(m) }
+    /// "Retrain with more shots": back to the review grid with the same shots (bring back or drop any), then train v{n+1}.
+    /// The current version stays in use until the new one is ready.
+    func retrainLora(_ m: MuseModel) {
+        perform { [self] in loras[m.id] = try await api.retrainLora(modelId: m.id) }
+    }
 
     // MARK: Accounts
 

@@ -149,9 +149,14 @@ public struct LoraCandidateRequest: Codable, Sendable {
     public init(keep: Bool) { self.keep = keep }
 }
 
-public struct LoraUseRequest: Codable, Sendable {
-    public var use: Bool
-    public init(use: Bool) { self.use = use }
+/// PATCH /v1/models/{id}/lora {use?, state?: "review"}.
+public struct LoraPatchRequest: Codable, Sendable {
+    public var use: Bool?
+    public var state: String?
+    public init(use: Bool? = nil, state: String? = nil) {
+        self.use = use
+        self.state = state
+    }
 }
 
 // MARK: Social accounts
@@ -298,9 +303,19 @@ public struct Post: Codable, Hashable, Sendable, Identifiable {
     public var when: String
     public var state: String
     public var stats: PostStats?
+    /// The take's title and thumbnail, so the Posts page can show a post whose take is gone.
+    public var title: String
+    public var thumb: ImageRef?
+    public var createdAt: Int64
+    public var postedAt: Int64?
 
     public init(id: String, modelId: String, takeId: String, platforms: [Platform], caption: String = "", aiLabel: Bool = false, paidPartnership: Bool = false,
-                when: String = "now", state: String = "handoff", stats: PostStats? = nil) {
+                when: String = "now", state: String = "handoff", stats: PostStats? = nil, title: String = "", thumb: ImageRef? = nil, createdAt: Int64 = 0,
+                postedAt: Int64? = nil) {
+        self.title = title
+        self.thumb = thumb
+        self.createdAt = createdAt
+        self.postedAt = postedAt
         self.id = id
         self.modelId = modelId
         self.takeId = takeId
@@ -313,7 +328,7 @@ public struct Post: Codable, Hashable, Sendable, Identifiable {
         self.stats = stats
     }
 
-    enum CodingKeys: String, CodingKey { case id, modelId, takeId, platforms, caption, aiLabel, paidPartnership, when, state, stats }
+    enum CodingKeys: String, CodingKey { case id, modelId, takeId, platforms, caption, aiLabel, paidPartnership, when, state, stats, title, thumb, createdAt, postedAt }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -328,6 +343,10 @@ public struct Post: Codable, Hashable, Sendable, Identifiable {
         when = c.v(.when, "now")
         state = c.v(.state, "handoff")
         stats = c.o(.stats)
+        title = c.v(.title, "")
+        thumb = c.o(.thumb)
+        createdAt = c.v(.createdAt, 0)
+        postedAt = c.o(.postedAt)
     }
 
     public var isScheduled: Bool { state == "scheduled" }

@@ -141,6 +141,12 @@ final class LoraFlowTests: XCTestCase {
         XCTAssertEqual(l.photo.progress, 100)
         XCTAssertEqual(l.video.progress, 100)
 
+        // Retrain: back to review with the same shots; v1 stays in use until v2 is ready.
+        l = try await api.retrainLora(modelId: id)
+        XCTAssertEqual(l.state, "review")
+        XCTAssertEqual(l.kept, 20)
+        XCTAssertEqual(l.activeVersion, 1)
+
         // New renders name the LoRA in the exact prompt saved with the job.
         _ = try await api.topUp(TopUpRequest(amount: 10))
         let job = try await api.createJob(JobRequest(title: "t", modelId: id, outfitId: SampleData.green, clipId: SampleData.sampleClip, engine: "viggle", steps: 4))
@@ -223,7 +229,7 @@ final class SocialTests: XCTestCase {
         XCTAssertEqual(now.state, "handoff")
         XCTAssertFalse(now.aiLabel)
         XCTAssertFalse(now.paidPartnership)
-        XCTAssertNotNil(now.stats)
+        XCTAssertEqual(now.title, take.caption)
 
         let labelled = try await api.createPost(CreatePostRequest(modelId: id, takeId: take.id, platforms: [.tiktok], aiLabel: true, paidPartnership: true))
         XCTAssertTrue(labelled.aiLabel && labelled.paidPartnership, "kept exactly as the user set them")
@@ -237,6 +243,11 @@ final class SocialTests: XCTestCase {
         try await api.deletePost(id: later.id)
         let all = try await api.listPosts(state: nil)
         XCTAssertEqual(all.count, 2)
+        // A handed-off post is marked posted with stats a moment later (like server/mock).
+        try await Task.sleep(nanoseconds: 2_000_000_000)
+        let posted = try await api.listPosts(state: "posted")
+        XCTAssertEqual(posted.count, 2)
+        XCTAssertTrue(posted.allSatisfy { $0.stats != nil && $0.postedAt != nil })
     }
 
     func testDecodesWireTypes() throws {

@@ -119,7 +119,10 @@ public actor FakeMuseAPI: MuseAPI {
 
     public func updateModel(id: String, _ req: UpdateModelRequest) throws -> MuseModel {
         var m = try model(id)
-        if let v = req.name?.trimmingCharacters(in: .whitespaces), !v.isEmpty { m.name = v }
+        if let v = req.name?.trimmingCharacters(in: .whitespaces) {
+            if v.isEmpty { throw ApiError("bad_request", "Give her a name") }
+            m.name = v
+        }
         if let v = req.niche { m.niche = v }
         if let v = req.personality { m.personality = v }
         if let v = req.notes { m.notes = v }
@@ -159,7 +162,7 @@ public actor FakeMuseAPI: MuseAPI {
     public func buildLoraCandidates(modelId: String) throws -> Lora {
         let m = try model(modelId)
         var l = loras[modelId] ?? Lora(modelId: modelId)
-        if l.isBusy { throw ApiError("bad_request", "The LoRA is busy · wait for it to finish") }
+        if l.isBusy { throw ApiError("busy", "The LoRA is busy · wait for it to finish") }
         if m.filled == 0 { throw ApiError("bad_request", "Add character-sheet shots first") }
         let cost = LoraPricing.setCost
         if cost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough balance · top up in Credits") }
@@ -212,7 +215,7 @@ public actor FakeMuseAPI: MuseAPI {
         l.state = "training"
         l.progress = 0
         l.photo = LoraPart(state: "training", progress: 0)
-        l.video = LoraPart(state: "queued", progress: 0)
+        l.video = LoraPart(state: "waiting", progress: 0)
         l.cost += cost
         loras[modelId] = l
         hub.emit(ApiEvent(type: "lora", lora: l))
@@ -231,7 +234,7 @@ public actor FakeMuseAPI: MuseAPI {
             let p = min(100, Date().timeIntervalSince(t0) / total * 100)
             l.progress = p
             l.photo = LoraPart(state: p >= 25 ? "ready" : "training", progress: LoraPricing.photoProgress(p))
-            l.video = LoraPart(state: p >= 100 ? "ready" : p >= 25 ? "training" : "queued", progress: LoraPricing.videoProgress(p))
+            l.video = LoraPart(state: p >= 100 ? "ready" : p >= 25 ? "training" : "waiting", progress: LoraPricing.videoProgress(p))
             if p >= 100 {
                 l.state = "ready"
                 l.version += 1
@@ -243,6 +246,14 @@ public actor FakeMuseAPI: MuseAPI {
             if p >= 100 { break }
         }
         loraTasks[modelId] = nil
+    }
+
+    public func retrainLora(modelId: String) throws -> Lora {
+        guard var l = loras[modelId], l.state == "ready" else { throw ApiError("bad_request", "Nothing to retrain yet") }
+        l.state = "review"
+        loras[modelId] = l
+        hub.emit(ApiEvent(type: "lora", lora: l))
+        return l
     }
 
     public func setLoraUse(modelId: String, use: Bool) throws -> Lora {
@@ -291,15 +302,17 @@ public actor FakeMuseAPI: MuseAPI {
         if req.platforms.isEmpty { throw ApiError("bad_request", "Pick at least one account") }
         let connected = Set((accounts[req.modelId] ?? []).map(\.platform))
         if let missing = req.platforms.first(where: { !connected.contains($0) }) { throw ApiError("bad_request", "Connect \(missing.label) first") }
-        guard takes.contains(where: { $0.id == req.takeId }) else { throw ApiError("not_found", "Take not found") }
+        guard let take = takes.first(where: { $0.id == req.takeId }) else { throw ApiError("not_found", "Take not found") }
         let scheduled = req.when != "now"
         if scheduled && PostTime.parse(req.when) == nil { throw ApiError("bad_request", "Pick a time to post") }
         let id = "p_" + shortId()
         // Stage 1: nothing is published by MUSE. "now" hands off to each app; the labels are stored exactly as the user set them.
         let p = Post(id: id, modelId: req.modelId, takeId: req.takeId, platforms: req.platforms, caption: req.caption, aiLabel: req.aiLabel,
-                     paidPartnership: req.paidPartnership, when: req.when, state: scheduled ? "scheduled" : "handoff", stats: scheduled ? nil : Self.demoStats(id))
+                     paidPartnership: req.paidPartnership, when: req.when, state: scheduled ? "scheduled" : "handoff", title: take.caption, thumb: take.thumb,
+                     createdAt: nowMs())
         posts.insert(p, at: 0)
         hub.emit(ApiEvent(type: "post", post: p))
+        if !scheduled { markPostedLater(id) }
         return p
     }
 
@@ -311,10 +324,27 @@ public actor FakeMuseAPI: MuseAPI {
         for i in posts.indices where posts[i].isScheduled {
             if let d = posts[i].scheduledDate, d <= now {
                 posts[i].state = "handoff"
-                posts[i].stats = Self.demoStats(posts[i].id)
                 hub.emit(ApiEvent(type: "post", post: posts[i]))
+                markPostedLater(posts[i].id)
             }
         }
+    }
+
+    /// Like server/mock: a handed-off post turns `posted` with stats after a moment, standing in for the stats read-back.
+    private func markPostedLater(_ id: String) {
+        let delay = genDelay
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            self.markPosted(id)
+        }
+    }
+
+    private func markPosted(_ id: String) {
+        guard let i = posts.firstIndex(where: { $0.id == id }), posts[i].state == "handoff" else { return }
+        posts[i].state = "posted"
+        posts[i].postedAt = nowMs()
+        posts[i].stats = Self.demoStats(id)
+        hub.emit(ApiEvent(type: "post", post: posts[i]))
     }
 
     /// Plausible demo numbers, stable per post.

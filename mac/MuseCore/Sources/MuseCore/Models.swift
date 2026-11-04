@@ -337,10 +337,13 @@ public struct JobRequest: Codable, Hashable, Sendable {
     public var background: String
     public var backgroundMotion: String
     public var clipSeconds: Double?
+    /// true parks the job as `queued` (not charged) until POST /v1/queue/run. nil/false starts it at once.
+    public var queue: Bool?
 
     public init(title: String, modelId: String, outfitId: String, clipId: String, engine: String = Engine.h3.rawValue, steps: Int = 10,
                 use: String = ClipUse.first.rawValue, takes: Int = 1, keepAudio: Bool = true, lipSync: Bool = false,
-                background: String = "keep", backgroundMotion: String = "subtle", clipSeconds: Double? = nil) {
+                background: String = "keep", backgroundMotion: String = "subtle", clipSeconds: Double? = nil, queue: Bool? = nil) {
+        self.queue = queue
         self.title = title
         self.modelId = modelId
         self.outfitId = outfitId
@@ -356,7 +359,7 @@ public struct JobRequest: Codable, Hashable, Sendable {
         self.clipSeconds = clipSeconds
     }
 
-    enum CodingKeys: String, CodingKey { case title, modelId, outfitId, clipId, engine, steps, use, takes, keepAudio, lipSync, background, backgroundMotion, clipSeconds }
+    enum CodingKeys: String, CodingKey { case title, modelId, outfitId, clipId, engine, steps, use, takes, keepAudio, lipSync, background, backgroundMotion, clipSeconds, queue }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         title = c.v(.title, "")
@@ -372,6 +375,7 @@ public struct JobRequest: Codable, Hashable, Sendable {
         background = c.v(.background, "keep")
         backgroundMotion = c.v(.backgroundMotion, "subtle")
         clipSeconds = c.o(.clipSeconds)
+        queue = c.o(.queue)
     }
 
     public var spec: RenderSpec {
