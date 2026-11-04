@@ -6,3 +6,4 @@ DerivedData/
 .swiftpm/
 *.xcuserstate
 xcuserdata/
+Muse/Info.plist

@@ -1,0 +1,60 @@
+# XcodeGen spec for the MUSE Mac app. Generate the project with:  cd mac && xcodegen generate
+name: Muse
+options:
+  bundleIdPrefix: studio.muse
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+packages:
+  MuseCore:
+    path: MuseCore
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1"
+    CURRENT_PROJECT_VERSION: "1"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+targets:
+  Muse:
+    type: application
+    platform: macOS
+    sources:
+      - path: Muse/App
+      - path: Muse/Theme
+      - path: Muse/Views
+      - path: Muse/Resources/Fonts
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: MuseCore
+    info:
+      path: Muse/Info.plist
+      properties:
+        CFBundleName: MUSE
+        CFBundleDisplayName: MUSE
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.photography
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        NSHumanReadableCopyright: MUSE AI model studio. Video model: MiniMax H3.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_NAME: MUSE
+        PRODUCT_BUNDLE_IDENTIFIER: studio.muse.mac
+        GENERATE_INFOPLIST_FILE: NO
+        ENABLE_HARDENED_RUNTIME: NO
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+        COMBINE_HIDPI_IMAGES: YES
+schemes:
+  Muse:
+    build:
+      targets:
+        Muse: all
+    run:
+      config: Debug
+    archive:
+      config: Release

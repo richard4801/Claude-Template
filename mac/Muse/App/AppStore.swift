@@ -1,0 +1,551 @@
+import AppKit
+import MuseCore
+import Observation
+import SwiftUI
+
+enum Screen: String, CaseIterable {
+    case home, models, profile, create, studio, shoot, queue, gallery, result, settings, credits
+
+    /// Which sidebar item is highlighted.
+    var navParent: Screen {
+        switch self {
+        case .profile, .create: return .models
+        case .result: return .gallery
+        case .credits: return .settings
+        default: return self
+        }
+    }
+}
+
+struct NavItem: Identifiable {
+    let screen: Screen
+    let title: String
+    let icon: String
+    let key: Character
+    var id: Screen { screen }
+
+    static let main: [NavItem] = [
+        NavItem(screen: .home, title: "Home", icon: "house", key: "1"),
+        NavItem(screen: .models, title: "Models", icon: "person", key: "2"),
+        NavItem(screen: .studio, title: "Video studio", icon: "video", key: "3"),
+        NavItem(screen: .shoot, title: "Photoshoot", icon: "camera", key: "4"),
+        NavItem(screen: .queue, title: "Queue", icon: "list.bullet.below.rectangle", key: "5"),
+        NavItem(screen: .gallery, title: "Gallery", icon: "square.grid.2x2", key: "6"),
+    ]
+}
+
+enum DataSource: String, CaseIterable, Codable {
+    case fake, http
+    var label: String { self == .fake ? "In-process (no server)" : "HTTP server" }
+}
+
+enum ShootState { case idle, busy, done }
+enum ShootTab: String, CaseIterable { case scene, camera, light, prompt }
+enum GalleryTab { case tests, final }
+enum SettingsSection: String, CaseIterable {
+    case appearance, defaults, costs, notif, developer, about
+    var title: String {
+        switch self {
+        case .appearance: return "Appearance"
+        case .defaults: return "Render defaults"
+        case .costs: return "Costs & limits"
+        case .notif: return "Notifications"
+        case .developer: return "Developer"
+        case .about: return "About"
+        }
+    }
+}
+
+struct Toast: Identifiable {
+    let id = UUID()
+    var message: String
+    var actionLabel: String?
+    var action: (() -> Void)?
+}
+
+/// A character-sheet slot while a new model is being made.
+enum DraftSlot: Equatable {
+    case local(URL)
+    case remote(ImageRef, ai: Bool)
+    case busy
+}
+
+struct CreateDraft {
+    var step = 1
+    var name = ""
+    var age = 24
+    var niche = "Beauty"
+    var personality = ""
+    var notes = ""
+    var slots: [SheetAngle: DraftSlot] = [:]
+    /// Set once the model exists on the backend (made lazily on Save or "Fill missing angles").
+    var modelId: String?
+
+    var filled: Int { slots.values.filter { $0 != .busy }.count }
+    var faces: Int { [SheetAngle.face, .profile].filter { slots[$0] != nil && slots[$0] != .busy }.count }
+    var busy: Bool { slots.values.contains(.busy) }
+}
+
+struct OutfitDraft {
+    var modelId: String
+    var mode: OutfitMode = .describe
+    var name = ""
+    var description = ""
+    var images: [URL] = []
+    var state: ShootState = .idle
+    var outfitId: String?
+    var angles: [ImageRef?] = [nil, nil, nil, nil]
+}
+
+enum Niches {
+    static let all = ["Beauty", "Fashion", "Fitness", "Food", "Tech", "Travel", "Lifestyle"]
+}
+
+/// All app state, observed by the views. Talks to the backend through `MuseAPI` (the in-process fake by default).
+@MainActor
+@Observable
+final class AppStore {
+    // MARK: Preferences (UserDefaults)
+
+    private let defaults = UserDefaults.standard
+
+    var themeID: ThemeID { didSet { defaults.set(themeID.rawValue, forKey: "muse.theme"); Sounds.theme = themeID } }
+    var sound: Bool { didSet { defaults.set(sound, forKey: "muse.sound"); Sounds.enabled = sound } }
+    var pro: Bool { didSet { defaults.set(pro, forKey: "muse.pro") } }
+    var defaultSteps: Int { didSet { defaults.set(defaultSteps, forKey: "muse.defaultSteps") } }
+    var defaultEngine: Engine { didSet { defaults.set(defaultEngine.rawValue, forKey: "muse.defaultEngine") } }
+    var houseStyle: String { didSet { defaults.set(houseStyle, forKey: "muse.houseStyle") } }
+    var notifyDone: Bool { didSet { defaults.set(notifyDone, forKey: "muse.notifyDone") } }
+    var notifyFailed: Bool { didSet { defaults.set(notifyFailed, forKey: "muse.notifyFailed") } }
+    var notifyLowBalance: Bool { didSet { defaults.set(notifyLowBalance, forKey: "muse.notifyLow") } }
+    var notifyPhone: Bool { didSet { defaults.set(notifyPhone, forKey: "muse.notifyPhone") } }
+    var warnOverBudget: Bool { didSet { defaults.set(warnOverBudget, forKey: "muse.warnBudget") } }
+    var dataSource: DataSource { didSet { defaults.set(dataSource.rawValue, forKey: "muse.dataSource") } }
+    var baseURL: String { didSet { defaults.set(baseURL, forKey: "muse.baseURL") } }
+    /// Never-add lists edited on the profile. plans/api.md has no endpoint to update a model yet, so edits are kept on this Mac.
+    var neverOverrides: [String: [String]] { didSet { defaults.set(neverOverrides, forKey: "muse.never") } }
+
+    var theme: Theme { Theme.get(themeID) }
+
+    // MARK: Session and backend
+
+    var user: User?
+    var authTab: AuthTab = .signIn
+    var attest = [false, false]
+    var authEmail = ""
+    var authPassword = ""
+    var authBusy = false
+    enum AuthTab { case signIn, signUp }
+
+    private let fake: FakeMuseAPI
+    @ObservationIgnored private(set) var api: any MuseAPI
+    @ObservationIgnored private var eventsTask: Task<Void, Never>?
+    @ObservationIgnored private var toastTask: Task<Void, Never>?
+    var offlineMessage: String?
+    var loading = false
+
+    // MARK: Navigation and overlays
+
+    var screen: Screen = .home
+    var navForward = true
+    var toast: Toast?
+    var paletteOpen = false
+    var paletteQuery = ""
+    var paletteIndex = 0
+    var settingsSection: SettingsSection = .appearance
+
+    // MARK: Data
+
+    var models: [MuseModel] = []
+    var outfits: [Outfit] = []
+    var jobs: [Job] = []
+    var takes: [Take] = []
+    var balance = Balance(balance: 0, month: 0)
+    var hiddenFailures: Set<String> = []
+
+    // MARK: Video studio
+
+    var modelId = SampleData.sienna
+    var outfitIdByModel: [String: String] = [:]
+    var clip: Clip?
+    var clipFile: URL?
+    var clipThumb: ImageRef?
+    var steps: Int
+    var engine: Engine
+    var use: ClipUse = .first
+    var takeCount = 1
+    var keepAudio = true
+    var lipSync = false
+    var background = "keep"
+    var motion = "subtle"
+    var showPrompt = false
+    var generating = false
+    var clipDropTargeted = false
+
+    // MARK: Photoshoot
+
+    var shoot = ShootSettings()
+    var shootState: ShootState = .idle
+    var lastShots: [Take] = []
+    var shootTab: ShootTab = .scene
+    /// "Edit as text": a hand-edited prompt used for the next shoot only.
+    var promptOverride: String?
+
+    // MARK: Gallery
+
+    var galleryTab: GalleryTab = .tests
+    var picked: [String] = []
+    var fresh: Set<String> = []
+    var comparing = false
+    var openTakeId: String?
+
+    // MARK: Models
+
+    var profileModelId = SampleData.sienna
+    var create = CreateDraft()
+    var outfitSheet: OutfitDraft?
+
+    // MARK: Credits
+
+    var topUpAmount: Double = 25
+
+    init() {
+        let d = UserDefaults.standard
+        themeID = ThemeID(rawValue: d.string(forKey: "muse.theme") ?? "a") ?? .a
+        sound = d.object(forKey: "muse.sound") as? Bool ?? true
+        pro = d.bool(forKey: "muse.pro")
+        let ds = d.object(forKey: "muse.defaultSteps") as? Int ?? Pricing.stepsDefault
+        defaultSteps = Pricing.clampSteps(ds)
+        defaultEngine = Engine(id: d.string(forKey: "muse.defaultEngine") ?? "h3")
+        houseStyle = d.string(forKey: "muse.houseStyle") ?? PromptEngine.houseStyle
+        notifyDone = d.object(forKey: "muse.notifyDone") as? Bool ?? true
+        notifyFailed = d.object(forKey: "muse.notifyFailed") as? Bool ?? true
+        notifyLowBalance = d.object(forKey: "muse.notifyLow") as? Bool ?? true
+        notifyPhone = d.object(forKey: "muse.notifyPhone") as? Bool ?? true
+        warnOverBudget = d.object(forKey: "muse.warnBudget") as? Bool ?? true
+        dataSource = DataSource(rawValue: d.string(forKey: "muse.dataSource") ?? "fake") ?? .fake
+        baseURL = d.string(forKey: "muse.baseURL") ?? "http://localhost:8787"
+        neverOverrides = d.dictionary(forKey: "muse.never") as? [String: [String]] ?? [:]
+        steps = Pricing.clampSteps(ds)
+        engine = Engine(id: d.string(forKey: "muse.defaultEngine") ?? "h3")
+        let store = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("MUSE/uploads")
+        fake = FakeMuseAPI(storeDir: store)
+        api = fake
+        Sounds.enabled = sound
+        Sounds.theme = themeID
+        if let data = d.data(forKey: "muse.user"), let u = try? JSONDecoder().decode(User.self, from: data) { user = u }
+    }
+
+    // MARK: Lifecycle
+
+    func bootstrap() {
+        api = makeAPI()
+        Notifier.shared.requestAuthorization()
+        if user != nil { Task { await connect() } }
+    }
+
+    private func makeAPI() -> any MuseAPI {
+        if dataSource == .http, let u = URL(string: baseURL.trimmingCharacters(in: .whitespaces)), u.scheme != nil { return HTTPMuseAPI(baseURL: u) }
+        return fake
+    }
+
+    /// Switches between the in-process fake and the HTTP server, then reloads everything.
+    func applyDataSource() {
+        api = makeAPI()
+        clip = nil
+        clipFile = nil
+        clipThumb = nil
+        Task {
+            if let token = defaults.string(forKey: "muse.token") { await api.setToken(token) }
+            await connect()
+        }
+    }
+
+    func connect() async {
+        eventsTask?.cancel()
+        let stream = api.events()
+        eventsTask = Task { [weak self] in
+            for await e in stream {
+                guard let self else { return }
+                self.apply(e)
+            }
+        }
+        await reload()
+    }
+
+    func reload() async {
+        loading = true
+        defer { loading = false }
+        let api = self.api
+        do {
+            async let m = api.listModels()
+            async let o = api.listOutfits()
+            async let j = api.listJobs()
+            async let t = api.listTakes()
+            async let b = api.balance()
+            let (mm, oo, jj, tt, bb) = try await (m, o, j, t, b)
+            models = mm
+            outfits = oo
+            jobs = jj
+            takes = tt
+            balance = bb
+            offlineMessage = nil
+            if !models.contains(where: { $0.id == modelId }), let first = models.first(where: { !$0.isDraft }) ?? models.first { modelId = first.id }
+            if !models.contains(where: { $0.id == profileModelId }), let first = models.first { profileModelId = first.id }
+            if clip == nil { await useSampleClip(bad: false, quiet: true) }
+        } catch {
+            offlineMessage = (error as? ApiError)?.message ?? error.localizedDescription
+        }
+    }
+
+    /// Runs an API call and shows its error as a toast.
+    func perform(_ work: @escaping @MainActor () async throws -> Void) {
+        Task {
+            do { try await work() } catch let e as ApiError {
+                if e.code == "offline" { offlineMessage = e.message }
+                if e.code == "insufficient_balance" {
+                    showToast(e.message, action: "Top up") { [weak self] in self?.go(.credits) }
+                } else {
+                    showToast(e.message)
+                }
+            } catch {
+                showToast(error.localizedDescription)
+            }
+        }
+    }
+
+    // MARK: Events
+
+    func apply(_ e: ApiEvent) {
+        if let j = e.job {
+            let before = jobs.first { $0.id == j.id }
+            if let i = jobs.firstIndex(where: { $0.id == j.id }) { jobs[i] = j } else { jobs.insert(j, at: 0) }
+            let wasActive = before.map(\.isActive) ?? true
+            if wasActive && j.isDone { jobFinished(j, newTakes: e.takes) }
+            if wasActive && j.isFailed { jobFailed(j) }
+        }
+        if !e.takes.isEmpty {
+            for t in e.takes.reversed() where !takes.contains(where: { $0.id == t.id }) { takes.insert(t, at: 0) }
+        }
+        if let b = e.balance {
+            let wasAbove = balance.balance >= 5
+            balance = b
+            if wasAbove && b.balance < 5 && notifyLowBalance {
+                Notifier.shared.post(title: "Balance below $5", body: "You have \(Pricing.money(b.balance)) left · about \(Pricing.videosLeft(b.balance)) videos at 10 steps.")
+            }
+        }
+        if let m = e.model {
+            if let i = models.firstIndex(where: { $0.id == m.id }) { models[i] = m } else { models.append(m) }
+            syncDraftSlots(from: m)
+        }
+        if let o = e.outfit {
+            if let i = outfits.firstIndex(where: { $0.id == o.id }) { outfits[i] = o } else { outfits.append(o) }
+            if outfitSheet?.outfitId == o.id && o.state == "preview" {
+                outfitSheet?.state = .done
+                outfitSheet?.angles = o.angles
+                Sounds.play(.done)
+            }
+        }
+    }
+
+    private func jobFinished(_ j: Job, newTakes: [Take]) {
+        let ids = newTakes.map(\.id)
+        fresh.formUnion(ids)
+        Sounds.play(.done)
+        showToast("\(j.title) is ready.", action: "Review") { [weak self] in
+            guard let self else { return }
+            self.openTake(ids.first ?? self.takes.first { $0.jobId == j.id }?.id ?? "")
+        }
+        if notifyDone {
+            Notifier.shared.post(title: "\(j.title) is ready", body: "\(j.engineLabel) · \(Pricing.money(j.cost)) · \(max(1, j.request.takes)) take\(j.request.takes > 1 ? "s" : "") to review.")
+        }
+    }
+
+    private func jobFailed(_ j: Job) {
+        Sounds.play(.error)
+        showToast("Render failed · \(j.title). \(Pricing.money(j.refunded)) refunded.", action: "Open queue") { [weak self] in self?.go(.queue) }
+        if notifyFailed {
+            Notifier.shared.post(title: "Render failed · \(j.title)", body: "\(j.error ?? "The render stopped.") \(Pricing.money(j.refunded)) refunded.")
+        }
+    }
+
+    // MARK: Auth
+
+    func signIn() {
+        authBusy = true
+        perform { [self] in
+            defer { authBusy = false }
+            let r = try await api.signIn(SignInRequest(email: authEmail.isEmpty ? "you@studio.com" : authEmail, password: authPassword))
+            await finishAuth(r)
+        }
+    }
+
+    /// Apple / Google buttons. Mocked: they sign in with a demo account.
+    func signInSSO(_ provider: String) {
+        authEmail = authEmail.isEmpty ? "studio@\(provider.lowercased()).example" : authEmail
+        signIn()
+    }
+
+    func signUp() {
+        guard attest[0] && attest[1] else {
+            showToast("Tick both boxes to create your account")
+            return
+        }
+        authBusy = true
+        perform { [self] in
+            defer { authBusy = false }
+            let email = authEmail.isEmpty ? "you@studio.com" : authEmail
+            let r = try await api.signUp(SignUpRequest(studioName: "", email: email, password: authPassword, attestAdultRightsOriginal: attest[0], attestLabelAi: attest[1]))
+            await finishAuth(r)
+        }
+    }
+
+    private func finishAuth(_ r: AuthResponse) async {
+        await api.setToken(r.token)
+        defaults.set(r.token, forKey: "muse.token")
+        defaults.set(try? JSONEncoder().encode(r.user), forKey: "muse.user")
+        user = r.user
+        screen = .home
+        authPassword = ""
+        Sounds.play(.go)
+        await connect()
+    }
+
+    func signOut() {
+        eventsTask?.cancel()
+        user = nil
+        authTab = .signIn
+        attest = [false, false]
+        defaults.removeObject(forKey: "muse.user")
+        defaults.removeObject(forKey: "muse.token")
+        Task { await api.setToken(nil) }
+    }
+
+    // MARK: Navigation
+
+    func go(_ s: Screen) {
+        guard s != screen else { return }
+        if s != .gallery { comparing = false }
+        navForward = true
+        Sounds.play(.nav)
+        withAnimation(MotionStyle.of(themeID).animation) { screen = s }
+    }
+
+    func setTheme(_ id: ThemeID) {
+        guard id != themeID else { return }
+        Sounds.play(.theme)
+        withAnimation(.easeOut(duration: 0.35)) { themeID = id }
+    }
+
+    func showToast(_ message: String, action: String? = nil, perform: (() -> Void)? = nil) {
+        toastTask?.cancel()
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { toast = Toast(message: message, actionLabel: action, action: perform) }
+        toastTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 3_600_000_000)
+            if Task.isCancelled { return }
+            withAnimation(.easeIn(duration: 0.25)) { self?.toast = nil }
+        }
+    }
+
+    // MARK: Derived
+
+    var currentModel: MuseModel? { models.first { $0.id == modelId } ?? models.first }
+    var profileModel: MuseModel? { models.first { $0.id == profileModelId } ?? models.first }
+
+    func outfits(for m: MuseModel?) -> [Outfit] {
+        guard let m else { return [] }
+        return m.outfitIds.compactMap { id in outfits.first { $0.id == id && $0.state == "ready" } }
+    }
+
+    var currentOutfits: [Outfit] { outfits(for: currentModel) }
+
+    var currentOutfit: Outfit? {
+        let list = currentOutfits
+        if let id = outfitIdByModel[modelId], let o = list.first(where: { $0.id == id }) { return o }
+        return list.first
+    }
+
+    func selectOutfit(_ o: Outfit) { outfitIdByModel[modelId] = o.id }
+
+    func neverList(_ m: MuseModel?) -> [String] {
+        guard let m else { return [] }
+        return neverOverrides[m.id] ?? m.neverAdd
+    }
+
+    func identity(_ m: MuseModel?) -> PromptIdentity {
+        guard let m else { return PromptIdentity(name: "Model", look: "") }
+        var id = m.promptIdentity
+        id.neverAdd = neverList(m)
+        return id
+    }
+
+    var spec: RenderSpec {
+        RenderSpec(engine: engine, use: use, steps: steps, lipSync: lipSync, takes: takeCount, clipSeconds: clip?.durationSec)
+    }
+
+    var totalCost: Double { Pricing.totalCost(spec) }
+    var clipBad: Bool { !(clip?.ok ?? true) }
+    var lowBalance: Bool { totalCost > balance.balance + 1e-9 }
+    var generateBlocked: Bool { clipBad || lowBalance || clip == nil || currentOutfit == nil || generating }
+
+    var videoPrompt: String {
+        PromptEngine.video(VideoPromptInput(identity: identity(currentModel), outfitName: currentOutfit?.name ?? "outfit",
+                                            performer: clip?.id == SampleData.sampleClip ? .sample : .generic,
+                                            keepBackground: background == "keep", backgroundMotion: motion, keepAudio: keepAudio, spec: spec))
+    }
+
+    var shootSlots: [PromptSlot] {
+        PromptEngine.shoot(identity: identity(currentModel), outfitName: currentOutfit?.name ?? "outfit", settings: shoot, houseStyle: houseStyle)
+    }
+
+    var shootPromptText: String { shootSlots.map(\.text).joined(separator: "\n") }
+
+    var runningJob: Job? { jobs.first { $0.isRunning } }
+    var activeJobs: [Job] { jobs.filter(\.isActive).sorted { a, b in a.isRunning != b.isRunning ? a.isRunning : a.createdAt < b.createdAt } }
+    var finishedJobs: [Job] { jobs.filter(\.isDone) }
+    var visibleFailures: [Job] { jobs.filter { $0.isFailed && !hiddenFailures.contains($0.id) } }
+    var queuedCost: Double { jobs.filter(\.isQueued).reduce(0) { $0 + $1.cost } }
+    var toReview: Int { takes.filter { $0.isVideo && !$0.isFinal }.count }
+    var todaySpent: Double {
+        if let t = balance.today { return t }
+        let start = Int64(Calendar.current.startOfDay(for: Date()).timeIntervalSince1970 * 1000)
+        return jobs.filter { $0.createdAt >= start }.reduce(0) { $0 + $1.cost - $1.refunded }
+    }
+
+    var galleryAll: [Take] { takes }
+    var galleryList: [Take] { galleryTab == .final ? takes.filter(\.isFinal) : takes }
+    var openedTake: Take? { takes.first { $0.id == openTakeId } ?? takes.first }
+
+    func job(for take: Take) -> Job? { take.jobId.flatMap { id in jobs.first { $0.id == id } } }
+}
+
+/// Screen transitions per theme (the prototype's `MOTION`).
+enum MotionStyle {
+    case a, b, c, d
+    static func of(_ t: ThemeID) -> MotionStyle {
+        switch t {
+        case .a: return .a
+        case .b: return .b
+        case .c: return .c
+        case .d: return .d
+        }
+    }
+
+    var animation: Animation {
+        switch self {
+        case .a: return .timingCurve(0.22, 0.61, 0.36, 1, duration: 0.42)
+        case .b: return .timingCurve(0.4, 0, 0.2, 1, duration: 0.2)
+        case .c: return .spring(response: 0.45, dampingFraction: 0.72)
+        case .d: return .spring(response: 0.42, dampingFraction: 0.6)
+        }
+    }
+
+    var transition: AnyTransition {
+        switch self {
+        case .a: return .asymmetric(insertion: .opacity.combined(with: .offset(y: 14)), removal: .opacity)
+        case .b: return .asymmetric(insertion: .opacity.combined(with: .offset(x: 24)), removal: .opacity)
+        case .c: return .asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.97)), removal: .opacity)
+        case .d: return .asymmetric(insertion: .opacity.combined(with: .offset(y: 26)), removal: .opacity)
+        }
+    }
+}

@@ -1,0 +1,68 @@
+name: mac
+
+on:
+  push:
+    paths:
+      - "mac/**"
+      - ".github/workflows/mac.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: mac-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          brew install xcodegen
+
+      - name: MuseCore tests (including the contract test against server/mock)
+        run: |
+          if [ -f server/mock/server.js ]; then
+            (cd server/mock && PORT=8799 node server.js > /tmp/mock.log 2>&1 &)
+            sleep 2
+            export MUSE_MOCK_URL=http://localhost:8799
+          fi
+          cd mac/MuseCore
+          swift test
+
+      - name: Generate Xcode project
+        working-directory: mac
+        run: xcodegen generate
+
+      - name: Build app (unsigned)
+        working-directory: mac
+        run: |
+          set -o pipefail
+          xcodebuild -project Muse.xcodeproj -scheme Muse -configuration Release \
+            -destination 'generic/platform=macOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build | tee build.log | grep -E "error:|warning: .*Muse/|BUILD" || true
+          test -d build/Build/Products/Release/MUSE.app
+
+      - name: Ad-hoc sign and zip
+        working-directory: mac
+        run: |
+          APP=build/Build/Products/Release/MUSE.app
+          codesign --force --deep --sign - "$APP"
+          ditto -c -k --keepParent "$APP" MUSE-mac.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MUSE-mac
+          path: mac/MUSE-mac.zip
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: build-log
+          path: mac/build.log
+          if-no-files-found: ignore

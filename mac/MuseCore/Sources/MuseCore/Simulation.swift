@@ -23,7 +23,7 @@ public enum SampleData {
                       slots: slotSample.map { SheetSlot(key: $0.0, image: .asset($0.1)) }, outfitIds: [green, crystal],
                       personality: "Warm, a little dry, morning-routine energy.",
                       notes: "Honey-blonde with brown roots is part of the look. Keep the freckles."),
-            MuseModel(id: noor, name: "Noor", age: 27, niche: "Beauty", slots: slotSample.map { SheetSlot(key: $0.0) }),
+            MuseModel(id: noor, name: "Noor Ellis", age: 27, niche: "Beauty", slots: slotSample.map { SheetSlot(key: $0.0) }),
         ]
     }
 

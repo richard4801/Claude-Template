@@ -110,7 +110,7 @@ final class FakeAPITests: XCTestCase {
         XCTAssertEqual(jobs.filter(\.isQueued).map(\.title), ["Living room dance"])
         XCTAssertEqual(jobs.filter(\.isFailed).first?.refunded, 0.19)
         let models = try await api.listModels()
-        XCTAssertEqual(models.map(\.name), ["Sienna Vale", "Noor"])
+        XCTAssertEqual(models.map(\.name), ["Sienna Vale", "Noor Ellis"])
         XCTAssertTrue(models[0].isLocked)
         XCTAssertTrue(models[1].isDraft)
     }
@@ -252,6 +252,6 @@ final class FakeAPITests: XCTestCase {
         let all = try await api.listTakes()
         XCTAssertFalse(all.contains { $0.id == shots[1].id })
         let b = try await api.topUp(TopUpRequest(amount: 25))
-        XCTAssertEqual(Pricing.money(b.balance), "$30.99")
+        XCTAssertEqual(Pricing.money(b.balance), "$30.95")
     }
 }

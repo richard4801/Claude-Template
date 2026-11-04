@@ -73,9 +73,10 @@ public enum Pricing {
     public static let baseLen = 5.2
     public static let maxClipSec = 15.0
 
-    /// Photoshoot: 4 stills ("Shoot 4 · ~20s · $0.08" in the desktop prototype).
-    public static let shootCost = 0.08
-    public static let shootLabel = "Shoot 4 · ~20s · $0.08"
+    /// Photoshoot: 4 stills. plans/api.md fixes this at $0.12 for every client and the server
+    /// (the desktop prototype showed an older "$0.08").
+    public static let shootCost = 0.12
+    public static let shootLabel = "Shoot 4 · ~32s · $0.12"
     /// Outfit set: 4 angles on one seed.
     public static let outfitSetCost = 0.08
     /// Character sheet: fill one missing angle from the user's images.
