@@ -81,6 +81,7 @@ Status tags: **[core]** needed for v1 · **[later]** after v1 · **[idea]** not 
 - **[core]** **Batch queue**: load the model once and run many clips back to back.
 - **[later]** Parallel GPUs for busy periods: more clips per hour at the same cost per clip.
 - **[core]** Live job status with a progress bar based on steps (example: "step 12/20 · ~6 min left"), plus **push notifications on Android** when a job finishes or fails.
+- **[core]** **Token wallets** (decided 2026-11-04): everyone signs in with their own account and has their own token wallet (1 token = $0.01). The owner's RunPod account pays for all GPU work; the owner sends tokens to members and can take back unused ones, never more than the real RunPod balance allows. Each render charges the user's own wallet (a hold at start, settled to the actual cost, refunded on failure). The owner sees each member's balance and spend.
 - **[core]** **Cost tracker**: per clip, per day and per month, the remaining RunPod balance, and a warning before a job would go over budget.
 - **[core]** Safety limits: a spend cap per job and per day, and auto-shutdown of idle pods.
 - **[later]** A fallback data centre or GPU when H100s are sold out.
