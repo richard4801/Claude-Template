@@ -43,7 +43,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
@@ -87,13 +86,9 @@ import androidx.compose.ui.window.PopupProperties
 import coil3.compose.AsyncImage
 import studio.muse.app.R
 import studio.muse.app.data.ImageRef
-import studio.muse.app.platform.SoundFx
 import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
 import kotlin.math.roundToInt
-
-/** Plays a UI sound for the current theme. */
-val LocalSfx = staticCompositionLocalOf<(SoundFx.Kind) -> Unit> { {} }
 
 val Ink = Color(0xFF111111)
 
@@ -108,14 +103,13 @@ fun Modifier.hardShadow(dx: Dp = 3.dp, radius: Dp = 14.dp, color: Color = Ink, d
 fun Modifier.softShadow(radius: Dp, elevation: Dp = 8.dp, color: Color = Color(0x2E50463A)): Modifier =
     shadow(elevation, RoundedCornerShape(radius), ambientColor = color, spotColor = color)
 
-/** Press feedback (scale .96, like the prototype's .pressed) plus the theme's tap sound. */
+/** Press feedback (scale .96, like the prototype's .pressed). */
 @Composable
-fun Modifier.press(sound: SoundFx.Kind? = SoundFx.Kind.TAP, enabled: Boolean = true, onClick: () -> Unit): Modifier {
+fun Modifier.press(enabled: Boolean = true, onClick: () -> Unit): Modifier {
     val src = remember { MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
     val s by animateFloatAsState(if (pressed) .96f else 1f, tween(120), label = "press")
-    val sfx = LocalSfx.current
-    return this.scale(s).clickable(src, indication = null, enabled = enabled) { sound?.let(sfx); onClick() }
+    return this.scale(s).clickable(src, indication = null, enabled = enabled) { onClick() }
 }
 
 /** Shimmer sweep for "busy" states. */
@@ -171,7 +165,7 @@ fun Wordmark(modifier: Modifier = Modifier, size: String = "sm", color: Color = 
 @Composable
 fun Cta(
     text: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon: String? = null, off: Boolean = false,
-    busy: Boolean = false, big: Boolean = false, sound: SoundFx.Kind? = SoundFx.Kind.TAP,
+    busy: Boolean = false, big: Boolean = false,
 ) {
     val m = muse
     val r = if (m.isA) 2.dp else 999.dp
@@ -184,7 +178,7 @@ fun Cta(
     }
     mod = mod.clip(shape).background(m.t.cta).let { if (m.isD) it.border(2.5.dp, Ink, shape) else it }
     Row(
-        mod.graphicsLayer { alpha = if (off) .45f else 1f }.shimmer(busy).press(sound, onClick = onClick).padding(horizontal = 20.dp),
+        mod.graphicsLayer { alpha = if (off) .45f else 1f }.shimmer(busy).press(onClick = onClick).padding(horizontal = 20.dp),
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) { Ic(icon, if (big) 22.dp else 18.dp, m.t.ctaInk); Spacer(Modifier.width(8.dp)) }
@@ -194,7 +188,7 @@ fun Cta(
 
 /** Secondary button (`.cta-2`). */
 @Composable
-fun Cta2(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon: String? = null, height: Dp = 54.dp, sound: SoundFx.Kind? = SoundFx.Kind.TAP) {
+fun Cta2(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon: String? = null, height: Dp = 54.dp) {
     val m = muse
     val shape = RoundedCornerShape(if (m.isA) 2.dp else 999.dp)
     var mod = modifier.height(height).widthIn(min = height)
@@ -203,7 +197,7 @@ fun Cta2(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon:
         m.isC -> mod.softShadow(999.dp).clip(shape).background(m.t.surface)
         else -> mod.clip(shape).background(m.t.surface).border(m.t.stroke, m.t.line, shape)
     }
-    Row(mod.press(sound, onClick = onClick).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+    Row(mod.press(onClick = onClick).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
         if (icon != null) { Ic(icon, 18.dp); if (text.isNotEmpty()) Spacer(Modifier.width(8.dp)) }
         if (text.isNotEmpty()) T(text, m.type.cta2, m.t.ink, maxLines = 1)
     }
@@ -211,8 +205,8 @@ fun Cta2(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon:
 
 /** Round 44dp icon button in top bars. */
 @Composable
-fun TbBtn(icon: String, onClick: () -> Unit, modifier: Modifier = Modifier, tint: Color = Color.Unspecified, sound: SoundFx.Kind? = SoundFx.Kind.TAP) {
-    Box(modifier.size(44.dp).clip(CircleShape).press(sound, onClick = onClick), contentAlignment = Alignment.Center) {
+fun TbBtn(icon: String, onClick: () -> Unit, modifier: Modifier = Modifier, tint: Color = Color.Unspecified) {
+    Box(modifier.size(44.dp).clip(CircleShape).press(onClick = onClick), contentAlignment = Alignment.Center) {
         Ic(icon, 22.dp, if (tint == Color.Unspecified) androidx.compose.material3.LocalContentColor.current else tint)
     }
 }
@@ -239,7 +233,7 @@ fun Chip(text: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = Mo
         m.isC -> mod
         else -> mod.border(m.t.stroke, if (on) bg else m.t.line, shape)
     }
-    Box(mod.press(SoundFx.Kind.TICK, onClick = onClick).padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
+    Box(mod.press(onClick = onClick).padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
         T(text, m.type.chip, fg, maxLines = 1)
     }
 }
@@ -272,7 +266,7 @@ fun Seg(options: List<Pair<String, String>>, selected: String, onSelect: (String
                 else -> m.t.ink to m.t.bg
             }
             Box(
-                Modifier.weight(if (wrap) 1f else l.length.coerceAtLeast(6).toFloat()).height(if (wrap) 48.dp else if (small) 28.dp else 38.dp).clip(shape).background(bg).press(SoundFx.Kind.TICK) { onSelect(k) }.padding(horizontal = 8.dp),
+                Modifier.weight(if (wrap) 1f else l.length.coerceAtLeast(6).toFloat()).height(if (wrap) 48.dp else if (small) 28.dp else 38.dp).clip(shape).background(bg).press { onSelect(k) }.padding(horizontal = 8.dp),
                 contentAlignment = Alignment.Center,
             ) { T(l, (if (small) m.type.seg.copy(fontSize = 12.sp) else m.type.seg).let { if (m.isA) it.copy(fontSize = it.fontSize * .88f, letterSpacing = .06.em) else it }, fg, upper = m.isA, maxLines = if (wrap) 2 else 1, align = TextAlign.Center) }
         }
@@ -321,7 +315,7 @@ fun Toggle(on: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier.size(50.dp, 30.dp).clip(shape).background(track)
             .let { if (m.isD) it.border(border, Ink, shape) else it }
-            .padding(border + inset).press(SoundFx.Kind.TICK, onClick = onClick),
+            .padding(border + inset).press(onClick = onClick),
         contentAlignment = Alignment.CenterStart,
     ) {
         Box(
@@ -448,7 +442,7 @@ fun Input(
 @Composable
 fun Check(text: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val m = muse
-    Row(modifier.fillMaxWidth().press(SoundFx.Kind.TICK, onClick = onClick), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    Row(modifier.fillMaxWidth().press(onClick = onClick), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         val shape = RoundedCornerShape(6.dp)
         Box(
             Modifier.size(22.dp).clip(shape).background(if (on) m.t.accent else Color.Transparent).border(1.5.dp, if (on) m.t.accent else m.t.line, shape),
@@ -471,7 +465,7 @@ fun TopBar(title: String = "", onBack: (() -> Unit)? = null, backIcon: String = 
                 .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (onBack != null) TbBtn(backIcon, onBack, sound = SoundFx.Kind.NAV) else Spacer(Modifier.size(44.dp))
+            if (onBack != null) TbBtn(backIcon, onBack) else Spacer(Modifier.size(44.dp))
             T(title, m.type.topTitle, color, Modifier.weight(1f), upper = m.isB, align = TextAlign.Center, maxLines = 1)
             if (right != null) right() else Spacer(Modifier.size(44.dp))
         }

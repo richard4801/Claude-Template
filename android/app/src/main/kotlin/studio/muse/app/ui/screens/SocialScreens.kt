@@ -57,7 +57,6 @@ import studio.muse.app.data.Platform
 import studio.muse.app.data.Post
 import studio.muse.app.data.Take
 import studio.muse.app.platform.Handoff
-import studio.muse.app.platform.SoundFx
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.LocalNav
 import studio.muse.app.ui.Routes
@@ -145,7 +144,7 @@ class AccountsViewModel(private val c: AppContainer) : ViewModel() {
         val r = c.repo.connect(m.id, p.id)
         busy.update { it - p.id }
         when {
-            r?.account != null -> { c.sound.play(SoundFx.Kind.DONE); c.repo.toast("${p.label} connected") }
+            r?.account != null -> c.repo.toast("${p.label} connected")
             r?.authUrl != null -> c.repo.toast("Finish signing in to ${p.label} in the browser")
         }
     }
@@ -175,7 +174,7 @@ fun AccountsScreen() {
                         TwoLineRow(p.label, a?.handle ?: "Not connected", lead = { PlatformBadge(p, 32.dp) }) {
                             when {
                                 a != null -> T("Disconnect", m.type.tiny.copy(fontWeight = FontWeight.SemiBold), if (m.isD) m.t.blue else m.t.accent, Modifier.press { vm.disconnect(p) }.padding(vertical = 8.dp))
-                                p.id in s.busy -> Cta2("Signing in…", {}, Modifier.shimmer(), height = 36.dp, sound = null)
+                                p.id in s.busy -> Cta2("Signing in…", {}, Modifier.shimmer(), height = 36.dp)
                                 else -> Cta2("Connect", { vm.connect(p) }, height = 36.dp)
                             }
                         }
@@ -233,7 +232,6 @@ class PostViewModel(private val c: AppContainer, private val takeId: String) : V
         val at = if (d.later) s.slots.getOrNull(d.slot) else null
         val req = CreatePostRequest(model.id, take.id, d.platforms, d.caption.trim(), d.aiLabel, d.paidPartnership, at?.let { PostTime.iso(it) } ?: "now")
         val post = c.repo.createPost(req) ?: return@launch
-        c.sound.play(SoundFx.Kind.DONE)
         if (at == null) {
             Platform.of(post.platforms.first())?.let { openHandoff(context, c, post, it) }
         } else {
@@ -303,7 +301,7 @@ fun PostScreen(takeId: String) {
                         notif.launch(Manifest.permission.POST_NOTIFICATIONS)
                     else -> vm.go(context) { nav.back() }
                 }
-            }, Modifier.weight(1f), off = n == 0, sound = null)
+            }, Modifier.weight(1f), off = n == 0)
         }
     }
 }
@@ -320,7 +318,7 @@ private fun PlatformChip(p: Platform, on: Boolean, onClick: () -> Unit) {
     }
     var mod = Modifier.height(36.dp).clip(shape).background(bg)
     mod = when { m.isD -> mod.border(2.5.dp, Ink, shape); m.isC -> mod; else -> mod.border(m.t.stroke, if (on) bg else m.t.line, shape) }
-    Row(mod.press(SoundFx.Kind.TICK, onClick = onClick).padding(start = 6.dp, end = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(mod.press(onClick = onClick).padding(start = 6.dp, end = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         PlatformBadge(p, 20.dp)
         T(p.label, m.type.chip, fg, maxLines = 1)
     }

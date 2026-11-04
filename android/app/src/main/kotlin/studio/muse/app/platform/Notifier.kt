@@ -7,7 +7,9 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
 import android.os.Build
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -16,7 +18,14 @@ import studio.muse.app.R
 import studio.muse.app.data.Job
 import studio.muse.core.Pricing
 
-/** Local "push" notification when a mock render finishes or fails. Needs POST_NOTIFICATIONS on Android 13+. */
+/**
+ * Local notifications: a render finished or failed, an Identity LoRA is ready, or it's time to post. Needs
+ * POST_NOTIFICATIONS on Android 13+.
+ *
+ * These are the only sounds MUSE makes. Every channel is IMPORTANCE_HIGH with the phone's default notification sound,
+ * and notifications are posted whether or not the app is in the foreground, so the sound plays either way. The user
+ * controls sound and alerts per channel in system settings ([openSettings]).
+ */
 class Notifier(private val context: Context) {
     companion object {
         const val CHANNEL = "renders_v2" // v2: IMPORTANCE_HIGH (a channel's importance can't be raised after it exists)
@@ -30,14 +39,34 @@ class Notifier(private val context: Context) {
         if (Build.VERSION.SDK_INT >= 26) {
             val nm = context.getSystemService(NotificationManager::class.java)
             nm?.deleteNotificationChannel("renders") // the old, quieter channel
+            // Sound and importance only apply when a channel is first created; afterwards the user's choices win.
+            val defaultSound = Settings.System.DEFAULT_NOTIFICATION_URI
+            val attrs = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
             val ch = NotificationChannel(CHANNEL, context.getString(R.string.channel_renders), NotificationManager.IMPORTANCE_HIGH)
             ch.description = context.getString(R.string.channel_renders_desc)
+            ch.setSound(defaultSound, attrs)
             ch.enableVibration(true)
             nm?.createNotificationChannel(ch)
             val posts = NotificationChannel(CHANNEL_POSTS, context.getString(R.string.channel_posts), NotificationManager.IMPORTANCE_HIGH)
             posts.description = context.getString(R.string.channel_posts_desc)
+            posts.setSound(defaultSound, attrs)
+            posts.enableVibration(true)
             nm?.createNotificationChannel(posts)
         }
+    }
+
+    /**
+     * Opens system settings for MUSE's notifications: the renders channel's page (sound, pop-up, vibration), or the
+     * app's notification page when notifications are off for the whole app or the channel page can't be opened.
+     */
+    fun openSettings(from: Context) {
+        val app = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+        val channel = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            .putExtra(Settings.EXTRA_CHANNEL_ID, CHANNEL)
+        val first = if (NotificationManagerCompat.from(context).areNotificationsEnabled()) channel else app
+        if (from !is android.app.Activity) { first.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); app.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+        runCatching { from.startActivity(first) }.recoverCatching { from.startActivity(app) }
     }
 
     fun canPost(): Boolean = Build.VERSION.SDK_INT < 33 ||

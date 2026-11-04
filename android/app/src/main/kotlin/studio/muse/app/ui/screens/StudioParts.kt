@@ -33,7 +33,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import studio.muse.app.platform.SoundFx
 import studio.muse.app.ui.components.Ink
 import studio.muse.app.ui.components.T
 import studio.muse.app.ui.components.hardShadow
@@ -61,7 +60,7 @@ fun ToolStrip(tools: List<Pair<String, String>>, current: String, onSelect: (Str
                     val shape = RoundedCornerShape(16.dp)
                     Column(
                         Modifier.width(54.dp).height(64.dp).shadow(6.dp, shape, ambientColor = Color(0x1A50463A), spotColor = Color(0x1A50463A)).clip(shape)
-                            .background(if (on) m.t.accent else m.t.surface).press(SoundFx.Kind.TAP) { onSelect(k) },
+                            .background(if (on) m.t.accent else m.t.surface).press { onSelect(k) },
                         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
                     ) {
                         val c = if (on) Color.White else m.t.muted

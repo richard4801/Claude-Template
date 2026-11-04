@@ -42,7 +42,6 @@ import studio.muse.app.data.Model
 import studio.muse.app.data.Outfit
 import studio.muse.app.data.ShootDraft
 import studio.muse.app.data.ShootRequest
-import studio.muse.app.platform.SoundFx
 import studio.muse.app.ui.LocalCelebrate
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.LocalNav
@@ -92,7 +91,6 @@ class ShootViewModel(private val c: AppContainer) : ViewModel() {
         val model = s.model ?: return@launch c.repo.toast("Only Sienna is ready · Noor needs close-ups")
         val p = s.prompt ?: return@launch
         phase.value = "busy"
-        c.sound.play(SoundFx.Kind.GO)
         val shots = c.repo.shoot(ShootRequest(model.id, s.outfit?.id ?: "", s.draft.scene ?: PromptEngine.DEFAULT_SCENE, p.text, p.seed))
         if (shots == null) { phase.value = "idle"; return@launch }
         c.drafts.freshShots.value = shots.size

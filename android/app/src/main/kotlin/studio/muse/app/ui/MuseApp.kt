@@ -66,9 +66,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import studio.muse.app.AppContainer
 import studio.muse.app.data.Toast
-import studio.muse.app.platform.SoundFx
 import studio.muse.app.ui.components.Ink
-import studio.muse.app.ui.components.LocalSfx
 import studio.muse.app.ui.components.MenuItem
 import studio.muse.app.ui.components.MuseMenu
 import studio.muse.app.ui.components.T
@@ -83,7 +81,7 @@ import kotlin.random.Random
 
 val LocalContainer = staticCompositionLocalOf<AppContainer> { error("no container") }
 val LocalNav = staticCompositionLocalOf<Nav> { error("no nav") }
-/** Celebrate: done sound + confetti in Creator Pop. */
+/** Celebrate: confetti in Creator Pop. */
 val LocalCelebrate = staticCompositionLocalOf<() -> Unit> { {} }
 
 object Routes {
@@ -98,7 +96,7 @@ object Routes {
 }
 
 /** Navigation helpers (the prototype's go/back/tab). */
-class Nav(val controller: NavHostController, private val sfx: (SoundFx.Kind) -> Unit) {
+class Nav(val controller: NavHostController) {
     fun go(route: String) {
         if (controller.currentDestination?.route == route) return
         controller.navigate(route) { launchSingleTop = true }
@@ -130,10 +128,9 @@ fun MuseApp(
     val theme = ThemeId.fromKey(prefs.theme)
     MuseTheme(theme) {
         val nav = rememberNavController()
-        val sfx: (SoundFx.Kind) -> Unit = remember(container) { { k -> container.sound.play(k) } }
-        val n = remember(nav) { Nav(nav, sfx) }
+        val n = remember(nav) { Nav(nav) }
         val confetti = remember { mutableStateListOf<Long>() }
-        val celebrate: () -> Unit = remember { { sfx(SoundFx.Kind.DONE); confetti.add(System.nanoTime()) } }
+        val celebrate: () -> Unit = remember { { confetti.add(System.nanoTime()) } }
         LaunchedEffect(pendingRoute) {
             if (pendingRoute != null) { delay(50); n.go(pendingRoute); onRouteConsumed() }
         }
@@ -146,7 +143,7 @@ fun MuseApp(
             if (post != null && platform != null) openHandoff(context, container, post, platform)
             onHandoffConsumed()
         }
-        CompositionLocalProvider(LocalContainer provides container, LocalNav provides n, LocalSfx provides sfx, LocalCelebrate provides celebrate) {
+        CompositionLocalProvider(LocalContainer provides container, LocalNav provides n, LocalCelebrate provides celebrate) {
             Box(Modifier.fillMaxSize().background(muse.t.bg)) {
                 NavHost(
                     nav, startDestination = startRoute, modifier = Modifier.fillMaxSize(),
@@ -295,7 +292,7 @@ fun BoxScope.TabBar(active: String) {
                 } else {
                     val on = route == active
                     val c = if (on) (if (m.isD) m.t.blue else m.t.accent) else m.t.muted
-                    Column(Modifier.width(60.dp).press(SoundFx.Kind.NAV) { if (!on) nav.tab(route) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Column(Modifier.width(60.dp).press { if (!on) nav.tab(route) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Ic(icon, 22.dp, c)
                         T(label, m.type.tab.copy(fontWeight = if (on && m.isD) androidx.compose.ui.text.font.FontWeight.ExtraBold else null), c, upper = m.isA, maxLines = 1)
                     }

@@ -50,7 +50,6 @@ import kotlinx.coroutines.launch
 import studio.muse.app.AppContainer
 import studio.muse.app.data.Job
 import studio.muse.app.data.Take
-import studio.muse.app.platform.SoundFx
 import studio.muse.app.ui.LocalCelebrate
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.LocalNav
@@ -167,7 +166,7 @@ fun ResultScreen(id: String) {
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Cta2("Discard", { vm.discard(take, nav) }, Modifier.weight(1f))
-                        Cta(if (take.final) "Approved ✓" else "Approve", { vm.approve(take, celebrate) }, Modifier.weight(1f), sound = null)
+                        Cta(if (take.final) "Approved ✓" else "Approve", { vm.approve(take, celebrate) }, Modifier.weight(1f))
                     }
                 }
             }
@@ -209,7 +208,7 @@ fun GalleryScreen() {
     ScreenBox {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                Wordmark(); Spacer(Modifier.weight(1f)); TbBtn("grid", {}, sound = null)
+                Wordmark(); Spacer(Modifier.weight(1f)); TbBtn("grid", {})
             }
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 if (m.isA) T("GALLERY", m.type.h2.copy(fontSize = 56.sp, lineHeight = 52.sp), m.t.ink) else H2("Gallery")

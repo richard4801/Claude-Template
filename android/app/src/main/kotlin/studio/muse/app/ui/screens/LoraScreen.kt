@@ -50,7 +50,6 @@ import studio.muse.app.data.ImageRef
 import studio.muse.app.data.Lora
 import studio.muse.app.data.LoraCandidate
 import studio.muse.app.data.Model
-import studio.muse.app.platform.SoundFx
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.LocalNav
 import studio.muse.app.ui.Routes
@@ -74,10 +73,10 @@ class LoraViewModel(private val c: AppContainer) : ViewModel() {
     fun build() = viewModelScope.launch {
         val m = id ?: return@launch
         if (Pricing.LORA_SET_COST > state.value.balance + 1e-9) return@launch c.repo.toast("Not enough balance · top up in Credits", Routes.CREDITS)
-        if (c.repo.buildLoraSet(m) != null) c.sound.play(SoundFx.Kind.GO)
+        c.repo.buildLoraSet(m)
     }
     fun toggle(cand: LoraCandidate) = viewModelScope.launch { id?.let { c.repo.keepCandidate(it, cand.id, !cand.keep) } }
-    fun train() = viewModelScope.launch { id?.let { if (c.repo.trainLora(it) != null) c.sound.play(SoundFx.Kind.GO) } }
+    fun train() = viewModelScope.launch { id?.let { c.repo.trainLora(it) } }
     fun use(v: Boolean) = viewModelScope.launch { id?.let { c.repo.setLoraUse(it, v) } }
     fun retrain() = viewModelScope.launch { id?.let { c.repo.retrainLora(it) } }
     fun toast(s: String) = c.repo.toast(s)
@@ -120,15 +119,15 @@ fun LoraScreen() {
         }
         Dock {
             when (l.state) {
-                "building" -> Cta("Generating…", {}, Modifier.weight(1f), off = true, busy = true, sound = null)
+                "building" -> Cta("Generating…", {}, Modifier.weight(1f), off = true, busy = true)
                 "review" -> when {
                     l.kept < Pricing.LORA_MIN_KEEP -> Cta("Keep ${Pricing.LORA_MIN_KEEP - l.kept} more to train", { vm.toast("Keep at least 20 shots so the LoRA learns her well") }, Modifier.weight(1f), off = true)
                     s.low -> Cta("Top up to train · ${Pricing.money(s.trainCost)}", { nav.go(Routes.CREDITS) }, Modifier.weight(1f))
-                    else -> Cta("Train · ~${minutesText(Pricing.loraTrainMinutes)} · ${Pricing.money(s.trainCost)}", vm::train, Modifier.weight(1f), sound = null)
+                    else -> Cta("Train · ~${minutesText(Pricing.loraTrainMinutes)} · ${Pricing.money(s.trainCost)}", vm::train, Modifier.weight(1f))
                 }
                 "training" -> Cta2("Back to profile", { nav.back() }, Modifier.weight(1f))
                 "ready" -> Cta("Test it in a photoshoot", { nav.go(Routes.SHOOT) }, Modifier.weight(1f))
-                else -> Cta("Build training set · ${Pricing.money(Pricing.LORA_SET_COST)}", vm::build, Modifier.weight(1f), sound = null)
+                else -> Cta("Build training set · ${Pricing.money(Pricing.LORA_SET_COST)}", vm::build, Modifier.weight(1f))
             }
         }
     }
@@ -241,7 +240,7 @@ private fun LoraReview(l: Lora, toggle: (LoraCandidate) -> Unit) {
     }
     Tiny("Tap a shot to drop it. Drop anything that doesn't look like her, or shows a tattoo or ring. ${l.flagged} were flagged for you.")
     Grid4(l.candidates) { cnd, mod ->
-        Box(mod.press(SoundFx.Kind.TICK) { toggle(cnd) }) {
+        Box(mod.press { toggle(cnd) }) {
             RefImage(cnd.image, Modifier.fillMaxSize(), 15, if (cnd.keep) null else dropped)
             if (cnd.flag != null) {
                 Box(Modifier.align(Alignment.BottomStart).padding(4.dp).clip(RoundedCornerShape(999.dp)).background(Color(0xFFF6E2C0)).padding(horizontal = 6.dp, vertical = 1.dp)) {

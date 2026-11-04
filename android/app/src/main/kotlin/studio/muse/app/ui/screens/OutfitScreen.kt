@@ -38,7 +38,6 @@ import studio.muse.app.data.ImageRef
 import studio.muse.app.data.Model
 import studio.muse.app.data.Outfit
 import studio.muse.app.data.OutfitDraft
-import studio.muse.app.platform.SoundFx
 import studio.muse.app.ui.LocalCelebrate
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.LocalNav
@@ -76,7 +75,6 @@ class OutfitViewModel(private val c: AppContainer) : ViewModel() {
             c.repo.toast(if (s.draft.mode == "own") "Upload front, ¾, side and back first" else "Upload a product or outfit photo first")
             return@launch
         }
-        c.sound.play(SoundFx.Kind.GO)
         val o = c.repo.createOutfit(CreateOutfitRequest(model.id, s.draft.name, s.draft.mode, s.draft.description, s.draft.images)) ?: return@launch
         edit { it.copy(previewId = o.id) }
     }
@@ -138,7 +136,7 @@ fun OutfitScreen() {
         Dock {
             if (s.done) {
                 Cta2("Retake", { vm.generate() }, icon = "retry")
-                Cta("Save outfit", { vm.save(celebrate) { nav.back() } }, Modifier.weight(1f), sound = null)
+                Cta("Save outfit", { vm.save(celebrate) { nav.back() } }, Modifier.weight(1f))
             } else {
                 Cta(
                     if (s.busy) "Generating…" else if (s.draft.mode == "own") "Use my images" else "Generate outfit set · ${Pricing.money(Pricing.OUTFIT_SET_COST)}",

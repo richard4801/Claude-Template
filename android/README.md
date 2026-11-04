@@ -1,6 +1,6 @@
 # MUSE for Android
 
-This is the native Kotlin and Jetpack Compose app, built from the approved web prototype (`prototype/app`). It has four themes (Editorial, Camera Body, Soft Tactile and Creator Pop), and each one has its own layouts, motion and sounds. It has no real GPU calls: debug builds run against an in-process fake backend by default, and can switch to the Node mock server.
+This is the native Kotlin and Jetpack Compose app, built from the approved web prototype (`prototype/app`). It has four themes (Editorial, Camera Body, Soft Tactile and Creator Pop), and each one has its own layouts and motion. The app makes no UI sounds: the only sounds are notifications, which use the phone's default notification sound. It has no real GPU calls: debug builds run against an in-process fake backend by default, and can switch to the Node mock server.
 
 ## Build
 Requirements: JDK 21 and the Android SDK (platform 36, build-tools 36). Put the SDK path in `local.properties` as `sdk.dir=/path/to/android-sdk`.
@@ -19,7 +19,7 @@ The build pulls Maven Central artifacts through Google's mirror (`maven-central.
 ```sh
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
-The minimum version is Android 8.0 (API 26). On Android 13 and later, the app asks for notification permission the first time you tap Generate. It uses that permission to tell you when a render finishes or fails.
+The minimum version is Android 8.0 (API 26). On Android 13 and later, the app asks for notification permission the first time you tap Generate. It uses that permission to tell you when a render finishes or fails, when an Identity LoRA is ready and when it's time to post. These notifications post even while the app is open, at high importance with the phone's default notification sound; Settings → Notifications opens the system page where you can change that.
 
 ## Mock server
 ```sh
@@ -40,6 +40,6 @@ Developer settings also include "Fast · beta engine (Viggle)", which flags Fast
 - `core/`: a pure Kotlin module (no Android) with `PromptEngine` (the layered prompt system in `plans/prompt-system.md`) and `Pricing` (steps 4–30, time and cost). Its tests use fixtures generated from the prototype's JS.
 - `app/data/`: the `MuseApi` interface, `FakeMuseApi` (in-process), `HttpMuseApi` (Retrofit + OkHttp SSE), the repository, DataStore prefs and the cross-screen drafts.
 - `app/ui/`: theme tokens and fonts (bundled in `res/font`, all OFL), the component kit, and one ViewModel with a StateFlow per screen.
-- `app/platform/`: notifications, Photo Picker media reading, and per-theme UI sounds synthesised like the prototype's WebAudio.
+- `app/platform/`: notifications, scheduled-post alarms, share handoff and Photo Picker media reading.
 
 The only bundled sample images are the character reference images. Source clips are never bundled, so clip thumbnails use neutral placeholders, or a frame from the user's own picked clip.

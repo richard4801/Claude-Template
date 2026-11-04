@@ -69,7 +69,6 @@ import studio.muse.app.data.Model
 import studio.muse.app.data.Outfit
 import studio.muse.app.data.SampleData
 import studio.muse.app.data.VideoDraft
-import studio.muse.app.platform.SoundFx
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.LocalNav
 import studio.muse.app.ui.Routes
@@ -112,7 +111,7 @@ class NewVideoViewModel(private val c: AppContainer) : ViewModel() {
 
     fun steps(n: Int) {
         val v = Pricing.clampSteps(n)
-        if (v != c.drafts.video.value.steps) { c.sound.play(SoundFx.Kind.TICK); edit { it.copy(steps = v) } }
+        if (v != c.drafts.video.value.steps) edit { it.copy(steps = v) }
     }
 
     fun sample(bad: Boolean) = viewModelScope.launch {
@@ -157,7 +156,6 @@ class NewVideoViewModel(private val c: AppContainer) : ViewModel() {
         if (s.cost > s.balance) return c.repo.toast("Not enough balance · top up in Credits", Routes.CREDITS)
         viewModelScope.launch {
             busy.update { it.first to true }
-            c.sound.play(SoundFx.Kind.GO)
             val d = s.draft
             val job = c.repo.createJob(
                 JobRequest(
@@ -283,7 +281,7 @@ fun DirectScreen() {
         Column(Modifier.fillMaxSize()) {
             if (m.isA) {
                 Row(Modifier.fillMaxWidth().height(52.dp).drawBehind { drawLine(m.t.line, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TbBtn("back", { nav.back() }, sound = SoundFx.Kind.NAV)
+                    TbBtn("back", { nav.back() })
                     Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { Wordmark() }
                     T("VIDEO STUDIO", m.type.mono.copy(fontSize = 12.5.sp, letterSpacing = .12.em), m.t.ink)
                     MoreMenu(menu)
@@ -294,7 +292,7 @@ fun DirectScreen() {
             BSheet(12.dp) { DirectSheet(vm, s) }
         }
         Dock(tight = true) {
-            Cta(if (s.starting) "Starting GPU…" else s.genLabel, { if (!s.starting) generate() }, Modifier.weight(1f), busy = s.starting, off = s.cost > s.balance, sound = null)
+            Cta(if (s.starting) "Starting GPU…" else s.genLabel, { if (!s.starting) generate() }, Modifier.weight(1f), busy = s.starting, off = s.cost > s.balance)
         }
     }
 }
@@ -402,9 +400,9 @@ private fun androidx.compose.foundation.layout.ColumnScope.DirectSheet(vm: NewVi
 private fun Stepper(value: Int, min: Int, max: Int, onChange: (Int) -> Unit) {
     val m = muse
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Cta2("", { if (value > min) onChange(value - 1) }, icon = "back", height = 40.dp, sound = SoundFx.Kind.TICK)
+        Cta2("", { if (value > min) onChange(value - 1) }, icon = "back", height = 40.dp)
         T("$value", m.type.mono.copy(fontSize = 18.sp, fontWeight = FontWeight.Bold), m.t.ink)
-        Cta2("", { if (value < max) onChange(value + 1) }, icon = "chev", height = 40.dp, sound = SoundFx.Kind.TICK)
+        Cta2("", { if (value < max) onChange(value + 1) }, icon = "chev", height = 40.dp)
     }
 }
 
@@ -465,7 +463,7 @@ private fun DialPlate(steps: Int, onSteps: (Int) -> Unit) {
 
 @Composable
 private fun KnobBtn(icon: String, onClick: () -> Unit) {
-    Box(Modifier.size(34.dp).clip(CircleShape).background(Color(0xFF15181A)).border(1.dp, Color(0xFF3A3F43), CircleShape).press(SoundFx.Kind.TICK, onClick = onClick), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(34.dp).clip(CircleShape).background(Color(0xFF15181A)).border(1.dp, Color(0xFF3A3F43), CircleShape).press(onClick = onClick), contentAlignment = Alignment.Center) {
         Ic(icon, 16.dp, muse.t.muted)
     }
 }

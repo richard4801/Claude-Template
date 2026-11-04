@@ -38,7 +38,7 @@ data class StudioState(
 /** A toast line, optionally tappable. */
 data class Toast(val message: String, val route: String? = null, val id: Long = System.nanoTime())
 
-/** Hooks the repository calls when jobs finish or fail (local notification, sound). */
+/** Hooks the repository calls when jobs finish or fail (local notification, toast). */
 fun interface JobListener {
     fun onJobFinished(job: Job)
 }

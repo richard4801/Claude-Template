@@ -15,7 +15,6 @@ import studio.muse.app.data.MuseApi
 import studio.muse.app.data.MuseRepository
 import studio.muse.app.data.PrefsStore
 import studio.muse.app.platform.Notifier
-import studio.muse.app.platform.SoundFx
 import java.io.File
 
 /** Manual dependency container (no DI framework). */
@@ -26,23 +25,18 @@ class AppContainer(
     val notifier: Notifier?,
     val media: studio.muse.app.platform.MediaReader? = null,
     initialPrefs: AppPrefs = AppPrefs(),
-    soundsOn: Boolean = true,
-    sfxCacheDir: File? = null,
     val postAlarms: studio.muse.app.platform.PostAlarms? = null,
 ) {
     val prefs: StateFlow<AppPrefs> = prefsStore.prefs.stateIn(scope, SharingStarted.Eagerly, initialPrefs)
     val repo = MuseRepository(scope, prefsStore, fake)
     val drafts = Drafts()
-    val sound = SoundFx(enabled = { soundsOn && prefs.value.sound }, theme = { prefs.value.theme }, cacheDir = sfxCacheDir)
 
     init {
         repo.listener = studio.muse.app.data.JobListener { job ->
-            sound.play(if (job.done) SoundFx.Kind.DONE else SoundFx.Kind.TAP)
             notifier?.jobFinished(job)
             if (job.done) repo.toast("Render done · tap to watch", "result/${job.id}") else repo.toast("Render failed · ${studio.muse.core.Pricing.money(job.refunded)} refunded", "queue")
         }
         repo.onLoraReady = { model, lora ->
-            sound.play(SoundFx.Kind.DONE)
             notifier?.loraReady(model?.name ?: "Your model", lora.version)
             repo.toast("Identity LoRA v${lora.version} is ready", "lora")
         }
@@ -51,8 +45,9 @@ class AppContainer(
     companion object {
         fun create(context: Context): AppContainer {
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+            File(context.cacheDir, "sfx").deleteRecursively() // WAVs left by the removed UI sound effects
             val fake = FakeMuseApi(scope, File(context.filesDir, "uploads"))
-            return AppContainer(scope, DataStorePrefs(context), fake, Notifier(context), studio.muse.app.platform.MediaReader(context), sfxCacheDir = File(context.cacheDir, "sfx").apply { mkdirs() }, postAlarms = studio.muse.app.platform.PostAlarms(context))
+            return AppContainer(scope, DataStorePrefs(context), fake, Notifier(context), studio.muse.app.platform.MediaReader(context), postAlarms = studio.muse.app.platform.PostAlarms(context))
         }
     }
 }

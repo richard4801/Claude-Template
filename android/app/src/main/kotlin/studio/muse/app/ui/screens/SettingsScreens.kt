@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
@@ -37,11 +38,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.flow.SharingStarted
@@ -53,7 +56,6 @@ import studio.muse.app.AppContainer
 import studio.muse.app.BuildConfig
 import studio.muse.app.data.AppPrefs
 import studio.muse.app.data.Balance
-import studio.muse.app.platform.SoundFx
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.LocalNav
 import studio.muse.app.ui.Routes
@@ -83,10 +85,8 @@ class SettingsViewModel(private val c: AppContainer) : ViewModel() {
     fun theme(t: ThemeId) {
         if (t.key == c.prefs.value.theme) return
         upd { it.copy(theme = t.key) }
-        c.sound.play(SoundFx.Kind.THEME)
     }
 
-    fun sound() = upd { it.copy(sound = !it.sound) }
     fun useFake(v: Boolean) = upd { it.copy(useFake = v) }.also { c.repo.toast(if (v) "Using the in-app mock" else "Using the mock server at ${c.prefs.value.serverUrl}") }
     fun serverUrl(v: String) = upd { it.copy(serverUrl = v) }
     fun fastBeta() = upd { it.copy(fastBeta = !it.fastBeta) }
@@ -99,6 +99,7 @@ class SettingsViewModel(private val c: AppContainer) : ViewModel() {
         if (c.repo.topUp(amount, method) != null) c.repo.toast("Added ${Pricing.money(amount)} · demo, no payment taken")
     }
     fun notifStatus() = c.notifier?.canPost() ?: false
+    fun openNotificationSettings(from: android.content.Context) = c.notifier?.openSettings(from)
     fun toast(s: String) = c.repo.toast(s)
 }
 
@@ -114,7 +115,11 @@ fun SettingsScreen() {
     val s by vm.state.collectAsState()
     val nav = LocalNav.current
     val m = muse
+    val context = LocalContext.current
     var notifOn by remember { mutableStateOf(vm.notifStatus()) }
+    var notifAskedHere by remember { mutableStateOf(false) }
+    // Re-read on return from system settings.
+    LifecycleResumeEffect(Unit) { notifOn = vm.notifStatus(); onPauseOrDispose {} }
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { notifOn = it }
     ScreenBox {
         Column(Modifier.fillMaxSize()) {
@@ -128,10 +133,11 @@ fun SettingsScreen() {
                     }
                 }
                 ListGroup {
-                    Li("audio", "Sound effects", onClick = { vm.sound() }) { Toggle(s.prefs.sound, { vm.sound() }) }
-                    Li("bell", "Render notifications", onClick = {
-                        if (!notifOn && Build.VERSION.SDK_INT >= 33) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) else vm.toast(if (notifOn) "Notifications are on" else "Turn on notifications in system settings")
-                    }) { Tiny(if (notifOn) "On" else "Off") }
+                    Li("bell", "Notifications", sub = "Sound and alerts follow your phone's notification settings", onClick = {
+                        // Off on Android 13+: ask once from here; after that (or when on) open the system page.
+                        if (!notifOn && Build.VERSION.SDK_INT >= 33 && !notifAskedHere) { notifAskedHere = true; notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
+                        else vm.openNotificationSettings(context)
+                    }) { Tiny(if (notifOn) "On" else "Off"); Ic("chev", 16.dp) }
                     Li("export", "${s.modelName}'s accounts", onClick = { nav.go(Routes.ACCOUNTS) }) { Tiny("${s.connected}/5"); Ic("chev", 16.dp) }
                     Li("queue", "Scheduled posts", onClick = { nav.go(Routes.POSTS) }) { Tiny("${s.scheduled}"); Ic("chev", 16.dp) }
                     Li("wallet", "Credits & billing", onClick = { nav.go(Routes.CREDITS) }) { Tiny(Pricing.money(s.balance.balance)); Ic("chev", 16.dp) }
@@ -165,7 +171,7 @@ private fun ThemeCard(t: ThemeId, on: Boolean, modifier: Modifier, onClick: () -
         m.isC -> mod.softShadow(m.t.r).clip(shape).background(m.t.surface).let { if (on) it.border(2.dp, m.t.accent, shape) else it }
         else -> mod.clip(shape).background(m.t.surface).border(if (on) 2.dp else m.t.stroke, if (on) m.t.accent else m.t.line, shape)
     }
-    Box(mod.press(null, onClick = onClick).padding(10.dp)) {
+    Box(mod.press(onClick = onClick).padding(10.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             ThemePreview(t, Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(m.t.r * .6f)).border(1.dp, Color.Black.copy(alpha = .12f), RoundedCornerShape(m.t.r * .6f)))
             T(t.label, m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), m.t.ink)
@@ -200,15 +206,16 @@ fun ListGroup(content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-fun Li(icon: String, label: String, onClick: () -> Unit, trailing: @Composable () -> Unit) {
+fun Li(icon: String, label: String, onClick: () -> Unit, sub: String? = null, trailing: @Composable () -> Unit) {
     val m = muse
     Row(
-        Modifier.fillMaxWidth().height(54.dp).drawBehind { drawLine(m.t.line, Offset(0f, size.height), Offset(size.width, size.height), m.t.stroke.toPx()) }
-            .press(onClick = onClick).padding(horizontal = 14.dp),
+        Modifier.fillMaxWidth().heightIn(min = 54.dp).drawBehind { drawLine(m.t.line, Offset(0f, size.height), Offset(size.width, size.height), m.t.stroke.toPx()) }
+            .press(onClick = onClick).padding(horizontal = 14.dp, vertical = if (sub != null) 10.dp else 0.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Ic(icon, 20.dp)
-        T(label, m.type.body, m.t.ink, Modifier.weight(1f))
+        if (sub == null) T(label, m.type.body, m.t.ink, Modifier.weight(1f))
+        else Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) { T(label, m.type.body, m.t.ink); Tiny(sub) }
         trailing()
     }
 }

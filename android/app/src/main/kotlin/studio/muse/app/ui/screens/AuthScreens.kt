@@ -43,7 +43,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import studio.muse.app.AppContainer
 import studio.muse.app.data.SignUpRequest
-import studio.muse.app.platform.SoundFx
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.LocalNav
 import studio.muse.app.ui.Routes
@@ -105,7 +104,7 @@ fun SplashScreen() {
     val signedIn = c.prefs.collectAsState().value.token != null
     val next = { if (signedIn) nav.reset(Routes.HOME) else nav.go(Routes.WELCOME) }
     LaunchedEffect(Unit) { delay(2600); next() }
-    Box(Modifier.fillMaxSize().background(if (m.isD) m.t.blue else Color.Black).press(SoundFx.Kind.NAV) { next() }) {
+    Box(Modifier.fillMaxSize().background(if (m.isD) m.t.blue else Color.Black).press { next() }) {
         if (m.isD) {
             val shape = RoundedCornerShape(22.dp)
             Box(Modifier.fillMaxSize().padding(start = 28.dp, end = 28.dp, top = 110.dp, bottom = 230.dp).hardShadow(6.dp, 22.dp).clip(shape).border(3.dp, Ink, shape)) {
@@ -194,7 +193,7 @@ fun SignInScreen() {
                 T("Forgot?", m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), if (m.isD) m.t.blue else m.t.accent, Modifier.press { vm.forgot() }.padding(8.dp))
             })
         }
-        Cta(if (s.busy) "Signing in…" else "Sign in", { vm.signIn { nav.reset(Routes.HOME) } }, Modifier.fillMaxWidth(), busy = s.busy, sound = SoundFx.Kind.GO)
+        Cta(if (s.busy) "Signing in…" else "Sign in", { vm.signIn { nav.reset(Routes.HOME) } }, Modifier.fillMaxWidth(), busy = s.busy)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f).height(1.dp).background(m.t.line)); Tiny("or"); Box(Modifier.weight(1f).height(1.dp).background(m.t.line))
         }
@@ -234,7 +233,7 @@ fun SignUpScreen() {
         Field("Password") { Input(s.password, { v -> vm.edit { it.copy(password = v) } }, password = true, placeholder = "••••••••••") }
         Check(ATTEST_1, s.ag1, { vm.edit { it.copy(ag1 = !it.ag1) } })
         Check(ATTEST_2, s.ag2, { vm.edit { it.copy(ag2 = !it.ag2) } })
-        Cta("Create account", { vm.signUp { nav.reset(Routes.HOME) } }, Modifier.fillMaxWidth(), off = !(s.ag1 && s.ag2), busy = s.busy, sound = SoundFx.Kind.GO)
+        Cta("Create account", { vm.signUp { nav.reset(Routes.HOME) } }, Modifier.fillMaxWidth(), off = !(s.ag1 && s.ag2), busy = s.busy)
         T(TERMS_LINE, m.type.tiny, m.t.muted, Modifier.fillMaxWidth(), align = TextAlign.Center)
     }
 }

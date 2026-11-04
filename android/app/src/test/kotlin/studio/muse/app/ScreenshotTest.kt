@@ -65,7 +65,7 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
     fun capture() {
         val scope = MainScope()
         val fake = FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0)
-        val c = AppContainer(scope, MemoryPrefs(AppPrefs(theme = theme, token = "t", studioName = "Jenne Studio", sound = false)), fake, null, soundsOn = false)
+        val c = AppContainer(scope, MemoryPrefs(AppPrefs(theme = theme, token = "t", studioName = "Jenne Studio")), fake, null)
         // Sienna has TikTok + Instagram linked, one scheduled post and one posted with stats (like the prototype review state).
         runBlocking {
             listOf(Platform.TIKTOK, Platform.INSTAGRAM).forEach { fake.debugPutAccount(Account(SampleData.SIENNA, it.id, "@sienna.vale", 0)) }

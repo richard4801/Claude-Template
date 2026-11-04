@@ -42,7 +42,6 @@ import studio.muse.app.AppContainer
 import studio.muse.app.data.CreateModelRequest
 import studio.muse.app.data.Model
 import studio.muse.app.data.ModelDraft
-import studio.muse.app.platform.SoundFx
 import studio.muse.app.ui.LocalCelebrate
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.LocalNav
@@ -108,7 +107,6 @@ class CreateModelViewModel(private val c: AppContainer) : ViewModel() {
 
     fun fill() = viewModelScope.launch {
         val id = state.value.model?.id ?: return@launch
-        c.sound.play(SoundFx.Kind.GO)
         c.repo.fillAngles(id)
     }
 
@@ -146,7 +144,7 @@ fun CreateBasicsScreen() {
                 Field("Name") { Input(s.draft.name, { v -> vm.edit { it.copy(name = v) } }, placeholder = "Noor Ellis") }
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row { Lbl("Age · "); T("${s.draft.age}", m.type.mono.copy(fontSize = 11.5.sp, fontWeight = FontWeight.Bold), m.t.ink) }
-                    MuseSlider(s.draft.age, 18, 70, { v -> if (v != s.draft.age) { c.sound.play(SoundFx.Kind.TICK); vm.edit { it.copy(age = v) } } })
+                    MuseSlider(s.draft.age, 18, 70, { v -> if (v != s.draft.age) vm.edit { it.copy(age = v) } })
                     Scale("18", "70")
                 }
                 Field("Niche") { ChipRow(NICHES, s.draft.niche, { v -> vm.edit { it.copy(niche = v) } }) }
@@ -214,7 +212,7 @@ fun CharacterSheetScreen() {
                 else NoteBox("$filled of 6 shots. ${if (filled < 6) "More angles help when she turns. Optional." else "Full sheet. Her identity is locked."}", icon = "check")
             }
         }
-        Dock { Cta("Save model · $filled/6", { vm.save(celebrate) { nav.reset(Routes.HOME) } }, Modifier.weight(1f), sound = null) }
+        Dock { Cta("Save model · $filled/6", { vm.save(celebrate) { nav.reset(Routes.HOME) } }, Modifier.weight(1f)) }
     }
 }
 

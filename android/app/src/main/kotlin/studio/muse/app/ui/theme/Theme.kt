@@ -23,7 +23,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import studio.muse.app.R
 
-/** The four approved themes. Each has its own layouts, motion and sounds, not just colours. */
+/** The four approved themes. Each has its own layouts and motion, not just colours. */
 enum class ThemeId(val key: String, val label: String) {
     A("a", "Editorial"), B("b", "Camera Body"), C("c", "Soft Tactile"), D("d", "Creator Pop");
 
