@@ -382,7 +382,6 @@ struct StudioSettingsSection: View {
     @State private var provider = "simulated"
     @State private var model = ""
     @State private var engineURL = ""
-    @State private var loaded = false
 
     var body: some View {
         if let s = store.studioSettings {
