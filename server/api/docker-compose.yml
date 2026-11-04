@@ -1,0 +1,26 @@
+# Local dev: Postgres + MinIO (stands in for Cloudflare R2). Then `cp .env.example .env` and `npm run dev`.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: muse
+      POSTGRES_PASSWORD: muse
+      POSTGRES_DB: muse
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: museminio
+      MINIO_ROOT_PASSWORD: museminio-secret
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [miniodata:/data]
+  minio-bucket:
+    image: minio/mc:latest
+    depends_on: [minio]
+    entrypoint: >
+      /bin/sh -c "sleep 3; mc alias set local http://minio:9000 museminio museminio-secret && mc mb --ignore-existing local/muse"
+volumes:
+  pgdata:
+  miniodata:

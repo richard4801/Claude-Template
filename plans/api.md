@@ -4,7 +4,7 @@ _Added 2026-11-04._ This is the contract between the apps and the backend. `serv
 
 - Base URL: `http://<host>:8787/`. The Android emulator reaches the host at `http://10.0.2.2:8787/`.
 - JSON bodies, UTF-8. Money is in US dollars as a number (`0.67`). Times are epoch milliseconds, and durations are seconds.
-- Auth: `Authorization: Bearer <token>` from sign-in or sign-up. The mock accepts any token or none.
+- Auth: `Authorization: Bearer <token>` from sign-in or sign-up. The mock accepts any token or none. The real API (`server/api`) needs a session for everything under `/v1` except sign-in and sign-up. `GET /v1/events` also accepts `?token=`.
 - Errors use a non-2xx status and the body `{ "error": "Human message", "code": "machine_code" }`. Clients show `error` as-is.
 
 | code | status | when |
@@ -16,6 +16,18 @@ _Added 2026-11-04._ This is the contract between the apps and the backend. `serv
 | `clip_failed_checks` | 422 | job for a clip whose checks failed |
 | `not_found` | 404 | unknown id |
 | `busy` | 409 | the LoRA is already building or training |
+| `unauthorized` | 401 | no session, or it ended (real API) |
+| `bad_credentials` | 401 | wrong email or password |
+| `invite_required` / `invite_invalid` | 400 | sign-up without a valid invite code |
+| `email_taken` | 409 | sign-up with an email that has an account |
+| `account_disabled` / `owner_only` | 403 | switched off by the owner / owner-only endpoint |
+| `insufficient_tokens` | 402 | a member's wallet can't cover the price (the owner gets `insufficient_balance`) |
+| `over_user_day_limit` / `over_day_limit` | 402 | over the per-user or per-studio daily cap |
+| `over_allocation` | 402 | the owner tried to send more tokens than the RunPod balance backs |
+| `balance_unavailable` | 503 | RunPod can't be read, so tokens can't be sent |
+| `engine_unavailable` | 400 | the GPU image can't run this yet (Fast · beta, LoRA training, or lip sync without LatentSync) |
+| `image_engine_failed` | 502 | the image engine failed (the charge is refunded) |
+| `rate_limited` | 429 | too many sign-in or sign-up tries |
 
 ## Types
 
@@ -35,9 +47,17 @@ JobRequest { title, modelId, outfitId, clipId, engine: "h3"|"viggle", steps (4�
              queue?: boolean /* true = park it as "queued", not charged, until POST /v1/queue/run */ }
 Job        { id, title, modelId, modelName, outfitId, request: JobRequest, state: "queued"|"running"|"done"|"failed",
              progress (0–100), take, step, totalSteps, phase /* "step 12/20 · ~6 min left" */, secondsLeft, totalSeconds,
-             cost, refunded, error?, createdAt, finishedAt?, prompt /* exact H3 prompt */, seed, thumb: ImageRef }
-Take       { id, kind: "take"|"shot", jobId|null, index, of, title, label, engineLabel, cost, seed, status: "test"|"final", thumb, prompt, createdAt }
-Balance    { balance, month, today /* spent since local midnight */, perJobLimit, perDayLimit, videos }
+             cost, refunded, error?, createdAt, finishedAt?, prompt /* exact H3 prompt */, seed, thumb: ImageRef,
+             queuePosition?, etaSeconds? /* while waiting for a GPU */, blocked?: "owner_balance_low", warmupCost? /* GPU warm-up charged with it */ }
+Take       { id, kind: "take"|"shot", jobId|null, index, of, title, label, engineLabel, cost, seed, status: "test"|"final", thumb, prompt, createdAt,
+             videoUrl?, durationSec?, width?, height? /* real output: renders are 768×1344 */ }
+Balance    { balance, month, today /* spent since local midnight */, perJobLimit, perDayLimit, videos,
+             tokens, tokenUsd, role: "owner"|"member", heldUsd, perUserDayLimit, balanceSource: "runpod"|"simulated"|"unavailable"|"wallet",
+             runpodBalance?, availableToSend? /* owner only */ }
+             // Member: balance = their wallet in USD; today/month = their own spend. Owner: balance = what they can spend or send
+             // (RunPod − members' unspent tokens − holds); today/month = the studio's spend.
+Wallet     { userId, role, tokens, usd, heldTokens, heldUsd, todayUsd, monthUsd, tokenUsd, balanceSource, availableToSend?, runpodBalance?, membersUnspentUsd? }
+Member     { id, email, role, tokens, usd, heldTokens, todayUsd, monthUsd, lastActiveAt?, disabled, capPerJob, capPerDay, createdAt }
 Lora       { modelId, version /* 0 = never trained; the last ready version */, state: "none"|"building"|"review"|"training"|"ready"|"failed",
              use: boolean /* default true */,
              candidates: { id, image: ImageRef, label, flag?: "tattoo"|"ring"|"choker"|"face drift", keep: boolean /* false when flagged */ }[],
@@ -49,7 +69,9 @@ Platform   "tiktok"|"instagram"|"facebook"|"youtube"|"x"
 Account    { modelId, platform: Platform, handle, connectedAt, canPostDirect: boolean /* false until that platform approves MUSE */ }
 Post       { id, modelId, takeId, title, thumb: ImageRef, platforms: Platform[], caption, aiLabel: boolean, paidPartnership: boolean,
              when: "now"|ISO time, state: "scheduled"|"handoff"|"posted"|"failed", createdAt, postedAt?, stats?: { views, likes, comments } }
-ApiEvent   { type: "job"|"balance"|"model"|"outfit"|"lora"|"post", job?, balance?, model?, outfit?, lora?, post?, takes?: Take[] }
+ApiEvent   { type: "job"|"balance"|"model"|"outfit"|"lora"|"post"|"wallet", job?, balance?, model?, outfit?, lora?, post?, takes?: Take[],
+             wallet?: Wallet, notice?: { code: "owner_balance_low"|"owner_balance_ok", message } }
+             // balance and wallet events go only to the user they concern (and to owners, whose pool moved too).
 // Model also carries optional { personality, notes }.
 ConnectResponse { authUrl?: string /* real backend: open it for OAuth */, account?: Account /* mock: signed in already */ }
 ```
@@ -72,7 +94,11 @@ These are measured on an H100 with FlashAttention 3 and billed at $3.99/h. The u
 | | |
 |---|---|
 | `POST /v1/auth/signin` `{email, password}` | → `{token, user}` |
-| `POST /v1/auth/signup` `{studioName, email, password, attestAdultRightsOriginal, attestLabelAi}` | → `{token, user}`. Both attestations are required (`attestation_required`). There is no other consent endpoint, because consent lives in the Terms. |
+| `POST /v1/auth/signup` `{studioName, email, password, inviteCode, attestAdultRightsOriginal, attestLabelAi}` | → `{token, user}`. Both attestations are required (`attestation_required`, checked first) and stored with a timestamp. There is no other consent endpoint, because consent lives in the Terms. The real API is invite-only: `inviteCode` is required (`invite_required`), except in its dev mode. `user` also carries `role`. |
+| `POST /v1/auth/signout` | 204. Revokes this session. |
+| `GET /v1/auth/me` | → `{id, email, studioName, role}` |
+| `POST /v1/invites` `{email?, role?, days?}` (owner) | → `{code, id, email, role, expiresAt}`. The code is shown once. `npm run invite -- email` in `server/api` does the same from a shell. |
+| `GET /v1/invites` (owner) | → invites without their codes |
 
 ### Models and character sheets
 | | |
@@ -94,7 +120,9 @@ These are measured on an H100 with FlashAttention 3 and billed at $3.99/h. The u
 |---|---|
 | `POST /v1/uploads/images` multipart `file` | → `ImageRef {url}` |
 | `POST /v1/uploads/clips` multipart `meta` (ClipMeta JSON) + optional `file` | → `Clip` with checks: one person, no watermark, vertical and ≥720 wide, ≤15 s, plus whether the performer is talking. The client reads duration, size and fps from the file. The server detects people and watermarks (the mock takes them from `meta`). |
-| `GET /uploads/{name}` | the stored file |
+| `POST /v1/uploads/presign` `{kind: "image"\|"clip", contentType, bytes?}` | → `{uploadId, method: "PUT", url, headers, expiresAt}`. For large files: PUT the bytes straight to R2, then confirm. |
+| `POST /v1/uploads/{uploadId}/confirm` `{meta?: ClipMeta}` | → `ImageRef` (image) or `Clip` (clip). `upload_missing` (409) if the PUT hasn't arrived. |
+| `GET /uploads/{name}` | the stored file (the real API redirects to a short-lived R2 URL) |
 
 ### Jobs, takes and photoshoots
 | | |
@@ -135,16 +163,32 @@ The mock runs LoRA training 5× faster than its render speed (120× real time by
 | `PATCH /v1/models/{id}` `{name?, niche?, personality?, notes?, neverAdd?}` | → `Model`, plus a `model` event. Only the fields sent change. An empty name is `bad_request`. |
 | `DELETE /v1/models/{id}` | 204. Also deletes her outfits, LoRAs and training set, linked accounts, and posts that haven't gone out. |
 
-### Balance
+### Balance and wallets
 | | |
 |---|---|
 | `GET /v1/balance` | → `Balance` |
-| `POST /v1/balance/topup` `{amount, method: "card"\|"usdt"\|"virtual"}` | → `Balance`. In the mock, no payment is taken. |
+| `POST /v1/balance/topup` `{amount, method: "card"\|"usdt"\|"virtual"}` | → `Balance`. In the mock, no payment is taken. The real API reads the RunPod balance, so this is `topup_unavailable` except in its dev mode (owner only). |
+| `GET /v1/wallet` | → `Wallet` (mine) |
+| `GET /v1/members` (owner) | → `Member[]` |
+| `PATCH /v1/members/{id}` `{capPerJob?, capPerDay?, disabled?}` (owner) | → `Member`. `null` caps go back to the studio default. Disabling signs them out. |
+| `POST /v1/wallets/transfer` `{toUserId, tokens, note?}` (owner) | → `{wallet, member}`. `over_allocation` beyond what the RunPod balance backs. |
+| `POST /v1/wallets/reclaim` `{fromUserId, tokens, note?}` (owner) | → `{wallet, member}`. Only unused tokens (not ones held by running jobs). |
+| `GET /v1/ledger?userId=&limit=` (owner) | → ledger rows, newest first |
+
+### Settings (real API)
+| | |
+|---|---|
+| `GET /v1/settings/image-engine` | → `{provider: "simulated"\|"fal"\|"custom-http", model, url?, available: {simulated, fal, "custom-http"}}` |
+| `PATCH /v1/settings/image-engine` `{provider, model?, url?}` | → same. Per studio. `custom-http` is owner-only and needs an https URL. Shoots and outfit sets also take `imageEngine: {provider, model?}` to override it for one call. |
+| `GET /v1/settings/studio` | → `{maxGpus, overheadPayer: "user"\|"owner", capPerJob, capPerDay, capPerUserDay, tokenUsd, minRunpodBalance, lowBalance, features: {standard, fastBeta, lipSync, loraTraining, replaceAudio: false, outputSize: {width: 768, height: 1344}, maxClipSec}, gpu}` |
+| `PATCH /v1/settings/studio` `{maxGpus?, overheadPayer?, capPerJob?, capPerDay?, capPerUserDay?}` (owner) | → same |
+
+"Replace audio" isn't wired on the GPU yet: `keepAudio: false` gives a silent take, and `features.replaceAudio` is false.
 
 ### Live events
 `GET /v1/events` is a `text/event-stream`. Each message is `data: <ApiEvent JSON>`. While a job runs, `job` events arrive about every 250 ms (`progress`, `step`, `phase`, `secondsLeft`). `lora` events carry training progress (about every 250 ms) and the `building` → `review` change. `post` events carry `handoff`/`posted` changes. When the job finishes, a `job` event arrives with `state: "done"` and its new `takes`, or with `state: "failed"`, `error` and `refunded`. Each failure is followed by a `balance` event. Clients reconnect with backoff. The Android app turns finished and failed jobs into local notifications. A real backend can add FCM push behind the same events.
 
-### Developer (mock only)
+### Developer (mock, and the real API only with `DEV_MODE=true`)
 | | |
 |---|---|
 | `POST /v1/dev/fail-next` `{failNext}` | The next job fails at step 3 and is refunded. |

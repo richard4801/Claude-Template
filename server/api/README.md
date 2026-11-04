@@ -1,0 +1,168 @@
+# MUSE API (`server/api`)
+
+This is the real backend for the MUSE Android and Mac apps. It speaks the same contract as `server/mock` (`plans/api.md`), so the apps switch over by changing the base URL and signing in. The design and decisions are in `plans/backend.md`.
+
+- **Stack:** Node 22, TypeScript, Fastify, Postgres (Drizzle, migrations in `drizzle/` run on start), Cloudflare R2 through the S3 API, and zod.
+- **Accounts:** invite-only sign-in with argon2id passwords and revocable bearer sessions (only a hash of each token is stored).
+- **Money:** per-user token wallets funded by the owner, a ledger, and caps. The balance is the real RunPod credit.
+- **GPU controller** (`src/gpu/`):
+  - `simulated` (the default, free): renders run 24× faster than real time, like the mock.
+  - `runpod`: one pod per user on the shared network volume, warm-pod reuse, idle shutdown, and the worker protocol at `/worker/v1/*`.
+- **Image engine** (`src/images/`): `simulated` (the bundled reference stills), `fal` (fal.ai queue API) or `custom-http` (our small contract). It is chosen per studio in Settings.
+- **Prompt engine** (`src/prompt/`): a port of `android/core` `PromptEngine.kt`, checked against the same fixtures.
+
+## Run it on your computer
+
+You need Node 22. Docker is optional.
+
+```bash
+cd server/api
+npm install
+```
+
+**Quickest: no Docker.** This uses an embedded in-memory Postgres and local files, simulated GPU and images, and the same seed data as the mock:
+
+```bash
+DEV_MODE=true DEV_SEED=true BALANCE_MODE=simulated npm run dev
+# → http://localhost:8787  (sign in as jen@studio.com / x)
+```
+
+**Like production, with Docker.** Postgres and MinIO stand in for R2:
+
+```bash
+docker compose up -d          # Postgres on :5432, MinIO on :9000 (console :9001), bucket "muse"
+cp .env.example .env          # already points at both
+npm run dev
+```
+
+**Tests.** The tests use the embedded Postgres, a stub S3 and a fake RunPod API, so no money is ever spent:
+
+```bash
+npm test                                                     # embedded Postgres
+TEST_DATABASE_URL=postgres://muse:muse@localhost:5432/muse_test npx vitest run --no-file-parallelism   # real Postgres (it wipes that DB)
+```
+
+**The apps' contract tests against this server:**
+
+```bash
+# Android (from android/): starts this server instead of server/mock
+MUSE_TEST_SERVER_CMD="cd ../../server/api && exec node --import tsx scripts/test-server.ts" ./gradlew :app:testDebugUnitTest --tests '*Http*'
+# Mac (from mac/MuseCore/), with this server running:
+(cd ../../server/api && PORT=8799 node --import tsx scripts/test-server.ts &) ; MUSE_MOCK_URL=http://127.0.0.1:8799 swift test --filter MockServerTests
+```
+
+**A GPU worker by hand** (no pod). Start the server with `GPU_MODE=runpod WORKER_TOKEN=some-dev-token`, then run the worker in dry-run mode:
+
+```bash
+cd gpu/worker && WORKER_TOKEN=some-dev-token POD_ID=dev python3.11 -m muse_worker --dry-run --api-url http://localhost:8787 --once
+```
+
+## Put it online: Railway + Cloudflare R2 (step by step)
+
+You'll make three things: a **Cloudflare R2 bucket** (for photos and videos), a **Railway project** (it runs the API and its database), and the **first owner account**. Keys go into Railway's Variables page only: never paste them into chat, email or the code.
+
+### 1. Cloudflare R2 (storage)
+1. Sign in at **dash.cloudflare.com**. In the left menu, click **R2 Object Storage**. If it asks, click **Purchase R2 Plan** to turn on R2; the free tier is enough to start.
+2. Click **Create bucket**. Name it `muse-media`, leave **Location** on Automatic, and click **Create bucket**.
+3. Back on the R2 overview page, copy your **Account ID** from the right-hand side. That's `R2_ACCOUNT_ID`.
+4. Click **Manage API tokens** (on the right, under Account Details), then **Create API token**:
+   - **Token name:** `muse-api`
+   - **Permissions:** **Object Read & Write**
+   - **Specify bucket(s):** **Apply to specific buckets only** → `muse-media`
+   - **TTL:** Forever
+   - Click **Create API Token**.
+5. The next page shows the **Access Key ID** and the **Secret Access Key** once. Copy both into a safe place, such as your password manager. They are `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`.
+
+Leave the bucket private. The API hands out short-lived links.
+
+### 2. Railway (the API and its database)
+1. Sign in at **railway.com** with GitHub. Click **New Project** → **Deploy from GitHub repo**, and pick this repository. If Railway can't see it, click **Configure GitHub App** and allow the repo.
+2. Railway creates a service from the repo. Open it, go to **Settings** → **Source** → **Root Directory**, and type `/server/api`. Railway then finds `Dockerfile` and `railway.json` there.
+3. Add the database: on the project canvas, click **+ Create** (or **New**) → **Database** → **Add PostgreSQL**.
+4. Open the API service → **Variables** → **New Variable**, and add these one by one:
+
+   | Variable | Value |
+   |---|---|
+   | `DATABASE_URL` | click **Add Reference** and pick **Postgres → DATABASE_URL** (it shows as `${{Postgres.DATABASE_URL}}`) |
+   | `R2_ACCOUNT_ID` | from step 1.3 |
+   | `R2_ACCESS_KEY_ID` | from step 1.5 |
+   | `R2_SECRET_ACCESS_KEY` | from step 1.5 |
+   | `R2_BUCKET` | `muse-media` |
+   | `RUNPOD_API_KEY` | RunPod → **Settings** → **API Keys** → **Create API Key** (Read/Write). The API reads the balance with it. |
+   | `TZ` | your time zone, e.g. `Europe/London`, so "today" starts at your midnight |
+   | `OWNER_INVITE_CODE` | make up a long code only you know, e.g. `jenne-studio-first-owner-2026` (see step 3) |
+   | `OWNER_EMAIL` | the email you'll sign up with |
+   | `STUDIO_NAME` | your studio's name, e.g. `Jenne Studio` |
+
+   Leave `GPU_MODE` unset for now: renders stay simulated (free) until the GPU worker is ready.
+5. Go to **Settings** → **Networking** → **Generate Domain**. Copy the address, e.g. `https://muse-api-production.up.railway.app`. Add one more variable, `PUBLIC_URL`, set to that address with no slash at the end.
+6. Railway redeploys after each change. Open **Deployments** → the latest one → **View logs**, and wait for `MUSE API listening`. Open `<your address>/health` in a browser: it should say `"ok":true`.
+
+### 3. The first owner account
+1. In the MUSE app, open Settings and set the server address to your Railway address.
+2. Choose **Sign up**. Use the `OWNER_EMAIL` address, a password of 8 or more characters, and the `OWNER_INVITE_CODE` you made up. Tick both boxes. You're now the studio **owner**.
+3. In Railway, delete the `OWNER_INVITE_CODE` variable. It only ever works once, but there's no reason to keep it.
+4. **Inviting testers:** each code works once, for that email, for 14 days. There are two ways to make one:
+   - **The API:** `POST /v1/invites {email}` as the owner. The app screen for this comes with Phase C.
+   - **A terminal:** with the Railway CLI, run `railway ssh` (pick the API service), then `npm run invite -- tester@example.com`. The code is printed there.
+5. **Giving testers tokens:** 1 token = $0.01. Send tokens to a tester with `POST /v1/wallets/transfer`. You can't send more than your RunPod balance backs.
+
+### 4. Turning on the real GPU (later, when you say go)
+Set these variables:
+- `GPU_MODE=runpod`
+- `RUNPOD_NETWORK_VOLUME_ID`: RunPod → **Storage** → your volume's ID
+- `RUNPOD_DATACENTER_ID`: the volume's data centre, e.g. `EU-RO-1`
+- `RUNPOD_IMAGE`: the worker image from `gpu/`'s README
+- optionally `RUNPOD_START_CMD`
+
+Each user then gets their own H100 pod when they render. It shuts down 3 minutes after their last job. `MAX_GPUS` (default 3) caps how many pods run at once.
+
+### 5. Hosted photo models (optional)
+For fal.ai: create a key at **fal.ai** → **Dashboard** → **Keys**, and add it as `FAL_KEY`. Then pick **fal** in the app's Settings → Image engine. The default model is `fal-ai/bytedance/seedream/v4/edit`; change it in the same place.
+
+## All variables
+
+| Variable | Default | What |
+|---|---|---|
+| `DATABASE_URL` | embedded (dev only) | Postgres connection string |
+| `PORT`, `HOST` | `8787`, `0.0.0.0` | Railway sets `PORT` |
+| `PUBLIC_URL` | `http://localhost:PORT` | Public address; used for image links and given to GPU pods |
+| `LOG_LEVEL` | `info` | Structured JSON logs. Auth headers, tokens and query strings are never logged |
+| `TZ` | UTC | Day boundary for "today" and the daily caps |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | none | Cloudflare R2. Setting `R2_BUCKET` switches storage to S3 |
+| `S3_ENDPOINT`, `S3_FORCE_PATH_STYLE`, `STORAGE` | | MinIO or other S3. `STORAGE=local` uses disk (`UPLOAD_DIR`) |
+| `DIRECT_UPLOAD_MAX_MB` | `50` | Largest multipart upload; bigger files use `/v1/uploads/presign` |
+| `RUNPOD_API_KEY` | none | Balance (always read-only) and pods (in `runpod` mode). Never logged. Without it the balance says `unavailable` |
+| `BALANCE_MODE` | `runpod` (`simulated` in dev) | `simulated` = a stand-in RunPod credit (`SIM_START_BALANCE`) for dev and tests |
+| `TOKEN_USD` | `0.01` | Dollars per wallet token |
+| `CAP_PER_JOB_USD`, `CAP_PER_DAY_USD`, `CAP_PER_USER_DAY_USD` | `5`, `15`, `10` | Default caps. The owner can change them in settings and per member |
+| `RUNPOD_MIN_BALANCE_USD` | `2` | New jobs pause when the RunPod balance < work in flight + this |
+| `GPU_MODE` | `simulated` | `runpod` starts real pods |
+| `RUNPOD_NETWORK_VOLUME_ID`, `RUNPOD_DATACENTER_ID`, `RUNPOD_IMAGE`, `RUNPOD_START_CMD`, `RUNPOD_CONTAINER_DISK_GB` | | Pod template |
+| `GPU_TABLE` | H3 → H100s then H200s; Viggle → H200 NVL, H200 | GPU types per job kind (JSON), best first |
+| `RUNPOD_WORKER_CAPABILITIES` | `h3,latentsync` | What the pod image can do; other jobs are refused at submit time |
+| `MAX_GPUS`, `IDLE_SHUTDOWN_SECONDS` | `3`, `180` | Pod cap and idle shutdown |
+| `WORKER_HEARTBEAT_TIMEOUT_SEC`, `POD_BOOT_TIMEOUT_SEC` | `60`, `900` | Health checks |
+| `GPU_HOURLY_USD` | `3.99` | Rate used when a pod doesn't report its own |
+| `WORKER_TOKEN` | none | Optional static token for a hand-run dev worker |
+| `IMAGE_PROVIDER`, `IMAGE_MODEL`, `IMAGE_CUSTOM_URL` | `simulated` | The default image engine (studios override it in Settings) |
+| `FAL_KEY`, `FAL_COST_PER_IMAGE` | none, `0.03` | fal.ai |
+| `OWNER_INVITE_CODE`, `OWNER_EMAIL`, `STUDIO_NAME` | | First owner without a terminal (see above) |
+| `DEV_MODE`, `DEV_SEED` | off | Dev only: seed data, `/v1/dev/*`, sign-up without invite, simulated socials. **Never on Railway** |
+| `SPEED`, `GEN_MS` | `24`, `1600` | Simulated render speed and image delay |
+
+## What's real and what's still a stand-in
+- **Real:**
+  - accounts, invites, sessions, wallets, the ledger, caps and the RunPod balance
+  - storage and presigned uploads
+  - the prompt engine and pricing
+  - the fal and custom-http image engines
+  - the RunPod pod controller (tested against a fake RunPod API)
+  - the worker protocol (tested with the Python worker in dry-run mode)
+- **Simulated by default:** GPU renders and LoRA training (`GPU_MODE`), and images (`IMAGE_PROVIDER`).
+- **Stubs:**
+  - Social **connect** links the handle after a short delay; there are no platform developer apps yet.
+  - Posts are scheduled in Postgres and handed off at their time. Stats read-back only exists in dev mode (made-up numbers).
+  - Clip checks (people, watermark) use the app's metadata, so they're heuristic.
+  - LoRA candidates from a real engine aren't auto-flagged yet.
+- **One instance:** live events and the money lock are in memory. Railway runs one replica (`railway.json`). More replicas would need Postgres LISTEN/NOTIFY and row locks.

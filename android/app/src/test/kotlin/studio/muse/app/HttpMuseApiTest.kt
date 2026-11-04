@@ -16,6 +16,7 @@ import studio.muse.app.data.ApiException
 import studio.muse.app.data.HttpMuseApi
 import studio.muse.app.data.JobRequest
 import studio.muse.app.data.SampleData
+import studio.muse.app.data.SignInRequest
 import studio.muse.app.data.SignUpRequest
 import studio.muse.app.data.CreatePostRequest
 import studio.muse.app.data.PatchLoraRequest
@@ -31,20 +32,38 @@ class HttpMuseApiTest {
     private var proc: Process? = null
     private lateinit var api: HttpMuseApi
 
+    /**
+     * Starts server/mock by default. Set MUSE_TEST_SERVER_CMD to run the same tests against another server, e.g. the real
+     * API in dev mode (the command runs in android/app):
+     *   MUSE_TEST_SERVER_CMD="cd ../../server/api && exec node --import tsx scripts/test-server.ts"
+     * The command runs through `sh -c` with PORT, SPEED and GEN_MS set, and must print a line containing "mock server".
+     */
     @Before fun start() {
-        val server = generateSequence(File("").absoluteFile) { it.parentFile }.map { File(it, "server/mock/server.js") }.firstOrNull { it.exists() }
-        val node = runCatching { ProcessBuilder("node", "--version").start().waitFor() == 0 }.getOrDefault(false)
-        assumeTrue("node + server/mock required", server != null && node)
         val port = ServerSocket(0).use { it.localPort }
-        proc = ProcessBuilder("node", server!!.path).apply { environment()["PORT"] = "$port"; environment()["SPEED"] = "2400"; environment()["GEN_MS"] = "50"; redirectErrorStream(true) }.start()
+        val cmd = System.getenv("MUSE_TEST_SERVER_CMD")?.takeIf { it.isNotBlank() }
+        val pb = if (cmd != null) {
+            ProcessBuilder("sh", "-c", cmd)
+        } else {
+            val server = generateSequence(File("").absoluteFile) { it.parentFile }.map { File(it, "server/mock/server.js") }.firstOrNull { it.exists() }
+            val node = runCatching { ProcessBuilder("node", "--version").start().waitFor() == 0 }.getOrDefault(false)
+            assumeTrue("node + server/mock required", server != null && node)
+            ProcessBuilder("node", server!!.path)
+        }
+        proc = pb.apply { environment()["PORT"] = "$port"; environment()["SPEED"] = "2400"; environment()["GEN_MS"] = System.getenv("MUSE_TEST_GEN_MS") ?: "50"; environment()["MUSE_EXIT_ON_STDIN_CLOSE"] = "1"; redirectErrorStream(true) }.start()
         val reader = proc!!.inputStream.bufferedReader()
-        withTimeoutBlocking { while (!reader.readLine().contains("mock server")) Unit }
+        val deadline = System.currentTimeMillis() + if (cmd != null) 90_000 else 10_000
+        while (true) {
+            val line = reader.readLine() ?: error("test server exited before it was ready")
+            if (line.contains("mock server")) break
+            check(System.currentTimeMillis() < deadline) { "test server not ready in time" }
+        }
+        Thread { runCatching { reader.forEachLine { } } }.apply { isDaemon = true }.start()
         api = HttpMuseApi("http://127.0.0.1:$port/")
     }
 
-    private fun withTimeoutBlocking(b: () -> Unit) = runBlocking { withTimeout(10_000) { b() } }
 
-    @After fun stop() { proc?.destroy() }
+    /** Closing stdin also stops a MUSE_TEST_SERVER_CMD server that runs under a wrapper (sh, npx), see MUSE_EXIT_ON_STDIN_CLOSE. */
+    @After fun stop() { proc?.let { p -> runCatching { p.outputStream.close() }; p.destroy() } }
 
     @Test fun fullRenderOverRestAndSse() = runBlocking {
         try { api.signUp(SignUpRequest("S", "a@b.c", "x", true, false)); error("should fail") } catch (e: ApiException) { assertEquals("attestation_required", e.code) }
@@ -63,6 +82,7 @@ class HttpMuseApiTest {
 
     /** The LoRA, accounts, posts, queue and model-edit contract (plans/api.md, 2026-11-04) against server/mock. */
     @Test fun loraAccountsPostsQueueAndModelEdit() = runBlocking {
+        api.setToken(api.signIn(SignInRequest("jen@studio.com", "x")).token) // the mock accepts anyone; the real API needs a session
         assertEquals(0.13, api.balance().today, 1e-9)
         assertEquals("none", api.lora(SampleData.SIENNA).state)
         api.buildLoraSet(SampleData.SIENNA)
