@@ -36,7 +36,17 @@ export type PgOptions = {
  *  - `sslmode=disable` (a local Postgres) is left alone.
  */
 export function normalizePgUrl(raw: string): { connectionString: string; enableChannelBinding: boolean; ssl: boolean } {
-  const u = new URL(raw);
+  let u: URL;
+  try {
+    u = new URL(raw.trim());
+  } catch {
+    // Never echo the value: a real connection string with a typo would put the database password in the logs.
+    throw new Error('Bad configuration: DATABASE_URL is not a valid connection string. ' +
+      'Paste the full Neon pooled string (postgresql://…-pooler…/neondb?sslmode=require), with no quotes.');
+  }
+  if (!/^postgres(ql)?:$/.test(u.protocol)) {
+    throw new Error('Bad configuration: DATABASE_URL must start with postgresql:// (the Neon pooled connection string).');
+  }
   const q = u.searchParams;
   const libpqCompat = q.get('uselibpqcompat') === 'true';
   const mode = q.get('sslmode');
