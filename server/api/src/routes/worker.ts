@@ -175,11 +175,17 @@ export async function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.post('/worker/v1/heartbeat', async (req, reply) => {
     const b = Heartbeat.parse(req.body ?? {});
-    let { pod } = await podFor(req, b.podId);
+    const found = await podFor(req, b.podId);
     const now = Date.now();
-    pod = await pool.markReady(pod, now);
+    const pod = await pool.markReady(found.pod, now);
     await ctx.db.update(pods).set({ lastHeartbeatAt: now, busy: !!b.busy, workerState: b.state ?? null }).where(eq(pods.id, pod.id));
     if (b.jobId && b.jobId === pod.currentJobId) await ctx.db.update(jobs).set({ lastProgressAt: now }).where(eq(jobs.id, b.jobId));
+    // The worker's dead-man's switch fired (gpu/worker/muse_worker/selfstop.py): it is terminating its own pod.
+    // Settle the pod's idle time and terminate it from here too (harmless if RunPod already removed it).
+    if (b.state === 'self-stopping' && !found.manual && !pod.currentJobId) {
+      req.log.warn({ pod: pod.id, reason: (req.body as any)?.reason }, 'worker is self-stopping its pod');
+      await pool.stopPod({ ...pod, lastHeartbeatAt: now }, now, 'worker self-stop');
+    }
     return reply.status(204).send();
   });
   void uid;

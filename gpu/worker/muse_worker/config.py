@@ -57,6 +57,15 @@ class Config:
     max_jobs: int | None = None
     keep_failed: bool = False
     preload: bool = True
+    # Dead-man's switch (selfstop.py): terminate the pod when idle or cut off from the API.
+    runpod_pod_id: str = ""  # RunPod's own id (RUNPOD_POD_ID), not the API's POD_ID
+    self_stop: bool = True
+    self_stop_idle_seconds: float = 300.0
+    self_stop_unreachable_seconds: float = 600.0
+    self_stop_retry_seconds: float = 60.0
+    runpodctl: str = "runpodctl"
+    runpod_api_key: str = field(default="", repr=False)
+    runpod_graphql_url: str = "https://api.runpod.io/graphql"
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None, **overrides) -> "Config":
@@ -85,6 +94,14 @@ class Config:
             max_jobs=int(max_jobs) if max_jobs else None,
             keep_failed=env.get("MUSE_KEEP_FAILED", "0") == "1",
             preload=env.get("MUSE_PRELOAD", "1") == "1",
+            runpod_pod_id=env.get("RUNPOD_POD_ID", ""),
+            self_stop=env.get("MUSE_SELF_STOP", "1") != "0",
+            self_stop_idle_seconds=_float(env, "SELF_STOP_IDLE_SECONDS", 300.0),
+            self_stop_unreachable_seconds=_float(env, "SELF_STOP_UNREACHABLE_SECONDS", 600.0),
+            self_stop_retry_seconds=_float(env, "SELF_STOP_RETRY_SECONDS", 60.0),
+            runpodctl=env.get("MUSE_RUNPODCTL", "runpodctl"),
+            runpod_api_key=env.get("RUNPOD_API_KEY", ""),
+            runpod_graphql_url=env.get("RUNPOD_GRAPHQL_URL", "https://api.runpod.io/graphql"),
         )
         for k, v in overrides.items():
             if v is not None:

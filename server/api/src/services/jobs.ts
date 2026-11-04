@@ -48,6 +48,9 @@ export class JobService {
   private loop: NodeJS.Timeout | null = null;
   private ticking = false;
   private current: Promise<void> | null = null;
+  /** Nothing waiting and no pod up after the last pass: poll only every IDLE_POLL_SECONDS (lets Neon sleep). */
+  private quiet = false;
+  private lastPassAt = 0;
   constructor(private ctx: Ctx) {}
 
   // ------------------------------------------------------------------ views
@@ -293,12 +296,18 @@ export class JobService {
   // ------------------------------------------------------------------ dispatcher
   start() {
     if (this.loop) return;
-    this.loop = setInterval(() => { if (!this.current) void this.tick(); }, this.ctx.config.DISPATCH_MS);
+    this.loop = setInterval(() => { if (!this.current && this.due()) void this.tick(); }, this.ctx.config.DISPATCH_MS);
     this.loop.unref?.();
   }
   stop() { if (this.loop) clearInterval(this.loop); this.loop = null; }
   /** Run a tick soon (after a job is queued or a GPU frees up). */
-  kick() { setImmediate(() => { if (!this.current) void this.tick(); }); }
+  kick() { this.quiet = false; setImmediate(() => { if (!this.current) void this.tick(); }); }
+  /** Whether the timer should run a pass now. Every code path that creates GPU work calls kick(), so when quiet the
+   * slow poll is only a safety net. */
+  private due() {
+    const idleMs = this.ctx.config.IDLE_POLL_SECONDS * 1000;
+    return !this.quiet || !idleMs || Date.now() - this.lastPassAt >= idleMs;
+  }
 
   /** One dispatcher pass. If a pass is running, waits for it and runs another (so callers see a fresh pass). */
   async tick(now?: number): Promise<void> {
@@ -326,9 +335,15 @@ export class JobService {
       await this.updateQueueInfo(waiting);
       await this.ctx.gpu.dispatch(waiting.filter(j => !j.blocked), now);
       await this.ctx.gpu.tick(now);
+      const pool = this.ctx.gpu as { activePods?: () => Promise<unknown[]> };
+      const wasQuiet = this.quiet;
+      this.quiet = waiting.length === 0 && (pool.activePods ? (await pool.activePods()).length === 0 : false);
+      if (this.quiet !== wasQuiet) this.ctx.log.debug({ quiet: this.quiet }, this.quiet ? 'dispatcher idle: slow polling' : 'dispatcher busy');
     } catch (e) {
+      this.quiet = false;
       this.ctx.log.error({ err: (e as Error).message }, 'dispatcher tick failed');
     } finally {
+      this.lastPassAt = Date.now();
       this.ticking = false;
     }
   }

@@ -1,8 +1,13 @@
-// Production entry point: node dist/index.js (Railway runs this from the Dockerfile).
+// Production entry point: node dist/index.js (Koyeb or Railway run this from the Dockerfile).
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 
-const config = loadConfig();
+let config;
+try { config = loadConfig(); } catch (e) {
+  // Configuration problems print one clear line (names only, never values) instead of a stack trace.
+  console.error(`MUSE API cannot start: ${(e as Error).message}`);
+  process.exit(2);
+}
 const { app, close } = await buildApp(config);
 await app.listen({ port: config.PORT, host: config.HOST });
 app.log.info(`MUSE API listening on port ${config.PORT}`);

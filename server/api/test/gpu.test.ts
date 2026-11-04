@@ -6,7 +6,7 @@ import { jobs, ledger, pods, studioSettings, takes } from '../src/db/schema.js';
 import { RunpodApi } from '../src/gpu/runpodApi.js';
 import { makeApp, people, sienna, type Client } from './helpers.js';
 
-type Fake = { balance: number; deployed: { id: string; gpuTypeId: string; token: string; podId: string }[]; terminated: string[]; unavailable: Set<string> };
+type Fake = { balance: number; deployed: { id: string; gpuTypeId: string; token: string; podId: string; env: Record<string, string> }[]; terminated: string[]; unavailable: Set<string> };
 function fakeRunpod(state: Fake) {
   let n = 0;
   const f = (async (_url: string, init: any) => {
@@ -18,7 +18,7 @@ function fakeRunpod(state: Fake) {
       if (state.unavailable.has(input.gpuTypeId)) return Response.json({ errors: [{ message: 'There are no longer any instances available with the requested specifications.' }] });
       const env = Object.fromEntries(input.env.map((e: any) => [e.key, e.value]));
       const id = `rp${++n}`;
-      state.deployed.push({ id, gpuTypeId: input.gpuTypeId, token: env.WORKER_TOKEN, podId: env.MUSE_POD_ID });
+      state.deployed.push({ id, gpuTypeId: input.gpuTypeId, token: env.WORKER_TOKEN, podId: env.MUSE_POD_ID, env });
       expect(input.networkVolumeId).toBe('vol_123');
       return Response.json({ data: { podFindAndDeployOnDemand: { id, desiredStatus: 'RUNNING', costPerHr: 3.6 } } });
     }
@@ -232,6 +232,19 @@ describe('runpod controller: one pod per user', () => {
     row = (await u2.req('GET', '/v1/jobs')).body.find((x: any) => x.id === j.id);
     expect(row.blocked).toBeUndefined();
     expect((await owner.req('GET', '/v1/settings/studio')).body.lowBalance).toBe(false);
+  });
+
+  it("pods get the worker's dead-man's switch, and a self-stopping heartbeat stops the pod here too", async () => {
+    // Later than the API's own idle shutdown (180 s), so the API normally stops idle pods first.
+    expect(rp.deployed.every(d => Number(d.env.SELF_STOP_IDLE_SECONDS) >= 300)).toBe(true);
+    const running = (await podRows()).filter(p => ['starting', 'running'].includes(p.state) && !p.currentJobId);
+    expect(running.length).toBeGreaterThan(0);
+    const p = running[0]!;
+    const d = rp.deployed.find(x => x.podId === p.id)!;
+    expect((await worker(d.token)('/worker/v1/heartbeat', { podId: d.id, busy: false, state: 'self-stopping', reason: 'idle' })).status).toBe(204);
+    const [row] = await a.ctx.db.select().from(pods).where(eq(pods.id, p.id));
+    expect(row!.state).toBe('stopped');
+    expect(rp.terminated).toContain(d.id);
   });
 });
 

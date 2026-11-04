@@ -244,6 +244,9 @@ export class RunpodGpu extends PodPool {
             { key: 'MUSE_POD_ID', value: pod.id },
             { key: 'POD_ID', value: pod.id },
             { key: 'WORKER_TOKEN', value: workerToken },
+            // The worker's dead-man's switch: it terminates its own pod if this API can't (down, unreachable).
+            // Always later than the API's own idle shutdown, so the API normally stops the pod first.
+            { key: 'SELF_STOP_IDLE_SECONDS', value: String(Math.max(300, c.IDLE_SHUTDOWN_SECONDS + 120)) },
           ],
         });
         return { runpodId: r.id, gpuType: gpuTypeId, costPerHr: Number(r.costPerHr ?? c.GPU_HOURLY_USD), ready: false };

@@ -39,7 +39,7 @@ npm run dev
 
 ```bash
 npm test                                                     # embedded Postgres
-TEST_DATABASE_URL=postgres://muse:muse@localhost:5432/muse_test npx vitest run --no-file-parallelism   # real Postgres (it wipes that DB)
+TEST_DATABASE_URL='postgres://muse:muse@localhost:5432/muse_test?sslmode=disable' npx vitest run --no-file-parallelism   # real Postgres, SSL off (it wipes that DB); also runs test/pg.test.ts's lock/retry tests
 ```
 
 **The apps' contract tests against this server:**
@@ -57,11 +57,35 @@ MUSE_TEST_SERVER_CMD="cd ../../server/api && exec node --import tsx scripts/test
 cd gpu/worker && WORKER_TOKEN=some-dev-token POD_ID=dev python3.11 -m muse_worker --dry-run --api-url http://localhost:8787 --once
 ```
 
-## Put it online: Railway + Cloudflare R2 (step by step)
+## Put it online
+
+**Free setup (recommended): Koyeb + Neon + Cloudflare R2.** Follow [`server/DEPLOY-free.md`](../DEPLOY-free.md), click by click. In short:
+
+| Koyeb setting | Value |
+|---|---|
+| Builder | **Dockerfile** |
+| Work directory (build context) | `server/api` |
+| Dockerfile location | `Dockerfile` (relative to the work directory). Without a work directory: `server/api/Dockerfile` plus the build argument `APP_DIR=server/api` |
+| Exposed port | `8000`, HTTP, path `/` (the image sets `PORT=8000`) |
+| Health check | HTTP on port `8000`, path `/health`, grace period 60 s |
+| Instance | Free (512 MB, 0.1 vCPU), Frankfurt or Washington, D.C., **1 instance** |
+
+How it's tuned for this setup:
+- **Neon:** use the pooled connection string with `sslmode=require`. Start-up retries while a sleeping database wakes. The pool is small (5) and closes idle connections after 10 s. Migrations run in one transaction under an advisory lock.
+- **Letting the database sleep:** `/health` doesn't touch the database (`/health?db=1` does). With nothing to do, the background loops look at the database only every `IDLE_POLL_SECONDS`, so Neon can suspend.
+- **Server-sent events:** `/v1/events` sends a keep-alive comment every 15 s and is never buffered or compressed, so it streams through Koyeb's proxy.
+- **Memory:** the image holds production dependencies only, with `NODE_OPTIONS=--max-old-space-size=384`. It idles at about 60 MB.
+- **Scale-to-zero:** Koyeb's **free** instance always sleeps after 1 hour without traffic; this can't be turned off. Read [`DEPLOY-free.md`](../DEPLOY-free.md) for why that's safe here. On a paid instance, turn scale-to-zero off.
+
+Build it yourself: `docker build -t muse-api server/api`, or from the repository root, `docker build -t muse-api -f server/api/Dockerfile --build-arg APP_DIR=server/api .`.
+
+### Alternative: Railway + Cloudflare R2 (step by step)
+
+Railway isn't free, but it still works: `railway.json` sets the Dockerfile, the health check and one replica.
 
 You'll make three things: a **Cloudflare R2 bucket** (for photos and videos), a **Railway project** (it runs the API and its database), and the **first owner account**. Keys go into Railway's Variables page only: never paste them into chat, email or the code.
 
-### 1. Cloudflare R2 (storage)
+#### 1. Cloudflare R2 (storage)
 1. Sign in at **dash.cloudflare.com**. In the left menu, click **R2 Object Storage**. If it asks, click **Purchase R2 Plan** to turn on R2; the free tier is enough to start.
 2. Click **Create bucket**. Name it `muse-media`, leave **Location** on Automatic, and click **Create bucket**.
 3. Back on the R2 overview page, copy your **Account ID** from the right-hand side. That's `R2_ACCOUNT_ID`.
@@ -75,7 +99,7 @@ You'll make three things: a **Cloudflare R2 bucket** (for photos and videos), a 
 
 Leave the bucket private. The API hands out short-lived links.
 
-### 2. Railway (the API and its database)
+#### 2. Railway (the API and its database)
 1. Sign in at **railway.com** with GitHub. Click **New Project** → **Deploy from GitHub repo**, and pick this repository. If Railway can't see it, click **Configure GitHub App** and allow the repo.
 2. Railway creates a service from the repo. Open it, go to **Settings** → **Source** → **Root Directory**, and type `/server/api`. Railway then finds `Dockerfile` and `railway.json` there.
 3. Add the database: on the project canvas, click **+ Create** (or **New**) → **Database** → **Add PostgreSQL**.
@@ -98,7 +122,7 @@ Leave the bucket private. The API hands out short-lived links.
 5. Go to **Settings** → **Networking** → **Generate Domain**. Copy the address, e.g. `https://muse-api-production.up.railway.app`. Add one more variable, `PUBLIC_URL`, set to that address with no slash at the end.
 6. Railway redeploys after each change. Open **Deployments** → the latest one → **View logs**, and wait for `MUSE API listening`. Open `<your address>/health` in a browser: it should say `"ok":true`.
 
-### 3. The first owner account
+#### 3. The first owner account
 1. In the MUSE app, open Settings and set the server address to your Railway address.
 2. Choose **Sign up**. Use the `OWNER_EMAIL` address, a password of 8 or more characters, and the `OWNER_INVITE_CODE` you made up. Tick both boxes. You're now the studio **owner**.
 3. In Railway, delete the `OWNER_INVITE_CODE` variable. It only ever works once, but there's no reason to keep it.
@@ -107,7 +131,7 @@ Leave the bucket private. The API hands out short-lived links.
    - **A terminal:** with the Railway CLI, run `railway ssh` (pick the API service), then `npm run invite -- tester@example.com`. The code is printed there.
 5. **Giving testers tokens:** 1 token = $0.01. Send tokens to a tester with `POST /v1/wallets/transfer`. You can't send more than your RunPod balance backs.
 
-### 4. Turning on the real GPU (later, when you say go)
+#### 4. Turning on the real GPU (later, when you say go)
 Set these variables:
 - `GPU_MODE=runpod`
 - `RUNPOD_NETWORK_VOLUME_ID`: RunPod → **Storage** → your volume's ID
@@ -117,15 +141,19 @@ Set these variables:
 
 Each user then gets their own H100 pod when they render. It shuts down 3 minutes after their last job. `MAX_GPUS` (default 3) caps how many pods run at once.
 
-### 5. Hosted photo models (optional)
+#### 5. Hosted photo models (optional)
 For fal.ai: create a key at **fal.ai** → **Dashboard** → **Keys**, and add it as `FAL_KEY`. Then pick **fal** in the app's Settings → Image engine. The default model is `fal-ai/bytedance/seedream/v4/edit`; change it in the same place.
 
 ## All variables
 
 | Variable | Default | What |
 |---|---|---|
-| `DATABASE_URL` | embedded (dev only) | Postgres connection string |
-| `PORT`, `HOST` | `8787`, `0.0.0.0` | Railway sets `PORT` |
+| `DATABASE_URL` | embedded (dev only) | Postgres connection string. **Required in production** (the server refuses to start without it). Neon: the pooled string with `sslmode=require` |
+| `DATABASE_URL_UNPOOLED` | none | Optional direct Neon string, used only for start-up migrations |
+| `DB_POOL_MAX`, `DB_IDLE_TIMEOUT_MS`, `DB_CONNECT_TIMEOUT_MS` | `5`, `10000`, `15000` | Pool size, how soon idle connections close (lets Neon sleep), and the connect timeout for a waking database |
+| `DB_STARTUP_RETRY_SECONDS` | `90` | How long start-up waits for the database |
+| `IDLE_POLL_SECONDS` | `600` | With nothing queued, no pod and no post due, the background loops read the database only this often. `0` = every tick |
+| `PORT`, `HOST` | `8787` (`8000` in the Docker image), `0.0.0.0` | Koyeb's default port is 8000; Railway sets `PORT` |
 | `PUBLIC_URL` | `http://localhost:PORT` | Public address; used for image links and given to GPU pods |
 | `LOG_LEVEL` | `info` | Structured JSON logs. Auth headers, tokens and query strings are never logged |
 | `TZ` | UTC | Day boundary for "today" and the daily caps |
@@ -148,7 +176,7 @@ For fal.ai: create a key at **fal.ai** → **Dashboard** → **Keys**, and add i
 | `IMAGE_PROVIDER`, `IMAGE_MODEL`, `IMAGE_CUSTOM_URL` | `simulated` | The default image engine (studios override it in Settings) |
 | `FAL_KEY`, `FAL_COST_PER_IMAGE` | none, `0.03` | fal.ai |
 | `OWNER_INVITE_CODE`, `OWNER_EMAIL`, `STUDIO_NAME` | | First owner without a terminal (see above) |
-| `DEV_MODE`, `DEV_SEED` | off | Dev only: seed data, `/v1/dev/*`, sign-up without invite, simulated socials. **Never on Railway** |
+| `DEV_MODE`, `DEV_SEED` | off | Dev only: seed data, `/v1/dev/*`, sign-up without invite, simulated socials. **Never in production** |
 | `SPEED`, `GEN_MS` | `24`, `1600` | Simulated render speed and image delay |
 
 ## What's real and what's still a stand-in
@@ -165,4 +193,4 @@ For fal.ai: create a key at **fal.ai** → **Dashboard** → **Keys**, and add i
   - Posts are scheduled in Postgres and handed off at their time. Stats read-back only exists in dev mode (made-up numbers).
   - Clip checks (people, watermark) use the app's metadata, so they're heuristic.
   - LoRA candidates from a real engine aren't auto-flagged yet.
-- **One instance:** live events and the money lock are in memory. Railway runs one replica (`railway.json`). More replicas would need Postgres LISTEN/NOTIFY and row locks.
+- **One instance:** live events and the money lock are in memory. Run exactly one instance (Koyeb: scaling min = max = 1; Railway: `railway.json`). More instances would need Postgres LISTEN/NOTIFY and row locks.

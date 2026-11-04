@@ -5,6 +5,9 @@ Threads:
   heartbeat  posts {podId, busy} every 15 s, independent of the GPU
   job        downloads, runs the handler (GPU), uploads, reports
   progress   posts the newest progress at most twice a second
+
+Between claims (never during a job or upload) the main thread also checks the dead-man's switch
+(selfstop.py): idle too long, or the API unreachable too long while idle, and the pod terminates itself.
 """
 
 from __future__ import annotations
@@ -21,11 +24,13 @@ from .config import Config
 from .heartbeat import Heartbeat
 from .jobs.base import Job, JobCancelled, JobContext, JobFailure, JobHandler
 from .progress import ProgressReporter
+from .selfstop import SelfStop
 from .transfer import TransferError, download, safe_name, upload
 
 log = logging.getLogger("muse.worker")
 
 EXIT_OK, EXIT_CONFIG, EXIT_AUTH = 0, 2, 3
+EXIT_SELF_STOP = 4  # the pod asked RunPod to terminate it; bootstrap.sh must not restart the worker
 SHUTDOWN = "shutdown"
 
 
@@ -65,7 +70,8 @@ def classify(exc: BaseException) -> tuple[str, bool]:
 
 
 class Worker:
-    def __init__(self, cfg: Config, api: ApiClient, handlers: list[JobHandler], *, install_signals: bool = True):
+    def __init__(self, cfg: Config, api: ApiClient, handlers: list[JobHandler], *, install_signals: bool = True,
+                 selfstop: SelfStop | None = None):
         self.cfg = cfg
         self.api = api
         self.handlers = {h.kind: h for h in handlers}
@@ -76,6 +82,10 @@ class Worker:
         self.current: ActiveJob | None = None
         self._preloading = 0
         self._heartbeat = Heartbeat(api, cfg.heartbeat_interval, self._status)
+        self.selfstop = selfstop or SelfStop.from_config(cfg)
+        self.idle_since = time.monotonic()  # worker start, then the end of each job
+        self.self_stopped: str | None = None  # how the pod was terminated, once it was
+        self._self_stop_next_try = 0.0
 
     # -- state ------------------------------------------------------------------------
     def capabilities(self) -> list[str]:
@@ -116,16 +126,21 @@ class Worker:
         caps = self.capabilities()
         log.info("worker up: api=%s pod=%s gpu=%s capabilities=%s", self.cfg.api_url, self.cfg.pod_id,
                  self.cfg.gpu_name, caps)
+        log.info("self-stop %s", self.selfstop.describe())
         if self.cfg.preload:
             for h in self.handlers.values():
                 if h.availability() is None:
                     threading.Thread(target=self._preload, args=(h,), name=f"preload-{h.kind}", daemon=True).start()
         self._heartbeat.start()
         code, backoff = EXIT_OK, self.cfg.poll_interval
+        self.idle_since = time.monotonic()
         try:
             while not self.stop_event.is_set():
                 if self.cfg.max_jobs is not None and self.jobs_processed >= self.cfg.max_jobs:
                     log.info("processed %d job(s); exiting", self.jobs_processed)
+                    break
+                if self._maybe_self_stop():
+                    code = EXIT_SELF_STOP
                     break
                 try:
                     raw = self.api.claim(self.cfg.gpu_name, caps)
@@ -144,10 +159,41 @@ class Worker:
                     continue
                 self._process(raw)
         finally:
-            self._heartbeat.stop(final=True)
+            self._heartbeat.stop(final=self.self_stopped is None)
             log.info("worker stopped after %d job(s)%s", self.jobs_processed,
                      f" ({self.stop_reason})" if self.stop_reason else "")
         return code
+
+    # -- dead-man's switch ---------------------------------------------------------------
+    def _maybe_self_stop(self) -> bool:
+        """Main thread, between claims only, so never during a job or an upload. True = the pod is being terminated."""
+        now = time.monotonic()
+        if now < self._self_stop_next_try:
+            return False
+        d = self.selfstop.check(busy=self.current is not None, idle_since=self.idle_since, api_last_ok=self.api.last_ok)
+        if d is None:
+            return False
+        log.warning("SELF-STOP: %s and no job is running. Terminating RunPod pod %s so it stops billing "
+                    "(the API would normally do this; it may be down).", d.describe(), self.selfstop.pod_id)
+        self._heartbeat.stop(final=False)
+        try:  # tell the API first, briefly; it then marks the pod stopped (and terminates it too)
+            self.api.heartbeat(False, timeout=5.0, state="self-stopping", reason=d.reason)
+            log.info("SELF-STOP: told the API (heartbeat state=self-stopping)")
+        except ApiError as e:
+            log.info("SELF-STOP: could not tell the API (%s); stopping anyway", e)
+        method = self.selfstop.terminate()
+        if method:
+            self.self_stopped = method
+            self.stop_reason = f"self-stop: {d.describe()}; pod terminated via {method}"
+            log.warning("SELF-STOP: RunPod accepted the request (%s); exiting, the pod will disappear shortly", method)
+            return True
+        retry = max(self.cfg.self_stop_retry_seconds, 1.0)
+        log.error("SELF-STOP FAILED: could not terminate pod %s; still serving jobs, trying again in %.0fs. "
+                  "Terminate it by hand in the RunPod console if this keeps happening.", self.selfstop.pod_id, retry)
+        self._self_stop_next_try = now + retry
+        self._heartbeat = Heartbeat(self.api, self.cfg.heartbeat_interval, self._status)
+        self._heartbeat.start()
+        return False
 
     def _preload(self, h: JobHandler) -> None:
         self._preloading += 1
@@ -174,6 +220,7 @@ class Worker:
                 self._shutdown_during(active, t)
                 break
         self.current = None
+        self.idle_since = time.monotonic()
         self.jobs_processed += 1
 
     def _shutdown_during(self, active: ActiveJob, t: threading.Thread) -> None:

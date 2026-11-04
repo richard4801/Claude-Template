@@ -42,9 +42,12 @@ class ApiClient:
         self.pod_id = cfg.pod_id
         self.timeout = cfg.http_timeout
         self._auth = "Bearer " + cfg.token
+        # Last time the API answered (any status below 500; a proxy's 502/503 means the API itself is down).
+        # Starts at "now" so a slow first contact gets the full SELF_STOP_UNREACHABLE_SECONDS.
+        self.last_ok = time.monotonic()
 
     # -- transport ---------------------------------------------------------
-    def _request(self, path: str, payload: dict) -> tuple[int, Any]:
+    def _request(self, path: str, payload: dict, timeout: float | None = None) -> tuple[int, Any]:
         req = urllib.request.Request(
             self.base + path,
             data=json.dumps(payload).encode(),
@@ -57,7 +60,7 @@ class ApiClient:
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urllib.request.urlopen(req, timeout=timeout or self.timeout) as resp:
                 status, body = resp.status, resp.read()
         except urllib.error.HTTPError as e:
             status = e.code
@@ -68,6 +71,8 @@ class ApiClient:
         except (urllib.error.URLError, http.client.HTTPException, OSError) as e:
             reason = getattr(e, "reason", e)
             raise ApiError(f"POST {path}: {reason}", retryable=True) from None
+        if status < 500:
+            self.last_ok = time.monotonic()
         parsed: Any = None
         if body and body.strip():
             try:
@@ -76,8 +81,8 @@ class ApiClient:
                 parsed = {"raw": body[:200].decode("utf-8", "replace")}
         return status, parsed
 
-    def _call(self, path: str, payload: dict, *, job: bool = False) -> tuple[int, Any]:
-        status, body = self._request(path, payload)
+    def _call(self, path: str, payload: dict, *, job: bool = False, timeout: float | None = None) -> tuple[int, Any]:
+        status, body = self._request(path, payload, timeout)
         if 200 <= status < 300:
             return status, body
         detail = ""
@@ -115,8 +120,8 @@ class ApiClient:
             return None
         return body["job"]
 
-    def heartbeat(self, busy: bool, **extra) -> None:
-        self._call("/worker/v1/heartbeat", {"podId": self.pod_id, "busy": busy, **extra})
+    def heartbeat(self, busy: bool, timeout: float | None = None, **extra) -> None:
+        self._call("/worker/v1/heartbeat", {"podId": self.pod_id, "busy": busy, **extra}, timeout=timeout)
 
     def progress(self, job_id: str, payload: dict) -> Any:
         """Best effort, single attempt. Raises JobGone if the API dropped the job."""

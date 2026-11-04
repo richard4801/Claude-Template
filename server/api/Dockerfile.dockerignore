@@ -1,0 +1,20 @@
+# Used for both build contexts (server/api and the repository root; see Dockerfile). Dockerfile.dockerignore is a copy,
+# which BuildKit prefers when the context is the repository root.
+**/node_modules
+**/dist
+**/data
+**/test
+**/.env
+**/.env.*
+**/*.log
+.git
+.github
+.claude
+android
+mac
+prototype
+test_outputs
+pipeline
+plans
+gpu
+server/mock

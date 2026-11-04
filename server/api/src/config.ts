@@ -9,14 +9,31 @@ const str = () => z.preprocess(v => (v === '' ? undefined : v), z.string().optio
 
 const Env = z.object({
   NODE_ENV: z.string().default('development'),
+  /** Koyeb's default is 8000 (the Dockerfile sets it); 8787 for `npm run dev`. */
   PORT: num(8787),
   HOST: z.string().default('0.0.0.0'),
-  /** Public base URL of this API (https://muse-api.up.railway.app). Used for absolute image URLs and the worker's API_URL. */
+  /** Public base URL of this API (https://muse-api-<org>.koyeb.app). Used for absolute image URLs and the worker's API_URL. */
   PUBLIC_URL: str(),
   LOG_LEVEL: z.string().default('info'),
 
-  /** postgres://… (Railway sets this). Unset or "pglite://memory" = embedded in-memory Postgres (dev and tests only). */
+  /** postgres://… (Neon: the pooled string, with sslmode=require; Railway sets this itself). Unset or "pglite://memory" = embedded in-memory Postgres (dev and tests only). */
   DATABASE_URL: str(),
+  /** Optional direct (non-pooled) Neon URL used only for start-up migrations. The pooled DATABASE_URL works too. */
+  DATABASE_URL_UNPOOLED: str(),
+  /** Pool size. Keep it small (≤ 5): Neon's free tier and a 512 MB instance both prefer few connections. */
+  DB_POOL_MAX: num(5),
+  /** Close idle connections after this long so a serverless database (Neon) can suspend. */
+  DB_IDLE_TIMEOUT_MS: num(10_000),
+  /** One connection attempt's timeout; a sleeping Neon compute takes a few seconds to wake. */
+  DB_CONNECT_TIMEOUT_MS: num(15_000),
+  /** How long start-up keeps retrying the database (asleep, waking, briefly unreachable) before giving up. */
+  DB_STARTUP_RETRY_SECONDS: num(90),
+  /**
+   * With nothing queued, no pod running and no post due, the background loops look at the database only this often
+   * (instead of every DISPATCH_MS / SCHEDULER_MS), so Neon can suspend and the free compute hours last. Everything
+   * that creates work in this process wakes the loops at once, so this is only a safety net. 0 = always poll.
+   */
+  IDLE_POLL_SECONDS: num(600),
 
   // Dev mode: seed data, /v1/dev/* endpoints, sign-up without an invite. Never turn on in production.
   DEV_MODE: bool(false),
@@ -128,6 +145,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     throw new Error(`Bad configuration: ${msg}`);
   }
   const c = r.data;
+  // In production an unset DATABASE_URL would silently run on the embedded in-memory database and lose everything on the
+  // next restart. Refuse to start instead (dev mode may still use it).
+  if (c.NODE_ENV === 'production' && !c.DEV_MODE && (!c.DATABASE_URL || c.DATABASE_URL === 'pglite://memory')) {
+    throw new Error('Bad configuration: DATABASE_URL is required in production (the Neon pooled connection string)');
+  }
   const storage = c.STORAGE ?? (c.R2_BUCKET ? 's3' : 'local');
   const balanceMode = c.BALANCE_MODE ?? (c.GPU_MODE === 'simulated' && c.DEV_MODE ? 'simulated' : 'runpod');
   const socialMode = c.SOCIAL_MODE ?? (c.DEV_MODE ? 'simulated' : 'stub');

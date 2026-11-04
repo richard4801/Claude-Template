@@ -8,6 +8,9 @@ answers with ETag = md5 of the body, like S3/R2).
 Fault knobs: `fail_next[path_prefix] = [503, ...]`, `corrupt_blobs`, `bad_etags`,
 `upload_delay`, `cancelled` (progress answers 409), `require_token`.
 
+It also fakes RunPod's GraphQL endpoint at POST /graphql (for the self-stop fallback): requests land in `graphql`,
+and `graphql_status` / `graphql_errors` make it fail.
+
 Run standalone for poking at the worker:  python -m muse_worker.devtools.fake_api --port 8787
 """
 
@@ -80,6 +83,9 @@ class FakeApi:
         self.cancelled: set[str] = set()
         self.seen_headers: list[dict] = []
         self.validation_errors: list[tuple[str, str, dict]] = []
+        self.graphql: list[tuple[dict, dict]] = []  # (headers, body) of each RunPod GraphQL call
+        self.graphql_status = 200
+        self.graphql_errors: list | None = None
         api = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -113,6 +119,12 @@ class FakeApi:
 
             def do_POST(self):
                 raw = self._body()
+                if self.path.split("?")[0] == "/graphql":  # fake RunPod GraphQL (own auth: RUNPOD_API_KEY)
+                    with api.lock:
+                        api.graphql.append((dict(self.headers), json.loads(raw or b"{}")))
+                        status, errors = api.graphql_status, api.graphql_errors
+                    body = {"errors": errors} if errors else {"data": {"podTerminate": None}}
+                    return self._send(status, body)
                 with api.lock:
                     api.seen_headers.append(dict(self.headers))
                 if api.require_token and self.headers.get("Authorization") != f"Bearer {api.token}":

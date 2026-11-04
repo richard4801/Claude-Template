@@ -1,7 +1,7 @@
 // Posts (plans/socials.md, stage 1): "now" hands off at once; scheduled posts wait in Postgres and a scheduler loop
 // hands them off when due (so they survive restarts). With SOCIAL_MODE=simulated (dev) a handed-off post is marked
 // posted with made-up stats after GEN_MS, like the mock; with "stub" it stays at handoff (no platform read-back yet).
-import { and, desc, eq, lte } from 'drizzle-orm';
+import { and, desc, eq, lte, min } from 'drizzle-orm';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { accounts, models, posts, takes } from '../db/schema.js';
@@ -25,6 +25,10 @@ type PostRow = typeof posts.$inferSelect;
 export class PostScheduler {
   private loop: NodeJS.Timeout | null = null;
   private running = false;
+  /** Earliest scheduled post still waiting (Infinity: none), and when the database was last read. Between due times
+   * the loop doesn't touch the database (lets Neon sleep), except a slow safety poll every IDLE_POLL_SECONDS. */
+  private nextDueAt = 0;
+  private lastReadAt = 0;
   constructor(private ctx: Ctx) {}
 
   view(x: PostRow) {
@@ -62,6 +66,7 @@ export class PostScheduler {
       caption: typeof b.caption === 'string' ? b.caption : b.caption == null ? '' : String(b.caption),
       aiLabel: b.aiLabel === true, paidPartnership: b.paidPartnership === true, when, dueAt: at, state: 'scheduled', createdAt: Date.now(),
     }).returning();
+    this.nextDueAt = Math.min(this.nextDueAt, at);
     if (when === 'now') return this.view(await this.handoff(x!));
     return this.view(x!);
   }
@@ -80,15 +85,22 @@ export class PostScheduler {
 
   start() {
     if (this.loop) return;
-    this.loop = setInterval(() => { void this.tick(); }, this.ctx.config.SCHEDULER_MS);
+    this.loop = setInterval(() => { if (this.due()) void this.tick(); }, this.ctx.config.SCHEDULER_MS);
     this.loop.unref?.();
   }
   stop() { if (this.loop) clearInterval(this.loop); this.loop = null; }
+
+  private due(now = Date.now()) {
+    const idleMs = this.ctx.config.IDLE_POLL_SECONDS * 1000;
+    if (!idleMs || this.ctx.config.socialMode === 'simulated') return true; // dev: simulated posting needs every tick
+    return now >= this.nextDueAt || now - this.lastReadAt >= idleMs;
+  }
 
   async tick(now = Date.now()) {
     if (this.running) return;
     this.running = true;
     try {
+      this.lastReadAt = Date.now();
       for (const x of await this.ctx.db.select().from(posts).where(and(eq(posts.state, 'scheduled'), lte(posts.dueAt, now)))) await this.handoff(x);
       if (this.ctx.config.socialMode === 'simulated') {
         const due = await this.ctx.db.select().from(posts).where(and(eq(posts.state, 'handoff'), lte(posts.handoffAt, now - this.ctx.config.GEN_MS)));
@@ -99,7 +111,10 @@ export class PostScheduler {
           if (u) this.emit(u);
         }
       }
+      const [n] = await this.ctx.db.select({ at: min(posts.dueAt) }).from(posts).where(eq(posts.state, 'scheduled'));
+      this.nextDueAt = n?.at == null ? Infinity : Number(n.at);
     } catch (e) {
+      this.nextDueAt = 0;
       this.ctx.log.error({ err: (e as Error).message }, 'post scheduler tick failed');
     } finally { this.running = false; }
   }

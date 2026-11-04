@@ -65,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
         log.error("%s", e)
         return EXIT_CONFIG
     add_secret(cfg.token)
+    add_secret(cfg.runpod_api_key)
     if args.once:
         cfg.max_jobs = 1
     elif args.max_jobs is not None:

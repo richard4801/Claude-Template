@@ -42,7 +42,10 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     trustProxy: true,
   });
 
-  const dbh = opts.db ?? await openDb(config.DATABASE_URL);
+  const dbh = opts.db ?? await openDb(config.DATABASE_URL, undefined, {
+    poolMax: config.DB_POOL_MAX, idleTimeoutMs: config.DB_IDLE_TIMEOUT_MS, connectTimeoutMs: config.DB_CONNECT_TIMEOUT_MS,
+    startupRetryMs: config.DB_STARTUP_RETRY_SECONDS * 1000, migrationUrl: config.DATABASE_URL_UNPOOLED, log: app.log,
+  });
   const hub = new EventHub();
   const timers = new Set<NodeJS.Timeout>();
   let boundPort = config.PORT;
@@ -65,6 +68,9 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   ctx.gpu = config.GPU_MODE === 'runpod' ? new RunpodGpu(ctx, ctx.runpod) : new SimulatedGpu(ctx);
 
   app.log.info({ config: describeConfig(config) }, 'MUSE API configuration');
+  if (config.NODE_ENV === 'production' && config.storage === 'local' && !config.DEV_MODE) {
+    app.log.warn('STORAGE IS LOCAL DISK: uploads and renders are lost on every redeploy. Set the R2_* variables.');
+  }
   if (config.DEV_SEED) await seedDev(ctx, { onlyIfEmpty: true });
   await bootstrapOwnerInvite(ctx);
 

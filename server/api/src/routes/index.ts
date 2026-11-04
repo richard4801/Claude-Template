@@ -19,6 +19,10 @@ import { ASSET_DIR, ASSET_KEYS, PROVIDERS } from '../images/service.js';
 import { LocalStorage, contentTypeFor } from '../storage/index.js';
 import { objectInfo, putObject } from '../storage/objects.js';
 import { seedDev, SLOT_SAMPLE } from '../seed.js';
+import { dbStatus } from '../db/pg.js';
+
+/** SSE comment interval: well under any hosting proxy's idle timeout (Koyeb, Railway, Cloudflare: 60-100 s). */
+export const SSE_KEEPALIVE_MS = 15_000;
 
 const SLOT_KEYS = ['face', 'profile', 'front', 'tq', 'side', 'back'];
 const parse = <T>(schema: z.ZodType<T>, body: unknown): T => {
@@ -58,10 +62,20 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   });
 
   // ------------------------------------------------------------------ health
-  app.get('/health', { config: { public: true } }, async () => {
-    let dbOk = true;
-    try { await db.execute(sql`select 1`); } catch { dbOk = false; }
-    return { ok: dbOk, speed: ctx.config.SPEED, db: dbOk, gpu: ctx.gpu.mode, storage: ctx.storage.kind, imageEngine: ctx.images.defaultSelection().provider, version: '0.1.0' };
+  // The host's health check (Koyeb, Railway) calls this every few seconds. It must not touch the database: a query every
+  // few seconds would keep a serverless database (Neon) awake around the clock and use up its free compute hours. It
+  // reports the last known database state instead. `/health?db=1` really queries (and wakes) the database.
+  app.get('/health', { config: { public: true } }, async (req, reply) => {
+    const deep = ['1', 'true'].includes(String((req.query as any)?.db ?? ''));
+    let db: boolean | 'unchecked' = 'unchecked';
+    if (deep) {
+      try { await ctx.db.execute(sql`select 1`); db = true; } catch { db = false; }
+    }
+    const lastOkAt = dbStatus.lastOkAt || null;
+    const body = { ok: db !== false, speed: ctx.config.SPEED, db, dbLastOkAt: lastOkAt, gpu: ctx.gpu.mode, storage: ctx.storage.kind,
+      imageEngine: ctx.images.defaultSelection().provider, version: '0.1.0' };
+    reply.header('cache-control', 'no-store');
+    return db === false ? reply.status(503).send(body) : body;
   });
 
   // ------------------------------------------------------------------ auth
@@ -473,13 +487,24 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   });
 
   // ------------------------------------------------------------------ live events
+  // Server-sent events through a hosting proxy (Koyeb, Railway): no compression and no buffering anywhere
+  // (no-transform, X-Accel-Buffering; this server registers no compression plugin; Nagle off), a comment line every 15 s so the proxy's idle
+  // timeout never closes the stream, and the socket's own timeout disabled.
   app.get('/v1/events', async (req, reply) => {
     reply.hijack();
     const res = reply.raw;
-    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' });
-    res.write(': connected\n\n');
+    req.raw.socket.setTimeout(0);
+    req.raw.socket.setNoDelay(true);
+    req.raw.socket.setKeepAlive(true, 30_000);
+    res.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-store, no-transform', connection: 'keep-alive',
+      'x-accel-buffering': 'no',
+    });
+    res.flushHeaders();
+    // retry: how long a client waits before reconnecting after the stream drops (e.g. an instance restart).
+    res.write('retry: 3000\n: connected\n\n');
     const off = ctx.hub.subscribe(req.user.studioId, req.user.id, line => res.write(line));
-    const ka = setInterval(() => res.write(': keep-alive\n\n'), 15_000);
+    const ka = setInterval(() => res.write(': keep-alive\n\n'), SSE_KEEPALIVE_MS);
     req.raw.on('close', () => { clearInterval(ka); off(); });
   });
 

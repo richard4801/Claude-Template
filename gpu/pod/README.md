@@ -59,7 +59,7 @@ The pod runs one process, the **MUSE GPU worker** (`gpu/worker`, package `muse_w
 
 | Name | Required | Meaning |
 |---|---|---|
-| `MUSE_API_URL` | yes | API base URL, e.g. `https://muse-api.up.railway.app` |
+| `MUSE_API_URL` | yes | API base URL, e.g. `https://muse-api-yourname.koyeb.app` |
 | `WORKER_TOKEN` | yes | per-pod bearer token from the controller. Never logged. |
 | `POD_ID` | no | defaults to RunPod's `RUNPOD_POD_ID` |
 | `VRAM_HEADROOM_GB` | no | default **30** (`vram_limit = total − 30`; the 9.4 s clip OOMed at −5) |
@@ -69,8 +69,43 @@ The pod runs one process, the **MUSE GPU worker** (`gpu/worker`, package `muse_w
 | `HF_TOKEN` | no | only if a weight download needs it |
 | `MUSE_LOG_LEVEL` | no | `INFO` |
 | `MUSE_HEARTBEAT_INTERVAL`, `MUSE_POLL_INTERVAL`, `MUSE_SHUTDOWN_GRACE` | no | 15 s, 5 s, 20 s |
+| `SELF_STOP_IDLE_SECONDS` | no | default **300**: the pod terminates itself after this long without a job (see "Self-stop" below). The API sets it to `max(300, IDLE_SHUTDOWN_SECONDS + 120)`. `0` turns this rule off. |
+| `SELF_STOP_UNREACHABLE_SECONDS` | no | default **600**: the pod terminates itself after this long without reaching the API, while idle. `0` turns this rule off. |
+| `MUSE_SELF_STOP` | no | default `1`. `0` turns the self-stop off completely (e.g. to debug a pod by hand; then stop it yourself). |
+| `RUNPOD_POD_ID`, `RUNPOD_API_KEY` | set by RunPod | the pod's own id and its pod-scoped API key; the self-stop uses them. Never logged. |
 
-Exit codes: `0` normal or SIGTERM, `2` config error, `3` token rejected. `bootstrap.sh` restarts the worker after a crash (up to 5 times), but not after 2 or 3.
+Exit codes: `0` normal or SIGTERM, `2` config error, `3` token rejected, `4` self-stopped (the pod asked RunPod to terminate it). `bootstrap.sh` runs the worker under `pod/supervise.sh`, which restarts it after a crash (up to 5 times), but never after 2, 3 or 4.
+
+## Self-stop (dead-man's switch)
+
+Normally the API's GPU controller terminates a pod `IDLE_SHUTDOWN_SECONDS` (180 s) after its last job. If the API is down or unreachable (a Koyeb restart, a free-tier hiccup, a network problem), nobody would stop the pod, and an H100 bills about **$4 an hour**. So the worker also watches the clock and terminates **its own** pod.
+
+**When.** The worker checks between jobs, on its main thread, so never during a job, a download, a render or an upload. It stops the pod when either rule fires:
+
+| Rule | Default | Clock starts |
+|---|---|---|
+| no job for `SELF_STOP_IDLE_SECONDS` | 300 s | when the worker starts, and again when each job ends |
+| no answer from the API for `SELF_STOP_UNREACHABLE_SECONDS` | 600 s | at the last HTTP answer from the API (any status below 500; a proxy's 502/503 counts as no answer) |
+
+The idle rule is set later than the API's own idle shutdown, so on a normal day the API stops the pod first and this never fires. When the API is unreachable no job can arrive either, so the idle rule usually fires first; the unreachable rule is the backstop for when the idle rule is turned off or set very long.
+
+**How.**
+1. It logs a `SELF-STOP:` warning that says which rule fired.
+2. It stops its heartbeat thread and sends one last heartbeat, `state: "self-stopping"` (5 s timeout; it carries on if the API doesn't answer). On that heartbeat the API marks the pod stopped, settles its idle time and terminates it through the RunPod API as well.
+3. It terminates the pod. Each method is tried in order until one works:
+   1. `runpodctl remove pod $RUNPOD_POD_ID`. RunPod ships `runpodctl` and a pod-scoped API key on every pod.
+   2. `runpodctl pod delete $RUNPOD_POD_ID`, the newer runpodctl syntax.
+   3. The RunPod GraphQL `podTerminate` mutation, sent with `RUNPOD_API_KEY` from the pod's environment.
+   4. As a last resort, **stop** instead of terminate: `runpodctl stop pod`, then GraphQL `podStop`. A stopped pod no longer bills the GPU.
+
+   It terminates rather than stops because the models live on the network volume and outputs are already in R2. Nothing on the pod is worth keeping, and a stopped pod still bills its disk.
+4. It exits with code 4. `supervise.sh` doesn't restart it: it waits for RunPod to remove the container, and asks again every 5 minutes in case the request was lost. It doesn't exit, because RunPod could restart an exited container and start a fresh, billing worker.
+
+If every method fails, the worker logs `SELF-STOP FAILED`, keeps serving jobs, and tries again every `SELF_STOP_RETRY_SECONDS` (60 s). If the worker crash-loops (more than 5 crashes), `supervise.sh` terminates the pod the same way, since a crashing worker can't self-stop.
+
+**Off** when `RUNPOD_POD_ID` is unset (not on RunPod: your laptop, `--dry-run`), with `MUSE_SELF_STOP=0`, or when both timeouts are 0. The worker logs `self-stop on …` or `self-stop off (…)` at start.
+
+**Tested** on CPU in `worker/tests/test_selfstop.py`, with a fake `runpodctl` and a fake GraphQL endpoint, so no pod is touched. The tests cover the idle timeout, the unreachable timeout, never stopping mid-job or mid-upload, the GraphQL fallback, retrying when everything fails, and the supervisor not restarting after exit 4. **Not yet run on a real pod**, so the first real run should confirm that `runpodctl remove pod` works with the pod-scoped key.
 
 ## Cold start and per-job overhead (estimates, to be measured on the first real run)
 

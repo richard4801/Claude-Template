@@ -7,7 +7,8 @@
 #
 # Env (pod template): MUSE_API_URL, WORKER_TOKEN, POD_ID (defaults to RUNPOD_POD_ID).
 # Optional: MUSE_VOLUME (/workspace), MUSE_H3_VARIANT (bf16), VRAM_HEADROOM_GB (30), MUSE_REQUIRE_FA3 (1),
-#           HF_TOKEN (only if a download needs it), MUSE_LOG_LEVEL (INFO).
+#           HF_TOKEN (only if a download needs it), MUSE_LOG_LEVEL (INFO),
+#           SELF_STOP_IDLE_SECONDS (300), SELF_STOP_UNREACHABLE_SECONDS (600), MUSE_SELF_STOP (1).
 set -euo pipefail
 
 MODE="${1:-start}"; MODE="${MODE#--}"
@@ -141,30 +142,12 @@ case "$MODE" in
   prepare) log "volume prepared in $(( $(date +%s) - T0 ))s; not starting the worker"; exit 0 ;;
 esac
 
-# --- 6. run the worker (restart on crash; exit on SIGTERM, bad token or config) -----------
+# --- 6. run the worker under supervise.sh ---------------------------------------------------
+# Restarts after a crash; never after SIGTERM, a config/token problem (exit 2/3) or a deliberate self-stop (exit 4,
+# the dead-man's switch in muse_worker/selfstop.py). See supervise.sh for the exit codes.
 export POD_ID="${POD_ID:-${RUNPOD_POD_ID:-}}"
 [ -n "${MUSE_API_URL:-}" ] && [ -n "${WORKER_TOKEN:-}" ] && [ -n "$POD_ID" ] \
   || die "MUSE_API_URL, WORKER_TOKEN and POD_ID (or RUNPOD_POD_ID) must be set"
 LOGFILE="$VOL/logs/worker-$POD_ID.log"
 log "starting worker (log also in $LOGFILE); bootstrap took $(( $(date +%s) - T0 ))s"
-
-child=0; stopping=0
-on_term() { stopping=1; [ "$child" != 0 ] && kill -TERM "$child" 2>/dev/null || true; }
-trap on_term TERM INT
-restarts=0
-while :; do
-  "$VENV/bin/python" -m muse_worker > >(tee -a "$LOGFILE") 2>&1 &
-  child=$!
-  set +e; wait "$child"; code=$?
-  [ "$stopping" = 1 ] && { wait "$child"; code=$?; }   # wait again: the first wait returns on the trap
-  set -e
-  [ "$stopping" = 1 ] && { log "worker stopped (exit $code)"; exit 0; }
-  case "$code" in
-    0) log "worker exited normally"; exit 0 ;;
-    2|3) log "worker exit $code (config or token problem): not restarting"; exit "$code" ;;
-  esac
-  restarts=$((restarts + 1))
-  [ "$restarts" -gt 5 ] && die "worker crashed $restarts times; giving up"
-  log "worker crashed (exit $code); restart $restarts/5 in 10 s"
-  sleep 10
-done
+exec bash "$GPU_DIR/pod/supervise.sh" "$LOGFILE" "$VENV/bin/python" -m muse_worker
