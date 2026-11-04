@@ -646,7 +646,7 @@ extension AppStore {
         if isMember {
             showToast(notEnoughMessage)
         } else {
-            showToast("Not enough balance" + (what.isEmpty ? "" : " \(what)"), action: "My tokens") { [weak self] in self?.go(.credits) }
+            showToast("Not enough balance" + (what.isEmpty ? "" : " \(what)"), action: "Credit") { [weak self] in self?.go(.credits) }
         }
     }
 
@@ -659,22 +659,37 @@ extension AppStore {
         }
     }
 
-    func sendTokens(to m: Member, tokens: Int, note: String) {
-        guard tokens > 0 else { showToast("Enter how many tokens to send"); return }
+    /// Send credit: dollars in the UI, whole tokens ($0.01) on the wire, rounded to the nearest cent.
+    func sendCredit(to m: Member, usd: Double, note: String) {
+        let move = TokenMove(userId: m.id, usd: usd, tokenUsd: balance.tokenUsd, note: note)
+        guard move.tokens > 0 else { showToast("Enter an amount to send, like 5.00"); return }
         perform { [self] in
-            let r = try await api.sendTokens(TokenMove(userId: m.id, tokens: tokens, note: note))
+            let r = try await api.sendTokens(move)
             applyMove(r)
-            showToast("Sent \(tokens) tokens to \(m.email) · they have \(r.member.tokens)")
+            showToast("Sent \(Pricing.money(usd)) to \(m.email) · their balance is \(Pricing.money(r.member.usd))")
         }
     }
 
-    func takeBackTokens(from m: Member, tokens: Int, note: String) {
-        guard tokens > 0 else { showToast("Enter how many tokens to take back"); return }
+    func takeBackCredit(from m: Member, usd: Double, note: String) {
+        let move = TokenMove(userId: m.id, usd: usd, tokenUsd: balance.tokenUsd, note: note)
+        guard move.tokens > 0 else { showToast("Enter an amount to take back, like 5.00"); return }
         perform { [self] in
-            let r = try await api.takeBackTokens(TokenMove(userId: m.id, tokens: tokens, note: note))
+            let r = try await api.takeBackTokens(move)
             applyMove(r)
-            showToast("Took back \(tokens) tokens from \(m.email)")
+            showToast("Took back \(Pricing.money(usd)) from \(m.email) · their balance is \(Pricing.money(r.member.usd))")
         }
+    }
+
+    /// The system share sheet with the invite message (the server's shareText, or the same text built here).
+    func shareInvite(_ inv: Invite) {
+        let text = inv.shareMessage(publicURL: publicServerURL)
+        guard let view = NSApp.keyWindow?.contentView else {
+            copy(text, toast: "Invite message copied")
+            return
+        }
+        let picker = NSSharingServicePicker(items: [text])
+        let anchor = NSRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+        picker.show(relativeTo: anchor, of: view, preferredEdge: .minY)
     }
 
     private func applyMove(_ r: TokenMoveResult) {
@@ -750,7 +765,7 @@ extension AppStore {
             }
             let b = try await api.balance()
             offlineMessage = nil
-            showToast("Connected · \(isMember ? "\(b.tokenCount) tokens" : "balance \(Pricing.money(b.balance))")")
+            showToast("Connected · balance \(Pricing.money(b.balance))")
         }
     }
 
@@ -778,7 +793,7 @@ extension AppStore {
                 self.openLora(m.id)
             },
             PaletteCommand(title: "Settings", icon: "slider.horizontal.3", shortcut: "⌘,") { [weak self] in self?.go(.settings) },
-            PaletteCommand(title: "My tokens", icon: "circle.hexagongrid", shortcut: "") { [weak self] in self?.go(.credits) },
+            PaletteCommand(title: "Credit", icon: "dollarsign.circle", shortcut: "") { [weak self] in self?.go(.credits) },
             PaletteCommand(title: "New outfit set", icon: "tshirt", shortcut: "") { [weak self] in self?.openOutfitSheet(for: nil) },
             PaletteCommand(title: "Choose a clip…", icon: "film", shortcut: "") { [weak self] in self?.go(.studio); self?.pickClip() },
             PaletteCommand(title: "Run queue", icon: "play.fill", shortcut: "") { [weak self] in self?.runQueue() },

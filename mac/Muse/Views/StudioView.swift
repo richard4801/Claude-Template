@@ -397,14 +397,14 @@ struct InspectorFooter: View {
         VStack(spacing: 10) {
             HStack(spacing: 8) {
                 est("Time", Pricing.fmtMin(Pricing.totalMin(spec)))
-                est("Cost", store.isMember ? "\(Pricing.tokens(total, store.balance.tokenUsd)) tokens" : Pricing.money(total))
-                est("After", store.isMember ? "\(max(0, store.tokenCount - Pricing.tokens(total, store.balance.tokenUsd)))" : Pricing.money(max(0, store.balance.balance - total)))
+                est("Cost", Pricing.money(total))
+                est("After", Pricing.money(max(0, store.creditUsd - total)))
             }
             if store.lowBalance && !store.clipBad {
                 if store.isMember {
-                    Note(icon: "circle.hexagongrid", warn: true, store.notEnoughMessage)
+                    Note(icon: "dollarsign.circle", warn: true, store.notEnoughMessage)
                 } else {
-                    Note(icon: "creditcard", warn: true, text: Text("Not enough balance for this render. ") + Text("My tokens").bold())
+                    Note(icon: "creditcard", warn: true, text: Text("Not enough balance for this render. ") + Text("Credit").bold())
                         .onTapGesture { store.go(.credits) }
                 }
             }

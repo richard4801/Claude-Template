@@ -423,7 +423,7 @@ final class AppStore {
         if e.endsSession {
             endSession(e.friendlyMessage)
         } else if e.code == "insufficient_balance" && !isMember {
-            showToast(e.friendlyMessage, action: "My tokens") { [weak self] in self?.go(.credits) }
+            showToast(e.friendlyMessage, action: "Credit") { [weak self] in self?.go(.credits) }
         } else {
             showToast(e.friendlyMessage)
         }
@@ -489,7 +489,7 @@ final class AppStore {
         }
     }
 
-    /// A `wallet` event: refresh the tokens and say what changed.
+    /// A `wallet` event: refresh the credit and say what changed (in dollars; the API counts whole tokens of $0.01).
     private func walletChanged(_ w: Wallet) {
         let before = wallet
         wallet = w
@@ -498,23 +498,23 @@ final class AppStore {
             self.balance = b
         }
         guard let before, before.userId == w.userId else { return }
-        let delta = w.tokens - before.tokens
-        // Holds and settles for my own renders move tokens too (and change heldTokens); only tell about the owner's sends and take-backs.
+        let delta = ((w.usd - before.usd) * 100).rounded() / 100
+        // Holds and settles for my own renders move credit too (and change what's held); only tell about the owner's sends and take-backs.
         guard delta != 0, !w.isOwner, w.heldTokens == before.heldTokens else { return }
         if delta < 0 && jobs.contains(where: { $0.isActive && ($0.userId == nil || $0.userId == user?.id) }) { return }
         if delta > 0 {
-            showToast("You got \(delta) tokens · you now have \(w.tokens)", action: "My tokens") { [weak self] in self?.go(.credits) }
-            Notifier.shared.post(title: "\(delta) tokens from the studio owner", body: "You now have \(w.tokens) tokens (\(Pricing.money(w.usd))).")
+            showToast("You received \(Pricing.money(delta)) · balance \(Pricing.money(w.usd))", action: "Credit") { [weak self] in self?.go(.credits) }
+            Notifier.shared.post(title: "You received \(Pricing.money(delta))", body: "From the studio owner. Your balance is \(Pricing.money(w.usd)).")
         } else {
-            showToast("The studio owner took back \(-delta) tokens · you have \(w.tokens)")
-            Notifier.shared.post(title: "\(-delta) tokens taken back", body: "You have \(w.tokens) tokens left (\(Pricing.money(w.usd))).")
+            showToast("The studio owner took back \(Pricing.money(-delta)) · balance \(Pricing.money(w.usd))")
+            Notifier.shared.post(title: "\(Pricing.money(-delta)) taken back", body: "By the studio owner. Your balance is \(Pricing.money(w.usd)).")
         }
     }
 
     /// Owners: the RunPod balance went low (jobs pause) or recovered.
     private func studioNotice(_ n: EventNotice) {
         if n.code == "owner_balance_low" {
-            showToast("\(Job.pausedLine). \(n.message)", action: "My tokens") { [weak self] in self?.go(.credits) }
+            showToast("\(Job.pausedLine). \(n.message)", action: "Credit") { [weak self] in self?.go(.credits) }
             Notifier.shared.post(title: Job.pausedLine, body: n.message)
         } else {
             showToast(n.message)
@@ -679,8 +679,10 @@ final class AppStore {
     var totalCost: Double { Pricing.totalCost(spec) }
     /// The toast for "can't afford this".
     var notEnoughMessage: String { isMember ? ApiError.friendly("insufficient_tokens")! : "Not enough balance for this" }
-    var tokenCount: Int { wallet?.tokens ?? balance.tokenCount }
-    func tokens(_ usd: Double) -> Int { Pricing.tokens(usd, balance.tokenUsd) }
+    /// What I can spend, in dollars: my wallet (member) or what I can spend or send (owner). Prefers the API's `usd` fields.
+    var creditUsd: Double { wallet?.usd ?? balance.balance }
+    /// The public address for invite links (the download page is `{server}/get`).
+    var publicServerURL: String { (api as? HTTPMuseAPI)?.baseURL.absoluteString ?? defaultServerURL }
     var clipBad: Bool { !(clip?.ok ?? true) }
     var lowBalance: Bool { totalCost > balance.balance + 1e-9 }
     var generateBlocked: Bool { clipBad || lowBalance || clip == nil || currentOutfit == nil || generating }

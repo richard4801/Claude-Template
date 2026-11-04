@@ -149,6 +149,12 @@ public struct TokenMove: Codable, Sendable {
     public var userId: String
     public var tokens: Int
     public var note: String?
+
+    /// From dollars (what the app shows): rounded to the nearest cent and converted at `tokenUsd` (0.01).
+    public init(userId: String, usd: Double, tokenUsd: Double = 0.01, note: String? = nil) {
+        self.init(userId: userId, tokens: Pricing.tokensForDollars(usd, tokenUsd), note: note)
+    }
+
     public init(userId: String, tokens: Int, note: String? = nil) {
         self.userId = userId
         self.tokens = tokens
@@ -186,16 +192,19 @@ public struct Invite: Codable, Hashable, Sendable {
     public var email: String?
     public var role: String
     public var expiresAt: Int64
+    /// Ready-to-send invite message from the server (newer servers). nil → build it with `shareMessage(publicURL:)`.
+    public var shareText: String?
 
-    public init(code: String, id: String, email: String? = nil, role: String = "member", expiresAt: Int64 = 0) {
+    public init(code: String, id: String, email: String? = nil, role: String = "member", expiresAt: Int64 = 0, shareText: String? = nil) {
         self.code = code
         self.id = id
         self.email = email
         self.role = role
         self.expiresAt = expiresAt
+        self.shareText = shareText
     }
 
-    enum CodingKeys: String, CodingKey { case code, id, email, role, expiresAt }
+    enum CodingKeys: String, CodingKey { case code, id, email, role, expiresAt, shareText }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         code = c.v(.code, "")
@@ -203,6 +212,19 @@ public struct Invite: Codable, Hashable, Sendable {
         email = c.o(.email)
         role = c.v(.role, "member")
         expiresAt = c.v(.expiresAt, 0)
+        shareText = c.o(.shareText)
+    }
+
+    /// The text for Share…: the server's `shareText`, or the same message built here (download page at `{server}/get`).
+    public func shareMessage(publicURL: String, now: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) -> String {
+        if let s = shareText?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty { return s }
+        var base = publicURL
+        while base.hasSuffix("/") { base.removeLast() }
+        let left = expiresAt > now ? Int((Double(expiresAt - now) / 86_400_000).rounded()) : 14
+        let days = max(1, left)
+        let who = email.map { " (email: \($0))" } ?? ""
+        return "You're invited to MUSE, the AI model studio. 1) Download: \(base)/get 2) Sign up with this invite code: \(code)\(who). "
+            + "The code works once and expires in \(days) day\(days == 1 ? "" : "s")."
     }
 }
 
@@ -397,7 +419,30 @@ extension ApiError {
     public var endsSession: Bool { code == "unauthorized" || code == "account_disabled" }
 
     /// The text the app shows for this error. Known codes get MUSE's own wording; anything else shows the server's message.
-    public var friendlyMessage: String { ApiError.friendly(code) ?? message }
+    public var friendlyMessage: String { ApiError.friendly(code) ?? ApiError.inDollars(message) }
+
+    /// The app shows dollars, never tokens: "They have 250 unused tokens" → "They have $2.50 unused credit".
+    public static func inDollars(_ text: String, tokenUsd: Double = 0.01) -> String {
+        guard text.range(of: "token", options: .caseInsensitive) != nil else { return text }
+        var out = text
+        if let re = try? NSRegularExpression(pattern: "(\\d+) ((?:unused |more )?)(?:tokens?|(?=are on hold))") {
+            let ns = out as NSString
+            var result = ""
+            var last = 0
+            for m in re.matches(in: out, range: NSRange(location: 0, length: ns.length)) {
+                result += ns.substring(with: NSRange(location: last, length: m.range.location - last))
+                let n = Double(ns.substring(with: m.range(at: 1))) ?? 0
+                let mid = ns.substring(with: m.range(at: 2))
+                let held = ns.substring(with: m.range).hasSuffix(" ")
+                result += Pricing.money(n * tokenUsd) + " " + mid + (held ? "" : "credit")
+                last = m.range.location + m.range.length
+            }
+            result += ns.substring(from: last)
+            out = result
+        }
+        return out.replacingOccurrences(of: "tokens", with: "credit").replacingOccurrences(of: "Tokens", with: "Credit")
+            .replacingOccurrences(of: "token", with: "credit")
+    }
 
     public static func friendly(_ code: String) -> String? {
         switch code {
@@ -409,11 +454,11 @@ extension ApiError {
         case "rate_limited", "http_429": return "Too many tries. Wait a minute, then try again."
         case "unauthorized": return "Your session has ended. Sign in again."
         case "attestation_required": return "Tick both boxes to create your account."
-        case "insufficient_tokens": return "Not enough tokens. Ask the studio owner for more."
+        case "insufficient_tokens": return "Not enough credit. Ask the studio owner for more."
         case "owner_balance_low": return Job.pausedLine
         case "owner_only": return "Only the studio owner can do that."
-        case "over_allocation": return "That's more than the studio's RunPod balance backs. Top up RunPod or send fewer tokens."
-        case "balance_unavailable": return "MUSE can't read the RunPod balance right now, so tokens can't be sent. Try again in a minute."
+        case "over_allocation": return "That's more than the studio's RunPod balance backs. Top up RunPod or send less."
+        case "balance_unavailable": return "MUSE can't read the RunPod balance right now, so credit can't be sent. Try again in a minute."
         case "topup_unavailable": return "Top up your RunPod account. MUSE reads the balance from RunPod."
         case "upload_missing": return "The upload didn't arrive. Try again."
         default: return nil

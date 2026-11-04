@@ -56,7 +56,7 @@ struct MuseCommands: Commands {
             }
             Button("Members") { store.go(.members) }.keyboardShortcut("8").disabled(!signedIn || !store.isOwner)
             Divider()
-            Button("My Tokens") { store.go(.credits) }.disabled(!signedIn)
+            Button("Credit") { store.go(.credits) }.disabled(!signedIn)
             Divider()
             Button("Command Palette…") { store.openPalette() }.keyboardShortcut("k").disabled(!signedIn)
         }

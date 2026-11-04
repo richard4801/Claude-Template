@@ -37,9 +37,9 @@ struct QueueView: View {
                 .card()
                 .frame(maxWidth: 300)
                 VStack(alignment: .leading, spacing: 4) {
-                    Lbl("My tokens")
-                    (Text("\(store.tokenCount)").font(t.mono(20)) + Text(" · \(Pricing.money(store.balance.balance))").font(t.body(12)).foregroundColor(t.muted))
-                    LinkText(store.isMember ? "Details" : "My tokens") { store.go(.credits) }
+                    Lbl("Balance")
+                    Text(Pricing.money(store.creditUsd)).font(t.mono(20))
+                    LinkText("Credit") { store.go(.credits) }
                 }
                 .card()
                 .frame(maxWidth: 300)

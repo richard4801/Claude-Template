@@ -2,10 +2,11 @@ import AppKit
 import MuseCore
 import SwiftUI
 
-// My tokens, Members (owner) and Settings → Studio (owner). Talks to the real API's wallets, members and settings
+// Credit, Members (owner) and Settings → Studio (owner). Everything is shown in US dollars; the API's whole tokens
+// ($0.01 each) only appear on the wire. Talks to the real API's wallets, members and settings
 // (plans/api.md, "Balance and wallets" and "Settings"); demo mode has the same screens with demo members.
 
-/// "My tokens" (was Credits). Members see their wallet; the owner also sees the RunPod balance and what's available to send.
+/// "Credit". Members see their balance; the owner also sees the RunPod balance and what's available to send.
 struct CreditsView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
@@ -16,12 +17,12 @@ struct CreditsView: View {
         let b = store.balance
         let w = store.wallet
         Page {
-            PageHeader(eyebrow: store.isOwner ? "Studio owner" : "Wallet", title: "My tokens") {
-                if store.isOwner { MButton("Send tokens", icon: "paperplane", kind: .primary) { store.go(.members) } }
+            PageHeader(eyebrow: store.isOwner ? "Studio owner" : "Wallet", title: "Credit") {
+                if store.isOwner { MButton("Send credit", icon: "paperplane", kind: .primary) { store.go(.members) } }
             }
             HStack(spacing: 14) {
-                KPI(label: "My tokens", value: "\(store.tokenCount)", hint: "\(Pricing.money(b.balance)) · ≈ \(Pricing.videosLeft(b.balance)) videos at 10 steps", index: 0)
-                KPI(label: "Held by running jobs", value: "\(w?.heldTokens ?? store.tokens(b.heldUsd))", hint: Pricing.money(w?.heldUsd ?? b.heldUsd), index: 1)
+                KPI(label: "Balance", value: Pricing.money(store.creditUsd), hint: "≈ \(Pricing.videosLeft(store.creditUsd)) videos at 10 steps", index: 0)
+                KPI(label: "Held by running jobs", value: Pricing.money(w?.heldUsd ?? b.heldUsd), index: 1)
                 KPI(label: "Today", value: Pricing.money(store.todaySpent), hint: "of \(Pricing.money(b.perDayLimit)) cap", index: 2)
                 KPI(label: "This month", value: Pricing.money(b.month), index: 3)
             }
@@ -29,14 +30,13 @@ struct CreditsView: View {
                 SectionHeader("Studio balance")
                 HStack(spacing: 14) {
                     KPI(label: "RunPod balance", value: b.runpodBalance.map(Pricing.money) ?? "—", hint: sourceHint(b.balanceSource), index: 1)
-                    KPI(label: "Available to send", value: b.availableToSend.map { "\(Int(($0 / b.tokenUsd + 1e-6).rounded(.down))) tokens" } ?? "—",
-                        hint: b.availableToSend.map(Pricing.money), index: 2)
-                    KPI(label: "Members hold", value: w?.membersUnspentUsd.map { "\(Pricing.tokens($0, b.tokenUsd)) tokens" } ?? "—", hint: w?.membersUnspentUsd.map(Pricing.money), index: 3)
+                    KPI(label: "Available to send", value: (w?.availableToSend ?? b.availableToSend).map(Pricing.money) ?? "—", index: 2)
+                    KPI(label: "Members hold", value: w?.membersUnspentUsd.map(Pricing.money) ?? "—", index: 3)
                 }
-                Muted("Available to send = the RunPod balance, minus every member's unused tokens, minus what running jobs hold. You can't send more than that.")
+                Muted("Available to send = the RunPod balance, minus every member's unused credit, minus what running jobs hold. You can't send more than that.")
                     .padding(.top, 10)
                 if b.isUnavailable {
-                    Note(icon: "exclamationmark.triangle", warn: true, "MUSE can't read the RunPod balance right now, so tokens can't be sent. Jobs still respect the caps.").padding(.top, 10)
+                    Note(icon: "exclamationmark.triangle", warn: true, "MUSE can't read the RunPod balance right now, so credit can't be sent. Jobs still respect the caps.").padding(.top, 10)
                 }
                 if store.studioSettings?.lowBalance == true {
                     Note(icon: "pause.circle", warn: true, "\(Job.pausedLine). New jobs wait until the RunPod balance is above the work in flight plus \(Pricing.money(store.studioSettings?.minRunpodBalance ?? 2)).").padding(.top, 10)
@@ -49,7 +49,7 @@ struct CreditsView: View {
                 }
                 .padding(.top, 14)
             } else if store.isMember {
-                Note(icon: "circle.hexagongrid", "Tokens come from the studio owner. 1 token = \(Pricing.money(b.tokenUsd)). A render holds its price when it starts and settles to the real GPU time when it's done; a failed render gives everything back. Need more? Ask the studio owner.")
+                Note(icon: "dollarsign.circle", "Your credit comes from the studio owner. A render holds its price when it starts and settles to the real GPU time when it's done; a failed render gives everything back. Need more? Ask the studio owner.")
                     .padding(.top, 18)
             }
             if store.isDemo || store.wallet == nil {
@@ -139,8 +139,8 @@ struct MembersView: View {
             }
             HStack(spacing: 14) {
                 KPI(label: "RunPod balance", value: b.runpodBalance.map(Pricing.money) ?? "—", hint: b.balanceSource == "simulated" ? "Simulated (test credit)" : nil, index: 0)
-                KPI(label: "Available to send", value: "\(store.wallet?.tokensToSend ?? 0) tokens", hint: b.availableToSend.map(Pricing.money), index: 1)
-                KPI(label: "Members", value: "\(people.filter { !$0.isOwner }.count)", hint: "\(people.filter { !$0.isOwner }.reduce(0) { $0 + $1.tokens }) tokens unused", index: 2)
+                KPI(label: "Available to send", value: (store.wallet?.availableToSend ?? b.availableToSend).map(Pricing.money) ?? "—", index: 1)
+                KPI(label: "Members", value: "\(people.filter { !$0.isOwner }.count)", hint: "\(Pricing.money(people.filter { !$0.isOwner }.reduce(0.0) { $0 + $1.usd })) unused", index: 2)
             }
             if let inv = store.lastInvite {
                 InviteCodeCard(invite: inv).padding(.top, 16)
@@ -149,12 +149,12 @@ struct MembersView: View {
                 LinkText("Refresh") { store.loadMembers() }
             }
             if people.isEmpty {
-                Note(icon: "person.2", "No one here yet. Invite someone: they sign up with the code and you send them tokens.")
+                Note(icon: "person.2", "No one here yet. Invite someone: they sign up with the code and you send them credit.")
             } else {
                 VStack(spacing: 0) {
                     HStack(spacing: 12) {
                         Lbl("Person").frame(maxWidth: .infinity, alignment: .leading)
-                        Lbl("Tokens").frame(width: 110, alignment: .leading)
+                        Lbl("Balance").frame(width: 110, alignment: .leading)
                         Lbl("Spent today · month").frame(width: 160, alignment: .leading)
                         Lbl("Daily cap").frame(width: 90, alignment: .leading)
                         Color.clear.frame(width: 150, height: 1)
@@ -165,7 +165,7 @@ struct MembersView: View {
                     ForEach(people) { m in MemberRow(member: m) }
                 }
             }
-            Muted("1 token = \(Pricing.money(b.tokenUsd)). Members pay for their own renders and GPU warm-up from their tokens (unless you pay warm-up in Settings → Studio). Taking back only moves unused tokens, never ones held by a running job. Switching someone off signs them out.")
+            Muted("Members pay for their own renders and GPU warm-up from their balance (unless you pay warm-up in Settings → Studio). Amounts are rounded to the nearest cent. Taking back only moves unused credit, never what a running job holds. Switching someone off signs them out.")
                 .padding(.top, 14)
         }
         .onAppear { store.loadMembers() }
@@ -195,8 +195,8 @@ struct MemberRow: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(m.isOwner ? "—" : "\(m.tokens)").font(t.mono(14))
-                    if !m.isOwner { Muted(Pricing.money(m.usd) + (m.heldTokens > 0 ? " · \(m.heldTokens) held" : "")) }
+                    Text(m.isOwner ? "—" : Pricing.money(m.usd)).font(t.mono(14))
+                    if !m.isOwner && m.heldTokens > 0 { Muted("\(Pricing.money(Double(m.heldTokens) * store.balance.tokenUsd)) held") }
                 }
                 .frame(width: 110, alignment: .leading)
                 Text("\(Pricing.money(m.todayUsd)) · \(Pricing.money(m.monthUsd))").font(t.mono(12.5)).frame(width: 160, alignment: .leading)
@@ -208,21 +208,21 @@ struct MemberRow: View {
                     if !m.isOwner {
                         MButton("Send", icon: "paperplane", size: .small) { sendOpen = true }
                             .popover(isPresented: $sendOpen, arrowEdge: .bottom) {
-                                TokenMoveForm(title: "Send tokens to \(m.email)", action: "Send", max: store.wallet?.tokensToSend) { n, note in
+                                CreditMoveForm(title: "Send credit to \(m.email)", action: "Send", max: store.wallet?.availableToSend ?? store.balance.availableToSend) { usd, note in
                                     sendOpen = false
-                                    store.sendTokens(to: m, tokens: n, note: note)
+                                    store.sendCredit(to: m, usd: usd, note: note)
                                 }
                             }
                         Color.clear.frame(width: 1, height: 1)
                             .popover(isPresented: $backOpen, arrowEdge: .bottom) {
-                                TokenMoveForm(title: "Take back from \(m.email)", action: "Take back", max: m.tokens) { n, note in
+                                CreditMoveForm(title: "Take back from \(m.email)", action: "Take back", max: m.usd) { usd, note in
                                     backOpen = false
-                                    store.takeBackTokens(from: m, tokens: n, note: note)
+                                    store.takeBackCredit(from: m, usd: usd, note: note)
                                 }
                             }
                         MoreMenu {
-                            Button("Send tokens…") { sendOpen = true }
-                            Button("Take back tokens…") { backOpen = true }.disabled(m.tokens == 0)
+                            Button("Send credit…") { sendOpen = true }
+                            Button("Take back credit…") { backOpen = true }.disabled(m.usd <= 0)
                             Divider()
                             Button("Set daily cap…") { capOpen = true }
                             Button("Use the studio's daily cap") { store.setDailyCap(m, nil) }
@@ -248,41 +248,45 @@ struct MemberRow: View {
     }
 }
 
-/// Amount + note, for Send tokens and Take back.
-struct TokenMoveForm: View {
+/// Dollar amount + note, for Send credit and Take back. The store converts dollars to the API's whole tokens.
+struct CreditMoveForm: View {
     @Environment(\.theme) private var t
     var title: String
     var action: String
-    var max: Int?
-    var submit: (Int, String) -> Void
+    /// The most that can move, in dollars (nil = unknown).
+    var max: Double?
+    var submit: (Double, String) -> Void
     @State private var amount = ""
     @State private var note = ""
 
     private var fillMax: (() -> Void)? {
         guard let m = max else { return nil }
-        return { amount = "\(m)" }
+        return { amount = String(format: "%.2f", (m * 100).rounded(.down) / 100) }
     }
 
     var body: some View {
-        let n = Int(amount.trimmingCharacters(in: .whitespaces)) ?? 0
-        let over = max.map { n > $0 } ?? false
+        let usd = Pricing.parseDollars(amount) ?? 0
+        let over = max.map { usd > $0 + 1e-9 } ?? false
+        let ok = usd >= 0.01 && !over
         VStack(alignment: .leading, spacing: 12) {
             Text(title).font(t.body(14, .bold))
-            Field("Tokens", trailing: max.map { "Max \($0)" }, trailingAction: fillMax) {
-                TextField("100", text: $amount).fieldChrome().font(t.mono(14)).onSubmit { if n > 0 && !over { submit(n, note) } }
-            }
-            HStack(spacing: 6) {
-                ForEach([50, 100, 250, 500], id: \.self) { v in
-                    Chip("\(v)", on: n == v) { amount = "\(v)" }
+            Field("Amount (US$)", trailing: max.map { "Max \(Pricing.money($0))" }, trailingAction: fillMax) {
+                HStack(spacing: 4) {
+                    Text("$").font(t.mono(14)).foregroundStyle(t.muted)
+                    TextField("5.00", text: $amount).fieldChrome().font(t.mono(14)).onSubmit { if ok { submit(usd, note) } }
                 }
             }
-            Muted(n > 0 ? "= \(Pricing.money(Double(n) * 0.01))" : "1 token = $0.01")
+            HStack(spacing: 6) {
+                ForEach([1.0, 5, 10, 25], id: \.self) { v in
+                    Chip(Pricing.money(v), on: abs(usd - v) < 0.005) { amount = String(format: "%.2f", v) }
+                }
+            }
             Field("Note (optional)") {
                 TextField("For this week's tests", text: $note).fieldChrome()
             }
-            if over { Note(icon: "exclamationmark.triangle", warn: true, "That's more than the \(max ?? 0) available.") }
-            MButton(n > 0 ? "\(action) \(n) tokens" : action, kind: .primary, off: n <= 0 || over, fill: true) {
-                if n > 0 && !over { submit(n, note) }
+            if over { Note(icon: "exclamationmark.triangle", warn: true, "That's more than the \(Pricing.money(max ?? 0)) available.") }
+            MButton(usd > 0 ? "\(action) \(Pricing.money(usd))" : action, kind: .primary, off: !ok, fill: true) {
+                if ok { submit(usd, note) }
             }
         }
         .padding(16)
@@ -358,9 +362,10 @@ struct InviteCodeCard: View {
                 Text(invite.code).font(t.mono(18, .medium)).textSelection(.enabled)
                 Spacer()
                 MButton("Copy", icon: "doc.on.doc", size: .small) { store.copy(invite.code, toast: "Invite code copied") }
+                MButton("Share…", icon: "square.and.arrow.up", size: .small) { store.shareInvite(invite) }
             }
             Muted((invite.email.map { "For \($0) · " } ?? "For anyone · ") + "expires " + Date(timeIntervalSince1970: Double(invite.expiresAt) / 1000).formatted(date: .abbreviated, time: .omitted)
-                + ". They choose Create an account in MUSE and enter it.")
+                + ". Share… sends the download link and the code; Copy copies the code only.")
         }
         .card(14)
     }

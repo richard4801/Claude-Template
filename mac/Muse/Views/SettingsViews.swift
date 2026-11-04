@@ -94,9 +94,9 @@ struct SettingsView: View {
         case .costs:
             H2("Costs & limits")
             HStack(spacing: 14) {
-                KPI(label: "My tokens", value: "\(store.tokenCount)", hint: Pricing.money(store.balance.balance), index: 0)
+                KPI(label: "Balance", value: Pricing.money(store.creditUsd), index: 0)
                 KPI(label: "This month", value: Pricing.money(store.balance.month), index: 1)
-                KPI(label: "Per video", value: "~\(Pricing.tokens(Pricing.typicalVideo, store.balance.tokenUsd)) tokens", hint: "~\(Pricing.money(Pricing.typicalVideo))", index: 2)
+                KPI(label: "Per video", value: "~\(Pricing.money(Pricing.typicalVideo))", index: 2)
             }
             ListBox {
                 ListRow(icon: "checkmark.shield", title: "Spend cap per job", hint: store.isOwner ? "Change it in Settings → Studio" : "Set by the studio owner") { MonoValue(Pricing.money(store.balance.perJobLimit)) }
@@ -104,7 +104,7 @@ struct SettingsView: View {
                 ListRow(icon: "bell", title: "Warn before a job goes over budget") { MToggle(isOn: $store.warnOverBudget) }
                 ListRow(icon: "slider.horizontal.3", title: "Shut down idle GPU after", last: true) { MonoValue("3 min") }
             }
-            MButton("My tokens", icon: "circle.hexagongrid", kind: .primary) { store.go(.credits) }
+            MButton("Credit", icon: "dollarsign.circle", kind: .primary) { store.go(.credits) }
         case .studio:
             StudioSettingsSection()
         case .notif:

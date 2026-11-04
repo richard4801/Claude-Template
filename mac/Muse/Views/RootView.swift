@@ -182,7 +182,7 @@ struct TitleBar: View {
                         Text(u.email + (u.role.map { " · \($0)" } ?? ""))
                     }
                     Divider()
-                    Button("My tokens · \(store.tokenCount)") { store.go(.credits) }
+                    Button("Credit · \(Pricing.money(store.creditUsd))") { store.go(.credits) }
                     if store.isOwner {
                         Button("Members") { store.go(.members) }
                         Button("Invite someone…") { store.go(.members) }
@@ -329,7 +329,7 @@ struct NavRow: View {
     }
 }
 
-/// "My tokens" at the bottom of the sidebar (`.balbox`). Members see their wallet; the owner sees what they can spend or send.
+/// "Balance" at the bottom of the sidebar (`.balbox`). Members see their wallet; the owner sees what they can spend or send.
 struct BalanceBox: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
@@ -338,15 +338,15 @@ struct BalanceBox: View {
         let onDark = t.isC
         Button { store.go(.credits) } label: {
             VStack(alignment: .leading, spacing: 4) {
-                Lbl("My tokens", color: onDark ? .white.opacity(0.75) : nil)
-                Text("\(store.tokenCount)")
+                Lbl("Balance", color: onDark ? .white.opacity(0.75) : nil)
+                Text(Pricing.money(store.creditUsd))
                     .font(t.isA ? Fonts.font("Instrument Serif", 34, .regular) : t.mono(22, .medium))
                     .foregroundStyle(onDark ? .white : t.ink)
-                Text("\(Pricing.money(store.balance.balance)) · ≈ \(Pricing.videosLeft(store.balance.balance)) videos").font(t.body(12)).foregroundStyle(onDark ? .white.opacity(0.75) : t.muted)
+                Text("≈ \(Pricing.videosLeft(store.creditUsd)) videos at 10 steps").font(t.body(12)).foregroundStyle(onDark ? .white.opacity(0.75) : t.muted)
                 GeometryReader { g in
                     ZStack(alignment: .leading) {
                         Capsule().fill(onDark ? .white.opacity(0.25) : t.line)
-                        Capsule().fill(onDark ? .white : t.accent).frame(width: g.size.width * min(1, store.balance.balance / 25))
+                        Capsule().fill(onDark ? .white : t.accent).frame(width: g.size.width * min(1, store.creditUsd / 25))
                     }
                 }
                 .frame(height: 4)

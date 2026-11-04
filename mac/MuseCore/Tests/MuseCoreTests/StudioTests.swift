@@ -83,15 +83,46 @@ final class StudioTests: XCTestCase {
 
     func testFriendlyErrors() {
         XCTAssertEqual(ApiError("insufficient_tokens", "Not enough tokens · ask the studio owner for more (you have 3)").friendlyMessage,
-                       "Not enough tokens. Ask the studio owner for more.")
+                       "Not enough credit. Ask the studio owner for more.")
+        for code in ["insufficient_tokens", "over_allocation", "balance_unavailable", "invite_required"] {
+            XCTAssertFalse(ApiError.friendly(code)!.lowercased().contains("token"), "no tokens in the UI: \(code)")
+        }
         for code in ["invite_required", "invite_invalid", "email_taken", "bad_credentials", "account_disabled", "rate_limited", "unauthorized"] {
             XCTAssertNotNil(ApiError.friendly(code), code)
         }
         XCTAssertEqual(ApiError("http_429", "Server error 429").friendlyMessage, ApiError("rate_limited", "").friendlyMessage)
+        XCTAssertEqual(ApiError("bad_request", "They have 250 unused tokens (13 more are on hold for running jobs)").friendlyMessage,
+                       "They have $2.50 unused credit ($0.13 more are on hold for running jobs)")
+        XCTAssertEqual(ApiError("bad_request", "The owner's wallet is the RunPod balance; send tokens to members only").friendlyMessage,
+                       "The owner's wallet is the RunPod balance; send credit to members only")
         XCTAssertTrue(ApiError("unauthorized", "").endsSession)
         XCTAssertTrue(ApiError("account_disabled", "").endsSession)
         XCTAssertFalse(ApiError("insufficient_tokens", "").endsSession)
         XCTAssertEqual(ApiError("over_day_limit", "Over the studio's $15.00 daily limit").friendlyMessage, "Over the studio's $15.00 daily limit")
+    }
+
+    func testDollarsToTokens() {
+        XCTAssertEqual(Pricing.tokensForDollars(5), 500)
+        XCTAssertEqual(Pricing.tokensForDollars(0.015), 2, "rounds to the nearest cent")
+        XCTAssertEqual(Pricing.tokensForDollars(0.014), 1)
+        XCTAssertEqual(Pricing.tokensForDollars(19.99), 1999)
+        XCTAssertEqual(Pricing.tokensForDollars(1.1), 110, "no float drift")
+        XCTAssertEqual(Pricing.parseDollars("$1,250.5"), 1250.5)
+        XCTAssertEqual(Pricing.parseDollars(" 2.345 "), 2.35)
+        XCTAssertNil(Pricing.parseDollars("abc"))
+        XCTAssertNil(Pricing.parseDollars("-3"))
+        XCTAssertEqual(TokenMove(userId: "u", usd: 2.5, note: "x").tokens, 250)
+    }
+
+    func testInviteShareText() throws {
+        let now: Int64 = 1_000_000_000_000
+        let inv = Invite(code: "MUSE-AB12-CD34-EF56", id: "i", email: "tess@example.com", expiresAt: now + 14 * 86_400_000)
+        XCTAssertEqual(inv.shareMessage(publicURL: "https://muse.example.com/", now: now),
+                       "You're invited to MUSE, the AI model studio. 1) Download: https://muse.example.com/get 2) Sign up with this invite code: MUSE-AB12-CD34-EF56 (email: tess@example.com). The code works once and expires in 14 days.")
+        let anyone = Invite(code: "MUSE-AB12-CD34-EF56", id: "i", expiresAt: now + 14 * 86_400_000)
+        XCTAssertFalse(anyone.shareMessage(publicURL: "https://m.example", now: now).contains("email"))
+        let fromServer = try JSONDecoder().decode(Invite.self, from: Data(#"{"code":"MUSE-X","id":"i","role":"member","expiresAt":1,"shareText":"From the server"}"#.utf8))
+        XCTAssertEqual(fromServer.shareMessage(publicURL: "https://m.example"), "From the server")
     }
 
     func testDemoOwnerSendsAndTakesBackTokens() async throws {

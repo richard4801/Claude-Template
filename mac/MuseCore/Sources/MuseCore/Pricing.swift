@@ -89,8 +89,19 @@ public enum Pricing {
     public static func secPerLen(_ len: Double) -> Double { secPerStep5s * pow(len / baseLen, 1.3) }
 
     public static func clampSteps(_ n: Int) -> Int { min(stepsMax, max(stepsMin, n)) }
-    /// A price in whole wallet tokens (rounded up, like the server's hold). 1 token = $0.01 by default.
+    /// A price in whole wallet tokens (rounded up, like the server's hold). 1 token = $0.01 by default. The UI shows dollars only.
     public static func tokens(_ usd: Double, _ tokenUsd: Double = 0.01) -> Int { Int((usd / max(tokenUsd, 0.0001) - 1e-6).rounded(.up)) }
+    /// A dollar amount the user typed, as whole wallet tokens for the API: rounded to the nearest cent, then converted at `tokenUsd`.
+    public static func tokensForDollars(_ usd: Double, _ tokenUsd: Double = 0.01) -> Int {
+        let cents = (usd * 100).rounded()
+        return Int((cents / 100 / max(tokenUsd, 0.0001)).rounded())
+    }
+    /// Parses "$5", "5.5", "1,250.00" → dollars rounded to 2 decimals; nil if it isn't a non-negative amount.
+    public static func parseDollars(_ text: String) -> Double? {
+        let s = text.replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces)
+        guard !s.isEmpty, let v = Double(s), v.isFinite, v >= 0 else { return nil }
+        return (v * 100).rounded() / 100
+    }
     public static func clampTakes(_ n: Int) -> Int { min(takesMax, max(1, n)) }
 
     /// Estimated minutes for ONE take.
