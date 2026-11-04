@@ -260,8 +260,10 @@ fun Seg(options: List<Pair<String, String>>, selected: String, onSelect: (String
         m.isC -> mod
         else -> mod.border(m.t.stroke, m.t.line, shape)
     }
+    val wrap = options.any { it.second.length > 18 }
     Row(mod.padding(3.dp)) {
-        options.forEach { (k, l) ->
+        options.forEach { (k, l0) ->
+            val l = if (wrap) l0.replaceFirst(" · ", "\n") else l0
             val on = k == selected
             val (bg, fg) = when {
                 !on -> Color.Transparent to m.t.muted
@@ -270,9 +272,9 @@ fun Seg(options: List<Pair<String, String>>, selected: String, onSelect: (String
                 else -> m.t.ink to m.t.bg
             }
             Box(
-                Modifier.weight(l.length.coerceAtLeast(6).toFloat()).height(if (small) 28.dp else 38.dp).clip(shape).background(bg).press(SoundFx.Kind.TICK) { onSelect(k) }.padding(horizontal = 8.dp),
+                Modifier.weight(if (wrap) 1f else l.length.coerceAtLeast(6).toFloat()).height(if (wrap) 48.dp else if (small) 28.dp else 38.dp).clip(shape).background(bg).press(SoundFx.Kind.TICK) { onSelect(k) }.padding(horizontal = 8.dp),
                 contentAlignment = Alignment.Center,
-            ) { T(l, (if (small) m.type.seg.copy(fontSize = 12.sp) else m.type.seg).let { if (m.isA) it.copy(fontSize = it.fontSize * .88f, letterSpacing = .06.em) else it }, fg, upper = m.isA, maxLines = 1) }
+            ) { T(l, (if (small) m.type.seg.copy(fontSize = 12.sp) else m.type.seg).let { if (m.isA) it.copy(fontSize = it.fontSize * .88f, letterSpacing = .06.em) else it }, fg, upper = m.isA, maxLines = if (wrap) 2 else 1, align = TextAlign.Center) }
         }
     }
 }
