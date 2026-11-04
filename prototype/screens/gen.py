@@ -158,7 +158,7 @@ def s_home(t):
       </div>
       <div class="row-b"><h3 class="h3">All models</h3><span class="tiny acc">See all</span></div>
       <div class="mgrid">{model_card(t,IMG["c_front"],"Sienna Vale","Fashion · 24","Locked","good")}
-        <div class="mcard empty"><div class="mc-img init">N</div><div class="mc-meta"><b>Noor Adeyemi</b><span class="tiny muted">Beauty · 27</span>{pill("Needs close-ups","warn")}</div></div></div>
+        <div class="mcard empty"><div class="mc-img init">N</div><div class="mc-meta"><b>Noor Ellis</b><span class="tiny muted">Beauty · 27</span>{pill("Needs close-ups","warn")}</div></div></div>
     </div>{tabbar(t,"home")}</section>'''
 
 def s_profile(t):
@@ -189,7 +189,7 @@ def s_create1(t):
     return f'''<section class="screen" data-name="07 Create · Basics">{status(t)}{topbar(t,"New model",left="back")}
     {steps_head(t,1,"Who is she?")}
     <div class="pad stack-16">
-      <label class="fld"><span class="lbl">Name</span><span class="inp">Noor Adeyemi</span></label>
+      <label class="fld"><span class="lbl">Name</span><span class="inp">Noor Ellis</span></label>
       <div class="fld"><span class="lbl">Age · <b class="mono">27</b></span><div class="slider"><i style="width:33%"></i><b style="left:33%"></b></div><div class="scale mono"><span>18</span><span>45</span></div></div>
       <div class="fld"><span class="lbl">Niche</span><div class="chips">{"".join(f'<span class="chip{" on" if x=="Beauty" else ""}">{x}</span>' for x in ["Fashion","Beauty","Fitness","Travel","Food","Tech"])}</div></div>
       <label class="fld"><span class="lbl">Personality & voice</span><span class="inp area">Warm and playful. Talks to camera like a best friend. Loves skincare routines.</span></label>

@@ -300,12 +300,36 @@ fun Pill(text: String, kind: String = "", modifier: Modifier = Modifier, icon: S
 @Composable
 fun Toggle(on: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val m = muse
-    val x by animateFloatAsState(if (on) 20f else 0f, tween(180, easing = FastOutSlowInEasing), label = "tog")
+    // Track 50x30, knob 24, inset 3dp inside the border, vertically centred (same spec as the prototypes).
+    val border = if (m.isD) 2.5.dp else 0.dp
+    val inset = if (m.isD) 2.dp else 3.dp
+    val knobSize = if (m.isD) 21.dp else 24.dp
+    val travel = 50.dp - border * 2 - inset * 2 - knobSize
+    val f by animateFloatAsState(if (on) 1f else 0f, tween(200, easing = FastOutSlowInEasing), label = "tog")
+    val track = when {
+        on -> m.t.accent
+        m.isA || m.isC -> m.t.line
+        m.isB -> Color(0xFF2C3033)
+        m.isD -> Color.White
+        else -> m.t.surface2
+    }
+    val knob = when {
+        m.isB -> if (on) Color(0xFF1A1205) else Color(0xFFA9A6A0)
+        else -> Color.White
+    }
+    val shape = RoundedCornerShape(50)
     Box(
-        modifier.size(48.dp, 28.dp).clip(RoundedCornerShape(14.dp)).background(if (on) m.t.accent else m.t.surface2)
-            .border(m.t.stroke, if (m.isD) Ink else m.t.line, RoundedCornerShape(14.dp)).press(SoundFx.Kind.TICK, onClick = onClick),
+        modifier.size(50.dp, 30.dp).clip(shape).background(track)
+            .let { if (m.isD) it.border(border, Ink, shape) else it }
+            .padding(border + inset).press(SoundFx.Kind.TICK, onClick = onClick),
+        contentAlignment = Alignment.CenterStart,
     ) {
-        Box(Modifier.offset(x = (3 + x).dp, y = 3.dp).size(20.dp).clip(CircleShape).background(if (on) m.t.accentInk else m.t.muted).align(Alignment.CenterStart))
+        Box(
+            Modifier.offset(x = travel * f).size(knobSize)
+                .let { if (m.isA || m.isB) it else it.shadow(if (m.isD) 0.dp else 2.dp, CircleShape) }
+                .clip(CircleShape).background(knob)
+                .let { if (m.isD) it.border(2.dp, Ink, CircleShape) else it },
+        )
     }
 }
 

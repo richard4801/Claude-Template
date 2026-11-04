@@ -197,7 +197,7 @@ const S = {
      refs:{'Face · front':'face_front','Face · profile':'face_side','Body · front':'green_front','Body · ¾':'green_tq','Body · side':'green_side','Body · back':'green_back'},
      outfits:[{n:'Green lounge set',img:'green_front'},{n:'Crystal mini dress',img:'crystal_front'}],
      never:['Tattoos','Rings','Necklaces']},
-    {id:'noor', name:'Noor Adeyemi', age:27, niche:'Beauty & skincare', status:'Needs face close-ups', cover:null, refs:{}, outfits:[], never:['Tattoos']},
+    {id:'noor', name:'Noor Ellis', age:27, niche:'Beauty & skincare', status:'Needs face close-ups', cover:null, refs:{}, outfits:[], never:['Tattoos']},
     {id:'kai', name:'Kai Moreno', age:29, niche:'Fitness', status:'Draft', cover:null, refs:{}, outfits:[], never:[]}
   ],
   sel:'sienna',
@@ -301,7 +301,7 @@ function viewCreate(){
   const stepper = `<div class="stepper">${CREATE_STEPS.map((s,i)=>`<button ${i===st?'aria-current="step"':''} onclick="S.create.step=${i};render()"><span class="n">${i+1}</span>${s}</button>`).join('')}</div>`;
   let body='';
   if(st===0) body = `<div class="card stack"><div class="grid2">
-      <label class="field"><span class="label">Name</span><input type="text" id="c-name" value="${esc(c.name)}" placeholder="e.g. Noor Adeyemi" oninput="S.create.name=this.value"></label>
+      <label class="field"><span class="label">Name</span><input type="text" id="c-name" value="${esc(c.name)}" placeholder="e.g. Noor Ellis" oninput="S.create.name=this.value"></label>
       <label class="field"><span class="label">Niche</span><select id="c-niche" onchange="S.create.niche=this.value">${['','Fashion & lifestyle','Beauty & skincare','Fitness','Travel','Food','Tech & gadgets'].map(n=>`<option ${n===c.niche?'selected':''} value="${n}">${n||'Choose a niche'}</option>`).join('')}</select></label></div>
       <label class="field"><span class="label">Age · <span class="mono" id="c-age-v">${c.age}</span></span><input type="range" id="c-age" min="18" max="45" value="${c.age}" oninput="S.create.age=+this.value;document.getElementById('c-age-v').textContent=this.value"></label>
       <p class="note">Models are always 18 or older, and always original. The studio won't create lookalikes of real people.</p>

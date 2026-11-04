@@ -69,7 +69,7 @@ class CreateModelViewModel(private val c: AppContainer) : ViewModel() {
     fun next(onDone: () -> Unit) = viewModelScope.launch {
         creating.value = true
         val d = c.drafts.model.value
-        val m = c.repo.createModel(CreateModelRequest(d.name.ifBlank { "Noor Adeyemi" }, d.age, d.niche))
+        val m = c.repo.createModel(CreateModelRequest(d.name.ifBlank { "Noor Ellis" }, d.age, d.niche))
         creating.value = false
         if (m != null) { c.drafts.modelId.value = m.id; onDone() }
     }
@@ -143,7 +143,7 @@ fun CreateBasicsScreen() {
                 StepBars(1); Lbl("Step 1 of 2"); H2("Who is she?")
             }
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 130.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Field("Name") { Input(s.draft.name, { v -> vm.edit { it.copy(name = v) } }, placeholder = "Noor Adeyemi") }
+                Field("Name") { Input(s.draft.name, { v -> vm.edit { it.copy(name = v) } }, placeholder = "Noor Ellis") }
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row { Lbl("Age · "); T("${s.draft.age}", m.type.mono.copy(fontSize = 11.5.sp, fontWeight = FontWeight.Bold), m.t.ink) }
                     MuseSlider(s.draft.age, 18, 70, { v -> if (v != s.draft.age) { c.sound.play(SoundFx.Kind.TICK); vm.edit { it.copy(age = v) } } })

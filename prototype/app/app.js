@@ -116,7 +116,7 @@ SCREENS.home = () => {
    <div class="quick"><div class="qa press" data-go="source">${ic('studio')}<span>New video</span></div><div class="qa press" data-go="shoot">${ic('camera')}<span>Photoshoot</span></div><div class="qa press" data-go="create1">${ic('model')}<span>New model</span></div></div>
    <div class="row-b"><h3 class="h3">All models</h3><span class="tiny muted">2 models</span></div>
    <div class="mgrid"><div class="mcard press" data-go="profile"><div class="mc-img" style="${bg('c_front')}">${vf()}</div><div class="mc-meta"><b>Sienna Vale</b><span class="tiny muted">Fashion · 24</span>${pill('Locked','good')}</div></div>
-    <div class="mcard press" data-go="create3"><div class="mc-img init">N</div><div class="mc-meta"><b>Noor Adeyemi</b><span class="tiny muted">Beauty · 27</span>${pill('Draft · 0/6 shots','warn')}</div></div></div>
+    <div class="mcard press" data-go="create3"><div class="mc-img init">N</div><div class="mc-meta"><b>Noor Ellis</b><span class="tiny muted">Beauty · 27</span>${pill('Draft · 0/6 shots','warn')}</div></div></div>
   </div>${tabbar('home')}${home}</section>`;
 };
 
@@ -157,7 +157,7 @@ SCREENS.profile = () => {
 const stepbars = n => `<div class="stepbars">${[0,1].map(i=>`<i class="${i<n?'on':''}"></i>`).join('')}</div>`;
 SCREENS.create1 = () => `<section class="screen">${sbar()}${topb('New model')}
   <div class="pad stack-8">${stepbars(1)}<span class="lbl">Step 1 of 2</span><h2 class="h2">Who is she?</h2></div>
-  <div class="pad stack-16" style="margin-top:12px"><label class="fld"><span class="lbl">Name</span><span class="inp typing">Noor Adeyemi</span></label>
+  <div class="pad stack-16" style="margin-top:12px"><label class="fld"><span class="lbl">Name</span><span class="inp typing">Noor Ellis</span></label>
    <div class="fld"><span class="lbl">Age · <b class="mono" id="age-v">27</b></span><div class="slider" data-slider="age" data-min="18" data-max="70" data-val="27"><i style="width:17%"></i><b style="left:17%"></b></div><div class="scale mono"><span>18</span><span>70</span></div></div>
    <div class="fld"><span class="lbl">Niche</span><div class="chips">${['Fashion','Beauty','Fitness','Travel','Food','Tech'].map(x=>`<span class="chip${x===S.create.niche?' on':''}" data-act="niche-${x}">${x}</span>`).join('')}</div></div>
    <div class="note-box">${ic('shield',18)}<span>Models are always 18+ and original. No lookalikes of real people.</span></div></div>

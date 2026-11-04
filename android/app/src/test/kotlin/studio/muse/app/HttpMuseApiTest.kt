@@ -45,7 +45,7 @@ class HttpMuseApiTest {
     @Test fun fullRenderOverRestAndSse() = runBlocking {
         try { api.signUp(SignUpRequest("S", "a@b.c", "x", true, false)); error("should fail") } catch (e: ApiException) { assertEquals("attestation_required", e.code) }
         api.setToken(api.signUp(SignUpRequest("Jenne Studio", "a@b.c", "x", true, true)).token)
-        assertEquals(listOf("Sienna Vale", "Noor Adeyemi"), api.listModels().map { it.name })
+        assertEquals(listOf("Sienna Vale", "Noor Ellis"), api.listModels().map { it.name })
         assertEquals(6.07, api.balance().balance, 1e-9)
         val clip = api.uploadClip(SampleData.sampleMeta, null)
         assertTrue(clip.ok)

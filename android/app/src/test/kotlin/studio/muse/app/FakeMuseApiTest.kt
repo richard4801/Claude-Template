@@ -33,7 +33,7 @@ class FakeMuseApiTest {
         val api = FakeMuseApi(backgroundScope, now = { testScheduler.currentTime })
         assertEquals(6.07, api.balance().balance, 1e-9)
         assertEquals(18.93, api.balance().month, 1e-9)
-        assertEquals(listOf("Sienna Vale", "Noor Adeyemi"), api.listModels().map { it.name })
+        assertEquals(listOf("Sienna Vale", "Noor Ellis"), api.listModels().map { it.name })
         assertTrue(api.listModels()[0].locked)
         assertEquals(0, api.listModels()[1].filled)
         assertTrue(api.listJobs().any { it.failed && it.refunded == 0.19 })

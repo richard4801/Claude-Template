@@ -27,7 +27,7 @@ test('signup needs both attestations', async () => {
 
 test('seed data', async () => {
   assert.equal((await api('GET', '/v1/balance')).body.balance, 6.07);
-  assert.deepEqual((await api('GET', '/v1/models')).body.map(m => m.name), ['Sienna Vale', 'Noor Adeyemi']);
+  assert.deepEqual((await api('GET', '/v1/models')).body.map(m => m.name), ['Sienna Vale', 'Noor Ellis']);
 });
 
 test('clip checks flag a failing clip and block the job', async () => {

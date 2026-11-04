@@ -27,7 +27,7 @@ object SampleData {
             id = SIENNA, name = "Sienna Vale", age = 24, niche = "Fashion", look = SIENNA_LOOK, neverAdd = listOf("tattoos", "rings"),
             slots = SLOT_SAMPLE.map { (k, img) -> SheetSlot(k, ImageRef.asset(img)) }, outfitIds = listOf(GREEN, CRYSTAL),
         ),
-        Model(id = NOOR, name = "Noor Adeyemi", age = 27, niche = "Beauty", slots = SLOT_SAMPLE.keys.map { SheetSlot(it) }),
+        Model(id = NOOR, name = "Noor Ellis", age = 27, niche = "Beauty", slots = SLOT_SAMPLE.keys.map { SheetSlot(it) }),
     )
 
     fun outfits(): List<Outfit> = listOf(

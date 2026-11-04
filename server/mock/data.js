@@ -10,7 +10,7 @@ export function seed(now = Date.now()) {
     models: [
       { id: 'm_sienna', name: 'Sienna Vale', age: 24, niche: 'Fashion', look: 'young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin',
         neverAdd: ['tattoos', 'rings'], slots: SLOT_KEYS.map(k => ({ key: k, image: asset(SLOT_SAMPLE[k]), source: 'upload', busy: false })), outfitIds: ['o_green', 'o_crystal'] },
-      { id: 'm_noor', name: 'Noor Adeyemi', age: 27, niche: 'Beauty', look: '', neverAdd: [], slots: SLOT_KEYS.map(k => ({ key: k, image: null, source: 'upload', busy: false })), outfitIds: [] },
+      { id: 'm_noor', name: 'Noor Ellis', age: 27, niche: 'Beauty', look: '', neverAdd: [], slots: SLOT_KEYS.map(k => ({ key: k, image: null, source: 'upload', busy: false })), outfitIds: [] },
     ],
     outfits: [
       { id: 'o_green', modelId: 'm_sienna', name: 'Green set', mode: 'own', description: 'Dark green cropped tee and drawstring shorts', angles: ['g_front', 'g_tq', 'g_side', 'g_back'].map(asset), state: 'ready', prompt: '' },
