@@ -8,7 +8,9 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import studio.muse.core.ClipUse
 import studio.muse.core.Engine
+import studio.muse.core.Quality
 import studio.muse.core.Identity
 import studio.muse.core.OutfitSource
 import studio.muse.core.OutfitSpec
@@ -168,7 +170,13 @@ class FakeMuseApi(
 
     override suspend fun listJobs() = lock.withLock { jobs.sortedByDescending { it.createdAt } }
 
-    override suspend fun createJob(req: JobRequest): Job {
+    override suspend fun createJob(request: JobRequest): Job {
+        // Replicate (Draft / Standard / HD): whole clip, priced per output second; lip sync and a background photo are Exact edit only.
+        val replicate = request.engine == Engine.REPLICATE.id
+        if (replicate && request.lipSync) throw ApiException("bad_request", "Lip sync is only on Exact edit")
+        if (replicate && request.background == "photo") throw ApiException("bad_request", "A new background photo is only on Exact edit for now")
+        val req = if (!replicate) request.copy(quality = null)
+            else Quality.fromId(request.quality).let { q -> request.copy(use = ClipUse.FULL.id, quality = q.id, pricePerSec = studio.features.video?.pricePerSec(q) ?: q.pricePerSec) }
         val job = lock.withLock {
             val clip = clips[req.clipId]
             if (clip != null && !clip.ok) throw ApiException("clip_failed_checks", "Fix the clip checks first")
@@ -187,7 +195,8 @@ class FakeMuseApi(
                 jobs += q
                 return@withLock q
             }
-            val prompt = PromptEngine.videoSwap(
+            val prompt = if (replicate) "Replace the person in the clip with ${m.name} in ${o?.name ?: "her outfit"} · keep the exact framing and crop · remove captions"
+                else PromptEngine.videoSwap(
                 VideoSwapSpec(identity(m, loras[m.id]), OutfitSpec(o?.name ?: "outfit"), SourcePerformer(), req.keepAudio, req.background == "keep", req.backgroundMotion, req.steps, seed),
             ).text
             charge(cost)
@@ -438,7 +447,7 @@ class FakeMuseApi(
                             val o = outfits.firstOrNull { it.id == cur.outfitId }
                             val thumb = o?.angles?.filterNotNull()?.let { if (it.isEmpty()) null else it[(i - 1) % it.size] } ?: cur.thumb ?: ImageRef.asset("g_front")
                             Take("t_${cur.id}_$i", "take", cur.id, i, cur.request.takes, cur.title,
-                                if (cur.request.engine == Engine.VIGGLE.id) "Fast · beta" else "${cur.request.steps} steps", cur.engineLabel,
+                                when (cur.request.engine) { Engine.VIGGLE.id -> "Fast · beta"; Engine.REPLICATE.id -> Quality.fromId(cur.request.quality).label; else -> "${cur.request.steps} steps" }, cur.engineLabel,
                                 cur.cost / cur.request.takes, cur.seed + i - 1, "test", thumb, cur.prompt, now())
                         }
                         takes.addAll(0, newTakes)
@@ -549,8 +558,8 @@ class FakeMuseApi(
     // ---- the demo studio's owner side: members, tokens, invites, settings (in memory, like the real API's rules)
     private val members = SampleData.members(now()).toMutableList()
     private val invites = mutableListOf<InviteInfo>()
-    private var studio = StudioSettings()
-    private var engine = ImageEngine("simulated", "bundled-stills", available = mapOf("simulated" to true, "fal" to false, "custom-http" to true))
+    private var studio = StudioSettings(features = StudioFeatures(replicate = true, video = VideoFeatures.DEFAULT))
+    private var engine = ImageEngine("simulated", "bundled-stills", "Simulated", available = mapOf("simulated" to true, "fal" to false, "custom-http" to true, "replicate" to false))
     private val tokenUsd = 0.01
 
     private fun ownerWallet(): Wallet {

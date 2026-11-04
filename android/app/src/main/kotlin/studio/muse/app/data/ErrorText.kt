@@ -36,8 +36,10 @@ object ErrorText {
                 ?: "That's more than the studio's RunPod balance can back."
             "balance_unavailable" -> "MUSE can't read the RunPod balance right now, so credit can't be sent. Try again shortly."
             "topup_unavailable" -> "Top up your RunPod account. MUSE reads the balance from RunPod."
-            "engine_unavailable" -> "The GPU can't run this option yet. Try Standard without lip sync."
+            "engine_unavailable" -> "This option isn't available on the server right now. Try another quality."
             "image_engine_failed" -> "The image engine failed. You weren't charged."
+            "provider_refused" -> server.ifBlank { "Replicate's safety filter refused this. You weren't charged." }
+            "provider_rate_limited" -> "Replicate is busy right now. You weren't charged · try again in a minute."
             "clip_failed_checks" -> "Fix the clip checks first."
             "not_found" -> "That's no longer there. Pull to refresh."
             "busy" -> "That's already in progress. Wait for it to finish."

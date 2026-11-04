@@ -66,11 +66,11 @@ import kotlinx.coroutines.launch
 import studio.muse.app.AppContainer
 import studio.muse.app.data.Clip
 import studio.muse.app.data.ImageRef
-import studio.muse.app.data.JobRequest
 import studio.muse.app.data.Model
 import studio.muse.app.data.Outfit
 import studio.muse.app.data.SampleData
 import studio.muse.app.data.VideoDraft
+import studio.muse.app.data.VideoFeatures
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.LocalNav
 import studio.muse.app.ui.Routes
@@ -80,6 +80,7 @@ import studio.muse.app.ui.theme.muse
 import studio.muse.core.ClipUse
 import studio.muse.core.Engine
 import studio.muse.core.Pricing
+import studio.muse.core.VideoOption
 import kotlin.math.atan2
 import kotlin.math.roundToInt
 
@@ -93,9 +94,11 @@ data class VideoState(
     val fastBeta: Boolean = true,
     val checking: Boolean = false,
     val starting: Boolean = false,
+    /** The quality picker's options and live prices (features.video). */
+    val video: VideoFeatures = VideoFeatures.DEFAULT,
 ) {
     val clip: Clip? get() = draft.clip
-    val spec get() = draft.spec()
+    val spec get() = draft.spec(video.pricePerSec(draft.quality))
     val cost get() = Pricing.totalCost(spec)
     val genLabel get() = Pricing.genLabel(spec)
 }
@@ -105,8 +108,11 @@ class NewVideoViewModel(private val c: AppContainer) : ViewModel() {
     val state: StateFlow<VideoState> = combine(c.repo.state, c.drafts.video, c.drafts.modelId, c.drafts.outfitId, combine(c.prefs, busy) { p, b -> p to b }) { s, d, mid, oid, (p, b) ->
         val model = s.model(mid)?.takeIf { it.filled > 0 } ?: s.models.firstOrNull { it.locked }
         val outfits = s.outfitsOf(model?.id)
-        val draft = if (!p.fastBeta && d.engine == Engine.VIGGLE) d.copy(engine = Engine.H3) else d
-        VideoState(draft, s.models, model, outfits, outfits.firstOrNull { it.id == oid } ?: outfits.firstOrNull(), s.balance.balance, p.fastBeta, b.first, b.second)
+        val video = s.video ?: VideoFeatures.DEFAULT
+        var draft = if (!p.fastBeta && d.engine == Engine.VIGGLE) d.copy(engine = Engine.H3) else d
+        // A quality the server can't run right now falls back to the first one it can (Replicate not set up → Exact edit).
+        if (!video.available(draft.option.id)) VideoOption.entries.firstOrNull { video.available(it.id) }?.let { draft = draft.pick(it) }
+        VideoState(draft, s.models, model, outfits, outfits.firstOrNull { it.id == oid } ?: outfits.firstOrNull(), s.balance.balance, p.fastBeta, b.first, b.second, video)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, VideoState())
 
     fun edit(f: (VideoDraft) -> VideoDraft) = c.drafts.video.update(f)
@@ -159,13 +165,8 @@ class NewVideoViewModel(private val c: AppContainer) : ViewModel() {
         if (s.cost > s.balance + 1e-9) return c.repo.toast(lowFundsMessage(c), Routes.CREDITS)
         viewModelScope.launch {
             busy.update { it.first to true }
-            val d = s.draft
             val job = c.repo.createJob(
-                JobRequest(
-                    title = clip.name, modelId = model.id, outfitId = s.outfit?.id ?: "", clipId = clip.id, engine = d.engine.id, steps = d.steps, use = d.use.id,
-                    takes = d.takes, keepAudio = d.keepAudio, lipSync = d.lipSync, background = d.background, backgroundMotion = d.motion,
-                    clipSeconds = clip.takeIf { it.id != SampleData.SAMPLE_CLIP }?.durationSec,
-                ),
+                s.draft.request(clip.name, model.id, s.outfit?.id ?: "", clip.id, clip.takeIf { it.id != SampleData.SAMPLE_CLIP }?.durationSec),
             )
             delay(900)
             busy.update { it.first to false }
@@ -173,8 +174,17 @@ class NewVideoViewModel(private val c: AppContainer) : ViewModel() {
         }
     }
 
-    /** Keep GPU warm: creating started (a clip picked or uploaded, or the video studio opened). Nudges once per flow. */
-    fun creatingStarted() = c.warmUi.creatingStarted(c.repo.state.value.warm)
+    /**
+     * Keep GPU warm: creating started (a clip picked or uploaded, or the video studio opened). Nudges once per flow, and
+     * only for Exact edit: Draft / Standard / HD run on Replicate and never use our GPU.
+     */
+    fun creatingStarted() { if (c.drafts.video.value.engine == Engine.H3) c.warmUi.creatingStarted(c.repo.state.value.warm) }
+
+    /** The quality picker. Switching to Exact edit is when creating on our GPU starts (the warm nudge, once per flow). */
+    fun pickOption(o: VideoOption) {
+        edit { it.pick(o) }
+        if (o == VideoOption.EXACT) creatingStarted()
+    }
     fun enterFlow() = c.warmUi.enterFlow()
     fun leaveFlow() = c.warmUi.leaveFlow()
 
@@ -219,8 +229,10 @@ fun SourceScreen() {
                     }
                     if (clip.ok) {
                         val len = clip.takeIf { it.id != SampleData.SAMPLE_CLIP }?.durationSec
-                        Field("Use · price at ${s.draft.steps} steps") {
+                        if (s.draft.exact) Field("Use · price at ${s.draft.steps} steps") {
                             Seg(ClipUse.entries.map { it.id to Pricing.sourceOption(it, s.draft.steps, len) }, s.draft.use.id, { k -> vm.edit { it.copy(use = ClipUse.fromId(k)) } }, small = false)
+                        } else if (s.draft.replicate) Field("Use") {
+                            T("Whole clip · ${s.spec.replicateSeconds} s · ${s.draft.quality.label} ${Pricing.priceLine(s.spec)}", m.type.body, m.t.ink)
                         }
                     }
                 }
@@ -285,8 +297,8 @@ fun DirectScreen() {
         vm.generate { nav.go(Routes.QUEUE) }
     }
     val menu = listOf(
-        MenuItem("spark", "Show prompt") { vm.toast("Prompt: replace the performer with ${s.model?.name ?: "your model"} · keep motion & room · ${d.steps} steps") },
-        MenuItem("quality", "Save as preset") { vm.toast("Saved as preset \"${s.clip?.name ?: "Clip"} · ${d.steps} steps\"") },
+        MenuItem("spark", "Show prompt") { vm.toast("Prompt: replace the performer with ${s.model?.name ?: "your model"} · keep motion & room · ${Pricing.engineLabel(s.spec)}") },
+        MenuItem("quality", "Save as preset") { vm.toast("Saved as preset \"${s.clip?.name ?: "Clip"} · ${Pricing.engineLabel(s.spec)}\"") },
         MenuItem("retry", "Reset settings") { vm.reset() },
         MenuItem("studio", "Change clip") { nav.go(Routes.SOURCE) },
         MenuItem("quality", "How steps work") { vm.toast("10 steps is enough: 15 and 20 looked the same in testing") },
@@ -303,11 +315,12 @@ fun DirectScreen() {
             } else TopBar("Video studio", onBack = { nav.back() }) { MoreMenu(menu) }
             DirectCanvas(s)
             ToolStrip(VIDEO_TOOLS, d.tool) { k -> vm.edit { it.copy(tool = k) } }
-            WarmSwitchRow(container, studio.warm)
+            // Keep GPU warm is for Exact edit only (Replicate renders don't use our GPU).
+            if (d.exact) WarmSwitchRow(container, studio.warm)
             BSheet(12.dp) { DirectSheet(vm, s) }
         }
         Dock(tight = true) {
-            Cta(if (s.starting) "Starting GPU…" else s.genLabel, { if (!s.starting) generate() }, Modifier.weight(1f), busy = s.starting, off = s.cost > s.balance)
+            Cta(if (s.starting) (if (d.exact) "Starting GPU…" else "Starting…") else s.genLabel, { if (!s.starting) generate() }, Modifier.weight(1f), busy = s.starting, off = s.cost > s.balance)
         }
     }
 }
@@ -355,13 +368,16 @@ private fun androidx.compose.foundation.layout.ColumnScope.DirectSheet(vm: NewVi
     val d = s.draft
     when (d.tool) {
         "quality" -> {
-            RowB {
-                H3("Quality")
-                if (s.fastBeta) Seg(listOf("h3" to "Standard", "viggle" to "Fast · beta"), d.engine.id, { k -> vm.edit { it.copy(engine = Engine.fromId(k)) } }, Modifier.width(200.dp), small = true)
-                else Pill("Standard · MiniMax H3")
+            QualityPicker(s, vm::pickOption)
+            if (s.fastBeta && !d.replicate) RowB {
+                Tiny("GPU engine", Modifier.weight(1f))
+                Seg(listOf("h3" to "Exact edit", "viggle" to "Fast · beta"), d.engine.id, { k -> vm.edit { it.copy(engine = Engine.fromId(k)) } }, Modifier.width(210.dp), small = true)
             }
-            if (d.engine == Engine.VIGGLE) NoteBox("Fast · beta renders in about 2 minutes with exact motion timing, but faces are softer and can warp slightly. Fixed quality, no steps.", warn = true)
-            else StepsControl(d.steps, vm::steps, Pricing.stepsDelta(s.spec))
+            when (d.engine) {
+                Engine.VIGGLE -> NoteBox("Fast · beta renders in about 2 minutes with exact motion timing, but faces are softer and can warp slightly. Fixed quality, no steps.", warn = true)
+                Engine.H3 -> StepsControl(d.steps, vm::steps, Pricing.stepsDelta(s.spec))
+                Engine.REPLICATE -> Unit
+            }
             RowB {
                 Column(Modifier.weight(1f)) { T("Takes", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink); Tiny("Different seeds, compared side by side") }
                 Stepper(d.takes, 1, Pricing.TAKES_MAX) { n -> vm.edit { it.copy(takes = n) } }
@@ -370,8 +386,9 @@ private fun androidx.compose.foundation.layout.ColumnScope.DirectSheet(vm: NewVi
         "bg" -> {
             H3("Background")
             Opt("Keep the real room", "Best realism. Uses the clip's own background.", d.background == "keep", onClick = { vm.edit { it.copy(background = "keep") } })
-            Opt("New background photo", "Vertical photo, same camera height, similar light.", d.background == "photo", onClick = { vm.edit { it.copy(background = "photo") } })
-            if (d.background == "photo") Field("Background motion") {
+            if (d.replicate) Tiny("A new background photo is on Exact edit for now.")
+            else Opt("New background photo", "Vertical photo, same camera height, similar light.", d.background == "photo", onClick = { vm.edit { it.copy(background = "photo") } })
+            if (!d.replicate && d.background == "photo") Field("Background motion") {
                 Seg(listOf("still" to "Still", "subtle" to "Subtly alive", "busy" to "Busy"), d.motion, { k -> vm.edit { it.copy(motion = k) } })
             }
         }
@@ -379,7 +396,8 @@ private fun androidx.compose.foundation.layout.ColumnScope.DirectSheet(vm: NewVi
             H3("Sound")
             Opt("Keep the clip's audio", "The song or voice from your source clip.", d.keepAudio, onClick = { vm.edit { it.copy(keepAudio = true) } })
             Opt("Replace audio", "Upload a new track or voiceover.", !d.keepAudio, onClick = { vm.edit { it.copy(keepAudio = false) }; vm.toast("Pick a track or voiceover (demo)") })
-            RowB {
+            if (d.replicate) Tiny("Mouth movements follow the clip. A separate lip sync pass is on Exact edit.")
+            else RowB {
                 Column(Modifier.weight(1f)) { T("Lip sync", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink); Tiny("Only when the performer talks or sings · adds ~4 min") }
                 Toggle(d.lipSync, { vm.edit { it.copy(lipSync = !it.lipSync) } })
             }
@@ -409,6 +427,28 @@ private fun androidx.compose.foundation.layout.ColumnScope.DirectSheet(vm: NewVi
             }
         }
     }
+}
+
+/**
+ * The quality picker: Draft (default) / Standard / HD on Replicate, Exact edit on our GPU, with the live price
+ * ("about $0.14 · 7 s") from the shared pricing formula and the server's per-second prices.
+ */
+@Composable
+fun QualityPicker(s: VideoState, onPick: (VideoOption) -> Unit) {
+    val m = muse
+    val d = s.draft
+    val options = VideoOption.entries.filter { s.video.available(it.id) || it == d.option }
+    RowB { H3("Quality"); Pill(if (d.replicate) "MiniMax H3 · Replicate" else "MiniMax H3 · our GPU") }
+    Seg(options.map { it.id to it.label }, d.option.id, { k -> onPick(VideoOption.fromId(k)) }, Modifier.fillMaxWidth())
+    val info = s.video.option(d.option.id)
+    val detail = info?.detail?.ifBlank { null } ?: d.option.quality?.detail ?: VideoOption.EXACT_DETAIL
+    if (d.replicate) {
+        RowB {
+            Tiny(detail, Modifier.weight(1f))
+            T(Pricing.priceLine(s.spec), m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink)
+        }
+        Tiny("Whole clip, billed per second of video. Different takes come out slightly different.")
+    } else Tiny(detail)
 }
 
 @Composable

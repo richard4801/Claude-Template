@@ -28,6 +28,8 @@ data class StudioState(
     val templates: List<Template> = emptyList(),
     /** Keep GPU warm. Null when the server doesn't have it (older server, server/mock). */
     val warm: WarmGpu? = null,
+    /** The video quality picker from GET /v1/settings/studio (features.video). Null = the contract's defaults. */
+    val video: VideoFeatures? = null,
     val loaded: Boolean = false,
     val error: String? = null,
 ) {
@@ -139,8 +141,9 @@ class MuseRepository(
             val accounts = models.mapNotNull { m -> runCatching { a.listAccounts(m.id) }.getOrNull()?.let { m.id to it } }.toMap()
             val posts = runCatching { a.listPosts() }.getOrDefault(emptyList())
             val warm = runCatching { a.warmGpu() }.getOrNull()
+            val video = runCatching { a.studioSettings().features.video }.getOrNull()
             if (a !== api) return
-            _state.update { StudioState(models, outfits, jobs.sortedByDescending { it.createdAt }, takes, bal, loras, accounts, posts, wallet, warm = warm, loaded = true) }
+            _state.update { StudioState(models, outfits, jobs.sortedByDescending { it.createdAt }, takes, bal, loras, accounts, posts, wallet, warm = warm, video = video, loaded = true) }
         } catch (e: ApiException) {
             _state.update { it.copy(loaded = true, error = ErrorText.of(e)) }
             if (e.code in ErrorText.SIGN_OUT_CODES) endSession(ErrorText.of(e)) else toast(ErrorText.of(e))

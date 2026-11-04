@@ -110,6 +110,14 @@ object JobClock {
         val spec = req.spec()
         val total = Pricing.totalSeconds(spec)
         val perTake = total / spec.takes
+        if (spec.engine == Engine.REPLICATE) {
+            // Hosted renders: no GPU start-up and no steps; step counts finished takes (like the server).
+            val e = elapsed.coerceIn(0.0, total)
+            val take = minOf(spec.takes, floor(e / perTake).toInt() + 1)
+            val prefix = if (spec.takes > 1) "take $take/${spec.takes} · " else ""
+            val phase = if (e >= total) "Done" else "${prefix}Rendering on Replicate · ${leftText(total - e)}"
+            return JobProgress((e / total * 100).coerceIn(0.0, 100.0), take, if (e >= total) spec.takes else take - 1, spec.takes, phase, total - e)
+        }
         val viggle = spec.engine == Engine.VIGGLE
         val totalSteps = if (viggle) 4 else spec.steps
         val startup = if (viggle) 0.0 else Pricing.GPU_STARTUP_MIN * 60
@@ -141,6 +149,7 @@ object JobClock {
     fun failAt(req: JobRequest): Double {
         val spec = req.spec()
         val perTake = Pricing.totalSeconds(spec) / spec.takes
+        if (spec.engine == Engine.REPLICATE) return perTake * 0.3
         val viggle = spec.engine == Engine.VIGGLE
         val totalSteps = if (viggle) 4 else spec.steps
         val startup = if (viggle) 0.0 else Pricing.GPU_STARTUP_MIN * 60

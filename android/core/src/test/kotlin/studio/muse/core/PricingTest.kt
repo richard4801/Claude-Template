@@ -97,3 +97,41 @@ class RealClipPricingTest {
         assertEquals(100, Pricing.loraTrainMinutes)
     }
 }
+
+/** Replicate (Draft / Standard / HD): checked against replicate_pricing_fixture.json (generated with JavaScript's toFixed). */
+class ReplicatePricingTest {
+    private val rows = Json.parseToJsonElement(javaClass.getResource("/replicate_pricing_fixture.json")!!.readText()).jsonArray
+
+    @Test fun everyFixtureRowMatches() {
+        assertEquals(135, rows.size)
+        for (row in rows) {
+            val o = row.jsonObject
+            val clip = o["clipSeconds"]!!.jsonPrimitive.let { if (it.content == "null") null else it.double }
+            val spec = RenderSpec(engine = Engine.REPLICATE, quality = Quality.fromId(o["quality"]!!.jsonPrimitive.content), takes = o["takes"]!!.jsonPrimitive.int, clipSeconds = clip)
+            val ctx = spec.toString()
+            assertEquals(ctx, o["seconds"]!!.jsonPrimitive.int, spec.replicateSeconds)
+            assertEquals(ctx, o["cost"]!!.jsonPrimitive.double, Pricing.totalCost(spec), 0.0)
+            assertEquals(ctx, o["costLabel"]!!.jsonPrimitive.content, Pricing.money(Pricing.totalCost(spec)))
+            assertEquals(ctx, o["priceLine"]!!.jsonPrimitive.content, Pricing.priceLine(spec))
+            assertEquals(ctx, o["genLabel"]!!.jsonPrimitive.content, Pricing.genLabel(spec))
+        }
+    }
+
+    @Test fun ownerExampleSevenSecondsStandard() {
+        val spec = RenderSpec(engine = Engine.REPLICATE, quality = Quality.STANDARD, clipSeconds = 7.0)
+        assertEquals("about \$0.56 · 7 s", Pricing.priceLine(spec))
+        assertEquals("Standard · 768P", Pricing.engineLabel(spec))
+        assertEquals("HD · 2K", Pricing.engineLabel(spec.copy(quality = Quality.HD)))
+        assertEquals("Exact edit · 10 steps", Pricing.engineLabel(RenderSpec()))
+        // The server's live price wins over the built-in default.
+        assertEquals("about \$0.70 · 7 s", Pricing.priceLine(spec.copy(pricePerSec = 0.10)))
+    }
+
+    @Test fun pickerMapsToEngineAndQuality() {
+        assertEquals(listOf("Draft", "Standard", "HD", "Exact edit"), VideoOption.entries.map { it.label })
+        assertEquals(VideoOption.HD, VideoOption.of(Engine.REPLICATE, Quality.HD))
+        assertEquals(VideoOption.EXACT, VideoOption.of(Engine.H3, Quality.HD))
+        assertEquals(VideoOption.DRAFT, VideoOption.fromId(null))
+        assertEquals(Quality.DRAFT, RenderSpec(engine = Engine.REPLICATE).quality)
+    }
+}

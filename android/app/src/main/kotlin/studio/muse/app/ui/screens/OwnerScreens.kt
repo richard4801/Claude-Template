@@ -163,7 +163,7 @@ private fun ownerVm(): OwnerViewModel {
     return viewModel { OwnerViewModel(c) }
 }
 
-fun engineLabel(p: String) = when (p) { "fal" -> "fal.ai"; "custom-http" -> "Custom (HTTP)"; else -> "Simulated" }
+fun engineLabel(p: String) = when (p) { "replicate" -> "Replicate"; "fal" -> "fal.ai"; "custom-http" -> "Custom (HTTP)"; else -> "Simulated" }
 
 /** "25 min ago", "3 days ago". */
 fun ago(ms: Long?, now: Long = System.currentTimeMillis()): String {
@@ -441,14 +441,15 @@ private fun EngineForm(vm: OwnerViewModel, en: ImageEngine, s: OwnerState) {
     var provider by remember(en) { mutableStateOf(en.provider) }
     var model by remember(en) { mutableStateOf(en.model) }
     var url by remember(en) { mutableStateOf(en.url ?: "") }
-    val providers = listOf("simulated", "fal", "custom-http")
+    val providers = listOf("replicate", "simulated", "fal", "custom-http")
     Seg(providers.map { it to (engineLabel(it) + if (en.available[it] == false) " ·  off" else "") }, provider, { p ->
         provider = p
-        model = if (p == en.provider) en.model else when (p) { "fal" -> "fal-ai/bytedance/seedream/v4/edit"; "simulated" -> "bundled-stills"; else -> "" }
+        model = if (p == en.provider) en.model else when (p) { "fal" -> "fal-ai/bytedance/seedream/v4/edit"; "simulated" -> "bundled-stills"; else -> "" } // replicate: the server's default
     }, small = true)
-    if (en.available[provider] == false) NoteBox(if (provider == "fal") "fal isn't set up on the server. Add FAL_KEY to the server's variables first." else "This engine isn't set up on the server.", warn = true)
+    if (en.available[provider] == false) NoteBox(if (provider == "fal") "fal isn't set up on the server. Add FAL_KEY to the server's variables first." else if (provider == "replicate") "Replicate isn't set up on the server (REPLICATE_API_TOKEN)." else "This engine isn't set up on the server.", warn = true)
     when (provider) {
         "simulated" -> Tiny("Free stand-in stills from the bundled references. Good for testing.")
+        "replicate" -> Tiny(if (en.provider == "replicate") "${en.label ?: "FLUX.2 [pro] · Replicate"}: new shots from the model's reference photos; outfit angles are edits of the front." else "FLUX.2 [pro] for new shots and Qwen edit for outfit angles, hosted on Replicate.")
         "fal" -> Field("fal model id") { Input(model, { model = it.trim() }, placeholder = "fal-ai/bytedance/seedream/v4/edit") }
         else -> {
             Field("Engine URL (https)") { Input(url, { url = it.trim() }, keyboard = KeyboardType.Uri, placeholder = "https://images.example.com/v1/generate") }

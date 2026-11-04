@@ -1,8 +1,11 @@
 package studio.muse.app.data
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import studio.muse.core.ClipUse
 import studio.muse.core.Engine
+import studio.muse.core.Pricing
+import studio.muse.core.Quality
 import studio.muse.core.RenderSpec
 
 /**
@@ -134,8 +137,12 @@ data class JobRequest(
     val clipSeconds: Double? = null,
     /** true parks the job as "queued" (not charged) until [MuseApi.runQueue]. */
     val queue: Boolean = false,
+    /** engine "replicate" only: draft | standard | hd (the server defaults to draft). */
+    val quality: String? = null,
+    /** Set by the server on replicate jobs: the $ per output second the job was priced at. */
+    val pricePerSec: Double? = null,
 ) {
-    fun spec() = RenderSpec(Engine.fromId(engine), ClipUse.fromId(use), steps, lipSync, takes, clipSeconds)
+    fun spec() = RenderSpec(Engine.fromId(engine), ClipUse.fromId(use), steps, lipSync, takes, clipSeconds, Quality.fromId(quality), pricePerSec)
 }
 
 /**
@@ -176,10 +183,15 @@ data class Job(
     val userId: String? = null,
     /** Ran on its user's warm GPU: the "Warm GPU" line pays its GPU time. */
     val warm: Boolean? = null,
+    /** The server's label ("Standard · 768P", "Exact edit · 10 steps"); older servers send none. */
+    @SerialName("engineLabel") val serverEngineLabel: String? = null,
+    /** Failed replicate jobs: provider_refused | provider_failed | provider_rate_limited | provider_timeout. */
+    val errorCode: String? = null,
+    /** Done replicate jobs: output seconds Replicate billed. */
+    val billedSeconds: Double? = null,
 ) {
     val paused get() = blocked == BLOCKED_LOW_BALANCE
-    val engineLabel: String
-        get() = if (request.engine == Engine.VIGGLE.id) "Fast · beta" else "Standard · ${request.steps} steps"
+    val engineLabel: String get() = serverEngineLabel ?: Pricing.engineLabel(request.spec())
     val running get() = state == "running" || state == "queued"
     val done get() = state == "done"
     val failed get() = state == "failed"
@@ -426,7 +438,45 @@ data class StudioFeatures(
     val loraTraining: Boolean = true,
     val replaceAudio: Boolean = false,
     val maxClipSec: Double? = null,
+    /** Replicate is set up on the server. */
+    val replicate: Boolean = false,
+    val video: VideoFeatures? = null,
 )
+
+/** One entry of the video studio's quality picker (features.video.options). */
+@Serializable
+data class VideoOptionInfo(
+    val id: String,
+    val label: String = "",
+    val detail: String = "",
+    val engine: String = "replicate",
+    val quality: String? = null,
+    val resolution: String? = null,
+    val pricePerSec: Double? = null,
+    val available: Boolean = true,
+)
+
+/** GET /v1/settings/studio → features.video: Draft / Standard / HD (Replicate) and Exact edit (our GPU). */
+@Serializable
+data class VideoFeatures(
+    val defaultEngine: String = "replicate",
+    val defaultQuality: String = "draft",
+    val minSeconds: Int = 4,
+    val maxSeconds: Int = 15,
+    val options: List<VideoOptionInfo> = emptyList(),
+) {
+    companion object {
+        /** The contract's table (plans/api.md), every option available: demo mode, and servers that don't send features.video. */
+        val DEFAULT = VideoFeatures(options = studio.muse.core.VideoOption.entries.map { o ->
+            VideoOptionInfo(o.id, o.label, o.quality?.detail ?: studio.muse.core.VideoOption.EXACT_DETAIL, o.engine.id, o.quality?.id, o.quality?.resolution, o.quality?.pricePerSec)
+        })
+    }
+
+    fun option(id: String) = options.firstOrNull { it.id == id }
+    /** An option is usable unless the server says it isn't. */
+    fun available(id: String) = option(id)?.available ?: true
+    fun pricePerSec(quality: Quality) = option(quality.id)?.pricePerSec
+}
 
 /** GET/PATCH /v1/settings/studio. overheadPayer: who pays GPU warm-up, "user" (the member) or "owner". */
 @Serializable
@@ -461,6 +511,9 @@ data class StudioSettingsPatch(
 data class ImageEngine(
     val provider: String = "simulated",
     val model: String = "",
+    /** Display name: "FLUX.2 [pro] · Replicate", "Simulated"… (older servers send none). */
+    val label: String? = null,
+    val editModel: String? = null,
     val url: String? = null,
     val available: Map<String, Boolean> = mapOf("simulated" to true),
 )

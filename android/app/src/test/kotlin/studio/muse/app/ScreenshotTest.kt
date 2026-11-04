@@ -68,6 +68,8 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "shoot_templates",
             // Keep GPU warm: the nudge when creating starts, the cost warning on switch-on, the bar (warm, starting) and the 5-minute warning.
             "warm_nudge", "warm_confirm", "warm_bar", "warm_starting", "warm_warning",
+            // Video quality picker (Replicate): Draft (default), HD, and Exact edit (steps + Keep GPU warm).
+            "quality_draft", "quality_hd", "quality_exact",
         )
 
         @JvmStatic
@@ -129,8 +131,11 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "template_use" -> c.drafts.templateUse.value = studio.muse.app.data.TemplateUseDraft("tpl_mirror-selfie")
             "template_use_prompt" -> c.drafts.templateUse.value = studio.muse.app.data.TemplateUseDraft("tpl_maya_walk", direction = "sitting on the steps, looking back over her shoulder", shuffleSeed = 7, showPrompt = true)
             "shoot_templates" -> c.drafts.shoot.update { it.copy(tool = "model") }
-            "warm_nudge" -> c.drafts.video.update { it.copy(clip = sample) }
-            "warm_confirm" -> { c.drafts.video.update { it.copy(clip = sample) }; c.warmUi.creatingStarted(null); c.warmUi.confirm() }
+            "warm_nudge" -> c.drafts.video.update { it.copy(clip = sample, engine = studio.muse.core.Engine.H3) }
+            "warm_confirm" -> { c.drafts.video.update { it.copy(clip = sample, engine = studio.muse.core.Engine.H3) }; c.warmUi.creatingStarted(null); c.warmUi.confirm() }
+            "quality_draft" -> c.drafts.video.update { it.copy(clip = sample.copy(id = "clip_7s", durationSec = 7.0)) }
+            "quality_hd" -> c.drafts.video.update { it.copy(clip = sample.copy(id = "clip_7s", durationSec = 7.0)).pick(studio.muse.core.VideoOption.HD) }
+            "quality_exact" -> c.drafts.video.update { it.copy(clip = sample).pick(studio.muse.core.VideoOption.EXACT) }
             "warm_bar", "warm_warning" -> runBlocking {
                 val t = System.currentTimeMillis()
                 // Ready 15 min ago with no render since: the idle auto-off is 5 min away (the warning's moment).
@@ -140,7 +145,7 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
                 if (screen == "warm_warning") c.warmUi.banner.value = studio.muse.app.data.WarmWarning("idle", ready + 20 * 60_000L, "Warm GPU turns off in 5 min (no renders)")
             }
             "warm_starting" -> runBlocking {
-                c.drafts.video.update { it.copy(clip = sample) }
+                c.drafts.video.update { it.copy(clip = sample, engine = studio.muse.core.Engine.H3) }
                 c.warmUi.creatingStarted(null)
                 val t = System.currentTimeMillis()
                 fake.debugSetWarm(studio.muse.app.data.WarmGpu("starting", startedAt = t - 2 * 60_000L - 10_000, minutes = 2, costUsd = 0.13, ratePerHour = 3.99, canExtend = true))
@@ -185,7 +190,7 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "templates", "templates_mine" -> Routes.TEMPLATES
             "template_detail", "template_detail_other", "template_edit", "template_use", "template_use_prompt", "save_template" -> Routes.HOME
             "shoot_templates" -> Routes.SHOOT
-            "warm_nudge", "warm_confirm", "warm_starting" -> Routes.DIRECT
+            "warm_nudge", "warm_confirm", "warm_starting", "quality_draft", "quality_hd", "quality_exact" -> Routes.DIRECT
             "warm_bar", "warm_warning" -> Routes.HOME
             else -> if (screen.startsWith("lora")) Routes.LORA else screen
         }

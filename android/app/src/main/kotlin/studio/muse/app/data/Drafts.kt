@@ -5,13 +5,18 @@ import kotlinx.coroutines.flow.update
 import studio.muse.core.ClipUse
 import studio.muse.core.Engine
 import studio.muse.core.Pricing
+import studio.muse.core.Quality
 import studio.muse.core.RenderSpec
+import studio.muse.core.VideoOption
 
 /** The video being set up across New video → Direct. Retry and "Run again" load a past job into it. */
 data class VideoDraft(
     val clip: Clip? = null,
     val showBadExample: Boolean = false,
-    val engine: Engine = Engine.H3,
+    /** Replicate (Draft / Standard / HD) by default; Exact edit = h3; Fast · beta = viggle. */
+    val engine: Engine = Engine.REPLICATE,
+    /** Replicate quality. Draft is the default (the owner's choice). */
+    val quality: Quality = Quality.DRAFT,
     val steps: Int = Pricing.STEPS_DEFAULT,
     val use: ClipUse = ClipUse.FIRST,
     val takes: Int = 1,
@@ -21,7 +26,24 @@ data class VideoDraft(
     val motion: String = "subtle",
     val tool: String = "quality",
 ) {
-    fun spec() = RenderSpec(engine, use, steps, lipSync, takes, clip?.takeIf { it.id != SampleData.SAMPLE_CLIP }?.durationSec)
+    /** [pricePerSec]: the server's live price for the quality (features.video), null = the built-in default. */
+    fun spec(pricePerSec: Double? = null) = RenderSpec(engine, use, steps, lipSync, takes, clip?.takeIf { it.id != SampleData.SAMPLE_CLIP }?.durationSec, quality,
+        pricePerSec.takeIf { engine == Engine.REPLICATE })
+
+    /** The quality picker's selection (Fast · beta shows as Exact edit's neighbour, not a picker option). */
+    val option: VideoOption get() = VideoOption.of(engine, quality)
+    val replicate: Boolean get() = engine == Engine.REPLICATE
+    val exact: Boolean get() = engine == Engine.H3
+
+    /** Picks a quality option: Draft / Standard / HD go to Replicate, Exact edit to our GPU. */
+    fun pick(o: VideoOption) = copy(engine = o.engine, quality = o.quality ?: quality)
+
+    /** What goes to POST /v1/jobs. Replicate renders the whole clip; lip sync and a background photo are Exact edit only. */
+    fun request(title: String, modelId: String, outfitId: String, clipId: String, clipSeconds: Double?) = JobRequest(
+        title = title, modelId = modelId, outfitId = outfitId, clipId = clipId, engine = engine.id, quality = quality.id.takeIf { replicate },
+        steps = steps, use = if (replicate) ClipUse.FULL.id else use.id, takes = takes, keepAudio = keepAudio, lipSync = lipSync && !replicate,
+        background = if (replicate) "keep" else background, backgroundMotion = motion, clipSeconds = clipSeconds,
+    )
 }
 
 /** Photoshoot tool state. */
@@ -94,7 +116,7 @@ class Drafts {
         outfitId.value = r.outfitId
         video.update {
             it.copy(
-                engine = Engine.fromId(r.engine), steps = r.steps, use = ClipUse.fromId(r.use), takes = r.takes, keepAudio = r.keepAudio,
+                engine = Engine.fromId(r.engine), quality = Quality.fromId(r.quality), steps = r.steps, use = ClipUse.fromId(r.use), takes = r.takes, keepAudio = r.keepAudio,
                 lipSync = r.lipSync, background = r.background, motion = r.backgroundMotion, tool = "quality",
                 clip = it.clip ?: Clip(r.clipId, r.title, r.clipSeconds ?: SampleData.sampleMeta.durationSec, 1080, 1920, 30, ClipRules.checks(SampleData.sampleMeta)),
             )

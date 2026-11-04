@@ -2,16 +2,49 @@ package studio.muse.core
 
 import java.math.BigDecimal
 import java.math.RoundingMode
+import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.pow
 
-/** Video engine. User-facing names: "Standard" (MiniMax H3) and "Fast · beta" (Viggle, behind a flag). */
+/**
+ * Video engine. "replicate" = MiniMax H3 hosted on Replicate (Draft / Standard / HD, the default), "h3" = our own GPU
+ * ("Exact edit"), "viggle" = "Fast · beta" (behind a flag). plans/api.md "Video engines and quality".
+ */
 enum class Engine(val id: String, val label: String) {
-    H3("h3", "Standard"),
+    REPLICATE("replicate", "Standard"),
+    H3("h3", "Exact edit"),
     VIGGLE("viggle", "Fast · beta");
 
     companion object {
         fun fromId(id: String): Engine = entries.firstOrNull { it.id == id } ?: H3
+    }
+}
+
+/** Replicate quality: price per output second (defaults; the server's features.video carries the live ones). */
+enum class Quality(val id: String, val label: String, val resolution: String, val detail: String, val pricePerSec: Double) {
+    DRAFT("draft", "Draft", "768P", "768P · lite", 0.02),
+    STANDARD("standard", "Standard", "768P", "768P", 0.08),
+    HD("hd", "HD", "2K", "2K", 0.13);
+
+    companion object {
+        fun fromId(id: String?): Quality = entries.firstOrNull { it.id == id } ?: DRAFT
+    }
+}
+
+/** The video studio's quality picker: Draft (the default) / Standard / HD on Replicate, then Exact edit on our GPU. */
+enum class VideoOption(val id: String, val label: String, val engine: Engine, val quality: Quality?) {
+    DRAFT("draft", "Draft", Engine.REPLICATE, Quality.DRAFT),
+    STANDARD("standard", "Standard", Engine.REPLICATE, Quality.STANDARD),
+    HD("hd", "HD", Engine.REPLICATE, Quality.HD),
+    EXACT("exact", "Exact edit", Engine.H3, null);
+
+    companion object {
+        const val EXACT_DETAIL = "Frame-by-frame · slower · GPU start-up"
+        fun fromId(id: String?): VideoOption = entries.firstOrNull { it.id == id } ?: DRAFT
+        fun of(engine: Engine, quality: Quality): VideoOption = when (engine) {
+            Engine.REPLICATE -> entries.first { it.quality == quality }
+            else -> EXACT
+        }
     }
 }
 
@@ -34,10 +67,17 @@ data class RenderSpec(
     val takes: Int = 1,
     /** Real length of the picked clip. Null = the prototype's sample clip (9.4 s). */
     val clipSeconds: Double? = null,
+    /** Replicate only. */
+    val quality: Quality = Quality.DRAFT,
+    /** Replicate only: $ per output second from the server (null = the [Quality] default). */
+    val pricePerSec: Double? = null,
 ) {
+    /** Replicate: the whole clip, rounded up to whole seconds (4–15). */
+    val replicateSeconds: Int get() = Pricing.replicateSeconds(clipSeconds)
+
     /** Seconds actually rendered: the first 5.2 s, or the whole clip (max 15 s, H3's single-pass limit). */
     val lengthSec: Double
-        get() = when (use) {
+        get() = if (engine == Engine.REPLICATE) minOf(clipSeconds ?: ClipUse.FULL.seconds, Pricing.MAX_CLIP_SEC) else when (use) {
             ClipUse.FIRST -> minOf(ClipUse.FIRST.seconds, clipSeconds ?: ClipUse.FIRST.seconds)
             ClipUse.FULL -> minOf(clipSeconds ?: ClipUse.FULL.seconds, Pricing.MAX_CLIP_SEC)
         }
@@ -80,6 +120,33 @@ object Pricing {
     /** Photo + video training at the GPU rate, rounded to cents: (25 + 75) / 60 × 3.99 = $6.65. */
     val loraTrainCost: Double get() = Math.round(loraTrainMinutes / 60.0 * GPU_PER_HOUR * 100) / 100.0
 
+    // ---- Replicate (plans/api.md "Pricing"): $ per output second × whole seconds × takes.
+    const val REPLICATE_MIN_SEC = 4
+    const val REPLICATE_MAX_SEC = 15
+
+    /** min(15, max(4, ceil(clipSeconds − 0.001))); no clip length = the 9.4 s sample. */
+    fun replicateSeconds(clipSeconds: Double?): Int =
+        ceil((clipSeconds ?: ClipUse.FULL.seconds) - 0.001).toInt().coerceIn(REPLICATE_MIN_SEC, REPLICATE_MAX_SEC)
+
+    private fun pricePerSec(spec: RenderSpec) = spec.pricePerSec ?: spec.quality.pricePerSec
+
+    /** Rough wall time of one Replicate take, for the progress estimate only (same as the server). */
+    fun replicateTakeSeconds(spec: RenderSpec): Double =
+        45 + 10.0 * spec.replicateSeconds * when (spec.quality) { Quality.HD -> 1.5; Quality.DRAFT -> 0.6; else -> 1.0 }
+
+    /** "about $0.56 · 7 s" (+ " · 2 takes"): the price line under the quality picker. */
+    fun priceLine(spec: RenderSpec): String {
+        val takes = if (spec.takes > 1) " · ${spec.takes} takes" else ""
+        return "about ${money(totalCost(spec))} · ${spec.replicateSeconds} s$takes"
+    }
+
+    /** "Standard · 768P", "HD · 2K", "Exact edit · 10 steps", "Fast · beta" (Job/Take engineLabel). */
+    fun engineLabel(spec: RenderSpec): String = when (spec.engine) {
+        Engine.REPLICATE -> "${spec.quality.label} · ${spec.quality.resolution}"
+        Engine.VIGGLE -> "Fast · beta"
+        Engine.H3 -> "Exact edit · ${spec.steps} steps"
+    }
+
     /** Seconds per denoising step for a clip of [len] seconds. */
     fun secPerLen(len: Double): Double = SEC_PER_STEP_5S * (len / BASE_LEN).pow(1.3)
 
@@ -87,6 +154,7 @@ object Pricing {
 
     /** Estimated minutes for ONE take. */
     fun estMin(spec: RenderSpec): Double {
+        if (spec.engine == Engine.REPLICATE) return replicateTakeSeconds(spec) / 60
         val len = spec.lengthSec
         return if (spec.engine == Engine.VIGGLE) VIGGLE_MIN_5S * (len / BASE_LEN)
         else spec.steps * secPerLen(len) / 60 + GPU_STARTUP_MIN + (if (spec.lipSync) LIP_SYNC_MIN else 0.0)
@@ -94,6 +162,7 @@ object Pricing {
 
     /** Estimated dollars for ONE take. */
     fun estCost(spec: RenderSpec): Double {
+        if (spec.engine == Engine.REPLICATE) return pricePerSec(spec) * spec.replicateSeconds
         val len = spec.lengthSec
         return if (spec.engine == Engine.VIGGLE) VIGGLE_COST_5S * (len / BASE_LEN)
         else estMin(spec) / 60 * GPU_PER_HOUR
@@ -105,6 +174,9 @@ object Pricing {
 
     /** "Generate · 10 min · $0.67" (takes > 1 adds "· 2 takes"). */
     fun genLabel(spec: RenderSpec): String {
+        if (spec.engine == Engine.REPLICATE) {
+            return "Generate · ${spec.replicateSeconds} s · ${money(totalCost(spec))}" + (if (spec.takes > 1) " · ${spec.takes} takes" else "")
+        }
         val m = totalMin(spec)
         val time = if (m < 2) "${jsRound(m * 60)}s" else "${jsRound(m)} min"
         val takes = if (spec.takes > 1) " · ${spec.takes} takes" else ""
