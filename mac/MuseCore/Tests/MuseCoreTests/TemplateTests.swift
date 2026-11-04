@@ -207,21 +207,21 @@ final class FakeTemplateTests: XCTestCase {
 
     func testLibraryScopesAndRedaction() async throws {
         let api = try await api()
-        let all = try await api.listTemplates(TemplateQuery())
+        let all = await api.listTemplates(TemplateQuery())
         XCTAssertEqual(all.count, 9)
         XCTAssertFalse(all.contains { $0.name == "Theo's test look" })
-        let mine = try await api.listTemplates(TemplateQuery(scope: .mine))
+        let mine = await api.listTemplates(TemplateQuery(scope: .mine))
         XCTAssertEqual(mine.count, 7)
         XCTAssertTrue(mine.allSatisfy { $0.isOwner && $0.layers != nil && $0.variationPool != nil })
         let maya = all.first { $0.name == "Golden hour walk" }!
         XCTAssertFalse(maya.isOwner)
         XCTAssertNil(maya.layers)
         XCTAssertNil(maya.variationPool)
-        let favs = try await api.listTemplates(TemplateQuery(scope: .favourites))
+        let favs = await api.listTemplates(TemplateQuery(scope: .favourites))
         XCTAssertEqual(favs.map(\.name), ["Mirror selfie"])
         let fav = try await api.setTemplateFavourite(id: maya.id, true)
         XCTAssertTrue(fav.favourite)
-        let favs2 = try await api.listTemplates(TemplateQuery(scope: .favourites))
+        let favs2 = await api.listTemplates(TemplateQuery(scope: .favourites))
         XCTAssertEqual(favs2.count, 2)
         do {
             _ = try await api.template(id: "tpl_theo_private")
@@ -231,11 +231,11 @@ final class FakeTemplateTests: XCTestCase {
 
     func testTemplateShootHidesLayersFromNonOwnersAndCountsUses() async throws {
         let api = try await api()
-        let before = try await api.balance().balance
+        let before = await api.balance().balance
         let maya = try await api.template(id: "tpl_maya_golden")
         let shots = try await api.shoot(.template(maya.id, modelId: SampleData.sienna, outfitId: SampleData.green, direction: "sitting on the steps", shuffleSeed: 11))
         XCTAssertEqual(shots.count, 4)
-        let after0 = try await api.balance().balance
+        let after0 = await api.balance().balance
         XCTAssertEqual(after0, before - Pricing.shootCost, accuracy: 1e-9)
         for s in shots {
             XCTAssertEqual(s.templateId, maya.id)
@@ -308,7 +308,7 @@ final class FakeTemplateTests: XCTestCase {
         XCTAssertEqual(copy.visibility, "private")
         XCTAssertEqual(copy.layers, t.layers)
         try await api.deleteTemplate(id: t.id)
-        let names = try await api.listTemplates(TemplateQuery(scope: .mine)).map(\.name)
+        let names = await api.listTemplates(TemplateQuery(scope: .mine)).map(\.name)
         XCTAssertFalse(names.contains("Café morning"))
         XCTAssertTrue(names.contains("Café morning copy"))
         do {
