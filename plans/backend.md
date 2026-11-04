@@ -108,3 +108,22 @@ _Decided 2026-11-04: per-user token wallets, funded by the owner._
 - **Cloudflare R2:** a bucket plus an API token. The API reads `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` and `R2_BUCKET`.
 - **RunPod:** already exists. The API reads `RUNPOD_API_KEY` and the network volume id.
 - **fal.ai** (if hosted images are used): `FAL_KEY`.
+
+## Keep GPU warm (decided 2026-11-04)
+A manual switch for sessions where many renders happen back to back, so they start instantly instead of waiting the 3–6 min cold start.
+- **Where:** a "Keep GPU warm" switch in the video studio, and in the Mac title bar.
+  - The owner decides whether members may use it: studio setting `warmGpuAllowed: owner | everyone`, default owner.
+- **Effect:** starts (or claims) a dedicated H100 for the user who switched it on and keeps H3 loaded. That user's jobs go to it first.
+- **Notice:** while it's on, a persistent bar on every screen ("GPU warm · 42 min · $2.80 so far · Turn off"), plus an ongoing notification on Android and a menu-bar/title-bar indicator on the Mac.
+- **Billing:** the pod's whole wall time is charged to the user who turned it on (a "Warm GPU" ledger line, settled per minute). Their render jobs on it aren't charged twice.
+- **Auto-off:** any of these turns it off.
+  - **Idle:** `warmIdleMinutes` (default 20) without a job.
+  - **Session cap:** `warmMaxMinutes` (default 120); "Keep warm" extends it once by the same amount.
+  - **Credit:** the user's credit can't cover 10 more minutes.
+  - **Owner balance:** the owner's RunPod balance is below `RUNPOD_MIN_BALANCE_USD`.
+  - **Warnings:** a warning 5 minutes before an idle or cap auto-off, with a "Keep warm" action.
+  - **Backstop:** the pod's own self-stop still applies if the API is unreachable.
+- **API:**
+  - `POST /v1/gpu/warm {on: true|false}` → `{state, startedAt, minutes, costUsd, autoOffAt, reason?}`
+  - `GET /v1/gpu/warm`
+  - SSE `gpu` events for the bar and the warnings
