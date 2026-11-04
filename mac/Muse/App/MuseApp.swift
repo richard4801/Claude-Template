@@ -54,8 +54,9 @@ struct MuseCommands: Commands {
             ForEach(NavItem.main) { item in
                 Button(item.title) { store.go(item.screen) }.keyboardShortcut(KeyEquivalent(item.key)).disabled(!signedIn)
             }
+            Button("Members") { store.go(.members) }.keyboardShortcut("8").disabled(!signedIn || !store.isOwner)
             Divider()
-            Button("Credits & Top Up") { store.go(.credits) }.disabled(!signedIn)
+            Button("My Tokens") { store.go(.credits) }.disabled(!signedIn)
             Divider()
             Button("Command Palette…") { store.openPalette() }.keyboardShortcut("k").disabled(!signedIn)
         }

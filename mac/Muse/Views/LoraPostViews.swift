@@ -231,7 +231,7 @@ struct LoraView: View {
             if !enough {
                 MButton("Keep \(LoraPricing.minKept - l.kept) more to train", kind: .primary, size: .big, off: true) { store.trainLora(m) }
             } else if cost > store.balance.balance + 1e-9 {
-                Note(icon: "creditcard", warn: true, text: Text("Not enough balance. ") + Text("Top up in Credits").bold())
+                Note(icon: "creditcard", warn: true, text: store.isMember ? Text(store.notEnoughMessage) : Text("Not enough balance. ") + Text("My tokens").bold())
                     .onTapGesture { store.go(.credits) }
                 MButton("Train both LoRAs · \(Pricing.money(cost))", kind: .primary, size: .big, off: true) { store.trainLora(m) }
             } else {

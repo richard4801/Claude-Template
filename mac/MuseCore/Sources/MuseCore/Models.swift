@@ -31,12 +31,27 @@ public struct User: Codable, Hashable, Sendable {
     public var id: String
     public var studioName: String
     public var email: String
+    /// "owner" | "member" from the real API (`server/api`). nil from server/mock, which has no roles.
+    public var role: String?
 
-    public init(id: String, studioName: String, email: String) {
+    public init(id: String, studioName: String, email: String, role: String? = nil) {
         self.id = id
         self.studioName = studioName
         self.email = email
+        self.role = role
     }
+
+    enum CodingKeys: String, CodingKey { case id, studioName, email, role }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = c.v(.id, "")
+        studioName = c.v(.studioName, "")
+        email = c.v(.email, "")
+        role = c.o(.role)
+    }
+
+    public var isOwner: Bool { role == "owner" }
+    public var isMember: Bool { role == "member" }
 }
 
 public struct AuthResponse: Codable, Sendable {
@@ -64,13 +79,17 @@ public struct SignUpRequest: Codable, Sendable {
     public var studioName: String
     public var email: String
     public var password: String
+    /// The invite code from the studio owner ("MUSE-7KQ2-XW9P-4HTD"). The real API needs it (`invite_required`); nil is left out of the JSON.
+    public var inviteCode: String?
     public var attestAdultRightsOriginal: Bool
     public var attestLabelAi: Bool
 
-    public init(studioName: String, email: String, password: String, attestAdultRightsOriginal: Bool, attestLabelAi: Bool) {
+    public init(studioName: String, email: String, password: String, inviteCode: String? = nil, attestAdultRightsOriginal: Bool, attestLabelAi: Bool) {
         self.studioName = studioName
         self.email = email
         self.password = password
+        let code = inviteCode?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.inviteCode = (code?.isEmpty ?? true) ? nil : code
         self.attestAdultRightsOriginal = attestAdultRightsOriginal
         self.attestLabelAi = attestLabelAi
     }
@@ -408,6 +427,15 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
     public var prompt: String
     public var seed: Int64
     public var thumb: ImageRef?
+    /// Waiting for a GPU (real API): place in line and seconds until it's done.
+    public var queuePosition: Int?
+    public var etaSeconds: Double?
+    /// "owner_balance_low": paused because the studio's RunPod credit is low.
+    public var blocked: String?
+    /// GPU warm-up charged with this job (its own cost line).
+    public var warmupCost: Double?
+    /// Who started it (real API).
+    public var userId: String?
 
     public init(id: String, title: String, modelId: String, modelName: String, outfitId: String, request: JobRequest, state: String, progress: Double = 0,
                 take: Int = 1, step: Int = 0, totalSteps: Int = 10, phase: String = "", secondsLeft: Double = 0, totalSeconds: Double = 0, cost: Double = 0,
@@ -438,7 +466,7 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, modelId, modelName, outfitId, request, state, progress, take, step, totalSteps, phase, secondsLeft, totalSeconds, cost, refunded, error,
-             createdAt, finishedAt, prompt, seed, thumb
+             createdAt, finishedAt, prompt, seed, thumb, queuePosition, etaSeconds, blocked, warmupCost, userId
     }
 
     public init(from d: Decoder) throws {
@@ -465,7 +493,26 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
         prompt = c.v(.prompt, "")
         seed = c.v(.seed, 42)
         thumb = c.o(.thumb)
+        queuePosition = c.o(.queuePosition)
+        etaSeconds = c.o(.etaSeconds)
+        blocked = c.o(.blocked)
+        warmupCost = c.o(.warmupCost)
+        userId = c.o(.userId)
     }
+
+    /// Paused until the owner tops up RunPod.
+    public var isPaused: Bool { blocked == "owner_balance_low" }
+    /// Running on the server but still waiting for a GPU.
+    public var isWaiting: Bool { isActive && step == 0 && (queuePosition != nil || isPaused) }
+    /// "#2 in line · ~4 min" while waiting for a GPU, or the paused line.
+    public var waitLine: String? {
+        if isPaused { return Job.pausedLine }
+        guard isActive, let pos = queuePosition else { return nil }
+        let eta = etaSeconds.map { " · done in \(Job.duration($0))" } ?? ""
+        return pos <= 1 ? "Next for a GPU\(eta)" : "#\(pos) in line\(eta)"
+    }
+    public static let pausedLine = "Paused: the studio's GPU credit is low"
+    public static func duration(_ s: Double) -> String { s >= 60 ? "~\(Int((s / 60).rounded(.up))) min" : "~\(Int(s.rounded(.up)))s" }
 
     public var engine: Engine { Engine(id: request.engine) }
     /// "Standard" / "Fast · beta".
@@ -496,6 +543,11 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
     public var thumb: ImageRef
     public var prompt: String
     public var createdAt: Int64
+    /// The rendered video (real API). Renders are 768×1344; durationSec is the real length.
+    public var videoUrl: String?
+    public var durationSec: Double?
+    public var width: Int?
+    public var height: Int?
 
     public init(id: String, kind: String = "take", jobId: String? = nil, index: Int = 1, of: Int = 1, title: String, label: String, engineLabel: String = "",
                 cost: Double = 0, seed: Int64 = 0, status: String = "test", thumb: ImageRef, prompt: String = "", createdAt: Int64 = 0) {
@@ -515,7 +567,7 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
         self.createdAt = createdAt
     }
 
-    enum CodingKeys: String, CodingKey { case id, kind, jobId, index, of, title, label, engineLabel, cost, seed, status, thumb, prompt, createdAt }
+    enum CodingKeys: String, CodingKey { case id, kind, jobId, index, of, title, label, engineLabel, cost, seed, status, thumb, prompt, createdAt, videoUrl, durationSec, width, height }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -532,6 +584,22 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
         thumb = c.v(.thumb, ImageRef())
         prompt = c.v(.prompt, "")
         createdAt = c.v(.createdAt, 0)
+        videoUrl = c.o(.videoUrl)
+        durationSec = c.o(.durationSec)
+        width = c.o(.width)
+        height = c.o(.height)
+    }
+
+    /// "0:05 · 768×1344" from the real output when the server sent it, else nil.
+    public var mediaLine: String? {
+        var parts: [String] = []
+        if let d = durationSec { parts.append(Take.clock(d)) }
+        if let w = width, let h = height { parts.append("\(w)×\(h)") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+    public static func clock(_ s: Double) -> String {
+        let n = Int(s.rounded())
+        return "\(n / 60):" + String(format: "%02d", n % 60)
     }
 
     public var isFinal: Bool { status == "final" }
@@ -575,17 +643,40 @@ public struct Balance: Codable, Hashable, Sendable {
     public var videos: Int
     /// Spent today (`Balance.today` in plans/api.md). nil when an older server doesn't send it; the app then sums today's jobs.
     public var today: Double?
+    /// Token wallet (real API). Member: their tokens. Owner: what they can spend or send, in tokens.
+    public var tokens: Int?
+    public var tokenUsd: Double
+    public var role: String?
+    public var heldUsd: Double
+    public var perUserDayLimit: Double?
+    /// runpod | simulated | unavailable | wallet
+    public var balanceSource: String?
+    /// Owner only.
+    public var runpodBalance: Double?
+    public var availableToSend: Double?
 
-    public init(balance: Double, month: Double, perJobLimit: Double = Pricing.perJobCap, perDayLimit: Double = Pricing.perDayCap, videos: Int = 0, today: Double? = nil) {
+    public init(balance: Double, month: Double, perJobLimit: Double = Pricing.perJobCap, perDayLimit: Double = Pricing.perDayCap, videos: Int = 0, today: Double? = nil,
+                tokens: Int? = nil, tokenUsd: Double = 0.01, role: String? = nil, heldUsd: Double = 0, perUserDayLimit: Double? = nil, balanceSource: String? = nil,
+                runpodBalance: Double? = nil, availableToSend: Double? = nil) {
         self.balance = balance
         self.month = month
         self.perJobLimit = perJobLimit
         self.perDayLimit = perDayLimit
         self.videos = videos
         self.today = today
+        self.tokens = tokens
+        self.tokenUsd = tokenUsd
+        self.role = role
+        self.heldUsd = heldUsd
+        self.perUserDayLimit = perUserDayLimit
+        self.balanceSource = balanceSource
+        self.runpodBalance = runpodBalance
+        self.availableToSend = availableToSend
     }
 
-    enum CodingKeys: String, CodingKey { case balance, month, perJobLimit, perDayLimit, videos, today }
+    enum CodingKeys: String, CodingKey {
+        case balance, month, perJobLimit, perDayLimit, videos, today, tokens, tokenUsd, role, heldUsd, perUserDayLimit, balanceSource, runpodBalance, availableToSend
+    }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         balance = c.v(.balance, 0)
@@ -594,7 +685,19 @@ public struct Balance: Codable, Hashable, Sendable {
         perDayLimit = c.v(.perDayLimit, Pricing.perDayCap)
         videos = c.v(.videos, 0)
         today = c.o(.today)
+        tokens = c.o(.tokens)
+        tokenUsd = c.v(.tokenUsd, 0.01)
+        role = c.o(.role)
+        heldUsd = c.v(.heldUsd, 0)
+        perUserDayLimit = c.o(.perUserDayLimit)
+        balanceSource = c.o(.balanceSource)
+        runpodBalance = c.o(.runpodBalance)
+        availableToSend = c.o(.availableToSend)
     }
+
+    /// Whole tokens: the server's count, or the balance converted.
+    public var tokenCount: Int { tokens ?? Int((balance / max(tokenUsd, 0.0001) + 1e-6).rounded(.down)) }
+    public var isUnavailable: Bool { balanceSource == "unavailable" }
 }
 
 public struct TopUpRequest: Codable, Sendable {
@@ -625,9 +728,15 @@ public struct ApiEvent: Codable, Sendable {
     public var lora: Lora?
     public var post: Post?
     public var takes: [Take]
+    /// `wallet` events (real API): the user's wallet after a transfer, reclaim or charge.
+    public var wallet: Wallet?
+    /// owner_balance_low | owner_balance_ok (owners only).
+    public var notice: EventNotice?
 
     public init(type: String, job: Job? = nil, balance: Balance? = nil, model: MuseModel? = nil, outfit: Outfit? = nil, lora: Lora? = nil, post: Post? = nil,
-                takes: [Take] = []) {
+                takes: [Take] = [], wallet: Wallet? = nil, notice: EventNotice? = nil) {
+        self.wallet = wallet
+        self.notice = notice
         self.type = type
         self.job = job
         self.balance = balance
@@ -638,7 +747,7 @@ public struct ApiEvent: Codable, Sendable {
         self.takes = takes
     }
 
-    enum CodingKeys: String, CodingKey { case type, job, balance, model, outfit, lora, post, takes }
+    enum CodingKeys: String, CodingKey { case type, job, balance, model, outfit, lora, post, takes, wallet, notice }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         type = c.v(.type, "")
@@ -649,6 +758,8 @@ public struct ApiEvent: Codable, Sendable {
         lora = c.o(.lora)
         post = c.o(.post)
         takes = c.v(.takes, [])
+        wallet = c.o(.wallet)
+        notice = c.o(.notice)
     }
 }
 

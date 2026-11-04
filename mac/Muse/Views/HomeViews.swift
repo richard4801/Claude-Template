@@ -77,7 +77,7 @@ struct HomeView: View {
                 MButton("New video", icon: "plus", kind: .primary) { store.go(.studio) }
             }
             HStack(spacing: 14) {
-                KPI(label: "GPU balance", value: Pricing.money(store.balance.balance), hint: "≈ \(Pricing.videosLeft(store.balance.balance)) videos at 10 steps", index: 0)
+                KPI(label: "My tokens", value: "\(store.tokenCount)", hint: "\(Pricing.money(store.balance.balance)) · ≈ \(Pricing.videosLeft(store.balance.balance)) videos at 10 steps", index: 0)
                 KPI(label: "This month", value: Pricing.money(store.balance.month), hint: "\(store.takes.count) renders", index: 1)
                 KPI(label: "In the queue", value: "\(store.activeJobs.count)", hint: store.runningJob != nil ? "H100 running" : "GPU off · starts on demand", index: 2)
                 KPI(label: "To review", value: "\(store.toReview)", hint: "takes waiting for approval", index: 3)

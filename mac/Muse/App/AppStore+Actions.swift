@@ -18,7 +18,7 @@ extension AppStore {
         }
         perform { [self] in
             let (meta, thumb) = try await MediaImport.clipInfo(url)
-            let c = try await api.uploadClip(meta, file: url)
+            let c = try await withUploadProgress("Uploading \(url.lastPathComponent)") { p in try await self.api.uploadClip(meta, file: url, progress: p) }
             clip = c
             clipFile = url
             clipThumb = thumb.map { ImageRef(url: $0.absoluteString) }
@@ -38,7 +38,7 @@ extension AppStore {
             clipFile = nil
             clipThumb = nil
         } catch {
-            if !quiet { showToast((error as? ApiError)?.message ?? error.localizedDescription) }
+            if !quiet { showToast((error as? ApiError)?.friendlyMessage ?? error.localizedDescription) }
         }
     }
 
@@ -84,7 +84,7 @@ extension AppStore {
             return
         }
         if lowBalance {
-            showToast("Not enough balance for this render", action: "Top up") { [weak self] in self?.go(.credits) }
+            notEnough("for this render")
             return
         }
         guard !generating else { return }
@@ -239,7 +239,15 @@ extension AppStore {
     }
 
     /// Saves the take to ~/Downloads/MUSE. No label is added: labels are the user's choice when posting (plans/socials.md).
+    /// A real render (videoUrl) is downloaded as its .mp4.
     func export(_ t: Take) {
+        if let v = t.videoUrl, let src = URL(string: v) {
+            perform { [self] in
+                let file = try await downloadVideo(src, name: t.caption)
+                showToast("Exported \(t.mediaLine ?? "video")", action: "Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([file]) }
+            }
+            return
+        }
         let file = exportFile(t)
         showToast("Exported 1080×1920", action: file == nil ? nil : "Show in Finder") {
             if let file { NSWorkspace.shared.activateFileViewerSelecting([file]) }
@@ -264,7 +272,7 @@ extension AppStore {
             return
         }
         if Pricing.shootCost > balance.balance {
-            showToast("Not enough balance for a shoot", action: "Top up") { [weak self] in self?.go(.credits) }
+            notEnough("for a shoot")
             return
         }
         let prompt = promptOverride ?? shootPromptText
@@ -300,7 +308,7 @@ extension AppStore {
 
     func uploadImage(_ url: URL) async throws -> ImageRef {
         let (data, mime) = try MediaImport.imagePayload(url)
-        let ref = try await api.uploadImage(name: url.lastPathComponent, data: data, mime: mime)
+        let ref = try await withUploadProgress("Uploading \(url.lastPathComponent)") { p in try await self.api.uploadImage(name: url.lastPathComponent, data: data, mime: mime, progress: p) }
         if let u = ref.url, u.hasPrefix("file:") || u.hasPrefix("data:"), let img = NSImage(contentsOf: url) { ImageCache.shared.put(u, img) }
         return ref
     }
@@ -488,7 +496,7 @@ extension AppStore {
         let missing = SheetAngle.allCases.filter { create.slots[$0] == nil }
         guard !missing.isEmpty else { return }
         let cost = Pricing.fillAnglesCost(missing.count)
-        if cost > balance.balance { showToast("Not enough balance", action: "Top up") { [weak self] in self?.go(.credits) }; return }
+        if cost > balance.balance { notEnough(""); return }
         withAnimation { for a in missing { create.slots[a] = .busy } }
         perform { [self] in
             do {
@@ -548,7 +556,7 @@ extension AppStore {
             return
         }
         if d.mode != .own && Pricing.outfitSetCost > balance.balance {
-            showToast("Not enough balance", action: "Top up") { [weak self] in self?.go(.credits) }
+            notEnough("")
             return
         }
         d.state = .busy
@@ -598,6 +606,127 @@ extension AppStore {
         }
     }
 
+    // MARK: Uploads
+
+    /// Runs an upload and shows its progress in the title bar.
+    func withUploadProgress<T>(_ label: String, _ work: (@escaping UploadProgress) async throws -> T) async throws -> T {
+        uploadLabel = label
+        uploadProgress = 0
+        defer { uploadProgress = nil }
+        let report: UploadProgress = { [weak self] v in
+            Task { @MainActor in
+                guard let self, self.uploadProgress != nil else { return }
+                self.uploadProgress = max(self.uploadProgress ?? 0, v)
+            }
+        }
+        return try await work(report)
+    }
+
+    func downloadVideo(_ src: URL, name: String) async throws -> URL {
+        let fm = FileManager.default
+        guard let dir = fm.urls(for: .downloadsDirectory, in: .userDomainMask).first?.appendingPathComponent("MUSE", isDirectory: true) else {
+            throw ApiError("export_failed", "Can't find the Downloads folder")
+        }
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let safe = name.components(separatedBy: CharacterSet(charactersIn: "/:\\?%*|\"<>")).joined(separator: "-").trimmingCharacters(in: .whitespaces)
+        let dst = dir.appendingPathComponent(String((safe.isEmpty ? "MUSE take" : safe).prefix(80))).appendingPathExtension("mp4")
+        let tmp: URL
+        do {
+            tmp = try await URLSession.shared.download(from: src).0
+        } catch {
+            throw ApiError("download_failed", "Couldn't download the video")
+        }
+        try? fm.removeItem(at: dst)
+        try fm.moveItem(at: tmp, to: dst)
+        return dst
+    }
+
+    /// Not enough money for something: members are told to ask the owner; owners get a link to their balance.
+    func notEnough(_ what: String) {
+        if isMember {
+            showToast(notEnoughMessage)
+        } else {
+            showToast("Not enough balance" + (what.isEmpty ? "" : " \(what)"), action: "My tokens") { [weak self] in self?.go(.credits) }
+        }
+    }
+
+    // MARK: Studio (owner)
+
+    func loadMembers() {
+        perform { [self] in
+            members = try await api.listMembers()
+            wallet = try? await api.wallet()
+        }
+    }
+
+    func sendTokens(to m: Member, tokens: Int, note: String) {
+        guard tokens > 0 else { showToast("Enter how many tokens to send"); return }
+        perform { [self] in
+            let r = try await api.sendTokens(TokenMove(userId: m.id, tokens: tokens, note: note))
+            applyMove(r)
+            showToast("Sent \(tokens) tokens to \(m.email) · they have \(r.member.tokens)")
+        }
+    }
+
+    func takeBackTokens(from m: Member, tokens: Int, note: String) {
+        guard tokens > 0 else { showToast("Enter how many tokens to take back"); return }
+        perform { [self] in
+            let r = try await api.takeBackTokens(TokenMove(userId: m.id, tokens: tokens, note: note))
+            applyMove(r)
+            showToast("Took back \(tokens) tokens from \(m.email)")
+        }
+    }
+
+    private func applyMove(_ r: TokenMoveResult) {
+        wallet = r.wallet
+        replaceMember(r.member)
+        Task { [weak self] in
+            guard let self, let b = try? await self.api.balance() else { return }
+            self.balance = b
+        }
+    }
+
+    func replaceMember(_ m: Member) {
+        if let i = members.firstIndex(where: { $0.id == m.id }) { members[i] = m } else { members.append(m) }
+    }
+
+    /// nil puts the member back on the studio's default daily cap.
+    func setDailyCap(_ m: Member, _ usd: Double?) {
+        perform { [self] in
+            let updated = try await api.updateMember(id: m.id, MemberPatch(capPerDay: usd.map { .set($0) } ?? .reset))
+            replaceMember(updated)
+            showToast("\(m.email) · daily cap \(Pricing.money(updated.capPerDay))")
+        }
+    }
+
+    func setDisabled(_ m: Member, _ disabled: Bool) {
+        perform { [self] in
+            let updated = try await api.updateMember(id: m.id, MemberPatch(disabled: disabled))
+            replaceMember(updated)
+            showToast(disabled ? "\(m.email) is switched off and signed out" : "\(m.email) can sign in again")
+        }
+    }
+
+    func createInvite(email: String) {
+        perform { [self] in
+            lastInvite = try await api.createInvite(InviteRequest(email: email))
+        }
+    }
+
+    func updateStudio(_ patch: StudioSettingsPatch) {
+        perform { [self] in
+            studioSettings = try await api.updateStudioSettings(patch)
+            balance = try await api.balance()
+        }
+    }
+
+    func setImageEngine(provider: String, model: String?, url: String?) {
+        perform { [self] in
+            imageEngine = try await api.setImageEngine(ImageEngineRequest(provider: provider, model: model, url: url))
+            showToast("Image engine: \(ImageEngine.providers.first { $0.id == provider }?.label ?? provider)")
+        }
+    }
+
     func setFailNext() {
         perform { [self] in
             try await api.setFailNext(true)
@@ -607,9 +736,21 @@ extension AppStore {
 
     func testConnection() {
         perform { [self] in
+            if let http = api as? HTTPMuseAPI {
+                var r = URLRequest(url: http.url("health"))
+                r.timeoutInterval = 15
+                let ok: Bool
+                do {
+                    let (_, resp) = try await URLSession.shared.data(for: r)
+                    ok = (resp as? HTTPURLResponse)?.statusCode == 200
+                } catch {
+                    throw ApiError("offline", "Can't reach the server at \(http.baseURL.absoluteString)")
+                }
+                if !ok { throw ApiError("offline", "The server at \(http.baseURL.host ?? "") isn't healthy right now") }
+            }
             let b = try await api.balance()
             offlineMessage = nil
-            showToast("Connected · balance \(Pricing.money(b.balance))")
+            showToast("Connected · \(isMember ? "\(b.tokenCount) tokens" : "balance \(Pricing.money(b.balance))")")
         }
     }
 
@@ -623,7 +764,7 @@ extension AppStore {
     }
 
     var paletteCommands: [PaletteCommand] {
-        let all: [PaletteCommand] = [
+        var all: [PaletteCommand] = [
             PaletteCommand(title: "New video", icon: "video", shortcut: "⌘N") { [weak self] in self?.go(.studio) },
             PaletteCommand(title: "Photoshoot", icon: "camera", shortcut: "⌘4") { [weak self] in self?.go(.shoot) },
             PaletteCommand(title: "New model", icon: "person.badge.plus", shortcut: "") { [weak self] in self?.go(.create) },
@@ -637,11 +778,23 @@ extension AppStore {
                 self.openLora(m.id)
             },
             PaletteCommand(title: "Settings", icon: "slider.horizontal.3", shortcut: "⌘,") { [weak self] in self?.go(.settings) },
-            PaletteCommand(title: "Credits & top up", icon: "creditcard", shortcut: "") { [weak self] in self?.go(.credits) },
+            PaletteCommand(title: "My tokens", icon: "circle.hexagongrid", shortcut: "") { [weak self] in self?.go(.credits) },
             PaletteCommand(title: "New outfit set", icon: "tshirt", shortcut: "") { [weak self] in self?.openOutfitSheet(for: nil) },
             PaletteCommand(title: "Choose a clip…", icon: "film", shortcut: "") { [weak self] in self?.go(.studio); self?.pickClip() },
             PaletteCommand(title: "Run queue", icon: "play.fill", shortcut: "") { [weak self] in self?.runQueue() },
-        ] + ThemeID.allCases.map { id in
+        ]
+        if isOwner {
+            let owner: [PaletteCommand] = [
+                PaletteCommand(title: "Members", icon: "person.2", shortcut: "⌘8") { [weak self] in self?.go(.members) },
+                PaletteCommand(title: "Invite someone", icon: "envelope", shortcut: "") { [weak self] in self?.go(.members) },
+                PaletteCommand(title: "Studio settings", icon: "building.2", shortcut: "") { [weak self] in
+                    self?.settingsSection = .studio
+                    self?.go(.settings)
+                },
+            ]
+            all += owner
+        }
+        all += ThemeID.allCases.map { id in
             PaletteCommand(title: "Theme: \(id.name)", icon: "paintpalette", shortcut: "") { [weak self] in self?.setTheme(id) }
         } + [
             PaletteCommand(title: "Toggle pro mode (show prompts)", icon: "sparkles", shortcut: "") { [weak self] in

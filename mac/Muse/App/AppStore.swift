@@ -4,7 +4,7 @@ import Observation
 import SwiftUI
 
 enum Screen: String, CaseIterable {
-    case home, models, profile, create, studio, shoot, queue, gallery, result, settings, credits, lora, posts
+    case home, models, profile, create, studio, shoot, queue, gallery, result, settings, credits, lora, posts, members
 
     /// Which sidebar item is highlighted.
     var navParent: Screen {
@@ -37,19 +37,23 @@ struct NavItem: Identifiable {
 
 enum DataSource: String, CaseIterable, Codable {
     case fake, http
-    var label: String { self == .fake ? "In-process (no server)" : "HTTP server" }
+    var label: String { self == .fake ? "Demo mode (no server)" : "MUSE server" }
 }
+
+/// The hosted MUSE API (server/api on Railway). Renders there are simulated until the GPU is switched on.
+let defaultServerURL = "https://angelic-elegance-production-c42b.up.railway.app"
 
 enum ShootState { case idle, busy, done }
 enum ShootTab: String, CaseIterable { case scene, camera, light, prompt }
 enum GalleryTab { case tests, final }
 enum SettingsSection: String, CaseIterable {
-    case appearance, defaults, costs, notif, developer, about
+    case appearance, defaults, costs, studio, notif, developer, about
     var title: String {
         switch self {
         case .appearance: return "Appearance"
         case .defaults: return "Render defaults"
         case .costs: return "Costs & limits"
+        case .studio: return "Studio"
         case .notif: return "Notifications"
         case .developer: return "Developer"
         case .about: return "About"
@@ -135,8 +139,8 @@ final class AppStore {
     var notifyLowBalance: Bool { didSet { defaults.set(notifyLowBalance, forKey: "muse.notifyLow") } }
     var notifyPhone: Bool { didSet { defaults.set(notifyPhone, forKey: "muse.notifyPhone") } }
     var warnOverBudget: Bool { didSet { defaults.set(warnOverBudget, forKey: "muse.warnBudget") } }
-    var dataSource: DataSource { didSet { defaults.set(dataSource.rawValue, forKey: "muse.dataSource") } }
-    var baseURL: String { didSet { defaults.set(baseURL, forKey: "muse.baseURL") } }
+    var dataSource: DataSource { didSet { defaults.set(dataSource.rawValue, forKey: "muse.dataSource.v2") } }
+    var baseURL: String { didSet { defaults.set(baseURL, forKey: "muse.baseURL.v2") } }
     /// Never-add edits not yet saved on the server (PATCH /v1/models/{id}); kept on this Mac when an older server doesn't have the endpoint.
     var neverOverrides: [String: [String]] { didSet { defaults.set(neverOverrides, forKey: "muse.never") } }
 
@@ -149,7 +153,12 @@ final class AppStore {
     var attest = [false, false]
     var authEmail = ""
     var authPassword = ""
+    var authInvite = ""
     var authBusy = false
+    /// Shown under the sign-in form (friendly text for the API's error codes).
+    var authError: String?
+    /// True while GET /v1/auth/me checks a stored session at launch.
+    var restoring = false
     enum AuthTab { case signIn, signUp }
 
     private let fake: FakeMuseAPI
@@ -176,6 +185,17 @@ final class AppStore {
     var jobs: [Job] = []
     var takes: [Take] = []
     var balance = Balance(balance: 0, month: 0)
+    /// GET /v1/wallet (real API). nil on servers without wallets (server/mock).
+    var wallet: Wallet?
+    /// Owner only: the studio's people, settings and image engine.
+    var members: [Member] = []
+    var studioSettings: StudioSettings?
+    var imageEngine: ImageEngine?
+    /// The last invite made on this Mac (its code is shown once).
+    var lastInvite: Invite?
+    /// An upload in flight: 0…1 and what's being uploaded.
+    var uploadProgress: Double?
+    var uploadLabel = ""
     var hiddenFailures: Set<String> = []
     /// Identity LoRA per model id.
     var loras: [String: Lora] = [:]
@@ -250,14 +270,16 @@ final class AppStore {
         notifyLowBalance = d.object(forKey: "muse.notifyLow") as? Bool ?? true
         notifyPhone = d.object(forKey: "muse.notifyPhone") as? Bool ?? true
         warnOverBudget = d.object(forKey: "muse.warnBudget") as? Bool ?? true
-        dataSource = DataSource(rawValue: d.string(forKey: "muse.dataSource") ?? "fake") ?? .fake
-        baseURL = d.string(forKey: "muse.baseURL") ?? "http://localhost:8787"
+        // v2 keys: the real server is the default now (older builds defaulted to the in-process fake and localhost).
+        dataSource = DataSource(rawValue: d.string(forKey: "muse.dataSource.v2") ?? "http") ?? .http
+        baseURL = d.string(forKey: "muse.baseURL.v2") ?? defaultServerURL
         neverOverrides = d.dictionary(forKey: "muse.never") as? [String: [String]] ?? [:]
         steps = Pricing.clampSteps(ds)
         engine = Engine(id: d.string(forKey: "muse.defaultEngine") ?? "h3")
         let store = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("MUSE/uploads")
         fake = FakeMuseAPI(storeDir: store)
         api = fake
+        d.removeObject(forKey: "muse.token") // older builds kept the token in UserDefaults; it lives in the Keychain now
         if let data = d.data(forKey: "muse.user"), let u = try? JSONDecoder().decode(User.self, from: data) { user = u }
     }
 
@@ -267,24 +289,71 @@ final class AppStore {
         api = makeAPI()
         Notifier.shared.requestAuthorization()
         Notifier.shared.onOpenPost = { [weak self] id in self?.openScheduledPost(id) }
-        if user != nil { Task { await connect() } }
+        Task { await restoreSession() }
     }
+
+    var isDemo: Bool { !(api is HTTPMuseAPI) }
+    var isOwner: Bool { user?.isOwner ?? false }
+    /// The Keychain account for the current server's session token.
+    var serverKey: String { (api as? HTTPMuseAPI)?.baseURL.absoluteString ?? "demo" }
+    var serverHost: String { (api as? HTTPMuseAPI)?.baseURL.host ?? "demo" }
 
     private func makeAPI() -> any MuseAPI {
         if dataSource == .http, let u = URL(string: baseURL.trimmingCharacters(in: .whitespaces)), u.scheme != nil { return HTTPMuseAPI(baseURL: u) }
         return fake
     }
 
-    /// Switches between the in-process fake and the HTTP server, then reloads everything.
+    /// Demo mode keeps the signed-in user on this Mac. A server session is restored from the Keychain token with GET /v1/auth/me.
+    func restoreSession() async {
+        if isDemo {
+            if var u = user {
+                if u.role == nil { u.role = "owner" }
+                user = u
+                _ = try? await api.signIn(SignInRequest(email: u.email, password: ""))
+                await connect()
+            }
+            return
+        }
+        guard let token = Keychain.token(for: serverKey) else {
+            user = nil
+            return
+        }
+        await api.setToken(token)
+        restoring = true
+        defer { restoring = false }
+        do {
+            let me = try await api.me()
+            setUser(me)
+            await connect()
+        } catch let e as ApiError where e.endsSession {
+            endSession(e.friendlyMessage)
+        } catch let e as ApiError where e.code == "not_found" || e.code == "http_404" {
+            // server/mock has no /v1/auth/me: keep the cached user.
+            if user != nil { await connect() }
+        } catch {
+            // Offline: keep the cached user and show the offline note; the next reload tries again.
+            if user != nil { await connect() } else { authError = (error as? ApiError)?.friendlyMessage }
+        }
+    }
+
+    private func setUser(_ u: User) {
+        user = u
+        defaults.set(try? JSONEncoder().encode(u), forKey: "muse.user")
+    }
+
+    /// Switches between demo mode and a server, then restores that server's session (or asks to sign in).
     func applyDataSource() {
+        eventsTask?.cancel()
         api = makeAPI()
         clip = nil
         clipFile = nil
         clipThumb = nil
-        Task {
-            if let token = defaults.string(forKey: "muse.token") { await api.setToken(token) }
-            await connect()
-        }
+        wallet = nil
+        members = []
+        studioSettings = nil
+        imageEngine = nil
+        offlineMessage = nil
+        Task { await restoreSession() }
     }
 
     func connect() async {
@@ -316,30 +385,51 @@ final class AppStore {
             takes = tt
             balance = bb
             offlineMessage = nil
+            await loadStudio()
             if !models.contains(where: { $0.id == modelId }), let first = models.first(where: { !$0.isDraft }) ?? models.first { modelId = first.id }
             if !models.contains(where: { $0.id == profileModelId }), let first = models.first { profileModelId = first.id }
             if clip == nil { await useSampleClip(bad: false, quiet: true) }
             await loadSocial()
+        } catch let e as ApiError where e.endsSession {
+            endSession(e.friendlyMessage)
         } catch {
-            offlineMessage = (error as? ApiError)?.message ?? error.localizedDescription
+            offlineMessage = (error as? ApiError)?.friendlyMessage ?? error.localizedDescription
         }
     }
 
-    /// Runs an API call and shows its error as a toast.
+    /// Wallet, and for the owner: members, studio settings and the image engine. Servers without them (server/mock) are fine.
+    func loadStudio() async {
+        let api = self.api
+        wallet = try? await api.wallet()
+        guard isOwner else { return }
+        if let m = try? await api.listMembers() { members = m }
+        studioSettings = try? await api.studioSettings()
+        imageEngine = try? await api.imageEngine()
+    }
+
+    /// Runs an API call and shows its error as a toast, in MUSE's words.
     func perform(_ work: @escaping @MainActor () async throws -> Void) {
         Task {
             do { try await work() } catch let e as ApiError {
-                if e.code == "offline" { offlineMessage = e.message }
-                if e.code == "insufficient_balance" {
-                    showToast(e.message, action: "Top up") { [weak self] in self?.go(.credits) }
-                } else {
-                    showToast(e.message)
-                }
+                handle(e)
             } catch {
                 showToast(error.localizedDescription)
             }
         }
     }
+
+    func handle(_ e: ApiError) {
+        if e.code == "offline" { offlineMessage = e.message }
+        if e.endsSession {
+            endSession(e.friendlyMessage)
+        } else if e.code == "insufficient_balance" && !isMember {
+            showToast(e.friendlyMessage, action: "My tokens") { [weak self] in self?.go(.credits) }
+        } else {
+            showToast(e.friendlyMessage)
+        }
+    }
+
+    var isMember: Bool { user?.isMember ?? false }
 
     // MARK: Events
 
@@ -357,10 +447,12 @@ final class AppStore {
         if let b = e.balance {
             let wasAbove = balance.balance >= 5
             balance = b
-            if wasAbove && b.balance < 5 && notifyLowBalance {
+            if wasAbove && b.balance < 5 && notifyLowBalance && !isMember {
                 Notifier.shared.post(title: "Balance below $5", body: "You have \(Pricing.money(b.balance)) left · about \(Pricing.videosLeft(b.balance)) videos at 10 steps.")
             }
         }
+        if let w = e.wallet { walletChanged(w) }
+        if let n = e.notice { studioNotice(n) }
         if let m = e.model {
             if let i = models.firstIndex(where: { $0.id == m.id }) { models[i] = m } else { models.append(m) }
             syncDraftSlots(from: m)
@@ -397,14 +489,61 @@ final class AppStore {
         }
     }
 
+    /// A `wallet` event: refresh the tokens and say what changed.
+    private func walletChanged(_ w: Wallet) {
+        let before = wallet
+        wallet = w
+        Task { [weak self] in
+            guard let self, let b = try? await self.api.balance() else { return }
+            self.balance = b
+        }
+        guard let before, before.userId == w.userId else { return }
+        let delta = w.tokens - before.tokens
+        // Holds and settles for my own renders move tokens too (and change heldTokens); only tell about the owner's sends and take-backs.
+        guard delta != 0, !w.isOwner, w.heldTokens == before.heldTokens else { return }
+        if delta < 0 && jobs.contains(where: { $0.isActive && ($0.userId == nil || $0.userId == user?.id) }) { return }
+        if delta > 0 {
+            showToast("You got \(delta) tokens · you now have \(w.tokens)", action: "My tokens") { [weak self] in self?.go(.credits) }
+            Notifier.shared.post(title: "\(delta) tokens from the studio owner", body: "You now have \(w.tokens) tokens (\(Pricing.money(w.usd))).")
+        } else {
+            showToast("The studio owner took back \(-delta) tokens · you have \(w.tokens)")
+            Notifier.shared.post(title: "\(-delta) tokens taken back", body: "You have \(w.tokens) tokens left (\(Pricing.money(w.usd))).")
+        }
+    }
+
+    /// Owners: the RunPod balance went low (jobs pause) or recovered.
+    private func studioNotice(_ n: EventNotice) {
+        if n.code == "owner_balance_low" {
+            showToast("\(Job.pausedLine). \(n.message)", action: "My tokens") { [weak self] in self?.go(.credits) }
+            Notifier.shared.post(title: Job.pausedLine, body: n.message)
+        } else {
+            showToast(n.message)
+            Notifier.shared.post(title: "GPU credit is back", body: n.message)
+        }
+    }
+
     // MARK: Auth
 
     func signIn() {
         authBusy = true
-        perform { [self] in
-            defer { authBusy = false }
-            let r = try await api.signIn(SignInRequest(email: authEmail.isEmpty ? "you@studio.com" : authEmail, password: authPassword))
+        authError = nil
+        let email = authEmail.trimmingCharacters(in: .whitespaces)
+        authPerform { [self] in
+            let r = try await api.signIn(SignInRequest(email: email.isEmpty && isDemo ? "you@studio.com" : email, password: authPassword))
             await finishAuth(r)
+        }
+    }
+
+    /// Like `perform`, but the error shows under the form (and as a toast) instead of signing out.
+    private func authPerform(_ work: @escaping @MainActor () async throws -> Void) {
+        Task {
+            defer { authBusy = false }
+            do { try await work() } catch let e as ApiError {
+                authError = e.friendlyMessage
+                if e.code == "email_taken" { withAnimation { authTab = .signIn } }
+            } catch {
+                authError = error.localizedDescription
+            }
         }
     }
 
@@ -416,36 +555,65 @@ final class AppStore {
 
     func signUp() {
         guard attest[0] && attest[1] else {
-            showToast("Tick both boxes to create your account")
+            authError = ApiError.friendly("attestation_required")
+            return
+        }
+        let invite = authInvite.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !isDemo && invite.isEmpty {
+            authError = ApiError.friendly("invite_required")
             return
         }
         authBusy = true
-        perform { [self] in
-            defer { authBusy = false }
-            let email = authEmail.isEmpty ? "you@studio.com" : authEmail
-            let r = try await api.signUp(SignUpRequest(studioName: "", email: email, password: authPassword, attestAdultRightsOriginal: attest[0], attestLabelAi: attest[1]))
+        authError = nil
+        let email = authEmail.trimmingCharacters(in: .whitespaces)
+        authPerform { [self] in
+            let r = try await api.signUp(SignUpRequest(studioName: "", email: email.isEmpty && isDemo ? "you@studio.com" : email, password: authPassword,
+                                                       inviteCode: invite, attestAdultRightsOriginal: attest[0], attestLabelAi: attest[1]))
             await finishAuth(r)
         }
     }
 
     private func finishAuth(_ r: AuthResponse) async {
         await api.setToken(r.token)
-        defaults.set(r.token, forKey: "muse.token")
-        defaults.set(try? JSONEncoder().encode(r.user), forKey: "muse.user")
-        user = r.user
+        if !isDemo { Keychain.setToken(r.token, for: serverKey) }
+        var u = r.user
+        if isDemo && u.role == nil { u.role = "owner" }
+        setUser(u)
         screen = .home
         authPassword = ""
+        authInvite = ""
+        authError = nil
         await connect()
     }
 
+    /// Sign out: revokes the session on the server (POST /v1/auth/signout), then forgets it on this Mac.
     func signOut() {
+        let api = self.api
+        Task {
+            try? await api.signOut()
+            await api.setToken(nil)
+        }
+        endSession(nil, forgetToken: false)
+    }
+
+    /// Back to the sign-in screen, with `message` under the form (session ended, account switched off).
+    func endSession(_ message: String?, forgetToken: Bool = true) {
         eventsTask?.cancel()
+        if !isDemo { Keychain.deleteToken(for: serverKey) }
         user = nil
+        wallet = nil
+        members = []
+        studioSettings = nil
+        imageEngine = nil
+        lastInvite = nil
         authTab = .signIn
         attest = [false, false]
+        authError = message
         defaults.removeObject(forKey: "muse.user")
-        defaults.removeObject(forKey: "muse.token")
-        Task { await api.setToken(nil) }
+        if forgetToken {
+            let api = self.api
+            Task { await api.setToken(nil) }
+        }
     }
 
     // MARK: Navigation
@@ -509,6 +677,12 @@ final class AppStore {
     }
 
     var totalCost: Double { Pricing.totalCost(spec) }
+    /// "tokens" for members of a studio, "balance" otherwise.
+    var moneyWord: String { isMember ? "tokens" : "balance" }
+    /// The toast for "can't afford this".
+    var notEnoughMessage: String { isMember ? ApiError.friendly("insufficient_tokens")! : "Not enough balance for this" }
+    var tokenCount: Int { wallet?.tokens ?? balance.tokenCount }
+    func tokens(_ usd: Double) -> Int { Int((usd / max(balance.tokenUsd, 0.0001) - 1e-6).rounded(.up)) }
     var clipBad: Bool { !(clip?.ok ?? true) }
     var lowBalance: Bool { totalCost > balance.balance + 1e-9 }
     var generateBlocked: Bool { clipBad || lowBalance || clip == nil || currentOutfit == nil || generating }

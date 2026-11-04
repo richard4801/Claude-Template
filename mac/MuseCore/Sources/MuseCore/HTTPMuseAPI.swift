@@ -66,7 +66,7 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
 
     // MARK: Plumbing
 
-    func url(_ path: String) -> URL {
+    public func url(_ path: String) -> URL {
         var s = baseURL.absoluteString
         if !s.hasSuffix("/") { s += "/" }
         return URL(string: s + path)!
@@ -132,6 +132,24 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
 
     public func signIn(_ req: SignInRequest) async throws -> AuthResponse { try await call("POST", "v1/auth/signin", req) }
     public func signUp(_ req: SignUpRequest) async throws -> AuthResponse { try await call("POST", "v1/auth/signup", req) }
+    public func signOut() async throws { _ = try await send(request("POST", "v1/auth/signout", body: try encoder.encode(Empty()))) }
+    public func me() async throws -> User { try await call("GET", "v1/auth/me") }
+
+    // Tokens, members and studio settings
+    public func wallet() async throws -> Wallet { try await call("GET", "v1/wallet") }
+    public func createInvite(_ req: InviteRequest) async throws -> Invite { try await call("POST", "v1/invites", req) }
+    public func listMembers() async throws -> [Member] { try await call("GET", "v1/members") }
+    public func updateMember(id: String, _ patch: MemberPatch) async throws -> Member { try await call("PATCH", "v1/members/\(id)", patch) }
+    public func sendTokens(_ move: TokenMove) async throws -> TokenMoveResult {
+        try await call("POST", "v1/wallets/transfer", TransferBody(toUserId: move.userId, tokens: move.tokens, note: move.note))
+    }
+    public func takeBackTokens(_ move: TokenMove) async throws -> TokenMoveResult {
+        try await call("POST", "v1/wallets/reclaim", ReclaimBody(fromUserId: move.userId, tokens: move.tokens, note: move.note))
+    }
+    public func imageEngine() async throws -> ImageEngine { try await call("GET", "v1/settings/image-engine") }
+    public func setImageEngine(_ req: ImageEngineRequest) async throws -> ImageEngine { try await call("PATCH", "v1/settings/image-engine", req) }
+    public func studioSettings() async throws -> StudioSettings { try await call("GET", "v1/settings/studio") }
+    public func updateStudioSettings(_ patch: StudioSettingsPatch) async throws -> StudioSettings { try await call("PATCH", "v1/settings/studio", patch) }
     public func listModels() async throws -> [MuseModel] { try await call("GET", "v1/models") }
     public func createModel(_ req: CreateModelRequest) async throws -> MuseModel { try await call("POST", "v1/models", req) }
     public func setSlot(modelId: String, slot: String, _ req: SetSlotRequest) async throws -> MuseModel { try await call("PUT", "v1/models/\(modelId)/slots/\(slot)", req) }
@@ -140,18 +158,109 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     public func createOutfit(_ req: CreateOutfitRequest) async throws -> Outfit { try await call("POST", "v1/outfits", req) }
     public func saveOutfit(outfitId: String) async throws -> Outfit { try await call("POST", "v1/outfits/\(outfitId)/save", Empty()) }
 
-    public func uploadImage(name: String, data: Data, mime: String) async throws -> ImageRef {
+    /// Images: presign → PUT → confirm. A server without presigned uploads (server/mock), or a PUT that can't reach storage, falls back to multipart.
+    public func uploadImage(name: String, data: Data, mime: String, progress: UploadProgress?) async throws -> ImageRef {
+        progress?(0)
+        if let ref: ImageRef = try await presigned(kind: "image", contentType: mime, body: .data(data), meta: nil, progress: progress) {
+            progress?(1)
+            return absolutize(ref)
+        }
         var form = Multipart()
         form.addFile("file", filename: name, mime: mime, data: data)
         let ref: ImageRef = try decode(try await send(request("POST", "v1/uploads/images", body: form.finish(), contentType: form.contentType)))
+        progress?(1)
         return absolutize(ref)
     }
 
-    public func uploadClip(_ meta: ClipMeta, file: URL?) async throws -> Clip {
+    /// Clips: with a file, presign → PUT → confirm {meta}; without one (the sample clips), or as the fallback, multipart.
+    public func uploadClip(_ meta: ClipMeta, file: URL?, progress: UploadProgress?) async throws -> Clip {
+        progress?(0)
+        if let file, let clip: Clip = try await presigned(kind: "clip", contentType: HTTPMuseAPI.videoType(file), body: .file(file), meta: meta, progress: progress) {
+            progress?(1)
+            return clip
+        }
         var form = Multipart()
         form.addField("meta", value: try encoder.encode(meta), mime: "application/json")
-        if let file { form.addFile("file", filename: file.lastPathComponent, mime: "video/mp4", data: try Data(contentsOf: file)) }
-        return try decode(try await send(request("POST", "v1/uploads/clips", body: form.finish(), contentType: form.contentType)))
+        if let file { form.addFile("file", filename: file.lastPathComponent, mime: HTTPMuseAPI.videoType(file), data: try Data(contentsOf: file)) }
+        let clip: Clip = try decode(try await send(request("POST", "v1/uploads/clips", body: form.finish(), contentType: form.contentType)))
+        progress?(1)
+        return clip
+    }
+
+    static func videoType(_ file: URL) -> String {
+        switch file.pathExtension.lowercased() {
+        case "mov", "qt": return "video/quicktime"
+        case "m4v": return "video/x-m4v"
+        case "webm": return "video/webm"
+        default: return "video/mp4"
+        }
+    }
+
+    enum UploadBody {
+        case data(Data)
+        case file(URL)
+        var size: Int? {
+            switch self {
+            case .data(let d): return d.count
+            case .file(let u): return (try? FileManager.default.attributesOfItem(atPath: u.path)[.size] as? NSNumber)?.intValue
+            }
+        }
+    }
+
+    /// presign → PUT the bytes → confirm. Returns nil when the server has no presigned uploads or the PUT can't reach storage,
+    /// so the caller can use the multipart upload instead. Errors from confirm (and from presign other than "not there") are thrown.
+    func presigned<T: Decodable>(kind: String, contentType: String, body: UploadBody, meta: ClipMeta?, progress: UploadProgress?) async throws -> T? {
+        let ticket: PresignedUpload
+        do {
+            ticket = try await call("POST", "v1/uploads/presign", PresignBody(kind: kind, contentType: contentType, bytes: body.size))
+        } catch let e as ApiError where e.code == "not_found" || e.code == "http_404" || e.code == "bad_response" {
+            return nil
+        }
+        // Local storage (dev servers) answers with a link to this API, possibly relative: resolve it against the base URL.
+        guard let target = resolve(ticket.url) else { return nil }
+        var put = URLRequest(url: target)
+        put.httpMethod = ticket.method.isEmpty ? "PUT" : ticket.method
+        put.timeoutInterval = 600
+        for (k, v) in ticket.headers { put.setValue(v, forHTTPHeaderField: k) }
+        if put.value(forHTTPHeaderField: "Content-Type") == nil { put.setValue(contentType, forHTTPHeaderField: "Content-Type") }
+        if target.host == baseURL.host, target.port == baseURL.port, let t = currentToken { put.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        do {
+            try await putBytes(put, body: body, progress: progress)
+        } catch {
+            return nil
+        }
+        return try await call("POST", "v1/uploads/\(ticket.uploadId)/confirm", ConfirmBody(meta: meta))
+    }
+
+    func resolve(_ link: String) -> URL? {
+        if link.hasPrefix("/") { return url(String(link.dropFirst())) }
+        return URL(string: link)
+    }
+
+    private func putBytes(_ r: URLRequest, body: UploadBody, progress: UploadProgress?) async throws {
+        let resp: URLResponse?
+        #if canImport(FoundationNetworking)
+        // swift-corelibs-foundation: no per-task delegates, so no progress until the end (Linux builds only, for tests).
+        let data: Data
+        switch body {
+        case .data(let d): data = d
+        case .file(let u): data = try Data(contentsOf: u)
+        }
+        resp = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<URLResponse?, Error>) in
+            session.uploadTask(with: r, from: data) { _, r, e in
+                if let e { cont.resume(throwing: e) } else { cont.resume(returning: r) }
+            }.resume()
+        }
+        #else
+        let delegate = UploadProgressDelegate(progress)
+        switch body {
+        case .data(let d): resp = try await session.upload(for: r, from: d, delegate: delegate).1
+        case .file(let u): resp = try await session.upload(for: r, fromFile: u, delegate: delegate).1
+        }
+        #endif
+        if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw ApiError("http_\(http.statusCode)", "Upload refused (\(http.statusCode))")
+        }
     }
 
     public func updateModel(id: String, _ req: UpdateModelRequest) async throws -> MuseModel { try await call("PATCH", "v1/models/\(id)", req) }
@@ -197,8 +306,8 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     }
     public func deletePost(id: String) async throws { _ = try await send(request("DELETE", "v1/posts/\(id)")) }
 
-    public func listJobs() async throws -> [Job] { try await call("GET", "v1/jobs") }
-    public func createJob(_ req: JobRequest) async throws -> Job { try await call("POST", "v1/jobs", req) }
+    public func listJobs() async throws -> [Job] { (try await call("GET", "v1/jobs") as [Job]).map(absolutize) }
+    public func createJob(_ req: JobRequest) async throws -> Job { absolutize(try await call("POST", "v1/jobs", req)) }
     public func removeJob(id: String) async throws { _ = try await send(request("DELETE", "v1/jobs/\(id)")) }
 
     public func runQueue() async throws {
@@ -206,10 +315,24 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
         do { _ = try await send(request("POST", "v1/queue/run", body: try encoder.encode(Empty()))) } catch let e as ApiError where e.code == "http_404" || e.code == "not_found" {}
     }
 
-    public func listTakes() async throws -> [Take] { try await call("GET", "v1/takes") }
-    public func setTakeStatus(id: String, status: String) async throws -> Take { try await call("PATCH", "v1/takes/\(id)", SetTakeStatusRequest(status: status)) }
+    public func listTakes() async throws -> [Take] { (try await call("GET", "v1/takes") as [Take]).map(absolutize) }
+    public func setTakeStatus(id: String, status: String) async throws -> Take { absolutize(try await call("PATCH", "v1/takes/\(id)", SetTakeStatusRequest(status: status))) }
     public func deleteTake(id: String) async throws { _ = try await send(request("DELETE", "v1/takes/\(id)")) }
-    public func shoot(_ req: ShootRequest) async throws -> [Take] { try await call("POST", "v1/shoots", req) }
+    public func shoot(_ req: ShootRequest) async throws -> [Take] { (try await call("POST", "v1/shoots", req) as [Take]).map(absolutize) }
+
+    /// Relative video and image links ("/uploads/x.mp4") become absolute.
+    func absolutize(_ t: Take) -> Take {
+        var out = t
+        out.thumb = absolutize(t.thumb)
+        if let v = t.videoUrl, v.hasPrefix("/") { out.videoUrl = absolutize(ImageRef(url: v)).url }
+        return out
+    }
+
+    func absolutize(_ j: Job) -> Job {
+        var out = j
+        out.thumb = j.thumb.map(absolutize)
+        return out
+    }
     public func balance() async throws -> Balance { try await call("GET", "v1/balance") }
     public func topUp(_ req: TopUpRequest) async throws -> Balance { try await call("POST", "v1/balance/topup", req) }
     public func setFailNext(_ fail: Bool) async throws { _ = try await send(request("POST", "v1/dev/fail-next", body: try encoder.encode(DevFailRequest(failNext: fail)))) }
@@ -257,6 +380,8 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
                 if let payload = parser.feed(String(decoding: line, as: UTF8.self)), let d = payload.data(using: .utf8), var e = try? decoder.decode(ApiEvent.self, from: d) {
                     if let l = e.lora { e.lora = absolutize(l) }
                     if let p = e.post { e.post = absolutize(p) }
+                    if let j = e.job { e.job = absolutize(j) }
+                    e.takes = e.takes.map(absolutize)
                     yield(e)
                 }
                 line.removeAll(keepingCapacity: true)
@@ -269,6 +394,18 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
 }
 
 struct Empty: Codable {}
+
+#if !canImport(FoundationNetworking)
+/// Reports a PUT's bytes sent as 0…1.
+final class UploadProgressDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let progress: UploadProgress?
+    init(_ progress: UploadProgress?) { self.progress = progress }
+    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        guard totalBytesExpectedToSend > 0 else { return }
+        progress?(min(1, Double(totalBytesSent) / Double(totalBytesExpectedToSend)))
+    }
+}
+#endif
 
 /// multipart/form-data body builder.
 struct Multipart {

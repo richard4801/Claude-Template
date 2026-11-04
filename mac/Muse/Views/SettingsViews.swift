@@ -11,7 +11,7 @@ struct SettingsView: View {
             PageHeader(eyebrow: "Preferences", title: "Settings")
             HStack(alignment: .top, spacing: 36) {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(SettingsSection.allCases, id: \.self) { s in
+                    ForEach(SettingsSection.allCases.filter { $0 != .studio || store.isOwner }, id: \.self) { s in
                         NavRow(icon: icon(s), title: s.title, on: store.settingsSection == s, compact: false, trailing: .none) { store.settingsSection = s }
                     }
                 }
@@ -27,6 +27,7 @@ struct SettingsView: View {
         case .appearance: return "paintpalette"
         case .defaults: return "slider.horizontal.3"
         case .costs: return "dollarsign.circle"
+        case .studio: return "building.2"
         case .notif: return "bell"
         case .developer: return "hammer"
         case .about: return "info.circle"
@@ -93,17 +94,19 @@ struct SettingsView: View {
         case .costs:
             H2("Costs & limits")
             HStack(spacing: 14) {
-                KPI(label: "Balance", value: Pricing.money(store.balance.balance), index: 0)
+                KPI(label: "My tokens", value: "\(store.tokenCount)", hint: Pricing.money(store.balance.balance), index: 0)
                 KPI(label: "This month", value: Pricing.money(store.balance.month), index: 1)
-                KPI(label: "Per video", value: "~\(Pricing.money(Pricing.typicalVideo))", index: 2)
+                KPI(label: "Per video", value: "~\(Pricing.tokens(Pricing.typicalVideo, store.balance.tokenUsd)) tokens", hint: "~\(Pricing.money(Pricing.typicalVideo))", index: 2)
             }
             ListBox {
-                ListRow(icon: "checkmark.shield", title: "Spend cap per job") { MonoValue(Pricing.money(store.balance.perJobLimit)) }
-                ListRow(icon: "checkmark.shield", title: "Spend cap per day") { MonoValue(Pricing.money(store.balance.perDayLimit)) }
+                ListRow(icon: "checkmark.shield", title: "Spend cap per job", hint: store.isOwner ? "Change it in Settings → Studio" : "Set by the studio owner") { MonoValue(Pricing.money(store.balance.perJobLimit)) }
+                ListRow(icon: "checkmark.shield", title: store.isMember ? "My cap per day" : "Spend cap per day") { MonoValue(Pricing.money(store.balance.perDayLimit)) }
                 ListRow(icon: "bell", title: "Warn before a job goes over budget") { MToggle(isOn: $store.warnOverBudget) }
-                ListRow(icon: "slider.horizontal.3", title: "Shut down idle GPU after", last: true) { MonoValue("5 min") }
+                ListRow(icon: "slider.horizontal.3", title: "Shut down idle GPU after", last: true) { MonoValue("3 min") }
             }
-            MButton("Credits & top up", icon: "creditcard", kind: .primary) { store.go(.credits) }
+            MButton("My tokens", icon: "circle.hexagongrid", kind: .primary) { store.go(.credits) }
+        case .studio:
+            StudioSettingsSection()
         case .notif:
             H2("Notifications")
             ListBox {
@@ -123,21 +126,25 @@ struct SettingsView: View {
             }
         case .developer:
             H2("Data source")
-            Muted("The app runs against an in-process fake backend by default. Switch to the HTTP mock server (server/mock) to test the real API contract. No GPU or RunPod calls are made either way.")
+            Muted("MUSE talks to the MUSE server by default (\(defaultServerURL)). Demo mode runs everything inside the app with sample data and no account. You can also point MUSE at another server, such as a local server/api or server/mock. Each server keeps its own sign-in.")
             Seg(DataSource.allCases.map { ($0, $0.label) }, selection: $store.dataSource) { _ in store.applyDataSource() }.frame(maxWidth: 460)
-            Field("Server base URL") {
+            Field("Server base URL", trailing: store.baseURL == defaultServerURL ? nil : "Use the MUSE server", trailingAction: {
+                store.baseURL = defaultServerURL
+                store.applyDataSource()
+            }) {
                 HStack(spacing: 10) {
-                    TextField("http://localhost:8787", text: $store.baseURL).fieldChrome().font(t.mono(13))
+                    TextField(defaultServerURL, text: $store.baseURL).fieldChrome().font(t.mono(13))
                         .onSubmit { store.applyDataSource() }
                     MButton("Reconnect", size: .regular) { store.applyDataSource() }
                     MButton("Test", size: .regular) { store.testConnection() }
                 }
             }
             .opacity(store.dataSource == .http ? 1 : 0.5)
+            Muted("Remote servers need HTTPS. Plain HTTP works for this Mac and the local network only.")
             if let msg = store.offlineMessage { Note(icon: "wifi.exclamationmark", warn: true, msg) }
             H2("Testing")
             ListBox {
-                ListRow(title: "Fail the next render", hint: "It stops at step 3 and the cost is refunded, to test failure handling and notifications.") {
+                ListRow(title: "Fail the next render", hint: "It stops at step 3 and the cost is refunded, to test failure handling and notifications. Demo mode, server/mock, and dev servers only.") {
                     MButton("Fail next", size: .small) { store.setFailNext() }
                 }
                 ListRow(title: "Reload everything", hint: "Fetches models, outfits, jobs, takes and balance again.", last: true) {
@@ -206,72 +213,6 @@ struct ThemePreview: View {
                 }
                 .padding(.leading, w * 0.28).padding(.trailing, w * 0.05).padding(.top, h * 0.14)
             }
-        }
-    }
-}
-
-struct CreditsView: View {
-    @Environment(AppStore.self) private var store
-    @Environment(\.theme) private var t
-    @State private var payOpen = false
-
-    var body: some View {
-        @Bindable var store = store
-        Page {
-            PageHeader(eyebrow: "Billing", title: "Credits")
-            HStack(spacing: 14) {
-                KPI(label: "GPU balance", value: Pricing.money(store.balance.balance), hint: "≈ \(Pricing.videosLeft(store.balance.balance)) videos at 10 steps", index: 0)
-                KPI(label: "This month", value: Pricing.money(store.balance.month), index: 1)
-                KPI(label: "Per video", value: "~\(Pricing.money(Pricing.typicalVideo))", hint: "5s clip · 10 steps · H100", index: 2)
-            }
-            SectionHeader("Top up")
-            HStack(spacing: 10) {
-                Seg([10.0, 25, 50, 100].map { ($0, "$\(Int($0))") }, selection: $store.topUpAmount).frame(width: 420)
-                MButton("Add \(Pricing.money(store.topUpAmount).replacingOccurrences(of: ".00", with: ""))", icon: "creditcard", kind: .primary) { payOpen = true }
-                    .popover(isPresented: $payOpen, arrowEdge: .bottom) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach([("card", "Card · Visa / Mastercard"), ("usdt", "USDT (TRC-20)"), ("virtual", "Virtual dollar card")], id: \.0) { code, m in
-                                Button {
-                                    payOpen = false
-                                    store.topUp(method: code)
-                                } label: {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: "creditcard")
-                                        Text(m).font(t.body(13.5))
-                                        Spacer()
-                                    }
-                                    .padding(.horizontal, 10)
-                                    .frame(height: 36)
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(6)
-                        .frame(width: 260)
-                    }
-            }
-            Muted("Payments are mocked in this build: no card is charged.").padding(.top, 8)
-            SectionHeader("Recent spend")
-            VStack(spacing: 0) {
-                ForEach(store.jobs.filter { !$0.isQueued }) { j in
-                    spendRow(j.title + (j.isFailed ? " (failed)" : ""), j.isFailed ? "Refunded" : j.engineName, j.isFailed ? "+\(Pricing.money(j.refunded))" : "−\(Pricing.money(j.cost))")
-                }
-                spendRow("Photoshoots", "\(store.takes.filter { !$0.isVideo }.count) stills", "−\(Pricing.money(store.takes.filter { !$0.isVideo }.reduce(0) { $0 + $1.cost }))")
-            }
-        }
-    }
-
-    private func spendRow(_ a: String, _ b: String, _ c: String) -> some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(a).frame(maxWidth: .infinity, alignment: .leading)
-                Text(b).foregroundStyle(t.muted).frame(width: 200, alignment: .leading)
-                Text(c).font(t.mono(13)).frame(width: 100, alignment: .trailing)
-            }
-            .font(t.body(14))
-            .padding(12)
-            Rectangle().fill(t.isD ? Color(hex: 0x111111) : t.line).frame(height: t.lineWidth)
         }
     }
 }

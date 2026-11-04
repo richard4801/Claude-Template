@@ -1,3 +1,4 @@
+import AVKit
 import MuseCore
 import SwiftUI
 
@@ -16,10 +17,13 @@ struct QueueView: View {
             }
             HStack(spacing: 14) {
                 HStack(spacing: 12) {
-                    LED(on: r != nil).id(r != nil)
+                    let rendering = active.contains { $0.isRunning && !$0.isWaiting }
+                    let paused = active.contains(where: \.isPaused)
+                    LED(on: rendering).id(rendering)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(r != nil ? "H100 80GB · rendering" : "GPU is off").font(t.body(14, .bold))
-                        Muted(r != nil ? "Shuts down automatically 5 min after the queue empties" : "Starts on demand · setup takes 1–2 min from the network volume")
+                        Text(paused ? "Paused · GPU credit low" : rendering ? "H100 80GB · rendering" : r != nil ? "Waiting for a GPU" : "GPU is off").font(t.body(14, .bold))
+                        Muted(paused ? "The studio's RunPod balance is low. Jobs resume by themselves after a top-up."
+                              : r != nil ? "Your own GPU shuts down 3 min after your last job" : "Starts on demand · setup takes 1–2 min from the network volume")
                     }
                     Spacer(minLength: 0)
                 }
@@ -33,9 +37,9 @@ struct QueueView: View {
                 .card()
                 .frame(maxWidth: 300)
                 VStack(alignment: .leading, spacing: 4) {
-                    Lbl("Balance")
-                    Text(Pricing.money(store.balance.balance)).font(t.mono(20))
-                    LinkText("Top up") { store.go(.credits) }
+                    Lbl("My tokens")
+                    (Text("\(store.tokenCount)").font(t.mono(20)) + Text(" · \(Pricing.money(store.balance.balance))").font(t.body(12)).foregroundColor(t.muted))
+                    LinkText(store.isMember ? "Details" : "My tokens") { store.go(.credits) }
                 }
                 .card()
                 .frame(maxWidth: 300)
@@ -115,6 +119,16 @@ struct JobRow: View {
                 Group {
                     if j.isDone {
                         Pill("✓ Done", .good)
+                    } else if j.isPaused {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Pill("Paused", .warn)
+                            Text(Job.pausedLine).font(t.mono(11.5)).foregroundStyle(t.warnInk).lineLimit(2)
+                        }
+                    } else if j.isWaiting, let line = j.waitLine {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Pill(j.queuePosition.map { "#\($0) in line" } ?? "Waiting")
+                            Text(line).font(t.mono(11.5)).foregroundStyle(t.muted)
+                        }
                     } else if j.isRunning {
                         VStack(alignment: .leading, spacing: 4) {
                             ProgressLine(value: j.progress / 100)
@@ -127,7 +141,13 @@ struct JobRow: View {
                     }
                 }
                 .frame(width: 280, alignment: .leading)
-                Text(Pricing.money(j.cost)).font(t.mono(13)).frame(width: 80, alignment: .leading)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(Pricing.money(j.cost)).font(t.mono(13))
+                    if let w = j.warmupCost, w > 0 {
+                        Text("+ \(Pricing.money(w)) warm-up").font(t.mono(10.5)).foregroundStyle(t.muted).help("GPU start-up and model load, charged as its own line")
+                    }
+                }
+                .frame(width: 80, alignment: .leading)
                 HStack(spacing: 4) {
                     if j.isDone { MButton("Review", size: .small) { store.watch(j) } }
                     MoreMenu {
@@ -279,8 +299,14 @@ struct ResultView: View {
                 Breadcrumb(parent: "Gallery", title: take.caption) { store.go(.gallery) }
                     HStack(alignment: .top, spacing: 28) {
                         Spacer(minLength: 0)
-                        Media(ref: take.thumb, caption: take.isVideo ? "0:0\(Int((job?.lengthSec ?? 5.2).rounded())) · 768×1344" : nil, captionIcon: take.isVideo ? "play.fill" : nil)
-                            .frame(height: min(720, max(360, g.size.height - 110)))
+                        Group {
+                            if let v = take.videoUrl, let u = URL(string: v) {
+                                TakePlayer(url: u, caption: take.mediaLine ?? "video")
+                            } else {
+                                Media(ref: take.thumb, caption: take.isVideo ? (take.mediaLine ?? "\(Take.clock(job?.lengthSec ?? 5.2)) · 768×1344") : nil, captionIcon: take.isVideo ? "play.fill" : nil)
+                            }
+                        }
+                        .frame(height: min(720, max(360, g.size.height - 110)))
                         VStack(alignment: .leading, spacing: 16) {
                             HStack(alignment: .top) {
                                 VStack(alignment: .leading, spacing: 4) {
@@ -306,11 +332,16 @@ struct ResultView: View {
                                     ("Outfit", outfit?.name ?? store.currentOutfit?.name ?? "—"),
                                     ("Engine", job?.engineName ?? (take.isVideo ? "Standard" : "Photo")),
                                     ("Steps", job.map { $0.engine == .viggle ? "4" : "\($0.request.steps)" } ?? (take.isVideo ? "10" : "—")),
-                                    ("Cost", Pricing.money(take.cost)),
+                                    ("Cost", Pricing.money(take.cost) + (job?.warmupCost.map { " + \(Pricing.money($0)) warm-up" } ?? "")),
                                     ("Seed", "\(take.seed)\(store.shoot.lockSeed || take.isVideo ? " · locked" : "")"),
                                 ]
-                                ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
-                                    ListRow(title: row.0, last: i == rows.count - 1) { MonoValue(row.1) }
+                                let media: [(String, String)] = take.isVideo ? [
+                                    ("Length", take.durationSec.map { "\(Pricing.trimNum($0))s" } ?? "—"),
+                                    ("Size", take.width.flatMap { w in take.height.map { "\(w)×\($0)" } } ?? "—"),
+                                ] : []
+                                let allRows = rows + media
+                                ForEach(Array(allRows.enumerated()), id: \.offset) { i, row in
+                                    ListRow(title: row.0, last: i == allRows.count - 1) { MonoValue(row.1) }
                                 }
                             }
                             HStack {
@@ -345,5 +376,40 @@ struct ResultView: View {
         } else {
             Page { Note("Nothing to show yet. Finished takes appear in the Gallery.") }
         }
+    }
+}
+
+/// A finished take's video (Take.videoUrl), played with AVKit.
+struct TakePlayer: View {
+    @Environment(\.theme) private var t
+    var url: URL
+    var caption: String
+    @State private var player: AVPlayer?
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            if let player {
+                VideoPlayer(player: player)
+            } else {
+                Rectangle().fill(Color.black)
+            }
+            Text(caption).font(t.mono(11.5)).foregroundStyle(.white)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Capsule().fill(.black.opacity(0.55)))
+                .padding(10)
+                .allowsHitTesting(false)
+        }
+        .aspectRatio(768.0 / 1344.0, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: t.isA ? 0 : t.cardRadius * 0.6))
+        .onAppear { load() }
+        .onChange(of: url) { load() }
+        .onDisappear { player?.pause() }
+    }
+
+    private func load() {
+        player?.pause()
+        let p = AVPlayer(url: url)
+        p.actionAtItemEnd = .pause
+        player = p
     }
 }

@@ -89,6 +89,8 @@ public enum Pricing {
     public static func secPerLen(_ len: Double) -> Double { secPerStep5s * pow(len / baseLen, 1.3) }
 
     public static func clampSteps(_ n: Int) -> Int { min(stepsMax, max(stepsMin, n)) }
+    /// A price in whole wallet tokens (rounded up, like the server's hold). 1 token = $0.01 by default.
+    public static func tokens(_ usd: Double, _ tokenUsd: Double = 0.01) -> Int { Int((usd / max(tokenUsd, 0.0001) - 1e-6).rounded(.up)) }
     public static func clampTakes(_ n: Int) -> Int { min(takesMax, max(1, n)) }
 
     /// Estimated minutes for ONE take.

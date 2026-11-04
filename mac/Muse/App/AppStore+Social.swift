@@ -72,7 +72,7 @@ extension AppStore {
             return
         }
         if LoraPricing.setCost > balance.balance + 1e-9 {
-            showToast("Not enough balance to build the training set", action: "Top up") { [weak self] in self?.go(.credits) }
+            notEnough("to build the training set")
             return
         }
         perform { [self] in
@@ -101,7 +101,7 @@ extension AppStore {
             return
         }
         if LoraPricing.trainCost > balance.balance + 1e-9 {
-            showToast("Not enough balance to train", action: "Top up") { [weak self] in self?.go(.credits) }
+            notEnough("to train")
             return
         }
         perform { [self] in

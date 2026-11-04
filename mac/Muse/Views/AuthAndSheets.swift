@@ -14,7 +14,7 @@ struct AuthView: View {
     var body: some View {
         @Bindable var store = store
         let up = store.authTab == .signUp
-        let ok = store.attest[0] && store.attest[1]
+        let ok = store.attest[0] && store.attest[1] && (store.isDemo || !store.authInvite.trimmingCharacters(in: .whitespaces).isEmpty)
         VStack(spacing: 0) {
             HStack(spacing: 14) {
                 Color.clear.frame(width: 64, height: 1)
@@ -48,17 +48,30 @@ struct AuthView: View {
                     VStack(alignment: .leading, spacing: 14) {
                         Eyebrow(up ? "Create account" : "Welcome back").styled()
                         H1(up ? "Join MUSE" : "Sign in")
+                        if up && !store.isDemo {
+                            Muted("MUSE is invite-only. Use the email your invite was sent to and the code from the studio owner.", size: 13)
+                        }
                         Group {
-                            SSOButton(icon: "apple.logo", title: "Continue with Apple") { store.signInSSO("Apple") }
-                            SSOButton(icon: "g.circle", title: "Continue with Google") { store.signInSSO("Google") }
-                            HStack {
-                                Rectangle().fill(t.line).frame(height: 1)
-                                Text("or with email").font(t.body(12)).foregroundStyle(t.muted).fixedSize()
-                                Rectangle().fill(t.line).frame(height: 1)
+                            if store.isDemo {
+                                // Apple and Google sign-in are mocked: demo mode only.
+                                SSOButton(icon: "apple.logo", title: "Continue with Apple") { store.signInSSO("Apple") }
+                                SSOButton(icon: "g.circle", title: "Continue with Google") { store.signInSSO("Google") }
+                                HStack {
+                                    Rectangle().fill(t.line).frame(height: 1)
+                                    Text("or with email").font(t.body(12)).foregroundStyle(t.muted).fixedSize()
+                                    Rectangle().fill(t.line).frame(height: 1)
+                                }
                             }
                             TextField("you@studio.com", text: $store.authEmail).fieldChrome().textContentType(.username)
-                            SecureField("Password", text: $store.authPassword).fieldChrome().textContentType(.password)
+                            SecureField(up && !store.isDemo ? "Password (8 or more characters)" : "Password", text: $store.authPassword).fieldChrome()
+                                .textContentType(.password)
                                 .onSubmit { up ? store.signUp() : store.signIn() }
+                            if up {
+                                TextField(store.isDemo ? "Invite code (not needed in demo mode)" : "Invite code · MUSE-XXXX-XXXX-XXXX", text: $store.authInvite)
+                                    .fieldChrome()
+                                    .font(t.mono(14))
+                                    .onSubmit { store.signUp() }
+                            }
                         }
                         if up {
                             ForEach(0..<2, id: \.self) { i in
@@ -79,17 +92,34 @@ struct AuthView: View {
                                 .buttonStyle(.plain)
                             }
                         }
-                        MButton(store.authBusy ? "…" : up ? "Create account" : "Sign in", kind: .primary, size: .big, off: up && !ok) {
+                        if let err = store.authError {
+                            Note(icon: "exclamationmark.circle", warn: true, err)
+                        }
+                        MButton(store.authBusy || store.restoring ? "…" : up ? "Create account" : "Sign in", kind: .primary, size: .big, off: up && !ok) {
                             up ? store.signUp() : store.signIn()
                         }
                         HStack(spacing: 4) {
                             Text(up ? "Already have an account?" : "New here?").font(t.body(12)).foregroundStyle(t.muted)
                             LinkText(up ? "Sign in" : "Create an account") {
+                                store.authError = nil
                                 withAnimation { store.authTab = up ? .signIn : .signUp }
                             }
                         }
+                        VStack(alignment: .leading, spacing: 14) {
+                        HStack(spacing: 4) {
+                            Image(systemName: store.isDemo ? "play.circle" : "server.rack").font(.system(size: 11))
+                            Text(store.isDemo ? "Demo mode · nothing leaves this Mac" : "Server: \(store.serverHost)").font(t.body(12))
+                            Text("·").font(t.body(12))
+                            LinkText(store.isDemo ? "Use the MUSE server" : "Try demo mode") {
+                                store.authError = nil
+                                store.dataSource = store.isDemo ? .http : .fake
+                                store.applyDataSource()
+                            }
+                        }
+                        .foregroundStyle(t.muted)
                         Text("By continuing you agree to the MUSE Terms and Acceptable Use Policy.").font(t.body(12)).foregroundStyle(t.muted)
                         Text("Build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?")").font(t.mono(11)).foregroundStyle(t.muted.opacity(0.7))
+                        }
                     }
                     .frame(maxWidth: 420, alignment: .leading)
                     .padding(.horizontal, 56)

@@ -76,6 +76,7 @@ struct Shell: View {
         case .credits: CreditsView()
         case .lora: LoraView()
         case .posts: PostsView()
+        case .members: MembersView()
         }
     }
 }
@@ -148,11 +149,23 @@ struct TitleBar: View {
             .layoutPriority(1)
             Spacer(minLength: 12)
             HStack(spacing: 10) {
+                if let p = store.uploadProgress {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.up.circle").font(.system(size: 12))
+                        Text("\(Int((p * 100).rounded()))%").font(t.mono(12))
+                        ProgressLine(value: p, height: 4).frame(width: 60)
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(height: 30)
+                    .background(Capsule().fill(t.surface2))
+                    .help(store.uploadLabel)
+                    .transition(.opacity)
+                }
                 if let r = store.runningJob {
                     Button { store.go(.queue) } label: {
                         HStack(spacing: 8) {
-                            LED(on: true)
-                            Text(r.step == 0 ? "starting" : "step \(r.step)/\(r.totalSteps)").font(t.mono(12))
+                            LED(on: !r.isPaused)
+                            Text(r.isPaused ? "paused" : r.step == 0 ? (r.queuePosition.map { "#\($0) in line" } ?? "starting") : "step \(r.step)/\(r.totalSteps)").font(t.mono(12))
                             ProgressLine(value: r.progress / 100, height: 4).frame(width: 60)
                         }
                         .padding(.horizontal, 10)
@@ -160,13 +173,20 @@ struct TitleBar: View {
                         .background(Capsule().fill(t.surface2))
                     }
                     .buttonStyle(.plain)
-                    .help(r.phase)
+                    .help(r.waitLine ?? r.phase)
                 }
                 ThemeDots()
                 Menu {
                     Text(store.user?.studioName ?? "Studio")
+                    if let u = store.user {
+                        Text(u.email + (u.role.map { " · \($0)" } ?? ""))
+                    }
                     Divider()
-                    Button("Credits") { store.go(.credits) }
+                    Button("My tokens · \(store.tokenCount)") { store.go(.credits) }
+                    if store.isOwner {
+                        Button("Members") { store.go(.members) }
+                        Button("Invite someone…") { store.go(.members) }
+                    }
                     Button("Settings") { store.go(.settings) }
                     Divider()
                     Button("Sign out", role: .destructive) { store.signOut() }
@@ -209,6 +229,14 @@ struct Sidebar: View {
             }
             NavRow(icon: "plus", title: "New video", on: false, compact: compact, trailing: .key("⌘N")) { store.go(.studio) }
             NavRow(icon: "person.badge.plus", title: "New model", on: store.screen == .create, compact: compact, trailing: .none) { store.go(.create) }
+            if store.isOwner {
+                if !compact {
+                    Text("STUDIO").font(t.mono(10.5)).tracking(1).foregroundStyle(t.isD ? .white.opacity(0.75) : t.muted).padding(.horizontal, 10).padding(.top, 16).padding(.bottom, 6)
+                } else {
+                    Divider().padding(.vertical, 8)
+                }
+                NavRow(icon: "person.2", title: "Members", on: store.screen == .members, compact: compact, trailing: .key("⌘8")) { store.go(.members) }
+            }
             Spacer()
             NavRow(icon: "slider.horizontal.3", title: "Settings", on: store.screen.navParent == .settings, compact: compact, trailing: .key("⌘,")) { store.go(.settings) }
             if !compact { BalanceBox().padding(.top, 8) }
@@ -301,7 +329,7 @@ struct NavRow: View {
     }
 }
 
-/// GPU balance box at the bottom of the sidebar (`.balbox`).
+/// "My tokens" at the bottom of the sidebar (`.balbox`). Members see their wallet; the owner sees what they can spend or send.
 struct BalanceBox: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
@@ -310,11 +338,11 @@ struct BalanceBox: View {
         let onDark = t.isC
         Button { store.go(.credits) } label: {
             VStack(alignment: .leading, spacing: 4) {
-                Lbl("GPU balance", color: onDark ? .white.opacity(0.75) : nil)
-                Text(Pricing.money(store.balance.balance))
+                Lbl("My tokens", color: onDark ? .white.opacity(0.75) : nil)
+                Text("\(store.tokenCount)")
                     .font(t.isA ? Fonts.font("Instrument Serif", 34, .regular) : t.mono(22, .medium))
                     .foregroundStyle(onDark ? .white : t.ink)
-                Text("≈ \(Pricing.videosLeft(store.balance.balance)) videos at 10 steps").font(t.body(12)).foregroundStyle(onDark ? .white.opacity(0.75) : t.muted)
+                Text("\(Pricing.money(store.balance.balance)) · ≈ \(Pricing.videosLeft(store.balance.balance)) videos").font(t.body(12)).foregroundStyle(onDark ? .white.opacity(0.75) : t.muted)
                 GeometryReader { g in
                     ZStack(alignment: .leading) {
                         Capsule().fill(onDark ? .white.opacity(0.25) : t.line)

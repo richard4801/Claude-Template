@@ -25,6 +25,11 @@ public actor FakeMuseAPI: MuseAPI {
     private var loraTasks: [String: Task<Void, Never>] = [:]
     private var accounts: [String: [Account]] = [:]
     private var posts: [Post] = []
+    /// Demo mode signs you in as the studio owner, with two demo members to send tokens to.
+    private var signedIn: User?
+    private var members: [Member] = FakeMuseAPI.demoMembers()
+    private var engine = ImageEngine(provider: "simulated", model: "bundled-stills", available: ["simulated": true, "fal": false, "custom-http": true])
+    private var studio = StudioSettings()
 
     /// - Parameters:
     ///   - speed: simulation speed; 0 freezes the queue (tests).
@@ -42,6 +47,7 @@ public actor FakeMuseAPI: MuseAPI {
         for (meta, id) in [(SampleData.sampleMeta, SampleData.sampleClip), (SampleData.badMeta, SampleData.badClip)] {
             clips[id] = Clip(id: id, name: meta.name, durationSec: meta.durationSec, width: meta.width, height: meta.height, fps: meta.fps, checks: ClipRules.checks(meta))
         }
+        bal = FakeMuseAPI.ownerView(bal, members: members)
     }
 
     public nonisolated func events() -> AsyncStream<ApiEvent> { hub.stream() }
@@ -52,7 +58,9 @@ public actor FakeMuseAPI: MuseAPI {
     public func signIn(_ req: SignInRequest) async throws -> AuthResponse {
         let email = req.email.trimmingCharacters(in: .whitespaces)
         if email.isEmpty { throw ApiError("bad_request", "Enter your email") }
-        return AuthResponse(token: "fake-token", user: User(id: "u1", studioName: Self.studio(from: email), email: email))
+        let u = User(id: "u1", studioName: Self.studio(from: email), email: email, role: "owner")
+        signedIn = u
+        return AuthResponse(token: "fake-token", user: u)
     }
 
     public func signUp(_ req: SignUpRequest) async throws -> AuthResponse {
@@ -60,7 +68,122 @@ public actor FakeMuseAPI: MuseAPI {
         let email = req.email.trimmingCharacters(in: .whitespaces)
         if email.isEmpty { throw ApiError("bad_request", "Enter your email") }
         let name = req.studioName.trimmingCharacters(in: .whitespaces)
-        return AuthResponse(token: "fake-token", user: User(id: "u1", studioName: name.isEmpty ? Self.studio(from: email) : name, email: email))
+        let u = User(id: "u1", studioName: name.isEmpty ? Self.studio(from: email) : name, email: email, role: "owner")
+        signedIn = u
+        return AuthResponse(token: "fake-token", user: u)
+    }
+
+    public func signOut() { signedIn = nil }
+
+    public func me() throws -> User {
+        guard let u = signedIn else { throw ApiError("unauthorized", "Sign in to continue") }
+        return u
+    }
+
+    // MARK: Tokens and members (demo: you are the owner; the "RunPod balance" is the balance plus what members hold)
+
+    static func demoMembers() -> [Member] {
+        let now = nowMs()
+        return [
+            Member(id: "u_maya", email: "maya@studio.com", tokens: 250, usd: 2.5, todayUsd: 0.13, monthUsd: 1.94, lastActiveAt: now - 1_800_000, createdAt: now - 864_000_000),
+            Member(id: "u_theo", email: "theo@studio.com", tokens: 40, usd: 0.4, monthUsd: 0.67, lastActiveAt: now - 90_000_000, createdAt: now - 432_000_000),
+        ]
+    }
+
+    static func ownerView(_ b: Balance, members: [Member]) -> Balance {
+        var out = b
+        let unspent = members.reduce(0.0) { $0 + Double($1.tokens + $1.heldTokens) * b.tokenUsd }
+        out.role = "owner"
+        out.tokens = Int((b.balance / b.tokenUsd + 1e-6).rounded(.down))
+        out.balanceSource = "simulated"
+        out.availableToSend = b.balance
+        out.runpodBalance = ((b.balance + unspent) * 100).rounded() / 100
+        out.perUserDayLimit = 10
+        return out
+    }
+
+    private func syncOwner() {
+        bal = Self.ownerView(bal, members: members)
+        hub.emit(ApiEvent(type: "balance", balance: bal))
+        hub.emit(ApiEvent(type: "wallet", wallet: walletNow()))
+    }
+
+    private func walletNow() -> Wallet {
+        let unspent = members.reduce(0.0) { $0 + Double($1.tokens + $1.heldTokens) * bal.tokenUsd }
+        return Wallet(userId: signedIn?.id ?? "u1", role: "owner", tokens: bal.tokenCount, usd: bal.balance, todayUsd: bal.today ?? 0, monthUsd: bal.month,
+                      tokenUsd: bal.tokenUsd, balanceSource: "simulated", availableToSend: bal.balance, runpodBalance: bal.runpodBalance, membersUnspentUsd: unspent)
+    }
+
+    public func wallet() -> Wallet { walletNow() }
+
+    public func createInvite(_ req: InviteRequest) -> Invite {
+        let alphabet = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
+        let s = String((0..<12).map { _ in alphabet.randomElement()! })
+        let code = "MUSE-\(s.prefix(4))-\(s.dropFirst(4).prefix(4))-\(s.suffix(4))"
+        return Invite(code: code, id: "inv_" + shortId(), email: req.email, role: req.role ?? "member", expiresAt: nowMs() + Int64(req.days ?? 14) * 86_400_000)
+    }
+
+    public func listMembers() -> [Member] {
+        let owner = Member(id: signedIn?.id ?? "u1", email: signedIn?.email ?? "you@studio.com", role: "owner", todayUsd: bal.today ?? 0, monthUsd: bal.month,
+                           lastActiveAt: nowMs(), capPerDay: studio.capPerUserDay)
+        return [owner] + members
+    }
+
+    private func memberIndex(_ id: String) throws -> Int {
+        guard let i = members.firstIndex(where: { $0.id == id }) else { throw ApiError("not_found", "Member not found") }
+        return i
+    }
+
+    public func updateMember(id: String, _ patch: MemberPatch) throws -> Member {
+        let i = try memberIndex(id)
+        switch patch.capPerJob { case .set(let v)?: members[i].capPerJob = v; case .reset?: members[i].capPerJob = studio.capPerJob; case nil: break }
+        switch patch.capPerDay { case .set(let v)?: members[i].capPerDay = v; case .reset?: members[i].capPerDay = studio.capPerUserDay; case nil: break }
+        if let d = patch.disabled { members[i].disabled = d }
+        return members[i]
+    }
+
+    public func sendTokens(_ move: TokenMove) throws -> TokenMoveResult {
+        if move.tokens <= 0 { throw ApiError("bad_request", "Send at least 1 token") }
+        let i = try memberIndex(move.userId)
+        if Double(move.tokens) * bal.tokenUsd > bal.balance + 1e-9 { throw ApiError("over_allocation", "Only \(bal.tokenCount) tokens are available to send") }
+        members[i].tokens += move.tokens
+        members[i].usd = Double(members[i].tokens) * bal.tokenUsd
+        bal.balance = max(0, ((bal.balance - Double(move.tokens) * bal.tokenUsd) * 1e8).rounded() / 1e8)
+        syncOwner()
+        return TokenMoveResult(wallet: walletNow(), member: members[i])
+    }
+
+    public func takeBackTokens(_ move: TokenMove) throws -> TokenMoveResult {
+        if move.tokens <= 0 { throw ApiError("bad_request", "Take back at least 1 token") }
+        let i = try memberIndex(move.userId)
+        if move.tokens > members[i].tokens { throw ApiError("bad_request", "\(members[i].email) has only \(members[i].tokens) unused tokens") }
+        members[i].tokens -= move.tokens
+        members[i].usd = Double(members[i].tokens) * bal.tokenUsd
+        bal.balance += Double(move.tokens) * bal.tokenUsd
+        syncOwner()
+        return TokenMoveResult(wallet: walletNow(), member: members[i])
+    }
+
+    public func imageEngine() -> ImageEngine { engine }
+
+    public func setImageEngine(_ req: ImageEngineRequest) throws -> ImageEngine {
+        guard engine.isAvailable(req.provider) else { throw ApiError("bad_request", "\(req.provider) is not set up on the server") }
+        if req.provider == "custom-http" && !(req.url ?? "").hasPrefix("https://") { throw ApiError("bad_request", "Use an https:// URL") }
+        engine.provider = req.provider
+        engine.model = req.model ?? (req.provider == "simulated" ? "bundled-stills" : engine.model)
+        engine.url = req.provider == "custom-http" ? req.url : nil
+        return engine
+    }
+
+    public func studioSettings() -> StudioSettings { studio }
+
+    public func updateStudioSettings(_ patch: StudioSettingsPatch) throws -> StudioSettings {
+        if let g = patch.maxGpus { guard (0...16).contains(g) else { throw ApiError("bad_request", "Max GPUs must be 0–16") }; studio.maxGpus = g }
+        if let p = patch.overheadPayer { studio.overheadPayer = p == "owner" ? "owner" : "user" }
+        if let v = patch.capPerJob { studio.capPerJob = v; bal.perJobLimit = v }
+        if let v = patch.capPerDay { studio.capPerDay = v; bal.perDayLimit = v }
+        if let v = patch.capPerUserDay { studio.capPerUserDay = v }
+        return studio
     }
 
     static func studio(from email: String) -> String {
@@ -403,7 +526,8 @@ public actor FakeMuseAPI: MuseAPI {
 
     // MARK: Uploads
 
-    public func uploadImage(name: String, data: Data, mime: String) throws -> ImageRef {
+    public func uploadImage(name: String, data: Data, mime: String, progress: UploadProgress?) throws -> ImageRef {
+        progress?(1)
         guard let dir = storeDir else { return ImageRef(url: "data:\(mime);base64,\(data.base64EncodedString())") }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let ext = mime.contains("png") ? "png" : mime.contains("heic") ? "heic" : "jpg"
@@ -412,7 +536,8 @@ public actor FakeMuseAPI: MuseAPI {
         return ImageRef(url: f.absoluteString)
     }
 
-    public func uploadClip(_ meta: ClipMeta, file: URL?) -> Clip {
+    public func uploadClip(_ meta: ClipMeta, file: URL?, progress: UploadProgress?) -> Clip {
+        progress?(1)
         let id: String
         if meta == SampleData.sampleMeta { id = SampleData.sampleClip } else if meta == SampleData.badMeta { id = SampleData.badClip } else { id = "clip_" + shortId() }
         let c = Clip(id: id, name: meta.name, durationSec: meta.durationSec, width: meta.width, height: meta.height, fps: meta.fps, checks: ClipRules.checks(meta))
@@ -585,6 +710,7 @@ public actor FakeMuseAPI: MuseAPI {
     public func topUp(_ req: TopUpRequest) throws -> Balance {
         if req.amount <= 0 { throw ApiError("bad_request", "Pick an amount") }
         bal.balance += req.amount
+        bal = Self.ownerView(bal, members: members)
         hub.emit(ApiEvent(type: "balance", balance: bal))
         return bal
     }
@@ -598,6 +724,7 @@ public actor FakeMuseAPI: MuseAPI {
         bal.month += cost
         bal.today = (bal.today ?? 0) + cost
         bal.videos = Pricing.videosLeft(bal.balance)
+        bal = Self.ownerView(bal, members: members)
     }
 
     private func refund(_ cost: Double) {
@@ -605,6 +732,7 @@ public actor FakeMuseAPI: MuseAPI {
         bal.month = max(0, bal.month - cost)
         bal.today = max(0, (bal.today ?? 0) - cost)
         bal.videos = Pricing.videosLeft(bal.balance)
+        bal = Self.ownerView(bal, members: members)
     }
 
     private func model(_ id: String) throws -> MuseModel {

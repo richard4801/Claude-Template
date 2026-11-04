@@ -24,15 +24,40 @@ jobs:
           swift --version
           brew install xcodegen
 
-      - name: MuseCore tests (including the contract test against server/mock)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/api/package-lock.json
+
+      # The real API (server/api) on this runner only: embedded Postgres in memory, local storage, simulated GPU and
+      # images, dev seed. The contract tests create accounts and move tokens, so they never run against the hosted server.
+      - name: Start the real API locally
+        run: |
+          cd server/api
+          npm ci --no-audit --no-fund
+          (PORT=8798 PUBLIC_URL=http://127.0.0.1:8798 node --import tsx scripts/test-server.ts > /tmp/api.log 2>&1 &)
+          for i in $(seq 1 90); do
+            if curl -sf http://127.0.0.1:8798/health > /dev/null; then echo "API is up"; exit 0; fi
+            sleep 1
+          done
+          cat /tmp/api.log
+          exit 1
+
+      - name: MuseCore tests (contract tests against server/api and server/mock)
         run: |
           if [ -f server/mock/server.js ]; then
             (cd server/mock && PORT=8799 node server.js > /tmp/mock.log 2>&1 &)
             sleep 2
             export MUSE_MOCK_URL=http://localhost:8799
           fi
+          export MUSE_API_URL=http://127.0.0.1:8798
           cd mac/MuseCore
           swift test
+
+      - name: Server logs
+        if: failure()
+        run: tail -n 200 /tmp/api.log /tmp/mock.log || true
 
       - name: Generate Xcode project
         working-directory: mac

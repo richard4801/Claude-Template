@@ -397,12 +397,19 @@ struct InspectorFooter: View {
         VStack(spacing: 10) {
             HStack(spacing: 8) {
                 est("Time", Pricing.fmtMin(Pricing.totalMin(spec)))
-                est("Cost", Pricing.money(total))
-                est("After", Pricing.money(max(0, store.balance.balance - total)))
+                est("Cost", store.isMember ? "\(Pricing.tokens(total, store.balance.tokenUsd)) tokens" : Pricing.money(total))
+                est("After", store.isMember ? "\(max(0, store.tokenCount - Pricing.tokens(total, store.balance.tokenUsd)))" : Pricing.money(max(0, store.balance.balance - total)))
             }
             if store.lowBalance && !store.clipBad {
-                Note(icon: "creditcard", warn: true, text: Text("Not enough balance for this render. ") + Text("Top up").bold())
-                    .onTapGesture { store.go(.credits) }
+                if store.isMember {
+                    Note(icon: "circle.hexagongrid", warn: true, store.notEnoughMessage)
+                } else {
+                    Note(icon: "creditcard", warn: true, text: Text("Not enough balance for this render. ") + Text("My tokens").bold())
+                        .onTapGesture { store.go(.credits) }
+                }
+            }
+            if store.studioSettings?.lowBalance == true || store.jobs.contains(where: \.isPaused) {
+                Note(icon: "pause.circle", warn: true, "\(Job.pausedLine). New renders wait until it's topped up.")
             }
             MButton(store.clipBad ? "Fix the clip to continue" : store.generating ? "Starting…" : Pricing.genLabel(spec), kind: .primary, size: .big, off: blocked) {
                 store.generate()

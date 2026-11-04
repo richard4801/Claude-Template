@@ -2,13 +2,31 @@ import Foundation
 
 /// The backend contract (plans/api.md). Two implementations:
 ///  - `FakeMuseAPI`: in-process, no server. The app's default data source.
-///  - `HTTPMuseAPI`: REST + Server-Sent Events against server/mock (or the real backend later).
+///  - `HTTPMuseAPI`: REST + Server-Sent Events against the real API (`server/api`, the default) or server/mock.
 /// Settings → Developer switches between them.
 public protocol MuseAPI: AnyObject, Sendable {
-    // Auth (stub: any email works; sign-up requires both attestations)
+    // Auth. The real API is invite-only (sign-up needs `inviteCode`); sign-up always requires both attestations.
     func signIn(_ req: SignInRequest) async throws -> AuthResponse
     func signUp(_ req: SignUpRequest) async throws -> AuthResponse
     func setToken(_ token: String?) async
+    /// POST /v1/auth/signout: revokes this session on the server.
+    func signOut() async throws
+    /// GET /v1/auth/me: who the stored token belongs to (restores the session on launch).
+    func me() async throws -> User
+
+    // Tokens, members and studio settings (real API; owner-only calls answer owner_only for members)
+    func wallet() async throws -> Wallet
+    func createInvite(_ req: InviteRequest) async throws -> Invite
+    func listMembers() async throws -> [Member]
+    func updateMember(id: String, _ patch: MemberPatch) async throws -> Member
+    /// POST /v1/wallets/transfer: the owner sends tokens to a member.
+    func sendTokens(_ move: TokenMove) async throws -> TokenMoveResult
+    /// POST /v1/wallets/reclaim: the owner takes unused tokens back.
+    func takeBackTokens(_ move: TokenMove) async throws -> TokenMoveResult
+    func imageEngine() async throws -> ImageEngine
+    func setImageEngine(_ req: ImageEngineRequest) async throws -> ImageEngine
+    func studioSettings() async throws -> StudioSettings
+    func updateStudioSettings(_ patch: StudioSettingsPatch) async throws -> StudioSettings
 
     // Models and character sheets
     func listModels() async throws -> [MuseModel]
@@ -50,10 +68,10 @@ public protocol MuseAPI: AnyObject, Sendable {
     /// Attaches a generated preview to the model.
     func saveOutfit(outfitId: String) async throws -> Outfit
 
-    // Uploads
-    func uploadImage(name: String, data: Data, mime: String) async throws -> ImageRef
+    // Uploads (HTTP: presign → PUT → confirm, falling back to a multipart upload). `progress` reports 0…1.
+    func uploadImage(name: String, data: Data, mime: String, progress: UploadProgress?) async throws -> ImageRef
     /// Registers a source clip and runs the clip checks. `file` is nil for the sample clips.
-    func uploadClip(_ meta: ClipMeta, file: URL?) async throws -> Clip
+    func uploadClip(_ meta: ClipMeta, file: URL?, progress: UploadProgress?) async throws -> Clip
 
     // Jobs and takes
     func listJobs() async throws -> [Job]
@@ -75,6 +93,16 @@ public protocol MuseAPI: AnyObject, Sendable {
 
     /// Live job progress, balance, generation, LoRA and post updates. Each call returns a new subscription.
     func events() -> AsyncStream<ApiEvent>
+}
+
+extension MuseAPI {
+    public func uploadImage(name: String, data: Data, mime: String) async throws -> ImageRef {
+        try await uploadImage(name: name, data: data, mime: mime, progress: nil)
+    }
+
+    public func uploadClip(_ meta: ClipMeta, file: URL?) async throws -> Clip {
+        try await uploadClip(meta, file: file, progress: nil)
+    }
 }
 
 /// Fan-out of events to any number of subscribers.
