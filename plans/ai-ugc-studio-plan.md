@@ -1,6 +1,6 @@
 # AI UGC Studio — Project Plan
 
-_Status: **paused until funds are available** · Drafted 2026-10-20_
+_Status: **video testing in progress** · Drafted 2026-10-20 · Updated 2026-11-04 (see `plans/video-test-results.md`)_
 
 ## 1. Goal
 Build our own system (no OpenArt or similar third-party apps) that can:
@@ -17,16 +17,18 @@ Target quality: as close to perfect realism as possible. Known weak spots to wat
 | Topic | Decision |
 |---|---|
 | Hardware | M1 MacBook runs the **app only**. AI work runs on a **rented cloud GPU** (an M3 wouldn't change this; these models need NVIDIA GPUs). |
-| Video model | **MiniMax H3 (Hailuo 3.0)**, open weights, 33B, the **Ref2VA** (reference-to-video+audio) variant. To be confirmed by the test phase. |
+| Video model | **MiniMax H3 (Hailuo 3.0) Ref2VA, confirmed by testing (Nov 2026).** True swap with real motion and timing kept. Beat Wan2.2-Animate-2 on realism. Quality bar: full model, 30 steps, 768×1344. |
+| Lip sync | **LatentSync 1.6**, an optional step for talking/singing clips only (~3–6 min on an RTX 4090). |
+| Open issue | **Speed:** ~45 min per 5s clip at the quality bar on an H100, against a target of ≤15 min. See the test results file. |
 | Interface | **Native Mac app**, no ComfyUI or node graphs. |
 | Cloud | RunPod or Vast.ai, pay-per-use, GPU shuts down automatically when idle. |
 
 ## 3. MiniMax H3: facts & risks
 - **License:** MiniMax H3 Community License. Excludes US, EU, UK, South Korea. **Nigeria is not excluded.** Commercial use is free under $20M annual revenue, **with attribution**.
-- **Resolution:** open weights max out at **768p**. 2K is API-only. Plan: add an open-source upscaler step (768p → 1080p+).
-- **Unproven:** no public demo yet of H3 doing a true performance-preserving body/face swap on existing footage. It may instead *recreate* the clip with the character. **The test phase decides this.**
-- **Hardware need (updated 2026-11-03):** official repo `MiniMaxAI/MiniMax-H3`. Ref2VA **INT8 checkpoint ~34GB** (BF16 ~66GB). INT8 should fit a 48GB card (L40S/A6000, cheaper) or one 80GB card; full BF16 needs 80GB+. Reported figures conflict, so confirm in the test.
-- **4-bit build (added 2026-11-03):** `DiffSynth-Studio/MiniMax-H3-NF4` (via the DiffSynth-Studio GitHub repo) runs on far less memory: 8GB minimum with heavy offloading (slow), 12–24GB more practical. Needs NVIDIA/CUDA, so **not the M1**. Lower quality than INT8/BF16 is expected. **Test NF4 on a cheap 24GB card (RTX 4090/3090) against INT8 on 48GB**; pick the cheapest that meets the realism bar.
+- **Resolution:** open weights max out at **768p**. 2K is API-only. Plan: add an open-source upscaler step (768p → 1080p+). _Tested: 768 short side is needed for a sharp face; 480p blurs and warps it._
+- ~~Unproven~~ **Proven (2026-11-03):** H3 does a true performance-preserving swap at 30 steps: background, hands and timing are kept. At 4 steps (Turbo LoRA v0.1) it instead *recreates* the clip loosely, so that setting is not usable.
+- **Hardware need (measured 2026-11-04):** official repo `MiniMaxAI/MiniMax-H3` ships BF16 only (transformer 66GB, text encoder 67GB; we use the 15GB NF4 text encoder instead). On an H100 80GB, peak VRAM was 58GB for a 5s clip and 72GB for a 6s clip with light offload. Int8/FP8 versions come from `Comfy-Org/MiniMax-H3` and are only ~10–14% faster.
+- **4-bit build:** `DiffSynth-Studio/MiniMax-H3-NF4`. _Tested 2026-11-03:_ it works on a 48GB card (33.5GB peak at 480p), but took 2h13m for 5s, so it is ❌ not viable for production.
 - **Commercial attribution:** the license reportedly requires commercial products to **display "MiniMax H3" in their UI**. Add this to the app (and to the Phase 2 subscription product).
 - **Rules:** the acceptable use policy bans using real people's likeness without consent. Use original AI characters or ourselves only. Label AI content on TikTok.
 
@@ -66,7 +68,7 @@ Inspired by @hamzzythecreator's sponsored skit (Cardcosmic ad) where an AI Bugat
 **One-time**
 | Item | Cost |
 |---|---|
-| Video test phase | $10–20 |
+| Video test phase | $10–20 (spent ~$12 by 2026-11-04) |
 | Image test phase | ~$10 |
 | Per character LoRA training | $5–15 |
 | Mac app | $0 |
@@ -75,7 +77,8 @@ Inspired by @hamzzythecreator's sponsored skit (Cardcosmic ad) where an AI Bugat
 | Item | Cost |
 |---|---|
 | Cloud storage for model files (100–150GB) | $7–15 |
-| GPU time (~$2–3/hr, 10–15s clips, ~5–10 min each incl. retakes) | usage-based |
+| GPU time (H100 ~$4/hr; measured ~45 min per 5s clip at the quality bar today, so ~$3/clip; target ≤15 min ≈ $1/clip) | usage-based |
+| Network volume for models + environment (cuts pod setup from ~12 min to ~1–2 min) | $5–7 |
 
 | Usage | ~Monthly total |
 |---|---|
@@ -115,9 +118,9 @@ Inspired by @hamzzythecreator's sponsored skit (Cardcosmic ad) where an AI Bugat
 - [ ] (Optional) Use `plans/influencer-account-partner-agreement.md` for any partner-run account (Canada contact, girlfriend's influencer, etc.).
 
 ## 9. Steps when funds arrive
-1. Create a RunPod account and fund $15–20.
-2. **Video test:** include the NF4-vs-INT8 quality/cost comparison.
-    run MiniMax H3 Ref2VA on one of our clips plus one dedicated swap model for comparison. Judge realism, lip sync, and hands.
+1. ~~Create a RunPod account and fund $15–20.~~ Done.
+2. ~~**Video test**~~ Done (2026-11-03/04). H3 Ref2VA wins; LatentSync handles lip sync. Results, settings and gotchas are in `plans/video-test-results.md`.
+2b. **Speed:** get a 5s clip to ≤15 min without losing faithfulness (FlashAttention 3, 15–20 steps, B200, parallel GPUs). Then test a new background from a photo.
 3. **Image test:** compare 1–2 image models against the reference folder.
 3b. **Object-insertion test:** recreate a Bugatti-style shot with both workflows (edit-then-animate vs. insert-into-video).
 4. Pick the winners and lock in settings.
