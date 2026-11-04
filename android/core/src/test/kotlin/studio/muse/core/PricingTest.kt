@@ -75,3 +75,18 @@ class PricingTest {
         assertEquals("00:46:00", formatTimecode(2760.0))
     }
 }
+
+class RealClipPricingTest {
+    @Test fun realClipLengthDrivesTheFullOption() {
+        val spec = RenderSpec(use = ClipUse.FULL, clipSeconds = 12.0)
+        assertEquals(12.0, spec.lengthSec, 0.0)
+        assertEquals(10 * Pricing.secPerLen(12.0) / 60 + 0.5, Pricing.estMin(spec), 1e-12)
+        assertEquals("Full 12s · ~${Pricing.jsRound(10 * Pricing.secPerLen(12.0) / 60 + 0.5)}m · ${Pricing.money((10 * Pricing.secPerLen(12.0) / 60 + 0.5) / 60 * 3.99)}", Pricing.sourceOption(ClipUse.FULL, 10, 12.0))
+    }
+
+    @Test fun clipsAreCappedAt15SecondsAndShortClipsShortenTheFirstOption() {
+        assertEquals(15.0, RenderSpec(use = ClipUse.FULL, clipSeconds = 22.0).lengthSec, 0.0)
+        assertEquals(3.0, RenderSpec(use = ClipUse.FIRST, clipSeconds = 3.0).lengthSec, 0.0)
+        assertEquals(5.2, RenderSpec(use = ClipUse.FIRST, clipSeconds = 9.0).lengthSec, 0.0)
+    }
+}

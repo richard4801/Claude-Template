@@ -32,7 +32,16 @@ data class RenderSpec(
     val steps: Int = Pricing.STEPS_DEFAULT,
     val lipSync: Boolean = false,
     val takes: Int = 1,
-)
+    /** Real length of the picked clip. Null = the prototype's sample clip (9.4 s). */
+    val clipSeconds: Double? = null,
+) {
+    /** Seconds actually rendered: the first 5.2 s, or the whole clip (max 15 s, H3's single-pass limit). */
+    val lengthSec: Double
+        get() = when (use) {
+            ClipUse.FIRST -> minOf(ClipUse.FIRST.seconds, clipSeconds ?: ClipUse.FIRST.seconds)
+            ClipUse.FULL -> minOf(clipSeconds ?: ClipUse.FULL.seconds, Pricing.MAX_CLIP_SEC)
+        }
+}
 
 /**
  * The pricing math from prototype/app/app.js, ported 1:1 (secPerLen, estMin, estCost, stepsDelta, genLabel).
@@ -51,6 +60,7 @@ object Pricing {
     const val VIGGLE_MIN_5S = 1.6
     const val VIGGLE_COST_5S = 0.13
     const val BASE_LEN = 5.2
+    const val MAX_CLIP_SEC = 15.0
 
     /** Photoshoot: 4 stills. */
     const val SHOOT_COST = 0.12
@@ -67,14 +77,14 @@ object Pricing {
 
     /** Estimated minutes for ONE take. */
     fun estMin(spec: RenderSpec): Double {
-        val len = spec.use.seconds
+        val len = spec.lengthSec
         return if (spec.engine == Engine.VIGGLE) VIGGLE_MIN_5S * (len / BASE_LEN)
         else spec.steps * secPerLen(len) / 60 + GPU_STARTUP_MIN + (if (spec.lipSync) LIP_SYNC_MIN else 0.0)
     }
 
     /** Estimated dollars for ONE take. */
     fun estCost(spec: RenderSpec): Double {
-        val len = spec.use.seconds
+        val len = spec.lengthSec
         return if (spec.engine == Engine.VIGGLE) VIGGLE_COST_5S * (len / BASE_LEN)
         else estMin(spec) / 60 * GPU_PER_HOUR
     }
@@ -94,7 +104,7 @@ object Pricing {
     /** The hint under the steps slider. */
     fun stepsDelta(spec: RenderSpec): String {
         if (spec.steps == STEPS_DEFAULT) return "Same quality as 15 or 20 steps in testing, for less time."
-        val d = (spec.steps - STEPS_DEFAULT) * secPerLen(spec.use.seconds) / 60
+        val d = (spec.steps - STEPS_DEFAULT) * secPerLen(spec.lengthSec) / 60
         val c = d / 60 * GPU_PER_HOUR
         val sign = if (d > 0) "+" else "−"
         val tail = if (spec.steps > STEPS_DEFAULT) " · no visible gain in testing" else " · may lose detail"
@@ -109,11 +119,15 @@ object Pricing {
     }
 
     /** Clip length option on the New video screen: "First 5.2s · ~10m · $0.67" (no lip sync). */
-    fun sourceOption(use: ClipUse, steps: Int): String {
-        val m = steps * secPerLen(use.seconds) / 60 + GPU_STARTUP_MIN
+    fun sourceOption(use: ClipUse, steps: Int, clipSeconds: Double? = null): String {
+        val spec = RenderSpec(use = use, steps = steps, clipSeconds = clipSeconds)
+        val m = steps * secPerLen(spec.lengthSec) / 60 + GPU_STARTUP_MIN
         val c = m / 60 * GPU_PER_HOUR
-        return "${use.label} · ~${jsRound(m)}m · ${money(c)}"
+        val label = if (clipSeconds == null) use.label else if (use == ClipUse.FIRST) "First ${trimNum(spec.lengthSec)}s" else "Full ${trimNum(spec.lengthSec)}s"
+        return "$label · ~${jsRound(m)}m · ${money(c)}"
     }
+
+    private fun trimNum(v: Double): String = toFixed(v, 1).removeSuffix(".0")
 
     /** Fill-missing-angles price, e.g. 3 missing → "$0.06". */
     fun fillAnglesCost(missing: Int): Double = FILL_ANGLE_COST * missing

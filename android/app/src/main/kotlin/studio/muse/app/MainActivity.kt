@@ -1,3 +1,41 @@
 package studio.muse.app
+
+import android.content.Intent
+import android.os.Bundle
 import androidx.activity.ComponentActivity
-class MainActivity : ComponentActivity()
+import androidx.activity.SystemBarStyle
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
+import studio.muse.app.platform.Notifier
+import studio.muse.app.ui.MuseApp
+import studio.muse.app.ui.Routes
+
+class MainActivity : ComponentActivity() {
+    private val pendingRoute = mutableStateOf<String?>(null)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val container = (application as MuseApplication).container
+        pendingRoute.value = intent?.getStringExtra(Notifier.EXTRA_ROUTE)
+        setContent {
+            val prefs by container.prefs.collectAsState()
+            val dark = prefs.theme == "b"
+            LaunchedEffect(dark) {
+                enableEdgeToEdge(
+                    statusBarStyle = if (dark) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT) else SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
+                    navigationBarStyle = if (dark) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT) else SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
+                )
+            }
+            MuseApp(container, Routes.SPLASH, pendingRoute.value) { pendingRoute.value = null }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        intent.getStringExtra(Notifier.EXTRA_ROUTE)?.let { pendingRoute.value = it }
+    }
+}
