@@ -22,19 +22,16 @@ extension AppStore {
         loras[l.modelId] = l
         let name = models.first { $0.id == l.modelId }?.shortName ?? "Your model"
         if before?.state == "building" && l.state == "review" {
-            Sounds.play(.done)
             if screen != .lora { showToast("\(name)'s training set is ready to review", action: "Review") { [weak self] in self?.openLora(l.modelId) } }
         }
         if before?.state == "training" && l.state == "ready" { loraReady(l, name: name) }
         if before?.state == "training" && l.state == "failed" {
-            Sounds.play(.error)
             showToast("LoRA training failed for \(name)")
             if notifyFailed { Notifier.shared.post(title: "LoRA training failed", body: "\(name)'s Identity LoRA stopped. Open MUSE to try again.") }
         }
     }
 
     private func loraReady(_ l: Lora, name: String) {
-        Sounds.play(.done)
         showToast("Identity LoRA v\(l.version) is ready", action: "Open") { [weak self] in self?.openLora(l.modelId) }
         if notifyDone {
             Notifier.shared.post(title: "Identity LoRA v\(l.version) is ready",
@@ -75,11 +72,9 @@ extension AppStore {
             return
         }
         if LoraPricing.setCost > balance.balance + 1e-9 {
-            Sounds.play(.error)
             showToast("Not enough balance to build the training set", action: "Top up") { [weak self] in self?.go(.credits) }
             return
         }
-        Sounds.play(.go)
         perform { [self] in
             let l = try await api.buildLoraCandidates(modelId: m.id)
             if loras[m.id]?.state != "review" { loras[m.id] = l }
@@ -90,7 +85,6 @@ extension AppStore {
     /// Click a shot to drop it or bring it back. Optimistic; the server's answer wins.
     func toggleCandidate(_ m: MuseModel, _ c: LoraCandidate) {
         guard var l = loras[m.id], l.state == "review", let i = l.candidates.firstIndex(where: { $0.id == c.id }) else { return }
-        Sounds.play(.tick)
         let keep = !l.candidates[i].keep
         l.candidates[i].keep = keep
         loras[m.id] = l
@@ -107,11 +101,9 @@ extension AppStore {
             return
         }
         if LoraPricing.trainCost > balance.balance + 1e-9 {
-            Sounds.play(.error)
             showToast("Not enough balance to train", action: "Top up") { [weak self] in self?.go(.credits) }
             return
         }
-        Sounds.play(.go)
         perform { [self] in
             let fresh = try await api.trainLora(modelId: m.id)
             if loras[m.id]?.state != "ready" { loras[m.id] = fresh }
@@ -154,7 +146,6 @@ extension AppStore {
                 list.removeAll { $0.platform == p }
                 list.append(a)
                 accounts[m.id] = Platform.allCases.compactMap { pl in list.first { $0.platform == pl } }
-                Sounds.play(.done)
                 showToast("\(p.label) connected · \(a.handle)")
             case .authorize(let url):
                 // Real OAuth: the platform's sign-in page opens in the browser; the account appears after the redirect.
@@ -194,7 +185,6 @@ extension AppStore {
     func openPostSheet(_ take: Take) {
         guard let m = model(for: take) else { return }
         let connected = accounts(for: m).map(\.platform)
-        Sounds.play(.tap)
         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
             postDraft = PostDraft(takeId: take.id, modelId: m.id, platforms: Array(connected.prefix(2)), when: PostTime.suggestions()[0])
         }
@@ -232,7 +222,6 @@ extension AppStore {
                 let p = try await api.createPost(req)
                 if let i = posts.firstIndex(where: { $0.id == p.id }) { posts[i] = p } else { posts.insert(p, at: 0) }
                 withAnimation { postDraft = nil }
-                Sounds.play(.done)
                 if p.isScheduled {
                     let when = p.scheduledDate ?? d.when
                     let who = models.first { $0.id == p.modelId }?.shortName ?? "your model"

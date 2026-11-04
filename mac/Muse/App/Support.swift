@@ -55,10 +55,18 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["post-\(id)"])
     }
 
-    /// Show banners (with sound) even while MUSE is the active app.
+    /// Show banners with the default notification sound even while MUSE is the active app.
+    /// Notifications are the only thing in MUSE that makes a sound.
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .list, .sound])
+        completionHandler([.banner, .sound, .list])
+    }
+
+    /// System Settings → Notifications, where the user chooses MUSE's alert style and sound.
+    static func openSystemSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {

@@ -80,7 +80,6 @@ struct MuseCommands: Commands {
                 Button((store.themeID == id ? "✓ " : "") + id.name) { store.setTheme(id) }
             }
             Divider()
-            Toggle("Sound Effects", isOn: Binding(get: { store.sound }, set: { store.sound = $0 }))
             Toggle("Pro Mode (Show Prompts)", isOn: Binding(get: { store.pro }, set: { store.pro = $0 }))
         }
     }

@@ -271,7 +271,6 @@ struct MButton: View {
 
     var body: some View {
         Button {
-            Sounds.play(.tap)
             action()
         } label: {
             HStack(spacing: 8) {
@@ -398,7 +397,6 @@ struct Chip: View {
         let bg: Color = on ? (t.isB || t.isC ? t.accent : t.isD ? t.yellow : t.ink) : t.surface
         let fg: Color = on ? (t.isB ? t.accentInk : t.isC ? .white : t.isD ? Color(hex: 0x111111) : t.bg) : t.ink
         Button {
-            Sounds.play(.tap)
             action()
         } label: {
             HStack(spacing: 6) {
@@ -496,7 +494,6 @@ struct Seg<T: Hashable>: View {
     }
 
     private func pick(_ v: T) {
-        Sounds.play(.tap)
         withAnimation(.easeOut(duration: 0.15)) { selection = v }
         onChange?(v)
     }
@@ -523,7 +520,6 @@ struct MToggle: View {
         }()
         let knobColor: Color = t.isB ? (isOn ? Color(hex: 0x1A1205) : Color(hex: 0xA9A6A0)) : .white
         Button {
-            Sounds.play(.tap)
             withAnimation(.easeOut(duration: 0.18)) { isOn.toggle() }
             onChange?(isOn)
         } label: {
@@ -571,9 +567,9 @@ struct NumStepper: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            Button(action: { Sounds.play(.tick); dec() }) { Text("−").frame(width: 34, height: 32).background(t.surface2).contentShape(Rectangle()) }.buttonStyle(.plain)
+            Button(action: { dec() }) { Text("−").frame(width: 34, height: 32).background(t.surface2).contentShape(Rectangle()) }.buttonStyle(.plain)
             Text("\(value)").font(t.mono(14)).frame(width: 40)
-            Button(action: { Sounds.play(.tick); inc() }) { Text("+").frame(width: 34, height: 32).background(t.surface2).contentShape(Rectangle()) }.buttonStyle(.plain)
+            Button(action: { inc() }) { Text("+").frame(width: 34, height: 32).background(t.surface2).contentShape(Rectangle()) }.buttonStyle(.plain)
         }
         .foregroundStyle(t.ink)
         .font(t.body(15, .semibold))

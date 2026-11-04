@@ -63,7 +63,6 @@ struct SettingsView: View {
                 }
             }
             ListBox {
-                ListRow(icon: "speaker.wave.2", title: "Sound effects", hint: "Each theme has its own sounds") { MToggle(isOn: $store.sound) }
                 ListRow(icon: "sparkles", title: "Pro mode", hint: "Show and edit the prompts behind every render", last: true) { MToggle(isOn: $store.pro) }
             }
         case .defaults:
@@ -108,6 +107,9 @@ struct SettingsView: View {
         case .notif:
             H2("Notifications")
             ListBox {
+                ListRow(icon: "bell", title: "Notifications", hint: "Sound and alerts follow your Mac's notification settings") {
+                    MButton("Open System Settings", size: .small) { Notifier.openSystemSettings() }
+                }
                 ListRow(title: "Render finished") { MToggle(isOn: $store.notifyDone) }
                 ListRow(title: "Render failed") { MToggle(isOn: $store.notifyFailed) }
                 ListRow(title: "Balance below $5") { MToggle(isOn: $store.notifyLowBalance) }

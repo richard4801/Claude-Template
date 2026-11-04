@@ -125,8 +125,7 @@ final class AppStore {
 
     private let defaults = UserDefaults.standard
 
-    var themeID: ThemeID { didSet { defaults.set(themeID.rawValue, forKey: "muse.theme"); Sounds.theme = themeID } }
-    var sound: Bool { didSet { defaults.set(sound, forKey: "muse.sound"); Sounds.enabled = sound } }
+    var themeID: ThemeID { didSet { defaults.set(themeID.rawValue, forKey: "muse.theme") } }
     var pro: Bool { didSet { defaults.set(pro, forKey: "muse.pro") } }
     var defaultSteps: Int { didSet { defaults.set(defaultSteps, forKey: "muse.defaultSteps") } }
     var defaultEngine: Engine { didSet { defaults.set(defaultEngine.rawValue, forKey: "muse.defaultEngine") } }
@@ -240,8 +239,8 @@ final class AppStore {
     init() {
         let d = UserDefaults.standard
         themeID = ThemeID(rawValue: d.string(forKey: "muse.theme") ?? "a") ?? .a
-        sound = d.object(forKey: "muse.sound") as? Bool ?? true
         pro = d.bool(forKey: "muse.pro")
+        d.removeObject(forKey: "muse.sound") // the old interface-sound preference; MUSE no longer plays UI sounds
         let ds = d.object(forKey: "muse.defaultSteps") as? Int ?? Pricing.stepsDefault
         defaultSteps = Pricing.clampSteps(ds)
         defaultEngine = Engine(id: d.string(forKey: "muse.defaultEngine") ?? "h3")
@@ -259,8 +258,6 @@ final class AppStore {
         let store = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("MUSE/uploads")
         fake = FakeMuseAPI(storeDir: store)
         api = fake
-        Sounds.enabled = sound
-        Sounds.theme = themeID
         if let data = d.data(forKey: "muse.user"), let u = try? JSONDecoder().decode(User.self, from: data) { user = u }
     }
 
@@ -377,7 +374,6 @@ final class AppStore {
             if outfitSheet?.outfitId == o.id && o.state == "preview" {
                 outfitSheet?.state = .done
                 outfitSheet?.angles = o.angles
-                Sounds.play(.done)
             }
         }
     }
@@ -385,7 +381,6 @@ final class AppStore {
     private func jobFinished(_ j: Job, newTakes: [Take]) {
         let ids = newTakes.map(\.id)
         fresh.formUnion(ids)
-        Sounds.play(.done)
         showToast("\(j.title) is ready.", action: "Review") { [weak self] in
             guard let self else { return }
             self.openTake(ids.first ?? self.takes.first { $0.jobId == j.id }?.id ?? "")
@@ -396,7 +391,6 @@ final class AppStore {
     }
 
     private func jobFailed(_ j: Job) {
-        Sounds.play(.error)
         showToast("Render failed · \(j.title). \(Pricing.money(j.refunded)) refunded.", action: "Open queue") { [weak self] in self?.go(.queue) }
         if notifyFailed {
             Notifier.shared.post(title: "Render failed · \(j.title)", body: "\(j.error ?? "The render stopped.") \(Pricing.money(j.refunded)) refunded.")
@@ -441,7 +435,6 @@ final class AppStore {
         user = r.user
         screen = .home
         authPassword = ""
-        Sounds.play(.go)
         await connect()
     }
 
@@ -461,14 +454,12 @@ final class AppStore {
         guard s != screen else { return }
         if s != .gallery { comparing = false }
         navForward = true
-        Sounds.play(.nav)
         withAnimation(MotionStyle.of(themeID).animation) { screen = s }
     }
 
     func setTheme(_ id: ThemeID) {
         guard id != themeID else { return }
         withAnimation(.easeOut(duration: 0.35)) { themeID = id }
-        Sounds.play(.theme) // the new theme's sound
     }
 
     func showToast(_ message: String, action: String? = nil, perform: (() -> Void)? = nil) {

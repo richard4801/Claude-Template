@@ -24,10 +24,8 @@ extension AppStore {
             clipThumb = thumb.map { ImageRef(url: $0.absoluteString) }
             if c.durationSec <= ClipUse.first.sampleSeconds { use = .full }
             if c.ok {
-                Sounds.play(.done)
                 showToast("Clip checked · \(Pricing.trimNum(c.durationSec))s · \(c.width)×\(c.height). Ready to generate.")
             } else {
-                Sounds.play(.error)
                 showToast("This clip needs fixing before you can generate. See the clip check.")
             }
         }
@@ -54,7 +52,6 @@ extension AppStore {
     func setSteps(_ n: Int) {
         let v = Pricing.clampSteps(n)
         guard v != steps else { return }
-        Sounds.play(.tick)
         steps = v
     }
 
@@ -83,12 +80,10 @@ extension AppStore {
     /// ⌘↵ and the Generate button. Blocked when the clip fails its checks or the balance is too low.
     func generate() {
         if clipBad {
-            Sounds.play(.error)
             showToast("Fix the clip first: one person, no watermark, 15s or less")
             return
         }
         if lowBalance {
-            Sounds.play(.error)
             showToast("Not enough balance for this render", action: "Top up") { [weak self] in self?.go(.credits) }
             return
         }
@@ -112,7 +107,6 @@ extension AppStore {
             let j = try await api.createJob(req)
             upsert(j)
             balance = try await api.balance()
-            Sounds.play(.go)
             showToast("Rendering \(n > 1 ? "\(n) takes" : "1 take") · \(Pricing.money(cost)). You'll get a notification when it's done.", action: "Open queue") { [weak self] in
                 self?.go(.queue)
             }
@@ -143,7 +137,6 @@ extension AppStore {
     func runQueue() {
         perform { [self] in
             try await api.runQueue()
-            Sounds.play(.go)
             showToast("GPU starting · about 1–2 min")
         }
     }
@@ -154,7 +147,6 @@ extension AppStore {
             upsert(n)
             hiddenFailures.insert(j.id)
             balance = try await api.balance()
-            Sounds.play(.go)
             showToast("Retrying \(j.title) · \(Pricing.money(n.cost))")
         }
     }
@@ -224,7 +216,6 @@ extension AppStore {
         perform { [self] in
             let u = try await api.setTakeStatus(id: t.id, status: "final")
             if let i = takes.firstIndex(where: { $0.id == u.id }) { takes[i] = u }
-            Sounds.play(.done)
             showToast("Moved to Final")
         }
     }
@@ -249,7 +240,6 @@ extension AppStore {
 
     /// Saves the take to ~/Downloads/MUSE. No label is added: labels are the user's choice when posting (plans/socials.md).
     func export(_ t: Take) {
-        Sounds.play(.go)
         let file = exportFile(t)
         showToast("Exported 1080×1920", action: file == nil ? nil : "Show in Finder") {
             if let file { NSWorkspace.shared.activateFileViewerSelecting([file]) }
@@ -279,7 +269,6 @@ extension AppStore {
         }
         let prompt = promptOverride ?? shootPromptText
         let req = ShootRequest(modelId: m.id, outfitId: o.id, scene: shoot.effectiveScene, prompt: prompt, seed: shoot.lockSeed ? 48213 : nil)
-        Sounds.play(.go)
         withAnimation { shootState = .busy }
         perform { [self] in
             do {
@@ -289,7 +278,6 @@ extension AppStore {
                 fresh.formUnion(shots.map(\.id))
                 promptOverride = nil
                 balance = try await api.balance()
-                Sounds.play(.done)
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) { shootState = .done }
             } catch {
                 shootState = .idle
@@ -419,7 +407,6 @@ extension AppStore {
         Task { [weak self] in
             for (angle, u) in plan {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { self?.create.slots[angle] = .local(u) }
-                Sounds.play(.tick)
                 try? await Task.sleep(nanoseconds: 180_000_000)
             }
             if let self, let id = self.create.modelId {
@@ -526,7 +513,6 @@ extension AppStore {
                 create.slots[angle] = .busy
             } else if let img = s.image {
                 if case .local = create.slots[angle] { continue }
-                if create.slots[angle] == .busy { Sounds.play(.done) }
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) { create.slots[angle] = .remote(img, ai: s.isAI) }
             }
         }
@@ -539,7 +525,6 @@ extension AppStore {
         perform { [self] in
             let id = try await ensureDraftModel()
             create = CreateDraft()
-            Sounds.play(.done)
             showToast("\(name) saved with \(n)/6 shots\(n < 6 ? " · you can add the rest any time" : "")", action: "Open") { [weak self] in self?.openProfile(id) }
             go(.models)
         }
@@ -609,7 +594,6 @@ extension AppStore {
         let amount = topUpAmount
         perform { [self] in
             balance = try await api.topUp(TopUpRequest(amount: amount, method: method))
-            Sounds.play(.done)
             showToast("\(Pricing.money(amount)) added")
         }
     }
@@ -660,11 +644,6 @@ extension AppStore {
         ] + ThemeID.allCases.map { id in
             PaletteCommand(title: "Theme: \(id.name)", icon: "paintpalette", shortcut: "") { [weak self] in self?.setTheme(id) }
         } + [
-            PaletteCommand(title: "Toggle sound", icon: "speaker.wave.2", shortcut: "") { [weak self] in
-                guard let self else { return }
-                self.sound.toggle()
-                self.showToast("Sound \(self.sound ? "on" : "off")")
-            },
             PaletteCommand(title: "Toggle pro mode (show prompts)", icon: "sparkles", shortcut: "") { [weak self] in
                 guard let self else { return }
                 self.pro.toggle()

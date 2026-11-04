@@ -425,7 +425,6 @@ struct PostSheetView: View {
     private func platformChip(_ p: Platform, on: Bool) -> some View {
         let shape = RoundedRectangle(cornerRadius: t.isA ? 0 : 16, style: .continuous)
         return Button {
-            Sounds.play(.tap)
             store.togglePostPlatform(p)
         } label: {
             HStack(spacing: 6) {

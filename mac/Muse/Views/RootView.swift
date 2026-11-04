@@ -163,11 +163,6 @@ struct TitleBar: View {
                     .help(r.phase)
                 }
                 ThemeDots()
-                IconButton(systemName: store.sound ? "speaker.wave.2" : "speaker.slash", help: "Sound") {
-                    store.sound.toggle()
-                    Sounds.play(.tap)
-                    store.showToast("Sound \(store.sound ? "on" : "off")")
-                }
                 Menu {
                     Text(store.user?.studioName ?? "Studio")
                     Divider()

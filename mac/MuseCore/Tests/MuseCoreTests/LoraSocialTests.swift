@@ -1,38 +1,6 @@
 import XCTest
 @testable import MuseCore
 
-final class SoundSynthTests: XCTestCase {
-    func testEveryThemeAndKindRendersAnAudibleBuffer() {
-        for theme in ["a", "b", "c", "d"] {
-            for kind in SoundKind.allCases {
-                let buf = SoundSynth.render(theme: theme, kind: kind)
-                XCTAssertFalse(buf.isEmpty, "\(theme)/\(kind) is empty")
-                let peak = SoundSynth.peak(buf)
-                XCTAssertGreaterThan(peak, 0.4, "\(theme)/\(kind) peak \(peak)")
-                XCTAssertLessThanOrEqual(peak, 0.7001, "\(theme)/\(kind) clips")
-                XCTAssertFalse(buf.contains { !$0.isFinite }, "\(theme)/\(kind) has NaN/inf")
-                XCTAssertLessThan(Double(buf.count) / SoundSynth.defaultRate, 1.6, "\(theme)/\(kind) too long")
-            }
-        }
-    }
-
-    func testTickIsQuieterAndRenderingIsDeterministic() {
-        XCTAssertEqual(SoundSynth.peak(SoundSynth.render(theme: "a", kind: .tick)), 0.45, accuracy: 1e-4)
-        XCTAssertEqual(SoundSynth.peak(SoundSynth.render(theme: "a", kind: .tap)), 0.7, accuracy: 1e-4)
-        XCTAssertEqual(SoundSynth.render(theme: "b", kind: .nav), SoundSynth.render(theme: "b", kind: .nav))
-    }
-
-    func testLengthsFollowThePrototype() {
-        // Editorial "done" is three 0.9 s notes 0.12 s apart (+ the 20 ms tail): 0.24 + 0.92 s.
-        let done = SoundSynth.render(theme: "a", kind: .done, sampleRate: 1000)
-        XCTAssertEqual(done.count, 240 + 920)
-        // Camera Body "tick" is a 12 ms noise burst.
-        XCTAssertEqual(SoundSynth.render(theme: "b", kind: .tick, sampleRate: 1000).count, 12)
-        // Creator Pop "go": a 0.25 s saw sweep with a 20 ms tail.
-        XCTAssertEqual(SoundSynth.render(theme: "d", kind: .go, sampleRate: 1000).count, 270)
-    }
-}
-
 final class LoraPromptTests: XCTestCase {
     private var sienna: MuseModel { SampleData.models().first { $0.id == SampleData.sienna }! }
 
