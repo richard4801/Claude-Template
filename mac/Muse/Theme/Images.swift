@@ -32,9 +32,20 @@ final class ImageCache {
     }
 
     func put(_ url: String, _ img: NSImage) { cache[url] = img }
+
+    /// Sienna's bundled reference photos (Resources/Samples/ref_<key>.jpg), the same set the Android app ships.
+    /// Clip frames (`vid_*`, `src_clip`) come from third-party test footage and are deliberately not bundled.
+    func sample(_ key: String) -> NSImage? {
+        let k = "sample:" + key
+        if let i = cache[k] { return i }
+        guard let u = Bundle.main.url(forResource: "ref_" + key, withExtension: "jpg", subdirectory: "Samples"),
+              let img = NSImage(contentsOf: u) else { return nil }
+        cache[k] = img
+        return img
+    }
 }
 
-/// An `ImageRef` drawn to fill its frame. Sample assets (the prototype's photos are not bundled) are drawn as placeholder art.
+/// An `ImageRef` drawn to fill its frame. Bundled sample photos are used for asset keys; anything else falls back to placeholder art.
 struct MuseImage: View {
     var ref: ImageRef?
     var symbol: String?
@@ -51,6 +62,8 @@ struct MuseImage: View {
 
     @ViewBuilder private var content: some View {
         if let u = ref?.url, let img = (u.hasPrefix("http") ? remote : ImageCache.shared.image(for: u)) {
+            Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
+        } else if let a = ref?.asset, let img = ImageCache.shared.sample(a) {
             Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
         } else {
             Placeholder(key: ref?.asset ?? ref?.url ?? "empty", symbol: symbol)

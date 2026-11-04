@@ -31,7 +31,7 @@ struct AuthView: View {
 
             HStack(spacing: 0) {
                 ZStack(alignment: .bottomLeading) {
-                    Placeholder(key: "hero", symbol: "person.fill")
+                    MuseImage(ref: ImageRef(asset: "hero"), symbol: "person.fill")
                     LinearGradient(colors: [.black.opacity(0.05), .black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
                     VStack(alignment: .leading, spacing: 10) {
                         Text("AI MODEL STUDIO").font(t.mono(11)).tracking(1.3).foregroundStyle(.white.opacity(0.8))

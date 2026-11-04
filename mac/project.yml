@@ -25,6 +25,9 @@ targets:
       - path: Muse/Resources/Fonts
         type: folder
         buildPhase: resources
+      - path: Muse/Resources/Samples
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: MuseCore
     info:
