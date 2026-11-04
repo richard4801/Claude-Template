@@ -545,27 +545,69 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
 
     /// Waiting in line before it starts (real API): `queuePosition` is set and nothing has rendered yet.
     public var isWaiting: Bool { isActive && step == 0 && queuePosition != nil }
-    /// "Waiting to start" / "#2 in line" (+ " · starts in ~3 min") while it waits.
+    /// "Waiting to start" / "#2 in line" (+ " · about 9 min") while it waits.
     public var waitLine: String? {
         guard isActive, let pos = queuePosition else { return nil }
-        let eta = etaSeconds.map { " · starts in \(Job.duration($0))" } ?? ""
-        return (pos <= 1 ? "Waiting to start" : "#\(pos) in line") + eta
+        return (pos <= 1 ? MemberText.waitingToStart : "#\(pos) in line") + timeTail
     }
     public static func duration(_ s: Double) -> String { s >= 60 ? "~\(Int((s / 60).rounded(.up))) min" : "~\(Int(s.rounded(.up)))s" }
 
-    /// What it's doing, for members: the server's phase when it's member-safe ("Rendering · ~6 min left"), else the same built here.
+    /// " · about 2 min" from the ETA (or seconds left), or "" when there's none.
+    var timeTail: String {
+        let left = etaSeconds ?? secondsLeft
+        return left > 0 ? " · about \(Job.aboutTime(left))" : ""
+    }
+
+    /// "2 min", "a minute" (whole minutes, JavaScript rounding, at least 1).
+    public static func aboutTime(_ seconds: Double) -> String {
+        seconds < 60 ? "a minute" : "\(max(1, Pricing.jsRound(seconds / 60))) min"
+    }
+
+    /// What it's doing, without its time: the server's phase cut before " · ~6 min left" ("Rendering", "take 2/3 · Finishing").
+    /// Older servers' "step 3/10", "Starting GPU" or "Waiting for Replicate" read as Rendering / Getting ready / Waiting to start.
     public var statusLine: String {
-        if isWaiting, let w = waitLine { return w }
-        if MemberText.isSafe(phase), !phase.isEmpty { return phase }
+        if isWaiting { return queuePosition.map { $0 <= 1 ? MemberText.waitingToStart : "#\($0) in line" } ?? MemberText.waitingToStart }
         switch state {
         case "done": return "Done"
         case "failed": return "Failed"
         case "queued": return "Queued"
-        default: return secondsLeft > 0 ? "Rendering · \(JobClock.leftText(secondsLeft))" : "Rendering"
+        default: return Job.memberPhase(phase)
         }
     }
-    /// "Rendering · ~2 min left · $0.14": the status, then the price.
-    public var progressLine: String { "\(statusLine) · \(Pricing.money(cost))" }
+
+    /// The queue's line (plans/api.md "App clean-up" §2): "Rendering · about 2 min · $0.14", "Waiting to start · $0.14",
+    /// "#2 in line · about 9 min · $0.14".
+    public var progressLine: String {
+        let time = isActive ? timeTail : ""
+        return "\(statusLine)\(time) · \(Pricing.money(cost))"
+    }
+
+    /// The server's phase without its time, in member words (the same rules as the Android app).
+    public static func memberPhase(_ phase: String) -> String {
+        var head = phase
+        for cut in [" · ~", " · starts in", " · about"] {
+            if let r = head.range(of: cut) { head = String(head[..<r.lowerBound]) }
+        }
+        var prefix = ""
+        if let r = head.range(of: #"^take \d+/\d+ · "#, options: .regularExpression) {
+            prefix = String(head[r])
+            head = String(head[r.upperBound...])
+        }
+        func has(_ p: String) -> Bool { head.range(of: p, options: [.regularExpression, .caseInsensitive]) != nil }
+        let clean: String
+        if head.trimmingCharacters(in: .whitespaces).isEmpty || has("paused|waiting|in line|queued|busy") {
+            if let r = head.range(of: #"^#\d+ in line"#, options: .regularExpression) { clean = String(head[r]) } else { clean = MemberText.waitingToStart }
+        } else if has("gpu|starting|load|getting ready") {
+            clean = "Getting ready"
+        } else if has("step|render|denois") {
+            clean = "Rendering"
+        } else if has("finish|upload|trim") {
+            clean = "Finishing"
+        } else {
+            clean = MemberText.safe(head, or: "Rendering")
+        }
+        return prefix + clean
+    }
 
     public var engine: Engine { Engine(id: request.engine) }
     /// The option it was made with.

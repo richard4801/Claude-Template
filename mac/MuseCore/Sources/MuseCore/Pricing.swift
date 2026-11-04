@@ -275,8 +275,12 @@ public enum Pricing {
     /// `fmtMin`: "38s" under two minutes, otherwise "10 min".
     public static func fmtMin(_ m: Double) -> String { m < 2 ? "\(jsRound(m * 60))s" : "\(jsRound(m)) min" }
 
-    /// The Generate button: "Generate · $0.56" (+ " · 2 takes"), for every option (plans/api.md "App clean-up" §2).
-    public static func genLabel(_ s: RenderSpec) -> String { "Generate · \(money(totalCost(s)))\(takesTail(s.takes))" }
+    /// The Generate button, as in the shared fixtures (plans/api.md "App clean-up" §2): "Generate · 7 s · $0.56" for Render,
+    /// "Generate · 10 min · $0.67" for Edit / Fast · beta (+ " · 2 takes").
+    public static func genLabel(_ s: RenderSpec) -> String {
+        if s.isReplicate { return "Generate · \(s.replicateSeconds) s · \(money(totalCost(s)))\(takesTail(s.takes))" }
+        return "Generate · \(fmtMin(totalMin(s))) · \(money(totalCost(s)))\(takesTail(s.takes))"
+    }
 
     /// The prototype's button ("Generate · 10 min · $0.67", "Generate 3 takes · 30 min · $2.02"), kept only to check the
     /// prototype's pricing fixtures; the app shows `genLabel`.

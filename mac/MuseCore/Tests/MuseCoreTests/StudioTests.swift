@@ -39,11 +39,11 @@ final class StudioTests: XCTestCase {
 
         let j = try decode(Job.self, #"{"id":"j9","state":"running","step":0,"queuePosition":2,"etaSeconds":250,"warmupCost":0.04,"blocked":null,"request":{"engine":"h3","steps":10}}"#)
         XCTAssertTrue(j.isWaiting)
-        XCTAssertEqual(j.waitLine, "#2 in line · starts in ~5 min")
+        XCTAssertEqual(j.waitLine, "#2 in line · about 4 min")
         XCTAssertEqual(j.warmupCost, 0.04, "decoded for the owner's ledger, never shown")
         let paused = try decode(Job.self, #"{"id":"j8","state":"running","blocked":"owner_balance_low","phase":"Paused: the studio's GPU credit is low"}"#)
         XCTAssertFalse(paused.isWaiting)
-        XCTAssertEqual(paused.statusLine, "Rendering", "an older server's paused line isn't shown")
+        XCTAssertEqual(paused.statusLine, "Waiting to start", "an older server's paused line isn't shown")
 
         let t = try decode(Take.self, #"{"id":"t1","kind":"take","videoUrl":"/uploads/r/take_1.mp4","durationSec":5.2,"width":768,"height":1344}"#)
         XCTAssertEqual(t.mediaLine, "0:05 · 768×1344")

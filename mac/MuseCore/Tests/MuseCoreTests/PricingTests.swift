@@ -47,7 +47,7 @@ final class PricingTests: XCTestCase {
         XCTAssertEqual(spec.steps, 10)
         XCTAssertEqual(Pricing.prototypeGenLabel(spec), "Generate · 10 min · $0.67")
         // Members see the price only: no minutes, no steps.
-        XCTAssertEqual(Pricing.genLabel(spec), "Generate · $0.67")
+        XCTAssertEqual(Pricing.genLabel(spec), "Generate · 10 min · $0.67")
     }
 
     func testTakesMultiplyTimeAndCost() {
@@ -55,13 +55,13 @@ final class PricingTests: XCTestCase {
         s.takes = 3
         XCTAssertEqual(Pricing.totalCost(s), Pricing.estCost(RenderSpec()) * 3, accuracy: 1e-12)
         XCTAssertEqual(Pricing.prototypeGenLabel(s), "Generate 3 takes · 30 min · $2.02")
-        XCTAssertEqual(Pricing.genLabel(s), "Generate · $2.02 · 3 takes")
+        XCTAssertEqual(Pricing.genLabel(s), "Generate · 30 min · $2.02 · 3 takes")
     }
 
     func testFastBetaIsUnderTwoMinutes() {
         let s = RenderSpec(engine: .viggle)
         XCTAssertEqual(Pricing.prototypeGenLabel(s), "Generate · 96s · $0.13")
-        XCTAssertEqual(Pricing.genLabel(s), "Generate · $0.13")
+        XCTAssertEqual(Pricing.genLabel(s), "Generate · 96s · $0.13")
     }
 
     func testStepsAndTakesAreClamped() {

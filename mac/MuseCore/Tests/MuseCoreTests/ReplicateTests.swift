@@ -20,14 +20,9 @@ final class ReplicateTests: XCTestCase {
             XCTAssertEqual(Pricing.totalCost(spec), o["cost"] as! Double, accuracy: 1e-12, ctx)
             XCTAssertEqual(Pricing.money(Pricing.totalCost(spec)), o["costLabel"] as! String, ctx)
             XCTAssertEqual(Pricing.priceLine(spec), o["priceLine"] as! String, ctx)
-            // The button is "Generate · $0.56" (+ " · 2 takes") since the app clean-up; the fixture's older
-            // "Generate · 7 s · $0.56" carries the same price and takes.
-            let takesTail = takes > 1 ? " · \(takes) takes" : ""
-            XCTAssertEqual(Pricing.genLabel(spec), "Generate · \(o["costLabel"] as! String)\(takesTail)", ctx)
-            let fixtureGen = o["genLabel"] as! String
-            XCTAssertTrue(fixtureGen.hasPrefix("Generate · ") && fixtureGen.contains(o["costLabel"] as! String), ctx)
+            XCTAssertEqual(Pricing.genLabel(spec), o["genLabel"] as! String, ctx)
             // The contract defaults give the same numbers without the server's price.
-            XCTAssertEqual(Pricing.genLabel(RenderSpec.replicate(q, clipSeconds: clip, takes: takes)), Pricing.genLabel(spec), ctx)
+            XCTAssertEqual(Pricing.genLabel(RenderSpec.replicate(q, clipSeconds: clip, takes: takes)), o["genLabel"] as! String, ctx)
         }
     }
 
@@ -43,11 +38,11 @@ final class ReplicateTests: XCTestCase {
     func testStandardSevenSecondsIsAbout56Cents() {
         let s = RenderSpec.replicate(.standard, clipSeconds: 7)
         XCTAssertEqual(Pricing.priceLine(s), "about $0.56 · 7 s")
-        XCTAssertEqual(Pricing.genLabel(s), "Generate · $0.56")
+        XCTAssertEqual(Pricing.genLabel(s), "Generate · 7 s · $0.56")
         var two = s
         two.takes = 2
         XCTAssertEqual(Pricing.priceLine(two), "about $1.12 · 7 s · 2 takes")
-        XCTAssertEqual(Pricing.genLabel(two), "Generate · $1.12 · 2 takes")
+        XCTAssertEqual(Pricing.genLabel(two), "Generate · 7 s · $1.12 · 2 takes")
         XCTAssertEqual(Pricing.money(Pricing.totalCost(.replicate(.draft, clipSeconds: 7))), "$0.14")
         XCTAssertEqual(Pricing.money(Pricing.totalCost(.replicate(.hd, clipSeconds: 7))), "$0.91")
         // The server's price wins.
@@ -72,7 +67,9 @@ final class ReplicateTests: XCTestCase {
         // The Exact edit formula with steps 10 and the whole clip; the line is just the price.
         XCTAssertEqual(Pricing.totalCost(edit), Pricing.totalCost(RenderSpec(engine: .h3, use: .full, steps: 10)), accuracy: 1e-12)
         XCTAssertEqual(Pricing.priceLine(edit), "about \(Pricing.money(Pricing.totalCost(edit)))")
-        XCTAssertEqual(Pricing.genLabel(edit), "Generate · \(Pricing.money(Pricing.totalCost(edit)))")
+        XCTAssertEqual(Pricing.genLabel(edit), "Generate · \(Pricing.fmtMin(Pricing.totalMin(edit))) · \(Pricing.money(Pricing.totalCost(edit)))")
+        XCTAssertEqual(Pricing.genLabel(RenderSpec(engine: .h3, use: .first, steps: 10)), "Generate · 10 min · $0.67")
+        XCTAssertFalse(Pricing.genLabel(edit).contains("step"))
         XCTAssertFalse(Pricing.priceLine(edit).contains("min"))
         let fast = RenderSpec.choice(.fast, clipSeconds: 5.2, takes: 2)
         XCTAssertEqual(fast.engine, .viggle)
@@ -102,7 +99,7 @@ final class ReplicateTests: XCTestCase {
         XCTAssertEqual(r.use, "full")
         XCTAssertFalse(r.lipSync)
         XCTAssertEqual(r.videoQuality, .hd)
-        XCTAssertEqual(Pricing.genLabel(r.spec), "Generate · $1.82 · 2 takes")
+        XCTAssertEqual(Pricing.genLabel(r.spec), "Generate · 7 s · $1.82 · 2 takes")
         XCTAssertEqual(Job.engineLabel(for: r), "HD · 2K")
         XCTAssertEqual(Job.engineLabel(for: JobRequest(title: "", modelId: "", outfitId: "", clipId: "", steps: 12)), "Edit")
         XCTAssertEqual(Job.engineLabel(for: JobRequest(title: "", modelId: "", outfitId: "", clipId: "", engine: "viggle")), "Fast · beta")
@@ -204,11 +201,15 @@ final class ReplicateTests: XCTestCase {
         waiting.queuePosition = 2
         waiting.etaSeconds = 200
         waiting.cost = 0.14
-        XCTAssertEqual(waiting.waitLine, "#2 in line · starts in ~4 min")
-        XCTAssertEqual(waiting.progressLine, "#2 in line · starts in ~4 min · $0.14")
+        XCTAssertEqual(waiting.waitLine, "#2 in line · about 3 min")
+        XCTAssertEqual(waiting.progressLine, "#2 in line · about 3 min · $0.14")
+        waiting.etaSeconds = 540
+        XCTAssertEqual(waiting.progressLine, "#2 in line · about 9 min · $0.14")
         waiting.queuePosition = 1
         waiting.etaSeconds = nil
+        waiting.secondsLeft = 0
         XCTAssertEqual(waiting.waitLine, "Waiting to start")
+        XCTAssertEqual(waiting.progressLine, "Waiting to start · $0.14")
         // Older servers' technical wording is replaced by the contract's.
         let gpu = try JSONDecoder().decode(Job.self, from: Data(#"{"id":"j3","state":"failed","error":"The GPU disconnected at step 3.","phase":"Failed at step 3","engineLabel":"Exact edit · 10 steps","request":{"engine":"h3","steps":10}}"#.utf8))
         XCTAssertEqual(gpu.failureLine, "Something went wrong · you weren't charged")
@@ -232,13 +233,24 @@ final class ReplicateTests: XCTestCase {
     }
 
     func testRunningLineShowsPhaseAndPrice() throws {
-        var j = try JSONDecoder().decode(Job.self, from: Data(#"{"id":"j5","state":"running","step":3,"cost":0.14,"phase":"Rendering · ~2 min left","request":{"engine":"replicate"}}"#.utf8))
-        XCTAssertEqual(j.progressLine, "Rendering · ~2 min left · $0.14")
+        var j = try JSONDecoder().decode(Job.self, from: Data(#"{"id":"j5","state":"running","step":3,"cost":0.14,"secondsLeft":118,"phase":"Rendering · ~2 min left","request":{"engine":"replicate"}}"#.utf8))
+        XCTAssertEqual(j.progressLine, "Rendering · about 2 min · $0.14")
+        j.phase = "take 2/3 · Rendering · ~2 min left"
+        XCTAssertEqual(j.progressLine, "take 2/3 · Rendering · about 2 min · $0.14")
         j.phase = "step 3/10 · ~6 min left"
-        j.secondsLeft = 125
-        XCTAssertEqual(j.progressLine, "Rendering · ~3 min left · $0.14", "an older server's steps phase is rebuilt")
+        XCTAssertEqual(j.progressLine, "Rendering · about 2 min · $0.14", "an older server's steps phase reads Rendering")
         j.phase = "Rendering on Replicate · ~2 min left"
-        XCTAssertFalse(j.progressLine.contains("Replicate"))
+        XCTAssertEqual(j.progressLine, "Rendering · about 2 min · $0.14")
+        j.phase = "Starting GPU · ~4 min left"
+        XCTAssertEqual(j.statusLine, "Getting ready")
+        j.phase = "Paused: the studio's GPU credit is low"
+        XCTAssertEqual(j.statusLine, "Waiting to start")
+        j.phase = "Finishing · exact length and audio"
+        XCTAssertEqual(j.statusLine, "Finishing")
+        j.secondsLeft = 30
+        j.phase = "Lip sync · ~1 min left"
+        XCTAssertEqual(j.progressLine, "Lip sync · about a minute · $0.14")
+        XCTAssertEqual(Job.aboutTime(150), "3 min")
     }
 
     func testTakeLabelsForMembers() throws {
