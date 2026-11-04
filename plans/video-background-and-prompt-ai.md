@@ -44,6 +44,13 @@ _Added 2026-11-04._ The goal is to let a user swap the clip's background (e.g. "
    - **Key:** `ANTHROPIC_API_KEY` as a Railway secret variable (the owner adds it; never in chat or code).
    - **Logs:** every call records its input description, structured output, model and cost on the job, so results are reproducible.
 
+## What the car tests taught us (2026-11-04)
+- **v1/v2** (person + background + caption removal in one pass, long prompt): sky ribbon, outfit drift, and lost expressions.
+- **v3** (person only, kitchen kept, short prompt): right outfit, and the side-eye and talking matched the source.
+- **Lesson:** ask H3 for one big change per pass. When a prompt asks for many changes at once, details get dropped.
+- **Next test:** describe the new place with a **reference photo** as an extra image (`<Image 6>: the background`) plus one short line, instead of paragraphs of scene and lighting text. Run it on top of a finished person swap (two-step), so each pass makes only one big change.
+- This keeps the scene writer's job small: short wording, and the photo carries the look.
+
 ## Gate: decided by the first background-replacement render
 - **If H3 replaces the background cleanly** (stable, no sliding, hand sits on the new surface, caption gone): ship the plan above.
 - **If H3 struggles:** switch "Replace" to **composite mode**:

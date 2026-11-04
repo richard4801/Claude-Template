@@ -71,8 +71,12 @@ class FakeH3Backend:
             seed = hashlib.sha256(f"{req.seed}:{req.prompt}:{req.num_frames}".encode()).digest()
             req.out_path.write_bytes(b"FAKEMP4" + seed * 64)
         return RenderResult(path=req.out_path, width=WIDTH, height=HEIGHT, fps=float(FPS),
-                            duration_sec=round(req.num_frames / FPS, 3), frames=req.num_frames,
+                            duration_sec=round((req.keep_frames or req.num_frames) / FPS, 3), frames=req.keep_frames or req.num_frames,
                             stats={"attention": "fake", "steps": req.steps})
+
+    def pad_source(self, path: Path, out: Path, seconds: float) -> Path:
+        self.padded_seconds = seconds
+        return path
 
     def thumbnail(self, video: Path, out: Path) -> tuple[int, int]:
         if self.make_video:

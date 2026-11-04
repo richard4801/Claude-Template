@@ -268,5 +268,6 @@ def test_job_shaped_like_server_api_payload(api, tmp_path):
     assert make_worker(api, tmp_path, backend, max_jobs=1).run() == 0
     assert job["id"] in api.done, api.failed
     r = backend.renders[0]
-    assert r.num_frames == 209 and [x.seed for x in backend.renders] == [1234, 1235]  # 9.4 s -> 225 -> 209
+    assert r.num_frames == 226 and r.keep_frames == 225  # 9.4 s: render 226, keep all 225 (was cut to 209)
+    assert [x.seed for x in backend.renders] == [1234, 1235]
     assert [p.name for p in r.references] == [n for n in inputs if n != "source.mp4"]  # inputs order = <Image N>

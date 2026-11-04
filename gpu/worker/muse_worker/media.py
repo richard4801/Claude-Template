@@ -71,6 +71,15 @@ def finalize_video(raw: Path, out: Path, *, audio_from: Path | None, duration_se
     _run(cmd)
 
 
+def pad_video(src: Path, out: Path, seconds: float) -> None:
+    """Hold the last frame (and add silence) for `seconds` more, so H3 has enough frames to round up to."""
+    has_audio = probe(src).has_audio
+    cmd = ["ffmpeg", "-v", "error", "-y", "-i", str(src), "-vf", f"tpad=stop_mode=clone:stop_duration={seconds:.3f}",
+           "-c:v", "libx264", "-preset", "veryfast", "-crf", "12", "-pix_fmt", "yuv420p"]
+    cmd += ["-af", f"apad=pad_dur={seconds:.3f}", "-c:a", "aac", "-b:a", "192k"] if has_audio else ["-an"]
+    _run(cmd + [str(out)])
+
+
 def extract_audio_wav(src: Path, out: Path, sample_rate: int | None = None, channels: int = 2,
                       duration_sec: float | None = None) -> None:
     cmd = ["ffmpeg", "-v", "error", "-y", "-i", str(src), "-vn", "-ac", str(channels)]

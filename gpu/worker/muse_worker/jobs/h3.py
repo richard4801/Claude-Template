@@ -44,6 +44,32 @@ def frames_for(use: str, available_frames: int, clip_seconds: float | None = Non
     return trim_frames(min(cap, available_frames))
 
 
+def round_up_frames(n: int) -> int:
+    """Smallest frame count >= n with n % 17 == 5."""
+    return max(MIN_FRAMES, n + ((5 - n) % 17))
+
+
+def frame_plan(use: str, available_frames: int, clip_seconds: float | None = None) -> tuple[int, int]:
+    """(frames to render, frames to keep).
+
+    "first" is a fixed 5.17 s sample, so it keeps the old trim-down rule. "full" keeps the whole clip:
+    it renders up to the next valid count (the source is padded with its last frame) and the output is
+    cut back to the source's real length, so a 6.2 s clip comes back 6.2 s, not 5.9 s.
+    """
+    if use == "first":
+        n = frames_for(use, available_frames, clip_seconds)
+        return n, n
+    keep = min(int(MAX_SECONDS * FPS), available_frames)
+    if clip_seconds:
+        keep = min(keep, int(math.floor(float(clip_seconds) * FPS + 1e-6)))
+    if keep < MIN_FRAMES:
+        trim_frames(keep)  # raises the usual "too short" failure
+    render = round_up_frames(keep)
+    if render > int(MAX_SECONDS * FPS):  # don't go past one tested 15 s pass
+        render = keep = trim_frames(keep)
+    return render, keep
+
+
 def build_prompt(sections: dict[str, Any]) -> str:
     """Join the structured H3 prompt (plans/prompt-system.md §2). Empty sections are dropped."""
     keys = [k for k in SECTION_ORDER if k in sections] + [k for k in sections if k not in SECTION_ORDER]
@@ -156,6 +182,7 @@ class RenderRequest:
     width: int = WIDTH
     height: int = HEIGHT
     fps: int = FPS
+    keep_frames: int | None = None  # cut the output back to this many frames (source was padded)
 
 
 @dataclass
@@ -177,6 +204,7 @@ class H3Backend(Protocol):
     def availability(self) -> str | None: ...
     def ensure_loaded(self) -> None: ...
     def source_frames(self, path: Path) -> int: ...
+    def pad_source(self, path: Path, out: Path, seconds: float) -> Path: ...
     def render(self, req: RenderRequest, on_step: Callable[[int, int], None],
                check_cancel: Callable[[], None]) -> RenderResult: ...
     def thumbnail(self, video: Path, out: Path) -> tuple[int, int]: ...
@@ -300,12 +328,14 @@ class H3Handler(JobHandler):
             raise JobFailure(str(e), retryable=False) from None
         ctx.check_cancel()
 
-        frames = frames_for(p.use, self.backend.source_frames(source), p.clip_seconds)
+        frames, keep = frame_plan(p.use, self.backend.source_frames(source), p.clip_seconds)
+        if frames > keep:
+            source = self.backend.pad_source(source, ctx.work_dir / "source_padded.mp4", (frames - keep) / FPS + 0.5)
         eta = Eta(p.steps, p.takes, frames, self.sec_per_step_124,
                   overhead_per_take=60.0 + (LIPSYNC_EST_S if p.lip_sync else 0.0))
-        ctx.log.info("h3 job %s: %d frames (%.2fs), %d steps, %d take(s), seeds %s, keepAudio=%s",
-                     ctx.job.id, frames, frames / FPS, p.steps, p.takes, p.seeds, p.keep_audio)
-        ctx.stats.update(frames=frames, steps=p.steps, seeds=p.seeds, takes=[])
+        ctx.log.info("h3 job %s: %d frames rendered, %d kept (%.2fs), %d steps, %d take(s), seeds %s, keepAudio=%s",
+                     ctx.job.id, frames, keep, keep / FPS, p.steps, p.takes, p.seeds, p.keep_audio)
+        ctx.stats.update(frames=frames, keptFrames=keep, steps=p.steps, seeds=p.seeds, takes=[])
 
         produced: list[ProducedOutput] = []
         for k in range(p.takes):
@@ -321,7 +351,7 @@ class H3Handler(JobHandler):
 
             req = RenderRequest(
                 source=source, references=refs, prompt=p.prompt, steps=p.steps, seed=p.seeds[k],
-                num_frames=frames, keep_audio=p.keep_audio, audio_source=p.audio_source,
+                num_frames=frames, keep_frames=keep if keep < frames else None, keep_audio=p.keep_audio, audio_source=p.audio_source,
                 out_path=ctx.output_path(videos[k].name), work_dir=ctx.work_dir,
             )
             res = self.backend.render(req, on_step, ctx.check_cancel)

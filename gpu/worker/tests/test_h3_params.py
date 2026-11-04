@@ -110,3 +110,16 @@ def test_job_from_dict_sanitizes_names():
     assert j.outputs[0].headers == {"Content-Type": "video/mp4"}
     with pytest.raises(JobFailure):
         Job.from_dict({"id": "x", "inputs": [{"name": ".."}]})
+
+
+def test_frame_plan_keeps_the_whole_clip():
+    from muse_worker.jobs.h3 import frame_plan, round_up_frames
+    assert frame_plan("first", 1000) == (124, 124)  # the 5.17 s sample is unchanged
+    assert frame_plan("full", 148) == (158, 148)  # a 6.17 s clip: render 158, keep all 148
+    assert frame_plan("full", 141) == (141, 141)  # already a valid count: no padding
+    assert frame_plan("full", 10_000) == (345, 345)  # capped at one 15 s pass
+    assert frame_plan("full", 10_000, clip_seconds=6.0) == (158, 144)
+    for n in range(22, 346):
+        render, keep = frame_plan("full", n)
+        assert render % 17 == 5 and keep == n and render - n < 17
+    assert round_up_frames(22) == 22 and round_up_frames(23) == 39

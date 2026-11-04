@@ -188,6 +188,10 @@ class DiffSynthH3Backend:
             raise BackendUnavailable(f"cannot read the duration of {path.name}")
         return int(info.duration_sec * FPS)
 
+    def pad_source(self, path: Path, out: Path, seconds: float) -> Path:
+        media.pad_video(path, out, seconds)
+        return out
+
     def thumbnail(self, video: Path, out: Path) -> tuple[int, int]:
         info = media.thumbnail(video, out)
         return info.width or 0, info.height or 0
@@ -250,6 +254,8 @@ class DiffSynthH3Backend:
         write_video_audio(video=video, audio=audio, output_path=str(raw), fps=req.fps,
                           audio_sample_rate=OUTPUT_AUDIO_SR)
         duration = len(video) / req.fps
+        if req.keep_frames:
+            duration = min(duration, req.keep_frames / req.fps)
         if not req.keep_audio:
             audio_from = None
         elif req.audio_source == "source":
@@ -274,7 +280,7 @@ def _cli() -> int:
     """Run one render without the API, from a folder laid out like the old script's `inputs/`."""
     import argparse
 
-    from ..jobs.h3 import frames_for
+    from ..jobs.h3 import frame_plan
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--inputs", default="inputs", help="folder with source.mp4 and the reference images")
@@ -297,7 +303,7 @@ def _cli() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     req = RenderRequest(source=src, references=[Path(a.inputs) / r for r in a.refs],
                         prompt=Path(a.prompt_file).read_text(), steps=a.steps, seed=a.seed,
-                        num_frames=frames_for(a.use, b.source_frames(src)), keep_audio=not a.no_audio,
+                        num_frames=frame_plan(a.use, b.source_frames(src))[0], keep_audio=not a.no_audio,
                         audio_source="source", out_path=out, work_dir=out.parent)
     res = b.render(req, lambda i, t: None, lambda: None)
     print("DONE", res.path, json.dumps(res.stats))
