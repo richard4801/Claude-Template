@@ -23,18 +23,158 @@ _Added 2026-11-04._ This is the contract between the apps and the backend. `serv
 | `account_disabled` / `owner_only` | 403 | switched off by the owner / owner-only endpoint |
 | `insufficient_tokens` | 402 | a member's wallet can't cover the price (the owner gets `insufficient_balance`) |
 | `over_user_day_limit` / `over_day_limit` | 402 | over the per-user or per-studio daily cap |
-| `over_allocation` | 402 | the owner tried to send more tokens than the RunPod balance backs |
-| `balance_unavailable` | 503 | RunPod can't be read, so tokens can't be sent |
-| `engine_unavailable` | 400 | the GPU image can't run this yet (Fast · beta, LoRA training, or lip sync without LatentSync), or `engine: "replicate"` / image provider `replicate` while the server has no Replicate token |
-| `image_engine_failed` | 502 | the image engine failed (the charge is refunded) |
-| `provider_refused` | 422 | the hosted provider's safety filter refused the request: "Replicate's safety filter refused this photo" (photos; the charge is refunded). Video jobs fail with `Job.errorCode: "provider_refused"` and the message "Replicate's safety filter refused this clip" (the hold is refunded) |
-| `provider_rate_limited` | 429 | photos only: Replicate stayed rate-limited for longer than `REPLICATE_IMAGE_MAX_WAIT_SEC` (default 120 s); the charge is refunded, try again in a minute. Video jobs never fail on a rate limit: they wait in line (see "Video engines") |
+| `over_allocation` | 402 | the owner tried to send more credit than the studio balance has free (top-ups − spending − credit already with members) |
+| `balance_unavailable` | 503 | _retired 2026-11-04 (app clean-up): the studio balance is the server's own ledger, so it is always known_ |
+| `engine_unavailable` | 400 | that option can't run right now ("Draft, Standard and HD aren't available right now", "Edit isn't available right now", "Fast · beta isn't available yet", lip sync, LoRA training) |
+| `image_engine_failed` | 502 | making the photos failed: "Something went wrong making the photos · you weren't charged" (the hold is released) |
+| `provider_refused` | 422 | the content filter refused it: "This photo was refused by the content filter · you weren't charged" (photos). Video jobs fail with `Job.errorCode: "provider_refused"` and "This clip was refused by the content filter · you weren't charged" |
+| `provider_rate_limited` | 429 | photos only: busy for longer than `REPLICATE_IMAGE_MAX_WAIT_SEC` (120 s): "Busy right now · you weren't charged. Try again in a minute." Video jobs never fail on this: they wait in line |
+| `provider_out_of_credit` | 503 | _added 2026-11-04._ An engine's own account refused for lack of credit: "Something went wrong · you weren't charged. The studio owner has been told." (photos). Video jobs fail with `Job.errorCode: "provider_out_of_credit"` and the same message. Owners get a `wallet` event with `notice.code: "provider_out_of_credit"` |
+| `upscale_unavailable` | 409 | _added 2026-11-04._ `POST /v1/takes/{id}/upscale` while Upscale is coming soon: "Upscale is coming soon" |
 | `rate_limited` | 429 | too many sign-in or sign-up tries |
 | `template_hidden` | 403 | saving a template from a shot made with someone else's template |
-| `warm_not_allowed` | 403 | Keep GPU warm when the studio allows it for the owner only |
-| `owner_balance_low` | 402 | Keep GPU warm while the studio's RunPod balance is below `RUNPOD_MIN_BALANCE_USD` |
-| `no_gpu_free` / `no_gpu_available` | 409 / 503 | Keep GPU warm with every pod in use / no GPU free on RunPod |
-| `not_warm` | 409 | Keep warm (`extend`) while the warm GPU is off |
+| `warm_not_allowed` | 403 | _retired 2026-11-04:_ Keep add-on engine ready is owner-only, members get `owner_only` |
+| `owner_balance_low` | 402 | _retired 2026-11-04:_ nothing pauses or refuses on a provider's balance any more |
+| `no_gpu_free` / `no_gpu_available` | 409 / 503 | Keep add-on engine ready with every add-on engine in use / none free right now (owner only) |
+| `not_warm` | 409 | Keep ready (`extend`) while it's off (owner only) |
+
+**Every message in `error` and `Job.error`/`Job.phase` is member-safe** (no GPU, warm-up, steps, start-up or provider names), see "App clean-up" below.
+
+## App clean-up: provider-neutral MUSE (2026-11-04)
+_Spec: `plans/app-cleanup.md`. This section wins where an older section below disagrees._ Members see results, time and price. Provider names (Replicate, RunPod, H3, Lite, SeedVR2), GPUs, warm-ups, steps and start-up appear **only in owner Settings → Engines**.
+
+### 1. What members see (server strings, shown as-is)
+`Job.phase` (the server writes it; apps show it next to time and price, e.g. "Rendering · about 2 min · $0.14"):
+
+| when | `phase` |
+|---|---|
+| waiting, first in line | `"Waiting to start"` (+ `" · starts in ~3 min"` when known) |
+| waiting behind others | `"#2 in line"` (+ `" · starts in ~3 min"`) |
+| getting the engine ready / loading | `"Getting ready · ~4 min left"` |
+| preparing a clip | `"Preparing the clip"` |
+| busy, retrying | `"Waiting to start · retrying in 10s"` |
+| rendering | `"Rendering · ~6 min left"` (several takes: `"take 2/3 · Rendering · ~6 min left"`) |
+| lip sync pass | `"Lip sync · ~2 min left"` |
+| finishing (trim, audio, upload) | `"Finishing"` |
+| done / failed | `"Done"` / `"Failed"` |
+
+`step`/`totalSteps` stay in the JSON for progress maths but are never shown. `Job.blocked` is never set any more (nothing pauses on a provider balance).
+
+`Job.error` / API `error` (shown as-is):
+
+| case | message |
+|---|---|
+| anything broke (engine error, disconnect, no output) | `"Something went wrong · you weren't charged"` |
+| content filter | `"This clip was refused by the content filter · you weren't charged"` / `"This photo was refused by the content filter · you weren't charged"` |
+| too long | `"This took too long and was stopped · you weren't charged"` |
+| busy too long | `"Busy right now · you weren't charged. Try again in a minute."` |
+| an engine's own account is out of credit | `"Something went wrong · you weren't charged. The studio owner has been told."` (`errorCode: "provider_out_of_credit"`) |
+| owner short of studio balance | `"Not enough in the studio balance · add a top-up in Credits"` (`insufficient_balance`) |
+
+`Job.errorCode` keeps its machine values (`provider_refused`, `provider_failed`, `provider_rate_limited`, `provider_timeout`) plus `provider_out_of_credit`; codes are never shown.
+
+Labels: `Job.engineLabel` = `"Draft · 768P"`, `"Standard · 768P"`, `"HD · 2K"`, `"Edit"`, `"Fast · beta"` (later `"Upscale · 2K"`). `Take.label` = `"Draft"`, `"Standard"`, `"HD"`, `"Edit"`, `"Fast · beta"`. Photo shots have `engineLabel: ""` (the engine is never shown on a photo). Apps must not show `Job.warmupCost` to members.
+
+### 2. Video options
+`GET /v1/settings/studio` → `features.video`:
+```ts
+VideoFeatures { defaultEngine, defaultQuality: "draft", minSeconds: 4, maxSeconds: 15,
+                options: RenderOption[],   // the Render picker, in order: draft, standard, hd  (no "exact" any more)
+                addons: AddonOption[] }    // in order: edit, fast, upscale
+RenderOption { id: "draft"|"standard"|"hd", label: "Draft"|"Standard"|"HD", detail: "Quick preview · 768P"|"768P"|"2K",
+               engine: "replicate", quality, resolution: "768P"|"2K", pricePerSec, available }
+AddonOption  { id: "edit"|"fast"|"upscale", label: "Edit"|"Fast · beta"|"Upscale", detail, available: boolean,
+               comingSoon?: true /* upscale today */, sends?: Partial<JobRequest> /* edit, fast */, sizes?: UpscaleSize[] /* upscale */ }
+UpscaleSize  { id: "1080p"|"2k"|"4k", label: "1080p"|"2K"|"4K", width: 1080|1440|2160, height: 1920|2560|3840,
+               available: boolean /* false today */, price: number|null /* null until measured */ }
+```
+| id | label | detail | sends | price |
+|---|---|---|---|---|
+| `draft` (default) | Draft | Quick preview · 768P | `{engine: "replicate", quality: "draft"}` | $0.02 × D × takes |
+| `standard` | Standard | 768P | `{engine: "replicate", quality: "standard"}` | $0.08 × D × takes |
+| `hd` | HD | 2K | `{engine: "replicate", quality: "hd"}` | $0.13 × D × takes |
+| `edit` | Edit | Swaps her into every frame of the whole clip | `{engine: "h3", use: "full", steps: 10}` | the Exact edit formula with steps 10 and the whole clip |
+| `fast` | Fast · beta | Quicker and rougher · beta | `{engine: "viggle", use: "full"}` | the Fast · beta formula on the whole clip |
+| `upscale` | Upscale | Sharper 1080p, 2K or 4K from a finished take | `POST /v1/takes/{id}/upscale {size}` | coming soon |
+
+- **Render** = Draft / Standard / HD, one picker. **Add-ons** = Edit, Fast · beta (shown only when `available`), Upscale.
+- **Edit** (was "Exact edit") always renders the whole clip with the default steps. Apps never show steps, "First 5.2s / Full", GPU start-up or Keep warm. Lip sync and "New background photo" stay Edit-only. The server still accepts `steps`/`use` from older clients.
+- **Upscale** (SeedVR2 on the add-on engine, not built yet): sizes 1080p = 1080×1920, 2K = 1440×2560, 4K = 2160×3840. Today `addons[upscale].available = false`, `comingSoon: true`, every size `available: false`, `price: null`. Apps show an "Upscale" entry on a **finished render take** (`kind: "take"` with a `videoUrl`) with the three sizes greyed and "Coming soon". `POST /v1/takes/{id}/upscale {size: "1080p"|"2k"|"4k"}` → `409 upscale_unavailable` ("Upscale is coming soon") until it ships; then it returns a `Job` (`request.engine: "upscale"`, `request.takeId`, `request.size`, `engineLabel: "Upscale · 2K"`) priced from measured times.
+- Price line under the picker: `"about $0.56 · 7 s"` as before; Edit and Fast use `"about $0.67"` (no minutes, no steps). Generate button: `"Generate · $0.56"` (+ `" · 2 takes"`). Running: `"<phase> · $0.56"`.
+
+### 3. Photos: charged exactly what the engine charges (pass-through)
+Fixed photo prices ($0.12 shoot, $0.08 outfit set, $0.02 an angle, $0.60 LoRA set) are **retired**. Every photo action holds an **estimate** at start and **settles to the exact cost** of the predictions it ran.
+
+`GET /v1/settings/studio` → `features.photo`:
+```ts
+PhotoPricing { perRun: 0.015, perInputMp: 0.015, perOutputMp: 0.015, perEdit: 0.03, refMp: 0.79, maxRefs: 6, loraShots: 30,
+               estimates: { shoot: 0.4644, outfitSet: 0.1911, sheetAngle: 0.1011, loraSet: 3.033 } /* refs = maxRefs, shoot = 4 photos */ }
+```
+(The values come from server config: `REPLICATE_IMAGE_RUN_USD`, `REPLICATE_IMAGE_MP_USD`, `REPLICATE_IMAGE_EDIT_USD`, `REPLICATE_IMAGE_MAX_REFS`; `refMp` is a reference shrunk to fit 1024 px at 3:4 = 1024×768 ≈ 0.79 MP. These are Replicate's published prices for FLUX.2 [pro] (`run_count` $0.015, `image_input_megapixel_count` $0.015, `image_output_megapixel_count` $0.015) and Qwen-Image-Edit 2511 (`image_output_count` $0.03), checked 2026-11-04.)
+
+**Estimate formula** (doubles, evaluated left to right; `refs` = references sent, capped at `maxRefs`):
+- `newShot(outMp, refs) = perRun + perOutputMp * outMp + perInputMp * refMp * min(refs, maxRefs)`; `outMp` = 2 for shoots (1080×1920 asks for "2 MP"), 1 for everything else.
+- `shoot(count, refs) = count * newShot(2, refs)` (count 1–4, default 4)
+- `outfitSet(refs) = newShot(1, refs) + 3 * perEdit` (front is a new shot, ¾/side/back are edits of it); "my own set" = 0
+- `sheetAngles(missing, refs) = missing * newShot(1, refs)`
+- `loraSet(refs) = loraShots * newShot(1, refs)`
+- Shown as `"about " + '$' + v.toFixed(2)`: shoot "about $0.46", outfit set "about $0.19", one angle "about $0.10", LoRA set "about $3.03". Apps use `refs = maxRefs` (or `features.photo.estimates`); the server holds with the real reference count.
+- Fixture: `android/core/src/test/resources/photo_pricing_fixture.json` `{params, rows: [{kind: "shoot"|"outfitSet"|"sheetAngles"|"loraSet", count, refs, outMp, estimate, label}]}`; server, Android and Mac check against it.
+
+**Exact cost of one prediction** (server):
+1. If Replicate's prediction reports a dollar figure (`metrics.cost_usd` or `metrics.cost`), that.
+2. Else Replicate's billing counts when present (`metrics.run_count`, `metrics.image_input_megapixel_count`, `metrics.image_output_megapixel_count`, `metrics.image_output_count`) × the prices above.
+3. Else measured: FLUX.2 [pro] = `perRun + perInputMp × Σ(width×height/1e6 of each input image as sent) + perOutputMp × (width×height/1e6 of the image received)`; Qwen edit = `perEdit` per output image.
+Worked example: a 4-photo shoot with 6 references of 768×1024 (0.786432 MP each) and outputs of 1088×1920 (2.08896 MP) costs per photo 0.015 + 0.015 × 4.718592 + 0.015 × 2.08896 = **$0.11711** and **$0.46845** for the shoot; the hold was $0.4644 ("about $0.46"), the settle row says $0.46845 and the member's wallet moves by 47 tokens (tokens round up to the cent).
+
+**Billing:** start → `hold` (caps and wallet checked: `insufficient_tokens`/`insufficient_balance`, cap codes); done → `settle` to the exact sum (ledger `amountUsd` is exact; `tokens` = the exact amount rounded up to a whole token); failed → the hold is released in full (the member isn't charged) and anything the engine already billed for photos that were thrown away goes on a studio `overhead` row ("Photos that didn't finish"). Sheet fills settle to the angles that worked. `Take.cost` of a shot = that photo's exact cost; `Outfit.cost` (new, optional) and `Lora.cost` = the exact amount once settled. `POST /v1/models/{id}/fill-angles` → `{model, cost}` where `cost` is the estimate held. Ledger notes: `"Photoshoot · 4 photos"`, `"Outfit set"`, `"Character sheet · 2 angles"`, `"LoRA training set · 30 photos"` (`" · hold"` on the hold). Simulated engines settle to the estimate.
+
+### 4. Studio balance (owner-loaded) replaces the RunPod balance
+The owner loads money into MUSE by recording **top-ups**; every engine's spending is tracked against it in the server's ledger; members get credit from it as before. RunPod's own balance no longer backs anything, nothing pauses because a provider's balance is low, and there are no "Top up RunPod" or runpod.io links.
+```ts
+StudioBalance { balanceUsd /* toppedUpUsd − spentUsd */, toppedUpUsd, spentUsd /* all engines, all users, since `since` */,
+                membersCreditUsd /* members' unspent credit, spendable + held */, heldUsd /* the owners' running holds */,
+                availableUsd /* balanceUsd − membersCreditUsd − heldUsd: what the owner can spend or send; may be negative */,
+                since /* epoch ms the studio ledger started */, needsFirstTopUp: boolean /* no top-up recorded yet */,
+                topUps: TopUp[] /* newest first, ≤ 20 */ }
+TopUp { id, amountUsd, note: string|null, paidAt /* epoch ms the owner says they paid */, createdAt, createdBy }
+```
+| | |
+|---|---|
+| `GET /v1/studio/balance` (owner) | → `StudioBalance` |
+| `POST /v1/studio/topups` `{amountUsd /* 0 < x ≤ 10000 */, note? /* ≤ 200 */, paidAt? /* epoch ms, default now, not in the future */}` (owner) | → `StudioBalance`. Ledger row `kind: "topup"`, `amountUsd: +x`, note `"Added $20.00"` (+ `" · <note>"`). `balance` and `wallet` events follow. |
+| `GET /v1/studio/topups?limit=` (owner) | → `TopUp[]`, newest first |
+| `POST /v1/balance/topup` `{amount, note?}` | Kept as an alias of `POST /v1/studio/topups` for the owner (`method` ignored, returns `Balance`); members get `owner_only`. |
+
+- `spentUsd` = Σ `amountUsd` of `settle`, `charge`, `overhead`, `warmup` and `warm` ledger rows since `since`.
+- **Migration (chosen):** the opening balance is **$0**. `since` is set to the moment the migration ran, so earlier spending (already paid from RunPod) doesn't count; members keep their tokens, which shows as `availableUsd` below zero until the first top-up. Apps show "Add your first top-up" while `needsFirstTopUp`.
+- `Balance` (owner): `balance` = `availableUsd`, `availableToSend` = `availableUsd`, `studioBalance` = `balanceUsd`, `needsFirstTopUp`, `balanceSource: "studio"`. `runpodBalance` is gone. Members: unchanged (`balanceSource: "wallet"`).
+- `Wallet` (owner): `availableToSend`, `studioBalance`, `membersUnspentUsd`, `balanceSource: "studio"`.
+- Owner jobs need `availableUsd ≥ price` (`insufficient_balance`). Transfers need `availableUsd ≥ amount` (`over_allocation`).
+- If an engine's own account refuses for lack of credit (Replicate 402 or "insufficient credit", RunPod "insufficient balance" on start), the job fails at once with a full refund (`provider_out_of_credit`), and every owner gets a `wallet` event with `notice: {code: "provider_out_of_credit", engine: "replicate"|"runpod", message: "An engine is out of credit · see Settings → Engines"}`. Settings → Engines then shows that engine as `out_of_credit` until a job on it succeeds.
+- `notice.code` `owner_balance_low` / `owner_balance_ok` are retired.
+
+### 5. Owner Settings → Engines (the only place provider names appear)
+`GET /v1/settings/studio` returns `engines` **for the owner only**:
+```ts
+Engines { list: EngineStatus[] /* replicate, runpod */,
+          imageEngine: { provider, model, editModel?, label /* "FLUX.2 [pro] · Replicate" */ },
+          addOn: { maxGpus, overheadPayer: "user"|"owner" /* "Who pays start-up" */, gpu: GpuStatus },
+          keepReady: { idleMinutes, maxMinutes, ratePerHour } }
+EngineStatus { id: "replicate"|"runpod", name: "Replicate"|"RunPod", usedFor: string /* "Draft, Standard and HD video · photos" | "Edit, Fast · beta, Upscale" */,
+               keySet: boolean, status: "ready"|"no_key"|"simulated"|"out_of_credit"|"no_gpu", message?: string, outOfCreditAt?: number }
+```
+- Members' `GET /v1/settings/studio` = `{capPerJob, capPerDay, capPerUserDay, tokenUsd, features}` only. The owner also gets `maxGpus`, `overheadPayer`, `warmIdleMinutes`, `warmMaxMinutes`, `gpu` and `engines`. `minRunpodBalance`, `lowBalance` and `warmGpuAllowed` are gone (PATCH still accepts and ignores `warmGpuAllowed`).
+- `PATCH /v1/settings/image-engine` is owner-only now (`owner_only`); `GET` stays for everyone but apps show it only in Engines.
+
+### 6. Keep add-on engine ready (was "Keep GPU warm"): owner-only
+- `GET/POST /v1/gpu/warm` (same body and `WarmGpu` shape) answer **`403 owner_only` for members**. `gpu` SSE events only ever go to the owner who switched it on.
+- Owner UI: a switch **"Keep add-on engine ready"** in Settings → Engines, the same cost warning on every switch-on ("Keeps the add-on engine ready so Edit renders start right away. About $4/hour from the studio balance while it's on, and it turns off by itself after 20 min without renders."), idle/max minutes, and a small indicator only while it is on ("Add-on engine ready · 42 min · $2.80 · Turn off"). No nudge, no switch in the video studio, no bar, no ongoing notification or warnings for members.
+- Auto-off rules unchanged (idle 20 min, cap 120 min + one extension, the owner's available balance can't cover 10 min, the pod lost); the RunPod-balance rule is gone (`lastOff.reason` is never `owner_balance` now). Warning text: `"Add-on engine turns off in 5 min (no renders)"`.
+- Ledger notes (owner): `"Add-on engine ready · 12 min"`, `"Add-on start-up"`, `"Add-on idle"` (were "Warm GPU", "GPU warm-up", "GPU idle").
+
+### 7. Strings the apps remove or rewrite
+Keep GPU warm nudge/switch/bar/menu-bar flame/notification/5-minute warning/"Warm GPU turned off" toasts (members) → gone; "GPU warm-up $x" cost lines → gone; "Waiting for a GPU" → "Waiting to start"; "The GPU disconnected"/"the GPU stopped responding" → "Something went wrong · you weren't charged"; steps (10/15/30) and first 5.2 s/full → hidden; "RunPod balance", "Top up RunPod", runpod.io links, "Paused: the studio's GPU credit is low" → the studio balance; "#2 in the Replicate line" → "#2 in line"; "Exact edit" → "Edit"; the "Who pays GPU warm-up" setting → "Who pays start-up" in Engines.
 
 ## Types
 
@@ -55,25 +195,25 @@ JobRequest { title, modelId, outfitId, clipId, engine: "replicate"|"h3"|"viggle"
              takes (1–4), keepAudio, lipSync /* h3 only */, background: "keep"|"photo" /* "photo" is h3 only */, backgroundMotion: "still"|"subtle"|"busy", clipSeconds?,
              queue?: boolean /* true = park it as "queued", not charged, until POST /v1/queue/run */ }
              // Clients should always send `engine`. The picker maps to it: Draft/Standard/HD = {engine:"replicate", quality},
-             // Exact edit = {engine:"h3", steps}, Fast · beta = {engine:"viggle"}. See "Video engines and quality".
+             // Edit = {engine:"h3", use:"full", steps:10}, Fast · beta = {engine:"viggle", use:"full"}. See "App clean-up" §2.
 Job        { id, title, modelId, modelName, outfitId, request: JobRequest, state: "queued"|"running"|"done"|"failed",
              progress (0–100), take, step, totalSteps, phase /* "step 12/20 · ~6 min left" */, secondsLeft, totalSeconds,
              cost, refunded, error?, createdAt, finishedAt?, prompt /* exact H3 prompt */, seed, thumb: ImageRef,
-             queuePosition?, etaSeconds? /* while waiting for a GPU, or in the Replicate line */, blocked?: "owner_balance_low", warmupCost? /* GPU warm-up charged with it */,
-             engineLabel /* "Standard · 768P", "Draft · 768P", "HD · 2K", "Exact edit · 10 steps", "Fast · beta" */,
-             errorCode?: "provider_refused"|"provider_failed"|"provider_rate_limited"|"provider_timeout" /* failed replicate jobs */,
+             queuePosition?, etaSeconds? /* while waiting in line */, blocked? /* never set since 2026-11-04 */, warmupCost? /* owner ledger only; never shown to members */,
+             engineLabel /* "Draft · 768P", "Standard · 768P", "HD · 2K", "Edit", "Fast · beta" */,
+             errorCode?: "provider_refused"|"provider_failed"|"provider_rate_limited"|"provider_timeout"|"provider_out_of_credit",
              billedSeconds? /* replicate, done: output seconds Replicate billed, summed over takes */ }
 Take       { id, kind: "take"|"shot", jobId|null, index, of, title, label, engineLabel, cost, seed, status: "test"|"final", thumb, prompt, createdAt,
              videoUrl?, durationSec?, width?, height? /* real output: Exact edit renders are 768×1344; Replicate 768P/2K sizes come from the file */ }
-             // Takes: label = "Standard"|"Draft"|"HD" (replicate), "10 steps" (h3), "Fast · beta"; engineLabel = Job.engineLabel.
+             // Takes: label = "Standard"|"Draft"|"HD" (replicate), "Edit" (h3), "Fast · beta"; engineLabel = Job.engineLabel.
              // A replicate take's durationSec is the source clip's exact length (see "Video engines"), and its thumb is a frame of the take.
-             // Shots: engineLabel = the image engine that made them ("FLUX.2 [pro] · Replicate", "Qwen edit · Replicate", "" for simulated).
+             // Shots: engineLabel = "" (2026-11-04: the engine is never shown on a photo); cost = that photo's exact cost.
 Balance    { balance, month, today /* spent since local midnight */, perJobLimit, perDayLimit, videos,
-             tokens, tokenUsd, role: "owner"|"member", heldUsd, perUserDayLimit, balanceSource: "runpod"|"simulated"|"unavailable"|"wallet",
-             runpodBalance?, availableToSend? /* owner only */ }
-             // Member: balance = their wallet in USD; today/month = their own spend. Owner: balance = what they can spend or send
-             // (RunPod − members' unspent tokens − holds); today/month = the studio's spend.
-Wallet     { userId, role, tokens, usd, heldTokens, heldUsd, todayUsd, monthUsd, tokenUsd, balanceSource, availableToSend?, runpodBalance?, membersUnspentUsd? }
+             tokens, tokenUsd, role: "owner"|"member", heldUsd, perUserDayLimit, balanceSource: "studio"|"wallet",
+             availableToSend?, studioBalance?, needsFirstTopUp? /* owner only */ }
+             // Member: balance = their wallet in USD; today/month = their own spend. Owner: balance = StudioBalance.availableUsd
+             // (top-ups − spending − members' unspent credit − holds; may be negative); today/month = the studio's spend.
+Wallet     { userId, role, tokens, usd, heldTokens, heldUsd, todayUsd, monthUsd, tokenUsd, balanceSource, availableToSend?, studioBalance?, membersUnspentUsd? }
 Member     { id, email, role, tokens, usd, heldTokens, todayUsd, monthUsd, lastActiveAt?, disabled, capPerJob, capPerDay, createdAt }
 Lora       { modelId, version /* 0 = never trained; the last ready version */, state: "none"|"building"|"review"|"training"|"ready"|"failed",
              use: boolean /* default true */,
@@ -87,7 +227,7 @@ Account    { modelId, platform: Platform, handle, connectedAt, canPostDirect: bo
 Post       { id, modelId, takeId, title, thumb: ImageRef, platforms: Platform[], caption, aiLabel: boolean, paidPartnership: boolean,
              when: "now"|ISO time, state: "scheduled"|"handoff"|"posted"|"failed", createdAt, postedAt?, stats?: { views, likes, comments } }
 ApiEvent   { type: "job"|"balance"|"model"|"outfit"|"lora"|"post"|"wallet"|"gpu", job?, balance?, model?, outfit?, lora?, post?, takes?: Take[],
-             wallet?: Wallet, notice?: { code: "owner_balance_low"|"owner_balance_ok", message },
+             wallet?: Wallet, notice?: { code: "provider_out_of_credit", engine?: "replicate"|"runpod", message } /* owners only */,
              gpu?: WarmGpu, event?: "state"|"tick"|"warning" /* gpu events only */, warning?: WarmWarning }
              // balance, wallet and gpu events go only to the user they concern (balance/wallet also to owners, whose pool moved too).
 WarmGpu    { state: "off"|"starting"|"warm"|"stopping",          // starting = the pod is booting (3–6 min); warm = ready, renders start at once
@@ -97,7 +237,7 @@ WarmGpu    { state: "off"|"starting"|"warm"|"stopping",          // starting = t
              autoOffAt: number|null /* the earliest idle or cap auto-off; null when off */, autoOffReason?: "idle"|"cap",
              warningAt?: number /* autoOffAt − 5 min: when the warning fires */,
              idleMinutes: number /* warmIdleMinutes */, maxMinutes: number /* the cap, including an extension */, canExtend: boolean,
-             allowed: boolean /* this user may switch it on (studio warmGpuAllowed) */,
+             allowed: boolean /* true for the owner (members get 403 owner_only from /v1/gpu/warm) */,
              lastOff?: { reason: WarmOffReason, at, minutes, costUsd }  /* state "off": how the last session ended (within the last hour) */ }
 WarmOffReason "user"|"idle"|"cap"|"credit"|"owner_balance"|"gpu_lost"
 WarmWarning { reason: "idle"|"cap", autoOffAt, message /* "Warm GPU turns off in 5 min (no renders)" */ }
@@ -157,7 +297,7 @@ These are measured on an H100 with FlashAttention 3 and billed at $3.99/h. The u
 - H3, per take: `minutes = steps × secPerLen(len) / 60 + 0.5 (GPU start) + 4 (if lip sync)`, and `cost = minutes / 60 × 3.99`.
 - Viggle (Fast · beta), per take: `minutes = 1.6 × len / 5.2`, and `cost = 0.13 × len / 5.2`.
 - Takes run back to back, so time and cost are multiplied by `takes`.
-- Fixed prices: a photoshoot (4 stills) is $0.12, an outfit set is $0.08 (free for "my own set"), and filling a missing character-sheet angle is $0.02 per angle.
+- Photo prices: _retired fixed prices ($0.12 / $0.08 / $0.02 / $0.60)._ Photos hold an estimate and settle to the exact engine cost, see "App clean-up" §3 and `photo_pricing_fixture.json`.
 - Billing: the price is held from the balance when a job starts, and refunded in full if the job fails.
 
 ## Endpoints
@@ -265,11 +405,12 @@ How a template shoot works (`POST /v1/shoots` with `templateId`):
 | | |
 |---|---|
 | `GET /v1/balance` | → `Balance` |
-| `POST /v1/balance/topup` `{amount, method: "card"\|"usdt"\|"virtual"}` | → `Balance`. In the mock, no payment is taken. The real API reads the RunPod balance, so this is `topup_unavailable` except in its dev mode (owner only). |
+| `POST /v1/balance/topup` `{amount, note?}` (owner) | → `Balance`. Records a studio top-up (alias of `POST /v1/studio/topups`, "App clean-up" §4). Members get `owner_only`. |
+| `GET /v1/studio/balance`, `POST /v1/studio/topups`, `GET /v1/studio/topups` (owner) | the studio balance and its top-ups, see "App clean-up" §4 |
 | `GET /v1/wallet` | → `Wallet` (mine) |
 | `GET /v1/members` (owner) | → `Member[]` |
 | `PATCH /v1/members/{id}` `{capPerJob?, capPerDay?, disabled?}` (owner) | → `Member`. `null` caps go back to the studio default. Disabling signs them out. |
-| `POST /v1/wallets/transfer` `{toUserId, tokens, note?}` (owner) | → `{wallet, member}`. `over_allocation` beyond what the RunPod balance backs. |
+| `POST /v1/wallets/transfer` `{toUserId, tokens, note?}` (owner) | → `{wallet, member}`. `over_allocation` beyond the studio balance's `availableUsd`. |
 | `POST /v1/wallets/reclaim` `{fromUserId, tokens, note?}` (owner) | → `{wallet, member}`. Only unused tokens (not ones held by running jobs). |
 | `GET /v1/ledger?userId=&limit=` (owner) | → ledger rows, newest first |
 
@@ -277,14 +418,16 @@ How a template shoot works (`POST /v1/shoots` with `templateId`):
 | | |
 |---|---|
 | `GET /v1/settings/image-engine` | → `{provider: "simulated"\|"fal"\|"custom-http"\|"replicate", model, editModel? /* replicate */, label, url?, available: {simulated, fal, "custom-http", replicate}}`. `label` is for display: "FLUX.2 [pro] · Replicate", "Simulated", the fal model id, "Custom". Default provider: `replicate` when the server has `REPLICATE_API_TOKEN`, else `IMAGE_PROVIDER` (simulated). A studio that saved a provider keeps it. |
-| `PATCH /v1/settings/image-engine` `{provider, model?, url?}` | → same. Per studio. `custom-http` is owner-only and needs an https URL; `replicate` needs the server's token (`bad_request` otherwise). Shoots and outfit sets also take `imageEngine: {provider, model?}` to override it for one call. |
-| `GET /v1/settings/studio` | → `{maxGpus, overheadPayer: "user"\|"owner", capPerJob, capPerDay, capPerUserDay, tokenUsd, minRunpodBalance, lowBalance, warmGpuAllowed: "owner"\|"everyone", warmIdleMinutes, warmMaxMinutes, features: {standard, fastBeta, lipSync, loraTraining, replaceAudio: false, outputSize: {width: 768, height: 1344}, maxClipSec, replicate, video: VideoFeatures}, gpu}`. `features.standard` still means "Exact edit (h3) can run"; `features.replicate` = the Replicate engine is set up. |
+| `PATCH /v1/settings/image-engine` `{provider, model?, url?}` (owner only since 2026-11-04) | → same. Per studio. `custom-http` is owner-only and needs an https URL; `replicate` needs the server's token (`bad_request` otherwise). Shoots and outfit sets also take `imageEngine: {provider, model?}` to override it for one call. |
+| `GET /v1/settings/studio` | _2026-11-04: members get only `{capPerJob, capPerDay, capPerUserDay, tokenUsd, features}`; the owner also gets `engines`, and `minRunpodBalance`, `lowBalance`, `warmGpuAllowed` are gone ("App clean-up" §5)._ Before: → `{maxGpus, overheadPayer: "user"\|"owner", capPerJob, capPerDay, capPerUserDay, tokenUsd, minRunpodBalance, lowBalance, warmGpuAllowed: "owner"\|"everyone", warmIdleMinutes, warmMaxMinutes, features: {standard, fastBeta, lipSync, loraTraining, replaceAudio: false, outputSize: {width: 768, height: 1344}, maxClipSec, replicate, video: VideoFeatures}, gpu}`. `features.standard` still means "Exact edit (h3) can run"; `features.replicate` = the Replicate engine is set up. |
 | `PATCH /v1/settings/studio` `{maxGpus?, overheadPayer?, capPerJob?, capPerDay?, capPerUserDay?, warmGpuAllowed?, warmIdleMinutes? (5–120), warmMaxMinutes? (30–480)}` (owner) | → same |
 
 "Replace audio" isn't wired on the GPU yet: `keepAudio: false` gives a silent take, and `features.replaceAudio` is false.
 
 ### Video engines and quality (Replicate)
 _Added 2026-11-04._ MiniMax H3 hosted on Replicate is the **default** video engine. Our own RunPod H3 stays as **Exact edit** (frame-by-frame, slower, needs a GPU start-up), Viggle stays **Fast · beta**.
+
+_2026-11-04: superseded by "App clean-up" §2: `options` = draft, standard, hd; Edit / Fast · beta / Upscale are `addons`; the detail lines and labels there are the ones to show._
 
 **The picker** (video studio, Quality tool), in this order, default **Draft** (changed from Standard on 2026-11-04 at the owner's request):
 
@@ -321,9 +464,11 @@ VideoOption   { id: "draft"|"standard"|"hd"|"exact", label: "Draft"|"Standard"|"
 - Prompt: a short H3 prompt (about 230 words, four sections) built by the server: identity, outfit, never-add, captions removed, and "keep the exact framing and crop of <Video 1>". `Job.prompt` holds it. Replicate takes no seed, steps or LoRA; `Job.seed` is informational only.
 - Done: one take per Replicate prediction (`take_n.mp4` + a thumbnail frame), the hold settles to the billed seconds (`billedSeconds` on the job). Failed (Replicate error, safety refusal, timeout) or cancelled (`DELETE /v1/jobs/{id}` cancels the prediction): `state: "failed"`, `refunded` = the hold, `errorCode` set, and `error` is a message to show as-is, e.g. "Replicate's safety filter refused this clip". If one take fails the whole job fails and is refunded.
 
-**Photos on Replicate:** with provider `replicate`, new shots (photoshoots, template shoots, outfit set fronts, character-sheet fills) use FLUX.2 [pro] with the model's reference shots (≤ 6, face first) and the outfit/product photos; the other three outfit angles are edits of the generated front with Qwen-Image-Edit 2511. Prices to users are unchanged ($0.12 a shoot, $0.08 an outfit set, $0.02 an angle). Template after-effects still run on our side.
+**Photos on Replicate:** with provider `replicate`, new shots (photoshoots, template shoots, outfit set fronts, character-sheet fills) use FLUX.2 [pro] with the model's reference shots (≤ 6, face first) and the outfit/product photos; the other three outfit angles are edits of the generated front with Qwen-Image-Edit 2511. Users pay exactly what these cost (estimate held, exact settle: "App clean-up" §3). Template after-effects still run on our side.
 
 ### Keep GPU warm (`plans/backend.md` "Keep GPU warm")
+_2026-11-04: now **"Keep add-on engine ready", owner-only** ("App clean-up" §6). Members get `403 owner_only`; the nudge, video-studio switch, bar, notification and warnings below are gone for members; the owner has the switch in Settings → Engines. `warmGpuAllowed` and the RunPod-balance auto-off are gone._
+
 A user can keep a dedicated H100 warm so renders start at once instead of after the 3–6 min cold start. One warm GPU per user. The pod's whole wall time (boot included) is charged to the user who switched it on, as a "Warm GPU" ledger line (`kind: "warm"`) settled every minute (the last partial minute pro rata). Their renders on it aren't charged GPU time again (`Job.warm`). While it's warm the pool's 3-minute idle shutdown doesn't apply to it; these auto-off rules do:
 
 | rule | default | |
