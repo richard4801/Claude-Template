@@ -221,4 +221,32 @@ class RealApiContractTest {
         owner.signOut()
         expectCode("unauthorized") { owner.me() }
     }
+
+    /** Keep GPU warm against server/api (simulated GPU: the pod is ready at once). */
+    @Test fun keepGpuWarm(): Unit = runBlocking {
+        val owner = HttpMuseApi(base)
+        owner.setToken(owner.signIn(SignInRequest("jen@studio.com", "x")).token)
+        val off = owner.warmGpu()
+        assertEquals("off", off.state); assertTrue(off.allowed); assertEquals(20, off.idleMinutes); assertEquals(120, off.maxMinutes)
+        assertEquals("everyone", owner.studioSettings().warmGpuAllowed)
+        val events = async { withTimeout(20_000) { owner.events().first { it.type == "gpu" && it.gpu?.state == "warm" } } }
+        delay(300)
+        val on = owner.setWarmGpu(studio.muse.app.data.WarmRequest(on = true))
+        assertEquals("warm", on.state); assertTrue(on.on); assertNotNull(on.startedAt); assertEquals("idle", on.autoOffReason); assertTrue(on.canExtend)
+        assertEquals("state", events.await().event)
+        assertEquals(on.startedAt, owner.setWarmGpu(studio.muse.app.data.WarmRequest(on = true)).startedAt) // idempotent
+        assertTrue(owner.setWarmGpu(studio.muse.app.data.WarmRequest(extend = true)).canExtend) // idle reset, cap untouched
+        val done = owner.setWarmGpu(studio.muse.app.data.WarmRequest(on = false))
+        assertEquals("off", done.state); assertEquals("user", done.lastOff?.reason)
+        expectCode("not_warm") { owner.setWarmGpu(studio.muse.app.data.WarmRequest(extend = true)) }
+        // Owner only: a member is refused.
+        val inv = owner.createInvite(CreateInviteRequest(email = "warm@test.local"))
+        val member = HttpMuseApi(base)
+        member.setToken(member.signUp(SignUpRequest("", "warm@test.local", "pw-123456", true, true, inv.code)).token)
+        assertEquals("owner", owner.patchStudioSettings(StudioSettingsPatch(warmGpuAllowed = "owner")).warmGpuAllowed)
+        assertTrue(!member.warmGpu().allowed)
+        val e = expectCode("warm_not_allowed") { member.setWarmGpu(studio.muse.app.data.WarmRequest(on = true)) }
+        assertEquals("Only the studio owner can keep a GPU warm.", ErrorText.of(e))
+        owner.patchStudioSettings(StudioSettingsPatch(warmGpuAllowed = "everyone"))
+    }
 }

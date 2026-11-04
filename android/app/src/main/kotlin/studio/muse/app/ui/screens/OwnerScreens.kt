@@ -395,6 +395,7 @@ fun StudioSettingsScreen() {
 private fun StudioForm(vm: OwnerViewModel, st: StudioSettings, s: OwnerState) {
     var gpus by remember(st) { mutableStateOf(st.maxGpus) }
     var payer by remember(st) { mutableStateOf(st.overheadPayer) }
+    var warmWho by remember(st) { mutableStateOf(st.warmGpuAllowed) }
     var perJob by remember(st) { mutableStateOf(Pricing.toFixed(st.capPerJob, 2)) }
     var perDay by remember(st) { mutableStateOf(Pricing.toFixed(st.capPerDay, 2)) }
     var perUser by remember(st) { mutableStateOf(Pricing.toFixed(st.capPerUserDay, 2)) }
@@ -408,6 +409,10 @@ private fun StudioForm(vm: OwnerViewModel, st: StudioSettings, s: OwnerState) {
         Seg(listOf("user" to "The member", "owner" to "The studio (me)"), payer, { payer = it })
         Tiny("Starting a GPU costs about ${Pricing.money(0.5 / 60 * 3.99)}. It shows as its own line on the job's cost.")
     }
+    Field("Who can keep a GPU warm") {
+        Seg(listOf("everyone" to "Everyone", "owner" to "Only me"), warmWho, { warmWho = it })
+        Tiny("A warm GPU starts renders at once. It bills about ${Pricing.money(3.99)}/hour to whoever turns it on and turns off after ${st.warmIdleMinutes} min without renders.")
+    }
     Field("Spending caps ($)") {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CapInput("Per job", perJob, { perJob = it }, Modifier.weight(1f))
@@ -417,7 +422,7 @@ private fun StudioForm(vm: OwnerViewModel, st: StudioSettings, s: OwnerState) {
     }
     Tiny("Jobs pause when RunPod drops below ${Pricing.money(st.minRunpodBalance)} plus work in flight.")
     Cta(if (s.busy) "Saving…" else "Save studio settings", {
-        vm.saveStudio(StudioSettingsPatch(gpus, payer, perJob.toDoubleOrNull(), perDay.toDoubleOrNull(), perUser.toDoubleOrNull()))
+        vm.saveStudio(StudioSettingsPatch(gpus, payer, perJob.toDoubleOrNull(), perDay.toDoubleOrNull(), perUser.toDoubleOrNull(), warmGpuAllowed = warmWho))
     }, Modifier.fillMaxWidth(), busy = s.busy)
     s.note?.takeIf { it.first == "studio" }?.let { InlineNote(it.second, it.third) }
     if (!st.features.replaceAudio) Tiny("Replace audio isn't on the GPU yet: turning Keep audio off gives a silent take.", color = m.t.muted)

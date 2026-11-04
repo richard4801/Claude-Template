@@ -48,6 +48,11 @@ object ErrorText {
             "bad_response" -> "The server sent something this app version can't read. Update MUSE."
             "server_error" -> "Something went wrong on the server. Try again."
             "bad_signature" -> "The upload link expired. Try again."
+            "warm_not_allowed" -> "Only the studio owner can keep a GPU warm."
+            "owner_balance_low" -> "The studio's GPU credit is low, so a GPU can't be kept warm. Ask the studio owner to top up."
+            "no_gpu_free" -> "Every GPU is busy right now. Try again when a render finishes."
+            "no_gpu_available" -> "RunPod has no free GPU right now. Try again in a minute."
+            "not_warm" -> "The GPU isn't warm any more."
             else -> Credit.dollarize(server).ifBlank { "Something went wrong." }
         }
     }

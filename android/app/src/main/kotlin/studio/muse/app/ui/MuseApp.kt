@@ -63,6 +63,11 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.statusBars
 import kotlinx.coroutines.launch
 import studio.muse.app.AppContainer
 import studio.muse.app.data.Toast
@@ -157,6 +162,22 @@ fun MuseApp(
         }
         CompositionLocalProvider(LocalContainer provides container, LocalNav provides n, LocalCelebrate provides celebrate) {
             Box(Modifier.fillMaxSize().background(muse.t.bg)) {
+                // Keep GPU warm: the bar (and its 5-minute warning) sits above every screen while a GPU is warm.
+                val warmScope = rememberCoroutineScope()
+                val warmFlow = remember(container) { container.repo.state.map { it.warm }.distinctUntilChanged() }
+                val warmState by warmFlow.collectAsState(null)
+                val warmOn = warmState?.takeIf { it.on }
+                val warmBanner by container.warmUi.banner.collectAsState()
+                val warmPrompt by container.warmUi.prompt.collectAsState()
+                val notifPermission = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
+                Column(Modifier.fillMaxSize()) {
+                if (warmOn != null) {
+                    WarmBar(warmOn, { warmScope.launch { container.repo.setWarm(false) } })
+                    warmBanner?.let { b ->
+                        WarmWarningBanner(b, { container.warmUi.banner.value = null; warmScope.launch { container.repo.keepWarm() } }, { container.warmUi.banner.value = null })
+                    }
+                }
+                Box(Modifier.weight(1f).fillMaxWidth().let { if (warmOn != null) it.consumeWindowInsets(WindowInsets.statusBars) else it }) {
                 NavHost(
                     nav, startDestination = startRoute, modifier = Modifier.fillMaxSize(),
                     enterTransition = { enterFor(theme, 1) }, exitTransition = { exitFor(theme, 1) },
@@ -191,10 +212,23 @@ fun MuseApp(
                     composable(Routes.TEMPLATE_USE) { e -> TemplateUseScreen(e.arguments?.getString("id") ?: "") }
                     composable(Routes.SAVE_TEMPLATE) { e -> SaveTemplateScreen(e.arguments?.getString("id") ?: "") }
                 }
+                }
+                }
                 val entry by nav.currentBackStackEntryAsState()
                 FlashOnNav(theme, entry)
                 UploadProgressHost(container)
                 ToastHost(container)
+                warmPrompt?.let { kind ->
+                    WarmPrompt(kind, warmState, onYes = {
+                        container.warmUi.dismiss()
+                        // The ongoing "GPU warm" notification needs the permission (asked once, like on the first Generate).
+                        if (android.os.Build.VERSION.SDK_INT >= 33 && !prefs.notifAsked) {
+                            warmScope.launch { container.prefsStore.update { it.copy(notifAsked = true) } }
+                            runCatching { notifPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS) }
+                        }
+                        warmScope.launch { container.repo.setWarm(true) }
+                    }, onNo = { container.warmUi.dismiss() })
+                }
                 ConfettiLayer(confetti)
             }
         }

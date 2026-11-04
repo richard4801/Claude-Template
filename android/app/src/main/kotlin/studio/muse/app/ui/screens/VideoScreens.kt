@@ -31,6 +31,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -118,7 +120,7 @@ class NewVideoViewModel(private val c: AppContainer) : ViewModel() {
         busy.update { true to it.second }
         val clip = c.repo.uploadClip(if (bad) SampleData.badMeta else SampleData.sampleMeta, null)
         busy.update { false to it.second }
-        if (clip != null) edit { it.copy(clip = clip, showBadExample = bad) }
+        if (clip != null) { edit { it.copy(clip = clip, showBadExample = bad) }; creatingStarted() }
     }
 
     /** A clip from the Android Photo Picker: read its real metadata, upload it, run the checks. */
@@ -131,6 +133,7 @@ class NewVideoViewModel(private val c: AppContainer) : ViewModel() {
             val bytes = if (c.repo.api is studio.muse.app.data.HttpMuseApi) media.bytes(uri) else null
             val clip = c.repo.uploadClip(meta, bytes, media.mime(uri).takeIf { it.startsWith("video/") } ?: "video/mp4") ?: return@launch
             edit { it.copy(clip = clip.copy(thumb = thumb?.let { t -> ImageRef(url = t) }), showBadExample = false) }
+            creatingStarted()
         } catch (e: Exception) {
             c.repo.toast("Couldn't read that clip")
         } finally {
@@ -170,6 +173,11 @@ class NewVideoViewModel(private val c: AppContainer) : ViewModel() {
         }
     }
 
+    /** Keep GPU warm: creating started (a clip picked or uploaded, or the video studio opened). Nudges once per flow. */
+    fun creatingStarted() = c.warmUi.creatingStarted(c.repo.state.value.warm)
+    fun enterFlow() = c.warmUi.enterFlow()
+    fun leaveFlow() = c.warmUi.leaveFlow()
+
     fun markNotifAsked() = viewModelScope.launch { c.prefsStore.update { it.copy(notifAsked = true) } }
     val notifAsked get() = c.prefs.value.notifAsked
 }
@@ -191,6 +199,7 @@ fun SourceScreen() {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) vm.pick(uri) }
     val pickVideo = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) }
     val clip = s.clip
+    DisposableEffect(Unit) { vm.enterFlow(); onDispose { vm.leaveFlow() } }
     ScreenBox {
         Column(Modifier.fillMaxSize()) {
             TopBar("New video", onBack = { nav.back() })
@@ -266,6 +275,11 @@ fun DirectScreen() {
     val m = muse
     val d = s.draft
     val notif = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val container = LocalContainer.current
+    val studio by container.repo.state.collectAsState()
+    // Opening the video studio (Generate) starts creating: the Keep GPU warm nudge, unless this flow already had it.
+    DisposableEffect(Unit) { vm.enterFlow(); onDispose { vm.leaveFlow() } }
+    LaunchedEffect(Unit) { vm.creatingStarted() }
     val generate = {
         if (Build.VERSION.SDK_INT >= 33 && !vm.notifAsked) { vm.markNotifAsked(); notif.launch(Manifest.permission.POST_NOTIFICATIONS) }
         vm.generate { nav.go(Routes.QUEUE) }
@@ -289,6 +303,7 @@ fun DirectScreen() {
             } else TopBar("Video studio", onBack = { nav.back() }) { MoreMenu(menu) }
             DirectCanvas(s)
             ToolStrip(VIDEO_TOOLS, d.tool) { k -> vm.edit { it.copy(tool = k) } }
+            WarmSwitchRow(container, studio.warm)
             BSheet(12.dp) { DirectSheet(vm, s) }
         }
         Dock(tight = true) {

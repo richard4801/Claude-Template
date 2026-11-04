@@ -26,6 +26,8 @@ data class StudioState(
     val wallet: Wallet? = null,
     /** The template library (scope=all: mine + the studio's public ones). Tabs, search and tags filter it on the phone. */
     val templates: List<Template> = emptyList(),
+    /** Keep GPU warm. Null when the server doesn't have it (older server, server/mock). */
+    val warm: WarmGpu? = null,
     val loaded: Boolean = false,
     val error: String? = null,
 ) {
@@ -69,6 +71,10 @@ class MuseRepository(
     /** The session ended (unauthorized / account switched off): the app goes back to sign-in with this message. */
     private val _signedOut = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val signedOut: SharedFlow<String> = _signedOut
+
+    /** The 5-minute warning before a warm GPU turns itself off (in-app banner and notification). */
+    private val _warmWarnings = MutableSharedFlow<WarmWarning>(extraBufferCapacity = 4)
+    val warmWarnings: SharedFlow<WarmWarning> = _warmWarnings
 
     /** 0..1 while a file uploads (presigned PUT or multipart), null otherwise. */
     private val _upload = MutableStateFlow<Float?>(null)
@@ -132,8 +138,9 @@ class MuseRepository(
             val loras = models.mapNotNull { m -> runCatching { a.lora(m.id) }.getOrNull()?.let { m.id to it } }.toMap()
             val accounts = models.mapNotNull { m -> runCatching { a.listAccounts(m.id) }.getOrNull()?.let { m.id to it } }.toMap()
             val posts = runCatching { a.listPosts() }.getOrDefault(emptyList())
+            val warm = runCatching { a.warmGpu() }.getOrNull()
             if (a !== api) return
-            _state.update { StudioState(models, outfits, jobs.sortedByDescending { it.createdAt }, takes, bal, loras, accounts, posts, wallet, loaded = true) }
+            _state.update { StudioState(models, outfits, jobs.sortedByDescending { it.createdAt }, takes, bal, loras, accounts, posts, wallet, warm = warm, loaded = true) }
         } catch (e: ApiException) {
             _state.update { it.copy(loaded = true, error = ErrorText.of(e)) }
             if (e.code in ErrorText.SIGN_OUT_CODES) endSession(ErrorText.of(e)) else toast(ErrorText.of(e))
@@ -156,6 +163,8 @@ class MuseRepository(
         ev.model?.let { m -> _state.update { s -> s.copy(models = s.models.upsert(m) { it.id == m.id }) } }
         ev.outfit?.let { o -> _state.update { s -> s.copy(outfits = s.outfits.upsert(o) { it.id == o.id }) } }
         ev.lora?.let { l -> putLora(l) }
+        ev.gpu?.let { g -> putWarm(g) }
+        if (ev.type == "gpu" && ev.event == "warning") ev.warning?.let { _warmWarnings.tryEmit(it) }
         ev.post?.let { p -> _state.update { s -> s.copy(posts = s.posts.upsert(p) { it.id == p.id }) } }
         if (ev.takes.isNotEmpty()) _state.update { s -> s.copy(takes = ev.takes + s.takes.filterNot { t -> ev.takes.any { it.id == t.id } }) }
         ev.job?.let { j ->
@@ -188,6 +197,20 @@ class MuseRepository(
         _state.update { s -> s.copy(loras = s.loras + (l.modelId to l)) }
         if (prev?.state == "training" && l.state == "ready") onLoraReady?.invoke(_state.value.model(l.modelId), l)
     }
+
+    /** A new warm GPU state. When it turned itself off, say why. */
+    private fun putWarm(g: WarmGpu) {
+        val prev = _state.value.warm
+        _state.update { it.copy(warm = g) }
+        val off = g.lastOff
+        if (prev?.on == true && !g.on && off != null && off.reason != "user") toast("Warm GPU turned off · ${warmOffWhy(off.reason, g.idleMinutes)} · ${Credit.money(off.costUsd)}")
+    }
+
+    // ---- Keep GPU warm
+    suspend fun refreshWarm() { runCatching { api.warmGpu() }.onSuccess { putWarm(it) } }
+    suspend fun setWarm(on: Boolean) = attempt { setWarmGpu(WarmRequest(on = on)) }?.also { putWarm(it); refreshBalance() }
+    /** "Keep warm": restarts the idle clock, or extends the time limit once. */
+    suspend fun keepWarm() = attempt { setWarmGpu(WarmRequest(extend = true)) }?.also { putWarm(it) }
 
     private inline fun <T> List<T>.upsert(item: T, match: (T) -> Boolean): List<T> =
         if (any(match)) map { if (match(it)) item else it } else listOf(item) + this
@@ -366,6 +389,16 @@ class MuseRepository(
         runCatching { api.balance() }.onSuccess { b -> _state.update { it.copy(balance = b) } }
         refreshWallet()
     }
+}
+
+/** Why a warm GPU turned itself off, for the toast. */
+fun warmOffWhy(reason: String, idleMinutes: Int) = when (reason) {
+    "idle" -> "$idleMinutes min without renders"
+    "cap" -> "it reached its time limit"
+    "credit" -> "your credit is running low"
+    "owner_balance" -> "the studio's GPU credit is low"
+    "gpu_lost" -> "the GPU stopped responding"
+    else -> "turned off"
 }
 
 /** 12,500 */

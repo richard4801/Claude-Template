@@ -66,6 +66,8 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             // Photo templates (plans/templates.md): library, detail (owner and someone else's), using one (locked prompt line), Save as template.
             "templates", "templates_mine", "template_detail", "template_detail_other", "template_edit", "template_use", "template_use_prompt", "save_template",
             "shoot_templates",
+            // Keep GPU warm: the nudge when creating starts, the cost warning on switch-on, the bar (warm, starting) and the 5-minute warning.
+            "warm_nudge", "warm_confirm", "warm_bar", "warm_starting", "warm_warning",
         )
 
         @JvmStatic
@@ -118,7 +120,7 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "post_schedule" -> c.drafts.postStartScheduled.value = true
             "posts_posted" -> c.drafts.postsTab.value = "posted"
             "shoot_prompt" -> c.drafts.shoot.update { it.copy(tool = "spark", direction = "laughing mid-step, hair blowing") }
-            "source", "direct" -> c.drafts.video.update { it.copy(clip = sample) }
+            "source", "direct" -> { c.drafts.video.update { it.copy(clip = sample) }; c.warmUi.creatingStarted(null) }
             "source_bad" -> c.drafts.video.update {
                 it.copy(clip = Clip(SampleData.BAD_CLIP, "Mirror trend (download)", 22.0, 1080, 1920, 30, ClipRules.checks(SampleData.badMeta)), showBadExample = true)
             }
@@ -127,6 +129,22 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "template_use" -> c.drafts.templateUse.value = studio.muse.app.data.TemplateUseDraft("tpl_mirror-selfie")
             "template_use_prompt" -> c.drafts.templateUse.value = studio.muse.app.data.TemplateUseDraft("tpl_maya_walk", direction = "sitting on the steps, looking back over her shoulder", shuffleSeed = 7, showPrompt = true)
             "shoot_templates" -> c.drafts.shoot.update { it.copy(tool = "model") }
+            "warm_nudge" -> c.drafts.video.update { it.copy(clip = sample) }
+            "warm_confirm" -> { c.drafts.video.update { it.copy(clip = sample) }; c.warmUi.creatingStarted(null); c.warmUi.confirm() }
+            "warm_bar", "warm_warning" -> runBlocking {
+                val t = System.currentTimeMillis()
+                // Ready 15 min ago with no render since: the idle auto-off is 5 min away (the warning's moment).
+                val ready = t - 15 * 60_000L
+                fake.debugSetWarm(studio.muse.app.data.WarmGpu("warm", startedAt = t - 42 * 60_000L - 20_000, readyAt = ready, minutes = 42, costUsd = 2.80,
+                    ratePerHour = 3.99, canExtend = true))
+                if (screen == "warm_warning") c.warmUi.banner.value = studio.muse.app.data.WarmWarning("idle", ready + 20 * 60_000L, "Warm GPU turns off in 5 min (no renders)")
+            }
+            "warm_starting" -> runBlocking {
+                c.drafts.video.update { it.copy(clip = sample) }
+                c.warmUi.creatingStarted(null)
+                val t = System.currentTimeMillis()
+                fake.debugSetWarm(studio.muse.app.data.WarmGpu("starting", startedAt = t - 2 * 60_000L - 10_000, minutes = 2, costUsd = 0.13, ratePerHour = 3.99, canExtend = true))
+            }
             "invite_code" -> c.drafts.lastInvite.value = InviteCreated("MUSE-7KQ2-XW9P-4HTD", "inv1", "maya@studio.com", "member", System.currentTimeMillis() + 14 * 86_400_000L,
                 shareText = "You're invited to MUSE, the AI model studio. 1) Download: https://muse.example/get 2) Sign up with this invite code: MUSE-7KQ2-XW9P-4HTD (email: maya@studio.com). The code works once and expires in 14 days.")
             "queue_waiting" -> runBlocking {
@@ -167,6 +185,8 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "templates", "templates_mine" -> Routes.TEMPLATES
             "template_detail", "template_detail_other", "template_edit", "template_use", "template_use_prompt", "save_template" -> Routes.HOME
             "shoot_templates" -> Routes.SHOOT
+            "warm_nudge", "warm_confirm", "warm_starting" -> Routes.DIRECT
+            "warm_bar", "warm_warning" -> Routes.HOME
             else -> if (screen.startsWith("lora")) Routes.LORA else screen
         }
         compose.mainClock.autoAdvance = false

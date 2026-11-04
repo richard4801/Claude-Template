@@ -33,6 +33,10 @@ class Notifier(private val context: Context) {
         /** Open the post handoff for this post id (scheduled post notification). */
         const val EXTRA_HANDOFF = "muse.handoff"
         const val CHANNEL_POSTS = "posts"
+        /** The ongoing "GPU warm" notification: low importance, silent (it updates every minute). */
+        const val CHANNEL_WARM = "warm_gpu"
+        private const val WARM_ID = 0x5741524d
+        private const val WARM_WARNING_ID = 0x5741524e
     }
 
     init {
@@ -52,6 +56,11 @@ class Notifier(private val context: Context) {
             posts.setSound(defaultSound, attrs)
             posts.enableVibration(true)
             nm?.createNotificationChannel(posts)
+            val warm = NotificationChannel(CHANNEL_WARM, context.getString(R.string.channel_warm), NotificationManager.IMPORTANCE_LOW)
+            warm.description = context.getString(R.string.channel_warm_desc)
+            warm.setSound(null, null)
+            warm.enableVibration(false)
+            nm?.createNotificationChannel(warm)
         }
     }
 
@@ -118,6 +127,60 @@ class Notifier(private val context: Context) {
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(id, n) }
     }
+
+    private fun warmAction(action: String, code: Int): PendingIntent =
+        PendingIntent.getBroadcast(context, code, Intent(context, WarmGpuReceiver::class.java).setAction(action), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+    /**
+     * The ongoing warm GPU notification, like a foreground service's: it can't be swiped away while the GPU is warm, its
+     * chronometer counts the minutes by itself, and it has Turn off. Updated on every state change and minute tick.
+     */
+    fun warmOngoing(w: studio.muse.app.data.WarmGpu) {
+        if (!canPost()) return
+        val title = if (w.starting) "GPU starting… (3–6 min)" else "GPU warm"
+        val text = "${Pricing.money(w.costUsd)} so far · about ${Pricing.money(w.ratePerHour)}/hour · turns off after ${w.idleMinutes} min without renders"
+        val n = NotificationCompat.Builder(context, CHANNEL_WARM)
+            .setSmallIcon(R.drawable.ic_stat_muse)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setUsesChronometer(true)
+            .setShowWhen(true)
+            .setWhen(w.startedAt ?: System.currentTimeMillis())
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setContentIntent(open("direct", WARM_ID))
+            .addAction(0, "Turn off", warmAction(WarmGpuReceiver.TURN_OFF, WARM_ID))
+            .build()
+        runCatching { NotificationManagerCompat.from(context).notify(WARM_ID, n) }
+    }
+
+    fun cancelWarm() {
+        runCatching { NotificationManagerCompat.from(context).cancel(WARM_ID) }
+        cancelWarmWarning()
+    }
+
+    /** The 5-minute warning before an idle or cap auto-off, with Keep warm. */
+    fun warmWarning(w: studio.muse.app.data.WarmWarning) {
+        if (!canPost()) return
+        val n = NotificationCompat.Builder(context, CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_muse)
+            .setContentTitle(w.message.ifBlank { "Warm GPU turns off in 5 min" })
+            .setContentText(if (w.reason == "cap") "It reaches its time limit. Keep warm extends it once." else "No renders on it. Keep warm keeps it on.")
+            .setAutoCancel(true)
+            .setTimeoutAfter((w.autoOffAt - System.currentTimeMillis()).coerceIn(10_000, 6 * 60_000L))
+            .setContentIntent(open("direct", WARM_WARNING_ID))
+            .addAction(0, "Keep warm", warmAction(WarmGpuReceiver.KEEP_WARM, WARM_WARNING_ID))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .build()
+        runCatching { NotificationManagerCompat.from(context).notify(WARM_WARNING_ID, n) }
+    }
+
+    fun cancelWarmWarning() { runCatching { NotificationManagerCompat.from(context).cancel(WARM_WARNING_ID) } }
 
     /** Identity LoRA training finished. */
     fun loraReady(modelName: String, version: Int) =

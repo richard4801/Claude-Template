@@ -174,6 +174,8 @@ data class Job(
     /** GPU warm-up charged with this job (when the member pays it). */
     val warmupCost: Double? = null,
     val userId: String? = null,
+    /** Ran on its user's warm GPU: the "Warm GPU" line pays its GPU time. */
+    val warm: Boolean? = null,
 ) {
     val paused get() = blocked == BLOCKED_LOW_BALANCE
     val engineLabel: String
@@ -437,6 +439,10 @@ data class StudioSettings(
     val tokenUsd: Double = 0.01,
     val minRunpodBalance: Double = 2.0,
     val lowBalance: Boolean = false,
+    /** Who may switch on Keep GPU warm: "everyone" (default) or "owner". */
+    val warmGpuAllowed: String = "everyone",
+    val warmIdleMinutes: Int = 20,
+    val warmMaxMinutes: Int = 120,
     val features: StudioFeatures = StudioFeatures(),
 )
 
@@ -447,6 +453,7 @@ data class StudioSettingsPatch(
     val capPerJob: Double? = null,
     val capPerDay: Double? = null,
     val capPerUserDay: Double? = null,
+    val warmGpuAllowed: String? = null,
 )
 
 /** GET/PATCH /v1/settings/image-engine. provider: simulated | fal | custom-http. */
@@ -487,7 +494,46 @@ data class TopUpRequest(val amount: Double, val method: String = "card")
 @Serializable
 data class FillAnglesResponse(val model: Model, val cost: Double)
 
-/** Server-sent event on /v1/events. type: job | balance | model | outfit | lora | post | wallet */
+/**
+ * Keep GPU warm (GET/POST /v1/gpu/warm). state: off | starting | warm | stopping. Times are epoch ms.
+ * costUsd is the "Warm GPU" line so far (settled per minute).
+ */
+@Serializable
+data class WarmGpu(
+    val state: String = "off",
+    val startedAt: Long? = null,
+    val readyAt: Long? = null,
+    val minutes: Int = 0,
+    val costUsd: Double = 0.0,
+    val ratePerHour: Double = 3.99,
+    val busy: Boolean = false,
+    val autoOffAt: Long? = null,
+    /** idle | cap */
+    val autoOffReason: String? = null,
+    val warningAt: Long? = null,
+    val idleMinutes: Int = 20,
+    val maxMinutes: Int = 120,
+    val canExtend: Boolean = false,
+    val allowed: Boolean = true,
+    val lastOff: WarmLastOff? = null,
+) {
+    val on get() = state == "starting" || state == "warm" || state == "stopping"
+    val starting get() = state == "starting"
+}
+
+/** How the last warm GPU ended. reason: user | idle | cap | credit | owner_balance | gpu_lost */
+@Serializable
+data class WarmLastOff(val reason: String, val at: Long = 0, val minutes: Int = 0, val costUsd: Double = 0.0)
+
+/** The 5-minute warning before an idle or cap auto-off. */
+@Serializable
+data class WarmWarning(val reason: String, val autoOffAt: Long = 0, val message: String = "")
+
+/** POST /v1/gpu/warm: {on: true|false} or {extend: true} ("Keep warm"). */
+@Serializable
+data class WarmRequest(val on: Boolean? = null, val extend: Boolean? = null)
+
+/** Server-sent event on /v1/events. type: job | balance | model | outfit | lora | post | wallet | gpu */
 @Serializable
 data class ApiEvent(
     val type: String,
@@ -500,6 +546,10 @@ data class ApiEvent(
     val takes: List<Take> = emptyList(),
     val wallet: Wallet? = null,
     val notice: Notice? = null,
+    /** type "gpu": the warm GPU, and event = state | tick | warning (with [warning]). */
+    val gpu: WarmGpu? = null,
+    val event: String? = null,
+    val warning: WarmWarning? = null,
 )
 
 /** PATCH /v1/models/{id}: only the fields sent change. */

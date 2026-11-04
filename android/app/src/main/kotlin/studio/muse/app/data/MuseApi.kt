@@ -103,6 +103,11 @@ interface MuseApi {
     suspend fun imageEngine(): ImageEngine
     suspend fun setImageEngine(req: ImageEnginePatch): ImageEngine
 
+    // Keep GPU warm (plans/api.md): a dedicated GPU so renders start at once, billed per minute.
+    suspend fun warmGpu(): WarmGpu
+    /** {on: true|false} or {extend: true} ("Keep warm"). */
+    suspend fun setWarmGpu(req: WarmRequest): WarmGpu
+
     // Developer
     suspend fun setFailNext(fail: Boolean)
 

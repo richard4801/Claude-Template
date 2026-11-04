@@ -90,6 +90,8 @@ interface MuseService {
     @GET("v1/settings/image-engine") suspend fun imageEngine(): ImageEngine
     @PATCH("v1/settings/image-engine") suspend fun setImageEngine(@Body r: ImageEnginePatch): ImageEngine
     @POST("v1/dev/fail-next") suspend fun failNext(@Body r: DevFailRequest)
+    @GET("v1/gpu/warm") suspend fun warmGpu(): WarmGpu
+    @POST("v1/gpu/warm") suspend fun setWarmGpu(@Body r: WarmRequest): WarmGpu
     @PATCH("v1/models/{id}") suspend fun updateModel(@Path("id") id: String, @Body r: UpdateModelRequest): Model
     @DELETE("v1/models/{id}") suspend fun deleteModel(@Path("id") id: String)
     @POST("v1/queue/run") suspend fun runQueue(): List<Job>
@@ -258,6 +260,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun imageEngine() = call { imageEngine() }
     override suspend fun setImageEngine(req: ImageEnginePatch) = call { setImageEngine(req) }
     override suspend fun setFailNext(fail: Boolean) = call { failNext(DevFailRequest(fail)) }
+    override suspend fun warmGpu() = call { warmGpu() }
+    override suspend fun setWarmGpu(req: WarmRequest) = call { setWarmGpu(req) }
     override suspend fun updateModel(modelId: String, req: UpdateModelRequest) = call { updateModel(modelId, req) }.abs()
     override suspend fun deleteModel(modelId: String) = call { deleteModel(modelId) }
     override suspend fun runQueue() = call { runQueue() }.map { it.abs() }

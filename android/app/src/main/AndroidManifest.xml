@@ -39,6 +39,7 @@
         </activity>
         <!-- Scheduled posts: a local alarm that shows the "time to post" notification. -->
         <receiver android:name=".platform.PostAlarmReceiver" android:exported="false" />
+        <receiver android:name=".platform.WarmGpuReceiver" android:exported="false" />
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.share"

@@ -607,9 +607,69 @@ class FakeMuseApi(
     override suspend fun studioSettings(): StudioSettings = lock.withLock { studio.copy(lowBalance = balance.balance < studio.minRunpodBalance) }
     override suspend fun patchStudioSettings(req: StudioSettingsPatch): StudioSettings = lock.withLock {
         studio = studio.copy(maxGpus = req.maxGpus ?: studio.maxGpus, overheadPayer = req.overheadPayer ?: studio.overheadPayer, capPerJob = req.capPerJob ?: studio.capPerJob,
-            capPerDay = req.capPerDay ?: studio.capPerDay, capPerUserDay = req.capPerUserDay ?: studio.capPerUserDay)
+            capPerDay = req.capPerDay ?: studio.capPerDay, capPerUserDay = req.capPerUserDay ?: studio.capPerUserDay, warmGpuAllowed = req.warmGpuAllowed ?: studio.warmGpuAllowed)
         studio
     }
+
+    // ---- Keep GPU warm (demo): boots in a few seconds, then bills $3.99/h from the balance once a minute.
+    private var warm = WarmGpu()
+    private var warmRunner: CoJob? = null
+    override suspend fun warmGpu(): WarmGpu = lock.withLock { warmView() }
+    private fun warmView(t: Long = now()): WarmGpu {
+        val w = warm
+        if (!w.on) return w.copy(idleMinutes = studio.warmIdleMinutes, maxMinutes = studio.warmMaxMinutes)
+        val start = w.startedAt ?: t
+        val idleAt = if (w.state == "warm") (w.readyAt ?: t) + w.idleMinutes * 60_000L else null
+        val capAt = start + w.maxMinutes * 60_000L
+        val (at, why) = if (idleAt != null && idleAt < capAt) idleAt to "idle" else capAt to "cap"
+        return w.copy(minutes = ((t - start) / 60_000).toInt(), autoOffAt = at, autoOffReason = why, warningAt = at - 5 * 60_000L)
+    }
+    override suspend fun setWarmGpu(req: WarmRequest): WarmGpu = lock.withLock {
+        when {
+            req.extend == true -> {
+                if (!warm.on) throw ApiException("not_warm", "The GPU is not warm")
+                val v = warmView()
+                warm = if (v.autoOffReason == "cap" && warm.canExtend) warm.copy(maxMinutes = warm.maxMinutes * 2, canExtend = false) else warm.copy(readyAt = now().takeIf { warm.state == "warm" } ?: warm.readyAt)
+            }
+            req.on == true -> if (!warm.on) {
+                if (balance.balance < 3.99 * 10 / 60) throw ApiException("insufficient_balance", "Not enough credit to keep a GPU warm")
+                warm = WarmGpu("starting", startedAt = now(), idleMinutes = studio.warmIdleMinutes, maxMinutes = studio.warmMaxMinutes, canExtend = true)
+                warmRunner?.cancel()
+                if (speed > 0) warmRunner = scope.launch {
+                    delay(4000)
+                    lock.withLock { if (warm.state == "starting") warm = warm.copy(state = "warm", readyAt = now()) }
+                    emitWarm("state")
+                    var billed = 0
+                    while (true) {
+                        delay(15_000)
+                        val v = lock.withLock { warmView() }
+                        if (!v.on) break
+                        if (v.minutes > billed) {
+                            lock.withLock {
+                                val usd = (v.minutes - billed) * 3.99 / 60
+                                billed = v.minutes
+                                warm = warm.copy(costUsd = warm.costUsd + usd)
+                                balance = balance.copy(balance = (balance.balance - usd).coerceAtLeast(0.0))
+                            }
+                            events.emit(ApiEvent("balance", balance = balance))
+                            emitWarm("tick")
+                        }
+                        val at = v.autoOffAt ?: continue
+                        if (now() >= at) { lock.withLock { warm = WarmGpu(lastOff = WarmLastOff(v.autoOffReason ?: "idle", now(), v.minutes, warm.costUsd)) }; emitWarm("state"); break }
+                    }
+                }
+            }
+            req.on == false -> if (warm.on) {
+                warmRunner?.cancel()
+                val v = warmView()
+                warm = WarmGpu(lastOff = WarmLastOff("user", now(), v.minutes, warm.costUsd))
+            }
+        }
+        warmView().also { events.tryEmit(ApiEvent("gpu", gpu = it, event = "state")) }
+    }
+    private suspend fun emitWarm(event: String) { events.emit(ApiEvent("gpu", gpu = lock.withLock { warmView() }, event = event)) }
+    /** Test hook: a fixed warm GPU state (no runner). */
+    suspend fun debugSetWarm(w: WarmGpu) = lock.withLock { warmRunner?.cancel(); warm = w }
     override suspend fun imageEngine(): ImageEngine = lock.withLock { engine }
     override suspend fun setImageEngine(req: ImageEnginePatch): ImageEngine = lock.withLock {
         if (engine.available[req.provider] != true) throw ApiException("bad_request", "${req.provider} is not set up on the server")

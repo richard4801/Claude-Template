@@ -54,6 +54,12 @@ Developer settings also include "Fast · beta engine (Viggle)", which flags Fast
 - **Save as template** (Result → ⋯ or "Save look" on any photo): name, tags, Private (default) or Public, and the auto-suggested variation pool, editable before saving (`POST /v1/templates/draft`, then `POST /v1/templates {fromShotId}`). A photo made with someone else's template can't be saved (`template_hidden`).
 - Demo mode has the seven starters (owned by you) and two public templates from "Maya", so both views can be tried without a server.
 
+## Keep GPU warm (`plans/backend.md`)
+- **Nudge:** when creating starts (a clip picked or uploaded in New video, or the Video studio opened) and no GPU is warm for you, MUSE asks: "Warm up a GPU now so your render starts right away? About $4/hour from your credit while it's on, and it turns off by itself after 20 min without renders." **Warm up** / **Not now**. Once per creating flow: going from New video to the Video studio doesn't ask again; the next time you start creating, it does (`data/WarmUi.kt`).
+- **Switch:** "Keep GPU warm" in the Video studio. Every switch-on shows the same cost warning to confirm (no "don't ask again"); switching off is immediate. Members see it dimmed when the owner keeps it to themselves (Studio settings → Who can keep a GPU warm).
+- **While it's on:** a bar above every screen, "GPU warm · 42 min · $2.80 so far · Turn off" ("Starting… · 2 min · …" while the pod boots, 3–6 min), updated live; an ongoing, silent notification with a running clock and **Turn off** (its own "Warm GPU" channel); and the 5-minute warning before an idle or time-limit auto-off, as a notification and an in-app banner, both with **Keep warm**. When it turns itself off, a toast says why and what it cost.
+- The ongoing notification is posted by the app, not a foreground service: if Android kills the app it stays until the app runs again (the GPU itself is managed by the server either way). Demo mode simulates it ($3.99/h from the demo balance).
+
 ## Layout
 - `core/`: a pure Kotlin module (no Android) with `PromptEngine` (the layered prompt system in `plans/prompt-system.md`) and `Pricing` (steps 4–30, time and cost). Its tests use fixtures generated from the prototype's JS.
 - `app/data/`: the `MuseApi` interface, `FakeMuseApi` (in-process), `HttpMuseApi` (Retrofit + OkHttp SSE), the repository, DataStore prefs and the cross-screen drafts.
