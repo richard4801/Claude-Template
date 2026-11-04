@@ -23,6 +23,9 @@ Status tags: **[core]** needed for v1 · **[later]** after v1 · **[idea]** not 
   - Warn when the user uploads a **character sheet** instead of separate images.
 - **[core]** **Outfits** per character: each outfit is its own reference set. Pick the outfit per video (tested: the outfit transfers reliably).
 - **[core]** "Never add" list per character: tattoos, rings, chokers, etc. These go into the prompt automatically (tested: necessary to stop features carrying over from the performer).
+- **[core]** **Character sheet: generate, bring your own, or mix.** Each of the 6 slots can be generated or uploaded, and tapping a slot retakes or replaces it. Nothing is strictly required (missing face close-ups only show a warning).
+- **[core]** **Outfit set generator:** Describe it / From a photo / My own set → front, ¾, side and back on one seed → Save. It's reachable from the profile, the video Outfit tool and the photoshoot Outfit tool.
+- **[core]** **Prompt engine** behind every generator (see `plans/prompt-system.md`). Photoshoot has a Prompt tool (your direction, Lock look, final prompt by slot), and Scene accepts custom text.
 - **[later]** Character LoRA training button, for faces that stay consistent across many videos.
 - **[later]** Logo/brand check on outfit images (tested: Nike socks and Crocs showed up), with the option to flag or remove.
 

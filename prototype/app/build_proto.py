@@ -34,6 +34,11 @@ extra = """
 .t-d .acc,.t-d .fld-r{color:var(--blue)}
 .full{height:560px}
 .t-c .ccard{height:290px}
+textarea.inp{font:inherit;color:var(--ink);resize:none;width:100%;outline:none;line-height:1.45;user-select:text;-webkit-user-select:text}
+textarea.inp:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
+.pbox{border:var(--stroke) solid var(--line);border-radius:var(--r);background:var(--surface2);padding:10px 12px;display:flex;flex-direction:column;gap:6px;font-size:12.5px;line-height:1.4;max-height:190px;overflow:auto}
+.pbox .pk{display:inline-block;min-width:68px;margin-right:6px;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.slot .ref-img.shimmer{background:var(--surface2)}
 """
 fonts = ("family=Instrument+Serif&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500"
          "&family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700"

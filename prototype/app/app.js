@@ -120,27 +120,28 @@ SCREENS.home = () => {
   </div>${tabbar('home')}${home}</section>`;
 };
 
-const OUTFITS=[['g_front','Green set'],['c_front','Crystal dress'],['g_tq','Green · ¾'],['c_tq','Crystal · ¾']];
+const OUTFITS=[['g_front','Green set',['g_front','g_tq','g_side','g_back']],['c_front','Crystal dress',['c_front','c_tq','c_face','c_front']]];
+const addTile = (cls='ofit') => `<div class="${cls} press" data-go="outfit" title="Add outfit"><div class="ref-img tall init" style="display:grid;place-items:center">+</div>${cls==='ofit'?'<span>Add outfit</span>':''}</div>`;
 SCREENS.profile = () => {
   const t=T(), o=S.outfit;
   if(t==='a') return `<section class="screen">${sbar()}<header class="top">${wm()}<span class="grow"></span><span class="tb-btn press" data-go="settings">${ic('more')}</span></header>
     <div class="strip"><span>${ic('lock',12)} Identity locked · 6/6</span><span>Model profile</span></div>
     <div class="ap-photo press" style="${bg('hero')}" data-go="direct"><span class="cond ap-name">Sienna<br>Vale</span><span class="ap-tag">THE FACE OF YOUR VISION</span></div>
-    <div class="carousel"><span class="arrow press" data-act="outfit-prev">${ic('back',18)}</span>${OUTFITS.map(([k],i)=>`<div class="cimg press${i===o?' on':''}" style="${bg(k)}" data-act="outfit-${i}"></div>`).join('')}<span class="arrow press" data-act="outfit-next">${ic('chev',18)}</span></div>
+    <div class="carousel"><span class="arrow press" data-act="outfit-prev">${ic('back',18)}</span>${OUTFITS.map(([k],i)=>`<div class="cimg press${i===o?' on':''}" style="${bg(k)}" data-act="outfit-${i}"></div>`).join('')}<div class="cimg press" data-go="outfit" style="display:grid;place-items:center;border:1px dashed var(--line);font-size:24px">+</div><span class="arrow press" data-act="outfit-next">${ic('chev',18)}</span></div>
     <div class="under">OUTFITS ${o+1} / ${OUTFITS.length} · ${OUTFITS[o][1].toUpperCase()}</div>
     <div class="dock"><div class="cta grow press" data-go="source">Make a video</div><div class="cta-2 press" data-go="shoot">${ic('camera',18)} Shoot</div></div>${home}</section>`;
   if(t==='b') return `<section class="screen">${sbar()}<header class="top"><span class="tb-btn press" data-back>${ic('back')}</span><span class="grow center">${wm()}</span><span class="tiny mono muted" style="width:60px;text-align:right;line-height:1.1">MODEL<br>PROFILE</span></header>
     <div class="vfcard" style="${bg('hero')}">${vf()}<span class="ro" style="left:16px;top:14px">6/6</span><span class="ro" style="right:16px;top:14px">768×1344</span><i class="cross"></i><span class="ro" style="left:16px;bottom:14px">ISO 100</span><span class="ro" style="right:16px;bottom:14px">24.00 FPS</span></div>
     <div class="namerow"><b>Sienna Vale</b><span class="active">● ACTIVE</span></div><div class="idl">ID 6/6 · 768×1344 · never add: tattoos, rings</div>
     <div class="pad" style="margin-top:12px"><div class="row-b"><span class="lbl">Outfit</span><span class="tiny mono muted">${o+1} / ${OUTFITS.length}</span></div>
-     <div class="refrow" style="margin-top:8px">${OUTFITS.map(([k,n],i)=>`<div class="ofit press${i===o?' on':''}" data-act="outfit-${i}"><div class="ref-img tall" style="${bg(k)}"></div></div>`).join('')}</div></div>
+     <div class="refrow" style="margin-top:8px">${OUTFITS.map(([k,n],i)=>`<div class="ofit press${i===o?' on':''}" data-act="outfit-${i}"><div class="ref-img tall" style="${bg(k)}"></div><span>${n}</span></div>`).join('')}${addTile()}</div></div>
     <div class="dock"><div class="cta grow press" data-go="source">Make a video</div><div class="cta-2 press" data-go="shoot">${ic('camera',18)} Shoot</div></div>${home}</section>`;
   if(t==='c') return `<section class="screen">${sbar()}<header class="top"><span class="tb-btn press" data-back>${ic('back')}</span><span class="grow center">${wm('c')}</span><span class="tb-btn press" data-go="settings">${ic('user')}</span></header>
     <div class="ccard" style="${bg('hero')}"></div>
     <div class="cname"><b>Sienna Vale</b><span class="tb-btn press" data-go="settings">${ic('more')}</span></div>
     <span class="cpill">${ic('lock',13)} Identity locked</span>
     <div class="pad row-b" style="margin-top:14px"><b>Outfit</b><span class="tiny muted">${o+1} / ${OUTFITS.length} ›</span></div>
-    <div class="ccar">${OUTFITS.map(([k],i)=>`<div class="cimg press${i===o?' on':''}" style="${bg(k)}" data-act="outfit-${i}"></div>`).join('')}<span class="round-btn press" data-act="outfit-next" style="position:absolute;right:14px;top:38px">${ic('chev',16)}</span></div>
+    <div class="ccar">${OUTFITS.map(([k],i)=>`<div class="cimg press${i===o?' on':''}" style="${bg(k)}" data-act="outfit-${i}"></div>`).join('')}<div class="cimg press" data-go="outfit" style="display:grid;place-items:center;background:var(--surface);font-size:26px;color:var(--muted)">+</div><span class="round-btn press" data-act="outfit-next" style="position:absolute;right:14px;top:38px">${ic('chev',16)}</span></div>
     <div class="row-g pad" style="margin-top:14px"><div class="cta grow press" data-go="source">Make a video</div><div class="cta-2 press" data-go="shoot">${ic('camera',18)} Shoot</div></div>
     ${tabbar('profile')}${home}</section>`;
   return `<section class="screen"><div class="blue" style="padding-bottom:48px;position:relative">${sbar(true)}<header class="top" style="color:#fff">${wm()}<span class="grow tiny" style="text-align:right;line-height:1.1;font-weight:700">CREATE<br>DIRECT<br>YOUR AI MODEL</span><span class="tb-btn press" data-back>${ic('back')}</span></header>
@@ -150,7 +151,7 @@ SCREENS.profile = () => {
     <span class="stk stk-pink pop-in" style="position:absolute;right:16px;bottom:30px;transform:rotate(-7deg);font-size:18px">IDENTITY<br>LOCKED ${ic('lock',16)}</span></div>
     <div class="pad stack-10" style="margin-top:34px"><b style="color:var(--blue);font-weight:800;letter-spacing:.04em">AI FASHION MODEL</b>
      <div class="row-b"><b>OUTFIT</b><span class="tiny"><b>${OUTFITS.length} LOOKS ›</b></span></div>
-     <div class="refrow">${OUTFITS.map(([k],i)=>`<div class="ofit press${i===o?' on':''}" data-act="outfit-${i}"><div class="ref-img tall" style="${bg(k)}"></div></div>`).join('')}</div></div>
+     <div class="refrow">${OUTFITS.map(([k,n],i)=>`<div class="ofit press${i===o?' on':''}" data-act="outfit-${i}"><div class="ref-img tall" style="${bg(k)}"></div><span>${n}</span></div>`).join('')}${addTile()}</div></div>
     <div class="dock"><div class="cta grow press" data-go="source">Make a video</div><div class="cta-2 press" data-go="shoot">${ic('camera',18)} Shoot</div></div>${home}</section>`;
 };
 
@@ -168,16 +169,58 @@ SCREENS.create2 = () => { const rows=[['Face shape',['Oval','Heart','Round','Squ
   <div class="pad stack-14" style="margin-top:10px"><div class="fld"><span class="lbl">Skin tone</span><div class="sws">${['#F3D9C4','#E8C09C','#D4A275','#B07A50','#8A5A38','#5E3B24'].map((c,i)=>`<i class="sw${i===S.create.skin?' on':''}" style="background:${c}" data-act="skin-${i}"></i>`).join('')}</div></div>
    ${rows.map(([k,o])=>`<div class="fld"><span class="lbl">${k}</span><div class="chips nowrap">${o.map(x=>`<span class="chip${S.create.look[k]===x?' on':''}" data-act="look|${k}|${x}">${x}</span>`).join('')}</div></div>`).join('')}</div>
   <div class="dock"><div class="cta grow press" data-act="portraits">Generate portraits · $0.08</div></div>${home}</section>`; };
-SCREENS.create3 = () => { const sl=[['Face · front','face',1],['Face · profile','profile',1],['Body · front','g_front'],['Body · ¾'],['Body · side'],['Body · back']];
+const SHEET_SLOTS=[['face','Face · front','face'],['profile','Face · profile','profile'],['front','Body · front','g_front'],['tq','Body · ¾','g_tq'],['side','Body · side','g_side'],['back','Body · back','g_back']];
+S.sheet = S.sheet || { face:{img:'face',src:'upload'}, profile:{img:'profile',src:'upload'}, front:{img:'g_front',src:'generated'} };
+SCREENS.create3 = () => { const filled=SHEET_SLOTS.filter(([k])=>S.sheet[k]).length; const faces=['face','profile'].filter(k=>S.sheet[k]).length;
   return `<section class="screen">${sbar()}${topb('New model')}
-  <div class="pad stack-8">${stepbars(3)}<span class="lbl">Step 3 of 3</span><h2 class="h2">Lock her identity</h2></div>
-  <div class="pad stack-14" style="margin-top:10px"><p class="muted">Six separate shots keep her the same person in every video. Face close-ups matter most.</p>
-   <div class="slots">${sl.map(([n,k,r])=>`<div class="slot${k?' filled':''} press" data-act="upload">${k?`<div class="ref-img" style="${bg(k)}"></div>`:`<div class="slot-e">${ic('upload',20)}</div>`}<span>${n}</span></div>`).join('')}</div>
-   <div class="note-box warn">${ic('shield',18)}<span>3 of 6 added. Upload separate images, not a character sheet.</span></div></div>
-  <div class="dock"><div class="cta-2 wide press" data-act="upload">${ic('upload',18)} Upload</div><div class="cta grow press" data-act="model-saved">Save model</div></div>${home}</section>`; };
+  <div class="pad stack-8">${stepbars(3)}<span class="lbl">Step 3 of 3</span><h2 class="h2">Character sheet</h2></div>
+  <div class="pad stack-12 scroll" style="margin-top:8px;padding-bottom:120px"><p class="muted">Generate her shots, bring your own, or mix both. Tap a shot to retake or replace it.</p>
+   <div class="seg"><span class="${S.sheetMode!=='upload'?'on':''}" data-act="sheetmode-gen">${ic('spark',14)} Generate</span><span class="${S.sheetMode==='upload'?'on':''}" data-act="sheetmode-upload">${ic('upload',14)} Bring your own</span></div>
+   <div class="slots">${SHEET_SLOTS.map(([k,n])=>{ const s=S.sheet[k];
+     return `<div class="slot press" data-act="slot-${k}">${s?`<div class="ref-img${s.busy?' shimmer':''}" style="${s.busy?'':bg(s.img)}"></div>`:`<div class="slot-e">${ic(S.sheetMode==='upload'?'upload':'spark',20)}</div>`}<span>${n}${s&&!s.busy?` · <b class="${s.src==='generated'?'acc':''}">${s.src==='generated'?'AI':'yours'}</b>`:''}</span></div>`; }).join('')}</div>
+   <div class="cta-2 press" data-act="sheet-fill">${ic(S.sheetMode==='upload'?'upload':'spark',18)} ${filled===6?'Sheet complete · tap a shot to retake':S.sheetMode==='upload'?'Upload images':'Generate missing shots · $'+(0.02*(6-filled)).toFixed(2)}</div>
+   ${faces<2?`<div class="note-box warn">${ic('shield',18)}<span>Tip: two face close-ups keep her face sharp and consistent in videos. You can still save without them.</span></div>`:`<div class="note-box">${ic('check',18)}<span>${filled} of 6 shots. ${filled<6?'More angles help when she turns; optional.':'Full sheet. Her identity is locked.'}</span></div>`}
+  </div>
+  <div class="dock"><div class="cta grow press" data-act="model-saved">Save model · ${filled}/6</div></div>${home}</section>`; };
+
+/* ---------- New outfit set ---------- */
+S.newOutfit = S.newOutfit || { mode:'describe', desc:'Cream cable-knit sweater, light-wash straight jeans, white sneakers', state:'idle' };
+SCREENS.outfit = () => { const o=S.newOutfit, angles=[['Front','c_front'],['¾','c_tq'],['Side','c_face'],['Back','c_front']];
+  return `<section class="screen">${sbar()}${topb('New outfit')}
+  <div class="pad stack-14 scroll" style="padding-bottom:120px"><h2 class="h2">Outfit set</h2><p class="muted">Sienna in a new outfit, from four angles. Used by every shoot and video with this outfit.</p>
+   <div class="seg"><span class="${o.mode==='describe'?'on':''}" data-act="omode-describe">Describe</span><span class="${o.mode==='photo'?'on':''}" data-act="omode-photo">From a photo</span><span class="${o.mode==='own'?'on':''}" data-act="omode-own">My own set</span></div>
+   ${o.mode==='describe'?`<label class="fld"><span class="lbl">Describe the outfit</span><textarea class="inp area" id="o-desc" rows="3">${o.desc}</textarea></label>`:
+     o.mode==='photo'?`<div class="opt press" data-act="upload"><b>${ic('upload',16)} Upload a product or outfit photo</b><span class="tiny muted">Flat-lay, mannequin or model photo. We'll dress Sienna in it.</span></div>`:
+     `<div class="opt press" data-act="upload"><b>${ic('upload',16)} Upload front, ¾, side and back</b><span class="tiny muted">Already have a set? Bring it in as is. Any missing angle can be generated later.</span></div>`}
+   <label class="fld"><span class="lbl">Name</span><span class="inp">Cream knit + jeans</span></label>
+   <div class="slots">${angles.map(([n,k],i)=>`<div class="slot"><div class="ref-img${o.state==='busy'?' shimmer':''}" style="${o.state==='done'?bg(k):''}"></div><span>${n}</span></div>`).join('')}</div>
+   <p class="tiny muted">Plain, unbranded clothes work best. Visible logos carry into the video.</p></div>
+  <div class="dock">${o.state==='done'?`<div class="cta-2 press" data-act="outfit-gen">${ic('retry',18)} Retake</div><div class="cta grow press" data-act="outfit-save">Save outfit</div>`:`<div class="cta grow press" data-act="outfit-gen">${o.mode==='own'?'Use my images':'Generate outfit set · $0.08'}</div>`}</div>${home}</section>`; };
+
+/* ---------- Prompt engine (shared by every generator) ---------- */
+const HOUSE = 'realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss';
+function buildPrompt(kind){
+  const m={name:'Sienna Vale', look:'young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin', never:['tattoos','rings','necklaces']};
+  const o=OUTFITS[S.outfit]||OUTFITS[0];
+  if(kind==='shoot'){
+    const parts={
+      identity:`${m.name}: ${m.look}. Identity from 6 locked reference images.`,
+      outfit:`Wearing: ${o[1].toLowerCase()} (outfit reference set).`,
+      scene:`Scene: ${(S.scene||'Rooftop · golden hour').toLowerCase()}.`,
+      camera:`Camera: ${S.shot.toLowerCase()} shot, ${S.lens}mm lens, ${S.aperture}${S.lens<=24?', slight wide-angle distortion':S.lens>=85?', compressed background, creamy bokeh':''}.`,
+      light:`Light: ${S.light.toLowerCase()}; grade: ${(S.grade||'Phone-natural').toLowerCase()}.`,
+      direction: S.direction? `Direction: ${S.direction}` : '',
+      style:`Style: ${HOUSE}.`,
+      negative:`Never add: ${m.never.join(', ')}, logos, extra fingers, warped jewellery.`,
+      seed: S.lockSeed? 'Seed: locked (variations keep the same look).' : 'Seed: new each shot.'
+    };
+    return parts;
+  }
+}
+const promptText = parts => Object.values(parts).filter(Boolean).join('\n');
 
 const TOOLS=[['model','Model'],['outfit','Outfit'],['bg','Background'],['audio','Sound'],['quality','Quality']];
-const SHOOT_TOOLS=[['model','Model'],['outfit','Outfit'],['bg','Scene'],['camera','Camera'],['light','Light']];
+const SHOOT_TOOLS=[['model','Model'],['outfit','Outfit'],['bg','Scene'],['camera','Camera'],['light','Light'],['spark','Prompt']];
 const toolstrip = (list=TOOLS, cur=S.tool, prefix='tool') => `<div class="tools">${list.map(([k,l])=>`<div class="tool press${k===cur?' on':''}" data-act="${prefix}-${k}">${ic(k,20)}<span>${l}</span></div>`).join('')}</div>`;
 function sheetBody(){
   const t=T();
@@ -202,20 +245,26 @@ function sheetBody(){
       <div class="opt press${S.keepAudio?' on':''}" data-act="audio-keep"><b>Keep the clip's audio</b><span class="tiny muted">The song or voice from your source clip.</span></div>
       <div class="opt press${!S.keepAudio?' on':''}" data-act="audio-new"><b>Replace audio</b><span class="tiny muted">Upload a new track or voiceover.</span></div>
       <div class="row-b"><span><b>Lip sync</b><br><span class="tiny muted">Only when the performer talks or sings · adds ~4 min</span></span><span class="tog${S.lip?' on':''}" data-act="lip"></span></div>`;
-  if(S.tool==='outfit') return `<b class="h3">Outfit</b><div class="refrow">${OUTFITS.map(([k,n],i)=>`<div class="ofit press${i===S.outfit?' on':''}" data-act="outfit-${i}"><div class="ref-img tall" style="${bg(k)}"></div><span>${n}</span></div>`).join('')}</div><p class="tiny muted">Never add: tattoos, rings, necklaces. Removed automatically.</p>`;
+  if(S.tool==='outfit') return `<b class="h3">Outfit</b><div class="refrow">${OUTFITS.map(([k,n],i)=>`<div class="ofit press${i===S.outfit?' on':''}" data-act="outfit-${i}"><div class="ref-img tall" style="${bg(k)}"></div><span>${n}</span></div>`).join('')}${addTile()}</div><p class="tiny muted">Never add: tattoos, rings, necklaces. Removed automatically.</p>`;
   if(S.tool==='model') return `<b class="h3">Model</b><div class="refrow"><div class="ofit on"><div class="ref-img tall" style="${bg('face')}"></div><span>Sienna</span></div><div class="ofit"><div class="ref-img tall init">N</div><span>Noor · needs close-ups</span></div></div>`;
   return '';
 }
 function shootSheet(){
   const k=S.stool||'camera';
+  if(k==='spark'){ const p=buildPrompt('shoot');
+    return `<div class="row-b"><b class="h3">Prompt</b><span class="tiny muted">Built from your choices</span></div>
+     <label class="fld"><span class="lbl">Your direction</span><textarea class="inp area" id="dir" rows="2" placeholder="e.g. laughing mid-step, hair blowing, holding an iced coffee">${S.direction||''}</textarea></label>
+     <div class="row-b"><span><b>Lock look</b><br><span class="tiny muted">Same seed, so retakes stay consistent</span></span><span class="tog${S.lockSeed?' on':''}" data-act="lockseed"></span></div>
+     <div class="fld"><span class="lbl">Final prompt</span><div class="pbox">${Object.entries(p).filter(([,v])=>v).map(([kk,v])=>`<div><span class="pk">${kk}</span>${v.replace(/^[A-Za-z ]+: /,'')}</div>`).join('')}</div></div>
+     <div class="row-g"><div class="cta-2 grow press" data-act="copyprompt">Copy</div><div class="cta-2 grow press" data-act="editprompt">Edit as text</div></div>`; }
   if(k==='camera') return `<div class="row-b"><b class="h3">Camera</b><span class="tiny acc press" data-act="shoot-reset">Reset</span></div>
    <div class="fld"><span class="lbl">Shot</span><div class="seg">${['Close','Medium','Full','Wide'].map(x=>`<span class="${S.shot===x?'on':''}" data-act="shot-${x}">${x}</span>`).join('')}</div></div>
    <div class="fld"><span class="lbl">Lens · ${S.lens}mm</span><div class="chips">${[16,24,35,50,85].map(x=>`<span class="chip${S.lens===x?' on':''}" data-act="lens-${x}">${x}mm</span>`).join('')}</div></div>
    <div class="fld"><span class="lbl">Aperture</span><div class="chips">${['f/1.4','f/2.8','f/5.6','f/11'].map(x=>`<span class="chip${S.aperture===x?' on':''}" data-act="ap-${x}">${x}</span>`).join('')}</div></div>`;
   if(k==='light') return `<b class="h3">Light</b><div class="chips">${['Golden hour','Overcast','Ring light','Window light','Flash','Neon night'].map(x=>`<span class="chip${S.light===x?' on':''}" data-act="light-${x}">${x}</span>`).join('')}</div>
    <div class="fld"><span class="lbl">Grade</span><div class="chips">${['Phone-natural','Warm film','Editorial','Muted'].map(x=>`<span class="chip${(S.grade||'Phone-natural')===x?' on':''}" data-act="grade-${x}">${x}</span>`).join('')}</div></div>`;
-  if(k==='bg') return `<b class="h3">Scene</b><div class="chips">${['Rooftop · golden hour','Bedroom mirror','Café window','Beach noon','City night'].map(x=>`<span class="chip${(S.scene||'Rooftop · golden hour')===x?' on':''}" data-act="scene-${x}">${x}</span>`).join('')}</div><p class="tiny muted">Or describe your own location in the prompt.</p>`;
-  if(k==='outfit') return `<b class="h3">Outfit</b><div class="refrow">${OUTFITS.map(([kk,n],i)=>`<div class="ofit press${i===S.outfit?' on':''}" data-act="outfit-${i}"><div class="ref-img tall" style="${bg(kk)}"></div><span>${n}</span></div>`).join('')}</div>`;
+  if(k==='bg') return `<b class="h3">Scene</b><div class="chips">${['Rooftop · golden hour','Bedroom mirror','Café window','Beach noon','City night'].map(x=>`<span class="chip${(S.scene||'Rooftop · golden hour')===x?' on':''}" data-act="scene-${x}">${x}</span>`).join('')}</div><label class="fld"><span class="lbl">Or describe your own</span><textarea class="inp area" id="scene-custom" rows="2" placeholder="e.g. sunlit Lagos rooftop bar, string lights, city skyline">${S.sceneCustom||''}</textarea></label>`;
+  if(k==='outfit') return `<b class="h3">Outfit</b><div class="refrow">${OUTFITS.map(([kk,n],i)=>`<div class="ofit press${i===S.outfit?' on':''}" data-act="outfit-${i}"><div class="ref-img tall" style="${bg(kk)}"></div><span>${n}</span></div>`).join('')}${addTile()}</div>`;
   return `<b class="h3">Model</b><div class="refrow"><div class="ofit on"><div class="ref-img tall" style="${bg('face')}"></div><span>Sienna</span></div><div class="ofit"><div class="ref-img tall init">N</div><span>Noor · draft</span></div></div>`;
 }
 function genLabel(){ const m=estMin(); return `Generate · ${m<2?Math.round(m*60)+'s':Math.round(m)+' min'} · ${money(estCost())}`; }
@@ -364,6 +413,19 @@ function act(a, el){
   const [k, ...rest] = a.split('-'); const v = rest.join('-');
   if(a==='signin'){ snd('go'); S.stack=[]; render('home',1); return; }
   if(a==='signout'){ S.stack=[]; render('welcome',-1); return; }
+  if(k==='slot'){ const s=S.sheet[v];
+    if(S.sheetMode==='upload'){ S.sheet[v]={img:(SHEET_SLOTS.find(x=>x[0]===v)||[])[2],src:'upload'}; toast('Added your image · '+v); refresh(); return; }
+    S.sheet[v]={busy:true}; refresh(); snd('go'); setTimeout(()=>{ S.sheet[v]={img:(SHEET_SLOTS.find(x=>x[0]===v)||[])[2],src:'generated'}; snd('done'); if(S.screen==='create3') refresh(); },1200); return; }
+  if(k==='sheetmode'){ S.sheetMode=v==='gen'?'gen':'upload'; refresh(); return; }
+  if(a==='sheet-fill'){ const miss=SHEET_SLOTS.filter(([kk])=>!S.sheet[kk]); if(!miss.length){ toast('Sheet complete · tap a shot to retake'); return; }
+    if(S.sheetMode==='upload'){ miss.forEach(([kk,,img])=>S.sheet[kk]={img,src:'upload'}); toast(miss.length+' images added'); refresh(); return; }
+    miss.forEach(([kk])=>S.sheet[kk]={busy:true}); refresh(); snd('go'); setTimeout(()=>{ miss.forEach(([kk,,img])=>S.sheet[kk]={img,src:'generated'}); snd('done'); confetti(); if(S.screen==='create3') refresh(); },1600); return; }
+  if(k==='omode'){ S.newOutfit.mode=v; S.newOutfit.state='idle'; refresh(); return; }
+  if(a==='outfit-gen'){ const d=$('#o-desc'); if(d) S.newOutfit.desc=d.value; S.newOutfit.state='busy'; refresh(); snd('go'); setTimeout(()=>{ S.newOutfit.state='done'; snd('done'); if(S.screen==='outfit') refresh(); },1700); return; }
+  if(a==='outfit-save'){ OUTFITS.push(['c_tq','Cream knit + jeans',['c_front','c_tq','c_face','c_front']]); S.outfit=OUTFITS.length-1; S.newOutfit.state='idle'; snd('done'); confetti(); toast('Outfit saved · selected for your next shoot'); back(); return; }
+  if(a==='lockseed'){ S.lockSeed=!S.lockSeed; rShoot(); return; }
+  if(a==='copyprompt'){ const t=promptText(buildPrompt('shoot')); try{ navigator.clipboard.writeText(t).then(()=>toast('Prompt copied'),()=>toast('Copy blocked here · use Edit as text')); }catch(e){ toast('Copy blocked here'); } return; }
+  if(a==='editprompt'){ toast('Advanced: edit the full prompt as text (pro mode)'); return; }
   if(k==='stool'){ S.stool=v; document.querySelectorAll('.tool').forEach(t=>t.classList.toggle('on', t.dataset.act===a)); const sh=$('#ssheet'); if(sh){ sh.innerHTML='<i class="grab"></i>'+shootSheet(); sh.animate([{transform:'translateY(14px)',opacity:.6},{transform:'none',opacity:1}],{duration:260,easing:MOTION[S.theme].ease}); } return; }
   if(k==='scene'){ S.scene=v; rShoot(); return; } if(k==='grade'){ S.grade=v; rShoot(); return; }
   if(a==='shoot-reset'){ S.shot='Medium'; S.lens=35; S.aperture='f/2.8'; rShoot(); return; }
@@ -392,7 +454,7 @@ function act(a, el){
   if(a==='sound'){ S.sound=!S.sound; store.set('sound',S.sound); refresh(); if(S.sound) snd('tap'); return; }
   if(a==='portraits'){ el.classList.add('shimmer'); el.textContent='Generating portraits…'; snd('go'); setTimeout(()=>{ snd('done'); go('create3'); }, 1400); return; }
   if(a==='upload'){ toast('Choose 6 separate images · not a character sheet'); return; }
-  if(a==='model-saved'){ snd('done'); confetti(); toast('Saved · add 3 more shots to unlock video'); S.stack=[]; render('home',1); return; }
+  if(a==='model-saved'){ snd('done'); confetti(); toast('Model saved · character sheet ready'); S.stack=[]; render('home',1); return; }
   if(a==='shoot'){ if(el.dataset.busy) return; el.dataset.busy=1; el.classList.add('shimmer'); el.textContent='Shooting…'; snd('go'); if(S.theme==='b'){ const f=$('#flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); }
     setTimeout(()=>{ const pool=[OUTFITS[S.outfit][0],'c_face','face','g_tq']; S.shots=[...pool.map((k,n)=>[k,(S.scene||'Rooftop · golden hour').split(' · ')[0]+' · '+(n+1),'s'+Date.now()+n]), ...(S.shots||[])];
       S.balance=Math.max(0,S.balance-0.12); S.month+=0.12; S.newShots=4; snd('done'); confetti();
@@ -428,6 +490,7 @@ function startJob(el){
 function setTheme(t){ if(t===S.theme) return; S.theme=t; store.set('theme',t); const ph=$('#phone');
   ph.animate([{filter:'blur(0)',opacity:1},{filter:'blur(6px)',opacity:.2}],{duration:180}).onfinish=()=>{ document.body.className='t-'+t; ph.className='phone t-'+t; refresh(); snd('theme'); ph.animate([{filter:'blur(6px)',opacity:.2},{filter:'blur(0)',opacity:1}],{duration:380,easing:'ease-out'}); confetti(); updateSide(); }; }
 
+document.addEventListener('input', e=>{ if(e.target.id==='scene-custom'){ S.sceneCustom=e.target.value; S.scene=e.target.value||'Rooftop · golden hour'; document.querySelectorAll('#ssheet .chip').forEach(c=>c.classList.remove('on')); return; } if(e.target.id==='dir'){ S.direction=e.target.value; const pb=document.querySelector('.pbox'); if(pb){ const p=buildPrompt('shoot'); pb.innerHTML=Object.entries(p).filter(([,v])=>v).map(([kk,v])=>`<div><span class="pk">${kk}</span>${v.replace(/^[A-Za-z ]+: /,'')}</div>`).join(''); } } });
 document.addEventListener('pointerdown', e=>{ const p=e.target.closest('.press,.chip,.seg span,.tool,.tog,.thm,.sw'); if(p){ p.classList.add('pressed'); ac(); } });
 document.addEventListener('pointerup', ()=>document.querySelectorAll('.pressed').forEach(x=>x.classList.remove('pressed')));
 document.addEventListener('click', e=>{
