@@ -127,7 +127,7 @@ html = f"""<title>MUSE Studio Prototype</title>
     <div class="sp-row"><button data-side="theme:a">Editorial</button><button data-side="theme:b">Camera Body</button><button data-side="theme:c">Soft Tactile</button><button data-side="theme:d">Creator Pop</button></div>
     <span class="lbl" style="color:var(--page-muted)">Jump to</span>
     <div class="sp-row"><button data-side="go:splash">Splash</button><button data-side="go:signin">Sign in</button><button data-side="go:home">Home</button><button data-side="go:profile">Model</button><button data-side="go:create1">Create</button><button data-side="go:shoot">Photoshoot</button><button data-side="go:direct">Video studio</button><button data-side="go:queue">Queue</button><button data-side="go:settings">Settings</button></div>
-    <div class="sp-row"><button data-side="sound">Sound</button></div>
+    <div class="sp-row"><button data-side="sound">Notification sound</button></div>
     <p>Tip: in the video studio, drag the steps slider (or turn the dial in Camera Body), then tap Generate.</p>
   </aside>
   <div class="device"><div class="phone" id="phone"><div class="toast" id="toast"></div><div class="flash" id="flash"></div></div></div>

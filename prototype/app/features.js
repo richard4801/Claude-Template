@@ -95,7 +95,7 @@ let loraIv=null;
     clearInterval(loraIv); const t0=Date.now(); loraIv=setInterval(()=>{ S.lora.p=Math.min(100,(Date.now()-t0)/1000*120/60); // 100 min at 120x
       const L=S.lora; [Math.min(100,L.p*4),Math.max(0,(L.p-25)/75*100)].forEach((p,i)=>{ const b=document.querySelector(`[data-lp="${i}"]`); if(b){ b.style.width=p+'%'; b.parentElement.previousElementSibling.lastElementChild.textContent=Math.round(p)+'%'; } });
       const lf=$('#lora-left'); if(lf) lf.textContent=`~${Math.max(1,Math.round(100-L.p))} min left · demo runs 120× faster`;
-      if(L.p>=100){ clearInterval(loraIv); L.state='done'; L.v+=1; snd('done'); confetti(); toast(`Identity LoRA v${L.v} is ready`, ()=>go('lora')); if(['lora','profile'].includes(S.screen)) refresh(); } }, 300); return; }
+      if(L.p>=100){ clearInterval(loraIv); L.state='done'; L.v+=1; notifySound(); confetti(); toast(`Identity LoRA v${L.v} is ready`, ()=>go('lora')); if(['lora','profile'].includes(S.screen)) refresh(); } }, 300); return; }
   if(a==='lora-use'){ S.lora.use=!S.lora.use; refresh(); return; }
   if(a==='lora-retrain'){ S.lora.state='review'; refresh(); return; }
   if(a.startsWith('acc-on-')){ const k=a.slice(7); el.classList.add('shimmer'); el.textContent='Signing in…'; setTimeout(()=>{ S.acc[k]=k==='youtube'?'Sienna Vale':k==='facebook'?'Sienna Vale (Page)':'@sienna.vale'; snd('done'); toast(pname(k)+' connected'); refresh(); },900); return; }

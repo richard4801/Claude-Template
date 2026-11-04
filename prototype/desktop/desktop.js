@@ -88,7 +88,7 @@ function shell(inner){
    <div class="tb-right">
     ${r?`<div class="jobchip" data-go="queue"><span class="led on"></span>step ${Math.min(r.steps,Math.floor(r.p/100*r.steps)+1)}/${r.steps}<span class="mini"><i style="width:${r.p}%"></i></span></div>`:''}
     <div class="thdots" title="Theme"><span>Theme</span>${THEMES.map(([k,n,b,a])=>`<b class="${k===T()?'on':''}" style="background:linear-gradient(135deg,${b} 50%,${a} 50%)" data-act="theme-${k}" title="${n}"></b>`).join('')}</div>
-    <span class="icbtn" data-act="sound" title="Sound">${ic('audio',18)}</span>
+    <span class="icbtn" data-act="sound" title="Notification sound">${ic('bell',18)}</span>
     <span class="icbtn" data-act="menu-account">${ic('user',18)}</span>
    </div></div>
   <div class="wbody">
@@ -291,7 +291,7 @@ SCREENS.settings = () => { const sec=S.settingsSec;
   const secs=[['appearance','Appearance'],['defaults','Render defaults'],['costs','Costs & limits'],['notif','Notifications'],['about','About']];
   let body='';
   if(sec==='appearance') body=`<span class="h2">Theme</span><div class="thms">${THEMES.map(([k,n])=>`<div class="thm press${k===T()?' on':''}" data-act="theme-${k}"><div class="thm-prev" style="background-image:url(${IMG['dth_'+k]||IMG['th_'+k]})"></div><span class="nm">${n}${k===T()?ic('check',16):''}</span></div>`).join('')}</div>
-   <div class="list"><div class="li">${ic('audio',18)}<span class="grow">Sound effects<br><span class="tiny muted">Each theme has its own sounds</span></span><span class="tog${S.sound?' on':''}" data-act="sound"></span></div>
+   <div class="list"><div class="li">${ic('audio',18)}<span class="grow">Notification sound<br><span class="tiny muted">A soft chime when a render or LoRA finishes. No other sounds.</span></span><span class="tog${S.sound?' on':''}" data-act="sound"></span></div>
    <div class="li">${ic('spark',18)}<span class="grow">Pro mode<br><span class="tiny muted">Show and edit the prompts behind every render</span></span><span class="tog${S.pro?' on':''}" data-act="pro"></span></div></div>`;
   if(sec==='defaults') body=`<span class="h2">Render defaults</span><div class="list"><div class="li"><span class="grow">Default steps<br><span class="tiny muted">10 looked the same as 15 and 20 in testing</span></span><div class="num"><span data-act="steps-dec">−</span><b>${S.steps}</b><span data-act="steps-inc">+</span></div></div>
    <div class="li"><span class="grow">Default engine</span><div class="seg" style="width:260px"><span class="${S.engine==='h3'?'on':''}" data-act="engine-h3">Standard</span><span class="${S.engine==='viggle'?'on':''}" data-act="engine-viggle">Fast · beta</span></div></div>
@@ -346,7 +346,7 @@ function outfitModal(){ closeMenu(); const o={mode:'describe', state:'idle'}; co
   bgd.onclick=e=>{ if(e.target===bgd) bgd.remove(); }; draw(); win.append(bgd); bgd.firstChild.animate([{opacity:0,transform:'translateY(16px) scale(.98)'},{opacity:1,transform:'none'}],{duration:260,easing:'cubic-bezier(.2,1,.3,1)'}); }
 
 /* ---------------- command palette ---------------- */
-const CMDS = [['New video','new-video','studio','⌘N'],['Photoshoot','go:shoot','camera','⌘4'],['New model','go:create','model',''],['Home','go:home','home','⌘1'],['Models','go:models','model','⌘2'],['Queue','go:queue','queue','⌘5'],['Gallery','go:gallery','grid','⌘6'],['Settings','go:settings','quality','⌘,'],['Credits & top up','go:credits','wallet',''],['Theme: Editorial','theme-a','palette',''],['Theme: Camera Body','theme-b','palette',''],['Theme: Soft Tactile','theme-c','palette',''],['Theme: Creator Pop','theme-d','palette',''],['Toggle sound','sound','audio',''],['Toggle pro mode (show prompts)','pro','spark','']];
+const CMDS = [['New video','new-video','studio','⌘N'],['Photoshoot','go:shoot','camera','⌘4'],['New model','go:create','model',''],['Home','go:home','home','⌘1'],['Models','go:models','model','⌘2'],['Queue','go:queue','queue','⌘5'],['Gallery','go:gallery','grid','⌘6'],['Settings','go:settings','quality','⌘,'],['Credits & top up','go:credits','wallet',''],['Theme: Editorial','theme-a','palette',''],['Theme: Camera Body','theme-b','palette',''],['Theme: Soft Tactile','theme-c','palette',''],['Theme: Creator Pop','theme-d','palette',''],['Toggle notification sound','sound','bell',''],['Toggle pro mode (show prompts)','pro','spark','']];
 function palette(){ closeMenu(); if($('.pal')) return; const win=$('.win'); const p=document.createElement('div'); p.className='pal'; let sel=0, list=CMDS;
   p.innerHTML=`<div class="pal-box"><input id="pal-in" placeholder="Type a command or screen…"><div class="pal-list" id="pal-list"></div></div>`;
   const draw=()=>{ $('#pal-list',p).innerHTML=list.map(([l,a,i,k],n)=>`<div class="mi${n===sel?' sel':''}" data-pa="${a}">${ic(i,16)}<span>${l}</span>${k?`<span class="kbd">${k}</span>`:''}</div>`).join('')||'<div class="mi muted">No matches</div>';
@@ -402,14 +402,14 @@ let ticker=null;
 function startQueue(){ const next=S.jobs.find(j=>j.state==='queued'); if(!next||running()) return; next.state='running'; next.mins = next.mins || (next.engine==='Fast · beta'?1.6:next.steps*secPerLen(next.len)/60+0.5); S.gpu='on';
   clearInterval(ticker); const t0=Date.now(), dur=next.mins*60/24*1000;
   ticker=setInterval(()=>{ next.p=Math.min(100,(Date.now()-t0)/dur*100);
-    if(next.p>=100){ clearInterval(ticker); next.state='done'; S.fresh.push(next.id); snd('done'); toast(`<b>${next.title}</b> is ready.`, 'Review', ()=>{ S.open=next.id; go('result'); }); if(S.jobs.some(j=>j.state==='queued')) setTimeout(startQueue,600); }
+    if(next.p>=100){ clearInterval(ticker); next.state='done'; S.fresh.push(next.id); notifySound(); toast(`<b>${next.title}</b> is ready.`, 'Review', ()=>{ S.open=next.id; go('result'); }); if(S.jobs.some(j=>j.state==='queued')) setTimeout(startQueue,600); }
     if(['queue','home'].includes(S.screen)||next.state==='done') refresh(); else { const c=$('.jobchip'); if(c){ c.innerHTML=`<span class="led on"></span>step ${Math.min(next.steps,Math.floor(next.p/100*next.steps)+1)}/${next.steps}<span class="mini"><i style="width:${next.p}%"></i></span>`; } else refresh(); } }, 400); }
 
 function act(a, el){
   if(a.startsWith('theme-')) return setTheme(a.slice(6));
   if(a.startsWith('menu-')){ const k=a.slice(5); if(k.startsWith('job-')){ menuJob=k.slice(4); return openMenu('job', el); } return openMenu(k, el); }
   if(a==='palette') return palette();
-  if(a==='sound'){ S.sound=!S.sound; store.set('sound',S.sound); if(S.sound) snd('tap'); toast('Sound '+(S.sound?'on':'off')); return refresh(); }
+  if(a==='sound'){ S.sound=!S.sound; store.set('sound',S.sound); if(S.sound) snd('tap'); toast('Notification sound '+(S.sound?'on':'off')); return refresh(); }
   if(a==='pro'){ S.pro=!S.pro; store.set('pro',S.pro); toast('Pro mode '+(S.pro?'on: prompts are shown':'off')); return refresh(); }
   if(a==='new-video'){ return go('studio'); }
   if(a==='signin'){ S.authed=true; S.screen='home'; snd('go'); return render(1); }

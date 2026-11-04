@@ -37,17 +37,11 @@ function noise(dur, freq, q=1, vol=.15, delay=0, type='bandpass', sweepTo){
   const g=a.createGain(); g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
   s.connect(f).connect(g).connect(a.destination); s.start(t); s.stop(t+dur);
 }
-const SND = {
-  a: { tap(){ noise(.035,3200,2,.09); }, tick(){ noise(.02,5000,4,.06); }, nav(){ noise(.22,1800,.6,.05,0,'bandpass',600); },
-       go(){ tone(392,null,.5,'sine',.08); tone(587,null,.6,'sine',.06,.08); }, done(){ [523,659,784].forEach((f,i)=>tone(f,null,.9,'sine',.07,i*.12)); }, theme(){ noise(.4,900,.5,.06,0,'bandpass',3000); } },
-  b: { tap(){ noise(.018,2400,6,.16); tone(90,50,.05,'sine',.12); }, tick(){ noise(.012,4200,10,.14); }, nav(){ noise(.05,1500,3,.12); noise(.05,900,3,.1,.06); },
-       go(){ tone(880,null,.08,'square',.05); tone(880,null,.08,'square',.05,.14); tone(1320,null,.18,'square',.05,.28); }, done(){ tone(1046,null,.12,'triangle',.08); tone(1568,null,.3,'triangle',.07,.12); }, theme(){ noise(.03,2000,8,.2); noise(.08,600,2,.15,.07); } },
-  c: { tap(){ tone(520,380,.09,'sine',.1); }, tick(){ tone(900,700,.03,'sine',.05); }, nav(){ tone(330,440,.18,'sine',.06); },
-       go(){ tone(440,660,.35,'sine',.08); }, done(){ [392,523,659,784].forEach((f,i)=>tone(f,null,1.1,'sine',.06,i*.1)); }, theme(){ tone(262,392,.5,'sine',.07); } },
-  d: { tap(){ tone(500,1100,.08,'triangle',.12); }, tick(){ tone(1400,1800,.03,'square',.03); }, nav(){ tone(300,900,.12,'triangle',.08); },
-       go(){ tone(400,1600,.25,'sawtooth',.05); noise(.25,800,.7,.06,0,'bandpass',4000); }, done(){ [523,659,784,1046].forEach((f,i)=>tone(f,null,.25,'square',.05,i*.08)); tone(1568,2093,.3,'triangle',.06,.34); }, theme(){ tone(200,1200,.3,'triangle',.08); tone(1200,1800,.15,'square',.03,.2); } }
-};
-const snd = k => { try{ SND[S.theme][k](); }catch(e){} };
+/* No UI sounds (decided 2026-11-04: they felt like an arcade game). Only notifications make a sound:
+   a soft two-note chime standing in for the phone's own notification sound. */
+const NOTIFY = () => { tone(880,null,.5,'sine',.05); tone(1318.5,null,.8,'sine',.035,.11); };
+function notifySound(){ try{ NOTIFY(); }catch(e){} }
+const snd = k => {};
 
 /* ---------------- Icons ---------------- */
 const ICON = __ICONS__;
@@ -342,7 +336,7 @@ SCREENS.gallery = () => { const fresh=S.newShots||0; S.newShots=0; const tiles=[
 const THEMES=[['a','Editorial','#EFEBE3','#141210','#B5121B'],['b','Camera Body','#0D0E0F','#ECEAE5','#F2A93B'],['c','Soft Tactile','#E7E2D9','#23262A','#6E8465'],['d','Creator Pop','#1F4BFF','#FFF6EC','#FF7EB6']];
 SCREENS.settings = () => `<section class="screen">${sbar()}${topb('Settings',null)}
   <div class="pad stack-16"><div class="fld"><span class="lbl">Theme</span><div class="thms">${THEMES.map(([k,n,b,f,a])=>`<div class="thm press${k===T()?' on':''}" data-act="theme-${k}"><div class="thm-prev" style="background-image:url(${IMG['th_'+k]})"></div><span>${n}</span>${k===T()?`<b class="thm-c">${ic('check',14)}</b>`:''}</div>`).join('')}</div></div>
-   <div class="list"><div class="li press" data-act="sound">${ic('audio',20)}<span class="grow">Sound effects</span><span class="tog${S.sound?' on':''}"></span></div>
+   <div class="list"><div class="li press" data-act="sound">${ic('audio',20)}<span class="grow">Notification sound</span><span class="tog${S.sound?' on':''}"></span></div>
     <div class="li press" data-go="credits">${ic('wallet',20)}<span class="grow">Credits & billing</span><span class="tiny muted">${money(S.balance)}</span>${ic('chev',16)}</div>
     
     <div class="li press" data-act="signout">${ic('user',20)}<span class="grow">Sign out</span>${ic('chev',16)}</div></div>
@@ -523,7 +517,7 @@ function startJob(el){
     document.querySelectorAll(`[data-tc="${r.id}"]`).forEach(b=>b.textContent=fmt(r.left));
     const bt=$('#bigtime'); if(bt) bt.textContent=fmt(r.left);
     if(S.screen==='queue' && S.theme==='c'){ const stages=[30,55,92,100]; stages.forEach((lim,i)=>{ const prev=i?stages[i-1]:0; const sp=Math.max(0,Math.min(100,(r.p-prev)/(lim-prev)*100)); const b=document.querySelector(`[data-stage="${i}"]`); if(b) b.style.width=sp+'%'; const tx=document.querySelector(`[data-stagep="${i}"]`); if(tx) tx.textContent=Math.round(sp)+'%'; }); }
-    if(r.p>=100){ clearInterval(startJob.iv); r.state='done'; r.tc=fmt(r.total); S.jobs.unshift(r); S.running=null; S.balance=Math.max(0,S.balance-r.cost); S.month+=r.cost; snd('done'); confetti();
+    if(r.p>=100){ clearInterval(startJob.iv); r.state='done'; r.tc=fmt(r.total); S.jobs.unshift(r); S.running=null; S.balance=Math.max(0,S.balance-r.cost); S.month+=r.cost; notifySound(); confetti();
       toast('Render done · tap to watch', ()=>{ S.open=r; go('result'); }); if(S.screen==='queue') refresh(); }
   }, 250);
 }
