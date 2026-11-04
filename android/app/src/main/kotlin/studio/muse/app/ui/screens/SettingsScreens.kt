@@ -152,13 +152,13 @@ fun SettingsScreen() {
                     }) { Tiny(if (notifOn) "On" else "Off"); Ic("chev", 16.dp) }
                     Li("export", "${s.modelName}'s accounts", onClick = { nav.go(Routes.ACCOUNTS) }) { Tiny("${s.connected}/5"); Ic("chev", 16.dp) }
                     Li("queue", "Scheduled posts", onClick = { nav.go(Routes.POSTS) }) { Tiny("${s.scheduled}"); Ic("chev", 16.dp) }
-                    Li("wallet", "My tokens", onClick = { nav.go(Routes.CREDITS) }) { Tiny(tokensLabel(s.wallet, s.balance)); Ic("chev", 16.dp) }
+                    Li("wallet", "Credit", onClick = { nav.go(Routes.CREDITS) }) { Tiny(creditLabel(s.wallet, s.balance)); Ic("chev", 16.dp) }
                     Li("user", "Sign out", sub = s.prefs.email.ifBlank { null }, onClick = { vm.signOut { nav.reset(Routes.WELCOME) } }) { Ic("chev", 16.dp) }
                 }
                 if (s.prefs.owner) {
                     Lbl("Studio")
                     ListGroup {
-                        Li("model", "Members", sub = "Send tokens, caps, switch accounts off", onClick = { nav.go(Routes.MEMBERS) }) { Ic("chev", 16.dp) }
+                        Li("model", "Members", sub = "Send credit, caps, switch accounts off", onClick = { nav.go(Routes.MEMBERS) }) { Ic("chev", 16.dp) }
                         Li("mail", "Invite someone", onClick = { nav.go(Routes.INVITE) }) { Ic("chev", 16.dp) }
                         Li("quality", "Studio settings", sub = "GPUs, warm-up, caps, image engine", onClick = { nav.go(Routes.STUDIO) }) { Ic("chev", 16.dp) }
                     }
@@ -247,9 +247,9 @@ fun Li(icon: String, label: String, onClick: () -> Unit, sub: String? = null, tr
     }
 }
 
-/** "1,200 tokens", or the dollar balance for a server without wallets. */
-fun tokensLabel(w: studio.muse.app.data.Wallet?, b: Balance): String = when {
+/** The balance pill and the Credit row: always dollars ("$12.50"). The owner sees what they can spend or send. */
+fun creditLabel(w: studio.muse.app.data.Wallet?, b: Balance): String = when {
     w == null -> Pricing.money(b.balance)
     w.owner -> Pricing.money(w.availableToSend ?: w.usd)
-    else -> "${studio.muse.app.data.fmtTokens(w.tokens)} tokens"
+    else -> Pricing.money(w.usd)
 }

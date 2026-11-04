@@ -5,7 +5,7 @@ package studio.muse.app.data
  * (validation, over-allocation) keep the server's message.
  */
 object ErrorText {
-    const val NOT_ENOUGH_TOKENS = "Not enough tokens. Ask the studio owner for more."
+    const val NOT_ENOUGH_CREDIT = "Not enough credit. Ask the studio owner for more."
     const val PAUSED_LOW_BALANCE = "Paused: the studio's GPU credit is low"
 
     /** Codes that end the session: the app goes back to sign-in. */
@@ -26,13 +26,15 @@ object ErrorText {
             "unauthorized" -> "Your session has ended. Please sign in again."
             "attestation_required" -> "Tick both boxes to continue."
             "owner_only" -> "Only the studio owner can do that."
-            "insufficient_tokens" -> NOT_ENOUGH_TOKENS
+            "insufficient_tokens" -> NOT_ENOUGH_CREDIT
             "insufficient_balance" -> "Not enough GPU credit for this."
             "over_job_limit" -> "This render costs more than the per-job limit. Try fewer steps or takes."
             "over_user_day_limit" -> "You've reached your daily spending cap. Try again tomorrow, or ask the studio owner to raise it."
             "over_day_limit" -> "The studio's daily spending cap is reached. Try again tomorrow."
-            "over_allocation" -> server.ifBlank { "That's more than the studio's RunPod balance can back." }
-            "balance_unavailable" -> "MUSE can't read the RunPod balance right now, so tokens can't be sent. Try again shortly."
+            // The server says "You can send at most 500 tokens ($5.00): …"; keep only the dollars.
+            "over_allocation" -> Regex("""\(\$([\d.,]+)\)""").find(server)?.let { "You can send at most $${it.groupValues[1]}. The rest of the RunPod balance is already with members or on hold." }
+                ?: "That's more than the studio's RunPod balance can back."
+            "balance_unavailable" -> "MUSE can't read the RunPod balance right now, so credit can't be sent. Try again shortly."
             "topup_unavailable" -> "Top up your RunPod account. MUSE reads the balance from RunPod."
             "engine_unavailable" -> "The GPU can't run this option yet. Try Standard without lip sync."
             "image_engine_failed" -> "The image engine failed. You weren't charged."
@@ -46,7 +48,7 @@ object ErrorText {
             "bad_response" -> "The server sent something this app version can't read. Update MUSE."
             "server_error" -> "Something went wrong on the server. Try again."
             "bad_signature" -> "The upload link expired. Try again."
-            else -> server.ifBlank { "Something went wrong." }
+            else -> Credit.dollarize(server).ifBlank { "Something went wrong." }
         }
     }
 }

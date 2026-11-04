@@ -72,6 +72,15 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.contentType
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -415,8 +424,12 @@ fun Field(label: String, modifier: Modifier = Modifier, content: @Composable Col
 fun Input(
     value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, placeholder: String = "", area: Boolean = false,
     password: Boolean = false, keyboard: KeyboardType = KeyboardType.Text, trailing: (@Composable () -> Unit)? = null,
+    /** What the OS password manager should offer here (Username, Password, NewPassword). */
+    autofill: ContentType? = null,
 ) {
     val m = muse
+    // Password fields get an eye that shows or hides what's typed; hidden by default.
+    var shown by rememberSaveable { mutableStateOf(false) }
     val shape = RoundedCornerShape(m.t.r)
     var mod = modifier.fillMaxWidth().let { if (area) it.heightIn(min = 84.dp) else it.height(52.dp) }
     mod = when {
@@ -424,17 +437,27 @@ fun Input(
         else -> mod.clip(shape).background(m.t.surface).border(if (m.isD) 2.5.dp else m.t.stroke, m.t.line, shape)
     }
     Box(mod.padding(horizontal = 16.dp, vertical = if (area) 14.dp else 0.dp), contentAlignment = if (area) Alignment.TopStart else Alignment.CenterStart) {
+        val endPad = (if (trailing != null) 64.dp else 0.dp) + (if (password) 36.dp else 0.dp)
         BasicTextField(
-            value, onChange, Modifier.fillMaxWidth().padding(end = if (trailing != null) 64.dp else 0.dp),
+            value, onChange, Modifier.fillMaxWidth().padding(end = endPad).let { f -> if (autofill != null) f.semantics { contentType = autofill } else f },
             textStyle = m.type.body.copy(fontSize = 15.5.sp, color = m.t.ink, lineHeight = 22.sp), singleLine = !area,
-            cursorBrush = SolidColor(m.t.accent), visualTransformation = if (password) PasswordVisualTransformation('•') else VisualTransformation.None,
+            cursorBrush = SolidColor(m.t.accent), visualTransformation = if (password && !shown) PasswordVisualTransformation('•') else VisualTransformation.None,
             keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else keyboard),
             decorationBox = { inner ->
                 if (value.isEmpty() && placeholder.isNotEmpty()) T(placeholder, m.type.body.copy(fontSize = 15.5.sp), m.t.muted.copy(alpha = .8f))
                 inner()
             },
         )
-        if (trailing != null) Box(Modifier.align(Alignment.CenterEnd)) { trailing() }
+        if (trailing != null || password) Row(Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically) {
+            if (password) {
+                val label = if (shown) "Hide password" else "Show password"
+                Box(
+                    Modifier.size(40.dp).clip(CircleShape).clickable(onClickLabel = label) { shown = !shown }.semantics { contentDescription = label; role = Role.Button },
+                    contentAlignment = Alignment.Center,
+                ) { Ic(if (shown) "eye_off" else "eye", 20.dp, m.t.muted) }
+            }
+            trailing?.invoke()
+        }
     }
 }
 

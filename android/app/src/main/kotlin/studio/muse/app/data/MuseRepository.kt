@@ -171,8 +171,8 @@ class MuseRepository(
         val delta = w.tokens - prev.tokens
         // A transfer moves tokens without touching holds; refunds and settlements release a hold, so they aren't gifts.
         val holdsSame = w.heldTokens >= prev.heldTokens
-        if (delta > 0 && holdsSame) toast("You received ${fmtTokens(delta)} tokens from ${ownerName()}", "credits")
-        else if (delta < 0 && w.heldTokens == prev.heldTokens) toast("${ownerName().replaceFirstChar { it.uppercase() }} took back ${fmtTokens(-delta)} tokens", "credits")
+        if (delta > 0 && holdsSame) toast("You received ${Credit.money(Credit.usdOf(delta, w.tokenUsd))} from ${ownerName()}", "credits")
+        else if (delta < 0 && w.heldTokens == prev.heldTokens) toast("${ownerName().replaceFirstChar { it.uppercase() }} took back ${Credit.money(Credit.usdOf(-delta, w.tokenUsd))}", "credits")
         scope.launch { refreshBalance() }
     }
 
@@ -215,18 +215,22 @@ class MuseRepository(
 
     // ---- actions ----
     /** Returns null on success, or the friendly error to show under the form. */
-    suspend fun signIn(email: String, password: String): String? = auth { signIn(SignInRequest(email.trim(), password)) }
-    suspend fun signUp(req: SignUpRequest): String? = auth { signUp(req) }
+    /**
+     * [remember] (Sign in's Remember me): on keeps the session and the email across restarts; off keeps the token in memory
+     * only, so the app is signed out once its process ends, and doesn't save the email. The password is never stored.
+     */
+    suspend fun signIn(email: String, password: String, remember: Boolean = true): String? = auth(remember) { signIn(SignInRequest(email.trim(), password)) }
+    suspend fun signUp(req: SignUpRequest): String? = auth(true) { signUp(req) }
 
-    private suspend fun auth(block: suspend MuseApi.() -> AuthResponse): String? = try {
-        onAuth(api.block()); null
+    private suspend fun auth(remember: Boolean, block: suspend MuseApi.() -> AuthResponse): String? = try {
+        onAuth(api.block(), remember); null
     } catch (e: ApiException) {
         ErrorText.of(e)
     }
 
-    private suspend fun onAuth(r: AuthResponse) {
+    private suspend fun onAuth(r: AuthResponse, remember: Boolean) {
         api.setToken(r.token)
-        prefs.update { it.copy(token = r.token, studioName = r.user.studioName, email = r.user.email, role = r.user.role, userId = r.user.id) }
+        prefs.update { it.copy(token = r.token, studioName = r.user.studioName, email = r.user.email, role = r.user.role, userId = r.user.id, rememberMe = remember) }
     }
 
     /** POST /v1/auth/signout (best effort), then forget the session on this phone. */

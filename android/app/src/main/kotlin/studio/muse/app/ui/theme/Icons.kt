@@ -46,6 +46,8 @@ object MuseIcons {
     "shield" to "M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z",
     "chev" to "M9 5l7 7-7 7",
     "grid" to "M4 4h7v7h-7z M13 4h7v7h-7z M4 13h7v7h-7z M13 13h7v7h-7z",
+    "eye" to "M2.5 12c2.2-4.2 5.4-6.5 9.5-6.5s7.3 2.3 9.5 6.5c-2.2 4.2-5.4 6.5-9.5 6.5s-7.3-2.3-9.5-6.5z M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0z",
+    "eye_off" to "M2.5 12c2.2-4.2 5.4-6.5 9.5-6.5s7.3 2.3 9.5 6.5c-2.2 4.2-5.4 6.5-9.5 6.5s-7.3-2.3-9.5-6.5z M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0z M4 4l16 16",
     )
     private val FILLED = setOf("play", "apple", "google")
     private val cache = HashMap<String, ImageVector>()

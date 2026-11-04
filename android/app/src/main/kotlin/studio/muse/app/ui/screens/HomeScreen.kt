@@ -104,7 +104,7 @@ fun HomeScreen() {
                         else -> H2("Your crew")
                     } }
                     val wallet = LocalContainer.current.repo.state.collectAsState().value.wallet
-                    BalancePill(tokensLabel(wallet, s.balance)) { nav.go(Routes.CREDITS) }
+                    BalancePill(creditLabel(wallet, s.balance)) { nav.go(Routes.CREDITS) }
                 }
                 s.featured?.let { f -> FeatureCard(f, s.featuredOutfits) { vm.open(f, nav) } }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

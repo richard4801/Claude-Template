@@ -524,20 +524,20 @@ class FakeMuseApi(
             availableToSend = available, runpodBalance = balance.balance, membersUnspentUsd = unspent)
     }
 
-    /** Test hook: act as a member with this wallet (screenshots of the member's My tokens). */
+    /** Test hook: act as a member with this wallet (screenshots of the member's Credit screen). */
     @Volatile var debugWallet: Wallet? = null
 
     override suspend fun wallet(): Wallet = lock.withLock { debugWallet ?: ownerWallet() }
     override suspend fun listMembers(): List<Member> = lock.withLock { listOf(Member("u1", "jenne@studio.com", "owner", ownerWallet().tokens, ownerWallet().usd, lastActiveAt = now())) + members }
 
     private fun member(id: String) = members.firstOrNull { it.id == id }
-        ?: if (id == "u1") throw ApiException("bad_request", "The owner's wallet is the RunPod balance; send tokens to members only") else throw ApiException("not_found", "Member not found")
+        ?: if (id == "u1") throw ApiException("bad_request", "The owner's wallet is the RunPod balance; send credit to members only") else throw ApiException("not_found", "Member not found")
 
     override suspend fun transfer(req: TransferRequest): WalletMemberResponse = lock.withLock {
         val m = member(req.toUserId)
         val w = ownerWallet()
-        if (req.tokens <= 0) throw ApiException("bad_request", "Send at least 1 token")
-        if (req.tokens > w.tokens) throw ApiException("over_allocation", "You can send up to ${fmtTokens(w.tokens)} tokens (${Pricing.money(w.usd)}): that's what your RunPod balance backs")
+        if (req.tokens <= 0) throw ApiException("bad_request", "Send at least $0.01")
+        if (req.tokens > w.tokens) throw ApiException("over_allocation", "You can send at most ${w.tokens} tokens (${Pricing.money(w.usd)}): that's what your RunPod balance backs")
         val n = m.copy(tokens = m.tokens + req.tokens, usd = (m.tokens + req.tokens) * tokenUsd)
         members[members.indexOf(m)] = n
         WalletMemberResponse(ownerWallet(), n)
@@ -545,7 +545,7 @@ class FakeMuseApi(
 
     override suspend fun reclaim(req: ReclaimRequest): WalletMemberResponse = lock.withLock {
         val m = member(req.fromUserId)
-        if (req.tokens > m.tokens) throw ApiException("bad_request", "They have ${fmtTokens(m.tokens)} unused tokens")
+        if (req.tokens > m.tokens) throw ApiException("bad_request", "They have ${m.tokens} unused tokens")
         val n = m.copy(tokens = m.tokens - req.tokens, usd = (m.tokens - req.tokens) * tokenUsd)
         members[members.indexOf(m)] = n
         WalletMemberResponse(ownerWallet(), n)

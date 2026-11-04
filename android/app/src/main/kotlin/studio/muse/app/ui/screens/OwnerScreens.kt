@@ -50,7 +50,7 @@ import studio.muse.app.data.MemberPatch
 import studio.muse.app.data.StudioSettings
 import studio.muse.app.data.StudioSettingsPatch
 import studio.muse.app.data.Wallet
-import studio.muse.app.data.fmtTokens
+import studio.muse.app.data.Credit
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.LocalNav
 import studio.muse.app.ui.Routes
@@ -94,15 +94,20 @@ class OwnerViewModel(private val c: AppContainer) : ViewModel() {
     private fun note(key: String, msg: String, err: Boolean) = _s.update { it.copy(note = Triple(key, msg, err), busy = false) }
     private fun putMember(m: Member) = _s.update { s -> s.copy(members = s.members.map { if (it.id == m.id) m else it }) }
 
+    /** [amount] is dollars ("5", "5.50"); the API moves whole tokens at the studio's rate, rounded to the nearest cent. */
     fun send(m: Member, amount: String, note: String, takeBack: Boolean) {
-        val n = amount.trim().replace(",", "").toLongOrNull()
-        if (n == null || n <= 0) return note(m.id, "Enter a whole number of tokens", true)
+        val usd = Credit.parseUsd(amount) ?: return note(m.id, "Enter an amount in dollars, like 5 or 5.50", true)
+        val rate = c.repo.state.value.wallet?.tokenUsd ?: Credit.DEFAULT_TOKEN_USD
+        val n = Credit.tokensFor(usd, rate)
+        if (n <= 0) return note(m.id, "Enter an amount in dollars, like 5 or 5.50", true)
+        if (takeBack && n > m.tokens) return note(m.id, "They have ${Pricing.money(m.usd)} of unused credit", true)
         _s.update { it.copy(busy = true, note = null) }
         viewModelScope.launch {
             val (r, err) = if (takeBack) c.repo.reclaim(m, n, note) else c.repo.transfer(m, n, note)
             if (r != null) {
                 putMember(r.member)
-                note(m.id, if (takeBack) "Took back ${fmtTokens(n)} tokens" else "Sent ${fmtTokens(n)} tokens to ${m.email.substringBefore('@')}", false)
+                val sent = Pricing.money(Credit.usdOf(n, rate))
+                note(m.id, if (takeBack) "Took back $sent" else "Sent $sent to ${m.email.substringBefore('@')}", false)
             } else note(m.id, err ?: "Something went wrong", true)
         }
     }
@@ -204,9 +209,9 @@ fun OwnerBalanceCard(w: Wallet, modifier: Modifier = Modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Lbl(if (w.balanceSource == "simulated") "RunPod balance · simulated" else "RunPod balance", color = fg.copy(alpha = .8f))
             T(w.runpodBalance?.let { Pricing.money(it) } ?: "Unavailable", m.type.mono.copy(fontSize = 42.sp, fontWeight = FontWeight.SemiBold, lineHeight = 46.sp), if (m.isB) m.t.accent else fg)
-            T("Available to send ${Pricing.money(w.availableToSend ?: 0.0)} · ${fmtTokens(w.tokensToSend)} tokens", m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), fg)
-            w.membersUnspentUsd?.let { Tiny("Members hold ${Pricing.money(it)} in unspent tokens${if (w.heldUsd > 0) " · ${Pricing.money(w.heldUsd)} on hold" else ""}", color = fg.copy(alpha = .85f)) }
-            if (w.balanceSource == "unavailable") Tiny("MUSE can't read RunPod right now, so tokens can't be sent.", color = fg)
+            T("Available to send ${Pricing.money(w.availableToSend ?: 0.0)}", m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), fg)
+            w.membersUnspentUsd?.let { Tiny("Members hold ${Pricing.money(it)} in unspent credit${if (w.heldUsd > 0) " · ${Pricing.money(w.heldUsd)} on hold" else ""}", color = fg.copy(alpha = .85f)) }
+            if (w.balanceSource == "unavailable") Tiny("MUSE can't read RunPod right now, so credit can't be sent.", color = fg)
         }
     }
 }
@@ -228,10 +233,10 @@ fun MembersScreen() {
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 studio.wallet?.takeIf { it.owner }?.let { OwnerBalanceCard(it) }
                 val people = s.members.filterNot { it.owner }
-                if (people.isEmpty()) NoteBox("No members yet. Invite someone, then send them tokens to render with.", icon = "user")
+                if (people.isEmpty()) NoteBox("No members yet. Invite someone, then send them credit to render with.", icon = "user")
                 people.forEach { mem -> MemberCard(vm, mem, open == mem.id, s) }
                 Cta2("Invite someone", { nav.go(Routes.INVITE) }, Modifier.fillMaxWidth(), icon = "plus")
-                Tiny("1 token = ${Pricing.money(studio.wallet?.tokenUsd ?: 0.01)}. You can't send more than your RunPod balance backs.")
+                Tiny("Amounts are in US dollars. You can't send more than your RunPod balance backs.")
             }
         }
     }
@@ -240,14 +245,15 @@ fun MembersScreen() {
 @Composable
 private fun MemberCard(vm: OwnerViewModel, mem: Member, open: Boolean, s: OwnerState) {
     val m = muse
+    val rate = vm.wallet.collectAsState().value.wallet?.tokenUsd ?: Credit.DEFAULT_TOKEN_USD
     Card {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(Modifier.fillMaxWidth().press { vm.toggleOpen(mem.id) }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     T(mem.email, m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink, maxLines = 1)
-                    T("${fmtTokens(mem.tokens)} tokens · ${Pricing.money(mem.usd)}", m.type.mono.copy(fontSize = 13.sp), m.t.ink)
+                    T("Balance ${Pricing.money(mem.usd)}", m.type.mono.copy(fontSize = 13.sp), m.t.ink)
                     Tiny("Today ${Pricing.money(mem.todayUsd)} · Month ${Pricing.money(mem.monthUsd)} · Active ${ago(mem.lastActiveAt)}")
-                    Tiny("Daily cap " + (mem.capPerDay?.let { Pricing.money(it) } ?: "· studio default") + if (mem.heldTokens > 0) " · ${fmtTokens(mem.heldTokens)} on hold" else "")
+                    Tiny("Daily cap " + (mem.capPerDay?.let { Pricing.money(it) } ?: "· studio default") + if (mem.heldTokens > 0) " · ${Pricing.money(Credit.usdOf(mem.heldTokens, rate))} on hold" else "")
                 }
                 if (mem.disabled) Pill("Off", "warn") else Pill("Active", "good")
                 Ic(if (open) "check" else "chev", 16.dp)
@@ -261,21 +267,21 @@ private fun MemberCard(vm: OwnerViewModel, mem: Member, open: Boolean, s: OwnerS
 private fun MemberEditor(vm: OwnerViewModel, mem: Member, s: OwnerState) {
     val m = muse
     var mode by remember(mem.id) { mutableStateOf("send") }
-    var amount by remember(mem.id) { mutableStateOf("500") }
+    var amount by remember(mem.id) { mutableStateOf("5") }
     var note by remember(mem.id) { mutableStateOf("") }
     var cap by remember(mem.id) { mutableStateOf(mem.capPerDay?.let { Pricing.toFixed(it, 2) } ?: "") }
     Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Seg(listOf("send" to "Send tokens", "back" to "Take back"), mode, { mode = it })
+        Seg(listOf("send" to "Send credit", "back" to "Take back"), mode, { mode = it })
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Field("Tokens", Modifier.weight(1f)) { Input(amount, { amount = it.filter { c -> c.isDigit() } }, keyboard = KeyboardType.Number, placeholder = "500") }
+            Field("Amount ($)", Modifier.weight(1f)) { Input(amount, { amount = Credit.filterInput(it) }, keyboard = KeyboardType.Decimal, placeholder = "5.00") }
             Field("Note (optional)", Modifier.weight(1.6f)) { Input(note, { note = it.take(200) }, placeholder = "For the dance set") }
         }
-        val n = amount.toLongOrNull() ?: 0
+        val usd = Pricing.money(Credit.parseUsd(amount) ?: 0.0)
         Cta(
-            if (s.busy) "Working…" else if (mode == "send") "Send ${fmtTokens(n)} tokens" else "Take back ${fmtTokens(n)} tokens",
+            if (s.busy) "Working…" else if (mode == "send") "Send $usd" else "Take back $usd",
             { vm.send(mem, amount, note, mode == "back") }, Modifier.fillMaxWidth(), busy = s.busy,
         )
-        if (mode == "back") Tiny("Only unused tokens come back. Tokens on hold for a running render stay with it.")
+        if (mode == "back") Tiny("Only unused credit comes back. Credit on hold for a running render stays with it.")
         Field("Daily cap ($)") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Input(cap, { cap = it.filter { c -> c.isDigit() || c == '.' } }, Modifier.weight(1f), placeholder = "Studio default", keyboard = KeyboardType.Decimal)
@@ -342,12 +348,13 @@ private fun InviteCodeCard(inv: InviteCreated) {
     val clip = LocalClipboardManager.current
     val context = LocalContext.current
     val repo = LocalContainer.current.repo
-    val message = "You're invited to MUSE. Sign up in the app with ${inv.email ?: "your email"} and this invite code: ${inv.code}"
+    val serverUrl = LocalContainer.current.prefs.collectAsState().value.serverUrl
+    val message = inv.shareMessage(serverUrl)
     Card {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Lbl("Invite code${inv.email?.let { " for $it" } ?: ""}")
             T(inv.code, m.type.mono.copy(fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp), m.t.ink, align = TextAlign.Center)
-            Tiny("Shown once. Copy or share it now.", Modifier.fillMaxWidth().padding(bottom = 2.dp))
+            Tiny("Shown once. Share sends the download link with the code; Copy copies the code only.", Modifier.fillMaxWidth().padding(bottom = 2.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Cta2("Copy", { clip.setText(AnnotatedString(inv.code)); repo.toast("Invite code copied") }, Modifier.weight(1f), icon = "grid")
                 Cta("Share", {
@@ -408,7 +415,7 @@ private fun StudioForm(vm: OwnerViewModel, st: StudioSettings, s: OwnerState) {
             CapInput("Member / day", perUser, { perUser = it }, Modifier.weight(1f))
         }
     }
-    Tiny("1 token = ${Pricing.money(st.tokenUsd)} · Jobs pause when RunPod drops below ${Pricing.money(st.minRunpodBalance)} plus work in flight.")
+    Tiny("Jobs pause when RunPod drops below ${Pricing.money(st.minRunpodBalance)} plus work in flight.")
     Cta(if (s.busy) "Saving…" else "Save studio settings", {
         vm.saveStudio(StudioSettingsPatch(gpus, payer, perJob.toDoubleOrNull(), perDay.toDoubleOrNull(), perUser.toDoubleOrNull()))
     }, Modifier.fillMaxWidth(), busy = s.busy)

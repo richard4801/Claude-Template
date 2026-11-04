@@ -38,6 +38,11 @@ data class AppPrefs(
     /** "owner" or "member" (from sign-in or GET /v1/auth/me). Owner-only screens follow it. */
     val role: String = "member",
     val userId: String = "",
+    /**
+     * Sign in's Remember me. On: the session (encrypted) and the email are saved. Off: the token lives in memory only (signed
+     * out when the process ends) and the email isn't saved.
+     */
+    val rememberMe: Boolean = true,
 ) {
     val owner get() = role == "owner"
 }
@@ -99,12 +104,15 @@ class DataStorePrefs(private val context: Context, private val cipher: TokenCiph
         val notifAsked = booleanPreferencesKey("notif_asked")
         val role = stringPreferencesKey("role")
         val userId = stringPreferencesKey("user_id")
+        val rememberMe = booleanPreferencesKey("remember_me")
         val version = intPreferencesKey("prefs_version")
     }
 
     /** Holds the token when the Keystore can't encrypt it (never persisted in the clear). */
     @Volatile private var memoryToken: String? = null
     @Volatile private var decrypted: Pair<String, String?>? = null
+    /** The signed-in email while Remember me is off (not persisted). */
+    @Volatile private var memoryEmail: String? = null
 
     private fun tokenOf(p: Preferences): String? {
         val enc = p[K.tokenEnc] ?: return memoryToken
@@ -122,8 +130,8 @@ class DataStorePrefs(private val context: Context, private val cipher: TokenCiph
             serverUrl = if (v2) p[K.serverUrl] ?: d.serverUrl else d.serverUrl,
             fastBeta = p[K.fastBeta] ?: d.fastBeta,
             token = if (v2) tokenOf(p) else null,
-            studioName = p[K.studio] ?: "", email = p[K.email] ?: "", notifAsked = p[K.notifAsked] ?: false,
-            role = p[K.role] ?: d.role, userId = p[K.userId] ?: "",
+            studioName = p[K.studio] ?: "", email = p[K.email]?.ifBlank { null } ?: memoryEmail ?: "", notifAsked = p[K.notifAsked] ?: false,
+            role = p[K.role] ?: d.role, userId = p[K.userId] ?: "", rememberMe = p[K.rememberMe] ?: d.rememberMe,
         )
     }
 
@@ -136,11 +144,19 @@ class DataStorePrefs(private val context: Context, private val cipher: TokenCiph
             p.remove(K.legacyToken)
             p[K.version] = 2
             p[K.theme] = n.theme; p[K.useFake] = n.useFake; p[K.serverUrl] = n.serverUrl
-            p[K.fastBeta] = n.fastBeta; p[K.studio] = n.studioName; p[K.email] = n.email; p[K.notifAsked] = n.notifAsked
-            p[K.role] = n.role; p[K.userId] = n.userId
+            p[K.fastBeta] = n.fastBeta; p[K.studio] = n.studioName; p[K.notifAsked] = n.notifAsked
+            p[K.role] = n.role; p[K.userId] = n.userId; p[K.rememberMe] = n.rememberMe
             val token = n.token
-            if (token == null) { memoryToken = null; p.remove(K.tokenEnc) }
-            else if (token != tokenOf(p)) {
+            if (!n.rememberMe) {
+                // Memory only: nothing about the session or the email survives the process.
+                p.remove(K.tokenEnc); memoryToken = token
+                p[K.email] = ""; memoryEmail = n.email
+            } else {
+                p[K.email] = n.email; memoryEmail = null
+            }
+            if (!n.rememberMe) Unit
+            else if (token == null) { memoryToken = null; p.remove(K.tokenEnc) }
+            else if (p[K.tokenEnc] == null || token != tokenOf(p)) {
                 val enc = cipher.encrypt(token)
                 if (enc != null) { p[K.tokenEnc] = enc; decrypted = enc to token; memoryToken = null } else { p.remove(K.tokenEnc); memoryToken = token }
             }

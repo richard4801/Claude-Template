@@ -295,9 +295,25 @@ data class MemberPatch(val capPerDay: Double? = null, val clearCapPerDay: Boolea
 @Serializable
 data class CreateInviteRequest(val email: String? = null, val role: String? = null, val days: Int? = null)
 
-/** POST /v1/invites: the code is shown once. */
+/** POST /v1/invites: the code is shown once. [shareText] is the ready-to-send message with the download link (newer servers). */
 @Serializable
-data class InviteCreated(val code: String, val id: String, val email: String? = null, val role: String = "member", val expiresAt: Long = 0)
+data class InviteCreated(
+    val code: String,
+    val id: String,
+    val email: String? = null,
+    val role: String = "member",
+    val expiresAt: Long = 0,
+    val shareText: String? = null,
+) {
+    /** What Share sends: the server's [shareText], or the same message built here for an older server. */
+    fun shareMessage(serverUrl: String): String = shareText?.takeIf { it.isNotBlank() } ?: buildString {
+        append("You're invited to MUSE, the AI model studio. 1) Download: ")
+        append(serverUrl.trimEnd('/')).append("/get")
+        append(" 2) Sign up with this invite code: ").append(code)
+        email?.let { append(" (email: ").append(it).append(')') }
+        append(". The code works once and expires in 14 days.")
+    }
+}
 
 /** GET /v1/invites (without codes). */
 @Serializable

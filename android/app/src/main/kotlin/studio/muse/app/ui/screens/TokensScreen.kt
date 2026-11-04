@@ -30,7 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import studio.muse.app.data.Balance
 import studio.muse.app.data.Wallet
-import studio.muse.app.data.fmtTokens
+import studio.muse.app.data.Credit
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.LocalNav
 import studio.muse.app.ui.Routes
@@ -40,10 +40,10 @@ import studio.muse.app.ui.theme.muse
 import studio.muse.core.Pricing
 import studio.muse.core.RenderSpec
 
-// ======================================================================= My tokens (was Credits)
+// ======================================================================= Credit (balance in dollars)
 
 /**
- * GET /v1/wallet. A member sees their tokens, what they're worth, holds and their own spend. The owner sees the RunPod
+ * GET /v1/wallet, shown in dollars only (the API's usd fields). A member sees their balance, holds and their own spend. The owner sees the RunPod
  * balance and what's available to send. Demo mode keeps the old top-up dock (no payment is taken).
  */
 @Composable
@@ -59,7 +59,7 @@ fun CreditsScreen() {
     val canTopUp = (vm.demo && w?.owner != false) || w == null
     ScreenBox {
         Column(Modifier.fillMaxSize()) {
-            TopBar("My tokens", onBack = { nav.back() })
+            TopBar("Credit", onBack = { nav.back() })
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 130.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 when {
                     w == null -> LegacyBalance(s.balance, s.videos)
@@ -98,25 +98,23 @@ private fun BigCard(label: String, value: String, sub: String, sub2: String? = n
     }
 }
 
-private fun perVideoTokens(tokenUsd: Double) = Math.round(Pricing.estCost(RenderSpec()) / tokenUsd)
-
 @Composable
 private fun MemberTokens(w: Wallet, b: Balance) {
     BigCard(
-        "My tokens", fmtTokens(w.tokens), "≈ ${Pricing.money(w.usd)} · 1 token = ${Pricing.money(w.tokenUsd)}",
-        if (w.heldTokens > 0) "${fmtTokens(w.heldTokens)} on hold for running renders" else null,
+        "Balance", Pricing.money(w.usd), "≈ ${Pricing.videosLeft(w.usd)} videos at 10 steps",
+        if (w.heldTokens > 0) "${Pricing.money(if (w.heldUsd > 0) w.heldUsd else Credit.usdOf(w.heldTokens, w.tokenUsd))} on hold for running renders" else null,
     )
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Kpi("Today", Pricing.money(w.todayUsd), Modifier.weight(1f))
         Kpi("This month", Pricing.money(w.monthUsd), Modifier.weight(1f))
-        Kpi("Per video", "~${perVideoTokens(w.tokenUsd)}", Modifier.weight(1f))
+        Kpi("Per video", "~${Pricing.money(Pricing.estCost(RenderSpec()))}", Modifier.weight(1f))
     }
     Field("Spend limits") {
         LimitRow("Per job", Pricing.money(b.perJobLimit))
         LimitRow("Per day (you)", Pricing.money(b.perUserDayLimit ?: b.perDayLimit))
     }
-    NoteBox("Tokens come from the studio owner. When you run low, ask them for more.", icon = "wallet")
-    Tiny("Renders hold their tokens when they start and give them back in full if the GPU fails.")
+    NoteBox("Your credit comes from the studio owner. When you run low, ask them for more.", icon = "wallet")
+    Tiny("Renders hold their cost when they start and give it back in full if the GPU fails.")
 }
 
 @Composable
@@ -131,14 +129,14 @@ private fun OwnerTokens(w: Wallet, b: Balance) {
     }
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Cta2("Members", { nav.go(Routes.MEMBERS) }, Modifier.weight(1f), icon = "model")
-        Cta("Send tokens", { nav.go(Routes.MEMBERS) }, Modifier.weight(1f), icon = "wallet")
+        Cta("Send credit", { nav.go(Routes.MEMBERS) }, Modifier.weight(1f), icon = "wallet")
     }
     Field("Spend limits") {
         LimitRow("Per job", Pricing.money(b.perJobLimit))
         LimitRow("Studio per day", Pricing.money(b.perDayLimit))
         b.perUserDayLimit?.let { LimitRow("Each member per day", Pricing.money(it)) }
     }
-    if (!demo) NoteBox("Top up on runpod.io. MUSE reads the balance from RunPod, and members' tokens are backed by it.", icon = "wallet")
+    if (!demo) NoteBox("Top up on runpod.io. MUSE reads the balance from RunPod, and members' credit is backed by it.", icon = "wallet")
 }
 
 @Composable

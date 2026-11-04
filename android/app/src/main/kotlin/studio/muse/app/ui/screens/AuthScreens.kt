@@ -28,6 +28,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.platform.LocalAutofillManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -63,6 +65,8 @@ data class AuthState(
     val invite: String = "",
     val ag1: Boolean = false,
     val ag2: Boolean = false,
+    /** Sign in's Remember me (on by default): keep the session and the email across restarts. */
+    val remember: Boolean = true,
     val busy: Boolean = false,
     /** Friendly error shown under the form. */
     val error: String? = null,
@@ -74,8 +78,8 @@ fun looksLikeInvite(code: String) = Regex("^MUSE-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9
 class AuthViewModel(private val c: AppContainer) : ViewModel() {
     private val demo get() = c.prefs.value.useFake
     private val _s = MutableStateFlow(
-        if (demo) AuthState(studio = "Jenne Studio", email = c.prefs.value.email.ifBlank { "jenne@studio.com" })
-        else AuthState(email = c.prefs.value.email),
+        if (demo) AuthState(studio = "Jenne Studio", email = c.prefs.value.email.ifBlank { "jenne@studio.com" }, remember = c.prefs.value.rememberMe)
+        else AuthState(email = c.prefs.value.email, remember = c.prefs.value.rememberMe),
     )
     val state: StateFlow<AuthState> = _s
     val isDemo get() = demo
@@ -86,7 +90,7 @@ class AuthViewModel(private val c: AppContainer) : ViewModel() {
         if (s.email.isBlank() || s.password.isEmpty()) { _s.update { it.copy(error = "Enter your email and password.") }; return }
         viewModelScope.launch {
             _s.update { it.copy(busy = true, error = null) }
-            val err = c.repo.signIn(s.email, s.password)
+            val err = c.repo.signIn(s.email, s.password, s.remember)
             _s.update { it.copy(busy = false, error = err) }
             if (err == null) onDone()
         }
@@ -204,14 +208,21 @@ fun SignInScreen() {
             H2("Welcome back")
             T("Sign in to your studio.", m.type.body, m.t.muted)
         }
-        Field("Email") { Input(s.email, { v -> vm.edit { it.copy(email = v) } }, keyboard = androidx.compose.ui.text.input.KeyboardType.Email, placeholder = "you@example.com") }
+        Field("Email") {
+            Input(s.email, { v -> vm.edit { it.copy(email = v) } }, keyboard = androidx.compose.ui.text.input.KeyboardType.Email, placeholder = "you@example.com",
+                autofill = ContentType.Username + ContentType.EmailAddress)
+        }
         Field("Password") {
-            Input(s.password, { v -> vm.edit { it.copy(password = v) } }, password = true, placeholder = "••••••••••", trailing = {
+            Input(s.password, { v -> vm.edit { it.copy(password = v) } }, password = true, placeholder = "••••••••••", autofill = ContentType.Password, trailing = {
                 T("Forgot?", m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), if (m.isD) m.t.blue else m.t.accent, Modifier.press { vm.forgot() }.padding(8.dp))
             })
         }
+        Check("Remember me", s.remember, { vm.edit { it.copy(remember = !it.remember) } })
         s.error?.let { NoteBox(it, warn = true) }
-        Cta(if (s.busy) "Signing in…" else "Sign in", { vm.signIn { nav.reset(Routes.HOME) } }, Modifier.fillMaxWidth(), busy = s.busy)
+        // After a good sign-in, commit() lets the phone's password manager offer to save the email and password.
+        val autofill = LocalAutofillManager.current
+        val done: () -> Unit = { autofill?.commit(); nav.reset(Routes.HOME) }
+        Cta(if (s.busy) "Signing in…" else "Sign in", { vm.signIn(done) }, Modifier.fillMaxWidth(), busy = s.busy)
         // Apple / Google sign-in only exist in Demo mode for now: the MUSE server is email + invite only.
         if (vm.isDemo) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -256,12 +267,16 @@ fun SignUpScreen() {
             if (s.invite.isNotBlank() && !looksLikeInvite(s.invite)) Tiny("Not the usual MUSE-XXXX-XXXX-XXXX shape. That's fine for the owner's first code.")
             else if (vm.isDemo) Tiny("Not needed in Demo mode.")
         }
-        Field("Email") { Input(s.email, { v -> vm.edit { it.copy(email = v) } }, keyboard = androidx.compose.ui.text.input.KeyboardType.Email, placeholder = "The email your invite was sent to") }
-        Field("Password") { Input(s.password, { v -> vm.edit { it.copy(password = v) } }, password = true, placeholder = "8 or more characters") }
+        Field("Email") {
+            Input(s.email, { v -> vm.edit { it.copy(email = v) } }, keyboard = androidx.compose.ui.text.input.KeyboardType.Email, placeholder = "The email your invite was sent to",
+                autofill = ContentType.Username + ContentType.EmailAddress)
+        }
+        Field("Password") { Input(s.password, { v -> vm.edit { it.copy(password = v) } }, password = true, placeholder = "8 or more characters", autofill = ContentType.NewPassword) }
         Check(ATTEST_1, s.ag1, { vm.edit { it.copy(ag1 = !it.ag1) } })
         Check(ATTEST_2, s.ag2, { vm.edit { it.copy(ag2 = !it.ag2) } })
         s.error?.let { NoteBox(it, warn = true) }
-        Cta(if (s.busy) "Creating account…" else "Create account", { vm.signUp { nav.reset(Routes.HOME) } }, Modifier.fillMaxWidth(), off = !(s.ag1 && s.ag2), busy = s.busy)
+        val autofill = LocalAutofillManager.current
+        Cta(if (s.busy) "Creating account…" else "Create account", { vm.signUp { autofill?.commit(); nav.reset(Routes.HOME) } }, Modifier.fillMaxWidth(), off = !(s.ag1 && s.ag2), busy = s.busy)
         T(TERMS_LINE, m.type.tiny, m.t.muted, Modifier.fillMaxWidth(), align = TextAlign.Center)
     }
 }

@@ -89,6 +89,9 @@ class RealApiContractTest {
         val inv = owner.createInvite(CreateInviteRequest(email = email))
         assertTrue(inv.code, looksLikeInvite(inv.code))
         assertEquals(email, inv.email)
+        // Share sends the server's message: the download page, the code and the email.
+        assertTrue(inv.shareText.orEmpty(), inv.shareText.orEmpty().contains("/get") && inv.shareText!!.contains(inv.code) && inv.shareText!!.contains(email))
+        assertEquals(inv.shareText, inv.shareMessage(base))
 
         // ---- sign-up errors map to friendly messages
         expectCode("attestation_required") { member.signUp(SignUpRequest("", email, "pw-123456", true, false, inv.code)) }
@@ -114,7 +117,9 @@ class RealApiContractTest {
         val ow = owner.wallet()
         assertTrue(ow.owner); assertNotNull(ow.availableToSend); assertNotNull(ow.runpodBalance)
         val over = expectCode("over_allocation") { owner.transfer(TransferRequest(me.id, ow.tokensToSend + 1_000)) }
-        assertEquals(over.message, ErrorText.of(over)) // the server's own explanation is shown
+        // The server counts tokens; the app shows its explanation in dollars only.
+        assertTrue(ErrorText.of(over), ErrorText.of(over).startsWith("You can send at most $"))
+        assertTrue(ErrorText.of(over), !ErrorText.of(over).contains("token", ignoreCase = true))
 
         // ---- owner sends 500 tokens; the member's wallet event arrives
         val walletEvent = async { withTimeout(10_000) { member.events().first { it.wallet != null && it.wallet.tokens == 500L } } }
@@ -147,7 +152,7 @@ class RealApiContractTest {
         owner.reclaim(ReclaimRequest(me.id, after.tokens))
         assertEquals(0L, member.wallet().tokens)
         val broke = expectCode("insufficient_tokens") { member.createJob(req) }
-        assertEquals(ErrorText.NOT_ENOUGH_TOKENS, ErrorText.of(broke))
+        assertEquals(ErrorText.NOT_ENOUGH_CREDIT, ErrorText.of(broke))
 
         // ---- uploads: multipart (storage local) and presign → PUT → confirm, with progress
         val img = member.uploadImage("a.jpg", ByteArray(200_000) { 7 }, "image/jpeg")
