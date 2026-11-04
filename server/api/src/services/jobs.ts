@@ -23,8 +23,9 @@ export const JobRequestSchema = z.object({
   outfitId: z.string().optional().default(''),
   clipId: z.string().optional().default(''),
   /** Absent: the server's default engine (VIDEO_ENGINE_DEFAULT). */
-  engine: z.enum(['replicate', 'h3', 'viggle']).optional(),
-  quality: z.enum(['draft', 'standard', 'hd']).optional(),
+  engine: z.enum(['replicate', 'h3', 'viggle']).nullish().transform(v => v ?? undefined),
+  /** Absent or null: VIDEO_QUALITY_DEFAULT (draft). */
+  quality: z.enum(['draft', 'standard', 'hd']).nullish().transform(v => v ?? undefined),
   steps: z.number().int().optional().default(P.STEPS_DEFAULT),
   use: z.enum(['first', 'full']).optional().default('first'),
   takes: z.number().int().optional().default(1),
