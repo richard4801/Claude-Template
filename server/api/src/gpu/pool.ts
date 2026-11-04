@@ -236,6 +236,9 @@ export class RunpodGpu extends PodPool {
       try {
         const r = await this.api.deployOnDemand({
           cloudType: 'SECURE', gpuCount: 1, gpuTypeId, name: `muse-${pod.id}`, imageName: c.RUNPOD_IMAGE,
+          // The worker's venv is torch cu130: bootstrap.sh refuses hosts whose driver is older than CUDA 13. The GraphQL
+          // field is minCudaVersion (allowedCudaVersions there silently matches no machine at all).
+          ...(c.RUNPOD_MIN_CUDA ? { minCudaVersion: c.RUNPOD_MIN_CUDA } : {}),
           networkVolumeId: c.RUNPOD_NETWORK_VOLUME_ID, volumeMountPath: '/workspace', containerDiskInGb: c.RUNPOD_CONTAINER_DISK_GB,
           ...(c.RUNPOD_DATACENTER_ID ? { dataCenterId: c.RUNPOD_DATACENTER_ID } : {}),
           ...(c.RUNPOD_START_CMD ? { dockerArgs: c.RUNPOD_START_CMD } : {}),

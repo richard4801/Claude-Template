@@ -20,6 +20,8 @@ function fakeRunpod(state: Fake) {
       const id = `rp${++n}`;
       state.deployed.push({ id, gpuTypeId: input.gpuTypeId, token: env.WORKER_TOKEN, podId: env.MUSE_POD_ID, env });
       expect(input.networkVolumeId).toBe('vol_123');
+      expect(input.minCudaVersion).toBe('13.0');
+      expect(input).not.toHaveProperty('allowedCudaVersions');
       return Response.json({ data: { podFindAndDeployOnDemand: { id, desiredStatus: 'RUNNING', costPerHr: 3.6 } } });
     }
     if (query.includes('podTerminate')) { state.terminated.push(variables.input.podId); return Response.json({ data: { podTerminate: null } }); }

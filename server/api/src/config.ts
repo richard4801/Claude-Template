@@ -77,6 +77,8 @@ const Env = z.object({
   RUNPOD_IMAGE: z.string().default('runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04'),
   RUNPOD_CONTAINER_DISK_GB: num(40),
   RUNPOD_START_CMD: str(),
+  /** Lowest host driver CUDA version a pod may get (the worker venv is torch cu130). Empty: any. */
+  RUNPOD_MIN_CUDA: z.string().default('13.0'),
   GPU_HOURLY_USD: num(3.99),
   /** Stop a pod this long after its last job. */
   IDLE_SHUTDOWN_SECONDS: num(180),
