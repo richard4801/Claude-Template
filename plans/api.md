@@ -25,8 +25,10 @@ _Added 2026-11-04._ This is the contract between the apps and the backend. `serv
 | `over_user_day_limit` / `over_day_limit` | 402 | over the per-user or per-studio daily cap |
 | `over_allocation` | 402 | the owner tried to send more tokens than the RunPod balance backs |
 | `balance_unavailable` | 503 | RunPod can't be read, so tokens can't be sent |
-| `engine_unavailable` | 400 | the GPU image can't run this yet (Fast · beta, LoRA training, or lip sync without LatentSync) |
+| `engine_unavailable` | 400 | the GPU image can't run this yet (Fast · beta, LoRA training, or lip sync without LatentSync), or `engine: "replicate"` / image provider `replicate` while the server has no Replicate token |
 | `image_engine_failed` | 502 | the image engine failed (the charge is refunded) |
+| `provider_refused` | 422 | the hosted provider's safety filter refused the request: "Replicate's safety filter refused this photo" (photos; the charge is refunded). Video jobs fail with `Job.errorCode: "provider_refused"` and the message "Replicate's safety filter refused this clip" (the hold is refunded) |
+| `provider_rate_limited` | 429 | photos only: Replicate stayed rate-limited for longer than `REPLICATE_IMAGE_MAX_WAIT_SEC` (default 120 s); the charge is refunded, try again in a minute. Video jobs never fail on a rate limit: they wait in line (see "Video engines") |
 | `rate_limited` | 429 | too many sign-in or sign-up tries |
 | `template_hidden` | 403 | saving a template from a shot made with someone else's template |
 | `warm_not_allowed` | 403 | Keep GPU warm when the studio allows it for the owner only |
@@ -47,15 +49,25 @@ Outfit     { id, modelId, name, mode: "describe"|"photo"|"own", description, ang
 ClipMeta   { name, durationSec, width, height, fps, people?, watermark?, talking? }
 ClipCheck  { label, value, status: "good"|"bad"|"info", fix? }
 Clip       { id, name, durationSec, width, height, fps, checks: ClipCheck[], thumb?: ImageRef }
-JobRequest { title, modelId, outfitId, clipId, engine: "h3"|"viggle", steps (4–30, default 10), use: "first"|"full",
-             takes (1–4), keepAudio, lipSync, background: "keep"|"photo", backgroundMotion: "still"|"subtle"|"busy", clipSeconds?,
+JobRequest { title, modelId, outfitId, clipId, engine: "replicate"|"h3"|"viggle" /* default: features.video.defaultEngine */,
+             quality?: "draft"|"standard"|"hd" /* engine "replicate" only; default "standard" */,
+             steps (4–30, default 10; h3 only), use: "first"|"full" /* h3/viggle; replicate always renders the whole clip and stores "full" */,
+             takes (1–4), keepAudio, lipSync /* h3 only */, background: "keep"|"photo" /* "photo" is h3 only */, backgroundMotion: "still"|"subtle"|"busy", clipSeconds?,
              queue?: boolean /* true = park it as "queued", not charged, until POST /v1/queue/run */ }
+             // Clients should always send `engine`. The picker maps to it: Draft/Standard/HD = {engine:"replicate", quality},
+             // Exact edit = {engine:"h3", steps}, Fast · beta = {engine:"viggle"}. See "Video engines and quality".
 Job        { id, title, modelId, modelName, outfitId, request: JobRequest, state: "queued"|"running"|"done"|"failed",
              progress (0–100), take, step, totalSteps, phase /* "step 12/20 · ~6 min left" */, secondsLeft, totalSeconds,
              cost, refunded, error?, createdAt, finishedAt?, prompt /* exact H3 prompt */, seed, thumb: ImageRef,
-             queuePosition?, etaSeconds? /* while waiting for a GPU */, blocked?: "owner_balance_low", warmupCost? /* GPU warm-up charged with it */ }
+             queuePosition?, etaSeconds? /* while waiting for a GPU, or in the Replicate line */, blocked?: "owner_balance_low", warmupCost? /* GPU warm-up charged with it */,
+             engineLabel /* "Standard · 768P", "Draft · 768P", "HD · 2K", "Exact edit · 10 steps", "Fast · beta" */,
+             errorCode?: "provider_refused"|"provider_failed"|"provider_rate_limited"|"provider_timeout" /* failed replicate jobs */,
+             billedSeconds? /* replicate, done: output seconds Replicate billed, summed over takes */ }
 Take       { id, kind: "take"|"shot", jobId|null, index, of, title, label, engineLabel, cost, seed, status: "test"|"final", thumb, prompt, createdAt,
-             videoUrl?, durationSec?, width?, height? /* real output: renders are 768×1344 */ }
+             videoUrl?, durationSec?, width?, height? /* real output: Exact edit renders are 768×1344; Replicate 768P/2K sizes come from the file */ }
+             // Takes: label = "Standard"|"Draft"|"HD" (replicate), "10 steps" (h3), "Fast · beta"; engineLabel = Job.engineLabel.
+             // A replicate take's durationSec is the source clip's exact length (see "Video engines"), and its thumb is a frame of the take.
+             // Shots: engineLabel = the image engine that made them ("FLUX.2 [pro] · Replicate", "Qwen edit · Replicate", "" for simulated).
 Balance    { balance, month, today /* spent since local midnight */, perJobLimit, perDayLimit, videos,
              tokens, tokenUsd, role: "owner"|"member", heldUsd, perUserDayLimit, balanceSource: "runpod"|"simulated"|"unavailable"|"wallet",
              runpodBalance?, availableToSend? /* owner only */ }
@@ -120,6 +132,24 @@ TemplatePrompt     { slots: PromptSlotView[], text, seed: number|null /* null = 
 
 ## Pricing (the same in every client and the server)
 
+### Replicate (Draft / Standard / HD), the default
+Billed per **output second**. `D` is the whole clip rounded **up** to whole seconds, between 4 and 15 (the output can't be fractional; see "Video engines" for how the take still keeps the exact clip length).
+
+| quality | label | detail | `pricePerSec` (default) |
+|---|---|---|---|
+| `draft` | Draft | 768P · lite | $0.02 |
+| `standard` | Standard (default) | 768P | $0.08 |
+| `hd` | HD | 2K | $0.13 |
+
+- `replicateSeconds(clipSeconds) = min(15, max(4, ceil(clipSeconds − 0.001)))`. With no clip length (the sample clip) `clipSeconds` = 9.4, so D = 10. Examples: 7.0 → 7, 7.04 → 8, 2.5 → 4, 14.97 → 15.
+- `replicateCost = pricePerSec(quality) × D × takes`. The server's `features.video.options[].pricePerSec` is authoritative (it comes from config); clients use the defaults above until they've read it.
+- Price line under the picker: `"about $0.56 · 7 s"`, and `" · 2 takes"` when takes > 1 (`"about $1.12 · 7 s · 2 takes"`). Money is `'$' + v.toFixed(2)` as elsewhere.
+- Generate button: `"Generate · 7 s · $0.56"` (+ `" · 2 takes"`).
+- Billing: the hold is `replicateCost` at job start; done settles to `pricePerSec × the seconds Replicate actually billed` (summed over takes, `metrics.video_output_duration_seconds`, D when Replicate doesn't report it); failed or cancelled refunds the hold in full.
+- Ledger notes (owner's ledger): hold `"Video · Standard 768P · 7 s · hold"`, settle `"Video · Standard 768P · 7 s"` (takes > 1: `"Video · Standard 768P · 2 × 7 s"`). Draft reads `"Video · Draft 768P · …"`, HD `"Video · HD 2K · …"`.
+- `cost` is computed in doubles exactly as `pricePerSec × D × takes`, left to right. The fixture `android/core/src/test/resources/replicate_pricing_fixture.json` (135 rows, generated with JavaScript's `toFixed`) lists `{quality, pricePerSec, clipSeconds /* null = sample */, takes, seconds, cost, costLabel, priceLine, genLabel}`; the server and both apps check against it. The 216-row `pricing_fixture.json` (Exact edit and Fast · beta) is unchanged.
+
+### Exact edit (H3 on our RunPod GPU) and Fast · beta
 These are measured on an H100 with FlashAttention 3 and billed at $3.99/h. The unit tests check them against `prototype/app/app.js`.
 
 - `secPerLen(len) = 57.8 × (len / 5.2)^1.3` seconds per step.
@@ -246,12 +276,52 @@ How a template shoot works (`POST /v1/shoots` with `templateId`):
 ### Settings (real API)
 | | |
 |---|---|
-| `GET /v1/settings/image-engine` | → `{provider: "simulated"\|"fal"\|"custom-http", model, url?, available: {simulated, fal, "custom-http"}}` |
-| `PATCH /v1/settings/image-engine` `{provider, model?, url?}` | → same. Per studio. `custom-http` is owner-only and needs an https URL. Shoots and outfit sets also take `imageEngine: {provider, model?}` to override it for one call. |
-| `GET /v1/settings/studio` | → `{maxGpus, overheadPayer: "user"\|"owner", capPerJob, capPerDay, capPerUserDay, tokenUsd, minRunpodBalance, lowBalance, warmGpuAllowed: "owner"\|"everyone", warmIdleMinutes, warmMaxMinutes, features: {standard, fastBeta, lipSync, loraTraining, replaceAudio: false, outputSize: {width: 768, height: 1344}, maxClipSec}, gpu}` |
+| `GET /v1/settings/image-engine` | → `{provider: "simulated"\|"fal"\|"custom-http"\|"replicate", model, editModel? /* replicate */, label, url?, available: {simulated, fal, "custom-http", replicate}}`. `label` is for display: "FLUX.2 [pro] · Replicate", "Simulated", the fal model id, "Custom". Default provider: `replicate` when the server has `REPLICATE_API_TOKEN`, else `IMAGE_PROVIDER` (simulated). A studio that saved a provider keeps it. |
+| `PATCH /v1/settings/image-engine` `{provider, model?, url?}` | → same. Per studio. `custom-http` is owner-only and needs an https URL; `replicate` needs the server's token (`bad_request` otherwise). Shoots and outfit sets also take `imageEngine: {provider, model?}` to override it for one call. |
+| `GET /v1/settings/studio` | → `{maxGpus, overheadPayer: "user"\|"owner", capPerJob, capPerDay, capPerUserDay, tokenUsd, minRunpodBalance, lowBalance, warmGpuAllowed: "owner"\|"everyone", warmIdleMinutes, warmMaxMinutes, features: {standard, fastBeta, lipSync, loraTraining, replaceAudio: false, outputSize: {width: 768, height: 1344}, maxClipSec, replicate, video: VideoFeatures}, gpu}`. `features.standard` still means "Exact edit (h3) can run"; `features.replicate` = the Replicate engine is set up. |
 | `PATCH /v1/settings/studio` `{maxGpus?, overheadPayer?, capPerJob?, capPerDay?, capPerUserDay?, warmGpuAllowed?, warmIdleMinutes? (5–120), warmMaxMinutes? (30–480)}` (owner) | → same |
 
 "Replace audio" isn't wired on the GPU yet: `keepAudio: false` gives a silent take, and `features.replaceAudio` is false.
+
+### Video engines and quality (Replicate)
+_Added 2026-11-04._ MiniMax H3 hosted on Replicate is the **default** video engine. Our own RunPod H3 stays as **Exact edit** (frame-by-frame, slower, needs a GPU start-up), Viggle stays **Fast · beta**.
+
+**The picker** (video studio, Quality tool), in this order, default **Standard**:
+
+| option `id` | label | detail line | sends | price |
+|---|---|---|---|---|
+| `draft` | Draft | 768P · lite | `{engine: "replicate", quality: "draft"}` | $0.02 × D |
+| `standard` | Standard | 768P | `{engine: "replicate", quality: "standard"}` | $0.08 × D |
+| `hd` | HD | 2K | `{engine: "replicate", quality: "hd"}` | $0.13 × D |
+| `exact` | Exact edit | Frame-by-frame · slower · GPU start-up | `{engine: "h3", steps, use}` | GPU formula below |
+
+(× takes in every row.) Fast · beta (`viggle`) is not in this picker; it stays behind its own flag as before.
+
+**What the apps read:** `GET /v1/settings/studio` → `features.video`:
+```ts
+VideoFeatures { defaultEngine: "replicate"|"h3",      // "replicate" when the server has Replicate set up (VIDEO_ENGINE_DEFAULT), else "h3"
+                defaultQuality: "draft"|"standard"|"hd", // "standard"
+                minSeconds: 4, maxSeconds: 15,          // Replicate's output length range (D)
+                options: VideoOption[] }                // picker order: draft, standard, hd, exact
+VideoOption   { id: "draft"|"standard"|"hd"|"exact", label: "Draft"|"Standard"|"HD"|"Exact edit", detail,
+                engine: "replicate"|"h3", quality?: "draft"|"standard"|"hd",
+                resolution?: "768P"|"2K", pricePerSec?: number /* replicate options */, available: boolean }
+```
+`available: false` greys an option out (no Replicate token on the server, or no h3 on the GPU image). Clients that can't read settings use the table above with every option available.
+
+**Per option, in the apps:**
+- Draft / Standard / HD: whole clip only (no "First 5.2s" choice, no steps), takes 1–4, Keep audio on/off. Lip sync and "New background photo" are Exact edit only (the server refuses them on replicate with `bad_request`). No Keep GPU warm nudge, switch or cost warning for these: they don't use our GPU.
+- Exact edit: everything as before: steps 4–30, First 5.2s / Full, lip sync, background photo, takes, and Keep GPU warm (the nudge and switch apply only while Exact edit is selected).
+
+**How a replicate job runs (server):**
+- `POST /v1/jobs` holds `replicateCost` (caps and balance as for any job) and the job joins the **Replicate line** (FIFO across the studio, `REPLICATE_MAX_CONCURRENT` = 1 at a time by default, because Replicate allows a burst of 1 and 6 starts per minute on a small balance). While waiting: `state: "running"`, `phase: "Waiting for Replicate · 2nd in line"`, `queuePosition`, `etaSeconds`. It isn't paused by a low RunPod balance (`blocked` never applies to it) and never starts a GPU.
+- Phases while it runs: `"Preparing the clip"`, `"Rendering on Replicate"` (`"take 2/3 · Rendering on Replicate"` with several takes), `"Replicate is busy · retrying in 10s"` on a rate limit (it waits and retries, honouring Replicate's "resets in ~Ns" hint; it fails with `errorCode: "provider_rate_limited"` only after `REPLICATE_MAX_RATE_WAIT_SEC`, default 30 min), `"Finishing · exact length and audio"`. `progress` is an estimate; `totalSteps` = takes and `step` = takes finished.
+- Length: the source is padded to D seconds (the last frame held, silence added), Replicate renders D seconds, and each take is trimmed back to the **exact** source length with a re-encode (not a keyframe cut). Keep audio on: the source's original audio is muxed back in; off: the take is silent.
+- Inputs: `<Video 1>` = the padded source; `<Image 1>…<Image n>` (n ≤ 9) = the model's locked reference shots in a fixed order (face front, face profile, body front, body ¾, body back) and then the outfit set's angles (front, ¾, back, side). All are short-lived signed links (2 h); nothing is made public.
+- Prompt: a short H3 prompt (about 230 words, four sections) built by the server: identity, outfit, never-add, captions removed, and "keep the exact framing and crop of <Video 1>". `Job.prompt` holds it. Replicate takes no seed, steps or LoRA; `Job.seed` is informational only.
+- Done: one take per Replicate prediction (`take_n.mp4` + a thumbnail frame), the hold settles to the billed seconds (`billedSeconds` on the job). Failed (Replicate error, safety refusal, timeout) or cancelled (`DELETE /v1/jobs/{id}` cancels the prediction): `state: "failed"`, `refunded` = the hold, `errorCode` set, and `error` is a message to show as-is, e.g. "Replicate's safety filter refused this clip". If one take fails the whole job fails and is refunded.
+
+**Photos on Replicate:** with provider `replicate`, new shots (photoshoots, template shoots, outfit set fronts, character-sheet fills) use FLUX.2 [pro] with the model's reference shots (≤ 6, face first) and the outfit/product photos; the other three outfit angles are edits of the generated front with Qwen-Image-Edit 2511. Prices to users are unchanged ($0.12 a shoot, $0.08 an outfit set, $0.02 an angle). Template after-effects still run on our side.
 
 ### Keep GPU warm (`plans/backend.md` "Keep GPU warm")
 A user can keep a dedicated H100 warm so renders start at once instead of after the 3–6 min cold start. One warm GPU per user. The pod's whole wall time (boot included) is charged to the user who switched it on, as a "Warm GPU" ledger line (`kind: "warm"`) settled every minute (the last partial minute pro rata). Their renders on it aren't charged GPU time again (`Job.warm`). While it's warm the pool's 3-minute idle shutdown doesn't apply to it; these auto-off rules do:
@@ -286,9 +356,9 @@ The apps: **nudge** when creating starts (a clip picked or uploaded in the video
 |---|---|
 | `POST /v1/dev/fail-next` `{failNext}` | The next job fails at step 3 and is refunded. |
 | `POST /v1/dev/reset` | Restores the seed data. |
-| `GET /health` | `{ok, speed}` |
+| `GET /health` | `{ok, speed}` (real API also: `build`, `gpu`, `storage`, `imageEngine`, `videoEngine: "replicate"\|"h3"`) |
 
 ## Notes for the real backend
 - Run the H3 Ref2VA pipeline (`pipeline/runpod/h3_ref2va_run.py`) on a network-volume pod, map the denoising step callback to `step`, and shut the pod down when the queue is empty.
 - Build the prompt with the layered engine (`plans/prompt-system.md`, implemented in `android/core/.../PromptEngine.kt`) and store the exact prompt, seed, steps and references on the job.
-- Show "MiniMax H3" attribution and pass through its licence and acceptable use terms.
+- Show "MiniMax H3" attribution and pass through its licence and acceptable use terms (both the Replicate-hosted and the RunPod engine are MiniMax H3).
