@@ -281,6 +281,23 @@ final class AppStore {
     var create = CreateDraft()
     var outfitSheet: OutfitDraft?
 
+    // MARK: Keep GPU warm (plans/backend.md)
+
+    /// The user's warm GPU (GET /v1/gpu/warm and `gpu` events).
+    var warmGpu = WarmGpu.off
+    /// False on servers without /v1/gpu/warm (server/mock) or when the owner hasn't allowed it: no switch, no nudge.
+    var warmAvailable = true
+    /// The nudge or the switch-on confirmation, when showing.
+    var warmPrompt: WarmPrompt?
+    /// The 5-minute auto-off warning banner.
+    var warmWarning: WarmGpuWarning?
+    var warmBusy = false
+    /// "Now" for the bar's minutes and cost; ticks every 15 s while the GPU is warm.
+    var warmClock = Date()
+    @ObservationIgnored var warmTicker: Task<Void, Never>?
+    /// The last warning shown (kind + time), so each one is announced once.
+    @ObservationIgnored var warmWarnedKey: String?
+
     // MARK: Credits
 
     var topUpAmount: Double = 25
@@ -320,6 +337,7 @@ final class AppStore {
         api = makeAPI()
         Notifier.shared.requestAuthorization()
         Notifier.shared.onOpenPost = { [weak self] id in self?.openScheduledPost(id) }
+        Notifier.shared.onKeepWarm = { [weak self] in self?.keepWarm() }
         Task { await restoreSession() }
     }
 
@@ -384,6 +402,7 @@ final class AppStore {
         studioSettings = nil
         imageEngine = nil
         offlineMessage = nil
+        resetWarm()
         Task { await restoreSession() }
     }
 
@@ -422,6 +441,7 @@ final class AppStore {
             if clip == nil { await useSampleClip(bad: false, quiet: true) }
             await loadSocial()
             await loadTemplates()
+            await loadWarmGpu()
         } catch let e as ApiError where e.endsSession {
             endSession(e.friendlyMessage)
         } catch {
@@ -485,6 +505,7 @@ final class AppStore {
         }
         if let w = e.wallet { walletChanged(w) }
         if let n = e.notice { studioNotice(n) }
+        if let g = e.gpu { applyWarm(g, warning: e.event == "warning" ? e.warning : nil) }
         if let m = e.model {
             if let i = models.firstIndex(where: { $0.id == m.id }) { models[i] = m } else { models.append(m) }
             syncDraftSlots(from: m)
@@ -650,6 +671,7 @@ final class AppStore {
         templateDetail = nil
         templatePrompt = nil
         templateForm = nil
+        resetWarm()
         authTab = .signIn
         attest = [false, false]
         authError = message

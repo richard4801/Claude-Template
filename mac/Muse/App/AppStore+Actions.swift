@@ -28,6 +28,7 @@ extension AppStore {
             } else {
                 showToast("This clip needs fixing before you can generate. See the clip check.")
             }
+            creatingStarted()
         }
     }
 
@@ -79,6 +80,7 @@ extension AppStore {
 
     /// ⌘↵ and the Generate button. Blocked when the clip fails its checks or the balance is too low.
     func generate() {
+        guard warmPrompt == nil else { return }
         if clipBad {
             showToast("Fix the clip first: one person, no watermark, 15s or less")
             return
@@ -101,6 +103,13 @@ extension AppStore {
                              steps: engine == .viggle ? 4 : steps, use: use.rawValue, takes: takeCount, keepAudio: keepAudio, lipSync: lipSync,
                              background: background, backgroundMotion: motion, clipSeconds: c.durationSec)
         let n = takeCount
+        // Creating starts: offer a warm GPU first (every time, when none is running), then render whatever the answer.
+        if creatingStarted(then: { [weak self] in self?.submit(req, cost: cost, takes: n) }) { return }
+        submit(req, cost: cost, takes: n)
+    }
+
+    private func submit(_ req: JobRequest, cost: Double, takes n: Int) {
+        guard !generating else { return }
         generating = true
         perform { [self] in
             defer { generating = false }
@@ -800,6 +809,11 @@ extension AppStore {
             PaletteCommand(title: "Choose a clip…", icon: "film", shortcut: "") { [weak self] in self?.go(.studio); self?.pickClip() },
             PaletteCommand(title: "Run queue", icon: "play.fill", shortcut: "") { [weak self] in self?.runQueue() },
         ]
+        if warmAvailable && warmOn {
+            all.append(PaletteCommand(title: "Turn off the warm GPU", icon: "flame", shortcut: "") { [weak self] in self?.turnOffWarm() })
+        } else if warmAvailable {
+            all.append(PaletteCommand(title: "Keep GPU warm…", icon: "flame", shortcut: "") { [weak self] in self?.setWarmSwitch(true) })
+        }
         if isOwner {
             let owner: [PaletteCommand] = [
                 PaletteCommand(title: "Members", icon: "person.2", shortcut: "⌘8") { [weak self] in self?.go(.members) },

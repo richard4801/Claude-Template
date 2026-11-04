@@ -35,14 +35,24 @@ public actor FakeMuseAPI: MuseAPI {
     private var favourites: Set<String> = []
     /// The exact layers behind each shot (server-side record), for "Save as template".
     private var shotLayers: [String: TemplateLayers] = [:]
+    /// Keep GPU warm: the rules run on a clock `warmSpeed`× real time (boot is sped up like renders).
+    private var warm: WarmGpuSim
+    private let warmSpeed: Double
+    private let warmEpoch = nowMs()
+    private var warmTask: Task<Void, Never>?
+    private let warmBoot: Double
 
     /// - Parameters:
     ///   - speed: simulation speed; 0 freezes the queue (tests).
     ///   - genDelay: seconds a generation (shoot, outfit, fill angles) takes.
     ///   - storeDir: where uploaded images are copied. nil keeps them in memory as data URLs.
     ///   - loraSeconds: how long LoRA training takes in the demo (~100 min of GPU time; the prototype runs it 120× faster).
-    public init(speed: Double = demoSpeed, genDelay: Double = 1.6, storeDir: URL? = nil, loraSeconds: Double = 50) {
+    ///   - warmSpeed: how fast the warm GPU's clock runs (minutes, billing, auto-off). 1 = real time.
+    public init(speed: Double = demoSpeed, genDelay: Double = 1.6, storeDir: URL? = nil, loraSeconds: Double = 50, warmSpeed: Double = 1) {
         self.speed = speed
+        self.warmSpeed = warmSpeed
+        warm = WarmGpuSim(config: WarmGpuSim.Config(bootSeconds: 240 / max(1, speed) * warmSpeed))
+        warmBoot = 240 / max(1, speed) * warmSpeed
         self.genDelay = genDelay
         self.storeDir = storeDir
         self.loraSeconds = loraSeconds
@@ -190,6 +200,11 @@ public actor FakeMuseAPI: MuseAPI {
         if let v = patch.capPerJob { studio.capPerJob = v; bal.perJobLimit = v }
         if let v = patch.capPerDay { studio.capPerDay = v; bal.perDayLimit = v }
         if let v = patch.capPerUserDay { studio.capPerUserDay = v }
+        if let v = patch.warmGpuAllowed { studio.warmGpuAllowed = v == "owner" ? "owner" : "everyone" }
+        if let v = patch.warmIdleMinutes { guard (5...120).contains(v) else { throw ApiError("bad_request", "Idle minutes must be 5–120") }; studio.warmIdleMinutes = v }
+        if let v = patch.warmMaxMinutes { guard (30...480).contains(v) else { throw ApiError("bad_request", "The time limit must be 30–480 min") }; studio.warmMaxMinutes = v }
+        // New warm sessions use the new rules.
+        if !warm.isOn { warm = WarmGpuSim(config: warmConfig()) }
         return studio
     }
 
@@ -612,6 +627,8 @@ public actor FakeMuseAPI: MuseAPI {
         let failThis = failNext
         failNext = false
         runningId = id
+        // On the user's warm GPU: its GPU time is covered by the "Warm GPU" line.
+        if warm.isOn { jobs[i].warm = true }
         runner = Task { await self.drive(id, fail: failThis) }
     }
 
@@ -645,6 +662,12 @@ public actor FakeMuseAPI: MuseAPI {
                 jobs[i].phase = "Done"
                 jobs[i].secondsLeft = 0
                 jobs[i].finishedAt = nowMs()
+                if jobs[i].warm == true {
+                    // Settles to $0: the warm GPU's wall time already paid for it.
+                    refund(cur.cost)
+                    jobs[i].cost = 0
+                    syncOwner()
+                }
                 let newTakes = makeTakes(for: jobs[i])
                 takes.insert(contentsOf: newTakes, at: 0)
                 hub.emit(ApiEvent(type: "job", job: jobs[i], takes: newTakes))
@@ -901,6 +924,89 @@ public actor FakeMuseAPI: MuseAPI {
     }
 
     public func setFailNext(_ fail: Bool) { failNext = fail }
+
+    // MARK: Keep GPU warm
+
+    /// The warm GPU's clock (ms): real time, sped up by `warmSpeed`.
+    private func warmNow() -> Int64 { warmEpoch + Int64(Double(nowMs() - warmEpoch) * warmSpeed) }
+
+    private func warmConfig() -> WarmGpuSim.Config {
+        WarmGpuSim.Config(idleMinutes: studio.warmIdleMinutes, maxMinutes: studio.warmMaxMinutes, bootSeconds: warmBoot)
+    }
+
+    private var warmAllowed: Bool { studio.warmGpuAllowed != "owner" || (signedIn?.role ?? "owner") == "owner" }
+
+    private func warmView() -> WarmGpu {
+        var g = warm.status(now: warmNow())
+        g.allowed = warmAllowed
+        return g
+    }
+
+    public func warmGpu() -> WarmGpu { warmView() }
+
+    public func setWarmGpu(_ req: WarmGpuRequest) throws -> WarmGpu {
+        let now = warmNow()
+        if req.extend == true {
+            try warm.keepWarm(now: now)
+            emitWarm("state")
+        } else if req.on == true {
+            if !warm.isOn {
+                if !warmAllowed { throw ApiError("warm_not_allowed", "Only the studio owner can keep a GPU warm") }
+                if studio.lowBalance { throw ApiError("owner_balance_low", "The studio's GPU credit is low · the owner needs to top up RunPod") }
+                try warm.turnOn(now: now, creditUsd: bal.balance)
+                emitWarm("state")
+                startWarmClock()
+            }
+        } else if req.on == false {
+            if warm.isOn {
+                let usd = warm.turnOff(now: now, reason: "user")
+                warmTask?.cancel()
+                warmTask = nil
+                settleWarm(usd)
+                emitWarm("state")
+            }
+        } else {
+            throw ApiError("bad_request", "Send {on: true}, {on: false} or {extend: true}")
+        }
+        return warmView()
+    }
+
+    private func emitWarm(_ event: String, warning: WarmGpuWarning? = nil) {
+        hub.emit(ApiEvent(type: "gpu", gpu: warmView(), event: event, warning: warning))
+    }
+
+    private func settleWarm(_ usd: Double) {
+        guard usd > 0 else { return }
+        charge(usd)
+        syncOwner()
+    }
+
+    private func startWarmClock() {
+        warmTask?.cancel()
+        warmTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self, await self.warmTick() else { return }
+            }
+        }
+    }
+
+    /// One pass of the warm GPU: boot, minute billing (a `tick` event), the warning and auto-off. Returns false once it's off.
+    private func warmTick() -> Bool {
+        let outs = warm.tick(now: warmNow(), creditUsd: bal.balance, ownerBalanceLow: studio.lowBalance, busy: runningId != nil)
+        for o in outs {
+            switch o {
+            case .charge(let usd):
+                settleWarm(usd)
+                if warm.isOn { emitWarm("tick") }
+            case .ready: emitWarm("state")
+            case .warning(let w): emitWarm("warning", warning: w)
+            case .off: emitWarm("state")
+            }
+        }
+        if !warm.isOn { warmTask = nil }
+        return warm.isOn
+    }
 
     // MARK: Helpers
 

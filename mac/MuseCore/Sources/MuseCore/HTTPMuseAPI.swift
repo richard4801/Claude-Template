@@ -365,6 +365,9 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
         return t
     }
 
+    public func warmGpu() async throws -> WarmGpu { try await call("GET", "v1/gpu/warm") }
+    public func setWarmGpu(_ req: WarmGpuRequest) async throws -> WarmGpu { try await call("POST", "v1/gpu/warm", req) }
+
     public func balance() async throws -> Balance { try await call("GET", "v1/balance") }
     public func topUp(_ req: TopUpRequest) async throws -> Balance { try await call("POST", "v1/balance/topup", req) }
     public func setFailNext(_ fail: Bool) async throws { _ = try await send(request("POST", "v1/dev/fail-next", body: try encoder.encode(DevFailRequest(failNext: fail)))) }
@@ -400,6 +403,7 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
             let jobs = try await listJobs()
             for j in jobs where j.isActive { yield(ApiEvent(type: "job", job: j)) }
             yield(ApiEvent(type: "balance", balance: try await balance()))
+            if let g = try? await warmGpu() { yield(ApiEvent(type: "gpu", gpu: g)) }
             try await Task.sleep(nanoseconds: 1_000_000_000)
         }
         #else

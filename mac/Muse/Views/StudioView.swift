@@ -395,6 +395,7 @@ struct InspectorFooter: View {
         let total = store.totalCost
         let blocked = store.generateBlocked
         VStack(spacing: 10) {
+            if store.warmAvailable { WarmStudioRow().padding(.bottom, 2) }
             HStack(spacing: 8) {
                 est("Time", Pricing.fmtMin(Pricing.totalMin(spec)))
                 est("Cost", Pricing.money(total))

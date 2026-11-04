@@ -85,7 +85,7 @@ struct CreditsView: View {
             SectionHeader("Recent spend")
             VStack(spacing: 0) {
                 ForEach(myJobs) { j in
-                    let warm = j.warmupCost.map { " + \(Pricing.money($0)) warm-up" } ?? ""
+                    let warm = j.warm == true ? " · on warm GPU" : j.warmupCost.map { " + \(Pricing.money($0)) warm-up" } ?? ""
                     spendRow(j.title + (j.isFailed ? " (failed)" : ""), j.isFailed ? "Refunded" : j.engineName + warm,
                              j.isFailed ? "+\(Pricing.money(j.refunded))" : "−\(Pricing.money(j.cost + (j.warmupCost ?? 0)))")
                 }
@@ -391,9 +391,17 @@ struct StudioSettingsSection: View {
                     NumStepper(value: s.maxGpus, dec: { store.updateStudio(StudioSettingsPatch(maxGpus: max(0, s.maxGpus - 1))) },
                                inc: { store.updateStudio(StudioSettingsPatch(maxGpus: min(16, s.maxGpus + 1))) })
                 }
-                ListRow(icon: "flame", title: "Who pays GPU warm-up", hint: "Start-up and model load on a person's own GPU. It shows as its own line on each job.", last: true) {
+                ListRow(icon: "flame", title: "Who pays GPU warm-up", hint: "Start-up and model load on a person's own GPU. It shows as its own line on each job.") {
                     Seg([("user", "The person rendering"), ("owner", "Me (studio)")], selection: Binding(get: { s.overheadPayer }, set: { _ in })) { v in
                         store.updateStudio(StudioSettingsPatch(overheadPayer: v))
+                    }
+                    .frame(width: 300)
+                }
+                ListRow(icon: "flame.fill", title: "Who can keep a GPU warm",
+                        hint: "A dedicated H100 billed by the minute to whoever switches it on. Turns off after \(s.warmIdleMinutes) min without renders, or \(WarmGpuText.duration(Double(s.warmMaxMinutes))) at most.",
+                        last: true) {
+                    Seg([("everyone", "Everyone"), ("owner", "Only me")], selection: Binding(get: { s.warmGpuAllowed }, set: { _ in })) { v in
+                        store.updateStudio(StudioSettingsPatch(warmGpuAllowed: v))
                     }
                     .frame(width: 300)
                 }

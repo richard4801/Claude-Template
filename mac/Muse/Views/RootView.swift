@@ -18,6 +18,7 @@ struct RootView: View {
             if store.postDraft != nil { PostSheetView().transition(.opacity) }
             if store.templateForm != nil { TemplateSheetView().transition(.opacity) }
             if store.paletteOpen { PaletteView().transition(.opacity) }
+            if store.warmPrompt != nil && store.user != nil { WarmPromptView().transition(.opacity) }
             ToastView()
         }
         .environment(\.theme, t)
@@ -39,6 +40,9 @@ struct Shell: View {
         GeometryReader { g in
             VStack(spacing: 0) {
                 TitleBar()
+                // Keep GPU warm: the bar on every screen while it's on, and the 5-minute warning under it.
+                if store.warmOn { WarmGpuBar().transition(.move(edge: .top).combined(with: .opacity)) }
+                if let w = store.warmWarning, store.warmOn { WarmWarningBanner(warning: w) }
                 HStack(spacing: 0) {
                     Sidebar(compact: g.size.width < 1240)
                     ZStack(alignment: .top) {
@@ -178,6 +182,7 @@ struct TitleBar: View {
                     .buttonStyle(.plain)
                     .help(r.waitLine ?? r.phase)
                 }
+                if store.warmAvailable { WarmTitleControl() }
                 ThemeDots()
                 Menu {
                     Text(store.user?.studioName ?? "Studio")

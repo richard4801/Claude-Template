@@ -105,6 +105,12 @@ public protocol MuseAPI: AnyObject, Sendable {
     /// POST /v1/templates/{id}/prompt: the prompt view. Non-owners get the locked "Template: <name>" line.
     func templatePrompt(id: String, _ req: TemplatePromptRequest) async throws -> TemplatePrompt
 
+    // Keep GPU warm (plans/backend.md). One per user; billed by wall time from their credit.
+    /// GET /v1/gpu/warm
+    func warmGpu() async throws -> WarmGpu
+    /// POST /v1/gpu/warm {on, extend?}
+    func setWarmGpu(_ req: WarmGpuRequest) async throws -> WarmGpu
+
     // Balance
     func balance() async throws -> Balance
     func topUp(_ req: TopUpRequest) async throws -> Balance
@@ -112,7 +118,7 @@ public protocol MuseAPI: AnyObject, Sendable {
     // Developer
     func setFailNext(_ fail: Bool) async throws
 
-    /// Live job progress, balance, generation, LoRA and post updates. Each call returns a new subscription.
+    /// Live job progress, balance, generation, LoRA, post and warm-GPU updates. Each call returns a new subscription.
     func events() -> AsyncStream<ApiEvent>
 }
 

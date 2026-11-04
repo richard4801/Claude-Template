@@ -296,9 +296,17 @@ public struct StudioSettings: Codable, Hashable, Sendable {
     public var minRunpodBalance: Double
     public var lowBalance: Bool
     public var features: StudioFeatures
+    /// Keep GPU warm: who may switch it on (owner | everyone, default everyone), the idle auto-off and the session cap.
+    public var warmGpuAllowed: String
+    public var warmIdleMinutes: Int
+    public var warmMaxMinutes: Int
 
     public init(maxGpus: Int = 3, overheadPayer: String = "user", capPerJob: Double = 5, capPerDay: Double = 15, capPerUserDay: Double = 10, tokenUsd: Double = 0.01,
-                minRunpodBalance: Double = 2, lowBalance: Bool = false, features: StudioFeatures = StudioFeatures()) {
+                minRunpodBalance: Double = 2, lowBalance: Bool = false, features: StudioFeatures = StudioFeatures(), warmGpuAllowed: String = "everyone",
+                warmIdleMinutes: Int = 20, warmMaxMinutes: Int = 120) {
+        self.warmGpuAllowed = warmGpuAllowed
+        self.warmIdleMinutes = warmIdleMinutes
+        self.warmMaxMinutes = warmMaxMinutes
         self.maxGpus = maxGpus
         self.overheadPayer = overheadPayer
         self.capPerJob = capPerJob
@@ -310,7 +318,9 @@ public struct StudioSettings: Codable, Hashable, Sendable {
         self.features = features
     }
 
-    enum CodingKeys: String, CodingKey { case maxGpus, overheadPayer, capPerJob, capPerDay, capPerUserDay, tokenUsd, minRunpodBalance, lowBalance, features }
+    enum CodingKeys: String, CodingKey {
+        case maxGpus, overheadPayer, capPerJob, capPerDay, capPerUserDay, tokenUsd, minRunpodBalance, lowBalance, features, warmGpuAllowed, warmIdleMinutes, warmMaxMinutes
+    }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         maxGpus = c.v(.maxGpus, 3)
@@ -322,6 +332,9 @@ public struct StudioSettings: Codable, Hashable, Sendable {
         minRunpodBalance = c.v(.minRunpodBalance, 2)
         lowBalance = c.v(.lowBalance, false)
         features = c.v(.features, StudioFeatures())
+        warmGpuAllowed = c.v(.warmGpuAllowed, "everyone")
+        warmIdleMinutes = c.v(.warmIdleMinutes, 20)
+        warmMaxMinutes = c.v(.warmMaxMinutes, 120)
     }
 }
 
@@ -361,7 +374,14 @@ public struct StudioSettingsPatch: Codable, Sendable {
     public var capPerJob: Double?
     public var capPerDay: Double?
     public var capPerUserDay: Double?
-    public init(maxGpus: Int? = nil, overheadPayer: String? = nil, capPerJob: Double? = nil, capPerDay: Double? = nil, capPerUserDay: Double? = nil) {
+    public var warmGpuAllowed: String?
+    public var warmIdleMinutes: Int?
+    public var warmMaxMinutes: Int?
+    public init(maxGpus: Int? = nil, overheadPayer: String? = nil, capPerJob: Double? = nil, capPerDay: Double? = nil, capPerUserDay: Double? = nil,
+                warmGpuAllowed: String? = nil, warmIdleMinutes: Int? = nil, warmMaxMinutes: Int? = nil) {
+        self.warmGpuAllowed = warmGpuAllowed
+        self.warmIdleMinutes = warmIdleMinutes
+        self.warmMaxMinutes = warmMaxMinutes
         self.maxGpus = maxGpus
         self.overheadPayer = overheadPayer
         self.capPerJob = capPerJob

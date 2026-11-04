@@ -436,6 +436,8 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
     public var warmupCost: Double?
     /// Who started it (real API).
     public var userId: String?
+    /// It ran on its user's warm GPU: its GPU time is covered by the "Warm GPU" line, so it settles to $0.
+    public var warm: Bool?
 
     public init(id: String, title: String, modelId: String, modelName: String, outfitId: String, request: JobRequest, state: String, progress: Double = 0,
                 take: Int = 1, step: Int = 0, totalSteps: Int = 10, phase: String = "", secondsLeft: Double = 0, totalSeconds: Double = 0, cost: Double = 0,
@@ -466,7 +468,7 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, modelId, modelName, outfitId, request, state, progress, take, step, totalSteps, phase, secondsLeft, totalSeconds, cost, refunded, error,
-             createdAt, finishedAt, prompt, seed, thumb, queuePosition, etaSeconds, blocked, warmupCost, userId
+             createdAt, finishedAt, prompt, seed, thumb, queuePosition, etaSeconds, blocked, warmupCost, userId, warm
     }
 
     public init(from d: Decoder) throws {
@@ -498,6 +500,7 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
         blocked = c.o(.blocked)
         warmupCost = c.o(.warmupCost)
         userId = c.o(.userId)
+        warm = c.o(.warm)
     }
 
     /// Paused until the owner tops up RunPod.
@@ -759,7 +762,7 @@ public struct FillAnglesResponse: Codable, Sendable {
     }
 }
 
-/// Server-sent event on /v1/events. type: job | balance | model | outfit | lora | post
+/// Server-sent event on /v1/events. type: job | balance | model | outfit | lora | post | wallet | gpu
 public struct ApiEvent: Codable, Sendable {
     public var type: String
     public var job: Job?
@@ -773,9 +776,19 @@ public struct ApiEvent: Codable, Sendable {
     public var wallet: Wallet?
     /// owner_balance_low | owner_balance_ok (owners only).
     public var notice: EventNotice?
+    /// `gpu` events: the user's warm GPU (the bar, starting → warm → off, the 5-minute warning).
+    public var gpu: WarmGpu?
+    /// `gpu` events: state | tick | warning.
+    public var event: String?
+    /// `gpu` events with `event: "warning"`.
+    public var warning: WarmGpuWarning?
 
     public init(type: String, job: Job? = nil, balance: Balance? = nil, model: MuseModel? = nil, outfit: Outfit? = nil, lora: Lora? = nil, post: Post? = nil,
-                takes: [Take] = [], wallet: Wallet? = nil, notice: EventNotice? = nil) {
+                takes: [Take] = [], wallet: Wallet? = nil, notice: EventNotice? = nil, gpu: WarmGpu? = nil,
+                event: String? = nil, warning: WarmGpuWarning? = nil) {
+        self.gpu = gpu
+        self.event = event
+        self.warning = warning
         self.wallet = wallet
         self.notice = notice
         self.type = type
@@ -788,7 +801,7 @@ public struct ApiEvent: Codable, Sendable {
         self.takes = takes
     }
 
-    enum CodingKeys: String, CodingKey { case type, job, balance, model, outfit, lora, post, takes, wallet, notice }
+    enum CodingKeys: String, CodingKey { case type, job, balance, model, outfit, lora, post, takes, wallet, notice, gpu, event, warning }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         type = c.v(.type, "")
@@ -801,6 +814,9 @@ public struct ApiEvent: Codable, Sendable {
         takes = c.v(.takes, [])
         wallet = c.o(.wallet)
         notice = c.o(.notice)
+        gpu = c.o(.gpu)
+        event = c.o(.event)
+        warning = c.o(.warning)
     }
 }
 

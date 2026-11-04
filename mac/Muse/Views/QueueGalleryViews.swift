@@ -146,6 +146,9 @@ struct JobRow: View {
                     if let w = j.warmupCost, w > 0 {
                         Text("+ \(Pricing.money(w)) warm-up").font(t.mono(10.5)).foregroundStyle(t.muted).help("GPU start-up and model load, charged as its own line")
                     }
+                    if j.warm == true {
+                        Text("warm GPU").font(t.mono(10.5)).foregroundStyle(t.muted).help("Ran on your warm GPU: its time is in the Warm GPU line, not charged again")
+                    }
                 }
                 .frame(width: 80, alignment: .leading)
                 HStack(spacing: 4) {
