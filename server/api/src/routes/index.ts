@@ -20,6 +20,7 @@ import { LocalStorage, contentTypeFor } from '../storage/index.js';
 import { objectInfo, putObject } from '../storage/objects.js';
 import { seedDev, SLOT_SAMPLE } from '../seed.js';
 import { dbStatus } from '../db/pg.js';
+import { inviteShareText, registerReleaseRoutes } from './releases.js';
 
 /** SSE comment interval: well under any hosting proxy's idle timeout (Koyeb, Railway, Cloudflare: 60-100 s). */
 export const SSE_KEEPALIVE_MS = 15_000;
@@ -88,11 +89,16 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   // ------------------------------------------------------------------ invites (owner)
   app.post('/v1/invites', { config: { owner: true } }, async req => {
     const b = parse(z.object({ email: z.string().email().optional(), role: z.enum(['owner', 'member']).optional(), days: z.number().int().min(1).max(90).optional() }), req.body);
-    return createInvite(ctx, { studioId: req.user.studioId, email: b.email, role: b.role ?? 'member', createdBy: req.user.id, days: b.days });
+    const inv = await createInvite(ctx, { studioId: req.user.studioId, email: b.email, role: b.role ?? 'member', createdBy: req.user.id, days: b.days });
+    // shareText: the message to send with the code (the download page, the code, the email).
+    return { ...inv, shareText: inviteShareText(ctx.publicBase(), inv.code, inv.email, b.days ?? 14) };
   });
   app.get('/v1/invites', { config: { owner: true } }, async req =>
     (await db.select().from(invites).where(eq(invites.studioId, req.user.studioId)).orderBy(desc(invites.createdAt)))
       .map(i => compact({ id: i.id, email: i.email, role: i.role, createdAt: i.createdAt, expiresAt: i.expiresAt, usedAt: i.usedAt })));
+
+  // ------------------------------------------------------------------ app downloads (/get, /download/*, PUT /v1/releases/*)
+  await registerReleaseRoutes(app, ctx);
 
   // ------------------------------------------------------------------ models and character sheets
   app.get('/v1/models', async req => (await db.select().from(models).where(eq(models.studioId, req.user.studioId)).orderBy(models.createdAt)).map(modelView));

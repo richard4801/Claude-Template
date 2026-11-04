@@ -129,7 +129,31 @@ Leave the bucket private. The API hands out short-lived links.
 4. **Inviting testers:** each code works once, for that email, for 14 days. There are two ways to make one:
    - **The API:** `POST /v1/invites {email}` as the owner. The app screen for this comes with Phase C.
    - **A terminal:** with the Railway CLI, run `railway ssh` (pick the API service), then `npm run invite -- tester@example.com`. The code is printed there.
-5. **Giving testers tokens:** 1 token = $0.01. Send tokens to a tester with `POST /v1/wallets/transfer`. You can't send more than your RunPod balance backs.
+   In the app, **Invite someone → Share** sends the invite's `shareText`: the download page (`<PUBLIC_URL>/get`), the code and the email.
+5. **Giving testers credit:** the apps show dollars; the API counts whole tokens (1 token = `TOKEN_USD` = $0.01). Send credit to a tester with `POST /v1/wallets/transfer`. You can't send more than your RunPod balance backs.
+6. **Publishing the apps** (see [App downloads](#app-downloads-and-invite-links)): upload the Android APK and the Mac zip once, and every invite link offers them.
+
+#### App downloads and invite links
+
+| Endpoint | Who | What |
+|---|---|---|
+| `GET /get` | anyone | A small mobile-friendly page: **Download for Android**, **Download for Mac**, and "Then sign up with the invite code you were sent". A button says "coming soon" until that build is uploaded. |
+| `GET /download/android`, `GET /download/mac` | anyone | 302 to a 10-minute presigned R2 link for `releases/android/latest.apk` / `releases/mac/MUSE-mac.zip`, saved as `MUSE.apk` / `MUSE-mac.zip`. A friendly 404 page when there's no build. With local storage the file is served from `UPLOAD_DIR` (`data/uploads/releases/...`). |
+| `PUT /v1/releases/android`, `PUT /v1/releases/mac` | owner | Uploads a new build. The body is the raw file (any content type, with a Content-Length, up to 1 GB); it streams straight to storage and replaces the previous build. → `{platform, key, bytes, filename, downloadUrl, pageUrl}` |
+
+To publish a build, sign in as the owner to get a session token, then PUT the file:
+
+```bash
+API=https://angelic-elegance-production-c42b.up.railway.app
+TOKEN=$(curl -s "$API/v1/auth/signin" -H 'content-type: application/json' \
+  -d '{"email":"you@example.com","password":"…"}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
+curl -fS -X PUT "$API/v1/releases/android" -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/vnd.android.package-archive' --data-binary @android/app/build/outputs/apk/release/app-release.apk
+curl -fS -X PUT "$API/v1/releases/mac" -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/zip' --data-binary @MUSE-mac.zip
+```
+
+Then open `$API/get` on a phone to check. `POST /v1/invites` responses carry `shareText`: "You're invited to MUSE, the AI model studio. 1) Download: {PUBLIC_URL}/get 2) Sign up with this invite code: {code} (email: {email}). The code works once and expires in 14 days." Set `PUBLIC_URL` so the link is right.
 
 #### 4. Turning on the real GPU (later, when you say go)
 Set these variables:
