@@ -1,0 +1,94 @@
+[
+ {
+  "input": {
+   "shot": "Medium",
+   "lens": 35,
+   "aperture": "f/2.8",
+   "light": "Golden hour",
+   "outfit": 0
+  },
+  "parts": {
+   "identity": "Sienna Vale: young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin. Identity from 6 locked reference images.",
+   "outfit": "Wearing: green set (outfit reference set).",
+   "scene": "Scene: rooftop · golden hour.",
+   "camera": "Camera: medium shot, 35mm lens, f/2.8.",
+   "light": "Light: golden hour; grade: phone-natural.",
+   "direction": "",
+   "style": "Style: realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss.",
+   "negative": "Never add: tattoos, rings, logos, extra fingers, warped jewellery.",
+   "seed": "Seed: new each shot."
+  },
+  "text": "Sienna Vale: young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin. Identity from 6 locked reference images.\nWearing: green set (outfit reference set).\nScene: rooftop · golden hour.\nCamera: medium shot, 35mm lens, f/2.8.\nLight: golden hour; grade: phone-natural.\nStyle: realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss.\nNever add: tattoos, rings, logos, extra fingers, warped jewellery.\nSeed: new each shot."
+ },
+ {
+  "input": {
+   "shot": "Close",
+   "lens": 85,
+   "aperture": "f/1.4",
+   "light": "Window light",
+   "outfit": 1,
+   "grade": "Warm film",
+   "scene": "Café window",
+   "lockSeed": true
+  },
+  "parts": {
+   "identity": "Sienna Vale: young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin. Identity from 6 locked reference images.",
+   "outfit": "Wearing: crystal dress (outfit reference set).",
+   "scene": "Scene: café window.",
+   "camera": "Camera: close shot, 85mm lens, f/1.4, compressed background, creamy bokeh.",
+   "light": "Light: window light; grade: warm film.",
+   "direction": "",
+   "style": "Style: realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss.",
+   "negative": "Never add: tattoos, rings, logos, extra fingers, warped jewellery.",
+   "seed": "Seed: locked (variations keep the same look)."
+  },
+  "text": "Sienna Vale: young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin. Identity from 6 locked reference images.\nWearing: crystal dress (outfit reference set).\nScene: café window.\nCamera: close shot, 85mm lens, f/1.4, compressed background, creamy bokeh.\nLight: window light; grade: warm film.\nStyle: realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss.\nNever add: tattoos, rings, logos, extra fingers, warped jewellery.\nSeed: locked (variations keep the same look)."
+ },
+ {
+  "input": {
+   "shot": "Wide",
+   "lens": 16,
+   "aperture": "f/11",
+   "light": "Neon night",
+   "outfit": 0,
+   "scene": "sunlit rooftop bar, string lights, city skyline",
+   "direction": "laughing mid-step, hair blowing, holding an iced coffee"
+  },
+  "parts": {
+   "identity": "Sienna Vale: young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin. Identity from 6 locked reference images.",
+   "outfit": "Wearing: green set (outfit reference set).",
+   "scene": "Scene: sunlit rooftop bar, string lights, city skyline.",
+   "camera": "Camera: wide shot, 16mm lens, f/11, slight wide-angle distortion.",
+   "light": "Light: neon night; grade: phone-natural.",
+   "direction": "Direction: laughing mid-step, hair blowing, holding an iced coffee",
+   "style": "Style: realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss.",
+   "negative": "Never add: tattoos, rings, logos, extra fingers, warped jewellery.",
+   "seed": "Seed: new each shot."
+  },
+  "text": "Sienna Vale: young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin. Identity from 6 locked reference images.\nWearing: green set (outfit reference set).\nScene: sunlit rooftop bar, string lights, city skyline.\nCamera: wide shot, 16mm lens, f/11, slight wide-angle distortion.\nLight: neon night; grade: phone-natural.\nDirection: laughing mid-step, hair blowing, holding an iced coffee\nStyle: realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss.\nNever add: tattoos, rings, logos, extra fingers, warped jewellery.\nSeed: new each shot."
+ },
+ {
+  "input": {
+   "shot": "Full",
+   "lens": 24,
+   "aperture": "f/5.6",
+   "light": "Flash",
+   "outfit": 0,
+   "grade": "Muted",
+   "scene": "Beach noon",
+   "lockSeed": false
+  },
+  "parts": {
+   "identity": "Sienna Vale: young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin. Identity from 6 locked reference images.",
+   "outfit": "Wearing: green set (outfit reference set).",
+   "scene": "Scene: beach noon.",
+   "camera": "Camera: full shot, 24mm lens, f/5.6, slight wide-angle distortion.",
+   "light": "Light: flash; grade: muted.",
+   "direction": "",
+   "style": "Style: realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss.",
+   "negative": "Never add: tattoos, rings, logos, extra fingers, warped jewellery.",
+   "seed": "Seed: new each shot."
+  },
+  "text": "Sienna Vale: young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin. Identity from 6 locked reference images.\nWearing: green set (outfit reference set).\nScene: beach noon.\nCamera: full shot, 24mm lens, f/5.6, slight wide-angle distortion.\nLight: flash; grade: muted.\nStyle: realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss.\nNever add: tattoos, rings, logos, extra fingers, warped jewellery.\nSeed: new each shot."
+ }
+]

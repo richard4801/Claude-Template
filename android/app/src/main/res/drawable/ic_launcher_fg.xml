@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "M" monogram for MUSE on the adaptive icon safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#00000000" android:strokeColor="#F8F5EF" android:strokeWidth="5"
+        android:strokeLineJoin="miter" android:pathData="M36,72 L36,38 L54,60 L72,38 L72,72" />
+    <path android:fillColor="#B5121B" android:pathData="M51,78h6v4h-6z" />
+</vector>

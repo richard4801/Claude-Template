@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">MUSE</string>
+    <string name="channel_renders">Renders</string>
+    <string name="channel_renders_desc">When a render finishes or fails</string>
+</resources>
