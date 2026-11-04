@@ -677,12 +677,10 @@ final class AppStore {
     }
 
     var totalCost: Double { Pricing.totalCost(spec) }
-    /// "tokens" for members of a studio, "balance" otherwise.
-    var moneyWord: String { isMember ? "tokens" : "balance" }
     /// The toast for "can't afford this".
     var notEnoughMessage: String { isMember ? ApiError.friendly("insufficient_tokens")! : "Not enough balance for this" }
     var tokenCount: Int { wallet?.tokens ?? balance.tokenCount }
-    func tokens(_ usd: Double) -> Int { Int((usd / max(balance.tokenUsd, 0.0001) - 1e-6).rounded(.up)) }
+    func tokens(_ usd: Double) -> Int { Pricing.tokens(usd, balance.tokenUsd) }
     var clipBad: Bool { !(clip?.ok ?? true) }
     var lowBalance: Bool { totalCost > balance.balance + 1e-9 }
     var generateBlocked: Bool { clipBad || lowBalance || clip == nil || currentOutfit == nil || generating }
