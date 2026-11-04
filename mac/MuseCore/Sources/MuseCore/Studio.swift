@@ -401,7 +401,7 @@ public struct VideoFeatures: Codable, Hashable, Sendable {
     public var maxSeconds: Int
     public var options: [VideoOption]
 
-    public init(defaultEngine: String = "replicate", defaultQuality: String = "standard", minSeconds: Int = 4, maxSeconds: Int = 15, options: [VideoOption] = VideoOption.defaults) {
+    public init(defaultEngine: String = "replicate", defaultQuality: String = VideoQuality.default.rawValue, minSeconds: Int = 4, maxSeconds: Int = 15, options: [VideoOption] = VideoOption.defaults) {
         self.defaultEngine = defaultEngine
         self.defaultQuality = defaultQuality
         self.minSeconds = minSeconds
@@ -413,7 +413,7 @@ public struct VideoFeatures: Codable, Hashable, Sendable {
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         defaultEngine = c.v(.defaultEngine, "replicate")
-        defaultQuality = c.v(.defaultQuality, "standard")
+        defaultQuality = c.v(.defaultQuality, VideoQuality.default.rawValue)
         minSeconds = c.v(.minSeconds, Pricing.replicateMinSec)
         maxSeconds = c.v(.maxSeconds, Pricing.replicateMaxSec)
         let read: [VideoOption] = c.v(.options, [])
@@ -423,10 +423,10 @@ public struct VideoFeatures: Codable, Hashable, Sendable {
     /// For servers that don't send `features.video`: the contract's table, every option available.
     public static let fallback = VideoFeatures()
 
-    /// The picker's default: Exact edit when the server's default engine is h3, else `defaultQuality` (Standard).
+    /// The picker's default: Exact edit when the server's default engine is h3, else `defaultQuality` (Draft).
     public var defaultOption: VideoQuality {
         if defaultEngine == Engine.h3.rawValue { return .exact }
-        return VideoQuality(id: defaultQuality).replicateOrStandard
+        return VideoQuality(id: defaultQuality).replicateOrDefault
     }
 
     public func option(_ q: VideoQuality) -> VideoOption { options.first { $0.id == q.rawValue } ?? VideoOption.make(q) }
@@ -465,7 +465,7 @@ public struct VideoOption: Codable, Hashable, Sendable, Identifiable {
     enum CodingKeys: String, CodingKey { case id, label, detail, engine, quality, resolution, pricePerSec, available }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
-        id = c.v(.id, "standard")
+        id = c.v(.id, VideoQuality.default.rawValue)
         let q = VideoQuality(id: id)
         label = c.v(.label, q.label)
         detail = c.v(.detail, q.detail)

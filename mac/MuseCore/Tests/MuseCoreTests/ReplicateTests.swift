@@ -68,7 +68,7 @@ final class ReplicateTests: XCTestCase {
 
     func testPickerOptionsAndRequests() {
         XCTAssertEqual(VideoQuality.allCases.map(\.label), ["Draft", "Standard", "HD", "Exact edit"])
-        XCTAssertEqual(VideoQuality.default, .standard)
+        XCTAssertEqual(VideoQuality.default, .draft)
         XCTAssertEqual(VideoQuality.exact.engine, .h3)
         XCTAssertNil(VideoQuality.exact.requestQuality)
         let r = JobRequest.replicate(title: "t", modelId: "m", outfitId: "o", clipId: "c", quality: .hd, takes: 2, clipSeconds: 7)
@@ -80,7 +80,10 @@ final class ReplicateTests: XCTestCase {
         XCTAssertEqual(Pricing.genLabel(r.spec), "Generate · 7 s · $1.82 · 2 takes")
         XCTAssertEqual(Job.engineLabel(for: r), "HD · 2K")
         XCTAssertEqual(Job.engineLabel(for: JobRequest(title: "", modelId: "", outfitId: "", clipId: "", steps: 12)), "Exact edit · 12 steps")
-        XCTAssertEqual(VideoQuality.of(engine: .replicate, quality: nil), .standard)
+        XCTAssertEqual(VideoQuality.of(engine: .replicate, quality: nil), .draft)
+        XCTAssertEqual(VideoQuality(id: nil), .draft)
+        XCTAssertEqual(VideoQuality(id: "bogus"), .draft)
+        XCTAssertEqual(RenderSpec(engine: .replicate).quality, .draft)
         XCTAssertEqual(VideoQuality.of(engine: .viggle, quality: "hd"), .exact)
     }
 
@@ -114,6 +117,12 @@ final class ReplicateTests: XCTestCase {
         XCTAssertFalse(old.features.replicate)
         XCTAssertEqual(VideoFeatures.fallback.ordered.map(\.label), ["Draft", "Standard", "HD", "Exact edit"])
         XCTAssertTrue(VideoQuality.allCases.allSatisfy { VideoFeatures.fallback.isAvailable($0) })
+        XCTAssertEqual(VideoFeatures.fallback.defaultQuality, "draft")
+        XCTAssertEqual(VideoFeatures.fallback.defaultOption, .draft)
+        // A video block without defaultQuality also means Draft.
+        let sparse = try JSONDecoder().decode(VideoFeatures.self, from: Data(#"{"defaultEngine":"replicate"}"#.utf8))
+        XCTAssertEqual(sparse.defaultOption, .draft)
+        XCTAssertEqual(sparse.ordered.map(\.id), ["draft", "standard", "hd", "exact"])
         XCTAssertEqual(VideoFeatures.fallback.pricePerSec(.hd), 0.13)
     }
 
@@ -129,7 +138,9 @@ final class ReplicateTests: XCTestCase {
         XCTAssertEqual(j.failureLine, "Replicate's safety filter refused this clip. Try another clip or outfit, or Exact edit.")
         let done = try JSONDecoder().decode(Job.self, from: Data(#"{"id":"j2","state":"done","request":{"engine":"replicate"},"billedSeconds":14}"#.utf8))
         XCTAssertEqual(done.billedSeconds, 14)
-        XCTAssertEqual(done.engineLabel, "Standard · 768P")
+        XCTAssertEqual(done.engineLabel, "Draft · 768P") // no quality = the default, Draft
+        XCTAssertEqual(done.engineName, "Draft")
+        XCTAssertEqual(done.videoQuality, .draft)
         var waiting = done
         waiting.state = "running"
         waiting.queuePosition = 2
@@ -180,6 +191,13 @@ final class ReplicateTests: XCTestCase {
         XCTAssertEqual(j.cost, 0.8, accuracy: 1e-9) // 9.4 s → 10 s × $0.08
         let s = try await api.studioSettings()
         XCTAssertTrue(s.features.replicate)
-        XCTAssertEqual(s.features.video?.defaultOption, .standard)
+        XCTAssertEqual(s.features.video?.defaultOption, .draft)
+        // A replicate request without quality is Draft: 9.4 s → 10 s × $0.02.
+        var noQuality = JobRequest.replicate(title: "t", modelId: SampleData.sienna, outfitId: SampleData.green, clipId: clip.id, quality: .hd, clipSeconds: clip.durationSec)
+        noQuality.quality = nil
+        let d = try await api.createJob(noQuality)
+        XCTAssertEqual(d.request.quality, "draft")
+        XCTAssertEqual(d.engineLabel, "Draft · 768P")
+        XCTAssertEqual(d.cost, 0.2, accuracy: 1e-9)
     }
 }

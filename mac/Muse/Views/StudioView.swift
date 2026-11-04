@@ -484,13 +484,15 @@ struct QualityPicker: View {
     private func card(_ o: VideoOption) -> some View {
         let q = o.videoQuality
         let on = store.quality == q
+        // The server's default (features.video.defaultQuality, Draft when it doesn't say).
+        let isDefault = q == store.videoFeatures.defaultOption
         let spec = store.spec(for: q)
         let radius = t.isA ? 0 : t.controlRadius
         return Button { store.setQuality(q) } label: {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(o.label).font(t.body(13, .semibold)).foregroundStyle(t.ink)
-                    if q == .standard { Text("Default").font(t.mono(10)).foregroundStyle(t.muted) }
+                    if isDefault { Text("Default").font(t.mono(10)).foregroundStyle(t.muted) }
                     Spacer(minLength: 4)
                     Text(Pricing.money(Pricing.totalCost(spec))).font(t.mono(12, .medium)).foregroundStyle(on ? t.accent : t.ink)
                 }

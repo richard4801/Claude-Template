@@ -406,7 +406,7 @@ public struct JobRequest: Codable, Hashable, Sendable {
                                  clipSeconds: Double? = nil) -> JobRequest {
         JobRequest(title: title, modelId: modelId, outfitId: outfitId, clipId: clipId, engine: Engine.replicate.rawValue, steps: Pricing.stepsDefault,
                    use: ClipUse.full.rawValue, takes: takes, keepAudio: keepAudio, lipSync: false, background: "keep", clipSeconds: clipSeconds,
-                   quality: quality.replicateOrStandard.rawValue)
+                   quality: quality.replicateOrDefault.rawValue)
     }
 
     public var videoQuality: VideoQuality { VideoQuality.of(engine: Engine(id: engine), quality: quality) }

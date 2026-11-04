@@ -21,7 +21,8 @@ public enum Engine: String, Codable, CaseIterable, Sendable {
     public init(id: String) { self = Engine(rawValue: id) ?? .h3 }
 }
 
-/// The video studio's Quality picker: Draft / Standard / HD on Replicate, or Exact edit (H3 on our GPU). Default Standard.
+/// The video studio's Quality picker: Draft / Standard / HD on Replicate, or Exact edit (H3 on our GPU). Default Draft (H3 Lite),
+/// the owner's choice on 2026-11-04 (plans/api.md: `JobRequest.quality` and `features.video.defaultQuality` default to "draft").
 public enum VideoQuality: String, Codable, CaseIterable, Sendable, Identifiable {
     case draft
     case standard
@@ -29,7 +30,7 @@ public enum VideoQuality: String, Codable, CaseIterable, Sendable, Identifiable 
     case exact
 
     public var id: String { rawValue }
-    public static let `default` = VideoQuality.standard
+    public static let `default` = VideoQuality.draft
 
     public init(id: String?) { self = VideoQuality(rawValue: id ?? "") ?? .default }
 
@@ -76,10 +77,10 @@ public enum VideoQuality: String, Codable, CaseIterable, Sendable, Identifiable 
 
     /// The picker option for a job: replicate jobs by their quality, everything else is Exact edit.
     public static func of(engine: Engine, quality: String?) -> VideoQuality {
-        engine == .replicate ? VideoQuality(id: quality).replicateOrStandard : .exact
+        engine == .replicate ? VideoQuality(id: quality).replicateOrDefault : .exact
     }
 
-    var replicateOrStandard: VideoQuality { self == .exact ? .standard : self }
+    var replicateOrDefault: VideoQuality { self == .exact ? .default : self }
 }
 
 /// Which part of the source clip is rendered.
@@ -108,7 +109,7 @@ public struct RenderSpec: Equatable, Sendable {
     public var pricePerSec: Double?
 
     public init(engine: Engine = .h3, use: ClipUse = .first, steps: Int = Pricing.stepsDefault, lipSync: Bool = false, takes: Int = 1, clipSeconds: Double? = nil,
-                quality: VideoQuality = .standard, pricePerSec: Double? = nil) {
+                quality: VideoQuality = .default, pricePerSec: Double? = nil) {
         self.engine = engine
         self.use = use
         self.steps = steps
@@ -126,9 +127,9 @@ public struct RenderSpec: Equatable, Sendable {
 
     public var isReplicate: Bool { engine == .replicate }
     /// The Quality picker option this spec belongs to.
-    public var videoQuality: VideoQuality { isReplicate ? quality.replicateOrStandard : .exact }
+    public var videoQuality: VideoQuality { isReplicate ? quality.replicateOrDefault : .exact }
     /// $ per output second for a replicate spec.
-    public var replicatePricePerSec: Double { pricePerSec ?? quality.replicateOrStandard.defaultPricePerSec ?? 0.08 }
+    public var replicatePricePerSec: Double { pricePerSec ?? quality.replicateOrDefault.defaultPricePerSec ?? 0.02 }
     /// Replicate's billed output length D (whole seconds, 4–15).
     public var replicateSeconds: Int { Pricing.replicateSeconds(clipSeconds) }
 

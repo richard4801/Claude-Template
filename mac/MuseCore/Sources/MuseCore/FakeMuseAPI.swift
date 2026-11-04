@@ -577,7 +577,7 @@ public actor FakeMuseAPI: MuseAPI {
         if req.engine == Engine.replicate.rawValue {
             // Replicate always renders the whole clip and stores "full".
             req.use = ClipUse.full.rawValue
-            if req.quality == nil { req.quality = VideoQuality.standard.rawValue }
+            if req.quality == nil { req.quality = VideoQuality.default.rawValue }
         }
         let spec = req.spec(pricePerSec: (studio.features.video ?? .fallback).pricePerSec(req.videoQuality))
         if spec.engine == .h3 && (spec.steps < Pricing.stepsMin || spec.steps > Pricing.stepsMax) { throw ApiError("bad_request", "Steps must be 4–30") }

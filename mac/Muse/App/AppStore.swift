@@ -135,7 +135,7 @@ final class AppStore {
     var defaultSteps: Int { didSet { defaults.set(defaultSteps, forKey: "muse.defaultSteps") } }
     /// Exact edit's engine: H3 on our GPU, or Fast · beta.
     var defaultEngine: Engine { didSet { defaults.set(defaultEngine.rawValue, forKey: "muse.defaultEngine") } }
-    /// The Quality picker's default (Standard). Until the user picks one, the server's `features.video` default applies.
+    /// The Quality picker's default (Draft). Until the user picks one, the server's `features.video` default applies.
     var defaultQuality: VideoQuality { didSet { defaults.set(defaultQuality.rawValue, forKey: "muse.defaultQuality") } }
     var houseStyle: String { didSet { defaults.set(houseStyle, forKey: "muse.houseStyle") } }
     var notifyDone: Bool { didSet { defaults.set(notifyDone, forKey: "muse.notifyDone") } }
