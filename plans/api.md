@@ -34,6 +34,8 @@ _Added 2026-11-04._ This is the contract between the apps and the backend. `serv
 | `rate_limited` | 429 | too many sign-in or sign-up tries |
 | `template_hidden` | 403 | saving a template from a shot made with someone else's template |
 | `warm_not_allowed` | 403 | _retired 2026-11-04:_ Keep add-on engine ready is owner-only, members get `owner_only` |
+| `model_incompatible` | 400 | _added 2026-11-04._ owner picked a model that can't do that step ("Model tools" §2) |
+| `model_archived` | 409 | _added 2026-11-04._ new work on an archived model ("Model tools" §7) |
 | `owner_balance_low` | 402 | _retired 2026-11-04:_ nothing pauses or refuses on a provider's balance any more |
 | `no_gpu_free` / `no_gpu_available` | 409 / 503 | Keep add-on engine ready with every add-on engine in use / none free right now (owner only) |
 | `not_warm` | 409 | Keep ready (`extend`) while it's off (owner only) |
@@ -176,15 +178,153 @@ EngineStatus { id: "replicate"|"runpod", name: "Replicate"|"RunPod", usedFor: st
 ### 7. Strings the apps remove or rewrite
 Keep GPU warm nudge/switch/bar/menu-bar flame/notification/5-minute warning/"Warm GPU turned off" toasts (members) → gone; "GPU warm-up $x" cost lines → gone; "Waiting for a GPU" → "Waiting to start"; "The GPU disconnected"/"the GPU stopped responding" → "Something went wrong · you weren't charged"; steps (10/15/30) and first 5.2 s/full → hidden; "RunPod balance", "Top up RunPod", runpod.io links, "Paused: the studio's GPU credit is low" → the studio balance; "#2 in the Replicate line" → "#2 in line"; "Exact edit" → "Edit"; the "Who pays GPU warm-up" setting → "Who pays start-up" in Engines.
 
+## Model tools: image model catalog, Enhance, Dress up, archive (2026-11-04)
+_Owner decisions 2026-11-04. This section wins where an older section disagrees._ Members never see a provider or model name here either: they get the owner's chosen defaults and neutral labels ("Option A", "Option B"). Model names, prices per unit and the catalog are **owner only**.
+
+### 1. The character sheet has 7 images
+`SheetSlot.key` gains **`"faceTq"`** (label "Face · ¾", a head-and-shoulders close-up turned three-quarters). `Model.slots` now has 7 entries in this order: `face, profile, front, tq, side, back, faceTq` (the new key is appended so clients that index by position keep working). Apps **show** them as two groups: face close-ups `face` (Face · front), `faceTq` (Face · ¾), `profile` (Face · profile); full body `front`, `tq`, `side`, `back`. Existing models get an empty `faceTq` slot (`source: "upload"`, `busy: false`). `PUT /v1/models/{id}/slots/faceTq` works like any slot; `fill-angles` fills it too. A missing face close-up stays a warning only.
+
+### 2. Image steps and their models (owner: Settings → Engines → "Image models")
+Every image-generation step runs on a configurable Replicate model. The owner can pick **any public Replicate model** for a step.
+
+| `step` | label (owner) | used by | default model | price (Replicate, checked 2026-11-04) |
+|---|---|---|---|---|
+| `shot` | New shots | photoshoots, template shoots, outfit-set fronts, sheet fills, LoRA set | `black-forest-labs/flux-2-pro` | $0.015 per run + $0.015 per input MP + $0.015 per output MP |
+| `edit` | Edits | outfit-set ¾ / side / back | `qwen/qwen-image-edit-2511` | $0.03 per output image |
+| `realism` | Enhance · realism | Enhance step 1 | `black-forest-labs/flux-krea-dev` | $0.025 per output image |
+| `upscale` | Enhance · upscale | Enhance step 2 | `philz1337x/clarity-upscaler` (community) | by time: $0.00115/s on A100 (40GB), typical run ≈ $0.018 |
+| `dressA` | Dress up · Option A | Dress up | `qwen/qwen-image-edit-2511` | $0.03 per output image |
+| `dressB` | Dress up · Option B | Dress up | `black-forest-labs/flux-2-pro` | the FLUX.2 [pro] formula |
+
+```ts
+ImageStep    "shot"|"edit"|"realism"|"upscale"|"dressA"|"dressB"
+PriceInfo    { kind: "per-unit", units: { metric: string /* "image_output_count", "run_count", "image_input_megapixel_count", … */, usd: number, label: string /* "per output image" */ }[] }
+           | { kind: "per-second", usdPerSecond: number, hardware: string|null /* "A100 (40GB)" */, typicalUsd: number|null /* the model page's typical run */ }
+           | { kind: "unknown" }
+             // + source: "model page" | "config"
+CatalogModel { id /* "owner/name" */, owner, name, description /* ≤ 200 chars */, runCount, official: boolean, coverUrl: string|null,
+               price: PriceInfo|null /* null = not fetched yet (search results until opened) */,
+               priceLine: string /* "$0.025 per output image", "$0.015 per run + $0.015 per input MP + $0.015 per output MP",
+                                    "by time · about $0.018 a run ($0.00115/s on A100 (40GB))", "price unknown" */,
+               compatible: boolean|null /* null = schema not read yet */, reasons: string[] /* why not: "needs an input image", "needs mask" */,
+               warnings: string[] /* compatible but: "no reference images · faces may drift", "no strength control" */ }
+InputField   { name, type /* "string"|"integer"|"number"|"boolean"|"array"|"enum" */, required: boolean, default?: any, enum?: any[],
+               minimum?: number, maximum?: number, maxItems?: number, description?: string /* ≤ 300 */, mappedAs?: MappedRole }
+MappedRole   "prompt"|"image"|"images"|"aspectRatio"|"width"|"height"|"resolution"|"seed"|"strength"|"scale"|"outputFormat"|"outputQuality"|"count"
+Mapping      { prompt?: string, image?: { field: string, array: boolean, max: number|null }, extraImageFields?: string[] /* image_2, image_3 … */,
+               aspectRatio?: string, size?: { width: string, height: string }, resolution?: string, seed?: string,
+               strength?: { field: string, min: number, max: number }, scale?: { field: string, kind: "number"|"enum", values?: string[] },
+               outputFormat?: string, outputQuality?: string, count?: string }
+StepModel    { step, label, model /* "owner/name" in use */, defaultModel, isDefault: boolean, name, official: boolean,
+               price: PriceInfo, priceLine, compatible: boolean, reasons: string[], warnings: string[],
+               mapping: Mapping, extra: Record<string, any> /* the owner's advanced inputs, sent on every run of this step */ }
+```
+
+| | |
+|---|---|
+| `GET /v1/image-models` (owner) | → `{ steps: StepModel[] }` in the order above |
+| `PUT /v1/image-models/{step}` `{model: "owner/name", extra?: object}` (owner) | → `StepModel`. The server reads the model and its latest version's schema. `400 model_incompatible` ("This model can't do <label>: needs mask") when the step's required inputs can't be mapped; `404 not_found` for an unknown model. `extra` (≤ 4 KB JSON): every key must be an input of the model (`bad_request` otherwise); `disable_safety_checker` (and any `*safety_checker*` key) is refused; values override what the mapping would send. |
+| `DELETE /v1/image-models/{step}` (owner) | → `StepModel` back on the default |
+| `GET /v1/image-models/catalog?step=&q=&collection=` (owner) | → `{ step, collections: {slug, name}[], models: CatalogModel[], cachedAt }`. Without `q`: the models of the step's collections (below), most-run first, with compatibility for `step`. With `q`: Replicate's search (≤ 20 results; each result's schema and price are read, so `compatible` and `price` are filled). `collection` (a slug from `GET /v1/image-models/collections`) lists that collection instead. |
+| `GET /v1/image-models/collections` (owner) | → `{slug, name, description}[]` (Replicate's collections) |
+| `GET /v1/image-models/model?id=owner/name&step=` (owner) | → `CatalogModel & { mapping: Mapping, inputs: InputField[], version: string }`: one model, for "paste any owner/model" and the advanced view |
+
+Collections per step: `shot` → `text-to-image`, `image-editing`; `edit`, `dressA`, `dressB` → `image-editing`; `realism` → `image-editing`, `text-to-image`; `upscale` → `super-resolution`, `ai-image-restoration`. Members get `403 owner_only` from every `/v1/image-models` endpoint.
+
+**Per-run override (owner only):** `POST /v1/shoots`, `POST /v1/outfits`, `POST /v1/models/{id}/enhance`, `POST /v1/models/{id}/dress-up` (and their `/estimate`) accept `models?: { [step in ImageStep]?: "owner/name" }` for that one run. A member sending `models` gets `403 owner_only`. Owner apps show a small "Model" chooser on Shoot, Enhance and Dress up (opens the catalog for that step; "Default" clears it). Members never see it.
+
+**Schema mapping (server):** for a chosen model the server reads `latest_version.openapi_schema.components.schemas.Input` (enums are resolved from `$ref`s) and `Output`, and maps:
+- prompt: `prompt` (else `instruction`, `text`); image input: `image`, `input_image`, `input_images`, `images`, `image_input`, `image_url(s)`, `reference_images`, `init_image`, `img` (an array field with its `maxItems`, else a single field; extra single fields `image_2`, `image_3`… count as more images);
+- size: `aspect_ratio` (the nearest enum value, or `match_input_image` for edits when offered) or `width`/`height` (clamped to min/max, multiples of 16), `resolution`/`megapixels` ("1 MP"/"2 MP", "1"/"2");
+- `seed`; strength: `prompt_strength`, `strength`, `denoising_strength`, `creativity`; scale: `scale_factor`, `scale`, `upscale_factor` (enum values like "2x"/"4x" or numbers), `upscale`;
+- `output_format` (jpg/jpeg when offered), `output_quality` 95, a count field (`num_outputs`, `num_images`, `max_images`) = 1;
+- **never sent:** `disable_safety_checker` (or any safety-checker switch); it stays at the model's default.
+- Not compatible when a required input has no default and isn't mapped, when the output isn't an image (URI or list of URIs), or the step needs what the model lacks: `edit`/`realism`/`upscale` need an image input; `shot`, `edit`, `realism`, `dressA/B` need a prompt; `dressA/B` need at least two images (an array or several image fields).
+- Known defaults keep their tested inputs (FLUX.2 [pro] `safety_tolerance` 2 and "1 MP"/"2 MP"; Qwen `match_input_image`).
+
+**Catalog caching:** collections and the step lists are cached 12 h (`REPLICATE_CATALOG_TTL_SEC` = 43200), a model's schema 6 h, a model's price 24 h. Every call uses the server's `REPLICATE_API_TOKEN`; Replicate's catalog reads are free.
+
+### 3. Pricing: estimate, hold, exact settle (any model)
+**Price source:** official models: the per-unit prices on the model's page (`https://replicate.com/<owner>/<name>`, the `billingConfig` of its pricing data: metric + price per unit, first tier). Community models are billed by time: the page's hardware price per second (`"$0.00115 per second"`, hardware "A100 (40GB)") and its typical cost per run. The two defaults on config prices (`shot`, `edit`) keep the config values of "App clean-up" §3.
+
+**Estimate of one prediction** (`est`, doubles):
+- per unit: Σ units × price, with units: `run_count` = 1, `image_output_count` = 1, `image_output_megapixel_count` = output MP (1, or 2 for shoots), `image_input_megapixel_count` = Σ input MP sent (0.79 per shrunk reference; an un-shrunk sheet image counts as 0.79 too for the estimate), any other metric = 1.
+- by time: the typical run cost; × (scale/2)² for upscales (4× ≈ 4 × the 2× typical); without a typical figure, `REPLICATE_TIME_EST_SEC` (20) × the price per second.
+- unknown: `REPLICATE_UNKNOWN_EST_USD` ($0.05) per prediction.
+
+**Exact cost of one prediction:** 1) `metrics.cost_usd`/`metrics.cost` when reported; 2) per unit: the prediction's billing counts in `metrics` (same metric names) × price, else the measured units (input MP as sent, output MP as received, 1 run/image); 3) by time: `metrics.predict_time` × price per second; 4) unknown price: settles on the estimate and the server logs `"price unknown · settled on estimate"` with the model id (owner ledger note gets `" · estimated"`).
+
+**Holds:** each action holds Σ estimates at start (caps and wallet as for photos), settles to Σ exact costs of what it kept, releases on failure (anything already billed goes on a studio `overhead` row, as for photos). Ledger notes: `"Enhance · 7 images"`, `"Dress up · 7 images"` (`" · 2 options"` for Both), `"Enhance · retry 1 image"`, `"Dress up · retry 1 image"` (`" · hold"` on holds).
+
+### 4. Enhance (character sheet → Enhance)
+`GET /v1/settings/studio` → `features.tools`:
+```ts
+ToolsFeatures { enhance: { available: boolean, realism: { id: "off"|"subtle"|"balanced"|"strong", label: "Off"|"Subtle"|"Balanced"|"Strong" }[] /* default "balanced" */,
+                           upscale: { id: "off"|"2x"|"4x", label: "Off"|"2×"|"4×" }[] /* default "2x" */ },
+                dressUp: { available: boolean, options: { id: "a"|"b"|"both", label: "Option A"|"Option B"|"Both", detail: string }[] /* default "a" */ } }
+// details: a = "Keeps each photo closest", b = "Richer detail", both = "Makes both · pick per photo"
+// owner only, extra: enhance.models / dressUp.models = { [step]: { model, name } } (the current defaults)
+```
+- `POST /v1/models/{id}/enhance/estimate` `{realism?, upscale?, slots?, models?}` → `{ images: 7, estimate: 0.301, label: "7 images · about $0.30", perImage: 0.043 }`
+- `POST /v1/models/{id}/enhance` `{realism?: "balanced", upscale?: "2x", slots?: SlotKey[] /* default: every filled slot */, models?}` → `ToolRun` (`state: "running"`). `bad_request` when both steps are off or the sheet has no images.
+- **Step 1 realism** (`realism` model, img2img): the slot image (original size, not shrunk) as `image`, `prompt_strength` Subtle 0.25 / Balanced 0.35 / Strong 0.5, **one seed and one prompt for every image**: `"candid smartphone photo, natural skin texture with visible pores and fine lines, true-to-life colour, soft natural light, no retouching, no beauty filter"`, aspect ratio nearest to the image. **Step 2 upscale** (`upscale` model) on step 1's output (or the original when realism is off): `scale_factor` 2 or 4, low creativity (clarity: `creativity` 0.2, `resemblance` 1.0; other models: their scale field only). Either step can be off.
+- Images run one after another; `tool` SSE events carry progress (`phase: "Enhancing · 3 of 7"`).
+
+### 5. Dress up (model profile and outfit screens)
+- `POST /v1/models/{id}/dress-up/estimate` `{engine?: "a"|"b"|"both", models?}` → `{ images: 7, estimate, label: "7 images · about $0.21" }` (Both: `"7 images · 2 options · about $0.86"`)
+- `POST /v1/models/{id}/dress-up` `{outfitImage: ImageRef /* one outfit-sheet photo: clothes + accessories */, name?: string /* ≤ 80 */, engine?: "a"|"b"|"both" /* default "a" */, models?}` → `ToolRun`. `bad_request` without `outfitImage` or when the sheet has no images.
+- For each engine: the **full-body front first** (`[sheet front, outfit image]`), then every other filled slot with `[that sheet image, outfit image, the new front]` so prints, colours and details match. **One seed for the whole set.** Full-body angles get the whole outfit; face close-ups get only what shows at that distance (earrings, necklace, glasses, hat, hair pieces) and the top's neckline. Face, hair, body, pose, framing and background of each sheet image stay the same. Option A (`dressA`) gets `image: [...]`; Option B (`dressB`) gets `input_images: [...]` (whatever the mapping says for a swapped model).
+- The original sheet is **never** changed.
+
+### 6. Review and apply (both tools)
+```ts
+ToolRun  { id, kind: "enhance"|"dressup", modelId, state: "running"|"review"|"applied"|"failed"|"discarded",
+           options: { realism?, upscale?, engine?: "a"|"b"|"both", name?, outfitImage?: ImageRef },
+           engines: ("a"|"b")[] /* dressup: which options ran; enhance: ["a"] */,
+           items: ToolItem[], estimate, cost /* exact, settled so far */, progress /* 0–100 */, phase /* member-safe */,
+           error?, createdAt, finishedAt?, appliedAt?, outfitId? /* dressup, once applied */,
+           models?: { [step]: string } /* owner only: the models used */ }
+ToolItem { slot: SlotKey, label /* "Face · ¾" */, before: ImageRef|null, results: { a?: ImageRef|null, b?: ImageRef|null },
+           state: "waiting"|"running"|"done"|"failed", decision: "pending"|"keep"|"reject", pick: "a"|"b"|null, cost, error? }
+SheetVersion { id, createdAt, reason: "enhance"|"restore", slots: SheetSlot[] }
+```
+| | |
+|---|---|
+| `GET /v1/tool-runs?modelId=&kind=` | → `ToolRun[]`, newest first (≤ 20) |
+| `GET /v1/tool-runs/{id}` | → `ToolRun` |
+| `PATCH /v1/tool-runs/{id}/items/{slot}` `{decision: "keep"\|"reject", pick?: "a"\|"b"}` | → `ToolRun`. `keep` needs a result (`pick` defaults to the only option, `"a"`). Only in `review`. |
+| `POST /v1/tool-runs/{id}/pick` `{pick: "a"\|"b"}` | → `ToolRun`: keeps that option for every item that has it (whole set). |
+| `POST /v1/tool-runs/{id}/items/{slot}/retry` `{engine?: "a"\|"b"}` | → `ToolRun`. Runs that one image again (new seed) with its own hold → exact settle; the item goes `running`, then back to `done` with `decision: "pending"`. |
+| `POST /v1/tool-runs/{id}/apply` `{name?}` | → `{ run, model, outfit? }`. **Enhance:** kept images replace their sheet slots (`source: "generated"`); the sheet as it was is saved first as a `SheetVersion` (`reason: "enhance"`). **Dress up:** a NEW outfit on the model (`mode: "dressup"`, `state: "ready"`, `name` = the body's name, else the run's name, else "Dressed look"), `angles` = the kept front / ¾ / side / back, `faces` = the kept face / face ¾ / profile (`null` where rejected or missing); attached to the model. Needs at least one kept item (`bad_request`). |
+| `DELETE /v1/tool-runs/{id}` | 204. Discards the results (what ran was already paid for). A running run is stopped; images not made yet are released from the hold. |
+| `GET /v1/models/{id}/sheet-versions` | → `SheetVersion[]`, newest first (the last 10 are kept) |
+| `POST /v1/models/{id}/sheet-versions/{vid}/restore` | → `Model`. The current sheet is saved as a version (`reason: "restore"`) first. |
+
+SSE: `{ type: "tool", tool: ToolRun }` on every change (to the studio). `Outfit` gains `mode: "dressup"` and `faces?: (ImageRef|null)[3] /* face, face ¾, profile */`. A dress-up outfit works everywhere an outfit does: photoshoots use its `faces` as the face references (before the model's own), and video renders use them in place of the model's face shots (Replicate: face, profile, face ¾, then the outfit's front, ¾, back, side; Edit: face, profile, then the outfit's front, ¾, back), so the accessories match.
+
+### 7. Archive models (owner)
+| | |
+|---|---|
+| `POST /v1/models/{id}/archive` (owner) | → `Model` with `archived: true`, `archivedAt`. A `model` event follows (clients drop her from lists). |
+| `POST /v1/models/{id}/unarchive` (owner) | → `Model` (`archived: false`) |
+| `GET /v1/models` | leaves archived models out (everyone) |
+| `GET /v1/models?archived=true` (owner) | → only the archived ones (Settings → "Archived models"); members get `owner_only` |
+
+- Archived models vanish from every list and picker (Home, models, video studio, shoots, templates' model choice); `GET /v1/outfits` leaves out their outfits. Their outfits, photos, renders, posts and ledger rows stay untouched, and finished takes stay in the gallery.
+- New work on an archived model (jobs, shoots, outfit sets, fill-angles, LoRA, Enhance, Dress up) → `409 model_archived` ("This model is archived · restore her in Settings → Archived models").
+- `Model` gains `archived: boolean` (false when absent) and `archivedAt?`.
+
 ## Types
 
 ```ts
 ImageRef   { asset?: string, url?: string }          // asset = bundled sample key ("g_front"); url = loadable image (relative "/uploads/x" is resolved against the base)
 User       { id, studioName, email }
-SheetSlot  { key: "face"|"profile"|"front"|"tq"|"side"|"back", image: ImageRef|null, source: "upload"|"generated", busy: boolean }
-Model      { id, name, age (18–70), niche, look, neverAdd: string[], slots: SheetSlot[6], outfitIds: string[] }
+SheetSlot  { key: "face"|"profile"|"front"|"tq"|"side"|"back"|"faceTq" /* 2026-11-04 */, image: ImageRef|null, source: "upload"|"generated", busy: boolean }
+Model      { id, name, age (18–70), niche, look, neverAdd: string[], slots: SheetSlot[7] /* 6 before 2026-11-04, see "Model tools" §1 */, outfitIds: string[],
+             archived?: boolean, archivedAt?: number /* "Model tools" §7 */ }
            // locked = all 6 slots filled. Missing face close-ups are only a warning, and saving is always allowed.
-Outfit     { id, modelId, name, mode: "describe"|"photo"|"own", description, angles: (ImageRef|null)[4] /* front, ¾, side, back */,
+Outfit     { id, modelId, name, mode: "describe"|"photo"|"own"|"dressup", description, angles: (ImageRef|null)[4] /* front, ¾, side, back */,
+             faces?: (ImageRef|null)[3] /* dressup: face, face ¾, profile */,
              state: "generating"|"preview"|"ready", prompt }
 ClipMeta   { name, durationSec, width, height, fps, people?, watermark?, talking? }
 ClipCheck  { label, value, status: "good"|"bad"|"info", fix? }
@@ -226,7 +366,7 @@ Platform   "tiktok"|"instagram"|"facebook"|"youtube"|"x"
 Account    { modelId, platform: Platform, handle, connectedAt, canPostDirect: boolean /* false until that platform approves MUSE */ }
 Post       { id, modelId, takeId, title, thumb: ImageRef, platforms: Platform[], caption, aiLabel: boolean, paidPartnership: boolean,
              when: "now"|ISO time, state: "scheduled"|"handoff"|"posted"|"failed", createdAt, postedAt?, stats?: { views, likes, comments } }
-ApiEvent   { type: "job"|"balance"|"model"|"outfit"|"lora"|"post"|"wallet"|"gpu", job?, balance?, model?, outfit?, lora?, post?, takes?: Take[],
+ApiEvent   { type: "job"|"balance"|"model"|"outfit"|"lora"|"post"|"wallet"|"gpu"|"tool", job?, tool?: ToolRun, balance?, model?, outfit?, lora?, post?, takes?: Take[],
              wallet?: Wallet, notice?: { code: "provider_out_of_credit", engine?: "replicate"|"runpod", message } /* owners only */,
              gpu?: WarmGpu, event?: "state"|"tick"|"warning" /* gpu events only */, warning?: WarmWarning }
              // balance, wallet and gpu events go only to the user they concern (balance/wallet also to owners, whose pool moved too).
