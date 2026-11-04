@@ -270,7 +270,10 @@ struct MButton: View {
     }
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            Sounds.play(.tap)
+            action()
+        } label: {
             HStack(spacing: 8) {
                 if let icon { Image(systemName: icon).font(.system(size: size == .small ? 12 : 14, weight: .semibold)) }
                 Text(title)
@@ -394,7 +397,10 @@ struct Chip: View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         let bg: Color = on ? (t.isB || t.isC ? t.accent : t.isD ? t.yellow : t.ink) : t.surface
         let fg: Color = on ? (t.isB ? t.accentInk : t.isC ? .white : t.isD ? Color(hex: 0x111111) : t.bg) : t.ink
-        Button(action: action) {
+        Button {
+            Sounds.play(.tap)
+            action()
+        } label: {
             HStack(spacing: 6) {
                 if let icon { Image(systemName: icon).font(.system(size: 11, weight: .semibold)) }
                 Text(t.isA ? text.uppercased() : text)

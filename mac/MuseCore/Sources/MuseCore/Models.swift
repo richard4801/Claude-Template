@@ -112,7 +112,7 @@ public struct MuseModel: Codable, Hashable, Sendable, Identifiable {
     public var neverAdd: [String]
     public var slots: [SheetSlot]
     public var outfitIds: [String]
-    /// Desktop-only profile fields (not in plans/api.md yet; servers that don't know them ignore them).
+    /// Optional profile fields (plans/api.md: "Model also carries optional { personality, notes }").
     public var personality: String
     public var notes: String
 
@@ -156,6 +156,13 @@ public struct MuseModel: Codable, Hashable, Sendable, Identifiable {
 
     public var promptIdentity: PromptIdentity {
         PromptIdentity(name: name, look: look.isEmpty ? "\(age)-year-old woman" : look, referenceCount: max(1, filled), neverAdd: neverAdd)
+    }
+
+    /// The prompt identity with the model's Identity LoRA when it is trained and switched on.
+    public func promptIdentity(lora: Lora?) -> PromptIdentity {
+        var id = promptIdentity
+        id.lora = lora?.promptToken(modelName: name)
+        return id
     }
 }
 
@@ -562,7 +569,7 @@ public struct Balance: Codable, Hashable, Sendable {
     public var perJobLimit: Double
     public var perDayLimit: Double
     public var videos: Int
-    /// Spent today. Not in the Android type; nil when the server doesn't send it (the app then sums today's jobs).
+    /// Spent today (`Balance.today` in plans/api.md). nil when an older server doesn't send it; the app then sums today's jobs.
     public var today: Double?
 
     public init(balance: Double, month: Double, perJobLimit: Double = Pricing.perJobCap, perDayLimit: Double = Pricing.perDayCap, videos: Int = 0, today: Double? = nil) {
@@ -604,25 +611,30 @@ public struct FillAnglesResponse: Codable, Sendable {
     }
 }
 
-/// Server-sent event on /v1/events. type: job | balance | model | outfit
+/// Server-sent event on /v1/events. type: job | balance | model | outfit | lora | post
 public struct ApiEvent: Codable, Sendable {
     public var type: String
     public var job: Job?
     public var balance: Balance?
     public var model: MuseModel?
     public var outfit: Outfit?
+    public var lora: Lora?
+    public var post: Post?
     public var takes: [Take]
 
-    public init(type: String, job: Job? = nil, balance: Balance? = nil, model: MuseModel? = nil, outfit: Outfit? = nil, takes: [Take] = []) {
+    public init(type: String, job: Job? = nil, balance: Balance? = nil, model: MuseModel? = nil, outfit: Outfit? = nil, lora: Lora? = nil, post: Post? = nil,
+                takes: [Take] = []) {
         self.type = type
         self.job = job
         self.balance = balance
         self.model = model
         self.outfit = outfit
+        self.lora = lora
+        self.post = post
         self.takes = takes
     }
 
-    enum CodingKeys: String, CodingKey { case type, job, balance, model, outfit, takes }
+    enum CodingKeys: String, CodingKey { case type, job, balance, model, outfit, lora, post, takes }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         type = c.v(.type, "")
@@ -630,6 +642,8 @@ public struct ApiEvent: Codable, Sendable {
         balance = c.o(.balance)
         model = c.o(.model)
         outfit = c.o(.outfit)
+        lora = c.o(.lora)
+        post = c.o(.post)
         takes = c.v(.takes, [])
     }
 }

@@ -4,60 +4,71 @@ import MuseCore
 import UniformTypeIdentifiers
 import UserNotifications
 
-/// Native notifications when a mock job finishes or fails.
-final class Notifier: NSObject, UNUserNotificationCenterDelegate {
+/// Native notifications: finished and failed jobs, low balance, a trained LoRA, and scheduled posts.
+/// Every notification uses `UNNotificationSound.default`, also while MUSE is in front.
+final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     static let shared = Notifier()
     private var authorized = false
+    /// Called on the main actor when the user clicks a scheduled-post notification.
+    var onOpenPost: (@MainActor (String) -> Void)?
+
+    /// UNUserNotificationCenter needs a real app bundle (it crashes in a bare test host).
+    private var available: Bool { Bundle.main.bundleIdentifier != nil && Bundle.main.bundleURL.pathExtension == "app" }
 
     func requestAuthorization() {
-        // UNUserNotificationCenter needs a real app bundle (it crashes in a bare test host).
-        guard Bundle.main.bundleIdentifier != nil, Bundle.main.bundleURL.pathExtension == "app" else { return }
+        guard available else { return }
         let c = UNUserNotificationCenter.current()
         c.delegate = self
         c.requestAuthorization(options: [.alert, .sound, .badge]) { ok, _ in self.authorized = ok }
     }
 
     func post(title: String, body: String) {
-        guard Bundle.main.bundleURL.pathExtension == "app" else { return }
+        guard available else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
-        content.sound = .default
+        content.sound = UNNotificationSound.default
         let req = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(req)
     }
 
-    /// Show banners even while MUSE is the active app.
+    /// Stage 1 scheduling: a notification at the chosen time; clicking it opens the post handoff.
+    func schedulePost(id: String, title: String, body: String, at date: Date) {
+        guard available else { return }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = UNNotificationSound.default
+        content.userInfo = ["postId": id]
+        let trigger: UNNotificationTrigger
+        if date.timeIntervalSinceNow > 1 {
+            let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+            trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+        } else {
+            trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        }
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "post-\(id)", content: content, trigger: trigger))
+    }
+
+    func cancelPost(id: String) {
+        guard available else { return }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["post-\(id)"])
+    }
+
+    /// Show banners (with sound) even while MUSE is the active app.
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .sound])
+        completionHandler([.banner, .list, .sound])
     }
-}
 
-/// Small interface sounds, a different set per theme (system sounds; no audio files bundled).
-enum Sounds {
-    enum Kind { case tap, nav, go, done, tick, theme, error }
-    static var enabled = true
-    static var theme: ThemeID = .a
-
-    static func play(_ k: Kind) {
-        guard enabled else { return }
-        let name: String
-        switch (k, theme) {
-        case (.tap, _), (.tick, _): return // keep clicks silent; only meaningful moments make a sound
-        case (.nav, .b): name = "Tink"
-        case (.nav, _): return
-        case (.go, .a): name = "Pop"
-        case (.go, .b): name = "Morse"
-        case (.go, .c): name = "Bottle"
-        case (.go, .d): name = "Hero"
-        case (.done, .a), (.done, .c): name = "Glass"
-        case (.done, .b): name = "Ping"
-        case (.done, .d): name = "Funk"
-        case (.theme, _): name = "Submarine"
-        case (.error, _): name = "Basso"
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        if let id = response.notification.request.content.userInfo["postId"] as? String {
+            DispatchQueue.main.async {
+                NSApp.activate(ignoringOtherApps: true)
+                MainActor.assumeIsolated { self.onOpenPost?(id) }
+            }
         }
-        NSSound(named: NSSound.Name(name))?.play()
+        completionHandler()
     }
 }
 
@@ -181,6 +192,7 @@ extension AppStore {
         case 53: // Esc
             if paletteOpen { closePalette(); return true }
             if outfitSheet != nil { outfitSheet = nil; return true }
+            if postDraft != nil { postDraft = nil; return true }
             if comparing { comparing = false; return true }
             if toast != nil { toast = nil; return true }
             return false
@@ -193,7 +205,7 @@ extension AppStore {
             if paletteOpen && mods.isEmpty { runPalette(paletteIndex); return true }
             return false
         case 123, 124: // ← →
-            guard !typing, mods.isEmpty, user != nil, screen == .studio, engine == .h3, !paletteOpen, outfitSheet == nil else { return false }
+            guard !typing, mods.isEmpty, user != nil, screen == .studio, engine == .h3, !paletteOpen, outfitSheet == nil, postDraft == nil else { return false }
             setSteps(steps + (e.keyCode == 124 ? 1 : -1))
             return true
         default:

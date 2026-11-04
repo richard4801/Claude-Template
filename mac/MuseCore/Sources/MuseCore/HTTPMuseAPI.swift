@@ -154,12 +154,46 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
         return try decode(try await send(request("POST", "v1/uploads/clips", body: form.finish(), contentType: form.contentType)))
     }
 
+    public func updateModel(id: String, _ req: UpdateModelRequest) async throws -> MuseModel { try await call("PATCH", "v1/models/\(id)", req) }
+    public func deleteModel(id: String) async throws { _ = try await send(request("DELETE", "v1/models/\(id)")) }
+
+    // Identity LoRA
+    public func lora(modelId: String) async throws -> Lora { absolutize(try await call("GET", "v1/models/\(modelId)/lora")) }
+    public func buildLoraCandidates(modelId: String) async throws -> Lora { absolutize(try await call("POST", "v1/models/\(modelId)/lora/candidates", Empty())) }
+    public func setLoraCandidate(modelId: String, candidateId: String, keep: Bool) async throws -> Lora {
+        absolutize(try await call("PATCH", "v1/models/\(modelId)/lora/candidates/\(candidateId)", LoraCandidateRequest(keep: keep)))
+    }
+    public func trainLora(modelId: String) async throws -> Lora { absolutize(try await call("POST", "v1/models/\(modelId)/lora/train", Empty())) }
+    public func setLoraUse(modelId: String, use: Bool) async throws -> Lora { absolutize(try await call("PATCH", "v1/models/\(modelId)/lora", LoraUseRequest(use: use))) }
+
+    func absolutize(_ l: Lora) -> Lora {
+        var out = l
+        for i in out.candidates.indices { out.candidates[i].image = absolutize(out.candidates[i].image) }
+        return out
+    }
+
+    // Social accounts and posts
+    public func listAccounts(modelId: String) async throws -> [Account] { try await call("GET", "v1/models/\(modelId)/accounts") }
+    public func connectAccount(modelId: String, platform: Platform) async throws -> ConnectResult {
+        let data = try await send(request("POST", "v1/models/\(modelId)/accounts/\(platform.rawValue)/connect", body: try encoder.encode(Empty())))
+        do { return try ConnectResult.decode(data, decoder: decoder) } catch { throw ApiError("bad_response", "Unexpected reply from the server (connect)") }
+    }
+    public func disconnectAccount(modelId: String, platform: Platform) async throws {
+        _ = try await send(request("DELETE", "v1/models/\(modelId)/accounts/\(platform.rawValue)"))
+    }
+    public func listPosts(state: String?) async throws -> [Post] {
+        guard let state, let q = state.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return try await call("GET", "v1/posts") }
+        return try await call("GET", "v1/posts?state=\(q)")
+    }
+    public func createPost(_ req: CreatePostRequest) async throws -> Post { try await call("POST", "v1/posts", req) }
+    public func deletePost(id: String) async throws { _ = try await send(request("DELETE", "v1/posts/\(id)")) }
+
     public func listJobs() async throws -> [Job] { try await call("GET", "v1/jobs") }
     public func createJob(_ req: JobRequest) async throws -> Job { try await call("POST", "v1/jobs", req) }
     public func removeJob(id: String) async throws { _ = try await send(request("DELETE", "v1/jobs/\(id)")) }
 
     public func runQueue() async throws {
-        // Not in the Android contract; the mock server starts jobs on its own. Ignore a 404.
+        // In plans/api.md since 2026-11-04. Older servers start jobs on their own and answer 404, which is ignored.
         do { _ = try await send(request("POST", "v1/queue/run", body: try encoder.encode(Empty()))) } catch let e as ApiError where e.code == "http_404" || e.code == "not_found" {}
     }
 
@@ -211,7 +245,8 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
         var line = [UInt8]()
         for try await b in bytes {
             if b == 0x0A {
-                if let payload = parser.feed(String(decoding: line, as: UTF8.self)), let d = payload.data(using: .utf8), let e = try? decoder.decode(ApiEvent.self, from: d) {
+                if let payload = parser.feed(String(decoding: line, as: UTF8.self)), let d = payload.data(using: .utf8), var e = try? decoder.decode(ApiEvent.self, from: d) {
+                    if let l = e.lora { e.lora = absolutize(l) }
                     yield(e)
                 }
                 line.removeAll(keepingCapacity: true)

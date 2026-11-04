@@ -247,10 +247,13 @@ extension AppStore {
         }
     }
 
-    /// Mock export: no real render exists, so this confirms the export settings only.
+    /// Saves the take to ~/Downloads/MUSE. No label is added: labels are the user's choice when posting (plans/socials.md).
     func export(_ t: Take) {
         Sounds.play(.go)
-        showToast("Exported 1080×1920 with the AI-generated label")
+        let file = exportFile(t)
+        showToast("Exported 1080×1920", action: file == nil ? nil : "Show in Finder") {
+            if let file { NSWorkspace.shared.activateFileViewerSelecting([file]) }
+        }
     }
 
     func retake(_ t: Take) {
@@ -362,14 +365,14 @@ extension AppStore {
         guard !v.isEmpty else { return }
         var list = neverList(m)
         if !list.contains(v) { list.append(v) }
-        neverOverrides[m.id] = list
+        saveNeverList(m, list)
     }
 
     func removeNever(_ m: MuseModel, at i: Int) {
         var list = neverList(m)
         guard list.indices.contains(i) else { return }
         list.remove(at: i)
-        neverOverrides[m.id] = list
+        saveNeverList(m, list)
     }
 
     func duplicate(_ m: MuseModel) {
@@ -644,6 +647,11 @@ extension AppStore {
             PaletteCommand(title: "Models", icon: "person", shortcut: "⌘2") { [weak self] in self?.go(.models) },
             PaletteCommand(title: "Queue", icon: "list.bullet.below.rectangle", shortcut: "⌘5") { [weak self] in self?.go(.queue) },
             PaletteCommand(title: "Gallery", icon: "square.grid.2x2", shortcut: "⌘6") { [weak self] in self?.go(.gallery) },
+            PaletteCommand(title: "Posts", icon: "paperplane", shortcut: "⌘7") { [weak self] in self?.go(.posts) },
+            PaletteCommand(title: "Identity LoRA", icon: "sparkles", shortcut: "") { [weak self] in
+                guard let self, let m = self.profileModel ?? self.currentModel else { return }
+                self.openLora(m.id)
+            },
             PaletteCommand(title: "Settings", icon: "slider.horizontal.3", shortcut: "⌘,") { [weak self] in self?.go(.settings) },
             PaletteCommand(title: "Credits & top up", icon: "creditcard", shortcut: "") { [weak self] in self?.go(.credits) },
             PaletteCommand(title: "New outfit set", icon: "tshirt", shortcut: "") { [weak self] in self?.openOutfitSheet(for: nil) },

@@ -122,11 +122,12 @@ struct ProfileView: View {
                 }
                 MoreMenu {
                     Button("Edit character sheet") { store.uploadSheet(m) }
+                    Button("Identity LoRA") { store.openLora(m.id) }
                     Button("Add outfit") { store.openOutfitSheet(for: m.id) }
                     Button("Duplicate model") { store.duplicate(m) }
                     Button("Share profile card") { store.shareProfileCard(m) }
                     Divider()
-                    Button("Delete model", role: .destructive) { store.showToast("Deleting models isn't in the API yet") }
+                    Button("Delete model…", role: .destructive) { store.deleteModel(m) }
                 }
             }
             VStack(alignment: .leading, spacing: 8) {
@@ -167,6 +168,11 @@ struct ProfileView: View {
                     .padding(.top, 14)
             }
 
+            VStack(alignment: .leading, spacing: 0) {
+                ProfileLoraCard(model: m)
+                ProfileAccounts(model: m)
+            }
+
             SectionHeader(title: "Outfits") {
                 MButton("Add outfit", icon: "plus", size: .small) { store.openOutfitSheet(for: m.id) }
             }
@@ -191,6 +197,7 @@ struct ProfileView: View {
                 }
             }
 
+            VStack(alignment: .leading, spacing: 0) {
             SectionHeader(title: "Never add") { Muted("Removed from every render automatically") }
             FlowLayout(spacing: 8) {
                 ForEach(Array(store.neverList(m).enumerated()), id: \.offset) { i, item in
@@ -211,6 +218,7 @@ struct ProfileView: View {
                 } else {
                     Chip("Add", icon: "plus") { addingNever = true }
                 }
+            }
             }
         }
     }

@@ -20,15 +20,22 @@ public actor FakeMuseAPI: MuseAPI {
     private var held = true
     private var runner: Task<Void, Never>?
     private var runningId: String?
+    private let loraSeconds: Double
+    private var loras: [String: Lora] = [:]
+    private var loraTasks: [String: Task<Void, Never>] = [:]
+    private var accounts: [String: [Account]] = [:]
+    private var posts: [Post] = []
 
     /// - Parameters:
     ///   - speed: simulation speed; 0 freezes the queue (tests).
     ///   - genDelay: seconds a generation (shoot, outfit, fill angles) takes.
     ///   - storeDir: where uploaded images are copied. nil keeps them in memory as data URLs.
-    public init(speed: Double = demoSpeed, genDelay: Double = 1.6, storeDir: URL? = nil) {
+    ///   - loraSeconds: how long LoRA training takes in the demo (~100 min of GPU time; the prototype runs it 120× faster).
+    public init(speed: Double = demoSpeed, genDelay: Double = 1.6, storeDir: URL? = nil, loraSeconds: Double = 50) {
         self.speed = speed
         self.genDelay = genDelay
         self.storeDir = storeDir
+        self.loraSeconds = loraSeconds
         let now = nowMs()
         jobs = SampleData.jobs(now: now)
         takes = SampleData.takes(now: now)
@@ -110,6 +117,214 @@ public actor FakeMuseAPI: MuseAPI {
         hub.emit(ApiEvent(type: "model", model: m))
     }
 
+    public func updateModel(id: String, _ req: UpdateModelRequest) throws -> MuseModel {
+        var m = try model(id)
+        if let v = req.name?.trimmingCharacters(in: .whitespaces), !v.isEmpty { m.name = v }
+        if let v = req.niche { m.niche = v }
+        if let v = req.personality { m.personality = v }
+        if let v = req.notes { m.notes = v }
+        if let v = req.neverAdd { m.neverAdd = v.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }
+        replace(m)
+        hub.emit(ApiEvent(type: "model", model: m))
+        return m
+    }
+
+    /// Deletes the model with its outfits, LoRAs, training set and accounts.
+    public func deleteModel(id: String) throws {
+        _ = try model(id)
+        models.removeAll { $0.id == id }
+        outfits.removeAll { $0.modelId == id }
+        loraTasks[id]?.cancel()
+        loraTasks[id] = nil
+        loras[id] = nil
+        accounts[id] = nil
+        posts.removeAll { $0.modelId == id && $0.isScheduled }
+    }
+
+    // MARK: Identity LoRA
+
+    /// The demo pool of training shots (the prototype's CAND_POOL) and which ones get flagged.
+    static let candidatePool: [(String, String)] = [
+        ("g_front", "Green set · front"), ("g_tq", "Green set · ¾"), ("face", "Close-up · window light"), ("c_front", "Crystal dress · full"),
+        ("g_side", "Green set · side"), ("profile", "Profile · soft light"), ("c_tq", "Crystal · ¾"), ("g_back", "Back · physique"),
+        ("hero", "Portrait · golden hour"), ("c_face", "Close-up · choker"),
+    ]
+    static let candidateFlags: [Int: String] = [4: "tattoo", 9: "choker", 16: "ring", 23: "face drift"]
+
+    public func lora(modelId: String) throws -> Lora {
+        _ = try model(modelId)
+        return loras[modelId] ?? Lora(modelId: modelId)
+    }
+
+    public func buildLoraCandidates(modelId: String) throws -> Lora {
+        let m = try model(modelId)
+        var l = loras[modelId] ?? Lora(modelId: modelId)
+        if l.isBusy { throw ApiError("bad_request", "The LoRA is busy · wait for it to finish") }
+        if m.filled == 0 { throw ApiError("bad_request", "Add character-sheet shots first") }
+        let cost = LoraPricing.setCost
+        if cost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough balance · top up in Credits") }
+        charge(cost)
+        hub.emit(ApiEvent(type: "balance", balance: bal))
+        l.state = "building"
+        l.candidates = []
+        l.progress = 0
+        l.cost = cost
+        loras[modelId] = l
+        hub.emit(ApiEvent(type: "lora", lora: l))
+        let delay = genDelay + 0.2
+        loraTasks[modelId]?.cancel()
+        loraTasks[modelId] = Task {
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            if Task.isCancelled { return }
+            self.finishCandidates(modelId)
+        }
+        return l
+    }
+
+    private func finishCandidates(_ modelId: String) {
+        guard var l = loras[modelId], l.state == "building" else { return }
+        let round = shortId().prefix(4)
+        l.candidates = (0..<LoraPricing.candidates).map { i in
+            let (k, label) = Self.candidatePool[i % Self.candidatePool.count]
+            return LoraCandidate(id: "lc_\(round)_\(i + 1)", image: .asset(k), label: label, flag: Self.candidateFlags[i])
+        }
+        l.state = "review"
+        loras[modelId] = l
+        loraTasks[modelId] = nil
+        hub.emit(ApiEvent(type: "lora", lora: l))
+    }
+
+    public func setLoraCandidate(modelId: String, candidateId: String, keep: Bool) throws -> Lora {
+        guard var l = loras[modelId], let i = l.candidates.firstIndex(where: { $0.id == candidateId }) else { throw ApiError("not_found", "Shot not found") }
+        if l.state != "review" { throw ApiError("bad_request", "The training set can only change while you review it") }
+        l.candidates[i].keep = keep
+        loras[modelId] = l
+        return l
+    }
+
+    public func trainLora(modelId: String) throws -> Lora {
+        guard var l = loras[modelId], l.state == "review" else { throw ApiError("bad_request", "Build and review the training set first") }
+        if l.kept < LoraPricing.minKept { throw ApiError("bad_request", "Keep at least \(LoraPricing.minKept) shots to train") }
+        let cost = LoraPricing.trainCost
+        if cost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough balance to train · top up in Credits") }
+        charge(cost)
+        hub.emit(ApiEvent(type: "balance", balance: bal))
+        l.state = "training"
+        l.progress = 0
+        l.photo = LoraPart(state: "training", progress: 0)
+        l.video = LoraPart(state: "queued", progress: 0)
+        l.cost += cost
+        loras[modelId] = l
+        hub.emit(ApiEvent(type: "lora", lora: l))
+        loraTasks[modelId]?.cancel()
+        loraTasks[modelId] = Task { await self.driveTraining(modelId) }
+        return l
+    }
+
+    private func driveTraining(_ modelId: String) async {
+        let t0 = Date()
+        let total = max(0.05, loraSeconds)
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: UInt64(min(0.3, total / 20) * 1_000_000_000))
+            if Task.isCancelled { return }
+            guard var l = loras[modelId], l.state == "training" else { return }
+            let p = min(100, Date().timeIntervalSince(t0) / total * 100)
+            l.progress = p
+            l.photo = LoraPart(state: p >= 25 ? "ready" : "training", progress: LoraPricing.photoProgress(p))
+            l.video = LoraPart(state: p >= 100 ? "ready" : p >= 25 ? "training" : "queued", progress: LoraPricing.videoProgress(p))
+            if p >= 100 {
+                l.state = "ready"
+                l.version += 1
+                l.use = true
+                l.trainedOn = l.kept
+            }
+            loras[modelId] = l
+            hub.emit(ApiEvent(type: "lora", lora: l))
+            if p >= 100 { break }
+        }
+        loraTasks[modelId] = nil
+    }
+
+    public func setLoraUse(modelId: String, use: Bool) throws -> Lora {
+        _ = try model(modelId)
+        var l = loras[modelId] ?? Lora(modelId: modelId)
+        l.use = use
+        loras[modelId] = l
+        return l
+    }
+
+    // MARK: Social accounts and posts
+
+    public func listAccounts(modelId: String) throws -> [Account] {
+        _ = try model(modelId)
+        return accounts[modelId] ?? []
+    }
+
+    /// The mock connects at once (no OAuth) and returns the account.
+    public func connectAccount(modelId: String, platform: Platform) throws -> ConnectResult {
+        let m = try model(modelId)
+        let handle: String
+        switch platform {
+        case .youtube: handle = m.name
+        case .facebook: handle = "\(m.name) (Page)"
+        default: handle = "@" + m.name.lowercased().split(separator: " ").joined(separator: ".")
+        }
+        let a = Account(modelId: modelId, platform: platform, handle: handle, connectedAt: nowMs(), canPostDirect: false)
+        var list = accounts[modelId] ?? []
+        list.removeAll { $0.platform == platform }
+        list.append(a)
+        accounts[modelId] = list.sorted { Platform.allCases.firstIndex(of: $0.platform)! < Platform.allCases.firstIndex(of: $1.platform)! }
+        return .connected(a)
+    }
+
+    public func disconnectAccount(modelId: String, platform: Platform) {
+        accounts[modelId]?.removeAll { $0.platform == platform }
+    }
+
+    public func listPosts(state: String?) -> [Post] {
+        promoteDuePosts()
+        return state.map { s in posts.filter { $0.state == s } } ?? posts
+    }
+
+    public func createPost(_ req: CreatePostRequest) throws -> Post {
+        _ = try model(req.modelId)
+        if req.platforms.isEmpty { throw ApiError("bad_request", "Pick at least one account") }
+        let connected = Set((accounts[req.modelId] ?? []).map(\.platform))
+        if let missing = req.platforms.first(where: { !connected.contains($0) }) { throw ApiError("bad_request", "Connect \(missing.label) first") }
+        guard takes.contains(where: { $0.id == req.takeId }) else { throw ApiError("not_found", "Take not found") }
+        let scheduled = req.when != "now"
+        if scheduled && PostTime.parse(req.when) == nil { throw ApiError("bad_request", "Pick a time to post") }
+        let id = "p_" + shortId()
+        // Stage 1: nothing is published by MUSE. "now" hands off to each app; the labels are stored exactly as the user set them.
+        let p = Post(id: id, modelId: req.modelId, takeId: req.takeId, platforms: req.platforms, caption: req.caption, aiLabel: req.aiLabel,
+                     paidPartnership: req.paidPartnership, when: req.when, state: scheduled ? "scheduled" : "handoff", stats: scheduled ? nil : Self.demoStats(id))
+        posts.insert(p, at: 0)
+        hub.emit(ApiEvent(type: "post", post: p))
+        return p
+    }
+
+    public func deletePost(id: String) { posts.removeAll { $0.id == id } }
+
+    /// Scheduled posts whose time has come move to `handoff` (stage 1: the app opens each platform for the user).
+    private func promoteDuePosts() {
+        let now = Date()
+        for i in posts.indices where posts[i].isScheduled {
+            if let d = posts[i].scheduledDate, d <= now {
+                posts[i].state = "handoff"
+                posts[i].stats = Self.demoStats(posts[i].id)
+                hub.emit(ApiEvent(type: "post", post: posts[i]))
+            }
+        }
+    }
+
+    /// Plausible demo numbers, stable per post.
+    static func demoStats(_ id: String) -> PostStats {
+        var h: UInt32 = 2166136261
+        for b in id.utf8 { h = (h ^ UInt32(b)) &* 16777619 }
+        let views = 1240 + Int(h % 900)
+        return PostStats(views: views, likes: views * 11 / 100, comments: views * 8 / 1000)
+    }
+
     // MARK: Outfits
 
     public func listOutfits() -> [Outfit] { outfits }
@@ -121,7 +336,7 @@ public actor FakeMuseAPI: MuseAPI {
         charge(cost)
         let name = req.name.trimmingCharacters(in: .whitespaces)
         let label = name.isEmpty ? (req.description.isEmpty ? "New outfit" : String(req.description.prefix(28))) : name
-        let prompt = PromptEngine.outfitAngle(identity: m.promptIdentity, outfit: req.description.isEmpty ? label : req.description,
+        let prompt = PromptEngine.outfitAngle(identity: m.promptIdentity(lora: loras[m.id]), outfit: req.description.isEmpty ? label : req.description,
                                               mode: OutfitMode(rawValue: req.mode) ?? .describe, angle: "Front")
         let o = Outfit(id: "o_" + shortId(), modelId: req.modelId, name: label, mode: req.mode, description: req.description, state: "generating", prompt: prompt)
         outfits.append(o)
@@ -191,7 +406,7 @@ public actor FakeMuseAPI: MuseAPI {
         let m = try model(req.modelId)
         let o = outfits.first { $0.id == req.outfitId }
         let seed = Int64.random(in: 1000...99999)
-        let prompt = PromptEngine.video(VideoPromptInput(identity: m.promptIdentity, outfitName: o?.name ?? "outfit",
+        let prompt = PromptEngine.video(VideoPromptInput(identity: m.promptIdentity(lora: loras[m.id]), outfitName: o?.name ?? "outfit",
                                                          performer: req.clipId == SampleData.sampleClip ? .sample : .generic,
                                                          keepBackground: req.background == "keep", backgroundMotion: req.backgroundMotion,
                                                          keepAudio: req.keepAudio, spec: spec))

@@ -224,6 +224,7 @@ struct GalleryTile: View {
         .contextMenu {
             Button(picked ? "Deselect" : "Select to compare") { store.togglePick(take.id) }
             Button(take.isFinal ? "Move back to Tests" : "Approve") { take.isFinal ? store.unapprove(take) : store.approve(take) }
+            Button("Post…") { store.openPostSheet(take) }
             Divider()
             Button("Delete take", role: .destructive) { store.discard(take) }
         }
@@ -289,7 +290,9 @@ struct ResultView: View {
                                 Spacer()
                                 Pill(take.isFinal ? "Final" : "Test", take.isFinal ? .good : .neutral)
                                 MoreMenu {
+                                    Button("Post…") { store.openPostSheet(take) }
                                     Button("Download") { store.export(take) }
+                                    Button("Share…") { store.share(take) }
                                     Button("Copy prompt") { store.copy(take.prompt.isEmpty ? (job?.prompt ?? "") : take.prompt) }
                                     Button("Compare takes") { store.compareFromResult() }
                                     Button("Report a problem") { store.showToast("Thanks, we'll look at this take") }
@@ -318,11 +321,17 @@ struct ResultView: View {
                                 MButton("Retake with changes", icon: "arrow.triangle.2.circlepath", fill: true) { store.retake(take) }
                                 MButton("Export 1080×1920", icon: "square.and.arrow.up", fill: true) { store.export(take) }
                             }
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Image(systemName: "checkmark.shield").font(.system(size: 12))
-                                Text("Exports carry the AI-generated label. Brand posts also need #ad.").font(t.body(12))
+                            let who = store.model(for: take)?.shortName ?? "her"
+                            MButton("Post to \(who)'s accounts", icon: "paperplane", kind: .primary, fill: true) { store.openPostSheet(take) }
+                            if let posted = store.posts(for: take).first(where: \.isOut) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Lbl(posted.state == "posted" ? "Posted" : "Handed off")
+                                    HStack(spacing: 6) { ForEach(posted.platforms) { PlatformBadge(platform: $0, size: 20) } }
+                                    if let s = posted.stats { Text(s.line).font(t.mono(12)) }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .card(14)
                             }
-                            .foregroundStyle(t.muted)
                         }
                         .frame(width: 380)
                         Spacer(minLength: 0)

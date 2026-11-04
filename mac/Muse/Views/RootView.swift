@@ -15,6 +15,7 @@ struct RootView: View {
                 Shell()
             }
             if store.outfitSheet != nil { OutfitSheetView().transition(.opacity) }
+            if store.postDraft != nil { PostSheetView().transition(.opacity) }
             if store.paletteOpen { PaletteView().transition(.opacity) }
             ToastView()
         }
@@ -73,6 +74,8 @@ struct Shell: View {
         case .result: ResultView()
         case .settings: SettingsView()
         case .credits: CreditsView()
+        case .lora: LoraView()
+        case .posts: PostsView()
         }
     }
 }
@@ -162,6 +165,7 @@ struct TitleBar: View {
                 ThemeDots()
                 IconButton(systemName: store.sound ? "speaker.wave.2" : "speaker.slash", help: "Sound") {
                     store.sound.toggle()
+                    Sounds.play(.tap)
                     store.showToast("Sound \(store.sound ? "on" : "off")")
                 }
                 Menu {

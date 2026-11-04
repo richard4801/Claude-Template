@@ -6,12 +6,16 @@ public struct PromptIdentity: Equatable, Sendable {
     public var look: String
     public var referenceCount: Int
     public var neverAdd: [String]
+    /// The Identity LoRA trigger token ("sienna_v1") when the model's LoRA is trained and switched on (plans/lora-training.md).
+    /// Photo prompts name the photo LoRA, the H3 prompt names the video LoRA. nil means references only.
+    public var lora: String?
 
-    public init(name: String, look: String, referenceCount: Int = 6, neverAdd: [String] = []) {
+    public init(name: String, look: String, referenceCount: Int = 6, neverAdd: [String] = [], lora: String? = nil) {
         self.name = name
         self.look = look
         self.referenceCount = referenceCount
         self.neverAdd = neverAdd
+        self.lora = lora
     }
 }
 
@@ -111,7 +115,8 @@ public enum PromptEngine {
 
     static func identityLine(_ id: PromptIdentity) -> String {
         let n = id.referenceCount
-        let refs = n == 1 ? "1 locked reference image" : "\(n) locked reference images"
+        var refs = n == 1 ? "1 locked reference image" : "\(n) locked reference images"
+        if let lora = id.lora { refs += " + LoRA \(lora) (photo)" }
         let look = id.look.trimmingCharacters(in: .whitespaces)
         return look.isEmpty ? "\(id.name). Identity from \(refs)." : "\(id.name): \(look). Identity from \(refs)."
     }
@@ -150,7 +155,8 @@ public enum PromptEngine {
     /// The structured MiniMax H3 Ref2VA prompt shown in the video studio (pro mode / "Show the prompt").
     public static func video(_ v: VideoPromptInput) -> String {
         let id = v.identity
-        let refs = id.referenceCount == 1 ? "reference image 1" : "reference images 1–\(id.referenceCount)"
+        var refs = id.referenceCount == 1 ? "reference image 1" : "reference images 1–\(id.referenceCount)"
+        if let lora = id.lora { refs += ", LoRA \(lora) video" }
         let look = id.look.trimmingCharacters(in: .whitespaces)
         let target = look.isEmpty ? id.name : "\(id.name), \(look)"
         let never = id.neverAdd.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }

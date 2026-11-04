@@ -4,12 +4,12 @@ import Observation
 import SwiftUI
 
 enum Screen: String, CaseIterable {
-    case home, models, profile, create, studio, shoot, queue, gallery, result, settings, credits
+    case home, models, profile, create, studio, shoot, queue, gallery, result, settings, credits, lora, posts
 
     /// Which sidebar item is highlighted.
     var navParent: Screen {
         switch self {
-        case .profile, .create: return .models
+        case .profile, .create, .lora: return .models
         case .result: return .gallery
         case .credits: return .settings
         default: return self
@@ -31,6 +31,7 @@ struct NavItem: Identifiable {
         NavItem(screen: .shoot, title: "Photoshoot", icon: "camera", key: "4"),
         NavItem(screen: .queue, title: "Queue", icon: "list.bullet.below.rectangle", key: "5"),
         NavItem(screen: .gallery, title: "Gallery", icon: "square.grid.2x2", key: "6"),
+        NavItem(screen: .posts, title: "Posts", icon: "paperplane", key: "7"),
     ]
 }
 
@@ -54,6 +55,21 @@ enum SettingsSection: String, CaseIterable {
         case .about: return "About"
         }
     }
+}
+
+enum PostTab: Hashable { case scheduled, posted }
+
+/// The Post sheet (Result → Post). Both labels start off and only the user turns them on.
+struct PostDraft {
+    var takeId: String
+    var modelId: String
+    var platforms: [Platform]
+    var caption = ""
+    var aiLabel = false
+    var paidPartnership = false
+    var schedule = false
+    var when: Date
+    var busy = false
 }
 
 struct Toast: Identifiable {
@@ -122,7 +138,7 @@ final class AppStore {
     var warnOverBudget: Bool { didSet { defaults.set(warnOverBudget, forKey: "muse.warnBudget") } }
     var dataSource: DataSource { didSet { defaults.set(dataSource.rawValue, forKey: "muse.dataSource") } }
     var baseURL: String { didSet { defaults.set(baseURL, forKey: "muse.baseURL") } }
-    /// Never-add lists edited on the profile. plans/api.md has no endpoint to update a model yet, so edits are kept on this Mac.
+    /// Never-add edits not yet saved on the server (PATCH /v1/models/{id}); kept on this Mac when an older server doesn't have the endpoint.
     var neverOverrides: [String: [String]] { didSet { defaults.set(neverOverrides, forKey: "muse.never") } }
 
     var theme: Theme { Theme.get(themeID) }
@@ -162,6 +178,18 @@ final class AppStore {
     var takes: [Take] = []
     var balance = Balance(balance: 0, month: 0)
     var hiddenFailures: Set<String> = []
+    /// Identity LoRA per model id.
+    var loras: [String: Lora] = [:]
+    /// Connected social accounts per model id.
+    var accounts: [String: [Account]] = [:]
+    var posts: [Post] = []
+    /// "modelId/platform" while its sign-in runs.
+    var connecting: Set<String> = []
+
+    // MARK: Posts
+
+    var postTab: PostTab = .scheduled
+    var postDraft: PostDraft?
 
     // MARK: Video studio
 
@@ -241,6 +269,7 @@ final class AppStore {
     func bootstrap() {
         api = makeAPI()
         Notifier.shared.requestAuthorization()
+        Notifier.shared.onOpenPost = { [weak self] id in self?.openScheduledPost(id) }
         if user != nil { Task { await connect() } }
     }
 
@@ -293,6 +322,7 @@ final class AppStore {
             if !models.contains(where: { $0.id == modelId }), let first = models.first(where: { !$0.isDraft }) ?? models.first { modelId = first.id }
             if !models.contains(where: { $0.id == profileModelId }), let first = models.first { profileModelId = first.id }
             if clip == nil { await useSampleClip(bad: false, quiet: true) }
+            await loadSocial()
         } catch {
             offlineMessage = (error as? ApiError)?.message ?? error.localizedDescription
         }
@@ -337,6 +367,10 @@ final class AppStore {
         if let m = e.model {
             if let i = models.firstIndex(where: { $0.id == m.id }) { models[i] = m } else { models.append(m) }
             syncDraftSlots(from: m)
+        }
+        if let l = e.lora { applyLora(l) }
+        if let p = e.post {
+            if let i = posts.firstIndex(where: { $0.id == p.id }) { posts[i] = p } else { posts.insert(p, at: 0) }
         }
         if let o = e.outfit {
             if let i = outfits.firstIndex(where: { $0.id == o.id }) { outfits[i] = o } else { outfits.append(o) }
@@ -433,8 +467,8 @@ final class AppStore {
 
     func setTheme(_ id: ThemeID) {
         guard id != themeID else { return }
-        Sounds.play(.theme)
         withAnimation(.easeOut(duration: 0.35)) { themeID = id }
+        Sounds.play(.theme) // the new theme's sound
     }
 
     func showToast(_ message: String, action: String? = nil, perform: (() -> Void)? = nil) {
@@ -474,7 +508,7 @@ final class AppStore {
 
     func identity(_ m: MuseModel?) -> PromptIdentity {
         guard let m else { return PromptIdentity(name: "Model", look: "") }
-        var id = m.promptIdentity
+        var id = m.promptIdentity(lora: loras[m.id])
         id.neverAdd = neverList(m)
         return id
     }
