@@ -21,11 +21,11 @@ describe('pricing (android/core pricing_fixture.json, generated from prototype/a
       expect(P.sourceOption(o.use, o.steps)).toBe(o.sourceOption);
     }
   });
-  it('fixed prices and LoRA', () => {
+  it('prices and LoRA', () => {
     expect(P.money(P.estCost({}))).toBe('$0.67');
     expect(P.genLabel({ takes: 3 })).toBe('Generate · 30 min · $2.02 · 3 takes');
     expect(P.money(P.loraTrainCost())).toBe('$6.65');
-    expect(P.money(P.fillAnglesCost(3))).toBe('$0.06');
+    expect(P.aboutMoney(P.sheetAnglesEstimate({ perRun: 0.015, perInputMp: 0.015, perOutputMp: 0.015, perEdit: 0.03, refMp: 0.79, maxRefs: 6 }, 1, 6))).toBe('about $0.10');
     expect(P.videosLeft(6.07)).toBe(9);
     expect(P.lengthSec({ use: 'full', clipSeconds: 22 })).toBe(15);
     expect(P.lengthSec({ use: 'first', clipSeconds: 3 })).toBe(3);

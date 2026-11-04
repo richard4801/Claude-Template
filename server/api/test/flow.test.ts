@@ -16,7 +16,7 @@ describe('simulated studio flow (dev seed, like server/mock)', () => {
 
   it('seed data matches the mock', async () => {
     const b = (await api('GET', '/v1/balance')).body;
-    expect(b).toMatchObject({ balance: 6.07, today: 0.13, perJobLimit: 5, videos: 9, balanceSource: 'simulated' });
+    expect(b).toMatchObject({ balance: 6.07, today: 0.13, perJobLimit: 5, videos: 9, balanceSource: 'studio', studioBalance: 6.07, needsFirstTopUp: false });
     expect((await api('GET', '/v1/models')).body.map((m: any) => m.name)).toEqual(['Sienna Vale', 'Noor Ellis']);
     expect((await api('GET', '/v1/takes')).body.length).toBe(6);
   });
@@ -30,10 +30,12 @@ describe('simulated studio flow (dev seed, like server/mock)', () => {
     expect((await api('GET', '/v1/balance')).body.balance).toBeCloseTo(before - 1.35, 6);
     await until(() => es.events.some(e => e.job?.id === job.id && e.job.state === 'done'));
     await es.stop();
-    expect(es.events.some(e => e.job?.id === job.id && /step \d+\/10/.test(e.job.phase))).toBe(true);
+    expect(es.events.some(e => e.job?.id === job.id && /^take \d\/2 · Rendering · ~/.test(e.job.phase))).toBe(true);
+    // Member-facing phases never mention steps, GPUs or start-up.
+    expect(es.events.filter(e => e.job?.id === job.id).every(e => !/step|gpu|warm|start-up/i.test(e.job.phase))).toBe(true);
     const done = es.events.find(e => e.job?.id === job.id && e.job.state === 'done');
     expect(done.takes.length).toBe(2);
-    expect(done.takes[0]).toMatchObject({ kind: 'take', jobId: job.id, label: '10 steps', engineLabel: 'Exact edit · 10 steps', status: 'test' });
+    expect(done.takes[0]).toMatchObject({ kind: 'take', jobId: job.id, label: 'Edit', engineLabel: 'Edit', status: 'test' });
     expect(es.events.some(e => e.type === 'balance')).toBe(true);
     expect(es.events.some(e => e.type === 'wallet')).toBe(true);
     expect(job.prompt).toContain('<Image 1> (face, front)');
@@ -65,7 +67,7 @@ describe('simulated studio flow (dev seed, like server/mock)', () => {
     const m = (await api('POST', '/v1/models', { name: 'Mac', age: 30, niche: 'Tech' })).body;
     expect(m.slots.length).toBe(6);
     const fill = (await api('POST', `/v1/models/${m.id}/fill-angles`)).body;
-    expect(fill.cost).toBeCloseTo(0.12, 9);
+    expect(fill.cost).toBeCloseTo(6 * (0.015 + 0.015), 9); // 6 angles, no references yet: the estimate held
     expect(fill.model.slots.every((s: any) => s.busy)).toBe(true);
     await until(async () => (await api('GET', '/v1/models')).body.find((x: any) => x.id === m.id).slots.every((s: any) => s.image && s.source === 'generated'));
     const o = (await api('POST', '/v1/outfits', { modelId: 'm_sienna', name: 'Cream knit', mode: 'describe', description: 'Cream cable-knit sweater' })).body;
@@ -126,6 +128,17 @@ describe('simulated studio flow (dev seed, like server/mock)', () => {
     expect((await api('DELETE', '/v1/models/m_noor')).status).toBe(204);
     expect((await api('GET', '/v1/models/m_noor/lora')).status).toBe(404);
     expect((await api('GET', '/v1/models/m_noor/accounts')).status).toBe(404);
+  });
+
+  it('Upscale is in the contract but coming soon; Edit takes keep their labels', async () => {
+    const r = await api('POST', '/v1/takes/t_j1/upscale', { size: '2k' });
+    expect(r.status).toBe(409);
+    expect(r.body).toEqual({ code: 'upscale_unavailable', error: 'Upscale is coming soon' });
+    expect((await api('POST', '/v1/takes/t_j1/upscale', { size: '8k' })).status).toBe(400);
+    expect((await api('POST', '/v1/takes/t_g4/upscale', { size: '4k' })).status).toBe(400); // a photo, not a render
+    expect((await api('POST', '/v1/takes/nope/upscale', { size: '4k' })).status).toBe(404);
+    const up = (await api('GET', '/v1/settings/studio')).body.features.video.addons.find((x: any) => x.id === 'upscale');
+    expect(up).toMatchObject({ label: 'Upscale', available: false, comingSoon: true });
   });
 
   it('dev reset restores the seed; uploads round-trip', async () => {

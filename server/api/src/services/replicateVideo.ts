@@ -13,35 +13,39 @@ import { and, eq } from 'drizzle-orm';
 import type { Ctx } from '../ctx.js';
 import { clips, jobs, type ImageRef } from '../db/schema.js';
 import * as P from '../pricing.js';
-import { outputUrl, ReplicateError, SAFETY_RE, errorText, type Prediction } from '../replicate/client.js';
+import { outputUrl, ReplicateError, SAFETY_RE, CREDIT_RE, errorText, type Prediction } from '../replicate/client.js';
+import { OUT_OF_CREDIT } from '../images/service.js';
+import { SOMETHING_WENT_WRONG } from './jobs.js';
 import { finishTake, mediaToolsAvailable, padTo, probe, thumbnail } from '../replicate/media.js';
 import { putFile } from '../storage/objects.js';
 import type { JobRow } from '../gpu/controller.js';
 
 /** The pod id replicate jobs are claimed under (no pod row exists for it). */
 export const REPLICATE_POD = 'replicate';
-export const REFUSED_CLIP = "Replicate's safety filter refused this clip";
+export const REFUSED_CLIP = "This clip was refused by the content filter · you weren't charged";
 
 type TakeState = { id?: string; done?: boolean; key?: string; thumbKey?: string; billed?: number; output?: Record<string, unknown> };
 type RunState = { paddedKey?: string; seconds?: number; takes: TakeState[] };
 type Running = { cancelled: boolean; predictions: Set<string>; done: Promise<void> };
 
-/** Why a run failed, for the job: the message shown as-is and the machine code. */
+/** Why a run failed, for the job: a member-safe message shown as-is and the machine code (the details go to the log). */
 export function failureOf(e: unknown): { message: string; code: string; retryable: boolean } {
   if (e instanceof ReplicateError) {
     if (e.kind === 'refused') return { message: REFUSED_CLIP, code: 'provider_refused', retryable: false };
-    if (e.kind === 'rate_limited') return { message: 'Replicate stayed busy for too long (rate limit). You were not charged · try again later.', code: 'provider_rate_limited', retryable: true };
-    if (e.kind === 'timeout') return { message: `${e.message}. You were not charged.`, code: 'provider_timeout', retryable: true };
-    if (e.kind === 'unavailable') return { message: `${e.message}. You were not charged.`, code: 'provider_failed', retryable: false };
-    return { message: `Replicate couldn't render this clip: ${e.message}. You were not charged.`, code: 'provider_failed', retryable: true };
+    if (e.kind === 'rate_limited') return { message: "Busy right now · you weren't charged. Try again in a minute.", code: 'provider_rate_limited', retryable: true };
+    if (e.kind === 'timeout') return { message: "This took too long and was stopped · you weren't charged", code: 'provider_timeout', retryable: true };
+    if (e.kind === 'out_of_credit') return { message: OUT_OF_CREDIT, code: 'provider_out_of_credit', retryable: true };
+    if (e.kind === 'unavailable') return { message: SOMETHING_WENT_WRONG, code: 'provider_failed', retryable: false };
+    return { message: SOMETHING_WENT_WRONG, code: 'provider_failed', retryable: true };
   }
-  return { message: `The render couldn't be finished: ${(e as Error)?.message ?? 'unknown error'}. You were not charged.`, code: 'provider_failed', retryable: true };
+  return { message: SOMETHING_WENT_WRONG, code: 'provider_failed', retryable: true };
 }
 
 /** A failed prediction → the error to throw (safety refusals are told apart). */
 export function predictionError(p: Prediction) {
   const t = errorText(p.error);
   if (SAFETY_RE.test(t)) return new ReplicateError(t, 'refused');
+  if (CREDIT_RE.test(t)) return new ReplicateError(t, 'out_of_credit');
   return new ReplicateError(t || 'the prediction failed', 'failed');
 }
 
@@ -115,7 +119,8 @@ export class ReplicateVideo {
       const progress = Math.min(99.5, ((i - 1) + Math.min(1, Math.max(0, f))) / n * 100);
       const secondsLeft = Math.max(0, (n - (i - 1) - f) * perTake);
       const prefix = n > 1 ? `take ${i}/${n} · ` : '';
-      const ok = await ctx.jobs.progress(job.id, { progress, take: i, step: i - 1, totalSteps: n, phase: `${prefix}${label}`, secondsLeft });
+      const left = label === 'Rendering' ? ` · ${secondsLeft >= 60 ? `~${Math.ceil(secondsLeft / 60)} min` : `~${Math.ceil(secondsLeft)}s`} left` : '';
+      const ok = await ctx.jobs.progress(job.id, { progress, take: i, step: i - 1, totalSteps: n, phase: `${prefix}${label}${left}`, secondsLeft });
       if (!ok) st.cancelled = true;
       return ok;
     };
@@ -168,28 +173,28 @@ export class ReplicateVideo {
         let pred: Prediction | null = null;
         if (ts.id) pred = await rep.get(ts.id).catch(() => null);
         if (!pred || pred.status === 'canceled') {
-          if (!(await report(i, 0.03, 'Starting on Replicate'))) return;
+          if (!(await report(i, 0.03, 'Starting'))) return;
           pred = await rep.create(model, input, {
             maxWaitMs: c.REPLICATE_MAX_RATE_WAIT_SEC * 1000, cancelled,
-            onWait: async s => { await report(i, 0.03, `Replicate is busy · retrying in ${s}s`); },
+            onWait: async s => { await report(i, 0.03, `Waiting to start · retrying in ${s}s`); },
           });
           ts.id = pred.id;
           await this.saveState(job.id, state);
         }
         st.predictions.add(pred.id);
-        if (!(await report(i, 0.05, 'Rendering on Replicate'))) { await rep.cancel(pred.id); return; }
+        if (!(await report(i, 0.05, 'Rendering'))) { await rep.cancel(pred.id); return; }
         const renderShare = 0.85;
         const done = pred.status === 'succeeded' || pred.status === 'failed' || pred.status === 'canceled' ? pred
           : await rep.wait(pred.id, {
             pollMs: c.REPLICATE_POLL_MS, timeoutMs: c.REPLICATE_PREDICTION_TIMEOUT_SEC * 1000, cancelled,
-            onPoll: async (_p, ms) => { await report(i, 0.05 + renderShare * Math.min(0.95, ms / 1000 / perTake), 'Rendering on Replicate'); },
+            onPoll: async (_p, ms) => { await report(i, 0.05 + renderShare * Math.min(0.95, ms / 1000 / perTake), 'Rendering'); },
           });
         st.predictions.delete(pred.id);
         if (done.status === 'canceled') { if (cancelled()) return; throw new ReplicateError('Replicate cancelled the render', 'failed'); }
         if (done.status === 'failed') throw predictionError(done);
         const url = outputUrl(done.output);
         if (!url) throw new ReplicateError('Replicate returned no video', 'failed');
-        if (!(await report(i, 0.92, 'Finishing · exact length and audio'))) return;
+        if (!(await report(i, 0.92, 'Finishing'))) return;
         const raw = path.join(tmp, `raw_${i}.mp4`), take = path.join(tmp, `take_${i}.mp4`), thumb = path.join(tmp, `take_${i}.jpg`);
         await rep.download(url, raw);
         await finishTake(c.FFMPEG_PATH, raw, src, take, { duration: len, keepAudio: r.keepAudio !== false, audioCodec: info.audioCodec });
@@ -208,6 +213,7 @@ export class ReplicateVideo {
         billed.push(ts.billed);
         for (const f of [raw, take, thumb]) fs.rmSync(f, { force: true });
       }
+      ctx.engines.worked('replicate');
       // 5. Done: settle on the seconds Replicate billed.
       const price = r.pricePerSec ?? P.QUALITY_PRICE_DEFAULTS[quality];
       const billedSeconds = billed.reduce((a, b) => a + b, 0);
@@ -219,6 +225,7 @@ export class ReplicateVideo {
       if (st.cancelled || (e instanceof ReplicateError && e.kind === 'cancelled')) return;
       const f = failureOf(e);
       ctx.log.warn({ job: job.id, code: f.code, err: (e as Error).message }, 'Replicate job failed');
+      if (f.code === 'provider_out_of_credit') await ctx.engines.outOfCredit(job.studioId, 'replicate', (e as Error).message);
       await ctx.jobs.fail(job.id, f.message, f.retryable, f.code);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });

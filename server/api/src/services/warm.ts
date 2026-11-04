@@ -46,12 +46,12 @@ export class WarmService {
     return next;
   }
 
-  /** Studio rules: who may switch it on, idle minutes and the cap. */
+  /** Studio rules: idle minutes and the cap. Only the owner may use it (2026-11-04, "Keep add-on engine ready"). */
   async limits(studioId: string) {
     const s = await this.ctx.money.settings(studioId), c = this.ctx.config;
-    return { allowed: s.warmGpuAllowed ?? 'everyone', idleMinutes: s.warmIdleMinutes ?? c.WARM_IDLE_MINUTES, maxMinutes: s.warmMaxMinutes ?? c.WARM_MAX_MINUTES };
+    return { idleMinutes: s.warmIdleMinutes ?? c.WARM_IDLE_MINUTES, maxMinutes: s.warmMaxMinutes ?? c.WARM_MAX_MINUTES };
   }
-  private mayUse(allowed: string, role: string) { return allowed !== 'owner' || role === 'owner'; }
+  private mayUse(role: string) { return role === 'owner'; }
 
   async active(userId: string) {
     const [s] = await this.ctx.db.select().from(warmSessions).where(and(eq(warmSessions.userId, userId), inArray(warmSessions.state, [...ACTIVE])))
@@ -73,7 +73,7 @@ export class WarmService {
   // ------------------------------------------------------------------ view
   async view(u: Who, now = Date.now()) {
     const lim = await this.limits(u.studioId);
-    const allowed = this.mayUse(lim.allowed, u.role);
+    const allowed = this.mayUse(u.role);
     const s = await this.active(u.id);
     if (s) return this.viewOf(s, await this.podOf(s), allowed, now);
     const [last] = await this.ctx.db.select().from(warmSessions).where(and(eq(warmSessions.userId, u.id), eq(warmSessions.state, 'off')))
@@ -110,15 +110,13 @@ export class WarmService {
       const existing = await this.active(user.id);
       if (existing) return this.view(who, now);
       const lim = await this.limits(user.studioId);
-      if (!this.mayUse(lim.allowed, user.role)) throw new ApiError(403, 'warm_not_allowed', 'Only the studio owner can keep a GPU warm');
+      if (!this.mayUse(user.role)) throw new ApiError(403, 'owner_only', 'Only the studio owner can keep the add-on engine ready');
       const c = this.ctx.config;
-      const rp = await this.ctx.money.runpodBalance(user.studioId);
-      if (rp.balance != null && rp.balance < c.RUNPOD_MIN_BALANCE_USD) throw new ApiError(402, 'owner_balance_low', "The studio's GPU credit is low · the owner needs to top up RunPod");
       const need = c.GPU_HOURLY_USD * c.WARM_MIN_CREDIT_MINUTES / 60;
       const can = await this.ctx.money.spendableUsd(who);
       if (can != null && can < need) {
         throw new ApiError(402, user.role === 'owner' ? 'insufficient_balance' : 'insufficient_tokens',
-          `Not enough credit to keep a GPU warm · it needs at least $${need.toFixed(2)} (${c.WARM_MIN_CREDIT_MINUTES} min)`);
+          `Not enough in the studio balance to keep the add-on engine ready · it needs at least $${need.toFixed(2)} (${c.WARM_MIN_CREDIT_MINUTES} min)`);
       }
 
       const id = uid('warm');
@@ -149,7 +147,7 @@ export class WarmService {
     if (take) {
       // Settle what the pool owes up to now, under its normal rules, before the session takes over.
       if (take.idleSince && take.warmupCharged) await this.pool.chargeIdle(take, now);
-      else if (!take.warmupCharged && take.startedForJobId) await this.pool.charge(take, (now - take.startedAt) / 1000, take.startedForJobId, 'GPU warm-up');
+      else if (!take.warmupCharged && take.startedForJobId) await this.pool.charge(take, (now - take.startedAt) / 1000, take.startedForJobId, 'Add-on start-up');
       if (take.currentJobId) await this.ctx.db.update(jobs).set({ warmSessionId: sessionId }).where(eq(jobs.id, take.currentJobId));
       const [u] = await this.ctx.db.update(pods).set({ warmSessionId: sessionId, assignedUserId: user.id, warmupCharged: true, idleSince: take.currentJobId ? null : now })
         .where(eq(pods.id, take.id)).returning();
@@ -157,9 +155,10 @@ export class WarmService {
       return u!;
     }
     const max = await this.pool.maxGpus(user.studioId);
-    if (active.length >= max) throw new ApiError(409, 'no_gpu_free', `All ${max} GPUs are in use · try again when a render finishes`);
+    if (active.length >= max) throw new ApiError(409, 'no_gpu_free', `All ${max} add-on engines are in use · try again when a render finishes`);
     const pod = await this.pool.startPod({ studioId: user.studioId, userId: user.id, jobId: null, warmSessionId: sessionId }, 'h3', now);
-    if (!pod) throw new ApiError(503, 'no_gpu_available', this.pool.launchFailure('h3')?.message ?? 'No GPU is free on RunPod right now · try again in a minute');
+    if (!pod && this.pool.launchFailure('h3')?.credit) throw new ApiError(503, 'provider_out_of_credit', 'An engine is out of credit · see Settings → Engines');
+    if (!pod) throw new ApiError(503, 'no_gpu_available', 'No add-on engine is free right now · try again in a minute');
     return pod;
   }
 
@@ -177,7 +176,7 @@ export class WarmService {
     return this.serial(user.id, async () => {
       const now = Date.now();
       const s = await this.active(user.id);
-      if (!s || s.state === 'stopping') throw new ApiError(409, 'not_warm', 'The GPU is not warm');
+      if (!s || s.state === 'stopping') throw new ApiError(409, 'not_warm', 'The add-on engine is off');
       const pod = await this.podOf(s);
       const next = this.autoOff(s, !!pod?.currentJobId);
       const extendCap = next.reason === 'cap' && !s.extended;
@@ -201,7 +200,7 @@ export class WarmService {
     // Tokens for the running total, rounded up once: the per-minute lines add up to the session's cost, not 1 token more each.
     const tokens = this.ctx.money.toTokens(s.costUsd + usd) - this.ctx.money.toTokens(s.costUsd);
     await this.ctx.money.gpuOverhead(s.studioId, s.userId, usd, null,
-      `Warm GPU · ${Number.isInteger(mins) ? mins : mins.toFixed(2)} min (${s.id}, pod ${s.podId})`, 'warm', tokens);
+      `Add-on engine ready · ${Number.isInteger(mins) ? mins : mins.toFixed(2)} min (${s.id}, pod ${s.podId})`, 'warm', tokens);
     const [u] = await this.ctx.db.update(warmSessions).set({ settledUntil: s.settledUntil + chargeMs, costUsd: s.costUsd + usd })
       .where(eq(warmSessions.id, s.id)).returning();
     return { s: u!, charged: true };
@@ -282,8 +281,6 @@ export class WarmService {
     if (charged || now - last >= CHECK_EVERY_MS || now < last) {
       this.checkedAt.set(s.id, now);
       const c = this.ctx.config;
-      const rp = await this.ctx.money.runpodBalance(s.studioId);
-      if (rp.balance != null && rp.balance < c.RUNPOD_MIN_BALANCE_USD) return this.end(s, 'owner_balance', now);
       const [u] = await this.ctx.db.select({ id: users.id, studioId: users.studioId, role: users.role }).from(users).where(eq(users.id, s.userId));
       const can = u ? await this.ctx.money.spendableUsd(u as Who) : null;
       if (can != null && can < s.ratePerHr * c.WARM_MIN_CREDIT_MINUTES / 60) return this.end(s, 'credit', now);
@@ -293,7 +290,7 @@ export class WarmService {
     if (now >= off.at - this.ctx.config.WARM_WARNING_MINUTES * MIN && s.warnedFor !== key) {
       [s] = await this.ctx.db.update(warmSessions).set({ warnedFor: key }).where(eq(warmSessions.id, s.id)).returning() as [WarmSession];
       const left = Math.max(1, Math.round((off.at - now) / MIN));
-      const message = off.reason === 'idle' ? `Warm GPU turns off in ${left} min (no renders)` : `Warm GPU reaches its ${Math.round(s.maxMinutes / 60 * 10) / 10} h limit in ${left} min`;
+      const message = off.reason === 'idle' ? `Add-on engine turns off in ${left} min (no renders)` : `Add-on engine reaches its ${Math.round(s.maxMinutes / 60 * 10) / 10} h limit in ${left} min`;
       await this.emit(s, 'warning', now, { warning: { reason: off.reason, autoOffAt: off.at, message } });
     }
   }

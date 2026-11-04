@@ -100,7 +100,7 @@ const Env = z.object({
     viggle: ['NVIDIA H200 NVL', 'NVIDIA H200'],
     'lora-train': ['NVIDIA H100 80GB HBM3', 'NVIDIA H100 NVL', 'NVIDIA H200 NVL', 'NVIDIA H200'],
   })),
-  /** Pause new jobs when the RunPod balance minus the queued work drops below this. */
+  /** Unused since 2026-11-04 (app clean-up): nothing pauses on a provider balance. Kept so old env files still parse. */
   RUNPOD_MIN_BALANCE_USD: num(2),
   DISPATCH_MS: num(250),
   WORKER_HEARTBEAT_TIMEOUT_SEC: num(60),

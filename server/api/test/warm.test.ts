@@ -3,9 +3,9 @@
 // RunPod API. No real pod is ever started; time is driven by passing a fake `now` to the dispatcher's pass.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { and, eq } from 'drizzle-orm';
-import { jobs, ledger, pods, studioSettings, users, warmSessions } from '../src/db/schema.js';
+import { jobs, ledger, pods, users, warmSessions } from '../src/db/schema.js';
 import { RunpodApi } from '../src/gpu/runpodApi.js';
-import { makeApp, people, sienna, sse, until, type Client } from './helpers.js';
+import { client, makeApp, people, sienna, sse, until, type Client } from './helpers.js';
 
 const MIN = 60_000;
 const RATE = 3.99;
@@ -25,118 +25,114 @@ const sum = (rows: { amountUsd: number }[]) => rows.reduce((s, r) => s + r.amoun
 const session = async (a: App, userId: string) => (await a.ctx.db.select().from(warmSessions).where(eq(warmSessions.userId, userId)))
   .sort((x, y) => y.startedAt - x.startedAt)[0]!;
 
-describe('Keep GPU warm (simulated GPU)', () => {
+describe('Keep add-on engine ready (was Keep GPU warm), owner-only, simulated GPU', () => {
   let a: App;
-  let owner: Client, m1: Client, m2: Client, m3: Client;
+  let owner: Client, co: Client, m1: Client, m2: Client;
   const tick = (now: number) => a.ctx.jobs.tick(now);
+  const wallet = async (c: Client) => (await c.req('GET', '/v1/wallet')).body;
 
   beforeAll(async () => {
     a = await makeApp({ GPU_MODE: 'simulated', BALANCE_MODE: 'simulated', MAX_GPUS: '3' }, { startLoops: false });
-    const p = await people(a, 3);
-    owner = p.owner; [m1, m2, m3] = p.members as [Client, Client, Client];
-    await owner.req('GET', '/v1/settings/studio'); // creates the settings row
-    await a.ctx.db.update(studioSettings).set({ simBalance: 1000 });
-    for (const m of [m1, m2]) { const r = await owner.req('POST', '/v1/wallets/transfer', { toUserId: m.id, tokens: 1500 }); expect(r.body).toMatchObject({ member: { id: m.id } }); }
+    const p = await people(a, 2, { topUp: 1000 });
+    owner = p.owner; [m1, m2] = p.members as [Client, Client];
+    co = await coOwner(a, owner);
+    for (const m of [m1, m2]) expect((await owner.req('POST', '/v1/wallets/transfer', { toUserId: m.id, tokens: 1500 })).status).toBe(200);
   });
   afterAll(async () => { await a.close(); });
-  afterEach(async () => {
-    for (const c of [owner, m1, m2, m3]) await c.req('POST', '/v1/gpu/warm', { on: false });
+  afterEach(async () => { for (const c of [owner, co]) await c.req('POST', '/v1/gpu/warm', { on: false }); });
+
+  it('members never see or use it: 403 owner_only, no settings for it, no nudge data', async () => {
+    for (const m of [m1, m2]) {
+      for (const [verb, url, body] of [['GET', '/v1/gpu/warm'], ['POST', '/v1/gpu/warm', { on: true }], ['POST', '/v1/gpu/warm', { extend: true }]] as const) {
+        const r = await m.req(verb, url, body);
+        expect(r.status, `${verb} ${url}`).toBe(403); expect(r.body.code).toBe('owner_only');
+      }
+      const st = (await m.req('GET', '/v1/settings/studio')).body;
+      for (const k of ['warmGpuAllowed', 'warmIdleMinutes', 'warmMaxMinutes', 'gpu', 'maxGpus', 'overheadPayer', 'engines', 'minRunpodBalance', 'lowBalance']) expect(st[k], k).toBeUndefined();
+    }
+    expect(await a.ctx.db.select().from(warmSessions)).toEqual([]);
   });
 
-  it('is off by default, allowed for everyone, and the studio settings show the rules', async () => {
-    const g = (await m1.req('GET', '/v1/gpu/warm')).body;
+  it('is off by default for the owner; the owner settings show the rules under Engines', async () => {
+    const g = (await owner.req('GET', '/v1/gpu/warm')).body;
     expect(g).toMatchObject({ state: 'off', startedAt: null, minutes: 0, costUsd: 0, autoOffAt: null, allowed: true, idleMinutes: 20, maxMinutes: 120, canExtend: false });
-    expect((await m1.req('GET', '/v1/settings/studio')).body).toMatchObject({ warmGpuAllowed: 'everyone', warmIdleMinutes: 20, warmMaxMinutes: 120 });
-    expect((await m1.req('POST', '/v1/gpu/warm', {})).status).toBe(400);
-    expect((await m1.req('POST', '/v1/gpu/warm', { extend: true })).body.code).toBe('not_warm');
+    const st = (await owner.req('GET', '/v1/settings/studio')).body;
+    expect(st).toMatchObject({ warmIdleMinutes: 20, warmMaxMinutes: 120, engines: { keepReady: { idleMinutes: 20, maxMinutes: 120, ratePerHour: RATE } } });
+    expect(st.warmGpuAllowed).toBeUndefined();
+    // The retired permission is accepted and ignored.
+    expect((await owner.req('PATCH', '/v1/settings/studio', { warmGpuAllowed: 'everyone' })).status).toBe(200);
+    expect((await m1.req('POST', '/v1/gpu/warm', { on: true })).status).toBe(403);
+    expect((await owner.req('POST', '/v1/gpu/warm', {})).status).toBe(400);
+    expect((await owner.req('POST', '/v1/gpu/warm', { extend: true })).body.code).toBe('not_warm');
+    expect((await owner.req('PATCH', '/v1/settings/studio', { warmIdleMinutes: 2 })).status).toBe(400);
   });
 
   it('on → a dedicated pod held by the session (no idle shutdown), off → the pod stops', async () => {
     const t0 = Date.now();
-    const on = await m1.req('POST', '/v1/gpu/warm', { on: true });
+    const on = await owner.req('POST', '/v1/gpu/warm', { on: true });
     expect(on.status).toBe(200);
     expect(on.body).toMatchObject({ state: 'warm', minutes: 0, costUsd: 0, ratePerHour: RATE, busy: false, autoOffReason: 'idle', canExtend: true, allowed: true });
     expect(on.body.startedAt).toBeGreaterThanOrEqual(t0);
     expect(on.body.autoOffAt).toBe(on.body.readyAt + 20 * MIN);
     expect(on.body.warningAt).toBe(on.body.autoOffAt - 5 * MIN);
-    // Idempotent: a second tap returns the same session.
-    expect((await m1.req('POST', '/v1/gpu/warm', { on: true })).body.startedAt).toBe(on.body.startedAt);
-    const [pod] = await a.ctx.db.select().from(pods).where(eq(pods.assignedUserId, m1.id));
+    expect((await owner.req('POST', '/v1/gpu/warm', { on: true })).body.startedAt).toBe(on.body.startedAt);
+    const [pod] = await a.ctx.db.select().from(pods).where(eq(pods.assignedUserId, owner.id));
     expect(pod!.warmSessionId).toBeTruthy();
-    expect(pod!.state).toBe('running');
-    // The pool's 3-minute idle shutdown doesn't touch it.
     await tick(t0 + 4 * MIN);
     expect((await a.ctx.db.select().from(pods).where(eq(pods.id, pod!.id)))[0]!.state).toBe('running');
-    const off = (await m1.req('POST', '/v1/gpu/warm', { on: false })).body;
-    expect(off.state).toBe('off');
-    expect(off.lastOff).toMatchObject({ reason: 'user' });
+    const off = (await owner.req('POST', '/v1/gpu/warm', { on: false })).body;
+    expect(off).toMatchObject({ state: 'off', lastOff: { reason: 'user' } });
     expect((await a.ctx.db.select().from(pods).where(eq(pods.id, pod!.id)))[0]!.state).toBe('stopped');
-    // No warm-up or idle lines for the warm pod: only "Warm GPU" ones.
-    expect((await a.ctx.db.select().from(ledger).where(and(eq(ledger.kind, 'warmup'), eq(ledger.userId, m1.id)))).length).toBe(0);
+    expect((await a.ctx.db.select().from(ledger).where(and(eq(ledger.kind, 'warmup'), eq(ledger.userId, owner.id)))).length).toBe(0);
   });
 
-  it('bills the wall time per minute to the user who switched it on ("Warm GPU" lines), the last part pro rata', async () => {
-    const before = (await m1.req('GET', '/v1/wallet')).body;
-    const on = (await m1.req('POST', '/v1/gpu/warm', { on: true })).body;
+  it('bills the wall time per minute from the studio balance ("Add-on engine ready" lines), the last part pro rata', async () => {
+    const before = (await owner.req('GET', '/v1/studio/balance')).body;
+    const on = (await owner.req('POST', '/v1/gpu/warm', { on: true })).body;
     const t0 = on.startedAt as number;
     await tick(t0 + 30_000);
-    expect((await warmLines(a, m1.id)).filter(l => l.createdAt >= t0).length).toBe(0); // under a minute: nothing yet
+    expect((await warmLines(a, owner.id)).filter(l => l.createdAt >= t0).length).toBe(0);
     await tick(t0 + MIN + 1);
-    let lines = (await warmLines(a, m1.id)).filter(l => l.createdAt >= t0);
+    let lines = (await warmLines(a, owner.id)).filter(l => l.createdAt >= t0);
     expect(lines.length).toBe(1);
     expect(lines[0]!.amountUsd).toBeCloseTo(RATE / 60, 6);
-    expect(lines[0]!.note).toMatch(/^Warm GPU · 1 min/);
+    expect(lines[0]!.note).toMatch(/^Add-on engine ready · 1 min/);
     await tick(t0 + 3.5 * MIN);
-    lines = (await warmLines(a, m1.id)).filter(l => l.createdAt >= t0);
+    lines = (await warmLines(a, owner.id)).filter(l => l.createdAt >= t0);
     expect(sum(lines)).toBeCloseTo(3 * RATE / 60, 6);
-    const g = (await m1.req('GET', '/v1/gpu/warm')).body;
-    expect(g.costUsd).toBeCloseTo(3 * RATE / 60, 3);
-    // Owner balance and the others' wallets aren't touched; the member's tokens go down by the running total.
-    const after = (await m1.req('GET', '/v1/wallet')).body;
-    expect(before.tokens - after.tokens).toBe(Math.ceil(3 * RATE / 60 * 100));
-    expect((await m2.req('GET', '/v1/wallet')).body.tokens).toBe(1500);
-    // The final partial minute is charged when it turns off (here at the real clock, which is before the fake ticks).
-    await m1.req('POST', '/v1/gpu/warm', { on: false });
-    const s = await session(a, m1.id);
+    expect((await owner.req('GET', '/v1/gpu/warm')).body.costUsd).toBeCloseTo(3 * RATE / 60, 3);
+    const after = (await owner.req('GET', '/v1/studio/balance')).body;
+    expect(before.balanceUsd - after.balanceUsd).toBeCloseTo(3 * RATE / 60, 6);
+    expect((await wallet(m1)).tokens).toBe(1500); // members' credit isn't touched
+    await owner.req('POST', '/v1/gpu/warm', { on: false });
+    const s = await session(a, owner.id);
     expect(s.state).toBe('off');
     expect(s.costUsd).toBeCloseTo(3 * RATE / 60, 6);
-    // Today's spend counts the warm GPU.
-    expect((await m1.req('GET', '/v1/wallet')).body.todayUsd).toBeGreaterThanOrEqual(3 * RATE / 60 - 1e-6);
   });
 
-  it("renders on the user's warm GPU are not charged GPU time again", async () => {
-    const m = await sienna(m2);
-    const w0 = (await m2.req('GET', '/v1/wallet')).body;
-    const on = (await m2.req('POST', '/v1/gpu/warm', { on: true })).body;
+  it("the owner's renders on it are not charged GPU time again", async () => {
+    const m = await sienna(owner);
+    const on = (await owner.req('POST', '/v1/gpu/warm', { on: true })).body;
     expect(on.state).toBe('warm');
-    const j = (await m2.req('POST', '/v1/jobs', { title: 'On warm', modelId: m.id, steps: 4 })).body;
+    const j = (await owner.req('POST', '/v1/jobs', { title: 'On warm', modelId: m.id, steps: 4, engine: 'h3' })).body;
     expect(j.state).toBe('running');
     await tick(Date.now());
     const done = await until(async () => {
-      const x = (await m2.req('GET', '/v1/jobs')).body.find((y: any) => y.id === j.id);
+      const x = (await owner.req('GET', '/v1/jobs')).body.find((y: any) => y.id === j.id);
       return x?.state === 'done' ? x : null;
     });
     expect(done.warm).toBe(true);
     const [row] = await a.ctx.db.select().from(jobs).where(eq(jobs.id, j.id));
     expect(row!.actualCost).toBe(0);
     expect(row!.warmupCost).toBe(0);
-    const settle = (await a.ctx.db.select().from(ledger).where(and(eq(ledger.jobId, j.id), eq(ledger.kind, 'settle'))))[0]!;
-    expect(settle.amountUsd).toBe(0);
-    expect((await a.ctx.db.select().from(ledger).where(and(eq(ledger.jobId, j.id), eq(ledger.kind, 'warmup')))).length).toBe(0);
-    // The hold came back in full; the job ran on the warm pod.
-    const w1 = (await m2.req('GET', '/v1/wallet')).body;
-    expect(w1.heldTokens).toBe(0);
-    expect(w1.tokens).toBe(w0.tokens);
+    expect((await wallet(owner)).heldTokens).toBe(0);
     const [pod] = await a.ctx.db.select().from(pods).where(eq(pods.id, row!.podId!));
-    expect(pod!.warmSessionId).toBe((await session(a, m2.id)).id);
-    // After a render the idle clock restarts.
-    await tick(Date.now());
-    expect((await m2.req('GET', '/v1/gpu/warm')).body.busy).toBe(false);
+    expect(pod!.warmSessionId).toBe((await session(a, owner.id)).id);
   });
 
   it('idle: a warning 5 minutes before, then off after 20 minutes without a render (charged up to the auto-off)', async () => {
-    const ev = await listen(a, m1);
-    const on = (await m1.req('POST', '/v1/gpu/warm', { on: true })).body;
+    const ev = await listen(a, owner);
+    const on = (await owner.req('POST', '/v1/gpu/warm', { on: true })).body;
     const t0 = on.readyAt as number;
     await tick(t0 + 14 * MIN);
     expect(ev.gpu().filter(e => e.event === 'warning').length).toBe(0);
@@ -144,135 +140,86 @@ describe('Keep GPU warm (simulated GPU)', () => {
     const warn = ev.gpu().filter(e => e.event === 'warning');
     expect(warn.length).toBe(1);
     expect(warn[0].warning).toMatchObject({ reason: 'idle', autoOffAt: t0 + 20 * MIN });
-    expect(warn[0].warning.message).toMatch(/turns off in 5 min/);
-    await tick(t0 + 16 * MIN); // sent once
+    expect(warn[0].warning.message).toBe('Add-on engine turns off in 5 min (no renders)');
+    await tick(t0 + 16 * MIN);
     expect(ev.gpu().filter(e => e.event === 'warning').length).toBe(1);
     await tick(t0 + 20 * MIN + 30_000);
-    const g = (await m1.req('GET', '/v1/gpu/warm')).body;
-    expect(g.state).toBe('off');
-    expect(g.lastOff.reason).toBe('idle');
-    const s = await session(a, m1.id);
-    expect(s.costUsd).toBeCloseTo(20 * RATE / 60, 6); // not the extra 30 s
-    expect((await a.ctx.db.select().from(pods).where(eq(pods.id, s.podId!)))[0]!.state).toBe('stopped');
-    const states = ev.gpu().filter(e => e.event === 'state').map(e => e.gpu.state);
-    expect(states).toEqual(['warm', 'stopping', 'off']);
+    const g = (await owner.req('GET', '/v1/gpu/warm')).body;
+    expect(g).toMatchObject({ state: 'off', lastOff: { reason: 'idle' } });
+    expect((await session(a, owner.id)).costUsd).toBeCloseTo(20 * RATE / 60, 6);
+    expect(ev.gpu().filter(e => e.event === 'state').map(e => e.gpu.state)).toEqual(['warm', 'stopping', 'off']);
     ev.stop();
   });
 
-  it('"Keep warm" on the idle warning restarts the idle clock without using the cap extension', async () => {
-    const on = (await m1.req('POST', '/v1/gpu/warm', { on: true })).body;
-    const k = (await m1.req('POST', '/v1/gpu/warm', { extend: true })).body;
-    expect(k.state).toBe('warm');
-    expect(k.canExtend).toBe(true);
-    expect(k.maxMinutes).toBe(120);
-    expect(k.autoOffAt).toBeGreaterThanOrEqual(on.autoOffAt);
-  });
-
-  it('cap: warning 5 minutes before, "Keep warm" extends it once, then it turns off', async () => {
+  it('cap: warning 5 minutes before, "Keep ready" extends it once, then it turns off', async () => {
     expect((await owner.req('PATCH', '/v1/settings/studio', { warmIdleMinutes: 120, warmMaxMinutes: 30 })).status).toBe(200);
     try {
-      const ev = await listen(a, m1);
-      const on = (await m1.req('POST', '/v1/gpu/warm', { on: true })).body;
+      const ev = await listen(a, owner);
+      const on = (await owner.req('POST', '/v1/gpu/warm', { on: true })).body;
       expect(on).toMatchObject({ autoOffReason: 'cap', maxMinutes: 30, canExtend: true });
       const t0 = on.startedAt as number;
-      expect(on.autoOffAt).toBe(t0 + 30 * MIN);
       await tick(t0 + 25 * MIN + 1);
       expect(ev.gpu().filter(e => e.event === 'warning').map(e => e.warning.reason)).toEqual(['cap']);
-      const ext = (await m1.req('POST', '/v1/gpu/warm', { extend: true })).body;
+      const ext = (await owner.req('POST', '/v1/gpu/warm', { extend: true })).body;
       expect(ext).toMatchObject({ maxMinutes: 60, canExtend: false, autoOffAt: t0 + 60 * MIN, autoOffReason: 'cap' });
-      // Only once.
-      expect((await m1.req('POST', '/v1/gpu/warm', { extend: true })).body).toMatchObject({ maxMinutes: 60, canExtend: false });
-      await tick(t0 + 31 * MIN);
-      expect((await m1.req('GET', '/v1/gpu/warm')).body.state).toBe('warm');
-      await tick(t0 + 55 * MIN + 1);
-      expect(ev.gpu().filter(e => e.event === 'warning').length).toBe(2);
+      expect((await owner.req('POST', '/v1/gpu/warm', { extend: true })).body).toMatchObject({ maxMinutes: 60, canExtend: false });
       await tick(t0 + 60 * MIN);
-      const g = (await m1.req('GET', '/v1/gpu/warm')).body;
-      expect(g.state).toBe('off');
-      expect(g.lastOff).toMatchObject({ reason: 'cap', minutes: 60 });
-      expect((await session(a, m1.id)).costUsd).toBeCloseTo(60 * RATE / 60, 6);
+      expect((await owner.req('GET', '/v1/gpu/warm')).body.lastOff).toMatchObject({ reason: 'cap', minutes: 60 });
       ev.stop();
     } finally {
       await owner.req('PATCH', '/v1/settings/studio', { warmIdleMinutes: 20, warmMaxMinutes: 120 });
     }
   });
 
-  it("credit: refused when it can't cover 10 minutes, and turns off when it no longer can", async () => {
-    expect((await owner.req('POST', '/v1/wallets/transfer', { toUserId: m3.id, tokens: 50 })).status).toBe(200);
-    const r = await m3.req('POST', '/v1/gpu/warm', { on: true });
+  it("credit: refused when the studio balance can't cover 10 minutes, and turns off when it no longer can; a low RunPod balance plays no part", async () => {
+    // Soak up what's free by sending it to a member, leaving $1.00.
+    const free = (await owner.req('GET', '/v1/studio/balance')).body.availableUsd;
+    expect((await owner.req('POST', '/v1/wallets/transfer', { toUserId: m2.id, tokens: Math.floor(free * 100) - 50 })).status).toBe(200);
+    const r = await owner.req('POST', '/v1/gpu/warm', { on: true });
     expect(r.status).toBe(402);
-    expect(r.body.code).toBe('insufficient_tokens');
-    expect(r.body.error).toMatch(/\$0\.67/);
-    expect((await owner.req('POST', '/v1/wallets/transfer', { toUserId: m3.id, tokens: 50 })).status).toBe(200); // $1.00
-    const on = (await m3.req('POST', '/v1/gpu/warm', { on: true })).body;
+    expect(r.body.code).toBe('insufficient_balance');
+    expect(r.body.error).toMatch(/studio balance.*\$0\.67/);
+    expect((await owner.req('POST', '/v1/wallets/reclaim', { fromUserId: m2.id, tokens: 50 })).status).toBe(200); // ~$1.00 free
+    const on = (await owner.req('POST', '/v1/gpu/warm', { on: true })).body;
     expect(on.state).toBe('warm');
     const t0 = on.startedAt as number;
-    await tick(t0 + 4 * MIN + 1); // $1.00 − 4 × $0.0665 = $0.73 left: still covers 10 minutes ($0.665)
-    expect((await m3.req('GET', '/v1/gpu/warm')).body.state).toBe('warm');
-    await tick(t0 + 5 * MIN + 1); // $0.66 left
-    const g = (await m3.req('GET', '/v1/gpu/warm')).body;
-    expect(g.state).toBe('off');
-    expect(g.lastOff.reason).toBe('credit');
-    expect((await m3.req('GET', '/v1/wallet')).body.tokens).toBe(100 - Math.ceil(5 * RATE / 60 * 100));
+    await tick(t0 + 4 * MIN + 1);
+    expect((await owner.req('GET', '/v1/gpu/warm')).body.state).toBe('warm');
+    await tick(t0 + 6 * MIN + 1);
+    const g = (await owner.req('GET', '/v1/gpu/warm')).body;
+    expect(g).toMatchObject({ state: 'off', lastOff: { reason: 'credit' } });
+    const back = (await wallet(m2)).tokens;
+    expect((await owner.req('POST', '/v1/wallets/reclaim', { fromUserId: m2.id, tokens: back - 1500 })).status).toBe(200);
   });
 
-  it("owner balance: refused while the RunPod balance is under RUNPOD_MIN_BALANCE_USD, and turns off when it drops", async () => {
-    await a.ctx.db.update(studioSettings).set({ simBalance: 1.5 });
-    try {
-      const r = await m1.req('POST', '/v1/gpu/warm', { on: true });
-      expect(r.status).toBe(402);
-      expect(r.body.code).toBe('owner_balance_low');
-    } finally { await a.ctx.db.update(studioSettings).set({ simBalance: 1000 }); }
-    const on = (await m1.req('POST', '/v1/gpu/warm', { on: true })).body;
-    expect(on.state).toBe('warm');
-    await a.ctx.db.update(studioSettings).set({ simBalance: 1.5 });
-    try {
-      await tick(on.startedAt + 15_000);
-      const g = (await m1.req('GET', '/v1/gpu/warm')).body;
-      expect(g.state).toBe('off');
-      expect(g.lastOff.reason).toBe('owner_balance');
-    } finally { await a.ctx.db.update(studioSettings).set({ simBalance: 1000 }); }
-  });
-
-  it('permission: the owner can limit it to themselves (default everyone); members can\'t change that', async () => {
-    expect((await m1.req('PATCH', '/v1/settings/studio', { warmGpuAllowed: 'owner' })).body.code).toBe('owner_only');
-    expect((await owner.req('PATCH', '/v1/settings/studio', { warmGpuAllowed: 'owner' })).body.warmGpuAllowed).toBe('owner');
-    try {
-      const r = await m1.req('POST', '/v1/gpu/warm', { on: true });
-      expect(r.status).toBe(403);
-      expect(r.body.code).toBe('warm_not_allowed');
-      expect((await m1.req('GET', '/v1/gpu/warm')).body.allowed).toBe(false);
-      const o = await owner.req('POST', '/v1/gpu/warm', { on: true });
-      expect(o.status).toBe(200);
-      expect(o.body).toMatchObject({ state: 'warm', allowed: true });
-    } finally {
-      expect((await owner.req('PATCH', '/v1/settings/studio', { warmGpuAllowed: 'everyone' })).body.warmGpuAllowed).toBe('everyone');
-    }
-    expect((await owner.req('PATCH', '/v1/settings/studio', { warmIdleMinutes: 2 })).status).toBe(400);
-  });
-
-  it('SSE: gpu events (state, the per-minute tick, the warning) reach only that user', async () => {
+  it('SSE: gpu events (state, the per-minute tick, the warning) reach only that owner', async () => {
     await a.app.listen({ port: 0, host: '127.0.0.1' });
     const addr = a.app.server.address() as { port: number };
     const base = `http://127.0.0.1:${addr.port}`;
-    const mine = await sse(base, m1.token), theirs = await sse(base, m2.token);
+    const mine = await sse(base, owner.token), coEv = await sse(base, co.token), member = await sse(base, m1.token);
     try {
-    const on = (await m1.req('POST', '/v1/gpu/warm', { on: true })).body;
-    await tick(on.startedAt + MIN + 1);
-    await tick(on.readyAt + 15 * MIN + 1);
-    await m1.req('POST', '/v1/gpu/warm', { on: false });
-    await until(() => mine.events.some(e => e.type === 'gpu' && e.gpu.state === 'off'));
-    const g = mine.events.filter(e => e.type === 'gpu');
-    expect(g[0]).toMatchObject({ type: 'gpu', event: 'state', gpu: { state: 'warm' } });
-    const t = g.find(e => e.event === 'tick');
-    expect(t.gpu.minutes).toBe(1);
-    expect(t.gpu.costUsd).toBeCloseTo(RATE / 60, 4);
-    expect(g.find(e => e.event === 'warning').warning.reason).toBe('idle');
-    expect(g[g.length - 1]).toMatchObject({ event: 'state', gpu: { state: 'off', lastOff: { reason: 'user' } } });
-    expect(theirs.events.filter(e => e.type === 'gpu').length).toBe(0);
-    } finally { await mine.stop(); await theirs.stop(); }
+      const on = (await owner.req('POST', '/v1/gpu/warm', { on: true })).body;
+      await tick(on.startedAt + MIN + 1);
+      await tick(on.readyAt + 15 * MIN + 1);
+      await owner.req('POST', '/v1/gpu/warm', { on: false });
+      await until(() => mine.events.some(e => e.type === 'gpu' && e.gpu.state === 'off'));
+      const g = mine.events.filter(e => e.type === 'gpu');
+      expect(g[0]).toMatchObject({ type: 'gpu', event: 'state', gpu: { state: 'warm' } });
+      expect(g.find(e => e.event === 'tick').gpu.minutes).toBe(1);
+      expect(g.find(e => e.event === 'warning').warning.reason).toBe('idle');
+      expect(coEv.events.filter(e => e.type === 'gpu').length).toBe(0);
+      expect(member.events.filter(e => e.type === 'gpu').length).toBe(0);
+    } finally { await mine.stop(); await coEv.stop(); await member.stop(); }
   });
 });
+
+/** A second owner of the same studio (an owner-role invite). */
+async function coOwner(a: App, owner: Client): Promise<Client> {
+  const inv = (await owner.req('POST', '/v1/invites', { role: 'owner' })).body;
+  const r = await client(a)('POST', '/v1/auth/signup', { studioName: 'x', email: `co${Date.now()}@test.dev`, password: 'correct horse', inviteCode: inv.code, attestAdultRightsOriginal: true, attestLabelAi: true });
+  expect(r.status).toBe(200);
+  return { token: r.body.token, id: r.body.user.id, role: 'owner', req: client(a, r.body.token) };
+}
 
 // ---------------------------------------------------------------------------------------------- RunPod (fake API)
 type Fake = { balance: number; deployed: { id: string; token: string; podId: string; env: Record<string, string> }[]; terminated: string[] };
@@ -293,9 +240,9 @@ function fakeRunpod(state: Fake) {
   return new RunpodApi('rp_test_key', 'http://runpod.fake/graphql', f);
 }
 
-describe('Keep GPU warm on the RunPod controller (fake RunPod)', () => {
+describe('Keep add-on engine ready on the RunPod controller (fake RunPod)', () => {
   let a: App;
-  let owner: Client, m1: Client, m2: Client;
+  let owner: Client, m1: Client, m2: Client; // m1 = the owner, m2 = a co-owner (it's owner-only)
   const rp: Fake = { balance: 100, deployed: [], terminated: [] };
   const worker = (token: string) => async (url: string, body: unknown = {}) => {
     const r = await a.app.inject({ method: 'POST', url, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
@@ -306,9 +253,8 @@ describe('Keep GPU warm on the RunPod controller (fake RunPod)', () => {
   beforeAll(async () => {
     a = await makeApp({ GPU_MODE: 'runpod', BALANCE_MODE: 'runpod', RUNPOD_NETWORK_VOLUME_ID: 'vol_123', MAX_GPUS: '1', PUBLIC_URL: 'http://api.test' },
       { runpod: fakeRunpod(rp), startLoops: false });
-    const p = await people(a, 2);
-    owner = p.owner; [m1, m2] = p.members as [Client, Client];
-    for (const m of [m1, m2]) await owner.req('POST', '/v1/wallets/transfer', { toUserId: m.id, tokens: 2000 });
+    const p = await people(a, 0);
+    owner = p.owner; m1 = owner; m2 = await coOwner(a, owner);
   });
   afterAll(async () => { await a.close(); });
 

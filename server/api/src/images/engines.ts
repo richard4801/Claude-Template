@@ -1,6 +1,7 @@
 // The image engine: one request shape, one adapter per provider (plans/backend.md, "Image engine contract").
 import { sleep } from '../lib/util.js';
-import { outputUrl, ReplicateError, SAFETY_RE, errorText, type ReplicateClient } from '../replicate/client.js';
+import { outputUrl, ReplicateError, SAFETY_RE, CREDIT_RE, errorText, type ReplicateClient } from '../replicate/client.js';
+import { outMpFor, type PhotoMetrics } from '../pricing.js';
 
 export type ImageRequest = {
   prompt: string;
@@ -18,7 +19,9 @@ export type ImageRequest = {
   /** Replicate: megapixels of each reference (after shrinking), for the cost estimate. */
   referenceMp?: number[];
 };
-export type EngineImage = { url?: string; b64?: string; asset?: string };
+/** What one prediction is billed on (Replicate): the service computes the exact cost once the output's size is known. */
+export type PhotoBillInfo = { kind: 'shot' | 'edit'; inMp: number; outMp: number; metrics?: PhotoMetrics | null };
+export type EngineImage = { url?: string; b64?: string; asset?: string; bill?: PhotoBillInfo };
 export type ImageResult = { images: EngineImage[]; seed?: number; costUsd?: number };
 export type EngineSelection = { provider: 'simulated' | 'fal' | 'custom-http' | 'replicate'; model: string; url?: string;
   /** Replicate: the model for edits of an existing photo. */
@@ -31,7 +34,9 @@ export interface ImageEngine {
 
 /** `code` turns into the API error: a safety refusal (422) or a rate limit that outlasted the wait (429). */
 export class ImageEngineError extends Error {
-  constructor(message: string, readonly code?: 'provider_refused' | 'provider_rate_limited' | 'engine_unavailable') { super(message); }
+  /** Images the engine had already made (and been billed for) before it failed. */
+  partial: EngineImage[] = [];
+  constructor(message: string, readonly code?: 'provider_refused' | 'provider_rate_limited' | 'engine_unavailable' | 'provider_out_of_credit') { super(message); }
 }
 
 /** Returns the bundled reference stills (assets/ref/*.jpg, the same ones the apps bundle) after GEN_MS. Free. */
@@ -114,7 +119,7 @@ export const aspectFor = (w: number, h: number) => RATIOS.reduce((a, b) => (Math
 /**
  * Replicate (plans/backend.md "Replicate"): new shots on FLUX.2 [pro] with the model's reference shots, edits of an
  * existing photo on Qwen-Image-Edit 2511. One prediction per image, through the shared rate-limit gate. The cost is
- * an estimate from the model's published prices (FLUX.2 [pro]: per run + per input and output megapixel).
+ * settled exactly by ImageService from each prediction's billing info (FLUX.2 [pro]: per run + per input and output megapixel).
  */
 export class ReplicateImageEngine implements ImageEngine {
   readonly provider = 'replicate' as const;
@@ -123,46 +128,48 @@ export class ReplicateImageEngine implements ImageEngine {
     const c = this.cfg();
     if (!this.client.configured) throw new ImageEngineError("Replicate isn't set up on the server", 'engine_unavailable');
     const images: EngineImage[] = [];
-    let cost = 0;
+    const fail = (e: ImageEngineError) => { e.partial = images.slice(); return e; };
     for (let i = 0; i < req.count; i++) {
       const seed = req.seed != null ? req.seed + i : undefined;
-      let model: string, input: Record<string, unknown>;
+      let model: string, input: Record<string, unknown>, bill: PhotoBillInfo;
       if (req.editOf) {
         model = sel.editModel || c.editModel;
         input = { prompt: req.prompt, image: [req.editOf, ...req.referenceImages.slice(0, 2)], aspect_ratio: 'match_input_image', output_format: 'jpg', output_quality: 95,
           ...(seed != null ? { seed } : {}), ...(c.loraUrl ? { lora_weights: c.loraUrl, lora_scale: c.loraScale } : {}) };
-        cost += c.editUsd;
+        bill = { kind: 'edit', inMp: 0, outMp: 0 };
       } else {
         model = sel.model;
         const refs = req.referenceImages.slice(0, c.maxRefs);
-        const outMp = req.width * req.height >= 1.5e6 ? 2 : 1;
+        const outMp = outMpFor(req.width, req.height);
         input = { prompt: req.prompt, input_images: refs, aspect_ratio: aspectFor(req.width, req.height), resolution: `${outMp} MP`, output_format: 'jpg', output_quality: 95,
           safety_tolerance: c.safety, ...(seed != null ? { seed } : {}) };
         const inMp = refs.reduce((a, _, k) => a + (req.referenceMp?.[k] ?? 1), 0);
-        cost += c.runUsd + c.mpUsd * (outMp + inMp);
+        bill = { kind: 'shot', inMp, outMp };
       }
       try {
         const p = await this.client.create(model, input, { maxWaitMs: c.maxWaitMs });
         const done = p.status === 'succeeded' ? p : await this.client.wait(p.id, { pollMs: c.pollMs, timeoutMs: c.timeoutMs });
         if (done.status !== 'succeeded') {
           const t = errorText(done.error);
-          if (SAFETY_RE.test(t)) throw new ImageEngineError("Replicate's safety filter refused this photo", 'provider_refused');
+          if (SAFETY_RE.test(t)) throw new ImageEngineError(`Replicate's safety filter refused this photo: ${t.slice(0, 200)}`, 'provider_refused');
+          if (CREDIT_RE.test(t)) throw new ImageEngineError(`Replicate is out of credit: ${t.slice(0, 200)}`, 'provider_out_of_credit');
           throw new ImageEngineError(`Replicate could not make the image${t ? `: ${t.slice(0, 200)}` : ''}`);
         }
         const url = outputUrl(done.output);
         if (!url) throw new ImageEngineError('Replicate returned no image');
-        images.push({ url });
+        images.push({ url, bill: { ...bill, metrics: (done.metrics ?? null) as PhotoMetrics | null } });
       } catch (e) {
-        if (e instanceof ImageEngineError) throw e;
+        if (e instanceof ImageEngineError) throw fail(e);
         if (e instanceof ReplicateError) {
-          if (e.kind === 'refused') throw new ImageEngineError("Replicate's safety filter refused this photo", 'provider_refused');
-          if (e.kind === 'rate_limited') throw new ImageEngineError('Replicate is busy (rate limit) · try again in a minute', 'provider_rate_limited');
-          if (e.kind === 'unavailable') throw new ImageEngineError(e.message, 'engine_unavailable');
-          throw new ImageEngineError(e.message);
+          if (e.kind === 'refused') throw fail(new ImageEngineError(`Replicate's safety filter refused this photo: ${e.message}`, 'provider_refused'));
+          if (e.kind === 'rate_limited') throw fail(new ImageEngineError('Replicate is busy (rate limit)', 'provider_rate_limited'));
+          if (e.kind === 'out_of_credit') throw fail(new ImageEngineError(e.message, 'provider_out_of_credit'));
+          if (e.kind === 'unavailable') throw fail(new ImageEngineError(e.message, 'engine_unavailable'));
+          throw fail(new ImageEngineError(e.message));
         }
         throw e;
       }
     }
-    return { images, seed: req.seed, costUsd: cost };
+    return { images, seed: req.seed };
   }
 }

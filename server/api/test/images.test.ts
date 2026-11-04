@@ -44,15 +44,18 @@ describe('image engine selection per studio', () => {
     url = `http://127.0.0.1:${(srv.address() as any).port}/gen`;
     a = await makeApp({ DEV_MODE: 'true', BALANCE_MODE: 'simulated', SIM_START_BALANCE: '20' });
     const p = await people(a, 1); owner = p.owner; tess = p.members[0]!;
-    await a.ctx.money.simTopUp({ id: owner.id, studioId: (await a.ctx.db.query.users.findFirst())!.studioId, role: 'owner' }, 20);
     await owner.req('POST', '/v1/wallets/transfer', { toUserId: tess.id, tokens: 500 });
   });
   afterAll(async () => { await a.close(); srv.close(); });
 
   it('defaults to simulated; fal needs FAL_KEY; custom-http is owner-only', async () => {
     expect((await tess.req('GET', '/v1/settings/image-engine')).body).toMatchObject({ provider: 'simulated', model: 'bundled-stills', available: { simulated: true, fal: false, 'custom-http': true } });
-    expect((await tess.req('PATCH', '/v1/settings/image-engine', { provider: 'fal' })).status).toBe(400);
-    expect((await tess.req('PATCH', '/v1/settings/image-engine', { provider: 'custom-http', model: 'mine', url })).status).toBe(403);
+    // Engines are owner Settings only (plans/api.md "App clean-up" §5).
+    for (const body of [{ provider: 'fal' }, { provider: 'simulated' }, { provider: 'custom-http', model: 'mine', url }]) {
+      const r = await tess.req('PATCH', '/v1/settings/image-engine', body);
+      expect(r.status).toBe(403); expect(r.body.code).toBe('owner_only');
+    }
+    expect((await owner.req('PATCH', '/v1/settings/image-engine', { provider: 'fal' })).status).toBe(400);
     const r = await owner.req('PATCH', '/v1/settings/image-engine', { provider: 'custom-http', model: 'mine', url });
     expect(r.body).toMatchObject({ provider: 'custom-http', model: 'mine', url });
   });

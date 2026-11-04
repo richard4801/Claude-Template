@@ -16,27 +16,51 @@ export function fakeRunpod(state: { balance: number; calls?: string[] }) {
   return new RunpodApi('rp_test_key', 'http://runpod.fake/graphql', f);
 }
 
-describe('wallets, ledger and caps (real RunPod balance via a fake API)', () => {
+describe('wallets, ledger and caps (owner-loaded studio balance)', () => {
   let a: Awaited<ReturnType<typeof makeApp>>;
   let owner: Client, tess: Client, mo: Client;
-  const rp = { balance: 20 };
+  const rp = { balance: 3 }; // RunPod's own balance no longer backs anything
   beforeAll(async () => {
     a = await makeApp({ BALANCE_MODE: 'runpod', RUNPOD_MIN_BALANCE_USD: '0', SPEED: '100000' }, { runpod: fakeRunpod(rp) });
-    const p = await people(a, 2);
+    const p = await people(a, 2, { topUp: 0 });
     owner = p.owner; tess = p.members[0]!; mo = p.members[1]!;
   });
   afterAll(async () => { await a.close(); });
 
-  it('balance reads RunPod; members start with 0 tokens', async () => {
+  it('a new studio starts at $0 and asks for the first top-up; nothing can be sent yet', async () => {
+    const b0 = (await owner.req('GET', '/v1/balance')).body;
+    expect(b0).toMatchObject({ balance: 0, studioBalance: 0, availableToSend: 0, balanceSource: 'studio', needsFirstTopUp: true });
+    expect(b0.runpodBalance).toBeUndefined();
+    const r = await owner.req('POST', '/v1/wallets/transfer', { toUserId: tess.id, tokens: 1 });
+    expect(r.status).toBe(402); expect(r.body.code).toBe('over_allocation');
+  });
+
+  it('top-ups: the owner records money loaded; it shows in the studio balance and the ledger', async () => {
+    expect((await owner.req('POST', '/v1/studio/topups', { amountUsd: 0 })).status).toBe(400);
+    expect((await owner.req('POST', '/v1/studio/topups', { amountUsd: 5, paidAt: Date.now() + 86_400_000 })).status).toBe(400);
+    const paidAt = Date.now() - 3_600_000;
+    const sb = (await owner.req('POST', '/v1/studio/topups', { amountUsd: 20, note: 'card', paidAt })).body;
+    expect(sb).toMatchObject({ balanceUsd: 20, toppedUpUsd: 20, spentUsd: 0, availableUsd: 20, membersCreditUsd: 0, needsFirstTopUp: false });
+    expect(sb.topUps[0]).toMatchObject({ amountUsd: 20, note: 'card', paidAt, createdBy: owner.id });
+    expect((await owner.req('GET', '/v1/studio/topups')).body.length).toBe(1);
+    const rows = await a.ctx.db.select().from(ledger).where(eq(ledger.kind, 'topup'));
+    expect(rows.map(x => [x.amountUsd, x.note])).toEqual([[20, 'Added $20.00 · card']]);
+    for (const [m, u, b] of [['GET', '/v1/studio/balance'], ['POST', '/v1/studio/topups', { amountUsd: 5 }], ['GET', '/v1/studio/topups'], ['POST', '/v1/balance/topup', { amount: 5 }]] as const) {
+      const r = await tess.req(m, u, b);
+      expect(r.status, u).toBe(403); expect(r.body.code).toBe('owner_only');
+    }
+  });
+
+  it('balance is the studio balance; members start with 0 tokens', async () => {
     const b = (await owner.req('GET', '/v1/balance')).body;
-    expect(b).toMatchObject({ balance: 20, runpodBalance: 20, availableToSend: 20, balanceSource: 'runpod', role: 'owner', tokens: 2000, tokenUsd: 0.01 });
+    expect(b).toMatchObject({ balance: 20, studioBalance: 20, availableToSend: 20, balanceSource: 'studio', role: 'owner', tokens: 2000, tokenUsd: 0.01 });
     const w = (await tess.req('GET', '/v1/wallet')).body;
     expect(w).toMatchObject({ tokens: 0, usd: 0, role: 'member' });
     expect((await tess.req('GET', '/v1/balance')).body).toMatchObject({ balance: 0, tokens: 0, role: 'member' });
   });
 
   it('members cannot call owner endpoints', async () => {
-    for (const [m, u, b] of [['GET', '/v1/members'], ['POST', '/v1/wallets/transfer', { toUserId: tess.id, tokens: 1 }], ['POST', '/v1/wallets/reclaim', { fromUserId: tess.id, tokens: 1 }],
+    for (const [m, u, b] of [['GET', '/v1/members'], ['GET', '/v1/gpu/warm'], ['POST', '/v1/gpu/warm', { on: true }], ['PATCH', '/v1/settings/image-engine', { provider: 'simulated' }], ['POST', '/v1/wallets/transfer', { toUserId: tess.id, tokens: 1 }], ['POST', '/v1/wallets/reclaim', { fromUserId: tess.id, tokens: 1 }],
       ['PATCH', `/v1/members/${tess.id}`, { capPerDay: 100 }], ['PATCH', '/v1/settings/studio', { maxGpus: 9 }], ['GET', '/v1/ledger']] as const) {
       const r = await tess.req(m, u, b);
       expect(r.status, u).toBe(403); expect(r.body.code).toBe('owner_only');
@@ -55,6 +79,7 @@ describe('wallets, ledger and caps (real RunPod balance via a fake API)', () => 
     const rows = await a.ctx.db.select().from(ledger).where(eq(ledger.kind, 'transfer'));
     expect(rows.map(x => [x.userId, x.actorId, x.tokens, x.note])).toContainEqual([tess.id, owner.id, 1200, 'test phase']);
     expect((await owner.req('GET', '/v1/balance')).body.balance).toBeCloseTo(5, 6);
+    expect((await owner.req('GET', '/v1/studio/balance')).body).toMatchObject({ balanceUsd: 20, membersCreditUsd: 15, availableUsd: 5 });
   });
 
   it('reclaim: only unused tokens come back', async () => {
@@ -116,13 +141,25 @@ describe('wallets, ledger and caps (real RunPod balance via a fake API)', () => 
     await owner.req('PATCH', '/v1/settings/studio', { capPerDay: 15 });
   });
 
-  it('balance unavailable without a RunPod key: says so, transfers refused', async () => {
+  it('spending from every engine counts against the studio balance; the owner spends from what is free', async () => {
+    const sb = (await owner.req('GET', '/v1/studio/balance')).body;
+    expect(sb.spentUsd).toBeGreaterThan(0); // tess's render settled
+    expect(sb.balanceUsd).toBeCloseTo(20 - sb.spentUsd, 6);
+    const w = (await tess.req('GET', '/v1/wallet')).body, m = (await mo.req('GET', '/v1/wallet')).body;
+    expect(sb.availableUsd).toBeCloseTo(sb.balanceUsd - (w.tokens + w.heldTokens + m.tokens + m.heldTokens) / 100, 6);
+    const om = await sienna(owner);
+    const r = await owner.req('POST', '/v1/jobs', { title: 'x', modelId: om.id, steps: 10, takes: 1, use: 'full' }); // ~$1.3 > what's free
+    if (sb.availableUsd < 1.3) { expect(r.status).toBe(402); expect(r.body.code).toBe('insufficient_balance'); expect(r.body.error).toMatch(/studio balance/); }
+  });
+
+  it('without a RunPod key the studio balance still works (it never reads RunPod); POST /v1/balance/topup records a top-up', async () => {
     const b = await makeApp({ BALANCE_MODE: 'runpod' });
-    const p = await people(b, 1);
-    const bal = (await p.owner.req('GET', '/v1/balance')).body;
-    expect(bal.balanceSource).toBe('unavailable');
-    expect((await p.owner.req('POST', '/v1/wallets/transfer', { toUserId: p.members[0]!.id, tokens: 5 })).body.code).toBe('balance_unavailable');
-    expect((await p.owner.req('POST', '/v1/balance/topup', { amount: 5 })).body.code).toBe('topup_unavailable');
+    const p = await people(b, 1, { topUp: 0 });
+    expect((await p.owner.req('GET', '/v1/balance')).body).toMatchObject({ balanceSource: 'studio', balance: 0, needsFirstTopUp: true });
+    const r = await p.owner.req('POST', '/v1/balance/topup', { amount: 5, method: 'card' });
+    expect(r.body).toMatchObject({ balance: 5, studioBalance: 5, needsFirstTopUp: false });
+    expect((await p.owner.req('POST', '/v1/wallets/transfer', { toUserId: p.members[0]!.id, tokens: 500 })).status).toBe(200);
+    expect((await p.owner.req('POST', '/v1/wallets/transfer', { toUserId: p.members[0]!.id, tokens: 1 })).body.code).toBe('over_allocation');
     await b.close();
   });
 });

@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { Ctx } from '../ctx.js';
 import { clips, jobs, loras, models, outfits, pods } from '../db/schema.js';
 import { ApiError } from '../errors.js';
+import { SOMETHING_WENT_WRONG } from '../services/jobs.js';
 import { sha256, uid } from '../lib/util.js';
 import { objectInfo } from '../storage/objects.js';
 import * as P from '../pricing.js';
@@ -157,7 +158,7 @@ export async function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx) {
     // gpuSeconds − load_s; the load goes on the pod's "GPU warm-up" line (its user's, or the owner's overhead).
     const load = Math.min(b.gpuSeconds ?? 0, b.stats?.load_s ?? 0);
     const rate = pod.costPerHr || ctx.config.GPU_HOURLY_USD;
-    if (load > 0 && !manual && !j.warmSessionId) await pool.chargeWarmup(pod, load, j.id, 'GPU warm-up: model load');
+    if (load > 0 && !manual && !j.warmSessionId) await pool.chargeWarmup(pod, load, j.id, 'Add-on start-up: model load');
     await ctx.jobs.complete(j.id, { outputs: reported, gpuSeconds: b.gpuSeconds == null ? undefined : b.gpuSeconds - load, costPerHr: rate, stats: b.stats ?? null });
     await pool.jobEnded(pod.id, Date.now());
     return reply.status(204).send();
@@ -167,8 +168,9 @@ export async function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx) {
     const { pod } = await podFor(req);
     const b = Failed.parse(req.body ?? {});
     const j = await jobOf(pod, req.params.id);
-    req.log.warn({ job: j.id, pod: pod.id, retryable: b.retryable }, 'worker reported failure');
-    await ctx.jobs.fail(j.id, b.error ?? 'The GPU job failed', b.retryable ?? false);
+    // The worker's own words (CUDA, OOM, paths) go to the log; members see a plain message.
+    req.log.warn({ job: j.id, pod: pod.id, retryable: b.retryable, err: (b.error ?? '').slice(0, 500) }, 'worker reported failure');
+    await ctx.jobs.fail(j.id, SOMETHING_WENT_WRONG, b.retryable ?? false);
     await pool.jobEnded(pod.id, Date.now());
     return reply.status(204).send();
   });

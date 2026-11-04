@@ -15,6 +15,7 @@ import type { TemplateService } from './templates/service.js';
 import type { WarmService } from './services/warm.js';
 import type { ReplicateClient } from './replicate/client.js';
 import type { ReplicateVideo } from './services/replicateVideo.js';
+import type { EngineHealth } from './services/engines.js';
 
 export type Ctx = {
   config: Config;
@@ -34,6 +35,8 @@ export type Ctx = {
   /** Replicate's HTTP API (video and photos share its rate-limit gate). */
   replicate: ReplicateClient;
   replicateVideo: ReplicateVideo;
+  /** Engine status and out-of-credit notices for owner Settings → Engines. */
+  engines: EngineHealth;
   /** Start-up facts for /health: the build, when it started, the schema migrations applied, the starter seed. */
   boot: { startedAt: number; build: string | null; migrations: { applied: number; latest: string | null }; starters?: { studios: number; added: number } | { error: string } };
   /** Absolute base URL of this API, for image URLs and presigned local-storage URLs. */

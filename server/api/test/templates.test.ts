@@ -26,7 +26,6 @@ describe('photo templates', () => {
   beforeAll(async () => {
     a = await makeApp({ DEV_MODE: 'true', BALANCE_MODE: 'simulated', SIM_START_BALANCE: '50', CAP_PER_USER_DAY_USD: '50', CAP_PER_DAY_USD: '100' });
     const p = await people(a, 2); owner = p.owner; tess = p.members[0]!; mo = p.members[1]!;
-    await a.ctx.money.simTopUp({ id: owner.id, studioId: (await a.ctx.db.query.users.findFirst())!.studioId, role: 'owner' }, 40);
     for (const m of [tess, mo]) await owner.req('POST', '/v1/wallets/transfer', { toUserId: m.id, tokens: 1000 });
     modelId = (await sienna(tess)).id;
   });
@@ -153,7 +152,9 @@ describe('photo templates', () => {
     expect(r.status).toBe(200);
     moShots = r.body;
     expect(moShots).toHaveLength(4);
-    expect((await mo.req('GET', '/v1/wallet')).body.usd).toBeCloseTo(before - 0.12, 6);
+    // Pass-through pricing: the simulated engine settles to the estimate, 4 × (0.015 + 0.015 × 2 + 0.015 × 0.79 × 6) = $0.4644 → 47 tokens.
+    expect((await mo.req('GET', '/v1/wallet')).body.usd).toBeCloseTo(before - 0.47, 6);
+    expect(moShots.reduce((t: number, x: any) => t + x.cost, 0)).toBeCloseTo(0.4644, 9);
     for (const s of moShots) {
       expect(s).toMatchObject({ kind: 'shot', templateId: tpl.id, templateName: 'Laundrette night' });
       expect(s.prompt.split('\n')).toContain('Template: Laundrette night');
@@ -295,7 +296,7 @@ describe('photo templates', () => {
 
   it('/health reports the build, the migrations and the starter seed', async () => {
     const h = (await a.app.inject({ method: 'GET', url: '/health' })).json();
-    expect(h.migrations).toEqual({ applied: 3, latest: '0002_warm_gpu' });
+    expect(h.migrations).toEqual({ applied: 4, latest: '0003_studio_balance' });
     expect(h.startedAt).toBeGreaterThan(0);
   });
 });

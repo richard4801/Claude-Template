@@ -6,6 +6,7 @@ import { loras, models, type ImageRef, type LoraCandidate } from '../db/schema.j
 import { ApiError, badRequest, notFound } from '../errors.js';
 import { compact } from '../lib/util.js';
 import { whoOf } from '../money/money.js';
+import { PhotoBill } from '../images/bill.js';
 import * as P from '../pricing.js';
 import { characterSheetShot, loraToken, SHEET_ANGLES } from '../prompt/engine.js';
 import type { JobRow } from '../gpu/controller.js';
@@ -53,21 +54,23 @@ export class LoraService {
     const m = await this.model(user, modelId);
     const l = await this.row(user, modelId);
     if (['building', 'training'].includes(l.state)) throw new ApiError(409, 'busy', 'Already working on it');
-    await this.ctx.money.charge(whoOf(user), P.LORA_SET_COST, 'LoRA training set', `lora_${modelId}`);
+    // Pass-through pricing: hold the estimate, settle to what the engine really charged (plans/api.md "App clean-up" §3).
+    const estimate = P.loraSetEstimate(this.ctx.images.photoPrices(), this.ctx.images.refCount(m.slots.map(s => s.image)));
+    const bill = await new PhotoBill(this.ctx, whoOf(user), `lora_${modelId}_${Date.now()}`, estimate, `LoRA training set · ${P.LORA_CANDIDATES} photos`).start();
     const before = l.state;
-    const building = await this.set(modelId, { state: 'building', candidates: [], progress: 0, cost: l.cost + P.LORA_SET_COST });
-    void this.generateCandidates(user, m, before).catch(() => {});
+    const building = await this.set(modelId, { state: 'building', candidates: [], progress: 0 });
+    void this.generateCandidates(user, m, before, bill).catch(() => {});
     return this.view(building);
   }
 
-  private async generateCandidates(user: AuthUser, m: typeof models.$inferSelect, before: string) {
+  private async generateCandidates(user: AuthUser, m: typeof models.$inferSelect, before: string, bill: PhotoBill) {
     try {
       const sel = await this.ctx.images.selection(user.studioId);
       const identity = { name: m.name, look: m.look || `${m.age}-year-old woman`, neverAdd: m.neverAdd, referenceCount: Math.max(1, m.slots.filter(s => s.image).length) };
       const refs = m.slots.map(s => s.image);
       let images: ImageRef[];
       if (sel.provider === 'simulated') {
-        const r = await this.ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'lora-candidate', refId: m.id, refs,
+        const r = await this.ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'lora-candidate', refId: m.id, refs, bill,
           req: { prompt: characterSheetShot(identity, SHEET_ANGLES[2]).text, width: 768, height: 1024, count: P.LORA_CANDIDATES, simAssets: LORA_POOL.map(p => p[0]) } });
         images = r.images;
       } else {
@@ -76,7 +79,7 @@ export class LoraService {
           const batch = await Promise.all(Array.from({ length: Math.min(4, P.LORA_CANDIDATES - i) }, (_, k) => {
             const n = i + k, angle = SHEET_ANGLES[n % SHEET_ANGLES.length]!;
             const prompt = `${characterSheetShot(identity, angle).text}\nVariation: ${VARIATIONS[n % VARIATIONS.length]}.`;
-            return this.ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'lora-candidate', refId: m.id, refs,
+            return this.ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'lora-candidate', refId: m.id, refs, bill,
               req: { prompt, width: 768, height: 1024, count: 1, seed: 1000 + n } }).then(r => r.images[0]!);
           }));
           images.push(...batch);
@@ -90,13 +93,14 @@ export class LoraService {
         return compact({ id: `c${i + 1}`, image, label: simulated ? label : `${SHEET_ANGLES[i % 6]!.label} · ${VARIATIONS[i % VARIATIONS.length]}`, flag, keep: !flag }) as LoraCandidate;
       });
       const [cur] = await this.ctx.db.select().from(loras).where(eq(loras.modelId, m.id));
+      await bill.finish();
       if (!cur || cur.state !== 'building') return;
-      this.emit(await this.set(m.id, { state: 'review', candidates }));
+      this.emit(await this.set(m.id, { state: 'review', candidates, cost: cur.cost + bill.spent }));
     } catch (e) {
       this.ctx.log.warn({ err: (e as Error).message }, 'LoRA training set failed');
-      await this.ctx.money.refundCharge(whoOf(user), P.LORA_SET_COST, 'LoRA training set failed', `lora_${m.id}`);
+      await bill.fail();
       const [cur] = await this.ctx.db.select().from(loras).where(eq(loras.modelId, m.id));
-      if (cur) this.emit(await this.set(m.id, { state: before === 'building' ? 'none' : before, cost: Math.max(0, cur.cost - P.LORA_SET_COST) }));
+      if (cur) this.emit(await this.set(m.id, { state: before === 'building' ? 'none' : before }));
     }
   }
 

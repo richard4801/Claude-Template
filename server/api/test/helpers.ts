@@ -41,8 +41,11 @@ export function client(a: App, token?: string) {
 }
 
 const ATTEST = { attestAdultRightsOriginal: true, attestLabelAi: true };
-/** Owner + members on a fresh studio (via real invites). */
-export async function people(a: App, members = 1): Promise<{ owner: Client; members: Client[] }> {
+/**
+ * Owner + members on a fresh studio (via real invites). `topUp` (default $100) is recorded as the owner's first top-up of
+ * the studio balance (plans/api.md "App clean-up" §4); pass 0 for a studio with no money loaded.
+ */
+export async function people(a: App, members = 1, opts: { topUp?: number } = {}): Promise<{ owner: Client; members: Client[] }> {
   const studio = await ensureStudio(a.ctx, 'Test Studio');
   const signUp = async (email: string, role: 'owner' | 'member') => {
     const inv = await createInvite(a.ctx, { studioId: studio.id, role });
@@ -53,6 +56,11 @@ export async function people(a: App, members = 1): Promise<{ owner: Client; memb
   const owner = await signUp('owner@test.dev', 'owner');
   const ms: Client[] = [];
   for (let i = 0; i < members; i++) ms.push(await signUp(`member${i + 1}@test.dev`, 'member'));
+  const topUp = opts.topUp ?? 100;
+  if (topUp > 0) {
+    const r = await owner.req('POST', '/v1/studio/topups', { amountUsd: topUp, note: 'test' });
+    if (r.status !== 200) throw new Error(`top-up failed ${JSON.stringify(r.body)}`);
+  }
   return { owner, members: ms };
 }
 
@@ -94,3 +102,9 @@ export async function sse(base: string, token: string) {
 }
 
 export { sql };
+
+/** Records another studio top-up directly (tests that used to set the simulated RunPod balance). */
+export async function topUp(a: App, studioId: string, usd: number) {
+  const [o] = await a.ctx.db.execute(sql`select id from users where studio_id = ${studioId} and role = 'owner' limit 1`).then((r: any) => r.rows ?? r);
+  await a.ctx.money.recordTopUp({ id: o.id, studioId, role: 'owner' }, { amountUsd: usd, note: 'test' });
+}

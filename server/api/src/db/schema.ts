@@ -85,7 +85,21 @@ export const studioSettings = pgTable('studio_settings', {
   warmIdleMinutes: integer('warm_idle_minutes'),
   /** Warm GPU session cap in minutes (null = WARM_MAX_MINUTES); "Keep warm" extends it once by the same amount. */
   warmMaxMinutes: integer('warm_max_minutes'),
+  /** The studio ledger's start (epoch ms): spending from here on counts against the owner's top-ups (2026-11-04). */
+  balanceSince: ms('balance_since'),
 });
+
+/** Money the owner loaded into the studio ("Added $20"). Also written to the ledger as a `topup` row. */
+export const topups = pgTable('topups', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  amountUsd: money('amount_usd').notNull(),
+  note: text('note'),
+  /** When the owner says they paid (defaults to when it was recorded). */
+  paidAt: ms('paid_at').notNull(),
+  createdBy: text('created_by'),
+  createdAt: ms('created_at').notNull(),
+}, t => [index('topups_studio_idx').on(t.studioId, t.createdAt)]);
 
 export const models = pgTable('models', {
   id: text('id').primaryKey(),
@@ -114,6 +128,8 @@ export const outfits = pgTable('outfits', {
   state: text('state').notNull(),
   prompt: text('prompt').notNull().default(''),
   seed: integer('seed'),
+  /** What the set really cost (exact, settled; null before it's made or for older sets). */
+  cost: money('cost'),
   createdBy: text('created_by'),
   createdAt: ms('created_at').notNull(),
 }, t => [index('outfits_studio_idx').on(t.studioId)]);
@@ -324,7 +340,7 @@ export const wallets = pgTable('wallets', {
  * Every token movement and every dollar spent. `userId` is whose wallet moved, `actorId` who caused it.
  * kinds: transfer (owner → member, +) | reclaim (member → owner, −) | hold (−spendable, +held) | release (hold returned on
  * failure) | settle (hold turned into spend at the actual cost; `amountUsd` = the spend) | charge (fixed-price work, spend)
- * | overhead (pod idle/start-up, studio spend with no user) | topup (dev: simulated RunPod credit).
+ * | overhead (pod idle/start-up, studio spend with no user) | topup (the owner loaded money: `amountUsd` > 0; old dev rows are 0).
  * "Today" and "this month" are sums of `amountUsd` over settle, charge and overhead rows.
  */
 export const ledger = pgTable('ledger', {

@@ -24,6 +24,7 @@ import { WarmService } from './services/warm.js';
 import { schemaState } from './db/client.js';
 import { ReplicateClient } from './replicate/client.js';
 import { ReplicateVideo } from './services/replicateVideo.js';
+import { EngineHealth } from './services/engines.js';
 
 declare module 'fastify' {
   interface FastifyRequest { user: AuthUser }
@@ -70,6 +71,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   ctx.replicate = new ReplicateClient({ token: config.REPLICATE_API_TOKEN, base: config.REPLICATE_API_URL, fetchFn: opts.fetchFn, log: app.log,
     ...(opts.replicateTime ?? {}) });
   ctx.replicateVideo = new ReplicateVideo(ctx);
+  ctx.engines = new EngineHealth(ctx);
   ctx.money = new Money(ctx);
   ctx.images = new ImageService(ctx, opts.fetchFn);
   ctx.jobs = new JobService(ctx);

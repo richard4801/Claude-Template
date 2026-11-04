@@ -8,7 +8,8 @@ This is the real backend for the MUSE Android and Mac apps. It speaks the same c
 - **GPU controller** (`src/gpu/`):
   - `simulated` (the default, free): renders run 24× faster than real time, like the mock.
   - `runpod`: one pod per user on the shared network volume, warm-pod reuse, idle shutdown, and the worker protocol at `/worker/v1/*`.
-  - **Keep GPU warm** (`src/services/warm.ts`, `POST /v1/gpu/warm`): a user holds a dedicated pod; its wall time is the "Warm GPU" ledger line, settled per minute, and their renders on it aren't charged GPU time again. It turns off after `WARM_IDLE_MINUTES` without a render, at the `WARM_MAX_MINUTES` cap (extended once by "Keep warm"), when their credit can't cover 10 more minutes, or when the RunPod balance drops below `RUNPOD_MIN_BALANCE_USD`. The studio setting `warmGpuAllowed` (default everyone) limits it to the owner.
+  - **Keep add-on engine ready** (was Keep GPU warm; `src/services/warm.ts`, `POST /v1/gpu/warm`, **owner only**, members get `403 owner_only`): the owner holds a dedicated pod; its wall time is the "Add-on engine ready" ledger line, settled per minute, and renders on it aren't charged GPU time again. It turns off after `WARM_IDLE_MINUTES` without a render, at the `WARM_MAX_MINUTES` cap (extended once), or when the studio balance can't cover 10 more minutes.
+  - **Studio balance** (`plans/api.md` "App clean-up" §4): the owner records top-ups (`POST /v1/studio/topups`); every engine's spending counts against them in this ledger. RunPod's own balance backs nothing (it's shown in owner Settings → Engines). Photos hold an estimate and settle to the exact Replicate cost (§3).
 - **Image engine** (`src/images/`): `simulated` (the bundled reference stills), `fal` (fal.ai queue API) or `custom-http` (our small contract). It is chosen per studio in Settings.
 - **Prompt engine** (`src/prompt/`): a port of `android/core` `PromptEngine.kt`, checked against the same fixtures.
 - **Photo templates** (`src/templates/`, `plans/templates.md`): reusable looks with hidden prompt layers and a variation pool.
@@ -136,7 +137,7 @@ Leave the bucket private. The API hands out short-lived links.
    - **The API:** `POST /v1/invites {email}` as the owner. The app screen for this comes with Phase C.
    - **A terminal:** with the Railway CLI, run `railway ssh` (pick the API service), then `npm run invite -- tester@example.com`. The code is printed there.
    In the app, **Invite someone → Share** sends the invite's `shareText`: the download page (`<PUBLIC_URL>/get`), the code and the email.
-5. **Giving testers credit:** the apps show dollars; the API counts whole tokens (1 token = `TOKEN_USD` = $0.01). Send credit to a tester with `POST /v1/wallets/transfer`. You can't send more than your RunPod balance backs.
+5. **Giving testers credit:** the apps show dollars; the API counts whole tokens (1 token = `TOKEN_USD` = $0.01). Send credit to a tester with `POST /v1/wallets/transfer`. Record what you loaded first (`POST /v1/studio/topups {amountUsd, note}`); you can't send more than the studio balance has free.
 6. **Publishing the apps** (see [App downloads](#app-downloads-and-invite-links)): upload the Android APK and the Mac zip once, and every invite link offers them.
 
 #### App downloads and invite links
@@ -191,10 +192,10 @@ For fal.ai: create a key at **fal.ai** → **Dashboard** → **Keys**, and add i
 | `S3_ENDPOINT`, `S3_FORCE_PATH_STYLE`, `STORAGE` | | MinIO or other S3. `STORAGE=local` uses disk (`UPLOAD_DIR`) |
 | `DIRECT_UPLOAD_MAX_MB` | `50` | Largest multipart upload; bigger files use `/v1/uploads/presign` |
 | `RUNPOD_API_KEY` | none | Balance (always read-only) and pods (in `runpod` mode). Never logged. Without it the balance says `unavailable` |
-| `BALANCE_MODE` | `runpod` (`simulated` in dev) | `simulated` = a stand-in RunPod credit (`SIM_START_BALANCE`) for dev and tests |
+| `BALANCE_MODE` | `runpod` (`simulated` in dev) | `simulated` = a new studio starts with a dev opening top-up of `SIM_START_BALANCE` (dev and tests) |
 | `TOKEN_USD` | `0.01` | Dollars per wallet token |
 | `CAP_PER_JOB_USD`, `CAP_PER_DAY_USD`, `CAP_PER_USER_DAY_USD` | `5`, `15`, `10` | Default caps. The owner can change them in settings and per member |
-| `RUNPOD_MIN_BALANCE_USD` | `2` | New jobs pause when the RunPod balance < work in flight + this |
+| `RUNPOD_MIN_BALANCE_USD` | `2` | Unused since 2026-11-04 (nothing pauses on a provider balance) |
 | `GPU_MODE` | `simulated` | `runpod` starts real pods |
 | `RUNPOD_NETWORK_VOLUME_ID`, `RUNPOD_DATACENTER_ID`, `RUNPOD_IMAGE`, `RUNPOD_START_CMD`, `RUNPOD_CONTAINER_DISK_GB` | | Pod template |
 | `GPU_TABLE` | H3 → H100s then H200s; Viggle → H200 NVL, H200 | GPU types per job kind (JSON), best first |
@@ -214,7 +215,7 @@ For fal.ai: create a key at **fal.ai** → **Dashboard** → **Keys**, and add i
 
 ## What's real and what's still a stand-in
 - **Real:**
-  - accounts, invites, sessions, wallets, the ledger, caps and the RunPod balance
+  - accounts, invites, sessions, wallets, the ledger, caps and the owner-loaded studio balance
   - storage and presigned uploads
   - the prompt engine and pricing
   - the fal and custom-http image engines

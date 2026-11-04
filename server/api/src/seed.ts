@@ -2,7 +2,7 @@
 // so the apps and their contract tests behave the same against this server. Only used with DEV_SEED / DEV_MODE.
 import { eq, sql } from 'drizzle-orm';
 import type { Ctx } from './ctx.js';
-import { accounts, clips, generatedImages, templateFavourites, templates, jobs, ledger, loras, models, outfits, pods, posts, studios, studioSettings, takes, uploads, users, wallets, warmSessions } from './db/schema.js';
+import { accounts, clips, generatedImages, templateFavourites, templates, jobs, ledger, loras, models, outfits, pods, posts, studios, studioSettings, takes, topups, uploads, users, wallets, warmSessions } from './db/schema.js';
 import { ensureStudio, hashPassword } from './auth/auth.js';
 import { dayStart, monthStart } from './lib/util.js';
 
@@ -28,13 +28,17 @@ export async function seedDev(ctx: Ctx, o: { onlyIfEmpty?: boolean; reset?: bool
   }
   if (o.reset) {
     await ctx.gpu.shutdown();
-    for (const t of [templateFavourites, templates, takes, jobs, outfits, clips, loras, accounts, posts, ledger, warmSessions, pods, generatedImages, uploads, models]) await db.delete(t);
+    for (const t of [templateFavourites, templates, takes, jobs, outfits, clips, loras, accounts, posts, ledger, topups, warmSessions, pods, generatedImages, uploads, models]) await db.delete(t);
     await db.update(wallets).set({ tokens: 0, held: 0, updatedAt: now });
     ctx.templates.forget();
   }
   await db.update(studios).set({ name: 'Jenne Studio' }).where(eq(studios.id, sid));
-  await db.insert(studioSettings).values({ studioId: sid, simBalance: ctx.config.SIM_START_BALANCE })
-    .onConflictDoUpdate({ target: studioSettings.studioId, set: { simBalance: ctx.config.SIM_START_BALANCE, failNext: false, lowBalanceSince: null, imageEngine: null } });
+  // The studio ledger starts now with a dev opening top-up of SIM_START_BALANCE (the seeded spend rows below are older).
+  await db.insert(studioSettings).values({ studioId: sid, simBalance: ctx.config.SIM_START_BALANCE, balanceSince: now })
+    .onConflictDoUpdate({ target: studioSettings.studioId, set: { simBalance: ctx.config.SIM_START_BALANCE, failNext: false, lowBalanceSince: null, imageEngine: null, balanceSince: now } });
+  if (!(await db.select({ id: topups.id }).from(topups).where(eq(topups.studioId, sid)).limit(1)).length) {
+    await ctx.money.recordTopUp({ id: owner!.id, studioId: sid, role: 'owner' }, { amountUsd: ctx.config.SIM_START_BALANCE, note: 'Dev opening balance', at: now }, false);
+  }
 
   const slotsFull = SLOT_KEYS.map(k => ({ key: k, image: asset(SLOT_SAMPLE[k]!), source: 'upload' as const, busy: false }));
   await db.insert(models).values([
@@ -51,15 +55,15 @@ export async function seedDev(ctx: Ctx, o: { onlyIfEmpty?: boolean; reset?: bool
   await db.insert(jobs).values([
     { ...base, id: 'j1', title: 'Kick test', outfitId: 'o_green', request: req('Kick test', 'viggle', 4), state: 'done', progress: 100, step: 4, totalSteps: 4, phase: 'Done', secondsLeft: 0, totalSeconds: 95, cost: 0.13, createdAt: now - 7_200_000, finishedAt: now - 7_000_000, seed: 7, thumb: asset('g_front') },
     { ...base, id: 'j2', title: 'Bathroom trend', outfitId: 'o_crystal', request: req('Bathroom trend', 'h3', 30, 'o_crystal'), state: 'done', progress: 100, step: 30, totalSteps: 30, phase: 'Done', secondsLeft: 0, totalSeconds: 2760, cost: 3.05, createdAt: now - 86_400_000, finishedAt: now - 83_640_000, seed: 42, thumb: asset('c_front') },
-    { ...base, id: 'j0', title: 'Mirror selfie', outfitId: 'o_green', request: req('Mirror selfie', 'h3', 10), state: 'failed', gpuState: 'failed', progress: 18, step: 3, totalSteps: 10, phase: 'Failed at step 3', secondsLeft: 0, totalSeconds: 608, cost: 0.19, refunded: 0.19, error: 'The GPU disconnected at step 3.', createdAt: now - 3_600_000, seed: 42, thumb: asset('g_tq') },
+    { ...base, id: 'j0', title: 'Mirror selfie', outfitId: 'o_green', request: req('Mirror selfie', 'h3', 10), state: 'failed', gpuState: 'failed', progress: 18, step: 3, totalSteps: 10, phase: 'Failed', secondsLeft: 0, totalSeconds: 608, cost: 0.19, refunded: 0.19, error: "Something went wrong · you weren't charged", createdAt: now - 3_600_000, seed: 42, thumb: asset('g_tq') },
   ]);
   const t = (id: string, kind: 'take' | 'shot', jobId: string | null, title: string, label: string, engineLabel: string, cost: number, seed: number, thumb: string, createdAt: number) =>
     ({ id, studioId: sid, userId: owner!.id, kind, jobId, modelId: 'm_sienna', index: 1, of: 1, title, label, engineLabel, cost, seed, status: 'test' as const, thumb: asset(thumb), prompt: '', createdAt });
   await db.insert(takes).values([
     t('t_j1', 'take', 'j1', 'Kick test', 'Fast · beta', 'Fast · beta', 0.13, 7, 'g_front', now - 7_000_000),
-    t('t_j2', 'take', 'j2', 'Bathroom trend', '30 steps', 'Standard · 30 steps', 3.05, 42, 'c_front', now - 83_640_000),
-    t('t_g1', 'take', null, 'Living-room dance', '10 steps', 'Standard · 10 steps', 0.67, 42, 'g_tq', now - 90_000_000),
-    t('t_g5', 'take', null, 'Living-room dance', '15 steps', 'Standard · 15 steps', 0.99, 42, 'g_side', now - 95_000_000),
+    t('t_j2', 'take', 'j2', 'Bathroom trend', 'Edit', 'Edit', 3.05, 42, 'c_front', now - 83_640_000),
+    t('t_g1', 'take', null, 'Living-room dance', 'Edit', 'Edit', 0.67, 42, 'g_tq', now - 90_000_000),
+    t('t_g5', 'take', null, 'Living-room dance', 'Edit', 'Edit', 0.99, 42, 'g_side', now - 95_000_000),
     t('t_g4', 'shot', null, 'Shoot', 'Shoot', '', 0.03, 0, 'c_front', now - 96_000_000),
     t('t_g6', 'shot', null, 'Shoot', 'Shoot', '', 0.03, 0, 'c_tq', now - 97_000_000),
   ]);

@@ -9,7 +9,20 @@ import { generatedImages, studioSettings, type ImageRef } from '../db/schema.js'
 import { ApiError } from '../errors.js';
 import { sha256, uid } from '../lib/util.js';
 import { putObject } from '../storage/objects.js';
-import { CustomHttpEngine, FalEngine, ImageEngineError, ReplicateImageEngine, SimulatedEngine, type EngineSelection, type ImageEngine, type ImageRequest } from './engines.js';
+import { CustomHttpEngine, FalEngine, ImageEngineError, ReplicateImageEngine, SimulatedEngine, type EngineImage, type EngineSelection, type ImageEngine, type ImageRequest } from './engines.js';
+import * as P from '../pricing.js';
+import type { PhotoBill } from './bill.js';
+
+/** Member-safe messages (plans/api.md "App clean-up" §1). The engine's own words go to the log only. */
+export const PHOTO_FAILED = "Something went wrong making the photos · you weren't charged";
+export const PHOTO_REFUSED = "This photo was refused by the content filter · you weren't charged";
+export const PHOTO_BUSY = "Busy right now · you weren't charged. Try again in a minute.";
+export const OUT_OF_CREDIT = "Something went wrong · you weren't charged. The studio owner has been told.";
+
+/** An ApiError from a photo call, carrying what the engine already billed for images that were thrown away. */
+export class PhotoError extends ApiError {
+  constructor(status: number, code: string, message: string, readonly spentUsd: number) { super(status, code, message); }
+}
 
 export const ASSET_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../assets/ref');
 export const ASSET_KEYS = fs.existsSync(ASSET_DIR) ? fs.readdirSync(ASSET_DIR).filter(f => f.endsWith('.jpg')).map(f => f.slice(0, -4)) : [];
@@ -50,15 +63,27 @@ export class ImageService {
     const c = this.ctx.config;
     return { provider: 'replicate', model: model ?? c.REPLICATE_IMAGE_MODEL, editModel: c.REPLICATE_IMAGE_EDIT_MODEL };
   }
-  /** "FLUX.2 [pro] · Replicate", "Simulated", the fal model id, "Custom". */
+  /** Photo prices from config (plans/api.md "App clean-up" §3). */
+  photoPrices(): P.PhotoPrices {
+    const c = this.ctx.config;
+    return { perRun: c.REPLICATE_IMAGE_RUN_USD, perInputMp: c.REPLICATE_IMAGE_MP_USD, perOutputMp: c.REPLICATE_IMAGE_MP_USD, perEdit: c.REPLICATE_IMAGE_EDIT_USD,
+      refMp: P.PHOTO_REF_MP, maxRefs: c.REPLICATE_IMAGE_MAX_REFS };
+  }
+  /** `features.photo` for the apps. */
+  photoFeatures() {
+    const p = this.photoPrices(), r = p.maxRefs;
+    return { ...p, loraShots: P.LORA_CANDIDATES,
+      estimates: { shoot: P.shootEstimate(p, 4, r), outfitSet: P.outfitSetEstimate(p, r), sheetAngle: P.sheetAnglesEstimate(p, 1, r), loraSet: P.loraSetEstimate(p, r) } };
+  }
+  /** How many references a call will really send (nulls dropped, capped). */
+  refCount(refs: (ImageRef | null | undefined)[]) { return Math.min(refs.filter(Boolean).length, this.photoPrices().maxRefs); }
+
+  /** "FLUX.2 [pro] · Replicate", "Simulated", the fal model id, "Custom" (owner Settings → Engines only). */
   label(sel: EngineSelection) {
     return sel.provider === 'replicate' ? `${modelLabel(sel.model)} · Replicate` : sel.provider === 'simulated' ? 'Simulated' : sel.provider === 'fal' ? sel.model : 'Custom';
   }
-  /** What a shot made with this engine shows as its engineLabel ("" except on Replicate). */
-  shotLabel(sel: EngineSelection, edit = false) {
-    if (sel.provider !== 'replicate') return '';
-    return `${modelLabel(edit ? sel.editModel ?? this.ctx.config.REPLICATE_IMAGE_EDIT_MODEL : sel.model)} · Replicate`;
-  }
+  /** A shot's engineLabel: always "" since 2026-11-04 (the engine is never shown on a photo). */
+  shotLabel(_sel?: EngineSelection) { return ''; }
 
   async selection(studioId: string, override?: Partial<EngineSelection> | null): Promise<EngineSelection> {
     const [s] = await this.ctx.db.select({ e: studioSettings.imageEngine }).from(studioSettings).where(eq(studioSettings.studioId, studioId));
@@ -146,7 +171,9 @@ export class ImageService {
     /** References as image refs, most important first (face, profile, outfit or product, body); turned into URLs here. */
     refs?: (ImageRef | null | undefined)[];
     /** Edit this photo instead of making a new shot (Replicate's edit model; other engines treat it as the first reference). */
-    editOf?: ImageRef | null }): Promise<{ images: ImageRef[]; seed?: number; costUsd: number; selection: EngineSelection }> {
+    editOf?: ImageRef | null;
+    /** The action's bill: each image's exact cost is added; images billed but thrown away on a failure are recorded. */
+    bill?: PhotoBill }): Promise<{ images: ImageRef[]; seed?: number; costUsd: number; costs: number[]; selection: EngineSelection }> {
     const sel = await this.selection(o.studioId, o.override);
     const engine = this.engines[sel.provider];
     if (!engine) throw new ApiError(400, 'bad_request', `Unknown image engine ${sel.provider}`);
@@ -163,26 +190,49 @@ export class ImageService {
         }
       } else req.referenceImages = (await Promise.all(list.map(r => this.loadableUrl(r)))).filter(Boolean) as string[];
     }
+    const prices = this.photoPrices();
+    const edit = !!o.editOf && sel.provider === 'replicate';
+    /** Cost of one image: Replicate's billing info (exact), the engine's own figure, or (simulated) the estimate. */
+    const costOf = (img: EngineImage, outMp?: number) => {
+      if (img.bill) return P.photoPredictionCost(prices, img.bill.kind, { inMp: img.bill.inMp, outMp: outMp ?? img.bill.outMp, outputs: 1 }, img.bill.metrics);
+      if (sel.provider === 'simulated') return o.editOf ? prices.perEdit : P.newShotEstimate(prices, P.outMpFor(o.req.width, o.req.height), this.refCount(o.refs ?? []));
+      return null;
+    };
     let out;
     try {
       out = await engine.generate(req, sel);
     } catch (e) {
       this.ctx.log.warn({ provider: sel.provider, model: sel.model, err: (e as Error).message }, 'image engine failed');
+      const partial = e instanceof ImageEngineError ? e.partial : [];
+      const spent = partial.reduce((a, img) => a + (costOf(img) ?? 0), 0);
+      o.bill?.waste(spent);
       const code = e instanceof ImageEngineError ? e.code : undefined;
-      if (code === 'provider_refused') throw new ApiError(422, 'provider_refused', e instanceof Error ? e.message : "Replicate's safety filter refused this photo");
-      if (code === 'provider_rate_limited') throw new ApiError(429, 'provider_rate_limited', (e as Error).message);
-      if (code === 'engine_unavailable') throw new ApiError(400, 'engine_unavailable', (e as Error).message);
-      throw new ApiError(502, 'image_engine_failed', e instanceof ImageEngineError ? e.message : 'The image engine failed');
+      if (code === 'provider_refused') throw new PhotoError(422, 'provider_refused', PHOTO_REFUSED, spent);
+      if (code === 'provider_rate_limited') throw new PhotoError(429, 'provider_rate_limited', PHOTO_BUSY, spent);
+      if (code === 'provider_out_of_credit') {
+        await this.ctx.engines.outOfCredit(o.studioId, 'replicate', (e as Error).message);
+        throw new PhotoError(503, 'provider_out_of_credit', OUT_OF_CREDIT, spent);
+      }
+      if (code === 'engine_unavailable') throw new PhotoError(400, 'engine_unavailable', "Photos aren't available right now", spent);
+      throw new PhotoError(502, 'image_engine_failed', PHOTO_FAILED, spent);
     }
-    const per = (out.costUsd ?? 0) / Math.max(1, out.images.length);
+    if (sel.provider === 'replicate') this.ctx.engines.worked('replicate');
+    const images = out.images.slice(0, o.req.count);
+    const engineTotal = out.costUsd;
     const refs: ImageRef[] = [];
-    for (const img of out.images.slice(0, o.req.count)) {
+    const costs: number[] = [];
+    for (const img of images) {
       const id = uid('img');
-      let ref: ImageRef, storageKey: string | null = null;
+      let ref: ImageRef, storageKey: string | null = null, outMp: number | undefined;
+      const measure = async (buf: Buffer) => {
+        try { const sharp = (await import('sharp')).default; const m = await sharp(buf).metadata(); if (m.width && m.height) outMp = m.width * m.height / 1e6; } catch { /* keep the requested size */ }
+      };
       if (img.asset) ref = { asset: img.asset, url: this.assetUrl(img.asset) };
       else if (img.b64) {
         storageKey = `g/${id}.png`;
-        await putObject(this.ctx, { key: storageKey, body: Buffer.from(img.b64, 'base64'), studioId: o.studioId, kind: 'generated', userId: o.userId, contentType: 'image/png' });
+        const buf = Buffer.from(img.b64, 'base64');
+        if (img.bill) await measure(buf);
+        await putObject(this.ctx, { key: storageKey, body: buf, studioId: o.studioId, kind: 'generated', userId: o.userId, contentType: 'image/png' });
         ref = { url: `${this.ctx.config.PUBLIC_URL ?? ''}/uploads/${storageKey}` };
       } else if (img.url) {
         ref = { url: img.url };
@@ -190,19 +240,25 @@ export class ImageService {
           const r = await fetch(img.url, { signal: AbortSignal.timeout(30_000) });
           if (r.ok) {
             const ct = r.headers.get('content-type') ?? 'image/jpeg';
+            const buf = Buffer.from(await r.arrayBuffer());
+            if (img.bill) await measure(buf);
             storageKey = `g/${id}.${ct.includes('png') ? 'png' : ct.includes('webp') ? 'webp' : 'jpg'}`;
-            await putObject(this.ctx, { key: storageKey, body: Buffer.from(await r.arrayBuffer()), studioId: o.studioId, kind: 'generated', userId: o.userId, contentType: ct });
+            await putObject(this.ctx, { key: storageKey, body: buf, studioId: o.studioId, kind: 'generated', userId: o.userId, contentType: ct });
             ref = { url: `${this.ctx.config.PUBLIC_URL ?? ''}/uploads/${storageKey}` };
           }
         } catch { /* keep the provider's URL */ }
       } else continue;
+      const cost = costOf(img, outMp) ?? (engineTotal ?? 0) / Math.max(1, images.length);
+      costs.push(cost);
       await this.ctx.db.insert(generatedImages).values({
         id, studioId: o.studioId, userId: o.userId, purpose: o.purpose, refId: o.refId ?? null, provider: sel.provider,
-        model: req.editOf ? sel.editModel ?? sel.model : sel.model, prompt: o.req.prompt, negative: o.req.negative ?? null, seed: out.seed ?? o.req.seed ?? null, costUsd: per, image: ref, storageKey, createdAt: Date.now(),
+        model: req.editOf || edit ? sel.editModel ?? sel.model : sel.model, prompt: o.req.prompt, negative: o.req.negative ?? null, seed: out.seed ?? o.req.seed ?? null, costUsd: cost, image: ref, storageKey, createdAt: Date.now(),
       });
       refs.push(ref);
     }
-    if (!refs.length) throw new ApiError(502, 'image_engine_failed', 'The image engine returned no images');
-    return { images: refs, seed: out.seed, costUsd: out.costUsd ?? 0, selection: sel };
+    const total = costs.reduce((a, b) => a + b, 0);
+    if (!refs.length) { o.bill?.waste(total); throw new PhotoError(502, 'image_engine_failed', PHOTO_FAILED, total); }
+    o.bill?.add(total);
+    return { images: refs, seed: out.seed, costUsd: total, costs, selection: sel };
   }
 }

@@ -7,7 +7,7 @@
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
-import { clips, jobs, loras, models, outfits, studioSettings, takes, users, type ImageRef } from '../db/schema.js';
+import { clips, jobs, loras, models, outfits, takes, type ImageRef } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
 import { compact, uid } from '../lib/util.js';
 import { whoOf } from '../money/money.js';
@@ -16,6 +16,7 @@ import { loraToken, replicateSwap, videoSwap } from '../prompt/engine.js';
 import { gpuCanRun, type JobRow } from '../gpu/controller.js';
 import { pods } from '../db/schema.js';
 import { shotPromptFor } from '../templates/service.js';
+import { OUT_OF_CREDIT as OUT_OF_CREDIT_MESSAGE } from '../images/service.js';
 
 export const JobRequestSchema = z.object({
   title: z.string().max(200).optional(),
@@ -40,10 +41,13 @@ export const JobRequestSchema = z.object({
 }).passthrough();
 
 const MOTION_WORDS: Record<string, string> = { still: 'still', subtle: 'subtly alive', busy: 'busy' };
-const ordinal = (n: number) => n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`;
 const mins = (s: number) => s >= 60 ? `~${Math.ceil(s / 60)} min` : `~${Math.ceil(s)}s`;
-export const LOW_BALANCE = 'owner_balance_low';
-export const PAUSED_PHASE = "Paused: the studio's GPU credit is low";
+/** Member-facing phases and messages (plans/api.md "App clean-up" §1): no GPU, steps, start-up or provider names. */
+export const WAITING_PHASE = 'Waiting to start';
+export const SOMETHING_WENT_WRONG = "Something went wrong · you weren't charged";
+/** "Waiting to start" (first in line) or "#2 in line", plus " · starts in ~3 min" when known. */
+export const linePhase = (position: number, startsIn: number) =>
+  `${position > 1 ? `#${position} in line` : WAITING_PHASE}${startsIn > 0 ? ` · starts in ${mins(startsIn)}` : ''}`;
 
 type QueueInfo = { queuePosition: number; etaSeconds: number; startsInSeconds: number };
 
@@ -94,10 +98,10 @@ export class JobService {
     r.takes = Math.min(P.TAKES_MAX, Math.max(1, r.takes));
     const replicate = r.engine === 'replicate';
     if (replicate) {
-      if (!this.ctx.replicate.configured) throw new ApiError(400, 'engine_unavailable', "Replicate isn't set up on the server · use Exact edit");
-      if (r.lipSync) throw badRequest('Lip sync is only on Exact edit');
-      if (r.background === 'photo') throw badRequest('A new background photo is only on Exact edit for now');
-      if (!(await this.ctx.replicateVideo.toolsReady())) throw new ApiError(400, 'engine_unavailable', "The server can't prepare clips for Replicate (ffmpeg is missing) · use Exact edit");
+      if (!this.ctx.replicate.configured) throw new ApiError(400, 'engine_unavailable', "Draft, Standard and HD aren't available right now · try Edit");
+      if (r.lipSync) throw badRequest('Lip sync is only on Edit');
+      if (r.background === 'photo') throw badRequest('A new background photo is only on Edit for now');
+      if (!(await this.ctx.replicateVideo.toolsReady())) throw new ApiError(400, 'engine_unavailable', "Draft, Standard and HD aren't available right now · try Edit");
       r.use = 'full';
       r.quality = r.quality ?? this.ctx.config.VIDEO_QUALITY_DEFAULT;
       (r as P.RenderReq).pricePerSec = this.qualityPrice(r.quality);
@@ -105,8 +109,8 @@ export class JobService {
     const [clip] = r.clipId ? await this.ctx.db.select().from(clips).where(and(eq(clips.id, r.clipId), eq(clips.studioId, user.studioId))) : [];
     if (clip && clip.checks.some(c => c.status === 'bad')) throw new ApiError(422, 'clip_failed_checks', 'Fix the clip checks first');
     if (r.engine === 'h3' && (r.steps < P.STEPS_MIN || r.steps > P.STEPS_MAX)) throw badRequest('Steps must be 4–30');
-    if (replicate && !clip?.storageKey) throw badRequest('Upload the clip file first: Replicate needs the video');
-    if (!replicate && this.ctx.gpu.mode === 'runpod' && !clip?.storageKey) throw badRequest('Upload the clip file first: the GPU needs the video');
+    if (replicate && !clip?.storageKey) throw badRequest('Upload the clip file first');
+    if (!replicate && this.ctx.gpu.mode === 'runpod' && !clip?.storageKey) throw badRequest('Upload the clip file first');
     if (r.clipSeconds == null && clip) r.clipSeconds = clip.durationSec;
     const [m] = await this.ctx.db.select().from(models).where(and(eq(models.id, r.modelId), eq(models.studioId, user.studioId)));
     if (!m) throw notFound('Model');
@@ -169,7 +173,7 @@ export class JobService {
   }
   private pendingFields(hold: number) {
     const now = Date.now();
-    return { state: 'running' as const, gpuState: 'pending' as const, holdTokens: hold, queuedAt: now, startedAt: now, phase: 'Waiting for a GPU' };
+    return { state: 'running' as const, gpuState: 'pending' as const, holdTokens: hold, queuedAt: now, startedAt: now, phase: WAITING_PHASE };
   }
 
   /** Starts a job that is already in the database (queued → running, or a LoRA training row). */
@@ -224,23 +228,27 @@ export class JobService {
   features() {
     const caps = this.capabilities();
     const replicate = this.ctx.replicate.configured;
-    const options = [
-      ...P.QUALITY_IDS.map(q => ({ id: q, label: P.QUALITY_INFO[q].label, detail: P.QUALITY_INFO[q].detail, engine: 'replicate', quality: q,
-        resolution: P.QUALITY_INFO[q].resolution, pricePerSec: this.qualityPrice(q), available: replicate })),
-      { id: 'exact', label: P.EXACT_EDIT.label, detail: P.EXACT_EDIT.detail, engine: 'h3', available: caps.includes('h3') },
+    // Render (Draft / Standard / HD) and the add-ons (Edit, Fast · beta, Upscale): plans/api.md "App clean-up" §2.
+    const options = P.QUALITY_IDS.map(q => ({ id: q, label: P.QUALITY_INFO[q].label, detail: P.QUALITY_INFO[q].detail, engine: 'replicate', quality: q,
+      resolution: P.QUALITY_INFO[q].resolution, pricePerSec: this.qualityPrice(q), available: replicate }));
+    const addons = [
+      { id: 'edit', label: P.EDIT.label, detail: P.EDIT.detail, available: caps.includes('h3'), sends: { engine: 'h3', use: 'full', steps: P.STEPS_DEFAULT } },
+      { id: 'fast', label: P.FAST.label, detail: P.FAST.detail, available: caps.includes('viggle'), sends: { engine: 'viggle', use: 'full' } },
+      { id: 'upscale', label: P.UPSCALE.label, detail: P.UPSCALE.detail, available: false, comingSoon: true,
+        sizes: P.UPSCALE_SIZES.map(z => ({ ...z, available: false, price: null })) },
     ];
     const video = { defaultEngine: this.ctx.config.videoEngineDefault === 'viggle' ? 'h3' : this.ctx.config.videoEngineDefault, defaultQuality: this.ctx.config.VIDEO_QUALITY_DEFAULT,
-      minSeconds: P.REPLICATE_MIN_SEC, maxSeconds: P.REPLICATE_MAX_SEC, options };
+      minSeconds: P.REPLICATE_MIN_SEC, maxSeconds: P.REPLICATE_MAX_SEC, options, addons };
     return { standard: caps.includes('h3'), fastBeta: caps.includes('viggle'), lipSync: caps.includes('latentsync'), loraTraining: caps.includes('lora-train'),
       replaceAudio: false, outputSize: { width: 768, height: 1344 }, maxClipSec: P.MAX_CLIP_SEC, replicate, video };
   }
   /** Refuse before any GPU starts when the pod image can't run this. */
   requireCapabilities(kind: 'h3' | 'viggle' | 'lora-train', lipSync = false) {
     const caps = this.capabilities();
-    if (kind === 'viggle' && !caps.includes('viggle')) throw new ApiError(400, 'engine_unavailable', "Fast · beta isn't enabled on the GPU yet (it needs an H200 pod image) · use Standard");
-    if (kind === 'lora-train' && !caps.includes('lora-train')) throw new ApiError(400, 'engine_unavailable', "LoRA training isn't enabled on the GPU yet");
-    if (kind === 'h3' && !caps.includes('h3')) throw new ApiError(400, 'engine_unavailable', "Standard renders aren't enabled on the GPU");
-    if (lipSync && !caps.includes('latentsync')) throw new ApiError(400, 'engine_unavailable', "Lip sync isn't enabled on the GPU yet · turn it off to render");
+    if (kind === 'viggle' && !caps.includes('viggle')) throw new ApiError(400, 'engine_unavailable', "Fast · beta isn't available yet · use Draft, Standard or HD");
+    if (kind === 'lora-train' && !caps.includes('lora-train')) throw new ApiError(400, 'engine_unavailable', "LoRA training isn't available yet");
+    if (kind === 'h3' && !caps.includes('h3')) throw new ApiError(400, 'engine_unavailable', "Edit isn't available right now");
+    if (lipSync && !caps.includes('latentsync')) throw new ApiError(400, 'engine_unavailable', "Lip sync isn't available yet · turn it off to render");
   }
 
   // ------------------------------------------------------------------ GPU side
@@ -273,7 +281,7 @@ export class JobService {
     if (!u) return null;
     this.queueInfo.delete(u.id);
     this.lineInfo.delete(u.id);
-    const p = u.kind === 'render' ? P.progressAt(u.request, 0) : { phase: 'Starting GPU' };
+    const p = u.kind === 'render' ? P.progressAt(u.request, 0) : { phase: 'Getting ready' };
     const [v] = await this.ctx.db.update(jobs).set({ ...p, blocked: null }).where(eq(jobs.id, u.id)).returning();
     this.emitJob(v!);
     if (v!.kind === 'lora-train') await this.ctx.lora.onProgress(v!, 0);
@@ -330,7 +338,7 @@ export class JobService {
     const j = await this.get(jobId);
     if (!j || j.state !== 'running') return null;
     const [u] = await this.ctx.db.update(jobs).set({
-      state: 'failed', gpuState: 'failed', error, retryable, refunded: j.cost, finishedAt: Date.now(), phase: isRep(j) ? 'Failed' : `Failed at step ${j.step}`,
+      state: 'failed', gpuState: 'failed', error, retryable, refunded: j.cost, finishedAt: Date.now(), phase: 'Failed',
       ...(errorCode ? { stats: { ...((j.stats as object | null) ?? {}), errorCode } } : {}),
     }).where(and(eq(jobs.id, jobId), eq(jobs.state, 'running'))).returning();
     if (!u) return null;
@@ -369,18 +377,13 @@ export class JobService {
     this.ticking = true;
     try {
       const all = await this.waitingJobs();
-      // Replicate jobs have their own line (services/replicateVideo.ts): no pod, no RunPod balance pause.
+      // Replicate jobs have their own line (services/replicateVideo.ts), never on a pod.
       const waiting = all.filter(j => !isRep(j));
       await this.ctx.replicateVideo.dispatch(all.filter(isRep));
-      const studios = [...new Set(waiting.map(j => j.studioId))];
-      // Low RunPod balance: pause new jobs for everyone until it recovers.
-      const blockedStudios = new Set<string>();
-      for (const s of studios) if (await this.balanceLow(s, now)) blockedStudios.add(s);
-      await this.clearRecovered(studios, blockedStudios);
+      // Nothing pauses on a provider balance any more (2026-11-04): clear any job an older build paused.
       for (const j of waiting) {
-        const want = blockedStudios.has(j.studioId) ? LOW_BALANCE : null;
-        if (j.blocked !== want) {
-          const [u] = await this.ctx.db.update(jobs).set({ blocked: want, phase: want ? PAUSED_PHASE : 'Waiting for a GPU' }).where(eq(jobs.id, j.id)).returning();
+        if (j.blocked) {
+          const [u] = await this.ctx.db.update(jobs).set({ blocked: null, phase: WAITING_PHASE }).where(eq(jobs.id, j.id)).returning();
           if (u) { Object.assign(j, u); this.emitJob(u); }
         }
       }
@@ -401,38 +404,11 @@ export class JobService {
     }
   }
 
-  /** True when the RunPod balance can't cover the work in flight plus the safety margin. */
-  private async balanceLow(studioId: string, now: number) {
-    const rp = await this.ctx.money.runpodBalance(studioId);
-    if (rp.balance == null) return false; // unknown: caps still apply
-    const [r] = await this.ctx.db.select({ s: sql<number>`coalesce(sum(${jobs.cost}), 0)` }).from(jobs)
-      .where(and(eq(jobs.studioId, studioId), eq(jobs.state, 'running'), sql`coalesce(${jobs.request}->>'engine', '') <> 'replicate'`));
-    const inFlight = Number(r?.s ?? 0);
-    const low = rp.balance < inFlight + this.ctx.config.RUNPOD_MIN_BALANCE_USD;
-    const s = await this.ctx.money.settings(studioId);
-    if (low && !s.lowBalanceSince) {
-      await this.ctx.db.update(studioSettings).set({ lowBalanceSince: now }).where(eq(studioSettings.studioId, studioId));
-      this.ctx.log.warn({ studioId, inFlight }, 'RunPod balance low: new jobs paused');
-      await this.noticeOwners(studioId, { code: LOW_BALANCE, message: 'RunPod balance low: top up to resume' });
-    }
-    return low;
-  }
-  private async clearRecovered(studiosWithWaiting: string[], blocked: Set<string>) {
-    const flagged = await this.ctx.db.select({ id: studioSettings.studioId }).from(studioSettings).where(sql`${studioSettings.lowBalanceSince} is not null`);
-    for (const { id } of flagged) {
-      if (blocked.has(id)) continue;
-      if (!studiosWithWaiting.includes(id) && await this.balanceLow(id, Date.now())) continue;
-      await this.ctx.db.update(studioSettings).set({ lowBalanceSince: null }).where(eq(studioSettings.studioId, id));
-      this.ctx.log.info({ studioId: id }, 'RunPod balance recovered: jobs resume');
-      await this.noticeOwners(id, { code: 'owner_balance_ok', message: 'RunPod balance is back: jobs resumed' });
-    }
-  }
-  private async noticeOwners(studioId: string, notice: { code: string; message: string }) {
-    const owners = await this.ctx.db.select().from(users).where(and(eq(users.studioId, studioId), eq(users.role, 'owner')));
-    for (const o of owners) {
-      const wallet = await this.ctx.money.walletView({ id: o.id, studioId, role: 'owner' });
-      this.ctx.hub.emitTo(o.id, { type: 'wallet', wallet, notice });
-    }
+  /** An add-on engine (RunPod) refused to start a pod for lack of credit: fail that user's waiting add-on jobs (refunded). */
+  async failForCredit(studioId: string, userId: string | null, kind: string) {
+    const waiting = (await this.waitingJobs(studioId)).filter(j => !isRep(j) && j.userId === userId && this.workerKind(j) === kind);
+    for (const j of waiting) await this.fail(j.id, OUT_OF_CREDIT_MESSAGE, true, 'provider_out_of_credit');
+    return waiting.length;
   }
 
   /** The Replicate line's position for a waiting job (services/replicateVideo.ts); a job event goes out when it moves. */
@@ -441,7 +417,7 @@ export class JobService {
     const prev = this.lineInfo.get(j.id);
     this.lineInfo.set(j.id, info);
     if (prev && prev.queuePosition === position) return;
-    const phase = `Waiting for Replicate${position > 1 ? ` · ${ordinal(position)} in line` : ''}${startsIn > 0 ? ` · starts in ${mins(startsIn)}` : ''}`;
+    const phase = linePhase(position, startsIn);
     const [u] = await this.ctx.db.update(jobs).set({ phase, blocked: null }).where(and(eq(jobs.id, j.id), eq(jobs.gpuState, 'pending'))).returning();
     if (u) this.emitJob(u);
   }
@@ -475,8 +451,7 @@ export class JobService {
       this.queueInfo.set(j.id, info);
       if (!prev || prev.queuePosition !== position) {
         if (!j.blocked) {
-          const phase = position === 1 && !podless.includes(u) ? `Waiting for a GPU${startsIn > 0 ? ` · starts in ${mins(startsIn)}` : ''}`
-            : `Waiting for a GPU · ${ordinal(position)} in line${startsIn > 0 ? ` · starts in ${mins(startsIn)}` : ''}`;
+          const phase = linePhase(position, startsIn);
           const [u2] = await this.ctx.db.update(jobs).set({ phase }).where(and(eq(jobs.id, j.id), eq(jobs.gpuState, 'pending'))).returning();
           if (u2) this.emitJob(u2);
         } else this.emitJob(j);

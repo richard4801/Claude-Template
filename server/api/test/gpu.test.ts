@@ -6,7 +6,7 @@ import { jobs, ledger, pods, studioSettings, takes } from '../src/db/schema.js';
 import { RunpodApi } from '../src/gpu/runpodApi.js';
 import { makeApp, people, sienna, type Client } from './helpers.js';
 
-type Fake = { balance: number; deployed: { id: string; gpuTypeId: string; token: string; podId: string; env: Record<string, string> }[]; terminated: string[]; unavailable: Set<string> };
+type Fake = { balance: number; noCredit?: boolean; deployed: { id: string; gpuTypeId: string; token: string; podId: string; env: Record<string, string> }[]; terminated: string[]; unavailable: Set<string> };
 function fakeRunpod(state: Fake) {
   let n = 0;
   const f = (async (_url: string, init: any) => {
@@ -15,6 +15,7 @@ function fakeRunpod(state: Fake) {
     if (query.includes('myself')) return Response.json({ data: { myself: { clientBalance: state.balance, currentSpendPerHr: 0 } } });
     if (query.includes('podFindAndDeployOnDemand')) {
       const input = variables.input;
+      if (state.noCredit) return Response.json({ errors: [{ message: 'Insufficient funds: your balance is too low to deploy this pod.' }] });
       if (state.unavailable.has(input.gpuTypeId)) return Response.json({ errors: [{ message: 'There are no longer any instances available with the requested specifications.' }] });
       const env = Object.fromEntries(input.env.map((e: any) => [e.key, e.value]));
       const id = `rp${++n}`;
@@ -91,7 +92,7 @@ describe('runpod controller: one pod per user', () => {
     const j = (await u3.req('GET', '/v1/jobs')).body.find((x: any) => x.id === j3.id);
     expect(j.queuePosition).toBe(1);
     expect(j.etaSeconds).toBeGreaterThan(j.totalSeconds - 1);
-    expect(j.phase).toMatch(/Waiting for a GPU/);
+    expect(j.phase).toMatch(/^Waiting to start/);
   });
 
   it('worker protocol: claim gives the pod user\'s job with presigned inputs (bytes + sha256) and outputs', async () => {
@@ -125,7 +126,7 @@ describe('runpod controller: one pod per user', () => {
     // progress (with take/takes, no etaSeconds) → app-facing job fields
     expect((await w(`/worker/v1/jobs/${job.id}/progress`, { step: 4, totalSteps: 10, phase: 'denoise', take: 1, takes: 1 })).status).toBe(204);
     const pj = (await u1.req('GET', '/v1/jobs')).body.find((x: any) => x.id === job.id) ?? (await u2.req('GET', '/v1/jobs')).body.find((x: any) => x.id === job.id);
-    expect(pj.step).toBe(4); expect(pj.phase).toMatch(/^step 4\/10 · ~\d+ min left$/); expect(pj.progress).toBeCloseTo(40, 5);
+    expect(pj.step).toBe(4); expect(pj.phase).toMatch(/^Rendering · ~\d+ min left$/); expect(pj.progress).toBeCloseTo(40, 5);
 
     // done before the upload arrived → refused; then upload to the presigned PUT and finish.
     expect((await w(`/worker/v1/jobs/${job.id}/done`, { outputs: [{ name: 'take_1.mp4' }], gpuSeconds: 200 })).body.code).toBe('output_missing');
@@ -168,7 +169,7 @@ describe('runpod controller: one pod per user', () => {
     const before = (await u3.req('GET', '/v1/wallet')).body;
     expect((await worker(d1.token)(`/worker/v1/jobs/${c.body.job.id}/failed`, { error: 'CUDA out of memory', retryable: true })).status).toBe(204);
     const j = (await u3.req('GET', '/v1/jobs')).body.find((x: any) => x.id === c.body.job.id);
-    expect(j.state).toBe('failed'); expect(j.refunded).toBe(j.cost); expect(j.error).toBe('CUDA out of memory');
+    expect(j.state).toBe('failed'); expect(j.refunded).toBe(j.cost); expect(j.error).toBe("Something went wrong · you weren't charged"); // the worker's words stay in the log
     const after = (await u3.req('GET', '/v1/wallet')).body;
     expect(after.heldTokens).toBe(0); expect(after.tokens).toBe(before.tokens + before.heldTokens);
   });
@@ -195,7 +196,7 @@ describe('runpod controller: one pod per user', () => {
     await tick(181_000);
     expect(rp.terminated).toContain(d1.id);
     const idle = await a.ctx.db.select().from(ledger).where(and(eq(ledger.kind, 'warmup'), eq(ledger.userId, u3.id)));
-    expect(idle.some(l => /GPU idle/.test(l.note ?? ''))).toBe(true);
+    expect(idle.some(l => /Add-on idle/.test(l.note ?? ''))).toBe(true);
   });
 
   it('cancelled job: progress answers 409 job_cancelled', async () => {
@@ -219,21 +220,36 @@ describe('runpod controller: one pod per user', () => {
     expect((await worker(d.token)('/worker/v1/claim', { podId: d.id, capabilities: ['h3', 'latentsync'] })).body.job.id).toBe(j.id);
   });
 
-  it('low RunPod balance pauses new jobs for everyone, and they resume when it recovers', async () => {
-    rp.balance = 2.5; // < in-flight work + $2 margin
-    const j = (await u2.req('POST', '/v1/jobs', { title: 'Paused', modelId: model2, clipId: clip2, steps: 10 })).body;
+  it('a low RunPod balance never pauses jobs; a start refused for lack of credit fails the job with a refund and tells the owner', async () => {
+    rp.balance = 0.5; // RunPod's own balance is not read for jobs any more
+    // A user with no pod of their own (u3) needs a new one: RunPod refuses it for lack of credit.
+    for (const p of (await podRows()).filter(p => p.assignedUserId === u3.id && ['starting', 'running'].includes(p.state))) await (a.ctx.gpu as any).stopPod(p, Date.now(), 'test');
+    rp.noCredit = true;
+    const before = (await u3.req('GET', '/v1/wallet')).body.tokens;
+    const j = (await u3.req('POST', '/v1/jobs', { title: 'No credit', modelId: model3, clipId: clip3, steps: 10 })).body;
+    expect(j.state).toBe('running');
+    expect(j.phase).not.toMatch(/paused|gpu|credit/i);
+    const ownerEvents: any[] = [];
+    const off = a.ctx.hub.subscribe((await a.ctx.db.select().from(studioSettings))[0]!.studioId, owner.id, line => { if (line.startsWith('data: ')) ownerEvents.push(JSON.parse(line.slice(6))); });
     await tick();
-    let row = (await u2.req('GET', '/v1/jobs')).body.find((x: any) => x.id === j.id);
-    expect(row.blocked).toBe('owner_balance_low');
-    expect(row.phase).toBe("Paused: the studio's GPU credit is low");
-    const [s] = await a.ctx.db.select().from(studioSettings);
-    expect(s!.lowBalanceSince).toBeGreaterThan(0);
-    expect((await owner.req('GET', '/v1/settings/studio')).body.lowBalance).toBe(true);
-    rp.balance = 100;
-    await tick();
-    row = (await u2.req('GET', '/v1/jobs')).body.find((x: any) => x.id === j.id);
+    off();
+    const row = (await u3.req('GET', '/v1/jobs')).body.find((x: any) => x.id === j.id);
+    expect(row).toMatchObject({ state: 'failed', errorCode: 'provider_out_of_credit', refunded: j.cost });
+    expect(row.error).toBe("Something went wrong · you weren't charged. The studio owner has been told.");
     expect(row.blocked).toBeUndefined();
-    expect((await owner.req('GET', '/v1/settings/studio')).body.lowBalance).toBe(false);
+    const w3 = (await u3.req('GET', '/v1/wallet')).body;
+    expect(w3.heldTokens).toBe(0); expect(w3.tokens).toBeGreaterThanOrEqual(before);
+    expect(ownerEvents.some(e => e.type === 'wallet' && e.notice?.code === 'provider_out_of_credit' && e.notice.engine === 'runpod')).toBe(true);
+    const st = (await owner.req('GET', '/v1/settings/studio')).body;
+    expect(st.engines.list.find((e: any) => e.id === 'runpod')).toMatchObject({ status: 'out_of_credit', name: 'RunPod', keySet: true });
+    expect(st.lowBalance).toBeUndefined();
+    expect((await u3.req('GET', '/v1/settings/studio')).body.engines).toBeUndefined();
+    rp.noCredit = false; rp.balance = 100;
+    (a.ctx.gpu as any).launchFailedAt.clear();
+    const j2 = (await u3.req('POST', '/v1/jobs', { title: 'Back', modelId: model3, clipId: clip3, steps: 10 })).body;
+    await tick();
+    expect((await owner.req('GET', '/v1/settings/studio')).body.engines.list.find((e: any) => e.id === 'runpod').status).not.toBe('out_of_credit');
+    await u3.req('DELETE', `/v1/jobs/${j2.id}`);
   });
 
   it("pods get the worker's dead-man's switch, and a self-stopping heartbeat stops the pod here too", async () => {

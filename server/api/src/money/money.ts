@@ -1,17 +1,20 @@
-// Money: per-user token wallets, holds, settlement, caps, and the real RunPod balance.
+// Money: per-user token wallets, holds, settlement, caps, and the owner-loaded studio balance.
 //
 // - Every user has a token wallet (1 token = TOKEN_USD). Members are funded by the owner (transfer / reclaim).
-// - The owner's wallet is the real money: RunPod clientBalance − every member's unspent tokens − owners' holds.
-//   That number is also the owner's "available to send", so tokens handed out can never exceed real credit.
+// - The studio balance (2026-11-04, plans/app-cleanup.md) = the owner's recorded top-ups − every engine's spending in
+//   this ledger since `balanceSince`. The owner's wallet = studio balance − members' unspent tokens − owners' holds.
+//   That number is also the owner's "available to send", so credit handed out can never exceed the money loaded.
+//   RunPod's own balance no longer backs anything (it is only shown in owner Settings → Engines).
 // - Jobs hold the estimated price from the requester's wallet, settle to the actual cost when done, and release the
 //   hold in full on failure. Fixed-price work (shoots, outfit sets, sheet fills, LoRA sets) is charged at once.
 // - Caps: per job, per user per day (owner-configurable per user), and per studio per day.
 // All money operations for a studio run one at a time (single API instance), so two jobs can't overspend a wallet.
 import { and, eq, gte, inArray, sql } from 'drizzle-orm';
 import type { Ctx, AuthUser } from '../ctx.js';
-import { ledger, studioSettings, users, wallets } from '../db/schema.js';
+import { desc } from 'drizzle-orm';
+import { ledger, studioSettings, topups, users, wallets } from '../db/schema.js';
 import { ApiError } from '../errors.js';
-import { dayStart, monthStart } from '../lib/util.js';
+import { dayStart, monthStart, uid } from '../lib/util.js';
 import { videosLeft } from '../pricing.js';
 
 export type RunpodBalance = { source: 'runpod' | 'simulated' | 'unavailable'; balance: number | null; spendPerHour?: number; reason?: string };
@@ -67,9 +70,62 @@ export class Money {
 
   async settings(studioId: string) {
     const [s] = await this.ctx.db.select().from(studioSettings).where(eq(studioSettings.studioId, studioId));
-    if (s) return s;
-    await this.ctx.db.insert(studioSettings).values({ studioId, simBalance: 0 }).onConflictDoNothing();
+    if (s) {
+      if (s.balanceSince != null) return s;
+      const now = Date.now();
+      await this.ctx.db.update(studioSettings).set({ balanceSince: now }).where(and(eq(studioSettings.studioId, studioId), sql`${studioSettings.balanceSince} is null`));
+      return { ...s, balanceSince: now };
+    }
+    const now = Date.now();
+    const [created] = await this.ctx.db.insert(studioSettings).values({ studioId, simBalance: 0, balanceSince: now }).onConflictDoNothing().returning();
+    // Dev and tests (BALANCE_MODE=simulated): a new studio starts with SIM_START_BALANCE as an opening top-up.
+    if (created && this.ctx.config.balanceMode === 'simulated' && this.ctx.config.SIM_START_BALANCE > 0) {
+      await this.insertTopUp(studioId, null, this.ctx.config.SIM_START_BALANCE, 'Dev opening balance', now);
+    }
     return (await this.ctx.db.select().from(studioSettings).where(eq(studioSettings.studioId, studioId)))[0]!;
+  }
+
+  // ------------------------------------------------------------------ studio balance (owner-loaded)
+  private async insertTopUp(studioId: string, by: string | null, usd: number, note: string | null, paidAt: number) {
+    const now = Date.now();
+    const id = uid('top');
+    await this.ctx.db.insert(topups).values({ id, studioId, amountUsd: usd, note, paidAt, createdBy: by, createdAt: now });
+    await this.row({ studioId, userId: by, actorId: by, jobId: null, kind: 'topup', amountUsd: usd, tokens: 0, note: `Added $${usd.toFixed(2)}${note ? ` · ${note}` : ''}` });
+    return id;
+  }
+
+  /** The owner records money they loaded ("Added $20"). */
+  async recordTopUp(owner: Who, t: { amountUsd: number; note?: string | null; at?: number }, notify = true) {
+    await this.lock.run(owner.studioId, async () => {
+      await this.settings(owner.studioId);
+      await this.insertTopUp(owner.studioId, owner.id, Math.round(t.amountUsd * 100) / 100, t.note?.trim() || null, t.at ?? Date.now());
+    });
+    if (notify) await this.notify(owner.studioId, [owner.id]);
+  }
+
+  async topUps(studioId: string, limit = 50) {
+    const rows = await this.ctx.db.select().from(topups).where(eq(topups.studioId, studioId)).orderBy(desc(topups.createdAt)).limit(Math.min(500, Math.max(1, limit)));
+    return rows.map(r => ({ id: r.id, amountUsd: r.amountUsd, note: r.note, paidAt: r.paidAt, createdAt: r.createdAt, createdBy: r.createdBy }));
+  }
+
+  /** Top-ups − every engine's spending since the studio ledger started. */
+  async studioTotals(studioId: string) {
+    const s = await this.settings(studioId);
+    const since = s.balanceSince ?? 0;
+    const [t] = await this.ctx.db.select({ s: sql<number>`coalesce(sum(${topups.amountUsd}), 0)`, n: sql<number>`count(*)` }).from(topups).where(eq(topups.studioId, studioId));
+    const toppedUpUsd = r8(Number(t?.s ?? 0));
+    const spentUsd = r8(await this.spend(studioId, since));
+    return { since, toppedUpUsd, spentUsd, balanceUsd: r8(toppedUpUsd - spentUsd), topUpCount: Number(t?.n ?? 0) };
+  }
+
+  /** GET /v1/studio/balance */
+  async studioBalanceView(studioId: string) {
+    const t = await this.studioTotals(studioId);
+    const a = await this.ownerAvailable(studioId);
+    return {
+      balanceUsd: t.balanceUsd, toppedUpUsd: t.toppedUpUsd, spentUsd: t.spentUsd, membersCreditUsd: a.membersUnspentUsd, heldUsd: a.ownersHeldUsd,
+      availableUsd: a.usd, since: t.since, needsFirstTopUp: t.topUpCount === 0, topUps: await this.topUps(studioId, 20),
+    };
   }
 
   // ------------------------------------------------------------------ wallets
@@ -92,13 +148,12 @@ export class Money {
     return { membersUnspent, ownersHeld };
   }
 
-  /** What the owner can spend or send: RunPod balance − members' unspent tokens − owners' holds (USD). Null when unknown. */
-  async ownerAvailable(studioId: string): Promise<{ usd: number | null; rp: RunpodBalance; membersUnspentUsd: number; ownersHeldUsd: number }> {
-    const rp = await this.runpodBalance(studioId);
+  /** What the owner can spend or send: studio balance − members' unspent tokens − owners' holds (USD). May be negative. */
+  async ownerAvailable(studioId: string): Promise<{ usd: number; studioUsd: number; membersUnspentUsd: number; ownersHeldUsd: number }> {
+    const t = await this.studioTotals(studioId);
     const p = await this.pools(studioId);
     const membersUnspentUsd = this.toUsd(p.membersUnspent), ownersHeldUsd = this.toUsd(p.ownersHeld);
-    const usd = rp.balance == null ? null : Math.round((rp.balance - membersUnspentUsd - ownersHeldUsd) * 1e8) / 1e8;
-    return { usd, rp, membersUnspentUsd, ownersHeldUsd };
+    return { usd: r8(t.balanceUsd - membersUnspentUsd - ownersHeldUsd), studioUsd: t.balanceUsd, membersUnspentUsd, ownersHeldUsd };
   }
 
   async spend(studioId: string, since: number, userId?: string) {
@@ -137,8 +192,7 @@ export class Money {
   private async ensureCovered(u: Who, tokens: number) {
     if (u.role === 'owner') {
       const a = await this.ownerAvailable(u.studioId);
-      // Unknown RunPod balance: caps still apply, but the balance can't be checked.
-      if (a.usd != null && this.toUsd(tokens) > a.usd + EPS) throw new ApiError(402, 'insufficient_balance', 'Not enough balance · top up in Credits');
+      if (this.toUsd(tokens) > a.usd + EPS) throw new ApiError(402, 'insufficient_balance', 'Not enough in the studio balance · add a top-up in Credits');
       return;
     }
     const w = await this.wallet(u.id, u.studioId);
@@ -194,7 +248,6 @@ export class Money {
       }).where(eq(wallets.userId, userId));
       await this.row({ studioId, userId, actorId: userId, jobId, kind: 'settle', tokens: back, amountUsd: actualUsd - overheadUsd, note });
       if (overheadUsd > EPS) await this.row({ studioId, userId: null, actorId: userId, jobId, kind: 'overhead', amountUsd: overheadUsd, note: 'over the member wallet' });
-      await this.simSpend(studioId, actualUsd);
     }).finally(() => this.notify(studioId, [userId]));
   }
 
@@ -208,7 +261,6 @@ export class Money {
       await this.wallet(u.id, u.studioId);
       if (u.role !== 'owner') await this.ctx.db.update(wallets).set({ tokens: sql`${wallets.tokens} - ${tokens}`, updatedAt: Date.now() }).where(eq(wallets.userId, u.id));
       await this.row({ studioId: u.studioId, userId: u.id, actorId: u.id, jobId: refId ?? null, kind: 'charge', tokens: -tokens, amountUsd: costUsd, note });
-      await this.simSpend(u.studioId, costUsd);
     }).finally(() => this.notify(u.studioId, [u.id]));
   }
 
@@ -219,7 +271,6 @@ export class Money {
       const tokens = this.toTokens(costUsd);
       if (u.role !== 'owner') await this.ctx.db.update(wallets).set({ tokens: sql`${wallets.tokens} + ${tokens}`, updatedAt: Date.now() }).where(eq(wallets.userId, u.id));
       await this.row({ studioId: u.studioId, userId: u.id, actorId: u.id, jobId: refId ?? null, kind: 'charge', tokens, amountUsd: -costUsd, note: `refund: ${note}` });
-      await this.simSpend(u.studioId, -costUsd);
     }).finally(() => this.notify(u.studioId, [u.id]));
   }
 
@@ -227,7 +278,6 @@ export class Money {
   async overhead(studioId: string, usd: number, note: string) {
     if (usd <= EPS) return;
     await this.row({ studioId, userId: null, actorId: null, jobId: null, kind: 'overhead', amountUsd: usd, note });
-    await this.simSpend(studioId, usd);
   }
 
   /**
@@ -249,11 +299,10 @@ export class Money {
       }
       await this.row({ studioId, userId, actorId: userId, jobId, kind, tokens: -tokens, amountUsd: paid, note });
       if (rest > EPS) await this.row({ studioId, userId: null, actorId: userId, jobId, kind: 'overhead', amountUsd: rest, note: `${note}: over the member wallet` });
-      await this.simSpend(studioId, usd);
-    }).finally(() => this.notify(studioId, [userId]));
+      }).finally(() => this.notify(studioId, [userId]));
   }
 
-  /** What this user can still spend in USD (member: wallet; owner: what the RunPod balance leaves). Null = unknown. */
+  /** What this user can still spend in USD (member: wallet; owner: what the studio balance leaves). Null = unknown. */
   async spendableUsd(u: Who): Promise<number | null> {
     if (u.role === 'owner') return (await this.ownerAvailable(u.studioId)).usd;
     return this.toUsd((await this.wallet(u.id, u.studioId)).tokens);
@@ -263,28 +312,16 @@ export class Money {
     await this.ctx.db.update(studioSettings).set({ failNext: false }).where(eq(studioSettings.studioId, studioId));
   }
 
-  /** In simulated mode the stand-in RunPod credit goes down by what was really spent, like RunPod's own balance. */
-  private async simSpend(studioId: string, usd: number) {
-    if (this.ctx.config.balanceMode !== 'simulated') return;
-    await this.settings(studioId);
-    await this.ctx.db.update(studioSettings).set({ simBalance: sql`greatest(${studioSettings.simBalance} - ${usd}, 0)` }).where(eq(studioSettings.studioId, studioId));
-  }
-  /** Dev only: add simulated RunPod credit. */
-  async simTopUp(u: Who, usd: number) {
-    await this.settings(u.studioId);
-    await this.ctx.db.update(studioSettings).set({ simBalance: sql`${studioSettings.simBalance} + ${usd}` }).where(eq(studioSettings.studioId, u.studioId));
-    await this.row({ studioId: u.studioId, userId: u.id, actorId: u.id, jobId: null, kind: 'topup', amountUsd: 0, tokens: 0, note: `simulated RunPod top-up $${usd.toFixed(2)}` });
-    await this.notify(u.studioId, [u.id]);
-  }
 
   // ------------------------------------------------------------------ owner: send and take back tokens
   transfer(owner: Who, toUserId: string, tokens: number, note?: string) {
     return this.lock.run(owner.studioId, async () => {
       const member = await this.memberOf(owner.studioId, toUserId);
       const a = await this.ownerAvailable(owner.studioId);
-      if (a.usd == null) throw new ApiError(503, 'balance_unavailable', "Can't read the RunPod balance right now, so tokens can't be sent");
-      const availTokens = Math.floor(Math.round(a.usd / this.rate * 1e6) / 1e6 + EPS);
-      if (tokens > availTokens) throw new ApiError(402, 'over_allocation', `You can send at most ${availTokens} tokens ($${this.toUsd(availTokens).toFixed(2)}): the rest of the RunPod balance is already with members or on hold`);
+      const availTokens = Math.max(0, Math.floor(Math.round(a.usd / this.rate * 1e6) / 1e6 + EPS));
+      if (tokens > availTokens) throw new ApiError(402, 'over_allocation', availTokens > 0
+        ? `You can send at most ${availTokens} tokens ($${this.toUsd(availTokens).toFixed(2)}): the rest of the studio balance is already with members or on hold`
+        : 'Nothing free to send · add a top-up first');
       await this.wallet(member.id, owner.studioId);
       await this.ctx.db.update(wallets).set({ tokens: sql`${wallets.tokens} + ${tokens}`, updatedAt: Date.now() }).where(eq(wallets.userId, member.id));
       await this.row({ studioId: owner.studioId, userId: member.id, actorId: owner.id, jobId: null, kind: 'transfer', tokens, note: note ?? null });
@@ -304,7 +341,7 @@ export class Money {
   private async memberOf(studioId: string, userId: string) {
     const [m] = await this.ctx.db.select().from(users).where(and(eq(users.id, userId), eq(users.studioId, studioId)));
     if (!m) throw new ApiError(404, 'not_found', 'Member not found');
-    if (m.role === 'owner') throw new ApiError(400, 'bad_request', "The owner's wallet is the RunPod balance; send tokens to members only");
+    if (m.role === 'owner') throw new ApiError(400, 'bad_request', "The owner's wallet is the studio balance; send credit to members only");
     return m;
   }
   private async roleOf(userId: string) {
@@ -326,13 +363,13 @@ export class Money {
     const base = { userId: u.id, role: u.role, tokenUsd: this.rate, heldTokens: w.held, heldUsd: this.toUsd(w.held), todayUsd: today, monthUsd: month };
     if (!owner) return { ...base, tokens: w.tokens, usd: this.toUsd(w.tokens), balanceSource: 'wallet' as const };
     const a = await this.ownerAvailable(u.studioId);
-    const tokens = a.usd == null ? 0 : Math.max(0, Math.floor(Math.round(a.usd / this.rate * 1e6) / 1e6 + EPS));
-    return { ...base, tokens, usd: a.usd ?? 0, availableToSend: a.usd, runpodBalance: a.rp.balance, balanceSource: a.rp.source, membersUnspentUsd: a.membersUnspentUsd };
+    const tokens = Math.max(0, Math.floor(Math.round(a.usd / this.rate * 1e6) / 1e6 + EPS));
+    return { ...base, tokens, usd: a.usd, availableToSend: a.usd, studioBalance: a.studioUsd, balanceSource: 'studio' as const, membersUnspentUsd: a.membersUnspentUsd };
   }
 
   /**
    * GET /v1/balance (the app's Credits card). Members: `balance` is their wallet in USD. The owner: `balance` is what they
-   * can spend or send (RunPod balance − members' unspent tokens − holds), with `runpodBalance` and `availableToSend`.
+   * can spend or send (studio balance − members' unspent credit − holds; may be negative), with `studioBalance`.
    */
   async balanceView(u: Who) {
     const w = await this.walletView(u);
@@ -340,12 +377,13 @@ export class Money {
     const now = Date.now();
     const today = u.role === 'owner' ? await this.spend(u.studioId, dayStart(now)) : w.todayUsd;
     const month = u.role === 'owner' ? await this.spend(u.studioId, monthStart(now)) : w.monthUsd;
-    const balance = Math.max(0, Math.round(w.usd * 1e8) / 1e8);
+    const balance = u.role === 'owner' ? r8(w.usd) : Math.max(0, r8(w.usd));
     return {
       balance, month, today, perJobLimit: caps.perJob, perDayLimit: u.role === 'owner' ? caps.perDay : caps.perUserDay,
-      perUserDayLimit: caps.perUserDay, videos: videosLeft(balance), tokens: w.tokens, tokenUsd: this.rate, role: u.role,
+      perUserDayLimit: caps.perUserDay, videos: videosLeft(Math.max(0, balance)), tokens: w.tokens, tokenUsd: this.rate, role: u.role,
       heldUsd: w.heldUsd, balanceSource: w.balanceSource,
-      ...(u.role === 'owner' ? { runpodBalance: (w as any).runpodBalance, availableToSend: (w as any).availableToSend } : {}),
+      ...(u.role === 'owner' ? { availableToSend: (w as any).availableToSend, studioBalance: (w as any).studioBalance,
+        needsFirstTopUp: (await this.studioTotals(u.studioId)).topUpCount === 0 } : {}),
     };
   }
 
@@ -368,6 +406,8 @@ export class Money {
     }
   }
 }
+
+const r8 = (v: number) => Math.round(v * 1e8) / 1e8;
 
 export type { Who };
 export const whoOf = (u: AuthUser): Who => ({ id: u.id, studioId: u.studioId, role: u.role });

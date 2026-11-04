@@ -1,0 +1,765 @@
+{
+ "params": {
+  "perRun": 0.015,
+  "perInputMp": 0.015,
+  "perOutputMp": 0.015,
+  "perEdit": 0.03,
+  "refMp": 0.79,
+  "maxRefs": 6,
+  "loraShots": 30
+ },
+ "rows": [
+  {
+   "kind": "shoot",
+   "count": 1,
+   "refs": 0,
+   "outMp": 2,
+   "estimate": 0.045,
+   "label": "about $0.04"
+  },
+  {
+   "kind": "shoot",
+   "count": 2,
+   "refs": 0,
+   "outMp": 2,
+   "estimate": 0.09,
+   "label": "about $0.09"
+  },
+  {
+   "kind": "shoot",
+   "count": 3,
+   "refs": 0,
+   "outMp": 2,
+   "estimate": 0.135,
+   "label": "about $0.14"
+  },
+  {
+   "kind": "shoot",
+   "count": 4,
+   "refs": 0,
+   "outMp": 2,
+   "estimate": 0.18,
+   "label": "about $0.18"
+  },
+  {
+   "kind": "shoot",
+   "count": 1,
+   "refs": 1,
+   "outMp": 2,
+   "estimate": 0.05685,
+   "label": "about $0.06"
+  },
+  {
+   "kind": "shoot",
+   "count": 2,
+   "refs": 1,
+   "outMp": 2,
+   "estimate": 0.1137,
+   "label": "about $0.11"
+  },
+  {
+   "kind": "shoot",
+   "count": 3,
+   "refs": 1,
+   "outMp": 2,
+   "estimate": 0.17054999999999998,
+   "label": "about $0.17"
+  },
+  {
+   "kind": "shoot",
+   "count": 4,
+   "refs": 1,
+   "outMp": 2,
+   "estimate": 0.2274,
+   "label": "about $0.23"
+  },
+  {
+   "kind": "shoot",
+   "count": 1,
+   "refs": 2,
+   "outMp": 2,
+   "estimate": 0.0687,
+   "label": "about $0.07"
+  },
+  {
+   "kind": "shoot",
+   "count": 2,
+   "refs": 2,
+   "outMp": 2,
+   "estimate": 0.1374,
+   "label": "about $0.14"
+  },
+  {
+   "kind": "shoot",
+   "count": 3,
+   "refs": 2,
+   "outMp": 2,
+   "estimate": 0.2061,
+   "label": "about $0.21"
+  },
+  {
+   "kind": "shoot",
+   "count": 4,
+   "refs": 2,
+   "outMp": 2,
+   "estimate": 0.2748,
+   "label": "about $0.27"
+  },
+  {
+   "kind": "shoot",
+   "count": 1,
+   "refs": 3,
+   "outMp": 2,
+   "estimate": 0.08055,
+   "label": "about $0.08"
+  },
+  {
+   "kind": "shoot",
+   "count": 2,
+   "refs": 3,
+   "outMp": 2,
+   "estimate": 0.1611,
+   "label": "about $0.16"
+  },
+  {
+   "kind": "shoot",
+   "count": 3,
+   "refs": 3,
+   "outMp": 2,
+   "estimate": 0.24164999999999998,
+   "label": "about $0.24"
+  },
+  {
+   "kind": "shoot",
+   "count": 4,
+   "refs": 3,
+   "outMp": 2,
+   "estimate": 0.3222,
+   "label": "about $0.32"
+  },
+  {
+   "kind": "shoot",
+   "count": 1,
+   "refs": 4,
+   "outMp": 2,
+   "estimate": 0.0924,
+   "label": "about $0.09"
+  },
+  {
+   "kind": "shoot",
+   "count": 2,
+   "refs": 4,
+   "outMp": 2,
+   "estimate": 0.1848,
+   "label": "about $0.18"
+  },
+  {
+   "kind": "shoot",
+   "count": 3,
+   "refs": 4,
+   "outMp": 2,
+   "estimate": 0.2772,
+   "label": "about $0.28"
+  },
+  {
+   "kind": "shoot",
+   "count": 4,
+   "refs": 4,
+   "outMp": 2,
+   "estimate": 0.3696,
+   "label": "about $0.37"
+  },
+  {
+   "kind": "shoot",
+   "count": 1,
+   "refs": 5,
+   "outMp": 2,
+   "estimate": 0.10425,
+   "label": "about $0.10"
+  },
+  {
+   "kind": "shoot",
+   "count": 2,
+   "refs": 5,
+   "outMp": 2,
+   "estimate": 0.2085,
+   "label": "about $0.21"
+  },
+  {
+   "kind": "shoot",
+   "count": 3,
+   "refs": 5,
+   "outMp": 2,
+   "estimate": 0.31275,
+   "label": "about $0.31"
+  },
+  {
+   "kind": "shoot",
+   "count": 4,
+   "refs": 5,
+   "outMp": 2,
+   "estimate": 0.417,
+   "label": "about $0.42"
+  },
+  {
+   "kind": "shoot",
+   "count": 1,
+   "refs": 6,
+   "outMp": 2,
+   "estimate": 0.1161,
+   "label": "about $0.12"
+  },
+  {
+   "kind": "shoot",
+   "count": 2,
+   "refs": 6,
+   "outMp": 2,
+   "estimate": 0.2322,
+   "label": "about $0.23"
+  },
+  {
+   "kind": "shoot",
+   "count": 3,
+   "refs": 6,
+   "outMp": 2,
+   "estimate": 0.3483,
+   "label": "about $0.35"
+  },
+  {
+   "kind": "shoot",
+   "count": 4,
+   "refs": 6,
+   "outMp": 2,
+   "estimate": 0.4644,
+   "label": "about $0.46"
+  },
+  {
+   "kind": "shoot",
+   "count": 1,
+   "refs": 7,
+   "outMp": 2,
+   "estimate": 0.1161,
+   "label": "about $0.12"
+  },
+  {
+   "kind": "shoot",
+   "count": 2,
+   "refs": 7,
+   "outMp": 2,
+   "estimate": 0.2322,
+   "label": "about $0.23"
+  },
+  {
+   "kind": "shoot",
+   "count": 3,
+   "refs": 7,
+   "outMp": 2,
+   "estimate": 0.3483,
+   "label": "about $0.35"
+  },
+  {
+   "kind": "shoot",
+   "count": 4,
+   "refs": 7,
+   "outMp": 2,
+   "estimate": 0.4644,
+   "label": "about $0.46"
+  },
+  {
+   "kind": "shoot",
+   "count": 1,
+   "refs": 8,
+   "outMp": 2,
+   "estimate": 0.1161,
+   "label": "about $0.12"
+  },
+  {
+   "kind": "shoot",
+   "count": 2,
+   "refs": 8,
+   "outMp": 2,
+   "estimate": 0.2322,
+   "label": "about $0.23"
+  },
+  {
+   "kind": "shoot",
+   "count": 3,
+   "refs": 8,
+   "outMp": 2,
+   "estimate": 0.3483,
+   "label": "about $0.35"
+  },
+  {
+   "kind": "shoot",
+   "count": 4,
+   "refs": 8,
+   "outMp": 2,
+   "estimate": 0.4644,
+   "label": "about $0.46"
+  },
+  {
+   "kind": "outfitSet",
+   "count": 1,
+   "refs": 0,
+   "outMp": 1,
+   "estimate": 0.12,
+   "label": "about $0.12"
+  },
+  {
+   "kind": "outfitSet",
+   "count": 1,
+   "refs": 1,
+   "outMp": 1,
+   "estimate": 0.13185,
+   "label": "about $0.13"
+  },
+  {
+   "kind": "outfitSet",
+   "count": 1,
+   "refs": 2,
+   "outMp": 1,
+   "estimate": 0.1437,
+   "label": "about $0.14"
+  },
+  {
+   "kind": "outfitSet",
+   "count": 1,
+   "refs": 3,
+   "outMp": 1,
+   "estimate": 0.15555,
+   "label": "about $0.16"
+  },
+  {
+   "kind": "outfitSet",
+   "count": 1,
+   "refs": 4,
+   "outMp": 1,
+   "estimate": 0.1674,
+   "label": "about $0.17"
+  },
+  {
+   "kind": "outfitSet",
+   "count": 1,
+   "refs": 5,
+   "outMp": 1,
+   "estimate": 0.17925,
+   "label": "about $0.18"
+  },
+  {
+   "kind": "outfitSet",
+   "count": 1,
+   "refs": 6,
+   "outMp": 1,
+   "estimate": 0.1911,
+   "label": "about $0.19"
+  },
+  {
+   "kind": "outfitSet",
+   "count": 1,
+   "refs": 7,
+   "outMp": 1,
+   "estimate": 0.1911,
+   "label": "about $0.19"
+  },
+  {
+   "kind": "outfitSet",
+   "count": 1,
+   "refs": 8,
+   "outMp": 1,
+   "estimate": 0.1911,
+   "label": "about $0.19"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 1,
+   "refs": 0,
+   "outMp": 1,
+   "estimate": 0.03,
+   "label": "about $0.03"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 2,
+   "refs": 0,
+   "outMp": 1,
+   "estimate": 0.06,
+   "label": "about $0.06"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 3,
+   "refs": 0,
+   "outMp": 1,
+   "estimate": 0.09,
+   "label": "about $0.09"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 4,
+   "refs": 0,
+   "outMp": 1,
+   "estimate": 0.12,
+   "label": "about $0.12"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 5,
+   "refs": 0,
+   "outMp": 1,
+   "estimate": 0.15,
+   "label": "about $0.15"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 6,
+   "refs": 0,
+   "outMp": 1,
+   "estimate": 0.18,
+   "label": "about $0.18"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 1,
+   "refs": 1,
+   "outMp": 1,
+   "estimate": 0.04185,
+   "label": "about $0.04"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 2,
+   "refs": 1,
+   "outMp": 1,
+   "estimate": 0.0837,
+   "label": "about $0.08"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 3,
+   "refs": 1,
+   "outMp": 1,
+   "estimate": 0.12555,
+   "label": "about $0.13"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 4,
+   "refs": 1,
+   "outMp": 1,
+   "estimate": 0.1674,
+   "label": "about $0.17"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 5,
+   "refs": 1,
+   "outMp": 1,
+   "estimate": 0.20925,
+   "label": "about $0.21"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 6,
+   "refs": 1,
+   "outMp": 1,
+   "estimate": 0.2511,
+   "label": "about $0.25"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 1,
+   "refs": 2,
+   "outMp": 1,
+   "estimate": 0.0537,
+   "label": "about $0.05"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 2,
+   "refs": 2,
+   "outMp": 1,
+   "estimate": 0.1074,
+   "label": "about $0.11"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 3,
+   "refs": 2,
+   "outMp": 1,
+   "estimate": 0.1611,
+   "label": "about $0.16"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 4,
+   "refs": 2,
+   "outMp": 1,
+   "estimate": 0.2148,
+   "label": "about $0.21"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 5,
+   "refs": 2,
+   "outMp": 1,
+   "estimate": 0.26849999999999996,
+   "label": "about $0.27"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 6,
+   "refs": 2,
+   "outMp": 1,
+   "estimate": 0.3222,
+   "label": "about $0.32"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 1,
+   "refs": 3,
+   "outMp": 1,
+   "estimate": 0.06555,
+   "label": "about $0.07"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 2,
+   "refs": 3,
+   "outMp": 1,
+   "estimate": 0.1311,
+   "label": "about $0.13"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 3,
+   "refs": 3,
+   "outMp": 1,
+   "estimate": 0.19665,
+   "label": "about $0.20"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 4,
+   "refs": 3,
+   "outMp": 1,
+   "estimate": 0.2622,
+   "label": "about $0.26"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 5,
+   "refs": 3,
+   "outMp": 1,
+   "estimate": 0.32775,
+   "label": "about $0.33"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 6,
+   "refs": 3,
+   "outMp": 1,
+   "estimate": 0.3933,
+   "label": "about $0.39"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 1,
+   "refs": 4,
+   "outMp": 1,
+   "estimate": 0.0774,
+   "label": "about $0.08"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 2,
+   "refs": 4,
+   "outMp": 1,
+   "estimate": 0.1548,
+   "label": "about $0.15"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 3,
+   "refs": 4,
+   "outMp": 1,
+   "estimate": 0.2322,
+   "label": "about $0.23"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 4,
+   "refs": 4,
+   "outMp": 1,
+   "estimate": 0.3096,
+   "label": "about $0.31"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 5,
+   "refs": 4,
+   "outMp": 1,
+   "estimate": 0.387,
+   "label": "about $0.39"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 6,
+   "refs": 4,
+   "outMp": 1,
+   "estimate": 0.4644,
+   "label": "about $0.46"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 1,
+   "refs": 5,
+   "outMp": 1,
+   "estimate": 0.08925,
+   "label": "about $0.09"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 2,
+   "refs": 5,
+   "outMp": 1,
+   "estimate": 0.1785,
+   "label": "about $0.18"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 3,
+   "refs": 5,
+   "outMp": 1,
+   "estimate": 0.26775,
+   "label": "about $0.27"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 4,
+   "refs": 5,
+   "outMp": 1,
+   "estimate": 0.357,
+   "label": "about $0.36"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 5,
+   "refs": 5,
+   "outMp": 1,
+   "estimate": 0.44625,
+   "label": "about $0.45"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 6,
+   "refs": 5,
+   "outMp": 1,
+   "estimate": 0.5355,
+   "label": "about $0.54"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 1,
+   "refs": 6,
+   "outMp": 1,
+   "estimate": 0.1011,
+   "label": "about $0.10"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 2,
+   "refs": 6,
+   "outMp": 1,
+   "estimate": 0.2022,
+   "label": "about $0.20"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 3,
+   "refs": 6,
+   "outMp": 1,
+   "estimate": 0.3033,
+   "label": "about $0.30"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 4,
+   "refs": 6,
+   "outMp": 1,
+   "estimate": 0.4044,
+   "label": "about $0.40"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 5,
+   "refs": 6,
+   "outMp": 1,
+   "estimate": 0.5055,
+   "label": "about $0.51"
+  },
+  {
+   "kind": "sheetAngles",
+   "count": 6,
+   "refs": 6,
+   "outMp": 1,
+   "estimate": 0.6066,
+   "label": "about $0.61"
+  },
+  {
+   "kind": "loraSet",
+   "count": 30,
+   "refs": 0,
+   "outMp": 1,
+   "estimate": 0.8999999999999999,
+   "label": "about $0.90"
+  },
+  {
+   "kind": "loraSet",
+   "count": 30,
+   "refs": 1,
+   "outMp": 1,
+   "estimate": 1.2555,
+   "label": "about $1.26"
+  },
+  {
+   "kind": "loraSet",
+   "count": 30,
+   "refs": 2,
+   "outMp": 1,
+   "estimate": 1.611,
+   "label": "about $1.61"
+  },
+  {
+   "kind": "loraSet",
+   "count": 30,
+   "refs": 3,
+   "outMp": 1,
+   "estimate": 1.9665,
+   "label": "about $1.97"
+  },
+  {
+   "kind": "loraSet",
+   "count": 30,
+   "refs": 4,
+   "outMp": 1,
+   "estimate": 2.322,
+   "label": "about $2.32"
+  },
+  {
+   "kind": "loraSet",
+   "count": 30,
+   "refs": 5,
+   "outMp": 1,
+   "estimate": 2.6774999999999998,
+   "label": "about $2.68"
+  },
+  {
+   "kind": "loraSet",
+   "count": 30,
+   "refs": 6,
+   "outMp": 1,
+   "estimate": 3.033,
+   "label": "about $3.03"
+  }
+ ]
+}

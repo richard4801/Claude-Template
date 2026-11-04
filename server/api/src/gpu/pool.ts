@@ -6,11 +6,17 @@ import { randomToken, sha256, uid } from '../lib/util.js';
 import * as P from '../pricing.js';
 import { gpuCanRun, gpuTable, workKindOf, type GpuController, type JobRow, type PodRow, type WorkKind } from './controller.js';
 import type { RunpodApi } from './runpodApi.js';
+import { SOMETHING_WENT_WRONG } from '../services/jobs.js';
+
+/** RunPod's wording when a deploy is refused because the account can't pay. */
+export const RUNPOD_CREDIT_RE = /\b((insufficient|enough) (funds|balance|credit)|balance (is )?too low|add (funds|credit)|out of credit)\b/i;
+/** A deploy refused for lack of credit: no other GPU type will do better. */
+export class OutOfCreditError extends Error {}
 
 export abstract class PodPool implements GpuController {
   abstract readonly mode: 'simulated' | 'runpod';
   /** Last launch failure per job kind (no GPU of that type available), for status and back-off. */
-  protected launchFailedAt = new Map<WorkKind, { at: number; message: string }>();
+  protected launchFailedAt = new Map<WorkKind, { at: number; message: string; credit?: boolean }>();
   protected launchBackoffMs = 60_000;
   constructor(protected ctx: Ctx) {}
 
@@ -69,7 +75,20 @@ export abstract class PodPool implements GpuController {
       warmSessionId: job.warmSessionId ?? null, warmupCharged: !!job.warmSessionId,
     }).returning();
     let res: Awaited<ReturnType<PodPool['launch']>> = null;
-    try { res = await this.launch(row!, kind, token); } catch (e) { this.ctx.log.error({ err: (e as Error).message }, 'pod launch failed'); }
+    let credit = false;
+    try { res = await this.launch(row!, kind, token); } catch (e) {
+      credit = e instanceof OutOfCreditError;
+      this.ctx.log.error({ err: (e as Error).message }, 'pod launch failed');
+    }
+    if (credit) {
+      // The add-on engine's account can't pay: fail what was waiting for it (refunded) and tell the owner. Nothing pauses.
+      const message = 'RunPod refused to start a GPU: the account is out of credit';
+      this.launchFailedAt.set(kind, { at: now, message, credit: true });
+      await this.ctx.db.update(pods).set({ state: 'failed', stoppedAt: now, error: message }).where(eq(pods.id, row!.id));
+      await this.ctx.engines.outOfCredit(job.studioId, 'runpod', message);
+      if (job.jobId) await this.ctx.jobs.failForCredit(job.studioId, job.userId, kind);
+      return null;
+    }
     if (!res) {
       const message = `No ${gpuTable(this.ctx.config)[kind].join(' / ')} available right now; the job stays queued and we retry`;
       this.launchFailedAt.set(kind, { at: now, message });
@@ -78,6 +97,7 @@ export abstract class PodPool implements GpuController {
       return null;
     }
     this.launchFailedAt.delete(kind);
+    this.ctx.engines.worked('runpod');
     const [up] = await this.ctx.db.update(pods).set({
       runpodId: res.runpodId, gpuType: res.gpuType, costPerHr: res.costPerHr,
       ...(res.ready ? { state: 'running' as const, readyAt: now, idleSince: now, lastHeartbeatAt: now } : {}),
@@ -108,9 +128,9 @@ export abstract class PodPool implements GpuController {
       return w ?? job;
     }
     // Idle time before this job, then the start-up time if this is the pod's first job.
-    if (pod.idleSince && pod.warmupCharged) await this.charge(pod, (now - pod.idleSince) / 1000, job.id, 'GPU idle before the job');
+    if (pod.idleSince && pod.warmupCharged) await this.charge(pod, (now - pod.idleSince) / 1000, job.id, 'Add-on idle');
     await this.ctx.db.update(pods).set({ currentJobId: job.id, busy: true, idleSince: null, warmupCharged: true }).where(eq(pods.id, pod.id));
-    if (!pod.warmupCharged) await this.charge(pod, ((pod.readyAt ?? now) - pod.startedAt) / 1000, job.id, 'GPU warm-up');
+    if (!pod.warmupCharged) await this.charge(pod, ((pod.readyAt ?? now) - pod.startedAt) / 1000, job.id, 'Add-on start-up');
     return job;
   }
 
@@ -135,7 +155,7 @@ export abstract class PodPool implements GpuController {
     if (!u) return;
     if (u.warmSessionId) { /* the warm session settles its own wall time */ }
     else if (p.idleSince && p.warmupCharged) await this.chargeIdle(p, now);
-    else if (!p.warmupCharged && p.startedForJobId) await this.charge(p, ((p.readyAt ?? now) - p.startedAt) / 1000, p.startedForJobId, 'GPU start-up (no job ran)');
+    else if (!p.warmupCharged && p.startedForJobId) await this.charge(p, ((p.readyAt ?? now) - p.startedAt) / 1000, p.startedForJobId, 'Add-on start-up (no job ran)');
     try { await this.terminate(p); } catch (e) { this.ctx.log.error({ pod: p.id, err: (e as Error).message }, 'pod stop failed'); }
     await this.ctx.db.update(pods).set({ state: 'stopped', stoppedAt: now, busy: false }).where(eq(pods.id, p.id));
     this.ctx.log.info({ pod: p.id, why }, 'pod stopped');
@@ -148,7 +168,7 @@ export abstract class PodPool implements GpuController {
   async chargeIdle(p: PodRow, now: number) {
     if (!p.idleSince || !p.warmupCharged || p.warmSessionId) return;
     const [last] = await this.ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.podId, p.id), eq(jobs.userId, p.assignedUserId ?? ''))).orderBy(desc(jobs.claimedAt)).limit(1);
-    await this.charge(p, (now - p.idleSince) / 1000, last?.id ?? null, 'GPU idle');
+    await this.charge(p, (now - p.idleSince) / 1000, last?.id ?? null, 'Add-on idle');
     await this.ctx.db.update(pods).set({ idleSince: now }).where(eq(pods.id, p.id));
   }
 
@@ -219,7 +239,7 @@ export class SimulatedGpu extends PodPool {
         if (elapsed >= failAt) {
           const p = P.progressAt(job.request, failAt);
           await ctx.db.update(jobs).set({ progress: p.progress, step: p.step }).where(eq(jobs.id, job.id));
-          await finish(() => ctx.jobs.fail(job.id, `The GPU disconnected at step ${p.step}.`, true));
+          await finish(() => ctx.jobs.fail(job.id, SOMETHING_WENT_WRONG, true));
         } else if (elapsed >= totalSec) {
           await finish(() => ctx.jobs.complete(job.id, { simulated: true, gpuSeconds: totalSec }));
         } else {
@@ -268,6 +288,7 @@ export class RunpodGpu extends PodPool {
         });
         return { runpodId: r.id, gpuType: gpuTypeId, costPerHr: Number(r.costPerHr ?? c.GPU_HOURLY_USD), ready: false };
       } catch (e) {
+        if (RUNPOD_CREDIT_RE.test((e as Error).message)) throw new OutOfCreditError((e as Error).message);
         this.ctx.log.warn({ gpuTypeId, err: (e as Error).message }, 'RunPod deploy failed, trying the next GPU type');
       }
     }
@@ -291,7 +312,7 @@ export class RunpodGpu extends PodPool {
       const last = p.lastHeartbeatAt ?? p.readyAt;
       if (p.state === 'running' && last && now - last > c.WORKER_HEARTBEAT_TIMEOUT_SEC * 1000) {
         this.ctx.log.warn({ pod: p.id }, 'heartbeats stopped');
-        if (p.currentJobId) await this.ctx.jobs.fail(p.currentJobId, 'The GPU stopped responding. You were not charged.', true);
+        if (p.currentJobId) await this.ctx.jobs.fail(p.currentJobId, SOMETHING_WENT_WRONG, true);
         await this.ctx.db.update(pods).set({ currentJobId: null, idleSince: null }).where(eq(pods.id, p.id));
         await this.stopPod({ ...p, currentJobId: null, idleSince: null }, now, 'heartbeat timeout');
       }

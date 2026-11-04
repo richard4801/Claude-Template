@@ -13,7 +13,7 @@ export type Prediction = {
   id: string; status: PredictionStatus; output?: unknown; error?: unknown;
   metrics?: { predict_time?: number; video_output_duration_seconds?: number; [k: string]: unknown };
 };
-export type ReplicateErrorKind = 'refused' | 'failed' | 'rate_limited' | 'timeout' | 'unavailable' | 'cancelled';
+export type ReplicateErrorKind = 'refused' | 'failed' | 'rate_limited' | 'timeout' | 'unavailable' | 'cancelled' | 'out_of_credit';
 
 export class ReplicateError extends Error {
   constructor(message: string, readonly kind: ReplicateErrorKind, readonly status?: number) { super(message); }
@@ -21,6 +21,9 @@ export class ReplicateError extends Error {
 
 /** Replicate's wording for a safety-filter refusal (its own checker or the model provider's). */
 export const SAFETY_RE = /\b(sensitive|safety|flagged|nsfw|content[ _-]?(policy|moderation|filter)|moderation|E005|inappropriate)\b/i;
+
+/** Replicate's wording when the account can't pay (HTTP 402, or a prediction error about credit or billing). */
+export const CREDIT_RE = /\b(insufficient (credit|funds|balance)|out of credit|payment required|billing (limit|issue|required)|add (a )?payment|monthly spend limit)\b/i;
 
 export const errorText = (e: unknown) => (typeof e === 'string' ? e : e == null ? '' : JSON.stringify(e)).slice(0, 500);
 
@@ -112,10 +115,11 @@ export class ReplicateClient {
       }
       const text = await res.text().catch(() => '');
       if (res.status === 401 || res.status === 403) throw new ReplicateError("Replicate refused the server's token", 'unavailable', res.status);
-      if (res.status === 402) throw new ReplicateError("The studio's Replicate account is out of credit", 'failed', 402);
+      if (res.status === 402) throw new ReplicateError("The studio's Replicate account is out of credit", 'out_of_credit', 402);
       if (!res.ok) {
         const detail = (() => { try { return errorText(JSON.parse(text).detail ?? text); } catch { return text.slice(0, 300); } })();
         if (SAFETY_RE.test(detail)) throw new ReplicateError(detail, 'refused', res.status);
+        if (CREDIT_RE.test(detail)) throw new ReplicateError(`Replicate is out of credit (${detail})`, 'out_of_credit', res.status);
         throw new ReplicateError(`Replicate rejected the request (${res.status}${detail ? `: ${detail}` : ''})`, 'failed', res.status);
       }
       return JSON.parse(text) as Prediction;

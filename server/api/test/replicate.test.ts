@@ -20,12 +20,12 @@ const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version']); execFileS
 const TOKEN = 'r8_test_token';
 
 type Pred = { id: string; model: string; input: any; polls: number; status: string; output?: unknown; error?: string; billed?: number; cancelled?: boolean };
-type Plan = { status?: 'succeeded' | 'failed'; error?: string; billed?: number; pollsBeforeDone?: number; holdUntilCancelled?: boolean };
+type Plan = { status?: 'succeeded' | 'failed'; error?: string; billed?: number; pollsBeforeDone?: number; holdUntilCancelled?: boolean; metrics?: Record<string, number> };
 
 /** A tiny stand-in for api.replicate.com: scripted 429s, predictions that finish after a few polls, output files. */
 async function fakeReplicate(dir: string) {
   const preds = new Map<string, Pred>();
-  const state = { creates: [] as Pred[], rateLimits: [] as string[], plans: [] as Plan[], unauthorized: 0, cancels: [] as string[], videoSize: '288x512' };
+  const state = { creates: [] as Pred[], rateLimits: [] as string[], plans: [] as Plan[], unauthorized: 0, cancels: [] as string[], videoSize: '288x512', noCredit: 0 };
   let n = 0;
   const videos = new Map<number, string>();
   const videoOf = (seconds: number) => {
@@ -55,6 +55,7 @@ async function fakeReplicate(dir: string) {
       if (create && req.method === 'POST') {
         const limit = state.rateLimits.shift();
         if (limit) return json(429, { detail: limit, status: 429 });
+        if (state.noCredit > 0) { state.noCredit--; return json(402, { detail: 'You have insufficient credit to run this model. Go to https://replicate.com/account/billing to purchase credit.', status: 402 }); }
         const plan = state.plans.shift() ?? {};
         const p: Pred = { id: `p${++n}`, model: create[1]!, input: JSON.parse(body).input, polls: 0, status: 'starting', error: plan.error, billed: plan.billed };
         (p as any).plan = plan;
@@ -75,7 +76,7 @@ async function fakeReplicate(dir: string) {
         if (plan.status === 'failed') return json(200, { id: p.id, status: 'failed', error: plan.error ?? 'boom' });
         const video = p.model.startsWith('minimax/');
         const output = video ? `${base}.mp4` : p.model.startsWith('qwen/') ? [`${base}.jpg`] : `${base}.jpg`;
-        return json(200, { id: p.id, status: 'succeeded', output, metrics: video ? { predict_time: 30, video_output_duration_seconds: plan.billed ?? p.input.duration } : { predict_time: 3 } });
+        return json(200, { id: p.id, status: 'succeeded', output, metrics: video ? { predict_time: 30, video_output_duration_seconds: plan.billed ?? p.input.duration } : { predict_time: 3, ...(plan.metrics ?? {}) } });
       }
       json(404, { detail: 'no such route' });
     });
@@ -99,15 +100,12 @@ async function uploadClip(a: Awaited<ReturnType<typeof makeApp>>, c: Client, fil
   return JSON.parse(r.body).id as string;
 }
 
-/** $50 of simulated studio credit for the owner. */
-async function fund(a: Awaited<ReturnType<typeof makeApp>>) {
+/** Live events for one user, straight from the hub. */
+async function listen(a: Awaited<ReturnType<typeof makeApp>>, c: Client) {
   const [st] = await a.ctx.db.select().from(studioSettings);
-  if (st) await a.ctx.db.update(studioSettings).set({ simBalance: 50 });
-  else {
-    const me = (await a.ctx.db.select().from((await import('../src/db/schema.js')).users))[0]!;
-    await a.ctx.money.settings(me.studioId);
-    await a.ctx.db.update(studioSettings).set({ simBalance: 50 });
-  }
+  const events: any[] = [];
+  const stop = a.ctx.hub.subscribe(st!.studioId, c.id, line => { if (line.startsWith('data: ')) events.push(JSON.parse(line.slice(6))); });
+  return { events, stop };
 }
 
 const probe = (file: string) => JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', file]).toString()) as
@@ -126,10 +124,30 @@ describe('pricing and prompt (Replicate)', () => {
       expect(P.genLabel(r)).toBe(o.genLabel);
     }
   });
+  it('matches every row of photo_pricing_fixture.json (pass-through photo estimates)', () => {
+    const fx = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../../android/core/src/test/resources/photo_pricing_fixture.json'), 'utf8'));
+    expect(fx.rows.length).toBe(94);
+    const pp = fx.params as P.PhotoPrices;
+    expect(pp).toMatchObject({ perRun: 0.015, perInputMp: 0.015, perOutputMp: 0.015, perEdit: 0.03, refMp: P.PHOTO_REF_MP, maxRefs: 6 });
+    for (const r of fx.rows) {
+      const v = r.kind === 'shoot' ? P.shootEstimate(pp, r.count, r.refs) : r.kind === 'outfitSet' ? P.outfitSetEstimate(pp, r.refs)
+        : r.kind === 'sheetAngles' ? P.sheetAnglesEstimate(pp, r.count, r.refs) : P.loraSetEstimate(pp, r.refs);
+      expect(v, JSON.stringify(r)).toBe(r.estimate);
+      expect(P.aboutMoney(v)).toBe(r.label);
+    }
+    // The exact cost of one prediction: Replicate's dollar figure > its billing counts > the measured megapixels.
+    expect(P.photoPredictionCost(pp, 'shot', { inMp: 6 * 0.786432, outMp: 1088 * 1920 / 1e6 })).toBeCloseTo(0.11711328, 12);
+    expect(P.photoPredictionCost(pp, 'shot', { inMp: 9, outMp: 9 }, { image_input_megapixel_count: 1, image_output_megapixel_count: 1 })).toBeCloseTo(0.045, 12);
+    expect(P.photoPredictionCost(pp, 'shot', { inMp: 9, outMp: 9 }, { cost_usd: 0.07 })).toBe(0.07);
+    expect(P.photoPredictionCost(pp, 'edit', { inMp: 0, outMp: 0 })).toBe(0.03);
+    expect(P.photoPredictionCost(pp, 'edit', { inMp: 0, outMp: 0 }, { image_output_count: 2 })).toBe(0.06);
+  });
   it('labels and ledger notes', () => {
     expect(P.engineLabel({ engine: 'replicate', quality: 'hd' })).toBe('HD · 2K');
     expect(P.engineLabel({ engine: 'replicate' })).toBe('Draft · 768P');
-    expect(P.engineLabel({ engine: 'h3', steps: 12 })).toBe('Exact edit · 12 steps');
+    expect(P.engineLabel({ engine: 'h3', steps: 12 })).toBe('Edit');
+    expect(P.takeLabel({ engine: 'h3', steps: 12 })).toBe('Edit');
+    expect(P.engineLabel({ engine: 'viggle' })).toBe('Fast · beta');
     expect(P.takeLabel({ engine: 'replicate', quality: 'draft' })).toBe('Draft');
     expect(P.videoNote({ engine: 'replicate', quality: 'standard' }, [7])).toBe('Video · Standard 768P · 7 s');
     expect(P.videoNote({ engine: 'replicate', quality: 'hd' }, [7, 7])).toBe('Video · HD 2K · 2 × 7 s');
@@ -179,7 +197,6 @@ describe.skipIf(!hasFfmpeg)('video on Replicate (fake Replicate server)', () => 
       SIM_START_BALANCE: '50', CAP_PER_DAY_USD: '1000', CAP_PER_USER_DAY_USD: '1000' },
       { replicateTime: { sleep: async ms => { slept.push(ms); clock += ms; await new Promise(r => setTimeout(r, 2)); }, now: () => clock } });
     owner = (await people(a, 0)).owner;
-    await fund(a);
     modelId = (await sienna(owner)).id;
     const o = (await owner.req('POST', '/v1/outfits', { modelId, name: 'Green crop tee', mode: 'own', images: [{ asset: 'g_front' }, { asset: 'g_tq' }, { asset: 'g_side' }, { asset: 'g_back' }] })).body;
     outfitId = o.id;
@@ -197,13 +214,22 @@ describe.skipIf(!hasFfmpeg)('video on Replicate (fake Replicate server)', () => 
   const ended = (id: string) => until(async () => { const j = await job(id); return j && ['done', 'failed'].includes(j.state) ? j : null; }, 60_000);
   const rows = (jobId: string) => a.ctx.db.select().from(ledger).where(eq(ledger.jobId, jobId));
 
-  it('advertises the picker with prices, and refuses Exact-edit-only options', async () => {
+  it('advertises Render (Draft / Standard / HD) and the add-ons (Edit, Fast · beta, Upscale coming soon), and refuses Edit-only options', async () => {
     const st = (await owner.req('GET', '/v1/settings/studio')).body;
     expect(st.features.replicate).toBe(true);
     expect(st.features.video.defaultEngine).toBe('replicate');
     expect(st.features.video.defaultQuality).toBe('draft');
-    expect(st.features.video.options.map((o: any) => [o.id, o.label, o.pricePerSec ?? null, o.available])).toEqual([
-      ['draft', 'Draft', 0.02, true], ['standard', 'Standard', 0.08, true], ['hd', 'HD', 0.13, true], ['exact', 'Exact edit', null, true]]);
+    expect(st.features.video.options.map((o: any) => [o.id, o.label, o.detail, o.pricePerSec ?? null, o.available])).toEqual([
+      ['draft', 'Draft', 'Quick preview · 768P', 0.02, true], ['standard', 'Standard', '768P', 0.08, true], ['hd', 'HD', '2K', 0.13, true]]);
+    expect(st.features.video.addons.map((o: any) => [o.id, o.label, o.available, o.comingSoon ?? false])).toEqual([
+      ['edit', 'Edit', true, false], ['fast', 'Fast · beta', true, false], ['upscale', 'Upscale', false, true]]);
+    expect(st.features.video.addons[0].sends).toEqual({ engine: 'h3', use: 'full', steps: 10 });
+    expect(st.features.video.addons[2].sizes).toEqual([
+      { id: '1080p', label: '1080p', width: 1080, height: 1920, available: false, price: null },
+      { id: '2k', label: '2K', width: 1440, height: 2560, available: false, price: null },
+      { id: '4k', label: '4K', width: 2160, height: 3840, available: false, price: null }]);
+    // Nothing a member reads names a provider, a GPU or steps.
+    expect(JSON.stringify(st.features)).not.toMatch(/replicate\b(?!")|runpod|gpu|lite|steps? ·|warm/i);
     expect((await owner.req('POST', '/v1/jobs', { modelId, outfitId, clipId, engine: 'replicate', lipSync: true })).body.code).toBe('bad_request');
     expect((await owner.req('POST', '/v1/jobs', { modelId, outfitId, clipId, engine: 'replicate', background: 'photo' })).body.code).toBe('bad_request');
     expect((await owner.req('GET', '/health')).body.videoEngine).toBe('replicate');
@@ -280,8 +306,8 @@ describe.skipIf(!hasFfmpeg)('video on Replicate (fake Replicate server)', () => 
     fake.state.plans.push({ status: 'failed', error: 'CUDA out of memory' });
     const j = (await owner.req('POST', '/v1/jobs', { modelId, outfitId, clipId, engine: 'replicate' })).body;
     const f = await ended(j.id);
-    expect(f).toMatchObject({ state: 'failed', errorCode: 'provider_failed' });
-    expect(f.error).toMatch(/CUDA out of memory.*not charged/);
+    expect(f).toMatchObject({ state: 'failed', errorCode: 'provider_failed', phase: 'Failed' });
+    expect(f.error).toBe("Something went wrong · you weren't charged");
     expect(f.refunded).toBeCloseTo(0.14, 9);                       // Draft (the default): 0.02 × 7
     const l = await rows(j.id);
     expect(l.find(x => x.kind === 'release')!.tokens).toBe(l.find(x => x.kind === 'hold')!.tokens! * -1);
@@ -292,7 +318,7 @@ describe.skipIf(!hasFfmpeg)('video on Replicate (fake Replicate server)', () => 
     fake.state.plans.push({ status: 'failed', error: 'The input or output was flagged as sensitive. Please try again with different inputs. (E005)' });
     const j = (await owner.req('POST', '/v1/jobs', { modelId, outfitId, clipId, engine: 'replicate' })).body;
     const f = await ended(j.id);
-    expect(f).toMatchObject({ state: 'failed', errorCode: 'provider_refused', error: "Replicate's safety filter refused this clip" });
+    expect(f).toMatchObject({ state: 'failed', errorCode: 'provider_refused', error: "This clip was refused by the content filter · you weren't charged" });
     expect((await rows(j.id)).some(x => x.kind === 'release')).toBe(true);
   }, 60_000);
 
@@ -304,7 +330,7 @@ describe.skipIf(!hasFfmpeg)('video on Replicate (fake Replicate server)', () => 
     const p1 = await until(() => { const p = fake.state.creates[n0]; return p && fake.preds.get(p.id)!.polls > 1 ? p : null; }, 30_000);
     expect(fake.state.creates.length).toBe(n0 + 1);                 // one at a time: j2 hasn't started
     const waiting = await until(async () => { const x = await job(j2.id); return x?.queuePosition === 1 ? x : null; });
-    expect(waiting.phase).toMatch(/^Waiting for Replicate/);
+    expect(waiting.phase).toMatch(/^Waiting to start/);
     expect((await owner.req('DELETE', `/v1/jobs/${j1.id}`)).status).toBe(204);
     await until(() => fake.state.cancels.includes(p1.id) || null);
     expect((await rows(j1.id)).some(x => x.kind === 'release')).toBe(true);
@@ -319,7 +345,26 @@ describe.skipIf(!hasFfmpeg)('video on Replicate (fake Replicate server)', () => 
     const f = await ended(j.id);
     fake.state.rateLimits.length = 0;
     expect(f).toMatchObject({ state: 'failed', errorCode: 'provider_rate_limited' });
+    expect(f.error).not.toMatch(/replicate/i);
     expect((await rows(j.id)).some(x => x.kind === 'release')).toBe(true);
+  }, 90_000);
+
+  it('out of credit (402): the job fails at once with a refund, and the owner gets a notice and an Engines status', async () => {
+    const ev = await listen(a, owner);
+    fake.state.noCredit = 1;
+    const j = (await owner.req('POST', '/v1/jobs', { modelId, outfitId, clipId, engine: 'replicate' })).body;
+    const f = await ended(j.id);
+    ev.stop();
+    expect(f).toMatchObject({ state: 'failed', errorCode: 'provider_out_of_credit', refunded: j.cost });
+    expect(f.error).toBe("Something went wrong · you weren't charged. The studio owner has been told.");
+    expect((await rows(j.id)).some(x => x.kind === 'release')).toBe(true);
+    expect(ev.events.some(e => e.type === 'wallet' && e.notice?.code === 'provider_out_of_credit' && e.notice.engine === 'replicate')).toBe(true);
+    const st = (await owner.req('GET', '/v1/settings/studio')).body;
+    expect(st.engines.list.find((e: any) => e.id === 'replicate')).toMatchObject({ name: 'Replicate', status: 'out_of_credit', keySet: true });
+    // The next job that works clears it.
+    const ok = (await owner.req('POST', '/v1/jobs', { modelId, outfitId, clipId, engine: 'replicate' })).body;
+    expect((await ended(ok.id)).state).toBe('done');
+    expect((await owner.req('GET', '/v1/settings/studio')).body.engines.list.find((e: any) => e.id === 'replicate').status).toBe('ready');
   }, 90_000);
 });
 
@@ -335,7 +380,6 @@ describe('photos on Replicate (fake Replicate server)', () => {
     a = await makeApp({ REPLICATE_API_TOKEN: TOKEN, REPLICATE_API_URL: fake.base, REPLICATE_POLL_MS: '10', BALANCE_MODE: 'simulated', SIM_START_BALANCE: '50',
       REPLICATE_IMAGE_MAX_WAIT_SEC: '30' }, { replicateTime: { sleep: async ms => { clock += ms; await new Promise(r => setTimeout(r, 1)); }, now: () => clock } });
     owner = (await people(a, 0)).owner;
-    await fund(a);
     modelId = (await sienna(owner)).id;
   });
   afterAll(async () => { await a?.close(); await fake?.close(); fs.rmSync(work, { recursive: true, force: true }); });
@@ -349,7 +393,7 @@ describe('photos on Replicate (fake Replicate server)', () => {
   it('a photoshoot makes one FLUX.2 prediction per still with shrunk references, and records the cost', async () => {
     const shots = (await owner.req('POST', '/v1/shoots', { modelId, scene: 'Rooftop · golden hour', count: 2 })).body;
     expect(shots).toHaveLength(2);
-    expect(shots[0].engineLabel).toBe('FLUX.2 [pro] · Replicate');
+    expect(shots[0].engineLabel).toBe(''); // the engine is never shown on a photo
     expect(shots[0].thumb.url).toMatch(/^\/uploads\/g\//);
     const ps = fake.state.creates.slice(-2);
     for (const p of ps) {
@@ -361,13 +405,43 @@ describe('photos on Replicate (fake Replicate server)', () => {
     expect(ps[0]!.input.prompt).toContain('Sienna Vale');
     const imgs = await a.ctx.db.select().from(generatedImages).where(eq(generatedImages.provider, 'replicate'));
     expect(imgs.length).toBeGreaterThanOrEqual(2);
-    expect(imgs[0]!.costUsd).toBeGreaterThan(0.03);
-    expect(imgs[0]!.costUsd).toBeLessThan(0.2);
+    // Exact cost from the real megapixels: $0.015 + $0.015 × Σ input MP (the shrunk references as sent) + $0.015 × output MP (64×96).
+    const inMp = async (p: typeof ps[number]) => {
+      let mp = 0;
+      for (const u of p.input.input_images as string[]) { const m = await sharp(path.join(a.dir, /\/(rx\/[^?]+)/.exec(u)![1]!)).metadata(); mp += m.width! * m.height! / 1e6; }
+      return mp;
+    };
+    for (const [i, p] of ps.entries()) expect(shots[i].cost).toBeCloseTo(0.015 + 0.015 * (await inMp(p)) + 0.015 * (64 * 96 / 1e6), 12);
+    // The hold was the estimate; the settle is the exact sum.
+    const holds = await a.ctx.db.select().from(ledger).where(eq(ledger.kind, 'hold'));
+    const hold = holds.at(-1)!;
+    expect(hold.note).toBe('Photoshoot · 2 photos · hold');
+    const settle = (await a.ctx.db.select().from(ledger).where(eq(ledger.jobId, hold.jobId!))).find(x => x.kind === 'settle')!;
+    expect(settle.note).toBe('Photoshoot · 2 photos');
+    expect(settle.amountUsd).toBeCloseTo(shots[0].cost + shots[1].cost, 12);
     // References were shrunk to fit 1024 px.
     const rx = fs.readdirSync(path.join(a.dir, 'rx'));
     expect(rx.length).toBeGreaterThan(0);
     const meta = await sharp(path.join(a.dir, 'rx', rx[0]!)).metadata();
     expect(Math.max(meta.width!, meta.height!)).toBeLessThanOrEqual(1024);
+  });
+
+  it("Replicate's own billing counts win over the measured size when the prediction reports them", async () => {
+    fake.state.plans.push({ metrics: { image_input_megapixel_count: 4, image_output_megapixel_count: 2 } });
+    const shots = (await owner.req('POST', '/v1/shoots', { modelId, scene: 'Kitchen', count: 1 })).body;
+    expect(shots[0].cost).toBeCloseTo(0.015 + 0.015 * 4 + 0.015 * 2, 12);   // $0.105
+    fake.state.plans.push({ metrics: { cost_usd: 0.0937 } });
+    const s2 = (await owner.req('POST', '/v1/shoots', { modelId, scene: 'Kitchen', count: 1 })).body;
+    expect(s2[0].cost).toBe(0.0937);
+  });
+
+  it('features.photo carries the prices and estimates the apps show ("about $0.46")', async () => {
+    const f = (await owner.req('GET', '/v1/settings/studio')).body.features.photo;
+    expect(f).toMatchObject({ perRun: 0.015, perInputMp: 0.015, perOutputMp: 0.015, perEdit: 0.03, refMp: 0.79, maxRefs: 6, loraShots: 30 });
+    expect(P.aboutMoney(f.estimates.shoot)).toBe('about $0.46');
+    expect(P.aboutMoney(f.estimates.outfitSet)).toBe('about $0.19');
+    expect(P.aboutMoney(f.estimates.sheetAngle)).toBe('about $0.10');
+    expect(P.aboutMoney(f.estimates.loraSet)).toBe('about $3.03');
   });
 
   it('an outfit set: a FLUX.2 front, then three Qwen edits of it', async () => {
@@ -380,6 +454,11 @@ describe('photos on Replicate (fake Replicate server)', () => {
     expect(ps[1]!.input).toMatchObject({ aspect_ratio: 'match_input_image', output_format: 'jpg' });
     expect(ps[1]!.input.image[0]).toMatch(/rx\//);
     expect(ps[1]!.input.prompt).toMatch(/three-quarter/);
+    // Exact: the FLUX.2 front + 3 × $0.03 edits.
+    expect(done.cost).toBeGreaterThan(0.09 + 0.015);
+    const imgs = (await a.ctx.db.select().from(generatedImages).where(eq(generatedImages.refId, o.id)));
+    expect(imgs.filter(i => i.model === 'qwen/qwen-image-edit-2511').map(i => i.costUsd)).toEqual([0.03, 0.03, 0.03]);
+    expect(done.cost).toBeCloseTo(imgs.reduce((t, i) => t + i.costUsd, 0), 12);
   });
 
   it('a safety refusal is provider_refused (422) and the shoot is refunded', async () => {
@@ -387,7 +466,7 @@ describe('photos on Replicate (fake Replicate server)', () => {
     fake.state.plans.push({ status: 'failed', error: 'NSFW content detected' });
     const r = await owner.req('POST', '/v1/shoots', { modelId, count: 1 });
     expect(r.status).toBe(422);
-    expect(r.body).toEqual({ code: 'provider_refused', error: "Replicate's safety filter refused this photo" });
+    expect(r.body).toEqual({ code: 'provider_refused', error: "This photo was refused by the content filter · you weren't charged" });
     expect((await owner.req('GET', '/v1/balance')).body.balance).toBeCloseTo(before, 6);
   });
 
@@ -399,5 +478,32 @@ describe('photos on Replicate (fake Replicate server)', () => {
     expect(r.status).toBe(429);
     expect(r.body.code).toBe('provider_rate_limited');
     expect((await owner.req('GET', '/v1/balance')).body.balance).toBeCloseTo(before, 6);
+  });
+
+  it('out of credit (402) on a photo: 503 provider_out_of_credit, not charged, owner told', async () => {
+    const ev = await listen(a, owner);
+    const before = (await owner.req('GET', '/v1/balance')).body.balance;
+    fake.state.noCredit = 1;
+    const r = await owner.req('POST', '/v1/shoots', { modelId, count: 1 });
+    ev.stop();
+    expect(r.status).toBe(503);
+    expect(r.body).toEqual({ code: 'provider_out_of_credit', error: "Something went wrong · you weren't charged. The studio owner has been told." });
+    expect((await owner.req('GET', '/v1/balance')).body.balance).toBeCloseTo(before, 6);
+    expect(ev.events.some(e => e.type === 'wallet' && e.notice?.code === 'provider_out_of_credit')).toBe(true);
+  });
+
+  it('a shoot that fails after some photos were billed: the member pays nothing, the studio records what was spent', async () => {
+    const n0 = fake.state.creates.length;
+    fake.state.plans.push({}, { status: 'failed', error: 'boom' });
+    const sb0 = (await owner.req('GET', '/v1/studio/balance')).body;
+    const r = await owner.req('POST', '/v1/shoots', { modelId, count: 2 });
+    expect(r.status).toBe(502);
+    expect(r.body.error).toBe("Something went wrong making the photos · you weren't charged");
+    expect(fake.state.creates.length).toBe(n0 + 2);
+    const over = (await a.ctx.db.select().from(ledger).where(eq(ledger.kind, 'overhead'))).at(-1)!;
+    expect(over.note).toMatch(/^Photos that didn't finish · Photoshoot · 2 photos/);
+    expect(over.amountUsd).toBeGreaterThan(0.015);
+    const sb1 = (await owner.req('GET', '/v1/studio/balance')).body;
+    expect(sb0.balanceUsd - sb1.balanceUsd).toBeCloseTo(over.amountUsd, 9);
   });
 });

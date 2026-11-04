@@ -6,8 +6,7 @@ export const DEMO_SPEED = 24;
 export const STEPS_MIN = 4, STEPS_MAX = 30, STEPS_DEFAULT = 10, TAKES_MAX = 4, MAX_CLIP_SEC = 15;
 export const SEC_PER_STEP_5S = 57.8, GPU_PER_HOUR = 3.99, GPU_STARTUP_MIN = 0.5, LIP_SYNC_MIN = 4;
 export const VIGGLE_MIN_5S = 1.6, VIGGLE_COST_5S = 0.13, BASE_LEN = 5.2;
-export const SHOOT_COST = 0.12, OUTFIT_SET_COST = 0.08, FILL_ANGLE_COST = 0.02;
-export const LORA_SET_COST = 0.60, LORA_CANDIDATES = 30, LORA_MIN_KEEP = 20, LORA_PHOTO_MIN = 25, LORA_VIDEO_MIN = 75;
+export const LORA_CANDIDATES = 30, LORA_MIN_KEEP = 20, LORA_PHOTO_MIN = 25, LORA_VIDEO_MIN = 75;
 
 export type RenderReq = {
   engine?: string; steps?: number; use?: string; lipSync?: boolean; takes?: number; clipSeconds?: number | null;
@@ -20,11 +19,52 @@ export type Quality = 'draft' | 'standard' | 'hd';
 export const QUALITY_IDS: Quality[] = ['draft', 'standard', 'hd'];
 export const QUALITY_PRICE_DEFAULTS: Record<Quality, number> = { draft: 0.02, standard: 0.08, hd: 0.13 };
 export const QUALITY_INFO: Record<Quality, { label: string; resolution: '768P' | '2K'; detail: string }> = {
-  draft: { label: 'Draft', resolution: '768P', detail: '768P · lite' },
+  draft: { label: 'Draft', resolution: '768P', detail: 'Quick preview · 768P' },
   standard: { label: 'Standard', resolution: '768P', detail: '768P' },
   hd: { label: 'HD', resolution: '2K', detail: '2K' },
 };
-export const EXACT_EDIT = { label: 'Exact edit', detail: 'Frame-by-frame · slower · GPU start-up' };
+/** The add-ons (plans/api.md "App clean-up" §2). Edit was "Exact edit"; nothing technical is shown. */
+export const EDIT = { label: 'Edit', detail: 'Swaps her into every frame of the whole clip' };
+export const FAST = { label: 'Fast · beta', detail: 'Quicker and rougher · beta' };
+export const UPSCALE = { label: 'Upscale', detail: 'Sharper 1080p, 2K or 4K from a finished take' };
+export const UPSCALE_SIZES = [
+  { id: '1080p', label: '1080p', width: 1080, height: 1920 },
+  { id: '2k', label: '2K', width: 1440, height: 2560 },
+  { id: '4k', label: '4K', width: 2160, height: 3840 },
+] as const;
+export type UpscaleSize = (typeof UPSCALE_SIZES)[number]['id'];
+
+// ---- Photos: pass-through pricing (plans/api.md "App clean-up" §3). An estimate is held; each prediction settles exactly.
+export type PhotoPrices = { perRun: number; perInputMp: number; perOutputMp: number; perEdit: number; refMp: number; maxRefs: number };
+/** A reference shrunk to fit 1024 px at 3:4 (1024×768), for estimates. */
+export const PHOTO_REF_MP = 0.79;
+/** Estimated cost of one new shot (FLUX.2 [pro]): run + output MP + input MP. Doubles, left to right, like the apps. */
+export const newShotEstimate = (p: PhotoPrices, outMp: number, refs: number) => p.perRun + p.perOutputMp * outMp + p.perInputMp * p.refMp * Math.min(Math.max(0, refs), p.maxRefs);
+export const shootEstimate = (p: PhotoPrices, count: number, refs: number) => count * newShotEstimate(p, 2, refs);
+export const outfitSetEstimate = (p: PhotoPrices, refs: number) => newShotEstimate(p, 1, refs) + 3 * p.perEdit;
+export const sheetAnglesEstimate = (p: PhotoPrices, missing: number, refs: number) => missing * newShotEstimate(p, 1, refs);
+export const loraSetEstimate = (p: PhotoPrices, refs: number) => LORA_CANDIDATES * newShotEstimate(p, 1, refs);
+export const aboutMoney = (v: number) => `about ${money(v)}`;
+/** Output megapixels FLUX.2 is asked for: "2 MP" for requests of 1.5 MP and up (shoots), else "1 MP". */
+export const outMpFor = (w: number, h: number) => (w * h >= 1.5e6 ? 2 : 1);
+
+/** Replicate's billing metrics that may come back on a prediction. */
+export type PhotoMetrics = { cost_usd?: unknown; cost?: unknown; run_count?: unknown; image_input_megapixel_count?: unknown; image_output_megapixel_count?: unknown; image_output_count?: unknown };
+const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : typeof v === 'string' && v.trim() && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : null);
+/**
+ * The exact cost of one photo prediction: Replicate's own dollar figure when it reports one, else its billing counts
+ * × the published prices, else the measured megapixels (input images as sent, the output as received).
+ */
+export function photoPredictionCost(p: PhotoPrices, kind: 'shot' | 'edit', measured: { inMp: number; outMp: number; outputs?: number }, metrics?: PhotoMetrics | null) {
+  const m = metrics ?? {};
+  const usd = num(m.cost_usd) ?? num(m.cost);
+  if (usd != null) return usd;
+  if (kind === 'edit') return p.perEdit * (num(m.image_output_count) ?? measured.outputs ?? 1);
+  const runs = num(m.run_count) ?? 1;
+  const inMp = num(m.image_input_megapixel_count) ?? measured.inMp;
+  const outMp = num(m.image_output_megapixel_count) ?? measured.outMp;
+  return p.perRun * runs + p.perInputMp * inMp + p.perOutputMp * outMp;
+}
 export const REPLICATE_MIN_SEC = 4, REPLICATE_MAX_SEC = 15, SAMPLE_CLIP_SEC = 9.4;
 export const isReplicate = (r: RenderReq) => r.engine === 'replicate';
 /** A replicate job's quality (Draft when it names none, the default). */
@@ -80,8 +120,8 @@ export const totalCost = (r: RenderReq) => estCost(r) * nTakes(r);
 export const money = (v: number) => '$' + v.toFixed(2);
 /** "Standard · 768P", "HD · 2K", "Exact edit · 10 steps", "Fast · beta". */
 export const engineLabel = (r: RenderReq) => isReplicate(r) ? `${QUALITY_INFO[qualityOf(r)].label} · ${QUALITY_INFO[qualityOf(r)].resolution}`
-  : r.engine === 'viggle' ? 'Fast · beta' : `${EXACT_EDIT.label} · ${r.steps ?? STEPS_DEFAULT} steps`;
-export const takeLabel = (r: RenderReq) => isReplicate(r) ? QUALITY_INFO[qualityOf(r)].label : r.engine === 'viggle' ? 'Fast · beta' : `${r.steps ?? STEPS_DEFAULT} steps`;
+  : r.engine === 'viggle' ? FAST.label : EDIT.label;
+export const takeLabel = (r: RenderReq) => isReplicate(r) ? QUALITY_INFO[qualityOf(r)].label : r.engine === 'viggle' ? FAST.label : EDIT.label;
 
 /** "Generate · 10 min · $0.67" (the app's button label). */
 export function genLabel(r: RenderReq) {
@@ -105,7 +145,6 @@ export function sourceOption(use: 'first' | 'full', steps: number, clipSeconds?:
   const label = clipSeconds == null ? (use === 'first' ? 'First 5.2s' : 'Full 9.4s') : use === 'first' ? `First ${trim(L)}s` : `Full ${trim(L)}s`;
   return `${label} · ~${Math.round(m)}m · ${money(c)}`;
 }
-export const fillAnglesCost = (missing: number) => FILL_ANGLE_COST * missing;
 export const videosLeft = (balance: number) => Math.max(0, Math.floor(balance / estCost({})));
 
 export const loraTrainMinutes = () => LORA_PHOTO_MIN + LORA_VIDEO_MIN;
@@ -119,7 +158,7 @@ export function progressAt(r: RenderReq, elapsed: number) {
   const total = totalSeconds(r), n = nTakes(r), perTake = total / n;
   if (isReplicate(r)) {
     const e = Math.min(Math.max(elapsed, 0), total), take = Math.min(n, Math.floor(e / perTake) + 1);
-    return { progress: Math.min(100, e / total * 100), take, step: take - 1, totalSteps: n, phase: e >= total ? 'Done' : `${n > 1 ? `take ${take}/${n} · ` : ''}Rendering on Replicate · ${leftText(total - e)}`, secondsLeft: total - e };
+    return { progress: Math.min(100, e / total * 100), take, step: take - 1, totalSteps: n, phase: e >= total ? 'Done' : `${n > 1 ? `take ${take}/${n} · ` : ''}Rendering · ${leftText(total - e)}`, secondsLeft: total - e };
   }
   const viggle = r.engine === 'viggle';
   const totalSteps = totalStepsFor(r);
@@ -131,10 +170,10 @@ export function progressAt(r: RenderReq, elapsed: number) {
   const prefix = n > 1 ? `take ${take}/${n} · ` : '';
   let step: number, phase: string;
   if (e >= total) { step = totalSteps; phase = 'Done'; }
-  else if (inTake < startup) { step = 0; phase = `${prefix}Starting GPU · ${leftText(left)}`; }
+  else if (inTake < startup) { step = 0; phase = `${prefix}Getting ready · ${leftText(left)}`; }
   else if (inTake < startup + stepsTime) {
     step = Math.min(totalSteps, Math.floor((inTake - startup) / stepsTime * totalSteps) + 1);
-    phase = `${prefix}step ${step}/${totalSteps} · ${leftText(left)}`;
+    phase = `${prefix}Rendering · ${leftText(left)}`;
   } else { step = totalSteps; phase = `${prefix}Lip sync · ${leftText(left)}`; }
   return { progress: Math.min(100, Math.max(0, e / total * 100)), take, step, totalSteps, phase, secondsLeft: left };
 }
@@ -147,12 +186,17 @@ export function progressFromWorker(r: RenderReq, p: { step: number; totalSteps: 
   const progress = Math.min(99.9, ((take - 1) + step / totalSteps) / n * 100);
   const secondsLeft = p.etaSeconds ?? Math.max(0, totalSeconds(r) * (1 - progress / 100));
   const prefix = n > 1 ? `take ${take}/${n} · ` : '';
-  // Worker phases other than denoising ("loading", "lip sync", "upload") are shown as-is; denoising shows the step.
-  const raw = (p.phase ?? '').trim();
-  const isSteps = !raw || /^(denoise|denoising|steps?|sampling)$/i.test(raw);
-  const label = isSteps ? `step ${step}/${totalSteps}` : raw.charAt(0).toUpperCase() + raw.slice(1);
-  const phase = `${prefix}${label} · ${leftText(secondsLeft)}`;
+  const phase = `${prefix}${workerPhaseLabel(p.phase)} · ${leftText(secondsLeft)}`;
   return { progress, take, step, totalSteps, phase, secondsLeft };
+}
+
+/** A worker's phase as members see it: no steps, GPU or model-loading words (plans/api.md "App clean-up" §1). */
+export function workerPhaseLabel(raw?: string) {
+  const p = (raw ?? '').trim().toLowerCase();
+  if (/lip/.test(p)) return 'Lip sync';
+  if (/load|start|boot|warm|download|prepar|init/.test(p)) return 'Getting ready';
+  if (/upload|encod|finish|mux|trim|save/.test(p)) return 'Finishing';
+  return 'Rendering';
 }
 
 /** Simulated seconds at which a failing job breaks (step 3 of take 1). */

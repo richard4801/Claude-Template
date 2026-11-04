@@ -16,6 +16,7 @@ import { createInvite, revokeSession, signin, signup } from '../auth/auth.js';
 import { accountView, PLATFORMS, platformOf } from '../services/posts.js';
 import { takeView } from '../services/jobs.js';
 import { ASSET_DIR, ASSET_KEYS, PROVIDERS } from '../images/service.js';
+import { PhotoBill } from '../images/bill.js';
 import { LocalStorage, contentTypeFor } from '../storage/index.js';
 import { objectInfo, putObject } from '../storage/objects.js';
 import { seedDev, SLOT_SAMPLE } from '../seed.js';
@@ -40,7 +41,7 @@ export function modelView(m: typeof models.$inferSelect) {
   return compact({ id: m.id, name: m.name, age: m.age, niche: m.niche, look: m.look, neverAdd: m.neverAdd, slots: m.slots, outfitIds: m.outfitIds, personality: m.personality, notes: m.notes });
 }
 export const outfitView = (o: typeof outfits.$inferSelect) =>
-  ({ id: o.id, modelId: o.modelId, name: o.name, mode: o.mode, description: o.description, angles: o.angles, state: o.state, prompt: o.prompt });
+  compact({ id: o.id, modelId: o.modelId, name: o.name, mode: o.mode, description: o.description, angles: o.angles, state: o.state, prompt: o.prompt, cost: o.cost ?? undefined });
 const clipView = (c: typeof clips.$inferSelect) => compact({ id: c.id, name: c.name, durationSec: c.durationSec, width: c.width, height: c.height, fps: c.fps, checks: c.checks });
 
 export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
@@ -148,8 +149,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post<{ Params: { id: string } }>('/v1/models/:id/fill-angles', async req => {
     const m = await model(req.user, req.params.id);
     const missing = m.slots.filter(s => !s.image && !s.busy);
-    const cost = P.fillAnglesCost(missing.length);
-    await ctx.money.charge(whoOf(req.user), cost, `fill ${missing.length} angles`, m.id);
+    const refsForFill = m.slots.map(s => s.image);
+    const cost = missing.length ? P.sheetAnglesEstimate(ctx.images.photoPrices(), missing.length, ctx.images.refCount(refsForFill)) : 0;
+    const bill = await new PhotoBill(ctx, whoOf(req.user), `sheet_${uid('f')}`, cost, `Character sheet · ${missing.length} angle${missing.length === 1 ? '' : 's'}`).start();
     const slots = m.slots.map(s => (missing.includes(s) ? { ...s, busy: true } : s));
     const [u] = await db.update(models).set({ slots }).where(eq(models.id, m.id)).returning();
     const user = req.user;
@@ -160,12 +162,13 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       let failed = 0;
       for (const s of missing) {
         try {
-          const r = await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'sheet', refId: m.id, refs,
+          const r = await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'sheet', refId: m.id, refs, bill,
             req: { prompt: characterSheetShot(identity, sheetAngle(s.key)!).text, width: 768, height: 1024, count: 1, simAssets: [SLOT_SAMPLE[s.key]!] } });
           filled[s.key] = r.images[0]!;
         } catch { filled[s.key] = null; failed++; }
       }
-      if (failed) await ctx.money.refundCharge(whoOf(user), P.fillAnglesCost(failed), 'angle fill failed', m.id);
+      // Settles to the angles that worked (the ones that failed cost nothing).
+      await bill.finish();
       const [cur] = await db.select().from(models).where(eq(models.id, m.id));
       if (!cur) return;
       const next: SheetSlot[] = cur.slots.map(s => (s.key in filled ? (filled[s.key] ? { ...s, busy: false, image: filled[s.key]!, source: 'generated' } : { ...s, busy: false }) : s));
@@ -182,9 +185,11 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       description: z.string().max(1000).optional(), images: z.array(ImageRefSchema).max(4).optional(), imageEngine: ImageEngineOverride.optional() }).passthrough(), req.body);
     const m = await model(req.user, b.modelId);
     const mode = b.mode ?? 'describe';
-    const cost = mode === 'own' ? 0 : P.OUTFIT_SET_COST;
     const id = uid('o');
-    await ctx.money.charge(whoOf(req.user), cost, 'outfit set', id);
+    const slotOf = (k: string) => m.slots.find(x => x.key === k)?.image;
+    const outfitRefs = [slotOf('face'), slotOf('profile'), ...((b.images ?? []) as ImageRef[]), slotOf('front'), slotOf('tq'), slotOf('back'), slotOf('side')];
+    const cost = mode === 'own' ? 0 : P.outfitSetEstimate(ctx.images.photoPrices(), ctx.images.refCount(outfitRefs));
+    const bill = await new PhotoBill(ctx, whoOf(req.user), id, cost, 'Outfit set').start();
     const identity = await identityOf(m);
     const spec = { name: b.name || 'New outfit', description: b.description, source: mode === 'describe' ? 'described' as const : mode === 'photo' ? 'product-photo' as const : 'reference-set' as const };
     const set = outfitSet(identity, spec);
@@ -197,35 +202,36 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       else {
         try {
           // Most important first (Replicate sends at most REPLICATE_IMAGE_MAX_REFS): face, profile, the product photos, body.
-          const slot = (k: string) => m.slots.find(x => x.key === k)?.image;
-          const refs = [slot('face'), slot('profile'), ...((b.images ?? []) as ImageRef[]), slot('front'), slot('tq'), slot('back'), slot('side')];
+          const slot = slotOf;
+          const refs = outfitRefs;
           const sel = await ctx.images.selection(user.studioId, b.imageEngine);
           if (sel.provider === 'simulated') {
-            angles = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, refs,
+            angles = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, refs, bill,
               req: { prompt: set[0]!.text, width: 768, height: 1024, count: 4, seed: set[0]!.seed ?? undefined, simAssets: ['c_front', 'c_tq', 'c_face', 'c_front'] } })).images;
           } else if (sel.provider === 'replicate') {
             // A new front shot, then the ¾, side and back as edits of it, so all four show the same clothes.
-            const front = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, refs,
+            const front = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, refs, bill,
               req: { prompt: set[0]!.text, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0]!;
             angles = [front];
             for (const a of OUTFIT_ANGLES.slice(1)) {
               const prompt = `Show the same person in exactly the same outfit, on the same plain studio background, as a ${a.words}. `
                 + 'Keep the face, hair, body and every detail of the clothes exactly the same. Realistic smartphone photo, natural skin texture.';
-              angles.push((await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine,
+              angles.push((await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, bill,
                 editOf: front, refs: [slot('face')], req: { prompt, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0]!);
             }
           } else {
-            angles = await Promise.all(set.map(p => ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, refs,
+            angles = await Promise.all(set.map(p => ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, refs, bill,
               req: { prompt: p.text, width: 768, height: 1024, count: 1, seed: p.seed ?? undefined } }).then(r => r.images[0]!)));
           }
         } catch (e) {
-          await ctx.money.refundCharge(whoOf(user), cost, 'outfit set failed', id);
+          await bill.fail();
           const [f] = await db.update(outfits).set({ state: 'preview', angles: [null, null, null, null] }).where(eq(outfits.id, id)).returning();
           if (f) emitOutfit(f);
           return;
         }
       }
-      const [u] = await db.update(outfits).set({ angles, state: 'preview' }).where(and(eq(outfits.id, id), eq(outfits.state, 'generating'))).returning();
+      await bill.finish();
+      const [u] = await db.update(outfits).set({ angles, state: 'preview', cost: bill.spent }).where(and(eq(outfits.id, id), eq(outfits.state, 'generating'))).returning();
       if (u) emitOutfit(u);
     }, mode === 'own' ? 300 : 0);
     return outfitView(o!);
@@ -358,6 +364,15 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const [u] = await db.update(takes).set({ status: b.status }).where(eq(takes.id, t.id)).returning();
     return takeView(u!, pub, req.user.id);
   });
+  // Upscale a finished render (plans/api.md "App clean-up" §2): the contract is in place, the engine job comes later.
+  app.post<{ Params: { id: string } }>('/v1/takes/:id/upscale', async req => {
+    const b = parse(z.object({ size: z.enum(P.UPSCALE_SIZES.map(x => x.id) as [P.UpscaleSize, ...P.UpscaleSize[]]) }), req.body);
+    const [t] = await db.select().from(takes).where(and(eq(takes.id, req.params.id), eq(takes.studioId, req.user.studioId)));
+    if (!t) throw notFound('Take');
+    if (t.kind !== 'take') throw badRequest('Upscale works on a finished video take');
+    void b;
+    throw new ApiError(409, 'upscale_unavailable', 'Upscale is coming soon');
+  });
   app.delete<{ Params: { id: string } }>('/v1/takes/:id', async (req, reply) => {
     await db.delete(takes).where(and(eq(takes.id, req.params.id), eq(takes.studioId, req.user.studioId)));
     return reply.status(204).send();
@@ -388,24 +403,25 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const count = Math.min(4, Math.max(1, b.count ?? 4));
     if (b.templateId) return templateShoot(req.user, b, m, o, count);
     const id = uid('shoot');
-    await ctx.money.charge(whoOf(req.user), P.SHOOT_COST, 'photoshoot', id);
+    const refs = shootRefs(m, o);
+    const bill = await new PhotoBill(ctx, whoOf(req.user), id, P.shootEstimate(ctx.images.photoPrices(), count, ctx.images.refCount(refs)), `Photoshoot · ${count} photo${count === 1 ? '' : 's'}`).start();
     const built = photoshoot({ identity: await identityOf(m), outfit: { name: o?.name ?? 'outfit' }, scene: b.scene?.split(' · ')[0], direction: b.direction, lockSeed: b.lockSeed });
     const prompt = b.prompt?.trim() || built.text;
     const seed = b.seed ?? built.seed ?? undefined;
-    const refs = shootRefs(m, o);
     let r;
     try {
-      r = await ctx.images.generate({ studioId: req.user.studioId, userId: req.user.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs,
+      r = await ctx.images.generate({ studioId: req.user.studioId, userId: req.user.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs, bill,
         req: { prompt, width: 1080, height: 1920, count, seed, simAssets: [o?.angles?.[0]?.asset ?? 'g_front', 'c_face', 'face', 'g_tq'] } });
     } catch (e) {
-      await ctx.money.refundCharge(whoOf(req.user), P.SHOOT_COST, 'photoshoot failed', id);
+      await bill.fail();
       throw e;
     }
+    await bill.finish();
     const label = (b.scene ?? 'Shoot').split(' · ')[0]!.slice(0, 28);
     const layers = layersFromPrompt(built.text);
     const rows = r.images.map((img, n) => ({
       id: uid('s'), studioId: req.user.studioId, userId: req.user.id, kind: 'shot' as const, jobId: null, modelId: m.id, index: n + 1, of: r.images.length,
-      title: `Shoot · ${label}`, label: `${label} · ${n + 1}`, engineLabel: ctx.images.shotLabel(r.selection), cost: P.SHOOT_COST / r.images.length, seed: r.seed ?? seed ?? 0, status: 'test' as const,
+      title: `Shoot · ${label}`, label: `${label} · ${n + 1}`, engineLabel: ctx.images.shotLabel(r.selection), cost: r.costs[n] ?? 0, seed: r.seed ?? seed ?? 0, status: 'test' as const,
       thumb: img, prompt, mediaKey: ctx.images.keyOf(img), layers, createdAt: Date.now() + n,
     }));
     const inserted = await db.insert(takes).values(rows).returning();
@@ -423,8 +439,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const product = t.layers.product && (b.productImage?.asset || b.productImage?.url) ? b.productImage! : null;
     const shuffleSeed = b.shuffleSeed ?? randomSeed();
     const id = uid('shoot');
-    await ctx.money.charge(whoOf(u), P.SHOOT_COST, 'photoshoot', id);
     const refs = shootRefs(m, o, [product]);
+    const bill = await new PhotoBill(ctx, whoOf(u), id, P.shootEstimate(ctx.images.photoPrices(), count, ctx.images.refCount(refs)), `Photoshoot · ${count} photo${count === 1 ? '' : 's'}`).start();
     const now = Date.now();
     const rows: (typeof takes.$inferInsert)[] = [];
     try {
@@ -432,20 +448,21 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
         const p = buildTemplatePrompt({ templateId: t.id, templateName: t.name, layers: t.layers, pool: t.variationPool, identity, outfit: outfitSpec(o),
           direction: b.direction, shuffleSeed, index: n, lockSeed: b.lockSeed, seed: randomImageSeed(), hasProduct: !!product });
         const sim = [o?.angles?.[0]?.asset ?? 'g_front', 'c_face', 'face', 'g_tq'];
-        const r = await ctx.images.generate({ studioId: u.studioId, userId: u.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs,
+        const r = await ctx.images.generate({ studioId: u.studioId, userId: u.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs, bill,
           req: { prompt: p.fullText, width: 1080, height: 1920, count: 1, seed: p.seed ?? undefined, simAssets: [sim[n % sim.length]!] } });
         const fx = await ctx.templates.postProcess(r.images[0]!, t.layers, { studioId: u.studioId, userId: u.id });
         rows.push({
           id: uid('s'), studioId: u.studioId, userId: u.id, kind: 'shot', jobId: null, modelId: m.id, index: n + 1, of: count,
-          title: `Shoot · ${t.name}`.slice(0, 60), label: `${t.name.slice(0, 28)} · ${n + 1}`, engineLabel: ctx.images.shotLabel(r.selection), cost: P.SHOOT_COST / count,
+          title: `Shoot · ${t.name}`.slice(0, 60), label: `${t.name.slice(0, 28)} · ${n + 1}`, engineLabel: ctx.images.shotLabel(r.selection), cost: r.costUsd,
           seed: p.seed ?? r.seed ?? 0, status: 'test', thumb: fx.ref, prompt: p.fullText, publicPrompt: p.visibleText, mediaKey: fx.key,
           layers: t.layers, templateId: t.id, templateName: t.name, templateOwnerId: t.ownerId, variation: p.variation, shuffleSeed, createdAt: now + n,
         });
       }
     } catch (e) {
-      await ctx.money.refundCharge(whoOf(u), P.SHOOT_COST, 'photoshoot failed', id);
+      await bill.fail();
       throw e;
     }
+    await bill.finish();
     const inserted = await db.insert(takes).values(rows).returning();
     await ctx.templates.bumpUses(t.id);
     return inserted.map(x => takeView(x, pub, u.id));
@@ -491,12 +508,21 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
 
   // ------------------------------------------------------------------ money
   app.get('/v1/balance', async req => ctx.money.balanceView(whoOf(req.user)));
+  // The owner-loaded studio balance (plans/api.md "App clean-up" §4).
+  const TopUpBody = z.object({ amountUsd: z.number().positive().max(10_000), note: z.string().max(200).nullish(), paidAt: z.number().int().positive().nullish() });
+  const topUp = async (u: AuthUser, body: unknown) => {
+    const b = parse(TopUpBody, body);
+    if (b.paidAt != null && b.paidAt > Date.now() + 60_000) throw badRequest("paidAt can't be in the future");
+    if (Math.round(b.amountUsd * 100) <= 0) throw badRequest('Amount must be at least $0.01');
+    await ctx.money.recordTopUp(whoOf(u), { amountUsd: b.amountUsd, note: b.note ?? null, at: b.paidAt ?? undefined });
+  };
+  app.get('/v1/studio/balance', { config: { owner: true } }, async req => ctx.money.studioBalanceView(req.user.studioId));
+  app.post('/v1/studio/topups', { config: { owner: true } }, async req => { await topUp(req.user, req.body); return ctx.money.studioBalanceView(req.user.studioId); });
+  app.get('/v1/studio/topups', { config: { owner: true } }, async req => ctx.money.topUps(req.user.studioId, Number((req.query as any)?.limit) || 50));
   app.post('/v1/balance/topup', async req => {
-    const b = (req.body ?? {}) as { amount?: number };
-    if (ctx.config.balanceMode !== 'simulated') throw new ApiError(400, 'topup_unavailable', 'Top up your RunPod account; MUSE reads the balance from RunPod');
-    if (req.user.role !== 'owner') throw new ApiError(403, 'owner_only', 'Ask the studio owner for tokens');
-    if (!(typeof b.amount === 'number' && b.amount > 0 && b.amount <= 500)) throw badRequest('Amount must be between $0 and $500');
-    await ctx.money.simTopUp(whoOf(req.user), b.amount);
+    if (req.user.role !== 'owner') throw new ApiError(403, 'owner_only', 'Ask the studio owner for credit');
+    const b = (req.body ?? {}) as { amount?: number; note?: string };
+    await topUp(req.user, { amountUsd: b.amount, note: b.note });
     return ctx.money.balanceView(whoOf(req.user));
   });
   app.get('/v1/wallet', async req => ctx.money.walletView(whoOf(req.user)));
@@ -552,10 +578,10 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/v1/settings/image-engine', async req => engineView(req.user.studioId));
   app.patch('/v1/settings/image-engine', async req => {
     const b = parse(EngineBody, req.body);
+    if (req.user.role !== 'owner') throw new ApiError(403, 'owner_only', 'Only the studio owner can change engines');
     if (b.provider === 'custom-http') {
       if (!b.url) throw badRequest('The custom engine needs a URL');
       if (!ctx.config.DEV_MODE && !b.url.startsWith('https://')) throw badRequest('Use an https:// URL');
-      if (req.user.role !== 'owner') throw new ApiError(403, 'owner_only', 'Only the studio owner can point MUSE at a custom engine');
     }
     if (b.provider === 'fal' && !ctx.config.FAL_KEY) throw badRequest('fal is not set up on the server (FAL_KEY)');
     if (b.provider === 'replicate' && !ctx.replicate.configured) throw badRequest('Replicate is not set up on the server (REPLICATE_API_TOKEN)');
@@ -566,27 +592,32 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     await db.update(studioSettings).set({ imageEngine: next }).where(eq(studioSettings.studioId, req.user.studioId));
     return engineView(req.user.studioId);
   });
-  const studioSettingsView = async (studioId: string) => {
-    const s = await ctx.money.settings(studioId);
+  /** Members get caps, the token rate and features; the owner also gets the add-on GPU settings and Engines (the only
+   * place provider names go to an app, plans/api.md "App clean-up" §5). */
+  const studioSettingsView = async (u: AuthUser) => {
+    const s = await ctx.money.settings(u.studioId);
     const c = ctx.config;
-    return { maxGpus: s.maxGpus ?? c.MAX_GPUS, overheadPayer: s.overheadPayer ?? 'user', capPerJob: s.capPerJob ?? c.CAP_PER_JOB_USD, capPerDay: s.capPerDay ?? c.CAP_PER_DAY_USD,
-      capPerUserDay: s.capPerUserDay ?? c.CAP_PER_USER_DAY_USD, tokenUsd: c.TOKEN_USD, minRunpodBalance: c.RUNPOD_MIN_BALANCE_USD, lowBalance: !!s.lowBalanceSince,
-      warmGpuAllowed: s.warmGpuAllowed ?? 'everyone', warmIdleMinutes: s.warmIdleMinutes ?? c.WARM_IDLE_MINUTES, warmMaxMinutes: s.warmMaxMinutes ?? c.WARM_MAX_MINUTES,
-      features: ctx.jobs.features(), gpu: await ctx.gpu.status() };
+    const base = { capPerJob: s.capPerJob ?? c.CAP_PER_JOB_USD, capPerDay: s.capPerDay ?? c.CAP_PER_DAY_USD, capPerUserDay: s.capPerUserDay ?? c.CAP_PER_USER_DAY_USD,
+      tokenUsd: c.TOKEN_USD, features: { ...ctx.jobs.features(), photo: ctx.images.photoFeatures() } };
+    if (u.role !== 'owner') return base;
+    return { ...base, maxGpus: s.maxGpus ?? c.MAX_GPUS, overheadPayer: s.overheadPayer ?? 'user',
+      warmIdleMinutes: s.warmIdleMinutes ?? c.WARM_IDLE_MINUTES, warmMaxMinutes: s.warmMaxMinutes ?? c.WARM_MAX_MINUTES,
+      gpu: await ctx.gpu.status(), engines: await ctx.engines.view(u.studioId) };
   };
-  app.get('/v1/settings/studio', async req => studioSettingsView(req.user.studioId));
+  app.get('/v1/settings/studio', async req => studioSettingsView(req.user));
   app.patch('/v1/settings/studio', { config: { owner: true } }, async req => {
     const b = parse(z.object({ maxGpus: z.number().int().min(0).max(16).optional(), overheadPayer: z.enum(['user', 'owner']).optional(),
       capPerJob: z.number().nonnegative().max(1000).optional(), capPerDay: z.number().nonnegative().max(10000).optional(), capPerUserDay: z.number().nonnegative().max(10000).optional(),
-      warmGpuAllowed: z.enum(['owner', 'everyone']).optional(), warmIdleMinutes: z.number().int().min(5).max(120).optional(), warmMaxMinutes: z.number().int().min(30).max(480).optional() }), req.body);
+      warmGpuAllowed: z.enum(['owner', 'everyone']).optional() /* retired: accepted and ignored */, warmIdleMinutes: z.number().int().min(5).max(120).optional(), warmMaxMinutes: z.number().int().min(30).max(480).optional() }), req.body);
     await ctx.money.settings(req.user.studioId);
-    if (Object.keys(b).length) await db.update(studioSettings).set(b).where(eq(studioSettings.studioId, req.user.studioId));
-    return studioSettingsView(req.user.studioId);
+    const { warmGpuAllowed: _retired, ...patch } = b;
+    if (Object.keys(patch).length) await db.update(studioSettings).set(patch).where(eq(studioSettings.studioId, req.user.studioId));
+    return studioSettingsView(req.user);
   });
 
-  // ------------------------------------------------------------------ Keep GPU warm (services/warm.ts)
-  app.get('/v1/gpu/warm', async req => ctx.warm.view(whoOf(req.user)));
-  app.post('/v1/gpu/warm', async req => {
+  // ------------------------------------------------------------------ Keep add-on engine ready (services/warm.ts): owner only
+  app.get('/v1/gpu/warm', { config: { owner: true } }, async req => ctx.warm.view(whoOf(req.user)));
+  app.post('/v1/gpu/warm', { config: { owner: true } }, async req => {
     const b = parse(z.object({ on: z.boolean().optional(), extend: z.boolean().optional() }), req.body ?? {});
     if (b.extend) return ctx.warm.extend(req.user);
     if (b.on === true) return ctx.warm.turnOn(req.user);
