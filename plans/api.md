@@ -28,6 +28,7 @@ _Added 2026-11-04._ This is the contract between the apps and the backend. `serv
 | `engine_unavailable` | 400 | the GPU image can't run this yet (Fast · beta, LoRA training, or lip sync without LatentSync) |
 | `image_engine_failed` | 502 | the image engine failed (the charge is refunded) |
 | `rate_limited` | 429 | too many sign-in or sign-up tries |
+| `template_hidden` | 403 | saving a template from a shot made with someone else's template |
 
 ## Types
 
@@ -74,6 +75,29 @@ ApiEvent   { type: "job"|"balance"|"model"|"outfit"|"lora"|"post"|"wallet", job?
              // balance and wallet events go only to the user they concern (and to owners, whose pool moved too).
 // Model also carries optional { personality, notes }.
 ConnectResponse { authUrl?: string /* real backend: open it for OAuth */, account?: Account /* mock: signed in already */ }
+
+// ---- Photo templates (plans/templates.md) ----
+Grade              "none"|"phone-natural"|"underexposed"|"moody-blue"|"golden"|"harsh-sun"|"faded"|"mono"
+TemplateAfterEffects { faceMotionBlur?: number /* 0–1, 0 or absent = off */, blurAngle?: number /* degrees, 0 = sideways drag */,
+                       grade?: Grade, grain?: number /* 0–1 */ }
+                   // Applied by the server to each generated still after the image engine (an edit step, not prompt words).
+TemplateLayers     { style?, scene?, camera?, light?, negative?, product? /* how a product photo is used */, afterEffects?: TemplateAfterEffects }
+                   // All strings, each ≤ 600 chars. Never identity, outfit, never-add or seed: those come from the model being shot.
+PoolSlot           "pose"|"bodyAngle"|"framing"|"expression"|"background"|"hands"|"timeOfDay"
+VariationPool      { [slot in PoolSlot]?: string[] }              // ≤ 12 options per slot, each ≤ 200 chars
+VariationDraw      { [slot in PoolSlot]?: string, direction?: string }  // what one shot drew; direction replaces pose + bodyAngle
+Template           { id, name, tags: string[], visibility: "private"|"public", ownerId, ownerName, isOwner: boolean,
+                     uses /* shoots made with it */, favourite: boolean /* mine */, cover: ImageRef|null, acceptsProduct: boolean,
+                     starter?: string /* starter-pack slug */, createdFromShotId?, createdAt, updatedAt,
+                     layers?: TemplateLayers, variationPool?: VariationPool          /* ONLY when isOwner */,
+                     recent?: { id, thumb: ImageRef, createdAt }[]                  /* GET /v1/templates/{id} only: newest 6 shots */ }
+TemplateDraft      { name, tags: string[], layers: TemplateLayers, variationPool: VariationPool, cover: ImageRef|null, fromShotId }
+PromptSlotView     { layer: "identity"|"outfit"|"template"|"scene"|"camera"|"light"|"pose"|"direction"|"product"|"style"|"negative"|"seed",
+                     text, locked?: true /* the one "Template: <name>" line non-owners see */ }
+TemplatePrompt     { slots: PromptSlotView[], text, seed: number|null /* null = a new random seed at shoot time */, shuffleSeed,
+                     variation?: VariationDraw /* owner only */ }
+// Take (photoshoot stills) also carries: templateId?, templateName?, shuffleSeed?, variation?: VariationDraw (template owner only).
+// For anyone but the template's owner a template shot's `prompt` is the public version: "Template: <name>" plus their own layers.
 ```
 
 ## Pricing (the same in every client and the server)
@@ -134,6 +158,7 @@ These are measured on an H100 with FlashAttention 3 and billed at $3.99/h. The u
 | `PATCH /v1/takes/{id}` `{status: "test"\|"final"}` | → `Take` (Approve) |
 | `DELETE /v1/takes/{id}` | 204 (Discard) |
 | `POST /v1/shoots` `{modelId, outfitId, scene, prompt, seed?, count}` | → `Take[]` (`kind: "shot"`). Charges $0.12. |
+| `POST /v1/shoots` with a template `{modelId, outfitId?, templateId, direction?, shuffleSeed?, lockSeed?, productImage?: ImageRef, count?}` | → `Take[]`, $0.12 as above. `scene`, `prompt` and `seed` are ignored: the server builds every still's prompt from the template layers + the model's identity, outfit and never-add + the draws (or `direction`) + a seed. See Templates below. |
 
 ### Identity LoRA (`plans/lora-training.md`)
 | | |
@@ -162,6 +187,31 @@ The mock runs LoRA training 5× faster than its render speed (120× real time by
 | `POST /v1/queue/run` | → `Job[]` it started. Starts `queued` jobs oldest first, charging each as it starts. Stops at the first one the balance can't cover (those stay queued); `insufficient_balance` if none could start. Jobs are queued with `JobRequest.queue: true`. |
 | `PATCH /v1/models/{id}` `{name?, niche?, personality?, notes?, neverAdd?}` | → `Model`, plus a `model` event. Only the fields sent change. An empty name is `bad_request`. |
 | `DELETE /v1/models/{id}` | 204. Also deletes her outfits, LoRAs and training set, linked accounts, and posts that haven't gone out. |
+
+### Photo templates (`plans/templates.md`)
+A template is a reusable look (style, scene, camera, light, grade, after-effects and a variation pool) applied to any model and outfit. Its `layers` and `variationPool` are **hidden**: only the owner ever receives them, from any endpoint. Everyone else gets the name, cover, tags, owner, visibility, uses and their favourite flag, and sees a template shot's prompt as one locked line.
+
+| | |
+|---|---|
+| `GET /v1/templates?scope=all\|mine\|public\|favourites&q=&tag=` | → `Template[]`, newest first. `all` (default) = mine + the studio's public ones; `mine` = I own (private and public); `public` = the studio's public ones (mine included); `favourites` = my favourites I can still see. `q` matches name or a tag (case-insensitive substring); `tag` is one exact tag (case-insensitive). The owner's own come with `layers` and `variationPool`. |
+| `GET /v1/templates/{id}` | → `Template` with `recent`. Someone else's private template is `not_found`. |
+| `POST /v1/templates` `{name, tags?, visibility?, layers?, variationPool?, coverTakeId?}` | → `Template` (mine). `visibility` defaults to `private`. From scratch: an empty `variationPool` is auto-suggested from the layers. `coverTakeId` = a shot or take in the studio whose still becomes the cover. |
+| `POST /v1/templates` `{fromShotId, name, tags?, visibility?, variationPool?}` | → `Template`. Copies that shot's exact layers (never identity, outfit, never-add or seed) and its still as the cover. A shot's own direction becomes the first `pose` option. `variationPool` (the creator's edits) replaces the suggestion. `template_hidden` (403) when the shot was made with someone else's template. |
+| `POST /v1/templates/draft` `{fromShotId}` | → `TemplateDraft`: what "Save as template" would save (layers, the auto-suggested pool, the cover, a suggested name and tags), to show and edit before saving. Nothing is stored. `template_hidden` as above. |
+| `PATCH /v1/templates/{id}` `{name?, tags?, visibility?, layers?, variationPool?}` | → `Template`. Owner only (`owner_only` 403 on someone else's public template; their private ones are `not_found`). |
+| `DELETE /v1/templates/{id}` | 204. Owner only. Shots made with it keep their (public) prompt and `templateName`. |
+| `POST /v1/templates/{id}/duplicate` | → `Template`: a private copy, "<name> copy". Owner only. |
+| `POST /v1/templates/{id}/favourite` / `DELETE /v1/templates/{id}/favourite` | → `Template`. Per user; anyone who can see it. |
+| `POST /v1/templates/{id}/prompt` `{modelId, outfitId?, direction?, shuffleSeed?, lockSeed?}` | → `TemplatePrompt`: the prompt the first still would get, for the prompt view. Non-owners get the locked `Template: <name>` line plus identity, outfit, their direction, never-add and seed; the owner gets every slot and the `variation` drawn. Free. |
+
+How a template shoot works (`POST /v1/shoots` with `templateId`):
+- **Seed:** a new random seed per still. `lockSeed: true` ("Lock look", off by default) uses one fixed seed for this template + model.
+- **Variation:** each still draws one option from every non-empty pool slot, from a random generator seeded by `shuffleSeed` + the still's index. Without `shuffleSeed` the server picks one. The same `shuffleSeed` gives the same draws (so the prompt view matches the shoot); **Shuffle** in the apps is a new random `shuffleSeed` (0 – 2^31−1).
+- **Direction:** a non-empty `direction` ("sitting on the steps, looking back over her shoulder") **replaces the `pose` and `bodyAngle` draws**; the other slots still draw. It's sanitised like any direction (it can't change identity or add never-add items).
+- **Product:** `productImage` is sent to the image engine as an extra reference when the template `acceptsProduct` (its `layers.product` is set); otherwise it is ignored.
+- **After-effects:** `layers.afterEffects` run on each still after generation (server-side, sharp): `grade` = a colour matrix, `grain` = soft-light noise, `faceMotionBlur` = a directional blur over the face box. The face box is the upper-centre of the frame for now (no face detector yet).
+- **Stored on each shot:** the exact final prompt, the seed, `shuffleSeed`, the `variation` drawn and the layers. `uses` goes up by one per shoot.
+- **Starter pack:** every studio has seven public starter templates owned by the studio owner (`starter`: `motion-blur-face`, `mirror-selfie`, `harsh-sun-close-up`, `moody-low-light`, `reflection`, `product-moment`, `candid-pov`). The server adds missing ones on start, and the owner can edit, hide or delete them like any other (a deleted starter comes back on the next start).
 
 ### Balance and wallets
 | | |

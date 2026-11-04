@@ -2,7 +2,7 @@
 // so the apps and their contract tests behave the same against this server. Only used with DEV_SEED / DEV_MODE.
 import { eq, sql } from 'drizzle-orm';
 import type { Ctx } from './ctx.js';
-import { accounts, clips, generatedImages, jobs, ledger, loras, models, outfits, pods, posts, studios, studioSettings, takes, uploads, users, wallets } from './db/schema.js';
+import { accounts, clips, generatedImages, templateFavourites, templates, jobs, ledger, loras, models, outfits, pods, posts, studios, studioSettings, takes, uploads, users, wallets } from './db/schema.js';
 import { ensureStudio, hashPassword } from './auth/auth.js';
 import { dayStart, monthStart } from './lib/util.js';
 
@@ -28,8 +28,9 @@ export async function seedDev(ctx: Ctx, o: { onlyIfEmpty?: boolean; reset?: bool
   }
   if (o.reset) {
     await ctx.gpu.shutdown();
-    for (const t of [takes, jobs, outfits, clips, loras, accounts, posts, ledger, pods, generatedImages, uploads, models]) await db.delete(t);
+    for (const t of [templateFavourites, templates, takes, jobs, outfits, clips, loras, accounts, posts, ledger, pods, generatedImages, uploads, models]) await db.delete(t);
     await db.update(wallets).set({ tokens: 0, held: 0, updatedAt: now });
+    ctx.templates.forget();
   }
   await db.update(studios).set({ name: 'Jenne Studio' }).where(eq(studios.id, sid));
   await db.insert(studioSettings).values({ studioId: sid, simBalance: ctx.config.SIM_START_BALANCE })

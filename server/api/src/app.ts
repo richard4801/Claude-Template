@@ -19,6 +19,8 @@ import { createStorage } from './storage/index.js';
 import { registerRoutes } from './routes/index.js';
 import { registerWorkerRoutes } from './routes/worker.js';
 import { seedDev } from './seed.js';
+import { TemplateService } from './templates/service.js';
+import { schemaState } from './db/client.js';
 
 declare module 'fastify' {
   interface FastifyRequest { user: AuthUser }
@@ -65,6 +67,9 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   ctx.jobs = new JobService(ctx);
   ctx.lora = new LoraService(ctx);
   ctx.posts = new PostScheduler(ctx);
+  ctx.templates = new TemplateService(ctx);
+  ctx.boot = { startedAt: Date.now(), build: (process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.KOYEB_GIT_SHA ?? process.env.GIT_SHA ?? '').slice(0, 12) || null,
+    migrations: await schemaState(ctx.db) };
   ctx.gpu = config.GPU_MODE === 'runpod' ? new RunpodGpu(ctx, ctx.runpod) : new SimulatedGpu(ctx);
 
   app.log.info({ config: describeConfig(config) }, 'MUSE API configuration');
@@ -73,6 +78,14 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   }
   if (config.DEV_SEED) await seedDev(ctx, { onlyIfEmpty: true });
   await bootstrapOwnerInvite(ctx);
+  // Starter templates: add any missing ones to every studio that has an owner (idempotent, keyed by slug).
+  try {
+    ctx.boot.starters = await ctx.templates.seedAllStarters();
+    app.log.info({ ...ctx.boot.starters, migrations: ctx.boot.migrations }, 'starter templates checked');
+  } catch (e) {
+    ctx.boot.starters = { error: (e as Error).message.slice(0, 200) };
+    app.log.error({ err: (e as Error).message }, 'starter templates failed');
+  }
 
   // Empty JSON bodies are fine ({}); bad JSON is a contract error.
   app.removeContentTypeParser('application/json');

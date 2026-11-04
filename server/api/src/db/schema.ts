@@ -7,6 +7,12 @@ const ms = (name: string) => bigint(name, { mode: 'number' });
 const money = (name: string) => doublePrecision(name);
 
 export type ImageRef = { asset?: string; url?: string };
+export type TemplateAfterEffects = { faceMotionBlur?: number; blurAngle?: number; grade?: string; grain?: number };
+export type TemplateLayers = { style?: string; scene?: string; camera?: string; light?: string; negative?: string; product?: string; afterEffects?: TemplateAfterEffects };
+export const POOL_SLOTS = ['pose', 'bodyAngle', 'framing', 'expression', 'background', 'hands', 'timeOfDay'] as const;
+export type PoolSlot = (typeof POOL_SLOTS)[number];
+export type VariationPool = Partial<Record<PoolSlot, string[]>>;
+export type VariationDraw = Partial<Record<PoolSlot | 'direction', string>>;
 export type SheetSlot = { key: string; image: ImageRef | null; source: 'upload' | 'generated'; busy: boolean };
 
 export const studios = pgTable('studios', {
@@ -210,8 +216,18 @@ export const takes = pgTable('takes', {
   mediaKey: text('media_key'),
   /** What the GPU really produced: {width, height, fps, durationSec, bytes} (renders are 768×1344). */
   media: jsonb('media').$type<Record<string, unknown>>(),
+  /** Photoshoot stills: the layers that made it (template layers, or scene/camera/light of a plain shoot). Never sent to apps. */
+  layers: jsonb('layers').$type<TemplateLayers>(),
+  /** Template shots: the template, its owner (who alone sees the hidden prompt), the variation options drawn and the draw seed. */
+  templateId: text('template_id'),
+  templateName: text('template_name'),
+  templateOwnerId: text('template_owner_id'),
+  variation: jsonb('variation').$type<VariationDraw>(),
+  shuffleSeed: integer('shuffle_seed'),
+  /** The prompt as non-owners of the template see it ("Template: <name>" plus their own layers). */
+  publicPrompt: text('public_prompt'),
   createdAt: ms('created_at').notNull(),
-}, t => [index('takes_studio_idx').on(t.studioId, t.createdAt)]);
+}, t => [index('takes_studio_idx').on(t.studioId, t.createdAt), index('takes_template_idx').on(t.templateId, t.createdAt)]);
 
 /** Every generated image, with the recipe to reproduce it. */
 export const generatedImages = pgTable('generated_images', {
@@ -347,3 +363,31 @@ export const pods = pgTable('pods', {
   stoppedAt: ms('stopped_at'),
   error: text('error'),
 }, t => [index('pods_state_idx').on(t.state)]);
+
+/**
+ * Photo templates (plans/templates.md): a reusable look. `layers` and `variationPool` are hidden from everyone but the owner.
+ * Starter-pack templates carry a stable `slug` (unique per studio) so the start-up seed can add missing ones idempotently.
+ */
+export const templates = pgTable('templates', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  ownerId: text('owner_id').notNull(),
+  visibility: text('visibility').notNull().$type<'private' | 'public'>(),
+  name: text('name').notNull(),
+  tags: jsonb('tags').$type<string[]>().notNull(),
+  layers: jsonb('layers').$type<TemplateLayers>().notNull(),
+  variationPool: jsonb('variation_pool').$type<VariationPool>().notNull(),
+  /** Storage key (R2) of the cover image. */
+  coverKey: text('cover_key'),
+  createdFromShotId: text('created_from_shot_id'),
+  slug: text('slug'),
+  uses: integer('uses').notNull().default(0),
+  createdAt: ms('created_at').notNull(),
+  updatedAt: ms('updated_at').notNull(),
+}, t => [index('templates_studio_idx').on(t.studioId, t.updatedAt), uniqueIndex('templates_slug_idx').on(t.studioId, t.slug)]);
+
+export const templateFavourites = pgTable('template_favourites', {
+  userId: text('user_id').notNull(),
+  templateId: text('template_id').notNull().references(() => templates.id, { onDelete: 'cascade' }),
+  createdAt: ms('created_at').notNull(),
+}, t => [primaryKey({ columns: [t.userId, t.templateId] })]);

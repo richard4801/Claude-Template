@@ -19,6 +19,8 @@ import { ASSET_DIR, ASSET_KEYS, PROVIDERS } from '../images/service.js';
 import { LocalStorage, contentTypeFor } from '../storage/index.js';
 import { objectInfo, putObject } from '../storage/objects.js';
 import { seedDev, SLOT_SAMPLE } from '../seed.js';
+import { buildTemplatePrompt, randomImageSeed, randomSeed } from '../templates/prompt.js';
+import { layersFromPrompt } from '../templates/service.js';
 import { dbStatus } from '../db/pg.js';
 import { inviteShareText, registerReleaseRoutes } from './releases.js';
 
@@ -74,7 +76,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     }
     const lastOkAt = dbStatus.lastOkAt || null;
     const body = { ok: db !== false, speed: ctx.config.SPEED, db, dbLastOkAt: lastOkAt, gpu: ctx.gpu.mode, storage: ctx.storage.kind,
-      imageEngine: ctx.images.defaultSelection().provider, version: '0.1.0' };
+      imageEngine: ctx.images.defaultSelection().provider, version: '0.1.0',
+      build: ctx.boot.build, startedAt: ctx.boot.startedAt, migrations: ctx.boot.migrations, starters: ctx.boot.starters };
     reply.header('cache-control', 'no-store');
     return db === false ? reply.status(503).send(body) : body;
   });
@@ -289,7 +292,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   // Stored files. Keys are unguessable; image loaders in the apps can't send a bearer token.
   app.get('/uploads/*', { config: { public: true } }, async (req, reply) => {
     const key = (req.params as { '*': string })['*'];
-    if (!/^(u|c|g|r|l|assets)\/[A-Za-z0-9._\/-]+$/.test(key) || key.includes('..')) throw notFound('Upload');
+    if (!/^(u|c|g|r|l|t|assets)\/[A-Za-z0-9._\/-]+$/.test(key) || key.includes('..')) throw notFound('Upload');
     if (ctx.storage.kind === 's3') {
       if (!(await ctx.storage.head(key))) throw notFound('Upload');
       return reply.redirect(await ctx.storage.presignGet(key, 3600), 302);
@@ -333,33 +336,46 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   app.delete<{ Params: { id: string } }>('/v1/jobs/:id', async (req, reply) => { await ctx.jobs.remove(req.user, req.params.id); return reply.status(204).send(); });
   app.post('/v1/queue/run', async req => ctx.jobs.runQueue(req.user));
 
-  app.get('/v1/takes', async req => (await db.select().from(takes).where(eq(takes.studioId, req.user.studioId)).orderBy(desc(takes.createdAt))).map(t => takeView(t, pub)));
+  app.get('/v1/takes', async req => (await db.select().from(takes).where(eq(takes.studioId, req.user.studioId)).orderBy(desc(takes.createdAt))).map(t => takeView(t, pub, req.user.id)));
   app.patch<{ Params: { id: string } }>('/v1/takes/:id', async req => {
     const b = (req.body ?? {}) as { status?: string };
     const [t] = await db.select().from(takes).where(and(eq(takes.id, req.params.id), eq(takes.studioId, req.user.studioId)));
     if (!t) throw notFound('Take');
     if (b.status !== 'test' && b.status !== 'final') throw badRequest('status must be test or final');
     const [u] = await db.update(takes).set({ status: b.status }).where(eq(takes.id, t.id)).returning();
-    return takeView(u!, pub);
+    return takeView(u!, pub, req.user.id);
   });
   app.delete<{ Params: { id: string } }>('/v1/takes/:id', async (req, reply) => {
     await db.delete(takes).where(and(eq(takes.id, req.params.id), eq(takes.studioId, req.user.studioId)));
     return reply.status(204).send();
   });
 
+  const ImageEngineOverride = z.object({ provider: z.enum(PROVIDERS), model: z.string().optional(), url: z.string().url().optional() });
+  const outfitOf = async (u: AuthUser, id?: string) => {
+    if (!id) return undefined;
+    const [o] = await db.select().from(outfits).where(and(eq(outfits.id, id), eq(outfits.studioId, u.studioId)));
+    return o;
+  };
+  const outfitSpec = (o?: typeof outfits.$inferSelect) => o ? { name: o.name, description: o.description, source: o.mode === 'describe' && !o.angles.some(Boolean) ? 'described' as const : 'reference-set' as const } : null;
+  const shootRefs = async (m: typeof models.$inferSelect, o?: typeof outfits.$inferSelect, extra: (ImageRef | null | undefined)[] = []) =>
+    [...(await Promise.all(m.slots.map(s => ctx.images.loadableUrl(s.image)))), ...(await Promise.all((o?.angles ?? []).map(a => ctx.images.loadableUrl(a)))),
+      ...(await Promise.all(extra.map(a => ctx.images.loadableUrl(a))))].filter(Boolean) as string[];
+
   app.post('/v1/shoots', async req => {
     const b = parse(z.object({ modelId: z.string(), outfitId: z.string().optional(), scene: z.string().max(200).optional(), prompt: z.string().max(4000).optional(),
       seed: z.number().int().nullable().optional(), count: z.number().int().optional(), direction: z.string().max(500).optional(), lockSeed: z.boolean().optional(),
-      imageEngine: z.object({ provider: z.enum(PROVIDERS), model: z.string().optional(), url: z.string().url().optional() }).optional() }).passthrough(), req.body);
+      templateId: z.string().optional(), shuffleSeed: z.number().int().min(0).optional(), productImage: z.object({ asset: z.string().optional(), url: z.string().optional() }).optional(),
+      imageEngine: ImageEngineOverride.optional() }).passthrough(), req.body);
     const m = await model(req.user, b.modelId);
-    const [o] = b.outfitId ? await db.select().from(outfits).where(and(eq(outfits.id, b.outfitId), eq(outfits.studioId, req.user.studioId))) : [];
+    const o = await outfitOf(req.user, b.outfitId);
     const count = Math.min(4, Math.max(1, b.count ?? 4));
+    if (b.templateId) return templateShoot(req.user, b, m, o, count);
     const id = uid('shoot');
     await ctx.money.charge(whoOf(req.user), P.SHOOT_COST, 'photoshoot', id);
     const built = photoshoot({ identity: await identityOf(m), outfit: { name: o?.name ?? 'outfit' }, scene: b.scene?.split(' · ')[0], direction: b.direction, lockSeed: b.lockSeed });
     const prompt = b.prompt?.trim() || built.text;
     const seed = b.seed ?? built.seed ?? undefined;
-    const refs = [...(await Promise.all(m.slots.map(s => ctx.images.loadableUrl(s.image)))), ...(await Promise.all((o?.angles ?? []).map(a => ctx.images.loadableUrl(a))))].filter(Boolean) as string[];
+    const refs = await shootRefs(m, o);
     let r;
     try {
       r = await ctx.images.generate({ studioId: req.user.studioId, userId: req.user.id, purpose: 'shoot', refId: id, override: b.imageEngine,
@@ -369,14 +385,69 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       throw e;
     }
     const label = (b.scene ?? 'Shoot').split(' · ')[0]!.slice(0, 28);
+    const layers = layersFromPrompt(built.text);
     const rows = r.images.map((img, n) => ({
       id: uid('s'), studioId: req.user.studioId, userId: req.user.id, kind: 'shot' as const, jobId: null, modelId: m.id, index: n + 1, of: r.images.length,
       title: `Shoot · ${label}`, label: `${label} · ${n + 1}`, engineLabel: '', cost: P.SHOOT_COST / r.images.length, seed: r.seed ?? seed ?? 0, status: 'test' as const,
-      thumb: img, prompt, mediaKey: ctx.images.keyOf(img), createdAt: Date.now() + n,
+      thumb: img, prompt, mediaKey: ctx.images.keyOf(img), layers, createdAt: Date.now() + n,
     }));
     const inserted = await db.insert(takes).values(rows).returning();
-    return inserted.map(t => takeView(t, pub));
+    return inserted.map(t => takeView(t, pub, req.user.id));
   });
+
+  /**
+   * A template shoot: every still gets its own prompt (template layers + identity/outfit/never-add + its own variation
+   * draws, or the user's direction in place of pose and angle), its own seed, and the template's after-effects.
+   */
+  async function templateShoot(u: AuthUser, b: { templateId?: string; direction?: string; shuffleSeed?: number; lockSeed?: boolean; productImage?: ImageRef; imageEngine?: any },
+    m: typeof models.$inferSelect, o: typeof outfits.$inferSelect | undefined, count: number) {
+    const t = await ctx.templates.visible(u, b.templateId!);
+    const identity = await identityOf(m);
+    const product = t.layers.product && (b.productImage?.asset || b.productImage?.url) ? b.productImage! : null;
+    const shuffleSeed = b.shuffleSeed ?? randomSeed();
+    const id = uid('shoot');
+    await ctx.money.charge(whoOf(u), P.SHOOT_COST, 'photoshoot', id);
+    const refs = await shootRefs(m, o, [product]);
+    const now = Date.now();
+    const rows: (typeof takes.$inferInsert)[] = [];
+    try {
+      for (let n = 0; n < count; n++) {
+        const p = buildTemplatePrompt({ templateId: t.id, templateName: t.name, layers: t.layers, pool: t.variationPool, identity, outfit: outfitSpec(o),
+          direction: b.direction, shuffleSeed, index: n, lockSeed: b.lockSeed, seed: randomImageSeed(), hasProduct: !!product });
+        const sim = [o?.angles?.[0]?.asset ?? 'g_front', 'c_face', 'face', 'g_tq'];
+        const r = await ctx.images.generate({ studioId: u.studioId, userId: u.id, purpose: 'shoot', refId: id, override: b.imageEngine,
+          req: { prompt: p.fullText, referenceImages: refs, width: 1080, height: 1920, count: 1, seed: p.seed ?? undefined, simAssets: [sim[n % sim.length]!] } });
+        const fx = await ctx.templates.postProcess(r.images[0]!, t.layers, { studioId: u.studioId, userId: u.id });
+        rows.push({
+          id: uid('s'), studioId: u.studioId, userId: u.id, kind: 'shot', jobId: null, modelId: m.id, index: n + 1, of: count,
+          title: `Shoot · ${t.name}`.slice(0, 60), label: `${t.name.slice(0, 28)} · ${n + 1}`, engineLabel: '', cost: P.SHOOT_COST / count,
+          seed: p.seed ?? r.seed ?? 0, status: 'test', thumb: fx.ref, prompt: p.fullText, publicPrompt: p.visibleText, mediaKey: fx.key,
+          layers: t.layers, templateId: t.id, templateName: t.name, templateOwnerId: t.ownerId, variation: p.variation, shuffleSeed, createdAt: now + n,
+        });
+      }
+    } catch (e) {
+      await ctx.money.refundCharge(whoOf(u), P.SHOOT_COST, 'photoshoot failed', id);
+      throw e;
+    }
+    const inserted = await db.insert(takes).values(rows).returning();
+    await ctx.templates.bumpUses(t.id);
+    return inserted.map(x => takeView(x, pub, u.id));
+  }
+
+  // ------------------------------------------------------------------ photo templates
+  app.get('/v1/templates', async req => ctx.templates.list(req.user, (req.query ?? {}) as any));
+  app.post('/v1/templates', async req => ctx.templates.create(req.user, req.body));
+  app.post('/v1/templates/draft', async req => ctx.templates.draft(req.user, req.body));
+  app.get<{ Params: { id: string } }>('/v1/templates/:id', async req => ctx.templates.detail(req.user, req.params.id));
+  app.patch<{ Params: { id: string } }>('/v1/templates/:id', async req => ctx.templates.patch(req.user, req.params.id, req.body));
+  app.delete<{ Params: { id: string } }>('/v1/templates/:id', async (req, reply) => { await ctx.templates.remove(req.user, req.params.id); return reply.status(204).send(); });
+  app.post<{ Params: { id: string } }>('/v1/templates/:id/duplicate', async req => ctx.templates.duplicate(req.user, req.params.id));
+  app.post<{ Params: { id: string } }>('/v1/templates/:id/favourite', async req => ctx.templates.favourite(req.user, req.params.id, true));
+  app.delete<{ Params: { id: string } }>('/v1/templates/:id/favourite', async req => ctx.templates.favourite(req.user, req.params.id, false));
+  app.post<{ Params: { id: string } }>('/v1/templates/:id/prompt', async req => ctx.templates.preview(req.user, req.params.id, req.body, async (modelId, outfitId) => {
+    const m = await model(req.user, modelId);
+    return { identity: await identityOf(m), outfit: outfitSpec(await outfitOf(req.user, outfitId)) };
+  }));
 
   // ------------------------------------------------------------------ identity LoRA
   app.get<{ Params: { id: string } }>('/v1/models/:id/lora', async req => ctx.lora.get(req.user, req.params.id));

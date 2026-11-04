@@ -10,6 +10,11 @@ This is the real backend for the MUSE Android and Mac apps. It speaks the same c
   - `runpod`: one pod per user on the shared network volume, warm-pod reuse, idle shutdown, and the worker protocol at `/worker/v1/*`.
 - **Image engine** (`src/images/`): `simulated` (the bundled reference stills), `fal` (fal.ai queue API) or `custom-http` (our small contract). It is chosen per studio in Settings.
 - **Prompt engine** (`src/prompt/`): a port of `android/core` `PromptEngine.kt`, checked against the same fixtures.
+- **Photo templates** (`src/templates/`, `plans/templates.md`): reusable looks with hidden prompt layers and a variation pool.
+  - The server builds every template still's prompt (template layers + the model's identity, outfit and never-add + one draw per pool slot, or the user's direction in place of pose and angle + a new seed) and stores the exact prompt, seed and draws on the shot. Layers, pools, draws and full prompts go only to the template's owner; everyone else sees `Template: <name>`.
+  - After-effects (`grade`, `grain`, `faceMotionBlur`) run on each still with **sharp** after the image engine. **Limitation:** there is no face detector yet; the face box for the motion blur is the upper-centre of the frame (x 28–72 %, y 6–40 %), which suits portrait phone photos and misses faces elsewhere.
+  - The seven starter templates are added on start to every studio with an owner (keyed by slug, idempotent; a deleted starter comes back on the next start). Their covers are the bundled Sienna stills with the template's grade and after-effects, stored at `t/<studioId>/starter-<slug>.jpg`.
+  - `/health` shows `build` (the git commit Railway or Koyeb built), `startedAt`, `migrations` `{applied, latest}` and `starters` `{studios, added}`.
 
 ## Run it on your computer
 

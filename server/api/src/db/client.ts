@@ -1,7 +1,9 @@
 // Database connection: node-postgres for a real DATABASE_URL, PGlite (Postgres compiled to WASM, in-process) when
 // DATABASE_URL is unset or "pglite://memory" (dev and tests without Docker). Migrations in ./drizzle run on start.
 // The Postgres side (pool size, idle timeouts, retries while a sleeping Neon database wakes, the migration lock) is in pg.ts.
+import fs from 'node:fs';
 import path from 'node:path';
+import { sql } from 'drizzle-orm';
 import { fileURLToPath } from 'node:url';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 import * as schema from './schema.js';
@@ -27,4 +29,18 @@ export async function openDb(url: string | undefined, migrationsFolder = MIGRATI
   const pool = await openPg(url, migrationsFolder, pgOptions);
   const db = drizzle(pool, { schema });
   return { db: db as unknown as Db, close: () => pool.end(), kind: 'postgres' };
+}
+
+/** How many migrations the database has applied, and the newest migration this build ships (for /health). */
+export async function schemaState(db: Db, migrationsFolder = MIGRATIONS_DIR): Promise<{ applied: number; latest: string | null }> {
+  let latest: string | null = null;
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(migrationsFolder, 'meta/_journal.json'), 'utf8')) as { entries: { tag: string }[] };
+    latest = j.entries.at(-1)?.tag ?? null;
+  } catch { /* no journal */ }
+  try {
+    const r: any = await db.execute(sql`select count(*)::int as n from drizzle.__drizzle_migrations`);
+    const rows = r.rows ?? r;
+    return { applied: Number(rows[0]?.n ?? 0), latest };
+  } catch { return { applied: 0, latest }; }
 }
