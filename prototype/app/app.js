@@ -1,0 +1,410 @@
+/* MUSE clickable prototype. Sample data only. */
+const IMG = window.__IMG;
+const $ = (s, r=document) => r.querySelector(s);
+const store = { get(k,d){ try{ const v=localStorage.getItem('muse.'+k); return v==null?d:JSON.parse(v);}catch(e){return d;} }, set(k,v){ try{localStorage.setItem('muse.'+k,JSON.stringify(v));}catch(e){} } };
+
+const S = {
+  theme: store.get('theme','a'), sound: store.get('sound', true),
+  stack: [], steps: 10, engine: 'h3', bg: 'keep', motion: 'subtle', lip: false, keepAudio: true, outfit: 0, tool: 'quality',
+  use: 'first', consent: 'tests', shot: 'Medium', lens: 35, aperture: 'f/2.8', light: 'Golden hour',
+  create: { niche: 'Beauty', look: { 'Face shape':'Oval', Eyes:'Brown', Hair:'Black', Texture:'Curly', Body:'Curvy', Makeup:'Soft glam' }, skin: 4 },
+  gallery: 'tests', final: [],
+  jobs: [
+    { id: 'j1', img: 'vid_kick', title: 'Kick test', engine: 'Viggle β', p: 100, state: 'done', cost: 0.13, tc: '00:01:35' },
+    { id: 'j2', img: 'vid_bath', title: 'Bathroom trend', engine: 'H3 · 30 steps', p: 100, state: 'done', cost: 3.05, tc: '00:46:00' },
+  ],
+  running: null
+};
+
+/* ---------------- Sound (WebAudio, synthesized, per theme) ---------------- */
+let AC = null;
+function ac(){ if(!AC){ try{ AC = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){ AC=null; } } if(AC && AC.state==='suspended') AC.resume(); return AC; }
+function tone(f1, f2, dur, type='sine', vol=.12, delay=0){
+  const a=ac(); if(!a||!S.sound) return; const t=a.currentTime+delay;
+  const o=a.createOscillator(), g=a.createGain(); o.type=type; o.frequency.setValueAtTime(f1,t); if(f2) o.frequency.exponentialRampToValueAtTime(f2,t+dur);
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(vol,t+.008); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g).connect(a.destination); o.start(t); o.stop(t+dur+.02);
+}
+function noise(dur, freq, q=1, vol=.15, delay=0, type='bandpass', sweepTo){
+  const a=ac(); if(!a||!S.sound) return; const t=a.currentTime+delay;
+  const b=a.createBuffer(1, Math.floor(a.sampleRate*dur), a.sampleRate), d=b.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
+  const s=a.createBufferSource(); s.buffer=b; const f=a.createBiquadFilter(); f.type=type; f.frequency.setValueAtTime(freq,t); f.Q.value=q; if(sweepTo) f.frequency.exponentialRampToValueAtTime(sweepTo,t+dur);
+  const g=a.createGain(); g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  s.connect(f).connect(g).connect(a.destination); s.start(t); s.stop(t+dur);
+}
+const SND = {
+  a: { tap(){ noise(.035,3200,2,.09); }, tick(){ noise(.02,5000,4,.06); }, nav(){ noise(.22,1800,.6,.05,0,'bandpass',600); },
+       go(){ tone(392,null,.5,'sine',.08); tone(587,null,.6,'sine',.06,.08); }, done(){ [523,659,784].forEach((f,i)=>tone(f,null,.9,'sine',.07,i*.12)); }, theme(){ noise(.4,900,.5,.06,0,'bandpass',3000); } },
+  b: { tap(){ noise(.018,2400,6,.16); tone(90,50,.05,'sine',.12); }, tick(){ noise(.012,4200,10,.14); }, nav(){ noise(.05,1500,3,.12); noise(.05,900,3,.1,.06); },
+       go(){ tone(880,null,.08,'square',.05); tone(880,null,.08,'square',.05,.14); tone(1320,null,.18,'square',.05,.28); }, done(){ tone(1046,null,.12,'triangle',.08); tone(1568,null,.3,'triangle',.07,.12); }, theme(){ noise(.03,2000,8,.2); noise(.08,600,2,.15,.07); } },
+  c: { tap(){ tone(520,380,.09,'sine',.1); }, tick(){ tone(900,700,.03,'sine',.05); }, nav(){ tone(330,440,.18,'sine',.06); },
+       go(){ tone(440,660,.35,'sine',.08); }, done(){ [392,523,659,784].forEach((f,i)=>tone(f,null,1.1,'sine',.06,i*.1)); }, theme(){ tone(262,392,.5,'sine',.07); } },
+  d: { tap(){ tone(500,1100,.08,'triangle',.12); }, tick(){ tone(1400,1800,.03,'square',.03); }, nav(){ tone(300,900,.12,'triangle',.08); },
+       go(){ tone(400,1600,.25,'sawtooth',.05); noise(.25,800,.7,.06,0,'bandpass',4000); }, done(){ [523,659,784,1046].forEach((f,i)=>tone(f,null,.25,'square',.05,i*.08)); tone(1568,2093,.3,'triangle',.06,.34); }, theme(){ tone(200,1200,.3,'triangle',.08); tone(1200,1800,.15,'square',.03,.2); } }
+};
+const snd = k => { try{ SND[S.theme][k](); }catch(e){} };
+
+/* ---------------- Icons ---------------- */
+const ICON = __ICONS__;
+function ic(n, s=22, cls=''){ const fill=['play','apple','google'].includes(n)?' fill="currentColor" stroke="none"':' fill="none" stroke="currentColor"'; return `<svg class="ic ${cls}" width="${s}" height="${s}" viewBox="0 0 24 24"${fill} stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICON[n]}</svg>`; }
+const bg = k => `background-image:url(${IMG[k]})`;
+const T = () => S.theme;
+
+/* ---------------- Shared parts ---------------- */
+const sbar = (over) => `<div class="sb${over?' sb-over':''}"><span>9:41</span><span class="sb-r"><i class="sig"></i><i class="wifi"></i><i class="bat"></i></span></div>`;
+const topb = (title='', left='back', right=null, over=false) => `<header class="top${over?' over':''}">${left?`<span class="tb-btn press" data-back>${ic(left)}</span>`:'<span class="tb-btn ghost"></span>'}<h1 class="top-t">${title}</h1>${right?`<span class="tb-btn press" data-go="${right[1]}">${ic(right[0])}</span>`:'<span class="tb-btn ghost"></span>'}</header>`;
+const wm = (c='') => `<span class="wm ${c}">MUSE</span>`;
+const pill = (t,k='') => `<span class="pill ${k}">${t}</span>`;
+const stk = (t,c='yellow',r=-6,st='') => T()==='d'?`<span class="stk stk-${c} pop-in" style="transform:rotate(${r}deg);${st}">${t}</span>`:'';
+const vf = () => T()==='b'?'<i class="vf tl"></i><i class="vf tr"></i><i class="vf bl"></i><i class="vf br"></i>':'';
+function tabbar(active){
+  if(T()==='c'){ const it=[['user','Model','profile'],['studio','Studio','direct'],['queue','Queue','queue']];
+    return `<nav class="tabbar three">${it.map(([i,l,g])=>`<div class="tb-i press${g===active||(active==='home'&&g==='profile')?' on':''}" data-go="${g}">${ic(i)}<span>${l}</span></div>`).join('')}</nav>`; }
+  const it=[['home','Home','home'],['studio','Studio','direct'],['plus','','source'],['queue','Queue','queue'],['user','You','settings']];
+  return `<nav class="tabbar">${it.map(([i,l,g])=> i==='plus'?`<div class="tb-plus press" data-go="source">${ic('plus',24)}</div>`:`<div class="tb-i press${g===active?' on':''}" data-go="${g}">${ic(i)}<span>${l}</span></div>`).join('')}</nav>`;
+}
+const home = '<div class="homebar"></div>';
+const DOODLE = {
+  crown:'<svg width="56" height="44" viewBox="0 0 56 44"><path d="M4 38L8 10l14 14L28 4l6 20 14-14 4 28z" fill="#FFE14D" stroke="#111" stroke-width="3" stroke-linejoin="round"/></svg>',
+  heart:'<svg width="44" height="40" viewBox="0 0 44 40"><path d="M22 36S4 25 4 13a9 9 0 0118-3 9 9 0 0118 3c0 12-18 23-18 23z" fill="#FF7EB6" stroke="#111" stroke-width="3"/></svg>',
+  spark:'<svg width="40" height="40" viewBox="0 0 40 40"><path d="M20 2v10M20 28v10M2 20h10M28 20h10M7 7l7 7M26 26l7 7M33 7l-7 7M14 26l-7 7" stroke="#111" stroke-width="3" stroke-linecap="round"/></svg>'
+};
+
+/* ---------------- Screens ---------------- */
+const SCREENS = {};
+
+SCREENS.splash = () => {
+  const sub = {a:'<span class="cond" style="font-size:16px;transform:none;font-family:var(--mono);letter-spacing:.14em">THE FACE OF YOUR VISION</span>', b:'● REC &nbsp;00:00:00:00', c:'Direct your AI model', d:'<span class="hand">make her move!</span>'}[T()];
+  return `<section class="screen splash" data-go="welcome">${sbar(true)}<div class="sp-photo" style="${bg('hero')}">${vf()}</div>
+  <div class="sp-mark"><span class="wm wm-xl">MUSE</span><p class="sp-sub">${sub}</p><p class="tiny" style="margin-top:22px;opacity:.75">Tap to start</p></div>
+  ${stk('AI model studio','yellow',-8,'position:absolute;left:28px;top:140px')}${home}</section>`;
+};
+SCREENS.welcome = () => `<section class="screen">${sbar()}
+  <div class="wel-grid"><div class="wel-img big" style="${bg('g_front')}">${vf()}</div><div class="wel-img" style="${bg('c_face')}"></div><div class="wel-img" style="${bg('vid_living')}"></div></div>
+  ${stk('identity locked','pink',6,'position:absolute;right:26px;top:300px')}
+  <div class="pad stack-16 wel-copy"><h2 class="hero-t">${T()==='a'?'<span class="cond" style="font-size:78px;line-height:.85">Create your<br>AI model.</span>':'Create your AI model.<br>Direct every shot.'}</h2>
+   <p class="muted">Build an original persona, lock her identity, then put her into real clips with the motion kept frame for frame.</p>
+   <div class="dots"><i class="on"></i><i></i><i></i></div>
+   <div class="cta press" data-go="signup">Get started</div><div class="link-c press" data-go="signin">I already have an account</div></div>${home}</section>`;
+
+SCREENS.signin = () => `<section class="screen">${sbar()}${topb('')}
+  <div class="pad stack-20"><div>${wm('wm-md')}<h2 class="h2" style="margin-top:14px">Welcome back</h2><p class="muted">Sign in to your studio.</p></div>
+   <label class="fld"><span class="lbl">Email</span><span class="inp">jenne@studio.com</span></label>
+   <label class="fld"><span class="lbl">Password</span><span class="inp">••••••••••</span><span class="fld-r">Forgot?</span></label>
+   <div class="cta press" data-act="signin">Sign in</div><div class="or"><i></i><span>or</span><i></i></div>
+   <div class="sso press" data-act="signin">${ic('apple',20)} Continue with Apple</div><div class="sso press" data-act="signin">${ic('google',20)} Continue with Google</div>
+   <p class="tiny muted center">New here? <b class="acc press" data-go="signup">Create an account</b></p></div>${home}</section>`;
+
+SCREENS.signup = () => `<section class="screen">${sbar()}${topb('')}
+  <div class="pad stack-20"><div><h2 class="h2">Create your studio</h2><p class="muted">One account for all your models.</p></div>
+   <label class="fld"><span class="lbl">Studio name</span><span class="inp">Jenne Studio</span></label>
+   <label class="fld"><span class="lbl">Email</span><span class="inp">jenne@studio.com</span></label>
+   <label class="fld"><span class="lbl">Password</span><span class="inp">••••••••••</span></label>
+   <div class="chk">${ic('check',16)}<span>I'm 18 or older and I'll only create original characters, never real people.</span></div>
+   <div class="chk">${ic('check',16)}<span>I'll label AI content when I post it.</span></div>
+   <div class="cta press" data-act="signin">Create account</div>
+   <p class="tiny muted center">By continuing you agree to the Terms and the MiniMax H3 acceptable use policy.</p></div>${home}</section>`;
+
+SCREENS.home = () => {
+  const hello={a:'<span class="cond" style="font-size:72px;line-height:.85">Your models</span>',b:'MODELS',c:'Good morning, Jenne',d:'Your crew'}[T()];
+  return `<section class="screen">${sbar()}<header class="top">${wm()}<span class="grow"></span><span class="tb-btn press" data-act="notify">${ic('bell')}</span></header>
+  <div class="pad stack-16 scroll"><div class="row-b"><h2 class="h2 home-t">${hello}</h2><span class="bal mono press" data-go="credits">$6.07</span></div>
+   <div class="feature press" style="${bg('g_front')}" data-go="profile">${vf()}<div class="feat-cap"><span class="lbl lbl-inv">Featured</span><b class="feat-name">Sienna Vale</b><span class="tiny">Identity locked · 2 outfits</span></div>
+    ${stk('ready to shoot','mint',-5,'position:absolute;right:14px;top:14px')}</div>
+   <div class="quick"><div class="qa press" data-go="source">${ic('studio')}<span>New video</span></div><div class="qa press" data-go="shoot">${ic('camera')}<span>Photoshoot</span></div><div class="qa press" data-go="create1">${ic('model')}<span>New model</span></div></div>
+   <div class="row-b"><h3 class="h3">All models</h3><span class="tiny acc">See all</span></div>
+   <div class="mgrid"><div class="mcard press" data-go="profile"><div class="mc-img" style="${bg('c_front')}">${vf()}</div><div class="mc-meta"><b>Sienna Vale</b><span class="tiny muted">Fashion · 24</span>${pill('Locked','good')}</div></div>
+    <div class="mcard press" data-go="create3"><div class="mc-img init">N</div><div class="mc-meta"><b>Noor Adeyemi</b><span class="tiny muted">Beauty · 27</span>${pill('Needs close-ups','warn')}</div></div></div>
+  </div>${tabbar('home')}${home}</section>`;
+};
+
+const OUTFITS=[['g_front','Green set'],['c_front','Crystal dress'],['g_tq','Green · ¾'],['c_tq','Crystal · ¾']];
+SCREENS.profile = () => {
+  const t=T(), o=S.outfit;
+  if(t==='a') return `<section class="screen">${sbar()}<header class="top">${wm()}<span class="grow"></span><span class="tb-btn press" data-go="settings">${ic('more')}</span></header>
+    <div class="strip"><span>${ic('lock',12)} Identity locked · 6/6</span><span>Model profile</span></div>
+    <div class="ap-photo press" style="${bg('hero')}" data-go="direct"><span class="cond ap-name">Sienna<br>Vale</span><span class="ap-tag">THE FACE OF YOUR VISION</span></div>
+    <div class="carousel"><span class="arrow press" data-act="outfit-prev">${ic('back',18)}</span>${OUTFITS.map(([k],i)=>`<div class="cimg press${i===o?' on':''}" style="${bg(k)}" data-act="outfit-${i}"></div>`).join('')}<span class="arrow press" data-act="outfit-next">${ic('chev',18)}</span></div>
+    <div class="under">OUTFITS ${o+1} / ${OUTFITS.length} · ${OUTFITS[o][1].toUpperCase()}</div>
+    <div class="dock"><div class="cta grow press" data-go="source">Make a video</div><div class="cta-2 press" data-go="shoot">${ic('camera',20)}</div></div>${home}</section>`;
+  if(t==='b') return `<section class="screen">${sbar()}<header class="top"><span class="tb-btn press" data-back>${ic('back')}</span><span class="grow center">${wm()}</span><span class="tiny mono muted" style="width:60px;text-align:right;line-height:1.1">MODEL<br>PROFILE</span></header>
+    <div class="vfcard" style="${bg('hero')}">${vf()}<span class="ro" style="left:16px;top:14px">6/6</span><span class="ro" style="right:16px;top:14px">768×1344</span><i class="cross"></i><span class="ro" style="left:16px;bottom:14px">ISO 100</span><span class="ro" style="right:16px;bottom:14px">24.00 FPS</span></div>
+    <div class="namerow"><b>Sienna Vale</b><span class="active">● ACTIVE</span></div><div class="idl">ID 6/6 · 768×1344 · never add: tattoos, rings</div>
+    <div class="pad" style="margin-top:12px"><div class="row-b"><span class="lbl">Outfit</span><span class="tiny mono muted">${o+1} / ${OUTFITS.length}</span></div>
+     <div class="refrow" style="margin-top:8px">${OUTFITS.map(([k,n],i)=>`<div class="ofit press${i===o?' on':''}" data-act="outfit-${i}"><div class="ref-img tall" style="${bg(k)}"></div></div>`).join('')}</div></div>
+    <div class="dock"><div class="cta grow press" data-go="source">Make a video</div><div class="cta-2 press" data-go="shoot">${ic('camera',20)}</div></div>${home}</section>`;
+  if(t==='c') return `<section class="screen">${sbar()}<header class="top"><span class="tb-btn press" data-back>${ic('back')}</span><span class="grow center">${wm('c')}</span><span class="tb-btn press" data-go="settings">${ic('user')}</span></header>
+    <div class="ccard" style="${bg('hero')}"></div>
+    <div class="cname"><b>Sienna Vale</b><span class="tb-btn press" data-go="settings">${ic('more')}</span></div>
+    <span class="cpill">${ic('lock',13)} Identity locked</span>
+    <div class="pad row-b" style="margin-top:14px"><b>Outfit</b><span class="tiny muted">${o+1} / ${OUTFITS.length} ›</span></div>
+    <div class="ccar">${OUTFITS.map(([k],i)=>`<div class="cimg press${i===o?' on':''}" style="${bg(k)}" data-act="outfit-${i}"></div>`).join('')}<span class="round-btn press" data-act="outfit-next" style="position:absolute;right:14px;top:38px">${ic('chev',16)}</span></div>
+    ${tabbar('profile')}${home}</section>`;
+  return `<section class="screen"><div class="blue" style="padding-bottom:48px;position:relative">${sbar(true)}<header class="top" style="color:#fff">${wm()}<span class="grow tiny" style="text-align:right;line-height:1.1;font-weight:700">CREATE<br>DIRECT<br>YOUR AI MODEL</span><span class="tb-btn press" data-back>${ic('back')}</span></header>
+    <div class="cutout" style="${bg('hero')}"><span class="dname">Sienna<br>Vale</span></div>
+    <span class="stk stk-yellow pop-in" style="position:absolute;left:14px;top:120px;transform:rotate(-10deg);font-size:13px;line-height:1.1">REAL LOOKS<br>+ AI POWER</span>
+    <span class="doodle pop-in" style="right:24px;top:96px">${DOODLE.crown}</span><span class="doodle pop-in" style="left:22px;top:260px">${DOODLE.heart}</span>
+    <span class="stk stk-pink pop-in" style="position:absolute;right:16px;bottom:30px;transform:rotate(-7deg);font-size:18px">IDENTITY<br>LOCKED ${ic('lock',16)}</span></div>
+    <div class="pad stack-10" style="margin-top:34px"><b style="color:var(--blue);font-weight:800;letter-spacing:.04em">AI FASHION MODEL</b>
+     <div class="row-b"><b>OUTFIT</b><span class="tiny"><b>${OUTFITS.length} LOOKS ›</b></span></div>
+     <div class="refrow">${OUTFITS.map(([k],i)=>`<div class="ofit press${i===o?' on':''}" data-act="outfit-${i}"><div class="ref-img tall" style="${bg(k)}"></div></div>`).join('')}</div></div>
+    <div class="dock"><div class="cta grow press" data-go="source">Make a video</div><div class="cta-2 press" data-go="shoot">${ic('camera',20)}</div></div>${home}</section>`;
+};
+
+const stepbars = n => `<div class="stepbars">${[0,1,2,3].map(i=>`<i class="${i<n?'on':''}"></i>`).join('')}</div>`;
+SCREENS.create1 = () => `<section class="screen">${sbar()}${topb('New model')}
+  <div class="pad stack-8">${stepbars(1)}<span class="lbl">Step 1 of 4</span><h2 class="h2">Who is she?</h2></div>
+  <div class="pad stack-16" style="margin-top:12px"><label class="fld"><span class="lbl">Name</span><span class="inp typing">Noor Adeyemi</span></label>
+   <div class="fld"><span class="lbl">Age · <b class="mono" id="age-v">27</b></span><div class="slider" data-slider="age" data-min="18" data-max="45" data-val="27"><i style="width:33%"></i><b style="left:33%"></b></div><div class="scale mono"><span>18</span><span>45</span></div></div>
+   <div class="fld"><span class="lbl">Niche</span><div class="chips">${['Fashion','Beauty','Fitness','Travel','Food','Tech'].map(x=>`<span class="chip${x===S.create.niche?' on':''}" data-act="niche-${x}">${x}</span>`).join('')}</div></div>
+   <div class="note-box">${ic('shield',18)}<span>Models are always 18+ and original. No lookalikes of real people.</span></div></div>
+  <div class="dock"><div class="cta grow press" data-go="create2">Next: Look</div></div>${home}</section>`;
+SCREENS.create2 = () => { const rows=[['Face shape',['Oval','Heart','Round','Square']],['Eyes',['Green','Hazel','Brown','Blue']],['Hair',['Honey blonde','Brunette','Black','Auburn']],['Texture',['Straight','Wavy','Curly','Coily']],['Body',['Slim','Athletic','Curvy']],['Makeup',['Bare','Soft glam','Full glam']]];
+  return `<section class="screen">${sbar()}${topb('New model')}
+  <div class="pad stack-8">${stepbars(2)}<span class="lbl">Step 2 of 4</span><h2 class="h2">Her look</h2></div>
+  <div class="pad stack-14" style="margin-top:10px"><div class="fld"><span class="lbl">Skin tone</span><div class="sws">${['#F3D9C4','#E8C09C','#D4A275','#B07A50','#8A5A38','#5E3B24'].map((c,i)=>`<i class="sw${i===S.create.skin?' on':''}" style="background:${c}" data-act="skin-${i}"></i>`).join('')}</div></div>
+   ${rows.map(([k,o])=>`<div class="fld"><span class="lbl">${k}</span><div class="chips nowrap">${o.map(x=>`<span class="chip${S.create.look[k]===x?' on':''}" data-act="look|${k}|${x}">${x}</span>`).join('')}</div></div>`).join('')}</div>
+  <div class="dock"><div class="cta grow press" data-act="portraits">Generate portraits · $0.08</div></div>${home}</section>`; };
+SCREENS.create3 = () => { const sl=[['Face · front','face',1],['Face · profile','profile',1],['Body · front','g_front'],['Body · ¾'],['Body · side'],['Body · back']];
+  return `<section class="screen">${sbar()}${topb('New model')}
+  <div class="pad stack-8">${stepbars(3)}<span class="lbl">Step 3 of 4</span><h2 class="h2">Lock her identity</h2></div>
+  <div class="pad stack-14" style="margin-top:10px"><p class="muted">Six separate shots keep her the same person in every video. Face close-ups matter most.</p>
+   <div class="slots">${sl.map(([n,k,r])=>`<div class="slot${k?' filled':''} press" data-act="upload">${k?`<div class="ref-img" style="${bg(k)}"></div>`:`<div class="slot-e">${ic('upload',20)}</div>`}<span>${n}</span></div>`).join('')}</div>
+   <div class="note-box warn">${ic('shield',18)}<span>3 of 6 added. Upload separate images, not a character sheet.</span></div></div>
+  <div class="dock"><div class="cta-2 wide press" data-act="upload">${ic('upload',18)} Upload</div><div class="cta grow press" data-act="model-saved">Save model</div></div>${home}</section>`; };
+
+const TOOLS=[['model','Model'],['outfit','Outfit'],['camera','Camera'],['light','Light'],['bg','Background'],['quality','Quality']];
+const toolstrip = () => `<div class="tools">${TOOLS.map(([k,l])=>`<div class="tool press${k===S.tool?' on':''}" data-act="tool-${k}">${ic(k==='bg'?'bg':k,20)}<span>${l}</span></div>`).join('')}</div>`;
+function sheetBody(){
+  const t=T();
+  if(S.tool==='quality'){
+    let stepsUI;
+    if(S.engine==='viggle') stepsUI = `<div class="note-box warn">${ic('shield',18)}<span>Viggle β uses a fixed 4 steps. Motion timing is exact; the face is softer and can warp slightly.</span></div>`;
+    else if(t==='b') stepsUI = `<div class="plate"><i class="screw s1"></i><i class="screw s2"></i><i class="screw s3"></i><i class="screw s4"></i><span class="lbl">Steps</span><span class="stepsbadge" id="steps-v">${S.steps}</span><span class="tiny acc" id="steps-rec">${S.steps===10?'Recommended':S.steps>10?'Rarely worth it':'Below tested range'}</span>
+        <div class="dialrow"><span class="knob-btn press" data-act="steps-dec">${ic('back',16)}</span><div class="knob" id="knob" style="transform:rotate(${(S.steps-17)*10}deg)"><i></i></div><span class="knob-btn press" data-act="steps-inc">${ic('chev',16)}</span></div>
+        <div class="ruler" style="align-self:stretch">${Array.from({length:27},(_,i)=>`<i class="${i%5===0?'big':''}${i+4===S.steps?' on':''}"></i>`).join('')}</div><div class="scale mono" style="align-self:stretch"><span>4</span><span>10</span><span>20</span><span>30</span></div></div>`;
+    else { const pct=(S.steps-4)/26*100; stepsUI = `<div class="${t==='c'?'stepcard':''} fld"><div class="row-b"><span class="lbl">Steps</span>${t==='d'?`<span class="stk stk-yellow" style="transform:rotate(-5deg)" id="steps-rec">${S.steps===10?'RECOMMENDED':S.steps>10?'TAKES LONGER':'TOO FEW?'}</span>`:pill(`<span id="steps-rec">${S.steps===10?'Recommended':S.steps>10?'Rarely worth it':'Below tested'}</span>`,S.steps===10?'good':'warn')}</div>
+        <b class="stepnum${t==='a'?'':' mono'}" id="steps-v">${S.steps}</b><div class="slider" data-slider="steps" data-min="4" data-max="30" data-val="${S.steps}"><i style="width:${pct}%"></i><b style="left:${pct}%"></b></div><div class="scale mono"><span>4</span><span>10</span><span>20</span><span>30</span></div>
+        <p class="tiny muted">10, 15 and 20 steps looked the same in testing. More steps only add time.</p></div>`; }
+    return `<div class="row-b"><b class="h3">Quality</b><div class="seg sm"><span class="${S.engine==='h3'?'on':''}" data-act="engine-h3">H3</span><span class="${S.engine==='viggle'?'on':''}" data-act="engine-viggle">Viggle β</span></div></div>${stepsUI}
+      <div class="row-b"><span>Lip sync <span class="tiny muted">· talking clips only</span></span><span class="tog${S.lip?' on':''}" data-act="lip"></span></div>`;
+  }
+  if(S.tool==='bg') return `<b class="h3">Background</b>
+      <div class="opt press${S.bg==='keep'?' on':''}" data-act="bg-keep"><b>Keep the real room</b><span class="tiny muted">Best realism. Uses the clip's own background.</span></div>
+      <div class="opt press${S.bg==='photo'?' on':''}" data-act="bg-photo"><b>New background photo</b><span class="tiny muted">Vertical photo, same camera height, similar light.</span></div>
+      ${S.bg==='photo'?`<div class="fld"><span class="lbl">Background motion</span><div class="seg">${[['still','Still'],['subtle','Subtly alive'],['busy','Busy']].map(([k,l])=>`<span class="${S.motion===k?'on':''}" data-act="motion-${k}">${l}</span>`).join('')}</div></div>`:''}
+      <div class="row-b"><span>Keep original audio</span><span class="tog${S.keepAudio?' on':''}" data-act="audio"></span></div>`;
+  if(S.tool==='outfit') return `<b class="h3">Outfit</b><div class="refrow">${OUTFITS.map(([k,n],i)=>`<div class="ofit press${i===S.outfit?' on':''}" data-act="outfit-${i}"><div class="ref-img tall" style="${bg(k)}"></div><span>${n}</span></div>`).join('')}</div><p class="tiny muted">Never add: tattoos, rings, necklaces. Removed automatically.</p>`;
+  if(S.tool==='model') return `<b class="h3">Model</b><div class="refrow"><div class="ofit on"><div class="ref-img tall" style="${bg('face')}"></div><span>Sienna</span></div><div class="ofit"><div class="ref-img tall init">N</div><span>Noor · needs close-ups</span></div></div>`;
+  if(S.tool==='camera') return `<b class="h3">Camera</b><p class="tiny muted">Video keeps the performer's real camera. These settings apply to photoshoots.</p><div class="seg">${['Close','Medium','Full','Wide'].map(x=>`<span class="${S.shot===x?'on':''}" data-act="shot-${x}">${x}</span>`).join('')}</div>`;
+  return `<b class="h3">Light</b><p class="tiny muted">Video keeps the room's real light. Relight comes with new backgrounds.</p><div class="chips">${['Golden hour','Overcast','Ring light','Window','Neon'].map(x=>`<span class="chip${S.light===x?' on':''}" data-act="light-${x}">${x}</span>`).join('')}</div>`;
+}
+function genLabel(){ const m = S.engine==='viggle'? 1.6 : S.steps*0.96 + (S.lip?4:0); const c = S.engine==='viggle'?0.13: m/60*3.99; return `Generate · ${m<2?Math.round(m*60)+'s':Math.round(m)+' min'} · $${c.toFixed(2)}`; }
+SCREENS.direct = () => {
+  const t=T(), readout = t==='b'?`<span class="readout tl-r mono"><i class="rec"></i> 00:00:05:04</span><span class="readout br-r mono">768×1344 · 24 FPS</span>`:'';
+  const head = t==='a'?`<header class="top">${'<span class="tb-btn press" data-back>'+ic('back')+'</span>'}<span class="grow center">${wm('c')}</span><span class="tiny mono" style="letter-spacing:.12em">VIDEO STUDIO</span></header>`: topb(t==='b'?'Video studio':'Video studio','back',['more','settings']);
+  return `<section class="screen">${sbar()}${head}
+  <div class="canvas" style="${bg(S.bg==='photo'?'vid_bath':'vid_living')}">${vf()}${readout}<div class="canvas-bar"><span class="press" data-act="play">${ic('play',16)}</span><div class="track"><i id="trk" style="width:38%"></i></div><span class="mono tiny">0:02 / 0:05</span></div>
+   ${t==='d'?'<span class="stk stk-yellow pop-in" style="position:absolute;left:12px;top:12px;transform:rotate(-7deg)">MAKE HER MOVE</span><span class="stk stk-yellow pop-in" style="position:absolute;right:10px;bottom:50px;transform:rotate(5deg);font-size:13px;line-height:1.1">YOUR VISION<br>HER STORY</span>':''}</div>
+  ${toolstrip()}<div class="bsheet stack-12" id="sheet"><i class="grab"></i>${sheetBody()}</div>
+  <div class="dock tight"><div class="cta grow press" id="gen" data-act="generate">${genLabel()}</div></div>${home}</section>`;
+};
+SCREENS.source = () => { const ck=[['One person in frame','Yes','good'],['Watermark','None','good'],['1080×1920 · 30fps','OK','good'],['Length 9.4s','Max 15s','good'],['Performer talking','No','warn']];
+  return `<section class="screen">${sbar()}${topb('New video')}
+  <div class="pad stack-16"><div class="clipcard"><div class="clip-th" style="${bg('src_clip')}">${ic('play',18)}</div><div class="stack-8 grow">${ck.map(([a,b,k],i)=>`<div class="row-b tiny pop-in" style="animation-delay:${i*90}ms"><span>${a}</span>${pill(b,k)}</div>`).join('')}</div></div>
+   <div class="fld"><span class="lbl">Use</span><div class="seg"><span class="${S.use==='first'?'on':''}" data-act="use-first">First 5.2s</span><span class="${S.use==='full'?'on':''}" data-act="use-full">Full 9.4s</span></div></div>
+   <div class="fld"><span class="lbl">Performer consent</span><div class="opt press${S.consent==='tests'?' on':''}" data-act="consent-tests"><b>On file · tests only</b><span class="tiny muted">Results stay in the test gallery</span></div>
+    <div class="opt press${S.consent==='post'?' on':''}" data-act="consent-post"><b>On file · posting allowed</b><span class="tiny muted">Can be exported for TikTok</span></div></div>
+   ${stk('clip looks good!','mint',-3,'align-self:flex-start')}</div>
+  <div class="dock"><div class="cta grow press" data-go="direct">Next: Direct</div></div>${home}</section>`; };
+
+SCREENS.shoot = () => `<section class="screen">${sbar()}${topb('Photoshoot','back',['more','settings'])}
+  <div class="canvas short" style="${bg('c_tq')}">${vf()}${T()==='b'?`<span class="readout tl-r mono">${S.lens}MM · ${S.aperture.toUpperCase()} · 4300K</span>`:''}${stk('rooftop · golden hour','yellow',-4,'position:absolute;left:12px;bottom:12px')}</div>
+  <div class="tools">${TOOLS.map(([k,l])=>`<div class="tool${k==='camera'?' on':''}">${ic(k,20)}<span>${l}</span></div>`).join('')}</div>
+  <div class="bsheet stack-14"><i class="grab"></i><div class="row-b"><b class="h3">Camera</b><span class="tiny acc">Reset</span></div>
+   <div class="fld"><span class="lbl">Shot</span><div class="seg">${['Close','Medium','Full','Wide'].map(x=>`<span class="${S.shot===x?'on':''}" data-act="shot-${x}">${x}</span>`).join('')}</div></div>
+   <div class="fld"><span class="lbl">Lens · <b class="mono">${S.lens}mm</b></span><div class="chips">${[16,24,35,50,85].map(x=>`<span class="chip${S.lens===x?' on':''}" data-act="lens-${x}">${x}mm</span>`).join('')}</div></div>
+   <div class="fld"><span class="lbl">Aperture</span><div class="chips">${['f/1.4','f/2.8','f/5.6','f/11'].map(x=>`<span class="chip${S.aperture===x?' on':''}" data-act="ap-${x}">${x}</span>`).join('')}</div></div></div>
+  <div class="dock tight"><div class="cta grow press" data-act="shoot">Shoot 4 · ~32s · $0.12</div></div>${home}</section>`;
+
+function fmt(s){ s=Math.max(0,Math.round(s)); return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); }
+SCREENS.queue = () => {
+  const t=T(), r=S.running, jobs=[...(r?[r]:[]), ...S.jobs];
+  const kpis = `<div class="kpis"><div><span class="lbl">Today</span><b class="mono">$3.95</b></div><div><span class="lbl">Month</span><b class="mono">$18.93</b></div><div><span class="lbl">Balance</span><b class="mono">$6.07</b></div></div>`;
+  if(t==='a') return `<section class="screen">${sbar()}<header class="top">${wm()}<span class="grow"></span><span class="tiny mono" style="letter-spacing:.12em">RENDER QUEUE <b class="acc">●</b></span></header>
+    <div class="pad scroll"><div class="row-b" style="align-items:flex-end;margin-top:6px"><span class="cond renders-t">Your renders</span><span class="tiny mono">${jobs.length} IN QUEUE</span></div>
+     ${jobs.map(j=>`<div class="rj press" data-act="open-${j.id}"><div class="th" style="${bg(j.img)}"></div><div class="grow stack-4"><b style="font-weight:500">${j.title}</b><span class="meta">9:16 · ${j.engine.toUpperCase()}</span><div class="row-b"><div class="bar grow"><i data-job="${j.id}" style="width:${j.p}%"></i></div><span class="mono tiny" data-pct="${j.id}">${Math.round(j.p)}%</span></div></div><span class="muted">${ic('more',18)}</span></div>`).join('')}
+    </div><div class="dock"><div class="cta grow press" data-go="direct">Generate · 10 min · $0.67</div></div>${tabbar('queue')}${home}</section>`;
+  if(t==='c'){ const stages=[['Model processing',30],['Outfit generation',55],['Video rendering',92],['Finalizing',100]];
+    const p = r? r.p : 100;
+    return `<section class="screen">${sbar()}${topb('Render queue')}
+    <div class="pad stack-14"><span class="muted" style="margin-top:8px">${r?'Time left':'All renders done'}</span><b class="bigtime" id="bigtime">${r?fmt(r.left):'00:00'}</b><span class="muted">${r?'Generating your video…':'Nothing running. Start a new one.'}</span>
+     ${stages.map(([n,lim],i)=>{ const prev=i?stages[i-1][1]:0; const sp=Math.max(0,Math.min(100,(p-prev)/(lim-prev)*100)); const st=sp>=100?'done':sp>0?'run':'';
+       return `<div class="stage-row"><span class="stage-ic ${st}">${st==='done'?ic('check',14):''}</span><div class="grow stack-4"><div class="row-b"><span>${n}</span><span class="mono tiny" data-stagep="${i}">${Math.round(sp)}%</span></div><div class="bar"><i data-stage="${i}" style="width:${sp}%"></i></div></div></div>`; }).join('')}
+     <div class="row-b tiny muted"><span>${S.jobs.length} finished · see Gallery</span><span class="acc press" data-go="gallery">Open ›</span></div></div>
+    <div class="dock"><div class="cta grow press" data-go="direct">Generate · 10 min · $0.67</div></div>${home}</section>`; }
+  if(t==='d') return `<section class="screen">${sbar()}<header class="top">${wm()}<span class="grow tiny" style="text-align:right;font-weight:700">RENDER QUEUE</span><span class="tb-btn press" data-go="settings">${ic('quality')}</span></header>
+    <div class="pad stack-12 scroll"><div style="position:relative"><span class="dhead">TURN IDEAS<br>INTO REALITY</span><span class="doodle" style="right:4px;top:0">${DOODLE.crown}</span></div>
+     ${jobs.map((j,i)=>`<div class="djob press" data-act="open-${j.id}"><div class="th" style="${bg(j.img)}"></div><div class="grow stack-4"><b>Sienna Vale · ${j.title}</b><span class="tiny muted">${j.engine}</span><div class="row-b" style="gap:8px"><div class="dbar grow${i%2?' p':''}"><i data-job="${j.id}" style="width:${j.p}%"></i></div><span class="bigpct" data-pct="${j.id}">${Math.round(j.p)}%</span></div><span class="tiny muted">${j.state==='done'?'Done':'Generating video… ~'+fmt(j.left)+' left'}</span></div></div>`).join('')}
+    </div><div class="dock"><div class="cta grow big press" data-go="direct">Generate · 10 min · $0.67</div></div>${home}</section>`;
+  return `<section class="screen">${sbar()}${topb('Render queue','back',['quality','settings'])}
+    <div class="pad stack-12 scroll"><div class="row-b"><span class="tiny mono acc">${r?'1 ACTIVE':'0 ACTIVE'}</span>${pill('● H100 '+(r?'on':'off'),r?'good':'')}</div>
+     ${jobs.map(j=>`<div class="job press" data-act="open-${j.id}"><div class="job-th" style="${bg(j.img)}"></div><div class="grow stack-4"><div class="row-b"><span class="tc" data-tc="${j.id}">${j.state==='done'?j.tc:fmt(j.left)}</span><span class="st ${j.state==='done'?'':'r'}">● ${j.state==='done'?'DONE':'RENDERING'}</span></div>
+       <span class="tiny muted">Sienna Vale · ${j.title}</span><span class="tiny mono muted">9:16 · 24fps · ${j.engine}</span><div class="row-b" style="gap:8px"><div class="bar grow"><i data-job="${j.id}" style="width:${j.p}%"></i></div><span class="mono tiny" data-pct="${j.id}">${Math.round(j.p)}%</span></div></div></div>`).join('')}
+     ${kpis}</div>${tabbar('queue')}${home}</section>`;
+};
+
+SCREENS.result = () => { const j=S.open||S.jobs[0];
+  return `<section class="screen"><div class="full" style="${bg(j.img==='c_tq'?'c_tq':j.img)}">${sbar(true)}${topb('Take 1 of 1','back',['more','settings'],true)}${vf()}
+   <div class="res-side"><div class="rs press" data-go="direct">${ic('retry')}<span>Retry</span></div><div class="rs press" data-act="export">${ic('export')}<span>Export</span></div></div>
+   ${stk('she ate!','pink',-8,'position:absolute;left:18px;top:140px')}</div>
+  <div class="res-sheet stack-12"><div class="row-b"><div><b class="h3">${j.title}</b><div class="tiny muted">${j.engine} · $${j.cost.toFixed(2)}</div></div>${pill(S.final.includes(j.id)?'Final':'Test',S.final.includes(j.id)?'good':'')}</div>
+   <div class="note-box">${ic('shield',18)}<span>Export adds the AI-generated label. Brand posts also need #ad.</span></div>
+   <div class="row-g"><div class="cta-2 grow press" data-back>Reject</div><div class="cta grow press" data-act="approve">${S.final.includes(j.id)?'Approved ✓':'Approve'}</div></div></div>${home}</section>`; };
+
+SCREENS.gallery = () => { const tiles=[['vid_living','10 steps','j0'],['vid_kick','Viggle β','j1'],['vid_bath','30 steps','j2'],['c_front','Shoot',''],['vid_living2','15 steps',''],['c_tq','Shoot','']];
+  const list = S.gallery==='final' ? tiles.filter(x=>S.final.includes(x[2])) : tiles;
+  return `<section class="screen">${sbar()}<header class="top">${wm()}<span class="grow"></span><span class="tb-btn">${ic('grid')}</span></header>
+  <div class="pad stack-14"><h2 class="h2">${T()==='a'?'<span class="cond" style="font-size:72px;line-height:.85">Gallery</span>':'Gallery'}</h2>
+   <div class="seg"><span class="${S.gallery==='tests'?'on':''}" data-act="gal-tests">Tests · ${tiles.length}</span><span class="${S.gallery==='final'?'on':''}" data-act="gal-final">Final · ${S.final.length}</span></div>
+   ${list.length?`<div class="gal">${list.map(([k,l],i)=>`<div class="gt pop-in" style="${bg(k)};animation-delay:${i*60}ms"><span class="gt-l">${l}</span></div>`).join('')}</div>`:`<div class="note-box">${ic('spark',18)}<span>Nothing approved yet. Approve a take to move it here.</span></div>`}
+   <p class="tiny muted">Tests never fill your final gallery.</p></div>${tabbar('direct')}${home}</section>`; };
+
+const THEMES=[['a','Editorial','#EFEBE3','#141210','#B5121B'],['b','Camera Body','#0D0E0F','#ECEAE5','#F2A93B'],['c','Soft Tactile','#E7E2D9','#23262A','#6E8465'],['d','Creator Pop','#1F4BFF','#FFF6EC','#FF7EB6']];
+SCREENS.settings = () => `<section class="screen">${sbar()}${topb('Settings')}
+  <div class="pad stack-16"><div class="fld"><span class="lbl">Theme</span><div class="thms">${THEMES.map(([k,n,b,f,a])=>`<div class="thm press${k===T()?' on':''}" data-act="theme-${k}"><div class="thm-sw" style="background:${b}"><i style="background:${f}"></i><i style="background:${a}"></i></div><span>${n}</span>${k===T()?`<b class="thm-c">${ic('check',14)}</b>`:''}</div>`).join('')}</div></div>
+   <div class="list"><div class="li press" data-act="sound">${ic('audio',20)}<span class="grow">Sound effects</span><span class="tog${S.sound?' on':''}"></span></div>
+    <div class="li press" data-go="credits">${ic('wallet',20)}<span class="grow">Credits & billing</span><span class="tiny muted">$6.07</span>${ic('chev',16)}</div>
+    <div class="li press" data-act="consent">${ic('shield',20)}<span class="grow">Consent records</span><span class="tiny muted">2</span>${ic('chev',16)}</div>
+    <div class="li press" data-act="signout">${ic('user',20)}<span class="grow">Sign out</span>${ic('chev',16)}</div></div>
+   <p class="tiny muted center">Video model: MiniMax H3 · Lip sync: LatentSync</p></div>${tabbar('settings')}${home}</section>`;
+
+SCREENS.credits = () => `<section class="screen">${sbar()}${topb('Credits')}
+  <div class="pad stack-16"><div class="balcard"><span class="lbl lbl-inv">GPU balance</span><b class="bal-n mono" id="bal">$6.07</b><span class="tiny">≈ 9 videos at 10 steps</span>${stk('top up!','yellow',-6,'position:absolute;right:16px;top:16px')}</div>
+   <div class="fld"><span class="lbl">Top up</span><div class="seg">${['$10','$25','$50','$100'].map(x=>`<span class="${x==='$25'?'on':''}">${x}</span>`).join('')}</div></div>
+   <div class="kpis"><div><span class="lbl">This month</span><b class="mono">$18.93</b></div><div><span class="lbl">Per video</span><b class="mono">~$0.65</b></div><div><span class="lbl">Videos</span><b class="mono">11</b></div></div>
+   <div class="fld"><span class="lbl">Spend limits</span><div class="li">${ic('shield',20)}<span class="grow">Per job</span><span class="mono tiny">$5.00</span></div><div class="li">${ic('shield',20)}<span class="grow">Per day</span><span class="mono tiny">$15.00</span></div></div></div>
+  <div class="dock"><div class="cta grow press" data-act="topup">Add $25 · USDT or card</div></div>${home}</section>`;
+
+/* ---------------- Navigation + transitions (per theme) ---------------- */
+const MOTION = {
+  a: { dur: 460, ease: 'cubic-bezier(.22,.61,.36,1)', inF: d => [{opacity:0, transform:`translateY(${d>0?18:-18}px)`},{opacity:1, transform:'none'}], outF: d => [{opacity:1},{opacity:0}] },
+  b: { dur: 230, ease: 'cubic-bezier(.4,0,.2,1)', inF: d => [{transform:`translateX(${d>0?100:-30}%)`},{transform:'none'}], outF: d => [{transform:'none', filter:'brightness(1)'},{transform:`translateX(${d>0?-30:100}%)`, filter:'brightness(.5)'}], flash: true },
+  c: { dur: 520, ease: 'cubic-bezier(.2,1.25,.35,1)', inF: d => [{transform:`translateX(${d>0?100:-25}%) scale(.96)`, borderRadius:'40px'},{transform:'none', borderRadius:'0px'}], outF: d => [{transform:'none', opacity:1},{transform:`translateX(${d>0?-25:100}%) scale(.94)`, opacity:.6}] },
+  d: { dur: 480, ease: 'cubic-bezier(.3,1.6,.5,1)', inF: d => [{transform:`translateY(${d>0?40:-40}%) rotate(${d>0?6:-6}deg) scale(.85)`, opacity:0},{transform:'none', opacity:1}], outF: d => [{transform:'none', opacity:1},{transform:'scale(.9)', opacity:0}] },
+};
+let busy=false;
+function render(name, dir=0){
+  const phone=$('#phone'); const old=phone.querySelector('.view'); const v=document.createElement('div'); v.className='view';
+  v.innerHTML = SCREENS[name](); phone.appendChild(v); S.screen=name; bindScreen(v);
+  const m=MOTION[S.theme];
+  if(old){ if(dir===0){ old.remove(); }
+    else { busy=true; const oa=old.animate(m.outF(dir),{duration:m.dur,easing:m.ease,fill:'forwards'}); v.animate(m.inF(dir),{duration:m.dur,easing:m.ease});
+      if(m.flash){ const f=$('#flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); }
+      oa.onfinish=()=>{ old.remove(); busy=false; }; setTimeout(()=>{ if(old.isConnected) old.remove(); busy=false; }, m.dur+80); } }
+  updateSide();
+}
+function go(name){ if(busy||name===S.screen) return; S.stack.push(S.screen); snd('nav'); render(name, 1); }
+function back(){ if(busy) return; const p=S.stack.pop()||'home'; snd('nav'); render(p, -1); }
+function refresh(){ const v=$('#phone .view'); if(!v) return; const y=v.querySelector('.scroll')?.scrollTop; v.innerHTML=SCREENS[S.screen](); bindScreen(v); }
+function refreshSheet(){ const sh=$('#sheet'); if(sh){ sh.innerHTML='<i class="grab"></i>'+sheetBody(); bindScreen(sh); const g=$('#gen'); if(g) g.textContent=genLabel(); sh.animate([{transform:'translateY(14px)',opacity:.6},{transform:'none',opacity:1}],{duration:260,easing:MOTION[S.theme].ease}); } }
+
+function toast(msg, onTap){ const t=$('#toast'); t.innerHTML=ic('spark',18)+'<span>'+msg+'</span>'; t.classList.add('show'); t.onclick=()=>{ t.classList.remove('show'); onTap&&onTap(); }; clearTimeout(toast.t); toast.t=setTimeout(()=>t.classList.remove('show'), 3200); }
+function confetti(){ if(S.theme!=='d'&&S.theme!=='c') return; const c=document.createElement('div'); c.className='confetti'; const cols=['#FF7EB6','#FFE14D','#39D98A','#1F4BFF','#fff'];
+  for(let i=0;i<40;i++){ const p=document.createElement('i'); p.style.left=Math.random()*100+'%'; p.style.background=cols[i%5]; p.style.animationDelay=(Math.random()*.4)+'s'; p.style.borderRadius=S.theme==='c'?'50%':'2px'; if(S.theme==='c') p.style.border='0'; c.appendChild(p); }
+  $('#phone').appendChild(c); setTimeout(()=>c.remove(), 2000); }
+
+/* ---------------- Interactions ---------------- */
+function setSteps(n){ n=Math.max(4,Math.min(30,n)); if(n===S.steps) return; S.steps=n; snd('tick');
+  const v=$('#steps-v'); if(v){ v.textContent=n; v.animate([{transform:'scale(1.25)'},{transform:'scale(1)'}],{duration:180}); }
+  const rec=$('#steps-rec'); if(rec) rec.textContent = S.theme==='d'?(n===10?'RECOMMENDED':n>10?'TAKES LONGER':'TOO FEW?'):(n===10?'Recommended':n>10?'Rarely worth it':'Below tested range');
+  const k=$('#knob'); if(k) k.style.transform=`rotate(${(n-17)*10}deg)`;
+  const sl=document.querySelector('[data-slider="steps"]'); if(sl){ const p=(n-4)/26*100; sl.querySelector('i').style.width=p+'%'; sl.querySelector('b').style.left=p+'%'; }
+  document.querySelectorAll('.plate .ruler i').forEach((t,i)=>t.classList.toggle('on', i+4===n));
+  const g=$('#gen'); if(g) g.textContent=genLabel(); }
+function bindScreen(root){
+  root.querySelectorAll('[data-slider]').forEach(sl=>{
+    const min=+sl.dataset.min, max=+sl.dataset.max;
+    const upd=e=>{ const r=sl.getBoundingClientRect(); const x=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)); const val=Math.round(min+x*(max-min));
+      if(sl.dataset.slider==='steps') setSteps(val); else { if(+sl.dataset.val!==val){ sl.dataset.val=val; snd('tick'); } sl.querySelector('i').style.width=x*100+'%'; sl.querySelector('b').style.left=x*100+'%'; const o=$('#age-v'); if(o) o.textContent=val; } };
+    sl.style.touchAction='none';
+    sl.addEventListener('pointerdown',e=>{ sl.setPointerCapture(e.pointerId); upd(e); const mv=ev=>upd(ev); sl.addEventListener('pointermove',mv); sl.addEventListener('pointerup',()=>sl.removeEventListener('pointermove',mv),{once:true}); });
+  });
+  const knob=root.querySelector('#knob');
+  if(knob){ let start=null, startSteps=10;
+    knob.addEventListener('pointerdown',e=>{ knob.setPointerCapture(e.pointerId); const r=knob.getBoundingClientRect(); start={cx:r.left+r.width/2, cy:r.top+r.height/2, a:Math.atan2(e.clientY-(r.top+r.height/2), e.clientX-(r.left+r.width/2))}; startSteps=S.steps; });
+    knob.addEventListener('pointermove',e=>{ if(!start) return; let a=Math.atan2(e.clientY-start.cy, e.clientX-start.cx)-start.a; if(a>Math.PI) a-=2*Math.PI; if(a<-Math.PI) a+=2*Math.PI; setSteps(startSteps+Math.round(a*180/Math.PI/10)); });
+    knob.addEventListener('pointerup',()=>start=null);
+  }
+}
+function act(a, el){
+  const [k, ...rest] = a.split('-'); const v = rest.join('-');
+  if(a==='signin'){ snd('go'); S.stack=[]; render('home',1); return; }
+  if(a==='signout'){ S.stack=[]; render('welcome',-1); return; }
+  if(k==='tool'){ S.tool=v; document.querySelectorAll('.tool').forEach(t=>t.classList.toggle('on', t.dataset.act===a)); refreshSheet(); return; }
+  if(k==='engine'){ S.engine=v; refreshSheet(); return; }
+  if(a==='lip'){ S.lip=!S.lip; refreshSheet(); return; }
+  if(a==='audio'){ S.keepAudio=!S.keepAudio; refreshSheet(); return; }
+  if(k==='bg'){ S.bg=v; const c=document.querySelector('.canvas'); if(c){ c.animate([{filter:'blur(8px)',opacity:.6},{filter:'none',opacity:1}],{duration:420}); c.style.backgroundImage=`url(${IMG[v==='photo'?'vid_bath':'vid_living']})`; } refreshSheet(); return; }
+  if(k==='motion'){ S.motion=v; refreshSheet(); return; }
+  if(a==='steps-inc'){ setSteps(S.steps+1); return; } if(a==='steps-dec'){ setSteps(S.steps-1); return; }
+  if(k==='outfit'){ if(v==='next') S.outfit=(S.outfit+1)%OUTFITS.length; else if(v==='prev') S.outfit=(S.outfit+OUTFITS.length-1)%OUTFITS.length; else S.outfit=+v;
+    if(S.screen==='direct') refreshSheet(); else refresh(); return; }
+  if(k==='shot'){ S.shot=v; S.screen==='direct'?refreshSheet():refresh(); return; }
+  if(k==='light'){ S.light=v; refreshSheet(); return; }
+  if(k==='lens'){ S.lens=+v; refresh(); return; } if(k==='ap'){ S.aperture=v; refresh(); return; }
+  if(k==='use'){ S.use=v; refresh(); return; } if(k==='consent'){ S.consent=v||'tests'; if(v) refresh(); else toast('2 performers on file · tests only'); return; }
+  if(k==='niche'){ S.create.niche=v; refresh(); return; }
+  if(k==='skin'){ S.create.skin=+v; refresh(); return; }
+  if(a.startsWith('look|')){ const [,kk,vv]=a.split('|'); S.create.look[kk]=vv; refresh(); return; }
+  if(k==='gal'){ S.gallery=v; refresh(); return; }
+  if(k==='theme'){ setTheme(v); return; }
+  if(a==='sound'){ S.sound=!S.sound; store.set('sound',S.sound); refresh(); if(S.sound) snd('tap'); return; }
+  if(a==='portraits'){ el.classList.add('shimmer'); el.textContent='Generating portraits…'; snd('go'); setTimeout(()=>{ snd('done'); go('create3'); }, 1400); return; }
+  if(a==='upload'){ toast('Choose 6 separate images · not a character sheet'); return; }
+  if(a==='model-saved'){ snd('done'); confetti(); toast('Saved · add 3 more shots to unlock video'); S.stack=[]; render('home',1); return; }
+  if(a==='shoot'){ el.classList.add('shimmer'); el.textContent='Shooting…'; snd('go'); if(S.theme==='b'){ const f=$('#flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); }
+    setTimeout(()=>{ snd('done'); el.classList.remove('shimmer'); el.textContent='4 shots ready · view in Gallery'; }, 1600); return; }
+  if(a==='generate'){ startJob(el); return; }
+  if(k==='open'){ const j=[S.running,...S.jobs].find(x=>x&&x.id===v); if(!j) return; if(j.state!=='done'){ toast('Still rendering · step '+Math.ceil(j.p/10)+' of 10'); return; } S.open=j; go('result'); return; }
+  if(a==='approve'){ const j=S.open||S.jobs[0]; if(!S.final.includes(j.id)) S.final.push(j.id); snd('done'); confetti(); refresh(); toast('Moved to Final gallery'); return; }
+  if(a==='export'){ toast(S.consent==='post'?'Exported 1080×1920 · AI label on':'Test clip · performer consent is tests-only'); return; }
+  if(a==='topup'){ snd('go'); toast('Top-up demo · no payment taken'); return; }
+  if(a==='notify'){ toast(S.running?'Rendering · '+fmt(S.running.left)+' left':'No new notifications'); return; }
+  if(a==='play'){ const t=$('#trk'); if(t){ t.style.transition='width 2.5s linear'; t.style.width='100%'; setTimeout(()=>{ t.style.transition='none'; t.style.width='0%'; },2600); } return; }
+}
+function startJob(el){
+  if(S.running){ toast('One render at a time in this demo'); return; }
+  el.classList.add('shimmer'); el.textContent='Starting GPU…'; snd('go');
+  const total = S.engine==='viggle'? 95 : Math.round(S.steps*57.8); // seconds (measured on H100 + FA3)
+  S.running = { id:'j'+Date.now(), img:'vid_living', title:'Living-room dance', engine: S.engine==='viggle'?'Viggle β':`H3 · ${S.steps} steps`, p:0, state:'running', cost: S.engine==='viggle'?0.13:total/3600*3.99, total, left: total, tc:'' };
+  setTimeout(()=>{ el.classList.remove('shimmer'); go('queue'); }, 900);
+  const speed = 24, t0 = Date.now(); // demo runs 24x faster
+  clearInterval(startJob.iv);
+  startJob.iv = setInterval(()=>{ const r=S.running; if(!r) return clearInterval(startJob.iv);
+    const el = (Date.now()-t0)/1000*speed; r.left = Math.max(0, r.total-el); r.p = Math.min(100, el/r.total*100);
+    document.querySelectorAll(`[data-job="${r.id}"]`).forEach(b=>b.style.width=r.p+'%');
+    document.querySelectorAll(`[data-pct="${r.id}"]`).forEach(b=>b.textContent=Math.round(r.p)+'%');
+    document.querySelectorAll(`[data-tc="${r.id}"]`).forEach(b=>b.textContent=fmt(r.left));
+    const bt=$('#bigtime'); if(bt) bt.textContent=fmt(r.left);
+    if(S.screen==='queue' && S.theme==='c'){ const stages=[30,55,92,100]; stages.forEach((lim,i)=>{ const prev=i?stages[i-1]:0; const sp=Math.max(0,Math.min(100,(r.p-prev)/(lim-prev)*100)); const b=document.querySelector(`[data-stage="${i}"]`); if(b) b.style.width=sp+'%'; const tx=document.querySelector(`[data-stagep="${i}"]`); if(tx) tx.textContent=Math.round(sp)+'%'; }); }
+    if(r.p>=100){ clearInterval(startJob.iv); r.state='done'; r.tc=fmt(r.total); S.jobs.unshift(r); S.running=null; snd('done'); confetti();
+      toast('Render done · tap to watch', ()=>{ S.open=r; go('result'); }); if(S.screen==='queue') refresh(); }
+  }, 250);
+}
+function setTheme(t){ if(t===S.theme) return; S.theme=t; store.set('theme',t); const ph=$('#phone');
+  ph.animate([{filter:'blur(0)',opacity:1},{filter:'blur(6px)',opacity:.2}],{duration:180}).onfinish=()=>{ document.body.className='t-'+t; ph.className='phone t-'+t; refresh(); snd('theme'); ph.animate([{filter:'blur(6px)',opacity:.2},{filter:'blur(0)',opacity:1}],{duration:380,easing:'ease-out'}); confetti(); updateSide(); }; }
+
+document.addEventListener('pointerdown', e=>{ const p=e.target.closest('.press,.chip,.seg span,.tool,.tog,.thm,.sw'); if(p){ p.classList.add('pressed'); ac(); } });
+document.addEventListener('pointerup', ()=>document.querySelectorAll('.pressed').forEach(x=>x.classList.remove('pressed')));
+document.addEventListener('click', e=>{
+  const sp=e.target.closest('[data-side]'); if(sp){ const [k,v]=sp.dataset.side.split(':'); if(k==='theme') setTheme(v); if(k==='go'){ S.stack=[]; render(v,1);} if(k==='sound'){ S.sound=!S.sound; store.set('sound',S.sound); updateSide(); } return; }
+  if(!e.target.closest('#phone')) return;
+  const b=e.target.closest('[data-back]'); if(b){ back(); return; }
+  const a=e.target.closest('[data-act]'); if(a){ snd('tap'); act(a.dataset.act, a); return; }
+  const g=e.target.closest('[data-go]'); if(g){ snd('tap'); go(g.dataset.go); return; }
+});
+function updateSide(){ const s=$('#side'); if(!s) return; s.querySelectorAll('[data-side^="theme"]').forEach(b=>b.setAttribute('aria-pressed', b.dataset.side==='theme:'+S.theme)); const sb=s.querySelector('[data-side="sound"]'); if(sb) sb.setAttribute('aria-pressed', S.sound); }
+
+document.body.className='t-'+S.theme; $('#phone').className='phone t-'+S.theme;
+render('splash');
