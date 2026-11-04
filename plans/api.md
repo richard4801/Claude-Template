@@ -29,6 +29,10 @@ _Added 2026-11-04._ This is the contract between the apps and the backend. `serv
 | `image_engine_failed` | 502 | the image engine failed (the charge is refunded) |
 | `rate_limited` | 429 | too many sign-in or sign-up tries |
 | `template_hidden` | 403 | saving a template from a shot made with someone else's template |
+| `warm_not_allowed` | 403 | Keep GPU warm when the studio allows it for the owner only |
+| `owner_balance_low` | 402 | Keep GPU warm while the studio's RunPod balance is below `RUNPOD_MIN_BALANCE_USD` |
+| `no_gpu_free` / `no_gpu_available` | 409 / 503 | Keep GPU warm with every pod in use / no GPU free on RunPod |
+| `not_warm` | 409 | Keep warm (`extend`) while the warm GPU is off |
 
 ## Types
 
@@ -70,9 +74,23 @@ Platform   "tiktok"|"instagram"|"facebook"|"youtube"|"x"
 Account    { modelId, platform: Platform, handle, connectedAt, canPostDirect: boolean /* false until that platform approves MUSE */ }
 Post       { id, modelId, takeId, title, thumb: ImageRef, platforms: Platform[], caption, aiLabel: boolean, paidPartnership: boolean,
              when: "now"|ISO time, state: "scheduled"|"handoff"|"posted"|"failed", createdAt, postedAt?, stats?: { views, likes, comments } }
-ApiEvent   { type: "job"|"balance"|"model"|"outfit"|"lora"|"post"|"wallet", job?, balance?, model?, outfit?, lora?, post?, takes?: Take[],
-             wallet?: Wallet, notice?: { code: "owner_balance_low"|"owner_balance_ok", message } }
-             // balance and wallet events go only to the user they concern (and to owners, whose pool moved too).
+ApiEvent   { type: "job"|"balance"|"model"|"outfit"|"lora"|"post"|"wallet"|"gpu", job?, balance?, model?, outfit?, lora?, post?, takes?: Take[],
+             wallet?: Wallet, notice?: { code: "owner_balance_low"|"owner_balance_ok", message },
+             gpu?: WarmGpu, event?: "state"|"tick"|"warning" /* gpu events only */, warning?: WarmWarning }
+             // balance, wallet and gpu events go only to the user they concern (balance/wallet also to owners, whose pool moved too).
+WarmGpu    { state: "off"|"starting"|"warm"|"stopping",          // starting = the pod is booting (3–6 min); warm = ready, renders start at once
+             startedAt: number|null, readyAt: number|null,          // epoch ms; null when off
+             minutes: number /* whole minutes since startedAt */, costUsd: number /* "Warm GPU" charged so far, settled per minute */,
+             ratePerHour: number /* the pod's $/h, ~3.99 */, busy: boolean /* a render is running on it */,
+             autoOffAt: number|null /* the earliest idle or cap auto-off; null when off */, autoOffReason?: "idle"|"cap",
+             warningAt?: number /* autoOffAt − 5 min: when the warning fires */,
+             idleMinutes: number /* warmIdleMinutes */, maxMinutes: number /* the cap, including an extension */, canExtend: boolean,
+             allowed: boolean /* this user may switch it on (studio warmGpuAllowed) */,
+             lastOff?: { reason: WarmOffReason, at, minutes, costUsd }  /* state "off": how the last session ended (within the last hour) */ }
+WarmOffReason "user"|"idle"|"cap"|"credit"|"owner_balance"|"gpu_lost"
+WarmWarning { reason: "idle"|"cap", autoOffAt, message /* "Warm GPU turns off in 5 min (no renders)" */ }
+// Job also carries warm?: true when it ran on its user's warm GPU: its GPU time is covered by the "Warm GPU" line,
+// so its hold settles to $0 (or only the part that ran after the warm GPU went off).
 // Model also carries optional { personality, notes }.
 ConnectResponse { authUrl?: string /* real backend: open it for OAuth */, account?: Account /* mock: signed in already */ }
 
@@ -230,10 +248,35 @@ How a template shoot works (`POST /v1/shoots` with `templateId`):
 |---|---|
 | `GET /v1/settings/image-engine` | → `{provider: "simulated"\|"fal"\|"custom-http", model, url?, available: {simulated, fal, "custom-http"}}` |
 | `PATCH /v1/settings/image-engine` `{provider, model?, url?}` | → same. Per studio. `custom-http` is owner-only and needs an https URL. Shoots and outfit sets also take `imageEngine: {provider, model?}` to override it for one call. |
-| `GET /v1/settings/studio` | → `{maxGpus, overheadPayer: "user"\|"owner", capPerJob, capPerDay, capPerUserDay, tokenUsd, minRunpodBalance, lowBalance, features: {standard, fastBeta, lipSync, loraTraining, replaceAudio: false, outputSize: {width: 768, height: 1344}, maxClipSec}, gpu}` |
-| `PATCH /v1/settings/studio` `{maxGpus?, overheadPayer?, capPerJob?, capPerDay?, capPerUserDay?}` (owner) | → same |
+| `GET /v1/settings/studio` | → `{maxGpus, overheadPayer: "user"\|"owner", capPerJob, capPerDay, capPerUserDay, tokenUsd, minRunpodBalance, lowBalance, warmGpuAllowed: "owner"\|"everyone", warmIdleMinutes, warmMaxMinutes, features: {standard, fastBeta, lipSync, loraTraining, replaceAudio: false, outputSize: {width: 768, height: 1344}, maxClipSec}, gpu}` |
+| `PATCH /v1/settings/studio` `{maxGpus?, overheadPayer?, capPerJob?, capPerDay?, capPerUserDay?, warmGpuAllowed?, warmIdleMinutes? (5–120), warmMaxMinutes? (30–480)}` (owner) | → same |
 
 "Replace audio" isn't wired on the GPU yet: `keepAudio: false` gives a silent take, and `features.replaceAudio` is false.
+
+### Keep GPU warm (`plans/backend.md` "Keep GPU warm")
+A user can keep a dedicated H100 warm so renders start at once instead of after the 3–6 min cold start. One warm GPU per user. The pod's whole wall time (boot included) is charged to the user who switched it on, as a "Warm GPU" ledger line (`kind: "warm"`) settled every minute (the last partial minute pro rata). Their renders on it aren't charged GPU time again (`Job.warm`). While it's warm the pool's 3-minute idle shutdown doesn't apply to it; these auto-off rules do:
+
+| rule | default | |
+|---|---|---|
+| idle | `warmIdleMinutes` = 20 | no render on it for that long (counted from when it's ready or the last render ended) |
+| cap | `warmMaxMinutes` = 120 | from `startedAt`; **Keep warm** extends it once by the same amount |
+| credit | | the user's credit can't cover 10 more minutes |
+| owner balance | `RUNPOD_MIN_BALANCE_USD` | the studio's RunPod balance drops below it |
+
+A `warning` event goes out 5 minutes before an idle or cap auto-off. Off = the pod is terminated, or, when a render is still running on it or the user has renders waiting, it goes back to the normal pool (it stops 3 min after its last job, charged like any pod).
+
+| | |
+|---|---|
+| `GET /v1/gpu/warm` | → `WarmGpu` (mine) |
+| `POST /v1/gpu/warm` `{on: true}` | → `WarmGpu` (`starting`, or `warm` when it took over a ready pod). Takes the user's own pod if they have one, else an idle ready pod, else starts one. Idempotent while on. Errors: `warm_not_allowed` (403, the studio allows only the owner), `insufficient_tokens` / `insufficient_balance` (402, can't cover 10 minutes), `owner_balance_low` (402), `no_gpu_free` (409, all `maxGpus` pods are in use), `no_gpu_available` (503, RunPod has no H100/H200 right now). |
+| `POST /v1/gpu/warm` `{on: false}` | → `WarmGpu` (`off`, `lastOff.reason: "user"`). Fine when already off. |
+| `POST /v1/gpu/warm` `{extend: true}` | → `WarmGpu`. **Keep warm** (the warning's action): restarts the idle clock, and when the cap is the next auto-off (`autoOffReason: "cap"`) extends it once by `warmMaxMinutes` (`canExtend` turns false). `not_warm` (409) when off. |
+
+Live: `gpu` events (to that user only) carry the full `WarmGpu` and `event`: `state` on every change (`starting` → `warm` → `stopping` → `off`, with `lastOff` on off), `tick` after each minute is settled (the bar's minutes and cost), and `warning` with `warning: WarmWarning` 5 min before an idle or cap auto-off.
+
+Studio settings carry `warmGpuAllowed: "owner"|"everyone"` (default **everyone**), `warmIdleMinutes` (default 20) and `warmMaxMinutes` (default 120); the owner changes them with `PATCH /v1/settings/studio`.
+
+The apps: **nudge** when creating starts (a clip picked or uploaded in the video studio, or Generate opened) and the user has no warm GPU: "Warm up a GPU now so your render starts right away? About $4/hour from your credit while it's on, and it turns off by itself after 20 min without renders." [Warm up] [Not now]. A manual **Keep GPU warm** switch shows the same cost warning on every switch-on. While on: a bar on every screen, "GPU warm · 42 min · $2.80 so far · Turn off" ("GPU starting… · Turn off" while `starting`).
 
 ### Live events
 `GET /v1/events` is a `text/event-stream`. Each message is `data: <ApiEvent JSON>`. While a job runs, `job` events arrive about every 250 ms (`progress`, `step`, `phase`, `secondsLeft`). `lora` events carry training progress (about every 250 ms) and the `building` → `review` change. `post` events carry `handoff`/`posted` changes. When the job finishes, a `job` event arrives with `state: "done"` and its new `takes`, or with `state: "failed"`, `error` and `refunded`. Each failure is followed by a `balance` event. Clients reconnect with backoff. The Android app turns finished and failed jobs into local notifications. A real backend can add FCM push behind the same events.
