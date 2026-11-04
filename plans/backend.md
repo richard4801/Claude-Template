@@ -112,7 +112,9 @@ _Decided 2026-11-04: per-user token wallets, funded by the owner._
 ## Keep GPU warm (decided 2026-11-04)
 A manual switch for sessions where many renders happen back to back, so they start instantly instead of waiting the 3–6 min cold start.
 - **Where:** a "Keep GPU warm" switch in the video studio, and in the Mac title bar.
-  - The owner decides whether members may use it: studio setting `warmGpuAllowed: owner | everyone`, default owner.
+  - The owner decides whether members may use it: studio setting `warmGpuAllowed: owner | everyone`, **default everyone** (decided 2026-11-04 for the test phase).
+- **Nudge when creating starts:** when a user starts making something (uploads or picks a clip in the video studio, or opens Generate) and no warm GPU is running for them, MUSE shows a prompt: "Warm up a GPU now so your render starts right away? About $4/hour from your credit while it's on, and it turns off by itself after 20 min without renders." [Warm up] [Not now]. The nudge appears every time creating starts, never mid-flow.
+- **Manual switch:** users can also switch it on themselves at any time. **Every** switch-on shows the same cost warning to confirm. There is no "don't ask again".
 - **Effect:** starts (or claims) a dedicated H100 for the user who switched it on and keeps H3 loaded. That user's jobs go to it first.
 - **Notice:** while it's on, a persistent bar on every screen ("GPU warm · 42 min · $2.80 so far · Turn off"), plus an ongoing notification on Android and a menu-bar/title-bar indicator on the Mac.
 - **Billing:** the pod's whole wall time is charged to the user who turned it on (a "Warm GPU" ledger line, settled per minute). Their render jobs on it aren't charged twice.
