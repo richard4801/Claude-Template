@@ -74,12 +74,12 @@ struct MuseCommands: Commands {
             }
             .keyboardShortcut(.return)
             .disabled(!signedIn)
-            Button("More Steps") { store.setSteps(store.steps + 1) }.disabled(!signedIn || store.engine == .viggle)
-            Button("Fewer Steps") { store.setSteps(store.steps - 1) }.disabled(!signedIn || store.engine == .viggle)
+            Button("More Steps") { store.setSteps(store.steps + 1) }.disabled(!signedIn || !store.stepsActive)
+            Button("Fewer Steps") { store.setSteps(store.steps - 1) }.disabled(!signedIn || !store.stepsActive)
             Divider()
             Button("Run Queue") { store.runQueue() }.disabled(!signedIn || !store.jobs.contains(where: \.isQueued))
             Button(store.warmOn ? "Turn Off Warm GPU" : "Keep GPU Warm…") { store.setWarmSwitch(!store.warmOn) }
-                .disabled(!signedIn || !store.warmAvailable || store.warmBusy)
+                .disabled(!signedIn || !store.warmAvailable || store.warmBusy || (!store.warmOn && !store.isExactEdit))
             Button("Show Shoot Prompt") {
                 store.shootTab = .prompt
                 store.go(.shoot)

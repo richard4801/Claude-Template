@@ -78,8 +78,11 @@ struct SettingsView: View {
                         store.steps = store.defaultSteps
                     })
                 }
-                ListRow(title: "Default engine") {
-                    Seg([(Engine.h3, "Standard"), (Engine.viggle, "Fast · beta")], selection: $store.defaultEngine) { store.engine = $0 }.frame(width: 260)
+                ListRow(title: "Default quality") {
+                    Seg(VideoQuality.allCases.map { ($0, $0.label) }, selection: $store.defaultQuality) { store.setQuality($0) }.frame(width: 380)
+                }
+                ListRow(title: "Exact edit engine") {
+                    Seg([(Engine.h3, "Exact edit"), (Engine.viggle, "Fast · beta")], selection: $store.defaultEngine) { store.engine = $0 }.frame(width: 260)
                 }
                 ListRow(title: "Export size") { MonoValue("1080×1920 · 9:16") }
                 ListRow(title: "Keep test renders for", last: true) { MonoValue("30 days") }

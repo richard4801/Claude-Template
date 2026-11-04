@@ -118,6 +118,7 @@ public struct JobProgress: Equatable, Sendable {
 public enum JobClock {
     public static func progress(_ req: JobRequest, elapsed: Double) -> JobProgress {
         let spec = req.spec
+        if spec.isReplicate { return replicateProgress(spec, elapsed: elapsed) }
         let takes = max(1, spec.takes)
         let total = Pricing.totalSeconds(spec)
         let perTake = total / Double(takes)
@@ -148,6 +149,31 @@ public enum JobClock {
         return JobProgress(progress: min(100, max(0, e / total * 100)), take: take, step: step, totalSteps: totalSteps, phase: phase, secondsLeft: left)
     }
 
+    /// Replicate (plans/api.md "How a replicate job runs"): totalSteps = takes, step = takes finished;
+    /// "Preparing the clip", "Rendering on Replicate" ("take 2/3 · …"), "Finishing · exact length and audio".
+    static func replicateProgress(_ spec: RenderSpec, elapsed: Double) -> JobProgress {
+        let takes = max(1, spec.takes)
+        let total = Pricing.totalSeconds(spec)
+        let perTake = total / Double(takes)
+        let e = min(max(elapsed, 0), total)
+        let take = min(takes, Int(floor(e / perTake)) + 1)
+        let inTake = e - Double(take - 1) * perTake
+        let left = total - e
+        let prefix = takes > 1 ? "take \(take)/\(takes) · " : ""
+        let phase: String
+        if e >= total {
+            phase = "Done"
+        } else if take == 1 && inTake < perTake * 0.1 {
+            phase = "Preparing the clip"
+        } else if inTake > perTake * 0.9 {
+            phase = "\(prefix)Finishing · exact length and audio"
+        } else {
+            phase = "\(prefix)Rendering on Replicate · \(leftText(left))"
+        }
+        let step = e >= total ? takes : take - 1
+        return JobProgress(progress: min(100, max(0, e / total * 100)), take: take, step: step, totalSteps: takes, phase: phase, secondsLeft: left)
+    }
+
     /// "~6 min left" / "~40s left".
     public static func leftText(_ sec: Double) -> String {
         sec >= 60 ? "~\(Int(ceil(sec / 60))) min left" : "~\(Int(ceil(sec)))s left"
@@ -157,6 +183,7 @@ public enum JobClock {
     public static func failAt(_ req: JobRequest) -> Double {
         let spec = req.spec
         let perTake = Pricing.totalSeconds(spec) / Double(max(1, spec.takes))
+        if spec.isReplicate { return perTake * 0.5 }
         let viggle = spec.engine == .viggle
         let totalSteps = viggle ? 4 : spec.steps
         let startup = viggle ? 0 : Pricing.gpuStartupMin * 60

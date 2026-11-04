@@ -49,7 +49,8 @@ extension AppStore {
     /// Returns false when nothing was shown and the caller should carry on itself.
     @discardableResult
     func creatingStarted(then: (@MainActor () -> Void)? = nil) -> Bool {
-        guard canWarm, !warmGpu.isOn, warmPrompt == nil, !warmBusy else { return false }
+        // Only Exact edit uses our GPU: Draft / Standard / HD run on Replicate, so no nudge for them.
+        guard canWarm, isExactEdit, !warmGpu.isOn, warmPrompt == nil, !warmBusy else { return false }
         withAnimation(.easeOut(duration: 0.15)) { warmPrompt = WarmPrompt(kind: .nudge, then: then) }
         return true
     }

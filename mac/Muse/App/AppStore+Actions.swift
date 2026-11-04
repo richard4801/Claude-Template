@@ -61,6 +61,7 @@ extension AppStore {
     func resetStudio() {
         steps = defaultSteps
         engine = defaultEngine
+        quality = videoFeatures.isAvailable(defaultQuality) ? defaultQuality : videoFeatures.defaultOption
         takeCount = 1
         lipSync = false
         keepAudio = true
@@ -96,12 +97,21 @@ extension AppStore {
         }
         let cost = totalCost
         if warnOverBudget && cost > balance.perJobLimit {
-            showToast("This render costs \(Pricing.money(cost)), over your \(Pricing.money(balance.perJobLimit)) per-job cap. Lower the steps or takes.")
+            let fix = isExactEdit ? "Lower the steps or takes." : "Pick a lower quality or fewer takes."
+            showToast("This render costs \(Pricing.money(cost)), over your \(Pricing.money(balance.perJobLimit)) per-job cap. \(fix)")
             return
         }
-        let req = JobRequest(title: "\(m.shortName) · \(o.name)", modelId: m.id, outfitId: o.id, clipId: c.id, engine: engine.rawValue,
+        let title = "\(m.shortName) · \(o.name)"
+        let req: JobRequest
+        if quality.isReplicate {
+            // Draft / Standard / HD: the whole clip, no steps, lip sync or background photo.
+            req = JobRequest.replicate(title: title, modelId: m.id, outfitId: o.id, clipId: c.id, quality: quality, takes: takeCount, keepAudio: keepAudio,
+                                       clipSeconds: c.durationSec)
+        } else {
+            req = JobRequest(title: title, modelId: m.id, outfitId: o.id, clipId: c.id, engine: engine.rawValue,
                              steps: engine == .viggle ? 4 : steps, use: use.rawValue, takes: takeCount, keepAudio: keepAudio, lipSync: lipSync,
                              background: background, backgroundMotion: motion, clipSeconds: c.durationSec)
+        }
         let n = takeCount
         // Creating starts: offer a warm GPU first (every time, when none is running), then render whatever the answer.
         if creatingStarted(then: { [weak self] in self?.submit(req, cost: cost, takes: n) }) { return }
@@ -130,7 +140,8 @@ extension AppStore {
     func loadIntoStudio(_ j: Job) {
         modelId = j.modelId
         outfitIdByModel[j.modelId] = j.outfitId
-        engine = j.engine
+        quality = j.videoQuality
+        if j.engine != .replicate { engine = j.engine }
         steps = Pricing.clampSteps(j.request.steps)
         use = ClipUse(id: j.request.use)
         takeCount = Pricing.clampTakes(j.request.takes)
@@ -811,7 +822,7 @@ extension AppStore {
         ]
         if warmAvailable && warmOn {
             all.append(PaletteCommand(title: "Turn off the warm GPU", icon: "flame", shortcut: "") { [weak self] in self?.turnOffWarm() })
-        } else if warmAvailable {
+        } else if warmAvailable && isExactEdit {
             all.append(PaletteCommand(title: "Keep GPU warm…", icon: "flame", shortcut: "") { [weak self] in self?.setWarmSwitch(true) })
         }
         if isOwner {

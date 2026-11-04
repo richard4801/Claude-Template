@@ -29,7 +29,7 @@ public actor FakeMuseAPI: MuseAPI {
     private var signedIn: User?
     private var members: [Member] = FakeMuseAPI.demoMembers()
     private var engine = ImageEngine(provider: "simulated", model: "bundled-stills", available: ["simulated": true, "fal": false, "custom-http": true])
-    private var studio = StudioSettings()
+    private var studio = StudioSettings(features: StudioFeatures(replicate: true, video: .fallback))
     /// Templates with their layers (the "server side"). Only the owner's ever leave the actor with layers.
     private var templates: [MuseTemplate]
     private var favourites: Set<String> = []
@@ -573,8 +573,19 @@ public actor FakeMuseAPI: MuseAPI {
 
     public func createJob(_ req: JobRequest) throws -> Job {
         if let clip = clips[req.clipId], !clip.ok { throw ApiError("clip_failed_checks", "Fix the clip first: one person, no watermark, 15s or less") }
-        let spec = req.spec
+        var req = req
+        if req.engine == Engine.replicate.rawValue {
+            // Replicate always renders the whole clip and stores "full".
+            req.use = ClipUse.full.rawValue
+            if req.quality == nil { req.quality = VideoQuality.standard.rawValue }
+        }
+        let spec = req.spec(pricePerSec: (studio.features.video ?? .fallback).pricePerSec(req.videoQuality))
         if spec.engine == .h3 && (spec.steps < Pricing.stepsMin || spec.steps > Pricing.stepsMax) { throw ApiError("bad_request", "Steps must be 4–30") }
+        if spec.isReplicate {
+            if req.lipSync { throw ApiError("bad_request", "Lip sync is Exact edit only") }
+            if req.background == "photo" { throw ApiError("bad_request", "A new background photo is Exact edit only") }
+            if let q = req.quality, !["draft", "standard", "hd"].contains(q) { throw ApiError("bad_request", "quality must be draft, standard or hd") }
+        }
         if spec.takes < 1 || spec.takes > Pricing.takesMax { throw ApiError("bad_request", "Takes must be 1–4") }
         let cost = Pricing.totalCost(spec)
         if cost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough balance for this render") }
@@ -589,9 +600,10 @@ public actor FakeMuseAPI: MuseAPI {
                                                          keepAudio: req.keepAudio, spec: spec))
         charge(cost)
         let p = JobClock.progress(req, elapsed: 0)
-        let j = Job(id: "j_" + shortId(), title: req.title, modelId: m.id, modelName: m.name, outfitId: req.outfitId, request: req, state: "queued",
+        var j = Job(id: "j_" + shortId(), title: req.title, modelId: m.id, modelName: m.name, outfitId: req.outfitId, request: req, state: "queued",
                     totalSteps: p.totalSteps, phase: "Queued", secondsLeft: p.secondsLeft, totalSeconds: Pricing.totalSeconds(spec), cost: cost,
                     createdAt: nowMs(), prompt: prompt, seed: seed, thumb: o?.front ?? m.cover)
+        j.engineText = Job.engineLabel(for: req)
         jobs.append(j)
         hub.emit(ApiEvent(type: "balance", balance: bal))
         hub.emit(ApiEvent(type: "job", job: j))
@@ -627,8 +639,8 @@ public actor FakeMuseAPI: MuseAPI {
         let failThis = failNext
         failNext = false
         runningId = id
-        // On the user's warm GPU: its GPU time is covered by the "Warm GPU" line.
-        if warm.isOn { jobs[i].warm = true }
+        // On the user's warm GPU: its GPU time is covered by the "Warm GPU" line. Replicate jobs never use our GPU.
+        if warm.isOn && next.engine != .replicate { jobs[i].warm = true }
         runner = Task { await self.drive(id, fail: failThis) }
     }
 
@@ -646,9 +658,15 @@ public actor FakeMuseAPI: MuseAPI {
                 jobs[i].state = "failed"
                 jobs[i].progress = p.progress
                 jobs[i].step = p.step
-                jobs[i].phase = "Failed at step \(p.step)"
                 jobs[i].refunded = cur.cost
-                jobs[i].error = "The GPU disconnected at step \(p.step)."
+                if cur.engine == .replicate {
+                    jobs[i].phase = "Failed"
+                    jobs[i].errorCode = "provider_refused"
+                    jobs[i].error = "Replicate's safety filter refused this clip"
+                } else {
+                    jobs[i].phase = "Failed at step \(p.step)"
+                    jobs[i].error = "The GPU disconnected at step \(p.step)."
+                }
                 jobs[i].finishedAt = nowMs()
                 refund(cur.cost)
                 hub.emit(ApiEvent(type: "job", job: jobs[i]))
@@ -662,6 +680,7 @@ public actor FakeMuseAPI: MuseAPI {
                 jobs[i].phase = "Done"
                 jobs[i].secondsLeft = 0
                 jobs[i].finishedAt = nowMs()
+                if cur.engine == .replicate { jobs[i].billedSeconds = Double(cur.request.spec.replicateSeconds * max(1, cur.request.takes)) }
                 if jobs[i].warm == true {
                     // Settles to $0: the warm GPU's wall time already paid for it.
                     refund(cur.cost)
@@ -695,7 +714,7 @@ public actor FakeMuseAPI: MuseAPI {
         let o = outfits.first { $0.id == j.outfitId }
         let pool = (o?.angles.compactMap { $0 } ?? [])
         let n = max(1, j.request.takes)
-        let label = j.engine == .viggle ? "Fast" : "\(j.request.steps) steps"
+        let label = j.engine == .viggle ? "Fast" : j.engine == .replicate ? j.videoQuality.label : "\(j.request.steps) steps"
         return (1...n).map { k in
             let thumb = pool.isEmpty ? (j.thumb ?? .asset("g_front")) : pool[(k - 1) % pool.count]
             return Take(id: "t_\(j.id)_\(k)", jobId: j.id, index: k, of: n, title: j.title, label: label, engineLabel: j.engineLabel,

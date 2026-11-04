@@ -358,11 +358,14 @@ public struct JobRequest: Codable, Hashable, Sendable {
     public var clipSeconds: Double?
     /// true parks the job as `queued` (not charged) until POST /v1/queue/run. nil/false starts it at once.
     public var queue: Bool?
+    /// engine "replicate" only: draft | standard | hd (left out of the JSON otherwise).
+    public var quality: String?
 
     public init(title: String, modelId: String, outfitId: String, clipId: String, engine: String = Engine.h3.rawValue, steps: Int = 10,
                 use: String = ClipUse.first.rawValue, takes: Int = 1, keepAudio: Bool = true, lipSync: Bool = false,
-                background: String = "keep", backgroundMotion: String = "subtle", clipSeconds: Double? = nil, queue: Bool? = nil) {
+                background: String = "keep", backgroundMotion: String = "subtle", clipSeconds: Double? = nil, queue: Bool? = nil, quality: String? = nil) {
         self.queue = queue
+        self.quality = quality
         self.title = title
         self.modelId = modelId
         self.outfitId = outfitId
@@ -378,7 +381,7 @@ public struct JobRequest: Codable, Hashable, Sendable {
         self.clipSeconds = clipSeconds
     }
 
-    enum CodingKeys: String, CodingKey { case title, modelId, outfitId, clipId, engine, steps, use, takes, keepAudio, lipSync, background, backgroundMotion, clipSeconds, queue }
+    enum CodingKeys: String, CodingKey { case title, modelId, outfitId, clipId, engine, steps, use, takes, keepAudio, lipSync, background, backgroundMotion, clipSeconds, queue, quality }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         title = c.v(.title, "")
@@ -395,11 +398,26 @@ public struct JobRequest: Codable, Hashable, Sendable {
         backgroundMotion = c.v(.backgroundMotion, "subtle")
         clipSeconds = c.o(.clipSeconds)
         queue = c.o(.queue)
+        quality = c.o(.quality)
     }
 
-    public var spec: RenderSpec {
-        RenderSpec(engine: Engine(id: engine), use: ClipUse(id: use), steps: steps, lipSync: lipSync, takes: takes, clipSeconds: clipSeconds)
+    /// A Draft / Standard / HD request: `{engine: "replicate", quality}`, always the whole clip, no lip sync or background photo.
+    public static func replicate(title: String, modelId: String, outfitId: String, clipId: String, quality: VideoQuality, takes: Int = 1, keepAudio: Bool = true,
+                                 clipSeconds: Double? = nil) -> JobRequest {
+        JobRequest(title: title, modelId: modelId, outfitId: outfitId, clipId: clipId, engine: Engine.replicate.rawValue, steps: Pricing.stepsDefault,
+                   use: ClipUse.full.rawValue, takes: takes, keepAudio: keepAudio, lipSync: false, background: "keep", clipSeconds: clipSeconds,
+                   quality: quality.replicateOrStandard.rawValue)
     }
+
+    public var videoQuality: VideoQuality { VideoQuality.of(engine: Engine(id: engine), quality: quality) }
+
+    /// `pricePerSec`: the server's price for a replicate quality (nil = the contract default).
+    public func spec(pricePerSec: Double? = nil) -> RenderSpec {
+        RenderSpec(engine: Engine(id: engine), use: ClipUse(id: use), steps: steps, lipSync: lipSync, takes: takes, clipSeconds: clipSeconds,
+                   quality: videoQuality, pricePerSec: pricePerSec)
+    }
+
+    public var spec: RenderSpec { spec() }
 }
 
 /// A render job. state: queued | running | done | failed. progress 0…100; step/totalSteps are per take;
@@ -438,6 +456,12 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
     public var userId: String?
     /// It ran on its user's warm GPU: its GPU time is covered by the "Warm GPU" line, so it settles to $0.
     public var warm: Bool?
+    /// The server's `engineLabel` ("Standard · 768P", "Exact edit · 10 steps"…). nil on older servers: `engineLabel` builds it.
+    public var engineText: String?
+    /// Failed replicate jobs: provider_refused | provider_failed | provider_rate_limited | provider_timeout.
+    public var errorCode: String?
+    /// Replicate, done: output seconds Replicate billed, summed over takes.
+    public var billedSeconds: Double?
 
     public init(id: String, title: String, modelId: String, modelName: String, outfitId: String, request: JobRequest, state: String, progress: Double = 0,
                 take: Int = 1, step: Int = 0, totalSteps: Int = 10, phase: String = "", secondsLeft: Double = 0, totalSeconds: Double = 0, cost: Double = 0,
@@ -468,7 +492,8 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, modelId, modelName, outfitId, request, state, progress, take, step, totalSteps, phase, secondsLeft, totalSeconds, cost, refunded, error,
-             createdAt, finishedAt, prompt, seed, thumb, queuePosition, etaSeconds, blocked, warmupCost, userId, warm
+             createdAt, finishedAt, prompt, seed, thumb, queuePosition, etaSeconds, blocked, warmupCost, userId, warm, errorCode, billedSeconds
+        case engineText = "engineLabel"
     }
 
     public init(from d: Decoder) throws {
@@ -501,10 +526,13 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
         warmupCost = c.o(.warmupCost)
         userId = c.o(.userId)
         warm = c.o(.warm)
+        engineText = c.o(.engineText)
+        errorCode = c.o(.errorCode)
+        billedSeconds = c.o(.billedSeconds)
     }
 
-    /// Paused until the owner tops up RunPod.
-    public var isPaused: Bool { blocked == "owner_balance_low" }
+    /// Paused until the owner tops up RunPod. Replicate jobs never are (they don't use our GPU).
+    public var isPaused: Bool { blocked == "owner_balance_low" && engine != .replicate }
     /// Running on the server but still waiting for a GPU.
     public var isWaiting: Bool { isActive && step == 0 && (queuePosition != nil || isPaused) }
     /// "#2 in line · ~4 min" while waiting for a GPU, or the paused line.
@@ -512,16 +540,57 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
         if isPaused { return Job.pausedLine }
         guard isActive, let pos = queuePosition else { return nil }
         let eta = etaSeconds.map { " · done in \(Job.duration($0))" } ?? ""
+        if engine == .replicate { return pos <= 1 ? "Next for Replicate\(eta)" : "#\(pos) in the Replicate line\(eta)" }
         return pos <= 1 ? "Next for a GPU\(eta)" : "#\(pos) in line\(eta)"
     }
     public static let pausedLine = "Paused: the studio's GPU credit is low"
     public static func duration(_ s: Double) -> String { s >= 60 ? "~\(Int((s / 60).rounded(.up))) min" : "~\(Int(s.rounded(.up)))s" }
 
     public var engine: Engine { Engine(id: request.engine) }
-    /// "Standard" / "Fast · beta".
-    public var engineName: String { engine.label }
-    /// "Standard · 10 steps" / "Fast · beta".
-    public var engineLabel: String { engine == .viggle ? "Fast · beta" : "Standard · \(request.steps) steps" }
+    /// The Quality picker option it was made with.
+    public var videoQuality: VideoQuality { request.videoQuality }
+    /// "Standard" / "HD" / "Exact edit" / "Fast · beta".
+    public var engineName: String { engine == .viggle ? Engine.viggle.label : videoQuality.label }
+    /// The server's label, or the same built here: "Standard · 768P", "HD · 2K", "Exact edit · 10 steps", "Fast · beta".
+    public var engineLabel: String {
+        if let t = engineText, !t.isEmpty { return t }
+        return Job.engineLabel(for: request)
+    }
+    public static func engineLabel(for r: JobRequest) -> String {
+        switch Engine(id: r.engine) {
+        case .viggle: return "Fast · beta"
+        case .h3: return "Exact edit · \(r.steps) steps"
+        case .replicate:
+            let q = r.videoQuality
+            return "\(q.label) · \(q.resolution ?? "768P")"
+        }
+    }
+
+    /// What to show for a failed job: the server's message as-is, with a next step for the provider codes.
+    public var failureLine: String {
+        let base = (error?.isEmpty == false ? error! : nil) ?? Job.defaultFailure(errorCode)
+        guard let hint = Job.failureHint(errorCode) else { return base }
+        return base.hasSuffix(".") ? "\(base) \(hint)" : "\(base). \(hint)"
+    }
+    static func defaultFailure(_ code: String?) -> String {
+        switch code {
+        case "provider_refused": return "Replicate's safety filter refused this clip."
+        case "provider_rate_limited": return "Replicate was rate-limited for too long."
+        case "provider_timeout": return "Replicate didn't finish in time."
+        case "provider_failed": return "Replicate couldn't render this clip."
+        default: return "The render stopped."
+        }
+    }
+    public static func failureHint(_ code: String?) -> String? {
+        switch code {
+        case "provider_refused": return "Try another clip or outfit, or Exact edit."
+        case "provider_rate_limited": return "Replicate stayed busy. Try again in a few minutes."
+        case "provider_timeout": return "Replicate took too long, so it was stopped. Try again."
+        default: return nil
+        }
+    }
+    /// Refused by the provider's safety filter.
+    public var isRefused: Bool { errorCode == "provider_refused" }
     public var isActive: Bool { state == "running" || state == "queued" }
     public var isRunning: Bool { state == "running" }
     public var isQueued: Bool { state == "queued" }

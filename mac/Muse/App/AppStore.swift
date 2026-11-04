@@ -133,7 +133,10 @@ final class AppStore {
     var themeID: ThemeID { didSet { defaults.set(themeID.rawValue, forKey: "muse.theme") } }
     var pro: Bool { didSet { defaults.set(pro, forKey: "muse.pro") } }
     var defaultSteps: Int { didSet { defaults.set(defaultSteps, forKey: "muse.defaultSteps") } }
+    /// Exact edit's engine: H3 on our GPU, or Fast · beta.
     var defaultEngine: Engine { didSet { defaults.set(defaultEngine.rawValue, forKey: "muse.defaultEngine") } }
+    /// The Quality picker's default (Standard). Until the user picks one, the server's `features.video` default applies.
+    var defaultQuality: VideoQuality { didSet { defaults.set(defaultQuality.rawValue, forKey: "muse.defaultQuality") } }
     var houseStyle: String { didSet { defaults.set(houseStyle, forKey: "muse.houseStyle") } }
     var notifyDone: Bool { didSet { defaults.set(notifyDone, forKey: "muse.notifyDone") } }
     var notifyFailed: Bool { didSet { defaults.set(notifyFailed, forKey: "muse.notifyFailed") } }
@@ -223,7 +226,12 @@ final class AppStore {
     var clipFile: URL?
     var clipThumb: ImageRef?
     var steps: Int
+    /// Exact edit's engine (h3 or viggle). Draft / Standard / HD send `engine: "replicate"`.
     var engine: Engine
+    /// Draft / Standard / HD (Replicate) or Exact edit.
+    var quality: VideoQuality
+    /// The server's default quality is applied once per launch (until the user sets a default in Settings).
+    @ObservationIgnored var appliedServerQuality = false
     var use: ClipUse = .first
     var takeCount = 1
     var keepAudio = true
@@ -309,7 +317,9 @@ final class AppStore {
         d.removeObject(forKey: "muse.sound") // the old interface-sound preference; MUSE no longer plays UI sounds
         let ds = d.object(forKey: "muse.defaultSteps") as? Int ?? Pricing.stepsDefault
         defaultSteps = Pricing.clampSteps(ds)
-        defaultEngine = Engine(id: d.string(forKey: "muse.defaultEngine") ?? "h3")
+        let savedEngine = Engine(id: d.string(forKey: "muse.defaultEngine") ?? "h3")
+        defaultEngine = savedEngine == .replicate ? .h3 : savedEngine
+        defaultQuality = VideoQuality(id: d.string(forKey: "muse.defaultQuality"))
         houseStyle = d.string(forKey: "muse.houseStyle") ?? PromptEngine.houseStyle
         notifyDone = d.object(forKey: "muse.notifyDone") as? Bool ?? true
         notifyFailed = d.object(forKey: "muse.notifyFailed") as? Bool ?? true
@@ -322,7 +332,8 @@ final class AppStore {
         neverOverrides = d.dictionary(forKey: "muse.never") as? [String: [String]] ?? [:]
         rememberMe = d.object(forKey: "muse.rememberMe") as? Bool ?? true
         steps = Pricing.clampSteps(ds)
-        engine = Engine(id: d.string(forKey: "muse.defaultEngine") ?? "h3")
+        engine = savedEngine == .replicate ? .h3 : savedEngine
+        quality = VideoQuality(id: d.string(forKey: "muse.defaultQuality"))
         let store = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("MUSE/uploads")
         fake = FakeMuseAPI(storeDir: store)
         api = fake
@@ -400,6 +411,7 @@ final class AppStore {
         wallet = nil
         members = []
         studioSettings = nil
+        appliedServerQuality = false
         imageEngine = nil
         offlineMessage = nil
         resetWarm()
@@ -453,9 +465,11 @@ final class AppStore {
     func loadStudio() async {
         let api = self.api
         wallet = try? await api.wallet()
+        // Everyone reads the studio settings: `features.video` drives the Quality picker and its prices.
+        studioSettings = try? await api.studioSettings()
+        syncQualityWithServer()
         guard isOwner else { return }
         if let m = try? await api.listMembers() { members = m }
-        studioSettings = try? await api.studioSettings()
         imageEngine = try? await api.imageEngine()
     }
 
@@ -538,7 +552,7 @@ final class AppStore {
     private func jobFailed(_ j: Job) {
         showToast("Render failed · \(j.title). \(Pricing.money(j.refunded)) refunded.", action: "Open queue") { [weak self] in self?.go(.queue) }
         if notifyFailed {
-            Notifier.shared.post(title: "Render failed · \(j.title)", body: "\(j.error ?? "The render stopped.") \(Pricing.money(j.refunded)) refunded.")
+            Notifier.shared.post(title: "Render failed · \(j.title)", body: "\(j.failureLine) \(Pricing.money(j.refunded)) refunded.")
         }
     }
 
@@ -664,6 +678,7 @@ final class AppStore {
         wallet = nil
         members = []
         studioSettings = nil
+        appliedServerQuality = false
         imageEngine = nil
         lastInvite = nil
         templates = []
@@ -738,8 +753,40 @@ final class AppStore {
         return id
     }
 
-    var spec: RenderSpec {
-        RenderSpec(engine: engine, use: use, steps: steps, lipSync: lipSync, takes: takeCount, clipSeconds: clip?.durationSec)
+    var spec: RenderSpec { spec(for: quality) }
+
+    /// The price and labels for one Quality option with the current clip and takes.
+    func spec(for q: VideoQuality) -> RenderSpec {
+        if q.isReplicate {
+            return RenderSpec.replicate(q, clipSeconds: clip?.durationSec, takes: takeCount, pricePerSec: videoFeatures.pricePerSec(q))
+        }
+        return RenderSpec(engine: engine, use: use, steps: steps, lipSync: lipSync, takes: takeCount, clipSeconds: clip?.durationSec)
+    }
+
+    /// `features.video` from the server, or the contract's table.
+    var videoFeatures: VideoFeatures { studioSettings?.features.video ?? .fallback }
+    /// Exact edit is picked: steps, First 5.2s / Full, lip sync, background photo and Keep GPU warm apply.
+    var isExactEdit: Bool { quality == .exact }
+    /// The steps control (and ← →) works: Exact edit on H3.
+    var stepsActive: Bool { isExactEdit && engine == .h3 }
+
+    /// After reading the studio settings: the server's default until the user picks one, and never an option that's switched off.
+    func syncQualityWithServer() {
+        let f = videoFeatures
+        if !appliedServerQuality, studioSettings != nil {
+            appliedServerQuality = true
+            if defaults.string(forKey: "muse.defaultQuality") == nil { quality = f.defaultOption }
+        }
+        if !f.isAvailable(quality), let first = f.ordered.first(where: \.available) { quality = first.videoQuality }
+    }
+
+    func setQuality(_ q: VideoQuality) {
+        guard q != quality else { return }
+        guard videoFeatures.isAvailable(q) else {
+            showToast("\(q.label) isn't available on this server right now")
+            return
+        }
+        quality = q
     }
 
     var totalCost: Double { Pricing.totalCost(spec) }

@@ -93,7 +93,7 @@ struct HomeView: View {
                         HStack(alignment: .center, spacing: 18) {
                             Media(ref: r.thumb).frame(width: 150)
                             VStack(alignment: .leading, spacing: 12) {
-                                Lbl("\(r.isRunning ? "Rendering" : "Queued") · \(r.engineName)\(r.engine == .h3 ? " · \(r.request.steps) steps" : "")")
+                                Lbl("\(r.isRunning ? "Rendering" : "Queued") · \(r.engineLabel)")
                                 Text(r.title).font(t.h2).foregroundStyle(t.ink)
                                 ProgressLine(value: r.progress / 100)
                                 Text(r.isRunning ? r.phase : "Starts when you press Run queue").font(t.mono(12)).foregroundStyle(t.muted)

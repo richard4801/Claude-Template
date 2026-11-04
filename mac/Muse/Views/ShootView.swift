@@ -81,6 +81,10 @@ struct ShootCanvas: View {
                     }
                 }
                 if store.shootState == .done {
+                    // The image engine that made them ("FLUX.2 [pro] · Replicate"); empty for the built-in one.
+                    if let engine = store.lastShots.first?.engineLabel, !engine.isEmpty {
+                        Muted("Made with \(engine)")
+                    }
                     HStack(spacing: 10) {
                         MButton("View in Gallery", icon: "square.grid.2x2", kind: .primary) {
                             store.galleryTab = .tests

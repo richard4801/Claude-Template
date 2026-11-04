@@ -182,7 +182,7 @@ struct TitleBar: View {
                     .buttonStyle(.plain)
                     .help(r.waitLine ?? r.phase)
                 }
-                if store.warmAvailable { WarmTitleControl() }
+                if store.warmAvailable && (store.isExactEdit || store.warmOn) { WarmTitleControl() }
                 ThemeDots()
                 Menu {
                     Text(store.user?.studioName ?? "Studio")

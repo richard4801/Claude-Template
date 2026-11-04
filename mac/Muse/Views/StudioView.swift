@@ -45,7 +45,7 @@ struct SourceColumn: View {
                     Spacer()
                     MoreMenu {
                         Button(store.showPrompt ? "Hide prompt" : "Show prompt") { store.showPrompt.toggle() }
-                        Button("Save as preset") { store.showToast("Saved as preset \"\(store.engine == .viggle ? "Fast" : "Dance") · \(store.steps) steps\"") }
+                        Button("Save as preset") { store.showToast("Saved as preset \"\(store.isExactEdit ? (store.engine == .viggle ? "Fast" : "Dance · \(store.steps) steps") : "Dance · \(store.quality.label)")\"") }
                         Button("Reset settings") { store.resetStudio() }
                         Button("Change clip…") { store.pickClip() }
                     }
@@ -161,8 +161,13 @@ struct Timeline: View {
             HStack {
                 Lbl("Use")
                 Spacer()
-                Seg([(ClipUse.first, RenderSpec.useLabel(.first, clipSeconds: dur)), (ClipUse.full, RenderSpec.useLabel(.full, clipSeconds: dur))], selection: $store.use)
-                    .frame(width: 420)
+                if store.isExactEdit {
+                    Seg([(ClipUse.first, RenderSpec.useLabel(.first, clipSeconds: dur)), (ClipUse.full, RenderSpec.useLabel(.full, clipSeconds: dur))], selection: $store.use)
+                        .frame(width: 420)
+                } else {
+                    // Draft / Standard / HD always render the whole clip.
+                    Text("Whole clip · \(Pricing.trimNum(len))s").font(t.mono(12.5)).foregroundStyle(t.ink)
+                }
             }
             GeometryReader { g in
                 ZStack(alignment: .leading) {
@@ -186,7 +191,7 @@ struct Timeline: View {
                     if s != scale(dur).last { Spacer() }
                 }
             }
-            if dur > Pricing.maxClipSec && store.use == .full {
+            if dur > Pricing.maxClipSec && (store.use == .full || !store.isExactEdit) {
                 Muted("H3 renders up to 15s in one pass, so the full option uses the first 15s.")
             }
         }
@@ -227,22 +232,33 @@ struct StudioInspector: View {
                         }
                         Muted("Never add: \(store.neverList(store.currentModel).joined(separator: ", ")). Removed automatically.")
                     }
-                    Field("Engine") {
-                        Seg([(Engine.h3, "Standard"), (Engine.viggle, "Fast · beta")], selection: $store.engine)
+                    QualityPicker()
+                    if store.isExactEdit {
+                        if store.studioSettings?.features.fastBeta ?? true {
+                            Field("Engine") {
+                                Seg([(Engine.h3, "Exact edit"), (Engine.viggle, "Fast · beta")], selection: $store.engine)
+                            }
+                        }
+                        StepsControl()
                     }
-                    StepsControl()
                     OptionRow(title: "Takes", hint: "Different seeds, compared side by side") {
                         NumStepper(value: store.takeCount, dec: { store.setTakes(store.takeCount - 1) }, inc: { store.setTakes(store.takeCount + 1) })
                     }
-                    Field("Background") {
-                        Seg([("keep", "Keep the room"), ("photo", "New photo")], selection: $store.background)
-                        if store.background == "photo" {
-                            Seg([("still", "Still"), ("subtle", "Subtly alive"), ("busy", "Busy")], selection: $store.motion)
-                            Muted("Vertical photo, same camera height, similar light.")
+                    if store.isExactEdit {
+                        Field("Background") {
+                            Seg([("keep", "Keep the room"), ("photo", "New photo")], selection: $store.background)
+                            if store.background == "photo" {
+                                Seg([("still", "Still"), ("subtle", "Subtly alive"), ("busy", "Busy")], selection: $store.motion)
+                                Muted("Vertical photo, same camera height, similar light.")
+                            }
                         }
                     }
-                    OptionRow(title: "Keep the clip's audio", hint: "Off = upload a new track") { MToggle(isOn: $store.keepAudio) }
-                    OptionRow(title: "Lip sync", hint: "Only when the performer talks or sings · +4 min") { MToggle(isOn: $store.lipSync) }
+                    OptionRow(title: "Keep the clip's audio", hint: store.isExactEdit ? "Off = upload a new track" : "Off = a silent take") { MToggle(isOn: $store.keepAudio) }
+                    if store.isExactEdit {
+                        OptionRow(title: "Lip sync", hint: "Only when the performer talks or sings · +4 min") { MToggle(isOn: $store.lipSync) }
+                    } else {
+                        Muted("Keeps the room and the clip's exact length. Lip sync and a new background photo need Exact edit.")
+                    }
                     if !store.pro {
                         LinkText("\(store.showPrompt ? "Hide" : "Show") the prompt") { store.showPrompt.toggle() }
                     }
@@ -395,9 +411,14 @@ struct InspectorFooter: View {
         let total = store.totalCost
         let blocked = store.generateBlocked
         VStack(spacing: 10) {
-            if store.warmAvailable { WarmStudioRow().padding(.bottom, 2) }
+            // Keep GPU warm is for Exact edit only (Draft / Standard / HD run on Replicate, not our GPU).
+            if store.warmAvailable && (store.isExactEdit || store.warmOn) { WarmStudioRow().padding(.bottom, 2) }
             HStack(spacing: 8) {
-                est("Time", Pricing.fmtMin(Pricing.totalMin(spec)))
+                if spec.isReplicate {
+                    est("Length", "\(spec.replicateSeconds) s")
+                } else {
+                    est("Time", Pricing.fmtMin(Pricing.totalMin(spec)))
+                }
                 est("Cost", Pricing.money(total))
                 est("After", Pricing.money(max(0, store.creditUsd - total)))
             }
@@ -409,7 +430,8 @@ struct InspectorFooter: View {
                         .onTapGesture { store.go(.credits) }
                 }
             }
-            if store.studioSettings?.lowBalance == true || store.jobs.contains(where: \.isPaused) {
+            // A low RunPod balance pauses Exact edit only; Replicate renders don't use it.
+            if (store.isExactEdit && store.studioSettings?.lowBalance == true) || store.jobs.contains(where: \.isPaused) {
                 Note(icon: "pause.circle", warn: true, "\(Job.pausedLine). New renders wait until it's topped up.")
             }
             MButton(store.clipBad ? "Fix the clip to continue" : store.generating ? "Starting…" : Pricing.genLabel(spec), kind: .primary, size: .big, off: blocked) {
@@ -433,5 +455,58 @@ struct InspectorFooter: View {
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: t.controlRadius).fill(t.surface2))
+    }
+}
+
+/// Quality: Draft / Standard / HD on Replicate, or Exact edit on our GPU, each with its live price for this clip and takes.
+struct QualityPicker: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    private let columns = [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
+
+    var body: some View {
+        let f = store.videoFeatures
+        VStack(alignment: .leading, spacing: 8) {
+            Lbl("Quality")
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(f.ordered) { o in card(o) }
+            }
+            Text(Pricing.priceLine(store.spec)).font(t.mono(12.5)).foregroundStyle(t.ink)
+                .contentTransition(.numericText())
+                .animation(.snappy, value: store.totalCost)
+            if store.isExactEdit {
+                Muted("Frame-by-frame on our GPU. Slower, with a GPU start-up, but every option below applies.")
+            }
+        }
+    }
+
+    private func card(_ o: VideoOption) -> some View {
+        let q = o.videoQuality
+        let on = store.quality == q
+        let spec = store.spec(for: q)
+        let radius = t.isA ? 0 : t.controlRadius
+        return Button { store.setQuality(q) } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(o.label).font(t.body(13, .semibold)).foregroundStyle(t.ink)
+                    if q == .standard { Text("Default").font(t.mono(10)).foregroundStyle(t.muted) }
+                    Spacer(minLength: 4)
+                    Text(Pricing.money(Pricing.totalCost(spec))).font(t.mono(12, .medium)).foregroundStyle(on ? t.accent : t.ink)
+                }
+                Text(o.available ? o.detail : "Not available on this server").font(t.body(11)).foregroundStyle(t.muted).lineLimit(2)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .topLeading)
+            .background(RoundedRectangle(cornerRadius: radius).fill(on ? t.surface : t.surface2))
+            .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(on ? t.accent : .clear, lineWidth: 2))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(o.available ? 1 : 0.5)
+        .help(q.isReplicate ? "\(o.label) · \(o.resolution ?? q.resolution ?? "") on Replicate · \(Pricing.priceLine(spec))" : "Exact edit on our GPU · \(Pricing.priceLine(spec))")
+        .accessibilityLabel("\(o.label), \(o.detail), \(Pricing.money(Pricing.totalCost(spec)))")
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 }

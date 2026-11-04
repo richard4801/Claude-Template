@@ -49,7 +49,7 @@ struct QueueView: View {
             ForEach(store.visibleFailures) { f in
                 HStack(spacing: 12) {
                     Image(systemName: "exclamationmark.shield").font(.system(size: 16))
-                    (Text("Render failed · \(f.title)").bold() + Text(" · \(f.error ?? "The render stopped.") \(Pricing.money(f.refunded)) refunded."))
+                    (Text("Render failed · \(f.title)").bold() + Text(" · \(f.failureLine) \(Pricing.money(f.refunded)) refunded."))
                         .font(t.body(13))
                     Spacer()
                     MButton("Retry · \(Pricing.money(Pricing.totalCost(f.request.spec)))", size: .small) { store.retry(f) }
@@ -113,7 +113,7 @@ struct JobRow: View {
                 Media(ref: j.thumb, ratio: 44.0 / 58.0, radius: t.isA ? 0 : 6).frame(width: 44)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(j.title).font(t.body(14, .bold))
-                    Muted("\(j.modelName.split(separator: " ").first.map(String.init) ?? j.modelName) · \(j.engineName)\(j.engine == .h3 ? " · \(j.request.steps) steps" : "") · \(Pricing.trimNum(j.lengthSec))s\(j.request.takes > 1 ? " · \(j.request.takes) takes" : "")")
+                    Muted("\(j.modelName.split(separator: " ").first.map(String.init) ?? j.modelName) · \(j.engineLabel) · \(Pricing.trimNum(j.lengthSec))s\(j.request.takes > 1 ? " · \(j.request.takes) takes" : "")")
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 Group {
@@ -339,8 +339,8 @@ struct ResultView: View {
                                 let base: [(String, String)] = [
                                     ("Model", job?.modelName ?? store.currentModel?.name ?? "—"),
                                     ("Outfit", outfit?.name ?? store.currentOutfit?.name ?? "—"),
-                                    ("Engine", job?.engineName ?? (take.isVideo ? "Standard" : "Photo")),
-                                    ("Steps", job.map { $0.engine == .viggle ? "4" : "\($0.request.steps)" } ?? (take.isVideo ? "10" : "—")),
+                                    ("Engine", job?.engineLabel ?? (take.engineLabel.isEmpty ? (take.isVideo ? "Standard" : "Photo") : take.engineLabel)),
+                                    ("Steps", job.map { $0.engine == .viggle ? "4" : $0.engine == .replicate ? "—" : "\($0.request.steps)" } ?? (take.isVideo ? "10" : "—")),
                                     ("Cost", Pricing.money(take.cost) + (job?.warmupCost.map { " + \(Pricing.money($0)) warm-up" } ?? "")),
                                     ("Seed", "\(take.seed)\(take.isVideo || (!take.isTemplateShot && store.shoot.lockSeed) ? " · locked" : "")"),
                                 ]

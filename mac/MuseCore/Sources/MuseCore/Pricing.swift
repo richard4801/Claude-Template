@@ -1,13 +1,85 @@
 import Foundation
 
-/// Video engine. User-facing names: "Standard" (MiniMax H3) and "Fast · beta" (Viggle).
+/// Video engine. `replicate` is MiniMax H3 hosted on Replicate (Draft / Standard / HD, the default on servers that have it),
+/// `h3` is our own RunPod H3 ("Exact edit"), `viggle` is "Fast · beta" (plans/api.md "Video engines and quality").
 public enum Engine: String, Codable, CaseIterable, Sendable {
+    case replicate
     case h3
     case viggle
 
-    public var label: String { self == .h3 ? "Standard" : "Fast · beta" }
+    public var label: String {
+        switch self {
+        case .replicate: return "Standard"
+        case .h3: return "Exact edit"
+        case .viggle: return "Fast · beta"
+        }
+    }
+
+    /// Runs on our own GPU (start-up, warm-up, Keep GPU warm).
+    public var usesOurGpu: Bool { self != .replicate }
 
     public init(id: String) { self = Engine(rawValue: id) ?? .h3 }
+}
+
+/// The video studio's Quality picker: Draft / Standard / HD on Replicate, or Exact edit (H3 on our GPU). Default Standard.
+public enum VideoQuality: String, Codable, CaseIterable, Sendable, Identifiable {
+    case draft
+    case standard
+    case hd
+    case exact
+
+    public var id: String { rawValue }
+    public static let `default` = VideoQuality.standard
+
+    public init(id: String?) { self = VideoQuality(rawValue: id ?? "") ?? .default }
+
+    public var label: String {
+        switch self {
+        case .draft: return "Draft"
+        case .standard: return "Standard"
+        case .hd: return "HD"
+        case .exact: return "Exact edit"
+        }
+    }
+
+    public var detail: String {
+        switch self {
+        case .draft: return "768P · lite"
+        case .standard: return "768P"
+        case .hd: return "2K"
+        case .exact: return "Frame-by-frame · slower · GPU start-up"
+        }
+    }
+
+    public var resolution: String? {
+        switch self {
+        case .draft, .standard: return "768P"
+        case .hd: return "2K"
+        case .exact: return nil
+        }
+    }
+
+    /// The contract's default $ per output second (the server's `features.video.options[].pricePerSec` wins once read).
+    public var defaultPricePerSec: Double? {
+        switch self {
+        case .draft: return 0.02
+        case .standard: return 0.08
+        case .hd: return 0.13
+        case .exact: return nil
+        }
+    }
+
+    public var isReplicate: Bool { self != .exact }
+    public var engine: Engine { isReplicate ? .replicate : .h3 }
+    /// The `quality` field of a JobRequest (replicate only).
+    public var requestQuality: String? { isReplicate ? rawValue : nil }
+
+    /// The picker option for a job: replicate jobs by their quality, everything else is Exact edit.
+    public static func of(engine: Engine, quality: String?) -> VideoQuality {
+        engine == .replicate ? VideoQuality(id: quality).replicateOrStandard : .exact
+    }
+
+    var replicateOrStandard: VideoQuality { self == .exact ? .standard : self }
 }
 
 /// Which part of the source clip is rendered.
@@ -30,18 +102,40 @@ public struct RenderSpec: Equatable, Sendable {
     public var takes: Int
     /// Real length of the picked clip. nil = the prototype's 9.4 s sample clip.
     public var clipSeconds: Double?
+    /// Replicate only: draft | standard | hd.
+    public var quality: VideoQuality
+    /// Replicate only: $ per output second from the server's `features.video`; nil = the contract default for `quality`.
+    public var pricePerSec: Double?
 
-    public init(engine: Engine = .h3, use: ClipUse = .first, steps: Int = Pricing.stepsDefault, lipSync: Bool = false, takes: Int = 1, clipSeconds: Double? = nil) {
+    public init(engine: Engine = .h3, use: ClipUse = .first, steps: Int = Pricing.stepsDefault, lipSync: Bool = false, takes: Int = 1, clipSeconds: Double? = nil,
+                quality: VideoQuality = .standard, pricePerSec: Double? = nil) {
         self.engine = engine
         self.use = use
         self.steps = steps
         self.lipSync = lipSync
         self.takes = takes
         self.clipSeconds = clipSeconds
+        self.quality = quality
+        self.pricePerSec = pricePerSec
     }
 
+    /// A Replicate render (always the whole clip).
+    public static func replicate(_ quality: VideoQuality, clipSeconds: Double?, takes: Int = 1, pricePerSec: Double? = nil) -> RenderSpec {
+        RenderSpec(engine: .replicate, use: .full, takes: takes, clipSeconds: clipSeconds, quality: quality, pricePerSec: pricePerSec)
+    }
+
+    public var isReplicate: Bool { engine == .replicate }
+    /// The Quality picker option this spec belongs to.
+    public var videoQuality: VideoQuality { isReplicate ? quality.replicateOrStandard : .exact }
+    /// $ per output second for a replicate spec.
+    public var replicatePricePerSec: Double { pricePerSec ?? quality.replicateOrStandard.defaultPricePerSec ?? 0.08 }
+    /// Replicate's billed output length D (whole seconds, 4–15).
+    public var replicateSeconds: Int { Pricing.replicateSeconds(clipSeconds) }
+
     /// Seconds actually rendered (the prototype's `LENS()`): the first 5.2 s, or the whole clip up to H3's 15 s single-pass limit.
+    /// Replicate always renders the whole clip (each take is trimmed back to its exact length).
     public var lengthSec: Double {
+        if isReplicate { return min(clipSeconds ?? ClipUse.full.sampleSeconds, Pricing.maxClipSec) }
         switch use {
         case .first: return min(ClipUse.first.sampleSeconds, clipSeconds ?? ClipUse.first.sampleSeconds)
         case .full: return min(clipSeconds ?? ClipUse.full.sampleSeconds, Pricing.maxClipSec)
@@ -104,9 +198,39 @@ public enum Pricing {
     }
     public static func clampTakes(_ n: Int) -> Int { min(takesMax, max(1, n)) }
 
+    // MARK: Replicate (Draft / Standard / HD), plans/api.md "Pricing"
+
+    public static let replicateMinSec = 4
+    public static let replicateMaxSec = 15
+
+    /// D = min(15, max(4, ceil(clipSeconds − 0.001))). No clip (the sample) = 9.4 s → 10.
+    public static func replicateSeconds(_ clipSeconds: Double?, min lo: Int = replicateMinSec, max hi: Int = replicateMaxSec) -> Int {
+        let c = clipSeconds ?? ClipUse.full.sampleSeconds
+        return Swift.min(hi, Swift.max(lo, Int((c - 0.001).rounded(.up))))
+    }
+
+    /// pricePerSec × D × takes, left to right in doubles (the shared fixture's `cost`).
+    public static func replicateCost(pricePerSec: Double, seconds: Int, takes: Int) -> Double {
+        pricePerSec * Double(seconds) * Double(max(1, takes))
+    }
+
+    /// " · 2 takes" when takes > 1.
+    static func takesTail(_ takes: Int) -> String { takes > 1 ? " · \(takes) takes" : "" }
+
+    /// "about $0.56 · 7 s" (+ " · 2 takes"): the line under the Quality picker.
+    public static func priceLine(_ s: RenderSpec) -> String {
+        if !s.isReplicate { return "about \(money(totalCost(s))) · \(fmtMin(totalMin(s)))\(takesTail(s.takes))" }
+        return "about \(money(totalCost(s))) · \(s.replicateSeconds) s\(takesTail(s.takes))"
+    }
+
+    /// Replicate's estimated wall time for ONE take, for the queue and the demo backend: the line, a start, ~15 s per output second.
+    public static let replicateBaseMin = 1.0
+    public static let replicateMinPerSec = 0.25
+
     /// Estimated minutes for ONE take.
     public static func estMin(_ s: RenderSpec) -> Double {
         let len = s.lengthSec
+        if s.isReplicate { return replicateBaseMin + replicateMinPerSec * Double(s.replicateSeconds) }
         if s.engine == .viggle { return viggleMin5s * (len / baseLen) }
         return Double(s.steps) * secPerLen(len) / 60 + gpuStartupMin + (s.lipSync ? lipSyncMin : 0)
     }
@@ -114,20 +238,26 @@ public enum Pricing {
     /// Estimated dollars for ONE take.
     public static func estCost(_ s: RenderSpec) -> Double {
         let len = s.lengthSec
+        if s.isReplicate { return s.replicatePricePerSec * Double(s.replicateSeconds) }
         if s.engine == .viggle { return viggleCost5s * (len / baseLen) }
         return estMin(s) / 60 * gpuPerHour
     }
 
     public static func totalMin(_ s: RenderSpec) -> Double { estMin(s) * Double(max(1, s.takes)) }
-    public static func totalCost(_ s: RenderSpec) -> Double { estCost(s) * Double(max(1, s.takes)) }
+    public static func totalCost(_ s: RenderSpec) -> Double {
+        if s.isReplicate { return replicateCost(pricePerSec: s.replicatePricePerSec, seconds: s.replicateSeconds, takes: s.takes) }
+        return estCost(s) * Double(max(1, s.takes))
+    }
     public static func totalSeconds(_ s: RenderSpec) -> Double { totalMin(s) * 60 }
 
     /// `fmtMin`: "38s" under two minutes, otherwise "10 min".
     public static func fmtMin(_ m: Double) -> String { m < 2 ? "\(jsRound(m * 60))s" : "\(jsRound(m)) min" }
 
     /// "Generate · 10 min · $0.67", or "Generate 3 takes · 30 min · $2.02".
+    /// Replicate: "Generate · 7 s · $0.56" (+ " · 2 takes").
     public static func genLabel(_ s: RenderSpec) -> String {
-        "Generate\(s.takes > 1 ? " \(s.takes) takes" : "") · \(fmtMin(totalMin(s))) · \(money(totalCost(s)))"
+        if s.isReplicate { return "Generate · \(s.replicateSeconds) s · \(money(totalCost(s)))\(takesTail(s.takes))" }
+        return "Generate\(s.takes > 1 ? " \(s.takes) takes" : "") · \(fmtMin(totalMin(s))) · \(money(totalCost(s)))"
     }
 
     /// The hint under the steps control.

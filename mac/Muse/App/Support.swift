@@ -247,7 +247,7 @@ extension AppStore {
             if paletteOpen && mods.isEmpty { runPalette(paletteIndex); return true }
             return false
         case 123, 124: // ← →
-            guard !typing, mods.isEmpty, user != nil, screen == .studio, engine == .h3, !paletteOpen, outfitSheet == nil, postDraft == nil, warmPrompt == nil else { return false }
+            guard !typing, mods.isEmpty, user != nil, screen == .studio, stepsActive, !paletteOpen, outfitSheet == nil, postDraft == nil, warmPrompt == nil else { return false }
             setSteps(steps + (e.keyCode == 124 ? 1 : -1))
             return true
         default:

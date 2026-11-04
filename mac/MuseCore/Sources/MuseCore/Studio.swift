@@ -240,35 +240,52 @@ public struct InviteRequest: Codable, Sendable {
     }
 }
 
-/// GET/PATCH /v1/settings/image-engine. provider: simulated | fal | custom-http.
+/// GET/PATCH /v1/settings/image-engine. provider: simulated | fal | custom-http | replicate.
 public struct ImageEngine: Codable, Hashable, Sendable {
     public var provider: String
     public var model: String
+    /// replicate: the edit model (outfit angles).
+    public var editModel: String?
+    /// For display: "FLUX.2 [pro] · Replicate", "Simulated"… (newer servers).
+    public var label: String?
     public var url: String?
     /// Which providers the server can use right now.
     public var available: [String: Bool]
 
-    public init(provider: String = "simulated", model: String = "bundled-stills", url: String? = nil, available: [String: Bool] = ["simulated": true]) {
+    public init(provider: String = "simulated", model: String = "bundled-stills", url: String? = nil, available: [String: Bool] = ["simulated": true],
+                label: String? = nil, editModel: String? = nil) {
         self.provider = provider
         self.model = model
         self.url = url
         self.available = available
+        self.label = label
+        self.editModel = editModel
     }
 
-    enum CodingKeys: String, CodingKey { case provider, model, url, available }
+    enum CodingKeys: String, CodingKey { case provider, model, editModel, label, url, available }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         provider = c.v(.provider, "simulated")
         model = c.v(.model, "")
+        editModel = c.o(.editModel)
+        label = c.o(.label)
         url = c.o(.url)
         available = c.v(.available, [:])
+    }
+
+    /// The server's label, else "<provider> · <model>".
+    public var displayLabel: String {
+        if let l = label?.trimmingCharacters(in: .whitespaces), !l.isEmpty { return l }
+        let name = ImageEngine.providers.first { $0.id == provider }?.label ?? provider
+        return model.isEmpty ? name : "\(name) · \(model)"
     }
 
     public struct Provider: Hashable, Sendable, Identifiable {
         public let id: String
         public let label: String
     }
-    public static let providers: [Provider] = [Provider(id: "simulated", label: "Built-in (free)"), Provider(id: "fal", label: "fal.ai"), Provider(id: "custom-http", label: "Custom HTTP")]
+    public static let providers: [Provider] = [Provider(id: "replicate", label: "Replicate"), Provider(id: "simulated", label: "Built-in (free)"),
+                                               Provider(id: "fal", label: "fal.ai"), Provider(id: "custom-http", label: "Custom HTTP")]
     public func isAvailable(_ p: String) -> Bool { available[p] ?? (p == provider) }
 }
 
@@ -345,8 +362,15 @@ public struct StudioFeatures: Codable, Hashable, Sendable {
     public var loraTraining: Bool
     public var replaceAudio: Bool
     public var maxClipSec: Double
+    /// The Replicate engine is set up on the server.
+    public var replicate: Bool
+    /// The Quality picker (newer servers). nil = use `VideoFeatures.fallback`.
+    public var video: VideoFeatures?
 
-    public init(standard: Bool = true, fastBeta: Bool = true, lipSync: Bool = true, loraTraining: Bool = true, replaceAudio: Bool = false, maxClipSec: Double = 15) {
+    public init(standard: Bool = true, fastBeta: Bool = true, lipSync: Bool = true, loraTraining: Bool = true, replaceAudio: Bool = false, maxClipSec: Double = 15,
+                replicate: Bool = false, video: VideoFeatures? = nil) {
+        self.replicate = replicate
+        self.video = video
         self.standard = standard
         self.fastBeta = fastBeta
         self.lipSync = lipSync
@@ -355,7 +379,7 @@ public struct StudioFeatures: Codable, Hashable, Sendable {
         self.maxClipSec = maxClipSec
     }
 
-    enum CodingKeys: String, CodingKey { case standard, fastBeta, lipSync, loraTraining, replaceAudio, maxClipSec }
+    enum CodingKeys: String, CodingKey { case standard, fastBeta, lipSync, loraTraining, replaceAudio, maxClipSec, replicate, video }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         standard = c.v(.standard, true)
@@ -364,7 +388,101 @@ public struct StudioFeatures: Codable, Hashable, Sendable {
         loraTraining = c.v(.loraTraining, true)
         replaceAudio = c.v(.replaceAudio, false)
         maxClipSec = c.v(.maxClipSec, 15)
+        replicate = c.v(.replicate, false)
+        video = c.o(.video)
     }
+}
+
+/// `features.video` (GET /v1/settings/studio): the Quality picker's options and prices.
+public struct VideoFeatures: Codable, Hashable, Sendable {
+    public var defaultEngine: String
+    public var defaultQuality: String
+    public var minSeconds: Int
+    public var maxSeconds: Int
+    public var options: [VideoOption]
+
+    public init(defaultEngine: String = "replicate", defaultQuality: String = "standard", minSeconds: Int = 4, maxSeconds: Int = 15, options: [VideoOption] = VideoOption.defaults) {
+        self.defaultEngine = defaultEngine
+        self.defaultQuality = defaultQuality
+        self.minSeconds = minSeconds
+        self.maxSeconds = maxSeconds
+        self.options = options
+    }
+
+    enum CodingKeys: String, CodingKey { case defaultEngine, defaultQuality, minSeconds, maxSeconds, options }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        defaultEngine = c.v(.defaultEngine, "replicate")
+        defaultQuality = c.v(.defaultQuality, "standard")
+        minSeconds = c.v(.minSeconds, Pricing.replicateMinSec)
+        maxSeconds = c.v(.maxSeconds, Pricing.replicateMaxSec)
+        let read: [VideoOption] = c.v(.options, [])
+        options = read.isEmpty ? VideoOption.defaults : read
+    }
+
+    /// For servers that don't send `features.video`: the contract's table, every option available.
+    public static let fallback = VideoFeatures()
+
+    /// The picker's default: Exact edit when the server's default engine is h3, else `defaultQuality` (Standard).
+    public var defaultOption: VideoQuality {
+        if defaultEngine == Engine.h3.rawValue { return .exact }
+        return VideoQuality(id: defaultQuality).replicateOrStandard
+    }
+
+    public func option(_ q: VideoQuality) -> VideoOption { options.first { $0.id == q.rawValue } ?? VideoOption.make(q) }
+    public func isAvailable(_ q: VideoQuality) -> Bool { option(q).available }
+    /// The server's $ per second for a replicate quality (nil = the default).
+    public func pricePerSec(_ q: VideoQuality) -> Double? { q.isReplicate ? (option(q).pricePerSec ?? q.defaultPricePerSec) : nil }
+    /// Picker order: the server's, with any missing option added.
+    public var ordered: [VideoOption] {
+        var out = options.filter { VideoQuality(rawValue: $0.id) != nil }
+        for q in VideoQuality.allCases where !out.contains(where: { $0.id == q.rawValue }) { out.append(VideoOption.make(q)) }
+        return out
+    }
+}
+
+public struct VideoOption: Codable, Hashable, Sendable, Identifiable {
+    public var id: String
+    public var label: String
+    public var detail: String
+    public var engine: String
+    public var quality: String?
+    public var resolution: String?
+    public var pricePerSec: Double?
+    public var available: Bool
+
+    public init(id: String, label: String, detail: String, engine: String, quality: String? = nil, resolution: String? = nil, pricePerSec: Double? = nil, available: Bool = true) {
+        self.id = id
+        self.label = label
+        self.detail = detail
+        self.engine = engine
+        self.quality = quality
+        self.resolution = resolution
+        self.pricePerSec = pricePerSec
+        self.available = available
+    }
+
+    enum CodingKeys: String, CodingKey { case id, label, detail, engine, quality, resolution, pricePerSec, available }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = c.v(.id, "standard")
+        let q = VideoQuality(id: id)
+        label = c.v(.label, q.label)
+        detail = c.v(.detail, q.detail)
+        engine = c.v(.engine, q.engine.rawValue)
+        quality = c.o(.quality)
+        resolution = c.o(.resolution)
+        pricePerSec = c.o(.pricePerSec)
+        available = c.v(.available, true)
+    }
+
+    public var videoQuality: VideoQuality { VideoQuality(id: id) }
+
+    public static func make(_ q: VideoQuality, available: Bool = true) -> VideoOption {
+        VideoOption(id: q.rawValue, label: q.label, detail: q.detail, engine: q.engine.rawValue, quality: q.requestQuality, resolution: q.resolution,
+                    pricePerSec: q.defaultPricePerSec, available: available)
+    }
+    public static let defaults: [VideoOption] = VideoQuality.allCases.map { make($0) }
 }
 
 /// PATCH /v1/settings/studio: only the fields set are sent.
@@ -481,6 +599,8 @@ extension ApiError {
         case "balance_unavailable": return "MUSE can't read the RunPod balance right now, so credit can't be sent. Try again in a minute."
         case "topup_unavailable": return "Top up your RunPod account. MUSE reads the balance from RunPod."
         case "upload_missing": return "The upload didn't arrive. Try again."
+        case "provider_refused": return "Replicate's safety filter refused this photo. Try other references or wording. You weren't charged."
+        case "provider_rate_limited": return "Replicate is busy right now. Try again in a minute. You weren't charged."
         default: return nil
         }
     }

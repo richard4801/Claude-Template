@@ -45,7 +45,7 @@ final class CodingTests: XCTestCase {
         let j = try JSONDecoder().decode(Job.self, from: Data(json.utf8))
         XCTAssertEqual(j.request.steps, 15)
         XCTAssertEqual(j.request.engine, "h3")
-        XCTAssertEqual(j.engineLabel, "Standard · 15 steps")
+        XCTAssertEqual(j.engineLabel, "Exact edit · 15 steps")
         XCTAssertTrue(j.isRunning)
         XCTAssertEqual(j.createdAt, 1_762_243_200_000)
         XCTAssertNil(j.error)

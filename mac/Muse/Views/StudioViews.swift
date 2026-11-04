@@ -428,7 +428,7 @@ struct StudioSettingsSection: View {
     @ViewBuilder private var imageEngineSection: some View {
         H2("Image engine")
         if let e = store.imageEngine {
-            Muted("Makes photoshoots, outfit sets and missing sheet angles. Video renders always use MiniMax H3 on the GPU.")
+            Muted("Makes photoshoots, outfit sets and missing sheet angles. Video uses the Quality picked in the studio (MiniMax H3 on Replicate, or Exact edit on our GPU).")
             HStack(spacing: 8) {
                 ForEach(ImageEngine.providers) { p in
                     Chip(p.label + (e.isAvailable(p.id) ? "" : " · not set up"), on: provider == p.id) {
@@ -439,7 +439,7 @@ struct StudioSettingsSection: View {
             }
             if provider != "simulated" {
                 Field("Model") {
-                    TextField(provider == "fal" ? "fal-ai/bytedance/seedream/v4/edit" : "model id", text: $model).fieldChrome().font(t.mono(13))
+                    TextField(provider == "fal" ? "fal-ai/bytedance/seedream/v4/edit" : provider == "replicate" ? "black-forest-labs/flux-2-pro" : "model id", text: $model).fieldChrome().font(t.mono(13))
                 }
             }
             if provider == "custom-http" {
@@ -448,7 +448,7 @@ struct StudioSettingsSection: View {
                 }
             }
             HStack {
-                Muted("Now: \(ImageEngine.providers.first { $0.id == e.provider }?.label ?? e.provider) · \(e.model)\(e.url.map { " · \($0)" } ?? "")")
+                Muted("Now: \(e.displayLabel)\(e.url.map { " · \($0)" } ?? "")")
                 Spacer()
                 MButton("Use this engine", kind: .primary, size: .small) {
                     store.setImageEngine(provider: provider, model: provider == "simulated" ? nil : model, url: provider == "custom-http" ? engineURL : nil)
