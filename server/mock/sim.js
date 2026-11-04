@@ -75,3 +75,35 @@ export function clipChecks(m) {
 
 export const money = v => '$' + v.toFixed(2);
 export const engineLabel = r => r.engine === 'viggle' ? 'Fast · beta' : `Standard · ${r.steps} steps`;
+
+// Identity LoRA (plans/lora-training.md). Estimates until a real training run is measured.
+export const LORA_SET_COST = 0.60, LORA_CANDIDATES = 30, LORA_MIN_KEEP = 20;
+export const LORA_PHOTO_MIN = 25, LORA_VIDEO_MIN = 75, GPU_PER_HOUR = 3.99;
+export const loraTrainMinutes = () => LORA_PHOTO_MIN + LORA_VIDEO_MIN;
+export const loraTrainCost = () => Math.round(loraTrainMinutes() / 60 * GPU_PER_HOUR * 100) / 100; // $6.65
+/** Candidate pool: only the bundled character reference images, cycled with labels. Same as prototype features.js CAND_POOL. */
+export const LORA_POOL = [['g_front', 'Green set · front'], ['g_tq', 'Green set · ¾'], ['face', 'Close-up · window light'], ['c_front', 'Crystal dress · full'], ['g_side', 'Green set · side'],
+  ['profile', 'Profile · soft light'], ['c_tq', 'Crystal · ¾'], ['g_back', 'Back · physique'], ['hero', 'Portrait · golden hour'], ['c_face', 'Close-up · choker']];
+/** 30 candidates; 3 are pre-flagged (and dropped) like the prototype. */
+export function loraCandidates() {
+  return Array.from({ length: LORA_CANDIDATES }, (_, i) => {
+    const [asset, label] = LORA_POOL[i % LORA_POOL.length];
+    const flag = [9, 19, 23].includes(i) ? (asset === 'c_face' ? 'choker' : 'face drift') : undefined;
+    return { id: `c${i + 1}`, image: { asset }, label, ...(flag ? { flag } : {}), keep: !flag };
+  });
+}
+/** Overall training progress p (0–100) → the two bars: photo is the first 25 %, video the remaining 75 %. */
+export function loraParts(p) {
+  const photo = Math.min(100, p * 100 / (100 * LORA_PHOTO_MIN / loraTrainMinutes()));
+  const video = Math.max(0, (p - 100 * LORA_PHOTO_MIN / loraTrainMinutes()) / (100 * LORA_VIDEO_MIN / loraTrainMinutes()) * 100);
+  return { photo: { state: photo >= 100 ? 'ready' : 'training', progress: photo }, video: { state: video >= 100 ? 'ready' : video > 0 ? 'training' : 'waiting', progress: video } };
+}
+export const loraToken = (name, v) => `${(name.split(' ')[0] || 'model').toLowerCase().replace(/[^a-z0-9]/g, '')}_v${v}`;
+
+// Social accounts (plans/socials.md)
+export const PLATFORMS = ['tiktok', 'instagram', 'facebook', 'youtube', 'x'];
+export function handleFor(platform, name) {
+  if (platform === 'youtube') return name;
+  if (platform === 'facebook') return `${name} (Page)`;
+  return '@' + name.toLowerCase().replace(/\s+/g, '.');
+}

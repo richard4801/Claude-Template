@@ -18,6 +18,8 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 let db = seed();
 const clients = new Set();
 const runners = new Map();
+const timers = new Set(); // LoRA training, sign-in delays, post schedules: cleared on reset
+const later = (fn, ms) => { const t = setTimeout(() => { timers.delete(t); fn(); }, ms); timers.add(t); return t; };
 const uid = () => crypto.randomUUID().slice(0, 8);
 
 class ApiError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
@@ -28,8 +30,8 @@ function emit(ev) {
   for (const res of clients) res.write(line);
 }
 const emitBalance = () => emit({ type: 'balance', balance: db.balance });
-function charge(cost) { db.balance.balance = Math.max(0, db.balance.balance - cost); db.balance.month += cost; }
-function refund(cost) { db.balance.balance += cost; db.balance.month = Math.max(0, db.balance.month - cost); }
+function charge(cost) { db.balance.balance = Math.max(0, db.balance.balance - cost); db.balance.month += cost; db.balance.today += cost; }
+function refund(cost) { db.balance.balance += cost; db.balance.month = Math.max(0, db.balance.month - cost); db.balance.today = Math.max(0, db.balance.today - cost); }
 const model = id => db.models.find(m => m.id === id) ?? (() => { throw notFound('Model'); })();
 const outfit = id => db.outfits.find(o => o.id === id) ?? (() => { throw notFound('Outfit'); })();
 const filled = m => m.slots.filter(s => s.image && !s.busy).length;
@@ -37,10 +39,24 @@ const filled = m => m.slots.filter(s => s.image && !s.busy).length;
 function h3Prompt(m, o, r) {
   // Structured H3 Ref2VA format (see plans/prompt-system.md). The full engine lives in android/core PromptEngine.
   const never = [...m.neverAdd, 'logos', 'extra fingers', 'warped jewellery'];
-  return `subject_definitions:\n<Subject 1> is the person in <Video 1>.\n<Subject 2> is ${m.name}: ${m.look || m.age + '-year-old woman'}, with NO tattoos, shown in <Image 1>-<Image ${Math.max(1, filled(m))}>.\n<Video 1> is the source video for the editing task.\n\n` +
+  const lora = activeLora(m);
+  return `subject_definitions:\n<Subject 1> is the person in <Video 1>.\n<Subject 2> is ${m.name}: ${m.look || m.age + '-year-old woman'}, with NO tattoos, shown in <Image 1>-<Image ${Math.max(1, filled(m))}>${lora ? `, with LoRA ${lora} video` : ''}.\n<Video 1> is the source video for the editing task.\n\n` +
     `summary:\n[video editing + character replacement${r.keepAudio ? ' + audio reuse' : ''}] <Subject 1> is replaced by <Subject 2>; motion and timing are kept frame by frame.\n\n` +
     `retention_analysis:\n<Subject 2>: reference - wears the ${(o?.name ?? 'outfit').toLowerCase()}. She wears no ${never.join(', no ')}.\n<Audio 1>: ${r.keepAudio ? 'fully_copy' : 'replaced'}.\n\n` +
     `detailed_description:\nRealistic smartphone video. ${r.steps} steps.\n`;
+}
+
+/** The LoRA token the prompts use ("sienna_v2"), or null when there's no trained version or it's switched off. */
+function activeLora(m) {
+  const l = db.loras[m.id];
+  return l && l.version > 0 && l.use ? sim.loraToken(m.name, l.version) : null;
+}
+
+function startJob(job) {
+  charge(job.cost);
+  Object.assign(job, { state: 'running', ...sim.progress(job.request, 0) });
+  emitBalance(); emit({ type: 'job', job });
+  runJob(job);
 }
 
 function runJob(job) {
@@ -138,6 +154,22 @@ route('POST', '/v1/models', async req => {
   db.models.push(m);
   return m;
 });
+route('PATCH', '/v1/models/:id', async (req, p) => {
+  const b = await json(req), m = model(p.id);
+  for (const k of ['name', 'niche', 'personality', 'notes']) if (typeof b[k] === 'string') m[k] = b[k];
+  if (Array.isArray(b.neverAdd)) m.neverAdd = b.neverAdd.map(String).map(x => x.trim()).filter(Boolean);
+  if (typeof b.name === 'string' && !b.name.trim()) throw new ApiError(400, 'bad_request', 'Give her a name');
+  emit({ type: 'model', model: m });
+  return m;
+});
+route('DELETE', '/v1/models/:id', (req, p) => {
+  const m = model(p.id);
+  db.models = db.models.filter(x => x !== m);
+  db.outfits = db.outfits.filter(o => o.modelId !== m.id);
+  delete db.loras[m.id]; delete db.accounts[m.id]; // her LoRAs, training set and linked accounts go with her
+  db.posts = db.posts.filter(x => x.modelId !== m.id || x.state === 'posted');
+  return undefined;
+});
 route('PUT', '/v1/models/:id/slots/:slot', async (req, p) => {
   const b = await json(req), m = model(p.id), s = m.slots.find(x => x.key === p.slot);
   if (!s) throw notFound('Slot');
@@ -216,14 +248,23 @@ route('POST', '/v1/jobs', async req => {
   if (cost > db.balance.balance + 1e-9) throw new ApiError(402, 'insufficient_balance', 'Not enough balance · top up in Credits');
   if (cost > db.balance.perJobLimit) throw new ApiError(402, 'over_job_limit', `Over your ${sim.money(db.balance.perJobLimit)} per-job limit`);
   const m = model(r.modelId), o = db.outfits.find(x => x.id === r.outfitId);
-  charge(cost);
   const p = sim.progress(r, 0), seedN = 1000 + Math.floor(Math.random() * 99000);
-  const job = { id: 'j_' + uid(), title: r.title ?? 'Untitled', modelId: m.id, modelName: m.name, outfitId: r.outfitId ?? '', request: r, state: 'running', ...p,
+  const job = { id: 'j_' + uid(), title: r.title ?? 'Untitled', modelId: m.id, modelName: m.name, outfitId: r.outfitId ?? '', request: r, state: 'queued', ...p, phase: 'Queued',
     totalSeconds: sim.totalSeconds(r), cost, refunded: 0, createdAt: Date.now(), prompt: h3Prompt(m, o, r), seed: seedN, thumb: o?.angles?.[0] ?? m.slots[0]?.image ?? null };
   db.jobs.push(job);
-  emitBalance(); emit({ type: 'job', job });
-  runJob(job);
+  // `queue: true` parks the job (not charged) until POST /v1/queue/run.
+  if (r.queue) emit({ type: 'job', job }); else startJob(job);
   return job;
+});
+route('POST', '/v1/queue/run', () => {
+  const queued = db.jobs.filter(j => j.state === 'queued').sort((a, b) => a.createdAt - b.createdAt);
+  const started = [];
+  for (const j of queued) {
+    if (j.cost > db.balance.balance + 1e-9) break; // the rest stay queued until a top-up
+    startJob(j); started.push(j);
+  }
+  if (queued.length && !started.length) throw new ApiError(402, 'insufficient_balance', 'Not enough balance · top up in Credits');
+  return started;
 });
 route('DELETE', '/v1/jobs/:id', (req, p) => {
   clearInterval(runners.get(p.id)); runners.delete(p.id);
@@ -255,6 +296,105 @@ route('POST', '/v1/shoots', async req => {
   return shots;
 });
 
+// ---------------------------------------------------------------- Identity LoRA
+const emptyLora = id => ({ modelId: id, version: 0, state: 'none', use: true, candidates: [], progress: 0,
+  photo: { state: 'none', progress: 0 }, video: { state: 'none', progress: 0 }, cost: 0 });
+const lora = id => { model(id); return db.loras[id] ??= emptyLora(id); };
+const emitLora = l => emit({ type: 'lora', lora: l });
+const LORA_SPEED = SPEED * 5; // 100 min of training in ~50 s at the default 24× (the prototype runs it at 120×)
+
+route('GET', '/v1/models/:id/lora', (req, p) => lora(p.id));
+route('POST', '/v1/models/:id/lora/candidates', (req, p) => {
+  const l = lora(p.id);
+  if (['building', 'training'].includes(l.state)) throw new ApiError(409, 'busy', 'Already working on it');
+  if (sim.LORA_SET_COST > db.balance.balance + 1e-9) throw new ApiError(402, 'insufficient_balance', 'Not enough balance · top up in Credits');
+  charge(sim.LORA_SET_COST); emitBalance();
+  Object.assign(l, { state: 'building', candidates: [], progress: 0, cost: sim.LORA_SET_COST });
+  later(() => { if (db.loras[p.id] !== l) return; Object.assign(l, { state: 'review', candidates: sim.loraCandidates() }); emitLora(l); }, GEN_MS);
+  return l;
+});
+route('PATCH', '/v1/models/:id/lora/candidates/:cid', async (req, p) => {
+  const b = await json(req), l = lora(p.id), c = l.candidates.find(x => x.id === p.cid);
+  if (!c) throw notFound('Candidate');
+  if (l.state === 'training') throw new ApiError(409, 'busy', 'Training is running');
+  c.keep = !!b.keep;
+  return l;
+});
+route('POST', '/v1/models/:id/lora/train', (req, p) => {
+  const l = lora(p.id), kept = l.candidates.filter(c => c.keep).length, cost = sim.loraTrainCost();
+  if (!['review', 'ready'].includes(l.state) || !l.candidates.length) throw new ApiError(400, 'bad_request', 'Build the training set first');
+  if (kept < sim.LORA_MIN_KEEP) throw new ApiError(400, 'bad_request', `Keep at least ${sim.LORA_MIN_KEEP} shots so the LoRA learns her well`);
+  if (cost > db.balance.balance + 1e-9) throw new ApiError(402, 'insufficient_balance', 'Not enough balance · top up in Credits');
+  charge(cost); emitBalance();
+  Object.assign(l, { state: 'training', progress: 0, cost: l.cost + cost, ...sim.loraParts(0) });
+  const t0 = Date.now(), totalSec = sim.loraTrainMinutes() * 60;
+  const iv = setInterval(() => {
+    if (db.loras[p.id] !== l || SPEED <= 0) { clearInterval(iv); return; }
+    const pr = Math.min(100, (Date.now() - t0) / 1000 * LORA_SPEED / totalSec * 100);
+    Object.assign(l, { progress: pr, ...sim.loraParts(pr) });
+    if (pr >= 100) { clearInterval(iv); runners.delete('lora_' + p.id); Object.assign(l, { state: 'ready', version: l.version + 1, trainedOn: kept }); }
+    emitLora(l);
+  }, 250);
+  runners.set('lora_' + p.id, iv);
+  return l;
+});
+route('PATCH', '/v1/models/:id/lora', async (req, p) => {
+  const b = await json(req), l = lora(p.id);
+  if (typeof b.use === 'boolean') l.use = b.use;
+  // Retrain: back to the review grid with the same shots; the current version stays in use until the next one is ready.
+  if (b.state === 'review') { if (l.state !== 'ready') throw new ApiError(400, 'bad_request', 'Nothing to retrain yet'); l.state = 'review'; }
+  emitLora(l);
+  return l;
+});
+
+// ---------------------------------------------------------------- social accounts and posts
+const accounts = id => { model(id); return db.accounts[id] ??= {}; };
+const platform = k => { if (!sim.PLATFORMS.includes(k)) throw new ApiError(400, 'bad_request', `Unknown platform ${k}`); return k; };
+route('GET', '/v1/models/:id/accounts', (req, p) => sim.PLATFORMS.map(k => accounts(p.id)[k]).filter(Boolean));
+route('POST', '/v1/models/:id/accounts/:platform/connect', async (req, p) => {
+  const k = platform(p.platform), m = model(p.id);
+  await new Promise(r => setTimeout(r, Math.min(GEN_MS, 900))); // the mock "signs in" after a short delay
+  const a = { modelId: m.id, platform: k, handle: sim.handleFor(k, m.name), connectedAt: Date.now(), canPostDirect: false };
+  accounts(m.id)[k] = a;
+  return { account: a };
+});
+route('DELETE', '/v1/models/:id/accounts/:platform', (req, p) => { delete accounts(p.id)[platform(p.platform)]; return undefined; });
+
+const emitPost = x => emit({ type: 'post', post: x });
+function handoff(x) {
+  // Stage 1: the client opens each app with the caption on the clipboard. The mock then "reads back" stats.
+  x.state = 'handoff'; emitPost(x);
+  later(() => {
+    if (!db.posts.includes(x)) return;
+    const views = 1240 + Math.floor(Math.random() * 900);
+    Object.assign(x, { state: 'posted', postedAt: Date.now(), stats: { views, likes: Math.floor(views * .11), comments: Math.floor(views * .008) } });
+    emitPost(x);
+  }, GEN_MS);
+}
+route('GET', '/v1/posts', (req) => {
+  const q = new URL(req.url, 'http://x').searchParams, st = q.get('state'), mid = q.get('modelId');
+  return db.posts.filter(x => (!st || x.state === st) && (!mid || x.modelId === mid));
+});
+route('POST', '/v1/posts', async req => {
+  const b = await json(req), m = model(b.modelId), t = db.takes.find(x => x.id === b.takeId);
+  if (!t) throw notFound('Take');
+  const platforms = [...new Set(b.platforms ?? [])].map(platform);
+  if (!platforms.length) throw new ApiError(400, 'bad_request', 'Pick at least one account');
+  const missing = platforms.find(k => !accounts(m.id)[k]);
+  if (missing) throw new ApiError(400, 'bad_request', `Connect ${missing} first`);
+  const when = b.when ?? 'now';
+  const at = when === 'now' ? Date.now() : Date.parse(when);
+  if (Number.isNaN(at)) throw new ApiError(400, 'bad_request', 'when must be "now" or an ISO time');
+  // Labels are the user's choice: only an explicit `true` turns one on. MUSE never sets them by itself.
+  const x = { id: 'p_' + uid(), modelId: m.id, takeId: t.id, title: t.title, thumb: t.thumb, platforms, caption: String(b.caption ?? ''),
+    aiLabel: b.aiLabel === true, paidPartnership: b.paidPartnership === true, when, state: 'scheduled', createdAt: Date.now() };
+  db.posts.unshift(x);
+  if (when === 'now') handoff(x);
+  else later(() => { if (db.posts.includes(x) && x.state === 'scheduled') handoff(x); }, Math.min(Math.max(0, at - Date.now()), 2 ** 31 - 1));
+  return x;
+});
+route('DELETE', '/v1/posts/:id', (req, p) => { db.posts = db.posts.filter(x => x.id !== p.id); return undefined; });
+
 route('GET', '/v1/balance', () => db.balance);
 route('POST', '/v1/balance/topup', async req => {
   const b = await json(req);
@@ -264,7 +404,7 @@ route('POST', '/v1/balance/topup', async req => {
 });
 
 route('POST', '/v1/dev/fail-next', async req => { db.failNext = !!(await json(req)).failNext; return undefined; });
-route('POST', '/v1/dev/reset', () => { runners.forEach(clearInterval); runners.clear(); db = seed(); return { ok: true }; });
+route('POST', '/v1/dev/reset', () => { runners.forEach(clearInterval); runners.clear(); timers.forEach(clearTimeout); timers.clear(); db = seed(); return { ok: true }; });
 
 route('GET', '/v1/events', (req, p, res) => {
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });

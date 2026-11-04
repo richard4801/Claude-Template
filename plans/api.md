@@ -15,6 +15,7 @@ _Added 2026-11-04._ This is the contract between the apps and the backend. `serv
 | `over_job_limit` | 402 | the price is more than the per-job spend limit |
 | `clip_failed_checks` | 422 | job for a clip whose checks failed |
 | `not_found` | 404 | unknown id |
+| `busy` | 409 | the LoRA is already building or training |
 
 ## Types
 
@@ -30,21 +31,27 @@ ClipMeta   { name, durationSec, width, height, fps, people?, watermark?, talking
 ClipCheck  { label, value, status: "good"|"bad"|"info", fix? }
 Clip       { id, name, durationSec, width, height, fps, checks: ClipCheck[], thumb?: ImageRef }
 JobRequest { title, modelId, outfitId, clipId, engine: "h3"|"viggle", steps (4–30, default 10), use: "first"|"full",
-             takes (1–4), keepAudio, lipSync, background: "keep"|"photo", backgroundMotion: "still"|"subtle"|"busy", clipSeconds? }
+             takes (1–4), keepAudio, lipSync, background: "keep"|"photo", backgroundMotion: "still"|"subtle"|"busy", clipSeconds?,
+             queue?: boolean /* true = park it as "queued", not charged, until POST /v1/queue/run */ }
 Job        { id, title, modelId, modelName, outfitId, request: JobRequest, state: "queued"|"running"|"done"|"failed",
              progress (0–100), take, step, totalSteps, phase /* "step 12/20 · ~6 min left" */, secondsLeft, totalSeconds,
              cost, refunded, error?, createdAt, finishedAt?, prompt /* exact H3 prompt */, seed, thumb: ImageRef }
 Take       { id, kind: "take"|"shot", jobId|null, index, of, title, label, engineLabel, cost, seed, status: "test"|"final", thumb, prompt, createdAt }
-Balance    { balance, month, today, perJobLimit, perDayLimit, videos }
-Lora       { modelId, version, state: "none"|"building"|"review"|"training"|"ready"|"failed", use: boolean,
-             candidates: { id, image: ImageRef, label, flag?: "tattoo"|"ring"|"choker"|"face drift", keep: boolean }[],
-             progress (0–100), photo: { state, progress }, video: { state, progress }, cost, trainedOn? }
+Balance    { balance, month, today /* spent since local midnight */, perJobLimit, perDayLimit, videos }
+Lora       { modelId, version /* 0 = never trained; the last ready version */, state: "none"|"building"|"review"|"training"|"ready"|"failed",
+             use: boolean /* default true */,
+             candidates: { id, image: ImageRef, label, flag?: "tattoo"|"ring"|"choker"|"face drift", keep: boolean /* false when flagged */ }[],
+             progress (0–100, overall), photo: { state: "none"|"training"|"ready", progress }, video: { state: "none"|"waiting"|"training"|"ready", progress },
+             cost /* spent so far */, trainedOn? /* shots kept for the last version */ }
+             // The LoRA is applied when version ≥ 1 and use is true, also while a retrain is in review/training.
+             // Token: first name, lower case, plus the version: "sienna_v2".
 Platform   "tiktok"|"instagram"|"facebook"|"youtube"|"x"
 Account    { modelId, platform: Platform, handle, connectedAt, canPostDirect: boolean /* false until that platform approves MUSE */ }
-Post       { id, modelId, takeId, platforms: Platform[], caption, aiLabel: boolean, paidPartnership: boolean,
-             when: "now"|ISO time, state: "scheduled"|"handoff"|"posted"|"failed", stats?: { views, likes, comments } }
+Post       { id, modelId, takeId, title, thumb: ImageRef, platforms: Platform[], caption, aiLabel: boolean, paidPartnership: boolean,
+             when: "now"|ISO time, state: "scheduled"|"handoff"|"posted"|"failed", createdAt, postedAt?, stats?: { views, likes, comments } }
 ApiEvent   { type: "job"|"balance"|"model"|"outfit"|"lora"|"post", job?, balance?, model?, outfit?, lora?, post?, takes?: Take[] }
 // Model also carries optional { personality, notes }.
+ConnectResponse { authUrl?: string /* real backend: open it for OAuth */, account?: Account /* mock: signed in already */ }
 ```
 
 ## Pricing (the same in every client and the server)
@@ -106,24 +113,27 @@ These are measured on an H100 with FlashAttention 3 and billed at $3.99/h. The u
 | `GET /v1/models/{id}/lora` | → `Lora` |
 | `POST /v1/models/{id}/lora/candidates` | → `Lora` (`building`, then `review` via a `lora` event). Generates 30 candidates. Charges $0.60. |
 | `PATCH /v1/models/{id}/lora/candidates/{cid}` `{keep}` | → `Lora` |
-| `POST /v1/models/{id}/lora/train` | → `Lora` (`training`). Needs 20+ kept. Charges the photo + video training price. Progress comes through `lora` events. |
-| `PATCH /v1/models/{id}/lora` `{use}` | → `Lora` |
+| `POST /v1/models/{id}/lora/train` | → `Lora` (`training`). Needs 20+ kept (`bad_request`). Charges the photo + video training price, (25 + 75) min / 60 × $3.99 = $6.65, or `insufficient_balance`. The per-job render limit doesn't apply. Progress comes through `lora` events; at 100 the state is `ready` and `version` goes up by one. Works from `review` (first time or retrain). |
+| `PATCH /v1/models/{id}/lora` `{use?, state?: "review"}` | → `Lora`. `use` switches it on or off for new renders. `state: "review"` on a `ready` LoRA is **Retrain**: back to the review grid with the same shots; the current version stays in use until the next one is ready. |
+
+The mock runs LoRA training 5× faster than its render speed (120× real time by default, like the prototype).
 
 ### Social accounts and posts (`plans/socials.md`)
 | | |
 |---|---|
 | `GET /v1/models/{id}/accounts` | → `Account[]` |
-| `POST /v1/models/{id}/accounts/{platform}/connect` | → `{ authUrl }` (OAuth). The mock connects immediately and returns the `Account`. |
+| `POST /v1/models/{id}/accounts/{platform}/connect` | → `ConnectResponse`. The real backend returns `{ authUrl }` (OAuth). The mock signs in after a short delay (≤ 0.9 s) and returns `{ account }`. Handles come from the model's name (`@sienna.vale`, `Sienna Vale` on YouTube, `Sienna Vale (Page)` on Facebook). |
 | `DELETE /v1/models/{id}/accounts/{platform}` | 204 |
-| `GET /v1/posts?state=` | → `Post[]` |
-| `POST /v1/posts` `{modelId, takeId, platforms, caption, aiLabel, paidPartnership, when}` | → `Post`. `aiLabel` and `paidPartnership` default to false and are only ever set by the user. Stage 1 returns `handoff` (the client opens each app). |
+| `GET /v1/posts?state=&modelId=` | → `Post[]`, newest first. Both filters are optional. |
+| `POST /v1/posts` `{modelId, takeId, platforms, caption, aiLabel, paidPartnership, when}` | → `Post`. `aiLabel` and `paidPartnership` default to false and are only ever set by the user. Only a JSON `true` turns a label on. Every platform must be connected for that model (`bad_request`). Stage 1: `when: "now"` returns `handoff` (the client opens each app); a scheduled post stays `scheduled` and turns `handoff` at its time (the client also sets a local notification). The mock then marks a handed-off post `posted` with stats after a moment (`post` event), standing in for the stats read-back. |
 | `DELETE /v1/posts/{id}` | 204 (cancels a scheduled post) |
 
 ### Gaps found while building the Mac app
 | | |
 |---|---|
-| `POST /v1/queue/run` | Starts queued jobs (the "Run queue" button). |
-| `PATCH /v1/models/{id}` `{name, niche, personality, notes, neverAdd}` / `DELETE /v1/models/{id}` | Edit and delete a model, including its LoRA and training set. |
+| `POST /v1/queue/run` | → `Job[]` it started. Starts `queued` jobs oldest first, charging each as it starts. Stops at the first one the balance can't cover (those stay queued); `insufficient_balance` if none could start. Jobs are queued with `JobRequest.queue: true`. |
+| `PATCH /v1/models/{id}` `{name?, niche?, personality?, notes?, neverAdd?}` | → `Model`, plus a `model` event. Only the fields sent change. An empty name is `bad_request`. |
+| `DELETE /v1/models/{id}` | 204. Also deletes her outfits, LoRAs and training set, linked accounts, and posts that haven't gone out. |
 
 ### Balance
 | | |
@@ -132,7 +142,7 @@ These are measured on an H100 with FlashAttention 3 and billed at $3.99/h. The u
 | `POST /v1/balance/topup` `{amount, method: "card"\|"usdt"\|"virtual"}` | → `Balance`. In the mock, no payment is taken. |
 
 ### Live events
-`GET /v1/events` is a `text/event-stream`. Each message is `data: <ApiEvent JSON>`. While a job runs, `job` events arrive about every 250 ms (`progress`, `step`, `phase`, `secondsLeft`). When the job finishes, a `job` event arrives with `state: "done"` and its new `takes`, or with `state: "failed"`, `error` and `refunded`. Each failure is followed by a `balance` event. Clients reconnect with backoff. The Android app turns finished and failed jobs into local notifications. A real backend can add FCM push behind the same events.
+`GET /v1/events` is a `text/event-stream`. Each message is `data: <ApiEvent JSON>`. While a job runs, `job` events arrive about every 250 ms (`progress`, `step`, `phase`, `secondsLeft`). `lora` events carry training progress (about every 250 ms) and the `building` → `review` change. `post` events carry `handoff`/`posted` changes. When the job finishes, a `job` event arrives with `state: "done"` and its new `takes`, or with `state: "failed"`, `error` and `refunded`. Each failure is followed by a `balance` event. Clients reconnect with backoff. The Android app turns finished and failed jobs into local notifications. A real backend can add FCM push behind the same events.
 
 ### Developer (mock only)
 | | |
