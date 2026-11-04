@@ -42,12 +42,12 @@ Status tags: **[core]** needed for v1 · **[later]** after v1 · **[idea]** not 
   - Show a hint that going above 10 is rarely worth it.
 - **[core]** **Engine choice:**
   - **H3 (multi-reference)**: identity from the full reference set.
-  - **Viggle-Animate (fast, exact timing)**: identity from one repainted frame. Tested: ~95s per 5s clip on an H200 NVL, and fast moves stay in sync.
+  - **Viggle-Animate (experimental, behind a flag)**: fast and exact timing, but the face is less sharp and warps slightly. Identity comes from one repainted frame. Tested: ~95s per 5s clip on an H200 NVL.
   - See the test results file for the trade-offs.
 - **[core]** Keep the original audio (default) or replace it.
 - **[core]** The prompt is built automatically from the character, outfit, never-add list and preset. An advanced users' panel shows and edits it.
 - **[core]** Number of takes (different seeds), compared side by side.
-- **[later]** "Lock motion" mode using the pose ControlNet, for exact timing on very fast dances (only available for the FL2VA mode).
+- **[later]** "Lock motion" for very fast dances. Candidates: Viggle + face fix (Option A), the pose ControlNet (FL2VA only), or someday our own trained add-on (Option B).
 
 ## 3. Background
 - **[core]** Keep the clip's real background (default, tested).

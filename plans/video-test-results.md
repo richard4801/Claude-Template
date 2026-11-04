@@ -113,6 +113,16 @@ Remaining speed levers, roughly best first:
   - Weak lip sync without `--audio`.
   - One person per clip.
 
+## 4c. Engine decision (2026-11-04)
+- **Main engine: H3 Ref2VA + FlashAttention 3, 10 steps.** It's preferred for sharpness and a stable face, with identity from the full reference set.
+- **Viggle-Animate: experimental only.** Its motion and timing are exact, but the face is less sharp and warps slightly. It's a full fine-tune of H3 distilled to 4 steps, and identity comes from a single frame.
+- **Option A (next, when funded):** our own pipeline: Viggle for motion → a face restore/identity pass from our close-ups (→ maybe an H3 polish pass). Cheap to test (~$1–2).
+- **Option B (someday idea, not planned):** train our own H3 Ref2VA add-on (LoRA) that follows the source frame by frame while keeping H3's multi-reference identity and 10-step sharpness.
+  - Hardest part: hundreds of matched training examples.
+  - Rough cost: ~$100–500+ GPU and weeks of work; research risk.
+  - Revisit in Phase 2 or if Viggle's next model doesn't fix the face.
+  - Tooling exists (DiffSynth H3 LoRA training scripts).
+
 ## 5. Setup gotchas (already built into the scripts)
 - `pip install -e DiffSynth-Studio[all]` pulls a CUDA-13 PyTorch build. On pods with a CUDA 12.4 driver, pin `torch==2.10.*` with the cu126 build. H100 pods have a CUDA-13 driver, so the cu130 build works there.
 - Use **torchcodec 0.10** with torch 2.10. 0.17 fails to load, and the clip audio then silently comes back empty.
