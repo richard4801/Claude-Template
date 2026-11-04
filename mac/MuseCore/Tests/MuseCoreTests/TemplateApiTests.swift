@@ -52,6 +52,7 @@ final class TemplateApiTests: XCTestCase {
         let boss = client()
         let ownerAuth = try await boss.signIn(SignInRequest(email: "jen@studio.com", password: "x"))
         await boss.setToken(ownerAuth.token)
+        try await boss.ensureStudioFunds()
         let starters: [MuseTemplate]
         do {
             starters = try await boss.listTemplates(TemplateQuery(scope: .mine))
@@ -124,7 +125,7 @@ final class TemplateApiTests: XCTestCase {
         let again = try await boss.templatePrompt(id: created.id, TemplatePromptRequest(modelId: sienna.id, outfitId: sienna.outfitIds.first, shuffleSeed: 42))
         XCTAssertEqual(again.variation, ownerView.variation)
 
-        // A member shoots with it: $0.12 from their wallet, template fields on each still, the public prompt only.
+        // A member shoots with it: the photos' cost from their wallet (an estimate held, settled to the exact amount), template fields on each still, the public prompt only.
         let w0 = try await member.wallet()
         let shots = try await member.shoot(.template(created.id, modelId: sienna.id, outfitId: sienna.outfitIds.first ?? "", direction: "looking back",
                                                      shuffleSeed: 7))
@@ -137,7 +138,11 @@ final class TemplateApiTests: XCTestCase {
             XCTAssertNil(s.variation)
         }
         let w1 = try await member.wallet()
-        XCTAssertEqual(w1.usd, w0.usd - Pricing.shootCost, accuracy: 0.011)
+        // Older servers charged a fixed $0.12; pass-through servers settle to the exact cost (about $0.46 for 4 photos).
+        let charged = w0.usd - w1.usd
+        XCTAssertGreaterThan(charged, 0)
+        XCTAssertLessThanOrEqual(charged, PhotoPricing.standard.shoot(count: shots.count) * 2 + 0.01)
+        XCTAssertEqual(shots.reduce(0) { $0 + $1.cost }, charged, accuracy: 0.011 * Double(shots.count))
         let rawTakes = try await raw("v1/takes", token: auth.token)
         XCTAssertFalse(rawTakes.contains("zz-secret"), "hidden layers reached a non-owner through takes")
         let detail = try await boss.template(id: created.id)

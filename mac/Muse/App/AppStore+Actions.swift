@@ -22,13 +22,11 @@ extension AppStore {
             clip = c
             clipFile = url
             clipThumb = thumb.map { ImageRef(url: $0.absoluteString) }
-            if c.durationSec <= ClipUse.first.sampleSeconds { use = .full }
             if c.ok {
                 showToast("Clip checked · \(Pricing.trimNum(c.durationSec))s · \(c.width)×\(c.height). Ready to generate.")
             } else {
                 showToast("This clip needs fixing before you can generate. See the clip check.")
             }
-            creatingStarted()
         }
     }
 
@@ -50,23 +48,14 @@ extension AppStore {
 
     // MARK: Studio
 
-    func setSteps(_ n: Int) {
-        let v = Pricing.clampSteps(n)
-        guard v != steps else { return }
-        steps = v
-    }
-
     func setTakes(_ n: Int) { takeCount = Pricing.clampTakes(n) }
 
     func resetStudio() {
-        steps = defaultSteps
-        engine = defaultEngine
         quality = videoFeatures.isAvailable(defaultQuality) ? defaultQuality : videoFeatures.defaultOption
         takeCount = 1
         lipSync = false
         keepAudio = true
         background = "keep"
-        use = .first
         showToast("Settings reset")
     }
 
@@ -81,7 +70,6 @@ extension AppStore {
 
     /// ⌘↵ and the Generate button. Blocked when the clip fails its checks or the balance is too low.
     func generate() {
-        guard warmPrompt == nil else { return }
         if clipBad {
             showToast("Fix the clip first: one person, no watermark, 15s or less")
             return
@@ -97,7 +85,7 @@ extension AppStore {
         }
         let cost = totalCost
         if warnOverBudget && cost > balance.perJobLimit {
-            let fix = isExactEdit ? "Lower the steps or takes." : "Pick a lower quality or fewer takes."
+            let fix = quality.isReplicate ? "Pick a lower quality or fewer takes." : "Try fewer takes, or Draft."
             showToast("This render costs \(Pricing.money(cost)), over your \(Pricing.money(balance.perJobLimit)) per-job cap. \(fix)")
             return
         }
@@ -108,14 +96,11 @@ extension AppStore {
             req = JobRequest.replicate(title: title, modelId: m.id, outfitId: o.id, clipId: c.id, quality: quality, takes: takeCount, keepAudio: keepAudio,
                                        clipSeconds: c.durationSec)
         } else {
-            req = JobRequest(title: title, modelId: m.id, outfitId: o.id, clipId: c.id, engine: engine.rawValue,
-                             steps: engine == .viggle ? 4 : steps, use: use.rawValue, takes: takeCount, keepAudio: keepAudio, lipSync: lipSync,
-                             background: background, backgroundMotion: motion, clipSeconds: c.durationSec)
+            // Edit / Fast · beta: always the whole clip with the default steps.
+            req = JobRequest.addOn(quality, title: title, modelId: m.id, outfitId: o.id, clipId: c.id, takes: takeCount, keepAudio: keepAudio,
+                                   lipSync: lipSync, background: background, backgroundMotion: motion, clipSeconds: c.durationSec)
         }
-        let n = takeCount
-        // Creating starts: offer a warm GPU first (every time, when none is running), then render whatever the answer.
-        if creatingStarted(then: { [weak self] in self?.submit(req, cost: cost, takes: n) }) { return }
-        submit(req, cost: cost, takes: n)
+        submit(req, cost: cost, takes: takeCount)
     }
 
     private func submit(_ req: JobRequest, cost: Double, takes n: Int) {
@@ -140,10 +125,7 @@ extension AppStore {
     func loadIntoStudio(_ j: Job) {
         modelId = j.modelId
         outfitIdByModel[j.modelId] = j.outfitId
-        quality = j.videoQuality
-        if j.engine != .replicate { engine = j.engine }
-        steps = Pricing.clampSteps(j.request.steps)
-        use = ClipUse(id: j.request.use)
+        quality = videoFeatures.isAvailable(j.videoQuality) ? j.videoQuality : quality
         takeCount = Pricing.clampTakes(j.request.takes)
         keepAudio = j.request.keepAudio
         lipSync = j.request.lipSync
@@ -152,12 +134,27 @@ extension AppStore {
         go(.studio)
     }
 
+    /// Upscale a finished take (1080p / 2K / 4K). The server answers `upscale_unavailable` ("Upscale is coming soon") until it ships.
+    func upscale(_ take: Take, size: UpscaleSize) {
+        guard !upscaling else { return }
+        upscaling = true
+        perform { [self] in
+            defer { upscaling = false }
+            let j = try await api.upscale(takeId: take.id, UpscaleRequest(size: size.id))
+            upsert(j)
+            balance = try await api.balance()
+            showToast("Upscaling to \(size.label) · \(Pricing.money(j.cost)). You'll get a notification when it's done.", action: "Open queue") { [weak self] in
+                self?.go(.queue)
+            }
+        }
+    }
+
     // MARK: Queue
 
     func runQueue() {
         perform { [self] in
             try await api.runQueue()
-            showToast("GPU starting · about 1–2 min")
+            showToast("Starting the queue")
         }
     }
 
@@ -196,7 +193,7 @@ extension AppStore {
     }
 
     func watch(_ j: Job) {
-        if let t = takes.first(where: { $0.jobId == j.id }) { openTake(t.id) } else { showToast(j.isDone ? "No take found for this job" : "Still rendering · \(j.phase)") }
+        if let t = takes.first(where: { $0.jobId == j.id }) { openTake(t.id) } else { showToast(j.isDone ? "No take found for this job" : j.progressLine) }
     }
 
     func copy(_ text: String, toast message: String = "Prompt copied") {
@@ -291,7 +288,7 @@ extension AppStore {
             if currentOutfit == nil { showToast("Add an outfit first", action: "Add outfit") { [weak self] in self?.openOutfitSheet(for: nil) } }
             return
         }
-        if Pricing.shootCost > balance.balance {
+        if shootEstimate > balance.balance {
             notEnough("for a shoot")
             return
         }
@@ -368,7 +365,7 @@ extension AppStore {
             let r = try await api.fillAngles(modelId: m.id)
             replaceModel(r.model)
             balance = try await api.balance()
-            showToast("Retaking \(angle.label.lowercased()) from your other images · \(Pricing.money(r.cost))")
+            showToast("Retaking \(angle.label.lowercased()) from your other images · \(PhotoPricing.label(r.cost))")
         }
     }
 
@@ -515,7 +512,7 @@ extension AppStore {
     func fillMissing() {
         let missing = SheetAngle.allCases.filter { create.slots[$0] == nil }
         guard !missing.isEmpty else { return }
-        let cost = Pricing.fillAnglesCost(missing.count)
+        let cost = sheetAnglesEstimate(missing.count)
         if cost > balance.balance { notEnough(""); return }
         withAnimation { for a in missing { create.slots[a] = .busy } }
         perform { [self] in
@@ -575,7 +572,7 @@ extension AppStore {
             showToast(d.mode == .photo ? "Drop a product photo first" : "Drop your angle images first")
             return
         }
-        if d.mode != .own && Pricing.outfitSetCost > balance.balance {
+        if d.mode != .own && outfitSetEstimate > balance.balance {
             notEnough("")
             return
         }
@@ -618,11 +615,27 @@ extension AppStore {
 
     // MARK: Credits and developer
 
-    func topUp(method: String) {
-        let amount = topUpAmount
+    /// The owner records a top-up of the studio balance ("Added $20"). Servers without the studio balance (server/mock) take
+    /// the older POST /v1/balance/topup. Returns through `done` so the form can clear itself.
+    func addTopUp(amount: Double, note: String, paidAt: Date?, done: @escaping @MainActor () -> Void = {}) {
+        let rec = TopUpRecord(amountUsd: amount, note: note, paidAt: paidAt.map { Int64(min($0, Date()).timeIntervalSince1970 * 1000) })
+        guard rec.isValid else {
+            showToast("Enter an amount between $0.01 and $10,000")
+            return
+        }
+        guard !topUpBusy else { return }
+        topUpBusy = true
         perform { [self] in
-            balance = try await api.topUp(TopUpRequest(amount: amount, method: method))
-            showToast("\(Pricing.money(amount)) added")
+            defer { topUpBusy = false }
+            do {
+                studioBalance = try await api.recordTopUp(rec)
+            } catch let e as ApiError where e.code == "not_found" || e.code == "http_404" {
+                _ = try await api.topUp(TopUpRequest(amount: rec.amountUsd, note: rec.note))
+            }
+            balance = try await api.balance()
+            wallet = try? await api.wallet()
+            showToast("Added \(Pricing.money(rec.amountUsd)) to the studio balance")
+            done()
         }
     }
 
@@ -765,7 +778,7 @@ extension AppStore {
     func setFailNext() {
         perform { [self] in
             try await api.setFailNext(true)
-            showToast("The next render will fail at step 3")
+            showToast("The next render will fail partway")
         }
     }
 
@@ -820,19 +833,13 @@ extension AppStore {
             PaletteCommand(title: "Choose a clip…", icon: "film", shortcut: "") { [weak self] in self?.go(.studio); self?.pickClip() },
             PaletteCommand(title: "Run queue", icon: "play.fill", shortcut: "") { [weak self] in self?.runQueue() },
         ]
-        if warmAvailable && warmOn {
-            all.append(PaletteCommand(title: "Turn off the warm GPU", icon: "flame", shortcut: "") { [weak self] in self?.turnOffWarm() })
-        } else if warmAvailable && isExactEdit {
-            all.append(PaletteCommand(title: "Keep GPU warm…", icon: "flame", shortcut: "") { [weak self] in self?.setWarmSwitch(true) })
-        }
         if isOwner {
             let owner: [PaletteCommand] = [
                 PaletteCommand(title: "Members", icon: "person.2", shortcut: "⌘8") { [weak self] in self?.go(.members) },
                 PaletteCommand(title: "Invite someone", icon: "envelope", shortcut: "") { [weak self] in self?.go(.members) },
-                PaletteCommand(title: "Studio settings", icon: "building.2", shortcut: "") { [weak self] in
-                    self?.settingsSection = .studio
-                    self?.go(.settings)
-                },
+                PaletteCommand(title: "Studio settings", icon: "building.2", shortcut: "") { [weak self] in self?.openSettings(.studio) },
+                PaletteCommand(title: "Engines", icon: "server.rack", shortcut: "") { [weak self] in self?.openSettings(.engines) },
+                PaletteCommand(title: "Add a top-up", icon: "plus.circle", shortcut: "") { [weak self] in self?.go(.credits) },
             ]
             all += owner
         }

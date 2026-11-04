@@ -80,7 +80,7 @@ final class MockServerTests: XCTestCase {
         let shots = try await api.shoot(ShootRequest(modelId: sienna.id, outfitId: sienna.outfitIds[0], scene: "Café window", prompt: "p", count: 4))
         XCTAssertEqual(shots.count, 4)
         XCTAssertTrue(shots.allSatisfy { !$0.isVideo })
-        let topped = try await api.topUp(TopUpRequest(amount: 10, method: "usdt"))
+        let topped = try await api.topUp(TopUpRequest(amount: 10, note: "Mac contract test"))
         XCTAssertGreaterThan(topped.balance, 10)
         try await api.runQueue() // not in the contract: must be a harmless no-op
         try await api.setFailNext(false)

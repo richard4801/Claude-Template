@@ -51,7 +51,7 @@ struct ProfileLoraCard: View {
                 Text(store.loraLine(l)).font(t.body(14, .bold))
                 Muted(l.version > 0 && l.state == "ready"
                       ? "Trained on \(l.trainedOn ?? l.kept) shots you approved"
-                      : "Train a photo and a video LoRA from \(LoraPricing.candidates) shots you approve · about \(Pricing.money(LoraPricing.totalCost))")
+                      : "Train a photo and a video LoRA from \(LoraPricing.candidates) shots you approve · about \(Pricing.money(store.loraSetEstimate + LoraPricing.trainCost))")
             }
             Spacer(minLength: 8)
             if l.state == "training" { ProgressLine(value: l.progress / 100).frame(width: 120) }
@@ -202,7 +202,7 @@ struct LoraView: View {
     private var info: some View {
         ListBox {
             ListRow(icon: "camera", title: "Photo LoRA", hint: "Photoshoots · ~\(Int(LoraPricing.photoMinutes)) min · \(Pricing.money(LoraPricing.photoCost))") { EmptyView() }
-            ListRow(icon: "video", title: "Video LoRA", hint: "H3 videos · ~\(Int(LoraPricing.videoMinutes)) min · \(Pricing.money(LoraPricing.videoCost))", last: true) { EmptyView() }
+            ListRow(icon: "video", title: "Video LoRA", hint: "Videos · ~\(Int(LoraPricing.videoMinutes)) min · \(Pricing.money(LoraPricing.videoCost))", last: true) { EmptyView() }
         }
     }
 
@@ -262,8 +262,8 @@ struct LoraView: View {
                 .font(t.body(13))
                 .fixedSize(horizontal: false, vertical: true)
             info
-            MButton("Build training set · \(Pricing.money(LoraPricing.setCost))", kind: .primary, size: .big) { store.buildTrainingSet(m) }
-            Muted("About \(Pricing.money(LoraPricing.totalCost)) in all: \(Pricing.money(LoraPricing.setCost)) for the training set and \(Pricing.money(LoraPricing.trainCost)) to train. Estimates until we've measured a real run.")
+            MButton("Build training set · \(PhotoPricing.label(store.loraSetEstimate))", kind: .primary, size: .big) { store.buildTrainingSet(m) }
+            Muted("About \(Pricing.money(store.loraSetEstimate + LoraPricing.trainCost)) in all: about \(Pricing.money(store.loraSetEstimate)) for the training set and \(Pricing.money(LoraPricing.trainCost)) to train. Estimates until we've measured a real run.")
         }
     }
 

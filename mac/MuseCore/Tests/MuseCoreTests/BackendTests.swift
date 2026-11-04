@@ -22,14 +22,23 @@ final class ClipAndClockTests: XCTestCase {
     func testJobClockPhases() {
         let req = JobRequest(title: "t", modelId: "m", outfitId: "o", clipId: "c")
         let total = Pricing.totalSeconds(req.spec)
-        XCTAssertEqual(JobClock.progress(req, elapsed: 0).phase, "Starting GPU · ~11 min left")
+        XCTAssertEqual(JobClock.progress(req, elapsed: 0).phase, "Getting ready · ~11 min left")
         let mid = JobClock.progress(req, elapsed: total / 2)
-        XCTAssertTrue(mid.phase.hasPrefix("step 5/10 · "), mid.phase)
+        XCTAssertEqual(mid.step, 5, "step is kept for progress maths")
+        XCTAssertTrue(mid.phase.hasPrefix("Rendering · "), mid.phase)
         XCTAssertEqual(JobClock.progress(req, elapsed: total).phase, "Done")
         XCTAssertEqual(JobClock.progress(req, elapsed: total).progress, 100)
         var two = req
         two.takes = 2
-        XCTAssertTrue(JobClock.progress(two, elapsed: Pricing.totalSeconds(two.spec) * 0.75).phase.hasPrefix("take 2/2 · step"))
+        XCTAssertTrue(JobClock.progress(two, elapsed: Pricing.totalSeconds(two.spec) * 0.75).phase.hasPrefix("take 2/2 · Rendering"))
+        var lip = req
+        lip.lipSync = true
+        XCTAssertTrue(JobClock.progress(lip, elapsed: Pricing.totalSeconds(lip.spec) - 60).phase.hasPrefix("Lip sync · "))
+        // Every phase is member-safe: no GPU, steps or start-up.
+        for r in [req, two, lip, JobRequest(title: "t", modelId: "m", outfitId: "o", clipId: "c", engine: "viggle")] {
+            let t = Pricing.totalSeconds(r.spec)
+            for f in stride(from: 0.0, through: 1.0, by: 0.02) { XCTAssertTrue(MemberText.isSafe(JobClock.progress(r, elapsed: t * f).phase)) }
+        }
         XCTAssertEqual(JobClock.leftText(40.2), "~41s left")
         XCTAssertEqual(JobClock.leftText(300), "~5 min left")
         XCTAssertEqual(JobClock.progress(req, elapsed: JobClock.failAt(req)).step, 3)
@@ -45,7 +54,7 @@ final class CodingTests: XCTestCase {
         let j = try JSONDecoder().decode(Job.self, from: Data(json.utf8))
         XCTAssertEqual(j.request.steps, 15)
         XCTAssertEqual(j.request.engine, "h3")
-        XCTAssertEqual(j.engineLabel, "Exact edit · 15 steps")
+        XCTAssertEqual(j.engineLabel, "Edit")
         XCTAssertTrue(j.isRunning)
         XCTAssertEqual(j.createdAt, 1_762_243_200_000)
         XCTAssertNil(j.error)
@@ -170,7 +179,8 @@ final class FakeAPITests: XCTestCase {
             failed = e.job
             break
         }
-        XCTAssertEqual(failed?.error, "The GPU disconnected at step 3.")
+        XCTAssertEqual(failed?.error, "Something went wrong · you weren't charged")
+        XCTAssertEqual(failed?.failureLine, "Something went wrong · you weren't charged")
         XCTAssertEqual(failed?.refunded ?? 0, job.cost, accuracy: 1e-12)
         let after = try await api.balance().balance
         XCTAssertEqual(after, before, accuracy: 1e-9)
@@ -210,7 +220,7 @@ final class FakeAPITests: XCTestCase {
         let m2 = try await api.setSlot(modelId: m.id, slot: "face", SetSlotRequest(image: img))
         XCTAssertEqual(m2.filled, 1)
         let fill = try await api.fillAngles(modelId: m.id)
-        XCTAssertEqual(Pricing.money(fill.cost), "$0.10")
+        XCTAssertEqual(PhotoPricing.label(fill.cost), "about $0.51", "5 angles × about $0.10")
         XCTAssertEqual(fill.model.slots.filter(\.busy).count, 5)
         var done: MuseModel?
         for await e in events where e.type == "model" {
@@ -252,6 +262,6 @@ final class FakeAPITests: XCTestCase {
         let all = try await api.listTakes()
         XCTAssertFalse(all.contains { $0.id == shots[1].id })
         let b = try await api.topUp(TopUpRequest(amount: 25))
-        XCTAssertEqual(Pricing.money(b.balance), "$30.95")
+        XCTAssertEqual(Pricing.money(b.balance), "$30.61", "6.07 − about 0.46 for the shoot + 25")
     }
 }

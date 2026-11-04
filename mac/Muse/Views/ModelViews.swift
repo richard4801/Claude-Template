@@ -317,7 +317,7 @@ struct CreateModelView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Fill missing angles from your images").font(t.body(14, .bold))
-                            Muted("Optional. AI makes the \(missing) empty angle\(missing > 1 ? "s" : "") from what you uploaded · \(Pricing.money(Pricing.fillAnglesCost(missing)))")
+                            Muted("Optional. AI makes the \(missing) empty angle\(missing > 1 ? "s" : "") from what you uploaded · \(PhotoPricing.label(store.sheetAnglesEstimate(missing)))")
                         }
                         Spacer()
                         MButton("Fill \(missing)") { store.fillMissing() }

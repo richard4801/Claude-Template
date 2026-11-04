@@ -11,17 +11,16 @@ public enum LoraPricing {
     public static let candidates = 30
     /// The user must keep at least this many to train.
     public static let minKept = 20
-    public static let perCandidate = 0.02
     public static let photoMinutes = 25.0
     public static let videoMinutes = 75.0
 
-    /// Building the training set: 30 × $0.02 = $0.60.
-    public static var setCost: Double { Double(candidates) * perCandidate }
+    /// Building the training set: an estimate (30 new photos, "about $3.03"); it settles to the exact cost.
+    public static var setCost: Double { PhotoPricing.standard.loraSet() }
     public static var photoCost: Double { photoMinutes / 60 * Pricing.gpuPerHour }
     public static var videoCost: Double { videoMinutes / 60 * Pricing.gpuPerHour }
-    /// Training both LoRAs: (25 + 75) min on an H100 at $3.99/h ≈ $6.65.
+    /// Training both LoRAs: (25 + 75) min at $3.99/h ≈ $6.65.
     public static var trainCost: Double { (photoMinutes + videoMinutes) / 60 * Pricing.gpuPerHour }
-    /// "about $7.25" in total.
+    /// "about $9.68" in total.
     public static var totalCost: Double { setCost + trainCost }
     /// "~1 h 40".
     public static var timeLabel: String {

@@ -1,54 +1,66 @@
 import Foundation
 
-/// Video engine. `replicate` is MiniMax H3 hosted on Replicate (Draft / Standard / HD, the default on servers that have it),
-/// `h3` is our own RunPod H3 ("Exact edit"), `viggle` is "Fast · beta" (plans/api.md "Video engines and quality").
+/// Video engine (wire values only; members never see these names). `replicate` renders Draft / Standard / HD, `h3` is the
+/// **Edit** add-on, `viggle` is **Fast · beta** (plans/api.md "App clean-up" §2).
 public enum Engine: String, Codable, CaseIterable, Sendable {
     case replicate
     case h3
     case viggle
 
+    /// What members see.
     public var label: String {
         switch self {
         case .replicate: return "Standard"
-        case .h3: return "Exact edit"
+        case .h3: return "Edit"
         case .viggle: return "Fast · beta"
         }
     }
 
-    /// Runs on our own GPU (start-up, warm-up, Keep GPU warm).
-    public var usesOurGpu: Bool { self != .replicate }
+    /// Runs on the add-on engine (start-up, Keep add-on engine ready).
+    public var isAddOnEngine: Bool { self != .replicate }
 
     public init(id: String) { self = Engine(rawValue: id) ?? .h3 }
 }
 
-/// The video studio's Quality picker: Draft / Standard / HD on Replicate, or Exact edit (H3 on our GPU). Default Draft (H3 Lite),
-/// the owner's choice on 2026-11-04 (plans/api.md: `JobRequest.quality` and `features.video.defaultQuality` default to "draft").
+/// The video studio's choice: **Render** (Draft / Standard / HD) or an **add-on** (Edit, Fast · beta). Default Draft,
+/// the owner's choice on 2026-11-04 (`features.video.defaultQuality`).
 public enum VideoQuality: String, Codable, CaseIterable, Sendable, Identifiable {
     case draft
     case standard
     case hd
-    case exact
+    case edit
+    case fast
 
     public var id: String { rawValue }
     public static let `default` = VideoQuality.draft
+    /// The Render picker, in order.
+    public static let renders: [VideoQuality] = [.draft, .standard, .hd]
+    /// The add-ons that render a clip (Upscale works on a finished take instead).
+    public static let addOns: [VideoQuality] = [.edit, .fast]
 
-    public init(id: String?) { self = VideoQuality(rawValue: id ?? "") ?? .default }
+    /// Unknown or missing ids are the default. "exact" (older servers and saved settings) is Edit.
+    public init(id: String?) {
+        if id == "exact" { self = .edit; return }
+        self = VideoQuality(rawValue: id ?? "") ?? .default
+    }
 
     public var label: String {
         switch self {
         case .draft: return "Draft"
         case .standard: return "Standard"
         case .hd: return "HD"
-        case .exact: return "Exact edit"
+        case .edit: return "Edit"
+        case .fast: return "Fast · beta"
         }
     }
 
     public var detail: String {
         switch self {
-        case .draft: return "768P · lite"
+        case .draft: return "Quick preview · 768P"
         case .standard: return "768P"
         case .hd: return "2K"
-        case .exact: return "Frame-by-frame · slower · GPU start-up"
+        case .edit: return "Swaps her into every frame of the whole clip"
+        case .fast: return "Quicker and rougher · beta"
         }
     }
 
@@ -56,7 +68,7 @@ public enum VideoQuality: String, Codable, CaseIterable, Sendable, Identifiable 
         switch self {
         case .draft, .standard: return "768P"
         case .hd: return "2K"
-        case .exact: return nil
+        case .edit, .fast: return nil
         }
     }
 
@@ -66,24 +78,37 @@ public enum VideoQuality: String, Codable, CaseIterable, Sendable, Identifiable 
         case .draft: return 0.02
         case .standard: return 0.08
         case .hd: return 0.13
-        case .exact: return nil
+        case .edit, .fast: return nil
         }
     }
 
-    public var isReplicate: Bool { self != .exact }
-    public var engine: Engine { isReplicate ? .replicate : .h3 }
+    public var isReplicate: Bool { VideoQuality.renders.contains(self) }
+    public var isAddOn: Bool { !isReplicate }
+    public var engine: Engine {
+        switch self {
+        case .draft, .standard, .hd: return .replicate
+        case .edit: return .h3
+        case .fast: return .viggle
+        }
+    }
     /// The `quality` field of a JobRequest (replicate only).
     public var requestQuality: String? { isReplicate ? rawValue : nil }
 
-    /// The picker option for a job: replicate jobs by their quality, everything else is Exact edit.
+    /// The option a job was made with: replicate jobs by their quality, h3 = Edit, viggle = Fast · beta.
     public static func of(engine: Engine, quality: String?) -> VideoQuality {
-        engine == .replicate ? VideoQuality(id: quality).replicateOrDefault : .exact
+        switch engine {
+        case .replicate: return VideoQuality(id: quality).replicateOrDefault
+        case .h3: return .edit
+        case .viggle: return .fast
+        }
     }
 
-    var replicateOrDefault: VideoQuality { self == .exact ? .default : self }
+    /// Draft / Standard / HD as is; anything else is the default (Draft).
+    public var replicateOrDefault: VideoQuality { isReplicate ? self : .default }
 }
 
-/// Which part of the source clip is rendered.
+/// Which part of the source clip is rendered. Members always render the whole clip (the "first 5.2 s" choice is gone);
+/// it stays for the prototype pricing fixtures and older jobs.
 public enum ClipUse: String, Codable, CaseIterable, Sendable {
     case first
     case full
@@ -125,15 +150,25 @@ public struct RenderSpec: Equatable, Sendable {
         RenderSpec(engine: .replicate, use: .full, takes: takes, clipSeconds: clipSeconds, quality: quality, pricePerSec: pricePerSec)
     }
 
+    /// An add-on render as members make it: the whole clip and the default steps.
+    public static func addOn(_ q: VideoQuality, clipSeconds: Double?, takes: Int = 1, lipSync: Bool = false) -> RenderSpec {
+        RenderSpec(engine: q == .fast ? .viggle : .h3, use: .full, steps: Pricing.stepsDefault, lipSync: q == .edit && lipSync, takes: takes, clipSeconds: clipSeconds)
+    }
+
+    /// The studio's choice: Render (Draft / Standard / HD) or an add-on (Edit, Fast · beta).
+    public static func choice(_ q: VideoQuality, clipSeconds: Double?, takes: Int = 1, lipSync: Bool = false, pricePerSec: Double? = nil) -> RenderSpec {
+        q.isReplicate ? replicate(q, clipSeconds: clipSeconds, takes: takes, pricePerSec: pricePerSec) : addOn(q, clipSeconds: clipSeconds, takes: takes, lipSync: lipSync)
+    }
+
     public var isReplicate: Bool { engine == .replicate }
-    /// The Quality picker option this spec belongs to.
-    public var videoQuality: VideoQuality { isReplicate ? quality.replicateOrDefault : .exact }
+    /// The option this spec belongs to.
+    public var videoQuality: VideoQuality { isReplicate ? quality.replicateOrDefault : VideoQuality.of(engine: engine, quality: nil) }
     /// $ per output second for a replicate spec.
     public var replicatePricePerSec: Double { pricePerSec ?? quality.replicateOrDefault.defaultPricePerSec ?? 0.02 }
     /// Replicate's billed output length D (whole seconds, 4–15).
     public var replicateSeconds: Int { Pricing.replicateSeconds(clipSeconds) }
 
-    /// Seconds actually rendered (the prototype's `LENS()`): the first 5.2 s, or the whole clip up to H3's 15 s single-pass limit.
+    /// Seconds actually rendered (the prototype's `LENS()`): the first 5.2 s, or the whole clip up to the 15 s single-pass limit.
     /// Replicate always renders the whole clip (each take is trimmed back to its exact length).
     public var lengthSec: Double {
         if isReplicate { return min(clipSeconds ?? ClipUse.full.sampleSeconds, Pricing.maxClipSec) }
@@ -141,14 +176,6 @@ public struct RenderSpec: Equatable, Sendable {
         case .first: return min(ClipUse.first.sampleSeconds, clipSeconds ?? ClipUse.first.sampleSeconds)
         case .full: return min(clipSeconds ?? ClipUse.full.sampleSeconds, Pricing.maxClipSec)
         }
-    }
-
-    /// "First 5.2s" / "Full 9.4s" for the timeline's Use control.
-    public var useLabel: String { Self.useLabel(use, clipSeconds: clipSeconds) }
-
-    public static func useLabel(_ use: ClipUse, clipSeconds: Double?) -> String {
-        let len = RenderSpec(use: use, clipSeconds: clipSeconds).lengthSec
-        return (use == .first ? "First " : "Full ") + Pricing.trimNum(len) + "s"
     }
 }
 
@@ -168,14 +195,7 @@ public enum Pricing {
     public static let baseLen = 5.2
     public static let maxClipSec = 15.0
 
-    /// Photoshoot: 4 stills. plans/api.md fixes this at $0.12 for every client and the server
-    /// (the desktop prototype showed an older "$0.08").
-    public static let shootCost = 0.12
-    public static let shootLabel = "Shoot 4 · ~32s · $0.12"
-    /// Outfit set: 4 angles on one seed.
-    public static let outfitSetCost = 0.08
-    /// Character sheet: fill one missing angle from the user's images.
-    public static let fillAngleCost = 0.02
+    /// Photo prices are estimates now: `PhotoPricing` (plans/api.md "App clean-up" §3). Receipts show the exact settled amount.
     /// Default spend caps (Settings → Costs & limits).
     public static let perJobCap = 5.0
     public static let perDayCap = 15.0
@@ -218,9 +238,10 @@ public enum Pricing {
     /// " · 2 takes" when takes > 1.
     static func takesTail(_ takes: Int) -> String { takes > 1 ? " · \(takes) takes" : "" }
 
-    /// "about $0.56 · 7 s" (+ " · 2 takes"): the line under the Quality picker.
+    /// The line under the picker: "about $0.56 · 7 s" for Draft / Standard / HD, "about $0.67" for Edit and Fast · beta
+    /// (no minutes, no steps), + " · 2 takes".
     public static func priceLine(_ s: RenderSpec) -> String {
-        if !s.isReplicate { return "about \(money(totalCost(s))) · \(fmtMin(totalMin(s)))\(takesTail(s.takes))" }
+        if !s.isReplicate { return "about \(money(totalCost(s)))\(takesTail(s.takes))" }
         return "about \(money(totalCost(s))) · \(s.replicateSeconds) s\(takesTail(s.takes))"
     }
 
@@ -254,15 +275,17 @@ public enum Pricing {
     /// `fmtMin`: "38s" under two minutes, otherwise "10 min".
     public static func fmtMin(_ m: Double) -> String { m < 2 ? "\(jsRound(m * 60))s" : "\(jsRound(m)) min" }
 
-    /// "Generate · 10 min · $0.67", or "Generate 3 takes · 30 min · $2.02".
-    /// Replicate: "Generate · 7 s · $0.56" (+ " · 2 takes").
-    public static func genLabel(_ s: RenderSpec) -> String {
-        if s.isReplicate { return "Generate · \(s.replicateSeconds) s · \(money(totalCost(s)))\(takesTail(s.takes))" }
-        return "Generate\(s.takes > 1 ? " \(s.takes) takes" : "") · \(fmtMin(totalMin(s))) · \(money(totalCost(s)))"
+    /// The Generate button: "Generate · $0.56" (+ " · 2 takes"), for every option (plans/api.md "App clean-up" §2).
+    public static func genLabel(_ s: RenderSpec) -> String { "Generate · \(money(totalCost(s)))\(takesTail(s.takes))" }
+
+    /// The prototype's button ("Generate · 10 min · $0.67", "Generate 3 takes · 30 min · $2.02"), kept only to check the
+    /// prototype's pricing fixtures; the app shows `genLabel`.
+    static func prototypeGenLabel(_ s: RenderSpec) -> String {
+        "Generate\(s.takes > 1 ? " \(s.takes) takes" : "") · \(fmtMin(totalMin(s))) · \(money(totalCost(s)))"
     }
 
-    /// The hint under the steps control.
-    public static func stepsDelta(_ s: RenderSpec) -> String {
+    /// The prototype's hint under its steps control, kept only to check the prototype's pricing fixtures (members never see steps).
+    static func stepsDelta(_ s: RenderSpec) -> String {
         if s.steps == stepsDefault { return "Same quality as 15 or 20 steps in testing, for less time." }
         let d = Double(s.steps - stepsDefault) * secPerLen(s.lengthSec) / 60
         let c = d / 60 * gpuPerHour
@@ -271,25 +294,11 @@ public enum Pricing {
         return "\(sign)\(toFixed(abs(d), 1)) min · \(sign)\(money(abs(c))) vs 10 steps\(tail)"
     }
 
-    public enum BadgeStyle: Sendable { case normal, readout, sticker }
+    /// A typical render for the "≈ 30 Draft videos" hint: Draft on a 10 s clip.
+    public static var typicalVideo: Double { totalCost(.replicate(.draft, clipSeconds: 10)) }
 
-    /// Badge next to the steps value. `.readout` is Camera Body's caps readout, `.sticker` Creator Pop's sticker.
-    public static func stepsBadge(_ steps: Int, style: BadgeStyle = .normal) -> String {
-        switch style {
-        case .normal: return steps == stepsDefault ? "Recommended" : steps > stepsDefault ? "Rarely worth it" : "Below tested"
-        case .readout: return steps == stepsDefault ? "RECOMMENDED" : steps > stepsDefault ? "RARELY WORTH IT" : "BELOW TESTED"
-        case .sticker: return steps == stepsDefault ? "RECOMMENDED" : "TAKES LONGER"
-        }
-    }
-
-    /// Fill-missing-angles price, e.g. 3 missing → $0.06.
-    public static func fillAnglesCost(_ missing: Int) -> Double { fillAngleCost * Double(missing) }
-
-    /// The prototype's typical 10-step video price, shown as "Per video ~$0.66".
-    public static let typicalVideo = 0.66
-
-    /// "≈ 9 videos at 10 steps" (the prototype divides by its $0.66 typical price).
-    public static func videosLeft(_ balance: Double) -> Int { max(0, Int(floor(balance / typicalVideo))) }
+    /// "≈ 30 Draft videos": how many typical Draft renders a balance covers.
+    public static func videosLeft(_ balance: Double) -> Int { max(0, Int(floor(balance / typicalVideo + 1e-9))) }
 
     /// JavaScript `'$' + v.toFixed(2)`.
     public static func money(_ v: Double) -> String { "$" + toFixed(v, 2) }
@@ -337,4 +346,93 @@ public enum Pricing {
 public func formatClock(_ seconds: Double) -> String {
     let s = Pricing.jsRound(max(0, seconds))
     return String(format: "%02d:%02d", s / 60, s % 60)
+}
+
+/// Photo prices (plans/api.md "App clean-up" §3): every photo action holds an **estimate** and settles to the exact engine cost.
+/// `GET /v1/settings/studio` → `features.photo`. The formulas run in doubles, left to right, like the server and Android
+/// (shared fixture `photo_pricing_fixture.json`).
+public struct PhotoPricing: Codable, Hashable, Sendable {
+    public var perRun: Double
+    public var perInputMp: Double
+    public var perOutputMp: Double
+    public var perEdit: Double
+    public var refMp: Double
+    public var maxRefs: Int
+    public var loraShots: Int
+    public var estimates: Estimates?
+
+    public struct Estimates: Codable, Hashable, Sendable {
+        public var shoot: Double?
+        public var outfitSet: Double?
+        public var sheetAngle: Double?
+        public var loraSet: Double?
+        public init(shoot: Double? = nil, outfitSet: Double? = nil, sheetAngle: Double? = nil, loraSet: Double? = nil) {
+            self.shoot = shoot
+            self.outfitSet = outfitSet
+            self.sheetAngle = sheetAngle
+            self.loraSet = loraSet
+        }
+    }
+
+    public init(perRun: Double = 0.015, perInputMp: Double = 0.015, perOutputMp: Double = 0.015, perEdit: Double = 0.03, refMp: Double = 0.79, maxRefs: Int = 6,
+                loraShots: Int = 30, estimates: Estimates? = nil) {
+        self.perRun = perRun
+        self.perInputMp = perInputMp
+        self.perOutputMp = perOutputMp
+        self.perEdit = perEdit
+        self.refMp = refMp
+        self.maxRefs = maxRefs
+        self.loraShots = loraShots
+        self.estimates = estimates
+    }
+
+    enum CodingKeys: String, CodingKey { case perRun, perInputMp, perOutputMp, perEdit, refMp, maxRefs, loraShots, estimates }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        let z = PhotoPricing()
+        perRun = c.v(.perRun, z.perRun)
+        perInputMp = c.v(.perInputMp, z.perInputMp)
+        perOutputMp = c.v(.perOutputMp, z.perOutputMp)
+        perEdit = c.v(.perEdit, z.perEdit)
+        refMp = c.v(.refMp, z.refMp)
+        maxRefs = c.v(.maxRefs, z.maxRefs)
+        loraShots = c.v(.loraShots, z.loraShots)
+        estimates = c.o(.estimates)
+    }
+
+    /// The contract's defaults (FLUX.2 [pro] and the edit model's published prices), for servers that don't send `features.photo`.
+    public static let standard = PhotoPricing()
+
+    /// Megapixels of a shoot photo (1080×1920 asks for "2 MP") and of everything else.
+    public static let shootOutMp = 2.0
+    public static let otherOutMp = 1.0
+    public static let shootCount = 4
+
+    /// One new photo: perRun + perOutputMp × outMp + perInputMp × refMp × min(refs, maxRefs).
+    public func newShot(outMp: Double, refs: Int) -> Double {
+        perRun + perOutputMp * outMp + perInputMp * refMp * Double(min(max(0, refs), maxRefs))
+    }
+
+    /// A photoshoot of `count` photos (1–4).
+    public func shoot(count: Int = PhotoPricing.shootCount, refs: Int? = nil) -> Double {
+        Double(count) * newShot(outMp: PhotoPricing.shootOutMp, refs: refs ?? maxRefs)
+    }
+
+    /// An outfit set: the front is a new photo, ¾ / side / back are edits of it. "My own set" is free.
+    public func outfitSet(refs: Int? = nil) -> Double {
+        newShot(outMp: PhotoPricing.otherOutMp, refs: refs ?? maxRefs) + 3 * perEdit
+    }
+
+    /// Filling `missing` character-sheet angles.
+    public func sheetAngles(_ missing: Int, refs: Int? = nil) -> Double {
+        Double(missing) * newShot(outMp: PhotoPricing.otherOutMp, refs: refs ?? maxRefs)
+    }
+
+    /// The LoRA training set (`loraShots` photos).
+    public func loraSet(refs: Int? = nil) -> Double {
+        Double(loraShots) * newShot(outMp: PhotoPricing.otherOutMp, refs: refs ?? maxRefs)
+    }
+
+    /// "about $0.46".
+    public static func label(_ estimate: Double) -> String { "about " + Pricing.money(estimate) }
 }

@@ -11,7 +11,7 @@ struct SettingsView: View {
             PageHeader(eyebrow: "Preferences", title: "Settings")
             HStack(alignment: .top, spacing: 36) {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(SettingsSection.allCases.filter { $0 != .studio || store.isOwner }, id: \.self) { s in
+                    ForEach(SettingsSection.allCases.filter { !$0.ownerOnly || store.isOwner }, id: \.self) { s in
                         NavRow(icon: icon(s), title: s.title, on: store.settingsSection == s, compact: false, trailing: .none) { store.settingsSection = s }
                     }
                 }
@@ -28,6 +28,7 @@ struct SettingsView: View {
         case .defaults: return "slider.horizontal.3"
         case .costs: return "dollarsign.circle"
         case .studio: return "building.2"
+        case .engines: return "server.rack"
         case .notif: return "bell"
         case .developer: return "hammer"
         case .about: return "info.circle"
@@ -69,20 +70,8 @@ struct SettingsView: View {
         case .defaults:
             H2("Render defaults")
             ListBox {
-                ListRow(title: "Default steps", hint: "10 looked the same as 15 and 20 in testing") {
-                    NumStepper(value: store.defaultSteps, dec: {
-                        store.defaultSteps = Pricing.clampSteps(store.defaultSteps - 1)
-                        store.steps = store.defaultSteps
-                    }, inc: {
-                        store.defaultSteps = Pricing.clampSteps(store.defaultSteps + 1)
-                        store.steps = store.defaultSteps
-                    })
-                }
-                ListRow(title: "Default quality") {
-                    Seg(VideoQuality.allCases.map { ($0, $0.label) }, selection: $store.defaultQuality) { store.setQuality($0) }.frame(width: 380)
-                }
-                ListRow(title: "Exact edit engine") {
-                    Seg([(Engine.h3, "Exact edit"), (Engine.viggle, "Fast · beta")], selection: $store.defaultEngine) { store.engine = $0 }.frame(width: 260)
+                ListRow(title: "Default render", hint: "Add-ons (Edit, Fast · beta) are picked per video") {
+                    Seg(VideoQuality.renders.map { ($0, $0.label) }, selection: $store.defaultQuality) { store.setQuality($0) }.frame(width: 300)
                 }
                 ListRow(title: "Export size") { MonoValue("1080×1920 · 9:16") }
                 ListRow(title: "Keep test renders for", last: true) { MonoValue("30 days") }
@@ -99,17 +88,18 @@ struct SettingsView: View {
             HStack(spacing: 14) {
                 KPI(label: "Balance", value: Pricing.money(store.creditUsd), index: 0)
                 KPI(label: "This month", value: Pricing.money(store.balance.month), index: 1)
-                KPI(label: "Per video", value: "~\(Pricing.money(Pricing.typicalVideo))", index: 2)
+                KPI(label: "Draft video (10 s)", value: "~\(Pricing.money(Pricing.typicalVideo))", index: 2)
             }
             ListBox {
                 ListRow(icon: "checkmark.shield", title: "Spend cap per job", hint: store.isOwner ? "Change it in Settings → Studio" : "Set by the studio owner") { MonoValue(Pricing.money(store.balance.perJobLimit)) }
                 ListRow(icon: "checkmark.shield", title: store.isMember ? "My cap per day" : "Spend cap per day") { MonoValue(Pricing.money(store.balance.perDayLimit)) }
-                ListRow(icon: "bell", title: "Warn before a job goes over budget") { MToggle(isOn: $store.warnOverBudget) }
-                ListRow(icon: "slider.horizontal.3", title: "Shut down idle GPU after", last: true) { MonoValue("3 min") }
+                ListRow(icon: "bell", title: "Warn before a job goes over budget", last: true) { MToggle(isOn: $store.warnOverBudget) }
             }
             MButton("Credit", icon: "dollarsign.circle", kind: .primary) { store.go(.credits) }
         case .studio:
             StudioSettingsSection()
+        case .engines:
+            EnginesSettingsSection()
         case .notif:
             H2("Notifications")
             ListBox {
@@ -147,7 +137,7 @@ struct SettingsView: View {
             if let msg = store.offlineMessage { Note(icon: "wifi.exclamationmark", warn: true, msg) }
             H2("Testing")
             ListBox {
-                ListRow(title: "Fail the next render", hint: "It stops at step 3 and the cost is refunded, to test failure handling and notifications. Demo mode, server/mock, and dev servers only.") {
+                ListRow(title: "Fail the next render", hint: "It stops partway and the cost is refunded, to test failure handling and notifications. Demo mode, server/mock, and dev servers only.") {
                     MButton("Fail next", size: .small) { store.setFailNext() }
                 }
                 ListRow(title: "Reload everything", hint: "Fetches models, outfits, jobs, takes and balance again.", last: true) {
@@ -158,8 +148,6 @@ struct SettingsView: View {
             H2("About")
             ListBox {
                 ListRow(title: "Version") { MonoValue("\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))") }
-                ListRow(title: "Video model") { Text("MiniMax H3").font(t.body(13)) }
-                ListRow(title: "Lip sync") { Text("LatentSync").font(t.body(13)) }
                 ListRow(title: "Fonts", hint: "Instrument Serif, Archivo, IBM Plex Mono, Barlow, JetBrains Mono, Outfit, DM Mono, Bricolage Grotesque, Figtree (SIL OFL) · Permanent Marker (Apache 2.0)") { EmptyView() }
                 RowButton(title: "Terms of Service") { store.showToast("The Terms of Service open on the MUSE website") }
                 RowButton(title: "Acceptable Use Policy") { store.showToast("The Acceptable Use Policy opens on the MUSE website") }

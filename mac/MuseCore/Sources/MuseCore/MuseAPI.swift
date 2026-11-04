@@ -105,7 +105,10 @@ public protocol MuseAPI: AnyObject, Sendable {
     /// POST /v1/templates/{id}/prompt: the prompt view. Non-owners get the locked "Template: <name>" line.
     func templatePrompt(id: String, _ req: TemplatePromptRequest) async throws -> TemplatePrompt
 
-    // Keep GPU warm (plans/backend.md). One per user; billed by wall time from their credit.
+    /// POST /v1/takes/{id}/upscale {size}: an Upscale job on a finished take. `upscale_unavailable` while it's coming soon.
+    func upscale(takeId: String, _ req: UpscaleRequest) async throws -> Job
+
+    // Keep add-on engine ready (owner only; members get owner_only). Billed by wall time from the studio balance.
     /// GET /v1/gpu/warm
     func warmGpu() async throws -> WarmGpu
     /// POST /v1/gpu/warm {on, extend?}
@@ -113,12 +116,17 @@ public protocol MuseAPI: AnyObject, Sendable {
 
     // Balance
     func balance() async throws -> Balance
+    /// POST /v1/balance/topup: the owner records a top-up (server/mock: demo credit).
     func topUp(_ req: TopUpRequest) async throws -> Balance
+    /// GET /v1/studio/balance (owner): the owner-loaded studio balance with recent top-ups.
+    func studioBalance() async throws -> StudioBalance
+    /// POST /v1/studio/topups (owner): records "Added $20".
+    func recordTopUp(_ req: TopUpRecord) async throws -> StudioBalance
 
     // Developer
     func setFailNext(_ fail: Bool) async throws
 
-    /// Live job progress, balance, generation, LoRA, post and warm-GPU updates. Each call returns a new subscription.
+    /// Live job progress, balance, generation, LoRA, post and add-on engine updates. Each call returns a new subscription.
     func events() -> AsyncStream<ApiEvent>
 }
 

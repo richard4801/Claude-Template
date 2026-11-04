@@ -18,7 +18,7 @@ struct RootView: View {
             if store.postDraft != nil { PostSheetView().transition(.opacity) }
             if store.templateForm != nil { TemplateSheetView().transition(.opacity) }
             if store.paletteOpen { PaletteView().transition(.opacity) }
-            if store.warmPrompt != nil && store.user != nil { WarmPromptView().transition(.opacity) }
+            if store.warmPrompt != nil && store.isOwner { WarmPromptView().transition(.opacity) }
             ToastView()
         }
         .environment(\.theme, t)
@@ -40,9 +40,6 @@ struct Shell: View {
         GeometryReader { g in
             VStack(spacing: 0) {
                 TitleBar()
-                // Keep GPU warm: the bar on every screen while it's on, and the 5-minute warning under it.
-                if store.warmOn { WarmGpuBar().transition(.move(edge: .top).combined(with: .opacity)) }
-                if let w = store.warmWarning, store.warmOn { WarmWarningBanner(warning: w) }
                 HStack(spacing: 0) {
                     Sidebar(compact: g.size.width < 1240)
                     ZStack(alignment: .top) {
@@ -53,10 +50,7 @@ struct Shell: View {
                             Note(icon: "wifi.exclamationmark", warn: true, text: Text("\(msg) · ") + Text("Settings → Developer").bold())
                                 .frame(maxWidth: 560)
                                 .padding(.top, 10)
-                                .onTapGesture {
-                                    store.settingsSection = .developer
-                                    store.go(.settings)
-                                }
+                                .onTapGesture { store.openSettings(.developer) }
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -171,8 +165,9 @@ struct TitleBar: View {
                 if let r = store.runningJob {
                     Button { store.go(.queue) } label: {
                         HStack(spacing: 8) {
-                            LED(on: !r.isPaused)
-                            Text(r.isPaused ? "paused" : r.step == 0 ? (r.queuePosition.map { "#\($0) in line" } ?? "starting") : "step \(r.step)/\(r.totalSteps)").font(t.mono(12))
+                            LED(on: !r.isWaiting)
+                            Text(r.isWaiting ? (r.queuePosition.map { $0 <= 1 ? "Waiting to start" : "#\($0) in line" } ?? "Waiting to start") : "\(Int(r.progress.rounded()))%")
+                                .font(t.mono(12))
                             ProgressLine(value: r.progress / 100, height: 4).frame(width: 60)
                         }
                         .padding(.horizontal, 10)
@@ -180,9 +175,10 @@ struct TitleBar: View {
                         .background(Capsule().fill(t.surface2))
                     }
                     .buttonStyle(.plain)
-                    .help(r.waitLine ?? r.phase)
+                    .help(r.progressLine)
                 }
-                if store.warmAvailable && (store.isExactEdit || store.warmOn) { WarmTitleControl() }
+                // Keep add-on engine ready: the owner's small indicator, only while it's on.
+                if store.warmOn { WarmIndicator() }
                 ThemeDots()
                 Menu {
                     Text(store.user?.studioName ?? "Studio")
@@ -356,7 +352,7 @@ struct BalanceBox: View {
                 Text(Pricing.money(store.creditUsd))
                     .font(t.isA ? Fonts.font("Instrument Serif", 34, .regular) : t.mono(22, .medium))
                     .foregroundStyle(onDark ? .white : t.ink)
-                Text("≈ \(Pricing.videosLeft(store.creditUsd)) videos at 10 steps").font(t.body(12)).foregroundStyle(onDark ? .white.opacity(0.75) : t.muted)
+                Text("≈ \(Pricing.videosLeft(store.creditUsd)) Draft videos").font(t.body(12)).foregroundStyle(onDark ? .white.opacity(0.75) : t.muted)
                 GeometryReader { g in
                     ZStack(alignment: .leading) {
                         Capsule().fill(onDark ? .white.opacity(0.25) : t.line)

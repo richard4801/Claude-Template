@@ -24,13 +24,6 @@ struct MuseApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1440, height: 900)
         .commands { MuseCommands(store: store) }
-
-        // Keep GPU warm: a menu-bar indicator while it's on, so it's visible with the window hidden.
-        MenuBarExtra(isInserted: Binding(get: { store.user != nil && store.warmOn }, set: { _ in })) {
-            WarmMenuBarContent().environment(store)
-        } label: {
-            WarmMenuBarLabel().environment(store)
-        }
     }
 }
 
@@ -74,12 +67,8 @@ struct MuseCommands: Commands {
             }
             .keyboardShortcut(.return)
             .disabled(!signedIn)
-            Button("More Steps") { store.setSteps(store.steps + 1) }.disabled(!signedIn || !store.stepsActive)
-            Button("Fewer Steps") { store.setSteps(store.steps - 1) }.disabled(!signedIn || !store.stepsActive)
             Divider()
             Button("Run Queue") { store.runQueue() }.disabled(!signedIn || !store.jobs.contains(where: \.isQueued))
-            Button(store.warmOn ? "Turn Off Warm GPU" : "Keep GPU Warm…") { store.setWarmSwitch(!store.warmOn) }
-                .disabled(!signedIn || !store.warmAvailable || store.warmBusy || (!store.warmOn && !store.isExactEdit))
             Button("Show Shoot Prompt") {
                 store.shootTab = .prompt
                 store.go(.shoot)

@@ -170,7 +170,7 @@ extension AppStore {
             if currentOutfit == nil { showToast("Add an outfit first", action: "Add outfit") { [weak self] in self?.openOutfitSheet(for: nil) } }
             return
         }
-        if Pricing.shootCost > balance.balance {
+        if shootEstimate > balance.balance {
             notEnough("for a shoot")
             return
         }

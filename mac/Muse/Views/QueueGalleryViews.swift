@@ -18,12 +18,10 @@ struct QueueView: View {
             HStack(spacing: 14) {
                 HStack(spacing: 12) {
                     let rendering = active.contains { $0.isRunning && !$0.isWaiting }
-                    let paused = active.contains(where: \.isPaused)
                     LED(on: rendering).id(rendering)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(paused ? "Paused · GPU credit low" : rendering ? "H100 80GB · rendering" : r != nil ? "Waiting for a GPU" : "GPU is off").font(t.body(14, .bold))
-                        Muted(paused ? "The studio's RunPod balance is low. Jobs resume by themselves after a top-up."
-                              : r != nil ? "Your own GPU shuts down 3 min after your last job" : "Starts on demand · setup takes 1–2 min from the network volume")
+                        Text(rendering ? "Rendering" : r != nil ? MemberText.waitingToStart : "Nothing rendering").font(t.body(14, .bold))
+                        Muted(r.map { $0.progressLine } ?? "Renders start when you press Generate. You only pay for what you make.")
                     }
                     Spacer(minLength: 0)
                 }
@@ -49,7 +47,7 @@ struct QueueView: View {
             ForEach(store.visibleFailures) { f in
                 HStack(spacing: 12) {
                     Image(systemName: "exclamationmark.shield").font(.system(size: 16))
-                    (Text("Render failed · \(f.title)").bold() + Text(" · \(f.failureLine) \(Pricing.money(f.refunded)) refunded."))
+                    (Text("Render failed · \(f.title)").bold() + Text(" · \(f.failureLine)"))
                         .font(t.body(13))
                     Spacer()
                     MButton("Retry · \(Pricing.money(Pricing.totalCost(f.request.spec)))", size: .small) { store.retry(f) }
@@ -64,7 +62,7 @@ struct QueueView: View {
 
             SectionHeader(title: "Active", top: 0) { Muted("\(active.count) job\(active.count == 1 ? "" : "s")") }
             if active.isEmpty {
-                Note(icon: "list.bullet.below.rectangle", text: Text("Nothing in the queue. The GPU is off, so you're not paying for anything. "))
+                Note(icon: "list.bullet.below.rectangle", text: Text("Nothing in the queue, so you're not paying for anything. "))
                 MButton("Start a new video", size: .small) { store.go(.studio) }.padding(.top, 8)
             } else {
                 JobTable(jobs: active, header: true)
@@ -119,20 +117,15 @@ struct JobRow: View {
                 Group {
                     if j.isDone {
                         Pill("✓ Done", .good)
-                    } else if j.isPaused {
+                    } else if j.isWaiting {
                         VStack(alignment: .leading, spacing: 4) {
-                            Pill("Paused", .warn)
-                            Text(Job.pausedLine).font(t.mono(11.5)).foregroundStyle(t.warnInk).lineLimit(2)
-                        }
-                    } else if j.isWaiting, let line = j.waitLine {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Pill(j.queuePosition.map { "#\($0) in line" } ?? "Waiting")
-                            Text(line).font(t.mono(11.5)).foregroundStyle(t.muted)
+                            Pill(j.queuePosition.map { $0 <= 1 ? "Next" : "#\($0) in line" } ?? "Waiting")
+                            Text(j.progressLine).font(t.mono(11.5)).foregroundStyle(t.muted)
                         }
                     } else if j.isRunning {
                         VStack(alignment: .leading, spacing: 4) {
                             ProgressLine(value: j.progress / 100)
-                            Text(j.phase).font(t.mono(11.5)).foregroundStyle(t.muted)
+                            Text(j.progressLine).font(t.mono(11.5)).foregroundStyle(t.muted)
                         }
                     } else if j.isFailed {
                         Pill("Failed · refunded", .warn)
@@ -143,12 +136,6 @@ struct JobRow: View {
                 .frame(width: 280, alignment: .leading)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(Pricing.money(j.cost)).font(t.mono(13))
-                    if let w = j.warmupCost, w > 0 {
-                        Text("+ \(Pricing.money(w)) warm-up").font(t.mono(10.5)).foregroundStyle(t.muted).help("GPU start-up and model load, charged as its own line")
-                    }
-                    if j.warm == true {
-                        Text("warm GPU").font(t.mono(10.5)).foregroundStyle(t.muted).help("Ran on your warm GPU: its time is in the Warm GPU line, not charged again")
-                    }
                 }
                 .frame(width: 80, alignment: .leading)
                 HStack(spacing: 4) {
@@ -286,7 +273,7 @@ struct CompareView: View {
     }
 
     private func meta(_ take: Take) -> String {
-        let engine = take.engineLabel.isEmpty ? "Photo" : take.engineLabel
+        let engine = take.displayEngineLabel.isEmpty ? (take.isVideo ? "Video" : "Photo") : take.displayEngineLabel
         return "\(engine) · \(Pricing.money(take.cost)) · seed \(take.seed)"
     }
 }
@@ -339,9 +326,8 @@ struct ResultView: View {
                                 let base: [(String, String)] = [
                                     ("Model", job?.modelName ?? store.currentModel?.name ?? "—"),
                                     ("Outfit", outfit?.name ?? store.currentOutfit?.name ?? "—"),
-                                    ("Engine", job?.engineLabel ?? (take.engineLabel.isEmpty ? (take.isVideo ? "Standard" : "Photo") : take.engineLabel)),
-                                    ("Steps", job.map { $0.engine == .viggle ? "4" : $0.engine == .replicate ? "—" : "\($0.request.steps)" } ?? (take.isVideo ? "10" : "—")),
-                                    ("Cost", Pricing.money(take.cost) + (job?.warmupCost.map { " + \(Pricing.money($0)) warm-up" } ?? "")),
+                                    ("Made with", take.isVideo ? (job?.engineLabel ?? (take.displayEngineLabel.isEmpty ? "Video" : take.displayEngineLabel)) : "Photo"),
+                                    ("Cost", Pricing.money(take.cost)),
                                     ("Seed", "\(take.seed)\(take.isVideo || (!take.isTemplateShot && store.shoot.lockSeed) ? " · locked" : "")"),
                                 ]
                                 let templateRow: [(String, String)] = take.templateName.map { name in [("Template", name)] } ?? []
@@ -363,6 +349,7 @@ struct ResultView: View {
                                 MButton("Retake with changes", icon: "arrow.triangle.2.circlepath", fill: true) { store.retake(take) }
                                 MButton("Export 1080×1920", icon: "square.and.arrow.up", fill: true) { store.export(take) }
                             }
+                            if take.canUpscale { UpscaleBox(take: take) }
                             let who = store.model(for: take)?.shortName ?? "her"
                             MButton("Post to \(who)'s accounts", icon: "paperplane", kind: .primary, fill: true) { store.openPostSheet(take) }
                             if !take.isVideo {
@@ -394,6 +381,35 @@ struct ResultView: View {
         } else {
             Page { Note("Nothing to show yet. Finished takes appear in the Gallery.") }
         }
+    }
+}
+
+/// Upscale on a finished render take: 1080p / 2K / 4K. Greyed with "Coming soon" until the server offers it.
+struct UpscaleBox: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    var take: Take
+
+    var body: some View {
+        let addon = store.videoFeatures.upscale ?? AddonOption.defaults[2]
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Lbl("Upscale")
+                Spacer()
+                if addon.comingSoon || !addon.available { Pill("Coming soon") }
+            }
+            HStack(spacing: 8) {
+                ForEach(addon.sizes) { size in
+                    let on = addon.available && size.available
+                    MButton(size.price.map { "\(size.label) · \(Pricing.money($0))" } ?? size.label, size: .small, off: !on || store.upscaling, fill: true) {
+                        store.upscale(take, size: size)
+                    }
+                    .help("\(size.label) · \(size.sizeLine)")
+                }
+            }
+            Muted(addon.shownDetail)
+        }
+        .card(14)
     }
 }
 

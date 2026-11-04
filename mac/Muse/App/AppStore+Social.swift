@@ -71,7 +71,7 @@ extension AppStore {
             showToast("Add character-sheet shots first", action: "Open") { [weak self] in self?.openProfile(m.id) }
             return
         }
-        if LoraPricing.setCost > balance.balance + 1e-9 {
+        if loraSetEstimate > balance.balance + 1e-9 {
             notEnough("to build the training set")
             return
         }

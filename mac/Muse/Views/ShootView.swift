@@ -81,9 +81,9 @@ struct ShootCanvas: View {
                     }
                 }
                 if store.shootState == .done {
-                    // The image engine that made them ("FLUX.2 [pro] · Replicate"); empty for the built-in one.
-                    if let engine = store.lastShots.first?.engineLabel, !engine.isEmpty {
-                        Muted("Made with \(engine)")
+                    // The receipt: what these photos actually cost (the estimate settles to the exact amount).
+                    if !store.lastShots.isEmpty {
+                        Muted("\(store.lastShots.count) photo\(store.lastShots.count == 1 ? "" : "s") · \(Pricing.money(store.lastShots.reduce(0) { $0 + $1.cost }))")
                     }
                     HStack(spacing: 10) {
                         MButton("View in Gallery", icon: "square.grid.2x2", kind: .primary) {
@@ -91,10 +91,10 @@ struct ShootCanvas: View {
                             store.go(.gallery)
                         }
                         if let tpl = store.shootTemplate {
-                            MButton("Shoot 4 more · \(Pricing.money(Pricing.shootCost))", icon: "arrow.triangle.2.circlepath") { store.startTemplateShoot() }
+                            MButton("Shoot 4 more · \(PhotoPricing.label(store.shootEstimate))", icon: "arrow.triangle.2.circlepath") { store.startTemplateShoot() }
                             Muted(store.templateLockLook ? "Lock look is on: the same seed for \(tpl.name) on this model." : "Same template, a new moment every shot.")
                         } else {
-                            MButton("Shoot 4 more · \(Pricing.money(Pricing.shootCost))", icon: "arrow.triangle.2.circlepath") { store.startShoot() }
+                            MButton("Shoot 4 more · \(PhotoPricing.label(store.shootEstimate))", icon: "arrow.triangle.2.circlepath") { store.startShoot() }
                             if store.shoot.lockSeed { Muted("Lock look is on: retakes keep the same face and styling.") }
                         }
                     }
@@ -217,7 +217,7 @@ struct ShootInspector: View {
                 .padding(20)
             }
             VStack {
-                MButton(store.shootState == .busy ? "Shooting…" : Pricing.shootLabel, kind: .primary, size: .big, off: store.shootState == .busy) { store.startShoot() }
+                MButton(store.shootState == .busy ? "Shooting…" : "Shoot 4 · \(PhotoPricing.label(store.shootEstimate))", kind: .primary, size: .big, off: store.shootState == .busy) { store.startShoot() }
             }
             .padding(.horizontal, 20)
             .padding(.top, 14)

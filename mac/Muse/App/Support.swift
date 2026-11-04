@@ -11,11 +11,6 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
     private var authorized = false
     /// Called on the main actor when the user clicks a scheduled-post notification.
     var onOpenPost: (@MainActor (String) -> Void)?
-    /// "Keep warm" on the warm-GPU warning notification.
-    var onKeepWarm: (@MainActor () -> Void)?
-    static let warmCategory = "warm-gpu-warning"
-    static let warmKeepAction = "keep-warm"
-    static let warmId = "warm-gpu-warning"
 
     /// UNUserNotificationCenter needs a real app bundle (it crashes in a bare test host).
     private var available: Bool { Bundle.main.bundleIdentifier != nil && Bundle.main.bundleURL.pathExtension == "app" }
@@ -24,8 +19,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
         guard available else { return }
         let c = UNUserNotificationCenter.current()
         c.delegate = self
-        let keep = UNNotificationAction(identifier: Self.warmKeepAction, title: WarmGpuText.keepWarm, options: [])
-        c.setNotificationCategories([UNNotificationCategory(identifier: Self.warmCategory, actions: [keep], intentIdentifiers: [], options: [])])
+        // Older builds registered a warm-GPU warning category; there are no actionable categories any more.
+        c.setNotificationCategories([])
         c.requestAuthorization(options: [.alert, .sound, .badge]) { ok, _ in self.authorized = ok }
     }
 
@@ -37,22 +32,6 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
         content.sound = UNNotificationSound.default
         let req = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(req)
-    }
-
-    /// The 5-minute auto-off warning, with a "Keep warm" button. A newer warning replaces the older one.
-    func postWarmWarning(title: String, body: String) {
-        guard available else { return }
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
-        content.sound = UNNotificationSound.default
-        content.categoryIdentifier = Self.warmCategory
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: Self.warmId, content: content, trigger: nil))
-    }
-
-    func clearWarmWarning() {
-        guard available else { return }
-        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.warmId])
     }
 
     /// Stage 1 scheduling: a notification at the chosen time; clicking it opens the post handoff.
@@ -93,15 +72,6 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
-        if response.notification.request.content.categoryIdentifier == Self.warmCategory {
-            let keep = response.actionIdentifier == Self.warmKeepAction
-            DispatchQueue.main.async {
-                if !keep { NSApp.activate(ignoringOtherApps: true) }
-                if keep { MainActor.assumeIsolated { self.onKeepWarm?() } }
-            }
-            completionHandler()
-            return
-        }
         if let id = response.notification.request.content.userInfo["postId"] as? String {
             DispatchQueue.main.async {
                 NSApp.activate(ignoringOtherApps: true)
@@ -207,7 +177,7 @@ enum MediaImport {
     }
 }
 
-/// Window-level keys the menus don't cover: Esc closes overlays, ↑/↓/↩ drive the palette, ←/→ change steps in the video studio.
+/// Window-level keys the menus don't cover: Esc closes overlays, ↑/↓/↩ drive the palette.
 @MainActor
 final class KeyMonitor {
     static let shared = KeyMonitor()
@@ -227,10 +197,9 @@ extension AppStore {
     /// Returns true when the key was handled.
     func handleKey(_ e: NSEvent) -> Bool {
         let mods = e.modifierFlags.intersection([.command, .option, .control, .shift])
-        let typing = NSApp.keyWindow?.firstResponder is NSTextView
         switch e.keyCode {
         case 53: // Esc
-            if warmPrompt != nil { answerWarmPrompt(warmUp: false); return true }
+            if warmPrompt != nil { answerWarmPrompt(turnOn: false); return true }
             if paletteOpen { closePalette(); return true }
             if outfitSheet != nil { outfitSheet = nil; return true }
             if postDraft != nil { postDraft = nil; return true }
@@ -243,13 +212,9 @@ extension AppStore {
             if n > 0 { paletteIndex = (paletteIndex + (e.keyCode == 125 ? 1 : -1) + n) % n }
             return true
         case 36, 76: // Return
-            if warmPrompt != nil { return true } // spending needs a click on Warm up, not a stray Return
+            if warmPrompt != nil { return true } // spending needs a click on "Keep it ready", not a stray Return
             if paletteOpen && mods.isEmpty { runPalette(paletteIndex); return true }
             return false
-        case 123, 124: // ← →
-            guard !typing, mods.isEmpty, user != nil, screen == .studio, stepsActive, !paletteOpen, outfitSheet == nil, postDraft == nil, warmPrompt == nil else { return false }
-            setSteps(steps + (e.keyCode == 124 ? 1 : -1))
-            return true
         default:
             return false
         }

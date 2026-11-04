@@ -22,7 +22,7 @@ final class WarmGpuTests: XCTestCase {
         try s.turnOn(now: t0, creditUsd: 50)
         XCTAssertEqual(s.status(now: t0).state, "starting")
         XCTAssertTrue(s.status(now: t0).isOn)
-        XCTAssertEqual(WarmGpuText.bar(s.status(now: t0)), "GPU starting…")
+        XCTAssertEqual(WarmGpuText.indicator(s.status(now: t0)), "Add-on engine starting…")
         XCTAssertEqual(charges(s.tick(now: t0 + 30_000, creditUsd: 50)), 0)
         // While starting only the cap counts.
         XCTAssertEqual(s.status(now: t0 + 30_000).autoOffReason, "cap")
@@ -42,7 +42,7 @@ final class WarmGpuTests: XCTestCase {
         XCTAssertEqual(g.minutes, 42)
         XCTAssertEqual(g.costUsd, 2.793, accuracy: 1e-9)
         XCTAssertTrue(g.busy)
-        XCTAssertEqual(WarmGpuText.bar(g), "GPU warm · 42 min · $2.79 so far")
+        XCTAssertEqual(WarmGpuText.indicator(g), "Add-on engine ready · 42 min · $2.79")
     }
 
     func testIdleWarningThenAutoOff() throws {
@@ -51,7 +51,7 @@ final class WarmGpuTests: XCTestCase {
         XCTAssertEqual(s.autoOff()?.at, t0 + 20 * min)
         XCTAssertTrue(warnings(s.tick(now: t0 + 14 * min, creditUsd: 50)).isEmpty)
         let w = warnings(s.tick(now: t0 + 15 * min, creditUsd: 50))
-        XCTAssertEqual(w, [WarmGpuWarning(reason: "idle", autoOffAt: t0 + 20 * min, message: "Warm GPU turns off in 5 min (no renders)")])
+        XCTAssertEqual(w, [WarmGpuWarning(reason: "idle", autoOffAt: t0 + 20 * min, message: "Add-on engine turns off in 5 min (no renders)")])
         XCTAssertEqual(s.status(now: t0 + 15 * min).pendingWarning(now: t0 + 15 * min)?.reason, "idle")
         // Warned once, not every tick.
         XCTAssertTrue(warnings(s.tick(now: t0 + 16 * min, creditUsd: 50)).isEmpty)
@@ -64,7 +64,7 @@ final class WarmGpuTests: XCTestCase {
         XCTAssertEqual(g.lastOff?.reason, "idle")
         XCTAssertEqual(g.lastOff?.minutes, 20)
         XCTAssertEqual(g.lastOff?.costUsd ?? 0, 1.33, accuracy: 1e-9)
-        XCTAssertEqual(WarmGpuText.offMessage(g.lastOff), "Warm GPU turned off: no renders for a while · 20 min · $1.33 in all")
+        XCTAssertEqual(WarmGpuText.offMessage(g.lastOff), "Add-on engine turned off: no renders for a while · 20 min · $1.33 in all")
         // lastOff shows for an hour.
         XCTAssertNil(s.status(now: t0 + 81 * min).lastOff)
     }
@@ -132,12 +132,18 @@ final class WarmGpuTests: XCTestCase {
 
     func testWords() {
         XCTAssertEqual(WarmGpuText.costWarning(),
-                       "Warm up a GPU now so your render starts right away? About $4/hour from your credit while it's on, and it turns off by itself after 20 min without renders.")
+                       "Keeps the add-on engine ready so Edit renders start right away. About $4/hour from the studio balance while it's on, and it turns off by itself after 20 min without renders.")
+        XCTAssertEqual(WarmGpuText.switchLabel, "Keep add-on engine ready")
+        XCTAssertEqual(WarmGpuText.warningTitle(WarmGpuWarning(reason: "idle", autoOffAt: 0)), "Add-on engine turns off in 5 min (no renders)")
         XCTAssertEqual(WarmGpuText.duration(42.9), "42 min")
         XCTAssertEqual(WarmGpuText.duration(65), "1 h 05 min")
-        XCTAssertEqual(WarmGpuText.bar(WarmGpu(state: "warm", minutes: 42, costUsd: 2.8)), "GPU warm · 42 min · $2.80 so far")
-        XCTAssertEqual(WarmGpuText.indicator(WarmGpu(state: "warm", minutes: 42, costUsd: 2.8)), "42 min · $2.80")
-        XCTAssertEqual(WarmGpuText.indicator(WarmGpu(state: "starting")), "Starting…")
+        XCTAssertEqual(WarmGpuText.indicator(WarmGpu(state: "warm", minutes: 42, costUsd: 2.8)), "Add-on engine ready · 42 min · $2.80")
+        XCTAssertEqual(WarmGpuText.indicator(WarmGpu(state: "starting")), "Add-on engine starting…")
+        // Owner-only words, but still no GPU or provider names.
+        for r in ["user", "idle", "cap", "credit", "owner_balance", "gpu_lost"] {
+            let m = WarmGpuText.offMessage(WarmGpuOff(reason: r, at: 0, minutes: 3, costUsd: 0.2))
+            XCTAssertFalse(m.lowercased().contains("gpu"), m)
+        }
         XCTAssertFalse(WarmGpu(state: "stopping").isOn)
     }
 
@@ -146,7 +152,7 @@ final class WarmGpuTests: XCTestCase {
         let l = g.live(now: t0 + 42 * min + 30_000)
         XCTAssertEqual(l.minutes, 42.5, accuracy: 1e-9)
         XCTAssertEqual(l.costUsd, 2.79, accuracy: 1e-9)
-        XCTAssertEqual(WarmGpuText.bar(l), "GPU warm · 42 min · $2.79 so far")
+        XCTAssertEqual(WarmGpuText.indicator(l), "Add-on engine ready · 42 min · $2.79")
         XCTAssertEqual(g.minutesLeft(now: t0 + 42 * min + 30_000), 18)
         XCTAssertEqual(WarmGpu.off.live(now: t0).minutes, 0)
         XCTAssertEqual(WarmGpu(state: "warm", startedAt: t0, minutes: 5, costUsd: 9).live(now: t0 + min).costUsd, 9)
@@ -157,7 +163,7 @@ final class WarmGpuTests: XCTestCase {
         let warn = #"""
         {"type":"gpu","event":"warning","gpu":{"state":"warm","startedAt":1700000000000,"readyAt":1700000240000,"minutes":42,"costUsd":2.793,"ratePerHour":3.99,
          "busy":false,"autoOffAt":1700002520000,"autoOffReason":"idle","warningAt":1700002220000,"idleMinutes":20,"maxMinutes":120,"canExtend":true,"allowed":true},
-         "warning":{"reason":"idle","autoOffAt":1700002520000,"message":"Warm GPU turns off in 5 min (no renders)"}}
+         "warning":{"reason":"idle","autoOffAt":1700002520000,"message":"Add-on engine turns off in 5 min (no renders)"}}
         """#
         let e = try JSONDecoder().decode(ApiEvent.self, from: Data(warn.utf8))
         XCTAssertEqual(e.type, "gpu")
@@ -168,7 +174,7 @@ final class WarmGpuTests: XCTestCase {
         XCTAssertEqual(e.gpu?.autoOffReason, "idle")
         XCTAssertEqual(e.gpu?.canExtend, true)
         XCTAssertEqual(e.warning?.reason, "idle")
-        XCTAssertEqual(e.warning?.message, "Warm GPU turns off in 5 min (no renders)")
+        XCTAssertEqual(e.warning?.message, "Add-on engine turns off in 5 min (no renders)")
 
         let off = #"""
         {"state":"off","startedAt":null,"readyAt":null,"minutes":0,"costUsd":0,"ratePerHour":3.99,"busy":false,"autoOffAt":null,"idleMinutes":20,"maxMinutes":120,
@@ -179,7 +185,7 @@ final class WarmGpuTests: XCTestCase {
         XCTAssertFalse(g.allowed)
         XCTAssertNil(g.autoOffAt)
         XCTAssertEqual(g.lastOff?.reason, "credit")
-        XCTAssertEqual(WarmGpuText.offMessage(g.lastOff), "Warm GPU turned off: your credit is running low · 10 min · $0.67 in all")
+        XCTAssertEqual(WarmGpuText.offMessage(g.lastOff), "Add-on engine turned off: the studio balance is low · 10 min · $0.67 in all")
 
         // Captured from a local server/api: on → stopping → off.
         let stopping = #"{"type":"gpu","event":"state","gpu":{"state":"stopping","startedAt":1793819699564,"readyAt":1793819699564,"minutes":0,"costUsd":0,"ratePerHour":3.99,"busy":false,"autoOffAt":1793826899564,"autoOffReason":"cap","warningAt":1793826599564,"idleMinutes":20,"maxMinutes":120,"canExtend":true,"allowed":true}}"#
@@ -187,7 +193,7 @@ final class WarmGpuTests: XCTestCase {
         let offEvent = #"{"type":"gpu","event":"state","gpu":{"state":"off","startedAt":null,"readyAt":null,"minutes":0,"costUsd":0,"ratePerHour":3.99,"busy":false,"autoOffAt":null,"idleMinutes":20,"maxMinutes":120,"canExtend":false,"allowed":true,"lastOff":{"reason":"user","at":1793819707606,"minutes":0,"costUsd":0.0089}}}"#
         let oe = try JSONDecoder().decode(ApiEvent.self, from: Data(offEvent.utf8))
         XCTAssertEqual(oe.gpu?.lastOff?.reason, "user")
-        XCTAssertEqual(WarmGpuText.offMessage(oe.gpu?.lastOff), "Warm GPU off · 0 min · $0.01 in all")
+        XCTAssertEqual(WarmGpuText.offMessage(oe.gpu?.lastOff), "Add-on engine off · 0 min · $0.01 in all")
 
         let enc = JSONEncoder()
         enc.outputFormatting = .sortedKeys
@@ -197,10 +203,10 @@ final class WarmGpuTests: XCTestCase {
 
         let job = try JSONDecoder().decode(Job.self, from: Data(#"{"id":"j1","state":"done","warm":true,"cost":0}"#.utf8))
         XCTAssertEqual(job.warm, true)
+        // warmGpuAllowed is gone (owner only now); an older server's field is ignored.
         let st = try JSONDecoder().decode(StudioSettings.self, from: Data(#"{"warmGpuAllowed":"owner","warmIdleMinutes":30,"warmMaxMinutes":90}"#.utf8))
-        XCTAssertEqual(st.warmGpuAllowed, "owner")
         XCTAssertEqual(st.warmIdleMinutes, 30)
-        XCTAssertEqual(StudioSettings().warmGpuAllowed, "everyone")
+        XCTAssertEqual(st.warmMaxMinutes, 90)
     }
 
     func testFakeSwitchOnKeepWarmAndOff() async throws {
@@ -233,9 +239,9 @@ final class WarmGpuTests: XCTestCase {
     func testFakeStudioSettings() async throws {
         let api = FakeMuseAPI(speed: 0)
         _ = try await api.signIn(SignInRequest(email: "you@studio.com", password: ""))
-        let st = try await api.updateStudioSettings(StudioSettingsPatch(warmGpuAllowed: "owner", warmIdleMinutes: 30))
-        XCTAssertEqual(st.warmGpuAllowed, "owner")
-        // The demo user is the owner, so they still may; the new idle rule applies to new sessions.
+        let st = try await api.updateStudioSettings(StudioSettingsPatch(warmIdleMinutes: 30))
+        XCTAssertEqual(st.warmIdleMinutes, 30)
+        // The demo user is the owner; the new idle rule applies to new sessions.
         let g = try await api.warmGpu()
         XCTAssertTrue(g.allowed)
         XCTAssertEqual(g.idleMinutes, 30)

@@ -409,7 +409,19 @@ public struct JobRequest: Codable, Hashable, Sendable {
                    quality: quality.replicateOrDefault.rawValue)
     }
 
+    /// An Edit or Fast · beta request as members make it: the whole clip and the default steps (plans/api.md "App clean-up" §2).
+    /// Lip sync and a new background photo are Edit only.
+    public static func addOn(_ q: VideoQuality, title: String, modelId: String, outfitId: String, clipId: String, takes: Int = 1, keepAudio: Bool = true,
+                             lipSync: Bool = false, background: String = "keep", backgroundMotion: String = "subtle", clipSeconds: Double? = nil) -> JobRequest {
+        let edit = q != .fast
+        return JobRequest(title: title, modelId: modelId, outfitId: outfitId, clipId: clipId, engine: edit ? Engine.h3.rawValue : Engine.viggle.rawValue,
+                          steps: Pricing.stepsDefault, use: ClipUse.full.rawValue, takes: takes, keepAudio: keepAudio, lipSync: edit && lipSync,
+                          background: edit ? background : "keep", backgroundMotion: backgroundMotion, clipSeconds: clipSeconds)
+    }
+
     public var videoQuality: VideoQuality { VideoQuality.of(engine: Engine(id: engine), quality: quality) }
+    /// `engine: "upscale"` (an Upscale job on a finished take, once it ships).
+    public var isUpscale: Bool { engine == "upscale" }
 
     /// `pricePerSec`: the server's price for a replicate quality (nil = the contract default).
     public func spec(pricePerSec: Double? = nil) -> RenderSpec {
@@ -445,20 +457,20 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
     public var prompt: String
     public var seed: Int64
     public var thumb: ImageRef?
-    /// Waiting for a GPU (real API): place in line and seconds until it's done.
+    /// Waiting in line (real API): place in line and seconds until it starts.
     public var queuePosition: Int?
     public var etaSeconds: Double?
-    /// "owner_balance_low": paused because the studio's RunPod credit is low.
+    /// Retired 2026-11-04: nothing pauses on a provider balance any more. Decoded and ignored.
     public var blocked: String?
-    /// GPU warm-up charged with this job (its own cost line).
+    /// The add-on engine's start-up charged with this job: owner ledger only, never shown to members.
     public var warmupCost: Double?
     /// Who started it (real API).
     public var userId: String?
-    /// It ran on its user's warm GPU: its GPU time is covered by the "Warm GPU" line, so it settles to $0.
+    /// It ran while the owner kept the add-on engine ready (its time is on that ledger line). Never shown to members.
     public var warm: Bool?
-    /// The server's `engineLabel` ("Standard · 768P", "Exact edit · 10 steps"…). nil on older servers: `engineLabel` builds it.
+    /// The server's `engineLabel` ("Draft · 768P", "Edit"…). nil on older servers: `engineLabel` builds it.
     public var engineText: String?
-    /// Failed replicate jobs: provider_refused | provider_failed | provider_rate_limited | provider_timeout.
+    /// provider_refused | provider_failed | provider_rate_limited | provider_timeout | provider_out_of_credit. Never shown.
     public var errorCode: String?
     /// Replicate, done: output seconds Replicate billed, summed over takes.
     public var billedSeconds: Double?
@@ -531,62 +543,59 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
         billedSeconds = c.o(.billedSeconds)
     }
 
-    /// Paused until the owner tops up RunPod. Replicate jobs never are (they don't use our GPU).
-    public var isPaused: Bool { blocked == "owner_balance_low" && engine != .replicate }
-    /// Running on the server but still waiting for a GPU.
-    public var isWaiting: Bool { isActive && step == 0 && (queuePosition != nil || isPaused) }
-    /// "#2 in line · ~4 min" while waiting for a GPU, or the paused line.
+    /// Waiting in line before it starts (real API): `queuePosition` is set and nothing has rendered yet.
+    public var isWaiting: Bool { isActive && step == 0 && queuePosition != nil }
+    /// "Waiting to start" / "#2 in line" (+ " · starts in ~3 min") while it waits.
     public var waitLine: String? {
-        if isPaused { return Job.pausedLine }
         guard isActive, let pos = queuePosition else { return nil }
-        let eta = etaSeconds.map { " · done in \(Job.duration($0))" } ?? ""
-        if engine == .replicate { return pos <= 1 ? "Next for Replicate\(eta)" : "#\(pos) in the Replicate line\(eta)" }
-        return pos <= 1 ? "Next for a GPU\(eta)" : "#\(pos) in line\(eta)"
+        let eta = etaSeconds.map { " · starts in \(Job.duration($0))" } ?? ""
+        return (pos <= 1 ? "Waiting to start" : "#\(pos) in line") + eta
     }
-    public static let pausedLine = "Paused: the studio's GPU credit is low"
     public static func duration(_ s: Double) -> String { s >= 60 ? "~\(Int((s / 60).rounded(.up))) min" : "~\(Int(s.rounded(.up)))s" }
 
+    /// What it's doing, for members: the server's phase when it's member-safe ("Rendering · ~6 min left"), else the same built here.
+    public var statusLine: String {
+        if isWaiting, let w = waitLine { return w }
+        if MemberText.isSafe(phase), !phase.isEmpty { return phase }
+        switch state {
+        case "done": return "Done"
+        case "failed": return "Failed"
+        case "queued": return "Queued"
+        default: return secondsLeft > 0 ? "Rendering · \(JobClock.leftText(secondsLeft))" : "Rendering"
+        }
+    }
+    /// "Rendering · ~2 min left · $0.14": the status, then the price.
+    public var progressLine: String { "\(statusLine) · \(Pricing.money(cost))" }
+
     public var engine: Engine { Engine(id: request.engine) }
-    /// The Quality picker option it was made with.
+    /// The option it was made with.
     public var videoQuality: VideoQuality { request.videoQuality }
-    /// "Standard" / "HD" / "Exact edit" / "Fast · beta".
-    public var engineName: String { engine == .viggle ? Engine.viggle.label : videoQuality.label }
-    /// The server's label, or the same built here: "Standard · 768P", "HD · 2K", "Exact edit · 10 steps", "Fast · beta".
+    /// "Draft" / "Standard" / "HD" / "Edit" / "Fast · beta" / "Upscale".
+    public var engineName: String { request.isUpscale ? "Upscale" : videoQuality.label }
+    /// The server's label when it's member-safe, or the same built here: "Draft · 768P", "HD · 2K", "Edit", "Fast · beta".
     public var engineLabel: String {
-        if let t = engineText, !t.isEmpty { return t }
+        if let t = engineText, !t.isEmpty, MemberText.isSafe(t) { return t }
         return Job.engineLabel(for: request)
     }
     public static func engineLabel(for r: JobRequest) -> String {
-        switch Engine(id: r.engine) {
-        case .viggle: return "Fast · beta"
-        case .h3: return "Exact edit · \(r.steps) steps"
-        case .replicate:
-            let q = r.videoQuality
-            return "\(q.label) · \(q.resolution ?? "768P")"
-        }
+        if r.isUpscale { return "Upscale" }
+        let q = r.videoQuality
+        if let res = q.resolution { return "\(q.label) · \(res)" }
+        return q.label
     }
 
-    /// What to show for a failed job: the server's message as-is, with a next step for the provider codes.
+    /// What to show for a failed job: the server's message when it's member-safe, else the contract's wording for its code.
     public var failureLine: String {
-        let base = (error?.isEmpty == false ? error! : nil) ?? Job.defaultFailure(errorCode)
-        guard let hint = Job.failureHint(errorCode) else { return base }
-        return base.hasSuffix(".") ? "\(base) \(hint)" : "\(base). \(hint)"
+        if let e = error?.trimmingCharacters(in: .whitespacesAndNewlines), !e.isEmpty, MemberText.isSafe(e) { return e }
+        return Job.defaultFailure(errorCode)
     }
-    static func defaultFailure(_ code: String?) -> String {
+    public static func defaultFailure(_ code: String?) -> String {
         switch code {
-        case "provider_refused": return "Replicate's safety filter refused this clip."
-        case "provider_rate_limited": return "Replicate was rate-limited for too long."
-        case "provider_timeout": return "Replicate didn't finish in time."
-        case "provider_failed": return "Replicate couldn't render this clip."
-        default: return "The render stopped."
-        }
-    }
-    public static func failureHint(_ code: String?) -> String? {
-        switch code {
-        case "provider_refused": return "Try another clip or outfit, or Exact edit."
-        case "provider_rate_limited": return "Replicate stayed busy. Try again in a few minutes."
-        case "provider_timeout": return "Replicate took too long, so it was stopped. Try again."
-        default: return nil
+        case "provider_refused": return "This clip was refused by the content filter · you weren't charged"
+        case "provider_rate_limited": return "Busy right now · you weren't charged. Try again in a minute."
+        case "provider_timeout": return "This took too long and was stopped · you weren't charged"
+        case "provider_out_of_credit": return MemberText.ownerTold
+        default: return MemberText.wentWrong
         }
     }
     /// Refused by the provider's safety filter.
@@ -692,12 +701,27 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
 
     public var isFinal: Bool { status == "final" }
     public var isVideo: Bool { kind == "take" }
-    /// Gallery caption: "Living-room dance · 10 steps".
+    /// Gallery caption: "Living-room dance · Draft". Older servers' labels ("10 steps") read "Edit".
     public var caption: String {
         if kind == "shot" { return title.isEmpty ? label : "\(title) \(index)" }
         let t = of > 1 ? "\(title) · take \(index)" : title
-        return label.isEmpty ? t : "\(t) · \(label)"
+        return displayLabel.isEmpty ? t : "\(t) · \(displayLabel)"
     }
+
+    /// `label` for members: "Draft", "Standard", "HD", "Edit", "Fast · beta".
+    public var displayLabel: String {
+        if label == "Fast" { return "Fast · beta" }
+        return MemberText.isSafe(label) ? label : "Edit"
+    }
+
+    /// `engineLabel` for members ("" on photos: the engine is never shown on a photo).
+    public var displayEngineLabel: String {
+        guard isVideo else { return "" }
+        return MemberText.isSafe(engineLabel) ? engineLabel : displayLabel
+    }
+
+    /// A finished render take that Upscale could work on.
+    public var canUpscale: Bool { isVideo && videoUrl != nil }
 }
 
 public struct SetTakeStatusRequest: Codable, Sendable {
@@ -762,15 +786,16 @@ public struct Balance: Codable, Hashable, Sendable {
     public var role: String?
     public var heldUsd: Double
     public var perUserDayLimit: Double?
-    /// runpod | simulated | unavailable | wallet
+    /// studio (owner) | wallet (member)
     public var balanceSource: String?
-    /// Owner only.
-    public var runpodBalance: Double?
+    /// Owner only: what they can spend or send (`StudioBalance.availableUsd`), the studio balance, and whether a top-up was ever recorded.
     public var availableToSend: Double?
+    public var studioBalance: Double?
+    public var needsFirstTopUp: Bool?
 
     public init(balance: Double, month: Double, perJobLimit: Double = Pricing.perJobCap, perDayLimit: Double = Pricing.perDayCap, videos: Int = 0, today: Double? = nil,
                 tokens: Int? = nil, tokenUsd: Double = 0.01, role: String? = nil, heldUsd: Double = 0, perUserDayLimit: Double? = nil, balanceSource: String? = nil,
-                runpodBalance: Double? = nil, availableToSend: Double? = nil) {
+                availableToSend: Double? = nil, studioBalance: Double? = nil, needsFirstTopUp: Bool? = nil) {
         self.balance = balance
         self.month = month
         self.perJobLimit = perJobLimit
@@ -783,12 +808,13 @@ public struct Balance: Codable, Hashable, Sendable {
         self.heldUsd = heldUsd
         self.perUserDayLimit = perUserDayLimit
         self.balanceSource = balanceSource
-        self.runpodBalance = runpodBalance
         self.availableToSend = availableToSend
+        self.studioBalance = studioBalance
+        self.needsFirstTopUp = needsFirstTopUp
     }
 
     enum CodingKeys: String, CodingKey {
-        case balance, month, perJobLimit, perDayLimit, videos, today, tokens, tokenUsd, role, heldUsd, perUserDayLimit, balanceSource, runpodBalance, availableToSend
+        case balance, month, perJobLimit, perDayLimit, videos, today, tokens, tokenUsd, role, heldUsd, perUserDayLimit, balanceSource, availableToSend, studioBalance, needsFirstTopUp
     }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -804,21 +830,23 @@ public struct Balance: Codable, Hashable, Sendable {
         heldUsd = c.v(.heldUsd, 0)
         perUserDayLimit = c.o(.perUserDayLimit)
         balanceSource = c.o(.balanceSource)
-        runpodBalance = c.o(.runpodBalance)
         availableToSend = c.o(.availableToSend)
+        studioBalance = c.o(.studioBalance)
+        needsFirstTopUp = c.o(.needsFirstTopUp)
     }
 
     /// Whole tokens: the server's count, or the balance converted.
     public var tokenCount: Int { tokens ?? Int((balance / max(tokenUsd, 0.0001) + 1e-6).rounded(.down)) }
-    public var isUnavailable: Bool { balanceSource == "unavailable" }
 }
 
+/// POST /v1/balance/topup `{amount, note?}`: the owner records a studio top-up (alias of POST /v1/studio/topups; server/mock adds demo credit).
 public struct TopUpRequest: Codable, Sendable {
     public var amount: Double
-    public var method: String
-    public init(amount: Double, method: String = "card") {
+    public var note: String?
+    public init(amount: Double, note: String? = nil) {
         self.amount = amount
-        self.method = method
+        let n = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.note = (n?.isEmpty ?? true) ? nil : n
     }
 }
 
@@ -831,7 +859,7 @@ public struct FillAnglesResponse: Codable, Sendable {
     }
 }
 
-/// Server-sent event on /v1/events. type: job | balance | model | outfit | lora | post | wallet | gpu
+/// Server-sent event on /v1/events. type: job | balance | model | outfit | lora | post | wallet | gpu (gpu: owner only)
 public struct ApiEvent: Codable, Sendable {
     public var type: String
     public var job: Job?
@@ -843,9 +871,9 @@ public struct ApiEvent: Codable, Sendable {
     public var takes: [Take]
     /// `wallet` events (real API): the user's wallet after a transfer, reclaim or charge.
     public var wallet: Wallet?
-    /// owner_balance_low | owner_balance_ok (owners only).
+    /// provider_out_of_credit (owners only).
     public var notice: EventNotice?
-    /// `gpu` events: the user's warm GPU (the bar, starting → warm → off, the 5-minute warning).
+    /// `gpu` events (owner only): Keep add-on engine ready.
     public var gpu: WarmGpu?
     /// `gpu` events: state | tick | warning.
     public var event: String?

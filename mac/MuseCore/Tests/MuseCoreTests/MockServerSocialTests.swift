@@ -37,7 +37,8 @@ final class MockServerSocialTests: XCTestCase {
         let building = try await api.buildLoraCandidates(modelId: m.id)
         XCTAssertTrue(["building", "review"].contains(building.state), building.state)
         let b1 = try await api.balance().balance
-        XCTAssertEqual(b0 - b1, LoraPricing.setCost, accuracy: 1e-6, "server and client agree on the training-set price")
+        // Photo prices are estimates now (pass-through, plans/api.md "App clean-up" §3); server/mock still charges its fixed price.
+        XCTAssertGreaterThan(b0 - b1, 0, "building the training set is charged")
 
         var l = building
         for _ in 0..<80 where l.state != "review" {

@@ -77,9 +77,9 @@ struct HomeView: View {
                 MButton("New video", icon: "plus", kind: .primary) { store.go(.studio) }
             }
             HStack(spacing: 14) {
-                KPI(label: "Balance", value: Pricing.money(store.creditUsd), hint: "≈ \(Pricing.videosLeft(store.creditUsd)) videos at 10 steps", index: 0)
+                KPI(label: "Balance", value: Pricing.money(store.creditUsd), hint: "≈ \(Pricing.videosLeft(store.creditUsd)) Draft videos", index: 0)
                 KPI(label: "This month", value: Pricing.money(store.balance.month), hint: "\(store.takes.count) renders", index: 1)
-                KPI(label: "In the queue", value: "\(store.activeJobs.count)", hint: store.runningJob != nil ? "H100 running" : "GPU off · starts on demand", index: 2)
+                KPI(label: "In the queue", value: "\(store.activeJobs.count)", hint: store.runningJob.map { $0.isWaiting ? MemberText.waitingToStart : "Rendering" } ?? "Nothing rendering", index: 2)
                 KPI(label: "To review", value: "\(store.toReview)", hint: "takes waiting for approval", index: 3)
             }
             HStack(alignment: .top, spacing: 16) {
@@ -96,7 +96,7 @@ struct HomeView: View {
                                 Lbl("\(r.isRunning ? "Rendering" : "Queued") · \(r.engineLabel)")
                                 Text(r.title).font(t.h2).foregroundStyle(t.ink)
                                 ProgressLine(value: r.progress / 100)
-                                Text(r.isRunning ? r.phase : "Starts when you press Run queue").font(t.mono(12)).foregroundStyle(t.muted)
+                                Text(r.isRunning ? r.progressLine : "Starts when you press Run queue").font(t.mono(12)).foregroundStyle(t.muted)
                                 HStack {
                                     if r.isQueued && store.runningJob == nil {
                                         MButton("Run queue · \(Pricing.money(store.queuedCost))", icon: "play.fill", kind: .primary, size: .small) { store.runQueue() }

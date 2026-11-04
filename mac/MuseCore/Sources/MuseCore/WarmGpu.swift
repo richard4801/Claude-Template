@@ -1,7 +1,7 @@
 import Foundation
 
-// Keep GPU warm (plans/backend.md → "Keep GPU warm", plans/api.md → "Keep GPU warm"): a dedicated H100 for the user who switches
-// it on, billed by wall time from their credit, with auto-off on idle, a session cap, low credit and a low owner balance.
+// Keep add-on engine ready (was "Keep GPU warm"; plans/api.md "App clean-up" §6): owner only. A dedicated add-on engine billed by
+// wall time from the studio balance, with auto-off on idle, a session cap and low credit.
 
 /// GET / POST /v1/gpu/warm, and the `gpu` field of a `gpu` event.
 public struct WarmGpu: Codable, Hashable, Sendable {
@@ -30,7 +30,7 @@ public struct WarmGpu: Codable, Hashable, Sendable {
     public var maxMinutes: Int
     /// "Keep warm" can still extend the cap (once per session).
     public var canExtend: Bool
-    /// This user may switch it on (studio setting `warmGpuAllowed`).
+    /// This user may switch it on (the owner; members get 403 owner_only).
     public var allowed: Bool
     /// While off: how the last session ended (within the last hour).
     public var lastOff: WarmGpuOff?
@@ -152,18 +152,19 @@ public struct WarmGpuRequest: Codable, Hashable, Sendable {
     public static let keepWarm = WarmGpuRequest(extend: true)
 }
 
-/// The words for Keep GPU warm, shared by every screen (and matching the Android app).
+/// The words for Keep add-on engine ready (owner only, Settings → Engines; plans/api.md "App clean-up" §6).
 public enum WarmGpuText {
-    public static let nudgeTitle = "Warm up a GPU?"
-    /// The nudge and the switch-on confirmation (every time).
+    public static let switchLabel = "Keep add-on engine ready"
+    /// The confirmation on every switch-on.
     public static func costWarning(rate: Double = WarmGpu.defaultRate, idleMinutes: Int = 20) -> String {
-        "Warm up a GPU now so your render starts right away? About \(perHour(rate)) from your credit while it's on, and it turns off by itself after \(idleMinutes) min without renders."
+        "Keeps the add-on engine ready so Edit renders start right away. About \(perHour(rate)) from the studio balance while it's on, "
+            + "and it turns off by itself after \(idleMinutes) min without renders."
     }
-    public static let warmUp = "Warm up"
+    public static let confirmTitle = "Keep the add-on engine ready?"
+    public static let turnOn = "Keep it ready"
     public static let notNow = "Not now"
     public static let turnOff = "Turn off"
-    public static let keepWarm = "Keep warm"
-    public static let switchLabel = "Keep GPU warm"
+    public static let keepWarm = "Keep ready"
 
     /// "$4/hour": the rate rounded to whole dollars.
     public static func perHour(_ rate: Double) -> String { "$\(Int(rate.rounded()))/hour" }
@@ -175,39 +176,26 @@ public enum WarmGpuText {
         return "\(m / 60) h " + String(format: "%02d", m % 60) + " min"
     }
 
-    /// The persistent bar (before " · Turn off"): "GPU warm · 42 min · $2.80 so far", or "GPU starting…" while the pod boots.
-    public static func bar(_ g: WarmGpu) -> String {
-        if g.isStarting { return "GPU starting…" }
-        return "GPU warm · \(duration(g.minutes)) · \(Pricing.money(g.costUsd)) so far"
-    }
-
-    /// The short title-bar / menu-bar indicator: "Starting…" or "42 min · $2.80".
+    /// The owner's small indicator (before " · Turn off"): "Add-on engine ready · 42 min · $2.80", or "Add-on engine starting…".
     public static func indicator(_ g: WarmGpu) -> String {
-        g.isStarting ? "Starting…" : "\(duration(g.minutes)) · \(Pricing.money(g.costUsd))"
+        if g.isStarting { return "Add-on engine starting…" }
+        return "Add-on engine ready · \(duration(g.minutes)) · \(Pricing.money(g.costUsd))"
     }
 
-    /// The 5-minute warning (banner and notification).
+    /// The 5-minute warning (Settings → Engines only).
     public static func warningTitle(_ w: WarmGpuWarning) -> String {
-        w.reason == "cap" ? "Warm GPU reaches its time limit in 5 min" : "Warm GPU turns off in 5 min"
+        w.reason == "cap" ? "Add-on engine reaches its time limit in 5 min" : "Add-on engine turns off in 5 min (no renders)"
     }
 
-    public static func warningBody(_ w: WarmGpuWarning, canExtend: Bool = true) -> String {
-        if w.reason == "cap" {
-            return canExtend ? "Keep warm to extend the session once, or let it turn off." : "It has had its one extension and turns off then."
-        }
-        return "No renders lately. Keep warm to hold it, or let it turn off."
-    }
-
-    /// Said when it turns off (toast, and a notification for an auto-off).
+    /// Said when it turns off (a toast for the owner).
     public static func offMessage(_ off: WarmGpuOff?) -> String {
         let total = off.map { " · \(duration($0.minutes)) · \(Pricing.money($0.costUsd)) in all" } ?? ""
         switch off?.reason {
-        case "idle": return "Warm GPU turned off: no renders for a while" + total
-        case "cap": return "Warm GPU turned off at its time limit" + total
-        case "credit": return "Warm GPU turned off: your credit is running low" + total
-        case "owner_balance": return "Warm GPU turned off: the studio's GPU credit is low" + total
-        case "gpu_lost": return "Warm GPU turned off: the GPU stopped responding" + total
-        default: return "Warm GPU off" + total
+        case "idle": return "Add-on engine turned off: no renders for a while" + total
+        case "cap": return "Add-on engine turned off at its time limit" + total
+        case "credit", "owner_balance": return "Add-on engine turned off: the studio balance is low" + total
+        case "gpu_lost": return "Add-on engine turned off: it stopped responding" + total
+        default: return "Add-on engine off" + total
         }
     }
 }
@@ -296,7 +284,7 @@ public struct WarmGpuSim: Sendable {
     public mutating func turnOn(now: Int64, creditUsd: Double) throws {
         if isOn { return }
         if creditUsd + 1e-9 < floorUsd {
-            throw ApiError("insufficient_balance", "Not enough credit to keep a GPU warm · it needs at least \(Pricing.money(floorUsd)) (\(config.creditFloorMinutes) min)")
+            throw ApiError("insufficient_balance", "Not enough in the studio balance to keep the add-on engine ready · it needs at least \(Pricing.money(floorUsd)) (\(config.creditFloorMinutes) min)")
         }
         let ready = config.bootSeconds <= 0
         state = ready ? "warm" : "starting"
@@ -326,7 +314,7 @@ public struct WarmGpuSim: Sendable {
 
     /// "Keep warm": restarts the idle clock; when the cap is the next auto-off, extends it once by the studio's cap.
     public mutating func keepWarm(now: Int64) throws {
-        guard isOn else { throw ApiError("not_warm", "The GPU is not warm") }
+        guard isOn else { throw ApiError("not_warm", "The add-on engine isn't on") }
         if autoOff()?.reason == "cap" && !extended {
             extended = true
             maxMinutes += config.maxMinutes
@@ -373,7 +361,7 @@ public struct WarmGpuSim: Sendable {
             if now >= off.at - Int64(config.warnMinutes) * Self.min && warnedFor != key {
                 warnedFor = key
                 let left = Swift.max(1, Int((Double(off.at - now) / 60_000).rounded()))
-                let msg = off.reason == "idle" ? "Warm GPU turns off in \(left) min (no renders)" : "Warm GPU reaches its time limit in \(left) min"
+                let msg = off.reason == "idle" ? "Add-on engine turns off in \(left) min (no renders)" : "Add-on engine reaches its time limit in \(left) min"
                 out.append(.warning(WarmGpuWarning(reason: off.reason, autoOffAt: off.at, message: msg)))
             }
         }

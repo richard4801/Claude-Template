@@ -370,6 +370,9 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
 
     public func balance() async throws -> Balance { try await call("GET", "v1/balance") }
     public func topUp(_ req: TopUpRequest) async throws -> Balance { try await call("POST", "v1/balance/topup", req) }
+    public func studioBalance() async throws -> StudioBalance { try await call("GET", "v1/studio/balance") }
+    public func recordTopUp(_ req: TopUpRecord) async throws -> StudioBalance { try await call("POST", "v1/studio/topups", req) }
+    public func upscale(takeId: String, _ req: UpscaleRequest) async throws -> Job { absolutize(try await call("POST", "v1/takes/\(takeId)/upscale", req)) }
     public func setFailNext(_ fail: Bool) async throws { _ = try await send(request("POST", "v1/dev/fail-next", body: try encoder.encode(DevFailRequest(failNext: fail)))) }
 
     /// Events from GET /v1/events. Reconnects with back-off while the subscriber is listening.

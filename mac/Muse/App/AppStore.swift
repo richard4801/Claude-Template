@@ -41,25 +41,29 @@ enum DataSource: String, CaseIterable, Codable {
     var label: String { self == .fake ? "Demo mode (no server)" : "MUSE server" }
 }
 
-/// The hosted MUSE API (server/api on Railway). Renders there are simulated until the GPU is switched on.
+/// The hosted MUSE API (server/api on Railway).
 let defaultServerURL = "https://angelic-elegance-production-c42b.up.railway.app"
 
 enum ShootState { case idle, busy, done }
 enum ShootTab: String, CaseIterable { case scene, camera, light, prompt }
 enum GalleryTab { case tests, final }
 enum SettingsSection: String, CaseIterable {
-    case appearance, defaults, costs, studio, notif, developer, about
+    case appearance, defaults, costs, studio, engines, notif, developer, about
     var title: String {
         switch self {
         case .appearance: return "Appearance"
         case .defaults: return "Render defaults"
         case .costs: return "Costs & limits"
         case .studio: return "Studio"
+        case .engines: return "Engines"
         case .notif: return "Notifications"
         case .developer: return "Developer"
         case .about: return "About"
         }
     }
+
+    /// Studio and Engines are the owner's.
+    var ownerOnly: Bool { self == .studio || self == .engines }
 }
 
 enum PostTab: Hashable { case scheduled, posted }
@@ -132,10 +136,7 @@ final class AppStore {
 
     var themeID: ThemeID { didSet { defaults.set(themeID.rawValue, forKey: "muse.theme") } }
     var pro: Bool { didSet { defaults.set(pro, forKey: "muse.pro") } }
-    var defaultSteps: Int { didSet { defaults.set(defaultSteps, forKey: "muse.defaultSteps") } }
-    /// Exact edit's engine: H3 on our GPU, or Fast · beta.
-    var defaultEngine: Engine { didSet { defaults.set(defaultEngine.rawValue, forKey: "muse.defaultEngine") } }
-    /// The Quality picker's default (Draft). Until the user picks one, the server's `features.video` default applies.
+    /// The Render picker's default (Draft). Until the user picks one, the server's `features.video` default applies.
     var defaultQuality: VideoQuality { didSet { defaults.set(defaultQuality.rawValue, forKey: "muse.defaultQuality") } }
     var houseStyle: String { didSet { defaults.set(houseStyle, forKey: "muse.houseStyle") } }
     var notifyDone: Bool { didSet { defaults.set(notifyDone, forKey: "muse.notifyDone") } }
@@ -199,6 +200,9 @@ final class AppStore {
     var members: [Member] = []
     var studioSettings: StudioSettings?
     var imageEngine: ImageEngine?
+    /// Owner only: the owner-loaded studio balance and its top-ups (GET /v1/studio/balance). nil on servers without it.
+    var studioBalance: StudioBalance?
+    var topUpBusy = false
     /// The last invite made on this Mac (its code is shown once).
     var lastInvite: Invite?
     /// An upload in flight: 0…1 and what's being uploaded.
@@ -225,14 +229,10 @@ final class AppStore {
     var clip: Clip?
     var clipFile: URL?
     var clipThumb: ImageRef?
-    var steps: Int
-    /// Exact edit's engine (h3 or viggle). Draft / Standard / HD send `engine: "replicate"`.
-    var engine: Engine
-    /// Draft / Standard / HD (Replicate) or Exact edit.
+    /// Render (Draft / Standard / HD) or an add-on (Edit, Fast · beta). Every option renders the whole clip.
     var quality: VideoQuality
     /// The server's default quality is applied once per launch (until the user sets a default in Settings).
     @ObservationIgnored var appliedServerQuality = false
-    var use: ClipUse = .first
     var takeCount = 1
     var keepAudio = true
     var lipSync = false
@@ -240,6 +240,8 @@ final class AppStore {
     var motion = "subtle"
     var showPrompt = false
     var generating = false
+    /// POST /v1/takes/{id}/upscale in flight.
+    var upscaling = false
     var clipDropTargeted = false
 
     // MARK: Photoshoot
@@ -289,18 +291,18 @@ final class AppStore {
     var create = CreateDraft()
     var outfitSheet: OutfitDraft?
 
-    // MARK: Keep GPU warm (plans/backend.md)
+    // MARK: Keep add-on engine ready (owner only, Settings → Engines)
 
-    /// The user's warm GPU (GET /v1/gpu/warm and `gpu` events).
+    /// The owner's add-on engine (GET /v1/gpu/warm and `gpu` events). Members never load it.
     var warmGpu = WarmGpu.off
-    /// False on servers without /v1/gpu/warm (server/mock) or when the owner hasn't allowed it: no switch, no nudge.
-    var warmAvailable = true
-    /// The nudge or the switch-on confirmation, when showing.
+    /// False for members and on servers without /v1/gpu/warm (server/mock).
+    var warmAvailable = false
+    /// The switch-on confirmation (cost warning), when showing.
     var warmPrompt: WarmPrompt?
-    /// The 5-minute auto-off warning banner.
+    /// The 5-minute auto-off warning (shown in Settings → Engines).
     var warmWarning: WarmGpuWarning?
     var warmBusy = false
-    /// "Now" for the bar's minutes and cost; ticks every 15 s while the GPU is warm.
+    /// "Now" for the indicator's minutes and cost; ticks every 15 s while it's on.
     var warmClock = Date()
     @ObservationIgnored var warmTicker: Task<Void, Never>?
     /// The last warning shown (kind + time), so each one is announced once.
@@ -308,18 +310,15 @@ final class AppStore {
 
     // MARK: Credits
 
-    var topUpAmount: Double = 25
-
     init() {
         let d = UserDefaults.standard
         themeID = ThemeID(rawValue: d.string(forKey: "muse.theme") ?? "a") ?? .a
         pro = d.bool(forKey: "muse.pro")
         d.removeObject(forKey: "muse.sound") // the old interface-sound preference; MUSE no longer plays UI sounds
-        let ds = d.object(forKey: "muse.defaultSteps") as? Int ?? Pricing.stepsDefault
-        defaultSteps = Pricing.clampSteps(ds)
-        let savedEngine = Engine(id: d.string(forKey: "muse.defaultEngine") ?? "h3")
-        defaultEngine = savedEngine == .replicate ? .h3 : savedEngine
-        defaultQuality = VideoQuality(id: d.string(forKey: "muse.defaultQuality"))
+        // Steps and the Exact edit engine aren't settings any more (Edit always uses the default steps and the whole clip).
+        d.removeObject(forKey: "muse.defaultSteps")
+        d.removeObject(forKey: "muse.defaultEngine")
+        defaultQuality = VideoQuality(id: d.string(forKey: "muse.defaultQuality")).replicateOrDefault
         houseStyle = d.string(forKey: "muse.houseStyle") ?? PromptEngine.houseStyle
         notifyDone = d.object(forKey: "muse.notifyDone") as? Bool ?? true
         notifyFailed = d.object(forKey: "muse.notifyFailed") as? Bool ?? true
@@ -331,9 +330,7 @@ final class AppStore {
         baseURL = d.string(forKey: "muse.baseURL.v2") ?? defaultServerURL
         neverOverrides = d.dictionary(forKey: "muse.never") as? [String: [String]] ?? [:]
         rememberMe = d.object(forKey: "muse.rememberMe") as? Bool ?? true
-        steps = Pricing.clampSteps(ds)
-        engine = savedEngine == .replicate ? .h3 : savedEngine
-        quality = VideoQuality(id: d.string(forKey: "muse.defaultQuality"))
+        quality = VideoQuality(id: d.string(forKey: "muse.defaultQuality")).replicateOrDefault
         let store = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("MUSE/uploads")
         fake = FakeMuseAPI(storeDir: store)
         api = fake
@@ -348,7 +345,6 @@ final class AppStore {
         api = makeAPI()
         Notifier.shared.requestAuthorization()
         Notifier.shared.onOpenPost = { [weak self] id in self?.openScheduledPost(id) }
-        Notifier.shared.onKeepWarm = { [weak self] in self?.keepWarm() }
         Task { await restoreSession() }
     }
 
@@ -413,6 +409,7 @@ final class AppStore {
         studioSettings = nil
         appliedServerQuality = false
         imageEngine = nil
+        studioBalance = nil
         offlineMessage = nil
         resetWarm()
         Task { await restoreSession() }
@@ -461,15 +458,16 @@ final class AppStore {
         }
     }
 
-    /// Wallet, and for the owner: members, studio settings and the image engine. Servers without them (server/mock) are fine.
+    /// Wallet, and for the owner: members, the studio balance, the engines and the image engine. Servers without them (server/mock) are fine.
     func loadStudio() async {
         let api = self.api
         wallet = try? await api.wallet()
-        // Everyone reads the studio settings: `features.video` drives the Quality picker and its prices.
+        // Everyone reads the studio settings: `features.video` drives the Render picker and add-ons, `features.photo` the photo estimates.
         studioSettings = try? await api.studioSettings()
         syncQualityWithServer()
         guard isOwner else { return }
         if let m = try? await api.listMembers() { members = m }
+        studioBalance = try? await api.studioBalance()
         imageEngine = try? await api.imageEngine()
     }
 
@@ -514,12 +512,13 @@ final class AppStore {
             let wasAbove = balance.balance >= 5
             balance = b
             if wasAbove && b.balance < 5 && notifyLowBalance && !isMember {
-                Notifier.shared.post(title: "Balance below $5", body: "You have \(Pricing.money(b.balance)) left · about \(Pricing.videosLeft(b.balance)) videos at 10 steps.")
+                Notifier.shared.post(title: "Balance below $5", body: "You have \(Pricing.money(b.balance)) left · about \(Pricing.videosLeft(b.balance)) Draft videos.")
             }
         }
         if let w = e.wallet { walletChanged(w) }
         if let n = e.notice { studioNotice(n) }
-        if let g = e.gpu { applyWarm(g, warning: e.event == "warning" ? e.warning : nil) }
+        // Keep add-on engine ready is the owner's; a member never gets these, and ignores one if an older server sends it.
+        if let g = e.gpu, isOwner { applyWarm(g, warning: e.event == "warning" ? e.warning : nil) }
         if let m = e.model {
             if let i = models.firstIndex(where: { $0.id == m.id }) { models[i] = m } else { models.append(m) }
             syncDraftSlots(from: m)
@@ -552,7 +551,7 @@ final class AppStore {
     private func jobFailed(_ j: Job) {
         showToast("Render failed · \(j.title). \(Pricing.money(j.refunded)) refunded.", action: "Open queue") { [weak self] in self?.go(.queue) }
         if notifyFailed {
-            Notifier.shared.post(title: "Render failed · \(j.title)", body: "\(j.failureLine) \(Pricing.money(j.refunded)) refunded.")
+            Notifier.shared.post(title: "Render failed · \(j.title)", body: j.failureLine)
         }
     }
 
@@ -578,15 +577,13 @@ final class AppStore {
         }
     }
 
-    /// Owners: the RunPod balance went low (jobs pause) or recovered.
+    /// Owners: an engine's own account refused for lack of credit (the job failed and was refunded). Retired notices are ignored.
     private func studioNotice(_ n: EventNotice) {
-        if n.code == "owner_balance_low" {
-            showToast("\(Job.pausedLine). \(n.message)", action: "Credit") { [weak self] in self?.go(.credits) }
-            Notifier.shared.post(title: Job.pausedLine, body: n.message)
-        } else {
-            showToast(n.message)
-            Notifier.shared.post(title: "GPU credit is back", body: n.message)
-        }
+        guard isOwner, n.code == "provider_out_of_credit" else { return }
+        let msg = n.message.isEmpty ? "An engine is out of credit · see Settings → Engines" : n.message
+        showToast(msg, action: "Engines") { [weak self] in self?.openSettings(.engines) }
+        Notifier.shared.post(title: "An engine is out of credit", body: msg)
+        Task { [weak self] in await self?.loadStudio() }
     }
 
     // MARK: Auth
@@ -680,6 +677,7 @@ final class AppStore {
         studioSettings = nil
         appliedServerQuality = false
         imageEngine = nil
+        studioBalance = nil
         lastInvite = nil
         templates = []
         shootTemplate = nil
@@ -698,6 +696,11 @@ final class AppStore {
     }
 
     // MARK: Navigation
+
+    func openSettings(_ section: SettingsSection) {
+        settingsSection = section
+        go(.settings)
+    }
 
     func go(_ s: Screen) {
         guard s != screen else { return }
@@ -755,20 +758,22 @@ final class AppStore {
 
     var spec: RenderSpec { spec(for: quality) }
 
-    /// The price and labels for one Quality option with the current clip and takes.
+    /// The price and labels for one option with the current clip and takes (always the whole clip).
     func spec(for q: VideoQuality) -> RenderSpec {
-        if q.isReplicate {
-            return RenderSpec.replicate(q, clipSeconds: clip?.durationSec, takes: takeCount, pricePerSec: videoFeatures.pricePerSec(q))
-        }
-        return RenderSpec(engine: engine, use: use, steps: steps, lipSync: lipSync, takes: takeCount, clipSeconds: clip?.durationSec)
+        RenderSpec.choice(q, clipSeconds: clip?.durationSec, takes: takeCount, lipSync: lipSync, pricePerSec: videoFeatures.pricePerSec(q))
     }
 
     /// `features.video` from the server, or the contract's table.
     var videoFeatures: VideoFeatures { studioSettings?.features.video ?? .fallback }
-    /// Exact edit is picked: steps, First 5.2s / Full, lip sync, background photo and Keep GPU warm apply.
-    var isExactEdit: Bool { quality == .exact }
-    /// The steps control (and ← →) works: Exact edit on H3.
-    var stepsActive: Bool { isExactEdit && engine == .h3 }
+    /// `features.photo` from the server, or the contract's prices: photo estimates ("about $0.46").
+    var photoPricing: PhotoPricing { studioSettings?.features.photo ?? .standard }
+    /// A 4-photo shoot's estimate (the server's `features.photo.estimates.shoot` when it sends one).
+    var shootEstimate: Double { photoPricing.estimates?.shoot ?? photoPricing.shoot() }
+    var outfitSetEstimate: Double { photoPricing.estimates?.outfitSet ?? photoPricing.outfitSet() }
+    func sheetAnglesEstimate(_ missing: Int) -> Double { photoPricing.estimates?.sheetAngle.map { $0 * Double(missing) } ?? photoPricing.sheetAngles(missing) }
+    var loraSetEstimate: Double { photoPricing.estimates?.loraSet ?? photoPricing.loraSet() }
+    /// Edit is picked: lip sync and a new background photo apply.
+    var isEdit: Bool { quality == .edit }
 
     /// After reading the studio settings: the server's default until the user picks one, and never an option that's switched off.
     func syncQualityWithServer() {
@@ -783,7 +788,7 @@ final class AppStore {
     func setQuality(_ q: VideoQuality) {
         guard q != quality else { return }
         guard videoFeatures.isAvailable(q) else {
-            showToast("\(q.label) isn't available on this server right now")
+            showToast("\(q.label) isn't available right now")
             return
         }
         quality = q
@@ -791,7 +796,7 @@ final class AppStore {
 
     var totalCost: Double { Pricing.totalCost(spec) }
     /// The toast for "can't afford this".
-    var notEnoughMessage: String { isMember ? ApiError.friendly("insufficient_tokens")! : "Not enough balance for this" }
+    var notEnoughMessage: String { isMember ? ApiError.friendly("insufficient_tokens")! : ApiError.friendly("insufficient_balance")! }
     /// What I can spend, in dollars: my wallet (member) or what I can spend or send (owner). Prefers the API's `usd` fields.
     var creditUsd: Double { wallet?.usd ?? balance.balance }
     /// The public address for invite links (the download page is `{server}/get`).
@@ -800,10 +805,12 @@ final class AppStore {
     var lowBalance: Bool { totalCost > balance.balance + 1e-9 }
     var generateBlocked: Bool { clipBad || lowBalance || clip == nil || currentOutfit == nil || generating }
 
+    /// The video prompt as members see it (pro mode / "Show the prompt"): the shared prompt without its steps line part.
     var videoPrompt: String {
-        PromptEngine.video(VideoPromptInput(identity: identity(currentModel), outfitName: currentOutfit?.name ?? "outfit",
-                                            performer: clip?.id == SampleData.sampleClip ? .sample : .generic,
-                                            keepBackground: background == "keep", backgroundMotion: motion, keepAudio: keepAudio, spec: spec))
+        let p = PromptEngine.video(VideoPromptInput(identity: identity(currentModel), outfitName: currentOutfit?.name ?? "outfit",
+                                                    performer: clip?.id == SampleData.sampleClip ? .sample : .generic,
+                                                    keepBackground: background == "keep", backgroundMotion: motion, keepAudio: keepAudio, spec: spec))
+        return PromptEngine.memberView(p)
     }
 
     var shootSlots: [PromptSlot] {

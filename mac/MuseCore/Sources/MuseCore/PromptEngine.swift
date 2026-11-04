@@ -178,6 +178,11 @@ public enum PromptEngine {
         """
     }
 
+    /// The video prompt as members see it: the same text without the "steps: 10 · " part (members never see steps).
+    public static func memberView(_ videoPrompt: String) -> String {
+        videoPrompt.replacingOccurrences(of: #"(?m)^(\s*)steps: [^·\n]*· "#, with: "$1", options: .regularExpression)
+    }
+
     /// Character-sheet shot (plans/prompt-system.md §2), used by "Fill missing angles" and "Retake with AI".
     public static func sheetShot(identity: PromptIdentity, angle: SheetAngle, houseStyle: String = houseStyle) -> String {
         [identityLine(identity),

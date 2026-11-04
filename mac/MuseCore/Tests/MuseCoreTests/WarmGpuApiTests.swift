@@ -4,8 +4,8 @@ import XCTest
 import FoundationNetworking
 #endif
 
-/// Contract tests for Keep GPU warm against the real API (`server/api`): GET/POST /v1/gpu/warm, Keep warm, off with
-/// `lastOff`, the owner-only studio setting and the credit floor. Skipped unless MUSE_API_URL is set, and only ever run
+/// Contract tests for Keep add-on engine ready (was Keep GPU warm) against the real API (`server/api`): GET/POST /v1/gpu/warm,
+/// Keep ready, off with `lastOff`, owner only since the app clean-up (older servers: a member's, and the credit floor). Skipped unless MUSE_API_URL is set, and only ever run
 /// against a LOCAL dev server (simulated GPU): they switch GPUs on and move credit.
 ///
 ///   cd server/api && PORT=8799 PUBLIC_URL=http://127.0.0.1:8799 node --import tsx scripts/test-server.ts &
@@ -29,6 +29,7 @@ final class WarmGpuApiTests: XCTestCase {
         let api = client()
         let auth = try await api.signIn(SignInRequest(email: "jen@studio.com", password: "x"))
         await api.setToken(auth.token)
+        try await api.ensureStudioFunds()
         do {
             _ = try await api.warmGpu()
         } catch let e as ApiError where e.code == "not_found" || e.code == "http_404" {
@@ -60,10 +61,14 @@ final class WarmGpuApiTests: XCTestCase {
         }
     }
 
+    /// True on servers with the app clean-up: Keep add-on engine ready is owner-only.
+    private func ownerOnly(_ boss: HTTPMuseAPI) async throws -> Bool { try await boss.studioBalanceIfAny() != nil }
+
     /// off → on (starting or warm) → idempotent on → Keep warm → off with lastOff.reason "user" → Keep warm refused.
+    /// The owner's since the app clean-up; a member's on older servers.
     func testSwitchOnKeepWarmAndOff() async throws {
         let boss = try await owner()
-        let (me, _) = try await member(boss, tokens: 150) // $1.50: 10 minutes need ~$0.67
+        let me = try await ownerOnly(boss) ? boss : try await member(boss, tokens: 150).0 // $1.50: 10 minutes need ~$0.67
         let g0 = try await me.warmGpu()
         XCTAssertEqual(g0.state, "off")
         XCTAssertFalse(g0.isOn)
@@ -115,33 +120,26 @@ final class WarmGpuApiTests: XCTestCase {
         await expect(["not_warm"]) { _ = try await me.setWarmGpu(.keepWarm) }
     }
 
-    /// The studio setting: owner-only hides it from members (allowed false, warm_not_allowed); the owner still may.
-    func testOwnerOnlySetting() async throws {
+    /// Owner only since the app clean-up: members get owner_only from GET and POST /v1/gpu/warm; the owner may.
+    func testOwnerOnly() async throws {
         let boss = try await owner()
+        guard try await ownerOnly(boss) else { throw XCTSkip("This server predates the app clean-up (warmGpuAllowed)") }
         let (me, _) = try await member(boss, tokens: 0)
-        let st0 = try await boss.studioSettings()
-        XCTAssertEqual(st0.warmGpuAllowed, "everyone")
-        XCTAssertEqual(st0.warmIdleMinutes, 20)
-        XCTAssertEqual(st0.warmMaxMinutes, 120)
-        let st = try await boss.updateStudioSettings(StudioSettingsPatch(warmGpuAllowed: "owner"))
-        XCTAssertEqual(st.warmGpuAllowed, "owner")
-        do {
-            let g = try await me.warmGpu()
-            XCTAssertFalse(g.allowed)
-            await expect(["warm_not_allowed"]) { _ = try await me.setWarmGpu(.turnOn) }
-            let mine = try await boss.warmGpu()
-            XCTAssertTrue(mine.allowed)
-            await expect(["owner_only"]) { _ = try await me.updateStudioSettings(StudioSettingsPatch(warmGpuAllowed: "everyone")) }
-        }
-        let back = try await boss.updateStudioSettings(StudioSettingsPatch(warmGpuAllowed: "everyone"))
-        XCTAssertEqual(back.warmGpuAllowed, "everyone")
-        let allowedAgain = try await me.warmGpu().allowed
-        XCTAssertTrue(allowedAgain)
+        await expect(["owner_only"]) { _ = try await me.warmGpu() }
+        await expect(["owner_only"]) { _ = try await me.setWarmGpu(.turnOn) }
+        await expect(["owner_only"]) { _ = try await me.setWarmGpu(.turnOff) }
+        let mine = try await boss.warmGpu()
+        XCTAssertTrue(mine.allowed)
+        let st = try await boss.studioSettings()
+        XCTAssertEqual(st.warmIdleMinutes, 20)
+        XCTAssertEqual(st.warmMaxMinutes, 120)
+        await expect(["owner_only"]) { _ = try await me.updateStudioSettings(StudioSettingsPatch(warmIdleMinutes: 30)) }
     }
 
     /// It needs credit for 10 minutes (~$0.67).
     func testNeedsCreditForTenMinutes() async throws {
         let boss = try await owner()
+        if try await ownerOnly(boss) { throw XCTSkip("Owner only now: the owner's credit floor isn't set up in this test") }
         let (broke, _) = try await member(boss, tokens: 30) // $0.30
         await expect(["insufficient_tokens", "insufficient_balance"]) { _ = try await broke.setWarmGpu(.turnOn) }
         let still = try await broke.warmGpu()

@@ -2,7 +2,7 @@ import Foundation
 
 /// In-process backend so the app works with no server. Same rules as server/mock and the Android fake:
 /// renders run `speed`× faster than real time, the balance is charged when a job is queued and refunded if it fails,
-/// and progress arrives as events. Like the desktop prototype there is one GPU: jobs run one after another.
+/// and progress arrives as events. Like the desktop prototype, jobs run one after another.
 public actor FakeMuseAPI: MuseAPI {
     private let speed: Double
     private let genDelay: Double
@@ -29,13 +29,15 @@ public actor FakeMuseAPI: MuseAPI {
     private var signedIn: User?
     private var members: [Member] = FakeMuseAPI.demoMembers()
     private var engine = ImageEngine(provider: "simulated", model: "bundled-stills", available: ["simulated": true, "fal": false, "custom-http": true])
-    private var studio = StudioSettings(features: StudioFeatures(replicate: true, video: .fallback))
+    private var studio = StudioSettings(features: StudioFeatures(replicate: true, video: .fallback, photo: .standard))
+    /// The demo studio balance: one opening top-up, then what the owner records.
+    private var topUps: [TopUp] = [TopUp(id: "tu_demo", amountUsd: 25, note: "Opening balance", paidAt: nowMs() - 864_000_000)]
     /// Templates with their layers (the "server side"). Only the owner's ever leave the actor with layers.
     private var templates: [MuseTemplate]
     private var favourites: Set<String> = []
     /// The exact layers behind each shot (server-side record), for "Save as template".
     private var shotLayers: [String: TemplateLayers] = [:]
-    /// Keep GPU warm: the rules run on a clock `warmSpeed`× real time (boot is sped up like renders).
+    /// Keep add-on engine ready (owner only): the rules run on a clock `warmSpeed`× real time (boot is sped up like renders).
     private var warm: WarmGpuSim
     private let warmSpeed: Double
     private let warmEpoch = nowMs()
@@ -92,12 +94,15 @@ public actor FakeMuseAPI: MuseAPI {
 
     public func signOut() { signedIn = nil }
 
+    /// Tests: look at the demo as a member would (members get the member view and owner_only errors).
+    func setRole(_ role: String) { signedIn?.role = role }
+
     public func me() throws -> User {
         guard let u = signedIn else { throw ApiError("unauthorized", "Sign in to continue") }
         return u
     }
 
-    // MARK: Tokens and members (demo: you are the owner; the "RunPod balance" is the balance plus what members hold)
+    // MARK: Tokens and members (demo: you are the owner; the studio balance is what you can send plus what members hold)
 
     static func demoMembers() -> [Member] {
         let now = nowMs()
@@ -112,9 +117,10 @@ public actor FakeMuseAPI: MuseAPI {
         let unspent = members.reduce(0.0) { $0 + Double($1.tokens + $1.heldTokens) * b.tokenUsd }
         out.role = "owner"
         out.tokens = Int((b.balance / b.tokenUsd + 1e-6).rounded(.down))
-        out.balanceSource = "simulated"
+        out.balanceSource = "studio"
         out.availableToSend = b.balance
-        out.runpodBalance = ((b.balance + unspent) * 100).rounded() / 100
+        out.studioBalance = ((b.balance + unspent + b.heldUsd) * 100).rounded() / 100
+        out.needsFirstTopUp = false
         out.perUserDayLimit = 10
         return out
     }
@@ -128,7 +134,7 @@ public actor FakeMuseAPI: MuseAPI {
     private func walletNow() -> Wallet {
         let unspent = members.reduce(0.0) { $0 + Double($1.tokens + $1.heldTokens) * bal.tokenUsd }
         return Wallet(userId: signedIn?.id ?? "u1", role: "owner", tokens: bal.tokenCount, usd: bal.balance, todayUsd: bal.today ?? 0, monthUsd: bal.month,
-                      tokenUsd: bal.tokenUsd, balanceSource: "simulated", availableToSend: bal.balance, runpodBalance: bal.runpodBalance, membersUnspentUsd: unspent)
+                      tokenUsd: bal.tokenUsd, balanceSource: "studio", availableToSend: bal.balance, studioBalance: bal.studioBalance, membersUnspentUsd: unspent)
     }
 
     public func wallet() -> Wallet { walletNow() }
@@ -184,6 +190,7 @@ public actor FakeMuseAPI: MuseAPI {
     public func imageEngine() -> ImageEngine { engine }
 
     public func setImageEngine(_ req: ImageEngineRequest) throws -> ImageEngine {
+        guard isOwner else { throw ApiError("owner_only", "Only the studio owner can change the image engine") }
         guard engine.isAvailable(req.provider) else { throw ApiError("bad_request", "\(req.provider) is not set up on the server") }
         if req.provider == "custom-http" && !(req.url ?? "").hasPrefix("https://") { throw ApiError("bad_request", "Use an https:// URL") }
         engine.provider = req.provider
@@ -192,20 +199,34 @@ public actor FakeMuseAPI: MuseAPI {
         return engine
     }
 
-    public func studioSettings() -> StudioSettings { studio }
+    /// Members get the caps and features only; the owner also gets Settings → Engines.
+    public func studioSettings() -> StudioSettings {
+        guard isOwner else {
+            return StudioSettings(capPerJob: studio.capPerJob, capPerDay: studio.capPerDay, capPerUserDay: studio.capPerUserDay, tokenUsd: studio.tokenUsd, features: studio.features)
+        }
+        var s = studio
+        s.engines = Engines(list: [EngineStatus(id: "replicate", name: "Replicate", usedFor: "Draft, Standard and HD video · photos", keySet: false, status: "simulated"),
+                                   EngineStatus(id: "runpod", name: "RunPod", usedFor: "Edit, Fast · beta, Upscale", keySet: false, status: "simulated")],
+                            imageEngine: engine, addOn: AddOnEngine(maxGpus: studio.maxGpus, overheadPayer: studio.overheadPayer),
+                            keepReady: KeepReady(idleMinutes: studio.warmIdleMinutes, maxMinutes: studio.warmMaxMinutes))
+        return s
+    }
+
+    /// Demo mode signs in as the owner; a demo account with role "member" sees the member view.
+    private var isOwner: Bool { (signedIn?.role ?? "owner") == "owner" }
 
     public func updateStudioSettings(_ patch: StudioSettingsPatch) throws -> StudioSettings {
+        guard isOwner else { throw ApiError("owner_only", "Only the studio owner can change studio settings") }
         if let g = patch.maxGpus { guard (0...16).contains(g) else { throw ApiError("bad_request", "Max GPUs must be 0–16") }; studio.maxGpus = g }
         if let p = patch.overheadPayer { studio.overheadPayer = p == "owner" ? "owner" : "user" }
         if let v = patch.capPerJob { studio.capPerJob = v; bal.perJobLimit = v }
         if let v = patch.capPerDay { studio.capPerDay = v; bal.perDayLimit = v }
         if let v = patch.capPerUserDay { studio.capPerUserDay = v }
-        if let v = patch.warmGpuAllowed { studio.warmGpuAllowed = v == "owner" ? "owner" : "everyone" }
         if let v = patch.warmIdleMinutes { guard (5...120).contains(v) else { throw ApiError("bad_request", "Idle minutes must be 5–120") }; studio.warmIdleMinutes = v }
         if let v = patch.warmMaxMinutes { guard (30...480).contains(v) else { throw ApiError("bad_request", "The time limit must be 30–480 min") }; studio.warmMaxMinutes = v }
         // New warm sessions use the new rules.
         if !warm.isOn { warm = WarmGpuSim(config: warmConfig()) }
-        return studio
+        return studioSettings()
     }
 
     static func studio(from email: String) -> String {
@@ -239,7 +260,7 @@ public actor FakeMuseAPI: MuseAPI {
     public func fillAngles(modelId: String) async throws -> FillAnglesResponse {
         var m = try model(modelId)
         let missing = m.slots.filter { $0.image == nil && !$0.busy }
-        let cost = Pricing.fillAnglesCost(missing.count)
+        let cost = photoPricing.sheetAngles(missing.count)
         if cost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough balance · top up in Credits") }
         charge(cost)
         for i in m.slots.indices where m.slots[i].image == nil { m.slots[i].busy = true }
@@ -309,7 +330,7 @@ public actor FakeMuseAPI: MuseAPI {
         var l = loras[modelId] ?? Lora(modelId: modelId)
         if l.isBusy { throw ApiError("busy", "The LoRA is busy · wait for it to finish") }
         if m.filled == 0 { throw ApiError("bad_request", "Add character-sheet shots first") }
-        let cost = LoraPricing.setCost
+        let cost = photoPricing.loraSet()
         if cost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough balance · top up in Credits") }
         charge(cost)
         hub.emit(ApiEvent(type: "balance", balance: bal))
@@ -505,7 +526,7 @@ public actor FakeMuseAPI: MuseAPI {
     public func listOutfits() -> [Outfit] { outfits }
 
     public func createOutfit(_ req: CreateOutfitRequest) async throws -> Outfit {
-        let cost = req.mode == "own" ? 0 : Pricing.outfitSetCost
+        let cost = req.mode == "own" ? 0 : photoPricing.outfitSet()
         if cost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough balance · top up in Credits") }
         let m = try model(req.modelId)
         charge(cost)
@@ -580,15 +601,15 @@ public actor FakeMuseAPI: MuseAPI {
             if req.quality == nil { req.quality = VideoQuality.default.rawValue }
         }
         let spec = req.spec(pricePerSec: (studio.features.video ?? .fallback).pricePerSec(req.videoQuality))
-        if spec.engine == .h3 && (spec.steps < Pricing.stepsMin || spec.steps > Pricing.stepsMax) { throw ApiError("bad_request", "Steps must be 4–30") }
+        if spec.engine == .h3 && (spec.steps < Pricing.stepsMin || spec.steps > Pricing.stepsMax) { throw ApiError("bad_request", "That render setting isn't supported") }
         if spec.isReplicate {
-            if req.lipSync { throw ApiError("bad_request", "Lip sync is Exact edit only") }
-            if req.background == "photo" { throw ApiError("bad_request", "A new background photo is Exact edit only") }
+            if req.lipSync { throw ApiError("bad_request", "Lip sync is Edit only") }
+            if req.background == "photo" { throw ApiError("bad_request", "A new background photo is Edit only") }
             if let q = req.quality, !["draft", "standard", "hd"].contains(q) { throw ApiError("bad_request", "quality must be draft, standard or hd") }
         }
         if spec.takes < 1 || spec.takes > Pricing.takesMax { throw ApiError("bad_request", "Takes must be 1–4") }
         let cost = Pricing.totalCost(spec)
-        if cost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough balance for this render") }
+        if cost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough in the studio balance · add a top-up in Credits") }
         if cost > bal.perJobLimit { throw ApiError("over_job_limit", "Over your \(Pricing.money(bal.perJobLimit)) per-job limit") }
         if (bal.today ?? 0) + cost > bal.perDayLimit { throw ApiError("over_day_limit", "Over your \(Pricing.money(bal.perDayLimit)) daily limit") }
         let m = try model(req.modelId)
@@ -627,7 +648,7 @@ public actor FakeMuseAPI: MuseAPI {
         pump()
     }
 
-    /// Starts the next queued job if the GPU is free.
+    /// Starts the next queued job when nothing is rendering.
     private func pump() {
         guard runner == nil, !held, speed > 0 else { return }
         guard let next = jobs.filter({ $0.isQueued }).min(by: { $0.createdAt < $1.createdAt }), let i = jobs.firstIndex(where: { $0.id == next.id }) else { return }
@@ -639,7 +660,7 @@ public actor FakeMuseAPI: MuseAPI {
         let failThis = failNext
         failNext = false
         runningId = id
-        // On the user's warm GPU: its GPU time is covered by the "Warm GPU" line. Replicate jobs never use our GPU.
+        // While the add-on engine is kept ready, Edit and Fast renders' time is on that line. Draft / Standard / HD never use it.
         if warm.isOn && next.engine != .replicate { jobs[i].warm = true }
         runner = Task { await self.drive(id, fail: failThis) }
     }
@@ -659,13 +680,13 @@ public actor FakeMuseAPI: MuseAPI {
                 jobs[i].progress = p.progress
                 jobs[i].step = p.step
                 jobs[i].refunded = cur.cost
+                jobs[i].phase = "Failed"
                 if cur.engine == .replicate {
-                    jobs[i].phase = "Failed"
                     jobs[i].errorCode = "provider_refused"
-                    jobs[i].error = "Replicate's safety filter refused this clip"
+                    jobs[i].error = "This clip was refused by the content filter · you weren't charged"
                 } else {
-                    jobs[i].phase = "Failed at step \(p.step)"
-                    jobs[i].error = "The GPU disconnected at step \(p.step)."
+                    jobs[i].errorCode = "provider_failed"
+                    jobs[i].error = MemberText.wentWrong
                 }
                 jobs[i].finishedAt = nowMs()
                 refund(cur.cost)
@@ -682,7 +703,7 @@ public actor FakeMuseAPI: MuseAPI {
                 jobs[i].finishedAt = nowMs()
                 if cur.engine == .replicate { jobs[i].billedSeconds = Double(cur.request.spec.replicateSeconds * max(1, cur.request.takes)) }
                 if jobs[i].warm == true {
-                    // Settles to $0: the warm GPU's wall time already paid for it.
+                    // Settles to $0: the add-on engine's ready time already paid for it.
                     refund(cur.cost)
                     jobs[i].cost = 0
                     syncOwner()
@@ -714,7 +735,7 @@ public actor FakeMuseAPI: MuseAPI {
         let o = outfits.first { $0.id == j.outfitId }
         let pool = (o?.angles.compactMap { $0 } ?? [])
         let n = max(1, j.request.takes)
-        let label = j.engine == .viggle ? "Fast" : j.engine == .replicate ? j.videoQuality.label : "\(j.request.steps) steps"
+        let label = j.videoQuality.label
         return (1...n).map { k in
             let thumb = pool.isEmpty ? (j.thumb ?? .asset("g_front")) : pool[(k - 1) % pool.count]
             return Take(id: "t_\(j.id)_\(k)", jobId: j.id, index: k, of: n, title: j.title, label: label, engineLabel: j.engineLabel,
@@ -736,17 +757,18 @@ public actor FakeMuseAPI: MuseAPI {
 
     public func shoot(_ req: ShootRequest) async throws -> [Take] {
         if let tid = req.templateId { return try await templateShoot(tid, req) }
-        if Pricing.shootCost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough balance · top up in Credits") }
-        charge(Pricing.shootCost)
+        let count = max(1, min(8, req.count))
+        let cost = photoPricing.shoot(count: count)
+        if cost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough in the studio balance · add a top-up in Credits") }
+        charge(cost)
         hub.emit(ApiEvent(type: "balance", balance: bal))
         try? await Task.sleep(nanoseconds: UInt64(genDelay * 1_000_000_000))
         let o = outfits.first { $0.id == req.outfitId }
         let pool = [o?.front?.asset ?? "c_front", "c_tq", "g_front", "hero"]
         let label = req.scene.components(separatedBy: "·").first?.trimmingCharacters(in: .whitespaces) ?? req.scene
         let t = nowMs()
-        let count = max(1, min(8, req.count))
         let shots = (0..<count).map { n in
-            Take(id: "s_\(shortId())", kind: "shot", index: n + 1, of: count, title: "Shoot · \(label.prefix(28))", label: "Shoot", cost: Pricing.shootCost / Double(count),
+            Take(id: "s_\(shortId())", kind: "shot", index: n + 1, of: count, title: "Shoot · \(label.prefix(28))", label: "Shoot", cost: cost / Double(count),
                  seed: req.seed ?? Int64.random(in: 1000...99999), thumb: .asset(pool[n % pool.count]), prompt: req.prompt, createdAt: t)
         }
         takes.insert(contentsOf: shots, at: 0)
@@ -899,8 +921,10 @@ public actor FakeMuseAPI: MuseAPI {
     private func templateShoot(_ tid: String, _ req: ShootRequest) async throws -> [Take] {
         let i = try visibleIndex(tid)
         _ = try model(req.modelId)
-        if Pricing.shootCost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough balance · top up in Credits") }
-        charge(Pricing.shootCost)
+        let count = max(1, min(8, req.count))
+        let cost = photoPricing.shoot(count: count)
+        if cost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough in the studio balance · add a top-up in Credits") }
+        charge(cost)
         hub.emit(ApiEvent(type: "balance", balance: bal))
         try? await Task.sleep(nanoseconds: UInt64(genDelay * 1_000_000_000))
         let t = templates[i]
@@ -909,14 +933,13 @@ public actor FakeMuseAPI: MuseAPI {
         let o = outfits.first { $0.id == req.outfitId }
         let pool = [t.cover?.asset ?? "hero", o?.front?.asset ?? "c_front", "c_tq", "g_front", "face", "g_tq"]
         let now = nowMs()
-        let count = max(1, min(8, req.count))
         let hasProduct = req.productImage != nil && t.acceptsProduct
         var shots: [Take] = []
         for n in 0..<count {
             let seed = Int64.random(in: 1000...999_999)
             let b = try templateBuild(t, modelId: req.modelId, outfitId: req.outfitId, direction: req.direction, shuffleSeed: shuffle, index: n,
                                       lockSeed: req.lockSeed ?? false, seed: seed, hasProduct: hasProduct)
-            var take = Take(id: "s_\(shortId())", kind: "shot", index: n + 1, of: count, title: "Template · \(t.name)", label: "Shoot", cost: Pricing.shootCost / Double(count),
+            var take = Take(id: "s_\(shortId())", kind: "shot", index: n + 1, of: count, title: "Template · \(t.name)", label: "Shoot", cost: cost / Double(count),
                             seed: b.seed ?? seed, thumb: .asset(pool[(n + Int(shuffle % 3)) % pool.count]), prompt: owner ? b.fullText : b.visibleText, createdAt: now)
             take.templateId = t.id
             take.templateName = t.name
@@ -935,16 +958,39 @@ public actor FakeMuseAPI: MuseAPI {
     public func balance() -> Balance { bal }
 
     public func topUp(_ req: TopUpRequest) throws -> Balance {
-        if req.amount <= 0 { throw ApiError("bad_request", "Pick an amount") }
-        bal.balance += req.amount
-        bal = Self.ownerView(bal, members: members)
-        hub.emit(ApiEvent(type: "balance", balance: bal))
+        _ = try recordTopUp(TopUpRecord(amountUsd: req.amount, note: req.note))
         return bal
+    }
+
+    public func studioBalance() throws -> StudioBalance {
+        guard isOwner else { throw ApiError("owner_only", "Only the studio owner can see the studio balance") }
+        let unspent = members.reduce(0.0) { $0 + Double($1.tokens + $1.heldTokens) * bal.tokenUsd }
+        let topped = topUps.reduce(0.0) { $0 + $1.amountUsd }
+        let balance = ((bal.balance + unspent + bal.heldUsd) * 100).rounded() / 100
+        return StudioBalance(balanceUsd: balance, toppedUpUsd: topped, spentUsd: max(0, ((topped - balance) * 100).rounded() / 100), membersCreditUsd: unspent,
+                             heldUsd: bal.heldUsd, availableUsd: bal.balance, since: topUps.last?.paidAt ?? 0, needsFirstTopUp: topUps.isEmpty,
+                             topUps: Array(topUps.prefix(20)))
+    }
+
+    public func recordTopUp(_ req: TopUpRecord) throws -> StudioBalance {
+        guard isOwner else { throw ApiError("owner_only", "Only the studio owner can add a top-up") }
+        guard req.isValid else { throw ApiError("bad_request", "Enter an amount between $0.01 and $10,000") }
+        let now = nowMs()
+        if let p = req.paidAt, p > now + 60_000 { throw ApiError("bad_request", "The paid date can't be in the future") }
+        topUps.insert(TopUp(id: "tu_" + shortId(), amountUsd: req.amountUsd, note: req.note, paidAt: req.paidAt ?? now, createdAt: now, createdBy: meId), at: 0)
+        bal.balance += req.amountUsd
+        syncOwner()
+        return try studioBalance()
+    }
+
+    public func upscale(takeId: String, _ req: UpscaleRequest) throws -> Job {
+        guard takes.contains(where: { $0.id == takeId }) else { throw ApiError("not_found", "Take not found") }
+        throw ApiError("upscale_unavailable", "Upscale is coming soon")
     }
 
     public func setFailNext(_ fail: Bool) { failNext = fail }
 
-    // MARK: Keep GPU warm
+    // MARK: Keep add-on engine ready (owner only)
 
     /// The warm GPU's clock (ms): real time, sped up by `warmSpeed`.
     private func warmNow() -> Int64 { warmEpoch + Int64(Double(nowMs() - warmEpoch) * warmSpeed) }
@@ -953,25 +999,25 @@ public actor FakeMuseAPI: MuseAPI {
         WarmGpuSim.Config(idleMinutes: studio.warmIdleMinutes, maxMinutes: studio.warmMaxMinutes, bootSeconds: warmBoot)
     }
 
-    private var warmAllowed: Bool { studio.warmGpuAllowed != "owner" || (signedIn?.role ?? "owner") == "owner" }
-
     private func warmView() -> WarmGpu {
         var g = warm.status(now: warmNow())
-        g.allowed = warmAllowed
+        g.allowed = isOwner
         return g
     }
 
-    public func warmGpu() -> WarmGpu { warmView() }
+    public func warmGpu() throws -> WarmGpu {
+        guard isOwner else { throw ApiError("owner_only", "Only the studio owner can keep the add-on engine ready") }
+        return warmView()
+    }
 
     public func setWarmGpu(_ req: WarmGpuRequest) throws -> WarmGpu {
+        guard isOwner else { throw ApiError("owner_only", "Only the studio owner can keep the add-on engine ready") }
         let now = warmNow()
         if req.extend == true {
             try warm.keepWarm(now: now)
             emitWarm("state")
         } else if req.on == true {
             if !warm.isOn {
-                if !warmAllowed { throw ApiError("warm_not_allowed", "Only the studio owner can keep a GPU warm") }
-                if studio.lowBalance { throw ApiError("owner_balance_low", "The studio's GPU credit is low · the owner needs to top up RunPod") }
                 try warm.turnOn(now: now, creditUsd: bal.balance)
                 emitWarm("state")
                 startWarmClock()
@@ -1012,7 +1058,7 @@ public actor FakeMuseAPI: MuseAPI {
 
     /// One pass of the warm GPU: boot, minute billing (a `tick` event), the warning and auto-off. Returns false once it's off.
     private func warmTick() -> Bool {
-        let outs = warm.tick(now: warmNow(), creditUsd: bal.balance, ownerBalanceLow: studio.lowBalance, busy: runningId != nil)
+        let outs = warm.tick(now: warmNow(), creditUsd: bal.balance, busy: runningId != nil)
         for o in outs {
             switch o {
             case .charge(let usd):
@@ -1028,6 +1074,8 @@ public actor FakeMuseAPI: MuseAPI {
     }
 
     // MARK: Helpers
+
+    private var photoPricing: PhotoPricing { studio.features.photo ?? .standard }
 
     private func charge(_ cost: Double) {
         bal.balance = max(0, bal.balance - cost)

@@ -37,14 +37,14 @@ public enum SampleData {
     }
 
     static func req(_ title: String, _ engine: Engine, _ steps: Int, outfit: String = green) -> JobRequest {
-        JobRequest(title: title, modelId: sienna, outfitId: outfit, clipId: sampleClip, engine: engine.rawValue, steps: steps)
+        JobRequest(title: title, modelId: sienna, outfitId: outfit, clipId: sampleClip, engine: engine.rawValue, steps: steps, use: ClipUse.full.rawValue)
     }
 
     public static func jobs(now: Int64) -> [Job] {
-        let living = req("Living room dance", .h3, 10)
+        let living = JobRequest.replicate(title: "Living room dance", modelId: sienna, outfitId: green, clipId: sampleClip, quality: .standard, clipSeconds: 9.4)
         return [
             Job(id: "j3", title: "Living room dance", modelId: sienna, modelName: "Sienna Vale", outfitId: green, request: living, state: "queued",
-                totalSteps: 10, phase: "Queued", secondsLeft: Pricing.totalSeconds(living.spec), totalSeconds: Pricing.totalSeconds(living.spec),
+                totalSteps: 1, phase: "Queued", secondsLeft: Pricing.totalSeconds(living.spec), totalSeconds: Pricing.totalSeconds(living.spec),
                 cost: Pricing.totalCost(living.spec), createdAt: now - 60_000, seed: 48213, thumb: .asset("vid_living")),
             Job(id: "j1", title: "Kick test", modelId: sienna, modelName: "Sienna Vale", outfitId: green, request: req("Kick test", .viggle, 4), state: "done",
                 progress: 100, step: 4, totalSteps: 4, phase: "Done", totalSeconds: 95, cost: 0.13, createdAt: now - 7_200_000, finishedAt: now - 7_000_000,
@@ -53,18 +53,18 @@ public enum SampleData {
                 state: "done", progress: 100, step: 30, totalSteps: 30, phase: "Done", totalSeconds: 2760, cost: 3.05, createdAt: now - 86_400_000,
                 finishedAt: now - 83_640_000, seed: 42, thumb: .asset("vid_bath")),
             Job(id: "j0", title: "Mirror selfie", modelId: sienna, modelName: "Sienna Vale", outfitId: green, request: req("Mirror selfie", .h3, 10), state: "failed",
-                progress: 18, step: 3, totalSteps: 10, phase: "Failed at step 3", totalSeconds: 608, cost: 0.19, refunded: 0.19,
-                error: "The GPU disconnected at step 3.", createdAt: now - 3_600_000, finishedAt: now - 3_500_000, thumb: .asset("vid_living2")),
+                progress: 18, step: 3, totalSteps: 10, phase: "Failed", totalSeconds: 608, cost: 0.19, refunded: 0.19,
+                error: MemberText.wentWrong, createdAt: now - 3_600_000, finishedAt: now - 3_500_000, thumb: .asset("vid_living2")),
         ]
     }
 
     public static func takes(now: Int64) -> [Take] {
         [
-            Take(id: "t_j1", jobId: "j1", title: "Kick test", label: "Fast", engineLabel: "Fast · beta", cost: 0.13, seed: 7, thumb: .asset("vid_kick"), createdAt: now - 7_000_000),
-            Take(id: "t_j2", jobId: "j2", title: "Bathroom", label: "30 steps", engineLabel: "Standard · 30 steps", cost: 3.05, seed: 42, thumb: .asset("vid_bath"), createdAt: now - 83_640_000),
-            Take(id: "t_g1", title: "Living room", label: "10 steps", engineLabel: "Standard · 10 steps", cost: 0.66, seed: 48213, status: "final", thumb: .asset("vid_living"), createdAt: now - 90_000_000),
+            Take(id: "t_j1", jobId: "j1", title: "Kick test", label: "Fast · beta", engineLabel: "Fast · beta", cost: 0.13, seed: 7, thumb: .asset("vid_kick"), createdAt: now - 7_000_000),
+            Take(id: "t_j2", jobId: "j2", title: "Bathroom", label: "Edit", engineLabel: "Edit", cost: 3.05, seed: 42, thumb: .asset("vid_bath"), createdAt: now - 83_640_000),
+            Take(id: "t_g1", title: "Living room", label: "Standard", engineLabel: "Standard · 768P", cost: 0.66, seed: 48213, status: "final", thumb: .asset("vid_living"), createdAt: now - 90_000_000),
             Take(id: "t_g4", kind: "shot", title: "Shoot · crystal", label: "Shoot", cost: 0.02, seed: 48213, thumb: .asset("c_front"), createdAt: now - 96_000_000),
-            Take(id: "t_g5", title: "Living room", label: "15 steps", engineLabel: "Standard · 15 steps", cost: 0.98, seed: 48213, thumb: .asset("vid_living2"), createdAt: now - 95_000_000),
+            Take(id: "t_g5", title: "Living room", label: "Edit", engineLabel: "Edit", cost: 0.98, seed: 48213, thumb: .asset("vid_living2"), createdAt: now - 95_000_000),
             Take(id: "t_g6", kind: "shot", title: "Shoot · crystal ¾", label: "Shoot", cost: 0.02, seed: 48213, thumb: .asset("c_tq"), createdAt: now - 97_000_000),
             Take(id: "t_g7", kind: "shot", title: "Shoot · green set", label: "Shoot", cost: 0.02, seed: 48213, thumb: .asset("g_front"), createdAt: now - 98_000_000),
         ]
@@ -104,8 +104,9 @@ public enum ClipRules {
     }
 }
 
-/// Where a job is after `elapsed` seconds of (simulated) GPU time. Each take: GPU start (30 s), the denoising steps,
-/// then lip sync (4 min) if on. Fast · beta runs a fixed 4 steps.
+/// Where a job is after `elapsed` seconds of (simulated) render time. Edit, each take: getting ready (30 s), rendering, then lip sync
+/// (4 min) if on. Fast · beta has no getting-ready part. Phases are member-safe (plans/api.md "App clean-up" §1); `step` is only for
+/// progress maths and never shown.
 public struct JobProgress: Equatable, Sendable {
     public var progress: Double
     public var take: Int
@@ -138,10 +139,10 @@ public enum JobClock {
             step = totalSteps
             phase = "Done"
         } else if inTake < startup {
-            phase = "\(prefix)Starting GPU · \(leftText(left))"
+            phase = "\(prefix)Getting ready · \(leftText(left))"
         } else if inTake < startup + stepsTime {
             step = min(totalSteps, Int(floor((inTake - startup) / stepsTime * Double(totalSteps))) + 1)
-            phase = "\(prefix)step \(step)/\(totalSteps) · \(leftText(left))"
+            phase = "\(prefix)Rendering · \(leftText(left))"
         } else {
             step = totalSteps
             phase = "\(prefix)Lip sync · \(leftText(left))"
@@ -150,7 +151,7 @@ public enum JobClock {
     }
 
     /// Replicate (plans/api.md "How a replicate job runs"): totalSteps = takes, step = takes finished;
-    /// "Preparing the clip", "Rendering on Replicate" ("take 2/3 · …"), "Finishing · exact length and audio".
+    /// "Preparing the clip", "Rendering · ~2 min left" ("take 2/3 · …"), "Finishing".
     static func replicateProgress(_ spec: RenderSpec, elapsed: Double) -> JobProgress {
         let takes = max(1, spec.takes)
         let total = Pricing.totalSeconds(spec)
@@ -166,9 +167,9 @@ public enum JobClock {
         } else if take == 1 && inTake < perTake * 0.1 {
             phase = "Preparing the clip"
         } else if inTake > perTake * 0.9 {
-            phase = "\(prefix)Finishing · exact length and audio"
+            phase = "\(prefix)Finishing"
         } else {
-            phase = "\(prefix)Rendering on Replicate · \(leftText(left))"
+            phase = "\(prefix)Rendering · \(leftText(left))"
         }
         let step = e >= total ? takes : take - 1
         return JobProgress(progress: min(100, max(0, e / total * 100)), take: take, step: step, totalSteps: takes, phase: phase, secondsLeft: left)

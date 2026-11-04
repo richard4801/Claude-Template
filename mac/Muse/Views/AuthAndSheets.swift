@@ -217,10 +217,10 @@ struct OutfitSheetView: View {
                     HStack {
                         Spacer()
                         if d.state == .done {
-                            if d.mode != .own { MButton("Retake · \(Pricing.money(Pricing.outfitSetCost))") { store.outfitGenerate() } }
+                            if d.mode != .own { MButton("Retake · \(PhotoPricing.label(store.outfitSetEstimate))") { store.outfitGenerate() } }
                             MButton("Save outfit", kind: .primary) { store.outfitSave() }
                         } else {
-                            MButton(d.mode == .own ? "Use my images" : "Generate 4 angles · \(Pricing.money(Pricing.outfitSetCost))", kind: .primary, off: d.state == .busy) {
+                            MButton(d.mode == .own ? "Use my images" : "Generate 4 angles · \(PhotoPricing.label(store.outfitSetEstimate))", kind: .primary, off: d.state == .busy) {
                                 store.outfitGenerate()
                             }
                         }

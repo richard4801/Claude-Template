@@ -1,29 +1,32 @@
 import MuseCore
 import SwiftUI
 
-/// The nudge when creating starts, or the cost warning on a switch-on. Both say the same thing; neither has "don't ask again".
+/// The cost warning on every switch-on of Keep add-on engine ready.
 struct WarmPrompt: Identifiable {
-    enum Kind { case nudge, confirm }
     let id = UUID()
-    var kind: Kind
-    /// What creating was about to do (Generate). Runs after either answer.
-    var then: (@MainActor () -> Void)?
 }
 
-// Keep GPU warm (plans/backend.md): the nudge, the switch, the bar, the 5-minute warning and auto-off.
+// Keep add-on engine ready (was "Keep GPU warm"; plans/api.md "App clean-up" §6): owner only. The switch lives in
+// Settings → Engines; the owner sees a small indicator in the title bar only while it's on. Members never load it and see
+// no nudge, switch, bar, notification or warning.
 extension AppStore {
-    var warmOn: Bool { warmGpu.isOn }
-    /// The warm GPU as of now (minutes and cost tick between server events).
+    var warmOn: Bool { isOwner && warmGpu.isOn }
+    /// As of now (minutes and cost tick between server events).
     var warmLive: WarmGpu { warmGpu.live(now: Int64(warmClock.timeIntervalSince1970 * 1000)) }
     var warmMinutesLeft: Int? { warmGpu.minutesLeft(now: Int64(warmClock.timeIntervalSince1970 * 1000)) }
-    private var canWarm: Bool { warmAvailable && user != nil }
+    private var canWarm: Bool { warmAvailable && isOwner }
 
     func loadWarmGpu() async {
+        guard isOwner else {
+            resetWarm()
+            return
+        }
         do {
             let g = try await api.warmGpu()
             applyWarm(g, quiet: true)
-        } catch let e as ApiError where ["not_found", "http_404"].contains(e.code) {
-            // server/mock has no warm GPU.
+            warmAvailable = true
+        } catch let e as ApiError where ["not_found", "http_404", "owner_only"].contains(e.code) {
+            // server/mock has none; owner_only should not happen for the owner.
             applyWarm(.off, quiet: true)
             warmAvailable = false
         } catch {
@@ -35,62 +38,41 @@ extension AppStore {
         warmTicker?.cancel()
         warmTicker = nil
         warmGpu = .off
+        warmAvailable = false
         warmPrompt = nil
         warmWarning = nil
         warmWarnedKey = nil
         warmBusy = false
-        Notifier.shared.clearWarmWarning()
     }
 
-    // MARK: Nudge and switch
+    // MARK: Switch (Settings → Engines)
 
-    /// Creating starts (a clip picked or dropped in the video studio, or Generate pressed). Asks to warm a GPU when none is
-    /// running for this user. `then` (Generate) runs after the answer, whichever it is.
-    /// Returns false when nothing was shown and the caller should carry on itself.
-    @discardableResult
-    func creatingStarted(then: (@MainActor () -> Void)? = nil) -> Bool {
-        // Only Exact edit uses our GPU: Draft / Standard / HD run on Replicate, so no nudge for them.
-        guard canWarm, isExactEdit, !warmGpu.isOn, warmPrompt == nil, !warmBusy else { return false }
-        withAnimation(.easeOut(duration: 0.15)) { warmPrompt = WarmPrompt(kind: .nudge, then: then) }
-        return true
-    }
-
-    /// The "Keep GPU warm" switch (video studio, title bar, menus). On always confirms with the cost warning first.
+    /// On always confirms with the cost warning first.
     func setWarmSwitch(_ on: Bool) {
         guard canWarm else { return }
         if on {
             guard !warmGpu.isOn, warmPrompt == nil else { return }
-            withAnimation(.easeOut(duration: 0.15)) { warmPrompt = WarmPrompt(kind: .confirm) }
+            withAnimation(.easeOut(duration: 0.15)) { warmPrompt = WarmPrompt() }
         } else {
             turnOffWarm()
         }
     }
 
-    /// [Warm up] or [Not now].
-    func answerWarmPrompt(warmUp: Bool) {
-        guard let p = warmPrompt else { return }
+    /// [Keep it ready] or [Not now].
+    func answerWarmPrompt(turnOn: Bool) {
+        guard warmPrompt != nil else { return }
         withAnimation(.easeIn(duration: 0.12)) { warmPrompt = nil }
-        if warmUp { turnOnWarm(then: p.then) } else { p.then?() }
+        if turnOn { turnOnWarm() }
     }
 
-    private func turnOnWarm(then: (@MainActor () -> Void)?) {
+    private func turnOnWarm() {
         warmBusy = true
-        let api = self.api
-        Task { [weak self] in
-            do {
-                let g = try await api.setWarmGpu(.turnOn)
-                guard let self else { return }
-                self.warmBusy = false
-                self.applyWarm(g)
-                self.showToast(g.isStarting ? "Starting a warm GPU · about 3–6 min. \(WarmGpuText.perHour(g.ratePerHour)) while it's on." : "GPU warm · your renders start right away")
-            } catch let e as ApiError {
-                self?.warmBusy = false
-                self?.handle(e)
-            } catch {
-                self?.warmBusy = false
-                self?.showToast(error.localizedDescription)
-            }
-            then?()
+        perform { [self] in
+            defer { warmBusy = false }
+            let g = try await api.setWarmGpu(.turnOn)
+            applyWarm(g)
+            showToast(g.isStarting ? "Getting the add-on engine ready · about 3–6 min. \(WarmGpuText.perHour(g.ratePerHour)) while it's on."
+                : "Add-on engine ready · Edit renders start right away")
         }
     }
 
@@ -105,7 +87,7 @@ extension AppStore {
         }
     }
 
-    /// "Keep warm" on the 5-minute warning: holds it another idle period, or extends the session cap once.
+    /// "Keep ready" on the 5-minute warning: holds it another idle period, or extends the session cap once.
     func keepWarm() {
         guard warmGpu.isOn, !warmBusy else { return }
         warmBusy = true
@@ -113,25 +95,19 @@ extension AppStore {
             defer { warmBusy = false }
             let g = try await api.setWarmGpu(.keepWarm)
             withAnimation { warmWarning = nil }
-            Notifier.shared.clearWarmWarning()
             applyWarm(g)
-            showToast("Kept warm" + (g.minutesLeft(now: Int64(Date().timeIntervalSince1970 * 1000)).map { " · auto-off in \($0) min" } ?? ""))
+            showToast("Kept ready" + (g.minutesLeft(now: Int64(Date().timeIntervalSince1970 * 1000)).map { " · auto-off in \($0) min" } ?? ""))
         }
-    }
-
-    func dismissWarmWarning() {
-        withAnimation { warmWarning = nil }
     }
 
     // MARK: Server updates
 
-    /// GET/POST answers and `gpu` events (`warning` set on `event: "warning"`). Says when it's ready, warns 5 minutes before an
-    /// auto-off (banner and notification), and says when it turned off.
+    /// GET/POST answers and `gpu` events (owner only). Keeps the 5-minute warning for Settings → Engines and says (as a toast)
+    /// when it turned off by itself. No banners or notifications.
     func applyWarm(_ g: WarmGpu, warning: WarmGpuWarning? = nil, quiet: Bool = false) {
+        guard isOwner else { return }
         let before = warmGpu
         withAnimation(.easeOut(duration: 0.25)) { warmGpu = g }
-        // The owner can keep the switch to themselves (studio setting warmGpuAllowed); the bar still shows a GPU already on.
-        warmAvailable = g.allowed || g.isOn
         warmClock = Date()
         if g.isOn { startWarmTicker() } else {
             warmTicker?.cancel()
@@ -144,35 +120,23 @@ extension AppStore {
             if key != warmWarnedKey {
                 warmWarnedKey = key
                 withAnimation { warmWarning = w }
-                // A warning found on a reload is shown as a banner only.
-                if warning != nil && !quiet {
-                    Notifier.shared.postWarmWarning(title: WarmGpuText.warningTitle(w), body: WarmGpuText.warningBody(w, canExtend: g.canExtend))
-                }
             }
         } else if warmWarning != nil, !g.isOn || g.pendingWarning(now: now) == nil {
-            // Kept warm (here or on another device), or off.
             withAnimation { warmWarning = nil }
-            Notifier.shared.clearWarmWarning()
         }
 
         guard !quiet else { return }
         if before.isStarting && g.state == "warm" {
-            showToast("Warm GPU ready · your next render starts right away")
+            showToast("Add-on engine ready · Edit renders start right away")
         }
-        // starting/warm → stopping → off: say it once, on off.
+        // starting/warm → stopping → off: say it once, on off. Turning it off from this Mac says so itself.
         if (before.isOn || before.state == "stopping") && g.state == "off" {
             warmWarnedKey = nil
-            Notifier.shared.clearWarmWarning()
-            // Turning it off from this Mac says so itself; auto-offs (and a switch-off elsewhere) are told here.
-            if !(g.lastOff?.reason == "user" && warmBusy) {
-                let msg = WarmGpuText.offMessage(g.lastOff)
-                showToast(msg)
-                if g.lastOff?.reason != "user" { Notifier.shared.post(title: "Warm GPU turned off", body: msg) }
-            }
+            if !(g.lastOff?.reason == "user" && warmBusy) { showToast(WarmGpuText.offMessage(g.lastOff)) }
         }
     }
 
-    /// Re-draws the bar and the indicators every 15 s while it's on (the server only sends news).
+    /// Re-draws the indicator every 15 s while it's on (the server only sends news).
     private func startWarmTicker() {
         guard warmTicker == nil else { return }
         warmTicker = Task { [weak self] in

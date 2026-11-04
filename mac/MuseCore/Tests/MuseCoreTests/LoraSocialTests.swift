@@ -5,11 +5,11 @@ final class LoraPromptTests: XCTestCase {
     private var sienna: MuseModel { SampleData.models().first { $0.id == SampleData.sienna }! }
 
     func testPricing() {
-        XCTAssertEqual(Pricing.money(LoraPricing.setCost), "$0.60")
+        XCTAssertEqual(PhotoPricing.label(LoraPricing.setCost), "about $3.03")
         XCTAssertEqual(Pricing.money(LoraPricing.trainCost), "$6.65")
         XCTAssertEqual(Pricing.money(LoraPricing.photoCost), "$1.66")
         XCTAssertEqual(Pricing.money(LoraPricing.videoCost), "$4.99")
-        XCTAssertEqual(Pricing.money(LoraPricing.totalCost), "$7.25")
+        XCTAssertEqual(Pricing.money(LoraPricing.totalCost), "$9.68")
         XCTAssertEqual(LoraPricing.timeLabel, "~1 h 40")
         XCTAssertEqual(LoraPricing.photoProgress(10), 40)
         XCTAssertEqual(LoraPricing.videoProgress(10), 0)
@@ -72,7 +72,7 @@ final class LoraFlowTests: XCTestCase {
         let building = try await api.buildLoraCandidates(modelId: id)
         XCTAssertEqual(building.state, "building")
         let b1 = try await api.balance().balance
-        XCTAssertEqual(b0 - b1, 0.60, accuracy: 1e-9)
+        XCTAssertEqual(b0 - b1, LoraPricing.setCost, accuracy: 1e-9)
 
         try await waitFor { try await api.lora(modelId: id).state == "review" }
         var l = try await api.lora(modelId: id)

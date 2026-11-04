@@ -29,6 +29,7 @@ final class ApiServerTests: XCTestCase {
         let auth = try await api.signIn(SignInRequest(email: "jen@studio.com", password: "x"))
         XCTAssertEqual(auth.user.role, "owner")
         await api.setToken(auth.token)
+        try await api.ensureStudioFunds()
         return api
     }
 
@@ -187,7 +188,10 @@ final class ApiServerTests: XCTestCase {
         XCTAssertEqual(s1.maxGpus, 2)
         XCTAssertEqual(s1.overheadPayer, "owner")
         let s2 = try await boss.updateStudioSettings(StudioSettingsPatch(maxGpus: s0.maxGpus, overheadPayer: s0.overheadPayer))
-        XCTAssertEqual(s2, s0.with(lowBalance: s2.lowBalance))
+        XCTAssertEqual(s2.maxGpus, s0.maxGpus)
+        XCTAssertEqual(s2.overheadPayer, s0.overheadPayer)
+        XCTAssertEqual(s2.capPerJob, s0.capPerJob)
+        XCTAssertEqual(s2.features, s0.features)
 
         let e0 = try await boss.imageEngine()
         XCTAssertEqual(e0.available["simulated"], true)
@@ -197,8 +201,53 @@ final class ApiServerTests: XCTestCase {
 
         let b = try await boss.balance()
         XCTAssertEqual(b.role, "owner")
-        XCTAssertNotNil(b.runpodBalance)
         XCTAssertNotNil(b.availableToSend)
+    }
+
+    /// The app clean-up (plans/api.md "App clean-up" §4–§6): the owner-loaded studio balance and top-ups, Engines for the owner
+    /// only, members' settings without them, Keep add-on engine ready owner-only, Upscale coming soon. Skipped on older servers.
+    func testStudioBalanceTopUpsAndOwnerOnlyEngines() async throws {
+        let boss = try await owner()
+        guard let sb0 = try await boss.studioBalanceIfAny() else { throw XCTSkip("This server predates the studio balance") }
+        XCTAssertEqual(sb0.balanceUsd, sb0.toppedUpUsd - sb0.spentUsd, accuracy: 0.011)
+        XCTAssertEqual(sb0.availableUsd, sb0.balanceUsd - sb0.membersCreditUsd - sb0.heldUsd, accuracy: 0.011)
+        XCTAssertFalse(sb0.needsFirstTopUp, "owner() recorded one")
+        let sb1 = try await boss.recordTopUp(TopUpRecord(amountUsd: 12.34, note: "Mac top-up test"))
+        XCTAssertEqual(sb1.toppedUpUsd - sb0.toppedUpUsd, 12.34, accuracy: 0.001)
+        XCTAssertEqual(sb1.availableUsd - sb0.availableUsd, 12.34, accuracy: 0.011)
+        let top = try XCTUnwrap(sb1.topUps.first)
+        XCTAssertEqual(top.amountUsd, 12.34, accuracy: 1e-9)
+        XCTAssertEqual(top.note, "Mac top-up test")
+        await expect("bad_request") { _ = try await boss.recordTopUp(TopUpRecord(amountUsd: 20_000)) }
+        let b = try await boss.balance()
+        XCTAssertEqual(b.balanceSource, "studio")
+        XCTAssertEqual(b.availableToSend ?? 0, sb1.availableUsd, accuracy: 0.011)
+
+        let s = try await boss.studioSettings()
+        let engines = try XCTUnwrap(s.engines, "the owner gets Settings → Engines")
+        XCTAssertEqual(Set(engines.list.map(\.id)), ["replicate", "runpod"])
+        let video = try XCTUnwrap(s.features.video)
+        XCTAssertEqual(video.ordered.map(\.id), ["draft", "standard", "hd"])
+        XCTAssertEqual(video.addons.map(\.id), ["edit", "fast", "upscale"])
+        XCTAssertEqual(video.upscale?.comingSoon, true)
+        XCTAssertNotNil(s.features.photo)
+
+        // A member: no engines, no studio balance, no add-on engine; member-safe labels.
+        let email = unique("cleanup")
+        let invite = try await boss.createInvite(InviteRequest(email: email))
+        let member = client()
+        let auth = try await member.signUp(SignUpRequest(studioName: "", email: email, password: "pw-12345678", inviteCode: invite.code,
+                                                         attestAdultRightsOriginal: true, attestLabelAi: true))
+        await member.setToken(auth.token)
+        let ms = try await member.studioSettings()
+        XCTAssertNil(ms.engines)
+        XCTAssertNotNil(ms.features.video)
+        await expect("owner_only") { _ = try await member.studioBalance() }
+        await expect("owner_only") { _ = try await member.recordTopUp(TopUpRecord(amountUsd: 5)) }
+        await expect("owner_only") { _ = try await member.warmGpu() }
+        await expect("owner_only") { _ = try await member.setWarmGpu(.turnOn) }
+        for o in video.options { XCTAssertTrue(MemberText.isSafe(o.label + " " + o.detail), o.detail) }
+        for a in video.addons { XCTAssertTrue(MemberText.isSafe(a.label + " " + a.detail), a.detail) }
     }
 
     /// presign → PUT → confirm, for an image and a clip file, with progress.
@@ -233,12 +282,4 @@ final class ProgressBox: @unchecked Sendable {
     private var values: [Double] = []
     func add(_ v: Double) { lock.lock(); values.append(v); lock.unlock() }
     var last: Double? { lock.lock(); defer { lock.unlock() }; return values.last }
-}
-
-private extension StudioSettings {
-    func with(lowBalance: Bool) -> StudioSettings {
-        var s = self
-        s.lowBalance = lowBalance
-        return s
-    }
 }

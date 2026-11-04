@@ -236,7 +236,7 @@ final class FakeTemplateTests: XCTestCase {
         let shots = try await api.shoot(.template(maya.id, modelId: SampleData.sienna, outfitId: SampleData.green, direction: "sitting on the steps", shuffleSeed: 11))
         XCTAssertEqual(shots.count, 4)
         let after0 = await api.balance().balance
-        XCTAssertEqual(after0, before - Pricing.shootCost, accuracy: 1e-9)
+        XCTAssertEqual(after0, before - PhotoPricing.standard.shoot(), accuracy: 1e-9)
         for s in shots {
             XCTAssertEqual(s.templateId, maya.id)
             XCTAssertEqual(s.templateName, "Golden hour walk")
