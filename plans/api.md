@@ -50,7 +50,7 @@ ClipMeta   { name, durationSec, width, height, fps, people?, watermark?, talking
 ClipCheck  { label, value, status: "good"|"bad"|"info", fix? }
 Clip       { id, name, durationSec, width, height, fps, checks: ClipCheck[], thumb?: ImageRef }
 JobRequest { title, modelId, outfitId, clipId, engine: "replicate"|"h3"|"viggle" /* default: features.video.defaultEngine */,
-             quality?: "draft"|"standard"|"hd" /* engine "replicate" only; default "standard" */,
+             quality?: "draft"|"standard"|"hd" /* engine "replicate" only; default "draft" (features.video.defaultQuality) */,
              steps (4–30, default 10; h3 only), use: "first"|"full" /* h3/viggle; replicate always renders the whole clip and stores "full" */,
              takes (1–4), keepAudio, lipSync /* h3 only */, background: "keep"|"photo" /* "photo" is h3 only */, backgroundMotion: "still"|"subtle"|"busy", clipSeconds?,
              queue?: boolean /* true = park it as "queued", not charged, until POST /v1/queue/run */ }
@@ -132,13 +132,13 @@ TemplatePrompt     { slots: PromptSlotView[], text, seed: number|null /* null = 
 
 ## Pricing (the same in every client and the server)
 
-### Replicate (Draft / Standard / HD), the default
+### Replicate (Draft / Standard / HD), the default engine; Draft is the default quality
 Billed per **output second**. `D` is the whole clip rounded **up** to whole seconds, between 4 and 15 (the output can't be fractional; see "Video engines" for how the take still keeps the exact clip length).
 
 | quality | label | detail | `pricePerSec` (default) |
 |---|---|---|---|
-| `draft` | Draft | 768P · lite | $0.02 |
-| `standard` | Standard (default) | 768P | $0.08 |
+| `draft` | Draft (default) | 768P · lite | $0.02 |
+| `standard` | Standard | 768P | $0.08 |
 | `hd` | HD | 2K | $0.13 |
 
 - `replicateSeconds(clipSeconds) = min(15, max(4, ceil(clipSeconds − 0.001)))`. With no clip length (the sample clip) `clipSeconds` = 9.4, so D = 10. Examples: 7.0 → 7, 7.04 → 8, 2.5 → 4, 14.97 → 15.
@@ -286,7 +286,7 @@ How a template shoot works (`POST /v1/shoots` with `templateId`):
 ### Video engines and quality (Replicate)
 _Added 2026-11-04._ MiniMax H3 hosted on Replicate is the **default** video engine. Our own RunPod H3 stays as **Exact edit** (frame-by-frame, slower, needs a GPU start-up), Viggle stays **Fast · beta**.
 
-**The picker** (video studio, Quality tool), in this order, default **Standard**:
+**The picker** (video studio, Quality tool), in this order, default **Draft** (changed from Standard on 2026-11-04 at the owner's request):
 
 | option `id` | label | detail line | sends | price |
 |---|---|---|---|---|
@@ -300,7 +300,7 @@ _Added 2026-11-04._ MiniMax H3 hosted on Replicate is the **default** video engi
 **What the apps read:** `GET /v1/settings/studio` → `features.video`:
 ```ts
 VideoFeatures { defaultEngine: "replicate"|"h3",      // "replicate" when the server has Replicate set up (VIDEO_ENGINE_DEFAULT), else "h3"
-                defaultQuality: "draft"|"standard"|"hd", // "standard"
+                defaultQuality: "draft"|"standard"|"hd", // "draft" (VIDEO_QUALITY_DEFAULT); apps preselect it
                 minSeconds: 4, maxSeconds: 15,          // Replicate's output length range (D)
                 options: VideoOption[] }                // picker order: draft, standard, hd, exact
 VideoOption   { id: "draft"|"standard"|"hd"|"exact", label: "Draft"|"Standard"|"HD"|"Exact edit", detail,

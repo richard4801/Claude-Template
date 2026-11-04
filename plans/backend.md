@@ -10,7 +10,8 @@ _Started 2026-11-04._ This is the real server that the Android and Mac apps talk
   - `fal` (hosted models such as Seedream or Nano Banana; the model id is configurable)
   - `custom-http` (any endpoint that follows our small contract below)
   - `runpod-selfhosted` (later)
-- **Video engine (2026-11-04):** **MiniMax H3 on Replicate** is the default (Draft / Standard / HD). Our RunPod H3 stays as **Exact edit**. See "Replicate" below.
+- **Video engine (2026-11-04):** **MiniMax H3 on Replicate** is the default (Draft / Standard / HD), and **Draft** (H3 Lite, 768P, $0.02/s) is the default quality. Our RunPod H3 stays as **Exact edit**. See "Replicate" below.
+- **RunPod's role (2026-11-04):** RunPod is now for add-on features: Exact edit, edits, and upscaling. **Planned, not built yet:** an "Upscale to 2K" add-on on RunPod (SeedVR2) for a finished take.
 - **Hosting:** **Railway** runs the API and Postgres. **Cloudflare R2** (S3-compatible) holds uploads and renders. **RunPod** runs the GPU work: H3 on an H100 with a network volume, started on demand and shut down when idle.
 
 ## Parts
@@ -138,8 +139,8 @@ The owner tested MiniMax H3 hosted on Replicate and made it the main video engin
 ### Video: `engine: "replicate"`
 | quality | label | Replicate model (config) | resolution | $ per output second (config) |
 |---|---|---|---|---|
-| `draft` | Draft | `REPLICATE_VIDEO_DRAFT_MODEL` = `minimax/h3-lite` | 768P | `REPLICATE_PRICE_DRAFT` = 0.02 |
-| `standard` (default) | Standard | `REPLICATE_VIDEO_MODEL` = `minimax/h3` | 768P | `REPLICATE_PRICE_STANDARD` = 0.08 |
+| `draft` (default) | Draft | `REPLICATE_VIDEO_DRAFT_MODEL` = `minimax/h3-lite` | 768P | `REPLICATE_PRICE_DRAFT` = 0.02 |
+| `standard` | Standard | `REPLICATE_VIDEO_MODEL` = `minimax/h3` | 768P | `REPLICATE_PRICE_STANDARD` = 0.08 |
 | `hd` | HD | `REPLICATE_VIDEO_MODEL` | 2K (1440×2560) | `REPLICATE_PRICE_HD` = 0.13 |
 
 - **Call:** `POST {REPLICATE_API_URL}/models/{owner}/{name}/predictions` with `Authorization: Bearer $REPLICATE_API_TOKEN` and `{input: {prompt, reference_video_urls: [padded source], reference_image_urls: [≤ 9], duration: D, resolution: "768P"|"2K", ratio: "9:16"}}`, then poll `GET /predictions/{id}` every `REPLICATE_POLL_MS` (5 s) until `succeeded|failed|canceled`. `output` is the video URL; it is downloaded at once (Replicate deletes outputs after a while). `metrics.video_output_duration_seconds` is what Replicate bills, and what the job settles on. Cancel = `POST /predictions/{id}/cancel`.
@@ -150,6 +151,7 @@ The owner tested MiniMax H3 hosted on Replicate and made it the main video engin
 - **Prompt:** `replicateSwap()` in `src/prompt/engine.ts` builds a short four-section prompt (~230 words, the shape of the owner's tested v4): identity from the model's look, outfit, never-add, captions removed, and "keep the exact framing and crop of <Video 1>" (the hosted model tends to pull the camera back otherwise). Long prompts made H3 drop details in testing, so nothing else goes in. References in this fixed order, at most 9: face front, face profile, body front, body ¾, body back, then the outfit set's front, ¾, back and side. Replicate's H3 has no seed, steps or LoRA inputs.
 - **Failures:** a failed prediction fails the job and refunds the hold. Safety-filter wording in Replicate's error (`sensitive`, `safety`, `flagged`, `content policy`, `nsfw`, `E005`) becomes `errorCode: "provider_refused"` with "Replicate's safety filter refused this clip"; others are `provider_failed` ("Replicate couldn't render this clip: <its error>"); a prediction running longer than `REPLICATE_PREDICTION_TIMEOUT_SEC` (30 min) is cancelled (`provider_timeout`). Several takes are separate predictions run one after another; if one fails, the whole job fails and is refunded.
 - **Billing:** hold = price × D × takes at start; settle = price × Σ billed seconds; refund on failure or cancel. Ledger notes: "Video · Standard 768P · 7 s" (see `plans/api.md`). The owner's wallet is still the RunPod balance minus members' tokens: Replicate's own credit can't be read through its API, so the owner keeps it topped up by hand. Replicate jobs are not paused by a low RunPod balance.
+- **Default quality:** `VIDEO_QUALITY_DEFAULT` = `draft` (the owner's choice, 2026-11-04; used when a replicate request has no `quality`, and sent to the apps as `features.video.defaultQuality`).
 - **Default engine:** `VIDEO_ENGINE_DEFAULT` = `replicate` (used when a request has no `engine`); without `REPLICATE_API_TOKEN` it falls back to `h3` and the replicate options show `available: false`.
 
 ### Photos: image provider `replicate`
@@ -168,4 +170,4 @@ Chosen 2026-11-04 from Replicate's own model pages (`replicate.com/<owner>/<mode
 - **Photo LoRA (later):** `REPLICATE_IMAGE_LORA_URL` / `REPLICATE_IMAGE_LORA_SCALE` are passed as `lora_weights`/`lora_scale` to the edit model when set. No training is wired yet (`plans/lora-training.md`).
 
 ### Variables
-`REPLICATE_API_TOKEN` (secret, set on Railway), `REPLICATE_API_URL` (`https://api.replicate.com/v1`), `VIDEO_ENGINE_DEFAULT` (`replicate`), `REPLICATE_VIDEO_MODEL`, `REPLICATE_VIDEO_DRAFT_MODEL`, `REPLICATE_PRICE_DRAFT` / `_STANDARD` / `_HD`, `REPLICATE_MAX_CONCURRENT` (1), `REPLICATE_POLL_MS` (5000), `REPLICATE_MAX_RATE_WAIT_SEC` (1800), `REPLICATE_PREDICTION_TIMEOUT_SEC` (1800), `REPLICATE_INPUT_URL_TTL_SEC` (7200), `REPLICATE_IMAGE_MODEL`, `REPLICATE_IMAGE_EDIT_MODEL`, `REPLICATE_IMAGE_RUN_USD`, `REPLICATE_IMAGE_MP_USD`, `REPLICATE_IMAGE_EDIT_USD`, `REPLICATE_IMAGE_MAX_REFS` (6), `REPLICATE_IMAGE_REF_MAX_PX` (1024), `REPLICATE_IMAGE_SAFETY` (2), `REPLICATE_IMAGE_MAX_WAIT_SEC` (120), `REPLICATE_IMAGE_LORA_URL`, `REPLICATE_IMAGE_LORA_SCALE` (1), `FFMPEG_PATH`, `FFPROBE_PATH`. All but the token have code defaults, so nothing else needs setting on Railway.
+`REPLICATE_API_TOKEN` (secret, set on Railway), `REPLICATE_API_URL` (`https://api.replicate.com/v1`), `VIDEO_ENGINE_DEFAULT` (`replicate`), `VIDEO_QUALITY_DEFAULT` (`draft`), `REPLICATE_VIDEO_MODEL`, `REPLICATE_VIDEO_DRAFT_MODEL`, `REPLICATE_PRICE_DRAFT` / `_STANDARD` / `_HD`, `REPLICATE_MAX_CONCURRENT` (1), `REPLICATE_POLL_MS` (5000), `REPLICATE_MAX_RATE_WAIT_SEC` (1800), `REPLICATE_PREDICTION_TIMEOUT_SEC` (1800), `REPLICATE_INPUT_URL_TTL_SEC` (7200), `REPLICATE_IMAGE_MODEL`, `REPLICATE_IMAGE_EDIT_MODEL`, `REPLICATE_IMAGE_RUN_USD`, `REPLICATE_IMAGE_MP_USD`, `REPLICATE_IMAGE_EDIT_USD`, `REPLICATE_IMAGE_MAX_REFS` (6), `REPLICATE_IMAGE_REF_MAX_PX` (1024), `REPLICATE_IMAGE_SAFETY` (2), `REPLICATE_IMAGE_MAX_WAIT_SEC` (120), `REPLICATE_IMAGE_LORA_URL`, `REPLICATE_IMAGE_LORA_SCALE` (1), `FFMPEG_PATH`, `FFPROBE_PATH`. All but the token have code defaults, so nothing else needs setting on Railway.
