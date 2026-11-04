@@ -35,8 +35,16 @@ Job        { id, title, modelId, modelName, outfitId, request: JobRequest, state
              progress (0–100), take, step, totalSteps, phase /* "step 12/20 · ~6 min left" */, secondsLeft, totalSeconds,
              cost, refunded, error?, createdAt, finishedAt?, prompt /* exact H3 prompt */, seed, thumb: ImageRef }
 Take       { id, kind: "take"|"shot", jobId|null, index, of, title, label, engineLabel, cost, seed, status: "test"|"final", thumb, prompt, createdAt }
-Balance    { balance, month, perJobLimit, perDayLimit, videos }
-ApiEvent   { type: "job"|"balance"|"model"|"outfit", job?, balance?, model?, outfit?, takes?: Take[] }
+Balance    { balance, month, today, perJobLimit, perDayLimit, videos }
+Lora       { modelId, version, state: "none"|"building"|"review"|"training"|"ready"|"failed", use: boolean,
+             candidates: { id, image: ImageRef, label, flag?: "tattoo"|"ring"|"choker"|"face drift", keep: boolean }[],
+             progress (0–100), photo: { state, progress }, video: { state, progress }, cost, trainedOn? }
+Platform   "tiktok"|"instagram"|"facebook"|"youtube"|"x"
+Account    { modelId, platform: Platform, handle, connectedAt, canPostDirect: boolean /* false until that platform approves MUSE */ }
+Post       { id, modelId, takeId, platforms: Platform[], caption, aiLabel: boolean, paidPartnership: boolean,
+             when: "now"|ISO time, state: "scheduled"|"handoff"|"posted"|"failed", stats?: { views, likes, comments } }
+ApiEvent   { type: "job"|"balance"|"model"|"outfit"|"lora"|"post", job?, balance?, model?, outfit?, lora?, post?, takes?: Take[] }
+// Model also carries optional { personality, notes }.
 ```
 
 ## Pricing (the same in every client and the server)
@@ -91,6 +99,31 @@ These are measured on an H100 with FlashAttention 3 and billed at $3.99/h. The u
 | `PATCH /v1/takes/{id}` `{status: "test"\|"final"}` | → `Take` (Approve) |
 | `DELETE /v1/takes/{id}` | 204 (Discard) |
 | `POST /v1/shoots` `{modelId, outfitId, scene, prompt, seed?, count}` | → `Take[]` (`kind: "shot"`). Charges $0.12. |
+
+### Identity LoRA (`plans/lora-training.md`)
+| | |
+|---|---|
+| `GET /v1/models/{id}/lora` | → `Lora` |
+| `POST /v1/models/{id}/lora/candidates` | → `Lora` (`building`, then `review` via a `lora` event). Generates 30 candidates. Charges $0.60. |
+| `PATCH /v1/models/{id}/lora/candidates/{cid}` `{keep}` | → `Lora` |
+| `POST /v1/models/{id}/lora/train` | → `Lora` (`training`). Needs 20+ kept. Charges the photo + video training price. Progress comes through `lora` events. |
+| `PATCH /v1/models/{id}/lora` `{use}` | → `Lora` |
+
+### Social accounts and posts (`plans/socials.md`)
+| | |
+|---|---|
+| `GET /v1/models/{id}/accounts` | → `Account[]` |
+| `POST /v1/models/{id}/accounts/{platform}/connect` | → `{ authUrl }` (OAuth). The mock connects immediately and returns the `Account`. |
+| `DELETE /v1/models/{id}/accounts/{platform}` | 204 |
+| `GET /v1/posts?state=` | → `Post[]` |
+| `POST /v1/posts` `{modelId, takeId, platforms, caption, aiLabel, paidPartnership, when}` | → `Post`. `aiLabel` and `paidPartnership` default to false and are only ever set by the user. Stage 1 returns `handoff` (the client opens each app). |
+| `DELETE /v1/posts/{id}` | 204 (cancels a scheduled post) |
+
+### Gaps found while building the Mac app
+| | |
+|---|---|
+| `POST /v1/queue/run` | Starts queued jobs (the "Run queue" button). |
+| `PATCH /v1/models/{id}` `{name, niche, personality, notes, neverAdd}` / `DELETE /v1/models/{id}` | Edit and delete a model, including its LoRA and training set. |
 
 ### Balance
 | | |

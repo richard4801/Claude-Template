@@ -11,6 +11,28 @@ base = re.sub(r"body\{[^}]*\}", "", base, count=1).replace(".board{display:flex;
 themes = open(os.path.join(HERE, "themes.css")).read()
 proto = open(os.path.join(HERE, "proto.css")).read()
 extra = """
+.fx>*{flex-shrink:0}.fx .li{height:auto;min-height:54px;padding-top:9px;padding-bottom:9px}
+.t-a .ap-photo{height:376px}.t-d .cutout{height:296px}
+.pex{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 16px;margin:10px 0 0}
+.pe{display:flex;gap:8px;align-items:center;padding:9px 10px;border:var(--stroke) solid var(--line);border-radius:var(--r);background:var(--surface);color:var(--ink);font-size:13px;line-height:1.2;min-height:52px}
+.pe>span{display:flex;flex-direction:column;gap:2px;min-width:0}.pe .tiny{font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t-b .pe{background:#17191B}.t-d .pe{border-width:2.5px;box-shadow:3px 3px 0 #111}
+.pbadge{display:inline-grid;place-items:center;border-radius:28%;color:#fff;font-weight:800;font-family:Arial,sans-serif;flex:none;letter-spacing:-.02em}
+.lora-hero{height:180px;border-radius:var(--r-lg);background-size:cover;background-position:center 20%;position:relative;overflow:hidden}
+.lh-cap{position:absolute;left:0;right:0;bottom:0;padding:30px 14px 12px;color:#fff;display:flex;flex-direction:column;background:linear-gradient(transparent,rgba(0,0,0,.65))}
+.steps3{display:grid;gap:8px}.steps3 span{display:flex;gap:10px;align-items:center;font-size:13px}.steps3 b{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:var(--accent);color:var(--accent-ink);font-size:12px;flex:none}
+.lgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.lt{aspect-ratio:3/4;border-radius:calc(var(--r) * .6);background-size:cover;background-position:center 15%;position:relative;overflow:hidden;background-color:var(--surface2)}
+.lt.tall{aspect-ratio:3/4}
+.lt.out{filter:grayscale(1) brightness(.55)}
+.lchk{position:absolute;right:4px;top:4px;width:20px;height:20px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font-size:11px;font-weight:700}
+.lt.out .lchk{background:#fff;color:#111}
+.lflag{position:absolute;left:4px;bottom:4px;background:#F6E2C0;color:#6B3F00;font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px}
+.pbar{height:6px;border-radius:3px;background:var(--surface2);overflow:hidden}.pbar i{display:block;height:100%;background:var(--accent);transition:width .3s}
+.cmp2{flex:1;display:flex;flex-direction:column;gap:6px}
+.pthumb{width:54px;height:72px;border-radius:calc(var(--r) * .6);background-size:cover;background-position:center;flex:none}
+.prow{display:flex;gap:12px;align-items:center;padding:10px;border:var(--stroke) solid var(--line);border-radius:var(--r);background:var(--surface)}
+.pchip{gap:8px;padding-left:6px}
 /* Editorial type scale: Instrument Serif (a true condensed serif), no stretching */
 .t-a{--display:'Instrument Serif',Didot,'Times New Roman',serif}
 .t-a .cond,.t-a .h2,.t-a .hero-t,.t-a .wm,.t-a .feat-name,.t-a .count-n,.t-a .stepnum,.t-a .prof-name{transform:none;font-family:'Instrument Serif',Didot,serif;font-weight:400;letter-spacing:0}
@@ -83,7 +105,7 @@ fonts = ("family=Instrument+Serif&family=Archivo:wght@400;500;600;700&family=IBM
          "&family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700"
          "&family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500"
          "&family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Figtree:wght@400;500;600;700;800&family=Permanent+Marker")
-app = open(os.path.join(HERE, "app.js")).read().replace("__ICONS__", json.dumps(gen.ICON))
+app = (open(os.path.join(HERE, "app.js")).read() + "\n" + open(os.path.join(HERE, "features.js")).read()).replace("__ICONS__", json.dumps(gen.ICON))
 imgs = open(os.path.join(HERE, "imgs.json")).read()
 
 html = f"""<title>MUSE Studio Prototype</title>

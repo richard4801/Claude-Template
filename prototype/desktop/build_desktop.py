@@ -21,7 +21,7 @@ theme_vars = "\n".join(f".t-{k}{{{v['css']}}}" for k, v in gen.THEMES.items())
 css = open(os.path.join(HERE, "desktop.css")).read()
 phone_js = open(os.path.join(ROOT, "app", "app.js")).read()
 sound = phone_js[phone_js.index("let AC = null;"): phone_js.index("const snd")] + "const snd = k => { if(!S.sound) return; try{ SND[S.theme][k](); }catch(e){} };"
-js = (open(os.path.join(HERE, "desktop.js")).read()
+js = ((open(os.path.join(HERE, "desktop.js")).read() + "\n" + open(os.path.join(HERE, "features.js")).read())
       .replace("__ICONS__", json.dumps(gen.ICON))
       .replace("__SOUND__", sound))
 fonts = ("family=Instrument+Serif&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500"

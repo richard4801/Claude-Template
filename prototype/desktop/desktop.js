@@ -486,10 +486,10 @@ document.addEventListener('keydown', e=>{ const tag=(e.target.tagName||'').toLow
   if((e.metaKey||e.ctrlKey)&&e.key==='n'){ e.preventDefault(); return go('studio'); }
   if((e.metaKey||e.ctrlKey)&&e.key===','){ e.preventDefault(); return go('settings'); }
   if((e.metaKey||e.ctrlKey)&&e.key==='Enter'&&S.screen==='studio'){ e.preventDefault(); const g=$('#gen'); return g&&act(g.dataset.act); }
-  if((e.metaKey||e.ctrlKey)&&/^[1-6]$/.test(e.key)){ e.preventDefault(); return go(NAV[+e.key-1][0]); }
+  if((e.metaKey||e.ctrlKey)&&/^[1-7]$/.test(e.key)){ e.preventDefault(); return go(NAV[+e.key-1][0]); }
   if(!typing&&S.screen==='studio'&&S.engine==='h3'&&(e.key==='ArrowRight'||e.key==='ArrowLeft')){ setSteps(S.steps+(e.key==='ArrowRight'?1:-1)); }
 });
 function fit(){ const sc=$('#scaler'); const s=Math.min(1,(innerWidth-32)/1440,(innerHeight-32)/900); sc.style.transform=`scale(${s})`; }
 addEventListener('resize', fit);
 const start=new URLSearchParams(location.search); if(start.get('theme')) S.theme=start.get('theme'); if(start.get('screen')) S.screen=start.get('screen'); if(start.get('auth')==='0') S.authed=false;
-render(0); fit();
+/* first render happens at the end of features.js */

@@ -210,7 +210,7 @@ textarea.inp{height:auto;padding:10px 12px;resize:none;line-height:1.45}
 .toolbar{display:flex;align-items:center;gap:10px;margin-bottom:18px}
 
 /* queue */
-.tbl{width:100%;border-collapse:separate;border-spacing:0}
+.tbl{width:100%;border-collapse:separate;border-spacing:0;color:var(--ink);font-size:inherit;font-family:inherit}
 .tbl th{text-align:left;font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:500;padding:0 12px 10px;border-bottom:var(--stroke) solid var(--line)}
 .tbl td{padding:12px;border-bottom:var(--stroke) solid var(--line);vertical-align:middle}
 .tbl tr.rowh:hover td{background:var(--surface)}
@@ -384,3 +384,16 @@ textarea.inp{height:auto;padding:10px 12px;resize:none;line-height:1.45}
 .t-d .acc,.t-d .link{color:var(--blue)}
 .stk{display:none}.t-d .stk{display:inline-block}
 .t-d .cmpbar{background:#111;border:2.5px solid #111}
+
+/* Identity LoRA + social accounts */
+.pbadge{display:inline-grid;place-items:center;border-radius:28%;color:#fff;font-weight:800;font-family:Arial,sans-serif;flex:none;letter-spacing:-.02em;vertical-align:middle}
+.lgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+.lt{aspect-ratio:3/4;border-radius:var(--r);background-size:cover;background-position:center 15%;position:relative;overflow:hidden;background-color:var(--surface2)}
+.lt.out{filter:grayscale(1) brightness(.5)}
+.lchk{position:absolute;right:6px;top:6px;width:22px;height:22px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font-size:11px;font-weight:700}
+.lt.out .lchk{background:#fff;color:#111}
+.lflag{position:absolute;left:6px;bottom:6px;background:#F6E2C0;color:#6B3F00;font-size:11px;font-weight:700;padding:1px 7px;border-radius:999px}
+.accs{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.ico-sq{width:44px;height:44px;border-radius:var(--r);display:grid;place-items:center;background:var(--surface2);flex:none}
+.t-a .lt,.t-a .ico-sq{border-radius:0}
+.t-d .lt{border:2.5px solid #111}

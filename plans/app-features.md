@@ -26,7 +26,7 @@ Status tags: **[core]** needed for v1 · **[later]** after v1 · **[idea]** not 
 - **[core]** **Character sheet: generate, bring your own, or mix.** Each of the 6 slots can be generated or uploaded, and tapping a slot retakes or replaces it. Nothing is strictly required (missing face close-ups only show a warning).
 - **[core]** **Outfit set generator:** Describe it / From a photo / My own set → front, ¾, side and back on one seed → Save. It's reachable from the profile, the video Outfit tool and the photoshoot Outfit tool.
 - **[core]** **Prompt engine** behind every generator (see `plans/prompt-system.md`). Photoshoot has a Prompt tool (your direction, Lock look, final prompt by slot), and Scene accepts custom text.
-- **[later]** Character LoRA training button, for faces that stay consistent across many videos.
+- **[core]** **Identity LoRA** per model (photo + video), for a face *and physique* that stay consistent: generate 30 shots → the user keeps 20+ → train both (~$7.25 est.) → before/after, "Use in new renders" switch, versions. See `plans/lora-training.md`.
 - **[later]** Logo/brand check on outfit images (tested: Nike socks and Crocs showed up), with the option to flag or remove.
 
 ## 2. New video (character swap)
@@ -89,7 +89,7 @@ Status tags: **[core]** needed for v1 · **[later]** after v1 · **[idea]** not 
 - **[core]** Gallery per character, comparing takes side by side.
 - **[core]** Separate **test** and **final** galleries, so test runs don't fill the main gallery.
 - **[core]** Export in TikTok/Reels formats (9:16, 1080×1920).
-- **[later]** Direct posting or scheduling to TikTok.
+- **[core]** **Social accounts per model** (TikTok, Instagram, Facebook, YouTube, X): connect, Post from a result (accounts, caption, *Mark as AI-generated* and *Paid partnership* toggles that are off by default and set only by the user, Now or Schedule), a Posts page with Scheduled/Posted and stats. Stage 1 hands off to each app; Stage 2 posts directly once each platform approves MUSE. See `plans/socials.md`.
 
 ## 9. Compliance (handled in the Terms, not in the UI)
 _Decided 2026-11-04: consent and rights are **not** shown as in-app features. The app can't verify uploads, and visible consent screens make it feel like a legal tool._
@@ -100,7 +100,7 @@ _Decided 2026-11-04: consent and rights are **not** shown as in-app features. Th
   - The user is solely responsible for what they upload and publish. MUSE may remove content and suspend accounts on valid complaints (takedown process plus a contact address).
   - The user must label AI content on platforms (TikTok AI label) and disclose paid promotions (#ad / Branded content). No fake reviews.
   - The MiniMax H3 licence and acceptable use policy terms are passed through to users.
-- **[core]** One small line on export: "Exports carry the AI-generated label. Brand posts also need #ad."
+- **[core]** No automatic AI label or #ad. Labelling is the user's job (Terms + sign-up attestation). The Post sheet offers both labels as toggles, off by default (decided 2026-11-04).
 - **[core]** "MiniMax H3" attribution in About/Settings (licence requirement).
 - **[later]** Report / takedown flow for third parties.
 
