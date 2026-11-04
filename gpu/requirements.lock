@@ -1,0 +1,130 @@
+# MUSE GPU worker: pinned Python packages for the H3 venv on the RunPod network volume.
+#
+# Matches what produced plans/video-test-results.md (Nov 3-4, 2026): torch 2.10 cu130 on H100
+# (CUDA-13 driver), torchcodec 0.10 (0.17 silently returns no audio), DiffSynth-Studio deps incl.
+# bitsandbytes (NF4 text encoder), comfy-kitchen, and `kernels` for kernels-community/flash-attn3.
+# Resolved for Linux x86_64 / Python 3.11 with `uv pip compile` (cut-off 2026-11-04), from:
+#   torch==2.10.0+cu130 torchvision==0.25.0+cu130 torchaudio==2.10.0+cu130 transformers imageio[ffmpeg]
+#   safetensors einops modelscope ftfy pandas accelerate peft av librosa bitsandbytes comfy-kitchen
+#   kernels huggingface_hub[hf_xet]
+# The test pods installed these unpinned on the same days, so exact patch versions may differ slightly.
+#
+# Install (bootstrap.sh does this):
+#   pip install -r requirements.lock --extra-index-url https://download.pytorch.org/whl/cu130
+#   pip install --no-deps --index-url https://pypi.org/simple torchcodec==0.10.0   (see marker below)
+#   pip install --no-deps -e DiffSynth-Studio   (at the commit below)
+#
+# muse:pypi-only torchcodec==0.10.0
+# muse:diffsynth https://github.com/modelscope/DiffSynth-Studio.git 1e8ae1d59c1baaae6c4c85fef717a44682b0fbd5
+accelerate==1.15.0
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.14.2
+audioread==3.1.0
+av==18.1.0
+bitsandbytes==0.50.2
+certifi==2026.10.23
+cffi==2.1.1
+charset-normalizer==3.5.2
+click==8.5.0
+cloudpickle==3.1.2
+comfy-kitchen==0.2.40
+cryptography==50.0.2
+cuda-bindings==13.0.3
+cuda-pathfinder==1.8.5
+decorator==5.3.1
+dnspython==2.9.2
+einops==0.8.2
+email-validator==2.3.0
+filelock==4.2.7
+fsspec==2026.9.0
+ftfy==6.3.1
+h11==0.16.0
+hf-xet==1.8.0
+httpcore2==2.16.0
+httpx2==2.16.0
+huggingface-hub==2.4.0
+id==1.6.1
+idna==3.20
+imageio==2.38.1
+imageio-ffmpeg==0.8.1
+jinja2==3.1.6
+joblib==1.6.0
+kernels==0.18.1
+lazy-loader==0.6
+librosa==0.11.0
+llvmlite==0.50.0
+markdown-it-py==4.2.0
+markupsafe==3.0.4
+mdurl==0.1.2
+modelscope==1.40.2
+modelscope-hub==0.6.1
+mpmath==1.3.0
+msgpack==1.2.4
+narwhals==2.28.0
+networkx==3.6.1
+numba==0.68.1
+numpy==2.4.6
+nvidia-cublas==13.1.0.3
+nvidia-cuda-cupti==13.0.85
+nvidia-cuda-nvrtc==13.0.88
+nvidia-cuda-runtime==13.0.96
+nvidia-cudnn-cu13==9.15.1.9
+nvidia-cufft==12.0.0.61
+nvidia-cufile==1.15.1.6
+nvidia-curand==10.4.0.35
+nvidia-cusolver==12.0.4.66
+nvidia-cusparse==12.6.3.3
+nvidia-cusparselt-cu13==0.8.0
+nvidia-nccl-cu13==2.28.9
+nvidia-nvjitlink==13.0.88
+nvidia-nvshmem-cu13==3.4.5
+nvidia-nvtx==13.0.85
+packaging==26.3
+pandas==3.1.0
+peft==0.21.2
+pillow==13.0.0
+platformdirs==4.14.3
+pooch==1.9.0
+psutil==7.2.2
+pycparser==3.12
+pydantic==2.13.5
+pydantic-core==2.46.5
+pygments==2.21.0
+pyjwt==2.15.1
+python-dateutil==4.0.0
+pyyaml==6.0.3
+regex==2026.9.29
+requests==2.34.2
+rfc3161-client==1.0.9
+rfc8785==0.1.4
+rich==15.0.0
+safetensors==0.8.0
+scikit-learn==1.9.1
+scipy==1.17.1
+securesystemslib==1.6.0
+setuptools==84.2.1
+shellingham==1.5.4
+sigstore==4.5.1
+sigstore-models==0.0.6
+sigstore-rekor-types==0.0.18
+soundfile==0.14.0
+soxr==1.1.0
+sympy==1.14.0
+threadpoolctl==3.7.0
+tokenizers==0.23.3
+tomlkit==0.15.2
+torch==2.10.0+cu130
+torchaudio==2.10.0+cu130
+torchvision==0.25.0+cu130
+tqdm==4.70.1
+transformers==5.22.1
+triton==3.6.0
+truststore==0.10.5
+tuf==7.0.1
+typer==0.27.3
+typing-extensions==4.16.0
+typing-inspection==0.4.4
+tzdata==2026.6
+urllib3==2.8.0
+wcwidth==0.9.4

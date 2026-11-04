@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "muse-worker"
+version = "0.1.0"
+description = "MUSE GPU worker: claims render jobs from the MUSE API and runs them on a RunPod GPU"
+requires-python = ">=3.11"
+# The worker core (loop, HTTP, transfers, tests, --dry-run) uses only the standard library.
+# The real H3 backend needs the GPU stack pinned in ../requirements.lock.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+muse-worker = "muse_worker.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["muse_worker*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
