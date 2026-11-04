@@ -30,6 +30,11 @@ public actor FakeMuseAPI: MuseAPI {
     private var members: [Member] = FakeMuseAPI.demoMembers()
     private var engine = ImageEngine(provider: "simulated", model: "bundled-stills", available: ["simulated": true, "fal": false, "custom-http": true])
     private var studio = StudioSettings()
+    /// Templates with their layers (the "server side"). Only the owner's ever leave the actor with layers.
+    private var templates: [MuseTemplate]
+    private var favourites: Set<String> = []
+    /// The exact layers behind each shot (server-side record), for "Save as template".
+    private var shotLayers: [String: TemplateLayers] = [:]
 
     /// - Parameters:
     ///   - speed: simulation speed; 0 freezes the queue (tests).
@@ -44,6 +49,8 @@ public actor FakeMuseAPI: MuseAPI {
         let now = nowMs()
         jobs = SampleData.jobs(now: now)
         takes = SampleData.takes(now: now)
+        templates = StarterTemplates.all(ownerId: "u1", ownerName: "Studio owner", now: now) + StarterTemplates.memberTemplates(now: now)
+        favourites = ["tpl_mirror_selfie"]
         for (meta, id) in [(SampleData.sampleMeta, SampleData.sampleClip), (SampleData.badMeta, SampleData.badClip)] {
             clips[id] = Clip(id: id, name: meta.name, durationSec: meta.durationSec, width: meta.width, height: meta.height, fps: meta.fps, checks: ClipRules.checks(meta))
         }
@@ -686,6 +693,7 @@ public actor FakeMuseAPI: MuseAPI {
     public func deleteTake(id: String) { takes.removeAll { $0.id == id } }
 
     public func shoot(_ req: ShootRequest) async throws -> [Take] {
+        if let tid = req.templateId { return try await templateShoot(tid, req) }
         if Pricing.shootCost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough balance · top up in Credits") }
         charge(Pricing.shootCost)
         hub.emit(ApiEvent(type: "balance", balance: bal))
@@ -699,6 +707,183 @@ public actor FakeMuseAPI: MuseAPI {
             Take(id: "s_\(shortId())", kind: "shot", index: n + 1, of: count, title: "Shoot · \(label.prefix(28))", label: "Shoot", cost: Pricing.shootCost / Double(count),
                  seed: req.seed ?? Int64.random(in: 1000...99999), thumb: .asset(pool[n % pool.count]), prompt: req.prompt, createdAt: t)
         }
+        takes.insert(contentsOf: shots, at: 0)
+        return shots
+    }
+
+    // MARK: Photo templates (plans/templates.md, plans/api.md)
+
+    private var meId: String { signedIn?.id ?? "u1" }
+
+    /// What the signed-in user may see of a template: layers and pool only for its owner.
+    private func view(_ t: MuseTemplate, detail: Bool = false) -> MuseTemplate {
+        var v = t
+        v.isOwner = t.ownerId == meId
+        v.favourite = favourites.contains(t.id)
+        if !v.isOwner { v = v.redacted }
+        if detail {
+            v.recent = takes.filter { $0.templateId == t.id }.sorted { $0.createdAt > $1.createdAt }.prefix(6)
+                .map { TemplateRecent(id: $0.id, thumb: $0.thumb, createdAt: $0.createdAt) }
+        } else {
+            v.recent = nil
+        }
+        return v
+    }
+
+    private func visibleIndex(_ id: String) throws -> Int {
+        guard let i = templates.firstIndex(where: { $0.id == id }), templates[i].isPublic || templates[i].ownerId == meId else {
+            throw ApiError("not_found", "Template not found")
+        }
+        return i
+    }
+
+    private func ownedIndex(_ id: String) throws -> Int {
+        let i = try visibleIndex(id)
+        guard templates[i].ownerId == meId else { throw ApiError("owner_only", "Only the template's owner can change it") }
+        return i
+    }
+
+    public func listTemplates(_ query: TemplateQuery) -> [MuseTemplate] { query.apply(templates.map { view($0) }) }
+
+    public func template(id: String) throws -> MuseTemplate { view(templates[try visibleIndex(id)], detail: true) }
+
+    public func templateDraft(fromShotId: String) throws -> TemplateDraft {
+        guard let shot = takes.first(where: { $0.id == fromShotId }) else { throw ApiError("not_found", "Shot not found") }
+        if let tid = shot.templateId, let t = templates.first(where: { $0.id == tid }), t.ownerId != meId {
+            throw ApiError("template_hidden", "This photo was made with someone else's template, so its look can't be saved")
+        }
+        let model = models.first { shot.prompt.hasPrefix($0.name) }
+        let layers = shotLayers[shot.id] ?? TemplateLayers.from(prompt: shot.prompt, neverAdd: model?.neverAdd ?? [])
+        var name = shot.title.replacingOccurrences(of: "Shoot · ", with: "")
+        if let tn = shot.templateName { name = tn }
+        name = name.prefix(1).uppercased() + name.dropFirst()
+        var pool = TemplateEngine.suggestPool(layers: layers, name: name)
+        let direction = shot.prompt.components(separatedBy: "\n").first { $0.hasPrefix("Direction: ") }.map { String($0.dropFirst("Direction: ".count)) }
+        if let d = direction?.trimmingCharacters(in: CharacterSet(charactersIn: ". ")), !d.isEmpty { pool[.pose] = [d] + pool[.pose].filter { $0 != d } }
+        return TemplateDraft(name: name.trimmingCharacters(in: .whitespaces), tags: [], layers: layers, variationPool: pool, cover: shot.thumb, fromShotId: shot.id)
+    }
+
+    public func createTemplate(_ req: CreateTemplateRequest) throws -> MuseTemplate {
+        let name = req.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty { throw ApiError("bad_request", "Give the template a name") }
+        let vis = req.visibility.isEmpty ? "private" : req.visibility
+        guard TemplateVisibility(rawValue: vis) != nil else { throw ApiError("bad_request", "Visibility is private or public") }
+        var layers = req.layers ?? TemplateLayers()
+        var pool = req.variationPool ?? VariationPool()
+        var cover: ImageRef?
+        if let sid = req.fromShotId {
+            let d = try templateDraft(fromShotId: sid)
+            layers = d.layers
+            if pool.isEmpty { pool = d.variationPool }
+            cover = d.cover
+        } else {
+            if pool.isEmpty { pool = TemplateEngine.suggestPool(layers: layers, name: name) }
+            if let cid = req.coverTakeId { cover = takes.first { $0.id == cid }?.thumb }
+        }
+        let now = nowMs()
+        let t = MuseTemplate(id: "tpl_" + shortId(), name: name, tags: req.tags, visibility: vis, ownerId: meId, ownerName: signedIn?.email ?? "you",
+                             isOwner: true, cover: cover, acceptsProduct: !layers.product.trimmingCharacters(in: .whitespaces).isEmpty,
+                             createdFromShotId: req.fromShotId, createdAt: now, updatedAt: now, layers: layers, variationPool: pool)
+        templates.insert(t, at: 0)
+        return view(t)
+    }
+
+    public func updateTemplate(id: String, _ patch: TemplatePatch) throws -> MuseTemplate {
+        let i = try ownedIndex(id)
+        if let n = patch.name {
+            let name = n.trimmingCharacters(in: .whitespacesAndNewlines)
+            if name.isEmpty { throw ApiError("bad_request", "Give the template a name") }
+            templates[i].name = name
+        }
+        if let t = patch.tags { templates[i].tags = t }
+        if let v = patch.visibility {
+            guard TemplateVisibility(rawValue: v) != nil else { throw ApiError("bad_request", "Visibility is private or public") }
+            templates[i].visibility = v
+        }
+        if let l = patch.layers {
+            templates[i].layers = l
+            templates[i].acceptsProduct = !l.product.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        if let p = patch.variationPool { templates[i].variationPool = p }
+        templates[i].updatedAt = nowMs()
+        return view(templates[i])
+    }
+
+    public func deleteTemplate(id: String) throws {
+        let i = try ownedIndex(id)
+        favourites.remove(templates[i].id)
+        templates.remove(at: i)
+    }
+
+    public func duplicateTemplate(id: String) throws -> MuseTemplate {
+        let src = templates[try ownedIndex(id)]
+        let now = nowMs()
+        var t = src
+        t.id = "tpl_" + shortId()
+        t.name = "\(src.name) copy"
+        t.visibility = "private"
+        t.uses = 0
+        t.starter = nil
+        t.createdAt = now
+        t.updatedAt = now
+        templates.insert(t, at: 0)
+        return view(t)
+    }
+
+    public func setTemplateFavourite(id: String, _ on: Bool) throws -> MuseTemplate {
+        let i = try visibleIndex(id)
+        if on { favourites.insert(id) } else { favourites.remove(id) }
+        return view(templates[i])
+    }
+
+    private func templateBuild(_ t: MuseTemplate, modelId: String, outfitId: String?, direction: String?, shuffleSeed: Int64, index: Int,
+                               lockSeed: Bool, seed: Int64?, hasProduct: Bool) throws -> TemplateEngine.Build {
+        let m = try model(modelId)
+        let outfit = outfitId.flatMap { id in outfits.first { $0.id == id } }
+        return TemplateEngine.build(templateId: t.id, templateName: t.name, layers: t.layers ?? TemplateLayers(), pool: t.variationPool ?? VariationPool(),
+                                    identity: m.promptIdentity(lora: loras[m.id]), outfitName: outfit?.name, direction: direction, shuffleSeed: shuffleSeed,
+                                    index: index, lockSeed: lockSeed, seed: seed, hasProduct: hasProduct)
+    }
+
+    public func templatePrompt(id: String, _ req: TemplatePromptRequest) throws -> TemplatePrompt {
+        let t = templates[try visibleIndex(id)]
+        let shuffle = req.shuffleSeed ?? TemplateEngine.newShuffleSeed()
+        let b = try templateBuild(t, modelId: req.modelId, outfitId: req.outfitId, direction: req.direction, shuffleSeed: shuffle, index: 0,
+                                  lockSeed: req.lockSeed ?? false, seed: nil, hasProduct: false)
+        let owner = t.ownerId == meId
+        return TemplatePrompt(slots: owner ? b.full : b.visible, seed: b.seed, shuffleSeed: shuffle, variation: owner ? b.variation : nil)
+    }
+
+    private func templateShoot(_ tid: String, _ req: ShootRequest) async throws -> [Take] {
+        let i = try visibleIndex(tid)
+        _ = try model(req.modelId)
+        if Pricing.shootCost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough balance · top up in Credits") }
+        charge(Pricing.shootCost)
+        hub.emit(ApiEvent(type: "balance", balance: bal))
+        try? await Task.sleep(nanoseconds: UInt64(genDelay * 1_000_000_000))
+        let t = templates[i]
+        let owner = t.ownerId == meId
+        let shuffle = req.shuffleSeed ?? TemplateEngine.newShuffleSeed()
+        let o = outfits.first { $0.id == req.outfitId }
+        let pool = [t.cover?.asset ?? "hero", o?.front?.asset ?? "c_front", "c_tq", "g_front", "face", "g_tq"]
+        let now = nowMs()
+        let count = max(1, min(8, req.count))
+        let hasProduct = req.productImage != nil && t.acceptsProduct
+        var shots: [Take] = []
+        for n in 0..<count {
+            let seed = Int64.random(in: 1000...999_999)
+            let b = try templateBuild(t, modelId: req.modelId, outfitId: req.outfitId, direction: req.direction, shuffleSeed: shuffle, index: n,
+                                      lockSeed: req.lockSeed ?? false, seed: seed, hasProduct: hasProduct)
+            var take = Take(id: "s_\(shortId())", kind: "shot", index: n + 1, of: count, title: "Template · \(t.name)", label: "Shoot", cost: Pricing.shootCost / Double(count),
+                            seed: b.seed ?? seed, thumb: .asset(pool[(n + Int(shuffle % 3)) % pool.count]), prompt: owner ? b.fullText : b.visibleText, createdAt: now)
+            take.templateId = t.id
+            take.templateName = t.name
+            take.shuffleSeed = shuffle
+            take.variation = owner ? b.variation : nil
+            shotLayers[take.id] = t.layers
+            shots.append(take)
+        }
+        templates[i].uses += 1
         takes.insert(contentsOf: shots, at: 0)
         return shots
     }

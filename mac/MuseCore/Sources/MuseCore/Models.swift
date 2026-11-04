@@ -548,6 +548,12 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
     public var durationSec: Double?
     public var width: Int?
     public var height: Int?
+    /// Template shots: which template made it. `prompt` is the public version ("Template: <name>" plus the user's own layers)
+    /// for anyone but the template's owner; `variation` (what was drawn) is owner only.
+    public var templateId: String?
+    public var templateName: String?
+    public var shuffleSeed: Int64?
+    public var variation: VariationDraw?
 
     public init(id: String, kind: String = "take", jobId: String? = nil, index: Int = 1, of: Int = 1, title: String, label: String, engineLabel: String = "",
                 cost: Double = 0, seed: Int64 = 0, status: String = "test", thumb: ImageRef, prompt: String = "", createdAt: Int64 = 0) {
@@ -567,7 +573,10 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
         self.createdAt = createdAt
     }
 
-    enum CodingKeys: String, CodingKey { case id, kind, jobId, index, of, title, label, engineLabel, cost, seed, status, thumb, prompt, createdAt, videoUrl, durationSec, width, height }
+    enum CodingKeys: String, CodingKey {
+        case id, kind, jobId, index, of, title, label, engineLabel, cost, seed, status, thumb, prompt, createdAt, videoUrl, durationSec, width, height,
+             templateId, templateName, shuffleSeed, variation
+    }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -588,7 +597,14 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
         durationSec = c.o(.durationSec)
         width = c.o(.width)
         height = c.o(.height)
+        templateId = c.o(.templateId)
+        templateName = c.o(.templateName)
+        shuffleSeed = c.o(.shuffleSeed)
+        variation = c.o(.variation)
     }
+
+    /// Made with a template.
+    public var isTemplateShot: Bool { templateId != nil }
 
     /// "0:05 · 768×1344" from the real output when the server sent it, else nil.
     public var mediaLine: String? {
@@ -617,6 +633,8 @@ public struct SetTakeStatusRequest: Codable, Sendable {
     public init(status: String) { self.status = status }
 }
 
+/// POST /v1/shoots. With `templateId` the server builds every still's prompt from the template's hidden layers + the model's
+/// identity, outfit and never-add + the variation draws (or `direction`) + a seed; `scene`, `prompt` and `seed` are then ignored.
 public struct ShootRequest: Codable, Sendable {
     public var modelId: String
     public var outfitId: String
@@ -624,6 +642,16 @@ public struct ShootRequest: Codable, Sendable {
     public var prompt: String
     public var seed: Int64?
     public var count: Int
+    // Template shoots (plans/templates.md). nil fields are left out of the JSON.
+    public var templateId: String?
+    /// Replaces the pose and body-angle draws.
+    public var direction: String?
+    /// The same shuffleSeed gives the same draws (Shuffle = a new one).
+    public var shuffleSeed: Int64?
+    /// "Lock look" (off by default for templates): one fixed seed for this template + model.
+    public var lockSeed: Bool?
+    /// For templates that take a product photo (Product moment).
+    public var productImage: ImageRef?
 
     public init(modelId: String, outfitId: String, scene: String, prompt: String, seed: Int64? = nil, count: Int = 4) {
         self.modelId = modelId
@@ -632,6 +660,19 @@ public struct ShootRequest: Codable, Sendable {
         self.prompt = prompt
         self.seed = seed
         self.count = count
+    }
+
+    /// A template shoot: only the template id and the user's choices are sent.
+    public static func template(_ templateId: String, modelId: String, outfitId: String, direction: String = "", shuffleSeed: Int64?, lockSeed: Bool = false,
+                                productImage: ImageRef? = nil, count: Int = 4) -> ShootRequest {
+        var r = ShootRequest(modelId: modelId, outfitId: outfitId, scene: "", prompt: "", count: count)
+        r.templateId = templateId
+        let d = direction.trimmingCharacters(in: .whitespacesAndNewlines)
+        r.direction = d.isEmpty ? nil : d
+        r.shuffleSeed = shuffleSeed
+        r.lockSeed = lockSeed
+        r.productImage = productImage
+        return r
     }
 }
 

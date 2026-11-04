@@ -333,6 +333,38 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
         out.thumb = j.thumb.map(absolutize)
         return out
     }
+    // Photo templates
+    public func listTemplates(_ query: TemplateQuery) async throws -> [MuseTemplate] {
+        var c = URLComponents()
+        c.queryItems = query.queryItems
+        return (try await call("GET", "v1/templates" + (c.percentEncodedQuery.map { "?" + $0 } ?? "")) as [MuseTemplate]).map(absolutize)
+    }
+    public func template(id: String) async throws -> MuseTemplate { absolutize(try await call("GET", "v1/templates/\(id)")) }
+    public func createTemplate(_ req: CreateTemplateRequest) async throws -> MuseTemplate { absolutize(try await call("POST", "v1/templates", req)) }
+    public func templateDraft(fromShotId: String) async throws -> TemplateDraft {
+        var d: TemplateDraft = try await call("POST", "v1/templates/draft", TemplateDraftRequest(fromShotId: fromShotId))
+        d.cover = d.cover.map(absolutize)
+        return d
+    }
+    public func updateTemplate(id: String, _ patch: TemplatePatch) async throws -> MuseTemplate { absolutize(try await call("PATCH", "v1/templates/\(id)", patch)) }
+    public func deleteTemplate(id: String) async throws { _ = try await send(request("DELETE", "v1/templates/\(id)")) }
+    public func duplicateTemplate(id: String) async throws -> MuseTemplate { absolutize(try await call("POST", "v1/templates/\(id)/duplicate", Empty())) }
+    public func setTemplateFavourite(id: String, _ on: Bool) async throws -> MuseTemplate {
+        on ? absolutize(try await call("POST", "v1/templates/\(id)/favourite", Empty())) : absolutize(try await call("DELETE", "v1/templates/\(id)/favourite"))
+    }
+    public func templatePrompt(id: String, _ req: TemplatePromptRequest) async throws -> TemplatePrompt { try await call("POST", "v1/templates/\(id)/prompt", req) }
+
+    func absolutize(_ t: MuseTemplate) -> MuseTemplate {
+        var t = t
+        t.cover = t.cover.map(absolutize)
+        t.recent = t.recent?.map { r in
+            var r = r
+            r.thumb = absolutize(r.thumb)
+            return r
+        }
+        return t
+    }
+
     public func balance() async throws -> Balance { try await call("GET", "v1/balance") }
     public func topUp(_ req: TopUpRequest) async throws -> Balance { try await call("POST", "v1/balance/topup", req) }
     public func setFailNext(_ fail: Bool) async throws { _ = try await send(request("POST", "v1/dev/fail-next", body: try encoder.encode(DevFailRequest(failNext: fail)))) }

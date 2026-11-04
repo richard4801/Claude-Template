@@ -84,6 +84,27 @@ public protocol MuseAPI: AnyObject, Sendable {
     func deleteTake(id: String) async throws
     func shoot(_ req: ShootRequest) async throws -> [Take]
 
+    // Photo templates (plans/templates.md). Layers and variation pools only ever reach the template's owner.
+    /// GET /v1/templates?scope=&q=&tag=
+    func listTemplates(_ query: TemplateQuery) async throws -> [MuseTemplate]
+    /// GET /v1/templates/{id}: with `recent`. Someone else's private template is not_found.
+    func template(id: String) async throws -> MuseTemplate
+    /// POST /v1/templates (from scratch, or `fromShotId` to copy a shot's exact layers and still).
+    func createTemplate(_ req: CreateTemplateRequest) async throws -> MuseTemplate
+    /// POST /v1/templates/draft: what "Save as template" would save, to show and edit first. `template_hidden` for a shot made
+    /// with someone else's template.
+    func templateDraft(fromShotId: String) async throws -> TemplateDraft
+    /// PATCH /v1/templates/{id} (owner only).
+    func updateTemplate(id: String, _ patch: TemplatePatch) async throws -> MuseTemplate
+    /// DELETE /v1/templates/{id} (owner only).
+    func deleteTemplate(id: String) async throws
+    /// POST /v1/templates/{id}/duplicate: a private copy (owner only).
+    func duplicateTemplate(id: String) async throws -> MuseTemplate
+    /// POST / DELETE /v1/templates/{id}/favourite.
+    func setTemplateFavourite(id: String, _ on: Bool) async throws -> MuseTemplate
+    /// POST /v1/templates/{id}/prompt: the prompt view. Non-owners get the locked "Template: <name>" line.
+    func templatePrompt(id: String, _ req: TemplatePromptRequest) async throws -> TemplatePrompt
+
     // Balance
     func balance() async throws -> Balance
     func topUp(_ req: TopUpRequest) async throws -> Balance
