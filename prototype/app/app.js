@@ -10,11 +10,14 @@ const S = {
   create: { niche: 'Beauty', look: { 'Face shape':'Oval', Eyes:'Brown', Hair:'Black', Texture:'Curly', Body:'Curvy', Makeup:'Soft glam' }, skin: 4 },
   gallery: 'tests', final: [],
   jobs: [
-    { id: 'j1', img: 'vid_kick', title: 'Kick test', engine: 'Viggle β', p: 100, state: 'done', cost: 0.13, tc: '00:01:35' },
+    { id: 'j1', img: 'vid_kick', title: 'Kick test', engine: 'Viggle beta', p: 100, state: 'done', cost: 0.13, tc: '00:01:35' },
     { id: 'j2', img: 'vid_bath', title: 'Bathroom trend', engine: 'H3 · 30 steps', p: 100, state: 'done', cost: 3.05, tc: '00:46:00' },
   ],
-  running: null
+  running: null, balance: 6.07, month: 18.93
 };
+const money = v => '$'+v.toFixed(2);
+const estMin = () => S.engine==='viggle'? 1.6 : S.steps*57.8/60 + (S.lip?4:0);
+const estCost = () => S.engine==='viggle'? 0.13 : estMin()/60*3.99;
 
 /* ---------------- Sound (WebAudio, synthesized, per theme) ---------------- */
 let AC = null;
@@ -58,9 +61,9 @@ const pill = (t,k='') => `<span class="pill ${k}">${t}</span>`;
 const stk = (t,c='yellow',r=-6,st='') => T()==='d'?`<span class="stk stk-${c} pop-in" style="transform:rotate(${r}deg);${st}">${t}</span>`:'';
 const vf = () => T()==='b'?'<i class="vf tl"></i><i class="vf tr"></i><i class="vf bl"></i><i class="vf br"></i>':'';
 function tabbar(active){
-  if(T()==='c'){ const it=[['user','Model','profile'],['studio','Studio','direct'],['queue','Queue','queue']];
-    return `<nav class="tabbar three">${it.map(([i,l,g])=>`<div class="tb-i press${g===active||(active==='home'&&g==='profile')?' on':''}" data-go="${g}">${ic(i)}<span>${l}</span></div>`).join('')}</nav>`; }
-  const it=[['home','Home','home'],['studio','Studio','direct'],['plus','','source'],['queue','Queue','queue'],['user','You','settings']];
+  if(T()==='c'){ const it=[['home','Home','home'],['grid','Gallery','gallery'],['queue','Queue','queue']];
+    return `<nav class="tabbar three">${it.map(([i,l,g])=>`<div class="tb-i press${g===active?' on':''}" data-go="${g}">${ic(i)}<span>${l}</span></div>`).join('')}</nav>`; }
+  const it=[['home','Home','home'],['grid','Gallery','gallery'],['plus','','source'],['queue','Queue','queue'],['user','You','settings']];
   return `<nav class="tabbar">${it.map(([i,l,g])=> i==='plus'?`<div class="tb-plus press" data-go="source">${ic('plus',24)}</div>`:`<div class="tb-i press${g===active?' on':''}" data-go="${g}">${ic(i)}<span>${l}</span></div>`).join('')}</nav>`;
 }
 const home = '<div class="homebar"></div>';
@@ -82,15 +85,14 @@ SCREENS.splash = () => {
 SCREENS.welcome = () => `<section class="screen">${sbar()}
   <div class="wel-grid"><div class="wel-img big" style="${bg('g_front')}">${vf()}</div><div class="wel-img" style="${bg('c_face')}"></div><div class="wel-img" style="${bg('vid_living')}"></div></div>
   ${stk('identity locked','pink',6,'position:absolute;right:26px;top:300px')}
-  <div class="pad stack-16 wel-copy"><h2 class="hero-t">${T()==='a'?'<span class="cond" style="font-size:78px;line-height:.85">Create your<br>AI model.</span>':'Create your AI model.<br>Direct every shot.'}</h2>
+  <div class="pad stack-16 wel-copy"><h2 class="hero-t">${T()==='a'?'<span class="cond" style="font-size:62px">Create your<br>AI model.</span>':'Create your AI model.<br>Direct every shot.'}</h2>
    <p class="muted">Build an original persona, lock her identity, then put her into real clips with the motion kept frame for frame.</p>
-   <div class="dots"><i class="on"></i><i></i><i></i></div>
-   <div class="cta press" data-go="signup">Get started</div><div class="link-c press" data-go="signin">I already have an account</div></div>${home}</section>`;
+      <div class="cta press" data-go="signup">Get started</div><div class="link-c press" data-go="signin">I already have an account</div></div>${home}</section>`;
 
 SCREENS.signin = () => `<section class="screen">${sbar()}${topb('')}
   <div class="pad stack-20"><div>${wm('wm-md')}<h2 class="h2" style="margin-top:14px">Welcome back</h2><p class="muted">Sign in to your studio.</p></div>
    <label class="fld"><span class="lbl">Email</span><span class="inp">jenne@studio.com</span></label>
-   <label class="fld"><span class="lbl">Password</span><span class="inp">••••••••••</span><span class="fld-r">Forgot?</span></label>
+   <label class="fld"><span class="lbl">Password</span><span class="inp">••••••••••</span><span class="fld-r" data-act="forgot">Forgot?</span></label>
    <div class="cta press" data-act="signin">Sign in</div><div class="or"><i></i><span>or</span><i></i></div>
    <div class="sso press" data-act="signin">${ic('apple',20)} Continue with Apple</div><div class="sso press" data-act="signin">${ic('google',20)} Continue with Google</div>
    <p class="tiny muted center">New here? <b class="acc press" data-go="signup">Create an account</b></p></div>${home}</section>`;
@@ -106,13 +108,13 @@ SCREENS.signup = () => `<section class="screen">${sbar()}${topb('')}
    <p class="tiny muted center">By continuing you agree to the Terms and the MiniMax H3 acceptable use policy.</p></div>${home}</section>`;
 
 SCREENS.home = () => {
-  const hello={a:'<span class="cond" style="font-size:72px;line-height:.85">Your models</span>',b:'MODELS',c:'Good morning, Jenne',d:'Your crew'}[T()];
-  return `<section class="screen">${sbar()}<header class="top">${wm()}<span class="grow"></span><span class="tb-btn press" data-act="notify">${ic('bell')}</span></header>
-  <div class="pad stack-16 scroll"><div class="row-b"><h2 class="h2 home-t">${hello}</h2><span class="bal mono press" data-go="credits">$6.07</span></div>
+  const hello={a:'<span class="cond" style="font-size:56px">Your models</span>',b:'MODELS',c:'Good morning, Jenne',d:'Your crew'}[T()];
+  return `<section class="screen">${sbar()}<header class="top">${wm()}<span class="grow"></span><span class="tb-btn press" data-act="notify">${ic('bell')}</span>${T()==='c'?`<span class="tb-btn press" data-go="settings">${ic('user')}</span>`:''}</header>
+  <div class="pad stack-16 scroll"><div class="row-b"><h2 class="h2 home-t">${hello}</h2><span class="bal mono press" data-go="credits">${money(S.balance)}</span></div>
    <div class="feature press" style="${bg('g_front')}" data-go="profile">${vf()}<div class="feat-cap"><span class="lbl lbl-inv">Featured</span><b class="feat-name">Sienna Vale</b><span class="tiny">Identity locked · 2 outfits</span></div>
     ${stk('ready to shoot','mint',-5,'position:absolute;right:14px;top:14px')}</div>
    <div class="quick"><div class="qa press" data-go="source">${ic('studio')}<span>New video</span></div><div class="qa press" data-go="shoot">${ic('camera')}<span>Photoshoot</span></div><div class="qa press" data-go="create1">${ic('model')}<span>New model</span></div></div>
-   <div class="row-b"><h3 class="h3">All models</h3><span class="tiny acc">See all</span></div>
+   <div class="row-b"><h3 class="h3">All models</h3><span class="tiny muted">2 models</span></div>
    <div class="mgrid"><div class="mcard press" data-go="profile"><div class="mc-img" style="${bg('c_front')}">${vf()}</div><div class="mc-meta"><b>Sienna Vale</b><span class="tiny muted">Fashion · 24</span>${pill('Locked','good')}</div></div>
     <div class="mcard press" data-go="create3"><div class="mc-img init">N</div><div class="mc-meta"><b>Noor Adeyemi</b><span class="tiny muted">Beauty · 27</span>${pill('Needs close-ups','warn')}</div></div></div>
   </div>${tabbar('home')}${home}</section>`;
@@ -126,19 +128,20 @@ SCREENS.profile = () => {
     <div class="ap-photo press" style="${bg('hero')}" data-go="direct"><span class="cond ap-name">Sienna<br>Vale</span><span class="ap-tag">THE FACE OF YOUR VISION</span></div>
     <div class="carousel"><span class="arrow press" data-act="outfit-prev">${ic('back',18)}</span>${OUTFITS.map(([k],i)=>`<div class="cimg press${i===o?' on':''}" style="${bg(k)}" data-act="outfit-${i}"></div>`).join('')}<span class="arrow press" data-act="outfit-next">${ic('chev',18)}</span></div>
     <div class="under">OUTFITS ${o+1} / ${OUTFITS.length} · ${OUTFITS[o][1].toUpperCase()}</div>
-    <div class="dock"><div class="cta grow press" data-go="source">Make a video</div><div class="cta-2 press" data-go="shoot">${ic('camera',20)}</div></div>${home}</section>`;
+    <div class="dock"><div class="cta grow press" data-go="source">Make a video</div><div class="cta-2 press" data-go="shoot">${ic('camera',18)} Shoot</div></div>${home}</section>`;
   if(t==='b') return `<section class="screen">${sbar()}<header class="top"><span class="tb-btn press" data-back>${ic('back')}</span><span class="grow center">${wm()}</span><span class="tiny mono muted" style="width:60px;text-align:right;line-height:1.1">MODEL<br>PROFILE</span></header>
     <div class="vfcard" style="${bg('hero')}">${vf()}<span class="ro" style="left:16px;top:14px">6/6</span><span class="ro" style="right:16px;top:14px">768×1344</span><i class="cross"></i><span class="ro" style="left:16px;bottom:14px">ISO 100</span><span class="ro" style="right:16px;bottom:14px">24.00 FPS</span></div>
     <div class="namerow"><b>Sienna Vale</b><span class="active">● ACTIVE</span></div><div class="idl">ID 6/6 · 768×1344 · never add: tattoos, rings</div>
     <div class="pad" style="margin-top:12px"><div class="row-b"><span class="lbl">Outfit</span><span class="tiny mono muted">${o+1} / ${OUTFITS.length}</span></div>
      <div class="refrow" style="margin-top:8px">${OUTFITS.map(([k,n],i)=>`<div class="ofit press${i===o?' on':''}" data-act="outfit-${i}"><div class="ref-img tall" style="${bg(k)}"></div></div>`).join('')}</div></div>
-    <div class="dock"><div class="cta grow press" data-go="source">Make a video</div><div class="cta-2 press" data-go="shoot">${ic('camera',20)}</div></div>${home}</section>`;
+    <div class="dock"><div class="cta grow press" data-go="source">Make a video</div><div class="cta-2 press" data-go="shoot">${ic('camera',18)} Shoot</div></div>${home}</section>`;
   if(t==='c') return `<section class="screen">${sbar()}<header class="top"><span class="tb-btn press" data-back>${ic('back')}</span><span class="grow center">${wm('c')}</span><span class="tb-btn press" data-go="settings">${ic('user')}</span></header>
     <div class="ccard" style="${bg('hero')}"></div>
     <div class="cname"><b>Sienna Vale</b><span class="tb-btn press" data-go="settings">${ic('more')}</span></div>
     <span class="cpill">${ic('lock',13)} Identity locked</span>
     <div class="pad row-b" style="margin-top:14px"><b>Outfit</b><span class="tiny muted">${o+1} / ${OUTFITS.length} ›</span></div>
     <div class="ccar">${OUTFITS.map(([k],i)=>`<div class="cimg press${i===o?' on':''}" style="${bg(k)}" data-act="outfit-${i}"></div>`).join('')}<span class="round-btn press" data-act="outfit-next" style="position:absolute;right:14px;top:38px">${ic('chev',16)}</span></div>
+    <div class="row-g pad" style="margin-top:14px"><div class="cta grow press" data-go="source">Make a video</div><div class="cta-2 press" data-go="shoot">${ic('camera',18)} Shoot</div></div>
     ${tabbar('profile')}${home}</section>`;
   return `<section class="screen"><div class="blue" style="padding-bottom:48px;position:relative">${sbar(true)}<header class="top" style="color:#fff">${wm()}<span class="grow tiny" style="text-align:right;line-height:1.1;font-weight:700">CREATE<br>DIRECT<br>YOUR AI MODEL</span><span class="tb-btn press" data-back>${ic('back')}</span></header>
     <div class="cutout" style="${bg('hero')}"><span class="dname">Sienna<br>Vale</span></div>
@@ -148,12 +151,12 @@ SCREENS.profile = () => {
     <div class="pad stack-10" style="margin-top:34px"><b style="color:var(--blue);font-weight:800;letter-spacing:.04em">AI FASHION MODEL</b>
      <div class="row-b"><b>OUTFIT</b><span class="tiny"><b>${OUTFITS.length} LOOKS ›</b></span></div>
      <div class="refrow">${OUTFITS.map(([k],i)=>`<div class="ofit press${i===o?' on':''}" data-act="outfit-${i}"><div class="ref-img tall" style="${bg(k)}"></div></div>`).join('')}</div></div>
-    <div class="dock"><div class="cta grow press" data-go="source">Make a video</div><div class="cta-2 press" data-go="shoot">${ic('camera',20)}</div></div>${home}</section>`;
+    <div class="dock"><div class="cta grow press" data-go="source">Make a video</div><div class="cta-2 press" data-go="shoot">${ic('camera',18)} Shoot</div></div>${home}</section>`;
 };
 
-const stepbars = n => `<div class="stepbars">${[0,1,2,3].map(i=>`<i class="${i<n?'on':''}"></i>`).join('')}</div>`;
+const stepbars = n => `<div class="stepbars">${[0,1,2].map(i=>`<i class="${i<n?'on':''}"></i>`).join('')}</div>`;
 SCREENS.create1 = () => `<section class="screen">${sbar()}${topb('New model')}
-  <div class="pad stack-8">${stepbars(1)}<span class="lbl">Step 1 of 4</span><h2 class="h2">Who is she?</h2></div>
+  <div class="pad stack-8">${stepbars(1)}<span class="lbl">Step 1 of 3</span><h2 class="h2">Who is she?</h2></div>
   <div class="pad stack-16" style="margin-top:12px"><label class="fld"><span class="lbl">Name</span><span class="inp typing">Noor Adeyemi</span></label>
    <div class="fld"><span class="lbl">Age · <b class="mono" id="age-v">27</b></span><div class="slider" data-slider="age" data-min="18" data-max="45" data-val="27"><i style="width:33%"></i><b style="left:33%"></b></div><div class="scale mono"><span>18</span><span>45</span></div></div>
    <div class="fld"><span class="lbl">Niche</span><div class="chips">${['Fashion','Beauty','Fitness','Travel','Food','Tech'].map(x=>`<span class="chip${x===S.create.niche?' on':''}" data-act="niche-${x}">${x}</span>`).join('')}</div></div>
@@ -161,45 +164,61 @@ SCREENS.create1 = () => `<section class="screen">${sbar()}${topb('New model')}
   <div class="dock"><div class="cta grow press" data-go="create2">Next: Look</div></div>${home}</section>`;
 SCREENS.create2 = () => { const rows=[['Face shape',['Oval','Heart','Round','Square']],['Eyes',['Green','Hazel','Brown','Blue']],['Hair',['Honey blonde','Brunette','Black','Auburn']],['Texture',['Straight','Wavy','Curly','Coily']],['Body',['Slim','Athletic','Curvy']],['Makeup',['Bare','Soft glam','Full glam']]];
   return `<section class="screen">${sbar()}${topb('New model')}
-  <div class="pad stack-8">${stepbars(2)}<span class="lbl">Step 2 of 4</span><h2 class="h2">Her look</h2></div>
+  <div class="pad stack-8">${stepbars(2)}<span class="lbl">Step 2 of 3</span><h2 class="h2">Her look</h2></div>
   <div class="pad stack-14" style="margin-top:10px"><div class="fld"><span class="lbl">Skin tone</span><div class="sws">${['#F3D9C4','#E8C09C','#D4A275','#B07A50','#8A5A38','#5E3B24'].map((c,i)=>`<i class="sw${i===S.create.skin?' on':''}" style="background:${c}" data-act="skin-${i}"></i>`).join('')}</div></div>
    ${rows.map(([k,o])=>`<div class="fld"><span class="lbl">${k}</span><div class="chips nowrap">${o.map(x=>`<span class="chip${S.create.look[k]===x?' on':''}" data-act="look|${k}|${x}">${x}</span>`).join('')}</div></div>`).join('')}</div>
   <div class="dock"><div class="cta grow press" data-act="portraits">Generate portraits · $0.08</div></div>${home}</section>`; };
 SCREENS.create3 = () => { const sl=[['Face · front','face',1],['Face · profile','profile',1],['Body · front','g_front'],['Body · ¾'],['Body · side'],['Body · back']];
   return `<section class="screen">${sbar()}${topb('New model')}
-  <div class="pad stack-8">${stepbars(3)}<span class="lbl">Step 3 of 4</span><h2 class="h2">Lock her identity</h2></div>
+  <div class="pad stack-8">${stepbars(3)}<span class="lbl">Step 3 of 3</span><h2 class="h2">Lock her identity</h2></div>
   <div class="pad stack-14" style="margin-top:10px"><p class="muted">Six separate shots keep her the same person in every video. Face close-ups matter most.</p>
    <div class="slots">${sl.map(([n,k,r])=>`<div class="slot${k?' filled':''} press" data-act="upload">${k?`<div class="ref-img" style="${bg(k)}"></div>`:`<div class="slot-e">${ic('upload',20)}</div>`}<span>${n}</span></div>`).join('')}</div>
    <div class="note-box warn">${ic('shield',18)}<span>3 of 6 added. Upload separate images, not a character sheet.</span></div></div>
   <div class="dock"><div class="cta-2 wide press" data-act="upload">${ic('upload',18)} Upload</div><div class="cta grow press" data-act="model-saved">Save model</div></div>${home}</section>`; };
 
-const TOOLS=[['model','Model'],['outfit','Outfit'],['camera','Camera'],['light','Light'],['bg','Background'],['quality','Quality']];
-const toolstrip = () => `<div class="tools">${TOOLS.map(([k,l])=>`<div class="tool press${k===S.tool?' on':''}" data-act="tool-${k}">${ic(k==='bg'?'bg':k,20)}<span>${l}</span></div>`).join('')}</div>`;
+const TOOLS=[['model','Model'],['outfit','Outfit'],['bg','Background'],['audio','Sound'],['quality','Quality']];
+const SHOOT_TOOLS=[['model','Model'],['outfit','Outfit'],['bg','Scene'],['camera','Camera'],['light','Light']];
+const toolstrip = (list=TOOLS, cur=S.tool, prefix='tool') => `<div class="tools">${list.map(([k,l])=>`<div class="tool press${k===cur?' on':''}" data-act="${prefix}-${k}">${ic(k,20)}<span>${l}</span></div>`).join('')}</div>`;
 function sheetBody(){
   const t=T();
   if(S.tool==='quality'){
     let stepsUI;
-    if(S.engine==='viggle') stepsUI = `<div class="note-box warn">${ic('shield',18)}<span>Viggle β uses a fixed 4 steps. Motion timing is exact; the face is softer and can warp slightly.</span></div>`;
+    if(S.engine==='viggle') stepsUI = `<div class="note-box warn">${ic('shield',18)}<span>Viggle beta uses a fixed 4 steps. Motion timing is exact; the face is softer and can warp slightly.</span></div>`;
     else if(t==='b') stepsUI = `<div class="plate"><i class="screw s1"></i><i class="screw s2"></i><i class="screw s3"></i><i class="screw s4"></i><span class="lbl">Steps</span><span class="stepsbadge" id="steps-v">${S.steps}</span><span class="tiny acc" id="steps-rec">${S.steps===10?'Recommended':S.steps>10?'Rarely worth it':'Below tested range'}</span>
         <div class="dialrow"><span class="knob-btn press" data-act="steps-dec">${ic('back',16)}</span><div class="knob" id="knob" style="transform:rotate(${(S.steps-17)*10}deg)"><i></i></div><span class="knob-btn press" data-act="steps-inc">${ic('chev',16)}</span></div>
         <div class="ruler" style="align-self:stretch">${Array.from({length:27},(_,i)=>`<i class="${i%5===0?'big':''}${i+4===S.steps?' on':''}"></i>`).join('')}</div><div class="scale mono" style="align-self:stretch"><span>4</span><span>10</span><span>20</span><span>30</span></div></div>`;
     else { const pct=(S.steps-4)/26*100; stepsUI = `<div class="${t==='c'?'stepcard':''} fld"><div class="row-b"><span class="lbl">Steps</span>${t==='d'?`<span class="stk stk-yellow" style="transform:rotate(-5deg)" id="steps-rec">${S.steps===10?'RECOMMENDED':S.steps>10?'TAKES LONGER':'TOO FEW?'}</span>`:pill(`<span id="steps-rec">${S.steps===10?'Recommended':S.steps>10?'Rarely worth it':'Below tested'}</span>`,S.steps===10?'good':'warn')}</div>
         <b class="stepnum${t==='a'?'':' mono'}" id="steps-v">${S.steps}</b><div class="slider" data-slider="steps" data-min="4" data-max="30" data-val="${S.steps}"><i style="width:${pct}%"></i><b style="left:${pct}%"></b></div><div class="scale mono"><span>4</span><span>10</span><span>20</span><span>30</span></div>
         <p class="tiny muted">10, 15 and 20 steps looked the same in testing. More steps only add time.</p></div>`; }
-    return `<div class="row-b"><b class="h3">Quality</b><div class="seg sm"><span class="${S.engine==='h3'?'on':''}" data-act="engine-h3">H3</span><span class="${S.engine==='viggle'?'on':''}" data-act="engine-viggle">Viggle β</span></div></div>${stepsUI}
-      <div class="row-b"><span>Lip sync <span class="tiny muted">· talking clips only</span></span><span class="tog${S.lip?' on':''}" data-act="lip"></span></div>`;
+    return `<div class="row-b"><b class="h3">Quality</b><div class="seg sm"><span class="${S.engine==='h3'?'on':''}" data-act="engine-h3">H3</span><span class="${S.engine==='viggle'?'on':''}" data-act="engine-viggle">Viggle beta</span></div></div>${stepsUI}
+`;
   }
   if(S.tool==='bg') return `<b class="h3">Background</b>
       <div class="opt press${S.bg==='keep'?' on':''}" data-act="bg-keep"><b>Keep the real room</b><span class="tiny muted">Best realism. Uses the clip's own background.</span></div>
       <div class="opt press${S.bg==='photo'?' on':''}" data-act="bg-photo"><b>New background photo</b><span class="tiny muted">Vertical photo, same camera height, similar light.</span></div>
       ${S.bg==='photo'?`<div class="fld"><span class="lbl">Background motion</span><div class="seg">${[['still','Still'],['subtle','Subtly alive'],['busy','Busy']].map(([k,l])=>`<span class="${S.motion===k?'on':''}" data-act="motion-${k}">${l}</span>`).join('')}</div></div>`:''}
-      <div class="row-b"><span>Keep original audio</span><span class="tog${S.keepAudio?' on':''}" data-act="audio"></span></div>`;
+`;
+  if(S.tool==='audio') return `<b class="h3">Sound</b>
+      <div class="opt press${S.keepAudio?' on':''}" data-act="audio-keep"><b>Keep the clip's audio</b><span class="tiny muted">The song or voice from your source clip.</span></div>
+      <div class="opt press${!S.keepAudio?' on':''}" data-act="audio-new"><b>Replace audio</b><span class="tiny muted">Upload a new track or voiceover.</span></div>
+      <div class="row-b"><span><b>Lip sync</b><br><span class="tiny muted">Only when the performer talks or sings · adds ~4 min</span></span><span class="tog${S.lip?' on':''}" data-act="lip"></span></div>`;
   if(S.tool==='outfit') return `<b class="h3">Outfit</b><div class="refrow">${OUTFITS.map(([k,n],i)=>`<div class="ofit press${i===S.outfit?' on':''}" data-act="outfit-${i}"><div class="ref-img tall" style="${bg(k)}"></div><span>${n}</span></div>`).join('')}</div><p class="tiny muted">Never add: tattoos, rings, necklaces. Removed automatically.</p>`;
   if(S.tool==='model') return `<b class="h3">Model</b><div class="refrow"><div class="ofit on"><div class="ref-img tall" style="${bg('face')}"></div><span>Sienna</span></div><div class="ofit"><div class="ref-img tall init">N</div><span>Noor · needs close-ups</span></div></div>`;
-  if(S.tool==='camera') return `<b class="h3">Camera</b><p class="tiny muted">Video keeps the performer's real camera. These settings apply to photoshoots.</p><div class="seg">${['Close','Medium','Full','Wide'].map(x=>`<span class="${S.shot===x?'on':''}" data-act="shot-${x}">${x}</span>`).join('')}</div>`;
-  return `<b class="h3">Light</b><p class="tiny muted">Video keeps the room's real light. Relight comes with new backgrounds.</p><div class="chips">${['Golden hour','Overcast','Ring light','Window','Neon'].map(x=>`<span class="chip${S.light===x?' on':''}" data-act="light-${x}">${x}</span>`).join('')}</div>`;
+  return '';
 }
-function genLabel(){ const m = S.engine==='viggle'? 1.6 : S.steps*0.96 + (S.lip?4:0); const c = S.engine==='viggle'?0.13: m/60*3.99; return `Generate · ${m<2?Math.round(m*60)+'s':Math.round(m)+' min'} · $${c.toFixed(2)}`; }
+function shootSheet(){
+  const k=S.stool||'camera';
+  if(k==='camera') return `<div class="row-b"><b class="h3">Camera</b><span class="tiny acc press" data-act="shoot-reset">Reset</span></div>
+   <div class="fld"><span class="lbl">Shot</span><div class="seg">${['Close','Medium','Full','Wide'].map(x=>`<span class="${S.shot===x?'on':''}" data-act="shot-${x}">${x}</span>`).join('')}</div></div>
+   <div class="fld"><span class="lbl">Lens · ${S.lens}mm</span><div class="chips">${[16,24,35,50,85].map(x=>`<span class="chip${S.lens===x?' on':''}" data-act="lens-${x}">${x}mm</span>`).join('')}</div></div>
+   <div class="fld"><span class="lbl">Aperture</span><div class="chips">${['f/1.4','f/2.8','f/5.6','f/11'].map(x=>`<span class="chip${S.aperture===x?' on':''}" data-act="ap-${x}">${x}</span>`).join('')}</div></div>`;
+  if(k==='light') return `<b class="h3">Light</b><div class="chips">${['Golden hour','Overcast','Ring light','Window light','Flash','Neon night'].map(x=>`<span class="chip${S.light===x?' on':''}" data-act="light-${x}">${x}</span>`).join('')}</div>
+   <div class="fld"><span class="lbl">Grade</span><div class="chips">${['Phone-natural','Warm film','Editorial','Muted'].map(x=>`<span class="chip${(S.grade||'Phone-natural')===x?' on':''}" data-act="grade-${x}">${x}</span>`).join('')}</div></div>`;
+  if(k==='bg') return `<b class="h3">Scene</b><div class="chips">${['Rooftop · golden hour','Bedroom mirror','Café window','Beach noon','City night'].map(x=>`<span class="chip${(S.scene||'Rooftop · golden hour')===x?' on':''}" data-act="scene-${x}">${x}</span>`).join('')}</div><p class="tiny muted">Or describe your own location in the prompt.</p>`;
+  if(k==='outfit') return `<b class="h3">Outfit</b><div class="refrow">${OUTFITS.map(([kk,n],i)=>`<div class="ofit press${i===S.outfit?' on':''}" data-act="outfit-${i}"><div class="ref-img tall" style="${bg(kk)}"></div><span>${n}</span></div>`).join('')}</div>`;
+  return `<b class="h3">Model</b><div class="refrow"><div class="ofit on"><div class="ref-img tall" style="${bg('face')}"></div><span>Sienna</span></div><div class="ofit"><div class="ref-img tall init">N</div><span>Noor · draft</span></div></div>`;
+}
+function genLabel(){ const m=estMin(); return `Generate · ${m<2?Math.round(m*60)+'s':Math.round(m)+' min'} · ${money(estCost())}`; }
 SCREENS.direct = () => {
   const t=T(), readout = t==='b'?`<span class="readout tl-r mono"><i class="rec"></i> 00:00:05:04</span><span class="readout br-r mono">768×1344 · 24 FPS</span>`:'';
   const head = t==='a'?`<header class="top">${'<span class="tb-btn press" data-back>'+ic('back')+'</span>'}<span class="grow center">${wm('c')}</span><span class="tiny mono" style="letter-spacing:.12em">VIDEO STUDIO</span></header>`: topb(t==='b'?'Video studio':'Video studio','back',['more','settings']);
@@ -219,34 +238,37 @@ SCREENS.source = () => { const ck=[['One person in frame','Yes','good'],['Waterm
   <div class="dock"><div class="cta grow press" data-go="direct">Next: Direct</div></div>${home}</section>`; };
 
 SCREENS.shoot = () => `<section class="screen">${sbar()}${topb('Photoshoot','back',['more','settings'])}
-  <div class="canvas short" style="${bg('c_tq')}">${vf()}${T()==='b'?`<span class="readout tl-r mono">${S.lens}MM · ${S.aperture.toUpperCase()} · 4300K</span>`:''}${stk('rooftop · golden hour','yellow',-4,'position:absolute;left:12px;bottom:12px')}</div>
-  <div class="tools">${TOOLS.map(([k,l])=>`<div class="tool${k==='camera'?' on':''}">${ic(k,20)}<span>${l}</span></div>`).join('')}</div>
-  <div class="bsheet stack-14"><i class="grab"></i><div class="row-b"><b class="h3">Camera</b><span class="tiny acc">Reset</span></div>
-   <div class="fld"><span class="lbl">Shot</span><div class="seg">${['Close','Medium','Full','Wide'].map(x=>`<span class="${S.shot===x?'on':''}" data-act="shot-${x}">${x}</span>`).join('')}</div></div>
-   <div class="fld"><span class="lbl">Lens · <b class="mono">${S.lens}mm</b></span><div class="chips">${[16,24,35,50,85].map(x=>`<span class="chip${S.lens===x?' on':''}" data-act="lens-${x}">${x}mm</span>`).join('')}</div></div>
-   <div class="fld"><span class="lbl">Aperture</span><div class="chips">${['f/1.4','f/2.8','f/5.6','f/11'].map(x=>`<span class="chip${S.aperture===x?' on':''}" data-act="ap-${x}">${x}</span>`).join('')}</div></div></div>
+  <div class="canvas short" style="${bg('c_tq')};height:220px">${vf()}${T()==='b'?`<span class="readout tl-r mono">${S.lens}MM · ${S.aperture.toUpperCase()} · 4300K</span>`:''}${stk('rooftop · golden hour','yellow',-4,'position:absolute;left:12px;bottom:12px')}</div>
+  ${toolstrip(SHOOT_TOOLS, S.stool||'camera', 'stool')}
+  <div class="bsheet stack-14" id="ssheet"><i class="grab"></i>${shootSheet()}</div>
   <div class="dock tight"><div class="cta grow press" data-act="shoot">Shoot 4 · ~32s · $0.12</div></div>${home}</section>`;
 
 function fmt(s){ s=Math.max(0,Math.round(s)); return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); }
 SCREENS.queue = () => {
   const t=T(), r=S.running, jobs=[...(r?[r]:[]), ...S.jobs];
-  const kpis = `<div class="kpis"><div><span class="lbl">Today</span><b class="mono">$3.95</b></div><div><span class="lbl">Month</span><b class="mono">$18.93</b></div><div><span class="lbl">Balance</span><b class="mono">$6.07</b></div></div>`;
+  const kpis = `<div class="kpis"><div><span class="lbl">Month</span><b class="mono">${money(S.month)}</b></div><div><span class="lbl">Balance</span><b class="mono">${money(S.balance)}</b></div><div><span class="lbl">GPU</span><b class="mono">${S.running?'H100':'Off'}</b></div></div>`;
   if(t==='a') return `<section class="screen">${sbar()}<header class="top">${wm()}<span class="grow"></span><span class="tiny mono" style="letter-spacing:.12em">RENDER QUEUE <b class="acc">●</b></span></header>
     <div class="pad scroll"><div class="row-b" style="align-items:flex-end;margin-top:6px"><span class="cond renders-t">Your renders</span><span class="tiny mono">${jobs.length} IN QUEUE</span></div>
      ${jobs.map(j=>`<div class="rj press" data-act="open-${j.id}"><div class="th" style="${bg(j.img)}"></div><div class="grow stack-4"><b style="font-weight:500">${j.title}</b><span class="meta">9:16 · ${j.engine.toUpperCase()}</span><div class="row-b"><div class="bar grow"><i data-job="${j.id}" style="width:${j.p}%"></i></div><span class="mono tiny" data-pct="${j.id}">${Math.round(j.p)}%</span></div></div><span class="muted">${ic('more',18)}</span></div>`).join('')}
-    </div><div class="dock"><div class="cta grow press" data-go="direct">Generate · 10 min · $0.67</div></div>${tabbar('queue')}${home}</section>`;
+     <div class="cta-2 press" data-go="source" style="margin-top:16px">${ic('plus',18)} New video</div>
+    </div>${tabbar('queue')}${home}</section>`;
   if(t==='c'){ const stages=[['Model processing',30],['Outfit generation',55],['Video rendering',92],['Finalizing',100]];
     const p = r? r.p : 100;
+    if(!r) return `<section class="screen">${sbar()}<header class="top">${wm('c')}<span class="grow"></span><span class="tb-btn press" data-go="settings">${ic('user')}</span></header>
+    <div class="pad stack-14 scroll"><h2 class="h2">Render queue</h2><div class="stage-row" style="flex-direction:column;align-items:flex-start"><span class="muted">Nothing rendering</span><b style="font-size:22px;font-weight:500">Your GPU is off · $0.00/hr</b><div class="cta-2 press" data-go="source" style="align-self:stretch;margin-top:6px">${ic('plus',18)} New video</div></div>
+     <span class="lbl">Finished</span>${S.jobs.map(j=>`<div class="job press" data-act="open-${j.id}"><div class="job-th" style="${bg(j.img)}"></div><div class="grow stack-4"><div class="row-b"><b>${j.title}</b><span class="mono tiny">${money(j.cost)}</span></div><span class="tiny muted">${j.engine} · took ${j.tc}</span>${pill('Done','good')}</div></div>`).join('')}</div>
+    ${tabbar('queue')}${home}</section>`;
     return `<section class="screen">${sbar()}${topb('Render queue')}
-    <div class="pad stack-14"><span class="muted" style="margin-top:8px">${r?'Time left':'All renders done'}</span><b class="bigtime" id="bigtime">${r?fmt(r.left):'00:00'}</b><span class="muted">${r?'Generating your video…':'Nothing running. Start a new one.'}</span>
+    <div class="pad stack-14"><span class="muted" style="margin-top:8px">Time left</span><b class="bigtime" id="bigtime">${fmt(r.left)}</b><span class="muted">Generating your video…</span>
      ${stages.map(([n,lim],i)=>{ const prev=i?stages[i-1][1]:0; const sp=Math.max(0,Math.min(100,(p-prev)/(lim-prev)*100)); const st=sp>=100?'done':sp>0?'run':'';
        return `<div class="stage-row"><span class="stage-ic ${st}">${st==='done'?ic('check',14):''}</span><div class="grow stack-4"><div class="row-b"><span>${n}</span><span class="mono tiny" data-stagep="${i}">${Math.round(sp)}%</span></div><div class="bar"><i data-stage="${i}" style="width:${sp}%"></i></div></div></div>`; }).join('')}
      <div class="row-b tiny muted"><span>${S.jobs.length} finished · see Gallery</span><span class="acc press" data-go="gallery">Open ›</span></div></div>
-    <div class="dock"><div class="cta grow press" data-go="direct">Generate · 10 min · $0.67</div></div>${home}</section>`; }
+    ${tabbar('queue')}${home}</section>`; }
   if(t==='d') return `<section class="screen">${sbar()}<header class="top">${wm()}<span class="grow tiny" style="text-align:right;font-weight:700">RENDER QUEUE</span><span class="tb-btn press" data-go="settings">${ic('quality')}</span></header>
     <div class="pad stack-12 scroll"><div style="position:relative"><span class="dhead">TURN IDEAS<br>INTO REALITY</span><span class="doodle" style="right:4px;top:0">${DOODLE.crown}</span></div>
      ${jobs.map((j,i)=>`<div class="djob press" data-act="open-${j.id}"><div class="th" style="${bg(j.img)}"></div><div class="grow stack-4"><b>Sienna Vale · ${j.title}</b><span class="tiny muted">${j.engine}</span><div class="row-b" style="gap:8px"><div class="dbar grow${i%2?' p':''}"><i data-job="${j.id}" style="width:${j.p}%"></i></div><span class="bigpct" data-pct="${j.id}">${Math.round(j.p)}%</span></div><span class="tiny muted">${j.state==='done'?'Done':'Generating video… ~'+fmt(j.left)+' left'}</span></div></div>`).join('')}
-    </div><div class="dock"><div class="cta grow big press" data-go="direct">Generate · 10 min · $0.67</div></div>${home}</section>`;
+     <div class="cta big press" data-go="source" style="margin-top:6px">${ic('plus',22)} New video</div>
+    </div>${tabbar('queue')}${home}</section>`;
   return `<section class="screen">${sbar()}${topb('Render queue','back',['quality','settings'])}
     <div class="pad stack-12 scroll"><div class="row-b"><span class="tiny mono acc">${r?'1 ACTIVE':'0 ACTIVE'}</span>${pill('● H100 '+(r?'on':'off'),r?'good':'')}</div>
      ${jobs.map(j=>`<div class="job press" data-act="open-${j.id}"><div class="job-th" style="${bg(j.img)}"></div><div class="grow stack-4"><div class="row-b"><span class="tc" data-tc="${j.id}">${j.state==='done'?j.tc:fmt(j.left)}</span><span class="st ${j.state==='done'?'':'r'}">● ${j.state==='done'?'DONE':'RENDERING'}</span></div>
@@ -259,13 +281,13 @@ SCREENS.result = () => { const j=S.open||S.jobs[0];
    <div class="res-side"><div class="rs press" data-go="direct">${ic('retry')}<span>Retry</span></div><div class="rs press" data-act="export">${ic('export')}<span>Export</span></div></div>
    ${stk('she ate!','pink',-8,'position:absolute;left:18px;top:140px')}</div>
   <div class="res-sheet stack-12"><div class="row-b"><div><b class="h3">${j.title}</b><div class="tiny muted">${j.engine} · $${j.cost.toFixed(2)}</div></div>${pill(S.final.includes(j.id)?'Final':'Test',S.final.includes(j.id)?'good':'')}</div>
-   <div class="note-box">${ic('shield',18)}<span>Export adds the AI-generated label. Brand posts also need #ad.</span></div>
-   <div class="row-g"><div class="cta-2 grow press" data-back>Reject</div><div class="cta grow press" data-act="approve">${S.final.includes(j.id)?'Approved ✓':'Approve'}</div></div></div>${home}</section>`; };
+   ${S.consent==='tests'&&!S.final.includes(j.id)?`<div class="note-box warn">${ic('shield',18)}<span>Performer consent is <b>tests only</b>, so this take stays in Tests and can't be exported.</span></div>`:`<div class="note-box">${ic('shield',18)}<span>Export adds the AI-generated label. Brand posts also need #ad.</span></div>`}
+   <div class="row-g"><div class="cta-2 grow press" data-act="discard">Discard</div><div class="cta grow press" data-act="approve">${S.final.includes(j.id)?'Approved ✓':S.consent==='tests'?'Keep as test':'Approve'}</div></div></div>${home}</section>`; };
 
-SCREENS.gallery = () => { const tiles=[['vid_living','10 steps','j0'],['vid_kick','Viggle β','j1'],['vid_bath','30 steps','j2'],['c_front','Shoot',''],['vid_living2','15 steps',''],['c_tq','Shoot','']];
+SCREENS.gallery = () => { const tiles=[...S.jobs.filter(j=>j.id.length>3).map(j=>[j.img,j.title,j.id]),['vid_living','10 steps','g1'],['vid_kick','Viggle beta','j1'],['vid_bath','30 steps','j2'],['c_front','Shoot','g4'],['vid_living2','15 steps','g5'],['c_tq','Shoot','g6']];
   const list = S.gallery==='final' ? tiles.filter(x=>S.final.includes(x[2])) : tiles;
   return `<section class="screen">${sbar()}<header class="top">${wm()}<span class="grow"></span><span class="tb-btn">${ic('grid')}</span></header>
-  <div class="pad stack-14"><h2 class="h2">${T()==='a'?'<span class="cond" style="font-size:72px;line-height:.85">Gallery</span>':'Gallery'}</h2>
+  <div class="pad stack-14"><h2 class="h2">${T()==='a'?'<span class="cond" style="font-size:56px">Gallery</span>':'Gallery'}</h2>
    <div class="seg"><span class="${S.gallery==='tests'?'on':''}" data-act="gal-tests">Tests · ${tiles.length}</span><span class="${S.gallery==='final'?'on':''}" data-act="gal-final">Final · ${S.final.length}</span></div>
    ${list.length?`<div class="gal">${list.map(([k,l],i)=>`<div class="gt pop-in" style="${bg(k)};animation-delay:${i*60}ms"><span class="gt-l">${l}</span></div>`).join('')}</div>`:`<div class="note-box">${ic('spark',18)}<span>Nothing approved yet. Approve a take to move it here.</span></div>`}
    <p class="tiny muted">Tests never fill your final gallery.</p></div>${tabbar('direct')}${home}</section>`; };
@@ -274,15 +296,15 @@ const THEMES=[['a','Editorial','#EFEBE3','#141210','#B5121B'],['b','Camera Body'
 SCREENS.settings = () => `<section class="screen">${sbar()}${topb('Settings')}
   <div class="pad stack-16"><div class="fld"><span class="lbl">Theme</span><div class="thms">${THEMES.map(([k,n,b,f,a])=>`<div class="thm press${k===T()?' on':''}" data-act="theme-${k}"><div class="thm-sw" style="background:${b}"><i style="background:${f}"></i><i style="background:${a}"></i></div><span>${n}</span>${k===T()?`<b class="thm-c">${ic('check',14)}</b>`:''}</div>`).join('')}</div></div>
    <div class="list"><div class="li press" data-act="sound">${ic('audio',20)}<span class="grow">Sound effects</span><span class="tog${S.sound?' on':''}"></span></div>
-    <div class="li press" data-go="credits">${ic('wallet',20)}<span class="grow">Credits & billing</span><span class="tiny muted">$6.07</span>${ic('chev',16)}</div>
+    <div class="li press" data-go="credits">${ic('wallet',20)}<span class="grow">Credits & billing</span><span class="tiny muted">${money(S.balance)}</span>${ic('chev',16)}</div>
     <div class="li press" data-act="consent">${ic('shield',20)}<span class="grow">Consent records</span><span class="tiny muted">2</span>${ic('chev',16)}</div>
     <div class="li press" data-act="signout">${ic('user',20)}<span class="grow">Sign out</span>${ic('chev',16)}</div></div>
    <p class="tiny muted center">Video model: MiniMax H3 · Lip sync: LatentSync</p></div>${tabbar('settings')}${home}</section>`;
 
 SCREENS.credits = () => `<section class="screen">${sbar()}${topb('Credits')}
-  <div class="pad stack-16"><div class="balcard"><span class="lbl lbl-inv">GPU balance</span><b class="bal-n mono" id="bal">$6.07</b><span class="tiny">≈ 9 videos at 10 steps</span>${stk('top up!','yellow',-6,'position:absolute;right:16px;top:16px')}</div>
+  <div class="pad stack-16"><div class="balcard"><span class="lbl lbl-inv">GPU balance</span><b class="bal-n mono" id="bal">${money(S.balance)}</b><span class="tiny">≈ ${Math.floor(S.balance/0.64)} videos at 10 steps</span>${stk('top up!','yellow',-6,'position:absolute;right:16px;top:16px')}</div>
    <div class="fld"><span class="lbl">Top up</span><div class="seg">${['$10','$25','$50','$100'].map(x=>`<span class="${x==='$25'?'on':''}">${x}</span>`).join('')}</div></div>
-   <div class="kpis"><div><span class="lbl">This month</span><b class="mono">$18.93</b></div><div><span class="lbl">Per video</span><b class="mono">~$0.65</b></div><div><span class="lbl">Videos</span><b class="mono">11</b></div></div>
+   <div class="kpis"><div><span class="lbl">This month</span><b class="mono">${money(S.month)}</b></div><div><span class="lbl">Per video</span><b class="mono">~$0.64</b></div><div><span class="lbl">Videos</span><b class="mono">${9+S.jobs.length}</b></div></div>
    <div class="fld"><span class="lbl">Spend limits</span><div class="li">${ic('shield',20)}<span class="grow">Per job</span><span class="mono tiny">$5.00</span></div><div class="li">${ic('shield',20)}<span class="grow">Per day</span><span class="mono tiny">$15.00</span></div></div></div>
   <div class="dock"><div class="cta grow press" data-act="topup">Add $25 · USDT or card</div></div>${home}</section>`;
 
@@ -309,6 +331,7 @@ function back(){ if(busy) return; const p=S.stack.pop()||'home'; snd('nav'); ren
 function refresh(){ const v=$('#phone .view'); if(!v) return; const y=v.querySelector('.scroll')?.scrollTop; v.innerHTML=SCREENS[S.screen](); bindScreen(v); }
 function refreshSheet(){ const sh=$('#sheet'); if(sh){ sh.innerHTML='<i class="grab"></i>'+sheetBody(); bindScreen(sh); const g=$('#gen'); if(g) g.textContent=genLabel(); sh.animate([{transform:'translateY(14px)',opacity:.6},{transform:'none',opacity:1}],{duration:260,easing:MOTION[S.theme].ease}); } }
 
+function rShoot(){ const sh=$('#ssheet'); if(sh){ sh.innerHTML='<i class="grab"></i>'+shootSheet(); } const ro=document.querySelector('.canvas .readout'); if(ro) ro.textContent=`${S.lens}MM · ${S.aperture.toUpperCase()} · 4300K`; }
 function toast(msg, onTap){ const t=$('#toast'); t.innerHTML=ic('spark',18)+'<span>'+msg+'</span>'; t.classList.add('show'); t.onclick=()=>{ t.classList.remove('show'); onTap&&onTap(); }; clearTimeout(toast.t); toast.t=setTimeout(()=>t.classList.remove('show'), 3200); }
 function confetti(){ if(S.theme!=='d'&&S.theme!=='c') return; const c=document.createElement('div'); c.className='confetti'; const cols=['#FF7EB6','#FFE14D','#39D98A','#1F4BFF','#fff'];
   for(let i=0;i<40;i++){ const p=document.createElement('i'); p.style.left=Math.random()*100+'%'; p.style.background=cols[i%5]; p.style.animationDelay=(Math.random()*.4)+'s'; p.style.borderRadius=S.theme==='c'?'50%':'2px'; if(S.theme==='c') p.style.border='0'; c.appendChild(p); }
@@ -341,6 +364,12 @@ function act(a, el){
   const [k, ...rest] = a.split('-'); const v = rest.join('-');
   if(a==='signin'){ snd('go'); S.stack=[]; render('home',1); return; }
   if(a==='signout'){ S.stack=[]; render('welcome',-1); return; }
+  if(k==='stool'){ S.stool=v; document.querySelectorAll('.tool').forEach(t=>t.classList.toggle('on', t.dataset.act===a)); const sh=$('#ssheet'); if(sh){ sh.innerHTML='<i class="grab"></i>'+shootSheet(); sh.animate([{transform:'translateY(14px)',opacity:.6},{transform:'none',opacity:1}],{duration:260,easing:MOTION[S.theme].ease}); } return; }
+  if(k==='scene'){ S.scene=v; rShoot(); return; } if(k==='grade'){ S.grade=v; rShoot(); return; }
+  if(a==='shoot-reset'){ S.shot='Medium'; S.lens=35; S.aperture='f/2.8'; rShoot(); return; }
+  if(a==='forgot'){ toast('Reset link sent to jenne@studio.com (demo)'); return; }
+  if(a==='audio-keep'){ S.keepAudio=true; refreshSheet(); return; } if(a==='audio-new'){ S.keepAudio=false; refreshSheet(); toast('Pick a track or voiceover (demo)'); return; }
+  if(a==='discard'){ const j=S.open; S.jobs=S.jobs.filter(x=>x!==j); toast('Discarded'); back(); return; }
   if(k==='tool'){ S.tool=v; document.querySelectorAll('.tool').forEach(t=>t.classList.toggle('on', t.dataset.act===a)); refreshSheet(); return; }
   if(k==='engine'){ S.engine=v; refreshSheet(); return; }
   if(a==='lip'){ S.lip=!S.lip; refreshSheet(); return; }
@@ -348,11 +377,12 @@ function act(a, el){
   if(k==='bg'){ S.bg=v; const c=document.querySelector('.canvas'); if(c){ c.animate([{filter:'blur(8px)',opacity:.6},{filter:'none',opacity:1}],{duration:420}); c.style.backgroundImage=`url(${IMG[v==='photo'?'vid_bath':'vid_living']})`; } refreshSheet(); return; }
   if(k==='motion'){ S.motion=v; refreshSheet(); return; }
   if(a==='steps-inc'){ setSteps(S.steps+1); return; } if(a==='steps-dec'){ setSteps(S.steps-1); return; }
+  if(k==='outfit' && S.screen==='shoot'){ S.outfit=+v; rShoot(); return; }
   if(k==='outfit'){ if(v==='next') S.outfit=(S.outfit+1)%OUTFITS.length; else if(v==='prev') S.outfit=(S.outfit+OUTFITS.length-1)%OUTFITS.length; else S.outfit=+v;
     if(S.screen==='direct') refreshSheet(); else refresh(); return; }
-  if(k==='shot'){ S.shot=v; S.screen==='direct'?refreshSheet():refresh(); return; }
-  if(k==='light'){ S.light=v; refreshSheet(); return; }
-  if(k==='lens'){ S.lens=+v; refresh(); return; } if(k==='ap'){ S.aperture=v; refresh(); return; }
+  if(k==='shot'){ S.shot=v; rShoot(); return; }
+  if(k==='light'){ S.light=v; rShoot(); return; }
+  if(k==='lens'){ S.lens=+v; rShoot(); return; } if(k==='ap'){ S.aperture=v; rShoot(); return; }
   if(k==='use'){ S.use=v; refresh(); return; } if(k==='consent'){ S.consent=v||'tests'; if(v) refresh(); else toast('2 performers on file · tests only'); return; }
   if(k==='niche'){ S.create.niche=v; refresh(); return; }
   if(k==='skin'){ S.create.skin=+v; refresh(); return; }
@@ -367,7 +397,7 @@ function act(a, el){
     setTimeout(()=>{ snd('done'); el.classList.remove('shimmer'); el.textContent='4 shots ready · view in Gallery'; }, 1600); return; }
   if(a==='generate'){ startJob(el); return; }
   if(k==='open'){ const j=[S.running,...S.jobs].find(x=>x&&x.id===v); if(!j) return; if(j.state!=='done'){ toast('Still rendering · step '+Math.ceil(j.p/10)+' of 10'); return; } S.open=j; go('result'); return; }
-  if(a==='approve'){ const j=S.open||S.jobs[0]; if(!S.final.includes(j.id)) S.final.push(j.id); snd('done'); confetti(); refresh(); toast('Moved to Final gallery'); return; }
+  if(a==='approve'){ const j=S.open||S.jobs[0]; if(S.consent==='tests'&&!S.final.includes(j.id)){ toast('Kept in Tests · change consent to post'); back(); return; } if(!S.final.includes(j.id)) S.final.push(j.id); snd('done'); confetti(); refresh(); toast('Moved to Final gallery'); return; }
   if(a==='export'){ toast(S.consent==='post'?'Exported 1080×1920 · AI label on':'Test clip · performer consent is tests-only'); return; }
   if(a==='topup'){ snd('go'); toast('Top-up demo · no payment taken'); return; }
   if(a==='notify'){ toast(S.running?'Rendering · '+fmt(S.running.left)+' left':'No new notifications'); return; }
@@ -375,9 +405,10 @@ function act(a, el){
 }
 function startJob(el){
   if(S.running){ toast('One render at a time in this demo'); return; }
+  if(estCost()>S.balance){ toast('Not enough balance · top up in Credits'); return; }
   el.classList.add('shimmer'); el.textContent='Starting GPU…'; snd('go');
   const total = S.engine==='viggle'? 95 : Math.round(S.steps*57.8); // seconds (measured on H100 + FA3)
-  S.running = { id:'j'+Date.now(), img:'vid_living', title:'Living-room dance', engine: S.engine==='viggle'?'Viggle β':`H3 · ${S.steps} steps`, p:0, state:'running', cost: S.engine==='viggle'?0.13:total/3600*3.99, total, left: total, tc:'' };
+  S.running = { id:'j'+Date.now(), img:'vid_living', title:'Living-room dance', engine: S.engine==='viggle'?'Viggle beta':`H3 · ${S.steps} steps`, p:0, state:'running', cost: S.engine==='viggle'?0.13:total/3600*3.99, total, left: total, tc:'' };
   setTimeout(()=>{ el.classList.remove('shimmer'); go('queue'); }, 900);
   const speed = 24, t0 = Date.now(); // demo runs 24x faster
   clearInterval(startJob.iv);
@@ -388,7 +419,7 @@ function startJob(el){
     document.querySelectorAll(`[data-tc="${r.id}"]`).forEach(b=>b.textContent=fmt(r.left));
     const bt=$('#bigtime'); if(bt) bt.textContent=fmt(r.left);
     if(S.screen==='queue' && S.theme==='c'){ const stages=[30,55,92,100]; stages.forEach((lim,i)=>{ const prev=i?stages[i-1]:0; const sp=Math.max(0,Math.min(100,(r.p-prev)/(lim-prev)*100)); const b=document.querySelector(`[data-stage="${i}"]`); if(b) b.style.width=sp+'%'; const tx=document.querySelector(`[data-stagep="${i}"]`); if(tx) tx.textContent=Math.round(sp)+'%'; }); }
-    if(r.p>=100){ clearInterval(startJob.iv); r.state='done'; r.tc=fmt(r.total); S.jobs.unshift(r); S.running=null; snd('done'); confetti();
+    if(r.p>=100){ clearInterval(startJob.iv); r.state='done'; r.tc=fmt(r.total); S.jobs.unshift(r); S.running=null; S.balance=Math.max(0,S.balance-r.cost); S.month+=r.cost; snd('done'); confetti();
       toast('Render done · tap to watch', ()=>{ S.open=r; go('result'); }); if(S.screen==='queue') refresh(); }
   }, 250);
 }

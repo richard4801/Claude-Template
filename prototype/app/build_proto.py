@@ -11,19 +11,31 @@ base = re.sub(r"body\{[^}]*\}", "", base, count=1).replace(".board{display:flex;
 themes = open(os.path.join(HERE, "themes.css")).read()
 proto = open(os.path.join(HERE, "proto.css")).read()
 extra = """
-.t-a .h2{display:inline-block;transform:scaleX(.62);transform-origin:left bottom;white-space:nowrap;font-size:50px;line-height:.95;text-transform:uppercase;font-weight:500}
-.t-a .home-t{transform:none}
-.t-a .stepnum{font-size:76px;line-height:.9;display:block;text-align:center}
+/* Editorial type scale: Instrument Serif (a true condensed serif), no stretching */
+.t-a{--display:'Instrument Serif',Didot,'Times New Roman',serif}
+.t-a .cond,.t-a .h2,.t-a .hero-t,.t-a .wm,.t-a .feat-name,.t-a .count-n,.t-a .stepnum,.t-a .prof-name{transform:none;font-family:'Instrument Serif',Didot,serif;font-weight:400;letter-spacing:0}
+.t-a .cond{display:inline-block;text-transform:uppercase;white-space:normal;line-height:.88}
+.t-a .h2{display:block;font-size:42px;line-height:.95;text-transform:uppercase;white-space:normal}
+.t-a .home-t{font-size:inherit}
+.t-a .wm{font-size:28px;letter-spacing:.08em}
+.t-a .wm-md{font-size:44px}.t-a .wm-xl{font-size:118px;letter-spacing:.02em;line-height:.85}
+.t-a .ap-name{font-size:108px;line-height:.82;left:14px;bottom:44px}
+.t-a .renders-t{font-size:58px;line-height:.9}
+.t-a .feat-name{font-size:40px;text-transform:uppercase;line-height:.9}
+.t-a .stepnum{font-size:84px;line-height:.85;display:block;text-align:center}
+.t-a .count-n{font-size:76px}
+.t-a .hero-t{font-size:56px;line-height:.9}
 .slider::before{content:"";position:absolute;left:0;right:0;top:-14px;bottom:-14px}
-.t-a .ap-name{line-height:.86}
-.t-a .feat-name{font-size:40px}
-.t-a .count-n{font-size:72px}
-.t-a .wm-md{font-size:56px}
-.t-a .wm-xl{font-size:150px}
+.t-a .slider{height:2px;background:var(--line)}
 .view .screen .scroll{overflow:auto}
-.t-c .tabbar.three .tb-i{width:70px}
+.view .bsheet{overflow-y:auto}
+.t-c .tabbar.three .tb-i{width:80px}
+.t-d .tool:nth-child(5) svg{background:#fff}
+.t-d .acc,.t-d .fld-r{color:var(--blue)}
+.full{height:560px}
+.t-c .ccard{height:290px}
 """
-fonts = ("family=Bodoni+Moda:opsz,wght@6..96,400;6..96,500;6..96,600&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500"
+fonts = ("family=Instrument+Serif&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500"
          "&family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700"
          "&family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500"
          "&family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Figtree:wght@400;500;600;700;800&family=Permanent+Marker")
