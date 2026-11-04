@@ -110,6 +110,10 @@ _Decided 2026-11-04: consent and rights are **not** shown as in-app features. Th
 - **[later]** Usage-based billing on top of the cost tracker.
 - **[later]** Re-check the MiniMax licence for offering it as a service first.
 
+## 10b. Parked until MUSE works end to end (decided 2026-11-04)
+- **[idea]** **MUSE MCP connector**: a hosted MCP server on the MUSE backend so Claude (web, desktop, phone, Claude Code) can look things up, manage models, quote and start paid work (only on an approved quote, inside spend caps), and draft posts (confirm step), with changes showing live in the apps. Needs the backend on a public HTTPS host (Railway is the likely pick, ~$5/month).
+- **[idea]** **HyperFrames editing**: a house editing style (captions, hook title, handle, end card) applied to approved takes as HyperFrames projects. Edited versions always need approval. Open/edit in HyperFrames Studio on the Mac and send back for a re-render. Waiting on the user's 2–3 reference videos for the style.
+
 ## 11. Prototype plan
 1. List every screen for Mac and Android (Characters, New Video, Job status, Gallery, Export, Settings/Costs, Consent records).
 2. Design wireframes, then a clickable prototype for both, mobile-first for Android.
