@@ -20,7 +20,7 @@ Target quality: as close to perfect realism as possible. Known weak spots to wat
 | Video model | **MiniMax H3 (Hailuo 3.0) Ref2VA, confirmed by testing (Nov 2026).** True swap with real motion and timing kept. Beat Wan2.2-Animate-2 on realism. Quality bar: full model, 30 steps, 768×1344. |
 | Lip sync | **LatentSync 1.6**, an optional step for talking/singing clips only (~3–6 min on an RTX 4090). |
 | Open issue | **Speed:** ~45 min per 5s clip at the quality bar on an H100, against a target of ≤15 min. See the test results file. |
-| Interface | **Native Mac app**, no ComfyUI or node graphs. |
+| Interface | **Native Mac app + responsive Android app**, sharing one backend. No ComfyUI or node graphs. **Prototype first, then build.** |
 | Cloud | RunPod or Vast.ai, pay-per-use, GPU shuts down automatically when idle. |
 
 ## 3. MiniMax H3: facts & risks
@@ -56,6 +56,8 @@ Inspired by @hamzzythecreator's sponsored skit (Cardcosmic ad) where an AI Bugat
 **Business value:** drop a client's product into any scene, a strong UGC selling point for Phase 2.
 
 ## 5. Mac app features
+_Superseded by the full living list in `plans/app-features.md` (Mac + Android, prototype first). The summary below is kept for history._
+
 1. **Characters:** store each influencer (reference photos, LoRA, notes).
 2. **Images:** generate with the house style; save picks to a character.
 3. **New Video:** drag in a clip → pick character → choose number of takes → Generate.
