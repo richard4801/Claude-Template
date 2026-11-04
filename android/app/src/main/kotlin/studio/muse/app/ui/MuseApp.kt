@@ -162,9 +162,10 @@ fun MuseApp(
         }
         CompositionLocalProvider(LocalContainer provides container, LocalNav provides n, LocalCelebrate provides celebrate) {
             Box(Modifier.fillMaxSize().background(muse.t.bg)) {
-                // Keep GPU warm: the bar (and its 5-minute warning) sits above every screen while a GPU is warm.
+                // Keep add-on engine ready (owner only): a small indicator (and its 5-minute warning) above every screen while it's on.
+                // Members never load it, and this checks the role again so nothing of it can show for them.
                 val warmScope = rememberCoroutineScope()
-                val warmFlow = remember(container) { container.repo.state.map { it.warm }.distinctUntilChanged() }
+                val warmFlow = remember(container) { container.repo.state.map { s -> s.warm?.takeIf { s.wallet?.owner ?: (s.balance.role == "owner") } }.distinctUntilChanged() }
                 val warmState by warmFlow.collectAsState(null)
                 val warmOn = warmState?.takeIf { it.on }
                 val warmBanner by container.warmUi.banner.collectAsState()
@@ -221,7 +222,7 @@ fun MuseApp(
                 warmPrompt?.let { kind ->
                     WarmPrompt(kind, warmState, onYes = {
                         container.warmUi.dismiss()
-                        // The ongoing "GPU warm" notification needs the permission (asked once, like on the first Generate).
+                        // The owner's ongoing notification needs the permission (asked once, like on the first Generate).
                         if (android.os.Build.VERSION.SDK_INT >= 33 && !prefs.notifAsked) {
                             warmScope.launch { container.prefsStore.update { it.copy(notifAsked = true) } }
                             runCatching { notifPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS) }

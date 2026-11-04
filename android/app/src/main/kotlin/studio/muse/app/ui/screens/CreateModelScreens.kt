@@ -206,7 +206,7 @@ fun CharacterSheetScreen() {
                 Cta2("Upload images", { pickMany.launch(img) }, Modifier.fillMaxWidth(), icon = "upload", height = 44.dp)
                 if (filled in 1..5) {
                     val miss = 6 - filled
-                    Opt("Fill missing angles from your images", "Optional. Adds the $miss missing angle${if (miss > 1) "s" else ""} of your model · ${Pricing.money(Pricing.fillAnglesCost(miss))}", icon = "spark", onClick = { vm.fill() })
+                    Opt("Fill missing angles from your images", "Optional. Adds the $miss missing angle${if (miss > 1) "s" else ""} of your model · ${studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.sheetAngles(photoPrices(), miss, filled))}", icon = "spark", onClick = { vm.fill() })
                 }
                 if (faces < 2) NoteBox("Tip: two face close-ups keep her face sharp and consistent in videos. You can still save without them.", warn = true)
                 else NoteBox("$filled of 6 shots. ${if (filled < 6) "More angles help when she turns. Optional." else "Full sheet. Her identity is locked."}", icon = "check")

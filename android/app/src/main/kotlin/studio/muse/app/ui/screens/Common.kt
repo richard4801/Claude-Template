@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -95,7 +96,14 @@ fun profileMenu(onSheet: () -> Unit, onOutfit: () -> Unit, onLora: () -> Unit = 
     )
 }
 
-/** Members spend credit from the owner; the owner (and Demo mode) spends the GPU credit. */
+/** Members spend credit from the owner; the owner (and Demo mode) spends the studio balance they load. */
 fun lowFundsMessage(c: studio.muse.app.AppContainer): String =
     if (c.repo.state.value.wallet?.owner == false || (!c.prefs.value.owner && !c.repo.demo)) studio.muse.app.data.ErrorText.NOT_ENOUGH_CREDIT
-    else if (c.repo.demo) "Not enough balance · top up in Credit" else "Not enough RunPod credit · top up on runpod.io"
+    else studio.muse.app.data.ErrorText.NOT_ENOUGH_STUDIO
+
+/** The live photo prices (features.photo) for the "about $0.46" estimates; the contract's defaults until loaded. */
+@androidx.compose.runtime.Composable
+fun photoPrices(): studio.muse.core.PhotoPrices {
+    val st = studio.muse.app.ui.LocalContainer.current.repo.state.collectAsState()
+    return st.value.photo
+}

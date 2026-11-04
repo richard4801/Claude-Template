@@ -13,12 +13,13 @@ import studio.muse.core.VideoOption
 data class VideoDraft(
     val clip: Clip? = null,
     val showBadExample: Boolean = false,
-    /** Replicate (Draft / Standard / HD) by default; Exact edit = h3; Fast · beta = viggle. */
+    /** Render (Draft / Standard / HD) by default; the Edit add-on = h3; Fast · beta = viggle. */
     val engine: Engine = Engine.REPLICATE,
     /** Replicate quality. Draft is the default (the owner's choice). */
     val quality: Quality = Quality.DRAFT,
     val steps: Int = Pricing.STEPS_DEFAULT,
-    val use: ClipUse = ClipUse.FIRST,
+    /** Always the whole clip (the First 5.2s choice is gone). */
+    val use: ClipUse = ClipUse.FULL,
     val takes: Int = 1,
     val keepAudio: Boolean = true,
     val lipSync: Boolean = false,
@@ -30,19 +31,23 @@ data class VideoDraft(
     fun spec(pricePerSec: Double? = null) = RenderSpec(engine, use, steps, lipSync, takes, clip?.takeIf { it.id != SampleData.SAMPLE_CLIP }?.durationSec, quality,
         pricePerSec.takeIf { engine == Engine.REPLICATE })
 
-    /** The quality picker's selection (Fast · beta shows as Exact edit's neighbour, not a picker option). */
+    /** The selected option: a Render quality (Draft / Standard / HD) or an add-on (Edit, Fast · beta). */
     val option: VideoOption get() = VideoOption.of(engine, quality)
     val replicate: Boolean get() = engine == Engine.REPLICATE
-    val exact: Boolean get() = engine == Engine.H3
+    /** The Edit add-on (was "Exact edit"). */
+    val edit: Boolean get() = engine == Engine.H3
 
-    /** Picks a quality option: Draft / Standard / HD go to Replicate, Exact edit to our GPU. */
-    fun pick(o: VideoOption) = copy(engine = o.engine, quality = o.quality ?: quality)
+    /**
+     * Picks an option. Edit and Fast · beta always use the whole clip and the default steps (plans/api.md "App clean-up" §2):
+     * nothing technical is chosen by the member.
+     */
+    fun pick(o: VideoOption) = copy(engine = o.engine, quality = o.quality ?: quality, use = ClipUse.FULL, steps = Pricing.STEPS_DEFAULT)
 
-    /** What goes to POST /v1/jobs. Replicate renders the whole clip; lip sync and a background photo are Exact edit only. */
+    /** What goes to POST /v1/jobs: always the whole clip; Edit sends the default steps; lip sync and a background photo are Edit only. */
     fun request(title: String, modelId: String, outfitId: String, clipId: String, clipSeconds: Double?) = JobRequest(
         title = title, modelId = modelId, outfitId = outfitId, clipId = clipId, engine = engine.id, quality = quality.id.takeIf { replicate },
-        steps = steps, use = if (replicate) ClipUse.FULL.id else use.id, takes = takes, keepAudio = keepAudio, lipSync = lipSync && !replicate,
-        background = if (replicate) "keep" else background, backgroundMotion = motion, clipSeconds = clipSeconds,
+        steps = Pricing.STEPS_DEFAULT, use = ClipUse.FULL.id, takes = takes, keepAudio = keepAudio, lipSync = lipSync && edit,
+        background = if (edit) background else "keep", backgroundMotion = motion, clipSeconds = clipSeconds,
     )
 }
 
@@ -116,7 +121,7 @@ class Drafts {
         outfitId.value = r.outfitId
         video.update {
             it.copy(
-                engine = Engine.fromId(r.engine), quality = Quality.fromId(r.quality), steps = r.steps, use = ClipUse.fromId(r.use), takes = r.takes, keepAudio = r.keepAudio,
+                engine = Engine.fromId(r.engine), quality = Quality.fromId(r.quality), steps = Pricing.STEPS_DEFAULT, use = ClipUse.FULL, takes = r.takes, keepAudio = r.keepAudio,
                 lipSync = r.lipSync, background = r.background, motion = r.backgroundMotion, tool = "quality",
                 clip = it.clip ?: Clip(r.clipId, r.title, r.clipSeconds ?: SampleData.sampleMeta.durationSec, 1080, 1920, 30, ClipRules.checks(SampleData.sampleMeta)),
             )

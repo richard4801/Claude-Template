@@ -28,7 +28,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.launch
 import studio.muse.app.data.Balance
+import studio.muse.app.data.StudioBalance
 import studio.muse.app.data.Wallet
 import studio.muse.app.data.Credit
 import studio.muse.app.ui.LocalContainer
@@ -43,8 +45,8 @@ import studio.muse.core.RenderSpec
 // ======================================================================= Credit (balance in dollars)
 
 /**
- * GET /v1/wallet, shown in dollars only (the API's usd fields). A member sees their balance, holds and their own spend. The owner sees the RunPod
- * balance and what's available to send. Demo mode keeps the old top-up dock (no payment is taken).
+ * GET /v1/wallet, shown in dollars only (the API's usd fields). A member sees their balance, holds and their own spend. The owner sees the
+ * studio balance they load (top-ups − spending), what's free to send, and records top-ups here (plans/api.md "App clean-up" §4).
  */
 @Composable
 fun CreditsScreen() {
@@ -52,32 +54,54 @@ fun CreditsScreen() {
     val vm: SettingsViewModel = viewModel { SettingsViewModel(c) }
     val s by vm.state.collectAsState()
     val nav = LocalNav.current
-    var amount by remember { mutableStateOf("25") }
-    var payOpen by remember { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var studio by remember { mutableStateOf<StudioBalance?>(null) }
+    var amount by remember { mutableStateOf("20") }
+    var note by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var err by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { c.repo.refreshWallet() }
     val w = s.wallet
-    val canTopUp = (vm.demo && w?.owner != false) || w == null
+    LaunchedEffect(w?.owner, w?.usd) { if (w?.owner == true) studio = c.repo.studioBalance().first }
     ScreenBox {
         Column(Modifier.fillMaxSize()) {
             TopBar("Credit", onBack = { nav.back() })
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 130.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 when {
                     w == null -> LegacyBalance(s.balance, s.videos)
-                    w.owner -> OwnerTokens(w, s.balance)
+                    w.owner -> {
+                        OwnerTokens(w, s.balance, studio)
+                        Field("Add a top-up") {
+                            Tiny("Record money you loaded into the studio, e.g. after paying the engines. Every render and photo is spent from it.")
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Field("Amount ($)", Modifier.weight(1f)) { Input(amount, { amount = Credit.filterInput(it) }, keyboard = androidx.compose.ui.text.input.KeyboardType.Decimal, placeholder = "20") }
+                                Field("Note (optional)", Modifier.weight(1.6f)) { Input(note, { note = it.take(200) }, placeholder = "Card, 4 Nov") }
+                            }
+                        }
+                        err?.let { NoteBox(it, warn = true) }
+                        studio?.topUps?.takeIf { it.isNotEmpty() }?.let { list ->
+                            Lbl("Top-ups")
+                            ListGroup {
+                                list.take(8).forEach { t ->
+                                    Li("wallet", "Added ${Pricing.money(t.amountUsd)}", sub = listOfNotNull(t.note, java.text.SimpleDateFormat("d MMM", java.util.Locale.US).format(java.util.Date(t.paidAt))).joinToString(" · "), onClick = {}) {}
+                                }
+                            }
+                        }
+                    }
                     else -> MemberTokens(w, s.balance)
                 }
-                if (canTopUp) Field("Top up (demo)") { Seg(listOf("10", "25", "50", "100").map { it to "$$it" }, amount, { amount = it }) }
             }
         }
-        if (canTopUp) Dock {
-            Box(Modifier.weight(1f)) {
-                Cta("Add $$amount", { payOpen = true }, Modifier.fillMaxWidth())
-                MuseMenu(payOpen, { payOpen = false }, listOf(
-                    MenuItem("wallet", "Card · Visa / Mastercard") { vm.topUp(amount.toDouble(), "card") },
-                    MenuItem("wallet", "USDT (TRC-20)") { vm.topUp(amount.toDouble(), "usdt") },
-                    MenuItem("wallet", "Virtual dollar card") { vm.topUp(amount.toDouble(), "virtual") },
-                ))
-            }
+        if (w?.owner == true) Dock {
+            val usd = Credit.parseUsd(amount) ?: 0.0
+            Cta(if (busy) "Adding…" else "Add ${Pricing.money(usd)}", {
+                if (!busy && usd > 0) scope.launch {
+                    busy = true; err = null
+                    val (r, e) = c.repo.addTopUp(usd, note)
+                    busy = false
+                    if (r != null) { studio = r; note = ""; c.repo.toast("Added ${Pricing.money(usd)} to the studio balance") } else err = e
+                }
+            }, Modifier.weight(1f), busy = busy, off = usd <= 0)
         }
     }
 }
@@ -101,31 +125,31 @@ private fun BigCard(label: String, value: String, sub: String, sub2: String? = n
 @Composable
 private fun MemberTokens(w: Wallet, b: Balance) {
     BigCard(
-        "Balance", Pricing.money(w.usd), "≈ ${Pricing.videosLeft(w.usd)} videos at 10 steps",
+        "Balance", Pricing.money(w.usd), "≈ ${Pricing.draftVideosLeft(w.usd)} Draft videos",
         if (w.heldTokens > 0) "${Pricing.money(if (w.heldUsd > 0) w.heldUsd else Credit.usdOf(w.heldTokens, w.tokenUsd))} on hold for running renders" else null,
     )
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Kpi("Today", Pricing.money(w.todayUsd), Modifier.weight(1f))
         Kpi("This month", Pricing.money(w.monthUsd), Modifier.weight(1f))
-        Kpi("Per video", "~${Pricing.money(Pricing.estCost(RenderSpec()))}", Modifier.weight(1f))
+        Kpi("Per video", "~${Pricing.money(Pricing.estCost(Pricing.typicalVideo))}", Modifier.weight(1f))
     }
     Field("Spend limits") {
         LimitRow("Per job", Pricing.money(b.perJobLimit))
         LimitRow("Per day (you)", Pricing.money(b.perUserDayLimit ?: b.perDayLimit))
     }
     NoteBox("Your credit comes from the studio owner. When you run low, ask them for more.", icon = "wallet")
-    Tiny("Renders hold their cost when they start and give it back in full if the GPU fails.")
+    Tiny("Videos and photos hold about their price when they start, then cost exactly what they took. If something goes wrong, you aren't charged.")
 }
 
 @Composable
-private fun OwnerTokens(w: Wallet, b: Balance) {
+private fun OwnerTokens(w: Wallet, b: Balance, studio: StudioBalance?) {
     val nav = LocalNav.current
-    val demo = LocalContainer.current.repo.demo
-    OwnerBalanceCard(w)
+    if (studio?.needsFirstTopUp ?: (b.needsFirstTopUp == true)) NoteBox("Add your first top-up: record what you loaded into the studio, then send members credit from it.", icon = "wallet")
+    OwnerBalanceCard(w, studio = studio)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Kpi("Studio today", Pricing.money(b.today), Modifier.weight(1f))
         Kpi("This month", Pricing.money(b.month), Modifier.weight(1f))
-        Kpi("Per video", "~${Pricing.money(Pricing.estCost(RenderSpec()))}", Modifier.weight(1f))
+        Kpi("Per video", "~${Pricing.money(Pricing.estCost(Pricing.typicalVideo))}", Modifier.weight(1f))
     }
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Cta2("Members", { nav.go(Routes.MEMBERS) }, Modifier.weight(1f), icon = "model")
@@ -136,22 +160,21 @@ private fun OwnerTokens(w: Wallet, b: Balance) {
         LimitRow("Studio per day", Pricing.money(b.perDayLimit))
         b.perUserDayLimit?.let { LimitRow("Each member per day", Pricing.money(it)) }
     }
-    if (!demo) NoteBox("Top up on runpod.io. MUSE reads the balance from RunPod, and members' credit is backed by it.", icon = "wallet")
 }
 
 @Composable
 private fun LegacyBalance(b: Balance, videos: Int) {
-    BigCard("GPU balance", Pricing.money(b.balance), "≈ ${Pricing.videosLeft(b.balance)} videos at 10 steps", sticker = "top up!")
+    BigCard("Balance", Pricing.money(b.balance), "≈ ${Pricing.draftVideosLeft(b.balance)} Draft videos")
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Kpi("This month", Pricing.money(b.month), Modifier.weight(1f))
-        Kpi("Per video", "~${Pricing.money(Pricing.estCost(RenderSpec()))}", Modifier.weight(1f))
+        Kpi("Per video", "~${Pricing.money(Pricing.estCost(Pricing.typicalVideo))}", Modifier.weight(1f))
         Kpi("Videos", "$videos", Modifier.weight(1f))
     }
     Field("Spend limits") {
         LimitRow("Per job", Pricing.money(b.perJobLimit))
         LimitRow("Per day", Pricing.money(b.perDayLimit))
     }
-    Tiny("Renders are charged when they start and refunded in full if the GPU fails.")
+    Tiny("Videos are charged when they start and refunded in full if something goes wrong.")
 }
 
 @Composable

@@ -55,7 +55,8 @@ class FakeMuseApiTest {
         advanceTimeBy((realSeconds * 1000 / 2).toLong())
         val mid = api.listJobs().first { it.id == job.id }
         assertEquals("running", mid.state)
-        assertTrue(mid.phase, mid.phase.contains("step") || mid.phase.contains("Starting"))
+        assertTrue(mid.phase, mid.phase.contains("Rendering") || mid.phase.contains("Getting ready"))
+        assertTrue(mid.phase, !Regex("(?i)gpu|step").containsMatchIn(mid.phase))
         advanceTimeBy((realSeconds * 1000).toLong())
         val done = api.listJobs().first { it.id == job.id }
         assertEquals("done", done.state)
@@ -71,7 +72,8 @@ class FakeMuseApiTest {
         assertEquals("failed", j.state)
         assertEquals(j.cost, j.refunded, 1e-9)
         assertEquals(6.07, api.balance().balance, 1e-9)
-        assertTrue(j.error!!.contains("step 3"))
+        assertEquals("Something went wrong · you weren't charged", j.error)
+        assertEquals("Failed", j.phase)
     }
 
     @Test fun generateIsBlockedWhenBalanceIsTooLow() = runTest {
@@ -105,17 +107,18 @@ class FakeMuseApiTest {
         val r = JobRequest("x", "m", "o", "c", steps = 20)
         val total = Pricing.totalSeconds(r.spec())
         val p = JobClock.progress(r, 30 + (total - 30) * 0.55)
-        assertTrue(p.phase, Regex("step 12/20 · ~\\d+ min left").matches(p.phase))
-        assertEquals("Starting GPU · ~20 min left", JobClock.progress(r, 1.0).phase)
+        assertTrue(p.phase, Regex("Rendering · ~\\d+ min left").matches(p.phase))
+        assertEquals(12, p.step)
+        assertEquals("Getting ready · ~20 min left", JobClock.progress(r, 1.0).phase)
         val two = JobClock.progress(r.copy(takes = 2), total * 1.5)
         assertTrue(two.phase.startsWith("take 2/2 · "))
     }
 
-    @Test fun fillAnglesChargesTwoCentsPerAngleAndFillsLater() = runTest {
+    @Test fun fillAnglesHoldsThePassThroughEstimateAndFillsLater() = runTest {
         val api = FakeMuseApi(backgroundScope, genDelayMs = 1000)
         val m = api.createModel(CreateModelRequest("Noor", 27, "Beauty"))
         val r = api.fillAngles(m.id)
-        assertEquals(0.12, r.cost, 1e-9)
+        assertEquals(6 * (0.015 + 0.015), r.cost, 1e-9) // 6 angles at 1 MP, no references yet
         assertTrue(r.model.slots.all { it.busy })
         advanceTimeBy(1500)
         val after = api.listModels().first { it.id == m.id }
@@ -127,7 +130,7 @@ class FakeMuseApiTest {
         val api = FakeMuseApi(backgroundScope, now = { testScheduler.currentTime }, genDelayMs = 1000)
         assertEquals("none", api.lora(SampleData.SIENNA).state)
         assertEquals("building", api.buildLoraSet(SampleData.SIENNA).state)
-        assertEquals(6.07 - 0.60, api.balance().balance, 1e-9)
+        assertEquals(6.07 - studio.muse.core.PhotoPricing.loraSet(studio.muse.core.PhotoPrices()), api.balance().balance, 1e-9)
         advanceTimeBy(1500)
         val review = api.lora(SampleData.SIENNA)
         assertEquals("review", review.state)

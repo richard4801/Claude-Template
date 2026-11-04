@@ -7,12 +7,12 @@ import kotlin.math.floor
 import kotlin.math.pow
 
 /**
- * Video engine. "replicate" = MiniMax H3 hosted on Replicate (Draft / Standard / HD, the default), "h3" = our own GPU
- * ("Exact edit"), "viggle" = "Fast · beta" (behind a flag). plans/api.md "Video engines and quality".
+ * Video engine (the wire id; never shown). "replicate" = Render (Draft / Standard / HD, the default), "h3" = the Edit add-on,
+ * "viggle" = the Fast · beta add-on. plans/api.md "App clean-up" §2.
  */
 enum class Engine(val id: String, val label: String) {
-    REPLICATE("replicate", "Standard"),
-    H3("h3", "Exact edit"),
+    REPLICATE("replicate", "Render"),
+    H3("h3", "Edit"),
     VIGGLE("viggle", "Fast · beta");
 
     companion object {
@@ -22,7 +22,7 @@ enum class Engine(val id: String, val label: String) {
 
 /** Replicate quality: price per output second (defaults; the server's features.video carries the live ones). */
 enum class Quality(val id: String, val label: String, val resolution: String, val detail: String, val pricePerSec: Double) {
-    DRAFT("draft", "Draft", "768P", "768P · lite", 0.02),
+    DRAFT("draft", "Draft", "768P", "Quick preview · 768P", 0.02),
     STANDARD("standard", "Standard", "768P", "768P", 0.08),
     HD("hd", "HD", "2K", "2K", 0.13);
 
@@ -31,21 +31,70 @@ enum class Quality(val id: String, val label: String, val resolution: String, va
     }
 }
 
-/** The video studio's quality picker: Draft (the default) / Standard / HD on Replicate, then Exact edit on our GPU. */
-enum class VideoOption(val id: String, val label: String, val engine: Engine, val quality: Quality?) {
-    DRAFT("draft", "Draft", Engine.REPLICATE, Quality.DRAFT),
-    STANDARD("standard", "Standard", Engine.REPLICATE, Quality.STANDARD),
-    HD("hd", "HD", Engine.REPLICATE, Quality.HD),
-    EXACT("exact", "Exact edit", Engine.H3, null);
+/**
+ * The video studio's options (plans/api.md "App clean-up" §2): **Render** = Draft (the default) / Standard / HD, and the
+ * **add-ons** Edit (the whole clip, default steps) and Fast · beta. Upscale is an add-on on a finished take.
+ */
+enum class VideoOption(val id: String, val label: String, val engine: Engine, val quality: Quality?, val detail: String) {
+    DRAFT("draft", "Draft", Engine.REPLICATE, Quality.DRAFT, Quality.DRAFT.detail),
+    STANDARD("standard", "Standard", Engine.REPLICATE, Quality.STANDARD, Quality.STANDARD.detail),
+    HD("hd", "HD", Engine.REPLICATE, Quality.HD, Quality.HD.detail),
+    EDIT("edit", "Edit", Engine.H3, null, "Swaps her into every frame of the whole clip"),
+    FAST("fast", "Fast · beta", Engine.VIGGLE, null, "Quicker and rougher · beta");
+
+    val addon: Boolean get() = quality == null
 
     companion object {
-        const val EXACT_DETAIL = "Frame-by-frame · slower · GPU start-up"
-        fun fromId(id: String?): VideoOption = entries.firstOrNull { it.id == id } ?: DRAFT
+        val RENDER = listOf(DRAFT, STANDARD, HD)
+        val ADDONS = listOf(EDIT, FAST)
+        /** "exact" is the old id of Edit. */
+        fun fromId(id: String?): VideoOption = if (id == "exact") EDIT else entries.firstOrNull { it.id == id } ?: DRAFT
         fun of(engine: Engine, quality: Quality): VideoOption = when (engine) {
-            Engine.REPLICATE -> entries.first { it.quality == quality }
-            else -> EXACT
+            Engine.REPLICATE -> RENDER.first { it.quality == quality }
+            Engine.H3 -> EDIT
+            Engine.VIGGLE -> FAST
         }
     }
+}
+
+/** Upscale a finished take (an add-on; coming soon until the server says it's available). */
+enum class UpscaleSize(val id: String, val label: String, val width: Int, val height: Int) {
+    P1080("1080p", "1080p", 1080, 1920),
+    K2("2k", "2K", 1440, 2560),
+    K4("4k", "4K", 2160, 3840);
+
+    companion object {
+        fun fromId(id: String?): UpscaleSize? = entries.firstOrNull { it.id == id }
+    }
+}
+
+/**
+ * Pass-through photo prices (plans/api.md "App clean-up" §3): the server holds an estimate and settles each photo to
+ * what the engine really charged. The defaults are Replicate's published prices; the server's features.photo wins.
+ */
+data class PhotoPrices(
+    val perRun: Double = 0.015,
+    val perInputMp: Double = 0.015,
+    val perOutputMp: Double = 0.015,
+    val perEdit: Double = 0.03,
+    /** A reference shrunk to fit 1024 px at 3:4 (1024×768). */
+    val refMp: Double = 0.79,
+    val maxRefs: Int = 6,
+    val loraShots: Int = 30,
+)
+
+/** The estimate formula, evaluated in doubles left to right exactly like the server and the Mac app. */
+object PhotoPricing {
+    /** One new shot: run + output megapixels + input megapixels. */
+    fun newShot(p: PhotoPrices, outMp: Double, refs: Int): Double = p.perRun + p.perOutputMp * outMp + p.perInputMp * p.refMp * minOf(maxOf(refs, 0), p.maxRefs)
+    /** A photoshoot of [count] stills at 2 MP. */
+    fun shoot(p: PhotoPrices, count: Int = 4, refs: Int = p.maxRefs): Double = count * newShot(p, 2.0, refs)
+    /** An outfit set: a new front, then three edits of it. "My own set" is free. */
+    fun outfitSet(p: PhotoPrices, refs: Int = p.maxRefs): Double = newShot(p, 1.0, refs) + 3 * p.perEdit
+    fun sheetAngles(p: PhotoPrices, missing: Int, refs: Int = p.maxRefs): Double = missing * newShot(p, 1.0, refs)
+    fun loraSet(p: PhotoPrices, refs: Int = p.maxRefs): Double = p.loraShots * newShot(p, 1.0, refs)
+    /** "about $0.46". */
+    fun about(v: Double): String = "about ${Pricing.money(v)}"
 }
 
 /** Which part of the source clip is rendered. */
@@ -102,16 +151,9 @@ object Pricing {
     const val BASE_LEN = 5.2
     const val MAX_CLIP_SEC = 15.0
 
-    /** Photoshoot: 4 stills. */
-    const val SHOOT_COST = 0.12
-    const val SHOOT_LABEL = "Shoot 4 · ~32s · \$0.12"
-    /** Outfit set: 4 angles on one seed. */
-    const val OUTFIT_SET_COST = 0.08
-    /** Character sheet: fill one missing angle from the user's images. */
-    const val FILL_ANGLE_COST = 0.02
+    // Photos are pass-through since 2026-11-04 (see [PhotoPricing]); the old fixed prices are gone.
 
-    // Identity LoRA (plans/lora-training.md). Estimates until one real training run is measured.
-    const val LORA_SET_COST = 0.60
+    // Identity LoRA (plans/lora-training.md). Training is an estimate until one real run is measured.
     const val LORA_CANDIDATES = 30
     const val LORA_MIN_KEEP = 20
     const val LORA_PHOTO_MIN = 25
@@ -140,12 +182,16 @@ object Pricing {
         return "about ${money(totalCost(spec))} · ${spec.replicateSeconds} s$takes"
     }
 
-    /** "Standard · 768P", "HD · 2K", "Exact edit · 10 steps", "Fast · beta" (Job/Take engineLabel). */
+    /** "Draft · 768P", "Standard · 768P", "HD · 2K", "Edit", "Fast · beta" (Job/Take engineLabel). */
     fun engineLabel(spec: RenderSpec): String = when (spec.engine) {
         Engine.REPLICATE -> "${spec.quality.label} · ${spec.quality.resolution}"
         Engine.VIGGLE -> "Fast · beta"
-        Engine.H3 -> "Exact edit · ${spec.steps} steps"
+        Engine.H3 -> "Edit"
     }
+
+    /** "about $0.56 · 7 s" for Render; "about $0.67" for the add-ons (no steps, no start-up). */
+    fun optionPriceLine(spec: RenderSpec): String = if (spec.engine == Engine.REPLICATE) priceLine(spec)
+        else "about ${money(totalCost(spec))}" + (if (spec.takes > 1) " · ${spec.takes} takes" else "")
 
     /** Seconds per denoising step for a clip of [len] seconds. */
     fun secPerLen(len: Double): Double = SEC_PER_STEP_5S * (len / BASE_LEN).pow(1.3)
@@ -211,11 +257,13 @@ object Pricing {
 
     private fun trimNum(v: Double): String = toFixed(v, 1).removeSuffix(".0")
 
-    /** Fill-missing-angles price, e.g. 3 missing → "$0.06". */
-    fun fillAnglesCost(missing: Int): Double = FILL_ANGLE_COST * missing
-
-    /** How many 10-step 5.2 s videos the balance covers (Credits card). */
+    /** How many 10-step 5.2 s videos the balance covers (the server's `videos` field). */
     fun videosLeft(balance: Double, spec: RenderSpec = RenderSpec()): Int = floor(balance / estCost(spec.copy(takes = 1))).toInt()
+
+    /** A typical video for the Credits card: a Draft render of the 9.4 s sample. */
+    val typicalVideo: RenderSpec get() = RenderSpec(engine = Engine.REPLICATE, quality = Quality.DRAFT)
+    /** How many typical (Draft) videos [balance] covers. */
+    fun draftVideosLeft(balance: Double): Int = if (balance <= 0) 0 else floor(balance / estCost(typicalVideo)).toInt()
 
     /** Seconds of GPU time, used by the mock to drive progress. */
     fun totalSeconds(spec: RenderSpec): Double = totalMin(spec) * 60

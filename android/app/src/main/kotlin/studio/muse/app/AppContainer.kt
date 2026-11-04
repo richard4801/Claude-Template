@@ -41,7 +41,7 @@ class AppContainer(
             if (job.done) repo.toast("Render done · tap to watch", "result/${job.id}") else repo.toast("Render failed · ${studio.muse.core.Pricing.money(job.refunded)} refunded", "queue")
         }
         scope.launch { prefs.collect { repo.setStudioName(it.studioName) } }
-        // Keep GPU warm: the ongoing notification follows the state; the warning is a notification and a banner.
+        // Keep add-on engine ready (owner only; members never load it): the ongoing notification follows the state; the warning is a notification and a banner.
         scope.launch {
             repo.state.map { it.warm }.distinctUntilChanged().collect { w ->
                 if (w?.on == true) notifier?.warmOngoing(w) else notifier?.cancelWarm()

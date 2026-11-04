@@ -33,7 +33,8 @@ class VideoQualityTest {
         assertEquals(Quality.DRAFT, d.quality)
         assertEquals(VideoOption.DRAFT, d.option)
         assertEquals("draft", VideoFeatures().defaultQuality)
-        assertEquals(listOf("draft", "standard", "hd", "exact"), VideoFeatures.DEFAULT.options.map { it.id })
+        assertEquals(listOf("draft", "standard", "hd"), VideoFeatures.DEFAULT.options.map { it.id })
+        assertEquals(listOf("edit", "fast", "upscale"), VideoFeatures.DEFAULT.addons.map { it.id })
     }
 
     @Test fun replicateRequestIsWholeClipWithoutExactEditOptions() {
@@ -47,15 +48,16 @@ class VideoQualityTest {
         assertEquals("about \$0.91 · 7 s", Pricing.priceLine(r.spec()))
     }
 
-    @Test fun exactEditKeepsStepsAndSample() {
-        val d = VideoDraft(steps = 14, use = ClipUse.FIRST, lipSync = true).pick(VideoOption.EXACT)
+    @Test fun editAlwaysUsesTheWholeClipAndTheDefaultSteps() {
+        val d = VideoDraft(steps = 14, use = ClipUse.FIRST, lipSync = true).pick(VideoOption.EDIT)
         val r = d.request("Kitchen", "m", "o", "c", 7.0)
         assertEquals("h3", r.engine)
         assertNull(r.quality)
-        assertEquals(14, r.steps)
-        assertEquals("first", r.use)
+        assertEquals(10, r.steps)
+        assertEquals("full", r.use)
         assertTrue(r.lipSync)
-        assertEquals("Exact edit · 14 steps", Pricing.engineLabel(r.spec()))
+        assertEquals("Edit", Pricing.engineLabel(r.spec()))
+        assertEquals("Edit", VideoDraft(engine = studio.muse.core.Engine.H3, steps = 30).option.label)
         // Back to a Replicate quality keeps the last one picked.
         assertEquals(VideoOption.DRAFT, d.pick(VideoOption.DRAFT).option)
     }

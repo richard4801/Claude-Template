@@ -15,6 +15,7 @@ import studio.muse.core.Identity
 import studio.muse.core.OutfitSource
 import studio.muse.core.OutfitSpec
 import studio.muse.core.Pricing
+import studio.muse.core.PhotoPricing
 import studio.muse.core.PromptEngine
 import studio.muse.core.SourcePerformer
 import studio.muse.core.VideoSwapSpec
@@ -86,8 +87,8 @@ class FakeMuseApi(
         val (busy, cost) = lock.withLock {
             val m = model(modelId)
             val missing = m.slots.filter { it.image == null }
-            val cost = Pricing.fillAnglesCost(missing.size)
-            if (cost > balance.balance) throw ApiException("insufficient_balance", "Not enough balance · top up in Credits")
+            val cost = PhotoPricing.sheetAngles(photoPrices, missing.size, m.slots.count { it.image != null })
+            if (cost > balance.balance) throw ApiException("insufficient_balance", ErrorText.NOT_ENOUGH_STUDIO)
             charge(cost)
             val busy = m.copy(slots = m.slots.map { if (it.image == null) it.copy(busy = true) else it })
             replaceModel(busy)
@@ -110,14 +111,14 @@ class FakeMuseApi(
     override suspend fun listOutfits() = lock.withLock { outfits.toList() }
 
     override suspend fun createOutfit(req: CreateOutfitRequest): Outfit {
-        val cost = if (req.mode == "own") 0.0 else Pricing.OUTFIT_SET_COST
+        val cost = if (req.mode == "own") 0.0 else PhotoPricing.outfitSet(photoPrices)
         val o = lock.withLock {
-            if (cost > balance.balance) throw ApiException("insufficient_balance", "Not enough balance · top up in Credits")
+            if (cost > balance.balance) throw ApiException("insufficient_balance", ErrorText.NOT_ENOUGH_STUDIO)
             charge(cost)
             val m = model(req.modelId)
             val spec = OutfitSpec(req.name, req.description, if (req.mode == "describe") OutfitSource.DESCRIBED else if (req.mode == "photo") OutfitSource.PRODUCT_PHOTO else OutfitSource.REFERENCE_SET)
             val prompt = PromptEngine.outfitSet(identity(m, loras[m.id]), spec).first().text
-            val o = Outfit("o_" + uid(), req.modelId, req.name.ifBlank { "New outfit" }, req.mode, req.description, listOf(null, null, null, null), "generating", prompt)
+            val o = Outfit("o_" + uid(), req.modelId, req.name.ifBlank { "New outfit" }, req.mode, req.description, listOf(null, null, null, null), "generating", prompt, cost = cost.takeIf { it > 0 })
             outfits += o
             o
         }
@@ -171,10 +172,10 @@ class FakeMuseApi(
     override suspend fun listJobs() = lock.withLock { jobs.sortedByDescending { it.createdAt } }
 
     override suspend fun createJob(request: JobRequest): Job {
-        // Replicate (Draft / Standard / HD): whole clip, priced per output second; lip sync and a background photo are Exact edit only.
+        // Render (Draft / Standard / HD): whole clip, priced per output second; lip sync and a background photo are Edit only.
         val replicate = request.engine == Engine.REPLICATE.id
-        if (replicate && request.lipSync) throw ApiException("bad_request", "Lip sync is only on Exact edit")
-        if (replicate && request.background == "photo") throw ApiException("bad_request", "A new background photo is only on Exact edit for now")
+        if (replicate && request.lipSync) throw ApiException("bad_request", "Lip sync is only on Edit")
+        if (replicate && request.background == "photo") throw ApiException("bad_request", "A new background photo is only on Edit for now")
         val req = if (!replicate) request.copy(quality = null)
             else Quality.fromId(request.quality).let { q -> request.copy(use = ClipUse.FULL.id, quality = q.id, pricePerSec = studio.features.video?.pricePerSec(q) ?: q.pricePerSec) }
         val job = lock.withLock {
@@ -272,9 +273,10 @@ class FakeMuseApi(
         val l = lock.withLock {
             val l0 = loraOf(modelId)
             if (l0.state == "building" || l0.state == "training") throw ApiException("busy", "Already working on it")
-            if (Pricing.LORA_SET_COST > balance.balance + 1e-9) throw ApiException("insufficient_balance", "Not enough balance · top up in Credits")
-            charge(Pricing.LORA_SET_COST)
-            l0.copy(state = "building", candidates = emptyList(), progress = 0.0, cost = Pricing.LORA_SET_COST).also { loras[modelId] = it }
+            val setCost = PhotoPricing.loraSet(photoPrices)
+            if (setCost > balance.balance + 1e-9) throw ApiException("insufficient_balance", ErrorText.NOT_ENOUGH_STUDIO)
+            charge(setCost)
+            l0.copy(state = "building", candidates = emptyList(), progress = 0.0, cost = l0.cost + setCost).also { loras[modelId] = it }
         }
         events.tryEmit(ApiEvent("balance", balance = balance))
         scope.launch {
@@ -435,8 +437,8 @@ class FakeMuseApi(
                     val cur = jobs.firstOrNull { it.id == job.id } ?: return@launch
                     if (elapsed >= failAt) {
                         val p = JobClock.progress(cur.request, failAt)
-                        val failed = cur.copy(state = "failed", progress = p.progress, step = p.step, phase = "Failed at step ${p.step}", refunded = cur.cost,
-                            error = "The GPU disconnected at step ${p.step}.", finishedAt = now())
+                        val failed = cur.copy(state = "failed", progress = p.progress, step = p.step, phase = "Failed", refunded = cur.cost,
+                            error = ErrorText.WENT_WRONG, finishedAt = now())
                         refund(cur.cost)
                         replaceJob(failed)
                         ApiEvent("job", job = failed)
@@ -447,7 +449,7 @@ class FakeMuseApi(
                             val o = outfits.firstOrNull { it.id == cur.outfitId }
                             val thumb = o?.angles?.filterNotNull()?.let { if (it.isEmpty()) null else it[(i - 1) % it.size] } ?: cur.thumb ?: ImageRef.asset("g_front")
                             Take("t_${cur.id}_$i", "take", cur.id, i, cur.request.takes, cur.title,
-                                when (cur.request.engine) { Engine.VIGGLE.id -> "Fast · beta"; Engine.REPLICATE.id -> Quality.fromId(cur.request.quality).label; else -> "${cur.request.steps} steps" }, cur.engineLabel,
+                                when (cur.request.engine) { Engine.VIGGLE.id -> "Fast · beta"; Engine.REPLICATE.id -> Quality.fromId(cur.request.quality).label; else -> "Edit" }, cur.engineLabel,
                                 cur.cost / cur.request.takes, cur.seed + i - 1, "test", thumb, cur.prompt, now())
                         }
                         takes.addAll(0, newTakes)
@@ -487,8 +489,8 @@ class FakeMuseApi(
     override suspend fun shoot(req: ShootRequest): List<Take> {
         lock.withLock {
             if (req.templateId != null) tpl.name(req.templateId) // not_found before charging
-            if (Pricing.SHOOT_COST > balance.balance) throw ApiException("insufficient_balance", "Not enough balance · top up in Credits")
-            charge(Pricing.SHOOT_COST)
+            if (PhotoPricing.shoot(photoPrices, req.count) > balance.balance) throw ApiException("insufficient_balance", ErrorText.NOT_ENOUGH_STUDIO)
+            charge(PhotoPricing.shoot(photoPrices, req.count))
         }
         events.tryEmit(ApiEvent("balance", balance = balance))
         delay(genDelayMs)
@@ -505,13 +507,13 @@ class FakeMuseApi(
                     val id = "s_${uid()}"
                     tpl.recordShot(id, req.templateId, b.full, b.draws)
                     // Stored with the public prompt; shotView() swaps in the full one for the template's owner.
-                    Take(id, "shot", null, n + 1, req.count, "Shoot · $name", "${name.take(28)} · ${n + 1}", "", Pricing.SHOOT_COST / req.count,
+                    Take(id, "shot", null, n + 1, req.count, "Shoot · $name", "${name.take(28)} · ${n + 1}", "", PhotoPricing.shoot(photoPrices, 1),
                         b.shown.seed ?: 0, "test", ImageRef.asset(k), b.visible, t + n, templateId = req.templateId, templateName = name, shuffleSeed = shuffle)
                 }.also { tpl.bumpUses(req.templateId) }
             } else {
                 val label = req.scene.substringBefore(" · ").take(28)
                 pool.take(req.count).mapIndexed { n, k ->
-                    Take("s_${uid()}", "shot", null, n + 1, req.count, "Shoot · $label", "$label · ${n + 1}", "", Pricing.SHOOT_COST / req.count,
+                    Take("s_${uid()}", "shot", null, n + 1, req.count, "Shoot · $label", "$label · ${n + 1}", "", PhotoPricing.shoot(photoPrices, 1),
                         req.seed ?: 0, "test", ImageRef.asset(k), req.prompt, t)
                 }
             }
@@ -543,13 +545,35 @@ class FakeMuseApi(
     override suspend fun balance() = lock.withLock { balance }
 
     override suspend fun topUp(req: TopUpRequest): Balance {
-        val b = lock.withLock {
-            balance = balance.copy(balance = balance.balance + req.amount)
-            balance
+        addTopUp(AddTopUpRequest(req.amount))
+        return lock.withLock { balance }
+    }
+
+    // ---- the owner-loaded studio balance (demo): balance.balance is top-ups − spending.
+    private val topUps = mutableListOf(TopUp("top_demo", 25.0, "Opening balance", now() - 86_400_000L, now() - 86_400_000L, "u1"))
+
+    private fun studioBalanceView(): StudioBalance {
+        val unspent = members.sumOf { it.usd }
+        val topped = topUps.sumOf { it.amountUsd }
+        return StudioBalance(balance.balance, topped, (topped - balance.balance).coerceAtLeast(0.0), unspent, 0.0, balance.balance - unspent, topUps.lastOrNull()?.createdAt ?: now(),
+            topUps.isEmpty(), topUps.take(20))
+    }
+
+    override suspend fun studioBalance(): StudioBalance = lock.withLock { studioBalanceView() }
+
+    override suspend fun addTopUp(req: AddTopUpRequest): StudioBalance {
+        if (!(req.amountUsd > 0 && req.amountUsd <= 10_000)) throw ApiException("bad_request", "Amount must be between $0.01 and $10,000")
+        val (sb, b) = lock.withLock {
+            val amt = Math.round(req.amountUsd * 100) / 100.0
+            topUps.add(0, TopUp("top_" + uid(), amt, req.note?.trim()?.ifBlank { null }, req.paidAt ?: now(), now(), "u1"))
+            balance = balance.copy(balance = balance.balance + amt, needsFirstTopUp = false)
+            studioBalanceView() to balance
         }
         events.tryEmit(ApiEvent("balance", balance = b))
-        return b
+        return sb
     }
+
+    override suspend fun upscale(takeId: String, size: String): Job = throw ApiException("upscale_unavailable", "Upscale is coming soon")
 
     override suspend fun setFailNext(fail: Boolean) {
         failNext = fail
@@ -558,15 +582,18 @@ class FakeMuseApi(
     // ---- the demo studio's owner side: members, tokens, invites, settings (in memory, like the real API's rules)
     private val members = SampleData.members(now()).toMutableList()
     private val invites = mutableListOf<InviteInfo>()
-    private var studio = StudioSettings(features = StudioFeatures(replicate = true, video = VideoFeatures.DEFAULT))
+    private var studio = StudioSettings(features = StudioFeatures(replicate = true, video = VideoFeatures.DEFAULT, photo = PhotoFeatures()),
+        engines = Engines(listOf(EngineStatus("replicate", "Replicate", "Draft, Standard and HD video · photos", keySet = false, status = "simulated"),
+            EngineStatus("runpod", "RunPod", "Edit, Fast · beta, Upscale", keySet = false, status = "simulated"))))
+    private val photoPrices get() = (studio.features.photo ?: PhotoFeatures()).prices
     private var engine = ImageEngine("simulated", "bundled-stills", "Simulated", available = mapOf("simulated" to true, "fal" to false, "custom-http" to true, "replicate" to false))
     private val tokenUsd = 0.01
 
     private fun ownerWallet(): Wallet {
         val unspent = members.sumOf { it.usd }
-        val available = (balance.balance - unspent).coerceAtLeast(0.0)
-        return Wallet("u1", "owner", kotlin.math.floor(available / tokenUsd + 1e-6).toLong(), available, 0, 0.0, balance.today, balance.month, tokenUsd, "simulated",
-            availableToSend = available, runpodBalance = balance.balance, membersUnspentUsd = unspent)
+        val available = balance.balance - unspent
+        return Wallet("u1", "owner", kotlin.math.floor(available.coerceAtLeast(0.0) / tokenUsd + 1e-6).toLong(), available, 0, 0.0, balance.today, balance.month, tokenUsd, "studio",
+            availableToSend = available, studioBalance = balance.balance, membersUnspentUsd = unspent)
     }
 
     /** Test hook: act as a member with this wallet (screenshots of the member's Credit screen). */
@@ -576,13 +603,13 @@ class FakeMuseApi(
     override suspend fun listMembers(): List<Member> = lock.withLock { listOf(Member("u1", "jenne@studio.com", "owner", ownerWallet().tokens, ownerWallet().usd, lastActiveAt = now())) + members }
 
     private fun member(id: String) = members.firstOrNull { it.id == id }
-        ?: if (id == "u1") throw ApiException("bad_request", "The owner's wallet is the RunPod balance; send credit to members only") else throw ApiException("not_found", "Member not found")
+        ?: if (id == "u1") throw ApiException("bad_request", "The owner's wallet is the studio balance; send credit to members only") else throw ApiException("not_found", "Member not found")
 
     override suspend fun transfer(req: TransferRequest): WalletMemberResponse = lock.withLock {
         val m = member(req.toUserId)
         val w = ownerWallet()
         if (req.tokens <= 0) throw ApiException("bad_request", "Send at least $0.01")
-        if (req.tokens > w.tokens) throw ApiException("over_allocation", "You can send at most ${w.tokens} tokens (${Pricing.money(w.usd)}): that's what your RunPod balance backs")
+        if (req.tokens > w.tokens) throw ApiException("over_allocation", "You can send at most ${w.tokens} tokens (${Pricing.money(w.usd.coerceAtLeast(0.0))}): the rest of the studio balance is already with members or on hold")
         val n = m.copy(tokens = m.tokens + req.tokens, usd = (m.tokens + req.tokens) * tokenUsd)
         members[members.indexOf(m)] = n
         WalletMemberResponse(ownerWallet(), n)
@@ -613,14 +640,14 @@ class FakeMuseApi(
     }
 
     override suspend fun listInvites(): List<InviteInfo> = lock.withLock { invites.toList() }
-    override suspend fun studioSettings(): StudioSettings = lock.withLock { studio.copy(lowBalance = balance.balance < studio.minRunpodBalance) }
+    override suspend fun studioSettings(): StudioSettings = lock.withLock { studio }
     override suspend fun patchStudioSettings(req: StudioSettingsPatch): StudioSettings = lock.withLock {
         studio = studio.copy(maxGpus = req.maxGpus ?: studio.maxGpus, overheadPayer = req.overheadPayer ?: studio.overheadPayer, capPerJob = req.capPerJob ?: studio.capPerJob,
-            capPerDay = req.capPerDay ?: studio.capPerDay, capPerUserDay = req.capPerUserDay ?: studio.capPerUserDay, warmGpuAllowed = req.warmGpuAllowed ?: studio.warmGpuAllowed)
+            capPerDay = req.capPerDay ?: studio.capPerDay, capPerUserDay = req.capPerUserDay ?: studio.capPerUserDay)
         studio
     }
 
-    // ---- Keep GPU warm (demo): boots in a few seconds, then bills $3.99/h from the balance once a minute.
+    // ---- Keep add-on engine ready (demo, the owner): ready in a few seconds, then bills $3.99/h from the studio balance once a minute.
     private var warm = WarmGpu()
     private var warmRunner: CoJob? = null
     override suspend fun warmGpu(): WarmGpu = lock.withLock { warmView() }
@@ -636,12 +663,12 @@ class FakeMuseApi(
     override suspend fun setWarmGpu(req: WarmRequest): WarmGpu = lock.withLock {
         when {
             req.extend == true -> {
-                if (!warm.on) throw ApiException("not_warm", "The GPU is not warm")
+                if (!warm.on) throw ApiException("not_warm", "The add-on engine is off")
                 val v = warmView()
                 warm = if (v.autoOffReason == "cap" && warm.canExtend) warm.copy(maxMinutes = warm.maxMinutes * 2, canExtend = false) else warm.copy(readyAt = now().takeIf { warm.state == "warm" } ?: warm.readyAt)
             }
             req.on == true -> if (!warm.on) {
-                if (balance.balance < 3.99 * 10 / 60) throw ApiException("insufficient_balance", "Not enough credit to keep a GPU warm")
+                if (balance.balance < 3.99 * 10 / 60) throw ApiException("insufficient_balance", ErrorText.NOT_ENOUGH_STUDIO)
                 warm = WarmGpu("starting", startedAt = now(), idleMinutes = studio.warmIdleMinutes, maxMinutes = studio.warmMaxMinutes, canExtend = true)
                 warmRunner?.cancel()
                 if (speed > 0) warmRunner = scope.launch {

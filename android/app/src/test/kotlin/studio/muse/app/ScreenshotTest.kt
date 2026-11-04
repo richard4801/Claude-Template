@@ -66,10 +66,11 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             // Photo templates (plans/templates.md): library, detail (owner and someone else's), using one (locked prompt line), Save as template.
             "templates", "templates_mine", "template_detail", "template_detail_other", "template_edit", "template_use", "template_use_prompt", "save_template",
             "shoot_templates",
-            // Keep GPU warm: the nudge when creating starts, the cost warning on switch-on, the bar (warm, starting) and the 5-minute warning.
-            "warm_nudge", "warm_confirm", "warm_bar", "warm_starting", "warm_warning",
-            // Video quality picker (Replicate): Draft (default), HD, and Exact edit (steps + Keep GPU warm).
-            "quality_draft", "quality_hd", "quality_exact",
+            // Keep add-on engine ready (owner only, Settings → Engines): the cost warning on switch-on, the owner's indicator (on, getting ready)
+            // and the 5-minute warning. No nudge, switch or bar for members.
+            "warm_confirm", "warm_bar", "warm_starting", "warm_warning",
+            // Video options (app clean-up): Render (Draft default, HD) and the Edit add-on (no steps, no start-up), Upscale coming soon on a take.
+            "quality_draft", "quality_hd", "quality_edit", "result_upscale",
         )
 
         @JvmStatic
@@ -122,7 +123,7 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "post_schedule" -> c.drafts.postStartScheduled.value = true
             "posts_posted" -> c.drafts.postsTab.value = "posted"
             "shoot_prompt" -> c.drafts.shoot.update { it.copy(tool = "spark", direction = "laughing mid-step, hair blowing") }
-            "source", "direct" -> { c.drafts.video.update { it.copy(clip = sample) }; c.warmUi.creatingStarted(null) }
+            "source", "direct" -> c.drafts.video.update { it.copy(clip = sample) }
             "source_bad" -> c.drafts.video.update {
                 it.copy(clip = Clip(SampleData.BAD_CLIP, "Mirror trend (download)", 22.0, 1080, 1920, 30, ClipRules.checks(SampleData.badMeta)), showBadExample = true)
             }
@@ -131,22 +132,19 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "template_use" -> c.drafts.templateUse.value = studio.muse.app.data.TemplateUseDraft("tpl_mirror-selfie")
             "template_use_prompt" -> c.drafts.templateUse.value = studio.muse.app.data.TemplateUseDraft("tpl_maya_walk", direction = "sitting on the steps, looking back over her shoulder", shuffleSeed = 7, showPrompt = true)
             "shoot_templates" -> c.drafts.shoot.update { it.copy(tool = "model") }
-            "warm_nudge" -> c.drafts.video.update { it.copy(clip = sample, engine = studio.muse.core.Engine.H3) }
-            "warm_confirm" -> { c.drafts.video.update { it.copy(clip = sample, engine = studio.muse.core.Engine.H3) }; c.warmUi.creatingStarted(null); c.warmUi.confirm() }
+            "warm_confirm" -> c.warmUi.confirm()
             "quality_draft" -> c.drafts.video.update { it.copy(clip = sample.copy(id = "clip_7s", durationSec = 7.0)) }
             "quality_hd" -> c.drafts.video.update { it.copy(clip = sample.copy(id = "clip_7s", durationSec = 7.0)).pick(studio.muse.core.VideoOption.HD) }
-            "quality_exact" -> c.drafts.video.update { it.copy(clip = sample).pick(studio.muse.core.VideoOption.EXACT) }
+            "quality_edit" -> c.drafts.video.update { it.copy(clip = sample).pick(studio.muse.core.VideoOption.EDIT) }
             "warm_bar", "warm_warning" -> runBlocking {
                 val t = System.currentTimeMillis()
                 // Ready 15 min ago with no render since: the idle auto-off is 5 min away (the warning's moment).
                 val ready = t - 15 * 60_000L
                 fake.debugSetWarm(studio.muse.app.data.WarmGpu("warm", startedAt = t - 42 * 60_000L - 20_000, readyAt = ready, minutes = 42, costUsd = 2.80,
                     ratePerHour = 3.99, canExtend = true))
-                if (screen == "warm_warning") c.warmUi.banner.value = studio.muse.app.data.WarmWarning("idle", ready + 20 * 60_000L, "Warm GPU turns off in 5 min (no renders)")
+                if (screen == "warm_warning") c.warmUi.banner.value = studio.muse.app.data.WarmWarning("idle", ready + 20 * 60_000L, "Add-on engine turns off in 5 min (no renders)")
             }
             "warm_starting" -> runBlocking {
-                c.drafts.video.update { it.copy(clip = sample, engine = studio.muse.core.Engine.H3) }
-                c.warmUi.creatingStarted(null)
                 val t = System.currentTimeMillis()
                 fake.debugSetWarm(studio.muse.app.data.WarmGpu("starting", startedAt = t - 2 * 60_000L - 10_000, minutes = 2, costUsd = 0.13, ratePerHour = 3.99, canExtend = true))
             }
@@ -162,8 +160,12 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
                     totalSeconds = total, cost = Pricing.totalCost(req.spec()), createdAt = now - 1000, thumb = ImageRef.asset("g_tq"), blocked = "owner_balance_low"))
             }
             "result_specs" -> runBlocking {
-                fake.debugPutTake(Take("t_spec", "take", null, 1, 1, "Living-room dance", "Take 1", "Standard · 10 steps", 0.67, 4211, thumb = ImageRef.asset("g_front"),
+                fake.debugPutTake(Take("t_spec", "take", null, 1, 1, "Living-room dance", "Take 1", "Edit", 0.67, 4211, thumb = ImageRef.asset("g_front"),
                     createdAt = System.currentTimeMillis(), durationSec = 5.2, width = 768, height = 1344))
+            }
+            "result_upscale" -> runBlocking {
+                fake.debugPutTake(Take("t_up", "take", null, 1, 1, "Kitchen", "Draft", "Draft · 768P", 0.14, 4211, thumb = ImageRef.asset("g_tq"),
+                    createdAt = System.currentTimeMillis(), videoUrl = "/uploads/r/j/take_1.mp4", durationSec = 6.4, width = 768, height = 1344))
             }
             "queue_run" -> runBlocking {
                 val req = JobRequest("Living-room dance", SampleData.SIENNA, SampleData.GREEN, SampleData.SAMPLE_CLIP)
@@ -177,7 +179,7 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "shoot_prompt" -> Routes.SHOOT
             "source_bad" -> Routes.SOURCE
             "queue_run" -> Routes.QUEUE
-            "result", "post", "post_schedule", "result_specs" -> Routes.HOME
+            "result", "post", "post_schedule", "result_specs", "result_upscale" -> Routes.HOME
             "signin_server", "signin_typed_server", "signin_shown_server", "signin_noremember_server" -> Routes.SIGNIN
             "signup_server", "signup_shown_server" -> Routes.SIGNUP
             "credit_member" -> Routes.CREDITS
@@ -190,12 +192,13 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "templates", "templates_mine" -> Routes.TEMPLATES
             "template_detail", "template_detail_other", "template_edit", "template_use", "template_use_prompt", "save_template" -> Routes.HOME
             "shoot_templates" -> Routes.SHOOT
-            "warm_nudge", "warm_confirm", "warm_starting", "quality_draft", "quality_hd", "quality_exact" -> Routes.DIRECT
+            "quality_draft", "quality_hd", "quality_edit" -> Routes.DIRECT
+            "warm_confirm", "warm_starting" -> Routes.STUDIO
             "warm_bar", "warm_warning" -> Routes.HOME
             else -> if (screen.startsWith("lora")) Routes.LORA else screen
         }
         compose.mainClock.autoAdvance = false
-        val pending = when (screen) { "result" -> Routes.result("j1"); "result_specs" -> Routes.result("t_spec"); "post", "post_schedule" -> Routes.post("t_j1")
+        val pending = when (screen) { "result" -> Routes.result("j1"); "result_specs" -> Routes.result("t_spec"); "result_upscale" -> Routes.result("t_up"); "post", "post_schedule" -> Routes.post("t_j1")
             "template_detail", "template_edit" -> Routes.template("tpl_mirror-selfie"); "template_detail_other" -> Routes.template("tpl_maya_walk")
             "template_use" -> Routes.templateUse("tpl_mirror-selfie"); "template_use_prompt" -> Routes.templateUse("tpl_maya_walk")
             "save_template" -> Routes.saveTemplate("t_g4"); else -> null }

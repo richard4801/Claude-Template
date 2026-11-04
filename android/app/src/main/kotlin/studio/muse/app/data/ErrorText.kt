@@ -6,7 +6,10 @@ package studio.muse.app.data
  */
 object ErrorText {
     const val NOT_ENOUGH_CREDIT = "Not enough credit. Ask the studio owner for more."
-    const val PAUSED_LOW_BALANCE = "Paused: the studio's GPU credit is low"
+    /** The owner's own spending power is the studio balance they load (plans/api.md "App clean-up" §4). */
+    const val NOT_ENOUGH_STUDIO = "Not enough in the studio balance · add a top-up in Credit"
+    /** Every failed render and photo: nothing technical, and no charge. */
+    const val WENT_WRONG = "Something went wrong · you weren't charged"
 
     /** Codes that end the session: the app goes back to sign-in. */
     val SIGN_OUT_CODES = setOf("unauthorized", "account_disabled")
@@ -27,19 +30,21 @@ object ErrorText {
             "attestation_required" -> "Tick both boxes to continue."
             "owner_only" -> "Only the studio owner can do that."
             "insufficient_tokens" -> NOT_ENOUGH_CREDIT
-            "insufficient_balance" -> "Not enough GPU credit for this."
-            "over_job_limit" -> "This render costs more than the per-job limit. Try fewer steps or takes."
+            "insufficient_balance" -> NOT_ENOUGH_STUDIO
+            "over_job_limit" -> "This costs more than the per-job limit. Try fewer takes or a lighter option."
             "over_user_day_limit" -> "You've reached your daily spending cap. Try again tomorrow, or ask the studio owner to raise it."
             "over_day_limit" -> "The studio's daily spending cap is reached. Try again tomorrow."
             // The server says "You can send at most 500 tokens ($5.00): …"; keep only the dollars.
-            "over_allocation" -> Regex("""\(\$([\d.,]+)\)""").find(server)?.let { "You can send at most $${it.groupValues[1]}. The rest of the RunPod balance is already with members or on hold." }
-                ?: "That's more than the studio's RunPod balance can back."
-            "balance_unavailable" -> "MUSE can't read the RunPod balance right now, so credit can't be sent. Try again shortly."
-            "topup_unavailable" -> "Top up your RunPod account. MUSE reads the balance from RunPod."
-            "engine_unavailable" -> "This option isn't available on the server right now. Try another quality."
-            "image_engine_failed" -> "The image engine failed. You weren't charged."
-            "provider_refused" -> server.ifBlank { "Replicate's safety filter refused this. You weren't charged." }
-            "provider_rate_limited" -> "Replicate is busy right now. You weren't charged · try again in a minute."
+            "over_allocation" -> Regex("""\(\$([\d.,]+)\)""").find(server)?.let { "You can send at most $${it.groupValues[1]}. The rest of the studio balance is already with members or on hold." }
+                ?: "That's more than the studio balance has free. Add a top-up first."
+            "balance_unavailable" -> "The studio balance can't be read right now. Try again shortly."
+            "topup_unavailable" -> "Top-ups are recorded by the studio owner."
+            "engine_unavailable" -> "This option isn't available right now. Try another one."
+            "image_engine_failed" -> "Something went wrong making the photos · you weren't charged"
+            "provider_refused" -> "This was refused by the content filter · you weren't charged"
+            "provider_rate_limited" -> "Busy right now · you weren't charged. Try again in a minute."
+            "provider_out_of_credit" -> "Something went wrong · you weren't charged. The studio owner has been told."
+            "upscale_unavailable" -> "Upscale is coming soon."
             "clip_failed_checks" -> "Fix the clip checks first."
             "not_found" -> "That's no longer there. Pull to refresh."
             "busy" -> "That's already in progress. Wait for it to finish."
@@ -50,11 +55,11 @@ object ErrorText {
             "bad_response" -> "The server sent something this app version can't read. Update MUSE."
             "server_error" -> "Something went wrong on the server. Try again."
             "bad_signature" -> "The upload link expired. Try again."
-            "warm_not_allowed" -> "Only the studio owner can keep a GPU warm."
-            "owner_balance_low" -> "The studio's GPU credit is low, so a GPU can't be kept warm. Ask the studio owner to top up."
-            "no_gpu_free" -> "Every GPU is busy right now. Try again when a render finishes."
-            "no_gpu_available" -> "RunPod has no free GPU right now. Try again in a minute."
-            "not_warm" -> "The GPU isn't warm any more."
+            "warm_not_allowed" -> "Only the studio owner can do that."
+            "owner_balance_low" -> NOT_ENOUGH_STUDIO
+            "no_gpu_free" -> "Every add-on engine is busy right now. Try again when a render finishes."
+            "no_gpu_available" -> "No add-on engine is free right now. Try again in a minute."
+            "not_warm" -> "The add-on engine isn't on any more."
             else -> Credit.dollarize(server).ifBlank { "Something went wrong." }
         }
     }

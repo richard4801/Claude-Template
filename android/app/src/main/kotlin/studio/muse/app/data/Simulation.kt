@@ -44,19 +44,19 @@ object SampleData {
         Job("j2", "Bathroom trend", SIENNA, "Sienna Vale", CRYSTAL, req("Bathroom trend", Engine.H3, 30, CRYSTAL), "done", 100.0, 1, 30, 30,
             "Done", 0.0, 2760.0, 3.05, createdAt = now - 86_400_000, finishedAt = now - 83_640_000, thumb = ImageRef.asset("c_front")),
         Job("j0", "Mirror selfie", SIENNA, "Sienna Vale", GREEN, req("Mirror selfie", Engine.H3, 10), "failed", 18.0, 1, 3, 10,
-            "Failed at step 3", 0.0, 608.0, 0.19, refunded = 0.19, error = "The GPU disconnected at step 3.", createdAt = now - 3_600_000, thumb = ImageRef.asset("g_tq")),
+            "Failed", 0.0, 608.0, 0.19, refunded = 0.19, error = ErrorText.WENT_WRONG, createdAt = now - 3_600_000, thumb = ImageRef.asset("g_tq")),
     )
 
     fun takes(now: Long): List<Take> = listOf(
         Take("t_j1", "take", "j1", 1, 1, "Kick test", "Fast · beta", "Fast · beta", 0.13, 7, "test", ImageRef.asset("g_front"), createdAt = now - 7_000_000),
-        Take("t_j2", "take", "j2", 1, 1, "Bathroom trend", "30 steps", "Standard · 30 steps", 3.05, 42, "test", ImageRef.asset("c_front"), createdAt = now - 83_640_000),
-        Take("t_g1", "take", null, 1, 1, "Living-room dance", "10 steps", "Standard · 10 steps", 0.67, 42, "test", ImageRef.asset("g_tq"), createdAt = now - 90_000_000),
-        Take("t_g5", "take", null, 1, 1, "Living-room dance", "15 steps", "Standard · 15 steps", 0.99, 42, "test", ImageRef.asset("g_side"), createdAt = now - 95_000_000),
+        Take("t_j2", "take", "j2", 1, 1, "Bathroom trend", "Edit", "Edit", 3.05, 42, "test", ImageRef.asset("c_front"), createdAt = now - 83_640_000),
+        Take("t_g1", "take", null, 1, 1, "Living-room dance", "Edit", "Edit", 0.67, 42, "test", ImageRef.asset("g_tq"), createdAt = now - 90_000_000),
+        Take("t_g5", "take", null, 1, 1, "Living-room dance", "Edit", "Edit", 0.99, 42, "test", ImageRef.asset("g_side"), createdAt = now - 95_000_000),
         Take("t_g4", "shot", null, 1, 1, "Shoot", "Shoot", "", 0.03, 0, "test", ImageRef.asset("c_front"), createdAt = now - 96_000_000),
         Take("t_g6", "shot", null, 1, 1, "Shoot", "Shoot", "", 0.03, 0, "test", ImageRef.asset("c_tq"), createdAt = now - 97_000_000),
     )
 
-    fun balance() = Balance(balance = 6.07, month = 18.93, today = 0.13, videos = 11)
+    fun balance() = Balance(balance = 6.07, month = 18.93, today = 0.13, videos = 11, role = "owner", balanceSource = "studio", availableToSend = 4.17, studioBalance = 6.07, needsFirstTopUp = false)
 
     /** The demo studio's members (the owner is "u1", Jenne). */
     fun members(now: Long) = listOf(
@@ -111,11 +111,11 @@ object JobClock {
         val total = Pricing.totalSeconds(spec)
         val perTake = total / spec.takes
         if (spec.engine == Engine.REPLICATE) {
-            // Hosted renders: no GPU start-up and no steps; step counts finished takes (like the server).
+            // Render (Draft / Standard / HD): no start-up and no steps; step counts finished takes (like the server).
             val e = elapsed.coerceIn(0.0, total)
             val take = minOf(spec.takes, floor(e / perTake).toInt() + 1)
             val prefix = if (spec.takes > 1) "take $take/${spec.takes} · " else ""
-            val phase = if (e >= total) "Done" else "${prefix}Rendering on Replicate · ${leftText(total - e)}"
+            val phase = if (e >= total) "Done" else "${prefix}Rendering · ${leftText(total - e)}"
             return JobProgress((e / total * 100).coerceIn(0.0, 100.0), take, if (e >= total) spec.takes else take - 1, spec.takes, phase, total - e)
         }
         val viggle = spec.engine == Engine.VIGGLE
@@ -132,10 +132,10 @@ object JobClock {
         val phase: String
         when {
             e >= total -> { step = totalSteps; phase = "Done" }
-            inTake < startup -> { step = 0; phase = "${prefix}Starting GPU · ${leftText(left)}" }
+            inTake < startup -> { step = 0; phase = "${prefix}Getting ready · ${leftText(left)}" }
             inTake < startup + stepsTime -> {
                 step = minOf(totalSteps, floor((inTake - startup) / stepsTime * totalSteps).toInt() + 1)
-                phase = "${prefix}step $step/$totalSteps · ${leftText(left)}"
+                phase = "${prefix}Rendering · ${leftText(left)}"
             }
             else -> { step = totalSteps; phase = "${prefix}Lip sync · ${leftText(left)}" }
         }

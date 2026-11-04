@@ -8,6 +8,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 /** Checks the Kotlin port against values produced by running prototype/app/app.js itself (see pricing_fixture.json). */
@@ -62,7 +63,7 @@ class PricingTest {
         assertEquals("\$1.00", Pricing.money(1.005))
         assertEquals("\$0.13", Pricing.money(0.125)) // exact tie rounds up, like JS
         assertEquals("\$6.07", Pricing.money(6.07))
-        assertEquals("\$0.06", Pricing.money(Pricing.fillAnglesCost(3)))
+        assertEquals("about \$0.10", PhotoPricing.about(PhotoPricing.sheetAngles(PhotoPrices(), 1)))
     }
 
     @Test fun balanceCoversNineVideosAtTenSteps() {
@@ -92,8 +93,7 @@ class RealClipPricingTest {
 
     @Test fun loraPricesMatchTheSpec() {
         assertEquals("\$6.65", Pricing.money(Pricing.loraTrainCost))
-        assertEquals("\$0.60", Pricing.money(Pricing.LORA_SET_COST))
-        assertEquals("\$7.25", Pricing.money(Pricing.LORA_SET_COST + Pricing.loraTrainCost))
+        assertEquals("about \$3.03", PhotoPricing.about(PhotoPricing.loraSet(PhotoPrices())))
         assertEquals(100, Pricing.loraTrainMinutes)
     }
 }
@@ -122,16 +122,63 @@ class ReplicatePricingTest {
         assertEquals("about \$0.56 · 7 s", Pricing.priceLine(spec))
         assertEquals("Standard · 768P", Pricing.engineLabel(spec))
         assertEquals("HD · 2K", Pricing.engineLabel(spec.copy(quality = Quality.HD)))
-        assertEquals("Exact edit · 10 steps", Pricing.engineLabel(RenderSpec()))
+        assertEquals("Edit", Pricing.engineLabel(RenderSpec()))
+        assertEquals("Fast · beta", Pricing.engineLabel(RenderSpec(engine = Engine.VIGGLE)))
+        assertEquals("about \$0.67", Pricing.optionPriceLine(RenderSpec()))
         // The server's live price wins over the built-in default.
         assertEquals("about \$0.70 · 7 s", Pricing.priceLine(spec.copy(pricePerSec = 0.10)))
     }
 
     @Test fun pickerMapsToEngineAndQuality() {
-        assertEquals(listOf("Draft", "Standard", "HD", "Exact edit"), VideoOption.entries.map { it.label })
+        assertEquals(listOf("Draft", "Standard", "HD"), VideoOption.RENDER.map { it.label })
+        assertEquals(listOf("Edit", "Fast · beta"), VideoOption.ADDONS.map { it.label })
         assertEquals(VideoOption.HD, VideoOption.of(Engine.REPLICATE, Quality.HD))
-        assertEquals(VideoOption.EXACT, VideoOption.of(Engine.H3, Quality.HD))
+        assertEquals(VideoOption.EDIT, VideoOption.of(Engine.H3, Quality.HD))
+        assertEquals(VideoOption.FAST, VideoOption.of(Engine.VIGGLE, Quality.HD))
+        assertEquals(VideoOption.EDIT, VideoOption.fromId("exact")) // the old id
         assertEquals(VideoOption.DRAFT, VideoOption.fromId(null))
+        assertEquals("Quick preview · 768P", VideoOption.DRAFT.detail)
         assertEquals(Quality.DRAFT, RenderSpec(engine = Engine.REPLICATE).quality)
+        assertEquals(listOf("1080p" to (1080 to 1920), "2K" to (1440 to 2560), "4K" to (2160 to 3840)), UpscaleSize.entries.map { it.label to (it.width to it.height) })
+    }
+
+    @Test fun nothingMembersReadNamesAProviderOrHardware() {
+        val words = Regex("(?i)gpu|runpod|replicate|\\bh3\\b|\\blite\\b|steps|warm|start-up")
+        for (o in VideoOption.entries) { assertFalse(o.label, words.containsMatchIn(o.label)); assertFalse(o.detail, words.containsMatchIn(o.detail)) }
+        for (q in Quality.entries) assertFalse(q.detail, words.containsMatchIn(q.detail))
+    }
+}
+
+/** Pass-through photo estimates: checked against photo_pricing_fixture.json (generated with JavaScript's toFixed). */
+class PhotoPricingTest {
+    private val fx = Json.parseToJsonElement(javaClass.getResource("/photo_pricing_fixture.json")!!.readText()).jsonObject
+
+    @Test fun everyFixtureRowMatches() {
+        val pj = fx["params"]!!.jsonObject
+        val p = PhotoPrices(pj["perRun"]!!.jsonPrimitive.double, pj["perInputMp"]!!.jsonPrimitive.double, pj["perOutputMp"]!!.jsonPrimitive.double,
+            pj["perEdit"]!!.jsonPrimitive.double, pj["refMp"]!!.jsonPrimitive.double, pj["maxRefs"]!!.jsonPrimitive.int, pj["loraShots"]!!.jsonPrimitive.int)
+        assertEquals(PhotoPrices(), p)
+        val rows = fx["rows"]!!.jsonArray
+        assertEquals(94, rows.size)
+        for (row in rows) {
+            val o = row.jsonObject
+            val count = o["count"]!!.jsonPrimitive.int
+            val refs = o["refs"]!!.jsonPrimitive.int
+            val v = when (o["kind"]!!.jsonPrimitive.content) {
+                "shoot" -> PhotoPricing.shoot(p, count, refs)
+                "outfitSet" -> PhotoPricing.outfitSet(p, refs)
+                "sheetAngles" -> PhotoPricing.sheetAngles(p, count, refs)
+                else -> PhotoPricing.loraSet(p, refs)
+            }
+            assertEquals(o.toString(), o["estimate"]!!.jsonPrimitive.double, v, 0.0)
+            assertEquals(o.toString(), o["label"]!!.jsonPrimitive.content, PhotoPricing.about(v))
+        }
+    }
+
+    @Test fun theUsualEstimates() {
+        val p = PhotoPrices()
+        assertEquals("about \$0.46", PhotoPricing.about(PhotoPricing.shoot(p)))
+        assertEquals("about \$0.19", PhotoPricing.about(PhotoPricing.outfitSet(p)))
+        assertEquals("about \$0.10", PhotoPricing.about(PhotoPricing.sheetAngles(p, 1)))
     }
 }

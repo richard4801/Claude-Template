@@ -109,24 +109,19 @@ class NewVideoViewModel(private val c: AppContainer) : ViewModel() {
         val model = s.model(mid)?.takeIf { it.filled > 0 } ?: s.models.firstOrNull { it.locked }
         val outfits = s.outfitsOf(model?.id)
         val video = s.video ?: VideoFeatures.DEFAULT
-        var draft = if (!p.fastBeta && d.engine == Engine.VIGGLE) d.copy(engine = Engine.H3) else d
-        // A quality the server can't run right now falls back to the first one it can (Replicate not set up → Exact edit).
-        if (!video.available(draft.option.id)) VideoOption.entries.firstOrNull { video.available(it.id) }?.let { draft = draft.pick(it) }
+        var draft = if (!p.fastBeta && d.engine == Engine.VIGGLE) d.pick(VideoOption.DRAFT) else d
+        // An option that can't run right now falls back to the first one that can (Render first, then Edit).
+        if (!video.available(draft.option.id)) (VideoOption.RENDER + VideoOption.EDIT).firstOrNull { video.available(it.id) }?.let { draft = draft.pick(it) }
         VideoState(draft, s.models, model, outfits, outfits.firstOrNull { it.id == oid } ?: outfits.firstOrNull(), s.balance.balance, p.fastBeta, b.first, b.second, video)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, VideoState())
 
     fun edit(f: (VideoDraft) -> VideoDraft) = c.drafts.video.update(f)
 
-    fun steps(n: Int) {
-        val v = Pricing.clampSteps(n)
-        if (v != c.drafts.video.value.steps) edit { it.copy(steps = v) }
-    }
-
     fun sample(bad: Boolean) = viewModelScope.launch {
         busy.update { true to it.second }
         val clip = c.repo.uploadClip(if (bad) SampleData.badMeta else SampleData.sampleMeta, null)
         busy.update { false to it.second }
-        if (clip != null) { edit { it.copy(clip = clip, showBadExample = bad) }; creatingStarted() }
+        if (clip != null) edit { it.copy(clip = clip, showBadExample = bad) }
     }
 
     /** A clip from the Android Photo Picker: read its real metadata, upload it, run the checks. */
@@ -139,7 +134,6 @@ class NewVideoViewModel(private val c: AppContainer) : ViewModel() {
             val bytes = if (c.repo.api is studio.muse.app.data.HttpMuseApi) media.bytes(uri) else null
             val clip = c.repo.uploadClip(meta, bytes, media.mime(uri).takeIf { it.startsWith("video/") } ?: "video/mp4") ?: return@launch
             edit { it.copy(clip = clip.copy(thumb = thumb?.let { t -> ImageRef(url = t) }), showBadExample = false) }
-            creatingStarted()
         } catch (e: Exception) {
             c.repo.toast("Couldn't read that clip")
         } finally {
@@ -174,19 +168,8 @@ class NewVideoViewModel(private val c: AppContainer) : ViewModel() {
         }
     }
 
-    /**
-     * Keep GPU warm: creating started (a clip picked or uploaded, or the video studio opened). Nudges once per flow, and
-     * only for Exact edit: Draft / Standard / HD run on Replicate and never use our GPU.
-     */
-    fun creatingStarted() { if (c.drafts.video.value.engine == Engine.H3) c.warmUi.creatingStarted(c.repo.state.value.warm) }
-
-    /** The quality picker. Switching to Exact edit is when creating on our GPU starts (the warm nudge, once per flow). */
-    fun pickOption(o: VideoOption) {
-        edit { it.pick(o) }
-        if (o == VideoOption.EXACT) creatingStarted()
-    }
-    fun enterFlow() = c.warmUi.enterFlow()
-    fun leaveFlow() = c.warmUi.leaveFlow()
+    /** Render (Draft / Standard / HD) or an add-on (Edit, Fast · beta). */
+    fun pickOption(o: VideoOption) = edit { it.pick(o) }
 
     fun markNotifAsked() = viewModelScope.launch { c.prefsStore.update { it.copy(notifAsked = true) } }
     val notifAsked get() = c.prefs.value.notifAsked
@@ -209,7 +192,6 @@ fun SourceScreen() {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) vm.pick(uri) }
     val pickVideo = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) }
     val clip = s.clip
-    DisposableEffect(Unit) { vm.enterFlow(); onDispose { vm.leaveFlow() } }
     ScreenBox {
         Column(Modifier.fillMaxSize()) {
             TopBar("New video", onBack = { nav.back() })
@@ -229,10 +211,8 @@ fun SourceScreen() {
                     }
                     if (clip.ok) {
                         val len = clip.takeIf { it.id != SampleData.SAMPLE_CLIP }?.durationSec
-                        if (s.draft.exact) Field("Use · price at ${s.draft.steps} steps") {
-                            Seg(ClipUse.entries.map { it.id to Pricing.sourceOption(it, s.draft.steps, len) }, s.draft.use.id, { k -> vm.edit { it.copy(use = ClipUse.fromId(k)) } }, small = false)
-                        } else if (s.draft.replicate) Field("Use") {
-                            T("Whole clip · ${s.spec.replicateSeconds} s · ${s.draft.quality.label} ${Pricing.priceLine(s.spec)}", m.type.body, m.t.ink)
+                        Field("Use") {
+                            T("Whole clip · ${s.draft.option.label} · ${Pricing.optionPriceLine(s.spec)}", m.type.body, m.t.ink)
                         }
                     }
                 }
@@ -287,11 +267,6 @@ fun DirectScreen() {
     val m = muse
     val d = s.draft
     val notif = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    val container = LocalContainer.current
-    val studio by container.repo.state.collectAsState()
-    // Opening the video studio (Generate) starts creating: the Keep GPU warm nudge, unless this flow already had it.
-    DisposableEffect(Unit) { vm.enterFlow(); onDispose { vm.leaveFlow() } }
-    LaunchedEffect(Unit) { vm.creatingStarted() }
     val generate = {
         if (Build.VERSION.SDK_INT >= 33 && !vm.notifAsked) { vm.markNotifAsked(); notif.launch(Manifest.permission.POST_NOTIFICATIONS) }
         vm.generate { nav.go(Routes.QUEUE) }
@@ -301,7 +276,6 @@ fun DirectScreen() {
         MenuItem("quality", "Save as preset") { vm.toast("Saved as preset \"${s.clip?.name ?: "Clip"} · ${Pricing.engineLabel(s.spec)}\"") },
         MenuItem("retry", "Reset settings") { vm.reset() },
         MenuItem("studio", "Change clip") { nav.go(Routes.SOURCE) },
-        MenuItem("quality", "How steps work") { vm.toast("10 steps is enough: 15 and 20 looked the same in testing") },
     )
     ScreenBox {
         Column(Modifier.fillMaxSize()) {
@@ -315,12 +289,10 @@ fun DirectScreen() {
             } else TopBar("Video studio", onBack = { nav.back() }) { MoreMenu(menu) }
             DirectCanvas(s)
             ToolStrip(VIDEO_TOOLS, d.tool) { k -> vm.edit { it.copy(tool = k) } }
-            // Keep GPU warm is for Exact edit only (Replicate renders don't use our GPU).
-            if (d.exact) WarmSwitchRow(container, studio.warm)
             BSheet(12.dp) { DirectSheet(vm, s) }
         }
         Dock(tight = true) {
-            Cta(if (s.starting) (if (d.exact) "Starting GPU…" else "Starting…") else s.genLabel, { if (!s.starting) generate() }, Modifier.weight(1f), busy = s.starting, off = s.cost > s.balance)
+            Cta(if (s.starting) "Starting…" else s.genLabel, { if (!s.starting) generate() }, Modifier.weight(1f), busy = s.starting, off = s.cost > s.balance)
         }
     }
 }
@@ -369,15 +341,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.DirectSheet(vm: NewVi
     when (d.tool) {
         "quality" -> {
             QualityPicker(s, vm::pickOption)
-            if (s.fastBeta && !d.replicate) RowB {
-                Tiny("GPU engine", Modifier.weight(1f))
-                Seg(listOf("h3" to "Exact edit", "viggle" to "Fast · beta"), d.engine.id, { k -> vm.edit { it.copy(engine = Engine.fromId(k)) } }, Modifier.width(210.dp), small = true)
-            }
-            when (d.engine) {
-                Engine.VIGGLE -> NoteBox("Fast · beta renders in about 2 minutes with exact motion timing, but faces are softer and can warp slightly. Fixed quality, no steps.", warn = true)
-                Engine.H3 -> StepsControl(d.steps, vm::steps, Pricing.stepsDelta(s.spec))
-                Engine.REPLICATE -> Unit
-            }
+            if (d.engine == Engine.VIGGLE) NoteBox("Fast · beta is quicker with exact motion timing, but faces are softer and can warp slightly.", warn = true)
             RowB {
                 Column(Modifier.weight(1f)) { T("Takes", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink); Tiny("Different seeds, compared side by side") }
                 Stepper(d.takes, 1, Pricing.TAKES_MAX) { n -> vm.edit { it.copy(takes = n) } }
@@ -386,9 +350,9 @@ private fun androidx.compose.foundation.layout.ColumnScope.DirectSheet(vm: NewVi
         "bg" -> {
             H3("Background")
             Opt("Keep the real room", "Best realism. Uses the clip's own background.", d.background == "keep", onClick = { vm.edit { it.copy(background = "keep") } })
-            if (d.replicate) Tiny("A new background photo is on Exact edit for now.")
+            if (!d.edit) Tiny("A new background photo is on Edit for now.")
             else Opt("New background photo", "Vertical photo, same camera height, similar light.", d.background == "photo", onClick = { vm.edit { it.copy(background = "photo") } })
-            if (!d.replicate && d.background == "photo") Field("Background motion") {
+            if (d.edit && d.background == "photo") Field("Background motion") {
                 Seg(listOf("still" to "Still", "subtle" to "Subtly alive", "busy" to "Busy"), d.motion, { k -> vm.edit { it.copy(motion = k) } })
             }
         }
@@ -396,7 +360,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.DirectSheet(vm: NewVi
             H3("Sound")
             Opt("Keep the clip's audio", "The song or voice from your source clip.", d.keepAudio, onClick = { vm.edit { it.copy(keepAudio = true) } })
             Opt("Replace audio", "Upload a new track or voiceover.", !d.keepAudio, onClick = { vm.edit { it.copy(keepAudio = false) }; vm.toast("Pick a track or voiceover (demo)") })
-            if (d.replicate) Tiny("Mouth movements follow the clip. A separate lip sync pass is on Exact edit.")
+            if (!d.edit) Tiny("Mouth movements follow the clip. A separate lip sync pass is on Edit.")
             else RowB {
                 Column(Modifier.weight(1f)) { T("Lip sync", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink); Tiny("Only when the performer talks or sings · adds ~4 min") }
                 Toggle(d.lipSync, { vm.edit { it.copy(lipSync = !it.lipSync) } })
@@ -430,25 +394,30 @@ private fun androidx.compose.foundation.layout.ColumnScope.DirectSheet(vm: NewVi
 }
 
 /**
- * The quality picker: Draft (default) / Standard / HD on Replicate, Exact edit on our GPU, with the live price
- * ("about $0.14 · 7 s") from the shared pricing formula and the server's per-second prices.
+ * Render (Draft, the default / Standard / HD) and the add-ons (Edit, Fast · beta; Upscale on a finished take), with the
+ * price in outcomes ("about $0.14 · 7 s", "about $0.67"): no GPUs, steps or provider names (plans/api.md "App clean-up" §2).
  */
 @Composable
 fun QualityPicker(s: VideoState, onPick: (VideoOption) -> Unit) {
     val m = muse
     val d = s.draft
-    val options = VideoOption.entries.filter { s.video.available(it.id) || it == d.option }
-    RowB { H3("Quality"); Pill(if (d.replicate) "MiniMax H3 · Replicate" else "MiniMax H3 · our GPU") }
-    Seg(options.map { it.id to it.label }, d.option.id, { k -> onPick(VideoOption.fromId(k)) }, Modifier.fillMaxWidth())
-    val info = s.video.option(d.option.id)
-    val detail = info?.detail?.ifBlank { null } ?: d.option.quality?.detail ?: VideoOption.EXACT_DETAIL
-    if (d.replicate) {
-        RowB {
-            Tiny(detail, Modifier.weight(1f))
-            T(Pricing.priceLine(s.spec), m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink)
-        }
-        Tiny("Whole clip, billed per second of video. Different takes come out slightly different.")
-    } else Tiny(detail)
+    val render = VideoOption.RENDER.filter { s.video.available(it.id) || it == d.option }
+    val addons = VideoOption.ADDONS.filter { (s.video.available(it.id) && (it != VideoOption.FAST || s.fastBeta)) || it == d.option }
+    H3("Render")
+    if (render.isNotEmpty()) Seg(render.map { it.id to it.label }, if (d.option.addon) "" else d.option.id, { k -> onPick(VideoOption.fromId(k)) }, Modifier.fillMaxWidth())
+    if (addons.isNotEmpty()) {
+        Lbl("Add-ons")
+        Seg(addons.map { it.id to it.label }, if (d.option.addon) d.option.id else "", { k -> onPick(VideoOption.fromId(k)) }, Modifier.fillMaxWidth(), small = true)
+    }
+    val detail = (if (d.option.addon) s.video.addon(d.option.id)?.detail else s.video.option(d.option.id)?.detail)?.ifBlank { null } ?: d.option.detail
+    RowB {
+        Tiny(detail, Modifier.weight(1f))
+        T(Pricing.optionPriceLine(s.spec), m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink)
+    }
+    Tiny(if (d.replicate) "Whole clip, billed per second of video. Different takes come out slightly different."
+        else "Whole clip. Different takes come out slightly different.")
+    val up = s.video.upscale
+    Tiny("Upscale to 1080p, 2K or 4K from a finished take · ${if (up.available) "on the take" else "coming soon"}")
 }
 
 @Composable
@@ -459,93 +428,4 @@ private fun Stepper(value: Int, min: Int, max: Int, onChange: (Int) -> Unit) {
         T("$value", m.type.mono.copy(fontSize = 18.sp, fontWeight = FontWeight.Bold), m.t.ink)
         Cta2("", { if (value < max) onChange(value + 1) }, icon = "chev", height = 40.dp)
     }
-}
-
-/** Steps 4–30 with the per-theme control: dial plate (Camera Body) or slider (the others). */
-@Composable
-fun StepsControl(steps: Int, onSteps: (Int) -> Unit, delta: String) {
-    val m = muse
-    if (m.isB) return DialPlate(steps, onSteps)
-    val shape = RoundedCornerShape(22.dp)
-    Column(
-        Modifier.fillMaxWidth().let { if (m.isC) it.clip(shape).background(m.t.surface).padding(16.dp) else it },
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        RowB {
-            Lbl("Steps")
-            if (m.isD) Sticker(Pricing.stepsBadge(steps, loud = true), "yellow", -5f, size = 13f)
-            else Pill(Pricing.stepsBadge(steps).let { if (it == "Below tested range") "Below tested" else it }, if (steps == Pricing.STEPS_DEFAULT) "good" else "warn")
-        }
-        T("$steps", if (m.isA) m.type.stepNum else m.type.stepNum.copy(fontFamily = if (m.isC || m.isD) m.type.stepNum.fontFamily else m.t.mono), m.t.ink,
-            if (m.isA) Modifier.fillMaxWidth() else Modifier, align = if (m.isA) androidx.compose.ui.text.style.TextAlign.Center else null)
-        MuseSlider(steps, Pricing.STEPS_MIN, Pricing.STEPS_MAX, onSteps)
-        Scale("4", "10", "20", "30")
-        Tiny(delta)
-    }
-}
-
-@Composable
-private fun DialPlate(steps: Int, onSteps: (Int) -> Unit) {
-    val m = muse
-    val shape = RoundedCornerShape(16.dp)
-    Column(
-        Modifier.fillMaxWidth().clip(shape).background(Brush.verticalGradient(listOf(Color(0xFF24282B), Color(0xFF121415)))).border(1.dp, Color(0xFF33373A), shape)
-            .drawBehind {
-                listOf(Offset(11.dp.toPx(), 11.dp.toPx()), Offset(size.width - 11.dp.toPx(), 11.dp.toPx()), Offset(11.dp.toPx(), size.height - 11.dp.toPx()), Offset(size.width - 11.dp.toPx(), size.height - 11.dp.toPx()))
-                    .forEach { drawCircle(Brush.radialGradient(listOf(Color(0xFF5A5F63), Color(0xFF1C1F21)), it, 3.5.dp.toPx()), 3.5.dp.toPx(), it) }
-            }.padding(horizontal = 14.dp, vertical = 10.dp),
-        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Lbl("Steps")
-        Box(Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFF0B0C0D)).border(1.dp, Color(0xFF2F3336), RoundedCornerShape(8.dp)).padding(horizontal = 12.dp)) {
-            T("$steps", m.type.mono.copy(fontSize = 24.sp, lineHeight = 31.sp), m.t.accent)
-        }
-        T(Pricing.stepsBadge(steps), m.type.tiny, m.t.accent)
-        RowB {
-            KnobBtn("back") { onSteps(steps - 1) }
-            Knob(steps, onSteps)
-            KnobBtn("chev") { onSteps(steps + 1) }
-        }
-        Row(Modifier.fillMaxWidth().height(26.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-            repeat(27) { i ->
-                val on = i + 4 == steps
-                Box(Modifier.width(if (on) 3.dp else 1.5.dp).height(if (on) 26.dp else if (i % 5 == 0) 18.dp else 10.dp).background(if (on) m.t.accent else m.t.muted.copy(alpha = if (i % 5 == 0) 1f else .6f)))
-            }
-        }
-        Scale("4", "10", "20", "30")
-    }
-}
-
-@Composable
-private fun KnobBtn(icon: String, onClick: () -> Unit) {
-    Box(Modifier.size(34.dp).clip(CircleShape).background(Color(0xFF15181A)).border(1.dp, Color(0xFF3A3F43), CircleShape).press(onClick = onClick), contentAlignment = Alignment.Center) {
-        Ic(icon, 16.dp, muse.t.muted)
-    }
-}
-
-/** Camera Body's rotary knob: drag around it, 10° per step. */
-@Composable
-private fun Knob(steps: Int, onSteps: (Int) -> Unit) {
-    val m = muse
-    var start by remember { mutableStateOf<Pair<Float, Int>?>(null) }
-    Box(
-        Modifier.size(80.dp).pointerInput(Unit) {
-            detectDragGestures(
-                onDragStart = { p -> start = atan2(p.y - size.height / 2f, p.x - size.width / 2f) to steps },
-                onDragEnd = { start = null },
-            ) { ch, _ ->
-                val st = start ?: return@detectDragGestures
-                var a = atan2(ch.position.y - size.height / 2f, ch.position.x - size.width / 2f) - st.first
-                if (a > Math.PI) a -= (2 * Math.PI).toFloat()
-                if (a < -Math.PI) a += (2 * Math.PI).toFloat()
-                onSteps(st.second + (a * 180 / Math.PI / 10).roundToInt())
-            }
-        }.rotate((steps - 17) * 10f).drawBehind {
-            val r = size.minDimension / 2
-            drawCircle(Color(0xFF31363A), r + 8.dp.toPx())
-            drawCircle(Color(0xFF191C1E), r + 7.dp.toPx())
-            drawCircle(Brush.radialGradient(listOf(Color(0xFF4A5055), Color(0xFF16191B)), Offset(size.width * .38f, size.height * .32f), r * 1.3f), r)
-            drawLine(m.t.accent, Offset(size.width / 2, 8.dp.toPx()), Offset(size.width / 2, 28.dp.toPx()), 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
-        },
-    )
 }

@@ -139,7 +139,7 @@ fun OutfitScreen() {
                 Cta("Save outfit", { vm.save(celebrate) { nav.back() } }, Modifier.weight(1f))
             } else {
                 Cta(
-                    if (s.busy) "Generating…" else if (s.draft.mode == "own") "Use my images" else "Generate outfit set · ${Pricing.money(Pricing.OUTFIT_SET_COST)}",
+                    if (s.busy) "Generating…" else if (s.draft.mode == "own") "Use my images" else "Generate outfit set · ${studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.outfitSet(photoPrices()))}",
                     { if (!s.busy) vm.generate() }, Modifier.weight(1f), busy = s.busy,
                 )
             }

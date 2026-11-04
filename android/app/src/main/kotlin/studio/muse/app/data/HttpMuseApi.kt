@@ -80,6 +80,9 @@ interface MuseService {
     @POST("v1/templates/{id}/prompt") suspend fun templatePrompt(@Path("id") id: String, @Body r: TemplatePromptRequest): TemplatePrompt
     @GET("v1/balance") suspend fun balance(): Balance
     @POST("v1/balance/topup") suspend fun topUp(@Body r: TopUpRequest): Balance
+    @GET("v1/studio/balance") suspend fun studioBalance(): StudioBalance
+    @POST("v1/studio/topups") suspend fun addTopUp(@Body r: AddTopUpRequest): StudioBalance
+    @POST("v1/takes/{id}/upscale") suspend fun upscale(@Path("id") id: String, @Body r: UpscaleRequest): Job
     @GET("v1/wallet") suspend fun wallet(): Wallet
     @GET("v1/members") suspend fun members(): List<Member>
     @PATCH("v1/members/{id}") suspend fun patchMember(@Path("id") id: String, @Body r: JsonObject): Member
@@ -246,6 +249,9 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun balance() = call { balance() }
     override suspend fun topUp(req: TopUpRequest) = call { topUp(req) }
     override suspend fun wallet() = call { wallet() }
+    override suspend fun studioBalance() = call { studioBalance() }
+    override suspend fun addTopUp(req: AddTopUpRequest) = call { addTopUp(req) }
+    override suspend fun upscale(takeId: String, size: String) = call { upscale(takeId, UpscaleRequest(size)) }
     override suspend fun listMembers() = call { members() }
     override suspend fun transfer(req: TransferRequest) = call { transfer(req) }
     override suspend fun reclaim(req: ReclaimRequest) = call { reclaim(req) }

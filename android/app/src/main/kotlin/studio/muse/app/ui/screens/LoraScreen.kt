@@ -58,7 +58,9 @@ import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
 import studio.muse.core.Pricing
 
-data class LoraState(val model: Model? = null, val lora: Lora = Lora(""), val balance: Double = 0.0) {
+data class LoraState(val model: Model? = null, val lora: Lora = Lora(""), val balance: Double = 0.0, val photo: studio.muse.core.PhotoPrices = studio.muse.core.PhotoPrices()) {
+    /** Pass-through: the estimate held for the 30 training shots ("about $3.03"). */
+    val setCost get() = studio.muse.core.PhotoPricing.loraSet(photo)
     val trainCost get() = Pricing.loraTrainCost
     val low get() = trainCost > balance + 1e-9
 }
@@ -66,13 +68,13 @@ data class LoraState(val model: Model? = null, val lora: Lora = Lora(""), val ba
 class LoraViewModel(private val c: AppContainer) : ViewModel() {
     val state: StateFlow<LoraState> = combine(c.repo.state, c.drafts.modelId) { s, mid ->
         val model = s.model(mid) ?: s.models.firstOrNull()
-        LoraState(model, s.lora(model?.id), s.balance.balance)
+        LoraState(model, s.lora(model?.id), s.balance.balance, s.photo)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, LoraState())
 
     private val id get() = state.value.model?.id
     fun build() = viewModelScope.launch {
         val m = id ?: return@launch
-        if (Pricing.LORA_SET_COST > state.value.balance + 1e-9) return@launch c.repo.toast(lowFundsMessage(c), Routes.CREDITS)
+        if (state.value.setCost > state.value.balance + 1e-9) return@launch c.repo.toast(lowFundsMessage(c), Routes.CREDITS)
         c.repo.buildLoraSet(m)
     }
     fun toggle(cand: LoraCandidate) = viewModelScope.launch { id?.let { c.repo.keepCandidate(it, cand.id, !cand.keep) } }
@@ -127,7 +129,7 @@ fun LoraScreen() {
                 }
                 "training" -> Cta2("Back to profile", { nav.back() }, Modifier.weight(1f))
                 "ready" -> Cta("Test it in a photoshoot", { nav.go(Routes.SHOOT) }, Modifier.weight(1f))
-                else -> Cta("Build training set · ${Pricing.money(Pricing.LORA_SET_COST)}", vm::build, Modifier.weight(1f))
+                else -> Cta("Build training set · ${studio.muse.core.PhotoPricing.about(s.setCost)}", vm::build, Modifier.weight(1f))
             }
         }
     }
@@ -190,7 +192,7 @@ private fun LoraIntro(model: Model?) {
     ListGroup {
         TwoLineRow("Photo LoRA", "For photoshoots · ~${Pricing.LORA_PHOTO_MIN} min", "camera")
         ListDivider()
-        TwoLineRow("Video LoRA", "For H3 videos · ~${Pricing.LORA_VIDEO_MIN} min", "studio")
+        TwoLineRow("Video LoRA", "For videos · ~${Pricing.LORA_VIDEO_MIN} min", "studio")
     }
     Field("How it works") {
         listOf("We generate 30 varied shots from her sheet", "You keep the ones that look like her", "We train both LoRAs on what you kept").forEachIndexed { i, t ->

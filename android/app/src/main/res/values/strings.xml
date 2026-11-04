@@ -3,7 +3,7 @@
     <string name="channel_renders">Renders</string>
     <string name="channel_renders_desc">When a render finishes or fails</string>
     <string name="channel_posts">Scheduled posts</string>
-    <string name="channel_warm">Warm GPU</string>
-    <string name="channel_warm_desc">While a GPU is kept warm for you: time, cost so far and Turn off</string>
+    <string name="channel_warm">Add-on engine (owner)</string>
+    <string name="channel_warm_desc">While the studio owner keeps the add-on engine ready: time, cost so far and Turn off</string>
     <string name="channel_posts_desc">When it\'s time to post a scheduled video</string>
 </resources>

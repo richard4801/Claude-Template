@@ -163,6 +163,9 @@ private fun ownerVm(): OwnerViewModel {
     return viewModel { OwnerViewModel(c) }
 }
 
+/** "$4.20", or "−$1.30" when the studio balance is below zero. */
+fun signedMoney(v: Double) = if (v < -0.004) "−" + Pricing.money(-v) else Pricing.money(kotlin.math.max(v, 0.0))
+
 fun engineLabel(p: String) = when (p) { "replicate" -> "Replicate"; "fal" -> "fal.ai"; "custom-http" -> "Custom (HTTP)"; else -> "Simulated" }
 
 /** "25 min ago", "3 days ago". */
@@ -198,20 +201,21 @@ fun InlineNote(text: String, error: Boolean) {
     NoteBox(text, warn = error, icon = if (error) "shield" else "check")
 }
 
-// ======================================================================= Owner balance (RunPod + available to send)
+// ======================================================================= Owner balance (the studio balance + available to send)
 
+/** The owner-loaded studio balance (top-ups − spending) and what's free to spend or send (plans/api.md "App clean-up" §4). */
 @Composable
-fun OwnerBalanceCard(w: Wallet, modifier: Modifier = Modifier) {
+fun OwnerBalanceCard(w: Wallet, modifier: Modifier = Modifier, studio: studio.muse.app.data.StudioBalance? = null) {
     val m = muse
     val shape = RoundedCornerShape(m.t.rLg)
     val (bg, fg) = when { m.isB -> m.t.surface2 to m.t.ink; m.isC -> m.t.cta to androidx.compose.ui.graphics.Color.White; m.isD -> m.t.blue to androidx.compose.ui.graphics.Color.White; else -> m.t.ink to m.t.bg }
     Box(modifier.fillMaxWidth().let { if (m.isD) it.hardShadow(5.dp, m.t.rLg) else it }.clip(shape).background(bg).let { if (m.isD) it.border(2.5.dp, Ink, shape) else if (m.isB) it.border(1.dp, m.t.line, shape) else it }.padding(20.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Lbl(if (w.balanceSource == "simulated") "RunPod balance · simulated" else "RunPod balance", color = fg.copy(alpha = .8f))
-            T(w.runpodBalance?.let { Pricing.money(it) } ?: "Unavailable", m.type.mono.copy(fontSize = 42.sp, fontWeight = FontWeight.SemiBold, lineHeight = 46.sp), if (m.isB) m.t.accent else fg)
-            T("Available to send ${Pricing.money(w.availableToSend ?: 0.0)}", m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), fg)
+            Lbl("Studio balance", color = fg.copy(alpha = .8f))
+            T(signedMoney(studio?.balanceUsd ?: w.studioBalance ?: w.usd), m.type.mono.copy(fontSize = 42.sp, fontWeight = FontWeight.SemiBold, lineHeight = 46.sp), if (m.isB) m.t.accent else fg)
+            T("Free to spend or send ${signedMoney(w.availableToSend ?: 0.0)}", m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), fg)
             w.membersUnspentUsd?.let { Tiny("Members hold ${Pricing.money(it)} in unspent credit${if (w.heldUsd > 0) " · ${Pricing.money(w.heldUsd)} on hold" else ""}", color = fg.copy(alpha = .85f)) }
-            if (w.balanceSource == "unavailable") Tiny("MUSE can't read RunPod right now, so credit can't be sent.", color = fg)
+            studio?.let { Tiny("Added ${Pricing.money(it.toppedUpUsd)} · spent ${Pricing.money(it.spentUsd)}", color = fg.copy(alpha = .85f)) }
         }
     }
 }
@@ -236,7 +240,7 @@ fun MembersScreen() {
                 if (people.isEmpty()) NoteBox("No members yet. Invite someone, then send them credit to render with.", icon = "user")
                 people.forEach { mem -> MemberCard(vm, mem, open == mem.id, s) }
                 Cta2("Invite someone", { nav.go(Routes.INVITE) }, Modifier.fillMaxWidth(), icon = "plus")
-                Tiny("Amounts are in US dollars. You can't send more than your RunPod balance backs.")
+                Tiny("Amounts are in US dollars. You can't send more than the studio balance has free. Add top-ups in Credit.")
             }
         }
     }
@@ -380,12 +384,12 @@ fun StudioSettingsScreen() {
             TopBar("Studio settings", onBack = { nav.back() })
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 val st = s.settings
-                if (st == null) T("Loading…", m.type.body, m.t.muted) else StudioForm(vm, st, s)
-                Spacer(Modifier.height(4.dp))
-                H3("Image engine")
-                Tiny("Makes character-sheet angles, outfit sets and photoshoots. Video renders always run on the GPU.")
-                val en = s.engine
-                if (en != null) EngineForm(vm, en, s)
+                if (st == null) T("Loading…", m.type.body, m.t.muted) else {
+                    StudioForm(vm, st, s)
+                    // Engines: the only place provider names, GPUs and start-up appear (owner only; plans/api.md "App clean-up" §5).
+                    Spacer(Modifier.height(4.dp))
+                    EnginesSection(vm, st, s)
+                }
             }
         }
     }
@@ -393,26 +397,10 @@ fun StudioSettingsScreen() {
 
 @Composable
 private fun StudioForm(vm: OwnerViewModel, st: StudioSettings, s: OwnerState) {
-    var gpus by remember(st) { mutableStateOf(st.maxGpus) }
-    var payer by remember(st) { mutableStateOf(st.overheadPayer) }
-    var warmWho by remember(st) { mutableStateOf(st.warmGpuAllowed) }
     var perJob by remember(st) { mutableStateOf(Pricing.toFixed(st.capPerJob, 2)) }
     var perDay by remember(st) { mutableStateOf(Pricing.toFixed(st.capPerDay, 2)) }
     var perUser by remember(st) { mutableStateOf(Pricing.toFixed(st.capPerUserDay, 2)) }
     val m = muse
-    if (st.lowBalance) NoteBox("Renders are paused: the RunPod balance is below ${Pricing.money(st.minRunpodBalance)} plus the work in flight. Top up on RunPod.", warn = true)
-    Field("Max GPUs at once · $gpus") {
-        MuseSlider(gpus, 0, 8, { gpus = it })
-        Tiny(if (gpus == 0) "0 pauses all renders." else "Each member renders on their own H100 while it's free.")
-    }
-    Field("Who pays GPU warm-up") {
-        Seg(listOf("user" to "The member", "owner" to "The studio (me)"), payer, { payer = it })
-        Tiny("Starting a GPU costs about ${Pricing.money(0.5 / 60 * 3.99)}. It shows as its own line on the job's cost.")
-    }
-    Field("Who can keep a GPU warm") {
-        Seg(listOf("everyone" to "Everyone", "owner" to "Only me"), warmWho, { warmWho = it })
-        Tiny("A warm GPU starts renders at once. It bills about ${Pricing.money(3.99)}/hour to whoever turns it on and turns off after ${st.warmIdleMinutes} min without renders.")
-    }
     Field("Spending caps ($)") {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CapInput("Per job", perJob, { perJob = it }, Modifier.weight(1f))
@@ -420,12 +408,57 @@ private fun StudioForm(vm: OwnerViewModel, st: StudioSettings, s: OwnerState) {
             CapInput("Member / day", perUser, { perUser = it }, Modifier.weight(1f))
         }
     }
-    Tiny("Jobs pause when RunPod drops below ${Pricing.money(st.minRunpodBalance)} plus work in flight.")
-    Cta(if (s.busy) "Saving…" else "Save studio settings", {
-        vm.saveStudio(StudioSettingsPatch(gpus, payer, perJob.toDoubleOrNull(), perDay.toDoubleOrNull(), perUser.toDoubleOrNull(), warmGpuAllowed = warmWho))
+    Cta(if (s.busy) "Saving…" else "Save caps", {
+        vm.saveStudio(StudioSettingsPatch(capPerJob = perJob.toDoubleOrNull(), capPerDay = perDay.toDoubleOrNull(), capPerUserDay = perUser.toDoubleOrNull()))
     }, Modifier.fillMaxWidth(), busy = s.busy)
     s.note?.takeIf { it.first == "studio" }?.let { InlineNote(it.second, it.third) }
-    if (!st.features.replaceAudio) Tiny("Replace audio isn't on the GPU yet: turning Keep audio off gives a silent take.", color = m.t.muted)
+    if (!st.features.replaceAudio) Tiny("Replace audio isn't available yet: turning Keep audio off gives a silent take.", color = m.t.muted)
+}
+
+/**
+ * Owner Settings → Engines: each engine's status and whether its key is set, the add-on GPU limits, who pays start-up,
+ * Keep add-on engine ready, and the image engine. The only screen that names providers.
+ */
+@Composable
+private fun EnginesSection(vm: OwnerViewModel, st: StudioSettings, s: OwnerState) {
+    val m = muse
+    val c = LocalContainer.current
+    val studio by c.repo.state.collectAsState()
+    var gpus by remember(st) { mutableStateOf(st.maxGpus) }
+    var payer by remember(st) { mutableStateOf(st.overheadPayer) }
+    H3("Engines")
+    Tiny("Members only ever see results, time and price. Engines, keys and GPUs live here.")
+    val list = st.engines?.list.orEmpty()
+    if (list.isEmpty()) Tiny("This server doesn't report engine status.")
+    else ListGroup {
+        list.forEach { e ->
+            Li(if (e.id == "replicate") "spark" else "studio", e.name.ifBlank { e.id }, sub = listOfNotNull(e.usedFor.ifBlank { null }, if (e.keySet) "key set" else "no key",
+                e.balanceUsd?.let { "balance ${Pricing.money(it)}" }, e.message).joinToString(" · "), onClick = {}) {
+                Pill(engineStatusLabel(e.status), if (e.status == "ready") "good" else if (e.status == "simulated") "" else "warn")
+            }
+        }
+    }
+    Lbl("Add-on engine (Edit, Fast · beta, Upscale)")
+    WarmSwitchRow(c, studio.warm)
+    Tiny("Turns off after ${st.engines?.keepReady?.idleMinutes ?: st.warmIdleMinutes} min without renders, and after ${(st.engines?.keepReady?.maxMinutes ?: st.warmMaxMinutes) / 60.0} h at most (Keep ready extends it once).".replace(".0 h", " h"))
+    Field("Add-on GPUs at once · $gpus") {
+        MuseSlider(gpus, 0, 8, { gpus = it })
+        Tiny(if (gpus == 0) "0 pauses Edit and Fast · beta." else "Each member's Edit renders run on their own H100 while it's free.")
+    }
+    Field("Who pays start-up") {
+        Seg(listOf("user" to "The member", "owner" to "The studio (me)"), payer, { payer = it })
+        Tiny("Starting an add-on GPU costs about ${Pricing.money(0.5 / 60 * 3.99)}. It's charged with the render, never shown to members as its own line.")
+    }
+    Cta2(if (s.busy) "Saving…" else "Save engine settings", { vm.saveStudio(StudioSettingsPatch(maxGpus = gpus, overheadPayer = payer)) }, Modifier.fillMaxWidth())
+    Spacer(Modifier.height(4.dp))
+    H3("Image engine")
+    Tiny("Makes character-sheet angles, outfit sets and photoshoots. Members pay exactly what each photo costs.")
+    val en = s.engine
+    if (en != null) EngineForm(vm, en, s)
+}
+
+fun engineStatusLabel(status: String) = when (status) {
+    "ready" -> "Ready"; "no_key" -> "No key"; "simulated" -> "Simulated"; "out_of_credit" -> "Out of credit"; "no_gpu" -> "No GPU free"; else -> status
 }
 
 @Composable

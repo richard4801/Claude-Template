@@ -79,7 +79,7 @@ class QueueViewModel(private val c: AppContainer) : ViewModel() {
 
     fun open(j: Job, nav: Nav) {
         if (j.done) nav.go(Routes.result(j.id))
-        else c.repo.toast("Still rendering · ${j.phase.ifBlank { "starting" }}")
+        else c.repo.toast("Still rendering · ${j.statusLine()}")
     }
 
     fun retry(j: Job, nav: Nav) {
@@ -131,7 +131,7 @@ private fun FailCard(vm: QueueViewModel, j: Job) {
     NoteBox("", warn = true) {
         Column(Modifier.weight(1f)) {
             T("Render failed · ${j.title}", m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.Bold), m.t.ink)
-            Tiny("${j.error ?: "The GPU disconnected."} ${Pricing.money(j.refunded)} refunded.", color = m.t.ink)
+            Tiny(j.failLine(), color = m.t.ink)
         }
         Cta2("Retry", { vm.retry(j, nav) }, height = 40.dp)
     }
@@ -156,17 +156,48 @@ private fun EmptyQueue() {
 
 private fun Job.clockText() = if (done) formatTimecode(totalSeconds) else formatClock(etaSeconds ?: secondsLeft)
 
-/** "#2 in line · done in ~6:30", "Paused: the studio's GPU credit is low", or the server's phase line. */
-fun Job.statusLine(): String = when {
-    paused -> studio.muse.app.data.ErrorText.PAUSED_LOW_BALANCE
-    state == "running" && queuePosition != null -> "#$queuePosition in line for a GPU" + (etaSeconds?.let { " · done in ~${formatClock(it)}" } ?: "")
-    else -> phase
+/**
+ * What a running job is doing, in outcomes (plans/api.md "App clean-up" §1): "Rendering · about 2 min · $0.14",
+ * "Waiting to start · $0.14", "#2 in line · about 9 min · $0.14".
+ */
+fun Job.statusLine(): String {
+    val price = Pricing.money(cost)
+    val left = etaSeconds ?: secondsLeft
+    val time = if (left > 0) " · about ${aboutTime(left)}" else ""
+    if (state == "running" && queuePosition != null) return "${if (queuePosition <= 1) "Waiting to start" else "#$queuePosition in line"}$time · $price"
+    return "${memberPhase(phase)}$time · $price"
 }
 
-/** The job's cost; GPU warm-up (charged separately when the member pays it) gets its own line. */
-fun Job.costLines(): List<String> = listOfNotNull(
+/** "about 2 min", "under a minute". */
+fun aboutTime(seconds: Double): String = if (seconds < 60) "a minute" else "${Pricing.jsRound(seconds / 60).coerceAtLeast(1)} min"
+
+/**
+ * The server's phase without its time ("Rendering · ~6 min left" → "Rendering"). Older servers said "step 3/10",
+ * "Starting GPU" or "Waiting for Replicate": those read as Rendering / Getting ready / Waiting to start.
+ */
+fun memberPhase(phase: String): String {
+    val head = phase.substringBefore(" · ~").substringBefore(" · starts in")
+    val prefix = Regex("^take \\d+/\\d+ · ").find(head)?.value.orEmpty()
+    val rest = head.removePrefix(prefix)
+    val clean = when {
+        rest.isBlank() || Regex("(?i)paused|waiting|in line|queued|busy").containsMatchIn(rest) -> if (Regex("^#\\d+ in line").containsMatchIn(rest)) rest.substringBefore(" · ") else "Waiting to start"
+        Regex("(?i)gpu|starting|load|getting ready").containsMatchIn(rest) -> "Getting ready"
+        Regex("(?i)step|render|denois").containsMatchIn(rest) -> "Rendering"
+        Regex("(?i)finish|upload|trim").containsMatchIn(rest) -> "Finishing"
+        else -> rest
+    }
+    return prefix + clean
+}
+
+/** "Something went wrong · you weren't charged. $0.14 refunded." (the server's message is already member-safe). */
+fun Job.failLine(): String {
+    val e = error?.takeUnless { Regex("(?i)gpu|runpod|replicate|cuda|step \\d").containsMatchIn(it) } ?: studio.muse.app.data.ErrorText.WENT_WRONG
+    return "$e${if (refunded > 0) " · ${Pricing.money(refunded)} back" else ""}"
+}
+
+/** The job's cost, and what came back if it failed. */
+fun Job.costLines(): List<String> = listOf(
     "Render ${Pricing.money(cost)}${if (refunded > 0) " · ${Pricing.money(refunded)} refunded" else ""}",
-    warmupCost?.takeIf { it > 0 }?.let { "GPU warm-up ${Pricing.money(it)}" },
 )
 
 @Composable
@@ -249,7 +280,7 @@ private fun QueueB(vm: QueueViewModel, s: QueueState) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Kpi("Month", Pricing.money(s.balance.month), Modifier.weight(1f))
                 Kpi("Balance", Pricing.money(s.balance.balance), Modifier.weight(1f))
-                Kpi("GPU", if (s.running.isNotEmpty()) "H100" else "Off", Modifier.weight(1f))
+                Kpi("Rendering", "${s.running.size}", Modifier.weight(1f))
             }
         }
     }
@@ -291,7 +322,6 @@ private fun QueueC(vm: QueueViewModel, s: QueueState) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             RowB { T(j.title, m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink); T(Pricing.money(j.cost), m.type.mono.copy(fontSize = 12.5.sp), m.t.ink) }
                             Tiny("${j.engineLabel} · took ${formatTimecode(j.totalSeconds)}")
-                            j.warmupCost?.takeIf { it > 0 }?.let { Tiny("GPU warm-up ${Pricing.money(it)}") }
                             Pill("Done", "good")
                         }
                     }
@@ -306,7 +336,7 @@ private fun QueueC(vm: QueueViewModel, s: QueueState) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             T("Time left", m.type.body, m.t.muted, Modifier.padding(top = 8.dp))
             T(formatClock(r.etaSeconds ?: r.secondsLeft), m.type.body.copy(fontSize = 104.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-.04).em, lineHeight = 104.sp), m.t.ink)
-            T(if (r.paused || r.queuePosition != null) r.statusLine() else "Generating your video… ${r.phase.substringBefore(" · ~")}", m.type.body, if (r.paused) m.t.warn else m.t.muted)
+            T(if (r.queuePosition != null) r.statusLine() else "Generating your video… ${memberPhase(r.phase)}", m.type.body, m.t.muted)
             r.costLines().forEach { Tiny(it) }
             stages.forEachIndexed { i, (name, lim) ->
                 val prev = if (i == 0) 0.0 else stages[i - 1].second
@@ -372,7 +402,6 @@ private fun QueueD(vm: QueueViewModel, s: QueueState) {
                             T("${Pricing.jsRound(j.progress)}%", m.type.h2.copy(fontSize = 28.sp, lineHeight = 30.sp), m.t.ink)
                         }
                         Tiny(if (j.done) "Done · ${Pricing.money(j.cost)}" else "~${formatClock(j.etaSeconds ?: j.secondsLeft)} left · ${Pricing.money(j.cost)}")
-                        j.warmupCost?.takeIf { it > 0 }?.let { Tiny("+ GPU warm-up ${Pricing.money(it)}") }
                     }
                 }
             }

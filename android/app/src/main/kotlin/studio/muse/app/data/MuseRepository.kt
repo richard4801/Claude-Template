@@ -26,10 +26,12 @@ data class StudioState(
     val wallet: Wallet? = null,
     /** The template library (scope=all: mine + the studio's public ones). Tabs, search and tags filter it on the phone. */
     val templates: List<Template> = emptyList(),
-    /** Keep GPU warm. Null when the server doesn't have it (older server, server/mock). */
+    /** Keep add-on engine ready: the owner only (members never load it). Null for members and servers without it. */
     val warm: WarmGpu? = null,
-    /** The video quality picker from GET /v1/settings/studio (features.video). Null = the contract's defaults. */
+    /** Render and add-ons from GET /v1/settings/studio (features.video). Null = the contract's defaults. */
     val video: VideoFeatures? = null,
+    /** Photo prices for the estimates ("about $0.46"), from features.photo. */
+    val photo: studio.muse.core.PhotoPrices = studio.muse.core.PhotoPrices(),
     val loaded: Boolean = false,
     val error: String? = null,
 ) {
@@ -140,10 +142,15 @@ class MuseRepository(
             val loras = models.mapNotNull { m -> runCatching { a.lora(m.id) }.getOrNull()?.let { m.id to it } }.toMap()
             val accounts = models.mapNotNull { m -> runCatching { a.listAccounts(m.id) }.getOrNull()?.let { m.id to it } }.toMap()
             val posts = runCatching { a.listPosts() }.getOrDefault(emptyList())
-            val warm = runCatching { a.warmGpu() }.getOrNull()
-            val video = runCatching { a.studioSettings().features.video }.getOrNull()
+            // Keep add-on engine ready is owner-only: members never ask for it (the server answers 403 anyway).
+            val owner = wallet?.owner ?: (bal.role == "owner")
+            val warm = if (owner) runCatching { a.warmGpu() }.getOrNull() else null
+            val features = runCatching { a.studioSettings().features }.getOrNull()
             if (a !== api) return
-            _state.update { StudioState(models, outfits, jobs.sortedByDescending { it.createdAt }, takes, bal, loras, accounts, posts, wallet, warm = warm, video = video, loaded = true) }
+            _state.update {
+                StudioState(models, outfits, jobs.sortedByDescending { it.createdAt }, takes, bal, loras, accounts, posts, wallet, warm = warm, video = features?.video,
+                    photo = features?.photo?.prices ?: studio.muse.core.PhotoPrices(), loaded = true)
+            }
         } catch (e: ApiException) {
             _state.update { it.copy(loaded = true, error = ErrorText.of(e)) }
             if (e.code in ErrorText.SIGN_OUT_CODES) endSession(ErrorText.of(e)) else toast(ErrorText.of(e))
@@ -160,14 +167,19 @@ class MuseRepository(
     private fun onEvent(ev: ApiEvent) {
         ev.balance?.let { b -> _state.update { it.copy(balance = b) } }
         ev.wallet?.let { w -> onWallet(w) }
+        // Owner notices only (an engine's own account is out of credit): Settings → Engines says which.
         ev.notice?.let { n ->
-            toast(when (n.code) { BLOCKED_LOW_BALANCE -> ErrorText.PAUSED_LOW_BALANCE; "owner_balance_ok" -> "GPU credit is back · renders resumed"; else -> n.message }, "queue")
+            if (n.code == "provider_out_of_credit") toast("An engine is out of credit · see Settings → Engines", "studio")
+            else if (n.message.isNotBlank() && !Regex("(?i)gpu|runpod").containsMatchIn(n.message)) toast(n.message)
         }
         ev.model?.let { m -> _state.update { s -> s.copy(models = s.models.upsert(m) { it.id == m.id }) } }
         ev.outfit?.let { o -> _state.update { s -> s.copy(outfits = s.outfits.upsert(o) { it.id == o.id }) } }
         ev.lora?.let { l -> putLora(l) }
-        ev.gpu?.let { g -> putWarm(g) }
-        if (ev.type == "gpu" && ev.event == "warning") ev.warning?.let { _warmWarnings.tryEmit(it) }
+        // gpu events only ever reach the owner who switched Keep add-on engine ready on; never shown to members.
+        if (isOwner()) {
+            ev.gpu?.let { g -> putWarm(g) }
+            if (ev.type == "gpu" && ev.event == "warning") ev.warning?.let { _warmWarnings.tryEmit(it) }
+        }
         ev.post?.let { p -> _state.update { s -> s.copy(posts = s.posts.upsert(p) { it.id == p.id }) } }
         if (ev.takes.isNotEmpty()) _state.update { s -> s.copy(takes = ev.takes + s.takes.filterNot { t -> ev.takes.any { it.id == t.id } }) }
         ev.job?.let { j ->
@@ -201,16 +213,18 @@ class MuseRepository(
         if (prev?.state == "training" && l.state == "ready") onLoraReady?.invoke(_state.value.model(l.modelId), l)
     }
 
-    /** A new warm GPU state. When it turned itself off, say why. */
+    private fun isOwner() = _state.value.wallet?.owner ?: (_state.value.balance.role == "owner")
+
+    /** A new Keep add-on engine ready state (owner). When it turned itself off, say why. */
     private fun putWarm(g: WarmGpu) {
         val prev = _state.value.warm
         _state.update { it.copy(warm = g) }
         val off = g.lastOff
-        if (prev?.on == true && !g.on && off != null && off.reason != "user") toast("Warm GPU turned off · ${warmOffWhy(off.reason, g.idleMinutes)} · ${Credit.money(off.costUsd)}")
+        if (prev?.on == true && !g.on && off != null && off.reason != "user") toast("Add-on engine turned off · ${warmOffWhy(off.reason, g.idleMinutes)} · ${Credit.money(off.costUsd)}")
     }
 
-    // ---- Keep GPU warm
-    suspend fun refreshWarm() { runCatching { api.warmGpu() }.onSuccess { putWarm(it) } }
+    // ---- Keep add-on engine ready (owner only)
+    suspend fun refreshWarm() { if (isOwner()) runCatching { api.warmGpu() }.onSuccess { putWarm(it) } }
     suspend fun setWarm(on: Boolean) = attempt { setWarmGpu(WarmRequest(on = on)) }?.also { putWarm(it); refreshBalance() }
     /** "Keep warm": restarts the idle clock, or extends the time limit once. */
     suspend fun keepWarm() = attempt { setWarmGpu(WarmRequest(extend = true)) }?.also { putWarm(it) }
@@ -326,6 +340,18 @@ class MuseRepository(
 
     suspend fun topUp(amount: Double, method: String) = attempt { topUp(TopUpRequest(amount, method)) }?.also { b -> _state.update { it.copy(balance = b) } }
 
+    // ---- the owner-loaded studio balance
+    suspend fun studioBalance() = attemptInline { studioBalance() }
+    /** Records "Added $20" (owner). Returns the new studio balance, or the friendly error. */
+    suspend fun addTopUp(amountUsd: Double, note: String?) =
+        attemptInline { addTopUp(AddTopUpRequest(amountUsd, note?.trim()?.ifBlank { null })) }.also { (r, _) -> if (r != null) refreshBalance() }
+
+    /** Upscale a finished render (coming soon). */
+    suspend fun upscale(takeId: String, size: String) = attempt { upscale(takeId, size) }?.also { j ->
+        _state.update { s -> s.copy(jobs = s.jobs.upsert(j) { it.id == j.id }.sortedByDescending { it.createdAt }) }
+        refreshBalance()
+    }
+
     suspend fun setFailNext(fail: Boolean) = attempt { setFailNext(fail) }
 
     suspend fun runQueue() = attempt { runQueue() }?.also { started ->
@@ -374,7 +400,7 @@ class MuseRepository(
     suspend fun members() = attempt { listMembers() }
     suspend fun invites() = attempt { listInvites() }
 
-    /** Owner → member. The server refuses over-allocation with a message saying what the RunPod balance backs. */
+    /** Owner → member. The server refuses over-allocation with a message saying what the studio balance has free. */
     suspend fun transfer(member: Member, tokens: Long, note: String?) =
         attemptInline { transfer(TransferRequest(member.id, tokens, note?.ifBlank { null })) }.also { (r, _) -> r?.let { res -> _state.update { it.copy(wallet = res.wallet) }; refreshBalance() } }
 
@@ -394,13 +420,12 @@ class MuseRepository(
     }
 }
 
-/** Why a warm GPU turned itself off, for the toast. */
+/** Why Keep add-on engine ready turned itself off, for the owner's toast. */
 fun warmOffWhy(reason: String, idleMinutes: Int) = when (reason) {
     "idle" -> "$idleMinutes min without renders"
     "cap" -> "it reached its time limit"
-    "credit" -> "your credit is running low"
-    "owner_balance" -> "the studio's GPU credit is low"
-    "gpu_lost" -> "the GPU stopped responding"
+    "credit", "owner_balance" -> "the studio balance is running low"
+    "gpu_lost" -> "the engine stopped responding"
     else -> "turned off"
 }
 

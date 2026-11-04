@@ -160,7 +160,7 @@ fun SettingsScreen() {
                     ListGroup {
                         Li("model", "Members", sub = "Send credit, caps, switch accounts off", onClick = { nav.go(Routes.MEMBERS) }) { Ic("chev", 16.dp) }
                         Li("mail", "Invite someone", onClick = { nav.go(Routes.INVITE) }) { Ic("chev", 16.dp) }
-                        Li("quality", "Studio settings", sub = "GPUs, warm-up, caps, image engine", onClick = { nav.go(Routes.STUDIO) }) { Ic("chev", 16.dp) }
+                        Li("quality", "Studio settings", sub = "Caps and engines", onClick = { nav.go(Routes.STUDIO) }) { Ic("chev", 16.dp) }
                     }
                 }
                 Lbl("Developer")
@@ -174,12 +174,13 @@ fun SettingsScreen() {
                         if (s.prefs.serverUrl != BuildConfig.DEFAULT_SERVER_URL) T("Use the MUSE server", m.type.tiny.copy(fontWeight = FontWeight.Bold), if (m.isD) m.t.blue else m.t.accent,
                             Modifier.press { vm.resetServer { nav.reset(Routes.WELCOME) } }.padding(vertical = 4.dp))
                     }
-                    Li("quality", "Fast · beta engine (Viggle)", onClick = { vm.fastBeta() }) { Toggle(s.prefs.fastBeta, { vm.fastBeta() }) }
+                    Li("quality", "Fast · beta", onClick = { vm.fastBeta() }) { Toggle(s.prefs.fastBeta, { vm.fastBeta() }) }
                     Li("shield", "Next render fails (test)", onClick = { vm.failNext() }) { Toggle(s.failNext, { vm.failNext() }) }
                 }
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Tiny("Video model: MiniMax H3 · Lip sync: LatentSync")
-                    Tiny("MUSE ${BuildConfig.VERSION_NAME} · MiniMax H3 licence terms apply")
+                    // Model names are owner-only (plans/app-cleanup.md); the owner sees the licence attribution.
+                    if (s.prefs.owner) Tiny("Video model: MiniMax H3 · Lip sync: LatentSync")
+                    Tiny("MUSE ${BuildConfig.VERSION_NAME}" + if (s.prefs.owner) " · MiniMax H3 licence terms apply" else " · third-party model licence terms apply")
                 }
             }
         }

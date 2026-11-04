@@ -19,7 +19,7 @@ data class ImageRef(val asset: String? = null, val url: String? = null) {
     }
 }
 
-/** role: "owner" (funds the studio from RunPod, invites people, sends tokens) or "member". Also GET /v1/auth/me. */
+/** role: "owner" (loads the studio balance, invites people, sends credit) or "member". Also GET /v1/auth/me. */
 @Serializable
 data class User(val id: String, val studioName: String = "", val email: String, val role: String = "member") {
     val owner get() = role == "owner"
@@ -85,6 +85,8 @@ data class Outfit(
     val angles: List<ImageRef?> = listOf(null, null, null, null),
     val state: String = "ready",
     val prompt: String = "",
+    /** What the set really cost once made (exact, pass-through); null before, or from an older server. */
+    val cost: Double? = null,
 ) {
     val front: ImageRef? get() = angles.firstOrNull()
 }
@@ -176,21 +178,21 @@ data class Job(
     /** While waiting for a GPU (real API): place in line and seconds until the render should finish. */
     val queuePosition: Int? = null,
     val etaSeconds: Double? = null,
-    /** "owner_balance_low": paused until the studio's RunPod credit is topped up. */
+    /** Never set since 2026-11-04 (nothing pauses on a provider balance). */
     val blocked: String? = null,
     /** GPU warm-up charged with this job (when the member pays it). */
     val warmupCost: Double? = null,
     val userId: String? = null,
-    /** Ran on its user's warm GPU: the "Warm GPU" line pays its GPU time. */
+    /** Ran while the owner kept the add-on engine ready (owner ledger only). */
     val warm: Boolean? = null,
-    /** The server's label ("Standard · 768P", "Exact edit · 10 steps"); older servers send none. */
+    /** The server's label ("Draft · 768P", "Edit", "Fast · beta"); older servers send none. */
     @SerialName("engineLabel") val serverEngineLabel: String? = null,
     /** Failed replicate jobs: provider_refused | provider_failed | provider_rate_limited | provider_timeout. */
     val errorCode: String? = null,
     /** Done replicate jobs: output seconds Replicate billed. */
     val billedSeconds: Double? = null,
 ) {
-    val paused get() = blocked == BLOCKED_LOW_BALANCE
+    val paused get() = false
     val engineLabel: String get() = serverEngineLabel ?: Pricing.engineLabel(request.spec())
     val running get() = state == "running" || state == "queued"
     val done get() = state == "done"
@@ -328,7 +330,7 @@ data class TemplatePrompt(
 
 /**
  * GET /v1/balance. Member: [balance] is their wallet in USD, today/month their own spend. Owner: [balance] is what they can
- * spend or send (RunPod − members' unspent tokens − holds), today/month the studio's spend.
+ * spend or send (the studio balance − members' unspent credit − holds; may be negative), today/month the studio's spend.
  */
 @Serializable
 data class Balance(
@@ -343,13 +345,16 @@ data class Balance(
     val role: String? = null,
     val heldUsd: Double? = null,
     val perUserDayLimit: Double? = null,
-    /** runpod | simulated | unavailable | wallet */
+    /** studio (owner) | wallet (member) */
     val balanceSource: String? = null,
-    val runpodBalance: Double? = null,
     val availableToSend: Double? = null,
+    /** Owner: top-ups − all spending (plans/api.md "App clean-up" §4). */
+    val studioBalance: Double? = null,
+    /** Owner: no top-up recorded yet ("Add your first top-up"). */
+    val needsFirstTopUp: Boolean? = null,
 )
 
-/** GET /v1/wallet: my tokens (1 token = [tokenUsd]). The owner's wallet is the RunPod balance. */
+/** GET /v1/wallet: my tokens (1 token = [tokenUsd]). The owner's wallet is what the studio balance has free. */
 @Serializable
 data class Wallet(
     val userId: String = "",
@@ -363,13 +368,39 @@ data class Wallet(
     val tokenUsd: Double = 0.01,
     val balanceSource: String = "wallet",
     val availableToSend: Double? = null,
-    val runpodBalance: Double? = null,
+    val studioBalance: Double? = null,
     val membersUnspentUsd: Double? = null,
 ) {
     val owner get() = role == "owner"
     /** Tokens the owner can send right now. */
-    val tokensToSend: Long get() = availableToSend?.let { kotlin.math.floor(it / tokenUsd + 1e-6).toLong() } ?: 0
+    val tokensToSend: Long get() = availableToSend?.let { kotlin.math.floor(it / tokenUsd + 1e-6).toLong().coerceAtLeast(0) } ?: 0
 }
+
+/** One recorded top-up of the studio balance ("Added $20"). */
+@Serializable
+data class TopUp(val id: String, val amountUsd: Double, val note: String? = null, val paidAt: Long = 0, val createdAt: Long = 0, val createdBy: String? = null)
+
+/** GET /v1/studio/balance (owner): top-ups − spending, and what's free to spend or send. */
+@Serializable
+data class StudioBalance(
+    val balanceUsd: Double = 0.0,
+    val toppedUpUsd: Double = 0.0,
+    val spentUsd: Double = 0.0,
+    val membersCreditUsd: Double = 0.0,
+    val heldUsd: Double = 0.0,
+    val availableUsd: Double = 0.0,
+    val since: Long = 0,
+    val needsFirstTopUp: Boolean = false,
+    val topUps: List<TopUp> = emptyList(),
+)
+
+/** POST /v1/studio/topups (owner). */
+@Serializable
+data class AddTopUpRequest(val amountUsd: Double, val note: String? = null, val paidAt: Long? = null)
+
+/** POST /v1/takes/{id}/upscale. */
+@Serializable
+data class UpscaleRequest(val size: String)
 
 /** GET /v1/members (owner). Caps are in USD; null caps follow the studio default. */
 @Serializable
@@ -438,12 +469,43 @@ data class StudioFeatures(
     val loraTraining: Boolean = true,
     val replaceAudio: Boolean = false,
     val maxClipSec: Double? = null,
-    /** Replicate is set up on the server. */
+    /** Draft / Standard / HD can run (the field name is the server's). */
     val replicate: Boolean = false,
     val video: VideoFeatures? = null,
+    /** Pass-through photo prices and estimates (plans/api.md "App clean-up" §3). */
+    val photo: PhotoFeatures? = null,
 )
 
-/** One entry of the video studio's quality picker (features.video.options). */
+/** features.photo: the prices the estimates use, and the server's own estimates. */
+@Serializable
+data class PhotoFeatures(
+    val perRun: Double = 0.015,
+    val perInputMp: Double = 0.015,
+    val perOutputMp: Double = 0.015,
+    val perEdit: Double = 0.03,
+    val refMp: Double = 0.79,
+    val maxRefs: Int = 6,
+    val loraShots: Int = 30,
+) {
+    val prices get() = studio.muse.core.PhotoPrices(perRun, perInputMp, perOutputMp, perEdit, refMp, maxRefs, loraShots)
+}
+
+/** One add-on (features.video.addons): Edit, Fast · beta, Upscale. */
+@Serializable
+data class AddonInfo(
+    val id: String,
+    val label: String = "",
+    val detail: String = "",
+    val available: Boolean = true,
+    val comingSoon: Boolean = false,
+    val sizes: List<UpscaleSizeInfo> = emptyList(),
+)
+
+/** Upscale sizes: 1080p / 2K / 4K; unavailable with no price until the engine ships. */
+@Serializable
+data class UpscaleSizeInfo(val id: String, val label: String = "", val width: Int = 0, val height: Int = 0, val available: Boolean = false, val price: Double? = null)
+
+/** One entry of the Render picker (features.video.options). */
 @Serializable
 data class VideoOptionInfo(
     val id: String,
@@ -456,7 +518,7 @@ data class VideoOptionInfo(
     val available: Boolean = true,
 )
 
-/** GET /v1/settings/studio → features.video: Draft / Standard / HD (Replicate) and Exact edit (our GPU). */
+/** GET /v1/settings/studio → features.video: Render (Draft / Standard / HD) and the add-ons (Edit, Fast · beta, Upscale). */
 @Serializable
 data class VideoFeatures(
     val defaultEngine: String = "replicate",
@@ -464,21 +526,50 @@ data class VideoFeatures(
     val minSeconds: Int = 4,
     val maxSeconds: Int = 15,
     val options: List<VideoOptionInfo> = emptyList(),
+    val addons: List<AddonInfo> = emptyList(),
 ) {
     companion object {
-        /** The contract's table (plans/api.md), every option available: demo mode, and servers that don't send features.video. */
-        val DEFAULT = VideoFeatures(options = studio.muse.core.VideoOption.entries.map { o ->
-            VideoOptionInfo(o.id, o.label, o.quality?.detail ?: studio.muse.core.VideoOption.EXACT_DETAIL, o.engine.id, o.quality?.id, o.quality?.resolution, o.quality?.pricePerSec)
-        })
+        /** The contract's tables (plans/api.md "App clean-up" §2), Render and Edit available, Upscale coming soon. */
+        val DEFAULT = VideoFeatures(
+            options = studio.muse.core.VideoOption.RENDER.map { o -> VideoOptionInfo(o.id, o.label, o.detail, o.engine.id, o.quality?.id, o.quality?.resolution, o.quality?.pricePerSec) },
+            addons = studio.muse.core.VideoOption.ADDONS.map { AddonInfo(it.id, it.label, it.detail) } + AddonInfo("upscale", "Upscale", "Sharper 1080p, 2K or 4K from a finished take",
+                available = false, comingSoon = true, sizes = studio.muse.core.UpscaleSize.entries.map { UpscaleSizeInfo(it.id, it.label, it.width, it.height) }),
+        )
     }
 
     fun option(id: String) = options.firstOrNull { it.id == id }
-    /** An option is usable unless the server says it isn't. */
-    fun available(id: String) = option(id)?.available ?: true
+    fun addon(id: String) = addons.firstOrNull { it.id == id } ?: if (id == "edit") options.firstOrNull { it.id == "exact" }?.let { AddonInfo("edit", "Edit", available = it.available) } else null
+    /** An option or add-on is usable unless the server says it isn't. An older server without `addons` has no Fast · beta here. */
+    fun available(id: String) = option(id)?.available ?: addon(id)?.available ?: (id != "upscale")
     fun pricePerSec(quality: Quality) = option(quality.id)?.pricePerSec
+    /** Upscale (coming soon until the server says otherwise). */
+    val upscale: AddonInfo get() = addon("upscale") ?: DEFAULT.addons.last()
 }
 
-/** GET/PATCH /v1/settings/studio. overheadPayer: who pays GPU warm-up, "user" (the member) or "owner". */
+/** One engine in owner Settings → Engines (the only place provider names appear). status: ready | no_key | simulated | out_of_credit | no_gpu */
+@Serializable
+data class EngineStatus(
+    val id: String,
+    val name: String = "",
+    val usedFor: String = "",
+    val keySet: Boolean = false,
+    val status: String = "ready",
+    val message: String? = null,
+    val outOfCreditAt: Long? = null,
+    val balanceUsd: Double? = null,
+)
+
+@Serializable
+data class KeepReadyInfo(val idleMinutes: Int = 20, val maxMinutes: Int = 120, val ratePerHour: Double = 3.99)
+
+/** Owner-only `engines` block of GET /v1/settings/studio. */
+@Serializable
+data class Engines(val list: List<EngineStatus> = emptyList(), val keepReady: KeepReadyInfo = KeepReadyInfo())
+
+/**
+ * GET/PATCH /v1/settings/studio. Members get caps, tokenUsd and features; the owner also gets the add-on engine limits
+ * (maxGpus, overheadPayer = who pays start-up: "user" or "owner", Keep add-on engine ready minutes) and [engines].
+ */
 @Serializable
 data class StudioSettings(
     val maxGpus: Int = 3,
@@ -487,13 +578,11 @@ data class StudioSettings(
     val capPerDay: Double = 15.0,
     val capPerUserDay: Double = 10.0,
     val tokenUsd: Double = 0.01,
-    val minRunpodBalance: Double = 2.0,
-    val lowBalance: Boolean = false,
-    /** Who may switch on Keep GPU warm: "everyone" (default) or "owner". */
-    val warmGpuAllowed: String = "everyone",
     val warmIdleMinutes: Int = 20,
     val warmMaxMinutes: Int = 120,
     val features: StudioFeatures = StudioFeatures(),
+    /** Owner only. */
+    val engines: Engines? = null,
 )
 
 @Serializable
@@ -503,7 +592,6 @@ data class StudioSettingsPatch(
     val capPerJob: Double? = null,
     val capPerDay: Double? = null,
     val capPerUserDay: Double? = null,
-    val warmGpuAllowed: String? = null,
 )
 
 /** GET/PATCH /v1/settings/image-engine. provider: simulated | fal | custom-http. */
@@ -535,11 +623,9 @@ data class ConfirmClipRequest(val meta: ClipMeta)
 @Serializable
 data class Health(val ok: Boolean = true, val storage: String? = null, val gpu: String? = null, val imageEngine: String? = null, val version: String? = null)
 
-/** A studio-wide notice on a wallet event: "owner_balance_low" / "owner_balance_ok". */
+/** An owner notice on a wallet event: "provider_out_of_credit" (an engine's own account is out of credit). */
 @Serializable
-data class Notice(val code: String, val message: String = "")
-
-const val BLOCKED_LOW_BALANCE = "owner_balance_low"
+data class Notice(val code: String, val message: String = "", val engine: String? = null)
 
 @Serializable
 data class TopUpRequest(val amount: Double, val method: String = "card")
@@ -548,8 +634,8 @@ data class TopUpRequest(val amount: Double, val method: String = "card")
 data class FillAnglesResponse(val model: Model, val cost: Double)
 
 /**
- * Keep GPU warm (GET/POST /v1/gpu/warm). state: off | starting | warm | stopping. Times are epoch ms.
- * costUsd is the "Warm GPU" line so far (settled per minute).
+ * Keep add-on engine ready (GET/POST /v1/gpu/warm, owner only). state: off | starting | warm | stopping. Times are epoch ms.
+ * costUsd is the "Add-on engine ready" line so far (settled per minute).
  */
 @Serializable
 data class WarmGpu(

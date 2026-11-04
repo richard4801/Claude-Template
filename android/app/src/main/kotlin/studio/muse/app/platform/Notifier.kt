@@ -16,6 +16,7 @@ import androidx.core.content.ContextCompat
 import studio.muse.app.MainActivity
 import studio.muse.app.R
 import studio.muse.app.data.Job
+import studio.muse.app.ui.screens.failLine
 import studio.muse.core.Pricing
 
 /**
@@ -33,7 +34,7 @@ class Notifier(private val context: Context) {
         /** Open the post handoff for this post id (scheduled post notification). */
         const val EXTRA_HANDOFF = "muse.handoff"
         const val CHANNEL_POSTS = "posts"
-        /** The ongoing "GPU warm" notification: low importance, silent (it updates every minute). */
+        /** The owner's ongoing "Add-on engine ready" notification: low importance, silent (it updates every minute). */
         const val CHANNEL_WARM = "warm_gpu"
         private const val WARM_ID = 0x5741524d
         private const val WARM_WARNING_ID = 0x5741524e
@@ -90,7 +91,7 @@ class Notifier(private val context: Context) {
         }
         val pi = PendingIntent.getActivity(context, job.id.hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val (title, text) = if (job.done) "Render done · ${job.title}" to "${job.engineLabel} · ${Pricing.money(job.cost)} · tap to watch"
-        else "Render failed · ${job.title}" to "${job.error ?: "The GPU disconnected."} ${Pricing.money(job.refunded)} refunded."
+        else "Render failed · ${job.title}" to job.failLine()
         val n = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_muse)
             .setContentTitle(title)
@@ -132,12 +133,12 @@ class Notifier(private val context: Context) {
         PendingIntent.getBroadcast(context, code, Intent(context, WarmGpuReceiver::class.java).setAction(action), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
     /**
-     * The ongoing warm GPU notification, like a foreground service's: it can't be swiped away while the GPU is warm, its
+     * The owner's ongoing "Add-on engine ready" notification, like a foreground service's: it can't be swiped away while it's on, its
      * chronometer counts the minutes by itself, and it has Turn off. Updated on every state change and minute tick.
      */
     fun warmOngoing(w: studio.muse.app.data.WarmGpu) {
         if (!canPost()) return
-        val title = if (w.starting) "GPU starting… (3–6 min)" else "GPU warm"
+        val title = if (w.starting) "Add-on engine getting ready… (3–6 min)" else "Add-on engine ready"
         val text = "${Pricing.money(w.costUsd)} so far · about ${Pricing.money(w.ratePerHour)}/hour · turns off after ${w.idleMinutes} min without renders"
         val n = NotificationCompat.Builder(context, CHANNEL_WARM)
             .setSmallIcon(R.drawable.ic_stat_muse)
@@ -152,7 +153,7 @@ class Notifier(private val context: Context) {
             .setWhen(w.startedAt ?: System.currentTimeMillis())
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setContentIntent(open("direct", WARM_ID))
+            .setContentIntent(open("studio", WARM_ID))
             .addAction(0, "Turn off", warmAction(WarmGpuReceiver.TURN_OFF, WARM_ID))
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(WARM_ID, n) }
@@ -163,17 +164,17 @@ class Notifier(private val context: Context) {
         cancelWarmWarning()
     }
 
-    /** The 5-minute warning before an idle or cap auto-off, with Keep warm. */
+    /** The 5-minute warning before an idle or cap auto-off, with Keep ready (owner). */
     fun warmWarning(w: studio.muse.app.data.WarmWarning) {
         if (!canPost()) return
         val n = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_muse)
-            .setContentTitle(w.message.ifBlank { "Warm GPU turns off in 5 min" })
-            .setContentText(if (w.reason == "cap") "It reaches its time limit. Keep warm extends it once." else "No renders on it. Keep warm keeps it on.")
+            .setContentTitle(w.message.ifBlank { "Add-on engine turns off in 5 min" }.replace("Warm GPU", "Add-on engine"))
+            .setContentText(if (w.reason == "cap") "It reaches its time limit. Keep ready extends it once." else "No renders on it. Keep ready keeps it on.")
             .setAutoCancel(true)
             .setTimeoutAfter((w.autoOffAt - System.currentTimeMillis()).coerceIn(10_000, 6 * 60_000L))
-            .setContentIntent(open("direct", WARM_WARNING_ID))
-            .addAction(0, "Keep warm", warmAction(WarmGpuReceiver.KEEP_WARM, WARM_WARNING_ID))
+            .setContentIntent(open("studio", WARM_WARNING_ID))
+            .addAction(0, "Keep ready", warmAction(WarmGpuReceiver.KEEP_WARM, WARM_WARNING_ID))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .build()

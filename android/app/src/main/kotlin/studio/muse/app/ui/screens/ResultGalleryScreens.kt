@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -61,7 +62,9 @@ import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
 import studio.muse.core.Pricing
 
-data class ResultState(val takes: List<Take> = emptyList(), val job: Job? = null, val retryCost: Double = 0.0, val posts: List<studio.muse.app.data.Post> = emptyList())
+data class ResultState(val takes: List<Take> = emptyList(), val job: Job? = null, val retryCost: Double = 0.0, val posts: List<studio.muse.app.data.Post> = emptyList(),
+    /** The Upscale add-on (coming soon until the server says otherwise). */
+    val upscale: studio.muse.app.data.AddonInfo = studio.muse.app.data.VideoFeatures.DEFAULT.upscale)
 
 class ResultViewModel(private val c: AppContainer, private val id: String) : ViewModel() {
     val state: StateFlow<ResultState> = c.repo.state.map { s ->
@@ -69,7 +72,8 @@ class ResultViewModel(private val c: AppContainer, private val id: String) : Vie
         val jobId = direct?.jobId ?: id
         val takes = if (direct != null && direct.jobId == null) listOf(direct) else s.takes.filter { it.jobId == jobId }.sortedBy { it.index }
         val job = s.job(jobId)
-        ResultState(takes, job, job?.let { Pricing.totalCost(it.request.spec()) } ?: 0.0, s.posts.filter { p -> takes.any { it.id == p.takeId } })
+        ResultState(takes, job, job?.let { Pricing.totalCost(it.request.spec()) } ?: 0.0, s.posts.filter { p -> takes.any { it.id == p.takeId } },
+            (s.video ?: studio.muse.app.data.VideoFeatures.DEFAULT).upscale)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, ResultState())
 
     fun approve(t: Take, celebrate: () -> Unit) = viewModelScope.launch {
@@ -92,6 +96,33 @@ class ResultViewModel(private val c: AppContainer, private val id: String) : Vie
 
     fun toast(s: String) = c.repo.toast(s)
     fun export() = c.repo.toast("Exported 1080×1920")
+
+    /** Upscale a finished render to 1080p / 2K / 4K (plans/api.md "App clean-up" §2). Coming soon for now. */
+    fun upscale(t: Take, size: studio.muse.app.data.UpscaleSizeInfo) {
+        val up = state.value.upscale
+        if (!up.available || !size.available) return c.repo.toast("Upscale is coming soon")
+        viewModelScope.launch { c.repo.upscale(t.id, size.id)?.let { c.repo.toast("Upscaling to ${size.label}") } }
+    }
+}
+
+/** The Upscale add-on on a finished render: 1080p / 2K / 4K, greyed with "Coming soon" until it ships. */
+@Composable
+private fun UpscaleRow(up: studio.muse.app.data.AddonInfo, onPick: (studio.muse.app.data.UpscaleSizeInfo) -> Unit) {
+    val m = muse
+    val sizes = up.sizes.ifEmpty { studio.muse.app.data.VideoFeatures.DEFAULT.upscale.sizes }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        RowB {
+            T(up.label.ifBlank { "Upscale" }, m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink)
+            if (!up.available || up.comingSoon) Pill("Coming soon")
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            sizes.forEach { z ->
+                val on = up.available && z.available
+                Cta2(z.label + (z.price?.let { " · ${Pricing.money(it)}" } ?: ""), { onPick(z) }, Modifier.weight(1f).graphicsLayer { alpha = if (on) 1f else .45f }, height = 40.dp)
+            }
+        }
+        Tiny(up.detail.ifBlank { "Sharper 1080p, 2K or 4K from a finished take" })
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -165,7 +196,6 @@ fun ResultScreen(id: String) {
                             take.templateName?.let { Tiny("Template: $it", weight = FontWeight.Bold) }
                             Tiny(listOf(take.engineLabel, Pricing.money(take.cost)).filter { it.isNotBlank() }.joinToString(" · "))
                             takeSpecs(take)?.let { T(it, m.type.mono.copy(fontSize = 11.5.sp), m.t.muted) }
-                            s.job?.warmupCost?.takeIf { it > 0 }?.let { Tiny("GPU warm-up ${Pricing.money(it)} (charged with this render)") }
                         }
                         Pill(if (take.final) "Final" else "Test", if (take.final) "good" else "")
                     }
@@ -175,6 +205,7 @@ fun ResultScreen(id: String) {
                             p.stats?.let { st -> T(" ${String.format(java.util.Locale.US, "%,d", st.views)} views · ${String.format(java.util.Locale.US, "%,d", st.likes)} likes", m.type.mono.copy(fontSize = 11.5.sp), m.t.muted) }
                         }
                     }
+                    if (take.kind == "take" && take.videoUrl != null) UpscaleRow(s.upscale) { z -> vm.upscale(take, z) }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Cta2("Discard", { vm.discard(take, nav) }, Modifier.weight(1f))
                         Cta(if (take.final) "Approved ✓" else "Approve", { vm.approve(take, celebrate) }, Modifier.weight(1f))

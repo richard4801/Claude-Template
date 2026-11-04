@@ -120,7 +120,7 @@ class RealApiContractTest {
         val w0 = member.wallet()
         assertEquals(0L, w0.tokens); assertEquals("member", w0.role)
         val ow = owner.wallet()
-        assertTrue(ow.owner); assertNotNull(ow.availableToSend); assertNotNull(ow.runpodBalance)
+        assertTrue(ow.owner); assertNotNull(ow.availableToSend); assertNotNull(ow.studioBalance); assertEquals("studio", ow.balanceSource)
         val over = expectCode("over_allocation") { owner.transfer(TransferRequest(me.id, ow.tokensToSend + 1_000)) }
         // The server counts tokens; the app shows its explanation in dollars only.
         assertTrue(ErrorText.of(over), ErrorText.of(over).startsWith("You can send at most $"))
@@ -222,13 +222,13 @@ class RealApiContractTest {
         expectCode("unauthorized") { owner.me() }
     }
 
-    /** Keep GPU warm against server/api (simulated GPU: the pod is ready at once). */
+    /** Keep add-on engine ready (was Keep GPU warm) against server/api: owner only (simulated GPU: ready at once). */
     @Test fun keepGpuWarm(): Unit = runBlocking {
         val owner = HttpMuseApi(base)
         owner.setToken(owner.signIn(SignInRequest("jen@studio.com", "x")).token)
         val off = owner.warmGpu()
         assertEquals("off", off.state); assertTrue(off.allowed); assertEquals(20, off.idleMinutes); assertEquals(120, off.maxMinutes)
-        assertEquals("everyone", owner.studioSettings().warmGpuAllowed)
+        assertEquals(20, owner.studioSettings().engines!!.keepReady.idleMinutes)
         val events = async { withTimeout(20_000) { owner.events().first { it.type == "gpu" && it.gpu?.state == "warm" } } }
         delay(300)
         val on = owner.setWarmGpu(studio.muse.app.data.WarmRequest(on = true))
@@ -243,10 +243,32 @@ class RealApiContractTest {
         val inv = owner.createInvite(CreateInviteRequest(email = "warm@test.local"))
         val member = HttpMuseApi(base)
         member.setToken(member.signUp(SignUpRequest("", "warm@test.local", "pw-123456", true, true, inv.code)).token)
-        assertEquals("owner", owner.patchStudioSettings(StudioSettingsPatch(warmGpuAllowed = "owner")).warmGpuAllowed)
-        assertTrue(!member.warmGpu().allowed)
-        val e = expectCode("warm_not_allowed") { member.setWarmGpu(studio.muse.app.data.WarmRequest(on = true)) }
-        assertEquals("Only the studio owner can keep a GPU warm.", ErrorText.of(e))
-        owner.patchStudioSettings(StudioSettingsPatch(warmGpuAllowed = "everyone"))
+        expectCode("owner_only") { member.warmGpu() }
+        val e = expectCode("owner_only") { member.setWarmGpu(studio.muse.app.data.WarmRequest(on = true)) }
+        assertEquals("Only the studio owner can do that.", ErrorText.of(e))
+        // Members' settings carry no engines, GPUs or Keep ready rules.
+        val ms = member.studioSettings()
+        assertNull(ms.engines)
+        assertTrue(ms.features.video!!.addons.any { it.id == "upscale" && it.comingSoon && !it.available })
+    }
+
+    /** The owner-loaded studio balance and pass-through photo prices (plans/api.md "App clean-up" §3–4). */
+    @Test fun studioBalanceAndPhotoPrices(): Unit = runBlocking {
+        val owner = HttpMuseApi(base)
+        owner.setToken(owner.signIn(SignInRequest("jen@studio.com", "x")).token)
+        val sb0 = owner.studioBalance()
+        val sb1 = owner.addTopUp(studio.muse.app.data.AddTopUpRequest(20.0, "card"))
+        assertEquals(sb0.toppedUpUsd + 20.0, sb1.toppedUpUsd, 1e-9)
+        assertEquals(sb0.balanceUsd + 20.0, sb1.balanceUsd, 1e-9)
+        assertEquals("card", sb1.topUps.first().note)
+        assertEquals(false, sb1.needsFirstTopUp)
+        val b = owner.balance()
+        assertEquals("studio", b.balanceSource); assertEquals(sb1.balanceUsd, b.studioBalance!!, 1e-9)
+        val photo = owner.studioSettings().features.photo!!
+        assertEquals(studio.muse.core.PhotoPrices(), photo.prices)
+        assertEquals("about \$0.46", studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.shoot(photo.prices)))
+        val owners = owner.studioSettings().engines!!.list.map { it.id }
+        assertEquals(listOf("replicate", "runpod"), owners)
+        expectCode("upscale_unavailable") { owner.upscale("t_j1", "2k") }
     }
 }

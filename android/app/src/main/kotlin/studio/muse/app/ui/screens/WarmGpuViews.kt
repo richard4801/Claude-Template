@@ -57,13 +57,14 @@ import studio.muse.core.Pricing
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-// Keep GPU warm (plans/backend.md): the persistent bar, the 5-minute warning banner, the nudge and the confirm dialog,
-// and the switch in the video studio. MuseApp hosts the bar, banner and dialogs on every screen.
+// Keep add-on engine ready (was Keep GPU warm; plans/api.md "App clean-up" §6), owner only: the small indicator while
+// it's on, the 5-minute warning, the cost warning on switch-on, and the switch in Settings → Engines.
+// MuseApp hosts the indicator, banner and dialog for the owner; members never see any of it.
 
-/** "About $4/hour from your credit while it's on, and it turns off by itself after 20 min without renders." */
+/** "About $4/hour from the studio balance while it's on, and it turns off by itself after 20 min without renders." */
 fun warmCostLine(w: WarmGpu?): String {
     val rate = (w?.ratePerHour ?: 3.99).roundToInt().coerceAtLeast(1)
-    return "About $$rate/hour from your credit while it's on, and it turns off by itself after ${w?.idleMinutes ?: 20} min without renders."
+    return "Keeps the add-on engine ready so Edit renders start right away. About $$rate/hour from the studio balance while it's on, and it turns off by itself after ${w?.idleMinutes ?: 20} min without renders."
 }
 
 /** Minutes since the start and the cost so far, computed live between the server's per-minute ticks. */
@@ -72,7 +73,7 @@ fun warmLive(w: WarmGpu, now: Long): Pair<Int, Double> {
     return minutes to max(w.costUsd, w.ratePerHour * minutes / 60.0)
 }
 
-/** "GPU warm · 42 min · $2.80 so far · Turn off" ("Starting… · 2 min · $0.13 so far" while the pod boots). */
+/** "Add-on engine ready · 42 min · $2.80 · Turn off" ("Getting ready… · 2 min · $0.13" while it starts). Owner only. */
 @Composable
 fun WarmBar(w: WarmGpu, onTurnOff: () -> Unit, modifier: Modifier = Modifier, statusPad: Boolean = true) {
     val m = muse
@@ -82,7 +83,7 @@ fun WarmBar(w: WarmGpu, onTurnOff: () -> Unit, modifier: Modifier = Modifier, st
     val bg = if (m.isD) m.t.yellow else m.t.ink
     val fg = if (m.isD) Ink else m.t.bg
     val dot = if (w.starting) m.t.warn else if (m.isD) m.t.blue else m.t.accent
-    val label = (if (w.starting) "Starting…" else if (w.state == "stopping") "Turning off…" else "GPU warm") + " · $minutes min · ${Pricing.money(cost)} so far"
+    val label = (if (w.starting) "Getting ready…" else if (w.state == "stopping") "Turning off…" else "Add-on engine ready") + " · $minutes min · ${Pricing.money(cost)}"
     Row(
         modifier.fillMaxWidth().background(bg).let { if (statusPad) it.statusBarsPadding() else it }.padding(horizontal = 16.dp, vertical = 9.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically,
@@ -94,7 +95,7 @@ fun WarmBar(w: WarmGpu, onTurnOff: () -> Unit, modifier: Modifier = Modifier, st
     }
 }
 
-/** The 5-minute warning: "Warm GPU turns off in 5 min (no renders)" [Keep warm]. */
+/** The 5-minute warning (owner): "Add-on engine turns off in 5 min (no renders)" [Keep ready]. */
 @Composable
 fun WarmWarningBanner(w: WarmWarning, onKeepWarm: () -> Unit, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
     val m = muse
@@ -108,22 +109,22 @@ fun WarmWarningBanner(w: WarmWarning, onKeepWarm: () -> Unit, onDismiss: () -> U
     Row(mod.padding(start = 14.dp, end = 8.dp, top = 10.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         Ic("light", 18.dp, m.t.ink)
         Column(Modifier.weight(1f)) {
-            T(w.message.ifBlank { "Warm GPU turns off in 5 min" }, m.type.body.copy(fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 2)
-            Tiny(if (w.reason == "cap") "Keep warm extends its time limit once." else "No renders on it lately.")
+            T(w.message.ifBlank { "Add-on engine turns off in 5 min" }.replace("Warm GPU", "Add-on engine"), m.type.body.copy(fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 2)
+            Tiny(if (w.reason == "cap") "Keep ready extends its time limit once." else "No renders on it lately.")
         }
-        Cta2("Keep warm", onKeepWarm, height = 40.dp)
+        Cta2("Keep ready", onKeepWarm, height = 40.dp)
         Box(Modifier.size(32.dp).press(onClick = onDismiss), contentAlignment = Alignment.Center) { T("✕", m.type.tiny, m.t.muted) }
     }
 }
 
 /**
- * The nudge ([WarmUi.NUDGE]) when creating starts, or the cost warning ([WarmUi.CONFIRM]) on every manual switch-on.
- * Drawn inside the app (not a system dialog) so it themes with the app; tapping outside is "Not now" / "Cancel".
+ * The cost warning ([WarmUi.CONFIRM]) on every switch-on (owner). Drawn inside the app (not a system dialog) so it themes
+ * with the app; tapping outside is "Cancel".
  */
 @Composable
 fun BoxScope.WarmPrompt(kind: String, w: WarmGpu?, onYes: () -> Unit, onNo: () -> Unit) {
     val m = muse
-    val nudge = kind == WarmUi.NUDGE
+    val nudge = false
     Box(
         Modifier.matchParentSize().background(Color.Black.copy(alpha = .45f))
             .clickable(remember { MutableInteractionSource() }, null, role = Role.Button, onClick = onNo),
@@ -143,44 +144,44 @@ fun BoxScope.WarmPrompt(kind: String, w: WarmGpu?, onYes: () -> Unit, onNo: () -
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Ic("light", 22.dp, if (m.isD) m.t.blue else m.t.accent)
-                H3(if (nudge) "Warm up a GPU?" else "Keep GPU warm?")
+                H3("Keep add-on engine ready?")
             }
-            T(if (nudge) "Warm up a GPU now so your render starts right away? ${warmCostLine(w)}" else warmCostLine(w), m.type.body, m.t.ink)
-            Tiny("It bills from the moment it starts booting (3–6 min). Renders on it aren't charged again.")
+            T(warmCostLine(w), m.type.body, m.t.ink)
+            Tiny("It bills from the moment it starts getting ready (3–6 min). Renders on it aren't charged again.")
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Cta2(if (nudge) "Not now" else "Cancel", onNo, Modifier.weight(1f), height = 50.dp)
-                Cta(if (nudge) "Warm up" else "Turn on", onYes, Modifier.weight(1f))
+                Cta("Turn on", onYes, Modifier.weight(1f))
             }
         }
     }
 }
 
-/** The manual switch in the video studio. Every switch-on asks first ([WarmUi.confirm]); switching off is immediate. */
+/** The owner's switch in Settings → Engines. Every switch-on asks first ([WarmUi.confirm]); switching off is immediate. */
 @Composable
 fun WarmSwitchRow(container: AppContainer, w: WarmGpu?, modifier: Modifier = Modifier) {
-    w ?: return // a server without Keep GPU warm
+    w ?: return // a server without it, or not the owner
     val m = muse
     val scope = rememberCoroutineScope()
     val (_, cost) = warmLive(w, System.currentTimeMillis())
     val sub = when {
         !w.allowed && !w.on -> "Only the studio owner can turn this on"
-        w.starting -> "Starting… usually 3–6 min · ${Pricing.money(cost)} so far"
-        w.on -> "On · renders start right away · ${Pricing.money(cost)} so far"
-        else -> "Renders start right away · about ${Pricing.money(w.ratePerHour)}/hour"
+        w.starting -> "Getting ready… usually 3–6 min · ${Pricing.money(cost)} so far"
+        w.on -> "On · Edit renders start right away · ${Pricing.money(cost)} so far"
+        else -> "Edit renders start right away · about ${Pricing.money(w.ratePerHour)}/hour"
     }
     Row(
-        modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+        modifier.fillMaxWidth().padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
         Ic("light", 20.dp, if (w.on) (if (m.isD) m.t.blue else m.t.accent) else m.t.muted)
         Column(Modifier.weight(1f)) {
-            T("Keep GPU warm", m.type.body.copy(fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
+            T("Keep add-on engine ready", m.type.body.copy(fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
             T(sub, m.type.tiny, m.t.muted, maxLines = 1)
         }
         Toggle(w.on, {
             when {
                 w.on -> scope.launch { container.repo.setWarm(false) }
-                !w.allowed -> container.repo.toast("Only the studio owner can keep a GPU warm")
+                !w.allowed -> container.repo.toast("Only the studio owner can do that")
                 else -> container.warmUi.confirm()
             }
         }, Modifier.graphicsLayer { alpha = if (!w.allowed && !w.on) .45f else 1f })

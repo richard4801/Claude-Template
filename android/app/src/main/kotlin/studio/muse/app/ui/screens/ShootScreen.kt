@@ -209,7 +209,7 @@ fun ShootScreen() {
             when (s.phase) {
                 "ready" -> Cta("${c.drafts.freshShots.value} shots ready · View in Gallery", { nav.tab(Routes.GALLERY) }, Modifier.weight(1f), icon = "grid")
                 "busy" -> Cta("Shooting…", {}, Modifier.weight(1f), busy = true)
-                else -> Cta(Pricing.SHOOT_LABEL, { vm.shoot(celebrate) }, Modifier.weight(1f))
+                else -> Cta("Shoot 4 · ${studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.shoot(photoPrices()))}", { vm.shoot(celebrate) }, Modifier.weight(1f))
             }
         }
     }

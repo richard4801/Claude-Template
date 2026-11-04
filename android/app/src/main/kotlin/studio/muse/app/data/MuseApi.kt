@@ -96,6 +96,11 @@ interface MuseApi {
     suspend fun transfer(req: TransferRequest): WalletMemberResponse
     suspend fun reclaim(req: ReclaimRequest): WalletMemberResponse
     suspend fun patchMember(memberId: String, patch: MemberPatch): Member
+    /** The owner-loaded studio balance and its top-ups (plans/api.md "App clean-up" §4, owner only). */
+    suspend fun studioBalance(): StudioBalance
+    suspend fun addTopUp(req: AddTopUpRequest): StudioBalance
+    /** Upscale a finished render (coming soon: the server answers upscale_unavailable). */
+    suspend fun upscale(takeId: String, size: String): Job
 
     // Studio settings (owner) and the image engine
     suspend fun studioSettings(): StudioSettings
@@ -103,7 +108,7 @@ interface MuseApi {
     suspend fun imageEngine(): ImageEngine
     suspend fun setImageEngine(req: ImageEnginePatch): ImageEngine
 
-    // Keep GPU warm (plans/api.md): a dedicated GPU so renders start at once, billed per minute.
+    // Keep add-on engine ready (plans/api.md "App clean-up" §6): owner only, billed per minute.
     suspend fun warmGpu(): WarmGpu
     /** {on: true|false} or {extend: true} ("Keep warm"). */
     suspend fun setWarmGpu(req: WarmRequest): WarmGpu
