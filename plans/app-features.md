@@ -37,7 +37,7 @@ Status tags: **[core]** needed for v1 · **[later]** after v1 · **[idea]** not 
   - resolution and frame rate
   - length up to 15s (tested: H3 does up to 15s in one pass with no stitch)
   - a warning if the performer's lip sync looks off (tested: the output copies the performer's mistakes)
-- **[core]** Pick character → outfit → quality preset → Generate.
+- **[core]** Pick character → outfit → quality preset → Generate. Engine names are user-facing: **Standard** (H3) / **Fast · beta** (Viggle).
 - **[core]** **Steps setting**, a slider or number field (decided 2026-11-04 after testing):
   - **Range 4–30, default and recommended: 10.** Max 30.
   - Tested on the same clip and seed: 10, 15 and 20 steps looked identical, and step count did not change the motion timing.
@@ -91,12 +91,18 @@ Status tags: **[core]** needed for v1 · **[later]** after v1 · **[idea]** not 
 - **[core]** Export in TikTok/Reels formats (9:16, 1080×1920).
 - **[later]** Direct posting or scheduling to TikTok.
 
-## 9. Compliance (built in, not optional)
-- **[core]** **Consent record per source performer**: who they are, written okay, scope (test only or posting allowed). Block posting clips made from footage with no posting consent.
-- **[core]** **AI label reminder on every export** (TikTok rule, and point 12 of the MiniMax licence).
-- **[core]** **#ad / Branded-content reminder** for brand deals (FTC/ASA, and MiniMax point 8: no fake reviews).
-- **[core]** "MiniMax H3" attribution shown in the UI (licence requirement for commercial products).
-- **[core]** Characters must be clearly adult. No lookalikes of real people.
+## 9. Compliance (handled in the Terms, not in the UI)
+_Decided 2026-11-04: consent and rights are **not** shown as in-app features. The app can't verify uploads, and visible consent screens make it feel like a legal tool._
+- **[core]** **Sign-up attestation** (unticked by default, both required): "I'm 18 or older. I'll only upload clips and images I have the rights to use, and only create original characters." and "I'll label AI content when I post it."
+- **[core]** **Terms of Service / Acceptable Use Policy** spell it out clearly (draft points):
+  - The user confirms they own, or have written permission for, every clip, image and voice they upload, including from any performer who appears in it.
+  - No real people's likeness without permission, and no public figures or lookalikes. Characters must be clearly adult (18+). No sexual content involving minors, ever.
+  - The user is solely responsible for what they upload and publish. MUSE may remove content and suspend accounts on valid complaints (takedown process plus a contact address).
+  - The user must label AI content on platforms (TikTok AI label) and disclose paid promotions (#ad / Branded content). No fake reviews.
+  - The MiniMax H3 licence and acceptable use policy terms are passed through to users.
+- **[core]** One small line on export: "Exports carry the AI-generated label. Brand posts also need #ad."
+- **[core]** "MiniMax H3" attribution in About/Settings (licence requirement).
+- **[later]** Report / takedown flow for third parties.
 
 ## 10. Phase 2 (client subscription)
 - **[later]** Client accounts and workspaces, with each client's characters and products.

@@ -34,6 +34,35 @@ extra = """
 .t-d .acc,.t-d .fld-r{color:var(--blue)}
 .full{height:560px}
 .t-c .ccard{height:290px}
+/* ---- review fixes: legibility, targets, contrast, state cues ---- */
+.tb-i{font-size:11.5px;width:60px}.t-a .tb-i,.t-a .tool{font-size:11px;letter-spacing:.06em}
+.tool{font-size:11.5px;width:62px}.tool span{white-space:nowrap}
+.slot,.ref,.ofit{font-size:12px}.ref span,.ofit span{font-size:11.5px}
+.gt-l{font-size:11.5px}.scale{font-size:11.5px}
+.t-a .rj .meta,.t-a .strip,.t-a .under,.t-a .ap-tag{font-size:11.5px}
+.t-b .ro,.readout{font-size:11.5px}
+.tb-btn{width:44px;height:44px}
+.t-a .arrow{width:44px;height:44px}
+.fld-r{padding:12px 4px;margin:-12px -4px;bottom:4px}
+.t-a .slider b{width:22px;height:22px;margin:-11px 0 0 -11px}
+.pill.warn{background:#F6E2C0;color:#6B3F00}
+.t-b .pill.warn{background:#3A2B14;color:#F2B45A}
+.t-b .muted,.t-b .tiny.muted,.t-b .tool,.t-b .tb-i{color:#A9A6A0}
+.t-c{--muted:#5E5C57}
+.t-c .cta,.t-c .tb-plus,.t-c .balcard{background:#5A6E52}
+.chk .ic{background:transparent;color:transparent;border:1.5px solid var(--line)}
+.chk.on .ic{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.is-off{opacity:.45}
+.opt.on b{color:var(--ink)}
+.t-d .tool.on span{text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:2px}
+.t-d .tool:not(.on) svg{box-shadow:none;opacity:.75}
+.t-b .tool.on span{text-decoration:underline;text-underline-offset:4px}
+.bsheet{padding-bottom:140px!important}
+.t-b .knob{width:80px;height:80px}.t-b .plate{padding:10px 14px 8px;gap:6px}.t-b .stepsbadge{font-size:24px}
+.view .screen .scroll{padding-bottom:120px}
+#ssheet .slots,.screen .slots{grid-template-columns:repeat(3,1fr)}
+.slot-e{flex-direction:column;gap:4px}
+.mi.danger{color:#B3261E}
 textarea.inp{font:inherit;color:var(--ink);resize:none;width:100%;outline:none;line-height:1.45;user-select:text;-webkit-user-select:text}
 textarea.inp:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
 .pbox{border:var(--stroke) solid var(--line);border-radius:var(--r);background:var(--surface2);padding:10px 12px;display:flex;flex-direction:column;gap:6px;font-size:12.5px;line-height:1.4;max-height:190px;overflow:auto}
