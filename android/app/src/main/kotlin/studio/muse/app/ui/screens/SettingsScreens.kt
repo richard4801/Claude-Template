@@ -70,14 +70,14 @@ import studio.muse.core.RenderSpec
 
 data class SettingsState(
     val prefs: AppPrefs = AppPrefs(), val balance: Balance = Balance(0.0, 0.0), val videos: Int = 0, val failNext: Boolean = false,
-    val modelName: String = "Sienna", val connected: Int = 0, val scheduled: Int = 0,
+    val modelName: String = "Sienna", val connected: Int = 0, val scheduled: Int = 0, val wallet: studio.muse.app.data.Wallet? = null,
 )
 
-class SettingsViewModel(private val c: AppContainer) : ViewModel() {
+class SettingsViewModel(val c: AppContainer) : ViewModel() {
     private val failNext = kotlinx.coroutines.flow.MutableStateFlow(false)
     val state: StateFlow<SettingsState> = combine(c.prefs, c.repo.state, failNext, c.drafts.modelId) { p, s, f, mid ->
         val m = s.model(mid) ?: s.models.firstOrNull()
-        SettingsState(p, s.balance, s.jobs.count { it.done } + 9, f, m?.name?.split(" ")?.first() ?: "Model", s.accountsOf(m?.id).size, s.posts.count { it.scheduled })
+        SettingsState(p, s.balance, s.jobs.count { it.done } + 9, f, m?.name?.split(" ")?.first() ?: "Model", s.accountsOf(m?.id).size, s.posts.count { it.scheduled }, s.wallet)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, SettingsState(c.prefs.value))
 
     private fun upd(f: (AppPrefs) -> AppPrefs) = viewModelScope.launch { c.prefsStore.update(f) }
@@ -87,8 +87,20 @@ class SettingsViewModel(private val c: AppContainer) : ViewModel() {
         upd { it.copy(theme = t.key) }
     }
 
-    fun useFake(v: Boolean) = upd { it.copy(useFake = v) }.also { c.repo.toast(if (v) "Using the in-app mock" else "Using the mock server at ${c.prefs.value.serverUrl}") }
+    /** Demo mode and the server are separate studios: switching signs out (the token belongs to one of them). */
+    fun useFake(v: Boolean, onSwitched: () -> Unit) = viewModelScope.launch {
+        c.prefsStore.update { it.copy(useFake = v, token = if (v) "demo" else null, role = if (v) "owner" else "member", studioName = if (v) "Jenne Studio" else "") }
+        c.repo.toast(if (v) "Demo mode · the sample studio, no server" else "Using the server at ${c.prefs.value.serverUrl.removeSuffix("/")} · sign in")
+        onSwitched()
+    }
     fun serverUrl(v: String) = upd { it.copy(serverUrl = v) }
+    fun resetServer(onSwitched: () -> Unit) = viewModelScope.launch {
+        if (c.prefs.value.serverUrl == BuildConfig.DEFAULT_SERVER_URL) return@launch
+        c.prefsStore.update { it.copy(serverUrl = BuildConfig.DEFAULT_SERVER_URL, token = null) }
+        c.repo.toast("Back to the MUSE server · sign in")
+        onSwitched()
+    }
+    val demo get() = c.repo.demo
     fun fastBeta() = upd { it.copy(fastBeta = !it.fastBeta) }
     fun failNext() = viewModelScope.launch {
         val v = !failNext.value
@@ -140,13 +152,28 @@ fun SettingsScreen() {
                     }) { Tiny(if (notifOn) "On" else "Off"); Ic("chev", 16.dp) }
                     Li("export", "${s.modelName}'s accounts", onClick = { nav.go(Routes.ACCOUNTS) }) { Tiny("${s.connected}/5"); Ic("chev", 16.dp) }
                     Li("queue", "Scheduled posts", onClick = { nav.go(Routes.POSTS) }) { Tiny("${s.scheduled}"); Ic("chev", 16.dp) }
-                    Li("wallet", "Credits & billing", onClick = { nav.go(Routes.CREDITS) }) { Tiny(Pricing.money(s.balance.balance)); Ic("chev", 16.dp) }
-                    Li("user", "Sign out", onClick = { vm.signOut { nav.reset(Routes.WELCOME) } }) { Ic("chev", 16.dp) }
+                    Li("wallet", "My tokens", onClick = { nav.go(Routes.CREDITS) }) { Tiny(tokensLabel(s.wallet, s.balance)); Ic("chev", 16.dp) }
+                    Li("user", "Sign out", sub = s.prefs.email.ifBlank { null }, onClick = { vm.signOut { nav.reset(Routes.WELCOME) } }) { Ic("chev", 16.dp) }
+                }
+                if (s.prefs.owner) {
+                    Lbl("Studio")
+                    ListGroup {
+                        Li("model", "Members", sub = "Send tokens, caps, switch accounts off", onClick = { nav.go(Routes.MEMBERS) }) { Ic("chev", 16.dp) }
+                        Li("mail", "Invite someone", onClick = { nav.go(Routes.INVITE) }) { Ic("chev", 16.dp) }
+                        Li("quality", "Studio settings", sub = "GPUs, warm-up, caps, image engine", onClick = { nav.go(Routes.STUDIO) }) { Ic("chev", 16.dp) }
+                    }
                 }
                 Lbl("Developer")
                 ListGroup {
-                    Li("studio", "In-app mock (no server)", onClick = { vm.useFake(!s.prefs.useFake) }) { Toggle(s.prefs.useFake, { vm.useFake(!s.prefs.useFake) }) }
-                    if (!s.prefs.useFake) Box(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) { Input(s.prefs.serverUrl, vm::serverUrl, placeholder = "http://10.0.2.2:8787/") }
+                    Li("studio", "Demo mode", sub = "The sample studio, in the app, no server", onClick = { vm.useFake(!s.prefs.useFake) { nav.reset(if (s.prefs.useFake) Routes.WELCOME else Routes.HOME) } }) {
+                        Toggle(s.prefs.useFake, { vm.useFake(!s.prefs.useFake) { nav.reset(if (s.prefs.useFake) Routes.WELCOME else Routes.HOME) } })
+                    }
+                    if (!s.prefs.useFake) Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Tiny("Server")
+                        Input(s.prefs.serverUrl, vm::serverUrl, placeholder = BuildConfig.DEFAULT_SERVER_URL, keyboard = androidx.compose.ui.text.input.KeyboardType.Uri)
+                        if (s.prefs.serverUrl != BuildConfig.DEFAULT_SERVER_URL) T("Use the MUSE server", m.type.tiny.copy(fontWeight = FontWeight.Bold), if (m.isD) m.t.blue else m.t.accent,
+                            Modifier.press { vm.resetServer { nav.reset(Routes.WELCOME) } }.padding(vertical = 4.dp))
+                    }
                     Li("quality", "Fast · beta engine (Viggle)", onClick = { vm.fastBeta() }) { Toggle(s.prefs.fastBeta, { vm.fastBeta() }) }
                     Li("shield", "Next render fails (test)", onClick = { vm.failNext() }) { Toggle(s.failNext, { vm.failNext() }) }
                 }
@@ -220,65 +247,9 @@ fun Li(icon: String, label: String, onClick: () -> Unit, sub: String? = null, tr
     }
 }
 
-// ======================================================================= Credits
-
-@Composable
-fun CreditsScreen() {
-    val vm = settingsVm()
-    val s by vm.state.collectAsState()
-    val nav = LocalNav.current
-    val m = muse
-    var amount by remember { mutableStateOf("25") }
-    var payOpen by remember { mutableStateOf(false) }
-    ScreenBox {
-        Column(Modifier.fillMaxSize()) {
-            TopBar("Credits", onBack = { nav.back() })
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 130.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                val shape = RoundedCornerShape(m.t.rLg)
-                val (bg, fg) = when { m.isB -> m.t.surface2 to m.t.ink; m.isC -> m.t.cta to Color.White; m.isD -> m.t.blue to Color.White; else -> m.t.ink to m.t.bg }
-                Box(Modifier.fillMaxWidth().let { if (m.isD) it.hardShadow(5.dp, m.t.rLg) else it }.clip(shape).background(bg).let { if (m.isD) it.border(2.5.dp, Ink, shape) else if (m.isB) it.border(1.dp, m.t.line, shape) else it }.padding(20.dp)) {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Lbl("GPU balance", color = fg.copy(alpha = .8f))
-                        T(Pricing.money(s.balance.balance), m.type.mono.copy(fontSize = 46.sp, fontWeight = FontWeight.SemiBold, lineHeight = 50.sp), if (m.isB) m.t.accent else fg)
-                        Tiny("≈ ${Pricing.videosLeft(s.balance.balance)} videos at 10 steps", color = fg)
-                    }
-                    Sticker("top up!", "yellow", -6f, Modifier.align(Alignment.TopEnd))
-                }
-                Field("Top up") { Seg(listOf("10", "25", "50", "100").map { it to "$$it" }, amount, { amount = it }) }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Kpi("This month", Pricing.money(s.balance.month), Modifier.weight(1f))
-                    Kpi("Per video", "~${Pricing.money(Pricing.estCost(RenderSpec()))}", Modifier.weight(1f))
-                    Kpi("Videos", "${s.videos}", Modifier.weight(1f))
-                }
-                Field("Spend limits") {
-                    LimitRow("Per job", Pricing.money(s.balance.perJobLimit))
-                    LimitRow("Per day", Pricing.money(s.balance.perDayLimit))
-                }
-                Tiny("Renders are charged when they start and refunded in full if the GPU fails.")
-            }
-        }
-        Dock {
-            Box(Modifier.weight(1f)) {
-                Cta("Add $$amount", { payOpen = true }, Modifier.fillMaxWidth())
-                MuseMenu(payOpen, { payOpen = false }, listOf(
-                    MenuItem("wallet", "Card · Visa / Mastercard") { vm.topUp(amount.toDouble(), "card") },
-                    MenuItem("wallet", "USDT (TRC-20)") { vm.topUp(amount.toDouble(), "usdt") },
-                    MenuItem("wallet", "Virtual dollar card") { vm.topUp(amount.toDouble(), "virtual") },
-                ))
-            }
-        }
-    }
-}
-
-@Composable
-private fun LimitRow(label: String, value: String) {
-    val m = muse
-    val shape = RoundedCornerShape(m.t.r)
-    Row(
-        Modifier.fillMaxWidth().height(54.dp).let { if (m.isC) it.softShadow(m.t.r) else it }.clip(shape).background(m.t.surface)
-            .let { if (m.isC) it else it.border(if (m.isD) 2.5.dp else m.t.stroke, m.t.line, shape) }.padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Ic("shield", 20.dp); T(label, m.type.body, m.t.ink, Modifier.weight(1f)); T(value, m.type.mono.copy(fontSize = 12.5.sp), m.t.ink)
-    }
+/** "1,200 tokens", or the dollar balance for a server without wallets. */
+fun tokensLabel(w: studio.muse.app.data.Wallet?, b: Balance): String = when {
+    w == null -> Pricing.money(b.balance)
+    w.owner -> Pricing.money(w.availableToSend ?: w.usd)
+    else -> "${studio.muse.app.data.fmtTokens(w.tokens)} tokens"
 }

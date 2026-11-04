@@ -154,7 +154,27 @@ private fun EmptyQueue() {
     }
 }
 
-private fun Job.clockText() = if (done) formatTimecode(totalSeconds) else formatClock(secondsLeft)
+private fun Job.clockText() = if (done) formatTimecode(totalSeconds) else formatClock(etaSeconds ?: secondsLeft)
+
+/** "#2 in line · done in ~6:30", "Paused: the studio's GPU credit is low", or the server's phase line. */
+fun Job.statusLine(): String = when {
+    paused -> studio.muse.app.data.ErrorText.PAUSED_LOW_BALANCE
+    state == "running" && queuePosition != null -> "#$queuePosition in line for a GPU" + (etaSeconds?.let { " · done in ~${formatClock(it)}" } ?: "")
+    else -> phase
+}
+
+/** The job's cost; GPU warm-up (charged separately when the member pays it) gets its own line. */
+fun Job.costLines(): List<String> = listOfNotNull(
+    "Render ${Pricing.money(cost)}${if (refunded > 0) " · ${Pricing.money(refunded)} refunded" else ""}",
+    warmupCost?.takeIf { it > 0 }?.let { "GPU warm-up ${Pricing.money(it)}" },
+)
+
+@Composable
+private fun JobMeta(j: Job) {
+    val m = muse
+    if (j.running) T(j.statusLine(), m.type.tiny, if (j.paused) m.t.warn else m.t.muted, maxLines = 2)
+    j.costLines().forEach { Tiny(it) }
+}
 
 // ---------------- A · Editorial: big serif title, hairline rows
 @Composable
@@ -183,7 +203,7 @@ private fun QueueA(vm: QueueViewModel, s: QueueState) {
                         T(j.title, m.type.body.copy(fontWeight = FontWeight.Medium), m.t.ink)
                         T("9:16 · ${j.engineLabel.uppercase()}", m.type.mono.copy(fontSize = 11.5.sp, letterSpacing = .08.em), m.t.muted)
                         RowB { Bar((j.progress / 100).toFloat(), Modifier.weight(1f), m.t.ink, 2.dp, m.t.line); Spacer(Modifier.width(8.dp)); T("${Pricing.jsRound(j.progress)}%", m.type.mono.copy(fontSize = 12.5.sp), m.t.ink) }
-                        if (j.running) Tiny(j.phase)
+                        JobMeta(j)
                     }
                     MoreMenu(jobMenu(vm, j), tint = m.t.muted)
                 }
@@ -219,8 +239,9 @@ private fun QueueB(vm: QueueViewModel, s: QueueState) {
                             T("● ${if (j.done) "DONE" else "RENDERING"}", m.type.mono.copy(fontSize = 11.sp, letterSpacing = .08.em), if (j.done) m.t.ink else m.t.accent)
                         }
                         Tiny("${j.modelName} · ${j.title}")
-                        T(if (j.running) j.phase else "9:16 · 24fps · ${j.engineLabel}", m.type.mono.copy(fontSize = 12.sp), m.t.muted, maxLines = 1)
+                        T(if (j.running) j.statusLine() else "9:16 · 24fps · ${j.engineLabel}", m.type.mono.copy(fontSize = 12.sp), if (j.paused) m.t.warn else m.t.muted, maxLines = 1)
                         RowB { Bar((j.progress / 100).toFloat(), Modifier.weight(1f)); Spacer(Modifier.width(8.dp)); T("${Pricing.jsRound(j.progress)}%", m.type.mono.copy(fontSize = 12.5.sp), m.t.ink) }
+                        j.costLines().forEach { Tiny(it) }
                     }
                 }
             }
@@ -270,6 +291,7 @@ private fun QueueC(vm: QueueViewModel, s: QueueState) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             RowB { T(j.title, m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink); T(Pricing.money(j.cost), m.type.mono.copy(fontSize = 12.5.sp), m.t.ink) }
                             Tiny("${j.engineLabel} · took ${formatTimecode(j.totalSeconds)}")
+                            j.warmupCost?.takeIf { it > 0 }?.let { Tiny("GPU warm-up ${Pricing.money(it)}") }
                             Pill("Done", "good")
                         }
                     }
@@ -283,8 +305,9 @@ private fun QueueC(vm: QueueViewModel, s: QueueState) {
         TopBar("Render queue")
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             T("Time left", m.type.body, m.t.muted, Modifier.padding(top = 8.dp))
-            T(formatClock(r.secondsLeft), m.type.body.copy(fontSize = 104.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-.04).em, lineHeight = 104.sp), m.t.ink)
-            T("Generating your video… ${r.phase.substringBefore(" · ~")}", m.type.body, m.t.muted)
+            T(formatClock(r.etaSeconds ?: r.secondsLeft), m.type.body.copy(fontSize = 104.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-.04).em, lineHeight = 104.sp), m.t.ink)
+            T(if (r.paused || r.queuePosition != null) r.statusLine() else "Generating your video… ${r.phase.substringBefore(" · ~")}", m.type.body, if (r.paused) m.t.warn else m.t.muted)
+            r.costLines().forEach { Tiny(it) }
             stages.forEachIndexed { i, (name, lim) ->
                 val prev = if (i == 0) 0.0 else stages[i - 1].second
                 val sp = ((r.progress - prev) / (lim - prev) * 100).coerceIn(0.0, 100.0)
@@ -340,7 +363,7 @@ private fun QueueD(vm: QueueViewModel, s: QueueState) {
                     Box(Modifier.size(56.dp, 74.dp).clip(ts).border(2.dp, Ink, ts)) { RefImage(j.thumb, Modifier.fillMaxSize(), 20) }
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         T("${j.modelName} · ${j.title}", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink, maxLines = 1)
-                        Tiny(if (j.running) j.phase else j.engineLabel)
+                        T(if (j.running) j.statusLine() else j.engineLabel, m.type.tiny, if (j.paused) m.t.warn else m.t.muted, maxLines = 2)
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             val bs = RoundedCornerShape(9.dp)
                             Box(Modifier.weight(1f).height(16.dp).clip(bs).background(Color.White).border(2.dp, Ink, bs)) {
@@ -348,7 +371,8 @@ private fun QueueD(vm: QueueViewModel, s: QueueState) {
                             }
                             T("${Pricing.jsRound(j.progress)}%", m.type.h2.copy(fontSize = 28.sp, lineHeight = 30.sp), m.t.ink)
                         }
-                        Tiny(if (j.done) "Done · ${Pricing.money(j.cost)}" else "~${formatClock(j.secondsLeft)} left · ${Pricing.money(j.cost)}")
+                        Tiny(if (j.done) "Done · ${Pricing.money(j.cost)}" else "~${formatClock(j.etaSeconds ?: j.secondsLeft)} left · ${Pricing.money(j.cost)}")
+                        j.warmupCost?.takeIf { it > 0 }?.let { Tiny("+ GPU warm-up ${Pricing.money(it)}") }
                     }
                 }
             }

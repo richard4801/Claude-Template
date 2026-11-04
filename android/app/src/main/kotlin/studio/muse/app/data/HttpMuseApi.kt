@@ -1,12 +1,20 @@
 package studio.muse.app.data
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.retryWhen
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -16,6 +24,7 @@ import okhttp3.Response
 import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
+import okio.BufferedSink
 import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -33,8 +42,13 @@ import java.util.concurrent.TimeUnit
 
 /** Retrofit description of plans/api.md. */
 interface MuseService {
+    @GET("health") suspend fun health(): Health
     @POST("v1/auth/signin") suspend fun signIn(@Body r: SignInRequest): AuthResponse
     @POST("v1/auth/signup") suspend fun signUp(@Body r: SignUpRequest): AuthResponse
+    @POST("v1/auth/signout") suspend fun signOut(): retrofit2.Response<Unit>
+    @GET("v1/auth/me") suspend fun me(): User
+    @POST("v1/invites") suspend fun createInvite(@Body r: CreateInviteRequest): InviteCreated
+    @GET("v1/invites") suspend fun invites(): List<InviteInfo>
     @GET("v1/models") suspend fun models(): List<Model>
     @POST("v1/models") suspend fun createModel(@Body r: CreateModelRequest): Model
     @PUT("v1/models/{id}/slots/{slot}") suspend fun setSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: SetSlotRequest): Model
@@ -44,6 +58,9 @@ interface MuseService {
     @POST("v1/outfits/{id}/save") suspend fun saveOutfit(@Path("id") id: String): Outfit
     @Multipart @POST("v1/uploads/images") suspend fun uploadImage(@Part file: MultipartBody.Part): ImageRef
     @Multipart @POST("v1/uploads/clips") suspend fun uploadClip(@Part("meta") meta: RequestBody, @Part file: MultipartBody.Part?): Clip
+    @POST("v1/uploads/presign") suspend fun presign(@Body r: PresignRequest): PresignResponse
+    @POST("v1/uploads/{id}/confirm") suspend fun confirmImage(@Path("id") id: String, @Body r: JsonObject): ImageRef
+    @POST("v1/uploads/{id}/confirm") suspend fun confirmClip(@Path("id") id: String, @Body r: ConfirmClipRequest): Clip
     @GET("v1/jobs") suspend fun jobs(): List<Job>
     @POST("v1/jobs") suspend fun createJob(@Body r: JobRequest): Job
     @DELETE("v1/jobs/{id}") suspend fun removeJob(@Path("id") id: String)
@@ -53,6 +70,15 @@ interface MuseService {
     @POST("v1/shoots") suspend fun shoot(@Body r: ShootRequest): List<Take>
     @GET("v1/balance") suspend fun balance(): Balance
     @POST("v1/balance/topup") suspend fun topUp(@Body r: TopUpRequest): Balance
+    @GET("v1/wallet") suspend fun wallet(): Wallet
+    @GET("v1/members") suspend fun members(): List<Member>
+    @PATCH("v1/members/{id}") suspend fun patchMember(@Path("id") id: String, @Body r: JsonObject): Member
+    @POST("v1/wallets/transfer") suspend fun transfer(@Body r: TransferRequest): WalletMemberResponse
+    @POST("v1/wallets/reclaim") suspend fun reclaim(@Body r: ReclaimRequest): WalletMemberResponse
+    @GET("v1/settings/studio") suspend fun studioSettings(): StudioSettings
+    @PATCH("v1/settings/studio") suspend fun patchStudioSettings(@Body r: StudioSettingsPatch): StudioSettings
+    @GET("v1/settings/image-engine") suspend fun imageEngine(): ImageEngine
+    @PATCH("v1/settings/image-engine") suspend fun setImageEngine(@Body r: ImageEnginePatch): ImageEngine
     @POST("v1/dev/fail-next") suspend fun failNext(@Body r: DevFailRequest)
     @PATCH("v1/models/{id}") suspend fun updateModel(@Path("id") id: String, @Body r: UpdateModelRequest): Model
     @DELETE("v1/models/{id}") suspend fun deleteModel(@Path("id") id: String)
@@ -70,19 +96,35 @@ interface MuseService {
     @DELETE("v1/posts/{id}") suspend fun deletePost(@Path("id") id: String)
 }
 
+/**
+ * How files go up. AUTO asks GET /health once: `storage: "s3"` (R2) → presigned PUT + confirm; anything else (the
+ * real API with `storage: "local"`, whose presigned links point at its own PUBLIC_URL, or server/mock) → multipart.
+ */
+enum class UploadMode { AUTO, PRESIGNED, MULTIPART }
+
 /** MuseApi over HTTP. Progress comes from the SSE stream at GET /v1/events. */
-class HttpMuseApi(baseUrl: String) : MuseApi {
+class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMode.AUTO) : MuseApi {
     private val base = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
+    val baseUrl: String get() = base
     @Volatile private var token: String? = null
-    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
+    @Volatile private var storage: String? = null
+    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true; coerceInputValues = true }
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(5, TimeUnit.MINUTES)
         .addInterceptor { chain ->
             val t = token
             chain.proceed(if (t == null) chain.request() else chain.request().newBuilder().header("Authorization", "Bearer $t").build())
         }
+        .build()
+
+    /** For presigned PUTs to storage: never sends our bearer token to R2. */
+    private val storageClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.MINUTES)
+        .readTimeout(2, TimeUnit.MINUTES)
         .build()
 
     private val svc: MuseService = Retrofit.Builder()
@@ -94,52 +136,112 @@ class HttpMuseApi(baseUrl: String) : MuseApi {
 
     override fun setToken(token: String?) { this.token = token }
 
-    /** Turns `{"error": "...", "code": "..."}` bodies into [ApiException] so the UI can show the server's message. */
+    /** Turns `{"error": "...", "code": "..."}` bodies into [ApiException]. The UI words the codes (see [ErrorText]). */
     private suspend fun <T> call(block: suspend MuseService.() -> T): T = try {
         svc.block()
     } catch (e: HttpException) {
-        val body = e.response()?.errorBody()?.string()
+        val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
         val err = runCatching { json.decodeFromString(ErrorBody.serializer(), body ?: "") }.getOrNull()
-        throw ApiException(err?.code ?: "http_${e.code()}", err?.error ?: "Server error ${e.code()}")
+        val code = err?.code ?: when (e.code()) { 401 -> "unauthorized"; 429 -> "rate_limited"; 413 -> "too_large"; else -> "http_${e.code()}" }
+        throw ApiException(code, err?.error ?: "Server error ${e.code()}")
     } catch (e: java.io.IOException) {
         throw ApiException("offline", "Can't reach the server at $base")
+    } catch (e: kotlinx.serialization.SerializationException) {
+        throw ApiException("bad_response", "The server sent something this app version can't read")
     }
+
+    suspend fun health(): Health = call { health() }
 
     override suspend fun signIn(req: SignInRequest) = call { signIn(req) }
-    override suspend fun signUp(req: SignUpRequest) = call { signUp(req) }
-    override suspend fun listModels() = call { models() }
-    override suspend fun createModel(req: CreateModelRequest) = call { createModel(req) }
-    override suspend fun setSlot(modelId: String, slot: String, req: SetSlotRequest) = call { setSlot(modelId, slot, req) }
-    override suspend fun fillAngles(modelId: String) = call { fillAngles(modelId) }
-    override suspend fun listOutfits() = call { outfits() }
-    override suspend fun createOutfit(req: CreateOutfitRequest) = call { createOutfit(req) }
-    override suspend fun saveOutfit(outfitId: String) = call { saveOutfit(outfitId) }
+    override suspend fun signUp(req: SignUpRequest) = call { signUp(req.copy(inviteCode = req.inviteCode?.trim()?.ifBlank { null })) }
+    override suspend fun signOut() { call { signOut() } }
+    override suspend fun me() = call { me() }
+    override suspend fun createInvite(req: CreateInviteRequest) = call { createInvite(req) }
+    override suspend fun listInvites() = call { invites() }
+    override suspend fun listModels() = call { models() }.map { it.abs() }
+    override suspend fun createModel(req: CreateModelRequest) = call { createModel(req) }.abs()
+    override suspend fun setSlot(modelId: String, slot: String, req: SetSlotRequest) = call { setSlot(modelId, slot, req) }.abs()
+    override suspend fun fillAngles(modelId: String) = call { fillAngles(modelId) }.let { it.copy(model = it.model.abs()) }
+    override suspend fun listOutfits() = call { outfits() }.map { it.abs() }
+    override suspend fun createOutfit(req: CreateOutfitRequest) = call { createOutfit(req) }.abs()
+    override suspend fun saveOutfit(outfitId: String) = call { saveOutfit(outfitId) }.abs()
 
-    override suspend fun uploadImage(name: String, bytes: ByteArray, mime: String): ImageRef = call {
-        val ref = uploadImage(MultipartBody.Part.createFormData("file", name, bytes.toRequestBody(mime.toMediaType())))
-        // Server returns a path; make it absolute so Coil can load it.
-        if (ref.url != null && ref.url.startsWith("/")) ref.copy(url = base.trimEnd('/') + ref.url) else ref
+    private suspend fun usePresigned(): Boolean = when (uploadMode) {
+        UploadMode.PRESIGNED -> true
+        UploadMode.MULTIPART -> false
+        UploadMode.AUTO -> (storage ?: runCatching { health().storage ?: "none" }.getOrDefault("none").also { storage = it }) == "s3"
     }
 
-    override suspend fun uploadClip(meta: ClipMeta, bytes: ByteArray?): Clip = call {
-        val m = json.encodeToString(ClipMeta.serializer(), meta).toRequestBody("application/json".toMediaType())
-        val part = bytes?.let { MultipartBody.Part.createFormData("file", meta.name, it.toRequestBody("video/mp4".toMediaType())) }
-        uploadClip(m, part)
+    override suspend fun uploadImage(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit): ImageRef {
+        val ref = if (usePresigned()) {
+            val id = putPresigned("image", mime, bytes, onProgress)
+            call { confirmImage(id, JsonObject(emptyMap())) }
+        } else call {
+            uploadImage(MultipartBody.Part.createFormData("file", name, ProgressBody(bytes, mime.toMediaTypeOrNull(), onProgress)))
+        }
+        onProgress(1f)
+        // The server may return a path; make it absolute so Coil can load it.
+        return ref.abs()
     }
 
-    override suspend fun listJobs() = call { jobs() }
-    override suspend fun createJob(req: JobRequest) = call { createJob(req) }
+    override suspend fun uploadClip(meta: ClipMeta, bytes: ByteArray?, mime: String, onProgress: (Float) -> Unit): Clip {
+        if (bytes != null && usePresigned()) {
+            val id = putPresigned("clip", mime, bytes, onProgress)
+            return call { confirmClip(id, ConfirmClipRequest(meta)) }.also { onProgress(1f) }
+        }
+        return call {
+            val m = json.encodeToString(ClipMeta.serializer(), meta).toRequestBody("application/json".toMediaType())
+            val part = bytes?.let { MultipartBody.Part.createFormData("file", meta.name, ProgressBody(it, mime.toMediaTypeOrNull(), onProgress)) }
+            uploadClip(m, part)
+        }.also { onProgress(1f) }
+    }
+
+    /** presign → PUT straight to storage (R2) with progress → returns the upload id to confirm. */
+    private suspend fun putPresigned(kind: String, mime: String, bytes: ByteArray, onProgress: (Float) -> Unit): String {
+        val p = call { presign(PresignRequest(kind, mime, bytes.size.toLong())) }
+        val ct = p.headers.entries.firstOrNull { it.key.equals("content-type", true) }?.value ?: mime
+        val req = Request.Builder().url(p.url).apply {
+            p.headers.forEach { (k, v) -> if (!k.equals("content-type", true)) header(k, v) }
+        }.method(p.method.ifBlank { "PUT" }, ProgressBody(bytes, ct.toMediaTypeOrNull(), onProgress)).build()
+        withContext(Dispatchers.IO) {
+            try {
+                storageClient.newCall(req).execute().use { r ->
+                    if (!r.isSuccessful) throw ApiException("upload_failed", "The upload was refused (${r.code})")
+                }
+            } catch (e: java.io.IOException) {
+                throw ApiException("upload_failed", "The upload was interrupted")
+            }
+        }
+        return p.uploadId
+    }
+
+    override suspend fun listJobs() = call { jobs() }.map { it.abs() }
+    override suspend fun createJob(req: JobRequest) = call { createJob(req) }.abs()
     override suspend fun removeJob(jobId: String) = call { removeJob(jobId) }
-    override suspend fun listTakes() = call { takes() }
-    override suspend fun setTakeStatus(takeId: String, status: String) = call { setTake(takeId, SetTakeStatusRequest(status)) }
+    override suspend fun listTakes() = call { takes() }.map { it.abs() }
+    override suspend fun setTakeStatus(takeId: String, status: String) = call { setTake(takeId, SetTakeStatusRequest(status)) }.abs()
     override suspend fun deleteTake(takeId: String) = call { deleteTake(takeId) }
-    override suspend fun shoot(req: ShootRequest) = call { shoot(req) }
+    override suspend fun shoot(req: ShootRequest) = call { shoot(req) }.map { it.abs() }
     override suspend fun balance() = call { balance() }
     override suspend fun topUp(req: TopUpRequest) = call { topUp(req) }
+    override suspend fun wallet() = call { wallet() }
+    override suspend fun listMembers() = call { members() }
+    override suspend fun transfer(req: TransferRequest) = call { transfer(req) }
+    override suspend fun reclaim(req: ReclaimRequest) = call { reclaim(req) }
+    override suspend fun patchMember(memberId: String, patch: MemberPatch) = call {
+        patchMember(memberId, buildJsonObject {
+            if (patch.clearCapPerDay) put("capPerDay", JsonNull) else patch.capPerDay?.let { put("capPerDay", JsonPrimitive(it)) }
+            patch.disabled?.let { put("disabled", JsonPrimitive(it)) }
+        })
+    }
+    override suspend fun studioSettings() = call { studioSettings() }
+    override suspend fun patchStudioSettings(req: StudioSettingsPatch) = call { patchStudioSettings(req) }
+    override suspend fun imageEngine() = call { imageEngine() }
+    override suspend fun setImageEngine(req: ImageEnginePatch) = call { setImageEngine(req) }
     override suspend fun setFailNext(fail: Boolean) = call { failNext(DevFailRequest(fail)) }
-    override suspend fun updateModel(modelId: String, req: UpdateModelRequest) = call { updateModel(modelId, req) }
+    override suspend fun updateModel(modelId: String, req: UpdateModelRequest) = call { updateModel(modelId, req) }.abs()
     override suspend fun deleteModel(modelId: String) = call { deleteModel(modelId) }
-    override suspend fun runQueue() = call { runQueue() }
+    override suspend fun runQueue() = call { runQueue() }.map { it.abs() }
     override suspend fun lora(modelId: String) = call { lora(modelId) }.abs()
     override suspend fun buildLoraSet(modelId: String) = call { buildLoraSet(modelId) }.abs()
     override suspend fun keepCandidate(modelId: String, candidateId: String, keep: Boolean) = call { keepCandidate(modelId, candidateId, KeepRequest(keep)) }.abs()
@@ -152,17 +254,24 @@ class HttpMuseApi(baseUrl: String) : MuseApi {
     override suspend fun createPost(req: CreatePostRequest) = call { createPost(req) }.abs()
     override suspend fun deletePost(postId: String) = call { deletePost(postId) }
 
-    /** Relative "/uploads/x" refs → absolute, so Coil can load them. */
-    private fun ImageRef.abs(): ImageRef = if (url != null && url.startsWith("/")) copy(url = base.trimEnd('/') + url) else this
+    /** Relative "/uploads/x" refs → absolute, so Coil and ExoPlayer can load them. */
+    private fun String.absUrl(): String = if (startsWith("/")) base.trimEnd('/') + this else this
+    private fun ImageRef.abs(): ImageRef = if (url != null && url.startsWith("/")) copy(url = url.absUrl()) else this
     private fun Lora.abs() = copy(candidates = candidates.map { it.copy(image = it.image.abs()) })
     private fun Post.abs() = copy(thumb = thumb?.abs())
+    private fun Model.abs() = copy(slots = slots.map { it.copy(image = it.image?.abs()) })
+    private fun Outfit.abs() = copy(angles = angles.map { it?.abs() })
+    private fun Job.abs() = copy(thumb = thumb?.abs())
+    private fun Take.abs() = copy(thumb = thumb?.abs(), videoUrl = videoUrl?.absUrl())
 
     override fun events(): Flow<ApiEvent> = callbackFlow {
         val req = Request.Builder().url(base + "v1/events").apply { token?.let { header("Authorization", "Bearer $it") } }.build()
         val sseClient = client.newBuilder().readTimeout(0, TimeUnit.SECONDS).build()
         val source = EventSources.createFactory(sseClient).newEventSource(req, object : EventSourceListener() {
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
-                runCatching { json.decodeFromString(ApiEvent.serializer(), data) }.onSuccess { e -> trySend(e.copy(lora = e.lora?.abs(), post = e.post?.abs())) }
+                runCatching { json.decodeFromString(ApiEvent.serializer(), data) }.onSuccess { e ->
+                    trySend(e.copy(lora = e.lora?.abs(), post = e.post?.abs(), job = e.job?.abs(), model = e.model?.abs(), outfit = e.outfit?.abs(), takes = e.takes.map { it.abs() }))
+                }
             }
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 close(t ?: java.io.IOException("SSE closed"))
@@ -171,4 +280,22 @@ class HttpMuseApi(baseUrl: String) : MuseApi {
         })
         awaitClose { source.cancel() }
     }.retryWhen { _, attempt -> delay(minOf(10_000L, 1000L * (attempt + 1))); true }
+}
+
+/** A byte-array body that reports how much has been written (0..1). */
+private class ProgressBody(private val bytes: ByteArray, private val type: MediaType?, private val onProgress: (Float) -> Unit) : RequestBody() {
+    override fun contentType() = type
+    override fun contentLength() = bytes.size.toLong()
+    override fun writeTo(sink: BufferedSink) {
+        val chunk = 64 * 1024
+        var off = 0
+        onProgress(0f)
+        while (off < bytes.size) {
+            val n = minOf(chunk, bytes.size - off)
+            sink.write(bytes, off, n)
+            off += n
+            sink.flush()
+            onProgress(off.toFloat() / bytes.size.coerceAtLeast(1))
+        }
+    }
 }

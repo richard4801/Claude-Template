@@ -58,6 +58,13 @@ object SampleData {
 
     fun balance() = Balance(balance = 6.07, month = 18.93, today = 0.13, videos = 11)
 
+    /** The demo studio's members (the owner is "u1", Jenne). */
+    fun members(now: Long) = listOf(
+        Member("u_maya", "maya@studio.com", tokens = 150, usd = 1.5, todayUsd = 0.67, monthUsd = 4.02, lastActiveAt = now - 25 * 60_000L, capPerDay = 5.0, createdAt = now - 20 * 86_400_000L),
+        Member("u_leo", "leo@studio.com", tokens = 40, usd = 0.4, monthUsd = 1.34, lastActiveAt = now - 3 * 86_400_000L, createdAt = now - 9 * 86_400_000L),
+        Member("u_ana", "ana@studio.com", disabled = true, lastActiveAt = now - 30 * 86_400_000L, createdAt = now - 40 * 86_400_000L),
+    )
+
     /** The good sample clip and the failing-clip example (third-party footage is never bundled; thumbnails are placeholders). */
     val sampleMeta = ClipMeta("Living-room dance", 9.4, 1080, 1920, 30)
     val badMeta = ClipMeta("Mirror trend (download)", 22.0, 1080, 1920, 30, people = 2, watermark = "TikTok logo")

@@ -90,6 +90,7 @@ object Routes {
     const val PROFILE = "profile"; const val CREATE1 = "create1"; const val CREATE3 = "create3"; const val OUTFIT = "outfit"
     const val SHOOT = "shoot"; const val SOURCE = "source"; const val DIRECT = "direct"; const val RESULT = "result/{id}"
     const val LORA = "lora"; const val ACCOUNTS = "accounts"; const val POST = "post/{id}"; const val POSTS = "posts"
+    const val MEMBERS = "members"; const val INVITE = "invite"; const val STUDIO = "studio"
     val TABS = setOf(HOME, GALLERY, QUEUE, SETTINGS)
     fun result(id: String) = "result/$id"
     fun post(takeId: String) = "post/$takeId"
@@ -143,6 +144,13 @@ fun MuseApp(
             if (post != null && platform != null) openHandoff(context, container, post, platform)
             onHandoffConsumed()
         }
+        // The session ended on the server (signed out elsewhere, switched off by the owner): back to sign-in.
+        LaunchedEffect(container) {
+            container.repo.signedOut.collect { msg ->
+                n.reset(Routes.SIGNIN)
+                container.repo.toast(msg)
+            }
+        }
         CompositionLocalProvider(LocalContainer provides container, LocalNav provides n, LocalCelebrate provides celebrate) {
             Box(Modifier.fillMaxSize().background(muse.t.bg)) {
                 NavHost(
@@ -171,9 +179,13 @@ fun MuseApp(
                     composable(Routes.ACCOUNTS) { AccountsScreen() }
                     composable(Routes.POST) { e -> PostScreen(e.arguments?.getString("id") ?: "") }
                     composable(Routes.POSTS) { PostsScreen() }
+                    composable(Routes.MEMBERS) { MembersScreen() }
+                    composable(Routes.INVITE) { InviteScreen() }
+                    composable(Routes.STUDIO) { StudioSettingsScreen() }
                 }
                 val entry by nav.currentBackStackEntryAsState()
                 FlashOnNav(theme, entry)
+                UploadProgressHost(container)
                 ToastHost(container)
                 ConfettiLayer(confetti)
             }
@@ -235,6 +247,23 @@ private fun BoxScope.ToastHost(container: AppContainer) {
     }
 }
 
+
+/** "Uploading · 42%" with a bar, while a reference image or clip goes up. */
+@Composable
+private fun BoxScope.UploadProgressHost(container: AppContainer) {
+    val p by container.repo.uploadProgress.collectAsState()
+    val v = p ?: return
+    val m = muse
+    val shape = RoundedCornerShape(m.t.r)
+    Column(
+        Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 96.dp).fillMaxWidth()
+            .clip(shape).background(m.t.ink).padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        T(if (v >= 1f) "Checking…" else "Uploading · ${(v * 100).toInt()}%", m.type.tiny.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), m.t.bg)
+        studio.muse.app.ui.components.Bar(v, Modifier.fillMaxWidth(), m.t.accent, 4.dp, m.t.bg.copy(alpha = .25f))
+    }
+}
 
 /** Creator Pop confetti (theme D only). */
 @Composable

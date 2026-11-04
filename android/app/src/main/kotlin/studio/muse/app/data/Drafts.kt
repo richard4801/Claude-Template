@@ -58,6 +58,9 @@ class Drafts {
     val video = MutableStateFlow(VideoDraft())
     val shoot = MutableStateFlow(ShootDraft())
     val model = MutableStateFlow(ModelDraft())
+    /** Owner screens: the member whose Send/Take back panel is open, and the last invite code made (shown once). */
+    val memberOpen = MutableStateFlow<String?>(null)
+    val lastInvite = MutableStateFlow<InviteCreated?>(null)
     val outfit = MutableStateFlow(OutfitDraft())
     /** Gallery tab: tests | final. Newly shot items are highlighted once. */
     val galleryTab = MutableStateFlow("tests")

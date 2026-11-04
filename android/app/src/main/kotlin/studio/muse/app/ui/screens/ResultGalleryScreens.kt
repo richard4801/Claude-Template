@@ -116,9 +116,15 @@ fun ResultScreen(id: String) {
                     }
                 } else {
                     HorizontalPager(pager, Modifier.fillMaxSize()) { p ->
+                        val t = s.takes.getOrNull(p)
                         Box(Modifier.fillMaxSize()) {
-                            RefImage(s.takes.getOrNull(p)?.thumb, Modifier.fillMaxSize(), 30)
-                            if (s.takes.getOrNull(p)?.kind == "take") PlayBadge()
+                            val url = t?.videoUrl
+                            // A real render plays with Media3; simulated renders have no video, so the still stays.
+                            if (url != null) TakeVideo(url, t.thumb, p == pager.currentPage, Modifier.fillMaxSize())
+                            else {
+                                RefImage(t?.thumb, Modifier.fillMaxSize(), 30)
+                                if (t?.kind == "take") PlayBadge()
+                            }
                         }
                     }
                 }
@@ -155,6 +161,8 @@ fun ResultScreen(id: String) {
                         Column(Modifier.weight(1f)) {
                             H3(take.title)
                             Tiny(listOf(take.engineLabel, Pricing.money(take.cost)).filter { it.isNotBlank() }.joinToString(" · "))
+                            takeSpecs(take)?.let { T(it, m.type.mono.copy(fontSize = 11.5.sp), m.t.muted) }
+                            s.job?.warmupCost?.takeIf { it > 0 }?.let { Tiny("GPU warm-up ${Pricing.money(it)} (charged with this render)") }
                         }
                         Pill(if (take.final) "Final" else "Test", if (take.final) "good" else "")
                     }
@@ -241,5 +249,48 @@ fun GalleryScreen() {
             }
         }
         TabBar(Routes.GALLERY)
+    }
+}
+
+/** "8.0 s · 768 × 1344" for a real render, or null. */
+fun takeSpecs(t: Take): String? {
+    val parts = listOfNotNull(
+        t.durationSec?.let { String.format(java.util.Locale.US, "%.1f s", it) },
+        if (t.width != null && t.height != null) "${t.width} × ${t.height}" else null,
+    )
+    return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
+}
+
+/** Plays a take's video (Media3 ExoPlayer), looping, only while its page is showing and the app is in front. */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+fun TakeVideo(url: String, poster: studio.muse.app.data.ImageRef?, active: Boolean, modifier: Modifier = Modifier) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val player = remember(url) {
+        androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+            setMediaItem(androidx.media3.common.MediaItem.fromUri(url))
+            repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
+            prepare()
+        }
+    }
+    androidx.compose.runtime.DisposableEffect(player) { onDispose { player.release() } }
+    androidx.lifecycle.compose.LifecycleResumeEffect(player, active) {
+        player.playWhenReady = active
+        onPauseOrDispose { player.pause() }
+    }
+    Box(modifier) {
+        RefImage(poster, Modifier.fillMaxSize(), 30)
+        androidx.compose.ui.viewinterop.AndroidView(
+            factory = { ctx ->
+                androidx.media3.ui.PlayerView(ctx).apply {
+                    this.player = player
+                    useController = true
+                    resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                    setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+            update = { it.player = player },
+        )
     }
 }

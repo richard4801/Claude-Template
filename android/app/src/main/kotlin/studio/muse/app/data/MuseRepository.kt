@@ -22,6 +22,8 @@ data class StudioState(
     val loras: Map<String, Lora> = emptyMap(),
     val accounts: Map<String, List<Account>> = emptyMap(),
     val posts: List<Post> = emptyList(),
+    /** My token wallet (real API). Null in demo mode against an older server. */
+    val wallet: Wallet? = null,
     val loaded: Boolean = false,
     val error: String? = null,
 ) {
@@ -60,6 +62,18 @@ class MuseRepository(
     @Volatile var api: MuseApi = fake
         private set
     private var eventsJob: CoJob? = null
+    private var refreshJob: CoJob? = null
+
+    /** The session ended (unauthorized / account switched off): the app goes back to sign-in with this message. */
+    private val _signedOut = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val signedOut: SharedFlow<String> = _signedOut
+
+    /** 0..1 while a file uploads (presigned PUT or multipart), null otherwise. */
+    private val _upload = MutableStateFlow<Float?>(null)
+    val uploadProgress: StateFlow<Float?> = _upload.asStateFlow()
+
+    /** True for the in-app demo studio. */
+    val demo: Boolean get() = api === fake
 
     init {
         scope.launch {
@@ -67,18 +81,38 @@ class MuseRepository(
                 val next = if (useFake) fake else (api.takeIf { it is HttpMuseApi && lastUrl == url } ?: httpFactory(url))
                 lastUrl = url
                 next.setToken(token)
-                if (next !== api || eventsJob == null) switchTo(next)
+                switchTo(next, token)
             }
         }
     }
 
     private var lastUrl: String? = null
+    private var sessionToken: String? = null
 
-    private fun switchTo(next: MuseApi) {
+    private fun switchTo(next: MuseApi, token: String?) {
+        val changed = next !== api
         api = next
+        sessionToken = token
         eventsJob?.cancel()
+        refreshJob?.cancel()
+        if (changed) _state.value = StudioState()
+        // The real API needs a session for everything under /v1: nothing to load until signed in.
+        if (next !== fake && token == null) { _state.value = StudioState(loaded = true); eventsJob = null; return }
         eventsJob = scope.launch { runCatching { next.events().collect { onEvent(it) } } }
-        scope.launch { refresh() }
+        refreshJob = scope.launch {
+            if (next !== fake) restoreSession()
+            refresh()
+        }
+    }
+
+    /** GET /v1/auth/me on launch: keeps the role current, or signs out if the session has ended. Offline keeps the session. */
+    private suspend fun restoreSession() {
+        try {
+            val me = api.me()
+            prefs.update { it.copy(role = me.role, email = me.email, studioName = me.studioName.ifBlank { it.studioName }, userId = me.id) }
+        } catch (e: ApiException) {
+            if (e.code in ErrorText.SIGN_OUT_CODES) endSession(ErrorText.of(e))
+        }
     }
 
     fun toast(msg: String, route: String? = null) { _toasts.tryEmit(Toast(msg, route)) }
@@ -91,19 +125,32 @@ class MuseRepository(
             val jobs = a.listJobs()
             val takes = a.listTakes()
             val bal = a.balance()
+            val wallet = runCatching { a.wallet() }.getOrNull()
             // LoRAs, accounts and posts are newer endpoints: an older server without them still loads.
             val loras = models.mapNotNull { m -> runCatching { a.lora(m.id) }.getOrNull()?.let { m.id to it } }.toMap()
             val accounts = models.mapNotNull { m -> runCatching { a.listAccounts(m.id) }.getOrNull()?.let { m.id to it } }.toMap()
             val posts = runCatching { a.listPosts() }.getOrDefault(emptyList())
-            _state.update { StudioState(models, outfits, jobs.sortedByDescending { it.createdAt }, takes, bal, loras, accounts, posts, loaded = true) }
+            if (a !== api) return
+            _state.update { StudioState(models, outfits, jobs.sortedByDescending { it.createdAt }, takes, bal, loras, accounts, posts, wallet, loaded = true) }
         } catch (e: ApiException) {
-            _state.update { it.copy(loaded = true, error = e.message) }
-            toast(e.message ?: "Error")
+            _state.update { it.copy(loaded = true, error = ErrorText.of(e)) }
+            if (e.code in ErrorText.SIGN_OUT_CODES) endSession(ErrorText.of(e)) else toast(ErrorText.of(e))
         }
+    }
+
+    private suspend fun endSession(message: String) {
+        if (sessionToken == null && api !== fake) return
+        sessionToken = null
+        prefs.update { it.copy(token = null) }
+        _signedOut.tryEmit(message)
     }
 
     private fun onEvent(ev: ApiEvent) {
         ev.balance?.let { b -> _state.update { it.copy(balance = b) } }
+        ev.wallet?.let { w -> onWallet(w) }
+        ev.notice?.let { n ->
+            toast(when (n.code) { BLOCKED_LOW_BALANCE -> ErrorText.PAUSED_LOW_BALANCE; "owner_balance_ok" -> "GPU credit is back · renders resumed"; else -> n.message }, "queue")
+        }
         ev.model?.let { m -> _state.update { s -> s.copy(models = s.models.upsert(m) { it.id == m.id }) } }
         ev.outfit?.let { o -> _state.update { s -> s.copy(outfits = s.outfits.upsert(o) { it.id == o.id }) } }
         ev.lora?.let { l -> putLora(l) }
@@ -116,6 +163,24 @@ class MuseRepository(
         }
     }
 
+    /** A `wallet` event: refresh the balance, and say so when the owner sent or took back tokens. */
+    private fun onWallet(w: Wallet) {
+        val prev = _state.value.wallet
+        _state.update { it.copy(wallet = w) }
+        if (prev == null || w.owner || prev.userId != w.userId) return
+        val delta = w.tokens - prev.tokens
+        // A transfer moves tokens without touching holds; refunds and settlements release a hold, so they aren't gifts.
+        val holdsSame = w.heldTokens >= prev.heldTokens
+        if (delta > 0 && holdsSame) toast("You received ${fmtTokens(delta)} tokens from ${ownerName()}", "credits")
+        else if (delta < 0 && w.heldTokens == prev.heldTokens) toast("${ownerName().replaceFirstChar { it.uppercase() }} took back ${fmtTokens(-delta)} tokens", "credits")
+        scope.launch { refreshBalance() }
+    }
+
+    private var ownerLabel: String = ""
+    /** Who sends tokens. The wallet event doesn't say, so it's the studio (its owner). */
+    private fun ownerName() = ownerLabel.ifBlank { "the studio owner" }
+    fun setStudioName(name: String) { ownerLabel = name }
+
     private fun putLora(l: Lora) {
         val prev = _state.value.loras[l.modelId]
         _state.update { s -> s.copy(loras = s.loras + (l.modelId to l)) }
@@ -125,25 +190,52 @@ class MuseRepository(
     private inline fun <T> List<T>.upsert(item: T, match: (T) -> Boolean): List<T> =
         if (any(match)) map { if (match(it)) item else it } else listOf(item) + this
 
-    /** Runs an API call; on failure shows the server's message as a toast and returns null. */
+    /** Runs an API call; on failure shows a friendly message as a toast and returns null. An ended session goes to sign-in. */
     suspend fun <T> attempt(block: suspend MuseApi.() -> T): T? = try {
         api.block()
     } catch (e: ApiException) {
-        toast(e.message ?: "Something went wrong")
+        if (e.code in ErrorText.SIGN_OUT_CODES) endSession(ErrorText.of(e)) else toast(ErrorText.of(e), routeFor(e.code))
         null
     }
 
+    /** Like [attempt], but hands the friendly error back instead of a toast (for inline messages). */
+    suspend fun <T> attemptInline(block: suspend MuseApi.() -> T): Pair<T?, String?> = try {
+        api.block() to null
+    } catch (e: ApiException) {
+        null to ErrorText.of(e)
+    }
+
+    private fun routeFor(code: String) = when (code) { "insufficient_tokens", "insufficient_balance", "over_user_day_limit" -> "credits"; else -> null }
+
+    /** Wraps an upload so the app shows its progress. */
+    suspend fun <T> withUploadProgress(block: suspend ((Float) -> Unit) -> T): T {
+        _upload.value = 0f
+        return try { block { p -> _upload.value = p.coerceIn(0f, 1f) } } finally { _upload.value = null }
+    }
+
     // ---- actions ----
-    suspend fun signIn(email: String, password: String) = attempt { signIn(SignInRequest(email, password)) }?.also { onAuth(it) }
-    suspend fun signUp(req: SignUpRequest) = attempt { signUp(req) }?.also { onAuth(it) }
+    /** Returns null on success, or the friendly error to show under the form. */
+    suspend fun signIn(email: String, password: String): String? = auth { signIn(SignInRequest(email.trim(), password)) }
+    suspend fun signUp(req: SignUpRequest): String? = auth { signUp(req) }
+
+    private suspend fun auth(block: suspend MuseApi.() -> AuthResponse): String? = try {
+        onAuth(api.block()); null
+    } catch (e: ApiException) {
+        ErrorText.of(e)
+    }
 
     private suspend fun onAuth(r: AuthResponse) {
         api.setToken(r.token)
-        prefs.update { it.copy(token = r.token, studioName = r.user.studioName, email = r.user.email) }
-        refresh()
+        prefs.update { it.copy(token = r.token, studioName = r.user.studioName, email = r.user.email, role = r.user.role, userId = r.user.id) }
     }
 
-    suspend fun signOut() = prefs.update { it.copy(token = null) }
+    /** POST /v1/auth/signout (best effort), then forget the session on this phone. */
+    suspend fun signOut() {
+        val a = api
+        runCatching { kotlinx.coroutines.withTimeoutOrNull(4000) { a.signOut() } }
+        prefs.update { it.copy(token = null, role = "member", userId = "") }
+        _state.value = StudioState(loaded = true)
+    }
 
     suspend fun createModel(req: CreateModelRequest) = attempt { createModel(req) }?.also { m -> _state.update { it.copy(models = it.models + m) } }
 
@@ -166,8 +258,9 @@ class MuseRepository(
         }
     }
 
-    suspend fun uploadImage(name: String, bytes: ByteArray, mime: String) = attempt { uploadImage(name, bytes, mime) }
-    suspend fun uploadClip(meta: ClipMeta, bytes: ByteArray?) = attempt { uploadClip(meta, bytes) }
+    suspend fun uploadImage(name: String, bytes: ByteArray, mime: String) = withUploadProgress { p -> attempt { uploadImage(name, bytes, mime, p) } }
+    suspend fun uploadClip(meta: ClipMeta, bytes: ByteArray?, mime: String = "video/mp4") =
+        if (bytes == null) attempt { uploadClip(meta, null, mime) } else withUploadProgress { p -> attempt { uploadClip(meta, bytes, mime, p) } }
 
     suspend fun createJob(req: JobRequest) = attempt { createJob(req) }?.also { j ->
         _state.update { s -> s.copy(jobs = s.jobs.upsert(j) { it.id == j.id }.sortedByDescending { it.createdAt }) }
@@ -230,7 +323,30 @@ class MuseRepository(
     suspend fun createPost(req: CreatePostRequest) = attempt { createPost(req) }?.also { p -> _state.update { s -> s.copy(posts = s.posts.upsert(p) { it.id == p.id }) } }
     suspend fun deletePost(id: String) = attempt { deletePost(id) }?.also { _state.update { s -> s.copy(posts = s.posts.filterNot { it.id == id }) } }
 
+    // ---- tokens, members, invites and studio settings (owner screens fetch these on demand)
+    suspend fun refreshWallet() { runCatching { api.wallet() }.onSuccess { w -> _state.update { it.copy(wallet = w) } } }
+    suspend fun members() = attempt { listMembers() }
+    suspend fun invites() = attempt { listInvites() }
+
+    /** Owner → member. The server refuses over-allocation with a message saying what the RunPod balance backs. */
+    suspend fun transfer(member: Member, tokens: Long, note: String?) =
+        attemptInline { transfer(TransferRequest(member.id, tokens, note?.ifBlank { null })) }.also { (r, _) -> r?.let { res -> _state.update { it.copy(wallet = res.wallet) }; refreshBalance() } }
+
+    suspend fun reclaim(member: Member, tokens: Long, note: String?) =
+        attemptInline { reclaim(ReclaimRequest(member.id, tokens, note?.ifBlank { null })) }.also { (r, _) -> r?.let { res -> _state.update { it.copy(wallet = res.wallet) }; refreshBalance() } }
+
+    suspend fun patchMember(id: String, patch: MemberPatch) = attemptInline { patchMember(id, patch) }
+    suspend fun createInvite(email: String?) = attemptInline { createInvite(CreateInviteRequest(email = email?.trim()?.ifBlank { null })) }
+    suspend fun studioSettings() = attempt { studioSettings() }
+    suspend fun patchStudioSettings(p: StudioSettingsPatch) = attemptInline { patchStudioSettings(p) }
+    suspend fun imageEngine() = attempt { imageEngine() }
+    suspend fun setImageEngine(p: ImageEnginePatch) = attemptInline { setImageEngine(p) }
+
     private suspend fun refreshBalance() {
         runCatching { api.balance() }.onSuccess { b -> _state.update { it.copy(balance = b) } }
+        refreshWallet()
     }
 }
+
+/** 12,500 */
+fun fmtTokens(n: Long): String = String.format(java.util.Locale.US, "%,d", n)

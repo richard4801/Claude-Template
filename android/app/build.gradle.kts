@@ -16,16 +16,16 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
-        // Mock server for the HTTP MuseApi. 10.0.2.2 is the host machine from the Android emulator.
-        buildConfigField("String", "DEFAULT_SERVER_URL", "\"http://10.0.2.2:8787/\"")
-        // Debug installs run against the in-process fake by default (no server needed).
-        buildConfigField("boolean", "DEFAULT_USE_FAKE", "true")
+        // The live MUSE API (server/api on Railway). Settings → Developer can point the app at another URL
+        // (e.g. http://10.0.2.2:8787/ for a local server/api or server/mock from the emulator).
+        buildConfigField("String", "DEFAULT_SERVER_URL", "\"https://angelic-elegance-production-c42b.up.railway.app/\"")
+        // Demo mode (the in-process fake with the bundled sample studio) is off by default in every build.
+        buildConfigField("boolean", "DEFAULT_USE_FAKE", "false")
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            buildConfigField("boolean", "DEFAULT_USE_FAKE", "false")
         }
     }
     compileOptions {
@@ -81,6 +81,8 @@ dependencies {
     implementation(libs.retrofit)
     implementation(libs.retrofit.kotlinx.serialization)
     implementation(libs.coil.compose)
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.ui)
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)
 

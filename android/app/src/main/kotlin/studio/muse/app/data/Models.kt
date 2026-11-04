@@ -16,8 +16,11 @@ data class ImageRef(val asset: String? = null, val url: String? = null) {
     }
 }
 
+/** role: "owner" (funds the studio from RunPod, invites people, sends tokens) or "member". Also GET /v1/auth/me. */
 @Serializable
-data class User(val id: String, val studioName: String, val email: String)
+data class User(val id: String, val studioName: String = "", val email: String, val role: String = "member") {
+    val owner get() = role == "owner"
+}
 
 @Serializable
 data class AuthResponse(val token: String, val user: User)
@@ -33,6 +36,8 @@ data class SignUpRequest(
     val password: String,
     val attestAdultRightsOriginal: Boolean,
     val attestLabelAi: Boolean,
+    /** Required by the real API ("MUSE-XXXX-XXXX-XXXX"; the owner's first code is free text). Omitted when null. */
+    val inviteCode: String? = null,
 )
 
 /** One of the 6 character-sheet slots. source: "upload" (yours) or "generated" (filled in). */
@@ -114,7 +119,7 @@ data class ClipMeta(val name: String, val durationSec: Double, val width: Int, v
 
 @Serializable
 data class JobRequest(
-    val title: String,
+    val title: String = "Untitled",
     val modelId: String,
     val outfitId: String,
     val clipId: String,
@@ -161,7 +166,16 @@ data class Job(
     val prompt: String = "",
     val seed: Long = 42,
     val thumb: ImageRef? = null,
+    /** While waiting for a GPU (real API): place in line and seconds until the render should finish. */
+    val queuePosition: Int? = null,
+    val etaSeconds: Double? = null,
+    /** "owner_balance_low": paused until the studio's RunPod credit is topped up. */
+    val blocked: String? = null,
+    /** GPU warm-up charged with this job (when the member pays it). */
+    val warmupCost: Double? = null,
+    val userId: String? = null,
 ) {
+    val paused get() = blocked == BLOCKED_LOW_BALANCE
     val engineLabel: String
         get() = if (request.engine == Engine.VIGGLE.id) "Fast · beta" else "Standard · ${request.steps} steps"
     val running get() = state == "running" || state == "queued"
@@ -183,9 +197,14 @@ data class Take(
     val cost: Double = 0.0,
     val seed: Long = 0,
     val status: String = "test",
-    val thumb: ImageRef,
+    val thumb: ImageRef? = null,
     val prompt: String = "",
     val createdAt: Long = 0,
+    /** The rendered video (real backend). Simulated renders may have none; the still is shown then. */
+    val videoUrl: String? = null,
+    val durationSec: Double? = null,
+    val width: Int? = null,
+    val height: Int? = null,
 ) {
     val final get() = status == "final"
 }
@@ -196,8 +215,158 @@ data class SetTakeStatusRequest(val status: String)
 @Serializable
 data class ShootRequest(val modelId: String, val outfitId: String, val scene: String, val prompt: String, val seed: Long? = null, val count: Int = 4)
 
+/**
+ * GET /v1/balance. Member: [balance] is their wallet in USD, today/month their own spend. Owner: [balance] is what they can
+ * spend or send (RunPod − members' unspent tokens − holds), today/month the studio's spend.
+ */
 @Serializable
-data class Balance(val balance: Double, val month: Double, val today: Double = 0.0, val perJobLimit: Double = 5.0, val perDayLimit: Double = 15.0, val videos: Int = 0)
+data class Balance(
+    val balance: Double,
+    val month: Double,
+    val today: Double = 0.0,
+    val perJobLimit: Double = 5.0,
+    val perDayLimit: Double = 15.0,
+    val videos: Int = 0,
+    val tokens: Long? = null,
+    val tokenUsd: Double? = null,
+    val role: String? = null,
+    val heldUsd: Double? = null,
+    val perUserDayLimit: Double? = null,
+    /** runpod | simulated | unavailable | wallet */
+    val balanceSource: String? = null,
+    val runpodBalance: Double? = null,
+    val availableToSend: Double? = null,
+)
+
+/** GET /v1/wallet: my tokens (1 token = [tokenUsd]). The owner's wallet is the RunPod balance. */
+@Serializable
+data class Wallet(
+    val userId: String = "",
+    val role: String = "member",
+    val tokens: Long = 0,
+    val usd: Double = 0.0,
+    val heldTokens: Long = 0,
+    val heldUsd: Double = 0.0,
+    val todayUsd: Double = 0.0,
+    val monthUsd: Double = 0.0,
+    val tokenUsd: Double = 0.01,
+    val balanceSource: String = "wallet",
+    val availableToSend: Double? = null,
+    val runpodBalance: Double? = null,
+    val membersUnspentUsd: Double? = null,
+) {
+    val owner get() = role == "owner"
+    /** Tokens the owner can send right now. */
+    val tokensToSend: Long get() = availableToSend?.let { kotlin.math.floor(it / tokenUsd + 1e-6).toLong() } ?: 0
+}
+
+/** GET /v1/members (owner). Caps are in USD; null caps follow the studio default. */
+@Serializable
+data class Member(
+    val id: String,
+    val email: String,
+    val role: String = "member",
+    val tokens: Long = 0,
+    val usd: Double = 0.0,
+    val heldTokens: Long = 0,
+    val todayUsd: Double = 0.0,
+    val monthUsd: Double = 0.0,
+    val lastActiveAt: Long? = null,
+    val disabled: Boolean = false,
+    val capPerJob: Double? = null,
+    val capPerDay: Double? = null,
+    val createdAt: Long = 0,
+) {
+    val owner get() = role == "owner"
+}
+
+@Serializable
+data class TransferRequest(val toUserId: String, val tokens: Long, val note: String? = null)
+
+@Serializable
+data class ReclaimRequest(val fromUserId: String, val tokens: Long, val note: String? = null)
+
+@Serializable
+data class WalletMemberResponse(val wallet: Wallet, val member: Member)
+
+/** PATCH /v1/members/{id}. [clearCapPerDay] sends `capPerDay: null` (back to the studio default). */
+data class MemberPatch(val capPerDay: Double? = null, val clearCapPerDay: Boolean = false, val disabled: Boolean? = null)
+
+@Serializable
+data class CreateInviteRequest(val email: String? = null, val role: String? = null, val days: Int? = null)
+
+/** POST /v1/invites: the code is shown once. */
+@Serializable
+data class InviteCreated(val code: String, val id: String, val email: String? = null, val role: String = "member", val expiresAt: Long = 0)
+
+/** GET /v1/invites (without codes). */
+@Serializable
+data class InviteInfo(val id: String, val email: String? = null, val role: String = "member", val createdAt: Long = 0, val expiresAt: Long = 0, val usedAt: Long? = null)
+
+@Serializable
+data class StudioFeatures(
+    val standard: Boolean = true,
+    val fastBeta: Boolean = true,
+    val lipSync: Boolean = true,
+    val loraTraining: Boolean = true,
+    val replaceAudio: Boolean = false,
+    val maxClipSec: Double? = null,
+)
+
+/** GET/PATCH /v1/settings/studio. overheadPayer: who pays GPU warm-up, "user" (the member) or "owner". */
+@Serializable
+data class StudioSettings(
+    val maxGpus: Int = 3,
+    val overheadPayer: String = "user",
+    val capPerJob: Double = 5.0,
+    val capPerDay: Double = 15.0,
+    val capPerUserDay: Double = 10.0,
+    val tokenUsd: Double = 0.01,
+    val minRunpodBalance: Double = 2.0,
+    val lowBalance: Boolean = false,
+    val features: StudioFeatures = StudioFeatures(),
+)
+
+@Serializable
+data class StudioSettingsPatch(
+    val maxGpus: Int? = null,
+    val overheadPayer: String? = null,
+    val capPerJob: Double? = null,
+    val capPerDay: Double? = null,
+    val capPerUserDay: Double? = null,
+)
+
+/** GET/PATCH /v1/settings/image-engine. provider: simulated | fal | custom-http. */
+@Serializable
+data class ImageEngine(
+    val provider: String = "simulated",
+    val model: String = "",
+    val url: String? = null,
+    val available: Map<String, Boolean> = mapOf("simulated" to true),
+)
+
+@Serializable
+data class ImageEnginePatch(val provider: String, val model: String? = null, val url: String? = null)
+
+/** POST /v1/uploads/presign → PUT the bytes to [url] with [headers] → POST /v1/uploads/{uploadId}/confirm. */
+@Serializable
+data class PresignRequest(val kind: String, val contentType: String, val bytes: Long? = null)
+
+@Serializable
+data class PresignResponse(val uploadId: String, val method: String = "PUT", val url: String, val headers: Map<String, String> = emptyMap(), val expiresAt: Long = 0)
+
+@Serializable
+data class ConfirmClipRequest(val meta: ClipMeta)
+
+/** GET /health: `storage` is "s3" (R2: presigned uploads) or "local" (direct multipart). The mock has no field. */
+@Serializable
+data class Health(val ok: Boolean = true, val storage: String? = null, val gpu: String? = null, val imageEngine: String? = null, val version: String? = null)
+
+/** A studio-wide notice on a wallet event: "owner_balance_low" / "owner_balance_ok". */
+@Serializable
+data class Notice(val code: String, val message: String = "")
+
+const val BLOCKED_LOW_BALANCE = "owner_balance_low"
 
 @Serializable
 data class TopUpRequest(val amount: Double, val method: String = "card")
@@ -205,7 +374,7 @@ data class TopUpRequest(val amount: Double, val method: String = "card")
 @Serializable
 data class FillAnglesResponse(val model: Model, val cost: Double)
 
-/** Server-sent event on /v1/events. type: job | balance | model | outfit | lora | post */
+/** Server-sent event on /v1/events. type: job | balance | model | outfit | lora | post | wallet */
 @Serializable
 data class ApiEvent(
     val type: String,
@@ -216,6 +385,8 @@ data class ApiEvent(
     val lora: Lora? = null,
     val post: Post? = null,
     val takes: List<Take> = emptyList(),
+    val wallet: Wallet? = null,
+    val notice: Notice? = null,
 )
 
 /** PATCH /v1/models/{id}: only the fields sent change. */

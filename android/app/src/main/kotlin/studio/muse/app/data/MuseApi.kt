@@ -4,15 +4,23 @@ import kotlinx.coroutines.flow.Flow
 
 /**
  * The backend contract (plans/api.md). Two implementations:
- *  - [FakeMuseApi]: in-process, no server, the default for debug installs.
- *  - [HttpMuseApi]: REST + Server-Sent Events against server/mock (or the real backend later).
+ *  - [HttpMuseApi]: REST + Server-Sent Events against the real API (server/api, the default) or server/mock.
+ *  - [FakeMuseApi]: in-process "Demo mode" with the bundled sample studio, no server.
  * Settings → Developer switches between them.
  */
 interface MuseApi {
-    // Auth (stub: any email/password works; sign-up requires both attestations)
+    // Auth: invite-only on the real API; sign-up requires both attestations.
     suspend fun signIn(req: SignInRequest): AuthResponse
     suspend fun signUp(req: SignUpRequest): AuthResponse
+    /** Revokes this session on the server. */
+    suspend fun signOut()
+    /** The signed-in user, used on launch to restore the session. `unauthorized` when it has ended. */
+    suspend fun me(): User
     fun setToken(token: String?)
+
+    // Invites (owner)
+    suspend fun createInvite(req: CreateInviteRequest): InviteCreated
+    suspend fun listInvites(): List<InviteInfo>
 
     // Models and character sheets
     suspend fun listModels(): List<Model>
@@ -31,10 +39,10 @@ interface MuseApi {
     /** Attaches a generated preview to the model. */
     suspend fun saveOutfit(outfitId: String): Outfit
 
-    // Uploads
-    suspend fun uploadImage(name: String, bytes: ByteArray, mime: String): ImageRef
+    // Uploads. [onProgress] gets 0..1 while the bytes go up (presigned PUT to R2, or multipart).
+    suspend fun uploadImage(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit = {}): ImageRef
     /** Registers a source clip and runs the clip checks. [bytes] may be null for the bundled sample clips. */
-    suspend fun uploadClip(meta: ClipMeta, bytes: ByteArray?): Clip
+    suspend fun uploadClip(meta: ClipMeta, bytes: ByteArray?, mime: String = "video/mp4", onProgress: (Float) -> Unit = {}): Clip
 
     // Jobs and takes
     suspend fun listJobs(): List<Job>
@@ -65,9 +73,20 @@ interface MuseApi {
     suspend fun createPost(req: CreatePostRequest): Post
     suspend fun deletePost(postId: String)
 
-    // Balance
+    // Balance, wallets and members
     suspend fun balance(): Balance
     suspend fun topUp(req: TopUpRequest): Balance
+    suspend fun wallet(): Wallet
+    suspend fun listMembers(): List<Member>
+    suspend fun transfer(req: TransferRequest): WalletMemberResponse
+    suspend fun reclaim(req: ReclaimRequest): WalletMemberResponse
+    suspend fun patchMember(memberId: String, patch: MemberPatch): Member
+
+    // Studio settings (owner) and the image engine
+    suspend fun studioSettings(): StudioSettings
+    suspend fun patchStudioSettings(req: StudioSettingsPatch): StudioSettings
+    suspend fun imageEngine(): ImageEngine
+    suspend fun setImageEngine(req: ImageEnginePatch): ImageEngine
 
     // Developer
     suspend fun setFailNext(fail: Boolean)

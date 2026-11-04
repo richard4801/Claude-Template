@@ -53,12 +53,15 @@ class FakeMuseApi(
 
     override suspend fun signIn(req: SignInRequest): AuthResponse {
         if (req.email.isBlank()) throw ApiException("bad_request", "Enter your email")
-        return AuthResponse("fake-token", User("u1", "Jenne Studio", req.email))
+        return AuthResponse("fake-token", User("u1", "Jenne Studio", req.email, "owner"))
     }
+
+    override suspend fun signOut() {}
+    override suspend fun me() = User("u1", "Jenne Studio", "jenne@studio.com", "owner")
 
     override suspend fun signUp(req: SignUpRequest): AuthResponse {
         if (!req.attestAdultRightsOriginal || !req.attestLabelAi) throw ApiException("attestation_required", "Tick both boxes to continue")
-        return AuthResponse("fake-token", User("u1", req.studioName.ifBlank { "My Studio" }, req.email))
+        return AuthResponse("fake-token", User("u1", req.studioName.ifBlank { "My Studio" }, req.email, "owner"))
     }
 
     override suspend fun listModels() = lock.withLock { models.toList() }
@@ -142,7 +145,7 @@ class FakeMuseApi(
         return o
     }
 
-    override suspend fun uploadImage(name: String, bytes: ByteArray, mime: String): ImageRef {
+    override suspend fun uploadImage(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit): ImageRef {
         val dir = storeDir ?: return ImageRef(url = "data:$mime;name=$name")
         dir.mkdirs()
         val ext = if (mime.contains("png")) "png" else "jpg"
@@ -151,7 +154,7 @@ class FakeMuseApi(
         return ImageRef(url = f.toURI().toString())
     }
 
-    override suspend fun uploadClip(meta: ClipMeta, bytes: ByteArray?): Clip = lock.withLock {
+    override suspend fun uploadClip(meta: ClipMeta, bytes: ByteArray?, mime: String, onProgress: (Float) -> Unit): Clip = lock.withLock {
         val id = when (meta) {
             SampleData.sampleMeta -> SampleData.SAMPLE_CLIP
             SampleData.badMeta -> SampleData.BAD_CLIP
@@ -406,7 +409,8 @@ class FakeMuseApi(
     /** Test hooks: put the LoRA, an account or a post in a fixed state. */
     suspend fun debugPutLora(l: Lora) = lock.withLock { loras[l.modelId] = l }
     suspend fun debugPutAccount(a: Account) = lock.withLock { accounts.getOrPut(a.modelId) { mutableMapOf() }[a.platform] = a }
-    suspend fun debugPutPost(p: Post) = lock.withLock { posts.removeAll { it.id == p.id }; posts.add(p) }
+    suspend fun debugPutTake(t: Take) = lock.withLock { takes.removeAll { it.id == t.id }; takes.add(0, t) }
+        suspend fun debugPutPost(p: Post) = lock.withLock { posts.removeAll { it.id == p.id }; posts.add(p) }
 
     private fun run(job: Job) {
         if (speed <= 0) return
@@ -504,6 +508,78 @@ class FakeMuseApi(
 
     override suspend fun setFailNext(fail: Boolean) {
         failNext = fail
+    }
+
+    // ---- the demo studio's owner side: members, tokens, invites, settings (in memory, like the real API's rules)
+    private val members = SampleData.members(now()).toMutableList()
+    private val invites = mutableListOf<InviteInfo>()
+    private var studio = StudioSettings()
+    private var engine = ImageEngine("simulated", "bundled-stills", available = mapOf("simulated" to true, "fal" to false, "custom-http" to true))
+    private val tokenUsd = 0.01
+
+    private fun ownerWallet(): Wallet {
+        val unspent = members.sumOf { it.usd }
+        val available = (balance.balance - unspent).coerceAtLeast(0.0)
+        return Wallet("u1", "owner", kotlin.math.floor(available / tokenUsd + 1e-6).toLong(), available, 0, 0.0, balance.today, balance.month, tokenUsd, "simulated",
+            availableToSend = available, runpodBalance = balance.balance, membersUnspentUsd = unspent)
+    }
+
+    /** Test hook: act as a member with this wallet (screenshots of the member's My tokens). */
+    @Volatile var debugWallet: Wallet? = null
+
+    override suspend fun wallet(): Wallet = lock.withLock { debugWallet ?: ownerWallet() }
+    override suspend fun listMembers(): List<Member> = lock.withLock { listOf(Member("u1", "jenne@studio.com", "owner", ownerWallet().tokens, ownerWallet().usd, lastActiveAt = now())) + members }
+
+    private fun member(id: String) = members.firstOrNull { it.id == id }
+        ?: if (id == "u1") throw ApiException("bad_request", "The owner's wallet is the RunPod balance; send tokens to members only") else throw ApiException("not_found", "Member not found")
+
+    override suspend fun transfer(req: TransferRequest): WalletMemberResponse = lock.withLock {
+        val m = member(req.toUserId)
+        val w = ownerWallet()
+        if (req.tokens <= 0) throw ApiException("bad_request", "Send at least 1 token")
+        if (req.tokens > w.tokens) throw ApiException("over_allocation", "You can send up to ${fmtTokens(w.tokens)} tokens (${Pricing.money(w.usd)}): that's what your RunPod balance backs")
+        val n = m.copy(tokens = m.tokens + req.tokens, usd = (m.tokens + req.tokens) * tokenUsd)
+        members[members.indexOf(m)] = n
+        WalletMemberResponse(ownerWallet(), n)
+    }
+
+    override suspend fun reclaim(req: ReclaimRequest): WalletMemberResponse = lock.withLock {
+        val m = member(req.fromUserId)
+        if (req.tokens > m.tokens) throw ApiException("bad_request", "They have ${fmtTokens(m.tokens)} unused tokens")
+        val n = m.copy(tokens = m.tokens - req.tokens, usd = (m.tokens - req.tokens) * tokenUsd)
+        members[members.indexOf(m)] = n
+        WalletMemberResponse(ownerWallet(), n)
+    }
+
+    override suspend fun patchMember(memberId: String, patch: MemberPatch): Member = lock.withLock {
+        val m = member(memberId)
+        val n = m.copy(capPerDay = if (patch.clearCapPerDay) null else patch.capPerDay ?: m.capPerDay, disabled = patch.disabled ?: m.disabled)
+        members[members.indexOf(m)] = n
+        n
+    }
+
+    override suspend fun createInvite(req: CreateInviteRequest): InviteCreated = lock.withLock {
+        val abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        val r = java.util.Random(now() + invites.size)
+        val code = "MUSE-" + (0 until 3).joinToString("-") { (0 until 4).map { abc[r.nextInt(abc.length)] }.joinToString("") }
+        val inv = InviteInfo("inv_" + uid(), req.email, req.role ?: "member", now(), now() + 14 * 86_400_000L)
+        invites.add(0, inv)
+        InviteCreated(code, inv.id, inv.email, inv.role, inv.expiresAt)
+    }
+
+    override suspend fun listInvites(): List<InviteInfo> = lock.withLock { invites.toList() }
+    override suspend fun studioSettings(): StudioSettings = lock.withLock { studio.copy(lowBalance = balance.balance < studio.minRunpodBalance) }
+    override suspend fun patchStudioSettings(req: StudioSettingsPatch): StudioSettings = lock.withLock {
+        studio = studio.copy(maxGpus = req.maxGpus ?: studio.maxGpus, overheadPayer = req.overheadPayer ?: studio.overheadPayer, capPerJob = req.capPerJob ?: studio.capPerJob,
+            capPerDay = req.capPerDay ?: studio.capPerDay, capPerUserDay = req.capPerUserDay ?: studio.capPerUserDay)
+        studio
+    }
+    override suspend fun imageEngine(): ImageEngine = lock.withLock { engine }
+    override suspend fun setImageEngine(req: ImageEnginePatch): ImageEngine = lock.withLock {
+        if (engine.available[req.provider] != true) throw ApiException("bad_request", "${req.provider} is not set up on the server")
+        if (req.provider == "custom-http" && req.url?.startsWith("https://") != true) throw ApiException("bad_request", "Use an https:// URL")
+        engine = engine.copy(provider = req.provider, model = req.model ?: if (req.provider == "simulated") "bundled-stills" else engine.model, url = req.url)
+        engine
     }
 
     /** Test hook: put a job in a fixed state (no runner). */

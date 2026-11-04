@@ -56,38 +56,55 @@ const val ATTEST_2 = "I'll label AI content when I post it."
 const val TERMS_LINE = "By continuing you agree to the MUSE Terms and Acceptable Use Policy."
 
 data class AuthState(
-    val studio: String = "Jenne Studio",
-    val email: String = "jenne@studio.com",
+    val studio: String = "",
+    val email: String = "",
     val password: String = "",
+    /** "MUSE-XXXX-XXXX-XXXX" from the studio owner; the owner's own first code is free text. */
+    val invite: String = "",
     val ag1: Boolean = false,
     val ag2: Boolean = false,
     val busy: Boolean = false,
+    /** Friendly error shown under the form. */
+    val error: String? = null,
 )
 
-class AuthViewModel(private val c: AppContainer) : ViewModel() {
-    private val _s = MutableStateFlow(AuthState(email = c.prefs.value.email.ifBlank { "jenne@studio.com" }))
-    val state: StateFlow<AuthState> = _s
-    fun edit(f: (AuthState) -> AuthState) = _s.update(f)
+/** Invite codes look like MUSE-7KQ2-XW9P-4HTD. Anything else is still sent (the owner's first code is free text). */
+fun looksLikeInvite(code: String) = Regex("^MUSE-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$").matches(code.trim().uppercase())
 
-    fun signIn(onDone: () -> Unit) = viewModelScope.launch {
-        _s.update { it.copy(busy = true) }
-        val r = c.repo.signIn(_s.value.email, _s.value.password)
-        _s.update { it.copy(busy = false) }
-        if (r != null) onDone()
+class AuthViewModel(private val c: AppContainer) : ViewModel() {
+    private val demo get() = c.prefs.value.useFake
+    private val _s = MutableStateFlow(
+        if (demo) AuthState(studio = "Jenne Studio", email = c.prefs.value.email.ifBlank { "jenne@studio.com" })
+        else AuthState(email = c.prefs.value.email),
+    )
+    val state: StateFlow<AuthState> = _s
+    val isDemo get() = demo
+    fun edit(f: (AuthState) -> AuthState) = _s.update { f(it).copy(error = null) }
+
+    fun signIn(onDone: () -> Unit) {
+        val s = _s.value
+        if (s.email.isBlank() || s.password.isEmpty()) { _s.update { it.copy(error = "Enter your email and password.") }; return }
+        viewModelScope.launch {
+            _s.update { it.copy(busy = true, error = null) }
+            val err = c.repo.signIn(s.email, s.password)
+            _s.update { it.copy(busy = false, error = err) }
+            if (err == null) onDone()
+        }
     }
 
     fun signUp(onDone: () -> Unit) {
         val s = _s.value
-        if (!s.ag1 || !s.ag2) { c.repo.toast("Tick both boxes to continue"); return }
+        if (!s.ag1 || !s.ag2) { _s.update { it.copy(error = "Tick both boxes to continue.") }; return }
+        if (!demo && s.invite.isBlank()) { _s.update { it.copy(error = "MUSE is invite-only. Enter the invite code your studio owner sent you.") }; return }
         viewModelScope.launch {
-            _s.update { it.copy(busy = true) }
-            val r = c.repo.signUp(SignUpRequest(s.studio, s.email, s.password, s.ag1, s.ag2))
-            _s.update { it.copy(busy = false) }
-            if (r != null) onDone()
+            _s.update { it.copy(busy = true, error = null) }
+            val err = c.repo.signUp(SignUpRequest(s.studio.trim(), s.email.trim(), s.password, s.ag1, s.ag2, s.invite.trim().ifBlank { null }))
+            _s.update { it.copy(busy = false, error = err) }
+            if (err == null) onDone()
         }
     }
 
-    fun forgot() = c.repo.toast("Reset link sent to ${_s.value.email} (demo)")
+    fun forgot() = if (demo) c.repo.toast("Reset link sent to ${_s.value.email} (demo)") else c.repo.toast("Password reset isn't in the app yet · ask your studio owner")
 }
 
 @Composable
@@ -187,18 +204,22 @@ fun SignInScreen() {
             H2("Welcome back")
             T("Sign in to your studio.", m.type.body, m.t.muted)
         }
-        Field("Email") { Input(s.email, { v -> vm.edit { it.copy(email = v) } }, keyboard = androidx.compose.ui.text.input.KeyboardType.Email) }
+        Field("Email") { Input(s.email, { v -> vm.edit { it.copy(email = v) } }, keyboard = androidx.compose.ui.text.input.KeyboardType.Email, placeholder = "you@example.com") }
         Field("Password") {
             Input(s.password, { v -> vm.edit { it.copy(password = v) } }, password = true, placeholder = "••••••••••", trailing = {
                 T("Forgot?", m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), if (m.isD) m.t.blue else m.t.accent, Modifier.press { vm.forgot() }.padding(8.dp))
             })
         }
+        s.error?.let { NoteBox(it, warn = true) }
         Cta(if (s.busy) "Signing in…" else "Sign in", { vm.signIn { nav.reset(Routes.HOME) } }, Modifier.fillMaxWidth(), busy = s.busy)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Box(Modifier.weight(1f).height(1.dp).background(m.t.line)); Tiny("or"); Box(Modifier.weight(1f).height(1.dp).background(m.t.line))
+        // Apple / Google sign-in only exist in Demo mode for now: the MUSE server is email + invite only.
+        if (vm.isDemo) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(Modifier.weight(1f).height(1.dp).background(m.t.line)); Tiny("or"); Box(Modifier.weight(1f).height(1.dp).background(m.t.line))
+            }
+            Sso("apple", "Continue with Apple") { vm.signIn { nav.reset(Routes.HOME) } }
+            Sso("google", "Continue with Google") { vm.signIn { nav.reset(Routes.HOME) } }
         }
-        Sso("apple", "Continue with Apple") { vm.signIn { nav.reset(Routes.HOME) } }
-        Sso("google", "Continue with Google") { vm.signIn { nav.reset(Routes.HOME) } }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
             Tiny("New here? ")
             T("Create an account", m.type.tiny.copy(fontWeight = FontWeight.Bold), if (m.isD) m.t.blue else m.t.accent, Modifier.press { nav.go(Routes.SIGNUP) })
@@ -225,15 +246,22 @@ fun SignUpScreen() {
     val s by vm.state.collectAsState()
     AuthFrame {
         Column {
-            H2("Create your studio")
-            T("One account for all your models.", m.type.body, m.t.muted)
+            H2(if (vm.isDemo) "Create your studio" else "Join your studio")
+            T(if (vm.isDemo) "One account for all your models." else "MUSE is invite-only. Use the code your studio owner sent you.", m.type.body, m.t.muted)
         }
-        Field("Studio name") { Input(s.studio, { v -> vm.edit { it.copy(studio = v) } }) }
-        Field("Email") { Input(s.email, { v -> vm.edit { it.copy(email = v) } }) }
-        Field("Password") { Input(s.password, { v -> vm.edit { it.copy(password = v) } }, password = true, placeholder = "••••••••••") }
+        // On the server the studio comes from the invite; the name only matters in Demo mode.
+        if (vm.isDemo) Field("Studio name") { Input(s.studio, { v -> vm.edit { it.copy(studio = v) } }) }
+        Field("Invite code") {
+            Input(s.invite, { v -> vm.edit { it.copy(invite = v.take(80)) } }, placeholder = "MUSE-XXXX-XXXX-XXXX")
+            if (s.invite.isNotBlank() && !looksLikeInvite(s.invite)) Tiny("Not the usual MUSE-XXXX-XXXX-XXXX shape. That's fine for the owner's first code.")
+            else if (vm.isDemo) Tiny("Not needed in Demo mode.")
+        }
+        Field("Email") { Input(s.email, { v -> vm.edit { it.copy(email = v) } }, keyboard = androidx.compose.ui.text.input.KeyboardType.Email, placeholder = "The email your invite was sent to") }
+        Field("Password") { Input(s.password, { v -> vm.edit { it.copy(password = v) } }, password = true, placeholder = "8 or more characters") }
         Check(ATTEST_1, s.ag1, { vm.edit { it.copy(ag1 = !it.ag1) } })
         Check(ATTEST_2, s.ag2, { vm.edit { it.copy(ag2 = !it.ag2) } })
-        Cta("Create account", { vm.signUp { nav.reset(Routes.HOME) } }, Modifier.fillMaxWidth(), off = !(s.ag1 && s.ag2), busy = s.busy)
+        s.error?.let { NoteBox(it, warn = true) }
+        Cta(if (s.busy) "Creating account…" else "Create account", { vm.signUp { nav.reset(Routes.HOME) } }, Modifier.fillMaxWidth(), off = !(s.ag1 && s.ag2), busy = s.busy)
         T(TERMS_LINE, m.type.tiny, m.t.muted, Modifier.fillMaxWidth(), align = TextAlign.Center)
     }
 }

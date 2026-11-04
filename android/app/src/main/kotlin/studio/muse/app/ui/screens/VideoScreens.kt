@@ -129,7 +129,7 @@ class NewVideoViewModel(private val c: AppContainer) : ViewModel() {
             val meta = media.clipMeta(uri)
             val thumb = media.clipThumb(uri)
             val bytes = if (c.repo.api is studio.muse.app.data.HttpMuseApi) media.bytes(uri) else null
-            val clip = c.repo.uploadClip(meta, bytes) ?: return@launch
+            val clip = c.repo.uploadClip(meta, bytes, media.mime(uri).takeIf { it.startsWith("video/") } ?: "video/mp4") ?: return@launch
             edit { it.copy(clip = clip.copy(thumb = thumb?.let { t -> ImageRef(url = t) }), showBadExample = false) }
         } catch (e: Exception) {
             c.repo.toast("Couldn't read that clip")
@@ -153,7 +153,7 @@ class NewVideoViewModel(private val c: AppContainer) : ViewModel() {
         val clip = s.clip ?: return c.repo.toast("Pick a clip first")
         val model = s.model ?: return c.repo.toast("Pick a model first")
         if (!clip.ok) return c.repo.toast("Fix the clip checks first")
-        if (s.cost > s.balance) return c.repo.toast("Not enough balance · top up in Credits", Routes.CREDITS)
+        if (s.cost > s.balance + 1e-9) return c.repo.toast(lowFundsMessage(c), Routes.CREDITS)
         viewModelScope.launch {
             busy.update { it.first to true }
             val d = s.draft

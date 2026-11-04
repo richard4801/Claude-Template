@@ -94,3 +94,8 @@ fun profileMenu(onSheet: () -> Unit, onOutfit: () -> Unit, onLora: () -> Unit = 
         MenuItem("shield", "Delete model", danger = true) { repo.toast("Delete is disabled in this demo") },
     )
 }
+
+/** Members spend tokens from the owner; the owner (and Demo mode) spends the GPU credit. */
+fun lowFundsMessage(c: studio.muse.app.AppContainer): String =
+    if (c.repo.state.value.wallet?.owner == false || (!c.prefs.value.owner && !c.repo.demo)) studio.muse.app.data.ErrorText.NOT_ENOUGH_TOKENS
+    else if (c.repo.demo) "Not enough balance · top up in My tokens" else "Not enough RunPod credit · top up on runpod.io"

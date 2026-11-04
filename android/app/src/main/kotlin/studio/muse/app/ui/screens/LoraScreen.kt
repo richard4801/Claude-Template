@@ -72,7 +72,7 @@ class LoraViewModel(private val c: AppContainer) : ViewModel() {
     private val id get() = state.value.model?.id
     fun build() = viewModelScope.launch {
         val m = id ?: return@launch
-        if (Pricing.LORA_SET_COST > state.value.balance + 1e-9) return@launch c.repo.toast("Not enough balance · top up in Credits", Routes.CREDITS)
+        if (Pricing.LORA_SET_COST > state.value.balance + 1e-9) return@launch c.repo.toast(lowFundsMessage(c), Routes.CREDITS)
         c.repo.buildLoraSet(m)
     }
     fun toggle(cand: LoraCandidate) = viewModelScope.launch { id?.let { c.repo.keepCandidate(it, cand.id, !cand.keep) } }

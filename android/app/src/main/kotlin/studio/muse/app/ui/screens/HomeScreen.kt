@@ -103,7 +103,8 @@ fun HomeScreen() {
                         m.isC -> H2("${greeting()}, ${s.firstName}")
                         else -> H2("Your crew")
                     } }
-                    BalancePill(s.balance.balance) { nav.go(Routes.CREDITS) }
+                    val wallet = LocalContainer.current.repo.state.collectAsState().value.wallet
+                    BalancePill(tokensLabel(wallet, s.balance)) { nav.go(Routes.CREDITS) }
                 }
                 s.featured?.let { f -> FeatureCard(f, s.featuredOutfits) { vm.open(f, nav) } }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -125,11 +126,14 @@ fun HomeScreen() {
 }
 
 @Composable
-fun BalancePill(balance: Double, onClick: () -> Unit) {
+fun BalancePill(balance: Double, onClick: () -> Unit) = BalancePill(Pricing.money(balance), onClick)
+
+@Composable
+fun BalancePill(text: String, onClick: () -> Unit) {
     val m = muse
     val shape = RoundedCornerShape(999.dp)
     Box(Modifier.clip(shape).border(if (m.isD) 2.5.dp else m.t.stroke, m.t.line, shape).press(onClick = onClick).padding(horizontal = 10.dp, vertical = 4.dp)) {
-        T(Pricing.money(balance), m.type.mono.copy(fontSize = 13.sp), m.t.ink)
+        T(text, m.type.mono.copy(fontSize = 13.sp), m.t.ink)
     }
 }
 

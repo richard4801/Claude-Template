@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import studio.muse.app.data.AppPrefs
 import studio.muse.app.data.DataStorePrefs
 import studio.muse.app.data.Drafts
@@ -36,6 +37,7 @@ class AppContainer(
             notifier?.jobFinished(job)
             if (job.done) repo.toast("Render done · tap to watch", "result/${job.id}") else repo.toast("Render failed · ${studio.muse.core.Pricing.money(job.refunded)} refunded", "queue")
         }
+        scope.launch { prefs.collect { repo.setStudioName(it.studioName) } }
         repo.onLoraReady = { model, lora ->
             notifier?.loraReady(model?.name ?: "Your model", lora.version)
             repo.toast("Identity LoRA v${lora.version} is ready", "lora")
