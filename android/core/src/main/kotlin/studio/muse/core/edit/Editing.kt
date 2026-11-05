@@ -221,6 +221,17 @@ class ProjectHistory(initial: EditProject, private val limit: Int = 100) {
         return true
     }
 
+    /**
+     * Replaces the current project without a new undo step (a slider being dragged: the drag is one step). The value
+     * before the drag stays the undo target; redo is cleared. False when [next] is null or no change.
+     */
+    fun amend(next: EditProject?): Boolean {
+        if (next == null || next == current) return false
+        future.clear()
+        current = next
+        return true
+    }
+
     /** Applies an operation on the current project (e.g. `edit { it.splitAt(3.2) }`). */
     fun edit(op: (EditProject) -> EditProject?): Boolean = apply(op(current))
 

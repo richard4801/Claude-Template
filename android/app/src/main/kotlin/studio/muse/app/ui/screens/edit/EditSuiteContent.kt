@@ -1,0 +1,177 @@
+package studio.muse.app.ui.screens.edit
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
+import studio.muse.app.ui.components.Bar
+import studio.muse.app.ui.components.Cta2
+import studio.muse.app.ui.components.NoteBox
+import studio.muse.app.ui.components.Pill
+import studio.muse.app.ui.components.T
+import studio.muse.app.ui.components.press
+import studio.muse.app.ui.screens.ScreenBox
+import studio.muse.app.ui.theme.muse
+import kotlin.math.floor
+
+/** "0:04.2" (minutes, seconds, tenths). */
+fun suiteTime(sec: Double): String {
+    val t = floor(sec.coerceAtLeast(0.0) * 10) / 10
+    val m = (t / 60).toInt(); val s = t - m * 60
+    return "$m:" + String.format(java.util.Locale.ROOT, "%04.1f", s)
+}
+
+/**
+ * The editor (EM1): top bar (✕ · title · EXPORT), the preview with its safe area, the transport (time, play, undo,
+ * redo, fullscreen), the multitrack timeline and the tool row; the open panel as a bottom sheet over it. On a wide
+ * screen (tablet) the panel stays open as an inspector on the right instead.
+ */
+@Composable
+fun EditSuiteContent(
+    ui: EditSuiteUi,
+    frames: Map<String, List<ImageBitmap>>,
+    host: SuiteHost,
+    act: (EditAction) -> Unit,
+    onClose: () -> Unit,
+    drawText: Boolean = true,
+    picture: @Composable (Modifier) -> Unit,
+) {
+    val m = muse
+    ScreenBox(statusPad = true) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val wide = maxWidth >= 840.dp
+            val editor = @Composable { mod: Modifier ->
+                Column(mod) {
+                    TopRow(ui, act, onClose)
+                    SuitePreview(ui, act, Modifier.fillMaxWidth().weight(1f), drawText, picture)
+                    Transport(ui, act)
+                    if (!ui.fullscreen) {
+                        Box(Modifier.fillMaxWidth().height(1.dp).background(m.t.line))
+                        if (ui.project != null) SuiteTimeline(ui, frames, act)
+                        Toolbar(ui, act)
+                    }
+                }
+            }
+            if (wide) {
+                Row(Modifier.fillMaxSize()) {
+                    editor(Modifier.weight(1f).fillMaxHeight())
+                    Box(Modifier.width(1.dp).fillMaxHeight().background(m.t.line))
+                    Box(Modifier.width(380.dp).fillMaxHeight()) {
+                        if (ui.project != null) SuiteSheet(ui, ui.panel ?: Panel.EDIT, host, act, Modifier.fillMaxSize())
+                    }
+                }
+            } else {
+                editor(Modifier.fillMaxSize())
+                val panel = ui.panel
+                if (panel != null && ui.project != null) {
+                    Box(Modifier.fillMaxSize().background(Color(0x40141210)).press { act(EditAction.Open(null)) })
+                    SuiteSheet(ui, panel, host, act, Modifier.align(Alignment.BottomCenter).heightIn(max = maxHeight * .62f).navigationBarsPadding())
+                }
+            }
+            // Loading / failure over everything.
+            when (val ph = ui.phase) {
+                is SuitePhase.Loading -> Status(if (ph.progress != null) "Getting the video · ${(ph.progress * 100).toInt()} %" else "Getting the video…", ph.progress)
+                is SuitePhase.Failed -> if (ui.project == null) Box(Modifier.fillMaxSize().background(m.t.bg).padding(24.dp), contentAlignment = Alignment.Center) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        NoteBox(ph.message, icon = "shield", warn = true)
+                        Cta2("Back", onClose, Modifier.fillMaxWidth(), height = 46.dp)
+                    }
+                }
+                else -> {}
+            }
+        }
+    }
+}
+
+@Composable
+private fun Status(text: String, progress: Float?) {
+    val m = muse
+    Box(Modifier.fillMaxSize().background(m.t.bg.copy(alpha = .6f)), contentAlignment = Alignment.Center) {
+        Column(Modifier.width(260.dp).clip(RoundedCornerShape(m.t.r)).background(m.t.surface).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            T(text, m.type.body.copy(fontSize = 14.sp), m.t.ink)
+            Bar(progress ?: .15f)
+        }
+    }
+}
+
+@Composable
+private fun TopRow(ui: EditSuiteUi, act: (EditAction) -> Unit, onClose: () -> Unit) {
+    val m = muse
+    Row(Modifier.fillMaxWidth().height(50.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(36.dp).press(onClick = onClose).semantics { contentDescription = "Close" }, contentAlignment = Alignment.CenterStart) { EIc("x", 22.dp, m.t.ink) }
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            T(ui.title.ifBlank { "Edit" }, m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold), m.t.ink, maxLines = 1)
+            if (ui.reopened) { Spacer(Modifier.width(6.dp)); Pill("Edited", "good") }
+        }
+        val shape = RoundedCornerShape(if (m.isA) 0.dp else if (m.isB) 8.dp else 999.dp)
+        Box(
+            Modifier.height(30.dp).clip(shape).background(m.t.cta).press(enabled = ui.project != null) { act(EditAction.Open(Panel.EXPORT)) }.padding(horizontal = 12.dp)
+                .semantics { contentDescription = "Export" },
+            contentAlignment = Alignment.Center,
+        ) { T("EXPORT", m.type.mono.copy(fontSize = 10.5.sp, letterSpacing = .14.em, fontWeight = FontWeight.Medium), m.t.ctaInk, maxLines = 1) }
+    }
+}
+
+@Composable
+private fun Transport(ui: EditSuiteUi, act: (EditAction) -> Unit) {
+    val m = muse
+    Row(Modifier.fillMaxWidth().height(42.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        T("${suiteTime(ui.playheadSec)} / ${suiteTime(ui.duration)}", m.type.mono.copy(fontSize = 12.5.sp), m.t.ink, Modifier.weight(1f), maxLines = 1)
+        Box(Modifier.size(40.dp).press(enabled = ui.ready) { act(EditAction.PlayPause) }.semantics { contentDescription = if (ui.playing) "Pause" else "Play" }, contentAlignment = Alignment.Center) {
+            EIc(if (ui.playing) "pause" else "play", 20.dp, m.t.ink)
+        }
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.press(enabled = ui.canUndo) { act(EditAction.Undo) }.semantics { contentDescription = "Undo" }) { EIc("undo", 18.dp, if (ui.canUndo) m.t.ink else m.t.muted) }
+            Box(Modifier.press(enabled = ui.canRedo) { act(EditAction.Redo) }.semantics { contentDescription = "Redo" }) { EIc("redo", 18.dp, if (ui.canRedo) m.t.ink else m.t.muted) }
+            Box(Modifier.press { act(EditAction.Fullscreen) }.semantics { contentDescription = "Fullscreen" }) { EIc("expand", 18.dp, if (ui.fullscreen) m.t.ink else m.t.muted) }
+        }
+    }
+}
+
+@Composable
+private fun Toolbar(ui: EditSuiteUi, act: (EditAction) -> Unit) {
+    val m = muse
+    val lit = ui.panel?.tool
+    Row(
+        Modifier.fillMaxWidth().height(66.dp).border(0.dp, Color.Transparent).navigationBarsPadding().padding(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.SpaceAround, verticalAlignment = Alignment.CenterVertically,
+    ) {
+        EditTool.entries.forEach { tool ->
+            val on = tool == lit
+            val c = if (on) m.t.accent else m.t.ink
+            Column(
+                Modifier.width(44.dp).press(enabled = ui.project != null) { act(EditAction.Open(if (on) null else tool.panel)) }.semantics { contentDescription = tool.label },
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                EIc(tool.icon, 20.dp, c)
+                T(tool.label, m.type.body.copy(fontSize = 9.5.sp, fontWeight = FontWeight.Medium), c, maxLines = 1)
+            }
+        }
+    }
+}

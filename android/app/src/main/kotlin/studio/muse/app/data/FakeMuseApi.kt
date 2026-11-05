@@ -683,7 +683,7 @@ class FakeMuseApi(
         t
     }
 
-    override suspend fun uploadEditorAudio(file: java.io.File, contentType: String, onProgress: (Float) -> Unit): String { onProgress(1f); return "up_audio_${++editorSeq}" }
+    override suspend fun uploadEditorFile(file: java.io.File, contentType: String, purpose: String?, onProgress: (Float) -> Unit): String { onProgress(1f); return "up_${purpose ?: "audio"}_${++editorSeq}" }
 
 
     // ---- the demo studio's owner side: members, tokens, invites, settings (in memory, like the real API's rules)

@@ -170,9 +170,9 @@ interface MuseApi {
     /** Saves a video made by the Edit suite as a new version of [takeId] with its v2 project. */
     suspend fun saveProjectVersion(takeId: String, video: EditedVideo, project: kotlinx.serialization.json.JsonObject, onProgress: (Float) -> Unit = {}): Take =
         throw ApiException("unsupported", "Saving an edited video needs the studio server")
-    /** Uploads a voice-over / music file for the editor; returns the upload id (an audio Asset.upload). */
-    suspend fun uploadEditorAudio(file: java.io.File, contentType: String, onProgress: (Float) -> Unit = {}): String =
-        throw ApiException("unsupported", "Uploading audio needs the studio server")
+    /** Uploads a voice-over / music file (or with purpose "lut" a .cube) for the editor; returns the upload id. */
+    suspend fun uploadEditorFile(file: java.io.File, contentType: String, purpose: String? = null, onProgress: (Float) -> Unit = {}): String =
+        throw ApiException("unsupported", "Uploading files needs the studio server")
 
     // Developer
     suspend fun setFailNext(fail: Boolean)

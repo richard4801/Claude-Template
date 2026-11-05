@@ -361,8 +361,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         val req = TakeVersionV2Request(p.uploadId, thumbId, project, video.durationSec, video.width, video.height, video.fps)
         return call { createVersionV2(takeId, req) }.abs().also { onProgress(1f) }
     }
-    override suspend fun uploadEditorAudio(file: java.io.File, contentType: String, onProgress: (Float) -> Unit): String {
-        val p = call { editorPresign(EditorPresignRequest(contentType, file.length())) }
+    override suspend fun uploadEditorFile(file: java.io.File, contentType: String, purpose: String?, onProgress: (Float) -> Unit): String {
+        val p = call { editorPresign(EditorPresignRequest(contentType, file.length(), purpose)) }
         putToStorage(p, FileProgressBody(file, contentType.toMediaType(), onProgress))
         return p.uploadId
     }
