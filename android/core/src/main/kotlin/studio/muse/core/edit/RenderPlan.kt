@@ -127,14 +127,18 @@ data class RenderPlan(
     private val mainIndex = project.mainClips.withIndex().associate { (i, c) -> c.id to i }
     private val layerOfMain = layers.filter { it.role == LayerRole.MAIN }.flatMap { l -> l.clips.map { it.itemId to l.index } }.toMap()
 
+    /** The clip or image layer [layerIndex] shows at [tSec], or null (a gap, the clock, the background). */
+    fun clipAt(layerIndex: Int, tSec: Double): PlannedClip? {
+        val tUs = us(tSec)
+        return (layers.getOrNull(layerIndex)?.entries?.firstOrNull { it is ClipEntry && tUs >= it.startUs && tUs < it.endUs } as ClipEntry?)?.clip
+    }
+
     /** Where layer [layerIndex] draws at timeline [tSec] (HIDDEN where it has no item, and always for the clock). */
     fun placement(layerIndex: Int, tSec: Double): Placement {
         val layer = layers.getOrNull(layerIndex) ?: return Placement.HIDDEN
         if (layer.role == LayerRole.CLOCK) return Placement.HIDDEN
         if (layer.role == LayerRole.BACKGROUND) return Placement(1.0, 0.5, 0.5, 1.0, 0.0)
-        val tUs = us(tSec)
-        val entry = layer.entries.firstOrNull { it is ClipEntry && tUs >= it.startUs && tUs < it.endUs } as ClipEntry? ?: return Placement.HIDDEN
-        val clip = entry.clip
+        val clip = clipAt(layerIndex, tSec) ?: return Placement.HIDDEN
         val track = project.track(clip.trackId) ?: return Placement.HIDDEN
         val item = track.items.firstOrNull { it.id == clip.itemId } ?: return Placement.HIDDEN
         return if (layer.role == LayerRole.MAIN) mainPlacement(item as VideoClip, tSec) else itemPlacement(item, track, tSec)

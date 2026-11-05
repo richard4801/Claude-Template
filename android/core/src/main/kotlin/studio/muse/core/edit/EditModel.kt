@@ -473,3 +473,24 @@ fun envelopeGain(env: List<GainPoint>, t: Double): Double {
     }
     return env.last().gain
 }
+
+/**
+ * Reads an envelope at increasing times in O(1) amortised, for per-sample gain in an audio processor (a time before
+ * the previous one, i.e. a seek, restarts the search). Outside the envelope it holds the end values, so rounding of
+ * a clip's edges never clicks to silence.
+ */
+class EnvelopeCursor(private val env: List<GainPoint>) {
+    private var i = 0
+    private var lastT = Double.NEGATIVE_INFINITY
+
+    fun gainAt(t: Double): Double {
+        if (env.isEmpty()) return 0.0
+        if (t <= env.first().t) return env.first().gain
+        if (t >= env.last().t) return env.last().gain
+        if (t < lastT) i = 0
+        lastT = t
+        while (t > env[i + 1].t) i++
+        val a = env[i]; val b = env[i + 1]
+        return if (b.t - a.t <= 0) b.gain else a.gain + (b.gain - a.gain) * (t - a.t) / (b.t - a.t)
+    }
+}

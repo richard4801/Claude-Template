@@ -107,5 +107,20 @@ class EditingTest {
         assertEquals(0.5, envelopeGain(env, 1.5), 1e-9)
         assertEquals(0.0, envelopeGain(env, 0.5), 1e-9)
         assertEquals(1.0, envelopeGain(env, 3.0), 1e-9)
+        // The cursor agrees inside the envelope, holds the ends outside it, and survives a seek back.
+        val c = EnvelopeCursor(env)
+        for (t in listOf(1.0, 1.25, 1.5, 2.0, 2.7, 3.0)) assertEquals(envelopeGain(env, t), c.gainAt(t), 1e-12)
+        assertEquals(0.25, c.gainAt(1.25), 1e-12)
+        assertEquals(0.0, c.gainAt(0.5), 0.0); assertEquals(1.0, c.gainAt(9.0), 0.0)
+    }
+
+    @Test fun chromaKeyRemovesTheKeyColourOnly() {
+        val green = Chroma("#00FF00")
+        assertEquals(0.0, ChromaKey.apply(0.0, 1.0, 0.0, green)[3], 0.0)
+        assertEquals(0.0, ChromaKey.apply(0.2, 0.8, 0.2, green)[3], 0.0)
+        assertEquals(1.0, ChromaKey.apply(0.9, 0.7, 0.6, green)[3], 0.0)       // skin
+        assertEquals(1.0, ChromaKey.apply(0.5, 0.5, 0.5, green)[3], 0.0)       // grey
+        val skin = ChromaKey.apply(0.9, 0.7, 0.6, green)
+        assertEquals(0.9, skin[0], 0.2)
     }
 }
