@@ -81,6 +81,7 @@ dependencies {
     implementation(libs.retrofit)
     implementation(libs.retrofit.kotlinx.serialization)
     implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
     debugImplementation(libs.compose.ui.tooling)
