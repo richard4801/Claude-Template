@@ -30,4 +30,4 @@ _Started 2026-11-05._ Several Claude sessions build MUSE features at the same ti
 - 1 · AI suite core: not started
 - 2 · MCP + Blender bridge: not started
 - 3 · Editor engine v2: not started
-- 4 · Prompt scripts: not started
+- 4 · Prompt scripts: server engine, scripts, talking detection, switch, beat-only audio, /v1/prompt-scripts and migration 0010 pushed (claude/muse-prompt-scripts); photo builders switch to scripts after the collage commit lands; Android + Mac screens in progress
