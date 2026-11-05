@@ -75,7 +75,9 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     func request(_ method: String, _ path: String, body: Data? = nil, contentType: String = "application/json") -> URLRequest {
         var r = URLRequest(url: url(path))
         r.httpMethod = method
-        r.timeoutInterval = 30
+        // Shoots and outfit sets make the images before answering, which can take a few minutes.
+        let long = method == "POST" && (path == "v1/shoots" || path == "v1/outfits" || (path.hasPrefix("v1/outfits/") && path.hasSuffix("/save")))
+        r.timeoutInterval = long ? 360 : 30
         r.setValue("application/json", forHTTPHeaderField: "Accept")
         if let t = currentToken { r.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
         if let body {
@@ -93,6 +95,8 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
                     if let e { cont.resume(throwing: e) } else { cont.resume(returning: (d ?? Data(), r)) }
                 }.resume()
             }
+        } catch let e as URLError where e.code == .timedOut {
+            throw ApiError("still_working", "Still working on it. It keeps going on the server, and the results will appear in Gallery.")
         } catch {
             throw ApiError("offline", "Can't reach the server at \(baseURL.absoluteString)")
         }

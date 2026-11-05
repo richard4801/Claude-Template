@@ -52,6 +52,7 @@ object ErrorText {
             "upload_failed" -> "The upload didn't go through. Check your connection and try again."
             "too_large" -> "That file is too large to upload."
             "offline" -> "Can't reach the MUSE server. Check your connection."
+            "still_working" -> "Still working on it. It keeps going on the server, and the photos will appear in Gallery. No need to press Shoot again."
             "bad_response" -> "The server sent something this app version can't read. Update MUSE."
             "server_error" -> "Something went wrong on the server. Try again."
             "bad_signature" -> "The upload link expired. Try again."

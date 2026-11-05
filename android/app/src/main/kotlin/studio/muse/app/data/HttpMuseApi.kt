@@ -171,16 +171,29 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         .build()
         .create(MuseService::class.java)
 
+    /** Same API with a long read timeout, for calls that make images before answering (shoots, outfit sets). */
+    private val longSvc: MuseService = Retrofit.Builder()
+        .baseUrl(base)
+        .client(client.newBuilder().readTimeout(6, TimeUnit.MINUTES).build())
+        .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+        .build()
+        .create(MuseService::class.java)
+
     override fun setToken(token: String?) { this.token = token }
 
     /** Turns `{"error": "...", "code": "..."}` bodies into [ApiException]. The UI words the codes (see [ErrorText]). */
-    private suspend fun <T> call(block: suspend MuseService.() -> T): T = try {
-        svc.block()
+    private suspend fun <T> call(block: suspend MuseService.() -> T): T = callOn(svc, block)
+    private suspend fun <T> callLong(block: suspend MuseService.() -> T): T = callOn(longSvc, block)
+
+    private suspend fun <T> callOn(service: MuseService, block: suspend MuseService.() -> T): T = try {
+        service.block()
     } catch (e: HttpException) {
         val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
         val err = runCatching { json.decodeFromString(ErrorBody.serializer(), body ?: "") }.getOrNull()
         val code = err?.code ?: when (e.code()) { 401 -> "unauthorized"; 429 -> "rate_limited"; 413 -> "too_large"; else -> "http_${e.code()}" }
         throw ApiException(code, err?.error ?: "Server error ${e.code()}")
+    } catch (e: java.net.SocketTimeoutException) {
+        throw ApiException("still_working", "This is taking longer than usual. It keeps going on the server; the results will appear in Gallery.")
     } catch (e: java.io.IOException) {
         throw ApiException("offline", "Can't reach the server at $base")
     } catch (e: kotlinx.serialization.SerializationException) {
@@ -200,7 +213,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun setSlot(modelId: String, slot: String, req: SetSlotRequest) = call { setSlot(modelId, slot, req) }.abs()
     override suspend fun fillAngles(modelId: String) = call { fillAngles(modelId) }.let { it.copy(model = it.model.abs()) }
     override suspend fun listOutfits() = call { outfits() }.map { it.abs() }
-    override suspend fun createOutfit(req: CreateOutfitRequest) = call { createOutfit(req) }.abs()
+    override suspend fun createOutfit(req: CreateOutfitRequest) = callLong { createOutfit(req) }.abs()
     override suspend fun saveOutfit(outfitId: String) = call { saveOutfit(outfitId) }.abs()
 
     private suspend fun usePresigned(): Boolean = when (uploadMode) {
@@ -258,7 +271,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun listTakes() = call { takes() }.map { it.abs() }
     override suspend fun setTakeStatus(takeId: String, status: String) = call { setTake(takeId, SetTakeStatusRequest(status)) }.abs()
     override suspend fun deleteTake(takeId: String) = call { deleteTake(takeId) }
-    override suspend fun shoot(req: ShootRequest) = call { shoot(req) }.map { it.abs() }
+    override suspend fun shoot(req: ShootRequest) = callLong { shoot(req) }.map { it.abs() }
     override suspend fun listTemplates(scope: String, q: String?, tag: String?) = call { templates(scope, q?.ifBlank { null }, tag?.ifBlank { null }) }.map { it.abs() }
     override suspend fun template(id: String) = call { template(id) }.abs()
     override suspend fun createTemplate(req: CreateTemplateRequest) = call { createTemplate(req) }.abs()
