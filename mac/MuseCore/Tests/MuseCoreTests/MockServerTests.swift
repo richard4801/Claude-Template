@@ -32,7 +32,7 @@ final class MockServerTests: XCTestCase {
 
         let models = try await api.listModels()
         XCTAssertTrue(models.contains { $0.isLocked })
-        XCTAssertTrue(models.contains { $0.name == "Demo model B" })
+        XCTAssertTrue(models.contains { $0.isDraft }, "a second model with an empty sheet")
         let outfits = try await api.listOutfits()
         XCTAssertFalse(outfits.isEmpty)
         let b0 = try await api.balance()
