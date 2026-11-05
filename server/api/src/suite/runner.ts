@@ -126,25 +126,35 @@ export class SuiteRunner {
         refs: await Promise.all(plan.images.refs.map(x => this.imageUrl(x.image, job.studioId).then(u => u!))),
         videos: await Promise.all(plan.videos.map(v => this.videoUrl(v.video, job.studioId))),
       };
-      // Audio: speech is sent as is; not speaking, only the instrumental (vocals separated once per job, billed with it).
-      let separationCost = 0;
+      // Audio: speech is sent as is. Not speaking: only a real instrumental (vocals removed once per job, billed with
+      // it). When nothing was separated (the separator is off, or this is a test render) NO audio is sent and the
+      // shot uses its no-audio prompt: the original track would let the model sing or lip-sync to it.
+      let separationCost = 0, prompt = plan.prompt;
       if (plan.audioRef) {
         const key = this.storageKeyOf(plan.audioRef.ref);
-        if (plan.audioRef.beatOnly && !mock) {
-          const saved = (job.stats as any)?.suite?.audio as { instrumentalKey?: string; costUsd?: number } | undefined;
-          let inst = saved?.instrumentalKey && (await ctx.storage.head(saved.instrumentalKey)) ? saved : undefined;
-          if (!inst) {
+        if (plan.audioRef.beatOnly) {
+          type Sep = { instrumentalKey?: string | null; costUsd?: number; separated?: boolean };
+          const saved = (job.stats as any)?.suite?.audio as Sep | undefined;
+          let sep: Sep | undefined = saved && (saved.separated === false || (saved.instrumentalKey && (await ctx.storage.head(saved.instrumentalKey)))) ? saved : undefined;
+          if (!sep && mock) sep = { instrumentalKey: null, costUsd: 0, separated: false };
+          if (!sep) {
             if (!key) throw new ReplicateError('the audio must be an upload to separate its beat', 'failed');
             await report(1, 0.02, 'Preparing the audio');
-            const b = await beatOnlyAudio(ctx, { studioId: job.studioId, userId: job.userId, jobId: job.id, audioKey: key, cancelled });
-            inst = { instrumentalKey: b.instrumentalKey, costUsd: b.costUsd };
-            await this.saveExtra(job.id, { audio: inst });
+            const b = await beatOnlyAudio(ctx, { studioId: job.studioId, userId: job.userId, jobId: job.id, audioKey: key, cancelled }) as { instrumentalKey: string; costUsd: number; separated?: boolean };
+            const separated = b.separated !== false && b.instrumentalKey !== key;
+            sep = separated ? { instrumentalKey: b.instrumentalKey, costUsd: b.costUsd, separated: true } : { instrumentalKey: null, costUsd: 0, separated: false };
+            await this.saveExtra(job.id, { audio: sep });
           }
-          separationCost = inst.costUsd ?? 0;
-          urls.audio = await ctx.storage.presignGet(inst.instrumentalKey!, c.REPLICATE_INPUT_URL_TTL_SEC);
+          if (sep.separated && sep.instrumentalKey) {
+            separationCost = sep.costUsd ?? 0;
+            urls.audio = await ctx.storage.presignGet(sep.instrumentalKey, c.REPLICATE_INPUT_URL_TTL_SEC);
+          } else if (plan.promptNoAudio) {
+            prompt = plan.promptNoAudio;
+            await ctx.db.update(jobs).set({ prompt }).where(eq(jobs.id, job.id));
+          }
         } else urls.audio = await this.videoUrl(plan.audioRef.ref, job.studioId);
       }
-      const input = buildInput(model, plan, urls);
+      const input = buildInput(model, { ...plan, prompt }, urls);
       const takes: TakeState[] = prior.map(x => ({ ...x }));
       const outputs: Record<string, unknown>[] = [], billed: number[] = [];
       for (let i = 1; i <= n; i++) {
