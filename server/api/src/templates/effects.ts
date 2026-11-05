@@ -5,6 +5,7 @@
 // phone photo's face usually is): x 28–72 %, y 6–40 %. A cheap detector can replace `faceBox()` later.
 import sharp from 'sharp';
 import type { TemplateAfterEffects } from '../db/schema.js';
+import { applyLookToImage, hasLook } from '../editor/photo.js';
 
 export const GRADES = ['none', 'phone-natural', 'underexposed', 'moody-blue', 'golden', 'harsh-sun', 'faded', 'mono'] as const;
 export type Grade = (typeof GRADES)[number];
@@ -42,7 +43,7 @@ function lineKernel(len: number, angleDeg: number) {
 }
 
 export const hasEffects = (fx?: TemplateAfterEffects | null) =>
-  !!fx && ((fx.faceMotionBlur ?? 0) > 0 || (fx.grain ?? 0) > 0 || (!!fx.grade && fx.grade !== 'none'));
+  !!fx && ((fx.faceMotionBlur ?? 0) > 0 || (fx.grain ?? 0) > 0 || (!!fx.grade && fx.grade !== 'none') || hasLook(fx.look));
 
 /** Applies the template's after-effects to one image. Returns JPEG bytes. */
 export async function applyAfterEffects(input: Buffer, fx: TemplateAfterEffects, o: { maxWidth?: number } = {}): Promise<Buffer> {
@@ -83,6 +84,9 @@ export async function applyAfterEffects(input: Buffer, fx: TemplateAfterEffects,
     if (g.linear) s = s.linear(g.linear[0], g.linear[1]);
     buf = await s.toColourspace('srgb').png().toBuffer();
   }
+
+  // 2b. Editor v2 look (workstream 3): the video editor's filter stack, so photo and video looks match.
+  if (hasLook(fx.look)) buf = await applyLookToImage(buf, fx.look!);
 
   // 3. Grain: gaussian noise blended soft-light.
   const grain = Math.max(0, Math.min(1, fx.grain ?? 0));

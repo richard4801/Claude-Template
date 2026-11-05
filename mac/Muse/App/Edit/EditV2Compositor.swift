@@ -84,6 +84,8 @@ final class EditV2Scene: @unchecked Sendable {
     private let lock = NSLock()
     private var textCache: [String: CIImage] = [:]
     private var cubeCache: [E.Chroma: Data] = [:]
+    /// The items' looks (filter stack) in Core Image.
+    private let looks: EditV2LookRenderer
 
     init(project: E.Project, plan: E.RenderPlan, laneTracks: [Int: CMPersistentTrackID], sources: EditV2Engine.Sources) {
         self.project = project
@@ -92,6 +94,7 @@ final class EditV2Scene: @unchecked Sendable {
         self.sources = sources
         pages = E.captionPages(project)
         size = CGSize(width: plan.width, height: plan.height)
+        looks = EditV2LookRenderer(imported: sources.luts)
         // Colour work (the item matrices, the chroma cube, blending) on sRGB values, as the contract defines it.
         ci = CIContext(options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!, .outputColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!])
     }
@@ -107,6 +110,8 @@ final class EditV2Scene: @unchecked Sendable {
 
     func render(_ request: AVAsynchronousVideoCompositionRequest, into out: CVPixelBuffer) {
         let t = request.compositionTime.seconds
+        let fps = plan.fps > 0 ? plan.fps : 30
+        let frameNo = Int((t * fps).rounded())
         var image = CIImage(color: color(plan.background)).cropped(to: canvas)
 
         // Main track (bottom layer).
@@ -117,7 +122,8 @@ final class EditV2Scene: @unchecked Sendable {
             guard let i = layer.segment.mainIndex, i < clips.count, let frame = sourceImage(request, layer.segment) else { continue }
             let c = clips[i]
             let pl = E.placement(c, local: t - layer.segment.timelineStart)
-            image = draw(frame, crop: c.crop, fit: c.fit ?? .cover, placement: pl, state: layer.state, adjust: c.adjust, filter: c.filter, chroma: c.chroma, over: image)
+            image = draw(frame, crop: c.crop, fit: c.fit ?? .cover, placement: pl, state: layer.state, adjust: c.adjust, filter: c.filter, look: c.look,
+                         chroma: c.chroma, frame: frameNo, fps: fps, over: image)
         }
 
         // Other tracks, bottom to top.
@@ -128,13 +134,13 @@ final class EditV2Scene: @unchecked Sendable {
                     guard let c = track.item(seg.itemId)?.videoClip, let frame = sourceImage(request, seg) else { continue }
                     let pl = E.placement(c, local: t - seg.timelineStart)
                     image = draw(frame, crop: c.crop, fit: c.fit ?? .contain, placement: pl, state: E.LayerState(), adjust: c.adjust, filter: c.filter,
-                                 chroma: c.chroma, over: image)
+                                 look: c.look, chroma: c.chroma, frame: frameNo, fps: fps, over: image)
                 }
             case .image:
                 for case .image(let im) in track.items where t >= im.startSec && t < im.startSec + im.durationSec {
                     guard let pic = sources.images[im.asset] else { continue }
                     image = draw(pic, crop: im.crop, fit: im.fit ?? .contain, placement: E.placement(im, local: t - im.startSec), state: E.LayerState(),
-                                 adjust: im.adjust, filter: im.filter, chroma: nil, over: image)
+                                 adjust: im.adjust, filter: im.filter, look: im.look, chroma: nil, frame: frameNo, fps: fps, over: image)
                 }
             case .text:
                 for case .text(let tx) in track.items where t >= tx.startSec && t < tx.startSec + tx.durationSec {
@@ -157,9 +163,10 @@ final class EditV2Scene: @unchecked Sendable {
 
     // MARK: Pictures
 
-    /// Draws a picture (origin 0,0): crop → chroma key → colour matrix → fit → scale/rotate/move → opacity, over `base`.
+    /// Draws a picture (origin 0,0): crop → chroma key → look (sharpen, chromatic, colour matrix + curves + LUT + lift,
+    /// halation, leak, vignette, grain; just the colour matrix without a look) → fit → scale/rotate/move → opacity, over `base`.
     private func draw(_ src: CIImage, crop: E.Crop?, fit: E.Fit, placement pl: E.Placement, state: E.LayerState, adjust: E.Adjust?, filter: E.FilterRef?,
-                      chroma: E.Chroma?, over base: CIImage) -> CIImage {
+                      look: E.Look?, chroma: E.Chroma?, frame: Int, fps: Double, over base: CIImage) -> CIImage {
         let opacity = pl.opacity * state.opacity
         guard opacity > 0.001 else { return base }
         var img = src
@@ -175,16 +182,7 @@ final class EditV2Scene: @unchecked Sendable {
         if let chroma, let cube = cube(chroma) {
             img = img.applyingFilter("CIColorCube", parameters: ["inputCubeDimension": 32, "inputCubeData": cube])
         }
-        let m = E.colorMatrix(adjust, filter)
-        if !E.isIdentity(m) {
-            img = img.applyingFilter("CIColorMatrix", parameters: [
-                "inputRVector": CIVector(x: m[0], y: m[1], z: m[2], w: 0),
-                "inputGVector": CIVector(x: m[4], y: m[5], z: m[6], w: 0),
-                "inputBVector": CIVector(x: m[8], y: m[9], z: m[10], w: 0),
-                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
-                "inputBiasVector": CIVector(x: m[3], y: m[7], z: m[11], w: 0),
-            ]).applyingFilter("CIColorClamp")
-        }
+        img = looks.apply(look, matrix: E.colorMatrix(adjust, filter), to: img, frame: frame, fps: fps)
         let (fw, _) = E.fittedSize(width: Double(w), height: Double(h), crop: nil, fit: fit, canvasWidth: Double(size.width), canvasHeight: Double(size.height))
         let s = CGFloat(fw / Double(w) * pl.scale * state.scale)
         let cx = CGFloat(pl.x + state.dx) * size.width, cy = size.height - CGFloat(pl.y + state.dy) * size.height

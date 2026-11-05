@@ -20,6 +20,8 @@ import type { Identity, OutfitSpec, SentRef } from '../prompt/engine.js';
 type Row = typeof templates.$inferSelect;
 type TakeRow = typeof takes.$inferSelect;
 
+import { hasLook, photoLook } from '../editor/photo.js';
+
 const str = (max: number) => z.string().trim().max(max);
 export const LayersSchema = z.object({
   style: str(600).optional(), scene: str(600).optional(), camera: str(600).optional(), light: str(600).optional(),
@@ -27,6 +29,7 @@ export const LayersSchema = z.object({
   afterEffects: z.object({
     faceMotionBlur: z.number().min(0).max(1).optional(), blurAngle: z.number().min(-360).max(360).optional(),
     grade: z.enum(GRADES).optional(), grain: z.number().min(0).max(1).optional(),
+    look: z.unknown().optional().transform(v => photoLook(v, 'afterEffects.look')), // Editor v2 look (workstream 3)
   }).strip().optional(),
 }).strip();
 export const PoolSchema = z.object(Object.fromEntries(POOL_SLOTS.map(s => [s, z.array(str(200)).max(12).optional()]))).strip();
@@ -44,7 +47,7 @@ const cleanLayers = (l: TemplateLayers | undefined): TemplateLayers => {
   const fx = l?.afterEffects;
   if (fx) {
     const f = compact({ faceMotionBlur: fx.faceMotionBlur || undefined, blurAngle: fx.faceMotionBlur ? fx.blurAngle : undefined,
-      grade: fx.grade && fx.grade !== 'none' ? fx.grade : undefined, grain: fx.grain || undefined });
+      grade: fx.grade && fx.grade !== 'none' ? fx.grade : undefined, grain: fx.grain || undefined, look: hasLook(fx.look) ? fx.look : undefined });
     if (Object.keys(f).length) out.afterEffects = f;
   }
   return out;

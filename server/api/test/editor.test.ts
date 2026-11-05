@@ -11,6 +11,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { ledger, takes } from '../src/db/schema.js';
 import * as M from '../src/editor/model.js';
 import { FILTERS } from '../src/editor/presets.js';
+import { LOOK_IDS } from '../src/editor/lookpack.js';
 import { suggestCuts } from '../src/editor/cuts.js';
 import { adaptInput, makeProvider, mockWords, parseTranscript, pickFile } from '../src/editor/providers.js';
 import { noiseSuggestion } from '../src/editor/service.js';
@@ -44,7 +45,7 @@ async function upload(a: A, c: Client, kind: 'clip' | 'image', body: Buffer, con
 describe('shared fixtures', () => {
   it('are what the reference implementation gives today (regenerate with scripts/editor-fixtures.ts) and the app copies are identical', () => {
     const dirs = ['android/core/src/test/resources/editor', 'mac/MuseCore/Tests/MuseCoreTests/Fixtures/editor'].map(d => path.join(repo, d));
-    const before = Object.fromEntries(['presets.json', 'projects.json', 'validation.json', 'functions.json'].map(n => [n, fs.readFileSync(path.join(FIX, n), 'utf8')]));
+    const before = Object.fromEntries(['presets.json', 'projects.json', 'validation.json', 'functions.json', 'looks.json'].map(n => [n, fs.readFileSync(path.join(FIX, n), 'utf8')]));
     for (const d of dirs) for (const [n, body] of Object.entries(before)) expect(fs.readFileSync(path.join(d, n), 'utf8'), `${d}/${n}`).toBe(body);
     execFileSync(process.execPath, ['--import', 'tsx', path.join(here, '../scripts/editor-fixtures.ts')], { cwd: path.join(here, '..'), stdio: 'pipe' });
     for (const [n, body] of Object.entries(before)) expect(fs.readFileSync(path.join(FIX, n), 'utf8'), `${n} changed: commit the regenerated fixtures`).toBe(body);
@@ -53,7 +54,7 @@ describe('shared fixtures', () => {
   it('every validation case gives the expected result and field', () => {
     for (const v of fx('validation.json') as { name: string; project: M.EditProject; ok: boolean; field?: string }[]) {
       let got: { ok: boolean; field?: string } = { ok: true };
-      try { M.validate(v.project, FILTERS); } catch (e) { got = { ok: false, field: (e as M.EditProblem).field }; }
+      try { M.validate(v.project, FILTERS, LOOK_IDS); } catch (e) { got = { ok: false, field: (e as M.EditProblem).field }; }
       expect(got, v.name).toEqual(v.ok ? { ok: true } : { ok: false, field: v.field });
     }
   });

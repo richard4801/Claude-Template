@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import * as M from '../src/editor/model.js';
 import { CAPTION_STYLES, FILTERS, HOOKS } from '../src/editor/presets.js';
 import { suggestCuts } from '../src/editor/cuts.js';
+import * as K from '../src/editor/look.js';
+import { CUBE_SIZE, LOOK_IDS, grade, packLook } from '../src/editor/lookpack.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../../..');
@@ -106,11 +108,20 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'asset with two refs', project: mut(p => (p.assets[1].upload = 'up_x')), ok: false, field: 'edits.assets.1' },
   { name: 'transition too long', project: (() => { const p = JSON.parse(JSON.stringify(projects[2]!.project)); p.tracks[0].items[1].transitionIn.durationSec = 1.6; return p; })(), ok: false, field: 'edits.tracks.0.items.1.transitionIn.durationSec' },
   { name: 'duck on voice', project: (() => { const p = JSON.parse(JSON.stringify(projects[6]!.project)); p.tracks[3].duck = { under: ['speech'] }; return p; })(), ok: false, field: 'edits.tracks.3.duck' },
+  { name: 'look ok', project: mut(p => { p.tracks[0].items[0].look = { ...packLook('film-cine'), curves: { rgb: [[0, 0.05], [1, 0.95]] } }; }), ok: true },
+  { name: 'look with imported lut', project: mut(p => { p.assets.push({ id: 'cube1', kind: 'lut', upload: 'up_cube' }); p.tracks[2].items[0].look = { lut: 'cube1', strength: 0.6 }; }), ok: true },
+  { name: 'look unknown pack', project: mut(p => { p.tracks[0].items[0].look = { lut: 'pack:nope' }; }), ok: false, field: 'edits.tracks.0.items.0.look.lut' },
+  { name: 'look lut not a lut asset', project: mut(p => { p.tracks[0].items[0].look = { lut: 'logo' }; }), ok: false, field: 'edits.tracks.0.items.0.look.lut' },
+  { name: 'look curve x not increasing', project: mut(p => { p.tracks[1].items[0].look = { curves: { r: [[0, 0], [0.5, 0.4], [0.5, 0.6], [1, 1]] } }; }), ok: false, field: 'edits.tracks.1.items.0.look.curves.r.2' },
+  { name: 'look grain too big', project: mut(p => { p.tracks[0].items[0].look = { grain: { amount: 2 } }; }), ok: false, field: 'edits.tracks.0.items.0.look.grain.amount' },
+  { name: 'look leak kind', project: mut(p => { p.tracks[0].items[0].look = { leak: { kind: 'green', amount: 0.3 } }; }), ok: false, field: 'edits.tracks.0.items.0.look.leak.kind' },
+  { name: 'look unknown key', project: mut(p => { p.tracks[0].items[0].look = { bloom: 1 }; }), ok: false, field: 'edits.tracks.0.items.0.look.bloom' },
+  { name: 'lut asset must be an upload', project: mut(p => { p.assets.push({ id: 'cube2', kind: 'lut', library: 'x' }); }), ok: false, field: 'edits.assets.3' },
   { name: 'caption word bad', project: (() => { const p = JSON.parse(JSON.stringify(projects[3]!.project)); p.tracks[1].caption.words[2].endSec = 0.1; return p; })(), ok: false, field: 'edits.tracks.1.caption.words.2.endSec' },
 ];
 for (const v of validation) {
   let got: { ok: boolean; field?: string };
-  try { M.validate(v.project as M.EditProject, FILTERS); got = { ok: true }; } catch (e) { got = { ok: false, field: (e as M.EditProblem).field }; }
+  try { M.validate(v.project as M.EditProject, FILTERS, LOOK_IDS); got = { ok: true }; } catch (e) { got = { ok: false, field: (e as M.EditProblem).field }; }
   if (got.ok !== v.ok || got.field !== v.field) throw new Error(`validation case "${v.name}": expected ${JSON.stringify(v)} got ${JSON.stringify(got)}`);
 }
 
@@ -154,7 +165,70 @@ const chroma = chromaKeys.flatMap(key => chromaColors.map(rgb => ({ key, rgb, ou
 
 function round<T>(o: T): T { return JSON.parse(JSON.stringify(o, (_k, v) => (typeof v === 'number' ? Math.round(v * 1e6) / 1e6 : v))); }
 
+// ------------------------------------------------------------------ looks (filters)
+const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
+/** 24×16 test picture: skin tones (shaded), colours, a grey ramp and a bright spot (for halation). */
+function testImage(): K.Image {
+  const w = 24, h = 16, d = new Float32Array(w * h * 3);
+  const skins = [[241, 194, 167], [198, 134, 103], [110, 74, 52]], cols = [[120, 170, 230], [70, 120, 60], [200, 40, 40], [240, 200, 40]];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let c: number[];
+    if (y < 6) c = skins[Math.floor(x / 8)]!.map(v => v * (0.8 + 0.3 * (1 - y / 6)));
+    else if (y < 10) c = cols[Math.floor(x / 6)]!;
+    else if (y < 13) { const v = (x / (w - 1)) * 255; c = [v, v, v]; }
+    else c = (x > 16 && x < 21) ? [255, 250, 240] : [30, 30, 40];
+    for (let k = 0; k < 3; k++) d[(y * w + x) * 3 + k] = Math.round(Math.min(255, c[k]!)) / 255;
+  }
+  return { width: w, height: h, data: d };
+}
+const pic = testImage();
+const small = K.writeCube(5, 'test5', grade({ temp: 0.4, contrast: 0.2, shadows: ['#204060', 0.2], sat: -0.2 }));
+const smallLut = K.parseCube(small);
+const goldLut = K.parseCube(fs.readFileSync(path.join(repo, 'server/api/assets/lookpack/looks/film-gold.cube'), 'utf8'));
+const M1 = M.colorMatrix({ exposure: 0.1, saturation: 0.2 }, { id: 'warm', amount: 0.5 }, FILTERS);
+const renders: { name: string; look: K.Look; matrix: number[] | null; lut: string | null; frame: number; out: number[] }[] = [];
+const addRender = (name: string, look: K.Look, o: { matrix?: number[] | null; lut?: string | null; frame?: number } = {}) => {
+  const lut = o.lut === 'test5' ? smallLut : o.lut === 'pack:film-gold' ? goldLut : null;
+  const out = K.renderLook(pic, look, { matrix: o.matrix ?? null, lut, frame: o.frame ?? 0, fps: 30 });
+  renders.push({ name, look, matrix: o.matrix ?? null, lut: o.lut ?? null, frame: o.frame ?? 0, out: Array.from(out.data, r4) });
+};
+addRender('identity', {});
+addRender('matrix only', {}, { matrix: M1 });
+addRender('curves', { curves: { rgb: [[0, 0.05], [0.3, 0.25], [0.7, 0.78], [1, 0.97]], b: [[0, 0.08], [1, 0.95]] } });
+addRender('lut half strength + lift', { lut: 'pack:test5', strength: 0.5, lift: 0.6 }, { lut: 'test5' });
+addRender('pack look film-gold', packLook('film-gold')!, { lut: 'pack:film-gold', frame: 3 });
+addRender('sharpen + chromatic', { sharpen: 0.8, chromatic: 1 });
+addRender('halation', { halation: { amount: 0.8, radius: 0.3, threshold: 0.6 } });
+addRender('vignette dark + grain', { vignette: { amount: 0.6, size: 0.3, softness: 0.5 }, grain: { amount: 0.7, size: 1 } }, { frame: 7 });
+addRender('vignette light + leak', { vignette: { amount: -0.5 }, leak: { kind: 'rose', amount: 0.7, angle: 140 } }, { frame: 45 });
+addRender('everything', { lut: 'pack:test5', strength: 0.8, curves: { rgb: [[0, 0], [0.5, 0.55], [1, 1]] }, lift: 0.3, sharpen: 0.4, chromatic: 0.5,
+  halation: { amount: 0.4 }, leak: { kind: 'amber', amount: 0.4 }, vignette: { amount: 0.4 }, grain: { amount: 0.4, size: 2 } }, { matrix: M1, lut: 'test5', frame: 12 });
+const curvesCases = [[[0, 0], [1, 1]], [[0, 0.1], [0.25, 0.2], [0.5, 0.6], [0.75, 0.8], [1, 0.9]], [[0.1, 0], [0.4, 0.9], [0.45, 0.95], [0.9, 1]], [[0, 1], [0.5, 0.2], [1, 0]]] as K.CurvePoint[][];
+const looks = {
+  image: { width: pic.width, height: pic.height, data: Array.from(pic.data, r4) },
+  matrix: M1,
+  cubes: { test5: small },
+  lutSamples: [...[[0, 0, 0], [1, 1, 1], [0.5, 0.25, 0.75], [0.13, 0.87, 0.42], [0.99, 0.01, 0.5]].map(c => ({ lut: 'test5', rgb: c, out: K.lutSample(smallLut, c[0]!, c[1]!, c[2]!).map(r4) })),
+    ...[[0.2, 0.3, 0.4], [0.8, 0.6, 0.5], [0.95, 0.85, 0.75]].map(c => ({ lut: 'pack:film-gold', rgb: c, out: K.lutSample(goldLut, c[0]!, c[1]!, c[2]!).map(r4) }))],
+  curves: curvesCases.map(pts => { const f = K.curveFn(pts)!; return { points: pts, samples: Array.from({ length: 21 }, (_, i) => [i / 20, r4(f(i / 20))]) }; }),
+  hash: [[0, 0, 0], [1, 0, 0], [0, 1, 0], [5, 7, 3], [1023, 767, 59], [12345, 6789, 100000]].map(([x, y, f]) => ({ x, y, frame: f, v: K.hash01(x!, y!, f!) })),
+  vignette: [{ amount: 0.5 }, { amount: 0.5, size: 0.2, softness: 0.3 }].map(v => ({ vignette: v, samples: [[0.5, 0.5], [0, 0], [1, 0.5], [0.25, 0.75], [0.9, 0.1]].map(([u, w]) => [u, w, r4(K.vignetteMask(v as K.Vignette, u!, w!))]) })),
+  leak: (['warm', 'rainbow'] as K.LeakKind[]).map(kind => ({ leak: { kind, amount: 0.8, angle: 60 }, samples: [[0.5, 0.5, 0], [1, 0, 0], [0.9, 0.2, 2.5], [0, 1, 1]].map(([u, v, t]) => ({ u, v, t, out: K.leakColor({ kind, amount: 0.8, angle: 60 }, u!, v!, t!).map(r4) })) })),
+  radii: [{ short: 16, sharpen: K.sharpenRadius(16), halation: K.halationRadius(16, { amount: 1, radius: 0.3 }), grain: K.grainCell(16, { amount: 1, size: 1 }) },
+    { short: 1080, sharpen: K.sharpenRadius(1080), halation: K.halationRadius(1080, { amount: 1 }), grain: K.grainCell(1080, { amount: 1, size: 2 }) },
+    { short: 1440, sharpen: K.sharpenRadius(1440), halation: K.halationRadius(1440, { amount: 1, radius: 1 }), grain: K.grainCell(1440, { amount: 1 }) }],
+  badCubes: [
+    { name: 'no size', text: '0 0 0\n' }, { name: 'too few', text: 'LUT_3D_SIZE 2\n0 0 0\n1 1 1\n' }, { name: 'size 65', text: 'LUT_3D_SIZE 65\n' },
+    { name: '1D', text: 'LUT_1D_SIZE 16\n' }, { name: 'bad number', text: 'LUT_3D_SIZE 2\n' + '0 0 x\n'.repeat(8) }, { name: 'too many', text: 'LUT_3D_SIZE 2\n' + '0 0 0\n'.repeat(9) },
+  ],
+  goodCube: { text: '# a comment\nTITLE "tiny"\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 1 1 1\nLUT_3D_SIZE 2\n' + '0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n', size: 2, title: 'tiny' },
+  renders,
+  pack: { cubeSize: CUBE_SIZE, ids: [...LOOK_IDS] },
+};
+for (const b of looks.badCubes) { let ok = true; try { K.parseCube(b.text); } catch { ok = false; } if (ok) throw new Error(`bad cube "${b.name}" parsed`); }
+
 const files: Record<string, unknown> = {
+  'looks.json': looks,
   'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
   'validation.json': validation,

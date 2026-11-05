@@ -14,14 +14,15 @@ extension EditV2 {
     }
 
     /// The first rule broken, or nil.
-    public static func problem(_ p: Project, presets: [FilterPreset] = filters) -> EditProblem? {
-        do { _ = try validate(p, presets: presets); return nil } catch let e as EditProblem { return e } catch { return EditProblem("edits", "\(error)") }
+    /// `lookIds` = the bundled looks a "pack:<id>" may name (empty = any).
+    public static func problem(_ p: Project, presets: [FilterPreset] = filters, lookIds: Set<String> = Set(lookPackIds)) -> EditProblem? {
+        do { _ = try validate(p, presets: presets, lookIds: lookIds); return nil } catch let e as EditProblem { return e } catch { return EditProblem("edits", "\(error)") }
     }
 
     /// Checks every rule; throws the first EditProblem. Returns the project's duration.
     @discardableResult
-    public static func validate(_ p: Project, presets: [FilterPreset] = filters) throws -> Double {
-        var v = Validator(p: p, filterIds: Set(presets.map(\.id)))
+    public static func validate(_ p: Project, presets: [FilterPreset] = filters, lookIds: Set<String> = Set(lookPackIds)) throws -> Double {
+        var v = Validator(p: p, filterIds: Set(presets.map(\.id)), lookIds: lookIds)
         return try v.run()
     }
 }
@@ -30,9 +31,11 @@ private struct Validator {
     typealias E = EditV2
     let p: EditV2.Project
     let filterIds: Set<String>
+    let lookIds: Set<String>
     var assets: [String: EditV2.Asset] = [:]
+    var assetKinds: [String: EditV2.AssetKind] = [:]
 
-    init(p: EditV2.Project, filterIds: Set<String>) { self.p = p; self.filterIds = filterIds }
+    init(p: EditV2.Project, filterIds: Set<String>, lookIds: Set<String>) { self.p = p; self.filterIds = filterIds; self.lookIds = lookIds }
 
     func bad(_ f: String, _ m: String) -> EditV2.EditProblem { EditV2.EditProblem(f, m) }
 
@@ -80,6 +83,7 @@ private struct Validator {
             let f = "edits.assets.\(i)"
             try id("\(f).id", a.id)
             if assets[a.id] != nil { throw bad("\(f).id", "is used twice") }
+            if a.kind == .lut && a.upload == nil { throw bad(f, "a lut asset must be an upload") }
             let refs = [a.take, a.upload, a.library].compactMap { $0 }
             if refs.count != 1 || refs.contains(where: { $0.isEmpty || $0.utf16.count > 100 }) { throw bad(f, "needs exactly one of take, upload or library") }
             try num("\(f).durationSec", a.durationSec, 0.01, 36_000)
@@ -87,6 +91,7 @@ private struct Validator {
             try num("\(f).height", a.height, 1, 16384)
             assets[a.id] = a
         }
+        assetKinds = assets.mapValues(\.kind)
         if p.tracks.isEmpty || p.tracks.count > E.maxTracks { throw bad("edits.tracks", "must have 1–\(E.maxTracks) tracks") }
         if p.tracks[0].kind != .main { throw bad("edits.tracks.0.kind", "the first track must be the main track") }
         if p.tracks.filter({ $0.kind == .main }).count != 1 { throw bad("edits.tracks", "needs exactly one main track") }
@@ -107,7 +112,7 @@ private struct Validator {
             if t.kind == .caption {
                 if !t.items.isEmpty { throw bad("\(f).items", "a caption track has no items") }
                 guard let c = t.caption else { throw bad("\(f).caption", "is required") }
-                if let a = assets[c.asset], a.kind != .image {} else { throw bad("\(f).caption.asset", "must be a video or audio asset") }
+                if let a = assets[c.asset], a.kind == .video || a.kind == .audio {} else { throw bad("\(f).caption.asset", "must be a video or audio asset") }
                 if c.words.count > E.maxWords { throw bad("\(f).caption.words", "at most \(E.maxWords) words") }
                 for (j, w) in c.words.enumerated() {
                     let n = w.text.utf16.count
@@ -138,10 +143,10 @@ private struct Validator {
                     try clipBase(g, asset: c.asset, inSec: c.inSec, outSec: c.outSec, volume: c.volume, fadeIn: c.fadeInSec, fadeOut: c.fadeOutSec, kinds: [.video])
                     try num("\(g).speed", c.speed, E.minSpeed, E.maxSpeed, optional: false)
                     let len = E.clipLength(c)
-                    try visual(g, fit: c.fit, transform: c.transform, crop: c.crop, opacity: c.opacity, adjust: c.adjust, filter: c.filter)
+                    try visual(g, fit: c.fit, transform: c.transform, crop: c.crop, opacity: c.opacity, adjust: c.adjust, filter: c.filter, look: c.look)
                     try kfs("\(g).keyframes", c.keyframes, len, allowed: [.x, .y, .scale, .rotation, .opacity, .volume])
                     if let aa = c.audioAsset {
-                        if let a = assets[aa], a.kind != .image {} else { throw bad("\(g).audioAsset", "must be an audio or video asset") }
+                        if let a = assets[aa], a.kind == .video || a.kind == .audio {} else { throw bad("\(g).audioAsset", "must be an audio or video asset") }
                     }
                     if let ck = c.chroma {
                         try color("\(g).chroma.color", ck.color, optional: false)
@@ -168,7 +173,7 @@ private struct Validator {
                     if a.kind != .image { throw bad("\(g).asset", "must be image") }
                     try num("\(g).startSec", im.startSec, 0, 600, optional: false)
                     try num("\(g).durationSec", im.durationSec, E.minItemSec, 600, optional: false)
-                    try visual(g, fit: im.fit, transform: im.transform, crop: im.crop, opacity: im.opacity, adjust: im.adjust, filter: im.filter)
+                    try visual(g, fit: im.fit, transform: im.transform, crop: im.crop, opacity: im.opacity, adjust: im.adjust, filter: im.filter, look: im.look)
                     try kfs("\(g).keyframes", im.keyframes, im.durationSec, allowed: [.x, .y, .scale, .rotation, .opacity])
                     try anim("\(g).animIn", im.animIn, text: false)
                     try anim("\(g).animOut", im.animOut, text: false)
@@ -178,7 +183,7 @@ private struct Validator {
                     try num("\(g).startSec", tx.startSec, 0, 600, optional: false)
                     try num("\(g).durationSec", tx.durationSec, E.minItemSec, 600, optional: false)
                     try textStyle("\(g).style", tx.style)
-                    if tx.transform != nil { try visual(g, fit: nil, transform: tx.transform, crop: nil, opacity: nil, adjust: nil, filter: nil) }
+                    if tx.transform != nil { try visual(g, fit: nil, transform: tx.transform, crop: nil, opacity: nil, adjust: nil, filter: nil, look: nil) }
                     try num("\(g).opacity", tx.opacity, 0, 1)
                     try kfs("\(g).keyframes", tx.keyframes, tx.durationSec, allowed: [.x, .y, .scale, .rotation, .opacity])
                     try anim("\(g).animIn", tx.animIn, text: true)
@@ -216,7 +221,8 @@ private struct Validator {
         try num("\(f).fadeOutSec", fadeOut, 0, 10)
     }
 
-    func visual(_ f: String, fit: EditV2.Fit?, transform: EditV2.Transform?, crop: EditV2.Crop?, opacity: Double?, adjust: EditV2.Adjust?, filter: EditV2.FilterRef?) throws {
+    func visual(_ f: String, fit: EditV2.Fit?, transform: EditV2.Transform?, crop: EditV2.Crop?, opacity: Double?, adjust: EditV2.Adjust?, filter: EditV2.FilterRef?,
+                look: EditV2.Look?) throws {
         if let t = transform {
             try num("\(f).transform.x", t.x, -2, 3)
             try num("\(f).transform.y", t.y, -2, 3)
@@ -239,6 +245,9 @@ private struct Validator {
         if let fl = filter {
             if !filterIds.isEmpty && !filterIds.contains(fl.id) { throw bad("\(f).filter.id", "unknown filter") }
             try num("\(f).filter.amount", fl.amount, 0, 1, optional: false)
+        }
+        if let lp = EditV2.lookProblem(look, assetKinds: assetKinds, packIds: lookIds) {
+            throw bad(lp.field.isEmpty ? "\(f).look" : "\(f).look.\(lp.field)", lp.message)
         }
     }
 

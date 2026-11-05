@@ -48,6 +48,8 @@ data class VideoLook(
     /** 3×4 row-major affine colour matrix, null when it's the identity. */
     val colorMatrix: List<Double>?,
     val chroma: Chroma?,
+    /** The item's look (plans/video-editor.md "Looks"), null when it has none or it changes nothing. */
+    val look: Look? = null,
 )
 
 /** A clip or image in a layer or lane, placed on the timeline. */
@@ -301,7 +303,7 @@ fun planRender(project: EditProject, infos: Map<String, MediaInfo>, presets: Lis
         }
         val crop = if (l > 1e-9 || r > 1e-9 || t > 1e-9 || b > 1e-9) CropNdc(-1 + 2 * l, 1 - 2 * r, -1 + 2 * b, 1 - 2 * t) else null
         val m = colorMatrix(v.adjust, v.filter, presets).takeUnless(::isIdentityMatrix)
-        return VideoLook(crop, tw, th, base, m, (v as? VideoClip)?.chroma)
+        return VideoLook(crop, tw, th, base, m, (v as? VideoClip)?.chroma, v.look?.takeUnless { it.isNoop() })
     }
 
     /** A clip limited to the project's end; null when it starts after it. */

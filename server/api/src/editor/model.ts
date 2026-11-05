@@ -2,6 +2,8 @@
 // the Kotlin (android/core/.../core/edit) and Swift (mac/MuseCore/.../Edit) ports must give the same answers for every
 // case in test/fixtures/editor/*.json (scripts/editor-fixtures.ts writes them from these functions). Pure: no I/O.
 
+import { lookProblem, type Look } from './look.js';
+
 // ------------------------------------------------------------------ types
 export type Ease = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'hold';
 export type Keyframe = { t: number; v: number; ease?: Ease };
@@ -18,10 +20,10 @@ export type AnimKind = 'none' | 'fade' | 'pop' | 'slideUp' | 'slideDown' | 'zoom
 export type Anim = { kind: AnimKind; durationSec: number };
 export type Fit = 'cover' | 'contain';
 
-export type Asset = { id: string; kind: 'video' | 'image' | 'audio'; take?: string; upload?: string; library?: string;
+export type Asset = { id: string; kind: 'video' | 'image' | 'audio' | 'lut' /* an imported .cube (Looks) */; take?: string; upload?: string; library?: string;
   durationSec?: number; width?: number; height?: number; hasAudio?: boolean; url?: string };
 
-type Visual = { fit?: Fit; transform?: Transform; crop?: Crop; opacity?: number; keyframes?: Keyframes; filter?: FilterRef; adjust?: Adjust };
+type Visual = { fit?: Fit; transform?: Transform; crop?: Crop; opacity?: number; keyframes?: Keyframes; filter?: FilterRef; adjust?: Adjust; look?: Look };
 export type VideoClip = Visual & { id: string; asset: string; inSec: number; outSec: number; speed: number; startSec?: number;
   volume?: number; muted?: boolean; fadeInSec?: number; fadeOutSec?: number; audioAsset?: string; chroma?: Chroma; transitionIn?: Transition };
 export type ImageItem = Visual & { id: string; asset: string; startSec: number; durationSec: number; animIn?: Anim; animOut?: Anim };
@@ -477,7 +479,7 @@ const HEX = /^#[0-9A-Fa-f]{6}$/;
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
 /** All the rules of plans/video-editor.md "Rules". Throws EditProblem (field path + message) on the first one broken. */
-export function validate(p: EditProject, presets: FilterPreset[] = []): { durationSec: number } {
+export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: Set<string> = new Set()): { durationSec: number } {
   const bad = (f: string, m: string): never => { throw new EditProblem(f, m); };
   const num = (f: string, v: unknown, lo: number, hi: number, optional = true) => {
     if (v === undefined && optional) return;
@@ -498,7 +500,8 @@ export function validate(p: EditProject, presets: FilterPreset[] = []): { durati
     const f = `edits.assets.${i}`;
     id(`${f}.id`, a.id);
     if (assets.has(a.id)) bad(`${f}.id`, 'is used twice');
-    if (!['video', 'image', 'audio'].includes(a.kind)) bad(`${f}.kind`, 'must be video, image or audio');
+    if (!['video', 'image', 'audio', 'lut'].includes(a.kind)) bad(`${f}.kind`, 'must be video, image, audio or lut');
+    if (a.kind === 'lut' && a.upload === undefined) bad(f, 'a lut asset must be an upload');
     const refs = [a.take, a.upload, a.library].filter(x => x !== undefined);
     if (refs.length !== 1 || refs.some(r => typeof r !== 'string' || !r || r.length > 100)) bad(f, 'needs exactly one of take, upload or library');
     num(`${f}.durationSec`, a.durationSec, 0.01, 36_000);
@@ -510,6 +513,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = []): { durati
   if (p.tracks.filter(t => t.kind === 'main').length !== 1) bad('edits.tracks', 'needs exactly one main track');
   if (p.tracks.filter(t => t.kind === 'caption').length > 1) bad('edits.tracks', 'at most one caption track');
   const ids = new Set<string>();
+  const assetKinds = new Map([...assets.values()].map(a => [a.id, a.kind as string]));
   let total = 0;
   const filterIds = new Set(presets.map(x => x.id));
 
@@ -544,6 +548,8 @@ export function validate(p: EditProject, presets: FilterPreset[] = []): { durati
       if (typeof it.filter.id !== 'string' || (filterIds.size && !filterIds.has(it.filter.id))) bad(`${f}.filter.id`, 'unknown filter');
       num(`${f}.filter.amount`, it.filter.amount, 0, 1, false);
     }
+    const lp = lookProblem(it.look, assetKinds, lookIds);
+    if (lp) bad(lp.field ? `${f}.look.${lp.field}` : `${f}.look`, lp.message);
   };
   const anim = (f: string, a: Anim | undefined, text: boolean) => {
     if (a === undefined) return;
@@ -577,7 +583,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = []): { durati
       const c = t.caption;
       if (!c) bad(`${f}.caption`, 'is required');
       const a = assets.get(c!.asset);
-      if (!a || a.kind === 'image') bad(`${f}.caption.asset`, 'must be a video or audio asset');
+      if (!a || (a.kind !== 'video' && a.kind !== 'audio')) bad(`${f}.caption.asset`, 'must be a video or audio asset');
       if (!Array.isArray(c!.words) || c!.words.length > LIMITS.maxWords) bad(`${f}.caption.words`, `at most ${LIMITS.maxWords} words`);
       c!.words.forEach((w, j) => {
         if (typeof w.text !== 'string' || w.text.length < 1 || w.text.length > 60) bad(`${f}.caption.words.${j}.text`, 'must be 1–60 characters');
@@ -606,7 +612,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = []): { durati
         num(`${g}.speed`, c.speed, LIMITS.minSpeed, LIMITS.maxSpeed, false);
         visual(g, c, clipLength(c));
         kfs(`${g}.keyframes`, c.keyframes, clipLength(c), ['x', 'y', 'scale', 'rotation', 'opacity', 'volume']);
-        if (c.audioAsset !== undefined) { const a = assets.get(c.audioAsset); if (!a || a.kind === 'image') bad(`${g}.audioAsset`, 'must be an audio or video asset'); }
+        if (c.audioAsset !== undefined) { const a = assets.get(c.audioAsset); if (!a || (a.kind !== 'video' && a.kind !== 'audio')) bad(`${g}.audioAsset`, 'must be an audio or video asset'); }
         if (c.chroma !== undefined) {
           color(`${g}.chroma.color`, c.chroma.color, false);
           num(`${g}.chroma.similarity`, c.chroma.similarity, 0, 1); num(`${g}.chroma.smoothness`, c.chroma.smoothness, 0, 1); num(`${g}.chroma.spill`, c.chroma.spill, 0, 1);

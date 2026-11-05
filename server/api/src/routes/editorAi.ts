@@ -3,10 +3,15 @@
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../ctx.js';
 import { uploads } from '../db/schema.js';
-import { ApiError, badRequest } from '../errors.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { ApiError, badRequest, notFound } from '../errors.js';
+import { LOOK_LIMITS } from '../editor/look.js';
+import { LOOK_IDS } from '../editor/lookpack.js';
+import { LOOK_DIR } from '../editor/photo.js';
 import { uid } from '../lib/util.js';
 import { EditorAiService } from '../editor/service.js';
-import { checkProject } from '../editor/versions.js';
+import { checkProject, lutOfUpload } from '../editor/versions.js';
 import { CAPTION_STYLES, FILTERS, HOOKS } from '../editor/presets.js';
 
 const AUDIO_EXT: Record<string, string> = { 'audio/mp4': 'm4a', 'audio/aac': 'aac', 'audio/mpeg': 'mp3', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/flac': 'flac' };
@@ -35,13 +40,30 @@ export async function registerEditorAiRoutes(app: FastifyInstance, ctx: Ctx) {
     return { ok: true, ...(await checkProject(ctx, req.user.studioId, b.project, null)) };
   });
 
-  /** A presigned PUT for an audio file (voice-over, music) to use as an asset upload. */
+  // ---- Looks (filters): the bundled pack, and the user's own .cube files
+  app.get('/v1/editor/looks', async () => JSON.parse(fs.readFileSync(path.join(LOOK_DIR, 'looks.json'), 'utf8')));
+  app.get<{ Params: { file: string } }>('/v1/editor/looks/:file', async (req, reply) => {
+    const m = /^([a-z0-9-]+)\.cube$/.exec(req.params.file);
+    if (!m || !LOOK_IDS.has(m[1]!)) throw notFound('Look');
+    return reply.header('content-type', 'text/plain; charset=utf-8').header('cache-control', 'public, max-age=86400').send(fs.createReadStream(path.join(LOOK_DIR, req.params.file)));
+  });
+  /** Checks an uploaded .cube (after its PUT): → {uploadId, size, title}; bad_request with the line when it isn't a usable 3D LUT. */
+  app.post('/v1/editor/luts/validate', async req => {
+    const id = (req.body as { uploadId?: unknown } | null)?.uploadId;
+    if (typeof id !== 'string') throw badRequest('uploadId: Required');
+    const l = await lutOfUpload(ctx, req.user.studioId, id);
+    return { uploadId: id, size: l.size, title: l.title };
+  });
+
+  /** A presigned PUT for an audio file (voice-over, music) or, with `purpose: "lut"`, a .cube look, to use as an asset upload. */
   app.post('/v1/editor/uploads/presign', async req => {
-    const b = (req.body ?? {}) as { contentType?: unknown; bytes?: unknown };
+    const b = (req.body ?? {}) as { contentType?: unknown; bytes?: unknown; purpose?: unknown };
     const ct = typeof b.contentType === 'string' ? b.contentType.toLowerCase() : '';
-    const ext = AUDIO_EXT[ct];
-    if (!ext) throw badRequest(`contentType: one of ${Object.keys(AUDIO_EXT).join(', ')}`);
-    if (b.bytes !== undefined && (typeof b.bytes !== 'number' || b.bytes <= 0 || b.bytes > 200 * 1024 ** 2)) throw new ApiError(400, 'bad_request', 'bytes: at most 200 MB');
+    const lut = b.purpose === 'lut';
+    const ext = lut ? (['text/plain', 'application/octet-stream', 'application/x-cube'].includes(ct) ? 'cube' : undefined) : AUDIO_EXT[ct];
+    if (!ext) throw badRequest(lut ? 'contentType: text/plain or application/octet-stream for a .cube' : `contentType: one of ${Object.keys(AUDIO_EXT).join(', ')}`);
+    const max = lut ? LOOK_LIMITS.maxCubeBytes : 200 * 1024 ** 2;
+    if (b.bytes !== undefined && (typeof b.bytes !== 'number' || b.bytes <= 0 || b.bytes > max)) throw new ApiError(400, 'bad_request', `bytes: at most ${max / 1024 ** 2} MB`);
     const id = uid('up'), key = `c/${id}.${ext}`, ttl = 3600;
     const signed = await ctx.storage.presignPut(key, ct, ttl);
     await ctx.db.insert(uploads).values({ id, studioId: req.user.studioId, kind: 'asset', storageKey: key, contentType: ct, bytes: (b.bytes as number) ?? null, state: 'pending', createdBy: req.user.id, createdAt: Date.now() });

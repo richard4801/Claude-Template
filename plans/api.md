@@ -574,6 +574,17 @@ DenoiseResult  { asset?: { kind: "audio", upload | take, url?, durationSec }, su
 - **Events:** `{type: "editor", editorJob: EditorJob}` to the job's user and the owners; `{type: "editor", op: "delete", id}` when one is removed.
 - **Server config** (env, optional): `EDITOR_AI_PROVIDER` = `mock` (the default, production included, until the owner turns the helpers on; in production the mock is free: no hold, no charge) | `auto` (Replicate when `REPLICATE_API_TOKEN` is set, else the mock) | `replicate`; `EDITOR_TRANSCRIBE_MODEL`, `EDITOR_MATTE_MODEL`, `EDITOR_SEPARATE_MODEL` (defaults: a WhisperX transcription model, a robust video matting model with green-screen output, a stem separation model); `EDITOR_*_USD_PER_SEC`. Inputs are renamed to the model's own field names from its published schema. Outputs are copied into storage byte for byte (`g/edit_*.mp4|mp3`) and recorded as studio uploads.
 
+**Looks (filters, 2026-11-05)** — spec `plans/video-editor.md` "Looks". A `look` (LUT + curves + texture effects) on video/image items; asset kind `"lut"` for imported .cube files.
+
+| | |
+|---|---|
+| `GET /v1/editor/looks` | → `{version: 1, cubeSize: 17, looks: {id, name, category: "natural"|"film"|"moody"|"warm"|"cool"|"bw"|"vintage"|"cinematic", file, look: Look}[]}` — the 32 bundled looks (the apps also ship them). |
+| `GET /v1/editor/looks/{id}.cube` | → the baked 17³ .cube (text). |
+| `POST /v1/editor/uploads/presign` `{purpose: "lut", contentType: "text/plain"|"application/octet-stream"|"application/x-cube", bytes? ≤ 12 MB}` | → the presigned PUT for a .cube. |
+| `POST /v1/editor/luts/validate` `{uploadId}` | → `{uploadId, size, title}` once the PUT arrived; `bad_request` `.cube: line N: …` for an unusable file (1D, size outside 2–64, wrong count, bad numbers). Projects using it as an asset `{kind: "lut", upload}` are checked the same way when saved/validated. |
+| `POST /v1/shoots` `{…, filter?: Look}` | The look is applied to every still on the server (bundled looks only: `lut: "pack:<id>"`); with a template it replaces the template's own look. `bad_request` `filter.<field>: …`. |
+| Templates `layers.afterEffects.look?: Look` | Kept with the template and applied to its stills after the grade (bundled looks only). |
+
 ## Types
 
 ```ts

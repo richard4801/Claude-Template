@@ -71,7 +71,8 @@ import kotlin.math.roundToInt
  *  - each plan layer → an EditedMediaItemSequence (gaps via `addGap`, stills as image items at the canvas fps), all
  *    composited by [PlanCompositorSettings] (per-frame alpha/position/scale/rotation from the plan);
  *  - each clip → clipping + `SpeedParameters(…, shouldMaintainPitch = true)` + FrameDropEffect when faster (like v1),
- *    Crop → Presentation (texture size) → [ChromaKeyEffect] → [ColorMatrixEffect], and its sound through an
+ *    Crop → Presentation (texture size) → [ChromaKeyEffect] → its look ([LookEffects]: sharpen → chromatic → one
+ *    baked colour LUT, or just [ColorMatrixEffect] → halation → leak/vignette/grain), and its sound through an
  *    [EnvelopeAudioProcessor];
  *  - each audio lane → an audio-only sequence;
  *  - text, captions and black/white flashes → one composition-level OverlayEffect ([EditOverlay]).
@@ -94,7 +95,7 @@ import kotlin.math.roundToInt
  * before Crop, and encoder fallback at 2K/4K canvases.
  */
 @OptIn(UnstableApi::class, ExperimentalApi::class)
-class EditCompositionEngine(private val context: Context) {
+class EditCompositionEngine(private val context: Context, private val looks: LookLibrary = LookLibrary(context)) {
     private val outDir get() = File(context.cacheDir, "edit2-out").apply { mkdirs() }
     private val stillDir get() = File(context.cacheDir, "edit2-still").apply { mkdirs() }
 
@@ -124,9 +125,9 @@ class EditCompositionEngine(private val context: Context) {
         } finally { ex.release() }
     }
 
-    /** The plan for [project] with its asset files probed ([files]: asset id → local file). */
+    /** The plan for [project] with its asset files probed ([files]: asset id → local file; imported LUTs are not probed). */
     fun plan(project: EditProject, files: Map<String, File>): RenderPlan =
-        planRender(project, project.assets.filter { it.id in files }.associate { it.id to probe(files.getValue(it.id), it.kind) })
+        planRender(project, project.assets.filter { it.id in files && it.kind != AssetKind.LUT }.associate { it.id to probe(files.getValue(it.id), it.kind) })
 
     /** The Media3 composition for [plan] (also what the preview plays). */
     fun composition(plan: RenderPlan, files: Map<String, File>): Composition {
@@ -180,7 +181,7 @@ class EditCompositionEngine(private val context: Context) {
         val b = EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_AUDIO))
         for (e in lane.entries) when (e) {
             is Gap -> b.addGap(e.durationUs)
-            is ClipEntry -> b.addItem(mediaClip(e.clip, files, video = false))
+            is ClipEntry -> b.addItem(mediaClip(e.clip, files, video = false, fps = 0.0))
             is StillEntry -> {}
         }
         return b.build()
@@ -206,16 +207,16 @@ class EditCompositionEngine(private val context: Context) {
     }
 
     private fun clipItem(plan: RenderPlan, c: PlannedClip, files: Map<String, File>): EditedMediaItem {
-        if (!c.isImage) return mediaClip(c, files, video = true)
-        return image(Uri.fromFile(file(files, c.assetId)), c.durationUs, plan.fps, videoEffects(c))
+        if (!c.isImage) return mediaClip(c, files, video = true, fps = plan.fps)
+        return image(Uri.fromFile(file(files, c.assetId)), c.durationUs, plan.fps, videoEffects(c, files, plan.fps))
     }
 
-    private fun mediaClip(c: PlannedClip, files: Map<String, File>, video: Boolean): EditedMediaItem {
+    private fun mediaClip(c: PlannedClip, files: Map<String, File>, video: Boolean, fps: Double): EditedMediaItem {
         val mi = MediaItem.Builder().setUri(Uri.fromFile(file(files, c.assetId)))
             .setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setStartPositionUs(c.clipStartUs).setEndPositionUs(c.clipEndUs).build())
             .build()
         val audio = if (c.withAudio) listOf<AudioProcessor>(EnvelopeAudioProcessor(c.startUs / 1_000_000.0, c.envelope)) else emptyList()
-        val fx = if (video && !c.removeVideo) videoEffects(c) else emptyList()
+        val fx = if (video && !c.removeVideo) videoEffects(c, files, fps) else emptyList()
         return EditedMediaItem.Builder(mi).apply {
             if (c.speed != 1.0) setSpeed(SpeedParameters(ConstantSpeed(c.speed.toFloat()), /* shouldMaintainPitch = */ true))
             if (!c.withAudio) setRemoveAudio(true)
@@ -224,14 +225,16 @@ class EditCompositionEngine(private val context: Context) {
         }.build()
     }
 
-    private fun videoEffects(c: PlannedClip): List<Effect> {
+    private fun videoEffects(c: PlannedClip, files: Map<String, File>, fps: Double): List<Effect> {
         val look = c.look ?: return emptyList()
         return buildList {
             c.frameDropFps?.let { add(FrameDropEffect.createDefaultFrameDropEffect(it.toFloat())) }
             look.crop?.let { add(Crop(it.left.toFloat(), it.right.toFloat(), it.bottom.toFloat(), it.top.toFloat())) }
             add(Presentation.createForWidthAndHeight(look.textureWidth, look.textureHeight, Presentation.LAYOUT_STRETCH_TO_FIT))
             look.chroma?.let { add(ChromaKeyEffect(it)) }
-            look.colorMatrix?.let { add(ColorMatrixEffect(it)) }
+            // Keyed first (on the source colours), then the look in the contract's order; the colour matrix is baked
+            // into the look's LUT when it has one.
+            addAll(LookEffects.effects(LookEffects.stages(look.colorMatrix, look.look, looks.lutFor(look.look, files), fps)))
         }
     }
 

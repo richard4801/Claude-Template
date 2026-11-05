@@ -25,6 +25,10 @@ targets:
       - path: Muse/Resources/Fonts
         type: folder
         buildPhase: resources
+      # The look pack (looks.json + 32 .cube files), single copy shared with the server and Android: bundled as `looks`.
+      - path: ../server/api/assets/lookpack/looks
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: MuseCore
     info:
