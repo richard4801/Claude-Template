@@ -236,6 +236,8 @@ data class Take(
     val templateName: String? = null,
     val shuffleSeed: Long? = null,
     val variation: Map<String, String>? = null,
+    /** Photoshoot stills: the reference images it was shot with (2026-11-05). */
+    val refs: List<ShootRef>? = null,
 ) {
     val final get() = status == "final"
     val shot get() = kind == "shot"
@@ -246,7 +248,8 @@ data class SetTakeStatusRequest(val status: String)
 
 @Serializable
 data class ShootRequest(
-    val modelId: String, val outfitId: String, val scene: String, val prompt: String, val seed: Long? = null, val count: Int = 4,
+    /** 2026-11-05: the server builds the prompt from these choices and the studio's prompt library; [prompt] only for "Edit as text". */
+    val modelId: String, val outfitId: String, val scene: String? = null, val prompt: String? = null, val seed: Long? = null, val count: Int = 4,
     /** With a template the server builds every prompt; scene/prompt/seed are ignored (plans/api.md "Photo templates"). */
     val templateId: String? = null,
     val direction: String? = null,
@@ -255,7 +258,93 @@ data class ShootRequest(
     val productImage: ImageRef? = null,
     /** Owner only: a model for this run, step → "owner/name" (plans/api.md "Model tools" §2). */
     val models: Map<String, String>? = null,
+    /** false = only identity, outfit, direction, reference and seed lines. Null = on. */
+    val presets: Boolean? = null,
+    val camera: CameraChoice? = null,
+    val light: String? = null,
+    val grade: String? = null,
+    /** Up to 3 reference images (plans/api.md "Shoot references" §1). */
+    val refs: List<ShootRef>? = null,
 )
+
+@Serializable
+data class CameraChoice(val shot: String, val lens: Int, val aperture: String)
+
+/** A shoot's reference image and what it guides: "pose" (Pose & framing), "look" (Look & colour), "scene" (Scene). Never face, body or outfit. */
+@Serializable
+data class ShootRef(val image: ImageRef, val guides: List<String>) {
+    /** Turns a guide on or off, kept in the order pose, look, scene. Null when it would leave none on (a reference needs one). */
+    fun toggled(guide: String): ShootRef? {
+        val next = if (guide in guides) guides - guide else GUIDE_IDS.filter { it in guides || it == guide }
+        return if (next.isEmpty()) null else copy(guides = next)
+    }
+
+    /** What POST /v1/shoots accepts: 1–3 known guides, no repeats, and an image. */
+    val valid: Boolean get() = guides.isNotEmpty() && guides.all { it in GUIDE_IDS } && guides.toSet().size == guides.size && (image.url != null || image.asset != null)
+
+    companion object {
+        const val MAX = 3
+        val GUIDES = listOf("pose" to "Pose & framing", "look" to "Look & colour", "scene" to "Scene")
+        val GUIDE_IDS = GUIDES.map { it.first }
+
+        /** The guide a new reference starts with: the first one the others don't use yet (pose, then look, then scene). */
+        fun defaultGuide(existing: List<ShootRef>): String {
+            val used = existing.flatMap { it.guides }.toSet()
+            return GUIDE_IDS.firstOrNull { it !in used } ?: "pose"
+        }
+
+        /** The server's bad_request for a shoot's refs (null when fine). */
+        fun problem(refs: List<ShootRef>?): String? = when {
+            refs == null -> null
+            refs.size > MAX -> "Up to $MAX reference images"
+            refs.any { !it.valid } -> "Each reference image needs an image and at least one guide: pose, look or scene"
+            else -> null
+        }
+    }
+}
+
+/** A reference image in a shoot preview: its image number in what is sent, or null + [dropped] when the shot can't take it. */
+@Serializable
+data class ShootPreviewRef(val index: Int? = null, val guides: List<String> = emptyList(), val dropped: Boolean = false) {
+    /** "Image 7" (as the prompt lines say) or "Not sent". */
+    val badge: String get() = if (dropped || index == null) "Not sent" else "Image $index"
+}
+
+/** POST /v1/shoots/preview: exactly what the shoot will send, the images it sends and the estimate. */
+@Serializable
+data class ShootPreview(
+    val slots: List<PromptSlotView> = emptyList(), val text: String = "", val seed: Long? = null, val removed: List<String> = emptyList(),
+    val images: Int = 0, val refs: List<ShootPreviewRef> = emptyList(), val estimate: Double = 0.0, val estimateLabel: String = "", val edited: Boolean = false,
+) {
+    /** Reference images the shot can't take (shown as "Not sent"). */
+    val droppedRefs: Int get() = refs.count { it.dropped }
+}
+
+// ---------------------------------------------------------------- prompt library (owner, plans/api.md §"Shoot references and the prompt library" 3)
+@Serializable
+data class PromptPlaceholder(val name: String, val description: String = "", val required: Boolean = false)
+
+@Serializable
+data class PromptEntry(
+    val key: String, val group: String, val title: String = "", val description: String = "", val kind: String = "text",
+    val default: String = "", val current: String = "", val overridden: Boolean = false, val allowEmpty: Boolean = true,
+    val placeholders: List<PromptPlaceholder> = emptyList(), val updatedAt: Long? = null, val updatedBy: String? = null,
+)
+
+@Serializable
+data class PromptGroupInfo(val id: String, val label: String)
+
+@Serializable
+data class PromptLibrary(val groups: List<PromptGroupInfo> = emptyList(), val prompts: List<PromptEntry> = emptyList())
+
+@Serializable
+data class PromptText(val text: String)
+
+@Serializable
+data class PromptPreviewRequest(val key: String, val text: String? = null)
+
+@Serializable
+data class PromptPreview(val key: String = "", val text: String = "", val example: String = "", val sample: Map<String, String> = emptyMap())
 
 // ---------------------------------------------------------------- photo templates (plans/templates.md)
 
@@ -500,6 +589,8 @@ data class PhotoFeatures(
     val refMp: Double = 0.79,
     val maxRefs: Int = 6,
     val loraShots: Int = 30,
+    /** Most images one new shot sends (identity references + reference images). */
+    val maxInputs: Int = 8,
 ) {
     val prices get() = studio.muse.core.PhotoPrices(perRun, perInputMp, perOutputMp, perEdit, refMp, maxRefs, loraShots)
 }
@@ -721,6 +812,8 @@ data class ApiEvent(
     /** Owners only: type "member" (one row of Members) and type "studio" (the studio balance card). */
     val member: Member? = null,
     val studioBalance: StudioBalance? = null,
+    /** Owners only: type "prompts", one prompt-library entry after a save or reset. */
+    val prompt: PromptEntry? = null,
 ) {
     companion object {
         /** Not from the server: the stream (re)connected, so the app refetches what it may have missed. */

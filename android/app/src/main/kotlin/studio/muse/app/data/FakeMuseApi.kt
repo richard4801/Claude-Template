@@ -51,6 +51,7 @@ class FakeMuseApi(
     private val posts = mutableListOf<Post>()
     private val postTimers = mutableMapOf<String, CoJob>()
     private val tpl = FakeTemplates(now = now)
+    private val promptLib = FakePromptLibrary(now)
 
     override fun events(): Flow<ApiEvent> = events
     override fun setToken(token: String?) {}
@@ -179,8 +180,7 @@ class FakeMuseApi(
         val req = if (!replicate) request.copy(quality = null)
             else Quality.fromId(request.quality).let { q -> request.copy(use = ClipUse.FULL.id, quality = q.id, pricePerSec = studio.features.video?.pricePerSec(q) ?: q.pricePerSec) }
         val job = lock.withLock {
-            val clip = clips[req.clipId]
-            if (clip != null && !clip.ok) throw ApiException("clip_failed_checks", "Fix the clip checks first")
+            // Clip checks are advice only (2026-11-05): a failing clip can still be rendered; the studio shows a disclaimer.
             val spec = req.spec()
             val cost = Pricing.totalCost(spec)
             if (spec.engine == Engine.H3 && (spec.steps < Pricing.STEPS_MIN || spec.steps > Pricing.STEPS_MAX)) throw ApiException("bad_request", "Steps must be 4–30")
@@ -487,10 +487,13 @@ class FakeMuseApi(
     }
 
     override suspend fun shoot(req: ShootRequest): List<Take> {
-        lock.withLock {
+        val cost = lock.withLock {
+            ShootRef.problem(req.refs)?.let { throw ApiException("bad_request", it) }
             if (req.templateId != null) tpl.name(req.templateId) // not_found before charging
-            if (PhotoPricing.shoot(photoPrices, req.count) > balance.balance) throw ApiException("insufficient_balance", ErrorText.NOT_ENOUGH_STUDIO)
-            charge(PhotoPricing.shoot(photoPrices, req.count))
+            val cost = previewNow(req).estimate
+            if (cost > balance.balance) throw ApiException("insufficient_balance", ErrorText.NOT_ENOUGH_STUDIO)
+            charge(cost)
+            cost
         }
         events.tryEmit(ApiEvent("balance", balance = balance))
         delay(genDelayMs)
@@ -498,29 +501,68 @@ class FakeMuseApi(
             val o = outfits.firstOrNull { it.id == req.outfitId }
             val pool = listOf(o?.front?.asset ?: "g_front", "c_face", "face", "g_tq")
             val t = now()
+            val each = cost / req.count.coerceAtLeast(1)
+            val refs = req.refs?.ifEmpty { null }
             val shots = if (req.templateId != null) {
                 val name = tpl.name(req.templateId)
                 val m = model(req.modelId)
                 val shuffle = req.shuffleSeed ?: kotlin.random.Random.nextLong(1L shl 31)
+                val refLines = templateRefLines(m, req)
                 pool.take(req.count).mapIndexed { n, k ->
                     val b = tpl.prompt(req.templateId, identity(m, loras[m.id]), o?.name, req.direction, shuffle, req.lockSeed == true, n)
                     val id = "s_${uid()}"
-                    tpl.recordShot(id, req.templateId, b.full, b.draws)
+                    tpl.recordShot(id, req.templateId, b.full.withRefLines(refLines), b.draws)
                     // Stored with the public prompt; shotView() swaps in the full one for the template's owner.
-                    Take(id, "shot", null, n + 1, req.count, "Shoot · $name", "${name.take(28)} · ${n + 1}", "", PhotoPricing.shoot(photoPrices, 1),
-                        b.shown.seed ?: 0, "test", ImageRef.asset(k), b.visible, t + n, templateId = req.templateId, templateName = name, shuffleSeed = shuffle)
+                    Take(id, "shot", null, n + 1, req.count, "Shoot · $name", "${name.take(28)} · ${n + 1}", "", each,
+                        b.shown.seed ?: 0, "test", ImageRef.asset(k), b.visible.withRefLines(refLines), t + n, templateId = req.templateId, templateName = name, shuffleSeed = shuffle,
+                        refs = refs)
                 }.also { tpl.bumpUses(req.templateId) }
             } else {
-                val label = req.scene.substringBefore(" · ").take(28)
+                val label = (req.scene?.takeIf { it.isNotBlank() } ?: PromptEngine.DEFAULT_SCENE).substringBefore(" · ").take(28)
+                val built = previewNow(req)
                 pool.take(req.count).mapIndexed { n, k ->
-                    Take("s_${uid()}", "shot", null, n + 1, req.count, "Shoot · $label", "$label · ${n + 1}", "", PhotoPricing.shoot(photoPrices, 1),
-                        req.seed ?: 0, "test", ImageRef.asset(k), req.prompt, t)
+                    Take("s_${uid()}", "shot", null, n + 1, req.count, "Shoot · $label", "$label · ${n + 1}", "", each,
+                        req.seed ?: built.seed ?: 0, "test", ImageRef.asset(k), built.text, t, refs = refs)
                 }
             }
             takes.addAll(0, shots)
             shots.map { tpl.shotView(it) }
         }
     }
+
+    /** POST /v1/shoots/preview: the prompt a shoot sends (the demo library's wording), the images and the estimate. Free. */
+    override suspend fun previewShoot(req: ShootRequest): ShootPreview = lock.withLock {
+        ShootRef.problem(req.refs)?.let { throw ApiException("bad_request", it) }
+        previewNow(req)
+    }
+
+    private fun previewNow(req: ShootRequest): ShootPreview {
+        val m = model(req.modelId)
+        val o = outfits.firstOrNull { it.id == req.outfitId }
+        val id = identity(m, loras[m.id])
+        if (req.templateId != null) {
+            val p = tpl.prompt(req.templateId, id, o?.name, req.direction, req.shuffleSeed ?: 0, req.lockSeed == true).shown
+            return promptLib.templatePreview(p.slots, p.seed, p.removed.orEmpty(), id.referenceCount, req, photoPrices)
+        }
+        return promptLib.shootPreview(id, o?.name, req, photoPrices)
+    }
+
+    /** A template shoot's reference lines (the prompt the shot keeps), as the preview places them. */
+    private fun templateRefLines(m: Model, req: ShootRequest): List<String> =
+        promptLib.templatePreview(emptyList(), null, emptyList(), identity(m, loras[m.id]).referenceCount, req, photoPrices).slots.map { it.text }
+
+    private fun String.withRefLines(lines: List<String>): String {
+        if (lines.isEmpty()) return this
+        val rows = split("\n")
+        val at = rows.indexOfFirst { it.startsWith("Style:") || it.startsWith("Never add:") || it.startsWith("Seed:") }.takeIf { it >= 0 } ?: rows.size
+        return (rows.take(at) + lines + rows.drop(at)).joinToString("\n")
+    }
+
+    // ---- prompt library (owner): the server's entries with their defaults, edited in memory
+    override suspend fun prompts() = lock.withLock { promptLib.list() }
+    override suspend fun savePrompt(key: String, text: String) = lock.withLock { promptLib.save(key, text) }.also { events.tryEmit(ApiEvent("prompts", prompt = it)) }
+    override suspend fun resetPrompt(key: String) = lock.withLock { promptLib.reset(key) }.also { events.tryEmit(ApiEvent("prompts", prompt = it)) }
+    override suspend fun previewPrompt(req: PromptPreviewRequest) = lock.withLock { promptLib.preview(req) }
 
     // ---- photo templates (FakeTemplates holds the same owner-only rules as server/api)
     override suspend fun listTemplates(scope: String, q: String?, tag: String?) = lock.withLock { tpl.list(scope, q, tag) }

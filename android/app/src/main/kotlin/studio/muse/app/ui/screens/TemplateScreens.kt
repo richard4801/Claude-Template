@@ -56,6 +56,8 @@ import studio.muse.app.data.PatchTemplateRequest
 import studio.muse.app.data.PoolSlots
 import studio.muse.app.data.PromptSlotView
 import studio.muse.app.data.ShootRequest
+import studio.muse.app.data.ShootPreview
+import studio.muse.app.data.ShootRef
 import studio.muse.app.data.Template
 import studio.muse.app.data.TemplateDraft
 import studio.muse.app.data.TemplateFilter
@@ -392,47 +394,89 @@ data class TemplateUseState(
     val prompt: TemplatePrompt? = null,
     /** idle | busy | ready */
     val phase: String = "idle",
+    /** With reference images: the server's shoot preview ("Image n" / "Not sent" and the price, which counts every image sent). */
+    val preview: ShootPreview? = null,
+    /** A reference image is being uploaded. */
+    val uploading: Boolean = false,
 )
 
 class TemplateUseViewModel(private val c: AppContainer, private val id: String) : ViewModel() {
     private val phase = MutableStateFlow("idle")
     private val prompt = MutableStateFlow<TemplatePrompt?>(null)
+    private val preview = MutableStateFlow<ShootPreview?>(null)
+    private val uploading = MutableStateFlow(false)
     private var promptJob: CoJob? = null
-    val state: StateFlow<TemplateUseState> = combine(c.repo.state, c.drafts.templateUse, c.drafts.modelId, c.drafts.outfitId, combine(phase, prompt) { a, b -> a to b }) { s, d, mid, oid, pp ->
+    private data class Local(val phase: String, val prompt: TemplatePrompt?, val preview: ShootPreview?, val uploading: Boolean)
+    val state: StateFlow<TemplateUseState> = combine(c.repo.state, c.drafts.templateUse, c.drafts.modelId, c.drafts.outfitId,
+        combine(phase, prompt, preview, uploading, ::Local)) { s, d, mid, oid, x ->
         val model = s.model(mid)?.takeIf { it.locked } ?: s.models.firstOrNull { it.locked }
         val outfits = s.outfitsOf(model?.id)
         val outfit = outfits.firstOrNull { it.id == oid } ?: outfits.firstOrNull()
-        TemplateUseState(s.templates.firstOrNull { it.id == id }, d, model, s.models, outfits, outfit, pp.second, pp.first)
+        TemplateUseState(s.templates.firstOrNull { it.id == id }, d, model, s.models, outfits, outfit, x.prompt, x.phase, x.preview.takeIf { d.refs.isNotEmpty() }, x.uploading)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, TemplateUseState())
 
     init {
         if (c.drafts.templateUse.value.templateId != id) c.drafts.templateUse.value = TemplateUseDraft(id)
         viewModelScope.launch { if (c.repo.state.value.templates.none { it.id == id }) c.repo.template(id) }
+        // A saved or reset prompt (owner) changes the reference lines.
+        viewModelScope.launch { c.repo.live.collect { ev -> if (ev.type == "prompts") refreshPromptIfShown() } }
+        if (c.drafts.templateUse.value.refs.isNotEmpty()) refreshPrompt(debounce = false)
     }
 
     fun edit(f: (TemplateUseDraft) -> TemplateUseDraft) {
         c.drafts.templateUse.update(f)
         if (phase.value == "ready") phase.value = "idle"
-        if (c.drafts.templateUse.value.showPrompt) refreshPrompt()
+        refreshPromptIfShown()
     }
     fun model(id: String) { c.drafts.modelId.value = id; refreshPromptIfShown() }
     fun outfit(id: String) { c.drafts.outfitId.value = id; refreshPromptIfShown() }
     fun shuffle() { edit { it.copy(shuffleSeed = kotlin.random.Random.nextLong(1L shl 31)) }; c.repo.toast("Shuffled · a new pose, angle and framing") }
     fun togglePrompt() { edit { it.copy(showPrompt = !it.showPrompt) } }
-    private fun refreshPromptIfShown() { if (c.drafts.templateUse.value.showPrompt) refreshPrompt() }
+    /** The prompt view, and with reference images the shoot preview (their image numbers and the price). */
+    private fun refreshPromptIfShown() { c.drafts.templateUse.value.let { if (it.showPrompt || it.refs.isNotEmpty()) refreshPrompt() } }
 
-    /** The prompt view comes from the server: non-owners get the template as one locked line. Debounced while typing. */
+    /**
+     * The prompt view comes from the server: non-owners get the template as one locked line. Debounced while typing.
+     * With reference images it is the shoot preview (POST /v1/shoots/preview with the template): the same view plus their lines.
+     */
     fun refreshPrompt(debounce: Boolean = true) {
         promptJob?.cancel()
         promptJob = viewModelScope.launch {
-            if (debounce) delay(250)
+            if (debounce) delay(300)
             val s = state.value
             val m = s.model ?: return@launch
             val d = c.drafts.templateUse.value
-            val (p, _) = c.repo.templatePrompt(id, TemplatePromptRequest(m.id, s.outfit?.id, d.direction.ifBlank { null }, d.shuffleSeed, d.lockSeed))
-            prompt.value = p
+            val p = if (d.refs.isNotEmpty()) c.repo.previewShoot(shootRequest(m.id, s.outfit?.id ?: "", d, s.t?.acceptsProduct == true)) else null
+            preview.value = p
+            if (d.showPrompt) prompt.value = p?.let { TemplatePrompt(it.slots, it.text, it.seed, d.shuffleSeed, removed = it.removed.ifEmpty { null }) }
+                ?: c.repo.templatePrompt(id, TemplatePromptRequest(m.id, s.outfit?.id, d.direction.ifBlank { null }, d.shuffleSeed, d.lockSeed)).first
         }
     }
+
+    /** A template shoot sends only the template and the user's choices (no scene or prompt: the server builds every prompt). */
+    private fun shootRequest(modelId: String, outfitId: String, d: TemplateUseDraft, product: Boolean) = ShootRequest(modelId, outfitId, templateId = id,
+        direction = d.direction.trim().ifBlank { null }?.take(500), shuffleSeed = d.shuffleSeed, lockSeed = d.lockSeed, productImage = d.product?.takeIf { product },
+        refs = d.refs.take(ShootRef.MAX).ifEmpty { null })
+
+    /** Adds a reference image (uploaded first); it starts on the first guide the others don't use yet. */
+    fun addRef(uri: Uri) = viewModelScope.launch {
+        if (uploading.value) return@launch
+        if (c.drafts.templateUse.value.refs.size >= ShootRef.MAX) return@launch c.repo.toast("Up to ${ShootRef.MAX} reference images")
+        val media = c.media ?: return@launch
+        uploading.value = true
+        try {
+            val bytes = media.bytes(uri) ?: return@launch c.repo.toast("Couldn't read that image")
+            c.repo.uploadImage(media.displayName(uri), bytes, media.mime(uri))?.let { ref ->
+                edit { d -> if (d.refs.size >= ShootRef.MAX) d else d.copy(refs = d.refs + ShootRef(ref, listOf(ShootRef.defaultGuide(d.refs)))) }
+            }
+        } finally { uploading.value = false }
+    }
+    fun toggleGuide(i: Int, guide: String) = edit { d ->
+        val r = d.refs.getOrNull(i) ?: return@edit d
+        val next = r.toggled(guide) ?: run { c.repo.toast("Keep at least one on: pose, look or scene"); return@edit d }
+        d.copy(refs = d.refs.toMutableList().also { it[i] = next })
+    }
+    fun removeRef(i: Int) = edit { d -> d.copy(refs = d.refs.filterIndexed { k, _ -> k != i }) }
 
     fun setProduct(uri: Uri) = viewModelScope.launch {
         val media = c.media ?: return@launch
@@ -444,10 +488,10 @@ class TemplateUseViewModel(private val c: AppContainer, private val id: String) 
         val s = state.value
         if (s.phase == "busy") return@launch
         val model = s.model ?: return@launch c.repo.toast("Pick a model with a finished character sheet")
+        if (s.uploading) return@launch c.repo.toast("Wait a moment · the reference photo is still uploading")
         val d = s.draft
         phase.value = "busy"
-        val shots = c.repo.shoot(ShootRequest(model.id, s.outfit?.id ?: "", "", "", templateId = id, direction = d.direction.trim().ifBlank { null },
-            shuffleSeed = d.shuffleSeed, lockSeed = d.lockSeed, productImage = d.product?.takeIf { s.t?.acceptsProduct == true }))
+        val shots = c.repo.shoot(shootRequest(model.id, s.outfit?.id ?: "", d, s.t?.acceptsProduct == true))
         if (shots == null) { phase.value = "idle"; return@launch }
         c.drafts.freshShots.value = shots.size
         c.drafts.galleryTab.value = "tests"
@@ -520,6 +564,9 @@ fun TemplateUseScreen(id: String) {
                     Column(Modifier.weight(1f)) { T("Lock look", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink); Tiny(if (d.lockSeed) "Same seed every shot" else "Off: a new seed and a new moment every shot") }
                     Toggle(d.lockSeed, { vm.edit { it.copy(lockSeed = !it.lockSeed) } })
                 }
+                val pickRef = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u -> if (u != null) vm.addRef(u) }
+                ReferencesPanel(d.refs, s.preview, s.uploading, onAdd = { pickRef.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                    onToggle = vm::toggleGuide, onRemove = vm::removeRef)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Cta2("Shuffle", { vm.shuffle() }, Modifier.weight(1f), icon = "retry", height = 46.dp)
                     Cta2(if (d.showPrompt) "Hide prompt" else "Show prompt", { vm.togglePrompt() }, Modifier.weight(1f), icon = "spark", height = 46.dp)
@@ -530,7 +577,8 @@ fun TemplateUseScreen(id: String) {
             when (s.phase) {
                 "ready" -> Cta("${c.drafts.freshShots.value} shots ready · View in Gallery", { nav.tab(Routes.GALLERY) }, Modifier.weight(1f), icon = "grid")
                 "busy" -> Cta("Shooting…", {}, Modifier.weight(1f), busy = true)
-                else -> Cta("Shoot 4 · ${studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.shoot(photoPrices()))}", { vm.shoot(celebrate) }, Modifier.weight(1f), icon = "camera")
+                else -> Cta("Shoot 4 · ${s.preview?.estimateLabel?.ifBlank { null } ?: studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.shoot(photoPrices()))}",
+                    { vm.shoot(celebrate) }, Modifier.weight(1f), icon = "camera")
             }
         }
     }
@@ -548,7 +596,7 @@ fun TemplatePromptBox(p: TemplatePrompt) {
         Modifier.fillMaxWidth().clip(shape).background(m.t.surface2).border(if (m.isD) 2.5.dp else m.t.stroke, m.t.line, shape).padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        p.slots.forEach { slot: PromptSlotView -> SlotLine(slot.layer, if (slot.locked) slot.text else slot.text.replace(SLOT_PREFIX, ""), slot.locked) }
+        p.slots.forEach { slot: PromptSlotView -> SlotLine(if (slot.layer == "reference") "ref" else slot.layer, if (slot.locked) slot.text else slot.text.replace(SLOT_PREFIX, ""), slot.locked) }
     }
 }
 

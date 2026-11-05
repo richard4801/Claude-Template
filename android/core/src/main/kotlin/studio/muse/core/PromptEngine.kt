@@ -10,7 +10,7 @@ package studio.muse.core
 /** Prompt layers, merged top to bottom. */
 enum class Layer(val key: String) {
     IDENTITY("identity"), OUTFIT("outfit"), TASK("task"), SCENE("scene"), CAMERA("camera"), LIGHT("light"),
-    DIRECTION("direction"), STYLE("style"), NEGATIVE("negative"), SEED("seed");
+    DIRECTION("direction"), REFERENCE("reference"), STYLE("style"), NEGATIVE("negative"), SEED("seed");
 }
 
 /**
@@ -53,7 +53,14 @@ data class ShootSpec(
     val grade: String? = null,
     val direction: String? = null,
     val lockSeed: Boolean = false,
+    /** Off: only identity, outfit, direction, reference and seed lines (the Presets switch). */
+    val presets: Boolean = true,
+    /** Reference images as sent: their image number and what they guide ("pose", "look", "scene"). */
+    val refs: List<SentRef> = emptyList(),
 )
+
+/** A shoot reference image as sent (plans/api.md "Shoot references"): its 1-based image number and its guides. */
+data class SentRef(val index: Int, val guides: List<String>)
 
 data class PromptSlot(val layer: Layer, val text: String) {
     /** The slot body without its "Label: " prefix, as shown in the "final prompt by slot" box. */
@@ -207,6 +214,21 @@ object PromptEngine {
         OutfitSource.PRODUCT_PHOTO -> "Wearing: the outfit from the product photo reference (${o.name.lowercase()})."
     }
 
+    /** Layers kept when Presets is off. */
+    val OWN_LAYERS = setOf(Layer.IDENTITY, Layer.OUTFIT, Layer.DIRECTION, Layer.REFERENCE, Layer.SEED)
+
+    /** One reference image's line, as the server's default prompt library writes it: its guides (pose, look, scene), then the guard. */
+    fun referenceLine(r: SentRef): String {
+        val k = r.index
+        val parts = buildList {
+            if ("pose" in r.guides) add("Copy the pose and framing from image $k.")
+            if ("look" in r.guides) add("Copy the light, colour grade and camera feel from image $k.")
+            if ("scene" in r.guides) add("Use the place and background from image $k.")
+            add("Do not take the face, body, hair or clothes from image $k.")
+        }
+        return parts.joinToString(" ")
+    }
+
     /** Photoshoot: all layers. Matches the prototype's buildPrompt('shoot') slot for slot. */
     fun photoshoot(s: ShootSpec): BuiltPrompt {
         val (dir, removed) = sanitizeDirection(s.direction, s.identity)
@@ -218,11 +240,13 @@ object PromptEngine {
             PromptSlot(Layer.CAMERA, cameraWords(s.camera)),
             PromptSlot(Layer.LIGHT, "Light: ${s.light.lowercase()}; grade: ${(s.grade ?: DEFAULT_GRADE).lowercase()}."),
             PromptSlot(Layer.DIRECTION, if (dir.isNotEmpty()) "Direction: $dir" else ""),
+        ) + s.refs.map { PromptSlot(Layer.REFERENCE, referenceLine(it)) } + listOf(
             styleSlot(),
             negativeSlot(s.identity),
             PromptSlot(Layer.SEED, if (s.lockSeed) "Seed: locked (variations keep the same look)." else "Seed: new each shot."),
-        ).filter { it.text.isNotBlank() }
-        return BuiltPrompt(slots, seed = if (s.lockSeed) seedFor(s.identity.name) else null, removed = removed)
+        )
+        val kept = slots.filter { it.text.isNotBlank() }.filter { s.presets || it.layer in OWN_LAYERS }
+        return BuiltPrompt(kept, seed = if (s.lockSeed) seedFor(s.identity.name) else null, removed = removed)
     }
 
     /** Character-sheet shot: identity + task + house style + never add. */

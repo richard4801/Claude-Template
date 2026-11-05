@@ -59,6 +59,8 @@ interface MuseApi {
     /** The edited versions of a take, newest first. */
     suspend fun takeVersions(takeId: String): List<Take> = listTakes().filter { it.parentTakeId == takeId }.sortedByDescending { it.createdAt }
     suspend fun shoot(req: ShootRequest): List<Take>
+    /** The final prompt the shoot will send (built on the server from the prompt library), the images and the estimate. Free. */
+    suspend fun previewShoot(req: ShootRequest): ShootPreview
 
     // Photo templates (plans/templates.md). Hidden layers come back only for the owner's own templates.
     /** scope: all | mine | public | favourites. */
@@ -141,6 +143,12 @@ interface MuseApi {
     suspend fun archiveModel(modelId: String, archived: Boolean): Model
     /** Owner: the archived models only. */
     suspend fun archivedModels(): List<Model>
+
+    // Prompt library (owner only): every prompt the server sends to a model.
+    suspend fun prompts(): PromptLibrary
+    suspend fun savePrompt(key: String, text: String): PromptEntry
+    suspend fun resetPrompt(key: String): PromptEntry
+    suspend fun previewPrompt(req: PromptPreviewRequest): PromptPreview
 
     // Developer
     suspend fun setFailNext(fail: Boolean)

@@ -7,6 +7,11 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import com.github.takahirom.roborazzi.captureRoboImage
 import kotlinx.coroutines.MainScope
@@ -74,6 +79,8 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             // Model tools (plans/api.md "Model tools"): the owner's image models and catalog picker, Enhance setup and review,
             // Dress up setup and the Both side-by-side review, archived models.
             "image_models", "catalog", "enhance_setup", "enhance_review", "dressup_setup", "dressup_review", "archived",
+            // Shoot references and the prompt library (2026-11-05): 3 reference images with their guides, owner Settings → Prompts and one prompt's editor.
+            "shoot_refs", "shoot_refs_prompt", "prompts", "prompt_edit",
         )
 
         @JvmStatic
@@ -135,6 +142,15 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "template_use" -> c.drafts.templateUse.value = studio.muse.app.data.TemplateUseDraft("tpl_mirror-selfie")
             "template_use_prompt" -> c.drafts.templateUse.value = studio.muse.app.data.TemplateUseDraft("tpl_maya_walk", direction = "sitting on the steps, looking back over her shoulder", shuffleSeed = 7, showPrompt = true)
             "shoot_templates" -> c.drafts.shoot.update { it.copy(tool = "model") }
+            "shoot_refs" -> c.drafts.shoot.update { it.copy(tool = "bg", refs = listOf(
+                studio.muse.app.data.ShootRef(ImageRef.asset("c_front"), listOf("pose")),
+                studio.muse.app.data.ShootRef(ImageRef.asset("c_tq"), listOf("look", "scene")),
+                studio.muse.app.data.ShootRef(ImageRef.asset("g_side"), listOf("scene")))) }
+            "shoot_refs_prompt" -> c.drafts.shoot.update { it.copy(tool = "spark", direction = "sitting on the steps", refs = listOf(
+                studio.muse.app.data.ShootRef(ImageRef.asset("c_front"), listOf("pose")),
+                studio.muse.app.data.ShootRef(ImageRef.asset("c_tq"), listOf("look", "scene")))) }
+            "prompts" -> runBlocking { fake.savePrompt("style.house", "realistic phone photo, visible skin texture, true colour, no filter") }
+            "prompt_edit" -> runBlocking { fake.savePrompt("refs.pose", "Copy the pose and framing from image {refIndex}, but keep her own hands.") }
             "warm_confirm" -> c.warmUi.confirm()
             "quality_draft" -> c.drafts.video.update { it.copy(clip = sample.copy(id = "clip_7s", durationSec = 7.0)) }
             "quality_hd" -> c.drafts.video.update { it.copy(clip = sample.copy(id = "clip_7s", durationSec = 7.0)).pick(studio.muse.core.VideoOption.HD) }
@@ -210,6 +226,9 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "enhance_setup", "enhance_review" -> Routes.ENHANCE
             "dressup_setup", "dressup_review" -> Routes.DRESSUP
             "archived" -> Routes.ARCHIVED
+            "shoot_refs", "shoot_refs_prompt" -> Routes.SHOOT
+            "prompts" -> Routes.PROMPTS
+            "prompt_edit" -> Routes.SETTINGS
             "shoot_prompt" -> Routes.SHOOT
             "source_bad" -> Routes.SOURCE
             "queue_run" -> Routes.QUEUE
@@ -235,7 +254,7 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
         val pending = when (screen) { "result" -> Routes.result("j1"); "result_specs" -> Routes.result("t_spec"); "result_upscale" -> Routes.result("t_up"); "post", "post_schedule" -> Routes.post("t_j1")
             "template_detail", "template_edit" -> Routes.template("tpl_mirror-selfie"); "template_detail_other" -> Routes.template("tpl_maya_walk")
             "template_use" -> Routes.templateUse("tpl_mirror-selfie"); "template_use_prompt" -> Routes.templateUse("tpl_maya_walk")
-            "save_template" -> Routes.saveTemplate("t_g4"); else -> null }
+            "save_template" -> Routes.saveTemplate("t_g4"); "prompt_edit" -> Routes.prompt("refs.pose"); else -> null }
         compose.setContent { MuseApp(c, route, pending) }
         repeat(6) { idle(); compose.mainClock.advanceTimeBy(400) }
         idle()
@@ -248,6 +267,16 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
         }
         if (screen == "signin_noremember_server") compose.onNodeWithText("Remember me").performClick()
         if (screen == "template_edit") compose.onNodeWithText("Edit").performClick()
+        // The References panel is below the scene chips: scroll the sheet to its end (all three in, so no Add button).
+        // A semantics scroll, not performScrollTo: that waits for the scroll animation, which never ends on the paused clock.
+        if (screen == "shoot_refs") {
+            compose.onNodeWithText("Add reference photo", substring = true).assertDoesNotExist()
+            compose.onNode(hasScrollAction() and hasAnyDescendant(hasText("Reference 3")), useUnmergedTree = true)
+                .performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 5000f) }
+        }
+        // The Final prompt with the two reference lines (REF), after the direction.
+        if (screen == "shoot_refs_prompt") compose.onNode(hasScrollAction() and hasAnyDescendant(hasText("Final prompt", ignoreCase = true)), useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 1250f) }
         if (screen == "template_use_prompt") {
             // The prompt view for someone else's template: one locked "Template: …" line, the hidden layers never arrive.
             // (No compose waits here: the canvas animates, so the UI never goes idle with a paused clock.)

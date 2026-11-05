@@ -179,6 +179,33 @@ class RealApiContractTest {
         expectCode("owner_only") { member.patchTemplate(mirror.id, PatchTemplateRequest(name = "mine")) }
         // Save as template from the member's own plain shoot: private by default, the pool editable
         val plain = member.shoot(ShootRequest(SampleData.DEMO, SampleData.GREEN, "Bedroom mirror", "", count = 1)).first()
+        // ---- the server builds the prompt (2026-11-05): preview = what is sent; reference images; the owner's prompt library
+        val refReq = ShootRequest(SampleData.DEMO, SampleData.GREEN, "Bedroom mirror", count = 1, direction = "laughing",
+            refs = listOf(studio.muse.app.data.ShootRef(studio.muse.app.data.ImageRef.asset("c_front"), listOf("pose", "scene"))))
+        val pv = member.previewShoot(refReq)
+        val idx = pv.refs.single().index!!
+        assertTrue(pv.text, pv.text.contains("Copy the pose and framing from image $idx. Use the place and background from image $idx. Do not take the face, body, hair or clothes from image $idx."))
+        assertEquals(listOf("identity", "outfit", "scene", "camera", "light", "direction", "reference", "style", "negative", "seed"), pv.slots.map { it.layer })
+        assertTrue(pv.estimate > 0 && pv.estimateLabel.startsWith("about $"))
+        assertEquals(listOf("identity", "outfit", "direction", "reference", "seed"), member.previewShoot(refReq.copy(presets = false)).slots.map { it.layer })
+        val refShot = member.shoot(refReq).first()
+        assertTrue(refShot.prompt.contains("from image $idx."))
+        assertEquals(listOf("pose", "scene"), refShot.refs?.single()?.guides)
+        expectCode("bad_request") { member.previewShoot(refReq.copy(refs = List(4) { refReq.refs!!.first() })) }
+        // Template shoots take references too: the viewer's view of the template plus their lines.
+        val tplPv = member.previewShoot(ShootRequest(SampleData.DEMO, SampleData.GREEN, templateId = mirror.id, shuffleSeed = 5, refs = refReq.refs))
+        assertTrue(tplPv.slots.map { it.layer }.toString(), tplPv.slots.any { it.layer == "reference" } && tplPv.refs.single().index != null)
+        expectCode("owner_only") { member.prompts() }
+        expectCode("owner_only") { member.savePrompt("style.house", "x") }
+        val lib = owner.prompts()
+        assertTrue("${lib.prompts.size} prompts", lib.prompts.size >= 52)
+        assertEquals(lib.prompts.size, lib.prompts.map { it.key }.toSet().size)
+        assertEquals("References", lib.groups[1].label)
+        expectCode("prompt_invalid") { owner.savePrompt("refs.pose", "no number") }
+        assertTrue(owner.savePrompt("style.house", "HOUSE X").overridden)
+        assertTrue(member.previewShoot(refReq).text.contains("Style: HOUSE X."))
+        assertTrue(owner.previewPrompt(studio.muse.app.data.PromptPreviewRequest("refs.look", "Look like image {refIndex}.")).text.startsWith("Look like image "))
+        assertEquals(false, owner.resetPrompt("style.house").overridden)
         val draft = member.templateDraft(plain.id)
         assertTrue(draft.variationPool.getValue("pose").isNotEmpty())
         val mine = member.createTemplate(CreateTemplateRequest("My mirror", listOf("Selfie"), variationPool = draft.variationPool + ("expression" to listOf("soft smile")), fromShotId = plain.id))
