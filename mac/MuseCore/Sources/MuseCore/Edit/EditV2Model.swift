@@ -124,7 +124,8 @@ extension EditV2 {
 
     public enum Fit: String, Codable, Hashable, Sendable { case cover, contain }
 
-    public enum AssetKind: String, Codable, Hashable, Sendable { case video, image, audio }
+    /// `lut` = an imported .cube (Looks); it must be an `upload`.
+    public enum AssetKind: String, Codable, Hashable, Sendable { case video, image, audio, lut }
 
     public struct Asset: Codable, Hashable, Sendable, Identifiable {
         public var id: String
@@ -166,16 +167,18 @@ extension EditV2 {
         public var keyframes: Keyframes?
         public var filter: FilterRef?
         public var adjust: Adjust?
+        /// The filter stack (EditV2Looks.swift).
+        public var look: Look?
         public var chroma: Chroma?
         public var transitionIn: Transition?
         public init(id: String, asset: String, inSec: Double, outSec: Double, speed: Double = 1, startSec: Double? = nil, volume: Double? = nil,
                     muted: Bool? = nil, fadeInSec: Double? = nil, fadeOutSec: Double? = nil, audioAsset: String? = nil, fit: Fit? = nil,
                     transform: Transform? = nil, crop: Crop? = nil, opacity: Double? = nil, keyframes: Keyframes? = nil, filter: FilterRef? = nil,
-                    adjust: Adjust? = nil, chroma: Chroma? = nil, transitionIn: Transition? = nil) {
+                    adjust: Adjust? = nil, look: Look? = nil, chroma: Chroma? = nil, transitionIn: Transition? = nil) {
             self.id = id; self.asset = asset; self.inSec = inSec; self.outSec = outSec; self.speed = speed; self.startSec = startSec
             self.volume = volume; self.muted = muted; self.fadeInSec = fadeInSec; self.fadeOutSec = fadeOutSec; self.audioAsset = audioAsset
             self.fit = fit; self.transform = transform; self.crop = crop; self.opacity = opacity; self.keyframes = keyframes
-            self.filter = filter; self.adjust = adjust; self.chroma = chroma; self.transitionIn = transitionIn
+            self.filter = filter; self.adjust = adjust; self.look = look; self.chroma = chroma; self.transitionIn = transitionIn
         }
     }
 
@@ -191,13 +194,15 @@ extension EditV2 {
         public var keyframes: Keyframes?
         public var filter: FilterRef?
         public var adjust: Adjust?
+        /// The filter stack (EditV2Looks.swift).
+        public var look: Look?
         public var animIn: Anim?
         public var animOut: Anim?
         public init(id: String, asset: String, startSec: Double, durationSec: Double, fit: Fit? = nil, transform: Transform? = nil, crop: Crop? = nil,
-                    opacity: Double? = nil, keyframes: Keyframes? = nil, filter: FilterRef? = nil, adjust: Adjust? = nil, animIn: Anim? = nil,
-                    animOut: Anim? = nil) {
+                    opacity: Double? = nil, keyframes: Keyframes? = nil, filter: FilterRef? = nil, adjust: Adjust? = nil, look: Look? = nil,
+                    animIn: Anim? = nil, animOut: Anim? = nil) {
             self.id = id; self.asset = asset; self.startSec = startSec; self.durationSec = durationSec; self.fit = fit; self.transform = transform
-            self.crop = crop; self.opacity = opacity; self.keyframes = keyframes; self.filter = filter; self.adjust = adjust
+            self.crop = crop; self.opacity = opacity; self.keyframes = keyframes; self.filter = filter; self.adjust = adjust; self.look = look
             self.animIn = animIn; self.animOut = animOut
         }
     }
