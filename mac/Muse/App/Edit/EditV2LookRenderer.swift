@@ -104,8 +104,11 @@ final class EditV2LookRenderer: @unchecked Sendable {
 
     private struct CubeKey: Hashable {
         let matrix: [Double]
+        let tone: E.Tone?
         let color: E.Look.ColorPart?
     }
+    private var masks: [E.Mask: CIImage] = [:]
+    static let maskMapSize = 256
 
     static let cubeSize = 33
     static let grainCubeSize = 17
@@ -119,10 +122,10 @@ final class EditV2LookRenderer: @unchecked Sendable {
 
     /// Applies the item's colour matrix and look to `src` (extent at 0,0). `frame` = the output frame number (grain);
     /// `fps` turns it into the leak's time.
-    func apply(_ look: E.Look?, matrix m: [Double], to src: CIImage, frame: Int, fps: Double) -> CIImage {
+    func apply(_ look: E.Look?, matrix m: [Double], tone: E.Tone? = nil, to src: CIImage, frame: Int, fps: Double) -> CIImage {
         let ext = src.extent
         guard ext.width >= 1, ext.height >= 1, ext.width.isFinite, ext.height.isFinite else { return src }
-        guard let look else { return colorOnly(src, matrix: m, look: nil, lut: nil) }
+        guard let look else { return colorOnly(src, matrix: m, tone: tone, look: nil, lut: nil) }
         let short = max(1, Int(min(ext.width, ext.height).rounded()))
         var img = src
 
@@ -154,7 +157,7 @@ final class EditV2LookRenderer: @unchecked Sendable {
         }
 
         // 3–6. colour matrix, curves, LUT, lift: one colour cube
-        img = colorOnly(img, matrix: m, look: look, lut: library.lut(for: look.lut, imported: imported))
+        img = colorOnly(img, matrix: m, tone: tone, look: look, lut: library.lut(for: look.lut, imported: imported))
 
         // 7. halation: blurred highlights above the threshold, tinted warm red, screened on
         if let ha = look.halation, ha.amount > 0 {
@@ -220,9 +223,9 @@ final class EditV2LookRenderer: @unchecked Sendable {
     }
 
     /// Steps 3–6: the matrix alone (CIColorMatrix) when the look has no colour part, else the baked colour cube.
-    private func colorOnly(_ img: CIImage, matrix m: [Double], look: E.Look?, lut: E.Lut?) -> CIImage {
-        if E.lookColorIsIdentity(matrix: m, look: look, lut: lut) { return img }
-        if look == nil || E.lookColorIsIdentity(matrix: nil, look: look, lut: lut) {
+    private func colorOnly(_ img: CIImage, matrix m: [Double], tone: E.Tone? = nil, look: E.Look?, lut: E.Lut?) -> CIImage {
+        if E.lookColorIsIdentity(matrix: m, tone: tone, look: look, lut: lut) { return img }
+        if tone == nil, look == nil || E.lookColorIsIdentity(matrix: nil, look: look, lut: lut) {
             return img.applyingFilter("CIColorMatrix", parameters: [
                 "inputRVector": CIVector(x: m[0], y: m[1], z: m[2], w: 0),
                 "inputGVector": CIVector(x: m[4], y: m[5], z: m[6], w: 0),
@@ -231,18 +234,18 @@ final class EditV2LookRenderer: @unchecked Sendable {
                 "inputBiasVector": CIVector(x: m[3], y: m[7], z: m[11], w: 0),
             ]).applyingFilter("CIColorClamp")
         }
-        let data = cube(matrix: m, look: look, lut: lut)
+        let data = cube(matrix: m, tone: tone, look: look, lut: lut)
         return img.applyingFilter("CIColorCubeWithColorSpace", parameters: [
             "inputCubeDimension": Self.cubeSize, "inputCubeData": data, "inputColorSpace": srgb,
         ])
     }
 
-    private func cube(matrix m: [Double], look: E.Look?, lut: E.Lut?) -> Data {
-        let key = CubeKey(matrix: m, color: look?.colorPart)
+    private func cube(matrix m: [Double], tone: E.Tone?, look: E.Look?, lut: E.Lut?) -> Data {
+        let key = CubeKey(matrix: m, tone: tone, color: look?.colorPart)
         lock.lock()
         if let d = cubes[key] { lock.unlock(); return d }
         lock.unlock()
-        let d = E.lookCube(matrix: m, look: look, lut: lut, size: Self.cubeSize).withUnsafeBufferPointer { Data(buffer: $0) }
+        let d = E.lookCube(matrix: m, tone: tone, look: look, lut: lut, size: Self.cubeSize).withUnsafeBufferPointer { Data(buffer: $0) }
         lock.lock()
         if cubes.count > 64 { cubes.removeAll() }
         cubes[key] = d
@@ -294,7 +297,36 @@ final class EditV2LookRenderer: @unchecked Sendable {
             .cropped(to: ext)
     }
 
+    /// Edit suite: the item's mask (maskAlpha, row 0 = the top of the item) multiplied into `src`'s alpha.
+    func applyMask(_ m: E.Mask, to src: CIImage) -> CIImage {
+        let ext = src.extent
+        guard ext.width >= 1, ext.height >= 1, ext.width.isFinite, ext.height.isFinite else { return src }
+        let n = Self.maskMapSize
+        lock.lock()
+        let cached = masks[m]
+        lock.unlock()
+        let base: CIImage
+        if let cached { base = cached } else {
+            let a = E.maskMap(m, width: n, height: n)
+            var px = [Float](repeating: 1, count: n * n * 4)
+            for i in 0..<(n * n) { px[i * 4 + 3] = Float(a[i]) / 255 }
+            let data = px.withUnsafeBufferPointer { Data(buffer: $0) }
+            base = CIImage(bitmapData: data, bytesPerRow: n * 16, size: CGSize(width: n, height: n), format: .RGBAf, colorSpace: nil)
+            lock.lock()
+            if masks.count > 32 { masks.removeAll() }
+            masks[m] = base
+            lock.unlock()
+        }
+        let mask = base.clampedToExtent()
+            .transformed(by: CGAffineTransform(scaleX: ext.width / CGFloat(n), y: ext.height / CGFloat(n))
+                .concatenating(CGAffineTransform(translationX: ext.minX, y: ext.minY)))
+            .cropped(to: ext)
+        let clear = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0)).cropped(to: ext)
+        return src.applyingFilter("CIBlendWithAlphaMask", parameters: [kCIInputBackgroundImageKey: clear, kCIInputMaskImageKey: mask]).cropped(to: ext)
+    }
+
     /// Mono uniform noise 0…1 in cells of `cell` px, a different pattern every frame.
+
     private func noise(frame: Int, cell: Int, extent ext: CGRect) -> CIImage? {
         guard let random = CIFilter(name: "CIRandomGenerator")?.outputImage else { return nil }
         // Whole-pixel offsets keep the generator's pixels intact; they move the pattern per frame.
