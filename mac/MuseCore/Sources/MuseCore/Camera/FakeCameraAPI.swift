@@ -31,8 +31,8 @@ public final class FakeCameraAPI: CameraAPI, @unchecked Sendable {
         let a = SampleData.demo, b = SampleData.demoB
         let path = CameraPath(keyframes: [
             CamKey(t: 0, position: Vec3(0.2, -3.2, 1.5), target: Vec3(0.4, 0.6, 1.4), focalMm: 35, ease: "in_out"),
-            CamKey(t: 4.5, position: Vec3(0.3, -2.8, 1.5), target: Vec3(1.2, 0.8, 1.4), focalMm: 35),
-            CamKey(t: 6, position: Vec3(2.6, -1.2, 1.5), target: Vec3(1.6, 0.8, 1.4), focalMm: 35),
+            CamKey(t: 4.5, position: Vec3(0.2, -2.8, 1.5), target: Vec3(0.4, 0.6, 1.4), focalMm: 35),
+            CamKey(t: 6, position: Vec3(3.6, 0.4, 1.5), target: Vec3(0.4, 0.6, 1.4), focalMm: 35),
         ], cuts: [])
         let blocking = CameraBlocking(characters: [
             CameraBlockingTrack(modelId: a, keyframes: [
@@ -58,7 +58,7 @@ public final class FakeCameraAPI: CameraAPI, @unchecked Sendable {
             CameraMessage(id: "cm_2", role: "tool", source: "chat", text: "", tool: CameraToolStep(name: "blender_setup_scene", ok: true, summary: "café 6 × 4 m"), createdAt: t0 + 10_000),
             CameraMessage(id: "cm_3", role: "tool", source: "chat", text: "", tool: CameraToolStep(name: "blender_place_character", ok: true), createdAt: t0 + 20_000),
             CameraMessage(id: "cm_4", role: "tool", source: "chat", text: "", tool: CameraToolStep(name: "blender_place_character", ok: true), createdAt: t0 + 21_000),
-            CameraMessage(id: "cm_5", role: "tool", source: "chat", text: "", tool: CameraToolStep(name: "blender_render_guides", ok: true), createdAt: t0 + 60_000),
+            CameraMessage(id: "cm_5", role: "tool", source: "chat", text: "", tool: CameraToolStep(name: "blender_render_guides", ok: true), createdAt: t0 + 59_000),
             CameraMessage(id: "cm_6", role: "assistant", source: "chat", text: "Built the café (6 × 4 m) and placed \(SampleData.demoName) (1.72 m) and \(SampleData.demoBName) (1.68 m) from their sheets. 35 mm, eye level; push 0.4 m, then orbit 90°.", createdAt: t0 + 64_000),
         ]
         let draft = CameraShotDraft(id: "sd_seed1", state: "draft", source: "camera", prompt: "Café walk-and-talk", targetModel: "kling-v4.0", durationSec: 6, aspect: "9:16",

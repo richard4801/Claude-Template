@@ -435,7 +435,9 @@ public struct ChatStreamParser: Sendable {
     public static func parseAll(_ body: String) -> [ChatEvent] {
         var p = ChatStreamParser()
         var out: [ChatEvent] = []
-        for line in body.split(separator: "\n", omittingEmptySubsequences: false) {
+        // "\r\n" is one Character in Swift: normalise line endings before splitting.
+        let text = body.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
             if let e = p.feed(String(line)) { out.append(e) }
         }
         if let e = p.feed("") { out.append(e) }

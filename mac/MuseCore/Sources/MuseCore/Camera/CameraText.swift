@@ -163,11 +163,12 @@ public enum CameraStatus {
         return CameraStatusRow(title: "Renders", detail: "None yet", tone: .off)
     }
 
-    /// While assets are pending: the batch is every asset made since the oldest pending one; n = the one uploading now (1-based).
+    /// While assets are pending: the batch is every asset made from 2 minutes before the oldest pending one on (one render's
+    /// files arrive together); n = the one uploading now (1-based).
     public static func uploading(_ assets: [CameraAsset]) -> (n: Int, m: Int)? {
         let pending = assets.filter { $0.state == "pending" }
         guard !pending.isEmpty else { return nil }
-        let since = pending.compactMap(\.createdAt).min() ?? 0
+        let since = (pending.compactMap(\.createdAt).min() ?? 0) - 120_000
         let batch = assets.filter { ($0.createdAt ?? since) >= since }
         let ready = batch.filter { $0.state == "ready" }.count
         return (min(batch.count, ready + 1), batch.count)
