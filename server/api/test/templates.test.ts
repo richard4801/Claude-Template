@@ -296,7 +296,8 @@ describe('photo templates', () => {
 
   it('/health reports the build, the migrations and the starter seed', async () => {
     const h = (await a.app.inject({ method: 'GET', url: '/health' })).json();
-    expect(h.migrations).toEqual({ applied: 7, latest: '0009_editor_jobs' } /* + editor v2 (workstream 3) */);
+    const journal = JSON.parse(fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '../drizzle/meta/_journal.json'), 'utf8')) as { entries: { tag: string }[] };
+    expect(h.migrations).toEqual({ applied: journal.entries.length, latest: journal.entries[journal.entries.length - 1]!.tag });
     expect(h.startedAt).toBeGreaterThan(0);
   });
 });
