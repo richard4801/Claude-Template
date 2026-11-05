@@ -421,6 +421,7 @@ struct RuleEditorSheet: View {
                 }
                 Spacer()
                 MButton("Cancel") { store.scriptEditingRule = nil }
+                    .keyboardShortcut(.cancelAction)
                 MButton("Done", kind: .primary, off: rule.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) { store.commitRule(rule) }
             }
         }
@@ -466,6 +467,7 @@ struct ConditionRow: View {
             }
             .buttonStyle(.plain)
             .help("Remove this condition")
+            .accessibilityLabel("Remove this condition")
         }
     }
 

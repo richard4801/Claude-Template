@@ -48,6 +48,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import studio.muse.app.AppContainer
 import studio.muse.app.data.Job
 import studio.muse.app.data.editable
@@ -100,7 +102,11 @@ class ResultViewModel(private val c: AppContainer, private val id: String) : Vie
     }
 
     fun toast(s: String) = c.repo.toast(s)
-    fun export() = c.repo.toast("Exported 1080×1920")
+    /** Saves the take's video (or photo) to Downloads. Demo takes are bundled stills with no file behind them. */
+    fun export(context: android.content.Context, t: Take?) {
+        val url = t?.videoUrl ?: t?.thumb?.url ?: return c.repo.toast(if (c.repo.demo) "Demo takes have no file to download" else "Nothing to download yet")
+        c.repo.toast(studio.muse.app.platform.Downloads.save(context, url, t?.title ?: "MUSE"))
+    }
 
     /** Upscale a finished render to 1080p / 2K / 4K (plans/api.md "App clean-up" §2). Coming soon for now. */
     fun upscale(t: Take, size: studio.muse.app.data.UpscaleSizeInfo) {
@@ -140,6 +146,7 @@ fun ResultScreen(id: String) {
     val m = muse
     val celebrate = LocalCelebrate.current
     val clip = LocalClipboardManager.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     var compare by remember { mutableStateOf(false) }
     val pager = rememberPagerState { s.takes.size.coerceAtLeast(1) }
     val take = s.takes.getOrNull(pager.currentPage) ?: s.takes.firstOrNull()
@@ -168,21 +175,21 @@ fun ResultScreen(id: String) {
                 Column(Modifier.statusBarsPadding()) {
                     TopBar(if (s.takes.size > 0) "Take ${(take?.index ?: 1)} of ${take?.of ?: s.takes.size}" else "", onBack = { nav.back() }, over = true) {
                         MoreMenu(listOf(
-                            MenuItem("export", "Download") { vm.export() },
+                            MenuItem("export", "Download") { vm.export(context, take) },
                             MenuItem("upload", "Post") { take?.let { nav.go(Routes.post(it.id)) } },
                             MenuItem("retry", "Edit video") { take?.let { if (it.editable) nav.go(Routes.editVideo(it.id)) else vm.toast("Only finished videos can be edited") } },
                             MenuItem("grid", "Save as template") { take?.let { if (it.shot) nav.go(Routes.saveTemplate(it.id)) else vm.toast("Templates are for photos · video templates come later") } },
                             MenuItem("spark", "Copy prompt") { clip.setText(AnnotatedString(take?.prompt?.ifBlank { null } ?: s.job?.prompt ?: "")); vm.toast("Prompt copied") },
                             MenuItem("grid", "Compare takes") { if (s.takes.size > 1) compare = !compare else vm.toast("Compare takes · needs 2+ takes") },
-                            MenuItem("bell", "Report a problem") { vm.toast("Thanks · report sent with the prompt and seed") },
                             MenuItem("shield", "Delete take", danger = true) { take?.let { vm.discard(it, nav) } },
                         ), tint = Color.White)
                     }
                 }
                 Box(Modifier.fillMaxSize()) { Viewfinder(bottomInset = 30.dp) }
-                Column(Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                // A real video has the player's own controls along the bottom: keep the side actions above them.
+                Column(Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = if (take?.videoUrl != null) 96.dp else 40.dp), verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     SideAction("retry", if (s.job != null) "Retry · ${Pricing.money(s.retryCost)}" else "Retry") { vm.retry(nav) }
-                    SideAction("export", "Export") { vm.export() }
+                    SideAction("export", "Download") { vm.export(context, take) }
                     if (take?.editable == true) SideAction("retry", "Edit") { nav.go(Routes.editVideo(take.id)) }
                     SideAction("upload", "Post") { take?.let { nav.go(Routes.post(it.id)) } }
                     if (take?.shot == true) SideAction("grid", "Save look") { nav.go(Routes.saveTemplate(take.id)) }
@@ -234,15 +241,17 @@ private fun SideAction(icon: String, label: String, onClick: () -> Unit) {
 
 // ======================================================================= Gallery
 
-data class GalleryState(val tab: String = "tests", val tests: List<Take> = emptyList(), val finals: List<Take> = emptyList(), val fresh: Int = 0)
+data class GalleryState(val tab: String = "tests", val tests: List<Take> = emptyList(), val finals: List<Take> = emptyList(), val fresh: Int = 0,
+    val loaded: Boolean = true, val error: String? = null)
 
 class GalleryViewModel(private val c: AppContainer) : ViewModel() {
     val state: StateFlow<GalleryState> = combine(c.repo.state, c.drafts.galleryTab, c.drafts.freshShots) { s, tab, fresh ->
-        GalleryState(tab, s.takes.filter { !it.final }, s.takes.filter { it.final }, fresh)
+        GalleryState(tab, s.takes.filter { !it.final }, s.takes.filter { it.final }, fresh, s.loaded, s.error)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, GalleryState())
 
     fun tab(t: String) { c.drafts.galleryTab.value = t }
     fun seen() { c.drafts.freshShots.value = 0 }
+    fun retry() = viewModelScope.launch { c.repo.refresh() }
 }
 
 @Composable
@@ -258,12 +267,16 @@ fun GalleryScreen() {
     ScreenBox {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                Wordmark(); Spacer(Modifier.weight(1f)); TbBtn("grid", {})
+                Wordmark(); Spacer(Modifier.weight(1f))
             }
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 if (m.isA) T("GALLERY", m.type.h2.copy(fontSize = 56.sp, lineHeight = 52.sp), m.t.ink) else H2("Gallery")
                 Seg(listOf("tests" to "Tests · ${s.tests.size}", "final" to "Final · ${s.finals.size}"), s.tab, vm::tab)
-                if (list.isEmpty()) {
+                if (list.isEmpty() && !s.loaded) Tiny("Loading your renders…")
+                else if (list.isEmpty() && s.error != null) {
+                    NoteBox(s.error ?: "", warn = true)
+                    Cta2("Try again", { vm.retry() }, Modifier.fillMaxWidth(), icon = "retry", height = 46.dp)
+                } else if (list.isEmpty()) {
                     NoteBox(if (s.tab == "final") "Nothing approved yet. Approve a take to move it here." else "No test renders yet. Make a video or a photoshoot.", icon = "spark")
                 } else {
                     list.chunked(3).forEachIndexed { r, row ->
@@ -274,7 +287,8 @@ fun GalleryScreen() {
                                 val shape = RoundedCornerShape(m.t.r * .6f)
                                 Box(
                                     Modifier.weight(1f).height(170.dp).let { if (isNew) it.border(3.dp, m.t.accent, shape) else it }.clip(shape)
-                                        .let { if (m.isD) it.border(2.5.dp, Ink, shape) else it }.press { nav.go(Routes.result(t.jobId ?: t.id)) },
+                                        .let { if (m.isD) it.border(2.5.dp, Ink, shape) else it }.press { nav.go(Routes.result(t.jobId ?: t.id)) }
+                                        .semantics(mergeDescendants = true) { contentDescription = "${t.title} · ${t.label}" },
                                 ) {
                                     RefImage(t.thumb, Modifier.fillMaxSize(), 20)
                                     if (t.kind == "take" || t.kind == "edit") PlayBadge()
