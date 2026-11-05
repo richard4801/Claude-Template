@@ -101,7 +101,9 @@ describe.skipIf(!URL_)('against a real Postgres (TEST_DATABASE_URL, SSL off)', (
     const [a, b] = await Promise.all([openPg(url, MIGRATIONS_DIR, { poolMax: 2 }), openPg(url, MIGRATIONS_DIR, { poolMax: 2 })]);
     closers.push(() => a.end(), () => b.end());
     const { rows } = await a.query('select count(*)::int as n from drizzle.__drizzle_migrations');
-    expect(rows[0].n).toBe(1);
+    // Each migration in the journal recorded once (not twice: the second instance waited on the lock).
+    const journal = JSON.parse((await import('node:fs')).readFileSync(`${MIGRATIONS_DIR}/meta/_journal.json`, 'utf8')).entries;
+    expect(rows[0].n).toBe(journal.length);
     expect(await migrateWithLock(a, MIGRATIONS_DIR)).toBe(0);
     const t = await a.query("select count(*)::int as n from information_schema.tables where table_schema = 'public'");
     expect(t.rows[0].n).toBeGreaterThan(5);
