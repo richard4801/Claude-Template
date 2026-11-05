@@ -12,7 +12,7 @@ struct SettingsView: View {
             HStack(alignment: .top, spacing: 36) {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(SettingsSection.allCases.filter { !$0.ownerOnly || store.isOwner }, id: \.self) { s in
-                        NavRow(icon: icon(s), title: s.title, on: store.settingsSection == s, compact: false, trailing: .none) { store.settingsSection = s }
+                        SettingsNavRow(icon: icon(s), title: s.title, on: store.settingsSection == s) { store.settingsSection = s }
                     }
                 }
                 .frame(width: 220)
@@ -75,7 +75,7 @@ struct SettingsView: View {
                 ListRow(title: "Default render", hint: "Add-ons (Edit, Fast · beta) are picked per video") {
                     Seg(VideoQuality.renders.map { ($0, $0.label) }, selection: $store.defaultQuality) { store.setQuality($0) }.frame(width: 300)
                 }
-                ListRow(title: "Export size") { MonoValue("1080×1920 · 9:16") }
+                ListRow(title: "Export size", hint: "Export saves the render as it was made") { MonoValue("9:16 · as rendered") }
                 ListRow(title: "Keep test renders for", last: true) { MonoValue("30 days") }
             }
             if store.isOwner {
@@ -161,6 +161,42 @@ struct SettingsView: View {
                 RowButton(title: "Sign out", last: true) { store.signOut() }
             }
         }
+    }
+}
+
+/// A Settings section in the list on the left. Like the sidebar's NavRow, but drawn for the page background: the sidebar's
+/// Creator Pop colours (white on blue) were white on cream here.
+private struct SettingsNavRow: View {
+    @Environment(\.theme) private var t
+    var icon: String
+    var title: String
+    var on: Bool
+    var action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: t.isA ? 0 : t.isC ? 14 : t.isD ? 12 : t.r, style: .continuous)
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon).font(.system(size: 15, weight: on ? .semibold : .regular)).frame(width: 20)
+                Text(t.navUppercase ? title.uppercased() : title).font(t.navFont).tracking(t.isA ? 1 : t.isB ? 1.2 : 0).lineLimit(1)
+                Spacer(minLength: 4)
+            }
+            .foregroundStyle(on ? (t.isA || t.isB ? t.accent : t.ink) : hover ? t.ink : t.muted)
+            .padding(.horizontal, 10)
+            .frame(height: t.isA ? 38 : 40)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(shape.fill(on ? (t.isA ? Color.clear : t.isD ? t.yellow : t.isB ? t.surface2 : t.surface) : hover && !t.isA ? t.surface2 : Color.clear))
+            .overlay(shape.strokeBorder(on && t.isD ? Color(hex: 0x111111) : Color.clear, lineWidth: 2.5))
+            .overlay(alignment: .leading) {
+                if on && t.isA { Rectangle().fill(t.accent).frame(width: 2).padding(.vertical, 10) }
+                if on && t.isB { Rectangle().fill(t.accent).frame(width: 3) }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 }
 
