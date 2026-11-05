@@ -240,7 +240,7 @@ Collections per step: `shot` → `text-to-image`, `image-editing`; `edit`, `dres
 - `output_format` (jpg/jpeg when offered), `output_quality` 95, a count field (`num_outputs`, `num_images`, `max_images`) = 1;
 - **never sent:** `disable_safety_checker` (or any safety-checker switch); it stays at the model's default.
 - Not compatible when a required input has no default and isn't mapped, when the output isn't an image (URI or list of URIs), or the step needs what the model lacks: `edit`/`realism`/`upscale` need an image input; `shot`, `edit`, `realism`, `dressA/B` need a prompt; `dressA/B` need at least two images (an array or several image fields).
-- Known defaults keep their tested inputs (FLUX.2 [pro] `safety_tolerance` 2 and "1 MP"/"2 MP"; Qwen `match_input_image`).
+- Known defaults keep their tested inputs (FLUX.2 [pro] `safety_tolerance` (5 since 2026-11-05, see "Identity images, safety tolerance and reference sheets" §1) and "1 MP"/"2 MP"; Qwen `match_input_image`).
 
 **Catalog caching:** collections and the step lists are cached 12 h (`REPLICATE_CATALOG_TTL_SEC` = 43200), a model's schema 6 h, a model's price 24 h. Every call uses the server's `REPLICATE_API_TOKEN`; Replicate's catalog reads are free.
 
@@ -325,7 +325,7 @@ ShootRef    { image: ImageRef, guides: ShootGuide[] /* 1–3, no repeats */ }
 - `pose` = pose and framing; `look` = light, colour grade, grain and camera feel; `scene` = the place / background. There is **no outfit guide**. Her face and body always come from her own sheet (and the outfit's) references, never from a reference image: every reference line ends with "do not take the face, body, hair or clothes from image k".
 - `POST /v1/shoots`, `POST /v1/shoots/preview` and template shoots accept `refs?: ShootRef[]` (≤ 3). `bad_request` for more than 3, a ref without an image, empty or unknown `guides`.
 - The image is any `ImageRef` (apps upload it with `POST /v1/uploads/images` first). Members get the same feature; nothing about models is shown.
-- **Order and limits.** The images sent to the shot model are: her identity/outfit references in the usual order (face front, profile, outfit front and ¾, product, body shots, outfit back and side; at most `REPLICATE_IMAGE_MAX_REFS` = 6 of them, as before), **then the reference images** in the order given. The total is capped at the shot model's image limit: `REPLICATE_IMAGE_MAX_INPUTS` (8) for the default shot model and the simulated/other engines, the schema's limit (array `maxItems`, or the image fields) for any other model. Over the limit, identity references are dropped from the end (least important first), **never the face front**; if the model still can't take them all (a 1- or 2-image model), the last reference images are dropped (`refs[i].dropped: true` in the preview) and get no prompt line. A model with no image input gets no images and no reference lines.
+- **Order and limits.** The images sent to the shot model are: her identity/outfit references (_since 2026-11-05: face front, face ¾, one body image, outfit front, product; see "Identity images, safety tolerance and reference sheets" §2_; before: face front, profile, outfit front and ¾, product, body shots, outfit back and side; at most `REPLICATE_IMAGE_MAX_REFS` = 6 of them), **then the reference images** in the order given. The total is capped at the shot model's image limit: `REPLICATE_IMAGE_MAX_INPUTS` (8) for the default shot model and the simulated/other engines, the schema's limit (array `maxItems`, or the image fields) for any other model. Over the limit, identity references are dropped from the end (least important first), **never the face front**; if the model still can't take them all (a 1- or 2-image model), the last reference images are dropped (`refs[i].dropped: true` in the preview) and get no prompt line. A model with no image input gets no images and no reference lines.
 - **Prompt lines.** One `reference` slot per sent reference image, after `direction`, made from the library (§2): its guide lines in the order pose, look, scene, then the guard line, joined by spaces, with `{refIndex}` = that image's 1-based position in the images sent. Default: `"Copy the pose and framing from image 7. Copy the light, colour grade and camera feel from image 7. Do not take the face, body, hair or clothes from image 7."`
 - **Price.** The estimate counts every image sent: per shot `run + output MP × price + 0.79 MP × (images sent) × input-MP price` for the default shot model (any other model: its own estimate with `inMp = 0.79 × images sent`). The hold is `count ×` that; the settle is exact (the input megapixels really sent). `features.photo` gains `maxInputs: 8` and `references: { max: 3, guides: [{id: "pose", label: "Pose & framing"}, {id: "look", label: "Look & colour"}, {id: "scene", label: "Scene"}] }`.
 - Each shot stores its refs (`Take.refs?: ShootRef[]` on photoshoot stills) so a template saved from it doesn't copy them.
@@ -437,6 +437,42 @@ Defaults reproduce the prompts exactly as they were before the library (the shar
 
 **Apps (owner only):** Settings → **Prompts**: the groups above, each entry with its title, a one-line preview of the current text and an "Edited" badge when overridden. The editor: the current text (multi-line), placeholder chips (tap inserts `{name}`; required ones marked), "Reset to default" (DELETE, after a confirm), a live preview (`POST /v1/prompts/preview`, debounced) showing `text` and `example`, the `prompt_invalid` message inline, and Save (PUT). Members never see the section.
 
+## Identity images, safety tolerance and reference sheets (2026-11-05)
+_Owner decisions 2026-11-05. This section wins where an older section disagrees._ Three changes to every photo step on Replicate (server only; members see no model or provider names, only fewer images and lower estimates).
+
+### 1. Safety tolerance 5
+`REPLICATE_IMAGE_SAFETY` now defaults to **5** (env override kept). It is sent as `safety_tolerance` to FLUX.2 models (the default shot model and any `black-forest-labs/flux-2*` chosen for a step) and to `black-forest-labs/flux-kontext*` when its schema has the field, clamped to the field's `minimum`/`maximum`, and to the lower limit a field's description states for requests with input images (Kontext: "2 is currently the maximum allowed when input images are used", so Kontext with images gets 2, without images 5). Other models keep their own default. `disable_safety_checker` (or any safety-checker switch) is still **never** sent.
+
+### 2. Fewer identity images (default 3)
+Photo steps (photoshoots, template shoots, outfit-set fronts, sheet fills, LoRA sets) used to send up to 6 of her sheet images. They now send her **identity images**, most important first:
+1. **face front** (`face`; never dropped),
+2. **face ¾** (`faceTq`; her `profile` when the ¾ is empty),
+3. **ONE full-body image**: the slot she chose (`identityBodySlot`: `front` (default), `tq`, `side` or `back`; the next filled body slot when that one is empty),
+then, beyond 3 (studio setting below): her profile (when the ¾ was sent), then her other body angles. A Dress up outfit's own face close-ups (`faces`) stand in for hers. After the person images: the **outfit's front** angle when the step wears an outfit (shoots with `outfitId`), a product photo (template shoots, outfit sets from photos), then the user's **reference images** (§"Shoot references" §1, same model-limit rules: identity images give way from the end, never the face front).
+
+```ts
+Model          { …, identityBodySlot: "front"|"tq"|"side"|"back" /* default "front"; in GET /v1/models, every model view and live `model` events */ }
+StudioSettings { …, identityRefs: number /* owner view only: how many of her own images a photo step sends, 1–7, default 3 */ }
+features.photo { …, identityRefs: number /* the same, for every member: the estimates below use it */ }
+ShootPreview   { …, referenceSheet: boolean /* true: the shot model takes one image, the images go as one reference sheet (§3) */ }
+```
+| | |
+|---|---|
+| `PATCH /v1/models/{id}` `{identityBodySlot}` | The owner or the member who made her (`createdBy`); anyone else gets `403 owner_only`. Other values: `bad_request`. → `Model` + a `model` event. |
+| `PATCH /v1/settings/studio` `{identityRefs}` (owner) | 1–7 (`bad_request` otherwise); → the studio settings + a `settings` event. |
+
+- **Prompt:** "Identity from N locked reference images" counts the person images really sent (3 by default).
+- **Estimates:** fewer input megapixels: `features.photo.estimates` use `refs = min(identityRefs, maxRefs)` (shoot "about $0.32", outfit set "about $0.16", one angle "about $0.07" with the default prices), and holds count the images really sent (e.g. a plain shoot with an outfit: face, face ¾, body, outfit front = 4).
+- DB: `models.identity_body_slot` (text, null = front) and `studio_settings.identity_refs` (integer, null = 3), migration `0006_identity_refs`.
+
+### 3. Reference sheet for one-image models
+A shot model whose schema takes **one** input image (a single image field, no array, no `image_2`… fields, and no strength input; e.g. FLUX Kontext Pro/Max) can't take her identity images and the references separately. For a new shot (shoots, template shoots, outfit-set fronts, sheet fills, LoRA sets) with more than one image the server builds **one reference sheet** and sends it as the only input:
+- one JPEG (quality 90, ≤ 2048 px on the long side, neutral background), panels in the order the images would have been sent: her face front **largest** (a 2×2 block, top left), then the other identity images, the outfit, the product photo, then each reference image; each panel has a small numbered label ("1 FACE", "2 FACE 3/4", "3 BODY", "4 OUTFIT", "5 REF: POSE & FRAMING"). The layout depends only on the number of panels, so the estimate's megapixels are the real ones. Stored once under `rx/` (same images → same sheet).
+- the prompt starts with the library line **`refs.collage`** (group References, "Reference sheet"; placeholders `{person}` = "panel 1 shows" / "panels 1–3 show", `{panels}` = "; panel 4 shows the outfit to wear; panel 5 guides the pose & framing only"). Default: `The input image is a reference sheet of numbered panels ("image N" below means panel N): {person} the person (use her face, hair and body exactly){panels}; create one new photo, not a collage.` The reference lines keep their image numbers (= panel numbers).
+- `POST /v1/shoots/preview` shows it: `referenceSheet: true`, `text` starts with that line and `slots` starts with `{layer: "sheet", text}`; `images` / `refs[].index` count panels.
+- **Price:** the estimate uses the sheet's megapixels (one input of that size, not 0.79 MP per image); the settle uses the sheet as sent.
+- Catalog (owner): such a model is compatible for `shot` with the warning **"1 image: MUSE sends a reference sheet"** (it used to say "takes 1 reference only"). An img2img model (single image + a strength input, e.g. FLUX Krea dev) still gets only the face front: a sheet would show through.
+
 ## Video editor: edited versions of a take (2026-11-05)
 _Owner decision 2026-11-05. Spec, UX and limits: `plans/video-editor.md`._ The apps trim, split, change speed and mute a video take **on the device** and upload the result. The server stores it as a **new take** (`kind: "edit"`) linked to the take it was cut from, with the **edit list** so it can be re-opened and changed. The server never encodes video. It is free: no price, hold or ledger row. Members and owners alike.
 
@@ -466,7 +502,8 @@ ImageRef   { asset?: string, url?: string }          // asset = bundled sample k
 User       { id, studioName, email }
 SheetSlot  { key: "face"|"profile"|"front"|"tq"|"side"|"back"|"faceTq" /* 2026-11-04 */, image: ImageRef|null, source: "upload"|"generated", busy: boolean }
 Model      { id, name, age (18–70), niche, look, neverAdd: string[], slots: SheetSlot[7] /* 6 before 2026-11-04, see "Model tools" §1 */, outfitIds: string[],
-             archived?: boolean, archivedAt?: number /* "Model tools" §7 */ }
+             archived?: boolean, archivedAt?: number /* "Model tools" §7 */,
+             identityBodySlot: "front"|"tq"|"side"|"back" /* 2026-11-05: the one body image her photos send, default "front" */ }
            // locked = all 6 slots filled. Missing face close-ups are only a warning, and saving is always allowed.
 Outfit     { id, modelId, name, mode: "describe"|"photo"|"own"|"dressup", description, angles: (ImageRef|null)[4] /* front, ¾, side, back */,
              faces?: (ImageRef|null)[3] /* dressup: face, face ¾, profile */,
@@ -666,7 +703,7 @@ The mock runs LoRA training 5× faster than its render speed (120× real time by
 | | |
 |---|---|
 | `POST /v1/queue/run` | → `Job[]` it started. Starts `queued` jobs oldest first, charging each as it starts. Stops at the first one the balance can't cover (those stay queued); `insufficient_balance` if none could start. Jobs are queued with `JobRequest.queue: true`. |
-| `PATCH /v1/models/{id}` `{name?, niche?, personality?, notes?, neverAdd?}` | → `Model`, plus a `model` event. Only the fields sent change. An empty name is `bad_request`. |
+| `PATCH /v1/models/{id}` `{name?, niche?, personality?, notes?, neverAdd?, identityBodySlot?}` | → `Model`, plus a `model` event. Only the fields sent change. An empty name is `bad_request`. `identityBodySlot` (owner or her creator): see "Identity images, safety tolerance and reference sheets" §2. |
 | `DELETE /v1/models/{id}` | 204. Also deletes her outfits, LoRAs and training set, linked accounts, and posts that haven't gone out. |
 
 ### Photo templates (`plans/templates.md`)
@@ -713,7 +750,7 @@ How a template shoot works (`POST /v1/shoots` with `templateId`):
 | `GET /v1/settings/image-engine` | → `{provider: "simulated"\|"fal"\|"custom-http"\|"replicate", model, editModel? /* replicate */, label, url?, available: {simulated, fal, "custom-http", replicate}}`. `label` is for display: "FLUX.2 [pro] · Replicate", "Simulated", the fal model id, "Custom". Default provider: `replicate` when the server has `REPLICATE_API_TOKEN`, else `IMAGE_PROVIDER` (simulated). A studio that saved a provider keeps it. |
 | `PATCH /v1/settings/image-engine` `{provider, model?, url?}` (owner only since 2026-11-04) | → same. Per studio. `custom-http` is owner-only and needs an https URL; `replicate` needs the server's token (`bad_request` otherwise). Shoots and outfit sets also take `imageEngine: {provider, model?}` to override it for one call. |
 | `GET /v1/settings/studio` | _2026-11-04: members get only `{capPerJob, capPerDay, capPerUserDay, tokenUsd, features}`; the owner also gets `engines`, and `minRunpodBalance`, `lowBalance`, `warmGpuAllowed` are gone ("App clean-up" §5)._ Before: → `{maxGpus, overheadPayer: "user"\|"owner", capPerJob, capPerDay, capPerUserDay, tokenUsd, minRunpodBalance, lowBalance, warmGpuAllowed: "owner"\|"everyone", warmIdleMinutes, warmMaxMinutes, features: {standard, fastBeta, lipSync, loraTraining, replaceAudio: false, outputSize: {width: 768, height: 1344}, maxClipSec, replicate, video: VideoFeatures}, gpu}`. `features.standard` still means "Exact edit (h3) can run"; `features.replicate` = the Replicate engine is set up. |
-| `PATCH /v1/settings/studio` `{maxGpus?, overheadPayer?, capPerJob?, capPerDay?, capPerUserDay?, warmGpuAllowed?, warmIdleMinutes? (5–120), warmMaxMinutes? (30–480)}` (owner) | → same |
+| `PATCH /v1/settings/studio` `{maxGpus?, overheadPayer?, capPerJob?, capPerDay?, capPerUserDay?, warmGpuAllowed?, warmIdleMinutes? (5–120), warmMaxMinutes? (30–480), identityRefs? (1–7, 2026-11-05)}` (owner) | → same |
 
 "Replace audio" isn't wired on the GPU yet: `keepAudio: false` gives a silent take, and `features.replaceAudio` is false.
 
