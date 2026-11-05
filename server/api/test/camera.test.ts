@@ -92,7 +92,10 @@ describe('camera sessions', () => {
     const s = (await owner.req('POST', '/v1/camera-sessions', { durationSec: 5, brief: 'cosy kitchen, morning light' })).body;
     const before = (await a.ctx.db.select().from(ledger)).length;
     const d = await owner.req('POST', `/v1/camera-sessions/${s.id}/shot-draft`, {});
-    expect(d.body).toMatchObject({ state: 'draft', source: 'camera', targetModel: 'kling-v4.0', durationSec: 5, prompt: 'cosy kitchen, morning light', estimate: { usd: 0.71, tokens: 71 } });
+    // With the AI suite merged (mock mode in tests) the draft is the suite's own estimate.
+    expect(d.body).toMatchObject({ state: 'draft', source: 'suite', targetModel: 'kling-v4.0', durationSec: 5, prompt: 'cosy kitchen, morning light' });
+    expect(d.body.estimate.usd).toBeGreaterThan(0);
+    expect(d.body.estimate.tokens).toBe(Math.ceil(d.body.estimate.usd / a.ctx.config.TOKEN_USD - 1e-9));
     expect(d.body.camera.directed.cameraSessionId).toBe(s.id);
     expect((await a.ctx.db.select().from(ledger)).length).toBe(before);
     expect((await owner.req('GET', `/v1/camera-sessions/${s.id}`)).body.shotDraft.id).toBe(d.body.id);
@@ -109,12 +112,25 @@ describe('camera sessions', () => {
     expect((await owner.req('POST', `/v1/camera-sessions/${empty.id}/shot-draft/job`, { jobId })).body.code).toBe('no_draft');
   });
 
+  it('without the AI suite the draft is priced from the target model\'s $/s (no hold either)', async () => {
+    const suite = a.ctx.suite;
+    (a.ctx as any).suite = undefined;
+    try {
+      const s = (await owner.req('POST', '/v1/camera-sessions', { durationSec: 5, brief: 'cosy kitchen, morning light' })).body;
+      const before = (await a.ctx.db.select().from(ledger)).length;
+      const d = await owner.req('POST', `/v1/camera-sessions/${s.id}/shot-draft`, {});
+      expect(d.body).toMatchObject({ state: 'draft', source: 'camera', targetModel: 'kling-v4.0', durationSec: 5, prompt: 'cosy kitchen, morning light', estimate: { usd: 0.71, tokens: 71 } });
+      expect((await a.ctx.db.select().from(ledger)).length).toBe(before);
+    } finally { a.ctx.suite = suite; }
+  });
+
   it('with the AI suite merged, the draft is the suite\'s estimate of a directed ShotRequest using the greybox', async () => {
     const s = (await owner.req('POST', '/v1/camera-sessions', { characters: [{ modelId }], durationSec: 6, brief: 'walk' })).body;
     const n = (await owner.req('POST', `/v1/camera-sessions/${s.id}/assets`, { kind: 'greybox', contentType: 'video/mp4' })).body;
     await put(n.upload.url, 'mp4', 'video/mp4');
     await owner.req('POST', `/v1/camera-sessions/${s.id}/assets/${n.asset.id}/confirm`);
     const seen: any[] = [];
+    const suite = a.ctx.suite; // the real suite (restored below: app.close() waits on its runner)
     (a.ctx as any).suite = { estimate: async (_u: unknown, body: any) => { seen.push(body); return { estimate: 0.78, warnings: ['length set to 6 s'] }; } };
     try {
       const before = (await a.ctx.db.select().from(ledger)).length;
@@ -129,7 +145,7 @@ describe('camera sessions', () => {
       const ups = await a.ctx.db.execute((await import('drizzle-orm')).sql`select state from uploads where storage_key = ${key}`).then((r: any) => r.rows ?? r);
       expect(ups).toEqual([{ state: 'ready' }]);
       expect((await a.ctx.db.select().from(ledger)).length).toBe(before);
-    } finally { delete (a.ctx as any).suite; }
+    } finally { a.ctx.suite = suite; }
   });
 
   it('live events reach the owner only; notes join the transcript', async () => {
