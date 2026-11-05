@@ -13,7 +13,16 @@
    "maxSeconds": 15,
    "canKeyframes": true,
    "canReferences": true,
-   "canGuide": true
+   "canGuide": true,
+   "inputs": {
+    "start": true,
+    "end": true,
+    "middle": 0,
+    "images": 6,
+    "videos": 3,
+    "audio": true,
+    "framesWithRefs": true
+   }
   },
   {
    "id": "standard",
@@ -25,7 +34,16 @@
    "maxSeconds": 30,
    "canKeyframes": true,
    "canReferences": true,
-   "canGuide": true
+   "canGuide": true,
+   "inputs": {
+    "start": true,
+    "end": true,
+    "middle": 8,
+    "images": 6,
+    "videos": 3,
+    "audio": true,
+    "framesWithRefs": true
+   }
   },
   {
    "id": "hd",
@@ -37,7 +55,16 @@
    "maxSeconds": 30,
    "canKeyframes": true,
    "canReferences": true,
-   "canGuide": true
+   "canGuide": true,
+   "inputs": {
+    "start": true,
+    "end": true,
+    "middle": 8,
+    "images": 6,
+    "videos": 3,
+    "audio": true,
+    "framesWithRefs": true
+   }
   },
   {
    "id": "cinema",
@@ -49,7 +76,16 @@
    "maxSeconds": 30,
    "canKeyframes": true,
    "canReferences": true,
-   "canGuide": true
+   "canGuide": true,
+   "inputs": {
+    "start": true,
+    "end": true,
+    "middle": 8,
+    "images": 6,
+    "videos": 3,
+    "audio": true,
+    "framesWithRefs": true
+   }
   }
  ],
  "modes": [

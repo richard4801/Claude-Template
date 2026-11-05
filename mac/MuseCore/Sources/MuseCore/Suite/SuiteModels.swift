@@ -229,6 +229,8 @@ public struct SuiteTierModel: Codable, Hashable, Sendable {
     public var model: String
     public var name: String
     public var resolution: String
+    /// The input slots this engine takes (SuiteInputSlots.swift).
+    public var inputs: SuiteInputs?
 }
 
 /// A quality tier: Draft / Standard / HD / Cinema. `models` is the owner's (what the tier runs today).
@@ -243,10 +245,12 @@ public struct SuiteTier: Codable, Hashable, Sendable, Identifiable {
     public var canKeyframes: Bool
     public var canReferences: Bool
     public var canGuide: Bool
+    /// The input slots the tier takes; see `slots` (SuiteInputSlots.swift).
+    public var inputs: SuiteInputs?
     public var models: [SuiteTierModel]?
 
     public init(id: String, label: String, detail: String, available: Bool = true, resolution: String? = nil, fromPerSec: Double? = nil, maxSeconds: Double? = nil,
-                canKeyframes: Bool = true, canReferences: Bool = true, canGuide: Bool = true, models: [SuiteTierModel]? = nil) {
+                canKeyframes: Bool = true, canReferences: Bool = true, canGuide: Bool = true, inputs: SuiteInputs? = nil, models: [SuiteTierModel]? = nil) {
         self.id = id
         self.label = label
         self.detail = detail
@@ -257,10 +261,11 @@ public struct SuiteTier: Codable, Hashable, Sendable, Identifiable {
         self.canKeyframes = canKeyframes
         self.canReferences = canReferences
         self.canGuide = canGuide
+        self.inputs = inputs
         self.models = models
     }
 
-    enum CodingKeys: String, CodingKey { case id, label, detail, available, resolution, fromPerSec, maxSeconds, canKeyframes, canReferences, canGuide, models }
+    enum CodingKeys: String, CodingKey { case id, label, detail, available, resolution, fromPerSec, maxSeconds, canKeyframes, canReferences, canGuide, inputs, models }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -273,6 +278,7 @@ public struct SuiteTier: Codable, Hashable, Sendable, Identifiable {
         canKeyframes = c.v(.canKeyframes, false)
         canReferences = c.v(.canReferences, false)
         canGuide = c.v(.canGuide, false)
+        inputs = c.o(.inputs)
         models = c.o(.models)
     }
 }
@@ -512,10 +518,18 @@ public struct SuiteRefVideo: Codable, Hashable, Sendable {
 public struct SuiteReferences: Codable, Hashable, Sendable {
     public var images: [SuiteRefImage]?
     public var videos: [SuiteRefVideo]?
-    public init(images: [SuiteRefImage]? = nil, videos: [SuiteRefVideo]? = nil) {
+    /// One audio track (an upload in this studio).
+    public var audio: SuiteRefAudio?
+    public init(images: [SuiteRefImage]? = nil, videos: [SuiteRefVideo]? = nil, audio: SuiteRefAudio? = nil) {
         self.images = images
         self.videos = videos
+        self.audio = audio
     }
+}
+
+public struct SuiteRefAudio: Codable, Hashable, Sendable {
+    public var audio: SuiteVideoRef
+    public init(audio: SuiteVideoRef) { self.audio = audio }
 }
 
 /// Recast: one person in the source clip → a studio character.

@@ -14,31 +14,85 @@
    "canKeyframes": true,
    "canReferences": true,
    "canGuide": true,
+   "inputs": {
+    "start": true,
+    "end": true,
+    "middle": 0,
+    "images": 6,
+    "videos": 3,
+    "audio": true,
+    "framesWithRefs": true
+   },
    "models": [
     {
      "model": "h3-lite",
      "name": "MiniMax H3 Lite",
-     "resolution": "768P"
+     "resolution": "768P",
+     "inputs": {
+      "start": true,
+      "end": true,
+      "middle": 0,
+      "images": 6,
+      "videos": 3,
+      "audio": true,
+      "framesWithRefs": true
+     }
     },
     {
      "model": "veo-3.1-lite",
      "name": "Veo 3.1 Lite",
-     "resolution": "720p"
+     "resolution": "720p",
+     "inputs": {
+      "start": true,
+      "end": true,
+      "middle": 0,
+      "images": 0,
+      "videos": 0,
+      "audio": false,
+      "framesWithRefs": false
+     }
     },
     {
      "model": "h3-highspeed",
      "name": "MiniMax H3 Highspeed",
-     "resolution": "768P"
+     "resolution": "768P",
+     "inputs": {
+      "start": true,
+      "end": true,
+      "middle": 0,
+      "images": 6,
+      "videos": 3,
+      "audio": true,
+      "framesWithRefs": true
+     }
     },
     {
      "model": "seedance-2.0",
      "name": "Seedance 2.0",
-     "resolution": "480p"
+     "resolution": "480p",
+     "inputs": {
+      "start": true,
+      "end": true,
+      "middle": 0,
+      "images": 6,
+      "videos": 3,
+      "audio": true,
+      "framesWithRefs": false
+     }
     },
     {
      "model": "wan-2.7",
      "name": "Wan 2.7",
-     "resolution": "720p"
+     "resolution": "720p",
+     "inputs": {
+      "start": true,
+      "end": true,
+      "middle": 0,
+      "images": 5,
+      "videos": 3,
+      "audio": false,
+      "framesWithRefs": false
+     }
     }
    ]
   },
@@ -53,31 +107,85 @@
    "canKeyframes": true,
    "canReferences": true,
    "canGuide": true,
+   "inputs": {
+    "start": true,
+    "end": true,
+    "middle": 8,
+    "images": 6,
+    "videos": 3,
+    "audio": true,
+    "framesWithRefs": true
+   },
    "models": [
     {
      "model": "h3",
      "name": "MiniMax H3",
-     "resolution": "768P"
+     "resolution": "768P",
+     "inputs": {
+      "start": true,
+      "end": true,
+      "middle": 0,
+      "images": 6,
+      "videos": 3,
+      "audio": true,
+      "framesWithRefs": true
+     }
     },
     {
      "model": "kling-v4",
      "name": "Kling 4.0",
-     "resolution": "720p"
+     "resolution": "720p",
+     "inputs": {
+      "start": true,
+      "end": true,
+      "middle": 8,
+      "images": 6,
+      "videos": 3,
+      "audio": false,
+      "framesWithRefs": true
+     }
     },
     {
      "model": "seedance-2.0",
      "name": "Seedance 2.0",
-     "resolution": "720p"
+     "resolution": "720p",
+     "inputs": {
+      "start": true,
+      "end": true,
+      "middle": 0,
+      "images": 6,
+      "videos": 3,
+      "audio": true,
+      "framesWithRefs": false
+     }
     },
     {
      "model": "wan-2.7",
      "name": "Wan 2.7",
-     "resolution": "1080p"
+     "resolution": "1080p",
+     "inputs": {
+      "start": true,
+      "end": true,
+      "middle": 0,
+      "images": 5,
+      "videos": 3,
+      "audio": false,
+      "framesWithRefs": false
+     }
     },
     {
      "model": "ltx-2.3",
      "name": "LTX-2.3 Pro",
-     "resolution": "1080p"
+     "resolution": "1080p",
+     "inputs": {
+      "start": true,
+      "end": true,
+      "middle": 0,
+      "images": 0,
+      "videos": 0,
+      "audio": false,
+      "framesWithRefs": false
+     }
     }
    ]
   },
@@ -92,31 +200,85 @@
    "canKeyframes": true,
    "canReferences": true,
    "canGuide": true,
+   "inputs": {
+    "start": true,
+    "end": true,
+    "middle": 8,
+    "images": 6,
+    "videos": 3,
+    "audio": true,
+    "framesWithRefs": true
+   },
    "models": [
     {
      "model": "h3",
      "name": "MiniMax H3",
-     "resolution": "2K"
+     "resolution": "2K",
+     "inputs": {
+      "start": true,
+      "end": true,
+      "middle": 0,
+      "images": 6,
+      "videos": 3,
+      "audio": true,
+      "framesWithRefs": true
+     }
     },
     {
      "model": "kling-v4",
      "name": "Kling 4.0",
-     "resolution": "1080p"
+     "resolution": "1080p",
+     "inputs": {
+      "start": true,
+      "end": true,
+      "middle": 8,
+      "images": 6,
+      "videos": 3,
+      "audio": false,
+      "framesWithRefs": true
+     }
     },
     {
      "model": "veo-3.1-lite",
      "name": "Veo 3.1 Lite",
-     "resolution": "1080p"
+     "resolution": "1080p",
+     "inputs": {
+      "start": true,
+      "end": true,
+      "middle": 0,
+      "images": 0,
+      "videos": 0,
+      "audio": false,
+      "framesWithRefs": false
+     }
     },
     {
      "model": "seedance-2.0",
      "name": "Seedance 2.0",
-     "resolution": "1080p"
+     "resolution": "1080p",
+     "inputs": {
+      "start": true,
+      "end": true,
+      "middle": 0,
+      "images": 6,
+      "videos": 3,
+      "audio": true,
+      "framesWithRefs": false
+     }
     },
     {
      "model": "ltx-2.3",
      "name": "LTX-2.3 Pro",
-     "resolution": "2k"
+     "resolution": "2k",
+     "inputs": {
+      "start": true,
+      "end": true,
+      "middle": 0,
+      "images": 0,
+      "videos": 0,
+      "audio": false,
+      "framesWithRefs": false
+     }
     }
    ]
   },
@@ -131,31 +293,85 @@
    "canKeyframes": true,
    "canReferences": true,
    "canGuide": true,
+   "inputs": {
+    "start": true,
+    "end": true,
+    "middle": 8,
+    "images": 6,
+    "videos": 3,
+    "audio": true,
+    "framesWithRefs": true
+   },
    "models": [
     {
      "model": "kling-v4",
      "name": "Kling 4.0",
-     "resolution": "1080p"
+     "resolution": "1080p",
+     "inputs": {
+      "start": true,
+      "end": true,
+      "middle": 8,
+      "images": 6,
+      "videos": 3,
+      "audio": false,
+      "framesWithRefs": true
+     }
     },
     {
      "model": "seedance-2.5",
      "name": "Seedance 2.5",
-     "resolution": "720p"
+     "resolution": "720p",
+     "inputs": {
+      "start": true,
+      "end": true,
+      "middle": 0,
+      "images": 6,
+      "videos": 3,
+      "audio": true,
+      "framesWithRefs": false
+     }
     },
     {
      "model": "seedance-2.0",
      "name": "Seedance 2.0",
-     "resolution": "1080p"
+     "resolution": "1080p",
+     "inputs": {
+      "start": true,
+      "end": true,
+      "middle": 0,
+      "images": 6,
+      "videos": 3,
+      "audio": true,
+      "framesWithRefs": false
+     }
     },
     {
      "model": "h3",
      "name": "MiniMax H3",
-     "resolution": "2K"
+     "resolution": "2K",
+     "inputs": {
+      "start": true,
+      "end": true,
+      "middle": 0,
+      "images": 6,
+      "videos": 3,
+      "audio": true,
+      "framesWithRefs": true
+     }
     },
     {
      "model": "kling-v3-omni",
      "name": "Kling 3.0 Omni",
-     "resolution": "1080p"
+     "resolution": "1080p",
+     "inputs": {
+      "start": true,
+      "end": true,
+      "middle": 0,
+      "images": 6,
+      "videos": 1,
+      "audio": false,
+      "framesWithRefs": true
+     }
     }
    ]
   }

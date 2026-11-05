@@ -24,6 +24,14 @@ enum FakeSuitePrices {
 }
 
 extension FakeMuseAPI {
+    /// Demo mode: the file stays on this Mac; the slot gets a demo storage key.
+    public func uploadSuiteMedia(_ file: URL, contentType: String, progress: UploadProgress?) async throws -> SuiteVideoRef {
+        progress?(0)
+        let ext = file.pathExtension.isEmpty ? (contentType.hasPrefix("audio/") ? "m4a" : "mp4") : file.pathExtension
+        progress?(1)
+        return SuiteVideoRef(key: "c/demo_\(shortId()).\(ext)")
+    }
+
     public func suiteCatalog() async throws -> SuiteCatalog {
         var c = SuiteDemoCatalog.catalog
         c.enabled = true

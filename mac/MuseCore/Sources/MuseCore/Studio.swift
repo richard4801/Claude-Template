@@ -843,8 +843,10 @@ public struct PresignedUpload: Codable, Sendable {
     public var url: String
     public var headers: [String: String]
     public var expiresAt: Int64?
+    /// AI suite (workstream 1): the editor presign's stored-file URL (…/uploads/<key>).
+    public var fileUrl: String?
 
-    enum CodingKeys: String, CodingKey { case uploadId, method, url, headers, expiresAt }
+    enum CodingKeys: String, CodingKey { case uploadId, method, url, headers, expiresAt, fileUrl }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         uploadId = try c.decode(String.self, forKey: .uploadId)
@@ -852,6 +854,7 @@ public struct PresignedUpload: Codable, Sendable {
         url = try c.decode(String.self, forKey: .url)
         headers = c.v(.headers, [:])
         expiresAt = c.o(.expiresAt)
+        fileUrl = c.o(.fileUrl)
     }
 }
 

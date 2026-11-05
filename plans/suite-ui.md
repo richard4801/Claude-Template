@@ -77,3 +77,17 @@ _Started 2026-11-05. Owner-approved designs. Backend: `plans/api.md` "AI suite" 
   - Commands: `./gradlew :app:testDebugUnitTest` and `./gradlew :app:recordRoborazziDebug --tests 'studio.muse.app.Suite*'`.
   - The existing tests must stay green.
 - **Mac:** `swift test` for MuseCore (decoding the real API's JSON for the catalog, estimate and job; the fake suite) plus the full app build. GitHub Actions `mac.yml` runs on every push that touches `mac/**`; it must be green.
+
+## Input slots (built while the composer spec is pending)
+- **What:** start / middle / end frames, reference images (with a role), reference videos (with a use) and one audio track. They are reusable pieces for whatever composer layout comes next.
+- **Which slots show:** only those the chosen tier takes, from the catalog's `tiers[].inputs`. For the owner's engine pick, they come from `models[].inputs`. Older servers fall back to `canKeyframes` / `canReferences`.
+  - Many-of kinds (middle frames, references, videos) show the filled ones plus one empty "add" slot while there is room.
+  - Filled slots the tier doesn't take are kept but not sent, and a note says so. Another note shows when frames and references can't be combined (`framesWithRefs` false).
+- **Uploads:**
+  - Images go through the usual image upload.
+  - Video and audio go through the editor presign, and the slot keeps the storage `key`.
+  - Demo mode answers both with no server.
+- **Code:**
+  - Android: `ui/screens/suite/InputSlots.kt` (rules) and `InputSlotViews.kt` (`InputSlotUploader`, `rememberInputSlotPicker`, `InputSlotTile`).
+  - Mac: `MuseCore/Suite/SuiteInputSlots.swift` (rules) and `Muse/Views/Suite/InputSlotViews.swift` (`InputSlotsModel`, `InputSlotTile`).
+  - The rules have no layout. A screen lays out the tiles from `visible(...)`, and `applyTo` / `apply(to:)` fills the request's `frames` and `references`.
