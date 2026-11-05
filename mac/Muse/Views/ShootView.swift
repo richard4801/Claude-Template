@@ -21,6 +21,7 @@ struct ShootView: View {
 struct ShootCanvas: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
+    @State private var modelPicker = false
 
     var body: some View {
         let model = store.currentModel
@@ -44,15 +45,36 @@ struct ShootCanvas: View {
                 }
                 HStack(spacing: 10) {
                     Lbl("Model")
-                    Menu {
-                        ForEach(store.models) { m in Button(m.name) { store.selectModel(m) } }
-                    } label: {
-                        Media(ref: model?.cover, ratio: 0.75, radius: t.isA ? 0 : 6).frame(width: 44)
+                    // A button + popover, not a Menu: macOS menus draw an image label at its full pixel size,
+                    // so a full-resolution uploaded cover filled the whole window.
+                    Button { modelPicker = true } label: {
+                        Media(ref: model?.cover, ratio: 0.75, radius: t.isA ? 0 : 6)
+                            .frame(width: 44, height: 58)
                             .overlay(RoundedRectangle(cornerRadius: t.isA ? 0 : 6).strokeBorder(t.accent, lineWidth: 2))
                     }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
+                    .buttonStyle(.plain)
+                    .help("Change model")
+                    .popover(isPresented: $modelPicker, arrowEdge: .bottom) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(store.models) { m in
+                                Button {
+                                    store.selectModel(m)
+                                    modelPicker = false
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Media(ref: m.cover, ratio: 0.75, radius: 4).frame(width: 30, height: 40)
+                                        Text(m.name).font(t.body(13, m.id == model?.id ? .semibold : .regular)).foregroundStyle(t.ink)
+                                        Spacer(minLength: 0)
+                                    }
+                                    .padding(.horizontal, 8).padding(.vertical, 4)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(8)
+                        .frame(width: 240)
+                    }
                     Lbl("Outfit").padding(.leading, 14)
                     if !store.currentOutfits.isEmpty {
                         Seg(store.currentOutfits.map { ($0.id, $0.name) }, selection: outfitBinding).frame(maxWidth: 360)
