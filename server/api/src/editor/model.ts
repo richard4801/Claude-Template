@@ -1,0 +1,662 @@
+// Editor v2: the multitrack edit project (plans/video-editor.md "Editor v2"). This file is the REFERENCE implementation:
+// the Kotlin (android/core/.../core/edit) and Swift (mac/MuseCore/.../Edit) ports must give the same answers for every
+// case in test/fixtures/editor/*.json (scripts/editor-fixtures.ts writes them from these functions). Pure: no I/O.
+
+// ------------------------------------------------------------------ types
+export type Ease = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'hold';
+export type Keyframe = { t: number; v: number; ease?: Ease };
+export type KfProp = 'x' | 'y' | 'scale' | 'rotation' | 'opacity' | 'volume';
+export type Keyframes = Partial<Record<KfProp, Keyframe[]>>;
+export type Transform = { x?: number; y?: number; scale?: number; rotation?: number };
+export type Crop = { left?: number; top?: number; right?: number; bottom?: number };
+export type Adjust = { exposure?: number; contrast?: number; saturation?: number; temperature?: number };
+export type FilterRef = { id: string; amount: number };
+export type Chroma = { color: string; similarity?: number; smoothness?: number; spill?: number };
+export type TransitionKind = 'fade' | 'black' | 'white' | 'slideLeft' | 'slideRight' | 'slideUp' | 'slideDown' | 'zoom';
+export type Transition = { kind: TransitionKind; durationSec: number };
+export type AnimKind = 'none' | 'fade' | 'pop' | 'slideUp' | 'slideDown' | 'zoom' | 'typewriter';
+export type Anim = { kind: AnimKind; durationSec: number };
+export type Fit = 'cover' | 'contain';
+
+export type Asset = { id: string; kind: 'video' | 'image' | 'audio'; take?: string; upload?: string; library?: string;
+  durationSec?: number; width?: number; height?: number; hasAudio?: boolean; url?: string };
+
+type Visual = { fit?: Fit; transform?: Transform; crop?: Crop; opacity?: number; keyframes?: Keyframes; filter?: FilterRef; adjust?: Adjust };
+export type VideoClip = Visual & { id: string; asset: string; inSec: number; outSec: number; speed: number; startSec?: number;
+  volume?: number; muted?: boolean; fadeInSec?: number; fadeOutSec?: number; audioAsset?: string; chroma?: Chroma; transitionIn?: Transition };
+export type ImageItem = Visual & { id: string; asset: string; startSec: number; durationSec: number; animIn?: Anim; animOut?: Anim };
+export type TextStyle = { font: 'sans' | 'serif' | 'rounded' | 'condensed' | 'mono' | 'marker'; weight: 400 | 700 | 900; sizePct: number; color: string;
+  align: 'left' | 'center' | 'right'; maxWidthPct?: number; lineHeight?: number; letterSpacing?: number; uppercase?: boolean;
+  stroke?: { color: string; widthPct: number }; shadow?: { color: string; opacity: number; blurPct: number; dyPct: number };
+  background?: { color: string; opacity: number; paddingPct: number; radiusPct: number } };
+export type TextItem = { id: string; startSec: number; durationSec: number; text: string; style: TextStyle; transform?: Transform; opacity?: number;
+  keyframes?: Keyframes; animIn?: Anim; animOut?: Anim; template?: string };
+export type AudioClip = { id: string; asset: string; startSec: number; inSec: number; outSec: number; speed?: number; volume?: number; muted?: boolean;
+  fadeInSec?: number; fadeOutSec?: number; keyframes?: Keyframes; beats?: number[] };
+export type CaptionPreset = 'plain' | 'highlight' | 'box' | 'karaoke' | 'pop' | 'single';
+export type CaptionStyle = TextStyle & { preset: CaptionPreset; highlightColor: string; y?: number; wordsPerPage?: number; maxLines?: number };
+export type CaptionWord = { text: string; startSec: number; endSec: number };
+export type CaptionTrack = { asset: string; words: CaptionWord[]; style: CaptionStyle };
+export type Duck = { level?: number; fadeSec?: number; under: ('voice' | 'speech')[] };
+export type TrackKind = 'main' | 'video' | 'image' | 'text' | 'caption' | 'music' | 'voice' | 'sfx';
+export type Item = VideoClip | ImageItem | TextItem | AudioClip;
+export type Track = { id: string; kind: TrackKind; name?: string; muted?: boolean; hidden?: boolean; volume?: number; items: Item[];
+  caption?: CaptionTrack; duck?: Duck };
+export type Canvas = { width: number; height: number; fps: number; background?: string };
+export type EditProject = { version: 2; sourceTakeId: string; canvas: Canvas; assets: Asset[]; tracks: Track[]; mute?: boolean };
+
+export type V1Segment = { inSec: number; outSec: number; speed: number; muted?: boolean };
+export type EditListV1 = { version: 1; sourceTakeId: string; sourceDurationSec: number; segments: V1Segment[]; mute: boolean };
+
+export const LIMITS = {
+  maxJsonBytes: 256 * 1024, maxTracks: 16, maxItemsPerTrack: 300, maxItems: 600, maxAssets: 60, maxWords: 3000, maxKeyframes: 100,
+  minClipSourceSec: 0.1, minItemSec: 0.05, minOutputSec: 0.5, maxOutputSec: 600, minSpeed: 0.25, maxSpeed: 4, endSlackSec: 0.05,
+  minTransitionSec: 0.1, maxTransitionSec: 2, maxText: 500, overlapSlackSec: 0.001,
+} as const;
+export const V1_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+export const TRANSITIONS: TransitionKind[] = ['fade', 'black', 'white', 'slideLeft', 'slideRight', 'slideUp', 'slideDown', 'zoom'];
+export const ANIMS: AnimKind[] = ['none', 'fade', 'pop', 'slideUp', 'slideDown', 'zoom', 'typewriter'];
+export const FONTS = ['sans', 'serif', 'rounded', 'condensed', 'mono', 'marker'] as const;
+export const CAPTION_PRESETS: CaptionPreset[] = ['plain', 'highlight', 'box', 'karaoke', 'pop', 'single'];
+/** Caption paging constants (plans/video-editor.md "Text, hooks and captions"). */
+export const CAPTION_GAP_SEC = 0.6, CAPTION_TAIL_SEC = 0.4, SPEECH_JOIN_SEC = 0.4;
+
+const r6 = (v: number) => Math.round(v * 1e6) / 1e6;
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+// ------------------------------------------------------------------ easing and keyframes
+export function ease(kind: Ease | undefined, p: number): number {
+  p = clamp(p, 0, 1);
+  switch (kind ?? 'linear') {
+    case 'easeIn': return p * p;
+    case 'easeOut': return 1 - (1 - p) * (1 - p);
+    case 'easeInOut': return p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+    case 'hold': return 0;
+    default: return p;
+  }
+}
+
+/** The value of a keyframed property at item-local time t (keys sorted by t). */
+export function keyframeValue(keys: Keyframe[], t: number): number {
+  if (keys.length === 0) return NaN;
+  if (t <= keys[0]!.t) return keys[0]!.v;
+  const last = keys[keys.length - 1]!;
+  if (t >= last.t) return last.v;
+  for (let k = 0; k < keys.length - 1; k++) {
+    const a = keys[k]!, b = keys[k + 1]!;
+    if (t >= a.t && t < b.t) {
+      const span = b.t - a.t;
+      if (span <= 0) return b.v;
+      return a.v + (b.v - a.v) * ease(a.ease, (t - a.t) / span);
+    }
+  }
+  return last.v;
+}
+
+/** A property at item-local t: its keyframes when it has any, else the static value. */
+export function propAt(item: { keyframes?: Keyframes }, prop: KfProp, fallback: number, t: number) {
+  const k = item.keyframes?.[prop];
+  return k && k.length ? keyframeValue(k, t) : fallback;
+}
+
+// ------------------------------------------------------------------ timeline
+export const clipLength = (c: { inSec: number; outSec: number; speed?: number }) => (c.outSec - c.inSec) / (c.speed ?? 1);
+export const mainTrack = (p: EditProject) => p.tracks.find(t => t.kind === 'main')!;
+
+export type MainSpan = { id: string; index: number; startSec: number; endSec: number; transitionSec: number };
+/** Each main clip's place on the timeline. A clip with transitionIn starts that much before the previous clip ends. */
+export function timeline(p: EditProject): MainSpan[] {
+  const out: MainSpan[] = [];
+  let end = 0;
+  mainTrack(p).items.forEach((it, i) => {
+    const c = it as VideoClip;
+    const tr = i > 0 && c.transitionIn ? c.transitionIn.durationSec : 0;
+    const start = Math.max(0, end - tr);
+    const len = clipLength(c);
+    out.push({ id: c.id, index: i, startSec: r6(start), endSec: r6(start + len), transitionSec: tr });
+    end = start + len;
+  });
+  return out;
+}
+export const durationSec = (p: EditProject) => { const t = timeline(p); return t.length ? t[t.length - 1]!.endSec : 0; };
+
+/** Timeline start/end of any item (main clips through timeline(); others from startSec). */
+export function itemSpan(p: EditProject, track: Track, item: Item): { startSec: number; endSec: number } {
+  if (track.kind === 'main') { const s = timeline(p).find(x => x.id === item.id)!; return { startSec: s.startSec, endSec: s.endSec }; }
+  const start = (item as { startSec: number }).startSec;
+  const len = 'inSec' in item ? clipLength(item as AudioClip) : (item as ImageItem).durationSec;
+  return { startSec: r6(start), endSec: r6(start + len) };
+}
+
+// ------------------------------------------------------------------ v1 <-> v2
+export function fromV1(v1: EditListV1, info: { width: number; height: number; fps: number; hasAudio?: boolean }): EditProject {
+  const asset: Asset = { id: 'src', kind: 'video', take: v1.sourceTakeId, durationSec: v1.sourceDurationSec, width: info.width, height: info.height, hasAudio: info.hasAudio ?? true };
+  return {
+    version: 2, sourceTakeId: v1.sourceTakeId, canvas: { width: info.width, height: info.height, fps: info.fps, background: '#000000' },
+    assets: [asset],
+    tracks: [{ id: 'main', kind: 'main', items: v1.segments.map((s, i) => ({ id: `c${i + 1}`, asset: 'src', inSec: s.inSec, outSec: s.outSec, speed: s.speed, ...(s.muted ? { muted: true } : {}) })) }],
+    ...(v1.mute ? { mute: true } : {}),
+  };
+}
+
+const V1_CLIP_KEYS = new Set(['id', 'asset', 'inSec', 'outSec', 'speed', 'muted']);
+/** The v1 edit list for a project that only uses v1 features (one source, main track only, v1 speeds, in order); else null. */
+export function toV1(p: EditProject): EditListV1 | null {
+  if (p.tracks.length !== 1 || p.tracks[0]!.kind !== 'main') return null;
+  const t = p.tracks[0]!;
+  if (t.muted || t.hidden || (t.volume != null && t.volume !== 1)) return null;
+  const src = p.assets.find(a => a.take === p.sourceTakeId && a.kind === 'video');
+  if (!src || src.durationSec == null) return null;
+  let prev = 0;
+  const segs: V1Segment[] = [];
+  for (const it of t.items as VideoClip[]) {
+    if (it.asset !== src.id || !V1_SPEEDS.includes(it.speed) || it.inSec < prev - 1e-9) return null;
+    if (Object.keys(it).some(k => !V1_CLIP_KEYS.has(k) && (it as Record<string, unknown>)[k] !== undefined)) return null;
+    prev = it.outSec;
+    segs.push({ inSec: it.inSec, outSec: it.outSec, speed: it.speed, ...(it.muted ? { muted: true } : {}) });
+  }
+  if (segs.length > 50) return null;
+  return { version: 1, sourceTakeId: p.sourceTakeId, sourceDurationSec: src.durationSec, segments: segs, mute: !!p.mute };
+}
+
+// ------------------------------------------------------------------ cuts (silence / filler removal)
+export type Range = { startSec: number; endSec: number };
+/** Merges and sorts source ranges. */
+export function mergeRanges(rs: Range[], joinGap = 0): Range[] {
+  const s = rs.filter(r => r.endSec > r.startSec).map(r => ({ ...r })).sort((a, b) => a.startSec - b.startSec);
+  const out: Range[] = [];
+  for (const r of s) {
+    const last = out[out.length - 1];
+    if (last && r.startSec <= last.endSec + joinGap) last.endSec = Math.max(last.endSec, r.endSec);
+    else out.push({ startSec: r.startSec, endSec: r.endSec });
+  }
+  return out;
+}
+
+/**
+ * Removes source ranges of `assetId` from every main clip of that asset (silence/filler suggestions). Clips are split
+ * around the cuts; pieces shorter than 0.1 s of source are dropped; looks and speed carry over; a transition stays only
+ * on the first piece of a clip that kept its start. Ids: a split clip's pieces are `<id>`, `<id>.2`, `<id>.3`… Returns
+ * the project unchanged when every clip would disappear.
+ */
+export function applyCuts(p: EditProject, assetId: string, cuts: Range[]): EditProject {
+  const rs = mergeRanges(cuts);
+  const main = mainTrack(p);
+  const items: VideoClip[] = [];
+  for (const it of main.items as VideoClip[]) {
+    if (it.asset !== assetId) { items.push(it); continue; }
+    let pieces: Range[] = [{ startSec: it.inSec, endSec: it.outSec }];
+    for (const r of rs) {
+      pieces = pieces.flatMap(pc => {
+        if (r.endSec <= pc.startSec || r.startSec >= pc.endSec) return [pc];
+        const keep: Range[] = [];
+        if (r.startSec > pc.startSec) keep.push({ startSec: pc.startSec, endSec: r.startSec });
+        if (r.endSec < pc.endSec) keep.push({ startSec: r.endSec, endSec: pc.endSec });
+        return keep;
+      });
+    }
+    pieces = pieces.filter(pc => pc.endSec - pc.startSec >= LIMITS.minClipSourceSec - 1e-9);
+    pieces.forEach((pc, k) => {
+      const { transitionIn, ...rest } = it;
+      const keepsStart = k === 0 && Math.abs(pc.startSec - it.inSec) < 1e-9;
+      items.push({ ...rest, id: k === 0 ? it.id : `${it.id}.${k + 1}`, inSec: r6(pc.startSec), outSec: r6(pc.endSec),
+        ...(transitionIn && keepsStart ? { transitionIn } : {}) });
+    });
+  }
+  if (!items.length) return p;
+  // A transition may now be on the first clip, or longer than its new neighbours allow: drop those.
+  const fixed = items.map((c, i) => {
+    if (!c.transitionIn) return c;
+    const prev = items[i - 1];
+    const ok = i > 0 && c.transitionIn.durationSec <= clipLength(c) / 2 + 1e-9 && prev && c.transitionIn.durationSec <= clipLength(prev) / 2 + 1e-9;
+    if (ok) return c;
+    const { transitionIn: _drop, ...rest } = c;
+    return rest;
+  });
+  return { ...p, tracks: p.tracks.map(t => (t === main ? { ...t, items: fixed } : t)) };
+}
+
+// ------------------------------------------------------------------ captions
+export type TimedWord = { text: string; startSec: number; endSec: number; index: number };
+/** Caption words on the timeline: each source word mapped through every main clip of the caption asset that keeps its midpoint. */
+export function captionWords(p: EditProject): TimedWord[] {
+  const ct = p.tracks.find(t => t.kind === 'caption' && t.caption)?.caption;
+  if (!ct) return [];
+  const spans = timeline(p);
+  const out: TimedWord[] = [];
+  (mainTrack(p).items as VideoClip[]).forEach((c, i) => {
+    if (c.asset !== ct.asset) return;
+    const s = spans[i]!;
+    const sp = c.speed;
+    ct.words.forEach((w, idx) => {
+      const mid = (w.startSec + w.endSec) / 2;
+      if (mid < c.inSec || mid >= c.outSec) return;
+      const a = Math.max(w.startSec, c.inSec), b = Math.min(w.endSec, c.outSec);
+      out.push({ text: w.text, startSec: r6(s.startSec + (a - c.inSec) / sp), endSec: r6(s.startSec + (b - c.inSec) / sp), index: idx });
+    });
+  });
+  return out.sort((a, b) => a.startSec - b.startSec || a.index - b.index);
+}
+
+export type CaptionPage = { startSec: number; endSec: number; words: TimedWord[] };
+export function captionPages(p: EditProject): CaptionPage[] {
+  const ct = p.tracks.find(t => t.kind === 'caption' && t.caption)?.caption;
+  if (!ct) return [];
+  const per = ct.style.preset === 'single' ? 1 : clamp(Math.round(ct.style.wordsPerPage ?? 3), 1, 8);
+  const words = captionWords(p);
+  const pages: TimedWord[][] = [];
+  let cur: TimedWord[] = [];
+  words.forEach((w, i) => {
+    cur.push(w);
+    const next = words[i + 1];
+    const brk = cur.length >= per || !next || next.startSec - w.endSec > CAPTION_GAP_SEC || /[.!?]["')\]]*$/.test(w.text.trim());
+    if (brk) { pages.push(cur); cur = []; }
+  });
+  return pages.map((ws, i) => {
+    const next = pages[i + 1];
+    const tail = ws[ws.length - 1]!.endSec + CAPTION_TAIL_SEC;
+    return { startSec: ws[0]!.startSec, endSec: r6(next ? Math.min(next[0]!.startSec, tail) : tail), words: ws };
+  });
+}
+
+/** The page shown at t and its active word (index into page.words), or null. */
+export function captionAt(p: EditProject, t: number): { page: number; word: number } | null {
+  const pages = captionPages(p);
+  for (let i = 0; i < pages.length; i++) {
+    const pg = pages[i]!;
+    if (t >= pg.startSec && t < pg.endSec) {
+      let w = 0;
+      pg.words.forEach((x, k) => { if (x.startSec <= t) w = k; });
+      return { page: i, word: w };
+    }
+  }
+  return null;
+}
+
+// ------------------------------------------------------------------ transitions and animations
+export type LayerState = { opacity: number; dx: number; dy: number; scale: number };
+export type TransitionState = { a: LayerState; b: LayerState; color: string | null };
+export function transitionState(kind: TransitionKind, p: number): TransitionState {
+  p = clamp(p, 0, 1);
+  const e = ease('easeInOut', p);
+  const L = (o: Partial<LayerState> = {}): LayerState => ({ opacity: 1, dx: 0, dy: 0, scale: 1, ...o });
+  switch (kind) {
+    case 'fade': return { a: L(), b: L({ opacity: p }), color: null };
+    case 'black': case 'white': return { a: L({ opacity: Math.max(0, 1 - 2 * p) }), b: L({ opacity: Math.max(0, 2 * p - 1) }), color: kind === 'black' ? '#000000' : '#FFFFFF' };
+    case 'slideLeft': return { a: L({ dx: -e }), b: L({ dx: 1 - e }), color: null };
+    case 'slideRight': return { a: L({ dx: e }), b: L({ dx: -(1 - e) }), color: null };
+    case 'slideUp': return { a: L({ dy: -e }), b: L({ dy: 1 - e }), color: null };
+    case 'slideDown': return { a: L({ dy: e }), b: L({ dy: -(1 - e) }), color: null };
+    case 'zoom': return { a: L({ scale: 1 + 0.25 * e, opacity: 1 - p }), b: L({ opacity: p }), color: null };
+  }
+}
+
+export type AnimState = { opacity: number; scale: number; dy: number; chars: number | null };
+/** In/out animation of an image or text item at item-local t (chars: how many characters typewriter shows, else null). */
+export function animState(item: { durationSec: number; animIn?: Anim; animOut?: Anim; text?: string }, t: number): AnimState {
+  const st: AnimState = { opacity: 1, scale: 1, dy: 0, chars: null };
+  const n = item.text != null ? [...item.text].length : 0;
+  const apply = (a: Anim | undefined, p: number) => {
+    if (!a || a.kind === 'none') return;
+    const e = ease('easeOut', p);
+    switch (a.kind) {
+      case 'fade': st.opacity *= e; break;
+      case 'pop': st.opacity *= e; st.scale *= p < 0.7 ? 0.6 + (1.08 - 0.6) * (p / 0.7) : 1.08 + (1 - 1.08) * ((p - 0.7) / 0.3); break;
+      case 'slideUp': st.opacity *= e; st.dy += 0.05 * (1 - e); break;
+      case 'slideDown': st.opacity *= e; st.dy -= 0.05 * (1 - e); break;
+      case 'zoom': st.opacity *= e; st.scale *= 1.3 + (1 - 1.3) * e; break;
+      case 'typewriter': st.chars = Math.min(st.chars ?? n, Math.ceil(clamp(p, 0, 1) * n)); break;
+    }
+  };
+  if (item.animIn) apply(item.animIn, item.animIn.durationSec > 0 ? clamp(t / item.animIn.durationSec, 0, 1) : 1);
+  if (item.animOut) apply(item.animOut, item.animOut.durationSec > 0 ? clamp((item.durationSec - t) / item.animOut.durationSec, 0, 1) : 1);
+  return { opacity: r6(st.opacity), scale: r6(st.scale), dy: r6(st.dy), chars: st.chars };
+}
+
+// ------------------------------------------------------------------ colour
+export type FilterPreset = { id: string; label: string; adjust: Adjust; tint?: { color: string; strength: number } };
+export const hexRgb = (h: string): [number, number, number] => {
+  const n = parseInt(h.slice(1), 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+};
+type M = number[]; // 3×4 row-major: [r0 r1 r2 r3, g0.., b0..]; out = M · (r, g, b, 1)
+const ID: M = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0];
+/** a ∘ b: apply b first, then a. */
+function mul(a: M, b: M): M {
+  const o: M = new Array(12).fill(0);
+  for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 4; j++) {
+      let s = 0;
+      for (let k = 0; k < 3; k++) s += a[i * 4 + k]! * b[k * 4 + j]!;
+      if (j === 3) s += a[i * 4 + 3]!;
+      o[i * 4 + j] = s;
+    }
+  }
+  return o;
+}
+const LUMA = [0.2126, 0.7152, 0.0722];
+/** The adjust an item ends up with: its own plus amount × the filter preset's (each clamped to ±1), and the tint. */
+export function effectiveAdjust(adjust: Adjust | undefined, filter: FilterRef | undefined, presets: FilterPreset[]): { adjust: Required<Adjust>; tint: { color: string; strength: number } | null } {
+  const a = { exposure: adjust?.exposure ?? 0, contrast: adjust?.contrast ?? 0, saturation: adjust?.saturation ?? 0, temperature: adjust?.temperature ?? 0 };
+  const pr = filter ? presets.find(x => x.id === filter.id) : undefined;
+  let tint: { color: string; strength: number } | null = null;
+  if (pr && filter) {
+    const k = clamp(filter.amount, 0, 1);
+    for (const key of ['exposure', 'contrast', 'saturation', 'temperature'] as const) a[key] = clamp(a[key] + k * (pr.adjust[key] ?? 0), -1, 1);
+    if (pr.tint && k > 0) tint = { color: pr.tint.color, strength: pr.tint.strength * k };
+  }
+  return { adjust: a, tint };
+}
+/** One 3×4 affine RGB matrix for the item's look (exposure → temperature → contrast → saturation → tint). */
+export function colorMatrix(adjust: Adjust | undefined, filter: FilterRef | undefined, presets: FilterPreset[]): number[] {
+  const { adjust: a, tint } = effectiveAdjust(adjust, filter, presets);
+  let m = ID;
+  const ex = Math.pow(2, a.exposure);
+  m = mul([ex, 0, 0, 0, 0, ex, 0, 0, 0, 0, ex, 0], m);
+  m = mul([1 + 0.1 * a.temperature, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 - 0.1 * a.temperature, 0], m);
+  const c = 1 + a.contrast, off = 0.5 * (1 - c);
+  m = mul([c, 0, 0, off, 0, c, 0, off, 0, 0, c, off], m);
+  const s = 1 + a.saturation;
+  const sat: M = [];
+  for (let i = 0; i < 3; i++) { for (let j = 0; j < 3; j++) sat.push((1 - s) * LUMA[j]! + (i === j ? s : 0)); sat.push(0); }
+  m = mul(sat, m);
+  if (tint && tint.strength > 0) {
+    const [tr, tg, tb] = hexRgb(tint.color), k = clamp(tint.strength, 0, 1);
+    m = mul([1 - k, 0, 0, tr * k, 0, 1 - k, 0, tg * k, 0, 0, 1 - k, tb * k], m);
+  }
+  return m.map(r6);
+}
+
+// ------------------------------------------------------------------ audio
+export type GainPoint = { t: number; gain: number };
+/** Timeline ranges where speech/voice is heard, for ducking. */
+export function duckRegions(p: EditProject, duck: Duck): Range[] {
+  const rs: Range[] = [];
+  if (duck.under.includes('voice')) {
+    for (const t of p.tracks) if (t.kind === 'voice' && !t.muted) for (const it of t.items) { const s = itemSpan(p, t, it); rs.push({ startSec: s.startSec, endSec: s.endSec }); }
+  }
+  if (duck.under.includes('speech')) for (const w of captionWords(p)) rs.push({ startSec: w.startSec, endSec: w.endSec });
+  return mergeRanges(rs, SPEECH_JOIN_SEC);
+}
+
+/** Base gain of a clip at timeline t, without ducking (volume, keyframes, fades, transition crossfade). */
+function baseGain(p: EditProject, track: Track, item: VideoClip | AudioClip, t: number): number {
+  if (p.mute || track.muted || item.muted) return 0;
+  const span = itemSpan(p, track, item);
+  if (t < span.startSec - 1e-9 || t > span.endSec + 1e-9) return 0;
+  const local = t - span.startSec, len = span.endSec - span.startSec;
+  let g = (track.volume ?? 1) * propAt(item, 'volume', item.volume ?? 1, local);
+  if (item.fadeInSec && item.fadeInSec > 0) g *= clamp(local / item.fadeInSec, 0, 1);
+  if (item.fadeOutSec && item.fadeOutSec > 0) g *= clamp((len - local) / item.fadeOutSec, 0, 1);
+  if (track.kind === 'main') {
+    const spans = timeline(p);
+    const i = spans.findIndex(s => s.id === item.id);
+    const me = spans[i]!, next = spans[i + 1];
+    if (me.transitionSec > 0) g *= clamp(local / me.transitionSec, 0, 1);
+    if (next && next.transitionSec > 0) g *= clamp((me.endSec - t) / next.transitionSec, 0, 1);
+  }
+  return g;
+}
+
+/** Ducking multiplier at t for a music track with `duck`. */
+function duckGain(regions: Range[], duck: Duck, t: number): number {
+  const level = clamp(duck.level ?? 0.3, 0.05, 1), f = Math.max(0.05, duck.fadeSec ?? 0.25);
+  let m = 1;
+  for (const r of regions) {
+    let d: number;
+    if (t >= r.startSec && t <= r.endSec) d = 1;
+    else if (t < r.startSec) d = clamp(1 - (r.startSec - t) / f, 0, 1);
+    else d = clamp(1 - (t - r.endSec) / f, 0, 1);
+    m = Math.min(m, 1 - (1 - level) * d);
+  }
+  return m;
+}
+
+/**
+ * A clip's gain over the timeline as piecewise-linear points (t ascending, timeline seconds, from the clip's start to
+ * its end). Points are placed at every corner (fades, transitions, keyframes, duck ramps), so linear interpolation
+ * between them is exact except inside eased keyframes, which are sampled every 0.1 s.
+ */
+export function audioEnvelope(p: EditProject, trackId: string, itemId: string): GainPoint[] {
+  const track = p.tracks.find(t => t.id === trackId);
+  const item = track?.items.find(i => i.id === itemId) as VideoClip | AudioClip | undefined;
+  if (!track || !item) return [];
+  const span = itemSpan(p, track, item);
+  const end = Math.min(span.endSec, durationSec(p));
+  if (end <= span.startSec) return [];
+  const ts = new Set<number>([span.startSec, end]);
+  const add = (t: number) => { if (t > span.startSec && t < end) ts.add(r6(t)); };
+  if (item.fadeInSec) add(span.startSec + item.fadeInSec);
+  if (item.fadeOutSec) add(span.endSec - item.fadeOutSec);
+  if (track.kind === 'main') {
+    const spans = timeline(p), i = spans.findIndex(s => s.id === item.id), me = spans[i]!, next = spans[i + 1];
+    if (me.transitionSec) add(me.startSec + me.transitionSec);
+    if (next?.transitionSec) add(next.startSec);
+  }
+  const kv = item.keyframes?.volume ?? [];
+  kv.forEach((k, idx) => {
+    add(span.startSec + k.t);
+    const nk = kv[idx + 1];
+    if (nk && k.ease && k.ease !== 'linear') {
+      if (k.ease === 'hold') add(span.startSec + nk.t - 1e-4);
+      else for (let s = k.t + 0.1; s < nk.t - 1e-9; s += 0.1) add(span.startSec + s);
+    }
+  });
+  let regions: Range[] = [];
+  if (track.kind === 'music' && track.duck) {
+    regions = duckRegions(p, track.duck);
+    const f = Math.max(0.05, track.duck.fadeSec ?? 0.25);
+    for (const r of regions) { add(r.startSec - f); add(r.startSec); add(r.endSec); add(r.endSec + f); }
+  }
+  return [...ts].sort((a, b) => a - b).map(t => {
+    let g = baseGain(p, track, item, t);
+    if (regions.length && track.duck) g *= duckGain(regions, track.duck, t);
+    return { t: r6(t), gain: r6(g) };
+  });
+}
+
+// ------------------------------------------------------------------ validation
+export class EditProblem extends Error { constructor(public field: string, message: string) { super(`${field}: ${message}`); } }
+const HEX = /^#[0-9A-Fa-f]{6}$/;
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/** All the rules of plans/video-editor.md "Rules". Throws EditProblem (field path + message) on the first one broken. */
+export function validate(p: EditProject, presets: FilterPreset[] = []): { durationSec: number } {
+  const bad = (f: string, m: string): never => { throw new EditProblem(f, m); };
+  const num = (f: string, v: unknown, lo: number, hi: number, optional = true) => {
+    if (v === undefined && optional) return;
+    if (!isNum(v) || v < lo || v > hi) bad(f, `must be a number from ${lo} to ${hi}`);
+  };
+  const color = (f: string, v: unknown, optional = true) => { if (v === undefined && optional) return; if (typeof v !== 'string' || !HEX.test(v)) bad(f, 'must be a colour like #FF0000'); };
+  const id = (f: string, v: unknown) => { if (typeof v !== 'string' || v.length < 1 || v.length > 64) bad(f, 'must be an id of 1–64 characters'); };
+  if (!p || typeof p !== 'object') bad('edits', 'must be an object');
+  if (p.version !== 2) bad('edits.version', 'must be 2');
+  if (typeof p.sourceTakeId !== 'string' || !p.sourceTakeId) bad('edits.sourceTakeId', 'is required');
+  const cv = p.canvas;
+  if (!cv || typeof cv !== 'object') bad('edits.canvas', 'is required');
+  num('edits.canvas.width', cv.width, 16, 4096, false); num('edits.canvas.height', cv.height, 16, 4096, false); num('edits.canvas.fps', cv.fps, 1, 120, false);
+  color('edits.canvas.background', cv.background);
+  if (!Array.isArray(p.assets) || p.assets.length > LIMITS.maxAssets) bad('edits.assets', `must be a list of at most ${LIMITS.maxAssets}`);
+  const assets = new Map<string, Asset>();
+  p.assets.forEach((a, i) => {
+    const f = `edits.assets.${i}`;
+    id(`${f}.id`, a.id);
+    if (assets.has(a.id)) bad(`${f}.id`, 'is used twice');
+    if (!['video', 'image', 'audio'].includes(a.kind)) bad(`${f}.kind`, 'must be video, image or audio');
+    const refs = [a.take, a.upload, a.library].filter(x => x !== undefined);
+    if (refs.length !== 1 || refs.some(r => typeof r !== 'string' || !r || r.length > 100)) bad(f, 'needs exactly one of take, upload or library');
+    num(`${f}.durationSec`, a.durationSec, 0.01, 36_000);
+    num(`${f}.width`, a.width, 1, 16384); num(`${f}.height`, a.height, 1, 16384);
+    assets.set(a.id, a);
+  });
+  if (!Array.isArray(p.tracks) || p.tracks.length < 1 || p.tracks.length > LIMITS.maxTracks) bad('edits.tracks', `must have 1–${LIMITS.maxTracks} tracks`);
+  if (p.tracks[0]!.kind !== 'main') bad('edits.tracks.0.kind', 'the first track must be the main track');
+  if (p.tracks.filter(t => t.kind === 'main').length !== 1) bad('edits.tracks', 'needs exactly one main track');
+  if (p.tracks.filter(t => t.kind === 'caption').length > 1) bad('edits.tracks', 'at most one caption track');
+  const ids = new Set<string>();
+  let total = 0;
+  const filterIds = new Set(presets.map(x => x.id));
+
+  const kfs = (f: string, k: Keyframes | undefined, len: number, allowed: KfProp[]) => {
+    if (k === undefined) return;
+    if (typeof k !== 'object' || k === null) bad(f, 'must be an object');
+    for (const [prop, list] of Object.entries(k)) {
+      if (!allowed.includes(prop as KfProp)) bad(`${f}.${prop}`, 'is not a keyframe property here');
+      if (!Array.isArray(list) || list.length > LIMITS.maxKeyframes) bad(`${f}.${prop}`, `at most ${LIMITS.maxKeyframes} keyframes`);
+      let prev = -Infinity;
+      (list as Keyframe[]).forEach((kf, j) => {
+        const g = `${f}.${prop}.${j}`;
+        num(`${g}.t`, kf.t, 0, len + LIMITS.endSlackSec, false);
+        if (kf.t < prev) bad(`${g}.t`, 'keyframes must be in time order');
+        prev = kf.t;
+        const range: Record<KfProp, [number, number]> = { x: [-2, 3], y: [-2, 3], scale: [0.05, 10], rotation: [-3600, 3600], opacity: [0, 1], volume: [0, 2] };
+        num(`${g}.v`, kf.v, range[prop as KfProp][0], range[prop as KfProp][1], false);
+        if (kf.ease !== undefined && !['linear', 'easeIn', 'easeOut', 'easeInOut', 'hold'].includes(kf.ease)) bad(`${g}.ease`, 'unknown ease');
+      });
+    }
+  };
+  const visual = (f: string, it: Visual, len: number) => {
+    if (it.fit !== undefined && it.fit !== 'cover' && it.fit !== 'contain') bad(`${f}.fit`, 'must be cover or contain');
+    if (it.transform !== undefined) {
+      num(`${f}.transform.x`, it.transform.x, -2, 3); num(`${f}.transform.y`, it.transform.y, -2, 3);
+      num(`${f}.transform.scale`, it.transform.scale, 0.05, 10); num(`${f}.transform.rotation`, it.transform.rotation, -3600, 3600);
+    }
+    if (it.crop !== undefined) for (const s of ['left', 'top', 'right', 'bottom'] as const) num(`${f}.crop.${s}`, it.crop[s], 0, 0.45);
+    num(`${f}.opacity`, it.opacity, 0, 1);
+    if (it.adjust !== undefined) for (const s of ['exposure', 'contrast', 'saturation', 'temperature'] as const) num(`${f}.adjust.${s}`, it.adjust[s], -1, 1);
+    if (it.filter !== undefined) {
+      if (typeof it.filter.id !== 'string' || (filterIds.size && !filterIds.has(it.filter.id))) bad(`${f}.filter.id`, 'unknown filter');
+      num(`${f}.filter.amount`, it.filter.amount, 0, 1, false);
+    }
+  };
+  const anim = (f: string, a: Anim | undefined, text: boolean) => {
+    if (a === undefined) return;
+    if (!ANIMS.includes(a.kind) || (a.kind === 'typewriter' && !text)) bad(`${f}.kind`, 'unknown animation');
+    num(`${f}.durationSec`, a.durationSec, 0.1, 2, false);
+  };
+  const clipBase = (f: string, c: VideoClip | AudioClip, kinds: Asset['kind'][]) => {
+    const a = assets.get(c.asset);
+    if (!a) bad(`${f}.asset`, 'is not in assets');
+    if (!kinds.includes(a!.kind)) bad(`${f}.asset`, `must be ${kinds.join(' or ')}`);
+    num(`${f}.inSec`, c.inSec, 0, 36_000, false); num(`${f}.outSec`, c.outSec, 0, 36_000, false);
+    if (c.outSec - c.inSec < LIMITS.minClipSourceSec - 1e-9) bad(`${f}.outSec`, `a clip must keep at least ${LIMITS.minClipSourceSec} s of its source`);
+    if (a!.durationSec != null && c.outSec > a!.durationSec + LIMITS.endSlackSec) bad(`${f}.outSec`, 'is past the end of its source');
+    num(`${f}.volume`, c.volume, 0, 2); num(`${f}.fadeInSec`, c.fadeInSec, 0, 10); num(`${f}.fadeOutSec`, c.fadeOutSec, 0, 10);
+    if (c.muted !== undefined && typeof c.muted !== 'boolean') bad(`${f}.muted`, 'must be true or false');
+  };
+
+  p.tracks.forEach((t, ti) => {
+    const f = `edits.tracks.${ti}`;
+    id(`${f}.id`, t.id);
+    if (ids.has(t.id)) bad(`${f}.id`, 'is used twice');
+    ids.add(t.id);
+    if (!['main', 'video', 'image', 'text', 'caption', 'music', 'voice', 'sfx'].includes(t.kind)) bad(`${f}.kind`, 'unknown track kind');
+    num(`${f}.volume`, t.volume, 0, 2);
+    if (!Array.isArray(t.items) || t.items.length > LIMITS.maxItemsPerTrack) bad(`${f}.items`, `at most ${LIMITS.maxItemsPerTrack} items`);
+    total += t.items.length;
+    if (total > LIMITS.maxItems) bad(`${f}.items`, `at most ${LIMITS.maxItems} items in all`);
+    if (t.kind === 'main' && t.items.length < 1) bad(`${f}.items`, 'the main track needs at least one clip');
+    if (t.kind === 'caption') {
+      if (t.items.length) bad(`${f}.items`, 'a caption track has no items');
+      const c = t.caption;
+      if (!c) bad(`${f}.caption`, 'is required');
+      const a = assets.get(c!.asset);
+      if (!a || a.kind === 'image') bad(`${f}.caption.asset`, 'must be a video or audio asset');
+      if (!Array.isArray(c!.words) || c!.words.length > LIMITS.maxWords) bad(`${f}.caption.words`, `at most ${LIMITS.maxWords} words`);
+      c!.words.forEach((w, j) => {
+        if (typeof w.text !== 'string' || w.text.length < 1 || w.text.length > 60) bad(`${f}.caption.words.${j}.text`, 'must be 1–60 characters');
+        num(`${f}.caption.words.${j}.startSec`, w.startSec, 0, 36_000, false);
+        num(`${f}.caption.words.${j}.endSec`, w.endSec, w.startSec, 36_000, false);
+      });
+      textStyle(`${f}.caption.style`, c!.style);
+      if (!CAPTION_PRESETS.includes(c!.style.preset)) bad(`${f}.caption.style.preset`, 'unknown preset');
+      color(`${f}.caption.style.highlightColor`, c!.style.highlightColor, false);
+      num(`${f}.caption.style.y`, c!.style.y, 0, 1); num(`${f}.caption.style.wordsPerPage`, c!.style.wordsPerPage, 1, 8); num(`${f}.caption.style.maxLines`, c!.style.maxLines, 1, 2);
+    } else if (t.caption !== undefined) bad(`${f}.caption`, 'only on a caption track');
+    if (t.duck !== undefined) {
+      if (t.kind !== 'music') bad(`${f}.duck`, 'only on a music track');
+      num(`${f}.duck.level`, t.duck.level, 0.05, 1); num(`${f}.duck.fadeSec`, t.duck.fadeSec, 0.05, 2);
+      if (!Array.isArray(t.duck.under) || !t.duck.under.length || t.duck.under.some(u => u !== 'voice' && u !== 'speech')) bad(`${f}.duck.under`, 'must list voice and/or speech');
+    }
+    let prevEnd = -Infinity;
+    t.items.forEach((it, ii) => {
+      const g = `${f}.items.${ii}`;
+      id(`${g}.id`, it.id);
+      if (ids.has(it.id)) bad(`${g}.id`, 'is used twice');
+      ids.add(it.id);
+      if (t.kind === 'main' || t.kind === 'video') {
+        const c = it as VideoClip;
+        clipBase(g, c, ['video']);
+        num(`${g}.speed`, c.speed, LIMITS.minSpeed, LIMITS.maxSpeed, false);
+        visual(g, c, clipLength(c));
+        kfs(`${g}.keyframes`, c.keyframes, clipLength(c), ['x', 'y', 'scale', 'rotation', 'opacity', 'volume']);
+        if (c.audioAsset !== undefined) { const a = assets.get(c.audioAsset); if (!a || a.kind === 'image') bad(`${g}.audioAsset`, 'must be an audio or video asset'); }
+        if (c.chroma !== undefined) {
+          color(`${g}.chroma.color`, c.chroma.color, false);
+          num(`${g}.chroma.similarity`, c.chroma.similarity, 0, 1); num(`${g}.chroma.smoothness`, c.chroma.smoothness, 0, 1); num(`${g}.chroma.spill`, c.chroma.spill, 0, 1);
+        }
+        if (t.kind === 'main') {
+          if (c.startSec !== undefined) bad(`${g}.startSec`, 'main clips play back to back (no startSec)');
+          if (c.transitionIn !== undefined) {
+            if (ii === 0) bad(`${g}.transitionIn`, 'the first clip has no transition');
+            if (!TRANSITIONS.includes(c.transitionIn.kind)) bad(`${g}.transitionIn.kind`, 'unknown transition');
+            num(`${g}.transitionIn.durationSec`, c.transitionIn.durationSec, LIMITS.minTransitionSec, LIMITS.maxTransitionSec, false);
+            const prev = t.items[ii - 1] as VideoClip;
+            if (c.transitionIn.durationSec > clipLength(c) / 2 + 1e-9 || c.transitionIn.durationSec > clipLength(prev) / 2 + 1e-9)
+              bad(`${g}.transitionIn.durationSec`, 'at most half of each clip');
+          }
+        } else {
+          if (c.transitionIn !== undefined) bad(`${g}.transitionIn`, 'transitions are on the main track only');
+          num(`${g}.startSec`, c.startSec, 0, 600, false);
+        }
+      } else if (t.kind === 'image') {
+        const im = it as ImageItem;
+        const a = assets.get(im.asset);
+        if (!a) bad(`${g}.asset`, 'is not in assets');
+        if (a!.kind !== 'image') bad(`${g}.asset`, 'must be image');
+        num(`${g}.startSec`, im.startSec, 0, 600, false); num(`${g}.durationSec`, im.durationSec, LIMITS.minItemSec, 600, false);
+        visual(g, im, im.durationSec);
+        kfs(`${g}.keyframes`, im.keyframes, im.durationSec, ['x', 'y', 'scale', 'rotation', 'opacity']);
+        anim(`${g}.animIn`, im.animIn, false); anim(`${g}.animOut`, im.animOut, false);
+      } else if (t.kind === 'text') {
+        const tx = it as TextItem;
+        if (typeof tx.text !== 'string' || tx.text.length < 1 || tx.text.length > LIMITS.maxText) bad(`${g}.text`, `must be 1–${LIMITS.maxText} characters`);
+        num(`${g}.startSec`, tx.startSec, 0, 600, false); num(`${g}.durationSec`, tx.durationSec, LIMITS.minItemSec, 600, false);
+        textStyle(`${g}.style`, tx.style);
+        if (tx.transform !== undefined) visual(g, { transform: tx.transform }, tx.durationSec);
+        num(`${g}.opacity`, tx.opacity, 0, 1);
+        kfs(`${g}.keyframes`, tx.keyframes, tx.durationSec, ['x', 'y', 'scale', 'rotation', 'opacity']);
+        anim(`${g}.animIn`, tx.animIn, true); anim(`${g}.animOut`, tx.animOut, true);
+      } else if (t.kind === 'music' || t.kind === 'voice' || t.kind === 'sfx') {
+        const c = it as AudioClip;
+        clipBase(g, c, ['audio', 'video']);
+        num(`${g}.startSec`, c.startSec, 0, 600, false);
+        if (c.speed !== undefined && c.speed !== 1) bad(`${g}.speed`, 'audio clips play at 1×');
+        kfs(`${g}.keyframes`, c.keyframes, clipLength(c), ['volume']);
+        if (c.beats !== undefined && (!Array.isArray(c.beats) || c.beats.length > 2000 || c.beats.some(b => !isNum(b) || b < 0))) bad(`${g}.beats`, 'must be up to 2000 times');
+      }
+      if (t.kind !== 'main') {
+        const s = (it as { startSec: number }).startSec;
+        if (s < prevEnd - LIMITS.overlapSlackSec) bad(`${g}.startSec`, 'items on a track must be in order and not overlap');
+        const span = itemSpan(p, t, it);
+        prevEnd = span.endSec;
+      }
+    });
+  });
+  function textStyle(f: string, s: TextStyle) {
+    if (!s || typeof s !== 'object') bad(f, 'is required');
+    if (!FONTS.includes(s.font)) bad(`${f}.font`, 'unknown font');
+    if (![400, 700, 900].includes(s.weight)) bad(`${f}.weight`, 'must be 400, 700 or 900');
+    num(`${f}.sizePct`, s.sizePct, 0.015, 0.25, false);
+    color(`${f}.color`, s.color, false);
+    if (!['left', 'center', 'right'].includes(s.align)) bad(`${f}.align`, 'must be left, center or right');
+    num(`${f}.maxWidthPct`, s.maxWidthPct, 0.1, 1); num(`${f}.lineHeight`, s.lineHeight, 0.8, 2); num(`${f}.letterSpacing`, s.letterSpacing, -0.1, 0.5);
+    if (s.stroke !== undefined) { color(`${f}.stroke.color`, s.stroke.color, false); num(`${f}.stroke.widthPct`, s.stroke.widthPct, 0, 0.3, false); }
+    if (s.shadow !== undefined) { color(`${f}.shadow.color`, s.shadow.color, false); num(`${f}.shadow.opacity`, s.shadow.opacity, 0, 1, false); num(`${f}.shadow.blurPct`, s.shadow.blurPct, 0, 1, false); num(`${f}.shadow.dyPct`, s.shadow.dyPct, -1, 1, false); }
+    if (s.background !== undefined) { color(`${f}.background.color`, s.background.color, false); num(`${f}.background.opacity`, s.background.opacity, 0, 1, false); num(`${f}.background.paddingPct`, s.background.paddingPct, 0, 1, false); num(`${f}.background.radiusPct`, s.background.radiusPct, 0, 1, false); }
+  }
+  const d = durationSec(p);
+  if (d < LIMITS.minOutputSec - 1e-9) bad('edits', `the edited video must be at least ${LIMITS.minOutputSec} s`);
+  if (d > LIMITS.maxOutputSec + 1e-9) bad('edits', `the edited video must be at most ${LIMITS.maxOutputSec} s`);
+  return { durationSec: d };
+}
