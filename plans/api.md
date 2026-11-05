@@ -314,6 +314,129 @@ SSE: `{ type: "tool", tool: ToolRun }` on every change (to the studio). `Outfit`
 - New work on an archived model (jobs, shoots, outfit sets, fill-angles, LoRA, Enhance, Dress up) → `409 model_archived` ("This model is archived · restore her in Settings → Archived models").
 - `Model` gains `archived: boolean` (false when absent) and `archivedAt?`.
 
+## Shoot references and the prompt library (2026-11-05)
+_Owner decisions 2026-11-05. This section wins where an older section disagrees._ Two things: (A) up to 3 **reference images** per photoshoot that guide pose, look or scene, and (B) an owner-editable **prompt library**: every prompt the server sends to a model is a named template with a default in code and an optional owner override. **The server now builds the photoshoot prompt** (it used to come from the apps' prompt engines), so an owner edit applies to every photo, every member and every app at once.
+
+### 1. Reference images in photoshoots (up to 3)
+```ts
+ShootGuide  "pose" | "look" | "scene"     // labels: "Pose & framing", "Look & colour", "Scene"
+ShootRef    { image: ImageRef, guides: ShootGuide[] /* 1–3, no repeats */ }
+```
+- `pose` = pose and framing; `look` = light, colour grade, grain and camera feel; `scene` = the place / background. There is **no outfit guide**. Her face and body always come from her own sheet (and the outfit's) references, never from a reference image: every reference line ends with "do not take the face, body, hair or clothes from image k".
+- `POST /v1/shoots`, `POST /v1/shoots/preview` and template shoots accept `refs?: ShootRef[]` (≤ 3). `bad_request` for more than 3, a ref without an image, empty or unknown `guides`.
+- The image is any `ImageRef` (apps upload it with `POST /v1/uploads/images` first). Members get the same feature; nothing about models is shown.
+- **Order and limits.** The images sent to the shot model are: her identity/outfit references in the usual order (face front, profile, outfit front and ¾, product, body shots, outfit back and side; at most `REPLICATE_IMAGE_MAX_REFS` = 6 of them, as before), **then the reference images** in the order given. The total is capped at the shot model's image limit: `REPLICATE_IMAGE_MAX_INPUTS` (8) for the default shot model and the simulated/other engines, the schema's limit (array `maxItems`, or the image fields) for any other model. Over the limit, identity references are dropped from the end (least important first), **never the face front**; if the model still can't take them all (a 1- or 2-image model), the last reference images are dropped (`refs[i].dropped: true` in the preview) and get no prompt line. A model with no image input gets no images and no reference lines.
+- **Prompt lines.** One `reference` slot per sent reference image, after `direction`, made from the library (§2): its guide lines in the order pose, look, scene, then the guard line, joined by spaces, with `{refIndex}` = that image's 1-based position in the images sent. Default: `"Copy the pose and framing from image 7. Copy the light, colour grade and camera feel from image 7. Do not take the face, body, hair or clothes from image 7."`
+- **Price.** The estimate counts every image sent: per shot `run + output MP × price + 0.79 MP × (images sent) × input-MP price` for the default shot model (any other model: its own estimate with `inMp = 0.79 × images sent`). The hold is `count ×` that; the settle is exact (the input megapixels really sent). `features.photo` gains `maxInputs: 8` and `references: { max: 3, guides: [{id: "pose", label: "Pose & framing"}, {id: "look", label: "Look & colour"}, {id: "scene", label: "Scene"}] }`.
+- Each shot stores its refs (`Take.refs?: ShootRef[]` on photoshoot stills) so a template saved from it doesn't copy them.
+
+### 2. The server builds the photoshoot prompt
+`POST /v1/shoots` (no template), full body:
+```ts
+ShootRequest { modelId, outfitId?, count? /* 1–4, default 4 */,
+  presets?: boolean            /* default true; false = only identity, outfit, direction, reference and seed lines */,
+  scene?: string /* ≤ 200: the chip label ("Rooftop · golden hour") or the user's own words; default: the library's default scene */,
+  camera?: { shot: "Close"|"Medium"|"Full"|"Wide", lens: number /* mm, 8–400 */, aperture: string /* "f/2.8", ≤ 10 */ } /* default Medium, 35, f/2.8 */,
+  light?: string /* ≤ 80, default "Golden hour" */, grade?: string /* ≤ 80, default "Phone-natural" */,
+  direction?: string /* ≤ 500 */, lockSeed?: boolean, refs?: ShootRef[],
+  prompt?: string /* ≤ 4000: "Edit as text". Sent to the model EXACTLY; nothing is built. Reference images are still sent. */,
+  seed?, imageEngine?, models? /* owner */ }
+```
+- Without `prompt` the server builds the prompt from the studio's prompt library: identity, outfit, scene, camera, light (+ grade), direction (sanitised as before: clauses that would change her identity or add a never-add item are dropped and listed in `removed`), reference lines, style, never-add, seed. Lock look = a fixed seed for this model (`seedFor(name)`, as the apps had). Scene is now used whole ("rooftop · golden hour"), as the apps sent it.
+- **`POST /v1/shoots/preview`** takes the same body (template fields too) and costs nothing:
+```ts
+ShootPreview { slots: PromptSlotView[] /* layer: identity|outfit|scene|camera|light|direction|reference|style|negative|seed (+ template|pose|product for template shoots) */,
+               text: string /* exactly what POST /v1/shoots will send (with "prompt": that text) */,
+               seed: number|null, removed: string[],
+               images: number /* images that will be sent */, refs: { index: number|null /* its image number, null = dropped */, guides: ShootGuide[], dropped?: true }[],
+               estimate: number /* the whole shoot (count stills) */, estimateLabel: "about $0.27", edited: boolean /* true when "prompt" was sent */ }
+```
+  The owner and members both get the full built text for a normal shoot (the same as the apps showed before). With `templateId` the slots are the viewer's view of a template shoot (`/v1/templates/{id}/prompt` rules: one locked `Template: <name>` line for anyone but its maker) plus the reference lines. With `prompt` set, `text` is that prompt and `slots` is one `{layer: "custom", text}`.
+- **Apps:** the Prompt tool's "Final prompt" box, Copy and "Edit as text" use the preview's `slots` / `text` (refetch, debounced ~300 ms, whenever a choice changes). Shoot sends the choices (no `prompt`) unless the user is on "Edit as text", in which case it sends `prompt` = their text. The Shoot button's price is `estimateLabel`. The apps' own prompt engines stay only as the demo/offline fallback (and are checked against the server's fixture, `android/core/src/test/resources/shoot_prompt_fixture.json`).
+
+### 3. Prompt library (owner: Settings → Prompts)
+Every prompt or prompt fragment the server sends to a model is a library entry: a default in code, plus an optional owner override per studio (`prompt_overrides` table). A saved override is used for every new photo, outfit set, sheet fill, Enhance, Dress up, template shoot, LoRA set and video render in the studio, for owners and members alike. Running work keeps the prompt it started with.
+```ts
+PromptGroup  "photoshoot"|"references"|"sheet"|"outfits"|"enhance"|"dressup"|"templates"|"video"|"lora"
+             // labels: Photoshoot, References, Character sheet, Outfits, Enhance, Dress up, Templates, Video, LoRA
+Placeholder  { name: string /* "look" */, description: string, required: boolean }
+PromptEntry  { key: string, group: PromptGroup, title: string, description: string,
+               kind: "text" | "list" /* comma-separated items */ | "lines" /* one item per line */,
+               default: string, current: string, overridden: boolean, allowEmpty: boolean,
+               placeholders: Placeholder[], updatedAt: number|null, updatedBy: string|null /* email */ }
+```
+| | |
+|---|---|
+| `GET /v1/prompts` (owner) | → `{ groups: {id: PromptGroup, label}[], prompts: PromptEntry[] }` in the order below |
+| `PUT /v1/prompts/{key}` `{text}` (owner) | → `PromptEntry`. `400 prompt_invalid` (message shown as-is) for an unknown `{placeholder}`, a missing required one, empty text where `allowEmpty` is false, or text over 4000 characters. `404 not_found` for an unknown key. Saving the default text clears the override. |
+| `DELETE /v1/prompts/{key}` (owner) | → `PromptEntry` back on its default ("Reset to default") |
+| `POST /v1/prompts/preview` `{key, text?}` (owner) | → `{ key, text /* this entry rendered with sample values */, example /* the whole prompt it is part of, built with this text and the sample model "Demo model" */, sample: Record<string,string> /* the values used */ }`. `text` defaults to the saved one. Same `prompt_invalid` errors as PUT, so the editor can show them while typing. |
+
+Members get `403 owner_only` from every `/v1/prompts` endpoint and never see this section. **Event:** `{ type: "prompts", prompt: PromptEntry }` to the studio's owners after every PUT and DELETE.
+
+**Placeholder rules.** A placeholder is `{name}` with `name` = a letter then letters/digits. Every `{name}` in the text must be one of that entry's placeholders (`Unknown placeholder {foo} · this prompt can use {name}, {look}`); every `required` one must be present (`Keep {refIndex} · this prompt needs it`). Other braces are left alone. Values are inserted as-is; a placeholder that has nothing to say (no LoRA, no anchor) becomes empty. A line that renders empty is left out of the prompt.
+
+**Keys** (group · key · placeholders, **required in bold** · what the default does):
+
+| group | key | placeholders | default / use |
+|---|---|---|---|
+| photoshoot | `style.house` | | `realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss`: the house style in every photo prompt |
+| photoshoot | `never.base` (list) | | `logos, extra fingers, warped jewellery`: appended to every model's never-add list |
+| photoshoot | `shoot.default.scene` | | `Rooftop · golden hour` (no scene sent) |
+| photoshoot | `shoot.default.light` | | `Golden hour` |
+| photoshoot | `shoot.default.grade` | | `Phone-natural` |
+| photoshoot | `shoot.identity` | name, look, refCount, lora | `{name}: {look}. Identity from {refCount} locked reference images{lora}.` (`lora` = ` + LoRA demo_v2 (photo)` or empty). Used by shoots, templates, sheet fills, outfit sets, LoRA sets |
+| photoshoot | `shoot.outfit.set` | **outfit** | `Wearing: {outfit} (outfit reference set).` |
+| photoshoot | `shoot.outfit.described` | **outfit** | `Wearing: {outfit}.` (an outfit described in words, no photos yet) |
+| photoshoot | `shoot.outfit.product` | outfit | `Wearing: the outfit from the product photo reference ({outfit}).` |
+| photoshoot | `shoot.scene` | **scene** | `Scene: {scene}.` (lower case) |
+| photoshoot | `shoot.camera` | shot, lens, aperture, lensNote | `Camera: {shot} shot, {lens}mm lens, {aperture}{lensNote}.` |
+| photoshoot | `shoot.camera.wide` | | `, slight wide-angle distortion` (`lensNote` at ≤ 24 mm) |
+| photoshoot | `shoot.camera.tele` | | `, compressed background, creamy bokeh` (`lensNote` at ≥ 85 mm) |
+| photoshoot | `shoot.light` | light, grade | `Light: {light}; grade: {grade}.` |
+| photoshoot | `shoot.direction` | **direction** | `Direction: {direction}` |
+| photoshoot | `shoot.style` | **style** | `Style: {style}.` (`style` = the house style) |
+| photoshoot | `shoot.never` | **never** | `Never add: {never}.` (her list + the base list) |
+| photoshoot | `shoot.seed.locked` | | `Seed: locked (variations keep the same look).` |
+| photoshoot | `shoot.seed.new` | | `Seed: new each shot.` |
+| references | `refs.pose` | **refIndex** | `Copy the pose and framing from image {refIndex}.` |
+| references | `refs.look` | **refIndex** | `Copy the light, colour grade and camera feel from image {refIndex}.` |
+| references | `refs.scene` | **refIndex** | `Use the place and background from image {refIndex}.` |
+| references | `refs.guard` | **refIndex** | `Do not take the face, body, hair or clothes from image {refIndex}.` |
+| sheet | `sheet.task` | angle, framing | `Task: {angle} shot on a plain light-grey studio background, even soft light, neutral expression, {framing}.` |
+| outfits | `outfit.task` | **angle** | `Task: {angle}, plain studio background.` |
+| outfits | `outfit.never.extra` (list) | | `visible brand logos` (added to never-add for outfit sets) |
+| outfits | `outfit.seed` | seed | `Seed: {seed} (shared by all four angles).` |
+| outfits | `outfit.edit` | **angle** | `Show the same person in exactly the same outfit, on the same plain studio background, as a {angle}. Keep the face, hair, body and every detail of the clothes exactly the same. Realistic smartphone photo, natural skin texture.` (¾ / side / back as edits of the front) |
+| enhance | `enhance.prompt` | | the Enhance realism prompt ("Model tools" §4) |
+| dressup | `dress.body` | anchor | full-body Dress up prompt; `{anchor}` = ` ` + `dress.anchor` when the new front is sent too, else empty |
+| dressup | `dress.closeup` | anchor | face close-up Dress up prompt |
+| dressup | `dress.anchor` | | `The last image shows the same outfit already worn: match its colours, prints and details exactly.` |
+| templates | `template.scene` | **scene** | `Scene: {scene}.` (template scene + drawn background / time of day) |
+| templates | `template.camera` | **camera** | `Camera: {camera}.` |
+| templates | `template.light` | **light** | `Light: {light}.` |
+| templates | `template.pose` | **pose** | `Pose: {pose}.` |
+| templates | `template.product` | **product** | `Product: {product}.` |
+| templates | `template.product.none` | **product** | `Product: {product} (no product photo: a plausible unbranded product).` |
+| templates | `template.style` | **style** | `Style: {style}.` (template style + house style) |
+| templates | `template.locked` | **name** | `Template: {name}` (the line non-makers see) |
+| templates | `template.seed.locked` | seed | `Seed: {seed} (locked look).` |
+| templates | `template.seed.new` | seed | `Seed: {seed} (new each shot).` |
+| video | `video.replicate.subjects` | **subject** | `subject_definitions` of the short Draft/Standard/HD prompt |
+| video | `video.replicate.summary` | | its `summary` |
+| video | `video.replicate.retention` | **reference** | its `retention_analysis` (`reference` = face/body/outfit image ranges and never-add) |
+| video | `video.replicate.detailed` | faceRef | its `detailed_description` (the user's direction is appended) |
+| video | `video.edit.subjects` | performer, setting, name, look, refs, lora, audio | `subject_definitions` of the structured Edit prompt |
+| video | `video.edit.summary` | audioTag, background, audio | its `summary` |
+| video | `video.edit.retention` | video, tattoos, clean, n, outfit, never, audio | its `retention_analysis` |
+| video | `video.edit.detailed` | outfit | its `detailed_description` (direction appended) |
+| lora | `lora.variations` (lines) | | the 10 variation lines the 30 LoRA candidates cycle through |
+| lora | `lora.variation` | **variation** | `Variation: {variation}.` (added under the sheet prompt) |
+
+Defaults reproduce the prompts exactly as they were before the library (the shared fixtures still pass). There is no "Improve with AI" or scene-writer prompt yet; when one is added it joins the library.
+
+**Apps (owner only):** Settings → **Prompts**: the groups above, each entry with its title, a one-line preview of the current text and an "Edited" badge when overridden. The editor: the current text (multi-line), placeholder chips (tap inserts `{name}`; required ones marked), "Reset to default" (DELETE, after a confirm), a live preview (`POST /v1/prompts/preview`, debounced) showing `text` and `example`, the `prompt_invalid` message inline, and Save (PUT). Members never see the section.
+
 ## Types
 
 ```ts
@@ -366,7 +489,8 @@ Platform   "tiktok"|"instagram"|"facebook"|"youtube"|"x"
 Account    { modelId, platform: Platform, handle, connectedAt, canPostDirect: boolean /* false until that platform approves MUSE */ }
 Post       { id, modelId, takeId, title, thumb: ImageRef, platforms: Platform[], caption, aiLabel: boolean, paidPartnership: boolean,
              when: "now"|ISO time, state: "scheduled"|"handoff"|"posted"|"failed", createdAt, postedAt?, stats?: { views, likes, comments } }
-ApiEvent   { type: "job"|"take"|"balance"|"wallet"|"model"|"outfit"|"lora"|"post"|"gpu"|"tool"|"template"|"clip"|"settings"|"member"|"invite"|"studio"|"account",
+ApiEvent   { type: "job"|"take"|"balance"|"wallet"|"model"|"outfit"|"lora"|"post"|"gpu"|"tool"|"template"|"clip"|"settings"|"member"|"invite"|"studio"|"account"|"prompts",
+             prompt?: PromptEntry /* "prompts", owners only (2026-11-05) */,
              op?: "delete"|"used" /* with id: remove that item */, id?, take?: Take, template?: Template, clip?: Clip, settings?: StudioSettings,
              imageEngine? /* owners */, imageModels? /* owners */, member?: Member /* owners */, invite? /* owners */, studioBalance?: StudioBalance /* owners */,
              account?: Account, modelId?, platform?,
@@ -410,7 +534,8 @@ PromptSlotView     { layer: "identity"|"outfit"|"template"|"scene"|"camera"|"lig
                      text, locked?: true /* the one "Template: <name>" line non-owners see */ }
 TemplatePrompt     { slots: PromptSlotView[], text, seed: number|null /* null = a new random seed at shoot time */, shuffleSeed,
                      variation?: VariationDraw /* owner only */ }
-// Take (photoshoot stills) also carries: templateId?, templateName?, shuffleSeed?, variation?: VariationDraw (template owner only).
+// Take (photoshoot stills) also carries: templateId?, templateName?, shuffleSeed?, variation?: VariationDraw (template owner only),
+//   refs?: ShootRef[] (2026-11-05, the reference images it was shot with).
 // For anyone but the template's owner a template shot's `prompt` is the public version: "Template: <name>" plus their own layers.
 ```
 
@@ -489,8 +614,9 @@ These are measured on an H100 with FlashAttention 3 and billed at $3.99/h. The u
 | `GET /v1/takes` | → `Take[]` (renders and photoshoot stills). `status: "final"` is the Final gallery, and everything else is Tests. |
 | `PATCH /v1/takes/{id}` `{status: "test"\|"final"}` | → `Take` (Approve) |
 | `DELETE /v1/takes/{id}` | 204 (Discard) |
-| `POST /v1/shoots` `{modelId, outfitId, scene, prompt, seed?, count}` | → `Take[]` (`kind: "shot"`). Charges $0.12. |
-| `POST /v1/shoots` with a template `{modelId, outfitId?, templateId, direction?, shuffleSeed?, lockSeed?, productImage?: ImageRef, count?}` | → `Take[]`, $0.12 as above. `scene`, `prompt` and `seed` are ignored: the server builds every still's prompt from the template layers + the model's identity, outfit and never-add + the draws (or `direction`) + a seed. See Templates below. |
+| `POST /v1/shoots` `ShootRequest` | → `Take[]` (`kind: "shot"`). _2026-11-05: the server builds the prompt from the choices and the prompt library; `prompt` only for "Edit as text"; `refs` = up to 3 reference images. See "Shoot references and the prompt library"._ Holds the estimate, settles exactly. |
+| `POST /v1/shoots/preview` `ShootRequest` | → `ShootPreview`: the final prompt, the images that will be sent and the price. Free. |
+| `POST /v1/shoots` with a template `{modelId, outfitId?, templateId, direction?, shuffleSeed?, lockSeed?, productImage?: ImageRef, refs?: ShootRef[], count?}` | → `Take[]`, $0.12 as above. `scene`, `prompt` and `seed` are ignored: the server builds every still's prompt from the template layers + the model's identity, outfit and never-add + the draws (or `direction`) + a seed. See Templates below. |
 
 ### Identity LoRA (`plans/lora-training.md`)
 | | |
@@ -659,6 +785,7 @@ _Added 2026-11-05 (every change is live, so a phone and a Mac on one studio stay
 | `invite` `{invite}` / `{op: "used", id}` | Invite created / used | Owners only |
 | `settings` `{settings}` | `PATCH /v1/settings/studio` | Everyone, in their role's view (members never get `engines`, GPU settings or tool models) |
 | `settings` `{imageEngine}` / `{imageModels}` | Image engine or image model changes | Owners only |
+| `prompts` `{prompt}` | `PUT` / `DELETE /v1/prompts/{key}` (2026-11-05) | Owners only |
 
 Catch-up: events are not replayed. When the stream (re)connects, and when the app comes back to the foreground, the apps refetch takes, jobs, models, outfits, balance and templates, so nothing missed while offline is lost. The stream sends `retry: 3000` and a comment every 10 s; headers `Cache-Control: no-cache, no-store, no-transform` and `X-Accel-Buffering: no` keep proxies (Railway) from buffering it. The Android app turns finished and failed jobs into local notifications. A real backend can add FCM push behind the same events.
 
