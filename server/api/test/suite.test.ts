@@ -14,7 +14,7 @@ import { compileCamera } from '../src/suite/compile.js';
 import { buildInput } from '../src/suite/inputs.js';
 import { buildPlan, billedSeconds, fit, needOf, perSecond, pickModel, ShotRequestSchema, type Character } from '../src/suite/plan.js';
 import { SUITE_PROMPT_DEFS, wordings } from '../src/suite/prompts.js';
-import { DEFAULT_LADDER, MODELS, modelById, TIERS } from '../src/suite/registry.js';
+import { DEFAULT_LADDER, inputSlotsOf, MODELS, modelById, NO_INPUTS, TIERS } from '../src/suite/registry.js';
 import { demoModel, makeApp, people, until, type Client } from './helpers.js';
 
 const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version']); execFileSync('ffprobe', ['-version']); return true; } catch { return false; } })();
@@ -174,6 +174,21 @@ describe('AI suite · plans, inputs and prices (unit)', () => {
   });
 });
 
+describe('AI suite · input slots', () => {
+  it('a tier takes what any of its models takes, capped to what a shot request can carry', () => {
+    expect(inputSlotsOf([])).toEqual(NO_INPUTS);
+    const kling = modelById('kling-o1')!; // recast-only: no keyframes
+    expect(inputSlotsOf([kling])).toMatchObject({ start: false, end: false, middle: 0 });
+    const many = MODELS.find(m => m.frames.middle >= 8 && m.modes.image)!;
+    const s = inputSlotsOf([kling, many]);
+    expect(s).toMatchObject({ start: true, end: true, middle: 8 });
+    expect(inputSlotsOf(MODELS).images).toBe(6);
+    expect(inputSlotsOf(MODELS).videos).toBe(3);
+    const noRefs = MODELS.find(m => m.modes.image && m.refs.images === 0 && m.refs.audios === 0)!;
+    expect(inputSlotsOf([noRefs])).toMatchObject({ start: true, images: 0, videos: 0, audio: false, framesWithRefs: false });
+  });
+});
+
 describe.skipIf(!hasFfmpeg)('AI suite · Shot API on the mock provider', () => {
   let a: Awaited<ReturnType<typeof makeApp>>, owner: Client, member: Client, model: { id: string };
   beforeAll(async () => {
@@ -192,7 +207,11 @@ describe.skipIf(!hasFfmpeg)('AI suite · Shot API on the mock provider', () => {
     expect(m.camera.moves.length).toBeGreaterThanOrEqual(30);
     expect(JSON.stringify(m.tiers)).not.toMatch(PROVIDER_WORDS);
     const o = (await owner.req('GET', '/v1/suite/catalog')).body;
-    expect(o.tiers[0].models[0]).toEqual({ model: 'h3-lite', name: 'MiniMax H3 Lite', resolution: '768P' });
+    expect(o.tiers[0].models[0]).toMatchObject({ model: 'h3-lite', name: 'MiniMax H3 Lite', resolution: '768P' });
+    // Input slots: member-safe numbers per tier (the apps show a slot only when the tier takes it); per model for the owner.
+    for (const t of m.tiers) expect(Object.keys(t.inputs).sort()).toEqual(['audio', 'end', 'framesWithRefs', 'images', 'middle', 'start', 'videos']);
+    expect(m.tiers[0].inputs).toMatchObject({ start: true, end: true, images: 6, videos: 3, audio: true });
+    expect(o.tiers[0].models[0].inputs).toEqual({ start: true, end: true, middle: 0, images: 6, videos: 3, audio: true, framesWithRefs: true });
   });
 
   it('estimate: price, caps and warnings for a member; the owner also gets the engine and the inputs', async () => {
