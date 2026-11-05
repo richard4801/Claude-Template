@@ -101,7 +101,19 @@ final class SuiteApiTests: XCTestCase {
     func testShotJobAndSettings() async throws {
         let boss = try await owner()
         let ch = try await character(boss)
-        let job = try await boss.suiteCreateShot(ShotRequest(title: "Mac suite test", modelId: ch.id, prompt: "She waves.", duration: 5, quality: "draft"))
+        let set = try await boss.suiteSettings()
+        XCTAssertEqual(set.mode, "mock")
+        XCTAssertFalse(set.models.isEmpty)
+        let after = try await boss.updateSuiteSettings(SuiteSettingsPatch(capPerDay: set.caps.perDay))
+        XCTAssertEqual(after.caps.perDay, set.caps.perDay)
+
+        // The mock renderer needs ffmpeg on the server's machine; without it the server answers engine_unavailable.
+        let job: Job
+        do {
+            job = try await boss.suiteCreateShot(ShotRequest(title: "Mac suite test", modelId: ch.id, prompt: "She waves.", duration: 5, quality: "draft"))
+        } catch let e as ApiError where e.code == "engine_unavailable" {
+            throw XCTSkip("This server can't make test renders here (\(e.message))")
+        }
         XCTAssertEqual(job.request.engine, "suite")
         XCTAssertEqual(job.engineLabel, "Shot · Draft · 768p")
         XCTAssertTrue(job.isActive || job.isDone)
@@ -117,11 +129,5 @@ final class SuiteApiTests: XCTestCase {
             let takes = try await boss.listTakes().filter { $0.jobId == job.id }
             XCTAssertEqual(takes.first?.label, "Draft")
         }
-
-        let set = try await boss.suiteSettings()
-        XCTAssertEqual(set.mode, "mock")
-        XCTAssertFalse(set.models.isEmpty)
-        let after = try await boss.updateSuiteSettings(SuiteSettingsPatch(capPerDay: set.caps.perDay))
-        XCTAssertEqual(after.caps.perDay, set.caps.perDay)
     }
 }
