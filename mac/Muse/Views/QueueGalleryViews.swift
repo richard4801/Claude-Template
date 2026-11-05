@@ -67,8 +67,13 @@ struct QueueView: View {
             } else {
                 JobTable(jobs: active, header: true)
             }
-            SectionHeader(title: "Finished") { Muted("Last 7 days") }
-            JobTable(jobs: store.finishedJobs, header: false)
+            let finished = store.finishedJobs
+            SectionHeader(title: "Finished") { Muted("\(finished.count) job\(finished.count == 1 ? "" : "s")") }
+            if finished.isEmpty {
+                Note(icon: "checkmark.circle", "Nothing finished yet. Finished renders stay here and in the Gallery.")
+            } else {
+                JobTable(jobs: finished, header: false)
+            }
         }
     }
 }
@@ -143,7 +148,7 @@ struct JobRow: View {
                     MoreMenu {
                         Button("Watch") { store.watch(j) }
                         Button("Run again with same settings") { store.runAgain(j) }
-                        Button("Copy prompt") { store.copy(j.prompt.isEmpty ? "(no prompt saved for this job)" : j.prompt) }
+                        Button("Copy prompt") { if j.prompt.isEmpty { store.showToast("No prompt was saved for this job") } else { store.copy(j.prompt) } }
                         Divider()
                         Button("Remove from list", role: .destructive) { store.removeJob(j) }
                     }
@@ -176,7 +181,7 @@ struct GalleryView: View {
                     Muted("Test renders stay separate from your Final gallery. Select takes to compare them side by side.").padding(.top, -8).padding(.bottom, 16)
                     let list = store.galleryList
                     if list.isEmpty {
-                        Note("Nothing approved yet. Approve a take to move it here.")
+                        Note(store.galleryTab == .final ? "Nothing approved yet. Approve a take to move it here." : "No test renders yet. Make a video or a photoshoot.")
                     } else {
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 6), spacing: 14) {
                             ForEach(list) { take in GalleryTile(take: take) }
@@ -230,6 +235,7 @@ struct GalleryTile: View {
             .buttonStyle(.plain)
             .padding(8)
             .help("Select to compare")
+            .accessibilityLabel(picked ? "Deselect \(take.caption)" : "Select \(take.caption) to compare")
         }
         .contextMenu {
             Button(picked ? "Deselect" : "Select to compare") { store.togglePick(take.id) }
@@ -321,7 +327,6 @@ struct ResultView: View {
                                         Button("Save as template…") { store.saveAsTemplate(take) }.disabled(!store.canSaveAsTemplate(take))
                                     }
                                     Button("Compare takes") { store.compareFromResult() }
-                                    Button("Report a problem") { store.showToast("Thanks, we'll look at this take") }
                                     Divider()
                                     Button("Delete take", role: .destructive) { store.discard(take) }
                                 }
@@ -353,15 +358,17 @@ struct ResultView: View {
                             }
                             HStack {
                                 MButton("Retake with changes", icon: "arrow.triangle.2.circlepath", fill: true) { store.retake(take) }
-                                MButton("Export 1080×1920", icon: "square.and.arrow.up", fill: true) { store.export(take) }
+                                MButton("Export", icon: "square.and.arrow.up", fill: true) { store.export(take) }
+                                    .help("Save it to Downloads › MUSE")
                             }
                             if store.canEdit(take) {
                                 MButton(take.isEdit ? "Edit again" : "Edit video", icon: "scissors", fill: true) { store.openEditor(take) }
                                     .help("Trim, split, change speed or mute. Saved as a new version; the original is kept.")
                             }
                             if take.canUpscale { UpscaleBox(take: take) }
-                            let who = store.model(for: take)?.shortName ?? "her"
-                            MButton("Post to \(who)'s accounts", icon: "paperplane", kind: .primary, fill: true) { store.openPostSheet(take) }
+                            MButton(store.model(for: take).map { "Post to \($0.shortName)'s accounts" } ?? "Post", icon: "paperplane", kind: .primary, fill: true) {
+                                store.openPostSheet(take)
+                            }
                             if !take.isVideo {
                                 if store.canSaveAsTemplate(take) {
                                     MButton("Save as template", icon: "square.on.square.dashed", fill: true) { store.saveAsTemplate(take) }

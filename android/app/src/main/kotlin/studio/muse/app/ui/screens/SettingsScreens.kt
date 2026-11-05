@@ -70,14 +70,14 @@ import studio.muse.core.RenderSpec
 
 data class SettingsState(
     val prefs: AppPrefs = AppPrefs(), val balance: Balance = Balance(0.0, 0.0), val videos: Int = 0, val failNext: Boolean = false,
-    val modelName: String = "Demo model", val connected: Int = 0, val scheduled: Int = 0, val wallet: studio.muse.app.data.Wallet? = null,
+    val modelName: String? = null, val connected: Int = 0, val scheduled: Int = 0, val wallet: studio.muse.app.data.Wallet? = null,
 )
 
 class SettingsViewModel(val c: AppContainer) : ViewModel() {
     private val failNext = kotlinx.coroutines.flow.MutableStateFlow(false)
     val state: StateFlow<SettingsState> = combine(c.prefs, c.repo.state, failNext, c.drafts.modelId) { p, s, f, mid ->
         val m = s.model(mid) ?: s.models.firstOrNull()
-        SettingsState(p, s.balance, s.jobs.count { it.done } + 9, f, m?.name?.split(" ")?.first() ?: "Model", s.accountsOf(m?.id).size, s.posts.count { it.scheduled }, s.wallet)
+        SettingsState(p, s.balance, s.jobs.count { it.done } + 9, f, m?.name?.split(" ")?.first(), s.accountsOf(m?.id).size, s.posts.count { it.scheduled }, s.wallet)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, SettingsState(c.prefs.value))
 
     private fun upd(f: (AppPrefs) -> AppPrefs) = viewModelScope.launch { c.prefsStore.update(f) }
@@ -105,7 +105,7 @@ class SettingsViewModel(val c: AppContainer) : ViewModel() {
     fun fastBeta() = upd { it.copy(fastBeta = !it.fastBeta) }
     fun failNext() = viewModelScope.launch {
         val v = !failNext.value
-        if (c.repo.setFailNext(v) != null) { failNext.value = v; c.repo.toast(if (v) "Next render will fail at step 3" else "Renders back to normal") }
+        if (c.repo.setFailNext(v) != null) { failNext.value = v; c.repo.toast(if (v) "Next render will fail partway" else "Renders back to normal") }
     }
     fun signOut(onDone: () -> Unit) = viewModelScope.launch { c.repo.signOut(); c.drafts.forgetAccount(); onDone() }
     fun topUp(amount: Double, method: String) = viewModelScope.launch {
@@ -134,6 +134,8 @@ fun SettingsScreen() {
     // Re-read on return from system settings.
     LifecycleResumeEffect(Unit) { notifOn = vm.notifStatus(); onPauseOrDispose {} }
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { notifOn = it }
+    val studio by vm.c.repo.state.collectAsState()
+    val preview = remember(studio.models, studio.outfits) { previewProfileState(studio, vm.demo) }
     ScreenBox {
         Column(Modifier.fillMaxSize()) {
             TopBar("Settings")
@@ -141,7 +143,7 @@ fun SettingsScreen() {
                 Field("Theme") {
                     ThemeId.entries.chunked(2).forEach { row ->
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            row.forEach { t -> ThemeCard(t, t.key == s.prefs.theme, Modifier.weight(1f)) { vm.theme(t) } }
+                            row.forEach { t -> ThemeCard(t, t.key == s.prefs.theme, Modifier.weight(1f), preview) { vm.theme(t) } }
                         }
                     }
                 }
@@ -151,7 +153,7 @@ fun SettingsScreen() {
                         if (!notifOn && Build.VERSION.SDK_INT >= 33 && !notifAskedHere) { notifAskedHere = true; notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
                         else vm.openNotificationSettings(context)
                     }) { Tiny(if (notifOn) "On" else "Off"); Ic("chev", 16.dp) }
-                    Li("export", "${s.modelName}'s accounts", onClick = { nav.go(Routes.ACCOUNTS) }) { Tiny("${s.connected}/5"); Ic("chev", 16.dp) }
+                    s.modelName?.let { name -> Li("export", "$name's accounts", onClick = { nav.go(Routes.ACCOUNTS) }) { Tiny("${s.connected}/5"); Ic("chev", 16.dp) } }
                     Li("queue", "Scheduled posts", onClick = { nav.go(Routes.POSTS) }) { Tiny("${s.scheduled}"); Ic("chev", 16.dp) }
                     Li("wallet", "Credit", onClick = { nav.go(Routes.CREDITS) }) { Tiny(creditLabel(s.wallet, s.balance)); Ic("chev", 16.dp) }
                     Li("user", "Sign out", sub = s.prefs.email.ifBlank { null }, onClick = { vm.signOut { nav.reset(Routes.WELCOME) } }) { Ic("chev", 16.dp) }
@@ -173,11 +175,12 @@ fun SettingsScreen() {
                     if (!s.prefs.useFake) Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Tiny("Server")
                         Input(s.prefs.serverUrl, vm::serverUrl, placeholder = BuildConfig.DEFAULT_SERVER_URL, keyboard = androidx.compose.ui.text.input.KeyboardType.Uri)
-                        if (s.prefs.serverUrl != BuildConfig.DEFAULT_SERVER_URL) T("Use the MUSE server", m.type.tiny.copy(fontWeight = FontWeight.Bold), if (m.isD) m.t.blue else m.t.accent,
+                        if (s.prefs.serverUrl != BuildConfig.DEFAULT_SERVER_URL) T("Use the MUSE server", m.type.tiny.copy(fontWeight = FontWeight.Bold), m.link,
                             Modifier.press { vm.resetServer { nav.reset(Routes.WELCOME) } }.padding(vertical = 4.dp))
                     }
                     Li("quality", "Fast · beta", onClick = { vm.fastBeta() }) { Toggle(s.prefs.fastBeta, { vm.fastBeta() }) }
-                    Li("shield", "Next render fails (test)", onClick = { vm.failNext() }) { Toggle(s.failNext, { vm.failNext() }) }
+                    // A demo-studio test switch: the real server has no such thing.
+                    if (vm.demo) Li("shield", "Next render fails (test)", onClick = { vm.failNext() }) { Toggle(s.failNext, { vm.failNext() }) }
                 }
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     // Model names are owner-only (plans/app-cleanup.md); the owner sees the licence attribution.
@@ -192,7 +195,7 @@ fun SettingsScreen() {
 
 /** Live preview: the real profile layout rendered in that theme, scaled down. */
 @Composable
-private fun ThemeCard(t: ThemeId, on: Boolean, modifier: Modifier, onClick: () -> Unit) {
+private fun ThemeCard(t: ThemeId, on: Boolean, modifier: Modifier, preview: ProfileState, onClick: () -> Unit) {
     val m = muse
     val shape = RoundedCornerShape(m.t.r)
     var mod = modifier
@@ -203,7 +206,7 @@ private fun ThemeCard(t: ThemeId, on: Boolean, modifier: Modifier, onClick: () -
     }
     Box(mod.press(onClick = onClick).padding(10.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            ThemePreview(t, Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(m.t.r * .6f)).border(1.dp, Color.Black.copy(alpha = .12f), RoundedCornerShape(m.t.r * .6f)))
+            ThemePreview(t, preview, Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(m.t.r * .6f)).border(1.dp, Color.Black.copy(alpha = .12f), RoundedCornerShape(m.t.r * .6f)))
             T(t.label, m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), m.t.ink)
         }
         if (on) Box(Modifier.align(Alignment.TopEnd).size(22.dp).clip(CircleShape).background(m.t.accent), contentAlignment = Alignment.Center) { Ic("check", 14.dp, m.t.accentInk) }
@@ -211,13 +214,21 @@ private fun ThemeCard(t: ThemeId, on: Boolean, modifier: Modifier, onClick: () -
 }
 
 @Composable
-fun ThemePreview(t: ThemeId, modifier: Modifier) {
+fun ThemePreview(t: ThemeId, modifier: Modifier) = ThemePreview(t, sampleProfileState(), modifier)
+
+/** The theme cards show the studio's own first ready model; the bundled sample only in Demo mode, unnamed otherwise. */
+fun previewProfileState(st: studio.muse.app.data.StudioState, demo: Boolean): ProfileState =
+    st.models.firstOrNull { it.locked }?.let { md -> ProfileState(md, st.outfitsOf(md.id), 0) }
+        ?: sampleProfileState().let { if (demo) it else it.copy(model = it.model?.copy(name = "Your model")) }
+
+@Composable
+fun ThemePreview(t: ThemeId, state: ProfileState, modifier: Modifier) {
     BoxWithConstraints(modifier) {
         val scale = maxWidth.value / 390f
         Box(Modifier.wrapContentSize(Alignment.TopStart, unbounded = true).requiredSize(390.dp, 844.dp).graphicsLayer {
             scaleX = scale; scaleY = scale; transformOrigin = TransformOrigin(0f, 0f)
         }) {
-            MuseTheme(t) { ProfileContent(sampleProfileState(), ProfileActions(menu = false)) }
+            MuseTheme(t) { ProfileContent(state, ProfileActions(menu = false)) }
         }
     }
 }

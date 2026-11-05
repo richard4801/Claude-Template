@@ -83,7 +83,7 @@ struct TemplatesView: View {
         if !store.templateQuery.isEmpty || store.templateTag != nil { return "Try another word or tag." }
         switch store.templateScope {
         case .mine: return "Open any photo you like and choose Save as template."
-        case .favourites: return "Tap the star on a template to keep it here."
+        case .favourites: return "Click the star on a template to keep it here."
         default: return "Save a photo you like as a template, and it shows up here."
         }
     }
@@ -105,6 +105,8 @@ struct TemplateCard: View {
                 }
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("\(tpl.name), \(tpl.isPublic ? "public" : "private") template")
+            .accessibilityAction(named: Text("Use")) { store.useTemplate(tpl) }
             .overlay(alignment: .topTrailing) {
                 FavouriteButton(on: tpl.favourite) { store.toggleFavourite(tpl) }.padding(6)
             }
@@ -156,6 +158,7 @@ struct FavouriteButton: View {
         }
         .buttonStyle(.plain)
         .help(on ? "Remove from Favourites" : "Add to Favourites")
+        .accessibilityLabel(on ? "Remove from Favourites" : "Add to Favourites")
     }
 }
 
@@ -189,7 +192,8 @@ struct TemplateDetailView: View {
                                     }
                                 }
                             }
-                            HStack(spacing: 8) {
+                            // Wraps: a template with several tags overflowed the 460 px column in one row.
+                            FlowLayout(spacing: 8) {
                                 Pill(tpl.isPublic ? "Public" : "Private", tpl.isPublic ? .good : .neutral)
                                 Pill(tpl.usesLabel)
                                 if tpl.acceptsProduct { Pill("Takes a product photo", .acc) }

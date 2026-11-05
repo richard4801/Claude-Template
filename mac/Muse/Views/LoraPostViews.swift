@@ -172,23 +172,44 @@ struct LoraView: View {
                 ForEach(l.candidates.filter(\.keep).prefix(18)) { c in Media(ref: c.image, ratio: 0.75) }
             }
         case "ready":
-            HStack(alignment: .top, spacing: 22) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Media(ref: .asset("c_face"), ratio: 0.75, radius: t.cardRadius)
-                    Muted("References only")
+            if store.isDemo {
+                HStack(alignment: .top, spacing: 22) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Media(ref: .asset("c_face"), ratio: 0.75, radius: t.cardRadius)
+                        Muted("References only")
+                    }
+                    .frame(width: 280)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Media(ref: .asset("face"), ratio: 0.75, radius: t.cardRadius)
+                        Text("With LoRA v\(l.version)").font(t.body(12, .bold))
+                    }
+                    .frame(width: 280)
                 }
-                .frame(width: 280)
-                VStack(alignment: .leading, spacing: 8) {
-                    Media(ref: .asset("face"), ratio: 0.75, radius: t.cardRadius)
-                    Text("With LoRA v\(l.version)").font(t.body(12, .bold))
+                Muted("Same prompt and seed. The LoRA keeps her face shape, freckles and build steady across angles.").padding(.top, 12)
+            } else {
+                // A real studio sees her own training shots, never the demo's sample art.
+                let kept = l.candidates.filter(\.keep)
+                if kept.isEmpty {
+                    Note(icon: "sparkles", "LoRA v\(l.version) is ready. Test it in a photoshoot.")
+                } else {
+                    Lbl("Trained on these \(kept.count) shots").padding(.bottom, 8)
+                    LazyVGrid(columns: grid, spacing: 10) {
+                        ForEach(kept.prefix(18)) { c in Media(ref: c.image, ratio: 0.75) }
+                    }
                 }
-                .frame(width: 280)
             }
-            Muted("Same prompt and seed. The LoRA keeps her face shape, freckles and build steady across angles.").padding(.top, 12)
         default:
+            // Her own sheet images (faded) when she has them; the neutral sample art only in demo mode or for an empty sheet.
+            let own = m.slots.compactMap(\.image).prefix(6)
             LazyVGrid(columns: grid, spacing: 10) {
-                ForEach(Array(["g_front", "g_tq", "face", "c_front", "g_side", "profile"].enumerated()), id: \.offset) { _, k in
-                    Media(ref: .asset(k), ratio: 0.75).opacity(0.35)
+                if own.isEmpty {
+                    ForEach(Array(["g_front", "g_tq", "face", "c_front", "g_side", "profile"].enumerated()), id: \.offset) { _, k in
+                        Media(ref: store.isDemo ? ImageRef.asset(k) : nil, ratio: 0.75).opacity(0.35)
+                    }
+                } else {
+                    ForEach(Array(own.enumerated()), id: \.offset) { _, img in
+                        Media(ref: img, ratio: 0.75).opacity(0.35)
+                    }
                 }
             }
             Note(icon: "sparkles", "We generate \(LoraPricing.candidates) varied shots from her character sheet: new angles, outfits, light and expressions, with full-body shots so her physique is learned too. You keep the ones that look like her.")
@@ -242,7 +263,7 @@ struct LoraView: View {
             Muted("You can keep working. We'll notify you when it's done.")
             bar("Photo LoRA", l.photo.progress > 0 || l.progress == 0 ? l.photo.progress : LoraPricing.photoProgress(l.progress))
             bar("Video LoRA", l.video.progress > 0 || l.progress == 0 ? l.video.progress : LoraPricing.videoProgress(l.progress))
-            Text("~\(max(1, Int((100 - l.progress).rounded()))) min left · the demo runs faster").font(t.mono(11.5)).foregroundStyle(t.muted)
+            Text(LoraPricing.timeLeftLine(progress: l.progress, demo: store.isDemo)).font(t.mono(11.5)).foregroundStyle(t.muted)
         case "ready":
             ListBox {
                 ListRow(title: "Use in new renders", hint: "Photos and videos") {
@@ -458,7 +479,9 @@ struct PostsView: View {
                     .frame(width: 320)
             }
             if let m {
-                HStack(spacing: 12) {
+                // Five cards in one row left ~25 px for the name and handle at 1280 px: a wrapping grid instead.
+                Lbl("\(m.shortName)'s accounts").padding(.bottom, 8)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 12)], alignment: .leading, spacing: 12) {
                     ForEach(Platform.allCases) { p in AccountCard(model: m, platform: p, allowDisconnect: false) }
                 }
                 .padding(.bottom, 22)

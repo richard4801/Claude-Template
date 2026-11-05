@@ -40,7 +40,7 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.photography
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
-        NSHumanReadableCopyright: "MUSE AI model studio. Video model: MiniMax H3."
+        NSHumanReadableCopyright: "MUSE AI model studio."
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
     settings:

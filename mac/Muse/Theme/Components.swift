@@ -299,6 +299,7 @@ struct IconButton: View {
         }
         .buttonStyle(.plain)
         .help(help)
+        .if(!help.isEmpty) { $0.accessibilityLabel(help) }
         .onHover { hover = $0 }
     }
 }
@@ -317,6 +318,8 @@ struct MoreMenu<Content: View>: View {
         .fixedSize()
         .frame(width: 34, height: 34)
         .contentShape(Rectangle())
+        .help("More")
+        .accessibilityLabel("More")
     }
 }
 
@@ -333,7 +336,7 @@ struct LinkText: View {
     }
     var body: some View {
         Button(action: action) {
-            Text(text).font(t.body(size, .semibold)).foregroundStyle(t.isD ? t.blue : t.accent)
+            Text(text).font(t.body(size, .semibold)).foregroundStyle(t.link)
         }
         .buttonStyle(.plain)
     }
@@ -357,9 +360,9 @@ struct Pill: View {
         let (bg, fg): (Color, Color) = {
             switch kind {
             case .neutral: return (t.surface2, t.ink)
-            case .good: return (t.good.opacity(0.18), t.good)
+            case .good: return (t.good.opacity(0.18), t.goodInk)
             case .warn: return (t.warnBg, t.isB ? t.warnInk : Color(hex: 0x6B3F00))
-            case .acc: return (t.accent, t.accentInk)
+            case .acc: return (t.accentFill, t.accentInk)
             case .yours: return (t.ink, t.bg)
             }
         }()
@@ -394,7 +397,7 @@ struct Chip: View {
     var body: some View {
         let radius: CGFloat = t.isA ? 0 : 16
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
-        let bg: Color = on ? (t.isB || t.isC ? t.accent : t.isD ? t.yellow : t.ink) : t.surface
+        let bg: Color = on ? (t.isB ? t.accent : t.isC ? t.accentFill : t.isD ? t.yellow : t.ink) : t.surface
         let fg: Color = on ? (t.isB ? t.accentInk : t.isC ? .white : t.isD ? Color(hex: 0x111111) : t.bg) : t.ink
         Button {
             action()
@@ -425,6 +428,8 @@ struct RemovableChip: View {
         HStack(spacing: 6) {
             Text(t.isA ? text.uppercased() : text).font(t.isA ? t.mono(11.5) : t.body(13, t.isD ? .bold : .regular))
             Button(action: onRemove) { Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).opacity(0.6) }.buttonStyle(.plain)
+                .help("Remove")
+                .accessibilityLabel("Remove \(text)")
         }
         .foregroundStyle(t.ink)
         .padding(.horizontal, 12)
@@ -536,6 +541,8 @@ struct MToggle: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .accessibilityValue(isOn ? "On" : "Off")
+        .accessibilityAddTraits(.isToggle)
     }
 }
 
@@ -568,8 +575,10 @@ struct NumStepper: View {
     var body: some View {
         HStack(spacing: 0) {
             Button(action: { dec() }) { Text("−").frame(width: 34, height: 32).background(t.surface2).contentShape(Rectangle()) }.buttonStyle(.plain)
+                .accessibilityLabel("Decrease")
             Text("\(value)").font(t.mono(14)).frame(width: 40)
             Button(action: { inc() }) { Text("+").frame(width: 34, height: 32).background(t.surface2).contentShape(Rectangle()) }.buttonStyle(.plain)
+                .accessibilityLabel("Increase")
         }
         .foregroundStyle(t.ink)
         .font(t.body(15, .semibold))

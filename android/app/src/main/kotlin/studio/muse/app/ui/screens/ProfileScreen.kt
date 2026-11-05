@@ -113,7 +113,15 @@ fun sampleProfileState() = ProfileState(SampleData.models().first(), SampleData.
 @Composable
 fun ProfileContent(s: ProfileState, a: ProfileActions) {
     val m = muse
-    val model = s.model ?: return ScreenBox {}
+    val model = s.model ?: return ScreenBox {
+        Column(Modifier.fillMaxSize()) {
+            TopBar("Model", onBack = a.back)
+            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                NoteBox("This model isn't here any more. It may have been archived.", icon = "model")
+                Cta2("Back", a.back, Modifier.fillMaxWidth())
+            }
+        }
+    }
     val menu = if (a.menu) profileMenu(a.sheet, a.addOutfit, a.lora, a.accounts, a.enhance, a.dressUp, a.archive) else emptyList()
     when {
         m.isA -> ProfileA(model, s, a, menu)
@@ -140,7 +148,7 @@ private fun ProfileA(model: Model, s: ProfileState, a: ProfileActions, menu: Lis
     ScreenBox {
         Column(Modifier.fillMaxSize().padding(bottom = 96.dp)) {
             Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                Wordmark(); Spacer(Modifier.weight(1f)); if (a.menu) MoreMenu(menu)
+                TbBtn("back", a.back); Wordmark(); Spacer(Modifier.weight(1f)); if (a.menu) MoreMenu(menu)
             }
             Row(
                 Modifier.fillMaxWidth().drawBehind {
@@ -151,7 +159,7 @@ private fun ProfileA(model: Model, s: ProfileState, a: ProfileActions, menu: Lis
             ) {
                 val st = m.type.mono.copy(fontSize = 11.5.sp, letterSpacing = .12.em)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Ic("lock", 12.dp); T("Identity locked · ${model.filled}/6", st, m.t.ink, upper = true)
+                    Ic("lock", 12.dp); T("Identity locked · ${model.filled}/7", st, m.t.ink, upper = true)
                 }
                 T("Model profile", st, m.t.ink, upper = true)
             }
@@ -201,7 +209,7 @@ private fun ProfileB(model: Model, s: ProfileState, a: ProfileActions, menu: Lis
                 RefImage(model.cover, Modifier.fillMaxSize(), 18)
                 Viewfinder()
                 val ro = m.type.mono.copy(fontSize = 11.5.sp, letterSpacing = .06.em)
-                T("${model.filled}/6", ro, Color.White, Modifier.align(Alignment.TopStart).padding(start = 16.dp, top = 14.dp))
+                T("${model.filled}/7", ro, Color.White, Modifier.align(Alignment.TopStart).padding(start = 16.dp, top = 14.dp))
                 T("768×1344", ro, Color.White, Modifier.align(Alignment.TopEnd).padding(end = 16.dp, top = 14.dp))
                 T("REF · FACE FRONT", ro, Color.White, Modifier.align(Alignment.BottomStart).padding(start = 16.dp, bottom = 14.dp))
                 T("${s.outfits.size} OUTFITS", ro, Color.White, Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 14.dp))
