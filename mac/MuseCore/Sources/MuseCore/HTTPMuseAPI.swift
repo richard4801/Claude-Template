@@ -473,11 +473,16 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
             let task = Task { [weak self] in
                 var attempt = 0
                 while !Task.isCancelled, let self {
+                    // A stream that opened and later dropped retries after 1 s; one that can't connect backs off to 10 s.
+                    let opened = OpenFlag()
                     do {
-                        try await self.stream { cont.yield($0) }
+                        try await self.stream { e in
+                            if e.type == ApiEvent.connected { opened.set() }
+                            cont.yield(e)
+                        }
                         attempt = 0
                     } catch {
-                        attempt += 1
+                        attempt = opened.value ? 0 : attempt + 1
                     }
                     if Task.isCancelled { break }
                     try? await Task.sleep(nanoseconds: UInt64(min(10, attempt + 1)) * 1_000_000_000)
@@ -491,9 +496,12 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     private func stream(_ yield: @escaping (ApiEvent) -> Void) async throws {
         var r = request("GET", "v1/events")
         r.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        r.timeoutInterval = 3600
+        // The server sends a comment every 10 s (15 s on older builds): 40 s without a byte means the stream died quietly
+        // (the Mac slept, the network changed, a proxy dropped it), so the request times out and the loop reconnects.
+        r.timeoutInterval = 40
         #if canImport(FoundationNetworking)
         // swift-corelibs-foundation has no streaming bytes API; poll instead (Linux builds only, for tests).
+        yield(ApiEvent(type: ApiEvent.connected))
         while !Task.isCancelled {
             let jobs = try await listJobs()
             for j in jobs where j.isActive { yield(ApiEvent(type: "job", job: j)) }
@@ -504,6 +512,7 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
         #else
         let (bytes, resp) = try await session.bytes(for: r)
         if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { throw ApiError("http_\(http.statusCode)", "Event stream refused") }
+        yield(ApiEvent(type: ApiEvent.connected))
         var parser = SSEParser()
         var line = [UInt8]()
         for try await b in bytes {
@@ -513,6 +522,10 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
                     if let p = e.post { e.post = absolutize(p) }
                     if let j = e.job { e.job = absolutize(j) }
                     if let t = e.tool { e.tool = absolutize(t) }
+                    if let m = e.model { e.model = absolutize(m) }
+                    if let o = e.outfit { e.outfit = absolutize(o) }
+                    if let t = e.take { e.take = absolutize(t) }
+                    if let t = e.template { e.template = absolutize(t) }
                     e.takes = e.takes.map(absolutize)
                     yield(e)
                 }
@@ -526,6 +539,14 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
 }
 
 struct Empty: Codable {}
+
+/// Set once the event stream has opened.
+final class OpenFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var on = false
+    func set() { lock.lock(); on = true; lock.unlock() }
+    var value: Bool { lock.lock(); defer { lock.unlock() }; return on }
+}
 
 #if !canImport(FoundationNetworking)
 /// Reports a PUT's bytes sent as 0…1.

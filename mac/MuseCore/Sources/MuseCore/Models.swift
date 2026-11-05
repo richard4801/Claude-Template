@@ -945,10 +945,41 @@ public struct ApiEvent: Codable, Sendable {
     public var warning: WarmGpuWarning?
     /// `tool` events: an Enhance or Dress up run changed.
     public var tool: ToolRun?
+    /// "delete": remove the item with `id` (take, job, model, template, post), or the account of `modelId` on `platform`.
+    public var op: String?
+    public var id: String?
+    /// `take` events: one new or changed take (a photoshoot still made on another device, a status change).
+    public var take: Take?
+    /// `template` events: my view of a template (layers only when it's mine).
+    public var template: MuseTemplate?
+    /// `account` events.
+    public var account: Account?
+    public var modelId: String?
+    public var platform: String?
+    /// `settings` events: the studio settings in my role's view.
+    public var settings: StudioSettings?
+    /// Owners only: `member` (one Members row) and `studio` (the studio balance card).
+    public var member: Member?
+    public var studioBalance: StudioBalance?
+
+    /// Not from the server: the stream (re)connected, so the app refetches what it may have missed.
+    public static let connected = "connected"
 
     public init(type: String, job: Job? = nil, tool: ToolRun? = nil, balance: Balance? = nil, model: MuseModel? = nil, outfit: Outfit? = nil, lora: Lora? = nil, post: Post? = nil,
                 takes: [Take] = [], wallet: Wallet? = nil, notice: EventNotice? = nil, gpu: WarmGpu? = nil,
-                event: String? = nil, warning: WarmGpuWarning? = nil) {
+                event: String? = nil, warning: WarmGpuWarning? = nil, op: String? = nil, id: String? = nil, take: Take? = nil, template: MuseTemplate? = nil,
+                account: Account? = nil, modelId: String? = nil, platform: String? = nil, settings: StudioSettings? = nil, member: Member? = nil,
+                studioBalance: StudioBalance? = nil) {
+        self.op = op
+        self.id = id
+        self.take = take
+        self.template = template
+        self.account = account
+        self.modelId = modelId
+        self.platform = platform
+        self.settings = settings
+        self.member = member
+        self.studioBalance = studioBalance
         self.tool = tool
         self.gpu = gpu
         self.event = event
@@ -965,7 +996,10 @@ public struct ApiEvent: Codable, Sendable {
         self.takes = takes
     }
 
-    enum CodingKeys: String, CodingKey { case type, job, balance, model, outfit, lora, post, takes, wallet, notice, gpu, event, warning, tool }
+    enum CodingKeys: String, CodingKey {
+        case type, job, balance, model, outfit, lora, post, takes, wallet, notice, gpu, event, warning, tool
+        case op, id, take, template, account, modelId, platform, settings, member, studioBalance
+    }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         type = c.v(.type, "")
@@ -982,6 +1016,16 @@ public struct ApiEvent: Codable, Sendable {
         event = c.o(.event)
         warning = c.o(.warning)
         tool = c.o(.tool)
+        op = c.o(.op)
+        id = c.o(.id)
+        take = c.o(.take)
+        template = c.o(.template)
+        account = c.o(.account)
+        modelId = c.o(.modelId)
+        platform = c.o(.platform)
+        settings = c.o(.settings)
+        member = c.o(.member)
+        studioBalance = c.o(.studioBalance)
     }
 }
 

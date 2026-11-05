@@ -174,6 +174,10 @@ final class AppStore {
     private let fake: FakeMuseAPI
     @ObservationIgnored private(set) var api: any MuseAPI
     @ObservationIgnored private var eventsTask: Task<Void, Never>?
+    /// Live stream bookkeeping: opens seen on this stream, when it started, and the last catch-up refetch.
+    @ObservationIgnored private var streamConnects = 0
+    @ObservationIgnored private var eventsStartedAt = Date.distantPast
+    @ObservationIgnored private var lastCatchUp = Date.distantPast
     @ObservationIgnored private var toastTask: Task<Void, Never>?
     var offlineMessage: String?
     var loading = false
@@ -434,7 +438,14 @@ final class AppStore {
     }
 
     func connect() async {
+        startEvents()
+        await reload()
+    }
+
+    private func startEvents() {
         eventsTask?.cancel()
+        streamConnects = 0
+        eventsStartedAt = Date()
         let stream = api.events()
         eventsTask = Task { [weak self] in
             for await e in stream {
@@ -442,7 +453,21 @@ final class AppStore {
                 self.apply(e)
             }
         }
-        await reload()
+    }
+
+    /// The app became active again, or the Mac woke from sleep or changed networks: the stream may have died quietly,
+    /// so it starts afresh and the lists are refetched (anything changed on the phone meanwhile shows up).
+    func resumeLive() {
+        guard user != nil, eventsTask != nil, Date().timeIntervalSince(eventsStartedAt) > 5 else { return }
+        startEvents()
+        catchUp()
+    }
+
+    /// Refetch after a reconnect or on becoming active; at most once every 3 s.
+    private func catchUp() {
+        guard Date().timeIntervalSince(lastCatchUp) > 3 else { return }
+        lastCatchUp = Date()
+        Task { [weak self] in await self?.reload() }
     }
 
     func reload() async {
@@ -518,15 +543,41 @@ final class AppStore {
     // MARK: Events
 
     func apply(_ e: ApiEvent) {
-        if let j = e.job {
-            let before = jobs.first { $0.id == j.id }
-            if let i = jobs.firstIndex(where: { $0.id == j.id }) { jobs[i] = j } else { jobs.insert(j, at: 0) }
-            let wasActive = before.map(\.isActive) ?? true
+        if e.type == ApiEvent.connected {
+            // The first connect comes with the initial load; every later one is a reconnect after a drop: catch up.
+            streamConnects += 1
+            if streamConnects > 1 { catchUp() }
+            return
+        }
+        let jobBefore = e.job.flatMap { j in jobs.first { $0.id == j.id } }
+        LiveEvents.applyJobs(&jobs, e)
+        LiveEvents.applyTakes(&takes, e)
+        if let j = e.job, e.op != "delete" {
+            let wasActive = jobBefore.map(\.isActive) ?? true
             if wasActive && j.isDone { jobFinished(j, newTakes: e.takes) }
             if wasActive && j.isFailed { jobFailed(j) }
         }
-        if !e.takes.isEmpty {
-            for t in e.takes.reversed() where !takes.contains(where: { $0.id == t.id }) { takes.insert(t, at: 0) }
+        if e.type == "template" {
+            LiveEvents.applyTemplates(&templates, e)
+            if let t = shootTemplate { shootTemplate = templates.first { $0.id == t.id } }
+            if let d = templateDetail, let t = templates.first(where: { $0.id == d.id }) { var n = t; n.recent = d.recent; templateDetail = n }
+        }
+        if let id = LiveEvents.isModelDelete(e), let m = models.first(where: { $0.id == id }) {
+            dropArchived(m)
+            archivedModels.removeAll { $0.id == id }
+            accounts[id] = nil
+            posts.removeAll { $0.modelId == id && !$0.isOut }
+        }
+        LiveEvents.applyPosts(&posts, e)
+        LiveEvents.applyAccounts(&accounts, e)
+        if isOwner {
+            LiveEvents.applyMembers(&members, e)
+            if e.type == "studio", let sb = e.studioBalance { studioBalance = sb }
+            if e.type == "settings", e.settings == nil { Task { [weak self] in await self?.loadStudio() } }
+        }
+        if e.type == "settings", let st = e.settings {
+            studioSettings = st
+            syncQualityWithServer()
         }
         if let b = e.balance {
             let wasAbove = balance.balance >= 5
@@ -551,11 +602,8 @@ final class AppStore {
         }
         if let r = e.tool { applyToolRun(r) }
         if let l = e.lora { applyLora(l) }
-        if let p = e.post {
-            if let i = posts.firstIndex(where: { $0.id == p.id }) { posts[i] = p } else { posts.insert(p, at: 0) }
-        }
         if let o = e.outfit {
-            if let i = outfits.firstIndex(where: { $0.id == o.id }) { outfits[i] = o } else { outfits.append(o) }
+            LiveEvents.applyOutfit(&outfits, &models, o)
             if outfitSheet?.outfitId == o.id && o.state == "preview" {
                 outfitSheet?.state = .done
                 outfitSheet?.angles = o.angles

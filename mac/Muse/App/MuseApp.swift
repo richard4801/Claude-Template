@@ -1,4 +1,7 @@
+import AppKit
+import Combine
 import MuseCore
+import Network
 import SwiftUI
 
 @main
@@ -19,11 +22,36 @@ struct MuseApp: App {
                 .onAppear {
                     store.bootstrap()
                     KeyMonitor.shared.install(store)
+                    NetworkWatcher.shared.start { store.resumeLive() }
                 }
+                // Back in front, or awake after sleep: restart the live stream and refetch what changed meanwhile.
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in store.resumeLive() }
+                .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in store.resumeLive() }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1440, height: 900)
         .commands { MuseCommands(store: store) }
+    }
+}
+
+/// Calls back on the main actor when the network comes back or changes (Wi-Fi to Ethernet, a VPN), so the live stream reconnects at once.
+final class NetworkWatcher: @unchecked Sendable {
+    static let shared = NetworkWatcher()
+    private let monitor = NWPathMonitor()
+    private var last: NWPath.Status?
+    private var started = false
+
+    func start(_ onChange: @escaping @MainActor () -> Void) {
+        guard !started else { return }
+        started = true
+        monitor.pathUpdateHandler = { [weak self] path in
+            guard let self else { return }
+            let was = self.last
+            self.last = path.status
+            guard was != nil, path.status == .satisfied else { return }
+            Task { @MainActor in onChange() }
+        }
+        monitor.start(queue: DispatchQueue(label: "muse.network"))
     }
 }
 
