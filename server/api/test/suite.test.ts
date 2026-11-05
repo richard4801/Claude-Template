@@ -303,6 +303,21 @@ describe.skipIf(!hasFfmpeg)('AI suite · Shot API on the mock provider', () => {
     expect((await owner.req('GET', '/v1/suite/targets')).body[3].model).toBe('kling-v4');
   });
 
+  it('beat-only audio in a test render sends no audio (never the track with vocals) and uses the no-audio prompt', async () => {
+    const [o] = await a.ctx.db.execute((await import('drizzle-orm')).sql`select studio_id from users where id = ${owner.id}`).then((r: any) => r.rows ?? r);
+    const { putObject } = await import('../src/storage/objects.js');
+    await putObject(a.ctx, { key: 'up/mock-song.m4a', body: Buffer.from('not really audio'), studioId: o.studio_id, kind: 'clip', contentType: 'audio/mp4' });
+    const before = a.ctx.suite.mock.calls.length;
+    const r = (await owner.req('POST', '/v1/suite/shots', { modelId: model.id, speaking: false, prompt: 'She dances.', references: { audio: { audio: { key: 'up/mock-song.m4a' } } } })).body;
+    expect(r.prompt).toMatch(/moves to the beat of <Audio 1>/);
+    const j = await done(r.id);
+    expect(j.state).toBe('done');
+    const call = a.ctx.suite.mock.calls.slice(before)[0]!;
+    expect(call.input.audio).toBeUndefined();
+    expect(call.input.prompt).toMatch(/does not speak, sing or mouth words/);
+    expect(j.prompt).toMatch(/does not speak, sing or mouth words/);
+  });
+
   it('swap is a suite mode over the existing engine (unavailable without Replicate)', async () => {
     const r = await member.req('POST', '/v1/suite/shots/estimate', { mode: 'swap', modelId: model.id, clipId: 'c_missing' });
     expect(r.status).toBe(400);

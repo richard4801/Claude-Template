@@ -59,6 +59,10 @@ describe('AI suite · prompt scripts (unit)', () => {
     expect(beat.audioRef).toEqual({ ref: { key: 'up/song.m4a' }, beatOnly: true });
     expect(beat.prompt).toMatch(/^Mia moves to the beat of <Audio 1>; she does not sing, speak or mouth lyrics\.$/m);
     expect(beat.estimate).toBeCloseTo(0.08 * 5 + 0.0066, 6);
+    // Its fallback when nothing can be separated: no audio, and the not-speaking line instead of the beat line.
+    expect(beat.promptNoAudio).toMatch(/^Mia does not speak, sing or mouth words\.$/m);
+    expect(beat.promptNoAudio).not.toMatch(/Audio 1/);
+    expect(plan('h3', '768P', req({ references: AUDIO }), { speaking: true }).promptNoAudio).toBeUndefined();
     expect(buildInput(modelById('h3')!, beat, { middle: [], refs: ['a', 'b'], videos: [], audio: 'inst' })).toMatchObject({ reference_audio_urls: ['inst'] });
     const sing = plan('seedance-2.0', '720p', req({ references: AUDIO }), { speaking: true });
     expect(sing.audioRef!.beatOnly).toBe(false);
@@ -170,12 +174,20 @@ describe.skipIf(!hasFfmpeg)('AI suite · talking flag and beat-only audio over H
     // settle is the shot plus exactly what the separation cost.
     expect(creates.filter(c => c.model.includes('demucs')).length).toBeLessThanOrEqual(1);
     const shot = creates.find(c => c.model === 'minimax/h3')!;
-    expect(shot.input.reference_audio_urls).toHaveLength(1);
-    expect(shot.input.reference_audio_urls[0]).toMatch(new RegExp(`(r/${r.id}/instrumental\\.m4a|up/song\\.m4a)`));
-    expect(shot.input.prompt).toMatch(/moves to the beat of <Audio 1>; she does not sing, speak or mouth lyrics/);
     const [row] = await a.ctx.db.select().from(jobs).where(eq(jobs.id, r.id));
     const sepCost = (row!.stats as any).suite.separationCost as number;
-    expect(sepCost).toBeGreaterThanOrEqual(0);
+    if ((row!.stats as any).suite.audio.separated) {
+      // Really separated: only the instrumental goes out, with the beat line.
+      expect(shot.input.reference_audio_urls).toEqual([expect.stringMatching(new RegExp(`r/${r.id}/instrumental\\.m4a`))]);
+      expect(shot.input.prompt).toMatch(/moves to the beat of <Audio 1>; she does not sing, speak or mouth lyrics/);
+      expect(sepCost).toBeGreaterThan(0);
+    } else {
+      // Nothing separated: never the original (vocals) track; the no-audio prompt; no separation cost.
+      expect(shot.input.reference_audio_urls).toBeUndefined();
+      expect(shot.input.prompt).toMatch(/does not speak, sing or mouth words/);
+      expect(sepCost).toBe(0);
+    }
+    expect(shot.input.reference_audio_urls ?? []).not.toContainEqual(expect.stringMatching(/up\/song\.m4a/));
     const settle = (await a.ctx.db.select().from(ledger).where(eq(ledger.jobId, r.id))).find(x => x.kind === 'settle')!;
     expect(settle.amountUsd).toBeCloseTo(0.08 * 5 + sepCost, 6);
     expect(r.cost).toBeCloseTo(0.08 * 5 + 0.0066, 6); // the hold includes the separation estimate

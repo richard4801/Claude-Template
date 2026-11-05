@@ -147,7 +147,7 @@ export type ShotPlan = {
   seconds: number; aspect: string; audio: boolean; takes: number; seed?: number; prompt: string; negative?: string; params: Record<string, unknown>;
   images: ImagePlan; videos: { video: VideoRef; use: string }[];
   /** The audio reference and whether only its instrumental is sent (performer not speaking). */
-  audioRef?: { ref: VideoRef; beatOnly: boolean }; speaking: boolean; separationUsd: number; perSec: number; billedPerTake: number; extraPerTake: number; estimate: number;
+  audioRef?: { ref: VideoRef; beatOnly: boolean }; promptNoAudio?: string; speaking: boolean; separationUsd: number; perSec: number; billedPerTake: number; extraPerTake: number; estimate: number;
   camera: Pick_<CompiledCamera, 'moves' | 'notes' | 'usesGuide'>; notes: string[];
 };
 type Pick_<T, K extends keyof T> = { [P in K]: T[P] };
@@ -226,7 +226,7 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
   const { clean, removed } = ident ? sanitizeDirection(userWords, ident, t) : { clean: userWords, removed: [] as string[] };
   if (removed.length) notes.push(`left out of the scene (it would change her look): ${removed.join('; ')}`);
   const audioSent: 'speech' | 'music' | 'none' = audioPlan ? (speaking ? 'speech' : 'music') : 'none';
-  const res = run('suite.shot', t, {
+  const shotPrompt = (audioSent: 'speech' | 'music' | 'none') => run('suite.shot', t, {
     inputs: {
       hasCharacter: !!character, characterImages: !!character && charTokens.length > 0 && named, hasOutfit: !!character?.outfit,
       refs: refItems, mixedRoles: new Set(images.refs.map(x => x.role)).size > 1 || images.refs.some(x => x.role === 'person'), hasFrames,
@@ -242,8 +242,12 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
       subject: character?.name ?? 'The person', audio: style === 'bracket' ? '[Audio1]' : '<Audio 1>', avoid,
     },
     direction: clean,
-  });
-  let prompt = res.text;
+  }).text;
+  let prompt = shotPrompt(audioSent);
+  // Beat-only shots also carry the prompt for "no audio sent": used when the vocals can't be removed (the separator is
+  // off or returned nothing), because sending the original track would let the model sing or lip-sync to it.
+  let promptNoAudio = audioPlan?.beatOnly ? shotPrompt('none') : undefined;
+  if (promptNoAudio && m.promptMax && promptNoAudio.length > m.promptMax) promptNoAudio = promptNoAudio.slice(0, m.promptMax);
   const negList = [...listOf(t['suite.shot.negative'] ?? ''), ...cam.avoid.map(a => a.replace(/^no\s+/i, ''))];
   if (m.promptMax && prompt.length > m.promptMax) { prompt = prompt.slice(0, m.promptMax); notes.push('prompt shortened to fit'); }
 
@@ -259,7 +263,7 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
   return {
     tier: r.quality, mode: n.mode, modelId: m.id, provider: m.provider, ref: refFor(m, kind), kind, resolution: p.resolution.id, seconds: p.seconds, aspect: r.aspectRatio,
     audio: r.audio && m.audio !== 'none', takes: r.takes, seed: m.seed ? r.seed : undefined, prompt, negative: m.negativePrompt ? negList.join(', ') : undefined, params: cam.params,
-    images, videos, audioRef: audioPlan, speaking, separationUsd: separation, perSec, billedPerTake: billed, extraPerTake: extraCost, estimate,
+    images, videos, audioRef: audioPlan, promptNoAudio, speaking, separationUsd: separation, perSec, billedPerTake: billed, extraPerTake: extraCost, estimate,
     camera: { moves: cam.moves, notes: cam.notes, usesGuide: cam.usesGuide }, notes,
   };
 }
