@@ -96,7 +96,8 @@ class ShootViewModel(private val c: AppContainer) : ViewModel() {
         val model = s.model ?: return@launch c.repo.toast("Only Demo model is ready · Noor needs close-ups")
         val p = s.prompt ?: return@launch
         phase.value = "busy"
-        val shots = c.repo.shoot(ShootRequest(model.id, s.outfit?.id ?: "", s.draft.scene ?: PromptEngine.DEFAULT_SCENE, p.text, p.seed,
+        val text = s.draft.promptText?.trim()?.takeIf { it.isNotEmpty() } ?: p.text
+        val shots = c.repo.shoot(ShootRequest(model.id, s.outfit?.id ?: "", s.draft.scene ?: PromptEngine.DEFAULT_SCENE, text, p.seed,
             models = s.draft.models.ifEmpty { null }))
         if (shots == null) { phase.value = "idle"; return@launch }
         c.drafts.freshShots.value = shots.size
@@ -106,9 +107,15 @@ class ShootViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     companion object {
-        fun buildPrompt(m: Model, o: Outfit?, d: ShootDraft, lora: studio.muse.app.data.Lora? = null): BuiltPrompt = PromptEngine.photoshoot(
-            ShootSpec(FakeMuseApi.identity(m, lora), OutfitSpec(o?.name ?: "outfit"), d.scene, CameraSpec(d.shot, d.lens, d.aperture), d.light, d.grade, d.direction, d.lockSeed),
-        )
+        /** Layers kept when Presets is off: who she is, what she wears, the user's own words, and the seed policy. */
+        private val OWN_PROMPT_LAYERS = setOf(studio.muse.core.Layer.IDENTITY, studio.muse.core.Layer.OUTFIT, studio.muse.core.Layer.DIRECTION, studio.muse.core.Layer.SEED)
+
+        fun buildPrompt(m: Model, o: Outfit?, d: ShootDraft, lora: studio.muse.app.data.Lora? = null): BuiltPrompt {
+            val p = PromptEngine.photoshoot(
+                ShootSpec(FakeMuseApi.identity(m, lora), OutfitSpec(o?.name ?: "outfit"), d.scene, CameraSpec(d.shot, d.lens, d.aperture), d.light, d.grade, d.direction, d.lockSeed),
+            )
+            return if (d.presets) p else p.copy(slots = p.slots.filter { it.layer in OWN_PROMPT_LAYERS })
+        }
     }
 }
 
@@ -148,18 +155,31 @@ fun ShootScreen() {
                         RowB { H3("Prompt"); Tiny("Built from your choices") }
                         Field("Your direction") { Input(d.direction, { v -> vm.edit { it.copy(direction = v) } }, area = true, placeholder = "e.g. laughing mid-step, hair blowing, holding an iced coffee") }
                         RowB {
+                            Column(Modifier.weight(1f)) {
+                                T("Presets", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink)
+                                Tiny(if (d.presets) "Adds scene, camera, light, style and never-add lines" else "Off: only her identity, outfit and your direction are sent")
+                            }
+                            Toggle(d.presets, { vm.edit { it.copy(presets = !it.presets) } })
+                        }
+                        RowB {
                             Column(Modifier.weight(1f)) { T("Lock look", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink); Tiny("Same seed, so retakes stay consistent") }
                             Toggle(d.lockSeed, { vm.edit { it.copy(lockSeed = !it.lockSeed) } })
                         }
                         // Owner only: run this shoot on another model (members never see model names).
                         if (c.repo.demo || c.prefs.value.owner) OwnerModelLine(listOf("shot"), d.models, emptyMap())
                         s.prompt?.let { p ->
-                            Field("Final prompt") { PromptBox(p) }
+                            if (d.promptText != null) {
+                                Field("Final prompt · your text") {
+                                    Input(d.promptText, { v -> vm.edit { it.copy(promptText = v) } }, area = true, placeholder = "The whole prompt, exactly as it will be sent")
+                                }
+                                Tiny("Sent exactly as written. Scene, camera, light and direction choices are ignored until you go back to the built prompt.")
+                            } else Field("Final prompt") { PromptBox(p) }
                             if (p.removed.isNotEmpty()) NoteBox("Left out of your direction: ${p.removed.joinToString("; ")}. It would change her identity or add a never-add item.", warn = true)
                             val clip = LocalClipboardManager.current
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Cta2("Copy", { clip.setText(AnnotatedString(p.text)); vm.toast("Prompt copied") }, Modifier.weight(1f))
-                                Cta2("Edit as text", { vm.toast("Advanced: edit the full prompt as text (pro mode)") }, Modifier.weight(1f))
+                                Cta2("Copy", { clip.setText(AnnotatedString(d.promptText ?: p.text)); vm.toast("Prompt copied") }, Modifier.weight(1f))
+                                if (d.promptText == null) Cta2("Edit as text", { vm.edit { it.copy(promptText = p.text) } }, Modifier.weight(1f))
+                                else Cta2("Use built prompt", { vm.edit { it.copy(promptText = null) } }, Modifier.weight(1f))
                             }
                         }
                     }

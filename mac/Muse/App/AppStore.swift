@@ -841,8 +841,12 @@ final class AppStore {
         return PromptEngine.memberView(p)
     }
 
+    /// Off: the shoot prompt keeps only identity, outfit, the user's direction and the seed line (no scene/camera/light/style/never-add presets).
+    var shootPresets = true
+
     var shootSlots: [PromptSlot] {
-        PromptEngine.shoot(identity: identity(currentModel), outfitName: currentOutfit?.name ?? "outfit", settings: shoot, houseStyle: houseStyle)
+        let all = PromptEngine.shoot(identity: identity(currentModel), outfitName: currentOutfit?.name ?? "outfit", settings: shoot, houseStyle: houseStyle)
+        return shootPresets ? all : all.filter { ["identity", "outfit", "direction", "seed"].contains($0.key) }
     }
 
     var shootPromptText: String { shootSlots.map(\.text).joined(separator: "\n") }

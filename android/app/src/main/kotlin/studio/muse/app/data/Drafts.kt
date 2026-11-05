@@ -62,6 +62,10 @@ data class ShootDraft(
     val grade: String? = null,
     val direction: String = "",
     val lockSeed: Boolean = false,
+    /** Off: only identity, outfit and the user's direction are sent (no scene/camera/light/style/never-add presets). */
+    val presets: Boolean = true,
+    /** "Edit as text": the full prompt as the user wrote it. Sent instead of the built prompt while set. */
+    val promptText: String? = null,
     val tool: String = "camera",
     val lastShots: Int = 0,
     /** Owner only: a model for this shoot, step → "owner/name" (the "Model" chooser). */

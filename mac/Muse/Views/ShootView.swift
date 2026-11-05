@@ -204,6 +204,9 @@ struct ShootInspector: View {
                             TextBox(placeholder: "e.g. laughing mid-step, hair blowing, holding an iced coffee", text: $store.shoot.direction)
                             Muted("Adds detail. It can't change her identity or the never-add list.")
                         }
+                        OptionRow(title: "Presets", hint: store.shootPresets ? "Adds scene, camera, light, style and never-add lines" : "Off: only her identity, outfit and your direction are sent") {
+                            MToggle(isOn: Binding(get: { store.shootPresets }, set: { store.shootPresets = $0 }))
+                        }
                         OptionRow(title: "Lock look", hint: "Same seed, so retakes stay consistent") { MToggle(isOn: $store.shoot.lockSeed) }
                         Field("Final prompt") {
                             if store.promptOverride != nil {
