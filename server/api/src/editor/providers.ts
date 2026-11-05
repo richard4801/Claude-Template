@@ -13,6 +13,7 @@ export type Hooks = {
   onPrediction?: (id: string) => void | Promise<void>;
   onProgress?: (p: number, phase: string) => void | Promise<void>;
 };
+export type Stem = 'vocals' | 'no_vocals';
 export type Transcript = { words: Word[]; language: string; gpuSec: number | null };
 /** A produced file on local disk (deleted by the caller), and the GPU seconds the provider billed (null = unknown). */
 export type Produced = { file: string | null; contentType: string; gpuSec: number | null };
@@ -26,8 +27,8 @@ export interface EditorProvider {
   transcribe(mediaUrl: string, durationSec: number, language: string | null, h: Hooks): Promise<Transcript>;
   /** Person matted onto pure green (#00FF00) video; the apps key it out (chroma). */
   matte(mediaUrl: string, durationSec: number, h: Hooks): Promise<Produced>;
-  /** The voice alone (music and noise removed). */
-  separate(mediaUrl: string, durationSec: number, h: Hooks): Promise<Produced>;
+  /** The voice alone (music and noise removed), or with `stem: "no_vocals"` everything but the voice (beat-only audio). */
+  separate(mediaUrl: string, durationSec: number, h: Hooks, stem?: Stem): Promise<Produced>;
 }
 
 const env = (k: string, d: string) => process.env[k]?.trim() || d;
@@ -76,7 +77,7 @@ export class MockProvider implements EditorProvider {
     await this.steps(h, 'Cutting out the background');
     return { file: null, contentType: 'video/mp4', gpuSec: 10 + 4 * durationSec };
   }
-  async separate(_url: string, durationSec: number, h: Hooks): Promise<Produced> {
+  async separate(_url: string, durationSec: number, h: Hooks, _stem: Stem = 'vocals'): Promise<Produced> {
     await this.steps(h, 'Cleaning up the voice');
     return { file: null, contentType: 'audio/mpeg', gpuSec: 5 + 0.3 * durationSec };
   }
@@ -174,9 +175,10 @@ export class ReplicateProvider implements EditorProvider {
     if (!u) throw new ReplicateError('The background removal returned no video', 'failed');
     return { file: await this.fetch(u, 'mp4'), contentType: 'video/mp4', gpuSec: this.gpu(p) };
   }
-  async separate(url: string, durationSec: number, h: Hooks): Promise<Produced> {
+  async separate(url: string, durationSec: number, h: Hooks, stem: Stem = 'vocals'): Promise<Produced> {
+    // Two-stem split on the voice: the output has both `vocals` and `no_vocals`; we keep the one asked for.
     const p = await this.run(this.models.separate, { audio: url, stem: 'vocals', output_format: 'mp3' }, h, 300 + durationSec * 3);
-    const u = pickFile(p.output, ['vocals']);
+    const u = stem === 'no_vocals' ? (() => { const o = p.output as Record<string, unknown> | null; return o && typeof o === 'object' && !Array.isArray(o) ? pickFile(o['no_vocals'] ?? o['other'] ?? o['accompaniment'] ?? null) : null; })() : pickFile(p.output, ['vocals']);
     if (!u) throw new ReplicateError('The voice clean-up returned no audio', 'failed');
     const ext = /\.(wav|flac|mp3|m4a)(\?|$)/i.exec(u)?.[1]?.toLowerCase() ?? 'mp3';
     return { file: await this.fetch(u, ext), contentType: ext === 'wav' ? 'audio/wav' : ext === 'flac' ? 'audio/flac' : ext === 'm4a' ? 'audio/mp4' : 'audio/mpeg', gpuSec: this.gpu(p) };

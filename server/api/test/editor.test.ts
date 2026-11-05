@@ -394,6 +394,11 @@ describe('Replicate provider (fake Replicate on localhost)', () => {
     const dr = await done(d.id);
     expect(dr.result.asset).toMatchObject({ kind: 'audio', upload: expect.stringMatching(/^up_/) });
     expect(creates.find(x => x.version === 'v_demucs').input).toMatchObject({ stem: 'vocals' });
+    // Beat-only audio for other features (workstream 4): the other stem of the same split.
+    const svc = new (await import('../src/editor/providers.js')).ReplicateProvider(a.ctx);
+    const beat = await svc.separate('https://x/in.mp4', 8, { cancelled: () => false }, 'no_vocals');
+    expect(fs.readFileSync(beat.file!, 'utf8')).toBe('file /files/rest.mp3');
+    fs.rmSync(beat.file!, { force: true });
     // The saved voice can be used in a project.
     const p = M.fromV1({ version: 1, sourceTakeId: src, sourceDurationSec: 8, segments: [{ inSec: 0, outSec: 8, speed: 1 }], mute: false }, { width: 1080, height: 1920, fps: 30 });
     p.assets.push({ id: 'voice', kind: 'audio', upload: dr.result.asset.upload, durationSec: 8 });
