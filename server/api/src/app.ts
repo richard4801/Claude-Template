@@ -18,6 +18,7 @@ import { PostScheduler } from './services/posts.js';
 import { createStorage } from './storage/index.js';
 import { registerRoutes } from './routes/index.js';
 import { registerWorkerRoutes } from './routes/worker.js';
+import { registerVersionRoutes } from './routes/versions.js';
 import { seedDev } from './seed.js';
 import { TemplateService } from './templates/service.js';
 import { WarmService } from './services/warm.js';
@@ -139,6 +140,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
 
   await registerRoutes(app, ctx);
   await registerWorkerRoutes(app, ctx);
+  await registerVersionRoutes(app, ctx);
 
   app.addHook('onListen', async () => {
     const a = app.server.address();

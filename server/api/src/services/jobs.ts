@@ -530,7 +530,9 @@ export function takeView(t: typeof takes.$inferSelect, publicUrl?: string, viewe
     id: t.id, kind: t.kind, jobId: t.jobId, index: t.index, of: t.of, title: t.title, label: t.label, engineLabel: t.engineLabel, cost: t.cost,
     seed: t.seed, status: t.status, thumb: t.thumb ?? undefined, prompt: shown.prompt, createdAt: t.createdAt,
     templateId: t.templateId, templateName: t.templateName, shuffleSeed: t.shuffleSeed, variation: shown.variation, refs: t.refs?.length ? t.refs : undefined,
-    videoUrl: t.kind === 'take' && t.mediaKey ? `${publicUrl ?? ''}/uploads/${t.mediaKey}` : undefined,
+    videoUrl: (t.kind === 'take' || (t.kind as string) === 'edit') && t.mediaKey ? `${publicUrl ?? ''}/uploads/${t.mediaKey}` : undefined,
     durationSec: t.media?.durationSec, width: t.media?.width, height: t.media?.height,
+    // Edited versions (plans/api.md "Video editor"): the source take and the edit list live in `media`.
+    ...((t.kind as string) === 'edit' ? { parentTakeId: t.media?.parentTakeId, edits: t.media?.edits, fps: t.media?.fps } : {}),
   }) as Record<string, unknown> & { jobId?: string | null };
 }
