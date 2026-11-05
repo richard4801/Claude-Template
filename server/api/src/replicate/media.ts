@@ -10,7 +10,10 @@ function run(bin: string, args: string[], timeoutMs = 10 * 60_000): Promise<stri
     execFile(bin, args, { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
         const tail = String(stderr ?? '').trim().split('\n').slice(-3).join(' | ').slice(0, 400);
-        reject(new Error(`${bin.split('/').pop()} failed: ${tail || (err as Error).message}`));
+        const e = err as Error & { signal?: string | null; killed?: boolean; code?: number | string };
+        // A kill with no stderr is almost always the instance running out of memory (or our timeout).
+        const how = e.signal ? ` (killed by ${e.signal}${e.killed ? ', timeout' : ', likely out of memory'})` : e.code != null ? ` (exit ${e.code})` : '';
+        reject(new Error(`${bin.split('/').pop()} failed${how}: ${tail || e.message}`));
       } else resolve(String(stdout));
     });
   });
@@ -67,8 +70,26 @@ export async function finishTake(ffmpeg: string, rendered: string, src: string, 
   args.push('-map', '0:v:0');
   if (withAudio) args.push('-map', '1:a:0', ...(o.audioCodec === 'aac' ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '192k']));
   else args.push('-an');
-  args.push('-t', sec(o.duration), '-c:v', 'libx264', '-preset', 'medium', '-crf', '14', '-pix_fmt', 'yuv420p', '-threads', '2', '-movflags', '+faststart', out);
-  await run(ffmpeg, args);
+  // Light on memory: a 2K (1440x2560) 'medium' encode with full lookahead was killed on the small API instance.
+  args.push('-t', sec(o.duration), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '15', '-x264-params', 'rc-lookahead=8:ref=2',
+    '-pix_fmt', 'yuv420p', '-threads', '2', '-max_muxing_queue_size', '1024', '-movflags', '+faststart', out);
+  try {
+    await run(ffmpeg, args);
+  } catch (first) {
+    // Fallback that needs almost no memory: copy the video stream (the cut lands on the nearest keyframe, at most a
+    // fraction of a second long) and put the audio on. Better a take a hair long than a finished render marked failed.
+    const fb = ['-y', '-v', 'error', '-i', rendered];
+    if (withAudio) fb.push('-i', src);
+    fb.push('-map', '0:v:0');
+    if (withAudio) fb.push('-map', '1:a:0', '-c:a', 'aac', '-b:a', '192k'); else fb.push('-an');
+    fb.push('-t', sec(o.duration), '-c:v', 'copy', '-movflags', '+faststart', out);
+    try { await run(ffmpeg, fb); } catch { throw first; }
+  }
+}
+
+/** The same video without its audio track (stream copy, no re-encode). */
+export async function stripAudio(ffmpeg: string, src: string, out: string) {
+  await run(ffmpeg, ['-y', '-v', 'error', '-i', src, '-map', '0:v:0', '-c:v', 'copy', '-an', '-movflags', '+faststart', out]);
 }
 
 /** A JPEG frame from the finished take, for its thumbnail. */

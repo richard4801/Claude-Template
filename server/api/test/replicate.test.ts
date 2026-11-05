@@ -260,16 +260,16 @@ describe.skipIf(!hasFfmpeg)('video on Replicate (fake Replicate server)', () => 
     expect(p.input.prompt).toContain('<Image 1> to <Image 9>');
     expect(p.input).not.toHaveProperty('seed');
     expect(fake.state.unauthorized).toBe(0);
-    // The padded source is exactly D seconds; the take is the source's exact length with its audio.
+    // The padded source is exactly D seconds; the take is Replicate's file as delivered (whole seconds, its own audio, no trim).
     const padded = probe(path.join(a.dir, `r/${j.id}/source_padded.mp4`));
     expect(Number(padded.format.duration)).toBeCloseTo(7, 1);
     const take = probe(path.join(a.dir, `r/${j.id}/take_1.mp4`));
-    expect(Math.abs(Number(take.format.duration) - 6.4)).toBeLessThan(0.06);
+    expect(Number(take.format.duration)).toBeCloseTo(7, 0);
     expect(take.streams.some(s => s.codec_type === 'audio')).toBe(true);
     expect(fs.existsSync(path.join(a.dir, `r/${j.id}/take_1.jpg`))).toBe(true);
     const t = (await owner.req('GET', '/v1/takes')).body.find((x: any) => x.jobId === j.id);
     expect(t).toMatchObject({ label: 'Standard', engineLabel: 'Standard · 768P', videoUrl: `/uploads/r/${j.id}/take_1.mp4`, thumb: { url: `/uploads/r/${j.id}/take_1.jpg` } });
-    expect(Math.abs(t.durationSec - 6.4)).toBeLessThan(0.06);
+    expect(t.durationSec).toBeCloseTo(7, 0);
     // Ledger: the hold, then the settle on 6 billed seconds (0.48).
     const l = await rows(j.id);
     expect(l.find(x => x.kind === 'hold')!.note).toBe('Video · Standard 768P · 7 s · hold');
@@ -289,7 +289,7 @@ describe.skipIf(!hasFfmpeg)('video on Replicate (fake Replicate server)', () => 
     expect(p2!.input.duration).toBe(4);
     for (const i of [1, 2]) {
       const take = probe(path.join(a.dir, `r/${j.id}/take_${i}.mp4`));
-      expect(Math.abs(Number(take.format.duration) - 2.5)).toBeLessThan(0.06);
+      expect(Number(take.format.duration)).toBeCloseTo(4, 0);   // as delivered, no trim
       expect(take.streams.some(s => s.codec_type === 'audio')).toBe(false);
     }
     expect((await rows(j.id)).find(x => x.kind === 'settle')!.note).toBe('Video · Draft 768P · 2 × 4 s');
@@ -398,7 +398,7 @@ describe('photos on Replicate (fake Replicate server)', () => {
     const ps = fake.state.creates.slice(-2);
     for (const p of ps) {
       expect(p.model).toBe('black-forest-labs/flux-2-pro');
-      expect(p.input).toMatchObject({ aspect_ratio: '9:16', resolution: '2 MP', output_format: 'jpg', safety_tolerance: 2 });
+      expect(p.input).toMatchObject({ aspect_ratio: '9:16', resolution: '2 MP', output_format: 'jpg', safety_tolerance: 5 });
       expect(p.input.input_images.length).toBeLessThanOrEqual(6);
       expect(p.input).not.toHaveProperty('negative_prompt');
     }
@@ -435,13 +435,13 @@ describe('photos on Replicate (fake Replicate server)', () => {
     expect(s2[0].cost).toBe(0.0937);
   });
 
-  it('features.photo carries the prices and estimates the apps show ("about $0.46")', async () => {
+  it('features.photo carries the prices and estimates the apps show ("about $0.32", 3 identity images)', async () => {
     const f = (await owner.req('GET', '/v1/settings/studio')).body.features.photo;
     expect(f).toMatchObject({ perRun: 0.015, perInputMp: 0.015, perOutputMp: 0.015, perEdit: 0.03, refMp: 0.79, maxRefs: 6, loraShots: 30 });
-    expect(P.aboutMoney(f.estimates.shoot)).toBe('about $0.46');
-    expect(P.aboutMoney(f.estimates.outfitSet)).toBe('about $0.19');
-    expect(P.aboutMoney(f.estimates.sheetAngle)).toBe('about $0.10');
-    expect(P.aboutMoney(f.estimates.loraSet)).toBe('about $3.03');
+    expect(P.aboutMoney(f.estimates.shoot)).toBe('about $0.32');
+    expect(P.aboutMoney(f.estimates.outfitSet)).toBe('about $0.16');
+    expect(P.aboutMoney(f.estimates.sheetAngle)).toBe('about $0.07');
+    expect(P.aboutMoney(f.estimates.loraSet)).toBe('about $1.97');
   });
 
   it('an outfit set: a FLUX.2 front, then three Qwen edits of it', async () => {

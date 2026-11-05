@@ -16,7 +16,7 @@ import * as P from '../pricing.js';
 import { outputUrl, ReplicateError, SAFETY_RE, CREDIT_RE, errorText, type Prediction } from '../replicate/client.js';
 import { OUT_OF_CREDIT } from '../images/service.js';
 import { SOMETHING_WENT_WRONG } from './jobs.js';
-import { finishTake, mediaToolsAvailable, padTo, probe, thumbnail } from '../replicate/media.js';
+import { mediaToolsAvailable, padTo, probe, stripAudio, thumbnail } from '../replicate/media.js';
 import { putFile } from '../storage/objects.js';
 import type { JobRow } from '../gpu/controller.js';
 
@@ -197,7 +197,11 @@ export class ReplicateVideo {
         if (!(await report(i, 0.92, 'Finishing'))) return;
         const raw = path.join(tmp, `raw_${i}.mp4`), take = path.join(tmp, `take_${i}.mp4`), thumb = path.join(tmp, `take_${i}.jpg`);
         await rep.download(url, raw);
-        await finishTake(c.FFMPEG_PATH, raw, src, take, { duration: len, keepAudio: r.keepAudio !== false, audioCodec: info.audioCodec });
+        // The take is Replicate's file exactly as delivered: no trim, no re-encode (trimming is the user's job in the
+        // app's editor). It covers the whole clip because the source was padded to whole seconds; its own audio track
+        // is the clip's audio. Skipping the re-encode also keeps a 2K take from running the API instance out of memory.
+        // Keep audio off: drop the audio track with a stream copy (no re-encode, almost no memory).
+        if (r.keepAudio === false) await stripAudio(c.FFMPEG_PATH, raw, take); else await fs.promises.copyFile(raw, take);
         const out = await probe(c.FFPROBE_PATH, take);
         await thumbnail(c.FFMPEG_PATH, take, thumb, Math.min(1, out.duration / 2));
         const key = `r/${job.id}/take_${i}.mp4`, thumbKey = `r/${job.id}/take_${i}.jpg`;
