@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics // CGRect's minX/maxX… live here on Apple platforms
+#endif
 
 // The Directed pane's plan (top-down) and side views: fitting the blocking into the drawing, positions at the playhead,
 // the camera's view cone, time ticks, and dragging a token or the camera (plans/mcp-bridge.md "Phase 2 · UI").
@@ -252,7 +255,8 @@ public enum CameraDrag {
         var best: (PlanHandle, CGFloat)?
         func consider(_ h: PlanHandle, _ v: Vec3) {
             let q = g.point(v)
-            let d = hypot(q.x - p.x, q.y - p.y)
+            let dx = q.x - p.x, dy = q.y - p.y
+            let d: CGFloat = (dx * dx + dy * dy).squareRoot()
             if d <= radius, best == nil || d < best!.1 { best = (h, d) }
         }
         for c in session.blocking?.characters ?? [] {
