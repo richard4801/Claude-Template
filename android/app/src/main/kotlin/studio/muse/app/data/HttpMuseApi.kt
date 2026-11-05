@@ -423,6 +423,13 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun suiteCompile(req: SuiteCompileRequest) = call { suiteCompile(req) }
     override suspend fun suiteSettings() = call { suiteSettings() }
     override suspend fun patchSuiteSettings(req: SuiteSettingsPatch) = call { patchSuiteSettings(req) }
+    override suspend fun uploadSuiteMedia(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit): SuiteMediaRef {
+        val p = call { editorPresign(EditorPresignRequest(mime, bytes.size.toLong())) }
+        putToStorage(p, ProgressBody(bytes, mime.toMediaTypeOrNull(), onProgress))
+        onProgress(1f)
+        val key = p.fileUrl?.substringAfter("/uploads/", "")?.ifBlank { null }
+        return if (key != null) SuiteMediaRef(key = key) else SuiteMediaRef(url = p.fileUrl ?: throw ApiException("upload_failed", "The upload has no address"))
+    }
 
     /** Relative "/uploads/x" refs → absolute, so Coil and ExoPlayer can load them. */
     private fun String.absUrl(): String = if (startsWith("/")) base.trimEnd('/') + this else this

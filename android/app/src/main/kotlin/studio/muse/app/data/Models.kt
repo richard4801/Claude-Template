@@ -730,7 +730,9 @@ data class ImageEnginePatch(val provider: String, val model: String? = null, val
 data class PresignRequest(val kind: String, val contentType: String, val bytes: Long? = null)
 
 @Serializable
-data class PresignResponse(val uploadId: String, val method: String = "PUT", val url: String, val headers: Map<String, String> = emptyMap(), val expiresAt: Long = 0)
+data class PresignResponse(val uploadId: String, val method: String = "PUT", val url: String, val headers: Map<String, String> = emptyMap(), val expiresAt: Long = 0,
+    /** AI suite (workstream 1): the editor presign's stored-file URL (…/uploads/<key>). */
+    val fileUrl: String? = null)
 
 @Serializable
 data class ConfirmClipRequest(val meta: ClipMeta)

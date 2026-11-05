@@ -869,6 +869,11 @@ class FakeMuseApi(
         if (!suiteOwner) throw ApiException("owner_only", "Only the studio owner can do that")
         suite.patch(req)
     }
+    override suspend fun uploadSuiteMedia(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit): SuiteMediaRef {
+        onProgress(1f)
+        val ext = name.substringAfterLast('.', if (mime.startsWith("audio/")) "m4a" else "mp4")
+        return SuiteMediaRef(key = "c/demo_${uid()}.$ext")
+    }
 
     /** Test hook: put a job in a fixed state (no runner). */
     suspend fun debugPut(job: Job) = lock.withLock {
