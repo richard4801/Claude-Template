@@ -49,7 +49,7 @@ struct TransformPanel: View {
     var body: some View {
         let tf = visual.transform ?? EditV2.Transform()
         let k = visual.keyframes
-        SuitePanel(title: "Transform & keyframes") {
+        EditPanel(title: "Transform & keyframes") {
             row("Position X", value: (tf.x ?? 0.5) - 0.5, range: -1...1, prop: .x, keys: k?.x, fmt: signed100) { v in setTransform { $0.x = 0.5 + v } }
             row("Position Y", value: (tf.y ?? 0.5) - 0.5, range: -1...1, prop: .y, keys: k?.y, fmt: signed100) { v in setTransform { $0.y = 0.5 + v } }
             row("Scale", value: tf.scale ?? 1, range: 0.1...4, prop: .scale, keys: k?.scale, fmt: { "\(Int(($0 * 100).rounded()))%" }) { v in setTransform { $0.scale = v } }
@@ -59,7 +59,7 @@ struct TransformPanel: View {
             }
             HStack {
                 SuiteLabel("Ease")
-                SuiteSeg(options: [(EditV2.Ease.linear, "Linear"), (.easeInOut, "In-out"), (.easeOut, "Ease out"), (.hold, "Hold")],
+                EditSeg(options: [(EditV2.Ease.linear, "Linear"), (.easeInOut, "In-out"), (.easeOut, "Ease out"), (.hold, "Hold")],
                          selection: k?.present.first?.1.first?.ease ?? .easeInOut) { e in session.edit { $0.setKeyframeEase(e) } }
                     .frame(width: 230)
             }
@@ -94,7 +94,7 @@ struct LooksPanel: View {
         let pack = EditV2LookLibrary.shared.pack
         let looks = (pack?.looks ?? []).filter { category == "all" || $0.category == category }
         let current = session.selectedLookId
-        SuitePanel(title: "Filters & LUTs", trailing: "\(pack?.looks.count ?? 0) looks") {
+        EditPanel(title: "Filters & LUTs", trailing: "\(pack?.looks.count ?? 0) looks") {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     Chip("All", on: category == "all") { category = "all" }
@@ -162,7 +162,7 @@ struct AdjustPanel: View {
 
     var body: some View {
         let a = visual.adjust ?? EditV2.Adjust()
-        SuitePanel(title: "Adjust") {
+        EditPanel(title: "Adjust") {
             SuiteSlider("Exposure", value: a.exposure ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.exposure = v } }
             SuiteSlider("Contrast", value: a.contrast ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.contrast = v } }
             SuiteSlider("Saturation", value: a.saturation ?? 0, range: -1...1, format: signed100) { v in setAdjust { $0.saturation = v } }
@@ -192,7 +192,7 @@ struct MaskPanel: View {
     var body: some View {
         let m = visual.mask
         let isVideo = session.state.selectedVideo != nil
-        SuitePanel(title: "Mask & green screen") {
+        EditPanel(title: "Mask & green screen") {
             SuiteLabel("Mask")
             FlowLayout(spacing: 6) {
                 Chip("None", on: m == nil) { setMask { $0 = nil } }
@@ -252,7 +252,7 @@ struct TransitionsPanel: View {
         let clip = session.state.selectedVideo
         let isFirst = session.project.mainClips.first?.id == clip?.id
         let current = clip?.transitionIn?.kind.rawValue ?? "cut"
-        SuitePanel(title: "Transitions") {
+        EditPanel(title: "Transitions") {
             if isFirst {
                 Text("The first clip has no transition in. Select the next clip.").font(t.body(12)).foregroundStyle(t.muted)
             }
@@ -318,7 +318,7 @@ struct AudioPanels: View {
     private func clipPanel(_ snd: EditSuite.Sound) -> some View {
         let audioAsset = snd.audioAsset.flatMap { session.project.asset($0) }
         let denoised = audioAsset?.kind == .audio
-        return SuitePanel(title: "Audio · clip") {
+        return EditPanel(title: "Audio · clip") {
             SuiteSlider("Volume", value: EditSuite.db(gain: snd.volume ?? 1), range: -30...6, format: { $0 == 0 ? "0 dB" : String(format: "%+.0f dB", $0) }) { v in
                 let g = v <= -29.5 ? 0 : EditSuite.gain(db: v.rounded())
                 setSound { $0.volume = min(2, g) == 1 ? nil : min(2, g) }
@@ -349,7 +349,7 @@ struct AudioPanels: View {
 
     @ViewBuilder private var mixPanel: some View {
         let music = session.state.musicTrack
-        SuitePanel(title: "Audio · mix & beats") {
+        EditPanel(title: "Audio · mix & beats") {
             if music == nil {
                 Text("Add music (Music in the media bin) to duck it under the voice and cut on its beats.").font(t.body(12)).foregroundStyle(t.muted)
             } else {
@@ -384,7 +384,7 @@ struct AudioPanels: View {
                         Text("Free").font(t.mono(11)).foregroundStyle(t.muted)
                     }
                 } else {
-                    SuiteSeg(options: [(EditSuite.BeatMarks.every, "Every beat"), (.strong, "Strong beats")], selection: session.state.beatMarks) { m in
+                    EditSeg(options: [(EditSuite.BeatMarks.every, "Every beat"), (.strong, "Strong beats")], selection: session.state.beatMarks) { m in
                         session.view { $0.beatMarks = m }
                     }
                 }
@@ -404,8 +404,8 @@ struct SpeedPanel: View {
 
     var body: some View {
         if let c = session.state.selectedVideo {
-            SuitePanel(title: "Speed") {
-                SuiteSeg(options: [(false, "Constant"), (true, "Curve")], selection: c.speedCurve != nil) { curve in
+            EditPanel(title: "Speed") {
+                EditSeg(options: [(false, "Constant"), (true, "Curve")], selection: c.speedCurve != nil) { curve in
                     session.edit { $0.setSpeedPreset(curve ? .custom : nil) }
                 }
                 if let curve = c.speedCurve {

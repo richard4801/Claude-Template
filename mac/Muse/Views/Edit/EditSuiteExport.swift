@@ -34,21 +34,21 @@ struct EditSuiteExportSheet: View {
                     HStack(alignment: .top, spacing: 16) {
                         VStack(alignment: .leading, spacing: 8) {
                             SuiteLabel("Resolution")
-                            SuiteSeg(options: EditSuite.Resolution.allCases.map { ($0, $0.label) }, selection: settings.resolution, height: 32) { settings.resolution = $0 }
+                            EditSeg(options: EditSuite.Resolution.allCases.map { ($0, $0.label) }, selection: settings.resolution, height: 32) { settings.resolution = $0 }
                         }
                         VStack(alignment: .leading, spacing: 8) {
                             SuiteLabel("Frame rate")
-                            SuiteSeg(options: EditSuite.ExportSettings.frameRates.map { ($0, "\($0)") }, selection: settings.fps, height: 32) { settings.fps = $0 }
+                            EditSeg(options: EditSuite.ExportSettings.frameRates.map { ($0, "\($0)") }, selection: settings.fps, height: 32) { settings.fps = $0 }
                         }
                     }
                     HStack(alignment: .top, spacing: 16) {
                         VStack(alignment: .leading, spacing: 8) {
                             SuiteLabel("Format")
-                            SuiteSeg(options: EditSuite.Codec.allCases.map { ($0, $0.label) }, selection: settings.codec, height: 32) { settings.codec = $0 }
+                            EditSeg(options: EditSuite.Codec.allCases.map { ($0, $0.label) }, selection: settings.codec, height: 32) { settings.codec = $0 }
                         }
                         VStack(alignment: .leading, spacing: 8) {
                             SuiteLabel("Captions")
-                            SuiteSeg(options: EditSuite.CaptionsOut.allCases.map { ($0, $0.label) }, selection: settings.captions, height: 32) { settings.captions = $0 }
+                            EditSeg(options: EditSuite.CaptionsOut.allCases.map { ($0, $0.label) }, selection: settings.captions, height: 32) { settings.captions = $0 }
                                 .disabled(session.project.captionTrack == nil)
                                 .opacity(session.project.captionTrack == nil ? 0.5 : 1)
                         }

@@ -210,7 +210,7 @@ struct EditSuiteEditor: View {
             .frame(minWidth: 120, alignment: .leading)
             Spacer(minLength: 8)
             if session.mode == .captions {
-                SuiteSeg(options: [(EditSuiteSession.Mode.captions, "Transcript"), (.timeline, "Timeline")], selection: session.mode) { session.mode = $0 }
+                EditSeg(options: [(EditSuiteSession.Mode.captions, "Transcript"), (.timeline, "Timeline")], selection: session.mode) { session.mode = $0 }
                     .frame(width: 200)
                 Spacer(minLength: 8)
                 Button { session.mode = .timeline } label: {
@@ -223,7 +223,7 @@ struct EditSuiteEditor: View {
                     .keyboardShortcut("z", modifiers: .command)
                 SuiteIconButton(systemName: "arrow.uturn.forward", label: "Redo", disabled: !session.state.canRedo) { session.redo() }
                     .keyboardShortcut("z", modifiers: [.command, .shift])
-                SuiteSeg(options: EditSuite.Ratio.allCases.map { ($0, $0.label) }, selection: session.state.export.ratio) { r in
+                EditSeg(options: EditSuite.Ratio.allCases.map { ($0, $0.label) }, selection: session.state.export.ratio) { r in
                     Task { await session.setRatio(r) }
                 }
                 .frame(width: 236)

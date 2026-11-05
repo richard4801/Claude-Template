@@ -53,7 +53,7 @@ struct SuiteLabel: View {
 }
 
 /// A row of boxed choices (ratio, resolution, format…): the chosen one filled with ink.
-struct SuiteSeg<T: Hashable>: View {
+struct EditSeg<T: Hashable>: View {
     @Environment(\.theme) private var t
     var options: [(T, String)]
     var selection: T?
@@ -217,7 +217,7 @@ struct SuiteSwatch: View {
 }
 
 /// "MUST"-style corner card title used by the inspector panels (E2): a title row and the panel's content.
-struct SuitePanel<Content: View>: View {
+struct EditPanel<Content: View>: View {
     @Environment(\.theme) private var t
     var title: String
     var trailing: String?

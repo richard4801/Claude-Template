@@ -127,7 +127,7 @@ struct CaptionsPanel: View {
         let style = session.state.captionStyle
         VStack(alignment: .leading, spacing: 0) {
             if style == nil {
-                SuitePanel(title: "Auto-captions") {
+                EditPanel(title: "Auto-captions") {
                     Text("Word-timed captions from what's said in the video. Edit the words in Captions & hooks.")
                         .font(t.body(12.5)).foregroundStyle(t.muted)
                     HStack {
@@ -171,7 +171,7 @@ struct CaptionsPanel: View {
                     }
                     HStack {
                         SuiteLabel("Position")
-                        SuiteSeg(options: EditSuite.CaptionPosition.allCases.map { ($0, $0.label) },
+                        EditSeg(options: EditSuite.CaptionPosition.allCases.map { ($0, $0.label) },
                                  selection: EditSuite.CaptionPosition.nearest(st.y ?? 0.72)) { pos in
                             session.edit { $0.changeCaptionStyle { $0.y = pos.y } }
                         }
@@ -229,7 +229,7 @@ struct TextPanel: View {
 
     @ViewBuilder private func editor(_ tx: EditV2.TextItem) -> some View {
         let st = tx.style
-        SuitePanel(title: tx.template.flatMap { id in EditV2.hooks.first { $0.id == id }?.label } ?? "Text") {
+        EditPanel(title: tx.template.flatMap { id in EditV2.hooks.first { $0.id == id }?.label } ?? "Text") {
             TextField("Text", text: Binding(get: { editingId == tx.id ? draft : tx.text }, set: { draft = $0; editingId = tx.id }), axis: .vertical)
                 .lineLimit(1...4)
                 .textFieldStyle(.plain)
@@ -243,7 +243,7 @@ struct TextPanel: View {
                 Spacer()
             }
         }
-        SuitePanel(title: "Style") {
+        EditPanel(title: "Style") {
             HStack(spacing: 8) {
                 Menu {
                     ForEach(EditV2.Font.allCases, id: \.self) { f in Button(f.rawValue.capitalized) { change { $0.style.font = f } } }
@@ -251,13 +251,13 @@ struct TextPanel: View {
                     .menuStyle(.borderlessButton)
                     .frame(width: 110)
                     .accessibilityLabel("Font")
-                SuiteSeg(options: [(400, "Reg"), (700, "Bold"), (900, "Black")], selection: st.weight) { w in change { $0.style.weight = w } }
+                EditSeg(options: [(400, "Reg"), (700, "Bold"), (900, "Black")], selection: st.weight) { w in change { $0.style.weight = w } }
                 SuiteSwatch(hex: st.color, label: "Text colour") { c in change { $0.style.color = c } }
             }
             SuiteSlider("Size", value: st.sizePct, range: 0.015...0.15, format: { "\(Int(($0 * 1000).rounded()) / 10) %" }) { v in
                 change { $0.style.sizePct = (v * 1000).rounded() / 1000 }
             }
-            SuiteSeg(options: [(EditV2.Align.left, "Left"), (.center, "Centre"), (.right, "Right")], selection: st.align, mono: false) { a in change { $0.style.align = a } }
+            EditSeg(options: [(EditV2.Align.left, "Left"), (.center, "Centre"), (.right, "Right")], selection: st.align, mono: false) { a in change { $0.style.align = a } }
             SuiteToggleRow(title: "Outline", isOn: st.stroke != nil) { on in change { $0.style.stroke = on ? EditV2.Stroke(color: "#000000", widthPct: 0.12) : nil } }
             SuiteToggleRow(title: "Background box", isOn: st.background != nil) { on in
                 change { $0.style.background = on ? EditV2.TextBackground(color: "#FFFFFF", opacity: 1, paddingPct: 0.3, radiusPct: 0.2) : nil }
@@ -271,7 +271,7 @@ struct TextPanel: View {
             }
             SuiteToggleRow(title: "Upper case", isOn: st.uppercase == true) { on in change { $0.style.uppercase = on ? true : nil } }
         }
-        SuitePanel(title: "Timing") {
+        EditPanel(title: "Timing") {
             SuiteSlider("Duration", value: tx.durationSec, range: 0.3...max(0.4, min(30, session.duration - tx.startSec)),
                         format: { String(format: "%.1f s", $0) }) { v in change { $0.durationSec = (v * 10).rounded() / 10 } }
         }
@@ -319,7 +319,7 @@ struct AnimPanel: View {
     @ViewBuilder private func panels(animIn: EditV2.Anim?, animOut: EditV2.Anim?, text: Bool) -> some View {
         ForEach([true, false], id: \.self) { isIn in
             let a = isIn ? animIn : animOut
-            SuitePanel(title: isIn ? "In" : "Out") {
+            EditPanel(title: isIn ? "In" : "Out") {
                 FlowLayout(spacing: 6) {
                     ForEach(EditV2.AnimKind.allCases.filter { text || $0 != .typewriter }, id: \.self) { k in
                         Chip(label(k), on: (a?.kind ?? .none) == k) {
