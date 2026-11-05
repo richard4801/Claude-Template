@@ -491,3 +491,6 @@ export const promptOverrides = pgTable('prompt_overrides', {
   updatedBy: text('updated_by'),
   updatedAt: ms('updated_at').notNull(),
 }, t => [primaryKey({ columns: [t.studioId, t.key] })]);
+
+// Workstream 2 (camera sessions + MCP tokens, migration 0008).
+export * from '../camera/schema.js';

@@ -195,6 +195,20 @@ const Env = z.object({
   AUTH_RATE_PER_MIN: num(10),
   SESSION_DAYS: num(90),
   MIN_PASSWORD: num(8),
+
+  // ---- Workstream 2: camera sessions, "Direct with Claude" chat, MUSE MCP server (plans/mcp-bridge.md)
+  /** Claude API key for the in-app Direct with Claude chat. Unset: the chat answers director_unavailable. */
+  ANTHROPIC_API_KEY: str(),
+  DIRECTOR_MODEL: z.string().default('claude-opus-5-5'),
+  DIRECTOR_EFFORT: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).default('high'),
+  DIRECTOR_MAX_TOKENS: num(32000),
+  /** Most model turns (tool rounds) in one chat message. */
+  DIRECTOR_MAX_STEPS: num(24),
+  /** Server-side refusal fallbacks ("default" routing) on the chat's requests. */
+  DIRECTOR_FALLBACKS: bool(true),
+  /** How long a relayed Blender call waits for the owner's Mac. */
+  BLENDER_CALL_TIMEOUT_SEC: num(300),
+  MCP_ENABLED: bool(true),
 });
 
 export type Config = Omit<z.infer<typeof Env>, 'IMAGE_PROVIDER'> & {
@@ -246,6 +260,7 @@ export function describeConfig(c: Config) {
       R2_SECRET_ACCESS_KEY: !!c.R2_SECRET_ACCESS_KEY,
       WORKER_TOKEN: !!c.WORKER_TOKEN,
       OWNER_INVITE_CODE: !!c.OWNER_INVITE_CODE,
+      ANTHROPIC_API_KEY: !!c.ANTHROPIC_API_KEY,
     },
   };
 }

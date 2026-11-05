@@ -823,3 +823,85 @@ Catch-up: events are not replayed. When the stream (re)connects, and when the ap
 - Run the H3 Ref2VA pipeline (`pipeline/runpod/h3_ref2va_run.py`) on a network-volume pod, map the denoising step callback to `step`, and shut the pod down when the queue is empty.
 - Build the prompt with the layered engine (`plans/prompt-system.md`, implemented in `android/core/.../PromptEngine.kt`) and store the exact prompt, seed, steps and references on the job.
 - Show "MiniMax H3" attribution and pass through its licence and acceptable use terms (both the Replicate-hosted and the RunPod engine are MiniMax H3).
+
+## MCP & camera sessions (2026-11-05)
+_Workstream 2. Owner only: every endpoint below answers `owner_only` (403) to a member. Setup and architecture: `plans/mcp-bridge.md`; research: `plans/research/ai-video-suite-research.md` §3.4._ A **camera session** is the shared workspace of the Camera control's **Directed (Blender)** mode: the brief, the cast, how the camera and each character move over time, the guide renders from Blender, and a Shot **draft**. Three things write to the same session: the MUSE apps (REST below), the in-app "Direct with Claude" chat (server-side Claude with MUSE tools + Blender tools relayed to the owner's Mac), and the owner's own Claude app / Claude Code through the **MUSE MCP server** (`/mcp`). **Agents never spend:** the most any tool does is a Shot draft with a cost estimate; the owner presses Generate in the app.
+
+```ts
+CameraStatus  "drafting" | "blocking" | "rendering" | "ready" | "generating" | "done" | "failed"
+Aspect        "9:16" | "16:9" | "1:1" | "4:5" | "21:9"
+Vec3          [x, y, z]                       // metres, Blender world (Z up, character faces -Y at facingDeg 0)
+CamKey        { t: number /* s */, position: Vec3, target?: Vec3 /* look-at */, focalMm?: number /* 8–300 */, rollDeg?: number, ease?: "linear"|"in"|"out"|"in_out" }
+CharKey       { t: number, position: Vec3, facingDeg?: number, action?: string /* "walk", "turn to camera", ≤ 80 chars */ }
+CameraPath    { keyframes: CamKey[] /* 1–64, t ascending, ≤ durationSec */, cuts?: number[], sensorMm?: number }
+Blocking      { characters: { modelId: string, keyframes: CharKey[] /* 1–64 */, note?: string }[] }
+CastMember    { modelId, name, role?: string, heightM?: number /* 1.2–2.2, default 1.68 */ }
+AssetKind     "greybox" | "depth" | "pose" | "tracks" | "keyframe_start" | "keyframe_mid" | "keyframe_end" | "still" | "preview"
+            | "camera_json" | "characters_json" | "blend"
+CameraAsset   { id: "ca_…", kind: AssetKind, label?, state: "pending"|"ready", contentType, bytes?, source: "app"|"mcp"|"relay"|"chat",
+                url?: string /* presigned GET, 1 h, ready only */, createdAt }
+ShotDraft     { id: "sd_…", state: "draft", source: "suite"|"camera", prompt, targetModel, durationSec, aspect,
+                estimate: { usd: number, tokens: number }, camera: CameraSpec, createdAt }
+CameraSpec    { mode: "directed", presets?: {rig?, move?, angle?}, directed: { cameraSessionId,
+                guideAssets: Partial<Record<"greybox"|"depth"|"pose"|"tracks"|"keyframeStart"|"keyframeMid"|"keyframeEnd", assetId>>,
+                trajectories: { camera?: assetId /* camera_json */, characters?: assetId /* characters_json */ },
+                keyframes: CamKey[] } }   // the suite's Shot API owns the full CameraSpec; this is the directed part
+CameraMessage { id, role: "user"|"assistant"|"tool", source: "app"|"chat"|"mcp", text, tool?: { name, ok: boolean, summary }, createdAt }
+CameraSession { id: "cs_…" /* unguessable */, title, brief, status: CameraStatus, aspect, fps /* 12–60, 24 */, durationSec /* 1–30, 6 */,
+                targetModel?: string, presets: { rig?, move?, angle?, intensity? /* 0–1 */ }, characters: CastMember[],
+                cameraPath?: CameraPath, blocking?: Blocking, assets: CameraAsset[], shotDraft?: ShotDraft, camera: CameraSpec,
+                revision: number /* +1 on every change */, relay: { online: boolean, blender: boolean }, createdAt, updatedAt,
+                messages?: CameraMessage[] /* GET one: the last 50 */ }
+BlenderCall   { id: "bc_…", sessionId, tool: BlenderTool, args: object, outDir: "CameraSessions/<sessionId>", createdAt, expiresAt }
+```
+
+| | |
+|---|---|
+| `POST /v1/camera-sessions` `{title?, brief?, aspect?, fps?, durationSec?, characters?: [{modelId, role?, heightM?}], presets?}` | → `CameraSession` (`drafting`). Characters must be the studio's, not archived. |
+| `GET /v1/camera-sessions` | → `CameraSession[]` (no `messages`), newest first. |
+| `GET /v1/camera-sessions/{id}` | → `CameraSession` with the last 50 `messages`. |
+| `PATCH /v1/camera-sessions/{id}` `{title?, brief?, status?, aspect?, fps?, durationSec?, targetModel?, presets?, characters?, revision?}` | → `CameraSession`. With `revision`, a session changed since → `stale_revision` (409). |
+| `DELETE /v1/camera-sessions/{id}` | → 204 (its files go too). |
+| `GET /v1/camera-sessions/{id}/messages?before=<ms>&limit=` | → `CameraMessage[]`, oldest first. |
+| `POST /v1/camera-sessions/{id}/messages` `{text}` | → `CameraMessage` (a note from the app; Claude reads it through `get_camera_session`). |
+| `POST /v1/camera-sessions/{id}/assets` `{kind, contentType, bytes?, label?}` | → `{asset, upload: {method: "PUT", url, headers, expiresAt}}` (presigned straight to R2, 1 h; video ≤ 1 GB, images ≤ 50 MB, JSON ≤ 20 MB, `.blend` ≤ 500 MB). |
+| `POST /v1/camera-sessions/{id}/assets/{assetId}/confirm` | → `CameraAsset` `ready`. `upload_missing` (409) if the PUT hasn't arrived; `camera_json`/`characters_json` must parse as JSON (`bad_request`). The newest ready asset of a guide kind is the one the CameraSpec points at. |
+| `DELETE /v1/camera-sessions/{id}/assets/{assetId}` | → 204. |
+| `PUT /v1/camera-sessions/{id}/path` `{camera?: CameraPath, characters?: Blocking["characters"]}` | → `CameraSession` (status moves `drafting` → `blocking`). Every `modelId` must be in the cast. |
+| `POST /v1/camera-sessions/{id}/shot-draft` `{prompt?, targetModel?, durationSec?}` | → `ShotDraft`. Estimate only: no hold, no ledger row, no provider call. Uses the AI suite's Shot API (`ctx.suite`) when present, otherwise a local draft priced from the target model's $/s. |
+| `POST /v1/camera-sessions/{id}/chat` `{message}` | → `text/event-stream` of `ChatEvent` (below). One turn at a time per session (`chat_busy`, 409); `director_unavailable` (503) without `ANTHROPIC_API_KEY`. |
+| `GET /v1/mcp/tokens` | → `[{id, name, prefix, createdAt, lastUsedAt?, expiresAt?}]` |
+| `POST /v1/mcp/tokens` `{name, expiresDays?: 1–365}` | → `{id, name, prefix, token /* "muse_pat_…", shown once */, createdAt, expiresAt?}` |
+| `DELETE /v1/mcp/tokens/{id}` | → 204 (revoked at once). |
+| `POST /v1/blender/relay` `{online: boolean, blender: {connected: boolean, addonVersion?, protocol?}}` | Mac heartbeat (every 20 s; offline after 45 s). → `{ok: true, pending: BlenderCall[]}` |
+| `GET /v1/blender/calls` | → `BlenderCall[]` waiting for a Mac (catch-up after reconnecting). |
+| `POST /v1/blender/calls/{id}/claim` | → `BlenderCall`. Only one Mac runs a call: `already_claimed` (409), `call_expired` (410). |
+| `POST /v1/blender/calls/{id}/result` `{ok, result?: object, error?: string, assetIds?: string[]}` | → 204. Results ≤ 256 KB; images travel as session assets (`preview`), never inline. |
+
+**ChatEvent** (one `data: <json>` per event): `{type: "text", delta}` · `{type: "tool", id, name, status: "running"|"done"|"error", summary?}` · `{type: "waiting", reason: "blender"}` (a Blender call is out to the Mac) · `{type: "message", message: CameraMessage}` · `{type: "done", stopReason, usage: {inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}}` · `{type: "error", code, error}`. The turn keeps running if the app disconnects; the transcript and `camera` events carry the result.
+
+**Live events** (owners' devices only): `camera` `{op: "upsert", session}` (no messages) / `{op: "delete", id}` / `{op: "message", sessionId, message}` / `{op: "asset", sessionId, asset}`; `blender` `{op: "call", call: BlenderCall}` / `{op: "cancel", id}` / `{op: "relay", online, blender}`.
+
+**Blender tools** (`BlenderTool`; relayed to the owner's Mac, which runs each as a fixed MUSE script through the Blender add-on's `execute_code`, or a native add-on command; arguments are data, never code; free-form Python is not offered in the in-app chat):
+
+| Tool | Args | Does |
+|---|---|---|
+| `blender_status` | — | `{connected, addonVersion, scene}` (add-on `ping` + `get_scene_info`) |
+| `blender_scene_info` | — | add-on `get_scene_info` |
+| `blender_screenshot` | `{maxSize?: 256–1600}` | viewport PNG → uploaded as a `preview` asset → `{assetIds}`; the chat shows it to Claude as an image |
+| `blender_setup_scene` | `{fps, durationSec, aspect, resolutionShort?: 480–1080, clear?: boolean}` | frame range, resolution, flat grey floor `MUSE_floor`; `clear` deletes only objects named `MUSE_*` |
+| `blender_place_character` | `{modelId, label, heightM, position, facingDeg?}` | grey proxy `MUSE_char_<modelId>` scaled to the height |
+| `blender_animate_character` | `{modelId, keyframes: CharKey[]}` | location/rotation keys on the proxy |
+| `blender_add_prop` | `{id, shape: "box"|"cylinder"|"sphere"|"plane", size: Vec3, position, rotationDeg?: Vec3}` | `MUSE_prop_<id>` |
+| `blender_set_camera` | `CameraPath` | camera `MUSE_camera` with keys (look-at via `target`), made the scene camera |
+| `blender_render_guides` | `{passes: ("greybox"|"keyframes"|"camera_json"|"characters_json")[], resolutionShort?}` | Workbench flat-grey playblast `greybox.mp4`, start/mid/end stills, per-frame `camera.json` and `characters.json`, written to `~/MUSE/CameraSessions/<sessionId>/out/`; the Mac uploads each as a session asset → `{assetIds}` |
+
+**MCP server** — `POST /mcp` (Streamable HTTP, JSON-RPC 2.0, JSON responses, stateless; `GET`/`DELETE /mcp` → 405). Auth: `Authorization: Bearer muse_pat_…` (owner personal access token) — a missing or bad token gets 401 with `WWW-Authenticate: Bearer resource_metadata="<base>/.well-known/oauth-protected-resource"`; a member's token is refused. Methods: `initialize` (protocol versions `2026-07-28`, `2025-11-25`, `2025-06-18`, `2025-03-26`), `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/read` (`muse://camera-session/{id}`), notifications are accepted with 202. Tools: `list_characters`, `list_camera_sessions`, `create_camera_session`, `get_camera_session`, `update_camera_session`, `post_camera_message`, `attach_guide_media` (→ presigned PUT), `confirm_guide_media`, `set_camera_path`, `list_presets`, `create_shot_draft` (estimate only). Tool errors come back as `isError: true` results; protocol errors as JSON-RPC errors.
+
+| code | status | when |
+|---|---|---|
+| `stale_revision` | 409 | `PATCH` with an old `revision` |
+| `upload_missing` | 409 | confirm before the PUT arrived |
+| `chat_busy` | 409 | a chat turn is already running on that session |
+| `director_unavailable` | 503 | no `ANTHROPIC_API_KEY` on the server |
+| `already_claimed` / `call_expired` | 409 / 410 | Blender call taken by another Mac / timed out (5 min) |
