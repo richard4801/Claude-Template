@@ -43,6 +43,13 @@
       "when": 1793874234502,
       "tag": "0005_prompt_library",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793894255090,
+      "tag": "0007_suite",
+      "breakpoints": true
     }
   ]
 }

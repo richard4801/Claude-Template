@@ -29,6 +29,8 @@ import { ImageModels } from './images/steps.js';
 import { PromptLibrary } from './prompt/service.js';
 import { ToolService } from './services/tools.js';
 import { EngineHealth } from './services/engines.js';
+import { SuiteService } from './suite/service.js';
+import { registerSuiteRoutes } from './routes/suite.js';
 
 declare module 'fastify' {
   interface FastifyRequest { user: AuthUser }
@@ -82,6 +84,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   ctx.images = new ImageService(ctx, opts.fetchFn);
   ctx.tools = new ToolService(ctx);
   ctx.prompts = new PromptLibrary(ctx);
+  ctx.suite = new SuiteService(ctx, opts.fetchFn); // AI suite (workstream 1)
   ctx.jobs = new JobService(ctx);
   ctx.lora = new LoraService(ctx);
   ctx.posts = new PostScheduler(ctx);
@@ -141,6 +144,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   await registerRoutes(app, ctx);
   await registerWorkerRoutes(app, ctx);
   await registerVersionRoutes(app, ctx);
+  await registerSuiteRoutes(app, ctx); // AI suite (workstream 1)
 
   app.addHook('onListen', async () => {
     const a = app.server.address();
@@ -156,6 +160,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     ctx.posts.stop();
     for (const t of timers) clearTimeout(t);
     await ctx.replicateVideo.idle();
+    await ctx.suite.runner.idle();
     await ctx.gpu.shutdown();
     await app.close();
     if (!opts.db) await dbh.close();

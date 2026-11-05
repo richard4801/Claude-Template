@@ -2,10 +2,14 @@
 // server sends to a model is a named entry with a default here and an optional owner override per studio. The defaults
 // reproduce the prompts exactly as they were before the library, so the shared fixtures keep passing.
 
+import { SUITE_PROMPT_DEFS } from '../suite/prompts.js';
+
 export const PROMPT_GROUPS = [
   { id: 'photoshoot', label: 'Photoshoot' }, { id: 'references', label: 'References' }, { id: 'sheet', label: 'Character sheet' },
   { id: 'outfits', label: 'Outfits' }, { id: 'enhance', label: 'Enhance' }, { id: 'dressup', label: 'Dress up' },
   { id: 'templates', label: 'Templates' }, { id: 'video', label: 'Video' }, { id: 'lora', label: 'LoRA' },
+  // AI suite (workstream 1): suite/prompts.ts
+  { id: 'suite', label: 'AI suite' },
 ] as const;
 export type PromptGroup = (typeof PROMPT_GROUPS)[number]['id'];
 
@@ -14,7 +18,6 @@ export type PromptDef = {
   key: string; group: PromptGroup; title: string; description: string; kind: 'text' | 'list' | 'lines';
   default: string; placeholders: Ph[]; allowEmpty?: boolean;
 };
-
 const REPLICATE_SUMMARY = '[video editing + character replacement] <Subject 1> is replaced by <Subject 2>. <Subject 2> copies '
   + "<Subject 1>'s facial performance exactly, frame by frame and with the same intensity: every eye movement, side glance, blink, "
   + 'eyebrow raise, mouth and lip movement and head turn, at the same moments, and the same body motion. The camera, the exact framing '
@@ -127,6 +130,8 @@ export const PROMPT_DEFS: PromptDef[] = [
       'evening city lights, candid', 'bright kitchen, relaxed', 'beach at noon, full body', 'gym mirror, full body athletic wear', 'cafe table, three-quarter', 'night flash photo, close-up'].join('\n'),
     [], { kind: 'lines', allowEmpty: false }),
   d('lora.variation', 'lora', 'Variation line', 'Added under the sheet prompt of each candidate.', 'Variation: {variation}.', [['variation', 'one line of the list above', true]]),
+  // AI suite (workstream 1): camera vocabulary and shot prompt parts, suite/prompts.ts
+  ...SUITE_PROMPT_DEFS,
 ];
 
 export type PromptKey = string;
