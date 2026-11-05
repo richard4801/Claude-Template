@@ -296,7 +296,9 @@ describe('photo templates', () => {
 
   it('/health reports the build, the migrations and the starter seed', async () => {
     const h = (await a.app.inject({ method: 'GET', url: '/health' })).json();
-    expect(h.migrations).toEqual({ applied: 7, latest: '0006_identity_refs' });
+    // Every migration the build ships (read from the journal, so new migrations don't break this test).
+    const journal = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../drizzle/meta/_journal.json'), 'utf8')).entries as { tag: string }[];
+    expect(h.migrations).toEqual({ applied: journal.length, latest: journal.at(-1)!.tag });
     expect(h.startedAt).toBeGreaterThan(0);
   });
 });
