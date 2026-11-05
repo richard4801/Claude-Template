@@ -82,9 +82,15 @@ export const until = async <T>(fn: () => Promise<T | undefined | null | false> |
   }
 };
 
-/** Collects SSE events from a listening app. */
+/**
+ * Collects SSE events from a listening app. Resolves once the server has subscribed this stream (its `: connected`
+ * line, written in the same tick as the subscription), so events emitted after this returns are never missed, however
+ * slow the machine is. Also resolves if the stream ends without connecting (e.g. a 401).
+ */
 export async function sse(base: string, token: string) {
   const ctrl = new AbortController(), events: any[] = [];
+  let connected!: () => void;
+  const ready = new Promise<void>(r => { connected = r; });
   const done = fetch(`${base}/v1/events`, { headers: { authorization: `Bearer ${token}` }, signal: ctrl.signal }).then(async res => {
     const dec = new TextDecoder();
     let buf = '';
@@ -93,11 +99,16 @@ export async function sse(base: string, token: string) {
       let i;
       while ((i = buf.indexOf('\n\n')) >= 0) {
         const msg = buf.slice(0, i); buf = buf.slice(i + 2);
-        for (const line of msg.split('\n')) if (line.startsWith('data: ')) events.push(JSON.parse(line.slice(6)));
+        for (const line of msg.split('\n')) {
+          if (line === ': connected') connected();
+          else if (line.startsWith('data: ')) events.push(JSON.parse(line.slice(6)));
+        }
       }
     }
-  }).catch(() => {});
-  await new Promise(r => setTimeout(r, 50));
+  }).catch(() => {}).finally(() => connected());
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<never>((_, no) => { timer = setTimeout(() => { ctrl.abort(); no(new Error('SSE stream did not connect')); }, 10_000); });
+  await Promise.race([ready, late]).finally(() => clearTimeout(timer));
   return { events, stop: async () => { ctrl.abort(); await done; } };
 }
 
