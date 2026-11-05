@@ -113,6 +113,7 @@ describe('camera sessions', () => {
       const key = seen[0].camera.guide.video.key;
       expect(key).toMatch(new RegExp(`^cam/${s.id}/${n.asset.id}\\.mp4$`));
       expect(d.request).toEqual(seen[0]);
+      expect(seen[0].camera.guide.keyframes).toBeUndefined(); // no stills in this session
       // The suite only takes references it knows: the guide is a studio upload.
       const ups = await a.ctx.db.execute((await import('drizzle-orm')).sql`select state from uploads where storage_key = ${key}`).then((r: any) => r.rows ?? r);
       expect(ups).toEqual([{ state: 'ready' }]);
@@ -144,7 +145,9 @@ describe('Blender relay', () => {
     const p = relay.call(u, 'cs_x', 'blender_status', {});
     const [call] = (await owner.req('GET', '/v1/blender/calls')).body;
     expect(call).toMatchObject({ sessionId: 'cs_x', tool: 'blender_status', outDir: 'CameraSessions/cs_x' });
-    expect((await owner.req('POST', `/v1/blender/calls/${call.id}/claim`)).body.id).toBe(call.id);
+    const claimed = (await owner.req('POST', `/v1/blender/calls/${call.id}/claim`)).body;
+    expect(claimed.id).toBe(call.id);
+    expect(claimed.expiresAt).toBeGreaterThanOrEqual(call.expiresAt); // a claimed call gets a fresh deadline
     expect((await owner.req('POST', `/v1/blender/calls/${call.id}/claim`)).body.code).toBe('already_claimed');
     expect((await member.req('POST', `/v1/blender/calls/${call.id}/result`, { ok: true })).status).toBe(403);
     expect((await owner.req('POST', `/v1/blender/calls/${call.id}/result`, { ok: true, result: { connected: true } })).status).toBe(204);
@@ -206,7 +209,8 @@ describe('Direct with Claude (mocked Claude)', () => {
       const call = await until(async () => (await owner.req('GET', '/v1/blender/calls')).body[0]);
       expect(call).toMatchObject({ tool: 'blender_screenshot', args: { maxSize: 512 }, sessionId: s.id });
       await owner.req('POST', `/v1/blender/calls/${call.id}/claim`);
-      const up = (await owner.req('POST', `/v1/camera-sessions/${s.id}/assets`, { kind: 'preview', contentType: 'image/png' })).body;
+      const up = (await owner.req('POST', `/v1/camera-sessions/${s.id}/assets?source=relay`, { kind: 'preview', contentType: 'image/png' })).body;
+      expect(up.asset.source).toBe('relay');
       await put(up.upload.url, Buffer.from('PNGDATA'), 'image/png');
       await owner.req('POST', `/v1/camera-sessions/${s.id}/assets/${up.asset.id}/confirm`);
       await owner.req('POST', `/v1/blender/calls/${call.id}/result`, { ok: true, result: { width: 512 }, assetIds: [up.asset.id] });

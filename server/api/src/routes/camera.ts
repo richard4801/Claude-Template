@@ -41,7 +41,9 @@ export async function registerCameraRoutes(app: FastifyInstance, ctx: Ctx) {
     return service.messages(req.user, req.params.id, { before: Number(q.before) || undefined, limit: Number(q.limit) || undefined });
   });
   app.post<P>('/v1/camera-sessions/:id/messages', owner, async req => service.note(req.user, req.params.id, req.body, 'app'));
-  app.post<P>('/v1/camera-sessions/:id/assets', owner, async req => service.newAsset(req.user, req.params.id, req.body, 'app'));
+  // The Mac's Blender relay marks its uploads with ?source=relay.
+  app.post<P>('/v1/camera-sessions/:id/assets', owner, async req =>
+    service.newAsset(req.user, req.params.id, req.body, (req.query as { source?: string })?.source === 'relay' ? 'relay' : 'app'));
   app.post<PA>('/v1/camera-sessions/:id/assets/:assetId/confirm', owner, async req => service.confirmAsset(req.user, req.params.id, req.params.assetId));
   app.delete<PA>('/v1/camera-sessions/:id/assets/:assetId', owner, async (req, reply) => {
     await service.removeAsset(req.user, req.params.id, req.params.assetId);

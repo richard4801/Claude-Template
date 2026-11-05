@@ -45,11 +45,7 @@ export class BlenderRelayHub {
     const now = Date.now(), ttl = this.ctx.config.BLENDER_CALL_TIMEOUT_SEC * 1000;
     const call: BlenderCall = { id: uid('bc'), sessionId, tool, args, outDir: `CameraSessions/${sessionId}`, createdAt: now, expiresAt: now + ttl };
     return new Promise(resolve => {
-      const timer = setTimeout(() => {
-        if (!this.calls.delete(call.id)) return;
-        void this.ctx.hub.emitTo(u.id, { type: 'blender', op: 'cancel', id: call.id });
-        resolve({ ok: false, error: 'Blender did not answer in time (the Mac app may be busy or asleep).' });
-      }, ttl);
+      const timer = setTimeout(() => this.expire(call.id, 'Blender did not answer in time (the Mac app may be busy or asleep).'), ttl);
       this.calls.set(call.id, { call, userId: u.id, state: 'pending', resolve, timer });
       void this.ctx.hub.emitTo(u.id, { type: 'blender', op: 'call', call });
     });
@@ -60,6 +56,11 @@ export class BlenderRelayHub {
     if (!p || p.userId !== u.id) throw new ApiError(410, 'call_expired', 'That Blender call has ended');
     if (p.state !== 'pending') throw new ApiError(409, 'already_claimed', 'Another Mac is running that Blender call');
     p.state = 'claimed';
+    // A claimed call is running on the Mac: it gets a fresh deadline (renders get three times as long, plus the upload).
+    clearTimeout(p.timer);
+    const ttl = this.ctx.config.BLENDER_CALL_TIMEOUT_SEC * 1000 * (p.call.tool === 'blender_render_guides' ? 3 : 1);
+    p.call.expiresAt = Date.now() + ttl;
+    p.timer = setTimeout(() => this.expire(id, 'Blender did not finish in time.'), ttl);
     return p.call;
   }
 
@@ -69,6 +70,14 @@ export class BlenderRelayHub {
     clearTimeout(p.timer);
     this.calls.delete(id);
     p.resolve(r);
+  }
+
+  private expire(id: string, error: string) {
+    const p = this.calls.get(id);
+    if (!p) return;
+    this.calls.delete(id);
+    void this.ctx.hub.emitTo(p.userId, { type: 'blender', op: 'cancel', id });
+    p.resolve({ ok: false, error });
   }
 
   /** Shutdown: every waiting call ends. */

@@ -91,7 +91,7 @@ public final class HTTPBlenderRelayAPI: BlenderRelayAPI, @unchecked Sendable {
     }
 
     public func createAsset(sessionId: String, kind: String, contentType: String, bytes: Int64?, label: String?) async throws -> CameraAssetUpload {
-        try await call("POST", "v1/camera-sessions/\(try key(sessionId))/assets", CameraAssetRequest(kind: kind, contentType: contentType, bytes: bytes, label: label))
+        try await call("POST", "v1/camera-sessions/\(try key(sessionId))/assets?source=relay", CameraAssetRequest(kind: kind, contentType: contentType, bytes: bytes, label: label))
     }
 
     public func confirmAsset(sessionId: String, assetId: String) async throws -> CameraAsset {

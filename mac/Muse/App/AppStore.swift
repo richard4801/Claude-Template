@@ -476,6 +476,8 @@ final class AppStore {
     func connect() async {
         startEvents()
         await reload()
+        // Workstream 2: the Blender relay (owner only, off until switched on in its debug view).
+        BlenderRelayService.shared.configure(baseURL: (api as? HTTPMuseAPI)?.baseURL, isOwner: isOwner) { [serverKey = self.serverKey] in Keychain.token(for: serverKey) }
     }
 
     private func startEvents() {
@@ -784,6 +786,7 @@ final class AppStore {
     /// Back to the sign-in screen, with `message` under the form (session ended, account switched off).
     func endSession(_ message: String?, forgetToken: Bool = true) {
         eventsTask?.cancel()
+        BlenderRelayService.shared.stop() // workstream 2
         if !isDemo { Keychain.deleteToken(for: serverKey) }
         user = nil
         wallet = nil

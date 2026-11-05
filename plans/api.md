@@ -843,7 +843,7 @@ CameraAsset   { id: "ca_…", kind: AssetKind, label?, state: "pending"|"ready",
 ShotDraft     { id: "sd_…", state: "draft", source: "suite"|"camera", prompt, targetModel, durationSec, aspect,
                 estimate: { usd: number, tokens: number }, camera: CameraSpec, createdAt,
                 request: ShotRequest /* the suite's ("AI suite"): camera.mode "directed", camera.guide.video.key = the newest greybox,
-                                        keyframes = presigned stills (24 h); the app POSTs it to /v1/suite/shots when the owner presses Generate */,
+                                        keyframes = "/uploads/cam/<sessionId>/<assetId>.<ext>" (the suite signs them when the shot runs); the app POSTs it to /v1/suite/shots when the owner presses Generate */,
                 warnings?: string[] }
 CameraSpec    { mode: "directed", presets?: {rig?, move?, angle?}, directed: { cameraSessionId,
                 guideAssets: Partial<Record<"greybox"|"depth"|"pose"|"tracks"|"keyframeStart"|"keyframeMid"|"keyframeEnd", assetId>>,
@@ -867,7 +867,7 @@ BlenderCall   { id: "bc_…", sessionId, tool: BlenderTool, args: object, outDir
 | `DELETE /v1/camera-sessions/{id}` | → 204 (its files go too). |
 | `GET /v1/camera-sessions/{id}/messages?before=<ms>&limit=` | → `CameraMessage[]`, oldest first. |
 | `POST /v1/camera-sessions/{id}/messages` `{text}` | → `CameraMessage` (a note from the app; Claude reads it through `get_camera_session`). |
-| `POST /v1/camera-sessions/{id}/assets` `{kind, contentType, bytes?, label?}` | → `{asset, upload: {method: "PUT", url, headers, expiresAt}}` (presigned straight to R2, 1 h; video ≤ 1 GB, images ≤ 50 MB, JSON ≤ 20 MB, `.blend` ≤ 500 MB). |
+| `POST /v1/camera-sessions/{id}/assets[?source=relay]` `{kind, contentType, bytes?, label?}` | → `{asset, upload: {method: "PUT", url, headers, expiresAt}}` (presigned straight to R2, 1 h; video ≤ 1 GB, images ≤ 50 MB, JSON ≤ 20 MB, `.blend` ≤ 500 MB). |
 | `POST /v1/camera-sessions/{id}/assets/{assetId}/confirm` | → `CameraAsset` `ready`. `upload_missing` (409) if the PUT hasn't arrived; `camera_json`/`characters_json` must parse as JSON (`bad_request`). The newest ready asset of a guide kind is the one the CameraSpec points at. |
 | `DELETE /v1/camera-sessions/{id}/assets/{assetId}` | → 204. |
 | `PUT /v1/camera-sessions/{id}/path` `{camera?: CameraPath, characters?: Blocking["characters"]}` | → `CameraSession` (status moves `drafting` → `blocking`). Every `modelId` must be in the cast. |
@@ -878,7 +878,7 @@ BlenderCall   { id: "bc_…", sessionId, tool: BlenderTool, args: object, outDir
 | `DELETE /v1/mcp/tokens/{id}` | → 204 (revoked at once). |
 | `POST /v1/blender/relay` `{online: boolean, blender: {connected: boolean, addonVersion?, protocol?}}` | Mac heartbeat (every 20 s; offline after 45 s). → `{ok: true, pending: BlenderCall[]}` |
 | `GET /v1/blender/calls` | → `BlenderCall[]` waiting for a Mac (catch-up after reconnecting). |
-| `POST /v1/blender/calls/{id}/claim` | → `BlenderCall`. Only one Mac runs a call: `already_claimed` (409), `call_expired` (410). |
+| `POST /v1/blender/calls/{id}/claim` | → `BlenderCall` with a fresh `expiresAt` (5 min; 15 min for `blender_render_guides`). Only one Mac runs a call: `already_claimed` (409), `call_expired` (410). |
 | `POST /v1/blender/calls/{id}/result` `{ok, result?: object, error?: string, assetIds?: string[]}` | → 204. Results ≤ 256 KB; images travel as session assets (`preview`), never inline. |
 
 **ChatEvent** (one `data: <json>` per event): `{type: "text", delta}` · `{type: "tool", id, name, status: "running"|"done"|"error", summary?}` · `{type: "waiting", reason: "blender"}` (a Blender call is out to the Mac) · `{type: "message", message: CameraMessage}` · `{type: "done", stopReason, usage: {inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}}` · `{type: "error", code, error}`. The turn keeps running if the app disconnects; the transcript and `camera` events carry the result.
@@ -896,7 +896,7 @@ BlenderCall   { id: "bc_…", sessionId, tool: BlenderTool, args: object, outDir
 | `blender_place_character` | `{modelId, label, heightM, position, facingDeg?}` | grey proxy `MUSE_char_<modelId>` scaled to the height |
 | `blender_animate_character` | `{modelId, keyframes: CharKey[]}` | location/rotation keys on the proxy |
 | `blender_add_prop` | `{id, shape: "box"|"cylinder"|"sphere"|"plane", size: Vec3, position, rotationDeg?: Vec3}` | `MUSE_prop_<id>` |
-| `blender_set_camera` | `CameraPath` | camera `MUSE_camera` with keys (look-at via `target`), made the scene camera |
+| `blender_set_camera` | `CameraPath` (`cuts` = hard cuts; two keys at the same `t` also cut) | camera `MUSE_camera` with keys (look-at via `target`), made the scene camera |
 | `blender_render_guides` | `{passes: ("greybox"|"keyframes"|"camera_json"|"characters_json")[], resolutionShort?}` | Workbench flat-grey playblast `greybox.mp4`, start/mid/end stills, per-frame `camera.json` and `characters.json`, written to `~/MUSE/CameraSessions/<sessionId>/out/`; the Mac uploads each as a session asset → `{assetIds}` |
 
 **MCP server** — `POST /mcp` (Streamable HTTP, JSON-RPC 2.0, JSON responses, stateless; `GET`/`DELETE /mcp` → 405). Auth: `Authorization: Bearer muse_pat_…` (owner personal access token) — a missing or bad token gets 401 with `WWW-Authenticate: Bearer resource_metadata="<base>/.well-known/oauth-protected-resource"`; a member's token is refused. Methods: `initialize` (protocol versions `2026-07-28`, `2025-11-25`, `2025-06-18`, `2025-03-26`), `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/read` (`muse://camera-session/{id}`), notifications are accepted with 202. Tools: `list_characters`, `list_camera_sessions`, `create_camera_session`, `get_camera_session`, `update_camera_session`, `post_camera_message`, `attach_guide_media` (→ presigned PUT), `confirm_guide_media`, `set_camera_path`, `list_presets`, `create_shot_draft` (estimate only). Tool errors come back as `isError: true` results; protocol errors as JSON-RPC errors.

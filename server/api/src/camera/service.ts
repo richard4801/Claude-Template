@@ -284,7 +284,8 @@ export class CameraService {
     const durationSec = b.durationSec ?? s.durationSec;
     const prompt = (b.prompt ?? s.brief ?? '').trim() || s.title;
     const newest = (kind: CameraAssetKind) => assets.filter(x => x.kind === kind && x.state === 'ready').at(-1);
-    const still = async (kind: CameraAssetKind) => { const x = newest(kind); return x ? this.ctx.storage.presignGet(x.storageKey, 24 * 3600) : undefined; };
+    // The suite signs /uploads/<key> paths itself when the shot runs (never an expiring URL in a queued shot).
+    const still = async (kind: CameraAssetKind) => { const x = newest(kind); return x ? `/uploads/${x.storageKey}` : undefined; };
     const draft = await createShotDraft(this.ctx, u, {
       prompt, targetModel: b.targetModel ?? s.targetModel ?? DEFAULT_TARGET, durationSec, aspect: s.aspect, camera: this.cameraSpec(s, assets),
       characters: s.characters.map(c => ({ modelId: c.modelId, role: c.role })), cameraSessionId: s.id,
