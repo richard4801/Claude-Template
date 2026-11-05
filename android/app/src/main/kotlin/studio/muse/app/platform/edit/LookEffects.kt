@@ -21,6 +21,8 @@ import studio.muse.core.edit.LEAK_COLORS
 import studio.muse.core.edit.Leak
 import studio.muse.core.edit.Look
 import studio.muse.core.edit.Lut
+import studio.muse.core.edit.Tone
+
 import studio.muse.core.edit.Vignette
 import studio.muse.core.edit.grainCell
 import studio.muse.core.edit.halationRadius
@@ -68,12 +70,13 @@ object LookEffects {
      * The stages for an item: [matrix] = its colour matrix (null = identity), [look] its look, [lut] the resolved LUT of
      * `look.lut` (null when it has none or it could not be loaded — the rest of the look still applies).
      */
-    fun stages(matrix: List<Double>?, look: Look?, lut: Lut?, fps: Double): List<Stage> = buildList {
+    fun stages(matrix: List<Double>?, look: Look?, lut: Lut?, fps: Double, tone: Tone? = null): List<Stage> = buildList {
         val l = look ?: Look()
         (l.sharpen ?: 0.0).coerceIn(0.0, 1.0).takeIf { it > 0 }?.let { add(Stage.Sharpen(it)) }
         (l.chromatic ?: 0.0).coerceIn(0.0, 1.0).takeIf { it > 0 }?.let { add(Stage.Chromatic(it)) }
-        val colour = ColorStack(null, l, lut)
-        if (!colour.isIdentity) add(Stage.BakedLut(BAKE_SIZE, ColorStack(matrix, l, lut).bakeCube(BAKE_SIZE)))
+        // Edit suite: highlights/shadows (tone) sit right after the matrix, so they go into the bake with the rest.
+        val colour = ColorStack(null, l, lut, tone)
+        if (!colour.isIdentity) add(Stage.BakedLut(BAKE_SIZE, ColorStack(matrix, l, lut, tone).bakeCube(BAKE_SIZE)))
         else if (matrix != null) add(Stage.Matrix(matrix))
         l.halation?.takeIf { it.amount > 0 }?.let { add(Stage.Halo(it)) }
         val leak = l.leak?.takeIf { it.amount > 0 }
@@ -165,7 +168,7 @@ class LookFinishEffect(private val leak: Leak?, private val vignette: Vignette?,
 // ------------------------------------------------------------------ programs
 /** One full-frame pass of [fragment]; [setUniforms] runs before every frame with the frame size and time. */
 @OptIn(UnstableApi::class)
-private class SinglePassProgram(
+internal class SinglePassProgram(
     useHdr: Boolean, fragment: String, private val setUniforms: (GlProgram, Int, Int, Long) -> Unit,
 ) : BaseGlShaderProgram(useHdr, 1) {
     private val program = glProgram(LookShaders.VERTEX, fragment)
@@ -266,7 +269,7 @@ private class TwoPassBlurProgram(
 }
 
 @OptIn(UnstableApi::class)
-private fun glProgram(vertex: String, fragment: String): GlProgram = try {
+internal fun glProgram(vertex: String, fragment: String): GlProgram = try {
     GlProgram(vertex, fragment).also { it.setBufferAttribute("aFramePosition", GlUtil.getNormalizedCoordinateBounds(), GlUtil.HOMOGENEOUS_COORDINATE_VECTOR_SIZE) }
 } catch (e: GlUtil.GlException) { throw VideoFrameProcessingException(e) }
 

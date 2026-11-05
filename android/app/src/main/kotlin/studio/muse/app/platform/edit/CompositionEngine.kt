@@ -53,6 +53,12 @@ import studio.muse.core.edit.PlannedClip
 import studio.muse.core.edit.RenderPlan
 import studio.muse.core.edit.StillEntry
 import studio.muse.core.edit.VideoLayer
+import studio.muse.core.edit.AudioClip
+import studio.muse.core.edit.TransitionKind
+import studio.muse.core.edit.VideoClip
+import studio.muse.core.edit.VoiceEffect
+import kotlin.math.roundToLong
+
 import studio.muse.core.edit.planRender
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -131,6 +137,7 @@ class EditCompositionEngine(private val context: Context, private val looks: Loo
 
     /** The Media3 composition for [plan] (also what the preview plays). */
     fun composition(plan: RenderPlan, files: Map<String, File>): Composition {
+        currentPlan = plan
         val sequences = plan.layers.map { layerSequence(plan, it, files) } + plan.audioLanes.map { audioSequence(it, files) }
         val overlay = EditOverlay(plan)
         return Composition.Builder(sequences)
@@ -152,11 +159,14 @@ class EditCompositionEngine(private val context: Context, private val looks: Loo
      * file. Returns the file with its real length, size (the encoder may have fallen back to a smaller one) and a
      * JPEG frame for the thumbnail.
      */
-    suspend fun export(plan: RenderPlan, files: Map<String, File>, onProgress: (Float) -> Unit): EditedVideo {
+    suspend fun export(plan: RenderPlan, files: Map<String, File>, onProgress: (Float) -> Unit): EditedVideo = export(plan, files, MimeTypes.VIDEO_H264, onProgress)
+
+    /** Edit suite (workstream 3): [videoMime] = H.264 or HEVC ([MimeTypes.VIDEO_H265]; the encoder factory falls back when a phone lacks it). */
+    suspend fun export(plan: RenderPlan, files: Map<String, File>, videoMime: String, onProgress: (Float) -> Unit): EditedVideo {
         val out = File(outDir, "edit_${System.currentTimeMillis()}.mp4")
         outDir.listFiles()?.filter { it != out && System.currentTimeMillis() - it.lastModified() > 3_600_000 }?.forEach { it.delete() }
         try {
-            withContext(Dispatchers.Main) { runTransformer(composition(plan, files), plan, out, onProgress) }
+            withContext(Dispatchers.Main) { runTransformer(composition(plan, files), plan, out, videoMime, onProgress) }
             val got = probe(out, AssetKind.VIDEO)
             return EditedVideo(out, thumbnail(out, got.durationSec), got.durationSec, got.width, got.height, got.fps.takeIf { it > 0 })
         } catch (e: Throwable) {
@@ -172,16 +182,32 @@ class EditCompositionEngine(private val context: Context, private val looks: Loo
         for (e in layer.entries) when (e) {
             is Gap -> b.addGap(e.durationUs)
             is StillEntry -> b.addItem(still(plan, e, layer.role))
-            is ClipEntry -> b.addItem(clipItem(plan, e.clip, files))
+            is ClipEntry -> if (e.clip.isImage) b.addItem(clipItem(plan, e.clip, files, layer.index))
+                else pieceItems(e.clip, files, video = true, fps = plan.fps, plan = plan, layerIndex = layer.index).forEach { b.addItem(it) }
         }
         return b.build()
+    }
+
+    /**
+     * Edit suite: a clip as one EditedMediaItem per constant-speed piece (a speed curve → 48 sub-clips back to back; a
+     * plain clip → one). Each piece's sound starts its envelope at its own timeline position.
+     */
+    private fun pieceItems(c: PlannedClip, files: Map<String, File>, video: Boolean, fps: Double, plan: RenderPlan? = null, layerIndex: Int = -1): List<EditedMediaItem> {
+        if (c.pieces.size <= 1) return listOf(mediaClip(c, files, video, fps, plan, layerIndex))
+        var startUs = c.startUs
+        return c.pieces.map { pc ->
+            val piece = c.copy(startUs = startUs, clipStartUs = pc.clipStartUs, clipEndUs = pc.clipEndUs, speed = pc.speed, pieces = listOf(pc),
+                frameDropFps = if (pc.speed > 1.0) c.frameDropFps ?: (if (!c.removeVideo) fps.takeIf { it > 0 } else null) else null)
+            startUs += ((pc.clipEndUs - pc.clipStartUs) / pc.speed).roundToLong()
+            mediaClip(piece, files, video, fps, plan, layerIndex)
+        }
     }
 
     private fun audioSequence(lane: AudioLane, files: Map<String, File>): EditedMediaItemSequence {
         val b = EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_AUDIO))
         for (e in lane.entries) when (e) {
             is Gap -> b.addGap(e.durationUs)
-            is ClipEntry -> b.addItem(mediaClip(e.clip, files, video = false, fps = 0.0))
+            is ClipEntry -> pieceItems(e.clip, files, video = false, fps = 0.0).forEach { b.addItem(it) }
             is StillEntry -> {}
         }
         return b.build()
@@ -206,17 +232,19 @@ class EditCompositionEngine(private val context: Context, private val looks: Loo
             .apply { if (effects.isNotEmpty()) setEffects(Effects(emptyList(), effects)) }.build()
     }
 
-    private fun clipItem(plan: RenderPlan, c: PlannedClip, files: Map<String, File>): EditedMediaItem {
-        if (!c.isImage) return mediaClip(c, files, video = true, fps = plan.fps)
+    private fun clipItem(plan: RenderPlan, c: PlannedClip, files: Map<String, File>, layerIndex: Int): EditedMediaItem {
+        if (!c.isImage) return mediaClip(c, files, video = true, fps = plan.fps, plan = plan, layerIndex = layerIndex)
         return image(Uri.fromFile(file(files, c.assetId)), c.durationUs, plan.fps, videoEffects(c, files, plan.fps))
     }
 
-    private fun mediaClip(c: PlannedClip, files: Map<String, File>, video: Boolean, fps: Double): EditedMediaItem {
+    private fun mediaClip(c: PlannedClip, files: Map<String, File>, video: Boolean, fps: Double, plan: RenderPlan? = null, layerIndex: Int = -1): EditedMediaItem {
         val mi = MediaItem.Builder().setUri(Uri.fromFile(file(files, c.assetId)))
             .setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setStartPositionUs(c.clipStartUs).setEndPositionUs(c.clipEndUs).build())
             .build()
-        val audio = if (c.withAudio) listOf<AudioProcessor>(EnvelopeAudioProcessor(c.startUs / 1_000_000.0, c.envelope)) else emptyList()
-        val fx = if (video && !c.removeVideo) videoEffects(c, files, fps) else emptyList()
+        // Edit suite: the clip's voice effect / enhance runs before its gain envelope.
+        val voice = c.voice
+        val audio = if (c.withAudio) listOfNotNull<AudioProcessor>(voice?.let { VoiceAudioProcessor(it.first, it.second) }, EnvelopeAudioProcessor(c.startUs / 1_000_000.0, c.envelope)) else emptyList()
+        val fx = if (video && !c.removeVideo) videoEffects(c, files, fps) + transitionFx(plan, layerIndex) else emptyList()
         return EditedMediaItem.Builder(mi).apply {
             if (c.speed != 1.0) setSpeed(SpeedParameters(ConstantSpeed(c.speed.toFloat()), /* shouldMaintainPitch = */ true))
             if (!c.withAudio) setRemoveAudio(true)
@@ -232,17 +260,38 @@ class EditCompositionEngine(private val context: Context, private val looks: Loo
             look.crop?.let { add(Crop(it.left.toFloat(), it.right.toFloat(), it.bottom.toFloat(), it.top.toFloat())) }
             add(Presentation.createForWidthAndHeight(look.textureWidth, look.textureHeight, Presentation.LAYOUT_STRETCH_TO_FIT))
             look.chroma?.let { add(ChromaKeyEffect(it)) }
+            // Edit suite: the mask multiplies the alpha after the chroma key.
+            look.mask?.let { add(MaskEffect(it)) }
             // Keyed first (on the source colours), then the look in the contract's order; the colour matrix is baked
             // into the look's LUT when it has one.
-            addAll(LookEffects.effects(LookEffects.stages(look.colorMatrix, look.look, looks.lutFor(look.look, files), fps)))
+            addAll(LookEffects.effects(LookEffects.stages(look.colorMatrix, look.look, looks.lutFor(look.look, files), fps, look.tone)))
         }
     }
+
+    /** Edit suite: whip blur / glitch split for a main-layer clip when the project uses those transitions. */
+    private fun transitionFx(plan: RenderPlan?, layerIndex: Int): List<Effect> {
+        if (plan == null || layerIndex < 0 || plan.layers.getOrNull(layerIndex)?.role != LayerRole.MAIN) return emptyList()
+        val uses = plan.project.mainClips.any { it.transitionIn?.kind == TransitionKind.WHIP || it.transitionIn?.kind == TransitionKind.GLITCH }
+        if (!uses) return emptyList()
+        return listOf(TransitionFxEffect { timeUs -> plan.placement(layerIndex, timeUs / 1_000_000.0).let { it.blur to it.rgbSplit } })
+    }
+
+    /** The voice settings of the project item behind a planned clip (null when it has none). */
+    private val PlannedClip.voice: kotlin.Pair<VoiceEffect?, Boolean?>?
+        get() {
+            val item = currentPlan?.project?.track(trackId.substringBefore('~').substringBefore('#'))?.items?.firstOrNull { it.id == itemId } ?: return null
+            val (e, en) = when (item) { is VideoClip -> item.voiceEffect to item.enhance; is AudioClip -> item.voiceEffect to item.enhance; else -> return null }
+            return if ((e == null || e == VoiceEffect.NONE) && en != true) null else e to en
+        }
+
+    /** The plan being translated (set by [composition]; the voice lookup reads items from it). */
+    private var currentPlan: RenderPlan? = null
 
     private val PlannedClip.durationUs: Long get() = endUs - startUs
 
     private fun file(files: Map<String, File>, assetId: String): File = files[assetId] ?: throw IllegalArgumentException("no file for asset $assetId")
 
-    private suspend fun runTransformer(composition: Composition, plan: RenderPlan, out: File, onProgress: (Float) -> Unit) = coroutineScope {
+    private suspend fun runTransformer(composition: Composition, plan: RenderPlan, out: File, videoMime: String, onProgress: (Float) -> Unit) = coroutineScope {
         // Bitrate for the canvas: ~0.12 bit per pixel per frame, 4–40 Mbit/s.
         val bitrate = (plan.width.toDouble() * plan.height * plan.fps * 0.12).toInt().coerceIn(4_000_000, 40_000_000)
         val encoders = DefaultEncoderFactory.Builder(context)
@@ -250,7 +299,7 @@ class EditCompositionEngine(private val context: Context, private val looks: Loo
             .setEnableFallback(true) // a phone that can't encode the full size gets the nearest size it can
             .build()
         val transformer = Transformer.Builder(context)
-            .setVideoMimeType(MimeTypes.VIDEO_H264)
+            .setVideoMimeType(videoMime)
             .setAudioMimeType(MimeTypes.AUDIO_AAC)
             .setEncoderFactory(encoders)
             .build()
