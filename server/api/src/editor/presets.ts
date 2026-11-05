@@ -27,7 +27,15 @@ export const CAPTION_STYLES: Record<CaptionPreset, CaptionStyle> = {
   karaoke: { ...base({ stroke: { color: '#000000', widthPct: 0.1 } }), preset: 'karaoke', highlightColor: '#22D3EE', y: 0.72, wordsPerPage: 4, maxLines: 2 },
   pop: { ...base({ sizePct: 0.05, uppercase: true, stroke: { color: '#000000', widthPct: 0.14 } }), preset: 'pop', highlightColor: '#4ADE80', y: 0.7, wordsPerPage: 2, maxLines: 1 },
   single: { ...base({ sizePct: 0.065, uppercase: true, stroke: { color: '#000000', widthPct: 0.14 } }), preset: 'single', highlightColor: '#FFFFFF', y: 0.6, wordsPerPage: 1, maxLines: 1 },
+  /** Active word gets a marker stripe (highlightColor, lower 45 % of the line) behind it. */
+  highlighter: { ...base({ weight: 900, sizePct: 0.045, uppercase: true, color: '#FFFFFF', stroke: { color: '#000000', widthPct: 0.08 } }), preset: 'highlighter', highlightColor: '#22C55E', y: 0.72, wordsPerPage: 3, maxLines: 2 },
+  /** Text glows in highlightColor (shadow blur, no offset); the active word is pure highlightColor. */
+  neon: { ...base({ weight: 900, sizePct: 0.045, uppercase: true, color: '#FFD1E8', shadow: { color: '#FF2D87', opacity: 0.9, blurPct: 0.5, dyPct: 0 } }), preset: 'neon', highlightColor: '#FF2D87', y: 0.72, wordsPerPage: 3, maxLines: 2 },
 };
+/** The names the Edit suite shows (design E1/E3, EM2), in its order; `highlight` and `single` stay for older projects. */
+export const CAPTION_STYLE_LABELS: [CaptionPreset, string][] = [['pop', 'Word pop'], ['karaoke', 'Karaoke'], ['box', 'Bold box'], ['plain', 'Minimal'], ['highlighter', 'Highlighter'], ['neon', 'Neon'], ['highlight', 'Highlight'], ['single', 'One word']];
+/** Transition names in the Edit suite (design E2): Cut = no transition. */
+export const TRANSITION_LABELS: [string, string][] = [['cut', 'Cut'], ['fade', 'X-fade'], ['zoom', 'Zoom'], ['whip', 'Whip'], ['slideLeft', 'Slide'], ['white', 'Flash'], ['glitch', 'Glitch'], ['spin', 'Spin'], ['black', 'Dip to black']];
 
 export type HookTemplate = { id: string; label: string; text: string; durationSec: number; style: TextStyle; transform: Transform; animIn: Anim; animOut?: Anim };
 /** Ready hook/text templates: choosing one copies style, position and animations into a TextItem (`template` = id). */

@@ -222,6 +222,46 @@
    "y": 0.6,
    "wordsPerPage": 1,
    "maxLines": 1
+  },
+  "highlighter": {
+   "font": "sans",
+   "weight": 900,
+   "sizePct": 0.045,
+   "color": "#FFFFFF",
+   "align": "center",
+   "maxWidthPct": 0.85,
+   "lineHeight": 1.15,
+   "uppercase": true,
+   "stroke": {
+    "color": "#000000",
+    "widthPct": 0.08
+   },
+   "preset": "highlighter",
+   "highlightColor": "#22C55E",
+   "y": 0.72,
+   "wordsPerPage": 3,
+   "maxLines": 2
+  },
+  "neon": {
+   "font": "sans",
+   "weight": 900,
+   "sizePct": 0.045,
+   "color": "#FFD1E8",
+   "align": "center",
+   "maxWidthPct": 0.85,
+   "lineHeight": 1.15,
+   "uppercase": true,
+   "shadow": {
+    "color": "#FF2D87",
+    "opacity": 0.9,
+    "blurPct": 0.5,
+    "dyPct": 0
+   },
+   "preset": "neon",
+   "highlightColor": "#FF2D87",
+   "y": 0.72,
+   "wordsPerPage": 3,
+   "maxLines": 2
   }
  },
  "hooks": [
@@ -511,5 +551,77 @@
     "durationSec": 0.3
    }
   }
+ ],
+ "captionStyleLabels": [
+  [
+   "pop",
+   "Word pop"
+  ],
+  [
+   "karaoke",
+   "Karaoke"
+  ],
+  [
+   "box",
+   "Bold box"
+  ],
+  [
+   "plain",
+   "Minimal"
+  ],
+  [
+   "highlighter",
+   "Highlighter"
+  ],
+  [
+   "neon",
+   "Neon"
+  ],
+  [
+   "highlight",
+   "Highlight"
+  ],
+  [
+   "single",
+   "One word"
+  ]
+ ],
+ "transitionLabels": [
+  [
+   "cut",
+   "Cut"
+  ],
+  [
+   "fade",
+   "X-fade"
+  ],
+  [
+   "zoom",
+   "Zoom"
+  ],
+  [
+   "whip",
+   "Whip"
+  ],
+  [
+   "slideLeft",
+   "Slide"
+  ],
+  [
+   "white",
+   "Flash"
+  ],
+  [
+   "glitch",
+   "Glitch"
+  ],
+  [
+   "spin",
+   "Spin"
+  ],
+  [
+   "black",
+   "Dip to black"
+  ]
  ]
 }

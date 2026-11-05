@@ -4,8 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as M from '../src/editor/model.js';
-import { CAPTION_STYLES, FILTERS, HOOKS } from '../src/editor/presets.js';
+import { CAPTION_STYLES, CAPTION_STYLE_LABELS, FILTERS, HOOKS, TRANSITION_LABELS } from '../src/editor/presets.js';
 import { suggestCuts } from '../src/editor/cuts.js';
+import { runChain, voiceChain } from '../src/editor/audio.js';
 import * as K from '../src/editor/look.js';
 import { CUBE_SIZE, LOOK_IDS, grade, packLook } from '../src/editor/lookpack.js';
 
@@ -64,6 +65,14 @@ const projects: { name: string; project: M.EditProject }[] = [
         { id: 't2', startSec: 3, durationSec: 4, text: HOOKS[3]!.text, style: HOOKS[3]!.style, transform: HOOKS[3]!.transform, animIn: HOOKS[3]!.animIn, animOut: { kind: 'slideDown', durationSec: 0.5 } } as M.TextItem] },
     ], [src, pip, img]),
   },
+  {
+    name: 'speed curves, new transitions, attack/release ducking', project: proj([
+      main([clip('c1', 0, 3, { speed: 1, speedCurve: { preset: 'hero', points: M.SPEED_PRESETS.hero } }), clip('c2', 3, 5.5, { speed: 0.5, transitionIn: { kind: 'whip', durationSec: 0.4 } }),
+        clip('c3', 5.5, 8, { transitionIn: { kind: 'spin', durationSec: 0.5 } }), clip('c4', 8, 10, { speed: 1, speedCurve: { preset: 'custom', points: [[0, 0.1], [0.5, 2], [1, 10]] }, transitionIn: { kind: 'glitch', durationSec: 0.3 } })]),
+      captionTrack('highlighter'),
+      { id: 'mus', kind: 'music', duck: { level: 0.25, attackSec: 0.2, releaseSec: 0.6, under: ['speech'] }, items: [{ id: 'm1', asset: 'song', startSec: 0, inSec: 0, outSec: 20 } as M.AudioClip] },
+    ], [src, music]),
+  },
 ];
 
 function expectFor(p: M.EditProject) {
@@ -79,6 +88,8 @@ function expectFor(p: M.EditProject) {
   for (const t of p.tracks) for (const it of t.items) if ('filter' in it || 'adjust' in it) colors[it.id] = M.colorMatrix((it as M.VideoClip).adjust, (it as M.VideoClip).filter, FILTERS);
   e.colorMatrices = colors;
   e.toV1 = M.toV1(p);
+  e.pieces = Object.fromEntries((M.mainTrack(p).items as M.VideoClip[]).filter(c => c.speedCurve).map(c => [c.id, M.speedPieces(c)]));
+  e.srt = M.toSrt(p);
   return e;
 }
 
@@ -91,7 +102,7 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'canvas too big', project: mut(p => (p.canvas.width = 5000)), ok: false, field: 'edits.canvas.width' },
   { name: 'no main first', project: mut(p => p.tracks.reverse()), ok: false, field: 'edits.tracks.0.kind' },
   { name: 'unknown asset', project: mut(p => (p.tracks[0].items[0].asset = 'nope')), ok: false, field: 'edits.tracks.0.items.0.asset' },
-  { name: 'speed too fast', project: mut(p => (p.tracks[0].items[0].speed = 8)), ok: false, field: 'edits.tracks.0.items.0.speed' },
+  { name: 'speed too fast', project: mut(p => (p.tracks[0].items[0].speed = 12)), ok: false, field: 'edits.tracks.0.items.0.speed' },
   { name: 'past the source end', project: mut(p => (p.tracks[0].items[0].outSec = 10.2)), ok: false, field: 'edits.tracks.0.items.0.outSec' },
   { name: 'too short clip', project: mut(p => { p.tracks[0].items[0].inSec = 0; p.tracks[0].items[0].outSec = 0.05; }), ok: false, field: 'edits.tracks.0.items.0.outSec' },
   { name: 'output too short', project: mut(p => { p.tracks[0].items[0].outSec = 0.3; }), ok: false, field: 'edits' },
@@ -108,6 +119,15 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'asset with two refs', project: mut(p => (p.assets[1].upload = 'up_x')), ok: false, field: 'edits.assets.1' },
   { name: 'transition too long', project: (() => { const p = JSON.parse(JSON.stringify(projects[2]!.project)); p.tracks[0].items[1].transitionIn.durationSec = 1.6; return p; })(), ok: false, field: 'edits.tracks.0.items.1.transitionIn.durationSec' },
   { name: 'duck on voice', project: (() => { const p = JSON.parse(JSON.stringify(projects[6]!.project)); p.tracks[3].duck = { under: ['speech'] }; return p; })(), ok: false, field: 'edits.tracks.3.duck' },
+  { name: 'speed curve ok', project: mut(p => { p.tracks[0].items[0].speedCurve = { preset: 'bullet', points: M.SPEED_PRESETS.bullet }; }), ok: true },
+  { name: 'speed curve bad point', project: mut(p => { p.tracks[0].items[0].speedCurve = { preset: 'custom', points: [[0, 1], [0.5, 20], [1, 1]] }; }), ok: false, field: 'edits.tracks.0.items.0.speedCurve.points.1' },
+  { name: 'speed curve must end at 1', project: mut(p => { p.tracks[0].items[0].speedCurve = { preset: 'custom', points: [[0, 1], [0.8, 2]] }; }), ok: false, field: 'edits.tracks.0.items.0.speedCurve.points' },
+  { name: 'speed 0.1–10 now', project: mut(p => { p.tracks[0].items[0].speed = 0.1; p.tracks[0].items[0].outSec = 0.4; }), ok: true },
+  { name: 'mask ok', project: mut(p => { p.tracks[1].items[0].mask = { shape: 'heart', feather: 0.2, invert: true }; }), ok: true },
+  { name: 'mask bad shape', project: mut(p => { p.tracks[1].items[0].mask = { shape: 'blob' }; }), ok: false, field: 'edits.tracks.1.items.0.mask.shape' },
+  { name: 'voice effect ok', project: mut(p => { p.tracks[0].items[0].voiceEffect = 'radio'; p.tracks[0].items[0].enhance = true; }), ok: true },
+  { name: 'voice effect bad', project: mut(p => { p.tracks[0].items[0].voiceEffect = 'robot'; }), ok: false, field: 'edits.tracks.0.items.0.voiceEffect' },
+  { name: 'adjust highlights', project: mut(p => { p.tracks[0].items[0].adjust = { highlights: -0.4, shadows: 2 }; }), ok: false, field: 'edits.tracks.0.items.0.adjust.shadows' },
   { name: 'look ok', project: mut(p => { p.tracks[0].items[0].look = { ...packLook('film-cine'), curves: { rgb: [[0, 0.05], [1, 0.95]] } }; }), ok: true },
   { name: 'look with imported lut', project: mut(p => { p.assets.push({ id: 'cube1', kind: 'lut', upload: 'up_cube' }); p.tracks[2].items[0].look = { lut: 'cube1', strength: 0.6 }; }), ok: true },
   { name: 'look unknown pack', project: mut(p => { p.tracks[0].items[0].look = { lut: 'pack:nope' }; }), ok: false, field: 'edits.tracks.0.items.0.look.lut' },
@@ -161,6 +181,24 @@ const suggest = [
 
 const chromaKeys: M.Chroma[] = [{ color: '#00FF00' }, { color: '#00FF00', similarity: 0.3, smoothness: 0.15, spill: 0.2 }, { color: '#0000FF', similarity: 0.35, smoothness: 0.05, spill: 0.8 }];
 const chromaColors: [number, number, number][] = [[0, 1, 0], [0.2, 0.7, 0.3], [0.3, 0.8, 0.35], [0.4, 0.75, 0.45], [0.9, 0.7, 0.6], [0.5, 0.5, 0.5], [0.1, 0.1, 0.9], [1, 1, 1], [0, 0, 0], [0.6, 0.9, 0.2]];
+const masks = (['linear', 'mirror', 'circle', 'rect', 'heart', 'star'] as M.MaskShape[]).flatMap(shape => [
+  { shape }, { shape, x: 0.4, y: 0.6, width: 0.6, height: 0.3, rotation: 30, feather: 0.2, invert: true },
+] as M.Mask[]).map(m => ({ mask: m, samples: [[0.5, 0.5], [0.1, 0.1], [0.5, 0.2], [0.5, 0.8], [0.3, 0.55], [0.72, 0.5], [0.5, 0.36], [0.62, 0.62]].map(([u, v]) => [u, v, M.maskAlpha(m, u!, v!)]) }));
+const tone = [[-1, 0], [0, 1], [0.5, -0.5], [1, 1]].map(([sh, hi]) => ({ shadows: sh, highlights: hi, samples: [0, 0.1, 0.25, 0.33, 0.5, 0.67, 0.8, 1].map(v => [v, Math.round(M.toneAdjust(v, sh, hi) * 1e6) / 1e6]) }));
+const curveClips = [
+  { inSec: 0, outSec: 3, speed: 1, speedCurve: { preset: 'hero', points: M.SPEED_PRESETS.hero } },
+  { inSec: 2, outSec: 9, speed: 1, speedCurve: { preset: 'montage', points: M.SPEED_PRESETS.montage } },
+  { inSec: 1, outSec: 2, speed: 1, speedCurve: { preset: 'custom', points: [[0, 0.1], [1, 10]] } },
+] as M.VideoClip[];
+const speedCurves = curveClips.map(c => ({ clip: c, length: Math.round(M.clipLength(c) * 1e6) / 1e6, curve: [0, 0.1, 0.33, 0.5, 0.9, 1].map(x => [x, Math.round(M.curveSpeed(c.speedCurve!, x) * 1e6) / 1e6]),
+  timeAt: [c.inSec, c.inSec + 0.01, (c.inSec + c.outSec) / 2, c.outSec - 0.01, c.outSec].map(t => [t, Math.round(M.clipTimeAt(c, t) * 1e6) / 1e6]),
+  sub: M.subCurve(c.speedCurve!, 0.25, 0.8) }));
+const presetsTable = M.SPEED_PRESETS;
+const impulse = Array.from({ length: 24 }, (_, i) => (i === 0 ? 1 : 0));
+const voice = (['none', 'warm', 'radio', 'phone', 'deep'] as M.VoiceEffect[]).flatMap(v => [false, true].flatMap(enh => [44100, 48000].map(sr => {
+  const chain = voiceChain({ voiceEffect: v, enhance: enh }, sr);
+  return { voiceEffect: v, enhance: enh, sampleRate: sr, chain, impulse: Array.from(runChain(chain, impulse), x => Math.round(x * 1e9) / 1e9) };
+})));
 const chroma = chromaKeys.flatMap(key => chromaColors.map(rgb => ({ key, rgb, out: M.chromaKey(rgb[0], rgb[1], rgb[2], key) })));
 
 function round<T>(o: T): T { return JSON.parse(JSON.stringify(o, (_k, v) => (typeof v === 'number' ? Math.round(v * 1e6) / 1e6 : v))); }
@@ -193,6 +231,8 @@ const addRender = (name: string, look: K.Look, o: { matrix?: number[] | null; lu
   renders.push({ name, look, matrix: o.matrix ?? null, lut: o.lut ?? null, frame: o.frame ?? 0, out: Array.from(out.data, r4) });
 };
 addRender('identity', {});
+renders.push({ name: 'tone (highlights/shadows)', look: {}, matrix: null, lut: null, frame: 0, tone: { shadows: 0.6, highlights: -0.5 },
+  out: Array.from(K.renderLook(pic, {}, { tone: { shadows: 0.6, highlights: -0.5 } }).data, r4) } as any);
 addRender('matrix only', {}, { matrix: M1 });
 addRender('curves', { curves: { rgb: [[0, 0.05], [0.3, 0.25], [0.7, 0.78], [1, 0.97]], b: [[0, 0.08], [1, 0.95]] } });
 addRender('lut half strength + lift', { lut: 'pack:test5', strength: 0.5, lift: 0.6 }, { lut: 'test5' });
@@ -229,10 +269,10 @@ for (const b of looks.badCubes) { let ok = true; try { K.parseCube(b.text); } ca
 
 const files: Record<string, unknown> = {
   'looks.json': looks,
-  'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS },
+  'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS, captionStyleLabels: CAPTION_STYLE_LABELS, transitionLabels: TRANSITION_LABELS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
   'validation.json': validation,
-  'functions.json': { keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma },
+  'functions.json': { keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma, masks, tone, speedCurves, speedPresets: presetsTable, voice, duckTimes: [{ under: ['speech'] }, { fadeSec: 0.4, under: ['speech'] }, { attackSec: 0.2, releaseSec: 0.6, under: ['voice'] }].map(d => ({ duck: d, times: M.duckTimes(d as M.Duck) })) },
 };
 for (const dir of FIXTURE_DIRS) {
   fs.mkdirSync(dir, { recursive: true });

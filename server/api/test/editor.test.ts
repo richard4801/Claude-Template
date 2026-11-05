@@ -329,7 +329,7 @@ describe('versions with a v2 project', () => {
     const up = await upload(a, owner, 'clip', Buffer.from('edited v2 b'));
     const p = project();
     expect((await owner.req('POST', `/v1/takes/${src}/versions`, { uploadId: up, edits: p, durationSec: 3, width: 1080, height: 1920 })).body.error).toMatch(/durationSec/);
-    const bad = project(); (bad.tracks[0]!.items[0] as M.VideoClip).speed = 9;
+    const bad = project(); (bad.tracks[0]!.items[0] as M.VideoClip).speed = 12;
     expect((await owner.req('POST', `/v1/takes/${src}/versions`, { uploadId: up, edits: bad, durationSec: 7, width: 1080, height: 1920 })).body.error).toMatch(/^edits\.tracks\.0\.items\.0\.speed/);
     const other = project(); other.assets.push({ id: 'x', kind: 'audio', take: 'take_elsewhere' });
     expect((await owner.req('POST', '/v1/editor/validate', { project: other })).status).toBe(404);
@@ -429,5 +429,34 @@ describe('Replicate provider (fake Replicate on localhost)', () => {
     p.assets.push({ id: 'voice', kind: 'audio', upload: dr.result.asset.upload, durationSec: 8 });
     (p.tracks[0]!.items[0] as M.VideoClip).audioAsset = 'voice';
     expect((await owner.req('POST', '/v1/editor/validate', { project: p })).body).toMatchObject({ ok: true });
+  });
+});
+
+describe('Edit suite additions', () => {
+  it('beats: a free job finds the tempo of a click track', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const a = await makeApp();
+    try {
+      const { owner } = await people(a, 0) as any;
+      const file = path.join(a.dir, 'clicks.m4a');
+      try {
+        execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', "aevalsrc='if(lt(mod(t,0.5),0.03),sin(2*PI*1000*t),0)':s=22050:d=12", '-c:a', 'aac', '-y', file]);
+      } catch { return; }
+      const studio = ((await a.ctx.db.execute(sql`select studio_id from users limit 1`)) as any).rows[0].studio_id;
+      const p = (await owner.req('POST', '/v1/editor/uploads/presign', { contentType: 'audio/mp4' })).body;
+      const u = new URL(p.url);
+      await a.app.inject({ method: 'PUT', url: u.pathname + u.search, headers: { 'content-type': 'audio/mp4' }, payload: fs.readFileSync(file) });
+      void studio;
+      const est = (await owner.req('POST', '/v1/editor/estimate', { kind: 'beats', source: { uploadId: p.uploadId, durationSec: 12 } })).body;
+      expect(est).toMatchObject({ free: true, usd: 0 });
+      const j = (await owner.req('POST', '/v1/editor/jobs', { kind: 'beats', source: { uploadId: p.uploadId, durationSec: 12 } })).body;
+      const r = await until(async () => { const x = (await owner.req('GET', `/v1/editor/jobs/${j.id}`)).body; return x.state !== 'running' ? x : null; });
+      expect(r.state, JSON.stringify(r)).toBe('done');
+      expect(r.result.bpm).toBeGreaterThan(118);
+      expect(r.result.bpm).toBeLessThan(122);
+      expect(r.result.beats.length).toBeGreaterThan(18);
+      expect(r.result.strong.length).toBeGreaterThan(3);
+      expect(r.costUsd).toBe(0);
+    } finally { await a.close(); }
   });
 });

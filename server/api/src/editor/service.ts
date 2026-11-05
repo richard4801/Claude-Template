@@ -18,10 +18,11 @@ import { CUT_DEFAULTS, suggestCuts, type CutOptions, type Word } from './cuts.js
 import { makeProvider, rmQuiet, type EditorProvider, type Hooks } from './providers.js';
 import { mediaToolsAvailable } from '../replicate/media.js';
 import { detectSilences, silenceCuts } from './silence.js';
+import { decodeMono, detectBeats } from './audio.js';
 import { editorJobs, type EditorJobKind, type EditorSource } from './schema.js';
 
 type Row = typeof editorJobs.$inferSelect;
-export const EDITOR_KINDS: EditorJobKind[] = ['captions', 'cuts', 'matte', 'denoise'];
+export const EDITOR_KINDS: EditorJobKind[] = ['captions', 'cuts', 'matte', 'denoise', 'beats'];
 export const EDITOR_LIMITS = { maxSourceSec: 600, maxMatteSec: 120, maxRunning: 2, reuseDays: 30, minChargeUsd: 0.01 } as const;
 /** GPU seconds a job is expected to take (start-up + per second of media), for the estimate. */
 const GPU_SEC = {
@@ -29,7 +30,7 @@ const GPU_SEC = {
   matte: (d: number) => 10 + 4 * d,
   separate: (d: number) => 5 + 0.3 * d,
 };
-const PHASE: Record<EditorJobKind, string> = { captions: 'Listening', cuts: 'Finding pauses', matte: 'Cutting out the background', denoise: 'Cleaning up the voice' };
+const PHASE: Record<EditorJobKind, string> = { captions: 'Listening', cuts: 'Finding pauses', matte: 'Cutting out the background', denoise: 'Cleaning up the voice', beats: 'Finding the beat' };
 const LANG_RE = /^[a-z]{2}$/;
 
 export type JobOptions = { language?: string | null; fromJobId?: string; analyzeOnly?: boolean; silenceOnly?: boolean; noiseDb?: number } & CutOptions;
@@ -148,8 +149,8 @@ export class EditorAiService {
     const d = src.source.durationSec;
     if (d > EDITOR_LIMITS.maxSourceSec) throw badRequest(`source: at most ${EDITOR_LIMITS.maxSourceSec / 60} minutes`);
     if (kind === 'matte' && d > EDITOR_LIMITS.maxMatteSec) throw badRequest(`source: background removal works on up to ${EDITOR_LIMITS.maxMatteSec} s`);
-    const silenceOnly = kind === 'cuts' && !!opts.silenceOnly;
-    if (silenceOnly && !(await mediaToolsAvailable(this.ctx.config.FFMPEG_PATH, this.ctx.config.FFPROBE_PATH))) throw badRequest('options.silenceOnly: not available on this server');
+    const silenceOnly = (kind === 'cuts' && !!opts.silenceOnly) || kind === 'beats';
+    if (silenceOnly && !(await mediaToolsAvailable(this.ctx.config.FFMPEG_PATH, this.ctx.config.FFPROBE_PATH))) throw badRequest(kind === 'beats' ? 'kind: beat detection is not available on this server' : 'options.silenceOnly: not available on this server');
     const reuse = silenceOnly ? null : (kind === 'cuts' || kind === 'captions' || (kind === 'denoise' && opts.analyzeOnly)) ? await this.transcriptFor(u, src.key, opts) : null;
     if (kind === 'denoise' && opts.analyzeOnly && !reuse) throw badRequest('options.analyzeOnly: make captions for this video first');
     const p = this.provider;
@@ -214,6 +215,10 @@ export class EditorAiService {
       if (row.kind === 'captions') {
         const t = await transcript();
         result = { language: t.language, words: t.words, durationSec: d, reused: !!reuse };
+      } else if (row.kind === 'beats') {
+        const samples = await this.withLocalInput(src.key, input => decodeMono(this.ctx.config.FFMPEG_PATH, input));
+        await this.patch(id, { progress: 70 });
+        result = { ...detectBeats(samples), durationSec: d };
       } else if (row.kind === 'cuts' && o.silenceOnly) {
         const minSilenceSec = o.minSilenceSec ?? CUT_DEFAULTS.minSilenceSec, keepPadSec = o.keepPadSec ?? CUT_DEFAULTS.keepPadSec;
         const sil = await this.withLocalInput(src.key, input => detectSilences(this.ctx.config.FFMPEG_PATH, input, d, { minSilenceSec, noiseDb: o.noiseDb }));
@@ -316,6 +321,7 @@ export class EditorAiService {
       cuts: { available: true, defaults: { ...CUT_DEFAULTS } },
       matte: { available: true, maxSec: EDITOR_LIMITS.maxMatteSec },
       denoise: { available: true },
+      beats: { available: true, free: true },
       maxSourceSec: EDITOR_LIMITS.maxSourceSec,
     };
   }

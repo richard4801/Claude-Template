@@ -233,7 +233,9 @@
      }
     ],
     "mute": false
-   }
+   },
+   "pieces": {},
+   "srt": ""
   }
  },
  {
@@ -520,7 +522,9 @@
      }
     ],
     "mute": false
-   }
+   },
+   "pieces": {},
+   "srt": ""
   }
  },
  {
@@ -802,7 +806,9 @@
     ]
    },
    "colorMatrices": {},
-   "toV1": null
+   "toV1": null,
+   "pieces": {},
+   "srt": ""
   }
  },
  {
@@ -1384,7 +1390,9 @@
     ]
    },
    "colorMatrices": {},
-   "toV1": null
+   "toV1": null,
+   "pieces": {},
+   "srt": "1\n00:00:00,200 --> 00:00:01,600\nOkay so um\n\n2\n00:00:01,600 --> 00:00:02,750\nthis serum changed\n\n3\n00:00:02,750 --> 00:00:03,567\nmy skin.\n\n4\n00:00:03,567 --> 00:00:04,333\nHonestly uh I\n\n5\n00:00:04,333 --> 00:00:04,867\nuse it every\n\n6\n00:00:04,867 --> 00:00:05,833\nsingle day!\n\n7\n00:00:05,833 --> 00:00:06,833\nLike seriously\n"
   }
  },
  {
@@ -2074,7 +2082,9 @@
     ]
    },
    "colorMatrices": {},
-   "toV1": null
+   "toV1": null,
+   "pieces": {},
+   "srt": "1\n00:00:00,200 --> 00:00:00,550\nOKAY\n\n2\n00:00:00,550 --> 00:00:00,900\nSO\n\n3\n00:00:00,900 --> 00:00:01,600\nUM\n\n4\n00:00:01,600 --> 00:00:01,850\nTHIS\n\n5\n00:00:01,850 --> 00:00:02,350\nSERUM\n\n6\n00:00:02,350 --> 00:00:02,750\nCHANGED\n\n7\n00:00:02,750 --> 00:00:02,950\nMY\n\n8\n00:00:02,950 --> 00:00:03,800\nSKIN.\n\n9\n00:00:04,600 --> 00:00:05,200\nHONESTLY\n\n10\n00:00:05,200 --> 00:00:05,600\nUH\n\n11\n00:00:05,600 --> 00:00:05,750\nI\n\n12\n00:00:05,750 --> 00:00:06,000\nUSE\n\n13\n00:00:06,000 --> 00:00:06,150\nIT\n\n14\n00:00:06,150 --> 00:00:06,550\nEVERY\n\n15\n00:00:06,550 --> 00:00:06,950\nSINGLE\n\n16\n00:00:06,950 --> 00:00:07,800\nDAY!\n\n17\n00:00:08,000 --> 00:00:08,250\nLIKE\n\n18\n00:00:08,250 --> 00:00:09,300\nSERIOUSLY\n"
   }
  },
  {
@@ -2646,7 +2656,9 @@
     ]
    },
    "colorMatrices": {},
-   "toV1": null
+   "toV1": null,
+   "pieces": {},
+   "srt": "1\n00:00:00,000 --> 00:00:00,850\nUM THIS\n\n2\n00:00:00,850 --> 00:00:01,750\nSERUM CHANGED\n\n3\n00:00:01,750 --> 00:00:02,800\nMY SKIN.\n\n4\n00:00:03,600 --> 00:00:04,600\nHONESTLY UH\n\n5\n00:00:04,600 --> 00:00:05,000\nI USE\n\n6\n00:00:05,000 --> 00:00:05,550\nIT EVERY\n\n7\n00:00:05,550 --> 00:00:06,800\nSINGLE DAY!\n\n8\n00:00:07,000 --> 00:00:08,300\nLIKE SERIOUSLY\n"
   }
  },
  {
@@ -3367,7 +3379,9 @@
     ]
    },
    "colorMatrices": {},
-   "toV1": null
+   "toV1": null,
+   "pieces": {},
+   "srt": "1\n00:00:00,200 --> 00:00:01,850\nOkay so um this\n\n2\n00:00:01,850 --> 00:00:03,800\nserum changed my skin.\n\n3\n00:00:04,600 --> 00:00:06,000\nHonestly uh I use\n\n4\n00:00:06,000 --> 00:00:07,800\nit every single day!\n\n5\n00:00:08,000 --> 00:00:09,300\nLike seriously\n"
   }
  },
  {
@@ -3766,7 +3780,9 @@
     ]
    },
    "colorMatrices": {},
-   "toV1": null
+   "toV1": null,
+   "pieces": {},
+   "srt": ""
   }
  },
  {
@@ -4197,7 +4213,1399 @@
      -0.05
     ]
    },
-   "toV1": null
+   "toV1": null,
+   "pieces": {},
+   "srt": ""
+  }
+ },
+ {
+  "name": "speed curves, new transitions, attack/release ducking",
+  "project": {
+   "version": 2,
+   "sourceTakeId": "take_src",
+   "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+   },
+   "assets": [
+    {
+     "id": "src",
+     "kind": "video",
+     "take": "take_src",
+     "durationSec": 10,
+     "width": 1080,
+     "height": 1920,
+     "hasAudio": true
+    },
+    {
+     "id": "song",
+     "kind": "audio",
+     "library": "music_upbeat_01",
+     "durationSec": 30
+    }
+   ],
+   "tracks": [
+    {
+     "id": "main",
+     "kind": "main",
+     "items": [
+      {
+       "id": "c1",
+       "asset": "src",
+       "inSec": 0,
+       "outSec": 3,
+       "speed": 1,
+       "speedCurve": {
+        "preset": "hero",
+        "points": [
+         [
+          0,
+          1
+         ],
+         [
+          0.3,
+          1
+         ],
+         [
+          0.42,
+          6
+         ],
+         [
+          0.58,
+          6
+         ],
+         [
+          0.7,
+          1
+         ],
+         [
+          1,
+          1
+         ]
+        ]
+       }
+      },
+      {
+       "id": "c2",
+       "asset": "src",
+       "inSec": 3,
+       "outSec": 5.5,
+       "speed": 0.5,
+       "transitionIn": {
+        "kind": "whip",
+        "durationSec": 0.4
+       }
+      },
+      {
+       "id": "c3",
+       "asset": "src",
+       "inSec": 5.5,
+       "outSec": 8,
+       "speed": 1,
+       "transitionIn": {
+        "kind": "spin",
+        "durationSec": 0.5
+       }
+      },
+      {
+       "id": "c4",
+       "asset": "src",
+       "inSec": 8,
+       "outSec": 10,
+       "speed": 1,
+       "speedCurve": {
+        "preset": "custom",
+        "points": [
+         [
+          0,
+          0.1
+         ],
+         [
+          0.5,
+          2
+         ],
+         [
+          1,
+          10
+         ]
+        ]
+       },
+       "transitionIn": {
+        "kind": "glitch",
+        "durationSec": 0.3
+       }
+      }
+     ]
+    },
+    {
+     "id": "cap",
+     "kind": "caption",
+     "items": [],
+     "caption": {
+      "asset": "src",
+      "words": [
+       {
+        "text": "Okay",
+        "startSec": 0.2,
+        "endSec": 0.5
+       },
+       {
+        "text": "so",
+        "startSec": 0.55,
+        "endSec": 0.7
+       },
+       {
+        "text": "um",
+        "startSec": 0.9,
+        "endSec": 1.2
+       },
+       {
+        "text": "this",
+        "startSec": 1.6,
+        "endSec": 1.8
+       },
+       {
+        "text": "serum",
+        "startSec": 1.85,
+        "endSec": 2.3
+       },
+       {
+        "text": "changed",
+        "startSec": 2.35,
+        "endSec": 2.7
+       },
+       {
+        "text": "my",
+        "startSec": 2.75,
+        "endSec": 2.9
+       },
+       {
+        "text": "skin.",
+        "startSec": 2.95,
+        "endSec": 3.4
+       },
+       {
+        "text": "Honestly",
+        "startSec": 4.6,
+        "endSec": 5.1
+       },
+       {
+        "text": "uh",
+        "startSec": 5.2,
+        "endSec": 5.4
+       },
+       {
+        "text": "I",
+        "startSec": 5.6,
+        "endSec": 5.7
+       },
+       {
+        "text": "use",
+        "startSec": 5.75,
+        "endSec": 5.95
+       },
+       {
+        "text": "it",
+        "startSec": 6,
+        "endSec": 6.1
+       },
+       {
+        "text": "every",
+        "startSec": 6.15,
+        "endSec": 6.5
+       },
+       {
+        "text": "single",
+        "startSec": 6.55,
+        "endSec": 6.9
+       },
+       {
+        "text": "day!",
+        "startSec": 6.95,
+        "endSec": 7.4
+       },
+       {
+        "text": "Like",
+        "startSec": 8,
+        "endSec": 8.2
+       },
+       {
+        "text": "seriously",
+        "startSec": 8.25,
+        "endSec": 8.9
+       }
+      ],
+      "style": {
+       "font": "sans",
+       "weight": 900,
+       "sizePct": 0.045,
+       "color": "#FFFFFF",
+       "align": "center",
+       "maxWidthPct": 0.85,
+       "lineHeight": 1.15,
+       "uppercase": true,
+       "stroke": {
+        "color": "#000000",
+        "widthPct": 0.08
+       },
+       "preset": "highlighter",
+       "highlightColor": "#22C55E",
+       "y": 0.72,
+       "wordsPerPage": 3,
+       "maxLines": 2
+      }
+     }
+    },
+    {
+     "id": "mus",
+     "kind": "music",
+     "duck": {
+      "level": 0.25,
+      "attackSec": 0.2,
+      "releaseSec": 0.6,
+      "under": [
+       "speech"
+      ]
+     },
+     "items": [
+      {
+       "id": "m1",
+       "asset": "song",
+       "startSec": 0,
+       "inSec": 0,
+       "outSec": 20
+      }
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "durationSec": 12.428664,
+   "timeline": [
+    {
+     "id": "c1",
+     "index": 0,
+     "startSec": 0,
+     "endSec": 2.23444,
+     "transitionSec": 0
+    },
+    {
+     "id": "c2",
+     "index": 1,
+     "startSec": 1.83444,
+     "endSec": 6.83444,
+     "transitionSec": 0.4
+    },
+    {
+     "id": "c3",
+     "index": 2,
+     "startSec": 6.33444,
+     "endSec": 8.83444,
+     "transitionSec": 0.5
+    },
+    {
+     "id": "c4",
+     "index": 3,
+     "startSec": 8.53444,
+     "endSec": 12.428664,
+     "transitionSec": 0.3
+    }
+   ],
+   "captionWords": [
+    {
+     "text": "Okay",
+     "startSec": 0.2,
+     "endSec": 0.5,
+     "index": 0
+    },
+    {
+     "text": "so",
+     "startSec": 0.55,
+     "endSec": 0.7,
+     "index": 1
+    },
+    {
+     "text": "um",
+     "startSec": 0.89996,
+     "endSec": 1.066659,
+     "index": 2
+    },
+    {
+     "text": "this",
+     "startSec": 1.133887,
+     "endSec": 1.167781,
+     "index": 3
+    },
+    {
+     "text": "serum",
+     "startSec": 1.178969,
+     "endSec": 1.53444,
+     "index": 4
+    },
+    {
+     "text": "changed",
+     "startSec": 1.58444,
+     "endSec": 1.93444,
+     "index": 5
+    },
+    {
+     "text": "skin.",
+     "startSec": 1.83444,
+     "endSec": 2.63444,
+     "index": 7
+    },
+    {
+     "text": "my",
+     "startSec": 1.98444,
+     "endSec": 2.13444,
+     "index": 6
+    },
+    {
+     "text": "Honestly",
+     "startSec": 5.03444,
+     "endSec": 6.03444,
+     "index": 8
+    },
+    {
+     "text": "uh",
+     "startSec": 6.23444,
+     "endSec": 6.63444,
+     "index": 9
+    },
+    {
+     "text": "I",
+     "startSec": 6.43444,
+     "endSec": 6.53444,
+     "index": 10
+    },
+    {
+     "text": "use",
+     "startSec": 6.58444,
+     "endSec": 6.78444,
+     "index": 11
+    },
+    {
+     "text": "it",
+     "startSec": 6.83444,
+     "endSec": 6.93444,
+     "index": 12
+    },
+    {
+     "text": "every",
+     "startSec": 6.98444,
+     "endSec": 7.33444,
+     "index": 13
+    },
+    {
+     "text": "single",
+     "startSec": 7.38444,
+     "endSec": 7.73444,
+     "index": 14
+    },
+    {
+     "text": "day!",
+     "startSec": 7.78444,
+     "endSec": 8.23444,
+     "index": 15
+    },
+    {
+     "text": "Like",
+     "startSec": 8.53444,
+     "endSec": 10.336362,
+     "index": 16
+    },
+    {
+     "text": "seriously",
+     "startSec": 10.678902,
+     "endSec": 12.116875,
+     "index": 17
+    }
+   ],
+   "captionPages": [
+    {
+     "startSec": 0.2,
+     "endSec": 1.133887,
+     "words": [
+      0,
+      1,
+      2
+     ]
+    },
+    {
+     "startSec": 1.133887,
+     "endSec": 1.83444,
+     "words": [
+      3,
+      4,
+      5
+     ]
+    },
+    {
+     "startSec": 1.83444,
+     "endSec": 1.98444,
+     "words": [
+      7
+     ]
+    },
+    {
+     "startSec": 1.98444,
+     "endSec": 2.53444,
+     "words": [
+      6
+     ]
+    },
+    {
+     "startSec": 5.03444,
+     "endSec": 6.58444,
+     "words": [
+      8,
+      9,
+      10
+     ]
+    },
+    {
+     "startSec": 6.58444,
+     "endSec": 7.38444,
+     "words": [
+      11,
+      12,
+      13
+     ]
+    },
+    {
+     "startSec": 7.38444,
+     "endSec": 8.53444,
+     "words": [
+      14,
+      15
+     ]
+    },
+    {
+     "startSec": 8.53444,
+     "endSec": 12.516875,
+     "words": [
+      16,
+      17
+     ]
+    }
+   ],
+   "captionAt": [
+    {
+     "t": 0,
+     "at": null
+    },
+    {
+     "t": 0.25,
+     "at": {
+      "page": 0,
+      "word": 0
+     }
+    },
+    {
+     "t": 0.5,
+     "at": {
+      "page": 0,
+      "word": 0
+     }
+    },
+    {
+     "t": 0.75,
+     "at": {
+      "page": 0,
+      "word": 1
+     }
+    },
+    {
+     "t": 1,
+     "at": {
+      "page": 0,
+      "word": 2
+     }
+    },
+    {
+     "t": 1.25,
+     "at": {
+      "page": 1,
+      "word": 1
+     }
+    },
+    {
+     "t": 1.5,
+     "at": {
+      "page": 1,
+      "word": 1
+     }
+    },
+    {
+     "t": 1.75,
+     "at": {
+      "page": 1,
+      "word": 2
+     }
+    },
+    {
+     "t": 2,
+     "at": {
+      "page": 3,
+      "word": 0
+     }
+    },
+    {
+     "t": 2.25,
+     "at": {
+      "page": 3,
+      "word": 0
+     }
+    },
+    {
+     "t": 2.5,
+     "at": {
+      "page": 3,
+      "word": 0
+     }
+    },
+    {
+     "t": 2.75,
+     "at": null
+    },
+    {
+     "t": 3,
+     "at": null
+    },
+    {
+     "t": 3.25,
+     "at": null
+    },
+    {
+     "t": 3.5,
+     "at": null
+    },
+    {
+     "t": 3.75,
+     "at": null
+    },
+    {
+     "t": 4,
+     "at": null
+    },
+    {
+     "t": 4.25,
+     "at": null
+    },
+    {
+     "t": 4.5,
+     "at": null
+    },
+    {
+     "t": 4.75,
+     "at": null
+    },
+    {
+     "t": 5,
+     "at": null
+    },
+    {
+     "t": 5.25,
+     "at": {
+      "page": 4,
+      "word": 0
+     }
+    },
+    {
+     "t": 5.5,
+     "at": {
+      "page": 4,
+      "word": 0
+     }
+    },
+    {
+     "t": 5.75,
+     "at": {
+      "page": 4,
+      "word": 0
+     }
+    },
+    {
+     "t": 6,
+     "at": {
+      "page": 4,
+      "word": 0
+     }
+    },
+    {
+     "t": 6.25,
+     "at": {
+      "page": 4,
+      "word": 1
+     }
+    },
+    {
+     "t": 6.5,
+     "at": {
+      "page": 4,
+      "word": 2
+     }
+    },
+    {
+     "t": 6.75,
+     "at": {
+      "page": 5,
+      "word": 0
+     }
+    },
+    {
+     "t": 7,
+     "at": {
+      "page": 5,
+      "word": 2
+     }
+    },
+    {
+     "t": 7.25,
+     "at": {
+      "page": 5,
+      "word": 2
+     }
+    },
+    {
+     "t": 7.5,
+     "at": {
+      "page": 6,
+      "word": 0
+     }
+    },
+    {
+     "t": 7.75,
+     "at": {
+      "page": 6,
+      "word": 0
+     }
+    },
+    {
+     "t": 8,
+     "at": {
+      "page": 6,
+      "word": 1
+     }
+    },
+    {
+     "t": 8.25,
+     "at": {
+      "page": 6,
+      "word": 1
+     }
+    },
+    {
+     "t": 8.5,
+     "at": {
+      "page": 6,
+      "word": 1
+     }
+    },
+    {
+     "t": 8.75,
+     "at": {
+      "page": 7,
+      "word": 0
+     }
+    },
+    {
+     "t": 9,
+     "at": {
+      "page": 7,
+      "word": 0
+     }
+    },
+    {
+     "t": 9.25,
+     "at": {
+      "page": 7,
+      "word": 0
+     }
+    },
+    {
+     "t": 9.5,
+     "at": {
+      "page": 7,
+      "word": 0
+     }
+    },
+    {
+     "t": 9.75,
+     "at": {
+      "page": 7,
+      "word": 0
+     }
+    },
+    {
+     "t": 10,
+     "at": {
+      "page": 7,
+      "word": 0
+     }
+    },
+    {
+     "t": 10.25,
+     "at": {
+      "page": 7,
+      "word": 0
+     }
+    },
+    {
+     "t": 10.5,
+     "at": {
+      "page": 7,
+      "word": 0
+     }
+    },
+    {
+     "t": 10.75,
+     "at": {
+      "page": 7,
+      "word": 1
+     }
+    },
+    {
+     "t": 11,
+     "at": {
+      "page": 7,
+      "word": 1
+     }
+    },
+    {
+     "t": 11.25,
+     "at": {
+      "page": 7,
+      "word": 1
+     }
+    },
+    {
+     "t": 11.5,
+     "at": {
+      "page": 7,
+      "word": 1
+     }
+    },
+    {
+     "t": 11.75,
+     "at": {
+      "page": 7,
+      "word": 1
+     }
+    },
+    {
+     "t": 12,
+     "at": {
+      "page": 7,
+      "word": 1
+     }
+    },
+    {
+     "t": 12.25,
+     "at": {
+      "page": 7,
+      "word": 1
+     }
+    },
+    {
+     "t": 12.5,
+     "at": {
+      "page": 7,
+      "word": 1
+     }
+    }
+   ],
+   "envelopes": {
+    "main/c1": [
+     {
+      "t": 0,
+      "gain": 1
+     },
+     {
+      "t": 1.83444,
+      "gain": 1
+     },
+     {
+      "t": 2.23444,
+      "gain": 0
+     }
+    ],
+    "main/c2": [
+     {
+      "t": 1.83444,
+      "gain": 0
+     },
+     {
+      "t": 2.23444,
+      "gain": 1
+     },
+     {
+      "t": 6.33444,
+      "gain": 1
+     },
+     {
+      "t": 6.83444,
+      "gain": 0
+     }
+    ],
+    "main/c3": [
+     {
+      "t": 6.33444,
+      "gain": 0
+     },
+     {
+      "t": 6.83444,
+      "gain": 1
+     },
+     {
+      "t": 8.53444,
+      "gain": 1
+     },
+     {
+      "t": 8.83444,
+      "gain": 0
+     }
+    ],
+    "main/c4": [
+     {
+      "t": 8.53444,
+      "gain": 0
+     },
+     {
+      "t": 8.83444,
+      "gain": 1
+     },
+     {
+      "t": 12.428664,
+      "gain": 1
+     }
+    ],
+    "mus/m1": [
+     {
+      "t": 0,
+      "gain": 1
+     },
+     {
+      "t": 0.2,
+      "gain": 0.25
+     },
+     {
+      "t": 2.63444,
+      "gain": 0.25
+     },
+     {
+      "t": 3.23444,
+      "gain": 1
+     },
+     {
+      "t": 4.83444,
+      "gain": 1
+     },
+     {
+      "t": 5.03444,
+      "gain": 0.25
+     },
+     {
+      "t": 12.116875,
+      "gain": 0.25
+     },
+     {
+      "t": 12.428664,
+      "gain": 0.639736
+     }
+    ]
+   },
+   "colorMatrices": {},
+   "toV1": null,
+   "pieces": {
+    "c1": [
+     {
+      "inSec": 0,
+      "outSec": 0.0625,
+      "speed": 1
+     },
+     {
+      "inSec": 0.0625,
+      "outSec": 0.125,
+      "speed": 1
+     },
+     {
+      "inSec": 0.125,
+      "outSec": 0.1875,
+      "speed": 1
+     },
+     {
+      "inSec": 0.1875,
+      "outSec": 0.25,
+      "speed": 1
+     },
+     {
+      "inSec": 0.25,
+      "outSec": 0.3125,
+      "speed": 1
+     },
+     {
+      "inSec": 0.3125,
+      "outSec": 0.375,
+      "speed": 1
+     },
+     {
+      "inSec": 0.375,
+      "outSec": 0.4375,
+      "speed": 1
+     },
+     {
+      "inSec": 0.4375,
+      "outSec": 0.5,
+      "speed": 1
+     },
+     {
+      "inSec": 0.5,
+      "outSec": 0.5625,
+      "speed": 1
+     },
+     {
+      "inSec": 0.5625,
+      "outSec": 0.625,
+      "speed": 1
+     },
+     {
+      "inSec": 0.625,
+      "outSec": 0.6875,
+      "speed": 1
+     },
+     {
+      "inSec": 0.6875,
+      "outSec": 0.75,
+      "speed": 1
+     },
+     {
+      "inSec": 0.75,
+      "outSec": 0.8125,
+      "speed": 1
+     },
+     {
+      "inSec": 0.8125,
+      "outSec": 0.875,
+      "speed": 1
+     },
+     {
+      "inSec": 0.875,
+      "outSec": 0.9375,
+      "speed": 1.001603
+     },
+     {
+      "inSec": 0.9375,
+      "outSec": 1,
+      "speed": 1.186586
+     },
+     {
+      "inSec": 1,
+      "outSec": 1.0625,
+      "speed": 1.717427
+     },
+     {
+      "inSec": 1.0625,
+      "outSec": 1.125,
+      "speed": 2.713754
+     },
+     {
+      "inSec": 1.125,
+      "outSec": 1.1875,
+      "speed": 4.183241
+     },
+     {
+      "inSec": 1.1875,
+      "outSec": 1.25,
+      "speed": 5.621377
+     },
+     {
+      "inSec": 1.25,
+      "outSec": 1.3125,
+      "speed": 6
+     },
+     {
+      "inSec": 1.3125,
+      "outSec": 1.375,
+      "speed": 6
+     },
+     {
+      "inSec": 1.375,
+      "outSec": 1.4375,
+      "speed": 6
+     },
+     {
+      "inSec": 1.4375,
+      "outSec": 1.5,
+      "speed": 6
+     },
+     {
+      "inSec": 1.5,
+      "outSec": 1.5625,
+      "speed": 6
+     },
+     {
+      "inSec": 1.5625,
+      "outSec": 1.625,
+      "speed": 6
+     },
+     {
+      "inSec": 1.625,
+      "outSec": 1.6875,
+      "speed": 6
+     },
+     {
+      "inSec": 1.6875,
+      "outSec": 1.75,
+      "speed": 6
+     },
+     {
+      "inSec": 1.75,
+      "outSec": 1.8125,
+      "speed": 5.621377
+     },
+     {
+      "inSec": 1.8125,
+      "outSec": 1.875,
+      "speed": 4.183241
+     },
+     {
+      "inSec": 1.875,
+      "outSec": 1.9375,
+      "speed": 2.713754
+     },
+     {
+      "inSec": 1.9375,
+      "outSec": 2,
+      "speed": 1.717427
+     },
+     {
+      "inSec": 2,
+      "outSec": 2.0625,
+      "speed": 1.186586
+     },
+     {
+      "inSec": 2.0625,
+      "outSec": 2.125,
+      "speed": 1.001603
+     },
+     {
+      "inSec": 2.125,
+      "outSec": 2.1875,
+      "speed": 1
+     },
+     {
+      "inSec": 2.1875,
+      "outSec": 2.25,
+      "speed": 1
+     },
+     {
+      "inSec": 2.25,
+      "outSec": 2.3125,
+      "speed": 1
+     },
+     {
+      "inSec": 2.3125,
+      "outSec": 2.375,
+      "speed": 1
+     },
+     {
+      "inSec": 2.375,
+      "outSec": 2.4375,
+      "speed": 1
+     },
+     {
+      "inSec": 2.4375,
+      "outSec": 2.5,
+      "speed": 1
+     },
+     {
+      "inSec": 2.5,
+      "outSec": 2.5625,
+      "speed": 1
+     },
+     {
+      "inSec": 2.5625,
+      "outSec": 2.625,
+      "speed": 1
+     },
+     {
+      "inSec": 2.625,
+      "outSec": 2.6875,
+      "speed": 1
+     },
+     {
+      "inSec": 2.6875,
+      "outSec": 2.75,
+      "speed": 1
+     },
+     {
+      "inSec": 2.75,
+      "outSec": 2.8125,
+      "speed": 1
+     },
+     {
+      "inSec": 2.8125,
+      "outSec": 2.875,
+      "speed": 1
+     },
+     {
+      "inSec": 2.875,
+      "outSec": 2.9375,
+      "speed": 1
+     },
+     {
+      "inSec": 2.9375,
+      "outSec": 3,
+      "speed": 1
+     }
+    ],
+    "c4": [
+     {
+      "inSec": 8,
+      "outSec": 8.041667,
+      "speed": 0.100385
+     },
+     {
+      "inSec": 8.041667,
+      "outSec": 8.083333,
+      "speed": 0.103422
+     },
+     {
+      "inSec": 8.083333,
+      "outSec": 8.125,
+      "speed": 0.109499
+     },
+     {
+      "inSec": 8.125,
+      "outSec": 8.166667,
+      "speed": 0.118833
+     },
+     {
+      "inSec": 8.166667,
+      "outSec": 8.208333,
+      "speed": 0.131846
+     },
+     {
+      "inSec": 8.208333,
+      "outSec": 8.25,
+      "speed": 0.149164
+     },
+     {
+      "inSec": 8.25,
+      "outSec": 8.291667,
+      "speed": 0.171634
+     },
+     {
+      "inSec": 8.291667,
+      "outSec": 8.333333,
+      "speed": 0.200333
+     },
+     {
+      "inSec": 8.333333,
+      "outSec": 8.375,
+      "speed": 0.236584
+     },
+     {
+      "inSec": 8.375,
+      "outSec": 8.416667,
+      "speed": 0.281949
+     },
+     {
+      "inSec": 8.416667,
+      "outSec": 8.458333,
+      "speed": 0.338204
+     },
+     {
+      "inSec": 8.458333,
+      "outSec": 8.5,
+      "speed": 0.407269
+     },
+     {
+      "inSec": 8.5,
+      "outSec": 8.541667,
+      "speed": 0.491076
+     },
+     {
+      "inSec": 8.541667,
+      "outSec": 8.583333,
+      "speed": 0.591359
+     },
+     {
+      "inSec": 8.583333,
+      "outSec": 8.625,
+      "speed": 0.709349
+     },
+     {
+      "inSec": 8.625,
+      "outSec": 8.666667,
+      "speed": 0.845367
+     },
+     {
+      "inSec": 8.666667,
+      "outSec": 8.708333,
+      "speed": 0.998338
+     },
+     {
+      "inSec": 8.708333,
+      "outSec": 8.75,
+      "speed": 1.165273
+     },
+     {
+      "inSec": 8.75,
+      "outSec": 8.791667,
+      "speed": 1.340807
+     },
+     {
+      "inSec": 8.791667,
+      "outSec": 8.833333,
+      "speed": 1.516925
+     },
+     {
+      "inSec": 8.833333,
+      "outSec": 8.875,
+      "speed": 1.68303
+     },
+     {
+      "inSec": 8.875,
+      "outSec": 8.916667,
+      "speed": 1.826501
+     },
+     {
+      "inSec": 8.916667,
+      "outSec": 8.958333,
+      "speed": 1.933832
+     },
+     {
+      "inSec": 8.958333,
+      "outSec": 9,
+      "speed": 1.992322
+     },
+     {
+      "inSec": 9,
+      "outSec": 9.041667,
+      "speed": 2.004137
+     },
+     {
+      "inSec": 9.041667,
+      "outSec": 9.083333,
+      "speed": 2.036478
+     },
+     {
+      "inSec": 9.083333,
+      "outSec": 9.125,
+      "speed": 2.099921
+     },
+     {
+      "inSec": 9.125,
+      "outSec": 9.166667,
+      "speed": 2.19427
+     },
+     {
+      "inSec": 9.166667,
+      "outSec": 9.208333,
+      "speed": 2.320249
+     },
+     {
+      "inSec": 9.208333,
+      "outSec": 9.25,
+      "speed": 2.479303
+     },
+     {
+      "inSec": 9.25,
+      "outSec": 9.291667,
+      "speed": 2.673429
+     },
+     {
+      "inSec": 9.291667,
+      "outSec": 9.333333,
+      "speed": 2.90499
+     },
+     {
+      "inSec": 9.333333,
+      "outSec": 9.375,
+      "speed": 3.176516
+     },
+     {
+      "inSec": 9.375,
+      "outSec": 9.416667,
+      "speed": 3.490447
+     },
+     {
+      "inSec": 9.416667,
+      "outSec": 9.458333,
+      "speed": 3.848822
+     },
+     {
+      "inSec": 9.458333,
+      "outSec": 9.5,
+      "speed": 4.252897
+     },
+     {
+      "inSec": 9.5,
+      "outSec": 9.541667,
+      "speed": 4.702677
+     },
+     {
+      "inSec": 9.541667,
+      "outSec": 9.583333,
+      "speed": 5.196395
+     },
+     {
+      "inSec": 9.583333,
+      "outSec": 9.625,
+      "speed": 5.729926
+     },
+     {
+      "inSec": 9.625,
+      "outSec": 9.666667,
+      "speed": 6.296207
+     },
+     {
+      "inSec": 9.666667,
+      "outSec": 9.708333,
+      "speed": 6.884706
+     },
+     {
+      "inSec": 9.708333,
+      "outSec": 9.75,
+      "speed": 7.48103
+     },
+     {
+      "inSec": 9.75,
+      "outSec": 9.791667,
+      "speed": 8.066782
+     },
+     {
+      "inSec": 9.791667,
+      "outSec": 9.833333,
+      "speed": 8.619765
+     },
+     {
+      "inSec": 9.833333,
+      "outSec": 9.875,
+      "speed": 9.114649
+     },
+     {
+      "inSec": 9.875,
+      "outSec": 9.916667,
+      "speed": 9.52417
+     },
+     {
+      "inSec": 9.916667,
+      "outSec": 9.958333,
+      "speed": 9.820876
+     },
+     {
+      "inSec": 9.958333,
+      "outSec": 10,
+      "speed": 9.979356
+     }
+    ]
+   },
+   "srt": "1\n00:00:00,200 --> 00:00:01,134\nOKAY SO UM\n\n2\n00:00:01,134 --> 00:00:01,834\nTHIS SERUM CHANGED\n\n3\n00:00:01,834 --> 00:00:01,984\nSKIN.\n\n4\n00:00:01,984 --> 00:00:02,534\nMY\n\n5\n00:00:05,034 --> 00:00:06,584\nHONESTLY UH I\n\n6\n00:00:06,584 --> 00:00:07,384\nUSE IT EVERY\n\n7\n00:00:07,384 --> 00:00:08,534\nSINGLE DAY!\n\n8\n00:00:08,534 --> 00:00:12,517\nLIKE SERIOUSLY\n"
   }
  }
 ]
