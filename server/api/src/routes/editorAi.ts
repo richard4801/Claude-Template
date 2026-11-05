@@ -3,6 +3,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../ctx.js';
 import { uploads } from '../db/schema.js';
+import { and, eq } from 'drizzle-orm';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ApiError, badRequest, notFound } from '../errors.js';
@@ -47,6 +48,12 @@ export async function registerEditorAiRoutes(app: FastifyInstance, ctx: Ctx) {
     const m = /^([a-z0-9-]+)\.cube$/.exec(req.params.file);
     if (!m || !LOOK_IDS.has(m[1]!)) throw notFound('Look');
     return reply.header('content-type', 'text/plain; charset=utf-8').header('cache-control', 'public, max-age=86400').send(fs.createReadStream(path.join(LOOK_DIR, req.params.file)));
+  });
+  /** Where an upload of the studio can be fetched (AI results, imported looks, bin files): → {uploadId, url, contentType, bytes}. */
+  app.get<{ Params: { id: string } }>('/v1/editor/uploads/:id', async req => {
+    const [up] = await ctx.db.select().from(uploads).where(and(eq(uploads.id, req.params.id), eq(uploads.studioId, req.user.studioId)));
+    if (!up) throw notFound('Upload');
+    return { uploadId: up.id, url: `${ctx.config.PUBLIC_URL ?? ''}/uploads/${up.storageKey}`, contentType: up.contentType, bytes: up.bytes };
   });
   /** Checks an uploaded .cube (after its PUT): → {uploadId, size, title}; bad_request with the line when it isn't a usable 3D LUT. */
   app.post('/v1/editor/luts/validate', async req => {

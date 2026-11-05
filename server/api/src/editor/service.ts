@@ -270,7 +270,7 @@ export class EditorAiService {
 
   /** Stores a produced file as an upload of the studio (bytes copied, never re-encoded); the mock points at the source. */
   private async store(u: AuthUser, src: { key: string; source: EditorSource }, file: string | null, contentType: string, kind: 'video' | 'audio', durationSec: number) {
-    if (!file) return { kind, ...(src.source.takeId ? { take: src.source.takeId } : { upload: src.source.uploadId }), durationSec };
+    if (!file) return { kind, ...(src.source.takeId ? { take: src.source.takeId } : { upload: src.source.uploadId }), url: `${this.ctx.config.PUBLIC_URL ?? ''}/uploads/${src.key}`, durationSec };
     const ext = contentType === 'video/mp4' ? 'mp4' : contentType === 'audio/wav' ? 'wav' : contentType === 'audio/flac' ? 'flac' : contentType === 'audio/mp4' ? 'm4a' : 'mp3';
     const key = `g/${uid('edit')}.${ext}`;
     await putFile(this.ctx, { key, file, studioId: u.studioId, kind: 'generated', userId: u.id, contentType });

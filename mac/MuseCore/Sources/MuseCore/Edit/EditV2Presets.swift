@@ -58,7 +58,7 @@ extension EditV2 {
         .karaoke: CaptionStyle(base { $0.stroke = Stroke(color: "#000000", widthPct: 0.1) }, preset: .karaoke, highlightColor: "#22D3EE", y: 0.72,
                                wordsPerPage: 4, maxLines: 2),
         .pop: CaptionStyle(base { $0.sizePct = 0.05; $0.uppercase = true; $0.stroke = Stroke(color: "#000000", widthPct: 0.14) }, preset: .pop,
-                           highlightColor: "#4ADE80", y: 0.7, wordsPerPage: 2, maxLines: 1),
+                           highlightColor: "#FFE600", y: 0.7, wordsPerPage: 2, maxLines: 1),
         .single: CaptionStyle(base { $0.sizePct = 0.065; $0.uppercase = true; $0.stroke = Stroke(color: "#000000", widthPct: 0.14) }, preset: .single,
                               highlightColor: "#FFFFFF", y: 0.6, wordsPerPage: 1, maxLines: 1),
         // Edit suite: a marker stripe behind the active word; a neon glow.

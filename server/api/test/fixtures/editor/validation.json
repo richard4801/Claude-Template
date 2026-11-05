@@ -628,7 +628,7 @@
         "widthPct": 0.14
        },
        "preset": "pop",
-       "highlightColor": "#4ADE80",
+       "highlightColor": "#FFE600",
        "y": 0.7,
        "wordsPerPage": 2,
        "maxLines": 1

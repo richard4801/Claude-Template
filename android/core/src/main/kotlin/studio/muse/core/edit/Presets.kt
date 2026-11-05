@@ -49,7 +49,7 @@ object Presets {
         CaptionPreset.HIGHLIGHT to CaptionStyle(base(stroke = BLACK_STROKE_12), CaptionPreset.HIGHLIGHT, "#FFE600", 0.72, 3, 2),
         CaptionPreset.BOX to CaptionStyle(base(weight = 700, sizePct = 0.042), CaptionPreset.BOX, "#7C3AED", 0.72, 3, 2),
         CaptionPreset.KARAOKE to CaptionStyle(base(stroke = Stroke("#000000", 0.1)), CaptionPreset.KARAOKE, "#22D3EE", 0.72, 4, 2),
-        CaptionPreset.POP to CaptionStyle(base(sizePct = 0.05, uppercase = true, stroke = BLACK_STROKE_14), CaptionPreset.POP, "#4ADE80", 0.7, 2, 1),
+        CaptionPreset.POP to CaptionStyle(base(sizePct = 0.05, uppercase = true, stroke = BLACK_STROKE_14), CaptionPreset.POP, "#FFE600", 0.7, 2, 1),
         CaptionPreset.SINGLE to CaptionStyle(base(sizePct = 0.065, uppercase = true, stroke = BLACK_STROKE_14), CaptionPreset.SINGLE, "#FFFFFF", 0.6, 1, 1),
         /** Active word gets a marker stripe (highlightColor, lower 45 % of the line) behind it. */
         CaptionPreset.HIGHLIGHTER to CaptionStyle(base(uppercase = true, stroke = Stroke("#000000", 0.08)), CaptionPreset.HIGHLIGHTER, "#22C55E", 0.72, 3, 2),

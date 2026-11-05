@@ -25,7 +25,7 @@ export const CAPTION_STYLES: Record<CaptionPreset, CaptionStyle> = {
   highlight: { ...base({ stroke: { color: '#000000', widthPct: 0.12 } }), preset: 'highlight', highlightColor: '#FFE600', y: 0.72, wordsPerPage: 3, maxLines: 2 },
   box: { ...base({ weight: 700, sizePct: 0.042 }), preset: 'box', highlightColor: '#7C3AED', y: 0.72, wordsPerPage: 3, maxLines: 2 },
   karaoke: { ...base({ stroke: { color: '#000000', widthPct: 0.1 } }), preset: 'karaoke', highlightColor: '#22D3EE', y: 0.72, wordsPerPage: 4, maxLines: 2 },
-  pop: { ...base({ sizePct: 0.05, uppercase: true, stroke: { color: '#000000', widthPct: 0.14 } }), preset: 'pop', highlightColor: '#4ADE80', y: 0.7, wordsPerPage: 2, maxLines: 1 },
+  pop: { ...base({ sizePct: 0.05, uppercase: true, stroke: { color: '#000000', widthPct: 0.14 } }), preset: 'pop', highlightColor: '#FFE600', y: 0.7, wordsPerPage: 2, maxLines: 1 },
   single: { ...base({ sizePct: 0.065, uppercase: true, stroke: { color: '#000000', widthPct: 0.14 } }), preset: 'single', highlightColor: '#FFFFFF', y: 0.6, wordsPerPage: 1, maxLines: 1 },
   /** Active word gets a marker stripe (highlightColor, lower 45 % of the line) behind it. */
   highlighter: { ...base({ weight: 900, sizePct: 0.045, uppercase: true, color: '#FFFFFF', stroke: { color: '#000000', widthPct: 0.08 } }), preset: 'highlighter', highlightColor: '#22C55E', y: 0.72, wordsPerPage: 3, maxLines: 2 },
