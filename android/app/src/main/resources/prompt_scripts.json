@@ -204,7 +204,8 @@
     {
      "id": "sheet",
      "label": "Reference sheet",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     }
    ],
    "values": [
@@ -445,53 +446,64 @@
     {
      "id": "identity",
      "label": "Identity",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "outfit",
      "label": "Outfit",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "scene",
      "label": "Scene",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "camera",
      "label": "Camera",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "light",
      "label": "Light",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "direction",
      "label": "Direction from the user",
-     "kind": "user"
+     "kind": "user",
+     "pick": "first"
     },
     {
      "id": "reference",
      "label": "Reference images",
      "kind": "system",
+     "pick": "all",
+     "join": " ",
      "each": "refs"
     },
     {
      "id": "style",
      "label": "Style",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "negative",
      "label": "Never add",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "seed",
      "label": "Seed",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     }
    ],
    "values": [
@@ -1173,68 +1185,82 @@
     {
      "id": "identity",
      "label": "Identity",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "outfit",
      "label": "Outfit",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "scene",
      "label": "Scene",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "camera",
      "label": "Camera",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "light",
      "label": "Light",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "pose",
      "label": "Pose",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "template",
      "label": "Locked template line",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "direction",
      "label": "Direction from the user",
-     "kind": "user"
+     "kind": "user",
+     "pick": "first"
     },
     {
      "id": "reference",
      "label": "Reference images",
      "kind": "system",
+     "pick": "all",
+     "join": " ",
      "each": "refs"
     },
     {
      "id": "product",
      "label": "Product",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "style",
      "label": "Style",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "negative",
      "label": "Never add",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "seed",
      "label": "Seed",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     }
    ],
    "values": [],
@@ -1964,22 +1990,26 @@
     {
      "id": "identity",
      "label": "Identity",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "task",
      "label": "Task",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "style",
      "label": "Style",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "negative",
      "label": "Never add",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     }
    ],
    "values": [],
@@ -2181,32 +2211,38 @@
     {
      "id": "identity",
      "label": "Identity",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "outfit",
      "label": "Outfit",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "task",
      "label": "Task",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "style",
      "label": "Style",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "negative",
      "label": "Never add",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "seed",
      "label": "Seed",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     }
    ],
    "values": [],
@@ -2453,7 +2489,8 @@
     {
      "id": "prompt",
      "label": "Prompt",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     }
    ],
    "values": [],
@@ -2501,7 +2538,8 @@
     {
      "id": "prompt",
      "label": "Prompt",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     }
    ],
    "values": [],
@@ -2564,7 +2602,8 @@
     {
      "id": "prompt",
      "label": "Prompt",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     }
    ],
    "values": [
@@ -2714,27 +2753,32 @@
     {
      "id": "identity",
      "label": "Identity",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "task",
      "label": "Task",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "style",
      "label": "Style",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "negative",
      "label": "Never add",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     },
     {
      "id": "variation",
      "label": "Variation",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     }
    ],
    "values": [],
@@ -2929,30 +2973,36 @@
      "id": "subjects",
      "label": "Subjects",
      "kind": "system",
+     "pick": "first",
      "heading": "subject_definitions:"
     },
     {
      "id": "summary",
      "label": "Summary",
      "kind": "system",
+     "pick": "first",
      "heading": "summary:"
     },
     {
      "id": "retention",
      "label": "Retention",
      "kind": "system",
+     "pick": "first",
      "heading": "retention_analysis:"
     },
     {
      "id": "detailed",
      "label": "Details",
      "kind": "system",
+     "pick": "all",
+     "join": " ",
      "heading": "detailed_description:"
     },
     {
      "id": "user",
      "label": "Direction from the user",
-     "kind": "user"
+     "kind": "user",
+     "pick": "first"
     }
    ],
    "values": [],
@@ -3241,30 +3291,45 @@
      "id": "subjects",
      "label": "Subjects",
      "kind": "system",
-     "heading": "subject_definitions:"
+     "pick": "first",
+     "heading": "subject_definitions:",
+     "alias": {
+      "audio": "audioSubjects"
+     }
     },
     {
      "id": "summary",
      "label": "Summary",
      "kind": "system",
-     "heading": "summary:"
+     "pick": "first",
+     "heading": "summary:",
+     "alias": {
+      "audio": "audioSummary"
+     }
     },
     {
      "id": "retention",
      "label": "Retention",
      "kind": "system",
-     "heading": "retention_analysis:"
+     "pick": "first",
+     "heading": "retention_analysis:",
+     "alias": {
+      "audio": "audioRetention"
+     }
     },
     {
      "id": "detailed",
      "label": "Details",
      "kind": "system",
+     "pick": "all",
+     "join": " ",
      "heading": "detailed_description:"
     },
     {
      "id": "user",
      "label": "Direction from the user",
-     "kind": "user"
+     "kind": "user",
+     "pick": "first"
     }
    ],
    "values": [
@@ -3772,7 +3837,8 @@
     {
      "id": "audio",
      "label": "Audio",
-     "kind": "system"
+     "kind": "system",
+     "pick": "first"
     }
    ],
    "values": [],

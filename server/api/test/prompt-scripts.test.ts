@@ -198,7 +198,8 @@ describe('Settings → Prompts → Scripts (API)', async () => {
     expect(r.ops.map((o: any) => o.id)).toContain('atLeast');
     const v = r.scripts.find((s: any) => s.id === 'video.replicate');
     expect(v.inputs.map((i: any) => i.name)).toEqual(['speaking', 'audioSent']);
-    expect(v.sections.at(-1)).toEqual({ id: 'user', label: 'Direction from the user', kind: 'user' });
+    expect(v.sections.at(-1)).toEqual({ id: 'user', label: 'Direction from the user', kind: 'user', pick: 'first' });
+    expect(v.sections.find((x: any) => x.id === 'detailed')).toMatchObject({ pick: 'all', join: ' ' });
     expect(v.targets.map((t: any) => t.id)).toEqual(['subjects', 'summary', 'retention', 'detailed', 'user']);
     expect(v).toMatchObject({ overridden: false, stale: false, updatedAt: null });
     expect(v.rules.find((x: any) => x.id === 'subjects').locked).toBe(true);

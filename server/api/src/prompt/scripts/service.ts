@@ -33,7 +33,7 @@ export class PromptScripts {
     const targets = ruleTargets(s).map(id => ({ id, label: id.startsWith('@') ? (s.values ?? []).find(v => `@${v.name}` === id)!.label : s.sections.find(x => x.id === id)!.label }));
     return {
       id: s.id, group: s.group, title: s.title, description: s.description, format: s.format,
-      inputs: s.inputs, sections: s.sections.map(x => ({ id: x.id, label: x.label, kind: x.kind, ...(x.each ? { each: x.each } : {}), ...(x.heading ? { heading: x.heading } : {}) })),
+      inputs: s.inputs, sections: s.sections.map(x => ({ id: x.id, label: x.label, kind: x.kind, pick: x.pick, ...(x.join != null ? { join: x.join } : {}), ...(x.each ? { each: x.each } : {}), ...(x.heading ? { heading: x.heading } : {}), ...(x.alias ? { alias: x.alias } : {}) })),
       values: s.values ?? [], targets, vars: s.vars ?? [], blocks: scriptBlocks(s),
       rules: res.rules, defaultRules: s.rules, overridden: res.overridden, stale: res.stale,
       updatedAt: res.overridden ? row!.updatedAt : null, updatedBy: res.overridden && row?.updatedBy ? emails?.get(row.updatedBy) ?? null : null,
