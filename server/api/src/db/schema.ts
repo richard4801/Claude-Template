@@ -495,3 +495,6 @@ export const promptOverrides = pgTable('prompt_overrides', {
   updatedBy: text('updated_by'),
   updatedAt: ms('updated_at').notNull(),
 }, t => [primaryKey({ columns: [t.studioId, t.key] })]);
+
+// Prompt scripts (workstream 4): the owner's rule edits per script.
+export * from '../prompt/scripts/schema.js';

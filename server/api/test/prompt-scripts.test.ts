@@ -141,3 +141,65 @@ describe('runner and rule edits', () => {
     expect(resolveRules(s, { rules: [{ id: 'bad' } as Rule], knownDefaults: [] })).toMatchObject({ overridden: false, stale: true });
   });
 });
+
+describe('Settings → Prompts → Scripts (API)', async () => {
+  const { makeApp, people, demoModel } = await import('./helpers.js');
+  const { afterAll, beforeAll } = await import('vitest');
+  let a: Awaited<ReturnType<typeof makeApp>>, owner: any, tess: any, modelId: string;
+  beforeAll(async () => {
+    a = await makeApp({ BALANCE_MODE: 'simulated', CAP_PER_DAY_USD: '1000', CAP_PER_USER_DAY_USD: '1000' });
+    const p = await people(a, 1); owner = p.owner; tess = p.members[0]!;
+    modelId = (await demoModel(owner)).id;
+  }, 60_000);
+  afterAll(async () => { await a?.close(); });
+
+  it('owner only: members get 403 from every endpoint', async () => {
+    for (const [m, u, b] of [['GET', '/v1/prompt-scripts'], ['GET', '/v1/prompt-scripts/photoshoot'], ['PUT', '/v1/prompt-scripts/photoshoot', { rules: [] }],
+      ['DELETE', '/v1/prompt-scripts/photoshoot'], ['POST', '/v1/prompt-scripts/preview', { id: 'photoshoot' }]] as const) {
+      const r = await tess.req(m, u, b);
+      expect(r.status, `${m} ${u}`).toBe(403);
+      expect(r.body.code).toBe('owner_only');
+    }
+  });
+  it('lists every script with its inputs, places, rules and blocks; the new blocks are library entries', async () => {
+    const r = (await owner.req('GET', '/v1/prompt-scripts')).body;
+    expect(r.scripts.map((s: any) => s.id)).toEqual(SCRIPTS.map(s => s.id));
+    expect(r.ops.map((o: any) => o.id)).toContain('atLeast');
+    const v = r.scripts.find((s: any) => s.id === 'video.replicate');
+    expect(v.inputs.map((i: any) => i.name)).toEqual(['speaking', 'audioSent']);
+    expect(v.sections.at(-1)).toEqual({ id: 'user', label: 'Direction from the user', kind: 'user' });
+    expect(v.targets.map((t: any) => t.id)).toEqual(['subjects', 'summary', 'retention', 'detailed', 'user']);
+    expect(v).toMatchObject({ overridden: false, stale: false, updatedAt: null });
+    expect(v.rules.find((x: any) => x.id === 'subjects').locked).toBe(true);
+    const lib = (await owner.req('GET', '/v1/prompts')).body.prompts.map((p: any) => p.key);
+    for (const s of r.scripts) for (const k of s.blocks) expect(lib, k).toContain(k);
+  });
+  it('save (validated), preview with sample inputs, reaches the next render, reset', async () => {
+    const def = scriptDef('video.replicate')!;
+    const bad = await owner.req('PUT', '/v1/prompt-scripts/video.replicate', { rules: def.rules.filter(r => r.id !== 'retention') });
+    expect(bad).toMatchObject({ status: 400, body: { code: 'script_invalid', error: '"What is kept" is required and can\'t be removed' } });
+    // Preview an unsaved edit: the silent summary always.
+    const always = def.rules.map(r => r.id === 'summary.silent' ? { ...r, when: [] } : r);
+    const pv = (await owner.req('POST', '/v1/prompt-scripts/preview', { id: 'video.replicate', rules: always, inputs: { speaking: true } })).body;
+    expect(pv.text).toContain('she does not speak, sing or mouth words');
+    expect(pv.fired).toContain('summary.silent');
+    expect(pv.parts.at(-1)).toMatchObject({ kind: 'user', text: 'Direction from the user: smiling, glancing at the camera' });
+    const saved = await owner.req('PUT', '/v1/prompt-scripts/video.replicate', { rules: always });
+    expect(saved.status).toBe(200);
+    expect(saved.body).toMatchObject({ overridden: true, updatedBy: 'owner@test.dev' });
+    // The next Edit render's prompt (built at creation) follows the saved rules; Edit's own script is unchanged.
+    const t = await a.ctx.prompts.texts((await a.ctx.db.select().from((await import('../src/db/schema.js')).users))[0]!.studioId);
+    expect(B.replicateSwap({ identity: demo, outfit: null, referenceLabels: [], speaking: true }, t).text).toContain('she does not speak, sing or mouth words');
+    // Saving the defaults again clears the override.
+    const back = await owner.req('PUT', '/v1/prompt-scripts/video.replicate', { rules: def.rules });
+    expect(back.body).toMatchObject({ overridden: false });
+    await owner.req('PUT', '/v1/prompt-scripts/video.replicate', { rules: always });
+    const reset = await owner.req('DELETE', '/v1/prompt-scripts/video.replicate');
+    expect(reset.body).toMatchObject({ overridden: false });
+    void modelId;
+  });
+  it('a block text edit (the library) and a rule edit work together in the preview', async () => {
+    const pv = (await owner.req('POST', '/v1/prompt-scripts/preview', { id: 'video.audio', inputs: { audio: 'music', speaking: false }, texts: { 'audio.beat': '{subject} dances to {audio}.' } })).body;
+    expect(pv.text).toBe('<Subject 1> dances to <Audio 1>.');
+  });
+});

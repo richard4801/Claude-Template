@@ -6,6 +6,8 @@ import { ApiError, notFound } from '../errors.js';
 import { allowEmpty, DEFAULT_TEXTS, fill, listOf, PROMPT_DEFS, PROMPT_GROUPS, promptDef, resolveTexts, validatePrompt, type PromptDef, type PromptTexts } from './library.js';
 import * as E from './engine.js';
 import { buildTemplatePrompt } from '../templates/prompt.js';
+import { withRules } from './scripts/builders.js';
+import { loadRules } from './scripts/service.js';
 
 export type PromptEntry = {
   key: string; group: string; title: string; description: string; kind: PromptDef['kind']; default: string; current: string; overridden: boolean;
@@ -30,6 +32,9 @@ export class PromptLibrary {
   private cache = new Map<string, { at: number; texts: PromptTexts }>();
   constructor(private ctx: Ctx) {}
 
+  /** Drops the cached texts and rules (after a script rule edit). */
+  forget(studioId: string) { this.cache.delete(studioId); }
+
   private async rows(studioId: string): Promise<Row[]> {
     return this.ctx.db.select().from(promptOverrides).where(eq(promptOverrides.studioId, studioId));
   }
@@ -37,7 +42,8 @@ export class PromptLibrary {
   async texts(studioId: string): Promise<PromptTexts> {
     const hit = this.cache.get(studioId);
     if (hit && Date.now() - hit.at < 60_000) return hit.texts;
-    const texts = resolveTexts(Object.fromEntries((await this.rows(studioId)).map(r => [r.key, r.text])));
+    // With the studio's script rules attached (prompt scripts), so every builder sees the owner's rule edits too.
+    const texts = withRules(resolveTexts(Object.fromEntries((await this.rows(studioId)).map(r => [r.key, r.text]))), await loadRules(this.ctx, studioId));
     this.cache.set(studioId, { at: Date.now(), texts });
     return texts;
   }

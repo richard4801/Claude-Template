@@ -133,11 +133,25 @@ export const PROMPT_DEFS: PromptDef[] = [
   d('lora.variation', 'lora', 'Variation line', 'Added under the sheet prompt of each candidate.', 'Variation: {variation}.', [['variation', 'one line of the list above', true]]),
 ];
 
+// Prompt scripts (plans/prompt-scripts.md §4): the blocks added with scripts join the library; other modules (the AI
+// suite) add theirs with registerPromptDefs.
+import { SCRIPT_BLOCK_DEFS } from './scripts/blocks.js';
+PROMPT_DEFS.push(...SCRIPT_BLOCK_DEFS);
+
 export type PromptKey = string;
 export type PromptTexts = Record<PromptKey, string>;
 const BY_KEY = new Map(PROMPT_DEFS.map(p => [p.key, p]));
 export const promptDef = (key: string) => BY_KEY.get(key);
-export const DEFAULT_TEXTS: PromptTexts = Object.freeze(Object.fromEntries(PROMPT_DEFS.map(p => [p.key, p.default]))) as PromptTexts;
+export const DEFAULT_TEXTS: PromptTexts = Object.fromEntries(PROMPT_DEFS.map(p => [p.key, p.default])) as PromptTexts;
+/** Adds library entries defined elsewhere (at module load, before any studio's texts are read). A known key is replaced. */
+export function registerPromptDefs(defs: PromptDef[]) {
+  for (const d of defs) {
+    const i = PROMPT_DEFS.findIndex(p => p.key === d.key);
+    if (i >= 0) PROMPT_DEFS[i] = d; else PROMPT_DEFS.push(d);
+    BY_KEY.set(d.key, d);
+    DEFAULT_TEXTS[d.key] = d.default;
+  }
+}
 export const allowEmpty = (p: PromptDef) => p.allowEmpty ?? !p.placeholders.some(x => x[2]);
 
 const PH_RE = /\{([A-Za-z][A-Za-z0-9]*)\}/g;

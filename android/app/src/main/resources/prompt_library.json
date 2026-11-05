@@ -1128,6 +1128,276 @@
    ],
    "updatedAt": null,
    "updatedBy": null
+  },
+  {
+   "key": "video.user.direction",
+   "group": "video",
+   "title": "User section",
+   "description": "The user’s own direction, after every system section (anything that would change her identity is removed first).",
+   "kind": "text",
+   "default": "Direction from the user: {direction}",
+   "current": "Direction from the user: {direction}",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "direction",
+     "description": "the user’s direction",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "video.replicate.summary.silent",
+   "group": "video",
+   "title": "Draft/Standard/HD · summary (not speaking)",
+   "description": "summary of the short prompt when the performer does not speak or sing.",
+   "kind": "text",
+   "default": "[video editing + character replacement] <Subject 1> is replaced by <Subject 2>. <Subject 2> copies <Subject 1>'s facial performance exactly, frame by frame and with the same intensity: every eye movement, side glance, blink, eyebrow raise and head turn, at the same moments, and the same body motion. Her mouth follows <Video 1> exactly; she does not speak, sing or mouth words. The camera, the exact framing and crop, the background and the lighting of <Video 1> stay unchanged. Any caption or on-screen text is removed.",
+   "current": "[video editing + character replacement] <Subject 1> is replaced by <Subject 2>. <Subject 2> copies <Subject 1>'s facial performance exactly, frame by frame and with the same intensity: every eye movement, side glance, blink, eyebrow raise and head turn, at the same moments, and the same body motion. Her mouth follows <Video 1> exactly; she does not speak, sing or mouth words. The camera, the exact framing and crop, the background and the lighting of <Video 1> stay unchanged. Any caption or on-screen text is removed.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "video.replicate.detailed.silent",
+   "group": "video",
+   "title": "Draft/Standard/HD · details (not speaking)",
+   "description": "detailed_description of the short prompt when the performer does not speak or sing.",
+   "kind": "text",
+   "default": "Casual phone video, realistic. [Shot 1] <Subject 2> in the same place, framed exactly like <Subject 1>: keep the exact framing and crop of <Video 1>, the camera does not pull back. The face is fully alive and mirrors every expression of <Subject 1>; the mouth follows <Video 1> exactly and she does not speak, sing or mouth words. Sharp face matching {faceRef}, natural skin texture, no beauty filter. No text anywhere.",
+   "current": "Casual phone video, realistic. [Shot 1] <Subject 2> in the same place, framed exactly like <Subject 1>: keep the exact framing and crop of <Video 1>, the camera does not pull back. The face is fully alive and mirrors every expression of <Subject 1>; the mouth follows <Video 1> exactly and she does not speak, sing or mouth words. Sharp face matching {faceRef}, natural skin texture, no beauty filter. No text anywhere.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "faceRef",
+     "description": "<Image 1>, or \"the description\"",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "video.mouth.silent",
+   "group": "video",
+   "title": "Mouth line (not speaking)",
+   "description": "Added to the Edit details when the performer does not speak or sing.",
+   "kind": "text",
+   "default": "<Subject 2>'s mouth follows <Video 1> exactly; she does not speak, sing or mouth words.",
+   "current": "<Subject 2>'s mouth follows <Video 1> exactly; she does not speak, sing or mouth words.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "video.edit.audio.subjects",
+   "group": "video",
+   "title": "Edit · audio track line",
+   "description": "Ends subject_definitions when the clip’s audio is sent.",
+   "kind": "text",
+   "default": "<Audio 1> is the synchronized audio track of <Video 1>.",
+   "current": "<Audio 1> is the synchronized audio track of <Video 1>.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "video.edit.audio.tag",
+   "group": "video",
+   "title": "Edit · audio tag",
+   "description": "Added to the summary’s task tag when the audio is kept.",
+   "kind": "text",
+   "default": "+ audio reuse",
+   "current": "+ audio reuse",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "video.edit.audio.summary",
+   "group": "video",
+   "title": "Edit · audio sentence",
+   "description": "Ends the summary when the audio is kept.",
+   "kind": "text",
+   "default": "<Audio 1> is fully reused.",
+   "current": "<Audio 1> is fully reused.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "video.edit.audio.kept",
+   "group": "video",
+   "title": "Edit · audio kept",
+   "description": "retention_analysis: <Audio 1> when the audio is kept.",
+   "kind": "text",
+   "default": "fully_copy - the original audio is kept unchanged.",
+   "current": "fully_copy - the original audio is kept unchanged.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "video.edit.audio.replaced",
+   "group": "video",
+   "title": "Edit · audio replaced",
+   "description": "retention_analysis: <Audio 1> when the audio is not kept.",
+   "kind": "text",
+   "default": "replaced - a new audio track is supplied.",
+   "current": "replaced - a new audio track is supplied.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "video.edit.background.keep",
+   "group": "video",
+   "title": "Edit · background kept",
+   "description": "The summary’s background sentence when the background is kept.",
+   "kind": "text",
+   "default": "The camera, framing, background, lighting and timing of <Video 1> are unchanged.",
+   "current": "The camera, framing, background, lighting and timing of <Video 1> are unchanged.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "video.edit.background.photo",
+   "group": "video",
+   "title": "Edit · background photo",
+   "description": "The summary’s background sentence with a new background photo.",
+   "kind": "text",
+   "default": "The camera, framing and timing of <Video 1> are unchanged; the background is replaced by the background reference photo{motion}.",
+   "current": "The camera, framing and timing of <Video 1> are unchanged; the background is replaced by the background reference photo{motion}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "motion",
+     "description": "\" (subtly alive)\" …, or empty",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "video.edit.video.keep",
+   "group": "video",
+   "title": "Edit · source kept",
+   "description": "retention_analysis: <Video 1> when the background is kept.",
+   "kind": "text",
+   "default": "fully_preserved - the background, camera position, lighting and the full body motion and timing are maintained exactly.",
+   "current": "fully_preserved - the background, camera position, lighting and the full body motion and timing are maintained exactly.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "video.edit.video.photo",
+   "group": "video",
+   "title": "Edit · source, new background",
+   "description": "retention_analysis: <Video 1> with a new background photo.",
+   "kind": "text",
+   "default": "motion_preserved - the full body motion and timing are maintained exactly; the background is replaced.",
+   "current": "motion_preserved - the full body motion and timing are maintained exactly; the background is replaced.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "audio.lipsync",
+   "group": "video",
+   "title": "Audio · speaking",
+   "description": "The performer speaks or sings to the reference audio.",
+   "kind": "text",
+   "default": "{subject} speaks in sync with {audio}: the lips match every word exactly.",
+   "current": "{subject} speaks in sync with {audio}: the lips match every word exactly.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "subject",
+     "description": "<Subject 1> …",
+     "required": false
+    },
+    {
+     "name": "audio",
+     "description": "<Audio 1> …",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "audio.beat",
+   "group": "video",
+   "title": "Audio · beat only",
+   "description": "Music drives the rhythm but nobody sings or speaks (the instrumental is sent).",
+   "kind": "text",
+   "default": "{subject} moves to the beat of {audio}; she does not sing, speak or mouth lyrics.",
+   "current": "{subject} moves to the beat of {audio}; she does not sing, speak or mouth lyrics.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "subject",
+     "description": "<Subject 1> …",
+     "required": false
+    },
+    {
+     "name": "audio",
+     "description": "<Audio 1> …",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "audio.silent",
+   "group": "video",
+   "title": "Audio · none",
+   "description": "No audio is sent.",
+   "kind": "text",
+   "default": "{subject} does not speak, sing or mouth words.",
+   "current": "{subject} does not speak, sing or mouth words.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "subject",
+     "description": "<Subject 1> …",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
   }
  ]
 }
