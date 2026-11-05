@@ -57,6 +57,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     startupRetryMs: config.DB_STARTUP_RETRY_SECONDS * 1000, migrationUrl: config.DATABASE_URL_UNPOOLED, log: app.log,
   });
   const hub = new EventHub();
+  hub.onError = e => app.log.warn({ err: (e as Error)?.message }, 'live event failed');
   const timers = new Set<NodeJS.Timeout>();
   let boundPort = config.PORT;
   const publicBase = () => (config.PUBLIC_URL ?? `http://localhost:${boundPort}`).replace(/\/$/, '');

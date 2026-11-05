@@ -332,6 +332,7 @@ export class JobService {
     }));
     const inserted = await this.ctx.db.insert(takes).values(rows).returning();
     this.emitJob(u, { takes: inserted.map(t => takeView(t, this.ctx.config.PUBLIC_URL)) });
+    if (u.kind === 'render' && !u.hiddenAt) for (const t of inserted) void this.ctx.hub.emit(t.studioId, v => ({ type: 'take', take: takeView(t, this.ctx.config.PUBLIC_URL, v.userId) }));
     this.kick();
     return u;
   }

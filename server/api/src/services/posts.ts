@@ -68,12 +68,14 @@ export class PostScheduler {
     }).returning();
     this.nextDueAt = Math.min(this.nextDueAt, at);
     if (when === 'now') return this.view(await this.handoff(x!));
+    this.emit(x!);
     return this.view(x!);
   }
 
   async remove(user: AuthUser, id: string) {
     const r = await this.ctx.db.delete(posts).where(and(eq(posts.id, id), eq(posts.studioId, user.studioId))).returning();
     if (!r.length) throw notFound('Post');
+    this.ctx.hub.emit(user.studioId, { type: 'post', op: 'delete', id });
   }
 
   /** Stage 1: the client opens each app with the caption on the clipboard. */
@@ -127,6 +129,7 @@ export class PostScheduler {
     await new Promise(r => setTimeout(r, Math.min(this.ctx.config.GEN_MS, 900)));
     const a = { studioId: user.studioId, modelId: m.id, platform: k, handle: handleFor(k, m.name), connectedAt: Date.now(), canPostDirect: false, connectedBy: user.id };
     await this.ctx.db.insert(accounts).values(a).onConflictDoUpdate({ target: [accounts.modelId, accounts.platform], set: { handle: a.handle, connectedAt: a.connectedAt, connectedBy: user.id } });
+    this.ctx.hub.emit(user.studioId, { type: 'account', modelId: m.id, account: accountView(a) });
     return { account: accountView(a) };
   }
 }

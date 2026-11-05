@@ -80,6 +80,18 @@ export class TemplateService {
   }
   async view(t: Row, viewer: AuthUser) { return (await this.views([t], viewer))[0]!; }
 
+  /**
+   * Live `template` events: each viewer gets their own view (layers and pool only to the template's owner); someone who
+   * can't see it (a private template of someone else, or one just made private) gets a delete for its id.
+   */
+  emitChange(t: Row) {
+    return this.ctx.hub.emit(t.studioId, async v => {
+      if (t.ownerId !== v.userId && t.visibility !== 'public') return { type: 'template', op: 'delete', id: t.id };
+      const viewer = { id: v.userId, studioId: v.studioId, role: v.role, email: '', studioName: '', sessionId: null } as AuthUser;
+      return { type: 'template', template: await this.view(t, viewer) };
+    });
+  }
+
   /** A template this user may see: their own, or a public one in their studio. Anything else is not_found. */
   async visible(u: AuthUser, id: string): Promise<Row> {
     const [t] = await this.ctx.db.select().from(templates).where(and(eq(templates.id, id), eq(templates.studioId, u.studioId)));
@@ -177,6 +189,7 @@ export class TemplateService {
       id: uid('tpl'), studioId: u.studioId, ownerId: u.id, visibility: b.visibility ?? 'private', name: b.name, tags,
       layers, variationPool: pool, coverKey, createdFromShotId: fromShot, createdAt: now, updatedAt: now,
     }).returning();
+    void this.emitChange(t!);
     return this.view(t!, u);
   }
 
@@ -193,12 +206,14 @@ export class TemplateService {
       layers: b.layers ? cleanLayers(b.layers as TemplateLayers) : undefined, variationPool: b.variationPool ? cleanPool(b.variationPool as VariationPool) : undefined,
       updatedAt: Date.now(),
     })).where(eq(templates.id, t.id)).returning();
+    void this.emitChange(r!);
     return this.view(r!, u);
   }
 
   async remove(u: AuthUser, id: string) {
     const t = await this.owned(u, id);
     await this.ctx.db.delete(templates).where(eq(templates.id, t.id));
+    void this.ctx.hub.emit(t.studioId, { type: 'template', op: 'delete', id: t.id });
   }
 
   async duplicate(u: AuthUser, id: string) {
@@ -207,6 +222,7 @@ export class TemplateService {
     const [r] = await this.ctx.db.insert(templates).values({
       ...t, id: uid('tpl'), name: `${t.name} copy`.slice(0, 80), visibility: 'private', slug: null, uses: 0, createdAt: now, updatedAt: now,
     }).returning();
+    void this.emitChange(r!);
     return this.view(r!, u);
   }
 
@@ -214,7 +230,10 @@ export class TemplateService {
     const t = await this.visible(u, id);
     if (on) await this.ctx.db.insert(templateFavourites).values({ userId: u.id, templateId: t.id, createdAt: Date.now() }).onConflictDoNothing();
     else await this.ctx.db.delete(templateFavourites).where(and(eq(templateFavourites.userId, u.id), eq(templateFavourites.templateId, t.id)));
-    return this.view(t, u);
+    const view = await this.view(t, u);
+    // A favourite is personal: only this user's devices hear about it.
+    void this.ctx.hub.emitTo(u.id, { type: 'template', template: view });
+    return view;
   }
 
   /** The prompt view: what the first still of a shoot would get. Non-owners see only the visible slots. */
@@ -260,7 +279,8 @@ export class TemplateService {
   }
 
   async bumpUses(id: string) {
-    await this.ctx.db.update(templates).set({ uses: sql`${templates.uses} + 1` }).where(eq(templates.id, id));
+    const [t] = await this.ctx.db.update(templates).set({ uses: sql`${templates.uses} + 1` }).where(eq(templates.id, id)).returning();
+    if (t) void this.emitChange(t);
   }
 
   // ---------------------------------------------------------------------------------------------- starter pack

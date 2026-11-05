@@ -29,7 +29,7 @@ import { IMAGE_STEPS, type ImageStep } from '../replicate/mapping.js';
 import { CatalogError } from '../replicate/catalog.js';
 
 /** SSE comment interval: well under any hosting proxy's idle timeout (Koyeb, Railway, Cloudflare: 60-100 s). */
-export const SSE_KEEPALIVE_MS = 15_000;
+export const SSE_KEEPALIVE_MS = 10_000;
 
 /** The 7 sheet images (faceTq appended last, plans/api.md "Model tools" §1). */
 export const SLOT_KEYS = ['face', 'profile', 'front', 'tq', 'side', 'back', 'faceTq'];
@@ -58,6 +58,11 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   const uploadUrl = (key: string) => `${pub}/uploads/${key}`;
   const emitModel = (m: typeof models.$inferSelect) => ctx.hub.emit(m.studioId, { type: 'model', model: modelView(m) });
   const emitOutfit = (o: typeof outfits.$inferSelect) => ctx.hub.emit(o.studioId, { type: 'outfit', outfit: outfitView(o) });
+  /** New or changed takes: each viewer gets the prompt they may see (a template's hidden layers only to its owner). */
+  const emitTakes = (studioId: string, rows: (typeof takes.$inferSelect)[]) => {
+    for (const t of rows) void ctx.hub.emit(studioId, v => ({ type: 'take', take: takeView(t, pub, v.userId) }));
+  };
+  const asUser = (v: { userId: string; studioId: string; role: 'owner' | 'member' }) => ({ id: v.userId, studioId: v.studioId, role: v.role, email: '', studioName: '', sessionId: null }) as AuthUser;
 
   /** A model of the studio; `forWork` refuses an archived one (plans/api.md "Model tools" §7). */
   async function model(u: AuthUser, id: string, forWork = false) {
@@ -96,7 +101,17 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   // ------------------------------------------------------------------ auth
   const authLimit = { rateLimit: { max: ctx.config.AUTH_RATE_PER_MIN, timeWindow: '1 minute' }, public: true };
   app.post('/v1/auth/signin', { config: authLimit }, async req => signin(ctx, (req.body ?? {}) as any));
-  app.post('/v1/auth/signup', { config: authLimit }, async req => signup(ctx, (req.body ?? {}) as any));
+  app.post('/v1/auth/signup', { config: authLimit }, async req => {
+    const r = await signup(ctx, (req.body ?? {}) as any);
+    // A new member joined through an invite: the owners' Members and Invites lists follow.
+    const u = r.user as { id: string; studioId?: string };
+    const [row] = await db.select({ studioId: users.studioId, inviteId: users.inviteId }).from(users).where(eq(users.id, u.id));
+    if (row) {
+      void ctx.money.memberView(row.studioId, u.id).then(m => ctx.hub.emitOwners(row.studioId, { type: 'member', member: m })).catch(() => {});
+      if (row.inviteId) ctx.hub.emitOwners(row.studioId, { type: 'invite', op: 'used', id: row.inviteId });
+    }
+    return r;
+  });
   app.post('/v1/auth/signout', async (req, reply) => { if (req.user.sessionId) await revokeSession(ctx, req.user.sessionId); return reply.status(204).send(); });
   app.get('/v1/auth/me', async req => ({ id: req.user.id, email: req.user.email, studioName: req.user.studioName, role: req.user.role }));
 
@@ -104,6 +119,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post('/v1/invites', { config: { owner: true } }, async req => {
     const b = parse(z.object({ email: z.string().email().optional(), role: z.enum(['owner', 'member']).optional(), days: z.number().int().min(1).max(90).optional() }), req.body);
     const inv = await createInvite(ctx, { studioId: req.user.studioId, email: b.email, role: b.role ?? 'member', createdBy: req.user.id, days: b.days });
+    ctx.hub.emitOwners(req.user.studioId, { type: 'invite', invite: compact({ id: inv.id, email: inv.email, role: inv.role, createdAt: Date.now(), expiresAt: inv.expiresAt }) });
     // shareText: the message to send with the code (the download page, the code, the email).
     return { ...inv, shareText: inviteShareText(ctx.publicBase(), inv.code, inv.email, b.days ?? 14) };
   });
@@ -136,6 +152,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       id: uid('m'), studioId: req.user.studioId, name: b.name?.trim() || 'New model', age: Math.min(70, Math.max(18, Math.round(b.age ?? 27))), niche: b.niche ?? 'Beauty',
       look: '', neverAdd: [], slots: SLOT_KEYS.map(k => ({ key: k, image: null, source: 'upload', busy: false })), outfitIds: [], createdBy: req.user.id, createdAt: Date.now(),
     }).returning();
+    emitModel(m!);
     return modelView(m!);
   });
   app.patch<{ Params: { id: string } }>('/v1/models/:id', async req => {
@@ -160,6 +177,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     await db.delete(accounts).where(eq(accounts.modelId, m.id));
     await db.delete(posts).where(and(eq(posts.modelId, m.id), ne(posts.state, 'posted')));
     await db.delete(models).where(eq(models.id, m.id));
+    // Her outfits and posts went with her: the apps drop them by modelId.
+    ctx.hub.emit(m.studioId, { type: 'model', op: 'delete', id: m.id });
     return reply.status(204).send();
   });
   app.put<{ Params: { id: string; slot: string } }>('/v1/models/:id/slots/:slot', async req => {
@@ -168,6 +187,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     if (!SLOT_KEYS.includes(req.params.slot)) throw notFound('Slot');
     const slots = m.slots.map(s => (s.key === req.params.slot ? { ...s, image: (b.image as ImageRef | null) ?? null, source: b.source ?? 'upload', busy: false } : s));
     const [u] = await db.update(models).set({ slots }).where(eq(models.id, m.id)).returning();
+    emitModel(u!);
     return modelView(u!);
   });
   app.post<{ Params: { id: string } }>('/v1/models/:id/fill-angles', async req => {
@@ -179,6 +199,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const bill = await new PhotoBill(ctx, whoOf(req.user), `sheet_${uid('f')}`, cost, `Character sheet · ${missing.length} angle${missing.length === 1 ? '' : 's'}`).start();
     const slots = m.slots.map(s => (missing.includes(s) ? { ...s, busy: true } : s));
     const [u] = await db.update(models).set({ slots }).where(eq(models.id, m.id)).returning();
+    emitModel(u!);
     const user = req.user;
     void (async () => {
       const identity = await identityOf(u!);
@@ -226,6 +247,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const set = outfitSet(identity, spec);
     const [o] = await db.insert(outfits).values({ id, studioId: req.user.studioId, modelId: m.id, name: spec.name, mode, description: b.description ?? '',
       angles: [null, null, null, null], state: 'generating', prompt: set[0]!.text, seed: set[0]!.seed ?? null, createdBy: req.user.id, createdAt: Date.now() }).returning();
+    emitOutfit(o!);
     const user = req.user;
     ctx.later(async () => {
       let angles: (ImageRef | null)[];
@@ -272,6 +294,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     if (!o) throw notFound('Outfit');
     const m = await model(req.user, o.modelId);
     const [u] = await db.update(outfits).set({ state: 'ready' }).where(eq(outfits.id, o.id)).returning();
+    emitOutfit(u!);
     if (!m.outfitIds.includes(o.id)) {
       const [mm] = await db.update(models).set({ outfitIds: [...m.outfitIds, o.id] }).where(eq(models.id, m.id)).returning();
       emitModel(mm!);
@@ -288,6 +311,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const id = uid('clip');
     const [c] = await db.insert(clips).values({ id, studioId: u.studioId, name: meta.name ?? 'Clip', durationSec: meta.durationSec, width: meta.width, height: meta.height, fps: meta.fps,
       meta, checks: P.clipChecks(meta), storageKey, createdBy: u.id, createdAt: Date.now() }).returning();
+    ctx.hub.emit(u.studioId, { type: 'clip', clip: clipView(c!) });
     return clipView(c!);
   }
 
@@ -383,7 +407,11 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   // ------------------------------------------------------------------ jobs and takes
   app.get('/v1/jobs', async req => ctx.jobs.list(req.user.studioId));
   app.post('/v1/jobs', async req => ctx.jobs.create(req.user, req.body));
-  app.delete<{ Params: { id: string } }>('/v1/jobs/:id', async (req, reply) => { await ctx.jobs.remove(req.user, req.params.id); return reply.status(204).send(); });
+  app.delete<{ Params: { id: string } }>('/v1/jobs/:id', async (req, reply) => {
+    await ctx.jobs.remove(req.user, req.params.id);
+    ctx.hub.emit(req.user.studioId, { type: 'job', op: 'delete', id: req.params.id });
+    return reply.status(204).send();
+  });
   app.post('/v1/queue/run', async req => ctx.jobs.runQueue(req.user));
 
   app.get('/v1/takes', async req => (await db.select().from(takes).where(eq(takes.studioId, req.user.studioId)).orderBy(desc(takes.createdAt))).map(t => takeView(t, pub, req.user.id)));
@@ -393,6 +421,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     if (!t) throw notFound('Take');
     if (b.status !== 'test' && b.status !== 'final') throw badRequest('status must be test or final');
     const [u] = await db.update(takes).set({ status: b.status }).where(eq(takes.id, t.id)).returning();
+    emitTakes(u!.studioId, [u!]);
     return takeView(u!, pub, req.user.id);
   });
   // Upscale a finished render (plans/api.md "App clean-up" §2): the contract is in place, the engine job comes later.
@@ -405,7 +434,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     throw new ApiError(409, 'upscale_unavailable', 'Upscale is coming soon');
   });
   app.delete<{ Params: { id: string } }>('/v1/takes/:id', async (req, reply) => {
-    await db.delete(takes).where(and(eq(takes.id, req.params.id), eq(takes.studioId, req.user.studioId)));
+    const gone = await db.delete(takes).where(and(eq(takes.id, req.params.id), eq(takes.studioId, req.user.studioId))).returning({ id: takes.id });
+    if (gone.length) ctx.hub.emit(req.user.studioId, { type: 'take', op: 'delete', id: req.params.id });
     return reply.status(204).send();
   });
 
@@ -460,6 +490,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       thumb: img, prompt, mediaKey: ctx.images.keyOf(img), layers, createdAt: Date.now() + n,
     }));
     const inserted = await db.insert(takes).values(rows).returning();
+    emitTakes(req.user.studioId, inserted);
     return inserted.map(t => takeView(t, pub, req.user.id));
   });
 
@@ -499,6 +530,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     }
     await bill.finish();
     const inserted = await db.insert(takes).values(rows).returning();
+    emitTakes(u.studioId, inserted);
     await ctx.templates.bumpUses(t.id);
     return inserted.map(x => takeView(x, pub, u.id));
   }
@@ -535,6 +567,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   app.delete<{ Params: { id: string; platform: string } }>('/v1/models/:id/accounts/:platform', async (req, reply) => {
     const m = await model(req.user, req.params.id);
     await db.delete(accounts).where(and(eq(accounts.modelId, m.id), eq(accounts.platform, platformOf(req.params.platform))));
+    ctx.hub.emit(m.studioId, { type: 'account', op: 'delete', modelId: m.id, platform: platformOf(req.params.platform) });
     return reply.status(204).send();
   });
   app.get('/v1/posts', async req => { const q = req.query as { state?: string; modelId?: string }; return ctx.posts.list(req.user.studioId, q.state || undefined, q.modelId || undefined); });
@@ -572,17 +605,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     return { wallet: await ctx.money.walletView(whoOf(req.user)), member: await memberView(req.user.studioId, b.fromUserId) };
   });
 
-  async function memberView(studioId: string, id: string) {
-    const [u] = await db.select().from(users).where(and(eq(users.id, id), eq(users.studioId, studioId)));
-    if (!u) throw notFound('Member');
-    const w = await ctx.money.wallet(u.id, studioId);
-    const caps = await ctx.money.caps(u);
-    return compact({
-      id: u.id, email: u.email, role: u.role, tokens: w.tokens, usd: ctx.money.toUsd(w.tokens), heldTokens: w.held,
-      todayUsd: await ctx.money.spend(studioId, dayStart(), u.id), monthUsd: await ctx.money.spend(studioId, monthStart(), u.id),
-      lastActiveAt: u.lastActiveAt, disabled: !!u.disabledAt, capPerJob: caps.perJob, capPerDay: caps.perUserDay, createdAt: u.createdAt,
-    });
-  }
+  const memberView = (studioId: string, id: string) => ctx.money.memberView(studioId, id);
   app.get('/v1/members', { config: { owner: true } }, async req => {
     const rows = await db.select().from(users).where(eq(users.studioId, req.user.studioId)).orderBy(users.createdAt);
     return Promise.all(rows.map(u => memberView(req.user.studioId, u.id)));
@@ -598,7 +621,11 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     if (b.disabled !== undefined) patch.disabledAt = b.disabled ? Date.now() : null;
     if (Object.keys(patch).length) await db.update(users).set(patch).where(eq(users.id, u.id));
     if (b.disabled) await db.update(sessions).set({ revokedAt: Date.now() }).where(and(eq(sessions.userId, u.id), isNull(sessions.revokedAt)));
-    return memberView(req.user.studioId, u.id);
+    const mv = await memberView(req.user.studioId, u.id);
+    ctx.hub.emitOwners(req.user.studioId, { type: 'member', member: mv });
+    // Their caps changed: their own Credits card (perJobLimit, perDayLimit) follows.
+    void ctx.money.notify(req.user.studioId, [u.id]);
+    return mv;
   });
   app.get('/v1/ledger', { config: { owner: true } }, async req => {
     const q = req.query as { limit?: string; userId?: string };
@@ -630,9 +657,17 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   });
   app.put<{ Params: { step: string } }>('/v1/image-models/:step', { config: { owner: true } }, async req => {
     const b = parse(z.object({ model: z.string().min(3).max(170), extra: z.record(z.unknown()).optional() }), req.body);
-    return catalogCall(() => ctx.imageModels.set(req.user.studioId, stepParam(req.params.step), b.model.trim(), b.extra));
+    const r = await catalogCall(() => ctx.imageModels.set(req.user.studioId, stepParam(req.params.step), b.model.trim(), b.extra));
+    emitImageModels(req.user.studioId);
+    return r;
   });
-  app.delete<{ Params: { step: string } }>('/v1/image-models/:step', { config: { owner: true } }, async req => ctx.imageModels.reset(req.user.studioId, stepParam(req.params.step)));
+  app.delete<{ Params: { step: string } }>('/v1/image-models/:step', { config: { owner: true } }, async req => {
+    const r = await ctx.imageModels.reset(req.user.studioId, stepParam(req.params.step));
+    emitImageModels(req.user.studioId);
+    return r;
+  });
+  /** Image models are owner-only (model names never reach a member). */
+  const emitImageModels = (studioId: string) => ctx.hub.emitOwners(studioId, async () => ({ type: 'settings', imageModels: await ctx.imageModels.views(studioId) }));
 
   app.post<{ Params: { id: string } }>('/v1/models/:id/enhance/estimate', async req => ctx.tools.enhanceEstimate(req.user, req.params.id, req.body));
   app.post<{ Params: { id: string } }>('/v1/models/:id/enhance', async req => ctx.tools.startEnhance(req.user, req.params.id, req.body));
@@ -666,7 +701,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       : { provider: b.provider, model: b.model ?? (b.provider === cur.provider ? cur.model : b.provider === 'simulated' ? 'bundled-stills' : ctx.config.IMAGE_MODEL), ...(b.url ? { url: b.url } : {}) };
     await ctx.money.settings(req.user.studioId);
     await db.update(studioSettings).set({ imageEngine: next }).where(eq(studioSettings.studioId, req.user.studioId));
-    return engineView(req.user.studioId);
+    const ev = await engineView(req.user.studioId);
+    ctx.hub.emitOwners(req.user.studioId, { type: 'settings', imageEngine: ev });
+    return ev;
   });
   /** Members get caps, the token rate and features; the owner also gets the add-on GPU settings and Engines (the only
    * place provider names go to an app, plans/api.md "App clean-up" §5). */
@@ -684,6 +721,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       gpu: await ctx.gpu.status(), engines: await ctx.engines.view(u.studioId) };
   };
   app.get('/v1/settings/studio', async req => studioSettingsView(req.user));
+  /** Studio settings changed: owners get the owner view (engines, GPU), members the member view. */
+  const emitSettings = (studioId: string) => ctx.hub.emit(studioId, async v => ({ type: 'settings', settings: await studioSettingsView(asUser(v)) }));
   app.patch('/v1/settings/studio', { config: { owner: true } }, async req => {
     const b = parse(z.object({ maxGpus: z.number().int().min(0).max(16).optional(), overheadPayer: z.enum(['user', 'owner']).optional(),
       capPerJob: z.number().nonnegative().max(1000).optional(), capPerDay: z.number().nonnegative().max(10000).optional(), capPerUserDay: z.number().nonnegative().max(10000).optional(),
@@ -691,6 +730,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     await ctx.money.settings(req.user.studioId);
     const { warmGpuAllowed: _retired, ...patch } = b;
     if (Object.keys(patch).length) await db.update(studioSettings).set(patch).where(eq(studioSettings.studioId, req.user.studioId));
+    emitSettings(req.user.studioId);
+    // Caps feed everyone's Credits card.
+    void ctx.money.notify(req.user.studioId, []);
     return studioSettingsView(req.user);
   });
 
@@ -706,7 +748,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
 
   // ------------------------------------------------------------------ live events
   // Server-sent events through a hosting proxy (Koyeb, Railway): no compression and no buffering anywhere
-  // (no-transform, X-Accel-Buffering; this server registers no compression plugin; Nagle off), a comment line every 15 s so the proxy's idle
+  // (no-transform, X-Accel-Buffering; this server registers no compression plugin; Nagle off), a comment line every 10 s so the proxy's idle
   // timeout never closes the stream, and the socket's own timeout disabled.
   app.get('/v1/events', async (req, reply) => {
     reply.hijack();
@@ -721,7 +763,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     res.flushHeaders();
     // retry: how long a client waits before reconnecting after the stream drops (e.g. an instance restart).
     res.write('retry: 3000\n: connected\n\n');
-    const off = ctx.hub.subscribe(req.user.studioId, req.user.id, line => res.write(line));
+    const off = ctx.hub.subscribe(req.user.studioId, req.user.id, line => res.write(line), req.user.role);
     const ka = setInterval(() => res.write(': keep-alive\n\n'), SSE_KEEPALIVE_MS);
     req.raw.on('close', () => { clearInterval(ka); off(); });
   });

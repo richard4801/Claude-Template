@@ -14,7 +14,7 @@ import type { Ctx, AuthUser } from '../ctx.js';
 import { desc } from 'drizzle-orm';
 import { ledger, studioSettings, topups, users, wallets } from '../db/schema.js';
 import { ApiError } from '../errors.js';
-import { dayStart, monthStart, uid } from '../lib/util.js';
+import { compact, dayStart, monthStart, uid } from '../lib/util.js';
 import { videosLeft } from '../pricing.js';
 
 export type RunpodBalance = { source: 'runpod' | 'simulated' | 'unavailable'; balance: number | null; spendPerHour?: number; reason?: string };
@@ -101,6 +101,16 @@ export class Money {
       await this.insertTopUp(owner.studioId, owner.id, Math.round(t.amountUsd * 100) / 100, t.note?.trim() || null, t.at ?? Date.now());
     });
     if (notify) await this.notify(owner.studioId, [owner.id]);
+  }
+
+  /** The studio balance card and the top-up list moved: owners only (members never see the studio's money). */
+  async notifyStudio(studioId: string) {
+    try {
+      if (!this.ctx.hub.connectedUsers(studioId).size) return;
+      await this.ctx.hub.emitOwners(studioId, async () => ({ type: 'studio', studioBalance: await this.studioBalanceView(studioId) }));
+    } catch (e) {
+      this.ctx.log.warn({ err: (e as Error).message }, 'studio notify failed');
+    }
   }
 
   async topUps(studioId: string, limit = 50) {
@@ -387,6 +397,19 @@ export class Money {
     };
   }
 
+  /** One row of GET /v1/members (owner only). */
+  async memberView(studioId: string, id: string) {
+    const [u] = await this.ctx.db.select().from(users).where(and(eq(users.id, id), eq(users.studioId, studioId)));
+    if (!u) throw new ApiError(404, 'not_found', 'Member not found');
+    const w = await this.wallet(u.id, studioId);
+    const caps = await this.caps(u);
+    return compact({
+      id: u.id, email: u.email, role: u.role, tokens: w.tokens, usd: this.toUsd(w.tokens), heldTokens: w.held,
+      todayUsd: await this.spend(studioId, dayStart(), u.id), monthUsd: await this.spend(studioId, monthStart(), u.id),
+      lastActiveAt: u.lastActiveAt, disabled: !!u.disabledAt, capPerJob: caps.perJob, capPerDay: caps.perUserDay, createdAt: u.createdAt,
+    });
+  }
+
   /** Sends `balance` and `wallet` events to the affected users and to every owner (whose pool moved too). */
   async notify(studioId: string, userIds: string[]) {
     try {
@@ -400,6 +423,15 @@ export class Money {
         const who = row as Who;
         this.ctx.hub.emitTo(id, { type: 'balance', balance: await this.balanceView(who) });
         if (userIds.includes(id)) this.ctx.hub.emitTo(id, { type: 'wallet', wallet: await this.walletView(who) });
+      }
+      // The owners' Members list (credit, holds, spend today) for each member whose wallet moved.
+      if (owners.some(o => connected.has(o.id))) {
+        for (const id of new Set(userIds)) {
+          if (owners.some(o => o.id === id)) continue;
+          const m = await this.memberView(studioId, id).catch(() => null);
+          if (m) this.ctx.hub.emitOwners(studioId, { type: 'member', member: m });
+        }
+        await this.notifyStudio(studioId);
       }
     } catch (e) {
       this.ctx.log.warn({ err: (e as Error).message }, 'money notify failed');

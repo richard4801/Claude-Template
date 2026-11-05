@@ -366,7 +366,11 @@ Platform   "tiktok"|"instagram"|"facebook"|"youtube"|"x"
 Account    { modelId, platform: Platform, handle, connectedAt, canPostDirect: boolean /* false until that platform approves MUSE */ }
 Post       { id, modelId, takeId, title, thumb: ImageRef, platforms: Platform[], caption, aiLabel: boolean, paidPartnership: boolean,
              when: "now"|ISO time, state: "scheduled"|"handoff"|"posted"|"failed", createdAt, postedAt?, stats?: { views, likes, comments } }
-ApiEvent   { type: "job"|"balance"|"model"|"outfit"|"lora"|"post"|"wallet"|"gpu"|"tool", job?, tool?: ToolRun, balance?, model?, outfit?, lora?, post?, takes?: Take[],
+ApiEvent   { type: "job"|"take"|"balance"|"wallet"|"model"|"outfit"|"lora"|"post"|"gpu"|"tool"|"template"|"clip"|"settings"|"member"|"invite"|"studio"|"account",
+             op?: "delete"|"used" /* with id: remove that item */, id?, take?: Take, template?: Template, clip?: Clip, settings?: StudioSettings,
+             imageEngine? /* owners */, imageModels? /* owners */, member?: Member /* owners */, invite? /* owners */, studioBalance?: StudioBalance /* owners */,
+             account?: Account, modelId?, platform?,
+             job?, tool?: ToolRun, balance?, model?, outfit?, lora?, post?, takes?: Take[],
              wallet?: Wallet, notice?: { code: "provider_out_of_credit", engine?: "replicate"|"runpod", message } /* owners only */,
              gpu?: WarmGpu, event?: "state"|"tick"|"warning" /* gpu events only */, warning?: WarmWarning }
              // balance, wallet and gpu events go only to the user they concern (balance/wallet also to owners, whose pool moved too).
@@ -634,7 +638,29 @@ Studio settings carry `warmGpuAllowed: "owner"|"everyone"` (default **everyone**
 The apps: **nudge** when creating starts (a clip picked or uploaded in the video studio, or Generate opened) and the user has no warm GPU: "Warm up a GPU now so your render starts right away? About $4/hour from your credit while it's on, and it turns off by itself after 20 min without renders." [Warm up] [Not now]. A manual **Keep GPU warm** switch shows the same cost warning on every switch-on. While on: a bar on every screen, "GPU warm · 42 min · $2.80 so far · Turn off" ("GPU starting… · Turn off" while `starting`).
 
 ### Live events
-`GET /v1/events` is a `text/event-stream`. Each message is `data: <ApiEvent JSON>`. While a job runs, `job` events arrive about every 250 ms (`progress`, `step`, `phase`, `secondsLeft`). `lora` events carry training progress (about every 250 ms) and the `building` → `review` change. `post` events carry `handoff`/`posted` changes. When the job finishes, a `job` event arrives with `state: "done"` and its new `takes`, or with `state: "failed"`, `error` and `refunded`. Each failure is followed by a `balance` event. Clients reconnect with backoff. The Android app turns finished and failed jobs into local notifications. A real backend can add FCM push behind the same events.
+`GET /v1/events` is a `text/event-stream`. Each message is `data: <ApiEvent JSON>`. While a job runs, `job` events arrive about every 250 ms (`progress`, `step`, `phase`, `secondsLeft`). `lora` events carry training progress (about every 250 ms) and the `building` → `review` change. `post` events carry `handoff`/`posted` changes. When the job finishes, a `job` event arrives with `state: "done"` and its new `takes`, or with `state: "failed"`, `error` and `refunded`. Each failure is followed by a `balance` event. Clients reconnect with backoff.
+
+_Added 2026-11-05 (every change is live, so a phone and a Mac on one studio stay in step within a second or two):_
+
+| Event | When | Who gets it |
+|---|---|---|
+| `take` `{take}` / `{op: "delete", id}` | Photoshoot and template-shoot stills, video takes when a job finishes, `PATCH /v1/takes/{id}`, `DELETE /v1/takes/{id}` | Everyone in the studio, each with the prompt *they* may see (a template's hidden layers only to its owner) |
+| `job` `{op: "delete", id}` | `DELETE /v1/jobs/{id}` | Everyone |
+| `model` `{model}` / `{op: "delete", id}` | Create, edit, sheet slot, fill-angles start and finish, archive/unarchive (`archived: true` → drop from lists), tool apply, version restore, delete (drop her outfits too) | Everyone |
+| `outfit` `{outfit}` | Create (`generating`), the set (`preview`), save (`ready`), Dress up apply | Everyone |
+| `tool` `{tool}` | Start, progress, review decisions, retry, apply, discard | Everyone; `models` (which image models ran) only to owners |
+| `template` `{template}` / `{op: "delete", id}` | Create, edit, duplicate, delete, use count after a shoot | Everyone who can see it, each in their own view (layers and pool only to its maker); someone who can't see it (private, or just made private) gets a delete. A favourite only to that user. |
+| `clip` `{clip}` | Clip upload or presigned confirm | Everyone |
+| `lora` | Also candidate keep/unkeep and the `building` start | Everyone |
+| `post` `{op: "delete", id}`, `account` `{modelId, account}` / `{op: "delete", modelId, platform}` | Post created/removed, account connected/disconnected | Everyone |
+| `balance`, `wallet` | After every hold, settle, release, charge, refund, GPU line, transfer, reclaim, top-up, cap change | The user concerned (all their devices), and `balance` to every owner |
+| `studio` `{studioBalance}` | Whenever the studio's money moves (top-up, any spend, transfer) | Owners only |
+| `member` `{member}` | A member's wallet moved, `PATCH /v1/members/{id}`, someone joined | Owners only |
+| `invite` `{invite}` / `{op: "used", id}` | Invite created / used | Owners only |
+| `settings` `{settings}` | `PATCH /v1/settings/studio` | Everyone, in their role's view (members never get `engines`, GPU settings or tool models) |
+| `settings` `{imageEngine}` / `{imageModels}` | Image engine or image model changes | Owners only |
+
+Catch-up: events are not replayed. When the stream (re)connects, and when the app comes back to the foreground, the apps refetch takes, jobs, models, outfits, balance and templates, so nothing missed while offline is lost. The stream sends `retry: 3000` and a comment every 10 s; headers `Cache-Control: no-cache, no-store, no-transform` and `X-Accel-Buffering: no` keep proxies (Railway) from buffering it. The Android app turns finished and failed jobs into local notifications. A real backend can add FCM push behind the same events.
 
 ### Developer (mock, and the real API only with `DEV_MODE=true`)
 | | |

@@ -64,6 +64,7 @@ export class LoraService {
     const bill = await new PhotoBill(this.ctx, whoOf(user), `lora_${modelId}_${Date.now()}`, estimate, `LoRA training set · ${P.LORA_CANDIDATES} photos`).start();
     const before = l.state;
     const building = await this.set(modelId, { state: 'building', candidates: [], progress: 0 });
+    this.emit(building);
     void this.generateCandidates(user, m, before, bill).catch(() => {});
     return this.view(building);
   }
@@ -114,7 +115,9 @@ export class LoraService {
     const c = l.candidates.find(x => x.id === cid);
     if (!c) throw notFound('Candidate');
     if (l.state === 'training') throw new ApiError(409, 'busy', 'Training is running');
-    return this.view(await this.set(modelId, { candidates: l.candidates.map(x => (x.id === cid ? { ...x, keep } : x)) }));
+    const u = await this.set(modelId, { candidates: l.candidates.map(x => (x.id === cid ? { ...x, keep } : x)) });
+    this.emit(u);
+    return this.view(u);
   }
 
   async train(user: AuthUser, modelId: string) {

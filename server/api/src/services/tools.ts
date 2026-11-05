@@ -96,9 +96,11 @@ export class ToolService {
       cost: r.cost, progress: Math.round(r.progress * 10) / 10, phase: r.phase, error: r.error ?? undefined, createdAt: r.createdAt, finishedAt: r.finishedAt ?? undefined,
       appliedAt: r.appliedAt ?? undefined, outfitId: r.outfitId ?? undefined, models: role === 'owner' ? r.models : undefined });
   }
+  /** Owners see which image models ran; members never do. */
+  private emitRun(r: Run) { void this.ctx.hub.emit(r.studioId, v => ({ type: 'tool', tool: this.view(r, v.role) })); }
   private async save(id: string, patch: Partial<Run>) {
     const [r] = await this.ctx.db.update(toolRuns).set(patch).where(eq(toolRuns.id, id)).returning();
-    if (r) this.ctx.hub.emit(r.studioId, { type: 'tool', tool: this.view(r, 'member') });
+    if (r) this.emitRun(r);
     return r!;
   }
   private label(n: number, est: number, options = 1) { return `${n} image${n === 1 ? '' : 's'}${options > 1 ? ` · ${options} options` : ''} · about ${money(est)}`; }
@@ -169,6 +171,7 @@ export class ToolService {
     const [r] = await this.ctx.db.insert(toolRuns).values({ id, studioId: u.studioId, modelId: m.id, kind: 'enhance', state: 'running',
       options: { realism: b.realism, upscale: b.upscale, seed: randomImageSeed() }, engines: ['a'], models: usedModels, items, estimate: per * slots.length,
       phase: `Enhancing · 1 of ${items.length}`, createdBy: u.id, createdAt: Date.now() }).returning();
+    this.emitRun(r!);
     void this.run(r!, u, bill).catch(e => this.ctx.log.error({ err: (e as Error).message }, 'enhance failed'));
     return this.view(r!, u.role);
   }
@@ -196,6 +199,7 @@ export class ToolService {
     const [r] = await this.ctx.db.insert(toolRuns).values({ id, studioId: u.studioId, modelId: m.id, kind: 'dressup', state: 'running',
       options: { engine: engines.length > 1 ? 'both' : engines[0], name, outfitImage, seed: randomImageSeed() }, engines, models: usedModels, items, estimate: est,
       phase: `Dressing up · 1 of ${items.length * engines.length}`, createdBy: u.id, createdAt: Date.now() }).returning();
+    this.emitRun(r!);
     void this.run(r!, u, bill).catch(e => this.ctx.log.error({ err: (e as Error).message }, 'dress up failed'));
     return this.view(r!, u.role);
   }
