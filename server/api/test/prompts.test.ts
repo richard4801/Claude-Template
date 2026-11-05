@@ -198,6 +198,9 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
     expect(shots[0].cost).toBeGreaterThan(plain[0].cost);
     const [row] = await a.ctx.db.query.takes.findMany({ where: (t, { eq: e }) => e(t.id, shots[0].id) });
     expect(row!.refs).toEqual(refs3);
+    expect(shots[0].refs).toEqual(refs3);
+    expect((await tess.req('GET', '/v1/takes')).body.find((t: any) => t.id === shots[0].id).refs).toEqual(refs3);
+    expect(plain[0].refs).toBeUndefined();
   });
 
   it('a smaller model: identity references give way first, never the face front; a 1-image model drops the references', async () => {
