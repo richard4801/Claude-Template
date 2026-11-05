@@ -3975,6 +3975,1025 @@
    "stale": false,
    "updatedAt": null,
    "updatedBy": null
+  },
+  {
+   "id": "suite.camera",
+   "group": "suite",
+   "title": "Camera block (AI suite)",
+   "description": "The Camera block of a generated shot, in the wording style the shot’s model reads best. The option wording is in the suite.camera.* lists.",
+   "format": "lines",
+   "inputs": [
+    {
+     "name": "vocab",
+     "label": "Model family",
+     "description": "Which wording style the shot’s model gets.",
+     "type": "enum",
+     "options": [
+      {
+       "id": "kling",
+       "label": "Short commands"
+      },
+      {
+       "id": "seedance",
+       "label": "Tagged blocks"
+      },
+      {
+       "id": "h3",
+       "label": "Camera vocabulary"
+      },
+      {
+       "id": "veo",
+       "label": "Descriptive sentence"
+      },
+      {
+       "id": "generic",
+       "label": "Other"
+      }
+     ],
+     "sample": "kling"
+    }
+   ],
+   "sections": [
+    {
+     "id": "camera",
+     "label": "Camera",
+     "kind": "system",
+     "pick": "first"
+    }
+   ],
+   "values": [],
+   "targets": [
+    {
+     "id": "camera",
+     "label": "Camera"
+    }
+   ],
+   "vars": [
+    {
+     "name": "move",
+     "description": "the camera move(s), with intensity and speed",
+     "sample": "slow physical dolly-in toward the subject about 1.4 m"
+    },
+    {
+     "name": "framing",
+     "description": "shot size and camera height",
+     "sample": "medium close-up from the chest up, eye-level camera"
+    },
+    {
+     "name": "rig",
+     "description": "body, focal length, lens, aperture, look, frame rate",
+     "sample": "35mm motion-picture film, 50mm lens (natural perspective), f/2, shallow depth of field"
+    },
+    {
+     "name": "light",
+     "description": "lighting",
+     "sample": "low golden-hour sun, long warm shadows"
+    },
+    {
+     "name": "palette",
+     "description": "colour palette",
+     "sample": "teal-and-orange blockbuster grade"
+    },
+    {
+     "name": "style",
+     "description": "genre, era, tempo",
+     "sample": "dramatic, calm lingering pacing"
+    },
+    {
+     "name": "performance",
+     "description": "the emotion line",
+     "sample": "Performance: clear hope, turning to joy at 3s."
+    }
+   ],
+   "blocks": [
+    "suite.camera.format.kling",
+    "suite.camera.format.seedance",
+    "suite.camera.format.h3",
+    "suite.camera.format.veo",
+    "suite.camera.format.generic"
+   ],
+   "rules": [
+    {
+     "id": "kling",
+     "label": "Short commands",
+     "target": "camera",
+     "when": [
+      {
+       "input": "vocab",
+       "op": "is",
+       "value": "kling"
+      }
+     ],
+     "block": "suite.camera.format.kling"
+    },
+    {
+     "id": "seedance",
+     "label": "Tagged blocks",
+     "target": "camera",
+     "when": [
+      {
+       "input": "vocab",
+       "op": "is",
+       "value": "seedance"
+      }
+     ],
+     "block": "suite.camera.format.seedance"
+    },
+    {
+     "id": "h3",
+     "label": "Camera vocabulary",
+     "target": "camera",
+     "when": [
+      {
+       "input": "vocab",
+       "op": "is",
+       "value": "h3"
+      }
+     ],
+     "block": "suite.camera.format.h3"
+    },
+    {
+     "id": "veo",
+     "label": "Descriptive sentence",
+     "target": "camera",
+     "when": [
+      {
+       "input": "vocab",
+       "op": "is",
+       "value": "veo"
+      }
+     ],
+     "block": "suite.camera.format.veo"
+    },
+    {
+     "id": "generic",
+     "label": "Everything else",
+     "target": "camera",
+     "when": [],
+     "block": "suite.camera.format.generic"
+    }
+   ],
+   "defaultRules": [
+    {
+     "id": "kling",
+     "label": "Short commands",
+     "target": "camera",
+     "when": [
+      {
+       "input": "vocab",
+       "op": "is",
+       "value": "kling"
+      }
+     ],
+     "block": "suite.camera.format.kling"
+    },
+    {
+     "id": "seedance",
+     "label": "Tagged blocks",
+     "target": "camera",
+     "when": [
+      {
+       "input": "vocab",
+       "op": "is",
+       "value": "seedance"
+      }
+     ],
+     "block": "suite.camera.format.seedance"
+    },
+    {
+     "id": "h3",
+     "label": "Camera vocabulary",
+     "target": "camera",
+     "when": [
+      {
+       "input": "vocab",
+       "op": "is",
+       "value": "h3"
+      }
+     ],
+     "block": "suite.camera.format.h3"
+    },
+    {
+     "id": "veo",
+     "label": "Descriptive sentence",
+     "target": "camera",
+     "when": [
+      {
+       "input": "vocab",
+       "op": "is",
+       "value": "veo"
+      }
+     ],
+     "block": "suite.camera.format.veo"
+    },
+    {
+     "id": "generic",
+     "label": "Everything else",
+     "target": "camera",
+     "when": [],
+     "block": "suite.camera.format.generic"
+    }
+   ],
+   "overridden": false,
+   "stale": false,
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "id": "suite.shot",
+   "group": "suite",
+   "title": "Shot (AI suite)",
+   "description": "Every shot from the AI suite: who she is, her outfit, extra references, keyframes, the user’s scene, guide clips, the Camera block, the audio line.",
+   "format": "lines",
+   "inputs": [
+    {
+     "name": "hasCharacter",
+     "label": "Has a character",
+     "description": "A MUSE model is in the shot.",
+     "type": "bool",
+     "sample": true
+    },
+    {
+     "name": "characterImages",
+     "label": "Her images are sent",
+     "description": "Her sheet images go to the model (some models take none, or keyframes carry her look).",
+     "type": "bool",
+     "sample": true
+    },
+    {
+     "name": "hasOutfit",
+     "label": "Has an outfit",
+     "description": "An outfit is chosen.",
+     "type": "bool",
+     "sample": true
+    },
+    {
+     "name": "refs",
+     "label": "Extra references",
+     "description": "Product, location, style, prop or person images sent after hers.",
+     "type": "list",
+     "fields": [
+      {
+       "name": "kind",
+       "label": "Kind",
+       "description": "What the image is.",
+       "type": "enum",
+       "options": [
+        {
+         "id": "product",
+         "label": "Product"
+        },
+        {
+         "id": "location",
+         "label": "Location"
+        },
+        {
+         "id": "style",
+         "label": "Style"
+        },
+        {
+         "id": "prop",
+         "label": "Prop"
+        },
+        {
+         "id": "person",
+         "label": "Another person"
+        }
+       ],
+       "sample": "product"
+      },
+      {
+       "name": "ref",
+       "label": "Token",
+       "description": "How the prompt names the image (<Image 6>, @image_6, [Image6]).",
+       "type": "text",
+       "sample": "<Image 6>"
+      },
+      {
+       "name": "role",
+       "label": "Role words",
+       "description": "\"the product (the perfume bottle)\".",
+       "type": "text",
+       "sample": "the product"
+      },
+      {
+       "name": "use",
+       "label": "Use",
+       "description": "What to take from it.",
+       "type": "text",
+       "sample": "shape, colours, packaging and label"
+      }
+     ],
+     "sample": [
+      {
+       "kind": "product",
+       "ref": "<Image 6>",
+       "role": "the product (the perfume bottle)",
+       "use": "shape, colours, packaging and label"
+      }
+     ]
+    },
+    {
+     "name": "mixedRoles",
+     "label": "Several kinds of reference",
+     "description": "More than one kind of reference image is sent (her, a product, a location …).",
+     "type": "bool",
+     "sample": false
+    },
+    {
+     "name": "hasFrames",
+     "label": "Keyframes",
+     "description": "Start, middle or end frames are sent.",
+     "type": "bool",
+     "sample": false
+    },
+    {
+     "name": "videos",
+     "label": "Guide and reference videos",
+     "description": "The guide clip first, then other reference videos.",
+     "type": "list",
+     "fields": [
+      {
+       "name": "kind",
+       "label": "Use",
+       "description": "What is taken from it.",
+       "type": "enum",
+       "options": [
+        {
+         "id": "camera",
+         "label": "Camera"
+        },
+        {
+         "id": "blocking",
+         "label": "Camera and blocking"
+        },
+        {
+         "id": "motion",
+         "label": "Motion"
+        },
+        {
+         "id": "style",
+         "label": "Style"
+        }
+       ],
+       "sample": "camera"
+      },
+      {
+       "name": "video",
+       "label": "Token",
+       "description": "How the prompt names the video.",
+       "type": "text",
+       "sample": "<Video 1>"
+      },
+      {
+       "name": "use",
+       "label": "Use words",
+       "description": "\"camera movement and framing\".",
+       "type": "text",
+       "sample": "camera movement and framing"
+      }
+     ],
+     "sample": [
+      {
+       "kind": "blocking",
+       "video": "<Video 1>",
+       "use": "camera movement, framing, blocking and positions"
+      }
+     ]
+    },
+    {
+     "name": "hasCamera",
+     "label": "Camera set",
+     "description": "The Camera control produced a block.",
+     "type": "bool",
+     "sample": true
+    },
+    {
+     "name": "audio",
+     "label": "Audio sent",
+     "description": "The reference audio sent with the shot.",
+     "type": "enum",
+     "options": [
+      {
+       "id": "speech",
+       "label": "Speech or singing"
+      },
+      {
+       "id": "music",
+       "label": "Music (instrumental only)"
+      },
+      {
+       "id": "none",
+       "label": "None"
+      }
+     ],
+     "sample": "none"
+    },
+    {
+     "name": "speaking",
+     "label": "Performer is speaking",
+     "description": "She speaks or sings on camera (the switch, else the uploaded audio’s talking flag, else detection, else no).",
+     "type": "bool",
+     "sample": false
+    },
+    {
+     "name": "hasAvoid",
+     "label": "Things to avoid",
+     "description": "The camera move has things the model must not do instead (no zoom …).",
+     "type": "bool",
+     "sample": false
+    }
+   ],
+   "sections": [
+    {
+     "id": "character",
+     "label": "Character",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "outfit",
+     "label": "Outfit",
+     "kind": "system",
+     "pick": "first",
+     "alias": {
+      "refs": "outfitRefs"
+     }
+    },
+    {
+     "id": "reference",
+     "label": "Extra references",
+     "kind": "system",
+     "pick": "all",
+     "each": "refs"
+    },
+    {
+     "id": "lock",
+     "label": "Reference lock",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "frames",
+     "label": "Keyframes",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "scene",
+     "label": "The user’s scene",
+     "kind": "user",
+     "pick": "first"
+    },
+    {
+     "id": "guide",
+     "label": "Guide clips",
+     "kind": "system",
+     "pick": "all",
+     "each": "videos"
+    },
+    {
+     "id": "camera",
+     "label": "Camera",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "audio",
+     "label": "Audio",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "avoid",
+     "label": "Avoid",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "footer",
+     "label": "Closing line",
+     "kind": "system",
+     "pick": "first"
+    }
+   ],
+   "values": [],
+   "targets": [
+    {
+     "id": "character",
+     "label": "Character"
+    },
+    {
+     "id": "outfit",
+     "label": "Outfit"
+    },
+    {
+     "id": "reference",
+     "label": "Extra references"
+    },
+    {
+     "id": "lock",
+     "label": "Reference lock"
+    },
+    {
+     "id": "frames",
+     "label": "Keyframes"
+    },
+    {
+     "id": "scene",
+     "label": "The user’s scene"
+    },
+    {
+     "id": "guide",
+     "label": "Guide clips"
+    },
+    {
+     "id": "camera",
+     "label": "Camera"
+    },
+    {
+     "id": "audio",
+     "label": "Audio"
+    },
+    {
+     "id": "avoid",
+     "label": "Avoid"
+    },
+    {
+     "id": "footer",
+     "label": "Closing line"
+    }
+   ],
+   "vars": [
+    {
+     "name": "name",
+     "description": "her name",
+     "sample": "Demo model"
+    },
+    {
+     "name": "look",
+     "description": "her look",
+     "sample": "young woman, dark hair"
+    },
+    {
+     "name": "refs",
+     "description": "her image tokens",
+     "sample": "<Image 1>, <Image 2> and <Image 3>"
+    },
+    {
+     "name": "never",
+     "description": "the never-add sentence",
+     "sample": " She never has: tattoos."
+    },
+    {
+     "name": "outfit",
+     "description": "the outfit",
+     "sample": "green set"
+    },
+    {
+     "name": "outfitRefs",
+     "description": "\" as shown in <Image 4>\" or empty",
+     "sample": " as shown in <Image 4>"
+    },
+    {
+     "name": "start",
+     "description": "the start frame words",
+     "sample": "the start frame"
+    },
+    {
+     "name": "middle",
+     "description": "the middle frames words",
+     "sample": ""
+    },
+    {
+     "name": "end",
+     "description": "the end frame words",
+     "sample": " and ends exactly on the end frame"
+    },
+    {
+     "name": "camera",
+     "description": "the Camera block (script suite.camera)",
+     "sample": "Camera: slow dolly-in."
+    },
+    {
+     "name": "subject",
+     "description": "who speaks or moves",
+     "sample": "Demo model"
+    },
+    {
+     "name": "audio",
+     "description": "the audio token",
+     "sample": "<Audio 1>"
+    },
+    {
+     "name": "avoid",
+     "description": "the things to avoid",
+     "sample": "No zoom."
+    }
+   ],
+   "blocks": [
+    "suite.shot.character",
+    "suite.shot.character.words",
+    "suite.shot.outfit",
+    "suite.shot.reference",
+    "suite.shot.lock",
+    "suite.shot.frames",
+    "suite.shot.scene",
+    "suite.shot.guide",
+    "suite.shot.camera",
+    "audio.lipsync",
+    "audio.beat",
+    "suite.audio.dialogue",
+    "audio.silent",
+    "suite.shot.avoid",
+    "suite.shot.footer"
+   ],
+   "rules": [
+    {
+     "id": "character.images",
+     "label": "Who she is (with her images)",
+     "target": "character",
+     "when": [
+      {
+       "input": "characterImages",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.shot.character",
+     "locked": true
+    },
+    {
+     "id": "character.words",
+     "label": "Who she is (in words)",
+     "target": "character",
+     "when": [
+      {
+       "input": "hasCharacter",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.shot.character.words",
+     "locked": true
+    },
+    {
+     "id": "outfit",
+     "label": "Her outfit",
+     "target": "outfit",
+     "when": [
+      {
+       "input": "hasOutfit",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.shot.outfit"
+    },
+    {
+     "id": "reference",
+     "label": "An extra reference",
+     "target": "reference",
+     "when": [],
+     "block": "suite.shot.reference"
+    },
+    {
+     "id": "lock",
+     "label": "References keep their roles",
+     "target": "lock",
+     "when": [
+      {
+       "input": "mixedRoles",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.shot.lock"
+    },
+    {
+     "id": "frames",
+     "label": "Keyframes",
+     "target": "frames",
+     "when": [
+      {
+       "input": "hasFrames",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.shot.frames"
+    },
+    {
+     "id": "scene",
+     "label": "The user’s scene",
+     "target": "scene",
+     "when": [],
+     "block": "suite.shot.scene",
+     "locked": true
+    },
+    {
+     "id": "guide",
+     "label": "A guide or reference video",
+     "target": "guide",
+     "when": [],
+     "block": "suite.shot.guide"
+    },
+    {
+     "id": "camera",
+     "label": "The Camera block",
+     "target": "camera",
+     "when": [
+      {
+       "input": "hasCamera",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.shot.camera"
+    },
+    {
+     "id": "audio.lipsync",
+     "label": "Speaking: lip-sync to the audio",
+     "target": "audio",
+     "when": [
+      {
+       "input": "audio",
+       "op": "isNot",
+       "value": "none"
+      },
+      {
+       "input": "speaking",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "audio.lipsync"
+    },
+    {
+     "id": "audio.beat",
+     "label": "Music, not speaking: beat only",
+     "target": "audio",
+     "when": [
+      {
+       "input": "audio",
+       "op": "is",
+       "value": "music"
+      },
+      {
+       "input": "speaking",
+       "op": "is",
+       "value": false
+      }
+     ],
+     "block": "audio.beat"
+    },
+    {
+     "id": "audio.dialogue",
+     "label": "Speaking, no audio sent: says the quoted lines",
+     "target": "audio",
+     "when": [
+      {
+       "input": "audio",
+       "op": "is",
+       "value": "none"
+      },
+      {
+       "input": "speaking",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.audio.dialogue"
+    },
+    {
+     "id": "audio.silent",
+     "label": "Not speaking",
+     "target": "audio",
+     "when": [
+      {
+       "input": "speaking",
+       "op": "is",
+       "value": false
+      }
+     ],
+     "block": "audio.silent"
+    },
+    {
+     "id": "avoid",
+     "label": "Things to avoid",
+     "target": "avoid",
+     "when": [
+      {
+       "input": "hasAvoid",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.shot.avoid"
+    },
+    {
+     "id": "footer",
+     "label": "Closing line",
+     "target": "footer",
+     "when": [],
+     "block": "suite.shot.footer"
+    }
+   ],
+   "defaultRules": [
+    {
+     "id": "character.images",
+     "label": "Who she is (with her images)",
+     "target": "character",
+     "when": [
+      {
+       "input": "characterImages",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.shot.character",
+     "locked": true
+    },
+    {
+     "id": "character.words",
+     "label": "Who she is (in words)",
+     "target": "character",
+     "when": [
+      {
+       "input": "hasCharacter",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.shot.character.words",
+     "locked": true
+    },
+    {
+     "id": "outfit",
+     "label": "Her outfit",
+     "target": "outfit",
+     "when": [
+      {
+       "input": "hasOutfit",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.shot.outfit"
+    },
+    {
+     "id": "reference",
+     "label": "An extra reference",
+     "target": "reference",
+     "when": [],
+     "block": "suite.shot.reference"
+    },
+    {
+     "id": "lock",
+     "label": "References keep their roles",
+     "target": "lock",
+     "when": [
+      {
+       "input": "mixedRoles",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.shot.lock"
+    },
+    {
+     "id": "frames",
+     "label": "Keyframes",
+     "target": "frames",
+     "when": [
+      {
+       "input": "hasFrames",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.shot.frames"
+    },
+    {
+     "id": "scene",
+     "label": "The user’s scene",
+     "target": "scene",
+     "when": [],
+     "block": "suite.shot.scene",
+     "locked": true
+    },
+    {
+     "id": "guide",
+     "label": "A guide or reference video",
+     "target": "guide",
+     "when": [],
+     "block": "suite.shot.guide"
+    },
+    {
+     "id": "camera",
+     "label": "The Camera block",
+     "target": "camera",
+     "when": [
+      {
+       "input": "hasCamera",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.shot.camera"
+    },
+    {
+     "id": "audio.lipsync",
+     "label": "Speaking: lip-sync to the audio",
+     "target": "audio",
+     "when": [
+      {
+       "input": "audio",
+       "op": "isNot",
+       "value": "none"
+      },
+      {
+       "input": "speaking",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "audio.lipsync"
+    },
+    {
+     "id": "audio.beat",
+     "label": "Music, not speaking: beat only",
+     "target": "audio",
+     "when": [
+      {
+       "input": "audio",
+       "op": "is",
+       "value": "music"
+      },
+      {
+       "input": "speaking",
+       "op": "is",
+       "value": false
+      }
+     ],
+     "block": "audio.beat"
+    },
+    {
+     "id": "audio.dialogue",
+     "label": "Speaking, no audio sent: says the quoted lines",
+     "target": "audio",
+     "when": [
+      {
+       "input": "audio",
+       "op": "is",
+       "value": "none"
+      },
+      {
+       "input": "speaking",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.audio.dialogue"
+    },
+    {
+     "id": "audio.silent",
+     "label": "Not speaking",
+     "target": "audio",
+     "when": [
+      {
+       "input": "speaking",
+       "op": "is",
+       "value": false
+      }
+     ],
+     "block": "audio.silent"
+    },
+    {
+     "id": "avoid",
+     "label": "Things to avoid",
+     "target": "avoid",
+     "when": [
+      {
+       "input": "hasAvoid",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.shot.avoid"
+    },
+    {
+     "id": "footer",
+     "label": "Closing line",
+     "target": "footer",
+     "when": [],
+     "block": "suite.shot.footer"
+    }
+   ],
+   "overridden": false,
+   "stale": false,
+   "updatedAt": null,
+   "updatedBy": null
   }
  ]
 }

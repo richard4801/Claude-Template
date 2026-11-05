@@ -1,6 +1,12 @@
 // AI suite · the service behind /v1/suite: catalog, settings, estimate, shots (as render jobs on the existing
 // job/wallet pipeline: hold → run → exact settle, or full refund), and the suite line that runs them.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { and, eq, gte, ne, sql } from 'drizzle-orm';
+import { detectTalking } from '../audio/detect.js';
+import { resolveSpeaking } from '../audio/service.js';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { clips, jobs, models, outfits, uploads, type ImageRef } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
@@ -168,8 +174,38 @@ export class SuiteService {
       throw e;
     }
     const texts = await this.ctx.prompts.texts(u.studioId);
-    const plan = buildPlan(r, need, pick, character, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale });
-    return { swap: false as const, plan, pick, prefs, tried: pick.tried };
+    const talk = await this.resolveSpeaking(u.studioId, r);
+    const plan = buildPlan(r, need, pick, character, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale, speaking: talk.speaking,
+      separationUsd: this.ctx.config.AUDIO_SEPARATION_ESTIMATE });
+    return { swap: false as const, plan, pick, prefs, tried: pick.tried, talk };
+  }
+
+  /**
+   * Whether she speaks (workstream 4's order): the request's switch, else the uploaded audio's talking flag or its
+   * detection (a clip upload, via the clip's stored analysis; any other upload is analysed here), else no.
+   */
+  private detected = new Map<string, boolean>();
+  async resolveSpeaking(studioId: string, r: ShotRequest): Promise<{ speaking: boolean; source: 'switch' | 'upload' | 'detected' | 'default' }> {
+    if (typeof r.speaking === 'boolean') return { speaking: r.speaking, source: 'switch' };
+    const a = r.references?.audio?.audio;
+    const key = a ? this.runner.storageKeyOf(a) : undefined;
+    if (!key) return { speaking: false, source: 'default' };
+    const [clip] = await this.ctx.db.select().from(clips).where(and(eq(clips.storageKey, key), eq(clips.studioId, studioId)));
+    if (clip) return resolveSpeaking(this.ctx, clip, undefined);
+    const [up] = await this.ctx.db.select({ id: uploads.id }).from(uploads).where(and(eq(uploads.storageKey, key), eq(uploads.studioId, studioId)));
+    if (!up) return { speaking: false, source: 'default' };
+    if (this.detected.has(key)) return { speaking: this.detected.get(key)!, source: 'detected' };
+    const obj = await this.ctx.storage.get(key).catch(() => null);
+    if (!obj) return { speaking: false, source: 'default' };
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-suite-talk-'));
+    try {
+      const file = path.join(dir, 'audio');
+      await pipeline(obj.body, fs.createWriteStream(file));
+      const d = await detectTalking(this.ctx.config.FFMPEG_PATH, file);
+      this.detected.set(key, d.speaking);
+      return { speaking: d.speaking, source: 'detected' };
+    } catch { return { speaking: false, source: 'default' }; }
+    finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }
 
   async spentToday(studioId: string) {
@@ -193,7 +229,7 @@ export class SuiteService {
     if (p.swap) return p.view;
     const { plan, prefs } = p;
     const caps = await this.checkCaps(u.studioId, plan.estimate, prefs);
-    return this.estimateView(u, r, plan, caps, p.tried);
+    return { ...this.estimateView(u, r, plan, caps, p.tried), speaking: p.talk };
   }
   estimateView(u: AuthUser, r: ShotRequest, plan: ShotPlan, caps: Awaited<ReturnType<SuiteService['checkCaps']>>, tried: { model: string; resolution: string; why: string }[]) {
     const res = plan.resolution.replace(/P$/, 'p');
@@ -207,7 +243,7 @@ export class SuiteService {
     if (u.role !== 'owner') return base;
     const m = modelById(plan.modelId)!;
     return { ...base, engine: { model: m.id, name: m.name, provider: m.provider, ref: plan.ref, resolution: plan.resolution, perSec: plan.perSec, billedPerTake: plan.billedPerTake,
-      licence: m.licence, notice: m.licence.notice ?? null }, input: { negative: plan.negative ?? null, params: plan.params, images: plan.images, videos: plan.videos }, tried };
+      licence: m.licence, notice: m.licence.notice ?? null }, input: { negative: plan.negative ?? null, params: plan.params, images: plan.images, videos: plan.videos, audio: plan.audioRef ?? null }, tried };
   }
 
   // ------------------------------------------------------------------ swap (the existing character swap as a suite mode)
@@ -238,13 +274,13 @@ export class SuiteService {
     }
     const { plan, prefs } = p;
     const caps = await this.checkCaps(u.studioId, plan.estimate, prefs);
-    if (r.dryRun) return { dryRun: true, estimate: this.estimateView(u, r, plan, caps, p.tried) };
+    if (r.dryRun) return { dryRun: true, estimate: { ...this.estimateView(u, r, plan, caps, p.tried), speaking: p.talk } };
     if (!caps.ok) throw new ApiError(402, caps.code!, caps.message!);
     if (!(await this.runner.toolsReady())) throw new ApiError(400, 'engine_unavailable', "The AI suite isn't available right now");
     await this.checkMedia(u.studioId, plan);
     const label = shotLabel(plan.tier, plan.resolution);
     const request = {
-      engine: 'suite', mode: plan.mode, quality: plan.tier, label, engineLabel: label, takeLabel: TIER_INFO[plan.tier].label, seconds: plan.seconds, takes: plan.takes, aspectRatio: plan.aspect, audio: plan.audio, speaking: r.speaking,
+      engine: 'suite', mode: plan.mode, quality: plan.tier, label, engineLabel: label, takeLabel: TIER_INFO[plan.tier].label, seconds: plan.seconds, takes: plan.takes, aspectRatio: plan.aspect, audio: plan.audio, speaking: p.talk.speaking, speakingSource: p.talk.source,
       prompt: r.prompt, direction: r.direction, camera: r.camera, frames: r.frames, references: r.references, modelId: r.modelId, outfitId: r.outfitId, keepAudio: true,
     };
     const perTake = 45 + plan.seconds * 10 * (plan.tier === 'draft' ? 0.6 : plan.tier === 'cinema' ? 2 : plan.tier === 'hd' ? 1.5 : 1);
@@ -261,6 +297,14 @@ export class SuiteService {
 
   /** Videos must be ours (an upload in this studio) or https; images are checked when they are signed at run time. */
   private async checkMedia(studioId: string, plan: ShotPlan) {
+    if (plan.audioRef) {
+      const key = this.runner.storageKeyOf(plan.audioRef.ref);
+      if (key) {
+        const [row] = await this.ctx.db.select({ id: uploads.id }).from(uploads).where(and(eq(uploads.storageKey, key), eq(uploads.studioId, studioId)));
+        if (!row) throw badRequest('That audio isn’t in this studio');
+      } else if (plan.audioRef.beatOnly) throw badRequest('Upload the audio to use it as a beat (only an upload can have its vocals removed)');
+      else if (!/^https:\/\//.test(plan.audioRef.ref.url ?? '')) throw badRequest('Audio must be an upload or an https link');
+    }
     for (const v of plan.videos) {
       if (v.video.key) {
         const [row] = await this.ctx.db.select({ id: uploads.id }).from(uploads).where(and(eq(uploads.storageKey, v.video.key), eq(uploads.studioId, studioId)));

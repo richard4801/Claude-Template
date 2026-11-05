@@ -198,8 +198,10 @@ The prompt is built in this order:
 3. **fal:** the H3 Max 3D-to-video adapter follows fal's queue API but is untested against real fal. It stays `preview` and is only available with `FAL_KEY`.
 4. **Price corrections:** each model has a `priceScale` (0.5–3) in settings, in case a provider changes prices before the registry is updated.
 
-## Next: building the suite prompts through prompt scripts (workstream 4)
-_Approved by the coordinator 2026-11-05. The port starts after `claude/muse-prompt-scripts` is merged into the main branch. Until then, today's builder stays._
+## Suite prompts through prompt scripts (workstream 4): done 2026-11-05
+_Code: `src/suite/scripts.ts` (both scripts, registered on load), `plan.ts` (`run('suite.shot')`), `compile.ts` (`run('suite.camera')`), `runner.ts` (beat-only audio), `service.ts` (`resolveSpeaking`). Tests: `test/suite-scripts.test.ts`._
+
+**Engine fix found while porting:** rule lists come back from Postgres `jsonb` with object keys reordered, so a saved list failed the "locked rule unchanged" check whenever a locked rule had conditions, and silently fell back to the defaults. `same()` in `prompt/scripts/run.ts` now compares key-order independently.
 
 **Script `suite.camera`** (format `lines`, one section `camera`, kind `system`):
 - **Inputs:** `vocab` (enum kling/seedance/h3/veo/generic), `hasMove`, `hasFraming`, `hasRig`, `hasLight`, `hasPalette`, `hasStyle`, `hasPerformance`, `presets`.

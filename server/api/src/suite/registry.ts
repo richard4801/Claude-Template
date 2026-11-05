@@ -184,6 +184,19 @@ export const DEFAULT_LADDER: Record<Tier, LadderStep[]> = {
     { model: 'h3', resolution: '2K' }, { model: 'kling-v3-omni', resolution: '1080p' }],
 };
 
+/**
+ * Camera-session target models (workstream 2's ids, src/camera/shots.ts) → the registry model and resolution a directed
+ * Shot draft is priced and run on, so the draft's price matches its target. Unknown targets use the Cinema ladder.
+ */
+export const CAMERA_TARGETS: Record<string, LadderStep> = {
+  'kling-v4.0': { model: 'kling-v4', resolution: '1080p' },
+  'kling-v3-omni': { model: 'kling-v3-omni', resolution: '1080p' },
+  'minimax-h3': { model: 'h3', resolution: '768P' },
+  'h3-max-3d-to-video': { model: 'h3-max-3d', resolution: '768P' },
+  'seedance-2.5': { model: 'seedance-2.5', resolution: '720p' },
+  'veo-3.1-lite': { model: 'veo-3.1-lite', resolution: '720p' },
+};
+
 /** The provider ref to call for a mode. */
 export function refFor(m: ModelSpec, kind: 't2v' | 'i2v' | 'ref2v' | 'guide'): string {
   if (typeof m.ref === 'string') return m.ref;

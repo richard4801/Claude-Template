@@ -7,12 +7,11 @@ import { users } from '../../db/schema.js';
 import { ApiError, notFound } from '../../errors.js';
 import { PROMPT_GROUPS } from '../library.js';
 import { SCRIPTS, scriptDef } from './defs.js';
-import { cleanRules, resolveRules, runScript, ruleTargets, scriptBlocks, validateRules, type SavedRules } from './run.js';
+import { cleanRules, resolveRules, runScript, ruleTargets, same, scriptBlocks, validateRules, type SavedRules } from './run.js';
 import { promptScriptRules } from './schema.js';
 import { COND_OPS, type Inputs, type Rule, type Script } from './types.js';
 
 type Row = typeof promptScriptRules.$inferSelect;
-const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 /** The studio's rules for every script it has edited (resolved: stale lists fall back to the defaults). */
 export async function loadRules(ctx: Pick<Ctx, 'db'>, studioId: string): Promise<Record<string, Rule[]>> {

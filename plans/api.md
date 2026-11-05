@@ -968,17 +968,19 @@ ShotRequest {
   title?, modelId? /* the character */, outfitId?, prompt /* ≤ 2000 */, direction?,
   frames?: { start?: ImageRef, middle?: ImageRef[] /* ≤ 8 */, end?: ImageRef },
   references?: { images?: { image: ImageRef, role?: "product"|"location"|"style"|"prop"|"person", label? }[] /* ≤ 6 */,
-                 videos?: { video: VideoRef, use?: "camera"|"motion"|"style" }[] /* ≤ 3 */ },
+                 videos?: { video: VideoRef, use?: "camera"|"motion"|"style" }[] /* ≤ 3 */,
+                 audio?: { audio: VideoRef } /* one track; speaking: sent as is; not speaking: only its instrumental (vocals removed, billed with the job; must be an upload) */ },
   duration? /* 2–30, default 5 */, aspectRatio?: "9:16"|"16:9"|"1:1"|"4:3"|"3:4"|"21:9" /* default 9:16 */,
   quality?: "draft"|"standard"|"hd"|"cinema" /* default draft */, takes? /* 1–4 */, audio? /* native sound, default true */,
-  speaking? /* default false: she speaks or sings on camera (lip sync); today it only drives the camera warnings; after the prompt-scripts port, off adds "does not speak, sing or mouth words" (workstream 4's talking flag) */, seed?,
+  speaking? /* she speaks or sings on camera. Unset: the audio reference's talking flag (a clip upload), else its detection, else no.
+               Off: the prompt says she "does not speak, sing or mouth words" (or moves to the beat of the instrumental); on: lip-sync to the audio, or "speaks the lines in quotes" with no audio sent */, seed?,
   camera?: CameraSpec, dryRun?: boolean,
   clipId?, keepAudio? /* swap */, engineModel?, resolution? /* (owner) bypass the ladder */
 }
 ShotEstimate { quality, label /* "Shot · HD · 2K" */, resolution, seconds /* what will render */, takes, mode, estimate, priceLine /* "about $0.78 · 6 s" */,
   buttonLabel /* "Generate · 6 s · $0.78" */, ok, code, message, caps: { perJob, perDay, spentToday, leftToday, ok, code, message },
   warnings: string[] /* e.g. "length set to 6 s", "one camera move per shot: … dropped", "the guide clip is not sent" */,
-  camera: { moves: string[], guideUsed: boolean }, prompt, test,
+  camera: { moves: string[], guideUsed: boolean }, prompt, test, speaking: { speaking: boolean, source: "switch"|"upload"|"detected"|"default" },
   engine?, input?, tried? /* (owner): model, provider, ref, $/s, billed seconds, licence and notice; the inputs; the ladder steps tried */ }
 ```
 
@@ -999,9 +1001,11 @@ ShotEstimate { quality, label /* "Shot · HD · 2K" */, resolution, seconds /* w
 - Hold: `"Video · Shot · Draft · 768p · 5 s · 2 takes · hold"`
 - Settle: `"Video · Shot Draft 768p · 2 × 5 s"` (+ `" · test render"` in mock mode)
 
-**Prompt library:** group `suite` ("AI suite") with 27 entries:
+**Prompts are prompt scripts** (2026-11-05, workstream 4's engine): `suite.shot` (the whole shot prompt; its `scene` section is the only one that sees the user's words, sanitised) and `suite.camera` (the Camera block per model family). Owner rule edits: `GET/PUT/DELETE /v1/prompt-scripts/suite.shot|suite.camera`. Mouth and speech wording comes only from the shot's audio rules (`audio.lipsync`, `audio.beat`, `suite.audio.dialogue`, `audio.silent`). The job's `request` also carries `speaking` and `speakingSource`. Camera-session Shot drafts are priced on their target model (`engineModel` + `resolution` from the session's `targetModel`), falling back to the Cinema ladder with a warning when the target can't make the shot.
+
+**Prompt library:** group `suite` ("AI suite") with 32 entries:
 - `suite.camera.*`: per-option wording as `id: wording` lines, and the per-model camera block formats.
-- `suite.shot.*`: character, outfit, extra reference, lock, keyframes, guide, footer, negative.
+- `suite.shot.*`: character, character in words, outfit, extra reference, lock, keyframes, scene (the user's words), guide, camera, avoid, footer, negative; `suite.audio.dialogue`.
 
 ## MCP & camera sessions (2026-11-05)
 _Workstream 2. Owner only: every endpoint below answers `owner_only` (403) to a member. Setup and architecture: `plans/mcp-bridge.md`; research: `plans/research/ai-video-suite-research.md` §3.4._ A **camera session** is the shared workspace of the Camera control's **Directed (Blender)** mode: the brief, the cast, how the camera and each character move over time, the guide renders from Blender, and a Shot **draft**. Three things write to the same session: the MUSE apps (REST below), the in-app "Direct with Claude" chat (server-side Claude with MUSE tools + Blender tools relayed to the owner's Mac), and the owner's own Claude app / Claude Code through the **MUSE MCP server** (`/mcp`). **Agents never spend:** the most any tool does is a Shot draft with a cost estimate; the owner presses Generate in the app.

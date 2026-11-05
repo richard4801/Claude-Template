@@ -4,6 +4,8 @@
 import type { AuthUser, Ctx } from '../ctx.js';
 import { round2, uid } from '../lib/util.js';
 import type { ShotDraftRow } from './schema.js';
+import { CAMERA_TARGETS } from '../suite/registry.js';
+import { ApiError } from '../errors.js';
 
 export const DEFAULT_TARGET = 'kling-v4.0';
 /** List $/s with a guide video as input (research §3.2, 2026-11-05). Owner-only plumbing: never shown to members. */
@@ -30,7 +32,10 @@ const SUITE_ASPECTS = ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'];
 export function shotRequest(d: DraftInput) {
   const g = d.guide ?? {};
   const keyframes = g.start || g.middle || g.end ? { ...(g.start ? { start: g.start } : {}), ...(g.middle ? { middle: [g.middle] } : {}), ...(g.end ? { end: g.end } : {}) } : undefined;
+  // The draft is priced and run on its target model (camera sessions are owner-only, so the engine pick is allowed).
+  const target = CAMERA_TARGETS[d.targetModel];
   return {
+    quality: 'cinema', ...(target ? { engineModel: target.model, resolution: target.resolution } : {}),
     prompt: d.prompt.slice(0, 2000), duration: Math.max(2, Math.min(30, Math.round(d.durationSec))), aspectRatio: SUITE_ASPECTS.includes(d.aspect) ? d.aspect : '9:16',
     ...(d.characters[0] ? { modelId: d.characters[0].modelId } : {}),
     camera: { mode: 'directed', ...(g.videoKey ? { guide: { video: { key: g.videoKey, ...(g.seconds ? { seconds: g.seconds } : {}) }, use: 'blocking', cameraSessionId: d.cameraSessionId, ...(keyframes ? { keyframes } : {}) } } : {}) },
@@ -42,10 +47,20 @@ export async function createShotDraft(ctx: Ctx, user: AuthUser, d: DraftInput): 
   const tokensOf = (usd: number) => Math.ceil(usd / ctx.config.TOKEN_USD - 1e-9);
   const base = { id: uid('sd'), state: 'draft' as const, prompt: d.prompt, targetModel: d.targetModel, durationSec: d.durationSec, aspect: d.aspect, camera: d.camera, createdAt: Date.now() };
   if (typeof suite?.estimate === 'function') {
-    const request = shotRequest(d);
-    const r = await suite.estimate(user, request);
+    let request: Record<string, unknown> = shotRequest(d);
+    let fallback: string | null = null;
+    let r: Awaited<ReturnType<Suite['estimate']>>;
+    try { r = await suite.estimate(user, request); }
+    catch (e) {
+      // The target can't make this shot here (not set up, too long, …): price it on the Cinema ladder instead, and say so.
+      if (!(e instanceof ApiError) || e.code !== 'nothing_fits' || !request.engineModel) throw e;
+      const { engineModel: _m, resolution: _r, ...rest } = request;
+      request = rest;
+      fallback = `${d.targetModel} can't make this shot right now · priced on the best available model`;
+      r = await suite.estimate(user, request);
+    }
     const usd = round2(Number(r.estimate ?? 0));
-    return { ...base, source: 'suite', estimate: { usd, tokens: tokensOf(usd) }, request, ...(r.warnings?.length ? { warnings: r.warnings } : {}) };
+    return { ...base, source: 'suite', estimate: { usd, tokens: tokensOf(usd) }, request, ...(r.warnings?.length || fallback ? { warnings: [...(fallback ? [fallback] : []), ...(r.warnings ?? [])] } : {}) };
   }
   const perSec = TARGET_PRICE_PER_SEC[d.targetModel] ?? TARGET_PRICE_PER_SEC[DEFAULT_TARGET]!;
   const usd = round2(perSec * d.durationSec);
