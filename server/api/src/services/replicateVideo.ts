@@ -16,7 +16,7 @@ import * as P from '../pricing.js';
 import { outputUrl, ReplicateError, SAFETY_RE, CREDIT_RE, errorText, type Prediction } from '../replicate/client.js';
 import { OUT_OF_CREDIT } from '../images/service.js';
 import { SOMETHING_WENT_WRONG } from './jobs.js';
-import { mediaToolsAvailable, padTo, probe, stripAudio, thumbnail } from '../replicate/media.js';
+import { mediaToolsAvailable, padTo, probe, restoreAudio, stripAudio, thumbnail } from '../replicate/media.js';
 import { putFile } from '../storage/objects.js';
 import type { JobRow } from '../gpu/controller.js';
 
@@ -25,7 +25,7 @@ export const REPLICATE_POD = 'replicate';
 export const REFUSED_CLIP = "This clip was refused by the content filter · you weren't charged";
 
 type TakeState = { id?: string; done?: boolean; key?: string; thumbKey?: string; billed?: number; output?: Record<string, unknown> };
-type RunState = { paddedKey?: string; seconds?: number; takes: TakeState[] };
+type RunState = { paddedKey?: string; seconds?: number; muted?: boolean; takes: TakeState[] };
 type Running = { cancelled: boolean; predictions: Set<string>; done: Promise<void> };
 
 /** Why a run failed, for the job: a member-safe message shown as-is and the machine code (the details go to the log). */
@@ -138,10 +138,15 @@ export class ReplicateVideo {
       const info = await probe(c.FFPROBE_PATH, src);
       const len = Math.min(P.REPLICATE_MAX_SEC, Number.isFinite(info.duration) && info.duration > 0 ? info.duration : (r.clipSeconds ?? clip.durationSec));
       const D = P.replicateSeconds(len);
+      // Lip-sync guard: unless the clip is marked as the performer talking, the model gets the clip without sound (it
+      // copies the motion, which already carries the beat) and the original sound goes back on the result.
+      const talking = (clip.checks as { label: string; value: string }[] | null)?.some(x => x.label === 'Performer talking' && x.value === 'Yes') ?? false;
+      const muteSource = !talking && !!info.audioCodec;
       // 2. Padded to D seconds and uploaded once (kept for a resumed run).
-      if (!state.paddedKey || state.seconds !== D || !(await ctx.storage.head(state.paddedKey))) {
+      if (!state.paddedKey || state.seconds !== D || state.muted !== muteSource || !(await ctx.storage.head(state.paddedKey))) {
         const padded = path.join(tmp, 'source_padded.mp4');
-        await padTo(c.FFMPEG_PATH, src, padded, D, info);
+        await padTo(c.FFMPEG_PATH, src, padded, D, info, { mute: muteSource });
+        state.muted = muteSource;
         state.paddedKey = `r/${job.id}/source_padded.mp4`;
         state.seconds = D;
         await putFile(ctx, { key: state.paddedKey, file: padded, studioId: job.studioId, kind: 'output', userId: job.userId, contentType: 'video/mp4' });
@@ -201,7 +206,9 @@ export class ReplicateVideo {
         // app's editor). It covers the whole clip because the source was padded to whole seconds; its own audio track
         // is the clip's audio. Skipping the re-encode also keeps a 2K take from running the API instance out of memory.
         // Keep audio off: drop the audio track with a stream copy (no re-encode, almost no memory).
-        if (r.keepAudio === false) await stripAudio(c.FFMPEG_PATH, raw, take); else await fs.promises.copyFile(raw, take);
+        if (r.keepAudio === false) await stripAudio(c.FFMPEG_PATH, raw, take);
+        else if (muteSource) await restoreAudio(c.FFMPEG_PATH, raw, src, take, info.audioCodec);
+        else await fs.promises.copyFile(raw, take);
         const out = await probe(c.FFPROBE_PATH, take);
         await thumbnail(c.FFMPEG_PATH, take, thumb, Math.min(1, out.duration / 2));
         const key = `r/${job.id}/take_${i}.mp4`, thumbKey = `r/${job.id}/take_${i}.jpg`;

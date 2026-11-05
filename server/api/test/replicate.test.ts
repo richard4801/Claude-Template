@@ -263,9 +263,11 @@ describe.skipIf(!hasFfmpeg)('video on Replicate (fake Replicate server)', () => 
     // The padded source is exactly D seconds; the take is Replicate's file as delivered (whole seconds, its own audio, no trim).
     const padded = probe(path.join(a.dir, `r/${j.id}/source_padded.mp4`));
     expect(Number(padded.format.duration)).toBeCloseTo(7, 1);
+    // Lip-sync guard: the clip isn't marked as the performer talking, so the model gets it silent…
+    expect(padded.streams.some(s => s.codec_type === 'audio')).toBe(false);
     const take = probe(path.join(a.dir, `r/${j.id}/take_1.mp4`));
     expect(Number(take.format.duration)).toBeCloseTo(7, 0);
-    expect(take.streams.some(s => s.codec_type === 'audio')).toBe(true);
+    expect(take.streams.some(s => s.codec_type === 'audio')).toBe(true);   // …and the clip's own sound is back on the take
     expect(fs.existsSync(path.join(a.dir, `r/${j.id}/take_1.jpg`))).toBe(true);
     const t = (await owner.req('GET', '/v1/takes')).body.find((x: any) => x.jobId === j.id);
     expect(t).toMatchObject({ label: 'Standard', engineLabel: 'Standard · 768P', videoUrl: `/uploads/r/${j.id}/take_1.mp4`, thumb: { url: `/uploads/r/${j.id}/take_1.jpg` } });
