@@ -82,7 +82,7 @@ fun WarmBar(w: WarmGpu, onTurnOff: () -> Unit, modifier: Modifier = Modifier, st
     val (minutes, cost) = warmLive(w, now)
     val bg = if (m.isD) m.t.yellow else m.t.ink
     val fg = if (m.isD) Ink else m.t.bg
-    val dot = if (w.starting) m.t.warn else if (m.isD) m.t.blue else m.t.accent
+    val dot = if (w.starting) m.t.warn else m.link
     val label = (if (w.starting) "Getting ready…" else if (w.state == "stopping") "Turning off…" else "Add-on engine ready") + " · $minutes min · ${Pricing.money(cost)}"
     Row(
         modifier.fillMaxWidth().background(bg).let { if (statusPad) it.statusBarsPadding() else it }.padding(horizontal = 16.dp, vertical = 9.dp),
@@ -143,7 +143,7 @@ fun BoxScope.WarmPrompt(kind: String, w: WarmGpu?, onYes: () -> Unit, onNo: () -
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Ic("light", 22.dp, if (m.isD) m.t.blue else m.t.accent)
+                Ic("light", 22.dp, m.link)
                 H3("Keep add-on engine ready?")
             }
             T(warmCostLine(w), m.type.body, m.t.ink)
@@ -173,7 +173,7 @@ fun WarmSwitchRow(container: AppContainer, w: WarmGpu?, modifier: Modifier = Mod
         modifier.fillMaxWidth().padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
-        Ic("light", 20.dp, if (w.on) (if (m.isD) m.t.blue else m.t.accent) else m.t.muted)
+        Ic("light", 20.dp, if (w.on) (m.link) else m.t.muted)
         Column(Modifier.weight(1f)) {
             T("Keep add-on engine ready", m.type.body.copy(fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
             T(sub, m.type.tiny, m.t.muted, maxLines = 1)

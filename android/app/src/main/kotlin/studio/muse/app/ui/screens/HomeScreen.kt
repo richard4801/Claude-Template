@@ -45,14 +45,19 @@ import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
 import studio.muse.core.Pricing
 import java.util.Calendar
+import kotlinx.coroutines.launch
 
 data class HomeState(
     val models: List<Model> = emptyList(),
     val featured: Model? = null,
     val featuredOutfits: List<Outfit> = emptyList(),
     val balance: Balance = Balance(0.0, 0.0),
-    val firstName: String = "Jenne",
+    val firstName: String = "",
     val runningLeft: String? = null,
+    /** The first load has answered (models may still be empty: a new studio). */
+    val loaded: Boolean = false,
+    /** The last load failed (server unreachable): shown when there's nothing to show yet. */
+    val error: String? = null,
 )
 
 class HomeViewModel(private val c: AppContainer) : ViewModel() {
@@ -60,8 +65,9 @@ class HomeViewModel(private val c: AppContainer) : ViewModel() {
         val featured = s.models.firstOrNull { it.locked } ?: s.models.firstOrNull()
         HomeState(
             s.models, featured, s.outfitsOf(featured?.id), s.balance,
-            p.studioName.substringBefore(' ').ifBlank { "Jenne" },
+            p.studioName.substringBefore(' '),
             s.running?.let { studio.muse.core.formatClock(it.secondsLeft) },
+            s.loaded, s.error,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, HomeState())
 
@@ -70,6 +76,8 @@ class HomeViewModel(private val c: AppContainer) : ViewModel() {
         c.repo.state.value.outfitsOf(m.id).firstOrNull()?.let { c.drafts.outfitId.value = it.id }
         nav.go(if (m.locked) Routes.PROFILE else Routes.CREATE3)
     }
+
+    fun retry() = viewModelScope.launch { c.repo.refresh() }
 
     fun bell() = c.repo.toast(state.value.runningLeft?.let { "Rendering · $it left" } ?: "No new notifications")
 }
@@ -100,7 +108,7 @@ fun HomeScreen() {
                     Box(Modifier.weight(1f)) { when {
                         m.isA -> T("YOUR\nMODELS", m.type.h2.copy(fontSize = 56.sp, lineHeight = 50.sp), m.t.ink)
                         m.isB -> H2("Models")
-                        m.isC -> H2("${greeting()}, ${s.firstName}")
+                        m.isC -> H2(greeting())
                         else -> H2("Your crew")
                     } }
                     val wallet = LocalContainer.current.repo.state.collectAsState().value.wallet
@@ -112,7 +120,15 @@ fun HomeScreen() {
                     QuickAction("camera", "Photoshoot", Modifier.weight(1f)) { nav.go(Routes.SHOOT) }
                     QuickAction("model", "New model", Modifier.weight(1f)) { nav.go(Routes.CREATE1) }
                 }
-                RowB { H3("All models"); Tiny("${s.models.size} models") }
+                when {
+                    s.models.isEmpty() && !s.loaded -> Tiny("Loading your models…")
+                    s.models.isEmpty() && s.error != null -> {
+                        NoteBox(s.error ?: "", warn = true)
+                        Cta2("Try again", { vm.retry() }, Modifier.fillMaxWidth(), icon = "retry", height = 46.dp)
+                    }
+                    s.models.isEmpty() -> EmptyModels { nav.go(Routes.CREATE1) }
+                    else -> RowB { H3("All models"); Tiny(plural(s.models.size, "model")) }
+                }
                 s.models.chunked(2).forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         row.forEach { model -> ModelCard(model, c.repo.state.value.outfitsOf(model.id).lastOrNull()?.front, Modifier.weight(1f)) { vm.open(model, nav) } }
@@ -137,6 +153,25 @@ fun BalancePill(text: String, onClick: () -> Unit) {
     }
 }
 
+/** "1 model", "3 models". */
+fun plural(n: Int, word: String) = "$n $word${if (n == 1) "" else "s"}"
+
+/** A new studio: no models yet. */
+@Composable
+private fun EmptyModels(onCreate: () -> Unit) {
+    val m = muse
+    val shape = RoundedCornerShape(m.t.r)
+    Column(
+        Modifier.fillMaxWidth().let { if (m.isC) it.softShadow(m.t.r) else it }.clip(shape).background(m.t.surface)
+            .let { if (m.isC) it else it.border(if (m.isD) 2.5.dp else m.t.stroke, m.t.line, shape) }.padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        T("No models yet", m.type.body.copy(fontSize = 22.sp, fontWeight = FontWeight.Medium, lineHeight = 26.sp), m.t.ink)
+        Tiny("Create her once: a name, a few photos for the character sheet, and she's ready for photoshoots and videos.")
+        Cta("New model", onCreate, Modifier.fillMaxWidth().padding(top = 6.dp), icon = "plus")
+    }
+}
+
 @Composable
 private fun FeatureCard(model: Model, outfits: List<Outfit>, onClick: () -> Unit) {
     val m = muse
@@ -153,9 +188,9 @@ private fun FeatureCard(model: Model, outfits: List<Outfit>, onClick: () -> Unit
         ) {
             Lbl("Featured", color = Color.White.copy(alpha = .8f))
             T(model.name, m.type.featName, Color.White, upper = m.isA || m.isB)
-            Tiny("${if (model.locked) "Identity locked" else "Draft"} · ${outfits.size} outfits", color = Color.White)
+            Tiny("${if (model.locked) "Identity locked" else "Draft"} · ${plural(outfits.size, "outfit")}", color = Color.White)
         }
-        Sticker("ready to shoot", "mint", -5f, Modifier.align(Alignment.TopEnd).padding(14.dp))
+        if (model.locked) Sticker("ready to shoot", "mint", -5f, Modifier.align(Alignment.TopEnd).padding(14.dp))
     }
 }
 

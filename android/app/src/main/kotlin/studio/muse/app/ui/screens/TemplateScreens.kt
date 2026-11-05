@@ -114,7 +114,7 @@ fun TemplatesScreen() {
         Column(Modifier.fillMaxSize()) {
             TopBar("Templates", onBack = { nav.back() }) {
                 MoreMenu(listOf(
-                    MenuItem("camera", "Make one from a photo") { c.repo.toast("Open any photo you like → Save as template") },
+                    MenuItem("camera", "Make one from a photo") { c.drafts.galleryTab.value = "tests"; nav.tab(Routes.GALLERY); c.repo.toast("Open a photo you like · then Save as template") },
                     MenuItem("retry", "Refresh") { vm.load() },
                 ))
             }
@@ -372,7 +372,7 @@ fun PoolEditor(pool: Map<String, List<String>>, onChange: (Map<String, List<Stri
                     opts.forEach { o -> Chip("$o  ×", false, { onChange(pool + (k to opts.filterNot { it == o })) }) }
                 }
                 Input(adding, { adding = it }, placeholder = "Add an option", trailing = {
-                    T("Add", m.type.tiny.copy(fontWeight = FontWeight.Bold), if (m.isD) m.t.blue else m.t.accent, Modifier.press {
+                    T("Add", m.type.tiny.copy(fontWeight = FontWeight.Bold), m.link, Modifier.press {
                         val v = adding.trim()
                         if (v.isNotEmpty() && opts.size < 12) { onChange(pool + (k to (opts + v).distinct())); adding = "" }
                     }.padding(8.dp))
@@ -678,7 +678,7 @@ fun SaveTemplateScreen(shotId: String) {
 @Composable
 fun TemplateStrip(templates: List<Template>, onOpen: (Template) -> Unit, onAll: () -> Unit) {
     val m = muse
-    RowB { H3("Templates"); T("See all", m.type.tiny.copy(fontWeight = FontWeight.Bold), if (m.isD) m.t.blue else m.t.accent, Modifier.press(onClick = onAll).padding(6.dp)) }
+    RowB { H3("Templates"); T("See all", m.type.tiny.copy(fontWeight = FontWeight.Bold), m.link, Modifier.press(onClick = onAll).padding(6.dp)) }
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         templates.take(8).forEach { t -> TemplateCard(t, Modifier.width(112.dp), 140.dp) { onOpen(t) } }
     }

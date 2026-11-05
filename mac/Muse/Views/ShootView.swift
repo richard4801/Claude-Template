@@ -50,6 +50,7 @@ struct ShootReferences: View {
                                 }
                                 .buttonStyle(.plain)
                                 .help("Remove")
+                                .accessibilityLabel("Remove reference \(i + 1)")
                                 .padding(6)
                             }
                             .overlay(alignment: .bottomLeading) {
@@ -122,7 +123,6 @@ struct ShootCanvas: View {
                             Button("Shoot without a template") { store.stopUsingTemplate() }
                         } else {
                             Button("Show prompt") { store.shootTab = .prompt }
-                            Button("Save as preset") { store.showToast("Saved as preset") }
                             Button("Reset camera") { store.resetCamera() }
                         }
                     }
@@ -138,6 +138,7 @@ struct ShootCanvas: View {
                     }
                     .buttonStyle(.plain)
                     .help("Change model")
+                    .accessibilityLabel("Model: \(model?.name ?? "none"). Change model")
                     .popover(isPresented: $modelPicker, arrowEdge: .bottom) {
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(store.models) { m in
@@ -160,13 +161,21 @@ struct ShootCanvas: View {
                         .frame(width: 240)
                     }
                     Lbl("Outfit").padding(.leading, 14)
-                    if !store.currentOutfits.isEmpty {
+                    if store.currentOutfits.count > 3 {
+                        // Four or more outfits truncate in a segmented control at 1280 px: a menu instead.
+                        Picker("Outfit", selection: outfitBinding) {
+                            ForEach(store.currentOutfits) { o in Text(o.name).tag(o.id) }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .fixedSize()
+                    } else if !store.currentOutfits.isEmpty {
                         Seg(store.currentOutfits.map { ($0.id, $0.name) }, selection: outfitBinding).frame(maxWidth: 360)
                     }
                     LinkText("+ New outfit") { store.openOutfitSheet(for: nil) }
                     Spacer()
                     if t.isB {
-                        Text("\(store.shoot.lens)MM · \(store.shoot.aperture.uppercased()) · 4300K").font(t.mono(11.5)).tracking(0.7).foregroundStyle(t.accent)
+                        Text("\(store.shoot.lens)MM · \(store.shoot.aperture.uppercased())").font(t.mono(11.5)).tracking(0.7).foregroundStyle(t.accent).lineLimit(1)
                     }
                 }
                 .padding(.bottom, 18)
@@ -181,6 +190,7 @@ struct ShootCanvas: View {
                                 Media(ref: shot?.thumb, ratio: 0.75, radius: t.cardRadius) { Pill("AI", .acc) }
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel("Shot \(i + 1)")
                             .transition(.scale(scale: 0.9).combined(with: .opacity).animation(.spring(response: 0.4, dampingFraction: 0.7).delay(Double(i) * 0.08)))
                         case .idle:
                             EmptyTile(icon: "camera", text: "Shot \(i + 1)")

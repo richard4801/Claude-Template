@@ -31,6 +31,14 @@ public enum LoraPricing {
     /// The photo bar runs over the first quarter of training, the video bar over the rest (the prototype's split).
     public static func photoProgress(_ overall: Double) -> Double { min(100, max(0, overall * 4)) }
     public static func videoProgress(_ overall: Double) -> Double { min(100, max(0, (overall - 25) / 75 * 100)) }
+
+    /// "~42 min left" while training (`progress` 0–100 over both LoRAs). Demo mode adds that its simulation runs faster;
+    /// a real studio never sees the word "demo".
+    public static func timeLeftLine(progress: Double, demo: Bool) -> String {
+        let left = (photoMinutes + videoMinutes) * (1 - min(100, max(0, progress)) / 100)
+        let line = "~\(max(1, Int(left.rounded()))) min left"
+        return demo ? line + " · the demo runs faster" : line
+    }
 }
 
 /// One generated training shot. `flag` marks a risky shot (tattoo, ring, choker, face drift); flagged shots start dropped.
