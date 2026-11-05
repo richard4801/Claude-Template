@@ -134,7 +134,7 @@ public struct BlenderCallResult: Codable, Sendable, Equatable {
 }
 
 /// A camera session asset (only the fields the relay needs).
-public struct CameraAsset: Codable, Sendable, Equatable, Identifiable {
+public struct CameraAsset: Codable, Sendable, Hashable, Identifiable {
     public var id: String
     public var kind: String
     public var label: String?

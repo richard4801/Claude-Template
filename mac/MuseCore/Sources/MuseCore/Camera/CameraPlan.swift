@@ -121,7 +121,7 @@ public enum PlanProjection: String, Sendable, CaseIterable {
 }
 
 /// Maps metres to points in a drawing of `size`, fitted to every point of the session (+1 m margin).
-public struct PlanGeometry: Hashable, Sendable {
+public struct PlanGeometry: Equatable, Sendable {
     public var projection: PlanProjection
     /// World bounds (in the projection's plane), margin included.
     public var bounds: CGRect
@@ -215,7 +215,7 @@ public struct PlanGeometry: Hashable, Sendable {
 }
 
 /// A time tick on a character's path: the key's point and "1.2s".
-public struct PathTick: Hashable, Sendable {
+public struct PathTick: Equatable, Sendable {
     public var point: CGPoint
     public var label: String
 }

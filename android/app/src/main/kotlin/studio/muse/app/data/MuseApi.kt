@@ -160,6 +160,9 @@ interface MuseApi {
         id: String, inputs: kotlinx.serialization.json.JsonObject? = null, rules: List<Rule>? = null, texts: Map<String, String>? = null, direction: String? = null,
     ): ScriptPreview
 
+    // Workstream 2: camera sessions (plans/api.md "MCP & camera sessions"), owner only. See CameraApi.kt.
+    val camera: CameraApi get() = CameraApi.Unsupported
+
     // Developer
     suspend fun setFailNext(fail: Boolean)
 
