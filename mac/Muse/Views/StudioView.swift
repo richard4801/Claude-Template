@@ -281,6 +281,10 @@ struct StudioInspector: View {
                         }
                     }
                     OptionRow(title: "Keep the clip's audio", hint: "Off = a silent take") { MToggle(isOn: $store.keepAudio) }
+                    // Prompt scripts (workstream 4): pre-set from the clip's talking detection, sent as `speaking`.
+                    OptionRow(title: PerformerSpeaking.title, hint: PerformerSpeaking.hint(store.speaking)) {
+                        MToggle(isOn: Binding(get: { store.speaking }, set: { store.setSpeaking($0) }))
+                    }
                     if store.isEdit {
                         OptionRow(title: "Lip sync", hint: "Only when the performer talks or sings · +4 min") { MToggle(isOn: $store.lipSync) }
                     } else {

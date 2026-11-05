@@ -231,7 +231,8 @@ final class AppStore {
 
     var modelId = SampleData.demo
     var outfitIdByModel: [String: String] = [:]
-    var clip: Clip?
+    /// The selected clip. Changing it (or its late talking detection arriving) re-sets "Performer is speaking".
+    var clip: Clip? { didSet { clipChangedForSpeaking(from: oldValue) } }
     var clipFile: URL?
     var clipThumb: ImageRef?
     /// Render (Draft / Standard / HD) or an add-on (Edit, Fast · beta). Every option renders the whole clip.
@@ -241,6 +242,10 @@ final class AppStore {
     var takeCount = 1
     var keepAudio = true
     var lipSync = false
+    // Prompt scripts (workstream 4): the studio's "Performer is speaking" switch, pre-set from the clip's detection, sent as
+    // `speaking`. `speakingTouched`: the user flipped it for this clip (a late detection then leaves it alone).
+    var speaking = false
+    var speakingTouched = false
     var background = "keep"
     var motion = "subtle"
     var showPrompt = false
@@ -287,6 +292,26 @@ final class AppStore {
     /// `prompt_invalid` while typing or on Save, shown under the editor as-is.
     var promptError: String?
     var promptSaving = false
+
+    // MARK: Prompt scripts (workstream 4, owner: Settings → Prompts → Scripts)
+
+    var promptsTab: PromptsTab = .blocks
+    var scriptList: PromptScriptsList?
+    var scriptListError: String?
+    /// The script open on the script screen.
+    var scriptOpenId: String?
+    /// Its rules as edited (Save sends them all, in order).
+    var scriptDraft: [ScriptRule] = []
+    /// The saved rules the draft started from (a live update replaces an untouched draft, never one being edited).
+    var scriptDraftBase: [ScriptRule] = []
+    /// `script_invalid` from Save or the preview, shown inline as-is.
+    var scriptError: String?
+    var scriptSaving = false
+    /// The preview's inputs (pre-filled with the samples) and its last answer.
+    var scriptInputs: [String: JSONValue] = [:]
+    var scriptPreview: ScriptPreview?
+    /// The rule in the edit sheet (a copy; Done puts it back into the draft).
+    var scriptEditingRule: ScriptRule?
 
     // MARK: Photo templates (plans/templates.md)
 
@@ -614,6 +639,9 @@ final class AppStore {
             if e.type == "settings", e.settings == nil { Task { [weak self] in await self?.loadStudio() } }
         }
         if isOwner, let p = LiveEvents.applyPrompts(&promptLibrary, e) { promptChanged(p) }
+        // Prompt scripts (workstream 4): a script saved or reset elsewhere; a late `clip` event with the talking detection.
+        if isOwner, let v = LiveEvents.applyPromptScript(&scriptList, e) { promptScriptChanged(v) }
+        if e.type == "clip", let c = e.clip, c.id == clip?.id { clip = c }
         if e.type == "settings", let st = e.settings {
             studioSettings = st
             syncQualityWithServer()

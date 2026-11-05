@@ -7,18 +7,23 @@ struct PromptsSettingsSection: View {
     @Environment(\.theme) private var t
 
     var body: some View {
+        @Bindable var store = store
         Group {
             if store.editingPrompt != nil {
                 PromptEditor()
+            } else if store.promptsTab == .scripts && store.currentScript != nil {
+                // Prompt scripts (workstream 4)
+                ScriptScreen()
             } else {
-                list
+                H2("Prompts")
+                Seg([(PromptsTab.blocks, "Blocks"), (PromptsTab.scripts, "Scripts")], selection: $store.promptsTab)
+                if store.promptsTab == .scripts { ScriptsList() } else { list }
             }
         }
         .task { if store.promptLibrary == nil { await store.loadPrompts() } }
     }
 
     @ViewBuilder private var list: some View {
-        H2("Prompts")
         Muted("Every prompt MUSE sends when it makes a photo, an outfit set, a sheet angle, a LoRA set or a video. A saved edit is used for every new render in your studio, by you and your members. Work already running keeps its prompt.")
         if let err = store.promptLibraryError, store.promptLibrary == nil {
             Note(icon: "exclamationmark.triangle", warn: true, err)

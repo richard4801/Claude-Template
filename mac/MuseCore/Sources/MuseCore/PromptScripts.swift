@@ -798,9 +798,8 @@ public enum ScriptEngine {
     /// The server's `runScript` + `assemble` over a ScriptView (pick: the section's own, else all for a repeating section).
     public static func run(_ s: ScriptView, inputs: [String: JSONValue], rules: [ScriptRule], texts: [String: String], vars given: [String: String] = [:],
                            direction: String? = nil) -> ScriptPreview {
+        // The code's samples, then the caller's values (inputs are not placeholders, as on the server).
         var vars: [String: String] = [:]
-        // Input values are placeholders too (the lens in the camera line), then the code's samples, then the caller's.
-        for (k, v) in inputs { vars[k] = scalarText(v) }
         for v in s.vars { vars[v.name] = v.sample }
         for (k, v) in given { vars[k] = v }
         vars["direction"] = nil

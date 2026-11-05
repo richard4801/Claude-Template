@@ -361,6 +361,15 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     public func resetPrompt(key: String) async throws -> PromptEntry { try await call("DELETE", "v1/prompts/\(Self.pathKey(key))") }
     public func previewPrompt(_ req: PromptPreviewRequest) async throws -> PromptPreview { try await call("POST", "v1/prompts/preview", req) }
 
+    // Prompt scripts (workstream 4)
+    public func promptScripts() async throws -> PromptScriptsList { try await call("GET", "v1/prompt-scripts") }
+    public func promptScript(id: String) async throws -> ScriptView { try await call("GET", "v1/prompt-scripts/\(Self.pathKey(id))") }
+    public func savePromptScript(id: String, rules: [ScriptRule]) async throws -> ScriptView {
+        try await call("PUT", "v1/prompt-scripts/\(Self.pathKey(id))", SaveScriptRequest(rules: rules))
+    }
+    public func resetPromptScript(id: String) async throws -> ScriptView { try await call("DELETE", "v1/prompt-scripts/\(Self.pathKey(id))") }
+    public func previewPromptScript(_ req: ScriptPreviewRequest) async throws -> ScriptPreview { try await call("POST", "v1/prompt-scripts/preview", req) }
+
     /// Library keys are dotted ("shoot.camera"); anything else is percent-encoded for the path.
     static func pathKey(_ key: String) -> String {
         var allowed = CharacterSet.alphanumerics

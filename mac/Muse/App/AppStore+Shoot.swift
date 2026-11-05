@@ -121,6 +121,7 @@ extension AppStore {
         promptLibrary = nil
         promptLibraryError = nil
         closePrompt()
+        resetPromptScripts() // prompt scripts (workstream 4)
     }
 
     // MARK: Prompt library (owner)

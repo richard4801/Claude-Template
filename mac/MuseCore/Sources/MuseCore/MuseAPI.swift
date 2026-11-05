@@ -96,6 +96,18 @@ public protocol MuseAPI: AnyObject, Sendable {
     /// POST /v1/prompts/preview {key, text?}
     func previewPrompt(_ req: PromptPreviewRequest) async throws -> PromptPreview
 
+    // Prompt scripts (workstream 4; owner only, members get owner_only). plans/api.md "Prompt scripts".
+    /// GET /v1/prompt-scripts
+    func promptScripts() async throws -> PromptScriptsList
+    /// GET /v1/prompt-scripts/{id}
+    func promptScript(id: String) async throws -> ScriptView
+    /// PUT /v1/prompt-scripts/{id} {rules}: the whole list, in order. `script_invalid` (message shown as-is). Saving the defaults clears the override.
+    func savePromptScript(id: String, rules: [ScriptRule]) async throws -> ScriptView
+    /// DELETE /v1/prompt-scripts/{id}: back to the default rules.
+    func resetPromptScript(id: String) async throws -> ScriptView
+    /// POST /v1/prompt-scripts/preview {id, inputs?, rules?, texts?, direction?}
+    func previewPromptScript(_ req: ScriptPreviewRequest) async throws -> ScriptPreview
+
     // Photo templates (plans/templates.md). Layers and variation pools only ever reach the template's owner.
     /// GET /v1/templates?scope=&q=&tag=
     func listTemplates(_ query: TemplateQuery) async throws -> [MuseTemplate]
