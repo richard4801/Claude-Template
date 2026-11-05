@@ -118,7 +118,7 @@ fun Modifier.press(enabled: Boolean = true, onClick: () -> Unit): Modifier {
     val src = remember { MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
     val s by animateFloatAsState(if (pressed) .96f else 1f, tween(120), label = "press")
-    return this.scale(s).clickable(src, indication = null, enabled = enabled) { onClick() }
+    return this.scale(s).clickable(src, indication = null, enabled = enabled, role = Role.Button) { onClick() }
 }
 
 /** Shimmer sweep for "busy" states. */
@@ -191,8 +191,22 @@ fun Cta(
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) { Ic(icon, if (big) 22.dp else 18.dp, m.t.ctaInk); Spacer(Modifier.width(8.dp)) }
-        T(text, if (big) m.type.cta.copy(fontSize = 22.sp) else m.type.cta, m.t.ctaInk, upper = m.isA, maxLines = 1)
+        FitText(text, if (big) m.type.cta.copy(fontSize = 22.sp) else m.type.cta, m.t.ctaInk, upper = m.isA)
     }
+}
+
+/**
+ * One line that shrinks (down to 75%) before it would be cut, so a price at the end of a button ("… · about $3.03")
+ * stays readable on a 360 dp phone and in Editorial's wide uppercase.
+ */
+@Composable
+fun FitText(text: String, style: TextStyle, color: Color, modifier: Modifier = Modifier, upper: Boolean = false) {
+    var scale by remember(text, style) { mutableStateOf(1f) }
+    Text(
+        if (upper) text.uppercase() else text, modifier = modifier, color = color, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
+        style = if (scale < 1f && style.fontSize.isSp) style.copy(fontSize = style.fontSize * scale, letterSpacing = if (style.letterSpacing.isSp) style.letterSpacing * scale else style.letterSpacing) else style,
+        onTextLayout = { r -> if (r.hasVisualOverflow && scale > .76f) scale = (scale - .08f).coerceAtLeast(.75f) },
+    )
 }
 
 /** Secondary button (`.cta-2`). */
@@ -212,10 +226,22 @@ fun Cta2(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon:
     }
 }
 
-/** Round 44dp icon button in top bars. */
+/** What TalkBack reads for an icon-only button (the icon's job, not its shape). Null: no default. */
+fun iconLabel(icon: String): String? = when (icon) {
+    "back" -> "Back"; "close" -> "Close"; "more" -> "More options"; "bell" -> "Notifications"; "user" -> "Settings"
+    "plus" -> "Add"; "chev" -> "Next"; "quality" -> "Credit"; "grid" -> "Gallery"; "retry" -> "Retry"; "export" -> "Share"
+    "camera" -> "Photoshoot"; "spark" -> "Prompt"; "play" -> "Play"; "upload" -> "Upload"; "check" -> "Done"
+    else -> null
+}
+
+/** Round icon button in top bars: 44dp circle inside a 48dp touch target, read by TalkBack as [label] (default from the icon). */
 @Composable
-fun TbBtn(icon: String, onClick: () -> Unit, modifier: Modifier = Modifier, tint: Color = Color.Unspecified) {
-    Box(modifier.size(44.dp).clip(CircleShape).press(onClick = onClick), contentAlignment = Alignment.Center) {
+fun TbBtn(icon: String, onClick: () -> Unit, modifier: Modifier = Modifier, tint: Color = Color.Unspecified, label: String? = null) {
+    val desc = label ?: iconLabel(icon)
+    Box(
+        modifier.size(48.dp).clip(CircleShape).press(onClick = onClick).let { b -> if (desc != null) b.semantics { contentDescription = desc; role = Role.Button } else b },
+        contentAlignment = Alignment.Center,
+    ) {
         Ic(icon, 22.dp, if (tint == Color.Unspecified) androidx.compose.material3.LocalContentColor.current else tint)
     }
 }
@@ -488,9 +514,9 @@ fun TopBar(title: String = "", onBack: (() -> Unit)? = null, backIcon: String = 
                 .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (onBack != null) TbBtn(backIcon, onBack) else Spacer(Modifier.size(44.dp))
+            if (onBack != null) TbBtn(backIcon, onBack) else Spacer(Modifier.size(48.dp))
             T(title, m.type.topTitle, color, Modifier.weight(1f), upper = m.isB, align = TextAlign.Center, maxLines = 1)
-            if (right != null) right() else Spacer(Modifier.size(44.dp))
+            if (right != null) right() else Spacer(Modifier.size(48.dp))
         }
     }
 }
@@ -678,7 +704,7 @@ fun MuseMenu(expanded: Boolean, onDismiss: () -> Unit, items: List<MenuItem>) {
 fun MoreMenu(items: List<MenuItem>, tint: Color = Color.Unspecified, icon: String = "more") {
     val open = remember { androidx.compose.runtime.mutableStateOf(false) }
     Box {
-        TbBtn(icon, { open.value = true }, tint = tint)
+        TbBtn(icon, { open.value = true }, tint = tint, label = if (icon == "more") "More options" else null)
         MuseMenu(open.value, { open.value = false }, items)
     }
 }

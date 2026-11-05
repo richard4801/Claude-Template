@@ -67,9 +67,12 @@ class CreateModelViewModel(private val c: AppContainer) : ViewModel() {
 
     /** Step 1 → creates the draft model, then the character sheet. */
     fun next(onDone: () -> Unit) = viewModelScope.launch {
-        creating.value = true
         val d = c.drafts.model.value
-        val m = c.repo.createModel(CreateModelRequest(d.name.ifBlank { "Noor Ellis" }, d.age, d.niche))
+        // Never a made-up name: a blank one would have created a model called after the demo's sample character.
+        if (d.name.isBlank()) return@launch c.repo.toast("Give her a name first")
+        if (creating.value) return@launch
+        creating.value = true
+        val m = c.repo.createModel(CreateModelRequest(d.name.trim(), d.age, d.niche))
         creating.value = false
         if (m != null) { c.drafts.modelId.value = m.id; onDone() }
     }
@@ -142,7 +145,7 @@ fun CreateBasicsScreen() {
                 StepBars(1); Lbl("Step 1 of 2"); H2("Who is she?")
             }
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 130.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Field("Name") { Input(s.draft.name, { v -> vm.edit { it.copy(name = v) } }, placeholder = "Noor Ellis") }
+                Field("Name") { Input(s.draft.name, { v -> vm.edit { it.copy(name = v) } }, placeholder = "Her name") }
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row { Lbl("Age · "); T("${s.draft.age}", m.type.mono.copy(fontSize = 11.5.sp, fontWeight = FontWeight.Bold), m.t.ink) }
                     MuseSlider(s.draft.age, 18, 70, { v -> if (v != s.draft.age) vm.edit { it.copy(age = v) } })
@@ -152,7 +155,7 @@ fun CreateBasicsScreen() {
                 NoteBox("Models are always 18+ and original. No lookalikes of real people.")
             }
         }
-        Dock { Cta("Next: Character sheet", { vm.next { nav.go(Routes.CREATE3) } }, Modifier.weight(1f), busy = s.creating) }
+        Dock { Cta("Next: Character sheet", { vm.next { nav.go(Routes.CREATE3) } }, Modifier.weight(1f), busy = s.creating, off = s.draft.name.isBlank()) }
     }
 }
 
@@ -199,7 +202,7 @@ fun CharacterSheetScreen() {
                                         }
                                     }
                                 }
-                                androidx.compose.material3.Text(label, style = m.type.tiny.copy(fontSize = 12.sp), color = m.t.muted, maxLines = 1)
+                                androidx.compose.material3.Text(label, style = m.type.tiny.copy(fontSize = 12.sp), color = m.t.muted, maxLines = 2)
                             }
                         }
                         repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }

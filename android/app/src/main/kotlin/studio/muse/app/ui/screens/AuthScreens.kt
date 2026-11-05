@@ -214,7 +214,7 @@ fun SignInScreen() {
         }
         Field("Password") {
             Input(s.password, { v -> vm.edit { it.copy(password = v) } }, password = true, placeholder = "••••••••••", autofill = ContentType.Password, trailing = {
-                T("Forgot?", m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), if (m.isD) m.t.blue else m.t.accent, Modifier.press { vm.forgot() }.padding(8.dp))
+                T("Forgot?", m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), m.link, Modifier.press { vm.forgot() }.padding(8.dp))
             })
         }
         Check("Remember me", s.remember, { vm.edit { it.copy(remember = !it.remember) } })
@@ -233,7 +233,7 @@ fun SignInScreen() {
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
             Tiny("New here? ")
-            T("Create an account", m.type.tiny.copy(fontWeight = FontWeight.Bold), if (m.isD) m.t.blue else m.t.accent, Modifier.press { nav.go(Routes.SIGNUP) })
+            T("Create an account", m.type.tiny.copy(fontWeight = FontWeight.Bold), m.link, Modifier.press { nav.go(Routes.SIGNUP) })
         }
     }
 }
