@@ -1,13 +1,13 @@
 // Camera sessions (plans/api.md "MCP & camera sessions"): create, read, update, cast, camera path and blocking, guide
 // assets through presigned uploads, the shared transcript and Shot drafts. Used by REST, the MCP server and the chat.
 import crypto from 'node:crypto';
-import { and, asc, desc, eq, inArray, lt } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, lt } from 'drizzle-orm';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { jobs, models, uploads } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
 import { compact, uid } from '../lib/util.js';
 import type { BlenderRelayHub } from './relay.js';
-import { cameraAssets, cameraMessages, cameraSessions, type Blocking, type CameraAssetKind, type CameraPath, type CastMember } from './schema.js';
+import { cameraAssets, cameraMessages, cameraSessions, mcpTokens, type Blocking, type CameraAssetKind, type CameraPath, type CastMember } from './schema.js';
 import { createShotDraft, DEFAULT_TARGET } from './shots.js';
 import { z } from 'zod';
 import { ASSET_RULES, CreateSession, extOf, NewAsset, parse, PatchSession, SetPath, ShotDraftIn } from './validate.js';
@@ -25,7 +25,16 @@ export const DEFAULT_HEIGHT_M = 1.68;
 export const messageView = (m: MessageRow) => compact({ id: m.id, role: m.role, source: m.source, text: m.text, tool: m.tool ?? undefined, createdAt: m.createdAt });
 
 export class CameraService {
+  /** Set by the routes: is the in-app chat running a turn on this session? */
+  chatBusy: (sessionId: string) => boolean = () => false;
   constructor(private ctx: Ctx, private relay: BlenderRelayHub) {}
+
+  /** When the owner's own Claude app last used a MUSE MCP token (null: never / no live token). */
+  async claudeAppSeenAt(ownerId: string): Promise<number | null> {
+    const rows = await this.db.select({ at: mcpTokens.lastUsedAt }).from(mcpTokens).where(and(eq(mcpTokens.userId, ownerId), isNull(mcpTokens.revokedAt)));
+    const at = Math.max(0, ...rows.map(r => r.at ?? 0));
+    return at || null;
+  }
   private get db() { return this.ctx.db; }
 
   // ------------------------------------------------------------------ reads
@@ -74,6 +83,7 @@ export class CameraService {
       presets: s.presets, characters: s.characters.map(c => compact({ modelId: c.modelId, name: names.get(c.modelId) ?? 'Unknown model', role: c.role, heightM: c.heightM ?? DEFAULT_HEIGHT_M })),
       cameraPath: s.cameraPath ?? undefined, blocking: s.blocking ?? undefined, assets: await Promise.all(assets.map(a => this.assetView(a))),
       shotDraft: s.shotDraft ?? undefined, camera: this.cameraSpec(s, assets), revision: s.revision, relay: this.relay.status(s.ownerId),
+      claude: compact({ chatBusy: this.chatBusy(s.id), appLastSeenAt: (await this.claudeAppSeenAt(s.ownerId)) ?? undefined }),
       createdAt: s.createdAt, updatedAt: s.updatedAt,
     });
     if (opts.messages) v.messages = (await this.messages(u, s.id, { limit: 50 }));

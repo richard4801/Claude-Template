@@ -194,6 +194,9 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
 
     override fun setToken(token: String?) { this.token = token }
 
+    // Workstream 2: camera sessions
+    override val camera: CameraApi by lazy { HttpCameraApi(base, client, json) }
+
     /** Turns `{"error": "...", "code": "..."}` bodies into [ApiException]. The UI words the codes (see [ErrorText]). */
     private suspend fun <T> call(block: suspend MuseService.() -> T): T = callOn(svc, block)
     private suspend fun <T> callLong(block: suspend MuseService.() -> T): T = callOn(longSvc, block)

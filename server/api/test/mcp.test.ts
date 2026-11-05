@@ -141,6 +141,18 @@ describe('MCP tools round-trip', () => {
   });
 });
 
+describe('Settings → Connections', () => {
+  it('shows relay, Claude app use and the MCP URL to the owner only', async () => {
+    await rpc('ping');
+    const c = (await owner.req('GET', '/v1/connections')).body;
+    expect(c).toMatchObject({ relay: { online: false, blender: false }, claudeApp: { tokens: expect.any(Number), lastSeenAt: expect.any(Number) }, inAppChat: false });
+    expect(c.mcpUrl).toMatch(/\/mcp$/);
+    expect((await member.req('GET', '/v1/connections')).status).toBe(403);
+    const s = (await call('create_camera_session', {})).structuredContent;
+    expect(s.claude).toMatchObject({ chatBusy: false, appLastSeenAt: expect.any(Number) });
+  });
+});
+
 describe('director history repair', () => {
   it('appends interrupted results for unanswered tool calls (never edits)', () => {
     const h: any[] = [{ role: 'user', content: 'x' }, { role: 'assistant', content: [{ type: 'text', text: 'a' }, { type: 'tool_use', id: 't1', name: 'n', input: {} }] }];

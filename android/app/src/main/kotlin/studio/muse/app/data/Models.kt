@@ -824,6 +824,15 @@ data class ApiEvent(
     val script: ScriptView? = null,
     /** Prompt scripts (workstream 4): type "clip", a clip whose talking detection finished after the upload answered. */
     val clip: Clip? = null,
+    // Workstream 2: camera sessions. type "camera": op upsert (session) / delete (id) / message (sessionId, message) / asset (sessionId, asset);
+    // type "blender": op relay (online, blender, addonVersion). Owners' devices only.
+    val session: CameraSession? = null,
+    val sessionId: String? = null,
+    val message: CameraMessage? = null,
+    val asset: CameraAsset? = null,
+    val online: Boolean? = null,
+    val blender: Boolean? = null,
+    val addonVersion: String? = null,
 ) {
     companion object {
         /** Not from the server: the stream (re)connected, so the app refetches what it may have missed. */
