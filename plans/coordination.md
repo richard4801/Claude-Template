@@ -27,7 +27,7 @@ _Started 2026-11-05._ Several Claude sessions build MUSE features at the same ti
 - You may spawn your own sub-agents for parts of your workstream; you remain responsible for their output and for this file's rules.
 
 ## Status (each session updates its own line)
-- 1 · AI suite core: not started
+- 1 · AI suite core: **backend done on `claude/muse-suite-core`** (2026-11-05): model registry + licence flags, quality ladder, Camera spec + per-model compiler (prompt library group `suite`), Shot estimate/create on the job/wallet pipeline, suite caps, Replicate/fal/mock providers, migration 0007. Contracts: `plans/api.md` "AI suite", `plans/ai-suite.md`. 22 suite tests green. UI waits for Figma.
 - 2 · MCP + Blender bridge: not started
 - 3 · Editor engine v2: not started
 - 4 · Prompt scripts: not started

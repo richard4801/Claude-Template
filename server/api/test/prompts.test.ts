@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm';
 import { ledger } from '../src/db/schema.js';
 import * as E from '../src/prompt/engine.js';
 import { DEFAULT_TEXTS, fill, PROMPT_DEFS, resolveTexts, validatePrompt } from '../src/prompt/library.js';
+import { SUITE_PROMPT_DEFS } from '../src/suite/prompts.js';
 import { dressPrompt, exampleFor, libraryDefaults } from '../src/prompt/service.js';
 import { planShotImages } from '../src/images/service.js';
 import { buildTemplatePrompt } from '../src/templates/prompt.js';
@@ -18,7 +19,7 @@ const R = (asset: string) => ({ asset });
 
 describe('prompt library (unit)', () => {
   it('every default validates, keys are unique, and every group has entries', () => {
-    expect(PROMPT_DEFS.length).toBe(53);
+    expect(PROMPT_DEFS.length).toBe(53 + SUITE_PROMPT_DEFS.length); // + AI suite (workstream 1)
     expect(new Set(PROMPT_DEFS.map(p => p.key)).size).toBe(PROMPT_DEFS.length);
     for (const p of PROMPT_DEFS) expect(validatePrompt(p.key, p.default), p.key).toBeNull();
     for (const g of ['photoshoot', 'references', 'sheet', 'outfits', 'enhance', 'dressup', 'templates', 'video', 'lora']) expect(PROMPT_DEFS.some(p => p.group === g), g).toBe(true);
@@ -121,8 +122,8 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
       expect(r.status, u).toBe(403); expect(r.body.code).toBe('owner_only');
     }
     const l = (await owner.req('GET', '/v1/prompts')).body;
-    expect(l.groups.map((g: any) => g.label)).toEqual(['Photoshoot', 'References', 'Character sheet', 'Outfits', 'Enhance', 'Dress up', 'Templates', 'Video', 'LoRA']);
-    expect(l.prompts).toHaveLength(53);
+    expect(l.groups.map((g: any) => g.label)).toEqual(['Photoshoot', 'References', 'Character sheet', 'Outfits', 'Enhance', 'Dress up', 'Templates', 'Video', 'LoRA', 'AI suite']); // + AI suite (workstream 1)
+    expect(l.prompts).toHaveLength(53 + SUITE_PROMPT_DEFS.length);
     const refPose = l.prompts.find((p: any) => p.key === 'refs.pose');
     expect(refPose).toMatchObject({ group: 'references', current: refPose.default, overridden: false, allowEmpty: false, updatedAt: null,
       placeholders: [{ name: 'refIndex', required: true }] });

@@ -19,6 +19,7 @@ import type { EngineHealth } from './services/engines.js';
 import type { ImageModels } from './images/steps.js';
 import type { ToolService } from './services/tools.js';
 import type { PromptLibrary } from './prompt/service.js';
+import type { SuiteService } from './suite/service.js';
 
 export type Ctx = {
   config: Config;
@@ -46,6 +47,8 @@ export type Ctx = {
   tools: ToolService;
   /** The studio's prompt library (plans/api.md "Shoot references and the prompt library" §3). */
   prompts: PromptLibrary;
+  /** AI suite (workstream 1): video model registry, Shot API, Camera compiler, the suite line (plans/ai-suite.md). */
+  suite: SuiteService;
   /** Start-up facts for /health: the build, when it started, the schema migrations applied, the starter seed. */
   boot: { startedAt: number; build: string | null; migrations: { applied: number; latest: string | null }; starters?: { studios: number; added: number } | { error: string } };
   /** Absolute base URL of this API, for image URLs and presigned local-storage URLs. */

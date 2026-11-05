@@ -860,3 +860,66 @@ Catch-up: events are not replayed. When the stream (re)connects, and when the ap
 - Run the H3 Ref2VA pipeline (`pipeline/runpod/h3_ref2va_run.py`) on a network-volume pod, map the denoising step callback to `step`, and shut the pod down when the queue is empty.
 - Build the prompt with the layered engine (`plans/prompt-system.md`, implemented in `android/core/.../PromptEngine.kt`) and store the exact prompt, seed, steps and references on the job.
 - Show "MiniMax H3" attribution and pass through its licence and acceptable use terms (both the Replicate-hosted and the RunPod engine are MiniMax H3).
+
+## AI suite (workstream 1, 2026-11-05)
+_Spec: `plans/ai-suite.md`. Backend only; the UI waits for the owner's Figma review. Members never see providers, models or GPUs. Owner-only fields are marked (owner)._
+
+**Modes.** `SUITE_MODE` is `off` (the production default), `mock` (the default elsewhere: the real plan and price, a test-pattern render, settles $0) or `live`. `catalog.enabled` and `catalog.test` show the mode to the apps.
+
+### Types
+```ts
+ImageRef  { asset?, url? }                       // as everywhere
+VideoRef  { key?: string /* our upload's storage key */, url?: string /* /uploads/... or https */, seconds?: number }
+CameraSpec {
+  mode?: "preset"|"directed" /* default preset; directed needs a guide-capable model */,
+  preset?: "phone_ugc"|"talking_head"|"selfie_vlog"|"creator_studio"|"cinematic"|"product_hero"|"music_video"|"documentary"|"noir"|"fashion_editorial"|"y2k_camcorder",
+  rig?: { body?, lens?, focalMm? /* 8–200 */, aperture?, look?, fps?: "24"|"25"|"30"|"48"|"60"|"slowmo", shutter?: "normal"|"low"|"narrow" },
+  lighting?: { preset?, direction?: "front"|"left"|"right"|"back"|"top"|"below", temperatureK? /* 1800–12000 */, intensity?: "low"|"normal"|"high" },
+  palette?: { preset?, colors?: string[] /* ≤ 5 "#rrggbb" */ },
+  move?: Move, mix?: Move /* a second, compatible move */,
+  angle?: { height?, shotSize?, dutchDeg? /* 0–30 */ },
+  style?: { genre?, era?, tempo? },
+  performance?: { emotion, to?, atS?, intensity? /* 0–1 */ },
+  guide?: { video: VideoRef, use?: "camera"|"motion"|"blocking" /* blocking = camera + framing + blocking (full playblast) */, cameraSessionId?, keyframes?: { start?: url, middle?: url[] /* ≤ 8 */, end?: url /* "/uploads/<storage key>" (signed at run time, never expires) or https */ } }
+}
+Move { id, intensity? /* 0–1, default 0.5 */, speed?: "slow"|"normal"|"fast", ease?: "linear"|"in"|"out"|"in_out", startS?, endS? }
+// The ids of every option are in GET /v1/suite/camera. Unknown ids are bad_request.
+ShotRequest {
+  mode?: "text"|"image"|"reference"|"swap" /* default: image with frames, reference with a character, else text */,
+  title?, modelId? /* the character */, outfitId?, prompt /* ≤ 2000 */, direction?,
+  frames?: { start?: ImageRef, middle?: ImageRef[] /* ≤ 8 */, end?: ImageRef },
+  references?: { images?: { image: ImageRef, role?: "product"|"location"|"style"|"prop"|"person", label? }[] /* ≤ 6 */,
+                 videos?: { video: VideoRef, use?: "camera"|"motion"|"style" }[] /* ≤ 3 */ },
+  duration? /* 2–30, default 5 */, aspectRatio?: "9:16"|"16:9"|"1:1"|"4:3"|"3:4"|"21:9" /* default 9:16 */,
+  quality?: "draft"|"standard"|"hd"|"cinema" /* default draft */, takes? /* 1–4 */, audio? /* native sound, default true */,
+  speaking? /* default false: she speaks or sings on camera (lip sync); today it only drives the camera warnings; after the prompt-scripts port, off adds "does not speak, sing or mouth words" (workstream 4's talking flag) */, seed?,
+  camera?: CameraSpec, dryRun?: boolean,
+  clipId?, keepAudio? /* swap */, engineModel?, resolution? /* (owner) bypass the ladder */
+}
+ShotEstimate { quality, label /* "Shot · HD · 2K" */, resolution, seconds /* what will render */, takes, mode, estimate, priceLine /* "about $0.78 · 6 s" */,
+  buttonLabel /* "Generate · 6 s · $0.78" */, ok, code, message, caps: { perJob, perDay, spentToday, leftToday, ok, code, message },
+  warnings: string[] /* e.g. "length set to 6 s", "one camera move per shot: … dropped", "the guide clip is not sent" */,
+  camera: { moves: string[], guideUsed: boolean }, prompt, test,
+  engine?, input?, tried? /* (owner): model, provider, ref, $/s, billed seconds, licence and notice; the inputs; the ladder steps tried */ }
+```
+
+### Endpoints
+| | |
+|---|---|
+| `GET /v1/suite/catalog` | → the catalog: <ul><li>`{enabled, test, defaultQuality: "draft"}`</li><li>`tiers[]`: `{id, label, detail, available, resolution, fromPerSec, maxSeconds, canKeyframes, canReferences, canGuide}`, plus `models[]` (owner)</li><li>`modes`, `aspectRatios`, `takesMax: 4`</li><li>`camera`: the same as `GET /v1/suite/camera`</li></ul> |
+| `GET /v1/suite/camera` | → the Camera picker: `{presets, bodies, lenses, focalLengths, apertures, looks, frameRates, shutters, lighting, palettes, moves, heights, shotSizes, genres, eras, tempos, emotions, limits}`. Each option is `{id, label, description}`; moves also have `category`, `editorBetter` and `talkSafe`. Presets carry their `spec`. |
+| `GET /v1/suite/targets` | → per quality, what a guide clip (Blender render) should be: `{quality, label, available, minSeconds, maxSeconds, guideSeconds: {min, max}, aspectRatios, shortSide, fps: 24, keyframes: {start, middle /* max count */, end}}`, plus `model`, `name` and `resolution` (owner). Only models that take a reference video count. |
+| `POST /v1/suite/camera/compile` `{camera, quality?, duration?, engineModel? (owner)}` | → `{text, moves, guideUsed, warnings}`, plus `engine`, `params` and `avoid` (owner). This is what the camera becomes on that quality's first model. Free. |
+| `POST /v1/suite/shots/estimate` `ShotRequest` | → `ShotEstimate`. Holds nothing and runs nothing. <ul><li>`400 nothing_fits` ("Draft can't make this shot · try another quality, a shorter length or fewer references"), with `tried` (owner).</li><li>`400 engine_unavailable` when the suite is off.</li><li>`403 owner_only` for `engineModel`/`resolution` from a member.</li></ul> |
+| `POST /v1/suite/shots` `ShotRequest` | → `Job`: a render job, `request.engine: "suite"`, `engineLabel: "Shot · Standard · 768p"`. <ul><li>The same live `job`/`take`/`balance` events, `DELETE /v1/jobs/{id}` cancels, and failures refund in full (`provider_failed`/`provider_refused`/`provider_timeout`/`provider_out_of_credit`).</li><li>Takes have `label` = the tier ("Draft"…). They are the provider's file **as delivered** (no trim).</li><li>`dryRun: true` → `{dryRun: true, estimate}` and nothing is held.</li><li>`402 suite_over_job_limit` / `suite_over_day_limit`, then the wallet's own cap and balance codes.</li><li>`mode: "swap"` is the existing character swap: `POST /v1/jobs` with `engine: "replicate"`, Cinema → HD.</li></ul> |
+| `GET /v1/suite/shots/{id}` | → `{job, warnings}`, plus `engine` and `runs` (owner) |
+| `GET /v1/suite/settings` (owner) | → <ul><li>`{mode, caps: {perJob, perDay}, spentToday}`</li><li>`ladder`, `defaultLadder`</li><li>`models[]`: the registry, each with `enabled`, `blocked`, `blockedReason`, `needsAck`, `configured` and `priceScale`</li><li>`providers: {replicate, fal, runpod}`</li></ul> |
+| `PATCH /v1/suite/settings` (owner) `{models?: {[id]: {enabled?, acknowledge?, priceScale? /* 0.5–3 */}}, ladder?: {[tier]: {model, resolution}[]} \| null, capPerJob? \| null, capPerDay? \| null}` | → the same. `409 model_blocked` for a model whose licence blocks new features, or one that was removed. |
+
+**Ledger notes:**
+- Hold: `"Video · Shot · Draft · 768p · 5 s · 2 takes · hold"`
+- Settle: `"Video · Shot Draft 768p · 2 × 5 s"` (+ `" · test render"` in mock mode)
+
+**Prompt library:** group `suite` ("AI suite") with 27 entries:
+- `suite.camera.*`: per-option wording as `id: wording` lines, and the per-model camera block formats.
+- `suite.shot.*`: character, outfit, extra reference, lock, keyframes, guide, footer, negative.

@@ -6,6 +6,7 @@ import { ApiError, notFound } from '../errors.js';
 import { allowEmpty, DEFAULT_TEXTS, fill, listOf, PROMPT_DEFS, PROMPT_GROUPS, promptDef, resolveTexts, validatePrompt, type PromptDef, type PromptTexts } from './library.js';
 import * as E from './engine.js';
 import { buildTemplatePrompt } from '../templates/prompt.js';
+import { suiteExample } from '../suite/example.js';
 
 export type PromptEntry = {
   key: string; group: string; title: string; description: string; kind: PromptDef['kind']; default: string; current: string; overridden: boolean;
@@ -134,6 +135,8 @@ export function exampleFor(def: PromptDef, t: PromptTexts = DEFAULT_TEXTS): stri
     case 'video':
       if (def.key.startsWith('video.edit')) return E.videoSwap({ identity: SAMPLE_ID, outfit, direction: 'smiling' }, t).text;
       return E.replicateSwap({ identity: SAMPLE_ID, outfit, referenceLabels: ['face, front', 'face, profile', 'body, front', 'body, ¾', 'body, back', 'outfit, front'], direction: 'smiling' }, t).text;
+    // AI suite (workstream 1)
+    case 'suite': return suiteExample(def.key, t);
     case 'lora': return `${E.characterSheetShot(SAMPLE_ID, E.SHEET_ANGLES[0], t).text}\n${loraVariationLine(0, t)}`;
   }
   return '';

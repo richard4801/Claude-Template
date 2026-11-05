@@ -196,6 +196,19 @@ const Env = z.object({
   AUTH_RATE_PER_MIN: num(10),
   SESSION_DAYS: num(90),
   MIN_PASSWORD: num(8),
+
+  // AI suite (workstream 1, plans/ai-suite.md). SUITE_MODE: "off" (no shots), "mock" (the test renderer: no provider
+  // calls, no spend) or "live" (Replicate / fal). Unset: "mock" outside production, "off" in production.
+  SUITE_MODE: z.enum(['off', 'mock', 'live']).optional(),
+  /** Suite shots running at once across the server. */
+  SUITE_MAX_CONCURRENT: num(2),
+  SUITE_POLL_MS: num(5000),
+  SUITE_PREDICTION_TIMEOUT_SEC: num(1800),
+  /** The suite's own caps (studio owner can change them in suite settings), on top of the wallet caps. */
+  SUITE_CAP_PER_JOB_USD: num(5),
+  SUITE_CAP_PER_DAY_USD: num(25),
+  /** Mock renders settle to their estimate instead of $0 (dev: to exercise the money path). */
+  SUITE_MOCK_CHARGE: bool(false),
 });
 
 export type Config = Omit<z.infer<typeof Env>, 'IMAGE_PROVIDER'> & {
@@ -205,6 +218,8 @@ export type Config = Omit<z.infer<typeof Env>, 'IMAGE_PROVIDER'> & {
   storage: 'local' | 's3';
   balanceMode: 'runpod' | 'simulated';
   socialMode: 'simulated' | 'stub';
+  /** AI suite (workstream 1): SUITE_MODE resolved. */
+  suiteMode: 'off' | 'mock' | 'live';
 };
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -225,7 +240,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const socialMode = c.SOCIAL_MODE ?? (c.DEV_MODE ? 'simulated' : 'stub');
   const IMAGE_PROVIDER = c.IMAGE_PROVIDER ?? (c.REPLICATE_API_TOKEN ? 'replicate' : 'simulated');
   const videoEngineDefault = c.VIDEO_ENGINE_DEFAULT === 'replicate' && !c.REPLICATE_API_TOKEN ? 'h3' : c.VIDEO_ENGINE_DEFAULT;
-  return { ...c, IMAGE_PROVIDER, videoEngineDefault, storage, balanceMode, socialMode };
+  const suiteMode = c.SUITE_MODE ?? (c.NODE_ENV === 'production' && !c.DEV_MODE ? 'off' : 'mock'); // AI suite (workstream 1)
+  return { ...c, IMAGE_PROVIDER, videoEngineDefault, storage, balanceMode, socialMode, suiteMode };
 }
 
 /** Safe summary for the start-up log: modes and which secrets are set (true/false), never their values. */
@@ -240,6 +256,7 @@ export function describeConfig(c: Config) {
     imageProvider: c.IMAGE_PROVIDER,
     videoEngine: c.videoEngineDefault,
     socials: c.socialMode,
+    suite: c.suiteMode,
     secrets: {
       RUNPOD_API_KEY: !!c.RUNPOD_API_KEY,
       FAL_KEY: !!c.FAL_KEY,

@@ -52,6 +52,9 @@ export const linePhase = (position: number, startsIn: number) =>
 type QueueInfo = { queuePosition: number; etaSeconds: number; startsInSeconds: number };
 
 const isRep = (j: { request: Record<string, any> }) => j.request?.engine === 'replicate';
+// AI suite (workstream 1): suite shots run on their own line (suite/runner.ts), never on a pod.
+const isSuite = (j: { request: Record<string, any> }) => j.request?.engine === 'suite';
+const isHosted = (j: { request: Record<string, any> }) => isRep(j) || isSuite(j);
 
 export class JobService {
   private queueInfo = new Map<string, QueueInfo>();
@@ -74,8 +77,8 @@ export class JobService {
       totalSeconds: j.totalSeconds, cost: j.cost, refunded: j.refunded, error: j.error, createdAt: j.createdAt, finishedAt: j.finishedAt,
       prompt: j.prompt, seed: j.seed, thumb: j.thumb ?? undefined, queuePosition: q?.queuePosition, etaSeconds: q?.etaSeconds,
       blocked: j.blocked, userId: j.userId, warmupCost: j.warmupCost || undefined, warm: j.warmSessionId ? true : undefined,
-      engineLabel: j.kind === 'render' ? P.engineLabel(j.request) : undefined, errorCode: (j.stats as any)?.errorCode,
-      billedSeconds: j.state === 'done' ? (j.stats as any)?.replicate?.billedSeconds : undefined,
+      engineLabel: j.kind === 'render' ? (isSuite(j) ? j.request.engineLabel : P.engineLabel(j.request)) : undefined, errorCode: (j.stats as any)?.errorCode,
+      billedSeconds: j.state === 'done' ? (j.stats as any)?.replicate?.billedSeconds ?? (j.stats as any)?.suite?.billedSeconds : undefined,
     });
   }
   emitJob(j: JobRow, extra: Record<string, unknown> = {}) {
@@ -160,6 +163,7 @@ export class JobService {
     return q === 'draft' ? c.REPLICATE_PRICE_DRAFT : q === 'hd' ? c.REPLICATE_PRICE_HD : c.REPLICATE_PRICE_STANDARD;
   }
   private holdNote(row: { kind?: string; request?: Record<string, any> }) {
+    if (row.kind === 'render' && row.request && isSuite(row as any)) return `Video · ${row.request.engineLabel} · ${row.request.seconds} s${(row.request.takes ?? 1) > 1 ? ` · ${row.request.takes} takes` : ''} · hold`;
     return row.kind === 'render' && row.request && isRep(row as any) ? `${P.videoNote(row.request, [P.replicateSeconds(row.request.clipSeconds)])}${(row.request.takes ?? 1) > 1 ? ` · ${row.request.takes} takes` : ''} · hold` : undefined;
   }
 
@@ -219,7 +223,7 @@ export class JobService {
     const [u] = await this.ctx.db.update(jobs).set({ state: 'failed', gpuState: 'cancelled', error: why, refunded: j.cost, finishedAt: Date.now(), phase: why })
       .where(and(eq(jobs.id, j.id), eq(jobs.state, 'running'))).returning();
     if (!u) return;
-    if (isRep(j)) this.ctx.replicateVideo.cancel(j.id); else await this.ctx.gpu.cancel(j.id);
+    if (isRep(j)) this.ctx.replicateVideo.cancel(j.id); else if (isSuite(j)) this.ctx.suite.runner.cancel(j.id); else await this.ctx.gpu.cancel(j.id);
     if (u.userId) await this.ctx.money.release(u.studioId, u.userId, u.id, u.holdTokens, why);
     this.queueInfo.delete(j.id); this.lineInfo.delete(j.id);
   }
@@ -271,7 +275,7 @@ export class JobService {
   async claimFor(pod: { id: string; assignedUserId: string | null; gpuType: string }, caps?: string[], anyUser = false): Promise<JobRow | null> {
     if (!pod.assignedUserId && !anyUser) return null;
     const can = (j: JobRow) => !caps || (caps.includes(this.workerKind(j)) && (!j.request.lipSync || caps.includes('latentsync')));
-    const mine = (await this.waitingJobs()).filter(j => !isRep(j) && (anyUser || j.userId === pod.assignedUserId) && !j.blocked
+    const mine = (await this.waitingJobs()).filter(j => !isHosted(j) && (anyUser || j.userId === pod.assignedUserId) && !j.blocked
       && (anyUser || gpuCanRun(this.ctx.config, pod.gpuType, this.workerKind(j))) && can(j));
     for (const j of mine) {
       const c = await this.claim(j.id, pod.id);
@@ -286,7 +290,7 @@ export class JobService {
     if (!u) return null;
     this.queueInfo.delete(u.id);
     this.lineInfo.delete(u.id);
-    const p = u.kind === 'render' ? P.progressAt(u.request, 0) : { phase: 'Getting ready' };
+    const p = isSuite(u) ? { progress: 0, phase: 'Starting' } : u.kind === 'render' ? P.progressAt(u.request, 0) : { phase: 'Getting ready' };
     const [v] = await this.ctx.db.update(jobs).set({ ...p, blocked: null }).where(eq(jobs.id, u.id)).returning();
     this.emitJob(v!);
     if (v!.kind === 'lora-train') await this.ctx.lora.onProgress(v!, 0);
@@ -327,7 +331,7 @@ export class JobService {
     const angles = (o2?.angles ?? []).filter(Boolean) as ImageRef[];
     const rows = Array.from({ length: n }, (_, i) => ({
       id: `t_${u.id}_${i + 1}`, studioId: u.studioId, userId: u.userId, kind: 'take' as const, jobId: u.id, modelId: u.modelId, index: i + 1, of: n, title: u.title,
-      label: P.takeLabel(u.request), engineLabel: P.engineLabel(u.request), cost: (o.actualCostUsd ?? u.cost) / n, seed: u.seed + i, status: 'test' as const,
+      label: isSuite(u) ? u.request.takeLabel ?? u.request.engineLabel : P.takeLabel(u.request), engineLabel: isSuite(u) ? u.request.engineLabel : P.engineLabel(u.request), cost: (o.actualCostUsd ?? u.cost) / n, seed: u.seed + i, status: 'test' as const,
       thumb: (outputs.find(x => x.name === `take_${i + 1}.mp4`)?.thumb as ImageRef | undefined) ?? (angles.length ? angles[i % angles.length]! : u.thumb), prompt: u.prompt,
       mediaKey: (outputs.find(x => x.name === `take_${i + 1}.mp4`)?.key as string | undefined) ?? null,
       media: mediaOf(outputs.find(x => x.name === `take_${i + 1}.mp4`)), createdAt: now,
@@ -384,8 +388,9 @@ export class JobService {
     try {
       const all = await this.waitingJobs();
       // Replicate jobs have their own line (services/replicateVideo.ts), never on a pod.
-      const waiting = all.filter(j => !isRep(j));
+      const waiting = all.filter(j => !isHosted(j));
       await this.ctx.replicateVideo.dispatch(all.filter(isRep));
+      await this.ctx.suite.runner.dispatch(all.filter(isSuite));
       // Nothing pauses on a provider balance any more (2026-11-04): clear any job an older build paused.
       for (const j of waiting) {
         if (j.blocked) {
@@ -399,7 +404,7 @@ export class JobService {
       await this.ctx.warm.tick(now);
       const pool = this.ctx.gpu as { activePods?: () => Promise<unknown[]> };
       const wasQuiet = this.quiet;
-      this.quiet = all.length === 0 && !this.ctx.replicateVideo.busy() && (pool.activePods ? (await pool.activePods()).length === 0 : false);
+      this.quiet = all.length === 0 && !this.ctx.replicateVideo.busy() && !this.ctx.suite.runner.busy() && (pool.activePods ? (await pool.activePods()).length === 0 : false);
       if (this.quiet !== wasQuiet) this.ctx.log.debug({ quiet: this.quiet }, this.quiet ? 'dispatcher idle: slow polling' : 'dispatcher busy');
     } catch (e) {
       this.quiet = false;
@@ -412,7 +417,7 @@ export class JobService {
 
   /** An add-on engine (RunPod) refused to start a pod for lack of credit: fail that user's waiting add-on jobs (refunded). */
   async failForCredit(studioId: string, userId: string | null, kind: string) {
-    const waiting = (await this.waitingJobs(studioId)).filter(j => !isRep(j) && j.userId === userId && this.workerKind(j) === kind);
+    const waiting = (await this.waitingJobs(studioId)).filter(j => !isHosted(j) && j.userId === userId && this.workerKind(j) === kind);
     for (const j of waiting) await this.fail(j.id, OUT_OF_CREDIT_MESSAGE, true, 'provider_out_of_credit');
     return waiting.length;
   }
