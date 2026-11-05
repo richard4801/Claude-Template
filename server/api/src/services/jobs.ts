@@ -12,7 +12,9 @@ import { ApiError, badRequest, notFound } from '../errors.js';
 import { compact, uid } from '../lib/util.js';
 import { whoOf } from '../money/money.js';
 import * as P from '../pricing.js';
-import { loraToken, replicateSwap, videoSwap } from '../prompt/engine.js';
+import { loraToken } from '../prompt/engine.js';
+import { replicateSwap, videoSwap } from '../prompt/scripts/builders.js';
+import { resolveSpeaking } from '../audio/service.js';
 import { gpuCanRun, type JobRow } from '../gpu/controller.js';
 import { pods } from '../db/schema.js';
 import { shotPromptFor } from '../templates/service.js';
@@ -38,6 +40,8 @@ export const JobRequestSchema = z.object({
   queue: z.boolean().optional(),
   seed: z.number().int().optional(),
   direction: z.string().max(500).optional(),
+  /** Prompt scripts: the studio's "Performer is speaking" switch. Absent: the clip's detection. */
+  speaking: z.boolean().nullish(),
 }).passthrough();
 
 const MOTION_WORDS: Record<string, string> = { still: 'still', subtle: 'subtly alive', busy: 'busy' };
@@ -129,11 +133,15 @@ export class JobService {
     // <Image n> in the prompt follows this order.
     const references = replicate ? replicateReferencesFor(m, o) : referencesFor(m, o);
     const texts = await this.ctx.prompts.texts(user.studioId);
-    const prompt = replicate ? replicateSwap({
+    // Lip-sync fix: speaking decides the prompt's mouth wording and whether the model hears the clip's audio.
+    const sp = await resolveSpeaking(this.ctx, clip, r.speaking);
+    (r as Record<string, unknown>).speaking = sp.speaking;
+    (r as Record<string, unknown>).speakingSource = sp.source;
+    const prompt = replicate ? replicateSwap({ speaking: sp.speaking,
       identity: { name: m.name, look: m.look || `${m.age}-year-old woman`, neverAdd: m.neverAdd },
       outfit: o ? { name: o.name, description: o.description, source: o.mode === 'describe' && !o.angles.some(Boolean) ? 'described' : 'reference-set' } : null,
       referenceLabels: references.map(x => x.label), direction: r.direction,
-    }, texts).text : videoSwap({
+    }, texts).text : videoSwap({ speaking: sp.speaking,
       identity: { name: m.name, look: m.look || `${m.age}-year-old woman`, referenceCount: Math.max(1, references.length), neverAdd: m.neverAdd, lora },
       referenceLabels: references.length ? references.map(x => x.label) : undefined,
       outfit: { name: o?.name ?? 'outfit' }, keepAudio: r.keepAudio, keepBackground: r.background === 'keep',

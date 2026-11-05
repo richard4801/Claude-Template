@@ -22,6 +22,7 @@ import { LocalStorage, contentTypeFor } from '../storage/index.js';
 import { objectInfo, putObject } from '../storage/objects.js';
 import { seedDev, SLOT_SAMPLE } from '../seed.js';
 import { buildTemplatePrompt, randomImageSeed, randomSeed } from '../templates/prompt.js';
+import { analyzeClip, audioView } from '../audio/service.js';
 import { dbStatus } from '../db/pg.js';
 import { inviteShareText, registerReleaseRoutes } from './releases.js';
 import { setViews } from '../services/tools.js';
@@ -50,7 +51,8 @@ export function modelView(m: typeof models.$inferSelect) {
 export const outfitView = (o: typeof outfits.$inferSelect) =>
   compact({ id: o.id, modelId: o.modelId, name: o.name, mode: o.mode, description: o.description, angles: o.angles, faces: o.faces ?? undefined, state: o.state, prompt: o.prompt, cost: o.cost ?? undefined });
 setViews(modelView, outfitView);
-const clipView = (c: typeof clips.$inferSelect) => compact({ id: c.id, name: c.name, durationSec: c.durationSec, width: c.width, height: c.height, fps: c.fps, checks: c.checks });
+const clipView = (c: typeof clips.$inferSelect) => compact({ id: c.id, name: c.name, durationSec: c.durationSec, width: c.width, height: c.height, fps: c.fps, checks: c.checks,
+  /* prompt scripts: talking detection */ audio: audioView(c) ?? undefined });
 
 export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   const db = ctx.db;
@@ -331,8 +333,15 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const id = uid('clip');
     const [c] = await db.insert(clips).values({ id, studioId: u.studioId, name: meta.name ?? 'Clip', durationSec: meta.durationSec, width: meta.width, height: meta.height, fps: meta.fps,
       meta, checks: P.clipChecks(meta), storageKey, createdBy: u.id, createdAt: Date.now() }).returning();
-    ctx.hub.emit(u.studioId, { type: 'clip', clip: clipView(c!) });
-    return clipView(c!);
+    // Prompt scripts: classify the clip's audio (free, well under a second); the answer comes with the clip. If it takes
+    // longer than 8 s it finishes in the background and a second clip event carries `audio`.
+    let late = false;
+    const analysed = storageKey ? analyzeClip(ctx, id, row => { if (late) ctx.hub.emit(u.studioId, { type: 'clip', clip: clipView(row) }); }) : null;
+    const row = analysed && (await Promise.race([analysed.then(() => true), new Promise<false>(r => setTimeout(() => r(false), 8000).unref())]))
+      ? (await db.select().from(clips).where(eq(clips.id, id)))[0] ?? c! : c!;
+    late = true;
+    ctx.hub.emit(u.studioId, { type: 'clip', clip: clipView(row) });
+    return clipView(row);
   }
 
   app.post('/v1/uploads/images', async req => {
