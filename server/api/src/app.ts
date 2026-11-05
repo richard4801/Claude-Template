@@ -19,6 +19,7 @@ import { createStorage } from './storage/index.js';
 import { registerRoutes } from './routes/index.js';
 import { registerWorkerRoutes } from './routes/worker.js';
 import { registerVersionRoutes } from './routes/versions.js';
+import { registerCameraRoutes } from './routes/camera.js'; // workstream 2
 import { seedDev } from './seed.js';
 import { TemplateService } from './templates/service.js';
 import { WarmService } from './services/warm.js';
@@ -145,6 +146,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   await registerWorkerRoutes(app, ctx);
   await registerVersionRoutes(app, ctx);
   await registerSuiteRoutes(app, ctx); // AI suite (workstream 1)
+  await registerCameraRoutes(app, ctx); // workstream 2: camera sessions, Direct with Claude, Blender relay, MCP server
 
   app.addHook('onListen', async () => {
     const a = app.server.address();

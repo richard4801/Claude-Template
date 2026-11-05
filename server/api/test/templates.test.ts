@@ -296,7 +296,9 @@ describe('photo templates', () => {
 
   it('/health reports the build, the migrations and the starter seed', async () => {
     const h = (await a.app.inject({ method: 'GET', url: '/health' })).json();
-    expect(h.migrations).toEqual({ applied: 8, latest: '0007_suite' });
+    // From the journal, so a new migration on any branch doesn't break this test.
+    const journal = JSON.parse((await import('node:fs')).readFileSync(new URL('../drizzle/meta/_journal.json', import.meta.url), 'utf8')).entries;
+    expect(h.migrations).toEqual({ applied: journal.length, latest: journal.at(-1).tag });
     expect(h.startedAt).toBeGreaterThan(0);
   });
 });

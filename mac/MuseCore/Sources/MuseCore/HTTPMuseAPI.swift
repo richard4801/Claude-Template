@@ -64,6 +64,9 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
         return token
     }
 
+    /// The signed-in session's token, in memory whether or not "Remember me" kept it in the Keychain (workstream 2: the Blender relay).
+    public var sessionToken: String? { currentToken }
+
     // MARK: Plumbing
 
     public func url(_ path: String) -> URL {

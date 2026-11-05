@@ -498,3 +498,6 @@ export const promptOverrides = pgTable('prompt_overrides', {
 
 // AI suite (workstream 1, migration 0007)
 export * from '../suite/schema.js';
+
+// Workstream 2 (camera sessions + MCP tokens, migration 0008).
+export * from '../camera/schema.js';

@@ -28,6 +28,6 @@ _Started 2026-11-05._ Several Claude sessions build MUSE features at the same ti
 
 ## Status (each session updates its own line)
 - 1 · AI suite core: **backend done on `claude/muse-suite-core`** (2026-11-05): model registry + licence flags, quality ladder, Camera spec + per-model compiler (prompt library group `suite`), Shot estimate/create on the job/wallet pipeline, suite caps, Replicate/fal/mock providers, migration 0007. Contracts: `plans/api.md` "AI suite", `plans/ai-suite.md`. 22 suite tests green. UI waits for Figma.
-- 2 · MCP + Blender bridge: not started
+- 2 · MCP + Blender bridge: done, pushed on claude/muse-mcp-bridge. Server: camera sessions (migration 0008), /mcp (owner tokens), Direct with Claude chat (mocked Claude in tests), Blender relay, Shot drafts via the suite's estimate. Mac: MuseCore Blender relay (swift build + 23 Blender tests green on Linux; scripts not yet run in a real Blender), BlenderRelayService wired with one line in AppStore.connect/endSession. Docs: plans/mcp-bridge.md, api.md "MCP & camera sessions".
 - 3 · Editor engine v2: not started
 - 4 · Prompt scripts: not started
