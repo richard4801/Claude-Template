@@ -81,6 +81,22 @@ class OwnerViewModel(private val c: AppContainer) : ViewModel() {
     val memberOpen = c.drafts.memberOpen
     val lastInvite = c.drafts.lastInvite
 
+    init {
+        // Live: a member's credit moves, someone joins, an invite is made or used, settings change on another device.
+        viewModelScope.launch {
+            c.repo.live.collect { ev ->
+                when (ev.type) {
+                    "member" -> ev.member?.let { m -> _s.update { s -> s.copy(members = if (s.members.any { it.id == m.id }) s.members.map { if (it.id == m.id) m else it } else s.members + m) } }
+                    "invite" -> loadInvites()
+                    "settings" -> when {
+                        ev.settings != null -> _s.update { it.copy(settings = ev.settings) }
+                        _s.value.settings != null -> loadSettings()
+                    }
+                }
+            }
+        }
+    }
+
     fun loadMembers() = viewModelScope.launch { c.repo.members()?.let { m -> _s.update { it.copy(members = m) } }; c.repo.refreshWallet() }
     fun loadInvites() = viewModelScope.launch { c.repo.invites()?.let { i -> _s.update { it.copy(invites = i) } } }
     fun loadSettings() = viewModelScope.launch {

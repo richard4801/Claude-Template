@@ -53,6 +53,8 @@ fun CreditsScreen() {
     val c = LocalContainer.current
     val vm: SettingsViewModel = viewModel { SettingsViewModel(c) }
     val s by vm.state.collectAsState()
+    /** The studio balance card, kept live by `studio` events (a top-up or a spend on another device). */
+    val live by c.repo.state.collectAsState()
     val nav = LocalNav.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var studio by remember { mutableStateOf<StudioBalance?>(null) }
@@ -70,7 +72,7 @@ fun CreditsScreen() {
                 when {
                     w == null -> LegacyBalance(s.balance, s.videos)
                     w.owner -> {
-                        OwnerTokens(w, s.balance, studio)
+                        OwnerTokens(w, s.balance, live.studioBalance ?: studio)
                         Field("Add a top-up") {
                             Tiny("Record money you loaded into the studio, e.g. after paying the engines. Every render and photo is spent from it.")
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

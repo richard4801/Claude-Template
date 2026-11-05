@@ -701,7 +701,28 @@ data class ApiEvent(
     val warning: WarmWarning? = null,
     /** type "tool": an Enhance or Dress up run changed. */
     val tool: ToolRun? = null,
-)
+    /** "delete": remove the item with [id] (take, job, model, template, post) or the account of [modelId] on [platform]. */
+    val op: String? = null,
+    val id: String? = null,
+    /** type "take": one new or changed take (a photoshoot still on another device, a status change). */
+    val take: Take? = null,
+    /** type "template": my view of a template (layers only when it's mine). */
+    val template: Template? = null,
+    /** type "account". */
+    val account: Account? = null,
+    val modelId: String? = null,
+    val platform: String? = null,
+    /** type "settings": the studio settings in my role's view. */
+    val settings: StudioSettings? = null,
+    /** Owners only: type "member" (one row of Members) and type "studio" (the studio balance card). */
+    val member: Member? = null,
+    val studioBalance: StudioBalance? = null,
+) {
+    companion object {
+        /** Not from the server: the stream (re)connected, so the app refetches what it may have missed. */
+        const val CONNECTED = "connected"
+    }
+}
 
 /** PATCH /v1/models/{id}: only the fields sent change. */
 @Serializable

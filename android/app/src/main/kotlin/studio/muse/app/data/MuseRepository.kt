@@ -36,6 +36,8 @@ data class StudioState(
     val tools: ToolsFeatures = ToolsFeatures(),
     /** Enhance and Dress up runs this session has seen, by id (kept live by `tool` events). */
     val toolRuns: Map<String, ToolRun> = emptyMap(),
+    /** The owner's studio balance card, kept live by `studio` events (null until loaded; never for members). */
+    val studioBalance: StudioBalance? = null,
     val loaded: Boolean = false,
     val error: String? = null,
 ) {
@@ -81,6 +83,10 @@ class MuseRepository(
     val signedOut: SharedFlow<String> = _signedOut
 
     /** The 5-minute warning before a warm GPU turns itself off (in-app banner and notification). */
+    /** Owner-screen events (members, invites, settings) for screens that hold their own lists. */
+    private val _live = MutableSharedFlow<ApiEvent>(extraBufferCapacity = 32)
+    val live: SharedFlow<ApiEvent> = _live
+
     private val _warmWarnings = MutableSharedFlow<WarmWarning>(extraBufferCapacity = 4)
     val warmWarnings: SharedFlow<WarmWarning> = _warmWarnings
 
@@ -114,11 +120,43 @@ class MuseRepository(
         if (changed) _state.value = StudioState()
         // The real API needs a session for everything under /v1: nothing to load until signed in.
         if (next !== fake && token == null) { _state.value = StudioState(loaded = true); eventsJob = null; return }
-        eventsJob = scope.launch { runCatching { next.events().collect { onEvent(it) } } }
+        startEvents(next)
         refreshJob = scope.launch {
             if (next !== fake) restoreSession()
             refresh()
         }
+    }
+
+    private var eventsStartedAt = 0L
+    private var connects = 0
+    private var lastCatchUp = 0L
+
+    private fun startEvents(a: MuseApi) {
+        eventsJob?.cancel()
+        connects = 0
+        eventsStartedAt = System.currentTimeMillis()
+        eventsJob = scope.launch { runCatching { a.events().collect { onEvent(it) } } }
+    }
+
+    /**
+     * The app came to the foreground (Activity onStart): the stream may have died quietly while the phone slept or
+     * changed networks, so it starts afresh, and the lists are refetched so nothing that happened meanwhile is missed.
+     */
+    fun onForeground() {
+        val a = api
+        if (a !== fake && sessionToken == null) return
+        val now = System.currentTimeMillis()
+        if (now - eventsStartedAt < 5_000) return // just started (launch, rotation)
+        startEvents(a)
+        catchUp()
+    }
+
+    /** Refetch after a reconnect or on foreground; at most once every 3 s. */
+    private fun catchUp() {
+        val now = System.currentTimeMillis()
+        if (now - lastCatchUp < 3_000) return
+        lastCatchUp = now
+        scope.launch { refresh(); if (_state.value.templates.isNotEmpty()) loadTemplates(quiet = true) }
     }
 
     /** GET /v1/auth/me on launch: keeps the role current, or signs out if the session has ended. Offline keeps the session. */
@@ -153,7 +191,8 @@ class MuseRepository(
             if (a !== api) return
             _state.update {
                 StudioState(models, outfits, jobs.sortedByDescending { it.createdAt }, takes, bal, loras, accounts, posts, wallet, warm = warm, video = features?.video,
-                    photo = features?.photo?.prices ?: studio.muse.core.PhotoPrices(), tools = features?.tools ?: ToolsFeatures(), toolRuns = it.toolRuns, loaded = true)
+                    photo = features?.photo?.prices ?: studio.muse.core.PhotoPrices(), tools = features?.tools ?: ToolsFeatures(), toolRuns = it.toolRuns,
+                    templates = it.templates, studioBalance = it.studioBalance, loaded = true)
             }
         } catch (e: ApiException) {
             _state.update { it.copy(loaded = true, error = ErrorText.of(e)) }
@@ -169,36 +208,38 @@ class MuseRepository(
     }
 
     private fun onEvent(ev: ApiEvent) {
-        ev.balance?.let { b -> _state.update { it.copy(balance = b) } }
-        ev.wallet?.let { w -> onWallet(w) }
+        if (ev.type == ApiEvent.CONNECTED) {
+            // The first connect comes with the initial load; every later one is a reconnect after a drop: catch up.
+            if (connects++ > 0) catchUp()
+            return
+        }
+        val before = _state.value
+        val owner = isOwner()
+        val prevJob = ev.job?.let { before.job(it.id) }
+        val prevTool = ev.tool?.let { before.toolRuns[it.id] }
+        val prevLora = ev.lora?.let { before.loras[it.modelId] }
+        val prevWallet = before.wallet
+        // gpu events only ever reach the owner who switched Keep add-on engine ready on; never shown to members.
+        val apply = if (ev.type == "gpu" && !owner) ev.copy(gpu = null) else ev
+        _state.update { LiveEvents.apply(it, apply, owner) }
+        ev.wallet?.let { w -> onWallet(w, prevWallet) }
         // Owner notices only (an engine's own account is out of credit): Settings → Engines says which.
         ev.notice?.let { n ->
             if (n.code == "provider_out_of_credit") toast("An engine is out of credit · see Settings → Engines", "studio")
             else if (n.message.isNotBlank() && !Regex("(?i)gpu|runpod").containsMatchIn(n.message)) toast(n.message)
         }
-        // An archived model drops out of every list.
-        ev.model?.let { m -> _state.update { s -> s.copy(models = if (m.archived) s.models.filterNot { it.id == m.id } else s.models.upsert(m) { it.id == m.id }) } }
-        ev.tool?.let { putTool(it) }
-        ev.outfit?.let { o -> _state.update { s -> s.copy(outfits = s.outfits.upsert(o) { it.id == o.id }) } }
-        ev.lora?.let { l -> putLora(l) }
-        // gpu events only ever reach the owner who switched Keep add-on engine ready on; never shown to members.
-        if (isOwner()) {
+        ev.tool?.let { r -> toolToasts(prevTool, r) }
+        ev.lora?.let { l -> if (prevLora?.state == "training" && l.state == "ready") onLoraReady?.invoke(_state.value.model(l.modelId), l) }
+        if (owner) {
             ev.gpu?.let { g -> putWarm(g) }
             if (ev.type == "gpu" && ev.event == "warning") ev.warning?.let { _warmWarnings.tryEmit(it) }
         }
-        ev.post?.let { p -> _state.update { s -> s.copy(posts = s.posts.upsert(p) { it.id == p.id }) } }
-        if (ev.takes.isNotEmpty()) _state.update { s -> s.copy(takes = ev.takes + s.takes.filterNot { t -> ev.takes.any { it.id == t.id } }) }
-        ev.job?.let { j ->
-            val prev = _state.value.job(j.id)
-            _state.update { s -> s.copy(jobs = s.jobs.upsert(j) { it.id == j.id }.sortedByDescending { it.createdAt }) }
-            if ((prev == null || prev.running) && (j.done || j.failed)) listener?.onJobFinished(j)
-        }
+        ev.job?.let { j -> if (ev.op != "delete" && (prevJob == null || prevJob.running) && (j.done || j.failed)) listener?.onJobFinished(j) }
+        if (ev.type in setOf("member", "invite", "settings", "studio")) _live.tryEmit(ev)
     }
 
     /** A `wallet` event: refresh the balance, and say so when the owner sent or took back tokens. */
-    private fun onWallet(w: Wallet) {
-        val prev = _state.value.wallet
-        _state.update { it.copy(wallet = w) }
+    private fun onWallet(w: Wallet, prev: Wallet?) {
         if (prev == null || w.owner || prev.userId != w.userId) return
         val delta = w.tokens - prev.tokens
         // A transfer moves tokens without touching holds; refunds and settlements release a hold, so they aren't gifts.
@@ -265,6 +306,9 @@ class MuseRepository(
     fun putTool(r: ToolRun) {
         val prev = _state.value.toolRuns[r.id]
         _state.update { it.copy(toolRuns = it.toolRuns + (r.id to r)) }
+        toolToasts(prev, r)
+    }
+    private fun toolToasts(prev: ToolRun?, r: ToolRun) {
         if (prev?.state == "running" && r.state == "review") toast("${if (r.kind == "enhance") "Enhance" else "Dress up"} is ready to review")
         if (prev?.state == "running" && r.state == "failed") toast(r.error ?: "Something went wrong · you weren't charged")
     }
@@ -322,7 +366,7 @@ class MuseRepository(
         _state.value = StudioState(loaded = true)
     }
 
-    suspend fun createModel(req: CreateModelRequest) = attempt { createModel(req) }?.also { m -> _state.update { it.copy(models = it.models + m) } }
+    suspend fun createModel(req: CreateModelRequest) = attempt { createModel(req) }?.also { m -> _state.update { s -> s.copy(models = s.models.filterNot { it.id == m.id } + m) } }
 
     suspend fun setSlot(modelId: String, slot: String, image: ImageRef?, source: String = "upload") =
         attempt { setSlot(modelId, slot, SetSlotRequest(image, source)) }?.also { m -> _state.update { s -> s.copy(models = s.models.upsert(m) { it.id == m.id }) } }
@@ -359,7 +403,7 @@ class MuseRepository(
     suspend fun deleteTake(id: String) = attempt { deleteTake(id) }?.also { _state.update { s -> s.copy(takes = s.takes.filterNot { it.id == id }) } }
 
     suspend fun shoot(req: ShootRequest) = attempt { shoot(req) }?.also { shots ->
-        _state.update { s -> s.copy(takes = shots + s.takes) }
+        _state.update { s -> s.copy(takes = LiveEvents.putTakes(s.takes, shots)) }
         refreshBalance()
     }
 
@@ -380,10 +424,10 @@ class MuseRepository(
     suspend fun topUp(amount: Double, method: String) = attempt { topUp(TopUpRequest(amount, method)) }?.also { b -> _state.update { it.copy(balance = b) } }
 
     // ---- the owner-loaded studio balance
-    suspend fun studioBalance() = attemptInline { studioBalance() }
+    suspend fun studioBalance() = attemptInline { studioBalance() }.also { (b, _) -> b?.let { v -> _state.update { it.copy(studioBalance = v) } } }
     /** Records "Added $20" (owner). Returns the new studio balance, or the friendly error. */
     suspend fun addTopUp(amountUsd: Double, note: String?) =
-        attemptInline { addTopUp(AddTopUpRequest(amountUsd, note?.trim()?.ifBlank { null })) }.also { (r, _) -> if (r != null) refreshBalance() }
+        attemptInline { addTopUp(AddTopUpRequest(amountUsd, note?.trim()?.ifBlank { null })) }.also { (r, _) -> if (r != null) { _state.update { it.copy(studioBalance = r) }; refreshBalance() } }
 
     /** Upscale a finished render (coming soon). */
     suspend fun upscale(takeId: String, size: String) = attempt { upscale(takeId, size) }?.also { j ->
@@ -401,12 +445,7 @@ class MuseRepository(
     // ---- models
     suspend fun updateModel(id: String, req: UpdateModelRequest) = attempt { updateModel(id, req) }?.also { m -> _state.update { s -> s.copy(models = s.models.upsert(m) { it.id == m.id }) } }
 
-    suspend fun deleteModel(id: String) = attempt { deleteModel(id) }?.also {
-        _state.update { s ->
-            s.copy(models = s.models.filterNot { it.id == id }, outfits = s.outfits.filterNot { it.modelId == id }, loras = s.loras - id, accounts = s.accounts - id,
-                posts = s.posts.filterNot { it.modelId == id && !it.out })
-        }
-    }
+    suspend fun deleteModel(id: String) = attempt { deleteModel(id) }?.also { _state.update { s -> LiveEvents.dropModel(s, id) } }
 
     // ---- Identity LoRA
     suspend fun buildLoraSet(modelId: String) = attempt { buildLoraSet(modelId) }?.also { putLora(it); refreshBalance() }

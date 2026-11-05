@@ -37,6 +37,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Back in the foreground: restart the live stream and refetch, so changes made on other devices meanwhile show up. */
+    override fun onStart() {
+        super.onStart()
+        (application as MuseApplication).container.repo.onForeground()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         intent.getStringExtra(Notifier.EXTRA_ROUTE)?.let { pendingRoute.value = it }

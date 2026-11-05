@@ -5,7 +5,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.retryWhen
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
@@ -352,13 +352,35 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     private fun Take.abs() = copy(thumb = thumb?.abs(), videoUrl = videoUrl?.absUrl())
     private fun Template.abs() = copy(cover = cover?.abs(), recent = recent?.map { it.copy(thumb = it.thumb?.abs()) })
 
-    override fun events(): Flow<ApiEvent> = callbackFlow {
+    /** Reconnects forever: 1 s after a drop, backing off to 10 s while the server can't be reached. */
+    override fun events(): Flow<ApiEvent> = flow {
+        var fails = 0
+        while (true) {
+            var opened = false
+            try {
+                eventStream().collect { if (it.type == ApiEvent.CONNECTED) opened = true; emit(it) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+            }
+            if (opened) fails = 0
+            delay(minOf(10_000L, 1000L * ++fails))
+        }
+    }
+
+    private fun eventStream(): Flow<ApiEvent> = callbackFlow {
         val req = Request.Builder().url(base + "v1/events").apply { token?.let { header("Authorization", "Bearer $it") } }.build()
-        val sseClient = client.newBuilder().readTimeout(0, TimeUnit.SECONDS).build()
+        // The server sends a comment every 10 s (15 s on older builds), so 40 s without a byte means the connection died
+        // quietly (sleep, a network change, a proxy dropping it): fail, and retryWhen reconnects.
+        val sseClient = client.newBuilder().readTimeout(40, TimeUnit.SECONDS).build()
         val source = EventSources.createFactory(sseClient).newEventSource(req, object : EventSourceListener() {
+            override fun onOpen(eventSource: EventSource, response: Response) {
+                trySend(ApiEvent(ApiEvent.CONNECTED))
+            }
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
                 runCatching { json.decodeFromString(ApiEvent.serializer(), data) }.onSuccess { e ->
-                    trySend(e.copy(lora = e.lora?.abs(), post = e.post?.abs(), job = e.job?.abs(), model = e.model?.abs(), outfit = e.outfit?.abs(), takes = e.takes.map { it.abs() }, tool = e.tool?.abs()))
+                    trySend(e.copy(lora = e.lora?.abs(), post = e.post?.abs(), job = e.job?.abs(), model = e.model?.abs(), outfit = e.outfit?.abs(), takes = e.takes.map { it.abs() },
+                        tool = e.tool?.abs(), take = e.take?.abs(), template = e.template?.abs()))
                 }
             }
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
@@ -367,7 +389,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
             override fun onClosed(eventSource: EventSource) { close(java.io.IOException("SSE closed")) }
         })
         awaitClose { source.cancel() }
-    }.retryWhen { _, attempt -> delay(minOf(10_000L, 1000L * (attempt + 1))); true }
+    }
 }
 
 /** A byte-array body that reports how much has been written (0..1). */
