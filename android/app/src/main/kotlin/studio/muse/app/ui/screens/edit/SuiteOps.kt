@@ -237,7 +237,8 @@ object SuiteOps {
     /** A transcript word and whether the edit still plays it (its middle is inside a kept main clip of its asset). */
     data class WordState(val index: Int, val text: String, val startSec: Double, val endSec: Double, val kept: Boolean, val filler: Boolean)
 
-    private val FILLERS = setOf("um", "uh", "er", "ah", "hmm", "mm", "erm", "uhm", "like")
+    /** The core filler list plus "like" (also passed to suggestCuts as an extra filler). */
+    val FILLERS: Set<String> = (studio.muse.core.edit.CutDefaults.FILLERS + "like").toSet()
 
     fun words(p: EditProject): List<WordState> {
         val ct = p.tracks.firstOrNull { it.kind == TrackKind.CAPTION }?.caption ?: return emptyList()

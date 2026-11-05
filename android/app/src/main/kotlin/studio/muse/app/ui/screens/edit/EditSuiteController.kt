@@ -151,7 +151,10 @@ class EditSuiteController(
     private val scope: CoroutineScope,
     private val backend: EditBackend,
     initial: EditSuiteUi = EditSuiteUi(),
+    /** The look a bundled look id sets (the pack's own; by default just its LUT at full strength). */
+    private val lookOf: (String) -> Look? = { Look(lut = "pack:$it", strength = 1.0) },
 ) {
+
     private val _ui = MutableStateFlow(initial)
     val ui: StateFlow<EditSuiteUi> = _ui.asStateFlow()
     private var history: ProjectHistory? = initial.project?.let { ProjectHistory(it) }
@@ -324,7 +327,11 @@ class EditSuiteController(
 
             is EditAction.FiltersTab -> _ui.update { it.copy(filtersTab = a.tab) }
             is EditAction.LookCategory -> _ui.update { it.copy(lookCategory = a.category) }
-            is EditAction.PickLook -> { val id = visualId(u) ?: return; change { SuiteOps.setLook(it, listOf(id), a.look?.copy(strength = currentLook(u)?.strength ?: a.look.strength)) } }
+            is EditAction.PickLook -> {
+                val id = visualId(u) ?: return
+                val look = (a.look ?: a.id?.let(lookOf))?.let { l -> l.copy(strength = currentLook(u)?.takeIf { it.lut != null }?.strength ?: l.strength) }
+                change { SuiteOps.setLook(it, listOf(id), look) }
+            }
             is EditAction.LookStrength -> { val id = visualId(u) ?: return; val l = currentLook(u) ?: return; change(a.done) { SuiteOps.setLook(it, listOf(id), l.copy(strength = r2(a.strength.coerceIn(0.0, 1.0)))) } }
             EditAction.LookToAll -> {
                 val l = currentLook(u)
@@ -446,7 +453,7 @@ class EditSuiteController(
         val ct = p.tracks.firstOrNull { it.kind == TrackKind.CAPTION }?.caption ?: return emptyList()
         val words = ct.words.map { Word(it.text, it.startSec, it.endSec) }
         val dur = p.asset(ct.asset)?.durationSec ?: (words.lastOrNull()?.endSec ?: 0.0)
-        return suggestCuts(words, dur, CutOptions(minSilenceSec = 5.0, fillers = true, repeats = false)).cuts
+        return suggestCuts(words, dur, CutOptions(minSilenceSec = 5.0, fillers = true, repeats = false, extraFillers = listOf("like"))).cuts
             .filter { it.reason == studio.muse.core.edit.CutReason.FILLER }
             .filter { k -> SuiteOps.words(p).any { w -> w.kept && w.startSec < k.endSec && w.endSec > k.startSec } }
             .map { Range(it.startSec, it.endSec) }

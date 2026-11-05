@@ -676,7 +676,7 @@ class FakeMuseApi(
         val dto = EditListDto(2, takeId, 0.0, emptyList(), false).also { it.project = project }
         val t = src.copy(
             id = "t_edit_${now()}", kind = "edit", parentTakeId = takeId, label = "Edited", edits = dto, createdAt = now(), cost = 0.0,
-            videoUrl = android.net.Uri.fromFile(video.file).toString(), durationSec = video.durationSec, width = video.width, height = video.height, fps = video.fps,
+            videoUrl = "file://" + video.file.absolutePath, durationSec = video.durationSec, width = video.width, height = video.height, fps = video.fps,
         )
         takes.add(0, t)
         events.tryEmit(ApiEvent("take", takes = listOf(t)))

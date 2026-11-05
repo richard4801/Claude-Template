@@ -245,9 +245,9 @@ class RepoEditBackend(private val c: AppContainer, private val pollMs: Long = 70
 @OptIn(FlowPreview::class)
 class EditSuiteViewModel(private val c: AppContainer, private val takeId: String, context: Context) : ViewModel() {
     private val app = context.applicationContext
-    val controller = EditSuiteController(viewModelScope, RepoEditBackend(c))
-    private val engine = VideoEditEngine(app)
     private val looks = LookLibrary(app)
+    val controller = EditSuiteController(viewModelScope, RepoEditBackend(c), lookOf = { id -> runCatching { looks.pack.packLook(id) }.getOrNull() })
+    private val engine = VideoEditEngine(app)
     private val composer by lazy { EditCompositionEngine(app, looks) }
     private val files = HashMap<String, File>()
     private var sourceFile: File? = null
