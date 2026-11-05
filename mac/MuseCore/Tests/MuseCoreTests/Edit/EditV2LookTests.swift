@@ -31,14 +31,16 @@ final class EditV2LookTests: XCTestCase {
         XCTAssertEqual(pic.data.count, 24 * 16 * 3)
         let L = try luts(f)
         let renders = f["renders"].array
-        XCTAssertEqual(renders.count, 10)
+        XCTAssertEqual(renders.count, 11)
         for r in renders {
             let name = r["name"].string ?? "?"
             let look = try r["look"].decode(E.Look.self)
             let matrix = r["matrix"].isNull ? nil : nums(r["matrix"])
             let lut = r["lut"].string.flatMap { L[$0] }
             if !r["lut"].isNull { XCTAssertNotNil(lut, name) }
-            let out = E.renderLook(pic, look, matrix: matrix, lut: lut, frame: Int(r["frame"].double ?? 0), fps: 30)
+            let tone = r["tone"].isNull ? nil : E.Tone(shadows: r["tone"]["shadows"].double ?? 0, highlights: r["tone"]["highlights"].double ?? 0)
+            let out = E.renderLook(pic, look, matrix: matrix, tone: tone, lut: lut, frame: Int(r["frame"].double ?? 0), fps: 30)
+
             let want = nums(r["out"])
             XCTAssertEqual(out.data.count, want.count, name)
             var worst = 0.0, at = 0

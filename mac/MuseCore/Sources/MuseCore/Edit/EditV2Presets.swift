@@ -61,7 +61,13 @@ extension EditV2 {
                            highlightColor: "#4ADE80", y: 0.7, wordsPerPage: 2, maxLines: 1),
         .single: CaptionStyle(base { $0.sizePct = 0.065; $0.uppercase = true; $0.stroke = Stroke(color: "#000000", widthPct: 0.14) }, preset: .single,
                               highlightColor: "#FFFFFF", y: 0.6, wordsPerPage: 1, maxLines: 1),
+        // Edit suite: a marker stripe behind the active word; a neon glow.
+        .highlighter: CaptionStyle(base { $0.weight = 900; $0.sizePct = 0.045; $0.uppercase = true; $0.color = "#FFFFFF"; $0.stroke = Stroke(color: "#000000", widthPct: 0.08) },
+                                   preset: .highlighter, highlightColor: "#22C55E", y: 0.72, wordsPerPage: 3, maxLines: 2),
+        .neon: CaptionStyle(base { $0.weight = 900; $0.sizePct = 0.045; $0.uppercase = true; $0.color = "#FFD1E8"; $0.shadow = Shadow(color: "#FF2D87", opacity: 0.9, blurPct: 0.5, dyPct: 0) },
+                            preset: .neon, highlightColor: "#FF2D87", y: 0.72, wordsPerPage: 3, maxLines: 2),
     ]
+
 
     public static func captionStyle(_ p: CaptionPreset) -> CaptionStyle { captionStyles[p]! }
 

@@ -7,7 +7,19 @@ extension EditV2 {
     public static let maxJsonBytes = 256 * 1024
     public static let maxTracks = 16, maxItemsPerTrack = 300, maxItems = 600, maxAssets = 60, maxWords = 3000, maxKeyframes = 100
     public static let minClipSourceSec = 0.1, minItemSec = 0.05, minOutputSec = 0.5, maxOutputSec = 600.0
-    public static let minSpeed = 0.25, maxSpeed = 4.0, endSlackSec = 0.05, minTransitionSec = 0.1, maxTransitionSec = 2.0
+    public static let minSpeed = 0.1, maxSpeed = 10.0, endSlackSec = 0.05, minTransitionSec = 0.1, maxTransitionSec = 2.0
+    /// Speed curves render as this many equal source pieces (each at the curve's speed at its middle).
+    public static let curvePieces = 48
+    /// Speed-curve presets (x = position in the clip's kept source, speed ×).
+    public static let speedPresets: [SpeedPreset: [[Double]]] = [
+        .montage: [[0, 1], [0.2, 4], [0.4, 0.5], [0.6, 4], [0.8, 0.5], [1, 1]],
+        .hero: [[0, 1], [0.3, 1], [0.42, 6], [0.58, 6], [0.7, 1], [1, 1]],
+        .bullet: [[0, 4], [0.35, 4], [0.45, 0.2], [0.55, 0.2], [0.65, 4], [1, 4]],
+        .flashIn: [[0, 6], [0.4, 6], [0.6, 1], [1, 1]],
+        .flashOut: [[0, 1], [0.4, 1], [0.6, 6], [1, 6]],
+    ]
+    /// The preset's curve (nil for custom).
+    public static func speedCurve(_ preset: SpeedPreset) -> SpeedCurve? { speedPresets[preset].map { SpeedCurve(preset: preset, points: $0) } }
     public static let maxText = 500, overlapSlackSec = 0.001
     public static let v1Speeds: [Double] = [0.5, 0.75, 1, 1.25, 1.5, 2]
     /// Caption paging constants.
@@ -71,7 +83,80 @@ extension EditV2 {
 
     // MARK: Timeline
 
-    public static func clipLength(_ c: VideoClip) -> Double { (c.outSec - c.inSec) / c.speed }
+    public static func clipLength(_ c: VideoClip) -> Double {
+        if c.speedCurve != nil { return speedPieces(c).reduce(0) { $0 + ($1.outSec - $1.inSec) / $1.speed } }
+        return (c.outSec - c.inSec) / c.speed
+    }
+
+    // MARK: Speed curves
+
+    /// Speed at x (0–1) of a curve: smoothstep between points in log speed.
+    public static func curveSpeed(_ c: SpeedCurve, _ x: Double) -> Double {
+        let pts = c.points.filter { $0.count >= 2 }
+        guard let first = pts.first, let last = pts.last else { return 1 }
+        if x <= first[0] { return first[1] }
+        for k in 0..<(pts.count - 1) {
+            let a = pts[k], b = pts[k + 1]
+            if x <= b[0] {
+                let t = b[0] > a[0] ? (x - a[0]) / (b[0] - a[0]) : 1, e = t * t * (3 - 2 * t)
+                return exp(log(a[1]) + (log(b[1]) - log(a[1])) * e)
+            }
+        }
+        return last[1]
+    }
+
+    /// A constant-speed stretch of a clip's source.
+    public struct Piece: Codable, Hashable, Sendable {
+        public var inSec: Double
+        public var outSec: Double
+        public var speed: Double
+        public init(inSec: Double, outSec: Double, speed: Double) { self.inSec = inSec; self.outSec = outSec; self.speed = speed }
+        public var length: Double { (outSec - inSec) / speed }
+    }
+
+    /// A clip as constant-speed pieces: one piece, or `curvePieces` equal source pieces of its speed curve (each at the
+    /// curve's speed at its middle). Engines render these.
+    public static func speedPieces(inSec: Double, outSec: Double, speed: Double, curve: SpeedCurve?) -> [Piece] {
+        guard let curve else { return [Piece(inSec: inSec, outSec: outSec, speed: speed)] }
+        let n = curvePieces, len = (outSec - inSec) / Double(n)
+        var out: [Piece] = []
+        out.reserveCapacity(n)
+        for i in 0..<n {
+            let a: Double = inSec + Double(i) * len
+            let b: Double = i == n - 1 ? outSec : inSec + Double(i + 1) * len
+            let x: Double = (Double(i) + 0.5) / Double(n)
+            out.append(Piece(inSec: r6(a), outSec: r6(b), speed: r6(curveSpeed(curve, x))))
+        }
+        return out
+    }
+    public static func speedPieces(_ c: VideoClip) -> [Piece] { speedPieces(inSec: c.inSec, outSec: c.outSec, speed: c.speed, curve: c.speedCurve) }
+
+    /// Seconds from the clip's start on the timeline at source time `sec` (clamped to the clip).
+    public static func clipTimeAt(_ c: VideoClip, _ sec: Double) -> Double {
+        var acc = 0.0
+        for p in speedPieces(c) {
+            if sec <= p.outSec { return acc + max(0, sec - p.inSec) / p.speed }
+            acc += (p.outSec - p.inSec) / p.speed
+        }
+        return acc
+    }
+
+    /// The source time at `local` seconds from the clip's start on the timeline (the inverse of clipTimeAt).
+    public static func clipSourceAt(_ c: VideoClip, _ local: Double) -> Double {
+        var acc = 0.0
+        for p in speedPieces(c) {
+            let len = (p.outSec - p.inSec) / p.speed
+            if local <= acc + len { return p.inSec + max(0, local - acc) * p.speed }
+            acc += len
+        }
+        return c.outSec
+    }
+
+    /// A curve cut down to the source range [x0, x1] of its clip, rescaled to 0–1 (preset becomes custom).
+    public static func subCurve(_ c: SpeedCurve, _ x0: Double, _ x1: Double) -> SpeedCurve {
+        let inner = c.points.filter { $0.count >= 2 && $0[0] > x0 + 1e-9 && $0[0] < x1 - 1e-9 }.map { [r6(($0[0] - x0) / (x1 - x0)), $0[1]] }
+        return SpeedCurve(preset: .custom, points: [[0, r6(curveSpeed(c, x0))]] + inner + [[1, r6(curveSpeed(c, x1))]])
+    }
     public static func clipLength(_ c: AudioClip) -> Double { (c.outSec - c.inSec) / (c.speed ?? 1) }
 
     public struct MainSpan: Codable, Hashable, Sendable {
@@ -134,7 +219,7 @@ extension EditV2 {
             guard case .video(let it) = item else { return nil }
             if it.asset != src.id || !v1Speeds.contains(it.speed) || it.inSec < prev - 1e-9 { return nil }
             let extra: [Any?] = [it.startSec, it.volume, it.fadeInSec, it.fadeOutSec, it.audioAsset, it.fit, it.transform, it.crop, it.opacity,
-                                 it.keyframes, it.filter, it.adjust, it.chroma, it.transitionIn]
+                                 it.keyframes, it.filter, it.adjust, it.chroma, it.transitionIn, it.look, it.speedCurve, it.mask, it.voiceEffect, it.enhance]
             if extra.contains(where: { $0 != nil }) { return nil }
             prev = it.outSec
             segs.append(V1Segment(inSec: it.inSec, outSec: it.outSec, speed: it.speed, muted: it.muted == true ? true : nil))
@@ -186,6 +271,10 @@ extension EditV2 {
                 c.inSec = r6(pc.startSec)
                 c.outSec = r6(pc.endSec)
                 if !keepsStart { c.transitionIn = nil }
+                if let sc = it.speedCurve {
+                    let span = it.outSec - it.inSec
+                    c.speedCurve = subCurve(sc, (pc.startSec - it.inSec) / span, (pc.endSec - it.inSec) / span)
+                }
                 items.append(c)
             }
         }
@@ -225,7 +314,7 @@ extension EditV2 {
                 let mid = (w.startSec + w.endSec) / 2
                 if mid < c.inSec || mid >= c.outSec { continue }
                 let a = max(w.startSec, c.inSec), b = min(w.endSec, c.outSec)
-                out.append(TimedWord(text: w.text, startSec: r6(s.startSec + (a - c.inSec) / c.speed), endSec: r6(s.startSec + (b - c.inSec) / c.speed), index: idx))
+                out.append(TimedWord(text: w.text, startSec: r6(s.startSec + clipTimeAt(c, a)), endSec: r6(s.startSec + clipTimeAt(c, b)), index: idx))
             }
         }
         return stableSorted(out) { $0.startSec < $1.startSec || ($0.startSec == $1.startSec && $0.index < $1.index) }
@@ -290,7 +379,15 @@ extension EditV2 {
         public var dx: Double = 0
         public var dy: Double = 0
         public var scale: Double = 1
-        public init(opacity: Double = 1, dx: Double = 0, dy: Double = 0, scale: Double = 1) { self.opacity = opacity; self.dx = dx; self.dy = dy; self.scale = scale }
+        /// Degrees clockwise.
+        public var rotation: Double = 0
+        /// 0–1: motion blur along the move, up to 4 % of the canvas.
+        public var blur: Double = 0
+        /// 0–1: red/blue offset up to 2 % of the canvas.
+        public var rgbSplit: Double = 0
+        public init(opacity: Double = 1, dx: Double = 0, dy: Double = 0, scale: Double = 1, rotation: Double = 0, blur: Double = 0, rgbSplit: Double = 0) {
+            self.opacity = opacity; self.dx = dx; self.dy = dy; self.scale = scale; self.rotation = rotation; self.blur = blur; self.rgbSplit = rgbSplit
+        }
     }
 
     public struct TransitionState: Codable, Hashable, Sendable {
@@ -305,6 +402,8 @@ extension EditV2 {
     public static func transitionState(_ kind: TransitionKind, _ p: Double) -> TransitionState {
         let p = clamp(p, 0, 1)
         let e = ease(.easeInOut, p)
+        let e3 = p < 0.5 ? 4 * p * p * p : 1 - pow(-2 * p + 2, 3) / 2, peak = sin(Double.pi * p)
+        func jit(_ seed: Int) -> Double { (hash01(Int((p * 24).rounded(.down)), seed, 7) - 0.5) * 2 }
         typealias L = LayerState
         switch kind {
         case .fade: return TransitionState(a: L(), b: L(opacity: p), color: nil)
@@ -315,6 +414,14 @@ extension EditV2 {
         case .slideUp: return TransitionState(a: L(dy: -e), b: L(dy: 1 - e), color: nil)
         case .slideDown: return TransitionState(a: L(dy: e), b: L(dy: -(1 - e)), color: nil)
         case .zoom: return TransitionState(a: L(opacity: 1 - p, scale: 1 + 0.25 * e), b: L(opacity: p), color: nil)
+        case .whip: return TransitionState(a: L(dx: -e3, blur: peak), b: L(dx: 1 - e3, blur: peak), color: nil)
+        case .spin:
+            return TransitionState(a: L(opacity: p < 0.5 ? 1 : 0, scale: 1 - 0.6 * e, rotation: 180 * e),
+                                   b: L(opacity: p < 0.5 ? 0 : 1, scale: 0.4 + 0.6 * e, rotation: -180 * (1 - e)), color: nil)
+        case .glitch:
+            return TransitionState(a: L(opacity: p < 0.5 ? 1 : 0, dx: 0.04 * peak * jit(1), rgbSplit: peak),
+                                   b: L(opacity: p < 0.5 ? 0 : 1, dx: 0.04 * peak * jit(2), rgbSplit: peak), color: nil)
+
         }
     }
 

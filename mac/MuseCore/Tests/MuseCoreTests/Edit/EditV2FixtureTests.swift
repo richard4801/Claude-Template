@@ -15,7 +15,7 @@ final class EditV2FixtureTests: XCTestCase {
 
     func testProjectsHaveTheReferenceAnswers() throws {
         let all = try projects()
-        XCTAssertEqual(all.count, 9)
+        XCTAssertEqual(all.count, 10)
         for (name, _, p, ex) in all {
             XCTAssertEqual(E.durationSec(p), try XCTUnwrap(ex["durationSec"].double), accuracy: 1e-6, name)
             assertJSON(E.timeline(p), ex["timeline"], "\(name) timeline")
@@ -45,6 +45,11 @@ final class EditV2FixtureTests: XCTestCase {
                 assertJSON(m, want, "\(name) colorMatrix \(id)")
             }
             assertJSON(E.toV1(p), ex["toV1"], "\(name) toV1")
+            // Edit suite: speed-curve pieces and the .srt.
+            var pieces: [String: [E.Piece]] = [:]
+            for c in p.mainClips where c.speedCurve != nil { pieces[c.id] = E.speedPieces(c) }
+            assertJSON(pieces, ex["pieces"], "\(name) pieces")
+            XCTAssertEqual(E.toSrt(p), ex["srt"].string, "\(name) srt")
         }
     }
 
@@ -85,7 +90,7 @@ final class EditV2FixtureTests: XCTestCase {
 
     func testTransitions() throws {
         let cases = try editorFixture("functions")["transitions"].array
-        XCTAssertEqual(cases.count, 8 * 7)
+        XCTAssertEqual(cases.count, 11 * 7)
         for c in cases {
             let kind = try c["kind"].decode(E.TransitionKind.self), p = try XCTUnwrap(c["p"].double)
             assertJSON(E.transitionState(kind, p), c["state"], "\(kind) \(p)")
@@ -169,5 +174,89 @@ final class EditV2FixtureTests: XCTestCase {
         let d = jsonStrictDiff(try JV.of(styles), f["captionStyles"])
         XCTAssert(d.isEmpty, "captionStyles: " + d.prefix(5).joined(separator: "; "))
         XCTAssertEqual(E.captionStyles.count, E.CaptionPreset.allCases.count)
+        let labels = E.captionStyleLabels.map { JV.arr([.str($0.0.rawValue), .str($0.1)]) }
+        XCTAssert(jsonStrictDiff(.arr(labels), f["captionStyleLabels"]).isEmpty, "captionStyleLabels")
+        let tl = E.transitionLabels.map { JV.arr([.str($0.0), .str($0.1)]) }
+        XCTAssert(jsonStrictDiff(.arr(tl), f["transitionLabels"]).isEmpty, "transitionLabels")
+        for (k, _) in E.transitionLabels where k != "cut" { XCTAssertNotNil(E.TransitionKind(rawValue: k), k) }
     }
+
+    // MARK: Edit suite additions
+
+    func testMasks() throws {
+        let cases = try editorFixture("functions")["masks"].array
+        XCTAssertEqual(cases.count, 12)
+        for c in cases {
+            let m = try c["mask"].decode(E.Mask.self)
+            for s in c["samples"].array {
+                let v = s.array.compactMap(\.double)
+                XCTAssertEqual(E.maskAlpha(m, v[0], v[1]), v[2], accuracy: 1e-6, "\(m.shape) \(v)")
+            }
+        }
+    }
+
+    func testTone() throws {
+        for c in try editorFixture("functions")["tone"].array {
+            let sh = try XCTUnwrap(c["shadows"].double), hi = try XCTUnwrap(c["highlights"].double)
+            for s in c["samples"].array {
+                let v = s.array.compactMap(\.double)
+                XCTAssertEqual(E.toneAdjust(v[0], shadows: sh, highlights: hi), v[1], accuracy: 1e-6, "tone \(sh) \(hi) \(v[0])")
+            }
+        }
+    }
+
+    func testSpeedCurves() throws {
+        let f = try editorFixture("functions")
+        let cases = f["speedCurves"].array
+        XCTAssertEqual(cases.count, 3)
+        for c in cases {
+            var raw = c["clip"].object; raw["id"] = .str("c"); raw["asset"] = .str("a")
+            let clip = try JV.obj(raw).decode(E.VideoClip.self)
+            let curve = try XCTUnwrap(clip.speedCurve)
+            XCTAssertEqual(E.clipLength(clip), try XCTUnwrap(c["length"].double), accuracy: 1e-6)
+            for s in c["curve"].array {
+                let v = s.array.compactMap(\.double)
+                XCTAssertEqual(E.curveSpeed(curve, v[0]), v[1], accuracy: 1e-5, "curve x=\(v[0])")
+            }
+            for s in c["timeAt"].array {
+                let v = s.array.compactMap(\.double)
+                XCTAssertEqual(E.clipTimeAt(clip, v[0]), v[1], accuracy: 1e-6, "timeAt \(v[0])")
+                XCTAssertEqual(E.clipSourceAt(clip, E.clipTimeAt(clip, v[0])), v[0], accuracy: 1e-6, "sourceAt inverse \(v[0])")
+            }
+            assertJSON(E.subCurve(curve, 0.25, 0.8), c["sub"], "subCurve")
+        }
+        let presets = f["speedPresets"].object
+        XCTAssertEqual(presets.count, E.speedPresets.count)
+        for (k, want) in presets {
+            assertJSON(try XCTUnwrap(E.speedPresets[E.SpeedPreset(rawValue: k)]), want, "preset \(k)")
+        }
+    }
+
+    func testVoiceChains() throws {
+        let cases = try editorFixture("functions")["voice"].array
+        XCTAssertEqual(cases.count, 20)
+        for c in cases {
+            let effect = try c["voiceEffect"].decode(E.VoiceEffect.self)
+            let enhance = c["enhance"] == .bool(true)
+            let sr = try XCTUnwrap(c["sampleRate"].double)
+            let chain = E.voiceChain(effect: effect, enhance: enhance, sampleRate: sr)
+            assertJSON(chain, c["chain"], "chain \(effect) \(enhance) \(sr)")
+            let impulse = (0..<24).map { $0 == 0 ? 1.0 : 0 }
+            let out = E.runChain(chain, impulse)
+            let want = c["impulse"].array.compactMap(\.double)
+            XCTAssertEqual(out.count, want.count)
+            for (a, b) in zip(out, want) { XCTAssertEqual(a, b, accuracy: 1e-8, "impulse \(effect) \(enhance) \(sr)") }
+        }
+    }
+
+    func testDuckTimes() throws {
+        for c in try editorFixture("functions")["duckTimes"].array {
+            let d = try c["duck"].decode(E.Duck.self)
+            let want = c["times"].array.compactMap(\.double)
+            let got = E.duckTimes(d)
+            XCTAssertEqual(got.attack, want[0], accuracy: 1e-9)
+            XCTAssertEqual(got.release, want[1], accuracy: 1e-9)
+        }
+    }
+
 }

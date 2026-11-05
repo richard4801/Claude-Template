@@ -177,12 +177,19 @@ extension EditV2.Project {
               case .video(let c) = tracks[mi].items[i] else { return nil }
         let fps = canvas.fps > 0 ? canvas.fps : 30
         let local = (rawLocal * fps).rounded() / fps
-        let src = c.inSec + local * c.speed
+        let src = EditV2.r6(EditV2.clipSourceAt(c, local))
         guard src - c.inSec >= EditV2.minClipSourceSec - 1e-9, c.outSec - src >= EditV2.minClipSourceSec - 1e-9 else { return nil }
         var a = c, b = c
         let nid = newId(c.id + ".")
         a.outSec = src
         a.fadeOutSec = nil
+        if let sc = c.speedCurve {
+            // Each half keeps its part of the curve (preset becomes custom).
+            let x = (src - c.inSec) / (c.outSec - c.inSec)
+            a.speedCurve = EditV2.subCurve(sc, 0, x)
+            b.speedCurve = EditV2.subCurve(sc, x, 1)
+        }
+
         b.id = nid
         b.inSec = src
         b.transitionIn = nil
