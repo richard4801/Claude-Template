@@ -437,6 +437,28 @@ Defaults reproduce the prompts exactly as they were before the library (the shar
 
 **Apps (owner only):** Settings → **Prompts**: the groups above, each entry with its title, a one-line preview of the current text and an "Edited" badge when overridden. The editor: the current text (multi-line), placeholder chips (tap inserts `{name}`; required ones marked), "Reset to default" (DELETE, after a confirm), a live preview (`POST /v1/prompts/preview`, debounced) showing `text` and `example`, the `prompt_invalid` message inline, and Save (PUT). Members never see the section.
 
+## Video editor: edited versions of a take (2026-11-05)
+_Owner decision 2026-11-05. Spec, UX and limits: `plans/video-editor.md`._ The apps trim, split, change speed and mute a video take **on the device** and upload the result. The server stores it as a **new take** (`kind: "edit"`) linked to the take it was cut from, with the **edit list** so it can be re-opened and changed. The server never encodes video. It is free: no price, hold or ledger row. Members and owners alike.
+
+```ts
+EditSpeed   0.5 | 0.75 | 1 | 1.25 | 1.5 | 2
+EditSegment { inSec: number, outSec: number, speed: EditSpeed, muted?: boolean }   // seconds of the SOURCE video
+EditList    { version: 1, sourceTakeId: string, sourceDurationSec: number, segments: EditSegment[] /* 1–50, in order */, mute: boolean }
+// Take gains: kind "edit"; parentTakeId?: string (the source take); edits?: EditList; fps?: number.
+// An edit take has videoUrl, durationSec, width, height of the uploaded file, label "Edited", cost 0, status "test",
+// and copies title, engineLabel, seed, modelId and prompt (with the same template-prompt hiding) from its source.
+```
+
+| | |
+|---|---|
+| `POST /v1/takes/{id}/versions` `{uploadId, thumbUploadId?, thumb?: ImageRef, edits: EditList, durationSec, width, height, fps?}` | → `Take` (`kind: "edit"`, `parentTakeId: id`). `{id}` is the take whose video the edits cut (a `take`, or an `edit` when its own source is gone); `edits.sourceTakeId` must equal it. `uploadId` comes from `POST /v1/uploads/presign {kind: "clip", contentType: "video/mp4"}` + the PUT (no `/confirm`: confirming would add it to the clip library). Thumbnail: `thumbUploadId` (presigned `image`, PUT done) or `thumb` (an `ImageRef` from `POST /v1/uploads/images`); without one the take starts with the source's thumb and the server may replace it with a single frame (ffmpeg grab, no re-encode) and send a `take` event. A `take` event goes to everyone in the studio. |
+| `GET /v1/takes/{id}/versions` | → `Take[]`, the edited versions whose `parentTakeId` is `{id}`, newest first. (`GET /v1/takes` also returns them, so clients can group versions under their source by `parentTakeId`.) |
+
+- **Rules** (`bad_request` with the field named): `edits` as in `plans/video-editor.md` "Edit list": `version` 1; 1–50 segments in source order, not overlapping, each ≥ 0.1 s, `0 ≤ inSec < outSec ≤ sourceDurationSec + 0.05`; `speed` one of the six; output Σ(out−in)/speed between 0.5 and 600 s; `durationSec` within max(0.5 s, 5 %) of that; `width`/`height` 16–4096; `fps` 1–240; the JSON ≤ 16 KB. The source must be a video take of the studio (`not_found` otherwise, `bad_request` "Edit works on a video take" for a photo).
+- **Uploads:** the upload must be this studio's, a video (`bad_request`), and the PUT must have arrived (`upload_missing`, 409). An upload already saved as a take → `upload_used` (409). The thumbnail upload must be this studio's image.
+- **Visibility and ownership:** the same as every take: everyone in the studio sees, approves (`PATCH`) and discards (`DELETE`) versions. Deleting a source keeps its versions (their `parentTakeId` then names a take that's gone; apps re-open such a version on its own video). Deleting a version never touches its source.
+- No model names, prices or engines in the editor; `engineLabel` is the source's ("HD · 2K").
+
 ## Types
 
 ```ts
@@ -466,7 +488,7 @@ Job        { id, title, modelId, modelName, outfitId, request: JobRequest, state
              engineLabel /* "Draft · 768P", "Standard · 768P", "HD · 2K", "Edit", "Fast · beta" */,
              errorCode?: "provider_refused"|"provider_failed"|"provider_rate_limited"|"provider_timeout"|"provider_out_of_credit",
              billedSeconds? /* replicate, done: output seconds Replicate billed, summed over takes */ }
-Take       { id, kind: "take"|"shot", jobId|null, index, of, title, label, engineLabel, cost, seed, status: "test"|"final", thumb, prompt, createdAt,
+Take       { id, kind: "take"|"shot"|"edit" /* edit: 2026-11-05, "Video editor" */, jobId|null, index, of, title, label, engineLabel, cost, seed, status: "test"|"final", thumb, prompt, createdAt,
              videoUrl?, durationSec?, width?, height? /* real output: Exact edit renders are 768×1344; Replicate 768P/2K sizes come from the file */ }
              // Takes: label = "Standard"|"Draft"|"HD" (replicate), "Edit" (h3), "Fast · beta"; engineLabel = Job.engineLabel.
              // A replicate take's durationSec is the source clip's exact length (see "Video engines"), and its thumb is a frame of the take.
@@ -614,6 +636,7 @@ These are measured on an H100 with FlashAttention 3 and billed at $3.99/h. The u
 | `GET /v1/takes` | → `Take[]` (renders and photoshoot stills). `status: "final"` is the Final gallery, and everything else is Tests. |
 | `PATCH /v1/takes/{id}` `{status: "test"\|"final"}` | → `Take` (Approve) |
 | `DELETE /v1/takes/{id}` | 204 (Discard) |
+| `POST /v1/takes/{id}/versions`, `GET /v1/takes/{id}/versions` | Edited versions (on-device video editor), see "Video editor: edited versions of a take". |
 | `POST /v1/shoots` `ShootRequest` | → `Take[]` (`kind: "shot"`). _2026-11-05: the server builds the prompt from the choices and the prompt library; `prompt` only for "Edit as text"; `refs` = up to 3 reference images. See "Shoot references and the prompt library"._ Holds the estimate, settles exactly. |
 | `POST /v1/shoots/preview` `ShootRequest` | → `ShootPreview`: the final prompt, the images that will be sent and the price. Free. |
 | `POST /v1/shoots` with a template `{modelId, outfitId?, templateId, direction?, shuffleSeed?, lockSeed?, productImage?: ImageRef, refs?: ShootRef[], count?}` | → `Take[]`, $0.12 as above. `scene`, `prompt` and `seed` are ignored: the server builds every still's prompt from the template layers + the model's identity, outfit and never-add + the draws (or `direction`) + a seed. See Templates below. |
@@ -770,7 +793,7 @@ _Added 2026-11-05 (every change is live, so a phone and a Mac on one studio stay
 
 | Event | When | Who gets it |
 |---|---|---|
-| `take` `{take}` / `{op: "delete", id}` | Photoshoot and template-shoot stills, video takes when a job finishes, `PATCH /v1/takes/{id}`, `DELETE /v1/takes/{id}` | Everyone in the studio, each with the prompt *they* may see (a template's hidden layers only to its owner) |
+| `take` `{take}` / `{op: "delete", id}` | Photoshoot and template-shoot stills, video takes when a job finishes, a new edited version (`POST /v1/takes/{id}/versions`) and its server-made thumbnail, `PATCH /v1/takes/{id}`, `DELETE /v1/takes/{id}` | Everyone in the studio, each with the prompt *they* may see (a template's hidden layers only to its owner) |
 | `job` `{op: "delete", id}` | `DELETE /v1/jobs/{id}` | Everyone |
 | `model` `{model}` / `{op: "delete", id}` | Create, edit, sheet slot, fill-angles start and finish, archive/unarchive (`archived: true` → drop from lists), tool apply, version restore, delete (drop her outfits too) | Everyone |
 | `outfit` `{outfit}` | Create (`generating`), the set (`preview`), save (`ready`), Dress up apply | Everyone |
