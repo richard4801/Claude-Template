@@ -150,7 +150,8 @@ const Env = z.object({
   REPLICATE_IMAGE_MAX_INPUTS: num(8),
   /** References are shrunk to fit inside this many pixels per side before they're sent. */
   REPLICATE_IMAGE_REF_MAX_PX: num(1024),
-  REPLICATE_IMAGE_SAFETY: num(2),
+  /** FLUX.2 / Kontext `safety_tolerance` (owner decision 2026-11-05: 5, the most permissive FLUX.2 allows); capped per model by its schema. */
+  REPLICATE_IMAGE_SAFETY: num(5),
   /** Photo LoRA hook (later): passed to the edit model as lora_weights when set. */
   REPLICATE_IMAGE_LORA_URL: str(),
   REPLICATE_IMAGE_LORA_SCALE: num(1),

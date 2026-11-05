@@ -13,7 +13,7 @@ import { CustomHttpEngine, FalEngine, ImageEngineError, ReplicateImageEngine, Si
 import * as P from '../pricing.js';
 import type { PhotoBill } from './bill.js';
 import { ReplicateError, SAFETY_RE, CREDIT_RE, errorText } from '../replicate/client.js';
-import { buildInput, imageCapacity, mapModel, type ImageStep } from '../replicate/mapping.js';
+import { buildInput, imageCapacity, mapModel, safetyTolerance, type ImageStep } from '../replicate/mapping.js';
 import { SHOOT_GUIDES, type SentRef, type ShootGuide } from '../prompt/engine.js';
 import { exactOne } from '../replicate/prices.js';
 import type { StepOverrides } from './steps.js';
@@ -443,8 +443,9 @@ export class ImageService {
     const first = prepared[0];
     const w = o.width ?? first?.w ?? 768, h = o.height ?? first?.h ?? 1024;
     const known: Record<string, unknown> = {};
-    // FLUX.2 keeps the tested safety tolerance (this is not the safety checker switch, which is never sent).
-    if (map.inputs.some(i => i.name === 'safety_tolerance') && o.model.startsWith('black-forest-labs/flux-2')) known.safety_tolerance = c.REPLICATE_IMAGE_SAFETY;
+    // FLUX.2 and Kontext: the most permissive safety tolerance the model allows (not the safety checker switch, which is never sent).
+    const tol = safetyTolerance(o.model, map.inputs, c.REPLICATE_IMAGE_SAFETY, prepared.length > 0 && !!map.mapping.image);
+    if (tol != null) known.safety_tolerance = tol;
     // Low creativity for the default upscaler, so the face stays the same.
     if (o.model === 'philz1337x/clarity-upscaler') known.resemblance = 1;
     const input = buildInput(map.mapping, { prompt: o.prompt, images: prepared.map(p => p.url), width: w, height: h, matchInput: o.matchInput, outMp,

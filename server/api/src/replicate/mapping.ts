@@ -215,6 +215,24 @@ export function buildInput(m: Mapping, a: BuildArgs, extra: Record<string, unkno
   return input;
 }
 
+/** Models whose `safety_tolerance` we set (FLUX.2 and FLUX Kontext); every other model keeps its own default. */
+export const SAFETY_MODEL_RE = /^black-forest-labs\/flux-(2|kontext)/;
+/**
+ * The `safety_tolerance` to send (owner decision 2026-11-05: as permissive as the model allows, REPLICATE_IMAGE_SAFETY = 5),
+ * clamped to the field's schema range and to a lower limit its description states for requests with input images
+ * ("2 is currently the maximum allowed when input images are used", FLUX Kontext). Null: don't send it.
+ */
+export function safetyTolerance(model: string, inputs: InputField[], want: number, hasImages: boolean): number | null {
+  const f = inputs.find(i => i.name === 'safety_tolerance');
+  if (!f || !SAFETY_MODEL_RE.test(model)) return null;
+  let v = Math.round(want);
+  if (typeof f.maximum === 'number') v = Math.min(v, f.maximum);
+  const withImages = /(\d+)\s+is\s+(?:currently\s+)?the\s+maximum\s+allowed\s+when\s+input\s+images?\s+are\s+used/i.exec(f.description ?? '');
+  if (hasImages && withImages) v = Math.min(v, Number(withImages[1]));
+  if (typeof f.minimum === 'number') v = Math.max(v, f.minimum);
+  return v;
+}
+
 /** How many images the mapping can take in one prediction. */
 export const imageCapacity = (m: Mapping) => !m.image ? 0 : m.image.array ? (m.image.max ?? 16) : 1 + (m.extraImageFields?.length ?? 0);
 

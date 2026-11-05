@@ -227,7 +227,7 @@ describe('model tools on a fake Replicate', () => {
     expect(qw[0]!.input.image.length).toBe(2); // the front: sheet + outfit
     expect(qw.slice(1).every(p => p.input.image.length === 3)).toBe(true); // + the new front
     expect(fl[0]!.input.input_images.length).toBe(2);
-    expect(fl[1]!.input).toMatchObject({ safety_tolerance: 2 });
+    expect(fl[1]!.input).toMatchObject({ safety_tolerance: 5 });
     expect(new Set(made.map(p => p.input.seed)).size).toBe(1);
     expect(qw[1]!.input.prompt).toMatch(/last image shows the same outfit already worn/);
     expect(qw.find(p => /earrings, necklace/.test(p.input.prompt))).toBeTruthy();

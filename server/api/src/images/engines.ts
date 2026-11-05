@@ -144,7 +144,7 @@ export class ReplicateImageEngine implements ImageEngine {
         const refs = req.referenceImages.slice(0, req.maxImages ?? c.maxRefs);
         const outMp = outMpFor(req.width, req.height);
         input = { prompt: req.prompt, input_images: refs, aspect_ratio: aspectFor(req.width, req.height), resolution: `${outMp} MP`, output_format: 'jpg', output_quality: 95,
-          safety_tolerance: c.safety, ...(seed != null ? { seed } : {}) };
+          safety_tolerance: Math.max(1, Math.min(5, Math.round(c.safety))), ...(seed != null ? { seed } : {}) };
         const inMp = refs.reduce((a, _, k) => a + (req.referenceMp?.[k] ?? 1), 0);
         bill = { kind: 'shot', inMp, outMp };
       }
