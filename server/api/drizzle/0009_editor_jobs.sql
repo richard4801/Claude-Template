@@ -1,4 +1,4 @@
-CREATE TABLE "editor_jobs" (
+CREATE TABLE IF NOT EXISTS "editor_jobs" (
 	"id" text PRIMARY KEY NOT NULL,
 	"studio_id" text NOT NULL,
 	"user_id" text NOT NULL,
@@ -20,5 +20,5 @@ CREATE TABLE "editor_jobs" (
 	"finished_at" bigint
 );
 --> statement-breakpoint
-CREATE INDEX "editor_jobs_studio_idx" ON "editor_jobs" USING btree ("studio_id","user_id","created_at");--> statement-breakpoint
-CREATE INDEX "editor_jobs_media_idx" ON "editor_jobs" USING btree ("media_key","kind");
+CREATE INDEX IF NOT EXISTS "editor_jobs_studio_idx" ON "editor_jobs" USING btree ("studio_id","user_id","created_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "editor_jobs_media_idx" ON "editor_jobs" USING btree ("media_key","kind");
