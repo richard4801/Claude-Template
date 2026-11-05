@@ -58,8 +58,9 @@ fun ToolStrip(tools: List<Pair<String, String>>, current: String, onSelect: (Str
             when {
                 m.isC -> {
                     val shape = RoundedCornerShape(16.dp)
+                    // Five tools get wider tiles so "Background" isn't cut on a 360 dp phone; six (Photoshoot) still fit.
                     Column(
-                        Modifier.width(54.dp).height(64.dp).shadow(6.dp, shape, ambientColor = Color(0x1A50463A), spotColor = Color(0x1A50463A)).clip(shape)
+                        Modifier.width(if (tools.size <= 5) 62.dp else 54.dp).height(64.dp).shadow(6.dp, shape, ambientColor = Color(0x1A50463A), spotColor = Color(0x1A50463A)).clip(shape)
                             .background(if (on) m.t.accent else m.t.surface).press { onSelect(k) },
                         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
                     ) {

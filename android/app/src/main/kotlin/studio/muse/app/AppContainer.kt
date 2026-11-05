@@ -34,6 +34,8 @@ class AppContainer(
     val repo = MuseRepository(scope, prefsStore, fake)
     val drafts = Drafts()
     val warmUi = studio.muse.app.data.WarmUi()
+    /** The renders started from the Video studio, so its stage can follow them (blurred preview, then the takes playing). */
+    val stageJobs = studio.muse.app.ui.screens.StageJobs()
 
     init {
         repo.listener = studio.muse.app.data.JobListener { job ->

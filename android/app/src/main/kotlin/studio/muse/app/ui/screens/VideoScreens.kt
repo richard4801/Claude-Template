@@ -55,7 +55,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -71,6 +70,7 @@ import studio.muse.app.data.Outfit
 import studio.muse.app.data.SampleData
 import studio.muse.app.data.VideoDraft
 import studio.muse.app.data.VideoFeatures
+import studio.muse.app.data.editable
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.LocalNav
 import studio.muse.app.ui.Routes
@@ -96,6 +96,12 @@ data class VideoState(
     val starting: Boolean = false,
     /** The quality picker's options and live prices (features.video). */
     val video: VideoFeatures = VideoFeatures.DEFAULT,
+    /** The stage (the canvas): the target, or the render started from here for this clip, model and outfit. */
+    val stage: StudioStage = StudioStage.IDLE,
+    /** The take picked in the stage's take switcher (null = take 1). */
+    val stageTake: String? = null,
+    /** Demo mode (the in-app fake): the only place the sample clip is offered. */
+    val demo: Boolean = false,
 ) {
     val clip: Clip? get() = draft.clip
     val spec get() = draft.spec(video.pricePerSec(draft.quality))
@@ -103,21 +109,31 @@ data class VideoState(
     val genLabel get() = Pricing.genLabel(spec)
 }
 
+private data class VideoExtras(val prefs: studio.muse.app.data.AppPrefs, val busy: Pair<Boolean, Boolean>, val started: List<String>, val take: String?)
+
 class NewVideoViewModel(private val c: AppContainer) : ViewModel() {
     private val busy = MutableStateFlow(false to false)
-    val state: StateFlow<VideoState> = combine(c.repo.state, c.drafts.video, c.drafts.modelId, c.drafts.outfitId, combine(c.prefs, busy) { p, b -> p to b }) { s, d, mid, oid, (p, b) ->
+    private val extras = combine(c.prefs, busy, c.stageJobs.ids, c.stageJobs.take) { p, b, ids, tk -> VideoExtras(p, b, ids, tk) }
+    val state: StateFlow<VideoState> = combine(c.repo.state, c.drafts.video, c.drafts.modelId, c.drafts.outfitId, extras) { s, d, mid, oid, x ->
+        val p = x.prefs
+        val b = x.busy
         val model = s.model(mid)?.takeIf { it.filled > 0 } ?: s.models.firstOrNull { it.locked }
         val outfits = s.outfitsOf(model?.id)
+        val outfit = outfits.firstOrNull { it.id == oid } ?: outfits.firstOrNull()
         val video = s.video ?: VideoFeatures.DEFAULT
         var draft = if (!p.fastBeta && d.engine == Engine.VIGGLE) d.pick(VideoOption.DRAFT) else d
         // An option that can't run right now falls back to the first one that can (Render first, then Edit).
         if (!video.available(draft.option.id)) (VideoOption.RENDER + VideoOption.EDIT).firstOrNull { video.available(it.id) }?.let { draft = draft.pick(it) }
-        VideoState(draft, s.models, model, outfits, outfits.firstOrNull { it.id == oid } ?: outfits.firstOrNull(), s.balance.balance, p.fastBeta, b.first, b.second, video)
+        // The stage follows the newest render started from here for this clip, model and outfit (live job and take events).
+        val stage = StudioStage.resolve(s.jobs, s.takes, x.started, draft.clip?.id, model?.id, outfit?.id)
+        VideoState(draft, s.models, model, outfits, outfit, s.balance.balance, p.fastBeta, b.first, b.second, video, stage, x.take, c.repo.demo)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, VideoState())
 
     fun edit(f: (VideoDraft) -> VideoDraft) = c.drafts.video.update(f)
 
+    /** The bundled sample clips: demo mode only (no sample performer on a server). */
     fun sample(bad: Boolean) = viewModelScope.launch {
+        if (!c.repo.demo) return@launch
         busy.update { true to it.second }
         val clip = c.repo.uploadClip(if (bad) SampleData.badMeta else SampleData.sampleMeta, null)
         busy.update { false to it.second }
@@ -151,8 +167,10 @@ class NewVideoViewModel(private val c: AppContainer) : ViewModel() {
     fun toast(s: String) = c.repo.toast(s)
     fun reset() { c.drafts.resetVideo(); c.repo.toast("Reset to recommended") }
 
-    fun generate(onStarted: () -> Unit) {
+    /** Generate (and the stage's Generate again / Try again): the render shows on the stage, so the studio stays open. */
+    fun generate() {
         val s = state.value
+        if (s.starting) return
         val clip = s.clip ?: return c.repo.toast("Pick a clip first")
         val model = s.model ?: return c.repo.toast("Pick a model first")
         if (s.cost > s.balance + 1e-9) return c.repo.toast(lowFundsMessage(c), Routes.CREDITS)
@@ -161,11 +179,17 @@ class NewVideoViewModel(private val c: AppContainer) : ViewModel() {
             val job = c.repo.createJob(
                 s.draft.request(clip.name, model.id, s.outfit?.id ?: "", clip.id, clip.takeIf { it.id != SampleData.SAMPLE_CLIP }?.durationSec),
             )
-            delay(900)
             busy.update { it.first to false }
-            if (job != null) onStarted()
+            if (job != null) {
+                c.stageJobs.started(job.id)
+                val n = job.request.takes
+                c.repo.toast("Rendering ${if (n > 1) "$n takes" else "1 take"} · ${Pricing.money(job.cost)}. You'll get a notification when it's done.", Routes.QUEUE)
+            }
         }
     }
+
+    /** The stage's take switcher. */
+    fun pickTake(id: String) { c.stageJobs.take.value = id }
 
     /** Render (Draft / Standard / HD) or an add-on (Edit, Fast · beta). */
     fun pickOption(o: VideoOption) = edit { it.pick(o) }
@@ -197,14 +221,17 @@ fun SourceScreen() {
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 130.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 if (clip == null) {
                     T("Pick a short vertical clip with one person. We check it before you spend anything.", m.type.body, m.t.muted)
-                    Opt(if (s.checking) "Checking your clip…" else "Choose from camera roll", "Up to 15s · 9:16 · one person · no watermark", icon = "upload", onClick = pickVideo)
-                    Opt("Use the sample clip", "Living-room dance · 9.4s · 1080×1920", icon = "play", onClick = { vm.sample(false) })
-                    T("Preview: what a failing clip looks like", m.type.tiny, if (m.isD) m.t.blue else m.t.accent, Modifier.press { vm.sample(true) }.padding(vertical = 6.dp))
+                    EmptyClipArea(s.checking, pickVideo)
+                    // The sample clip and the failing-clip preview are demo mode's only.
+                    if (s.demo) {
+                        Opt("Use the sample clip", "Living-room dance · 9.4s · 1080×1920", icon = "play", onClick = { vm.sample(false) })
+                        T("Preview: what a failing clip looks like", m.type.tiny, if (m.isD) m.t.blue else m.t.accent, Modifier.press { vm.sample(true) }.padding(vertical = 6.dp))
+                    }
                 } else {
                     ClipCard(clip)
                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        T(if (s.draft.showBadExample) "Use the good sample clip" else "Preview: what a failing clip looks like", m.type.tiny, if (m.isD) m.t.blue else m.t.accent,
-                            Modifier.press { vm.sample(!s.draft.showBadExample) }.padding(vertical = 6.dp))
+                        if (s.demo) T(if (s.draft.showBadExample) "Use the good sample clip" else "Preview: what a failing clip looks like", m.type.tiny, if (m.isD) m.t.blue else m.t.accent,
+                            Modifier.weight(1f, fill = false).press { vm.sample(!s.draft.showBadExample) }.padding(vertical = 6.dp), maxLines = 2)
                         Spacer(Modifier.weight(1f))
                         T("Change clip", m.type.tiny.copy(fontWeight = FontWeight.SemiBold), m.t.ink, Modifier.press(onClick = pickVideo).padding(vertical = 6.dp))
                     }
@@ -224,6 +251,24 @@ fun SourceScreen() {
                 else -> Cta("Next: Direct", { nav.go(Routes.DIRECT) }, Modifier.weight(1f))
             }
         }
+    }
+}
+
+/** Nothing uploaded yet: an empty, dashed area to choose a clip (never a sample performer). */
+@Composable
+private fun EmptyClipArea(checking: Boolean, onPick: () -> Unit) {
+    val m = muse
+    val shape = RoundedCornerShape(m.t.r)
+    Column(
+        Modifier.fillMaxWidth().height(220.dp).clip(shape).background(m.t.surface2.copy(alpha = .6f)).dashed(if (m.isD) Ink else m.t.muted.copy(alpha = .55f), m.t.r, if (m.isD) 2.5.dp else 1.5.dp)
+            .press(onClick = onPick).padding(20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+    ) {
+        Box(Modifier.size(52.dp).clip(CircleShape).background(m.t.surface).let { if (m.isD) it.border(2.dp, Ink, CircleShape) else it }, contentAlignment = Alignment.Center) {
+            Ic("upload", 24.dp, m.t.ink)
+        }
+        T(if (checking) "Checking your clip…" else StudioText.CHOOSE_TITLE, m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink)
+        T(StudioText.CHOOSE_HINT, m.type.tiny, m.t.muted, align = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }
 
@@ -272,7 +317,7 @@ fun DirectScreen() {
     val notif = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val generate = {
         if (Build.VERSION.SDK_INT >= 33 && !vm.notifAsked) { vm.markNotifAsked(); notif.launch(Manifest.permission.POST_NOTIFICATIONS) }
-        vm.generate { nav.go(Routes.QUEUE) }
+        vm.generate()
     }
     val menu = listOf(
         MenuItem("spark", "Show prompt") { vm.toast("Prompt: replace the performer with ${s.model?.name ?: "your model"} · keep motion & room · ${Pricing.engineLabel(s.spec)}") },
@@ -290,49 +335,76 @@ fun DirectScreen() {
                     MoreMenu(menu)
                 }
             } else TopBar("Video studio", onBack = { nav.back() }) { MoreMenu(menu) }
-            DirectCanvas(s)
+            DirectCanvas(s, vm, generate)
             ToolStrip(VIDEO_TOOLS, d.tool) { k -> vm.edit { it.copy(tool = k) } }
             BSheet(12.dp) { DirectSheet(vm, s) }
         }
         Dock(tight = true) {
-            Cta(if (s.starting) "Starting…" else s.genLabel, { if (!s.starting) generate() }, Modifier.weight(1f), busy = s.starting, off = s.cost > s.balance)
+            Cta(if (s.starting) "Starting…" else s.genLabel, { if (!s.starting) generate() }, Modifier.weight(1f), busy = s.starting, off = s.cost > s.balance || s.clip == null)
         }
     }
 }
 
+/**
+ * The stage. Idle: the source clip with the target (model in outfit) in the corner, or an empty placeholder before a clip
+ * is uploaded. While a render from here runs: blurred and softly moving with its phase, progress and price. Ready: the
+ * take playing with Open / Edit video / Generate again. Failed: why, with Try again.
+ */
 @Composable
-private fun DirectCanvas(s: VideoState) {
+private fun DirectCanvas(s: VideoState, vm: NewVideoViewModel, onGenerate: () -> Unit) {
+    val m = muse
+    val nav = LocalNav.current
+    val stage = s.stage
+    val target = s.outfit?.front ?: s.model?.cover
+    Canvas(300.dp) {
+        val clip = s.clip
+        when (stage.phase) {
+            StagePhase.IDLE -> when {
+                clip == null -> StageEmptySource { nav.go(Routes.SOURCE) }
+                s.draft.background == "photo" -> Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFFB9C4CF), Color(0xFF6E7A86)))))
+                clip.thumb != null -> RefImage(clip.thumb, Modifier.fillMaxSize(), 25)
+                else -> ClipPlaceholder(Modifier.fillMaxSize(), 1, showPlay = false)
+            }
+            // The blurred picture: the clip's first frame, or the model when there's no frame.
+            StagePhase.QUEUED, StagePhase.RENDERING -> StageBusy(stage, clip?.thumb ?: target)
+            StagePhase.FAILED -> StageFailed(stage, clip?.thumb ?: target, onGenerate)
+            StagePhase.READY -> StageReady(
+                stage, s.stageTake, target, vm::pickTake, onOpen = { nav.go(Routes.result(it.id)) },
+                onEdit = { if (it.editable) nav.go(Routes.editVideo(it.id)) else vm.toast("Edit video works once the take has its video") }, onAgain = onGenerate,
+            )
+        }
+        // Who goes in: the selected model in the selected outfit (the finished take takes the whole stage).
+        if (stage.phase != StagePhase.READY) Box(
+            Modifier.align(Alignment.TopEnd).padding(top = if (m.isB && stage.phase == StagePhase.IDLE) 36.dp else 12.dp, end = 12.dp).size(64.dp, 86.dp).clip(RoundedCornerShape(10.dp))
+                .border(2.dp, Color.White, RoundedCornerShape(10.dp)),
+        ) { RefImage(target, Modifier.fillMaxSize()) }
+        if (stage.phase == StagePhase.IDLE && clip != null) IdleSourceOverlay(s)
+    }
+}
+
+/** Idle with a clip: the viewfinder, the source's name and a preview scrubber. */
+@Composable
+private fun androidx.compose.foundation.layout.BoxScope.IdleSourceOverlay(s: VideoState) {
     val m = muse
     val track = remember { Animatable(.38f) }
     val scope = rememberCoroutineScope()
-    Canvas(300.dp) {
-        val clip = s.clip
-        when {
-            s.draft.background == "photo" -> Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFFB9C4CF), Color(0xFF6E7A86)))))
-            clip?.thumb != null -> RefImage(clip.thumb, Modifier.fillMaxSize(), 25)
-            else -> ClipPlaceholder(Modifier.fillMaxSize(), 1, showPlay = false)
+    val clip = s.clip
+    Viewfinder(bottomInset = 44.dp)
+    if (m.isB) {
+        Row(Modifier.padding(start = 14.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(8.dp).clip(CircleShape).background(m.t.rec)); Spacer(Modifier.width(4.dp)); Readout("00:00:05:04")
         }
-        // Who goes in: the selected model in the selected outfit.
-        Box(
-            Modifier.align(Alignment.TopEnd).padding(top = if (m.isB) 36.dp else 12.dp, end = 12.dp).size(64.dp, 86.dp).clip(RoundedCornerShape(10.dp))
-                .border(2.dp, Color.White, RoundedCornerShape(10.dp)),
-        ) { RefImage(s.outfit?.front ?: s.model?.cover, Modifier.fillMaxSize()) }
-        Viewfinder(bottomInset = 44.dp)
-        if (m.isB) {
-            Row(Modifier.padding(start = 14.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(m.t.rec)); Spacer(Modifier.width(4.dp)); Readout("00:00:05:04")
-            }
-            Readout("OUTPUT 768×1344", Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 44.dp))
+        Readout("OUTPUT 768×1344", Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 44.dp))
+    }
+    T(clip?.let { "Source · ${it.name}" } ?: "No clip", m.type.tiny.copy(fontSize = 11.sp), Color.White.copy(alpha = .85f),
+        Modifier.align(Alignment.TopStart).padding(start = 14.dp, end = 88.dp, top = if (m.isB) 30.dp else 12.dp), maxLines = 1)
+    Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(Modifier.press { scope.launch { track.snapTo(0f); track.animateTo(1f, tween(2500, easing = LinearEasing)); track.snapTo(0f) } }) { Ic("play", 16.dp, Color.White) }
+        Box(Modifier.weight(1f).height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = .35f))) {
+            Box(Modifier.fillMaxWidth(track.value).fillMaxHeight().background(Color.White))
         }
-        T(clip?.let { "Source · ${it.name}" } ?: "No clip", m.type.tiny.copy(fontSize = 11.sp), Color.White.copy(alpha = .85f), Modifier.align(Alignment.TopStart).padding(start = 14.dp, top = if (m.isB) 30.dp else 12.dp))
-        Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Box(Modifier.press { scope.launch { track.snapTo(0f); track.animateTo(1f, tween(2500, easing = LinearEasing)); track.snapTo(0f) } }) { Ic("play", 16.dp, Color.White) }
-            Box(Modifier.weight(1f).height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = .35f))) {
-                Box(Modifier.fillMaxWidth(track.value).fillMaxHeight().background(Color.White))
-            }
-            val total = s.spec.lengthSec
-            T("0:%02d / 0:%02d".format((track.value * total).toInt(), total.roundToInt()), m.type.mono.copy(fontSize = 12.5.sp), Color.White)
-        }
+        val total = s.spec.lengthSec
+        T("0:%02d / 0:%02d".format((track.value * total).toInt(), total.roundToInt()), m.type.mono.copy(fontSize = 12.5.sp), Color.White)
     }
 }
 
@@ -375,7 +447,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.DirectSheet(vm: NewVi
                 s.outfits.forEach { o -> OutfitTile(o, o.id == s.outfit?.id, { vm.selectOutfit(o) }) }
                 AddOutfitTile({ nav.go(Routes.OUTFIT) })
             }
-            Tiny("Never add: ${s.model?.neverAdd?.joinToString(", ")?.ifBlank { null } ?: "nothing set"}. Removed automatically.")
+            StudioText.neverAdd(s.model?.neverAdd)?.let { Tiny(it) }
         }
         else -> {
             H3("Model")
