@@ -83,8 +83,13 @@ extension EditV2 {
         public var contrast: Double?
         public var saturation: Double?
         public var temperature: Double?
-        public init(exposure: Double? = nil, contrast: Double? = nil, saturation: Double? = nil, temperature: Double? = nil) {
+        /// Edit suite: tone after the colour matrix (`toneAdjust`), −1…1.
+        public var highlights: Double?
+        public var shadows: Double?
+        public init(exposure: Double? = nil, contrast: Double? = nil, saturation: Double? = nil, temperature: Double? = nil,
+                    highlights: Double? = nil, shadows: Double? = nil) {
             self.exposure = exposure; self.contrast = contrast; self.saturation = saturation; self.temperature = temperature
+            self.highlights = highlights; self.shadows = shadows
         }
     }
 
@@ -106,6 +111,68 @@ extension EditV2 {
 
     public enum TransitionKind: String, Codable, Hashable, Sendable, CaseIterable {
         case fade, black, white, slideLeft, slideRight, slideUp, slideDown, zoom
+        /// Edit suite additions.
+        case whip, spin, glitch
+    }
+
+    /// Speed-curve preset (`custom` = edited points). Decodes any string so validate() can name an unknown one.
+    public struct SpeedPreset: RawRepresentable, Codable, Hashable, Sendable, CustomStringConvertible {
+        public let rawValue: String
+        public init(rawValue: String) { self.rawValue = rawValue }
+        public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
+        public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
+        public var description: String { rawValue }
+        public static let montage = SpeedPreset(rawValue: "montage"), hero = SpeedPreset(rawValue: "hero"), bullet = SpeedPreset(rawValue: "bullet")
+        public static let flashIn = SpeedPreset(rawValue: "flashIn"), flashOut = SpeedPreset(rawValue: "flashOut"), custom = SpeedPreset(rawValue: "custom")
+        public static let all: [SpeedPreset] = [.montage, .hero, .bullet, .flashIn, .flashOut, .custom]
+    }
+
+    /// A speed curve over the clip's kept source: points [x 0–1, speed 0.1–10], x from 0 to 1, rising.
+    public struct SpeedCurve: Codable, Hashable, Sendable {
+        public var preset: SpeedPreset
+        public var points: [[Double]]
+        public init(preset: SpeedPreset, points: [[Double]]) { self.preset = preset; self.points = points }
+    }
+
+    /// Mask shape (decodes any string, see SpeedPreset).
+    public struct MaskShape: RawRepresentable, Codable, Hashable, Sendable, CustomStringConvertible {
+        public let rawValue: String
+        public init(rawValue: String) { self.rawValue = rawValue }
+        public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
+        public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
+        public var description: String { rawValue }
+        public static let linear = MaskShape(rawValue: "linear"), mirror = MaskShape(rawValue: "mirror"), circle = MaskShape(rawValue: "circle")
+        public static let rect = MaskShape(rawValue: "rect"), heart = MaskShape(rawValue: "heart"), star = MaskShape(rawValue: "star")
+        public static let all: [MaskShape] = [.linear, .mirror, .circle, .rect, .heart, .star]
+    }
+
+    /// A mask on a video/image item: centre and size in item fractions, rotation in degrees, soft edge, inverted or not.
+    public struct Mask: Codable, Hashable, Sendable {
+        public var shape: MaskShape
+        public var x: Double?
+        public var y: Double?
+        public var width: Double?
+        public var height: Double?
+        public var rotation: Double?
+        public var feather: Double?
+        public var invert: Bool?
+        public init(shape: MaskShape, x: Double? = nil, y: Double? = nil, width: Double? = nil, height: Double? = nil, rotation: Double? = nil,
+                    feather: Double? = nil, invert: Bool? = nil) {
+            self.shape = shape; self.x = x; self.y = y; self.width = width; self.height = height; self.rotation = rotation
+            self.feather = feather; self.invert = invert
+        }
+    }
+
+    /// Voice effect on a clip with sound (decodes any string, see SpeedPreset).
+    public struct VoiceEffect: RawRepresentable, Codable, Hashable, Sendable, CustomStringConvertible {
+        public let rawValue: String
+        public init(rawValue: String) { self.rawValue = rawValue }
+        public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
+        public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
+        public var description: String { rawValue }
+        public static let none = VoiceEffect(rawValue: "none"), warm = VoiceEffect(rawValue: "warm"), radio = VoiceEffect(rawValue: "radio")
+        public static let phone = VoiceEffect(rawValue: "phone"), deep = VoiceEffect(rawValue: "deep")
+        public static let all: [VoiceEffect] = [.none, .warm, .radio, .phone, .deep]
     }
 
     public struct Transition: Codable, Hashable, Sendable {
@@ -171,10 +238,17 @@ extension EditV2 {
         public var look: Look?
         public var chroma: Chroma?
         public var transitionIn: Transition?
+        /// Edit suite: a speed curve (replaces `speed` for timing), a mask, voice processing.
+        public var speedCurve: SpeedCurve?
+        public var mask: Mask?
+        public var voiceEffect: VoiceEffect?
+        public var enhance: Bool?
         public init(id: String, asset: String, inSec: Double, outSec: Double, speed: Double = 1, startSec: Double? = nil, volume: Double? = nil,
                     muted: Bool? = nil, fadeInSec: Double? = nil, fadeOutSec: Double? = nil, audioAsset: String? = nil, fit: Fit? = nil,
                     transform: Transform? = nil, crop: Crop? = nil, opacity: Double? = nil, keyframes: Keyframes? = nil, filter: FilterRef? = nil,
-                    adjust: Adjust? = nil, look: Look? = nil, chroma: Chroma? = nil, transitionIn: Transition? = nil) {
+                    adjust: Adjust? = nil, look: Look? = nil, chroma: Chroma? = nil, transitionIn: Transition? = nil, speedCurve: SpeedCurve? = nil,
+                    mask: Mask? = nil, voiceEffect: VoiceEffect? = nil, enhance: Bool? = nil) {
+            self.speedCurve = speedCurve; self.mask = mask; self.voiceEffect = voiceEffect; self.enhance = enhance
             self.id = id; self.asset = asset; self.inSec = inSec; self.outSec = outSec; self.speed = speed; self.startSec = startSec
             self.volume = volume; self.muted = muted; self.fadeInSec = fadeInSec; self.fadeOutSec = fadeOutSec; self.audioAsset = audioAsset
             self.fit = fit; self.transform = transform; self.crop = crop; self.opacity = opacity; self.keyframes = keyframes
@@ -198,9 +272,12 @@ extension EditV2 {
         public var look: Look?
         public var animIn: Anim?
         public var animOut: Anim?
+        /// Edit suite.
+        public var mask: Mask?
         public init(id: String, asset: String, startSec: Double, durationSec: Double, fit: Fit? = nil, transform: Transform? = nil, crop: Crop? = nil,
                     opacity: Double? = nil, keyframes: Keyframes? = nil, filter: FilterRef? = nil, adjust: Adjust? = nil, look: Look? = nil,
-                    animIn: Anim? = nil, animOut: Anim? = nil) {
+                    animIn: Anim? = nil, animOut: Anim? = nil, mask: Mask? = nil) {
+            self.mask = mask
             self.id = id; self.asset = asset; self.startSec = startSec; self.durationSec = durationSec; self.fit = fit; self.transform = transform
             self.crop = crop; self.opacity = opacity; self.keyframes = keyframes; self.filter = filter; self.adjust = adjust; self.look = look
             self.animIn = animIn; self.animOut = animOut
@@ -298,15 +375,21 @@ extension EditV2 {
         public var keyframes: Keyframes?
         /// Beat marks, source seconds.
         public var beats: [Double]?
+        /// Edit suite: the strong (bar) beats, voice processing.
+        public var strongBeats: [Double]?
+        public var voiceEffect: VoiceEffect?
+        public var enhance: Bool?
         public init(id: String, asset: String, startSec: Double, inSec: Double, outSec: Double, speed: Double? = nil, volume: Double? = nil,
-                    muted: Bool? = nil, fadeInSec: Double? = nil, fadeOutSec: Double? = nil, keyframes: Keyframes? = nil, beats: [Double]? = nil) {
+                    muted: Bool? = nil, fadeInSec: Double? = nil, fadeOutSec: Double? = nil, keyframes: Keyframes? = nil, beats: [Double]? = nil,
+                    strongBeats: [Double]? = nil, voiceEffect: VoiceEffect? = nil, enhance: Bool? = nil) {
+            self.strongBeats = strongBeats; self.voiceEffect = voiceEffect; self.enhance = enhance
             self.id = id; self.asset = asset; self.startSec = startSec; self.inSec = inSec; self.outSec = outSec; self.speed = speed
             self.volume = volume; self.muted = muted; self.fadeInSec = fadeInSec; self.fadeOutSec = fadeOutSec; self.keyframes = keyframes
             self.beats = beats
         }
     }
 
-    public enum CaptionPreset: String, Codable, Hashable, Sendable, CaseIterable { case plain, highlight, box, karaoke, pop, single }
+    public enum CaptionPreset: String, Codable, Hashable, Sendable, CaseIterable { case plain, highlight, box, karaoke, pop, single, highlighter, neon }
 
     /// TextStyle fields plus the caption ones (flat in JSON, as in the contract).
     public struct CaptionStyle: Codable, Hashable, Sendable {
@@ -365,8 +448,14 @@ extension EditV2 {
         public var level: Double?
         /// 0.05–2 (default 0.25).
         public var fadeSec: Double?
+        /// Edit suite: ramp down before (0.05–2) and back up after (0.05–3); else fadeSec for both.
+        public var attackSec: Double?
+        public var releaseSec: Double?
         public var under: [DuckSource]
-        public init(level: Double? = nil, fadeSec: Double? = nil, under: [DuckSource]) { self.level = level; self.fadeSec = fadeSec; self.under = under }
+        public init(level: Double? = nil, fadeSec: Double? = nil, attackSec: Double? = nil, releaseSec: Double? = nil, under: [DuckSource]) {
+            self.level = level; self.fadeSec = fadeSec; self.attackSec = attackSec; self.releaseSec = releaseSec; self.under = under
+        }
+
     }
 
     public enum TrackKind: String, Codable, Hashable, Sendable, CaseIterable {

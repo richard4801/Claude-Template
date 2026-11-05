@@ -2,7 +2,8 @@
 // ports (fixture test/fixtures/editor/looks.json) and the CPU renderer the server uses for photos. Pure: no I/O.
 //
 // Per item, on sRGB values 0–1, in this order:
-//   1 sharpen (unsharp mask)  2 chromatic aberration  3 colour matrix (adjust + filter, model.ts)  4 tone curves
+//   1 sharpen (unsharp mask)  2 chromatic aberration  3 colour matrix (adjust + filter, model.ts)  3b highlights/shadows
+//   (Adjust, model.ts toneAdjust)  4 tone curves
 //   5 3D LUT (trilinear, blended by strength)  6 lift (faded blacks)  7 halation  8 light leak  9 vignette  10 grain
 // Steps 1, 2 and 7 look at neighbours (blur radii scale with the picture, so a thumbnail looks like the full frame).
 
@@ -200,7 +201,7 @@ export const grainCell = (short: number, g: Grain) => Math.max(1, Math.round((sh
  * Renders a look on an image. `matrix` = the item's colour matrix (model.ts colorMatrix, 3×4) or null; `lut` = the
  * resolved LUT or null; `frame`/`fps` animate the grain and leak.
  */
-export function renderLook(img: Image, look: Look, o: { matrix?: number[] | null; lut?: Lut | null; frame?: number; fps?: number } = {}): Image {
+export function renderLook(img: Image, look: Look, o: { matrix?: number[] | null; tone?: { shadows?: number; highlights?: number } | null; lut?: Lut | null; frame?: number; fps?: number } = {}): Image {
   const { width: w, height: h } = img, short = Math.min(w, h);
   let src = img;
   // 1. sharpen
@@ -215,7 +216,7 @@ export function renderLook(img: Image, look: Look, o: { matrix?: number[] | null
   const curves = curvesFn(look.curves);
   const strength = clamp(look.strength ?? 1, 0, 1);
   const lift = 0.12 * clamp(look.lift ?? 0, 0, 1);
-  const M = o.matrix ?? null, L = o.lut ?? null;
+  const M = o.matrix ?? null, L = o.lut ?? null, sh0 = o.tone?.shadows ?? 0, hi0 = o.tone?.highlights ?? 0;
   const out = new Float32Array(w * h * 3);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     let rgb: [number, number, number];
@@ -225,6 +226,8 @@ export function renderLook(img: Image, look: Look, o: { matrix?: number[] | null
     } else rgb = [px(src, x, y, 0), px(src, x, y, 1), px(src, x, y, 2)];
     // 3. colour matrix
     if (M) rgb = [0, 1, 2].map(i => c01(M[i * 4]! * rgb[0] + M[i * 4 + 1]! * rgb[1] + M[i * 4 + 2]! * rgb[2] + M[i * 4 + 3]!)) as [number, number, number];
+    // 3b. highlights / shadows (Adjust)
+    if (sh0 || hi0) rgb = rgb.map(v => c01(v + 0.25 * (sh0 * 4 * v * (1 - v) * (1 - v) + hi0 * 4 * v * v * (1 - v)))) as [number, number, number];
     // 4. curves
     if (curves) rgb = curves(rgb);
     // 5. LUT

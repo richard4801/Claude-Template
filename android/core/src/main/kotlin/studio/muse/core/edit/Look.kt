@@ -323,8 +323,10 @@ fun grainCell(short: Int, g: Grain): Int = max(1L, jsRound(short / 1080.0 * lcla
  * Steps 3–6 (colour matrix → curves → LUT by strength → lift), each clamped: the per-pixel colour part of a look.
  * The GPU path bakes exactly this into one 3D LUT ([bakeCube]).
  */
-class ColorStack(matrix: List<Double>?, look: Look, lut: Lut?) {
+class ColorStack(matrix: List<Double>?, look: Look, lut: Lut?, tone: Tone? = null) {
     private val m: DoubleArray? = matrix?.toDoubleArray()
+    private val sh = tone?.shadows ?: 0.0
+    private val hi = tone?.highlights ?: 0.0
     private val curves = curvesFn(look.curves)
     private val strength = lclamp(look.strength ?: 1.0, 0.0, 1.0)
     private val l: Lut? = lut?.takeIf { strength > 0 }
@@ -332,7 +334,7 @@ class ColorStack(matrix: List<Double>?, look: Look, lut: Lut?) {
     private val t = DoubleArray(3)
 
     /** True when the stack changes nothing. */
-    val isIdentity: Boolean get() = m == null && curves == null && l == null && lift <= 0
+    val isIdentity: Boolean get() = m == null && sh == 0.0 && hi == 0.0 && curves == null && l == null && lift <= 0
 
     /** Applies the stack to [rgb] in place (not thread-safe: one instance per thread). */
     fun apply(rgb: DoubleArray): DoubleArray {
@@ -340,6 +342,8 @@ class ColorStack(matrix: List<Double>?, look: Look, lut: Lut?) {
             val r = rgb[0]; val g = rgb[1]; val b = rgb[2]
             for (i in 0 until 3) rgb[i] = lc01(m[i * 4] * r + m[i * 4 + 1] * g + m[i * 4 + 2] * b + m[i * 4 + 3])
         }
+        // 3b. highlights / shadows (Adjust)
+        if (sh != 0.0 || hi != 0.0) for (i in 0 until 3) rgb[i] = toneAdjust(rgb[i], sh, hi)
         curves?.invoke(rgb)
         l?.let { lut ->
             lutSample(lut, rgb[0], rgb[1], rgb[2], t)
@@ -372,7 +376,7 @@ class ColorStack(matrix: List<Double>?, look: Look, lut: Lut?) {
  * Renders [look] on [img]. [matrix] = the item's colour matrix (colorMatrix, 3×4) or null; [lut] = the resolved LUT or
  * null; [frame]/[fps] animate the grain and the leak.
  */
-fun renderLook(img: LookImage, look: Look, matrix: List<Double>? = null, lut: Lut? = null, frame: Int = 0, fps: Double = 30.0): LookImage {
+fun renderLook(img: LookImage, look: Look, matrix: List<Double>? = null, lut: Lut? = null, frame: Int = 0, fps: Double = 30.0, tone: Tone? = null): LookImage {
     val w = img.width; val h = img.height; val short = min(w, h)
     var src = img
     // 1. sharpen
@@ -385,7 +389,8 @@ fun renderLook(img: LookImage, look: Look, matrix: List<Double>? = null, lut: Lu
     }
     // 2. chromatic aberration (red out, blue in, from the centre); 3–6 the colour stack
     val ca = lclamp(look.chromatic ?: 0.0, 0.0, 1.0) * 0.006
-    val stack = ColorStack(matrix, look, lut)
+    val stack = ColorStack(matrix, look, lut, tone)
+
     val out = FloatArray(w * h * 3)
     val rgb = DoubleArray(3)
     for (y in 0 until h) for (x in 0 until w) {
@@ -444,3 +449,13 @@ fun renderLook(img: LookImage, look: Look, matrix: List<Double>? = null, lut: Lu
 
 /** The warm tint of halation (screened). */
 val HALATION_TINT = doubleArrayOf(1.0, 0.35, 0.2)
+
+/** Highlights/shadows of an item's Adjust (Edit suite), applied right after the colour matrix ([toneAdjust]). */
+data class Tone(val shadows: Double = 0.0, val highlights: Double = 0.0) {
+    val isNoop: Boolean get() = shadows == 0.0 && highlights == 0.0
+
+    companion object {
+        /** The tone of [adjust], or null when it has none. */
+        fun of(adjust: Adjust?): Tone? = Tone(adjust?.shadows ?: 0.0, adjust?.highlights ?: 0.0).takeUnless { it.isNoop }
+    }
+}

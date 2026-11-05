@@ -2,7 +2,7 @@
 // the Kotlin (android/core/.../core/edit) and Swift (mac/MuseCore/.../Edit) ports must give the same answers for every
 // case in test/fixtures/editor/*.json (scripts/editor-fixtures.ts writes them from these functions). Pure: no I/O.
 
-import { lookProblem, type Look } from './look.js';
+import { hash01, lookProblem, type Look } from './look.js';
 
 // ------------------------------------------------------------------ types
 export type Ease = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'hold';
@@ -11,10 +11,17 @@ export type KfProp = 'x' | 'y' | 'scale' | 'rotation' | 'opacity' | 'volume';
 export type Keyframes = Partial<Record<KfProp, Keyframe[]>>;
 export type Transform = { x?: number; y?: number; scale?: number; rotation?: number };
 export type Crop = { left?: number; top?: number; right?: number; bottom?: number };
-export type Adjust = { exposure?: number; contrast?: number; saturation?: number; temperature?: number };
+export type Adjust = { exposure?: number; contrast?: number; saturation?: number; temperature?: number;
+  /** Edit suite (phase 2): tone, applied after the colour matrix (`toneAdjust`). */ highlights?: number; shadows?: number };
 export type FilterRef = { id: string; amount: number };
 export type Chroma = { color: string; similarity?: number; smoothness?: number; spill?: number };
-export type TransitionKind = 'fade' | 'black' | 'white' | 'slideLeft' | 'slideRight' | 'slideUp' | 'slideDown' | 'zoom';
+export type TransitionKind = 'fade' | 'black' | 'white' | 'slideLeft' | 'slideRight' | 'slideUp' | 'slideDown' | 'zoom' | 'whip' | 'spin' | 'glitch';
+export type SpeedPreset = 'montage' | 'hero' | 'bullet' | 'flashIn' | 'flashOut' | 'custom';
+/** A speed curve over the clip's source: points [x 0–1 of the kept source, speed 0.1–10], x from 0 to 1. */
+export type SpeedCurve = { preset: SpeedPreset; points: [number, number][] };
+export type MaskShape = 'linear' | 'mirror' | 'circle' | 'rect' | 'heart' | 'star';
+export type Mask = { shape: MaskShape; x?: number; y?: number; width?: number; height?: number; rotation?: number; feather?: number; invert?: boolean };
+export type VoiceEffect = 'none' | 'warm' | 'radio' | 'phone' | 'deep';
 export type Transition = { kind: TransitionKind; durationSec: number };
 export type AnimKind = 'none' | 'fade' | 'pop' | 'slideUp' | 'slideDown' | 'zoom' | 'typewriter';
 export type Anim = { kind: AnimKind; durationSec: number };
@@ -23,8 +30,10 @@ export type Fit = 'cover' | 'contain';
 export type Asset = { id: string; kind: 'video' | 'image' | 'audio' | 'lut' /* an imported .cube (Looks) */; take?: string; upload?: string; library?: string;
   durationSec?: number; width?: number; height?: number; hasAudio?: boolean; url?: string };
 
-type Visual = { fit?: Fit; transform?: Transform; crop?: Crop; opacity?: number; keyframes?: Keyframes; filter?: FilterRef; adjust?: Adjust; look?: Look };
-export type VideoClip = Visual & { id: string; asset: string; inSec: number; outSec: number; speed: number; startSec?: number;
+type Visual = { fit?: Fit; transform?: Transform; crop?: Crop; opacity?: number; keyframes?: Keyframes; filter?: FilterRef; adjust?: Adjust; look?: Look; mask?: Mask };
+/** Voice processing on a clip with sound (Edit suite audio panel). */
+type Voice = { voiceEffect?: VoiceEffect; enhance?: boolean };
+export type VideoClip = Visual & Voice & { id: string; asset: string; inSec: number; outSec: number; speed: number; speedCurve?: SpeedCurve; startSec?: number;
   volume?: number; muted?: boolean; fadeInSec?: number; fadeOutSec?: number; audioAsset?: string; chroma?: Chroma; transitionIn?: Transition };
 export type ImageItem = Visual & { id: string; asset: string; startSec: number; durationSec: number; animIn?: Anim; animOut?: Anim };
 export type TextStyle = { font: 'sans' | 'serif' | 'rounded' | 'condensed' | 'mono' | 'marker'; weight: 400 | 700 | 900; sizePct: number; color: string;
@@ -33,13 +42,13 @@ export type TextStyle = { font: 'sans' | 'serif' | 'rounded' | 'condensed' | 'mo
   background?: { color: string; opacity: number; paddingPct: number; radiusPct: number } };
 export type TextItem = { id: string; startSec: number; durationSec: number; text: string; style: TextStyle; transform?: Transform; opacity?: number;
   keyframes?: Keyframes; animIn?: Anim; animOut?: Anim; template?: string };
-export type AudioClip = { id: string; asset: string; startSec: number; inSec: number; outSec: number; speed?: number; volume?: number; muted?: boolean;
+export type AudioClip = Voice & { id: string; asset: string; strongBeats?: number[]; startSec: number; inSec: number; outSec: number; speed?: number; volume?: number; muted?: boolean;
   fadeInSec?: number; fadeOutSec?: number; keyframes?: Keyframes; beats?: number[] };
-export type CaptionPreset = 'plain' | 'highlight' | 'box' | 'karaoke' | 'pop' | 'single';
+export type CaptionPreset = 'plain' | 'highlight' | 'box' | 'karaoke' | 'pop' | 'single' | 'highlighter' | 'neon';
 export type CaptionStyle = TextStyle & { preset: CaptionPreset; highlightColor: string; y?: number; wordsPerPage?: number; maxLines?: number };
 export type CaptionWord = { text: string; startSec: number; endSec: number };
 export type CaptionTrack = { asset: string; words: CaptionWord[]; style: CaptionStyle };
-export type Duck = { level?: number; fadeSec?: number; under: ('voice' | 'speech')[] };
+export type Duck = { level?: number; fadeSec?: number; attackSec?: number; releaseSec?: number; under: ('voice' | 'speech')[] };
 export type TrackKind = 'main' | 'video' | 'image' | 'text' | 'caption' | 'music' | 'voice' | 'sfx';
 export type Item = VideoClip | ImageItem | TextItem | AudioClip;
 export type Track = { id: string; kind: TrackKind; name?: string; muted?: boolean; hidden?: boolean; volume?: number; items: Item[];
@@ -52,14 +61,25 @@ export type EditListV1 = { version: 1; sourceTakeId: string; sourceDurationSec: 
 
 export const LIMITS = {
   maxJsonBytes: 256 * 1024, maxTracks: 16, maxItemsPerTrack: 300, maxItems: 600, maxAssets: 60, maxWords: 3000, maxKeyframes: 100,
-  minClipSourceSec: 0.1, minItemSec: 0.05, minOutputSec: 0.5, maxOutputSec: 600, minSpeed: 0.25, maxSpeed: 4, endSlackSec: 0.05,
+  minClipSourceSec: 0.1, minItemSec: 0.05, minOutputSec: 0.5, maxOutputSec: 600, minSpeed: 0.1, maxSpeed: 10, endSlackSec: 0.05,
   minTransitionSec: 0.1, maxTransitionSec: 2, maxText: 500, overlapSlackSec: 0.001,
 } as const;
 export const V1_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
-export const TRANSITIONS: TransitionKind[] = ['fade', 'black', 'white', 'slideLeft', 'slideRight', 'slideUp', 'slideDown', 'zoom'];
+export const TRANSITIONS: TransitionKind[] = ['fade', 'black', 'white', 'slideLeft', 'slideRight', 'slideUp', 'slideDown', 'zoom', 'whip', 'spin', 'glitch'];
+export const MASK_SHAPES: MaskShape[] = ['linear', 'mirror', 'circle', 'rect', 'heart', 'star'];
+export const VOICE_EFFECTS: VoiceEffect[] = ['none', 'warm', 'radio', 'phone', 'deep'];
+export const CURVE_PIECES = 48;
+/** Speed-curve presets (x = position in the clip's kept source, speed ×). */
+export const SPEED_PRESETS: Record<Exclude<SpeedPreset, 'custom'>, [number, number][]> = {
+  montage: [[0, 1], [0.2, 4], [0.4, 0.5], [0.6, 4], [0.8, 0.5], [1, 1]],
+  hero: [[0, 1], [0.3, 1], [0.42, 6], [0.58, 6], [0.7, 1], [1, 1]],
+  bullet: [[0, 4], [0.35, 4], [0.45, 0.2], [0.55, 0.2], [0.65, 4], [1, 4]],
+  flashIn: [[0, 6], [0.4, 6], [0.6, 1], [1, 1]],
+  flashOut: [[0, 1], [0.4, 1], [0.6, 6], [1, 6]],
+};
 export const ANIMS: AnimKind[] = ['none', 'fade', 'pop', 'slideUp', 'slideDown', 'zoom', 'typewriter'];
 export const FONTS = ['sans', 'serif', 'rounded', 'condensed', 'mono', 'marker'] as const;
-export const CAPTION_PRESETS: CaptionPreset[] = ['plain', 'highlight', 'box', 'karaoke', 'pop', 'single'];
+export const CAPTION_PRESETS: CaptionPreset[] = ['plain', 'highlight', 'box', 'karaoke', 'pop', 'single', 'highlighter', 'neon'];
 /** Caption paging constants (plans/video-editor.md "Text, hooks and captions"). */
 export const CAPTION_GAP_SEC = 0.6, CAPTION_TAIL_SEC = 0.4, SPEECH_JOIN_SEC = 0.4;
 
@@ -102,7 +122,39 @@ export function propAt(item: { keyframes?: Keyframes }, prop: KfProp, fallback: 
 }
 
 // ------------------------------------------------------------------ timeline
-export const clipLength = (c: { inSec: number; outSec: number; speed?: number }) => (c.outSec - c.inSec) / (c.speed ?? 1);
+/** Speed at x (0–1) of a curve: smoothstep between points in log speed. */
+export function curveSpeed(c: SpeedCurve, x: number): number {
+  const pts = c.points;
+  if (x <= pts[0]![0]) return pts[0]![1];
+  for (let k = 0; k < pts.length - 1; k++) {
+    const a = pts[k]!, b = pts[k + 1]!;
+    if (x <= b[0]) { const t = b[0] > a[0] ? (x - a[0]) / (b[0] - a[0]) : 1, e = t * t * (3 - 2 * t); return Math.exp(Math.log(a[1]) + (Math.log(b[1]) - Math.log(a[1])) * e); }
+  }
+  return pts[pts.length - 1]![1];
+}
+export type Piece = { inSec: number; outSec: number; speed: number };
+/** A clip as constant-speed pieces: one piece, or CURVE_PIECES equal source pieces of a speed curve (each at the curve's speed at its middle). Engines render these. */
+export function speedPieces(c: { inSec: number; outSec: number; speed?: number; speedCurve?: SpeedCurve }): Piece[] {
+  if (!c.speedCurve) return [{ inSec: c.inSec, outSec: c.outSec, speed: c.speed ?? 1 }];
+  const n = CURVE_PIECES, len = (c.outSec - c.inSec) / n;
+  return Array.from({ length: n }, (_, i) => ({ inSec: r6(c.inSec + i * len), outSec: r6(i === n - 1 ? c.outSec : c.inSec + (i + 1) * len), speed: r6(curveSpeed(c.speedCurve!, (i + 0.5) / n)) }));
+}
+export const clipLength = (c: { inSec: number; outSec: number; speed?: number; speedCurve?: SpeedCurve }) =>
+  c.speedCurve ? speedPieces(c).reduce((s, p) => s + (p.outSec - p.inSec) / p.speed, 0) : (c.outSec - c.inSec) / (c.speed ?? 1);
+/** Seconds from the clip's start on the timeline at source time `sec` (clamped to the clip). */
+export function clipTimeAt(c: { inSec: number; outSec: number; speed?: number; speedCurve?: SpeedCurve }, sec: number): number {
+  let acc = 0;
+  for (const p of speedPieces(c)) {
+    if (sec <= p.outSec) return acc + Math.max(0, sec - p.inSec) / p.speed;
+    acc += (p.outSec - p.inSec) / p.speed;
+  }
+  return acc;
+}
+/** A curve cut down to the source range [x0, x1] of its clip, rescaled to 0–1 (preset becomes custom). */
+export function subCurve(c: SpeedCurve, x0: number, x1: number): SpeedCurve {
+  const inner = c.points.filter(p => p[0] > x0 + 1e-9 && p[0] < x1 - 1e-9).map(p => [r6((p[0] - x0) / (x1 - x0)), p[1]] as [number, number]);
+  return { preset: 'custom', points: [[0, r6(curveSpeed(c, x0))], ...inner, [1, r6(curveSpeed(c, x1))]] };
+}
 export const mainTrack = (p: EditProject) => p.tracks.find(t => t.kind === 'main')!;
 
 export type MainSpan = { id: string; index: number; startSec: number; endSec: number; transitionSec: number };
@@ -201,7 +253,8 @@ export function applyCuts(p: EditProject, assetId: string, cuts: Range[]): EditP
     pieces.forEach((pc, k) => {
       const { transitionIn, ...rest } = it;
       const keepsStart = k === 0 && Math.abs(pc.startSec - it.inSec) < 1e-9;
-      items.push({ ...rest, id: k === 0 ? it.id : `${it.id}.${k + 1}`, inSec: r6(pc.startSec), outSec: r6(pc.endSec),
+      const curve = it.speedCurve ? { speedCurve: subCurve(it.speedCurve, (pc.startSec - it.inSec) / (it.outSec - it.inSec), (pc.endSec - it.inSec) / (it.outSec - it.inSec)) } : {};
+      items.push({ ...rest, ...curve, id: k === 0 ? it.id : `${it.id}.${k + 1}`, inSec: r6(pc.startSec), outSec: r6(pc.endSec),
         ...(transitionIn && keepsStart ? { transitionIn } : {}) });
     });
   }
@@ -229,12 +282,11 @@ export function captionWords(p: EditProject): TimedWord[] {
   (mainTrack(p).items as VideoClip[]).forEach((c, i) => {
     if (c.asset !== ct.asset) return;
     const s = spans[i]!;
-    const sp = c.speed;
     ct.words.forEach((w, idx) => {
       const mid = (w.startSec + w.endSec) / 2;
       if (mid < c.inSec || mid >= c.outSec) return;
       const a = Math.max(w.startSec, c.inSec), b = Math.min(w.endSec, c.outSec);
-      out.push({ text: w.text, startSec: r6(s.startSec + (a - c.inSec) / sp), endSec: r6(s.startSec + (b - c.inSec) / sp), index: idx });
+      out.push({ text: w.text, startSec: r6(s.startSec + clipTimeAt(c, a)), endSec: r6(s.startSec + clipTimeAt(c, b)), index: idx });
     });
   });
   return out.sort((a, b) => a.startSec - b.startSec || a.index - b.index);
@@ -276,12 +328,15 @@ export function captionAt(p: EditProject, t: number): { page: number; word: numb
 }
 
 // ------------------------------------------------------------------ transitions and animations
-export type LayerState = { opacity: number; dx: number; dy: number; scale: number };
+/** rotation in degrees clockwise; blur 0–1 (motion blur along the move, up to 4 % of the canvas); rgbSplit 0–1 (channel offset up to 2 %). */
+export type LayerState = { opacity: number; dx: number; dy: number; scale: number; rotation: number; blur: number; rgbSplit: number };
 export type TransitionState = { a: LayerState; b: LayerState; color: string | null };
 export function transitionState(kind: TransitionKind, p: number): TransitionState {
   p = clamp(p, 0, 1);
   const e = ease('easeInOut', p);
-  const L = (o: Partial<LayerState> = {}): LayerState => ({ opacity: 1, dx: 0, dy: 0, scale: 1, ...o });
+  const L = (o: Partial<LayerState> = {}): LayerState => ({ opacity: 1, dx: 0, dy: 0, scale: 1, rotation: 0, blur: 0, rgbSplit: 0, ...o });
+  const e3 = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2, peak = Math.sin(Math.PI * p);
+  const jit = (seed: number) => (hash01(Math.floor(p * 24), seed, 7) - 0.5) * 2;
   switch (kind) {
     case 'fade': return { a: L(), b: L({ opacity: p }), color: null };
     case 'black': case 'white': return { a: L({ opacity: Math.max(0, 1 - 2 * p) }), b: L({ opacity: Math.max(0, 2 * p - 1) }), color: kind === 'black' ? '#000000' : '#FFFFFF' };
@@ -290,6 +345,9 @@ export function transitionState(kind: TransitionKind, p: number): TransitionStat
     case 'slideUp': return { a: L({ dy: -e }), b: L({ dy: 1 - e }), color: null };
     case 'slideDown': return { a: L({ dy: e }), b: L({ dy: -(1 - e) }), color: null };
     case 'zoom': return { a: L({ scale: 1 + 0.25 * e, opacity: 1 - p }), b: L({ opacity: p }), color: null };
+    case 'whip': return { a: L({ dx: -e3, blur: peak }), b: L({ dx: 1 - e3, blur: peak }), color: null };
+    case 'spin': return { a: L({ rotation: 180 * e, scale: 1 - 0.6 * e, opacity: p < 0.5 ? 1 : 0 }), b: L({ rotation: -180 * (1 - e), scale: 0.4 + 0.6 * e, opacity: p < 0.5 ? 0 : 1 }), color: null };
+    case 'glitch': return { a: L({ opacity: p < 0.5 ? 1 : 0, dx: 0.04 * peak * jit(1), rgbSplit: peak }), b: L({ opacity: p < 0.5 ? 0 : 1, dx: 0.04 * peak * jit(2), rgbSplit: peak }), color: null };
   }
 }
 
@@ -338,7 +396,7 @@ function mul(a: M, b: M): M {
 }
 const LUMA = [0.2126, 0.7152, 0.0722];
 /** The adjust an item ends up with: its own plus amount × the filter preset's (each clamped to ±1), and the tint. */
-export function effectiveAdjust(adjust: Adjust | undefined, filter: FilterRef | undefined, presets: FilterPreset[]): { adjust: Required<Adjust>; tint: { color: string; strength: number } | null } {
+export function effectiveAdjust(adjust: Adjust | undefined, filter: FilterRef | undefined, presets: FilterPreset[]): { adjust: Required<Pick<Adjust, 'exposure' | 'contrast' | 'saturation' | 'temperature'>>; tint: { color: string; strength: number } | null } {
   const a = { exposure: adjust?.exposure ?? 0, contrast: adjust?.contrast ?? 0, saturation: adjust?.saturation ?? 0, temperature: adjust?.temperature ?? 0 };
   const pr = filter ? presets.find(x => x.id === filter.id) : undefined;
   let tint: { color: string; strength: number } | null = null;
@@ -349,6 +407,57 @@ export function effectiveAdjust(adjust: Adjust | undefined, filter: FilterRef | 
   }
   return { adjust: a, tint };
 }
+/**
+ * Highlights/shadows (Adjust, −1…1) on one channel value, after the colour matrix: shadows move values around 1/3,
+ * highlights around 2/3 (weights 4v(1−v)² and 4v²(1−v), at most ±0.25·0.6).
+ */
+export function toneAdjust(v: number, shadows = 0, highlights = 0): number {
+  if (!shadows && !highlights) return v;
+  return clamp(v + 0.25 * (shadows * 4 * v * (1 - v) * (1 - v) + highlights * 4 * v * v * (1 - v)), 0, 1);
+}
+
+// ------------------------------------------------------------------ masks
+/** Mask opacity (0–1) at u, v of the item's own frame (0–1). Distances are in item fractions; feather is the soft edge width. */
+export function maskAlpha(m: Mask, u: number, v: number): number {
+  const cx = m.x ?? 0.5, cy = m.y ?? 0.5, w = Math.max(0.01, m.width ?? 0.5), h = Math.max(0.01, m.height ?? 0.5), f = Math.max(1e-4, m.feather ?? 0.1);
+  const a = ((m.rotation ?? 0) * Math.PI) / 180, du = u - cx, dv = v - cy;
+  const x = du * Math.cos(a) + dv * Math.sin(a), y = -du * Math.sin(a) + dv * Math.cos(a); // into mask space
+  const soft = (d: number) => 1 - smoothstep(-f / 2, f / 2, d); // d < 0 inside
+  let alpha: number;
+  switch (m.shape) {
+    case 'linear': alpha = soft(y); break;                                   // visible above the line
+    case 'mirror': alpha = soft(Math.abs(y) - h / 2); break;                 // a band h tall
+    case 'circle': { const r = Math.hypot(x / (w / 2), y / (h / 2)); alpha = soft((r - 1) * Math.min(w, h) / 2); break; }
+    case 'rect': alpha = soft(Math.max(Math.abs(x) - w / 2, Math.abs(y) - h / 2)); break;
+    case 'heart': {
+      const X = (x / (w / 2)) * 1.15, Y = (-y / (h / 2)) * 1.15 + 0.25;
+      const F = Math.pow(X * X + Y * Y - 1, 3) - X * X * Y * Y * Y;            // < 0 inside
+      alpha = soft(F * 0.6 * Math.min(w, h)); break;
+    }
+    case 'star': {
+      const X = x / (w / 2), Y = y / (h / 2), r = Math.hypot(X, Y);
+      const ang = ((Math.atan2(X, -Y) * 180) / Math.PI + 360) % 72, t = Math.abs(ang - 36) / 36; // 0 at an inner corner, 1 at a point
+      const edge = 0.45 + 0.55 * t;
+      alpha = soft((r - edge) * Math.min(w, h) / 2); break;
+    }
+  }
+  return r6(m.invert ? 1 - alpha : alpha);
+}
+const smoothstep = (a: number, b: number, x: number) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+
+// ------------------------------------------------------------------ SRT
+const srtTime = (t: number) => { const ms = Math.round(Math.max(0, t) * 1000); const h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60, s = Math.floor(ms / 1000) % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms % 1000).padStart(3, '0')}`; };
+/** The captions as an .srt file (one cue per caption page; upper case when the style says so). Empty without captions. */
+export function toSrt(p: EditProject): string {
+  const ct = p.tracks.find(t => t.kind === 'caption' && t.caption)?.caption;
+  if (!ct) return '';
+  return captionPages(p).map((pg, i) => {
+    const text = pg.words.map(w => w.text).join(' ');
+    return `${i + 1}\n${srtTime(pg.startSec)} --> ${srtTime(pg.endSec)}\n${ct.style.uppercase ? text.toUpperCase() : text}\n`;
+  }).join('\n');
+}
+
 /** One 3×4 affine RGB matrix for the item's look (exposure → temperature → contrast → saturation → tint). */
 export function colorMatrix(adjust: Adjust | undefined, filter: FilterRef | undefined, presets: FilterPreset[]): number[] {
   const { adjust: a, tint } = effectiveAdjust(adjust, filter, presets);
@@ -416,15 +525,20 @@ function baseGain(p: EditProject, track: Track, item: VideoClip | AudioClip, t: 
   return g;
 }
 
+/** Ramp down (attack, before speech) and back up (release, after it): attackSec/releaseSec, else fadeSec for both. */
+export const duckTimes = (d: Duck): [number, number] => {
+  const f = d.fadeSec ?? 0.25;
+  return [Math.max(0.05, d.attackSec ?? f), Math.max(0.05, d.releaseSec ?? f)];
+};
 /** Ducking multiplier at t for a music track with `duck`. */
 function duckGain(regions: Range[], duck: Duck, t: number): number {
-  const level = clamp(duck.level ?? 0.3, 0.05, 1), f = Math.max(0.05, duck.fadeSec ?? 0.25);
+  const level = clamp(duck.level ?? 0.3, 0.05, 1), [att, rel] = duckTimes(duck);
   let m = 1;
   for (const r of regions) {
     let d: number;
     if (t >= r.startSec && t <= r.endSec) d = 1;
-    else if (t < r.startSec) d = clamp(1 - (r.startSec - t) / f, 0, 1);
-    else d = clamp(1 - (t - r.endSec) / f, 0, 1);
+    else if (t < r.startSec) d = clamp(1 - (r.startSec - t) / att, 0, 1);
+    else d = clamp(1 - (t - r.endSec) / rel, 0, 1);
     m = Math.min(m, 1 - (1 - level) * d);
   }
   return m;
@@ -463,8 +577,8 @@ export function audioEnvelope(p: EditProject, trackId: string, itemId: string): 
   let regions: Range[] = [];
   if (track.kind === 'music' && track.duck) {
     regions = duckRegions(p, track.duck);
-    const f = Math.max(0.05, track.duck.fadeSec ?? 0.25);
-    for (const r of regions) { add(r.startSec - f); add(r.startSec); add(r.endSec); add(r.endSec + f); }
+    const [att, rel] = duckTimes(track.duck);
+    for (const r of regions) { add(r.startSec - att); add(r.startSec); add(r.endSec); add(r.endSec + rel); }
   }
   return [...ts].sort((a, b) => a - b).map(t => {
     let g = baseGain(p, track, item, t);
@@ -543,7 +657,13 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
     }
     if (it.crop !== undefined) for (const s of ['left', 'top', 'right', 'bottom'] as const) num(`${f}.crop.${s}`, it.crop[s], 0, 0.45);
     num(`${f}.opacity`, it.opacity, 0, 1);
-    if (it.adjust !== undefined) for (const s of ['exposure', 'contrast', 'saturation', 'temperature'] as const) num(`${f}.adjust.${s}`, it.adjust[s], -1, 1);
+    if (it.adjust !== undefined) for (const s of ['exposure', 'contrast', 'saturation', 'temperature', 'highlights', 'shadows'] as const) num(`${f}.adjust.${s}`, it.adjust[s], -1, 1);
+    if (it.mask !== undefined) {
+      if (!it.mask || !MASK_SHAPES.includes(it.mask.shape)) bad(`${f}.mask.shape`, `one of ${MASK_SHAPES.join(', ')}`);
+      num(`${f}.mask.x`, it.mask.x, -1, 2); num(`${f}.mask.y`, it.mask.y, -1, 2); num(`${f}.mask.width`, it.mask.width, 0.01, 3); num(`${f}.mask.height`, it.mask.height, 0.01, 3);
+      num(`${f}.mask.rotation`, it.mask.rotation, -360, 360); num(`${f}.mask.feather`, it.mask.feather, 0, 1);
+      if (it.mask.invert !== undefined && typeof it.mask.invert !== 'boolean') bad(`${f}.mask.invert`, 'must be true or false');
+    }
     if (it.filter !== undefined) {
       if (typeof it.filter.id !== 'string' || (filterIds.size && !filterIds.has(it.filter.id))) bad(`${f}.filter.id`, 'unknown filter');
       num(`${f}.filter.amount`, it.filter.amount, 0, 1, false);
@@ -565,6 +685,8 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
     if (a!.durationSec != null && c.outSec > a!.durationSec + LIMITS.endSlackSec) bad(`${f}.outSec`, 'is past the end of its source');
     num(`${f}.volume`, c.volume, 0, 2); num(`${f}.fadeInSec`, c.fadeInSec, 0, 10); num(`${f}.fadeOutSec`, c.fadeOutSec, 0, 10);
     if (c.muted !== undefined && typeof c.muted !== 'boolean') bad(`${f}.muted`, 'must be true or false');
+    if (c.voiceEffect !== undefined && !VOICE_EFFECTS.includes(c.voiceEffect)) bad(`${f}.voiceEffect`, `one of ${VOICE_EFFECTS.join(', ')}`);
+    if (c.enhance !== undefined && typeof c.enhance !== 'boolean') bad(`${f}.enhance`, 'must be true or false');
   };
 
   p.tracks.forEach((t, ti) => {
@@ -598,6 +720,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
     if (t.duck !== undefined) {
       if (t.kind !== 'music') bad(`${f}.duck`, 'only on a music track');
       num(`${f}.duck.level`, t.duck.level, 0.05, 1); num(`${f}.duck.fadeSec`, t.duck.fadeSec, 0.05, 2);
+      num(`${f}.duck.attackSec`, t.duck.attackSec, 0.05, 2); num(`${f}.duck.releaseSec`, t.duck.releaseSec, 0.05, 3);
       if (!Array.isArray(t.duck.under) || !t.duck.under.length || t.duck.under.some(u => u !== 'voice' && u !== 'speech')) bad(`${f}.duck.under`, 'must list voice and/or speech');
     }
     let prevEnd = -Infinity;
@@ -610,6 +733,17 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
         const c = it as VideoClip;
         clipBase(g, c, ['video']);
         num(`${g}.speed`, c.speed, LIMITS.minSpeed, LIMITS.maxSpeed, false);
+        if (c.speedCurve !== undefined) {
+          const sc = c.speedCurve;
+          if (!sc || !['montage', 'hero', 'bullet', 'flashIn', 'flashOut', 'custom'].includes(sc.preset)) bad(`${g}.speedCurve.preset`, 'unknown preset');
+          if (!Array.isArray(sc.points) || sc.points.length < 2 || sc.points.length > 16) bad(`${g}.speedCurve.points`, '2–16 points');
+          sc.points.forEach((pt, j) => {
+            if (!Array.isArray(pt) || pt.length !== 2 || !isNum(pt[0]) || !isNum(pt[1]) || pt[0] < 0 || pt[0] > 1 || pt[1] < LIMITS.minSpeed || pt[1] > LIMITS.maxSpeed)
+              bad(`${g}.speedCurve.points.${j}`, `must be [x 0–1, speed ${LIMITS.minSpeed}–${LIMITS.maxSpeed}]`);
+            if (j > 0 && pt[0] <= sc.points[j - 1]![0]) bad(`${g}.speedCurve.points.${j}`, 'x must increase');
+          });
+          if (sc.points[0]![0] !== 0 || sc.points[sc.points.length - 1]![0] !== 1) bad(`${g}.speedCurve.points`, 'must start at x 0 and end at x 1');
+        }
         visual(g, c, clipLength(c));
         kfs(`${g}.keyframes`, c.keyframes, clipLength(c), ['x', 'y', 'scale', 'rotation', 'opacity', 'volume']);
         if (c.audioAsset !== undefined) { const a = assets.get(c.audioAsset); if (!a || (a.kind !== 'video' && a.kind !== 'audio')) bad(`${g}.audioAsset`, 'must be an audio or video asset'); }
@@ -655,7 +789,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
         num(`${g}.startSec`, c.startSec, 0, 600, false);
         if (c.speed !== undefined && c.speed !== 1) bad(`${g}.speed`, 'audio clips play at 1×');
         kfs(`${g}.keyframes`, c.keyframes, clipLength(c), ['volume']);
-        if (c.beats !== undefined && (!Array.isArray(c.beats) || c.beats.length > 2000 || c.beats.some(b => !isNum(b) || b < 0))) bad(`${g}.beats`, 'must be up to 2000 times');
+        for (const k of ['beats', 'strongBeats'] as const) { const bs = c[k]; if (bs !== undefined && (!Array.isArray(bs) || bs.length > 2000 || bs.some(b => !isNum(b) || b < 0))) bad(`${g}.${k}`, 'must be up to 2000 times'); }
       }
       if (t.kind !== 'main') {
         const s = (it as { startSec: number }).startSec;

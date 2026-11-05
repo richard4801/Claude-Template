@@ -3,7 +3,7 @@ import { bigint, doublePrecision, index, integer, jsonb, pgTable, text } from 'd
 
 const ms = (name: string) => bigint(name, { mode: 'number' });
 
-export type EditorJobKind = 'captions' | 'cuts' | 'matte' | 'denoise';
+export type EditorJobKind = 'captions' | 'cuts' | 'matte' | 'denoise' | 'beats';
 export type EditorJobState = 'running' | 'done' | 'failed' | 'cancelled';
 /** What the job works on: a take of the studio, or an upload of the studio (with the duration the app measured). */
 export type EditorSource = { takeId?: string; uploadId?: string; durationSec: number };

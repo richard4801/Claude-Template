@@ -101,17 +101,19 @@ object EditJson {
                 CaptionTrack(c.str("asset"), c.arr("words").map { (e, f) -> Obj.of(e, f).let { w -> CaptionWord(w.str("text"), w.num("startSec"), w.num("endSec")) } }, captionStyle(c.obj("style")))
             },
             duck = o.objOrNull("duck")?.let { d ->
-                Duck(d.numOrNull("level"), d.numOrNull("fadeSec"), d.arr("under").map { (e, f) -> Obj.wire<DuckUnder>(e, f, "must list voice and/or speech") })
+                Duck(d.numOrNull("level"), d.numOrNull("fadeSec"), d.arr("under").map { (e, f) -> Obj.wire<DuckUnder>(e, f, "must list voice and/or speech") },
+                    d.numOrNull("attackSec"), d.numOrNull("releaseSec"))
             },
         )
     }
 
     private fun videoClip(o: Obj) = VideoClip(
         id = o.str("id"), asset = o.str("asset"), inSec = o.num("inSec"), outSec = o.num("outSec"), speed = o.num("speed"),
-        startSec = o.numOrNull("startSec"), volume = o.numOrNull("volume"), muted = o.boolOrNull("muted"),
+        speedCurve = o.objOrNull("speedCurve")?.let(::speedCurveOf), startSec = o.numOrNull("startSec"), volume = o.numOrNull("volume"), muted = o.boolOrNull("muted"),
         fadeInSec = o.numOrNull("fadeInSec"), fadeOutSec = o.numOrNull("fadeOutSec"), audioAsset = o.strOrNull("audioAsset"),
         fit = o.enumOrNull("fit", "must be cover or contain"), transform = transform(o), crop = crop(o), opacity = o.numOrNull("opacity"),
-        keyframes = keyframes(o), filter = filter(o), adjust = adjust(o), look = look(o),
+        keyframes = keyframes(o), filter = filter(o), adjust = adjust(o), look = look(o), mask = mask(o),
+        voiceEffect = o.enumOrNull("voiceEffect", "one of ${VoiceEffect.entries.joinToString(", ") { it.wire }}"), enhance = o.boolOrNull("enhance"),
         chroma = o.objOrNull("chroma")?.let { Chroma(it.str("color"), it.numOrNull("similarity"), it.numOrNull("smoothness"), it.numOrNull("spill")) },
         transitionIn = o.objOrNull("transitionIn")?.let { Transition(it.enum("kind", "unknown transition"), it.num("durationSec")) },
     )
@@ -119,7 +121,7 @@ object EditJson {
     private fun imageItem(o: Obj) = ImageItem(
         id = o.str("id"), asset = o.str("asset"), startSec = o.num("startSec"), durationSec = o.num("durationSec"),
         fit = o.enumOrNull("fit", "must be cover or contain"), transform = transform(o), crop = crop(o), opacity = o.numOrNull("opacity"),
-        keyframes = keyframes(o), filter = filter(o), adjust = adjust(o), look = look(o), animIn = anim(o, "animIn"), animOut = anim(o, "animOut"),
+        keyframes = keyframes(o), filter = filter(o), adjust = adjust(o), look = look(o), mask = mask(o), animIn = anim(o, "animIn"), animOut = anim(o, "animOut"),
     )
 
     private fun textItem(o: Obj) = TextItem(
@@ -133,12 +135,33 @@ object EditJson {
         speed = o.numOrNull("speed"), volume = o.numOrNull("volume"), muted = o.boolOrNull("muted"),
         fadeInSec = o.numOrNull("fadeInSec"), fadeOutSec = o.numOrNull("fadeOutSec"), keyframes = keyframes(o),
         beats = o.arrOrNull("beats")?.map { (e, f) -> Obj.number(e, f) },
+        strongBeats = o.arrOrNull("strongBeats")?.map { (e, f) -> Obj.number(e, f) },
+        voiceEffect = o.enumOrNull("voiceEffect", "one of ${VoiceEffect.entries.joinToString(", ") { it.wire }}"), enhance = o.boolOrNull("enhance"),
     )
+
+    /** A speed curve; a point that isn't `[x, speed]` numbers is a problem here (ranges are [validate]'s). */
+    private fun speedCurveOf(c: Obj) = SpeedCurve(
+        preset = c.enum("preset", "unknown preset"),
+        points = c.arr("points").map { (e, f) ->
+            val pt = (e as? JsonArray)?.takeIf { it.size == 2 }?.map { (it as? JsonPrimitive)?.takeIf { p -> !p.isString }?.doubleOrNull?.takeIf { d -> d.isFinite() } }
+            if (pt == null || pt.any { it == null }) throw EditProblem(f, "must be [x 0–1, speed ${number(EditLimits.MIN_SPEED)}–${number(EditLimits.MAX_SPEED)}]")
+            SpeedPoint(pt[0]!!, pt[1]!!)
+        },
+    )
+
+    private fun mask(o: Obj) = o.objOrNull("mask")?.let { m ->
+        Mask(
+            m.enum("shape", "one of ${MaskShape.entries.joinToString(", ") { it.wire }}"), m.numOrNull("x"), m.numOrNull("y"), m.numOrNull("width"), m.numOrNull("height"),
+            m.numOrNull("rotation"), m.numOrNull("feather"), m.boolOrNull("invert"),
+        )
+    }
 
     private fun transform(o: Obj) = o.objOrNull("transform")?.let { Transform(it.numOrNull("x"), it.numOrNull("y"), it.numOrNull("scale"), it.numOrNull("rotation")) }
     private fun crop(o: Obj) = o.objOrNull("crop")?.let { Crop(it.numOrNull("left"), it.numOrNull("top"), it.numOrNull("right"), it.numOrNull("bottom")) }
     private fun adjust(o: Obj) = o.objOrNull("adjust")?.let(::adjustOf)
-    private fun adjustOf(a: Obj) = Adjust(a.numOrNull("exposure"), a.numOrNull("contrast"), a.numOrNull("saturation"), a.numOrNull("temperature"))
+    private fun adjustOf(a: Obj) = Adjust(
+        a.numOrNull("exposure"), a.numOrNull("contrast"), a.numOrNull("saturation"), a.numOrNull("temperature"), a.numOrNull("highlights"), a.numOrNull("shadows"),
+    )
     private fun filter(o: Obj) = o.objOrNull("filter")?.let { FilterRef(it.str("id"), it.num("amount")) }
     private fun look(o: Obj) = o.objOrNull("look")?.let(::lookOf)
 
@@ -215,12 +238,19 @@ object EditJson {
                 put("style", encodeCaptionStyle(c.style))
             })
         }
-        t.duck?.let { d -> put("duck", buildJsonObject { num("level", d.level); num("fadeSec", d.fadeSec); put("under", JsonArray(d.under.map { JsonPrimitive(it.wire) })) }) }
+        t.duck?.let { d ->
+            put("duck", buildJsonObject {
+                num("level", d.level); num("fadeSec", d.fadeSec); num("attackSec", d.attackSec); num("releaseSec", d.releaseSec)
+                put("under", JsonArray(d.under.map { JsonPrimitive(it.wire) }))
+            })
+        }
     }
 
     fun encodeItem(it: Item): JsonObject = when (it) {
         is VideoClip -> buildJsonObject {
             put("id", it.id); put("asset", it.asset); num("inSec", it.inSec); num("outSec", it.outSec); num("speed", it.speed)
+            it.speedCurve?.let { c -> put("speedCurve", encodeSpeedCurve(c)) }
+            str("voiceEffect", it.voiceEffect?.wire); bool("enhance", it.enhance)
             num("startSec", it.startSec); num("volume", it.volume); bool("muted", it.muted); num("fadeInSec", it.fadeInSec); num("fadeOutSec", it.fadeOutSec)
             str("audioAsset", it.audioAsset); visual(it)
             it.chroma?.let { c -> put("chroma", buildJsonObject { put("color", c.color); num("similarity", c.similarity); num("smoothness", c.smoothness); num("spill", c.spill) }) }
@@ -238,6 +268,8 @@ object EditJson {
             put("id", it.id); put("asset", it.asset); num("startSec", it.startSec); num("inSec", it.inSec); num("outSec", it.outSec); num("speed", it.speed)
             num("volume", it.volume); bool("muted", it.muted); num("fadeInSec", it.fadeInSec); num("fadeOutSec", it.fadeOutSec); keyframes(it.keyframes)
             it.beats?.let { b -> put("beats", JsonArray(b.map(::number))) }
+            it.strongBeats?.let { b -> put("strongBeats", JsonArray(b.map(::number))) }
+            str("voiceEffect", it.voiceEffect?.wire); bool("enhance", it.enhance)
         }
     }
 
@@ -250,6 +282,17 @@ object EditJson {
         v.filter?.let { f -> put("filter", buildJsonObject { put("id", f.id); num("amount", f.amount) }) }
         v.adjust?.let { put("adjust", encodeAdjust(it)) }
         v.look?.let { put("look", encodeLook(it)) }
+        v.mask?.let { m ->
+            put("mask", buildJsonObject {
+                put("shape", m.shape.wire); num("x", m.x); num("y", m.y); num("width", m.width); num("height", m.height)
+                num("rotation", m.rotation); num("feather", m.feather); bool("invert", m.invert)
+            })
+        }
+    }
+
+    fun encodeSpeedCurve(c: SpeedCurve) = buildJsonObject {
+        put("preset", c.preset.wire)
+        put("points", JsonArray(c.points.map { p -> buildJsonArray { add(number(p.x)); add(number(p.speed)) } }))
     }
 
     fun encodeLook(l: Look) = buildJsonObject {
@@ -266,7 +309,11 @@ object EditJson {
         l.grain?.let { g -> put("grain", buildJsonObject { num("amount", g.amount); num("size", g.size) }) }
     }
 
-    fun encodeAdjust(a: Adjust) = buildJsonObject { num("exposure", a.exposure); num("contrast", a.contrast); num("saturation", a.saturation); num("temperature", a.temperature) }
+    fun encodeAdjust(a: Adjust) = buildJsonObject {
+        num("exposure", a.exposure); num("contrast", a.contrast); num("saturation", a.saturation); num("temperature", a.temperature)
+        num("highlights", a.highlights); num("shadows", a.shadows)
+    }
+
 
     private fun JsonObjectBuilder.transform(t: Transform?) {
         t?.let { put("transform", encodeTransform(it)) }

@@ -541,7 +541,7 @@ _Spec, data model, rules and rendering: `plans/video-editor.md` "Editor v2 (engi
 
 ```ts
 EditProject  { version: 2, sourceTakeId, canvas: { width, height, fps, background? }, assets: Asset[], tracks: Track[], mute? }   // plans/video-editor.md
-EditorJobKind "captions" | "cuts" | "matte" | "denoise"
+EditorJobKind "captions" | "cuts" | "matte" | "denoise" | "beats"
 EditorSource { takeId } | { uploadId, durationSec }            // a video take of the studio, or a video/audio upload of the studio (+ its length)
 EditorJob    { id, kind, state: "running"|"done"|"failed"|"cancelled", progress /* 0–100 */, phase /* "Listening", "Waiting"… */,
                source: EditorSource & { durationSec }, options, estimateUsd, costUsd, result?, error?, createdAt, finishedAt?,
@@ -555,10 +555,11 @@ DenoiseResult  { asset?: { kind: "audio", upload | take, url?, durationSec }, su
 | | |
 |---|---|
 | `POST /v1/takes/{id}/versions` with `edits: EditProject` | As in "Video editor", but `edits.version: 2`: checked by the v2 rules (JSON ≤ 256 KB; `durationSec` must match the project's duration within max(0.5 s, 5 %)); every `take`/`upload` asset must be this studio's (`not_found`) and of a fitting kind (`bad_request`). v1 lists are unchanged. |
+| `POST /v1/takes/{id}/versions` `{…, aiLabel?: boolean}` | Edit suite export "Label as AI-generated" (default off): kept with the version and returned as `Take.aiLabel: true`; posting uses it for the platform's AI label. C2PA signing is not implemented yet. |
 | `POST /v1/editor/validate` `{project}` | → `{ok: true, durationSec}` or `bad_request` naming the first broken field (`edits.tracks.2.items.0.speed: …`). Free. |
 | `GET /v1/editor/features` | → `{captions: {available, languages}, cuts: {available, defaults}, matte: {available, maxSec: 120}, denoise: {available}, maxSourceSec: 600}` |
 | `GET /v1/editor/presets` | → `{filters, captionStyles, hooks}` (the same tables the apps carry). |
-| `POST /v1/editor/uploads/presign` `{contentType: "audio/mp4"|"audio/mpeg"|"audio/wav"|…, bytes?}` | → `{uploadId, method: "PUT", url, headers, expiresAt, fileUrl}` for a voice-over or music file (≤ 200 MB). Use `uploadId` as an audio `Asset.upload`. |
+| `POST /v1/editor/uploads/presign` `{contentType: "audio/mp4"|"audio/mpeg"|"audio/wav"|…, bytes?}` | → `{uploadId, method: "PUT", url, headers, expiresAt, fileUrl}` for a voice-over or music file (≤ 200 MB), or a video (`video/mp4`, `video/quicktime`, ≤ 2 GB) for the media bin. Use `uploadId` as an audio `Asset.upload`. |
 | `POST /v1/editor/estimate` `{kind, source, options?}` | → `{kind, usd, tokens, free, reusesTranscript, durationSec}`. Free. |
 | `POST /v1/editor/jobs` `{kind, source, options?}` | → `EditorJob` (`running`). Holds the estimate (`insufficient_tokens`/`insufficient_balance`/cap errors as for renders, before anything starts), runs, then settles at the GPU time actually billed (at least $0.01), or releases the hold on failure/cancel. Progress and the result arrive as `editor` events. |
 | `GET /v1/editor/jobs?kind=&takeId=&uploadId=&limit=` | → my `EditorJob[]`, newest first (≤ 100). |
@@ -568,6 +569,7 @@ DenoiseResult  { asset?: { kind: "audio", upload | take, url?, durationSec }, su
 **Kinds and options**
 - `captions` `{language?: "auto"|"en"|…}` → `CaptionsResult`. Word timestamps of the source's speech. Free (reused, cost 0) when the same video already has a transcript from the last 30 days in that language.
 - `cuts` `{minSilenceSec? 0.25–5 (0.7), keepPadSec? 0–0.5 (0.12), fillers? (true), repeats? (false), extraFillers?: string[] ≤ 50, fromJobId?, silenceOnly?, noiseDb? −60…−10 (−35)}` → `CutsResult`: suggested source ranges to remove (silences longer than `minSilenceSec`, keeping `keepPadSec` of each side; "um/uh/er/ah/hmm…" + `extraFillers`; a word said twice in a row). Free when a transcript exists (`fromJobId`, or the newest one of that video); otherwise it transcribes first (priced like captions). **`silenceOnly: true`** is always free and needs no transcript: the server reads the audio level (ffmpeg `silencedetect`, analysis only, nothing encoded) and returns silence cuts only (`words: []`); quieter than `noiseDb` counts as silence. The app shows the cuts and applies the accepted ones with `applyCuts(project, assetId, cuts)`.
+- `beats` (free; music or any video/audio, ≤ 10 min) → `{bpm, beats: number[], strong: number[] /* source s */, durationSec}`: beat marks for the music track (ffmpeg decode + onset/tempo analysis on the server; nothing encoded).
 - `matte` (video ≤ 120 s) → `MatteResult`: the person on pure green; the app adds the asset (usually on an overlay/PiP track) with the given `chroma`. Priced per second of video.
 - `denoise` `{analyzeOnly?}`: `analyzeOnly: true` is free and needs a transcript → `{suggestion}` from how clearly the words were heard. Otherwise → the voice alone (music and noise removed) as an audio asset + the suggestion; the app sets it as the clip's `audioAsset`.
 - Estimates: GPU seconds (captions 8 + 0.15·d, matte 10 + 4·d, voice 5 + 0.3·d, d = media seconds) × the GPU's $/s; at least $0.01. Jobs on the server run 2 at a time (others wait in `phase: "Waiting"`); after a restart running jobs end `failed` ("Interrupted · try again") and their holds go back.

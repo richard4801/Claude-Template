@@ -157,11 +157,14 @@ fun EditProject.splitAt(t: Double): EditProject? {
     spans.getOrNull(i + 1)?.let { if (t >= it.startSec) return null }
     val c = mainClips[i]
     val local = t - s.startSec
-    val src = c.inSec + local * c.speed
+    val src = clipSourceAt(c, local)
     if (src - c.inSec < EditLimits.MIN_CLIP_SOURCE_SEC - 1e-9 || c.outSec - src < EditLimits.MIN_CLIP_SOURCE_SEC - 1e-9) return null
     if (main.items.size >= EditLimits.MAX_ITEMS_PER_TRACK) return null
-    val first = c.copy(outSec = r6(src), fadeOutSec = null, keyframes = splitKeys(c.keyframes, local, first = true))
-    val second = c.copy(id = newId(c.id, dotted = true), inSec = r6(src), fadeInSec = null, transitionIn = null, keyframes = splitKeys(c.keyframes, local, first = false))
+    // A speed curve stays on each piece (cut down to its part of the source; preset becomes custom).
+    val xs = (src - c.inSec) / (c.outSec - c.inSec)
+    val first = c.copy(outSec = r6(src), fadeOutSec = null, keyframes = splitKeys(c.keyframes, local, first = true), speedCurve = c.speedCurve?.let { subCurve(it, 0.0, xs) })
+    val second = c.copy(id = newId(c.id, dotted = true), inSec = r6(src), fadeInSec = null, transitionIn = null, keyframes = splitKeys(c.keyframes, local, first = false),
+        speedCurve = c.speedCurve?.let { subCurve(it, xs, 1.0) })
     val items = main.items.toMutableList().apply { set(i, first); add(i + 1, second) }
     return replaceTrack(main, main.copy(items = dropBadTransitions(items)))
 }
@@ -213,6 +216,17 @@ class ProjectHistory(initial: EditProject, private val limit: Int = 100) {
         if (next == null || next == current) return false
         past.addLast(current)
         while (past.size > limit) past.removeFirst()
+        future.clear()
+        current = next
+        return true
+    }
+
+    /**
+     * Replaces the current project without a new undo step (a slider being dragged: the drag is one step). The value
+     * before the drag stays the undo target; redo is cleared. False when [next] is null or no change.
+     */
+    fun amend(next: EditProject?): Boolean {
+        if (next == null || next == current) return false
         future.clear()
         current = next
         return true

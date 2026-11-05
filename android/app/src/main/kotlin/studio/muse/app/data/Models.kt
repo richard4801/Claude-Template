@@ -235,7 +235,8 @@ data class Take(
     val height: Int? = null,
     /** Edited versions (kind "edit", plans/api.md "Video editor"): the take it was cut from, the edit list, the file's frame rate. */
     val parentTakeId: String? = null,
-    val edits: EditListDto? = null,
+    // Edit suite (workstream 3): a v2 project comes back in the same field (EditsFieldSerializer keeps it in `project`).
+    @Serializable(with = EditsFieldSerializer::class) val edits: EditListDto? = null,
     val fps: Double? = null,
     /** Template shots: the template's id and name, the variation draw seed, and (template owner only) what was drawn. */
     val templateId: String? = null,
@@ -1039,3 +1040,75 @@ data class ScriptPreview(
     val id: String = "", val text: String = "", val parts: List<ScriptPart> = emptyList(), val fired: List<String> = emptyList(),
     val inputs: JsonObject = JsonObject(emptyMap()),
 )
+
+// ======================================================================= Edit suite (workstream 3)
+// plans/api.md "Editor v2": AI helper jobs (estimate first, then a job polled to its result) and edited versions that
+// carry a v2 project. Additive; nothing above depends on it except Take.edits' serializer.
+
+/** A job's source: a take of the studio, or an upload (+ its length). */
+@Serializable
+data class EditorSourceDto(val takeId: String? = null, val uploadId: String? = null, val durationSec: Double? = null)
+
+@Serializable
+data class EditorJobRequest(val kind: String, val source: EditorSourceDto, val options: JsonObject? = null)
+
+/** POST /v1/editor/estimate. [free] = nothing is charged ("Free" in the UI). */
+@Serializable
+data class EditorEstimate(val kind: String = "", val usd: Double = 0.0, val tokens: Double = 0.0, val free: Boolean = false, val reusesTranscript: Boolean = false, val durationSec: Double = 0.0)
+
+/** An AI helper job (captions, cuts, matte, denoise, beats). [result] is the kind's result object (plans/api.md). */
+@Serializable
+data class EditorJob(
+    val id: String,
+    val kind: String,
+    val state: String = "running",
+    val progress: Int = 0,
+    val phase: String = "",
+    val estimateUsd: Double = 0.0,
+    val costUsd: Double = 0.0,
+    val result: JsonObject? = null,
+    val error: String? = null,
+    val createdAt: Long = 0,
+) {
+    val finished: Boolean get() = state == "done" || state == "failed" || state == "cancelled"
+}
+
+/** POST /v1/takes/{id}/versions with a v2 project as `edits`. */
+@Serializable
+data class TakeVersionV2Request(
+    val uploadId: String,
+    val thumbUploadId: String? = null,
+    val edits: JsonObject,
+    val durationSec: Double,
+    val width: Int,
+    val height: Int,
+    val fps: Double? = null,
+)
+
+/** POST /v1/editor/uploads/presign (voice-over / music / .cube). */
+@Serializable
+data class EditorPresignRequest(val contentType: String, val bytes: Long? = null, val purpose: String? = null)
+
+/**
+ * Take.edits: a v1 edit list decodes as before; a v2 project (version 2) becomes an EditListDto with no segments and
+ * the project kept in [EditListDto.project], so old app code ignores it and the Edit suite reopens it.
+ */
+object EditsFieldSerializer : kotlinx.serialization.KSerializer<EditListDto> {
+    override val descriptor = JsonElement.serializer().descriptor
+
+    override fun deserialize(decoder: kotlinx.serialization.encoding.Decoder): EditListDto {
+        val el = (decoder as kotlinx.serialization.json.JsonDecoder).decodeJsonElement()
+        val o = el as? JsonObject ?: throw kotlinx.serialization.SerializationException("edits must be an object")
+        val version = (o["version"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 1
+        if (version == 2) {
+            val src = (o["sourceTakeId"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: ""
+            return EditListDto(2, src, 0.0, emptyList(), false).also { it.project = o }
+        }
+        return decoder.json.decodeFromJsonElement(EditListDto.serializer(), o)
+    }
+
+    override fun serialize(encoder: kotlinx.serialization.encoding.Encoder, value: EditListDto) {
+        val json = (encoder as kotlinx.serialization.json.JsonEncoder)
+        json.encodeJsonElement(value.project ?: json.json.encodeToJsonElement(EditListDto.serializer(), value))
+    }
+}

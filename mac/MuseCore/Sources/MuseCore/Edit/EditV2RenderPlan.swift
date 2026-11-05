@@ -33,6 +33,9 @@ extension EditV2 {
         public var timelineEnd: Double
         public var sourceStart: Double
         public var sourceEnd: Double
+        /// Constant-speed source pieces in play order (one for a plain clip, up to 48 for a speed curve); their lengths add
+        /// up to the segment's timeline length. Engines retime each piece on its own.
+        public var pieces: [Piece] = []
         public var isMain: Bool { mainIndex != nil }
         public var timelineLength: Double { timelineEnd - timelineStart }
         public func contains(_ t: Double) -> Bool { t >= timelineStart - 1e-9 && t < timelineEnd - 1e-9 }
@@ -50,6 +53,21 @@ extension EditV2 {
         public var sourceEnd: Double
         /// Timeline gain points (EditV2.audioEnvelope), clipped to the segment.
         public var envelope: [GainPoint]
+        /// Constant-speed source pieces (see VideoSegment.pieces).
+        public var pieces: [Piece] = []
+        /// The clip's voice processing (enhance + effect), empty = none.
+        public var voice: VoiceSettings? = nil
+    }
+
+    /// A clip's voice settings, for the engine's audio tap.
+    public struct VoiceSettings: Hashable, Sendable {
+        public var effect: VoiceEffect?
+        public var enhance: Bool?
+        public init?(effect: VoiceEffect?, enhance: Bool?) {
+            if (effect == nil || effect == VoiceEffect.none) && enhance != true { return nil }
+            self.effect = effect; self.enhance = enhance
+        }
+        public func chain(sampleRate: Double) -> [Biquad] { voiceChain(effect: effect, enhance: enhance, sampleRate: sampleRate) }
     }
 
     public struct RenderPlan: Hashable, Sendable {
@@ -83,20 +101,31 @@ extension EditV2 {
         var audioLane = 2
         var videoLane = 2
 
-        func sourceRange(_ inSec: Double, _ outSec: Double, _ speed: Double, start: Double, end: Double, asset: String) -> (Double, Double)? {
-            let s = inSec + 0
-            var e = inSec + (end - start) * speed
-            e = min(e, outSec)
-            if let m = media[asset], m.durationSec > 0 { e = min(e, m.durationSec) }
-            return e - s > 1e-3 ? (s, e) : nil
+        /// The clip's pieces cut to `end − start` of timeline and to the source file's length.
+        func cutPieces(_ all: [Piece], start: Double, end: Double, asset: String) -> [Piece]? {
+            let length = end - start
+            let fileEnd = media[asset].flatMap { $0.durationSec > 0 ? $0.durationSec : nil } ?? .infinity
+            var out: [Piece] = []
+            var acc = 0.0
+            for pc in all {
+                if acc >= length - 1e-9 { break }
+                var q = pc
+                if acc + pc.length > length { q.outSec = pc.inSec + (length - acc) * pc.speed }
+                q.outSec = min(q.outSec, fileEnd)
+                if q.outSec - q.inSec > 1e-4 { out.append(q) }
+                acc += pc.length
+            }
+            guard let f = out.first, let l = out.last, l.outSec - f.inSec > 1e-3 else { return nil }
+            return out
         }
 
-        func addAudio(_ track: Track, _ itemId: String, asset: String, inSec: Double, outSec: Double, speed: Double, start: Double, end: Double, lane: Int) -> Bool {
-            guard media[asset]?.hasAudio == true, let (s, e) = sourceRange(inSec, outSec, speed, start: start, end: end, asset: asset) else { return false }
+        func addAudio(_ track: Track, _ itemId: String, asset: String, pieces all: [Piece], start: Double, end: Double, lane: Int,
+                      voice: VoiceSettings? = nil) -> Bool {
+            guard media[asset]?.hasAudio == true, let pcs = cutPieces(all, start: start, end: end, asset: asset) else { return false }
             let env = audioEnvelope(p, trackId: track.id, itemId: itemId)
             guard env.contains(where: { $0.gain > 0 }) else { return false }
             audio.append(AudioSegment(trackId: track.id, itemId: itemId, assetId: asset, lane: lane, timelineStart: start, timelineEnd: end,
-                                      sourceStart: s, sourceEnd: e, envelope: env))
+                                      sourceStart: pcs[0].inSec, sourceEnd: pcs[pcs.count - 1].outSec, envelope: env, pieces: pcs, voice: voice))
             return true
         }
 
@@ -106,11 +135,14 @@ extension EditV2 {
                 for (i, c) in t.items.compactMap(\.videoClip).enumerated() where i < spans.count {
                     let start = spans[i].startSec, end = min(spans[i].endSec, d)
                     guard end - start > 1e-3 else { continue }
-                    if t.hidden != true, media[c.asset]?.hasVideo == true, let (s, e) = sourceRange(c.inSec, c.outSec, c.speed, start: start, end: end, asset: c.asset) {
+                    let all = speedPieces(c)
+                    if t.hidden != true, media[c.asset]?.hasVideo == true, let pcs = cutPieces(all, start: start, end: end, asset: c.asset) {
                         video.append(VideoSegment(trackId: t.id, itemId: c.id, assetId: c.asset, lane: i % 2, mainIndex: i, layer: 0,
-                                                  timelineStart: start, timelineEnd: end, sourceStart: s, sourceEnd: e))
+                                                  timelineStart: start, timelineEnd: end, sourceStart: pcs[0].inSec, sourceEnd: pcs[pcs.count - 1].outSec,
+                                                  pieces: pcs))
                     }
-                    _ = addAudio(t, c.id, asset: c.audioAsset ?? c.asset, inSec: c.inSec, outSec: c.outSec, speed: c.speed, start: start, end: end, lane: i % 2)
+                    _ = addAudio(t, c.id, asset: c.audioAsset ?? c.asset, pieces: all, start: start, end: end, lane: i % 2,
+                                 voice: VoiceSettings(effect: c.voiceEffect, enhance: c.enhance))
                 }
             case .video:
                 let vLane = videoLane, aLane = audioLane
@@ -118,12 +150,15 @@ extension EditV2 {
                 for c in t.items.compactMap(\.videoClip) {
                     let start = r6(c.startSec ?? 0), end = min(r6(start + clipLength(c)), d)
                     guard end - start > 1e-3 else { continue }
-                    if t.hidden != true, media[c.asset]?.hasVideo == true, let (s, e) = sourceRange(c.inSec, c.outSec, c.speed, start: start, end: end, asset: c.asset) {
+                    let all = speedPieces(c)
+                    if t.hidden != true, media[c.asset]?.hasVideo == true, let pcs = cutPieces(all, start: start, end: end, asset: c.asset) {
                         video.append(VideoSegment(trackId: t.id, itemId: c.id, assetId: c.asset, lane: vLane, mainIndex: nil, layer: ti,
-                                                  timelineStart: start, timelineEnd: end, sourceStart: s, sourceEnd: e))
+                                                  timelineStart: start, timelineEnd: end, sourceStart: pcs[0].inSec, sourceEnd: pcs[pcs.count - 1].outSec,
+                                                  pieces: pcs))
                         usedV = true
                     }
-                    if addAudio(t, c.id, asset: c.audioAsset ?? c.asset, inSec: c.inSec, outSec: c.outSec, speed: c.speed, start: start, end: end, lane: aLane) { usedA = true }
+                    if addAudio(t, c.id, asset: c.audioAsset ?? c.asset, pieces: all, start: start, end: end, lane: aLane,
+                                voice: VoiceSettings(effect: c.voiceEffect, enhance: c.enhance)) { usedA = true }
                 }
                 if usedV { videoLane += 1 }
                 if usedA { audioLane += 1 }
@@ -133,7 +168,10 @@ extension EditV2 {
                 for c in t.items.compactMap(\.audioClip) {
                     let start = r6(c.startSec), end = min(r6(start + clipLength(c)), d)
                     guard end - start > 1e-3 else { continue }
-                    if addAudio(t, c.id, asset: c.asset, inSec: c.inSec, outSec: c.outSec, speed: c.speed ?? 1, start: start, end: end, lane: aLane) { used = true }
+                    let all = speedPieces(inSec: c.inSec, outSec: c.outSec, speed: c.speed ?? 1, curve: nil)
+                    if addAudio(t, c.id, asset: c.asset, pieces: all, start: start, end: end, lane: aLane,
+                                voice: VoiceSettings(effect: c.voiceEffect, enhance: c.enhance)) { used = true }
+
                 }
                 if used { audioLane += 1 }
             case .image, .text, .caption:

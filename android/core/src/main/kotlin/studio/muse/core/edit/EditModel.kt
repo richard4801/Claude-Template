@@ -50,8 +50,63 @@ fun propAt(keyframes: Keyframes?, prop: KfProp, fallback: Double, t: Double): Do
 }
 
 // ------------------------------------------------------------------ timeline
-fun clipLength(inSec: Double, outSec: Double, speed: Double?): Double = (outSec - inSec) / (speed ?: 1.0)
-fun clipLength(c: MediaClip): Double = clipLength(c.inSec, c.outSec, c.speedOrNull)
+/** Speed at [x] (0–1) of a curve: smoothstep between points in log speed. */
+fun curveSpeed(c: SpeedCurve, x: Double): Double {
+    val pts = c.points
+    if (x <= pts[0].x) return pts[0].speed
+    for (k in 0 until pts.size - 1) {
+        val a = pts[k]; val b = pts[k + 1]
+        if (x <= b.x) {
+            val t = if (b.x > a.x) (x - a.x) / (b.x - a.x) else 1.0
+            val e = t * t * (3 - 2 * t)
+            return kotlin.math.exp(kotlin.math.ln(a.speed) + (kotlin.math.ln(b.speed) - kotlin.math.ln(a.speed)) * e)
+        }
+    }
+    return pts.last().speed
+}
+
+/** A constant-speed piece of a clip's source. */
+data class Piece(val inSec: Double, val outSec: Double, val speed: Double)
+
+/** A clip as constant-speed pieces: one piece, or CURVE_PIECES equal source pieces of a speed curve (each at the curve's speed at its middle). Engines render these. */
+fun speedPieces(inSec: Double, outSec: Double, speed: Double?, curve: SpeedCurve?): List<Piece> {
+    if (curve == null) return listOf(Piece(inSec, outSec, speed ?: 1.0))
+    val n = EditLimits.CURVE_PIECES; val len = (outSec - inSec) / n
+    return List(n) { i -> Piece(r6(inSec + i * len), r6(if (i == n - 1) outSec else inSec + (i + 1) * len), r6(curveSpeed(curve, (i + 0.5) / n))) }
+}
+
+fun speedPieces(c: MediaClip): List<Piece> = speedPieces(c.inSec, c.outSec, c.speedOrNull, (c as? VideoClip)?.speedCurve)
+
+fun clipLength(inSec: Double, outSec: Double, speed: Double?, curve: SpeedCurve? = null): Double =
+    if (curve != null) speedPieces(inSec, outSec, speed, curve).sumOf { (it.outSec - it.inSec) / it.speed } else (outSec - inSec) / (speed ?: 1.0)
+fun clipLength(c: MediaClip): Double = clipLength(c.inSec, c.outSec, c.speedOrNull, (c as? VideoClip)?.speedCurve)
+
+/** Seconds from the clip's start on the timeline at source time [sec] (clamped to the clip). */
+fun clipTimeAt(c: MediaClip, sec: Double): Double {
+    var acc = 0.0
+    for (p in speedPieces(c)) {
+        if (sec <= p.outSec) return acc + max(0.0, sec - p.inSec) / p.speed
+        acc += (p.outSec - p.inSec) / p.speed
+    }
+    return acc
+}
+
+/** The source time of the clip at [local] seconds from its start on the timeline (the inverse of [clipTimeAt]). */
+fun clipSourceAt(c: MediaClip, local: Double): Double {
+    var acc = 0.0
+    for (p in speedPieces(c)) {
+        val len = (p.outSec - p.inSec) / p.speed
+        if (local <= acc + len) return p.inSec + max(0.0, local - acc) * p.speed
+        acc += len
+    }
+    return c.outSec
+}
+
+/** A curve cut down to the source range [x0, x1] of its clip, rescaled to 0–1 (preset becomes custom). */
+fun subCurve(c: SpeedCurve, x0: Double, x1: Double): SpeedCurve {
+    val inner = c.points.filter { it.x > x0 + 1e-9 && it.x < x1 - 1e-9 }.map { SpeedPoint(r6((it.x - x0) / (x1 - x0)), it.speed) }
+    return SpeedCurve(SpeedPreset.CUSTOM, listOf(SpeedPoint(0.0, r6(curveSpeed(c, x0)))) + inner + SpeedPoint(1.0, r6(curveSpeed(c, x1))))
+}
 
 data class MainSpan(val id: String, val index: Int, val startSec: Double, val endSec: Double, val transitionSec: Double)
 
@@ -171,7 +226,8 @@ fun applyCuts(p: EditProject, assetId: String, cuts: List<Range>): EditProject {
         pieces = pieces.filter { pc -> pc.endSec - pc.startSec >= EditLimits.MIN_CLIP_SOURCE_SEC - 1e-9 }
         pieces.forEachIndexed { k, pc ->
             val keepsStart = k == 0 && kotlin.math.abs(pc.startSec - it.inSec) < 1e-9
-            items += it.copy(id = if (k == 0) it.id else "${it.id}.${k + 1}", inSec = r6(pc.startSec), outSec = r6(pc.endSec),
+            val curve = it.speedCurve?.let { sc -> subCurve(sc, (pc.startSec - it.inSec) / (it.outSec - it.inSec), (pc.endSec - it.inSec) / (it.outSec - it.inSec)) }
+            items += it.copy(id = if (k == 0) it.id else "${it.id}.${k + 1}", inSec = r6(pc.startSec), outSec = r6(pc.endSec), speedCurve = curve,
                 transitionIn = if (keepsStart) it.transitionIn else null)
         }
     }
@@ -199,12 +255,11 @@ fun captionWords(p: EditProject): List<TimedWord> {
     p.mainClips.forEachIndexed { i, c ->
         if (c.asset != ct.asset) return@forEachIndexed
         val s = spans[i]
-        val sp = c.speed
         ct.words.forEachIndexed { idx, w ->
             val mid = (w.startSec + w.endSec) / 2
             if (mid < c.inSec || mid >= c.outSec) return@forEachIndexed
             val a = max(w.startSec, c.inSec); val b = min(w.endSec, c.outSec)
-            out += TimedWord(w.text, r6(s.startSec + (a - c.inSec) / sp), r6(s.startSec + (b - c.inSec) / sp), idx)
+            out += TimedWord(w.text, r6(s.startSec + clipTimeAt(c, a)), r6(s.startSec + clipTimeAt(c, b)), idx)
         }
     }
     return out.sortedWith(compareBy<TimedWord> { it.startSec }.thenBy { it.index })
@@ -250,13 +305,20 @@ fun captionAt(pages: List<CaptionPage>, t: Double): CaptionAt? {
 fun captionAt(p: EditProject, t: Double): CaptionAt? = captionAt(captionPages(p), t)
 
 // ------------------------------------------------------------------ transitions and animations
-data class LayerState(val opacity: Double = 1.0, val dx: Double = 0.0, val dy: Double = 0.0, val scale: Double = 1.0)
+/** [rotation] in degrees clockwise; [blur] 0–1 (motion blur along the move, up to 4 % of the canvas); [rgbSplit] 0–1 (channel offset up to 2 %). */
+data class LayerState(
+    val opacity: Double = 1.0, val dx: Double = 0.0, val dy: Double = 0.0, val scale: Double = 1.0,
+    val rotation: Double = 0.0, val blur: Double = 0.0, val rgbSplit: Double = 0.0,
+)
 data class TransitionState(val a: LayerState, val b: LayerState, val color: String?)
 
 fun transitionState(kind: TransitionKind, p0: Double): TransitionState {
     val p = clamp(p0, 0.0, 1.0)
     val e = ease(Ease.EASE_IN_OUT, p)
     val l = LayerState()
+    val e3 = if (p < 0.5) 4 * p * p * p else 1 - (-2 * p + 2).pow(3) / 2
+    val peak = kotlin.math.sin(Math.PI * p)
+    fun jit(seed: Int) = (hash01(kotlin.math.floor(p * 24).toInt(), seed, 7) - 0.5) * 2
     return when (kind) {
         TransitionKind.FADE -> TransitionState(l, LayerState(opacity = p), null)
         TransitionKind.BLACK, TransitionKind.WHITE -> TransitionState(
@@ -267,6 +329,15 @@ fun transitionState(kind: TransitionKind, p0: Double): TransitionState {
         TransitionKind.SLIDE_UP -> TransitionState(LayerState(dy = -e), LayerState(dy = 1 - e), null)
         TransitionKind.SLIDE_DOWN -> TransitionState(LayerState(dy = e), LayerState(dy = -(1 - e)), null)
         TransitionKind.ZOOM -> TransitionState(LayerState(scale = 1 + 0.25 * e, opacity = 1 - p), LayerState(opacity = p), null)
+        TransitionKind.WHIP -> TransitionState(LayerState(dx = -e3, blur = peak), LayerState(dx = 1 - e3, blur = peak), null)
+        TransitionKind.SPIN -> TransitionState(
+            LayerState(rotation = 180 * e, scale = 1 - 0.6 * e, opacity = if (p < 0.5) 1.0 else 0.0),
+            LayerState(rotation = -180 * (1 - e), scale = 0.4 + 0.6 * e, opacity = if (p < 0.5) 0.0 else 1.0), null,
+        )
+        TransitionKind.GLITCH -> TransitionState(
+            LayerState(opacity = if (p < 0.5) 1.0 else 0.0, dx = 0.04 * peak * jit(1), rgbSplit = peak),
+            LayerState(opacity = if (p < 0.5) 0.0 else 1.0, dx = 0.04 * peak * jit(2), rgbSplit = peak), null,
+        )
     }
 }
 
@@ -369,6 +440,61 @@ fun colorMatrix(adjust: Adjust?, filter: FilterRef?, presets: List<FilterPreset>
     return m.map(::r6)
 }
 
+/**
+ * Highlights/shadows (Adjust, −1…1) on one channel value, after the colour matrix: shadows move values around 1/3,
+ * highlights around 2/3 (weights 4v(1−v)² and 4v²(1−v), at most ±0.25·0.6).
+ */
+fun toneAdjust(v: Double, shadows: Double = 0.0, highlights: Double = 0.0): Double {
+    if (shadows == 0.0 && highlights == 0.0) return v
+    return clamp(v + 0.25 * (shadows * 4 * v * (1 - v) * (1 - v) + highlights * 4 * v * v * (1 - v)), 0.0, 1.0)
+}
+
+// ------------------------------------------------------------------ masks
+private fun smoothstep(a: Double, b: Double, x: Double): Double { val t = clamp((x - a) / (b - a), 0.0, 1.0); return t * t * (3 - 2 * t) }
+
+/** Mask opacity (0–1) at [u], [v] of the item's own frame (0–1). Distances are in item fractions; feather is the soft edge width. */
+fun maskAlpha(m: Mask, u: Double, v: Double): Double {
+    val cx = m.x ?: 0.5; val cy = m.y ?: 0.5
+    val w = max(0.01, m.width ?: 0.5); val h = max(0.01, m.height ?: 0.5); val f = max(1e-4, m.feather ?: 0.1)
+    val a = (m.rotation ?: 0.0) * Math.PI / 180; val du = u - cx; val dv = v - cy
+    val x = du * kotlin.math.cos(a) + dv * kotlin.math.sin(a); val y = -du * kotlin.math.sin(a) + dv * kotlin.math.cos(a)
+    fun soft(d: Double) = 1 - smoothstep(-f / 2, f / 2, d)
+    val alpha = when (m.shape) {
+        MaskShape.LINEAR -> soft(y)
+        MaskShape.MIRROR -> soft(kotlin.math.abs(y) - h / 2)
+        MaskShape.CIRCLE -> { val r = kotlin.math.hypot(x / (w / 2), y / (h / 2)); soft((r - 1) * min(w, h) / 2) }
+        MaskShape.RECT -> soft(max(kotlin.math.abs(x) - w / 2, kotlin.math.abs(y) - h / 2))
+        MaskShape.HEART -> {
+            val X = (x / (w / 2)) * 1.15; val Y = (-y / (h / 2)) * 1.15 + 0.25
+            val F = (X * X + Y * Y - 1).pow(3) - X * X * Y * Y * Y
+            soft(F * 0.6 * min(w, h))
+        }
+        MaskShape.STAR -> {
+            val X = x / (w / 2); val Y = y / (h / 2); val r = kotlin.math.hypot(X, Y)
+            val ang = ((kotlin.math.atan2(X, -Y) * 180 / Math.PI + 360) % 72); val t = kotlin.math.abs(ang - 36) / 36
+            val edge = 0.45 + 0.55 * t
+            soft((r - edge) * min(w, h) / 2)
+        }
+    }
+    return r6(if (m.invert == true) 1 - alpha else alpha)
+}
+
+// ------------------------------------------------------------------ SRT
+private fun srtTime(t: Double): String {
+    val ms = kotlin.math.floor(max(0.0, t) * 1000 + 0.5).toLong()
+    val h = ms / 3_600_000; val m = (ms / 60_000) % 60; val s = (ms / 1000) % 60
+    return String.format(java.util.Locale.ROOT, "%02d:%02d:%02d,%03d", h, m, s, ms % 1000)
+}
+
+/** The captions as an .srt file (one cue per caption page; upper case when the style says so). Empty without captions. */
+fun toSrt(p: EditProject): String {
+    val ct = captionTrack(p) ?: return ""
+    return captionPages(p).mapIndexed { i, pg ->
+        val text = pg.words.joinToString(" ") { it.text }
+        "${i + 1}\n${srtTime(pg.startSec)} --> ${srtTime(pg.endSec)}\n${if (ct.style.text.uppercase == true) text.uppercase() else text}\n"
+    }.joinToString("\n")
+}
+
 /** True when [m] is the identity (no colour work needed). */
 fun isIdentityMatrix(m: List<Double>): Boolean = m.indices.all { kotlin.math.abs(m[it] - IDENTITY[it]) < 1e-9 }
 
@@ -403,15 +529,21 @@ private fun baseGain(p: EditProject, track: Track, item: MediaClip, t: Double, s
     return g
 }
 
+/** Ramp down (attack, before speech) and back up (release, after it): attackSec/releaseSec, else fadeSec for both. */
+fun duckTimes(d: Duck): Pair<Double, Double> {
+    val f = d.fadeSec ?: 0.25
+    return max(0.05, d.attackSec ?: f) to max(0.05, d.releaseSec ?: f)
+}
+
 /** Ducking multiplier at [t] for a music track with [duck]. */
 private fun duckGain(regions: List<Range>, duck: Duck, t: Double): Double {
-    val level = clamp(duck.level ?: 0.3, 0.05, 1.0); val f = max(0.05, duck.fadeSec ?: 0.25)
+    val level = clamp(duck.level ?: 0.3, 0.05, 1.0); val (att, rel) = duckTimes(duck)
     var m = 1.0
     for (r in regions) {
         val d = when {
             t >= r.startSec && t <= r.endSec -> 1.0
-            t < r.startSec -> clamp(1 - (r.startSec - t) / f, 0.0, 1.0)
-            else -> clamp(1 - (t - r.endSec) / f, 0.0, 1.0)
+            t < r.startSec -> clamp(1 - (r.startSec - t) / att, 0.0, 1.0)
+            else -> clamp(1 - (t - r.endSec) / rel, 0.0, 1.0)
         }
         m = min(m, 1 - (1 - level) * d)
     }
@@ -453,8 +585,9 @@ fun audioEnvelope(p: EditProject, trackId: String, itemId: String): List<GainPoi
     val duck = track.duck
     if (track.kind == TrackKind.MUSIC && duck != null) {
         regions = duckRegions(p, duck)
-        val f = max(0.05, duck.fadeSec ?: 0.25)
-        for (r in regions) { add(r.startSec - f); add(r.startSec); add(r.endSec); add(r.endSec + f) }
+        val (att, rel) = duckTimes(duck)
+        for (r in regions) { add(r.startSec - att); add(r.startSec); add(r.endSec); add(r.endSec + rel) }
+
     }
     return ts.sorted().map { t ->
         var g = baseGain(p, track, item, t, spans)

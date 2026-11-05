@@ -58,8 +58,8 @@ extension EditV2 {
     // MARK: Tables for the GPU renderer
 
     /// True when steps 3–6 change nothing (no matrix, curves, LUT or lift): the cube can be skipped.
-    public static func lookColorIsIdentity(matrix: [Double]?, look: Look?, lut: Lut?) -> Bool {
-        let noMatrix = matrix.map { isIdentity($0) } ?? true
+    public static func lookColorIsIdentity(matrix: [Double]?, tone: Tone? = nil, look: Look?, lut: Lut?) -> Bool {
+        let noMatrix = (matrix.map { isIdentity($0) } ?? true) && tone == nil
         guard let look else { return noMatrix }
         let noLut = lut == nil || clamp(look.strength ?? 1, 0, 1) <= 0
         return noMatrix && curvesFn(look.curves) == nil && noLut && clamp(look.lift ?? 0, 0, 1) <= 0
@@ -68,7 +68,7 @@ extension EditV2 {
     /// RGBA float data (alpha 1, red fastest, then green, then blue) of a `size`³ colour cube holding steps 3–6 of the
     /// pipeline — the colour matrix, curves, LUT (blended by strength) and lift — for Core Image's
     /// CIColorCubeWithColorSpace (sRGB).
-    public static func lookCube(matrix: [Double]?, look: Look?, lut: Lut?, size: Int = 33) -> [Float] {
+    public static func lookCube(matrix: [Double]?, tone: Tone? = nil, look: Look?, lut: Lut?, size: Int = 33) -> [Float] {
         let curves = curvesFn(look?.curves)
         let strength = clamp(look?.strength ?? 1, 0, 1), lift = 0.12 * clamp(look?.lift ?? 0, 0, 1)
         let m = matrix.flatMap { isIdentity($0) ? nil : $0 }
@@ -76,7 +76,8 @@ extension EditV2 {
         let n = Double(size - 1)
         var i = 0
         for bi in 0..<size { for gi in 0..<size { for ri in 0..<size {
-            let o = lookColor(SIMD3(Double(ri) / n, Double(gi) / n, Double(bi) / n), matrix: m, curves: curves, lut: lut, strength: strength, lift: lift)
+            let o = lookColor(SIMD3(Double(ri) / n, Double(gi) / n, Double(bi) / n), matrix: m, tone: tone, curves: curves, lut: lut, strength: strength, lift: lift)
+
             out[i] = Float(o.x); out[i + 1] = Float(o.y); out[i + 2] = Float(o.z)
             i += 4
         } } }

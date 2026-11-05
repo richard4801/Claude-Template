@@ -428,12 +428,17 @@ extension EditV2 {
     }
 
     /// Steps 3–6 (colour matrix, curves, LUT, lift) on one colour: what the per-item colour cube holds.
-    public static func lookColor(_ rgbIn: SIMD3<Double>, matrix M: [Double]?, curves: ((SIMD3<Double>) -> SIMD3<Double>)?, lut L: Lut?,
+    public static func lookColor(_ rgbIn: SIMD3<Double>, matrix M: [Double]?, tone: Tone? = nil, curves: ((SIMD3<Double>) -> SIMD3<Double>)?, lut L: Lut?,
                                  strength: Double, lift: Double) -> SIMD3<Double> {
         var rgb = rgbIn
         if let M, M.count == 12 {
             let i = rgb
             rgb = SIMD3((0..<3).map { k in clamp(M[k * 4] * i.x + M[k * 4 + 1] * i.y + M[k * 4 + 2] * i.z + M[k * 4 + 3], 0, 1) })
+        }
+        // 3b. highlights / shadows (Adjust, Edit suite)
+        if let tone {
+            rgb = SIMD3(toneAdjust(rgb.x, shadows: tone.shadows, highlights: tone.highlights), toneAdjust(rgb.y, shadows: tone.shadows, highlights: tone.highlights),
+                        toneAdjust(rgb.z, shadows: tone.shadows, highlights: tone.highlights))
         }
         if let curves { rgb = curves(rgb) }
         if let L, strength > 0 {
@@ -446,7 +451,7 @@ extension EditV2 {
 
     /// Renders a look on a picture. `matrix` = the item's colour matrix (colorMatrix, 3×4) or nil; `lut` = the resolved
     /// LUT or nil; `frame`/`fps` animate the grain and leak.
-    public static func renderLook(_ img: LookImage, _ look: Look, matrix: [Double]? = nil, lut: Lut? = nil, frame: Int = 0, fps: Double = 30) -> LookImage {
+    public static func renderLook(_ img: LookImage, _ look: Look, matrix: [Double]? = nil, tone: Tone? = nil, lut: Lut? = nil, frame: Int = 0, fps: Double = 30) -> LookImage {
         let w = img.width, h = img.height, short = min(w, h)
         guard w > 0, h > 0 else { return img }
         var src = img
@@ -474,7 +479,8 @@ extension EditV2 {
                 rgb = SIMD3(src.px(x, y, 0), src.px(x, y, 1), src.px(x, y, 2))
             }
             // 3–6. colour matrix, curves, LUT, lift
-            rgb = lookColor(rgb, matrix: matrix, curves: curves, lut: lut, strength: strength, lift: lift)
+            rgb = lookColor(rgb, matrix: matrix, tone: tone, curves: curves, lut: lut, strength: strength, lift: lift)
+
             let i = (y * w + x) * 3
             out[i] = Float(rgb.x); out[i + 1] = Float(rgb.y); out[i + 2] = Float(rgb.z)
         } }

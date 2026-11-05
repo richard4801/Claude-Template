@@ -86,8 +86,11 @@ final class EditV2Scene: @unchecked Sendable {
     private var cubeCache: [E.Chroma: Data] = [:]
     /// The items' looks (filter stack) in Core Image.
     private let looks: EditV2LookRenderer
+    /// Edit suite: false when captions go out as an .srt instead of being drawn.
+    let burnCaptions: Bool
 
-    init(project: E.Project, plan: E.RenderPlan, laneTracks: [Int: CMPersistentTrackID], sources: EditV2Engine.Sources) {
+    init(project: E.Project, plan: E.RenderPlan, laneTracks: [Int: CMPersistentTrackID], sources: EditV2Engine.Sources, burnCaptions: Bool = true) {
+        self.burnCaptions = burnCaptions
         self.project = project
         self.plan = plan
         self.laneTracks = laneTracks
@@ -123,7 +126,7 @@ final class EditV2Scene: @unchecked Sendable {
             let c = clips[i]
             let pl = E.placement(c, local: t - layer.segment.timelineStart)
             image = draw(frame, crop: c.crop, fit: c.fit ?? .cover, placement: pl, state: layer.state, adjust: c.adjust, filter: c.filter, look: c.look,
-                         chroma: c.chroma, frame: frameNo, fps: fps, over: image)
+                         chroma: c.chroma, mask: c.mask, frame: frameNo, fps: fps, over: image)
         }
 
         // Other tracks, bottom to top.
@@ -134,20 +137,20 @@ final class EditV2Scene: @unchecked Sendable {
                     guard let c = track.item(seg.itemId)?.videoClip, let frame = sourceImage(request, seg) else { continue }
                     let pl = E.placement(c, local: t - seg.timelineStart)
                     image = draw(frame, crop: c.crop, fit: c.fit ?? .contain, placement: pl, state: E.LayerState(), adjust: c.adjust, filter: c.filter,
-                                 look: c.look, chroma: c.chroma, frame: frameNo, fps: fps, over: image)
+                                 look: c.look, chroma: c.chroma, mask: c.mask, frame: frameNo, fps: fps, over: image)
                 }
             case .image:
                 for case .image(let im) in track.items where t >= im.startSec && t < im.startSec + im.durationSec {
                     guard let pic = sources.images[im.asset] else { continue }
                     image = draw(pic, crop: im.crop, fit: im.fit ?? .contain, placement: E.placement(im, local: t - im.startSec), state: E.LayerState(),
-                                 adjust: im.adjust, filter: im.filter, look: im.look, chroma: nil, frame: frameNo, fps: fps, over: image)
+                                 adjust: im.adjust, filter: im.filter, look: im.look, chroma: nil, mask: im.mask, frame: frameNo, fps: fps, over: image)
                 }
             case .text:
                 for case .text(let tx) in track.items where t >= tx.startSec && t < tx.startSec + tx.durationSec {
                     image = drawText(tx, local: t - tx.startSec, over: image)
                 }
             case .caption:
-                if let ct = track.caption { image = drawCaption(ct, at: t, over: image) }
+                if burnCaptions, let ct = track.caption { image = drawCaption(ct, at: t, over: image) }
             default:
                 break
             }
@@ -166,7 +169,7 @@ final class EditV2Scene: @unchecked Sendable {
     /// Draws a picture (origin 0,0): crop → chroma key → look (sharpen, chromatic, colour matrix + curves + LUT + lift,
     /// halation, leak, vignette, grain; just the colour matrix without a look) → fit → scale/rotate/move → opacity, over `base`.
     private func draw(_ src: CIImage, crop: E.Crop?, fit: E.Fit, placement pl: E.Placement, state: E.LayerState, adjust: E.Adjust?, filter: E.FilterRef?,
-                      look: E.Look?, chroma: E.Chroma?, frame: Int, fps: Double, over base: CIImage) -> CIImage {
+                      look: E.Look?, chroma: E.Chroma?, mask: E.Mask? = nil, frame: Int, fps: Double, over base: CIImage) -> CIImage {
         let opacity = pl.opacity * state.opacity
         guard opacity > 0.001 else { return base }
         var img = src
@@ -182,16 +185,42 @@ final class EditV2Scene: @unchecked Sendable {
         if let chroma, let cube = cube(chroma) {
             img = img.applyingFilter("CIColorCube", parameters: ["inputCubeDimension": 32, "inputCubeData": cube])
         }
-        img = looks.apply(look, matrix: E.colorMatrix(adjust, filter), to: img, frame: frame, fps: fps)
+        img = looks.apply(look, matrix: E.colorMatrix(adjust, filter), tone: E.Tone(adjust), to: img, frame: frame, fps: fps)
+        // Edit suite: the mask multiplies the alpha (after the chroma key).
+        if let mask { img = looks.applyMask(mask, to: img) }
         let (fw, _) = E.fittedSize(width: Double(w), height: Double(h), crop: nil, fit: fit, canvasWidth: Double(size.width), canvasHeight: Double(size.height))
         let s = CGFloat(fw / Double(w) * pl.scale * state.scale)
         let cx = CGFloat(pl.x + state.dx) * size.width, cy = size.height - CGFloat(pl.y + state.dy) * size.height
         let tf = CGAffineTransform(translationX: -w / 2, y: -h / 2)
             .concatenating(CGAffineTransform(scaleX: s, y: s))
-            .concatenating(CGAffineTransform(rotationAngle: -CGFloat(pl.rotation) * .pi / 180))
+            .concatenating(CGAffineTransform(rotationAngle: -CGFloat(pl.rotation + state.rotation) * .pi / 180))
             .concatenating(CGAffineTransform(translationX: cx, y: cy))
         img = img.transformed(by: tf)
+        // Edit suite transitions: motion blur along the move (whip) and a red/blue split (glitch).
+        if state.blur > 0.001 {
+            let placed = img.extent
+            img = img.clampedToExtent()
+                .applyingFilter("CIMotionBlur", parameters: [kCIInputRadiusKey: state.blur * 0.04 * Double(size.width), kCIInputAngleKey: 0])
+                .cropped(to: placed)
+        }
+        if state.rgbSplit > 0.001 {
+            img = rgbSplit(img, offset: CGFloat(state.rgbSplit * 0.02) * size.width)
+        }
         return faded(img, opacity).composited(over: base)
+    }
+
+    /// Red moved right and blue left by `offset` px, green in place (alpha = the widest of the three).
+    private func rgbSplit(_ img: CIImage, offset: CGFloat) -> CIImage {
+        func channel(_ c: Int, dx: CGFloat) -> CIImage {
+            func v(_ k: Int) -> CIVector { k == c ? CIVector(x: c == 0 ? 1 : 0, y: c == 1 ? 1 : 0, z: c == 2 ? 1 : 0, w: 0) : CIVector(x: 0, y: 0, z: 0, w: 0) }
+            return img.applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": v(0), "inputGVector": v(1), "inputBVector": v(2),
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1), "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+            ]).transformed(by: CGAffineTransform(translationX: dx, y: 0))
+        }
+        return channel(0, dx: offset)
+            .applyingFilter("CIMaximumCompositing", parameters: [kCIInputBackgroundImageKey: channel(1, dx: 0)])
+            .applyingFilter("CIMaximumCompositing", parameters: [kCIInputBackgroundImageKey: channel(2, dx: -offset)])
     }
 
     /// The image at `opacity` (premultiplied, so a dissolve to clear is exact).
@@ -268,7 +297,10 @@ final class EditV2Scene: @unchecked Sendable {
             case .karaoke: if k <= at.word { run.color = st.highlightColor }
             case .pop: if active { run.color = st.highlightColor; run.scale = 1.15 }
             case .single: run.color = st.highlightColor
+            case .highlighter: if active { run.marker = st.highlightColor }
+            case .neon: if active { run.color = st.highlightColor }
             }
+
             return run
         }
         let key = "c|\(at.page)|\(at.word)|\(st.hashValue)"
