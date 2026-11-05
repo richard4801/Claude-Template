@@ -107,8 +107,8 @@ enum EditV2Engine {
         /// Puts source [s, e) of `src` at timeline [start, end) of `track`, retimed to fit (speed).
         func place(_ src: AVAssetTrack, on track: AVMutableCompositionTrack, source s: Double, _ e: Double, at start: Double, _ end: Double) throws {
             var at = time(start)
-            let e = track.timeRange.end
-            let trackEnd = e.isValid && e.isNumeric ? e : .zero
+            let tEnd = track.timeRange.end
+            let trackEnd = tEnd.isValid && tEnd.isNumeric ? tEnd : .zero
             if at > trackEnd { track.insertEmptyTimeRange(CMTimeRange(start: trackEnd, end: at)) }
             else { at = trackEnd }   // never insert inside the previous piece (rounding)
             let range = CMTimeRange(start: time(s), end: time(e))
