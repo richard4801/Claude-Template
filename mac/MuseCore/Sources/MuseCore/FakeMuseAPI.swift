@@ -41,6 +41,9 @@ public actor FakeMuseAPI: MuseAPI {
     /// Demo prompt library overrides (Settings → Prompts) and when each was saved.
     var promptOverrides: [String: String] = [:]
     var promptUpdated: [String: Int64] = [:]
+    /// Prompt scripts (workstream 4): the demo studio's saved rule lists by script id, and when each was saved.
+    var scriptOverrides: [String: [ScriptRule]] = [:]
+    var scriptUpdated: [String: Int64] = [:]
     /// The exact layers behind each shot (server-side record), for "Save as template".
     private var shotLayers: [String: TemplateLayers] = [:]
     /// Keep add-on engine ready (owner only): the rules run on a clock `warmSpeed`× real time (boot is sped up like renders).
@@ -75,7 +78,8 @@ public actor FakeMuseAPI: MuseAPI {
         templates = StarterTemplates.all(ownerId: "u1", ownerName: "Studio owner", now: now) + StarterTemplates.memberTemplates(now: now)
         favourites = ["tpl_mirror_selfie"]
         for (meta, id) in [(SampleData.sampleMeta, SampleData.sampleClip), (SampleData.badMeta, SampleData.badClip)] {
-            clips[id] = Clip(id: id, name: meta.name, durationSec: meta.durationSec, width: meta.width, height: meta.height, fps: meta.fps, checks: ClipRules.checks(meta))
+            clips[id] = Clip(id: id, name: meta.name, durationSec: meta.durationSec, width: meta.width, height: meta.height, fps: meta.fps, checks: ClipRules.checks(meta),
+                             audio: ClipAudio.demo(talking: meta.talking))
         }
         bal = FakeMuseAPI.ownerView(bal, members: members)
     }
@@ -605,7 +609,9 @@ public actor FakeMuseAPI: MuseAPI {
         progress?(1)
         let id: String
         if meta == SampleData.sampleMeta { id = SampleData.sampleClip } else if meta == SampleData.badMeta { id = SampleData.badClip } else { id = "clip_" + shortId() }
-        let c = Clip(id: id, name: meta.name, durationSec: meta.durationSec, width: meta.width, height: meta.height, fps: meta.fps, checks: ClipRules.checks(meta))
+        // Prompt scripts: the demo's talking detection follows the upload's `talking`.
+        let c = Clip(id: id, name: meta.name, durationSec: meta.durationSec, width: meta.width, height: meta.height, fps: meta.fps, checks: ClipRules.checks(meta),
+                     audio: ClipAudio.demo(talking: meta.talking))
         clips[id] = c
         return c
     }
@@ -622,6 +628,17 @@ public actor FakeMuseAPI: MuseAPI {
             // Replicate always renders the whole clip and stores "full".
             req.use = ClipUse.full.rawValue
             if req.quality == nil { req.quality = VideoQuality.default.rawValue }
+        }
+        // Prompt scripts: "Performer is speaking" is resolved once, at creation (the switch, else the clip's detection, else off).
+        if let sp = req.speaking {
+            req.speaking = sp
+            req.speakingSource = "switch"
+        } else if let a = clips[req.clipId]?.audio {
+            req.speaking = a.speaking
+            req.speakingSource = a.detected ? "detected" : "upload"
+        } else {
+            req.speaking = false
+            req.speakingSource = "default"
         }
         let spec = req.spec(pricePerSec: (studio.features.video ?? .fallback).pricePerSec(req.videoQuality))
         if spec.engine == .h3 && (spec.steps < Pricing.stepsMin || spec.steps > Pricing.stepsMax) { throw ApiError("bad_request", "That render setting isn't supported") }

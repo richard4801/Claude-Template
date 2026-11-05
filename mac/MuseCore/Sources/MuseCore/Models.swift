@@ -311,8 +311,12 @@ public struct Clip: Codable, Hashable, Sendable, Identifiable {
     public var fps: Int
     public var checks: [ClipCheck]
     public var thumb: ImageRef?
+    // Prompt scripts (workstream 4): talking detection, the "Performer is speaking" switch's starting value.
+    public var audio: ClipAudio?
 
-    public init(id: String, name: String, durationSec: Double, width: Int, height: Int, fps: Int, checks: [ClipCheck], thumb: ImageRef? = nil) {
+    public init(id: String, name: String, durationSec: Double, width: Int, height: Int, fps: Int, checks: [ClipCheck], thumb: ImageRef? = nil,
+                audio: ClipAudio? = nil) {
+        self.audio = audio
         self.id = id
         self.name = name
         self.durationSec = durationSec
@@ -323,7 +327,7 @@ public struct Clip: Codable, Hashable, Sendable, Identifiable {
         self.thumb = thumb
     }
 
-    enum CodingKeys: String, CodingKey { case id, name, durationSec, width, height, fps, checks, thumb }
+    enum CodingKeys: String, CodingKey { case id, name, durationSec, width, height, fps, checks, thumb, audio }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -334,6 +338,7 @@ public struct Clip: Codable, Hashable, Sendable, Identifiable {
         fps = c.v(.fps, 30)
         checks = c.v(.checks, [])
         thumb = c.o(.thumb)
+        audio = c.o(.audio)
     }
 
     public var ok: Bool { !checks.contains { $0.status == "bad" } }
@@ -380,10 +385,16 @@ public struct JobRequest: Codable, Hashable, Sendable {
     public var queue: Bool?
     /// engine "replicate" only: draft | standard | hd (left out of the JSON otherwise).
     public var quality: String?
+    // Prompt scripts (workstream 4): the studio's "Performer is speaking" switch (nil = the clip's detection). On a job the server
+    // sends the resolved value and where it came from (switch | upload | detected | default).
+    public var speaking: Bool?
+    public var speakingSource: String?
 
     public init(title: String, modelId: String, outfitId: String, clipId: String, engine: String = Engine.h3.rawValue, steps: Int = 10,
                 use: String = ClipUse.first.rawValue, takes: Int = 1, keepAudio: Bool = true, lipSync: Bool = false,
-                background: String = "keep", backgroundMotion: String = "subtle", clipSeconds: Double? = nil, queue: Bool? = nil, quality: String? = nil) {
+                background: String = "keep", backgroundMotion: String = "subtle", clipSeconds: Double? = nil, queue: Bool? = nil, quality: String? = nil,
+                speaking: Bool? = nil) {
+        self.speaking = speaking
         self.queue = queue
         self.quality = quality
         self.title = title
@@ -401,7 +412,10 @@ public struct JobRequest: Codable, Hashable, Sendable {
         self.clipSeconds = clipSeconds
     }
 
-    enum CodingKeys: String, CodingKey { case title, modelId, outfitId, clipId, engine, steps, use, takes, keepAudio, lipSync, background, backgroundMotion, clipSeconds, queue, quality }
+    enum CodingKeys: String, CodingKey {
+        case title, modelId, outfitId, clipId, engine, steps, use, takes, keepAudio, lipSync, background, backgroundMotion, clipSeconds, queue, quality
+        case speaking, speakingSource // prompt scripts (workstream 4)
+    }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         title = c.v(.title, "")
@@ -419,6 +433,8 @@ public struct JobRequest: Codable, Hashable, Sendable {
         clipSeconds = c.o(.clipSeconds)
         queue = c.o(.queue)
         quality = c.o(.quality)
+        speaking = c.o(.speaking)
+        speakingSource = c.o(.speakingSource)
     }
 
     /// A Draft / Standard / HD request: `{engine: "replicate", quality}`, always the whole clip, no lip sync or background photo.
@@ -985,6 +1001,10 @@ public struct ApiEvent: Codable, Sendable {
     public var studioBalance: StudioBalance?
     /// `prompts` events (owners only): a prompt-library entry was saved or reset.
     public var prompt: PromptEntry?
+    // Prompt scripts (workstream 4): `promptScript` events (owners only) carry the saved or reset script; `clip` events carry a
+    // clip (a late one brings its talking detection).
+    public var script: ScriptView?
+    public var clip: Clip?
 
     /// Not from the server: the stream (re)connected, so the app refetches what it may have missed.
     public static let connected = "connected"
@@ -993,7 +1013,9 @@ public struct ApiEvent: Codable, Sendable {
                 takes: [Take] = [], wallet: Wallet? = nil, notice: EventNotice? = nil, gpu: WarmGpu? = nil,
                 event: String? = nil, warning: WarmGpuWarning? = nil, op: String? = nil, id: String? = nil, take: Take? = nil, template: MuseTemplate? = nil,
                 account: Account? = nil, modelId: String? = nil, platform: String? = nil, settings: StudioSettings? = nil, member: Member? = nil,
-                studioBalance: StudioBalance? = nil, prompt: PromptEntry? = nil) {
+                studioBalance: StudioBalance? = nil, prompt: PromptEntry? = nil, script: ScriptView? = nil, clip: Clip? = nil) {
+        self.script = script
+        self.clip = clip
         self.prompt = prompt
         self.op = op
         self.id = id
@@ -1024,6 +1046,7 @@ public struct ApiEvent: Codable, Sendable {
     enum CodingKeys: String, CodingKey {
         case type, job, balance, model, outfit, lora, post, takes, wallet, notice, gpu, event, warning, tool
         case op, id, take, template, account, modelId, platform, settings, member, studioBalance, prompt
+        case script, clip // prompt scripts (workstream 4)
     }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -1052,6 +1075,8 @@ public struct ApiEvent: Codable, Sendable {
         member = c.o(.member)
         studioBalance = c.o(.studioBalance)
         prompt = c.o(.prompt)
+        script = c.o(.script)
+        clip = c.o(.clip)
     }
 }
 
