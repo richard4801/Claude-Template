@@ -35,6 +35,10 @@
   {
    "id": "lora",
    "label": "LoRA"
+  },
+  {
+   "id": "suite",
+   "label": "AI suite"
   }
  ],
  "prompts": [
@@ -1101,6 +1105,645 @@
      "required": true
     }
    ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.camera.bodies",
+   "group": "suite",
+   "title": "Camera · bodies",
+   "description": "One per line: \"id: wording\". Delete a line to go back to its default; the ids are fixed.",
+   "kind": "lines",
+   "default": "phone: shot on a modern smartphone, deep focus, natural HDR, true-to-life colour\nvlog: shot on a compact vlogging camera, crisp detail, bright creator look\ncinema_digital: large-format digital cinema camera, clean high-dynamic-range image, rich skin tones\nsuper35: Super 35 digital cinema sensor, filmic highlight roll-off\nfilm_35: 35mm motion-picture film, fine grain, gentle halation, organic colour\nfilm_16: 16mm film, visible grain, softer detail, indie documentary texture\nfilm_8: Super 8 home-movie film, heavy grain, slight gate weave, warm faded colour\nlarge_format_65: 65mm large-format film camera, epic scale, extremely shallow depth of field, pristine detail\ncamcorder: early-2000s DV camcorder footage, video texture, edge sharpening, slightly blown highlights\nwebcam: laptop webcam footage, flat lighting, slight softness, video-call framing\nsecurity_cam: security camera footage, high fixed angle, wide lens, muted colour",
+   "current": "phone: shot on a modern smartphone, deep focus, natural HDR, true-to-life colour\nvlog: shot on a compact vlogging camera, crisp detail, bright creator look\ncinema_digital: large-format digital cinema camera, clean high-dynamic-range image, rich skin tones\nsuper35: Super 35 digital cinema sensor, filmic highlight roll-off\nfilm_35: 35mm motion-picture film, fine grain, gentle halation, organic colour\nfilm_16: 16mm film, visible grain, softer detail, indie documentary texture\nfilm_8: Super 8 home-movie film, heavy grain, slight gate weave, warm faded colour\nlarge_format_65: 65mm large-format film camera, epic scale, extremely shallow depth of field, pristine detail\ncamcorder: early-2000s DV camcorder footage, video texture, edge sharpening, slightly blown highlights\nwebcam: laptop webcam footage, flat lighting, slight softness, video-call framing\nsecurity_cam: security camera footage, high fixed angle, wide lens, muted colour",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.camera.lenses",
+   "group": "suite",
+   "title": "Camera · lenses",
+   "description": "One per line: \"id: wording\". Delete a line to go back to its default; the ids are fixed.",
+   "kind": "lines",
+   "default": "clean: clean modern prime lens, edge-to-edge sharpness\nvintage: vintage prime lens, softer contrast, gentle flare\nwarm_vintage: warm 1970s cinema prime, creamy rendering, amber flare\nanamorphic: anamorphic lens, oval bokeh, horizontal blue lens flares\nvintage_anamorphic: vintage anamorphic lens, strong edge falloff, warm streak flares\nhalation: diffusion filter, glowing highlights with halation, dreamy softness\nswirl: Petzval-style portrait lens, swirling bokeh\nmacro: macro lens, extreme close-up detail, razor-thin focus\ntilt_shift: tilt-shift lens, narrow slanted focus band, miniature look\nfisheye: fisheye lens, strong barrel distortion",
+   "current": "clean: clean modern prime lens, edge-to-edge sharpness\nvintage: vintage prime lens, softer contrast, gentle flare\nwarm_vintage: warm 1970s cinema prime, creamy rendering, amber flare\nanamorphic: anamorphic lens, oval bokeh, horizontal blue lens flares\nvintage_anamorphic: vintage anamorphic lens, strong edge falloff, warm streak flares\nhalation: diffusion filter, glowing highlights with halation, dreamy softness\nswirl: Petzval-style portrait lens, swirling bokeh\nmacro: macro lens, extreme close-up detail, razor-thin focus\ntilt_shift: tilt-shift lens, narrow slanted focus band, miniature look\nfisheye: fisheye lens, strong barrel distortion",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.camera.apertures",
+   "group": "suite",
+   "title": "Camera · apertures",
+   "description": "One per line: \"id: wording\". Delete a line to go back to its default; the ids are fixed.",
+   "kind": "lines",
+   "default": "f1.2: f/1.2, wafer-thin depth of field, heavy background blur\nf1.4: f/1.4, very shallow depth of field, creamy bokeh\nf2: f/2, shallow depth of field\nf2.8: f/2.8, soft background separation\nf4: f/4, moderate depth of field\nf5.6: f/5.6, most of the scene in focus\nf8: f/8, deep focus\nf11: f/11, everything sharp from foreground to background",
+   "current": "f1.2: f/1.2, wafer-thin depth of field, heavy background blur\nf1.4: f/1.4, very shallow depth of field, creamy bokeh\nf2: f/2, shallow depth of field\nf2.8: f/2.8, soft background separation\nf4: f/4, moderate depth of field\nf5.6: f/5.6, most of the scene in focus\nf8: f/8, deep focus\nf11: f/11, everything sharp from foreground to background",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.camera.looks",
+   "group": "suite",
+   "title": "Camera · film looks",
+   "description": "One per line: \"id: wording\". Delete a line to go back to its default; the ids are fixed.",
+   "kind": "lines",
+   "default": "digital_clean: neutral clean digital colour science\nphone_hdr: bright punchy smartphone HDR processing\nportrait_negative: portrait colour-negative film stock, soft warm skin tones, pastel highlights\ntungsten_stock: tungsten-balanced cinema film stock, cool shadows, glowing practicals\nslide_film: saturated slide film, deep contrast\nbw_film: black-and-white film, silver grain, rich blacks\nbleach_bypass: bleach-bypass process, desaturated colour, harsh contrast\ncross_process: cross-processed film, shifted greens and yellows\nfaded_print: faded film print, lifted blacks, nostalgic colour",
+   "current": "digital_clean: neutral clean digital colour science\nphone_hdr: bright punchy smartphone HDR processing\nportrait_negative: portrait colour-negative film stock, soft warm skin tones, pastel highlights\ntungsten_stock: tungsten-balanced cinema film stock, cool shadows, glowing practicals\nslide_film: saturated slide film, deep contrast\nbw_film: black-and-white film, silver grain, rich blacks\nbleach_bypass: bleach-bypass process, desaturated colour, harsh contrast\ncross_process: cross-processed film, shifted greens and yellows\nfaded_print: faded film print, lifted blacks, nostalgic colour",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.camera.frameRates",
+   "group": "suite",
+   "title": "Camera · frame rates",
+   "description": "One per line: \"id: wording\". Delete a line to go back to its default; the ids are fixed.",
+   "kind": "lines",
+   "default": "24: 24 frames per second with a 180-degree shutter, natural cinematic motion blur\n25: 25 fps broadcast cadence\n30: 30 fps video motion\n48: 48 fps, crisp smooth motion\n60: 60 fps hyper-smooth motion\nslowmo: high-frame-rate slow motion, every movement stretched and graceful",
+   "current": "24: 24 frames per second with a 180-degree shutter, natural cinematic motion blur\n25: 25 fps broadcast cadence\n30: 30 fps video motion\n48: 48 fps, crisp smooth motion\n60: 60 fps hyper-smooth motion\nslowmo: high-frame-rate slow motion, every movement stretched and graceful",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.camera.shutters",
+   "group": "suite",
+   "title": "Camera · shutter",
+   "description": "One per line: \"id: wording\". Delete a line to go back to its default; the ids are fixed.",
+   "kind": "lines",
+   "default": "low: slow shutter, long streaking motion blur on movement\nnarrow: narrow shutter angle, staccato crisp motion, no motion blur",
+   "current": "low: slow shutter, long streaking motion blur on movement\nnarrow: narrow shutter angle, staccato crisp motion, no motion blur",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.camera.lighting",
+   "group": "suite",
+   "title": "Camera · lighting",
+   "description": "One per line: \"id: wording\". Delete a line to go back to its default; the ids are fixed.",
+   "kind": "lines",
+   "default": "natural: natural available light\nwindow: soft daylight from a window to one side\nsoft_cross: soft cross-lighting from two diffused sources\ncontre_jour: contre-jour backlight, glowing hair rim, slight haze\noverhead: hard overhead light falling on the subject, sculpted shadows\npracticals: motivated by practical lamps in the frame, pools of warm light\nsilhouette: subject in silhouette against a bright background\ngolden_hour: low golden-hour sun, long warm shadows\nblue_hour: cool blue-hour dusk light, city lights coming on\nring_light: ring light in front of the subject, round catchlights, even soft face light\nstudio_3pt: three-point studio lighting: soft key, gentle fill, crisp rim light\nneon: neon signs spilling magenta and cyan light\nharsh_sun: harsh midday sun, hard shadows, bright highlights\novercast: soft overcast daylight, no hard shadows\ncandle: warm flickering candle and firelight\nmoonlight: cool moonlight, low-key night exposure\nflash: direct on-camera flash, hard light, dark falloff",
+   "current": "natural: natural available light\nwindow: soft daylight from a window to one side\nsoft_cross: soft cross-lighting from two diffused sources\ncontre_jour: contre-jour backlight, glowing hair rim, slight haze\noverhead: hard overhead light falling on the subject, sculpted shadows\npracticals: motivated by practical lamps in the frame, pools of warm light\nsilhouette: subject in silhouette against a bright background\ngolden_hour: low golden-hour sun, long warm shadows\nblue_hour: cool blue-hour dusk light, city lights coming on\nring_light: ring light in front of the subject, round catchlights, even soft face light\nstudio_3pt: three-point studio lighting: soft key, gentle fill, crisp rim light\nneon: neon signs spilling magenta and cyan light\nharsh_sun: harsh midday sun, hard shadows, bright highlights\novercast: soft overcast daylight, no hard shadows\ncandle: warm flickering candle and firelight\nmoonlight: cool moonlight, low-key night exposure\nflash: direct on-camera flash, hard light, dark falloff",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.camera.palettes",
+   "group": "suite",
+   "title": "Camera · palettes",
+   "description": "One per line: \"id: wording\". Delete a line to go back to its default; the ids are fixed.",
+   "kind": "lines",
+   "default": "naturalistic: naturalistic clean colour grade\nbleached_warm: bleached warm grade\nhyper_neon: hyper-saturated neon palette\nteal_orange: teal-and-orange blockbuster grade\nsodium_decay: sodium-vapour orange urban grade\ncold_steel: cold steel blue-grey grade\nbleach_bypass: silvery low-saturation bleach-bypass grade\nclassic_bw: classic black-and-white\npastel_dream: soft pastel palette, airy and light\nmuted_earth: muted earth tones, olive and tan\ngolden_warmth: honey-gold warm palette\nmoody_blue: moody blue grade with deep shadows\nvintage_fade: faded 1970s colour\nhigh_key: bright high-key look, clean whites\nlow_key_noir: low-key noir look, deep blacks, single source\ncyber_magenta: magenta-and-cyan cyberpunk palette\nforest_green: lush forest-green palette\ndesert_sand: dusty desert beige palette\ncommercial_clean: glossy clean commercial grade, accurate product colour\nretro_80s: retro 1980s sunset pink and purple\nnineties_mall: saturated 1990s mall-photo colour\ny2k_gloss: Y2K glossy chrome and icy blue\ncandy_pop: bright candy-pop colours\nautumn: autumn rust and gold palette\nwinter_frost: frosty winter whites and blues\nsepia: sepia-toned\nkodachrome_like: rich vintage slide-film colour, deep reds and saturated blues\nmatte_film: matte film look with lifted shadows",
+   "current": "naturalistic: naturalistic clean colour grade\nbleached_warm: bleached warm grade\nhyper_neon: hyper-saturated neon palette\nteal_orange: teal-and-orange blockbuster grade\nsodium_decay: sodium-vapour orange urban grade\ncold_steel: cold steel blue-grey grade\nbleach_bypass: silvery low-saturation bleach-bypass grade\nclassic_bw: classic black-and-white\npastel_dream: soft pastel palette, airy and light\nmuted_earth: muted earth tones, olive and tan\ngolden_warmth: honey-gold warm palette\nmoody_blue: moody blue grade with deep shadows\nvintage_fade: faded 1970s colour\nhigh_key: bright high-key look, clean whites\nlow_key_noir: low-key noir look, deep blacks, single source\ncyber_magenta: magenta-and-cyan cyberpunk palette\nforest_green: lush forest-green palette\ndesert_sand: dusty desert beige palette\ncommercial_clean: glossy clean commercial grade, accurate product colour\nretro_80s: retro 1980s sunset pink and purple\nnineties_mall: saturated 1990s mall-photo colour\ny2k_gloss: Y2K glossy chrome and icy blue\ncandy_pop: bright candy-pop colours\nautumn: autumn rust and gold palette\nwinter_frost: frosty winter whites and blues\nsepia: sepia-toned\nkodachrome_like: rich vintage slide-film colour, deep reds and saturated blues\nmatte_film: matte film look with lifted shadows",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.camera.moves",
+   "group": "suite",
+   "title": "Camera · moves",
+   "description": "One per line: \"id: wording\". Delete a line to go back to its default; the ids are fixed.",
+   "kind": "lines",
+   "default": "static: locked-off static camera, no camera movement\nmicro_push: an almost imperceptible push-in {amount}\nhandheld: handheld phone footage with subtle natural shake, not chaotic\nselfie: selfie camera held at arm’s length, walking with the subject, gentle arm sway\ndolly_in: physical dolly-in toward the subject {amount}\ndolly_out: dolly-out pulling back to reveal the surroundings {amount}\ntruck_left: camera trucks sideways to the left {amount}\ntruck_right: camera trucks sideways to the right {amount}\npan_left: smooth pan to the left {amount}\npan_right: smooth pan to the right {amount}\ntilt_up: camera tilts up {amount}\ntilt_down: camera tilts down {amount}\norbit_left: camera orbits around the subject to the left {amount}, keeping them centred\norbit_right: camera orbits around the subject to the right {amount}, keeping them centred\norbit_360: a full 360-degree orbit around the subject\ncrane_up: crane shot rising {amount} while tilting down to keep the subject framed\ncrane_down: crane shot descending {amount} toward the subject\ncrane_overhead: crane sweeps up and over the subject’s head into a top-down view\npedestal_up: camera rises straight up {amount} without tilting\npedestal_down: camera lowers straight down {amount} without tilting\nzoom_in: optical zoom in, camera stays in place\nzoom_out: optical zoom out, camera stays in place\ncrash_zoom: sudden crash zoom onto the subject\ndolly_zoom: dolly zoom (vertigo effect): subject stays the same size while the background stretches\nrack_focus: focus racks from the foreground to the subject\nfollow: camera follows the subject from behind at a constant distance\ntrack_side: camera tracks alongside the subject in profile, matching their pace\nlead: camera leads the subject, moving backwards as they walk toward it\nsteadicam: smooth gliding steadicam move through the space\nsnorricam: body-mounted snorricam: the face stays locked in frame while the world moves\nfpv: fast FPV drone flight swooping through the scene, banking on turns\ndrone_reveal: aerial drone rising and pulling back to reveal the location\nflyover: high aerial flyover above the scene\nwhip_pan: fast whip pan with motion blur\ndutch_push: canted Dutch angle with a slow push-in\nthrough_object: camera passes through a gap in the foreground into the scene\ntop_down_spin: top-down overhead view slowly rotating\nbullet_time: frozen moment while the camera circles the subject (bullet time)\nhyperlapse: hyperlapse: camera moves forward while time speeds up\nhandheld_run: energetic handheld camera running with the action, urgent",
+   "current": "static: locked-off static camera, no camera movement\nmicro_push: an almost imperceptible push-in {amount}\nhandheld: handheld phone footage with subtle natural shake, not chaotic\nselfie: selfie camera held at arm’s length, walking with the subject, gentle arm sway\ndolly_in: physical dolly-in toward the subject {amount}\ndolly_out: dolly-out pulling back to reveal the surroundings {amount}\ntruck_left: camera trucks sideways to the left {amount}\ntruck_right: camera trucks sideways to the right {amount}\npan_left: smooth pan to the left {amount}\npan_right: smooth pan to the right {amount}\ntilt_up: camera tilts up {amount}\ntilt_down: camera tilts down {amount}\norbit_left: camera orbits around the subject to the left {amount}, keeping them centred\norbit_right: camera orbits around the subject to the right {amount}, keeping them centred\norbit_360: a full 360-degree orbit around the subject\ncrane_up: crane shot rising {amount} while tilting down to keep the subject framed\ncrane_down: crane shot descending {amount} toward the subject\ncrane_overhead: crane sweeps up and over the subject’s head into a top-down view\npedestal_up: camera rises straight up {amount} without tilting\npedestal_down: camera lowers straight down {amount} without tilting\nzoom_in: optical zoom in, camera stays in place\nzoom_out: optical zoom out, camera stays in place\ncrash_zoom: sudden crash zoom onto the subject\ndolly_zoom: dolly zoom (vertigo effect): subject stays the same size while the background stretches\nrack_focus: focus racks from the foreground to the subject\nfollow: camera follows the subject from behind at a constant distance\ntrack_side: camera tracks alongside the subject in profile, matching their pace\nlead: camera leads the subject, moving backwards as they walk toward it\nsteadicam: smooth gliding steadicam move through the space\nsnorricam: body-mounted snorricam: the face stays locked in frame while the world moves\nfpv: fast FPV drone flight swooping through the scene, banking on turns\ndrone_reveal: aerial drone rising and pulling back to reveal the location\nflyover: high aerial flyover above the scene\nwhip_pan: fast whip pan with motion blur\ndutch_push: canted Dutch angle with a slow push-in\nthrough_object: camera passes through a gap in the foreground into the scene\ntop_down_spin: top-down overhead view slowly rotating\nbullet_time: frozen moment while the camera circles the subject (bullet time)\nhyperlapse: hyperlapse: camera moves forward while time speeds up\nhandheld_run: energetic handheld camera running with the action, urgent",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "amount",
+     "description": "how far it travels or turns at the chosen intensity, e.g. \"about 1.4 m\"",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.camera.heights",
+   "group": "suite",
+   "title": "Camera · angles",
+   "description": "One per line: \"id: wording\". Delete a line to go back to its default; the ids are fixed.",
+   "kind": "lines",
+   "default": "eye: eye-level camera\nshoulder: shoulder-height camera\nlow: low angle looking up at the subject\nhigh: high angle looking down at the subject\noverhead: overhead bird’s-eye view\nworm: worm’s-eye view from the ground\nground: ground-level camera\nhip: hip-level camera",
+   "current": "eye: eye-level camera\nshoulder: shoulder-height camera\nlow: low angle looking up at the subject\nhigh: high angle looking down at the subject\noverhead: overhead bird’s-eye view\nworm: worm’s-eye view from the ground\nground: ground-level camera\nhip: hip-level camera",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.camera.shotSizes",
+   "group": "suite",
+   "title": "Camera · shot sizes",
+   "description": "One per line: \"id: wording\". Delete a line to go back to its default; the ids are fixed.",
+   "kind": "lines",
+   "default": "els: extreme wide shot\nls: wide shot\nfull: full-body shot\ncowboy: cowboy shot from mid-thigh up\nms: medium shot from the waist up\nmcu: medium close-up from the chest up\ncu: close-up on the face\necu: extreme close-up\ninsert: insert shot of a detail\nots: over-the-shoulder shot\npov: first-person point-of-view shot\ntwo_shot: two-shot with both people in frame",
+   "current": "els: extreme wide shot\nls: wide shot\nfull: full-body shot\ncowboy: cowboy shot from mid-thigh up\nms: medium shot from the waist up\nmcu: medium close-up from the chest up\ncu: close-up on the face\necu: extreme close-up\ninsert: insert shot of a detail\nots: over-the-shoulder shot\npov: first-person point-of-view shot\ntwo_shot: two-shot with both people in frame",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.camera.genres",
+   "group": "suite",
+   "title": "Camera · genres",
+   "description": "One per line: \"id: wording\". Delete a line to go back to its default; the ids are fixed.",
+   "kind": "lines",
+   "default": "ugc: authentic creator-made social video\ncommercial: polished commercial\ndrama: dramatic\naction: high-energy action\nepic: epic, grand scale\ncomedy: light comedic\nromance: romantic, intimate\nhorror: tense horror\nnoir: film-noir\ndocumentary: observational documentary\nmusic_video: stylised music video\nfashion: editorial fashion film",
+   "current": "ugc: authentic creator-made social video\ncommercial: polished commercial\ndrama: dramatic\naction: high-energy action\nepic: epic, grand scale\ncomedy: light comedic\nromance: romantic, intimate\nhorror: tense horror\nnoir: film-noir\ndocumentary: observational documentary\nmusic_video: stylised music video\nfashion: editorial fashion film",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.camera.eras",
+   "group": "suite",
+   "title": "Camera · eras",
+   "description": "One per line: \"id: wording\". Delete a line to go back to its default; the ids are fixed.",
+   "kind": "lines",
+   "default": "1960s: 1960s era\n1970s: 1970s era\n1980s: 1980s era\n1990s: 1990s era\n2000s: 2000s era\n2010s: 2010s era\n2020s: 2020s era\nfuture: near-future",
+   "current": "1960s: 1960s era\n1970s: 1970s era\n1980s: 1980s era\n1990s: 1990s era\n2000s: 2000s era\n2010s: 2010s era\n2020s: 2020s era\nfuture: near-future",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.camera.tempos",
+   "group": "suite",
+   "title": "Camera · tempo",
+   "description": "One per line: \"id: wording\". Delete a line to go back to its default; the ids are fixed.",
+   "kind": "lines",
+   "default": "calm: calm lingering pacing\nsteady: steady even pacing\ndynamic: dynamic energetic pacing\nchaotic: frantic chaotic pacing\nsingle_shot: one continuous take with no cuts",
+   "current": "calm: calm lingering pacing\nsteady: steady even pacing\ndynamic: dynamic energetic pacing\nchaotic: frantic chaotic pacing\nsingle_shot: one continuous take with no cuts",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.camera.format.kling",
+   "group": "suite",
+   "title": "Camera block · short imperative",
+   "description": "Used by models that like short camera commands.",
+   "kind": "text",
+   "default": "Camera: {move}. {framing}. {rig}. Lighting: {light}. Colour: {palette}. {style}. {performance}",
+   "current": "Camera: {move}. {framing}. {rig}. Lighting: {light}. Colour: {palette}. {style}. {performance}",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "move",
+     "description": "the camera move(s)",
+     "required": false
+    },
+    {
+     "name": "framing",
+     "description": "angle and shot size",
+     "required": false
+    },
+    {
+     "name": "rig",
+     "description": "body, lens, focal length, aperture, look, frame rate",
+     "required": false
+    },
+    {
+     "name": "light",
+     "description": "lighting",
+     "required": false
+    },
+    {
+     "name": "palette",
+     "description": "colour palette",
+     "required": false
+    },
+    {
+     "name": "style",
+     "description": "genre, era and tempo",
+     "required": false
+    },
+    {
+     "name": "performance",
+     "description": "the emotion line",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.camera.format.seedance",
+   "group": "suite",
+   "title": "Camera block · tagged blocks",
+   "description": "Used by models that read tagged blocks (one camera move per shot).",
+   "kind": "text",
+   "default": "[Camera] {move} [Shot] {framing} [Lens] {rig} [Light] {light} [Color] {palette} [Mood] {style} {performance}",
+   "current": "[Camera] {move} [Shot] {framing} [Lens] {rig} [Light] {light} [Color] {palette} [Mood] {style} {performance}",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "move",
+     "description": "the camera move(s)",
+     "required": false
+    },
+    {
+     "name": "framing",
+     "description": "angle and shot size",
+     "required": false
+    },
+    {
+     "name": "rig",
+     "description": "body, lens, focal length, aperture, look, frame rate",
+     "required": false
+    },
+    {
+     "name": "light",
+     "description": "lighting",
+     "required": false
+    },
+    {
+     "name": "palette",
+     "description": "colour palette",
+     "required": false
+    },
+    {
+     "name": "style",
+     "description": "genre, era and tempo",
+     "required": false
+    },
+    {
+     "name": "performance",
+     "description": "the emotion line",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.camera.format.h3",
+   "group": "suite",
+   "title": "Camera block · camera vocabulary",
+   "description": "Used by models with a camera-vocabulary prompt guide.",
+   "kind": "text",
+   "default": "Cinematography: {framing}, {move}. Shot with {rig}. {light}. {palette}. {style}. {performance}",
+   "current": "Cinematography: {framing}, {move}. Shot with {rig}. {light}. {palette}. {style}. {performance}",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "move",
+     "description": "the camera move(s)",
+     "required": false
+    },
+    {
+     "name": "framing",
+     "description": "angle and shot size",
+     "required": false
+    },
+    {
+     "name": "rig",
+     "description": "body, lens, focal length, aperture, look, frame rate",
+     "required": false
+    },
+    {
+     "name": "light",
+     "description": "lighting",
+     "required": false
+    },
+    {
+     "name": "palette",
+     "description": "colour palette",
+     "required": false
+    },
+    {
+     "name": "style",
+     "description": "genre, era and tempo",
+     "required": false
+    },
+    {
+     "name": "performance",
+     "description": "the emotion line",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.camera.format.veo",
+   "group": "suite",
+   "title": "Camera block · descriptive",
+   "description": "Used by models that prefer a descriptive sentence.",
+   "kind": "text",
+   "default": "A {framing} with {move}, {rig}, lit by {light}, {palette}, {style}. {performance}",
+   "current": "A {framing} with {move}, {rig}, lit by {light}, {palette}, {style}. {performance}",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "move",
+     "description": "the camera move(s)",
+     "required": false
+    },
+    {
+     "name": "framing",
+     "description": "angle and shot size",
+     "required": false
+    },
+    {
+     "name": "rig",
+     "description": "body, lens, focal length, aperture, look, frame rate",
+     "required": false
+    },
+    {
+     "name": "light",
+     "description": "lighting",
+     "required": false
+    },
+    {
+     "name": "palette",
+     "description": "colour palette",
+     "required": false
+    },
+    {
+     "name": "style",
+     "description": "genre, era and tempo",
+     "required": false
+    },
+    {
+     "name": "performance",
+     "description": "the emotion line",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.camera.format.generic",
+   "group": "suite",
+   "title": "Camera block · default",
+   "description": "Everything else.",
+   "kind": "text",
+   "default": "Camera: {move}; {framing}; {rig}. Light: {light}. Colour: {palette}. {style}. {performance}",
+   "current": "Camera: {move}; {framing}; {rig}. Light: {light}. Colour: {palette}. {style}. {performance}",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "move",
+     "description": "the camera move(s)",
+     "required": false
+    },
+    {
+     "name": "framing",
+     "description": "angle and shot size",
+     "required": false
+    },
+    {
+     "name": "rig",
+     "description": "body, lens, focal length, aperture, look, frame rate",
+     "required": false
+    },
+    {
+     "name": "light",
+     "description": "lighting",
+     "required": false
+    },
+    {
+     "name": "palette",
+     "description": "colour palette",
+     "required": false
+    },
+    {
+     "name": "style",
+     "description": "genre, era and tempo",
+     "required": false
+    },
+    {
+     "name": "performance",
+     "description": "the emotion line",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.shot.character",
+   "group": "suite",
+   "title": "Shot · character",
+   "description": "Who is in the shot. {refs} names the character images.",
+   "kind": "text",
+   "default": "{name} is the woman shown in {refs}: {look}. Keep her face, hair, skin, body and proportions exactly as in those images.{never}",
+   "current": "{name} is the woman shown in {refs}: {look}. Keep her face, hair, skin, body and proportions exactly as in those images.{never}",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "name",
+     "description": "her name",
+     "required": true
+    },
+    {
+     "name": "refs",
+     "description": "the character images, e.g. \"<Image 1> and <Image 2>\"",
+     "required": false
+    },
+    {
+     "name": "look",
+     "description": "her look",
+     "required": false
+    },
+    {
+     "name": "never",
+     "description": "\" She never has: tattoos, rings.\" or empty",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.shot.outfit",
+   "group": "suite",
+   "title": "Shot · outfit",
+   "description": "Her outfit.",
+   "kind": "text",
+   "default": "She wears {outfit}{refs}.",
+   "current": "She wears {outfit}{refs}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "outfit",
+     "description": "the outfit name or description",
+     "required": true
+    },
+    {
+     "name": "refs",
+     "description": "\" as shown in <Image 4>\" or empty",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.shot.reference",
+   "group": "suite",
+   "title": "Shot · extra reference",
+   "description": "One line per extra reference image (product, location, style).",
+   "kind": "text",
+   "default": "{ref} is {role}: use only its {use}.",
+   "current": "{ref} is {role}: use only its {use}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "ref",
+     "description": "the image token",
+     "required": true
+    },
+    {
+     "name": "role",
+     "description": "what it is",
+     "required": false
+    },
+    {
+     "name": "use",
+     "description": "what to take from it",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.shot.lock",
+   "group": "suite",
+   "title": "Shot · reference lock",
+   "description": "Keeps references from swapping roles.",
+   "kind": "text",
+   "default": "Each reference keeps its role: never swap appearances, clothing or positions between them.",
+   "current": "Each reference keeps its role: never swap appearances, clothing or positions between them.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.shot.frames",
+   "group": "suite",
+   "title": "Shot · keyframes",
+   "description": "When start / middle / end frames are given.",
+   "kind": "text",
+   "default": "The shot starts exactly on {start}{middle}{end}.",
+   "current": "The shot starts exactly on {start}{middle}{end}.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "start",
+     "description": "the start frame token",
+     "required": false
+    },
+    {
+     "name": "middle",
+     "description": "\", passes through …\" or empty",
+     "required": false
+    },
+    {
+     "name": "end",
+     "description": "\" and ends exactly on …\" or empty",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.shot.guide",
+   "group": "suite",
+   "title": "Shot · guide clip",
+   "description": "When a guide clip (greybox or reference video) is sent.",
+   "kind": "text",
+   "default": "Take the {use} from {video}; do not copy its look, textures or grey shapes.",
+   "current": "Take the {use} from {video}; do not copy its look, textures or grey shapes.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "video",
+     "description": "the video token",
+     "required": true
+    },
+    {
+     "name": "use",
+     "description": "camera movement / motion / blocking",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.shot.footer",
+   "group": "suite",
+   "title": "Shot · closing line",
+   "description": "Added at the end of every shot prompt.",
+   "kind": "text",
+   "default": "Photorealistic. No text, captions, logos or watermarks anywhere.",
+   "current": "Photorealistic. No text, captions, logos or watermarks anywhere.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.shot.negative",
+   "group": "suite",
+   "title": "Shot · negative prompt",
+   "description": "Sent as the negative prompt where the model takes one (comma-separated).",
+   "kind": "list",
+   "default": "text, captions, watermark, logo, extra fingers, deformed hands, distorted face, flicker, cartoon",
+   "current": "text, captions, watermark, logo, extra fingers, deformed hands, distorted face, flicker, cartoon",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
    "updatedAt": null,
    "updatedBy": null
   }

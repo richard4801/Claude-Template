@@ -296,7 +296,7 @@ describe('photo templates', () => {
 
   it('/health reports the build, the migrations and the starter seed', async () => {
     const h = (await a.app.inject({ method: 'GET', url: '/health' })).json();
-    expect(h.migrations).toEqual({ applied: 6, latest: '0005_prompt_library' });
+    expect(h.migrations).toEqual({ applied: 7, latest: '0007_suite' });
     expect(h.startedAt).toBeGreaterThan(0);
   });
 });
