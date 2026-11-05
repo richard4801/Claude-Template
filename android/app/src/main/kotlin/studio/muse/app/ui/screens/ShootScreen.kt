@@ -192,7 +192,7 @@ fun ShootScreen() {
         Column(Modifier.fillMaxSize()) {
             TopBar("Photoshoot", onBack = { nav.back() }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                T("Templates", m.type.tiny.copy(fontWeight = FontWeight.Bold), if (m.isD) m.t.blue else m.t.accent, Modifier.press { nav.go(Routes.TEMPLATES) }.padding(8.dp))
+                T("Templates", m.type.tiny.copy(fontWeight = FontWeight.Bold), m.link, Modifier.press { nav.go(Routes.TEMPLATES) }.padding(8.dp))
                 MoreMenu(listOf(
                     MenuItem("grid", "Templates") { nav.go(Routes.TEMPLATES) },
                     MenuItem("spark", "Show prompt") { vm.edit { it.copy(tool = "spark") } },
@@ -246,7 +246,7 @@ fun ShootScreen() {
                         }
                     }
                     "camera" -> {
-                        RowB { H3("Camera"); T("Reset", m.type.tiny, if (m.isD) m.t.blue else m.t.accent, Modifier.press { vm.resetCamera() }.padding(6.dp)) }
+                        RowB { H3("Camera"); T("Reset", m.type.tiny, m.link, Modifier.press { vm.resetCamera() }.padding(6.dp)) }
                         Field("Shot") { Seg(listOf("Close", "Medium", "Full", "Wide").map { it to it }, d.shot, { v -> vm.edit { it.copy(shot = v) } }) }
                         Field("Lens · ${d.lens}mm") { ChipRow(listOf("16", "24", "35", "50", "85"), d.lens.toString(), { v -> vm.edit { it.copy(lens = v.toInt()) } }) { "${it}mm" } }
                         Field("Aperture") { ChipRow(listOf("f/1.4", "f/2.8", "f/5.6", "f/11"), d.aperture, { v -> vm.edit { it.copy(aperture = v) } }) }
@@ -356,7 +356,7 @@ fun ReferencesPanel(refs: List<ShootRef>, preview: ShootPreview?, uploading: Boo
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 RowB {
                     T("Reference ${i + 1}", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink)
-                    T("Remove", m.type.tiny, if (m.isD) m.t.blue else m.t.accent, Modifier.press { onRemove(i) }.padding(4.dp))
+                    T("Remove", m.type.tiny, m.link, Modifier.press { onRemove(i) }.padding(4.dp))
                 }
                 FlowRow(hGap = 6.dp, vGap = 6.dp) { ShootRef.GUIDES.forEach { (id, label) -> Chip(label, id in r.guides, { onToggle(i, id) }) } }
             }

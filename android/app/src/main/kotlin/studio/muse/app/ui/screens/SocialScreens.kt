@@ -173,7 +173,7 @@ fun AccountsScreen() {
                         val a = s.accounts.firstOrNull { it.platform == p.id }
                         TwoLineRow(p.label, a?.handle ?: "Not connected", lead = { PlatformBadge(p, 32.dp) }) {
                             when {
-                                a != null -> T("Disconnect", m.type.tiny.copy(fontWeight = FontWeight.SemiBold), if (m.isD) m.t.blue else m.t.accent, Modifier.press { vm.disconnect(p) }.padding(vertical = 8.dp))
+                                a != null -> T("Disconnect", m.type.tiny.copy(fontWeight = FontWeight.SemiBold), m.link, Modifier.press { vm.disconnect(p) }.padding(vertical = 8.dp))
                                 p.id in s.busy -> Cta2("Signing in…", {}, Modifier.shimmer(), height = 36.dp)
                                 else -> Cta2("Connect", { vm.connect(p) }, height = 36.dp)
                             }
@@ -270,7 +270,7 @@ fun PostScreen(takeId: String) {
                     }
                     if (s.connected.size < 5) T(
                         if (s.connected.isEmpty()) "+ Connect ${firstName(s.model)}'s accounts" else "+ Connect more accounts",
-                        m.type.tiny.copy(fontWeight = FontWeight.SemiBold), if (m.isD) m.t.blue else m.t.accent, Modifier.press { nav.go(Routes.ACCOUNTS) }.padding(vertical = 4.dp),
+                        m.type.tiny.copy(fontWeight = FontWeight.SemiBold), m.link, Modifier.press { nav.go(Routes.ACCOUNTS) }.padding(vertical = 4.dp),
                     )
                 }
                 Field("Caption") { Input(d.caption, vm::caption, placeholder = "Write a caption and hashtags", area = true) }

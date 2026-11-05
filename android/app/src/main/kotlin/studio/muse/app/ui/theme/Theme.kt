@@ -92,6 +92,11 @@ data class Muse(val id: ThemeId, val t: Tokens, val type: MuseType) {
     val isB get() = id == ThemeId.B
     val isC get() = id == ThemeId.C
     val isD get() = id == ThemeId.D
+    /**
+     * Text links and small coloured labels ("Templates", "Reset", "Remove"): cobalt in Creator Pop; in Soft Tactile a darker
+     * sage than the accent (#6E8465 is 3.2:1 on its background, under WCAG AA; #4E6B45 is 4.9:1, the Mac's link colour).
+     */
+    val link: Color get() = when (id) { ThemeId.D -> t.blue; ThemeId.C -> Color(0xFF4E6B45); else -> t.accent }
 }
 
 private val tight = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both)

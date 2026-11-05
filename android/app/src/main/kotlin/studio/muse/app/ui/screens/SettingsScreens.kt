@@ -175,7 +175,7 @@ fun SettingsScreen() {
                     if (!s.prefs.useFake) Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Tiny("Server")
                         Input(s.prefs.serverUrl, vm::serverUrl, placeholder = BuildConfig.DEFAULT_SERVER_URL, keyboard = androidx.compose.ui.text.input.KeyboardType.Uri)
-                        if (s.prefs.serverUrl != BuildConfig.DEFAULT_SERVER_URL) T("Use the MUSE server", m.type.tiny.copy(fontWeight = FontWeight.Bold), if (m.isD) m.t.blue else m.t.accent,
+                        if (s.prefs.serverUrl != BuildConfig.DEFAULT_SERVER_URL) T("Use the MUSE server", m.type.tiny.copy(fontWeight = FontWeight.Bold), m.link,
                             Modifier.press { vm.resetServer { nav.reset(Routes.WELCOME) } }.padding(vertical = 4.dp))
                     }
                     Li("quality", "Fast · beta", onClick = { vm.fastBeta() }) { Toggle(s.prefs.fastBeta, { vm.fastBeta() }) }

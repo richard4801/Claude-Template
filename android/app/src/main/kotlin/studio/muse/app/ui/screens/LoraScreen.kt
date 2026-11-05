@@ -199,7 +199,7 @@ private fun LoraIntro(model: Model?) {
     Field("How it works") {
         listOf("We generate 30 varied shots from her sheet", "You keep the ones that look like her", "We train both LoRAs on what you kept").forEachIndexed { i, t ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(Modifier.size(24.dp).clip(CircleShape).background(if (m.isD) m.t.blue else m.t.accent).let { if (m.isD) it.border(2.dp, Ink, CircleShape) else it }, contentAlignment = Alignment.Center) {
+                Box(Modifier.size(24.dp).clip(CircleShape).background(m.link).let { if (m.isD) it.border(2.dp, Ink, CircleShape) else it }, contentAlignment = Alignment.Center) {
                     T("${i + 1}", m.type.body.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold), if (m.isD) Color.White else m.t.accentInk)
                 }
                 T(t, m.type.body.copy(fontSize = 13.sp), m.t.ink)
@@ -252,7 +252,7 @@ private fun LoraReview(l: Lora, toggle: (LoraCandidate) -> Unit) {
                 }
             }
             Box(
-                Modifier.align(Alignment.TopEnd).padding(4.dp).size(20.dp).clip(CircleShape).background(if (cnd.keep) (if (m.isD) m.t.blue else m.t.accent) else Color.White),
+                Modifier.align(Alignment.TopEnd).padding(4.dp).size(20.dp).clip(CircleShape).background(if (cnd.keep) (m.link) else Color.White),
                 contentAlignment = Alignment.Center,
             ) {
                 if (cnd.keep) Ic("check", 13.dp, if (m.isD) Color.White else m.t.accentInk) else T("✕", m.type.tiny.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold), Ink)
@@ -268,7 +268,7 @@ private fun LoraTraining(l: Lora, model: Model?, demo: Boolean) {
     listOf("Photo LoRA" to l.photo.progress, "Video LoRA" to l.video.progress).forEach { (name, p) ->
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             RowB { T(name, m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink); T("${p.toInt()}%", m.type.mono.copy(fontSize = 11.5.sp), m.t.ink) }
-            Bar((p / 100).toFloat(), Modifier.fillMaxWidth(), color = if (m.isD) m.t.blue else m.t.accent, height = 6.dp)
+            Bar((p / 100).toFloat(), Modifier.fillMaxWidth(), color = m.link, height = 6.dp)
         }
     }
     val left = ((100 - l.progress) / 100 * Pricing.loraTrainMinutes).toInt().coerceAtLeast(1)
