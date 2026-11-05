@@ -1,0 +1,316 @@
+{
+ "identity": {
+  "name": "Demo model",
+  "look": "young woman, shoulder-length dark brown hair, brown eyes, light olive skin",
+  "neverAdd": [
+   "tattoos",
+   "rings"
+  ],
+  "referenceCount": 7
+ },
+ "rows": [
+  {
+   "input": {
+    "outfit": "Green set",
+    "shot": "Medium",
+    "lens": 35,
+    "aperture": "f/2.8"
+   },
+   "slots": [
+    {
+     "layer": "identity",
+     "text": "Demo model: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Identity from 7 locked reference images."
+    },
+    {
+     "layer": "outfit",
+     "text": "Wearing: green set (outfit reference set)."
+    },
+    {
+     "layer": "scene",
+     "text": "Scene: rooftop · golden hour."
+    },
+    {
+     "layer": "camera",
+     "text": "Camera: medium shot, 35mm lens, f/2.8."
+    },
+    {
+     "layer": "light",
+     "text": "Light: golden hour; grade: phone-natural."
+    },
+    {
+     "layer": "style",
+     "text": "Style: realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss."
+    },
+    {
+     "layer": "negative",
+     "text": "Never add: tattoos, rings, logos, extra fingers, warped jewellery."
+    },
+    {
+     "layer": "seed",
+     "text": "Seed: new each shot."
+    }
+   ],
+   "seed": null,
+   "removed": [],
+   "text": "Demo model: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Identity from 7 locked reference images.\nWearing: green set (outfit reference set).\nScene: rooftop · golden hour.\nCamera: medium shot, 35mm lens, f/2.8.\nLight: golden hour; grade: phone-natural.\nStyle: realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss.\nNever add: tattoos, rings, logos, extra fingers, warped jewellery.\nSeed: new each shot."
+  },
+  {
+   "input": {
+    "outfit": "Green set",
+    "scene": "Café window",
+    "shot": "Close",
+    "lens": 85,
+    "aperture": "f/1.4",
+    "light": "Window light",
+    "grade": "Warm film",
+    "lockSeed": true
+   },
+   "slots": [
+    {
+     "layer": "identity",
+     "text": "Demo model: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Identity from 7 locked reference images."
+    },
+    {
+     "layer": "outfit",
+     "text": "Wearing: green set (outfit reference set)."
+    },
+    {
+     "layer": "scene",
+     "text": "Scene: café window."
+    },
+    {
+     "layer": "camera",
+     "text": "Camera: close shot, 85mm lens, f/1.4, compressed background, creamy bokeh."
+    },
+    {
+     "layer": "light",
+     "text": "Light: window light; grade: warm film."
+    },
+    {
+     "layer": "style",
+     "text": "Style: realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss."
+    },
+    {
+     "layer": "negative",
+     "text": "Never add: tattoos, rings, logos, extra fingers, warped jewellery."
+    },
+    {
+     "layer": "seed",
+     "text": "Seed: locked (variations keep the same look)."
+    }
+   ],
+   "seed": 821900,
+   "removed": [],
+   "text": "Demo model: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Identity from 7 locked reference images.\nWearing: green set (outfit reference set).\nScene: café window.\nCamera: close shot, 85mm lens, f/1.4, compressed background, creamy bokeh.\nLight: window light; grade: warm film.\nStyle: realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss.\nNever add: tattoos, rings, logos, extra fingers, warped jewellery.\nSeed: locked (variations keep the same look)."
+  },
+  {
+   "input": {
+    "outfit": "Crystal dress",
+    "scene": "sunlit rooftop bar, string lights",
+    "shot": "Wide",
+    "lens": 16,
+    "aperture": "f/11",
+    "light": "Neon night",
+    "direction": "laughing mid-step, hair blowing"
+   },
+   "slots": [
+    {
+     "layer": "identity",
+     "text": "Demo model: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Identity from 7 locked reference images."
+    },
+    {
+     "layer": "outfit",
+     "text": "Wearing: crystal dress (outfit reference set)."
+    },
+    {
+     "layer": "scene",
+     "text": "Scene: sunlit rooftop bar, string lights."
+    },
+    {
+     "layer": "camera",
+     "text": "Camera: wide shot, 16mm lens, f/11, slight wide-angle distortion."
+    },
+    {
+     "layer": "light",
+     "text": "Light: neon night; grade: phone-natural."
+    },
+    {
+     "layer": "direction",
+     "text": "Direction: laughing mid-step, hair blowing"
+    },
+    {
+     "layer": "style",
+     "text": "Style: realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss."
+    },
+    {
+     "layer": "negative",
+     "text": "Never add: tattoos, rings, logos, extra fingers, warped jewellery."
+    },
+    {
+     "layer": "seed",
+     "text": "Seed: new each shot."
+    }
+   ],
+   "seed": null,
+   "removed": [],
+   "text": "Demo model: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Identity from 7 locked reference images.\nWearing: crystal dress (outfit reference set).\nScene: sunlit rooftop bar, string lights.\nCamera: wide shot, 16mm lens, f/11, slight wide-angle distortion.\nLight: neon night; grade: phone-natural.\nDirection: laughing mid-step, hair blowing\nStyle: realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss.\nNever add: tattoos, rings, logos, extra fingers, warped jewellery.\nSeed: new each shot."
+  },
+  {
+   "input": {
+    "outfit": "Green set",
+    "shot": "Medium",
+    "lens": 35,
+    "aperture": "f/2.8",
+    "direction": "holding an iced coffee, with rings",
+    "presets": false
+   },
+   "slots": [
+    {
+     "layer": "identity",
+     "text": "Demo model: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Identity from 7 locked reference images."
+    },
+    {
+     "layer": "outfit",
+     "text": "Wearing: green set (outfit reference set)."
+    },
+    {
+     "layer": "direction",
+     "text": "Direction: holding an iced coffee"
+    },
+    {
+     "layer": "seed",
+     "text": "Seed: new each shot."
+    }
+   ],
+   "seed": null,
+   "removed": [
+    "with rings"
+   ],
+   "text": "Demo model: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Identity from 7 locked reference images.\nWearing: green set (outfit reference set).\nDirection: holding an iced coffee\nSeed: new each shot."
+  },
+  {
+   "input": {
+    "outfit": "Green set",
+    "shot": "Full",
+    "lens": 50,
+    "aperture": "f/5.6",
+    "refs": [
+     {
+      "index": 6,
+      "guides": [
+       "pose"
+      ]
+     },
+     {
+      "index": 7,
+      "guides": [
+       "look",
+       "scene"
+      ]
+     },
+     {
+      "index": 8,
+      "guides": [
+       "scene",
+       "pose",
+       "look"
+      ]
+     }
+    ]
+   },
+   "slots": [
+    {
+     "layer": "identity",
+     "text": "Demo model: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Identity from 7 locked reference images."
+    },
+    {
+     "layer": "outfit",
+     "text": "Wearing: green set (outfit reference set)."
+    },
+    {
+     "layer": "scene",
+     "text": "Scene: rooftop · golden hour."
+    },
+    {
+     "layer": "camera",
+     "text": "Camera: full shot, 50mm lens, f/5.6."
+    },
+    {
+     "layer": "light",
+     "text": "Light: golden hour; grade: phone-natural."
+    },
+    {
+     "layer": "reference",
+     "text": "Copy the pose and framing from image 6. Do not take the face, body, hair or clothes from image 6."
+    },
+    {
+     "layer": "reference",
+     "text": "Copy the light, colour grade and camera feel from image 7. Use the place and background from image 7. Do not take the face, body, hair or clothes from image 7."
+    },
+    {
+     "layer": "reference",
+     "text": "Copy the pose and framing from image 8. Copy the light, colour grade and camera feel from image 8. Use the place and background from image 8. Do not take the face, body, hair or clothes from image 8."
+    },
+    {
+     "layer": "style",
+     "text": "Style: realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss."
+    },
+    {
+     "layer": "negative",
+     "text": "Never add: tattoos, rings, logos, extra fingers, warped jewellery."
+    },
+    {
+     "layer": "seed",
+     "text": "Seed: new each shot."
+    }
+   ],
+   "seed": null,
+   "removed": [],
+   "text": "Demo model: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Identity from 7 locked reference images.\nWearing: green set (outfit reference set).\nScene: rooftop · golden hour.\nCamera: full shot, 50mm lens, f/5.6.\nLight: golden hour; grade: phone-natural.\nCopy the pose and framing from image 6. Do not take the face, body, hair or clothes from image 6.\nCopy the light, colour grade and camera feel from image 7. Use the place and background from image 7. Do not take the face, body, hair or clothes from image 7.\nCopy the pose and framing from image 8. Copy the light, colour grade and camera feel from image 8. Use the place and background from image 8. Do not take the face, body, hair or clothes from image 8.\nStyle: realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss.\nNever add: tattoos, rings, logos, extra fingers, warped jewellery.\nSeed: new each shot."
+  },
+  {
+   "input": {
+    "outfit": "Crystal dress",
+    "shot": "Medium",
+    "lens": 24,
+    "aperture": "f/2.8",
+    "presets": false,
+    "lockSeed": true,
+    "direction": "sitting on the steps",
+    "refs": [
+     {
+      "index": 8,
+      "guides": [
+       "look"
+      ]
+     }
+    ]
+   },
+   "slots": [
+    {
+     "layer": "identity",
+     "text": "Demo model: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Identity from 7 locked reference images."
+    },
+    {
+     "layer": "outfit",
+     "text": "Wearing: crystal dress (outfit reference set)."
+    },
+    {
+     "layer": "direction",
+     "text": "Direction: sitting on the steps"
+    },
+    {
+     "layer": "reference",
+     "text": "Copy the light, colour grade and camera feel from image 8. Do not take the face, body, hair or clothes from image 8."
+    },
+    {
+     "layer": "seed",
+     "text": "Seed: locked (variations keep the same look)."
+    }
+   ],
+   "seed": 821900,
+   "removed": [],
+   "text": "Demo model: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Identity from 7 locked reference images.\nWearing: crystal dress (outfit reference set).\nDirection: sitting on the steps\nCopy the light, colour grade and camera feel from image 8. Do not take the face, body, hair or clothes from image 8.\nSeed: locked (variations keep the same look)."
+  }
+ ]
+}

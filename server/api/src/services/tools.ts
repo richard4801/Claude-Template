@@ -13,6 +13,8 @@ import { modelName, type StepOverrides } from '../images/steps.js';
 import type { ImageStep } from '../replicate/mapping.js';
 import { PHOTO_REF_MP, money } from '../pricing.js';
 import { randomImageSeed } from '../templates/prompt.js';
+import { DEFAULT_TEXTS } from '../prompt/library.js';
+import { dressPrompt } from '../prompt/service.js';
 
 type Run = typeof toolRuns.$inferSelect;
 type ModelRow = typeof models.$inferSelect;
@@ -31,7 +33,8 @@ export const REALISM = { off: 0, subtle: 0.25, balanced: 0.35, strong: 0.5 } as 
 export type RealismId = keyof typeof REALISM;
 export const UPSCALE = { off: 0, '2x': 2, '4x': 4 } as const;
 export type UpscaleId = keyof typeof UPSCALE;
-export const ENHANCE_PROMPT = 'candid smartphone photo, natural skin texture with visible pores and fine lines, true-to-life colour, soft natural light, no retouching, no beauty filter';
+/** The default realism prompt (the owner can change it: prompt library `enhance.prompt`). */
+export const ENHANCE_PROMPT = DEFAULT_TEXTS['enhance.prompt']!;
 export const DRESS_OPTIONS = [
   { id: 'a', label: 'Option A', detail: 'Keeps each photo closest' },
   { id: 'b', label: 'Option B', detail: 'Richer detail' },
@@ -39,16 +42,7 @@ export const DRESS_OPTIONS = [
 ] as const;
 const stepOf = (e: 'a' | 'b'): ImageStep => (e === 'a' ? 'dressA' : 'dressB');
 
-/** The Dress up prompt for one sheet image. */
-export function dressPrompt(slot: string, withAnchor: boolean) {
-  const anchor = withAnchor ? ' The last image shows the same outfit already worn: match its colours, prints and details exactly.' : '';
-  if (slotInfo(slot).kind === 'body') {
-    return 'Dress the person in the first image in the outfit from the second image: every garment, shoe and accessory, with the same colours, prints, fabrics and details.'
-      + anchor + ' Keep the face, hair, body, skin, pose, framing, camera angle and background exactly as in the first image. Realistic photo, natural skin texture.';
-  }
-  return 'Add to the person in the first image only what shows of the outfit from the second image at this distance: earrings, necklace, glasses, hat or hair pieces, and the neckline of the top.'
-    + anchor + ' Keep the face, expression, hair, skin, pose, framing and background exactly as in the first image. Realistic close-up photo, natural skin texture.';
-}
+export { dressPrompt };
 
 const ENHANCE_BODY = (b: any) => ({
   realism: (b?.realism ?? 'balanced') as RealismId, upscale: (b?.upscale ?? '2x') as UpscaleId,
@@ -210,13 +204,14 @@ export class ToolService {
     const im = this.ctx.imageModels, imgs = this.ctx.images;
     const o = run.options as any;
     const cancelled = () => this.stopping.has(run.id);
+    const texts = await this.ctx.prompts.texts(u.studioId);
     if (run.kind === 'enhance') {
       let img = item.before!, cost = 0;
       try {
         if (o.realism !== 'off') {
           const ch = await im.resolve(u.studioId, 'realism', { realism: run.models.realism });
           const r = await imgs.runModel({ studioId: u.studioId, userId: u.id, purpose: 'enhance', refId: run.id, step: 'realism', model: ch.model, extra: ch.extra,
-            prompt: ENHANCE_PROMPT, refs: [img], fullSize: true, strength: REALISM[o.realism as RealismId], seed, outMp: 1, cancelled });
+            prompt: texts['enhance.prompt'], refs: [img], fullSize: true, strength: REALISM[o.realism as RealismId], seed, outMp: 1, cancelled });
           img = r.image; cost += r.cost;
         }
         if (o.upscale !== 'off') {
@@ -232,7 +227,7 @@ export class ToolService {
     const ch = await im.resolve(u.studioId, step, { [step]: run.models[step] });
     const useAnchor = !!anchor && item.slot !== 'front';
     const r = await imgs.runModel({ studioId: u.studioId, userId: u.id, purpose: 'dressup', refId: run.id, step, model: ch.model, extra: ch.extra,
-      prompt: dressPrompt(item.slot, useAnchor), refs: [item.before, o.outfitImage as ImageRef, ...(useAnchor ? [anchor] : [])], matchInput: true, seed, outMp: 1,
+      prompt: dressPrompt(item.slot, useAnchor, texts), refs: [item.before, o.outfitImage as ImageRef, ...(useAnchor ? [anchor] : [])], matchInput: true, seed, outMp: 1,
       simulate: item.before, cancelled });
     return { image: r.image, cost: r.cost };
   }
@@ -381,7 +376,7 @@ export class ToolService {
     const oid = uid('o');
     const [o] = await this.ctx.db.insert(outfits).values({ id: oid, studioId: u.studioId, modelId: m.id, name, mode: 'dressup', description: '',
       angles: ['front', 'tq', 'side', 'back'].map(k => kept.get(k) ?? null), faces: ['face', 'faceTq', 'profile'].map(k => kept.get(k) ?? null),
-      state: 'ready', prompt: dressPrompt('front', false), seed: Number((r.options as any).seed ?? 0) || null, cost: r.cost, createdBy: u.id, createdAt: now }).returning();
+      state: 'ready', prompt: dressPrompt('front', false, await this.ctx.prompts.texts(u.studioId)), seed: Number((r.options as any).seed ?? 0) || null, cost: r.cost, createdBy: u.id, createdAt: now }).returning();
     const [mm] = await this.ctx.db.update(models).set({ outfitIds: [...m.outfitIds, oid] }).where(eq(models.id, m.id)).returning();
     const run = await this.save(r.id, { state: 'applied', appliedAt: now, phase: 'Saved', outfitId: oid });
     const ov = outfitViewOf(o!);

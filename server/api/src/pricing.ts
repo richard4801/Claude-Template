@@ -40,6 +40,8 @@ export type PhotoPrices = { perRun: number; perInputMp: number; perOutputMp: num
 export const PHOTO_REF_MP = 0.79;
 /** Estimated cost of one new shot (FLUX.2 [pro]): run + output MP + input MP. Doubles, left to right, like the apps. */
 export const newShotEstimate = (p: PhotoPrices, outMp: number, refs: number) => p.perRun + p.perOutputMp * outMp + p.perInputMp * p.refMp * Math.min(Math.max(0, refs), p.maxRefs);
+/** One new shot that sends exactly `images` input images (no cap: the caller already fitted them to the model). */
+export const newShotEstimateImages = (p: PhotoPrices, outMp: number, images: number) => p.perRun + p.perOutputMp * outMp + p.perInputMp * p.refMp * Math.max(0, images);
 export const shootEstimate = (p: PhotoPrices, count: number, refs: number) => count * newShotEstimate(p, 2, refs);
 export const outfitSetEstimate = (p: PhotoPrices, refs: number) => newShotEstimate(p, 1, refs) + 3 * p.perEdit;
 export const sheetAnglesEstimate = (p: PhotoPrices, missing: number, refs: number) => missing * newShotEstimate(p, 1, refs);

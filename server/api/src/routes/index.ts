@@ -11,17 +11,16 @@ import { ApiError, badRequest, notFound } from '../errors.js';
 import { compact, dayStart, monthStart, uid } from '../lib/util.js';
 import { whoOf } from '../money/money.js';
 import * as P from '../pricing.js';
-import { characterSheetShot, outfitSet, photoshoot, sheetAngle, loraToken, OUTFIT_ANGLES } from '../prompt/engine.js';
+import { cameraValues, characterSheetShot, outfitEditPrompt, outfitSet, photoshoot, sheetAngle, shootChoices, loraToken, OUTFIT_ANGLES } from '../prompt/engine.js';
 import { createInvite, revokeSession, signin, signup } from '../auth/auth.js';
 import { accountView, PLATFORMS, platformOf } from '../services/posts.js';
 import { takeView } from '../services/jobs.js';
-import { ASSET_DIR, ASSET_KEYS, PROVIDERS } from '../images/service.js';
+import { ASSET_DIR, ASSET_KEYS, PROVIDERS, type ShootRefIn } from '../images/service.js';
 import { PhotoBill } from '../images/bill.js';
 import { LocalStorage, contentTypeFor } from '../storage/index.js';
 import { objectInfo, putObject } from '../storage/objects.js';
 import { seedDev, SLOT_SAMPLE } from '../seed.js';
 import { buildTemplatePrompt, randomImageSeed, randomSeed } from '../templates/prompt.js';
-import { layersFromPrompt } from '../templates/service.js';
 import { dbStatus } from '../db/pg.js';
 import { inviteShareText, registerReleaseRoutes } from './releases.js';
 import { setViews } from '../services/tools.js';
@@ -203,13 +202,14 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const user = req.user;
     void (async () => {
       const identity = await identityOf(u!);
+      const texts = await ctx.prompts.texts(user.studioId);
       const refs = m.slots.map(s => s.image);
       const filled: Record<string, ImageRef | null> = {};
       let failed = 0;
       for (const s of missing) {
         try {
           const r = await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'sheet', refId: m.id, refs, bill,
-            req: { prompt: characterSheetShot(identity, sheetAngle(s.key)!).text, width: 768, height: 1024, count: 1, simAssets: [SLOT_SAMPLE[s.key] ?? 'face'] } });
+            req: { prompt: characterSheetShot(identity, sheetAngle(s.key)!, texts).text, width: 768, height: 1024, count: 1, simAssets: [SLOT_SAMPLE[s.key] ?? 'face'] } });
           filled[s.key] = r.images[0]!;
         } catch { filled[s.key] = null; failed++; }
       }
@@ -244,7 +244,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const bill = await new PhotoBill(ctx, whoOf(req.user), id, cost, 'Outfit set').start();
     const identity = await identityOf(m);
     const spec = { name: b.name || 'New outfit', description: b.description, source: mode === 'describe' ? 'described' as const : mode === 'photo' ? 'product-photo' as const : 'reference-set' as const };
-    const set = outfitSet(identity, spec);
+    const texts = await ctx.prompts.texts(req.user.studioId);
+    const set = outfitSet(identity, spec, undefined, texts);
     const [o] = await db.insert(outfits).values({ id, studioId: req.user.studioId, modelId: m.id, name: spec.name, mode, description: b.description ?? '',
       angles: [null, null, null, null], state: 'generating', prompt: set[0]!.text, seed: set[0]!.seed ?? null, createdBy: req.user.id, createdAt: Date.now() }).returning();
     emitOutfit(o!);
@@ -267,8 +268,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
               req: { prompt: set[0]!.text, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0]!;
             angles = [front];
             for (const a of OUTFIT_ANGLES.slice(1)) {
-              const prompt = `Show the same person in exactly the same outfit, on the same plain studio background, as a ${a.words}. `
-                + 'Keep the face, hair, body and every detail of the clothes exactly the same. Realistic smartphone photo, natural skin texture.';
+              const prompt = outfitEditPrompt(a, texts);
               angles.push((await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, bill,
                 editOf: front, refs: [slot('face')], req: { prompt, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0]!);
             }
@@ -457,37 +457,81 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     return [slot('face'), slot('profile'), a[0], a[1], ...extra, slot('front'), slot('tq'), a[3], a[2], slot('back'), slot('side')];
   };
 
-  app.post('/v1/shoots', async req => {
-    const b = parse(z.object({ modelId: z.string(), outfitId: z.string().optional(), scene: z.string().max(200).optional(), prompt: z.string().max(4000).optional(),
-      seed: z.number().int().nullable().optional(), count: z.number().int().optional(), direction: z.string().max(500).optional(), lockSeed: z.boolean().optional(),
-      templateId: z.string().optional(), shuffleSeed: z.number().int().min(0).optional(), productImage: z.object({ asset: z.string().optional(), url: z.string().optional() }).optional(),
-      imageEngine: ImageEngineOverride.optional() }).passthrough(), req.body);
-    const m = await model(req.user, b.modelId, true);
-    const o = await outfitOf(req.user, b.outfitId);
+  // Photoshoots (plans/api.md "Shoot references and the prompt library"): the server builds the prompt from the choices
+  // and the studio's prompt library, unless "Edit as text" sends `prompt`.
+  const ShootRefBody = z.object({ image: ImageRefSchema, guides: z.array(z.enum(['pose', 'look', 'scene'])).min(1).max(3) })
+    .refine(r => !!(r.image.asset || r.image.url), { message: 'each reference needs an image' })
+    .refine(r => new Set(r.guides).size === r.guides.length, { message: 'guides must not repeat' });
+  const ShootBody = z.object({ modelId: z.string(), outfitId: z.string().optional(), scene: z.string().max(200).optional(), prompt: z.string().max(4000).optional(),
+    seed: z.number().int().nullable().optional(), count: z.number().int().optional(), direction: z.string().max(500).optional(), lockSeed: z.boolean().optional(),
+    presets: z.boolean().optional(), camera: z.object({ shot: z.string().min(1).max(20), lens: z.number().int().min(8).max(400), aperture: z.string().min(1).max(10) }).optional(),
+    light: z.string().max(80).optional(), grade: z.string().max(80).optional(), refs: z.array(ShootRefBody).max(3).optional(),
+    templateId: z.string().optional(), shuffleSeed: z.number().int().min(0).optional(), productImage: z.object({ asset: z.string().optional(), url: z.string().optional() }).optional(),
+    imageEngine: ImageEngineOverride.optional() }).passthrough();
+
+  /** Everything a shoot (or its preview) needs: the model, outfit, images to send, the prompt and the estimate. */
+  async function planShoot(u: AuthUser, body: unknown) {
+    const b = parse(ShootBody, body);
+    const m = await model(u, b.modelId, true);
+    const o = await outfitOf(u, b.outfitId);
     const count = Math.min(4, Math.max(1, b.count ?? 4));
-    const stepModels = ctx.imageModels.overridesFrom(req.user.role, b as { models?: unknown });
-    if (b.templateId) return templateShoot(req.user, { ...b, stepModels }, m, o, count);
+    const stepModels = ctx.imageModels.overridesFrom(u.role, b as { models?: unknown });
+    const texts = await ctx.prompts.texts(u.studioId);
+    const refsIn = (b.refs ?? []) as ShootRefIn[];
+    const identity = await identityOf(m);
+    if (b.templateId) {
+      const t = await ctx.templates.visible(u, b.templateId);
+      const product = t.layers.product && (b.productImage?.asset || b.productImage?.url) ? b.productImage as ImageRef : null;
+      const plan = await ctx.images.shotPlan(u.studioId, shootRefs(m, o, [product]), refsIn, 2, b.imageEngine, stepModels);
+      return { kind: 'template' as const, b, m, o, count, stepModels, texts, refsIn, identity, plan, t, product };
+    }
+    const plan = await ctx.images.shotPlan(u.studioId, shootRefs(m, o), refsIn, 2, b.imageEngine, stepModels);
+    const spec = { identity, outfit: outfitSpec(o) ?? { name: 'outfit' }, scene: b.scene, light: b.light, grade: b.grade, direction: b.direction, lockSeed: b.lockSeed,
+      presets: b.presets, refs: plan.sent, camera: b.camera ? { shot: b.camera.shot, lensMm: b.camera.lens, aperture: b.camera.aperture } : undefined };
+    const built = photoshoot(spec, texts);
+    const custom = b.prompt?.trim() || null;
+    return { kind: 'plain' as const, b, m, o, count, stepModels, texts, refsIn, identity, plan, spec, built, custom };
+  }
+  const previewRefs = (plan: { images: ImageRef[]; refs: unknown[] }) => ({ images: plan.images.length, refs: plan.refs });
+
+  app.post('/v1/shoots/preview', async req => {
+    const s = await planShoot(req.user, req.body);
+    const estimate = s.count * s.plan.perShot;
+    const money = { estimate, estimateLabel: P.aboutMoney(estimate) };
+    if (s.kind === 'template') {
+      const v = await ctx.templates.preview(req.user, s.t.id, { ...(req.body as object), modelId: s.m.id }, async () => ({ identity: s.identity, outfit: outfitSpec(s.o) }), { refs: s.plan.sent });
+      return { ...v, removed: (v as any).removed ?? [], ...previewRefs(s.plan), ...money, edited: false };
+    }
+    if (s.custom) return { slots: [{ layer: 'custom', text: s.custom }], text: s.custom, seed: s.b.seed ?? s.built.seed, removed: [], ...previewRefs(s.plan), ...money, edited: true };
+    return { slots: s.built.slots.map(x => ({ layer: x.layer, text: x.text })), text: s.built.text, seed: s.built.seed, removed: s.built.removed, ...previewRefs(s.plan), ...money, edited: false };
+  });
+
+  app.post('/v1/shoots', async req => {
+    const s = await planShoot(req.user, req.body);
+    if (s.kind === 'template') return templateShoot(req.user, s);
+    const { b, m, o, count, plan } = s;
     const id = uid('shoot');
-    const refs = shootRefs(m, o);
-    const bill = await new PhotoBill(ctx, whoOf(req.user), id, count * await ctx.images.newShotCost(req.user.studioId, 2, ctx.images.refCount(refs), stepModels), `Photoshoot · ${count} photo${count === 1 ? '' : 's'}`).start();
-    const built = photoshoot({ identity: await identityOf(m), outfit: { name: o?.name ?? 'outfit' }, scene: b.scene?.split(' · ')[0], direction: b.direction, lockSeed: b.lockSeed });
-    const prompt = b.prompt?.trim() || built.text;
-    const seed = b.seed ?? built.seed ?? undefined;
+    const bill = await new PhotoBill(ctx, whoOf(req.user), id, count * plan.perShot, `Photoshoot · ${count} photo${count === 1 ? '' : 's'}`).start();
+    const prompt = s.custom ?? s.built.text;
+    const seed = b.seed ?? s.built.seed ?? undefined;
     let r;
     try {
-      r = await ctx.images.generate({ studioId: req.user.studioId, userId: req.user.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs, bill, models: stepModels,
-        req: { prompt, width: 1080, height: 1920, count, seed, simAssets: [o?.angles?.[0]?.asset ?? 'g_front', 'c_face', 'face', 'g_tq'] } });
+      r = await ctx.images.generate({ studioId: req.user.studioId, userId: req.user.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs: plan.images, maxImages: plan.images.length,
+        bill, models: s.stepModels, req: { prompt, width: 1080, height: 1920, count, seed, simAssets: [o?.angles?.[0]?.asset ?? 'g_front', 'c_face', 'face', 'g_tq'] } });
     } catch (e) {
       await bill.fail();
       throw e;
     }
     await bill.finish();
-    const label = (b.scene ?? 'Shoot').split(' · ')[0]!.slice(0, 28);
-    const layers = layersFromPrompt(built.text);
+    const ch = shootChoices(s.spec, s.texts);
+    const label = (b.scene?.trim() || ch.scene).split(' · ')[0]!.slice(0, 28);
+    const cv = cameraValues(ch.camera, s.texts);
+    // The shot's own layers (for "Save as template"), from the choices rather than the (owner-editable) prompt wording.
+    const layers = b.presets === false ? {} : { scene: ch.scene.toLowerCase(), camera: `${cv.shot} shot, ${cv.lens}mm lens, ${cv.aperture}${cv.lensNote}`, light: `${ch.light.toLowerCase()}; grade: ${ch.grade.toLowerCase()}` };
     const rows = r.images.map((img, n) => ({
       id: uid('s'), studioId: req.user.studioId, userId: req.user.id, kind: 'shot' as const, jobId: null, modelId: m.id, index: n + 1, of: r.images.length,
       title: `Shoot · ${label}`, label: `${label} · ${n + 1}`, engineLabel: ctx.images.shotLabel(r.selection), cost: r.costs[n] ?? 0, seed: r.seed ?? seed ?? 0, status: 'test' as const,
-      thumb: img, prompt, mediaKey: ctx.images.keyOf(img), layers, createdAt: Date.now() + n,
+      thumb: img, prompt, mediaKey: ctx.images.keyOf(img), layers, refs: s.refsIn.length ? s.refsIn : null, createdAt: Date.now() + n,
     }));
     const inserted = await db.insert(takes).values(rows).returning();
     emitTakes(req.user.studioId, inserted);
@@ -498,30 +542,26 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
    * A template shoot: every still gets its own prompt (template layers + identity/outfit/never-add + its own variation
    * draws, or the user's direction in place of pose and angle), its own seed, and the template's after-effects.
    */
-  async function templateShoot(u: AuthUser, b: { templateId?: string; direction?: string; shuffleSeed?: number; lockSeed?: boolean; productImage?: ImageRef; imageEngine?: any; stepModels?: Partial<Record<ImageStep, string>> },
-    m: typeof models.$inferSelect, o: typeof outfits.$inferSelect | undefined, count: number) {
-    const t = await ctx.templates.visible(u, b.templateId!);
-    const identity = await identityOf(m);
-    const product = t.layers.product && (b.productImage?.asset || b.productImage?.url) ? b.productImage! : null;
+  async function templateShoot(u: AuthUser, s: Extract<Awaited<ReturnType<typeof planShoot>>, { kind: 'template' }>) {
+    const { b, m, o, count, t, plan, identity, product } = s;
     const shuffleSeed = b.shuffleSeed ?? randomSeed();
     const id = uid('shoot');
-    const refs = shootRefs(m, o, [product]);
-    const bill = await new PhotoBill(ctx, whoOf(u), id, count * await ctx.images.newShotCost(u.studioId, 2, ctx.images.refCount(refs), b.stepModels), `Photoshoot · ${count} photo${count === 1 ? '' : 's'}`).start();
+    const bill = await new PhotoBill(ctx, whoOf(u), id, count * plan.perShot, `Photoshoot · ${count} photo${count === 1 ? '' : 's'}`).start();
     const now = Date.now();
     const rows: (typeof takes.$inferInsert)[] = [];
     try {
       for (let n = 0; n < count; n++) {
         const p = buildTemplatePrompt({ templateId: t.id, templateName: t.name, layers: t.layers, pool: t.variationPool, identity, outfit: outfitSpec(o),
-          direction: b.direction, shuffleSeed, index: n, lockSeed: b.lockSeed, seed: randomImageSeed(), hasProduct: !!product });
+          direction: b.direction, shuffleSeed, index: n, lockSeed: b.lockSeed, seed: randomImageSeed(), hasProduct: !!product, refs: plan.sent }, s.texts);
         const sim = [o?.angles?.[0]?.asset ?? 'g_front', 'c_face', 'face', 'g_tq'];
-        const r = await ctx.images.generate({ studioId: u.studioId, userId: u.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs, bill, models: b.stepModels,
-          req: { prompt: p.fullText, width: 1080, height: 1920, count: 1, seed: p.seed ?? undefined, simAssets: [sim[n % sim.length]!] } });
+        const r = await ctx.images.generate({ studioId: u.studioId, userId: u.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs: plan.images, maxImages: plan.images.length,
+          bill, models: s.stepModels, req: { prompt: p.fullText, width: 1080, height: 1920, count: 1, seed: p.seed ?? undefined, simAssets: [sim[n % sim.length]!] } });
         const fx = await ctx.templates.postProcess(r.images[0]!, t.layers, { studioId: u.studioId, userId: u.id });
         rows.push({
           id: uid('s'), studioId: u.studioId, userId: u.id, kind: 'shot', jobId: null, modelId: m.id, index: n + 1, of: count,
           title: `Shoot · ${t.name}`.slice(0, 60), label: `${t.name.slice(0, 28)} · ${n + 1}`, engineLabel: ctx.images.shotLabel(r.selection), cost: r.costUsd,
           seed: p.seed ?? r.seed ?? 0, status: 'test', thumb: fx.ref, prompt: p.fullText, publicPrompt: p.visibleText, mediaKey: fx.key,
-          layers: t.layers, templateId: t.id, templateName: t.name, templateOwnerId: t.ownerId, variation: p.variation, shuffleSeed, createdAt: now + n,
+          layers: t.layers, templateId: t.id, templateName: t.name, templateOwnerId: t.ownerId, variation: p.variation, shuffleSeed, refs: s.refsIn.length ? s.refsIn : null, createdAt: now + n,
         });
       }
     } catch (e) {
@@ -668,6 +708,12 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   });
   /** Image models are owner-only (model names never reach a member). */
   const emitImageModels = (studioId: string) => ctx.hub.emitOwners(studioId, async () => ({ type: 'settings', imageModels: await ctx.imageModels.views(studioId) }));
+
+  // ------------------------------------------------------------------ prompt library (owner, plans/api.md "Shoot references and the prompt library" §3)
+  app.get('/v1/prompts', { config: { owner: true } }, async req => ctx.prompts.list(req.user.studioId));
+  app.put<{ Params: { key: string } }>('/v1/prompts/:key', { config: { owner: true } }, async req => ctx.prompts.set(req.user, req.params.key, req.body));
+  app.delete<{ Params: { key: string } }>('/v1/prompts/:key', { config: { owner: true } }, async req => ctx.prompts.reset(req.user, req.params.key));
+  app.post('/v1/prompts/preview', { config: { owner: true } }, async req => ctx.prompts.preview(req.user, req.body));
 
   app.post<{ Params: { id: string } }>('/v1/models/:id/enhance/estimate', async req => ctx.tools.enhanceEstimate(req.user, req.params.id, req.body));
   app.post<{ Params: { id: string } }>('/v1/models/:id/enhance', async req => ctx.tools.startEnhance(req.user, req.params.id, req.body));

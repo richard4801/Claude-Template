@@ -260,6 +260,8 @@ export const takes = pgTable('takes', {
   templateOwnerId: text('template_owner_id'),
   variation: jsonb('variation').$type<VariationDraw>(),
   shuffleSeed: integer('shuffle_seed'),
+  /** Photoshoot stills: the reference images it was shot with (plans/api.md "Shoot references"). */
+  refs: jsonb('refs').$type<{ image: ImageRef; guides: ('pose' | 'look' | 'scene')[] }[]>(),
   /** The prompt as non-owners of the template see it ("Template: <name>" plus their own layers). */
   publicPrompt: text('public_prompt'),
   createdAt: ms('created_at').notNull(),
@@ -480,3 +482,12 @@ export const toolRuns = pgTable('tool_runs', {
   finishedAt: ms('finished_at'),
   appliedAt: ms('applied_at'),
 }, t => [index('tool_runs_studio_idx').on(t.studioId, t.createdAt)]);
+
+/** Owner overrides of the prompt library (plans/api.md "Shoot references and the prompt library" §3). */
+export const promptOverrides = pgTable('prompt_overrides', {
+  studioId: text('studio_id').notNull(),
+  key: text('key').notNull(),
+  text: text('text').notNull(),
+  updatedBy: text('updated_by'),
+  updatedAt: ms('updated_at').notNull(),
+}, t => [primaryKey({ columns: [t.studioId, t.key] })]);

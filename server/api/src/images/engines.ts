@@ -18,6 +18,8 @@ export type ImageRequest = {
   editOf?: string;
   /** Replicate: megapixels of each reference (after shrinking), for the cost estimate. */
   referenceMp?: number[];
+  /** How many references to send at most (default: the engine's reference limit). Shoots with reference images pass their planned count. */
+  maxImages?: number;
 };
 /** What one prediction is billed on (Replicate): the service computes the exact cost once the output's size is known. */
 export type PhotoBillInfo = { kind: 'shot' | 'edit'; inMp: number; outMp: number; metrics?: PhotoMetrics | null };
@@ -139,7 +141,7 @@ export class ReplicateImageEngine implements ImageEngine {
         bill = { kind: 'edit', inMp: 0, outMp: 0 };
       } else {
         model = sel.model;
-        const refs = req.referenceImages.slice(0, c.maxRefs);
+        const refs = req.referenceImages.slice(0, req.maxImages ?? c.maxRefs);
         const outMp = outMpFor(req.width, req.height);
         input = { prompt: req.prompt, input_images: refs, aspect_ratio: aspectFor(req.width, req.height), resolution: `${outMp} MP`, output_format: 'jpg', output_quality: 95,
           safety_tolerance: c.safety, ...(seed != null ? { seed } : {}) };

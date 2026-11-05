@@ -13,7 +13,8 @@ import { CustomHttpEngine, FalEngine, ImageEngineError, ReplicateImageEngine, Si
 import * as P from '../pricing.js';
 import type { PhotoBill } from './bill.js';
 import { ReplicateError, SAFETY_RE, CREDIT_RE, errorText } from '../replicate/client.js';
-import { buildInput, mapModel, type ImageStep } from '../replicate/mapping.js';
+import { buildInput, imageCapacity, mapModel, type ImageStep } from '../replicate/mapping.js';
+import { SHOOT_GUIDES, type SentRef, type ShootGuide } from '../prompt/engine.js';
 import { exactOne } from '../replicate/prices.js';
 import type { StepOverrides } from './steps.js';
 
@@ -26,6 +27,23 @@ export const OUT_OF_CREDIT = "Something went wrong · you weren't charged. The s
 /** An ApiError from a photo call, carrying what the engine already billed for images that were thrown away. */
 export class PhotoError extends ApiError {
   constructor(status: number, code: string, message: string, readonly spentUsd: number) { super(status, code, message); }
+}
+
+export type ShootRefIn = { image: ImageRef; guides: ShootGuide[] };
+export type ShotPlan = { images: ImageRef[]; sent: SentRef[]; refs: { index: number | null; guides: ShootGuide[]; dropped?: true }[] };
+/**
+ * The images one new shot sends (plans/api.md "Shoot references" §1): identity/outfit references (most important first,
+ * at most `maxIdentity`), then the reference images, all within the model's `capacity`. Identity references go first
+ * from the end, never the first (face front); then the last reference images.
+ */
+export function planShotImages(identity: (ImageRef | null | undefined)[], refs: ShootRefIn[], maxIdentity: number, capacity: number): ShotPlan {
+  const id = (identity.filter(Boolean) as ImageRef[]).slice(0, Math.max(0, maxIdentity));
+  const cap = Math.max(0, capacity);
+  const nRefs = Math.min(refs.length, Math.max(0, id.length ? cap - 1 : cap));
+  const nId = Math.min(id.length, cap - nRefs);
+  const images = [...id.slice(0, nId), ...refs.slice(0, nRefs).map(r => r.image)];
+  const sent: SentRef[] = refs.slice(0, nRefs).map((r, k) => ({ index: nId + k + 1, guides: r.guides }));
+  return { images, sent, refs: refs.map((r, k) => (k < nRefs ? { index: nId + k + 1, guides: r.guides } : { index: null, guides: r.guides, dropped: true as const })) };
 }
 
 export const ASSET_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../assets/ref');
@@ -76,7 +94,8 @@ export class ImageService {
   /** `features.photo` for the apps. */
   photoFeatures() {
     const p = this.photoPrices(), r = p.maxRefs;
-    return { ...p, loraShots: P.LORA_CANDIDATES,
+    return { ...p, loraShots: P.LORA_CANDIDATES, maxInputs: this.ctx.config.REPLICATE_IMAGE_MAX_INPUTS,
+      references: { max: 3, guides: SHOOT_GUIDES.map(g => ({ ...g })) },
       estimates: { shoot: P.shootEstimate(p, 4, r), outfitSet: P.outfitSetEstimate(p, r), sheetAngle: P.sheetAnglesEstimate(p, 1, r), loraSet: P.loraSetEstimate(p, r) } };
   }
   /** Estimate of one new shot on the studio's shot model (the tested default: the config formula, "App clean-up" §3). */
@@ -84,6 +103,22 @@ export class ImageService {
     const sel = await this.selection(studioId, null, models);
     if (sel.provider !== 'replicate' || this.ctx.imageModels.isRecipe('shot', sel.model)) return P.newShotEstimate(this.photoPrices(), outMp, refs);
     return this.ctx.imageModels.estimate(sel.model, { outMp, inMp: P.PHOTO_REF_MP * Math.min(refs, this.photoPrices().maxRefs) });
+  }
+  /** How many images one new shot can send on the studio's shot model (plans/api.md "Shoot references" §1). */
+  async shotCapacity(studioId: string, override?: Partial<EngineSelection> | null, models?: StepOverrides | null) {
+    const sel = await this.selection(studioId, override, models);
+    const max = this.ctx.config.REPLICATE_IMAGE_MAX_INPUTS;
+    if (sel.provider !== 'replicate' || this.ctx.imageModels.isRecipe('shot', sel.model) || !this.toolsLive) return max;
+    try { return imageCapacity(mapModel(await this.ctx.imageModels.info(sel.model), 'shot').mapping); } catch { return max; }
+  }
+  /** A shoot's images and the estimate of one still that sends them all. */
+  async shotPlan(studioId: string, identity: (ImageRef | null | undefined)[], refs: ShootRefIn[], outMp: number, override?: Partial<EngineSelection> | null, models?: StepOverrides | null) {
+    const plan = planShotImages(identity, refs, this.photoPrices().maxRefs, await this.shotCapacity(studioId, override, models));
+    const sel = await this.selection(studioId, override, models);
+    const n = plan.images.length;
+    const perShot = sel.provider !== 'replicate' || this.ctx.imageModels.isRecipe('shot', sel.model) ? P.newShotEstimateImages(this.photoPrices(), outMp, n)
+      : await this.ctx.imageModels.estimate(sel.model, { outMp, inMp: P.PHOTO_REF_MP * n });
+    return { ...plan, perShot };
   }
   /** Estimate of one edit on the studio's edit model. */
   async editCost(studioId: string, models?: StepOverrides | null) {
@@ -196,7 +231,9 @@ export class ImageService {
     /** The action's bill: each image's exact cost is added; images billed but thrown away on a failure are recorded. */
     bill?: PhotoBill;
     /** Owner's per-run model choice (plans/api.md "Model tools" §2). */
-    models?: StepOverrides | null }): Promise<{ images: ImageRef[]; seed?: number; costUsd: number; costs: number[]; selection: EngineSelection }> {
+    models?: StepOverrides | null;
+    /** Send up to this many references (a shoot's planned images); default: the reference limit. */
+    maxImages?: number }): Promise<{ images: ImageRef[]; seed?: number; costUsd: number; costs: number[]; selection: EngineSelection }> {
     const sel = await this.selection(o.studioId, o.override, o.models);
     // Any model other than the two tested defaults runs through the schema mapping.
     const step: ImageStep = o.editOf ? 'edit' : 'shot';
@@ -222,7 +259,7 @@ export class ImageService {
     }
     const engine = this.engines[sel.provider];
     if (!engine) throw new ApiError(400, 'bad_request', `Unknown image engine ${sel.provider}`);
-    const req: ImageRequest = { ...o.req, referenceImages: o.req.referenceImages ?? [] };
+    const req: ImageRequest = { ...o.req, referenceImages: o.req.referenceImages ?? [], ...(o.maxImages != null ? { maxImages: o.maxImages } : {}) };
     if (o.refs || o.editOf) {
       const list = [...(o.editOf && sel.provider !== 'replicate' ? [o.editOf] : []), ...(o.refs ?? [])];
       if (sel.provider === 'replicate') {
@@ -240,7 +277,11 @@ export class ImageService {
     /** Cost of one image: Replicate's billing info (exact), the engine's own figure, or (simulated) the estimate. */
     const costOf = (img: EngineImage, outMp?: number) => {
       if (img.bill) return P.photoPredictionCost(prices, img.bill.kind, { inMp: img.bill.inMp, outMp: outMp ?? img.bill.outMp, outputs: 1 }, img.bill.metrics);
-      if (sel.provider === 'simulated') return o.editOf ? prices.perEdit : P.newShotEstimate(prices, P.outMpFor(o.req.width, o.req.height), this.refCount(o.refs ?? []));
+      if (sel.provider === 'simulated') {
+        if (o.editOf) return prices.perEdit;
+        const outMp = P.outMpFor(o.req.width, o.req.height);
+        return o.maxImages != null ? P.newShotEstimateImages(prices, outMp, Math.min(o.maxImages, (o.refs ?? []).filter(Boolean).length)) : P.newShotEstimate(prices, outMp, this.refCount(o.refs ?? []));
+      }
       return null;
     };
     let out;

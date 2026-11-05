@@ -146,6 +146,8 @@ const Env = z.object({
   /** Qwen-Image-Edit 2511: per output image. */
   REPLICATE_IMAGE_EDIT_USD: num(0.03),
   REPLICATE_IMAGE_MAX_REFS: num(6),
+  /** Most images one new shot sends (identity references + a shoot's reference images) on the default shot model and other engines. */
+  REPLICATE_IMAGE_MAX_INPUTS: num(8),
   /** References are shrunk to fit inside this many pixels per side before they're sent. */
   REPLICATE_IMAGE_REF_MAX_PX: num(1024),
   REPLICATE_IMAGE_SAFETY: num(2),

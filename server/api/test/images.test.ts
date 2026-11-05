@@ -68,7 +68,7 @@ describe('image engine selection per studio', () => {
     expect(shots[0].seed).toBe(4242);
     const rec = (await a.ctx.db.query.generatedImages.findMany())[0]!;
     expect(rec).toMatchObject({ provider: 'custom-http', model: 'mine', seed: 4242, costUsd: 0.02, purpose: 'shoot' });
-    expect(rec.prompt).toContain('Scene: rooftop.');
+    expect(rec.prompt).toContain('Scene: rooftop · golden hour.');
     const img = await a.app.inject({ method: 'GET', url: shots[0].thumb.url });
     expect(img.body).toBe('png!');
     // A call can override the studio's engine.

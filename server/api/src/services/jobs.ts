@@ -127,16 +127,17 @@ export class JobService {
     // front, ¾ and back if it has them, otherwise the body slots. Replicate: the five locked shots, then the outfit (≤ 9).
     // <Image n> in the prompt follows this order.
     const references = replicate ? replicateReferencesFor(m, o) : referencesFor(m, o);
+    const texts = await this.ctx.prompts.texts(user.studioId);
     const prompt = replicate ? replicateSwap({
       identity: { name: m.name, look: m.look || `${m.age}-year-old woman`, neverAdd: m.neverAdd },
       outfit: o ? { name: o.name, description: o.description, source: o.mode === 'describe' && !o.angles.some(Boolean) ? 'described' : 'reference-set' } : null,
       referenceLabels: references.map(x => x.label), direction: r.direction,
-    }).text : videoSwap({
+    }, texts).text : videoSwap({
       identity: { name: m.name, look: m.look || `${m.age}-year-old woman`, referenceCount: Math.max(1, references.length), neverAdd: m.neverAdd, lora },
       referenceLabels: references.length ? references.map(x => x.label) : undefined,
       outfit: { name: o?.name ?? 'outfit' }, keepAudio: r.keepAudio, keepBackground: r.background === 'keep',
       backgroundMotion: MOTION_WORDS[r.backgroundMotion], steps: r.steps, seed, direction: r.direction,
-    }).text;
+    }, texts).text;
     const { queue, ...request } = r;
     const p0 = P.progressAt(request, 0);
     const row: typeof jobs.$inferInsert = {

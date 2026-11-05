@@ -9,6 +9,7 @@ import { whoOf } from '../money/money.js';
 import { PhotoBill } from '../images/bill.js';
 import * as P from '../pricing.js';
 import { characterSheetShot, loraToken, SHEET_ANGLES } from '../prompt/engine.js';
+import { loraVariationLine, loraVariations } from '../prompt/service.js';
 import type { JobRow } from '../gpu/controller.js';
 
 /** Candidate pool: the bundled character stills, cycled with labels (same as the mock and prototype features.js). */
@@ -16,9 +17,6 @@ export const LORA_POOL: [string, string][] = [['g_front', 'Green set · front'],
   ['profile', 'Profile · soft light'], ['c_tq', 'Crystal · ¾'], ['g_back', 'Back · physique'], ['hero', 'Portrait · golden hour'], ['c_face', 'Close-up · choker']];
 const SIM_FLAGGED = [9, 19, 23];
 /** Variations for real candidates: new angles, light and expressions, including full-body shots for her physique. */
-const VARIATIONS = ['window light, soft smile', 'golden hour outdoors, laughing', 'overcast street, neutral expression', 'studio softbox, looking over shoulder',
-  'evening city lights, candid', 'bright kitchen, relaxed', 'beach at noon, full body', 'gym mirror, full body athletic wear', 'cafe table, three-quarter', 'night flash photo, close-up'];
-
 type LoraRow = typeof loras.$inferSelect;
 
 export class LoraService {
@@ -74,17 +72,19 @@ export class LoraService {
       const sel = await this.ctx.images.selection(user.studioId);
       const identity = { name: m.name, look: m.look || `${m.age}-year-old woman`, neverAdd: m.neverAdd, referenceCount: Math.max(1, m.slots.filter(s => s.image).length) };
       const refs = m.slots.map(s => s.image);
+      const texts = await this.ctx.prompts.texts(user.studioId);
+      const variations = loraVariations(texts);
       let images: ImageRef[];
       if (sel.provider === 'simulated') {
         const r = await this.ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'lora-candidate', refId: m.id, refs, bill,
-          req: { prompt: characterSheetShot(identity, SHEET_ANGLES[2]).text, width: 768, height: 1024, count: P.LORA_CANDIDATES, simAssets: LORA_POOL.map(p => p[0]) } });
+          req: { prompt: characterSheetShot(identity, SHEET_ANGLES[2], texts).text, width: 768, height: 1024, count: P.LORA_CANDIDATES, simAssets: LORA_POOL.map(p => p[0]) } });
         images = r.images;
       } else {
         images = [];
         for (let i = 0; i < P.LORA_CANDIDATES; i += 4) {
           const batch = await Promise.all(Array.from({ length: Math.min(4, P.LORA_CANDIDATES - i) }, (_, k) => {
             const n = i + k, angle = SHEET_ANGLES[n % SHEET_ANGLES.length]!;
-            const prompt = `${characterSheetShot(identity, angle).text}\nVariation: ${VARIATIONS[n % VARIATIONS.length]}.`;
+            const prompt = [characterSheetShot(identity, angle, texts).text, loraVariationLine(n, texts)].filter(x => x.trim()).join('\n');
             return this.ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'lora-candidate', refId: m.id, refs, bill,
               req: { prompt, width: 768, height: 1024, count: 1, seed: 1000 + n } }).then(r => r.images[0]!);
           }));
@@ -96,7 +96,7 @@ export class LoraService {
         const [asset, label] = LORA_POOL[i % LORA_POOL.length]!;
         // Simulated sets pre-flag 3 risky shots like the prototype. Real sets aren't auto-checked yet: nothing is flagged.
         const flag = simulated && SIM_FLAGGED.includes(i) ? (asset === 'c_face' ? 'choker' : 'face drift') : undefined;
-        return compact({ id: `c${i + 1}`, image, label: simulated ? label : `${SHEET_ANGLES[i % 6]!.label} · ${VARIATIONS[i % VARIATIONS.length]}`, flag, keep: !flag }) as LoraCandidate;
+        return compact({ id: `c${i + 1}`, image, label: simulated ? label : `${SHEET_ANGLES[i % 6]!.label} · ${variations[i % variations.length]}`, flag, keep: !flag }) as LoraCandidate;
       });
       const [cur] = await this.ctx.db.select().from(loras).where(eq(loras.modelId, m.id));
       await bill.finish();

@@ -1,7 +1,7 @@
 // Live events for GET /v1/events, scoped per studio, per role and per user (plans/api.md "Live events").
 // In-memory: one API instance. A second instance would need Postgres LISTEN/NOTIFY behind the same interface.
 export type EventType = 'job' | 'take' | 'balance' | 'wallet' | 'model' | 'outfit' | 'lora' | 'post' | 'gpu' | 'tool' | 'template' | 'clip'
-  | 'settings' | 'member' | 'invite' | 'studio' | 'account';
+  | 'settings' | 'member' | 'invite' | 'studio' | 'account' | 'prompts';
 export type ApiEvent = { type: EventType; [k: string]: unknown };
 export type Viewer = { userId: string; studioId: string; role: 'owner' | 'member' };
 type Payload = ApiEvent | null | undefined;

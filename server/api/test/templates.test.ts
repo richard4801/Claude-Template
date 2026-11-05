@@ -254,7 +254,7 @@ describe('photo templates', () => {
   it('Save as template from a plain shot: its layers (no identity, outfit, never-add or seed), its image, a suggested pool', async () => {
     const shot = (await mo.req('POST', '/v1/shoots', { modelId, scene: 'Bathroom mirror · soft', direction: 'phone covering her face', count: 1 })).body[0];
     const draft = (await mo.req('POST', '/v1/templates/draft', { fromShotId: shot.id })).body;
-    expect(draft.layers.scene).toBe('bathroom mirror');
+    expect(draft.layers.scene).toBe('bathroom mirror · soft');
     expect(draft.layers.camera).toContain('35mm');
     expect(JSON.stringify(draft.layers)).not.toMatch(/Demo model|Wearing|Never add|Seed/);
     expect(draft.variationPool.pose[0]).toBe('phone covering her face');
@@ -296,7 +296,7 @@ describe('photo templates', () => {
 
   it('/health reports the build, the migrations and the starter seed', async () => {
     const h = (await a.app.inject({ method: 'GET', url: '/health' })).json();
-    expect(h.migrations).toEqual({ applied: 5, latest: '0004_model_tools' });
+    expect(h.migrations).toEqual({ applied: 6, latest: '0005_prompt_library' });
     expect(h.startedAt).toBeGreaterThan(0);
   });
 });

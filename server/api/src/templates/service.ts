@@ -15,7 +15,7 @@ import { putObject } from '../storage/objects.js';
 import { applyAfterEffects, GRADES, hasEffects } from './effects.js';
 import { buildTemplatePrompt, cleanPool, poolIsEmpty, randomSeed, suggestPool } from './prompt.js';
 import { STARTERS } from './starters.js';
-import type { Identity, OutfitSpec } from '../prompt/engine.js';
+import type { Identity, OutfitSpec, SentRef } from '../prompt/engine.js';
 
 type Row = typeof templates.$inferSelect;
 type TakeRow = typeof takes.$inferSelect;
@@ -237,14 +237,15 @@ export class TemplateService {
   }
 
   /** The prompt view: what the first still of a shoot would get. Non-owners see only the visible slots. */
-  async preview(u: AuthUser, id: string, body: unknown, resolve: (modelId: string, outfitId?: string) => Promise<{ identity: Identity; outfit: OutfitSpec | null }>) {
+  async preview(u: AuthUser, id: string, body: unknown, resolve: (modelId: string, outfitId?: string) => Promise<{ identity: Identity; outfit: OutfitSpec | null }>,
+    extra: { refs?: SentRef[] } = {}) {
     const t = await this.visible(u, id);
     const b = parse(z.object({ modelId: z.string(), outfitId: z.string().optional(), direction: str(500).optional(),
       shuffleSeed: z.number().int().min(0).optional(), lockSeed: z.boolean().optional() }).passthrough(), body);
     const { identity, outfit } = await resolve(b.modelId, b.outfitId);
     const shuffleSeed = b.shuffleSeed ?? randomSeed();
     const p = buildTemplatePrompt({ templateId: t.id, templateName: t.name, layers: t.layers, pool: t.variationPool, identity, outfit,
-      direction: b.direction, shuffleSeed, lockSeed: b.lockSeed, hasProduct: false });
+      direction: b.direction, shuffleSeed, lockSeed: b.lockSeed, hasProduct: false, refs: extra.refs }, await this.ctx.prompts.texts(u.studioId));
     const mine = t.ownerId === u.id;
     return compact({ slots: mine ? p.full : p.visible, text: mine ? p.fullText : p.visibleText, seed: p.seed, shuffleSeed, variation: mine ? p.variation : undefined, removed: p.removed.length ? p.removed : undefined });
   }
