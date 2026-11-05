@@ -232,6 +232,17 @@ _Approved by the coordinator 2026-11-05. The port starts after `claude/muse-prom
 - With a source clip it is pre-set from `detectTalking`.
 - When audio references are added, non-speaking shots send `beatOnlyAudio`'s instrumental instead of raw audio.
 
+**Confirmed with workstream 4 (their head 5b96d54):**
+- **Group:** `suite` stays, and so does the concat into PROMPT_DEFS. `registerPromptDefs` is optional.
+- **Registration:** the scripts are registered with `registerScript()`.
+- **User text:** the user's text goes through `sanitizeDirection(direction, identity, texts)` before `run()`, and its `removed` list is returned with the result. `suite.shot.scene` = `{direction}` is the script's only user section.
+- **Speaking:** `speaking` is the one switch for both the audio and the mouth wording.
+  - **On:** send the speech audio and use the lip-sync line.
+  - **Off:** send `beatOnlyAudio(...)`'s instrumental only. It runs synchronously inside the job, and its `costUsd` is added to the job's bill. Use `audioLine({audio: 'music', speaking: false})`.
+  - **Nothing sent:** use `audioLine({audio: 'none', speaking})`, or `suite.audio.dialogue` when she is speaking.
+- **Pre-set:** `speaking` is pre-set from `detectTalking` when the user brings an audio or video reference.
+- **Mouth wording:** it comes only from these audio rules, never from camera or performance blocks. The regex guess is gone; it went in 07c9128.
+
 **Unchanged by the port:**
 - The shot API contract.
 - Every existing `suite.*` block key, so saved owner overrides keep working.
