@@ -44,13 +44,15 @@ _Started 2026-11-05. Owner-approved designs. Backend: `plans/api.md` "AI suite" 
 - **Edit** becomes top-level (workstream 3's screen).
 - **Entry points for the other workstreams:** stubs with these exact paths and signatures. The other workstreams replace the files at merge; keep the stubs minimal.
   - **Android:**
-    - `ui/screens/camera/CameraEntry.kt` (package `studio.muse.app.ui.screens.camera`): `@Composable fun CameraStageScreen()` and `@Composable fun DirectedModePanel(shotTitle: String, onApply: (cameraJson: String) -> Unit)`.
-    - `ui/screens/edit/EditEntry.kt` (package `studio.muse.app.ui.screens.edit`): `@Composable fun EditSuiteScreen(takeId: String?)`.
+    - `ui/screens/camera/CameraEntry.kt` (package `studio.muse.app.ui.screens.camera`): `@Composable fun CameraStageScreen()`, `@Composable fun DirectedModePanel(shotTitle: String, onApply: (cameraJson: String) -> Unit)` and `@Composable fun ConnectionsScreen(onBack: () -> Unit)`.
+    - `ui/screens/edit/EditSuiteScreen.kt` (package `studio.muse.app.ui.screens.edit`): `@Composable fun EditSuiteScreen(takeId: String?, onBack: () -> Unit)`.
     - Routes: `Routes.CAMERA_STAGE = "camera-stage"`, `Routes.EDIT = "edit"`, `Routes.EDIT_TAKE = "edit/{id}"`.
     - `Routes.EDIT_VIDEO` keeps working: "Edit video" on a take opens `EditSuiteScreen(id)`.
+    - **Settings:** an owner-only row "Connections" (subtitle "Claude & MCP · Blender relay") opens `ConnectionsScreen`. It is one additive line in Settings.
   - **Mac:**
-    - `Muse/Views/Camera/CameraEntry.swift`: `struct CameraStageView: View { init() }` and `struct DirectedModePanel: View { init(shotTitle: String, onApply: @escaping (String) -> Void) }`.
-    - `Muse/Views/Edit/EditEntry.swift`: `struct EditSuiteView: View { init(takeId: String?) }`.
+    - `Muse/Views/Camera/CameraEntry.swift`: `struct CameraStageView: View { init() }`, `struct DirectedModePanel: View { init(shotTitle: String, onApply: @escaping (String) -> Void) }` and `struct ConnectionsView: View { init() }`.
+    - `Muse/Views/Edit/EditSuiteView.swift`: `struct EditSuiteView: View { init(takeId: String? = nil) }`. It reads the AppStore from the environment.
+    - **Settings:** an owner-only "Connections" row opens `ConnectionsView`.
     - The sidebar gets a top-level "Edit" item.
 
 ## Ownership (write only here; shared files with small additive blocks marked "AI suite (workstream 1)")
