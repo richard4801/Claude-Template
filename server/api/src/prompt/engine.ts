@@ -145,6 +145,29 @@ export function referenceLine(r: SentRef, t: PromptTexts = DEFAULT_TEXTS) {
   parts.push(fill(t['refs.guard']!, v));
   return parts.map(p => p.trim()).filter(Boolean).join(' ');
 }
+/** One panel of a reference sheet (images/collage.ts): who or what it shows, and for a reference image its guides. */
+export type SheetPanel = { label: string; role: 'person' | 'outfit' | 'product' | 'ref'; guides?: ShootGuide[] };
+const GUIDE_WORDS: Record<ShootGuide, string> = { pose: 'pose & framing', look: 'look & colour', scene: 'scene' };
+/** The label printed on a reference image's panel: "ref: look & colour". */
+export const refPanelLabel = (guides: ShootGuide[]) => `ref: ${SHOOT_GUIDES.filter(g => guides.includes(g.id)).map(g => GUIDE_WORDS[g.id]).join(' & ')}`;
+/** "panel 1 shows", "panels 1–3 show", "panels 1, 3 and 4 show". */
+const span = (ns: number[]) => {
+  if (ns.length === 1) return `panel ${ns[0]} shows`;
+  const run = ns.every((n, i) => i === 0 || n === ns[i - 1]! + 1);
+  return `${run ? `panels ${ns[0]}–${ns[ns.length - 1]}` : `panels ${ns.slice(0, -1).join(', ')} and ${ns[ns.length - 1]}`} show`;
+};
+/** The line that tells a one-image model its input is a reference sheet (prompt library `refs.collage`). */
+export function collageLine(panels: SheetPanel[], t: PromptTexts = DEFAULT_TEXTS) {
+  const person = panels.map((p, i) => (p.role === 'person' ? i + 1 : 0)).filter(Boolean);
+  const rest = panels.map((p, i) => {
+    const k = i + 1;
+    if (p.role === 'outfit') return `panel ${k} shows the outfit to wear`;
+    if (p.role === 'product') return `panel ${k} shows the product`;
+    if (p.role === 'ref') return `panel ${k} guides the ${SHOOT_GUIDES.filter(g => p.guides?.includes(g.id)).map(g => GUIDE_WORDS[g.id]).join(' and the ')} only`;
+    return '';
+  }).filter(Boolean);
+  return fill(t['refs.collage']!, { person: span(person.length ? person : [1]), panels: rest.map(r => `; ${r}`).join('') }).trim();
+}
 /** Layers kept when Presets is off. */
 export const OWN_LAYERS: LayerKey[] = ['identity', 'outfit', 'direction', 'reference', 'seed'];
 

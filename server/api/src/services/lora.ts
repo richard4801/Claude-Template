@@ -7,6 +7,7 @@ import { ApiError, badRequest, notFound } from '../errors.js';
 import { compact } from '../lib/util.js';
 import { whoOf } from '../money/money.js';
 import { PhotoBill } from '../images/bill.js';
+import { identityRefs } from '../images/identity.js';
 import * as P from '../pricing.js';
 import { characterSheetShot, loraToken, SHEET_ANGLES } from '../prompt/engine.js';
 import { loraVariationLine, loraVariations } from '../prompt/service.js';
@@ -58,7 +59,7 @@ export class LoraService {
     const l = await this.row(user, modelId);
     if (['building', 'training'].includes(l.state)) throw new ApiError(409, 'busy', 'Already working on it');
     // Pass-through pricing: hold the estimate, settle to what the engine really charged (plans/api.md "App clean-up" §3).
-    const estimate = P.LORA_CANDIDATES * await this.ctx.images.newShotCost(user.studioId, 1, this.ctx.images.refCount(m.slots.map(s => s.image)));
+    const estimate = P.LORA_CANDIDATES * (await this.identityPlan(user, m)).plan.perShot;
     const bill = await new PhotoBill(this.ctx, whoOf(user), `lora_${modelId}_${Date.now()}`, estimate, `LoRA training set · ${P.LORA_CANDIDATES} photos`).start();
     const before = l.state;
     const building = await this.set(modelId, { state: 'building', candidates: [], progress: 0 });
@@ -67,16 +68,23 @@ export class LoraService {
     return this.view(building);
   }
 
+  /** Her identity images for the set (plans/api.md "Identity images": face, face ¾, one body image by default), within the shot model's limit. */
+  private async identityPlan(user: AuthUser, m: typeof models.$inferSelect) {
+    const ids = identityRefs(m, null, { count: await this.ctx.images.identityCount(user.studioId) });
+    return { ids, plan: await this.ctx.images.shotPlan(user.studioId, ids, [], 1) };
+  }
+
   private async generateCandidates(user: AuthUser, m: typeof models.$inferSelect, before: string, bill: PhotoBill) {
     try {
       const sel = await this.ctx.images.selection(user.studioId);
-      const identity = { name: m.name, look: m.look || `${m.age}-year-old woman`, neverAdd: m.neverAdd, referenceCount: Math.max(1, m.slots.filter(s => s.image).length) };
-      const refs = m.slots.map(s => s.image);
+      const { plan } = await this.identityPlan(user, m);
+      const refs = plan.images, panels = plan.panels;
+      const identity = { name: m.name, look: m.look || `${m.age}-year-old woman`, neverAdd: m.neverAdd, referenceCount: Math.max(1, refs.length) };
       const texts = await this.ctx.prompts.texts(user.studioId);
       const variations = loraVariations(texts);
       let images: ImageRef[];
       if (sel.provider === 'simulated') {
-        const r = await this.ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'lora-candidate', refId: m.id, refs, bill,
+        const r = await this.ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'lora-candidate', refId: m.id, refs, maxImages: refs.length, panels, bill,
           req: { prompt: characterSheetShot(identity, SHEET_ANGLES[2], texts).text, width: 768, height: 1024, count: P.LORA_CANDIDATES, simAssets: LORA_POOL.map(p => p[0]) } });
         images = r.images;
       } else {
@@ -85,7 +93,7 @@ export class LoraService {
           const batch = await Promise.all(Array.from({ length: Math.min(4, P.LORA_CANDIDATES - i) }, (_, k) => {
             const n = i + k, angle = SHEET_ANGLES[n % SHEET_ANGLES.length]!;
             const prompt = [characterSheetShot(identity, angle, texts).text, loraVariationLine(n, texts)].filter(x => x.trim()).join('\n');
-            return this.ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'lora-candidate', refId: m.id, refs, bill,
+            return this.ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'lora-candidate', refId: m.id, refs, maxImages: refs.length, panels, bill,
               req: { prompt, width: 768, height: 1024, count: 1, seed: 1000 + n } }).then(r => r.images[0]!);
           }));
           images.push(...batch);

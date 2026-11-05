@@ -152,9 +152,9 @@ describe('photo templates', () => {
     expect(r.status).toBe(200);
     moShots = r.body;
     expect(moShots).toHaveLength(4);
-    // Pass-through pricing: the simulated engine settles to the estimate, 4 × (0.015 + 0.015 × 2 + 0.015 × 0.79 × 6) = $0.4644 → 47 tokens.
-    expect((await mo.req('GET', '/v1/wallet')).body.usd).toBeCloseTo(before - 0.47, 6);
-    expect(moShots.reduce((t: number, x: any) => t + x.cost, 0)).toBeCloseTo(0.4644, 9);
+    // Pass-through pricing: the simulated engine settles to the estimate, 4 × (0.015 + 0.015 × 2 + 0.015 × 0.79 × 3) = $0.3222 → 33 tokens (3 identity images).
+    expect((await mo.req('GET', '/v1/wallet')).body.usd).toBeCloseTo(before - 0.33, 6);
+    expect(moShots.reduce((t: number, x: any) => t + x.cost, 0)).toBeCloseTo(0.3222, 9);
     for (const s of moShots) {
       expect(s).toMatchObject({ kind: 'shot', templateId: tpl.id, templateName: 'Laundrette night' });
       expect(s.prompt.split('\n')).toContain('Template: Laundrette night');
@@ -296,7 +296,7 @@ describe('photo templates', () => {
 
   it('/health reports the build, the migrations and the starter seed', async () => {
     const h = (await a.app.inject({ method: 'GET', url: '/health' })).json();
-    expect(h.migrations).toEqual({ applied: 6, latest: '0005_prompt_library' });
+    expect(h.migrations).toEqual({ applied: 7, latest: '0006_identity_refs' });
     expect(h.startedAt).toBeGreaterThan(0);
   });
 });

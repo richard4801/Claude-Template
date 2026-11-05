@@ -93,6 +93,8 @@ export const studioSettings = pgTable('studio_settings', {
   balanceSince: ms('balance_since'),
   /** The owner's model per image step (plans/api.md "Model tools" §2): {[step]: {model, extra}}; absent = the default. */
   imageModels: jsonb('image_models').$type<Record<string, { model: string; extra?: Record<string, unknown> }>>(),
+  /** How many of a model's own images a photo step sends (1–7; null = 3: face, face ¾, one body image). */
+  identityRefs: integer('identity_refs'),
 });
 
 /** Money the owner loaded into the studio ("Added $20"). Also written to the ledger as a `topup` row. */
@@ -123,6 +125,8 @@ export const models = pgTable('models', {
   archivedAt: ms('archived_at'),
   /** Earlier character sheets, newest first (≤ 10): saved before Enhance replaces images, and before a restore. */
   sheetVersions: jsonb('sheet_versions').$type<SheetVersion[]>().notNull().default([]),
+  /** The one full-body sheet image her photos send (front, tq, side or back; null = front). */
+  identityBodySlot: text('identity_body_slot'),
   createdBy: text('created_by'),
   createdAt: ms('created_at').notNull(),
 }, t => [index('models_studio_idx').on(t.studioId)]);

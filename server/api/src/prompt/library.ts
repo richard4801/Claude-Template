@@ -56,6 +56,10 @@ export const PROMPT_DEFS: PromptDef[] = [
   d('refs.scene', 'references', 'Scene', 'For a reference image that guides the place.', 'Use the place and background from image {refIndex}.', [['refIndex', 'the image’s number in the images sent', true]]),
   d('refs.guard', 'references', 'Guard line', 'Ends every reference line: her face and body come only from her own sheet.', 'Do not take the face, body, hair or clothes from image {refIndex}.',
     [['refIndex', 'the image’s number in the images sent', true]]),
+  d('refs.collage', 'references', 'Reference sheet', 'For models that take one image: MUSE sends one reference sheet (all the images as numbered panels) and puts this line first.',
+    'The input image is a reference sheet of numbered panels ("image N" below means panel N): {person} the person (use her face, hair and body exactly){panels}; create one new photo, not a collage.',
+    [['person', 'the panels that show her, with the verb: "panel 1 shows" or "panels 1–3 show"', true], ['panels', 'what the other panels show ("; panel 4 shows the outfit to wear; panel 5 guides the pose & framing"), or empty']],
+    { allowEmpty: false }),
   // ---------------------------------------------------------------- character sheet
   d('sheet.task', 'sheet', 'Sheet shot task', 'One character-sheet image (fill angles, LoRA sets).',
     'Task: {angle} shot on a plain light-grey studio background, even soft light, neutral expression, {framing}.',

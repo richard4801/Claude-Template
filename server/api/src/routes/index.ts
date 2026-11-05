@@ -11,7 +11,8 @@ import { ApiError, badRequest, notFound } from '../errors.js';
 import { compact, dayStart, monthStart, uid } from '../lib/util.js';
 import { whoOf } from '../money/money.js';
 import * as P from '../pricing.js';
-import { cameraValues, characterSheetShot, outfitEditPrompt, outfitSet, photoshoot, sheetAngle, shootChoices, loraToken, OUTFIT_ANGLES } from '../prompt/engine.js';
+import { cameraValues, characterSheetShot, collageLine, outfitEditPrompt, outfitSet, photoshoot, sheetAngle, shootChoices, loraToken, OUTFIT_ANGLES } from '../prompt/engine.js';
+import { BODY_SLOTS, bodySlotOf, identityRefs, IDENTITY_REFS_MAX, IDENTITY_REFS_MIN, type IdentityRef } from '../images/identity.js';
 import { createInvite, revokeSession, signin, signup } from '../auth/auth.js';
 import { accountView, PLATFORMS, platformOf } from '../services/posts.js';
 import { takeView } from '../services/jobs.js';
@@ -44,7 +45,7 @@ export function modelView(m: typeof models.$inferSelect) {
   // Every model shows the 7 sheet images, also a row written before faceTq existed.
   const slots = SLOT_KEYS.map(k => m.slots.find(s => s.key === k) ?? { key: k, image: null, source: 'upload' as const, busy: false });
   return compact({ id: m.id, name: m.name, age: m.age, niche: m.niche, look: m.look, neverAdd: m.neverAdd, slots, outfitIds: m.outfitIds, personality: m.personality, notes: m.notes,
-    archived: !!m.archivedAt, archivedAt: m.archivedAt ?? undefined });
+    identityBodySlot: bodySlotOf(m), archived: !!m.archivedAt, archivedAt: m.archivedAt ?? undefined });
 }
 export const outfitView = (o: typeof outfits.$inferSelect) =>
   compact({ id: o.id, modelId: o.modelId, name: o.name, mode: o.mode, description: o.description, angles: o.angles, faces: o.faces ?? undefined, state: o.state, prompt: o.prompt, cost: o.cost ?? undefined });
@@ -74,10 +75,17 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const [l] = await db.select().from(loras).where(eq(loras.modelId, m.id));
     return l && l.version > 0 && l.use ? loraToken(m.name, l.version) : null;
   }
-  const identityOf = async (m: typeof models.$inferSelect) => ({
+  /** Who she is, for a prompt; `sent` = how many of her own images go with it (default: her sheet images). */
+  const identityOf = async (m: typeof models.$inferSelect, sent?: number) => ({
     name: m.name, look: m.look || `${m.age}-year-old woman`, neverAdd: m.neverAdd,
-    referenceCount: Math.max(1, m.slots.filter(s => s.image && !s.busy).length), lora: await activeLora(m),
+    referenceCount: Math.max(1, sent ?? m.slots.filter(s => s.image && !s.busy).length), lora: await activeLora(m),
   });
+  /** Her identity images for a photo step (plans/api.md "Identity images"), with the studio's budget. */
+  const idRefs = async (studioId: string, m: typeof models.$inferSelect, o?: typeof outfits.$inferSelect | null, opts: { outfit?: boolean; extra?: IdentityRef[] } = {}) =>
+    identityRefs(m, o, { count: await ctx.images.identityCount(studioId), ...opts });
+  const personCount = (ids: IdentityRef[]) => ids.filter(i => i.role === 'person').length;
+  /** "Identity from N locked reference images": the ones a plan really sends (identity images come first). */
+  const sentOf = (ids: IdentityRef[], plan: { images: ImageRef[]; sent: unknown[] }) => personCount(ids.slice(0, plan.images.length - plan.sent.length));
 
   // ------------------------------------------------------------------ health
   // The host's health check (Koyeb, Railway) calls this every few seconds. It must not touch the database: a query every
@@ -156,10 +164,16 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   });
   app.patch<{ Params: { id: string } }>('/v1/models/:id', async req => {
     const b = parse(z.object({ name: z.string().max(80).optional(), niche: z.string().max(80).optional(), personality: z.string().max(2000).optional(),
-      notes: z.string().max(4000).optional(), neverAdd: z.array(z.string().max(80)).max(50).optional(), look: z.string().max(1000).optional() }).passthrough(), req.body);
+      notes: z.string().max(4000).optional(), neverAdd: z.array(z.string().max(80)).max(50).optional(), look: z.string().max(1000).optional(),
+      identityBodySlot: z.enum(BODY_SLOTS).optional() }).passthrough(), req.body);
     const m = await model(req.user, req.params.id);
     if (typeof b.name === 'string' && !b.name.trim()) throw badRequest('Give her a name');
     const patch: Partial<typeof models.$inferInsert> = {};
+    // Which full-body image her photos send: the owner or whoever made her.
+    if (b.identityBodySlot) {
+      if (req.user.role !== 'owner' && m.createdBy !== req.user.id) throw new ApiError(403, 'owner_only', 'Only the studio owner or her creator can choose this');
+      patch.identityBodySlot = b.identityBodySlot;
+    }
     for (const k of ['name', 'niche', 'personality', 'notes', 'look'] as const) if (typeof b[k] === 'string') patch[k] = b[k];
     if (b.neverAdd) patch.neverAdd = b.neverAdd.map(x => x.trim()).filter(Boolean);
     const [u] = Object.keys(patch).length ? await db.update(models).set(patch).where(eq(models.id, m.id)).returning() : [m];
@@ -193,22 +207,24 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const m0 = await model(req.user, req.params.id, true);
     const m = { ...m0, slots: SLOT_KEYS.map(k => m0.slots.find(s => s.key === k) ?? { key: k, image: null, source: 'upload' as const, busy: false }) };
     const missing = m.slots.filter(s => !s.image && !s.busy);
-    const refsForFill = m.slots.map(s => s.image);
-    const cost = missing.length ? missing.length * await ctx.images.newShotCost(req.user.studioId, 1, ctx.images.refCount(refsForFill)) : 0;
+    // Her identity images within the shot model's limit (plans/api.md "Identity images"); one sheet image each.
+    const fillIds = await idRefs(req.user.studioId, m);
+    const fillPlan = await ctx.images.shotPlan(req.user.studioId, fillIds, [], 1);
+    const cost = missing.length ? missing.length * fillPlan.perShot : 0;
     const bill = await new PhotoBill(ctx, whoOf(req.user), `sheet_${uid('f')}`, cost, `Character sheet · ${missing.length} angle${missing.length === 1 ? '' : 's'}`).start();
     const slots = m.slots.map(s => (missing.includes(s) ? { ...s, busy: true } : s));
     const [u] = await db.update(models).set({ slots }).where(eq(models.id, m.id)).returning();
     emitModel(u!);
     const user = req.user;
     void (async () => {
-      const identity = await identityOf(u!);
+      const identity = await identityOf(u!, sentOf(fillIds, fillPlan));
       const texts = await ctx.prompts.texts(user.studioId);
-      const refs = m.slots.map(s => s.image);
+      const refs = fillPlan.images, panels = fillPlan.panels;
       const filled: Record<string, ImageRef | null> = {};
       let failed = 0;
       for (const s of missing) {
         try {
-          const r = await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'sheet', refId: m.id, refs, bill,
+          const r = await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'sheet', refId: m.id, refs, maxImages: refs.length, panels, bill,
             req: { prompt: characterSheetShot(identity, sheetAngle(s.key)!, texts).text, width: 768, height: 1024, count: 1, simAssets: [SLOT_SAMPLE[s.key] ?? 'face'] } });
           filled[s.key] = r.images[0]!;
         } catch { filled[s.key] = null; failed++; }
@@ -239,10 +255,14 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const mode = b.mode ?? 'describe';
     const id = uid('o');
     const slotOf = (k: string) => m.slots.find(x => x.key === k)?.image;
-    const outfitRefs = [slotOf('face'), slotOf('profile'), ...((b.images ?? []) as ImageRef[]), slotOf('front'), slotOf('tq'), slotOf('back'), slotOf('side')];
-    const cost = mode === 'own' ? 0 : await ctx.images.newShotCost(req.user.studioId, 1, ctx.images.refCount(outfitRefs), stepModels) + 3 * await ctx.images.editCost(req.user.studioId, stepModels);
+    // Her identity images (face, face ¾, one body image), then the product photos.
+    const outfitIds = await idRefs(req.user.studioId, m, null, { extra: ((b.images ?? []) as ImageRef[]).filter(i => i && (i.asset || i.url)).map(image => ({ image, label: 'outfit photo', role: 'product' as const })) });
+    // Planned like a shoot's images: within the shot model's limit, the face front never dropped.
+    const outfitPlan = mode === 'own' ? null : await ctx.images.shotPlan(req.user.studioId, outfitIds, [], 1, b.imageEngine, stepModels);
+    const outfitRefs = outfitPlan?.images ?? [], outfitPanels = outfitPlan?.panels ?? [];
+    const cost = !outfitPlan ? 0 : outfitPlan.perShot + 3 * await ctx.images.editCost(req.user.studioId, stepModels);
     const bill = await new PhotoBill(ctx, whoOf(req.user), id, cost, 'Outfit set').start();
-    const identity = await identityOf(m);
+    const identity = await identityOf(m, outfitPlan ? sentOf(outfitIds, outfitPlan) : personCount(outfitIds));
     const spec = { name: b.name || 'New outfit', description: b.description, source: mode === 'describe' ? 'described' as const : mode === 'photo' ? 'product-photo' as const : 'reference-set' as const };
     const texts = await ctx.prompts.texts(req.user.studioId);
     const set = outfitSet(identity, spec, undefined, texts);
@@ -255,16 +275,16 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       if (mode === 'own' && b.images?.length) angles = [0, 1, 2, 3].map(i => (b.images![i] as ImageRef) ?? null);
       else {
         try {
-          // Most important first (Replicate sends at most REPLICATE_IMAGE_MAX_REFS): face, profile, the product photos, body.
+          // Most important first: face, face ¾, one body image, the product photos.
           const slot = slotOf;
           const refs = outfitRefs;
           const sel = await ctx.images.selection(user.studioId, b.imageEngine, stepModels);
           if (sel.provider === 'simulated') {
-            angles = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, refs, bill,
+            angles = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, refs, maxImages: refs.length, panels: outfitPanels, bill,
               req: { prompt: set[0]!.text, width: 768, height: 1024, count: 4, seed: set[0]!.seed ?? undefined, simAssets: ['c_front', 'c_tq', 'c_face', 'c_front'] } })).images;
           } else if (sel.provider === 'replicate') {
             // A new front shot, then the ¾, side and back as edits of it, so all four show the same clothes.
-            const front = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, refs, bill,
+            const front = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, refs, maxImages: refs.length, panels: outfitPanels, bill,
               req: { prompt: set[0]!.text, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0]!;
             angles = [front];
             for (const a of OUTFIT_ANGLES.slice(1)) {
@@ -273,7 +293,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
                 editOf: front, refs: [slot('face')], req: { prompt, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0]!);
             }
           } else {
-            angles = await Promise.all(set.map(p => ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, refs, bill,
+            angles = await Promise.all(set.map(p => ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, refs, maxImages: refs.length, panels: outfitPanels, bill,
               req: { prompt: p.text, width: 768, height: 1024, count: 1, seed: p.seed ?? undefined } }).then(r => r.images[0]!)));
           }
         } catch (e) {
@@ -446,16 +466,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     return o;
   };
   const outfitSpec = (o?: typeof outfits.$inferSelect) => o ? { name: o.name, description: o.description, source: o.mode === 'describe' && !o.angles.some(Boolean) ? 'described' as const : 'reference-set' as const } : null;
-  /** References for a shot, most important first (Replicate sends only the first REPLICATE_IMAGE_MAX_REFS): face, profile,
-   * the outfit's front and ¾, a product photo, then the body shots and the outfit's other angles. */
-  const shootRefs = (m: typeof models.$inferSelect, o?: typeof outfits.$inferSelect, extra: (ImageRef | null | undefined)[] = []) => {
-    const slot = (k: string) => m.slots.find(x => x.key === k)?.image;
-    const a = o?.angles ?? [];
-    // A Dress up outfit's own face close-ups (with its accessories) come before the model's.
-    const f = o?.faces ?? [];
-    if (f.some(Boolean)) return [f[0] ?? slot('face'), f[2] ?? slot('profile'), a[0], a[1], ...extra, f[1], a[3], a[2], slot('face'), slot('side')];
-    return [slot('face'), slot('profile'), a[0], a[1], ...extra, slot('front'), slot('tq'), a[3], a[2], slot('back'), slot('side')];
-  };
+  /** Her images for a shot (plans/api.md "Identity images"): face, face ¾, one body image, the outfit's front, a product photo. */
+  const shootRefs = (u: AuthUser, m: typeof models.$inferSelect, o?: typeof outfits.$inferSelect, product?: ImageRef | null) =>
+    idRefs(u.studioId, m, o, { outfit: !!o, extra: product ? [{ image: product, label: 'product', role: 'product' }] : [] });
 
   // Photoshoots (plans/api.md "Shoot references and the prompt library"): the server builds the prompt from the choices
   // and the studio's prompt library, unless "Edit as text" sends `prompt`.
@@ -478,21 +491,28 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const stepModels = ctx.imageModels.overridesFrom(u.role, b as { models?: unknown });
     const texts = await ctx.prompts.texts(u.studioId);
     const refsIn = (b.refs ?? []) as ShootRefIn[];
-    const identity = await identityOf(m);
     if (b.templateId) {
       const t = await ctx.templates.visible(u, b.templateId);
       const product = t.layers.product && (b.productImage?.asset || b.productImage?.url) ? b.productImage as ImageRef : null;
-      const plan = await ctx.images.shotPlan(u.studioId, shootRefs(m, o, [product]), refsIn, 2, b.imageEngine, stepModels);
+      const ids = await shootRefs(u, m, o, product);
+      const plan = await ctx.images.shotPlan(u.studioId, ids, refsIn, 2, b.imageEngine, stepModels);
+      const identity = await identityOf(m, sentOf(ids, plan));
       return { kind: 'template' as const, b, m, o, count, stepModels, texts, refsIn, identity, plan, t, product };
     }
-    const plan = await ctx.images.shotPlan(u.studioId, shootRefs(m, o), refsIn, 2, b.imageEngine, stepModels);
+    const ids = await shootRefs(u, m, o);
+    const plan = await ctx.images.shotPlan(u.studioId, ids, refsIn, 2, b.imageEngine, stepModels);
+    const identity = await identityOf(m, sentOf(ids, plan));
     const spec = { identity, outfit: outfitSpec(o) ?? { name: 'outfit' }, scene: b.scene, light: b.light, grade: b.grade, direction: b.direction, lockSeed: b.lockSeed,
       presets: b.presets, refs: plan.sent, camera: b.camera ? { shot: b.camera.shot, lensMm: b.camera.lens, aperture: b.camera.aperture } : undefined };
     const built = photoshoot(spec, texts);
     const custom = b.prompt?.trim() || null;
     return { kind: 'plain' as const, b, m, o, count, stepModels, texts, refsIn, identity, plan, spec, built, custom };
   }
-  const previewRefs = (plan: { images: ImageRef[]; refs: unknown[] }) => ({ images: plan.images.length, refs: plan.refs });
+  const previewRefs = (plan: { images: ImageRef[]; refs: unknown[]; sheet: boolean }) => ({ images: plan.images.length, refs: plan.refs, referenceSheet: plan.sheet });
+  /** On a one-image model the prompt starts with the reference-sheet line (as runModel sends it). */
+  const withSheet = (s: { plan: { sheet: boolean; panels: Parameters<typeof collageLine>[0] }; texts: Parameters<typeof collageLine>[1] }, text: string) =>
+    s.plan.sheet ? [collageLine(s.plan.panels, s.texts), text].filter(x => x.trim()).join('\n') : text;
+  const sheetSlot = (s: Parameters<typeof withSheet>[0]) => (s.plan.sheet ? [{ layer: 'sheet', text: collageLine(s.plan.panels, s.texts) }] : []);
 
   app.post('/v1/shoots/preview', async req => {
     const s = await planShoot(req.user, req.body);
@@ -500,10 +520,12 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const money = { estimate, estimateLabel: P.aboutMoney(estimate) };
     if (s.kind === 'template') {
       const v = await ctx.templates.preview(req.user, s.t.id, { ...(req.body as object), modelId: s.m.id }, async () => ({ identity: s.identity, outfit: outfitSpec(s.o) }), { refs: s.plan.sent });
-      return { ...v, removed: (v as any).removed ?? [], ...previewRefs(s.plan), ...money, edited: false };
+      const vv = v as { text?: string; slots?: unknown[] };
+      return { ...v, ...(s.plan.sheet && typeof vv.text === 'string' ? { text: withSheet(s, vv.text), slots: [...sheetSlot(s), ...(vv.slots ?? [])] } : {}),
+        removed: (v as any).removed ?? [], ...previewRefs(s.plan), ...money, edited: false };
     }
-    if (s.custom) return { slots: [{ layer: 'custom', text: s.custom }], text: s.custom, seed: s.b.seed ?? s.built.seed, removed: [], ...previewRefs(s.plan), ...money, edited: true };
-    return { slots: s.built.slots.map(x => ({ layer: x.layer, text: x.text })), text: s.built.text, seed: s.built.seed, removed: s.built.removed, ...previewRefs(s.plan), ...money, edited: false };
+    if (s.custom) return { slots: [...sheetSlot(s), { layer: 'custom', text: s.custom }], text: withSheet(s, s.custom), seed: s.b.seed ?? s.built.seed, removed: [], ...previewRefs(s.plan), ...money, edited: true };
+    return { slots: [...sheetSlot(s), ...s.built.slots.map(x => ({ layer: x.layer, text: x.text }))], text: withSheet(s, s.built.text), seed: s.built.seed, removed: s.built.removed, ...previewRefs(s.plan), ...money, edited: false };
   });
 
   app.post('/v1/shoots', async req => {
@@ -516,7 +538,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const seed = b.seed ?? s.built.seed ?? undefined;
     let r;
     try {
-      r = await ctx.images.generate({ studioId: req.user.studioId, userId: req.user.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs: plan.images, maxImages: plan.images.length,
+      r = await ctx.images.generate({ studioId: req.user.studioId, userId: req.user.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs: plan.images, maxImages: plan.images.length, panels: plan.panels,
         bill, models: s.stepModels, req: { prompt, width: 1080, height: 1920, count, seed, simAssets: [o?.angles?.[0]?.asset ?? 'g_front', 'c_face', 'face', 'g_tq'] } });
     } catch (e) {
       await bill.fail();
@@ -554,7 +576,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
         const p = buildTemplatePrompt({ templateId: t.id, templateName: t.name, layers: t.layers, pool: t.variationPool, identity, outfit: outfitSpec(o),
           direction: b.direction, shuffleSeed, index: n, lockSeed: b.lockSeed, seed: randomImageSeed(), hasProduct: !!product, refs: plan.sent }, s.texts);
         const sim = [o?.angles?.[0]?.asset ?? 'g_front', 'c_face', 'face', 'g_tq'];
-        const r = await ctx.images.generate({ studioId: u.studioId, userId: u.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs: plan.images, maxImages: plan.images.length,
+        const r = await ctx.images.generate({ studioId: u.studioId, userId: u.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs: plan.images, maxImages: plan.images.length, panels: plan.panels,
           bill, models: s.stepModels, req: { prompt: p.fullText, width: 1080, height: 1920, count: 1, seed: p.seed ?? undefined, simAssets: [sim[n % sim.length]!] } });
         const fx = await ctx.templates.postProcess(r.images[0]!, t.layers, { studioId: u.studioId, userId: u.id });
         rows.push({
@@ -586,8 +608,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post<{ Params: { id: string } }>('/v1/templates/:id/favourite', async req => ctx.templates.favourite(req.user, req.params.id, true));
   app.delete<{ Params: { id: string } }>('/v1/templates/:id/favourite', async req => ctx.templates.favourite(req.user, req.params.id, false));
   app.post<{ Params: { id: string } }>('/v1/templates/:id/prompt', async req => ctx.templates.preview(req.user, req.params.id, req.body, async (modelId, outfitId) => {
-    const m = await model(req.user, modelId);
-    return { identity: await identityOf(m), outfit: outfitSpec(await outfitOf(req.user, outfitId)) };
+    const m = await model(req.user, modelId), o = await outfitOf(req.user, outfitId);
+    return { identity: await identityOf(m, personCount(await shootRefs(req.user, m, o))), outfit: outfitSpec(o) };
   }));
 
   // ------------------------------------------------------------------ identity LoRA
@@ -757,12 +779,12 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const s = await ctx.money.settings(u.studioId);
     const c = ctx.config;
     const base = { capPerJob: s.capPerJob ?? c.CAP_PER_JOB_USD, capPerDay: s.capPerDay ?? c.CAP_PER_DAY_USD, capPerUserDay: s.capPerUserDay ?? c.CAP_PER_USER_DAY_USD,
-      tokenUsd: c.TOKEN_USD, features: { ...ctx.jobs.features(), photo: ctx.images.photoFeatures(), tools: ctx.tools.features(u.role) } };
+      tokenUsd: c.TOKEN_USD, features: { ...ctx.jobs.features(), photo: ctx.images.photoFeatures(s.identityRefs ?? undefined), tools: ctx.tools.features(u.role) } };
     if (u.role !== 'owner') return base;
     const om = await ctx.tools.ownerModels(u.studioId);
     base.features.tools.enhance.models = om.enhance;
     base.features.tools.dressUp.models = om.dressUp;
-    return { ...base, maxGpus: s.maxGpus ?? c.MAX_GPUS, overheadPayer: s.overheadPayer ?? 'user',
+    return { ...base, maxGpus: s.maxGpus ?? c.MAX_GPUS, overheadPayer: s.overheadPayer ?? 'user', identityRefs: base.features.photo.identityRefs,
       warmIdleMinutes: s.warmIdleMinutes ?? c.WARM_IDLE_MINUTES, warmMaxMinutes: s.warmMaxMinutes ?? c.WARM_MAX_MINUTES,
       gpu: await ctx.gpu.status(), engines: await ctx.engines.view(u.studioId) };
   };
@@ -772,7 +794,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   app.patch('/v1/settings/studio', { config: { owner: true } }, async req => {
     const b = parse(z.object({ maxGpus: z.number().int().min(0).max(16).optional(), overheadPayer: z.enum(['user', 'owner']).optional(),
       capPerJob: z.number().nonnegative().max(1000).optional(), capPerDay: z.number().nonnegative().max(10000).optional(), capPerUserDay: z.number().nonnegative().max(10000).optional(),
-      warmGpuAllowed: z.enum(['owner', 'everyone']).optional() /* retired: accepted and ignored */, warmIdleMinutes: z.number().int().min(5).max(120).optional(), warmMaxMinutes: z.number().int().min(30).max(480).optional() }), req.body);
+      warmGpuAllowed: z.enum(['owner', 'everyone']).optional() /* retired: accepted and ignored */, warmIdleMinutes: z.number().int().min(5).max(120).optional(), warmMaxMinutes: z.number().int().min(30).max(480).optional(),
+      identityRefs: z.number().int().min(IDENTITY_REFS_MIN).max(IDENTITY_REFS_MAX).optional() }), req.body);
     await ctx.money.settings(req.user.studioId);
     const { warmGpuAllowed: _retired, ...patch } = b;
     if (Object.keys(patch).length) await db.update(studioSettings).set(patch).where(eq(studioSettings.studioId, req.user.studioId));

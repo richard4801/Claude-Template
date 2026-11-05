@@ -13,8 +13,10 @@ import { CustomHttpEngine, FalEngine, ImageEngineError, ReplicateImageEngine, Si
 import * as P from '../pricing.js';
 import type { PhotoBill } from './bill.js';
 import { ReplicateError, SAFETY_RE, CREDIT_RE, errorText } from '../replicate/client.js';
-import { buildInput, imageCapacity, mapModel, safetyTolerance, type ImageStep } from '../replicate/mapping.js';
-import { SHOOT_GUIDES, type SentRef, type ShootGuide } from '../prompt/engine.js';
+import { buildInput, imageCapacity, mapModel, safetyTolerance, takesReferenceSheet, type ImageStep } from '../replicate/mapping.js';
+import { collageLine, refPanelLabel, SHOOT_GUIDES, type SentRef, type SheetPanel, type ShootGuide } from '../prompt/engine.js';
+import { buildCollage, collageMp } from './collage.js';
+import { clampIdentityRefs, IDENTITY_REFS_DEFAULT, type IdentityRef } from './identity.js';
 import { exactOne } from '../replicate/prices.js';
 import type { StepOverrides } from './steps.js';
 
@@ -31,6 +33,11 @@ export class PhotoError extends ApiError {
 
 export type ShootRefIn = { image: ImageRef; guides: ShootGuide[] };
 export type ShotPlan = { images: ImageRef[]; sent: SentRef[]; refs: { index: number | null; guides: ShootGuide[]; dropped?: true }[] };
+/** The panels of the images a plan sends, for a reference sheet: identity labels, then "ref: look & colour" … */
+export function planPanels(identity: IdentityRef[], plan: ShotPlan): SheetPanel[] {
+  const nId = plan.images.length - plan.sent.length;
+  return [...identity.slice(0, nId).map(i => ({ label: i.label, role: i.role })), ...plan.sent.map(r => ({ label: refPanelLabel(r.guides), role: 'ref' as const, guides: r.guides }))];
+}
 /**
  * The images one new shot sends (plans/api.md "Shoot references" §1): identity/outfit references (most important first,
  * at most `maxIdentity`), then the reference images, all within the model's `capacity`. Identity references go first
@@ -91,34 +98,47 @@ export class ImageService {
     return { perRun: c.REPLICATE_IMAGE_RUN_USD, perInputMp: c.REPLICATE_IMAGE_MP_USD, perOutputMp: c.REPLICATE_IMAGE_MP_USD, perEdit: c.REPLICATE_IMAGE_EDIT_USD,
       refMp: P.PHOTO_REF_MP, maxRefs: c.REPLICATE_IMAGE_MAX_REFS };
   }
-  /** `features.photo` for the apps. */
-  photoFeatures() {
-    const p = this.photoPrices(), r = p.maxRefs;
-    return { ...p, loraShots: P.LORA_CANDIDATES, maxInputs: this.ctx.config.REPLICATE_IMAGE_MAX_INPUTS,
+  /** `features.photo` for the apps (estimates with the studio's identity images: 3 by default). */
+  photoFeatures(identityRefs = IDENTITY_REFS_DEFAULT) {
+    const p = this.photoPrices(), r = Math.min(clampIdentityRefs(identityRefs), p.maxRefs);
+    return { ...p, loraShots: P.LORA_CANDIDATES, maxInputs: this.ctx.config.REPLICATE_IMAGE_MAX_INPUTS, identityRefs: clampIdentityRefs(identityRefs),
       references: { max: 3, guides: SHOOT_GUIDES.map(g => ({ ...g })) },
       estimates: { shoot: P.shootEstimate(p, 4, r), outfitSet: P.outfitSetEstimate(p, r), sheetAngle: P.sheetAnglesEstimate(p, 1, r), loraSet: P.loraSetEstimate(p, r) } };
   }
-  /** Estimate of one new shot on the studio's shot model (the tested default: the config formula, "App clean-up" §3). */
-  async newShotCost(studioId: string, outMp: number, refs: number, models?: StepOverrides | null) {
-    const sel = await this.selection(studioId, null, models);
-    if (sel.provider !== 'replicate' || this.ctx.imageModels.isRecipe('shot', sel.model)) return P.newShotEstimate(this.photoPrices(), outMp, refs);
-    return this.ctx.imageModels.estimate(sel.model, { outMp, inMp: P.PHOTO_REF_MP * Math.min(refs, this.photoPrices().maxRefs) });
+  /** How many of a model's own images the studio's photo steps send (1–7, default 3; plans/api.md "Identity images"). */
+  async identityCount(studioId: string) {
+    const [s] = await this.ctx.db.select({ n: studioSettings.identityRefs }).from(studioSettings).where(eq(studioSettings.studioId, studioId));
+    return clampIdentityRefs(s?.n);
   }
-  /** How many images one new shot can send on the studio's shot model (plans/api.md "Shoot references" §1). */
-  async shotCapacity(studioId: string, override?: Partial<EngineSelection> | null, models?: StepOverrides | null) {
+  /** Input megapixels of a new shot sending `n` images: one reference sheet on a one-image model, else n shrunk references. */
+  inputMp(n: number, sheet: boolean) { return sheet && n > 1 ? collageMp(n) : P.PHOTO_REF_MP * n; }
+  /**
+   * How many images one new shot can send on the studio's shot model (plans/api.md "Shoot references" §1), and whether
+   * they go as one reference sheet (a model that takes a single image: every image, up to REPLICATE_IMAGE_MAX_INPUTS).
+   */
+  async shotInputs(studioId: string, override?: Partial<EngineSelection> | null, models?: StepOverrides | null): Promise<{ capacity: number; sheet: boolean }> {
     const sel = await this.selection(studioId, override, models);
     const max = this.ctx.config.REPLICATE_IMAGE_MAX_INPUTS;
-    if (sel.provider !== 'replicate' || this.ctx.imageModels.isRecipe('shot', sel.model) || !this.toolsLive) return max;
-    try { return imageCapacity(mapModel(await this.ctx.imageModels.info(sel.model), 'shot').mapping); } catch { return max; }
+    if (sel.provider !== 'replicate' || this.ctx.imageModels.isRecipe('shot', sel.model) || !this.toolsLive) return { capacity: max, sheet: false };
+    try {
+      const m = mapModel(await this.ctx.imageModels.info(sel.model), 'shot').mapping;
+      return takesReferenceSheet(m) ? { capacity: max, sheet: true } : { capacity: imageCapacity(m), sheet: false };
+    } catch { return { capacity: max, sheet: false }; }
   }
-  /** A shoot's images and the estimate of one still that sends them all. */
-  async shotPlan(studioId: string, identity: (ImageRef | null | undefined)[], refs: ShootRefIn[], outMp: number, override?: Partial<EngineSelection> | null, models?: StepOverrides | null) {
-    const plan = planShotImages(identity, refs, this.photoPrices().maxRefs, await this.shotCapacity(studioId, override, models));
+  /**
+   * The images one new shot sends (her identity images, then a shoot's reference images; shoots, sheet fills, outfit-set
+   * fronts, LoRA sets), their reference-sheet panels and the estimate of one still (the tested default: the config
+   * formula, "App clean-up" §3; any other model: its own price with the input megapixels it gets).
+   */
+  async shotPlan(studioId: string, identity: IdentityRef[], refs: ShootRefIn[], outMp: number, override?: Partial<EngineSelection> | null, models?: StepOverrides | null) {
+    const inputs = await this.shotInputs(studioId, override, models);
+    const plan = planShotImages(identity.map(i => i.image), refs, identity.length, inputs.capacity);
     const sel = await this.selection(studioId, override, models);
     const n = plan.images.length;
+    const sheet = inputs.sheet && n > 1;
     const perShot = sel.provider !== 'replicate' || this.ctx.imageModels.isRecipe('shot', sel.model) ? P.newShotEstimateImages(this.photoPrices(), outMp, n)
-      : await this.ctx.imageModels.estimate(sel.model, { outMp, inMp: P.PHOTO_REF_MP * n });
-    return { ...plan, perShot };
+      : await this.ctx.imageModels.estimate(sel.model, { outMp, inMp: this.inputMp(n, sheet) });
+    return { ...plan, perShot, sheet, panels: planPanels(identity, plan) };
   }
   /** Estimate of one edit on the studio's edit model. */
   async editCost(studioId: string, models?: StepOverrides | null) {
@@ -155,6 +175,44 @@ export class ImageService {
     return { simulated: true, fal: !!this.ctx.config.FAL_KEY, 'custom-http': true, replicate: this.ctx.replicate.configured };
   }
 
+  /** The bytes of an image ref: from our storage (bundled stills copied in first) or its own https URL. */
+  private async refBytes(ref: ImageRef, studioId: string): Promise<{ buf: Buffer; src: string } | null> {
+    const key = await this.storedKey(ref, studioId);
+    const src = key ?? (ref.url && /^https?:\/\//.test(ref.url) ? ref.url : null);
+    if (!src) return null;
+    if (key) {
+      const obj = await this.ctx.storage.get(key);
+      if (!obj) return null;
+      const parts: Buffer[] = [];
+      for await (const ch of obj.body) parts.push(ch as Buffer);
+      return { buf: Buffer.concat(parts), src };
+    }
+    const r = await fetch(src, { signal: AbortSignal.timeout(30_000) }).catch(() => null);
+    if (!r?.ok) return null;
+    return { buf: Buffer.from(await r.arrayBuffer()), src };
+  }
+
+  /**
+   * One reference sheet (images/collage.ts) of `refs` with their panel labels, stored once under rx/ and handed over as a
+   * short-lived signed link. Images that can't be read are left out (with their panels). Null when none can be read.
+   */
+  async referenceSheet(refs: ImageRef[], panels: SheetPanel[], studioId: string): Promise<{ url: string; mp: number; w: number; h: number; panels: SheetPanel[] } | null> {
+    const got = await Promise.all(refs.map(r => this.refBytes(r, studioId).catch(() => null)));
+    const keep = got.map((g, i) => (g ? i : -1)).filter(i => i >= 0);
+    if (!keep.length) return null;
+    const used = keep.map(i => panels[i] ?? { label: i === 0 ? 'face' : '', role: 'person' as const });
+    const key = `rx/sheet_${sha256(keep.map(i => got[i]!.src).join('|') + '|' + used.map(p => p.label).join('|')).slice(0, 32)}.jpg`;
+    let dim = this.sheetDim.get(key);
+    if (!dim || !(await this.ctx.storage.head(key))) {
+      const c = await buildCollage(keep.map(i => got[i]!.buf), used.map(p => p.label));
+      await putObject(this.ctx, { key, body: c.data, studioId, kind: 'generated', contentType: 'image/jpeg' });
+      dim = { w: c.width, h: c.height };
+      this.sheetDim.set(key, dim);
+    }
+    return { url: await this.ctx.storage.presignGet(key, this.ctx.config.REPLICATE_INPUT_URL_TTL_SEC), mp: dim.w * dim.h / 1e6, w: dim.w, h: dim.h, panels: used };
+  }
+  private sheetDim = new Map<string, { w: number; h: number }>();
+
   /**
    * A reference for Replicate: shrunk to fit inside REPLICATE_IMAGE_REF_MAX_PX (keeps the per-megapixel price and the
    * 9 MP input limit in check), stored once under rx/, and handed over as a short-lived signed link.
@@ -168,18 +226,9 @@ export class ImageService {
     const rx = `rx/${sha256(`${src}|${px}`).slice(0, 32)}.jpg`;
     let mp = this.refMp.get(rx);
     if (mp == null || !(await this.ctx.storage.head(rx))) {
-      let buf: Buffer;
-      if (key) {
-        const obj = await this.ctx.storage.get(key);
-        if (!obj) return null;
-        const parts: Buffer[] = [];
-        for await (const ch of obj.body) parts.push(ch as Buffer);
-        buf = Buffer.concat(parts);
-      } else {
-        const r = await fetch(src, { signal: AbortSignal.timeout(30_000) }).catch(() => null);
-        if (!r?.ok) return null;
-        buf = Buffer.from(await r.arrayBuffer());
-      }
+      const got = await this.refBytes(ref, studioId);
+      if (!got) return null;
+      const buf = got.buf;
       const sharp = (await import('sharp')).default;
       const { data, info } = await sharp(buf).rotate().resize(px, px, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer({ resolveWithObject: true });
       await putObject(this.ctx, { key: rx, body: data, studioId, kind: 'generated', contentType: 'image/jpeg' });
@@ -233,7 +282,9 @@ export class ImageService {
     /** Owner's per-run model choice (plans/api.md "Model tools" §2). */
     models?: StepOverrides | null;
     /** Send up to this many references (a shoot's planned images); default: the reference limit. */
-    maxImages?: number }): Promise<{ images: ImageRef[]; seed?: number; costUsd: number; costs: number[]; selection: EngineSelection }> {
+    maxImages?: number;
+    /** What each of `refs` shows, for a reference sheet on a one-image model (default: her, "1 face", "2", …). */
+    panels?: SheetPanel[] }): Promise<{ images: ImageRef[]; seed?: number; costUsd: number; costs: number[]; selection: EngineSelection }> {
     const sel = await this.selection(o.studioId, o.override, o.models);
     // Any model other than the two tested defaults runs through the schema mapping.
     const step: ImageStep = o.editOf ? 'edit' : 'shot';
@@ -245,7 +296,7 @@ export class ImageService {
         try {
           const r = await this.runModel({ studioId: o.studioId, userId: o.userId, purpose: o.purpose, refId: o.refId, step, model: stepModel, extra,
             prompt: o.req.prompt, refs: o.editOf ? [o.editOf, ...(o.refs ?? []).slice(0, 2)] : (o.refs ?? []), width: o.req.width, height: o.req.height,
-            matchInput: !!o.editOf, outMp: P.outMpFor(o.req.width, o.req.height), seed: o.req.seed != null ? o.req.seed + i : undefined });
+            matchInput: !!o.editOf, outMp: P.outMpFor(o.req.width, o.req.height), seed: o.req.seed != null ? o.req.seed + i : undefined, panels: o.editOf ? undefined : o.panels });
           images.push(r.image); costs.push(r.cost);
         } catch (e) {
           const spent = costs.reduce((a, b) => a + b, 0) + (e instanceof PhotoError ? e.spentUsd : 0);
@@ -421,7 +472,9 @@ export class ImageService {
    */
   async runModel(o: { studioId: string; userId: string | null; purpose: string; refId?: string; step: ImageStep; model: string; extra?: Record<string, unknown>;
     prompt?: string; refs: (ImageRef | null | undefined)[]; fullSize?: boolean; width?: number; height?: number; matchInput?: boolean; outMp?: number;
-    seed?: number; strength?: number; scale?: number; simulate?: ImageRef | null; cancelled?: () => boolean | Promise<boolean> }): Promise<{ image: ImageRef; cost: number; estimated: boolean }> {
+    seed?: number; strength?: number; scale?: number; simulate?: ImageRef | null; cancelled?: () => boolean | Promise<boolean>;
+    /** What each ref shows, for a reference sheet (a one-image model on a new shot). */
+    panels?: SheetPanel[] }): Promise<{ image: ImageRef; cost: number; estimated: boolean }> {
     const c = this.ctx.config, im = this.ctx.imageModels;
     const refs = o.refs.filter(Boolean) as ImageRef[];
     const outMp = o.outMp ?? 1;
@@ -437,7 +490,15 @@ export class ImageService {
     try { raw = await im.info(o.model); } catch (e) { throw await this.photoError(o.studioId, e, 0, { model: o.model, step: o.step }); }
     const map = mapModel(raw, o.step);
     if (!map.compatible) throw await this.photoError(o.studioId, new Error(`model ${o.model} can't do ${o.step}: ${map.reasons.join(', ')}`), 0, { model: o.model });
-    const prepared = (await Promise.all(refs.map(r => (o.fullSize ? this.prepareFull(r, o.studioId) : this.replicateRef(r, o.studioId)).catch(() => null))))
+    // A model that takes one image gets one reference sheet of all the images, and a first prompt line that says so.
+    const sheet = o.step === 'shot' && !o.fullSize && refs.length > 1 && takesReferenceSheet(map.mapping);
+    let prompt = o.prompt;
+    let prepared: { url: string; mp: number; w?: number; h?: number }[];
+    if (sheet) {
+      const built = await this.referenceSheet(refs, refs.map((_, i) => o.panels?.[i] ?? { label: i === 0 ? 'face' : '', role: 'person' as const }), o.studioId).catch(() => null);
+      prepared = built ? [{ url: built.url, mp: built.mp }] : [];
+      if (built) prompt = [collageLine(built.panels, await this.ctx.prompts.texts(o.studioId)), o.prompt].filter(x => x?.trim()).join('\n');
+    } else prepared = (await Promise.all(refs.map(r => (o.fullSize ? this.prepareFull(r, o.studioId) : this.replicateRef(r, o.studioId)).catch(() => null))))
       .filter(Boolean) as { url: string; mp: number; w?: number; h?: number }[];
     if (o.step !== 'shot' && !prepared.length) throw await this.photoError(o.studioId, new Error('no input image could be prepared'), 0, { model: o.model });
     const first = prepared[0];
@@ -448,7 +509,7 @@ export class ImageService {
     if (tol != null) known.safety_tolerance = tol;
     // Low creativity for the default upscaler, so the face stays the same.
     if (o.model === 'philz1337x/clarity-upscaler') known.resemblance = 1;
-    const input = buildInput(map.mapping, { prompt: o.prompt, images: prepared.map(p => p.url), width: w, height: h, matchInput: o.matchInput, outMp,
+    const input = buildInput(map.mapping, { prompt, images: prepared.map(p => p.url), width: w, height: h, matchInput: o.matchInput, outMp,
       seed: o.seed, strength: o.strength, scale: o.scale }, { ...known, ...(o.extra ?? {}) });
     const inMp = prepared.slice(0, map.mapping.image?.array ? (map.mapping.image.max ?? prepared.length) : 1 + (map.mapping.extraImageFields?.length ?? 0)).reduce((a, p) => a + p.mp, 0);
     const price = await im.price(o.model).catch(() => ({ kind: 'unknown' } as const));
@@ -479,7 +540,7 @@ export class ImageService {
     const ex = exactOne(price, (done.metrics ?? null) as Record<string, unknown> | null, measured, im.estOpts());
     if (ex.estimated) this.ctx.log.warn({ model: o.model, step: o.step, usd: ex.usd }, 'price unknown · settled on estimate');
     await this.ctx.db.insert(generatedImages).values({ id: uid('img'), studioId: o.studioId, userId: o.userId, purpose: o.purpose, refId: o.refId ?? null,
-      provider: 'replicate', model: o.model, prompt: o.prompt ?? '', negative: null, seed: o.seed ?? null, costUsd: ex.usd, image: stored.ref, storageKey: stored.key, createdAt: Date.now() });
+      provider: 'replicate', model: o.model, prompt: prompt ?? '', negative: null, seed: o.seed ?? null, costUsd: ex.usd, image: stored.ref, storageKey: stored.key, createdAt: Date.now() });
     return { image: stored.ref, cost: ex.usd, estimated: ex.estimated };
   }
 }

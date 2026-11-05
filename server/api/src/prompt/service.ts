@@ -18,6 +18,7 @@ const SAMPLE_ID: E.Identity = { name: 'Demo model', look: 'young woman, shoulder
 const SAMPLE: Record<string, string> = {
   name: 'Demo model', look: SAMPLE_ID.look, refCount: '7', lora: '', outfit: 'green set', scene: 'rooftop · golden hour', shot: 'medium', lens: '35', aperture: 'f/2.8',
   lensNote: '', light: 'golden hour', grade: 'phone-natural', direction: 'laughing mid-step, hair blowing', style: '', never: '', refIndex: '8',
+  person: 'panels 1–3 show', panels: '; panel 4 shows the outfit to wear; panel 5 guides the pose & framing only',
   angle: 'body · front', framing: 'full body, facing the camera', seed: '421337', anchor: '', camera: 'handheld, slightly tilted', pose: 'mid-step, glancing back',
   product: 'held up next to the cheek', subject: 'the person in <Image 1> to <Image 5>: ' + SAMPLE_ID.look, reference: 'face and identity from <Image 1> and <Image 2>',
   faceRef: '<Image 1>', performer: 'the person', setting: 'the room', refs: '<Image 1> (face, front) and <Image 2> (face, profile)', audio: '', audioTag: '',
@@ -115,7 +116,8 @@ export function exampleFor(def: PromptDef, t: PromptTexts = DEFAULT_TEXTS): stri
   const outfit: E.OutfitSpec = { name: 'Green set' };
   switch (def.group) {
     case 'photoshoot': case 'references':
-      return E.photoshoot({ identity: SAMPLE_ID, outfit, direction: 'laughing mid-step, hair blowing', refs: [{ index: 8, guides: ['pose', 'look', 'scene'] }],
+      return (def.key === 'refs.collage' ? `${E.collageLine([{ label: 'face', role: 'person' }, { label: 'face ¾', role: 'person' }, { label: 'body', role: 'person' },
+        { label: 'outfit', role: 'outfit' }, { label: E.refPanelLabel(['pose']), role: 'ref', guides: ['pose'] }], t)}\n` : '') + E.photoshoot({ identity: SAMPLE_ID, outfit, direction: 'laughing mid-step, hair blowing', refs: [{ index: 8, guides: ['pose', 'look', 'scene'] }],
         camera: def.key === 'shoot.camera.wide' ? { shot: 'Wide', lensMm: 24, aperture: 'f/5.6' } : def.key === 'shoot.camera.tele' ? { shot: 'Close', lensMm: 85, aperture: 'f/1.4' } : undefined,
         lockSeed: def.key === 'shoot.seed.locked', ...(def.key === 'shoot.outfit.described' ? { outfit: { name: 'Knit', description: 'a cream cable-knit sweater', source: 'described' } } : {}),
         ...(def.key === 'shoot.outfit.product' ? { outfit: { name: 'Green set', source: 'product-photo' } } : {}) }, t).text;

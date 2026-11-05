@@ -18,7 +18,7 @@ const R = (asset: string) => ({ asset });
 
 describe('prompt library (unit)', () => {
   it('every default validates, keys are unique, and every group has entries', () => {
-    expect(PROMPT_DEFS.length).toBe(52);
+    expect(PROMPT_DEFS.length).toBe(53);
     expect(new Set(PROMPT_DEFS.map(p => p.key)).size).toBe(PROMPT_DEFS.length);
     for (const p of PROMPT_DEFS) expect(validatePrompt(p.key, p.default), p.key).toBeNull();
     for (const g of ['photoshoot', 'references', 'sheet', 'outfits', 'enhance', 'dressup', 'templates', 'video', 'lora']) expect(PROMPT_DEFS.some(p => p.group === g), g).toBe(true);
@@ -122,7 +122,7 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
     }
     const l = (await owner.req('GET', '/v1/prompts')).body;
     expect(l.groups.map((g: any) => g.label)).toEqual(['Photoshoot', 'References', 'Character sheet', 'Outfits', 'Enhance', 'Dress up', 'Templates', 'Video', 'LoRA']);
-    expect(l.prompts).toHaveLength(52);
+    expect(l.prompts).toHaveLength(53);
     const refPose = l.prompts.find((p: any) => p.key === 'refs.pose');
     expect(refPose).toMatchObject({ group: 'references', current: refPose.default, overridden: false, allowEmpty: false, updatedAt: null,
       placeholders: [{ name: 'refIndex', required: true }] });
@@ -159,10 +159,10 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
     const pv = (await tess.req('POST', '/v1/shoots/preview', body)).body;
     expect(pv.text).toContain('Scene: café window.\nCamera: close shot, 85mm lens, f/1.4, compressed background, creamy bokeh.\nLight: window light; grade: warm film.\nDirection: laughing');
     expect(pv.removed).toEqual(['blonde hair']);
-    expect(pv).toMatchObject({ images: 6, refs: [], edited: false });
+    expect(pv).toMatchObject({ images: 3, refs: [], edited: false, referenceSheet: false });
     expect(pv.slots.map((s: any) => s.layer)).toEqual(['identity', 'outfit', 'scene', 'camera', 'light', 'direction', 'style', 'negative', 'seed']);
-    expect(pv.estimate).toBeCloseTo(0.015 + 0.015 * 2 + 0.015 * 0.79 * 6, 9);
-    expect(pv.estimateLabel).toBe('about $0.12');
+    expect(pv.estimate).toBeCloseTo(0.015 + 0.015 * 2 + 0.015 * 0.79 * 3, 9);
+    expect(pv.estimateLabel).toBe('about $0.08');
     await tess.req('POST', '/v1/shoots', body);
     expect(lastShots(1)[0]!.input.prompt).toBe(pv.text);
     // Edit as text.
@@ -174,19 +174,20 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
     expect(off.slots.map((s: any) => s.layer)).toEqual(['identity', 'outfit', 'direction', 'seed']);
   });
 
-  it('reference images: after her references, within 8 images, lines with their numbers, priced per image, stored on the shot', async () => {
+  it('reference images: after her 3 identity images, within 8 images, lines with their numbers, priced per image, stored on the shot', async () => {
     const pv = (await tess.req('POST', '/v1/shoots/preview', { modelId, refs: refs3, count: 2 })).body;
-    expect(pv.images).toBe(8);
-    expect(pv.refs).toEqual([{ index: 6, guides: ['pose'] }, { index: 7, guides: ['look', 'scene'] }, { index: 8, guides: ['scene'] }]);
-    expect(pv.text).toContain('Copy the pose and framing from image 6. Do not take the face, body, hair or clothes from image 6.\n'
-      + 'Copy the light, colour grade and camera feel from image 7. Use the place and background from image 7. Do not take the face, body, hair or clothes from image 7.\n'
-      + 'Use the place and background from image 8. Do not take the face, body, hair or clothes from image 8.\nStyle:');
-    expect(pv.estimate).toBeCloseTo(2 * (0.015 + 0.015 * 2 + 0.015 * 0.79 * 8), 9);
+    expect(pv.images).toBe(6);
+    expect(pv.refs).toEqual([{ index: 4, guides: ['pose'] }, { index: 5, guides: ['look', 'scene'] }, { index: 6, guides: ['scene'] }]);
+    expect(pv.text).toContain('Copy the pose and framing from image 4. Do not take the face, body, hair or clothes from image 4.\n'
+      + 'Copy the light, colour grade and camera feel from image 5. Use the place and background from image 5. Do not take the face, body, hair or clothes from image 5.\n'
+      + 'Use the place and background from image 6. Do not take the face, body, hair or clothes from image 6.\nStyle:');
+    expect(pv.text).toContain('Identity from 3 locked reference images.');
+    expect(pv.estimate).toBeCloseTo(2 * (0.015 + 0.015 * 2 + 0.015 * 0.79 * 6), 9);
     const shots = (await tess.req('POST', '/v1/shoots', { modelId, refs: refs3, count: 2 })).body;
     const sent = lastShots(2);
     for (const p of sent) {
       expect(p.model).toBe('black-forest-labs/flux-2-pro');
-      expect(p.input.input_images).toHaveLength(8);
+      expect(p.input.input_images).toHaveLength(6);
       expect(p.input.prompt).toBe(pv.text);
     }
     // The hold was the estimate with the extra images.
@@ -194,7 +195,7 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
     expect(-hold.tokens).toBe(a.ctx.money.toTokens(pv.estimate));
     // The exact cost counts the extra input megapixels: more than the same shoot without references.
     const plain = (await tess.req('POST', '/v1/shoots', { modelId, count: 1 })).body;
-    expect(lastShots(1)[0]!.input.input_images).toHaveLength(6);
+    expect(lastShots(1)[0]!.input.input_images).toHaveLength(3);
     expect(shots[0].cost).toBeGreaterThan(plain[0].cost);
     const [row] = await a.ctx.db.query.takes.findMany({ where: (t, { eq: e }) => e(t.id, shots[0].id) });
     expect(row!.refs).toEqual(refs3);
@@ -228,14 +229,14 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
   it('template shoots take references too; the member sees the locked line plus the reference lines', async () => {
     const t = (await owner.req('POST', '/v1/templates', { name: 'Ref look', visibility: 'public', layers: { scene: 'a bathroom mirror', light: 'soft window light' } })).body;
     const pv = (await tess.req('POST', '/v1/shoots/preview', { modelId, templateId: t.id, refs: refs3.slice(0, 1), shuffleSeed: 5, count: 1 })).body;
-    expect(pv.text).toContain('Template: Ref look\nCopy the pose and framing from image 7.');
+    expect(pv.text).toContain('Template: Ref look\nCopy the pose and framing from image 4.');
     expect(pv.text).not.toContain('bathroom');
-    expect(pv.images).toBe(7);
+    expect(pv.images).toBe(4);
     await tess.req('POST', '/v1/shoots', { modelId, templateId: t.id, refs: refs3.slice(0, 1), shuffleSeed: 5, count: 1 });
     const p = lastShots(1)[0]!;
     expect(p.input.prompt).toContain('a bathroom mirror');
-    expect(p.input.prompt).toContain('Copy the pose and framing from image 7.');
-    expect(p.input.input_images).toHaveLength(7);
+    expect(p.input.prompt).toContain('Copy the pose and framing from image 4.');
+    expect(p.input.input_images).toHaveLength(4);
   });
 
   it('a saved override changes what is sent: shoots, sheet fills, outfit sets, Enhance, Dress up, video', async () => {
@@ -251,7 +252,7 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
     // Shoot (a member's).
     await tess.req('POST', '/v1/shoots', { modelId, refs: refs3.slice(0, 1), count: 1 });
     expect(lastShots(1)[0]!.input.prompt).toContain('Style: HOUSE STYLE X.');
-    expect(lastShots(1)[0]!.input.prompt).toContain('POSE FROM 7.');
+    expect(lastShots(1)[0]!.input.prompt).toContain('POSE FROM 4.');
     // Sheet fill.
     const m2 = (await owner.req('POST', '/v1/models', { name: 'Sheet test', age: 25 })).body;
     await owner.req('PUT', `/v1/models/${m2.id}/slots/face`, { image: R('face'), source: 'upload' });

@@ -129,7 +129,8 @@ export function mapModel(raw: RawModel, step: ImageStep): MapResult {
   if (step !== 'shot' && !m.image) reasons.push('needs an input image');
   if ((step === 'dressA' || step === 'dressB') && m.image && imageCount < 2) reasons.push('takes one photo · Dress up needs the sheet photo and the outfit');
   if (step === 'shot' && !m.image) warnings.push('no reference images · faces may drift');
-  if (step === 'shot' && m.image && imageCount < 3) warnings.push(`takes ${imageCount} reference${imageCount === 1 ? '' : 's'} only`);
+  if (step === 'shot' && m.image && takesReferenceSheet(m)) warnings.push('1 image: MUSE sends a reference sheet');
+  else if (step === 'shot' && m.image && imageCount < 3) warnings.push(`takes ${imageCount} reference${imageCount === 1 ? '' : 's'} only`);
   if (step === 'realism' && !m.strength) warnings.push('no strength control · presets do nothing');
   if (step === 'upscale' && !m.scale) warnings.push('no scale control · 2× / 4× do nothing');
   const inputs: InputField[] = names.map(n => {
@@ -232,6 +233,13 @@ export function safetyTolerance(model: string, inputs: InputField[], want: numbe
   if (typeof f.minimum === 'number') v = Math.max(v, f.minimum);
   return v;
 }
+
+/**
+ * A model that takes exactly one input image as a reference (FLUX Kontext …): a new shot sends it one reference sheet (a
+ * collage of all its images, images/collage.ts). Not an img2img model (one with a strength input), where the image is
+ * the starting picture and a collage would show through.
+ */
+export const takesReferenceSheet = (m: Mapping) => !!m.image && !m.image.array && !m.extraImageFields?.length && !m.strength;
 
 /** How many images the mapping can take in one prediction. */
 export const imageCapacity = (m: Mapping) => !m.image ? 0 : m.image.array ? (m.image.max ?? 16) : 1 + (m.extraImageFields?.length ?? 0);
