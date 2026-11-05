@@ -92,7 +92,7 @@ class PromptScriptsTest {
 
     @Test fun httpParsesTheScriptsListGetSaveResetAndPreview() = runBlocking {
         val list = api.listPromptScripts()
-        assertEquals(11, list.scripts.size)
+        assertEquals(12, list.scripts.size)
         assertTrue(list.ops.first { it.id == "in" }.types == listOf("enum"))
         assertEquals("Video", list.groups.first { it.id == "video" }.label)
         val v = list.scripts.first { it.id == "video.replicate" }
@@ -180,6 +180,39 @@ class PromptScriptsTest {
         try { api.previewPromptScript(s.id, null, emptyList()); fail() } catch (e: ApiException) { assertEquals("script_invalid", e.code) }
         // Photoshoot: one reference line per sample item.
         assertTrue(api.previewPromptScript("photoshoot", null).fired.contains("refs.guard"))
+    }
+
+    @Test fun fakePreviewRepeatsAPerItemValueSlot() = runTest {
+        val api = FakeMuseApi(backgroundScope)
+        // refs.collage: one piece per panel (first matching rule each), after "; ", as the server assembles it.
+        val p = api.previewPromptScript("refs.collage", null)
+        assertEquals(listOf("panel.outfit", "panel.ref", "sheet"), p.fired)
+        assertEquals("The input image is a reference sheet of numbered panels (\"image N\" below means panel N): panels 1–3 show the person (use her face, hair " +
+            "and body exactly); panel 4 shows the outfit to wear; panel 5 guides the pose & framing only; create one new photo, not a collage.", p.text)
+        // Item fields are offered (and validated) for a rule in a per-item value slot.
+        val s = api.getPromptScript("refs.collage")
+        assertTrue(ScriptText.inputsFor(s, "@panels").any { it.first == "item.role" })
+        val bad = s.rules.map { if (it.id == "panel.ref") it.copy(conds = listOf(Cond("item.role", "is", JsonPrimitive("nope")))) else it }
+        try { api.savePromptScript(s.id, bad); fail() } catch (e: ApiException) { assertEquals("Rule \"Reference panel\": Pick one of person, outfit, product, ref for \"Shows\"", e.message) }
+    }
+
+    @Test fun lateClipEventUpdatesTheSelectedClip() {
+        val checks = ClipRules.checks(SampleData.sampleMeta)
+        val pending = Clip("c1", "Talk", 6.0, 1080, 1920, 30, checks, thumb = studio.muse.app.data.ImageRef(url = "file:///t.jpg"))
+        val detected = pending.copy(thumb = null, audio = ClipAudio("speech", true, true))
+        val d = VideoDraft().withClip(pending)
+        assertFalse(d.speaking)
+        val after = d.onClipEvent(detected)
+        assertTrue(after.speaking)
+        assertEquals(ClipAudio("speech", true, true), after.clip?.audio)
+        assertEquals("file:///t.jpg", after.clip?.thumb?.url)
+        // The user's own choice wins; another clip's event is ignored.
+        val touched = d.toggleSpeaking().toggleSpeaking()
+        assertFalse(touched.onClipEvent(detected).speaking)
+        assertEquals(ClipAudio("speech", true, true), touched.onClipEvent(detected).clip?.audio)
+        assertEquals(d, d.onClipEvent(detected.copy(id = "other")))
+        // Picking a clip again clears the touch.
+        assertFalse(touched.withClip(pending).speakingTouched)
     }
 
     @Test fun fakeClipUploadClassifiesTheAudio() = runTest {

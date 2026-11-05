@@ -235,7 +235,7 @@ class MuseRepository(
             if (ev.type == "gpu" && ev.event == "warning") ev.warning?.let { _warmWarnings.tryEmit(it) }
         }
         ev.job?.let { j -> if (ev.op != "delete" && (prevJob == null || prevJob.running) && (j.done || j.failed)) listener?.onJobFinished(j) }
-        if (ev.type in setOf("member", "invite", "settings", "studio", "prompts")) _live.tryEmit(ev)
+        if (ev.type in setOf("member", "invite", "settings", "studio", "prompts", "promptScript", "clip")) _live.tryEmit(ev)
     }
 
     /** A `wallet` event: refresh the balance, and say so when the owner sent or took back tokens. */

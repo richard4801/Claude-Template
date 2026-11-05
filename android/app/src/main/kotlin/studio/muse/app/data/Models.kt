@@ -822,6 +822,8 @@ data class ApiEvent(
     val prompt: PromptEntry? = null,
     /** Prompt scripts (workstream 4). Owners only: type "promptScript", one script after a save or reset. */
     val script: ScriptView? = null,
+    /** Prompt scripts (workstream 4): type "clip", a clip whose talking detection finished after the upload answered. */
+    val clip: Clip? = null,
 ) {
     companion object {
         /** Not from the server: the stream (re)connected, so the app refetches what it may have missed. */
@@ -983,7 +985,11 @@ data class Rule(
 data class ScriptSection(val id: String, val label: String = "", val kind: String = "system", val each: String? = null, val heading: String? = null)
 
 @Serializable
-data class ScriptValue(val name: String, val label: String = "", val prefix: String? = null)
+data class ScriptValue(
+    val name: String, val label: String = "", val prefix: String? = null,
+    /** A per-item value: repeats over this list input's items (first matching rule per item), each piece after [itemPrefix], joined with [join]. */
+    val each: String? = null, val itemPrefix: String? = null, val join: String? = null,
+)
 
 @Serializable
 data class ScriptTarget(val id: String, val label: String = "")

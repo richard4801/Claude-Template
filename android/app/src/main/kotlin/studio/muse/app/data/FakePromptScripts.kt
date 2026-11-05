@@ -60,7 +60,7 @@ class FakePromptScripts(private val library: FakePromptLibrary, private val now:
         /** The input a condition reads: an input of the script, or "item.<field>" of the list its place repeats over. */
         fun inputFor(s: ScriptView, name: String, target: String): InputDef? {
             if (!name.startsWith("item.")) return s.inputs.firstOrNull { it.name == name }
-            val each = s.sections.firstOrNull { it.id == target }?.each ?: return null
+            val each = (if (target.startsWith("@")) s.values.firstOrNull { "@${it.name}" == target }?.each else s.sections.firstOrNull { it.id == target }?.each) ?: return null
             return s.inputs.firstOrNull { it.name == each }?.fields?.firstOrNull { it.name == name.removePrefix("item.") }
         }
 
@@ -156,6 +156,17 @@ class FakePromptScripts(private val library: FakePromptLibrary, private val now:
             val fired = mutableListOf<String>()
             val vars = s.vars.associate { it.name to it.sample }.toMutableMap()
             for (slot in s.values) {
+                if (slot.each != null) {
+                    // A per-item value: the first matching rule per item, each piece after itemPrefix, joined with join.
+                    val pieces = mutableListOf<String>()
+                    for (item in (inputs[slot.each] as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty()) {
+                        val r = rules.firstOrNull { it.target == "@${slot.name}" && on(it, inputs, item) } ?: continue
+                        val t = FakePromptLibrary.fill(text(r.block), vars + item.mapValues { itemText(it.value) }).trim()
+                        if (t.isNotEmpty()) { fired += r.id; pieces += (slot.itemPrefix ?: "") + t }
+                    }
+                    vars[slot.name] = if (pieces.isNotEmpty()) (slot.prefix ?: "") + pieces.joinToString(slot.join ?: "") else ""
+                    continue
+                }
                 val r = rules.firstOrNull { it.target == "@${slot.name}" && on(it, inputs, null) }
                 if (r == null) { vars.putIfAbsent(slot.name, ""); continue }
                 fired += r.id

@@ -420,7 +420,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
                 runCatching { json.decodeFromString(ApiEvent.serializer(), data) }.onSuccess { e ->
                     trySend(e.copy(lora = e.lora?.abs(), post = e.post?.abs(), job = e.job?.abs(), model = e.model?.abs(), outfit = e.outfit?.abs(), takes = e.takes.map { it.abs() },
-                        tool = e.tool?.abs(), take = e.take?.abs(), template = e.template?.abs()))
+                        tool = e.tool?.abs(), take = e.take?.abs(), template = e.template?.abs(), clip = e.clip?.let { c -> c.copy(thumb = c.thumb?.abs()) }))
                 }
             }
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {

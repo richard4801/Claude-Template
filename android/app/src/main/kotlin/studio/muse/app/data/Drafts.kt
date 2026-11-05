@@ -28,9 +28,25 @@ data class VideoDraft(
     val tool: String = "quality",
     /** "Performer is speaking" (prompt scripts): pre-set from the clip's detection, off when unknown; sent as `speaking`. */
     val speaking: Boolean = false,
+    /** The user switched "Performer is speaking" for this clip: a late detection no longer moves it. */
+    val speakingTouched: Boolean = false,
 ) {
     /** A new or changed clip: the speaking switch starts again from that clip's detection. */
-    fun withClip(c: Clip?) = copy(clip = c, speaking = speakingFor(c))
+    fun withClip(c: Clip?) = copy(clip = c, speaking = speakingFor(c), speakingTouched = false)
+
+    /** The user flips the switch. */
+    fun toggleSpeaking() = copy(speaking = !speaking, speakingTouched = true)
+
+    /**
+     * A `clip` event (the detection finished after the upload answered): for the selected clip, store its audio and checks
+     * (the local thumb stays) and, unless the user switched it, re-apply the pre-set. Other clips are ignored.
+     */
+    fun onClipEvent(c: Clip): VideoDraft {
+        val cur = clip ?: return this
+        if (cur.id != c.id) return this
+        val next = cur.copy(audio = c.audio ?: cur.audio, checks = c.checks.ifEmpty { cur.checks })
+        return copy(clip = next, speaking = if (speakingTouched) speaking else speakingFor(next))
+    }
 
     /** [pricePerSec]: the server's live price for the quality (features.video), null = the built-in default. */
     fun spec(pricePerSec: Double? = null) = RenderSpec(engine, use, steps, lipSync, takes, clip?.takeIf { it.id != SampleData.SAMPLE_CLIP }?.durationSec, quality,
@@ -166,7 +182,7 @@ class Drafts {
                 engine = Engine.fromId(r.engine), quality = Quality.fromId(r.quality), steps = Pricing.STEPS_DEFAULT, use = ClipUse.FULL, takes = r.takes, keepAudio = r.keepAudio,
                 lipSync = r.lipSync, background = r.background, motion = r.backgroundMotion, tool = "quality",
                 clip = it.clip ?: Clip(r.clipId, r.title, r.clipSeconds ?: SampleData.sampleMeta.durationSec, 1080, 1920, 30, ClipRules.checks(SampleData.sampleMeta)),
-            ).let { d -> d.copy(speaking = r.speaking ?: VideoDraft.speakingFor(d.clip)) }
+            ).let { d -> d.copy(speaking = r.speaking ?: VideoDraft.speakingFor(d.clip), speakingTouched = r.speaking != null) }
         }
     }
 

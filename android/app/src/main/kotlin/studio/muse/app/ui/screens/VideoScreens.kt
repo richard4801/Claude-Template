@@ -438,10 +438,9 @@ private fun androidx.compose.foundation.layout.ColumnScope.DirectSheet(vm: NewVi
             // Prompt scripts: whether she talks/sings (lip-sync) or not (her mouth follows the clip, no lip-sync to music).
             RowB {
                 Column(Modifier.weight(1f)) { T("Performer is speaking", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink); Tiny(VideoDraft.speakingHint(d.speaking)) }
-                Toggle(d.speaking, { vm.edit { it.copy(speaking = !it.speaking) } })
+                Toggle(d.speaking, { vm.edit { it.toggleSpeaking() } })
             }
-            if (!d.edit) Tiny("Mouth movements follow the clip. A separate lip sync pass is on Edit.")
-            else RowB {
+            if (d.edit) RowB {
                 Column(Modifier.weight(1f)) { T("Lip sync", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink); Tiny("Only when the performer talks or sings · adds ~4 min") }
                 Toggle(d.lipSync, { vm.edit { it.copy(lipSync = !it.lipSync) } })
             }

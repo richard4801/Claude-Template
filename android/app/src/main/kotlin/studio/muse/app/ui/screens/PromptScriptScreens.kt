@@ -107,7 +107,7 @@ object ScriptText {
 
     /** The inputs a rule in [target] can test: the script's, then "item.<field>" when that place repeats per list item. */
     fun inputsFor(s: ScriptView, target: String): List<Pair<String, InputDef>> {
-        val each = s.sections.firstOrNull { it.id == target }?.each
+        val each = if (target.startsWith("@")) s.values.firstOrNull { "@${it.name}" == target }?.each else s.sections.firstOrNull { it.id == target }?.each
         val items = each?.let { e -> s.inputs.firstOrNull { it.name == e }?.fields?.map { "item.${it.name}" to it } }.orEmpty()
         return s.inputs.map { it.name to it } + items
     }
