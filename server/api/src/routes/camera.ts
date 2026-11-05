@@ -24,6 +24,7 @@ export async function registerCameraRoutes(app: FastifyInstance, ctx: Ctx) {
   const service = new CameraService(ctx, relay);
   const director = new Director(ctx, service, relay);
   modules.set(ctx, { service, relay, director });
+  service.chatBusy = id => director.isBusy(id);
   app.addHook('onClose', async () => relay.close());
   const owner = { config: { owner: true } };
 
@@ -81,6 +82,15 @@ export async function registerCameraRoutes(app: FastifyInstance, ctx: Ctx) {
     online: z.boolean(), blender: z.object({ connected: z.boolean(), addonVersion: z.string().max(40).optional(), protocol: z.union([z.string().max(20), z.number()]).optional() }).optional(),
   }), req.body)));
   app.get('/v1/blender/calls', owner, async req => relay.pending(req.user));
+
+  // ------------------------------------------------------------------ Settings → Connections (owner)
+  app.get('/v1/connections', owner, async req => ({
+    relay: relay.status(req.user.id),
+    claudeApp: { lastSeenAt: (await service.claudeAppSeenAt(req.user.id)) ?? undefined, tokens: (await listTokens(ctx, req.user)).length },
+    mcpUrl: `${ctx.publicBase()}/mcp`,
+    inAppChat: !!ctx.config.ANTHROPIC_API_KEY,
+    docsUrl: 'https://github.com/richard4801/claude-template/blob/main/plans/mcp-bridge.md',
+  }));
   app.post<P>('/v1/blender/calls/:id/claim', owner, async req => relay.claim(req.user, req.params.id));
   app.post<P>('/v1/blender/calls/:id/result', { ...owner, bodyLimit: 512 * 1024 }, async (req, reply) => {
     const b = parse(z.object({ ok: z.boolean(), result: z.unknown().optional(), error: z.string().max(2000).optional(), assetIds: z.array(z.string().max(40)).max(20).optional() }), req.body);

@@ -41,6 +41,7 @@ How to work:
 
 export class Director {
   private busy = new Set<string>();
+  isBusy(sessionId: string) { return this.busy.has(sessionId); }
   private client: DirectorClient | null = null;
   constructor(private ctx: Ctx, private camera: CameraService, private relay: BlenderRelayHub) {}
 
