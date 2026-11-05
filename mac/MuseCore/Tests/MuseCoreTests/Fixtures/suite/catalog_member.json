@@ -1,0 +1,1750 @@
+{
+ "enabled": true,
+ "test": true,
+ "defaultQuality": "draft",
+ "tiers": [
+  {
+   "id": "draft",
+   "label": "Draft",
+   "detail": "Quick preview",
+   "available": true,
+   "resolution": "768P",
+   "fromPerSec": 0.02,
+   "maxSeconds": 15,
+   "canKeyframes": true,
+   "canReferences": true,
+   "canGuide": true
+  },
+  {
+   "id": "standard",
+   "label": "Standard",
+   "detail": "Everyday quality",
+   "available": true,
+   "resolution": "768P",
+   "fromPerSec": 0.08,
+   "maxSeconds": 30,
+   "canKeyframes": true,
+   "canReferences": true,
+   "canGuide": true
+  },
+  {
+   "id": "hd",
+   "label": "HD",
+   "detail": "Sharper, for posting",
+   "available": true,
+   "resolution": "2K",
+   "fromPerSec": 0.08,
+   "maxSeconds": 30,
+   "canKeyframes": true,
+   "canReferences": true,
+   "canGuide": true
+  },
+  {
+   "id": "cinema",
+   "label": "Cinema",
+   "detail": "Best camera work and detail",
+   "available": true,
+   "resolution": "1080p",
+   "fromPerSec": 0.13,
+   "maxSeconds": 30,
+   "canKeyframes": true,
+   "canReferences": true,
+   "canGuide": true
+  }
+ ],
+ "modes": [
+  "text",
+  "image",
+  "reference",
+  "swap",
+  "recast"
+ ],
+ "recastMaxPeople": 4,
+ "aspectRatios": [
+  "9:16",
+  "16:9",
+  "1:1",
+  "4:3",
+  "3:4",
+  "21:9"
+ ],
+ "takesMax": 4,
+ "camera": {
+  "presets": [
+   {
+    "id": "phone_ugc",
+    "label": "Phone UGC",
+    "description": "Friend-filmed phone, natural light",
+    "spec": {
+     "rig": {
+      "body": "phone",
+      "lens": "clean",
+      "focalMm": 26,
+      "aperture": "f8",
+      "look": "phone_hdr",
+      "fps": "30"
+     },
+     "lighting": {
+      "preset": "natural"
+     },
+     "move": {
+      "id": "handheld",
+      "intensity": 0.3
+     },
+     "angle": {
+      "height": "eye",
+      "shotSize": "ms"
+     },
+     "style": {
+      "genre": "ugc"
+     }
+    }
+   },
+   {
+    "id": "talking_head",
+    "label": "Talking head",
+    "description": "Locked tripod, ring light",
+    "spec": {
+     "rig": {
+      "body": "phone",
+      "focalMm": 26,
+      "aperture": "f8",
+      "look": "phone_hdr"
+     },
+     "lighting": {
+      "preset": "ring_light"
+     },
+     "move": {
+      "id": "static",
+      "intensity": 0
+     },
+     "angle": {
+      "height": "eye",
+      "shotSize": "mcu"
+     },
+     "style": {
+      "genre": "ugc",
+      "tempo": "single_shot"
+     }
+    }
+   },
+   {
+    "id": "selfie_vlog",
+    "label": "Selfie vlog",
+    "description": "Walk-and-talk at arm’s length",
+    "spec": {
+     "rig": {
+      "body": "vlog",
+      "focalMm": 18,
+      "aperture": "f5.6",
+      "look": "phone_hdr"
+     },
+     "move": {
+      "id": "selfie",
+      "intensity": 0.4
+     },
+     "angle": {
+      "height": "eye",
+      "shotSize": "mcu"
+     },
+     "style": {
+      "genre": "ugc"
+     }
+    }
+   },
+   {
+    "id": "creator_studio",
+    "label": "Creator studio",
+    "description": "Clean studio, soft key",
+    "spec": {
+     "rig": {
+      "body": "cinema_digital",
+      "lens": "clean",
+      "focalMm": 35,
+      "aperture": "f2.8",
+      "look": "digital_clean"
+     },
+     "lighting": {
+      "preset": "studio_3pt"
+     },
+     "move": {
+      "id": "micro_push",
+      "intensity": 0.3
+     },
+     "angle": {
+      "height": "eye",
+      "shotSize": "ms"
+     }
+    }
+   },
+   {
+    "id": "cinematic",
+    "label": "Cinematic",
+    "description": "Film look, shallow focus, slow push",
+    "spec": {
+     "rig": {
+      "body": "film_35",
+      "lens": "anamorphic",
+      "focalMm": 50,
+      "aperture": "f2",
+      "look": "portrait_negative",
+      "fps": "24"
+     },
+     "lighting": {
+      "preset": "contre_jour"
+     },
+     "palette": {
+      "preset": "teal_orange"
+     },
+     "move": {
+      "id": "dolly_in",
+      "intensity": 0.5
+     },
+     "angle": {
+      "height": "eye",
+      "shotSize": "mcu"
+     },
+     "style": {
+      "genre": "drama",
+      "tempo": "calm"
+     }
+    }
+   },
+   {
+    "id": "product_hero",
+    "label": "Product hero",
+    "description": "Glossy orbit for products",
+    "spec": {
+     "rig": {
+      "body": "cinema_digital",
+      "lens": "clean",
+      "focalMm": 85,
+      "aperture": "f4",
+      "look": "digital_clean"
+     },
+     "lighting": {
+      "preset": "studio_3pt"
+     },
+     "palette": {
+      "preset": "commercial_clean"
+     },
+     "move": {
+      "id": "orbit_right",
+      "intensity": 0.4
+     },
+     "angle": {
+      "height": "eye",
+      "shotSize": "cu"
+     },
+     "style": {
+      "genre": "commercial"
+     }
+    }
+   },
+   {
+    "id": "music_video",
+    "label": "Music video",
+    "description": "Neon, low angle, energy",
+    "spec": {
+     "rig": {
+      "body": "cinema_digital",
+      "lens": "vintage_anamorphic",
+      "focalMm": 24,
+      "aperture": "f2",
+      "shutter": "low"
+     },
+     "lighting": {
+      "preset": "neon"
+     },
+     "palette": {
+      "preset": "hyper_neon"
+     },
+     "move": {
+      "id": "orbit_left",
+      "intensity": 0.7
+     },
+     "angle": {
+      "height": "low",
+      "shotSize": "ms"
+     },
+     "style": {
+      "genre": "music_video",
+      "tempo": "dynamic"
+     }
+    }
+   },
+   {
+    "id": "documentary",
+    "label": "Documentary",
+    "description": "Observational 16mm",
+    "spec": {
+     "rig": {
+      "body": "film_16",
+      "lens": "vintage",
+      "focalMm": 35,
+      "aperture": "f4"
+     },
+     "lighting": {
+      "preset": "natural"
+     },
+     "move": {
+      "id": "handheld",
+      "intensity": 0.4
+     },
+     "style": {
+      "genre": "documentary"
+     }
+    }
+   },
+   {
+    "id": "noir",
+    "label": "Noir",
+    "description": "Hard light, deep shadows",
+    "spec": {
+     "rig": {
+      "body": "film_35",
+      "lens": "vintage",
+      "focalMm": 50,
+      "aperture": "f2.8",
+      "look": "bw_film"
+     },
+     "lighting": {
+      "preset": "practicals"
+     },
+     "palette": {
+      "preset": "low_key_noir"
+     },
+     "move": {
+      "id": "dolly_in",
+      "intensity": 0.3
+     },
+     "angle": {
+      "height": "low",
+      "shotSize": "mcu"
+     },
+     "style": {
+      "genre": "noir",
+      "tempo": "calm"
+     }
+    }
+   },
+   {
+    "id": "fashion_editorial",
+    "label": "Fashion editorial",
+    "description": "Large format, golden hour",
+    "spec": {
+     "rig": {
+      "body": "large_format_65",
+      "lens": "halation",
+      "focalMm": 85,
+      "aperture": "f1.4",
+      "look": "portrait_negative"
+     },
+     "lighting": {
+      "preset": "golden_hour"
+     },
+     "palette": {
+      "preset": "golden_warmth"
+     },
+     "move": {
+      "id": "track_side",
+      "intensity": 0.4
+     },
+     "angle": {
+      "height": "eye",
+      "shotSize": "full"
+     },
+     "style": {
+      "genre": "fashion"
+     }
+    }
+   },
+   {
+    "id": "y2k_camcorder",
+    "label": "Y2K camcorder",
+    "description": "Party flash, camcorder",
+    "spec": {
+     "rig": {
+      "body": "camcorder",
+      "focalMm": 24,
+      "aperture": "f5.6"
+     },
+     "lighting": {
+      "preset": "flash"
+     },
+     "palette": {
+      "preset": "y2k_gloss"
+     },
+     "move": {
+      "id": "handheld",
+      "intensity": 0.6
+     },
+     "style": {
+      "era": "2000s",
+      "genre": "ugc"
+     }
+    }
+   }
+  ],
+  "bodies": [
+   {
+    "id": "phone",
+    "label": "Phone",
+    "description": "Modern smartphone: deep focus, natural HDR",
+    "render": "body-08-phone",
+    "name": "Phone UGC",
+    "caption": "Phone · 24 mm · deep focus · HDR"
+   },
+   {
+    "id": "vlog",
+    "label": "Vlog camera",
+    "description": "Compact creator camera, crisp and bright"
+   },
+   {
+    "id": "cinema_digital",
+    "label": "Cinema digital",
+    "description": "Large-format digital cinema camera, clean and rich",
+    "render": "body-01-large-format",
+    "name": "Large Format Digital",
+    "caption": "Alexa LF look · Large format · 4.5K"
+   },
+   {
+    "id": "super35",
+    "label": "Super 35 digital",
+    "description": "Classic S35 cinema sensor",
+    "render": "body-02-super35",
+    "name": "Super 35 Digital",
+    "caption": "Alexa 35 look · Super 35 · 4.6K"
+   },
+   {
+    "id": "film_35",
+    "label": "35mm film",
+    "description": "Fine grain, halation, organic colour",
+    "render": "body-05-film35",
+    "name": "35mm Film",
+    "caption": "35mm 4-perf · Vision3 500T look"
+   },
+   {
+    "id": "film_16",
+    "label": "16mm film",
+    "description": "Visible grain, softer, indie feel",
+    "render": "body-06-film16",
+    "name": "Super 16 Film",
+    "caption": "Super 16 · grain · documentary"
+   },
+   {
+    "id": "film_8",
+    "label": "Super 8",
+    "description": "Home-movie grain, gate weave, warm",
+    "render": "body-10-super8",
+    "name": "Super 8",
+    "caption": "Super 8 · home movie · 18 fps"
+   },
+   {
+    "id": "large_format_65",
+    "label": "65mm large format",
+    "description": "Epic, huge sensor, shallow depth"
+   },
+   {
+    "id": "camcorder",
+    "label": "DV camcorder",
+    "description": "2000s camcorder: video texture, sharpening",
+    "render": "body-09-dv-camcorder",
+    "name": "DV Camcorder",
+    "caption": "MiniDV · 2000s · 480i texture"
+   },
+   {
+    "id": "modular_8k",
+    "label": "Modular 8K",
+    "description": "Modular 8K digital: razor detail, big sensor",
+    "render": "body-03-modular8k",
+    "name": "Modular 8K",
+    "caption": "V-Raptor look · VistaVision · 8K"
+   },
+   {
+    "id": "full_frame_cine",
+    "label": "Full-frame cine",
+    "description": "Full-frame cinema sensor, creamy depth",
+    "render": "body-04-fullframe",
+    "name": "Full-Frame Cine",
+    "caption": "Venice 2 look · Full frame · 8.6K"
+   },
+   {
+    "id": "creator_cine",
+    "label": "Creator cine",
+    "description": "Compact full-frame creator camera, 4K 120",
+    "render": "body-07-creator-cine",
+    "name": "Creator Cine",
+    "caption": "FX3 look · Full frame · 4K 120"
+   },
+   {
+    "id": "webcam",
+    "label": "Webcam / FaceTime",
+    "description": "Laptop webcam look, flat and close"
+   },
+   {
+    "id": "security_cam",
+    "label": "CCTV",
+    "description": "High-angle surveillance look"
+   }
+  ],
+  "lenses": [
+   {
+    "id": "clean",
+    "label": "Clean sharp",
+    "description": "Modern clinical prime",
+    "render": "lens-01-clean-prime",
+    "name": "Clean Sharp Prime",
+    "caption": "Master Prime look · spherical · T1.3"
+   },
+   {
+    "id": "vintage",
+    "label": "Vintage prime",
+    "description": "Soft contrast, gentle flare"
+   },
+   {
+    "id": "warm_vintage",
+    "label": "Warm vintage",
+    "description": "70s-style warm prime",
+    "render": "lens-04-warm-vintage",
+    "name": "Warm Vintage Prime",
+    "caption": "Speed Panchro look · warm · gentle falloff"
+   },
+   {
+    "id": "anamorphic",
+    "label": "Anamorphic",
+    "description": "Oval bokeh, horizontal flares",
+    "render": "lens-02-anamorphic",
+    "name": "Anamorphic 2×",
+    "caption": "Master Anamorphic look · oval bokeh · blue flares"
+   },
+   {
+    "id": "vintage_anamorphic",
+    "label": "Vintage anamorphic",
+    "description": "Character, falloff, streaks",
+    "render": "lens-03-vintage-anamorphic",
+    "name": "Vintage Anamorphic",
+    "caption": "1970s C-series look · amber flares · soft edges"
+   },
+   {
+    "id": "halation",
+    "label": "Halation diffusion",
+    "description": "Glowing highlights, dreamy",
+    "render": "lens-05-halation",
+    "name": "Halation Diffusion",
+    "caption": "Vintage prime + 1/4 mist · bloom on highlights"
+   },
+   {
+    "id": "swirl",
+    "label": "Swirl bokeh",
+    "description": "Petzval-style swirling background"
+   },
+   {
+    "id": "macro",
+    "label": "Macro",
+    "description": "Extreme close detail",
+    "render": "lens-06-macro",
+    "name": "Macro",
+    "caption": "100 mm macro · 1:1 · product & detail"
+   },
+   {
+    "id": "tilt_shift",
+    "label": "Tilt-shift",
+    "description": "Miniature-looking focus band"
+   },
+   {
+    "id": "fisheye",
+    "label": "Fisheye",
+    "description": "Ultra-wide barrel distortion",
+    "render": "lens-08-fisheye",
+    "name": "Ultra-wide / Fisheye",
+    "caption": "14 mm & fisheye · skate & FPV energy"
+   },
+   {
+    "id": "cine_zoom",
+    "label": "Cine zoom",
+    "description": "Long cinema zoom, crash zooms",
+    "render": "lens-07-cine-zoom",
+    "name": "Cine Zoom",
+    "caption": "Optimo look · 24–290 mm · crash zoom"
+   }
+  ],
+  "focalLengths": [
+   8,
+   14,
+   18,
+   24,
+   26,
+   35,
+   50,
+   65,
+   85,
+   100,
+   135
+  ],
+  "apertures": [
+   {
+    "id": "f1.2",
+    "label": "f/1.2",
+    "description": "Wafer-thin focus"
+   },
+   {
+    "id": "f1.4",
+    "label": "f/1.4 · wide open",
+    "description": "Very shallow focus"
+   },
+   {
+    "id": "f2",
+    "label": "f/2",
+    "description": "Shallow focus"
+   },
+   {
+    "id": "f2.8",
+    "label": "f/2.8",
+    "description": "Soft background"
+   },
+   {
+    "id": "f4",
+    "label": "f/4 · moderate",
+    "description": "Moderate depth"
+   },
+   {
+    "id": "f5.6",
+    "label": "f/5.6",
+    "description": "Most of the scene sharp"
+   },
+   {
+    "id": "f8",
+    "label": "f/8",
+    "description": "Deep focus"
+   },
+   {
+    "id": "f11",
+    "label": "f/11 · deep focus",
+    "description": "Everything sharp"
+   }
+  ],
+  "looks": [
+   {
+    "id": "digital_clean",
+    "label": "Clean digital",
+    "description": "Neutral and true",
+    "render": "stock-03-sensor",
+    "name": "Digital sensor",
+    "caption": "Clean digital · 14+ stops · no grain"
+   },
+   {
+    "id": "phone_hdr",
+    "label": "Phone HDR",
+    "description": "Bright, punchy, social-ready"
+   },
+   {
+    "id": "portrait_negative",
+    "label": "Portrait negative film",
+    "description": "Soft warm skin, pastel highlights"
+   },
+   {
+    "id": "tungsten_stock",
+    "label": "Tungsten cinema stock",
+    "description": "Night-friendly, cool shadows",
+    "render": "stock-01-35mm",
+    "name": "35mm colour negative",
+    "caption": "Vision3 500T look · tungsten · fine grain"
+   },
+   {
+    "id": "slide_film",
+    "label": "Slide film",
+    "description": "Saturated, contrasty"
+   },
+   {
+    "id": "bw_film",
+    "label": "Black & white film",
+    "description": "Silver grain monochrome"
+   },
+   {
+    "id": "bleach_bypass",
+    "label": "Bleach bypass",
+    "description": "Desaturated, harsh contrast"
+   },
+   {
+    "id": "cross_process",
+    "label": "Cross-processed",
+    "description": "Shifted, surreal colour"
+   },
+   {
+    "id": "reversal_16",
+    "label": "16mm reversal",
+    "description": "Visible grain, punchy colour, halation",
+    "render": "stock-02-16mm",
+    "name": "16mm reversal",
+    "caption": "Super 16 · visible grain · halation"
+   },
+   {
+    "id": "faded_print",
+    "label": "Faded print",
+    "description": "Lifted blacks, nostalgic"
+   }
+  ],
+  "frameRates": [
+   {
+    "id": "24",
+    "label": "24 fps · cinematic",
+    "description": "180° shutter, classic motion blur"
+   },
+   {
+    "id": "25",
+    "label": "25 fps",
+    "description": "Broadcast cadence"
+   },
+   {
+    "id": "30",
+    "label": "30 fps · video",
+    "description": "Everyday video motion"
+   },
+   {
+    "id": "48",
+    "label": "48 fps",
+    "description": "Crisp, smooth motion"
+   },
+   {
+    "id": "60",
+    "label": "60 fps",
+    "description": "Hyper-smooth, sports feel"
+   },
+   {
+    "id": "slowmo",
+    "label": "Slow motion",
+    "description": "High-frame-rate slow motion"
+   }
+  ],
+  "shutters": [
+   {
+    "id": "normal",
+    "label": "Normal shutter",
+    "description": "Natural blur"
+   },
+   {
+    "id": "low",
+    "label": "Low shutter",
+    "description": "Long streaky motion blur"
+   },
+   {
+    "id": "narrow",
+    "label": "Narrow shutter",
+    "description": "Staccato, crisp action"
+   }
+  ],
+  "lighting": [
+   {
+    "id": "natural",
+    "label": "Natural",
+    "description": "Available light, as it is"
+   },
+   {
+    "id": "window",
+    "label": "Window light",
+    "description": "Soft side light from a window",
+    "render": "light-04-window",
+    "name": "Window",
+    "caption": "Soft daylight through sheer · natural & calm"
+   },
+   {
+    "id": "soft_cross",
+    "label": "Soft cross",
+    "description": "Two soft sources crossing",
+    "render": "light-01-soft-cross",
+    "name": "Soft Cross",
+    "caption": "Two softboxes crossing · even, flattering"
+   },
+   {
+    "id": "contre_jour",
+    "label": "Contre-jour",
+    "description": "Backlit, glowing rim",
+    "render": "light-02-contre-jour",
+    "name": "Contre-jour",
+    "caption": "Hard backlight through haze · rim & glow"
+   },
+   {
+    "id": "overhead",
+    "label": "Overhead fall",
+    "description": "Top light, sculpted shadows",
+    "render": "light-03-overhead",
+    "name": "Overhead Fall",
+    "caption": "Butterfly silk overhead · beauty top-light"
+   },
+   {
+    "id": "practicals",
+    "label": "Practicals",
+    "description": "Lamps and screens in shot",
+    "render": "light-05-practicals",
+    "name": "Practicals",
+    "caption": "Lamps, neon, bulbs in shot · night mood"
+   },
+   {
+    "id": "silhouette",
+    "label": "Silhouette",
+    "description": "Subject dark against bright"
+   },
+   {
+    "id": "golden_hour",
+    "label": "Golden hour",
+    "description": "Low warm sun"
+   },
+   {
+    "id": "blue_hour",
+    "label": "Blue hour",
+    "description": "Cool dusk ambience"
+   },
+   {
+    "id": "ring_light",
+    "label": "Ring light",
+    "description": "Creator ring light, catchlights",
+    "render": "light-06-ring-creator",
+    "name": "Creator Ring",
+    "caption": "Ring light + RGB tube · UGC talking head"
+   },
+   {
+    "id": "studio_3pt",
+    "label": "Studio three-point",
+    "description": "Key, fill and rim"
+   },
+   {
+    "id": "neon",
+    "label": "Neon night",
+    "description": "Coloured neon spill"
+   },
+   {
+    "id": "harsh_sun",
+    "label": "Harsh noon sun",
+    "description": "Hard shadows, bright"
+   },
+   {
+    "id": "overcast",
+    "label": "Overcast",
+    "description": "Flat soft daylight"
+   },
+   {
+    "id": "candle",
+    "label": "Candle / firelight",
+    "description": "Warm flicker"
+   },
+   {
+    "id": "moonlight",
+    "label": "Moonlight",
+    "description": "Cool low-key night"
+   },
+   {
+    "id": "flash",
+    "label": "On-camera flash",
+    "description": "Party flash, hard and direct"
+   }
+  ],
+  "palettes": [
+   {
+    "id": "naturalistic",
+    "label": "Naturalistic",
+    "description": "True colour",
+    "render": "palette-01-naturalistic",
+    "name": "Naturalistic Clean",
+    "caption": "True-to-life · neutral · gentle contrast"
+   },
+   {
+    "id": "bleached_warm",
+    "label": "Bleached warm",
+    "description": "Sun-bleached warmth",
+    "render": "palette-04-bleached-warm",
+    "name": "Bleached Warm",
+    "caption": "Sun-faded · milky shadows · nostalgic"
+   },
+   {
+    "id": "hyper_neon",
+    "label": "Hyper neon",
+    "description": "Electric saturated neon",
+    "render": "palette-03-hyper-neon",
+    "name": "Hyper Neon",
+    "caption": "Magenta & cyan · deep blacks · night"
+   },
+   {
+    "id": "teal_orange",
+    "label": "Teal & orange",
+    "description": "Blockbuster contrast",
+    "render": "palette-02-teal-orange",
+    "name": "Teal & Orange",
+    "caption": "Blockbuster · teal shadows · warm skin"
+   },
+   {
+    "id": "sodium_decay",
+    "label": "Sodium decay",
+    "description": "Urban orange streetlight",
+    "render": "palette-05-sodium-decay",
+    "name": "Sodium Decay",
+    "caption": "Street-lamp yellow-green · gritty"
+   },
+   {
+    "id": "cold_steel",
+    "label": "Cold steel",
+    "description": "Blue-grey and hard"
+   },
+   {
+    "id": "bleach_bypass",
+    "label": "Bleach bypass",
+    "description": "Silver, low saturation"
+   },
+   {
+    "id": "classic_bw",
+    "label": "Classic B&W",
+    "description": "Monochrome",
+    "render": "palette-06-classic-bw",
+    "name": "Classic B&W",
+    "caption": "Silver tones · rich blacks · grain"
+   },
+   {
+    "id": "pastel_dream",
+    "label": "Pastel dream",
+    "description": "Soft pastels"
+   },
+   {
+    "id": "muted_earth",
+    "label": "Muted earth",
+    "description": "Olive, tan, brown"
+   },
+   {
+    "id": "golden_warmth",
+    "label": "Golden warmth",
+    "description": "Honey and amber"
+   },
+   {
+    "id": "moody_blue",
+    "label": "Moody blue",
+    "description": "Deep blue shadows"
+   },
+   {
+    "id": "vintage_fade",
+    "label": "Vintage fade",
+    "description": "Faded 70s colour"
+   },
+   {
+    "id": "high_key",
+    "label": "High key",
+    "description": "Bright and clean"
+   },
+   {
+    "id": "low_key_noir",
+    "label": "Low key noir",
+    "description": "Deep blacks"
+   },
+   {
+    "id": "cyber_magenta",
+    "label": "Cyber magenta",
+    "description": "Magenta and cyan"
+   },
+   {
+    "id": "forest_green",
+    "label": "Forest green",
+    "description": "Lush greens"
+   },
+   {
+    "id": "desert_sand",
+    "label": "Desert sand",
+    "description": "Dusty beige heat"
+   },
+   {
+    "id": "commercial_clean",
+    "label": "Clean commercial",
+    "description": "Glossy ad look"
+   },
+   {
+    "id": "retro_80s",
+    "label": "Retro 80s",
+    "description": "Pink sunset synth"
+   },
+   {
+    "id": "nineties_mall",
+    "label": "90s mall",
+    "description": "Warm flash, saturated"
+   },
+   {
+    "id": "y2k_gloss",
+    "label": "Y2K gloss",
+    "description": "Chrome, icy blue"
+   },
+   {
+    "id": "candy_pop",
+    "label": "Candy pop",
+    "description": "Bright playful colours"
+   },
+   {
+    "id": "autumn",
+    "label": "Autumn",
+    "description": "Rust and gold"
+   },
+   {
+    "id": "winter_frost",
+    "label": "Winter frost",
+    "description": "Cool white and blue"
+   },
+   {
+    "id": "sepia",
+    "label": "Sepia",
+    "description": "Old brown tint"
+   },
+   {
+    "id": "kodachrome_like",
+    "label": "Rich vintage slide",
+    "description": "Deep reds, saturated blues"
+   },
+   {
+    "id": "matte_film",
+    "label": "Matte film",
+    "description": "Soft contrast, lifted shadows"
+   }
+  ],
+  "optics": [
+   {
+    "id": "aperture",
+    "render": "optic-01-iris",
+    "name": "Iris · depth of field",
+    "caption": "T1.4 wide open → T11 deep focus"
+   },
+   {
+    "id": "shutter",
+    "render": "optic-02-shutter180",
+    "name": "Rotary shutter",
+    "caption": "180° natural blur · 90° crisp · 360° smear"
+   }
+  ],
+  "grips": [
+   {
+    "move": "dolly_in",
+    "render": "grip-01-dolly",
+    "name": "Dolly & track",
+    "caption": "Dolly in / out · push · tracking"
+   },
+   {
+    "move": "crane_up",
+    "render": "grip-02-jib",
+    "name": "Jib / crane",
+    "caption": "Crane up / down · reveal · overhead"
+   },
+   {
+    "move": "steadicam",
+    "render": "grip-03-gimbal",
+    "name": "Gimbal",
+    "caption": "Handheld smooth · walk-and-talk · follow"
+   },
+   {
+    "move": "fpv",
+    "render": "grip-04-fpv",
+    "name": "FPV drone",
+    "caption": "FPV fly-through · dives · energy"
+   },
+   {
+    "move": "truck_left",
+    "render": "grip-05-slider",
+    "name": "Slider",
+    "caption": "Short parallax slide · product & detail"
+   }
+  ],
+  "moves": [
+   {
+    "id": "static",
+    "label": "Static",
+    "description": "Locked-off tripod",
+    "category": "static",
+    "editorBetter": false,
+    "talkSafe": true
+   },
+   {
+    "id": "micro_push",
+    "label": "Micro push",
+    "description": "Barely-there push-in",
+    "category": "push",
+    "editorBetter": false,
+    "talkSafe": true
+   },
+   {
+    "id": "handheld",
+    "label": "Handheld UGC",
+    "description": "Friend-filmed phone, subtle shake",
+    "category": "follow",
+    "editorBetter": false,
+    "talkSafe": true
+   },
+   {
+    "id": "selfie",
+    "label": "Selfie walk-and-talk",
+    "description": "Arm-length selfie, walking",
+    "category": "follow",
+    "editorBetter": false,
+    "talkSafe": true
+   },
+   {
+    "id": "dolly_in",
+    "label": "Dolly in",
+    "description": "Cinematic push toward the subject",
+    "category": "push",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "dolly_out",
+    "label": "Dolly out reveal",
+    "description": "Pull back to reveal",
+    "category": "push",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "truck_left",
+    "label": "Truck left",
+    "description": "Slide sideways to the left",
+    "category": "lateral",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "truck_right",
+    "label": "Truck right",
+    "description": "Slide sideways to the right",
+    "category": "lateral",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "pan_left",
+    "label": "Pan left",
+    "description": "Turn the camera left",
+    "category": "rotate",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "pan_right",
+    "label": "Pan right",
+    "description": "Turn the camera right",
+    "category": "rotate",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "tilt_up",
+    "label": "Tilt up",
+    "description": "Tilt up to reveal",
+    "category": "rotate",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "tilt_down",
+    "label": "Tilt down",
+    "description": "Tilt down",
+    "category": "rotate",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "orbit_left",
+    "label": "Orbit left",
+    "description": "Arc around the subject",
+    "category": "rotate",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "orbit_right",
+    "label": "Orbit right",
+    "description": "Arc around the subject",
+    "category": "rotate",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "orbit_360",
+    "label": "360 orbit",
+    "description": "Full circle around the subject",
+    "category": "rotate",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "crane_up",
+    "label": "Crane up",
+    "description": "Rise up and look down",
+    "category": "vertical",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "crane_down",
+    "label": "Crane down",
+    "description": "Descend toward the subject",
+    "category": "vertical",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "crane_overhead",
+    "label": "Crane over the head",
+    "description": "Sweep up and over",
+    "category": "vertical",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "pedestal_up",
+    "label": "Pedestal up",
+    "description": "Straight rise, no tilt",
+    "category": "vertical",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "pedestal_down",
+    "label": "Pedestal down",
+    "description": "Straight drop, no tilt",
+    "category": "vertical",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "zoom_in",
+    "label": "Zoom in",
+    "description": "Optical zoom, no travel",
+    "category": "zoom",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "zoom_out",
+    "label": "Zoom out",
+    "description": "Optical zoom out",
+    "category": "zoom",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "crash_zoom",
+    "label": "Crash zoom",
+    "description": "Sudden fast zoom",
+    "category": "zoom",
+    "editorBetter": true,
+    "talkSafe": false
+   },
+   {
+    "id": "dolly_zoom",
+    "label": "Dolly zoom",
+    "description": "Vertigo: background warps",
+    "category": "zoom",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "rack_focus",
+    "label": "Rack focus",
+    "description": "Focus shifts foreground → subject",
+    "category": "specialty",
+    "editorBetter": false,
+    "talkSafe": true
+   },
+   {
+    "id": "follow",
+    "label": "Tracking follow",
+    "description": "Follow behind at constant distance",
+    "category": "follow",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "track_side",
+    "label": "Side tracking",
+    "description": "Move alongside the subject",
+    "category": "follow",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "lead",
+    "label": "Leading",
+    "description": "Camera walks backwards ahead",
+    "category": "follow",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "steadicam",
+    "label": "Steadicam",
+    "description": "Gliding follow through space",
+    "category": "follow",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "snorricam",
+    "label": "Snorricam",
+    "description": "Rig mounted on the subject",
+    "category": "specialty",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "fpv",
+    "label": "FPV drone",
+    "description": "Fast swooping drone",
+    "category": "aerial",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "drone_reveal",
+    "label": "Drone reveal",
+    "description": "Rise and reveal the location",
+    "category": "aerial",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "flyover",
+    "label": "Aerial flyover",
+    "description": "High pass over the scene",
+    "category": "aerial",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "whip_pan",
+    "label": "Whip pan",
+    "description": "Very fast pan (best as a transition)",
+    "category": "rotate",
+    "editorBetter": true,
+    "talkSafe": false
+   },
+   {
+    "id": "dutch_push",
+    "label": "Dutch push",
+    "description": "Canted angle with a slow push",
+    "category": "push",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "through_object",
+    "label": "Through object",
+    "description": "Pass through a gap or window",
+    "category": "specialty",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "top_down_spin",
+    "label": "Top-down spin",
+    "description": "Overhead slow rotation",
+    "category": "rotate",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "bullet_time",
+    "label": "Bullet time",
+    "description": "Frozen moment, camera circles",
+    "category": "time",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "hyperlapse",
+    "label": "Hyperlapse",
+    "description": "Moving time-lapse",
+    "category": "time",
+    "editorBetter": false,
+    "talkSafe": false
+   },
+   {
+    "id": "handheld_run",
+    "label": "Action handheld",
+    "description": "Energetic running camera",
+    "category": "follow",
+    "editorBetter": false,
+    "talkSafe": false
+   }
+  ],
+  "library": [
+   {
+    "id": "static",
+    "label": "Locked-off",
+    "tag": "ugc",
+    "description": "Locked-off tripod",
+    "category": "static"
+   },
+   {
+    "id": "handheld",
+    "label": "Handheld UGC",
+    "tag": "ugc",
+    "description": "Friend-filmed phone, subtle shake",
+    "category": "follow"
+   },
+   {
+    "id": "selfie",
+    "label": "Selfie walk-and-talk",
+    "tag": "ugc",
+    "description": "Arm-length selfie, walking",
+    "category": "follow"
+   },
+   {
+    "id": "follow",
+    "label": "Tracking follow",
+    "tag": "ugc",
+    "description": "Follow behind at constant distance",
+    "category": "follow"
+   },
+   {
+    "id": "micro_push",
+    "label": "Micro push",
+    "tag": "subtle",
+    "description": "Barely-there push-in",
+    "category": "push"
+   },
+   {
+    "id": "dolly_in",
+    "label": "Dolly in",
+    "tag": "cinematic",
+    "description": "Cinematic push toward the subject",
+    "category": "push"
+   },
+   {
+    "id": "dolly_out",
+    "label": "Dolly out reveal",
+    "tag": "cinematic",
+    "description": "Pull back to reveal",
+    "category": "push"
+   },
+   {
+    "id": "orbit_left",
+    "label": "Orbit / arc",
+    "tag": "cinematic",
+    "description": "Arc around the subject",
+    "category": "rotate"
+   },
+   {
+    "id": "crane_up",
+    "label": "Crane up",
+    "tag": "cinematic",
+    "description": "Rise up and look down",
+    "category": "vertical"
+   },
+   {
+    "id": "track_side",
+    "label": "Tracking",
+    "tag": "cinematic",
+    "description": "Move alongside the subject",
+    "category": "follow"
+   },
+   {
+    "id": "fpv",
+    "label": "FPV fly-through",
+    "tag": "energy",
+    "description": "Fast swooping drone",
+    "category": "aerial"
+   },
+   {
+    "id": "whip_pan",
+    "label": "Whip pan",
+    "tag": "energy",
+    "description": "Very fast pan (best as a transition)",
+    "category": "rotate"
+   },
+   {
+    "id": "crash_zoom",
+    "label": "Crash zoom",
+    "tag": "energy",
+    "description": "Sudden fast zoom",
+    "category": "zoom"
+   },
+   {
+    "id": "handheld_run",
+    "label": "Action handheld",
+    "tag": "energy",
+    "description": "Energetic running camera",
+    "category": "follow"
+   },
+   {
+    "id": "rack_focus",
+    "label": "Rack focus",
+    "tag": "subtle",
+    "description": "Focus shifts foreground → subject",
+    "category": "specialty"
+   },
+   {
+    "id": "dutch_push",
+    "label": "Dutch push",
+    "tag": "subtle",
+    "description": "Canted angle with a slow push",
+    "category": "push"
+   }
+  ],
+  "heights": [
+   {
+    "id": "eye",
+    "label": "Eye level",
+    "description": "Neutral"
+   },
+   {
+    "id": "shoulder",
+    "label": "Shoulder level",
+    "description": "Slightly below eye"
+   },
+   {
+    "id": "low",
+    "label": "Low angle",
+    "description": "Heroic, looking up"
+   },
+   {
+    "id": "high",
+    "label": "High angle",
+    "description": "Looking down"
+   },
+   {
+    "id": "overhead",
+    "label": "Overhead",
+    "description": "Bird’s-eye"
+   },
+   {
+    "id": "worm",
+    "label": "Worm’s-eye",
+    "description": "From the ground up"
+   },
+   {
+    "id": "ground",
+    "label": "Ground level",
+    "description": "Camera on the floor"
+   },
+   {
+    "id": "hip",
+    "label": "Hip level",
+    "description": "Western-style"
+   }
+  ],
+  "shotSizes": [
+   {
+    "id": "els",
+    "label": "Extreme wide",
+    "description": "Tiny in a huge space"
+   },
+   {
+    "id": "ls",
+    "label": "Wide",
+    "description": "Whole body and place"
+   },
+   {
+    "id": "full",
+    "label": "Full body",
+    "description": "Head to toe"
+   },
+   {
+    "id": "cowboy",
+    "label": "Cowboy",
+    "description": "Mid-thigh up"
+   },
+   {
+    "id": "ms",
+    "label": "Medium",
+    "description": "Waist up"
+   },
+   {
+    "id": "mcu",
+    "label": "Medium close-up",
+    "description": "Chest up"
+   },
+   {
+    "id": "cu",
+    "label": "Close-up",
+    "description": "Face"
+   },
+   {
+    "id": "ecu",
+    "label": "Extreme close-up",
+    "description": "Eyes or a detail"
+   },
+   {
+    "id": "insert",
+    "label": "Insert",
+    "description": "An object or detail"
+   },
+   {
+    "id": "ots",
+    "label": "Over the shoulder",
+    "description": "From behind another person"
+   },
+   {
+    "id": "pov",
+    "label": "POV",
+    "description": "Through her eyes"
+   },
+   {
+    "id": "two_shot",
+    "label": "Two-shot",
+    "description": "Two people in frame"
+   }
+  ],
+  "genres": [
+   {
+    "id": "ugc",
+    "label": "UGC",
+    "description": "Authentic creator content"
+   },
+   {
+    "id": "commercial",
+    "label": "Commercial",
+    "description": "Polished ad"
+   },
+   {
+    "id": "drama",
+    "label": "Drama",
+    "description": ""
+   },
+   {
+    "id": "action",
+    "label": "Action",
+    "description": ""
+   },
+   {
+    "id": "epic",
+    "label": "Epic",
+    "description": ""
+   },
+   {
+    "id": "comedy",
+    "label": "Comedy",
+    "description": ""
+   },
+   {
+    "id": "romance",
+    "label": "Romance",
+    "description": ""
+   },
+   {
+    "id": "horror",
+    "label": "Horror",
+    "description": ""
+   },
+   {
+    "id": "noir",
+    "label": "Noir",
+    "description": ""
+   },
+   {
+    "id": "documentary",
+    "label": "Documentary",
+    "description": ""
+   },
+   {
+    "id": "music_video",
+    "label": "Music video",
+    "description": ""
+   },
+   {
+    "id": "fashion",
+    "label": "Fashion film",
+    "description": ""
+   }
+  ],
+  "eras": [
+   {
+    "id": "1960s",
+    "label": "1960s",
+    "description": ""
+   },
+   {
+    "id": "1970s",
+    "label": "1970s",
+    "description": ""
+   },
+   {
+    "id": "1980s",
+    "label": "1980s",
+    "description": ""
+   },
+   {
+    "id": "1990s",
+    "label": "1990s",
+    "description": ""
+   },
+   {
+    "id": "2000s",
+    "label": "2000s",
+    "description": ""
+   },
+   {
+    "id": "2010s",
+    "label": "2010s",
+    "description": ""
+   },
+   {
+    "id": "2020s",
+    "label": "2020s",
+    "description": ""
+   },
+   {
+    "id": "future",
+    "label": "Near future",
+    "description": ""
+   }
+  ],
+  "tempos": [
+   {
+    "id": "calm",
+    "label": "Calm",
+    "description": "Slow, lingering"
+   },
+   {
+    "id": "steady",
+    "label": "Steady",
+    "description": "Even pacing"
+   },
+   {
+    "id": "dynamic",
+    "label": "Dynamic",
+    "description": "Energetic"
+   },
+   {
+    "id": "chaotic",
+    "label": "Chaotic",
+    "description": "Frantic"
+   },
+   {
+    "id": "single_shot",
+    "label": "Single shot",
+    "description": "One continuous take, no cuts"
+   }
+  ],
+  "emotions": [
+   "joy",
+   "trust",
+   "fear",
+   "surprise",
+   "sadness",
+   "disgust",
+   "anger",
+   "hope",
+   "calm",
+   "confidence",
+   "playful",
+   "flirty"
+  ],
+  "limits": {
+   "intensity": [
+    0,
+    1
+   ],
+   "dutchDeg": [
+    0,
+    30
+   ],
+   "focalMm": [
+    8,
+    200
+   ],
+   "paletteColors": 5,
+   "mixPairs": "two moves of different kinds; not static, time or aerial"
+  }
+ }
+}

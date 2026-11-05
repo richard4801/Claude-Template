@@ -1,0 +1,34 @@
+{
+ "quality": "hd",
+ "label": "Shot · HD · 2K",
+ "resolution": "2K",
+ "seconds": 6,
+ "takes": 1,
+ "mode": "reference",
+ "estimate": 0.78,
+ "priceLine": "about $0.78 · 6 s",
+ "buttonLabel": "Generate · 6 s · $0.78",
+ "caps": {
+  "perJob": 5,
+  "perDay": 25,
+  "spentToday": 0,
+  "leftToday": 25,
+  "ok": true,
+  "code": null,
+  "message": null
+ },
+ "ok": true,
+ "code": null,
+ "message": null,
+ "warnings": [],
+ "camera": {
+  "moves": [],
+  "guideUsed": false
+ },
+ "prompt": "Demo model is the woman shown in <Image 1>, <Image 2>, <Image 3>, <Image 4> and <Image 5>: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Keep her face, hair, skin, body and proportions exactly as in those images. She never has: tattoos, rings.\nShe waves.\nDemo model does not speak, sing or mouth words.\nPhotorealistic. No text, captions, logos or watermarks anywhere.",
+ "test": true,
+ "speaking": {
+  "speaking": false,
+  "source": "default"
+ }
+}

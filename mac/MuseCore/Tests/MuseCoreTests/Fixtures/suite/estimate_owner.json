@@ -1,0 +1,99 @@
+{
+ "quality": "hd",
+ "label": "Shot · HD · 2K",
+ "resolution": "2K",
+ "seconds": 6,
+ "takes": 2,
+ "mode": "reference",
+ "estimate": 1.56,
+ "priceLine": "about $1.56 · 6 s · 2 takes",
+ "buttonLabel": "Generate · 6 s · $1.56 · 2 takes",
+ "caps": {
+  "perJob": 5,
+  "perDay": 25,
+  "spentToday": 0,
+  "leftToday": 25,
+  "ok": true,
+  "code": null,
+  "message": null
+ },
+ "ok": true,
+ "code": null,
+ "message": null,
+ "warnings": [],
+ "camera": {
+  "moves": [
+   "dolly_in",
+   "rack_focus"
+  ],
+  "guideUsed": false
+ },
+ "prompt": "Demo model is the woman shown in <Image 1>, <Image 2>, <Image 3>, <Image 4> and <Image 5>: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Keep her face, hair, skin, body and proportions exactly as in those images. She never has: tattoos, rings.\nShe waves at the camera.\nCinematography: medium close-up from the chest up, eye-level camera, physical dolly-in toward the subject about 1.5 m, combined with slow focus racks from the foreground to the subject. Shot with 35mm motion-picture film, fine grain, gentle halation, organic colour, 50mm lens (natural perspective), anamorphic lens, oval bokeh, horizontal blue lens flares, f/2, shallow depth of field, portrait colour-negative film stock, soft warm skin tones, pastel highlights, 24 frames per second with a 180-degree shutter, natural cinematic motion blur. Contre-jour backlight, glowing hair rim, slight haze. Teal-and-orange blockbuster grade. Dramatic, calm lingering pacing.\nDemo model does not speak, sing or mouth words.\nNo zoom.\nPhotorealistic. No text, captions, logos or watermarks anywhere.",
+ "test": true,
+ "engine": {
+  "model": "h3",
+  "name": "MiniMax H3",
+  "provider": "replicate",
+  "ref": "minimax/h3",
+  "resolution": "2K",
+  "perSec": 0.13,
+  "billedPerTake": 6,
+  "licence": {
+   "kind": "hosted",
+   "name": "MiniMax H3 (hosted)",
+   "notice": "MiniMax H3"
+  },
+  "notice": "MiniMax H3"
+ },
+ "input": {
+  "negative": null,
+  "params": {},
+  "images": {
+   "middle": [],
+   "refs": [
+    {
+     "label": "face, front",
+     "role": "character",
+     "image": {
+      "asset": "face"
+     }
+    },
+    {
+     "label": "face, profile",
+     "role": "character",
+     "image": {
+      "asset": "profile"
+     }
+    },
+    {
+     "label": "body, front",
+     "role": "character",
+     "image": {
+      "asset": "g_front"
+     }
+    },
+    {
+     "label": "body, ¾",
+     "role": "character",
+     "image": {
+      "asset": "g_tq"
+     }
+    },
+    {
+     "label": "body, back",
+     "role": "character",
+     "image": {
+      "asset": "g_back"
+     }
+    }
+   ]
+  },
+  "videos": [],
+  "audio": null
+ },
+ "tried": [],
+ "speaking": {
+  "speaking": false,
+  "source": "default"
+ }
+}

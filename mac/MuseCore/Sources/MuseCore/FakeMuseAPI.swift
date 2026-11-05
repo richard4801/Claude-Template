@@ -57,6 +57,8 @@ public actor FakeMuseAPI: MuseAPI {
     var toolRuns: [ToolRun] = []
     var toolTasks: [String: Task<Void, Never>] = [:]
     var sheetVersionsByModel: [String: [SheetVersion]] = [:]
+    /// AI suite (workstream 1): the demo studio's suite settings (Engines), once changed.
+    var suiteSettingsBox: SuiteSettings?
 
     /// - Parameters:
     ///   - speed: simulation speed; 0 freezes the queue (tests).
@@ -701,7 +703,7 @@ public actor FakeMuseAPI: MuseAPI {
         failNext = false
         runningId = id
         // While the add-on engine is kept ready, Edit and Fast renders' time is on that line. Draft / Standard / HD never use it.
-        if warm.isOn && next.engine != .replicate { jobs[i].warm = true }
+        if warm.isOn && next.engine != .replicate && next.request.engine != "suite" { jobs[i].warm = true } // AI suite (workstream 1): suite shots never use it
         runner = Task { await self.drive(id, fail: failThis) }
     }
 
@@ -775,7 +777,7 @@ public actor FakeMuseAPI: MuseAPI {
         let o = outfits.first { $0.id == j.outfitId }
         let pool = (o?.angles.compactMap { $0 } ?? [])
         let n = max(1, j.request.takes)
-        let label = j.videoQuality.label
+        let label = j.request.engine == "suite" ? SuiteText.tierLabel(j.request.quality) : j.videoQuality.label // AI suite (workstream 1): tier label
         return (1...n).map { k in
             let thumb = pool.isEmpty ? (j.thumb ?? .asset("g_front")) : pool[(k - 1) % pool.count]
             return Take(id: "t_\(j.id)_\(k)", jobId: j.id, index: k, of: n, title: j.title, label: label, engineLabel: j.engineLabel,
@@ -1149,4 +1151,19 @@ public actor FakeMuseAPI: MuseAPI {
     func replace(_ m: MuseModel) {
         if let i = models.firstIndex(where: { $0.id == m.id }) { models[i] = m }
     }
+
+    // AI suite (workstream 1): hooks for Suite/FakeMuseAPI+Suite.swift. Demo suite shots run on this job pipeline.
+    var suiteIsOwner: Bool { signedIn?.role != "member" }
+    func suiteClip(_ id: String) -> Clip? { clips[id] }
+    func enqueueSuiteJob(_ j: Job) throws -> Job {
+        if j.cost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough in the studio balance · add a top-up in Credits") }
+        charge(j.cost)
+        jobs.append(j)
+        hub.emit(ApiEvent(type: "balance", balance: bal))
+        hub.emit(ApiEvent(type: "job", job: j))
+        held = false
+        pump()
+        return jobs.first { $0.id == j.id } ?? j
+    }
+    // End AI suite (workstream 1)
 }
