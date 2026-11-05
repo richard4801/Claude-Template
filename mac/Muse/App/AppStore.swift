@@ -4,13 +4,13 @@ import Observation
 import SwiftUI
 
 enum Screen: String, CaseIterable {
-    case home, models, profile, create, studio, shoot, queue, gallery, result, settings, credits, lora, posts, members, templates, template
+    case home, models, profile, create, studio, shoot, queue, gallery, result, settings, credits, lora, posts, members, templates, template, editor
 
     /// Which sidebar item is highlighted.
     var navParent: Screen {
         switch self {
         case .profile, .create, .lora: return .models
-        case .result: return .gallery
+        case .result, .editor: return .gallery
         case .credits: return .settings
         case .template: return .templates
         default: return self
@@ -314,6 +314,8 @@ final class AppStore {
     var fresh: Set<String> = []
     var comparing = false
     var openTakeId: String?
+    /// The open video editor (Screen.editor).
+    var editor: VideoEditorSession?
 
     // MARK: Models
 

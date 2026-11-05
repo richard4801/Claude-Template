@@ -82,6 +82,7 @@ struct Shell: View {
         case .members: MembersView()
         case .templates: TemplatesView()
         case .template: TemplateDetailView()
+        case .editor: VideoEditorView()
         }
     }
 }

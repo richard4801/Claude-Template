@@ -117,6 +117,14 @@ public protocol MuseAPI: AnyObject, Sendable {
     /// POST /v1/templates/{id}/prompt: the prompt view. Non-owners get the locked "Template: <name>" line.
     func templatePrompt(id: String, _ req: TemplatePromptRequest) async throws -> TemplatePrompt
 
+    // Video editor (plans/video-editor.md). The edit is made on the device; the server stores the file and the edit list.
+    /// presign `clip` + PUT (no confirm) for the edited .mp4, presign `image` + PUT for its thumbnail. `progress` 0…1.
+    func uploadEditedVideo(_ video: EditedVideo, progress: UploadProgress?) async throws -> EditedUpload
+    /// POST /v1/takes/{id}/versions → the new `kind: "edit"` take (`parentTakeId` = id). Free.
+    func createTakeVersion(takeId: String, _ req: TakeVersionRequest) async throws -> Take
+    /// GET /v1/takes/{id}/versions: edited versions of a take, newest first.
+    func takeVersions(takeId: String) async throws -> [Take]
+
     /// POST /v1/takes/{id}/upscale {size}: an Upscale job on a finished take. `upscale_unavailable` while it's coming soon.
     func upscale(takeId: String, _ req: UpscaleRequest) async throws -> Job
 

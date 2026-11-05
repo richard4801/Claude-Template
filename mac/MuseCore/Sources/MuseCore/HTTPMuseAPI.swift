@@ -214,6 +214,12 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     /// presign → PUT the bytes → confirm. Returns nil when the server has no presigned uploads or the PUT can't reach storage,
     /// so the caller can use the multipart upload instead. Errors from confirm (and from presign other than "not there") are thrown.
     func presigned<T: Decodable>(kind: String, contentType: String, body: UploadBody, meta: ClipMeta?, progress: UploadProgress?) async throws -> T? {
+        guard let uploadId = try await presignAndPut(kind: kind, contentType: contentType, body: body, progress: progress) else { return nil }
+        return try await call("POST", "v1/uploads/\(uploadId)/confirm", ConfirmBody(meta: meta))
+    }
+
+    /// presign → PUT, without confirm. The upload id, or nil when the server has no presigned uploads or storage can't be reached.
+    func presignAndPut(kind: String, contentType: String, body: UploadBody, progress: UploadProgress?) async throws -> String? {
         let ticket: PresignedUpload
         do {
             ticket = try await call("POST", "v1/uploads/presign", PresignBody(kind: kind, contentType: contentType, bytes: body.size))
@@ -233,7 +239,32 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
         } catch {
             return nil
         }
-        return try await call("POST", "v1/uploads/\(ticket.uploadId)/confirm", ConfirmBody(meta: meta))
+        return ticket.uploadId
+    }
+
+    // MARK: Video editor (edited versions of a take)
+
+    /// The edited .mp4 (presigned `clip`, PUT, no confirm: confirming would add it to the clip library) and its JPEG thumbnail
+    /// (presigned `image`, PUT). A thumbnail that can't be uploaded is left out (the server then uses the source's).
+    public func uploadEditedVideo(_ video: EditedVideo, progress: UploadProgress?) async throws -> EditedUpload {
+        progress?(0)
+        guard let id = try await presignAndPut(kind: "clip", contentType: "video/mp4", body: .file(video.file), progress: { p in progress?(p * 0.97) }) else {
+            throw ApiError("upload_failed", "Couldn't upload the edit. Check your connection and try again.")
+        }
+        var thumbId: String?
+        if let jpeg = video.thumbJPEG {
+            thumbId = try? await presignAndPut(kind: "image", contentType: "image/jpeg", body: .data(jpeg), progress: nil)
+        }
+        progress?(1)
+        return EditedUpload(uploadId: id, thumbUploadId: thumbId)
+    }
+
+    public func createTakeVersion(takeId: String, _ req: TakeVersionRequest) async throws -> Take {
+        absolutize(try await call("POST", "v1/takes/\(Self.pathKey(takeId))/versions", req))
+    }
+
+    public func takeVersions(takeId: String) async throws -> [Take] {
+        (try await call("GET", "v1/takes/\(Self.pathKey(takeId))/versions") as [Take]).map(absolutize)
     }
 
     func resolve(_ link: String) -> URL? {

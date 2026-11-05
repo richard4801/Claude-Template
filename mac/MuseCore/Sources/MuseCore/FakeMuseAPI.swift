@@ -6,7 +6,10 @@ import Foundation
 public actor FakeMuseAPI: MuseAPI {
     private let speed: Double
     let genDelay: Double
-    private let storeDir: URL?
+    let storeDir: URL?
+    /// Video editor: presigned uploads that were PUT but not used yet (id → file or JPEG), and the ids already saved as takes.
+    var editUploads: [String: FakeEditUpload] = [:]
+    var usedUploads: Set<String> = []
     let hub = EventHub()
 
     var models = SampleData.models()

@@ -699,6 +699,10 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
     public var variation: VariationDraw?
     /// Photoshoot stills: the reference images it was shot with (2026-11-05).
     public var refs: [ShootRef]?
+    /// Edited versions (`kind: "edit"`, 2026-11-05): the take it was cut from, the edit list (to re-open it) and the file's fps.
+    public var parentTakeId: String?
+    public var edits: EditList?
+    public var fps: Double?
 
     public init(id: String, kind: String = "take", jobId: String? = nil, index: Int = 1, of: Int = 1, title: String, label: String, engineLabel: String = "",
                 cost: Double = 0, seed: Int64 = 0, status: String = "test", thumb: ImageRef, prompt: String = "", createdAt: Int64 = 0) {
@@ -720,7 +724,7 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, kind, jobId, index, of, title, label, engineLabel, cost, seed, status, thumb, prompt, createdAt, videoUrl, durationSec, width, height,
-             templateId, templateName, shuffleSeed, variation, refs
+             templateId, templateName, shuffleSeed, variation, refs, parentTakeId, edits, fps
     }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -747,6 +751,9 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
         shuffleSeed = c.o(.shuffleSeed)
         variation = c.o(.variation)
         refs = c.o(.refs)
+        parentTakeId = c.o(.parentTakeId)
+        edits = c.o(.edits)
+        fps = c.o(.fps)
     }
 
     /// Made with a template.
@@ -765,7 +772,8 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
     }
 
     public var isFinal: Bool { status == "final" }
-    public var isVideo: Bool { kind == "take" }
+    /// Video takes: renders and their edited versions.
+    public var isVideo: Bool { kind == "take" || kind == "edit" }
     /// Gallery caption: "Living-room dance · Draft". Older servers' labels ("10 steps") read "Edit".
     public var caption: String {
         if kind == "shot" { return title.isEmpty ? label : "\(title) \(index)" }
@@ -786,7 +794,7 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
     }
 
     /// A finished render take that Upscale could work on.
-    public var canUpscale: Bool { isVideo && videoUrl != nil }
+    public var canUpscale: Bool { kind == "take" && videoUrl != nil }
 }
 
 public struct SetTakeStatusRequest: Codable, Sendable {

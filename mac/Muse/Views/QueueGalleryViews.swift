@@ -235,6 +235,9 @@ struct GalleryTile: View {
             Button(picked ? "Deselect" : "Select to compare") { store.togglePick(take.id) }
             Button(take.isFinal ? "Move back to Tests" : "Approve") { take.isFinal ? store.unapprove(take) : store.approve(take) }
             Button("Post…") { store.openPostSheet(take) }
+            if store.canEdit(take) {
+                Button("Edit video…") { store.openEditor(take) }
+            }
             if !take.isVideo && store.canSaveAsTemplate(take) {
                 Button("Save as template…") { store.saveAsTemplate(take) }
             }
@@ -309,6 +312,7 @@ struct ResultView: View {
                                 Spacer()
                                 Pill(take.isFinal ? "Final" : "Test", take.isFinal ? .good : .neutral)
                                 MoreMenu {
+                                    if store.canEdit(take) { Button("Edit video…") { store.openEditor(take) } }
                                     Button("Post…") { store.openPostSheet(take) }
                                     Button("Download") { store.export(take) }
                                     Button("Share…") { store.share(take) }
@@ -331,7 +335,9 @@ struct ResultView: View {
                                     ("Seed", "\(take.seed)\(take.isVideo || (!take.isTemplateShot && store.shoot.lockSeed) ? " · locked" : "")"),
                                 ]
                                 let templateRow: [(String, String)] = take.templateName.map { name in [("Template", name)] } ?? []
-                                let rows: [(String, String)] = base + templateRow
+                                let editRow: [(String, String)] = take.isEdit
+                                    ? [("Edited from", take.parentTakeId.flatMap { id in store.takes.first { $0.id == id }?.caption } ?? "A take that was deleted")] : []
+                                let rows: [(String, String)] = base + templateRow + editRow
                                 let media: [(String, String)] = take.isVideo ? [
                                     ("Length", take.durationSec.map { "\(Pricing.trimNum($0))s" } ?? "—"),
                                     ("Size", take.width.flatMap { w in take.height.map { "\(w)×\($0)" } } ?? "—"),
@@ -348,6 +354,10 @@ struct ResultView: View {
                             HStack {
                                 MButton("Retake with changes", icon: "arrow.triangle.2.circlepath", fill: true) { store.retake(take) }
                                 MButton("Export 1080×1920", icon: "square.and.arrow.up", fill: true) { store.export(take) }
+                            }
+                            if store.canEdit(take) {
+                                MButton(take.isEdit ? "Edit again" : "Edit video", icon: "scissors", fill: true) { store.openEditor(take) }
+                                    .help("Trim, split, change speed or mute. Saved as a new version; the original is kept.")
                             }
                             if take.canUpscale { UpscaleBox(take: take) }
                             let who = store.model(for: take)?.shortName ?? "her"
