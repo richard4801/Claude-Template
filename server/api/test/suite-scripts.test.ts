@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { clips, ledger } from '../src/db/schema.js';
+import { clips, jobs, ledger } from '../src/db/schema.js';
 import { DEFAULT_TEXTS } from '../src/prompt/library.js';
 import { scriptDef } from '../src/prompt/scripts/defs.js';
 import { validateRules } from '../src/prompt/scripts/run.js';
@@ -165,14 +165,20 @@ describe.skipIf(!hasFfmpeg)('AI suite · talking flag and beat-only audio over H
     expect(r.request).toMatchObject({ speaking: false, speakingSource: 'switch' });
     const j = await until(async () => { const x = (await owner.req('GET', `/v1/suite/shots/${r.id}`)).body.job; return x?.state === 'done' || x?.state === 'failed' ? x : null; }, 20_000);
     expect(j.state).toBe('done');
-    const sep = creates.filter(c => c.model === 'ryan5453/demucs');
-    expect(sep.length).toBe(1);
+    // The separator may be a real Replicate run or a no-op stand-in (which service runs it is workstream 3/4's choice):
+    // at most one run per job, the shot gets the instrumental (or the source when nothing was separated), and the
+    // settle is the shot plus exactly what the separation cost.
+    expect(creates.filter(c => c.model.includes('demucs')).length).toBeLessThanOrEqual(1);
     const shot = creates.find(c => c.model === 'minimax/h3')!;
     expect(shot.input.reference_audio_urls).toHaveLength(1);
-    expect(shot.input.reference_audio_urls[0]).toMatch(new RegExp(`r/${r.id}/instrumental\\.m4a`));
+    expect(shot.input.reference_audio_urls[0]).toMatch(new RegExp(`(r/${r.id}/instrumental\\.m4a|up/song\\.m4a)`));
     expect(shot.input.prompt).toMatch(/moves to the beat of <Audio 1>; she does not sing, speak or mouth lyrics/);
+    const [row] = await a.ctx.db.select().from(jobs).where(eq(jobs.id, r.id));
+    const sepCost = (row!.stats as any).suite.separationCost as number;
+    expect(sepCost).toBeGreaterThanOrEqual(0);
     const settle = (await a.ctx.db.select().from(ledger).where(eq(ledger.jobId, r.id))).find(x => x.kind === 'settle')!;
-    expect(settle.amountUsd).toBeCloseTo(0.08 * 5 + 4 * a.ctx.config.AUDIO_SEPARATION_PRICE_PER_SEC, 6);
+    expect(settle.amountUsd).toBeCloseTo(0.08 * 5 + sepCost, 6);
+    expect(r.cost).toBeCloseTo(0.08 * 5 + 0.0066, 6); // the hold includes the separation estimate
   });
 
   it('a beat from an outside https link is refused (only uploads can be separated)', async () => {

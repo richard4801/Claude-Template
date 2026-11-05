@@ -21,6 +21,13 @@ import { DEFAULT_LADDER, MODELS, modelById, modelView, MOCK_MODEL, TIER_INFO, TI
 import { SuiteRunner } from './runner.js';
 import { suiteSettings } from './schema.js';
 
+/**
+ * Estimate for removing the vocals of an audio reference (beat-only audio), held with the shot; the job settles the
+ * separator's exact cost. About 5 s of GPU on the separation model (2026-11-05 list price). Kept here so the suite
+ * doesn't depend on which service runs the separation (workstream 4 / 3).
+ */
+export const SEPARATION_ESTIMATE_USD = 0.0066;
+
 export const isSuiteJob = (j: { request?: Record<string, any> | null }) => j.request?.engine === 'suite';
 
 export class SuiteService {
@@ -176,7 +183,7 @@ export class SuiteService {
     const texts = await this.ctx.prompts.texts(u.studioId);
     const talk = await this.resolveSpeaking(u.studioId, r);
     const plan = buildPlan(r, need, pick, character, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale, speaking: talk.speaking,
-      separationUsd: this.ctx.config.AUDIO_SEPARATION_ESTIMATE });
+      separationUsd: SEPARATION_ESTIMATE_USD });
     return { swap: false as const, plan, pick, prefs, tried: pick.tried, talk };
   }
 
