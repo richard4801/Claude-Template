@@ -10,6 +10,10 @@ public actor FakeMuseAPI: MuseAPI {
     /// Video editor: presigned uploads that were PUT but not used yet (id → file or JPEG), and the ids already saved as takes.
     var editUploads: [String: FakeEditUpload] = [:]
     var usedUploads: Set<String> = []
+    /// Edit suite (workstream 3): editor AI jobs in demo mode, and editor uploads (music, voice-overs, .cube) by id.
+    var editorJobs: [String: EditorJob] = [:]
+    var editorFiles: [String: URL] = [:]
+
     let hub = EventHub()
 
     var models = SampleData.models()
