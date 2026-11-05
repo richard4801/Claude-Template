@@ -1,4 +1,4 @@
-CREATE TABLE "suite_settings" (
+CREATE TABLE IF NOT EXISTS "suite_settings" (
 	"studio_id" text PRIMARY KEY NOT NULL,
 	"models" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"ladder" jsonb,
