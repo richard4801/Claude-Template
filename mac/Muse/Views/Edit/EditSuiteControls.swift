@@ -172,10 +172,10 @@ struct SuiteToolButton: View {
                 if let icon { Image(systemName: icon).font(.system(size: 11.5, weight: .semibold)) }
                 Text(title).font(t.body(12.5, .medium)).lineLimit(1)
             }
-            .foregroundStyle(disabled ? t.muted.opacity(0.5) : (filled || accent ? Color.white : t.ink))
+            .foregroundStyle(disabled ? t.muted.opacity(0.5) : (accent ? t.accentInk : filled ? t.bg : t.ink))
             .padding(.horizontal, 10)
             .frame(height: 28)
-            .background(RoundedRectangle(cornerRadius: t.isA ? 0 : 6).fill(accent ? t.accent : (filled ? t.ink : t.surface)))
+            .background(RoundedRectangle(cornerRadius: t.isA ? 0 : 6).fill(accent ? t.accentFill : (filled ? t.ink : t.surface)))
             .overlay(RoundedRectangle(cornerRadius: t.isA ? 0 : 6).strokeBorder(filled || accent ? .clear : t.line, lineWidth: 1))
             .contentShape(Rectangle())
         }

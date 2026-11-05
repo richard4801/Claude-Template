@@ -578,12 +578,14 @@ final class EditSuiteSession {
     func setNoiseReduction(_ on: Bool) async {
         guard let c = state.selectedItem else { return }
         if !on {
-            edit { s in s.changeSound { $0.audioAsset = nil } }
+            // Back to the clip's own sound (or, after Remove background, the original video's).
+            let back = matteOriginal[c.id]
+            edit { s in s.changeSound { $0.audioAsset = back } }
             return
         }
         let assetId: String
         switch c {
-        case .video(let v): assetId = v.asset
+        case .video(let v): assetId = matteOriginal[v.id] ?? v.asset
         case .audio(let v): assetId = v.asset
         default: return
         }
