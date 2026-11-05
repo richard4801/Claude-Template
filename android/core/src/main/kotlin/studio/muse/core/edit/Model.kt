@@ -1,0 +1,275 @@
+package studio.muse.core.edit
+
+/*
+ * Editor v2: the multitrack edit project (plans/video-editor.md "Editor v2"). A Kotlin port of the TypeScript reference
+ * server/api/src/editor/model.ts: the same data, the same JSON field names (EditJson), and the same answers from every
+ * function (checked against the shared fixtures in src/test/resources/editor). Pure and immutable: no Android types.
+ *
+ * Optional fields of the contract are nullable and default to null (null = absent in JSON); required ones are not.
+ * Enums carry their exact JSON spelling in [Wire.wire]; an unknown spelling is an error when parsing.
+ */
+
+/** An enum with a JSON spelling. */
+interface Wire { val wire: String }
+
+inline fun <reified E> wireOf(s: String): E? where E : Enum<E>, E : Wire = enumValues<E>().firstOrNull { it.wire == s }
+
+enum class Ease(override val wire: String) : Wire { LINEAR("linear"), EASE_IN("easeIn"), EASE_OUT("easeOut"), EASE_IN_OUT("easeInOut"), HOLD("hold") }
+
+/** Keyframeable properties. Volume only on clips with sound; the rest on visual items. */
+enum class KfProp(override val wire: String) : Wire { X("x"), Y("y"), SCALE("scale"), ROTATION("rotation"), OPACITY("opacity"), VOLUME("volume") }
+
+enum class TransitionKind(override val wire: String) : Wire {
+    FADE("fade"), BLACK("black"), WHITE("white"), SLIDE_LEFT("slideLeft"), SLIDE_RIGHT("slideRight"), SLIDE_UP("slideUp"), SLIDE_DOWN("slideDown"), ZOOM("zoom")
+}
+
+enum class AnimKind(override val wire: String) : Wire {
+    NONE("none"), FADE("fade"), POP("pop"), SLIDE_UP("slideUp"), SLIDE_DOWN("slideDown"), ZOOM("zoom"), TYPEWRITER("typewriter")
+}
+
+enum class Fit(override val wire: String) : Wire { COVER("cover"), CONTAIN("contain") }
+enum class AssetKind(override val wire: String) : Wire { VIDEO("video"), IMAGE("image"), AUDIO("audio") }
+
+enum class TrackKind(override val wire: String) : Wire {
+    MAIN("main"), VIDEO("video"), IMAGE("image"), TEXT("text"), CAPTION("caption"), MUSIC("music"), VOICE("voice"), SFX("sfx");
+
+    val isAudio: Boolean get() = this == MUSIC || this == VOICE || this == SFX
+    /** Tracks whose items are [VideoClip]s. */
+    val isVideo: Boolean get() = this == MAIN || this == VIDEO
+}
+
+enum class Font(override val wire: String) : Wire { SANS("sans"), SERIF("serif"), ROUNDED("rounded"), CONDENSED("condensed"), MONO("mono"), MARKER("marker") }
+enum class Align(override val wire: String) : Wire { LEFT("left"), CENTER("center"), RIGHT("right") }
+
+enum class CaptionPreset(override val wire: String) : Wire {
+    PLAIN("plain"), HIGHLIGHT("highlight"), BOX("box"), KARAOKE("karaoke"), POP("pop"), SINGLE("single")
+}
+
+enum class DuckUnder(override val wire: String) : Wire { VOICE("voice"), SPEECH("speech") }
+
+data class Keyframe(val t: Double, val v: Double, val ease: Ease? = null)
+
+/** Per-property keyframe lists, in JSON order. */
+typealias Keyframes = Map<KfProp, List<Keyframe>>
+
+data class Transform(val x: Double? = null, val y: Double? = null, val scale: Double? = null, val rotation: Double? = null)
+data class Crop(val left: Double? = null, val top: Double? = null, val right: Double? = null, val bottom: Double? = null)
+data class Adjust(val exposure: Double? = null, val contrast: Double? = null, val saturation: Double? = null, val temperature: Double? = null)
+data class FilterRef(val id: String, val amount: Double)
+data class Chroma(val color: String, val similarity: Double? = null, val smoothness: Double? = null, val spill: Double? = null)
+data class Transition(val kind: TransitionKind, val durationSec: Double)
+data class Anim(val kind: AnimKind, val durationSec: Double)
+
+data class Asset(
+    val id: String,
+    val kind: AssetKind,
+    val take: String? = null,
+    val upload: String? = null,
+    val library: String? = null,
+    val durationSec: Double? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+    val hasAudio: Boolean? = null,
+    /** A hint, never trusted. */
+    val url: String? = null,
+)
+
+/** Anything on a track. Which class an item is follows from its track's kind. */
+sealed interface Item { val id: String }
+
+/** Items that draw a picture (video clips and images). */
+sealed interface Visual : Item {
+    val fit: Fit?
+    val transform: Transform?
+    val crop: Crop?
+    val opacity: Double?
+    val keyframes: Keyframes?
+    val filter: FilterRef?
+    val adjust: Adjust?
+}
+
+/** Items with source in/out times and a sound (video clips and audio clips). */
+sealed interface MediaClip : Item {
+    val asset: String
+    val inSec: Double
+    val outSec: Double
+    /** Null = 1 (only audio clips may leave it out). */
+    val speedOrNull: Double?
+    val volume: Double?
+    val muted: Boolean?
+    val fadeInSec: Double?
+    val fadeOutSec: Double?
+    val keyframes: Keyframes?
+}
+
+data class VideoClip(
+    override val id: String,
+    override val asset: String,
+    override val inSec: Double,
+    override val outSec: Double,
+    val speed: Double = 1.0,
+    /** Not on the main track. */
+    val startSec: Double? = null,
+    override val volume: Double? = null,
+    override val muted: Boolean? = null,
+    override val fadeInSec: Double? = null,
+    override val fadeOutSec: Double? = null,
+    /** Use this asset's sound (e.g. a cleaned voice) at the same source times. */
+    val audioAsset: String? = null,
+    override val fit: Fit? = null,
+    override val transform: Transform? = null,
+    override val crop: Crop? = null,
+    override val opacity: Double? = null,
+    override val keyframes: Keyframes? = null,
+    override val filter: FilterRef? = null,
+    override val adjust: Adjust? = null,
+    val chroma: Chroma? = null,
+    /** Main track, clip ≥ 2. */
+    val transitionIn: Transition? = null,
+) : Visual, MediaClip {
+    override val speedOrNull: Double get() = speed
+}
+
+data class ImageItem(
+    override val id: String,
+    val asset: String,
+    val startSec: Double,
+    val durationSec: Double,
+    override val fit: Fit? = null,
+    override val transform: Transform? = null,
+    override val crop: Crop? = null,
+    override val opacity: Double? = null,
+    override val keyframes: Keyframes? = null,
+    override val filter: FilterRef? = null,
+    override val adjust: Adjust? = null,
+    val animIn: Anim? = null,
+    val animOut: Anim? = null,
+) : Visual
+
+data class Stroke(val color: String, val widthPct: Double)
+data class Shadow(val color: String, val opacity: Double, val blurPct: Double, val dyPct: Double)
+data class TextBackground(val color: String, val opacity: Double, val paddingPct: Double, val radiusPct: Double)
+
+data class TextStyle(
+    val font: Font,
+    val weight: Int,
+    val sizePct: Double,
+    val color: String,
+    val align: Align,
+    val maxWidthPct: Double? = null,
+    val lineHeight: Double? = null,
+    val letterSpacing: Double? = null,
+    val uppercase: Boolean? = null,
+    val stroke: Stroke? = null,
+    val shadow: Shadow? = null,
+    val background: TextBackground? = null,
+)
+
+data class TextItem(
+    override val id: String,
+    val startSec: Double,
+    val durationSec: Double,
+    val text: String,
+    val style: TextStyle,
+    val transform: Transform? = null,
+    val opacity: Double? = null,
+    val keyframes: Keyframes? = null,
+    val animIn: Anim? = null,
+    val animOut: Anim? = null,
+    val template: String? = null,
+) : Item
+
+data class AudioClip(
+    override val id: String,
+    override val asset: String,
+    val startSec: Double,
+    override val inSec: Double,
+    override val outSec: Double,
+    val speed: Double? = null,
+    override val volume: Double? = null,
+    override val muted: Boolean? = null,
+    override val fadeInSec: Double? = null,
+    override val fadeOutSec: Double? = null,
+    override val keyframes: Keyframes? = null,
+    /** Beat marks, source seconds. */
+    val beats: List<Double>? = null,
+) : MediaClip {
+    override val speedOrNull: Double? get() = speed
+}
+
+/** A caption style: the [TextStyle] fields plus the caption ones (one flat JSON object). */
+data class CaptionStyle(
+    val text: TextStyle,
+    val preset: CaptionPreset,
+    val highlightColor: String,
+    val y: Double? = null,
+    val wordsPerPage: Int? = null,
+    val maxLines: Int? = null,
+)
+
+data class CaptionWord(val text: String, val startSec: Double, val endSec: Double)
+data class CaptionTrack(val asset: String, val words: List<CaptionWord>, val style: CaptionStyle)
+data class Duck(val level: Double? = null, val fadeSec: Double? = null, val under: List<DuckUnder>)
+
+data class Track(
+    val id: String,
+    val kind: TrackKind,
+    val name: String? = null,
+    val muted: Boolean? = null,
+    val hidden: Boolean? = null,
+    val volume: Double? = null,
+    val items: List<Item> = emptyList(),
+    val caption: CaptionTrack? = null,
+    val duck: Duck? = null,
+)
+
+data class Canvas(val width: Int, val height: Int, val fps: Double, val background: String? = null)
+
+data class EditProject(
+    val version: Int = 2,
+    val sourceTakeId: String,
+    val canvas: Canvas,
+    val assets: List<Asset>,
+    val tracks: List<Track>,
+    val mute: Boolean? = null,
+) {
+    /** The main track (exactly one in a valid project; the first). */
+    val main: Track get() = tracks.first { it.kind == TrackKind.MAIN }
+    val mainClips: List<VideoClip> get() = main.items.map { it as VideoClip }
+    fun asset(id: String): Asset? = assets.firstOrNull { it.id == id }
+    fun track(id: String): Track? = tracks.firstOrNull { it.id == id }
+}
+
+/** The v1 edit list (plans/video-editor.md "Edit list"), as JSON sees it. */
+data class V1Segment(val inSec: Double, val outSec: Double, val speed: Double, val muted: Boolean? = null)
+data class EditListV1(val version: Int = 1, val sourceTakeId: String, val sourceDurationSec: Double, val segments: List<V1Segment>, val mute: Boolean)
+
+/** A broken rule: the field path (e.g. `edits.tracks.0.items.1.startSec`) and what is wrong, like the server's bad_request. */
+class EditProblem(val field: String, val reason: String) : IllegalArgumentException("$field: $reason")
+
+object EditLimits {
+    const val MAX_JSON_BYTES = 256 * 1024
+    const val MAX_TRACKS = 16
+    const val MAX_ITEMS_PER_TRACK = 300
+    const val MAX_ITEMS = 600
+    const val MAX_ASSETS = 60
+    const val MAX_WORDS = 3000
+    const val MAX_KEYFRAMES = 100
+    const val MIN_CLIP_SOURCE_SEC = 0.1
+    const val MIN_ITEM_SEC = 0.05
+    const val MIN_OUTPUT_SEC = 0.5
+    const val MAX_OUTPUT_SEC = 600.0
+    const val MIN_SPEED = 0.25
+    const val MAX_SPEED = 4.0
+    const val END_SLACK_SEC = 0.05
+    const val MIN_TRANSITION_SEC = 0.1
+    const val MAX_TRANSITION_SEC = 2.0
+    const val MAX_TEXT = 500
+    const val OVERLAP_SLACK_SEC = 0.001
+    val V1_SPEEDS = listOf(0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
+
+    /** Caption paging constants (plans/video-editor.md "Text, hooks and captions"). */
+    const val CAPTION_GAP_SEC = 0.6
+    const val CAPTION_TAIL_SEC = 0.4
+    const val SPEECH_JOIN_SEC = 0.4
+}
