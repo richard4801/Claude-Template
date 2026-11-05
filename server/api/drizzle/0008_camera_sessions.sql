@@ -1,4 +1,4 @@
-CREATE TABLE "camera_assets" (
+CREATE TABLE IF NOT EXISTS "camera_assets" (
 	"id" text PRIMARY KEY NOT NULL,
 	"session_id" text NOT NULL,
 	"studio_id" text NOT NULL,
@@ -13,7 +13,7 @@ CREATE TABLE "camera_assets" (
 	"created_at" bigint NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "camera_messages" (
+CREATE TABLE IF NOT EXISTS "camera_messages" (
 	"id" text PRIMARY KEY NOT NULL,
 	"session_id" text NOT NULL,
 	"role" text NOT NULL,
@@ -23,7 +23,7 @@ CREATE TABLE "camera_messages" (
 	"created_at" bigint NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "camera_sessions" (
+CREATE TABLE IF NOT EXISTS "camera_sessions" (
 	"id" text PRIMARY KEY NOT NULL,
 	"studio_id" text NOT NULL,
 	"owner_id" text NOT NULL,
@@ -45,7 +45,7 @@ CREATE TABLE "camera_sessions" (
 	"updated_at" bigint NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "mcp_tokens" (
+CREATE TABLE IF NOT EXISTS "mcp_tokens" (
 	"id" text PRIMARY KEY NOT NULL,
 	"studio_id" text NOT NULL,
 	"user_id" text NOT NULL,
@@ -58,10 +58,16 @@ CREATE TABLE "mcp_tokens" (
 	"revoked_at" bigint
 );
 --> statement-breakpoint
-ALTER TABLE "camera_assets" ADD CONSTRAINT "camera_assets_session_id_camera_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."camera_sessions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "camera_messages" ADD CONSTRAINT "camera_messages_session_id_camera_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."camera_sessions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "camera_assets_session_idx" ON "camera_assets" USING btree ("session_id","created_at");--> statement-breakpoint
-CREATE INDEX "camera_messages_session_idx" ON "camera_messages" USING btree ("session_id","created_at");--> statement-breakpoint
-CREATE INDEX "camera_sessions_studio_idx" ON "camera_sessions" USING btree ("studio_id","updated_at");--> statement-breakpoint
-CREATE UNIQUE INDEX "mcp_tokens_hash_idx" ON "mcp_tokens" USING btree ("token_hash");--> statement-breakpoint
-CREATE INDEX "mcp_tokens_user_idx" ON "mcp_tokens" USING btree ("user_id");
+DO $$ BEGIN
+ ALTER TABLE "camera_assets" ADD CONSTRAINT "camera_assets_session_id_camera_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."camera_sessions"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "camera_messages" ADD CONSTRAINT "camera_messages_session_id_camera_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."camera_sessions"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "camera_assets_session_idx" ON "camera_assets" USING btree ("session_id","created_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "camera_messages_session_idx" ON "camera_messages" USING btree ("session_id","created_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "camera_sessions_studio_idx" ON "camera_sessions" USING btree ("studio_id","updated_at");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "mcp_tokens_hash_idx" ON "mcp_tokens" USING btree ("token_hash");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "mcp_tokens_user_idx" ON "mcp_tokens" USING btree ("user_id");

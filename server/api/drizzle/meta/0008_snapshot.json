@@ -1,6 +1,6 @@
 {
   "id": "589a7801-f0ea-4f54-87eb-aae01a51a5b7",
-  "prevId": "56f103b8-a126-4f9f-92e3-4b9314edadf7",
+  "prevId": "4cf48424-6c9c-40fd-a9ef-7bf95f12a4b6",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -988,6 +988,12 @@
           "notNull": true,
           "default": "'[]'::jsonb"
         },
+        "identity_body_slot": {
+          "name": "identity_body_slot",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -1686,6 +1692,12 @@
         "image_models": {
           "name": "image_models",
           "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "identity_refs": {
+          "name": "identity_refs",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         }
@@ -2772,6 +2784,62 @@
           "with": {}
         }
       },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.suite_settings": {
+      "name": "suite_settings",
+      "schema": "",
+      "columns": {
+        "studio_id": {
+          "name": "studio_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "models": {
+          "name": "models",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "ladder": {
+          "name": "ladder",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cap_per_job": {
+          "name": "cap_per_job",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cap_per_day": {
+          "name": "cap_per_day",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
