@@ -114,7 +114,7 @@ fun TemplatesScreen() {
         Column(Modifier.fillMaxSize()) {
             TopBar("Templates", onBack = { nav.back() }) {
                 MoreMenu(listOf(
-                    MenuItem("camera", "Make one from a photo") { c.repo.toast("Open any photo you like → Save as template") },
+                    MenuItem("camera", "Make one from a photo") { c.drafts.galleryTab.value = "tests"; nav.tab(Routes.GALLERY); c.repo.toast("Open a photo you like · then Save as template") },
                     MenuItem("retry", "Refresh") { vm.load() },
                 ))
             }

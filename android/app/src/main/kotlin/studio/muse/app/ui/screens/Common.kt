@@ -80,25 +80,21 @@ fun ModelInitial(model: Model, modifier: Modifier = Modifier, size: Float = 42f)
     Box(modifier.background(m.t.surface2), contentAlignment = Alignment.Center) { T(model.initial, m.type.wm.copy(fontSize = size.sp), m.t.muted) }
 }
 
-/** The profile ⋯ menu (app.js MENUS.profile). */
+/**
+ * The profile ⋯ menu (app.js MENUS.profile): only actions that really do something. Archive (owner) is the way to take a
+ * model away; it keeps everything and can be undone in Settings.
+ */
 @Composable
 fun profileMenu(onSheet: () -> Unit, onOutfit: () -> Unit, onLora: () -> Unit = {}, onAccounts: () -> Unit = {},
-    onEnhance: () -> Unit = {}, onDressUp: () -> Unit = {}, onArchive: (() -> Unit)? = null): List<MenuItem> {
-    val repo = LocalContainer.current.repo
-    return listOfNotNull(
-        MenuItem("spark", "Edit character sheet", onClick = onSheet),
-        MenuItem("grid", "Character sheet", onClick = onSheet),
-        MenuItem("spark", "Enhance character sheet", onClick = onEnhance),
-        MenuItem("outfit", "Dress up", onClick = onDressUp),
-        MenuItem("spark", "Identity LoRA", onClick = onLora),
-        MenuItem("export", "Accounts", onClick = onAccounts),
-        MenuItem("outfit", "Add outfit", onClick = onOutfit),
-        MenuItem("retry", "Duplicate model") { repo.toast("Model duplicated") },
-        MenuItem("export", "Share profile card") { repo.toast("Profile card ready to share") },
-        onArchive?.let { MenuItem("lock", "Archive model", onClick = it) },
-        MenuItem("shield", "Delete model", danger = true) { repo.toast("Delete is disabled in this demo") },
-    )
-}
+    onEnhance: () -> Unit = {}, onDressUp: () -> Unit = {}, onArchive: (() -> Unit)? = null): List<MenuItem> = listOfNotNull(
+    MenuItem("grid", "Character sheet", onClick = onSheet),
+    MenuItem("spark", "Enhance character sheet", onClick = onEnhance),
+    MenuItem("outfit", "Dress up", onClick = onDressUp),
+    MenuItem("outfit", "Add outfit", onClick = onOutfit),
+    MenuItem("spark", "Identity LoRA", onClick = onLora),
+    MenuItem("export", "Accounts", onClick = onAccounts),
+    onArchive?.let { MenuItem("lock", "Archive model", danger = true, onClick = it) },
+)
 
 /** Members spend credit from the owner; the owner (and Demo mode) spends the studio balance they load. */
 fun lowFundsMessage(c: studio.muse.app.AppContainer): String =

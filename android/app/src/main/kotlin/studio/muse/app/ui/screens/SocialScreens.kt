@@ -292,7 +292,7 @@ fun PostScreen(takeId: String) {
         }
         Dock {
             val n = d.platforms.size
-            val label = if (!d.later) "Post to ${if (n == 0) "…" else n} account${if (n == 1) "" else "s"}" else "Schedule · ${s.slots.getOrNull(d.slot)?.let { PostTime.label(it) } ?: ""}"
+            val label = if (!d.later) (if (n == 0) "Pick an account to post" else "Post to $n account${if (n == 1) "" else "s"}") else "Schedule · ${s.slots.getOrNull(d.slot)?.let { PostTime.label(it) } ?: ""}"
             Cta(label, {
                 when {
                     n == 0 -> vm.toast("Pick at least one account")

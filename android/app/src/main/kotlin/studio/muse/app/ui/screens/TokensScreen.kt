@@ -132,7 +132,7 @@ private fun MemberTokens(w: Wallet, b: Balance) {
     )
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Kpi("Today", Pricing.money(w.todayUsd), Modifier.weight(1f))
-        Kpi("This month", Pricing.money(w.monthUsd), Modifier.weight(1f))
+        Kpi("Month", Pricing.money(w.monthUsd), Modifier.weight(1f))
         Kpi("Per video", "~${Pricing.money(Pricing.estCost(Pricing.typicalVideo))}", Modifier.weight(1f))
     }
     Field("Spend limits") {
@@ -149,13 +149,14 @@ private fun OwnerTokens(w: Wallet, b: Balance, studio: StudioBalance?) {
     if (studio?.needsFirstTopUp ?: (b.needsFirstTopUp == true)) NoteBox("Add your first top-up: record what you loaded into the studio, then send members credit from it.", icon = "wallet")
     OwnerBalanceCard(w, studio = studio)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Kpi("Studio today", Pricing.money(b.today), Modifier.weight(1f))
-        Kpi("This month", Pricing.money(b.month), Modifier.weight(1f))
+        Kpi("Today", Pricing.money(b.today), Modifier.weight(1f))
+        Kpi("Month", Pricing.money(b.month), Modifier.weight(1f))
         Kpi("Per video", "~${Pricing.money(Pricing.estCost(Pricing.typicalVideo))}", Modifier.weight(1f))
     }
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        // No icon on Send credit: at 360 dp the label would be cut ("SEND CRE…").
         Cta2("Members", { nav.go(Routes.MEMBERS) }, Modifier.weight(1f), icon = "model")
-        Cta("Send credit", { nav.go(Routes.MEMBERS) }, Modifier.weight(1f), icon = "wallet")
+        Cta("Send credit", { nav.go(Routes.MEMBERS) }, Modifier.weight(1.25f))
     }
     Field("Spend limits") {
         LimitRow("Per job", Pricing.money(b.perJobLimit))
@@ -168,7 +169,7 @@ private fun OwnerTokens(w: Wallet, b: Balance, studio: StudioBalance?) {
 private fun LegacyBalance(b: Balance, videos: Int) {
     BigCard("Balance", Pricing.money(b.balance), "≈ ${Pricing.draftVideosLeft(b.balance)} Draft videos")
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Kpi("This month", Pricing.money(b.month), Modifier.weight(1f))
+        Kpi("Month", Pricing.money(b.month), Modifier.weight(1f))
         Kpi("Per video", "~${Pricing.money(Pricing.estCost(Pricing.typicalVideo))}", Modifier.weight(1f))
         Kpi("Videos", "$videos", Modifier.weight(1f))
     }

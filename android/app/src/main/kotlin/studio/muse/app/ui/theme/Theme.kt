@@ -101,7 +101,7 @@ private fun ts(f: FontFamily, size: TextUnit, w: FontWeight = FontWeight.Normal,
 
 fun tokensFor(id: ThemeId): Tokens = when (id) {
     ThemeId.A -> Tokens(
-        bg = Color(0xFFEFEBE3), surface = Color(0xFFF8F5EF), surface2 = Color(0xFFE7E1D6), ink = Color(0xFF141210), muted = Color(0xFF6E675E),
+        bg = Color(0xFFEFEBE3), surface = Color(0xFFF8F5EF), surface2 = Color(0xFFE7E1D6), ink = Color(0xFF141210), muted = Color(0xFF67605A),
         line = Color(0xFFCFC7BA), accent = Color(0xFFB5121B), accentInk = Color.White, cta = Color(0xFF141210), ctaInk = Color(0xFFF8F5EF),
         good = Color(0xFF2F6B3A), warn = Color(0xFF9A5B00), warnPillBg = Color(0xFFF6E2C0), warnPillInk = Color(0xFF6B3F00),
         r = 2.dp, rLg = 2.dp, stroke = 1.dp, display = Fonts.instrumentSerif, body = Fonts.archivo, mono = Fonts.plexMono, dark = false,
