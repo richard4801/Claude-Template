@@ -32,6 +32,7 @@ export const SHEET_ANGLES = [
   { key: 'tq', label: 'Body · ¾', framing: 'full body, three-quarter view' },
   { key: 'side', label: 'Body · side', framing: 'full body, side view' },
   { key: 'back', label: 'Body · back', framing: 'full body, from behind' },
+  { key: 'faceTq', label: 'Face · ¾', framing: 'head-and-shoulders, turned three-quarters' },
 ] as const;
 export type SheetAngle = (typeof SHEET_ANGLES)[number];
 export const sheetAngle = (key: string) => SHEET_ANGLES.find(a => a.key === key);
@@ -52,7 +53,7 @@ export const DEFAULT_CAMERA: CameraSpec = { shot: 'Medium', lensMm: 35, aperture
 /** Words that would change who she is. A direction clause containing one is dropped. */
 const IDENTITY_OVERRIDE = /\b(blonde|brunette|redhead|ginger|bald|(blue|green|brown|hazel|grey|gray) eyes|eye colou?r|hair colou?r|dyed hair|skin tone|different (face|person|woman|girl|model)|another (face|person|woman|model)|older|younger|look like)\b/i;
 
-/** Identity LoRA naming: first name, lower case, plus the version ("sienna_v2"). */
+/** Identity LoRA naming: first name, lower case, plus the version ("demo_v2"). */
 export function loraToken(modelName: string, version: number) {
   const first = modelName.trim().split(/\s+/)[0] ?? '';
   const clean = [...first.toLowerCase()].filter(ch => /[\p{L}\p{N}]/u.test(ch)).join('');

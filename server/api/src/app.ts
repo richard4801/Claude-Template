@@ -24,6 +24,8 @@ import { WarmService } from './services/warm.js';
 import { schemaState } from './db/client.js';
 import { ReplicateClient } from './replicate/client.js';
 import { ReplicateVideo } from './services/replicateVideo.js';
+import { ImageModels } from './images/steps.js';
+import { ToolService } from './services/tools.js';
 import { EngineHealth } from './services/engines.js';
 
 declare module 'fastify' {
@@ -73,7 +75,9 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   ctx.replicateVideo = new ReplicateVideo(ctx);
   ctx.engines = new EngineHealth(ctx);
   ctx.money = new Money(ctx);
+  ctx.imageModels = new ImageModels(ctx, opts.fetchFn);
   ctx.images = new ImageService(ctx, opts.fetchFn);
+  ctx.tools = new ToolService(ctx);
   ctx.jobs = new JobService(ctx);
   ctx.lora = new LoraService(ctx);
   ctx.posts = new PostScheduler(ctx);

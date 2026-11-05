@@ -5,7 +5,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { and, eq } from 'drizzle-orm';
 import { jobs, ledger, pods, users, warmSessions } from '../src/db/schema.js';
 import { RunpodApi } from '../src/gpu/runpodApi.js';
-import { client, makeApp, people, sienna, sse, until, type Client } from './helpers.js';
+import { client, makeApp, people, demoModel, sse, until, type Client } from './helpers.js';
 
 const MIN = 60_000;
 const RATE = 3.99;
@@ -111,7 +111,7 @@ describe('Keep add-on engine ready (was Keep GPU warm), owner-only, simulated GP
   });
 
   it("the owner's renders on it are not charged GPU time again", async () => {
-    const m = await sienna(owner);
+    const m = await demoModel(owner);
     const on = (await owner.req('POST', '/v1/gpu/warm', { on: true })).body;
     expect(on.state).toBe('warm');
     const j = (await owner.req('POST', '/v1/jobs', { title: 'On warm', modelId: m.id, steps: 4, engine: 'h3' })).body;
@@ -282,7 +282,7 @@ describe('Keep add-on engine ready on the RunPod controller (fake RunPod)', () =
     expect(warm.state).toBe('warm');
     expect(warm.ratePerHour).toBe(3.6);
     // A render goes straight to the warm pod.
-    const m = await sienna(m1);
+    const m = await demoModel(m1);
     const clip = await uploadClip(a, m1);
     const j = (await m1.req('POST', '/v1/jobs', { title: 'Warm', modelId: m.id, clipId: clip, steps: 10 })).body;
     await tick(Date.now());
@@ -310,7 +310,7 @@ describe('Keep add-on engine ready on the RunPod controller (fake RunPod)', () =
     const d = rp.deployed[rp.deployed.length - 1]!;
     const w = worker(d.token);
     await w('/worker/v1/heartbeat', { podId: d.id, busy: false });
-    const m = await sienna(m2);
+    const m = await demoModel(m2);
     const clip = await uploadClip(a, m2);
     const j = (await m2.req('POST', '/v1/jobs', { title: 'Mid', modelId: m.id, clipId: clip, steps: 10 })).body;
     await tick(Date.now());

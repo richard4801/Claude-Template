@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { and, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
@@ -24,11 +24,15 @@ import { buildTemplatePrompt, randomImageSeed, randomSeed } from '../templates/p
 import { layersFromPrompt } from '../templates/service.js';
 import { dbStatus } from '../db/pg.js';
 import { inviteShareText, registerReleaseRoutes } from './releases.js';
+import { setViews } from '../services/tools.js';
+import { IMAGE_STEPS, type ImageStep } from '../replicate/mapping.js';
+import { CatalogError } from '../replicate/catalog.js';
 
 /** SSE comment interval: well under any hosting proxy's idle timeout (Koyeb, Railway, Cloudflare: 60-100 s). */
 export const SSE_KEEPALIVE_MS = 15_000;
 
-const SLOT_KEYS = ['face', 'profile', 'front', 'tq', 'side', 'back'];
+/** The 7 sheet images (faceTq appended last, plans/api.md "Model tools" §1). */
+export const SLOT_KEYS = ['face', 'profile', 'front', 'tq', 'side', 'back', 'faceTq'];
 const parse = <T>(schema: z.ZodType<T>, body: unknown): T => {
   const r = schema.safeParse(body ?? {});
   if (!r.success) { const i = r.error.issues[0]!; throw badRequest(`${i.path.join('.') || 'body'}: ${i.message}`); }
@@ -38,10 +42,14 @@ const jsonOr400 = (s: string) => { try { return JSON.parse(s); } catch { throw n
 const ImageRefSchema = z.object({ asset: z.string().max(100).optional(), url: z.string().max(2000).optional() });
 
 export function modelView(m: typeof models.$inferSelect) {
-  return compact({ id: m.id, name: m.name, age: m.age, niche: m.niche, look: m.look, neverAdd: m.neverAdd, slots: m.slots, outfitIds: m.outfitIds, personality: m.personality, notes: m.notes });
+  // Every model shows the 7 sheet images, also a row written before faceTq existed.
+  const slots = SLOT_KEYS.map(k => m.slots.find(s => s.key === k) ?? { key: k, image: null, source: 'upload' as const, busy: false });
+  return compact({ id: m.id, name: m.name, age: m.age, niche: m.niche, look: m.look, neverAdd: m.neverAdd, slots, outfitIds: m.outfitIds, personality: m.personality, notes: m.notes,
+    archived: !!m.archivedAt, archivedAt: m.archivedAt ?? undefined });
 }
 export const outfitView = (o: typeof outfits.$inferSelect) =>
-  compact({ id: o.id, modelId: o.modelId, name: o.name, mode: o.mode, description: o.description, angles: o.angles, state: o.state, prompt: o.prompt, cost: o.cost ?? undefined });
+  compact({ id: o.id, modelId: o.modelId, name: o.name, mode: o.mode, description: o.description, angles: o.angles, faces: o.faces ?? undefined, state: o.state, prompt: o.prompt, cost: o.cost ?? undefined });
+setViews(modelView, outfitView);
 const clipView = (c: typeof clips.$inferSelect) => compact({ id: c.id, name: c.name, durationSec: c.durationSec, width: c.width, height: c.height, fps: c.fps, checks: c.checks });
 
 export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
@@ -51,9 +59,11 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   const emitModel = (m: typeof models.$inferSelect) => ctx.hub.emit(m.studioId, { type: 'model', model: modelView(m) });
   const emitOutfit = (o: typeof outfits.$inferSelect) => ctx.hub.emit(o.studioId, { type: 'outfit', outfit: outfitView(o) });
 
-  async function model(u: AuthUser, id: string) {
+  /** A model of the studio; `forWork` refuses an archived one (plans/api.md "Model tools" §7). */
+  async function model(u: AuthUser, id: string, forWork = false) {
     const [m] = await db.select().from(models).where(and(eq(models.id, id), eq(models.studioId, u.studioId)));
     if (!m) throw notFound('Model');
+    if (forWork && m.archivedAt) throw new ApiError(409, 'model_archived', 'This model is archived · restore her in Settings → Archived models');
     return m;
   }
   async function activeLora(m: typeof models.$inferSelect) {
@@ -105,7 +115,21 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   await registerReleaseRoutes(app, ctx);
 
   // ------------------------------------------------------------------ models and character sheets
-  app.get('/v1/models', async req => (await db.select().from(models).where(eq(models.studioId, req.user.studioId)).orderBy(models.createdAt)).map(modelView));
+  app.get('/v1/models', async req => {
+    const archived = ['1', 'true'].includes(String((req.query as any)?.archived ?? ''));
+    if (archived && req.user.role !== 'owner') throw new ApiError(403, 'owner_only', 'Only the studio owner can see archived models');
+    const rows = await db.select().from(models).where(and(eq(models.studioId, req.user.studioId), archived ? isNotNull(models.archivedAt) : isNull(models.archivedAt))).orderBy(models.createdAt);
+    return rows.map(modelView);
+  });
+  // Archive (owner): hidden from every list and picker, nothing deleted.
+  for (const [path, on] of [['archive', true], ['unarchive', false]] as const) {
+    app.post<{ Params: { id: string } }>(`/v1/models/:id/${path}`, { config: { owner: true } }, async req => {
+      const m = await model(req.user, req.params.id);
+      const [u] = await db.update(models).set({ archivedAt: on ? m.archivedAt ?? Date.now() : null }).where(eq(models.id, m.id)).returning();
+      emitModel(u!);
+      return modelView(u!);
+    });
+  }
   app.post('/v1/models', async req => {
     const b = parse(z.object({ name: z.string().max(80).optional(), age: z.number().optional(), niche: z.string().max(80).optional() }).passthrough(), req.body);
     const [m] = await db.insert(models).values({
@@ -147,10 +171,11 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     return modelView(u!);
   });
   app.post<{ Params: { id: string } }>('/v1/models/:id/fill-angles', async req => {
-    const m = await model(req.user, req.params.id);
+    const m0 = await model(req.user, req.params.id, true);
+    const m = { ...m0, slots: SLOT_KEYS.map(k => m0.slots.find(s => s.key === k) ?? { key: k, image: null, source: 'upload' as const, busy: false }) };
     const missing = m.slots.filter(s => !s.image && !s.busy);
     const refsForFill = m.slots.map(s => s.image);
-    const cost = missing.length ? P.sheetAnglesEstimate(ctx.images.photoPrices(), missing.length, ctx.images.refCount(refsForFill)) : 0;
+    const cost = missing.length ? missing.length * await ctx.images.newShotCost(req.user.studioId, 1, ctx.images.refCount(refsForFill)) : 0;
     const bill = await new PhotoBill(ctx, whoOf(req.user), `sheet_${uid('f')}`, cost, `Character sheet · ${missing.length} angle${missing.length === 1 ? '' : 's'}`).start();
     const slots = m.slots.map(s => (missing.includes(s) ? { ...s, busy: true } : s));
     const [u] = await db.update(models).set({ slots }).where(eq(models.id, m.id)).returning();
@@ -163,7 +188,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       for (const s of missing) {
         try {
           const r = await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'sheet', refId: m.id, refs, bill,
-            req: { prompt: characterSheetShot(identity, sheetAngle(s.key)!).text, width: 768, height: 1024, count: 1, simAssets: [SLOT_SAMPLE[s.key]!] } });
+            req: { prompt: characterSheetShot(identity, sheetAngle(s.key)!).text, width: 768, height: 1024, count: 1, simAssets: [SLOT_SAMPLE[s.key] ?? 'face'] } });
           filled[s.key] = r.images[0]!;
         } catch { filled[s.key] = null; failed++; }
       }
@@ -171,7 +196,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       await bill.finish();
       const [cur] = await db.select().from(models).where(eq(models.id, m.id));
       if (!cur) return;
-      const next: SheetSlot[] = cur.slots.map(s => (s.key in filled ? (filled[s.key] ? { ...s, busy: false, image: filled[s.key]!, source: 'generated' } : { ...s, busy: false }) : s));
+      const curSlots = SLOT_KEYS.map(k => cur.slots.find(s => s.key === k) ?? { key: k, image: null, source: 'upload' as const, busy: false });
+      const next: SheetSlot[] = curSlots.map(s => (s.key in filled ? (filled[s.key] ? { ...s, busy: false, image: filled[s.key]!, source: 'generated' } : { ...s, busy: false }) : s));
       const [v] = await db.update(models).set({ slots: next }).where(eq(models.id, m.id)).returning();
       emitModel(v!);
     })().catch(e => ctx.log.error({ err: (e as Error).message }, 'fill angles failed'));
@@ -179,16 +205,21 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   });
 
   // ------------------------------------------------------------------ outfits
-  app.get('/v1/outfits', async req => (await db.select().from(outfits).where(eq(outfits.studioId, req.user.studioId)).orderBy(outfits.createdAt)).map(outfitView));
+  app.get('/v1/outfits', async req => {
+    // Outfits of archived models are left out with them.
+    const hidden = new Set((await db.select({ id: models.id }).from(models).where(and(eq(models.studioId, req.user.studioId), isNotNull(models.archivedAt)))).map(x => x.id));
+    return (await db.select().from(outfits).where(eq(outfits.studioId, req.user.studioId)).orderBy(outfits.createdAt)).filter(o => !hidden.has(o.modelId)).map(outfitView);
+  });
   app.post('/v1/outfits', async req => {
     const b = parse(z.object({ modelId: z.string(), name: z.string().max(80).optional(), mode: z.enum(['describe', 'photo', 'own']).optional(),
       description: z.string().max(1000).optional(), images: z.array(ImageRefSchema).max(4).optional(), imageEngine: ImageEngineOverride.optional() }).passthrough(), req.body);
-    const m = await model(req.user, b.modelId);
+    const m = await model(req.user, b.modelId, true);
+    const stepModels = ctx.imageModels.overridesFrom(req.user.role, b as { models?: unknown });
     const mode = b.mode ?? 'describe';
     const id = uid('o');
     const slotOf = (k: string) => m.slots.find(x => x.key === k)?.image;
     const outfitRefs = [slotOf('face'), slotOf('profile'), ...((b.images ?? []) as ImageRef[]), slotOf('front'), slotOf('tq'), slotOf('back'), slotOf('side')];
-    const cost = mode === 'own' ? 0 : P.outfitSetEstimate(ctx.images.photoPrices(), ctx.images.refCount(outfitRefs));
+    const cost = mode === 'own' ? 0 : await ctx.images.newShotCost(req.user.studioId, 1, ctx.images.refCount(outfitRefs), stepModels) + 3 * await ctx.images.editCost(req.user.studioId, stepModels);
     const bill = await new PhotoBill(ctx, whoOf(req.user), id, cost, 'Outfit set').start();
     const identity = await identityOf(m);
     const spec = { name: b.name || 'New outfit', description: b.description, source: mode === 'describe' ? 'described' as const : mode === 'photo' ? 'product-photo' as const : 'reference-set' as const };
@@ -204,23 +235,23 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
           // Most important first (Replicate sends at most REPLICATE_IMAGE_MAX_REFS): face, profile, the product photos, body.
           const slot = slotOf;
           const refs = outfitRefs;
-          const sel = await ctx.images.selection(user.studioId, b.imageEngine);
+          const sel = await ctx.images.selection(user.studioId, b.imageEngine, stepModels);
           if (sel.provider === 'simulated') {
-            angles = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, refs, bill,
+            angles = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, refs, bill,
               req: { prompt: set[0]!.text, width: 768, height: 1024, count: 4, seed: set[0]!.seed ?? undefined, simAssets: ['c_front', 'c_tq', 'c_face', 'c_front'] } })).images;
           } else if (sel.provider === 'replicate') {
             // A new front shot, then the ¾, side and back as edits of it, so all four show the same clothes.
-            const front = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, refs, bill,
+            const front = (await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, refs, bill,
               req: { prompt: set[0]!.text, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0]!;
             angles = [front];
             for (const a of OUTFIT_ANGLES.slice(1)) {
               const prompt = `Show the same person in exactly the same outfit, on the same plain studio background, as a ${a.words}. `
                 + 'Keep the face, hair, body and every detail of the clothes exactly the same. Realistic smartphone photo, natural skin texture.';
-              angles.push((await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, bill,
+              angles.push((await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, bill,
                 editOf: front, refs: [slot('face')], req: { prompt, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })).images[0]!);
             }
           } else {
-            angles = await Promise.all(set.map(p => ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, refs, bill,
+            angles = await Promise.all(set.map(p => ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, refs, bill,
               req: { prompt: p.text, width: 768, height: 1024, count: 1, seed: p.seed ?? undefined } }).then(r => r.images[0]!)));
           }
         } catch (e) {
@@ -390,6 +421,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   const shootRefs = (m: typeof models.$inferSelect, o?: typeof outfits.$inferSelect, extra: (ImageRef | null | undefined)[] = []) => {
     const slot = (k: string) => m.slots.find(x => x.key === k)?.image;
     const a = o?.angles ?? [];
+    // A Dress up outfit's own face close-ups (with its accessories) come before the model's.
+    const f = o?.faces ?? [];
+    if (f.some(Boolean)) return [f[0] ?? slot('face'), f[2] ?? slot('profile'), a[0], a[1], ...extra, f[1], a[3], a[2], slot('face'), slot('side')];
     return [slot('face'), slot('profile'), a[0], a[1], ...extra, slot('front'), slot('tq'), a[3], a[2], slot('back'), slot('side')];
   };
 
@@ -398,19 +432,20 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       seed: z.number().int().nullable().optional(), count: z.number().int().optional(), direction: z.string().max(500).optional(), lockSeed: z.boolean().optional(),
       templateId: z.string().optional(), shuffleSeed: z.number().int().min(0).optional(), productImage: z.object({ asset: z.string().optional(), url: z.string().optional() }).optional(),
       imageEngine: ImageEngineOverride.optional() }).passthrough(), req.body);
-    const m = await model(req.user, b.modelId);
+    const m = await model(req.user, b.modelId, true);
     const o = await outfitOf(req.user, b.outfitId);
     const count = Math.min(4, Math.max(1, b.count ?? 4));
-    if (b.templateId) return templateShoot(req.user, b, m, o, count);
+    const stepModels = ctx.imageModels.overridesFrom(req.user.role, b as { models?: unknown });
+    if (b.templateId) return templateShoot(req.user, { ...b, stepModels }, m, o, count);
     const id = uid('shoot');
     const refs = shootRefs(m, o);
-    const bill = await new PhotoBill(ctx, whoOf(req.user), id, P.shootEstimate(ctx.images.photoPrices(), count, ctx.images.refCount(refs)), `Photoshoot · ${count} photo${count === 1 ? '' : 's'}`).start();
+    const bill = await new PhotoBill(ctx, whoOf(req.user), id, count * await ctx.images.newShotCost(req.user.studioId, 2, ctx.images.refCount(refs), stepModels), `Photoshoot · ${count} photo${count === 1 ? '' : 's'}`).start();
     const built = photoshoot({ identity: await identityOf(m), outfit: { name: o?.name ?? 'outfit' }, scene: b.scene?.split(' · ')[0], direction: b.direction, lockSeed: b.lockSeed });
     const prompt = b.prompt?.trim() || built.text;
     const seed = b.seed ?? built.seed ?? undefined;
     let r;
     try {
-      r = await ctx.images.generate({ studioId: req.user.studioId, userId: req.user.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs, bill,
+      r = await ctx.images.generate({ studioId: req.user.studioId, userId: req.user.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs, bill, models: stepModels,
         req: { prompt, width: 1080, height: 1920, count, seed, simAssets: [o?.angles?.[0]?.asset ?? 'g_front', 'c_face', 'face', 'g_tq'] } });
     } catch (e) {
       await bill.fail();
@@ -432,7 +467,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
    * A template shoot: every still gets its own prompt (template layers + identity/outfit/never-add + its own variation
    * draws, or the user's direction in place of pose and angle), its own seed, and the template's after-effects.
    */
-  async function templateShoot(u: AuthUser, b: { templateId?: string; direction?: string; shuffleSeed?: number; lockSeed?: boolean; productImage?: ImageRef; imageEngine?: any },
+  async function templateShoot(u: AuthUser, b: { templateId?: string; direction?: string; shuffleSeed?: number; lockSeed?: boolean; productImage?: ImageRef; imageEngine?: any; stepModels?: Partial<Record<ImageStep, string>> },
     m: typeof models.$inferSelect, o: typeof outfits.$inferSelect | undefined, count: number) {
     const t = await ctx.templates.visible(u, b.templateId!);
     const identity = await identityOf(m);
@@ -440,7 +475,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const shuffleSeed = b.shuffleSeed ?? randomSeed();
     const id = uid('shoot');
     const refs = shootRefs(m, o, [product]);
-    const bill = await new PhotoBill(ctx, whoOf(u), id, P.shootEstimate(ctx.images.photoPrices(), count, ctx.images.refCount(refs)), `Photoshoot · ${count} photo${count === 1 ? '' : 's'}`).start();
+    const bill = await new PhotoBill(ctx, whoOf(u), id, count * await ctx.images.newShotCost(u.studioId, 2, ctx.images.refCount(refs), b.stepModels), `Photoshoot · ${count} photo${count === 1 ? '' : 's'}`).start();
     const now = Date.now();
     const rows: (typeof takes.$inferInsert)[] = [];
     try {
@@ -448,7 +483,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
         const p = buildTemplatePrompt({ templateId: t.id, templateName: t.name, layers: t.layers, pool: t.variationPool, identity, outfit: outfitSpec(o),
           direction: b.direction, shuffleSeed, index: n, lockSeed: b.lockSeed, seed: randomImageSeed(), hasProduct: !!product });
         const sim = [o?.angles?.[0]?.asset ?? 'g_front', 'c_face', 'face', 'g_tq'];
-        const r = await ctx.images.generate({ studioId: u.studioId, userId: u.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs, bill,
+        const r = await ctx.images.generate({ studioId: u.studioId, userId: u.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs, bill, models: b.stepModels,
           req: { prompt: p.fullText, width: 1080, height: 1920, count: 1, seed: p.seed ?? undefined, simAssets: [sim[n % sim.length]!] } });
         const fx = await ctx.templates.postProcess(r.images[0]!, t.layers, { studioId: u.studioId, userId: u.id });
         rows.push({
@@ -572,6 +607,47 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     return db.select().from(ledger).where(and(...conds)).orderBy(desc(ledger.id)).limit(Math.min(500, Number(q.limit) || 100));
   });
 
+  // ------------------------------------------------------------------ model tools (plans/api.md "Model tools")
+  const stepParam = (v: string): ImageStep => { if (!(IMAGE_STEPS as readonly string[]).includes(v)) throw notFound('Step'); return v as ImageStep; };
+  const catalogCall = async <T>(fn: () => Promise<T>): Promise<T> => {
+    try { return await fn(); }
+    catch (e) {
+      if (e instanceof CatalogError) throw new ApiError(e.status === 404 ? 404 : e.status === 400 ? 400 : 502, e.status === 404 ? 'not_found' : e.status === 400 ? 'engine_unavailable' : 'catalog_unavailable', e.message);
+      throw e;
+    }
+  };
+  app.get('/v1/image-models', { config: { owner: true } }, async req => ctx.imageModels.views(req.user.studioId));
+  app.get('/v1/image-models/collections', { config: { owner: true } }, async () => catalogCall(() => ctx.imageModels.catalog.collections()));
+  app.get('/v1/image-models/catalog', { config: { owner: true } }, async req => {
+    const q = (req.query ?? {}) as { step?: string; q?: string; collection?: string };
+    const step = stepParam(q.step ?? 'shot');
+    return catalogCall(() => ctx.imageModels.catalog.list(step, { q: q.q?.slice(0, 120), collection: q.collection || undefined }));
+  });
+  app.get('/v1/image-models/model', { config: { owner: true } }, async req => {
+    const q = (req.query ?? {}) as { id?: string; step?: string };
+    if (!q.id) throw badRequest('id: owner/name');
+    return catalogCall(() => ctx.imageModels.detail(q.id!.trim(), stepParam(q.step ?? 'shot')));
+  });
+  app.put<{ Params: { step: string } }>('/v1/image-models/:step', { config: { owner: true } }, async req => {
+    const b = parse(z.object({ model: z.string().min(3).max(170), extra: z.record(z.unknown()).optional() }), req.body);
+    return catalogCall(() => ctx.imageModels.set(req.user.studioId, stepParam(req.params.step), b.model.trim(), b.extra));
+  });
+  app.delete<{ Params: { step: string } }>('/v1/image-models/:step', { config: { owner: true } }, async req => ctx.imageModels.reset(req.user.studioId, stepParam(req.params.step)));
+
+  app.post<{ Params: { id: string } }>('/v1/models/:id/enhance/estimate', async req => ctx.tools.enhanceEstimate(req.user, req.params.id, req.body));
+  app.post<{ Params: { id: string } }>('/v1/models/:id/enhance', async req => ctx.tools.startEnhance(req.user, req.params.id, req.body));
+  app.post<{ Params: { id: string } }>('/v1/models/:id/dress-up/estimate', async req => ctx.tools.dressEstimate(req.user, req.params.id, req.body));
+  app.post<{ Params: { id: string } }>('/v1/models/:id/dress-up', async req => ctx.tools.startDressUp(req.user, req.params.id, req.body));
+  app.get('/v1/tool-runs', async req => ctx.tools.list(req.user, (req.query ?? {}) as any));
+  app.get<{ Params: { id: string } }>('/v1/tool-runs/:id', async req => ctx.tools.get(req.user, req.params.id));
+  app.patch<{ Params: { id: string; slot: string } }>('/v1/tool-runs/:id/items/:slot', async req => ctx.tools.decide(req.user, req.params.id, req.params.slot, req.body));
+  app.post<{ Params: { id: string } }>('/v1/tool-runs/:id/pick', async req => ctx.tools.pickAll(req.user, req.params.id, req.body));
+  app.post<{ Params: { id: string; slot: string } }>('/v1/tool-runs/:id/items/:slot/retry', async req => ctx.tools.retry(req.user, req.params.id, req.params.slot, req.body));
+  app.post<{ Params: { id: string } }>('/v1/tool-runs/:id/apply', async req => ctx.tools.apply(req.user, req.params.id, req.body));
+  app.delete<{ Params: { id: string } }>('/v1/tool-runs/:id', async (req, reply) => { await ctx.tools.discard(req.user, req.params.id); return reply.status(204).send(); });
+  app.get<{ Params: { id: string } }>('/v1/models/:id/sheet-versions', async req => ctx.tools.versions(req.user, req.params.id));
+  app.post<{ Params: { id: string; vid: string } }>('/v1/models/:id/sheet-versions/:vid/restore', async req => ctx.tools.restore(req.user, req.params.id, req.params.vid));
+
   // ------------------------------------------------------------------ settings
   const EngineBody = z.object({ provider: z.enum(PROVIDERS), model: z.string().min(1).max(200).optional(), url: z.string().url().max(500).optional() });
   const engineView = async (studioId: string) => { const sel = await ctx.images.selection(studioId); return { ...sel, label: ctx.images.label(sel), available: ctx.images.available() }; };
@@ -598,8 +674,11 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const s = await ctx.money.settings(u.studioId);
     const c = ctx.config;
     const base = { capPerJob: s.capPerJob ?? c.CAP_PER_JOB_USD, capPerDay: s.capPerDay ?? c.CAP_PER_DAY_USD, capPerUserDay: s.capPerUserDay ?? c.CAP_PER_USER_DAY_USD,
-      tokenUsd: c.TOKEN_USD, features: { ...ctx.jobs.features(), photo: ctx.images.photoFeatures() } };
+      tokenUsd: c.TOKEN_USD, features: { ...ctx.jobs.features(), photo: ctx.images.photoFeatures(), tools: ctx.tools.features(u.role) } };
     if (u.role !== 'owner') return base;
+    const om = await ctx.tools.ownerModels(u.studioId);
+    base.features.tools.enhance.models = om.enhance;
+    base.features.tools.dressUp.models = om.dressUp;
     return { ...base, maxGpus: s.maxGpus ?? c.MAX_GPUS, overheadPayer: s.overheadPayer ?? 'user',
       warmIdleMinutes: s.warmIdleMinutes ?? c.WARM_IDLE_MINUTES, warmMaxMinutes: s.warmMaxMinutes ?? c.WARM_MAX_MINUTES,
       gpu: await ctx.gpu.status(), engines: await ctx.engines.view(u.studioId) };

@@ -65,9 +65,9 @@ export async function people(a: App, members = 1, opts: { topUp?: number } = {})
 }
 
 /** A model with a full character sheet (bundled stills) and an outfit. */
-export async function sienna(c: Client) {
-  const m = (await c.req('POST', '/v1/models', { name: 'Sienna Vale', age: 24, niche: 'Fashion' })).body;
-  for (const [k, a] of Object.entries({ face: 'face', profile: 'profile', front: 'g_front', tq: 'g_tq', side: 'g_side', back: 'g_back' }))
+export async function demoModel(c: Client) {
+  const m = (await c.req('POST', '/v1/models', { name: 'Demo model', age: 24, niche: 'Fashion' })).body;
+  for (const [k, a] of Object.entries({ face: 'face', profile: 'profile', front: 'g_front', tq: 'g_tq', side: 'g_side', back: 'g_back', faceTq: 'c_face' }))
     await c.req('PUT', `/v1/models/${m.id}/slots/${k}`, { image: { asset: a }, source: 'upload' });
   return m as { id: string };
 }

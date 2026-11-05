@@ -95,6 +95,8 @@ export class JobService {
     const parsed = JobRequestSchema.safeParse(body);
     if (!parsed.success) throw badRequest(`Invalid job: ${parsed.error.issues[0]?.path.join('.')} ${parsed.error.issues[0]?.message}`);
     const r = { ...parsed.data, engine: parsed.data.engine ?? this.ctx.config.videoEngineDefault };
+    const [archived] = await this.ctx.db.select({ at: models.archivedAt }).from(models).where(and(eq(models.id, r.modelId), eq(models.studioId, user.studioId)));
+    if (archived?.at) throw new ApiError(409, 'model_archived', 'This model is archived · restore her in Settings → Archived models');
     r.takes = Math.min(P.TAKES_MAX, Math.max(1, r.takes));
     const replicate = r.engine === 'replicate';
     if (replicate) {
@@ -114,6 +116,7 @@ export class JobService {
     if (r.clipSeconds == null && clip) r.clipSeconds = clip.durationSec;
     const [m] = await this.ctx.db.select().from(models).where(and(eq(models.id, r.modelId), eq(models.studioId, user.studioId)));
     if (!m) throw notFound('Model');
+    if (m.archivedAt) throw new ApiError(409, 'model_archived', 'This model is archived · restore her in Settings → Archived models');
     const [o] = r.outfitId ? await this.ctx.db.select().from(outfits).where(and(eq(outfits.id, r.outfitId), eq(outfits.studioId, user.studioId))) : [];
     const cost = P.totalCost(r);
     const [l] = await this.ctx.db.select().from(loras).where(eq(loras.modelId, m.id));
@@ -468,8 +471,10 @@ export function referencesFor(m: typeof models.$inferSelect, o?: typeof outfits.
   const slot = (k: string) => m.slots.find(s => s.key === k && s.image && !s.busy)?.image ?? null;
   const out: { label: string; image: ImageRef }[] = [];
   const push = (label: string, image: ImageRef | null | undefined) => { if (image && out.length < 6) out.push({ label, image }); };
-  push('face, front', slot('face'));
-  push('face, profile', slot('profile'));
+  // A Dress up outfit carries its own face close-ups (with its accessories): they go in place of the model's.
+  const faces = o?.faces ?? [];
+  push('face, front', faces[0] ?? slot('face'));
+  push('face, profile', faces[2] ?? slot('profile'));
   const angles = o?.angles ?? [];
   const outfitRefs = [[0, 'outfit, front'], [1, 'outfit, ¾'], [3, 'outfit, back']].filter(([i]) => angles[i as number]) as [number, string][];
   if (outfitRefs.length) for (const [i, l] of outfitRefs) push(l, angles[i]);
@@ -482,12 +487,20 @@ export function replicateReferencesFor(m: typeof models.$inferSelect, o?: typeof
   const slot = (k: string) => m.slots.find(s => s.key === k && s.image && !s.busy)?.image ?? null;
   const out: { label: string; image: ImageRef }[] = [];
   const push = (label: string, image: ImageRef | null | undefined) => { if (image && out.length < 9) out.push({ label, image }); };
-  push('face, front', slot('face'));
-  push('face, profile', slot('profile'));
-  push('body, front', slot('front'));
-  push('body, ¾', slot('tq'));
-  push('body, back', slot('back'));
+  const faces = o?.faces ?? [];
   const angles = o?.angles ?? [];
+  if (faces.some(Boolean)) {
+    // A Dress up outfit: its own face close-ups (accessories), then its body angles (the model's own body shots wear other clothes).
+    push('face, front', faces[0] ?? slot('face'));
+    push('face, profile', faces[2] ?? slot('profile'));
+    push('face, ¾', faces[1]);
+  } else {
+    push('face, front', slot('face'));
+    push('face, profile', slot('profile'));
+    push('body, front', slot('front'));
+    push('body, ¾', slot('tq'));
+    push('body, back', slot('back'));
+  }
   push('outfit, front', angles[0]); push('outfit, ¾', angles[1]); push('outfit, back', angles[3]); push('outfit, side', angles[2]);
   return out;
 }

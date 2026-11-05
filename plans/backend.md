@@ -102,7 +102,7 @@ _Decided 2026-11-04: per-user token wallets, funded by the owner._
    - the image engine with the `fal` and `custom-http` adapters
    - a **simulated GPU worker** so everything runs end to end for free
    - Dockerfile and Railway setup, tests
-2. **B. Real GPU (now, in parallel):** the Python worker plus the RunPod controller. Then one end-to-end H3 render on a 5 s Sienna clip (about $0.70) once the user says go.
+2. **B. Real GPU (now, in parallel):** the Python worker plus the RunPod controller. Then one end-to-end H3 render on a 5 s test clip (about $0.70) once the user says go.
 3. **C. Apps:** sign-in against the real API, the default base URL set to the Railway host, the image-engine picker in Settings, and push notifications (FCM; APNs once there's an Apple Developer account).
 4. **D. Later:** LoRA training on the GPU (ai-toolkit), social OAuth (each platform needs a developer app), lip sync and upscale passes.
 
@@ -193,4 +193,4 @@ Contract: `plans/api.md` "Model tools". Owner decisions: any Replicate model per
 - **Storage:** `studio_settings.image_models` (jsonb, `{[step]: {model, extra}}`), `models.archived_at`, `models.sheet_versions` (jsonb, last 10), `outfits.faces` (jsonb), and a `tool_runs` table (kind, model, state, options, items jsonb, estimate, cost, created_by). Migration `0004_model_tools` also appends the empty `faceTq` slot to every model.
 - **Enhance and Dress up** (`src/services/tools.ts`): one hold for the whole run (Σ per-image estimates), images one after another through the shared Replicate gate, each image's exact cost added, one settle at the end; failures release and record waste as overhead like photos. Retries hold and settle on their own. Results are stored under `g/` like every generated image (`generated_images.purpose` = `enhance` / `dressup`).
 - **Archive:** `models.archived_at`; lists filter it, new work refuses with `model_archived`; nothing is deleted.
-- **Sample data:** the bundled sample person ("Sienna Vale") and her photos are gone from the seed, the mock, the apps and the tests (owner decision 2026-11-04). Demo data uses "Demo model" with neutral silhouette placeholder stills under the same asset keys; the splash is an abstract gradient with the MUSE wordmark until the owner supplies an image.
+- **Sample data:** the bundled sample person ("Demo model") and her photos are gone from the seed, the mock, the apps and the tests (owner decision 2026-11-04). Demo data uses "Demo model" with neutral silhouette placeholder stills under the same asset keys; the splash is an abstract gradient with the MUSE wordmark until the owner supplies an image.

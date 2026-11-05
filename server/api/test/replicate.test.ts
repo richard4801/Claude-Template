@@ -14,7 +14,7 @@ import { loadConfig } from '../src/config.js';
 import * as P from '../src/pricing.js';
 import { replicateSwap, imageRange } from '../src/prompt/engine.js';
 import { rateHintSeconds } from '../src/replicate/client.js';
-import { makeApp, people, sienna, until, type Client } from './helpers.js';
+import { makeApp, people, demoModel, until, type Client } from './helpers.js';
 
 const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version']); execFileSync('ffprobe', ['-version']); return true; } catch { return false; } })();
 const TOKEN = 'r8_test_token';
@@ -158,10 +158,10 @@ describe('pricing and prompt (Replicate)', () => {
   });
   it('a short four-section prompt with the framing line, references in order', () => {
     const labels = ['face, front', 'face, profile', 'body, front', 'body, ¾', 'body, back', 'outfit, front', 'outfit, ¾', 'outfit, back'];
-    const { text } = replicateSwap({ identity: { name: 'Sienna Vale', look: 'long wavy honey-blonde hair, green eyes, light freckles', neverAdd: ['tattoos', 'rings'] },
+    const { text } = replicateSwap({ identity: { name: 'Demo model', look: 'shoulder-length dark brown hair, brown eyes', neverAdd: ['tattoos', 'rings'] },
       outfit: { name: 'Green crop tee', source: 'reference-set' }, referenceLabels: labels });
     for (const s of ['subject_definitions:', 'summary:', 'retention_analysis:', 'detailed_description:']) expect(text).toContain(s);
-    expect(text).toContain('<Subject 2> is the person in <Image 1> to <Image 8>: long wavy honey-blonde hair');
+    expect(text).toContain('<Subject 2> is the person in <Image 1> to <Image 8>: shoulder-length dark brown hair');
     expect(text).toContain('face and identity from <Image 1> and <Image 2>; body shape from <Image 3> to <Image 5>; the green crop tee outfit from <Image 6> to <Image 8>');
     expect(text).toContain('no tattoos, no rings, no logos');
     expect(text).toContain('keep the exact framing and crop of <Video 1>');
@@ -197,7 +197,7 @@ describe.skipIf(!hasFfmpeg)('video on Replicate (fake Replicate server)', () => 
       SIM_START_BALANCE: '50', CAP_PER_DAY_USD: '1000', CAP_PER_USER_DAY_USD: '1000' },
       { replicateTime: { sleep: async ms => { slept.push(ms); clock += ms; await new Promise(r => setTimeout(r, 2)); }, now: () => clock } });
     owner = (await people(a, 0)).owner;
-    modelId = (await sienna(owner)).id;
+    modelId = (await demoModel(owner)).id;
     const o = (await owner.req('POST', '/v1/outfits', { modelId, name: 'Green crop tee', mode: 'own', images: [{ asset: 'g_front' }, { asset: 'g_tq' }, { asset: 'g_side' }, { asset: 'g_back' }] })).body;
     outfitId = o.id;
     await until(async () => (await owner.req('GET', '/v1/outfits')).body.find((x: any) => x.id === outfitId && x.state === 'preview'));
@@ -380,7 +380,7 @@ describe('photos on Replicate (fake Replicate server)', () => {
     a = await makeApp({ REPLICATE_API_TOKEN: TOKEN, REPLICATE_API_URL: fake.base, REPLICATE_POLL_MS: '10', BALANCE_MODE: 'simulated', SIM_START_BALANCE: '50',
       REPLICATE_IMAGE_MAX_WAIT_SEC: '30' }, { replicateTime: { sleep: async ms => { clock += ms; await new Promise(r => setTimeout(r, 1)); }, now: () => clock } });
     owner = (await people(a, 0)).owner;
-    modelId = (await sienna(owner)).id;
+    modelId = (await demoModel(owner)).id;
   });
   afterAll(async () => { await a?.close(); await fake?.close(); fs.rmSync(work, { recursive: true, force: true }); });
 
@@ -402,7 +402,7 @@ describe('photos on Replicate (fake Replicate server)', () => {
       expect(p.input.input_images.length).toBeLessThanOrEqual(6);
       expect(p.input).not.toHaveProperty('negative_prompt');
     }
-    expect(ps[0]!.input.prompt).toContain('Sienna Vale');
+    expect(ps[0]!.input.prompt).toContain('Demo model');
     const imgs = await a.ctx.db.select().from(generatedImages).where(eq(generatedImages.provider, 'replicate'));
     expect(imgs.length).toBeGreaterThanOrEqual(2);
     // Exact cost from the real megapixels: $0.015 + $0.015 × Σ input MP (the shrunk references as sent) + $0.015 × output MP (64×96).

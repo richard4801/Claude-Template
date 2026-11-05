@@ -1,0 +1,1468 @@
+{
+ "black-forest-labs/flux-krea-dev": {
+  "owner": "black-forest-labs",
+  "name": "flux-krea-dev",
+  "description": "An opinionated text-to-image model from Black Forest Labs in collaboration with Krea that excels in photorealism. Creates images that avoid the oversaturated \"AI look\".",
+  "run_count": 3119055,
+  "is_official": true,
+  "url": "https://replicate.com/black-forest-labs/flux-krea-dev",
+  "cover_image_url": "https://tjzk.replicate.delivery/models_models_featured_image/879ed0b3-c69b-4037-ad12-1909af775e62/out-0-5.webp",
+  "visibility": "public",
+  "latest_version": {
+   "id": "9d7a7c510de5b6bab1b183a9ed61cee5416ea3b4ab0bd644047780c4ef115662",
+   "created_at": "2025-07-31T17:17:35.734422Z",
+   "openapi_schema": {
+    "components": {
+     "schemas": {
+      "Input": {
+       "type": "object",
+       "title": "Input",
+       "required": [
+        "prompt"
+       ],
+       "properties": {
+        "seed": {
+         "type": "integer",
+         "title": "Seed",
+         "x-order": 7,
+         "nullable": true,
+         "description": "Random seed. Set for reproducible generation"
+        },
+        "image": {
+         "type": "string",
+         "title": "Image",
+         "format": "uri",
+         "x-order": 2,
+         "nullable": true,
+         "description": "Input image for image to image mode. The aspect ratio of your output will match this image"
+        },
+        "prompt": {
+         "type": "string",
+         "title": "Prompt",
+         "x-order": 0,
+         "description": "Prompt for generated image"
+        },
+        "go_fast": {
+         "type": "boolean",
+         "title": "Go Fast",
+         "default": true,
+         "x-order": 11,
+         "description": "Run faster predictions with model optimized for speed (currently fp8 quantized); disable to run in original bf16. Note that outputs will not be deterministic when this is enabled, even if you set a seed."
+        },
+        "guidance": {
+         "type": "number",
+         "title": "Guidance",
+         "default": 3,
+         "maximum": 10,
+         "minimum": 0,
+         "x-order": 6,
+         "description": "Guidance for generated image"
+        },
+        "megapixels": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/megapixels"
+          }
+         ],
+         "default": "1",
+         "x-order": 12,
+         "description": "Approximate number of megapixels for generated image"
+        },
+        "num_outputs": {
+         "type": "integer",
+         "title": "Num Outputs",
+         "default": 1,
+         "maximum": 4,
+         "minimum": 1,
+         "x-order": 4,
+         "description": "Number of outputs to generate"
+        },
+        "aspect_ratio": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/aspect_ratio"
+          }
+         ],
+         "default": "1:1",
+         "x-order": 1,
+         "description": "Aspect ratio for the generated image"
+        },
+        "output_format": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/output_format"
+          }
+         ],
+         "default": "webp",
+         "x-order": 8,
+         "description": "Format of the output images"
+        },
+        "output_quality": {
+         "type": "integer",
+         "title": "Output Quality",
+         "default": 80,
+         "maximum": 100,
+         "minimum": 0,
+         "x-order": 9,
+         "description": "Quality when saving the output images, from 0 to 100. 100 is best quality, 0 is lowest quality. Not relevant for .png outputs"
+        },
+        "prompt_strength": {
+         "type": "number",
+         "title": "Prompt Strength",
+         "default": 0.8,
+         "maximum": 1,
+         "minimum": 0,
+         "x-order": 3,
+         "description": "Prompt strength when using img2img. 1.0 corresponds to full destruction of information in image"
+        },
+        "num_inference_steps": {
+         "type": "integer",
+         "title": "Num Inference Steps",
+         "default": 28,
+         "maximum": 50,
+         "minimum": 1,
+         "x-order": 5,
+         "description": "Number of denoising steps. Recommended range is 28-50, and lower number of steps produce lower quality outputs, faster."
+        },
+        "disable_safety_checker": {
+         "type": "boolean",
+         "title": "Disable Safety Checker",
+         "default": false,
+         "x-order": 10,
+         "description": "Disable safety checker for generated images."
+        }
+       }
+      },
+      "Output": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "format": "uri"
+       },
+       "title": "Output"
+      },
+      "megapixels": {
+       "enum": [
+        "1",
+        "0.25"
+       ],
+       "type": "string",
+       "title": "megapixels",
+       "description": "An enumeration."
+      },
+      "aspect_ratio": {
+       "enum": [
+        "1:1",
+        "16:9",
+        "21:9",
+        "3:2",
+        "2:3",
+        "4:5",
+        "5:4",
+        "3:4",
+        "4:3",
+        "9:16",
+        "9:21"
+       ],
+       "type": "string",
+       "title": "aspect_ratio",
+       "description": "An enumeration."
+      },
+      "output_format": {
+       "enum": [
+        "webp",
+        "jpg",
+        "png"
+       ],
+       "type": "string",
+       "title": "output_format",
+       "description": "An enumeration."
+      }
+     }
+    }
+   }
+  }
+ },
+ "qwen/qwen-image-edit-2511": {
+  "owner": "qwen",
+  "name": "qwen-image-edit-2511",
+  "description": "An enhanced version over Qwen-Image-Edit-2509, featuring multiple improvements including notably better consistency",
+  "run_count": 4864016,
+  "is_official": true,
+  "url": "https://replicate.com/qwen/qwen-image-edit-2511",
+  "cover_image_url": "https://tjzk.replicate.delivery/models_models_featured_image/c561eae9-8502-4a74-907b-e8b57cd7fc82/replicate-prediction-2krqph3q.webp",
+  "visibility": "public",
+  "latest_version": {
+   "id": "a0670a7f47d5975347c105b6ce71456c4377d511993975988127dee03ca6c729",
+   "created_at": "2025-12-23T15:50:38.957521Z",
+   "openapi_schema": {
+    "components": {
+     "schemas": {
+      "Input": {
+       "type": "object",
+       "title": "Input",
+       "required": [
+        "prompt",
+        "image"
+       ],
+       "properties": {
+        "seed": {
+         "type": "integer",
+         "title": "Seed",
+         "x-order": 4,
+         "nullable": true,
+         "description": "Random seed. Set for reproducible generation."
+        },
+        "image": {
+         "type": "array",
+         "items": {
+          "type": "string",
+          "format": "uri"
+         },
+         "title": "Image",
+         "x-order": 1,
+         "description": "Images to use as reference. Must be jpeg, png, gif, or webp."
+        },
+        "prompt": {
+         "type": "string",
+         "title": "Prompt",
+         "x-order": 0,
+         "description": "Text instruction on how to edit the given image."
+        },
+        "go_fast": {
+         "type": "boolean",
+         "title": "Go Fast",
+         "default": true,
+         "x-order": 3,
+         "description": "Run faster predictions with additional optimizations."
+        },
+        "aspect_ratio": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/aspect_ratio"
+          }
+         ],
+         "default": "match_input_image",
+         "x-order": 2,
+         "description": "Aspect ratio for the generated image."
+        },
+        "output_format": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/output_format"
+          }
+         ],
+         "default": "webp",
+         "x-order": 5,
+         "description": "Format of the output images."
+        },
+        "output_quality": {
+         "type": "integer",
+         "title": "Output Quality",
+         "default": 95,
+         "maximum": 100,
+         "minimum": 0,
+         "x-order": 6,
+         "description": "Quality when saving the output images, from 0 to 100. 100 is best quality, 0 is lowest quality. Not relevant for .png outputs."
+        },
+        "disable_safety_checker": {
+         "type": "boolean",
+         "title": "Disable Safety Checker",
+         "default": false,
+         "x-order": 7,
+         "description": "Disable safety checker for generated images."
+        }
+       }
+      },
+      "Output": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "format": "uri"
+       },
+       "title": "Output"
+      },
+      "aspect_ratio": {
+       "enum": [
+        "1:1",
+        "16:9",
+        "9:16",
+        "4:3",
+        "3:4",
+        "match_input_image"
+       ],
+       "type": "string",
+       "title": "aspect_ratio",
+       "description": "An enumeration."
+      },
+      "output_format": {
+       "enum": [
+        "webp",
+        "jpg",
+        "png"
+       ],
+       "type": "string",
+       "title": "output_format",
+       "description": "An enumeration."
+      }
+     }
+    }
+   }
+  }
+ },
+ "black-forest-labs/flux-2-pro": {
+  "owner": "black-forest-labs",
+  "name": "flux-2-pro",
+  "description": "High-quality image generation and editing with support for eight reference images",
+  "run_count": 12415088,
+  "is_official": true,
+  "url": "https://replicate.com/black-forest-labs/flux-2-pro",
+  "cover_image_url": "https://tjzk.replicate.delivery/models_models_featured_image/5a8b527e-f298-45db-b51a-4e1cc7d5f1eb/flux-2-pro-sm.jpg",
+  "visibility": "public",
+  "latest_version": {
+   "id": "ccb5e33141097816e6fab8c895e702fe4c619e4e07500885b71214e9f6382a5c",
+   "created_at": "2026-03-23T20:10:44.379167Z",
+   "openapi_schema": {
+    "components": {
+     "schemas": {
+      "Input": {
+       "type": "object",
+       "title": "Input",
+       "required": [
+        "prompt"
+       ],
+       "properties": {
+        "seed": {
+         "type": "integer",
+         "title": "Seed",
+         "x-order": 7,
+         "description": "Random seed. Set for reproducible generation"
+        },
+        "width": {
+         "type": "integer",
+         "title": "Width",
+         "maximum": 2048,
+         "minimum": 256,
+         "x-order": 4,
+         "nullable": true,
+         "description": "Width of the generated image. Only used when aspect_ratio=custom. Must be a multiple of 16 (if it's not, it will be rounded to nearest multiple of 16)."
+        },
+        "height": {
+         "type": "integer",
+         "title": "Height",
+         "maximum": 2048,
+         "minimum": 256,
+         "x-order": 5,
+         "nullable": true,
+         "description": "Height of the generated image. Only used when aspect_ratio=custom. Must be a multiple of 16 (if it's not, it will be rounded to nearest multiple of 16)."
+        },
+        "prompt": {
+         "type": "string",
+         "title": "Prompt",
+         "x-order": 0,
+         "description": "Text prompt for image generation"
+        },
+        "resolution": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/resolution"
+          }
+         ],
+         "default": "1 MP",
+         "x-order": 3,
+         "description": "Resolution in megapixels. Up to 4 MP is possible, but 2 MP or below is recommended. The maximum image size is 2048x2048, which means that high-resolution images may not respect the resolution if aspect ratio is not 1:1.\n\nResolution is not used when aspect_ratio is 'custom'. When aspect_ratio is 'match_input_image', use 'match_input_image' to match the input image's resolution (clamped to 0.5-4 MP)."
+        },
+        "aspect_ratio": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/aspect_ratio"
+          }
+         ],
+         "default": "1:1",
+         "x-order": 2,
+         "description": "Aspect ratio for the generated image. Use 'match_input_image' to match the first input image's aspect ratio."
+        },
+        "input_images": {
+         "type": "array",
+         "items": {
+          "type": "string",
+          "format": "uri"
+         },
+         "title": "Input Images",
+         "default": [],
+         "x-order": 1,
+         "description": "List of input images for image-to-image generation. Maximum 8 images. Must be jpeg, png, gif, or webp."
+        },
+        "output_format": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/output_format"
+          }
+         ],
+         "default": "webp",
+         "x-order": 8,
+         "description": "Format of the output images."
+        },
+        "output_quality": {
+         "type": "integer",
+         "title": "Output Quality",
+         "default": 80,
+         "maximum": 100,
+         "minimum": 0,
+         "x-order": 9,
+         "description": "Quality when saving the output images, from 0 to 100. 100 is best quality, 0 is lowest quality. Not relevant for .png outputs"
+        },
+        "safety_tolerance": {
+         "type": "integer",
+         "title": "Safety Tolerance",
+         "default": 2,
+         "maximum": 5,
+         "minimum": 1,
+         "x-order": 6,
+         "description": "Safety tolerance, 1 is most strict and 5 is most permissive"
+        }
+       }
+      },
+      "Output": {
+       "type": "string",
+       "title": "Output",
+       "format": "uri"
+      },
+      "resolution": {
+       "enum": [
+        "match_input_image",
+        "0.5 MP",
+        "1 MP",
+        "2 MP",
+        "4 MP"
+       ],
+       "type": "string",
+       "title": "resolution",
+       "description": "An enumeration."
+      },
+      "aspect_ratio": {
+       "enum": [
+        "match_input_image",
+        "custom",
+        "1:1",
+        "16:9",
+        "3:2",
+        "2:3",
+        "4:5",
+        "5:4",
+        "9:16",
+        "3:4",
+        "4:3"
+       ],
+       "type": "string",
+       "title": "aspect_ratio",
+       "description": "An enumeration."
+      },
+      "output_format": {
+       "enum": [
+        "webp",
+        "jpg",
+        "png"
+       ],
+       "type": "string",
+       "title": "output_format",
+       "description": "An enumeration."
+      }
+     }
+    }
+   }
+  }
+ },
+ "google/nano-banana": {
+  "owner": "google",
+  "name": "nano-banana",
+  "description": "Google's latest image editing model in Gemini 2.5",
+  "run_count": 123193659,
+  "is_official": true,
+  "url": "https://replicate.com/google/nano-banana",
+  "cover_image_url": "https://tjzk.replicate.delivery/models_models_featured_image/ed879e99-71b5-4689-bed3-e7305e35a28a/this.png",
+  "visibility": "public",
+  "latest_version": {
+   "id": "5bdc2c7cd642ae33611d8c33f79615f98ff02509ab8db9d8ec1cc6c36d378fba",
+   "created_at": "2026-02-06T04:33:54.610363Z",
+   "openapi_schema": {
+    "components": {
+     "schemas": {
+      "Input": {
+       "type": "object",
+       "title": "Input",
+       "required": [
+        "prompt"
+       ],
+       "properties": {
+        "prompt": {
+         "type": "string",
+         "title": "Prompt",
+         "x-order": 0,
+         "description": "A text description of the image you want to generate"
+        },
+        "image_input": {
+         "type": "array",
+         "items": {
+          "type": "string",
+          "format": "uri"
+         },
+         "title": "Image Input",
+         "default": [],
+         "x-order": 1,
+         "description": "Input images to transform or use as reference (supports multiple images)"
+        },
+        "aspect_ratio": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/aspect_ratio"
+          }
+         ],
+         "default": "match_input_image",
+         "x-order": 2,
+         "description": "Aspect ratio of the generated image"
+        },
+        "output_format": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/output_format"
+          }
+         ],
+         "default": "jpg",
+         "x-order": 3,
+         "description": "Format of the output image"
+        }
+       }
+      },
+      "Output": {
+       "type": "string",
+       "title": "Output",
+       "format": "uri"
+      },
+      "aspect_ratio": {
+       "enum": [
+        "match_input_image",
+        "1:1",
+        "2:3",
+        "3:2",
+        "3:4",
+        "4:3",
+        "4:5",
+        "5:4",
+        "9:16",
+        "16:9",
+        "21:9"
+       ],
+       "type": "string",
+       "title": "aspect_ratio",
+       "description": "An enumeration."
+      },
+      "output_format": {
+       "enum": [
+        "jpg",
+        "png"
+       ],
+       "type": "string",
+       "title": "output_format",
+       "description": "An enumeration."
+      }
+     }
+    }
+   }
+  }
+ },
+ "philz1337x/clarity-upscaler": {
+  "owner": "philz1337x",
+  "name": "clarity-upscaler",
+  "description": "High resolution image Upscaler and Enhancer. Use at ClarityAI.co. A free Magnific alternative. Twitter/X: @philz1337x",
+  "run_count": 30755727,
+  "is_official": false,
+  "url": "https://replicate.com/philz1337x/clarity-upscaler",
+  "cover_image_url": "https://tjzk.replicate.delivery/models_models_cover_image/76fbe6df-517d-480a-a6e4-dce383b40bbb/Bildschirmfoto_2024-03-30_um_09.2.png",
+  "visibility": "public",
+  "latest_version": {
+   "id": "dfad41707589d68ecdccd1dfa600d55a208f9310748e44bfe35b4a6291453d5e",
+   "created_at": "2024-06-24T10:54:00.909883Z",
+   "openapi_schema": {
+    "components": {
+     "schemas": {
+      "Input": {
+       "type": "object",
+       "title": "Input",
+       "required": [
+        "image"
+       ],
+       "properties": {
+        "mask": {
+         "type": "string",
+         "title": "Mask",
+         "format": "uri",
+         "x-order": 18,
+         "description": "Mask image to mark areas that should be preserved during upscaling"
+        },
+        "seed": {
+         "type": "integer",
+         "title": "Seed",
+         "default": 1337,
+         "x-order": 12,
+         "description": "Random seed. Leave blank to randomize the seed"
+        },
+        "image": {
+         "type": "string",
+         "title": "Image",
+         "format": "uri",
+         "x-order": 0,
+         "description": "input image"
+        },
+        "prompt": {
+         "type": "string",
+         "title": "Prompt",
+         "default": "masterpiece, best quality, highres, <lora:more_details:0.5> <lora:SDXLrender_v2.0:1>",
+         "x-order": 1,
+         "description": "Prompt"
+        },
+        "dynamic": {
+         "type": "number",
+         "title": "Dynamic",
+         "default": 6,
+         "maximum": 50,
+         "minimum": 1,
+         "x-order": 4,
+         "description": "HDR, try from 3 - 9"
+        },
+        "handfix": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/handfix"
+          }
+         ],
+         "default": "disabled",
+         "x-order": 19,
+         "description": "Use clarity to fix hands in the image"
+        },
+        "pattern": {
+         "type": "boolean",
+         "title": "Pattern",
+         "default": false,
+         "x-order": 20,
+         "description": "Upscale a pattern with seamless tiling"
+        },
+        "sharpen": {
+         "type": "number",
+         "title": "Sharpen",
+         "default": 0,
+         "maximum": 10,
+         "minimum": 0,
+         "x-order": 17,
+         "description": "Sharpen the image after upscaling. The higher the value, the more sharpening is applied. 0 for no sharpening"
+        },
+        "sd_model": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/sd_model"
+          }
+         ],
+         "default": "juggernaut_reborn.safetensors [338b85bc4f]",
+         "x-order": 9,
+         "description": "Stable Diffusion model checkpoint"
+        },
+        "scheduler": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/scheduler"
+          }
+         ],
+         "default": "DPM++ 3M SDE Karras",
+         "x-order": 10,
+         "description": "scheduler"
+        },
+        "creativity": {
+         "type": "number",
+         "title": "Creativity",
+         "default": 0.35,
+         "maximum": 1,
+         "minimum": 0,
+         "x-order": 5,
+         "description": "Creativity, try from 0.3 - 0.9"
+        },
+        "lora_links": {
+         "type": "string",
+         "title": "Lora Links",
+         "default": "",
+         "x-order": 15,
+         "description": "Link to a lora file you want to use in your upscaling. Multiple links possible, seperated by comma"
+        },
+        "downscaling": {
+         "type": "boolean",
+         "title": "Downscaling",
+         "default": false,
+         "x-order": 13,
+         "description": "Downscale the image before upscaling. Can improve quality and speed for images with high resolution but lower quality"
+        },
+        "resemblance": {
+         "type": "number",
+         "title": "Resemblance",
+         "default": 0.6,
+         "maximum": 3,
+         "minimum": 0,
+         "x-order": 6,
+         "description": "Resemblance, try from 0.3 - 1.6"
+        },
+        "scale_factor": {
+         "type": "number",
+         "title": "Scale Factor",
+         "default": 2,
+         "x-order": 3,
+         "description": "Scale factor"
+        },
+        "tiling_width": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/tiling_width"
+          }
+         ],
+         "default": 112,
+         "x-order": 7,
+         "description": "Fractality, set lower tile width for a high Fractality"
+        },
+        "output_format": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/output_format"
+          }
+         ],
+         "default": "png",
+         "x-order": 21,
+         "description": "Format of the output images"
+        },
+        "tiling_height": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/tiling_height"
+          }
+         ],
+         "default": 144,
+         "x-order": 8,
+         "description": "Fractality, set lower tile height for a high Fractality"
+        },
+        "custom_sd_model": {
+         "type": "string",
+         "title": "Custom Sd Model",
+         "default": "",
+         "x-order": 16
+        },
+        "negative_prompt": {
+         "type": "string",
+         "title": "Negative Prompt",
+         "default": "(worst quality, low quality, normal quality:2) JuggernautNegative-neg",
+         "x-order": 2,
+         "description": "Negative Prompt"
+        },
+        "num_inference_steps": {
+         "type": "integer",
+         "title": "Num Inference Steps",
+         "default": 18,
+         "maximum": 100,
+         "minimum": 1,
+         "x-order": 11,
+         "description": "Number of denoising steps"
+        },
+        "downscaling_resolution": {
+         "type": "integer",
+         "title": "Downscaling Resolution",
+         "default": 768,
+         "x-order": 14,
+         "description": "Downscaling resolution"
+        }
+       }
+      },
+      "Output": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "format": "uri"
+       },
+       "title": "Output"
+      },
+      "handfix": {
+       "enum": [
+        "disabled",
+        "hands_only",
+        "image_and_hands"
+       ],
+       "type": "string",
+       "title": "handfix",
+       "description": "An enumeration."
+      },
+      "sd_model": {
+       "enum": [
+        "epicrealism_naturalSinRC1VAE.safetensors [84d76a0328]",
+        "juggernaut_reborn.safetensors [338b85bc4f]",
+        "flat2DAnimerge_v45Sharp.safetensors"
+       ],
+       "type": "string",
+       "title": "sd_model",
+       "description": "An enumeration."
+      },
+      "scheduler": {
+       "enum": [
+        "DPM++ 2M Karras",
+        "DPM++ SDE Karras",
+        "DPM++ 2M SDE Exponential",
+        "DPM++ 2M SDE Karras",
+        "Euler a",
+        "Euler",
+        "LMS",
+        "Heun",
+        "DPM2",
+        "DPM2 a",
+        "DPM++ 2S a",
+        "DPM++ 2M",
+        "DPM++ SDE",
+        "DPM++ 2M SDE",
+        "DPM++ 2M SDE Heun",
+        "DPM++ 2M SDE Heun Karras",
+        "DPM++ 2M SDE Heun Exponential",
+        "DPM++ 3M SDE",
+        "DPM++ 3M SDE Karras",
+        "DPM++ 3M SDE Exponential",
+        "DPM fast",
+        "DPM adaptive",
+        "LMS Karras",
+        "DPM2 Karras",
+        "DPM2 a Karras",
+        "DPM++ 2S a Karras",
+        "Restart",
+        "DDIM",
+        "PLMS",
+        "UniPC"
+       ],
+       "type": "string",
+       "title": "scheduler",
+       "description": "An enumeration."
+      },
+      "tiling_width": {
+       "enum": [
+        16,
+        32,
+        48,
+        64,
+        80,
+        96,
+        112,
+        128,
+        144,
+        160,
+        176,
+        192,
+        208,
+        224,
+        240,
+        256
+       ],
+       "type": "integer",
+       "title": "tiling_width",
+       "description": "An enumeration."
+      },
+      "output_format": {
+       "enum": [
+        "webp",
+        "jpg",
+        "png"
+       ],
+       "type": "string",
+       "title": "output_format",
+       "description": "An enumeration."
+      },
+      "tiling_height": {
+       "enum": [
+        16,
+        32,
+        48,
+        64,
+        80,
+        96,
+        112,
+        128,
+        144,
+        160,
+        176,
+        192,
+        208,
+        224,
+        240,
+        256
+       ],
+       "type": "integer",
+       "title": "tiling_height",
+       "description": "An enumeration."
+      }
+     }
+    }
+   }
+  }
+ },
+ "topazlabs/image-upscale": {
+  "owner": "topazlabs",
+  "name": "image-upscale",
+  "description": "Professional-grade image upscaling, from Topaz Labs",
+  "run_count": 3743197,
+  "is_official": true,
+  "url": "https://replicate.com/topazlabs/image-upscale",
+  "cover_image_url": "https://tjzk.replicate.delivery/models_models_featured_image/e220ac1a-3d43-4c48-884f-5678c0c3ea94/tmp9lnlmaoj.jpg",
+  "visibility": "public",
+  "latest_version": {
+   "id": "2fdc3b86a01d338ae89ad58e5d9241398a8a01de9b0dda41ba8a0434c8a00dc3",
+   "created_at": "2025-04-25T06:37:39.150973Z",
+   "openapi_schema": {
+    "components": {
+     "schemas": {
+      "Input": {
+       "type": "object",
+       "title": "Input",
+       "required": [
+        "image"
+       ],
+       "properties": {
+        "image": {
+         "type": "string",
+         "title": "Image",
+         "format": "uri",
+         "x-order": 0,
+         "description": "Image to enhance"
+        },
+        "enhance_model": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/enhance_model"
+          }
+         ],
+         "default": "Standard V2",
+         "x-order": 1,
+         "description": "Model to use: Standard V2 (general purpose), Low Resolution V2 (for low-res images), CGI (for digital art), High Fidelity V2 (preserves details), Text Refine (optimized for text)"
+        },
+        "output_format": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/output_format"
+          }
+         ],
+         "default": "jpg",
+         "x-order": 3,
+         "description": "Output format"
+        },
+        "upscale_factor": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/upscale_factor"
+          }
+         ],
+         "default": "None",
+         "x-order": 2,
+         "description": "How much to upscale the image"
+        },
+        "face_enhancement": {
+         "type": "boolean",
+         "title": "Face Enhancement",
+         "default": false,
+         "x-order": 5,
+         "description": "Enhance faces in the image"
+        },
+        "subject_detection": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/subject_detection"
+          }
+         ],
+         "default": "None",
+         "x-order": 4,
+         "description": "Subject detection"
+        },
+        "face_enhancement_strength": {
+         "type": "number",
+         "title": "Face Enhancement Strength",
+         "default": 0.8,
+         "maximum": 1,
+         "minimum": 0,
+         "x-order": 7,
+         "description": "Control how sharp the enhanced faces are relative to the background from 0 to 1. Defaults to 0.8, and is ignored if face_enhancement is false."
+        },
+        "face_enhancement_creativity": {
+         "type": "number",
+         "title": "Face Enhancement Creativity",
+         "default": 0,
+         "maximum": 1,
+         "minimum": 0,
+         "x-order": 6,
+         "description": "Choose the level of creativity for face enhancement from 0 to 1. Defaults to 0, and is ignored if face_enhancement is false."
+        }
+       }
+      },
+      "Output": {
+       "type": "string",
+       "title": "Output",
+       "format": "uri"
+      },
+      "enhance_model": {
+       "enum": [
+        "Standard V2",
+        "Low Resolution V2",
+        "CGI",
+        "High Fidelity V2",
+        "Text Refine"
+       ],
+       "type": "string",
+       "title": "enhance_model",
+       "description": "An enumeration."
+      },
+      "output_format": {
+       "enum": [
+        "jpg",
+        "png"
+       ],
+       "type": "string",
+       "title": "output_format",
+       "description": "An enumeration."
+      },
+      "upscale_factor": {
+       "enum": [
+        "None",
+        "2x",
+        "4x",
+        "6x"
+       ],
+       "type": "string",
+       "title": "upscale_factor",
+       "description": "An enumeration."
+      },
+      "subject_detection": {
+       "enum": [
+        "None",
+        "All",
+        "Foreground",
+        "Background"
+       ],
+       "type": "string",
+       "title": "subject_detection",
+       "description": "An enumeration."
+      }
+     }
+    }
+   }
+  }
+ },
+ "nightmareai/real-esrgan": {
+  "owner": "nightmareai",
+  "name": "real-esrgan",
+  "description": "Real-ESRGAN with optional face correction and adjustable upscale",
+  "run_count": 102953346,
+  "is_official": true,
+  "url": "https://replicate.com/nightmareai/real-esrgan",
+  "cover_image_url": "https://tjzk.replicate.delivery/models_models_featured_image/97ea20d0-2f23-4393-a8d8-71e4df5361f0/ApplicationFrameHost_3Bs5DdjGn.png",
+  "visibility": "public",
+  "latest_version": {
+   "id": "b3ef194191d13140337468c916c2c5b96dd0cb06dffc032a022a31807f6a5ea8",
+   "created_at": "2025-10-27T21:59:19.965174Z",
+   "openapi_schema": {
+    "components": {
+     "schemas": {
+      "Input": {
+       "type": "object",
+       "title": "Input",
+       "required": [
+        "image"
+       ],
+       "properties": {
+        "image": {
+         "type": "string",
+         "title": "Image",
+         "format": "uri",
+         "description": "Input image"
+        },
+        "scale": {
+         "type": "number",
+         "title": "Scale",
+         "default": 4,
+         "maximum": 10,
+         "minimum": 0,
+         "description": "Factor to scale image by"
+        },
+        "face_enhance": {
+         "type": "boolean",
+         "title": "Face Enhance",
+         "default": false,
+         "description": "Run GFPGAN face enhancement along with upscaling"
+        }
+       }
+      },
+      "Output": {
+       "type": "string",
+       "title": "Output",
+       "format": "uri"
+      }
+     }
+    }
+   }
+  }
+ },
+ "stability-ai/sdxl": {
+  "owner": "stability-ai",
+  "name": "sdxl",
+  "description": "A text-to-image generative AI model that creates beautiful images",
+  "run_count": 86524336,
+  "is_official": false,
+  "url": "https://replicate.com/stability-ai/sdxl",
+  "cover_image_url": "https://tjzk.replicate.delivery/models_models_featured_image/9065f9e3-40da-4742-8cb8-adfa8e794c0d/sdxl_cover.jpg",
+  "visibility": "public",
+  "latest_version": {
+   "id": "7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc",
+   "created_at": "2024-05-23T23:26:26.222931Z",
+   "openapi_schema": {
+    "components": {
+     "schemas": {
+      "Input": {
+       "type": "object",
+       "title": "Input",
+       "properties": {
+        "mask": {
+         "type": "string",
+         "title": "Mask",
+         "format": "uri",
+         "x-order": 3,
+         "description": "Input mask for inpaint mode. Black areas will be preserved, white areas will be inpainted."
+        },
+        "seed": {
+         "type": "integer",
+         "title": "Seed",
+         "x-order": 11,
+         "description": "Random seed. Leave blank to randomize the seed"
+        },
+        "image": {
+         "type": "string",
+         "title": "Image",
+         "format": "uri",
+         "x-order": 2,
+         "description": "Input image for img2img or inpaint mode"
+        },
+        "width": {
+         "type": "integer",
+         "title": "Width",
+         "default": 1024,
+         "x-order": 4,
+         "description": "Width of output image"
+        },
+        "height": {
+         "type": "integer",
+         "title": "Height",
+         "default": 1024,
+         "x-order": 5,
+         "description": "Height of output image"
+        },
+        "prompt": {
+         "type": "string",
+         "title": "Prompt",
+         "default": "An astronaut riding a rainbow unicorn",
+         "x-order": 0,
+         "description": "Input prompt"
+        },
+        "refine": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/refine"
+          }
+         ],
+         "default": "no_refiner",
+         "x-order": 12,
+         "description": "Which refine style to use"
+        },
+        "scheduler": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/scheduler"
+          }
+         ],
+         "default": "K_EULER",
+         "x-order": 7,
+         "description": "scheduler"
+        },
+        "lora_scale": {
+         "type": "number",
+         "title": "Lora Scale",
+         "default": 0.6,
+         "maximum": 1,
+         "minimum": 0,
+         "x-order": 16,
+         "description": "LoRA additive scale. Only applicable on trained models."
+        },
+        "num_outputs": {
+         "type": "integer",
+         "title": "Num Outputs",
+         "default": 1,
+         "maximum": 4,
+         "minimum": 1,
+         "x-order": 6,
+         "description": "Number of images to output."
+        },
+        "refine_steps": {
+         "type": "integer",
+         "title": "Refine Steps",
+         "x-order": 14,
+         "description": "For base_image_refiner, the number of steps to refine, defaults to num_inference_steps"
+        },
+        "guidance_scale": {
+         "type": "number",
+         "title": "Guidance Scale",
+         "default": 7.5,
+         "maximum": 50,
+         "minimum": 1,
+         "x-order": 9,
+         "description": "Scale for classifier-free guidance"
+        },
+        "apply_watermark": {
+         "type": "boolean",
+         "title": "Apply Watermark",
+         "default": true,
+         "x-order": 15,
+         "description": "Applies a watermark to enable determining if an image is generated in downstream applications. If you have other provisions for generating or deploying images safely, you can use this to disable watermarking."
+        },
+        "high_noise_frac": {
+         "type": "number",
+         "title": "High Noise Frac",
+         "default": 0.8,
+         "maximum": 1,
+         "minimum": 0,
+         "x-order": 13,
+         "description": "For expert_ensemble_refiner, the fraction of noise to use"
+        },
+        "negative_prompt": {
+         "type": "string",
+         "title": "Negative Prompt",
+         "default": "",
+         "x-order": 1,
+         "description": "Input Negative Prompt"
+        },
+        "prompt_strength": {
+         "type": "number",
+         "title": "Prompt Strength",
+         "default": 0.8,
+         "maximum": 1,
+         "minimum": 0,
+         "x-order": 10,
+         "description": "Prompt strength when using img2img / inpaint. 1.0 corresponds to full destruction of information in image"
+        },
+        "replicate_weights": {
+         "type": "string",
+         "title": "Replicate Weights",
+         "x-order": 17,
+         "description": "Replicate LoRA weights to use. Leave blank to use the default weights."
+        },
+        "num_inference_steps": {
+         "type": "integer",
+         "title": "Num Inference Steps",
+         "default": 50,
+         "maximum": 500,
+         "minimum": 1,
+         "x-order": 8,
+         "description": "Number of denoising steps"
+        },
+        "disable_safety_checker": {
+         "type": "boolean",
+         "title": "Disable Safety Checker",
+         "default": false,
+         "x-order": 18,
+         "description": "Disable safety checker for generated images. This feature is only available through the API. See [https://replicate.com/docs/how-does-replicate-work#safety](https://replicate.com/docs/how-does-replicate-work#safety)"
+        }
+       }
+      },
+      "Output": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "format": "uri"
+       },
+       "title": "Output"
+      },
+      "refine": {
+       "enum": [
+        "no_refiner",
+        "expert_ensemble_refiner",
+        "base_image_refiner"
+       ],
+       "type": "string",
+       "title": "refine",
+       "description": "An enumeration."
+      },
+      "scheduler": {
+       "enum": [
+        "DDIM",
+        "DPMSolverMultistep",
+        "HeunDiscrete",
+        "KarrasDPM",
+        "K_EULER_ANCESTRAL",
+        "K_EULER",
+        "PNDM"
+       ],
+       "type": "string",
+       "title": "scheduler",
+       "description": "An enumeration."
+      }
+     }
+    }
+   }
+  }
+ },
+ "bytedance/seedream-4": {
+  "owner": "bytedance",
+  "name": "seedream-4",
+  "description": "Unified text-to-image generation and precise single-sentence editing at up to 4K resolution",
+  "run_count": 40143012,
+  "is_official": true,
+  "url": "https://replicate.com/bytedance/seedream-4",
+  "cover_image_url": "https://tjzk.replicate.delivery/models_models_featured_image/53dda182-2998-4fde-b235-e1b2a09b0484/seedream4-sm.jpg",
+  "visibility": "public",
+  "latest_version": {
+   "id": "cf7d431991436f19d1c8dad83fe463c729c816d7a21056c5105e75c84a0aa7e9",
+   "created_at": "2025-11-20T19:56:36.961915Z",
+   "openapi_schema": {
+    "components": {
+     "schemas": {
+      "Input": {
+       "type": "object",
+       "title": "Input",
+       "required": [
+        "prompt"
+       ],
+       "properties": {
+        "size": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/size"
+          }
+         ],
+         "default": "2K",
+         "x-order": 2,
+         "description": "Image resolution: 1K (1024px), 2K (2048px), 4K (4096px), or 'custom' for specific dimensions."
+        },
+        "width": {
+         "type": "integer",
+         "title": "Width",
+         "default": 2048,
+         "maximum": 4096,
+         "minimum": 1024,
+         "x-order": 4,
+         "description": "Custom image width (only used when size='custom'). Range: 1024-4096 pixels."
+        },
+        "height": {
+         "type": "integer",
+         "title": "Height",
+         "default": 2048,
+         "maximum": 4096,
+         "minimum": 1024,
+         "x-order": 5,
+         "description": "Custom image height (only used when size='custom'). Range: 1024-4096 pixels."
+        },
+        "prompt": {
+         "type": "string",
+         "title": "Prompt",
+         "x-order": 0,
+         "description": "Text prompt for image generation"
+        },
+        "max_images": {
+         "type": "integer",
+         "title": "Max Images",
+         "default": 1,
+         "maximum": 15,
+         "minimum": 1,
+         "x-order": 7,
+         "description": "Maximum number of images to generate when sequential_image_generation='auto'. Range: 1-15. Total images (input + generated) cannot exceed 15."
+        },
+        "image_input": {
+         "type": "array",
+         "items": {
+          "type": "string",
+          "format": "uri"
+         },
+         "title": "Image Input",
+         "default": [],
+         "x-order": 1,
+         "description": "Input image(s) for image-to-image generation. List of 1-10 images for single or multi-reference generation."
+        },
+        "aspect_ratio": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/aspect_ratio"
+          }
+         ],
+         "default": "match_input_image",
+         "x-order": 3,
+         "description": "Image aspect ratio. Only used when size is not 'custom'. Use 'match_input_image' to automatically match the input image's aspect ratio."
+        },
+        "enhance_prompt": {
+         "type": "boolean",
+         "title": "Enhance Prompt",
+         "default": true,
+         "x-order": 8,
+         "description": "Enable prompt enhancement for higher quality results, this will take longer to generate."
+        },
+        "sequential_image_generation": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/sequential_image_generation"
+          }
+         ],
+         "default": "disabled",
+         "x-order": 6,
+         "description": "Group image generation mode. 'disabled' generates a single image. 'auto' lets the model decide whether to generate multiple related images (e.g., story scenes, character variations)."
+        }
+       }
+      },
+      "Output": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "format": "uri"
+       },
+       "title": "Output"
+      },
+      "size": {
+       "enum": [
+        "1K",
+        "2K",
+        "4K",
+        "custom"
+       ],
+       "type": "string",
+       "title": "size",
+       "description": "An enumeration."
+      },
+      "aspect_ratio": {
+       "enum": [
+        "match_input_image",
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9"
+       ],
+       "type": "string",
+       "title": "aspect_ratio",
+       "description": "An enumeration."
+      },
+      "sequential_image_generation": {
+       "enum": [
+        "disabled",
+        "auto"
+       ],
+       "type": "string",
+       "title": "sequential_image_generation",
+       "description": "An enumeration."
+      }
+     }
+    }
+   }
+  }
+ }
+}

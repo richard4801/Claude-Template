@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CustomHttpEngine, FalEngine } from '../src/images/engines.js';
-import { makeApp, people, sienna, type Client } from './helpers.js';
+import { makeApp, people, demoModel, type Client } from './helpers.js';
 
 describe('image engine adapters', () => {
   it('fal: submits to the queue, polls, fetches the result', async () => {
@@ -61,7 +61,7 @@ describe('image engine selection per studio', () => {
   });
 
   it('shoots use the studio engine, store the image and record provider, model, prompt, seed and cost', async () => {
-    const m = await sienna(tess);
+    const m = await demoModel(tess);
     const shots = (await tess.req('POST', '/v1/shoots', { modelId: m.id, scene: 'Rooftop · golden hour', count: 1 })).body;
     expect(shots.length).toBe(1);
     expect(shots[0].thumb.url).toMatch(/^\/uploads\/g\/img_[0-9a-f]+\.png$/);

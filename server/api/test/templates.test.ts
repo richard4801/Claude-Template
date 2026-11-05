@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { makeApp, people, sienna, type Client } from './helpers.js';
+import { makeApp, people, demoModel, type Client } from './helpers.js';
 import { templates } from '../src/db/schema.js';
 import { applyAfterEffects, faceBox } from '../src/templates/effects.js';
 import { drawVariation, suggestPool } from '../src/templates/prompt.js';
@@ -27,7 +27,7 @@ describe('photo templates', () => {
     a = await makeApp({ DEV_MODE: 'true', BALANCE_MODE: 'simulated', SIM_START_BALANCE: '50', CAP_PER_USER_DAY_USD: '50', CAP_PER_DAY_USD: '100' });
     const p = await people(a, 2); owner = p.owner; tess = p.members[0]!; mo = p.members[1]!;
     for (const m of [tess, mo]) await owner.req('POST', '/v1/wallets/transfer', { toUserId: m.id, tokens: 1000 });
-    modelId = (await sienna(tess)).id;
+    modelId = (await demoModel(tess)).id;
   });
   afterAll(async () => { await a.close(); });
 
@@ -158,7 +158,7 @@ describe('photo templates', () => {
     for (const s of moShots) {
       expect(s).toMatchObject({ kind: 'shot', templateId: tpl.id, templateName: 'Laundrette night' });
       expect(s.prompt.split('\n')).toContain('Template: Laundrette night');
-      expect(s.prompt).toContain('Sienna Vale');
+      expect(s.prompt).toContain('Demo model');
       expect(s.prompt).toMatch(/Never add: .*logos/);
       expect(s.variation).toBeUndefined(); // the draws are the owner's secret too
       expect(s.thumb.url).toMatch(/\/uploads\/g\/fx_/); // graded copy, not the raw still
@@ -256,7 +256,7 @@ describe('photo templates', () => {
     const draft = (await mo.req('POST', '/v1/templates/draft', { fromShotId: shot.id })).body;
     expect(draft.layers.scene).toBe('bathroom mirror');
     expect(draft.layers.camera).toContain('35mm');
-    expect(JSON.stringify(draft.layers)).not.toMatch(/Sienna|Wearing|Never add|Seed/);
+    expect(JSON.stringify(draft.layers)).not.toMatch(/Demo model|Wearing|Never add|Seed/);
     expect(draft.variationPool.pose[0]).toBe('phone covering her face');
     expect(draft.variationPool.framing.length).toBeGreaterThan(0); // mirror → mirror-selfie suggestions
     const pool = { ...draft.variationPool, expression: ['edited-by-creator'] };
@@ -296,13 +296,18 @@ describe('photo templates', () => {
 
   it('/health reports the build, the migrations and the starter seed', async () => {
     const h = (await a.app.inject({ method: 'GET', url: '/health' })).json();
-    expect(h.migrations).toEqual({ applied: 4, latest: '0003_studio_balance' });
+    expect(h.migrations).toEqual({ applied: 5, latest: '0004_model_tools' });
     expect(h.startedAt).toBeGreaterThan(0);
   });
 });
 
 describe('after-effects', () => {
-  const src = fs.readFileSync(path.join(ASSET_DIR, 'face.jpg'));
+  // A detailed test image (the bundled stills are flat placeholders now): a warm base with fine noise.
+  let src: Buffer;
+  beforeAll(async () => {
+    src = await sharp({ create: { width: 640, height: 584, channels: 3, background: '#000', noise: { type: 'gaussian', mean: 128, sigma: 40 } } as any })
+      .linear([1.1, 0.95, 0.8], [20, 5, -10]).blur(1.5).jpeg({ quality: 95 }).toBuffer();
+  });
   const stats = async (b: Buffer, region?: { left: number; top: number; width: number; height: number }) => {
     const img = region ? sharp(b).extract(region) : sharp(b);
     return img.stats();

@@ -1,16 +1,16 @@
-// Dev seed: the same studio data as server/mock/data.js (Sienna, Noor, two outfits, three jobs, six takes, $6.07),
+// Dev seed: the same studio data as server/mock/data.js (the demo model, Noor, two outfits, three jobs, six takes, $6.07),
 // so the apps and their contract tests behave the same against this server. Only used with DEV_SEED / DEV_MODE.
 import { eq, sql } from 'drizzle-orm';
 import type { Ctx } from './ctx.js';
-import { accounts, clips, generatedImages, templateFavourites, templates, jobs, ledger, loras, models, outfits, pods, posts, studios, studioSettings, takes, topups, uploads, users, wallets, warmSessions } from './db/schema.js';
+import { accounts, clips, generatedImages, toolRuns, templateFavourites, templates, jobs, ledger, loras, models, outfits, pods, posts, studios, studioSettings, takes, topups, uploads, users, wallets, warmSessions } from './db/schema.js';
 import { ensureStudio, hashPassword } from './auth/auth.js';
 import { dayStart, monthStart } from './lib/util.js';
 
-export const SLOT_SAMPLE: Record<string, string> = { face: 'face', profile: 'profile', front: 'g_front', tq: 'g_tq', side: 'g_side', back: 'g_back' };
+export const SLOT_SAMPLE: Record<string, string> = { face: 'face', profile: 'profile', front: 'g_front', tq: 'g_tq', side: 'g_side', back: 'g_back', faceTq: 'c_face' };
 const SLOT_KEYS = Object.keys(SLOT_SAMPLE);
 const asset = (a: string) => ({ asset: a });
 const req = (title: string, engine: string, steps: number, outfitId = 'o_green') =>
-  ({ title, modelId: 'm_sienna', outfitId, clipId: 'clip_sample', engine, steps, use: 'first', takes: 1, keepAudio: true, lipSync: false, background: 'keep', backgroundMotion: 'subtle' });
+  ({ title, modelId: 'm_demo', outfitId, clipId: 'clip_sample', engine, steps, use: 'first', takes: 1, keepAudio: true, lipSync: false, background: 'keep', backgroundMotion: 'subtle' });
 
 export async function seedDev(ctx: Ctx, o: { onlyIfEmpty?: boolean; reset?: boolean } = {}) {
   const db = ctx.db, now = Date.now();
@@ -28,7 +28,7 @@ export async function seedDev(ctx: Ctx, o: { onlyIfEmpty?: boolean; reset?: bool
   }
   if (o.reset) {
     await ctx.gpu.shutdown();
-    for (const t of [templateFavourites, templates, takes, jobs, outfits, clips, loras, accounts, posts, ledger, topups, warmSessions, pods, generatedImages, uploads, models]) await db.delete(t);
+    for (const t of [toolRuns, templateFavourites, templates, takes, jobs, outfits, clips, loras, accounts, posts, ledger, topups, warmSessions, pods, generatedImages, uploads, models]) await db.delete(t);
     await db.update(wallets).set({ tokens: 0, held: 0, updatedAt: now });
     ctx.templates.forget();
   }
@@ -42,23 +42,23 @@ export async function seedDev(ctx: Ctx, o: { onlyIfEmpty?: boolean; reset?: bool
 
   const slotsFull = SLOT_KEYS.map(k => ({ key: k, image: asset(SLOT_SAMPLE[k]!), source: 'upload' as const, busy: false }));
   await db.insert(models).values([
-    { id: 'm_sienna', studioId: sid, name: 'Sienna Vale', age: 24, niche: 'Fashion', look: 'young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin',
+    { id: 'm_demo', studioId: sid, name: 'Demo model', age: 24, niche: 'Fashion', look: 'young woman, shoulder-length dark brown hair, brown eyes, light olive skin',
       neverAdd: ['tattoos', 'rings'], slots: slotsFull, outfitIds: ['o_green', 'o_crystal'], createdBy: owner!.id, createdAt: now - 3 },
     { id: 'm_noor', studioId: sid, name: 'Noor Ellis', age: 27, niche: 'Beauty', look: '', neverAdd: [], slots: SLOT_KEYS.map(k => ({ key: k, image: null, source: 'upload' as const, busy: false })),
       outfitIds: [], createdBy: owner!.id, createdAt: now - 2 },
   ]);
   await db.insert(outfits).values([
-    { id: 'o_green', studioId: sid, modelId: 'm_sienna', name: 'Green set', mode: 'own', description: 'Dark green cropped tee and drawstring shorts', angles: ['g_front', 'g_tq', 'g_side', 'g_back'].map(asset), state: 'ready', prompt: '', createdAt: now - 2 },
-    { id: 'o_crystal', studioId: sid, modelId: 'm_sienna', name: 'Crystal dress', mode: 'describe', description: 'Silver crystal cowl-neck mini dress', angles: ['c_front', 'c_tq', 'c_face', 'c_front'].map(asset), state: 'ready', prompt: '', createdAt: now - 1 },
+    { id: 'o_green', studioId: sid, modelId: 'm_demo', name: 'Green set', mode: 'own', description: 'Dark green cropped tee and drawstring shorts', angles: ['g_front', 'g_tq', 'g_side', 'g_back'].map(asset), state: 'ready', prompt: '', createdAt: now - 2 },
+    { id: 'o_crystal', studioId: sid, modelId: 'm_demo', name: 'Crystal dress', mode: 'describe', description: 'Silver crystal cowl-neck mini dress', angles: ['c_front', 'c_tq', 'c_face', 'c_front'].map(asset), state: 'ready', prompt: '', createdAt: now - 1 },
   ]);
-  const base = { studioId: sid, userId: owner!.id, kind: 'render' as const, modelId: 'm_sienna', modelName: 'Sienna Vale', take: 1, refunded: 0, prompt: '', gpuState: 'done' as const };
+  const base = { studioId: sid, userId: owner!.id, kind: 'render' as const, modelId: 'm_demo', modelName: 'Demo model', take: 1, refunded: 0, prompt: '', gpuState: 'done' as const };
   await db.insert(jobs).values([
     { ...base, id: 'j1', title: 'Kick test', outfitId: 'o_green', request: req('Kick test', 'viggle', 4), state: 'done', progress: 100, step: 4, totalSteps: 4, phase: 'Done', secondsLeft: 0, totalSeconds: 95, cost: 0.13, createdAt: now - 7_200_000, finishedAt: now - 7_000_000, seed: 7, thumb: asset('g_front') },
     { ...base, id: 'j2', title: 'Bathroom trend', outfitId: 'o_crystal', request: req('Bathroom trend', 'h3', 30, 'o_crystal'), state: 'done', progress: 100, step: 30, totalSteps: 30, phase: 'Done', secondsLeft: 0, totalSeconds: 2760, cost: 3.05, createdAt: now - 86_400_000, finishedAt: now - 83_640_000, seed: 42, thumb: asset('c_front') },
     { ...base, id: 'j0', title: 'Mirror selfie', outfitId: 'o_green', request: req('Mirror selfie', 'h3', 10), state: 'failed', gpuState: 'failed', progress: 18, step: 3, totalSteps: 10, phase: 'Failed', secondsLeft: 0, totalSeconds: 608, cost: 0.19, refunded: 0.19, error: "Something went wrong · you weren't charged", createdAt: now - 3_600_000, seed: 42, thumb: asset('g_tq') },
   ]);
   const t = (id: string, kind: 'take' | 'shot', jobId: string | null, title: string, label: string, engineLabel: string, cost: number, seed: number, thumb: string, createdAt: number) =>
-    ({ id, studioId: sid, userId: owner!.id, kind, jobId, modelId: 'm_sienna', index: 1, of: 1, title, label, engineLabel, cost, seed, status: 'test' as const, thumb: asset(thumb), prompt: '', createdAt });
+    ({ id, studioId: sid, userId: owner!.id, kind, jobId, modelId: 'm_demo', index: 1, of: 1, title, label, engineLabel, cost, seed, status: 'test' as const, thumb: asset(thumb), prompt: '', createdAt });
   await db.insert(takes).values([
     t('t_j1', 'take', 'j1', 'Kick test', 'Fast · beta', 'Fast · beta', 0.13, 7, 'g_front', now - 7_000_000),
     t('t_j2', 'take', 'j2', 'Bathroom trend', 'Edit', 'Edit', 3.05, 42, 'c_front', now - 83_640_000),

@@ -50,12 +50,17 @@ export class LoraService {
 
   async get(user: AuthUser, modelId: string) { return this.view(await this.row(user, modelId)); }
 
+  private archived(m: typeof models.$inferSelect) {
+    if (m.archivedAt) throw new ApiError(409, 'model_archived', 'This model is archived · restore her in Settings → Archived models');
+  }
+
   async buildCandidates(user: AuthUser, modelId: string) {
     const m = await this.model(user, modelId);
+    this.archived(m);
     const l = await this.row(user, modelId);
     if (['building', 'training'].includes(l.state)) throw new ApiError(409, 'busy', 'Already working on it');
     // Pass-through pricing: hold the estimate, settle to what the engine really charged (plans/api.md "App clean-up" §3).
-    const estimate = P.loraSetEstimate(this.ctx.images.photoPrices(), this.ctx.images.refCount(m.slots.map(s => s.image)));
+    const estimate = P.LORA_CANDIDATES * await this.ctx.images.newShotCost(user.studioId, 1, this.ctx.images.refCount(m.slots.map(s => s.image)));
     const bill = await new PhotoBill(this.ctx, whoOf(user), `lora_${modelId}_${Date.now()}`, estimate, `LoRA training set · ${P.LORA_CANDIDATES} photos`).start();
     const before = l.state;
     const building = await this.set(modelId, { state: 'building', candidates: [], progress: 0 });
@@ -114,6 +119,7 @@ export class LoraService {
 
   async train(user: AuthUser, modelId: string) {
     const m = await this.model(user, modelId);
+    this.archived(m);
     const l = await this.row(user, modelId);
     if (!['review', 'ready', 'failed'].includes(l.state) || !l.candidates.length) throw badRequest('Build the training set first');
     const kept = l.candidates.filter(c => c.keep).length;

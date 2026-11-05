@@ -5,7 +5,7 @@ _Added 2026-11-04._ Every generator in the app (character sheet, outfit set, pho
 ## 1. Layers (merged top to bottom)
 | Layer | Source | Example |
 |---|---|---|
-| **Identity** | Model profile: look settings and locked references | "Sienna Vale: young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin. Identity from 6 locked reference images." |
+| **Identity** | Model profile: look settings and locked references | "Demo model: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Identity from 6 locked reference images." |
 | **Outfit** | The selected outfit set (front, ¾, side, back) | "Wearing: green set (outfit reference set)." |
 | **Task** | Which generator is running | Photoshoot / identity shot / outfit angle / video swap |
 | **Scene** | Scene chip **or** custom text | "Scene: sunlit rooftop bar, string lights." |

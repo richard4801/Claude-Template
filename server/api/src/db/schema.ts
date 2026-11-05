@@ -14,6 +14,10 @@ export type PoolSlot = (typeof POOL_SLOTS)[number];
 export type VariationPool = Partial<Record<PoolSlot, string[]>>;
 export type VariationDraw = Partial<Record<PoolSlot | 'direction', string>>;
 export type SheetSlot = { key: string; image: ImageRef | null; source: 'upload' | 'generated'; busy: boolean };
+export type SheetVersion = { id: string; createdAt: number; reason: 'enhance' | 'restore'; slots: SheetSlot[] };
+/** One image of an Enhance or Dress up run (plans/api.md "Model tools" §6). */
+export type ToolItem = { slot: string; label: string; before: ImageRef | null; results: { a?: ImageRef | null; b?: ImageRef | null };
+  state: 'waiting' | 'running' | 'done' | 'failed'; decision: 'pending' | 'keep' | 'reject'; pick: 'a' | 'b' | null; cost: number; error?: string };
 
 export const studios = pgTable('studios', {
   id: text('id').primaryKey(),
@@ -87,6 +91,8 @@ export const studioSettings = pgTable('studio_settings', {
   warmMaxMinutes: integer('warm_max_minutes'),
   /** The studio ledger's start (epoch ms): spending from here on counts against the owner's top-ups (2026-11-04). */
   balanceSince: ms('balance_since'),
+  /** The owner's model per image step (plans/api.md "Model tools" §2): {[step]: {model, extra}}; absent = the default. */
+  imageModels: jsonb('image_models').$type<Record<string, { model: string; extra?: Record<string, unknown> }>>(),
 });
 
 /** Money the owner loaded into the studio ("Added $20"). Also written to the ledger as a `topup` row. */
@@ -113,6 +119,10 @@ export const models = pgTable('models', {
   outfitIds: jsonb('outfit_ids').$type<string[]>().notNull(),
   personality: text('personality'),
   notes: text('notes'),
+  /** Archived (owner): hidden from every list and picker; nothing is deleted (plans/api.md "Model tools" §7). */
+  archivedAt: ms('archived_at'),
+  /** Earlier character sheets, newest first (≤ 10): saved before Enhance replaces images, and before a restore. */
+  sheetVersions: jsonb('sheet_versions').$type<SheetVersion[]>().notNull().default([]),
   createdBy: text('created_by'),
   createdAt: ms('created_at').notNull(),
 }, t => [index('models_studio_idx').on(t.studioId)]);
@@ -130,6 +140,8 @@ export const outfits = pgTable('outfits', {
   seed: integer('seed'),
   /** What the set really cost (exact, settled; null before it's made or for older sets). */
   cost: money('cost'),
+  /** Dress up outfits: the face close-ups wearing its accessories (face, face ¾, profile). */
+  faces: jsonb('faces').$type<(ImageRef | null)[]>(),
   createdBy: text('created_by'),
   createdAt: ms('created_at').notNull(),
 }, t => [index('outfits_studio_idx').on(t.studioId)]);
@@ -444,3 +456,27 @@ export const templateFavourites = pgTable('template_favourites', {
   templateId: text('template_id').notNull().references(() => templates.id, { onDelete: 'cascade' }),
   createdAt: ms('created_at').notNull(),
 }, t => [primaryKey({ columns: [t.userId, t.templateId] })]);
+
+/** Enhance and Dress up runs on a model's character sheet (plans/api.md "Model tools" §4–6). */
+export const toolRuns = pgTable('tool_runs', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  modelId: text('model_id').notNull(),
+  kind: text('kind').notNull().$type<'enhance' | 'dressup'>(),
+  state: text('state').notNull().$type<'running' | 'review' | 'applied' | 'failed' | 'discarded'>(),
+  options: jsonb('options').$type<Record<string, unknown>>().notNull(),
+  engines: jsonb('engines').$type<('a' | 'b')[]>().notNull(),
+  /** The Replicate model per step used by this run (owner only in views). */
+  models: jsonb('models').$type<Record<string, string>>().notNull(),
+  items: jsonb('items').$type<ToolItem[]>().notNull(),
+  estimate: money('estimate').notNull(),
+  cost: money('cost').notNull().default(0),
+  progress: doublePrecision('progress').notNull().default(0),
+  phase: text('phase').notNull().default(''),
+  error: text('error'),
+  outfitId: text('outfit_id'),
+  createdBy: text('created_by'),
+  createdAt: ms('created_at').notNull(),
+  finishedAt: ms('finished_at'),
+  appliedAt: ms('applied_at'),
+}, t => [index('tool_runs_studio_idx').on(t.studioId, t.createdAt)]);

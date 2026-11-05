@@ -1,0 +1,36 @@
+{
+ "next": null,
+ "previous": null,
+ "results": [
+  {
+   "name": "Official models",
+   "slug": "official",
+   "description": "Official models are always on, predictably priced, and have a stable API."
+  },
+  {
+   "name": "FLUX family of models",
+   "slug": "flux",
+   "description": "FLUX AI models by Black Forest Labs: image generation & editing via API"
+  },
+  {
+   "name": "Edit any image",
+   "slug": "image-editing",
+   "description": "Use AI to edit any image via API"
+  },
+  {
+   "name": "Upscale images with super resolution",
+   "slug": "super-resolution",
+   "description": "Use AI to upscale and enhance images with an API"
+  },
+  {
+   "name": "Restore images",
+   "slug": "ai-image-restoration",
+   "description": "Use AI to restore images via API"
+  },
+  {
+   "name": "Generate images",
+   "slug": "text-to-image",
+   "description": "Use AI to generate images & photos with an API"
+  }
+ ]
+}

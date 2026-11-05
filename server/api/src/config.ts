@@ -152,6 +152,20 @@ const Env = z.object({
   /** Photo LoRA hook (later): passed to the edit model as lora_weights when set. */
   REPLICATE_IMAGE_LORA_URL: str(),
   REPLICATE_IMAGE_LORA_SCALE: num(1),
+  // Model tools (plans/api.md "Model tools"): default models per image step, the catalog and pricing of any model.
+  REPLICATE_REALISM_MODEL: z.string().default('black-forest-labs/flux-krea-dev'),
+  REPLICATE_UPSCALE_MODEL: z.string().default('philz1337x/clarity-upscaler'),
+  REPLICATE_DRESS_A_MODEL: z.string().default('qwen/qwen-image-edit-2511'),
+  REPLICATE_DRESS_B_MODEL: z.string().default('black-forest-labs/flux-2-pro'),
+  /** Model pages (prices) live on the website, not the API. */
+  REPLICATE_WEB_URL: z.string().default('https://replicate.com'),
+  REPLICATE_CATALOG_TTL_SEC: num(43200),
+  REPLICATE_SCHEMA_TTL_SEC: num(21600),
+  REPLICATE_PRICE_TTL_SEC: num(86400),
+  /** Time-billed models without a typical run on their page: estimate this many seconds. */
+  REPLICATE_TIME_EST_SEC: num(20),
+  /** A model whose price can't be read: estimate (and settle on) this much per image. */
+  REPLICATE_UNKNOWN_EST_USD: num(0.05),
   FFMPEG_PATH: z.string().default('ffmpeg'),
   FFPROBE_PATH: z.string().default('ffprobe'),
 

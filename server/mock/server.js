@@ -46,7 +46,7 @@ function h3Prompt(m, o, r) {
     `detailed_description:\nRealistic smartphone video. ${r.steps} steps.\n`;
 }
 
-/** The LoRA token the prompts use ("sienna_v2"), or null when there's no trained version or it's switched off. */
+/** The LoRA token the prompts use ("demo_v2"), or null when there's no trained version or it's switched off. */
 function activeLora(m) {
   const l = db.loras[m.id];
   return l && l.version > 0 && l.use ? sim.loraToken(m.name, l.version) : null;
@@ -146,7 +146,13 @@ route('POST', '/v1/auth/signup', async req => {
   return { token: 'mock-' + uid(), user: { id: 'u1', studioName: b.studioName || 'My Studio', email: b.email } };
 });
 
-route('GET', '/v1/models', () => db.models);
+// Archived models are left out; ?archived=true lists only them (plans/api.md "Model tools" §7).
+route('GET', '/v1/models', req => {
+  const archived = ['1', 'true'].includes(new URL(req.url, 'http://x').searchParams.get('archived') ?? '');
+  return db.models.filter(m => !!m.archived === archived);
+});
+route('POST', '/v1/models/:id/archive', (req, p) => { const m = model(p.id); Object.assign(m, { archived: true, archivedAt: m.archivedAt ?? Date.now() }); emit({ type: 'model', model: m }); return m; });
+route('POST', '/v1/models/:id/unarchive', (req, p) => { const m = model(p.id); m.archived = false; delete m.archivedAt; emit({ type: 'model', model: m }); return m; });
 route('POST', '/v1/models', async req => {
   const b = await json(req);
   const m = { id: 'm_' + uid(), name: b.name || 'New model', age: Math.min(70, Math.max(18, b.age ?? 27)), niche: b.niche ?? 'Beauty', look: '', neverAdd: [],

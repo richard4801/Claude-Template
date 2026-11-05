@@ -1,0 +1,75 @@
+{
+ "query": "upscale portrait",
+ "models": [
+  {
+   "model": {
+    "cover_image_url": "https://tjzk.replicate.delivery/models_models_featured_image/955e89ed-7a69-4b5a-ba72-2ba20d725c19/crystal-cover.webp",
+    "default_example": null,
+    "description": "Upscale without changing the original. Fastest, highest resolution and best quality on the market. Built for fashion, products and architecture.",
+    "github_url": null,
+    "latest_version": null,
+    "license_url": null,
+    "name": "crystal-upscaler",
+    "owner": "philz1337x",
+    "paper_url": null,
+    "run_count": 1369367,
+    "url": "https://replicate.com/philz1337x/crystal-upscaler",
+    "visibility": "public"
+   },
+   "metadata": {
+    "generated_description": "Upscales images while preserving the original appearance with high fidelity. Accepts an input image and scale factor, returning an upscaled version without altering details or introducing artifacts. Optimized for product photography, fashion, architecture, real estate, portraits, and AI-generated images. Maintains natural texture and detail in fabrics, faces, and architectural elements. Supports upscaling up to 1.5 gigapixel output resolution. Fast processing times across resolutions from 1K to 10K.",
+    "tags": [
+     "image-upscaling"
+    ],
+    "score": 2.320302893780471
+   }
+  },
+  {
+   "model": {
+    "cover_image_url": "https://tjzk.replicate.delivery/models_models_featured_image/e220ac1a-3d43-4c48-884f-5678c0c3ea94/tmp9lnlmaoj.jpg",
+    "default_example": null,
+    "description": "Professional-grade image upscaling, from Topaz Labs",
+    "github_url": null,
+    "latest_version": null,
+    "license_url": null,
+    "name": "image-upscale",
+    "owner": "topazlabs",
+    "paper_url": null,
+    "run_count": 3737769,
+    "url": "https://replicate.com/topazlabs/image-upscale",
+    "visibility": "public"
+   },
+   "metadata": {
+    "generated_description": "Upscales images using professional-grade AI technology with specialized models for different content types. Offers five enhancement models: Standard V2 for general purpose upscaling, Low Resolution V2 for low-resolution images, CGI for digital art, High Fidelity V2 for detail preservation, and Text Refine optimized for text. Supports upscaling factors up to 6x and includes specialized face enhancement features with adjustable creativity and strength parameters for portraits and photos containing faces.",
+    "tags": [
+     "image-upscaling"
+    ],
+    "score": 2.309575738590883
+   }
+  },
+  {
+   "model": {
+    "cover_image_url": "https://tjzk.replicate.delivery/models_models_featured_image/d6c92296-f00c-40af-a352-c87a51ccaff5/cover.jpeg",
+    "default_example": null,
+    "description": "The first creative upscaler which keeps identity. Stunning photorealistic results, realistic skin, and full creative control.",
+    "github_url": null,
+    "latest_version": null,
+    "license_url": null,
+    "name": "clarity-pro-upscaler",
+    "owner": "philz1337x",
+    "paper_url": null,
+    "run_count": 42124,
+    "url": "https://replicate.com/philz1337x/clarity-pro-upscaler",
+    "visibility": "public"
+   },
+   "metadata": {
+    "generated_description": "Upscale images while preserving identity and maintaining photorealistic quality. Supports scale factors of 2x, 4x, 8x, or 16x with output capped at 64 megapixels. Features creativity control to balance between strict fidelity to the original image and allowing the model to add enhanced detail. Designed for photos, AI-generated images, products, and artwork without introducing artifacts like plastic skin or hallucinated features that affect other upscalers.",
+    "tags": [
+     "image-upscaling"
+    ],
+    "score": 2.306759321720609
+   }
+  }
+ ],
+ "collections": []
+}

@@ -26,13 +26,13 @@ The app shows "about $7.25" in total: $0.60 for the training set plus $6.65 for 
 
 ## Rules
 - **Training data:** the training set is the shots the user approved, plus their 6 reference shots. For the video LoRA, it can also include short clips from approved Final takes, but only ones the user picks.
-- **Captions:** each training image gets a trigger token (`sienna_v1`) and a plain caption. Never-add items are kept out of the training set: shots with tattoos, rings or chokers are flagged.
-- **Prompt engine:** when the LoRA is on, the identity layer adds it, e.g. "Identity from 6 locked reference images + LoRA sienna_v1." The exact LoRA version is saved with every render, so results can be reproduced.
+- **Captions:** each training image gets a trigger token (`demo_v1`) and a plain caption. Never-add items are kept out of the training set: shots with tattoos, rings or chokers are flagged.
+- **Prompt engine:** when the LoRA is on, the identity layer adds it, e.g. "Identity from 6 locked reference images + LoRA demo_v1." The exact LoRA version is saved with every render, so results can be reproduced.
 - **Turning it off:** the model falls back to references only.
 - **Deleting a model** deletes its LoRAs and its training set.
 
 ## Before we ship
-- [ ] Run one real training of each LoRA on Sienna (about $8 of GPU) and compare against references only, on the same clip and seed.
+- [ ] Run one real training of each LoRA on one model (about $8 of GPU) and compare against references only, on the same clip and seed.
 - [ ] Check that the H3 LoRA stacks with the reference images and doesn't fight them, and that it doesn't slow down rendering.
 - [ ] Pick the photo model, then confirm the photo LoRA trainer for it.
 - [ ] Replace the estimated times and prices in the app with the measured ones.

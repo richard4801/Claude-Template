@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { and, eq } from 'drizzle-orm';
 import { jobs, ledger, pods, studioSettings, takes } from '../src/db/schema.js';
 import { RunpodApi } from '../src/gpu/runpodApi.js';
-import { makeApp, people, sienna, type Client } from './helpers.js';
+import { makeApp, people, demoModel, type Client } from './helpers.js';
 
 type Fake = { balance: number; noCredit?: boolean; deployed: { id: string; gpuTypeId: string; token: string; podId: string; env: Record<string, string> }[]; terminated: string[]; unavailable: Set<string> };
 function fakeRunpod(state: Fake) {
@@ -62,7 +62,7 @@ describe('runpod controller: one pod per user', () => {
     const p = await people(a, 3);
     owner = p.owner; [u1, u2, u3] = p.members as [Client, Client, Client];
     for (const u of [u1, u2, u3]) await owner.req('POST', '/v1/wallets/transfer', { toUserId: u.id, tokens: 500 });
-    model1 = (await sienna(u1)).id; model2 = model1; model3 = model1;
+    model1 = (await demoModel(u1)).id; model2 = model1; model3 = model1;
     clip1 = await uploadClip(a, u1); clip2 = await uploadClip(a, u2); clip3 = await uploadClip(a, u3);
   });
   afterAll(async () => { await a.close(); });
@@ -271,7 +271,7 @@ describe('GPU type fallback and Viggle on H200', () => {
     const rp: Fake = { balance: 100, deployed: [], terminated: [], unavailable: new Set(['NVIDIA H200 NVL']) };
     const a = await makeApp({ GPU_MODE: 'runpod', BALANCE_MODE: 'runpod', RUNPOD_NETWORK_VOLUME_ID: 'vol_123', RUNPOD_WORKER_CAPABILITIES: 'h3,viggle,latentsync' }, { runpod: fakeRunpod(rp), startLoops: false });
     const p = await people(a, 0);
-    const m = await sienna(p.owner);
+    const m = await demoModel(p.owner);
     const clip = await uploadClip(a, p.owner);
     expect((await p.owner.req('POST', '/v1/jobs', { title: 'v', modelId: m.id, clipId: clip, engine: 'viggle', steps: 4 })).status).toBe(200);
     await a.ctx.jobs.tick();

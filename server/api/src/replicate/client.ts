@@ -83,7 +83,7 @@ export class ReplicateClient {
    * Starts a prediction on an official model ("owner/name"). Waits out 429s (and brief 5xx) for up to `maxWaitMs`,
    * then throws `rate_limited`. Other errors throw `failed` (bad input, out of credit) or `unavailable` (token).
    */
-  async create(model: string, input: Record<string, unknown>, opts: WaitHooks & { maxWaitMs: number }): Promise<Prediction> {
+  async create(model: string, input: Record<string, unknown>, opts: WaitHooks & { maxWaitMs: number; /** A community model: run this version via POST /predictions. */ version?: string }): Promise<Prediction> {
     if (!this.o.token) throw new ReplicateError("Replicate isn't set up on the server", 'unavailable');
     const t0 = this.now();
     let tries = 0, serverErrors = 0;
@@ -96,8 +96,8 @@ export class ReplicateClient {
         await this.sleepFn(blocked);
         continue;
       }
-      const res = await this.serial(() => this.fetchFn(`${this.base}/models/${model}/predictions`, {
-        method: 'POST', headers: this.headers(), body: JSON.stringify({ input }), signal: AbortSignal.timeout(60_000),
+      const res = await this.serial(() => this.fetchFn(opts.version ? `${this.base}/predictions` : `${this.base}/models/${model}/predictions`, {
+        method: 'POST', headers: this.headers(), body: JSON.stringify(opts.version ? { version: opts.version, input } : { input }), signal: AbortSignal.timeout(60_000),
       })).catch(e => { throw new ReplicateError(`Replicate unreachable (${(e as Error).name})`, 'failed'); });
       if (res.status === 429) {
         const body = await res.text().catch(() => '');

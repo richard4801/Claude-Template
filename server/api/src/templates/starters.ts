@@ -1,5 +1,5 @@
 // The starter pack (plans/templates.md): seven public templates per studio, owned by the studio owner. Our own
-// recreations: prompt layers written here, covers made from the bundled Sienna reference stills with the template's
+// recreations: prompt layers written here, covers made from the bundled placeholder stills with the template's
 // grade and after-effects applied. No third-party photos are used, as references or as covers.
 import type { TemplateLayers, VariationPool } from '../db/schema.js';
 

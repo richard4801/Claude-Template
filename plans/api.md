@@ -361,7 +361,7 @@ Lora       { modelId, version /* 0 = never trained; the last ready version */, s
              progress (0–100, overall), photo: { state: "none"|"training"|"ready", progress }, video: { state: "none"|"waiting"|"training"|"ready", progress },
              cost /* spent so far */, trainedOn? /* shots kept for the last version */ }
              // The LoRA is applied when version ≥ 1 and use is true, also while a retrain is in review/training.
-             // Token: first name, lower case, plus the version: "sienna_v2".
+             // Token: first name, lower case, plus the version: "demo_v2".
 Platform   "tiktok"|"instagram"|"facebook"|"youtube"|"x"
 Account    { modelId, platform: Platform, handle, connectedAt, canPostDirect: boolean /* false until that platform approves MUSE */ }
 Post       { id, modelId, takeId, title, thumb: ImageRef, platforms: Platform[], caption, aiLabel: boolean, paidPartnership: boolean,
@@ -503,7 +503,7 @@ The mock runs LoRA training 5× faster than its render speed (120× real time by
 | | |
 |---|---|
 | `GET /v1/models/{id}/accounts` | → `Account[]` |
-| `POST /v1/models/{id}/accounts/{platform}/connect` | → `ConnectResponse`. The real backend returns `{ authUrl }` (OAuth). The mock signs in after a short delay (≤ 0.9 s) and returns `{ account }`. Handles come from the model's name (`@sienna.vale`, `Sienna Vale` on YouTube, `Sienna Vale (Page)` on Facebook). |
+| `POST /v1/models/{id}/accounts/{platform}/connect` | → `ConnectResponse`. The real backend returns `{ authUrl }` (OAuth). The mock signs in after a short delay (≤ 0.9 s) and returns `{ account }`. Handles come from the model's name (`@demo.model`, `Demo model` on YouTube, `Demo model (Page)` on Facebook). |
 | `DELETE /v1/models/{id}/accounts/{platform}` | 204 |
 | `GET /v1/posts?state=&modelId=` | → `Post[]`, newest first. Both filters are optional. |
 | `POST /v1/posts` `{modelId, takeId, platforms, caption, aiLabel, paidPartnership, when}` | → `Post`. `aiLabel` and `paidPartnership` default to false and are only ever set by the user. Only a JSON `true` turns a label on. Every platform must be connected for that model (`bad_request`). Stage 1: `when: "now"` returns `handoff` (the client opens each app); a scheduled post stays `scheduled` and turns `handoff` at its time (the client also sets a local notification). The mock then marks a handed-off post `posted` with stats after a moment (`post` event), standing in for the stats read-back. |

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { ledger, studioSettings } from '../src/db/schema.js';
 import { RunpodApi } from '../src/gpu/runpodApi.js';
-import { makeApp, people, sienna, until, type Client } from './helpers.js';
+import { makeApp, people, demoModel, until, type Client } from './helpers.js';
 
 /** A fake RunPod GraphQL API: `myself` returns `state.balance`. */
 export function fakeRunpod(state: { balance: number; calls?: string[] }) {
@@ -93,14 +93,14 @@ describe('wallets, ledger and caps (owner-loaded studio balance)', () => {
   });
 
   it('insufficient tokens are refused before any GPU work', async () => {
-    const m = await sienna(mo);
+    const m = await demoModel(mo);
     const r = await mo.req('POST', '/v1/jobs', { title: 'x', modelId: m.id, steps: 10, takes: 3 }); // $2.02 > $2.00
     expect(r.status).toBe(402); expect(r.body.code).toBe('insufficient_tokens');
     expect((await mo.req('GET', '/v1/jobs')).body.length).toBe(0);
   });
 
   it('hold → settle: the estimate is held, then the actual cost is spent', async () => {
-    const m = await sienna(tess);
+    const m = await demoModel(tess);
     const before = (await tess.req('GET', '/v1/wallet')).body.tokens;
     const job = (await tess.req('POST', '/v1/jobs', { title: 'Dance', modelId: m.id, steps: 10 })).body;
     expect(job.state).toBe('running');
@@ -147,7 +147,7 @@ describe('wallets, ledger and caps (owner-loaded studio balance)', () => {
     expect(sb.balanceUsd).toBeCloseTo(20 - sb.spentUsd, 6);
     const w = (await tess.req('GET', '/v1/wallet')).body, m = (await mo.req('GET', '/v1/wallet')).body;
     expect(sb.availableUsd).toBeCloseTo(sb.balanceUsd - (w.tokens + w.heldTokens + m.tokens + m.heldTokens) / 100, 6);
-    const om = await sienna(owner);
+    const om = await demoModel(owner);
     const r = await owner.req('POST', '/v1/jobs', { title: 'x', modelId: om.id, steps: 10, takes: 1, use: 'full' }); // ~$1.3 > what's free
     if (sb.availableUsd < 1.3) { expect(r.status).toBe(402); expect(r.body.code).toBe('insufficient_balance'); expect(r.body.error).toMatch(/studio balance/); }
   });
