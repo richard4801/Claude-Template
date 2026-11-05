@@ -185,13 +185,13 @@ extension EditV2 {
 
     /// Ducking multiplier at t for a music track with `duck`.
     private static func duckGain(_ regions: [SecRange], _ duck: Duck, _ t: Double) -> Double {
-        let level = clamp(duck.level ?? 0.3, 0.05, 1), f = max(0.05, duck.fadeSec ?? 0.25)
+        let level = clamp(duck.level ?? 0.3, 0.05, 1), (att, rel) = duckTimes(duck)
         var m = 1.0
         for r in regions {
             let d: Double
             if t >= r.startSec && t <= r.endSec { d = 1 }
-            else if t < r.startSec { d = clamp(1 - (r.startSec - t) / f, 0, 1) }
-            else { d = clamp(1 - (t - r.endSec) / f, 0, 1) }
+            else if t < r.startSec { d = clamp(1 - (r.startSec - t) / att, 0, 1) }
+            else { d = clamp(1 - (t - r.endSec) / rel, 0, 1) }
             m = min(m, 1 - (1 - level) * d)
         }
         return m
@@ -232,8 +232,9 @@ extension EditV2 {
         if track.kind == .music, let d = track.duck {
             duck = d
             regions = duckRegions(p, d)
-            let f = max(0.05, d.fadeSec ?? 0.25)
-            for r in regions { add(r.startSec - f); add(r.startSec); add(r.endSec); add(r.endSec + f) }
+            let (att, rel) = duckTimes(d)
+            for r in regions { add(r.startSec - att); add(r.startSec); add(r.endSec); add(r.endSec + rel) }
+
         }
         return ts.sorted().map { t in
             var g = baseGain(p, track, item, s, spans, t)

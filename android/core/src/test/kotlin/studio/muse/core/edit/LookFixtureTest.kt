@@ -125,14 +125,16 @@ class LookFixtureTest {
     @Test fun renders() {
         val img = image()
         val renders = f["renders"]!!.arr
-        assertEquals(10, renders.size)
+        assertEquals(11, renders.size)
         for (r in renders) {
             val o = r.obj
             val name = o["name"]!!.str
             val look = EditJson.parseLook(o["look"]!!)
             val matrix = (o["matrix"] as? JsonArray)?.map { it.num }
             val l = (o["lut"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.let(::lut)
-            val out = renderLook(img, look, matrix, l, frame = o["frame"]!!.num.toInt(), fps = 30.0)
+            val tone = (o["tone"] as? JsonObject)?.let { Tone(it["shadows"]?.num ?: 0.0, it["highlights"]?.num ?: 0.0) }
+            val out = renderLook(img, look, matrix, l, frame = o["frame"]!!.num.toInt(), fps = 30.0, tone = tone)
+
             val want = o["out"]!!.arr
             assertEquals(want.size, out.data.size)
             var worst = 0.0

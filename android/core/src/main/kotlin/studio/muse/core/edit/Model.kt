@@ -20,8 +20,37 @@ enum class Ease(override val wire: String) : Wire { LINEAR("linear"), EASE_IN("e
 enum class KfProp(override val wire: String) : Wire { X("x"), Y("y"), SCALE("scale"), ROTATION("rotation"), OPACITY("opacity"), VOLUME("volume") }
 
 enum class TransitionKind(override val wire: String) : Wire {
-    FADE("fade"), BLACK("black"), WHITE("white"), SLIDE_LEFT("slideLeft"), SLIDE_RIGHT("slideRight"), SLIDE_UP("slideUp"), SLIDE_DOWN("slideDown"), ZOOM("zoom")
+    FADE("fade"), BLACK("black"), WHITE("white"), SLIDE_LEFT("slideLeft"), SLIDE_RIGHT("slideRight"), SLIDE_UP("slideUp"), SLIDE_DOWN("slideDown"), ZOOM("zoom"),
+    /** Edit suite: cubic push with motion blur. */ WHIP("whip"),
+    /** Edit suite: rotate 180° and scale through a hard switch at the middle. */ SPIN("spin"),
+    /** Edit suite: hard switch with jitter and an RGB split. */ GLITCH("glitch"),
 }
+
+/** Speed-curve presets (Edit suite, EM4). */
+enum class SpeedPreset(override val wire: String) : Wire { MONTAGE("montage"), HERO("hero"), BULLET("bullet"), FLASH_IN("flashIn"), FLASH_OUT("flashOut"), CUSTOM("custom") }
+
+/** A point of a speed curve: [x] 0–1 of the clip's kept source, [speed] 0.1–10. */
+data class SpeedPoint(val x: Double, val speed: Double)
+
+/** A speed curve over the clip's source (points 2–16, x from 0 to 1, rising). */
+data class SpeedCurve(val preset: SpeedPreset, val points: List<SpeedPoint>)
+
+enum class MaskShape(override val wire: String) : Wire { LINEAR("linear"), MIRROR("mirror"), CIRCLE("circle"), RECT("rect"), HEART("heart"), STAR("star") }
+
+/** A mask on a video/image item: centre [x]/[y] and size in item fractions, [rotation] in degrees, soft edge [feather]. */
+data class Mask(
+    val shape: MaskShape,
+    val x: Double? = null,
+    val y: Double? = null,
+    val width: Double? = null,
+    val height: Double? = null,
+    val rotation: Double? = null,
+    val feather: Double? = null,
+    val invert: Boolean? = null,
+)
+
+/** Voice processing on a clip with sound (Edit suite audio panel). */
+enum class VoiceEffect(override val wire: String) : Wire { NONE("none"), WARM("warm"), RADIO("radio"), PHONE("phone"), DEEP("deep") }
 
 enum class AnimKind(override val wire: String) : Wire {
     NONE("none"), FADE("fade"), POP("pop"), SLIDE_UP("slideUp"), SLIDE_DOWN("slideDown"), ZOOM("zoom"), TYPEWRITER("typewriter")
@@ -42,7 +71,9 @@ enum class Font(override val wire: String) : Wire { SANS("sans"), SERIF("serif")
 enum class Align(override val wire: String) : Wire { LEFT("left"), CENTER("center"), RIGHT("right") }
 
 enum class CaptionPreset(override val wire: String) : Wire {
-    PLAIN("plain"), HIGHLIGHT("highlight"), BOX("box"), KARAOKE("karaoke"), POP("pop"), SINGLE("single")
+    PLAIN("plain"), HIGHLIGHT("highlight"), BOX("box"), KARAOKE("karaoke"), POP("pop"), SINGLE("single"),
+    /** Edit suite: a marker stripe behind the active word. */ HIGHLIGHTER("highlighter"),
+    /** Edit suite: glowing text. */ NEON("neon"),
 }
 
 enum class DuckUnder(override val wire: String) : Wire { VOICE("voice"), SPEECH("speech") }
@@ -54,7 +85,11 @@ typealias Keyframes = Map<KfProp, List<Keyframe>>
 
 data class Transform(val x: Double? = null, val y: Double? = null, val scale: Double? = null, val rotation: Double? = null)
 data class Crop(val left: Double? = null, val top: Double? = null, val right: Double? = null, val bottom: Double? = null)
-data class Adjust(val exposure: Double? = null, val contrast: Double? = null, val saturation: Double? = null, val temperature: Double? = null)
+data class Adjust(
+    val exposure: Double? = null, val contrast: Double? = null, val saturation: Double? = null, val temperature: Double? = null,
+    /** Edit suite: tone, applied after the colour matrix ([toneAdjust]). */
+    val highlights: Double? = null, val shadows: Double? = null,
+)
 data class FilterRef(val id: String, val amount: Double)
 data class Chroma(val color: String, val similarity: Double? = null, val smoothness: Double? = null, val spill: Double? = null)
 data class Transition(val kind: TransitionKind, val durationSec: Double)
@@ -88,6 +123,8 @@ sealed interface Visual : Item {
     val adjust: Adjust?
     /** The filter stack (plans/video-editor.md "Looks"), additive to [filter]/[adjust]. */
     val look: Look?
+    /** Edit suite: a shape mask multiplied into the item's alpha (after chroma key). */
+    val mask: Mask?
 }
 
 /** Items with source in/out times and a sound (video clips and audio clips). */
@@ -110,6 +147,8 @@ data class VideoClip(
     override val inSec: Double,
     override val outSec: Double,
     val speed: Double = 1.0,
+    /** Edit suite: a speed curve (used for timing instead of [speed]). */
+    val speedCurve: SpeedCurve? = null,
     /** Not on the main track. */
     val startSec: Double? = null,
     override val volume: Double? = null,
@@ -126,9 +165,12 @@ data class VideoClip(
     override val filter: FilterRef? = null,
     override val adjust: Adjust? = null,
     override val look: Look? = null,
+    override val mask: Mask? = null,
     val chroma: Chroma? = null,
     /** Main track, clip ≥ 2. */
     val transitionIn: Transition? = null,
+    val voiceEffect: VoiceEffect? = null,
+    val enhance: Boolean? = null,
 ) : Visual, MediaClip {
     override val speedOrNull: Double get() = speed
 }
@@ -146,6 +188,7 @@ data class ImageItem(
     override val filter: FilterRef? = null,
     override val adjust: Adjust? = null,
     override val look: Look? = null,
+    override val mask: Mask? = null,
     val animIn: Anim? = null,
     val animOut: Anim? = null,
 ) : Visual
@@ -197,6 +240,10 @@ data class AudioClip(
     override val keyframes: Keyframes? = null,
     /** Beat marks, source seconds. */
     val beats: List<Double>? = null,
+    /** Strong (downbeat) marks, source seconds. */
+    val strongBeats: List<Double>? = null,
+    val voiceEffect: VoiceEffect? = null,
+    val enhance: Boolean? = null,
 ) : MediaClip {
     override val speedOrNull: Double? get() = speed
 }
@@ -213,7 +260,11 @@ data class CaptionStyle(
 
 data class CaptionWord(val text: String, val startSec: Double, val endSec: Double)
 data class CaptionTrack(val asset: String, val words: List<CaptionWord>, val style: CaptionStyle)
-data class Duck(val level: Double? = null, val fadeSec: Double? = null, val under: List<DuckUnder>)
+data class Duck(
+    val level: Double? = null, val fadeSec: Double? = null, val under: List<DuckUnder>,
+    /** Edit suite: ramp down before speech / back up after it (else [fadeSec] for both). */
+    val attackSec: Double? = null, val releaseSec: Double? = null,
+)
 
 data class Track(
     val id: String,
@@ -263,8 +314,8 @@ object EditLimits {
     const val MIN_ITEM_SEC = 0.05
     const val MIN_OUTPUT_SEC = 0.5
     const val MAX_OUTPUT_SEC = 600.0
-    const val MIN_SPEED = 0.25
-    const val MAX_SPEED = 4.0
+    const val MIN_SPEED = 0.1
+    const val MAX_SPEED = 10.0
     const val END_SLACK_SEC = 0.05
     const val MIN_TRANSITION_SEC = 0.1
     const val MAX_TRANSITION_SEC = 2.0
@@ -276,4 +327,16 @@ object EditLimits {
     const val CAPTION_GAP_SEC = 0.6
     const val CAPTION_TAIL_SEC = 0.4
     const val SPEECH_JOIN_SEC = 0.4
+
+    /** Source pieces a speed curve is rendered as. */
+    const val CURVE_PIECES = 48
 }
+
+/** Speed-curve presets (x = position in the clip's kept source, speed ×). */
+val SPEED_PRESETS: Map<SpeedPreset, List<SpeedPoint>> = linkedMapOf(
+    SpeedPreset.MONTAGE to listOf(SpeedPoint(0.0, 1.0), SpeedPoint(0.2, 4.0), SpeedPoint(0.4, 0.5), SpeedPoint(0.6, 4.0), SpeedPoint(0.8, 0.5), SpeedPoint(1.0, 1.0)),
+    SpeedPreset.HERO to listOf(SpeedPoint(0.0, 1.0), SpeedPoint(0.3, 1.0), SpeedPoint(0.42, 6.0), SpeedPoint(0.58, 6.0), SpeedPoint(0.7, 1.0), SpeedPoint(1.0, 1.0)),
+    SpeedPreset.BULLET to listOf(SpeedPoint(0.0, 4.0), SpeedPoint(0.35, 4.0), SpeedPoint(0.45, 0.2), SpeedPoint(0.55, 0.2), SpeedPoint(0.65, 4.0), SpeedPoint(1.0, 4.0)),
+    SpeedPreset.FLASH_IN to listOf(SpeedPoint(0.0, 6.0), SpeedPoint(0.4, 6.0), SpeedPoint(0.6, 1.0), SpeedPoint(1.0, 1.0)),
+    SpeedPreset.FLASH_OUT to listOf(SpeedPoint(0.0, 1.0), SpeedPoint(0.4, 1.0), SpeedPoint(0.6, 6.0), SpeedPoint(1.0, 6.0)),
+)

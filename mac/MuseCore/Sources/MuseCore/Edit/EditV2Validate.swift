@@ -130,6 +130,8 @@ private struct Validator {
                 if t.kind != .music { throw bad("\(f).duck", "only on a music track") }
                 try num("\(f).duck.level", d.level, 0.05, 1)
                 try num("\(f).duck.fadeSec", d.fadeSec, 0.05, 2)
+                try num("\(f).duck.attackSec", d.attackSec, 0.05, 2)
+                try num("\(f).duck.releaseSec", d.releaseSec, 0.05, 3)
                 if d.under.isEmpty { throw bad("\(f).duck.under", "must list voice and/or speech") }
             }
             var prevEnd = -Double.infinity
@@ -140,10 +142,22 @@ private struct Validator {
                 ids.insert(it.id)
                 switch (t.kind, it) {
                 case (.main, .video(let c)), (.video, .video(let c)):
-                    try clipBase(g, asset: c.asset, inSec: c.inSec, outSec: c.outSec, volume: c.volume, fadeIn: c.fadeInSec, fadeOut: c.fadeOutSec, kinds: [.video])
+                    try clipBase(g, asset: c.asset, inSec: c.inSec, outSec: c.outSec, volume: c.volume, fadeIn: c.fadeInSec, fadeOut: c.fadeOutSec, kinds: [.video],
+                                 voice: c.voiceEffect)
                     try num("\(g).speed", c.speed, E.minSpeed, E.maxSpeed, optional: false)
+                    if let sc = c.speedCurve {
+                        if !E.SpeedPreset.all.contains(sc.preset) { throw bad("\(g).speedCurve.preset", "unknown preset") }
+                        if sc.points.count < 2 || sc.points.count > 16 { throw bad("\(g).speedCurve.points", "2–16 points") }
+                        for (j, pt) in sc.points.enumerated() {
+                            if pt.count != 2 || !pt[0].isFinite || !pt[1].isFinite || pt[0] < 0 || pt[0] > 1 || pt[1] < E.minSpeed || pt[1] > E.maxSpeed {
+                                throw bad("\(g).speedCurve.points.\(j)", "must be [x 0–1, speed \(Self.fmt(E.minSpeed))–\(Self.fmt(E.maxSpeed))]")
+                            }
+                            if j > 0 && pt[0] <= sc.points[j - 1][0] { throw bad("\(g).speedCurve.points.\(j)", "x must increase") }
+                        }
+                        if sc.points[0][0] != 0 || sc.points[sc.points.count - 1][0] != 1 { throw bad("\(g).speedCurve.points", "must start at x 0 and end at x 1") }
+                    }
                     let len = E.clipLength(c)
-                    try visual(g, fit: c.fit, transform: c.transform, crop: c.crop, opacity: c.opacity, adjust: c.adjust, filter: c.filter, look: c.look)
+                    try visual(g, fit: c.fit, transform: c.transform, crop: c.crop, opacity: c.opacity, adjust: c.adjust, filter: c.filter, look: c.look, mask: c.mask)
                     try kfs("\(g).keyframes", c.keyframes, len, allowed: [.x, .y, .scale, .rotation, .opacity, .volume])
                     if let aa = c.audioAsset {
                         if let a = assets[aa], a.kind == .video || a.kind == .audio {} else { throw bad("\(g).audioAsset", "must be an audio or video asset") }
@@ -173,7 +187,8 @@ private struct Validator {
                     if a.kind != .image { throw bad("\(g).asset", "must be image") }
                     try num("\(g).startSec", im.startSec, 0, 600, optional: false)
                     try num("\(g).durationSec", im.durationSec, E.minItemSec, 600, optional: false)
-                    try visual(g, fit: im.fit, transform: im.transform, crop: im.crop, opacity: im.opacity, adjust: im.adjust, filter: im.filter, look: im.look)
+                    try visual(g, fit: im.fit, transform: im.transform, crop: im.crop, opacity: im.opacity, adjust: im.adjust, filter: im.filter, look: im.look,
+                               mask: im.mask)
                     try kfs("\(g).keyframes", im.keyframes, im.durationSec, allowed: [.x, .y, .scale, .rotation, .opacity])
                     try anim("\(g).animIn", im.animIn, text: false)
                     try anim("\(g).animOut", im.animOut, text: false)
@@ -189,11 +204,13 @@ private struct Validator {
                     try anim("\(g).animIn", tx.animIn, text: true)
                     try anim("\(g).animOut", tx.animOut, text: true)
                 case (.music, .audio(let c)), (.voice, .audio(let c)), (.sfx, .audio(let c)):
-                    try clipBase(g, asset: c.asset, inSec: c.inSec, outSec: c.outSec, volume: c.volume, fadeIn: c.fadeInSec, fadeOut: c.fadeOutSec, kinds: [.audio, .video])
+                    try clipBase(g, asset: c.asset, inSec: c.inSec, outSec: c.outSec, volume: c.volume, fadeIn: c.fadeInSec, fadeOut: c.fadeOutSec, kinds: [.audio, .video],
+                                 voice: c.voiceEffect)
                     try num("\(g).startSec", c.startSec, 0, 600, optional: false)
                     if let s = c.speed, s != 1 { throw bad("\(g).speed", "audio clips play at 1×") }
                     try kfs("\(g).keyframes", c.keyframes, E.clipLength(c), allowed: [.volume])
                     if let b = c.beats, b.count > 2000 || b.contains(where: { !$0.isFinite || $0 < 0 }) { throw bad("\(g).beats", "must be up to 2000 times") }
+                    if let b = c.strongBeats, b.count > 2000 || b.contains(where: { !$0.isFinite || $0 < 0 }) { throw bad("\(g).strongBeats", "must be up to 2000 times") }
                 default:
                     break
                 }
@@ -209,7 +226,8 @@ private struct Validator {
         return d
     }
 
-    func clipBase(_ f: String, asset: String, inSec: Double, outSec: Double, volume: Double?, fadeIn: Double?, fadeOut: Double?, kinds: [EditV2.AssetKind]) throws {
+    func clipBase(_ f: String, asset: String, inSec: Double, outSec: Double, volume: Double?, fadeIn: Double?, fadeOut: Double?, kinds: [EditV2.AssetKind],
+                  voice: EditV2.VoiceEffect? = nil) throws {
         guard let a = assets[asset] else { throw bad("\(f).asset", "is not in assets") }
         if !kinds.contains(a.kind) { throw bad("\(f).asset", "must be " + kinds.map(\.rawValue).joined(separator: " or ")) }
         try num("\(f).inSec", inSec, 0, 36_000, optional: false)
@@ -219,10 +237,11 @@ private struct Validator {
         try num("\(f).volume", volume, 0, 2)
         try num("\(f).fadeInSec", fadeIn, 0, 10)
         try num("\(f).fadeOutSec", fadeOut, 0, 10)
+        if let v = voice, !EditV2.VoiceEffect.all.contains(v) { throw bad("\(f).voiceEffect", "one of " + EditV2.VoiceEffect.all.map(\.rawValue).joined(separator: ", ")) }
     }
 
     func visual(_ f: String, fit: EditV2.Fit?, transform: EditV2.Transform?, crop: EditV2.Crop?, opacity: Double?, adjust: EditV2.Adjust?, filter: EditV2.FilterRef?,
-                look: EditV2.Look?) throws {
+                look: EditV2.Look?, mask: EditV2.Mask? = nil) throws {
         if let t = transform {
             try num("\(f).transform.x", t.x, -2, 3)
             try num("\(f).transform.y", t.y, -2, 3)
@@ -241,7 +260,19 @@ private struct Validator {
             try num("\(f).adjust.contrast", a.contrast, -1, 1)
             try num("\(f).adjust.saturation", a.saturation, -1, 1)
             try num("\(f).adjust.temperature", a.temperature, -1, 1)
+            try num("\(f).adjust.highlights", a.highlights, -1, 1)
+            try num("\(f).adjust.shadows", a.shadows, -1, 1)
         }
+        if let m = mask {
+            if !EditV2.MaskShape.all.contains(m.shape) { throw bad("\(f).mask.shape", "one of " + EditV2.MaskShape.all.map(\.rawValue).joined(separator: ", ")) }
+            try num("\(f).mask.x", m.x, -1, 2)
+            try num("\(f).mask.y", m.y, -1, 2)
+            try num("\(f).mask.width", m.width, 0.01, 3)
+            try num("\(f).mask.height", m.height, 0.01, 3)
+            try num("\(f).mask.rotation", m.rotation, -360, 360)
+            try num("\(f).mask.feather", m.feather, 0, 1)
+        }
+
         if let fl = filter {
             if !filterIds.isEmpty && !filterIds.contains(fl.id) { throw bad("\(f).filter.id", "unknown filter") }
             try num("\(f).filter.amount", fl.amount, 0, 1, optional: false)

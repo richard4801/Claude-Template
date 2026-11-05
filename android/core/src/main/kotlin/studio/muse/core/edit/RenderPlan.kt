@@ -50,6 +50,10 @@ data class VideoLook(
     val chroma: Chroma?,
     /** The item's look (plans/video-editor.md "Looks"), null when it has none or it changes nothing. */
     val look: Look? = null,
+    /** Edit suite: highlights/shadows after the colour matrix (baked into the colour LUT), null when none. */
+    val tone: Tone? = null,
+    /** Edit suite: the item's shape mask (alpha), null when none. */
+    val mask: Mask? = null,
 )
 
 /** A clip or image in a layer or lane, placed on the timeline. */
@@ -74,7 +78,15 @@ data class PlannedClip(
     /** Thin faster clips back to this rate (like v1). */
     val frameDropFps: Double?,
     val look: VideoLook?,
+    /**
+     * Edit suite: constant-speed source pieces the engine renders back to back (a speed curve → 48 pieces, else one
+     * piece = clipStart/clipEnd at [speed]). Microseconds of source; the sum of their lengths ≈ endUs − startUs.
+     */
+    val pieces: List<PlannedPiece> = listOf(PlannedPiece(clipStartUs, clipEndUs, speed)),
 )
+
+/** A constant-speed sub-clip of a [PlannedClip] (source microseconds). */
+data class PlannedPiece(val clipStartUs: Long, val clipEndUs: Long, val speed: Double)
 
 sealed interface LaneEntry { val startUs: Long; val endUs: Long; val durationUs: Long get() = endUs - startUs }
 data class Gap(override val startUs: Long, override val endUs: Long) : LaneEntry
@@ -102,15 +114,25 @@ data class CaptionPiece(val trackId: String, val style: CaptionStyle, val pages:
 data class FlashPiece(val flash: Flash) : OverlayPiece
 
 /** Where a layer's picture goes at one moment: centre in canvas fractions, scale, clockwise degrees, alpha. */
-data class Placement(val alpha: Double, val centerX: Double, val centerY: Double, val scale: Double, val rotationCw: Double) {
+data class Placement(
+    val alpha: Double, val centerX: Double, val centerY: Double, val scale: Double, val rotationCw: Double,
+    /** Edit suite transitions: motion blur 0–1 along x (whip) and RGB split 0–1 (glitch). */
+    val blur: Double = 0.0, val rgbSplit: Double = 0.0,
+) {
     companion object { val HIDDEN = Placement(0.0, 0.5, 0.5, 1.0, 0.0) }
 }
 
 /** A text item's state at one moment (the shown text after typewriter and uppercase). */
 data class TextFrame(val text: String, val alpha: Double, val centerX: Double, val centerY: Double, val scale: Double, val rotationCw: Double)
 
-/** A caption page at one moment: its words (uppercased when the style says so), the active one, and how to draw each. */
-data class CaptionFrame(val words: List<String>, val active: Int, val highlighted: List<Boolean>, val boxed: Int?, val activeScale: Double, val alpha: Double)
+/**
+ * A caption page at one moment: its words (uppercased when the style says so), the active one, and how to draw each.
+ * [stripe] = the word with a marker stripe behind it (highlighter preset).
+ */
+data class CaptionFrame(
+    val words: List<String>, val active: Int, val highlighted: List<Boolean>, val boxed: Int?, val activeScale: Double, val alpha: Double,
+    val stripe: Int? = null,
+)
 
 data class RenderPlan(
     val project: EditProject,
@@ -185,7 +207,10 @@ data class RenderPlan(
         }
         val st = transitionState(kind, p)
         val mine = if (incoming) st.b else st.a
-        var placed = base.copy(centerX = base.centerX + mine.dx, centerY = base.centerY + mine.dy, scale = base.scale * mine.scale)
+        var placed = base.copy(
+            centerX = base.centerX + mine.dx, centerY = base.centerY + mine.dy, scale = base.scale * mine.scale,
+            rotationCw = base.rotationCw + mine.rotation, blur = mine.blur, rgbSplit = mine.rgbSplit,
+        )
         if (kind == TransitionKind.BLACK || kind == TransitionKind.WHITE) {
             // The colour is drawn by a Flash overlay; the clip shows fully while it is the visible one.
             return placed.copy(alpha = if (mine.opacity > 0) base.alpha else 0.0)
@@ -245,7 +270,7 @@ data class RenderPlan(
         val words = page.words.map { if (style.text.uppercase == true) it.text.uppercase() else it.text }
         val hl = words.indices.map { k ->
             when (style.preset) {
-                CaptionPreset.HIGHLIGHT, CaptionPreset.POP -> k == at.word
+                CaptionPreset.HIGHLIGHT, CaptionPreset.POP, CaptionPreset.NEON -> k == at.word
                 CaptionPreset.KARAOKE -> k <= at.word
                 else -> false
             }
@@ -255,7 +280,8 @@ data class RenderPlan(
             CaptionPreset.SINGLE -> 0.6 + 0.4 * ease(Ease.EASE_OUT, (tSec - page.startSec) / 0.15)
             else -> 1.0
         }
-        return CaptionFrame(words, at.word, hl, if (style.preset == CaptionPreset.BOX) at.word else null, scale, 1.0)
+        return CaptionFrame(words, at.word, hl, if (style.preset == CaptionPreset.BOX) at.word else null, scale, 1.0,
+            stripe = if (style.preset == CaptionPreset.HIGHLIGHTER) at.word else null)
     }
 
     companion object {
@@ -303,7 +329,7 @@ fun planRender(project: EditProject, infos: Map<String, MediaInfo>, presets: Lis
         }
         val crop = if (l > 1e-9 || r > 1e-9 || t > 1e-9 || b > 1e-9) CropNdc(-1 + 2 * l, 1 - 2 * r, -1 + 2 * b, 1 - 2 * t) else null
         val m = colorMatrix(v.adjust, v.filter, presets).takeUnless(::isIdentityMatrix)
-        return VideoLook(crop, tw, th, base, m, (v as? VideoClip)?.chroma, v.look?.takeUnless { it.isNoop() })
+        return VideoLook(crop, tw, th, base, m, (v as? VideoClip)?.chroma, v.look?.takeUnless { it.isNoop() }, Tone.of(v.adjust), v.mask)
     }
 
     /** A clip limited to the project's end; null when it starts after it. */
@@ -312,15 +338,19 @@ fun planRender(project: EditProject, infos: Map<String, MediaInfo>, presets: Lis
         if (startUs >= totalUs) return null
         val endSec = min(span.endSec, total)
         val speed = item.speedOrNull ?: 1.0
-        val outSec = min(item.outSec, item.inSec + (endSec - span.startSec) * speed)
+        val outSec = min(item.outSec, clipSourceAt(item, endSec - span.startSec))
         val env = audioEnvelope(p, track.id, item.id)
         val inf = info(assetId)
         val audible = inf.hasAudio && env.any { it.gain > 0 }
+        // Speed curves play as constant-speed pieces, cut where the project ends.
+        val pieces = speedPieces(item).filter { it.inSec < outSec - 1e-9 }.map { pc -> PlannedPiece(RenderPlan.us(pc.inSec), RenderPlan.us(min(pc.outSec, outSec)), pc.speed) }
+        val fast = pieces.any { it.speed > 1.0 }
         return PlannedClip(
             track.id, item.id, assetId, startUs, RenderPlan.us(endSec), RenderPlan.us(item.inSec), RenderPlan.us(outSec), speed, isImage = false,
             withAudio = audible, removeVideo = removeVideo, envelope = if (audible) env else emptyList(),
-            frameDropFps = if (speed > 1.0 && !removeVideo) frameDrop else null, look = withVideoLook,
+            frameDropFps = if (fast && !removeVideo) frameDrop else null, look = withVideoLook, pieces = pieces,
         )
+
     }
 
     fun lane(clips: List<PlannedClip>): List<LaneEntry> {

@@ -160,6 +160,23 @@ interface MuseApi {
         id: String, inputs: kotlinx.serialization.json.JsonObject? = null, rules: List<Rule>? = null, texts: Map<String, String>? = null, direction: String? = null,
     ): ScriptPreview
 
+    // Workstream 2: camera sessions (plans/api.md "MCP & camera sessions"), owner only. See CameraApi.kt.
+    val camera: CameraApi get() = CameraApi.Unsupported
+
+    // Edit suite (workstream 3): AI helpers and v2 versions (plans/api.md "Editor v2"). Defaults: not available.
+    /** What a helper would cost (free ones say so). */
+    suspend fun editorEstimate(req: EditorJobRequest): EditorEstimate = throw ApiException("unsupported", "AI helpers need the studio server")
+    /** Starts a helper job (running); poll [editorJob] until it finishes. */
+    suspend fun startEditorJob(req: EditorJobRequest): EditorJob = throw ApiException("unsupported", "AI helpers need the studio server")
+    suspend fun editorJob(id: String): EditorJob = throw ApiException("not_found", "Job not found")
+    suspend fun cancelEditorJob(id: String) {}
+    /** Saves a video made by the Edit suite as a new version of [takeId] with its v2 project. */
+    suspend fun saveProjectVersion(takeId: String, video: EditedVideo, project: kotlinx.serialization.json.JsonObject, onProgress: (Float) -> Unit = {}): Take =
+        throw ApiException("unsupported", "Saving an edited video needs the studio server")
+    /** Uploads a voice-over / music file (or with purpose "lut" a .cube) for the editor; returns the upload id. */
+    suspend fun uploadEditorFile(file: java.io.File, contentType: String, purpose: String? = null, onProgress: (Float) -> Unit = {}): String =
+        throw ApiException("unsupported", "Uploading files needs the studio server")
+
     // AI suite (workstream 1, plans/api.md "AI suite"). Members never get engine names back; the owner does.
     suspend fun suiteCatalog(): SuiteCatalog = throw ApiException("not_found", "This server doesn't have the AI suite yet")
     suspend fun suiteEstimate(req: SuiteShotRequest): SuiteEstimate = throw ApiException("not_found", "This server doesn't have the AI suite yet")
@@ -170,8 +187,6 @@ interface MuseApi {
     /** Owner only. */
     suspend fun suiteSettings(): SuiteSettings = throw ApiException("not_found", "This server doesn't have the AI suite yet")
     suspend fun patchSuiteSettings(req: SuiteSettingsPatch): SuiteSettings = throw ApiException("not_found", "This server doesn't have the AI suite yet")
-    // Workstream 2: camera sessions (plans/api.md "MCP & camera sessions"), owner only. See CameraApi.kt.
-    val camera: CameraApi get() = CameraApi.Unsupported
 
     // Developer
     suspend fun setFailNext(fail: Boolean)

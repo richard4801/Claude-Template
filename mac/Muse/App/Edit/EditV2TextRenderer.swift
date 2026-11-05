@@ -12,11 +12,14 @@ enum EditV2TextRenderer {
         /// A rounded box of this colour behind the word (caption preset `box`).
         var box: String?
         var scale: Double = 1
-        init(text: String, color: String, box: String? = nil, scale: Double = 1) {
+        /// Edit suite: a marker stripe of this colour behind the lower 45 % of the word (caption preset `highlighter`).
+        var marker: String?
+        init(text: String, color: String, box: String? = nil, scale: Double = 1, marker: String? = nil) {
             self.text = text
             self.color = color
             self.box = box
             self.scale = scale
+            self.marker = marker
         }
     }
 
@@ -71,13 +74,14 @@ enum EditV2TextRenderer {
                     kernKey: NSNumber(value: Double(size) * (style.letterSpacing ?? 0)), paragraphKey: para]
         }
         let fill = NSMutableAttributedString()
-        var boxes: [(NSRange, String)] = []
+        var boxes: [(NSRange, String, Bool)] = []
         for (i, r) in runs.enumerated() {
             if i > 0 { fill.append(NSAttributedString(string: " ", attributes: attrs(1, style.color))) }
             let text = style.uppercase == true ? r.text.uppercased() : r.text
             let start = fill.length
             fill.append(NSAttributedString(string: text, attributes: attrs(r.scale, r.color)))
-            if let b = r.box { boxes.append((NSRange(location: start, length: fill.length - start), b)) }
+            if let b = r.box { boxes.append((NSRange(location: start, length: fill.length - start), b, false)) }
+            if let m = r.marker { boxes.append((NSRange(location: start, length: fill.length - start), m, true)) }
         }
         let fs = CTFramesetterCreateWithAttributedString(fill as CFAttributedString)
         let suggested = CTFramesetterSuggestFrameSizeWithConstraints(fs, CFRange(location: 0, length: 0), nil,
@@ -108,7 +112,7 @@ enum EditV2TextRenderer {
         if !boxes.isEmpty, let lines = CTFrameGetLines(frame) as? [CTLine] {
             var origins = [CGPoint](repeating: .zero, count: lines.count)
             CTFrameGetLineOrigins(frame, CFRange(location: 0, length: 0), &origins)
-            for (range, color) in boxes {
+            for (range, color, isMarker) in boxes {
                 for (line, o) in zip(lines, origins) {
                     let lr = CTLineGetStringRange(line)
                     let a = max(range.location, lr.location), b = min(range.location + range.length, lr.location + lr.length)
@@ -116,9 +120,14 @@ enum EditV2TextRenderer {
                     var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
                     _ = CTLineGetTypographicBounds(line, &ascent, &descent, &leading)
                     let x0 = CTLineGetOffsetForStringIndex(line, a, nil), x1 = CTLineGetOffsetForStringIndex(line, b, nil)
-                    let r = CGRect(x: textRect.minX + o.x + x0, y: textRect.minY + o.y - descent, width: x1 - x0, height: ascent + descent)
+                    var r = CGRect(x: textRect.minX + o.x + x0, y: textRect.minY + o.y - descent, width: x1 - x0, height: ascent + descent)
                         .insetBy(dx: -boxPad, dy: -boxPad * 0.5)
-                    let radius = min(fontSize * 0.2, r.width / 2, r.height / 2)
+                    if isMarker {
+                        // The lower 45 % of the line, square ends.
+                        r = CGRect(x: r.minX, y: r.minY, width: r.width, height: r.height * 0.45)
+                    }
+                    let radius = isMarker ? 0 : min(fontSize * 0.2, r.width / 2, r.height / 2)
+
                     ctx.addPath(CGPath(roundedRect: r, cornerWidth: radius, cornerHeight: radius, transform: nil))
                     ctx.setFillColor(cgColor(color))
                     ctx.fillPath()

@@ -251,7 +251,38 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
         return ticket.uploadId
     }
 
+    // MARK: Edit suite (workstream 3): Editor v2 jobs, uploads, LUT check, v2 versions
+
+    private struct EditorPresignBody: Encodable { var contentType: String; var bytes: Int?; var purpose: String? }
+    private struct LutValidateBody: Encodable { var uploadId: String }
+    private struct StateReply: Decodable { var state: String? }
+
+    public func editorEstimate(_ req: EditorJobRequest) async throws -> EditorEstimate { try await call("POST", "v1/editor/estimate", req) }
+    public func startEditorJob(_ req: EditorJobRequest) async throws -> EditorJob { try await call("POST", "v1/editor/jobs", req) }
+    public func editorJob(id: String) async throws -> EditorJob { try await call("GET", "v1/editor/jobs/\(Self.pathKey(id))") }
+    public func cancelEditorJob(id: String) async throws { let _: StateReply = try await call("DELETE", "v1/editor/jobs/\(Self.pathKey(id))") }
+    public func validateLut(uploadId: String) async throws -> LutValidation { try await call("POST", "v1/editor/luts/validate", LutValidateBody(uploadId: uploadId)) }
+
+    public func uploadEditorFile(_ file: URL, contentType: String, purpose: String?, progress: UploadProgress?) async throws -> String {
+        let body = UploadBody.file(file)
+        let ticket: PresignedUpload = try await call("POST", "v1/editor/uploads/presign", EditorPresignBody(contentType: contentType, bytes: body.size, purpose: purpose))
+        guard let target = resolve(ticket.url) else { throw ApiError("upload_failed", "Couldn't upload the file") }
+        var put = URLRequest(url: target)
+        put.httpMethod = ticket.method.isEmpty ? "PUT" : ticket.method
+        put.timeoutInterval = 600
+        for (k, v) in ticket.headers { put.setValue(v, forHTTPHeaderField: k) }
+        if put.value(forHTTPHeaderField: "Content-Type") == nil { put.setValue(contentType, forHTTPHeaderField: "Content-Type") }
+        if target.host == baseURL.host, target.port == baseURL.port, let t = currentToken { put.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        try await putBytes(put, body: body, progress: progress)
+        return ticket.uploadId
+    }
+
+    public func createTakeVersionV2(takeId: String, _ req: TakeVersionV2Request) async throws -> Take {
+        absolutize(try await call("POST", "v1/takes/\(Self.pathKey(takeId))/versions", req))
+    }
+
     // MARK: Video editor (edited versions of a take)
+
 
     /// The edited .mp4 (presigned `clip`, PUT, no confirm: confirming would add it to the clip library) and its JPEG thumbnail
     /// (presigned `image`, PUT). A thumbnail that can't be uploaded is left out (the server then uses the source's).

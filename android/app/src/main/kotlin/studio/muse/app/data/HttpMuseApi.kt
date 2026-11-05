@@ -144,6 +144,14 @@ interface MuseService {
     @POST("v1/models/{id}/archive") suspend fun archiveModel(@Path("id") id: String): Model
     @POST("v1/models/{id}/unarchive") suspend fun unarchiveModel(@Path("id") id: String): Model
     @GET("v1/models") suspend fun archivedModels(@Query("archived") archived: Boolean = true): List<Model>
+    // Edit suite (workstream 3): Editor v2 AI helpers, v2 versions, editor uploads
+    @POST("v1/editor/estimate") suspend fun editorEstimate(@Body r: EditorJobRequest): EditorEstimate
+    @POST("v1/editor/jobs") suspend fun startEditorJob(@Body r: EditorJobRequest): EditorJob
+    @GET("v1/editor/jobs/{id}") suspend fun editorJob(@Path("id") id: String): EditorJob
+    @DELETE("v1/editor/jobs/{id}") suspend fun cancelEditorJob(@Path("id") id: String): retrofit2.Response<Unit>
+    @POST("v1/takes/{id}/versions") suspend fun createVersionV2(@Path("id") id: String, @Body r: TakeVersionV2Request): Take
+    @POST("v1/editor/uploads/presign") suspend fun editorPresign(@Body r: EditorPresignRequest): PresignResponse
+
     // AI suite (workstream 1)
     @GET("v1/suite/catalog") suspend fun suiteCatalog(): SuiteCatalog
     @POST("v1/suite/shots/estimate") suspend fun suiteEstimate(@Body r: SuiteShotRequest): SuiteEstimate
@@ -352,6 +360,25 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun imageEngine() = call { imageEngine() }
     override suspend fun setImageEngine(req: ImageEnginePatch) = call { setImageEngine(req) }
     override suspend fun setFailNext(fail: Boolean) = call { failNext(DevFailRequest(fail)) }
+
+    // Edit suite (workstream 3)
+    override suspend fun editorEstimate(req: EditorJobRequest) = call { editorEstimate(req) }
+    override suspend fun startEditorJob(req: EditorJobRequest) = call { startEditorJob(req) }
+    override suspend fun editorJob(id: String) = call { editorJob(id) }
+    override suspend fun cancelEditorJob(id: String) { call { cancelEditorJob(id) } }
+    override suspend fun saveProjectVersion(takeId: String, video: EditedVideo, project: JsonObject, onProgress: (Float) -> Unit): Take {
+        val p = call { presign(PresignRequest("clip", "video/mp4", video.file.length())) }
+        putToStorage(p, FileProgressBody(video.file, "video/mp4".toMediaType()) { onProgress(it * .97f) })
+        val thumbId = video.thumbJpeg?.let { putPresigned("image", "image/jpeg", it) {} }
+        val req = TakeVersionV2Request(p.uploadId, thumbId, project, video.durationSec, video.width, video.height, video.fps)
+        return call { createVersionV2(takeId, req) }.abs().also { onProgress(1f) }
+    }
+    override suspend fun uploadEditorFile(file: java.io.File, contentType: String, purpose: String?, onProgress: (Float) -> Unit): String {
+        val p = call { editorPresign(EditorPresignRequest(contentType, file.length(), purpose)) }
+        putToStorage(p, FileProgressBody(file, contentType.toMediaType(), onProgress))
+        return p.uploadId
+    }
+
     override suspend fun warmGpu() = call { warmGpu() }
     override suspend fun setWarmGpu(req: WarmRequest) = call { setWarmGpu(req) }
     override suspend fun updateModel(modelId: String, req: UpdateModelRequest) = call { updateModel(modelId, req) }.abs()

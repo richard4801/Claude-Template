@@ -19,6 +19,10 @@ data class EditListDto(
     val segments: List<EditSegmentDto>,
     val mute: Boolean = false,
 ) {
+    /** Edit suite (workstream 3): the v2 project when the version was saved by the Edit suite (segments are then empty). */
+    @kotlinx.serialization.Transient
+    var project: kotlinx.serialization.json.JsonObject? = null
+
     fun toEdit(): VideoEdit? = segments.takeIf { it.isNotEmpty() }?.let { s ->
         VideoEdit(sourceDurationSec, s.map { EditSegment(it.inSec, it.outSec, it.speed, it.muted == true) }, mute)
     }

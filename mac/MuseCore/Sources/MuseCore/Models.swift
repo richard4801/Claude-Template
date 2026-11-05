@@ -719,6 +719,8 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
     public var parentTakeId: String?
     public var edits: EditList?
     public var fps: Double?
+    /// Edit suite (workstream 3): a version saved with a v2 project (`edits.version: 2`); then `edits` is nil.
+    public var editsV2: EditV2.Project?
 
     public init(id: String, kind: String = "take", jobId: String? = nil, index: Int = 1, of: Int = 1, title: String, label: String, engineLabel: String = "",
                 cost: Double = 0, seed: Int64 = 0, status: String = "test", thumb: ImageRef, prompt: String = "", createdAt: Int64 = 0) {
@@ -770,6 +772,9 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
         parentTakeId = c.o(.parentTakeId)
         edits = c.o(.edits)
         fps = c.o(.fps)
+        // Edit suite (workstream 3)
+        editsV2 = edits == nil ? (try? c.decodeIfPresent(EditV2.Project.self, forKey: .edits)) ?? nil : nil
+
     }
 
     /// Made with a template.

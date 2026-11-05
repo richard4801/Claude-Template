@@ -8,6 +8,10 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.JsonArray // Edit suite (workstream 3)
+import kotlinx.serialization.json.JsonElement // Edit suite (workstream 3)
+import kotlinx.serialization.json.JsonObject // Edit suite (workstream 3)
+import kotlinx.serialization.json.JsonPrimitive // Edit suite (workstream 3)
 import studio.muse.core.ClipUse
 import studio.muse.core.Engine
 import studio.muse.core.Quality
@@ -638,6 +642,57 @@ class FakeMuseApi(
         failNext = fail
     }
 
+    // ---- Edit suite (workstream 3): the Editor v2 AI helpers as instant mocks (like the server's mock provider)
+    private val editorJobs = mutableMapOf<String, EditorJob>()
+    private var editorSeq = 0
+
+    private fun editorDuration(src: EditorSourceDto): Double =
+        src.durationSec ?: takes.firstOrNull { it.id == src.takeId }?.durationSec ?: 8.0
+
+    override suspend fun editorEstimate(req: EditorJobRequest): EditorEstimate {
+        val d = editorDuration(req.source)
+        val silenceOnly = (req.options?.get("silenceOnly") as? kotlinx.serialization.json.JsonPrimitive)?.content == "true"
+        val usd = when (req.kind) {
+            "beats" -> 0.0
+            "cuts" -> if (silenceOnly || editorJobs.values.any { it.kind == "captions" && it.state == "done" }) 0.0 else 0.02
+            "matte" -> maxOf(0.01, Math.round((10 + 4 * d) * 0.00025 * 100) / 100.0)
+            "denoise" -> if ((req.options?.get("analyzeOnly") as? kotlinx.serialization.json.JsonPrimitive)?.content == "true") 0.0 else maxOf(0.01, Math.round((5 + 0.3 * d) * 0.00025 * 100) / 100.0)
+            else -> 0.02
+        }
+        return EditorEstimate(req.kind, usd, usd * 100, usd == 0.0, req.kind == "cuts" && usd == 0.0 && !silenceOnly, d)
+    }
+
+    override suspend fun startEditorJob(req: EditorJobRequest): EditorJob = lock.withLock {
+        if (failNext) { failNext = false; throw ApiException("failed", "Something went wrong · try again") }
+        val d = editorDuration(req.source)
+        val id = "ej_${++editorSeq}"
+        val result = FakeEditorResults.result(req.kind, d, id, req.options)
+        val est = editorEstimate(req)
+        val job = EditorJob(id, req.kind, "done", 100, "Done", est.usd, est.usd, result, createdAt = now())
+        editorJobs[id] = job
+        job.copy(state = "running", progress = 10, phase = "Listening", result = null)
+    }
+
+    override suspend fun editorJob(id: String): EditorJob = lock.withLock { editorJobs[id] ?: throw ApiException("not_found", "Job not found") }
+
+    override suspend fun cancelEditorJob(id: String) { lock.withLock { editorJobs[id]?.let { editorJobs[id] = it.copy(state = "cancelled", result = null) } } }
+
+    override suspend fun saveProjectVersion(takeId: String, video: EditedVideo, project: kotlinx.serialization.json.JsonObject, onProgress: (Float) -> Unit): Take = lock.withLock {
+        val src = takes.firstOrNull { it.id == takeId } ?: throw ApiException("not_found", "Take not found")
+        onProgress(1f)
+        val dto = EditListDto(2, takeId, 0.0, emptyList(), false).also { it.project = project }
+        val t = src.copy(
+            id = "t_edit_${now()}", kind = "edit", parentTakeId = takeId, label = "Edited", edits = dto, createdAt = now(), cost = 0.0,
+            videoUrl = "file://" + video.file.absolutePath, durationSec = video.durationSec, width = video.width, height = video.height, fps = video.fps,
+        )
+        takes.add(0, t)
+        events.tryEmit(ApiEvent("take", takes = listOf(t)))
+        t
+    }
+
+    override suspend fun uploadEditorFile(file: java.io.File, contentType: String, purpose: String?, onProgress: (Float) -> Unit): String { onProgress(1f); return "up_${purpose ?: "audio"}_${++editorSeq}" }
+
+
     // ---- the demo studio's owner side: members, tokens, invites, settings (in memory, like the real API's rules)
     private val members = SampleData.members(now()).toMutableList()
     private val invites = mutableListOf<InviteInfo>()
@@ -1026,5 +1081,72 @@ class FakeMuseApi(
     companion object {
         /** The prompt identity; names her Identity LoRA when it's trained and switched on. */
         fun identity(m: Model, lora: Lora? = null) = Identity(m.name, m.look.ifBlank { "${m.age}-year-old woman" }, m.filled.coerceAtLeast(1), m.neverAdd, lora?.token(m.name))
+    }
+}
+
+// ======================================================================= Edit suite (workstream 3)
+/**
+ * Demo results of the Editor v2 AI helpers (the same shapes as plans/api.md "Editor v2"): a café transcript spread over
+ * the video, its silences and fillers, a 118 BPM beat grid, a voice stem and a green-screen matte as uploads.
+ */
+object FakeEditorResults {
+    private val SCRIPT = listOf(
+        "I", "um", "always", "order", "the", "oat", "flat", "white", "and", "like", "they", "remember", "my", "name", "you", "know",
+        "this", "place", "is", "unreal", "honestly", "the", "light", "in", "here", "uh", "ten", "out", "of", "ten", "go",
+    )
+    private val FILLERS = setOf("um", "uh", "like")
+
+    /** The sample transcript over [d] seconds, with pauses after "white" and after "unreal" (scaled to the length). */
+    fun words(d: Double): List<Triple<String, Double, Double>> {
+        val k = (d / 18.0).coerceIn(0.2, 1.0)
+        val pauseAfter = mapOf(7 to 1.4 * k, 19 to 0.9 * k)
+        val unit = (d - 0.6 - pauseAfter.values.sum()).coerceAtLeast(1.0) / SCRIPT.size
+        var t = 0.3
+        return SCRIPT.mapIndexed { i, w ->
+            val len = unit * (0.55 + w.length.coerceAtMost(8) * 0.05)
+            val out = Triple(w, r3(t), r3(t + len))
+            t += unit + (pauseAfter[i] ?: 0.0)
+            out
+        }.filter { it.third <= d }
+    }
+
+    private fun r3(v: Double) = Math.round(v * 1000) / 1000.0
+    private fun p(v: Any): JsonPrimitive = when (v) { is Number -> JsonPrimitive(v); is Boolean -> JsonPrimitive(v); else -> JsonPrimitive(v.toString()) }
+    private fun obj(vararg kv: Pair<String, JsonElement>) = JsonObject(mapOf(*kv))
+
+    fun result(kind: String, d: Double, id: String, options: JsonObject?): JsonObject {
+        val ws = words(d)
+        val wordsArray = JsonArray(ws.map { (w, s, e) -> obj("text" to p(w), "startSec" to p(s), "endSec" to p(e)) })
+        return when (kind) {
+            "captions" -> obj("language" to p("en"), "words" to wordsArray, "durationSec" to p(d), "reused" to p(false))
+            "cuts" -> {
+                val silenceOnly = (options?.get("silenceOnly") as? JsonPrimitive)?.content == "true"
+                val cuts = ArrayList<Triple<Double, Double, String>>()
+                for (i in 0 until ws.size - 1) {
+                    val gap = ws[i + 1].second - ws[i].third
+                    if (gap > 0.7) cuts += Triple(r3(ws[i].third + 0.12), r3(ws[i + 1].second - 0.12), "silence")
+                }
+                if (!silenceOnly) ws.forEach { (w, s, e) -> if (w.lowercase() in FILLERS) cuts += Triple(s, e, "filler") }
+                val list = cuts.sortedBy { it.first }
+                obj(
+                    "cuts" to JsonArray(list.map { (s, e, r) -> obj("startSec" to p(s), "endSec" to p(e), "reason" to p(r)) }),
+                    "savedSec" to p(r3(list.sumOf { it.second - it.first })), "words" to (if (silenceOnly) JsonArray(emptyList()) else wordsArray), "durationSec" to p(d),
+                )
+            }
+            "beats" -> {
+                val period = 60.0 / 118
+                val beats = generateSequence(0.21) { it + period }.takeWhile { it < d }.map(::r3).toList()
+                obj("bpm" to p(118), "beats" to JsonArray(beats.map(::p)), "strong" to JsonArray(beats.filterIndexed { i, _ -> i % 4 == 0 }.map(::p)), "durationSec" to p(d))
+            }
+            "denoise" -> obj(
+                "asset" to obj("kind" to p("audio"), "upload" to p("up_voice_$id"), "durationSec" to p(d)),
+                "suggestion" to obj("level" to p("light"), "reason" to p("Some background hum")),
+            )
+            "matte" -> obj(
+                "asset" to obj("kind" to p("video"), "upload" to p("up_matte_$id"), "durationSec" to p(d)),
+                "chroma" to obj("color" to p("#00FF00"), "similarity" to p(0.4), "smoothness" to p(0.08), "spill" to p(0.5)),
+            )
+            else -> obj()
+        }
     }
 }

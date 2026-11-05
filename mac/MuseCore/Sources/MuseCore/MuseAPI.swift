@@ -202,6 +202,23 @@ public protocol MuseAPI: AnyObject, Sendable {
     /// GET /v1/models?archived=true (owner)
     func listArchivedModels() async throws -> [MuseModel]
 
+    // Edit suite (workstream 3): Editor v2 AI helpers, uploads and v2 versions (plans/api.md "Editor v2"). Types in
+    // Edit/EditorAPI.swift; the fake in Edit/FakeMuseAPI+EditSuite.swift.
+    /// POST /v1/editor/estimate
+    func editorEstimate(_ req: EditorJobRequest) async throws -> EditorEstimate
+    /// POST /v1/editor/jobs
+    func startEditorJob(_ req: EditorJobRequest) async throws -> EditorJob
+    /// GET /v1/editor/jobs/{id}
+    func editorJob(id: String) async throws -> EditorJob
+    /// DELETE /v1/editor/jobs/{id}
+    func cancelEditorJob(id: String) async throws
+    /// POST /v1/editor/uploads/presign {contentType, bytes, purpose?} + PUT → the uploadId (music, voice-over, .cube).
+    func uploadEditorFile(_ file: URL, contentType: String, purpose: String?, progress: UploadProgress?) async throws -> String
+    /// POST /v1/editor/luts/validate {uploadId}
+    func validateLut(uploadId: String) async throws -> LutValidation
+    /// POST /v1/takes/{id}/versions with `edits: EditProject` (v2).
+    func createTakeVersionV2(takeId: String, _ req: TakeVersionV2Request) async throws -> Take
+
     // AI suite (workstream 1): plans/api.md "AI suite". Implemented in Suite/SuiteHTTP.swift and Suite/FakeMuseAPI+Suite.swift.
     /// GET /v1/suite/catalog
     func suiteCatalog() async throws -> SuiteCatalog
@@ -222,6 +239,7 @@ public protocol MuseAPI: AnyObject, Sendable {
     // End AI suite (workstream 1)
 
     // Developer
+
     func setFailNext(_ fail: Bool) async throws
 
     /// Live job progress, balance, generation, LoRA, post and add-on engine updates. Each call returns a new subscription.

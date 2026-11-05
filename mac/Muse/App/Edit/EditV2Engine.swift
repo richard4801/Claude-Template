@@ -93,8 +93,9 @@ enum EditV2Engine {
 
     // MARK: Composition
 
-    /// The composition, video composition (custom compositor) and audio mix for a project.
-    static func build(_ project: EditV2.Project, sources: Sources) throws -> Built {
+    /// The composition, video composition (custom compositor) and audio mix for a project. `burnCaptions` false leaves the
+    /// captions out of the picture (they go out as an .srt).
+    static func build(_ project: EditV2.Project, sources: Sources, burnCaptions: Bool = true) throws -> Built {
         let plan = EditV2.renderPlan(project, media: sources.infos)
         guard plan.durationSec > 0 else { throw ApiError("edit_empty", "This edit has nothing to play") }
         let comp = AVMutableComposition()
@@ -126,19 +127,33 @@ enum EditV2Engine {
             }
         }
 
+        /// Puts a segment's constant-speed pieces back to back from `start` (a speed curve = up to 48 retimed pieces).
+        func placePieces(_ src: AVAssetTrack, on track: AVMutableCompositionTrack, pieces: [EditV2.Piece], source s: Double, _ e: Double,
+                   at start: Double, _ end: Double) throws {
+            if pieces.count <= 1 { try place(src, on: track, source: s, e, at: start, end); return }
+            var tl = start
+            for (i, pc) in pieces.enumerated() {
+                let pieceEnd = i == pieces.count - 1 ? end : min(end, tl + pc.length)
+                if pieceEnd - tl > 1e-4 { try place(src, on: track, source: pc.inSec, pc.outSec, at: tl, pieceEnd) }
+                tl += pc.length
+            }
+        }
+
         var trackIds: [Int: CMPersistentTrackID] = [:]
         for seg in plan.video {
             guard let src = sources.media[seg.assetId]?.videoTrack else { continue }
             let t = try lane(seg.lane, .video, &videoLanes)
-            try place(src, on: t, source: seg.sourceStart, seg.sourceEnd, at: seg.timelineStart, seg.timelineEnd)
+            try placePieces(src, on: t, pieces: seg.pieces, source: seg.sourceStart, seg.sourceEnd, at: seg.timelineStart, seg.timelineEnd)
             trackIds[seg.lane] = t.trackID
         }
 
         var params: [Int: AVMutableAudioMixInputParameters] = [:]
+        var voiceSpans: [Int: [EditV2VoiceTap.Span]] = [:]
         for seg in plan.audio {
             guard let src = sources.media[seg.assetId]?.audioTrack else { continue }
             let t = try lane(seg.lane, .audio, &audioLanes)
-            try place(src, on: t, source: seg.sourceStart, seg.sourceEnd, at: seg.timelineStart, seg.timelineEnd)
+            try placePieces(src, on: t, pieces: seg.pieces, source: seg.sourceStart, seg.sourceEnd, at: seg.timelineStart, seg.timelineEnd)
+            if let v = seg.voice { voiceSpans[seg.lane, default: []].append(EditV2VoiceTap.Span(start: seg.timelineStart, end: seg.timelineEnd, voice: v)) }
             let p = params[seg.lane] ?? AVMutableAudioMixInputParameters(track: t)
             p.audioTimePitchAlgorithm = .spectral
             // AVAudioMix volumes are 0…1: louder than 1× (volume up to 2) plays at 1×.
@@ -151,6 +166,11 @@ enum EditV2Engine {
             }
             params[seg.lane] = p
         }
+        // Edit suite: voice enhance / effects through an audio tap per lane (works in export too).
+        for (laneNo, spans) in voiceSpans {
+            guard let p = params[laneNo] else { continue }
+            p.audioTapProcessor = EditV2VoiceTap.make(spans)
+        }
         let mix: AVMutableAudioMix?
         if params.isEmpty { mix = nil } else {
             let m = AVMutableAudioMix()
@@ -158,7 +178,7 @@ enum EditV2Engine {
             mix = m
         }
 
-        let scene = EditV2Scene(project: project, plan: plan, laneTracks: trackIds, sources: sources)
+        let scene = EditV2Scene(project: project, plan: plan, laneTracks: trackIds, sources: sources, burnCaptions: burnCaptions)
         let vc = AVMutableVideoComposition()
         vc.customVideoCompositorClass = EditV2Compositor.self
         vc.renderSize = CGSize(width: plan.width, height: plan.height)
@@ -196,9 +216,12 @@ enum EditV2Engine {
 
     /// Exports H.264/AAC .mp4 at the canvas size and frame rate. `progress` reports 0…1; cancelling the task cancels the
     /// export, and a cancelled or failed export deletes the half-made file.
-    static func export(_ built: Built, to url: URL, progress: @escaping @MainActor (Double) -> Void) async throws {
+    static func export(_ built: Built, to url: URL, hevc: Bool = false, progress: @escaping @MainActor (Double) -> Void) async throws {
         try? FileManager.default.removeItem(at: url)
-        guard let session = AVAssetExportSession(asset: built.composition, presetName: AVAssetExportPresetHighestQuality) else {
+        // Edit suite: MP4 · H.264 (default) or HEVC.
+        let preset = hevc ? AVAssetExportPresetHEVCHighestQuality : AVAssetExportPresetHighestQuality
+        guard let session = AVAssetExportSession(asset: built.composition, presetName: preset) else {
+
             throw ApiError("edit_export_failed", "This Mac can't export this video")
         }
         session.outputURL = url
