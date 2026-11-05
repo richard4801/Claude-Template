@@ -172,6 +172,22 @@ final class EditSuiteSession {
         return ok
     }
 
+    /// A timeline drag (trim, move): one undo step for the whole gesture; the preview follows (debounced).
+    func beginGesture() {
+        guard isReady, !busy else { return }
+        if !playing { state.playhead = playhead }
+        state.beginGesture()
+    }
+
+    func updateGesture(_ make: (EditSuiteState) -> E.Project?) {
+        guard isReady, !busy else { return }
+        let before = state.project
+        state.updateGesture(make(state))
+        if state.project != before { projectChanged() }
+    }
+
+    func endGesture() { state.endGesture() }
+
     /// View-only changes (selection, zoom, tabs, snapping…).
     func view(_ f: (inout EditSuiteState) -> Void) { f(&state) }
 
