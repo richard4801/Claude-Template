@@ -480,6 +480,31 @@
    "updatedBy": null
   },
   {
+   "key": "refs.collage",
+   "group": "references",
+   "title": "Reference sheet",
+   "description": "For models that take one image: MUSE sends one reference sheet (all the images as numbered panels) and puts this line first.",
+   "kind": "text",
+   "default": "The input image is a reference sheet of numbered panels (\"image N\" below means panel N): {person} the person (use her face, hair and body exactly){panels}; create one new photo, not a collage.",
+   "current": "The input image is a reference sheet of numbered panels (\"image N\" below means panel N): {person} the person (use her face, hair and body exactly){panels}; create one new photo, not a collage.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "person",
+     "description": "the panels that show her, with the verb: \"panel 1 shows\" or \"panels 1–3 show\"",
+     "required": true
+    },
+    {
+     "name": "panels",
+     "description": "what the other panels show (\"; panel 4 shows the outfit to wear; panel 5 guides the pose & framing\"), or empty",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
    "key": "sheet.task",
    "group": "sheet",
    "title": "Sheet shot task",
