@@ -45,6 +45,7 @@ targets:
         LSApplicationCategoryType: public.app-category.photography
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         NSHumanReadableCopyright: "MUSE AI model studio."
+        NSMicrophoneUsageDescription: "MUSE uses the microphone to record voice-overs in the editor."
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
     settings:
