@@ -150,6 +150,16 @@ interface MuseApi {
     suspend fun resetPrompt(key: String): PromptEntry
     suspend fun previewPrompt(req: PromptPreviewRequest): PromptPreview
 
+    // Prompt scripts (workstream 4), owner only: inputs → rules → blocks (plans/api.md "Prompt scripts").
+    suspend fun listPromptScripts(): PromptScriptsList
+    suspend fun getPromptScript(id: String): ScriptView
+    /** The whole rule list, in order. script_invalid (400) carries the message to show as-is. */
+    suspend fun savePromptScript(id: String, rules: List<Rule>): ScriptView
+    suspend fun resetPromptScript(id: String): ScriptView
+    suspend fun previewPromptScript(
+        id: String, inputs: kotlinx.serialization.json.JsonObject? = null, rules: List<Rule>? = null, texts: Map<String, String>? = null, direction: String? = null,
+    ): ScriptPreview
+
     // Developer
     suspend fun setFailNext(fail: Boolean)
 

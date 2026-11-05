@@ -98,6 +98,9 @@ object Routes {
     const val MEMBERS = "members"; const val INVITE = "invite"; const val STUDIO = "studio"
     const val ENHANCE = "enhance"; const val DRESSUP = "dressup"; const val IMAGE_MODELS = "imagemodels"; const val CATALOG = "catalog"; const val ARCHIVED = "archived"
     const val PROMPTS = "prompts"; const val PROMPT = "prompt/{key}"
+    /** Prompt scripts (workstream 4): one script's rules, inputs, blocks and preview. */
+    const val PROMPT_SCRIPT = "promptscript/{id}"
+    fun promptScript(id: String) = "promptscript/$id"
     const val TEMPLATES = "templates"; const val TEMPLATE = "template/{id}"; const val TEMPLATE_USE = "template/{id}/use"; const val SAVE_TEMPLATE = "savetemplate/{id}"
     val TABS = setOf(HOME, GALLERY, QUEUE, SETTINGS)
     fun result(id: String) = "result/$id"
@@ -223,6 +226,7 @@ fun MuseApp(
                     composable(Routes.ARCHIVED) { ArchivedModelsScreen() }
                     composable(Routes.PROMPTS) { PromptsScreen() }
                     composable(Routes.PROMPT) { e -> PromptEditScreen(e.arguments?.getString("key") ?: "") }
+                    composable(Routes.PROMPT_SCRIPT) { e -> PromptScriptScreen(e.arguments?.getString("id") ?: "") }
                     composable(Routes.TEMPLATE) { e -> TemplateDetailScreen(e.arguments?.getString("id") ?: "") }
                     composable(Routes.TEMPLATE_USE) { e -> TemplateUseScreen(e.arguments?.getString("id") ?: "") }
                     composable(Routes.SAVE_TEMPLATE) { e -> SaveTemplateScreen(e.arguments?.getString("id") ?: "") }

@@ -31,6 +31,7 @@ object ErrorText {
             "owner_only" -> "Only the studio owner can do that."
             // The prompt library's placeholder rules, shown as the server words them ("Keep {refIndex} · this prompt needs it").
             "prompt_invalid" -> server.ifBlank { "That prompt can't be saved as it is." }
+            "script_invalid" -> server.ifBlank { "Those rules can't be saved as they are." }
             "insufficient_tokens" -> NOT_ENOUGH_CREDIT
             "insufficient_balance" -> NOT_ENOUGH_STUDIO
             "over_job_limit" -> "This costs more than the per-job limit. Try fewer takes or a lighter option."

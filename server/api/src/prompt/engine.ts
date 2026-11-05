@@ -109,8 +109,6 @@ export function sanitizeDirection(direction: string | null | undefined, id: Iden
   return { clean: trimEndChars(kept.join(' ').trim(), ',;').trim(), removed };
 }
 
-const build = (slots: PromptSlot[], seed: number | null = null, removed: string[] = []): BuiltPrompt =>
-  ({ slots, seed, removed, text: slots.map(s => s.text).join('\n') });
 export const slotText = (p: BuiltPrompt, layer: LayerKey) => p.slots.find(s => s.layer === layer)?.text;
 /** The slot body without its "Label: " prefix. */
 export const slotBody = (s: PromptSlot) => s.text.replace(/^[A-Za-z ]+: /, '');
@@ -119,10 +117,7 @@ const refCount = (id: Identity) => id.referenceCount ?? 6;
 /** The identity line (every photo prompt). */
 export const identityLine = (id: Identity, t: PromptTexts = DEFAULT_TEXTS) =>
   fill(t['shoot.identity']!, { name: id.name, look: id.look, refCount: refCount(id), lora: id.lora ? ` + LoRA ${id.lora} (photo)` : '' });
-const identitySlot = (id: Identity, t: PromptTexts): PromptSlot => ({ layer: 'identity', text: identityLine(id, t) });
 export const neverLine = (items: string[], t: PromptTexts = DEFAULT_TEXTS) => fill(t['shoot.never']!, { never: items.join(', ') });
-const negativeSlot = (id: Identity, t: PromptTexts): PromptSlot => ({ layer: 'negative', text: neverLine(neverList(id, t), t) });
-const styleSlot = (t: PromptTexts): PromptSlot => ({ layer: 'style', text: fill(t['shoot.style']!, { style: t['style.house'] }) });
 
 /** The camera words without the "Camera: " label (a shot's stored layer). */
 export function cameraValues(c: CameraSpec, t: PromptTexts = DEFAULT_TEXTS) {
@@ -151,23 +146,11 @@ const GUIDE_WORDS: Record<ShootGuide, string> = { pose: 'pose & framing', look: 
 /** The label printed on a reference image's panel: "ref: look & colour". */
 export const refPanelLabel = (guides: ShootGuide[]) => `ref: ${SHOOT_GUIDES.filter(g => guides.includes(g.id)).map(g => GUIDE_WORDS[g.id]).join(' & ')}`;
 /** "panel 1 shows", "panels 1–3 show", "panels 1, 3 and 4 show". */
-const span = (ns: number[]) => {
+export const panelSpan = (ns: number[]) => {
   if (ns.length === 1) return `panel ${ns[0]} shows`;
   const run = ns.every((n, i) => i === 0 || n === ns[i - 1]! + 1);
   return `${run ? `panels ${ns[0]}–${ns[ns.length - 1]}` : `panels ${ns.slice(0, -1).join(', ')} and ${ns[ns.length - 1]}`} show`;
 };
-/** The line that tells a one-image model its input is a reference sheet (prompt library `refs.collage`). */
-export function collageLine(panels: SheetPanel[], t: PromptTexts = DEFAULT_TEXTS) {
-  const person = panels.map((p, i) => (p.role === 'person' ? i + 1 : 0)).filter(Boolean);
-  const rest = panels.map((p, i) => {
-    const k = i + 1;
-    if (p.role === 'outfit') return `panel ${k} shows the outfit to wear`;
-    if (p.role === 'product') return `panel ${k} shows the product`;
-    if (p.role === 'ref') return `panel ${k} guides the ${SHOOT_GUIDES.filter(g => p.guides?.includes(g.id)).map(g => GUIDE_WORDS[g.id]).join(' and the ')} only`;
-    return '';
-  }).filter(Boolean);
-  return fill(t['refs.collage']!, { person: span(person.length ? person : [1]), panels: rest.map(r => `; ${r}`).join('') }).trim();
-}
 /** Layers kept when Presets is off. */
 export const OWN_LAYERS: LayerKey[] = ['identity', 'outfit', 'direction', 'reference', 'seed'];
 
@@ -184,88 +167,10 @@ export function shootChoices(s: ShootSpec, t: PromptTexts = DEFAULT_TEXTS) {
   return { scene, light, grade, camera: s.camera ?? DEFAULT_CAMERA };
 }
 
-/** Photoshoot: all layers (Presets off: identity, outfit, direction, references and seed only). */
-export function photoshoot(s: ShootSpec, t: PromptTexts = DEFAULT_TEXTS): BuiltPrompt {
-  const { clean: dir, removed } = sanitizeDirection(s.direction, s.identity, t);
-  const c = shootChoices(s, t);
-  let slots: PromptSlot[] = [
-    identitySlot(s.identity, t),
-    { layer: 'outfit', text: outfitWords(s.outfit, t) },
-    { layer: 'scene', text: fill(t['shoot.scene']!, { scene: c.scene.toLowerCase() }) },
-    { layer: 'camera', text: cameraWords(c.camera, t) },
-    { layer: 'light', text: fill(t['shoot.light']!, { light: c.light.toLowerCase(), grade: c.grade.toLowerCase() }) },
-    { layer: 'direction', text: dir ? fill(t['shoot.direction']!, { direction: dir }) : '' },
-    ...(s.refs ?? []).map(r => ({ layer: 'reference' as const, text: referenceLine(r, t) })),
-    styleSlot(t),
-    negativeSlot(s.identity, t),
-    { layer: 'seed', text: s.lockSeed ? t['shoot.seed.locked']! : t['shoot.seed.new']! },
-  ].filter(x => x.text.trim()) as PromptSlot[];
-  if (s.presets === false) slots = slots.filter(x => OWN_LAYERS.includes(x.layer));
-  return build(slots, s.lockSeed ? seedFor(s.identity.name) : null, removed);
-}
 
-/** Character-sheet shot: identity + task + house style + never add. */
-export function characterSheetShot(id: Identity, angle: SheetAngle, t: PromptTexts = DEFAULT_TEXTS): BuiltPrompt {
-  return build([
-    identitySlot(id, t),
-    { layer: 'task', text: fill(t['sheet.task']!, { angle: angle.label.toLowerCase(), framing: angle.framing }) },
-    styleSlot(t),
-    negativeSlot(id, t),
-  ].filter(x => x.text.trim()) as PromptSlot[]);
-}
 
-/** One outfit-set angle. All four angles share `seed`. */
-export function outfitAngle(id: Identity, outfit: OutfitSpec, angle: (typeof OUTFIT_ANGLES)[number], seed: number, t: PromptTexts = DEFAULT_TEXTS): BuiltPrompt {
-  const never = { ...id, neverAdd: [...(id.neverAdd ?? []), ...listOf(t['outfit.never.extra'] ?? '')] };
-  return build([
-    identitySlot(id, t),
-    { layer: 'outfit', text: outfitWords(outfit, t) },
-    { layer: 'task', text: fill(t['outfit.task']!, { angle: angle.words }) },
-    styleSlot(t),
-    negativeSlot(never, t),
-    { layer: 'seed', text: fill(t['outfit.seed']!, { seed }) },
-  ].filter(x => x.text.trim()) as PromptSlot[], seed);
-}
 export const outfitSet = (id: Identity, outfit: OutfitSpec, seed = seedFor(outfit.name), t: PromptTexts = DEFAULT_TEXTS) => OUTFIT_ANGLES.map(a => outfitAngle(id, outfit, a, seed, t));
-/** The ¾ / side / back of an outfit set, as edits of the front. */
-export const outfitEditPrompt = (angle: (typeof OUTFIT_ANGLES)[number], t: PromptTexts = DEFAULT_TEXTS) => fill(t['outfit.edit']!, { angle: angle.words });
 
-/** The structured H3 Ref2VA prompt for a character swap. */
-export function videoSwap(v: VideoSwapSpec, t: PromptTexts = DEFAULT_TEXTS): H3Prompt {
-  const id = v.identity;
-  const n = v.referenceLabels?.length ? Math.min(6, v.referenceLabels.length) : Math.min(6, Math.max(1, refCount(id)));
-  const keepAudio = v.keepAudio ?? true, keepBackground = v.keepBackground ?? true;
-  const perf = { description: 'the person', tattoos: false, rings: false, setting: 'the room', ...v.performer };
-  const labels = v.referenceLabels?.length ? v.referenceLabels.slice(0, n) : SHEET_ANGLES.slice(0, n).map(a => a.label.toLowerCase().replace(' · ', ', '));
-  const refs = labels.map((l, i) => `<Image ${i + 1}> (${l})`);
-  const refList = refs.length === 1 ? refs[0] : refs.slice(0, -1).join(', ') + ' and ' + refs[refs.length - 1];
-  const extras = [perf.tattoos && 'tattoos', perf.rings && 'rings'].filter(Boolean) as string[];
-  const performer = perf.description + (extras.length ? ` with ${extras.join(' and ')}` : '');
-  const never = neverList(id, t);
-  const { clean: dir, removed } = sanitizeDirection(v.direction, id, t);
-  const outfitName = v.outfit.name.toLowerCase();
-
-  const subjects = fill(t['video.edit.subjects']!, { performer, setting: perf.setting, name: id.name, look: id.look, refs: refList,
-    lora: id.lora ? `, with LoRA ${id.lora} video` : '', audio: keepAudio ? '\n<Audio 1> is the synchronized audio track of <Video 1>.' : '' });
-
-  const background = keepBackground ? 'The camera, framing, background, lighting and timing of <Video 1> are unchanged.'
-    : `The camera, framing and timing of <Video 1> are unchanged; the background is replaced by the background reference photo${v.backgroundMotion ? ` (${v.backgroundMotion})` : ''}.`;
-  const summary = fill(t['video.edit.summary']!, { audioTag: keepAudio ? ' + audio reuse' : '', background, audio: keepAudio ? ' <Audio 1> is fully reused.' : '' });
-
-  const clean = [perf.tattoos && "None of <Subject 1>'s tattoos remain.", perf.rings && "None of <Subject 1>'s rings remain."].filter(Boolean).join(' ');
-  const retention = fill(t['video.edit.retention']!, {
-    video: keepBackground ? 'fully_preserved - the background, camera position, lighting and the full body motion and timing are maintained exactly.'
-      : 'motion_preserved - the full body motion and timing are maintained exactly; the background is replaced.',
-    tattoos: perf.tattoos ? 'tattoos, ' : '', clean: clean ? ` ${clean}` : '', n, outfit: outfitName, never: never.join(', no '),
-    audio: keepAudio ? 'fully_copy - the original audio is kept unchanged.' : 'replaced - a new audio track is supplied.' });
-
-  let detailed = fill(t['video.edit.detailed']!, { outfit: outfitName });
-  if (dir) detailed += ` ${dir}`;
-
-  const text = `subject_definitions:\n${subjects}\n\nsummary:\n${summary}\n\nretention_analysis:\n${retention}\n\ndetailed_description:\n${detailed}\n`;
-  return { subjectDefinitions: subjects, summary, retentionAnalysis: retention, detailedDescription: detailed,
-    audioMode: keepAudio ? 'fully_copy' : 'replace', steps: v.steps ?? 10, seed: v.seed ?? 42, removed, text };
-}
 
 // ---- Replicate (hosted MiniMax H3): a SHORT prompt (plans/backend.md "Replicate").
 // The owner's tests showed that long prompts make H3 drop details, so this keeps the four sections of the tested v4
@@ -291,33 +196,8 @@ export function imageRange(ns: number[]): string {
   return ns.slice(0, -1).map(tag).join(', ') + ' and ' + tag(ns[ns.length - 1]!);
 }
 
-export function replicateSwap(v: ReplicateSwapSpec, t: PromptTexts = DEFAULT_TEXTS): { text: string; removed: string[] } {
-  const id = v.identity;
-  const labels = v.referenceLabels.slice(0, 9);
-  const all = labels.map((_, i) => i + 1);
-  const where = (prefix: string) => labels.map((l, i) => (l.startsWith(prefix) ? i + 1 : 0)).filter(Boolean);
-  const faces = where('face'), body = where('body'), outfitRefs = where('outfit');
-  const never = neverList(id, t);
-  const { clean: dir, removed } = sanitizeDirection(v.direction, id, t);
-  const look = trimEndChars(id.look.trim(), '.');
 
-  const s2 = all.length ? `the person in ${imageRange(all)}: ${look}` : look;
-  const subjects = fill(t['video.replicate.subjects']!, { subject: s2 });
-  const summary = t['video.replicate.summary']!;
-
-  const o = v.outfit;
-  const outfitName = (o?.name ?? '').trim().toLowerCase();
-  let outfit: string;
-  if (outfitRefs.length) outfit = `${outfitName ? `the ${outfitName} outfit` : 'the outfit'} from ${imageRange(outfitRefs)}`;
-  else if (o && (o.source === 'described' || o.source === 'product-photo') && (o.description ?? '').trim())
-    outfit = `wearing ${trimEndChars(o.description!.trim(), '.')}${body.length ? `, not the clothes in ${imageRange(body)}` : ''}`;
-  else outfit = body.length ? `the outfit from ${imageRange(body)}` : 'an everyday outfit';
-  const parts = [faces.length ? `face and identity from ${imageRange(faces)}` : 'face and identity as described',
-    ...(body.length ? [`body shape from ${imageRange(body)}`] : []), outfit, `no ${never.join(', no ')}`];
-  const retention = fill(t['video.replicate.retention']!, { reference: parts.join('; ') });
-  let detailed = fill(t['video.replicate.detailed']!, { faceRef: faces.length ? `<Image ${faces[0]}>` : 'the description' });
-  if (dir) detailed += ` ${dir}`;
-
-  const text = `subject_definitions:\n${subjects}\n\nsummary:\n${summary}\n\nretention_analysis:\n${retention}\n\ndetailed_description:\n${detailed}\n`;
-  return { text, removed };
-}
+// ---- Prompt scripts (plans/prompt-scripts.md): every builder runs its script. Same signatures and, at default
+// settings, the same prompts as before (test/prompt-scripts.test.ts checks them against test/legacy/).
+import { photoshoot, characterSheetShot, outfitAngle, outfitEditPrompt, videoSwap, replicateSwap, collageLine } from './scripts/builders.js';
+export { photoshoot, characterSheetShot, outfitAngle, outfitEditPrompt, videoSwap, replicateSwap, collageLine };

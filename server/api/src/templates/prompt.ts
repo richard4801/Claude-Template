@@ -2,8 +2,9 @@
 // one draw from each variation-pool slot (or the user's direction) + a seed. Two views of the same prompt are built:
 // `full` (what the image engine gets, and what the template's owner may see) and `visible` (everyone else: one locked
 // "Template: <name>" line in place of the hidden layers).
-import { identityLine, neverLine, neverList, referenceLine, sanitizeDirection, seedFor, type Identity, type OutfitSpec, type SentRef } from '../prompt/engine.js';
-import { DEFAULT_TEXTS, fill, type PromptTexts } from '../prompt/library.js';
+import { neverList, sanitizeDirection, seedFor, type Identity, type OutfitSpec, type SentRef } from '../prompt/engine.js';
+import { templateViews } from '../prompt/scripts/builders.js';
+import { DEFAULT_TEXTS, type PromptTexts } from '../prompt/library.js';
 import { POOL_SLOTS, type PoolSlot, type TemplateLayers, type VariationDraw, type VariationPool } from '../db/schema.js';
 
 export type TemplateSlot = { layer: string; text: string; locked?: true };
@@ -43,10 +44,6 @@ export function drawVariation(pool: VariationPool, shuffleSeed: number, index = 
 const dot = (s: string) => { const t = s.trim(); return !t ? '' : /[.!?]$/.test(t) ? t : `${t}.`; };
 const join = (...parts: (string | undefined)[]) => parts.map(p => (p ?? '').trim().replace(/[.;,]+$/, '')).filter(Boolean).join('; ');
 
-function outfitWords(o: OutfitSpec, t: PromptTexts) {
-  if (o.source === 'described') return fill(t['shoot.outfit.described']!, { outfit: (o.description ?? o.name).trim().replace(/\.$/, '') });
-  return fill(t['shoot.outfit.set']!, { outfit: o.name.toLowerCase() });
-}
 
 export function buildTemplatePrompt(o: {
   templateId: string; templateName: string; layers: TemplateLayers; pool: VariationPool;
@@ -55,35 +52,21 @@ export function buildTemplatePrompt(o: {
   /** Reference images that were sent (their lines show in both views). */
   refs?: SentRef[];
 }, t: PromptTexts = DEFAULT_TEXTS): TemplatePromptBuild {
+  // Prompt scripts: the words are drawn here; the script `template` (prompt/scripts/defs.ts) assembles both views.
   const { clean: dir, removed } = sanitizeDirection(o.direction, o.identity, t);
   const v = drawVariation(o.pool, o.shuffleSeed, o.index ?? 0, dir || undefined);
   const L = o.layers;
   const id = o.identity;
   const seed = o.lockSeed ? seedFor(`${o.templateId}:${id.name}`) : (o.seed ?? null);
-  const nz = (s: TemplateSlot | null) => (s && s.text.trim() ? s : null);
-  const identity = nz({ layer: 'identity', text: identityLine(id, t) });
-  const outfit: TemplateSlot | null = o.outfit ? nz({ layer: 'outfit', text: outfitWords(o.outfit, t) }) : null;
   const never = neverList(id, t);
-  const negFull = nz({ layer: 'negative', text: neverLine([...never, ...(L.negative ? [L.negative.trim().replace(/\.$/, '')] : [])], t) });
-  const negVisible = nz({ layer: 'negative', text: neverLine(never, t) });
-  const seedSlot = nz({ layer: 'seed', text: o.lockSeed ? fill(t['template.seed.locked']!, { seed }) : seed != null ? fill(t['template.seed.new']!, { seed }) : t['shoot.seed.new']! });
-  const directionSlot = dir ? nz({ layer: 'direction', text: fill(t['shoot.direction']!, { direction: dot(dir) }) }) : null;
-  const refSlots: TemplateSlot[] = (o.refs ?? []).map(r => ({ layer: 'reference', text: referenceLine(r, t) })).filter(s => s.text);
-
-  const hidden: TemplateSlot[] = [
-    { layer: 'scene', text: L.scene || v.background || v.timeOfDay ? fill(t['template.scene']!, { scene: join(L.scene, v.background, v.timeOfDay) }) : '' },
-    { layer: 'camera', text: L.camera || v.framing ? fill(t['template.camera']!, { camera: join(L.camera, v.framing) }) : '' },
-    { layer: 'light', text: L.light ? fill(t['template.light']!, { light: join(L.light) }) : '' },
-    { layer: 'pose', text: v.pose || v.bodyAngle || v.expression || v.hands ? fill(t['template.pose']!, { pose: join(v.pose, v.bodyAngle, v.expression, v.hands) }) : '' },
-    { layer: 'product', text: L.product && o.hasProduct ? fill(t['template.product']!, { product: join(L.product) }) : L.product ? fill(t['template.product.none']!, { product: join(L.product) }) : '' },
-    { layer: 'style', text: fill(t['template.style']!, { style: join(L.style, t['style.house']) }) },
-  ].filter(s => s.text.trim());
-  const nHead = hidden.filter(s => ['scene', 'camera', 'light', 'pose'].includes(s.layer)).length;
-
-  const full = [identity, outfit, ...hidden.slice(0, nHead), directionSlot, ...refSlots, ...hidden.slice(nHead), negFull, seedSlot].filter(Boolean) as TemplateSlot[];
-  const locked = nz({ layer: 'template', text: fill(t['template.locked']!, { name: o.templateName }), locked: true as const });
-  const visible = [identity, outfit, locked, directionSlot, ...refSlots, negVisible, seedSlot].filter(Boolean) as TemplateSlot[];
-  return { full, visible, fullText: full.map(s => s.text).join('\n'), visibleText: visible.map(s => s.text).join('\n'), seed, variation: v, removed };
+  const views = templateViews({
+    identity: id, outfit: o.outfit, templateName: o.templateName, refs: o.refs, direction: dir ? dot(dir) : '',
+    scene: join(L.scene, v.background, v.timeOfDay), camera: join(L.camera, v.framing), light: L.light ? join(L.light) : '',
+    pose: join(v.pose, v.bodyAngle, v.expression, v.hands), product: L.product ? { words: join(L.product), photo: !!o.hasProduct } : null,
+    style: join(L.style, t['style.house']), neverFull: [...never, ...(L.negative ? [L.negative.trim().replace(/\.$/, '')] : [])], neverVisible: never,
+    seed: { mode: o.lockSeed ? 'locked' : seed != null ? 'known' : 'none', value: seed },
+  }, t);
+  return { ...views, seed, variation: v, removed };
 }
 
 // ------------------------------------------------------------------------------------------------ suggested pools

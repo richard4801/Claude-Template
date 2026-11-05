@@ -3,7 +3,9 @@
 export type EventType = 'job' | 'take' | 'balance' | 'wallet' | 'model' | 'outfit' | 'lora' | 'post' | 'gpu' | 'tool' | 'template' | 'clip'
   | 'settings' | 'member' | 'invite' | 'studio' | 'account' | 'prompts'
   | 'camera' | 'blender' /* workstream 2: camera sessions and the Blender relay (owners only) */
-  | 'editor' /* Editor v2 AI jobs (workstream 3) */;
+  | 'editor' /* Editor v2 AI jobs (workstream 3) */
+  | 'promptScript' // prompt scripts (workstream 4)
+  ;
 export type ApiEvent = { type: EventType; [k: string]: unknown };
 export type Viewer = { userId: string; studioId: string; role: 'owner' | 'member' };
 type Payload = ApiEvent | null | undefined;

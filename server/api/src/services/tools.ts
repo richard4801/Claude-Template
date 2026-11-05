@@ -15,6 +15,7 @@ import { PHOTO_REF_MP, money } from '../pricing.js';
 import { randomImageSeed } from '../templates/prompt.js';
 import { DEFAULT_TEXTS } from '../prompt/library.js';
 import { dressPrompt } from '../prompt/service.js';
+import { enhancePrompt } from '../prompt/scripts/builders.js';
 
 type Run = typeof toolRuns.$inferSelect;
 type ModelRow = typeof models.$inferSelect;
@@ -211,7 +212,7 @@ export class ToolService {
         if (o.realism !== 'off') {
           const ch = await im.resolve(u.studioId, 'realism', { realism: run.models.realism });
           const r = await imgs.runModel({ studioId: u.studioId, userId: u.id, purpose: 'enhance', refId: run.id, step: 'realism', model: ch.model, extra: ch.extra,
-            prompt: texts['enhance.prompt'], refs: [img], fullSize: true, strength: REALISM[o.realism as RealismId], seed, outMp: 1, cancelled });
+            prompt: enhancePrompt(texts), refs: [img], fullSize: true, strength: REALISM[o.realism as RealismId], seed, outMp: 1, cancelled });
           img = r.image; cost += r.cost;
         }
         if (o.upscale !== 'off') {

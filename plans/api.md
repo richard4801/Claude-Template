@@ -473,6 +473,47 @@ A shot model whose schema takes **one** input image (a single image field, no ar
 - **Price:** the estimate uses the sheet's megapixels (one input of that size, not 0.79 MP per image); the settle uses the sheet as sent.
 - Catalog (owner): such a model is compatible for `shot` with the warning **"1 image: MUSE sends a reference sheet"** (it used to say "takes 1 reference only"). An img2img model (single image + a strength input, e.g. FLUX Krea dev) still gets only the face front: a sheet would show through.
 
+## Prompt scripts (2026-11-05)
+_Workstream 4; design in `plans/prompt-scripts.md`. This section wins where an older section disagrees._ Every prompt is assembled by a **script** (typed inputs → rules → blocks); blocks are the prompt library entries (above), so `/v1/prompts` is unchanged and every saved override keeps working. New here: the owner's **rule** edits, talking detection and the "Performer is speaking" switch.
+
+### 1. Clips and renders
+```ts
+Clip      { …, audio?: { kind: "speech"|"music"|"silence"|"none", speaking: boolean, detected: boolean } }
+          // classified on upload (free); absent while still running (a second `clip` event brings it) or when it failed
+JobRequest{ …, speaking?: boolean|null /* the studio's "Performer is speaking" switch; absent = the clip's detection */ }
+Job.request { …, speaking: boolean, speakingSource: "switch"|"upload"|"detected"|"default" }   // resolved at creation
+```
+- **Apps:** the video studio shows a **"Performer is speaking"** switch (a small toggle near Keep audio), pre-set from `clip.audio.speaking` (off when unknown), and sends `speaking`. One-line hint under it: on = "She talks or sings: her lips follow the clip's sound"; off = "Her mouth follows the clip; she won't lip-sync to the music".
+- **Server:** the switch is one input with two effects. Not speaking → the model gets the clip **without sound** and the prompt ends "<Subject 2>'s mouth follows <Video 1> exactly; she does not speak, sing or mouth words." (no "words being mouthed"); the clip's own sound is put back on the take (video stream-copied, never re-encoded). Speaking → the clip goes with its sound and the prompt ends "<Subject 2>'s mouth follows <Video 1> and is in sync with <Audio 1>'s speech." Both lines are owner-editable blocks (`video.mouth.speaking`, `video.mouth.silent`). Keep audio off still gives a silent take. Edit: only the prompt follows `speaking`.
+- The clip's "Performer talking" check follows the detection (`Yes`/`No`). Upload meta `talking: true` still means "talking" (and wins); `false` now means "unknown".
+- Video prompts end with the user's direction as its own line: `Direction from the user: <direction>` (it used to be appended to `detailed_description`).
+
+### 2. Settings → Prompts → Scripts (owner)
+```ts
+InputDef    { name, label, description, type: "bool"|"enum"|"number"|"text"|"list", options?: {id,label}[], fields?: InputDef[], sample }
+CondOp      "is"|"isNot"|"in"|"notIn"|"atLeast"|"atMost"|"has"|"hasNot"|"empty"|"notEmpty"
+Cond        { input: string /* an input name, or "item.<field>" in a section that repeats per list item */, op: CondOp, value?: boolean|number|string|string[] }
+Rule        { id: string /* [A-Za-z0-9._-]{1,60} */, label: string /* ≤ 120 */, target: string /* a place id */, when: Cond[] /* ≤ 8, all must hold */,
+              block: string /* a library key from `blocks` */, optional?: true /* removed by Presets off */, locked?: true, enabled?: false }
+ScriptView  { id, group: PromptGroup, title, description, format: "lines"|"sections",
+              inputs: InputDef[], sections: {id, label, kind: "system"|"user", each?, heading?}[],
+              values: {name, label, prefix?}[] /* placeholders chosen by rules */, targets: {id, label}[] /* where a rule can put its block: section ids and "@value" */,
+              vars: {name, description, sample}[] /* values the code supplies */, blocks: string[] /* library keys usable here */,
+              rules: Rule[] /* current */, defaultRules: Rule[], overridden: boolean, stale: boolean /* a saved list no longer fits: shown as reset */,
+              updatedAt: number|null, updatedBy: string|null /* email */ }
+```
+| | |
+|---|---|
+| `GET /v1/prompt-scripts` (owner) | → `{ groups: {id, label}[], ops: {id: CondOp, label, types: InputType[]}[], scripts: ScriptView[] }` |
+| `GET /v1/prompt-scripts/{id}` (owner) | → `ScriptView` |
+| `PUT /v1/prompt-scripts/{id}` `{rules: Rule[]}` (owner) | the whole list, in order → `ScriptView`. `400 script_invalid` (the `error` text is shown as-is): unknown input/test/value, a block the script can't use, an unknown place, duplicate ids, a **locked** rule removed, switched off or changed (`"Who is who" is locked: only its text can be changed`). Saving the defaults clears the override. `404 not_found` for an unknown id. |
+| `DELETE /v1/prompt-scripts/{id}` (owner) | → `ScriptView` on its defaults |
+| `POST /v1/prompt-scripts/preview` `{id, inputs?, rules?, texts?: Record<key,string>, direction?}` (owner) | → `{ id, text, parts: {section, layer, kind, text, rules: string[]}[], fired: string[] /* rule ids that matched */, inputs }`: the script run with the sample values, `inputs` over the samples, unsaved `rules` (validated like PUT) and unsaved block `texts`. Default direction `"smiling, glancing at the camera"`. |
+
+Members get `403 owner_only` from every endpoint. **Event:** `{ type: "promptScript", script: ScriptView }` to the studio's owners after PUT and DELETE. A saved edit applies to every new prompt in the studio (renders resolve their prompt at creation).
+
+**Editor (Android + Mac, owner only):** Settings → Prompts gets a **Blocks | Scripts** switch. Scripts: grouped like blocks; each row shows the title, description and an "Edited" badge. The script screen: **Inputs** (label, type, description), **Rules** grouped by place (each as a sentence: "When Performer is speaking is no → Summary: Draft/Standard/HD · summary (not speaking)"; a lock icon on locked rules; a switch to turn a rule off; tap → edit), **Blocks** (tap → the existing block editor), **Preview** (a control per input pre-filled with its sample: switch / menu / number; shows `text` and which rules fired), "Reset to default" (DELETE after a confirm) and Save (PUT). The rule form: label, place (menu of `targets`), block (menu of `blocks` by title), conditions (input menu → test menu filtered by the input's type from `ops` → value: switch, menu of options, number or text), add/remove condition, delete (added rules only), move up/down. Show the `script_invalid` message inline.
+
 ## Video editor: edited versions of a take (2026-11-05)
 _Owner decision 2026-11-05. Spec, UX and limits: `plans/video-editor.md`._ The apps trim, split, change speed and mute a video take **on the device** and upload the result. The server stores it as a **new take** (`kind: "edit"`) linked to the take it was cut from, with the **edit list** so it can be re-opened and changed. The server never encodes video. It is free: no price, hold or ledger row. Members and owners alike.
 

@@ -71,6 +71,13 @@
       "when": 1793894288154,
       "tag": "0009_editor_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793896375493,
+      "tag": "0010_prompt_scripts",
+      "breakpoints": true
     }
   ]
 }

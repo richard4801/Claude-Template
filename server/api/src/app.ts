@@ -17,6 +17,7 @@ import { LoraService } from './services/lora.js';
 import { PostScheduler } from './services/posts.js';
 import { createStorage } from './storage/index.js';
 import { registerRoutes } from './routes/index.js';
+import { registerPromptScriptRoutes } from './prompt/scripts/service.js'; // prompt scripts (workstream 4)
 import { registerWorkerRoutes } from './routes/worker.js';
 import { registerVersionRoutes } from './routes/versions.js';
 import { registerCameraRoutes } from './routes/camera.js'; // workstream 2
@@ -144,6 +145,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   app.setNotFoundHandler((_req, reply) => reply.status(404).send({ error: 'No such endpoint', code: 'not_found' }));
 
   await registerRoutes(app, ctx);
+  await registerPromptScriptRoutes(app, ctx);
   await registerWorkerRoutes(app, ctx);
   await registerVersionRoutes(app, ctx);
   await registerSuiteRoutes(app, ctx); // AI suite (workstream 1)

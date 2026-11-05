@@ -504,3 +504,6 @@ export * from '../camera/schema.js';
 
 // Editor v2 (workstream 3): AI helper jobs, migration 0009.
 export * from '../editor/schema.js';
+
+// Prompt scripts (workstream 4): the owner's rule edits per script.
+export * from '../prompt/scripts/schema.js';

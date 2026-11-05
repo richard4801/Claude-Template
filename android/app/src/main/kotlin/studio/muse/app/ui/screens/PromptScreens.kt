@@ -137,6 +137,10 @@ fun PromptsScreen() {
             TopBar("Prompts", onBack = { nav.back() })
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 6.dp, bottom = 40.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Prompt scripts (workstream 4): Blocks (the texts) | Scripts (which block is used when).
+                val tab by c.drafts.promptsTab.collectAsState()
+                Seg(listOf("blocks" to "Blocks", "scripts" to "Scripts"), tab, { c.drafts.promptsTab.value = it }, Modifier.fillMaxWidth())
+                if (tab == "scripts") { PromptScriptsList(); return@Column }
                 T("Every prompt MUSE sends when it makes a photo, an outfit set, a sheet angle, a LoRA set or a video. A saved edit is used for every new render in your studio, by you and your members. Work already running keeps its prompt.",
                     m.type.body, m.t.muted)
                 err?.let { NoteBox(it, warn = true); Cta2("Try again", { vm.load() }, Modifier.fillMaxWidth(), icon = "retry", height = 46.dp) }

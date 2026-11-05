@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import studio.muse.app.data.AppPrefs
 import studio.muse.app.data.DataStorePrefs
@@ -58,6 +59,8 @@ class AppContainer(
                 notifier?.warmWarning(w)
             }
         }
+        // Prompt scripts: the talking detection can finish after the upload answered (a second `clip` event).
+        scope.launch { repo.live.collect { ev -> if (ev.type == "clip") ev.clip?.let { cl -> drafts.video.update { it.onClipEvent(cl) } } } }
         repo.onLoraReady = { model, lora ->
             notifier?.loraReady(model?.name ?: "Your model", lora.version)
             repo.toast("Identity LoRA v${lora.version} is ready", "lora")

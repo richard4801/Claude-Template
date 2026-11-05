@@ -235,7 +235,7 @@ class MuseRepository(
             if (ev.type == "gpu" && ev.event == "warning") ev.warning?.let { _warmWarnings.tryEmit(it) }
         }
         ev.job?.let { j -> if (ev.op != "delete" && (prevJob == null || prevJob.running) && (j.done || j.failed)) listener?.onJobFinished(j) }
-        if (ev.type in setOf("member", "invite", "settings", "studio", "prompts")) _live.tryEmit(ev)
+        if (ev.type in setOf("member", "invite", "settings", "studio", "prompts", "promptScript", "clip")) _live.tryEmit(ev)
     }
 
     /** A `wallet` event: refresh the balance, and say so when the owner sent or took back tokens. */
@@ -440,6 +440,27 @@ class MuseRepository(
         api.previewPrompt(PromptPreviewRequest(key, text)) to null
     } catch (e: ApiException) {
         null to if (e.code == "prompt_invalid") ErrorText.of(e) else null
+    }
+
+    // ---- Prompt scripts (workstream 4): owner Settings → Prompts → Scripts
+    suspend fun promptScripts(): Pair<PromptScriptsList?, String?> = try {
+        api.listPromptScripts() to null
+    } catch (e: ApiException) {
+        null to if (e.code == "not_found" || e.code == "http_404") "This server doesn't have prompt scripts yet." else ErrorText.of(e)
+    }
+    suspend fun promptScript(id: String) = attemptInline { getPromptScript(id) }
+    /** Save (PUT): the script, or the server's script_invalid message to show inline (other failures are toasts). */
+    suspend fun savePromptScript(id: String, rules: List<Rule>): Pair<ScriptView?, String?> = try {
+        api.savePromptScript(id, rules) to null
+    } catch (e: ApiException) {
+        if (e.code == "script_invalid") null to ErrorText.of(e) else { toast(ErrorText.of(e)); null to null }
+    }
+    suspend fun resetPromptScript(id: String) = attemptInline { resetPromptScript(id) }
+    /** The live preview: the preview, or the script_invalid message (null for any other failure: the old preview stays). */
+    suspend fun previewPromptScript(id: String, inputs: kotlinx.serialization.json.JsonObject?, rules: List<Rule>?, texts: Map<String, String>? = null): Pair<ScriptPreview?, String?> = try {
+        api.previewPromptScript(id, inputs, rules, texts) to null
+    } catch (e: ApiException) {
+        null to if (e.code == "script_invalid") ErrorText.of(e) else null
     }
 
     // ---- photo templates

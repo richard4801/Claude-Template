@@ -75,6 +75,12 @@ interface MuseService {
     @PUT("v1/prompts/{key}") suspend fun savePrompt(@Path("key") key: String, @Body r: PromptText): PromptEntry
     @DELETE("v1/prompts/{key}") suspend fun resetPrompt(@Path("key") key: String): PromptEntry
     @POST("v1/prompts/preview") suspend fun previewPrompt(@Body r: PromptPreviewRequest): PromptPreview
+    // Prompt scripts (workstream 4)
+    @GET("v1/prompt-scripts") suspend fun promptScripts(): PromptScriptsList
+    @GET("v1/prompt-scripts/{id}") suspend fun promptScript(@Path("id") id: String): ScriptView
+    @PUT("v1/prompt-scripts/{id}") suspend fun savePromptScript(@Path("id") id: String, @Body r: SaveScriptRules): ScriptView
+    @DELETE("v1/prompt-scripts/{id}") suspend fun resetPromptScript(@Path("id") id: String): ScriptView
+    @POST("v1/prompt-scripts/preview") suspend fun previewPromptScript(@Body r: ScriptPreviewRequest): ScriptPreview
     @GET("v1/templates") suspend fun templates(@Query("scope") scope: String, @Query("q") q: String?, @Query("tag") tag: String?): List<Template>
     @GET("v1/templates/{id}") suspend fun template(@Path("id") id: String): Template
     @POST("v1/templates") suspend fun createTemplate(@Body r: CreateTemplateRequest): Template
@@ -308,6 +314,13 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun savePrompt(key: String, text: String) = call { savePrompt(key, PromptText(text)) }
     override suspend fun resetPrompt(key: String) = call { resetPrompt(key) }
     override suspend fun previewPrompt(req: PromptPreviewRequest) = call { previewPrompt(req) }
+    // Prompt scripts (workstream 4)
+    override suspend fun listPromptScripts() = call { promptScripts() }
+    override suspend fun getPromptScript(id: String) = call { promptScript(id) }
+    override suspend fun savePromptScript(id: String, rules: List<Rule>) = call { savePromptScript(id, SaveScriptRules(rules)) }
+    override suspend fun resetPromptScript(id: String) = call { resetPromptScript(id) }
+    override suspend fun previewPromptScript(id: String, inputs: JsonObject?, rules: List<Rule>?, texts: Map<String, String>?, direction: String?) =
+        call { previewPromptScript(ScriptPreviewRequest(id, inputs, rules, texts, direction)) }
     override suspend fun balance() = call { balance() }
     override suspend fun topUp(req: TopUpRequest) = call { topUp(req) }
     override suspend fun wallet() = call { wallet() }
@@ -407,7 +420,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
                 runCatching { json.decodeFromString(ApiEvent.serializer(), data) }.onSuccess { e ->
                     trySend(e.copy(lora = e.lora?.abs(), post = e.post?.abs(), job = e.job?.abs(), model = e.model?.abs(), outfit = e.outfit?.abs(), takes = e.takes.map { it.abs() },
-                        tool = e.tool?.abs(), take = e.take?.abs(), template = e.template?.abs()))
+                        tool = e.tool?.abs(), take = e.take?.abs(), template = e.template?.abs(), clip = e.clip?.let { c -> c.copy(thumb = c.thumb?.abs()) }))
                 }
             }
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {

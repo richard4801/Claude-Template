@@ -138,6 +138,16 @@ const Env = z.object({
   REPLICATE_PREDICTION_TIMEOUT_SEC: num(1800),
   /** Presigned R2 GET links handed to Replicate. */
   REPLICATE_INPUT_URL_TTL_SEC: num(7200),
+  // ---- prompt scripts (workstream 4): beat-only audio = the music without its vocals (plans/prompt-scripts.md §6)
+  /** Vocal-separation model on Replicate (community model: runs by version; the latest version is looked up when none is set). */
+  AUDIO_SEPARATION_MODEL: z.string().default('ryan5453/demucs'),
+  AUDIO_SEPARATION_VERSION: z.string().optional(),
+  /** Its input besides the audio URL (JSON). Check the model's API page before enabling. */
+  AUDIO_SEPARATION_INPUT: z.string().default('{"model":"htdemucs","stem":"vocals","output_format":"mp3"}'),
+  AUDIO_SEPARATION_AUDIO_FIELD: z.string().default('audio'),
+  /** Dollars per second of prediction time (A100 40GB), and the flat estimate when Replicate reports no time. */
+  AUDIO_SEPARATION_PRICE_PER_SEC: num(0.00115),
+  AUDIO_SEPARATION_ESTIMATE: num(0.0066),
   REPLICATE_IMAGE_MODEL: z.string().default('black-forest-labs/flux-2-pro'),
   REPLICATE_IMAGE_EDIT_MODEL: z.string().default('qwen/qwen-image-edit-2511'),
   /** FLUX.2 [pro] on Replicate: per run, plus per input and per output megapixel. */

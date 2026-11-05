@@ -10,7 +10,8 @@ import { PhotoBill } from '../images/bill.js';
 import { identityRefs } from '../images/identity.js';
 import * as P from '../pricing.js';
 import { characterSheetShot, loraToken, SHEET_ANGLES } from '../prompt/engine.js';
-import { loraVariationLine, loraVariations } from '../prompt/service.js';
+import { loraVariations } from '../prompt/service.js';
+import { loraCandidate } from '../prompt/scripts/builders.js';
 import type { JobRow } from '../gpu/controller.js';
 
 /** Candidate pool: the bundled character stills, cycled with labels (same as the mock and prototype features.js). */
@@ -92,7 +93,7 @@ export class LoraService {
         for (let i = 0; i < P.LORA_CANDIDATES; i += 4) {
           const batch = await Promise.all(Array.from({ length: Math.min(4, P.LORA_CANDIDATES - i) }, (_, k) => {
             const n = i + k, angle = SHEET_ANGLES[n % SHEET_ANGLES.length]!;
-            const prompt = [characterSheetShot(identity, angle, texts).text, loraVariationLine(n, texts)].filter(x => x.trim()).join('\n');
+            const prompt = loraCandidate(identity, angle, n, texts).text;
             return this.ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'lora-candidate', refId: m.id, refs, maxImages: refs.length, panels, bill,
               req: { prompt, width: 768, height: 1024, count: 1, seed: 1000 + n } }).then(r => r.images[0]!);
           }));

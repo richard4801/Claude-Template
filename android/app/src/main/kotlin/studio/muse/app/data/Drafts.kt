@@ -26,7 +26,28 @@ data class VideoDraft(
     val background: String = "keep",
     val motion: String = "subtle",
     val tool: String = "quality",
+    /** "Performer is speaking" (prompt scripts): pre-set from the clip's detection, off when unknown; sent as `speaking`. */
+    val speaking: Boolean = false,
+    /** The user switched "Performer is speaking" for this clip: a late detection no longer moves it. */
+    val speakingTouched: Boolean = false,
 ) {
+    /** A new or changed clip: the speaking switch starts again from that clip's detection. */
+    fun withClip(c: Clip?) = copy(clip = c, speaking = speakingFor(c), speakingTouched = false)
+
+    /** The user flips the switch. */
+    fun toggleSpeaking() = copy(speaking = !speaking, speakingTouched = true)
+
+    /**
+     * A `clip` event (the detection finished after the upload answered): for the selected clip, store its audio and checks
+     * (the local thumb stays) and, unless the user switched it, re-apply the pre-set. Other clips are ignored.
+     */
+    fun onClipEvent(c: Clip): VideoDraft {
+        val cur = clip ?: return this
+        if (cur.id != c.id) return this
+        val next = cur.copy(audio = c.audio ?: cur.audio, checks = c.checks.ifEmpty { cur.checks })
+        return copy(clip = next, speaking = if (speakingTouched) speaking else speakingFor(next))
+    }
+
     /** [pricePerSec]: the server's live price for the quality (features.video), null = the built-in default. */
     fun spec(pricePerSec: Double? = null) = RenderSpec(engine, use, steps, lipSync, takes, clip?.takeIf { it.id != SampleData.SAMPLE_CLIP }?.durationSec, quality,
         pricePerSec.takeIf { engine == Engine.REPLICATE })
@@ -47,8 +68,15 @@ data class VideoDraft(
     fun request(title: String, modelId: String, outfitId: String, clipId: String, clipSeconds: Double?) = JobRequest(
         title = title, modelId = modelId, outfitId = outfitId, clipId = clipId, engine = engine.id, quality = quality.id.takeIf { replicate },
         steps = Pricing.STEPS_DEFAULT, use = ClipUse.FULL.id, takes = takes, keepAudio = keepAudio, lipSync = lipSync && edit,
-        background = if (edit) background else "keep", backgroundMotion = motion, clipSeconds = clipSeconds,
+        background = if (edit) background else "keep", backgroundMotion = motion, clipSeconds = clipSeconds, speaking = speaking,
     )
+
+    companion object {
+        /** The switch's starting position for a clip: its detection, off when unknown (no clip, still running, failed). */
+        fun speakingFor(c: Clip?): Boolean = c?.audio?.speaking ?: false
+        /** The hint under the switch. */
+        fun speakingHint(on: Boolean) = if (on) "She talks or sings: her lips follow the clip's sound" else "Her mouth follows the clip; she won't lip-sync to the music"
+    }
 }
 
 /** Photoshoot tool state. */
@@ -141,6 +169,8 @@ class Drafts {
     val postsTab = MutableStateFlow("scheduled")
     /** Starts the Post sheet in Schedule mode once (used by the Posts empty state and screenshot tests). */
     val postStartScheduled = MutableStateFlow(false)
+    /** Owner Settings → Prompts: "blocks" or "scripts" (prompt scripts). */
+    val promptsTab = MutableStateFlow("blocks")
 
     /** Loads a past job's settings (Retry / Run again with same settings). */
     fun loadJob(job: Job) {
@@ -152,11 +182,11 @@ class Drafts {
                 engine = Engine.fromId(r.engine), quality = Quality.fromId(r.quality), steps = Pricing.STEPS_DEFAULT, use = ClipUse.FULL, takes = r.takes, keepAudio = r.keepAudio,
                 lipSync = r.lipSync, background = r.background, motion = r.backgroundMotion, tool = "quality",
                 clip = it.clip ?: Clip(r.clipId, r.title, r.clipSeconds ?: SampleData.sampleMeta.durationSec, 1080, 1920, 30, ClipRules.checks(SampleData.sampleMeta)),
-            )
+            ).let { d -> d.copy(speaking = r.speaking ?: VideoDraft.speakingFor(d.clip), speakingTouched = r.speaking != null) }
         }
     }
 
-    fun resetVideo() = video.update { VideoDraft(clip = it.clip, tool = it.tool) }
+    fun resetVideo() = video.update { VideoDraft(tool = it.tool).withClip(it.clip) }
 
     /** Signing out or switching studios: reference images are that account's uploads, and "Edit as text" was written for its prompts. */
     fun forgetAccount() {

@@ -60,6 +60,8 @@ extension AppStore {
         lipSync = false
         keepAudio = true
         background = "keep"
+        speaking = PerformerSpeaking.preset(clip) // prompt scripts (workstream 4)
+        speakingTouched = false
         showToast("Settings reset")
     }
 
@@ -90,7 +92,7 @@ extension AppStore {
             return
         }
         let title = "\(m.shortName) · \(o.name)"
-        let req: JobRequest
+        var req: JobRequest
         if quality.isReplicate {
             // Draft / Standard / HD: the whole clip, no steps, lip sync or background photo.
             req = JobRequest.replicate(title: title, modelId: m.id, outfitId: o.id, clipId: c.id, quality: quality, takes: takeCount, keepAudio: keepAudio,
@@ -100,6 +102,8 @@ extension AppStore {
             req = JobRequest.addOn(quality, title: title, modelId: m.id, outfitId: o.id, clipId: c.id, takes: takeCount, keepAudio: keepAudio,
                                    lipSync: lipSync, background: background, backgroundMotion: motion, clipSeconds: c.durationSec)
         }
+        // Prompt scripts (workstream 4): "Performer is speaking" (off: the server sends the clip without its sound, no lip-sync).
+        req.speaking = speaking
         submit(req, cost: cost, takes: takeCount)
     }
 

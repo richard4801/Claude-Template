@@ -137,7 +137,7 @@ class NewVideoViewModel(private val c: AppContainer) : ViewModel() {
         busy.update { true to it.second }
         val clip = c.repo.uploadClip(if (bad) SampleData.badMeta else SampleData.sampleMeta, null)
         busy.update { false to it.second }
-        if (clip != null) edit { it.copy(clip = clip, showBadExample = bad) }
+        if (clip != null) edit { it.withClip(clip).copy(showBadExample = bad) }
     }
 
     /** A clip from the Android Photo Picker: read its real metadata, upload it, run the checks. */
@@ -149,7 +149,7 @@ class NewVideoViewModel(private val c: AppContainer) : ViewModel() {
             val thumb = media.clipThumb(uri)
             val bytes = if (c.repo.api is studio.muse.app.data.HttpMuseApi) media.bytes(uri) else null
             val clip = c.repo.uploadClip(meta, bytes, media.mime(uri).takeIf { it.startsWith("video/") } ?: "video/mp4") ?: return@launch
-            edit { it.copy(clip = clip.copy(thumb = thumb?.let { t -> ImageRef(url = t) }), showBadExample = false) }
+            edit { it.withClip(clip.copy(thumb = thumb?.let { t -> ImageRef(url = t) })).copy(showBadExample = false) }
         } catch (e: Exception) {
             c.repo.toast("Couldn't read that clip")
         } finally {
@@ -435,8 +435,12 @@ private fun androidx.compose.foundation.layout.ColumnScope.DirectSheet(vm: NewVi
             H3("Sound")
             Opt("Keep the clip's audio", "The song or voice from your source clip.", d.keepAudio, onClick = { vm.edit { it.copy(keepAudio = true) } })
             Opt("Replace audio", "Upload a new track or voiceover.", !d.keepAudio, onClick = { vm.edit { it.copy(keepAudio = false) }; vm.toast("Pick a track or voiceover (demo)") })
-            if (!d.edit) Tiny("Mouth movements follow the clip. A separate lip sync pass is on Edit.")
-            else RowB {
+            // Prompt scripts: whether she talks/sings (lip-sync) or not (her mouth follows the clip, no lip-sync to music).
+            RowB {
+                Column(Modifier.weight(1f)) { T("Performer is speaking", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink); Tiny(VideoDraft.speakingHint(d.speaking)) }
+                Toggle(d.speaking, { vm.edit { it.toggleSpeaking() } })
+            }
+            if (d.edit) RowB {
                 Column(Modifier.weight(1f)) { T("Lip sync", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink); Tiny("Only when the performer talks or sings · adds ~4 min") }
                 Toggle(d.lipSync, { vm.edit { it.copy(lipSync = !it.lipSync) } })
             }

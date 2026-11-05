@@ -52,6 +52,7 @@ class FakeMuseApi(
     private val postTimers = mutableMapOf<String, CoJob>()
     private val tpl = FakeTemplates(now = now)
     private val promptLib = FakePromptLibrary(now)
+    private val promptScripts = FakePromptScripts(promptLib, now)
 
     override fun events(): Flow<ApiEvent> = events
     override fun setToken(token: String?) {}
@@ -165,7 +166,9 @@ class FakeMuseApi(
             SampleData.badMeta -> SampleData.BAD_CLIP
             else -> "clip_" + uid()
         }
-        val c = Clip(id, meta.name, meta.durationSec, meta.width, meta.height, meta.fps, ClipRules.checks(meta))
+        // The server classifies the clip's audio on upload (prompt scripts); the demo takes it from the meta.
+        val audio = ClipAudio(if (meta.talking) "speech" else "music", meta.talking, true)
+        val c = Clip(id, meta.name, meta.durationSec, meta.width, meta.height, meta.fps, ClipRules.checks(meta), audio = audio)
         clips[id] = c
         c
     }
@@ -563,6 +566,13 @@ class FakeMuseApi(
     override suspend fun savePrompt(key: String, text: String) = lock.withLock { promptLib.save(key, text) }.also { events.tryEmit(ApiEvent("prompts", prompt = it)) }
     override suspend fun resetPrompt(key: String) = lock.withLock { promptLib.reset(key) }.also { events.tryEmit(ApiEvent("prompts", prompt = it)) }
     override suspend fun previewPrompt(req: PromptPreviewRequest) = lock.withLock { promptLib.preview(req) }
+    // Prompt scripts (workstream 4)
+    override suspend fun listPromptScripts() = lock.withLock { promptScripts.list() }
+    override suspend fun getPromptScript(id: String) = lock.withLock { promptScripts.get(id) }
+    override suspend fun savePromptScript(id: String, rules: List<Rule>) = lock.withLock { promptScripts.save(id, rules) }.also { events.tryEmit(ApiEvent("promptScript", script = it)) }
+    override suspend fun resetPromptScript(id: String) = lock.withLock { promptScripts.reset(id) }.also { events.tryEmit(ApiEvent("promptScript", script = it)) }
+    override suspend fun previewPromptScript(id: String, inputs: kotlinx.serialization.json.JsonObject?, rules: List<Rule>?, texts: Map<String, String>?, direction: String?) =
+        lock.withLock { promptScripts.preview(id, inputs, rules, texts, direction) }
 
     // ---- photo templates (FakeTemplates holds the same owner-only rules as server/api)
     override suspend fun listTemplates(scope: String, q: String?, tag: String?) = lock.withLock { tpl.list(scope, q, tag) }

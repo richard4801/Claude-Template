@@ -140,7 +140,9 @@ export class ReplicateVideo {
       const D = P.replicateSeconds(len);
       // Lip-sync guard: unless the clip is marked as the performer talking, the model gets the clip without sound (it
       // copies the motion, which already carries the beat) and the original sound goes back on the result.
-      const talking = (clip.checks as { label: string; value: string }[] | null)?.some(x => x.label === 'Performer talking' && x.value === 'Yes') ?? false;
+      // Prompt scripts: the request carries the resolved switch/detection; older jobs fall back to the clip's check.
+      const talking = typeof r.speaking === 'boolean' ? r.speaking
+        : (clip.checks as { label: string; value: string }[] | null)?.some(x => x.label === 'Performer talking' && x.value === 'Yes') ?? false;
       const muteSource = !talking && !!info.audioCodec;
       // 2. Padded to D seconds and uploaded once (kept for a resumed run).
       if (!state.paddedKey || state.seconds !== D || state.muted !== muteSource || !(await ctx.storage.head(state.paddedKey))) {
