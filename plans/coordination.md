@@ -28,4 +28,4 @@ _Started 2026-11-05._ Several Claude sessions build MUSE features at the same ti
 ## Status (each session updates its own line)
 - 1 · AI suite core: not started
 - 2 · MCP + Blender bridge: not started
-- 3 · Editor engine v2: not started
+- 3 · Editor engine v2: in progress — contract + TS reference + shared fixtures + server AI jobs/v2 versions done (migration 0009); Android and Mac ports being built

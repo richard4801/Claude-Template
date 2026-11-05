@@ -459,6 +459,44 @@ EditList    { version: 1, sourceTakeId: string, sourceDurationSec: number, segme
 - **Visibility and ownership:** the same as every take: everyone in the studio sees, approves (`PATCH`) and discards (`DELETE`) versions. Deleting a source keeps its versions (their `parentTakeId` then names a take that's gone; apps re-open such a version on its own video). Deleting a version never touches its source.
 - No model names, prices or engines in the editor; `engineLabel` is the source's ("HD · 2K").
 
+## Editor v2 (2026-11-05, workstream 3)
+_Spec, data model, rules and rendering: `plans/video-editor.md` "Editor v2 (engine contract)". Reference code: `server/api/src/editor/` (model, presets, cuts); shared fixtures `server/api/test/fixtures/editor/` (same files in the Android and Mac test resources)._ The apps still render everything on the device; the server checks and stores the **edit project** with a version, and runs the paid **AI helpers** as jobs whose results the app applies to its project. Nothing here encodes video. Members and owners alike; nothing member-facing names a provider or model.
+
+```ts
+EditProject  { version: 2, sourceTakeId, canvas: { width, height, fps, background? }, assets: Asset[], tracks: Track[], mute? }   // plans/video-editor.md
+EditorJobKind "captions" | "cuts" | "matte" | "denoise"
+EditorSource { takeId } | { uploadId, durationSec }            // a video take of the studio, or a video/audio upload of the studio (+ its length)
+EditorJob    { id, kind, state: "running"|"done"|"failed"|"cancelled", progress /* 0–100 */, phase /* "Listening", "Waiting"… */,
+               source: EditorSource & { durationSec }, options, estimateUsd, costUsd, result?, error?, createdAt, finishedAt?,
+               models?: string[] /* owners only */ }
+CaptionsResult { language, words: { text, startSec, endSec, score? }[] /* SOURCE seconds */, durationSec, reused: boolean }
+CutsResult     { cuts: { startSec, endSec, reason: "silence"|"filler"|"repeat", text? }[] /* source s */, savedSec, words, language, options, durationSec }
+MatteResult    { asset: { kind: "video", upload | take, url?, durationSec }, chroma: { color: "#00FF00", similarity: 0.4, smoothness: 0.08, spill: 0.5 } }
+DenoiseResult  { asset?: { kind: "audio", upload | take, url?, durationSec }, suggestion: { level: "none"|"light"|"strong", reason, confidence: number|null } }
+```
+
+| | |
+|---|---|
+| `POST /v1/takes/{id}/versions` with `edits: EditProject` | As in "Video editor", but `edits.version: 2`: checked by the v2 rules (JSON ≤ 256 KB; `durationSec` must match the project's duration within max(0.5 s, 5 %)); every `take`/`upload` asset must be this studio's (`not_found`) and of a fitting kind (`bad_request`). v1 lists are unchanged. |
+| `POST /v1/editor/validate` `{project}` | → `{ok: true, durationSec}` or `bad_request` naming the first broken field (`edits.tracks.2.items.0.speed: …`). Free. |
+| `GET /v1/editor/features` | → `{captions: {available, languages}, cuts: {available, defaults}, matte: {available, maxSec: 120}, denoise: {available}, maxSourceSec: 600}` |
+| `GET /v1/editor/presets` | → `{filters, captionStyles, hooks}` (the same tables the apps carry). |
+| `POST /v1/editor/uploads/presign` `{contentType: "audio/mp4"|"audio/mpeg"|"audio/wav"|…, bytes?}` | → `{uploadId, method: "PUT", url, headers, expiresAt, fileUrl}` for a voice-over or music file (≤ 200 MB). Use `uploadId` as an audio `Asset.upload`. |
+| `POST /v1/editor/estimate` `{kind, source, options?}` | → `{kind, usd, tokens, free, reusesTranscript, durationSec}`. Free. |
+| `POST /v1/editor/jobs` `{kind, source, options?}` | → `EditorJob` (`running`). Holds the estimate (`insufficient_tokens`/`insufficient_balance`/cap errors as for renders, before anything starts), runs, then settles at the GPU time actually billed (at least $0.01), or releases the hold on failure/cancel. Progress and the result arrive as `editor` events. |
+| `GET /v1/editor/jobs?kind=&takeId=&uploadId=&limit=` | → my `EditorJob[]`, newest first (≤ 100). |
+| `GET /v1/editor/jobs/{id}` | → `EditorJob` (mine; owners see any in the studio). |
+| `DELETE /v1/editor/jobs/{id}` | Running → `{state: "cancelling"}` (stops; the hold goes back; the job ends `cancelled`). Finished → `{state: "deleted"}` (forgotten; an `editor` event with `op: "delete"`). |
+
+**Kinds and options**
+- `captions` `{language?: "auto"|"en"|…}` → `CaptionsResult`. Word timestamps of the source's speech. Free (reused, cost 0) when the same video already has a transcript from the last 30 days in that language.
+- `cuts` `{minSilenceSec? 0.25–5 (0.7), keepPadSec? 0–0.5 (0.12), fillers? (true), repeats? (false), extraFillers?: string[] ≤ 50, fromJobId?}` → `CutsResult`: suggested source ranges to remove (silences longer than `minSilenceSec`, keeping `keepPadSec` of each side; "um/uh/er/ah/hmm…" + `extraFillers`; a word said twice in a row). Free when a transcript exists (`fromJobId`, or the newest one of that video); otherwise it transcribes first (priced like captions). The app shows them and applies the accepted ones with `applyCuts(project, assetId, cuts)`.
+- `matte` (video ≤ 120 s) → `MatteResult`: the person on pure green; the app adds the asset (usually on an overlay/PiP track) with the given `chroma`. Priced per second of video.
+- `denoise` `{analyzeOnly?}`: `analyzeOnly: true` is free and needs a transcript → `{suggestion}` from how clearly the words were heard. Otherwise → the voice alone (music and noise removed) as an audio asset + the suggestion; the app sets it as the clip's `audioAsset`.
+- Estimates: GPU seconds (captions 8 + 0.15·d, matte 10 + 4·d, voice 5 + 0.3·d, d = media seconds) × the GPU's $/s; at least $0.01. Jobs on the server run 2 at a time (others wait in `phase: "Waiting"`); after a restart running jobs end `failed` ("Interrupted · try again") and their holds go back.
+- **Events:** `{type: "editor", editorJob: EditorJob}` to the job's user and the owners; `{type: "editor", op: "delete", id}` when one is removed.
+- **Server config** (env, optional): `EDITOR_AI_PROVIDER` = `auto` (default: Replicate when `REPLICATE_API_TOKEN` is set, else the mock) | `mock` | `replicate`; `EDITOR_TRANSCRIBE_MODEL`, `EDITOR_MATTE_MODEL`, `EDITOR_SEPARATE_MODEL` (defaults: a WhisperX transcription model, a robust video matting model with green-screen output, a stem separation model); `EDITOR_*_USD_PER_SEC`. Inputs are renamed to the model's own field names from its published schema. Outputs are copied into storage byte for byte (`g/edit_*.mp4|mp3`) and recorded as studio uploads.
+
 ## Types
 
 ```ts
@@ -511,7 +549,7 @@ Platform   "tiktok"|"instagram"|"facebook"|"youtube"|"x"
 Account    { modelId, platform: Platform, handle, connectedAt, canPostDirect: boolean /* false until that platform approves MUSE */ }
 Post       { id, modelId, takeId, title, thumb: ImageRef, platforms: Platform[], caption, aiLabel: boolean, paidPartnership: boolean,
              when: "now"|ISO time, state: "scheduled"|"handoff"|"posted"|"failed", createdAt, postedAt?, stats?: { views, likes, comments } }
-ApiEvent   { type: "job"|"take"|"balance"|"wallet"|"model"|"outfit"|"lora"|"post"|"gpu"|"tool"|"template"|"clip"|"settings"|"member"|"invite"|"studio"|"account"|"prompts",
+ApiEvent   { type: "job"|"take"|"balance"|"wallet"|"model"|"outfit"|"lora"|"post"|"gpu"|"tool"|"template"|"clip"|"settings"|"member"|"invite"|"studio"|"account"|"prompts"|"editor" /* "Editor v2" */,
              prompt?: PromptEntry /* "prompts", owners only (2026-11-05) */,
              op?: "delete"|"used" /* with id: remove that item */, id?, take?: Take, template?: Template, clip?: Clip, settings?: StudioSettings,
              imageEngine? /* owners */, imageModels? /* owners */, member?: Member /* owners */, invite? /* owners */, studioBalance?: StudioBalance /* owners */,
