@@ -141,14 +141,22 @@ public struct CameraAsset: Codable, Sendable, Equatable, Identifiable {
     public var state: String
     public var contentType: String?
     public var bytes: Int64?
+    // Workstream 2: camera sessions UI (Guides, History): who made it ("app"|"mcp"|"relay"|"chat"), its presigned GET (ready only), when (ms).
+    public var source: String?
+    public var url: String?
+    public var createdAt: Double?
 
-    public init(id: String, kind: String, label: String? = nil, state: String = "pending", contentType: String? = nil, bytes: Int64? = nil) {
+    public init(id: String, kind: String, label: String? = nil, state: String = "pending", contentType: String? = nil, bytes: Int64? = nil,
+                source: String? = nil, url: String? = nil, createdAt: Double? = nil) {
         self.id = id
         self.kind = kind
         self.label = label
         self.state = state
         self.contentType = contentType
         self.bytes = bytes
+        self.source = source
+        self.url = url
+        self.createdAt = createdAt
     }
 }
 
