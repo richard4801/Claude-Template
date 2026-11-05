@@ -45,7 +45,6 @@ final class MockServerTests: XCTestCase {
 
         let demoModel = models.first { $0.isLocked }!
         var req = JobRequest(title: "Mac test", modelId: demoModel.id, outfitId: demoModel.outfitIds[0], clipId: bad.id)
-        do { _ = try await api.createJob(req); XCTFail() } catch let e as ApiError { XCTAssertEqual(e.code, "clip_failed_checks") }
         req.clipId = good.id
         req.steps = 31
         do { _ = try await api.createJob(req); XCTFail() } catch let e as ApiError { XCTAssertEqual(e.code, "bad_request") }

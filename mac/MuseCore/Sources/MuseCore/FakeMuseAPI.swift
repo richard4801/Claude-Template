@@ -616,7 +616,7 @@ public actor FakeMuseAPI: MuseAPI {
 
     public func createJob(_ req: JobRequest) throws -> Job {
         if let m = models.first(where: { $0.id == req.modelId }), m.archived { throw ApiError.modelArchived }
-        if let clip = clips[req.clipId], !clip.ok { throw ApiError("clip_failed_checks", "Fix the clip first: one person, no watermark, 15s or less") }
+        // Clip checks are advice only: a failing clip can still be rendered (the app shows a disclaimer).
         var req = req
         if req.engine == Engine.replicate.rawValue {
             // Replicate always renders the whole clip and stores "full".

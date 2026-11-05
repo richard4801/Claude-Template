@@ -917,7 +917,8 @@ final class AppStore {
     var publicServerURL: String { (api as? HTTPMuseAPI)?.baseURL.absoluteString ?? defaultServerURL }
     var clipBad: Bool { !(clip?.ok ?? true) }
     var lowBalance: Bool { totalCost > balance.balance + 1e-9 }
-    var generateBlocked: Bool { clipBad || lowBalance || clip == nil || currentOutfit == nil || generating }
+    /// Clip checks are advice only (owner decision): a failing clip shows a disclaimer but doesn't block generating.
+    var generateBlocked: Bool { lowBalance || clip == nil || currentOutfit == nil || generating }
 
     /// The video prompt as members see it (pro mode / "Show the prompt"): the shared prompt without its steps line part.
     var videoPrompt: String {

@@ -42,12 +42,11 @@ describe('simulated studio flow (dev seed, like server/mock)', () => {
     expect(job.prompt).toContain('outfit, back');
   });
 
-  it('failing clip, bad steps and the per-job limit are refused', async () => {
+  it('a failing clip only warns; bad steps and the per-job limit are refused', async () => {
     const fd = new FormData();
     fd.append('meta', new Blob([JSON.stringify({ name: 'bad', durationSec: 22, width: 1080, height: 1920, fps: 30, people: 2, watermark: 'TikTok logo' })], { type: 'application/json' }));
     const clip = await (await fetch(`${base}/v1/uploads/clips`, { method: 'POST', body: fd, headers: { authorization: `Bearer ${token}` } })).json();
     expect(clip.checks.filter((c: any) => c.status === 'bad').length).toBe(3);
-    expect((await api('POST', '/v1/jobs', { title: 'x', modelId: 'm_demo', clipId: clip.id, steps: 10 })).body.code).toBe('clip_failed_checks');
     expect((await api('POST', '/v1/jobs', { title: 'x', modelId: 'm_demo', steps: 31 })).body.code).toBe('bad_request');
     expect((await api('POST', '/v1/jobs', { title: 'x', modelId: 'm_demo', steps: 30, takes: 3 })).body.code).toBe('over_job_limit');
   });

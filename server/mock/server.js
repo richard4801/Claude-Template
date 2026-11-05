@@ -248,7 +248,7 @@ route('POST', '/v1/jobs', async req => {
   const r = await json(req);
   r.takes = Math.min(4, Math.max(1, r.takes ?? 1)); r.steps = r.steps ?? 10; r.engine = r.engine ?? 'h3'; r.use = r.use ?? 'first';
   const clip = db.clips[r.clipId];
-  if (clip && clip.checks.some(c => c.status === 'bad')) throw new ApiError(422, 'clip_failed_checks', 'Fix the clip checks first');
+  // Clip checks are advice only: a failing clip can still be rendered (the apps show a disclaimer).
   if (r.engine === 'h3' && (r.steps < sim.STEPS_MIN || r.steps > sim.STEPS_MAX)) throw new ApiError(400, 'bad_request', 'Steps must be 4–30');
   const cost = sim.totalCost(r);
   if (cost > db.balance.balance + 1e-9) throw new ApiError(402, 'insufficient_balance', 'Not enough balance · top up in Credits');

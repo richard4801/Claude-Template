@@ -109,7 +109,8 @@ export class JobService {
       (r as P.RenderReq).pricePerSec = this.qualityPrice(r.quality);
     } else delete r.quality;
     const [clip] = r.clipId ? await this.ctx.db.select().from(clips).where(and(eq(clips.id, r.clipId), eq(clips.studioId, user.studioId))) : [];
-    if (clip && clip.checks.some(c => c.status === 'bad')) throw new ApiError(422, 'clip_failed_checks', 'Fix the clip checks first');
+    // Clip checks are advice only (owner decision): a clip that fails them can still be rendered; the apps show a
+    // disclaimer. Over 15 s, only the first 15 s are used (the engines' limit).
     if (r.engine === 'h3' && (r.steps < P.STEPS_MIN || r.steps > P.STEPS_MAX)) throw badRequest('Steps must be 4–30');
     if (replicate && !clip?.storageKey) throw badRequest('Upload the clip file first');
     if (!replicate && this.ctx.gpu.mode === 'runpod' && !clip?.storageKey) throw badRequest('Upload the clip file first');

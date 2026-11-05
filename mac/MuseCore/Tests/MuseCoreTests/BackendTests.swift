@@ -186,10 +186,9 @@ final class FakeAPITests: XCTestCase {
         XCTAssertEqual(after, before, accuracy: 1e-9)
     }
 
-    func testGenerateIsBlockedByLowBalanceAndBadClips() async throws {
+    func testGenerateIsBlockedByLowBalance() async throws {
         let api: any MuseAPI = FakeMuseAPI(speed: 0)
         var req = JobRequest(title: "x", modelId: SampleData.demo, outfitId: SampleData.green, clipId: SampleData.badClip)
-        do { _ = try await api.createJob(req); XCTFail() } catch let e as ApiError { XCTAssertEqual(e.code, "clip_failed_checks") }
         req.clipId = SampleData.sampleClip
         req.steps = 30
         req.takes = 4

@@ -155,7 +155,6 @@ class NewVideoViewModel(private val c: AppContainer) : ViewModel() {
         val s = state.value
         val clip = s.clip ?: return c.repo.toast("Pick a clip first")
         val model = s.model ?: return c.repo.toast("Pick a model first")
-        if (!clip.ok) return c.repo.toast("Fix the clip checks first")
         if (s.cost > s.balance + 1e-9) return c.repo.toast(lowFundsMessage(c), Routes.CREDITS)
         viewModelScope.launch {
             busy.update { it.first to true }
@@ -209,7 +208,8 @@ fun SourceScreen() {
                         Spacer(Modifier.weight(1f))
                         T("Change clip", m.type.tiny.copy(fontWeight = FontWeight.SemiBold), m.t.ink, Modifier.press(onClick = pickVideo).padding(vertical = 6.dp))
                     }
-                    if (clip.ok) {
+                    if (!clip.ok) NoteBox(CLIP_DISCLAIMER, warn = true)
+                    run {
                         val len = clip.takeIf { it.id != SampleData.SAMPLE_CLIP }?.durationSec
                         Field("Use") {
                             T("Whole clip · ${s.draft.option.label} · ${Pricing.optionPriceLine(s.spec)}", m.type.body, m.t.ink)
@@ -221,12 +221,15 @@ fun SourceScreen() {
         Dock {
             when {
                 clip == null -> Cta("Pick a clip to continue", { pickVideo() }, Modifier.weight(1f), off = true)
-                !clip.ok -> Cta("Fix the clip to continue", { vm.toast("Fix the clip checks first") }, Modifier.weight(1f), off = true)
                 else -> Cta("Next: Direct", { nav.go(Routes.DIRECT) }, Modifier.weight(1f))
             }
         }
     }
 }
+
+/** Shown when a clip misses a check: generating is still allowed (owner decision). */
+const val CLIP_DISCLAIMER = "This clip doesn't meet every recommendation. You can still generate, but results may be weaker: " +
+    "low resolution looks softer, extra people or watermarks can confuse the swap, and only the first 15 s of a longer clip is used."
 
 @Composable
 private fun ClipCard(clip: Clip) {

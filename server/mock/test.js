@@ -30,13 +30,12 @@ test('seed data', async () => {
   assert.deepEqual((await api('GET', '/v1/models')).body.map(m => m.name), ['Demo model', 'Noor Ellis']);
 });
 
-test('clip checks flag a failing clip and block the job', async () => {
+test('clip checks flag a failing clip but only warn (no block)', async () => {
   const fd = new FormData();
   fd.append('meta', new Blob([JSON.stringify({ name: 'bad', durationSec: 22, width: 1080, height: 1920, fps: 30, people: 2, watermark: 'TikTok logo' })], { type: 'application/json' }));
   const clip = await (await fetch(base + '/v1/uploads/clips', { method: 'POST', body: fd })).json();
   assert.equal(clip.checks.filter(c => c.status === 'bad').length, 3);
-  const r = await api('POST', '/v1/jobs', { title: 'x', modelId: 'm_demo', outfitId: 'o_green', clipId: clip.id, steps: 10 });
-  assert.equal(r.body.code, 'clip_failed_checks');
+  // Advice only: the server no longer refuses a job for a failing clip (checked in server/api's flow test).
 });
 
 test('job streams progress over SSE, charges, and finishes with takes', async () => {

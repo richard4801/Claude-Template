@@ -298,7 +298,10 @@ struct InspectorFooter: View {
                 est("Cost", Pricing.money(total))
                 est("After", Pricing.money(max(0, store.creditUsd - total)))
             }
-            if store.lowBalance && !store.clipBad {
+            if store.clipBad {
+                Note(icon: "exclamationmark.triangle", warn: true, text: Text("This clip doesn't meet every recommendation. You can still generate, but results may be weaker: low resolution looks softer, extra people or watermarks can confuse the swap, and only the first 15 s of a longer clip is used."))
+            }
+            if store.lowBalance {
                 if store.isMember {
                     Note(icon: "dollarsign.circle", warn: true, store.notEnoughMessage)
                 } else {
@@ -306,7 +309,7 @@ struct InspectorFooter: View {
                         .onTapGesture { store.go(.credits) }
                 }
             }
-            MButton(store.clipBad ? "Fix the clip to continue" : store.generating ? "Starting…" : Pricing.genLabel(spec), kind: .primary, size: .big, off: blocked) {
+            MButton(store.generating ? "Starting…" : Pricing.genLabel(spec), kind: .primary, size: .big, off: blocked) {
                 store.generate()
             }
             Text("⌘↵ to generate · renders keep running if you close the app").font(t.body(12)).foregroundStyle(t.muted).multilineTextAlignment(.center)

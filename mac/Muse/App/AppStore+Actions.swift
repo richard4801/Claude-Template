@@ -68,12 +68,8 @@ extension AppStore {
         if outfits(for: m).isEmpty { showToast("\(m.shortName) has no outfits yet.", action: "Add outfit") { [weak self] in self?.openOutfitSheet(for: m.id) } }
     }
 
-    /// ⌘↵ and the Generate button. Blocked when the clip fails its checks or the balance is too low.
+    /// ⌘↵ and the Generate button. Blocked only when the balance is too low; failing clip checks just show a disclaimer.
     func generate() {
-        if clipBad {
-            showToast("Fix the clip first: one person, no watermark, 15s or less")
-            return
-        }
         if lowBalance {
             notEnough("for this render")
             return
