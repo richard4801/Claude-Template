@@ -111,7 +111,10 @@ export function assemble(script: Script, parts: ScriptPart[]): string {
 export const scriptBlocks = (s: Script) => s.blocks ?? [...new Set(s.rules.map(r => r.block))];
 export const ruleTargets = (s: Script) => [...s.sections.map(x => x.id), ...(s.values ?? []).map(v => `@${v.name}`)];
 const MAX_RULES = 60, MAX_CONDS = 8;
-const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+/** Key-order independent: rule lists come back from Postgres jsonb with their object keys reordered. */
+const canon = (v: unknown): unknown => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object'
+  ? Object.fromEntries(Object.keys(v as object).sort().map(k => [k, canon((v as Record<string, unknown>)[k])])) : v);
+export const same = (a: unknown, b: unknown) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 
 function inputFor(s: Script, name: string, target: string): InputDef | undefined {
   if (!name.startsWith('item.')) return s.inputs.find(i => i.name === name);

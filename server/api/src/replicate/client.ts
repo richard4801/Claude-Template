@@ -126,15 +126,6 @@ export class ReplicateClient {
     }
   }
 
-  /** The latest version id of a model ("owner/name"), for community models that run by version. Null when unknown. */
-  async latestVersion(model: string): Promise<string | null> {
-    if (!this.o.token) return null;
-    const res = await this.fetchFn(`${this.base}/models/${model}`, { headers: this.headers(), signal: AbortSignal.timeout(30_000) }).catch(() => null);
-    if (!res?.ok) return null;
-    const m = (await res.json().catch(() => null)) as { latest_version?: { id?: string } | null } | null;
-    return m?.latest_version?.id ?? null;
-  }
-
   /** One read of a prediction. Rate limits and brief server errors are retried. */
   async get(id: string): Promise<Prediction> {
     for (let i = 0; ; i++) {

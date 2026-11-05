@@ -230,6 +230,16 @@ describe('Settings → Prompts → Scripts (API)', async () => {
     expect(reset.body).toMatchObject({ overridden: false });
     void modelId;
   });
+  it('a saved list survives the database reordering its keys (a locked rule with conditions: template)', async () => {
+    const def = scriptDef('template')!;
+    // Switch off the hidden scene line; the locked "Members see one locked line" rule (view is visible) stays as is.
+    const edited = def.rules.map(r => r.id === 'scene' ? { ...r, enabled: false } : r);
+    expect((await owner.req('PUT', '/v1/prompt-scripts/template', { rules: edited })).body).toMatchObject({ overridden: true, stale: false });
+    const back = (await owner.req('GET', '/v1/prompt-scripts/template')).body;
+    expect(back).toMatchObject({ overridden: true, stale: false });
+    expect(back.rules.find((r: any) => r.id === 'scene').enabled).toBe(false);
+    await owner.req('DELETE', '/v1/prompt-scripts/template');
+  });
   it('a block text edit (the library) and a rule edit work together in the preview', async () => {
     const pv = (await owner.req('POST', '/v1/prompt-scripts/preview', { id: 'video.audio', inputs: { audio: 'music', speaking: false }, texts: { 'audio.beat': '{subject} dances to {audio}.' } })).body;
     expect(pv.text).toBe('<Subject 1> dances to <Audio 1>.');
