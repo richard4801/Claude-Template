@@ -32,6 +32,9 @@ export const BODIES: Option[] = [
   o('film_8', 'Super 8', 'Home-movie grain, gate weave, warm', 'Super 8 home-movie film, heavy grain, slight gate weave, warm faded colour'),
   o('large_format_65', '65mm large format', 'Epic, huge sensor, shallow depth', '65mm large-format film camera, epic scale, extremely shallow depth of field, pristine detail'),
   o('camcorder', 'DV camcorder', '2000s camcorder: video texture, sharpening', 'early-2000s DV camcorder footage, video texture, edge sharpening, slightly blown highlights'),
+  o('modular_8k', 'Modular 8K', 'Modular 8K digital: razor detail, big sensor', 'modular 8K digital cinema camera, razor-sharp detail, large sensor rendering'),
+  o('full_frame_cine', 'Full-frame cine', 'Full-frame cinema sensor, creamy depth', 'full-frame digital cinema camera, creamy shallow depth of field, rich colour'),
+  o('creator_cine', 'Creator cine', 'Compact full-frame creator camera, 4K 120', 'compact full-frame creator cinema camera, clean 4K image, smooth high-frame-rate motion'),
   o('webcam', 'Webcam / FaceTime', 'Laptop webcam look, flat and close', 'laptop webcam footage, flat lighting, slight softness, video-call framing'),
   o('security_cam', 'CCTV', 'High-angle surveillance look', 'security camera footage, high fixed angle, wide lens, muted colour'),
 ];
@@ -46,6 +49,7 @@ export const LENSES: Option[] = [
   o('macro', 'Macro', 'Extreme close detail', 'macro lens, extreme close-up detail, razor-thin focus'),
   o('tilt_shift', 'Tilt-shift', 'Miniature-looking focus band', 'tilt-shift lens, narrow slanted focus band, miniature look'),
   o('fisheye', 'Fisheye', 'Ultra-wide barrel distortion', 'fisheye lens, strong barrel distortion'),
+  o('cine_zoom', 'Cine zoom', 'Long cinema zoom, crash zooms', 'long cinema zoom lens, smooth zooms, slightly compressed perspective'),
 ];
 export const FOCALS: number[] = [8, 14, 18, 24, 26, 35, 50, 65, 85, 100, 135];
 export const focalWords = (mm: number) => `${mm}mm lens (${mm <= 14 ? 'ultra-wide' : mm <= 24 ? 'wide' : mm <= 35 ? 'moderate wide' : mm <= 50 ? 'natural perspective' : mm <= 85 ? 'portrait telephoto, compressed background' : 'long telephoto, strongly compressed background'})`;
@@ -68,6 +72,7 @@ export const LOOKS: Option[] = [
   o('bw_film', 'Black & white film', 'Silver grain monochrome', 'black-and-white film, silver grain, rich blacks'),
   o('bleach_bypass', 'Bleach bypass', 'Desaturated, harsh contrast', 'bleach-bypass process, desaturated colour, harsh contrast'),
   o('cross_process', 'Cross-processed', 'Shifted, surreal colour', 'cross-processed film, shifted greens and yellows'),
+  o('reversal_16', '16mm reversal', 'Visible grain, punchy colour, halation', '16mm reversal film, visible grain, punchy saturated colour, halation'),
   o('faded_print', 'Faded print', 'Lifted blacks, nostalgic', 'faded film print, lifted blacks, nostalgic colour'),
 ];
 export const FRAME_RATES: Option[] = [
@@ -292,14 +297,78 @@ export function resolvePreset(spec: CameraSpec): CameraSpec {
     move: spec.move ?? base.move, angle: merge(base.angle, spec.angle), style: merge(base.style, spec.style) };
 }
 
-/** Everything the Camera picker shows (member-safe: ids, labels, descriptions). */
+/**
+ * The camera bag's photoreal hardware renders (design/hardware, bundled in both apps as `hardware/<file>.webp`) per
+ * option, with the spec caption shown under the picture (owner decision: real model names only as a "look" caption).
+ */
+export const HARDWARE: Record<string, { render: string; name: string; caption: string }> = {
+  'bodies.cinema_digital': { render: 'body-01-large-format', name: 'Large Format Digital', caption: 'Alexa LF look · Large format · 4.5K' },
+  'bodies.super35': { render: 'body-02-super35', name: 'Super 35 Digital', caption: 'Alexa 35 look · Super 35 · 4.6K' },
+  'bodies.modular_8k': { render: 'body-03-modular8k', name: 'Modular 8K', caption: 'V-Raptor look · VistaVision · 8K' },
+  'bodies.full_frame_cine': { render: 'body-04-fullframe', name: 'Full-Frame Cine', caption: 'Venice 2 look · Full frame · 8.6K' },
+  'bodies.film_35': { render: 'body-05-film35', name: '35mm Film', caption: '35mm 4-perf · Vision3 500T look' },
+  'bodies.film_16': { render: 'body-06-film16', name: 'Super 16 Film', caption: 'Super 16 · grain · documentary' },
+  'bodies.creator_cine': { render: 'body-07-creator-cine', name: 'Creator Cine', caption: 'FX3 look · Full frame · 4K 120' },
+  'bodies.phone': { render: 'body-08-phone', name: 'Phone UGC', caption: 'Phone · 24 mm · deep focus · HDR' },
+  'bodies.camcorder': { render: 'body-09-dv-camcorder', name: 'DV Camcorder', caption: 'MiniDV · 2000s · 480i texture' },
+  'bodies.film_8': { render: 'body-10-super8', name: 'Super 8', caption: 'Super 8 · home movie · 18 fps' },
+  'lenses.clean': { render: 'lens-01-clean-prime', name: 'Clean Sharp Prime', caption: 'Master Prime look · spherical · T1.3' },
+  'lenses.anamorphic': { render: 'lens-02-anamorphic', name: 'Anamorphic 2×', caption: 'Master Anamorphic look · oval bokeh · blue flares' },
+  'lenses.vintage_anamorphic': { render: 'lens-03-vintage-anamorphic', name: 'Vintage Anamorphic', caption: '1970s C-series look · amber flares · soft edges' },
+  'lenses.warm_vintage': { render: 'lens-04-warm-vintage', name: 'Warm Vintage Prime', caption: 'Speed Panchro look · warm · gentle falloff' },
+  'lenses.halation': { render: 'lens-05-halation', name: 'Halation Diffusion', caption: 'Vintage prime + 1/4 mist · bloom on highlights' },
+  'lenses.macro': { render: 'lens-06-macro', name: 'Macro', caption: '100 mm macro · 1:1 · product & detail' },
+  'lenses.cine_zoom': { render: 'lens-07-cine-zoom', name: 'Cine Zoom', caption: 'Optimo look · 24–290 mm · crash zoom' },
+  'lenses.fisheye': { render: 'lens-08-fisheye', name: 'Ultra-wide / Fisheye', caption: '14 mm & fisheye · skate & FPV energy' },
+  'optics.aperture': { render: 'optic-01-iris', name: 'Iris · depth of field', caption: 'T1.4 wide open → T11 deep focus' },
+  'optics.shutter': { render: 'optic-02-shutter180', name: 'Rotary shutter', caption: '180° natural blur · 90° crisp · 360° smear' },
+  'looks.tungsten_stock': { render: 'stock-01-35mm', name: '35mm colour negative', caption: 'Vision3 500T look · tungsten · fine grain' },
+  'looks.reversal_16': { render: 'stock-02-16mm', name: '16mm reversal', caption: 'Super 16 · visible grain · halation' },
+  'looks.digital_clean': { render: 'stock-03-sensor', name: 'Digital sensor', caption: 'Clean digital · 14+ stops · no grain' },
+  'lighting.soft_cross': { render: 'light-01-soft-cross', name: 'Soft Cross', caption: 'Two softboxes crossing · even, flattering' },
+  'lighting.contre_jour': { render: 'light-02-contre-jour', name: 'Contre-jour', caption: 'Hard backlight through haze · rim & glow' },
+  'lighting.overhead': { render: 'light-03-overhead', name: 'Overhead Fall', caption: 'Butterfly silk overhead · beauty top-light' },
+  'lighting.window': { render: 'light-04-window', name: 'Window', caption: 'Soft daylight through sheer · natural & calm' },
+  'lighting.practicals': { render: 'light-05-practicals', name: 'Practicals', caption: 'Lamps, neon, bulbs in shot · night mood' },
+  'lighting.ring_light': { render: 'light-06-ring-creator', name: 'Creator Ring', caption: 'Ring light + RGB tube · UGC talking head' },
+  'grips.dolly_in': { render: 'grip-01-dolly', name: 'Dolly & track', caption: 'Dolly in / out · push · tracking' },
+  'grips.crane_up': { render: 'grip-02-jib', name: 'Jib / crane', caption: 'Crane up / down · reveal · overhead' },
+  'grips.steadicam': { render: 'grip-03-gimbal', name: 'Gimbal', caption: 'Handheld smooth · walk-and-talk · follow' },
+  'grips.fpv': { render: 'grip-04-fpv', name: 'FPV drone', caption: 'FPV fly-through · dives · energy' },
+  'grips.truck_left': { render: 'grip-05-slider', name: 'Slider', caption: 'Short parallax slide · product & detail' },
+  'palettes.naturalistic': { render: 'palette-01-naturalistic', name: 'Naturalistic Clean', caption: 'True-to-life · neutral · gentle contrast' },
+  'palettes.teal_orange': { render: 'palette-02-teal-orange', name: 'Teal & Orange', caption: 'Blockbuster · teal shadows · warm skin' },
+  'palettes.hyper_neon': { render: 'palette-03-hyper-neon', name: 'Hyper Neon', caption: 'Magenta & cyan · deep blacks · night' },
+  'palettes.bleached_warm': { render: 'palette-04-bleached-warm', name: 'Bleached Warm', caption: 'Sun-faded · milky shadows · nostalgic' },
+  'palettes.sodium_decay': { render: 'palette-05-sodium-decay', name: 'Sodium Decay', caption: 'Street-lamp yellow-green · gritty' },
+  'palettes.classic_bw': { render: 'palette-06-classic-bw', name: 'Classic B&W', caption: 'Silver tones · rich blacks · grain' },
+};
+
+/**
+ * The camera bag's move library (owner decision: 16 moves, UGC first, at most two combined), with the filter tag the
+ * Move tab shows (All / UGC / Cinematic / Energy / Subtle). The other moves stay available to the API and Claude.
+ */
+export const FEATURED_MOVES: { id: string; tag: 'ugc' | 'cinematic' | 'energy' | 'subtle'; label?: string }[] = [
+  { id: 'static', tag: 'ugc', label: 'Locked-off' }, { id: 'handheld', tag: 'ugc' }, { id: 'selfie', tag: 'ugc' }, { id: 'follow', tag: 'ugc' },
+  { id: 'micro_push', tag: 'subtle' }, { id: 'dolly_in', tag: 'cinematic' }, { id: 'dolly_out', tag: 'cinematic' }, { id: 'orbit_left', tag: 'cinematic', label: 'Orbit / arc' },
+  { id: 'crane_up', tag: 'cinematic' }, { id: 'track_side', tag: 'cinematic', label: 'Tracking' }, { id: 'fpv', tag: 'energy', label: 'FPV fly-through' },
+  { id: 'whip_pan', tag: 'energy' }, { id: 'crash_zoom', tag: 'energy' }, { id: 'handheld_run', tag: 'energy' }, { id: 'rack_focus', tag: 'subtle' }, { id: 'dutch_push', tag: 'subtle' },
+];
+
+/** Everything the Camera picker shows (member-safe: ids, labels, descriptions, renders and look captions). */
 export function cameraCatalog() {
-  const v = (l: Option[]) => l.map(({ id, label, description }) => ({ id, label, description }));
+  const v = (l: Option[], group?: string) => l.map(({ id, label, description }) => {
+    const h = group ? HARDWARE[`${group}.${id}`] : undefined;
+    return h ? { id, label, description, render: h.render, name: h.name, caption: h.caption } : { id, label, description };
+  });
   return {
     presets: PRESETS.map(({ id, label, description, spec }) => ({ id, label, description, spec })),
-    bodies: v(BODIES), lenses: v(LENSES), focalLengths: FOCALS, apertures: v(APERTURES), looks: v(LOOKS), frameRates: v(FRAME_RATES), shutters: v(SHUTTERS),
-    lighting: v(LIGHTING), palettes: v(PALETTES),
+    bodies: v(BODIES, 'bodies'), lenses: v(LENSES, 'lenses'), focalLengths: FOCALS, apertures: v(APERTURES), looks: v(LOOKS, 'looks'), frameRates: v(FRAME_RATES), shutters: v(SHUTTERS),
+    lighting: v(LIGHTING, 'lighting'), palettes: v(PALETTES, 'palettes'),
+    optics: ['aperture', 'shutter'].map(id => ({ id, ...HARDWARE[`optics.${id}`]! })),
+    grips: Object.entries(HARDWARE).filter(([k]) => k.startsWith('grips.')).map(([k, h]) => ({ move: k.slice(6), ...h })),
     moves: MOVES.map(x => ({ id: x.id, label: x.label, description: x.description, category: x.category, editorBetter: !!x.editorBetter, talkSafe: !!x.talkSafe })),
+    library: FEATURED_MOVES.map(f => { const m = MOVES.find(x => x.id === f.id)!; return { id: m.id, label: f.label ?? m.label, tag: f.tag, description: m.description, category: m.category }; }),
     heights: v(HEIGHTS), shotSizes: v(SHOT_SIZES), genres: v(GENRES), eras: v(ERAS), tempos: v(TEMPOS), emotions: [...EMOTIONS],
     limits: { intensity: [0, 1], dutchDeg: [0, 30], focalMm: [8, 200], paletteColors: 5, mixPairs: 'two moves of different kinds; not static, time or aerial' },
   };
