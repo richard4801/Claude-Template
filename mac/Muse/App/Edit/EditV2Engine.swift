@@ -23,6 +23,8 @@ enum EditV2Engine {
     struct Sources {
         var media: [String: Media] = [:]
         var images: [String: CIImage] = [:]
+        /// Imported .cube LUTs (assets of kind "lut") by asset id.
+        var luts: [String: EditV2.Lut] = [:]
         var infos: [String: EditV2.MediaInfo] { media.mapValues(\.info) }
     }
 
@@ -38,8 +40,8 @@ enum EditV2Engine {
 
     // MARK: Sources
 
-    /// Reads every asset of the project from its local file (`files` by asset id). Assets without a file are left out
-    /// (the plan then skips them); a file that can't be read throws.
+    /// Reads every asset of the project from its local file (`files` by asset id; a "lut" asset = its downloaded .cube).
+    /// Assets without a file are left out (the plan then skips them); a file that can't be read throws.
     static func load(_ project: EditV2.Project, files: [String: URL]) async throws -> Sources {
         var out = Sources()
         for a in project.assets {
@@ -52,6 +54,10 @@ enum EditV2Engine {
                 out.images[a.id] = img.transformed(by: CGAffineTransform(translationX: -img.extent.minX, y: -img.extent.minY))
             case .video, .audio:
                 out.media[a.id] = try await media(AVURLAsset(url: url))
+            case .lut:
+                do { out.luts[a.id] = try EditV2LookLibrary.readCube(url) } catch {
+                    throw ApiError("edit_bad_media", "Couldn't read a LUT of this edit (\(error.localizedDescription))")
+                }
             }
         }
         return out
