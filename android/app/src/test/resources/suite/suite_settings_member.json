@@ -1,0 +1,4 @@
+{
+ "error": "Only the studio owner can do that",
+ "code": "owner_only"
+}

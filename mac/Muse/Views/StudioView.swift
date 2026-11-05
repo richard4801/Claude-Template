@@ -46,7 +46,6 @@ struct SourceColumn: View {
                     Spacer()
                     MoreMenu {
                         Button(store.showPrompt ? "Hide prompt" : "Show prompt") { store.showPrompt.toggle() }
-                        Button("Save as preset") { store.showToast("Saved as preset \"Dance · \(store.quality.label)\"") }
                         Button("Reset settings") { store.resetStudio() }
                         Button(clip == nil ? "Choose a clip…" : "Change clip…") { store.pickClip() }
                     }

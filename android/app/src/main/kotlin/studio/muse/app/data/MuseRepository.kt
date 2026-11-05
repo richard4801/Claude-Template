@@ -397,6 +397,11 @@ class MuseRepository(
         refreshBalance()
     }
 
+    /** AI suite (workstream 1): a shot is a render job; it goes into the list at once, then its live events move it. */
+    suspend fun createSuiteShot(req: SuiteShotRequest) = attemptInline { createSuiteShot(req) }.also { (j, _) ->
+        if (j != null) { _state.update { s -> s.copy(jobs = s.jobs.upsert(j) { it.id == j.id }.sortedByDescending { it.createdAt }) }; refreshBalance() }
+    }
+
     suspend fun removeJob(id: String) = attempt { removeJob(id) }?.also { _state.update { s -> s.copy(jobs = s.jobs.filterNot { it.id == id }) } }
 
     suspend fun setTakeStatus(id: String, status: String) = attempt { setTakeStatus(id, status) }?.also { t -> _state.update { s -> s.copy(takes = s.takes.upsert(t) { it.id == t.id }) } }

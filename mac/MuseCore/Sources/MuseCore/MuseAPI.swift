@@ -219,6 +219,25 @@ public protocol MuseAPI: AnyObject, Sendable {
     /// POST /v1/takes/{id}/versions with `edits: EditProject` (v2).
     func createTakeVersionV2(takeId: String, _ req: TakeVersionV2Request) async throws -> Take
 
+    // AI suite (workstream 1): plans/api.md "AI suite". Implemented in Suite/SuiteHTTP.swift and Suite/FakeMuseAPI+Suite.swift.
+    /// GET /v1/suite/catalog
+    func suiteCatalog() async throws -> SuiteCatalog
+    /// GET /v1/suite/camera
+    func suiteCamera() async throws -> CameraCatalog
+    /// POST /v1/suite/camera/compile (free)
+    func suiteCompileCamera(_ req: CameraCompileRequest) async throws -> CameraCompiled
+    /// POST /v1/suite/shots/estimate: holds nothing. `nothing_fits` / `engine_unavailable` as ApiError.
+    func suiteEstimate(_ req: ShotRequest) async throws -> ShotEstimate
+    /// POST /v1/suite/shots → a render job (`request.engine: "suite"`); progress arrives as `job` events.
+    func suiteCreateShot(_ req: ShotRequest) async throws -> Job
+    /// GET /v1/suite/shots/{id}
+    func suiteShot(id: String) async throws -> SuiteShot
+    /// GET /v1/suite/settings (owner)
+    func suiteSettings() async throws -> SuiteSettings
+    /// PATCH /v1/suite/settings (owner)
+    func updateSuiteSettings(_ patch: SuiteSettingsPatch) async throws -> SuiteSettings
+    // End AI suite (workstream 1)
+
     // Developer
 
     func setFailNext(_ fail: Bool) async throws

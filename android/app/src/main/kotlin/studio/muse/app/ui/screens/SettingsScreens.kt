@@ -165,6 +165,7 @@ fun SettingsScreen() {
                         Li("mail", "Invite someone", onClick = { nav.go(Routes.INVITE) }) { Ic("chev", 16.dp) }
                         Li("quality", "Studio settings", sub = "Caps and engines", onClick = { nav.go(Routes.STUDIO) }) { Ic("chev", 16.dp) }
                         Li("spark", "Prompts", sub = "Every prompt the studio sends · edit or reset", onClick = { nav.go(Routes.PROMPTS) }) { Ic("chev", 16.dp) }
+                        Li("export", "Connections", sub = "Claude & MCP · Blender relay", onClick = { nav.go(Routes.CONNECTIONS) }) { Ic("chev", 16.dp) } // AI suite (workstream 1 → 2)
                     }
                 }
                 Lbl("Developer")

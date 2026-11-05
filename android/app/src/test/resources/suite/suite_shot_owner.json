@@ -1,0 +1,92 @@
+{
+ "job": {
+  "id": "jl_4f67b61879d2",
+  "title": "Untitled shot",
+  "modelId": "m_demo",
+  "modelName": "Demo model",
+  "outfitId": "o_green",
+  "request": {
+   "mode": "reference",
+   "audio": true,
+   "label": "Shot · Standard · 768p",
+   "takes": 2,
+   "camera": {
+    "mix": {
+     "id": "rack_focus",
+     "ease": "in_out",
+     "speed": "normal",
+     "intensity": 0.5
+    },
+    "rig": {
+     "body": "super35",
+     "lens": "anamorphic",
+     "focalMm": 40,
+     "aperture": "f2"
+    },
+    "mode": "preset",
+    "move": {
+     "id": "dolly_in",
+     "ease": "in_out",
+     "speed": "normal",
+     "intensity": 0.6
+    },
+    "angle": {
+     "height": "eye",
+     "shotSize": "mcu"
+    },
+    "palette": {
+     "preset": "teal_orange"
+    },
+    "lighting": {
+     "preset": "soft_cross"
+    }
+   },
+   "engine": "suite",
+   "prompt": "Morning in a small Paris café. She orders at the counter and turns to the camera with a soft smile.",
+   "modelId": "m_demo",
+   "quality": "standard",
+   "seconds": 6,
+   "outfitId": "o_green",
+   "speaking": false,
+   "keepAudio": true,
+   "takeLabel": "Standard",
+   "aspectRatio": "9:16",
+   "engineLabel": "Shot · Standard · 768p",
+   "speakingSource": "default"
+  },
+  "state": "running",
+  "progress": 2.5,
+  "take": 1,
+  "step": 0,
+  "totalSteps": 2,
+  "phase": "take 1/2 · Rendering · ~4 min left",
+  "secondsLeft": 204.75,
+  "totalSeconds": 210,
+  "cost": 0.96,
+  "refunded": 0,
+  "createdAt": 1793916797446,
+  "prompt": "Demo model is the woman shown in <Image 1>, <Image 2>, <Image 3>, <Image 4> and <Image 5>: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Keep her face, hair, skin, body and proportions exactly as in those images. She never has: tattoos, rings.\nShe wears Dark green cropped tee and drawstring shorts as shown in <Image 6>, <Image 7>, <Image 8> and <Image 9>.\nMorning in a small Paris café. She orders at the counter and turns to the camera with a soft smile.\nCinematography: medium close-up from the chest up, eye-level camera, physical dolly-in toward the subject about 1.5 m, combined with focus racks from the foreground to the subject. Shot with Super 35 digital cinema sensor, filmic highlight roll-off, 40mm lens (natural perspective), anamorphic lens, oval bokeh, horizontal blue lens flares, f/2, shallow depth of field. Soft cross-lighting from two diffused sources. Teal-and-orange blockbuster grade.\nDemo model does not speak, sing or mouth words.\nNo zoom.\nPhotorealistic. No text, captions, logos or watermarks anywhere.",
+  "seed": 38378,
+  "thumb": {
+   "asset": "face"
+  },
+  "userId": "u_owner",
+  "engineLabel": "Shot · Standard · 768p"
+ },
+ "warnings": [],
+ "engine": {
+  "model": "h3",
+  "name": "MiniMax H3",
+  "provider": "replicate",
+  "ref": "minimax/h3",
+  "resolution": "768P",
+  "perSec": 0.08,
+  "test": true
+ },
+ "runs": [
+  {
+   "id": "mock_3_mw43qrs1",
+   "provider": "mock"
+  }
+ ]
+}

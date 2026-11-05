@@ -1,0 +1,37 @@
+{
+ "quality": "standard",
+ "label": "Shot · Standard · 768p",
+ "resolution": "768p",
+ "seconds": 6,
+ "takes": 2,
+ "mode": "reference",
+ "estimate": 0.96,
+ "priceLine": "about $0.96 · 6 s · 2 takes",
+ "buttonLabel": "Generate · 6 s · $0.96 · 2 takes",
+ "caps": {
+  "perJob": 5,
+  "perDay": 25,
+  "spentToday": 0,
+  "leftToday": 25,
+  "ok": true,
+  "code": null,
+  "message": null
+ },
+ "ok": true,
+ "code": null,
+ "message": null,
+ "warnings": [],
+ "camera": {
+  "moves": [
+   "dolly_in",
+   "rack_focus"
+  ],
+  "guideUsed": false
+ },
+ "prompt": "Demo model is the woman shown in <Image 1>, <Image 2>, <Image 3>, <Image 4> and <Image 5>: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Keep her face, hair, skin, body and proportions exactly as in those images. She never has: tattoos, rings.\nShe wears Dark green cropped tee and drawstring shorts as shown in <Image 6>, <Image 7>, <Image 8> and <Image 9>.\nMorning in a small Paris café. She orders at the counter and turns to the camera with a soft smile.\nCinematography: medium close-up from the chest up, eye-level camera, physical dolly-in toward the subject about 1.5 m, combined with focus racks from the foreground to the subject. Shot with Super 35 digital cinema sensor, filmic highlight roll-off, 40mm lens (natural perspective), anamorphic lens, oval bokeh, horizontal blue lens flares, f/2, shallow depth of field. Soft cross-lighting from two diffused sources. Teal-and-orange blockbuster grade.\nDemo model does not speak, sing or mouth words.\nNo zoom.\nPhotorealistic. No text, captions, logos or watermarks anywhere.",
+ "test": true,
+ "speaking": {
+  "speaking": false,
+  "source": "default"
+ }
+}

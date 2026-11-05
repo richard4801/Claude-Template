@@ -43,6 +43,26 @@ To use a local server (the mock, or `server/api` with `DEV_MODE=true DEV_SEED=tr
 
 Developer settings also include "Fast · beta engine (Viggle)", which flags Fast · beta on or off, and "Next render fails", which demos the refund, Retry and failure notification.
 
+## Video suite (AI suite, plans/suite-ui.md)
+- **Navigation:** the bottom bar's **Studio** tab is the Video suite hub (`ui/screens/suite/`). The centre **+** opens Shot, Character swap, Storyboard, Edit, Photoshoot and New model. Edit is top-level (`Routes.EDIT`), and "Edit video" on a take opens `EditSuiteScreen`. The Camera stage and the owner-only Settings → Connections open workstream 2's screens (`ui/screens/camera/CameraEntry.kt`).
+- **Data:**
+  - `data/Suite.kt` holds the `/v1/suite` types: the catalog, which carries the camera bag's `render` / `name` / `caption` and the 16-move `library`; the estimate; shots; settings.
+  - Every Generate shows the estimate's `buttonLabel`.
+  - Suite shots are ordinary render jobs (`request.engine == "suite"`), so live job events move their result panes.
+  - Members get member-safe copies only (`SuiteRules.memberSafe`).
+- **Screens:**
+  - The hub, with a suite-off state for the owner (SUITE_MODE in Railway → Variables, with Copy) and for members.
+  - Character swap + Recast (up to 4 people), Storyboard, the result states, and the owner's Engines.
+  - Talking, UGC ad and Extend & upscale show as "Coming soon".
+- **Paused:** the Shot builder and the camera bag are built but paused, because the owner asked for a prompt-first composer.
+  - `suite/SuiteCamera.kt` gives any picker the camera as option groups (each option with its render, name and caption), all set to "Auto" by default.
+- **Assets and demo mode:**
+  - The 40 hardware renders ship in `app/src/main/assets/hardware/`.
+  - Demo mode answers the suite from `resources/suite_camera.json` and `suite_demo.json` (the server's own answers) through `data/FakeSuite.kt`.
+- **Tests:**
+  - `Suite*Test`: real server responses in `test/resources/suite/`, the state logic, demo mode end to end, and member safety.
+  - Screenshots: `./gradlew :app:recordRoborazziDebug --tests 'studio.muse.app.SuiteScreenshotTest'` writes `suite_<theme>_<screen>_<390|360>.png`.
+
 ## Video studio stage (owner request 2026-11-05)
 - **New video** starts empty on a server: a dashed "Choose a clip · up to 15s works best · 9:16 · one person" area. "Use the sample clip" and "Preview: what a failing clip looks like" are demo mode's only. Without a clip the Video studio's canvas shows an empty "No clip yet" placeholder.
 - **The canvas is the live output.** Generate keeps you in the Video studio (a toast offers the queue). While the render started there for this clip, model and outfit runs, the canvas shows the clip's first frame (or the model) blurred and softly moving with "Waiting to start" / "#2 in line · about 9 min" / "Rendering · about 2 min", a progress bar, the percent and the price. When it's ready the take plays (muted loop, unmute top right, take switcher 1 · 2 · 3) with **Open**, **Edit video** and **Generate again**; a failed render shows its member-safe reason and **Try again**. The state comes from the live job and take events (`ui/screens/StudioStage.kt`, `StudioStageTest`); picking another clip, model or outfit puts the source and target back.

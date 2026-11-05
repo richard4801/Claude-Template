@@ -1,0 +1,42 @@
+{
+ "id": "jl_6d68a41cdadf",
+ "title": "Café morning",
+ "modelId": "m_demo",
+ "modelName": "Demo model",
+ "outfitId": "",
+ "request": {
+  "mode": "reference",
+  "audio": true,
+  "label": "Shot · Draft · 768p",
+  "takes": 1,
+  "engine": "suite",
+  "prompt": "She waves.",
+  "modelId": "m_demo",
+  "quality": "draft",
+  "seconds": 5,
+  "speaking": false,
+  "keepAudio": true,
+  "takeLabel": "Draft",
+  "aspectRatio": "9:16",
+  "engineLabel": "Shot · Draft · 768p",
+  "speakingSource": "default"
+ },
+ "state": "running",
+ "progress": 0,
+ "take": 1,
+ "step": 0,
+ "totalSteps": 1,
+ "phase": "Waiting to start",
+ "secondsLeft": 0,
+ "totalSeconds": 75,
+ "cost": 0.1,
+ "refunded": 0,
+ "createdAt": 1793916473950,
+ "prompt": "Demo model is the woman shown in <Image 1>, <Image 2>, <Image 3>, <Image 4> and <Image 5>: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Keep her face, hair, skin, body and proportions exactly as in those images. She never has: tattoos, rings.\nShe waves.\nDemo model does not speak, sing or mouth words.\nPhotorealistic. No text, captions, logos or watermarks anywhere.",
+ "seed": 18264,
+ "thumb": {
+  "asset": "face"
+ },
+ "userId": "u_owner",
+ "engineLabel": "Shot · Draft · 768p"
+}

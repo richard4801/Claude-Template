@@ -1,0 +1,214 @@
+import MuseCore
+import SwiftUI
+
+// AI suite (workstream 1): the Video suite screen (Screen.suite). It loads the catalog, shows the suite-off state when the
+// server has it switched off, and otherwise the hub (D1) or the chosen mode; the camera bag opens over it (always dark).
+
+struct SuiteRootView: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    var body: some View {
+        ZStack {
+            content
+            if store.suite.bagOpen {
+                CameraBagView().transition(.opacity)
+            }
+        }
+        .task(id: store.serverKey) { await store.loadSuite() }
+    }
+
+    @ViewBuilder private var content: some View {
+        let s = store.suite
+        if s.catalog == nil {
+            if let err = s.catalogError {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("The Video suite couldn't load").font(t.display(24))
+                    Muted(err, size: 13)
+                    MButton("Try again", icon: "arrow.clockwise", size: .small) { Task { await store.loadSuite(force: true) } }
+                }
+                .padding(36)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        } else if !s.enabled {
+            SuiteOffView()
+        } else {
+            switch s.mode {
+            case .hub: SuiteHubView()
+            case .shot: ShotBuilderView()
+            case .swap: SwapView()
+            case .storyboard: StoryboardView()
+            case .cameraStage: CameraStageView()
+            case .talking, .ugc, .extend: SuiteComingSoonView(mode: s.mode)
+            }
+        }
+    }
+}
+
+/// D1: mode tiles, the camera stage, saved rigs, recent takes and the studio's cast.
+struct SuiteHubView: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 26) {
+                header
+                tiles
+                HStack(alignment: .top, spacing: 28) {
+                    recent.frame(maxWidth: .infinity, alignment: .topLeading)
+                    stage.frame(maxWidth: .infinity, alignment: .topLeading)
+                    cast.frame(width: 260, alignment: .topLeading)
+                }
+            }
+            .padding(.horizontal, 32)
+            .padding(.vertical, 28)
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .bottom, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text((store.user?.studioName ?? "MUSE Studio").uppercased()).font(t.mono(11)).tracking(1.6).foregroundStyle(t.muted)
+                Text("Video suite").font(t.isA ? Fonts.font("Instrument Serif", 56, .regular) : t.display(40))
+                Text("Make a shot, swap your character into a clip, or plan a whole story — with your cast and a real camera.").font(t.body(14)).foregroundStyle(t.muted)
+            }
+            Spacer(minLength: 12)
+            SuiteTestBadge()
+            MButton("New shot · ⌘N", kind: .primary, size: .big) { store.openSuite(.shot) }
+        }
+    }
+
+    private var tiles: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 12)], spacing: 12) {
+            ForEach(SuiteMode.group.filter { $0 != .cameraStage }) { m in
+                Button { store.openSuite(m) } label: { tile(m) }.buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func tile(_ m: SuiteMode) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HardwareImage(name: m.tileRender).frame(height: 128).clipped()
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(m.title).font(t.body(15, .semibold)).lineLimit(1)
+                    Spacer(minLength: 4)
+                    if m.comingSoon { SuiteTag(text: SuiteText.comingSoon) }
+                }
+                Text(m.tileLine).font(t.body(12.5)).foregroundStyle(t.muted).lineLimit(3).fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 96, alignment: .topLeading)
+        }
+        .background(t.surface)
+        .overlay(Rectangle().strokeBorder(t.line, lineWidth: 1))
+        .opacity(m.comingSoon ? 0.82 : 1)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(m.title)\(m.comingSoon ? ", coming soon" : "")")
+    }
+
+    // MARK: Recent takes
+
+    private var recentJobs: [Job] {
+        let suiteJobs = store.jobs.filter { $0.request.engine == "suite" }
+        return Array((suiteJobs.isEmpty ? store.jobs : suiteJobs).sorted { $0.createdAt > $1.createdAt }.prefix(4))
+    }
+
+    private var recent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SuiteSectionHead(title: "Recent takes") { LinkText("See all in Queue →") { store.go(.queue) } }
+            if recentJobs.isEmpty {
+                Muted("Your takes show up here as they render.")
+            } else {
+                HStack(alignment: .top, spacing: 10) {
+                    ForEach(recentJobs) { j in recentTile(j) }
+                }
+            }
+        }
+    }
+
+    private func recentTile(_ j: Job) -> some View {
+        let state = SuiteResultState.of(j)
+        let take = store.takes(of: j).first
+        return Button {
+            if let take { store.openTake(take.id) } else { store.go(.queue) }
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                Color.clear.aspectRatio(9.0 / 16.0, contentMode: .fit)
+                    .overlay(MuseImage(ref: take?.thumb ?? j.thumb).blur(radius: state == .ready ? 0 : 10))
+                    .overlay(overlay(state))
+                    .clipped()
+                Text(j.title.uppercased()).font(t.mono(10)).tracking(0.6).lineLimit(1)
+                stateTag(state)
+            }
+            .frame(maxWidth: 110)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder private func overlay(_ s: SuiteResultState) -> some View {
+        switch s {
+        case .ready: Image(systemName: "play.circle.fill").font(.system(size: 30)).foregroundStyle(.white.opacity(0.9))
+        case .rendering(let p, _): Text("\(p)%").font(t.isA ? Fonts.font("Instrument Serif", 30, .regular) : t.display(24)).foregroundStyle(.white)
+        case .queued: Text(s.queueLine.uppercased()).font(t.mono(9.5)).foregroundStyle(.white).padding(4).background(Color.black.opacity(0.8))
+        case .failed: Text("RETRY FREE").font(t.mono(9.5, .semibold)).foregroundStyle(.white).padding(4).background(t.rec)
+        case .empty: EmptyView()
+        }
+    }
+
+    @ViewBuilder private func stateTag(_ s: SuiteResultState) -> some View {
+        switch s {
+        case .ready: SuiteTag(text: "Ready", color: t.good)
+        case .rendering: SuiteTag(text: "Rendering", color: t.rec)
+        case .queued: SuiteTag(text: s.queueLine)
+        case .failed: SuiteTag(text: "Failed", color: t.rec)
+        case .empty: EmptyView()
+        }
+    }
+
+    // MARK: Camera stage (camera-bag entry points paused for the composer redesign)
+
+    private var stage: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SuiteSectionHead(title: "Camera stage") { LinkText("Open →") { store.openSuite(.cameraStage) } }
+            Muted("Block a shot in Blender, then use it as the camera (Directed mode).")
+        }
+    }
+
+    // MARK: Cast
+
+    private var cast: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SuiteSectionHead(title: "Your cast") { LinkText("+ New model") { store.go(.create) } }
+            if store.suiteCharacters.isEmpty { Muted("Make a model with a character sheet to cast her.") }
+            ForEach(store.suiteCharacters) { m in
+                Button { store.openProfile(m.id) } label: { castRow(m) }.buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func castRow(_ m: MuseModel) -> some View {
+        let faces = m.slot("face")?.image != nil && m.slot("profile")?.image != nil
+        return HStack(alignment: .top, spacing: 10) {
+            MuseImage(ref: m.cover).frame(width: 40, height: 50).clipped()
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(m.name).font(t.body(13.5, .semibold)).lineLimit(1)
+                    Spacer(minLength: 4)
+                    SuiteTag(text: faces ? "Locked" : "Needs close-ups", color: faces ? t.good : t.warn)
+                }
+                HStack(spacing: 2) {
+                    ForEach(m.slots.filter { $0.image != nil }.prefix(7), id: \.key) { s in
+                        MuseImage(ref: s.image).frame(width: 18, height: 22).clipped()
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 6)
+        .overlay(alignment: .bottom) { Rectangle().fill(t.line).frame(height: 1) }
+    }
+}

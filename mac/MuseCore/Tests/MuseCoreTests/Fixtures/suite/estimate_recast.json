@@ -1,0 +1,86 @@
+{
+ "quality": "hd",
+ "label": "Recast · HD · 1080p",
+ "resolution": "1080p",
+ "seconds": 8,
+ "takes": 1,
+ "mode": "recast",
+ "estimate": 3.6,
+ "priceLine": "about $3.60 · 8 s",
+ "buttonLabel": "Generate · 8 s · $3.60",
+ "caps": {
+  "perJob": 5,
+  "perDay": 25,
+  "spentToday": 0.16,
+  "leftToday": 24.84,
+  "ok": true,
+  "code": null,
+  "message": null
+ },
+ "ok": true,
+ "code": null,
+ "message": null,
+ "warnings": [
+  "no single shot in the clip may be longer than 15 s"
+ ],
+ "camera": {
+  "moves": [],
+  "guideUsed": false
+ },
+ "cast": [
+  {
+   "characterId": "m_demo",
+   "who": "the person on the left",
+   "speaking": "no"
+  }
+ ],
+ "keepAudio": true,
+ "prompt": "Recast the source video: replace one person with the characters below. Keep each person’s exact motion, timing, gestures and expressions, the camera, the framing, the background and the lighting of the source video.\nthe person on the left in the source video becomes Demo model, shown in reference photo 1: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. She never has: tattoos, rings.\nDemo model’s mouth follows the source video exactly; she does not speak, sing or mouth words.\nKeep every cut and shot change of the source video at the same moments.\nPhotorealistic. No text, captions, logos or watermarks anywhere.",
+ "test": true,
+ "engine": {
+  "model": "h3-max-recast",
+  "name": "MiniMax H3 Max Recast",
+  "provider": "fal",
+  "ref": "minimax/h3-max/recast",
+  "resolution": "1080P",
+  "perSec": 0.45,
+  "billedPerTake": 8,
+  "licence": {
+   "kind": "hosted",
+   "name": "MiniMax H3 Max (hosted on fal)",
+   "notice": "MiniMax H3"
+  },
+  "notice": "MiniMax H3"
+ },
+ "input": {
+  "negative": null,
+  "params": {},
+  "images": {
+   "middle": [],
+   "refs": [
+    {
+     "label": "person 1 · body, front",
+     "role": "character",
+     "image": {
+      "asset": "g_front"
+     }
+    }
+   ]
+  },
+  "videos": [
+   {
+    "video": {
+     "key": "c/vid_8392473326a6.mp4",
+     "seconds": 8
+    },
+    "use": "source"
+   }
+  ],
+  "audio": null
+ },
+ "tried": [],
+ "speaking": {
+  "speaking": false,
+  "source": "detected"
+ }
+}

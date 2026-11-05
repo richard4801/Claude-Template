@@ -14,6 +14,7 @@ struct SettingsView: View {
                     ForEach(SettingsSection.allCases.filter { !$0.ownerOnly || store.isOwner }, id: \.self) { s in
                         SettingsNavRow(icon: icon(s), title: s.title, on: store.settingsSection == s) { store.settingsSection = s }
                     }
+                    if store.isOwner { SuiteConnectionsRow() } // AI suite (workstream 1): Connections (owner) → ConnectionsView
                 }
                 .frame(width: 220)
                 VStack(alignment: .leading, spacing: 16) { section }
@@ -103,6 +104,7 @@ struct SettingsView: View {
             StudioSettingsSection()
         case .engines:
             EnginesSettingsSection()
+            if store.isOwner { SuiteEnginesPanel(estimate: nil).frame(maxWidth: 560) } // AI suite (workstream 1): D9, the Video suite's engines
         case .prompts:
             PromptsSettingsSection()
         case .archived:

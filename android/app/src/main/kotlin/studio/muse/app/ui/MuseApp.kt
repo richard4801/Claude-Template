@@ -54,6 +54,8 @@ import androidx.compose.ui.graphics.drawscope.rotate as drawRotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
@@ -102,7 +104,7 @@ object Routes {
     const val PROMPT_SCRIPT = "promptscript/{id}"
     fun promptScript(id: String) = "promptscript/$id"
     const val TEMPLATES = "templates"; const val TEMPLATE = "template/{id}"; const val TEMPLATE_USE = "template/{id}/use"; const val SAVE_TEMPLATE = "savetemplate/{id}"
-    val TABS = setOf(HOME, GALLERY, QUEUE, SETTINGS)
+    val TABS = setOf(HOME, GALLERY, QUEUE, SETTINGS, SUITE)
     fun result(id: String) = "result/$id"
     fun template(id: String) = "template/$id"
     fun prompt(key: String) = "prompt/$key"
@@ -112,6 +114,14 @@ object Routes {
     /** The on-device video editor (plans/video-editor.md). */
     const val EDIT_VIDEO = "editvideo/{id}"
     fun editVideo(takeId: String) = "editvideo/$takeId"
+    // AI suite (workstream 1): the Video suite and its modes; Edit top-level (workstream 3); the camera stage and Connections (workstream 2).
+    const val SUITE = "suite"; const val SUITE_SHOT = "suite/shot"; const val SUITE_SWAP = "suite/swap"; const val SUITE_STORYBOARD = "suite/storyboard"
+    const val SUITE_CAMERA = "suite/camera/{tab}"; const val SUITE_TAKE = "suite/take/{id}"; const val SUITE_ENGINES = "suite/engines"; const val SUITE_SOON = "suite/soon/{mode}"
+    fun suiteCamera(tab: String) = "suite/camera/$tab"
+    fun suiteTake(jobId: String) = "suite/take/$jobId"
+    fun suiteSoon(mode: String) = "suite/soon/$mode"
+    const val CAMERA_STAGE = "camera-stage"; const val EDIT = "edit"; const val EDIT_TAKE = "edit/{id}"; const val CONNECTIONS = "connections"
+    fun editTake(takeId: String) = "edit/$takeId"
 }
 
 /** Navigation helpers (the prototype's go/back/tab). */
@@ -210,7 +220,21 @@ fun MuseApp(
                     composable(Routes.SOURCE) { SourceScreen() }
                     composable(Routes.DIRECT) { DirectScreen() }
                     composable(Routes.RESULT) { e -> ResultScreen(e.arguments?.getString("id") ?: "") }
-                    composable(Routes.EDIT_VIDEO) { e -> VideoEditorScreen(e.arguments?.getString("id") ?: "") }
+                    // "Edit video" on a take opens the Edit suite (workstream 3).
+                    composable(Routes.EDIT_VIDEO) { e -> studio.muse.app.ui.screens.edit.EditSuiteScreen(e.arguments?.getString("id"), onBack = { n.back() }) }
+                    // AI suite (workstream 1)
+                    composable(Routes.SUITE) { studio.muse.app.ui.screens.suite.SuiteHubScreen() }
+                    composable(Routes.SUITE_SHOT) { studio.muse.app.ui.screens.suite.SuiteShotScreen() }
+                    composable(Routes.SUITE_SWAP) { studio.muse.app.ui.screens.suite.SuiteSwapScreen() }
+                    composable(Routes.SUITE_STORYBOARD) { studio.muse.app.ui.screens.suite.SuiteStoryboardScreen() }
+                    composable(Routes.SUITE_CAMERA) { e -> studio.muse.app.ui.screens.suite.CameraBagScreen(e.arguments?.getString("tab") ?: "Body") }
+                    composable(Routes.SUITE_TAKE) { e -> studio.muse.app.ui.screens.suite.SuiteResultScreen(e.arguments?.getString("id") ?: "") }
+                    composable(Routes.SUITE_ENGINES) { studio.muse.app.ui.screens.suite.SuiteEnginesScreen() }
+                    composable(Routes.SUITE_SOON) { e -> studio.muse.app.ui.screens.suite.SuiteSoonScreen(e.arguments?.getString("mode") ?: "") }
+                    composable(Routes.CAMERA_STAGE) { studio.muse.app.ui.screens.camera.CameraStageScreen() }
+                    composable(Routes.EDIT) { studio.muse.app.ui.screens.edit.EditSuiteScreen(null, onBack = { n.back() }) }
+                    composable(Routes.EDIT_TAKE) { e -> studio.muse.app.ui.screens.edit.EditSuiteScreen(e.arguments?.getString("id"), onBack = { n.back() }) }
+                    composable(Routes.CONNECTIONS) { studio.muse.app.ui.screens.camera.ConnectionsScreen(onBack = { n.back() }) }
                     composable(Routes.LORA) { LoraScreen() }
                     composable(Routes.ACCOUNTS) { AccountsScreen() }
                     composable(Routes.POST) { e -> PostScreen(e.arguments?.getString("id") ?: "") }
@@ -350,13 +374,13 @@ private fun BoxScope.ConfettiLayer(bursts: MutableList<Long>) {
     })
 }
 
-/** Bottom bar: Home · Gallery · + · Queue · You. Same in every theme. + opens a menu. */
+/** Bottom bar: Home · Studio (the Video suite) · + · Queue · You. Same in every theme. + opens the create menu. */
 @Composable
 fun BoxScope.TabBar(active: String) {
     val m = muse
     val nav = LocalNav.current
     var plus by remember { mutableStateOf(false) }
-    val items = listOf(Triple("home", "Home", Routes.HOME), Triple("grid", "Gallery", Routes.GALLERY), Triple("plus", "", ""), Triple("queue", "Queue", Routes.QUEUE), Triple("user", "You", Routes.SETTINGS))
+    val items = listOf(Triple("home", "Home", Routes.HOME), Triple("studio", "Studio", Routes.SUITE), Triple("plus", "", ""), Triple("queue", "Queue", Routes.QUEUE), Triple("user", "You", Routes.SETTINGS))
     val bg = when { m.isA -> m.t.bg; m.isB -> Color(0xFF0B0C0D); m.isD -> Color.White; else -> m.t.surface }
     Column(
         Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(bg).drawBehind {
@@ -370,11 +394,15 @@ fun BoxScope.TabBar(active: String) {
                         val shape = RoundedCornerShape(if (m.isA) 2.dp else 999.dp)
                         Box(
                             Modifier.size(50.dp).let { if (m.isD) it.hardShadow(3.dp, 999.dp) else it }.clip(shape).background(m.t.cta)
-                                .let { if (m.isD) it.border(2.5.dp, Ink, shape) else it }.press { plus = true },
+                                .let { if (m.isD) it.border(2.5.dp, Ink, shape) else it }.press { plus = true }
+                                .semantics { contentDescription = "Create" },
                             contentAlignment = Alignment.Center,
                         ) { Ic("plus", 24.dp, m.t.ctaInk) }
                         MuseMenu(plus, { plus = false }, listOf(
-                            MenuItem("studio", "New video") { nav.go(Routes.SOURCE) },
+                            MenuItem("studio", "Shot") { nav.go(Routes.SUITE_SHOT) },
+                            MenuItem("model", "Character swap") { nav.go(Routes.SUITE_SWAP) },
+                            MenuItem("grid", "Storyboard") { nav.go(Routes.SUITE_STORYBOARD) },
+                            MenuItem("retry", "Edit") { nav.go(Routes.EDIT) },
                             MenuItem("camera", "Photoshoot") { nav.go(Routes.SHOOT) },
                             MenuItem("model", "New model") { nav.go(Routes.CREATE1) },
                         ))

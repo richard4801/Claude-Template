@@ -127,6 +127,12 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
         }
     }
 
+    // AI suite (workstream 1): the JSON round trip for Suite/SuiteHTTP.swift.
+    func suiteCall<T: Decodable>(_ method: String, _ path: String, body: Data? = nil) async throws -> T {
+        try decode(try await send(request(method, path, body: body)))
+    }
+    // End AI suite (workstream 1)
+
     /// Server image paths ("/files/x.jpg") become absolute so the app can load them.
     func absolutize(_ ref: ImageRef) -> ImageRef {
         guard let u = ref.url, u.hasPrefix("/") else { return ref }

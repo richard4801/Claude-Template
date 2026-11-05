@@ -135,9 +135,10 @@ data class ClipMeta(val name: String, val durationSec: Double, val width: Int, v
 @Serializable
 data class JobRequest(
     val title: String = "Untitled",
-    val modelId: String,
-    val outfitId: String,
-    val clipId: String,
+    // AI suite (workstream 1): suite jobs (engine "suite") may have no character, outfit or clip, so these default to "".
+    val modelId: String = "",
+    val outfitId: String = "",
+    val clipId: String = "",
     val engine: String = Engine.H3.id,
     val steps: Int = 10,
     val use: String = ClipUse.FIRST.id,
@@ -155,6 +156,9 @@ data class JobRequest(
     val pricePerSec: Double? = null,
     /** Prompt scripts (workstream 4): the studio's "Performer is speaking" switch; null = the clip's detection. */
     val speaking: Boolean? = null,
+    /** AI suite (workstream 1), set by the server on suite jobs: text | image | reference | swap | recast, and the seconds each take renders. */
+    val mode: String? = null,
+    val seconds: Double? = null,
 ) {
     fun spec() = RenderSpec(Engine.fromId(engine), ClipUse.fromId(use), steps, lipSync, takes, clipSeconds, Quality.fromId(quality), pricePerSec)
 }

@@ -1,0 +1,76 @@
+{
+ "enabled": false,
+ "test": false,
+ "defaultQuality": "draft",
+ "tiers": [
+  {
+   "id": "draft",
+   "label": "Draft",
+   "detail": "Quick preview",
+   "available": false,
+   "resolution": null,
+   "fromPerSec": null,
+   "maxSeconds": null,
+   "canKeyframes": false,
+   "canReferences": false,
+   "canGuide": false,
+   "models": []
+  },
+  {
+   "id": "standard",
+   "label": "Standard",
+   "detail": "Everyday quality",
+   "available": false,
+   "resolution": null,
+   "fromPerSec": null,
+   "maxSeconds": null,
+   "canKeyframes": false,
+   "canReferences": false,
+   "canGuide": false,
+   "models": []
+  },
+  {
+   "id": "hd",
+   "label": "HD",
+   "detail": "Sharper, for posting",
+   "available": false,
+   "resolution": null,
+   "fromPerSec": null,
+   "maxSeconds": null,
+   "canKeyframes": false,
+   "canReferences": false,
+   "canGuide": false,
+   "models": []
+  },
+  {
+   "id": "cinema",
+   "label": "Cinema",
+   "detail": "Best camera work and detail",
+   "available": false,
+   "resolution": null,
+   "fromPerSec": null,
+   "maxSeconds": null,
+   "canKeyframes": false,
+   "canReferences": false,
+   "canGuide": false,
+   "models": []
+  }
+ ],
+ "modes": [
+  "text",
+  "image",
+  "reference",
+  "swap",
+  "recast"
+ ],
+ "recastMaxPeople": 4,
+ "aspectRatios": [
+  "9:16",
+  "16:9",
+  "1:1",
+  "4:3",
+  "3:4",
+  "21:9"
+ ],
+ "takesMax": 4
+}

@@ -83,6 +83,9 @@ struct Shell: View {
         case .templates: TemplatesView()
         case .template: TemplateDetailView()
         case .editor: VideoEditorView()
+        // AI suite (workstream 1): the Video suite and the top-level Edit.
+        case .suite: SuiteRootView()
+        case .edit: EditSuiteView(takeId: store.suite.editTakeId)
         }
     }
 }
@@ -120,6 +123,7 @@ struct ThemeDots: View {
                 }
                 .buttonStyle(.plain)
                 .help(id.name)
+                .accessibilityLabel("Theme: \(id.name)\(on ? ", selected" : "")")
             }
         }
         .padding(.horizontal, 8)
@@ -206,6 +210,7 @@ struct TitleBar: View {
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .frame(width: 34, height: 34)
+                .accessibilityLabel("Account: \(store.user?.email ?? "signed in")")
             }
         }
         .padding(.leading, 18)
@@ -229,12 +234,18 @@ struct Sidebar: View {
             ForEach(NavItem.main) { item in
                 let q = store.activeJobs.count
                 NavRow(icon: item.icon, title: item.title, on: store.screen.navParent == item.screen, compact: compact,
-                       trailing: item.screen == .queue && q > 0 ? .count(q) : .key("⌘\(item.key)")) { store.go(item.screen) }
+                       trailing: item.screen == .queue && q > 0 ? .count(q) : .key("⌘\(item.key)")) {
+                    // AI suite (workstream 1): Video suite opens its hub.
+                    if item.screen == .suite { store.openSuite(.hub) } else { store.go(item.screen) }
+                }
+                // AI suite (workstream 1): the Video suite's modes under it; Edit is top level after Photoshoot.
+                if item.screen == .suite && !compact { SuiteNavGroup() }
                 if item.screen == .shoot {
                     // Photoshoot → Templates
                     NavRow(icon: "square.on.square.dashed", title: "Templates", on: store.screen.navParent == .templates, compact: compact,
                            trailing: .key("⇧⌘T")) { store.openTemplates() }
                         .padding(.leading, compact ? 0 : 14)
+                    NavRow(icon: "scissors", title: "Edit", on: store.screen.navParent == .edit, compact: compact, trailing: .none) { store.openEdit() } // AI suite (workstream 1)
                 }
             }
             if !compact {
@@ -402,7 +413,8 @@ struct ToastView: View {
                             store.toast = nil
                             toast.action?()
                         } label: {
-                            Text(label).font(t.body(13.5, .semibold)).foregroundStyle(t.isD ? t.pink : t.accent)
+                            // The toast's own text colour, bold and underlined: it clears 4.5:1 on the toast in every theme.
+                            Text(label).font(t.body(13.5, .bold)).underline().foregroundStyle(t.bg)
                         }
                         .buttonStyle(.plain)
                     }

@@ -1,0 +1,79 @@
+{
+ "job": {
+  "id": "jl_6d68a41cdadf",
+  "title": "Café morning",
+  "modelId": "m_demo",
+  "modelName": "Demo model",
+  "outfitId": "",
+  "request": {
+   "mode": "reference",
+   "audio": true,
+   "label": "Shot · Draft · 768p",
+   "takes": 1,
+   "engine": "suite",
+   "prompt": "She waves.",
+   "modelId": "m_demo",
+   "quality": "draft",
+   "seconds": 5,
+   "speaking": false,
+   "keepAudio": true,
+   "takeLabel": "Draft",
+   "aspectRatio": "9:16",
+   "engineLabel": "Shot · Draft · 768p",
+   "speakingSource": "default"
+  },
+  "state": "done",
+  "progress": 100,
+  "take": 1,
+  "step": 1,
+  "totalSteps": 1,
+  "phase": "Done",
+  "secondsLeft": 0,
+  "totalSeconds": 75,
+  "cost": 0.1,
+  "refunded": 0,
+  "createdAt": 1793916473950,
+  "finishedAt": 1793916479465,
+  "prompt": "Demo model is the woman shown in <Image 1>, <Image 2>, <Image 3>, <Image 4> and <Image 5>: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Keep her face, hair, skin, body and proportions exactly as in those images. She never has: tattoos, rings.\nShe waves.\nDemo model does not speak, sing or mouth words.\nPhotorealistic. No text, captions, logos or watermarks anywhere.",
+  "seed": 18264,
+  "thumb": {
+   "asset": "face"
+  },
+  "userId": "u_owner",
+  "engineLabel": "Shot · Draft · 768p",
+  "billedSeconds": 5
+ },
+ "warnings": [],
+ "engine": {
+  "model": "h3-lite",
+  "name": "MiniMax H3 Lite",
+  "provider": "replicate",
+  "ref": "minimax/h3-lite",
+  "resolution": "768P",
+  "perSec": 0.02,
+  "test": true
+ },
+ "runs": [
+  {
+   "id": "mock_1_mw43ju7m",
+   "key": "s/jl_6d68a41cdadf/take_1.mp4",
+   "done": true,
+   "billed": 5,
+   "output": {
+    "fps": 24,
+    "key": "s/jl_6d68a41cdadf/take_1.mp4",
+    "name": "take_1.mp4",
+    "bytes": 126164,
+    "thumb": {
+     "url": "http://127.0.0.1:8798/uploads/s/jl_6d68a41cdadf/take_1.jpg"
+    },
+    "width": 180,
+    "height": 320,
+    "sha256": "0f778fe9e06246f0395d9a4ea9628f7b7b89af443e094e1a62fb098fe53f4e9e",
+    "contentType": "video/mp4",
+    "durationSec": 5
+   },
+   "provider": "mock"
+  }
+ ]
+}
