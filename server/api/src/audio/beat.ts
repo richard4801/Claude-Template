@@ -1,70 +1,50 @@
 // Beat-only audio (plans/prompt-scripts.md §6): for a shot with no motion source where the user's music should drive
 // the rhythm but nobody sings or speaks, the vocals are separated out and only the instrumental is sent to the video
 // model as reference audio (with "move to the beat; do not sing or mouth lyrics"). Runs only when the user generates,
-// on Replicate (a Demucs build, MIT-licensed code), billed with the job. The AI suite (workstream 1) calls this.
+// billed with the job. The separation is the editor's (workstream 3) `EditorProvider.separate(…, 'no_vocals')`: one
+// Replicate adapter for both, switched by EDITOR_AI_PROVIDER (mock by default: no provider call, the source is used).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import type { Ctx } from '../ctx.js';
-import { ReplicateError, type Prediction } from '../replicate/client.js';
+import { makeProvider, rmQuiet, type EditorProvider } from '../editor/providers.js';
 import { putFile } from '../storage/objects.js';
-import { predictionError } from '../services/replicateVideo.js';
 
-export type BeatOnly = { instrumentalKey: string; costUsd: number; predictionId: string; seconds: number | null };
-type Deps = Pick<Ctx, 'replicate' | 'storage' | 'db' | 'config' | 'log'>;
-
-/** The instrumental in a finished separation: a no-vocals stem, or null (then the other stems are mixed). */
-export function instrumentalOf(output: unknown): { url: string | null; stems: string[] } {
-  if (!output || typeof output !== 'object' || Array.isArray(output)) return { url: null, stems: [] };
-  const o = output as Record<string, unknown>;
-  const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
-  for (const k of ['no_vocals', 'accompaniment', 'instrumental', 'other_than_vocals']) if (str(o[k])) return { url: str(o[k]), stems: [] };
-  return { url: null, stems: Object.entries(o).filter(([k, v]) => k !== 'vocals' && str(v)).map(([, v]) => v as string) };
-}
+export type BeatOnly = {
+  /** The instrumental in storage (audio only, AAC). The source itself when the provider is the mock (`separated: false`). */
+  instrumentalKey: string; separated: boolean;
+  costUsd: number; predictionId: string | null; seconds: number | null;
+};
 
 function ffmpeg(bin: string, args: string[]) {
   return new Promise<void>((resolve, reject) => execFile(bin, args, { timeout: 5 * 60_000 }, (e, _o, err) => (e ? reject(new Error(`ffmpeg failed: ${String(err).slice(-300)}`)) : resolve())));
 }
 
 /**
- * Separates the vocals from `audioKey` (any audio or video file in storage) and stores the instrumental as an AAC
- * file next to it. Throws a ReplicateError (the caller fails the job with its usual member-safe message).
+ * Separates the vocals from `audioKey` (any audio or video file in storage) and stores the instrumental as
+ * `r/<jobId>/instrumental.m4a`. Throws the provider's ReplicateError (the caller fails the job with its usual
+ * member-safe message). `durationSec` sizes the provider's timeout; `provider` is for tests.
  */
-export async function beatOnlyAudio(ctx: Deps, o: { studioId: string; userId?: string | null; jobId: string; audioKey: string; cancelled?: () => boolean }): Promise<BeatOnly> {
-  const c = ctx.config;
-  const version = c.AUDIO_SEPARATION_VERSION || (await ctx.replicate.latestVersion(c.AUDIO_SEPARATION_MODEL));
-  if (!version) throw new ReplicateError(`The vocal separation model ${c.AUDIO_SEPARATION_MODEL} isn't available`, 'unavailable');
-  const extra = (() => { try { return JSON.parse(c.AUDIO_SEPARATION_INPUT) as Record<string, unknown>; } catch { return {}; } })();
-  const url = await ctx.storage.presignGet(o.audioKey, c.REPLICATE_INPUT_URL_TTL_SEC);
-  const input = { ...extra, [c.AUDIO_SEPARATION_AUDIO_FIELD]: url };
-  const p = await ctx.replicate.create(c.AUDIO_SEPARATION_MODEL, input, { version, maxWaitMs: c.REPLICATE_MAX_RATE_WAIT_SEC * 1000, cancelled: o.cancelled });
-  const done: Prediction = p.status === 'succeeded' || p.status === 'failed' || p.status === 'canceled' ? p
-    : await ctx.replicate.wait(p.id, { pollMs: Math.min(c.REPLICATE_POLL_MS, 2000), timeoutMs: 10 * 60_000, cancelled: o.cancelled });
-  if (done.status === 'failed') throw predictionError(done);
-  if (done.status === 'canceled') throw new ReplicateError('The vocal separation was cancelled', 'cancelled');
-  const found = instrumentalOf(done.output);
-  if (!found.url && !found.stems.length) throw new ReplicateError('The vocal separation returned no instrumental', 'failed');
+export async function beatOnlyAudio(ctx: Ctx, o: {
+  studioId: string; userId?: string | null; jobId: string; audioKey: string; durationSec?: number; cancelled?: () => boolean; provider?: EditorProvider;
+}): Promise<BeatOnly> {
+  const provider = o.provider ?? makeProvider(ctx);
+  const url = await ctx.storage.presignGet(o.audioKey, ctx.config.REPLICATE_INPUT_URL_TTL_SEC);
+  let predictionId: string | null = null;
+  const r = await provider.separate(url, o.durationSec ?? 30, { cancelled: o.cancelled ?? (() => false), onPrediction: id => { predictionId = id; } }, 'no_vocals');
+  const costUsd = (r.gpuSec ?? 0) * provider.rates.separate;
+  if (!r.file) return { instrumentalKey: o.audioKey, separated: false, costUsd, predictionId, seconds: r.gpuSec };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-beat-'));
   try {
-    const files: string[] = [];
-    for (const [i, u] of (found.url ? [found.url] : found.stems).entries()) {
-      const f = path.join(tmp, `stem_${i}`);
-      await ctx.replicate.download(u, f);
-      files.push(f);
-    }
-    // Audio only (never video): one stem is converted to AAC, several are mixed into one.
+    // Audio only (never video): the stem converted to AAC.
     const out = path.join(tmp, 'instrumental.m4a');
-    const args = ['-y', '-v', 'error', ...files.flatMap(f => ['-i', f])];
-    if (files.length > 1) args.push('-filter_complex', `amix=inputs=${files.length}:normalize=0`);
-    args.push('-vn', '-c:a', 'aac', '-b:a', '192k', out);
-    await ffmpeg(c.FFMPEG_PATH, args);
+    await ffmpeg(ctx.config.FFMPEG_PATH, ['-y', '-v', 'error', '-i', r.file, '-vn', '-c:a', 'aac', '-b:a', '192k', out]);
     const key = `r/${o.jobId}/instrumental.m4a`;
     await putFile(ctx, { key, file: out, studioId: o.studioId, kind: 'output', userId: o.userId ?? null, contentType: 'audio/mp4' });
-    const secs = Number(done.metrics?.predict_time);
-    const costUsd = Number.isFinite(secs) && secs > 0 ? secs * c.AUDIO_SEPARATION_PRICE_PER_SEC : c.AUDIO_SEPARATION_ESTIMATE;
-    return { instrumentalKey: key, costUsd, predictionId: done.id, seconds: Number.isFinite(secs) ? secs : null };
+    return { instrumentalKey: key, separated: true, costUsd, predictionId, seconds: r.gpuSec };
   } finally {
+    rmQuiet(r.file);
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 }

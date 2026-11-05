@@ -10,7 +10,8 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { decodeAudio, detectTalking, soundRanges } from '../src/audio/detect.js';
 import { audioIdle } from '../src/audio/service.js';
-import { beatOnlyAudio, instrumentalOf } from '../src/audio/beat.js';
+import { beatOnlyAudio } from '../src/audio/beat.js';
+import { MockProvider, ReplicateProvider } from '../src/editor/providers.js';
 import { makeApp, people, demoModel, until, type Client } from './helpers.js';
 import { musicLike, silence, speechLike, writeWav } from './audioSignals.js';
 
@@ -185,22 +186,27 @@ describe.skipIf(!hasFfmpeg)('lip-sync fix: speaking decides what the model hears
     expect(row!.prompt).toContain("<Subject 2>'s mouth follows <Video 1> exactly; she does not speak, sing or mouth words.");
   });
 
-  it('beat-only audio: separates the vocals and stores the instrumental (audio only), priced from the run time', async () => {
+  it('beat-only audio: the editor separator (no_vocals) gives the instrumental, stored audio-only and priced from GPU time', async () => {
     const key = 'c/beat_source.wav';
     writeWav(path.join(a.dir, key), musicLike(3, 5, true));
-    const r = await beatOnlyAudio(a.ctx, { studioId: 's', jobId: 'jbeat', audioKey: key });
+    const provider = new ReplicateProvider(a.ctx);
+    const r = await beatOnlyAudio(a.ctx, { studioId: 's', jobId: 'jbeat', audioKey: key, durationSec: 3, provider });
     const p = fake.state.creates.at(-1)!;
     expect(p).toMatchObject({ model: 'ryan5453/demucs', version: 'v_demucs' });
-    expect(p.input).toMatchObject({ model: 'htdemucs', stem: 'vocals' });
+    expect(p.input).toMatchObject({ stem: 'vocals' });
     expect(p.input.audio).toMatch(/beat_source\.wav/);
-    expect(r).toMatchObject({ instrumentalKey: 'r/jbeat/instrumental.m4a', seconds: 6 });
-    expect(r.costUsd).toBeCloseTo(6 * 0.00115, 9);
-    const out = probe(path.join(a.dir, r.instrumentalKey));
-    expect(out.streams.map(s => s.codec_type)).toEqual(['audio']);
-    // A separator that returns four stems: everything but the vocals is mixed.
+    expect(r).toMatchObject({ instrumentalKey: 'r/jbeat/instrumental.m4a', separated: true, seconds: 6, predictionId: p.id });
+    expect(r.costUsd).toBeCloseTo(6 * provider.rates.separate, 9);
+    expect(probe(path.join(a.dir, r.instrumentalKey)).streams.map(s => s.codec_type)).toEqual(['audio']);
+    // A separator that returns four stems: the accompaniment stem ("other") is used.
     fake.state.demucsOutput = 'stems';
-    const r2 = await beatOnlyAudio(a.ctx, { studioId: 's', jobId: 'jbeat2', audioKey: key });
+    const r2 = await beatOnlyAudio(a.ctx, { studioId: 's', jobId: 'jbeat2', audioKey: key, durationSec: 3, provider });
     expect(probe(path.join(a.dir, r2.instrumentalKey)).streams.map(s => s.codec_type)).toEqual(['audio']);
+    // The mock (EDITOR_AI_PROVIDER unset): no provider call, the source is used as is.
+    const before = fake.state.creates.length;
+    const m = await beatOnlyAudio(a.ctx, { studioId: 's', jobId: 'jbeat3', audioKey: key, durationSec: 3, provider: new MockProvider(1) });
+    expect(m).toMatchObject({ instrumentalKey: key, separated: false });
+    expect(fake.state.creates.length).toBe(before);
   }, 60_000);
 });
 
@@ -217,10 +223,3 @@ describe('sound ranges (for the editor\'s silence cuts)', () => {
   });
 });
 
-describe('beat-only output parsing', () => {
-  it('finds the no-vocals stem, else lists the other stems', () => {
-    expect(instrumentalOf({ vocals: 'v', no_vocals: 'nv' })).toEqual({ url: 'nv', stems: [] });
-    expect(instrumentalOf({ vocals: 'v', drums: 'd', bass: 'b', other: 'o' })).toEqual({ url: null, stems: ['d', 'b', 'o'] });
-    expect(instrumentalOf('x')).toEqual({ url: null, stems: [] });
-  });
-});
