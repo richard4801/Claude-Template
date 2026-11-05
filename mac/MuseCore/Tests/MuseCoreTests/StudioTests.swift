@@ -264,7 +264,7 @@ final class StudioTests: XCTestCase {
         let api = FakeMuseAPI(speed: 0, genDelay: 0)
         _ = try await api.signIn(SignInRequest(email: "jen@studio.com", password: "x"))
         let b0 = await api.balance()
-        let shots = try await api.shoot(ShootRequest(modelId: SampleData.sienna, outfitId: SampleData.green, scene: "Kitchen", prompt: "p"))
+        let shots = try await api.shoot(ShootRequest(modelId: SampleData.demo, outfitId: SampleData.green, scene: "Kitchen", prompt: "p"))
         let b1 = await api.balance()
         XCTAssertEqual(b0.balance - b1.balance, PhotoPricing.standard.shoot(), accuracy: 1e-9)
         XCTAssertEqual(shots.reduce(0) { $0 + $1.cost }, PhotoPricing.standard.shoot(), accuracy: 1e-9)

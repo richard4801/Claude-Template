@@ -29,6 +29,7 @@ struct SettingsView: View {
         case .costs: return "dollarsign.circle"
         case .studio: return "building.2"
         case .engines: return "server.rack"
+        case .archived: return "archivebox"
         case .notif: return "bell"
         case .developer: return "hammer"
         case .about: return "info.circle"
@@ -100,6 +101,8 @@ struct SettingsView: View {
             StudioSettingsSection()
         case .engines:
             EnginesSettingsSection()
+        case .archived:
+            ArchivedModelsSection()
         case .notif:
             H2("Notifications")
             ListBox {

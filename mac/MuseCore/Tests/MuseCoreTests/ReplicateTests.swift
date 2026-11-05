@@ -294,13 +294,13 @@ final class ReplicateTests: XCTestCase {
     func testDemoBackendRunsReplicateJobs() async throws {
         let api: any MuseAPI = FakeMuseAPI(speed: 0)
         let clip = try await api.uploadClip(SampleData.sampleMeta, file: nil)
-        var lip = JobRequest.replicate(title: "t", modelId: SampleData.sienna, outfitId: SampleData.green, clipId: clip.id, quality: .standard)
+        var lip = JobRequest.replicate(title: "t", modelId: SampleData.demo, outfitId: SampleData.green, clipId: clip.id, quality: .standard)
         lip.lipSync = true
         do {
             _ = try await api.createJob(lip)
             XCTFail("lip sync is Edit only")
         } catch let e as ApiError { XCTAssertEqual(e.code, "bad_request") }
-        var req = JobRequest.replicate(title: "t", modelId: SampleData.sienna, outfitId: SampleData.green, clipId: clip.id, quality: .standard, clipSeconds: clip.durationSec)
+        var req = JobRequest.replicate(title: "t", modelId: SampleData.demo, outfitId: SampleData.green, clipId: clip.id, quality: .standard, clipSeconds: clip.durationSec)
         req.use = "first"
         let j = try await api.createJob(req)
         XCTAssertEqual(j.request.use, "full")
@@ -310,7 +310,7 @@ final class ReplicateTests: XCTestCase {
         XCTAssertTrue(s.features.replicate)
         XCTAssertEqual(s.features.video?.defaultOption, .draft)
         // A replicate request without quality is Draft: 9.4 s → 10 s × $0.02.
-        var noQuality = JobRequest.replicate(title: "t", modelId: SampleData.sienna, outfitId: SampleData.green, clipId: clip.id, quality: .hd, clipSeconds: clip.durationSec)
+        var noQuality = JobRequest.replicate(title: "t", modelId: SampleData.demo, outfitId: SampleData.green, clipId: clip.id, quality: .hd, clipSeconds: clip.durationSec)
         noQuality.quality = nil
         let d = try await api.createJob(noQuality)
         XCTAssertEqual(d.request.quality, "draft")

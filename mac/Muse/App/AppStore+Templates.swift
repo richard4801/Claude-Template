@@ -174,8 +174,9 @@ extension AppStore {
             notEnough("for a shoot")
             return
         }
-        let req = ShootRequest.template(t.id, modelId: m.id, outfitId: o.id, direction: templateDirection, shuffleSeed: templateShuffle,
+        var req = ShootRequest.template(t.id, modelId: m.id, outfitId: o.id, direction: templateDirection, shuffleSeed: templateShuffle,
                                         lockSeed: templateLockLook, productImage: t.acceptsProduct ? templateProduct : nil)
+        req.models = shootOverrides
         withAnimation { shootState = .busy }
         perform { [self] in
             do {

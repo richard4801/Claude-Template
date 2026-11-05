@@ -93,10 +93,10 @@ final class ApiServerTests: XCTestCase {
         XCTAssertEqual(w0.role, "member")
         XCTAssertNil(w0.availableToSend)
         let models = try await member.listModels()
-        let sienna = try XCTUnwrap(models.first { $0.name == "Sienna Vale" })
+        let demoModel = try XCTUnwrap(models.first { $0.isLocked })
         let clip = try await member.uploadClip(SampleData.sampleMeta, file: nil)
         XCTAssertTrue(clip.ok)
-        let req = JobRequest(title: "Member test", modelId: sienna.id, outfitId: sienna.outfitIds[0], clipId: clip.id, engine: "viggle", steps: 4)
+        let req = JobRequest(title: "Member test", modelId: demoModel.id, outfitId: demoModel.outfitIds[0], clipId: clip.id, engine: "viggle", steps: 4)
         await expect("insufficient_tokens") { _ = try await member.createJob(req) }
         XCTAssertEqual(ApiError("insufficient_tokens", "server text").friendlyMessage, "Not enough credit. Ask the studio owner for more.")
         await expect("owner_only") { _ = try await member.listMembers() }

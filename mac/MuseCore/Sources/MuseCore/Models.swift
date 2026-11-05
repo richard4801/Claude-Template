@@ -95,7 +95,7 @@ public struct SignUpRequest: Codable, Sendable {
     }
 }
 
-/// One of the 6 character-sheet slots. source: "upload" (yours) or "generated" (AI).
+/// One of the 7 character-sheet slots. source: "upload" (yours) or "generated" (AI).
 public struct SheetSlot: Codable, Hashable, Sendable {
     public var key: String
     public var image: ImageRef?
@@ -134,9 +134,14 @@ public struct MuseModel: Codable, Hashable, Sendable, Identifiable {
     /// Optional profile fields (plans/api.md: "Model also carries optional { personality, notes }").
     public var personality: String
     public var notes: String
+    /// Archived models vanish from every list and picker; the owner restores them in Settings → Archived models.
+    public var archived: Bool
+    public var archivedAt: Int64?
 
     public init(id: String, name: String, age: Int = 24, niche: String, look: String = "", neverAdd: [String] = [], slots: [SheetSlot] = [],
-                outfitIds: [String] = [], personality: String = "", notes: String = "") {
+                outfitIds: [String] = [], personality: String = "", notes: String = "", archived: Bool = false, archivedAt: Int64? = nil) {
+        self.archived = archived
+        self.archivedAt = archivedAt
         self.id = id
         self.name = name
         self.age = age
@@ -149,7 +154,7 @@ public struct MuseModel: Codable, Hashable, Sendable, Identifiable {
         self.notes = notes
     }
 
-    enum CodingKeys: String, CodingKey { case id, name, age, niche, look, neverAdd, slots, outfitIds, personality, notes }
+    enum CodingKeys: String, CodingKey { case id, name, age, niche, look, neverAdd, slots, outfitIds, personality, notes, archived, archivedAt }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -162,10 +167,16 @@ public struct MuseModel: Codable, Hashable, Sendable, Identifiable {
         outfitIds = c.v(.outfitIds, [])
         personality = c.v(.personality, "")
         notes = c.v(.notes, "")
+        archived = c.v(.archived, false)
+        archivedAt = c.o(.archivedAt) ?? (c.o(.archivedAt) as Double?).map { Int64($0) }
     }
 
+    /// The sheet's filled slots (what Enhance and Dress up work on).
+    public var filledSlots: [SheetSlot] { slots.filter { $0.image != nil && !$0.busy } }
+
     public var filled: Int { slots.filter { $0.image != nil && !$0.busy }.count }
-    public var isLocked: Bool { filled == 6 }
+    /// All six core slots filled (the face ¾ close-up is optional).
+    public var isLocked: Bool { SheetAngle.core.allSatisfy { k in slots.contains { $0.key == k.rawValue && $0.image != nil && !$0.busy } } }
     public var hasBothFaces: Bool { slots.filter { ($0.key == "face" || $0.key == "profile") && $0.image != nil }.count == 2 }
     public var isDraft: Bool { filled == 0 }
     public func slot(_ key: String) -> SheetSlot? { slots.first { $0.key == key } }
@@ -221,9 +232,12 @@ public struct Outfit: Codable, Hashable, Sendable, Identifiable {
     public var angles: [ImageRef?]
     public var state: String
     public var prompt: String
+    /// Dress up outfits: face, face ¾ and profile close-ups with the accessories (nil where rejected or missing).
+    public var faces: [ImageRef?]?
 
     public init(id: String, modelId: String, name: String, mode: String = "describe", description: String = "", angles: [ImageRef?] = [nil, nil, nil, nil],
-                state: String = "ready", prompt: String = "") {
+                state: String = "ready", prompt: String = "", faces: [ImageRef?]? = nil) {
+        self.faces = faces
         self.id = id
         self.modelId = modelId
         self.name = name
@@ -234,7 +248,7 @@ public struct Outfit: Codable, Hashable, Sendable, Identifiable {
         self.prompt = prompt
     }
 
-    enum CodingKeys: String, CodingKey { case id, modelId, name, mode, description, angles, state, prompt }
+    enum CodingKeys: String, CodingKey { case id, modelId, name, mode, description, angles, state, prompt, faces }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -245,9 +259,12 @@ public struct Outfit: Codable, Hashable, Sendable, Identifiable {
         angles = c.v(.angles, [nil, nil, nil, nil])
         state = c.v(.state, "ready")
         prompt = c.v(.prompt, "")
+        faces = c.o(.faces)
     }
 
     public var front: ImageRef? { angles.first ?? nil }
+    /// Made with Dress up (plans/api.md "Model tools" §6).
+    public var isDressUp: Bool { mode == "dressup" }
 }
 
 public struct CreateOutfitRequest: Codable, Sendable {
@@ -256,8 +273,11 @@ public struct CreateOutfitRequest: Codable, Sendable {
     public var mode: String
     public var description: String
     public var images: [ImageRef]
+    /// Owner only: per-run model override (step → "owner/name").
+    public var models: ModelOverrides?
 
-    public init(modelId: String, name: String, mode: String, description: String = "", images: [ImageRef] = []) {
+    public init(modelId: String, name: String, mode: String, description: String = "", images: [ImageRef] = [], models: ModelOverrides? = nil) {
+        self.models = (models?.isEmpty ?? true) ? nil : models
         self.modelId = modelId
         self.name = name
         self.mode = mode
@@ -790,6 +810,8 @@ public struct ShootRequest: Codable, Sendable {
     public var lockSeed: Bool?
     /// For templates that take a product photo (Product moment).
     public var productImage: ImageRef?
+    /// Owner only: per-run model override (step → "owner/name"); members never send it.
+    public var models: ModelOverrides?
 
     public init(modelId: String, outfitId: String, scene: String, prompt: String, seed: Int64? = nil, count: Int = 4) {
         self.modelId = modelId
@@ -921,10 +943,13 @@ public struct ApiEvent: Codable, Sendable {
     public var event: String?
     /// `gpu` events with `event: "warning"`.
     public var warning: WarmGpuWarning?
+    /// `tool` events: an Enhance or Dress up run changed.
+    public var tool: ToolRun?
 
-    public init(type: String, job: Job? = nil, balance: Balance? = nil, model: MuseModel? = nil, outfit: Outfit? = nil, lora: Lora? = nil, post: Post? = nil,
+    public init(type: String, job: Job? = nil, tool: ToolRun? = nil, balance: Balance? = nil, model: MuseModel? = nil, outfit: Outfit? = nil, lora: Lora? = nil, post: Post? = nil,
                 takes: [Take] = [], wallet: Wallet? = nil, notice: EventNotice? = nil, gpu: WarmGpu? = nil,
                 event: String? = nil, warning: WarmGpuWarning? = nil) {
+        self.tool = tool
         self.gpu = gpu
         self.event = event
         self.warning = warning
@@ -940,7 +965,7 @@ public struct ApiEvent: Codable, Sendable {
         self.takes = takes
     }
 
-    enum CodingKeys: String, CodingKey { case type, job, balance, model, outfit, lora, post, takes, wallet, notice, gpu, event, warning }
+    enum CodingKeys: String, CodingKey { case type, job, balance, model, outfit, lora, post, takes, wallet, notice, gpu, event, warning, tool }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         type = c.v(.type, "")
@@ -956,6 +981,7 @@ public struct ApiEvent: Codable, Sendable {
         gpu = c.o(.gpu)
         event = c.o(.event)
         warning = c.o(.warning)
+        tool = c.o(.tool)
     }
 }
 

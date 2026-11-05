@@ -48,7 +48,7 @@ enum ShootState { case idle, busy, done }
 enum ShootTab: String, CaseIterable { case scene, camera, light, prompt }
 enum GalleryTab { case tests, final }
 enum SettingsSection: String, CaseIterable {
-    case appearance, defaults, costs, studio, engines, notif, developer, about
+    case appearance, defaults, costs, studio, engines, archived, notif, developer, about
     var title: String {
         switch self {
         case .appearance: return "Appearance"
@@ -56,14 +56,15 @@ enum SettingsSection: String, CaseIterable {
         case .costs: return "Costs & limits"
         case .studio: return "Studio"
         case .engines: return "Engines"
+        case .archived: return "Archived models"
         case .notif: return "Notifications"
         case .developer: return "Developer"
         case .about: return "About"
         }
     }
 
-    /// Studio and Engines are the owner's.
-    var ownerOnly: Bool { self == .studio || self == .engines }
+    /// Studio, Engines and Archived models are the owner's.
+    var ownerOnly: Bool { self == .studio || self == .engines || self == .archived }
 }
 
 enum PostTab: Hashable { case scheduled, posted }
@@ -224,7 +225,7 @@ final class AppStore {
 
     // MARK: Video studio
 
-    var modelId = SampleData.sienna
+    var modelId = SampleData.demo
     var outfitIdByModel: [String: String] = [:]
     var clip: Clip?
     var clipFile: URL?
@@ -287,9 +288,25 @@ final class AppStore {
 
     // MARK: Models
 
-    var profileModelId = SampleData.sienna
+    var profileModelId = SampleData.demo
     var create = CreateDraft()
     var outfitSheet: OutfitDraft?
+
+    // MARK: Model tools (plans/api.md "Model tools")
+
+    /// Owner: the model per image step (Settings → Engines → Image models).
+    var stepModels: [StepModel] = []
+    /// Owner: archived models (Settings → Archived models).
+    var archivedModels: [MuseModel] = []
+    /// The model catalog sheet (owner only).
+    var catalog: CatalogDraft?
+    var enhanceDraft: EnhanceDraft?
+    var dressUpDraft: DressUpDraft?
+    var versionsDraft: VersionsDraft?
+    /// Owner: per-run model for Shoot (step → "owner/name"; empty = the defaults).
+    var shootModels: [String: String] = [:]
+    /// Enhance and Dress up runs by id (from `tool` events and the API).
+    var toolRuns: [String: ToolRun] = [:]
 
     // MARK: Keep add-on engine ready (owner only, Settings → Engines)
 
@@ -411,6 +428,7 @@ final class AppStore {
         imageEngine = nil
         studioBalance = nil
         offlineMessage = nil
+        resetModelTools()
         resetWarm()
         Task { await restoreSession() }
     }
@@ -469,6 +487,8 @@ final class AppStore {
         if let m = try? await api.listMembers() { members = m }
         studioBalance = try? await api.studioBalance()
         imageEngine = try? await api.imageEngine()
+        stepModels = (try? await api.imageModels()) ?? []
+        archivedModels = (try? await api.listArchivedModels()) ?? []
     }
 
     /// Runs an API call and shows its error as a toast, in MUSE's words.
@@ -520,9 +540,16 @@ final class AppStore {
         // Keep add-on engine ready is the owner's; a member never gets these, and ignores one if an older server sends it.
         if let g = e.gpu, isOwner { applyWarm(g, warning: e.event == "warning" ? e.warning : nil) }
         if let m = e.model {
-            if let i = models.firstIndex(where: { $0.id == m.id }) { models[i] = m } else { models.append(m) }
-            syncDraftSlots(from: m)
+            if m.archived {
+                // Archived models vanish from every list and picker.
+                dropArchived(m)
+            } else {
+                if let i = models.firstIndex(where: { $0.id == m.id }) { models[i] = m } else { models.append(m) }
+                archivedModels.removeAll { $0.id == m.id }
+                syncDraftSlots(from: m)
+            }
         }
+        if let r = e.tool { applyToolRun(r) }
         if let l = e.lora { applyLora(l) }
         if let p = e.post {
             if let i = posts.firstIndex(where: { $0.id == p.id }) { posts[i] = p } else { posts.insert(p, at: 0) }
@@ -679,6 +706,7 @@ final class AppStore {
         imageEngine = nil
         studioBalance = nil
         lastInvite = nil
+        resetModelTools()
         templates = []
         shootTemplate = nil
         templateDetail = nil

@@ -5,54 +5,59 @@ public let demoSpeed = 24.0
 
 /// Seed data, matching the desktop prototype's state `S` (and the Android app's SampleData).
 public enum SampleData {
-    public static let sienna = "m_sienna"
-    public static let noor = "m_noor"
+    public static let demo = "m_demo"
+    public static let demoB = "m_demo_b"
     public static let green = "o_green"
     public static let crystal = "o_crystal"
     public static let sampleClip = "clip_sample"
     public static let badClip = "clip_bad"
-    public static let siennaLook = "young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin"
+    /// A neutral look for the demo model (no real person).
+    public static let demoLook = "young woman, shoulder-length dark brown hair, brown eyes, warm olive skin"
 
-    /// Slot key → the sample image used for that angle (the app draws placeholders for these keys).
+    /// Neutral demo names (no real person). The stills are drawn as silhouette placeholders.
+    public static let demoName = "Demo model"
+    public static let demoBName = "Demo model B"
+
+    /// Slot key → the sample image key used for that angle (the app draws silhouette placeholders for these keys).
     public static let slotSample: [(String, String)] = [("face", "face"), ("profile", "profile"), ("front", "g_front"), ("tq", "g_tq"), ("side", "g_side"), ("back", "g_back")]
-    public static func sample(for slot: String) -> String { slotSample.first { $0.0 == slot }?.1 ?? "face" }
+    public static func sample(for slot: String) -> String { slotSample.first { $0.0 == slot }?.1 ?? (slot == SheetAngle.faceTq.rawValue ? "face_tq" : "face") }
 
     public static func models() -> [MuseModel] {
         [
-            MuseModel(id: sienna, name: "Sienna Vale", age: 24, niche: "Beauty · lifestyle", look: siennaLook, neverAdd: ["tattoos", "rings"],
-                      slots: slotSample.map { SheetSlot(key: $0.0, image: .asset($0.1)) }, outfitIds: [green, crystal],
+            MuseModel(id: demo, name: demoName, age: 24, niche: "Beauty · lifestyle", look: demoLook, neverAdd: ["tattoos", "rings"],
+                      slots: slotSample.map { SheetSlot(key: $0.0, image: .asset($0.1)) } + [SheetSlot(key: SheetAngle.faceTq.rawValue)], outfitIds: [green, crystal],
                       personality: "Warm, a little dry, morning-routine energy.",
-                      notes: "Honey-blonde with brown roots is part of the look. Keep the freckles."),
-            MuseModel(id: noor, name: "Noor Ellis", age: 27, niche: "Beauty", slots: slotSample.map { SheetSlot(key: $0.0) }),
+                      notes: "Demo data: the stills are placeholder silhouettes."),
+            MuseModel(id: demoB, name: demoBName, age: 27, niche: "Beauty", slots: SheetAngle.allCases.map { SheetSlot(key: $0.rawValue) }),
         ]
     }
 
     public static func outfits() -> [Outfit] {
         [
-            Outfit(id: green, modelId: sienna, name: "Green set", mode: "own", description: "Dark green cropped tee and drawstring shorts",
+            Outfit(id: green, modelId: demo, name: "Green set", mode: "own", description: "Dark green cropped tee and drawstring shorts",
                    angles: ["g_front", "g_tq", "g_side", "g_back"].map { ImageRef.asset($0) }),
-            Outfit(id: crystal, modelId: sienna, name: "Crystal dress", mode: "describe", description: "Silver crystal cowl-neck mini dress",
+            Outfit(id: crystal, modelId: demo, name: "Crystal dress", mode: "describe", description: "Silver crystal cowl-neck mini dress",
                    angles: ["c_front", "c_tq", "c_face", "c_front"].map { ImageRef.asset($0) }),
         ]
     }
 
     static func req(_ title: String, _ engine: Engine, _ steps: Int, outfit: String = green) -> JobRequest {
-        JobRequest(title: title, modelId: sienna, outfitId: outfit, clipId: sampleClip, engine: engine.rawValue, steps: steps, use: ClipUse.full.rawValue)
+        JobRequest(title: title, modelId: demo, outfitId: outfit, clipId: sampleClip, engine: engine.rawValue, steps: steps, use: ClipUse.full.rawValue)
     }
 
     public static func jobs(now: Int64) -> [Job] {
-        let living = JobRequest.replicate(title: "Living room dance", modelId: sienna, outfitId: green, clipId: sampleClip, quality: .standard, clipSeconds: 9.4)
+        let living = JobRequest.replicate(title: "Living room dance", modelId: demo, outfitId: green, clipId: sampleClip, quality: .standard, clipSeconds: 9.4)
         return [
-            Job(id: "j3", title: "Living room dance", modelId: sienna, modelName: "Sienna Vale", outfitId: green, request: living, state: "queued",
+            Job(id: "j3", title: "Living room dance", modelId: demo, modelName: demoName, outfitId: green, request: living, state: "queued",
                 totalSteps: 1, phase: "Queued", secondsLeft: Pricing.totalSeconds(living.spec), totalSeconds: Pricing.totalSeconds(living.spec),
                 cost: Pricing.totalCost(living.spec), createdAt: now - 60_000, seed: 48213, thumb: .asset("vid_living")),
-            Job(id: "j1", title: "Kick test", modelId: sienna, modelName: "Sienna Vale", outfitId: green, request: req("Kick test", .viggle, 4), state: "done",
+            Job(id: "j1", title: "Kick test", modelId: demo, modelName: demoName, outfitId: green, request: req("Kick test", .viggle, 4), state: "done",
                 progress: 100, step: 4, totalSteps: 4, phase: "Done", totalSeconds: 95, cost: 0.13, createdAt: now - 7_200_000, finishedAt: now - 7_000_000,
                 seed: 7, thumb: .asset("vid_kick")),
-            Job(id: "j2", title: "Bathroom trend", modelId: sienna, modelName: "Sienna Vale", outfitId: crystal, request: req("Bathroom trend", .h3, 30, outfit: crystal),
+            Job(id: "j2", title: "Bathroom trend", modelId: demo, modelName: demoName, outfitId: crystal, request: req("Bathroom trend", .h3, 30, outfit: crystal),
                 state: "done", progress: 100, step: 30, totalSteps: 30, phase: "Done", totalSeconds: 2760, cost: 3.05, createdAt: now - 86_400_000,
                 finishedAt: now - 83_640_000, seed: 42, thumb: .asset("vid_bath")),
-            Job(id: "j0", title: "Mirror selfie", modelId: sienna, modelName: "Sienna Vale", outfitId: green, request: req("Mirror selfie", .h3, 10), state: "failed",
+            Job(id: "j0", title: "Mirror selfie", modelId: demo, modelName: demoName, outfitId: green, request: req("Mirror selfie", .h3, 10), state: "failed",
                 progress: 18, step: 3, totalSteps: 10, phase: "Failed", totalSeconds: 608, cost: 0.19, refunded: 0.19,
                 error: MemberText.wentWrong, createdAt: now - 3_600_000, finishedAt: now - 3_500_000, thumb: .asset("vid_living2")),
         ]

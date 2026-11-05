@@ -109,8 +109,8 @@ final class TemplateApiTests: XCTestCase {
 
         // The member's prompt view shows the template as one locked line.
         let models = try await member.listModels()
-        let sienna = try XCTUnwrap(models.first { $0.name == "Sienna Vale" })
-        let view = try await member.templatePrompt(id: created.id, TemplatePromptRequest(modelId: sienna.id, outfitId: sienna.outfitIds.first,
+        let demoModel = try XCTUnwrap(models.first { $0.isLocked })
+        let view = try await member.templatePrompt(id: created.id, TemplatePromptRequest(modelId: demoModel.id, outfitId: demoModel.outfitIds.first,
                                                                                          direction: "sitting on the steps", shuffleSeed: 42))
         XCTAssertTrue(view.isLocked)
         XCTAssertEqual(view.slots.filter(\.locked).map(\.text), ["Template: Mac test look"])
@@ -119,15 +119,15 @@ final class TemplateApiTests: XCTestCase {
         XCTAssertNil(view.variation)
         XCTAssertEqual(view.shuffleSeed, 42)
         // The owner sees every layer and the draws; the same shuffleSeed gives the same prompt.
-        let ownerView = try await boss.templatePrompt(id: created.id, TemplatePromptRequest(modelId: sienna.id, outfitId: sienna.outfitIds.first, shuffleSeed: 42))
+        let ownerView = try await boss.templatePrompt(id: created.id, TemplatePromptRequest(modelId: demoModel.id, outfitId: demoModel.outfitIds.first, shuffleSeed: 42))
         XCTAssertTrue(ownerView.text.contains("zz-secret-scene"), ownerView.text)
         XCTAssertEqual(ownerView.variation?[.pose], "zz-secret-pose")
-        let again = try await boss.templatePrompt(id: created.id, TemplatePromptRequest(modelId: sienna.id, outfitId: sienna.outfitIds.first, shuffleSeed: 42))
+        let again = try await boss.templatePrompt(id: created.id, TemplatePromptRequest(modelId: demoModel.id, outfitId: demoModel.outfitIds.first, shuffleSeed: 42))
         XCTAssertEqual(again.variation, ownerView.variation)
 
         // A member shoots with it: the photos' cost from their wallet (an estimate held, settled to the exact amount), template fields on each still, the public prompt only.
         let w0 = try await member.wallet()
-        let shots = try await member.shoot(.template(created.id, modelId: sienna.id, outfitId: sienna.outfitIds.first ?? "", direction: "looking back",
+        let shots = try await member.shoot(.template(created.id, modelId: demoModel.id, outfitId: demoModel.outfitIds.first ?? "", direction: "looking back",
                                                      shuffleSeed: 7))
         XCTAssertFalse(shots.isEmpty)
         for s in shots {
@@ -162,8 +162,8 @@ final class TemplateApiTests: XCTestCase {
         XCTAssertFalse(unfav.favourite)
 
         // Save as template from a plain photoshoot: the draft shows the layers, then the template is saved from the shot.
-        let plain = try await member.shoot(ShootRequest(modelId: sienna.id, outfitId: sienna.outfitIds.first ?? "", scene: "Café window",
-                                                        prompt: "Sienna Vale\nScene: café window.\nCamera: medium shot, 35mm lens, f/2.8.", count: 1))
+        let plain = try await member.shoot(ShootRequest(modelId: demoModel.id, outfitId: demoModel.outfitIds.first ?? "", scene: "Café window",
+                                                        prompt: "Demo model\nScene: café window.\nCamera: medium shot, 35mm lens, f/2.8.", count: 1))
         let draft = try await member.templateDraft(fromShotId: plain[0].id)
         XCTAssertEqual(draft.fromShotId, plain[0].id)
         XCTAssertFalse(draft.variationPool.isEmpty, "the pool is auto-suggested")

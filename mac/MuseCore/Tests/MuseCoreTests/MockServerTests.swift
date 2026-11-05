@@ -31,8 +31,8 @@ final class MockServerTests: XCTestCase {
         await api.setToken(auth.token)
 
         let models = try await api.listModels()
-        XCTAssertTrue(models.contains { $0.name == "Sienna Vale" && $0.isLocked })
-        XCTAssertTrue(models.contains { $0.name == "Noor Ellis" })
+        XCTAssertTrue(models.contains { $0.isLocked })
+        XCTAssertTrue(models.contains { $0.name == "Demo model B" })
         let outfits = try await api.listOutfits()
         XCTAssertFalse(outfits.isEmpty)
         let b0 = try await api.balance()
@@ -43,8 +43,8 @@ final class MockServerTests: XCTestCase {
         let good = try await api.uploadClip(SampleData.sampleMeta, file: nil)
         XCTAssertEqual(good.checks.map(\.status), ClipRules.checks(SampleData.sampleMeta).map(\.status))
 
-        let sienna = models.first { $0.name == "Sienna Vale" }!
-        var req = JobRequest(title: "Mac test", modelId: sienna.id, outfitId: sienna.outfitIds[0], clipId: bad.id)
+        let demoModel = models.first { $0.isLocked }!
+        var req = JobRequest(title: "Mac test", modelId: demoModel.id, outfitId: demoModel.outfitIds[0], clipId: bad.id)
         do { _ = try await api.createJob(req); XCTFail() } catch let e as ApiError { XCTAssertEqual(e.code, "clip_failed_checks") }
         req.clipId = good.id
         req.steps = 31
@@ -77,7 +77,7 @@ final class MockServerTests: XCTestCase {
         let fill = try await api.fillAngles(modelId: m.id)
         XCTAssertEqual(Pricing.money(fill.cost), "$0.10")
 
-        let shots = try await api.shoot(ShootRequest(modelId: sienna.id, outfitId: sienna.outfitIds[0], scene: "Café window", prompt: "p", count: 4))
+        let shots = try await api.shoot(ShootRequest(modelId: demoModel.id, outfitId: demoModel.outfitIds[0], scene: "Café window", prompt: "p", count: 4))
         XCTAssertEqual(shots.count, 4)
         XCTAssertTrue(shots.allSatisfy { !$0.isVideo })
         let topped = try await api.topUp(TopUpRequest(amount: 10, note: "Mac contract test"))

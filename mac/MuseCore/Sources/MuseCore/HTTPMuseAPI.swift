@@ -373,6 +373,94 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     public func studioBalance() async throws -> StudioBalance { try await call("GET", "v1/studio/balance") }
     public func recordTopUp(_ req: TopUpRecord) async throws -> StudioBalance { try await call("POST", "v1/studio/topups", req) }
     public func upscale(takeId: String, _ req: UpscaleRequest) async throws -> Job { absolutize(try await call("POST", "v1/takes/\(takeId)/upscale", req)) }
+    // MARK: Model tools
+
+    public func imageModels() async throws -> [StepModel] { (try await call("GET", "v1/image-models") as ImageModelsResponse).steps }
+    public func setImageModel(step: ImageStep, _ req: SetImageModelRequest) async throws -> StepModel { try await call("PUT", "v1/image-models/\(step.rawValue)", req) }
+    public func resetImageModel(step: ImageStep) async throws -> StepModel { try await call("DELETE", "v1/image-models/\(step.rawValue)") }
+    public func imageModelCatalog(_ query: CatalogQuery) async throws -> CatalogResponse {
+        var c = URLComponents()
+        c.queryItems = query.queryItems
+        return try await call("GET", "v1/image-models/catalog" + (c.percentEncodedQuery.map { "?" + $0 } ?? ""))
+    }
+    public func imageModelCollections() async throws -> [CatalogCollectionRef] { try await call("GET", "v1/image-models/collections") }
+    public func imageModelDetail(id: String, step: ImageStep) async throws -> ModelDetail {
+        var c = URLComponents()
+        c.queryItems = [URLQueryItem(name: "id", value: id), URLQueryItem(name: "step", value: step.rawValue)]
+        return try await call("GET", "v1/image-models/model?" + (c.percentEncodedQuery ?? ""))
+    }
+
+    public func enhanceEstimate(modelId: String, _ req: EnhanceRequest) async throws -> ToolEstimate { try await call("POST", "v1/models/\(modelId)/enhance/estimate", req) }
+    public func enhance(modelId: String, _ req: EnhanceRequest) async throws -> ToolRun { absolutize(try await call("POST", "v1/models/\(modelId)/enhance", req)) }
+    public func dressUpEstimate(modelId: String, _ req: DressUpEstimateRequest) async throws -> ToolEstimate {
+        try await call("POST", "v1/models/\(modelId)/dress-up/estimate", req)
+    }
+    public func dressUp(modelId: String, _ req: DressUpRequest) async throws -> ToolRun { absolutize(try await call("POST", "v1/models/\(modelId)/dress-up", req)) }
+    public func listToolRuns(_ query: ToolRunQuery) async throws -> [ToolRun] {
+        var c = URLComponents()
+        c.queryItems = [query.modelId.map { URLQueryItem(name: "modelId", value: $0) }, query.kind.map { URLQueryItem(name: "kind", value: $0) }].compactMap { $0 }
+        let q = (c.queryItems?.isEmpty ?? true) ? "" : "?" + (c.percentEncodedQuery ?? "")
+        return (try await call("GET", "v1/tool-runs" + q) as [ToolRun]).map(absolutize)
+    }
+    public func toolRun(id: String) async throws -> ToolRun { absolutize(try await call("GET", "v1/tool-runs/\(id)")) }
+    public func decideToolItem(runId: String, slot: String, _ req: ToolDecisionRequest) async throws -> ToolRun {
+        absolutize(try await call("PATCH", "v1/tool-runs/\(runId)/items/\(slot)", req))
+    }
+    public func pickToolRun(runId: String, pick: String) async throws -> ToolRun { absolutize(try await call("POST", "v1/tool-runs/\(runId)/pick", ToolPickRequest(pick: pick))) }
+    public func retryToolItem(runId: String, slot: String, engine: String?) async throws -> ToolRun {
+        absolutize(try await call("POST", "v1/tool-runs/\(runId)/items/\(slot)/retry", ToolRetryRequest(engine: engine)))
+    }
+    public func applyToolRun(runId: String, _ req: ToolApplyRequest) async throws -> ToolApplyResponse {
+        var r: ToolApplyResponse = try await call("POST", "v1/tool-runs/\(runId)/apply", req)
+        r.run = absolutize(r.run)
+        r.model = absolutize(r.model)
+        r.outfit = r.outfit.map(absolutize)
+        return r
+    }
+    public func discardToolRun(runId: String) async throws { _ = try await send(request("DELETE", "v1/tool-runs/\(runId)")) }
+    public func sheetVersions(modelId: String) async throws -> [SheetVersion] {
+        (try await call("GET", "v1/models/\(modelId)/sheet-versions") as [SheetVersion]).map { v in
+            var v = v
+            v.slots = v.slots.map(absolutize)
+            return v
+        }
+    }
+    public func restoreSheetVersion(modelId: String, versionId: String) async throws -> MuseModel {
+        absolutize(try await call("POST", "v1/models/\(modelId)/sheet-versions/\(versionId)/restore", Empty()))
+    }
+    public func archiveModel(id: String) async throws -> MuseModel { absolutize(try await call("POST", "v1/models/\(id)/archive", Empty())) }
+    public func unarchiveModel(id: String) async throws -> MuseModel { absolutize(try await call("POST", "v1/models/\(id)/unarchive", Empty())) }
+    public func listArchivedModels() async throws -> [MuseModel] { (try await call("GET", "v1/models?archived=true") as [MuseModel]).map(absolutize) }
+
+    func absolutize(_ r: ImageRef?) -> ImageRef? { r.map(absolutize) }
+    func absolutize(_ s: SheetSlot) -> SheetSlot {
+        var s = s
+        s.image = absolutize(s.image)
+        return s
+    }
+    func absolutize(_ m: MuseModel) -> MuseModel {
+        var m = m
+        m.slots = m.slots.map(absolutize)
+        return m
+    }
+    func absolutize(_ o: Outfit) -> Outfit {
+        var o = o
+        o.angles = o.angles.map(absolutize)
+        o.faces = o.faces?.map(absolutize)
+        return o
+    }
+    func absolutize(_ run: ToolRun) -> ToolRun {
+        var run = run
+        run.options.outfitImage = absolutize(run.options.outfitImage)
+        run.items = run.items.map { i in
+            var i = i
+            i.before = absolutize(i.before)
+            i.results = ToolResults(a: absolutize(i.results.a), b: absolutize(i.results.b))
+            return i
+        }
+        return run
+    }
+
     public func setFailNext(_ fail: Bool) async throws { _ = try await send(request("POST", "v1/dev/fail-next", body: try encoder.encode(DevFailRequest(failNext: fail)))) }
 
     /// Events from GET /v1/events. Reconnects with back-off while the subscriber is listening.
@@ -420,6 +508,7 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
                     if let l = e.lora { e.lora = absolutize(l) }
                     if let p = e.post { e.post = absolutize(p) }
                     if let j = e.job { e.job = absolutize(j) }
+                    if let t = e.tool { e.tool = absolutize(t) }
                     e.takes = e.takes.map(absolutize)
                     yield(e)
                 }

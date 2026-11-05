@@ -48,7 +48,7 @@ final class ClipAndClockTests: XCTestCase {
 final class CodingTests: XCTestCase {
     func testDecodesSparseServerJSON() throws {
         let json = """
-        {"id":"j9","title":"Dance","state":"running","progress":42.5,"request":{"title":"Dance","modelId":"m_sienna","outfitId":"o_green","clipId":"c1","steps":15},
+        {"id":"j9","title":"Dance","state":"running","progress":42.5,"request":{"title":"Dance","modelId":"m_demo","outfitId":"o_green","clipId":"c1","steps":15},
          "createdAt":1762243200000,"thumb":{"url":"/files/a.jpg"},"unknownField":true}
         """
         let j = try JSONDecoder().decode(Job.self, from: Data(json.utf8))
@@ -119,7 +119,7 @@ final class FakeAPITests: XCTestCase {
         XCTAssertEqual(jobs.filter(\.isQueued).map(\.title), ["Living room dance"])
         XCTAssertEqual(jobs.filter(\.isFailed).first?.refunded, 0.19)
         let models = try await api.listModels()
-        XCTAssertEqual(models.map(\.name), ["Sienna Vale", "Noor Ellis"])
+        XCTAssertEqual(models.map(\.name), ["Demo model", "Demo model B"])
         XCTAssertTrue(models[0].isLocked)
         XCTAssertTrue(models[1].isDraft)
     }
@@ -140,13 +140,13 @@ final class FakeAPITests: XCTestCase {
         let api = fast()
         let events = api.events()
         let before = try await api.balance().balance
-        var req = JobRequest(title: "Dance", modelId: SampleData.sienna, outfitId: SampleData.green, clipId: SampleData.sampleClip)
+        var req = JobRequest(title: "Dance", modelId: SampleData.demo, outfitId: SampleData.green, clipId: SampleData.sampleClip)
         req.takes = 2
         let job = try await api.createJob(req)
         XCTAssertEqual(job.cost, Pricing.totalCost(req.spec), accuracy: 1e-12)
         let after = try await api.balance().balance
         XCTAssertEqual(before - after, job.cost, accuracy: 1e-9)
-        XCTAssertTrue(job.prompt.contains("Sienna Vale wears the green set"))
+        XCTAssertTrue(job.prompt.contains("Demo model wears the green set"))
 
         // The seeded queued job runs first (one GPU), then ours.
         var finished: Job?
@@ -173,7 +173,7 @@ final class FakeAPITests: XCTestCase {
         let events = api.events()
         try await api.removeJob(id: "j3")
         let before = try await api.balance().balance
-        let job = try await api.createJob(JobRequest(title: "x", modelId: SampleData.sienna, outfitId: SampleData.green, clipId: SampleData.sampleClip))
+        let job = try await api.createJob(JobRequest(title: "x", modelId: SampleData.demo, outfitId: SampleData.green, clipId: SampleData.sampleClip))
         var failed: Job?
         for await e in events where e.job?.id == job.id && e.job?.isFailed == true {
             failed = e.job
@@ -188,7 +188,7 @@ final class FakeAPITests: XCTestCase {
 
     func testGenerateIsBlockedByLowBalanceAndBadClips() async throws {
         let api: any MuseAPI = FakeMuseAPI(speed: 0)
-        var req = JobRequest(title: "x", modelId: SampleData.sienna, outfitId: SampleData.green, clipId: SampleData.badClip)
+        var req = JobRequest(title: "x", modelId: SampleData.demo, outfitId: SampleData.green, clipId: SampleData.badClip)
         do { _ = try await api.createJob(req); XCTFail() } catch let e as ApiError { XCTAssertEqual(e.code, "clip_failed_checks") }
         req.clipId = SampleData.sampleClip
         req.steps = 30
@@ -215,26 +215,27 @@ final class FakeAPITests: XCTestCase {
         let m = try await api.createModel(CreateModelRequest(name: "  Ada ", age: 15, niche: "Tech", personality: "dry"))
         XCTAssertEqual(m.name, "Ada")
         XCTAssertEqual(m.age, 18)
-        XCTAssertEqual(m.slots.count, 6)
+        XCTAssertEqual(m.slots.map(\.key), ["face", "profile", "front", "tq", "side", "back", "faceTq"], "7 slots, face ¾ appended")
         let img = try await api.uploadImage(name: "a.jpg", data: Data([0xFF, 0xD8]), mime: "image/jpeg")
         let m2 = try await api.setSlot(modelId: m.id, slot: "face", SetSlotRequest(image: img))
         XCTAssertEqual(m2.filled, 1)
         let fill = try await api.fillAngles(modelId: m.id)
-        XCTAssertEqual(PhotoPricing.label(fill.cost), "about $0.51", "5 angles × about $0.10")
-        XCTAssertEqual(fill.model.slots.filter(\.busy).count, 5)
+        XCTAssertEqual(PhotoPricing.label(fill.cost), "about $0.61", "6 angles (face ¾ too) × about $0.10")
+        XCTAssertEqual(fill.model.slots.filter(\.busy).count, 6)
         var done: MuseModel?
         for await e in events where e.type == "model" {
             done = e.model
             break
         }
-        XCTAssertEqual(done?.filled, 6)
-        XCTAssertEqual(done?.slots.filter(\.isAI).count, 5)
+        XCTAssertEqual(done?.filled, 7)
+        XCTAssertEqual(done?.slots.filter(\.isAI).count, 6)
+        XCTAssertEqual(done?.isLocked, true)
     }
 
     func testOutfitPreviewThenSave() async throws {
         let api = fast()
         let events = api.events()
-        let o = try await api.createOutfit(CreateOutfitRequest(modelId: SampleData.sienna, name: "", mode: "describe", description: "red satin slip dress"))
+        let o = try await api.createOutfit(CreateOutfitRequest(modelId: SampleData.demo, name: "", mode: "describe", description: "red satin slip dress"))
         XCTAssertEqual(o.state, "generating")
         XCTAssertEqual(o.name, "red satin slip dress")
         var preview: Outfit?
@@ -246,13 +247,13 @@ final class FakeAPITests: XCTestCase {
         XCTAssertEqual(preview?.angles.compactMap { $0 }.count, 4)
         let saved = try await api.saveOutfit(outfitId: o.id)
         XCTAssertEqual(saved.state, "ready")
-        let sienna = try await api.listModels().first { $0.id == SampleData.sienna }
-        XCTAssertEqual(sienna?.outfitIds.last, o.id)
+        let demoModel = try await api.listModels().first { $0.id == SampleData.demo }
+        XCTAssertEqual(demoModel?.outfitIds.last, o.id)
     }
 
     func testShootAndTakeStatus() async throws {
         let api = fast()
-        let shots = try await api.shoot(ShootRequest(modelId: SampleData.sienna, outfitId: SampleData.crystal, scene: "Rooftop · golden hour", prompt: "p", seed: 48213))
+        let shots = try await api.shoot(ShootRequest(modelId: SampleData.demo, outfitId: SampleData.crystal, scene: "Rooftop · golden hour", prompt: "p", seed: 48213))
         XCTAssertEqual(shots.count, 4)
         XCTAssertEqual(shots[0].title, "Shoot · Rooftop")
         XCTAssertEqual(shots[0].caption, "Shoot · Rooftop 1")

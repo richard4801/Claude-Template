@@ -123,6 +123,53 @@ public protocol MuseAPI: AnyObject, Sendable {
     /// POST /v1/studio/topups (owner): records "Added $20".
     func recordTopUp(_ req: TopUpRecord) async throws -> StudioBalance
 
+    // Model tools (plans/api.md "Model tools"). Image models and the catalog are owner only (members get owner_only).
+    /// GET /v1/image-models
+    func imageModels() async throws -> [StepModel]
+    /// PUT /v1/image-models/{step} {model, extra?}: `model_incompatible` when the model can't do the step.
+    func setImageModel(step: ImageStep, _ req: SetImageModelRequest) async throws -> StepModel
+    /// DELETE /v1/image-models/{step}: back to the default.
+    func resetImageModel(step: ImageStep) async throws -> StepModel
+    /// GET /v1/image-models/catalog?step=&q=&collection=
+    func imageModelCatalog(_ query: CatalogQuery) async throws -> CatalogResponse
+    /// GET /v1/image-models/collections
+    func imageModelCollections() async throws -> [CatalogCollectionRef]
+    /// GET /v1/image-models/model?id=owner/name&step=
+    func imageModelDetail(id: String, step: ImageStep) async throws -> ModelDetail
+
+    /// POST /v1/models/{id}/enhance/estimate
+    func enhanceEstimate(modelId: String, _ req: EnhanceRequest) async throws -> ToolEstimate
+    /// POST /v1/models/{id}/enhance → a running ToolRun; `tool` events follow.
+    func enhance(modelId: String, _ req: EnhanceRequest) async throws -> ToolRun
+    /// POST /v1/models/{id}/dress-up/estimate
+    func dressUpEstimate(modelId: String, _ req: DressUpEstimateRequest) async throws -> ToolEstimate
+    /// POST /v1/models/{id}/dress-up → a running ToolRun. The original sheet is never changed.
+    func dressUp(modelId: String, _ req: DressUpRequest) async throws -> ToolRun
+    /// GET /v1/tool-runs?modelId=&kind= (newest first)
+    func listToolRuns(_ query: ToolRunQuery) async throws -> [ToolRun]
+    func toolRun(id: String) async throws -> ToolRun
+    /// PATCH /v1/tool-runs/{id}/items/{slot} {decision, pick?}
+    func decideToolItem(runId: String, slot: String, _ req: ToolDecisionRequest) async throws -> ToolRun
+    /// POST /v1/tool-runs/{id}/pick {pick}: that option for the whole set.
+    func pickToolRun(runId: String, pick: String) async throws -> ToolRun
+    /// POST /v1/tool-runs/{id}/items/{slot}/retry {engine?}
+    func retryToolItem(runId: String, slot: String, engine: String?) async throws -> ToolRun
+    /// POST /v1/tool-runs/{id}/apply {name?}
+    func applyToolRun(runId: String, _ req: ToolApplyRequest) async throws -> ToolApplyResponse
+    /// DELETE /v1/tool-runs/{id}
+    func discardToolRun(runId: String) async throws
+    /// GET /v1/models/{id}/sheet-versions (newest first)
+    func sheetVersions(modelId: String) async throws -> [SheetVersion]
+    /// POST /v1/models/{id}/sheet-versions/{vid}/restore
+    func restoreSheetVersion(modelId: String, versionId: String) async throws -> MuseModel
+
+    /// POST /v1/models/{id}/archive (owner)
+    func archiveModel(id: String) async throws -> MuseModel
+    /// POST /v1/models/{id}/unarchive (owner)
+    func unarchiveModel(id: String) async throws -> MuseModel
+    /// GET /v1/models?archived=true (owner)
+    func listArchivedModels() async throws -> [MuseModel]
+
     // Developer
     func setFailNext(_ fail: Bool) async throws
 

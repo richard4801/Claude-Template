@@ -153,7 +153,7 @@ enum MediaImport {
     /// Sorts dropped reference images into character-sheet slots by file name ("face", "profile", "back"…), then fills the rest in order.
     static func sortIntoSlots(_ urls: [URL], free: [SheetAngle]) -> [(SheetAngle, URL)] {
         let hints: [(SheetAngle, [String])] = [
-            (.profile, ["profile", "side-face", "sideface"]), (.face, ["face", "headshot", "portrait", "closeup", "close-up"]),
+            (.profile, ["profile", "side-face", "sideface"]), (.faceTq, ["face34", "face-34", "face_34", "facetq", "face-tq", "face_tq", "face-quarter"]), (.face, ["face", "headshot", "portrait", "closeup", "close-up"]),
             (.back, ["back", "rear", "behind"]), (.tq, ["34", "3-4", "three", "quarter", "tq"]), (.side, ["side"]), (.front, ["front", "full", "body"]),
         ]
         var open = free

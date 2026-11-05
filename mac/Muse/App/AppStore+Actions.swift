@@ -293,7 +293,8 @@ extension AppStore {
             return
         }
         let prompt = promptOverride ?? shootPromptText
-        let req = ShootRequest(modelId: m.id, outfitId: o.id, scene: shoot.effectiveScene, prompt: prompt, seed: shoot.lockSeed ? 48213 : nil)
+        var req = ShootRequest(modelId: m.id, outfitId: o.id, scene: shoot.effectiveScene, prompt: prompt, seed: shoot.lockSeed ? 48213 : nil)
+        req.models = shootOverrides
         withAnimation { shootState = .busy }
         perform { [self] in
             do {
@@ -428,7 +429,7 @@ extension AppStore {
         }
         let free = SheetAngle.allCases.filter { create.slots[$0] == nil }
         let plan = MediaImport.sortIntoSlots(imgs, free: free)
-        if plan.isEmpty { showToast("All six slots are full. Replace one from its menu."); return }
+        if plan.isEmpty { showToast("All seven slots are full. Replace one from its menu."); return }
         Task { [weak self] in
             for (angle, u) in plan {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { self?.create.slots[angle] = .local(u) }
@@ -550,7 +551,7 @@ extension AppStore {
         perform { [self] in
             let id = try await ensureDraftModel()
             create = CreateDraft()
-            showToast("\(name) saved with \(n)/6 shots\(n < 6 ? " · you can add the rest any time" : "")", action: "Open") { [weak self] in self?.openProfile(id) }
+            showToast("\(name) saved with \(n)/\(SheetAngle.allCases.count) shots\(n < SheetAngle.allCases.count ? " · you can add the rest any time" : "")", action: "Open") { [weak self] in self?.openProfile(id) }
             go(.models)
         }
     }

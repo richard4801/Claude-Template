@@ -32,28 +32,10 @@ final class ImageCache {
     }
 
     func put(_ url: String, _ img: NSImage) { cache[url] = img }
-
-    /// Sienna's bundled reference photos (Resources/Samples/ref_<key>.jpg), the same set the Android app ships.
-    /// Clip frames (`vid_*`, `src_clip`) come from third-party test footage and are deliberately not bundled.
-    func sample(_ key: String) -> NSImage? {
-        let k = "sample:" + key
-        if let i = cache[k] { return i }
-        // Look in Resources/Samples first, then the Resources root, in case the folder is flattened.
-        let candidates = [
-            Bundle.main.url(forResource: "ref_" + key, withExtension: "jpg", subdirectory: "Samples"),
-            Bundle.main.url(forResource: "ref_" + key, withExtension: "jpg"),
-            Bundle.main.resourceURL?.appendingPathComponent("Samples/ref_\(key).jpg"),
-        ]
-        guard let img = candidates.compactMap({ $0 }).lazy.compactMap({ NSImage(contentsOf: $0) }).first else {
-            NSLog("MUSE: sample image ref_%@.jpg not found in %@", key, Bundle.main.bundlePath)
-            return nil
-        }
-        cache[k] = img
-        return img
-    }
 }
 
-/// An `ImageRef` drawn to fill its frame. Bundled sample photos are used for asset keys; anything else falls back to placeholder art.
+/// An `ImageRef` drawn to fill its frame. No photos are bundled: demo asset keys ("face", "g_front", …) are drawn as neutral
+/// silhouette placeholders, and anything that can't load falls back to the same art.
 struct MuseImage: View {
     var ref: ImageRef?
     var symbol: String?
@@ -71,15 +53,13 @@ struct MuseImage: View {
     @ViewBuilder private var content: some View {
         if let u = ref?.url, let img = (u.hasPrefix("http") ? remote : ImageCache.shared.image(for: u)) {
             Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
-        } else if let a = ref?.asset, let img = ImageCache.shared.sample(a) {
-            Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
         } else {
             Placeholder(key: ref?.asset ?? ref?.url ?? "empty", symbol: symbol)
         }
     }
 }
 
-/// Generated art standing in for the prototype's sample photos: a tonal gradient keyed to the asset family.
+/// Generated art standing in for demo stills: a tonal gradient keyed to the asset family with a generic silhouette (never a real person).
 struct Placeholder: View {
     var key: String
     var symbol: String?
@@ -102,8 +82,12 @@ struct Placeholder: View {
         switch key {
         case let k where k.hasPrefix("g_"): return (Color(hex: 0x6F8C7A), Color(hex: 0x1F4A35), "figure.stand")
         case let k where k.hasPrefix("c_"): return (Color(hex: 0xD9D4CC), Color(hex: 0x8C8378), k == "c_face" ? "person.crop.circle" : "figure.stand.dress")
-        case "face", "profile": return (Color(hex: 0xE7C3A4), Color(hex: 0xA0705A), key == "profile" ? "person.crop.circle.badge" : "person.crop.circle")
-        case "hero": return (Color(hex: 0xE2BE97), Color(hex: 0x8C5B44), "person.fill")
+        case "face", "profile", "face_tq": return (Color(hex: 0xC9C3D6), Color(hex: 0x6E6884), "person.crop.circle")
+        case "hero": return (Color(hex: 0xC9C3D6), Color(hex: 0x6E6884), "person.fill")
+        case let k where k.hasPrefix("enh_") || k.hasPrefix("dressa_") || k.hasPrefix("dressb_"):
+            let face = k.contains("face") || k.contains("profile")
+            let tint: (Color, Color) = k.hasPrefix("dressb_") ? (Color(hex: 0xC8B6D9), Color(hex: 0x5B4A72)) : k.hasPrefix("dressa_") ? (Color(hex: 0xB9CDD9), Color(hex: 0x3F5A6E)) : (Color(hex: 0xD6D0C4), Color(hex: 0x6F6658))
+            return (tint.0, tint.1, face ? "person.crop.circle" : "figure.stand")
         case let k where k.hasPrefix("vid_bath"): return (Color(hex: 0xB8B2A6), Color(hex: 0x4E4A44), "figure.dance")
         case let k where k.hasPrefix("vid_kick"): return (Color(hex: 0x7C8FB8), Color(hex: 0x3A3550), "figure.kickboxing")
         case let k where k.hasPrefix("vid_"): return (Color(hex: 0x8C93C9), Color(hex: 0x4A3F3A), "figure.dance")

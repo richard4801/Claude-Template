@@ -67,7 +67,7 @@ final class TemplateCodingTests: XCTestCase {
     }
 
     func testTemplatePromptDecodes() throws {
-        let json = #"{"slots":[{"layer":"identity","text":"Sienna"},{"layer":"template","text":"Template: X","locked":true}],"text":"Sienna\nTemplate: X","seed":null,"shuffleSeed":7}"#
+        let json = #"{"slots":[{"layer":"identity","text":"Demo"},{"layer":"template","text":"Template: X","locked":true}],"text":"Demo\nTemplate: X","seed":null,"shuffleSeed":7}"#
         let p = try JSONDecoder().decode(TemplatePrompt.self, from: Data(json.utf8))
         XCTAssertTrue(p.isLocked)
         XCTAssertNil(p.seed)
@@ -115,7 +115,7 @@ final class TemplateEngineTests: XCTestCase {
     func testVisibleViewNeverCarriesHiddenLayers() {
         let l = TemplateLayers(style: "SECRET-STYLE", scene: "SECRET-SCENE", camera: "SECRET-CAM", light: "SECRET-LIGHT", negative: "SECRET-NEG")
         let pool = VariationPool(pose: ["SECRET-POSE"], framing: ["SECRET-FRAME"])
-        let id = PromptIdentity(name: "Sienna Vale", look: "young woman", neverAdd: ["tattoos"])
+        let id = PromptIdentity(name: "Demo model", look: "young woman", neverAdd: ["tattoos"])
         let b = TemplateEngine.build(templateId: "t", templateName: "Mirror selfie", layers: l, pool: pool, identity: id, outfitName: "Green set",
                                      direction: "looking back", shuffleSeed: 3, lockSeed: false, seed: 123)
         XCTAssertFalse(b.visibleText.contains("SECRET"), b.visibleText)
@@ -134,7 +134,7 @@ final class TemplateEngineTests: XCTestCase {
         var s = ShootSettings()
         s.scene = "Bedroom mirror"
         s.direction = "laughing"
-        let id = PromptIdentity(name: "Sienna Vale", look: "x", neverAdd: ["tattoos", "rings"])
+        let id = PromptIdentity(name: "Demo model", look: "x", neverAdd: ["tattoos", "rings"])
         let prompt = PromptEngine.shootText(identity: id, outfitName: "Green set", settings: s)
         let l = TemplateLayers.from(prompt: prompt, neverAdd: ["tattoos", "rings"])
         XCTAssertEqual(l.scene, "bedroom mirror")
@@ -161,7 +161,7 @@ final class TemplateEngineTests: XCTestCase {
         XCTAssertEqual(TemplateEngine.allTags(all).first, "Faceless")
     }
 
-    func testStarterPackUsesOnlyBundledSiennaPhotos() {
+    func testStarterPackUsesOnlySampleKeys() {
         let bundled: Set<String> = ["hero", "face", "profile", "g_front", "g_tq", "g_side", "g_back", "c_front", "c_tq", "c_face"]
         let starters = StarterTemplates.all(ownerId: "u1", ownerName: "Jen")
         XCTAssertEqual(starters.compactMap(\.starter), ["motion-blur-face", "mirror-selfie", "harsh-sun-close-up", "moody-low-light", "reflection", "product-moment", "candid-pov"])
@@ -233,7 +233,7 @@ final class FakeTemplateTests: XCTestCase {
         let api = try await api()
         let before = await api.balance().balance
         let maya = try await api.template(id: "tpl_maya_golden")
-        let shots = try await api.shoot(.template(maya.id, modelId: SampleData.sienna, outfitId: SampleData.green, direction: "sitting on the steps", shuffleSeed: 11))
+        let shots = try await api.shoot(.template(maya.id, modelId: SampleData.demo, outfitId: SampleData.green, direction: "sitting on the steps", shuffleSeed: 11))
         XCTAssertEqual(shots.count, 4)
         let after0 = await api.balance().balance
         XCTAssertEqual(after0, before - PhotoPricing.standard.shoot(), accuracy: 1e-9)
@@ -251,7 +251,7 @@ final class FakeTemplateTests: XCTestCase {
         let after = try await api.template(id: maya.id)
         XCTAssertEqual(after.uses, maya.uses + 1)
         XCTAssertEqual(after.recent?.count, 4)
-        let view = try await api.templatePrompt(id: maya.id, TemplatePromptRequest(modelId: SampleData.sienna, outfitId: SampleData.green, shuffleSeed: 11))
+        let view = try await api.templatePrompt(id: maya.id, TemplatePromptRequest(modelId: SampleData.demo, outfitId: SampleData.green, shuffleSeed: 11))
         XCTAssertTrue(view.isLocked)
         XCTAssertNil(view.variation)
         // Saving someone else's template shot as a template is refused.
@@ -268,14 +268,14 @@ final class FakeTemplateTests: XCTestCase {
 
     func testOwnerShootAndPromptViewShowEveryLayer() async throws {
         let api = try await api()
-        let view = try await api.templatePrompt(id: "tpl_mirror_selfie", TemplatePromptRequest(modelId: SampleData.sienna, outfitId: SampleData.green, shuffleSeed: 5, lockSeed: true))
+        let view = try await api.templatePrompt(id: "tpl_mirror_selfie", TemplatePromptRequest(modelId: SampleData.demo, outfitId: SampleData.green, shuffleSeed: 5, lockSeed: true))
         XCTAssertFalse(view.isLocked)
         XCTAssertNotNil(view.variation)
         XCTAssertTrue(view.text.contains("Scene: lived-in bedroom"), view.text)
         XCTAssertNotNil(view.seed, "Lock look gives one fixed seed")
-        let again = try await api.templatePrompt(id: "tpl_mirror_selfie", TemplatePromptRequest(modelId: SampleData.sienna, outfitId: SampleData.green, shuffleSeed: 5, lockSeed: true))
+        let again = try await api.templatePrompt(id: "tpl_mirror_selfie", TemplatePromptRequest(modelId: SampleData.demo, outfitId: SampleData.green, shuffleSeed: 5, lockSeed: true))
         XCTAssertEqual(view, again, "the same shuffleSeed gives the same prompt")
-        let shots = try await api.shoot(.template("tpl_mirror_selfie", modelId: SampleData.sienna, outfitId: SampleData.green, shuffleSeed: 5, lockSeed: true))
+        let shots = try await api.shoot(.template("tpl_mirror_selfie", modelId: SampleData.demo, outfitId: SampleData.green, shuffleSeed: 5, lockSeed: true))
         XCTAssertEqual(Set(shots.map(\.seed)), [view.seed!])
         XCTAssertEqual(shots[0].variation, view.variation, "still 1 drew what the prompt view showed")
         XCTAssertTrue(shots[0].prompt.contains("Pose: "))
@@ -287,7 +287,7 @@ final class FakeTemplateTests: XCTestCase {
         s.scene = "Café window"
         s.direction = "stirring a coffee"
         let prompt = PromptEngine.shootText(identity: SampleData.models()[0].promptIdentity, outfitName: "Green set", settings: s)
-        let shots = try await api.shoot(ShootRequest(modelId: SampleData.sienna, outfitId: SampleData.green, scene: s.effectiveScene, prompt: prompt))
+        let shots = try await api.shoot(ShootRequest(modelId: SampleData.demo, outfitId: SampleData.green, scene: s.effectiveScene, prompt: prompt))
         let draft = try await api.templateDraft(fromShotId: shots[0].id)
         XCTAssertEqual(draft.layers.scene, "café window")
         XCTAssertEqual(draft.variationPool[.pose].first, "stirring a coffee", "the shot's direction becomes the first pose option")

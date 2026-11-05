@@ -6,7 +6,7 @@ public struct PromptIdentity: Equatable, Sendable {
     public var look: String
     public var referenceCount: Int
     public var neverAdd: [String]
-    /// The Identity LoRA trigger token ("sienna_v1") when the model's LoRA is trained and switched on (plans/lora-training.md).
+    /// The Identity LoRA trigger token ("demo_v1") when the model's LoRA is trained and switched on (plans/lora-training.md).
     /// Photo prompts name the photo LoRA, the H3 prompt names the video LoRA. nil means references only.
     public var lora: String?
 
@@ -213,9 +213,9 @@ extension Pricing {
     }
 }
 
-/// The six character-sheet slots.
+/// The seven character-sheet slots (plans/api.md "Model tools" §1: `faceTq` is appended so position-indexed clients keep working).
 public enum SheetAngle: String, CaseIterable, Codable, Sendable, Identifiable {
-    case face, profile, front, tq, side, back
+    case face, profile, front, tq, side, back, faceTq
     public var id: String { rawValue }
 
     public var label: String {
@@ -226,6 +226,7 @@ public enum SheetAngle: String, CaseIterable, Codable, Sendable, Identifiable {
         case .tq: return "Body · ¾"
         case .side: return "Body · side"
         case .back: return "Body · back"
+        case .faceTq: return "Face · ¾"
         }
     }
 
@@ -237,10 +238,17 @@ public enum SheetAngle: String, CaseIterable, Codable, Sendable, Identifiable {
         case .tq: return "full body, three-quarter view"
         case .side: return "full body, side view"
         case .back: return "full body, from behind"
+        case .faceTq: return "head-and-shoulders, turned three-quarters"
         }
     }
 
-    public var isFace: Bool { self == .face || self == .profile }
+    public var isFace: Bool { self == .face || self == .profile || self == .faceTq }
+
+    /// The six slots a sheet needs to be locked (the face ¾ close-up is optional, like a missing face close-up).
+    public static let core: [SheetAngle] = [.face, .profile, .front, .tq, .side, .back]
+    /// How the apps show the sheet: face close-ups (front, ¾, profile), then the full body.
+    public static let faceGroup: [SheetAngle] = [.face, .faceTq, .profile]
+    public static let bodyGroup: [SheetAngle] = [.front, .tq, .side, .back]
 }
 
 /// How an outfit set is made: Describe it / From a photo / My own set.

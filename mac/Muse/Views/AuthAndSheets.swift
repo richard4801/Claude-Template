@@ -31,8 +31,7 @@ struct AuthView: View {
 
             HStack(spacing: 0) {
                 ZStack(alignment: .bottomLeading) {
-                    MuseImage(ref: ImageRef(asset: "hero"), symbol: "person.fill")
-                    LinearGradient(colors: [.black.opacity(0.05), .black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
+                    BrandSplash()
                     VStack(alignment: .leading, spacing: 10) {
                         Text("AI MODEL STUDIO").font(t.mono(11)).tracking(1.3).foregroundStyle(.white.opacity(0.8))
                         Text(t.headingsUppercase ? "YOUR MODELS.\nREAL MOTION." : "Your models.\nReal motion.").font(t.h1).foregroundStyle(.white)
@@ -156,6 +155,32 @@ struct SSOButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// The sign-in splash: an abstract brand gradient with the MUSE wordmark. No photo of a person.
+struct BrandSplash: View {
+    @Environment(\.theme) private var t
+
+    var body: some View {
+        GeometryReader { g in
+            ZStack {
+                LinearGradient(colors: [Color(hex: 0x1B1530), Color(hex: 0x3B2A5C), Color(hex: 0x8A4B6E)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                RadialGradient(colors: [Color(hex: 0xF2B48C).opacity(0.55), .clear], center: UnitPoint(x: 0.78, y: 0.22), startRadius: 4, endRadius: g.size.width * 0.6)
+                RadialGradient(colors: [Color(hex: 0x6C8CF5).opacity(0.35), .clear], center: UnitPoint(x: 0.12, y: 0.7), startRadius: 4, endRadius: g.size.width * 0.55)
+                Circle().strokeBorder(.white.opacity(0.10), lineWidth: 1).frame(width: g.size.width * 0.9).offset(x: g.size.width * 0.28, y: -g.size.height * 0.18)
+                Circle().strokeBorder(.white.opacity(0.07), lineWidth: 1).frame(width: g.size.width * 0.6).offset(x: g.size.width * 0.32, y: -g.size.height * 0.14)
+                Text("MUSE")
+                    .font(Fonts.font("Instrument Serif", min(180, g.size.width * 0.28), .regular))
+                    .tracking(6)
+                    .foregroundStyle(.white.opacity(0.92))
+                    .shadow(color: .black.opacity(0.25), radius: 18, y: 8)
+                    .offset(y: -g.size.height * 0.12)
+                LinearGradient(colors: [.clear, .black.opacity(0.35)], startPoint: .center, endPoint: .bottom)
+            }
+            .frame(width: g.size.width, height: g.size.height)
+        }
+        .accessibilityLabel("MUSE")
     }
 }
 

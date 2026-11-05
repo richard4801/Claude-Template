@@ -769,7 +769,7 @@ public enum TemplateEngine {
 }
 
 /// The seven starter templates: public, studio-wide, our own recreations. In demo mode they belong to you (the studio owner),
-/// as on the server. Covers are the bundled Sienna photos; no third-party images are used.
+/// as on the server. Covers are placeholder sample keys; no photos of real people are bundled.
 public enum StarterTemplates {
     public static func all(ownerId: String, ownerName: String, now: Int64 = 0) -> [MuseTemplate] {
         func t(_ slug: String, _ name: String, _ cover: String, _ tags: [String], uses: Int, age: Int64, _ l: TemplateLayers) -> MuseTemplate {

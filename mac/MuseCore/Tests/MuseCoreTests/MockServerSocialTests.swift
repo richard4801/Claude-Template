@@ -16,21 +16,21 @@ final class MockServerSocialTests: XCTestCase {
         let auth = try await api.signIn(SignInRequest(email: "jen@studio.com", password: "x"))
         await api.setToken(auth.token)
         do {
-            _ = try await api.lora(modelId: try await sienna(api).id)
+            _ = try await api.lora(modelId: try await demoModel(api).id)
         } catch let e as ApiError where e.code == "http_404" || e.code == "not_found" {
             throw XCTSkip("server/mock has no LoRA endpoints yet")
         }
         return api
     }
 
-    private func sienna(_ api: HTTPMuseAPI) async throws -> MuseModel {
+    private func demoModel(_ api: HTTPMuseAPI) async throws -> MuseModel {
         let models = try await api.listModels()
-        return try XCTUnwrap(models.first { $0.name == "Sienna Vale" })
+        return try XCTUnwrap(models.first { $0.isLocked })
     }
 
     func testLoraContract() async throws {
         let api = try await api()
-        let m = try await sienna(api)
+        let m = try await demoModel(api)
         let none = try await api.lora(modelId: m.id)
         XCTAssertEqual(none.modelId, m.id)
         let b0 = try await api.balance().balance
@@ -67,7 +67,7 @@ final class MockServerSocialTests: XCTestCase {
 
     func testAccountsPostsAndModelEdits() async throws {
         let api = try await api()
-        let m = try await sienna(api)
+        let m = try await demoModel(api)
         let result = try await api.connectAccount(modelId: m.id, platform: .tiktok)
         if case .connected(let a) = result { XCTAssertEqual(a.platform, .tiktok) }
         let accounts = try await api.listAccounts(modelId: m.id)

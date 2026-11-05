@@ -203,7 +203,7 @@ struct ModelCard: View {
                 Group {
                     if let cover = model.cover {
                         Media(ref: cover, ratio: 0.75, radius: 0) {
-                            Pill(model.isLocked ? "6/6 shots" : "\(model.filled)/6 shots", model.isLocked ? .good : .warn)
+                            Pill("\(model.filled)/\(SheetAngle.allCases.count) shots", model.isLocked ? .good : .warn)
                         }
                     } else {
                         InitialTile(letter: model.initial)

@@ -3,8 +3,8 @@ import XCTest
 
 /// The prompt engine must word things exactly like prototype/desktop/desktop.js (`shootPrompt`, `videoPrompt`).
 final class PromptTests: XCTestCase {
-    private func siennaIdentity(never: [String]) -> PromptIdentity {
-        PromptIdentity(name: "Sienna Vale", look: SampleData.siennaLook, referenceCount: 6, neverAdd: never)
+    private func demoIdentity(never: [String]) -> PromptIdentity {
+        PromptIdentity(name: "Demo model", look: SampleData.demoLook, referenceCount: 6, neverAdd: never)
     }
 
     func testMatchesDesktopJS() throws {
@@ -28,7 +28,7 @@ final class PromptTests: XCTestCase {
             if let v = input["direction"] as? String { s.direction = v }
             if let v = input["lockSeed"] as? Bool { s.lockSeed = v }
             let outfit = (input["outfit"] as? Int ?? 0) == 1 ? "Crystal dress" : "Green set"
-            let id = siennaIdentity(never: never)
+            let id = demoIdentity(never: never)
 
             let expected = c["shoot"] as! [String: String]
             let slots = PromptEngine.shoot(identity: id, outfitName: outfit, settings: s)
@@ -51,7 +51,7 @@ final class PromptTests: XCTestCase {
     }
 
     func testEmptyNeverAddListIsDropped() {
-        let id = siennaIdentity(never: [])
+        let id = demoIdentity(never: [])
         let slots = PromptEngine.shoot(identity: id, outfitName: "Green set", settings: ShootSettings())
         XCTAssertEqual(slots.first { $0.key == "negative" }?.text, "Never add: logos, extra fingers, warped jewellery.")
         let video = PromptEngine.video(VideoPromptInput(identity: id, outfitName: "Green set"))
@@ -62,7 +62,7 @@ final class PromptTests: XCTestCase {
     func testDirectionAndHouseStyleAreDroppedWhenBlank() {
         var s = ShootSettings()
         s.direction = "   "
-        let slots = PromptEngine.shoot(identity: siennaIdentity(never: ["tattoos"]), outfitName: "Green set", settings: s, houseStyle: " ")
+        let slots = PromptEngine.shoot(identity: demoIdentity(never: ["tattoos"]), outfitName: "Green set", settings: s, houseStyle: " ")
         XCTAssertNil(slots.first { $0.key == "direction" })
         XCTAssertNil(slots.first { $0.key == "style" })
     }
@@ -82,7 +82,7 @@ final class PromptTests: XCTestCase {
     }
 
     func testSheetShotUsesAngleFraming() {
-        let p = PromptEngine.sheetShot(identity: siennaIdentity(never: ["rings"]), angle: .profile)
+        let p = PromptEngine.sheetShot(identity: demoIdentity(never: ["rings"]), angle: .profile)
         XCTAssertTrue(p.contains("face · profile shot on a plain light-grey studio background"))
         XCTAssertTrue(p.contains("Never add: rings, logos, extra fingers, warped jewellery."))
     }

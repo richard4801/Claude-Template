@@ -494,6 +494,7 @@ struct EnginesSettingsSection: View {
                 }
             }
             ListBox { KeepReadyRow() }
+            ImageModelsSection()
             imageEngineSection
             H2("Models")
             ListBox {

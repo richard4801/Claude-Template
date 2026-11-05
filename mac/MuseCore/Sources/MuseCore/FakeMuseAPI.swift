@@ -5,17 +5,17 @@ import Foundation
 /// and progress arrives as events. Like the desktop prototype, jobs run one after another.
 public actor FakeMuseAPI: MuseAPI {
     private let speed: Double
-    private let genDelay: Double
+    let genDelay: Double
     private let storeDir: URL?
-    private let hub = EventHub()
+    let hub = EventHub()
 
-    private var models = SampleData.models()
-    private var outfits = SampleData.outfits()
-    private var jobs: [Job]
-    private var takes: [Take]
+    var models = SampleData.models()
+    var outfits = SampleData.outfits()
+    var jobs: [Job]
+    var takes: [Take]
     private var clips: [String: Clip] = [:]
-    private var bal = SampleData.balance()
-    private var failNext = false
+    var bal = SampleData.balance()
+    var failNext = false
     /// The seeded queue waits for "Run queue", like the prototype. Any new job starts it.
     private var held = true
     private var runner: Task<Void, Never>?
@@ -29,7 +29,7 @@ public actor FakeMuseAPI: MuseAPI {
     private var signedIn: User?
     private var members: [Member] = FakeMuseAPI.demoMembers()
     private var engine = ImageEngine(provider: "simulated", model: "bundled-stills", available: ["simulated": true, "fal": false, "custom-http": true])
-    private var studio = StudioSettings(features: StudioFeatures(replicate: true, video: .fallback, photo: .standard))
+    var studio = StudioSettings(features: StudioFeatures(replicate: true, video: .fallback, photo: .standard, tools: ToolsFeatures()))
     /// The demo studio balance: one opening top-up, then what the owner records.
     private var topUps: [TopUp] = [TopUp(id: "tu_demo", amountUsd: 25, note: "Opening balance", paidAt: nowMs() - 864_000_000)]
     /// Templates with their layers (the "server side"). Only the owner's ever leave the actor with layers.
@@ -43,6 +43,11 @@ public actor FakeMuseAPI: MuseAPI {
     private let warmEpoch = nowMs()
     private var warmTask: Task<Void, Never>?
     private let warmBoot: Double
+    /// Model tools (plans/api.md "Model tools"): the owner's model per image step, tool runs and sheet versions.
+    var stepModels: [ImageStep: (model: String, extra: [String: JSONValue])] = [:]
+    var toolRuns: [ToolRun] = []
+    var toolTasks: [String: Task<Void, Never>] = [:]
+    var sheetVersionsByModel: [String: [SheetVersion]] = [:]
 
     /// - Parameters:
     ///   - speed: simulation speed; 0 freezes the queue (tests).
@@ -202,9 +207,15 @@ public actor FakeMuseAPI: MuseAPI {
     /// Members get the caps and features only; the owner also gets Settings → Engines.
     public func studioSettings() -> StudioSettings {
         guard isOwner else {
-            return StudioSettings(capPerJob: studio.capPerJob, capPerDay: studio.capPerDay, capPerUserDay: studio.capPerUserDay, tokenUsd: studio.tokenUsd, features: studio.features)
+            // Members get neutral labels only: no model names.
+            var f = studio.features
+            f.tools?.enhance.models = nil
+            f.tools?.dressUp.models = nil
+            return StudioSettings(capPerJob: studio.capPerJob, capPerDay: studio.capPerDay, capPerUserDay: studio.capPerUserDay, tokenUsd: studio.tokenUsd, features: f)
         }
         var s = studio
+        s.features.tools?.enhance.models = toolModelRefs(ImageStep.enhanceSteps)
+        s.features.tools?.dressUp.models = toolModelRefs(ImageStep.dressUpSteps)
         s.engines = Engines(list: [EngineStatus(id: "replicate", name: "Replicate", usedFor: "Draft, Standard and HD video · photos", keySet: false, status: "simulated"),
                                    EngineStatus(id: "runpod", name: "RunPod", usedFor: "Edit, Fast · beta, Upscale", keySet: false, status: "simulated")],
                             imageEngine: engine, addOn: AddOnEngine(maxGpus: studio.maxGpus, overheadPayer: studio.overheadPayer),
@@ -213,7 +224,7 @@ public actor FakeMuseAPI: MuseAPI {
     }
 
     /// Demo mode signs in as the owner; a demo account with role "member" sees the member view.
-    private var isOwner: Bool { (signedIn?.role ?? "owner") == "owner" }
+    var isOwner: Bool { (signedIn?.role ?? "owner") == "owner" }
 
     public func updateStudioSettings(_ patch: StudioSettingsPatch) throws -> StudioSettings {
         guard isOwner else { throw ApiError("owner_only", "Only the studio owner can change studio settings") }
@@ -236,7 +247,7 @@ public actor FakeMuseAPI: MuseAPI {
 
     // MARK: Models
 
-    public func listModels() -> [MuseModel] { models }
+    public func listModels() -> [MuseModel] { models.filter { !$0.archived } }
 
     public func createModel(_ req: CreateModelRequest) throws -> MuseModel {
         let name = req.name.trimmingCharacters(in: .whitespaces)
@@ -258,7 +269,7 @@ public actor FakeMuseAPI: MuseAPI {
     }
 
     public func fillAngles(modelId: String) async throws -> FillAnglesResponse {
-        var m = try model(modelId)
+        var m = try activeModel(modelId)
         let missing = m.slots.filter { $0.image == nil && !$0.busy }
         let cost = photoPricing.sheetAngles(missing.count)
         if cost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough balance · top up in Credits") }
@@ -326,7 +337,7 @@ public actor FakeMuseAPI: MuseAPI {
     }
 
     public func buildLoraCandidates(modelId: String) throws -> Lora {
-        let m = try model(modelId)
+        let m = try activeModel(modelId)
         var l = loras[modelId] ?? Lora(modelId: modelId)
         if l.isBusy { throw ApiError("busy", "The LoRA is busy · wait for it to finish") }
         if m.filled == 0 { throw ApiError("bad_request", "Add character-sheet shots first") }
@@ -523,12 +534,17 @@ public actor FakeMuseAPI: MuseAPI {
 
     // MARK: Outfits
 
-    public func listOutfits() -> [Outfit] { outfits }
+    /// Archived models' outfits are left out.
+    public func listOutfits() -> [Outfit] {
+        let archived = Set(models.filter(\.archived).map(\.id))
+        return outfits.filter { !archived.contains($0.modelId) }
+    }
 
     public func createOutfit(_ req: CreateOutfitRequest) async throws -> Outfit {
+        try checkOverrides(req.models)
+        let m = try activeModel(req.modelId)
         let cost = req.mode == "own" ? 0 : photoPricing.outfitSet()
         if cost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough balance · top up in Credits") }
-        let m = try model(req.modelId)
         charge(cost)
         let name = req.name.trimmingCharacters(in: .whitespaces)
         let label = name.isEmpty ? (req.description.isEmpty ? "New outfit" : String(req.description.prefix(28))) : name
@@ -593,6 +609,7 @@ public actor FakeMuseAPI: MuseAPI {
     public func listJobs() -> [Job] { jobs.sorted { $0.createdAt > $1.createdAt } }
 
     public func createJob(_ req: JobRequest) throws -> Job {
+        if let m = models.first(where: { $0.id == req.modelId }), m.archived { throw ApiError.modelArchived }
         if let clip = clips[req.clipId], !clip.ok { throw ApiError("clip_failed_checks", "Fix the clip first: one person, no watermark, 15s or less") }
         var req = req
         if req.engine == Engine.replicate.rawValue {
@@ -756,6 +773,8 @@ public actor FakeMuseAPI: MuseAPI {
     public func deleteTake(id: String) { takes.removeAll { $0.id == id } }
 
     public func shoot(_ req: ShootRequest) async throws -> [Take] {
+        try checkOverrides(req.models)
+        _ = try activeModel(req.modelId)
         if let tid = req.templateId { return try await templateShoot(tid, req) }
         let count = max(1, min(8, req.count))
         let cost = photoPricing.shoot(count: count)
@@ -1075,9 +1094,9 @@ public actor FakeMuseAPI: MuseAPI {
 
     // MARK: Helpers
 
-    private var photoPricing: PhotoPricing { studio.features.photo ?? .standard }
+    var photoPricing: PhotoPricing { studio.features.photo ?? .standard }
 
-    private func charge(_ cost: Double) {
+    func charge(_ cost: Double) {
         bal.balance = max(0, bal.balance - cost)
         bal.month += cost
         bal.today = (bal.today ?? 0) + cost
@@ -1085,7 +1104,7 @@ public actor FakeMuseAPI: MuseAPI {
         bal = Self.ownerView(bal, members: members)
     }
 
-    private func refund(_ cost: Double) {
+    func refund(_ cost: Double) {
         bal.balance += cost
         bal.month = max(0, bal.month - cost)
         bal.today = max(0, (bal.today ?? 0) - cost)
@@ -1093,12 +1112,12 @@ public actor FakeMuseAPI: MuseAPI {
         bal = Self.ownerView(bal, members: members)
     }
 
-    private func model(_ id: String) throws -> MuseModel {
+    func model(_ id: String) throws -> MuseModel {
         guard let m = models.first(where: { $0.id == id }) else { throw ApiError("not_found", "Model not found") }
         return m
     }
 
-    private func replace(_ m: MuseModel) {
+    func replace(_ m: MuseModel) {
         if let i = models.firstIndex(where: { $0.id == m.id }) { models[i] = m }
     }
 }

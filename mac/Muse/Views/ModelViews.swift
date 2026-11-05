@@ -124,9 +124,13 @@ struct ProfileView: View {
                     Button("Edit character sheet") { store.uploadSheet(m) }
                     Button("Identity LoRA") { store.openLora(m.id) }
                     Button("Add outfit") { store.openOutfitSheet(for: m.id) }
+                    Button("Enhance character sheet") { store.openEnhance(m) }
+                    Button("Dress up") { store.openDressUp(m) }
+                    Button("Previous sheet versions") { store.openVersions(m.id) }
                     Button("Duplicate model") { store.duplicate(m) }
                     Button("Share profile card") { store.shareProfileCard(m) }
                     Divider()
+                    if store.isOwner { Button("Archive model…") { store.archiveModel(m) } }
                     Button("Delete model…", role: .destructive) { store.deleteModel(m) }
                 }
             }
@@ -149,15 +153,19 @@ struct ProfileView: View {
             SectionHeader(title: "Character sheet") {
                 HStack(spacing: 10) {
                     Muted("Hover a shot to replace it")
+                    LinkText("Versions") { store.openVersions(m.id) }
                     MButton("Upload images", icon: "square.and.arrow.up", size: .small) { store.uploadSheet(m) }
+                    if store.toolsFeatures?.enhance.available ?? false {
+                        MButton("Enhance", icon: "wand.and.stars", size: .small) { store.openEnhance(m) }
+                    }
+                    if store.toolsFeatures?.dressUp.available ?? false {
+                        MButton("Dress up", icon: "tshirt", size: .small) { store.openDressUp(m) }
+                    }
                 }
             }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 6), alignment: .leading, spacing: 12) {
-                ForEach(SheetAngle.allCases) { a in
-                    let s = m.slot(a.rawValue)
-                    SheetSlotTile(label: a.label, ref: s?.image, ai: s?.isAI ?? false, busy: s?.busy ?? false, primary: "Replace", secondary: "Retake with AI",
-                                  onPrimary: { store.replaceSlot(m, a) }, onSecondary: { store.retakeSlot(m, a) }, onDrop: { store.replaceSlot(m, a, with: $0) })
-                }
+            VStack(alignment: .leading, spacing: 16) {
+                sheetGroup(m, "Face close-ups", SheetAngle.faceGroup)
+                sheetGroup(m, "Full body", SheetAngle.bodyGroup)
             }
             .dropDestination(for: URL.self) { urls, _ in
                 store.uploadSheet(m, urls: urls)
@@ -185,11 +193,19 @@ struct ProfileView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Text(o.name).font(t.body(14, .bold))
+                            if o.isDressUp { Pill("Dress up") }
                             Spacer()
-                            Muted("front · ¾ · side · back")
+                            Muted(o.isDressUp ? "body · then faces" : "front · ¾ · side · back")
                         }
                         HStack(spacing: 8) {
                             ForEach(0..<4, id: \.self) { i in Media(ref: o.angles.indices.contains(i) ? o.angles[i] : nil, ratio: 0.75) }
+                        }
+                        if let faces = o.faces, faces.contains(where: { $0 != nil }) {
+                            HStack(spacing: 8) {
+                                ForEach(0..<faces.count, id: \.self) { i in Media(ref: faces[i], ratio: 0.75) }
+                                Spacer()
+                            }
+                            .frame(maxWidth: 220)
                         }
                     }
                     .padding(12)
@@ -219,6 +235,23 @@ struct ProfileView: View {
                     Chip("Add", icon: "plus") { addingNever = true }
                 }
             }
+            }
+        }
+    }
+}
+
+extension ProfileView {
+    /// One group of the character sheet (face close-ups, or the full body).
+    func sheetGroup(_ m: MuseModel, _ title: String, _ angles: [SheetAngle]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Lbl(title)
+            // Four columns for both groups, so every tile is the same size.
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), alignment: .leading, spacing: 12) {
+                ForEach(angles) { a in
+                    let s = m.slot(a.rawValue)
+                    SheetSlotTile(label: a.label, ref: s?.image, ai: s?.isAI ?? false, busy: s?.busy ?? false, primary: "Replace", secondary: "Retake with AI",
+                                  onPrimary: { store.replaceSlot(m, a) }, onSecondary: { store.retakeSlot(m, a) }, onDrop: { store.replaceSlot(m, a, with: $0) })
+                }
             }
         }
     }
@@ -298,9 +331,9 @@ struct CreateModelView: View {
                     return true
                 } isTargeted: { dropTargeted = $0 }
 
-                SectionHeader(title: "\(c.filled)/6 shots") { Muted("Two face close-ups give the sharpest face") }
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 6), alignment: .leading, spacing: 12) {
-                    ForEach(SheetAngle.allCases) { a in
+                SectionHeader(title: "\(c.filled)/\(SheetAngle.allCases.count) shots") { Muted("Two face close-ups give the sharpest face") }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 7), alignment: .leading, spacing: 12) {
+                    ForEach(SheetAngle.faceGroup + SheetAngle.bodyGroup) { a in
                         let slot = c.slots[a]
                         SheetSlotTile(label: a.label, ref: ref(slot), ai: isAI(slot), busy: slot == .busy, primary: "Replace", secondary: "Remove",
                                       onPrimary: { store.setDraftSlot(a) }, onSecondary: { store.clearDraftSlot(a) }, onDrop: { store.setDraftSlot(a, $0) },
@@ -312,8 +345,8 @@ struct CreateModelView: View {
                          "No \(c.faces > 0 ? "profile" : "face") close-up yet. You can still save, but faces come out softer without both close-ups.")
                         .padding(.top, 16)
                 }
-                if c.filled > 0 && c.filled < 6 && !c.busy {
-                    let missing = 6 - c.filled
+                if c.filled > 0 && c.filled < SheetAngle.allCases.count && !c.busy {
+                    let missing = SheetAngle.allCases.count - c.filled
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Fill missing angles from your images").font(t.body(14, .bold))

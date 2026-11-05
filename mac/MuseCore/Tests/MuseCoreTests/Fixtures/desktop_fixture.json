@@ -9725,7 +9725,7 @@
   {
    "input": {},
    "shoot": {
-    "identity": "Sienna Vale: young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin. Identity from 6 locked reference images.",
+    "identity": "Demo model: young woman, shoulder-length dark brown hair, brown eyes, warm olive skin. Identity from 6 locked reference images.",
     "outfit": "Wearing: green set (outfit reference set).",
     "scene": "Scene: rooftop · golden hour.",
     "camera": "Camera: medium shot, 35mm lens, f/2.8.",
@@ -9735,7 +9735,7 @@
     "negative": "Never add: tattoos, rings, logos, extra fingers, warped jewellery.",
     "seed": "Seed: locked (retakes keep the same look)."
    },
-   "video": "subject_definitions:\n  Subject 1: the performer in the source clip, a young woman with a floral forearm tattoo and two silver rings.\n  Target: Sienna Vale, young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin (reference images 1–6).\nsummary:\n  Replace Subject 1 with Sienna Vale, keeping the exact motion, timing, camera and background.\nretention_analysis:\n  Keep: pose, choreography, hand positions, room, lighting, audio (fully_copy).\n  Replace: face, hair, skin, body proportions, outfit.\ndetailed_description:\n  Sienna Vale wears the green set from the outfit reference images. None of Subject 1's tattoos or rings remain.\nsteps: 10 · clip: 5.2s · takes: 1"
+   "video": "subject_definitions:\n  Subject 1: the performer in the source clip, a young woman with a floral forearm tattoo and two silver rings.\n  Target: Demo model, young woman, shoulder-length dark brown hair, brown eyes, warm olive skin (reference images 1–6).\nsummary:\n  Replace Subject 1 with Demo model, keeping the exact motion, timing, camera and background.\nretention_analysis:\n  Keep: pose, choreography, hand positions, room, lighting, audio (fully_copy).\n  Replace: face, hair, skin, body proportions, outfit.\ndetailed_description:\n  Demo model wears the green set from the outfit reference images. None of Subject 1's tattoos or rings remain.\nsteps: 10 · clip: 5.2s · takes: 1"
   },
   {
    "input": {
@@ -9750,7 +9750,7 @@
     "lockSeed": false
    },
    "shoot": {
-    "identity": "Sienna Vale: young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin. Identity from 6 locked reference images.",
+    "identity": "Demo model: young woman, shoulder-length dark brown hair, brown eyes, warm olive skin. Identity from 6 locked reference images.",
     "outfit": "Wearing: crystal dress (outfit reference set).",
     "scene": "Scene: café window.",
     "camera": "Camera: close shot, 85mm lens, f/1.4, compressed background, creamy bokeh.",
@@ -9760,7 +9760,7 @@
     "negative": "Never add: tattoos, rings, logos, extra fingers, warped jewellery.",
     "seed": "Seed: new each shot."
    },
-   "video": "subject_definitions:\n  Subject 1: the performer in the source clip, a young woman with a floral forearm tattoo and two silver rings.\n  Target: Sienna Vale, young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin (reference images 1–6).\nsummary:\n  Replace Subject 1 with Sienna Vale, keeping the exact motion, timing, camera and background.\nretention_analysis:\n  Keep: pose, choreography, hand positions, room, lighting, audio (fully_copy).\n  Replace: face, hair, skin, body proportions, outfit.\ndetailed_description:\n  Sienna Vale wears the crystal dress from the outfit reference images. None of Subject 1's tattoos or rings remain.\nsteps: 10 · clip: 5.2s · takes: 1"
+   "video": "subject_definitions:\n  Subject 1: the performer in the source clip, a young woman with a floral forearm tattoo and two silver rings.\n  Target: Demo model, young woman, shoulder-length dark brown hair, brown eyes, warm olive skin (reference images 1–6).\nsummary:\n  Replace Subject 1 with Demo model, keeping the exact motion, timing, camera and background.\nretention_analysis:\n  Keep: pose, choreography, hand positions, room, lighting, audio (fully_copy).\n  Replace: face, hair, skin, body proportions, outfit.\ndetailed_description:\n  Demo model wears the crystal dress from the outfit reference images. None of Subject 1's tattoos or rings remain.\nsteps: 10 · clip: 5.2s · takes: 1"
   },
   {
    "input": {
@@ -9773,7 +9773,7 @@
     ]
    },
    "shoot": {
-    "identity": "Sienna Vale: young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin. Identity from 6 locked reference images.",
+    "identity": "Demo model: young woman, shoulder-length dark brown hair, brown eyes, warm olive skin. Identity from 6 locked reference images.",
     "outfit": "Wearing: green set (outfit reference set).",
     "scene": "Scene: sunlit rooftop bar, string lights.",
     "camera": "Camera: medium shot, 16mm lens, f/2.8, slight wide-angle distortion.",
@@ -9783,7 +9783,7 @@
     "negative": "Never add: tattoos, rings, necklaces, logos, extra fingers, warped jewellery.",
     "seed": "Seed: locked (retakes keep the same look)."
    },
-   "video": "subject_definitions:\n  Subject 1: the performer in the source clip, a young woman with a floral forearm tattoo and two silver rings.\n  Target: Sienna Vale, young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin (reference images 1–6).\nsummary:\n  Replace Subject 1 with Sienna Vale, keeping the exact motion, timing, camera and background.\nretention_analysis:\n  Keep: pose, choreography, hand positions, room, lighting, audio (fully_copy).\n  Replace: face, hair, skin, body proportions, outfit.\ndetailed_description:\n  Sienna Vale wears the green set from the outfit reference images. None of Subject 1's tattoos or rings or necklaces remain.\nsteps: 10 · clip: 5.2s · takes: 1"
+   "video": "subject_definitions:\n  Subject 1: the performer in the source clip, a young woman with a floral forearm tattoo and two silver rings.\n  Target: Demo model, young woman, shoulder-length dark brown hair, brown eyes, warm olive skin (reference images 1–6).\nsummary:\n  Replace Subject 1 with Demo model, keeping the exact motion, timing, camera and background.\nretention_analysis:\n  Keep: pose, choreography, hand positions, room, lighting, audio (fully_copy).\n  Replace: face, hair, skin, body proportions, outfit.\ndetailed_description:\n  Demo model wears the green set from the outfit reference images. None of Subject 1's tattoos or rings or necklaces remain.\nsteps: 10 · clip: 5.2s · takes: 1"
   },
   {
    "input": {
@@ -9792,7 +9792,7 @@
     "never": []
    },
    "shoot": {
-    "identity": "Sienna Vale: young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin. Identity from 6 locked reference images.",
+    "identity": "Demo model: young woman, shoulder-length dark brown hair, brown eyes, warm olive skin. Identity from 6 locked reference images.",
     "outfit": "Wearing: green set (outfit reference set).",
     "scene": "Scene: rooftop · golden hour.",
     "camera": "Camera: medium shot, 24mm lens, f/2.8, slight wide-angle distortion.",
@@ -9802,7 +9802,7 @@
     "negative": "Never add: , logos, extra fingers, warped jewellery.",
     "seed": "Seed: locked (retakes keep the same look)."
    },
-   "video": "subject_definitions:\n  Subject 1: the performer in the source clip, a young woman with a floral forearm tattoo and two silver rings.\n  Target: Sienna Vale, young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin (reference images 1–6).\nsummary:\n  Replace Subject 1 with Sienna Vale, keeping the exact motion, timing, camera and background.\nretention_analysis:\n  Keep: pose, choreography, hand positions, room, lighting, audio (fully_copy).\n  Replace: face, hair, skin, body proportions, outfit.\ndetailed_description:\n  Sienna Vale wears the green set from the outfit reference images. None of Subject 1's  remain.\nsteps: 10 · clip: 5.2s · takes: 1"
+   "video": "subject_definitions:\n  Subject 1: the performer in the source clip, a young woman with a floral forearm tattoo and two silver rings.\n  Target: Demo model, young woman, shoulder-length dark brown hair, brown eyes, warm olive skin (reference images 1–6).\nsummary:\n  Replace Subject 1 with Demo model, keeping the exact motion, timing, camera and background.\nretention_analysis:\n  Keep: pose, choreography, hand positions, room, lighting, audio (fully_copy).\n  Replace: face, hair, skin, body proportions, outfit.\ndetailed_description:\n  Demo model wears the green set from the outfit reference images. None of Subject 1's  remain.\nsteps: 10 · clip: 5.2s · takes: 1"
   },
   {
    "input": {
@@ -9814,7 +9814,7 @@
     "use": "full"
    },
    "shoot": {
-    "identity": "Sienna Vale: young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin. Identity from 6 locked reference images.",
+    "identity": "Demo model: young woman, shoulder-length dark brown hair, brown eyes, warm olive skin. Identity from 6 locked reference images.",
     "outfit": "Wearing: green set (outfit reference set).",
     "scene": "Scene: rooftop · golden hour.",
     "camera": "Camera: medium shot, 35mm lens, f/2.8.",
@@ -9824,7 +9824,7 @@
     "negative": "Never add: tattoos, rings, logos, extra fingers, warped jewellery.",
     "seed": "Seed: locked (retakes keep the same look)."
    },
-   "video": "subject_definitions:\n  Subject 1: the performer in the source clip, a young woman with a floral forearm tattoo and two silver rings.\n  Target: Sienna Vale, young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin (reference images 1–6).\nsummary:\n  Replace Subject 1 with Sienna Vale, keeping the exact motion, timing, camera and new background photo (busy).\nretention_analysis:\n  Keep: pose, choreography, hand positions, room, lighting.\n  Replace: face, hair, skin, body proportions, outfit.\ndetailed_description:\n  Sienna Vale wears the green set from the outfit reference images. None of Subject 1's tattoos or rings remain.\nsteps: 4 (Fast · beta, fixed) · clip: 9.4s · takes: 3"
+   "video": "subject_definitions:\n  Subject 1: the performer in the source clip, a young woman with a floral forearm tattoo and two silver rings.\n  Target: Demo model, young woman, shoulder-length dark brown hair, brown eyes, warm olive skin (reference images 1–6).\nsummary:\n  Replace Subject 1 with Demo model, keeping the exact motion, timing, camera and new background photo (busy).\nretention_analysis:\n  Keep: pose, choreography, hand positions, room, lighting.\n  Replace: face, hair, skin, body proportions, outfit.\ndetailed_description:\n  Demo model wears the green set from the outfit reference images. None of Subject 1's tattoos or rings remain.\nsteps: 4 (Fast · beta, fixed) · clip: 9.4s · takes: 3"
   },
   {
    "input": {
@@ -9833,7 +9833,7 @@
     "motion": "still"
    },
    "shoot": {
-    "identity": "Sienna Vale: young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin. Identity from 6 locked reference images.",
+    "identity": "Demo model: young woman, shoulder-length dark brown hair, brown eyes, warm olive skin. Identity from 6 locked reference images.",
     "outfit": "Wearing: green set (outfit reference set).",
     "scene": "Scene: rooftop · golden hour.",
     "camera": "Camera: medium shot, 35mm lens, f/2.8.",
@@ -9843,7 +9843,7 @@
     "negative": "Never add: tattoos, rings, logos, extra fingers, warped jewellery.",
     "seed": "Seed: locked (retakes keep the same look)."
    },
-   "video": "subject_definitions:\n  Subject 1: the performer in the source clip, a young woman with a floral forearm tattoo and two silver rings.\n  Target: Sienna Vale, young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin (reference images 1–6).\nsummary:\n  Replace Subject 1 with Sienna Vale, keeping the exact motion, timing, camera and new background photo (still).\nretention_analysis:\n  Keep: pose, choreography, hand positions, room, lighting, audio (fully_copy).\n  Replace: face, hair, skin, body proportions, outfit.\ndetailed_description:\n  Sienna Vale wears the green set from the outfit reference images. None of Subject 1's tattoos or rings remain.\nsteps: 17 · clip: 5.2s · takes: 1"
+   "video": "subject_definitions:\n  Subject 1: the performer in the source clip, a young woman with a floral forearm tattoo and two silver rings.\n  Target: Demo model, young woman, shoulder-length dark brown hair, brown eyes, warm olive skin (reference images 1–6).\nsummary:\n  Replace Subject 1 with Demo model, keeping the exact motion, timing, camera and new background photo (still).\nretention_analysis:\n  Keep: pose, choreography, hand positions, room, lighting, audio (fully_copy).\n  Replace: face, hair, skin, body proportions, outfit.\ndetailed_description:\n  Demo model wears the green set from the outfit reference images. None of Subject 1's tattoos or rings remain.\nsteps: 17 · clip: 5.2s · takes: 1"
   }
  ]
 }

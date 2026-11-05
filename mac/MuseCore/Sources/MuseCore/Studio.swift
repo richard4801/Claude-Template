@@ -560,9 +560,12 @@ public struct StudioFeatures: Codable, Hashable, Sendable {
     public var video: VideoFeatures?
     /// Photo price estimates. nil = `PhotoPricing.standard`.
     public var photo: PhotoPricing?
+    /// Enhance and Dress up (plans/api.md "Model tools" §4). nil = this server doesn't have them.
+    public var tools: ToolsFeatures?
 
     public init(standard: Bool = true, fastBeta: Bool = true, lipSync: Bool = true, loraTraining: Bool = true, replaceAudio: Bool = false, maxClipSec: Double = 15,
-                replicate: Bool = false, video: VideoFeatures? = nil, photo: PhotoPricing? = nil) {
+                replicate: Bool = false, video: VideoFeatures? = nil, photo: PhotoPricing? = nil, tools: ToolsFeatures? = nil) {
+        self.tools = tools
         self.replicate = replicate
         self.video = video
         self.photo = photo
@@ -574,7 +577,7 @@ public struct StudioFeatures: Codable, Hashable, Sendable {
         self.maxClipSec = maxClipSec
     }
 
-    enum CodingKeys: String, CodingKey { case standard, fastBeta, lipSync, loraTraining, replaceAudio, maxClipSec, replicate, video, photo }
+    enum CodingKeys: String, CodingKey { case standard, fastBeta, lipSync, loraTraining, replaceAudio, maxClipSec, replicate, video, photo, tools }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         standard = c.v(.standard, true)
@@ -586,6 +589,7 @@ public struct StudioFeatures: Codable, Hashable, Sendable {
         replicate = c.v(.replicate, false)
         video = c.o(.video)
         photo = c.o(.photo)
+        tools = c.o(.tools)
     }
 }
 
@@ -917,6 +921,7 @@ extension ApiError {
         case "provider_rate_limited": return "Busy right now · you weren't charged. Try again in a minute."
         case "provider_out_of_credit": return MemberText.ownerTold
         case "upscale_unavailable": return "Upscale is coming soon"
+        case "model_archived": return "This model is archived · restore her in Settings → Archived models"
         // Retired codes from older servers, in member-safe words.
         case "owner_balance_low", "balance_unavailable", "topup_unavailable": return MemberText.wentWrong
         default: return nil

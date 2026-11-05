@@ -17,6 +17,10 @@ struct RootView: View {
             if store.outfitSheet != nil { OutfitSheetView().transition(.opacity) }
             if store.postDraft != nil { PostSheetView().transition(.opacity) }
             if store.templateForm != nil { TemplateSheetView().transition(.opacity) }
+            if store.enhanceDraft != nil { EnhanceSheetView().transition(.opacity) }
+            if store.dressUpDraft != nil { DressUpSheetView().transition(.opacity) }
+            if store.versionsDraft != nil { SheetVersionsSheet().transition(.opacity) }
+            if store.catalog != nil && store.isOwner { ModelCatalogSheet().transition(.opacity) }
             if store.paletteOpen { PaletteView().transition(.opacity) }
             if store.warmPrompt != nil && store.isOwner { WarmPromptView().transition(.opacity) }
             ToastView()

@@ -131,7 +131,7 @@ public struct Lora: Codable, Hashable, Sendable {
     /// The version new renders use, or nil when there's no trained version or the user turned it off.
     public var activeVersion: Int? { use && version > 0 ? version : nil }
 
-    /// The trigger token, e.g. "sienna_v1": the model's first name, lower-case letters and digits only.
+    /// The trigger token, e.g. "demo_v1": the model's first name, lower-case letters and digits only.
     public static func token(modelName: String, version: Int) -> String {
         let first = modelName.split(separator: " ").first.map(String.init) ?? modelName
         let clean = first.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) && $0.isASCII }

@@ -2,7 +2,7 @@ import XCTest
 @testable import MuseCore
 
 final class LoraPromptTests: XCTestCase {
-    private var sienna: MuseModel { SampleData.models().first { $0.id == SampleData.sienna }! }
+    private var demoModel: MuseModel { SampleData.models().first { $0.id == SampleData.demo }! }
 
     func testPricing() {
         XCTAssertEqual(PhotoPricing.label(LoraPricing.setCost), "about $3.03")
@@ -17,35 +17,35 @@ final class LoraPromptTests: XCTestCase {
     }
 
     func testTokenAndActiveVersion() {
-        XCTAssertEqual(Lora.token(modelName: "Sienna Vale", version: 1), "sienna_v1")
+        XCTAssertEqual(Lora.token(modelName: "Demo model", version: 1), "demo_v1")
         XCTAssertEqual(Lora.token(modelName: "Zoë-Ann K", version: 3), "zoann_v3")
         var l = Lora(modelId: "m", version: 0, state: "review")
-        XCTAssertNil(l.promptToken(modelName: "Sienna Vale"), "never trained")
+        XCTAssertNil(l.promptToken(modelName: "Demo model"), "never trained")
         l.version = 2
-        XCTAssertEqual(l.promptToken(modelName: "Sienna Vale"), "sienna_v2", "a retrain keeps using the last ready version")
+        XCTAssertEqual(l.promptToken(modelName: "Demo model"), "demo_v2", "a retrain keeps using the last ready version")
         l.use = false
-        XCTAssertNil(l.promptToken(modelName: "Sienna Vale"), "switched off: references only")
+        XCTAssertNil(l.promptToken(modelName: "Demo model"), "switched off: references only")
     }
 
     func testIdentityLayerAddsThePhotoLoRA() {
-        let ready = Lora(modelId: sienna.id, version: 1, state: "ready", use: true)
-        let slots = PromptEngine.shoot(identity: sienna.promptIdentity(lora: ready), outfitName: "Green set", settings: ShootSettings())
-        XCTAssertEqual(slots.first?.text, "Sienna Vale: \(SampleData.siennaLook). Identity from 6 locked reference images + LoRA sienna_v1 (photo).")
+        let ready = Lora(modelId: demoModel.id, version: 1, state: "ready", use: true)
+        let slots = PromptEngine.shoot(identity: demoModel.promptIdentity(lora: ready), outfitName: "Green set", settings: ShootSettings())
+        XCTAssertEqual(slots.first?.text, "Demo model: \(SampleData.demoLook). Identity from 6 locked reference images + LoRA demo_v1 (photo).")
         // Off: exactly the references-only wording.
         var off = ready
         off.use = false
-        let plain = PromptEngine.shoot(identity: sienna.promptIdentity(lora: off), outfitName: "Green set", settings: ShootSettings())
-        XCTAssertEqual(plain.first?.text, "Sienna Vale: \(SampleData.siennaLook). Identity from 6 locked reference images.")
-        XCTAssertEqual(PromptEngine.shoot(identity: sienna.promptIdentity, outfitName: "Green set", settings: ShootSettings()), plain)
+        let plain = PromptEngine.shoot(identity: demoModel.promptIdentity(lora: off), outfitName: "Green set", settings: ShootSettings())
+        XCTAssertEqual(plain.first?.text, "Demo model: \(SampleData.demoLook). Identity from 6 locked reference images.")
+        XCTAssertEqual(PromptEngine.shoot(identity: demoModel.promptIdentity, outfitName: "Green set", settings: ShootSettings()), plain)
         // Sheet fills and outfit sets use the photo LoRA too.
-        XCTAssertTrue(PromptEngine.sheetShot(identity: sienna.promptIdentity(lora: ready), angle: .back).contains("+ LoRA sienna_v1 (photo)."))
+        XCTAssertTrue(PromptEngine.sheetShot(identity: demoModel.promptIdentity(lora: ready), angle: .back).contains("+ LoRA demo_v1 (photo)."))
     }
 
     func testVideoPromptAddsTheVideoLoRA() {
-        let ready = Lora(modelId: sienna.id, version: 2, state: "ready", use: true)
-        let v = PromptEngine.video(VideoPromptInput(identity: sienna.promptIdentity(lora: ready), outfitName: "Green set"))
-        XCTAssertTrue(v.contains("Target: Sienna Vale, \(SampleData.siennaLook) (reference images 1–6, LoRA sienna_v2 video)."), v)
-        let plain = PromptEngine.video(VideoPromptInput(identity: sienna.promptIdentity, outfitName: "Green set"))
+        let ready = Lora(modelId: demoModel.id, version: 2, state: "ready", use: true)
+        let v = PromptEngine.video(VideoPromptInput(identity: demoModel.promptIdentity(lora: ready), outfitName: "Green set"))
+        XCTAssertTrue(v.contains("Target: Demo model, \(SampleData.demoLook) (reference images 1–6, LoRA demo_v2 video)."), v)
+        let plain = PromptEngine.video(VideoPromptInput(identity: demoModel.promptIdentity, outfitName: "Green set"))
         XCTAssertTrue(plain.contains("(reference images 1–6).\n"), plain)
         XCTAssertFalse(plain.contains("LoRA"))
     }
@@ -63,7 +63,7 @@ final class LoraFlowTests: XCTestCase {
 
     func testBuildReviewTrainAndUse() async throws {
         let api = FakeMuseAPI(speed: 0, genDelay: 0.05, loraSeconds: 0.4)
-        let id = SampleData.sienna
+        let id = SampleData.demo
         let b0 = try await api.balance().balance
         let none = try await api.lora(modelId: id)
         XCTAssertEqual(none.state, "none")
@@ -118,7 +118,7 @@ final class LoraFlowTests: XCTestCase {
         // New renders name the LoRA in the exact prompt saved with the job.
         _ = try await api.topUp(TopUpRequest(amount: 10))
         let job = try await api.createJob(JobRequest(title: "t", modelId: id, outfitId: SampleData.green, clipId: SampleData.sampleClip, engine: "viggle", steps: 4))
-        XCTAssertTrue(job.prompt.contains("LoRA sienna_v1 video"), job.prompt)
+        XCTAssertTrue(job.prompt.contains("LoRA demo_v1 video"), job.prompt)
         l = try await api.setLoraUse(modelId: id, use: false)
         XCTAssertNil(l.activeVersion)
         let job2 = try await api.createJob(JobRequest(title: "t", modelId: id, outfitId: SampleData.green, clipId: SampleData.sampleClip, engine: "viggle", steps: 4))
@@ -139,10 +139,10 @@ final class LoraFlowTests: XCTestCase {
 
     func testUpdateModel() async throws {
         let api = FakeMuseAPI(speed: 0)
-        let m = try await api.updateModel(id: SampleData.sienna, UpdateModelRequest(personality: "dry", neverAdd: ["tattoos", " ", "necklaces"]))
+        let m = try await api.updateModel(id: SampleData.demo, UpdateModelRequest(personality: "dry", neverAdd: ["tattoos", " ", "necklaces"]))
         XCTAssertEqual(m.personality, "dry")
         XCTAssertEqual(m.neverAdd, ["tattoos", "necklaces"])
-        XCTAssertEqual(m.name, "Sienna Vale")
+        XCTAssertEqual(m.name, "Demo model")
         let body = try JSONSerialization.jsonObject(with: JSONEncoder().encode(UpdateModelRequest(notes: "n"))) as! [String: Any]
         XCTAssertEqual(Set(body.keys), ["notes"], "only the fields that are set are sent")
     }
@@ -175,7 +175,7 @@ final class SocialTests: XCTestCase {
 
     func testConnectPostScheduleAndCancel() async throws {
         let api = FakeMuseAPI(speed: 0)
-        let id = SampleData.sienna
+        let id = SampleData.demo
         let take = try await api.listTakes().first!
         do {
             _ = try await api.createPost(CreatePostRequest(modelId: id, takeId: take.id, platforms: [.tiktok]))
@@ -183,7 +183,7 @@ final class SocialTests: XCTestCase {
         } catch let e as ApiError { XCTAssertEqual(e.code, "bad_request") }
 
         guard case .connected(let tt) = try await api.connectAccount(modelId: id, platform: .tiktok) else { return XCTFail() }
-        XCTAssertEqual(tt.handle, "@sienna.vale")
+        XCTAssertEqual(tt.handle, "@demo.model")
         XCTAssertFalse(tt.canPostDirect, "stage 1")
         _ = try await api.connectAccount(modelId: id, platform: .youtube)
         _ = try await api.connectAccount(modelId: id, platform: .instagram)
@@ -220,7 +220,7 @@ final class SocialTests: XCTestCase {
 
     func testDecodesWireTypes() throws {
         let lora = """
-        {"modelId":"m_sienna","version":1,"state":"review","use":true,"progress":0,"cost":0.6,
+        {"modelId":"m_demo","version":1,"state":"review","use":true,"progress":0,"cost":0.6,
          "candidates":[{"id":"c1","image":{"asset":"g_front"},"label":"Green set · front","keep":true},
                        {"id":"c2","image":{"url":"/uploads/x.jpg"},"label":"Close-up","flag":"choker","keep":false}],
          "photo":{"state":"none","progress":0},"video":{"state":"none","progress":0}}

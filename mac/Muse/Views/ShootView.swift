@@ -216,7 +216,8 @@ struct ShootInspector: View {
                 }
                 .padding(20)
             }
-            VStack {
+            VStack(alignment: .leading, spacing: 8) {
+                if store.isOwner { ModelChooser(step: .shot, target: .shoot) }
                 MButton(store.shootState == .busy ? "Shooting…" : "Shoot 4 · \(PhotoPricing.label(store.shootEstimate))", kind: .primary, size: .big, off: store.shootState == .busy) { store.startShoot() }
             }
             .padding(.horizontal, 20)
