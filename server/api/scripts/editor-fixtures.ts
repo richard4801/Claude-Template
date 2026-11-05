@@ -148,13 +148,17 @@ const suggest = [
   { words: [W('I', 0.1, 0.2), W('I', 0.3, 0.4), W('I', 0.45, 0.5), W('mean', 0.55, 0.8), W('so', 3, 3.2)], durationSec: 4, options: { repeats: true, fillers: false } },
 ].map(c => ({ ...c, result: suggestCuts(c.words, c.durationSec, c.options) }));
 
+const chromaKeys: M.Chroma[] = [{ color: '#00FF00' }, { color: '#00FF00', similarity: 0.3, smoothness: 0.15, spill: 0.2 }, { color: '#0000FF', similarity: 0.35, smoothness: 0.05, spill: 0.8 }];
+const chromaColors: [number, number, number][] = [[0, 1, 0], [0.2, 0.7, 0.3], [0.3, 0.8, 0.35], [0.4, 0.75, 0.45], [0.9, 0.7, 0.6], [0.5, 0.5, 0.5], [0.1, 0.1, 0.9], [1, 1, 1], [0, 0, 0], [0.6, 0.9, 0.2]];
+const chroma = chromaKeys.flatMap(key => chromaColors.map(rgb => ({ key, rgb, out: M.chromaKey(rgb[0], rgb[1], rgb[2], key) })));
+
 function round<T>(o: T): T { return JSON.parse(JSON.stringify(o, (_k, v) => (typeof v === 'number' ? Math.round(v * 1e6) / 1e6 : v))); }
 
 const files: Record<string, unknown> = {
   'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
   'validation.json': validation,
-  'functions.json': { keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest },
+  'functions.json': { keyframes, transitions, anims, colors, cuts: cutsCases, v1: v1cases, suggestCuts: suggest, chroma },
 };
 for (const dir of FIXTURE_DIRS) {
   fs.mkdirSync(dir, { recursive: true });

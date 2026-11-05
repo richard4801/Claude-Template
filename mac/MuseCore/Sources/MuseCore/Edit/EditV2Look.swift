@@ -97,22 +97,17 @@ extension EditV2 {
     /// Rec.709 YCbCr chroma plane: alpha 0 within `similarity` of the key colour, a smoothstep up to similarity + smoothness;
     /// kept pixels near the key are pulled towards their own luma by `spill`. Renderers bake it into a colour cube.
     public static func chromaKey(_ r: Double, _ g: Double, _ b: Double, _ ck: Chroma) -> (r: Double, g: Double, b: Double, alpha: Double) {
+        // The shared formula (plans/video-editor.md "Chroma key"; reference model.ts chromaKey; fixture functions.json → chroma).
         let (kr, kg, kb) = hexRgb(ck.color)
-        func cbcr(_ r: Double, _ g: Double, _ b: Double) -> (Double, Double, Double) {
-            let y = luma[0] * r + luma[1] * g + luma[2] * b
-            return (y, (b - y) / 1.8556, (r - y) / 1.5748)
+        func cbcr(_ r: Double, _ g: Double, _ b: Double) -> (Double, Double) {
+            (-0.168736 * r - 0.331264 * g + 0.5 * b, 0.5 * r - 0.418688 * g - 0.081312 * b)
         }
-        let (y, cb, cr) = cbcr(r, g, b)
-        let (_, kcb, kcr) = cbcr(kr, kg, kb)
-        let d = ((cb - kcb) * (cb - kcb) + (cr - kcr) * (cr - kcr)).squareRoot()
-        let sim = clamp(ck.similarity ?? 0.4, 0, 1), smooth = max(1e-3, clamp(ck.smoothness ?? 0.08, 0, 1))
-        func smoothstep(_ e0: Double, _ e1: Double, _ x: Double) -> Double {
-            let t = clamp((x - e0) / (e1 - e0), 0, 1)
-            return t * t * (3 - 2 * t)
-        }
-        let alpha = smoothstep(sim, sim + smooth, d)
-        let spill = clamp(ck.spill ?? 0.5, 0, 1) * (1 - smoothstep(sim, sim + smooth + 0.25, d))
-        return (r + (y - r) * spill, g + (y - g) * spill, b + (y - b) * spill, alpha)
+        let (cb, cr) = cbcr(r, g, b), (kcb, kcr) = cbcr(kr, kg, kb)
+        let base = ((cb - kcb) * (cb - kcb) + (cr - kcr) * (cr - kcr)).squareRoot() - (ck.similarity ?? 0.4)
+        let alpha = pow(clamp(base / max(ck.smoothness ?? 0.08, 1e-4), 0, 1), 1.5)
+        let s = pow(clamp(base / max(ck.spill ?? 0.5, 1e-4), 0, 1), 1.5)
+        let l = luma[0] * r + luma[1] * g + luma[2] * b
+        return (l + (r - l) * s, l + (g - l) * s, l + (b - l) * s, alpha)
     }
 
     /// RGBA float data for a colour cube of `size`³ entries (red fastest, then green, then blue), premultiplied, as Core

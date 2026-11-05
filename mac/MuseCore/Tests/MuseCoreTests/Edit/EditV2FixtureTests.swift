@@ -113,6 +113,18 @@ final class EditV2FixtureTests: XCTestCase {
         }
     }
 
+    func testChromaKey() throws {
+        let cases = try editorFixture("functions")["chroma"].array
+        XCTAssertEqual(cases.count, 30)
+        for (i, c) in cases.enumerated() {
+            let key = try c["key"].decode(E.Chroma.self)
+            let rgb = c["rgb"].array.compactMap { $0.double }
+            let want = c["out"].array.compactMap { $0.double }
+            let got = E.chromaKey(rgb[0], rgb[1], rgb[2], key)
+            for (j, v) in [got.r, got.g, got.b, got.alpha].enumerated() { XCTAssertEqual(v, want[j], accuracy: 1e-6, "chroma \(i)[\(j)]") }
+        }
+    }
+
     func testApplyCuts() throws {
         for (i, c) in try editorFixture("functions")["cuts"].array.enumerated() {
             let p = try c["project"].decode(E.Project.self)

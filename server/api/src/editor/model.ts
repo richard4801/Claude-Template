@@ -367,6 +367,22 @@ export function colorMatrix(adjust: Adjust | undefined, filter: FilterRef | unde
   return m.map(r6);
 }
 
+/**
+ * The chroma key on 0–1 RGB → [r, g, b, alpha] (not premultiplied). d = distance between the pixel's and the key's
+ * (Cb, Cr) (BT.601); base = d − similarity; alpha = clamp(base / smoothness)^1.5; spill s = clamp(base / spill)^1.5 and
+ * colour = luma(709) + (colour − luma)·s, so pixels near the key lose its tint.
+ */
+export function chromaKey(r: number, g: number, b: number, key: Chroma): [number, number, number, number] {
+  const cbcr = (r: number, g: number, b: number) => [-0.168736 * r - 0.331264 * g + 0.5 * b, 0.5 * r - 0.418688 * g - 0.081312 * b] as const;
+  const [kr, kg, kb] = hexRgb(key.color);
+  const [cb, cr] = cbcr(r, g, b), [kcb, kcr] = cbcr(kr, kg, kb);
+  const base = Math.hypot(cb - kcb, cr - kcr) - (key.similarity ?? 0.4);
+  const alpha = Math.pow(clamp(base / Math.max(key.smoothness ?? 0.08, 1e-4), 0, 1), 1.5);
+  const s = Math.pow(clamp(base / Math.max(key.spill ?? 0.5, 1e-4), 0, 1), 1.5);
+  const l = LUMA[0]! * r + LUMA[1]! * g + LUMA[2]! * b;
+  return [r6(l + (r - l) * s), r6(l + (g - l) * s), r6(l + (b - l) * s), r6(alpha)];
+}
+
 // ------------------------------------------------------------------ audio
 export type GainPoint = { t: number; gain: number };
 /** Timeline ranges where speech/voice is heard, for ducking. */

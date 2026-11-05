@@ -188,6 +188,19 @@ class EditFixtureTest {
         }
     }
 
+    @Test fun chromaKeyMatches() {
+        val cases = fn["chroma"]!!.arr
+        assertEquals(30, cases.size)
+        for ((i, c) in cases.withIndex()) {
+            val k = c.obj["key"]!!.obj
+            val key = Chroma(k["color"]!!.str, k["similarity"]?.num, k["smoothness"]?.num, k["spill"]?.num)
+            val rgb = c.obj["rgb"]!!.arr.map { it.num }
+            val got = ChromaKey.apply(rgb[0], rgb[1], rgb[2], key)
+            val want = c.obj["out"]!!.arr.map { it.num }
+            for (j in 0..3) assertEquals("chroma $i[$j]", want[j], got[j], 1e-6)
+        }
+    }
+
     @Test fun suggestCutsMatches() {
         for ((i, c) in fn["suggestCuts"]!!.arr.withIndex()) {
             val words = c.obj["words"]!!.arr.map { Word(it.obj["text"]!!.str, it.obj["startSec"]!!.num, it.obj["endSec"]!!.num) }
