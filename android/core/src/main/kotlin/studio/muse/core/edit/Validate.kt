@@ -4,17 +4,18 @@ package studio.muse.core.edit
  * All the rules of plans/video-editor.md "Rules", in the reference's order: throws [EditProblem] (field path + message)
  * on the first one broken, else returns the project's duration. Shape problems (missing fields, wrong types, unknown
  * kinds) are caught earlier by [EditJson.parse] with the same field paths. [presets] = the known filters (the
- * reference defaults to none, which skips the filter-id check; the apps always pass the bundled table).
+ * reference defaults to none, which skips the filter-id check; the apps always pass the bundled table); [lookIds] = the
+ * bundled looks a `pack:` LUT may name (empty skips that check, like the reference).
  */
-fun validate(p: EditProject, presets: List<FilterPreset> = Presets.FILTERS): Double = Validator(p, presets).run()
+fun validate(p: EditProject, presets: List<FilterPreset> = Presets.FILTERS, lookIds: Set<String> = LookPack.IDS): Double = Validator(p, presets, lookIds).run()
 
 /** The first problem, or null when [p] is valid. */
-fun problemOf(p: EditProject, presets: List<FilterPreset> = Presets.FILTERS): EditProblem? =
-    try { validate(p, presets); null } catch (e: EditProblem) { e }
+fun problemOf(p: EditProject, presets: List<FilterPreset> = Presets.FILTERS, lookIds: Set<String> = LookPack.IDS): EditProblem? =
+    try { validate(p, presets, lookIds); null } catch (e: EditProblem) { e }
 
 private val HEX = Regex("^#[0-9A-Fa-f]{6}$")
 
-private class Validator(val p: EditProject, presets: List<FilterPreset>) {
+private class Validator(val p: EditProject, presets: List<FilterPreset>, private val lookIds: Set<String>) {
     private val assets = HashMap<String, Asset>()
     private val ids = HashSet<String>()
     private val filterIds = presets.map { it.id }.toSet()
@@ -43,6 +44,7 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>) {
             val f = "edits.assets.$i"
             id("$f.id", a.id)
             if (assets.containsKey(a.id)) bad("$f.id", "is used twice")
+            if (a.kind == AssetKind.LUT && a.upload == null) bad(f, "a lut asset must be an upload")
             val refs = listOfNotNull(a.take, a.upload, a.library)
             if (refs.size != 1 || refs.any { it.isEmpty() || it.length > 100 }) bad(f, "needs exactly one of take, upload or library")
             num("$f.durationSec", a.durationSec, 0.01, 36_000.0)
@@ -74,7 +76,7 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>) {
             if (t.items.isNotEmpty()) bad("$f.items", "a caption track has no items")
             val c = t.caption ?: bad("$f.caption", "is required")
             val a = assets[c.asset]
-            if (a == null || a.kind == AssetKind.IMAGE) bad("$f.caption.asset", "must be a video or audio asset")
+            if (a == null || (a.kind != AssetKind.VIDEO && a.kind != AssetKind.AUDIO)) bad("$f.caption.asset", "must be a video or audio asset")
             if (c.words.size > EditLimits.MAX_WORDS) bad("$f.caption.words", "at most ${EditLimits.MAX_WORDS} words")
             c.words.forEachIndexed { j, w ->
                 if (w.text.isEmpty() || w.text.length > 60) bad("$f.caption.words.$j.text", "must be 1–60 characters")
@@ -154,6 +156,30 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>) {
             if (filterIds.isNotEmpty() && fl.id !in filterIds) bad("$f.filter.id", "unknown filter")
             num("$f.filter.amount", fl.amount, 0.0, 1.0, false)
         }
+        it.look?.let { look("$f.look", it) }
+    }
+
+    /** The reference's lookProblem (look.ts), same order and field paths; shapes were checked when parsing. */
+    private fun look(f: String, l: Look) {
+        l.lut?.let { lut ->
+            if (lut.startsWith(Look.PACK_PREFIX)) { if (lookIds.isNotEmpty() && lut.substring(Look.PACK_PREFIX.length) !in lookIds) bad("$f.lut", "unknown look") }
+            else if (assets[lut]?.kind != AssetKind.LUT) bad("$f.lut", "must be \"pack:<id>\" or a lut asset id")
+        }
+        num("$f.strength", l.strength, 0.0, 1.0); num("$f.lift", l.lift, 0.0, 1.0); num("$f.sharpen", l.sharpen, 0.0, 1.0); num("$f.chromatic", l.chromatic, 0.0, 1.0)
+        l.curves?.forEach { (ch, pts) ->
+            val g = "$f.curves.${ch.wire}"
+            if (pts.size < 2 || pts.size > LookLimits.MAX_CURVE_POINTS) bad(g, "2–${LookLimits.MAX_CURVE_POINTS} points")
+            var prev = -1.0
+            pts.forEachIndexed { i, pt ->
+                if (pt.x < 0 || pt.x > 1 || pt.y < 0 || pt.y > 1) bad("$g.$i", "must be [x, y], each 0–1")
+                if (pt.x <= prev) bad("$g.$i", "x must increase")
+                prev = pt.x
+            }
+        }
+        l.grain?.let { num("$f.grain.amount", it.amount, 0.0, 1.0, false); num("$f.grain.size", it.size, 0.5, 3.0) }
+        l.vignette?.let { num("$f.vignette.amount", it.amount, -1.0, 1.0, false); num("$f.vignette.size", it.size, 0.0, 1.0); num("$f.vignette.softness", it.softness, 0.0, 1.0) }
+        l.halation?.let { num("$f.halation.amount", it.amount, 0.0, 1.0, false); num("$f.halation.radius", it.radius, 0.05, 1.0); num("$f.halation.threshold", it.threshold, 0.0, 0.99) }
+        l.leak?.let { num("$f.leak.amount", it.amount, 0.0, 1.0, false); num("$f.leak.angle", it.angle, -360.0, 360.0) }
     }
 
     private fun anim(f: String, a: Anim?, text: Boolean) {
@@ -176,7 +202,7 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>) {
         num("$g.speed", c.speed, EditLimits.MIN_SPEED, EditLimits.MAX_SPEED, false)
         visual(g, c)
         keyframes("$g.keyframes", c.keyframes, clipLength(c), KfProp.entries.toSet())
-        c.audioAsset?.let { aa -> val a = assets[aa]; if (a == null || a.kind == AssetKind.IMAGE) bad("$g.audioAsset", "must be an audio or video asset") }
+        c.audioAsset?.let { aa -> val a = assets[aa]; if (a == null || (a.kind != AssetKind.VIDEO && a.kind != AssetKind.AUDIO)) bad("$g.audioAsset", "must be an audio or video asset") }
         c.chroma?.let { ch ->
             color("$g.chroma.color", ch.color, false)
             num("$g.chroma.similarity", ch.similarity, 0.0, 1.0); num("$g.chroma.smoothness", ch.smoothness, 0.0, 1.0); num("$g.chroma.spill", ch.spill, 0.0, 1.0)

@@ -28,7 +28,7 @@ enum class AnimKind(override val wire: String) : Wire {
 }
 
 enum class Fit(override val wire: String) : Wire { COVER("cover"), CONTAIN("contain") }
-enum class AssetKind(override val wire: String) : Wire { VIDEO("video"), IMAGE("image"), AUDIO("audio") }
+enum class AssetKind(override val wire: String) : Wire { VIDEO("video"), IMAGE("image"), AUDIO("audio"), /** An imported .cube (Looks); always an upload. */ LUT("lut") }
 
 enum class TrackKind(override val wire: String) : Wire {
     MAIN("main"), VIDEO("video"), IMAGE("image"), TEXT("text"), CAPTION("caption"), MUSIC("music"), VOICE("voice"), SFX("sfx");
@@ -86,6 +86,8 @@ sealed interface Visual : Item {
     val keyframes: Keyframes?
     val filter: FilterRef?
     val adjust: Adjust?
+    /** The filter stack (plans/video-editor.md "Looks"), additive to [filter]/[adjust]. */
+    val look: Look?
 }
 
 /** Items with source in/out times and a sound (video clips and audio clips). */
@@ -123,6 +125,7 @@ data class VideoClip(
     override val keyframes: Keyframes? = null,
     override val filter: FilterRef? = null,
     override val adjust: Adjust? = null,
+    override val look: Look? = null,
     val chroma: Chroma? = null,
     /** Main track, clip ≥ 2. */
     val transitionIn: Transition? = null,
@@ -142,6 +145,7 @@ data class ImageItem(
     override val keyframes: Keyframes? = null,
     override val filter: FilterRef? = null,
     override val adjust: Adjust? = null,
+    override val look: Look? = null,
     val animIn: Anim? = null,
     val animOut: Anim? = null,
 ) : Visual

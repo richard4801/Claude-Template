@@ -174,4 +174,15 @@ class RenderPlanTest {
         val bad = base.copy(canvas = base.canvas.copy(fps = 0.0))
         assertEquals("edits.canvas.fps", runCatching { planRender(bad, infos) }.exceptionOrNull().let { (it as EditProblem).field })
     }
+
+    @Test fun looksReachTheVideoLookAndNoOpLooksAreDropped() {
+        val base = projects.getValue("single clip")
+        fun withLook(l: Look) = base.copy(tracks = base.tracks.mapIndexed { i, t ->
+            if (i == 0) t.copy(items = t.items.map { (it as VideoClip).copy(look = l) }) else t
+        })
+        val look = Look(lut = "pack:film-gold", strength = 0.6, grain = Grain(0.3))
+        assertEquals(look, planRender(withLook(look), infos).layers[1].clips.single().look!!.look)
+        assertNull(planRender(withLook(Look(strength = 0.5, vignette = Vignette(0.0))), infos).layers[1].clips.single().look!!.look)
+        assertNull(planRender(withLook(Look(lut = "pack:film-gold", strength = 0.0)), infos).layers[1].clips.single().look!!.look)
+    }
 }
