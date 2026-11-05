@@ -1,10 +1,12 @@
 // Writes android/core/src/test/resources/shoot_prompt_fixture.json: photoshoot prompts as the SERVER builds them with the
 // default prompt library (Presets on/off, reference images). The apps' offline/demo prompt engines are checked against it.
+// Also writes android/app/src/main/resources/prompt_library.json: the library's entries with their defaults, for the app's demo mode.
 // Run: npx tsx scripts/gen-shoot-fixture.ts
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { photoshoot, type SentRef } from '../src/prompt/engine.js';
+import { libraryDefaults } from '../src/prompt/service.js';
 
 const out = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../android/core/src/test/resources/shoot_prompt_fixture.json');
 const identity = { name: 'Demo model', look: 'young woman, shoulder-length dark brown hair, brown eyes, light olive skin', neverAdd: ['tattoos', 'rings'], referenceCount: 7 };
@@ -24,3 +26,8 @@ const rows = inputs.map(i => {
 });
 fs.writeFileSync(out, JSON.stringify({ identity, rows }, null, 1) + '\n');
 console.log(`wrote ${rows.length} rows to ${out}`);
+
+const lib = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../android/app/src/main/resources/prompt_library.json');
+fs.mkdirSync(path.dirname(lib), { recursive: true });
+fs.writeFileSync(lib, JSON.stringify(libraryDefaults(), null, 1) + '\n');
+console.log(`wrote the prompt library defaults to ${lib}`);

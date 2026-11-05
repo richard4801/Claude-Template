@@ -146,3 +146,10 @@ export function dressPrompt(slot: string, withAnchor: boolean, t: PromptTexts = 
 /** The LoRA candidate variations and the line for candidate `n`. */
 export const loraVariations = (t: PromptTexts = DEFAULT_TEXTS) => { const l = listOf(t['lora.variations']!, 'lines'); return l.length ? l : listOf(DEFAULT_TEXTS['lora.variations']!, 'lines'); };
 export const loraVariationLine = (n: number, t: PromptTexts = DEFAULT_TEXTS) => { const v = loraVariations(t); return fill(t['lora.variation']!, { variation: v[n % v.length] }); };
+
+/** Every entry on its default, as GET /v1/prompts lists them for a studio with no overrides (the app's demo mode ships this). */
+export function libraryDefaults() {
+  return { groups: PROMPT_GROUPS.map(g => ({ ...g })), prompts: PROMPT_DEFS.map(d => ({ key: d.key, group: d.group, title: d.title, description: d.description, kind: d.kind,
+    default: d.default, current: d.default, overridden: false, allowEmpty: allowEmpty(d), placeholders: d.placeholders.map(([name, description, req]) => ({ name, description, required: !!req })),
+    updatedAt: null, updatedBy: null })) };
+}

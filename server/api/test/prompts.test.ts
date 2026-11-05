@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm';
 import { ledger } from '../src/db/schema.js';
 import * as E from '../src/prompt/engine.js';
 import { DEFAULT_TEXTS, fill, PROMPT_DEFS, resolveTexts, validatePrompt } from '../src/prompt/library.js';
-import { dressPrompt, exampleFor } from '../src/prompt/service.js';
+import { dressPrompt, exampleFor, libraryDefaults } from '../src/prompt/service.js';
 import { planShotImages } from '../src/images/service.js';
 import { buildTemplatePrompt } from '../src/templates/prompt.js';
 import { makeApp, people, demoModel, until, sse, type Client } from './helpers.js';
@@ -47,6 +47,10 @@ describe('prompt library (unit)', () => {
       expect(p.slots).toEqual(r.slots);
       expect(p.seed).toBe(r.seed);
     }
+  });
+  it("the app's demo copy of the library (android/app/src/main/resources/prompt_library.json) is current", () => {
+    const shipped = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../../android/app/src/main/resources/prompt_library.json'), 'utf8'));
+    expect(shipped).toEqual(libraryDefaults());
   });
   it('reference lines: guides in order pose, look, scene, then the guard; Presets off keeps them', () => {
     expect(E.referenceLine({ index: 7, guides: ['scene', 'pose'] })).toBe('Copy the pose and framing from image 7. Use the place and background from image 7. Do not take the face, body, hair or clothes from image 7.');

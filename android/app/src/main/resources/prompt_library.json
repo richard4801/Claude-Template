@@ -1,0 +1,1108 @@
+{
+ "groups": [
+  {
+   "id": "photoshoot",
+   "label": "Photoshoot"
+  },
+  {
+   "id": "references",
+   "label": "References"
+  },
+  {
+   "id": "sheet",
+   "label": "Character sheet"
+  },
+  {
+   "id": "outfits",
+   "label": "Outfits"
+  },
+  {
+   "id": "enhance",
+   "label": "Enhance"
+  },
+  {
+   "id": "dressup",
+   "label": "Dress up"
+  },
+  {
+   "id": "templates",
+   "label": "Templates"
+  },
+  {
+   "id": "video",
+   "label": "Video"
+  },
+  {
+   "id": "lora",
+   "label": "LoRA"
+  }
+ ],
+ "prompts": [
+  {
+   "key": "style.house",
+   "group": "photoshoot",
+   "title": "House style",
+   "description": "The look every photo asks for. Used in the style line of shoots, template shoots, sheet fills and outfit sets.",
+   "kind": "text",
+   "default": "realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss",
+   "current": "realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "never.base",
+   "group": "photoshoot",
+   "title": "Never add (every model)",
+   "description": "Comma-separated. Added after each model’s own never-add list in every photo and video prompt.",
+   "kind": "list",
+   "default": "logos, extra fingers, warped jewellery",
+   "current": "logos, extra fingers, warped jewellery",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "shoot.default.scene",
+   "group": "photoshoot",
+   "title": "Default scene",
+   "description": "Used when a shoot sends no scene.",
+   "kind": "text",
+   "default": "Rooftop · golden hour",
+   "current": "Rooftop · golden hour",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "shoot.default.light",
+   "group": "photoshoot",
+   "title": "Default light",
+   "description": "Used when a shoot sends no light.",
+   "kind": "text",
+   "default": "Golden hour",
+   "current": "Golden hour",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "shoot.default.grade",
+   "group": "photoshoot",
+   "title": "Default grade",
+   "description": "Used when a shoot sends no grade.",
+   "kind": "text",
+   "default": "Phone-natural",
+   "current": "Phone-natural",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "shoot.identity",
+   "group": "photoshoot",
+   "title": "Identity line",
+   "description": "Who she is. First line of every photo prompt (shoots, templates, sheet fills, outfit sets, LoRA sets).",
+   "kind": "text",
+   "default": "{name}: {look}. Identity from {refCount} locked reference images{lora}.",
+   "current": "{name}: {look}. Identity from {refCount} locked reference images{lora}.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "name",
+     "description": "her name",
+     "required": false
+    },
+    {
+     "name": "look",
+     "description": "her written look",
+     "required": false
+    },
+    {
+     "name": "refCount",
+     "description": "how many sheet images she has",
+     "required": false
+    },
+    {
+     "name": "lora",
+     "description": "\" + LoRA demo_v2 (photo)\" when her LoRA is on, else empty",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "shoot.outfit.set",
+   "group": "photoshoot",
+   "title": "Outfit · reference set",
+   "description": "An outfit with photos.",
+   "kind": "text",
+   "default": "Wearing: {outfit} (outfit reference set).",
+   "current": "Wearing: {outfit} (outfit reference set).",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "outfit",
+     "description": "the outfit name, lower case",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "shoot.outfit.described",
+   "group": "photoshoot",
+   "title": "Outfit · described",
+   "description": "An outfit described in words, with no photos yet.",
+   "kind": "text",
+   "default": "Wearing: {outfit}.",
+   "current": "Wearing: {outfit}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "outfit",
+     "description": "the description",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "shoot.outfit.product",
+   "group": "photoshoot",
+   "title": "Outfit · product photo",
+   "description": "An outfit from a product photo.",
+   "kind": "text",
+   "default": "Wearing: the outfit from the product photo reference ({outfit}).",
+   "current": "Wearing: the outfit from the product photo reference ({outfit}).",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "outfit",
+     "description": "the outfit name, lower case",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "shoot.scene",
+   "group": "photoshoot",
+   "title": "Scene line",
+   "description": "The place.",
+   "kind": "text",
+   "default": "Scene: {scene}.",
+   "current": "Scene: {scene}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "scene",
+     "description": "the chosen scene, lower case",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "shoot.camera",
+   "group": "photoshoot",
+   "title": "Camera line",
+   "description": "Shot size, lens and aperture.",
+   "kind": "text",
+   "default": "Camera: {shot} shot, {lens}mm lens, {aperture}{lensNote}.",
+   "current": "Camera: {shot} shot, {lens}mm lens, {aperture}{lensNote}.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "shot",
+     "description": "close, medium, full or wide",
+     "required": false
+    },
+    {
+     "name": "lens",
+     "description": "the lens in mm",
+     "required": false
+    },
+    {
+     "name": "aperture",
+     "description": "f/2.8 …",
+     "required": false
+    },
+    {
+     "name": "lensNote",
+     "description": "the wide or long lens note below, or empty",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "shoot.camera.wide",
+   "group": "photoshoot",
+   "title": "Camera · wide lens note",
+   "description": "Added to the camera line at 24 mm and wider.",
+   "kind": "text",
+   "default": ", slight wide-angle distortion",
+   "current": ", slight wide-angle distortion",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "shoot.camera.tele",
+   "group": "photoshoot",
+   "title": "Camera · long lens note",
+   "description": "Added to the camera line at 85 mm and longer.",
+   "kind": "text",
+   "default": ", compressed background, creamy bokeh",
+   "current": ", compressed background, creamy bokeh",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "shoot.light",
+   "group": "photoshoot",
+   "title": "Light line",
+   "description": "Light and colour grade.",
+   "kind": "text",
+   "default": "Light: {light}; grade: {grade}.",
+   "current": "Light: {light}; grade: {grade}.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "light",
+     "description": "the chosen light, lower case",
+     "required": false
+    },
+    {
+     "name": "grade",
+     "description": "the chosen grade, lower case",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "shoot.direction",
+   "group": "photoshoot",
+   "title": "Direction line",
+   "description": "The user’s own words (anything that would change her identity is removed first).",
+   "kind": "text",
+   "default": "Direction: {direction}",
+   "current": "Direction: {direction}",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "direction",
+     "description": "the user’s direction",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "shoot.style",
+   "group": "photoshoot",
+   "title": "Style line",
+   "description": "The house style line.",
+   "kind": "text",
+   "default": "Style: {style}.",
+   "current": "Style: {style}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "style",
+     "description": "the house style",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "shoot.never",
+   "group": "photoshoot",
+   "title": "Never-add line",
+   "description": "What must never appear.",
+   "kind": "text",
+   "default": "Never add: {never}.",
+   "current": "Never add: {never}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "never",
+     "description": "her never-add list plus the base list",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "shoot.seed.locked",
+   "group": "photoshoot",
+   "title": "Seed line · Lock look",
+   "description": "When Lock look is on.",
+   "kind": "text",
+   "default": "Seed: locked (variations keep the same look).",
+   "current": "Seed: locked (variations keep the same look).",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "shoot.seed.new",
+   "group": "photoshoot",
+   "title": "Seed line · new each shot",
+   "description": "When Lock look is off.",
+   "kind": "text",
+   "default": "Seed: new each shot.",
+   "current": "Seed: new each shot.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "refs.pose",
+   "group": "references",
+   "title": "Pose & framing",
+   "description": "For a reference image that guides the pose.",
+   "kind": "text",
+   "default": "Copy the pose and framing from image {refIndex}.",
+   "current": "Copy the pose and framing from image {refIndex}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "refIndex",
+     "description": "the image’s number in the images sent",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "refs.look",
+   "group": "references",
+   "title": "Look & colour",
+   "description": "For a reference image that guides the look.",
+   "kind": "text",
+   "default": "Copy the light, colour grade and camera feel from image {refIndex}.",
+   "current": "Copy the light, colour grade and camera feel from image {refIndex}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "refIndex",
+     "description": "the image’s number in the images sent",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "refs.scene",
+   "group": "references",
+   "title": "Scene",
+   "description": "For a reference image that guides the place.",
+   "kind": "text",
+   "default": "Use the place and background from image {refIndex}.",
+   "current": "Use the place and background from image {refIndex}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "refIndex",
+     "description": "the image’s number in the images sent",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "refs.guard",
+   "group": "references",
+   "title": "Guard line",
+   "description": "Ends every reference line: her face and body come only from her own sheet.",
+   "kind": "text",
+   "default": "Do not take the face, body, hair or clothes from image {refIndex}.",
+   "current": "Do not take the face, body, hair or clothes from image {refIndex}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "refIndex",
+     "description": "the image’s number in the images sent",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "sheet.task",
+   "group": "sheet",
+   "title": "Sheet shot task",
+   "description": "One character-sheet image (fill angles, LoRA sets).",
+   "kind": "text",
+   "default": "Task: {angle} shot on a plain light-grey studio background, even soft light, neutral expression, {framing}.",
+   "current": "Task: {angle} shot on a plain light-grey studio background, even soft light, neutral expression, {framing}.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "angle",
+     "description": "face · front, body · ¾ …",
+     "required": false
+    },
+    {
+     "name": "framing",
+     "description": "head-and-shoulders, facing the camera …",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "outfit.task",
+   "group": "outfits",
+   "title": "Outfit angle task",
+   "description": "One angle of an outfit set.",
+   "kind": "text",
+   "default": "Task: {angle}, plain studio background.",
+   "current": "Task: {angle}, plain studio background.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "angle",
+     "description": "full body front view …",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "outfit.never.extra",
+   "group": "outfits",
+   "title": "Never add (outfit sets)",
+   "description": "Comma-separated. Added to never-add for outfit sets.",
+   "kind": "list",
+   "default": "visible brand logos",
+   "current": "visible brand logos",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "outfit.seed",
+   "group": "outfits",
+   "title": "Outfit seed line",
+   "description": "The shared seed of the four angles.",
+   "kind": "text",
+   "default": "Seed: {seed} (shared by all four angles).",
+   "current": "Seed: {seed} (shared by all four angles).",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "seed",
+     "description": "the seed",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "outfit.edit",
+   "group": "outfits",
+   "title": "Other angles (edit)",
+   "description": "The ¾, side and back are made as edits of the front with this prompt.",
+   "kind": "text",
+   "default": "Show the same person in exactly the same outfit, on the same plain studio background, as a {angle}. Keep the face, hair, body and every detail of the clothes exactly the same. Realistic smartphone photo, natural skin texture.",
+   "current": "Show the same person in exactly the same outfit, on the same plain studio background, as a {angle}. Keep the face, hair, body and every detail of the clothes exactly the same. Realistic smartphone photo, natural skin texture.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "angle",
+     "description": "full body three-quarter view …",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "enhance.prompt",
+   "group": "enhance",
+   "title": "Realism prompt",
+   "description": "One prompt for every image of the sheet in Enhance step 1.",
+   "kind": "text",
+   "default": "candid smartphone photo, natural skin texture with visible pores and fine lines, true-to-life colour, soft natural light, no retouching, no beauty filter",
+   "current": "candid smartphone photo, natural skin texture with visible pores and fine lines, true-to-life colour, soft natural light, no retouching, no beauty filter",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "dress.body",
+   "group": "dressup",
+   "title": "Full-body images",
+   "description": "Dress up for the four full-body sheet images.",
+   "kind": "text",
+   "default": "Dress the person in the first image in the outfit from the second image: every garment, shoe and accessory, with the same colours, prints, fabrics and details.{anchor} Keep the face, hair, body, skin, pose, framing, camera angle and background exactly as in the first image. Realistic photo, natural skin texture.",
+   "current": "Dress the person in the first image in the outfit from the second image: every garment, shoe and accessory, with the same colours, prints, fabrics and details.{anchor} Keep the face, hair, body, skin, pose, framing, camera angle and background exactly as in the first image. Realistic photo, natural skin texture.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "anchor",
+     "description": "a space and the anchor sentence when the new front is sent too, else empty",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "dress.closeup",
+   "group": "dressup",
+   "title": "Face close-ups",
+   "description": "Dress up for the three face close-ups: only what shows at that distance.",
+   "kind": "text",
+   "default": "Add to the person in the first image only what shows of the outfit from the second image at this distance: earrings, necklace, glasses, hat or hair pieces, and the neckline of the top.{anchor} Keep the face, expression, hair, skin, pose, framing and background exactly as in the first image. Realistic close-up photo, natural skin texture.",
+   "current": "Add to the person in the first image only what shows of the outfit from the second image at this distance: earrings, necklace, glasses, hat or hair pieces, and the neckline of the top.{anchor} Keep the face, expression, hair, skin, pose, framing and background exactly as in the first image. Realistic close-up photo, natural skin texture.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "anchor",
+     "description": "a space and the anchor sentence when the new front is sent too, else empty",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "dress.anchor",
+   "group": "dressup",
+   "title": "Anchor sentence",
+   "description": "Added when the newly dressed front is sent as a third image.",
+   "kind": "text",
+   "default": "The last image shows the same outfit already worn: match its colours, prints and details exactly.",
+   "current": "The last image shows the same outfit already worn: match its colours, prints and details exactly.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "template.scene",
+   "group": "templates",
+   "title": "Scene line",
+   "description": "Template scene plus the drawn background and time of day.",
+   "kind": "text",
+   "default": "Scene: {scene}.",
+   "current": "Scene: {scene}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "scene",
+     "description": "the scene words",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "template.camera",
+   "group": "templates",
+   "title": "Camera line",
+   "description": "Template camera plus the drawn framing.",
+   "kind": "text",
+   "default": "Camera: {camera}.",
+   "current": "Camera: {camera}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "camera",
+     "description": "the camera words",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "template.light",
+   "group": "templates",
+   "title": "Light line",
+   "description": "Template light.",
+   "kind": "text",
+   "default": "Light: {light}.",
+   "current": "Light: {light}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "light",
+     "description": "the light words",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "template.pose",
+   "group": "templates",
+   "title": "Pose line",
+   "description": "The drawn pose, body angle, expression and hands.",
+   "kind": "text",
+   "default": "Pose: {pose}.",
+   "current": "Pose: {pose}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "pose",
+     "description": "the pose words",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "template.product",
+   "group": "templates",
+   "title": "Product line",
+   "description": "With a product photo.",
+   "kind": "text",
+   "default": "Product: {product}.",
+   "current": "Product: {product}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "product",
+     "description": "how the product is used",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "template.product.none",
+   "group": "templates",
+   "title": "Product line · no photo",
+   "description": "Without a product photo.",
+   "kind": "text",
+   "default": "Product: {product} (no product photo: a plausible unbranded product).",
+   "current": "Product: {product} (no product photo: a plausible unbranded product).",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "product",
+     "description": "how the product is used",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "template.style",
+   "group": "templates",
+   "title": "Style line",
+   "description": "Template style plus the house style.",
+   "kind": "text",
+   "default": "Style: {style}.",
+   "current": "Style: {style}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "style",
+     "description": "the style words",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "template.locked",
+   "group": "templates",
+   "title": "Locked line",
+   "description": "What anyone but the template’s maker sees in place of its hidden layers.",
+   "kind": "text",
+   "default": "Template: {name}",
+   "current": "Template: {name}",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "name",
+     "description": "the template name",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "template.seed.locked",
+   "group": "templates",
+   "title": "Seed line · Lock look",
+   "description": "Lock look on.",
+   "kind": "text",
+   "default": "Seed: {seed} (locked look).",
+   "current": "Seed: {seed} (locked look).",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "seed",
+     "description": "the seed",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "template.seed.new",
+   "group": "templates",
+   "title": "Seed line · new each shot",
+   "description": "Lock look off.",
+   "kind": "text",
+   "default": "Seed: {seed} (new each shot).",
+   "current": "Seed: {seed} (new each shot).",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "seed",
+     "description": "the seed",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "video.replicate.subjects",
+   "group": "video",
+   "title": "Draft/Standard/HD · subjects",
+   "description": "subject_definitions of the short prompt.",
+   "kind": "text",
+   "default": "<Subject 1> is the person in <Video 1>.\n<Subject 2> is {subject}, no tattoos.\n<Video 1> is the source video.",
+   "current": "<Subject 1> is the person in <Video 1>.\n<Subject 2> is {subject}, no tattoos.\n<Video 1> is the source video.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "subject",
+     "description": "the person in <Image 1> to <Image n>: her look",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "video.replicate.summary",
+   "group": "video",
+   "title": "Draft/Standard/HD · summary",
+   "description": "summary of the short prompt.",
+   "kind": "text",
+   "default": "[video editing + character replacement] <Subject 1> is replaced by <Subject 2>. <Subject 2> copies <Subject 1>'s facial performance exactly, frame by frame and with the same intensity: every eye movement, side glance, blink, eyebrow raise, mouth and lip movement and head turn, at the same moments, and the same body motion. The camera, the exact framing and crop, the background and the lighting of <Video 1> stay unchanged. Any caption or on-screen text is removed.",
+   "current": "[video editing + character replacement] <Subject 1> is replaced by <Subject 2>. <Subject 2> copies <Subject 1>'s facial performance exactly, frame by frame and with the same intensity: every eye movement, side glance, blink, eyebrow raise, mouth and lip movement and head turn, at the same moments, and the same body motion. The camera, the exact framing and crop, the background and the lighting of <Video 1> stay unchanged. Any caption or on-screen text is removed.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "video.replicate.retention",
+   "group": "video",
+   "title": "Draft/Standard/HD · retention",
+   "description": "retention_analysis of the short prompt.",
+   "kind": "text",
+   "default": "<Video 1>: fully_preserved - camera motion, framing and crop, background, lighting and timing.\n<Subject 1>: replaced - only the facial expressions, mouth movements and body motion are kept, not the face, hair, tattoos, jewellery or clothes.\n<Subject 2>: reference - {reference}.",
+   "current": "<Video 1>: fully_preserved - camera motion, framing and crop, background, lighting and timing.\n<Subject 1>: replaced - only the facial expressions, mouth movements and body motion are kept, not the face, hair, tattoos, jewellery or clothes.\n<Subject 2>: reference - {reference}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "reference",
+     "description": "face, body and outfit image ranges and the never-add list",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "video.replicate.detailed",
+   "group": "video",
+   "title": "Draft/Standard/HD · details",
+   "description": "detailed_description of the short prompt (the user’s direction is added after it).",
+   "kind": "text",
+   "default": "Casual phone video, realistic. [Shot 1] <Subject 2> in the same place, framed exactly like <Subject 1>: keep the exact framing and crop of <Video 1>, the camera does not pull back. The face is fully alive and mirrors every expression of <Subject 1> and the words being mouthed. Sharp face matching {faceRef}, natural skin texture, no beauty filter. No text anywhere.",
+   "current": "Casual phone video, realistic. [Shot 1] <Subject 2> in the same place, framed exactly like <Subject 1>: keep the exact framing and crop of <Video 1>, the camera does not pull back. The face is fully alive and mirrors every expression of <Subject 1> and the words being mouthed. Sharp face matching {faceRef}, natural skin texture, no beauty filter. No text anywhere.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "faceRef",
+     "description": "<Image 1>, or \"the description\"",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "video.edit.subjects",
+   "group": "video",
+   "title": "Edit · subjects",
+   "description": "subject_definitions of the structured Edit prompt.",
+   "kind": "text",
+   "default": "<Subject 1> is {performer} in <Video 1>, in {setting}.\n<Subject 2> is {name}: {look}, with NO tattoos, shown in {refs}{lora}.\n<Video 1> is the source video for the editing task.{audio}",
+   "current": "<Subject 1> is {performer} in <Video 1>, in {setting}.\n<Subject 2> is {name}: {look}, with NO tattoos, shown in {refs}{lora}.\n<Video 1> is the source video for the editing task.{audio}",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "performer",
+     "description": "the source performer",
+     "required": false
+    },
+    {
+     "name": "setting",
+     "description": "the source setting",
+     "required": false
+    },
+    {
+     "name": "name",
+     "description": "her name",
+     "required": false
+    },
+    {
+     "name": "look",
+     "description": "her look",
+     "required": false
+    },
+    {
+     "name": "refs",
+     "description": "<Image 1> (face, front), …",
+     "required": false
+    },
+    {
+     "name": "lora",
+     "description": "\", with LoRA demo_v2 video\" or empty",
+     "required": false
+    },
+    {
+     "name": "audio",
+     "description": "the audio-track line when the audio is kept, else empty",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "video.edit.summary",
+   "group": "video",
+   "title": "Edit · summary",
+   "description": "summary of the structured Edit prompt.",
+   "kind": "text",
+   "default": "[video editing + character replacement{audioTag}] The target video is an edited version of <Video 1> in which <Subject 1> is replaced by <Subject 2>. Every movement, pose, gesture, hand position, head turn, facial expression and mouth movement of <Subject 1> is kept exactly, frame by frame, at exactly the same moments. {background}{audio}",
+   "current": "[video editing + character replacement{audioTag}] The target video is an edited version of <Video 1> in which <Subject 1> is replaced by <Subject 2>. Every movement, pose, gesture, hand position, head turn, facial expression and mouth movement of <Subject 1> is kept exactly, frame by frame, at exactly the same moments. {background}{audio}",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "audioTag",
+     "description": "\" + audio reuse\" when the audio is kept",
+     "required": false
+    },
+    {
+     "name": "background",
+     "description": "the background sentence",
+     "required": false
+    },
+    {
+     "name": "audio",
+     "description": "\" <Audio 1> is fully reused.\" when the audio is kept",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "video.edit.retention",
+   "group": "video",
+   "title": "Edit · retention",
+   "description": "retention_analysis of the structured Edit prompt.",
+   "kind": "text",
+   "default": "<Video 1> (source video editing): {video}\n<Subject 1>: replaced - identity, face, hair, skin, {tattoos}body and clothing are all replaced by <Subject 2>; only motion and expressions are kept.{clean}\n<Subject 2>: reference - identity, face, hair, clean tattoo-free skin, body shape and outfit follow <Image 1>-<Image {n}> and the {outfit} outfit reference set. She wears no {never}.\n<Audio 1>: {audio}",
+   "current": "<Video 1> (source video editing): {video}\n<Subject 1>: replaced - identity, face, hair, skin, {tattoos}body and clothing are all replaced by <Subject 2>; only motion and expressions are kept.{clean}\n<Subject 2>: reference - identity, face, hair, clean tattoo-free skin, body shape and outfit follow <Image 1>-<Image {n}> and the {outfit} outfit reference set. She wears no {never}.\n<Audio 1>: {audio}",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "video",
+     "description": "what is kept of the source",
+     "required": false
+    },
+    {
+     "name": "tattoos",
+     "description": "\"tattoos, \" when the performer has them",
+     "required": false
+    },
+    {
+     "name": "clean",
+     "description": "tattoo/ring removal sentences",
+     "required": false
+    },
+    {
+     "name": "n",
+     "description": "how many images",
+     "required": false
+    },
+    {
+     "name": "outfit",
+     "description": "the outfit name",
+     "required": false
+    },
+    {
+     "name": "never",
+     "description": "never-add items joined with \", no \"",
+     "required": false
+    },
+    {
+     "name": "audio",
+     "description": "fully_copy or replaced",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "video.edit.detailed",
+   "group": "video",
+   "title": "Edit · details",
+   "description": "detailed_description of the structured Edit prompt (the user’s direction is added after it).",
+   "kind": "text",
+   "default": "The target video is in realistic photographic style, like a casual smartphone video. [Shot 1] <Subject 2> performs exactly the same motion as <Subject 1> with the same timing, wearing the {outfit}. Her skin is smooth and clean with no tattoos. Her face is sharp and detailed and matches <Image 1>, with natural skin texture, natural expressions, stable eyes, natural lips and teeth, and realistic hands with five fingers.",
+   "current": "The target video is in realistic photographic style, like a casual smartphone video. [Shot 1] <Subject 2> performs exactly the same motion as <Subject 1> with the same timing, wearing the {outfit}. Her skin is smooth and clean with no tattoos. Her face is sharp and detailed and matches <Image 1>, with natural skin texture, natural expressions, stable eyes, natural lips and teeth, and realistic hands with five fingers.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "outfit",
+     "description": "the outfit name",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "lora.variations",
+   "group": "lora",
+   "title": "Candidate variations",
+   "description": "One per line. The 30 LoRA training candidates cycle through them.",
+   "kind": "lines",
+   "default": "window light, soft smile\ngolden hour outdoors, laughing\novercast street, neutral expression\nstudio softbox, looking over shoulder\nevening city lights, candid\nbright kitchen, relaxed\nbeach at noon, full body\ngym mirror, full body athletic wear\ncafe table, three-quarter\nnight flash photo, close-up",
+   "current": "window light, soft smile\ngolden hour outdoors, laughing\novercast street, neutral expression\nstudio softbox, looking over shoulder\nevening city lights, candid\nbright kitchen, relaxed\nbeach at noon, full body\ngym mirror, full body athletic wear\ncafe table, three-quarter\nnight flash photo, close-up",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "lora.variation",
+   "group": "lora",
+   "title": "Variation line",
+   "description": "Added under the sheet prompt of each candidate.",
+   "kind": "text",
+   "default": "Variation: {variation}.",
+   "current": "Variation: {variation}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "variation",
+     "description": "one line of the list above",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  }
+ ]
+}
