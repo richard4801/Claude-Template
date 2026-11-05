@@ -320,8 +320,6 @@ fun DirectScreen() {
         vm.generate()
     }
     val menu = listOf(
-        MenuItem("spark", "Show prompt") { vm.toast("Prompt: replace the performer with ${s.model?.name ?: "your model"} · keep motion & room · ${Pricing.engineLabel(s.spec)}") },
-        MenuItem("quality", "Save as preset") { vm.toast("Saved as preset \"${s.clip?.name ?: "Clip"} · ${Pricing.engineLabel(s.spec)}\"") },
         MenuItem("retry", "Reset settings") { vm.reset() },
         MenuItem("studio", "Change clip") { nav.go(Routes.SOURCE) },
     )
@@ -434,7 +432,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.DirectSheet(vm: NewVi
         "audio" -> {
             H3("Sound")
             Opt("Keep the clip's audio", "The song or voice from your source clip.", d.keepAudio, onClick = { vm.edit { it.copy(keepAudio = true) } })
-            Opt("Replace audio", "Upload a new track or voiceover.", !d.keepAudio, onClick = { vm.edit { it.copy(keepAudio = false) }; vm.toast("Pick a track or voiceover (demo)") })
+            Opt("Replace audio", "Upload a new track or voiceover.", !d.keepAudio, onClick = { vm.edit { it.copy(keepAudio = false) }; if (s.demo) vm.toast("Pick a track or voiceover (demo)") })
             // Prompt scripts: whether she talks/sings (lip-sync) or not (her mouth follows the clip, no lip-sync to music).
             RowB {
                 Column(Modifier.weight(1f)) { T("Performer is speaking", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink); Tiny(VideoDraft.speakingHint(d.speaking)) }
