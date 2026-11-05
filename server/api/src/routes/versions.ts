@@ -15,6 +15,7 @@ import { uid } from '../lib/util.js';
 import { takeView } from '../services/jobs.js';
 import { putObject } from '../storage/objects.js';
 import { mediaToolsAvailable, thumbnail } from '../replicate/media.js';
+import { checkProject } from '../editor/versions.js';
 
 export const EDIT_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 export const EDIT_LIMITS = { maxSegments: 50, minSegmentSec: 0.1, minOutputSec: 0.5, maxOutputSec: 600, maxJsonBytes: 16 * 1024, endSlackSec: 0.05 } as const;
@@ -127,11 +128,13 @@ export async function registerVersionRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.post<{ Params: { id: string } }>('/v1/takes/:id/versions', async req => {
     const u = req.user;
-    if (JSON.stringify((req.body as { edits?: unknown } | null)?.edits ?? null).length > EDIT_LIMITS.maxJsonBytes) throw badRequest(`edits: at most ${EDIT_LIMITS.maxJsonBytes / 1024} KB`);
+    // Editor v2 (workstream 3): a v2 project is checked by editor/versions.ts (its own size limit and rules).
+    const v2 = ((req.body as { edits?: { version?: unknown } } | null)?.edits?.version) === 2;
+    if (!v2 && JSON.stringify((req.body as { edits?: unknown } | null)?.edits ?? null).length > EDIT_LIMITS.maxJsonBytes) throw badRequest(`edits: at most ${EDIT_LIMITS.maxJsonBytes / 1024} KB`);
     const b = parse(VersionBody, req.body);
     if (b.edits === undefined) throw badRequest('edits: Required');
-    const edits = parse(EditListSchema, b.edits, 'edits') as EditList;
-    const expected = checkEditList(edits);
+    const edits = v2 ? (b.edits as EditList) : (parse(EditListSchema, b.edits, 'edits') as EditList);
+    const expected = v2 ? (await checkProject(ctx, u.studioId, b.edits, req.params.id)).durationSec : checkEditList(edits);
     if (Math.abs(b.durationSec - expected) > Math.max(0.5, expected * 0.05))
       throw badRequest(`durationSec: ${b.durationSec.toFixed(2)} s doesn't match the edit list (${expected.toFixed(2)} s)`);
 

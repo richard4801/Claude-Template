@@ -20,6 +20,7 @@ import { registerRoutes } from './routes/index.js';
 import { registerWorkerRoutes } from './routes/worker.js';
 import { registerVersionRoutes } from './routes/versions.js';
 import { registerCameraRoutes } from './routes/camera.js'; // workstream 2
+import { registerEditorAiRoutes } from './routes/editorAi.js'; // Editor v2 (workstream 3)
 import { seedDev } from './seed.js';
 import { TemplateService } from './templates/service.js';
 import { WarmService } from './services/warm.js';
@@ -147,6 +148,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   await registerVersionRoutes(app, ctx);
   await registerSuiteRoutes(app, ctx); // AI suite (workstream 1)
   await registerCameraRoutes(app, ctx); // workstream 2: camera sessions, Direct with Claude, Blender relay, MCP server
+  await registerEditorAiRoutes(app, ctx); // Editor v2 (workstream 3)
 
   app.addHook('onListen', async () => {
     const a = app.server.address();

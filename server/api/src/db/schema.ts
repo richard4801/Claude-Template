@@ -501,3 +501,6 @@ export * from '../suite/schema.js';
 
 // Workstream 2 (camera sessions + MCP tokens, migration 0008).
 export * from '../camera/schema.js';
+
+// Editor v2 (workstream 3): AI helper jobs, migration 0009.
+export * from '../editor/schema.js';

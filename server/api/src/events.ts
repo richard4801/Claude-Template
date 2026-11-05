@@ -2,7 +2,8 @@
 // In-memory: one API instance. A second instance would need Postgres LISTEN/NOTIFY behind the same interface.
 export type EventType = 'job' | 'take' | 'balance' | 'wallet' | 'model' | 'outfit' | 'lora' | 'post' | 'gpu' | 'tool' | 'template' | 'clip'
   | 'settings' | 'member' | 'invite' | 'studio' | 'account' | 'prompts'
-  | 'camera' | 'blender' /* workstream 2: camera sessions and the Blender relay (owners only) */;
+  | 'camera' | 'blender' /* workstream 2: camera sessions and the Blender relay (owners only) */
+  | 'editor' /* Editor v2 AI jobs (workstream 3) */;
 export type ApiEvent = { type: EventType; [k: string]: unknown };
 export type Viewer = { userId: string; studioId: string; role: 'owner' | 'member' };
 type Payload = ApiEvent | null | undefined;

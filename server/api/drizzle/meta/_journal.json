@@ -64,6 +64,13 @@
       "when": 1793894270000,
       "tag": "0008_camera_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793894288154,
+      "tag": "0009_editor_jobs",
+      "breakpoints": true
     }
   ]
 }
