@@ -16,6 +16,8 @@ export type CameraStatus = 'drafting' | 'blocking' | 'rendering' | 'ready' | 'ge
 export type ShotDraftRow = {
   id: string; state: 'draft'; source: 'suite' | 'camera'; prompt: string; targetModel: string; durationSec: number; aspect: string;
   estimate: { usd: number; tokens: number }; camera: Record<string, unknown>; createdAt: number;
+  /** The suite ShotRequest to send when the owner presses Generate (POST /v1/suite/shots). */
+  request?: Record<string, unknown>; warnings?: string[];
 };
 
 export const cameraSessions = pgTable('camera_sessions', {

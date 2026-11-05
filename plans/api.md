@@ -841,7 +841,10 @@ AssetKind     "greybox" | "depth" | "pose" | "tracks" | "keyframe_start" | "keyf
 CameraAsset   { id: "ca_…", kind: AssetKind, label?, state: "pending"|"ready", contentType, bytes?, source: "app"|"mcp"|"relay"|"chat",
                 url?: string /* presigned GET, 1 h, ready only */, createdAt }
 ShotDraft     { id: "sd_…", state: "draft", source: "suite"|"camera", prompt, targetModel, durationSec, aspect,
-                estimate: { usd: number, tokens: number }, camera: CameraSpec, createdAt }
+                estimate: { usd: number, tokens: number }, camera: CameraSpec, createdAt,
+                request: ShotRequest /* the suite's ("AI suite"): camera.mode "directed", camera.guide.video.key = the newest greybox,
+                                        keyframes = presigned stills (24 h); the app POSTs it to /v1/suite/shots when the owner presses Generate */,
+                warnings?: string[] }
 CameraSpec    { mode: "directed", presets?: {rig?, move?, angle?}, directed: { cameraSessionId,
                 guideAssets: Partial<Record<"greybox"|"depth"|"pose"|"tracks"|"keyframeStart"|"keyframeMid"|"keyframeEnd", assetId>>,
                 trajectories: { camera?: assetId /* camera_json */, characters?: assetId /* characters_json */ },
@@ -868,7 +871,7 @@ BlenderCall   { id: "bc_…", sessionId, tool: BlenderTool, args: object, outDir
 | `POST /v1/camera-sessions/{id}/assets/{assetId}/confirm` | → `CameraAsset` `ready`. `upload_missing` (409) if the PUT hasn't arrived; `camera_json`/`characters_json` must parse as JSON (`bad_request`). The newest ready asset of a guide kind is the one the CameraSpec points at. |
 | `DELETE /v1/camera-sessions/{id}/assets/{assetId}` | → 204. |
 | `PUT /v1/camera-sessions/{id}/path` `{camera?: CameraPath, characters?: Blocking["characters"]}` | → `CameraSession` (status moves `drafting` → `blocking`). Every `modelId` must be in the cast. |
-| `POST /v1/camera-sessions/{id}/shot-draft` `{prompt?, targetModel?, durationSec?}` | → `ShotDraft`. Estimate only: no hold, no ledger row, no provider call. Uses the AI suite's Shot API (`ctx.suite`) when present, otherwise a local draft priced from the target model's $/s. |
+| `POST /v1/camera-sessions/{id}/shot-draft` `{prompt?, targetModel?, durationSec?}` | → `ShotDraft`. Estimate only: no hold, no ledger row, no provider call. With the AI suite merged it is `ctx.suite.estimate(ShotRequest)` (same as `POST /v1/suite/shots/estimate`); without it, a local draft priced from the target model's $/s. Ready guide videos and stills are also recorded in `uploads` (kind `output`), because the suite only takes references it knows. |
 | `POST /v1/camera-sessions/{id}/chat` `{message}` | → `text/event-stream` of `ChatEvent` (below). One turn at a time per session (`chat_busy`, 409); `director_unavailable` (503) without `ANTHROPIC_API_KEY`. |
 | `GET /v1/mcp/tokens` | → `[{id, name, prefix, createdAt, lastUsedAt?, expiresAt?}]` |
 | `POST /v1/mcp/tokens` `{name, expiresDays?: 1–365}` | → `{id, name, prefix, token /* "muse_pat_…", shown once */, createdAt, expiresAt?}` |

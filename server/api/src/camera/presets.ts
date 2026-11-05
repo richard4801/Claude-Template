@@ -1,5 +1,5 @@
-// Camera presets for list_presets. The AI suite (workstream 1) owns the real preset library; until it is merged this is
-// the starting list from the research (plans/research/ai-video-suite-research.md §3.5), as Blender rig parameters.
+// Camera presets for list_presets: starting Blender rig parameters for blocking (plans/research/ai-video-suite-research.md
+// §3.5). The suite's Camera catalog (prompt-side ids for CameraSpec, workstream 1) is added next to them when merged.
 import type { Ctx } from '../ctx.js';
 
 export type CameraPreset = { id: string; kind: 'rig' | 'move' | 'angle'; label: string; params: Record<string, unknown> };
@@ -31,12 +31,15 @@ export const FALLBACK_PRESETS: CameraPreset[] = [
   P('angle', 'ground', 'Ground level', { heightM: 0.1, tiltDeg: 5 }),
 ];
 
-/** The suite's presets when its preset compiler is merged (ctx.suite.presets.list), otherwise the fallback list. */
 export async function listPresets(ctx: Ctx, kind?: CameraPreset['kind']): Promise<CameraPreset[]> {
-  const suite = (ctx as unknown as { suite?: { presets?: { list?: () => Promise<CameraPreset[]> | CameraPreset[] } } }).suite;
-  let all = FALLBACK_PRESETS;
-  if (typeof suite?.presets?.list === 'function') {
-    try { all = await suite.presets.list(); } catch (e) { ctx.log.warn({ err: (e as Error).message }, 'suite presets failed, using the built-in list'); }
-  }
-  return kind ? all.filter(p => p.kind === kind) : all;
+  return kind ? FALLBACK_PRESETS.filter(p => p.kind === kind) : FALLBACK_PRESETS;
+}
+
+/** The suite's Camera catalog (src/suite/camera.ts cameraCatalog) once workstream 1 is merged: ids for CameraSpec. */
+export async function suiteCatalog(ctx: Ctx): Promise<unknown | null> {
+  const path = '../suite/camera.js'; // not a literal import: this branch builds without the suite
+  try {
+    const m = await import(path) as { cameraCatalog?: () => unknown };
+    return typeof m.cameraCatalog === 'function' ? m.cameraCatalog() : null;
+  } catch { ctx.log.debug('suite camera catalog not present'); return null; }
 }

@@ -3,7 +3,7 @@
 import crypto from 'node:crypto';
 import { and, asc, desc, eq, inArray, lt } from 'drizzle-orm';
 import type { AuthUser, Ctx } from '../ctx.js';
-import { models } from '../db/schema.js';
+import { models, uploads } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
 import { compact, uid } from '../lib/util.js';
 import type { BlenderRelayHub } from './relay.js';
@@ -159,7 +159,10 @@ export class CameraService {
     const s = await this.row(u, id);
     const assets = await this.assets([s.id]);
     await this.db.delete(cameraSessions).where(eq(cameraSessions.id, s.id));
-    for (const a of assets) await this.ctx.storage.delete(a.storageKey).catch(() => {});
+    for (const a of assets) {
+      await this.db.delete(uploads).where(eq(uploads.storageKey, a.storageKey));
+      await this.ctx.storage.delete(a.storageKey).catch(() => {});
+    }
     void this.ctx.hub.emitTo(u.id, { type: 'camera', op: 'delete', id: s.id });
   }
 
@@ -225,6 +228,11 @@ export class CameraService {
       try { JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw badRequest(`${a.kind} is not valid JSON`); }
     }
     const [n] = await this.db.update(cameraAssets).set({ state: 'ready', bytes: head.size }).where(eq(cameraAssets.id, a.id)).returning();
+    // Guide videos and stills are also recorded as studio uploads: the suite's Shot API only takes references it knows.
+    if (/^(video|image)\//.test(a.contentType)) {
+      await this.db.insert(uploads).values({ id: uid('up'), studioId: u.studioId, kind: 'output', storageKey: a.storageKey, contentType: a.contentType, bytes: head.size,
+        state: 'ready', createdBy: u.id, createdAt: Date.now() });
+    }
     const view = await this.assetView(n!);
     void this.ctx.hub.emitTo(u.id, { type: 'camera', op: 'asset', sessionId: s.id, asset: view });
     // A greybox guide makes the session ready to generate.
@@ -237,6 +245,7 @@ export class CameraService {
     const s = await this.row(u, sessionId);
     const a = await this.assetRow(u, s.id, assetId);
     await this.db.delete(cameraAssets).where(eq(cameraAssets.id, a.id));
+    await this.db.delete(uploads).where(eq(uploads.storageKey, a.storageKey));
     await this.ctx.storage.delete(a.storageKey).catch(() => {});
     await this.save(u, s, {});
   }
@@ -274,9 +283,12 @@ export class CameraService {
     const assets = await this.assets([s.id]);
     const durationSec = b.durationSec ?? s.durationSec;
     const prompt = (b.prompt ?? s.brief ?? '').trim() || s.title;
+    const newest = (kind: CameraAssetKind) => assets.filter(x => x.kind === kind && x.state === 'ready').at(-1);
+    const still = async (kind: CameraAssetKind) => { const x = newest(kind); return x ? this.ctx.storage.presignGet(x.storageKey, 24 * 3600) : undefined; };
     const draft = await createShotDraft(this.ctx, u, {
       prompt, targetModel: b.targetModel ?? s.targetModel ?? DEFAULT_TARGET, durationSec, aspect: s.aspect, camera: this.cameraSpec(s, assets),
       characters: s.characters.map(c => ({ modelId: c.modelId, role: c.role })), cameraSessionId: s.id,
+      guide: { videoKey: newest('greybox')?.storageKey, seconds: s.durationSec, start: await still('keyframe_start'), middle: await still('keyframe_mid'), end: await still('keyframe_end') },
     });
     await this.save(u, s, { shotDraft: draft });
     return draft;

@@ -18,19 +18,36 @@ export const TARGET_PRICE_PER_SEC: Record<string, number> = {
 };
 
 export type DraftInput = { prompt: string; targetModel: string; durationSec: number; aspect: string; camera: Record<string, unknown>;
-  characters: { modelId: string; role?: string }[]; cameraSessionId: string };
+  characters: { modelId: string; role?: string }[]; cameraSessionId: string;
+  /** Storage key of the newest ready greybox (registered in uploads), and presigned URLs of the keyframe stills. */
+  guide?: { videoKey?: string; seconds?: number; start?: string; middle?: string; end?: string } };
 
-type SuiteShots = { createDraft: (u: AuthUser, d: DraftInput) => Promise<{ id: string; estimate: { usd: number; tokens?: number } }> };
+/** Workstream 1's suite service (plans/api.md "AI suite"): estimate(user, ShotRequest) holds and runs nothing. */
+type Suite = { estimate: (u: AuthUser, body: unknown) => Promise<{ estimate?: number; priceLine?: string; warnings?: string[]; ok?: boolean; message?: string }> };
+const SUITE_ASPECTS = ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'];
+
+/** The suite's ShotRequest for this draft; the app sends it to POST /v1/suite/shots when the owner presses Generate. */
+export function shotRequest(d: DraftInput) {
+  const g = d.guide ?? {};
+  const keyframes = g.start || g.middle || g.end ? { ...(g.start ? { start: g.start } : {}), ...(g.middle ? { middle: [g.middle] } : {}), ...(g.end ? { end: g.end } : {}) } : undefined;
+  return {
+    prompt: d.prompt.slice(0, 2000), duration: Math.max(2, Math.min(30, Math.round(d.durationSec))), aspectRatio: SUITE_ASPECTS.includes(d.aspect) ? d.aspect : '9:16',
+    ...(d.characters[0] ? { modelId: d.characters[0].modelId } : {}),
+    camera: { mode: 'directed', ...(g.videoKey ? { guide: { video: { key: g.videoKey, ...(g.seconds ? { seconds: g.seconds } : {}) }, use: 'blocking', cameraSessionId: d.cameraSessionId, ...(keyframes ? { keyframes } : {}) } } : {}) },
+  };
+}
 
 export async function createShotDraft(ctx: Ctx, user: AuthUser, d: DraftInput): Promise<ShotDraftRow> {
-  const suite = (ctx as unknown as { suite?: { shots?: Partial<SuiteShots> } }).suite;
+  const suite = (ctx as unknown as { suite?: Partial<Suite> }).suite;
   const tokensOf = (usd: number) => Math.ceil(usd / ctx.config.TOKEN_USD - 1e-9);
-  const base = { state: 'draft' as const, prompt: d.prompt, targetModel: d.targetModel, durationSec: d.durationSec, aspect: d.aspect, camera: d.camera, createdAt: Date.now() };
-  if (typeof suite?.shots?.createDraft === 'function') {
-    const r = await suite.shots.createDraft(user, d);
-    return { ...base, id: r.id, source: 'suite', estimate: { usd: round2(r.estimate.usd), tokens: r.estimate.tokens ?? tokensOf(r.estimate.usd) } };
+  const base = { id: uid('sd'), state: 'draft' as const, prompt: d.prompt, targetModel: d.targetModel, durationSec: d.durationSec, aspect: d.aspect, camera: d.camera, createdAt: Date.now() };
+  if (typeof suite?.estimate === 'function') {
+    const request = shotRequest(d);
+    const r = await suite.estimate(user, request);
+    const usd = round2(Number(r.estimate ?? 0));
+    return { ...base, source: 'suite', estimate: { usd, tokens: tokensOf(usd) }, request, ...(r.warnings?.length ? { warnings: r.warnings } : {}) };
   }
   const perSec = TARGET_PRICE_PER_SEC[d.targetModel] ?? TARGET_PRICE_PER_SEC[DEFAULT_TARGET]!;
   const usd = round2(perSec * d.durationSec);
-  return { ...base, id: uid('sd'), source: 'camera', estimate: { usd, tokens: tokensOf(usd) } };
+  return { ...base, source: 'camera', estimate: { usd, tokens: tokensOf(usd) }, request: shotRequest(d) };
 }

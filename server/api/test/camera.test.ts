@@ -19,7 +19,7 @@ beforeAll(async () => {
 afterAll(async () => { await a.close(); });
 
 /** PUT bytes to a presigned (local storage) URL. */
-const put = (url: string, body: string | Buffer, type: string) => fetch(url, { method: 'PUT', body, headers: { 'content-type': type } });
+const put = (url: string, body: string | Buffer, type: string) => fetch(url, { method: 'PUT', body: typeof body === 'string' ? body : new Uint8Array(body), headers: { 'content-type': type } });
 
 describe('camera sessions', () => {
   it('are owner-only', async () => {
@@ -96,6 +96,28 @@ describe('camera sessions', () => {
     expect(d.body.camera.directed.cameraSessionId).toBe(s.id);
     expect((await a.ctx.db.select().from(ledger)).length).toBe(before);
     expect((await owner.req('GET', `/v1/camera-sessions/${s.id}`)).body.shotDraft.id).toBe(d.body.id);
+  });
+
+  it('with the AI suite merged, the draft is the suite\'s estimate of a directed ShotRequest using the greybox', async () => {
+    const s = (await owner.req('POST', '/v1/camera-sessions', { characters: [{ modelId }], durationSec: 6, brief: 'walk' })).body;
+    const n = (await owner.req('POST', `/v1/camera-sessions/${s.id}/assets`, { kind: 'greybox', contentType: 'video/mp4' })).body;
+    await put(n.upload.url, 'mp4', 'video/mp4');
+    await owner.req('POST', `/v1/camera-sessions/${s.id}/assets/${n.asset.id}/confirm`);
+    const seen: any[] = [];
+    (a.ctx as any).suite = { estimate: async (_u: unknown, body: any) => { seen.push(body); return { estimate: 0.78, warnings: ['length set to 6 s'] }; } };
+    try {
+      const before = (await a.ctx.db.select().from(ledger)).length;
+      const d = (await owner.req('POST', `/v1/camera-sessions/${s.id}/shot-draft`, {})).body;
+      expect(d).toMatchObject({ source: 'suite', estimate: { usd: 0.78, tokens: 78 }, warnings: ['length set to 6 s'] });
+      expect(seen[0]).toMatchObject({ prompt: 'walk', duration: 6, aspectRatio: '9:16', modelId, camera: { mode: 'directed', guide: { use: 'blocking', cameraSessionId: s.id } } });
+      const key = seen[0].camera.guide.video.key;
+      expect(key).toMatch(new RegExp(`^cam/${s.id}/${n.asset.id}\\.mp4$`));
+      expect(d.request).toEqual(seen[0]);
+      // The suite only takes references it knows: the guide is a studio upload.
+      const ups = await a.ctx.db.execute((await import('drizzle-orm')).sql`select state from uploads where storage_key = ${key}`).then((r: any) => r.rows ?? r);
+      expect(ups).toEqual([{ state: 'ready' }]);
+      expect((await a.ctx.db.select().from(ledger)).length).toBe(before);
+    } finally { delete (a.ctx as any).suite; }
   });
 
   it('live events reach the owner only; notes join the transcript', async () => {

@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { models, outfits } from '../db/schema.js';
 import { badRequest } from '../errors.js';
-import { listPresets } from '../camera/presets.js';
+import { listPresets, suiteCatalog } from '../camera/presets.js';
 import type { CameraService } from '../camera/service.js';
 import { ASPECTS, ASSET_KINDS, parse, STATUSES } from '../camera/validate.js';
 
@@ -121,9 +121,12 @@ export const MUSE_TOOLS: MuseTool[] = [
   },
   {
     name: 'list_presets', title: 'List camera presets', readOnly: true, idempotent: true,
-    description: 'Camera presets with their Blender rig parameters: rigs (body/lens look), moves (dolly, orbit, crane, handheld…) and angles. Use them as starting points when blocking.',
+    description: 'Camera presets with their Blender rig parameters: rigs (body/lens look), moves (dolly, orbit, crane, handheld…) and angles. Use them as starting points when blocking. When present, cameraCatalog lists the Camera control\'s option ids (look, lighting, palette…) used by the Shot.',
     inputSchema: obj({ kind: { type: 'string', enum: ['rig', 'move', 'angle'] } }),
-    run: async (env, a) => ({ presets: await listPresets(env.ctx, a.kind === 'rig' || a.kind === 'move' || a.kind === 'angle' ? a.kind : undefined) }),
+    run: async (env, a) => {
+      const catalog = await suiteCatalog(env.ctx);
+      return { presets: await listPresets(env.ctx, a.kind === 'rig' || a.kind === 'move' || a.kind === 'angle' ? a.kind : undefined), ...(catalog ? { cameraCatalog: catalog } : {}) };
+    },
   },
   {
     name: 'create_shot_draft', title: 'Create Shot draft (estimate only)', session: true,
