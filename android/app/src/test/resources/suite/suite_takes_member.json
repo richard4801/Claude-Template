@@ -1,0 +1,46 @@
+[
+ {
+  "id": "t_jl_4f67b61879d2_2",
+  "kind": "take",
+  "jobId": "jl_4f67b61879d2",
+  "index": 2,
+  "of": 2,
+  "title": "Untitled shot",
+  "label": "Standard",
+  "engineLabel": "Shot · Standard · 768p",
+  "cost": 0,
+  "seed": 38379,
+  "status": "test",
+  "thumb": {
+   "url": "/uploads/s/jl_4f67b61879d2/take_2.jpg"
+  },
+  "prompt": "Demo model is the woman shown in <Image 1>, <Image 2>, <Image 3>, <Image 4> and <Image 5>: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Keep her face, hair, skin, body and proportions exactly as in those images. She never has: tattoos, rings.\nShe wears Dark green cropped tee and drawstring shorts as shown in <Image 6>, <Image 7>, <Image 8> and <Image 9>.\nMorning in a small Paris café. She orders at the counter and turns to the camera with a soft smile.\nCinematography: medium close-up from the chest up, eye-level camera, physical dolly-in toward the subject about 1.5 m, combined with focus racks from the foreground to the subject. Shot with Super 35 digital cinema sensor, filmic highlight roll-off, 40mm lens (natural perspective), anamorphic lens, oval bokeh, horizontal blue lens flares, f/2, shallow depth of field. Soft cross-lighting from two diffused sources. Teal-and-orange blockbuster grade.\nDemo model does not speak, sing or mouth words.\nNo zoom.\nPhotorealistic. No text, captions, logos or watermarks anywhere.",
+  "createdAt": 1793916808268,
+  "videoUrl": "/uploads/s/jl_4f67b61879d2/take_2.mp4",
+  "durationSec": 6,
+  "width": 180,
+  "height": 320
+ },
+ {
+  "id": "t_jl_4f67b61879d2_1",
+  "kind": "take",
+  "jobId": "jl_4f67b61879d2",
+  "index": 1,
+  "of": 2,
+  "title": "Untitled shot",
+  "label": "Standard",
+  "engineLabel": "Shot · Standard · 768p",
+  "cost": 0,
+  "seed": 38378,
+  "status": "test",
+  "thumb": {
+   "url": "/uploads/s/jl_4f67b61879d2/take_1.jpg"
+  },
+  "prompt": "Demo model is the woman shown in <Image 1>, <Image 2>, <Image 3>, <Image 4> and <Image 5>: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Keep her face, hair, skin, body and proportions exactly as in those images. She never has: tattoos, rings.\nShe wears Dark green cropped tee and drawstring shorts as shown in <Image 6>, <Image 7>, <Image 8> and <Image 9>.\nMorning in a small Paris café. She orders at the counter and turns to the camera with a soft smile.\nCinematography: medium close-up from the chest up, eye-level camera, physical dolly-in toward the subject about 1.5 m, combined with focus racks from the foreground to the subject. Shot with Super 35 digital cinema sensor, filmic highlight roll-off, 40mm lens (natural perspective), anamorphic lens, oval bokeh, horizontal blue lens flares, f/2, shallow depth of field. Soft cross-lighting from two diffused sources. Teal-and-orange blockbuster grade.\nDemo model does not speak, sing or mouth words.\nNo zoom.\nPhotorealistic. No text, captions, logos or watermarks anywhere.",
+  "createdAt": 1793916808268,
+  "videoUrl": "/uploads/s/jl_4f67b61879d2/take_1.mp4",
+  "durationSec": 6,
+  "width": 180,
+  "height": 320
+ }
+]

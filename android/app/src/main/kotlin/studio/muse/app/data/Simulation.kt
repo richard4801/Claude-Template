@@ -107,6 +107,7 @@ data class JobProgress(val progress: Double, val take: Int, val step: Int, val t
 
 object JobClock {
     fun progress(req: JobRequest, elapsed: Double): JobProgress {
+        if (req.engine == SuiteRules.ENGINE) return SuiteClock.progress(req, elapsed) // AI suite (workstream 1)
         val spec = req.spec()
         val total = Pricing.totalSeconds(spec)
         val perTake = total / spec.takes
@@ -147,6 +148,7 @@ object JobClock {
 
     /** The elapsed (simulated) seconds at which a failing job breaks: step 3 of take 1. */
     fun failAt(req: JobRequest): Double {
+        if (req.engine == SuiteRules.ENGINE) return SuiteClock.failAt(req) // AI suite (workstream 1)
         val spec = req.spec()
         val perTake = Pricing.totalSeconds(spec) / spec.takes
         if (spec.engine == Engine.REPLICATE) return perTake * 0.3

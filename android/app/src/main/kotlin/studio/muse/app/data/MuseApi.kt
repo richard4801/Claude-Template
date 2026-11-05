@@ -160,6 +160,17 @@ interface MuseApi {
         id: String, inputs: kotlinx.serialization.json.JsonObject? = null, rules: List<Rule>? = null, texts: Map<String, String>? = null, direction: String? = null,
     ): ScriptPreview
 
+    // AI suite (workstream 1, plans/api.md "AI suite"). Members never get engine names back; the owner does.
+    suspend fun suiteCatalog(): SuiteCatalog = throw ApiException("not_found", "This server doesn't have the AI suite yet")
+    suspend fun suiteEstimate(req: SuiteShotRequest): SuiteEstimate = throw ApiException("not_found", "This server doesn't have the AI suite yet")
+    /** A render job (`request.engine == "suite"`) on the usual job pipeline: job, take and balance events follow. */
+    suspend fun createSuiteShot(req: SuiteShotRequest): Job = throw ApiException("not_found", "This server doesn't have the AI suite yet")
+    suspend fun suiteShot(id: String): SuiteShot = throw ApiException("not_found", "This server doesn't have the AI suite yet")
+    suspend fun suiteCompile(req: SuiteCompileRequest): SuiteCompiled = throw ApiException("not_found", "This server doesn't have the AI suite yet")
+    /** Owner only. */
+    suspend fun suiteSettings(): SuiteSettings = throw ApiException("not_found", "This server doesn't have the AI suite yet")
+    suspend fun patchSuiteSettings(req: SuiteSettingsPatch): SuiteSettings = throw ApiException("not_found", "This server doesn't have the AI suite yet")
+
     // Developer
     suspend fun setFailNext(fail: Boolean)
 

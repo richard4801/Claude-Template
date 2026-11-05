@@ -1,0 +1,86 @@
+{
+ "quality": "hd",
+ "label": "Recast · HD · 1080p",
+ "resolution": "1080p",
+ "seconds": 6,
+ "takes": 1,
+ "mode": "recast",
+ "estimate": 2.7,
+ "priceLine": "about $2.70 · 6 s",
+ "buttonLabel": "Generate · 6 s · $2.70",
+ "caps": {
+  "perJob": 5,
+  "perDay": 25,
+  "spentToday": 0,
+  "leftToday": 25,
+  "ok": true,
+  "code": null,
+  "message": null
+ },
+ "ok": true,
+ "code": null,
+ "message": null,
+ "warnings": [
+  "no single shot in the clip may be longer than 15 s"
+ ],
+ "camera": {
+  "moves": [],
+  "guideUsed": false
+ },
+ "cast": [
+  {
+   "characterId": "m_demo",
+   "who": "the person on the left",
+   "speaking": "yes"
+  }
+ ],
+ "keepAudio": true,
+ "prompt": "Recast the source video: replace one person with the characters below. Keep each person’s exact motion, timing, gestures and expressions, the camera, the framing, the background and the lighting of the source video.\nthe person on the left in the source video becomes Demo model, shown in reference photo 1: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. She never has: tattoos, rings.\nDemo model’s lips match every word of the original audio.\nKeep every cut and shot change of the source video at the same moments.\nPhotorealistic. No text, captions, logos or watermarks anywhere.",
+ "test": true,
+ "engine": {
+  "model": "h3-max-recast",
+  "name": "MiniMax H3 Max Recast",
+  "provider": "fal",
+  "ref": "minimax/h3-max/recast",
+  "resolution": "1080P",
+  "perSec": 0.45,
+  "billedPerTake": 6,
+  "licence": {
+   "kind": "hosted",
+   "name": "MiniMax H3 Max (hosted on fal)",
+   "notice": "MiniMax H3"
+  },
+  "notice": "MiniMax H3"
+ },
+ "input": {
+  "negative": null,
+  "params": {},
+  "images": {
+   "middle": [],
+   "refs": [
+    {
+     "label": "person 1 · body, front",
+     "role": "character",
+     "image": {
+      "asset": "g_front"
+     }
+    }
+   ]
+  },
+  "videos": [
+   {
+    "video": {
+     "key": "c/vid_7a6a280ef398.mp4",
+     "seconds": 6
+    },
+    "use": "source"
+   }
+  ],
+  "audio": null
+ },
+ "tried": [],
+ "speaking": {
+  "speaking": true,
+  "source": "switch"
+ }
+}

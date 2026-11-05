@@ -1,0 +1,274 @@
+[
+ {
+  "id": "jl_4f67b61879d2",
+  "title": "Untitled shot",
+  "modelId": "m_demo",
+  "modelName": "Demo model",
+  "outfitId": "o_green",
+  "request": {
+   "mode": "reference",
+   "audio": true,
+   "label": "Shot · Standard · 768p",
+   "takes": 2,
+   "camera": {
+    "mix": {
+     "id": "rack_focus",
+     "ease": "in_out",
+     "speed": "normal",
+     "intensity": 0.5
+    },
+    "rig": {
+     "body": "super35",
+     "lens": "anamorphic",
+     "focalMm": 40,
+     "aperture": "f2"
+    },
+    "mode": "preset",
+    "move": {
+     "id": "dolly_in",
+     "ease": "in_out",
+     "speed": "normal",
+     "intensity": 0.6
+    },
+    "angle": {
+     "height": "eye",
+     "shotSize": "mcu"
+    },
+    "palette": {
+     "preset": "teal_orange"
+    },
+    "lighting": {
+     "preset": "soft_cross"
+    }
+   },
+   "engine": "suite",
+   "prompt": "Morning in a small Paris café. She orders at the counter and turns to the camera with a soft smile.",
+   "modelId": "m_demo",
+   "quality": "standard",
+   "seconds": 6,
+   "outfitId": "o_green",
+   "speaking": false,
+   "keepAudio": true,
+   "takeLabel": "Standard",
+   "aspectRatio": "9:16",
+   "engineLabel": "Shot · Standard · 768p",
+   "speakingSource": "default"
+  },
+  "state": "done",
+  "progress": 100,
+  "take": 2,
+  "step": 2,
+  "totalSteps": 2,
+  "phase": "Done",
+  "secondsLeft": 0,
+  "totalSeconds": 210,
+  "cost": 0.96,
+  "refunded": 0,
+  "createdAt": 1793916797446,
+  "finishedAt": 1793916808268,
+  "prompt": "Demo model is the woman shown in <Image 1>, <Image 2>, <Image 3>, <Image 4> and <Image 5>: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Keep her face, hair, skin, body and proportions exactly as in those images. She never has: tattoos, rings.\nShe wears Dark green cropped tee and drawstring shorts as shown in <Image 6>, <Image 7>, <Image 8> and <Image 9>.\nMorning in a small Paris café. She orders at the counter and turns to the camera with a soft smile.\nCinematography: medium close-up from the chest up, eye-level camera, physical dolly-in toward the subject about 1.5 m, combined with focus racks from the foreground to the subject. Shot with Super 35 digital cinema sensor, filmic highlight roll-off, 40mm lens (natural perspective), anamorphic lens, oval bokeh, horizontal blue lens flares, f/2, shallow depth of field. Soft cross-lighting from two diffused sources. Teal-and-orange blockbuster grade.\nDemo model does not speak, sing or mouth words.\nNo zoom.\nPhotorealistic. No text, captions, logos or watermarks anywhere.",
+  "seed": 38378,
+  "thumb": {
+   "asset": "face"
+  },
+  "userId": "u_owner",
+  "engineLabel": "Shot · Standard · 768p",
+  "billedSeconds": 12
+ },
+ {
+  "id": "jl_4a85264615d5",
+  "title": "Untitled shot",
+  "modelId": "m_demo",
+  "modelName": "Demo model",
+  "outfitId": "o_green",
+  "request": {
+   "mode": "reference",
+   "audio": true,
+   "label": "Shot · Standard · 768p",
+   "takes": 2,
+   "camera": {
+    "mix": {
+     "id": "rack_focus",
+     "ease": "in_out",
+     "speed": "normal",
+     "intensity": 0.5
+    },
+    "rig": {
+     "body": "super35",
+     "lens": "anamorphic",
+     "focalMm": 40,
+     "aperture": "f2"
+    },
+    "mode": "preset",
+    "move": {
+     "id": "dolly_in",
+     "ease": "in_out",
+     "speed": "normal",
+     "intensity": 0.6
+    },
+    "angle": {
+     "height": "eye",
+     "shotSize": "mcu"
+    },
+    "palette": {
+     "preset": "teal_orange"
+    },
+    "lighting": {
+     "preset": "soft_cross"
+    }
+   },
+   "engine": "suite",
+   "prompt": "Morning in a small Paris café. She orders at the counter and turns to the camera with a soft smile.",
+   "modelId": "m_demo",
+   "quality": "standard",
+   "seconds": 6,
+   "outfitId": "o_green",
+   "speaking": false,
+   "keepAudio": true,
+   "takeLabel": "Standard",
+   "aspectRatio": "9:16",
+   "engineLabel": "Shot · Standard · 768p",
+   "speakingSource": "default"
+  },
+  "state": "done",
+  "progress": 100,
+  "take": 2,
+  "step": 2,
+  "totalSteps": 2,
+  "phase": "Done",
+  "secondsLeft": 0,
+  "totalSeconds": 210,
+  "cost": 0.96,
+  "refunded": 0,
+  "createdAt": 1793916781963,
+  "finishedAt": 1793916792894,
+  "prompt": "Demo model is the woman shown in <Image 1>, <Image 2>, <Image 3>, <Image 4> and <Image 5>: young woman, shoulder-length dark brown hair, brown eyes, light olive skin. Keep her face, hair, skin, body and proportions exactly as in those images. She never has: tattoos, rings.\nShe wears Dark green cropped tee and drawstring shorts as shown in <Image 6>, <Image 7>, <Image 8> and <Image 9>.\nMorning in a small Paris café. She orders at the counter and turns to the camera with a soft smile.\nCinematography: medium close-up from the chest up, eye-level camera, physical dolly-in toward the subject about 1.5 m, combined with focus racks from the foreground to the subject. Shot with Super 35 digital cinema sensor, filmic highlight roll-off, 40mm lens (natural perspective), anamorphic lens, oval bokeh, horizontal blue lens flares, f/2, shallow depth of field. Soft cross-lighting from two diffused sources. Teal-and-orange blockbuster grade.\nDemo model does not speak, sing or mouth words.\nNo zoom.\nPhotorealistic. No text, captions, logos or watermarks anywhere.",
+  "seed": 25183,
+  "thumb": {
+   "asset": "face"
+  },
+  "userId": "u_owner",
+  "engineLabel": "Shot · Standard · 768p",
+  "billedSeconds": 12
+ },
+ {
+  "id": "j0",
+  "title": "Mirror selfie",
+  "modelId": "m_demo",
+  "modelName": "Demo model",
+  "outfitId": "o_green",
+  "request": {
+   "use": "first",
+   "steps": 10,
+   "takes": 1,
+   "title": "Mirror selfie",
+   "clipId": "clip_sample",
+   "engine": "h3",
+   "lipSync": false,
+   "modelId": "m_demo",
+   "outfitId": "o_green",
+   "keepAudio": true,
+   "background": "keep",
+   "backgroundMotion": "subtle"
+  },
+  "state": "failed",
+  "progress": 18,
+  "take": 1,
+  "step": 3,
+  "totalSteps": 10,
+  "phase": "Failed",
+  "secondsLeft": 0,
+  "totalSeconds": 608,
+  "cost": 0.19,
+  "refunded": 0.19,
+  "error": "Something went wrong · you weren't charged",
+  "createdAt": 1793913127039,
+  "prompt": "",
+  "seed": 42,
+  "thumb": {
+   "asset": "g_tq"
+  },
+  "userId": "u_owner",
+  "engineLabel": "Edit"
+ },
+ {
+  "id": "j1",
+  "title": "Kick test",
+  "modelId": "m_demo",
+  "modelName": "Demo model",
+  "outfitId": "o_green",
+  "request": {
+   "use": "first",
+   "steps": 4,
+   "takes": 1,
+   "title": "Kick test",
+   "clipId": "clip_sample",
+   "engine": "viggle",
+   "lipSync": false,
+   "modelId": "m_demo",
+   "outfitId": "o_green",
+   "keepAudio": true,
+   "background": "keep",
+   "backgroundMotion": "subtle"
+  },
+  "state": "done",
+  "progress": 100,
+  "take": 1,
+  "step": 4,
+  "totalSteps": 4,
+  "phase": "Done",
+  "secondsLeft": 0,
+  "totalSeconds": 95,
+  "cost": 0.13,
+  "refunded": 0,
+  "createdAt": 1793909527039,
+  "finishedAt": 1793909727039,
+  "prompt": "",
+  "seed": 7,
+  "thumb": {
+   "asset": "g_front"
+  },
+  "userId": "u_owner",
+  "engineLabel": "Fast · beta"
+ },
+ {
+  "id": "j2",
+  "title": "Bathroom trend",
+  "modelId": "m_demo",
+  "modelName": "Demo model",
+  "outfitId": "o_crystal",
+  "request": {
+   "use": "first",
+   "steps": 30,
+   "takes": 1,
+   "title": "Bathroom trend",
+   "clipId": "clip_sample",
+   "engine": "h3",
+   "lipSync": false,
+   "modelId": "m_demo",
+   "outfitId": "o_crystal",
+   "keepAudio": true,
+   "background": "keep",
+   "backgroundMotion": "subtle"
+  },
+  "state": "done",
+  "progress": 100,
+  "take": 1,
+  "step": 30,
+  "totalSteps": 30,
+  "phase": "Done",
+  "secondsLeft": 0,
+  "totalSeconds": 2760,
+  "cost": 3.05,
+  "refunded": 0,
+  "createdAt": 1793830327039,
+  "finishedAt": 1793833087039,
+  "prompt": "",
+  "seed": 42,
+  "thumb": {
+   "asset": "c_front"
+  },
+  "userId": "u_owner",
+  "engineLabel": "Edit"
+ }
+]

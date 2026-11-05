@@ -448,11 +448,13 @@ class FakeMuseApi(
                     } else if (elapsed >= cur.totalSeconds) {
                         val done = cur.copy(state = "done", progress = 100.0, step = cur.totalSteps, take = cur.request.takes, phase = "Done", secondsLeft = 0.0, finishedAt = now())
                         replaceJob(done)
+                        if (cur.request.engine == SuiteRules.ENGINE) refund(cur.cost) // AI suite: demo renders are test renders, settled at $0
                         val newTakes = (1..cur.request.takes).map { i ->
                             val o = outfits.firstOrNull { it.id == cur.outfitId }
                             val thumb = o?.angles?.filterNotNull()?.let { if (it.isEmpty()) null else it[(i - 1) % it.size] } ?: cur.thumb ?: ImageRef.asset("g_front")
                             Take("t_${cur.id}_$i", "take", cur.id, i, cur.request.takes, cur.title,
-                                when (cur.request.engine) { Engine.VIGGLE.id -> "Fast · beta"; Engine.REPLICATE.id -> Quality.fromId(cur.request.quality).label; else -> "Edit" }, cur.engineLabel,
+                                when (cur.request.engine) { Engine.VIGGLE.id -> "Fast · beta"; Engine.REPLICATE.id -> Quality.fromId(cur.request.quality).label
+                                    SuiteRules.ENGINE -> SuiteRules.tierLabel(cur.request.quality); else -> "Edit" }, cur.engineLabel,
                                 cur.cost / cur.request.takes, cur.seed + i - 1, "test", thumb, cur.prompt, now())
                         }
                         takes.addAll(0, newTakes)
@@ -764,6 +766,48 @@ class FakeMuseApi(
         if (req.provider == "custom-http" && req.url?.startsWith("https://") != true) throw ApiException("bad_request", "Use an https:// URL")
         engine = engine.copy(provider = req.provider, model = req.model ?: if (req.provider == "simulated") "bundled-stills" else engine.model, url = req.url)
         engine
+    }
+
+    // ---- AI suite (workstream 1): demo answers from FakeSuite; shots run on the job pipeline above.
+    val suite by lazy { FakeSuite() }
+    /** Demo mode is the owner; tests flip this to see a member's answers. */
+    var suiteOwner = true
+    /** false shows the suite-off state (SUITE_MODE=off on a server). */
+    var suiteEnabled = true
+    private fun suiteOn() { if (!suiteEnabled) throw ApiException("engine_unavailable", "The AI suite isn't switched on yet") }
+    private fun suiteClipSeconds(id: String?) = clips[id]?.durationSec ?: if (id == SampleData.SAMPLE_CLIP) SampleData.sampleMeta.durationSec else null
+    override suspend fun suiteCatalog() = suite.catalog(suiteOwner).let { if (suiteEnabled) it else it.copy(enabled = false, test = false, tiers = it.tiers.map { t -> t.copy(available = false) }) }
+    override suspend fun suiteEstimate(req: SuiteShotRequest) = lock.withLock { suiteOn(); suite.estimate(req, suiteOwner, models, suiteClipSeconds(req.clipId)) }
+    override suspend fun createSuiteShot(req: SuiteShotRequest): Job {
+        val job = lock.withLock {
+            suiteOn()
+            val e = suite.estimate(req, suiteOwner, models, suiteClipSeconds(req.clipId))
+            if (e.estimate > balance.balance + 1e-9) throw ApiException("insufficient_balance", "Not enough balance · top up in Credits")
+            val lead = req.modelId ?: req.cast?.firstOrNull()?.characterId
+            val m = lead?.let { id -> models.firstOrNull { it.id == id } }
+            val o = (req.outfitId ?: req.cast?.firstOrNull()?.outfitId)?.let { id -> outfits.firstOrNull { it.id == id } }
+            val j = suite.job("j_" + uid(), req, e, m, o, now())
+            charge(j.cost)
+            jobs += j
+            j
+        }
+        events.tryEmit(ApiEvent("balance", balance = balance))
+        events.tryEmit(ApiEvent("job", job = job))
+        run(job)
+        return job
+    }
+    override suspend fun suiteShot(id: String) = lock.withLock {
+        val j = jobs.firstOrNull { it.id == id && it.request.engine == SuiteRules.ENGINE } ?: throw ApiException("not_found", "Shot not found")
+        SuiteShot(j, emptyList(), if (suiteOwner) suite.estimate(SuiteShotRequest(prompt = j.prompt.ifBlank { "shot" }, quality = j.request.quality), true, models, null).engine else null)
+    }
+    override suspend fun suiteCompile(req: SuiteCompileRequest) = SuiteCompiled("Camera: ${req.camera.move?.id ?: "static"}", listOfNotNull(req.camera.move?.id, req.camera.mix?.id))
+    override suspend fun suiteSettings() = lock.withLock {
+        if (!suiteOwner) throw ApiException("owner_only", "Only the studio owner can do that")
+        suite.settings()
+    }
+    override suspend fun patchSuiteSettings(req: SuiteSettingsPatch) = lock.withLock {
+        if (!suiteOwner) throw ApiException("owner_only", "Only the studio owner can do that")
+        suite.patch(req)
     }
 
     /** Test hook: put a job in a fixed state (no runner). */

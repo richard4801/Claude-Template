@@ -1,0 +1,335 @@
+package studio.muse.app.data
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+
+// AI suite (workstream 1): the wire types of /v1/suite (plans/api.md "AI suite", server/api/src/suite). Members never see
+// providers or models: those fields only come back for the owner (marked "owner") and only the owner's Engines sheet shows them.
+
+/** One option of the Camera picker. Hardware options also carry their bundled render (`hardware/<render>.webp`), name and look caption. */
+@Serializable
+data class SuiteOption(
+    val id: String,
+    val label: String = "",
+    val description: String = "",
+    val render: String? = null,
+    val name: String? = null,
+    val caption: String? = null,
+) {
+    /** The card's title: the hardware name when it has a render ("Super 35 Digital"), else the label. */
+    val title: String get() = name ?: label
+}
+
+@Serializable
+data class SuiteMoveOption(
+    val id: String,
+    val label: String = "",
+    val description: String = "",
+    val category: String = "",
+    val editorBetter: Boolean = false,
+    val talkSafe: Boolean = false,
+)
+
+/** One of the 16 featured moves of the camera bag (UGC first), with its filter tag: ugc / cinematic / energy / subtle. */
+@Serializable
+data class SuiteLibraryMove(val id: String, val label: String = "", val tag: String = "", val description: String = "", val category: String = "")
+
+@Serializable
+data class SuiteOptic(val id: String, val render: String? = null, val name: String = "", val caption: String = "")
+
+@Serializable
+data class SuiteGrip(val move: String, val render: String? = null, val name: String = "", val caption: String = "")
+
+@Serializable
+data class SuitePreset(val id: String, val label: String = "", val description: String = "", val spec: JsonObject? = null)
+
+/** GET /v1/suite/camera (also `catalog.camera`). The apps draw what this returns; demo mode bundles a copy. */
+@Serializable
+data class CameraCatalog(
+    val presets: List<SuitePreset> = emptyList(),
+    val bodies: List<SuiteOption> = emptyList(),
+    val lenses: List<SuiteOption> = emptyList(),
+    val focalLengths: List<Int> = emptyList(),
+    val apertures: List<SuiteOption> = emptyList(),
+    val looks: List<SuiteOption> = emptyList(),
+    val frameRates: List<SuiteOption> = emptyList(),
+    val shutters: List<SuiteOption> = emptyList(),
+    val lighting: List<SuiteOption> = emptyList(),
+    val palettes: List<SuiteOption> = emptyList(),
+    val optics: List<SuiteOptic> = emptyList(),
+    val grips: List<SuiteGrip> = emptyList(),
+    val moves: List<SuiteMoveOption> = emptyList(),
+    val library: List<SuiteLibraryMove> = emptyList(),
+    val heights: List<SuiteOption> = emptyList(),
+    val shotSizes: List<SuiteOption> = emptyList(),
+    val genres: List<SuiteOption> = emptyList(),
+    val eras: List<SuiteOption> = emptyList(),
+    val tempos: List<SuiteOption> = emptyList(),
+    val emotions: List<String> = emptyList(),
+) {
+    fun move(id: String?) = moves.firstOrNull { it.id == id }
+    fun libraryMove(id: String?) = library.firstOrNull { it.id == id }
+    fun moveLabel(id: String?) = libraryMove(id)?.label ?: move(id)?.label ?: id.orEmpty()
+}
+
+/** owner: the models a tier runs, in ladder order. */
+@Serializable
+data class SuiteTierModel(val model: String, val name: String = "", val resolution: String = "")
+
+/** A quality tier (Draft / Standard / HD / Cinema). */
+@Serializable
+data class SuiteTier(
+    val id: String,
+    val label: String = "",
+    val detail: String = "",
+    val available: Boolean = false,
+    val resolution: String? = null,
+    val fromPerSec: Double? = null,
+    val maxSeconds: Int? = null,
+    val canKeyframes: Boolean = false,
+    val canReferences: Boolean = false,
+    val canGuide: Boolean = false,
+    /** owner */
+    val models: List<SuiteTierModel>? = null,
+)
+
+/** GET /v1/suite/catalog. `enabled` false = the server's SUITE_MODE is off; `test` = mock renders (free). */
+@Serializable
+data class SuiteCatalog(
+    val enabled: Boolean = false,
+    val test: Boolean = false,
+    val defaultQuality: String = "draft",
+    val tiers: List<SuiteTier> = emptyList(),
+    val modes: List<String> = emptyList(),
+    val recastMaxPeople: Int = 4,
+    val aspectRatios: List<String> = emptyList(),
+    val takesMax: Int = 4,
+    val camera: CameraCatalog = CameraCatalog(),
+) {
+    fun tier(id: String?) = tiers.firstOrNull { it.id == id }
+}
+
+// ---------------------------------------------------------------- the request
+
+@Serializable
+data class SuiteMove(val id: String, val intensity: Double? = null, val speed: String? = null)
+
+@Serializable
+data class SuiteRig(
+    val body: String? = null, val lens: String? = null, val focalMm: Int? = null, val aperture: String? = null,
+    val look: String? = null, val fps: String? = null, val shutter: String? = null,
+)
+
+@Serializable
+data class SuiteLighting(val preset: String? = null)
+
+@Serializable
+data class SuitePalette(val preset: String? = null)
+
+@Serializable
+data class SuiteAngle(val height: String? = null, val shotSize: String? = null)
+
+/** The Camera block of a shot (CameraSpec, `.strict()` on the server: only these keys). */
+@Serializable
+data class SuiteCameraSpec(
+    val mode: String = "preset",
+    val preset: String? = null,
+    val rig: SuiteRig? = null,
+    val lighting: SuiteLighting? = null,
+    val palette: SuitePalette? = null,
+    val move: SuiteMove? = null,
+    val mix: SuiteMove? = null,
+    val angle: SuiteAngle? = null,
+)
+
+/** Recast: one person of the source clip → a studio character. */
+@Serializable
+data class SuiteCastMember(
+    val characterId: String,
+    val outfitId: String? = null,
+    val personIndex: Int? = null,
+    val personHint: String? = null,
+    val personNote: String? = null,
+    val speaking: Boolean? = null,
+)
+
+/** POST /v1/suite/shots[/estimate]. Nulls are left out, so the server's defaults apply. */
+@Serializable
+data class SuiteShotRequest(
+    val mode: String? = null,
+    val cast: List<SuiteCastMember>? = null,
+    val title: String? = null,
+    val modelId: String? = null,
+    val outfitId: String? = null,
+    val prompt: String = "",
+    val duration: Int? = null,
+    val aspectRatio: String? = null,
+    val quality: String? = null,
+    val takes: Int? = null,
+    val speaking: Boolean? = null,
+    /** A preset spec, or a Directed mode spec from the camera stage (kept as JSON). */
+    val camera: JsonElement? = null,
+    val clipId: String? = null,
+    val keepAudio: Boolean? = null,
+    val dryRun: Boolean? = null,
+    /** owner only */
+    val engineModel: String? = null,
+    val resolution: String? = null,
+)
+
+// ---------------------------------------------------------------- the answers
+
+@Serializable
+data class SuiteCaps(
+    val perJob: Double = 0.0, val perDay: Double = 0.0, val spentToday: Double = 0.0, val leftToday: Double = 0.0,
+    val ok: Boolean = true, val code: String? = null, val message: String? = null,
+)
+
+@Serializable
+data class SuiteEstimateCamera(val moves: List<String> = emptyList(), val guideUsed: Boolean = false)
+
+@Serializable
+data class SuiteSpeaking(val speaking: Boolean = false, val source: String = "default")
+
+/** Recast: who in the clip becomes whom, and whether their mouth follows speech ("yes" | "no" | "unknown"). */
+@Serializable
+data class SuiteEstimateCast(val characterId: String, val outfitId: String? = null, val who: String = "", val speaking: String = "unknown")
+
+@Serializable
+data class SuiteLicence(
+    val kind: String = "", val name: String = "", val notice: String? = null, val blockNewFeatures: Boolean? = null,
+    val territoryExcluded: List<String>? = null, val requiresAck: Boolean? = null,
+)
+
+/** owner: the engine a shot runs on. */
+@Serializable
+data class SuiteEngine(
+    val model: String = "", val name: String? = null, val provider: String? = null, val ref: String? = null, val resolution: String? = null,
+    val perSec: Double? = null, val billedPerTake: Double? = null, val licence: SuiteLicence? = null, val notice: String? = null, val test: Boolean? = null,
+)
+
+/** owner: a ladder step that was skipped, and why. */
+@Serializable
+data class SuiteTried(val model: String = "", val resolution: String = "", val why: String = "")
+
+/** POST /v1/suite/shots/estimate. Every Generate shows [buttonLabel] / [priceLine]; a cap problem shows [message]. */
+@Serializable
+data class SuiteEstimate(
+    val quality: String = "draft",
+    val label: String = "",
+    val resolution: String? = null,
+    val seconds: Double = 0.0,
+    val takes: Int = 1,
+    val mode: String = "text",
+    val estimate: Double = 0.0,
+    val priceLine: String = "",
+    val buttonLabel: String = "",
+    val ok: Boolean = true,
+    val code: String? = null,
+    val message: String? = null,
+    val caps: SuiteCaps? = null,
+    val warnings: List<String> = emptyList(),
+    val camera: SuiteEstimateCamera? = null,
+    val prompt: String = "",
+    val test: Boolean = false,
+    val speaking: SuiteSpeaking? = null,
+    val cast: List<SuiteEstimateCast>? = null,
+    val keepAudio: Boolean? = null,
+    /** owner */
+    val engine: SuiteEngine? = null,
+    /** owner */
+    val tried: List<SuiteTried>? = null,
+)
+
+/** GET /v1/suite/shots/{id}. */
+@Serializable
+data class SuiteShot(val job: Job, val warnings: List<String> = emptyList(), val engine: SuiteEngine? = null)
+
+@Serializable
+data class SuiteLadderStep(val model: String, val resolution: String)
+
+@Serializable
+data class SuiteResolution(val id: String, val label: String = "", val shortSide: Int = 0, val perSec: Double = 0.0)
+
+/** owner: one model of the registry, with the studio's switches. */
+@Serializable
+data class SuiteModelView(
+    val id: String,
+    val name: String = "",
+    val provider: String = "",
+    val ref: String? = null,
+    val status: String = "active",
+    val resolutions: List<SuiteResolution> = emptyList(),
+    val licence: SuiteLicence = SuiteLicence(),
+    val enabled: Boolean = true,
+    val blocked: Boolean = false,
+    val blockedReason: String? = null,
+    val needsAck: Boolean = false,
+    val configured: Boolean = true,
+    val priceScale: Double = 1.0,
+) {
+    fun perSec(resolution: String?) = (resolutions.firstOrNull { it.id == resolution } ?: resolutions.firstOrNull())?.perSec?.times(priceScale)
+}
+
+@Serializable
+data class SuiteCapsSet(val perJob: Double = 0.0, val perDay: Double = 0.0)
+
+/** GET /v1/suite/settings (owner). */
+@Serializable
+data class SuiteSettings(
+    val mode: String = "off",
+    val caps: SuiteCapsSet = SuiteCapsSet(),
+    val spentToday: Double = 0.0,
+    val ladder: Map<String, List<SuiteLadderStep>> = emptyMap(),
+    val defaultLadder: Map<String, List<SuiteLadderStep>> = emptyMap(),
+    val models: List<SuiteModelView> = emptyList(),
+    val providers: Map<String, Boolean> = emptyMap(),
+) {
+    fun model(id: String?) = models.firstOrNull { it.id == id }
+}
+
+/** POST /v1/suite/camera/compile: what the camera becomes on a quality's first model (owner also gets the engine). */
+@Serializable
+data class SuiteCompileRequest(val camera: SuiteCameraSpec, val quality: String? = null, val duration: Int? = null)
+
+@Serializable
+data class SuiteCompiled(val text: String = "", val moves: List<String> = emptyList(), val guideUsed: Boolean = false, val warnings: List<String> = emptyList(), val engine: SuiteEngine? = null)
+
+/** PATCH /v1/suite/settings (owner). */
+@Serializable
+data class SuiteModelPatch(val enabled: Boolean? = null)
+
+@Serializable
+data class SuiteSettingsPatch(val models: Map<String, SuiteModelPatch>? = null)
+
+/** Fixed suite wording and the rules both apps share. */
+object SuiteRules {
+    const val ENGINE = "suite"
+    val TIERS = listOf("draft", "standard", "hd", "cinema")
+    const val MAX_MOVES = 2
+    const val MAX_CAST = 4
+    /** Moves that can't be combined with another (static, time) and aerial ones. */
+    private val SOLO = setOf("static", "time", "aerial")
+
+    /** Two moves of different kinds; never static, time or aerial (server canMix). */
+    fun canMix(a: SuiteMoveOption?, b: SuiteMoveOption?): Boolean {
+        if (a == null || b == null || a.id == b.id || a.category == b.category) return false
+        return a.category !in SOLO && b.category !in SOLO
+    }
+
+    fun tierLabel(id: String?) = when (id) { "standard" -> "Standard"; "hd" -> "HD"; "cinema" -> "Cinema"; else -> "Draft" }
+
+    /** Words members must never see (server test PROVIDER_WORDS, plus the GPU words of the studio). */
+    val PROVIDER_WORDS = Regex("(?i)\\b(replicate|fal|runpod|minimax|h3|kling|seedance|veo|wan|ltx|lightricks|bytedance|google|sora)\\b")
+
+    /** The member's view of an estimate: no engine, no tried steps, no model words in what's shown. */
+    fun memberSafe(e: SuiteEstimate): SuiteEstimate = e.copy(engine = null, tried = null, prompt = "",
+        warnings = e.warnings.filterNot { PROVIDER_WORDS.containsMatchIn(it) })
+
+    /** The member's view of the catalog: tiers without their models. */
+    fun memberSafe(c: SuiteCatalog): SuiteCatalog = c.copy(tiers = c.tiers.map { it.copy(models = null) })
+
+    /** The server variable the owner sets to turn the suite on, and its two values. */
+    const val MODE_VAR = "SUITE_MODE"
+}

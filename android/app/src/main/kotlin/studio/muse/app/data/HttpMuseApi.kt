@@ -144,6 +144,14 @@ interface MuseService {
     @POST("v1/models/{id}/archive") suspend fun archiveModel(@Path("id") id: String): Model
     @POST("v1/models/{id}/unarchive") suspend fun unarchiveModel(@Path("id") id: String): Model
     @GET("v1/models") suspend fun archivedModels(@Query("archived") archived: Boolean = true): List<Model>
+    // AI suite (workstream 1)
+    @GET("v1/suite/catalog") suspend fun suiteCatalog(): SuiteCatalog
+    @POST("v1/suite/shots/estimate") suspend fun suiteEstimate(@Body r: SuiteShotRequest): SuiteEstimate
+    @POST("v1/suite/shots") suspend fun createSuiteShot(@Body r: SuiteShotRequest): Job
+    @GET("v1/suite/shots/{id}") suspend fun suiteShot(@Path("id") id: String): SuiteShot
+    @POST("v1/suite/camera/compile") suspend fun suiteCompile(@Body r: SuiteCompileRequest): SuiteCompiled
+    @GET("v1/suite/settings") suspend fun suiteSettings(): SuiteSettings
+    @PATCH("v1/suite/settings") suspend fun patchSuiteSettings(@Body r: SuiteSettingsPatch): SuiteSettings
 }
 
 /**
@@ -377,6 +385,14 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun listPosts(state: String?) = call { posts(state) }.map { it.abs() }
     override suspend fun createPost(req: CreatePostRequest) = call { createPost(req) }.abs()
     override suspend fun deletePost(postId: String) = call { deletePost(postId) }
+    // AI suite (workstream 1)
+    override suspend fun suiteCatalog() = call { suiteCatalog() }
+    override suspend fun suiteEstimate(req: SuiteShotRequest) = call { suiteEstimate(req.copy(dryRun = null)) }
+    override suspend fun createSuiteShot(req: SuiteShotRequest) = call { createSuiteShot(req.copy(dryRun = null)) }.abs()
+    override suspend fun suiteShot(id: String) = call { suiteShot(id) }.let { it.copy(job = it.job.abs()) }
+    override suspend fun suiteCompile(req: SuiteCompileRequest) = call { suiteCompile(req) }
+    override suspend fun suiteSettings() = call { suiteSettings() }
+    override suspend fun patchSuiteSettings(req: SuiteSettingsPatch) = call { patchSuiteSettings(req) }
 
     /** Relative "/uploads/x" refs → absolute, so Coil and ExoPlayer can load them. */
     private fun String.absUrl(): String = if (startsWith("/")) base.trimEnd('/') + this else this
