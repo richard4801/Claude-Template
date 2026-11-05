@@ -16,11 +16,11 @@ export const TIER_INFO: Record<Tier, { label: string; detail: string }> = {
 };
 
 /** How a model wants its inputs named in the prompt. */
-export type RefStyle = 'angle' /* <Image 1>, <Video 1> */ | 'at' /* @image_1, @video_1 */ | 'triple' /* <<<image_1>>> */ | 'bracket' /* [Image1] */ | 'none';
+export type RefStyle = 'angle' /* <Image 1>, <Video 1> */ | 'at' /* @image_1, @video_1 */ | 'triple' /* <<<image_1>>> */ | 'bracket' /* [Image1] */ | 'photo' /* reference photo 1, the source video */ | 'none';
 /** Which camera wording template the compiler uses (prompt library keys suite.camera.format.*). */
 export type CameraVocab = 'kling' | 'seedance' | 'h3' | 'veo' | 'wan' | 'ltx' | 'generic';
 /** Which input mapper builds the provider input (suite/inputs.ts). */
-export type Adapter = 'minimax-h3' | 'kling-v4' | 'kling-v3-omni' | 'seedance' | 'veo' | 'wan-2.7' | 'ltx-2.3' | 'fal-h3-3d' | 'mock';
+export type Adapter = 'minimax-h3' | 'kling-v4' | 'kling-v3-omni' | 'seedance' | 'veo' | 'wan-2.7' | 'ltx-2.3' | 'fal-h3-3d' | 'fal-h3-recast' | 'kling-o1' | 'wan-animate' | 'mock';
 
 export type Resolution = { id: string; label: string; shortSide: number; perSec: number; perSecWithVideo?: number; audioPerSec?: number };
 
@@ -31,7 +31,13 @@ export type ModelSpec = {
   /** Provider model ref; per mode where a family has separate endpoints (Wan 2.7 t2v/i2v/r2v). */
   ref: string | Partial<Record<'t2v' | 'i2v' | 'ref2v' | 'guide', string>>;
   adapter: Adapter;
-  modes: { text: boolean; image: boolean; reference: boolean; guide?: boolean };
+  modes: { text: boolean; image: boolean; reference: boolean; guide?: boolean; recast?: boolean };
+  /**
+   * Recast (same take, new cast): replace people in a source clip. `maxPeople` per call; `keepsCuts` = multi-shot cuts
+   * are kept; `keepsAudio` = the source sound comes back (else MUSE puts it back by stream copy); `refsPerPerson` =
+   * images per new person; `faceCrops` = a crop of who to replace can be sent; `sourceSeconds` = clip length range.
+   */
+  recast?: { maxPeople: number; keepsCuts: boolean; keepsAudio: boolean; refsPerPerson: number; totalImages: number; faceCrops: boolean; sourceSeconds: [number, number]; maxShotSeconds?: number };
   frames: { start: boolean; end: boolean; middle: number; /** frames and references can be combined */ withRefs: boolean };
   refs: { images: number; videos: number; audios: number; /** all images (frames + refs) together */ totalImages?: number; videoSecondsMax?: number; videoSecondsMin?: number };
   duration: { min: number; max: number; allowed?: number[]; /** billed at least this many seconds */ minBilled?: number };
@@ -85,8 +91,10 @@ export const MODELS: ModelSpec[] = [
     status: 'active' },
   // ---------------------------------------------------------------- Kling (Replicate)
   { id: 'kling-v4', name: 'Kling 4.0', provider: 'replicate', ref: 'kwaivgi/kling-v4.0', adapter: 'kling-v4',
-    modes: { text: true, image: true, reference: true, guide: true }, frames: { start: true, end: true, middle: 8, withRefs: true },
+    modes: { text: true, image: true, reference: true, guide: true, recast: true }, frames: { start: true, end: true, middle: 8, withRefs: true },
     refs: { images: 10, videos: 5, audios: 0, totalImages: 10, videoSecondsMin: 3, videoSecondsMax: 30 }, duration: { min: 3, max: 30 },
+    // Recast via base_video: people are mapped only by the prompt (no per-person field): ≤ 3 is a cautious limit (⚠ unverified).
+    recast: { maxPeople: 3, keepsCuts: false, keepsAudio: false, refsPerPerson: 3, totalImages: 10, faceCrops: true, sourceSeconds: [3, 30] },
     resolutions: [R('720p', '720p', 720, 0.157, { perSecWithVideo: 0.094 }), R('1080p', '1080p', 1080, 0.235, { perSecWithVideo: 0.141 })],
     aspectRatios: ['9:16', '16:9', '1:1', '21:9'], audio: 'always', negativePrompt: false, seed: false,
     camera: { vocab: 'kling', refStyle: 'at', referenceVideo: true }, lora: false, promptMax: 26000,
@@ -148,6 +156,33 @@ export const MODELS: ModelSpec[] = [
     audio: 'none', negativePrompt: false, seed: false, camera: { vocab: 'h3', refStyle: 'angle', referenceVideo: true }, lora: false,
     licence: hosted('MiniMax H3 Max (hosted on fal)', { notice: 'MiniMax H3' }), status: 'preview',
     notes: 'Duration comes from the guide clip; plus reference-token usage (estimate ≈ +$0.50 per job).' },
+  // ---------------------------------------------------------------- Recast (same take, new cast)
+  // The purpose-built one: up to 4 people, one photo each (left to right by default), keeps motion, camera, cuts and
+  // the source sound (fal page, 2026-11-05). No per-person field: who-is-who goes in the prompt.
+  { id: 'h3-max-recast', name: 'MiniMax H3 Max Recast', provider: 'fal', ref: 'minimax/h3-max/recast', adapter: 'fal-h3-recast',
+    modes: { text: false, image: false, reference: false, recast: true }, frames: { start: false, end: false, middle: 0, withRefs: true },
+    refs: { images: 4, videos: 1, audios: 0 }, duration: { min: 5, max: 30 },
+    recast: { maxPeople: 4, keepsCuts: true, keepsAudio: true, refsPerPerson: 1, totalImages: 4, faceCrops: false, sourceSeconds: [5, 30], maxShotSeconds: 15 },
+    resolutions: [R('768P', '768P', 768, 0.30), R('1080P', '1080P', 1080, 0.45)], aspectRatios: AR_FULL,
+    audio: 'always', negativePrompt: false, seed: true, camera: { vocab: 'h3', refStyle: 'photo', referenceVideo: true }, lora: false, promptMax: 2000,
+    licence: hosted('MiniMax H3 Max (hosted on fal)', { notice: 'MiniMax H3' }), status: 'preview',
+    notes: 'Clips 5–30 s, no single shot over 15 s. Needs FAL_KEY.' },
+  // Kling O1 edit: the source as base video plus up to 4 reference images; mapped by the prompt (⚠ people limit unverified).
+  { id: 'kling-o1', name: 'Kling O1 Edit', provider: 'replicate', ref: 'kwaivgi/kling-o1', adapter: 'kling-o1',
+    modes: { text: false, image: false, reference: false, recast: true }, frames: { start: false, end: false, middle: 0, withRefs: true },
+    refs: { images: 4, videos: 1, audios: 0, videoSecondsMin: 3, videoSecondsMax: 10 }, duration: { min: 3, max: 10 },
+    recast: { maxPeople: 2, keepsCuts: false, keepsAudio: true, refsPerPerson: 2, totalImages: 4, faceCrops: true, sourceSeconds: [3, 10] },
+    resolutions: [R('720p', '720p · std', 720, 0.084, { perSecWithVideo: 0.126 }), R('1080p', '1080p · pro', 1080, 0.112, { perSecWithVideo: 0.168 })],
+    aspectRatios: ['9:16', '16:9', '1:1'], audio: 'always', negativePrompt: false, seed: false, camera: { vocab: 'kling', refStyle: 'triple', referenceVideo: true }, lora: false,
+    licence: hosted('Kling (hosted)'), status: 'active' },
+  // Wan 2.2 Animate Replace: one character per call, source sound merged back (Apache-2.0 weights; hosted).
+  { id: 'wan-2.2-animate', name: 'Wan 2.2 Animate Replace', provider: 'replicate', ref: 'wan-video/wan-2.2-animate-replace', adapter: 'wan-animate',
+    modes: { text: false, image: false, reference: false, recast: true }, frames: { start: false, end: false, middle: 0, withRefs: true },
+    refs: { images: 1, videos: 1, audios: 0 }, duration: { min: 1, max: 30 },
+    recast: { maxPeople: 1, keepsCuts: false, keepsAudio: true, refsPerPerson: 1, totalImages: 1, faceCrops: false, sourceSeconds: [1, 30] },
+    resolutions: [R('480', '480p', 480, 0.02), R('720', '720p', 720, 0.05)], aspectRatios: AR_FULL,
+    audio: 'always', negativePrompt: false, seed: true, camera: { vocab: 'generic', refStyle: 'none', referenceVideo: true }, lora: false,
+    licence: hosted('Wan (hosted)'), status: 'active', notes: 'Several people in the clip may confuse it: one person per call.' },
   // ---------------------------------------------------------------- removed
   { id: 'sora-2', name: 'Sora 2', provider: 'replicate', ref: 'openai/sora-2', adapter: 'mock',
     modes: { text: false, image: false, reference: false }, frames: { start: false, end: false, middle: 0, withRefs: false },
@@ -155,6 +190,14 @@ export const MODELS: ModelSpec[] = [
     audio: 'always', negativePrompt: false, seed: false, camera: { vocab: 'generic', refStyle: 'none', referenceVideo: false }, lora: false,
     licence: hosted('OpenAI (hosted)'), status: 'removed', notes: 'API shut down 2026-09-24.' },
 ];
+
+/** Recast: per tier, candidates best-first (people count, clip length and provider decide). */
+export const RECAST_LADDER: Record<Tier, LadderStep[]> = {
+  draft: [{ model: 'wan-2.2-animate', resolution: '480' }, { model: 'kling-o1', resolution: '720p' }, { model: 'h3-max-recast', resolution: '768P' }, { model: 'kling-v4', resolution: '720p' }],
+  standard: [{ model: 'kling-o1', resolution: '720p' }, { model: 'h3-max-recast', resolution: '768P' }, { model: 'wan-2.2-animate', resolution: '720' }, { model: 'kling-v4', resolution: '720p' }],
+  hd: [{ model: 'h3-max-recast', resolution: '1080P' }, { model: 'kling-o1', resolution: '1080p' }, { model: 'kling-v4', resolution: '1080p' }],
+  cinema: [{ model: 'h3-max-recast', resolution: '1080P' }, { model: 'kling-v4', resolution: '1080p' }, { model: 'kling-o1', resolution: '1080p' }],
+};
 
 /** The model used by the mock provider when SUITE_MODE=mock picks nothing better (it can do everything). */
 export const MOCK_MODEL: ModelSpec = {

@@ -14,7 +14,7 @@ import type { ProviderId } from './registry.js';
 const run = promisify(execFile);
 
 export type ProviderStatus = { status: 'running' | 'succeeded' | 'failed' | 'canceled'; url?: string | null; billedSeconds?: number | null; error?: ReplicateError };
-export type StartHooks = { cancelled: () => boolean; onWait?: (seconds: number) => void | Promise<void> };
+export type StartHooks = { cancelled: () => boolean; onWait?: (seconds: number) => void | Promise<void>; /** The planned output length (the mock renders this long when the input has no duration, e.g. recast). */ seconds?: number };
 export interface VideoProvider {
   id: ProviderId;
   configured(): boolean;
@@ -110,7 +110,7 @@ export class MockProvider implements VideoProvider {
   async start(ref: string, input: Record<string, unknown>, hooks: StartHooks) {
     if (hooks.cancelled()) throw new ReplicateError('Cancelled', 'cancelled');
     const id = `mock_${this.calls.length + 1}_${Date.now().toString(36)}`;
-    const c = { id, ref, input, polls: 0 } as MockProvider['calls'][number] & { fail?: 'failed' | 'refused' };
+    const c = { id, ref, input, polls: 0, seconds: hooks.seconds } as MockProvider['calls'][number] & { fail?: 'failed' | 'refused'; seconds?: number };
     if (this.refuseNext > 0) { this.refuseNext--; c.fail = 'refused'; } else if (this.failNext > 0) { this.failNext--; c.fail = 'failed'; }
     this.calls.push(c);
     return id;
@@ -121,12 +121,12 @@ export class MockProvider implements VideoProvider {
     if (c.cancelled) return { status: 'canceled' };
     if (++c.polls <= this.pollsToFinish - 1) return { status: 'running' };
     if (c.fail) return { status: 'failed', error: new ReplicateError(c.fail === 'refused' ? 'flagged by the safety filter (mock)' : 'mock failure', c.fail) };
-    return { status: 'succeeded', url: `mock://${id}`, billedSeconds: Number(c.input.duration) || 5 };
+    return { status: 'succeeded', url: `mock://${id}`, billedSeconds: Number(c.input.duration) || (c as { seconds?: number }).seconds || 5 };
   }
   async cancel(id: string) { const c = this.calls.find(x => x.id === id); if (c) c.cancelled = true; }
   async download(url: string, file: string) {
     const c = this.calls.find(x => `mock://${x.id}` === url);
-    const secs = Math.max(1, Math.min(30, Number(c?.input.duration) || 5));
+    const secs = Math.max(1, Math.min(30, Number(c?.input.duration) || (c as { seconds?: number } | undefined)?.seconds || 5));
     const ar = String(c?.input.aspect_ratio ?? c?.input.ratio ?? '9:16');
     const [w, h] = ar === '16:9' ? [320, 180] : ar === '1:1' ? [240, 240] : ar === '4:3' ? [320, 240] : ar === '3:4' ? [240, 320] : ar === '21:9' ? [336, 144] : [180, 320];
     await run(this.ctx.config.FFMPEG_PATH, ['-y', '-v', 'error', '-f', 'lavfi', '-i', `testsrc=size=${w}x${h}:rate=24`, '-f', 'lavfi', '-i', 'sine=frequency=440',

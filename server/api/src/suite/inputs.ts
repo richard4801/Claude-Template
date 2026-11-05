@@ -22,6 +22,10 @@ export function buildInput(m: ModelSpec, p: ShotPlan, u: MediaUrls): Record<stri
       set(i, 'reference_image_urls', u.refs); set(i, 'reference_video_urls', u.videos.slice(0, 3)); set(i, 'reference_audio_urls', u.audio ? [u.audio] : undefined);
       break;
     case 'kling-v4':
+      if (p.mode === 'recast') { // edit the source clip (base_video): length and aspect come from it
+        i.base_video = u.videos[0]; i.resolution = p.resolution; set(i, 'reference_images', u.refs.slice(0, 10));
+        break;
+      }
       i.duration = p.seconds; i.resolution = p.resolution; i.aspect_ratio = p.aspect;
       set(i, 'start_image', u.start); set(i, 'middle_images', u.middle); set(i, 'end_image', u.end);
       set(i, 'reference_images', u.refs); set(i, 'reference_videos', u.videos.slice(0, 5));
@@ -58,6 +62,20 @@ export function buildInput(m: ModelSpec, p: ShotPlan, u: MediaUrls): Record<stri
     case 'fal-h3-3d':
       i.video_url = u.videos[0]; i.resolution = p.resolution; set(i, 'reference_image_urls', u.refs.slice(0, 8));
       break;
+    // ---- Recast (same take, new cast)
+    case 'fal-h3-recast': // one photo per new person, left to right; who-is-who in the prompt; the source sound is kept
+      i.video_url = u.videos[0]; i.reference_image_urls = u.refs.slice(0, 4); i.resolution = p.resolution; set(i, 'seed', p.seed);
+      break;
+    case 'kling-o1': // the source as the base video, references mapped by the prompt
+      i.reference_video = u.videos[0]; i.video_reference_type = 'base'; set(i, 'reference_images', u.refs.slice(0, 4));
+      i.keep_original_sound = p.recast?.keepAudio ?? true; i.mode = p.resolution === '720p' ? 'std' : 'pro';
+      if (['9:16', '16:9', '1:1'].includes(p.aspect)) i.aspect_ratio = p.aspect;
+      break;
+    case 'wan-animate': { // one character per call; no prompt
+      const o: Record<string, unknown> = { video: u.videos[0], character_image: u.refs[0], resolution: p.resolution === '480' ? '480' : '720', merge_audio: p.recast?.keepAudio ?? true };
+      set(o, 'seed', p.seed);
+      return o;
+    }
     case 'mock':
       Object.assign(i, { duration: p.seconds, resolution: p.resolution, aspect_ratio: p.aspect, start: u.start, middle: u.middle, end: u.end, refs: u.refs, videos: u.videos, audio: u.audio, ...p.params });
       break;

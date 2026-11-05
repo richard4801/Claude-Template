@@ -15,6 +15,7 @@ import * as P from '../pricing.js';
 import { replicateReferencesFor } from '../services/jobs.js';
 import { cameraCatalog, CameraSpecSchema } from './camera.js';
 import { compileCamera } from './compile.js';
+import { buildRecastPlan, pickRecast } from './recast.js';
 import { buildPlan, needOf, pickModel, shotLabel, ShotRequestSchema, type Character, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
 import { FalProvider, MockProvider, ReplicateProvider, type VideoProvider } from './providers.js';
 import { DEFAULT_LADDER, MODELS, modelById, modelView, MOCK_MODEL, TIER_INFO, TIERS, type ProviderId, type Tier } from './registry.js';
@@ -138,7 +139,7 @@ export class SuiteService {
         canKeyframes: usable.some(x => x.m!.modes.image), canReferences: usable.some(x => x.m!.modes.reference), canGuide: usable.some(x => x.m!.camera.referenceVideo) };
       return u.role === 'owner' ? { ...base, models: usable.map(x => ({ model: x.m!.id, name: x.m!.name, resolution: x.s.resolution })) } : base;
     });
-    return { enabled: this.mode !== 'off', test: this.mode === 'mock', defaultQuality: 'draft', tiers, modes: ['text', 'image', 'reference', 'swap'],
+    return { enabled: this.mode !== 'off', test: this.mode === 'mock', defaultQuality: 'draft', tiers, modes: ['text', 'image', 'reference', 'swap', 'recast'], recastMaxPeople: 4,
       aspectRatios: ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'], takesMax: 4, camera: cameraCatalog() };
   }
 
@@ -168,6 +169,7 @@ export class SuiteService {
   async plan(u: AuthUser, r: ShotRequest) {
     if (this.mode === 'off') throw new ApiError(400, 'engine_unavailable', "The AI suite isn't switched on yet");
     if (r.mode === 'swap') return { swap: true as const, ...(await this.swapEstimate(u, r)) };
+    if (r.mode === 'recast' || r.cast?.length) return this.recastPlan(u, r);
     const prefs = await this.prefs(u.studioId);
     const character = await this.character(u.studioId, r.modelId, r.outfitId);
     const need = needOf(r, character);
@@ -185,6 +187,45 @@ export class SuiteService {
     const plan = buildPlan(r, need, pick, character, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale, speaking: talk.speaking,
       separationUsd: SEPARATION_ESTIMATE_USD });
     return { swap: false as const, plan, pick, prefs, tried: pick.tried, talk };
+  }
+
+  /**
+   * Recast (same take, new cast): up to 4 people in the source clip, each → a studio character. Speaking per person:
+   * its switch; else, with one person, the clip's (switch → upload → detection); else unknown (the mouth follows the clip).
+   */
+  private async recastPlan(u: AuthUser, r: ShotRequest) {
+    if (!r.clipId) throw badRequest('Recast needs the source clip (clipId)');
+    if (!r.cast?.length) throw badRequest('Recast needs a cast: who in the clip becomes which character');
+    const [clip] = await this.ctx.db.select().from(clips).where(and(eq(clips.id, r.clipId), eq(clips.studioId, u.studioId)));
+    if (!clip) throw notFound('Clip');
+    if (!clip.storageKey) throw badRequest('Upload the clip file first');
+    const seen = new Set<string>();
+    for (const c of r.cast) {
+      const k = c.personIndex ? `i${c.personIndex}` : c.personHint ? `h${c.personHint}` : '';
+      if (k && seen.has(k)) throw badRequest('Two cast entries point at the same person');
+      if (k) seen.add(k);
+    }
+    const prefs = await this.prefs(u.studioId);
+    const texts = await this.ctx.prompts.texts(u.studioId);
+    const clipTalk = r.cast.length === 1 && r.cast[0]!.speaking === undefined ? await resolveSpeaking(this.ctx, clip, undefined) : null;
+    const members = [];
+    for (const c of r.cast) {
+      const character = await this.character(u.studioId, c.characterId, c.outfitId);
+      if (!character?.images.length) throw badRequest('Each recast character needs a character sheet');
+      const speaking: 'yes' | 'no' | 'unknown' = typeof c.speaking === 'boolean' ? (c.speaking ? 'yes' : 'no')
+        : clipTalk && clipTalk.source !== 'default' ? (clipTalk.speaking ? 'yes' : 'no') : 'unknown';
+      members.push({ cast: c, character, speaking });
+    }
+    const need = { people: r.cast.length, seconds: clip.durationSec, crops: r.cast.filter(c => c.faceCrop).length };
+    const pick = pickRecast(r.quality, need, { prefs, providers: this.available(), engineModel: r.engineModel, resolution: r.resolution });
+    if ('error' in pick) {
+      const e = new ApiError(400, 'nothing_fits', `${TIER_INFO[r.quality].label} can't recast this clip · try another quality, fewer people or a clip of 5–30 s`);
+      (e as any).tried = pick.tried;
+      throw e;
+    }
+    const plan = buildRecastPlan(r, members, pick, { key: clip.storageKey, seconds: clip.durationSec }, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale });
+    const talk = { speaking: plan.speaking, source: (r.cast.some(c => typeof c.speaking === 'boolean') ? 'switch' : clipTalk?.source ?? 'default') as 'switch' | 'upload' | 'detected' | 'default' };
+    return { swap: false as const, plan, pick: { ...pick, seconds: plan.seconds }, prefs, tried: pick.tried, talk };
   }
 
   /**
@@ -241,10 +282,11 @@ export class SuiteService {
   estimateView(u: AuthUser, r: ShotRequest, plan: ShotPlan, caps: Awaited<ReturnType<SuiteService['checkCaps']>>, tried: { model: string; resolution: string; why: string }[]) {
     const res = plan.resolution.replace(/P$/, 'p');
     const base = {
-      quality: plan.tier, label: shotLabel(plan.tier, plan.resolution), resolution: res, seconds: plan.seconds, takes: plan.takes, mode: plan.mode,
+      quality: plan.tier, label: shotLabel(plan.tier, plan.resolution, plan.mode === 'recast' ? 'Recast' : 'Shot'), resolution: res, seconds: plan.seconds, takes: plan.takes, mode: plan.mode,
       estimate: round2(plan.estimate), priceLine: `about ${P.money(plan.estimate)} · ${plan.seconds} s${plan.takes > 1 ? ` · ${plan.takes} takes` : ''}`,
       buttonLabel: `Generate · ${plan.seconds} s · ${P.money(plan.estimate)}${plan.takes > 1 ? ` · ${plan.takes} takes` : ''}`,
       caps, ok: caps.ok, code: caps.code, message: caps.message, warnings: [...plan.notes, ...plan.camera.notes], camera: { moves: plan.camera.moves, guideUsed: plan.camera.usesGuide },
+      ...(plan.recast ? { cast: plan.recast.people, keepAudio: plan.recast.keepAudio } : {}),
       prompt: plan.prompt, test: this.mode === 'mock',
     };
     if (u.role !== 'owner') return base;
@@ -285,17 +327,19 @@ export class SuiteService {
     if (!caps.ok) throw new ApiError(402, caps.code!, caps.message!);
     if (!(await this.runner.toolsReady())) throw new ApiError(400, 'engine_unavailable', "The AI suite isn't available right now");
     await this.checkMedia(u.studioId, plan);
-    const label = shotLabel(plan.tier, plan.resolution);
+    const label = shotLabel(plan.tier, plan.resolution, plan.mode === 'recast' ? 'Recast' : 'Shot');
     const request = {
       engine: 'suite', mode: plan.mode, quality: plan.tier, label, engineLabel: label, takeLabel: TIER_INFO[plan.tier].label, seconds: plan.seconds, takes: plan.takes, aspectRatio: plan.aspect, audio: plan.audio, speaking: p.talk.speaking, speakingSource: p.talk.source,
-      prompt: r.prompt, direction: r.direction, camera: r.camera, frames: r.frames, references: r.references, modelId: r.modelId, outfitId: r.outfitId, keepAudio: true,
+      prompt: r.prompt, direction: r.direction, camera: r.camera, frames: r.frames, references: r.references, modelId: r.modelId ?? plan.recast?.people[0]?.characterId, outfitId: r.outfitId,
+      keepAudio: plan.recast?.keepAudio ?? true, ...(plan.recast ? { clipId: r.clipId, cast: plan.recast.people } : {}),
     };
     const perTake = 45 + plan.seconds * 10 * (plan.tier === 'draft' ? 0.6 : plan.tier === 'cinema' ? 2 : plan.tier === 'hd' ? 1.5 : 1);
     const seed = r.seed ?? 1000 + Math.floor(Math.random() * 99000);
-    const [mrow] = r.modelId ? await this.ctx.db.select({ name: models.name, slots: models.slots }).from(models).where(eq(models.id, r.modelId)) : [];
+    const leadId = r.modelId ?? plan.recast?.people[0]?.characterId;
+    const [mrow] = leadId ? await this.ctx.db.select({ name: models.name, slots: models.slots }).from(models).where(eq(models.id, leadId)) : [];
     const thumb = (plan.images.start ?? plan.images.refs.find(x => x.role === 'character')?.image ?? mrow?.slots?.[0]?.image ?? null) as ImageRef | null;
     const job = await this.ctx.jobs.createInternal(u, {
-      kind: 'render', title: r.title ?? 'Untitled shot', modelId: r.modelId ?? '', modelName: mrow?.name ?? '', outfitId: r.outfitId ?? '', request,
+      kind: 'render', title: r.title ?? (plan.recast ? 'Recast' : 'Untitled shot'), modelId: leadId ?? '', modelName: mrow?.name ?? '', outfitId: r.outfitId ?? '', request,
       cost: round2(plan.estimate * 10000) / 10000, prompt: plan.prompt, seed, thumb, totalSeconds: perTake * plan.takes, totalSteps: plan.takes, phase: 'Queued',
       stats: { suite: { plan, mode: this.mode } },
     });
@@ -315,7 +359,8 @@ export class SuiteService {
     for (const v of plan.videos) {
       if (v.video.key) {
         const [row] = await this.ctx.db.select({ id: uploads.id }).from(uploads).where(and(eq(uploads.storageKey, v.video.key), eq(uploads.studioId, studioId)));
-        if (!row) throw badRequest('That video isn’t in this studio');
+        const [clip] = row ? [] : await this.ctx.db.select({ id: clips.id }).from(clips).where(and(eq(clips.storageKey, v.video.key), eq(clips.studioId, studioId)));
+        if (!row && !clip) throw badRequest('That video isn’t in this studio');
       } else if (v.video.url && !/^https:\/\//.test(v.video.url) && !/\/uploads\//.test(v.video.url)) throw badRequest('Videos must be uploads or https links');
     }
   }

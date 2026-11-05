@@ -6,9 +6,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { and, eq } from 'drizzle-orm';
 import type { Ctx } from '../ctx.js';
-import { jobs, uploads, type ImageRef } from '../db/schema.js';
+import { clips, jobs, uploads, type ImageRef } from '../db/schema.js';
 import { ReplicateError } from '../replicate/client.js';
-import { mediaToolsAvailable, probe, stripAudio, thumbnail } from '../replicate/media.js';
+import { mediaToolsAvailable, probe, restoreAudio, stripAudio, thumbnail } from '../replicate/media.js';
+import { pipeline } from 'node:stream/promises';
 import { failureOf } from '../services/replicateVideo.js';
 import { beatOnlyAudio } from '../audio/beat.js';
 import { putFile } from '../storage/objects.js';
@@ -89,7 +90,8 @@ export class SuiteRunner {
     const key = v.key ?? (v.url ? /\/uploads\/([A-Za-z0-9][A-Za-z0-9._\/-]*)$/.exec(v.url)?.[1] : undefined);
     if (key) {
       const [row] = await this.ctx.db.select({ id: uploads.id }).from(uploads).where(and(eq(uploads.storageKey, key), eq(uploads.studioId, studioId)));
-      if (!row && !key.startsWith('assets/')) throw new ReplicateError('a video is not in this studio', 'failed');
+      const clip = row ? null : (await this.ctx.db.select({ id: clips.id }).from(clips).where(and(eq(clips.storageKey, key), eq(clips.studioId, studioId))))[0];
+      if (!row && !clip && !key.startsWith('assets/')) throw new ReplicateError('a video is not in this studio', 'failed');
       return this.ctx.storage.presignGet(key, ttl);
     }
     if (v.url && /^https:\/\//.test(v.url)) return v.url;
@@ -166,7 +168,7 @@ export class SuiteRunner {
         if (!status || status.status === 'canceled') {
           if (!(await report(i, 0.03, 'Starting'))) return;
           const takeInput = plan.seed != null && input.seed != null ? { ...input, seed: plan.seed + i - 1 } : input;
-          ts.id = await provider.start(plan.ref, takeInput, { cancelled, onWait: async s => { await report(i, 0.03, `Waiting to start · retrying in ${s}s`); } });
+          ts.id = await provider.start(plan.ref, takeInput, { cancelled, seconds: plan.seconds, onWait: async s => { await report(i, 0.03, `Waiting to start · retrying in ${s}s`); } });
           ts.provider = provider.id;
           await this.save(job.id, takes);
           status = { status: 'running' };
@@ -188,7 +190,13 @@ export class SuiteRunner {
         const raw = path.join(tmp, `raw_${i}.mp4`), take = path.join(tmp, `take_${i}.mp4`), thumb = path.join(tmp, `take_${i}.jpg`);
         await provider.download(status.url, raw);
         // Delivered as the provider made it: no trim, no re-encode. Sound off: the audio track is dropped by stream copy.
-        if (!plan.audio && model.audio === 'always') await stripAudio(c.FFMPEG_PATH, raw, take); else await fs.promises.copyFile(raw, take);
+        if (plan.recast?.restoreAudio && plan.videos[0]?.video.key) {
+          // Recast keeps the original sound: this model doesn't return it, so it goes back on by stream copy (no re-encode).
+          const src = path.join(tmp, 'source');
+          if (!fs.existsSync(src)) { const obj = await ctx.storage.get(plan.videos[0].video.key); if (!obj) throw new ReplicateError('the source clip is missing', 'failed'); await pipeline(obj.body, fs.createWriteStream(src)); }
+          const si = await probe(c.FFPROBE_PATH, src);
+          if (si.audioCodec) await restoreAudio(c.FFMPEG_PATH, raw, src, take, si.audioCodec); else await fs.promises.copyFile(raw, take);
+        } else if (!plan.audio && model.audio === 'always') await stripAudio(c.FFMPEG_PATH, raw, take); else await fs.promises.copyFile(raw, take);
         const info = await probe(c.FFPROBE_PATH, take);
         await thumbnail(c.FFMPEG_PATH, take, thumb, Math.min(1, info.duration / 2));
         const key = `s/${job.id}/take_${i}.mp4`, thumbKey = `s/${job.id}/take_${i}.jpg`;
@@ -208,7 +216,7 @@ export class SuiteRunner {
       const actual = mock && !c.SUITE_MOCK_CHARGE ? 0 : exact;
       const fresh = ((await ctx.db.select({ stats: jobs.stats }).from(jobs).where(eq(jobs.id, job.id)))[0]?.stats ?? {}) as Record<string, any>;
       await ctx.jobs.complete(job.id, {
-        outputs, actualCostUsd: actual, settleNote: `${shotNote(plan.tier, plan.resolution, outputs.map(o => Number(o.durationSec) || plan.seconds))}${mock ? ' · test render' : ''}`,
+        outputs, actualCostUsd: actual, settleNote: `${shotNote(plan.tier, plan.resolution, outputs.map(o => Number(o.durationSec) || plan.seconds), plan.mode === 'recast' ? 'Recast' : 'Shot')}${mock ? ' · test render' : ''}`,
         stats: { ...fresh, suite: { ...(fresh.suite ?? {}), takes, billedSeconds: billed.reduce((a, b) => a + b, 0), exactCost: exact, separationCost } },
       });
     } catch (e) {

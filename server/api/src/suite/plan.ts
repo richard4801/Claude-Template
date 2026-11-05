@@ -9,10 +9,27 @@ import { CameraSpecSchema, VideoRefSchema, type VideoRef } from './camera.js';
 import { compileCamera, type CompiledCamera } from './compile.js';
 import { DEFAULT_LADDER, modelById, refFor, TIER_INFO, TIERS, type LadderStep, type ModelSpec, type ProviderId, type Resolution, type ShotMode, type Tier } from './registry.js';
 
-const ImageRefSchema = z.object({ asset: z.string().max(80).optional(), url: z.string().max(2000).optional() }).refine(v => !!v.asset || !!v.url, 'an image needs asset or url');
+export const ImageRefSchema = z.object({ asset: z.string().max(80).optional(), url: z.string().max(2000).optional() }).refine(v => !!v.asset || !!v.url, 'an image needs asset or url');
+
+/** One person to recast: which person in the clip (index, position hint, or a face crop) → which character. */
+export const CastSchema = z.object({
+  /** 1-based, in order of appearance (or left to right when they appear together). */
+  personIndex: z.number().int().min(1).max(4).optional(),
+  personHint: z.enum(['left', 'center', 'right', 'foreground', 'background', 'first', 'second', 'third', 'fourth']).optional(),
+  /** Free words: "the woman in the red coat". */
+  personNote: z.string().max(80).optional(),
+  /** A crop of the person's face from the clip (sent where the model takes one). */
+  faceCrop: ImageRefSchema.optional(),
+  characterId: z.string().max(80),
+  outfitId: z.string().max(80).optional(),
+  /** This person speaks or sings in the clip. Unset: the clip's talking flag/detection when one person is recast, else unknown. */
+  speaking: z.boolean().optional(),
+}).strict();
 
 export const ShotRequestSchema = z.object({
-  mode: z.enum(['text', 'image', 'reference', 'swap']).optional(),
+  mode: z.enum(['text', 'image', 'reference', 'swap', 'recast']).optional(),
+  /** Recast: who in the source clip (`clipId`) becomes which studio character; 1–4 people (suite/recast.ts). */
+  cast: z.array(CastSchema).min(1).max(4).optional(),
   title: z.string().max(200).optional(),
   /** The character (a MUSE model) and her outfit. */
   modelId: z.string().max(80).optional(),
@@ -143,18 +160,20 @@ export const extraPerTake = (m: ModelSpec) => (m.adapter === 'fal-h3-3d' ? 0.5 :
 
 export type ImagePlan = { start?: ImageRef; middle: ImageRef[]; end?: ImageRef; refs: { label: string; role: string; image: ImageRef }[] };
 export type ShotPlan = {
-  tier: Tier; mode: Need['mode']; modelId: string; provider: ProviderId; ref: string; kind: 't2v' | 'i2v' | 'ref2v' | 'guide'; resolution: string;
+  tier: Tier; mode: Need['mode'] | 'recast'; modelId: string; provider: ProviderId; ref: string; kind: 't2v' | 'i2v' | 'ref2v' | 'guide'; resolution: string;
   seconds: number; aspect: string; audio: boolean; takes: number; seed?: number; prompt: string; negative?: string; params: Record<string, unknown>;
   images: ImagePlan; videos: { video: VideoRef; use: string }[];
   /** The audio reference and whether only its instrumental is sent (performer not speaking). */
   audioRef?: { ref: VideoRef; beatOnly: boolean }; promptNoAudio?: string; speaking: boolean; separationUsd: number; perSec: number; billedPerTake: number; extraPerTake: number; estimate: number;
   camera: Pick_<CompiledCamera, 'moves' | 'notes' | 'usesGuide'>; notes: string[];
+  /** Recast only: keep the source sound (put back by stream copy when the model doesn't), and who became whom. */
+  recast?: { keepAudio: boolean; restoreAudio: boolean; people: { characterId: string; outfitId?: string; who: string; speaking: 'yes' | 'no' | 'unknown' }[] };
 };
 type Pick_<T, K extends keyof T> = { [P in K]: T[P] };
 
-const token = (style: ModelSpec['camera']['refStyle'], kind: 'image' | 'video', i: number) =>
-  style === 'at' ? `@${kind}_${i}` : style === 'triple' ? `<<<${kind}_${i}>>>` : style === 'bracket' ? `[${kind === 'image' ? 'Image' : 'Video'}${i}]` : `<${kind === 'image' ? 'Image' : 'Video'} ${i}>`;
-const joinTokens = (t: string[]) => (t.length <= 1 ? t.join('') : `${t.slice(0, -1).join(', ')} and ${t.at(-1)}`);
+export const token = (style: ModelSpec['camera']['refStyle'], kind: 'image' | 'video', i: number) =>
+  style === 'photo' ? (kind === 'image' ? `reference photo ${i}` : `the source video`) : style === 'at' ? `@${kind}_${i}` : style === 'triple' ? `<<<${kind}_${i}>>>` : style === 'bracket' ? `[${kind === 'image' ? 'Image' : 'Video'}${i}]` : `<${kind === 'image' ? 'Image' : 'Video'} ${i}>`;
+export const joinTokens = (t: string[]) => (t.length <= 1 ? t.join('') : `${t.slice(0, -1).join(', ')} and ${t.at(-1)}`);
 const ROLE_WORDS: Record<string, [string, string]> = {
   product: ['the product', 'shape, colours, packaging and label'], location: ['the location', 'place, layout and light'], style: ['a style reference', 'colour, mood and texture'],
   prop: ['a prop', 'shape and colour'], person: ['another person in the scene', 'appearance and clothing'],
@@ -269,9 +288,9 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
 }
 
 /** "Video · Shot · HD 1080p · 5 s" (ledger) / "Shot · HD · 1080p" (job label). Never names a model. */
-export const shotLabel = (tier: Tier, resolution: string) => `Shot · ${TIER_INFO[tier].label} · ${resolution.replace(/P$/, 'p')}`;
-export const shotNote = (tier: Tier, resolution: string, seconds: number[]) => {
+export const shotLabel = (tier: Tier, resolution: string, kind: 'Shot' | 'Recast' = 'Shot') => `${kind} · ${TIER_INFO[tier].label} · ${/^\d+$/.test(resolution) ? `${resolution}p` : resolution.replace(/P$/, 'p')}`;
+export const shotNote = (tier: Tier, resolution: string, seconds: number[], kind: 'Shot' | 'Recast' = 'Shot') => {
   const fmt = (v: number) => String(Math.round(v * 10) / 10);
   const s = seconds.length > 1 ? (seconds.every(v => v === seconds[0]) ? `${seconds.length} × ${fmt(seconds[0]!)} s` : `${fmt(seconds.reduce((a, b) => a + b, 0))} s`) : `${fmt(seconds[0] ?? 0)} s`;
-  return `Video · Shot ${TIER_INFO[tier].label} ${resolution.replace(/P$/, 'p')} · ${s}`;
+  return `Video · ${kind} ${TIER_INFO[tier].label} ${/^\d+$/.test(resolution) ? `${resolution}p` : resolution.replace(/P$/, 'p')} · ${s}`;
 };

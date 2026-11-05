@@ -961,10 +961,14 @@ CameraSpec {
   performance?: { emotion, to?, atS?, intensity? /* 0–1 */ },
   guide?: { video: VideoRef, use?: "camera"|"motion"|"blocking" /* blocking = camera + framing + blocking (full playblast) */, cameraSessionId?, keyframes?: { start?: url, middle?: url[] /* ≤ 8 */, end?: url /* "/uploads/<storage key>" (signed at run time, never expires) or https */ } }
 }
+CastMember { characterId, outfitId?, personIndex? /* 1–4: order of appearance, or left to right */,
+  personHint?: "left"|"center"|"right"|"foreground"|"background"|"first"|"second"|"third"|"fourth", personNote? /* ≤ 80: "the woman in the red coat" */,
+  faceCrop?: ImageRef /* who to replace, where the model takes one */, speaking?: boolean /* unset: one person → the clip's talking flag/detection; several → unknown (the mouth follows the clip) */ }
 Move { id, intensity? /* 0–1, default 0.5 */, speed?: "slow"|"normal"|"fast", ease?: "linear"|"in"|"out"|"in_out", startS?, endS? }
 // The ids of every option are in GET /v1/suite/camera. Unknown ids are bad_request.
 ShotRequest {
-  mode?: "text"|"image"|"reference"|"swap" /* default: image with frames, reference with a character, else text */,
+  mode?: "text"|"image"|"reference"|"swap"|"recast" /* default: image with frames, reference with a character, else text */,
+  cast?: CastMember[] /* recast: 1–4 people of the source clip (clipId) → studio characters */,
   title?, modelId? /* the character */, outfitId?, prompt /* ≤ 2000 */, direction?,
   frames?: { start?: ImageRef, middle?: ImageRef[] /* ≤ 8 */, end?: ImageRef },
   references?: { images?: { image: ImageRef, role?: "product"|"location"|"style"|"prop"|"person", label? }[] /* ≤ 6 */,
@@ -981,6 +985,7 @@ ShotEstimate { quality, label /* "Shot · HD · 2K" */, resolution, seconds /* w
   buttonLabel /* "Generate · 6 s · $0.78" */, ok, code, message, caps: { perJob, perDay, spentToday, leftToday, ok, code, message },
   warnings: string[] /* e.g. "length set to 6 s", "one camera move per shot: … dropped", "the guide clip is not sent" */,
   camera: { moves: string[], guideUsed: boolean }, prompt, test, speaking: { speaking: boolean, source: "switch"|"upload"|"detected"|"default" },
+  cast?: { characterId, outfitId?, who /* "the person on the left" */, speaking: "yes"|"no"|"unknown" }[], keepAudio? /* recast */,
   engine?, input?, tried? /* (owner): model, provider, ref, $/s, billed seconds, licence and notice; the inputs; the ladder steps tried */ }
 ```
 
@@ -1000,6 +1005,14 @@ ShotEstimate { quality, label /* "Shot · HD · 2K" */, resolution, seconds /* w
 **Ledger notes:**
 - Hold: `"Video · Shot · Draft · 768p · 5 s · 2 takes · hold"`
 - Settle: `"Video · Shot Draft 768p · 2 × 5 s"` (+ `" · test render"` in mock mode)
+
+**Recast** (2026-11-05, "same take, new cast"): `POST /v1/suite/shots[/estimate]` with `{mode: "recast", clipId, cast, quality?, keepAudio? /* default true */, prompt?, takes?}`.
+- **What it keeps:** the clip's motion, camera, framing and (on models that keep them) cuts. The original sound is kept (put back by stream copy on models that drop it) unless `keepAudio: false`.
+- **Delivery:** as the model made it, no trim.
+- **The model** comes from its own recast ladder: the first that takes this many people and this clip length. `400 nothing_fits` otherwise ("try another quality, fewer people or a clip of 5–30 s").
+- **Labels:** `engineLabel` "Recast · HD · 1080p", take `label` "HD", ledger "Video · Recast HD 1080p · 6 s".
+- **Refused (400):** no `clipId`, no `cast`, two entries for the same person, a character with no sheet. More than 4 people is refused by the schema. Unknown clip or character → 404.
+- **Prompt:** the prompt script `suite.recast` (owner-editable). Mouth wording per person comes only from its speaking rules.
 
 **Prompts are prompt scripts** (2026-11-05, workstream 4's engine): `suite.shot` (the whole shot prompt; its `scene` section is the only one that sees the user's words, sanitised) and `suite.camera` (the Camera block per model family). Owner rule edits: `GET/PUT/DELETE /v1/prompt-scripts/suite.shot|suite.camera`. Mouth and speech wording comes only from the shot's audio rules (`audio.lipsync`, `audio.beat`, `suite.audio.dialogue`, `audio.silent`). The job's `request` also carries `speaking` and `speakingSource`. Camera-session Shot drafts are priced on their target model (`engineModel` + `resolution` from the session's `targetModel`), falling back to the Cinema ladder with a warning when the target can't make the shot.
 

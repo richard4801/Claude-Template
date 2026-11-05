@@ -248,3 +248,66 @@ _Code: `src/suite/scripts.ts` (both scripts, registered on load), `plan.ts` (`ru
 **Unchanged by the port:**
 - The shot API contract.
 - Every existing `suite.*` block key, so saved owner overrides keep working.
+
+## Recast: same take, new cast (2026-11-05)
+_Owner-approved. Backend only; the UI waits for the design review. Code: `src/suite/recast.ts` (plan), `registry.ts` (`recast` flags, `RECAST_LADDER`), `inputs.ts` (adapters), `runner.ts` (the source sound put back), `scripts.ts` (`suite.recast`). Tests: `test/suite-recast.test.ts`._
+
+Replaces **up to 4 people** in one source clip. Each person is mapped to a studio character with her sheet and outfit. Motion, gestures, expressions, camera, framing and (where the model keeps them) cuts stay the same, and so does the original sound.
+
+### Models (public pages only, 2026-11-05; nothing was run)
+| id | provider · endpoint | people / call | keeps cuts | keeps sound | images | clip | $/s of output |
+|---|---|---|---|---|---|---|---|
+| `h3-max-recast` | fal `minimax/h3-max/recast` | **4** | **yes** | **yes** | 1 photo per person (left to right) | 5–30 s, no shot > 15 s | 768P 0.30 · 1080P 0.45 |
+| `kling-o1` | Replicate `kwaivgi/kling-o1` (`video_reference_type: base`) | 2 ⚠ (prompt-mapped, not stated) | unknown → no | yes (`keep_original_sound`) | ≤ 4 with a video | 3–10 s | std 0.126 · pro 0.168 (video input) |
+| `kling-v4` | Replicate `kwaivgi/kling-v4.0` (`base_video`) | 3 ⚠ (prompt-mapped, not stated) | unknown → no | unknown → no: MUSE puts the sound back | ≤ 10 | 3–30 s | 720p 0.094 · 1080p 0.141, billed output + input seconds |
+| `wan-2.2-animate` | Replicate `wan-video/wan-2.2-animate-replace` | 1 | unknown → no | yes (`merge_audio`) | 1 | — | 480 0.02 · 720 0.05 |
+
+**Not added:**
+- Wan 2.7 VideoEdit (one reference image, general editor, ≤ 10 s).
+- Runway Aleph 2 (no per-person reference; keyframe edits only).
+- Luma Modify (no person references).
+
+**fal Recast** is the purpose-built option.
+- **Status:** it stays `preview` and needs `FAL_KEY`. The owner adds the fal account later; until then it runs only on the mock (no spend).
+- **Inputs:** there is no person-index, box or face-crop field. Who-is-who goes through the reference order (left to right) and the prompt.
+
+**Recast ladder** (first that fits the people count and clip length):
+
+| Quality | Order |
+|---|---|
+| Draft | Wan Animate 480 → Kling O1 720p → fal 768P → Kling 4.0 720p |
+| Standard | Kling O1 720p → fal 768P → Wan 720 → Kling 4.0 720p |
+| HD | fal 1080P → Kling O1 1080p → Kling 4.0 1080p |
+| Cinema | fal 1080P → Kling 4.0 1080p → Kling O1 1080p |
+
+Without `FAL_KEY` (live mode), 3 people go to Kling 4.0, and 4 people fit nothing.
+
+### Who is who
+- **The cast list:** `cast[]` holds `personIndex` (order of appearance or left to right), `personHint` (left/center/right/foreground/background/first…fourth), `personNote` (free words) and `faceCrop`. Face crops are sent only where the model takes them (the Kling models) and are named "<Image k> shows which person … is".
+- **Ordering:** the cast is sorted by index, then by hint (left → right), then as given. Models that map references left to right get them in that order.
+- **References per person:** each person gets `refsPerPerson` images, within the model's image budget. Priority: dressed in the outfit (outfit front), face front, body front, profile, …. One-photo models without an outfit get the full-body front.
+
+### Speaking and sound (the lip-sync rules)
+- **Per person:**
+  - **The switch:** `cast[i].speaking`.
+  - **One person, no switch:** the clip's switch → upload talking flag → detection.
+  - **Several people:** "unknown", and the mouth follows the clip.
+- **Mouth wording:** only from the script's rules — "lips match every word of the original audio" / "mouth follows the source exactly; she does not speak, sing or mouth words" / "mouth follows the source exactly".
+- **Sound:**
+  - `keepAudio` (default on) keeps the original sound. On models that don't return it (`keepsAudio: false`), it is put back with `restoreAudio` (video stream copy, no re-encode, no trim).
+  - `keepAudio: false` strips it.
+
+### Prompt script `suite.recast` (owner-editable)
+- **Sections:** task → each person → who is who (face crops) → cast lock (several people) → mouths (per person) → cuts (models that keep them) → the user's direction (the only user section, sanitised against every cast member's identity and never-add list) → closing line.
+- **Blocks:** `suite.recast.*` (task, person, identify, lock, mouth.speaking / mouth.silent / mouth.follow, cuts, direction).
+
+### Money
+- **Estimate:** $/s (with video input) × billed seconds × takes. The hold uses the same caps as any suite shot.
+- **Settle:** exact billed seconds from the provider. Mock mode settles $0 ("test render").
+- **Billed seconds:**
+  - The fal minimum length is 5 s.
+  - Kling 4.0 edits bill output + input seconds.
+
+### Open
+1. Real multi-person accuracy on the Kling edit models is unverified: their people limits (2 and 3) are cautious guesses, ⚠. Check them with the owner's first real recasts, then adjust `maxPeople`.
+2. **fal:** add `FAL_KEY` to turn fal Recast on in live mode. Its adapter follows fal's queue API (the same as 3D-to-video) and has been tested only against fakes.
