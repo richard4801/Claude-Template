@@ -32,12 +32,20 @@ struct CreditsView: View {
                     .padding(.top, 18)
             }
             SectionHeader("Recent spend")
-            VStack(spacing: 0) {
-                ForEach(myJobs) { j in
-                    spendRow(j.title + (j.isFailed ? " (failed)" : ""), j.isFailed ? "Refunded" : j.engineName,
-                             j.isFailed ? "+\(Pricing.money(j.refunded))" : "−\(Pricing.money(j.cost))")
+            // UX audit M4-38: the newest 20 renders, a Photos row only when there are photos, and an empty state.
+            let photos = store.takes.filter { !$0.isVideo }
+            if myJobs.isEmpty && photos.isEmpty {
+                Note(icon: "clock", "Nothing spent yet. Renders and photos show here as they finish.")
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(myJobs.prefix(20))) { j in
+                        spendRow(j.title + (j.isFailed ? " (failed)" : ""), j.isFailed ? "Refunded" : j.engineName,
+                                 j.isFailed ? "+\(Pricing.money(j.refunded))" : "−\(Pricing.money(j.cost))")
+                    }
+                    if !photos.isEmpty {
+                        spendRow("Photos", photos.count == 1 ? "1 photo" : "\(photos.count) photos", "−\(Pricing.money(photos.reduce(0) { $0 + $1.cost }))")
+                    }
                 }
-                spendRow("Photos", "\(store.takes.filter { !$0.isVideo }.count) photos", "−\(Pricing.money(store.takes.filter { !$0.isVideo }.reduce(0) { $0 + $1.cost }))")
             }
         }
         .task { await store.loadStudio() }
@@ -418,7 +426,7 @@ struct StudioSettingsSection: View {
             }
         } else {
             H2("Studio")
-            Note(icon: "building.2", "This server has no studio settings. They come with the MUSE server (server/api).")
+            Note(icon: "building.2", "This server has no studio settings yet. They come with the full MUSE server.")
         }
     }
 
@@ -504,7 +512,7 @@ struct EnginesSettingsSection: View {
             }
         } else {
             H2("Engines")
-            Note(icon: "server.rack", "This server has no engine settings. They come with the MUSE server (server/api).")
+            Note(icon: "server.rack", "This server has no engine settings yet. They come with the full MUSE server.")
         }
     }
 
