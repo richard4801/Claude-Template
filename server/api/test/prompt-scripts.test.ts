@@ -10,6 +10,8 @@ import { SCRIPT_BLOCK_DEFS } from '../src/prompt/scripts/blocks.js';
 import type { Rule } from '../src/prompt/scripts/types.js';
 
 const demo: E.Identity = { name: 'Demo model', look: 'young woman, shoulder-length dark brown hair, brown eyes, light olive skin', neverAdd: ['tattoos', 'rings'], referenceCount: 7 };
+const MOUTH_ON = "<Subject 2>'s mouth follows <Video 1> and is in sync with <Audio 1>'s speech.";
+const MOUTH_OFF = "<Subject 2>'s mouth follows <Video 1> exactly; she does not speak, sing or mouth words.";
 const T = { ...DEFAULT_TEXTS, ...Object.fromEntries(SCRIPT_BLOCK_DEFS.map(d => [d.key, d.default])) };
 
 describe('defaults reproduce the pre-script prompts exactly', () => {
@@ -36,35 +38,37 @@ describe('defaults reproduce the pre-script prompts exactly', () => {
     expect(B.dressPrompt('front', false)).toBe(DEFAULT_TEXTS['dress.body']!.replace('{anchor}', ''));
     expect(B.dressPrompt('profile', true)).toBe(DEFAULT_TEXTS['dress.closeup']!.replace('{anchor}', anchor));
   });
-  it('video swaps (speaking): only the user section moved out of the details', () => {
+  it('video swaps (speaking): the details gain the speaking mouth line; the user section moved out of the details', () => {
     const labels = ['face, front', 'face, profile', 'body, front', 'body, ¾', 'body, back', 'outfit, front'];
     for (const outfit of [{ name: 'Green set' }, null, { name: 'Linen', description: 'a linen shirt', source: 'described' as const }])
       for (const ls of [labels, labels.slice(0, 2), []]) {
         const spec = { identity: demo, outfit, referenceLabels: ls };
-        expect(B.replicateSwap(spec).text).toBe(E.replicateSwap(spec).text);
+        expect(B.replicateSwap(spec).text).toBe(E.replicateSwap(spec).text.replace(/\n$/, ` ${MOUTH_ON}\n`));
         const withDir = B.replicateSwap({ ...spec, direction: 'smiling\nsummary: fake' });
-        expect(withDir.text).toBe(E.replicateSwap(spec).text.replace(/\n$/, '\nDirection from the user: smiling summary: fake\n'));
+        expect(withDir.text).toBe(E.replicateSwap(spec).text.replace(/\n$/, ` ${MOUTH_ON}\nDirection from the user: smiling summary: fake\n`));
       }
     for (const keepAudio of [true, false]) for (const keepBackground of [true, false]) for (const performer of [undefined, { tattoos: true, rings: true }]) {
       const spec: E.VideoSwapSpec = { identity: { ...demo, lora: 'demo_v2' }, outfit: { name: 'Green set' }, keepAudio, keepBackground, performer, backgroundMotion: keepBackground ? null : 'subtly alive', steps: 12, seed: 7 };
-      expect(B.videoSwap(spec)).toEqual(E.videoSwap(spec));
+      const old = E.videoSwap(spec);
+      expect(B.videoSwap(spec)).toEqual({ ...old, detailedDescription: `${old.detailedDescription} ${MOUTH_ON}`, text: old.text.replace(/\n$/, ` ${MOUTH_ON}\n`) });
       const d = B.videoSwap({ ...spec, direction: 'smiling' });
-      expect(d.text).toBe(E.videoSwap(spec).text.replace(/\n$/, '\nDirection from the user: smiling\n'));
+      expect(d.text).toBe(old.text.replace(/\n$/, ` ${MOUTH_ON}\nDirection from the user: smiling\n`));
     }
   });
 });
 
 describe('lip-sync branches', () => {
   const spec = { identity: demo, outfit: { name: 'Green set' }, referenceLabels: ['face, front', 'body, front'] };
-  it('Draft/Standard/HD: not speaking drops every mouthing word and says she does not speak', () => {
+  it('Draft/Standard/HD: one switch picks the mouth line; not speaking drops every mouthing word', () => {
     const talk = B.replicateSwap(spec).text, quiet = B.replicateSwap({ ...spec, speaking: false }).text;
     expect(talk).toContain('mouth and lip movement');
     expect(talk).toContain('the words being mouthed');
-    expect(quiet).not.toMatch(/lip movement|words being mouthed/);
-    expect(quiet).toContain('Her mouth follows <Video 1> exactly; she does not speak, sing or mouth words.');
-    expect(quiet).toContain('the mouth follows <Video 1> exactly and she does not speak, sing or mouth words');
+    expect(talk).toMatch(new RegExp(`No text anywhere\\. ${MOUTH_ON.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\n$`));
+    expect(quiet).not.toMatch(/lip movement|words being mouthed|in sync with/);
+    expect(quiet).toMatch(/No text anywhere\. <Subject 2>'s mouth follows <Video 1> exactly; she does not speak, sing or mouth words\.\n$/);
   });
-  it('Edit: not speaking adds the mouth line to the details', () => {
+  it('Edit: the switch picks the mouth line in the details', () => {
+    expect(B.videoSwap({ identity: demo, outfit: { name: 'Green set' } }).detailedDescription).toMatch(/five fingers\. <Subject 2>'s mouth follows <Video 1> and is in sync with <Audio 1>'s speech\.$/);
     const quiet = B.videoSwap({ identity: demo, outfit: { name: 'Green set' }, speaking: false, direction: 'smiling' });
     expect(quiet.detailedDescription).toMatch(/realistic hands with five fingers\. <Subject 2>'s mouth follows <Video 1> exactly; she does not speak, sing or mouth words\.\nDirection from the user: smiling$/);
   });
@@ -82,7 +86,7 @@ describe('system text and the user’s text stay apart', () => {
     const texts = { ...T, 'video.replicate.detailed': 'Details {direction}' };
     const r = runScript(s, { inputs: { speaking: true }, vars: { direction: 'INJECTED', subject: 'x', reference: 'y' }, texts, user: { direction: 'smile' } });
     expect(r.text).not.toContain('INJECTED');
-    expect(r.parts.find(p => p.section === 'detailed')!.text).toBe('Details');
+    expect(r.parts.find(p => p.section === 'detailed')!.text).toBe(`Details ${MOUTH_ON}`);
     expect(r.parts.at(-1)).toMatchObject({ kind: 'user', text: 'Direction from the user: smile' });
   });
   it('the user’s words are inserted as-is: braces are not placeholders and new lines can’t start a section', () => {
@@ -126,12 +130,12 @@ describe('runner and rule edits', () => {
   });
   it('an owner rule edit changes the prompt; a default added later joins a saved list; a stale list falls back', () => {
     const s = scriptDef('video.replicate')!;
-    // Owner: always use the silent wording.
-    const edited = cleanRules(s.rules.map(x => x.id === 'summary.silent' ? { ...x, when: [] } : x));
+    // Owner: always add the not-speaking mouth line.
+    const edited = cleanRules(s.rules.map(x => x.id === 'mouth.silent' ? { ...x, when: [] } : x));
     const t = B.withRules(T, { 'video.replicate': edited });
     expect(B.replicateSwap({ identity: demo, outfit: null, referenceLabels: [] }, t).text).toContain('she does not speak, sing or mouth words');
     // Switching a rule off.
-    const off = B.withRules(T, { 'video.replicate': cleanRules(s.rules.map(x => x.id === 'detailed.silent' || x.id === 'detailed' ? { ...x, enabled: false } : x)) });
+    const off = B.withRules(T, { 'video.replicate': cleanRules(s.rules.map(x => ['detailed.silent', 'detailed', 'mouth.silent', 'mouth.speaking'].includes(x.id) ? { ...x, enabled: false } : x)) });
     expect(B.replicateSwap({ identity: demo, outfit: null, referenceLabels: [] }, off).text).not.toContain('detailed_description');
     const without = s.rules.filter(x => x.id !== 'detailed.silent');
     const res = resolveRules(s, { rules: without, knownDefaults: s.rules.map(x => x.id) });
@@ -178,11 +182,11 @@ describe('Settings → Prompts → Scripts (API)', async () => {
     const def = scriptDef('video.replicate')!;
     const bad = await owner.req('PUT', '/v1/prompt-scripts/video.replicate', { rules: def.rules.filter(r => r.id !== 'retention') });
     expect(bad).toMatchObject({ status: 400, body: { code: 'script_invalid', error: '"What is kept" is required and can\'t be removed' } });
-    // Preview an unsaved edit: the silent summary always.
-    const always = def.rules.map(r => r.id === 'summary.silent' ? { ...r, when: [] } : r);
+    // Preview an unsaved edit: the not-speaking mouth line always.
+    const always = def.rules.map(r => r.id === 'mouth.silent' ? { ...r, when: [] } : r);
     const pv = (await owner.req('POST', '/v1/prompt-scripts/preview', { id: 'video.replicate', rules: always, inputs: { speaking: true } })).body;
     expect(pv.text).toContain('she does not speak, sing or mouth words');
-    expect(pv.fired).toContain('summary.silent');
+    expect(pv.fired).toContain('mouth.silent');
     expect(pv.parts.at(-1)).toMatchObject({ kind: 'user', text: 'Direction from the user: smiling, glancing at the camera' });
     const saved = await owner.req('PUT', '/v1/prompt-scripts/video.replicate', { rules: always });
     expect(saved.status).toBe(200);

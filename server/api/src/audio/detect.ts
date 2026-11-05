@@ -91,3 +91,38 @@ export async function detectTalking(ffmpeg: string, file: string): Promise<Talki
   if (!s || s.length < RATE / 2) return { kind: 'none', speaking: false, confidence: 1 };
   return classifySamples(s);
 }
+
+/**
+ * Where there is sound worth keeping: ranges of `samples` (16 kHz mono) louder than 25 dB under the clip's loud level,
+ * gaps under `minGapSec` bridged, ranges under `minSec` dropped. Energy-based (free): for silence cuts, not a word
+ * detector (music counts as sound). The editor (workstream 3) uses it for silence-only cuts.
+ */
+export function soundRanges(s: Float32Array, o: { minGapSec?: number; minSec?: number; floorDb?: number } = {}): { startSec: number; endSec: number }[] {
+  const minGap = o.minGapSec ?? 0.3, minLen = o.minSec ?? 0.2;
+  const rms: number[] = [];
+  for (let start = 0; start + FRAME <= s.length; start += HOP) {
+    let e = 0;
+    for (let i = start; i < start + FRAME; i++) e += s[i]! * s[i]!;
+    rms.push(Math.sqrt(e / FRAME));
+  }
+  if (!rms.length) return [];
+  const loud = db(pct(rms, 0.95));
+  if (loud < -45) return [];
+  const floor = o.floorDb ?? loud - 25, t = (i: number) => (i * HOP) / RATE;
+  const out: { startSec: number; endSec: number }[] = [];
+  let open = -1;
+  rms.forEach((v, i) => {
+    const on = db(v) > floor;
+    if (on && open < 0) open = i;
+    if (!on && open >= 0) { out.push({ startSec: t(open), endSec: t(i - 1) + FRAME / RATE }); open = -1; }
+  });
+  if (open >= 0) out.push({ startSec: t(open), endSec: s.length / RATE });
+  const merged: typeof out = [];
+  for (const r of out) { const last = merged.at(-1); if (last && r.startSec - last.endSec < minGap) last.endSec = r.endSec; else merged.push({ ...r }); }
+  return merged.filter(r => r.endSec - r.startSec >= minLen).map(r => ({ startSec: Math.round(r.startSec * 1000) / 1000, endSec: Math.round(r.endSec * 1000) / 1000 }));
+}
+/** soundRanges for a file (decoded with ffmpeg); [] when it has no audio. */
+export async function fileSoundRanges(ffmpeg: string, file: string, o?: Parameters<typeof soundRanges>[1]) {
+  const s = await decodeAudio(ffmpeg, file);
+  return s ? soundRanges(s, o) : [];
+}

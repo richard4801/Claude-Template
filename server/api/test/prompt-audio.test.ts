@@ -8,7 +8,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { decodeAudio, detectTalking } from '../src/audio/detect.js';
+import { decodeAudio, detectTalking, soundRanges } from '../src/audio/detect.js';
 import { audioIdle } from '../src/audio/service.js';
 import { beatOnlyAudio, instrumentalOf } from '../src/audio/beat.js';
 import { makeApp, people, demoModel, until, type Client } from './helpers.js';
@@ -202,6 +202,19 @@ describe.skipIf(!hasFfmpeg)('lip-sync fix: speaking decides what the model hears
     const r2 = await beatOnlyAudio(a.ctx, { studioId: 's', jobId: 'jbeat2', audioKey: key });
     expect(probe(path.join(a.dir, r2.instrumentalKey)).streams.map(s => s.codec_type)).toEqual(['audio']);
   }, 60_000);
+});
+
+describe('sound ranges (for the editor\'s silence cuts)', () => {
+  it('finds the sound between silences and bridges short gaps', () => {
+    const s = new Float32Array(16000 * 5);
+    const tone = (from: number, to: number) => { for (let i = from * 16000; i < to * 16000; i++) s[i] = 0.3 * Math.sin(2 * Math.PI * 220 * i / 16000); };
+    tone(0.5, 1.5); tone(1.6, 2.0); tone(3.5, 4.5);
+    const r = soundRanges(s);
+    expect(r).toHaveLength(2);
+    expect(r[0]!.startSec).toBeCloseTo(0.5, 1); expect(r[0]!.endSec).toBeCloseTo(2.0, 1);
+    expect(r[1]!.startSec).toBeCloseTo(3.5, 1); expect(r[1]!.endSec).toBeCloseTo(4.5, 1);
+    expect(soundRanges(silence(3))).toEqual([]);
+  });
 });
 
 describe('beat-only output parsing', () => {

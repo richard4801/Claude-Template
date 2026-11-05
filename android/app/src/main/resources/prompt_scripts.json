@@ -2779,6 +2779,8 @@
     "video.replicate.retention",
     "video.replicate.detailed.silent",
     "video.replicate.detailed",
+    "video.mouth.speaking",
+    "video.mouth.silent",
     "video.user.direction"
    ],
    "rules": [
@@ -2820,7 +2822,7 @@
     },
     {
      "id": "detailed.silent",
-     "label": "Not speaking: mouth follows the clip",
+     "label": "Not speaking: no mouthed words",
      "target": "detailed",
      "when": [
       {
@@ -2835,8 +2837,40 @@
      "id": "detailed",
      "label": "Details",
      "target": "detailed",
-     "when": [],
+     "when": [
+      {
+       "input": "speaking",
+       "op": "is",
+       "value": true
+      }
+     ],
      "block": "video.replicate.detailed"
+    },
+    {
+     "id": "mouth.speaking",
+     "label": "Speaking: mouth in sync with the speech",
+     "target": "detailed",
+     "when": [
+      {
+       "input": "speaking",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.mouth.speaking"
+    },
+    {
+     "id": "mouth.silent",
+     "label": "Not speaking: mouth follows the clip, no words",
+     "target": "detailed",
+     "when": [
+      {
+       "input": "speaking",
+       "op": "is",
+       "value": false
+      }
+     ],
+     "block": "video.mouth.silent"
     },
     {
      "id": "user",
@@ -2886,7 +2920,7 @@
     },
     {
      "id": "detailed.silent",
-     "label": "Not speaking: mouth follows the clip",
+     "label": "Not speaking: no mouthed words",
      "target": "detailed",
      "when": [
       {
@@ -2901,8 +2935,40 @@
      "id": "detailed",
      "label": "Details",
      "target": "detailed",
-     "when": [],
+     "when": [
+      {
+       "input": "speaking",
+       "op": "is",
+       "value": true
+      }
+     ],
      "block": "video.replicate.detailed"
+    },
+    {
+     "id": "mouth.speaking",
+     "label": "Speaking: mouth in sync with the speech",
+     "target": "detailed",
+     "when": [
+      {
+       "input": "speaking",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.mouth.speaking"
+    },
+    {
+     "id": "mouth.silent",
+     "label": "Not speaking: mouth follows the clip, no words",
+     "target": "detailed",
+     "when": [
+      {
+       "input": "speaking",
+       "op": "is",
+       "value": false
+      }
+     ],
+     "block": "video.mouth.silent"
     },
     {
      "id": "user",
@@ -3104,6 +3170,7 @@
     "video.edit.summary",
     "video.edit.retention",
     "video.edit.detailed",
+    "video.mouth.speaking",
     "video.mouth.silent",
     "video.user.direction"
    ],
@@ -3238,8 +3305,21 @@
      "block": "video.edit.detailed"
     },
     {
+     "id": "mouth.speaking",
+     "label": "Speaking: mouth in sync with the speech",
+     "target": "detailed",
+     "when": [
+      {
+       "input": "speaking",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.mouth.speaking"
+    },
+    {
      "id": "mouth.silent",
-     "label": "Not speaking: mouth follows the clip",
+     "label": "Not speaking: mouth follows the clip, no words",
      "target": "detailed",
      "when": [
       {
@@ -3390,8 +3470,21 @@
      "block": "video.edit.detailed"
     },
     {
+     "id": "mouth.speaking",
+     "label": "Speaking: mouth in sync with the speech",
+     "target": "detailed",
+     "when": [
+      {
+       "input": "speaking",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "video.mouth.speaking"
+    },
+    {
      "id": "mouth.silent",
-     "label": "Not speaking: mouth follows the clip",
+     "label": "Not speaking: mouth follows the clip, no words",
      "target": "detailed",
      "when": [
       {

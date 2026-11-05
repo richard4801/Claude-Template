@@ -15,14 +15,16 @@ export const SCRIPT_BLOCK_DEFS: PromptDef[] = [
   b('video.replicate.summary.silent', 'Draft/Standard/HD · summary (not speaking)', 'summary of the short prompt when the performer does not speak or sing.',
     '[video editing + character replacement] <Subject 1> is replaced by <Subject 2>. <Subject 2> copies '
     + "<Subject 1>'s facial performance exactly, frame by frame and with the same intensity: every eye movement, side glance, blink, "
-    + 'eyebrow raise and head turn, at the same moments, and the same body motion. Her mouth follows <Video 1> exactly; she does not speak, sing or mouth words. '
+    + 'eyebrow raise and head turn, at the same moments, and the same body motion. '
     + 'The camera, the exact framing and crop, the background and the lighting of <Video 1> stay unchanged. Any caption or on-screen text is removed.', [], { allowEmpty: false }),
   b('video.replicate.detailed.silent', 'Draft/Standard/HD · details (not speaking)', 'detailed_description of the short prompt when the performer does not speak or sing.',
     'Casual phone video, realistic. [Shot 1] <Subject 2> in the same place, framed exactly like <Subject 1>: keep the exact '
-    + 'framing and crop of <Video 1>, the camera does not pull back. The face is fully alive and mirrors every expression of <Subject 1>; '
-    + 'the mouth follows <Video 1> exactly and she does not speak, sing or mouth words. Sharp face matching {faceRef}, natural skin texture, no beauty filter. No text anywhere.',
+    + 'framing and crop of <Video 1>, the camera does not pull back. The face is fully alive and mirrors every expression of <Subject 1>. '
+    + 'Sharp face matching {faceRef}, natural skin texture, no beauty filter. No text anywhere.',
     [['faceRef', '<Image 1>, or "the description"']], { allowEmpty: false }),
-  b('video.mouth.silent', 'Mouth line (not speaking)', 'Added to the Edit details when the performer does not speak or sing.',
+  b('video.mouth.speaking', 'Mouth line (speaking)', 'Ends the details of a character swap when “Performer is speaking” is on (the clip is sent with its sound).',
+    "<Subject 2>'s mouth follows <Video 1> and is in sync with <Audio 1>'s speech."),
+  b('video.mouth.silent', 'Mouth line (not speaking)', 'Ends the details of a character swap when “Performer is speaking” is off (the clip is sent without sound).',
     "<Subject 2>'s mouth follows <Video 1> exactly; she does not speak, sing or mouth words."),
   // ---- the Edit prompt's audio and background sentences (were fixed in code)
   b('video.edit.audio.subjects', 'Edit · audio track line', 'Ends subject_definitions when the clip’s audio is sent.', '<Audio 1> is the synchronized audio track of <Video 1>.'),

@@ -18,7 +18,7 @@ const R = (asset: string) => ({ asset });
 
 describe('prompt library (unit)', () => {
   it('every default validates, keys are unique, and every group has entries', () => {
-    expect(PROMPT_DEFS.length).toBe(69);   // 53 + 16 blocks added with prompt scripts
+    expect(PROMPT_DEFS.length).toBe(70);   // 53 + 17 blocks added with prompt scripts
     expect(new Set(PROMPT_DEFS.map(p => p.key)).size).toBe(PROMPT_DEFS.length);
     for (const p of PROMPT_DEFS) expect(validatePrompt(p.key, p.default), p.key).toBeNull();
     for (const g of ['photoshoot', 'references', 'sheet', 'outfits', 'enhance', 'dressup', 'templates', 'video', 'lora']) expect(PROMPT_DEFS.some(p => p.group === g), g).toBe(true);
