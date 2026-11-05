@@ -90,6 +90,7 @@ class SettingsViewModel(val c: AppContainer) : ViewModel() {
     /** Demo mode and the server are separate studios: switching signs out (the token belongs to one of them). */
     fun useFake(v: Boolean, onSwitched: () -> Unit) = viewModelScope.launch {
         c.prefsStore.update { it.copy(useFake = v, token = if (v) "demo" else null, role = if (v) "owner" else "member", studioName = if (v) "Jenne Studio" else "") }
+        c.drafts.forgetAccount()
         c.repo.toast(if (v) "Demo mode · the sample studio, no server" else "Using the server at ${c.prefs.value.serverUrl.removeSuffix("/")} · sign in")
         onSwitched()
     }
@@ -106,7 +107,7 @@ class SettingsViewModel(val c: AppContainer) : ViewModel() {
         val v = !failNext.value
         if (c.repo.setFailNext(v) != null) { failNext.value = v; c.repo.toast(if (v) "Next render will fail at step 3" else "Renders back to normal") }
     }
-    fun signOut(onDone: () -> Unit) = viewModelScope.launch { c.repo.signOut(); onDone() }
+    fun signOut(onDone: () -> Unit) = viewModelScope.launch { c.repo.signOut(); c.drafts.forgetAccount(); onDone() }
     fun topUp(amount: Double, method: String) = viewModelScope.launch {
         if (c.repo.topUp(amount, method) != null) c.repo.toast("Added ${Pricing.money(amount)} · demo, no payment taken")
     }
@@ -161,6 +162,7 @@ fun SettingsScreen() {
                         Li("model", "Members", sub = "Send credit, caps, switch accounts off", onClick = { nav.go(Routes.MEMBERS) }) { Ic("chev", 16.dp) }
                         Li("mail", "Invite someone", onClick = { nav.go(Routes.INVITE) }) { Ic("chev", 16.dp) }
                         Li("quality", "Studio settings", sub = "Caps and engines", onClick = { nav.go(Routes.STUDIO) }) { Ic("chev", 16.dp) }
+                        Li("spark", "Prompts", sub = "Every prompt the studio sends · edit or reset", onClick = { nav.go(Routes.PROMPTS) }) { Ic("chev", 16.dp) }
                     }
                 }
                 Lbl("Developer")

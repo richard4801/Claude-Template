@@ -29,10 +29,13 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -42,18 +45,16 @@ import studio.muse.app.data.FakeMuseApi
 import studio.muse.app.data.Model
 import studio.muse.app.data.Outfit
 import studio.muse.app.data.ShootDraft
-import studio.muse.app.data.ShootRequest
+import studio.muse.app.data.ShootPreview
+import studio.muse.app.data.ShootRef
+import studio.muse.app.data.FakePromptLibrary
+import studio.muse.app.data.PromptSlotView
 import studio.muse.app.ui.LocalCelebrate
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.LocalNav
 import studio.muse.app.ui.Routes
 import studio.muse.app.ui.components.*
-import studio.muse.core.BuiltPrompt
-import studio.muse.core.CameraSpec
-import studio.muse.core.OutfitSpec
-import studio.muse.core.Pricing
 import studio.muse.core.PromptEngine
-import studio.muse.core.ShootSpec
 import studio.muse.app.ui.theme.muse
 
 val SCENES = listOf("Rooftop · golden hour", "Bedroom mirror", "Café window", "Beach noon", "City night")
@@ -66,20 +67,53 @@ data class ShootState(
     val models: List<Model> = emptyList(),
     val outfits: List<Outfit> = emptyList(),
     val outfit: Outfit? = null,
-    val prompt: BuiltPrompt? = null,
+    /** The final prompt, images and price: from the server (POST /v1/shoots/preview), else the app's own fallback engine. */
+    val preview: ShootPreview? = null,
     /** idle | busy | ready */
     val phase: String = "idle",
+    /** A reference image is being uploaded. */
+    val uploading: Boolean = false,
+    /** The preview is the app's own because the server couldn't be reached (never in Demo mode). */
+    val local: Boolean = false,
 )
 
 class ShootViewModel(private val c: AppContainer) : ViewModel() {
     private val phase = MutableStateFlow("idle")
-    val state: StateFlow<ShootState> = combine(c.repo.state, c.drafts.shoot, c.drafts.modelId, c.drafts.outfitId, phase) { s, d, mid, oid, ph ->
+    private val preview = MutableStateFlow<ShootPreview?>(null)
+    private val uploading = MutableStateFlow(false)
+    /** The last preview request failed (an older server, or offline): the app's own version is shown, with a note. */
+    private val previewFailed = MutableStateFlow(false)
+    /** Bumped by `prompts` events (the owner saved or reset a prompt), so the preview refetches with the new wording. */
+    private val promptsRev = MutableStateFlow(0)
+    private data class Base(val d: ShootDraft, val model: Model?, val models: List<Model>, val outfits: List<Outfit>, val outfit: Outfit?, val lora: studio.muse.app.data.Lora?,
+        val prices: studio.muse.core.PhotoPrices)
+    private val base = combine(c.repo.state, c.drafts.shoot, c.drafts.modelId, c.drafts.outfitId) { s, d, mid, oid ->
         val model = s.model(mid)?.takeIf { it.locked } ?: s.models.firstOrNull { it.locked }
         val outfits = s.outfitsOf(model?.id)
-        val outfit = outfits.firstOrNull { it.id == oid } ?: outfits.firstOrNull()
-        val prompt = model?.let { buildPrompt(it, outfit, d, s.loras[it.id]) }
-        ShootState(d, model, s.models, outfits, outfit, prompt, ph)
+        Base(d, model, s.models, outfits, outfits.firstOrNull { it.id == oid } ?: outfits.firstOrNull(), model?.let { s.loras[it.id] }, s.photo)
+    }
+    val state: StateFlow<ShootState> = combine(base, preview, phase, uploading, previewFailed) { b, p, ph, up, failed ->
+        ShootState(b.d, b.model, b.models, b.outfits, b.outfit, p ?: b.model?.let { localPreview(it, b.outfit, b.d, b.lora, b.prices) }, ph, up,
+            local = p == null && failed && b.model != null && !c.repo.demo)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, ShootState())
+
+    init {
+        viewModelScope.launch { c.repo.live.collect { ev -> if (ev.type == "prompts") promptsRev.update { it + 1 } } }
+        // The server builds the prompt from the studio's prompt library: fetch it now, then again ~300 ms after the last change
+        // (collectLatest cancels the wait when another change comes in).
+        viewModelScope.launch {
+            var first = true
+            combine(base.map { b -> b.model?.let { m -> b.d.request(m.id, b.outfit?.id ?: "") } }, promptsRev) { req, rev -> req to rev }
+                .distinctUntilChanged().collectLatest { (req, _) ->
+                    if (req == null) { preview.value = null; return@collectLatest }
+                    if (!first) delay(300)
+                    first = false
+                    val p = c.repo.previewShoot(req)
+                    preview.value = p
+                    previewFailed.value = p == null
+                }
+        }
+    }
 
     /** Templates for the strip on the Model tool (loaded once). */
     val templates: StateFlow<List<studio.muse.app.data.Template>> = c.repo.state.map { it.templates }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -90,15 +124,34 @@ class ShootViewModel(private val c: AppContainer) : ViewModel() {
     fun resetCamera() = edit { it.copy(shot = "Medium", lens = 35, aperture = "f/2.8") }
     fun toast(s: String) = c.repo.toast(s)
 
+    /** Adds a reference image (uploaded first, POST /v1/uploads/images). It starts on the first guide the others don't use yet. */
+    fun addRef(uri: android.net.Uri) = viewModelScope.launch {
+        if (uploading.value) return@launch
+        if (state.value.draft.refs.size >= ShootRef.MAX) return@launch toast("Up to ${ShootRef.MAX} reference images")
+        val media = c.media ?: return@launch
+        uploading.value = true
+        try {
+            val bytes = media.bytes(uri) ?: return@launch toast("Couldn't read that image")
+            val ref = c.repo.uploadImage(media.displayName(uri), bytes, media.mime(uri)) ?: return@launch
+            edit { d -> if (d.refs.size >= ShootRef.MAX) d else d.copy(refs = d.refs + ShootRef(ref, listOf(ShootRef.defaultGuide(d.refs)))) }
+        } finally { uploading.value = false }
+    }
+    /** Pose & framing / Look & colour / Scene: at least one stays on. */
+    fun toggleGuide(i: Int, guide: String) = edit { d ->
+        val r = d.refs.getOrNull(i) ?: return@edit d
+        val next = r.toggled(guide) ?: run { toast("Keep at least one on: pose, look or scene"); return@edit d }
+        d.copy(refs = d.refs.toMutableList().also { it[i] = next })
+    }
+    fun removeRef(i: Int) = edit { d -> d.copy(refs = d.refs.filterIndexed { k, _ -> k != i }) }
+
+    /** Sends the choices (the server builds the prompt), or the user's own text on "Edit as text". */
     fun shoot(celebrate: () -> Unit) = viewModelScope.launch {
         val s = state.value
         if (s.phase == "busy") return@launch
         val model = s.model ?: return@launch c.repo.toast("Only Demo model is ready · Noor needs close-ups")
-        val p = s.prompt ?: return@launch
+        if (s.uploading) return@launch toast("Wait a moment · the reference photo is still uploading")
         phase.value = "busy"
-        val text = s.draft.promptText?.trim()?.takeIf { it.isNotEmpty() } ?: p.text
-        val shots = c.repo.shoot(ShootRequest(model.id, s.outfit?.id ?: "", s.draft.scene ?: PromptEngine.DEFAULT_SCENE, text, p.seed,
-            models = s.draft.models.ifEmpty { null }))
+        val shots = c.repo.shoot(s.draft.request(model.id, s.outfit?.id ?: ""))
         if (shots == null) { phase.value = "idle"; return@launch }
         c.drafts.freshShots.value = shots.size
         c.drafts.galleryTab.value = "tests"
@@ -107,15 +160,9 @@ class ShootViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     companion object {
-        /** Layers kept when Presets is off: who she is, what she wears, the user's own words, and the seed policy. */
-        private val OWN_PROMPT_LAYERS = setOf(studio.muse.core.Layer.IDENTITY, studio.muse.core.Layer.OUTFIT, studio.muse.core.Layer.DIRECTION, studio.muse.core.Layer.SEED)
-
-        fun buildPrompt(m: Model, o: Outfit?, d: ShootDraft, lora: studio.muse.app.data.Lora? = null): BuiltPrompt {
-            val p = PromptEngine.photoshoot(
-                ShootSpec(FakeMuseApi.identity(m, lora), OutfitSpec(o?.name ?: "outfit"), d.scene, CameraSpec(d.shot, d.lens, d.aperture), d.light, d.grade, d.direction, d.lockSeed),
-            )
-            return if (d.presets) p else p.copy(slots = p.slots.filter { it.layer in OWN_PROMPT_LAYERS })
-        }
+        /** The offline fallback (until the server's preview arrives): the app's own engine, checked against the server's fixture (shoot_prompt_fixture.json). */
+        fun localPreview(m: Model, o: Outfit?, d: ShootDraft, lora: studio.muse.app.data.Lora? = null, prices: studio.muse.core.PhotoPrices = studio.muse.core.PhotoPrices()): ShootPreview =
+            FakePromptLibrary.shootPreview(FakeMuseApi.identity(m, lora), o?.name, d.request(m.id, o?.id ?: ""), prices)
     }
 }
 
@@ -157,7 +204,7 @@ fun ShootScreen() {
                         RowB {
                             Column(Modifier.weight(1f)) {
                                 T("Presets", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink)
-                                Tiny(if (d.presets) "Adds scene, camera, light, style and never-add lines" else "Off: only her identity, outfit and your direction are sent")
+                                Tiny(if (d.presets) "Adds scene, camera, light, style and never-add lines" else "Off: only her identity, outfit, your direction and references are sent")
                             }
                             Toggle(d.presets, { vm.edit { it.copy(presets = !it.presets) } })
                         }
@@ -167,14 +214,15 @@ fun ShootScreen() {
                         }
                         // Owner only: run this shoot on another model (members never see model names).
                         if (c.repo.demo || c.prefs.value.owner) OwnerModelLine(listOf("shot"), d.models, emptyMap())
-                        s.prompt?.let { p ->
+                        s.preview?.let { p ->
                             if (d.promptText != null) {
                                 Field("Final prompt · your text") {
                                     Input(d.promptText, { v -> vm.edit { it.copy(promptText = v) } }, area = true, placeholder = "The whole prompt, exactly as it will be sent")
                                 }
                                 Tiny("Sent exactly as written. Scene, camera, light and direction choices are ignored until you go back to the built prompt.")
-                            } else Field("Final prompt") { PromptBox(p) }
-                            if (p.removed.isNotEmpty()) NoteBox("Left out of your direction: ${p.removed.joinToString("; ")}. It would change her identity or add a never-add item.", warn = true)
+                            } else Field("Final prompt") { PromptBox(p.slots) }
+                            if (p.removed.isNotEmpty() && d.promptText == null) NoteBox("Left out of your direction: ${p.removed.joinToString("; ")}. It would change her identity or add a never-add item.", warn = true)
+                            if (s.local) Tiny("Can't reach the server, so this is the app's own version. The server's wording applies when you shoot.")
                             val clip = LocalClipboardManager.current
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Cta2("Copy", { clip.setText(AnnotatedString(d.promptText ?: p.text)); vm.toast("Prompt copied") }, Modifier.weight(1f))
@@ -200,6 +248,9 @@ fun ShootScreen() {
                         Field("Or describe your own") {
                             Input(d.sceneCustom, { v -> vm.edit { it.copy(sceneCustom = v, scene = v.ifBlank { null }) } }, area = true, placeholder = "e.g. sunlit rooftop bar, string lights, city skyline")
                         }
+                        val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) vm.addRef(uri) }
+                        ReferencesPanel(d.refs, s.preview, s.uploading, onAdd = { pick.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                            onToggle = vm::toggleGuide, onRemove = vm::removeRef)
                     }
                     "outfit" -> {
                         H3("Outfit")
@@ -232,7 +283,7 @@ fun ShootScreen() {
             when (s.phase) {
                 "ready" -> Cta("${c.drafts.freshShots.value} shots ready · View in Gallery", { nav.tab(Routes.GALLERY) }, Modifier.weight(1f), icon = "grid")
                 "busy" -> Cta("Shooting…", {}, Modifier.weight(1f), busy = true)
-                else -> Cta("Shoot 4 · ${studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.shoot(photoPrices()))}", { vm.shoot(celebrate) }, Modifier.weight(1f))
+                else -> Cta("Shoot 4 · ${s.preview?.estimateLabel?.ifBlank { null } ?: studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.shoot(photoPrices()))}", { vm.shoot(celebrate) }, Modifier.weight(1f))
             }
         }
     }
@@ -241,20 +292,55 @@ fun ShootScreen() {
 @Composable
 private fun Tiny(text: String, maxLines: Int) = T(text, muse.type.tiny.copy(fontSize = 11.5.sp), muse.t.muted, maxLines = maxLines)
 
-/** The final prompt broken down by slot (`.pbox`). */
+/** The server's final prompt by slot (the label is the layer; reference lines are "REF"). */
 @Composable
-fun PromptBox(p: BuiltPrompt) {
+fun PromptBox(slots: List<PromptSlotView>) {
     val m = muse
     val shape = RoundedCornerShape(m.t.r)
     Column(
         Modifier.fillMaxWidth().clip(shape).background(m.t.surface2).border(if (m.isD) 2.5.dp else m.t.stroke, m.t.line, shape).padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        p.slots.forEach { slot ->
+        slots.forEach { slot ->
             Row {
-                T(slot.layer.key.uppercase(), m.type.mono.copy(fontSize = 10.sp, letterSpacing = .08.em), m.t.muted, Modifier.width(74.dp))
-                T(slot.body, m.type.body.copy(fontSize = 12.5.sp, lineHeight = 17.sp), m.t.ink, Modifier.weight(1f))
+                T(if (slot.layer == "reference") "REF" else slot.layer.uppercase(), m.type.mono.copy(fontSize = 10.sp, letterSpacing = .08.em), m.t.muted, Modifier.width(74.dp))
+                T(slot.text.replaceFirst(Regex("^[A-Za-z ]+: "), ""), m.type.body.copy(fontSize = 12.5.sp, lineHeight = 17.sp), m.t.ink, Modifier.weight(1f))
             }
         }
     }
 }
+
+/**
+ * Shoot → Scene (and template shoots): up to 3 reference images, each with what it guides (at least one on), "Image n" / "Not sent"
+ * from the server's preview, and remove. Her face, body and outfit never come from them.
+ */
+@Composable
+fun ReferencesPanel(refs: List<ShootRef>, preview: ShootPreview?, uploading: Boolean, onAdd: () -> Unit, onToggle: (Int, String) -> Unit, onRemove: (Int) -> Unit) {
+    val m = muse
+    RowB { H3("References"); Tiny("${refs.size}/${ShootRef.MAX}") }
+    Tiny("Optional · copy a pose, a look or a place from up to ${ShootRef.MAX} photos. Her face, body, hair and outfit always come from her own photos.")
+    refs.forEachIndexed { i, r ->
+        val shape = RoundedCornerShape(m.t.r * .6f)
+        val sent = preview?.refs?.getOrNull(i)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+            Box(Modifier.width(64.dp).heightIn(min = 84.dp, max = 84.dp).clip(shape).border(if (m.isD) 2.dp else m.t.stroke, m.t.line, shape)) {
+                RefImage(r.image, Modifier.fillMaxSize())
+                if (sent != null) T(sent.badge, m.type.mono.copy(fontSize = 9.5.sp, fontWeight = FontWeight.Bold), androidx.compose.ui.graphics.Color.White,
+                    Modifier.align(Alignment.BottomStart).padding(4.dp).clip(RoundedCornerShape(4.dp))
+                        .background(if (sent.dropped) m.t.warn.copy(alpha = .9f) else androidx.compose.ui.graphics.Color.Black.copy(alpha = .6f)).padding(horizontal = 5.dp, vertical = 2.dp))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                RowB {
+                    T("Reference ${i + 1}", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink)
+                    T("Remove", m.type.tiny, if (m.isD) m.t.blue else m.t.accent, Modifier.press { onRemove(i) }.padding(4.dp))
+                }
+                FlowRow(hGap = 6.dp, vGap = 6.dp) { ShootRef.GUIDES.forEach { (id, label) -> Chip(label, id in r.guides, { onToggle(i, id) }) } }
+            }
+        }
+    }
+    preview?.takeIf { it.droppedRefs > 0 }?.let { p ->
+        NoteBox("This shoot can take only ${p.images} images in all, so ${if (p.droppedRefs == 1) "1 reference isn't" else "${p.droppedRefs} references aren't"} sent.", warn = true)
+    }
+    if (refs.size < ShootRef.MAX) Cta2(if (uploading) "Adding…" else "Add reference photo", { if (!uploading) onAdd() }, Modifier.fillMaxWidth(), icon = "plus", height = 46.dp)
+}
+

@@ -235,7 +235,7 @@ class MuseRepository(
             if (ev.type == "gpu" && ev.event == "warning") ev.warning?.let { _warmWarnings.tryEmit(it) }
         }
         ev.job?.let { j -> if (ev.op != "delete" && (prevJob == null || prevJob.running) && (j.done || j.failed)) listener?.onJobFinished(j) }
-        if (ev.type in setOf("member", "invite", "settings", "studio")) _live.tryEmit(ev)
+        if (ev.type in setOf("member", "invite", "settings", "studio", "prompts")) _live.tryEmit(ev)
     }
 
     /** A `wallet` event: refresh the balance, and say so when the owner sent or took back tokens. */
@@ -405,6 +405,41 @@ class MuseRepository(
     suspend fun shoot(req: ShootRequest) = attempt { shoot(req) }?.also { shots ->
         _state.update { s -> s.copy(takes = LiveEvents.putTakes(s.takes, shots)) }
         refreshBalance()
+    }
+
+    /**
+     * The final prompt, images and price of a shoot, from the server (POST /v1/shoots/preview). Quiet: null when it can't be
+     * reached (an older server, offline), and the Prompt tool falls back to the app's own engine. A bad_request (bad refs) is said.
+     */
+    suspend fun previewShoot(req: ShootRequest): ShootPreview? = try {
+        api.previewShoot(req)
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: ApiException) {
+        if (e.code == "bad_request") toast(ErrorText.of(e))
+        null
+    } catch (e: Exception) {
+        null
+    }
+
+    // ---- prompt library (owner Settings → Prompts)
+    suspend fun prompts(): Pair<PromptLibrary?, String?> = try {
+        api.prompts() to null
+    } catch (e: ApiException) {
+        null to if (e.code == "not_found" || e.code == "http_404") "This server doesn't have the prompt library yet." else ErrorText.of(e)
+    }
+    /** Save (PUT): the entry, or the server's prompt_invalid message to show under the editor (other failures are toasts). */
+    suspend fun savePrompt(key: String, text: String): Pair<PromptEntry?, String?> = try {
+        api.savePrompt(key, text) to null
+    } catch (e: ApiException) {
+        if (e.code == "prompt_invalid") null to ErrorText.of(e) else { toast(ErrorText.of(e)); null to null }
+    }
+    suspend fun resetPrompt(key: String) = attemptInline { resetPrompt(key) }
+    /** The editor's live preview: the preview, or the server's prompt_invalid message (null for any other failure: the old preview stays). */
+    suspend fun previewPrompt(key: String, text: String?): Pair<PromptPreview?, String?> = try {
+        api.previewPrompt(PromptPreviewRequest(key, text)) to null
+    } catch (e: ApiException) {
+        null to if (e.code == "prompt_invalid") ErrorText.of(e) else null
     }
 
     // ---- photo templates

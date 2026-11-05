@@ -49,11 +49,12 @@ const sec = (v: number) => v.toFixed(3);
  * Pads `src` to exactly `seconds` by holding the last frame (and adding silence when it has audio), so Replicate's
  * whole-second output covers the full clip. Very large sources are scaled down to 1440 wide (2K's width).
  */
-export async function padTo(ffmpeg: string, src: string, out: string, seconds: number, info: MediaInfo) {
+export async function padTo(ffmpeg: string, src: string, out: string, seconds: number, info: MediaInfo, o: { mute?: boolean } = {}) {
   const extra = Math.max(0, seconds - info.duration) + 0.1;
   const args = ['-y', '-v', 'error', '-i', src,
     '-vf', `scale='min(1440,iw)':-2,tpad=stop_mode=clone:stop_duration=${sec(extra)}`];
-  if (info.audioCodec) args.push('-af', `apad=pad_dur=${sec(extra)}`, '-c:a', 'aac', '-b:a', '192k');
+  // mute: the model gets no sound, so it can't lip-sync to music or speech the performer isn't making.
+  if (info.audioCodec && !o.mute) args.push('-af', `apad=pad_dur=${sec(extra)}`, '-c:a', 'aac', '-b:a', '192k');
   else args.push('-an');
   args.push('-t', String(seconds), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '16', '-pix_fmt', 'yuv420p', '-threads', '2', '-movflags', '+faststart', out);
   await run(ffmpeg, args);
@@ -85,6 +86,15 @@ export async function finishTake(ffmpeg: string, rendered: string, src: string, 
     fb.push('-t', sec(o.duration), '-c:v', 'copy', '-movflags', '+faststart', out);
     try { await run(ffmpeg, fb); } catch { throw first; }
   }
+}
+
+/**
+ * Puts the source clip's own sound on a delivered take: the video is stream-copied (no re-encode); the audio is copied
+ * when it's AAC, else encoded to AAC (audio only, light). Used when the model was sent a silent clip.
+ */
+export async function restoreAudio(ffmpeg: string, take: string, src: string, out: string, audioCodec: string | null) {
+  await run(ffmpeg, ['-y', '-v', 'error', '-i', take, '-i', src, '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy',
+    ...(audioCodec === 'aac' ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '192k']), '-movflags', '+faststart', out]);
 }
 
 /** The same video without its audio track (stream copy, no re-encode). */

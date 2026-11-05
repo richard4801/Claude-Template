@@ -70,6 +70,11 @@ interface MuseService {
     @POST("v1/takes/{id}/versions") suspend fun createVersion(@Path("id") id: String, @Body r: TakeVersionRequest): Take
     @GET("v1/takes/{id}/versions") suspend fun versions(@Path("id") id: String): List<Take>
     @POST("v1/shoots") suspend fun shoot(@Body r: ShootRequest): List<Take>
+    @POST("v1/shoots/preview") suspend fun previewShoot(@Body r: ShootRequest): ShootPreview
+    @GET("v1/prompts") suspend fun prompts(): PromptLibrary
+    @PUT("v1/prompts/{key}") suspend fun savePrompt(@Path("key") key: String, @Body r: PromptText): PromptEntry
+    @DELETE("v1/prompts/{key}") suspend fun resetPrompt(@Path("key") key: String): PromptEntry
+    @POST("v1/prompts/preview") suspend fun previewPrompt(@Body r: PromptPreviewRequest): PromptPreview
     @GET("v1/templates") suspend fun templates(@Query("scope") scope: String, @Query("q") q: String?, @Query("tag") tag: String?): List<Template>
     @GET("v1/templates/{id}") suspend fun template(@Path("id") id: String): Template
     @POST("v1/templates") suspend fun createTemplate(@Body r: CreateTemplateRequest): Template
@@ -298,6 +303,11 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun duplicateTemplate(id: String) = call { duplicateTemplate(id) }.abs()
     override suspend fun favouriteTemplate(id: String, on: Boolean) = call { if (on) favourite(id) else unfavourite(id) }.abs()
     override suspend fun templatePrompt(id: String, req: TemplatePromptRequest) = call { templatePrompt(id, req) }
+    override suspend fun previewShoot(req: ShootRequest) = call { previewShoot(req) }
+    override suspend fun prompts() = call { prompts() }
+    override suspend fun savePrompt(key: String, text: String) = call { savePrompt(key, PromptText(text)) }
+    override suspend fun resetPrompt(key: String) = call { resetPrompt(key) }
+    override suspend fun previewPrompt(req: PromptPreviewRequest) = call { previewPrompt(req) }
     override suspend fun balance() = call { balance() }
     override suspend fun topUp(req: TopUpRequest) = call { topUp(req) }
     override suspend fun wallet() = call { wallet() }

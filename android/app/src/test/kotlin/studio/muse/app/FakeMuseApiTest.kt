@@ -86,12 +86,14 @@ class FakeMuseApiTest {
         api.createJob(req())
     }
 
-    @Test fun failingClipBlocksTheJob() = runTest {
+    @Test fun failingClipIsStillAccepted() = runTest {
+        // Clip checks are advice only (2026-11-05): the studio shows a disclaimer, the job goes ahead.
         val api = FakeMuseApi(backgroundScope)
         val bad = api.uploadClip(SampleData.badMeta, null)
         assertFalse(bad.ok)
         assertEquals(3, bad.checks.count { it.status == "bad" })
-        try { api.createJob(req().copy(clipId = bad.id)); fail() } catch (e: ApiException) { assertEquals("clip_failed_checks", e.code) }
+        val job = api.createJob(req().copy(clipId = bad.id))
+        assertEquals(bad.id, job.request.clipId)
     }
 
     @Test fun clipRulesMatchThePrototypeCopy() {
