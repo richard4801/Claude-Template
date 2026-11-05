@@ -63,6 +63,7 @@ const VersionBody = z.object({
   width: z.number().int().min(16).max(4096),
   height: z.number().int().min(16).max(4096),
   fps: z.number().finite().min(1).max(240).optional(),
+  aiLabel: z.boolean().optional(), // Edit suite export "Label as AI-generated" (workstream 3); off unless the user switched it on
 });
 
 const parse = <T>(schema: z.ZodType<T>, body: unknown, prefix = ''): T => {
@@ -159,7 +160,7 @@ export async function registerVersionRoutes(app: FastifyInstance, ctx: Ctx) {
       templateId: src.templateId, templateName: src.templateName, templateOwnerId: src.templateOwnerId,
       mediaKey: up.storageKey,
       media: { durationSec: b.durationSec, width: b.width, height: b.height, ...(b.fps ? { fps: b.fps } : {}), bytes: head.size, contentType: up.contentType,
-        parentTakeId: src.id, edits },
+        parentTakeId: src.id, edits, ...(b.aiLabel ? { aiLabel: true } : {}) },
       createdAt: Date.now(),
     }).returning();
     emitTake(row!);

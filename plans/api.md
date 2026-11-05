@@ -555,10 +555,11 @@ DenoiseResult  { asset?: { kind: "audio", upload | take, url?, durationSec }, su
 | | |
 |---|---|
 | `POST /v1/takes/{id}/versions` with `edits: EditProject` | As in "Video editor", but `edits.version: 2`: checked by the v2 rules (JSON ≤ 256 KB; `durationSec` must match the project's duration within max(0.5 s, 5 %)); every `take`/`upload` asset must be this studio's (`not_found`) and of a fitting kind (`bad_request`). v1 lists are unchanged. |
+| `POST /v1/takes/{id}/versions` `{…, aiLabel?: boolean}` | Edit suite export "Label as AI-generated" (default off): kept with the version and returned as `Take.aiLabel: true`; posting uses it for the platform's AI label. C2PA signing is not implemented yet. |
 | `POST /v1/editor/validate` `{project}` | → `{ok: true, durationSec}` or `bad_request` naming the first broken field (`edits.tracks.2.items.0.speed: …`). Free. |
 | `GET /v1/editor/features` | → `{captions: {available, languages}, cuts: {available, defaults}, matte: {available, maxSec: 120}, denoise: {available}, maxSourceSec: 600}` |
 | `GET /v1/editor/presets` | → `{filters, captionStyles, hooks}` (the same tables the apps carry). |
-| `POST /v1/editor/uploads/presign` `{contentType: "audio/mp4"|"audio/mpeg"|"audio/wav"|…, bytes?}` | → `{uploadId, method: "PUT", url, headers, expiresAt, fileUrl}` for a voice-over or music file (≤ 200 MB). Use `uploadId` as an audio `Asset.upload`. |
+| `POST /v1/editor/uploads/presign` `{contentType: "audio/mp4"|"audio/mpeg"|"audio/wav"|…, bytes?}` | → `{uploadId, method: "PUT", url, headers, expiresAt, fileUrl}` for a voice-over or music file (≤ 200 MB), or a video (`video/mp4`, `video/quicktime`, ≤ 2 GB) for the media bin. Use `uploadId` as an audio `Asset.upload`. |
 | `POST /v1/editor/estimate` `{kind, source, options?}` | → `{kind, usd, tokens, free, reusesTranscript, durationSec}`. Free. |
 | `POST /v1/editor/jobs` `{kind, source, options?}` | → `EditorJob` (`running`). Holds the estimate (`insufficient_tokens`/`insufficient_balance`/cap errors as for renders, before anything starts), runs, then settles at the GPU time actually billed (at least $0.01), or releases the hold on failure/cancel. Progress and the result arrive as `editor` events. |
 | `GET /v1/editor/jobs?kind=&takeId=&uploadId=&limit=` | → my `EditorJob[]`, newest first (≤ 100). |

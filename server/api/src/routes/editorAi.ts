@@ -14,6 +14,7 @@ import { EditorAiService } from '../editor/service.js';
 import { checkProject, lutOfUpload } from '../editor/versions.js';
 import { CAPTION_STYLES, FILTERS, HOOKS } from '../editor/presets.js';
 
+const VIDEO_EXT: Record<string, string> = { 'video/mp4': 'mp4', 'video/quicktime': 'mov' };
 const AUDIO_EXT: Record<string, string> = { 'audio/mp4': 'm4a', 'audio/aac': 'aac', 'audio/mpeg': 'mp3', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/flac': 'flac' };
 
 export async function registerEditorAiRoutes(app: FastifyInstance, ctx: Ctx) {
@@ -60,9 +61,9 @@ export async function registerEditorAiRoutes(app: FastifyInstance, ctx: Ctx) {
     const b = (req.body ?? {}) as { contentType?: unknown; bytes?: unknown; purpose?: unknown };
     const ct = typeof b.contentType === 'string' ? b.contentType.toLowerCase() : '';
     const lut = b.purpose === 'lut';
-    const ext = lut ? (['text/plain', 'application/octet-stream', 'application/x-cube'].includes(ct) ? 'cube' : undefined) : AUDIO_EXT[ct];
-    if (!ext) throw badRequest(lut ? 'contentType: text/plain or application/octet-stream for a .cube' : `contentType: one of ${Object.keys(AUDIO_EXT).join(', ')}`);
-    const max = lut ? LOOK_LIMITS.maxCubeBytes : 200 * 1024 ** 2;
+    const ext = lut ? (['text/plain', 'application/octet-stream', 'application/x-cube'].includes(ct) ? 'cube' : undefined) : (AUDIO_EXT[ct] ?? VIDEO_EXT[ct]);
+    if (!ext) throw badRequest(lut ? 'contentType: text/plain or application/octet-stream for a .cube' : `contentType: one of ${[...Object.keys(AUDIO_EXT), ...Object.keys(VIDEO_EXT)].join(', ')}`);
+    const max = lut ? LOOK_LIMITS.maxCubeBytes : VIDEO_EXT[ct] ? 2 * 1024 ** 3 : 200 * 1024 ** 2;
     if (b.bytes !== undefined && (typeof b.bytes !== 'number' || b.bytes <= 0 || b.bytes > max)) throw new ApiError(400, 'bad_request', `bytes: at most ${max / 1024 ** 2} MB`);
     const id = uid('up'), key = `c/${id}.${ext}`, ttl = 3600;
     const signed = await ctx.storage.presignPut(key, ct, ttl);

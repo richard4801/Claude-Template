@@ -547,6 +547,6 @@ export function takeView(t: typeof takes.$inferSelect, publicUrl?: string, viewe
     videoUrl: (t.kind === 'take' || (t.kind as string) === 'edit') && t.mediaKey ? `${publicUrl ?? ''}/uploads/${t.mediaKey}` : undefined,
     durationSec: t.media?.durationSec, width: t.media?.width, height: t.media?.height,
     // Edited versions (plans/api.md "Video editor"): the source take and the edit list live in `media`.
-    ...((t.kind as string) === 'edit' ? { parentTakeId: t.media?.parentTakeId, edits: t.media?.edits, fps: t.media?.fps } : {}),
+    ...((t.kind as string) === 'edit' ? { parentTakeId: t.media?.parentTakeId, edits: t.media?.edits, fps: t.media?.fps, ...(t.media?.aiLabel ? { aiLabel: true } : {}) /* Edit suite (workstream 3) */ } : {}),
   }) as Record<string, unknown> & { jobId?: string | null };
 }

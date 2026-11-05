@@ -341,6 +341,16 @@ describe('versions with a v2 project', () => {
     expect((await owner.req('POST', '/v1/editor/validate', { project: big })).body.error).toMatch(/at most 256 KB/);
   });
 
+  it('the export "Label as AI-generated" choice is kept on the version (off unless sent)', async () => {
+    const up = await upload(a, owner, 'clip', Buffer.from('edited v2 label'));
+    const p = project();
+    const r = await owner.req('POST', `/v1/takes/${src}/versions`, { uploadId: up, edits: p, durationSec: M.durationSec(p), width: 1080, height: 1920, aiLabel: true });
+    expect(r.body.aiLabel).toBe(true);
+    const up2 = await upload(a, owner, 'clip', Buffer.from('edited v2 nolabel'));
+    expect((await owner.req('POST', `/v1/takes/${src}/versions`, { uploadId: up2, edits: p, durationSec: M.durationSec(p), width: 1080, height: 1920 })).body.aiLabel).toBeUndefined();
+    expect((await owner.req('POST', '/v1/editor/uploads/presign', { contentType: 'video/quicktime' })).body).toMatchObject({ method: 'PUT' });
+  });
+
   it('v1 lists still work unchanged', async () => {
     const up = await upload(a, owner, 'clip', Buffer.from('edited v1'));
     const r = await owner.req('POST', `/v1/takes/${src}/versions`, { uploadId: up, edits: { version: 1, sourceTakeId: src, sourceDurationSec: 10, segments: [{ inSec: 0, outSec: 5, speed: 1 }], mute: false }, durationSec: 5, width: 1080, height: 1920 });
