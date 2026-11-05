@@ -45,13 +45,14 @@ final class EditV2VoiceTap: @unchecked Sendable {
                 let me = Unmanaged<EditV2VoiceTap>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).takeUnretainedValue()
                 me.process(buffers, frames: Int(framesOut.pointee), start: range.start.isNumeric ? range.start.seconds : nil)
             })
-        var tap: MTAudioProcessingTap?
-        let err = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PostEffects, &tap)
-        if err != noErr || tap == nil {
+        // The macOS SDK hands the new tap back as a retained Unmanaged reference.
+        var tapOut: Unmanaged<MTAudioProcessingTap>?
+        let err = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PostEffects, &tapOut)
+        guard err == noErr, let made = tapOut else {
             Unmanaged<EditV2VoiceTap>.fromOpaque(info).release()
             return nil
         }
-        return tap
+        return made.takeRetainedValue()
     }
 
     private func prepare(_ f: AudioStreamBasicDescription) {
