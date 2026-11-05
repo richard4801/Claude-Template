@@ -178,7 +178,7 @@ Same as v1: H.264 + AAC MP4 at the canvas size and fps (2K must work; Media3 enc
 - **Android** draws text, hooks and captions above every PiP/image layer, whatever the track order (they are composition-wide overlays).
 - **Mac** plays volumes above 1× at 1× (`AVAudioMix` is 0–1; a boost needs an audio tap). Android applies up to 2× (clamped, no wrap).
 - **Fonts** use system fallbacks until the Figma "Edit Suite" designs fix the families.
-- Server AI helpers run on the mock (`EDITOR_AI_PROVIDER=mock`) until the owner tries the editor UI.
+- Server AI helpers run on the mock until the owner tries the editor UI: `EDITOR_AI_PROVIDER` defaults to `mock` (free in production); set `auto` or `replicate` on Railway to turn the real helpers on.
 
 ## Not in phase 1
 Speed curves, freeze frame, reverse, masks/blend modes, motion tracking, stabilization, reframe, LUT files (`.cube`), beat detection, TTS, stickers library, Lottie. The schema leaves room (`version`, unknown kinds rejected until added).

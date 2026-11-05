@@ -12,7 +12,7 @@ import { ledger, takes } from '../src/db/schema.js';
 import * as M from '../src/editor/model.js';
 import { FILTERS } from '../src/editor/presets.js';
 import { suggestCuts } from '../src/editor/cuts.js';
-import { adaptInput, mockWords, parseTranscript, pickFile } from '../src/editor/providers.js';
+import { adaptInput, makeProvider, mockWords, parseTranscript, pickFile } from '../src/editor/providers.js';
 import { noiseSuggestion } from '../src/editor/service.js';
 import { editorJobs } from '../src/editor/schema.js';
 import { parseSilenceDetect, silenceCuts } from '../src/editor/silence.js';
@@ -129,6 +129,29 @@ describe('cuts and transcripts', () => {
     expect(noiseSuggestion(w(0.7)).level).toBe('light');
     expect(noiseSuggestion(w(0.95)).level).toBe('none');
     expect(noiseSuggestion([]).level).toBe('none');
+  });
+});
+
+describe('which provider runs the AI helpers (EDITOR_AI_PROVIDER)', () => {
+  const ctxOf = (configured: boolean, env = 'development', dev = false) =>
+    ({ replicate: { configured }, config: { GEN_MS: 20, NODE_ENV: env, DEV_MODE: dev } }) as any;
+  const pick = (want: string | undefined, ctx: any) => {
+    const before = process.env.EDITOR_AI_PROVIDER;
+    if (want === undefined) delete process.env.EDITOR_AI_PROVIDER; else process.env.EDITOR_AI_PROVIDER = want;
+    try { return makeProvider(ctx); } finally { if (before === undefined) delete process.env.EDITOR_AI_PROVIDER; else process.env.EDITOR_AI_PROVIDER = before; }
+  };
+  it('the mock unless the owner sets auto or replicate, even when the server has a Replicate token', () => {
+    expect(pick(undefined, ctxOf(true)).name).toBe('mock');
+    expect(pick('mock', ctxOf(true)).name).toBe('mock');
+    expect(pick('auto', ctxOf(true)).name).toBe('replicate');
+    expect(pick('auto', ctxOf(false)).name).toBe('mock');
+    expect(pick('replicate', ctxOf(false)).name).toBe('replicate');
+    expect(pick('something-else', ctxOf(true)).name).toBe('mock');
+  });
+  it('the mock is free in production (no hold, no charge) and priced elsewhere (tests exercise the money path)', () => {
+    expect(pick(undefined, ctxOf(true, 'production')).rates).toEqual({ transcribe: 0, matte: 0, separate: 0 });
+    expect(pick(undefined, ctxOf(true, 'production', true)).rates.transcribe).toBeGreaterThan(0);
+    expect(pick(undefined, ctxOf(true)).rates.transcribe).toBeGreaterThan(0);
   });
 });
 
@@ -362,12 +385,13 @@ describe('Replicate provider (fake Replicate on localhost)', () => {
     });
     await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
     const port = (server.address() as any).port;
+    process.env.EDITOR_AI_PROVIDER = 'auto'; // the owner switched the helpers on (the default is the mock)
     a = await makeApp({ REPLICATE_API_TOKEN: 'r8_editor', REPLICATE_API_URL: `http://127.0.0.1:${port}/v1`, REPLICATE_POLL_MS: '10' });
     ({ owner } = await people(a, 0) as any);
     studioId = await studioOf(a);
     src = await videoTake(a, studioId, { durationSec: 8 });
   });
-  afterAll(async () => { await a.close(); server.close(); });
+  afterAll(async () => { delete process.env.EDITOR_AI_PROVIDER; await a.close(); server.close(); });
   const done = (id: string) => until(async () => { const r = (await owner.req('GET', `/v1/editor/jobs/${id}`)).body; return r.state !== 'running' ? r : null; });
 
   it('captions run the transcription model by version and settle at the billed GPU time', async () => {

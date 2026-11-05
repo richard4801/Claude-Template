@@ -207,11 +207,17 @@ export function adaptInput(wanted: Record<string, unknown>, inputs: string[] | n
   return out;
 }
 
-/** EDITOR_AI_PROVIDER = mock | replicate | auto (default: Replicate when the server has a token, else the mock). */
+/**
+ * EDITOR_AI_PROVIDER = mock (the default: no provider calls) | auto (Replicate when the server has a token, else the mock)
+ * | replicate. The owner turns the real helpers on by setting auto or replicate; until then production runs the mock.
+ * In production the mock is also free (rates 0: no hold, no charge), so nobody pays for its stand-in results.
+ */
 export function makeProvider(ctx: Ctx): EditorProvider {
-  const want = env('EDITOR_AI_PROVIDER', 'auto');
-  if (want === 'mock' || (want === 'auto' && !ctx.replicate.configured)) return new MockProvider(Math.max(5, ctx.config.GEN_MS));
-  return new ReplicateProvider(ctx);
+  const want = env('EDITOR_AI_PROVIDER', 'mock');
+  if (want === 'replicate' || (want === 'auto' && ctx.replicate.configured)) return new ReplicateProvider(ctx);
+  const mock = new MockProvider(Math.max(5, ctx.config.GEN_MS));
+  if (ctx.config.NODE_ENV === 'production' && !ctx.config.DEV_MODE) mock.rates = { transcribe: 0, matte: 0, separate: 0 };
+  return mock;
 }
 
 export const rmQuiet = (f: string | null) => { if (f) fs.promises.rm(f, { force: true }).catch(() => {}); };
