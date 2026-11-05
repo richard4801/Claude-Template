@@ -186,7 +186,8 @@ fun ResultScreen(id: String) {
                     }
                 }
                 Box(Modifier.fillMaxSize()) { Viewfinder(bottomInset = 30.dp) }
-                Column(Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                // A real video has the player's own controls along the bottom: keep the side actions above them.
+                Column(Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = if (take?.videoUrl != null) 96.dp else 40.dp), verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     SideAction("retry", if (s.job != null) "Retry · ${Pricing.money(s.retryCost)}" else "Retry") { vm.retry(nav) }
                     SideAction("export", "Download") { vm.export(context, take) }
                     if (take?.editable == true) SideAction("retry", "Edit") { nav.go(Routes.editVideo(take.id)) }
