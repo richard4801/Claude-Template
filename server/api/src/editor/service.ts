@@ -2,6 +2,10 @@
 // background removal (green-screen video the apps key out) and voice clean-up. Each job: estimate → hold → run on the
 // provider → settle at the GPU time actually billed (or release on failure/cancel), with `editor` live events. Results are
 // data the APP applies to its edit project; nothing here touches video frames (outputs are copied byte for byte).
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { takes, uploads } from '../db/schema.js';
@@ -12,6 +16,8 @@ import { putFile } from '../storage/objects.js';
 import { ReplicateError } from '../replicate/client.js';
 import { CUT_DEFAULTS, suggestCuts, type CutOptions, type Word } from './cuts.js';
 import { makeProvider, rmQuiet, type EditorProvider, type Hooks } from './providers.js';
+import { mediaToolsAvailable } from '../replicate/media.js';
+import { detectSilences, silenceCuts } from './silence.js';
 import { editorJobs, type EditorJobKind, type EditorSource } from './schema.js';
 
 type Row = typeof editorJobs.$inferSelect;
@@ -26,7 +32,7 @@ const GPU_SEC = {
 const PHASE: Record<EditorJobKind, string> = { captions: 'Listening', cuts: 'Finding pauses', matte: 'Cutting out the background', denoise: 'Cleaning up the voice' };
 const LANG_RE = /^[a-z]{2}$/;
 
-export type JobOptions = { language?: string | null; fromJobId?: string; analyzeOnly?: boolean } & CutOptions;
+export type JobOptions = { language?: string | null; fromJobId?: string; analyzeOnly?: boolean; silenceOnly?: boolean; noiseDb?: number } & CutOptions;
 
 function parseOptions(kind: EditorJobKind, o: any): JobOptions {
   o = o ?? {};
@@ -39,8 +45,8 @@ function parseOptions(kind: EditorJobKind, o: any): JobOptions {
   if (o.fromJobId !== undefined) { if (typeof o.fromJobId !== 'string') throw badRequest('options.fromJobId: must be a job id'); out.fromJobId = o.fromJobId; }
   if (kind === 'cuts') {
     const n = (k: string, lo: number, hi: number) => { if (o[k] === undefined) return; if (typeof o[k] !== 'number' || o[k] < lo || o[k] > hi) throw badRequest(`options.${k}: from ${lo} to ${hi}`); (out as any)[k] = o[k]; };
-    n('minSilenceSec', 0.25, 5); n('keepPadSec', 0, 0.5);
-    for (const k of ['fillers', 'repeats'] as const) if (o[k] !== undefined) { if (typeof o[k] !== 'boolean') throw badRequest(`options.${k}: true or false`); out[k] = o[k]; }
+    n('minSilenceSec', 0.25, 5); n('keepPadSec', 0, 0.5); n('noiseDb', -60, -10);
+    for (const k of ['fillers', 'repeats', 'silenceOnly'] as const) if (o[k] !== undefined) { if (typeof o[k] !== 'boolean') throw badRequest(`options.${k}: true or false`); out[k] = o[k]; }
     if (o.extraFillers !== undefined) {
       if (!Array.isArray(o.extraFillers) || o.extraFillers.length > 50 || o.extraFillers.some((w: unknown) => typeof w !== 'string' || !w || (w as string).length > 30)) throw badRequest('options.extraFillers: up to 50 words');
       out.extraFillers = o.extraFillers;
@@ -142,11 +148,14 @@ export class EditorAiService {
     const d = src.source.durationSec;
     if (d > EDITOR_LIMITS.maxSourceSec) throw badRequest(`source: at most ${EDITOR_LIMITS.maxSourceSec / 60} minutes`);
     if (kind === 'matte' && d > EDITOR_LIMITS.maxMatteSec) throw badRequest(`source: background removal works on up to ${EDITOR_LIMITS.maxMatteSec} s`);
-    const reuse = (kind === 'cuts' || kind === 'captions' || (kind === 'denoise' && opts.analyzeOnly)) ? await this.transcriptFor(u, src.key, opts) : null;
+    const silenceOnly = kind === 'cuts' && !!opts.silenceOnly;
+    if (silenceOnly && !(await mediaToolsAvailable(this.ctx.config.FFMPEG_PATH, this.ctx.config.FFPROBE_PATH))) throw badRequest('options.silenceOnly: not available on this server');
+    const reuse = silenceOnly ? null : (kind === 'cuts' || kind === 'captions' || (kind === 'denoise' && opts.analyzeOnly)) ? await this.transcriptFor(u, src.key, opts) : null;
     if (kind === 'denoise' && opts.analyzeOnly && !reuse) throw badRequest('options.analyzeOnly: make captions for this video first');
     const p = this.provider;
     let usd = 0;
-    if (kind === 'captions' || kind === 'cuts') usd = reuse ? 0 : GPU_SEC.transcribe(d) * p.rates.transcribe;
+    if (silenceOnly) usd = 0;
+    else if (kind === 'captions' || kind === 'cuts') usd = reuse ? 0 : GPU_SEC.transcribe(d) * p.rates.transcribe;
     else if (kind === 'matte') usd = GPU_SEC.matte(d) * p.rates.matte;
     else if (!opts.analyzeOnly) usd = GPU_SEC.separate(d) * p.rates.separate;
     usd = usd > 0 ? Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(usd * 10000) / 10000) : 0;
@@ -205,6 +214,11 @@ export class EditorAiService {
       if (row.kind === 'captions') {
         const t = await transcript();
         result = { language: t.language, words: t.words, durationSec: d, reused: !!reuse };
+      } else if (row.kind === 'cuts' && o.silenceOnly) {
+        const minSilenceSec = o.minSilenceSec ?? CUT_DEFAULTS.minSilenceSec, keepPadSec = o.keepPadSec ?? CUT_DEFAULTS.keepPadSec;
+        const sil = await this.withLocalInput(src.key, input => detectSilences(this.ctx.config.FFMPEG_PATH, input, d, { minSilenceSec, noiseDb: o.noiseDb }));
+        await this.patch(id, { progress: 90 });
+        result = { ...silenceCuts(sil, d, { minSilenceSec, keepPadSec }), words: [], options: { ...CUT_DEFAULTS, ...o }, durationSec: d };
       } else if (row.kind === 'cuts') {
         const t = await transcript();
         const s = suggestCuts(t.words, d, o);
@@ -235,6 +249,18 @@ export class EditorAiService {
       this.stopping.delete(id);
       if (needsGpu) this.free();
     }
+  }
+
+  /** The media as something ffmpeg can read: a presigned URL on R2, else a temporary copy of the local object. */
+  private async withLocalInput<T>(key: string, fn: (input: string) => Promise<T>): Promise<T> {
+    if (this.ctx.storage.kind === 's3') return fn(await this.ctx.storage.presignGet(key, 900));
+    const obj = await this.ctx.storage.get(key);
+    if (!obj) throw new Error('media missing');
+    const file = path.join(os.tmpdir(), `${uid('edin')}${path.extname(key)}`);
+    try {
+      await pipeline(obj.body as NodeJS.ReadableStream, fs.createWriteStream(file));
+      return await fn(file);
+    } finally { rmQuiet(file); }
   }
 
   /** Stores a produced file as an upload of the studio (bytes copied, never re-encoded); the mock points at the source. */

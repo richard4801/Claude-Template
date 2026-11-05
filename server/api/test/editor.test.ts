@@ -15,6 +15,7 @@ import { suggestCuts } from '../src/editor/cuts.js';
 import { adaptInput, mockWords, parseTranscript, pickFile } from '../src/editor/providers.js';
 import { noiseSuggestion } from '../src/editor/service.js';
 import { editorJobs } from '../src/editor/schema.js';
+import { parseSilenceDetect, silenceCuts } from '../src/editor/silence.js';
 import { makeApp, people, sse, until, type Client } from './helpers.js';
 
 type A = Awaited<ReturnType<typeof makeApp>>;
@@ -115,6 +116,13 @@ describe('cuts and transcripts', () => {
     expect(adaptInput({ audio_file: 'u', align_output: true, batch_size: 32 }, ['audio', 'align_output'])).toEqual({ audio: 'u', align_output: true });
     expect(adaptInput({ input_video: 'u' }, null)).toEqual({ input_video: 'u' });
   });
+  it('silencedetect log → silences → padded cuts', () => {
+    const log = '[silencedetect @ 0x1] silence_start: 0\n[silencedetect @ 0x1] silence_end: 0.8 | silence_duration: 0.8\nx\n[silencedetect @ 0x1] silence_start: 3.2\n[silencedetect @ 0x1] silence_end: 4.1 | silence_duration: 0.9\n[silencedetect @ 0x1] silence_start: 5.5\n[silencedetect @ 0x1] silence_start: 9.6\n';
+    const sil = parseSilenceDetect(log, 10);
+    expect(sil).toEqual([{ startSec: 0, endSec: 0.8 }, { startSec: 3.2, endSec: 4.1 }, { startSec: 9.6, endSec: 10 }]);
+    expect(silenceCuts(sil, 10, { minSilenceSec: 0.7, keepPadSec: 0.1 })).toEqual({ cuts: [{ startSec: 0, endSec: 0.7, reason: 'silence' }, { startSec: 3.3, endSec: 4, reason: 'silence' }], savedSec: 1.4 });
+  });
+
   it('noise suggestion from word confidence', () => {
     const w = (s: number) => Array.from({ length: 6 }, (_, i) => ({ text: 'a', startSec: i, endSec: i + 0.5, score: s }));
     expect(noiseSuggestion(w(0.5)).level).toBe('strong');
@@ -221,6 +229,26 @@ describe('editor AI jobs (mock provider)', () => {
     expect((await owner.req('POST', '/v1/editor/estimate', { kind: 'cuts', source: { takeId: long }, options: { fromJobId: cap.id } })).body.error).toMatch(/another video/);
     const fresh = await videoTake(a, studioId);
     expect((await owner.req('POST', '/v1/editor/estimate', { kind: 'denoise', source: { takeId: fresh }, options: { analyzeOnly: true } })).body.error).toMatch(/captions for this video first/);
+  });
+
+  it('silence-only cuts are free and come from the audio itself (ffmpeg silencedetect, no transcript)', async () => {
+    const file = path.join(a.dir, 'tone.mp4');
+    try {
+      execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=6', '-af', "volume='if(between(t,2,4),0,1)':eval=frame", '-c:a', 'aac', '-y', file]);
+    } catch { return; } // no ffmpeg here: the route says "not available" (covered by the estimate below being skipped)
+    const id = await videoTake(a, studioId, { durationSec: 6 });
+    await a.ctx.storage.put(`c/${id}.mp4`, fs.readFileSync(file), 'video/mp4');
+    const est = (await owner.req('POST', '/v1/editor/estimate', { kind: 'cuts', source: { takeId: id }, options: { silenceOnly: true } })).body;
+    expect(est).toMatchObject({ free: true, usd: 0, reusesTranscript: false });
+    const j = (await owner.req('POST', '/v1/editor/jobs', { kind: 'cuts', source: { takeId: id }, options: { silenceOnly: true, minSilenceSec: 1, keepPadSec: 0.1 } })).body;
+    const r = await done(j.id);
+    expect(r.state, JSON.stringify(r)).toBe('done');
+    expect(r.costUsd).toBe(0);
+    expect(r.result.cuts).toHaveLength(1);
+    expect(r.result.cuts[0].reason).toBe('silence');
+    expect(r.result.cuts[0].startSec).toBeCloseTo(2.1, 1);
+    expect(r.result.cuts[0].endSec).toBeCloseTo(3.9, 1);
+    expect(await a.ctx.db.select().from(ledger).where(eq(ledger.jobId, j.id))).toHaveLength(0);
   });
 
   it('uploads: audio presign, and jobs on an upload need its duration', async () => {
