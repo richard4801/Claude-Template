@@ -491,3 +491,6 @@ export const promptOverrides = pgTable('prompt_overrides', {
   updatedBy: text('updated_by'),
   updatedAt: ms('updated_at').notNull(),
 }, t => [primaryKey({ columns: [t.studioId, t.key] })]);
+
+// Editor v2 (workstream 3): AI helper jobs, migration 0009.
+export * from '../editor/schema.js';

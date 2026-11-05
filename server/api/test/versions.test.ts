@@ -113,7 +113,7 @@ describe('POST/GET /v1/takes/{id}/versions', () => {
       expect(r.body.error).toMatch(msg);
     };
     await bad({ edits: undefined }, /edits/);
-    await bad({ edits: { ...edits(src), version: 2 } }, /edits\.version/);
+    await bad({ edits: { ...edits(src), version: 3 } }, /edits\.version/);
     await bad({ edits: { ...edits(src), segments: [] } }, /edits\.segments/);
     await bad({ edits: edits(src, [{ inSec: 0, outSec: 3, speed: 3 as any }]) }, /edits\.segments\.0\.speed: must be one of 0.5, 0.75, 1, 1.25, 1.5, 2/);
     await bad({ edits: edits(src, [{ inSec: 0, outSec: 3, speed: 1, extra: 1 } as any]) }, /edits\.segments\.0/);
