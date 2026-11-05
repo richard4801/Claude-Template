@@ -245,6 +245,11 @@ final class AppStore {
     var motion = "subtle"
     var showPrompt = false
     var generating = false
+    /// Renders started from the studio this session, oldest first: the stage (its right pane) follows the newest one that is
+    /// still for the current clip, model and outfit (`StudioStage`).
+    var stageJobIds: [String] = []
+    /// The take picked in the stage's take switcher (nil = take 1).
+    var stageTakeId: String?
     /// POST /v1/takes/{id}/upscale in flight.
     var upscaling = false
     var clipDropTargeted = false
@@ -453,6 +458,8 @@ final class AppStore {
         clip = nil
         clipFile = nil
         clipThumb = nil
+        stageJobIds = []
+        stageTakeId = nil
         wallet = nil
         members = []
         studioSettings = nil
@@ -519,7 +526,8 @@ final class AppStore {
             await loadStudio()
             if !models.contains(where: { $0.id == modelId }), let first = models.first(where: { !$0.isDraft }) ?? models.first { modelId = first.id }
             if !models.contains(where: { $0.id == profileModelId }), let first = models.first { profileModelId = first.id }
-            if clip == nil { await useSampleClip(bad: false, quiet: true) }
+            // The sample clip is demo mode's only: on a server the studio starts empty until a clip is uploaded.
+            if clip == nil && isDemo { await useSampleClip(bad: false, quiet: true) }
             await loadSocial()
             await loadTemplates()
             await loadWarmGpu()
@@ -785,6 +793,8 @@ final class AppStore {
         imageEngine = nil
         studioBalance = nil
         lastInvite = nil
+        stageJobIds = []
+        stageTakeId = nil
         resetModelTools()
         resetShootAndPrompts()
         templates = []
@@ -916,6 +926,15 @@ final class AppStore {
     /// The public address for invite links (the download page is `{server}/get`).
     var publicServerURL: String { (api as? HTTPMuseAPI)?.baseURL.absoluteString ?? defaultServerURL }
     var clipBad: Bool { !(clip?.ok ?? true) }
+    /// The source clip's picture: its grabbed first frame, else the clip's own thumb, else neutral clip art. nil = no clip yet.
+    var clipPoster: ImageRef? {
+        guard let c = clip else { return nil }
+        return clipThumb ?? c.thumb ?? .asset("src_clip")
+    }
+    /// The stage's right pane: the target, or the render started from here for this clip, model and outfit.
+    var stage: StudioStage {
+        StudioStage.resolve(jobs: jobs, takes: takes, started: stageJobIds, clipId: clip?.id, modelId: currentModel?.id, outfitId: currentOutfit?.id)
+    }
     var lowBalance: Bool { totalCost > balance.balance + 1e-9 }
     /// Clip checks are advice only (owner decision): a failing clip shows a disclaimer but doesn't block generating.
     var generateBlocked: Bool { lowBalance || clip == nil || currentOutfit == nil || generating }

@@ -10,9 +10,10 @@ struct StudioView: View {
     var body: some View {
         GeometryReader { g in
             let narrow = g.size.width < 900
+            let side: CGFloat = narrow ? 230 + 310 : 280 + 344
             HStack(spacing: 0) {
                 SourceColumn(targeted: dropTargeted).frame(width: narrow ? 230 : 280)
-                StudioCenter()
+                StudioCenter(width: max(0, g.size.width - side))
                     .frame(maxWidth: .infinity)
                     .dropDestination(for: URL.self) { urls, _ in
                         guard let u = urls.first else { return false }
@@ -47,33 +48,29 @@ struct SourceColumn: View {
                         Button(store.showPrompt ? "Hide prompt" : "Show prompt") { store.showPrompt.toggle() }
                         Button("Save as preset") { store.showToast("Saved as preset \"Dance · \(store.quality.label)\"") }
                         Button("Reset settings") { store.resetStudio() }
-                        Button("Change clip…") { store.pickClip() }
+                        Button(clip == nil ? "Choose a clip…" : "Change clip…") { store.pickClip() }
                     }
                 }
-                Media(ref: store.clipThumb ?? .asset("src_clip"), caption: clip.map { "\(clipTime($0.durationSec)) · \($0.width)×\($0.height)" }, captionIcon: "play.fill",
-                      selectedColor: targeted || localTarget ? t.accent : nil)
-                    .frame(maxWidth: 180)
-                    .frame(maxWidth: .infinity)
-                if targeted || localTarget {
-                    Text("Drop to use this clip").font(t.body(12, .semibold)).foregroundStyle(t.accent).frame(maxWidth: .infinity)
-                }
-                MButton("Change clip", icon: "square.and.arrow.up", size: .small, fill: true) { store.pickClip() }
-                if let name = clip?.name, store.clipFile != nil { Muted(name).lineLimit(1) }
-                VStack(alignment: .leading, spacing: 10) {
-                    Lbl("Clip check")
-                    VStack(alignment: .leading, spacing: 9) {
-                        ForEach(clip?.checks ?? [], id: \.label) { c in
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack {
-                                    Text(c.label).font(t.body(13))
-                                    Spacer()
-                                    Pill((c.status == "bad" ? "✕ " : c.status == "good" ? "✓ " : "") + c.value, c.status == "bad" ? .warn : c.status == "good" ? .good : .neutral)
-                                }
-                                if let fix = c.fix { Text(fix).font(t.body(12)).foregroundStyle(t.warn) }
-                            }
-                        }
+                if let clip {
+                    Media(ref: store.clipPoster, caption: "\(clipTime(clip.durationSec)) · \(clip.width)×\(clip.height)", captionIcon: "play.fill",
+                          selectedColor: targeted || localTarget ? t.accent : nil)
+                        .frame(maxWidth: 180)
+                        .frame(maxWidth: .infinity)
+                    if targeted || localTarget {
+                        Text("Drop to use this clip").font(t.body(12, .semibold)).foregroundStyle(t.accent).frame(maxWidth: .infinity)
                     }
-                    LinkText(store.clipBad ? "Use the good sample clip" : "Preview: what a failing clip looks like") { store.toggleBadSample() }
+                    MButton("Change clip", icon: "square.and.arrow.up", size: .small, fill: true) { store.pickClip() }
+                    if store.clipFile != nil { Muted(clip.name).lineLimit(1) }
+                    clipChecks(clip)
+                } else {
+                    // Nothing uploaded yet: an empty drop zone. The sample clip is demo mode's only.
+                    ClipDropZone(targeted: targeted || localTarget) { store.pickClip() }
+                        .frame(maxWidth: 180)
+                        .frame(maxWidth: .infinity)
+                    MButton("Choose a clip", icon: "square.and.arrow.up", size: .small, fill: true) { store.pickClip() }
+                    if store.isDemo {
+                        LinkText("Use the sample clip") { Task { await store.useSampleClip(bad: false) } }
+                    }
                 }
             }
             .padding(20)
@@ -86,16 +83,45 @@ struct SourceColumn: View {
             return true
         } isTargeted: { localTarget = $0 }
     }
+
+    private func clipChecks(_ clip: Clip) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Lbl("Clip check")
+            VStack(alignment: .leading, spacing: 9) {
+                ForEach(clip.checks, id: \.label) { c in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text(c.label).font(t.body(13))
+                            Spacer()
+                            Pill((c.status == "bad" ? "✕ " : c.status == "good" ? "✓ " : "") + c.value, c.status == "bad" ? .warn : c.status == "good" ? .good : .neutral)
+                        }
+                        if let fix = c.fix { Text(fix).font(t.body(12)).foregroundStyle(t.warn) }
+                    }
+                }
+            }
+            if store.isDemo {
+                LinkText(store.clipBad ? "Use the good sample clip" : "Preview: what a failing clip looks like") { store.toggleBadSample() }
+            }
+        }
+    }
 }
 
 struct StudioCenter: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
+    /// The column's width: the stage tightens up in a narrower window (a 1280 px window leaves about 360 pt for it).
+    var width: CGFloat
 
     var body: some View {
         @Bindable var store = store
         let outfit = store.currentOutfit
         let model = store.currentModel
+        let stage = store.stage
+        let avail = max(260, width - 64)
+        let compact = avail < 430
+        let arrowWidth: CGFloat = compact ? 44 : 96
+        let pane = max(90, min(196, (avail - arrowWidth - 28) / 2))
+        let keptLine = "Motion, timing and room are kept. The person is replaced."
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -111,20 +137,32 @@ struct StudioCenter: View {
                 }
                 .padding(.bottom, 8)
                 HStack(alignment: .center, spacing: 14) {
-                    Media(ref: store.clipThumb ?? .asset("src_clip"), caption: "Source · performer").frame(maxWidth: 196)
+                    StageSourcePane().frame(width: pane)
                     VStack(spacing: 8) {
                         Image(systemName: "chevron.right").font(.system(size: 15, weight: .semibold)).frame(width: 44, height: 44)
                             .background(Circle().fill(t.surface)).overlay(Circle().strokeBorder(t.strongLine, lineWidth: t.lineWidth))
-                        Text("Motion, timing and room are kept. The person is replaced.").font(t.body(12)).foregroundStyle(t.muted).multilineTextAlignment(.center)
+                        if !compact {
+                            Text(keptLine).font(t.body(12)).foregroundStyle(t.muted).multilineTextAlignment(.center)
+                        }
                     }
-                    .frame(width: 96)
-                    Media(ref: outfit?.front ?? model?.cover, caption: "\(model?.shortName ?? "Model") · \(outfit?.name ?? "No outfit")").frame(maxWidth: 196)
+                    .frame(width: arrowWidth)
+                    // Idle: the target. While a render from here runs: its live state; then the take playing (`StudioStage`).
+                    StageOutputPane(stage: stage, target: outfit?.front ?? model?.cover, caption: "\(model?.shortName ?? "Model") · \(outfit?.name ?? "No outfit")")
+                        .frame(width: pane)
+                        .animation(.easeOut(duration: 0.3), value: stage.phase)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.top, 6)
-                .padding(.bottom, 20)
+                .padding(.bottom, compact || stage.phase != .idle ? 10 : 20)
+                if compact {
+                    Text(keptLine).font(t.body(12)).foregroundStyle(t.muted).multilineTextAlignment(.center).frame(maxWidth: .infinity)
+                        .padding(.bottom, stage.phase == .idle ? 14 : 8)
+                }
+                if stage.phase != .idle {
+                    StageBar(stage: stage).padding(.bottom, 16)
+                }
 
-                Timeline()
+                if store.clip != nil { Timeline() }
 
                 if store.pro || store.showPrompt {
                     SectionHeader(title: "Prompt") {
@@ -167,7 +205,7 @@ struct Timeline: View {
                 ZStack(alignment: .leading) {
                     HStack(spacing: 0) {
                         ForEach(0..<10, id: \.self) { i in
-                            MuseImage(ref: store.clipThumb ?? .asset("src_clip")).opacity(0.35 + Double(i % 3) * 0.1)
+                            MuseImage(ref: store.clipPoster).opacity(0.35 + Double(i % 3) * 0.1)
                         }
                     }
                     Color.black.opacity(0.25)
@@ -210,9 +248,11 @@ struct StudioInspector: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     Field("Model") {
-                        HStack(spacing: 8) {
-                            ForEach(store.models) { m in
-                                ThumbChoice(label: m.shortName, ref: m.cover, initial: m.initial, on: m.id == store.currentModel?.id) { store.selectModel(m) }
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(store.models) { m in
+                                    ThumbChoice(label: m.shortName, ref: m.cover, initial: m.initial, on: m.id == store.currentModel?.id) { store.selectModel(m) }
+                                }
                             }
                         }
                     }
@@ -224,7 +264,7 @@ struct StudioInspector: View {
                                 }
                             }
                         }
-                        Muted("Never add: \(store.neverList(store.currentModel).joined(separator: ", ")). Removed automatically.")
+                        if let never = StudioText.neverAdd(store.neverList(store.currentModel)) { Muted(never) }
                     }
                     QualityPicker()
                     AddOnsPicker()
@@ -325,6 +365,7 @@ struct InspectorFooter: View {
         VStack(alignment: .leading, spacing: 2) {
             Lbl(label)
             Text(value).font(t.mono(15, .medium)).foregroundStyle(t.ink).contentTransition(.numericText())
+                .lineLimit(1).minimumScaleFactor(0.6)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -347,7 +388,7 @@ struct QualityPicker: View {
             LazyVGrid(columns: columns, spacing: 8) {
                 ForEach(f.ordered) { o in
                     ChoiceCard(label: o.label, detail: o.available ? o.shownDetail : "Not available right now", price: Pricing.totalCost(store.spec(for: o.videoQuality)),
-                               on: store.quality == o.videoQuality, isDefault: o.videoQuality == f.defaultOption, available: o.available) {
+                               on: store.quality == o.videoQuality, isDefault: o.videoQuality == f.defaultOption, available: o.available, badgeRow: true) {
                         store.setQuality(o.videoQuality)
                     }
                 }
@@ -393,13 +434,12 @@ struct UpscaleCard: View {
 
     var body: some View {
         let radius = t.isA ? 0 : t.controlRadius
+        // Laid out like the other cards (name, then the price line, then two lines of detail) so a row lines up.
         VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(addon.label).font(t.body(13, .semibold)).foregroundStyle(t.ink)
-                Spacer(minLength: 4)
-                if addon.comingSoon || !addon.available { Text("Coming soon").font(t.mono(10)).foregroundStyle(t.muted) }
-            }
-            Text(addon.sizes.map(\.label).joined(separator: " · ") + " · on a finished take").font(t.body(11)).foregroundStyle(t.muted).lineLimit(2)
+            Text(addon.label).font(t.body(13, .semibold)).foregroundStyle(t.ink).lineLimit(1).minimumScaleFactor(0.75)
+            Text(addon.comingSoon || !addon.available ? "Coming soon" : "On a finished take").font(t.mono(12, .medium)).foregroundStyle(t.muted)
+                .lineLimit(1).minimumScaleFactor(0.75)
+            Text(addon.sizes.map(\.label).joined(separator: " · ") + " · on a finished take").font(t.body(11)).foregroundStyle(t.muted).lineLimit(2, reservesSpace: true)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -420,19 +460,30 @@ struct ChoiceCard: View {
     var on: Bool
     var isDefault: Bool
     var available: Bool
+    /// Render cards keep a row for the "Default" pill (empty on the others), so the three cards line up.
+    var badgeRow = false
     var action: () -> Void
 
     var body: some View {
         let radius = t.isA ? 0 : t.controlRadius
         Button(action: action) {
             VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(label).font(t.body(13, .semibold)).foregroundStyle(t.ink).lineLimit(1)
-                    if isDefault { Text("Default").font(t.mono(10)).foregroundStyle(t.muted) }
-                    Spacer(minLength: 2)
+                Text(label).font(t.body(13, .semibold)).foregroundStyle(t.ink).lineLimit(1).minimumScaleFactor(0.75)
+                Text(Pricing.money(price)).font(t.mono(12, .medium)).foregroundStyle(on ? t.accent : t.ink).lineLimit(1).minimumScaleFactor(0.75)
+                Text(detail).font(t.body(11)).foregroundStyle(t.muted).lineLimit(2, reservesSpace: true)
+                if badgeRow {
+                    Text(t.isA ? "DEFAULT" : "Default")
+                        .font(t.mono(9.5, .medium))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .foregroundStyle(on ? t.accent : t.muted)
+                        .padding(.horizontal, 6)
+                        .frame(height: 16)
+                        .background(Capsule().fill(on ? t.accent.opacity(0.14) : t.surface))
+                        .opacity(isDefault ? 1 : 0)
+                        .accessibilityHidden(!isDefault)
+                        .padding(.top, 2)
                 }
-                Text(Pricing.money(price)).font(t.mono(12, .medium)).foregroundStyle(on ? t.accent : t.ink)
-                Text(detail).font(t.body(11)).foregroundStyle(t.muted).lineLimit(2).fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
@@ -443,8 +494,8 @@ struct ChoiceCard: View {
         }
         .buttonStyle(.plain)
         .opacity(available ? 1 : 0.5)
-        .help("\(label) · \(detail) · \(Pricing.money(price))")
-        .accessibilityLabel("\(label), \(detail), \(Pricing.money(price))")
+        .help("\(label)\(isDefault ? " (default)" : "") · \(detail) · \(Pricing.money(price))")
+        .accessibilityLabel("\(label)\(isDefault ? ", default" : ""), \(detail), \(Pricing.money(price))")
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 }

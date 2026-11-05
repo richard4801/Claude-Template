@@ -30,7 +30,9 @@ extension AppStore {
         }
     }
 
+    /// The bundled sample clips are demo mode's only (no sample performer on a server).
     func useSampleClip(bad: Bool, quiet: Bool = false) async {
+        guard isDemo else { return }
         do {
             let c = try await api.uploadClip(bad ? SampleData.badMeta : SampleData.sampleMeta, file: nil)
             clip = c
@@ -41,7 +43,9 @@ extension AppStore {
         }
     }
 
+    /// Demo mode only: swaps between the good sample clip and the failing example.
     func toggleBadSample() {
+        guard isDemo else { return }
         let bad = !clipBad
         Task { await useSampleClip(bad: bad) }
     }
@@ -106,6 +110,9 @@ extension AppStore {
             defer { generating = false }
             let j = try await api.createJob(req)
             upsert(j)
+            // The stage follows it: blurred preview with its progress, then the takes playing.
+            stageJobIds.append(j.id)
+            stageTakeId = nil
             balance = try await api.balance()
             showToast("Rendering \(n > 1 ? "\(n) takes" : "1 take") · \(Pricing.money(cost)). You'll get a notification when it's done.", action: "Open queue") { [weak self] in
                 self?.go(.queue)
