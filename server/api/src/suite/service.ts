@@ -281,6 +281,26 @@ export class SuiteService {
       runs: (j.stats as any)?.suite?.takes ?? [] };
   }
 
+  /**
+   * GET /v1/suite/targets: what a guide clip (Blender render) should be for each quality that can use one: length,
+   * reference-video length limits, aspect ratios, output size. The owner also gets the model per step.
+   */
+  async targets(u: AuthUser) {
+    const prefs = await this.prefs(u.studioId);
+    const avail = this.available();
+    return TIERS.map(t => {
+      const steps = (prefs.ladder?.[t]?.length ? prefs.ladder[t]! : DEFAULT_LADDER[t]).map(s => ({ s, m: modelById(s.model) }))
+        .filter(x => x.m && x.m.camera.referenceVideo && x.m.status !== 'removed' && !x.m.licence.blockNewFeatures && prefs.models?.[x.m.id]?.enabled !== false && avail.has(x.m.provider));
+      const first = steps[0];
+      if (!first) return { quality: t, label: TIER_INFO[t].label, available: false };
+      const m = first.m!, res = m.resolutions.find(r => r.id === first.s.resolution) ?? m.resolutions[0]!;
+      const base = { quality: t, label: TIER_INFO[t].label, available: true, minSeconds: m.duration.min, maxSeconds: m.duration.max,
+        guideSeconds: { min: m.refs.videoSecondsMin ?? 1, max: m.refs.videoSecondsMax ?? m.duration.max }, aspectRatios: m.aspectRatios,
+        shortSide: res.shortSide, fps: 24, keyframes: { start: m.frames.start, middle: m.frames.middle, end: m.frames.end } };
+      return u.role === 'owner' ? { ...base, model: m.id, name: m.name, resolution: res.id } : base;
+    });
+  }
+
   /** POST /v1/suite/camera/compile: what a CameraSpec becomes on a quality's model (or, for the owner, any model). */
   async compile(u: AuthUser, body: unknown) {
     const b = (body ?? {}) as { camera?: unknown; quality?: unknown; engineModel?: unknown; duration?: unknown };

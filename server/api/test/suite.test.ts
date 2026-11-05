@@ -294,6 +294,11 @@ describe.skipIf(!hasFfmpeg)('AI suite · Shot API on the mock provider', () => {
     expect(c2.text).toMatch(/the camera circles her about 180°/);
     await owner.req('DELETE', '/v1/prompts/suite.camera.moves');
     expect((await member.req('GET', '/v1/suite/camera')).body.presets.length).toBe(PRESETS.length);
+    const tg = (await member.req('GET', '/v1/suite/targets')).body;
+    expect(tg.map((x: any) => x.quality)).toEqual(['draft', 'standard', 'hd', 'cinema']);
+    expect(tg[3]).toMatchObject({ available: true, maxSeconds: 30, guideSeconds: { min: 3, max: 30 }, shortSide: 1080, keyframes: { middle: 8 } });
+    expect(JSON.stringify(tg)).not.toMatch(PROVIDER_WORDS);
+    expect((await owner.req('GET', '/v1/suite/targets')).body[3].model).toBe('kling-v4');
   });
 
   it('swap is a suite mode over the existing engine (unavailable without Replicate)', async () => {

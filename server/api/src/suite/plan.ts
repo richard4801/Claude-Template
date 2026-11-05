@@ -212,7 +212,7 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
   if (r.prompt.trim()) lines.push(r.prompt.trim().replace(/\s+/g, ' '));
   if (r.direction?.trim()) lines.push(r.direction.trim());
   videos.forEach((v, i) => {
-    const use = v.use === 'camera' ? 'camera movement and framing' : v.use === 'blocking' ? 'blocking and positions' : v.use === 'style' ? 'style and pacing' : 'motion and timing';
+    const use = v.use === 'camera' ? 'camera movement and framing' : v.use === 'blocking' ? 'camera movement, framing, blocking and positions' : v.use === 'style' ? 'style and pacing' : 'motion and timing';
     lines.push(fill(t['suite.shot.guide']!, { video: style === 'none' ? 'the reference video' : token(style, 'video', i + 1), use }));
   });
   if (cam.text) lines.push(cam.text.endsWith('.') ? cam.text : `${cam.text}.`);

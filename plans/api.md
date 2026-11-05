@@ -843,7 +843,7 @@ CameraSpec {
   angle?: { height?, shotSize?, dutchDeg? /* 0–30 */ },
   style?: { genre?, era?, tempo? },
   performance?: { emotion, to?, atS?, intensity? /* 0–1 */ },
-  guide?: { video: VideoRef, use?: "camera"|"motion"|"blocking", cameraSessionId?, keyframes?: { start?: url, middle?: url[] /* ≤ 8 */, end?: url } }
+  guide?: { video: VideoRef, use?: "camera"|"motion"|"blocking" /* blocking = camera + framing + blocking (full playblast) */, cameraSessionId?, keyframes?: { start?: url, middle?: url[] /* ≤ 8 */, end?: url /* "/uploads/<storage key>" (signed at run time, never expires) or https */ } }
 }
 Move { id, intensity? /* 0–1, default 0.5 */, speed?: "slow"|"normal"|"fast", ease?: "linear"|"in"|"out"|"in_out", startS?, endS? }
 // The ids of every option are in GET /v1/suite/camera. Unknown ids are bad_request.
@@ -870,6 +870,7 @@ ShotEstimate { quality, label /* "Shot · HD · 2K" */, resolution, seconds /* w
 |---|---|
 | `GET /v1/suite/catalog` | → the catalog: <ul><li>`{enabled, test, defaultQuality: "draft"}`</li><li>`tiers[]`: `{id, label, detail, available, resolution, fromPerSec, maxSeconds, canKeyframes, canReferences, canGuide}`, plus `models[]` (owner)</li><li>`modes`, `aspectRatios`, `takesMax: 4`</li><li>`camera`: the same as `GET /v1/suite/camera`</li></ul> |
 | `GET /v1/suite/camera` | → the Camera picker: `{presets, bodies, lenses, focalLengths, apertures, looks, frameRates, shutters, lighting, palettes, moves, heights, shotSizes, genres, eras, tempos, emotions, limits}`. Each option is `{id, label, description}`; moves also have `category`, `editorBetter` and `talkSafe`. Presets carry their `spec`. |
+| `GET /v1/suite/targets` | → per quality, what a guide clip (Blender render) should be: `{quality, label, available, minSeconds, maxSeconds, guideSeconds: {min, max}, aspectRatios, shortSide, fps: 24, keyframes: {start, middle /* max count */, end}}`, plus `model`, `name` and `resolution` (owner). Only models that take a reference video count. |
 | `POST /v1/suite/camera/compile` `{camera, quality?, duration?, engineModel? (owner)}` | → `{text, moves, guideUsed, warnings}`, plus `engine`, `params` and `avoid` (owner). This is what the camera becomes on that quality's first model. Free. |
 | `POST /v1/suite/shots/estimate` `ShotRequest` | → `ShotEstimate`. Holds nothing and runs nothing. <ul><li>`400 nothing_fits` ("Draft can't make this shot · try another quality, a shorter length or fewer references"), with `tried` (owner).</li><li>`400 engine_unavailable` when the suite is off.</li><li>`403 owner_only` for `engineModel`/`resolution` from a member.</li></ul> |
 | `POST /v1/suite/shots` `ShotRequest` | → `Job`: a render job, `request.engine: "suite"`, `engineLabel: "Shot · Standard · 768p"`. <ul><li>The same live `job`/`take`/`balance` events, `DELETE /v1/jobs/{id}` cancels, and failures refund in full (`provider_failed`/`provider_refused`/`provider_timeout`/`provider_out_of_credit`).</li><li>Takes have `label` = the tier ("Draft"…). They are the provider's file **as delivered** (no trim).</li><li>`dryRun: true` → `{dryRun: true, estimate}` and nothing is held.</li><li>`402 suite_over_job_limit` / `suite_over_day_limit`, then the wallet's own cap and balance codes.</li><li>`mode: "swap"` is the existing character swap: `POST /v1/jobs` with `engine: "replicate"`, Cinema → HD.</li></ul> |

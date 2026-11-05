@@ -7,6 +7,7 @@ import { cameraCatalog } from '../suite/camera.js';
 export async function registerSuiteRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/v1/suite/catalog', async req => ctx.suite.catalog(req.user));
   app.get('/v1/suite/camera', async () => cameraCatalog());
+  app.get('/v1/suite/targets', async req => ctx.suite.targets(req.user));
   app.post('/v1/suite/camera/compile', async req => ctx.suite.compile(req.user, req.body));
   app.post('/v1/suite/shots/estimate', async (req, reply) => {
     try { return await ctx.suite.estimate(req.user, req.body); }
