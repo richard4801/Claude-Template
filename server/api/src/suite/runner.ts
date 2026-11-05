@@ -10,6 +10,7 @@ import { jobs, uploads, type ImageRef } from '../db/schema.js';
 import { ReplicateError } from '../replicate/client.js';
 import { mediaToolsAvailable, probe, stripAudio, thumbnail } from '../replicate/media.js';
 import { failureOf } from '../services/replicateVideo.js';
+import { beatOnlyAudio } from '../audio/beat.js';
 import { putFile } from '../storage/objects.js';
 import type { JobRow } from '../gpu/controller.js';
 import type { VideoRef } from './camera.js';
@@ -67,6 +68,13 @@ export class SuiteRunner {
     await this.ctx.db.update(jobs).set({ stats: { ...s, suite: { ...(s.suite ?? {}), takes } } }).where(eq(jobs.id, jobId));
   }
 
+  private async saveExtra(jobId: string, extra: Record<string, unknown>) {
+    const [j] = await this.ctx.db.select({ stats: jobs.stats }).from(jobs).where(eq(jobs.id, jobId));
+    const s = (j?.stats ?? {}) as Record<string, any>;
+    await this.ctx.db.update(jobs).set({ stats: { ...s, suite: { ...(s.suite ?? {}), ...extra } } }).where(eq(jobs.id, jobId));
+  }
+  storageKeyOf(v: VideoRef) { return v.key ?? (v.url ? /\/uploads\/([A-Za-z0-9][A-Za-z0-9._\/-]*)$/.exec(v.url)?.[1] : undefined); }
+
   /** A signed URL an outside service can fetch for an image. */
   private async imageUrl(ref: ImageRef | undefined, studioId: string): Promise<string | undefined> {
     if (!ref) return undefined;
@@ -118,6 +126,24 @@ export class SuiteRunner {
         refs: await Promise.all(plan.images.refs.map(x => this.imageUrl(x.image, job.studioId).then(u => u!))),
         videos: await Promise.all(plan.videos.map(v => this.videoUrl(v.video, job.studioId))),
       };
+      // Audio: speech is sent as is; not speaking, only the instrumental (vocals separated once per job, billed with it).
+      let separationCost = 0;
+      if (plan.audioRef) {
+        const key = this.storageKeyOf(plan.audioRef.ref);
+        if (plan.audioRef.beatOnly && !mock) {
+          const saved = (job.stats as any)?.suite?.audio as { instrumentalKey?: string; costUsd?: number } | undefined;
+          let inst = saved?.instrumentalKey && (await ctx.storage.head(saved.instrumentalKey)) ? saved : undefined;
+          if (!inst) {
+            if (!key) throw new ReplicateError('the audio must be an upload to separate its beat', 'failed');
+            await report(1, 0.02, 'Preparing the audio');
+            const b = await beatOnlyAudio(ctx, { studioId: job.studioId, userId: job.userId, jobId: job.id, audioKey: key, cancelled });
+            inst = { instrumentalKey: b.instrumentalKey, costUsd: b.costUsd };
+            await this.saveExtra(job.id, { audio: inst });
+          }
+          separationCost = inst.costUsd ?? 0;
+          urls.audio = await ctx.storage.presignGet(inst.instrumentalKey!, c.REPLICATE_INPUT_URL_TTL_SEC);
+        } else urls.audio = await this.videoUrl(plan.audioRef.ref, job.studioId);
+      }
       const input = buildInput(model, plan, urls);
       const takes: TakeState[] = prior.map(x => ({ ...x }));
       const outputs: Record<string, unknown>[] = [], billed: number[] = [];
@@ -168,11 +194,12 @@ export class SuiteRunner {
         for (const f of [raw, take, thumb]) fs.rmSync(f, { force: true });
       }
       // Settle: price × billed seconds (+ fixed extras); the mock charges nothing unless SUITE_MOCK_CHARGE.
-      const exact = plan.perSec * billed.reduce((a, b) => a + b, 0) + plan.extraPerTake * n;
+      const exact = plan.perSec * billed.reduce((a, b) => a + b, 0) + plan.extraPerTake * n + separationCost;
       const actual = mock && !c.SUITE_MOCK_CHARGE ? 0 : exact;
+      const fresh = ((await ctx.db.select({ stats: jobs.stats }).from(jobs).where(eq(jobs.id, job.id)))[0]?.stats ?? {}) as Record<string, any>;
       await ctx.jobs.complete(job.id, {
         outputs, actualCostUsd: actual, settleNote: `${shotNote(plan.tier, plan.resolution, outputs.map(o => Number(o.durationSec) || plan.seconds))}${mock ? ' · test render' : ''}`,
-        stats: { ...((job.stats as object | null) ?? {}), suite: { ...((job.stats as any)?.suite ?? {}), takes, billedSeconds: billed.reduce((a, b) => a + b, 0), exactCost: exact } },
+        stats: { ...fresh, suite: { ...(fresh.suite ?? {}), takes, billedSeconds: billed.reduce((a, b) => a + b, 0), exactCost: exact, separationCost } },
       });
     } catch (e) {
       if (st.cancelled || (e instanceof ReplicateError && e.kind === 'cancelled')) return;

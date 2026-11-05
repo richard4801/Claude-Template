@@ -1139,8 +1139,8 @@
    "title": "Camera · bodies",
    "description": "One per line: \"id: wording\". Delete a line to go back to its default; the ids are fixed.",
    "kind": "lines",
-   "default": "phone: shot on a modern smartphone, deep focus, natural HDR, true-to-life colour\nvlog: shot on a compact vlogging camera, crisp detail, bright creator look\ncinema_digital: large-format digital cinema camera, clean high-dynamic-range image, rich skin tones\nsuper35: Super 35 digital cinema sensor, filmic highlight roll-off\nfilm_35: 35mm motion-picture film, fine grain, gentle halation, organic colour\nfilm_16: 16mm film, visible grain, softer detail, indie documentary texture\nfilm_8: Super 8 home-movie film, heavy grain, slight gate weave, warm faded colour\nlarge_format_65: 65mm large-format film camera, epic scale, extremely shallow depth of field, pristine detail\ncamcorder: early-2000s DV camcorder footage, video texture, edge sharpening, slightly blown highlights\nwebcam: laptop webcam footage, flat lighting, slight softness, video-call framing\nsecurity_cam: security camera footage, high fixed angle, wide lens, muted colour",
-   "current": "phone: shot on a modern smartphone, deep focus, natural HDR, true-to-life colour\nvlog: shot on a compact vlogging camera, crisp detail, bright creator look\ncinema_digital: large-format digital cinema camera, clean high-dynamic-range image, rich skin tones\nsuper35: Super 35 digital cinema sensor, filmic highlight roll-off\nfilm_35: 35mm motion-picture film, fine grain, gentle halation, organic colour\nfilm_16: 16mm film, visible grain, softer detail, indie documentary texture\nfilm_8: Super 8 home-movie film, heavy grain, slight gate weave, warm faded colour\nlarge_format_65: 65mm large-format film camera, epic scale, extremely shallow depth of field, pristine detail\ncamcorder: early-2000s DV camcorder footage, video texture, edge sharpening, slightly blown highlights\nwebcam: laptop webcam footage, flat lighting, slight softness, video-call framing\nsecurity_cam: security camera footage, high fixed angle, wide lens, muted colour",
+   "default": "phone: a modern smartphone camera, deep focus, natural HDR, true-to-life colour\nvlog: a compact vlogging camera, crisp detail, bright creator look\ncinema_digital: large-format digital cinema camera, clean high-dynamic-range image, rich skin tones\nsuper35: Super 35 digital cinema sensor, filmic highlight roll-off\nfilm_35: 35mm motion-picture film, fine grain, gentle halation, organic colour\nfilm_16: 16mm film, visible grain, softer detail, indie documentary texture\nfilm_8: Super 8 home-movie film, heavy grain, slight gate weave, warm faded colour\nlarge_format_65: 65mm large-format film camera, epic scale, extremely shallow depth of field, pristine detail\ncamcorder: early-2000s DV camcorder footage, video texture, edge sharpening, slightly blown highlights\nwebcam: laptop webcam footage, flat lighting, slight softness, video-call framing\nsecurity_cam: security camera footage, high fixed angle, wide lens, muted colour",
+   "current": "phone: a modern smartphone camera, deep focus, natural HDR, true-to-life colour\nvlog: a compact vlogging camera, crisp detail, bright creator look\ncinema_digital: large-format digital cinema camera, clean high-dynamic-range image, rich skin tones\nsuper35: Super 35 digital cinema sensor, filmic highlight roll-off\nfilm_35: 35mm motion-picture film, fine grain, gentle halation, organic colour\nfilm_16: 16mm film, visible grain, softer detail, indie documentary texture\nfilm_8: Super 8 home-movie film, heavy grain, slight gate weave, warm faded colour\nlarge_format_65: 65mm large-format film camera, epic scale, extremely shallow depth of field, pristine detail\ncamcorder: early-2000s DV camcorder footage, video texture, edge sharpening, slightly blown highlights\nwebcam: laptop webcam footage, flat lighting, slight softness, video-call framing\nsecurity_cam: security camera footage, high fixed angle, wide lens, muted colour",
    "overridden": false,
    "allowEmpty": true,
    "placeholders": [],
@@ -1621,6 +1621,36 @@
    "updatedBy": null
   },
   {
+   "key": "suite.shot.character.words",
+   "group": "suite",
+   "title": "Shot · character (in words)",
+   "description": "Who is in the shot when her images are not sent.",
+   "kind": "text",
+   "default": "{name}: {look}.{never}",
+   "current": "{name}: {look}.{never}",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "name",
+     "description": "her name",
+     "required": true
+    },
+    {
+     "name": "look",
+     "description": "her look",
+     "required": false
+    },
+    {
+     "name": "never",
+     "description": "\" She never has: tattoos, rings.\" or empty",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
    "key": "suite.shot.outfit",
    "group": "suite",
    "title": "Shot · outfit",
@@ -1738,6 +1768,86 @@
     {
      "name": "use",
      "description": "camera movement / motion / blocking",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.shot.scene",
+   "group": "suite",
+   "title": "Shot · the user’s scene",
+   "description": "The user’s own words (scene, action, dialogue), after her identity and references. Only this block sees them.",
+   "kind": "text",
+   "default": "{direction}",
+   "current": "{direction}",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "direction",
+     "description": "the user’s scene and direction",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.shot.camera",
+   "group": "suite",
+   "title": "Shot · camera line",
+   "description": "Where the Camera block goes (script suite.camera builds {camera}).",
+   "kind": "text",
+   "default": "{camera}",
+   "current": "{camera}",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "camera",
+     "description": "the Camera block",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.shot.avoid",
+   "group": "suite",
+   "title": "Shot · things to avoid",
+   "description": "What the camera move must not turn into (models without a negative prompt).",
+   "kind": "text",
+   "default": "{avoid}",
+   "current": "{avoid}",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "avoid",
+     "description": "\"No zoom.\" …",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.audio.dialogue",
+   "group": "suite",
+   "title": "Shot · speaking, no audio sent",
+   "description": "She speaks and the model makes the sound itself.",
+   "kind": "text",
+   "default": "{subject} speaks the lines in quotes; her lips match every word.",
+   "current": "{subject} speaks the lines in quotes; her lips match every word.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "subject",
+     "description": "her name",
      "required": false
     }
    ],

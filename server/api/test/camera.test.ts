@@ -94,7 +94,7 @@ describe('camera sessions', () => {
     const d = await owner.req('POST', `/v1/camera-sessions/${s.id}/shot-draft`, {});
     // With the AI suite merged (mock mode in tests) the draft is the suite's own estimate.
     expect(d.body).toMatchObject({ state: 'draft', source: 'suite', targetModel: 'kling-v4.0', durationSec: 5, prompt: 'cosy kitchen, morning light' });
-    expect(d.body.estimate.usd).toBeGreaterThan(0);
+    expect(d.body.estimate.usd).toBe(1.18); // the target's price: Kling 4.0 1080p, 5 s × $0.235 (no guide video yet)
     expect(d.body.estimate.tokens).toBe(Math.ceil(d.body.estimate.usd / a.ctx.config.TOKEN_USD - 1e-9));
     expect(d.body.camera.directed.cameraSessionId).toBe(s.id);
     expect((await a.ctx.db.select().from(ledger)).length).toBe(before);
@@ -136,6 +136,8 @@ describe('camera sessions', () => {
       const before = (await a.ctx.db.select().from(ledger)).length;
       const d = (await owner.req('POST', `/v1/camera-sessions/${s.id}/shot-draft`, {})).body;
       expect(d).toMatchObject({ source: 'suite', estimate: { usd: 0.78, tokens: 78 }, warnings: ['length set to 6 s'] });
+      // Priced on its target model (workstream 1): Kling 4.0 at 1080p for the default target.
+      expect(seen[0]).toMatchObject({ quality: 'cinema', engineModel: 'kling-v4', resolution: '1080p' });
       expect(seen[0]).toMatchObject({ prompt: 'walk', duration: 6, aspectRatio: '9:16', modelId, camera: { mode: 'directed', guide: { use: 'blocking', cameraSessionId: s.id } } });
       const key = seen[0].camera.guide.video.key;
       expect(key).toMatch(new RegExp(`^cam/${s.id}/${n.asset.id}\\.mp4$`));

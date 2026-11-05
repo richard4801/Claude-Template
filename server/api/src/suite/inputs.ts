@@ -3,7 +3,7 @@ import type { ShotPlan } from './plan.js';
 import type { ModelSpec } from './registry.js';
 
 /** Signed URLs for the plan's media, in plan order. */
-export type MediaUrls = { start?: string; middle: string[]; end?: string; refs: string[]; videos: string[] };
+export type MediaUrls = { start?: string; middle: string[]; end?: string; refs: string[]; videos: string[]; /** The reference audio (or its instrumental). */ audio?: string };
 
 const set = (o: Record<string, unknown>, k: string, v: unknown) => {
   if (v === undefined || v === null || (Array.isArray(v) && !v.length)) return;
@@ -19,7 +19,7 @@ export function buildInput(m: ModelSpec, p: ShotPlan, u: MediaUrls): Record<stri
       if (m.resolutions.length > 1) i.resolution = p.resolution;
       i.ratio = frames && m.id !== 'h3-lite' ? 'adaptive' : p.aspect;
       set(i, 'first_frame_image', u.start); set(i, 'last_frame_image', u.end);
-      set(i, 'reference_image_urls', u.refs); set(i, 'reference_video_urls', u.videos.slice(0, 3));
+      set(i, 'reference_image_urls', u.refs); set(i, 'reference_video_urls', u.videos.slice(0, 3)); set(i, 'reference_audio_urls', u.audio ? [u.audio] : undefined);
       break;
     case 'kling-v4':
       i.duration = p.seconds; i.resolution = p.resolution; i.aspect_ratio = p.aspect;
@@ -36,7 +36,7 @@ export function buildInput(m: ModelSpec, p: ShotPlan, u: MediaUrls): Record<stri
     case 'seedance':
       i.duration = p.seconds; i.resolution = p.resolution; i.aspect_ratio = frames ? 'adaptive' : p.aspect; i.generate_audio = p.audio;
       if (frames) { set(i, 'image', u.start); if (u.start) set(i, 'last_frame_image', u.end); }
-      else { set(i, 'reference_images', u.refs); set(i, 'reference_videos', u.videos); }
+      else { set(i, 'reference_images', u.refs); set(i, 'reference_videos', u.videos); set(i, 'reference_audios', u.audio ? [u.audio] : undefined); }
       set(i, 'seed', p.seed);
       break;
     case 'veo':
@@ -59,7 +59,7 @@ export function buildInput(m: ModelSpec, p: ShotPlan, u: MediaUrls): Record<stri
       i.video_url = u.videos[0]; i.resolution = p.resolution; set(i, 'reference_image_urls', u.refs.slice(0, 8));
       break;
     case 'mock':
-      Object.assign(i, { duration: p.seconds, resolution: p.resolution, aspect_ratio: p.aspect, start: u.start, middle: u.middle, end: u.end, refs: u.refs, videos: u.videos, ...p.params });
+      Object.assign(i, { duration: p.seconds, resolution: p.resolution, aspect_ratio: p.aspect, start: u.start, middle: u.middle, end: u.end, refs: u.refs, videos: u.videos, audio: u.audio, ...p.params });
       break;
   }
   return i;

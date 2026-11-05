@@ -2,7 +2,9 @@
 // the prompt, provider inputs and the cost. Pure functions (no database), so the estimate, the job and the tests agree.
 import { z } from 'zod';
 import type { ImageRef } from '../db/schema.js';
-import { DEFAULT_TEXTS, fill, listOf, type PromptTexts } from '../prompt/library.js';
+import { DEFAULT_TEXTS, listOf, type PromptTexts } from '../prompt/library.js';
+import { sanitizeDirection } from '../prompt/engine.js';
+import { run } from '../prompt/scripts/builders.js';
 import { CameraSpecSchema, VideoRefSchema, type VideoRef } from './camera.js';
 import { compileCamera, type CompiledCamera } from './compile.js';
 import { DEFAULT_LADDER, modelById, refFor, TIER_INFO, TIERS, type LadderStep, type ModelSpec, type ProviderId, type Resolution, type ShotMode, type Tier } from './registry.js';
@@ -21,6 +23,8 @@ export const ShotRequestSchema = z.object({
   references: z.object({
     images: z.array(z.object({ image: ImageRefSchema, role: z.enum(['product', 'location', 'style', 'prop', 'person']).default('product'), label: z.string().max(80).optional() })).max(6).optional(),
     videos: z.array(z.object({ video: VideoRefSchema, use: z.enum(['camera', 'motion', 'style']).default('motion') })).max(3).optional(),
+    /** One audio track (an upload in this studio). Speaking: sent as is (lip sync); not speaking: only its instrumental is sent. */
+    audio: z.object({ audio: VideoRefSchema }).optional(),
   }).optional(),
   duration: z.number().int().min(2).max(30).default(5),
   aspectRatio: z.enum(['9:16', '16:9', '1:1', '4:3', '3:4', '21:9']).default('9:16'),
@@ -28,8 +32,11 @@ export const ShotRequestSchema = z.object({
   takes: z.number().int().min(1).max(4).default(1),
   /** Native sound where the model makes it. */
   audio: z.boolean().default(true),
-  /** The character speaks or sings on camera (lip sync). Off: the prompt says she does not speak (prompt scripts, workstream 4). */
-  speaking: z.boolean().default(false),
+  /**
+   * The character speaks or sings on camera (the switch). Unset: the uploaded audio's talking flag, else detection on
+   * the audio reference, else no (plans/prompt-scripts.md). Off: the prompt says she does not speak, sing or mouth words.
+   */
+  speaking: z.boolean().optional(),
   camera: CameraSpecSchema.optional(),
   seed: z.number().int().min(0).max(2147483647).optional(),
   /** Owner only: a registry model id (and resolution) instead of the ladder. */
@@ -51,7 +58,7 @@ export type Character = { name: string; look: string; neverAdd: string[]; images
 
 export type Need = {
   mode: Exclude<ShotMode, 'swap'>; start: boolean; end: boolean; middle: number; characterImages: number; extraImages: number; videos: number; guide: boolean;
-  directed: boolean; duration: number; aspect: string; withAudio: boolean;
+  directed: boolean; duration: number; aspect: string; withAudio: boolean; audioRef: boolean;
 };
 
 /** The shot's needs, from the request. */
@@ -61,7 +68,7 @@ export function needOf(r: ShotRequest, character: Character | null): Need {
   const start = !!(f.start || keyframes?.start), end = !!(f.end || keyframes?.end), middle = (f.middle?.length ?? 0) || (keyframes?.middle?.length ?? 0);
   const mode = (r.mode as Need['mode'] | undefined) ?? (start || end ? 'image' : character?.images.length ? 'reference' : 'text');
   return { mode, start, end, middle, characterImages: mode === 'text' ? 0 : character?.images.length ?? 0, extraImages: r.references?.images?.length ?? 0,
-    videos: r.references?.videos?.length ?? 0, guide: !!r.camera?.guide, directed: r.camera?.mode === 'directed', duration: r.duration, aspect: r.aspectRatio, withAudio: r.audio };
+    videos: r.references?.videos?.length ?? 0, guide: !!r.camera?.guide, directed: r.camera?.mode === 'directed', duration: r.duration, aspect: r.aspectRatio, withAudio: r.audio, audioRef: !!r.references?.audio };
 }
 
 /** Why `m` at `resolution` can't make this shot, or null. Also the duration it would render. */
@@ -82,6 +89,10 @@ export function fit(m: ModelSpec, resolution: string, n: Need): { why: string | 
   }
   if (n.mode === 'reference' && (!m.modes.reference || m.refs.images < 1)) return no('no reference images');
   if (n.videos > m.refs.videos) return no('no reference videos');
+  if (n.audioRef && m.refs.audios < 1) return no('no reference audio');
+  // Reference audio rides with an image or video reference (Seedance and H3 Lite require it; safest everywhere).
+  if (n.audioRef && n.mode === 'text' && !n.extraImages && !n.videos && !n.guide) return no('audio needs an image or video reference');
+  if (n.audioRef && n.mode === 'image' && !m.frames.withRefs) return no('no audio with keyframes');
   if (n.extraImages > 0 && m.refs.images < n.extraImages + (n.mode === 'reference' ? 1 : 0) && !(n.mode === 'image' && !m.frames.withRefs)) return no('too many reference images');
   if (m.id === 'veo-3.1-lite' && resolution === '1080p' && seconds !== 8) return no('1080p only at 8 s');
   return { why: null, seconds };
@@ -134,7 +145,9 @@ export type ImagePlan = { start?: ImageRef; middle: ImageRef[]; end?: ImageRef; 
 export type ShotPlan = {
   tier: Tier; mode: Need['mode']; modelId: string; provider: ProviderId; ref: string; kind: 't2v' | 'i2v' | 'ref2v' | 'guide'; resolution: string;
   seconds: number; aspect: string; audio: boolean; takes: number; seed?: number; prompt: string; negative?: string; params: Record<string, unknown>;
-  images: ImagePlan; videos: { video: VideoRef; use: string }[]; perSec: number; billedPerTake: number; extraPerTake: number; estimate: number;
+  images: ImagePlan; videos: { video: VideoRef; use: string }[];
+  /** The audio reference and whether only its instrumental is sent (performer not speaking). */
+  audioRef?: { ref: VideoRef; beatOnly: boolean }; speaking: boolean; separationUsd: number; perSec: number; billedPerTake: number; extraPerTake: number; estimate: number;
   camera: Pick_<CompiledCamera, 'moves' | 'notes' | 'usesGuide'>; notes: string[];
 };
 type Pick_<T, K extends keyof T> = { [P in K]: T[P] };
@@ -148,11 +161,11 @@ const ROLE_WORDS: Record<string, [string, string]> = {
 };
 
 /** Builds the whole plan for a picked model. */
-export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character | null, o: { texts?: PromptTexts; priceScale?: number }): ShotPlan {
+export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character | null, o: { texts?: PromptTexts; priceScale?: number; speaking?: boolean; separationUsd?: number }): ShotPlan {
   const t = o.texts ?? DEFAULT_TEXTS;
   const m = p.model, notes: string[] = [];
   const kind = kindOf(m, n);
-  const cam = compileCamera(r.camera, m, { texts: t, durationS: p.seconds, talking: r.speaking });
+  const cam = compileCamera(r.camera, m, { texts: t, durationS: p.seconds, talking: o.speaking ?? r.speaking ?? false });
   if (p.seconds !== r.duration) notes.push(`length set to ${p.seconds} s (this quality makes ${m.duration.allowed?.join(', ') ?? `${m.duration.min}–${m.duration.max}`} s)`);
 
   // ---- images: keyframes, then the character subset, then extra references, within the model's limits
@@ -190,38 +203,48 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
   if (cam.usesGuide && r.camera?.guide) videos.push({ video: r.camera.guide.video, use: r.camera.guide.use });
   for (const v of r.references?.videos ?? []) if (videos.length < m.refs.videos) videos.push({ video: v.video, use: v.use });
 
-  // ---- prompt
+  // ---- audio: speech goes as is; music without speaking goes as its instrumental (separated when the job runs)
+  const speaking = o.speaking ?? r.speaking ?? false;
+  const audioRef = r.references?.audio?.audio;
+  const audioPlan = audioRef && m.refs.audios > 0 ? { ref: audioRef, beatOnly: !speaking } : undefined;
+  if (audioRef && !audioPlan) notes.push('this quality takes no reference audio: the audio is not sent');
+
+  // ---- prompt: the suite.shot script (owner-editable rules and blocks); the user's words only in its scene section
   const style = m.camera.refStyle;
-  const lines: string[] = [];
+  const named = style !== 'none';
   const charTokens = images.refs.map((x, i) => (x.role === 'character' && !x.label.startsWith('outfit') ? token(style, 'image', i + 1) : '')).filter(Boolean);
   const outfitTokens = images.refs.map((x, i) => (x.role === 'character' && x.label.startsWith('outfit') ? token(style, 'image', i + 1) : '')).filter(Boolean);
-  if (character) {
-    const never = character.neverAdd.length ? ` She never has: ${character.neverAdd.join(', ')}.` : '';
-    if (charTokens.length && style !== 'none') lines.push(fill(t['suite.shot.character']!, { name: character.name, refs: joinTokens(charTokens), look: character.look, never }));
-    else lines.push(`${character.name}: ${character.look}.${never}`);
-    if (character.outfit) lines.push(fill(t['suite.shot.outfit']!, { outfit: character.outfit.description || character.outfit.name, refs: outfitTokens.length && style !== 'none' ? ` as shown in ${joinTokens(outfitTokens)}` : '' }));
-  }
-  images.refs.forEach((x, i) => {
-    if (x.role === 'character') return;
+  const refItems = images.refs.map((x, i) => ({ x, i })).filter(({ x }) => x.role !== 'character').map(({ x, i }) => {
     const [role, use] = ROLE_WORDS[x.role] ?? ROLE_WORDS.product!;
-    lines.push(style === 'none' ? `${x.label}: ${role}.` : fill(t['suite.shot.reference']!, { ref: token(style, 'image', i + 1), role: x.label && !x.label.startsWith(x.role) ? `${role} (${x.label})` : role, use }));
+    return { kind: x.role, ref: named ? token(style, 'image', i + 1) : x.label, role: x.label && !x.label.startsWith(x.role) ? `${role} (${x.label})` : role, use };
   });
-  if (new Set(images.refs.map(x => x.role)).size > 1 || images.refs.filter(x => x.role === 'person').length) lines.push(t['suite.shot.lock']!);
-  if (hasFrames) {
-    lines.push(fill(t['suite.shot.frames']!, { start: images.start ? 'the start frame' : 'its first frame',
-      middle: images.middle.length ? `, passes through the ${images.middle.length} middle keyframe${images.middle.length > 1 ? 's' : ''} in order` : '', end: images.end ? ' and ends exactly on the end frame' : '' }));
-  }
-  if (r.prompt.trim()) lines.push(r.prompt.trim().replace(/\s+/g, ' '));
-  if (r.direction?.trim()) lines.push(r.direction.trim());
-  videos.forEach((v, i) => {
-    const use = v.use === 'camera' ? 'camera movement and framing' : v.use === 'blocking' ? 'camera movement, framing, blocking and positions' : v.use === 'style' ? 'style and pacing' : 'motion and timing';
-    lines.push(fill(t['suite.shot.guide']!, { video: style === 'none' ? 'the reference video' : token(style, 'video', i + 1), use }));
+  const VIDEO_USE: Record<string, string> = { camera: 'camera movement and framing', blocking: 'camera movement, framing, blocking and positions', style: 'style and pacing', motion: 'motion and timing' };
+  const videoItems = videos.map((v, i) => ({ kind: v.use, video: named ? token(style, 'video', i + 1) : 'the reference video', use: VIDEO_USE[v.use] ?? VIDEO_USE.motion! }));
+  const avoid = !m.negativePrompt && cam.avoid.length ? cam.avoid.map(a => a.charAt(0).toUpperCase() + a.slice(1)).join('. ') + '.' : '';
+  const ident = character ? { name: character.name, look: character.look, neverAdd: character.neverAdd } : null;
+  const userWords = [r.prompt, r.direction].map(x => (x ?? '').trim()).filter(Boolean).join(' ');
+  const { clean, removed } = ident ? sanitizeDirection(userWords, ident, t) : { clean: userWords, removed: [] as string[] };
+  if (removed.length) notes.push(`left out of the scene (it would change her look): ${removed.join('; ')}`);
+  const audioSent: 'speech' | 'music' | 'none' = audioPlan ? (speaking ? 'speech' : 'music') : 'none';
+  const res = run('suite.shot', t, {
+    inputs: {
+      hasCharacter: !!character, characterImages: !!character && charTokens.length > 0 && named, hasOutfit: !!character?.outfit,
+      refs: refItems, mixedRoles: new Set(images.refs.map(x => x.role)).size > 1 || images.refs.some(x => x.role === 'person'), hasFrames,
+      videos: videoItems, hasCamera: !!cam.text, audio: audioSent, speaking, hasAvoid: !!avoid,
+    },
+    vars: {
+      name: character?.name ?? '', look: character?.look ?? '', refs: joinTokens(charTokens), never: character?.neverAdd.length ? ` She never has: ${character.neverAdd.join(', ')}.` : '',
+      outfit: character?.outfit ? character.outfit.description || character.outfit.name : '', outfitRefs: outfitTokens.length && named ? ` as shown in ${joinTokens(outfitTokens)}` : '',
+      start: images.start ? 'the start frame' : 'its first frame',
+      middle: images.middle.length ? `, passes through the ${images.middle.length} middle keyframe${images.middle.length > 1 ? 's' : ''} in order` : '',
+      end: images.end ? ' and ends exactly on the end frame' : '',
+      camera: cam.text ? (cam.text.endsWith('.') ? cam.text : `${cam.text}.`) : '',
+      subject: character?.name ?? 'The person', audio: style === 'bracket' ? '[Audio1]' : '<Audio 1>', avoid,
+    },
+    direction: clean,
   });
-  if (cam.text) lines.push(cam.text.endsWith('.') ? cam.text : `${cam.text}.`);
+  let prompt = res.text;
   const negList = [...listOf(t['suite.shot.negative'] ?? ''), ...cam.avoid.map(a => a.replace(/^no\s+/i, ''))];
-  if (!m.negativePrompt && cam.avoid.length) lines.push(cam.avoid.map(a => a.charAt(0).toUpperCase() + a.slice(1)).join('. ') + '.');
-  if (t['suite.shot.footer']?.trim()) lines.push(t['suite.shot.footer']!.trim());
-  let prompt = lines.filter(Boolean).join('\n');
   if (m.promptMax && prompt.length > m.promptMax) { prompt = prompt.slice(0, m.promptMax); notes.push('prompt shortened to fit'); }
 
   // ---- price
@@ -230,12 +253,13 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
   const guideSeconds = videos[0]?.video.seconds;
   const billed = billedSeconds(m, p.seconds, { videoInput, guideSeconds });
   const extraCost = extraPerTake(m);
-  const estimate = Math.round((perSec * billed + extraCost) * r.takes * 10000) / 10000;
+  const separation = audioPlan?.beatOnly ? o.separationUsd ?? 0 : 0;
+  const estimate = Math.round(((perSec * billed + extraCost) * r.takes + separation) * 10000) / 10000;
 
   return {
     tier: r.quality, mode: n.mode, modelId: m.id, provider: m.provider, ref: refFor(m, kind), kind, resolution: p.resolution.id, seconds: p.seconds, aspect: r.aspectRatio,
     audio: r.audio && m.audio !== 'none', takes: r.takes, seed: m.seed ? r.seed : undefined, prompt, negative: m.negativePrompt ? negList.join(', ') : undefined, params: cam.params,
-    images, videos, perSec, billedPerTake: billed, extraPerTake: extraCost, estimate,
+    images, videos, audioRef: audioPlan, speaking, separationUsd: separation, perSec, billedPerTake: billed, extraPerTake: extraCost, estimate,
     camera: { moves: cam.moves, notes: cam.notes, usesGuide: cam.usesGuide }, notes,
   };
 }

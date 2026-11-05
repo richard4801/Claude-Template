@@ -23,8 +23,8 @@ const o = (id: string, label: string, description: string, wording: string): Opt
 
 // ---------------------------------------------------------------- rig
 export const BODIES: Option[] = [
-  o('phone', 'Phone', 'Modern smartphone: deep focus, natural HDR', 'shot on a modern smartphone, deep focus, natural HDR, true-to-life colour'),
-  o('vlog', 'Vlog camera', 'Compact creator camera, crisp and bright', 'shot on a compact vlogging camera, crisp detail, bright creator look'),
+  o('phone', 'Phone', 'Modern smartphone: deep focus, natural HDR', 'a modern smartphone camera, deep focus, natural HDR, true-to-life colour'),
+  o('vlog', 'Vlog camera', 'Compact creator camera, crisp and bright', 'a compact vlogging camera, crisp detail, bright creator look'),
   o('cinema_digital', 'Cinema digital', 'Large-format digital cinema camera, clean and rich', 'large-format digital cinema camera, clean high-dynamic-range image, rich skin tones'),
   o('super35', 'Super 35 digital', 'Classic S35 cinema sensor', 'Super 35 digital cinema sensor, filmic highlight roll-off'),
   o('film_35', '35mm film', 'Fine grain, halation, organic colour', '35mm motion-picture film, fine grain, gentle halation, organic colour'),

@@ -5,6 +5,7 @@ import { DEFAULT_TEXTS, fill, type PromptTexts } from '../prompt/library.js';
 import { APERTURES, BODIES, canMix, ERAS, focalWords, FRAME_RATES, GENRES, HEIGHTS, LENSES, LIGHTING, LOOKS, MOVES, PALETTES, resolvePreset, SHOT_SIZES, SHUTTERS, TEMPOS,
   type CameraSpec, type MoveOption } from './camera.js';
 import { wordings } from './prompts.js';
+import { run } from '../prompt/scripts/builders.js';
 import type { ModelSpec } from './registry.js';
 
 export type CompiledCamera = {
@@ -101,8 +102,9 @@ export function compileCamera(input: CameraSpec | undefined, model: Pick<ModelSp
 
   const parts = { move: moves.join(', combined with '), framing, rig, light, palette, style, performance };
   if (!Object.values(parts).some(Boolean)) return out;
-  const fmtKey = `suite.camera.format.${['kling', 'seedance', 'h3', 'veo'].includes(model.camera.vocab) ? model.camera.vocab : 'generic'}`;
-  out.text = tidy(fill(t[fmtKey] ?? DEFAULT_TEXTS[fmtKey] ?? '', parts));
+  // The block's grammar is the prompt script suite.camera (owner-editable rules and format blocks).
+  const vocab = ['kling', 'seedance', 'h3', 'veo'].includes(model.camera.vocab) ? model.camera.vocab : 'generic';
+  out.text = tidy(run('suite.camera', t, { inputs: { vocab }, vars: parts }).text);
   return out;
 }
 
