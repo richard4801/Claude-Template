@@ -242,7 +242,7 @@ fun CaptionTile(style: CaptionStyle, label: String, on: Boolean, onClick: () -> 
             contentAlignment = Alignment.Center,
         ) {
             val words = if (style.preset == CaptionPreset.PLAIN) listOf("I", "always", "order", "the") else listOf("I", "always", "order")
-            CaptionLine(words, 1, style.copy(text = style.text.copy(sizePct = if (style.preset == CaptionPreset.PLAIN) .16 else .2)), 60.dp * 1.0f, 108.dp)
+            CaptionLine(words, 1, style.copy(text = style.text.copy(sizePct = when (style.preset) { CaptionPreset.PLAIN -> .16; CaptionPreset.POP -> .17; else -> .2 })), 60.dp, 108.dp)
         }
         T(label, m.type.tiny.copy(fontSize = 12.sp), if (on) m.t.ink else m.t.muted, weight = if (on) FontWeight.Bold else null, maxLines = 1)
     }

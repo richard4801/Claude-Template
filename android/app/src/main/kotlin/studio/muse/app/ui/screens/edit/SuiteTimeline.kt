@@ -143,7 +143,7 @@ fun SuiteTimeline(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap>>, act: 
                 val x = xOf(s.toDouble())
                 if (x > -40 && x < size.width + 40) {
                     val label = if (s % (step * 2) == 0) "$s s" else "·"
-                    drawText(measurer, label, Offset(x, 6 * dp), TextStyle(fontFamily = m.t.mono, fontSize = 9.5.sp, color = m.t.muted))
+                    drawText(measurer.measure(label, TextStyle(fontFamily = m.t.mono, fontSize = 9.5.sp, color = m.t.muted), softWrap = false), topLeft = Offset(x, 6 * dp))
                 }
                 s += step
             }
@@ -211,7 +211,7 @@ fun SuiteTimeline(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap>>, act: 
         }
         // "+": add a clip or an overlay.
         Box(
-            Modifier.align(Alignment.TopEnd).offset(x = (-12).dp, y = 40.dp).size(32.dp).background(m.t.surface).border(1.dp, m.t.line).press { act(EditAction.Open(Panel.OVERLAY)) }
+            Modifier.align(Alignment.TopEnd).offset(x = (-4).dp, y = 32.dp).size(48.dp).press { act(EditAction.Open(Panel.OVERLAY)) }.padding(8.dp).background(m.t.surface).border(1.dp, m.t.line)
                 .semantics { contentDescription = "Add" },
             contentAlignment = Alignment.Center,
         ) { EIc("plus", 16.dp, m.t.ink) }

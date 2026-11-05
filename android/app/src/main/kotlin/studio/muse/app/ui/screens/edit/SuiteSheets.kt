@@ -266,7 +266,7 @@ private fun TransformBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             SuiteSlider(frac, { f, done -> set(f)?.let { act(EditAction.SetTransform(it, done)) } }, Modifier.weight(1f), label = label, valueText = value)
             Spacer(Modifier.width(10.dp))
-            Box(Modifier.size(32.dp).press { act(EditAction.AddKeyframe(prop)) }.semantics { contentDescription = "Keyframe $label" }, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(48.dp).press { act(EditAction.AddKeyframe(prop)) }.semantics { contentDescription = "Keyframe $label" }, contentAlignment = Alignment.Center) {
                 EIc(if (keys?.get(prop).isNullOrEmpty()) "keyframe" else "diamond", 14.dp, if (keys?.get(prop).isNullOrEmpty()) m.t.muted else m.t.accent)
             }
         }

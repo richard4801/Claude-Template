@@ -124,9 +124,9 @@ private fun Status(text: String, progress: Float?) {
 private fun TopRow(ui: EditSuiteUi, act: (EditAction) -> Unit, onClose: () -> Unit) {
     val m = muse
     Row(Modifier.fillMaxWidth().height(50.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(36.dp).press(onClick = onClose).semantics { contentDescription = "Close" }, contentAlignment = Alignment.CenterStart) { EIc("x", 22.dp, m.t.ink) }
+        Box(Modifier.size(48.dp).press(onClick = onClose).semantics { contentDescription = "Close" }, contentAlignment = Alignment.CenterStart) { EIc("x", 22.dp, m.t.ink) }
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-            T(ui.title.ifBlank { "Edit" }, m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold), m.t.ink, maxLines = 1)
+            studio.muse.app.ui.components.FitText(ui.title.ifBlank { "Edit" }, m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold), m.t.ink, Modifier.weight(1f, fill = false))
             if (ui.reopened) { Spacer(Modifier.width(6.dp)); Pill("Edited", "good") }
         }
         val shape = RoundedCornerShape(if (m.isA) 0.dp else if (m.isB) 8.dp else 999.dp)
@@ -143,13 +143,13 @@ private fun Transport(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     val m = muse
     Row(Modifier.fillMaxWidth().height(42.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
         T("${suiteTime(ui.playheadSec)} / ${suiteTime(ui.duration)}", m.type.mono.copy(fontSize = 12.5.sp), m.t.ink, Modifier.weight(1f), maxLines = 1)
-        Box(Modifier.size(40.dp).press(enabled = ui.ready) { act(EditAction.PlayPause) }.semantics { contentDescription = if (ui.playing) "Pause" else "Play" }, contentAlignment = Alignment.Center) {
+        Box(Modifier.size(48.dp).press(enabled = ui.ready) { act(EditAction.PlayPause) }.semantics { contentDescription = if (ui.playing) "Pause" else "Play" }, contentAlignment = Alignment.Center) {
             EIc(if (ui.playing) "pause" else "play", 20.dp, m.t.ink)
         }
-        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.press(enabled = ui.canUndo) { act(EditAction.Undo) }.semantics { contentDescription = "Undo" }) { EIc("undo", 18.dp, if (ui.canUndo) m.t.ink else m.t.muted) }
-            Box(Modifier.press(enabled = ui.canRedo) { act(EditAction.Redo) }.semantics { contentDescription = "Redo" }) { EIc("redo", 18.dp, if (ui.canRedo) m.t.ink else m.t.muted) }
-            Box(Modifier.press { act(EditAction.Fullscreen) }.semantics { contentDescription = "Fullscreen" }) { EIc("expand", 18.dp, if (ui.fullscreen) m.t.ink else m.t.muted) }
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(42.dp, 48.dp).press(enabled = ui.canUndo) { act(EditAction.Undo) }.semantics { contentDescription = "Undo" }, contentAlignment = Alignment.Center) { EIc("undo", 18.dp, if (ui.canUndo) m.t.ink else m.t.muted) }
+            Box(Modifier.size(42.dp, 48.dp).press(enabled = ui.canRedo) { act(EditAction.Redo) }.semantics { contentDescription = "Redo" }, contentAlignment = Alignment.Center) { EIc("redo", 18.dp, if (ui.canRedo) m.t.ink else m.t.muted) }
+            Box(Modifier.size(42.dp, 48.dp).press { act(EditAction.Fullscreen) }.semantics { contentDescription = "Fullscreen" }, contentAlignment = Alignment.Center) { EIc("expand", 18.dp, if (ui.fullscreen) m.t.ink else m.t.muted) }
         }
     }
 }
@@ -159,14 +159,15 @@ private fun Toolbar(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     val m = muse
     val lit = ui.panel?.tool
     Row(
-        Modifier.fillMaxWidth().height(66.dp).border(0.dp, Color.Transparent).navigationBarsPadding().padding(horizontal = 4.dp),
+        Modifier.fillMaxWidth().height(66.dp).navigationBarsPadding().padding(horizontal = 2.dp),
         horizontalArrangement = Arrangement.SpaceAround, verticalAlignment = Alignment.CenterVertically,
     ) {
         EditTool.entries.forEach { tool ->
             val on = tool == lit
             val c = if (on) m.t.accent else m.t.ink
             Column(
-                Modifier.width(44.dp).press(enabled = ui.project != null) { act(EditAction.Open(if (on) null else tool.panel)) }.semantics { contentDescription = tool.label },
+                Modifier.weight(1f).height(60.dp).press(enabled = ui.project != null)
+ { act(EditAction.Open(if (on) null else tool.panel)) }.semantics { contentDescription = tool.label },
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 EIc(tool.icon, 20.dp, c)

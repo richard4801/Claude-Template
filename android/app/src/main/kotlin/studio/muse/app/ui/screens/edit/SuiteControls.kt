@@ -32,6 +32,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -65,7 +67,7 @@ fun SheetFrame(title: String, onDone: () -> Unit, modifier: Modifier = Modifier,
         Box(Modifier.fillMaxWidth().padding(top = 8.dp), contentAlignment = Alignment.Center) { Box(Modifier.size(40.dp, 4.dp).clip(RoundedCornerShape(2.dp)).background(m.t.line)) }
         Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
             T(title, m.type.h3, m.t.ink, Modifier.weight(1f), maxLines = 1)
-            Box(Modifier.size(40.dp).press(onClick = onDone), contentAlignment = Alignment.Center) { EIc("check", 20.dp, m.t.ink) }
+            Box(Modifier.size(48.dp).press(onClick = onDone).semantics { contentDescription = "Done" }, contentAlignment = Alignment.CenterEnd) { EIc("check", 20.dp, m.t.ink) }
         }
         Column(
             (if (scroll) Modifier.verticalScroll(rememberScrollState()) else Modifier).padding(bottom = 28.dp),
@@ -142,7 +144,7 @@ fun SuiteChip(text: String, on: Boolean, onClick: () -> Unit, modifier: Modifier
         else -> m.t.accent to m.t.accentInk
     }
     Box(
-        modifier.height(34.dp).clip(shape).background(bg).border(if (m.isD) 2.dp else 1.dp, if (on) bg else if (m.isD) Ink else m.t.line, shape)
+        modifier.height(40.dp).clip(shape).background(bg).border(if (m.isD) 2.dp else 1.dp, if (on) bg else if (m.isD) Ink else m.t.line, shape)
             .press(enabled = enabled, onClick = onClick).padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,
     ) { T(text, m.type.body.copy(fontSize = 13.sp), fg, maxLines = 1) }
