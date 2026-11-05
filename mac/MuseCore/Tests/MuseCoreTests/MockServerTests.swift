@@ -71,11 +71,11 @@ final class MockServerTests: XCTestCase {
         let img = try await api.uploadImage(name: "a.png", data: Data([0x89, 0x50, 0x4E, 0x47]), mime: "image/png")
         XCTAssertTrue(img.url?.hasPrefix("http") == true, "relative upload URLs are made absolute: \(img)")
         let m = try await api.createModel(CreateModelRequest(name: "Mac", age: 30, niche: "Tech"))
-        XCTAssertEqual(m.slots.count, 6)
+        XCTAssertEqual(m.slots.count, 7)  // 3 face close-ups + 4 full-body angles
         let m2 = try await api.setSlot(modelId: m.id, slot: "face", SetSlotRequest(image: img))
         XCTAssertEqual(m2.filled, 1)
         let fill = try await api.fillAngles(modelId: m.id)
-        XCTAssertEqual(Pricing.money(fill.cost), "$0.10")
+        XCTAssertEqual(Pricing.money(fill.cost), "$0.12")  // 6 empty slots × $0.02
 
         let shots = try await api.shoot(ShootRequest(modelId: demoModel.id, outfitId: demoModel.outfitIds[0], scene: "Café window", prompt: "p", count: 4))
         XCTAssertEqual(shots.count, 4)
