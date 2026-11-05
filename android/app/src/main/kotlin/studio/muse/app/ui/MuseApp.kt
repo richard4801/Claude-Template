@@ -96,6 +96,7 @@ object Routes {
     const val SHOOT = "shoot"; const val SOURCE = "source"; const val DIRECT = "direct"; const val RESULT = "result/{id}"
     const val LORA = "lora"; const val ACCOUNTS = "accounts"; const val POST = "post/{id}"; const val POSTS = "posts"
     const val MEMBERS = "members"; const val INVITE = "invite"; const val STUDIO = "studio"
+    const val ENHANCE = "enhance"; const val DRESSUP = "dressup"; const val IMAGE_MODELS = "imagemodels"; const val CATALOG = "catalog"; const val ARCHIVED = "archived"
     const val TEMPLATES = "templates"; const val TEMPLATE = "template/{id}"; const val TEMPLATE_USE = "template/{id}/use"; const val SAVE_TEMPLATE = "savetemplate/{id}"
     val TABS = setOf(HOME, GALLERY, QUEUE, SETTINGS)
     fun result(id: String) = "result/$id"
@@ -209,6 +210,11 @@ fun MuseApp(
                     composable(Routes.INVITE) { InviteScreen() }
                     composable(Routes.STUDIO) { StudioSettingsScreen() }
                     composable(Routes.TEMPLATES) { TemplatesScreen() }
+                    composable(Routes.ENHANCE) { EnhanceScreen() }
+                    composable(Routes.DRESSUP) { DressUpScreen() }
+                    composable(Routes.IMAGE_MODELS) { ImageModelsScreen() }
+                    composable(Routes.CATALOG) { CatalogScreen() }
+                    composable(Routes.ARCHIVED) { ArchivedModelsScreen() }
                     composable(Routes.TEMPLATE) { e -> TemplateDetailScreen(e.arguments?.getString("id") ?: "") }
                     composable(Routes.TEMPLATE_USE) { e -> TemplateUseScreen(e.arguments?.getString("id") ?: "") }
                     composable(Routes.SAVE_TEMPLATE) { e -> SaveTemplateScreen(e.arguments?.getString("id") ?: "") }

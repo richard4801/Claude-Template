@@ -142,7 +142,7 @@ class RealApiContractTest {
 
         // ---- the member's job charges tokens
         val clip = member.uploadClip(SampleData.sampleMeta, null)
-        val req = JobRequest("Dance", SampleData.SIENNA, SampleData.GREEN, clip.id, steps = 10)
+        val req = JobRequest("Dance", SampleData.DEMO, SampleData.GREEN, clip.id, steps = 10)
         val done = async { withTimeout(20_000) { member.events().first { it.job?.done == true } } }
         delay(500)
         val job = member.createJob(req)
@@ -163,11 +163,11 @@ class RealApiContractTest {
         assertTrue(mirror.cover!!.url!!.startsWith(base.trimEnd('/')))
         assertEquals(7, member.listTemplates().count { it.starter != null })
         assertTrue(member.listTemplates(q = "faceless").any { it.id == mirror.id })
-        val view = member.templatePrompt(mirror.id, TemplatePromptRequest(SampleData.SIENNA, SampleData.GREEN, "sitting on the steps", 7))
+        val view = member.templatePrompt(mirror.id, TemplatePromptRequest(SampleData.DEMO, SampleData.GREEN, "sitting on the steps", 7))
         assertEquals(PromptSlotView("template", "Template: Mirror selfie", true), view.slots.first { it.layer == "template" })
         assertTrue(view.text, !view.text.contains(secretStyle) && view.text.contains("Direction: sitting on the steps."))
         assertNull(view.variation)
-        val shots = member.shoot(ShootRequest(SampleData.SIENNA, SampleData.GREEN, "", "", count = 2, templateId = mirror.id, shuffleSeed = 11))
+        val shots = member.shoot(ShootRequest(SampleData.DEMO, SampleData.GREEN, "", "", count = 2, templateId = mirror.id, shuffleSeed = 11))
         assertEquals(2, shots.size)
         shots.forEach { assertEquals("Mirror selfie", it.templateName); assertTrue(it.prompt.contains("Template: Mirror selfie")); assertTrue(!it.prompt.contains(secretStyle)); assertNull(it.variation) }
         val asOwner = owner.listTakes().first { it.id == shots[0].id }
@@ -178,7 +178,7 @@ class RealApiContractTest {
         assertEquals(1, member.template(mirror.id).uses)
         expectCode("owner_only") { member.patchTemplate(mirror.id, PatchTemplateRequest(name = "mine")) }
         // Save as template from the member's own plain shoot: private by default, the pool editable
-        val plain = member.shoot(ShootRequest(SampleData.SIENNA, SampleData.GREEN, "Bedroom mirror", "", count = 1)).first()
+        val plain = member.shoot(ShootRequest(SampleData.DEMO, SampleData.GREEN, "Bedroom mirror", "", count = 1)).first()
         val draft = member.templateDraft(plain.id)
         assertTrue(draft.variationPool.getValue("pose").isNotEmpty())
         val mine = member.createTemplate(CreateTemplateRequest("My mirror", listOf("Selfie"), variationPool = draft.variationPool + ("expression" to listOf("soft smile")), fromShotId = plain.id))
@@ -270,5 +270,40 @@ class RealApiContractTest {
         val owners = owner.studioSettings().engines!!.list.map { it.id }
         assertEquals(listOf("replicate", "runpod"), owners)
         expectCode("upscale_unavailable") { owner.upscale("t_j1", "2k") }
+    }
+
+    /** Model tools (plans/api.md "Model tools") on the real server with simulated images: Enhance, Dress up, review, apply, archive. */
+    @Test fun modelTools(): Unit = runBlocking {
+        val owner = HttpMuseApi(base)
+        owner.setToken(owner.signIn(SignInRequest("jen@studio.com", "x")).token)
+        val demo = owner.listModels().first { it.id == SampleData.DEMO }
+        assertEquals(studio.muse.app.data.Sheet.KEYS, demo.slots.map { it.key })
+        val tools = owner.studioSettings().features.tools!!
+        assertEquals(listOf("Option A", "Option B", "Both"), tools.dressUp.options.map { it.label })
+        val est = owner.enhanceEstimate(demo.id, studio.muse.app.data.EnhanceRequest())
+        assertEquals(7, est.images); assertEquals("7 images · about \$0.30", est.label)
+        var run = owner.startEnhance(demo.id, studio.muse.app.data.EnhanceRequest(upscale = "off"))
+        val deadline = System.currentTimeMillis() + 20_000
+        while (run.state == "running") { check(System.currentTimeMillis() < deadline); kotlinx.coroutines.delay(100); run = owner.toolRun(run.id) }
+        assertEquals("review", run.state)
+        run = owner.decideTool(run.id, "face", studio.muse.app.data.DecideRequest("keep"))
+        val applied = owner.applyTool(run.id)
+        assertEquals("applied", applied.run.state)
+        assertEquals(1, owner.sheetVersions(demo.id).size)
+        var dress = owner.startDressUp(demo.id, studio.muse.app.data.DressUpRequest(studio.muse.app.data.ImageRef.asset("c_front"), "Silver night", "both"))
+        while (dress.state == "running") { check(System.currentTimeMillis() < deadline + 20_000); kotlinx.coroutines.delay(100); dress = owner.toolRun(dress.id) }
+        assertEquals(listOf("a", "b"), dress.engines)
+        owner.pickTool(dress.id, "b")
+        val outfit = owner.applyTool(dress.id).outfit!!
+        assertEquals("dressup", outfit.mode); assertEquals(3, outfit.faces!!.size)
+        // Image models: the owner sees six steps (simulated server: no catalog).
+        assertEquals(studio.muse.app.data.Sheet.STEPS, owner.imageModels().steps.map { it.step })
+        // Archive: hidden from the list, listed as archived, back again.
+        assertTrue(owner.archiveModel(SampleData.NOOR, true).archived)
+        assertTrue(owner.listModels().none { it.id == SampleData.NOOR })
+        assertEquals(listOf(SampleData.NOOR), owner.archivedModels().map { it.id })
+        expectCode("model_archived") { owner.startEnhance(SampleData.NOOR, studio.muse.app.data.EnhanceRequest()) }
+        owner.archiveModel(SampleData.NOOR, false)
+        assertTrue(owner.listModels().any { it.id == SampleData.NOOR })
     }
 }

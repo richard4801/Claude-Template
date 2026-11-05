@@ -101,7 +101,7 @@ fun OutfitScreen() {
     val img = PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
     val pickOne = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u -> if (u != null) vm.addImages(listOf(u)) }
     val pickFour = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(4)) { us -> if (us.isNotEmpty()) vm.addImages(us) }
-    val name = s.model?.name?.substringBefore(' ') ?: "Sienna"
+    val name = s.model?.name?.substringBefore(' ') ?: "Her"
     ScreenBox {
         Column(Modifier.fillMaxSize()) {
             TopBar("New outfit", onBack = { nav.back() })
@@ -131,6 +131,7 @@ fun OutfitScreen() {
                     }
                 }
                 Tiny("Plain, unbranded clothes work best. Visible logos carry into the video.")
+                Opt("Dress up the whole character sheet", "One outfit photo · all 7 sheet photos remade wearing it, saved as a new outfit", icon = "outfit", onClick = { nav.go(studio.muse.app.ui.Routes.DRESSUP) })
             }
         }
         Dock {

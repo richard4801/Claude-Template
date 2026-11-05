@@ -16,7 +16,7 @@ import studio.muse.app.ui.screens.statusLine
 class MemberTextTest {
     private val hardware = Regex("(?i)gpu|runpod|replicate|\\bh3\\b|\\blite\\b|steps?\\b|warm|start-up|h100|viggle")
     private fun job(phase: String, state: String = "running", queue: Int? = null, left: Double = 0.0, error: String? = null, refunded: Double = 0.0) =
-        Job("j", "Dance", SampleData.SIENNA, "Sienna Vale", SampleData.GREEN, JobRequest("Dance", SampleData.SIENNA, SampleData.GREEN, SampleData.SAMPLE_CLIP),
+        Job("j", "Dance", SampleData.DEMO, "Demo model", SampleData.GREEN, JobRequest("Dance", SampleData.DEMO, SampleData.GREEN, SampleData.SAMPLE_CLIP),
             state, 0.0, phase = phase, secondsLeft = left, totalSeconds = 600.0, cost = 0.14, queuePosition = queue, error = error, refunded = refunded)
 
     @Test fun phasesReadAsOutcomes() {

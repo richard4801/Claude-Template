@@ -14,9 +14,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PromptEngineTest {
-    private val sienna = Identity(
-        name = "Sienna Vale",
-        look = "young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin",
+    private val demo = Identity(
+        name = "Demo model",
+        look = "young woman, shoulder-length dark brown hair, brown eyes, light olive skin",
         neverAdd = listOf("tattoos", "rings"),
     )
     private val outfits = listOf("Green set", "Crystal dress")
@@ -29,7 +29,7 @@ class PromptEngineTest {
         for (c in cases) {
             val input = c.jsonObject["input"]!!.jsonObject
             val spec = ShootSpec(
-                identity = sienna,
+                identity = demo,
                 outfit = OutfitSpec(outfits[input["outfit"]!!.jsonPrimitive.int]),
                 scene = input.str("scene"),
                 camera = CameraSpec(input.str("shot")!!, input["lens"]!!.jsonPrimitive.int, input.str("aperture")!!),
@@ -49,47 +49,47 @@ class PromptEngineTest {
     }
 
     @Test fun emptySlotsAreDropped() {
-        val p = PromptEngine.photoshoot(ShootSpec(sienna, OutfitSpec("Green set"), direction = "   "))
+        val p = PromptEngine.photoshoot(ShootSpec(demo, OutfitSpec("Green set"), direction = "   "))
         assertNull(p[Layer.DIRECTION])
         assertFalse(p.text.contains("Direction"))
         assertFalse(p.text.contains("\n\n"))
     }
 
     @Test fun slotBodyStripsTheLabelLikeThePrototype() {
-        val p = PromptEngine.photoshoot(ShootSpec(sienna, OutfitSpec("Green set")))
-        assertTrue(p.slots.first().body.startsWith("young woman, long wavy"))
+        val p = PromptEngine.photoshoot(ShootSpec(demo, OutfitSpec("Green set")))
+        assertTrue(p.slots.first().body.startsWith("young woman, shoulder-length"))
         assertEquals("medium shot, 35mm lens, f/2.8.", p.slots.first { it.layer == Layer.CAMERA }.body)
     }
 
     @Test fun lensAwareWording() {
-        fun cam(mm: Int) = PromptEngine.photoshoot(ShootSpec(sienna, OutfitSpec("Green set"), camera = CameraSpec("Close", mm, "f/1.4")))[Layer.CAMERA]!!
+        fun cam(mm: Int) = PromptEngine.photoshoot(ShootSpec(demo, OutfitSpec("Green set"), camera = CameraSpec("Close", mm, "f/1.4")))[Layer.CAMERA]!!
         assertTrue(cam(16).endsWith("slight wide-angle distortion."))
         assertTrue(cam(85).endsWith("compressed background, creamy bokeh."))
         assertEquals("Camera: close shot, 50mm lens, f/1.4.", cam(50))
     }
 
     @Test fun directionCannotAddNeverAddItems() {
-        val (clean, removed) = PromptEngine.sanitizeDirection("laughing mid-step, wearing a gold ring, holding an iced coffee", sienna)
+        val (clean, removed) = PromptEngine.sanitizeDirection("laughing mid-step, wearing a gold ring, holding an iced coffee", demo)
         assertEquals("laughing mid-step, holding an iced coffee", clean)
         assertEquals(listOf("wearing a gold ring"), removed)
-        val p = PromptEngine.photoshoot(ShootSpec(sienna, OutfitSpec("Green set"), direction = "small tattoo on her wrist, smiling"))
+        val p = PromptEngine.photoshoot(ShootSpec(demo, OutfitSpec("Green set"), direction = "small tattoo on her wrist, smiling"))
         assertEquals("Direction: smiling", p[Layer.DIRECTION])
         assertEquals(listOf("small tattoo on her wrist"), p.removed)
     }
 
     @Test fun directionCannotOverrideIdentity() {
-        val (clean, removed) = PromptEngine.sanitizeDirection("blonde hair turned platinum, blue eyes, hair blowing in the wind", sienna)
+        val (clean, removed) = PromptEngine.sanitizeDirection("blonde hair turned platinum, blue eyes, hair blowing in the wind", demo)
         assertEquals("hair blowing in the wind", clean)
         assertEquals(2, removed.size)
     }
 
     @Test fun neverListMergesGlobalDefaultsWithoutDuplicates() {
-        val id = sienna.copy(neverAdd = listOf("tattoos", "Logos", "chokers"))
+        val id = demo.copy(neverAdd = listOf("tattoos", "Logos", "chokers"))
         assertEquals(listOf("tattoos", "Logos", "chokers", "extra fingers", "warped jewellery"), PromptEngine.neverList(id))
     }
 
     @Test fun outfitSetUsesOneSeedForAllFourAngles() {
-        val set = PromptEngine.outfitSet(sienna, OutfitSpec("Cream knit + jeans", "Cream cable-knit sweater, light-wash straight jeans, white sneakers", OutfitSource.DESCRIBED))
+        val set = PromptEngine.outfitSet(demo, OutfitSpec("Cream knit + jeans", "Cream cable-knit sweater, light-wash straight jeans, white sneakers", OutfitSource.DESCRIBED))
         assertEquals(4, set.size)
         assertEquals(1, set.map { it.seed }.toSet().size)
         assertTrue(set[0][Layer.OUTFIT]!!.startsWith("Wearing: Cream cable-knit sweater"))
@@ -98,7 +98,7 @@ class PromptEngineTest {
     }
 
     @Test fun characterSheetShotHasTaskAndNoScene() {
-        val p = PromptEngine.characterSheetShot(sienna, SheetAngle.FACE_PROFILE)
+        val p = PromptEngine.characterSheetShot(demo, SheetAngle.FACE_PROFILE)
         assertEquals(listOf(Layer.IDENTITY, Layer.TASK, Layer.STYLE, Layer.NEGATIVE), p.slots.map { it.layer })
         assertTrue(p[Layer.TASK]!!.contains("plain light-grey studio background"))
         assertTrue(p[Layer.TASK]!!.contains("side profile"))
@@ -106,7 +106,7 @@ class PromptEngineTest {
 
     @Test fun videoSwapUsesTheStructuredH3FormatAndRemovesPerformerTattoos() {
         val v = PromptEngine.videoSwap(
-            VideoSwapSpec(sienna, OutfitSpec("Green set"), SourcePerformer("the young woman with long red hair", tattoos = true, rings = true, setting = "a living room")),
+            VideoSwapSpec(demo, OutfitSpec("Green set"), SourcePerformer("the young woman with long red hair", tattoos = true, rings = true, setting = "a living room")),
         )
         val t = v.text
         assertTrue(t.startsWith("subject_definitions:\n<Subject 1> is the young woman with long red hair with tattoos and rings in <Video 1>"))
@@ -120,7 +120,7 @@ class PromptEngineTest {
     }
 
     @Test fun videoSwapWithoutAudioOrBackground() {
-        val v = PromptEngine.videoSwap(VideoSwapSpec(sienna.copy(referenceCount = 3), OutfitSpec("Crystal dress"), keepAudio = false, keepBackground = false, backgroundMotion = "subtly alive"))
+        val v = PromptEngine.videoSwap(VideoSwapSpec(demo.copy(referenceCount = 3), OutfitSpec("Crystal dress"), keepAudio = false, keepBackground = false, backgroundMotion = "subtly alive"))
         assertFalse(v.text.contains("<Audio 1> is the synchronized"))
         assertTrue(v.text.contains("<Audio 1>: replaced"))
         assertTrue(v.text.contains("(subtly alive)"))
@@ -129,32 +129,32 @@ class PromptEngineTest {
     }
 
     @Test fun lockLookGivesAStableSeed() {
-        val a = PromptEngine.photoshoot(ShootSpec(sienna, OutfitSpec("Green set"), lockSeed = true))
-        val b = PromptEngine.photoshoot(ShootSpec(sienna, OutfitSpec("Crystal dress"), lockSeed = true))
+        val a = PromptEngine.photoshoot(ShootSpec(demo, OutfitSpec("Green set"), lockSeed = true))
+        val b = PromptEngine.photoshoot(ShootSpec(demo, OutfitSpec("Crystal dress"), lockSeed = true))
         assertEquals(a.seed, b.seed)
-        assertNull(PromptEngine.photoshoot(ShootSpec(sienna, OutfitSpec("Green set"))).seed)
+        assertNull(PromptEngine.photoshoot(ShootSpec(demo, OutfitSpec("Green set"))).seed)
     }
 
     @Test fun loraTokenUsesTheFirstNameAndVersion() {
-        assertEquals("sienna_v1", LoraToken.of("Sienna Vale", 1))
+        assertEquals("demo_v1", LoraToken.of("Demo model", 1))
         assertEquals("noor_v3", LoraToken.of("  Noor Ellis", 3))
     }
 
     /** prototype features.js: the identity layer names the LoRA when it's on. */
     @Test fun identityLayerAddsThePhotoLoraWhenOn() {
-        val on = PromptEngine.photoshoot(ShootSpec(sienna.copy(lora = LoraToken.of("Sienna Vale", 2)), OutfitSpec("Green set")))
-        assertTrue(on[Layer.IDENTITY]!!.endsWith("Identity from 6 locked reference images + LoRA sienna_v2 (photo)."))
-        val off = PromptEngine.photoshoot(ShootSpec(sienna, OutfitSpec("Green set")))
+        val on = PromptEngine.photoshoot(ShootSpec(demo.copy(lora = LoraToken.of("Demo model", 2)), OutfitSpec("Green set")))
+        assertTrue(on[Layer.IDENTITY]!!.endsWith("Identity from 6 locked reference images + LoRA demo_v2 (photo)."))
+        val off = PromptEngine.photoshoot(ShootSpec(demo, OutfitSpec("Green set")))
         assertTrue(off[Layer.IDENTITY]!!.endsWith("Identity from 6 locked reference images."))
         assertFalse(off.text.contains("LoRA"))
-        val sheet = PromptEngine.characterSheetShot(sienna.copy(lora = "sienna_v1"), SheetAngle.BODY_FRONT)
-        assertTrue(sheet[Layer.IDENTITY]!!.contains("+ LoRA sienna_v1 (photo)"))
+        val sheet = PromptEngine.characterSheetShot(demo.copy(lora = "demo_v1"), SheetAngle.BODY_FRONT)
+        assertTrue(sheet[Layer.IDENTITY]!!.contains("+ LoRA demo_v1 (photo)"))
     }
 
     @Test fun h3PromptAddsTheVideoLoraWhenOn() {
-        val on = PromptEngine.videoSwap(VideoSwapSpec(sienna.copy(lora = "sienna_v1"), OutfitSpec("Green set"))).text
-        assertTrue(on, on.contains("<Image 6> (body, back), with LoRA sienna_v1 video.\n<Video 1>"))
+        val on = PromptEngine.videoSwap(VideoSwapSpec(demo.copy(lora = "demo_v1"), OutfitSpec("Green set"))).text
+        assertTrue(on, on.contains("<Image 6> (body, back), with LoRA demo_v1 video.\n<Video 1>"))
         assertFalse(on.contains("(photo)"))
-        assertFalse(PromptEngine.videoSwap(VideoSwapSpec(sienna, OutfitSpec("Green set"))).text.contains("LoRA"))
+        assertFalse(PromptEngine.videoSwap(VideoSwapSpec(demo, OutfitSpec("Green set"))).text.contains("LoRA"))
     }
 }

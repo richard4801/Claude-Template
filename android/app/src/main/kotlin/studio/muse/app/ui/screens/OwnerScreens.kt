@@ -438,6 +438,11 @@ private fun EnginesSection(vm: OwnerViewModel, st: StudioSettings, s: OwnerState
             }
         }
     }
+    val navX = LocalNav.current
+    ListGroup {
+        Li("spark", "Image models", sub = "Any Replicate model for new shots, edits, Enhance and Dress up", onClick = { navX.go(Routes.IMAGE_MODELS) }) { Ic("chev", 14.dp) }
+        Li("user", "Archived models", sub = "Hidden models · restore any time", onClick = { navX.go(Routes.ARCHIVED) }) { Ic("chev", 14.dp) }
+    }
     Lbl("Add-on engine (Edit, Fast · beta, Upscale)")
     WarmSwitchRow(c, studio.warm)
     Tiny("Turns off after ${st.engines?.keepReady?.idleMinutes ?: st.warmIdleMinutes} min without renders, and after ${(st.engines?.keepReady?.maxMinutes ?: st.warmMaxMinutes) / 60.0} h at most (Keep ready extends it once).".replace(".0 h", " h"))

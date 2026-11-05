@@ -15,7 +15,7 @@ enum class Layer(val key: String) {
 
 /**
  * Who the model is. [look] is the written look; references are the locked character-sheet images.
- * [lora] is the Identity LoRA trigger token ("sienna_v1") when one is trained and switched on (plans/lora-training.md);
+ * [lora] is the Identity LoRA trigger token ("demo_v1") when one is trained and switched on (plans/lora-training.md);
  * null means references only.
  */
 data class Identity(
@@ -26,7 +26,7 @@ data class Identity(
     val lora: String? = null,
 )
 
-/** Identity LoRA naming: first name, lower case, plus the version ("sienna_v2"). */
+/** Identity LoRA naming: first name, lower case, plus the version ("demo_v2"). */
 object LoraToken {
     fun of(modelName: String, version: Int): String =
         modelName.trim().split(Regex("\\s+")).first().lowercase().filter { it.isLetterOrDigit() }.ifEmpty { "model" } + "_v$version"
@@ -109,17 +109,20 @@ data class VideoSwapSpec(
     val direction: String? = null,
 )
 
-/** Character-sheet angles (6 slots). */
+/** Character-sheet angles (7 slots; FACE_TQ added 2026-11-04 and kept last so the original order stays). */
 enum class SheetAngle(val key: String, val label: String, val framing: String) {
     FACE_FRONT("face", "Face · front", "head-and-shoulders, facing the camera"),
     FACE_PROFILE("profile", "Face · profile", "head-and-shoulders, side profile"),
     BODY_FRONT("front", "Body · front", "full body, facing the camera"),
     BODY_TQ("tq", "Body · ¾", "full body, three-quarter view"),
     BODY_SIDE("side", "Body · side", "full body, side view"),
-    BODY_BACK("back", "Body · back", "full body, from behind");
+    BODY_BACK("back", "Body · back", "full body, from behind"),
+    FACE_TQ("faceTq", "Face · ¾", "head-and-shoulders, turned three-quarters");
 
     companion object {
         fun fromKey(k: String): SheetAngle? = entries.firstOrNull { it.key == k }
+        /** The order the apps show them: the three face close-ups, then the four full-body angles. */
+        val DISPLAY = listOf(FACE_FRONT, FACE_TQ, FACE_PROFILE, BODY_FRONT, BODY_TQ, BODY_SIDE, BODY_BACK)
     }
 }
 
@@ -181,7 +184,7 @@ object PromptEngine {
         }
     }
 
-    /** The identity layer. With a LoRA on it reads "... 6 locked reference images + LoRA sienna_v1 (photo)." (prototype features.js). */
+    /** The identity layer. With a LoRA on it reads "... 6 locked reference images + LoRA demo_v1 (photo)." (prototype features.js). */
     private fun identitySlot(id: Identity) =
         PromptSlot(Layer.IDENTITY, "${id.name}: ${id.look}. Identity from ${id.referenceCount} locked reference images${id.lora?.let { " + LoRA $it (photo)" } ?: ""}.")
 

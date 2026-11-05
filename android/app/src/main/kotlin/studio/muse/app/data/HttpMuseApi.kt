@@ -109,6 +109,28 @@ interface MuseService {
     @GET("v1/posts") suspend fun posts(@Query("state") state: String?): List<Post>
     @POST("v1/posts") suspend fun createPost(@Body r: CreatePostRequest): Post
     @DELETE("v1/posts/{id}") suspend fun deletePost(@Path("id") id: String)
+    // Model tools (plans/api.md "Model tools")
+    @GET("v1/image-models") suspend fun imageModels(): StepModels
+    @GET("v1/image-models/catalog") suspend fun imageCatalog(@Query("step") step: String, @Query("q") q: String?, @Query("collection") collection: String?): CatalogPage
+    @GET("v1/image-models/model") suspend fun imageModel(@Query("id") id: String, @Query("step") step: String): ModelDetail
+    @PUT("v1/image-models/{step}") suspend fun setImageModel(@Path("step") step: String, @Body r: SetStepModelRequest): StepModel
+    @DELETE("v1/image-models/{step}") suspend fun resetImageModel(@Path("step") step: String): StepModel
+    @POST("v1/models/{id}/enhance/estimate") suspend fun enhanceEstimate(@Path("id") id: String, @Body r: EnhanceRequest): ToolEstimate
+    @POST("v1/models/{id}/enhance") suspend fun startEnhance(@Path("id") id: String, @Body r: EnhanceRequest): ToolRun
+    @POST("v1/models/{id}/dress-up/estimate") suspend fun dressUpEstimate(@Path("id") id: String, @Body r: DressUpRequest): ToolEstimate
+    @POST("v1/models/{id}/dress-up") suspend fun startDressUp(@Path("id") id: String, @Body r: DressUpRequest): ToolRun
+    @GET("v1/tool-runs") suspend fun toolRuns(@Query("modelId") modelId: String?): List<ToolRun>
+    @GET("v1/tool-runs/{id}") suspend fun toolRun(@Path("id") id: String): ToolRun
+    @PATCH("v1/tool-runs/{id}/items/{slot}") suspend fun decideTool(@Path("id") id: String, @Path("slot") slot: String, @Body r: DecideRequest): ToolRun
+    @POST("v1/tool-runs/{id}/pick") suspend fun pickTool(@Path("id") id: String, @Body r: PickRequest): ToolRun
+    @POST("v1/tool-runs/{id}/items/{slot}/retry") suspend fun retryTool(@Path("id") id: String, @Path("slot") slot: String, @Body r: RetryRequest): ToolRun
+    @POST("v1/tool-runs/{id}/apply") suspend fun applyTool(@Path("id") id: String, @Body r: ApplyRequest): ApplyResponse
+    @DELETE("v1/tool-runs/{id}") suspend fun discardTool(@Path("id") id: String): retrofit2.Response<Unit>
+    @GET("v1/models/{id}/sheet-versions") suspend fun sheetVersions(@Path("id") id: String): List<SheetVersion>
+    @POST("v1/models/{id}/sheet-versions/{vid}/restore") suspend fun restoreSheet(@Path("id") id: String, @Path("vid") vid: String): Model
+    @POST("v1/models/{id}/archive") suspend fun archiveModel(@Path("id") id: String): Model
+    @POST("v1/models/{id}/unarchive") suspend fun unarchiveModel(@Path("id") id: String): Model
+    @GET("v1/models") suspend fun archivedModels(@Query("archived") archived: Boolean = true): List<Model>
 }
 
 /**
@@ -270,6 +292,26 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun setWarmGpu(req: WarmRequest) = call { setWarmGpu(req) }
     override suspend fun updateModel(modelId: String, req: UpdateModelRequest) = call { updateModel(modelId, req) }.abs()
     override suspend fun deleteModel(modelId: String) = call { deleteModel(modelId) }
+    override suspend fun imageModels() = call { imageModels() }
+    override suspend fun imageCatalog(step: String, q: String?, collection: String?) = call { imageCatalog(step, q?.ifBlank { null }, collection?.ifBlank { null }) }
+    override suspend fun imageModel(id: String, step: String) = call { imageModel(id, step) }
+    override suspend fun setImageModel(step: String, req: SetStepModelRequest) = call { setImageModel(step, req) }
+    override suspend fun resetImageModel(step: String) = call { resetImageModel(step) }
+    override suspend fun enhanceEstimate(modelId: String, req: EnhanceRequest) = call { enhanceEstimate(modelId, req) }
+    override suspend fun startEnhance(modelId: String, req: EnhanceRequest) = call { startEnhance(modelId, req) }.abs()
+    override suspend fun dressUpEstimate(modelId: String, req: DressUpRequest) = call { dressUpEstimate(modelId, req) }
+    override suspend fun startDressUp(modelId: String, req: DressUpRequest) = call { startDressUp(modelId, req) }.abs()
+    override suspend fun toolRuns(modelId: String?) = call { toolRuns(modelId) }.map { it.abs() }
+    override suspend fun toolRun(id: String) = call { toolRun(id) }.abs()
+    override suspend fun decideTool(id: String, slot: String, req: DecideRequest) = call { decideTool(id, slot, req) }.abs()
+    override suspend fun pickTool(id: String, pick: String) = call { pickTool(id, PickRequest(pick)) }.abs()
+    override suspend fun retryTool(id: String, slot: String, engine: String?) = call { retryTool(id, slot, RetryRequest(engine)) }.abs()
+    override suspend fun applyTool(id: String, name: String?) = call { applyTool(id, ApplyRequest(name)) }.let { r -> r.copy(run = r.run.abs(), model = r.model.abs(), outfit = r.outfit?.abs()) }
+    override suspend fun discardTool(id: String) { call { discardTool(id) } }
+    override suspend fun sheetVersions(modelId: String) = call { sheetVersions(modelId) }.map { it.abs() }
+    override suspend fun restoreSheet(modelId: String, versionId: String) = call { restoreSheet(modelId, versionId) }.abs()
+    override suspend fun archiveModel(modelId: String, archived: Boolean) = call { if (archived) archiveModel(modelId) else unarchiveModel(modelId) }.abs()
+    override suspend fun archivedModels() = call { archivedModels() }.map { it.abs() }
     override suspend fun runQueue() = call { runQueue() }.map { it.abs() }
     override suspend fun lora(modelId: String) = call { lora(modelId) }.abs()
     override suspend fun buildLoraSet(modelId: String) = call { buildLoraSet(modelId) }.abs()
@@ -289,7 +331,10 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     private fun Lora.abs() = copy(candidates = candidates.map { it.copy(image = it.image.abs()) })
     private fun Post.abs() = copy(thumb = thumb?.abs())
     private fun Model.abs() = copy(slots = slots.map { it.copy(image = it.image?.abs()) })
-    private fun Outfit.abs() = copy(angles = angles.map { it?.abs() })
+    private fun Outfit.abs() = copy(angles = angles.map { it?.abs() }, faces = faces?.map { it?.abs() })
+    private fun ToolRun.abs() = copy(items = items.map { i -> i.copy(before = i.before?.abs(), results = ToolResults(i.results.a?.abs(), i.results.b?.abs())) },
+        options = options.copy(outfitImage = options.outfitImage?.abs()))
+    private fun SheetVersion.abs() = copy(slots = slots.map { it.copy(image = it.image?.abs()) })
     private fun Job.abs() = copy(thumb = thumb?.abs())
     private fun Take.abs() = copy(thumb = thumb?.abs(), videoUrl = videoUrl?.absUrl())
     private fun Template.abs() = copy(cover = cover?.abs(), recent = recent?.map { it.copy(thumb = it.thumb?.abs()) })
@@ -300,7 +345,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         val source = EventSources.createFactory(sseClient).newEventSource(req, object : EventSourceListener() {
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
                 runCatching { json.decodeFromString(ApiEvent.serializer(), data) }.onSuccess { e ->
-                    trySend(e.copy(lora = e.lora?.abs(), post = e.post?.abs(), job = e.job?.abs(), model = e.model?.abs(), outfit = e.outfit?.abs(), takes = e.takes.map { it.abs() }))
+                    trySend(e.copy(lora = e.lora?.abs(), post = e.post?.abs(), job = e.job?.abs(), model = e.model?.abs(), outfit = e.outfit?.abs(), takes = e.takes.map { it.abs() }, tool = e.tool?.abs()))
                 }
             }
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {

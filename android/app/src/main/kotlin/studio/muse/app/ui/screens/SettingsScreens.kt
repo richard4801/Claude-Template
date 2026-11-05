@@ -70,7 +70,7 @@ import studio.muse.core.RenderSpec
 
 data class SettingsState(
     val prefs: AppPrefs = AppPrefs(), val balance: Balance = Balance(0.0, 0.0), val videos: Int = 0, val failNext: Boolean = false,
-    val modelName: String = "Sienna", val connected: Int = 0, val scheduled: Int = 0, val wallet: studio.muse.app.data.Wallet? = null,
+    val modelName: String = "Demo model", val connected: Int = 0, val scheduled: Int = 0, val wallet: studio.muse.app.data.Wallet? = null,
 )
 
 class SettingsViewModel(val c: AppContainer) : ViewModel() {

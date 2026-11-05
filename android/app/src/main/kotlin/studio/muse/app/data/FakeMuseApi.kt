@@ -68,7 +68,7 @@ class FakeMuseApi(
         return AuthResponse("fake-token", User("u1", req.studioName.ifBlank { "My Studio" }, req.email, "owner"))
     }
 
-    override suspend fun listModels() = lock.withLock { models.toList() }
+    override suspend fun listModels() = lock.withLock { models.filter { !it.archived } }
 
     override suspend fun createModel(req: CreateModelRequest): Model = lock.withLock {
         val m = Model("m_" + uid(), req.name.ifBlank { "New model" }, req.age.coerceIn(18, 70), req.niche, slots = SampleData.SLOT_SAMPLE.keys.map { SheetSlot(it) })
@@ -108,7 +108,7 @@ class FakeMuseApi(
         return FillAnglesResponse(busy, cost)
     }
 
-    override suspend fun listOutfits() = lock.withLock { outfits.toList() }
+    override suspend fun listOutfits() = lock.withLock { outfits.filter { o -> models.none { it.id == o.modelId && it.archived } } }
 
     override suspend fun createOutfit(req: CreateOutfitRequest): Outfit {
         val cost = if (req.mode == "own") 0.0 else PhotoPricing.outfitSet(photoPrices)
@@ -582,7 +582,7 @@ class FakeMuseApi(
     // ---- the demo studio's owner side: members, tokens, invites, settings (in memory, like the real API's rules)
     private val members = SampleData.members(now()).toMutableList()
     private val invites = mutableListOf<InviteInfo>()
-    private var studio = StudioSettings(features = StudioFeatures(replicate = true, video = VideoFeatures.DEFAULT, photo = PhotoFeatures()),
+    private var studio = StudioSettings(features = StudioFeatures(replicate = true, video = VideoFeatures.DEFAULT, photo = PhotoFeatures(), tools = FakeCatalog.ownerTools()),
         engines = Engines(listOf(EngineStatus("replicate", "Replicate", "Draft, Standard and HD video · photos", keySet = false, status = "simulated"),
             EngineStatus("runpod", "RunPod", "Edit, Fast · beta, Upscale", keySet = false, status = "simulated"))))
     private val photoPrices get() = (studio.features.photo ?: PhotoFeatures()).prices
@@ -719,6 +719,190 @@ class FakeMuseApi(
         jobs.removeAll { it.id == job.id }
         jobs += job
     }
+
+    // ---- Model tools (demo): the default models and a small catalog, Enhance and Dress up that return the sheet's own
+    // stills (no engine), charged at the estimate from the studio balance.
+    private val stepModels = mutableMapOf<String, String>()
+    private val toolRuns = mutableListOf<ToolRun>()
+    private val sheetVersions = mutableMapOf<String, MutableList<SheetVersion>>()
+
+    override suspend fun imageModels(): StepModels = lock.withLock { StepModels(Sheet.STEPS.map { stepView(it) }) }
+    private fun stepView(step: String): StepModel {
+        val def = FakeCatalog.DEFAULTS.getValue(step)
+        val id = stepModels[step] ?: def
+        val m = FakeCatalog.model(id)
+        return StepModel(step, FakeCatalog.STEP_LABELS.getValue(step), id, def, id == def, m?.name ?: id, m?.official ?: true, m?.description ?: "", m?.price,
+            m?.priceLine ?: "price unknown")
+    }
+    override suspend fun imageCatalog(step: String, q: String?, collection: String?): CatalogPage {
+        val list = FakeCatalog.forStep(step).filter { q.isNullOrBlank() || it.id.contains(q, true) || it.description.contains(q, true) }
+        return CatalogPage(step, FakeCatalog.STEP_LABELS[step] ?: step, FakeCatalog.collections(step), list, now())
+    }
+    override suspend fun imageModel(id: String, step: String): ModelDetail {
+        val m = FakeCatalog.forStep(step).firstOrNull { it.id == id } ?: throw ApiException("not_found", "Replicate has no model $id")
+        return ModelDetail(m.id, m.name, m.owner, m.description, m.runCount, m.official, m.priceLine, m.compatible, m.reasons, m.warnings)
+    }
+    override suspend fun setImageModel(step: String, req: SetStepModelRequest): StepModel = lock.withLock {
+        val m = FakeCatalog.forStep(step).firstOrNull { it.id == req.model } ?: throw ApiException("not_found", "Replicate has no model ${req.model}")
+        if (m.compatible == false) throw ApiException("model_incompatible", "This model can't do ${FakeCatalog.STEP_LABELS[step]}: ${m.reasons.joinToString()}")
+        stepModels[step] = req.model
+        stepView(step)
+    }
+    override suspend fun resetImageModel(step: String): StepModel = lock.withLock { stepModels.remove(step); stepView(step) }
+
+    private fun modelFor(step: String, over: Map<String, String>?) = over?.get(step) ?: stepModels[step] ?: FakeCatalog.DEFAULTS.getValue(step)
+    private fun filledSlots(m: Model, only: List<String>? = null) = Sheet.SLOTS.mapNotNull { si ->
+        m.slot(si.key)?.image?.takeIf { only == null || si.key in only }?.let { si to it }
+    }
+    private fun enhancePer(req: EnhanceRequest): Double {
+        var v = 0.0
+        if (req.realism != "off") v += FakeCatalog.estimate(modelFor("realism", req.models), 1.0, 0.79)
+        if (req.upscale != "off") v += FakeCatalog.estimate(modelFor("upscale", req.models), 4.0, 0.79, if (req.upscale == "4x") 4.0 else 2.0)
+        return v
+    }
+    private fun dressEngines(e: String) = when (e) { "both" -> listOf("a", "b"); "b" -> listOf("b"); else -> listOf("a") }
+    private fun dressTotal(n: Int, engines: List<String>, over: Map<String, String>?) = engines.sumOf { e ->
+        val model = modelFor(if (e == "a") "dressA" else "dressB", over)
+        (0 until n).sumOf { i -> FakeCatalog.estimate(model, 1.0, 0.79 * if (i == 0) 2 else 3) }
+    }
+    private fun estimateLabel(n: Int, est: Double, options: Int = 1) = "$n image${if (n == 1) "" else "s"}${if (options > 1) " · $options options" else ""} · ${PhotoPricing.about(est)}"
+
+    override suspend fun enhanceEstimate(modelId: String, req: EnhanceRequest): ToolEstimate = lock.withLock {
+        val n = filledSlots(model(modelId), req.slots).size
+        val per = enhancePer(req)
+        ToolEstimate(n, per * n, estimateLabel(n, per * n), per)
+    }
+    override suspend fun dressUpEstimate(modelId: String, req: DressUpRequest): ToolEstimate = lock.withLock {
+        val n = filledSlots(model(modelId)).size
+        val engines = dressEngines(req.engine)
+        val est = dressTotal(n, engines, req.models)
+        ToolEstimate(n, est, estimateLabel(n, est, engines.size))
+    }
+    private fun archivedCheck(m: Model) { if (m.archived) throw ApiException("model_archived", "This model is archived · restore her in Settings → Archived models") }
+
+    override suspend fun startEnhance(modelId: String, req: EnhanceRequest): ToolRun {
+        if (req.realism == "off" && req.upscale == "off") throw ApiException("bad_request", "Turn on realism or upscale")
+        val run = lock.withLock {
+            val m = model(modelId); archivedCheck(m)
+            val slots = filledSlots(m, req.slots)
+            if (slots.isEmpty()) throw ApiException("bad_request", "Add photos to the character sheet first")
+            val est = enhancePer(req) * slots.size
+            if (est > balance.balance) throw ApiException("insufficient_balance", ErrorText.NOT_ENOUGH_STUDIO)
+            charge(est)
+            val models = buildMap { if (req.realism != "off") put("realism", modelFor("realism", req.models)); if (req.upscale != "off") put("upscale", modelFor("upscale", req.models)) }
+            ToolRun("tool_" + uid(), "enhance", modelId, "running", ToolOptions(realism = req.realism, upscale = req.upscale), listOf("a"),
+                slots.map { (si, img) -> ToolItem(si.key, si.label, img) }, est, 0.0, 0.0, "Enhancing · 1 of ${slots.size}", createdAt = now(), models = models).also { toolRuns.add(0, it) }
+        }
+        events.tryEmit(ApiEvent("balance", balance = balance))
+        simulate(run.id)
+        return run
+    }
+    override suspend fun startDressUp(modelId: String, req: DressUpRequest): ToolRun {
+        val image = req.outfitImage ?: throw ApiException("bad_request", "Add the outfit photo")
+        val run = lock.withLock {
+            val m = model(modelId); archivedCheck(m)
+            val order = listOf("front", "tq", "side", "back", "face", "faceTq", "profile")
+            val slots = filledSlots(m).sortedBy { order.indexOf(it.first.key) }
+            if (slots.isEmpty()) throw ApiException("bad_request", "Add photos to the character sheet first")
+            val engines = dressEngines(req.engine)
+            val est = dressTotal(slots.size, engines, req.models)
+            if (est > balance.balance) throw ApiException("insufficient_balance", ErrorText.NOT_ENOUGH_STUDIO)
+            charge(est)
+            val models = engines.associate { e -> (if (e == "a") "dressA" else "dressB").let { it to modelFor(it, req.models) } }
+            ToolRun("tool_" + uid(), "dressup", modelId, "running", ToolOptions(engine = req.engine, name = req.name?.ifBlank { null }, outfitImage = image), engines,
+                slots.map { (si, img) -> ToolItem(si.key, si.label, img) }, est, 0.0, 0.0, "Dressing up · 1 of ${slots.size * engines.size}", createdAt = now(), models = models).also { toolRuns.add(0, it) }
+        }
+        events.tryEmit(ApiEvent("balance", balance = balance))
+        simulate(run.id)
+        return run
+    }
+    /** The demo "engine": each image after a moment; the result is the sheet image itself (Option B: the outfit photo for full-body shots). */
+    private fun simulate(id: String) {
+        scope.launch {
+            val r0 = lock.withLock { toolRuns.first { it.id == id } }
+            val per = if (r0.items.isEmpty()) 0.0 else r0.estimate / (r0.items.size * r0.engines.size)
+            for ((i, item) in r0.items.withIndex()) {
+                delay(genDelayMs / 4)
+                val next = lock.withLock {
+                    val r = toolRuns.firstOrNull { it.id == id } ?: return@launch
+                    if (r.state != "running") return@launch
+                    val res = ToolResults(a = item.before, b = if ("b" in r.engines) (if (Sheet.SLOTS.first { it.key == item.slot }.face) item.before else r.options.outfitImage ?: item.before) else null)
+                    val items = r.items.mapIndexed { k, it -> if (k == i) it.copy(state = "done", results = res, cost = per * r.engines.size) else it }
+                    val done = i == r.items.lastIndex
+                    r.copy(items = items, progress = (i + 1) * 100.0 / r.items.size, cost = r.cost + per * r.engines.size, state = if (done) "review" else "running",
+                        phase = if (done) "Ready to review" else "${if (r.kind == "enhance") "Enhancing" else "Dressing up"} · ${i + 2} of ${r.items.size * r.engines.size}",
+                        finishedAt = if (done) now() else null).also { replaceRun(it) }
+                }
+                events.emit(ApiEvent("tool", tool = next))
+            }
+        }
+    }
+    private fun replaceRun(r: ToolRun) { toolRuns[toolRuns.indexOfFirst { it.id == r.id }] = r }
+    private fun run(id: String) = toolRuns.firstOrNull { it.id == id } ?: throw ApiException("not_found", "Run not found")
+    private fun inReview(r: ToolRun) { if (r.state != "review") throw ApiException("bad_request", if (r.state == "running") "Still working · wait for it to finish" else "This run is closed") }
+    private fun update(id: String, f: (ToolRun) -> ToolRun): ToolRun { val r = f(run(id)); replaceRun(r); events.tryEmit(ApiEvent("tool", tool = r)); return r }
+
+    override suspend fun toolRuns(modelId: String?): List<ToolRun> = lock.withLock { toolRuns.filter { modelId == null || it.modelId == modelId }.take(20) }
+    override suspend fun toolRun(id: String): ToolRun = lock.withLock { run(id) }
+    override suspend fun decideTool(id: String, slot: String, req: DecideRequest): ToolRun = lock.withLock {
+        inReview(run(id))
+        update(id) { r -> r.copy(items = r.items.map { if (it.slot != slot) it else if (req.decision == "reject") it.copy(decision = "reject", pick = null)
+            else { val pick = req.pick ?: if (it.results.a != null) "a" else "b"; if (it.results.of(pick) == null) throw ApiException("bad_request", "That option has no image"); it.copy(decision = "keep", pick = pick) } }) }
+    }
+    override suspend fun pickTool(id: String, pick: String): ToolRun = lock.withLock {
+        inReview(run(id))
+        update(id) { r -> r.copy(items = r.items.map { if (it.results.of(pick) != null) it.copy(decision = "keep", pick = pick) else it }) }
+    }
+    override suspend fun retryTool(id: String, slot: String, engine: String?): ToolRun {
+        val r = lock.withLock {
+            inReview(run(id))
+            update(id) { r -> r.copy(items = r.items.map { if (it.slot == slot) it.copy(state = "running", decision = "pending", pick = null) else it }) }
+        }
+        scope.launch {
+            delay(genDelayMs / 2)
+            val next = lock.withLock { update(id) { x -> x.copy(items = x.items.map { if (it.slot == slot) it.copy(state = "done") else it }) } }
+            events.emit(ApiEvent("tool", tool = next))
+        }
+        return r
+    }
+    override suspend fun applyTool(id: String, name: String?): ApplyResponse = lock.withLock {
+        val r = run(id); inReview(r)
+        val kept = r.items.filter { it.decision == "keep" && it.pick != null }.associate { it.slot to it.results.of(it.pick!!)!! }
+        if (kept.isEmpty()) throw ApiException("bad_request", "Keep at least one image")
+        val m = model(r.modelId)
+        if (r.kind == "enhance") {
+            sheetVersions.getOrPut(m.id) { mutableListOf() }.add(0, SheetVersion("sv_" + uid(), now(), "enhance", m.slots))
+            val nm = m.copy(slots = m.slots.map { s -> kept[s.key]?.let { s.copy(image = it, source = "generated", busy = false) } ?: s })
+            replaceModel(nm)
+            val done = update(id) { it.copy(state = "applied", appliedAt = now(), phase = "Saved") }
+            events.tryEmit(ApiEvent("model", model = nm))
+            ApplyResponse(done, nm)
+        } else {
+            val o = Outfit("o_" + uid(), m.id, name?.ifBlank { null } ?: r.options.name ?: "Dressed look", "dressup", "", listOf("front", "tq", "side", "back").map { kept[it] }, "ready",
+                cost = r.cost, faces = listOf("face", "faceTq", "profile").map { kept[it] })
+            outfits += o
+            val nm = m.copy(outfitIds = m.outfitIds + o.id)
+            replaceModel(nm)
+            val done = update(id) { it.copy(state = "applied", appliedAt = now(), phase = "Saved", outfitId = o.id) }
+            events.tryEmit(ApiEvent("outfit", outfit = o)); events.tryEmit(ApiEvent("model", model = nm))
+            ApplyResponse(done, nm, o)
+        }
+    }
+    override suspend fun discardTool(id: String) { lock.withLock { update(id) { it.copy(state = "discarded", phase = "Discarded") } } }
+    override suspend fun sheetVersions(modelId: String): List<SheetVersion> = lock.withLock { sheetVersions[modelId]?.toList() ?: emptyList() }
+    override suspend fun restoreSheet(modelId: String, versionId: String): Model = lock.withLock {
+        val m = model(modelId)
+        val list = sheetVersions.getOrPut(modelId) { mutableListOf() }
+        val v = list.firstOrNull { it.id == versionId } ?: throw ApiException("not_found", "Version not found")
+        list.remove(v); list.add(0, SheetVersion("sv_" + uid(), now(), "restore", m.slots))
+        val nm = m.copy(slots = m.slots.map { s -> v.slots.firstOrNull { it.key == s.key } ?: s })
+        replaceModel(nm); events.tryEmit(ApiEvent("model", model = nm)); nm
+    }
+    override suspend fun archiveModel(modelId: String, archived: Boolean): Model = lock.withLock {
+        val nm = model(modelId).copy(archived = archived, archivedAt = if (archived) now() else null)
+        replaceModel(nm); events.tryEmit(ApiEvent("model", model = nm)); nm
+    }
+    override suspend fun archivedModels(): List<Model> = lock.withLock { models.filter { it.archived } }
 
     // ---- helpers (call under lock) ----
     private fun charge(cost: Double) {

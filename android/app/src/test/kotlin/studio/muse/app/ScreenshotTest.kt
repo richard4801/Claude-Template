@@ -71,6 +71,9 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "warm_confirm", "warm_bar", "warm_starting", "warm_warning",
             // Video options (app clean-up): Render (Draft default, HD) and the Edit add-on (no steps, no start-up), Upscale coming soon on a take.
             "quality_draft", "quality_hd", "quality_edit", "result_upscale",
+            // Model tools (plans/api.md "Model tools"): the owner's image models and catalog picker, Enhance setup and review,
+            // Dress up setup and the Both side-by-side review, archived models.
+            "image_models", "catalog", "enhance_setup", "enhance_review", "dressup_setup", "dressup_review", "archived",
         )
 
         @JvmStatic
@@ -91,21 +94,21 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
         val c = AppContainer(scope, MemoryPrefs(AppPrefs(theme = theme, useFake = !server, token = if (server) null else "t", studioName = "Jenne Studio", role = "owner",
             email = if (server) "" else "jenne@studio.com")), fake, null)
         if (screen == "credit_member") fake.debugWallet = Wallet("u_maya", "member", 1_250, 12.5, 67, 0.67, 0.67, 4.02)
-        // Sienna has TikTok + Instagram linked, one scheduled post and one posted with stats (like the prototype review state).
+        // The demo model has TikTok + Instagram linked, one scheduled post and one posted with stats (like the prototype review state).
         runBlocking {
-            listOf(Platform.TIKTOK, Platform.INSTAGRAM).forEach { fake.debugPutAccount(Account(SampleData.SIENNA, it.id, "@sienna.vale", 0)) }
-            fake.debugPutPost(Post("p1", SampleData.SIENNA, "t_g1", "Living-room dance", ImageRef.asset("g_tq"), listOf("tiktok", "instagram"), "",
+            listOf(Platform.TIKTOK, Platform.INSTAGRAM).forEach { fake.debugPutAccount(Account(SampleData.DEMO, it.id, "@demo.model", 0)) }
+            fake.debugPutPost(Post("p1", SampleData.DEMO, "t_g1", "Living-room dance", ImageRef.asset("g_tq"), listOf("tiktok", "instagram"), "",
                 `when` = PostTime.iso(PostTime.slots().first()), state = "scheduled"))
-            fake.debugPutPost(Post("p2", SampleData.SIENNA, "t_j1", "Kick test", ImageRef.asset("g_front"), listOf("tiktok"), "", state = "posted",
+            fake.debugPutPost(Post("p2", SampleData.DEMO, "t_j1", "Kick test", ImageRef.asset("g_front"), listOf("tiktok"), "", state = "posted",
                 postedAt = System.currentTimeMillis() - 7_200_000, stats = PostStats(1834, 201, 14)))
         }
         val cands = LoraSim.candidates()
         val lora = when (screen) {
-            "lora_gen" -> Lora(SampleData.SIENNA, state = "building")
-            "lora_review" -> Lora(SampleData.SIENNA, state = "review", candidates = cands)
-            "lora_ready_to_train" -> Lora(SampleData.SIENNA, state = "review", candidates = cands)
-            "lora_training" -> LoraSim.parts(40.0).let { (ph, vi) -> Lora(SampleData.SIENNA, state = "training", candidates = cands, progress = 40.0, photo = ph, video = vi) }
-            "lora_done", "profile_lora" -> Lora(SampleData.SIENNA, 1, "ready", candidates = cands, progress = 100.0, trainedOn = 27)
+            "lora_gen" -> Lora(SampleData.DEMO, state = "building")
+            "lora_review" -> Lora(SampleData.DEMO, state = "review", candidates = cands)
+            "lora_ready_to_train" -> Lora(SampleData.DEMO, state = "review", candidates = cands)
+            "lora_training" -> LoraSim.parts(40.0).let { (ph, vi) -> Lora(SampleData.DEMO, state = "training", candidates = cands, progress = 40.0, photo = ph, video = vi) }
+            "lora_done", "profile_lora" -> Lora(SampleData.DEMO, 1, "ready", candidates = cands, progress = 100.0, trainedOn = 27)
             else -> null
         }
         runBlocking {
@@ -151,12 +154,12 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "invite_code" -> c.drafts.lastInvite.value = InviteCreated("MUSE-7KQ2-XW9P-4HTD", "inv1", "maya@studio.com", "member", System.currentTimeMillis() + 14 * 86_400_000L,
                 shareText = "You're invited to MUSE, the AI model studio. 1) Download: https://muse.example/get 2) Sign up with this invite code: MUSE-7KQ2-XW9P-4HTD (email: maya@studio.com). The code works once and expires in 14 days.")
             "queue_waiting" -> runBlocking {
-                val req = JobRequest("Mirror dance", SampleData.SIENNA, SampleData.GREEN, SampleData.SAMPLE_CLIP)
+                val req = JobRequest("Mirror dance", SampleData.DEMO, SampleData.GREEN, SampleData.SAMPLE_CLIP)
                 val total = Pricing.totalSeconds(req.spec())
                 val now = System.currentTimeMillis()
-                fake.debugPut(Job("jw", "Mirror dance", SampleData.SIENNA, "Sienna Vale", SampleData.GREEN, req, "running", 0.0, phase = "Waiting for a GPU", secondsLeft = total,
+                fake.debugPut(Job("jw", "Mirror dance", SampleData.DEMO, "Demo model", SampleData.GREEN, req, "running", 0.0, phase = "Waiting for a GPU", secondsLeft = total,
                     totalSeconds = total, cost = Pricing.totalCost(req.spec()), createdAt = now, thumb = ImageRef.asset("g_front"), queuePosition = 2, etaSeconds = total + 240, warmupCost = 0.03))
-                fake.debugPut(Job("jp", "Kick test", SampleData.SIENNA, "Sienna Vale", SampleData.GREEN, req.copy(title = "Kick test"), "running", 0.0, phase = "Paused", secondsLeft = total,
+                fake.debugPut(Job("jp", "Kick test", SampleData.DEMO, "Demo model", SampleData.GREEN, req.copy(title = "Kick test"), "running", 0.0, phase = "Paused", secondsLeft = total,
                     totalSeconds = total, cost = Pricing.totalCost(req.spec()), createdAt = now - 1000, thumb = ImageRef.asset("g_tq"), blocked = "owner_balance_low"))
             }
             "result_specs" -> runBlocking {
@@ -167,15 +170,46 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
                 fake.debugPutTake(Take("t_up", "take", null, 1, 1, "Kitchen", "Draft", "Draft · 768P", 0.14, 4211, thumb = ImageRef.asset("g_tq"),
                     createdAt = System.currentTimeMillis(), videoUrl = "/uploads/r/j/take_1.mp4", durationSec = 6.4, width = 768, height = 1344))
             }
+            "catalog" -> { c.drafts.catalogStep.value = "upscale"; c.drafts.catalogFor.value = "settings" }
+            "dressup_setup" -> c.drafts.dressUp.value = studio.muse.app.data.DressUpDraft(ImageRef.asset("c_front"), "Silver night", "both")
+            "archived" -> runBlocking { fake.archiveModel(SampleData.NOOR, true) }
             "queue_run" -> runBlocking {
-                val req = JobRequest("Living-room dance", SampleData.SIENNA, SampleData.GREEN, SampleData.SAMPLE_CLIP)
+                val req = JobRequest("Living-room dance", SampleData.DEMO, SampleData.GREEN, SampleData.SAMPLE_CLIP)
                 val total = Pricing.totalSeconds(req.spec())
                 val p = JobClock.progress(req, total * .42)
-                fake.debugPut(Job("jr", "Living-room dance", SampleData.SIENNA, "Sienna Vale", SampleData.GREEN, req, "running", p.progress, p.take, p.step, p.totalSteps,
+                fake.debugPut(Job("jr", "Living-room dance", SampleData.DEMO, "Demo model", SampleData.GREEN, req, "running", p.progress, p.take, p.step, p.totalSteps,
                     p.phase, p.secondsLeft, total, Pricing.totalCost(req.spec()), createdAt = System.currentTimeMillis(), thumb = studio.muse.app.data.ImageRef.asset("g_front")))
             }
         }
+        // Enhance / Dress up review: start a run on the demo engine and let it finish (it returns the sheet's own stills).
+        val toolRun = when (screen) {
+            "enhance_review" -> runBlocking { fake.startEnhance(SampleData.DEMO, studio.muse.app.data.EnhanceRequest()) }
+            "dressup_review" -> runBlocking { fake.startDressUp(SampleData.DEMO, studio.muse.app.data.DressUpRequest(ImageRef.asset("c_front"), "Silver night", "both")) }
+            else -> null
+        }
+        if (toolRun != null) {
+            repeat(40) { idle() }
+            runBlocking {
+                val r = fake.toolRun(toolRun.id)
+                check(r.state == "review") { "run still ${r.state}" }
+                if (screen == "enhance_review") {
+                    fake.decideTool(r.id, "face", studio.muse.app.data.DecideRequest("keep"))
+                    fake.decideTool(r.id, "back", studio.muse.app.data.DecideRequest("reject"))
+                } else {
+                    fake.pickTool(r.id, "a")
+                    fake.decideTool(r.id, "front", studio.muse.app.data.DecideRequest("keep", "b"))
+                }
+                c.repo.putTool(fake.toolRun(r.id))
+            }
+            if (screen == "enhance_review") c.drafts.enhance.value = studio.muse.app.data.EnhanceDraft(runId = toolRun.id)
+            else c.drafts.dressUp.value = studio.muse.app.data.DressUpDraft(ImageRef.asset("c_front"), "Silver night", "both", runId = toolRun.id)
+        }
         val route = when (screen) {
+            "image_models" -> Routes.IMAGE_MODELS
+            "catalog" -> Routes.CATALOG
+            "enhance_setup", "enhance_review" -> Routes.ENHANCE
+            "dressup_setup", "dressup_review" -> Routes.DRESSUP
+            "archived" -> Routes.ARCHIVED
             "shoot_prompt" -> Routes.SHOOT
             "source_bad" -> Routes.SOURCE
             "queue_run" -> Routes.QUEUE
@@ -217,7 +251,7 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
         if (screen == "template_use_prompt") {
             // The prompt view for someone else's template: one locked "Template: …" line, the hidden layers never arrive.
             // (No compose waits here: the canvas animates, so the UI never goes idle with a paused clock.)
-            runBlocking { check(fake.templatePrompt("tpl_maya_walk", studio.muse.app.data.TemplatePromptRequest(SampleData.SIENNA)).text.contains("Template: Golden hour walk")) }
+            runBlocking { check(fake.templatePrompt("tpl_maya_walk", studio.muse.app.data.TemplatePromptRequest(SampleData.DEMO)).text.contains("Template: Golden hour walk")) }
         }
         repeat(2) { idle(); compose.mainClock.advanceTimeBy(400) }
         idle()

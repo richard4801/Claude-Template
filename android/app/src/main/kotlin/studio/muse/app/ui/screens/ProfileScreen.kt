@@ -47,6 +47,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import studio.muse.app.AppContainer
 import studio.muse.app.data.Model
+import kotlinx.coroutines.launch
 import studio.muse.app.data.Outfit
 import studio.muse.app.data.SampleData
 import studio.muse.app.ui.LocalContainer
@@ -68,6 +69,11 @@ class ProfileViewModel(private val c: AppContainer) : ViewModel() {
         ProfileState(model, outfits, outfits.indexOfFirst { it.id == oid }.coerceAtLeast(0), s.lora(model?.id), s.accountsOf(model?.id).size)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, ProfileState())
 
+    /** Owner: archive her (hidden everywhere, nothing deleted; restore in Settings → Engines → Archived models). */
+    fun archive(md: Model, done: () -> Unit) = viewModelScope.launch {
+        if (c.repo.archiveModel(md.id, true) != null) { c.repo.toast("${md.name} archived · restore her in Settings"); done() }
+    }
+
     fun select(i: Int) {
         val o = state.value.outfits
         if (o.isEmpty()) return
@@ -80,6 +86,7 @@ data class ProfileActions(
     val select: (Int) -> Unit = {}, val addOutfit: () -> Unit = {}, val video: () -> Unit = {}, val shoot: () -> Unit = {},
     val back: () -> Unit = {}, val settings: () -> Unit = {}, val sheet: () -> Unit = {}, val menu: Boolean = true,
     val lora: () -> Unit = {}, val accounts: () -> Unit = {},
+    val enhance: () -> Unit = {}, val dressUp: () -> Unit = {}, val archive: (() -> Unit)? = null,
 )
 
 @Composable
@@ -94,6 +101,8 @@ fun ProfileScreen() {
             select = vm::select, addOutfit = { nav.go(Routes.OUTFIT) }, video = { nav.go(Routes.SOURCE) }, shoot = { nav.go(Routes.SHOOT) },
             back = { nav.back() }, settings = { nav.tab(Routes.SETTINGS) }, sheet = { nav.go(Routes.CREATE3) },
             lora = { nav.go(Routes.LORA) }, accounts = { nav.go(Routes.ACCOUNTS) },
+            enhance = { nav.go(Routes.ENHANCE) }, dressUp = { nav.go(Routes.DRESSUP) },
+            archive = if (c.repo.demo || c.prefs.value.owner) ({ s.model?.let { md -> vm.archive(md) { nav.reset(Routes.HOME) } } }) else null,
         ),
     )
 }
@@ -105,7 +114,7 @@ fun sampleProfileState() = ProfileState(SampleData.models().first(), SampleData.
 fun ProfileContent(s: ProfileState, a: ProfileActions) {
     val m = muse
     val model = s.model ?: return ScreenBox {}
-    val menu = if (a.menu) profileMenu(a.sheet, a.addOutfit, a.lora, a.accounts) else emptyList()
+    val menu = if (a.menu) profileMenu(a.sheet, a.addOutfit, a.lora, a.accounts, a.enhance, a.dressUp, a.archive) else emptyList()
     when {
         m.isA -> ProfileA(model, s, a, menu)
         m.isB -> ProfileB(model, s, a, menu)

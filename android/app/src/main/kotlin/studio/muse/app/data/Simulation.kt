@@ -11,39 +11,39 @@ const val DEMO_SPEED = 24.0
 
 /** Seed data, identical to the prototype's state `S` and server/mock/data.js. */
 object SampleData {
-    const val SIENNA = "m_sienna"
+    const val DEMO = "m_demo"
     const val NOOR = "m_noor"
     const val GREEN = "o_green"
     const val CRYSTAL = "o_crystal"
     const val SAMPLE_CLIP = "clip_sample"
     const val BAD_CLIP = "clip_bad"
-    const val SIENNA_LOOK = "young woman, long wavy honey-blonde hair with brown roots, green eyes, light freckles, tanned skin"
+    const val DEMO_LOOK = "young woman, shoulder-length dark brown hair, brown eyes, light olive skin"
 
     /** Slot key → the bundled sample image used for that angle. */
-    val SLOT_SAMPLE = linkedMapOf("face" to "face", "profile" to "profile", "front" to "g_front", "tq" to "g_tq", "side" to "g_side", "back" to "g_back")
+    val SLOT_SAMPLE = linkedMapOf("face" to "face", "profile" to "profile", "front" to "g_front", "tq" to "g_tq", "side" to "g_side", "back" to "g_back", "faceTq" to "c_face")
 
     fun models(): List<Model> = listOf(
         Model(
-            id = SIENNA, name = "Sienna Vale", age = 24, niche = "Fashion", look = SIENNA_LOOK, neverAdd = listOf("tattoos", "rings"),
+            id = DEMO, name = "Demo model", age = 24, niche = "Fashion", look = DEMO_LOOK, neverAdd = listOf("tattoos", "rings"),
             slots = SLOT_SAMPLE.map { (k, img) -> SheetSlot(k, ImageRef.asset(img)) }, outfitIds = listOf(GREEN, CRYSTAL),
         ),
         Model(id = NOOR, name = "Noor Ellis", age = 27, niche = "Beauty", slots = SLOT_SAMPLE.keys.map { SheetSlot(it) }),
     )
 
     fun outfits(): List<Outfit> = listOf(
-        Outfit(GREEN, SIENNA, "Green set", "own", "Dark green cropped tee and drawstring shorts", listOf("g_front", "g_tq", "g_side", "g_back").map(ImageRef::asset)),
-        Outfit(CRYSTAL, SIENNA, "Crystal dress", "describe", "Silver crystal cowl-neck mini dress", listOf("c_front", "c_tq", "c_face", "c_front").map(ImageRef::asset)),
+        Outfit(GREEN, DEMO, "Green set", "own", "Dark green cropped tee and drawstring shorts", listOf("g_front", "g_tq", "g_side", "g_back").map(ImageRef::asset)),
+        Outfit(CRYSTAL, DEMO, "Crystal dress", "describe", "Silver crystal cowl-neck mini dress", listOf("c_front", "c_tq", "c_face", "c_front").map(ImageRef::asset)),
     )
 
     private fun req(title: String, engine: Engine, steps: Int, outfit: String = GREEN) =
-        JobRequest(title = title, modelId = SIENNA, outfitId = outfit, clipId = SAMPLE_CLIP, engine = engine.id, steps = steps)
+        JobRequest(title = title, modelId = DEMO, outfitId = outfit, clipId = SAMPLE_CLIP, engine = engine.id, steps = steps)
 
     fun jobs(now: Long): List<Job> = listOf(
-        Job("j1", "Kick test", SIENNA, "Sienna Vale", GREEN, req("Kick test", Engine.VIGGLE, 4), "done", 100.0, 1, 4, 4,
+        Job("j1", "Kick test", DEMO, "Demo model", GREEN, req("Kick test", Engine.VIGGLE, 4), "done", 100.0, 1, 4, 4,
             "Done", 0.0, 95.0, 0.13, createdAt = now - 7_200_000, finishedAt = now - 7_000_000, thumb = ImageRef.asset("g_front")),
-        Job("j2", "Bathroom trend", SIENNA, "Sienna Vale", CRYSTAL, req("Bathroom trend", Engine.H3, 30, CRYSTAL), "done", 100.0, 1, 30, 30,
+        Job("j2", "Bathroom trend", DEMO, "Demo model", CRYSTAL, req("Bathroom trend", Engine.H3, 30, CRYSTAL), "done", 100.0, 1, 30, 30,
             "Done", 0.0, 2760.0, 3.05, createdAt = now - 86_400_000, finishedAt = now - 83_640_000, thumb = ImageRef.asset("c_front")),
-        Job("j0", "Mirror selfie", SIENNA, "Sienna Vale", GREEN, req("Mirror selfie", Engine.H3, 10), "failed", 18.0, 1, 3, 10,
+        Job("j0", "Mirror selfie", DEMO, "Demo model", GREEN, req("Mirror selfie", Engine.H3, 10), "failed", 18.0, 1, 3, 10,
             "Failed", 0.0, 608.0, 0.19, refunded = 0.19, error = ErrorText.WENT_WRONG, createdAt = now - 3_600_000, thumb = ImageRef.asset("g_tq")),
     )
 

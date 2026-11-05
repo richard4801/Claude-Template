@@ -64,6 +64,8 @@ data class ShootDraft(
     val lockSeed: Boolean = false,
     val tool: String = "camera",
     val lastShots: Int = 0,
+    /** Owner only: a model for this shoot, step → "owner/name" (the "Model" chooser). */
+    val models: Map<String, String> = emptyMap()
 )
 
 /** Using a template: the user's own choices (the template's layers stay on the server). Lock look is off by default. */
@@ -93,7 +95,7 @@ data class OutfitDraft(
 
 /** Cross-screen selections and drafts (the prototype's global `S`), shared by the screen ViewModels. */
 class Drafts {
-    val modelId = MutableStateFlow(SampleData.SIENNA)
+    val modelId = MutableStateFlow(SampleData.DEMO)
     val outfitId = MutableStateFlow(SampleData.GREEN)
     val video = MutableStateFlow(VideoDraft())
     val shoot = MutableStateFlow(ShootDraft())
@@ -104,6 +106,13 @@ class Drafts {
     val memberOpen = MutableStateFlow<String?>(null)
     val lastInvite = MutableStateFlow<InviteCreated?>(null)
     val outfit = MutableStateFlow(OutfitDraft())
+    /** Enhance and Dress up setup, and the run being reviewed (plans/api.md "Model tools"). */
+    val enhance = MutableStateFlow(EnhanceDraft())
+    val dressUp = MutableStateFlow(DressUpDraft())
+    /** Owner Settings → Engines → Image models: the step whose catalog is open; the owner's per-run model choice ("Model" chooser). */
+    val catalogStep = MutableStateFlow("shot")
+    /** Where the catalog picker returns its choice: "settings" (the studio default) or "run" (this run only). */
+    val catalogFor = MutableStateFlow("settings")
     /** Gallery tab: tests | final. Newly shot items are highlighted once. */
     val galleryTab = MutableStateFlow("tests")
     val freshShots = MutableStateFlow(0)
@@ -130,3 +139,9 @@ class Drafts {
 
     fun resetVideo() = video.update { VideoDraft(clip = it.clip, tool = it.tool) }
 }
+
+/** Enhance setup: realism off | subtle | balanced | strong, upscale off | 2x | 4x; [runId] once started. models: the owner's per-run choice. */
+data class EnhanceDraft(val realism: String = "balanced", val upscale: String = "2x", val runId: String? = null, val models: Map<String, String> = emptyMap())
+
+/** Dress up setup: one outfit-sheet photo, a name, Option A / B / Both; [runId] once started. */
+data class DressUpDraft(val outfitImage: ImageRef? = null, val name: String = "", val engine: String = "a", val runId: String? = null, val models: Map<String, String> = emptyMap())

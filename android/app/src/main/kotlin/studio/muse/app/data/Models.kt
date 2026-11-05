@@ -43,7 +43,7 @@ data class SignUpRequest(
     val inviteCode: String? = null,
 )
 
-/** One of the 6 character-sheet slots. source: "upload" (yours) or "generated" (filled in). */
+/** One of the 7 character-sheet slots (face, profile, front, tq, side, back, faceTq; see [Sheet]). source: "upload" (yours) or "generated" (filled in). */
 @Serializable
 data class SheetSlot(val key: String, val image: ImageRef? = null, val source: String = "upload", val busy: Boolean = false)
 
@@ -59,9 +59,13 @@ data class Model(
     val outfitIds: List<String> = emptyList(),
     val personality: String? = null,
     val notes: String? = null,
+    /** Archived by the owner: hidden from every list (plans/api.md "Model tools" §7). */
+    val archived: Boolean = false,
+    val archivedAt: Long? = null,
 ) {
     val filled: Int get() = slots.count { it.image != null && !it.busy }
-    val locked: Boolean get() = filled == 6
+    /** The 6 original sheet images are in (a missing face ¾ is only a warning). */
+    val locked: Boolean get() = Sheet.REQUIRED.all { k -> slots.any { it.key == k && it.image != null && !it.busy } }
     val hasBothFaces: Boolean get() = slots.count { (it.key == "face" || it.key == "profile") && it.image != null } == 2
     fun slot(key: String) = slots.firstOrNull { it.key == key }
     val cover: ImageRef? get() = slot("face")?.image ?: slots.firstOrNull { it.image != null }?.image
@@ -87,6 +91,8 @@ data class Outfit(
     val prompt: String = "",
     /** What the set really cost once made (exact, pass-through); null before, or from an older server. */
     val cost: Double? = null,
+    /** Dress up outfits: the face close-ups wearing its accessories (face, face ¾, profile). */
+    val faces: List<ImageRef?>? = null,
 ) {
     val front: ImageRef? get() = angles.firstOrNull()
 }
@@ -243,6 +249,8 @@ data class ShootRequest(
     val shuffleSeed: Long? = null,
     val lockSeed: Boolean? = null,
     val productImage: ImageRef? = null,
+    /** Owner only: a model for this run, step → "owner/name" (plans/api.md "Model tools" §2). */
+    val models: Map<String, String>? = null,
 )
 
 // ---------------------------------------------------------------- photo templates (plans/templates.md)
@@ -474,6 +482,8 @@ data class StudioFeatures(
     val video: VideoFeatures? = null,
     /** Pass-through photo prices and estimates (plans/api.md "App clean-up" §3). */
     val photo: PhotoFeatures? = null,
+    /** Enhance and Dress up (plans/api.md "Model tools" §4–5). */
+    val tools: ToolsFeatures? = null,
 )
 
 /** features.photo: the prices the estimates use, and the server's own estimates. */
@@ -689,6 +699,8 @@ data class ApiEvent(
     val gpu: WarmGpu? = null,
     val event: String? = null,
     val warning: WarmWarning? = null,
+    /** type "tool": an Enhance or Dress up run changed. */
+    val tool: ToolRun? = null,
 )
 
 /** PATCH /v1/models/{id}: only the fields sent change. */

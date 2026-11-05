@@ -87,12 +87,12 @@ class VideoQualityTest {
 
     @Test fun demoStudioRunsReplicateJobs() = runTest {
         val api = FakeMuseApi(backgroundScope, now = { testScheduler.currentTime })
-        val job = api.createJob(VideoDraft().request("Living-room dance", SampleData.SIENNA, SampleData.GREEN, SampleData.SAMPLE_CLIP, null))
+        val job = api.createJob(VideoDraft().request("Living-room dance", SampleData.DEMO, SampleData.GREEN, SampleData.SAMPLE_CLIP, null))
         assertEquals("draft", job.request.quality)
         assertEquals(0.02 * 10, job.cost, 1e-9)
         assertEquals("Draft · 768P", job.engineLabel)
         try {
-            api.createJob(VideoDraft().request("x", SampleData.SIENNA, SampleData.GREEN, SampleData.SAMPLE_CLIP, null).copy(lipSync = true))
+            api.createJob(VideoDraft().request("x", SampleData.DEMO, SampleData.GREEN, SampleData.SAMPLE_CLIP, null).copy(lipSync = true))
             fail("lip sync on Replicate should be refused")
         } catch (e: ApiException) { assertEquals("bad_request", e.code) }
     }

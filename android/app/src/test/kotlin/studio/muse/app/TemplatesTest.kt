@@ -30,14 +30,14 @@ class TemplatesTest {
         val maya = all.first { it.id == "tpl_maya_walk" }
         assertTrue(!maya.isOwner); assertNull(maya.layers); assertNull(maya.variationPool)
         assertTrue(all.none { it.id == "tpl_maya_private" })
-        val p = api.templatePrompt(maya.id, TemplatePromptRequest(SampleData.SIENNA, direction = "on the steps"))
+        val p = api.templatePrompt(maya.id, TemplatePromptRequest(SampleData.DEMO, direction = "on the steps"))
         assertTrue(p.slots.any { it.locked && it.text == "Template: Golden hour walk" })
         assertTrue(!p.text.contains("warm candid street photo"))
-        val shots = api.shoot(ShootRequest(SampleData.SIENNA, SampleData.GREEN, "", "", templateId = maya.id, shuffleSeed = 3))
+        val shots = api.shoot(ShootRequest(SampleData.DEMO, SampleData.GREEN, "", "", templateId = maya.id, shuffleSeed = 3))
         assertTrue(shots.all { it.templateName == "Golden hour walk" && !it.prompt.contains("warm candid") && it.variation == null })
         try { api.templateDraft(shots[0].id); error("should be hidden") } catch (e: ApiException) { assertEquals("template_hidden", e.code) }
         try { api.patchTemplate(maya.id, studio.muse.app.data.PatchTemplateRequest(name = "x")); error("owner only") } catch (e: ApiException) { assertEquals("owner_only", e.code) }
-        val own = api.shoot(ShootRequest(SampleData.SIENNA, SampleData.GREEN, "", "", count = 1, templateId = "tpl_mirror-selfie")).first()
+        val own = api.shoot(ShootRequest(SampleData.DEMO, SampleData.GREEN, "", "", count = 1, templateId = "tpl_mirror-selfie")).first()
         assertTrue(own.prompt.contains("real mirror selfie")); assertNotNull(own.variation)
         assertEquals(1, api.template("tpl_mirror-selfie").uses)
     }

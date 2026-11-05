@@ -113,6 +113,30 @@ interface MuseApi {
     /** {on: true|false} or {extend: true} ("Keep warm"). */
     suspend fun setWarmGpu(req: WarmRequest): WarmGpu
 
+    // Model tools (plans/api.md "Model tools"). Image models are owner only; Enhance and Dress up are for everyone.
+    suspend fun imageModels(): StepModels
+    suspend fun imageCatalog(step: String, q: String? = null, collection: String? = null): CatalogPage
+    suspend fun imageModel(id: String, step: String): ModelDetail
+    suspend fun setImageModel(step: String, req: SetStepModelRequest): StepModel
+    suspend fun resetImageModel(step: String): StepModel
+    suspend fun enhanceEstimate(modelId: String, req: EnhanceRequest): ToolEstimate
+    suspend fun startEnhance(modelId: String, req: EnhanceRequest): ToolRun
+    suspend fun dressUpEstimate(modelId: String, req: DressUpRequest): ToolEstimate
+    suspend fun startDressUp(modelId: String, req: DressUpRequest): ToolRun
+    suspend fun toolRuns(modelId: String? = null): List<ToolRun>
+    suspend fun toolRun(id: String): ToolRun
+    suspend fun decideTool(id: String, slot: String, req: DecideRequest): ToolRun
+    suspend fun pickTool(id: String, pick: String): ToolRun
+    suspend fun retryTool(id: String, slot: String, engine: String? = null): ToolRun
+    suspend fun applyTool(id: String, name: String? = null): ApplyResponse
+    suspend fun discardTool(id: String)
+    suspend fun sheetVersions(modelId: String): List<SheetVersion>
+    suspend fun restoreSheet(modelId: String, versionId: String): Model
+    /** Owner: archive (true) or restore (false). Archived models drop out of every list. */
+    suspend fun archiveModel(modelId: String, archived: Boolean): Model
+    /** Owner: the archived models only. */
+    suspend fun archivedModels(): List<Model>
+
     // Developer
     suspend fun setFailNext(fail: Boolean)
 

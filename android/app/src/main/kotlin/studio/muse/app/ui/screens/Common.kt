@@ -82,16 +82,20 @@ fun ModelInitial(model: Model, modifier: Modifier = Modifier, size: Float = 42f)
 
 /** The profile ⋯ menu (app.js MENUS.profile). */
 @Composable
-fun profileMenu(onSheet: () -> Unit, onOutfit: () -> Unit, onLora: () -> Unit = {}, onAccounts: () -> Unit = {}): List<MenuItem> {
+fun profileMenu(onSheet: () -> Unit, onOutfit: () -> Unit, onLora: () -> Unit = {}, onAccounts: () -> Unit = {},
+    onEnhance: () -> Unit = {}, onDressUp: () -> Unit = {}, onArchive: (() -> Unit)? = null): List<MenuItem> {
     val repo = LocalContainer.current.repo
-    return listOf(
+    return listOfNotNull(
         MenuItem("spark", "Edit character sheet", onClick = onSheet),
         MenuItem("grid", "Character sheet", onClick = onSheet),
+        MenuItem("spark", "Enhance character sheet", onClick = onEnhance),
+        MenuItem("outfit", "Dress up", onClick = onDressUp),
         MenuItem("spark", "Identity LoRA", onClick = onLora),
         MenuItem("export", "Accounts", onClick = onAccounts),
         MenuItem("outfit", "Add outfit", onClick = onOutfit),
-        MenuItem("retry", "Duplicate model") { repo.toast("Duplicated as \"Sienna Vale copy\"") },
+        MenuItem("retry", "Duplicate model") { repo.toast("Model duplicated") },
         MenuItem("export", "Share profile card") { repo.toast("Profile card ready to share") },
+        onArchive?.let { MenuItem("lock", "Archive model", onClick = it) },
         MenuItem("shield", "Delete model", danger = true) { repo.toast("Delete is disabled in this demo") },
     )
 }

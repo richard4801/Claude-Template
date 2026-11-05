@@ -129,10 +129,10 @@ fun SplashScreen() {
         if (m.isD) {
             val shape = RoundedCornerShape(22.dp)
             Box(Modifier.fillMaxSize().padding(start = 28.dp, end = 28.dp, top = 110.dp, bottom = 230.dp).hardShadow(6.dp, 22.dp).clip(shape).border(3.dp, Ink, shape)) {
-                AssetImage("hero", Modifier.fillMaxSize(), 20)
+                BrandArt(Modifier.fillMaxSize())
             }
         } else {
-            AssetImage("hero", Modifier.fillMaxSize(), 20)
+            BrandArt(Modifier.fillMaxSize())
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Color.Transparent, .45f to Color.Transparent, 1f to Color.Black.copy(alpha = .65f))))
             Box(Modifier.fillMaxSize().statusBarsPadding()) { Viewfinder() }
         }
@@ -278,5 +278,26 @@ fun SignUpScreen() {
         val autofill = LocalAutofillManager.current
         Cta(if (s.busy) "Creating account…" else "Create account", { vm.signUp { autofill?.commit(); nav.reset(Routes.HOME) } }, Modifier.fillMaxWidth(), off = !(s.ag1 && s.ag2), busy = s.busy)
         T(TERMS_LINE, m.type.tiny, m.t.muted, Modifier.fillMaxWidth(), align = TextAlign.Center)
+    }
+}
+
+/**
+ * The splash art: an abstract brand gradient with soft light shapes (no person, owner decision 2026-11-04) until the owner
+ * supplies a new image.
+ */
+@Composable
+fun BrandArt(modifier: Modifier = Modifier) {
+    val m = muse
+    val a = m.t.accent
+    androidx.compose.foundation.Canvas(modifier.background(Brush.linearGradient(listOf(Color(0xFF1B1726), a.copy(alpha = .85f), Color(0xFF0E0D12))))) {
+        val w = size.width; val h = size.height
+        drawCircle(Brush.radialGradient(listOf(Color.White.copy(alpha = .28f), Color.Transparent), center = androidx.compose.ui.geometry.Offset(w * .72f, h * .28f), radius = w * .7f),
+            radius = w * .7f, center = androidx.compose.ui.geometry.Offset(w * .72f, h * .28f))
+        drawCircle(Brush.radialGradient(listOf(m.t.yellow.copy(alpha = .22f), Color.Transparent), center = androidx.compose.ui.geometry.Offset(w * .18f, h * .62f), radius = w * .55f),
+            radius = w * .55f, center = androidx.compose.ui.geometry.Offset(w * .18f, h * .62f))
+        drawCircle(Color.White.copy(alpha = .10f), radius = w * .36f, center = androidx.compose.ui.geometry.Offset(w * .5f, h * .42f),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f))
+        drawCircle(Color.White.copy(alpha = .06f), radius = w * .52f, center = androidx.compose.ui.geometry.Offset(w * .5f, h * .42f),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f))
     }
 }

@@ -93,10 +93,11 @@ class ShootViewModel(private val c: AppContainer) : ViewModel() {
     fun shoot(celebrate: () -> Unit) = viewModelScope.launch {
         val s = state.value
         if (s.phase == "busy") return@launch
-        val model = s.model ?: return@launch c.repo.toast("Only Sienna is ready · Noor needs close-ups")
+        val model = s.model ?: return@launch c.repo.toast("Only Demo model is ready · Noor needs close-ups")
         val p = s.prompt ?: return@launch
         phase.value = "busy"
-        val shots = c.repo.shoot(ShootRequest(model.id, s.outfit?.id ?: "", s.draft.scene ?: PromptEngine.DEFAULT_SCENE, p.text, p.seed))
+        val shots = c.repo.shoot(ShootRequest(model.id, s.outfit?.id ?: "", s.draft.scene ?: PromptEngine.DEFAULT_SCENE, p.text, p.seed,
+            models = s.draft.models.ifEmpty { null }))
         if (shots == null) { phase.value = "idle"; return@launch }
         c.drafts.freshShots.value = shots.size
         c.drafts.galleryTab.value = "tests"
@@ -130,7 +131,7 @@ fun ShootScreen() {
                     MenuItem("spark", "Show prompt") { vm.edit { it.copy(tool = "spark") } },
                     MenuItem("quality", "Save as preset") { vm.toast("Saved as preset \"${(d.scene ?: PromptEngine.DEFAULT_SCENE).substringBefore(" · ")} · ${d.lens}mm\"") },
                     MenuItem("retry", "Reset camera") { vm.resetCamera() },
-                    MenuItem("model", "Change model") { vm.toast("Only Sienna is ready · Noor needs close-ups") },
+                    MenuItem("model", "Change model") { vm.toast("Only Demo model is ready · Noor needs close-ups") },
                 ))
                 }
             }
@@ -150,6 +151,8 @@ fun ShootScreen() {
                             Column(Modifier.weight(1f)) { T("Lock look", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink); Tiny("Same seed, so retakes stay consistent") }
                             Toggle(d.lockSeed, { vm.edit { it.copy(lockSeed = !it.lockSeed) } })
                         }
+                        // Owner only: run this shoot on another model (members never see model names).
+                        if (c.repo.demo || c.prefs.value.owner) OwnerModelLine(listOf("shot"), d.models, emptyMap())
                         s.prompt?.let { p ->
                             Field("Final prompt") { PromptBox(p) }
                             if (p.removed.isNotEmpty()) NoteBox("Left out of your direction: ${p.removed.joinToString("; ")}. It would change her identity or add a never-add item.", warn = true)

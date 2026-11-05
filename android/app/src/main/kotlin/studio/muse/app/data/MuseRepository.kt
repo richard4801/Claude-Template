@@ -32,6 +32,10 @@ data class StudioState(
     val video: VideoFeatures? = null,
     /** Photo prices for the estimates ("about $0.46"), from features.photo. */
     val photo: studio.muse.core.PhotoPrices = studio.muse.core.PhotoPrices(),
+    /** Enhance and Dress up options (features.tools); the owner's copy also names the current models. */
+    val tools: ToolsFeatures = ToolsFeatures(),
+    /** Enhance and Dress up runs this session has seen, by id (kept live by `tool` events). */
+    val toolRuns: Map<String, ToolRun> = emptyMap(),
     val loaded: Boolean = false,
     val error: String? = null,
 ) {
@@ -149,7 +153,7 @@ class MuseRepository(
             if (a !== api) return
             _state.update {
                 StudioState(models, outfits, jobs.sortedByDescending { it.createdAt }, takes, bal, loras, accounts, posts, wallet, warm = warm, video = features?.video,
-                    photo = features?.photo?.prices ?: studio.muse.core.PhotoPrices(), loaded = true)
+                    photo = features?.photo?.prices ?: studio.muse.core.PhotoPrices(), tools = features?.tools ?: ToolsFeatures(), toolRuns = it.toolRuns, loaded = true)
             }
         } catch (e: ApiException) {
             _state.update { it.copy(loaded = true, error = ErrorText.of(e)) }
@@ -172,7 +176,9 @@ class MuseRepository(
             if (n.code == "provider_out_of_credit") toast("An engine is out of credit · see Settings → Engines", "studio")
             else if (n.message.isNotBlank() && !Regex("(?i)gpu|runpod").containsMatchIn(n.message)) toast(n.message)
         }
-        ev.model?.let { m -> _state.update { s -> s.copy(models = s.models.upsert(m) { it.id == m.id }) } }
+        // An archived model drops out of every list.
+        ev.model?.let { m -> _state.update { s -> s.copy(models = if (m.archived) s.models.filterNot { it.id == m.id } else s.models.upsert(m) { it.id == m.id }) } }
+        ev.tool?.let { putTool(it) }
         ev.outfit?.let { o -> _state.update { s -> s.copy(outfits = s.outfits.upsert(o) { it.id == o.id }) } }
         ev.lora?.let { l -> putLora(l) }
         // gpu events only ever reach the owner who switched Keep add-on engine ready on; never shown to members.
@@ -254,6 +260,39 @@ class MuseRepository(
         _upload.value = 0f
         return try { block { p -> _upload.value = p.coerceIn(0f, 1f) } } finally { _upload.value = null }
     }
+
+    // ---- Model tools (plans/api.md "Model tools")
+    fun putTool(r: ToolRun) {
+        val prev = _state.value.toolRuns[r.id]
+        _state.update { it.copy(toolRuns = it.toolRuns + (r.id to r)) }
+        if (prev?.state == "running" && r.state == "review") toast("${if (r.kind == "enhance") "Enhance" else "Dress up"} is ready to review")
+        if (prev?.state == "running" && r.state == "failed") toast(r.error ?: "Something went wrong · you weren't charged")
+    }
+    suspend fun enhanceEstimate(modelId: String, req: EnhanceRequest) = attemptInline { enhanceEstimate(modelId, req) }
+    suspend fun dressUpEstimate(modelId: String, req: DressUpRequest) = attemptInline { dressUpEstimate(modelId, req) }
+    suspend fun startEnhance(modelId: String, req: EnhanceRequest) = attempt { startEnhance(modelId, req) }?.also { putTool(it); refreshBalance() }
+    suspend fun startDressUp(modelId: String, req: DressUpRequest) = attempt { startDressUp(modelId, req) }?.also { putTool(it); refreshBalance() }
+    suspend fun loadToolRuns(modelId: String) = attempt { toolRuns(modelId) }?.also { list -> _state.update { s -> s.copy(toolRuns = s.toolRuns + list.associateBy { it.id }) } }
+    suspend fun decideTool(id: String, slot: String, keep: Boolean, pick: String? = null) = attempt { decideTool(id, slot, DecideRequest(if (keep) "keep" else "reject", pick)) }?.also(::putTool)
+    suspend fun pickTool(id: String, pick: String) = attempt { pickTool(id, pick) }?.also(::putTool)
+    suspend fun retryTool(id: String, slot: String, engine: String? = null) = attempt { retryTool(id, slot, engine) }?.also { putTool(it); refreshBalance() }
+    suspend fun applyTool(id: String, name: String? = null) = attempt { applyTool(id, name) }?.also { r ->
+        putTool(r.run)
+        _state.update { s -> s.copy(models = s.models.upsert(r.model) { it.id == r.model.id }, outfits = r.outfit?.let { o -> s.outfits.upsert(o) { it.id == o.id } } ?: s.outfits) }
+    }
+    suspend fun discardTool(id: String) = attempt { discardTool(id) }?.also { _state.value.toolRuns[id]?.let { putTool(it.copy(state = "discarded")) } }
+    suspend fun sheetVersions(modelId: String) = attempt { sheetVersions(modelId) }
+    suspend fun restoreSheet(modelId: String, vid: String) = attempt { restoreSheet(modelId, vid) }?.also { m -> _state.update { s -> s.copy(models = s.models.upsert(m) { it.id == m.id }) } }
+    suspend fun archiveModel(id: String, archived: Boolean) = attempt { archiveModel(id, archived) }?.also { m ->
+        _state.update { s -> s.copy(models = if (m.archived) s.models.filterNot { it.id == m.id } else s.models.upsert(m) { it.id == m.id }) }
+        if (!archived) refresh()
+    }
+    suspend fun archivedModels() = attempt { archivedModels() }
+    suspend fun imageModels() = attemptInline { imageModels() }
+    suspend fun imageCatalog(step: String, q: String?) = attemptInline { imageCatalog(step, q) }
+    suspend fun imageModel(id: String, step: String) = attemptInline { imageModel(id, step) }
+    suspend fun setImageModel(step: String, model: String) = attemptInline { setImageModel(step, SetStepModelRequest(model)) }
+    suspend fun resetImageModel(step: String) = attemptInline { resetImageModel(step) }
 
     // ---- actions ----
     /** Returns null on success, or the friendly error to show under the form. */

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -87,7 +88,7 @@ class CreateModelViewModel(private val c: AppContainer) : ViewModel() {
     fun uploadMany(uris: List<Uri>) = viewModelScope.launch {
         val model = state.value.model ?: return@launch
         val empty = model.slots.filter { it.image == null }.map { it.key }
-        if (empty.isEmpty()) return@launch c.repo.toast("All 6 slots filled · tap one to replace")
+        if (empty.isEmpty()) return@launch c.repo.toast("All 7 slots filled · tap one to replace")
         val media = c.media ?: return@launch
         var n = 0
         uris.take(empty.size).forEachIndexed { i, u ->
@@ -113,7 +114,7 @@ class CreateModelViewModel(private val c: AppContainer) : ViewModel() {
     fun save(celebrate: () -> Unit, onDone: () -> Unit) {
         val m = state.value.model ?: return
         celebrate()
-        c.repo.toast(if (m.filled == 6) "Model saved · character sheet ready" else "Model saved with ${m.filled}/6 shots · add more angles any time")
+        c.repo.toast(if (m.locked) "Model saved · character sheet ready" else "Model saved with ${m.filled}/7 shots · add more angles any time")
         c.drafts.model.value = ModelDraft()
         onDone()
     }
@@ -165,7 +166,7 @@ fun CharacterSheetScreen() {
     val m = muse
     var pendingSlot by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
     val pickOne = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> val k = pendingSlot; if (uri != null && k != null) vm.upload(k, uri) }
-    val pickMany = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(6)) { uris -> if (uris.isNotEmpty()) vm.uploadMany(uris) }
+    val pickMany = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(7)) { uris -> if (uris.isNotEmpty()) vm.uploadMany(uris) }
     val img = PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
     val model = s.model
     val filled = model?.filled ?: 0
@@ -178,7 +179,7 @@ fun CharacterSheetScreen() {
             }
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 8.dp, bottom = 130.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 T("Upload your model's images. Tap a slot to add or replace a shot.", m.type.body, m.t.muted)
-                SheetAngle.entries.chunked(3).forEach { row ->
+                SheetAngle.DISPLAY.chunked(3).forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         row.forEach { a ->
                             val slot = model?.slot(a.key)
@@ -201,18 +202,23 @@ fun CharacterSheetScreen() {
                                 androidx.compose.material3.Text(label, style = m.type.tiny.copy(fontSize = 12.sp), color = m.t.muted, maxLines = 1)
                             }
                         }
+                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
                 Cta2("Upload images", { pickMany.launch(img) }, Modifier.fillMaxWidth(), icon = "upload", height = 44.dp)
-                if (filled in 1..5) {
-                    val miss = 6 - filled
+                if (filled > 0) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Cta2("Enhance", { nav.go(Routes.ENHANCE) }, Modifier.weight(1f), icon = "spark", height = 44.dp)
+                    Cta2("Dress up", { nav.go(Routes.DRESSUP) }, Modifier.weight(1f), icon = "outfit", height = 44.dp)
+                }
+                if (filled in 1..6) {
+                    val miss = 7 - filled
                     Opt("Fill missing angles from your images", "Optional. Adds the $miss missing angle${if (miss > 1) "s" else ""} of your model · ${studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.sheetAngles(photoPrices(), miss, filled))}", icon = "spark", onClick = { vm.fill() })
                 }
                 if (faces < 2) NoteBox("Tip: two face close-ups keep her face sharp and consistent in videos. You can still save without them.", warn = true)
-                else NoteBox("$filled of 6 shots. ${if (filled < 6) "More angles help when she turns. Optional." else "Full sheet. Her identity is locked."}", icon = "check")
+                else NoteBox("$filled of 7 shots. ${if (filled < 7) "More angles help when she turns. Optional." else "Full sheet. Her identity is locked."}", icon = "check")
             }
         }
-        Dock { Cta("Save model · $filled/6", { vm.save(celebrate) { nav.reset(Routes.HOME) } }, Modifier.weight(1f)) }
+        Dock { Cta("Save model · $filled/7", { vm.save(celebrate) { nav.reset(Routes.HOME) } }, Modifier.weight(1f)) }
     }
 }
 

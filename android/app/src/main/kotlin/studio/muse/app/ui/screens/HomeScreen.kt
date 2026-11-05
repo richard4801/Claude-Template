@@ -196,7 +196,7 @@ private fun ModelCard(model: Model, img: studio.muse.app.data.ImageRef?, modifie
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             T(model.name, m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink, maxLines = 1)
             Tiny("${model.niche} · ${model.age}")
-            if (model.locked) Pill("Locked", "good") else Pill("Draft · ${model.filled}/6 shots", "warn")
+            if (model.locked) Pill("Locked", "good") else Pill("Draft · ${model.filled}/7 shots", "warn")
         }
     }
 }
