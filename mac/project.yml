@@ -29,6 +29,10 @@ targets:
       - path: ../server/api/assets/lookpack/looks
         type: folder
         buildPhase: resources
+      # AI suite (workstream 1): the 40 hardware renders for the camera bag (design/hardware), bundled as `hardware`.
+      - path: ../design/hardware
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: MuseCore
     info:

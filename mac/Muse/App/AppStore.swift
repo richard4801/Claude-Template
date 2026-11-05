@@ -5,6 +5,8 @@ import SwiftUI
 
 enum Screen: String, CaseIterable {
     case home, models, profile, create, studio, shoot, queue, gallery, result, settings, credits, lora, posts, members, templates, template, editor
+    // AI suite (workstream 1): the Video suite (hub and modes) and the top-level Edit.
+    case suite, edit
 
     /// Which sidebar item is highlighted.
     var navParent: Screen {
@@ -13,6 +15,7 @@ enum Screen: String, CaseIterable {
         case .result, .editor: return .gallery
         case .credits: return .settings
         case .template: return .templates
+        case .studio: return .suite // AI suite (workstream 1): the classic studio sits under Video suite
         default: return self
         }
     }
@@ -28,7 +31,7 @@ struct NavItem: Identifiable {
     static let main: [NavItem] = [
         NavItem(screen: .home, title: "Home", icon: "house", key: "1"),
         NavItem(screen: .models, title: "Models", icon: "person", key: "2"),
-        NavItem(screen: .studio, title: "Video studio", icon: "video", key: "3"),
+        NavItem(screen: .suite, title: "Video suite", icon: "video", key: "3"), // AI suite (workstream 1): was "Video studio"
         NavItem(screen: .shoot, title: "Photoshoot", icon: "camera", key: "4"),
         NavItem(screen: .queue, title: "Queue", icon: "list.bullet.below.rectangle", key: "5"),
         NavItem(screen: .gallery, title: "Gallery", icon: "square.grid.2x2", key: "6"),
@@ -226,6 +229,9 @@ final class AppStore {
 
     var postTab: PostTab = .scheduled
     var postDraft: PostDraft?
+
+    // AI suite (workstream 1): the Video suite's state (AppStore+Suite.swift).
+    let suite = SuiteState()
 
     // MARK: Video studio
 
@@ -495,6 +501,7 @@ final class AppStore {
         resetModelTools()
         resetShootAndPrompts()
         resetWarm()
+        suite.reset() // AI suite (workstream 1)
         Task { await restoreSession() }
     }
 
