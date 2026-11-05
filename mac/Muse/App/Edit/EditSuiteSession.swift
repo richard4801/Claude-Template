@@ -386,6 +386,46 @@ final class EditSuiteSession {
         }
     }
 
+    // MARK: Record VO (Edit suite, workstream 3)
+
+    /// True while a voice-over is being recorded from the Mac's microphone.
+    var isRecordingVO = false
+    @ObservationIgnored private var voRecorder: AVAudioRecorder?
+
+    /// Starts recording a voice-over (asks for the microphone the first time), or stops and adds it to the voice row.
+    @MainActor
+    func toggleRecordVO() async {
+        if let r = voRecorder {
+            r.stop()
+            voRecorder = nil
+            isRecordingVO = false
+            await importAudio(r.url, kind: .voice)
+            return
+        }
+        guard isReady else { return }
+        let allowed: Bool
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: allowed = true
+        case .notDetermined: allowed = await AVCaptureDevice.requestAccess(for: .audio)
+        default: allowed = false
+        }
+        guard allowed else {
+            lastError = "MUSE can't use the microphone · allow it in System Settings → Privacy & Security → Microphone"
+            return
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("vo-\(UUID().uuidString).m4a")
+        let settings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 48_000, AVNumberOfChannelsKey: 1,
+                                       AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue]
+        do {
+            let r = try AVAudioRecorder(url: url, settings: settings)
+            guard r.record() else { throw ApiError("record_failed", "Couldn't start recording") }
+            voRecorder = r
+            isRecordingVO = true
+        } catch {
+            lastError = (error as? ApiError)?.message ?? "Couldn't start recording"
+        }
+    }
+
     static func contentType(_ url: URL) -> String {
         switch url.pathExtension.lowercased() {
         case "mp3": return "audio/mpeg"

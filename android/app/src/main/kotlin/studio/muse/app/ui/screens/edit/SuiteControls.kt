@@ -27,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -144,7 +145,7 @@ fun SuiteChip(text: String, on: Boolean, onClick: () -> Unit, modifier: Modifier
         else -> m.t.accent to m.t.accentInk
     }
     Box(
-        modifier.height(40.dp).clip(shape).background(bg).border(if (m.isD) 2.dp else 1.dp, if (on) bg else if (m.isD) Ink else m.t.line, shape)
+        modifier.height(48.dp).clip(shape).background(bg).border(if (m.isD) 2.dp else 1.dp, if (on) bg else if (m.isD) Ink else m.t.line, shape)
             .press(enabled = enabled, onClick = onClick).padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,
     ) { T(text, m.type.body.copy(fontSize = 13.sp), fg, maxLines = 1) }
@@ -171,7 +172,7 @@ fun SuiteSeg(options: List<Pair<String, String>>, selected: String?, onSelect: (
                 else -> m.t.accent to m.t.accentInk
             }
             Box(
-                (if (fill) Modifier.weight(1f) else Modifier.width((l.length * 9 + 22).dp.coerceAtLeast(44.dp))).height(height).background(bg).press { onSelect(k) },
+                (if (fill) Modifier.weight(1f) else Modifier.width((l.length * 9 + 22).dp.coerceAtLeast(48.dp))).minimumInteractiveComponentSize().height(height).background(bg).press { onSelect(k) },
                 contentAlignment = Alignment.Center,
             ) {
                 T(l, if (m.isA || m.isB) m.type.mono.copy(fontSize = 11.sp, letterSpacing = .08.em, fontWeight = FontWeight.Medium) else m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
@@ -196,7 +197,7 @@ fun OptRow(title: String, sub: String?, on: Boolean, onToggle: () -> Unit, modif
 
 /** A full-width bordered action (`.btn`), with an icon. */
 @Composable
-fun SuiteButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon: String? = null, primary: Boolean = false, enabled: Boolean = true, height: Dp = 40.dp) {
+fun SuiteButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon: String? = null, primary: Boolean = false, enabled: Boolean = true, height: Dp = 48.dp) {
     val m = muse
     val shape = RoundedCornerShape(if (m.isA) 2.dp else if (m.isB) 10.dp else 999.dp)
     val bg = if (primary) m.t.cta else m.t.surface

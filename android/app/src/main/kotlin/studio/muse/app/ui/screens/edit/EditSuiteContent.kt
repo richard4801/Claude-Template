@@ -17,6 +17,9 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -158,15 +161,16 @@ private fun Transport(ui: EditSuiteUi, act: (EditAction) -> Unit) {
 private fun Toolbar(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     val m = muse
     val lit = ui.panel?.tool
+    // A scrolling row (CapCut-style): every tool keeps a 64 dp wide, 60 dp tall target, however narrow the phone.
     Row(
-        Modifier.fillMaxWidth().height(66.dp).navigationBarsPadding().padding(horizontal = 2.dp),
-        horizontalArrangement = Arrangement.SpaceAround, verticalAlignment = Alignment.CenterVertically,
+        Modifier.fillMaxWidth().height(66.dp).navigationBarsPadding().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
         EditTool.entries.forEach { tool ->
             val on = tool == lit
             val c = if (on) m.t.accent else m.t.ink
             Column(
-                Modifier.weight(1f).height(60.dp).press(enabled = ui.project != null)
+                Modifier.widthIn(min = 64.dp).height(60.dp).press(enabled = ui.project != null)
  { act(EditAction.Open(if (on) null else tool.panel)) }.semantics { contentDescription = tool.label },
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {

@@ -1,5 +1,5 @@
 // The whole app flow on the simulated GPU and image engine, over real HTTP + SSE, with the dev seed (mock data).
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { client, makeApp, sse, until } from './helpers.js';
 
 describe('simulated studio flow (dev seed, like server/mock)', () => {
@@ -22,20 +22,30 @@ describe('simulated studio flow (dev seed, like server/mock)', () => {
   });
 
   it('a video job streams step progress over SSE, holds the price, and finishes with takes', async () => {
+    // The simulated GPU samples a job's progress every 250 ms of wall-clock time. At the suite's SPEED (2400×) this
+    // 2-take job lasts about 0.5 s, so it gets two samples, and a few ms of scheduling delay can put both outside the
+    // Rendering phase (one in take 2's start-up, one after the end): no Rendering event is ever sent. At 480× each
+    // take renders for about 1.2 s, several samples, so the job always streams Rendering progress. The GPU reads SPEED
+    // when it starts a job.
+    const speed = a.ctx.config.SPEED;
+    a.ctx.config.SPEED = 480;
+    onTestFinished(() => { a.ctx.config.SPEED = speed; });
     const es = await sse(base, token);
     const before = (await api('GET', '/v1/balance')).body.balance;
     const job = (await api('POST', '/v1/jobs', { title: 'Dance', modelId: 'm_demo', outfitId: 'o_green', clipId: 'clip_sample', steps: 10, takes: 2 })).body;
     expect(job.state).toBe('running');
     expect(job.cost).toBeCloseTo(2 * 0.6738666666666667, 9);
     expect((await api('GET', '/v1/balance')).body.balance).toBeCloseTo(before - 1.35, 6);
+    await vi.waitFor(() => expect(es.events.some(e => e.job?.id === job.id && /^take \d\/2 · Rendering · ~/.test(e.job.phase))).toBe(true),
+      { timeout: 10_000, interval: 25 });
     await until(() => es.events.some(e => e.job?.id === job.id && e.job.state === 'done'));
     await es.stop();
-    expect(es.events.some(e => e.job?.id === job.id && /^take \d\/2 · Rendering · ~/.test(e.job.phase))).toBe(true);
     // Member-facing phases never mention steps, GPUs or start-up.
     expect(es.events.filter(e => e.job?.id === job.id).every(e => !/step|gpu|warm|start-up/i.test(e.job.phase))).toBe(true);
     const done = es.events.find(e => e.job?.id === job.id && e.job.state === 'done');
     expect(done.takes.length).toBe(2);
     expect(done.takes[0]).toMatchObject({ kind: 'take', jobId: job.id, label: 'Edit', engineLabel: 'Edit', status: 'test' });
+    // Sent by the hold (during POST /v1/jobs) and again by the settle, which the server finishes before it sends `done`.
     expect(es.events.some(e => e.type === 'balance')).toBe(true);
     expect(es.events.some(e => e.type === 'wallet')).toBe(true);
     expect(job.prompt).toContain('<Image 1> (face, front)');

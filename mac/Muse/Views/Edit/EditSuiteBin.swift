@@ -21,8 +21,11 @@ struct EditSuiteBin: View {
             SuiteRule()
             HStack(spacing: 8) {
                 SuiteToolButton(title: "Import", icon: "square.and.arrow.up") { importAudio(kind: session.binTab == .music ? .music : .voice) }
-                SuiteToolButton(title: "Record VO", icon: "mic", disabled: true) {}
-                    .help("Recording a voice-over is coming soon · import one instead")
+                SuiteToolButton(title: session.isRecordingVO ? "Stop recording" : "Record VO", icon: session.isRecordingVO ? "stop.circle.fill" : "mic") {
+                    Task { await session.toggleRecordVO() }
+                }
+                .help(session.isRecordingVO ? "Stop and add the voice-over to the voice row" : "Record a voice-over with the microphone")
+                .accessibilityLabel(session.isRecordingVO ? "Stop recording the voice-over" : "Record a voice-over")
                 Spacer(minLength: 0)
             }
             .padding(12)
