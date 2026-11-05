@@ -1,0 +1,41 @@
+file	figma_node	group	name	spec
+body-01-large-format.png	89:2	Camera body	Large Format Digital	Alexa LF look · Large format · 4.5K
+body-02-super35.png	89:3	Camera body	Super 35 Digital	Alexa 35 look · Super 35 · 4.6K
+body-03-modular8k.png	89:4	Camera body	Modular 8K	V-Raptor look · VistaVision · 8K
+body-04-fullframe.png	89:5	Camera body	Full-Frame Cine	Venice 2 look · Full frame · 8.6K
+body-05-film35.png	89:6	Camera body	35mm Film	35mm 4-perf · Vision3 500T look
+body-06-film16.png	89:7	Camera body	Super 16 Film	Super 16 · grain · documentary
+body-07-creator-cine.png	89:8	Camera body	Creator Cine	FX3 look · Full frame · 4K 120
+body-08-phone.png	89:9	Camera body	Phone UGC	Phone · 24 mm · deep focus · HDR
+body-09-dv-camcorder.png	89:10	Camera body	DV Camcorder	MiniDV · 2000s · 480i texture
+body-10-super8.png	89:11	Camera body	Super 8	Super 8 · home movie · 18 fps
+lens-01-clean-prime.png	89:12	Lens	Clean Sharp Prime	Master Prime look · spherical · T1.3
+lens-02-anamorphic.png	89:13	Lens	Anamorphic 2×	Master Anamorphic look · oval bokeh · blue flares
+lens-03-vintage-anamorphic.png	89:14	Lens	Vintage Anamorphic	1970s C-series look · amber flares · soft edges
+lens-04-warm-vintage.png	89:15	Lens	Warm Vintage Prime	Speed Panchro look · warm · gentle falloff
+lens-05-halation.png	89:16	Lens	Halation Diffusion	Vintage prime + 1/4 mist · bloom on highlights
+lens-06-macro.png	89:17	Lens	Macro	100 mm macro · 1:1 · product & detail
+lens-07-cine-zoom.png	89:18	Lens	Cine Zoom	Optimo look · 24–290 mm · crash zoom
+lens-08-fisheye.png	89:19	Lens	Ultra-wide / Fisheye	14 mm & fisheye · skate & FPV energy
+optic-01-iris.png	89:20	Aperture	Iris · depth of field	T1.4 wide open → T11 deep focus
+optic-02-shutter180.png	89:21	Shutter	Rotary shutter	180° natural blur · 90° crisp · 360° smear
+stock-01-35mm.png	89:22	Film / sensor	35mm colour negative	Vision3 500T look · tungsten · fine grain
+stock-02-16mm.png	89:23	Film / sensor	16mm reversal	Super 16 · visible grain · halation
+stock-03-sensor.png	89:24	Film / sensor	Digital sensor	Clean digital · 14+ stops · no grain
+light-01-soft-cross.png	89:25	Lighting	Soft Cross	Two softboxes crossing · even, flattering
+light-02-contre-jour.png	89:26	Lighting	Contre-jour	Hard backlight through haze · rim & glow
+light-03-overhead.png	89:27	Lighting	Overhead Fall	Butterfly silk overhead · beauty top-light
+light-04-window.png	89:28	Lighting	Window	Soft daylight through sheer · natural & calm
+light-05-practicals.png	89:29	Lighting	Practicals	Lamps, neon, bulbs in shot · night mood
+light-06-ring-creator.png	89:30	Lighting	Creator Ring	Ring light + RGB tube · UGC talking head
+grip-01-dolly.png	89:31	Grip	Dolly & track	Dolly in / out · push · tracking
+grip-02-jib.png	89:32	Grip	Jib / crane	Crane up / down · reveal · overhead
+grip-03-gimbal.png	89:33	Grip	Gimbal	Handheld smooth · walk-and-talk · follow
+grip-04-fpv.png	89:34	Grip	FPV drone	FPV fly-through · dives · energy
+grip-05-slider.png	89:35	Grip	Slider	Short parallax slide · product & detail
+palette-01-naturalistic.png	89:36	Colour palette	Naturalistic Clean	True-to-life · neutral · gentle contrast
+palette-02-teal-orange.png	89:37	Colour palette	Teal & Orange	Blockbuster · teal shadows · warm skin
+palette-03-hyper-neon.png	89:38	Colour palette	Hyper Neon	Magenta & cyan · deep blacks · night
+palette-04-bleached-warm.png	89:39	Colour palette	Bleached Warm	Sun-faded · milky shadows · nostalgic
+palette-05-sodium-decay.png	89:40	Colour palette	Sodium Decay	Street-lamp yellow-green · gritty
+palette-06-classic-bw.png	90:2	Colour palette	Classic B&W	Silver tones · rich blacks · grain
