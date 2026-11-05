@@ -160,6 +160,20 @@ interface MuseApi {
         id: String, inputs: kotlinx.serialization.json.JsonObject? = null, rules: List<Rule>? = null, texts: Map<String, String>? = null, direction: String? = null,
     ): ScriptPreview
 
+    // Edit suite (workstream 3): AI helpers and v2 versions (plans/api.md "Editor v2"). Defaults: not available.
+    /** What a helper would cost (free ones say so). */
+    suspend fun editorEstimate(req: EditorJobRequest): EditorEstimate = throw ApiException("unsupported", "AI helpers need the studio server")
+    /** Starts a helper job (running); poll [editorJob] until it finishes. */
+    suspend fun startEditorJob(req: EditorJobRequest): EditorJob = throw ApiException("unsupported", "AI helpers need the studio server")
+    suspend fun editorJob(id: String): EditorJob = throw ApiException("not_found", "Job not found")
+    suspend fun cancelEditorJob(id: String) {}
+    /** Saves a video made by the Edit suite as a new version of [takeId] with its v2 project. */
+    suspend fun saveProjectVersion(takeId: String, video: EditedVideo, project: kotlinx.serialization.json.JsonObject, onProgress: (Float) -> Unit = {}): Take =
+        throw ApiException("unsupported", "Saving an edited video needs the studio server")
+    /** Uploads a voice-over / music file for the editor; returns the upload id (an audio Asset.upload). */
+    suspend fun uploadEditorAudio(file: java.io.File, contentType: String, onProgress: (Float) -> Unit = {}): String =
+        throw ApiException("unsupported", "Uploading audio needs the studio server")
+
     // Developer
     suspend fun setFailNext(fail: Boolean)
 
