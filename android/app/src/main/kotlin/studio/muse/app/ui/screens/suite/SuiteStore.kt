@@ -1,0 +1,92 @@
+package studio.muse.app.ui.screens.suite
+
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
+import studio.muse.app.AppContainer
+import studio.muse.app.data.ApiException
+import studio.muse.app.data.ErrorText
+import studio.muse.app.data.Job
+import studio.muse.app.data.SuiteCatalog
+import studio.muse.app.data.SuiteEstimate
+import studio.muse.app.data.SuiteModelPatch
+import studio.muse.app.data.SuiteRules
+import studio.muse.app.data.SuiteSettings
+import studio.muse.app.data.SuiteSettingsPatch
+import studio.muse.app.data.SuiteShotRequest
+
+/**
+ * The AI suite's session state (one per app): the catalog (null until loaded), the Shot / Recast / Storyboard drafts, the
+ * camera bag's working copy and the renders started from each screen. Members only ever hold member-safe copies: the
+ * catalog and estimates go through [SuiteRules.memberSafe] whatever the server sent.
+ */
+class SuiteStore(private val c: AppContainer) {
+    val catalog = MutableStateFlow<SuiteCatalog?>(null)
+    /** Why the catalog couldn't load (offline, an older server), shown on the hub. */
+    val catalogError = MutableStateFlow<String?>(null)
+    val shot = MutableStateFlow(ShotDraft())
+    val recast = MutableStateFlow(RecastDraft())
+    val board = MutableStateFlow<Storyboard?>(null)
+    /** The camera bag's working copy; Apply to shot puts it into [shot]. */
+    val bag = MutableStateFlow<CameraDraft?>(null)
+    /** Renders started from the Shot and Swap screens this session (newest last): their panes follow them. */
+    val shotJobs = MutableStateFlow<List<String>>(emptyList())
+    val swapJobs = MutableStateFlow<List<String>>(emptyList())
+    val settings = MutableStateFlow<SuiteSettings?>(null)
+
+    val owner: Boolean get() = c.repo.state.value.wallet?.owner ?: c.prefs.value.owner
+
+    suspend fun load() {
+        try {
+            val cat = c.repo.api.suiteCatalog()
+            catalog.value = if (owner) cat else SuiteRules.memberSafe(cat)
+            catalogError.value = null
+            shot.update { it.copy(camera = it.camera.fit(cat.camera), quality = if (it.quality in cat.tiers.map { t -> t.id } || cat.tiers.isEmpty()) it.quality else cat.defaultQuality) }
+            if (board.value == null && c.repo.demo) board.value = demoBoard()
+        } catch (e: ApiException) {
+            catalogError.value = ErrorText.of(e)
+        }
+    }
+
+    /** The price and any cap message; a member never gets engine words, whatever the server sends. */
+    suspend fun estimate(req: SuiteShotRequest): Pair<SuiteEstimate?, String?> {
+        val (e, err) = c.repo.attemptInline { suiteEstimate(req) }
+        return (e?.let { if (owner) it else SuiteRules.memberSafe(it) }) to err?.let { memberSafeText(it) }
+    }
+
+    /** Generate: the job, or the plain reason it couldn't start (as a toast too). Claude never calls this: only a tap does. */
+    suspend fun generate(req: SuiteShotRequest, into: MutableStateFlow<List<String>>? = null): Job? {
+        val (j, err) = c.repo.createSuiteShot(req)
+        if (err != null) c.repo.toast(memberSafeText(err))
+        if (j != null) into?.update { (it - j.id) + j.id }
+        return j
+    }
+
+    suspend fun loadSettings(): String? {
+        if (!owner) return null
+        val (s, err) = c.repo.attemptInline { suiteSettings() }
+        if (s != null) settings.value = s
+        return err
+    }
+
+    suspend fun setModel(id: String, enabled: Boolean) {
+        val (s, err) = c.repo.attemptInline { patchSuiteSettings(SuiteSettingsPatch(mapOf(id to SuiteModelPatch(enabled)))) }
+        if (s != null) { settings.value = s; load() } else if (err != null) c.repo.toast(err)
+    }
+
+    private fun memberSafeText(s: String) = if (!owner && SuiteRules.PROVIDER_WORDS.containsMatchIn(s)) ErrorText.WENT_WRONG else s
+
+    /** Demo mode's sample storyboard, cast from the demo studio's own models. */
+    private fun demoBoard(): Storyboard {
+        val models = c.repo.state.value.models
+        val lead = models.firstOrNull()
+        val second = models.getOrNull(1)
+        val name = lead?.name?.substringBefore(' ') ?: "She"
+        return Storyboard("Café GRWM", listOfNotNull(lead?.id, second?.id), "cinematic", "hd", listOf(
+            StoryShot("s1", "Street → café door", "$name walks in from the rain and pushes the café door open.", "handheld", 3),
+            StoryShot("s2", "Order at the counter", "$name orders a flat white at the counter.", "dolly_in", 4),
+            StoryShot("s3", "Turn to camera, smile", "$name turns from the counter to camera and smiles; steam rises.", "orbit_left", 5),
+            StoryShot("s4", "${second?.name?.substringBefore(' ') ?: "A friend"} joins at the window", "A friend joins $name at the window seat.", "track_side", 4),
+            StoryShot("s5", "Selfie review, close", "$name gives the café a 10/10 to her phone camera.", "selfie", 5),
+        ))
+    }
+}

@@ -37,6 +37,8 @@ class AppContainer(
     val warmUi = studio.muse.app.data.WarmUi()
     /** The renders started from the Video studio, so its stage can follow them (blurred preview, then the takes playing). */
     val stageJobs = studio.muse.app.ui.screens.StageJobs()
+    /** AI suite (workstream 1): the catalog, drafts and renders of the Video suite screens. */
+    val suite by lazy { studio.muse.app.ui.screens.suite.SuiteStore(this) }
 
     init {
         repo.listener = studio.muse.app.data.JobListener { job ->
