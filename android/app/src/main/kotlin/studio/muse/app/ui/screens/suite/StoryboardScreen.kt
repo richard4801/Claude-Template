@@ -21,6 +21,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.text.font.FontWeight
@@ -128,7 +129,7 @@ private fun StoryRow(i: Int, s: StoryShot, st: studio.muse.app.data.StudioState,
     val pane = SuitePane.of(job, st.takes, null)
     Row(Modifier.fillMaxWidth().drawBehind { drawLine(m.t.line, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }
         .press { job?.let { nav.go(Routes.suiteTake(it.id)) } }.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Box(Modifier.size(62.dp, 104.dp)) {
+        Box(Modifier.size(62.dp, 104.dp).clipToBounds()) {
             val art = st.takes.firstOrNull { it.jobId == job?.id }?.thumb ?: st.models.firstOrNull()?.cover
             if (pane.phase == StagePhase.READY) RefImage(art, Modifier.fillMaxSize(), 20) else BlurredStageArt(art, moving = false)
         }

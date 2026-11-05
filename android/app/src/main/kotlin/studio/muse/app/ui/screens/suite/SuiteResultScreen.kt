@@ -122,7 +122,6 @@ fun SuiteResultScreen(jobId: String) {
                         }
                     }
                 }
-                if (pane.phase == StagePhase.FAILED) Tiny(pane.failure ?: "")
             }
         }
         // Keep · Retake · Edit · Share above the tab bar.
@@ -152,8 +151,8 @@ private fun Action(icon: String, label: String, enabled: Boolean, onClick: () ->
     val m = muse
     Column(Modifier.width(72.dp).press(enabled = enabled, onClick = onClick).semantics(mergeDescendants = true) { contentDescription = label },
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        SIc(icon, 20.dp, if (enabled) m.t.ink else m.t.muted)
-        T(label.uppercase(), m.type.mono.copy(fontSize = 9.5.sp, letterSpacing = .8.sp), if (enabled) m.t.muted else m.t.line)
+        SIc(icon, 20.dp, if (enabled) m.t.ink else m.t.muted.copy(alpha = .5f))
+        T(label.uppercase(), m.type.mono.copy(fontSize = 9.5.sp, letterSpacing = .8.sp), if (enabled) m.t.muted else m.t.muted.copy(alpha = .5f))
     }
 }
 

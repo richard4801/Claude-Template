@@ -24,7 +24,7 @@ import kotlin.math.roundToInt
 // two moves with intensity and speed), the Shot, Recast and Storyboard drafts and the requests they send, and the
 // result pane's member-safe wording.
 
-private val specJson = Json { encodeDefaults = false; explicitNulls = false }
+private val specJson = Json { encodeDefaults = true; explicitNulls = false }
 
 /** One picked move: intensity 0–100 %, speed slow / normal / fast. */
 data class MovePick(val id: String, val intensity: Int = 60, val speed: String = "normal") {
@@ -177,7 +177,7 @@ data class RecastDraft(
     fun add(): RecastDraft = if (!canAdd) this else {
         // Two people read left and right; a third and fourth take the next free spot.
         val spread = if (people.size == 1 && people[0].hint == "center") listOf(people[0].copy(hint = "left")) else people
-        val free = HINTS.first { h -> spread.none { it.hint == h } }
+        val free = ADD_ORDER.first { h -> spread.none { it.hint == h } }
         copy(people = spread + RecastPerson(free))
     }
 
@@ -201,6 +201,7 @@ data class RecastDraft(
 
     companion object {
         val HINTS = listOf("center", "left", "right", "foreground", "background")
+        private val ADD_ORDER = listOf("left", "right", "center", "foreground", "background")
         fun hintLabel(h: String) = when (h) { "center" -> "Centre"; "foreground" -> "Front"; "background" -> "Back"; else -> h.replaceFirstChar { it.uppercase() } }
     }
 }

@@ -205,7 +205,7 @@ data class SuiteLicence(
 /** owner: the engine a shot runs on. */
 @Serializable
 data class SuiteEngine(
-    val model: String = "", val name: String? = null, val provider: String? = null, val ref: String? = null, val resolution: String? = null,
+    val model: String = "", val name: String? = null, val provider: String? = null, val ref: JsonElement? = null, val resolution: String? = null,
     val perSec: Double? = null, val billedPerTake: Double? = null, val licence: SuiteLicence? = null, val notice: String? = null, val test: Boolean? = null,
 )
 
@@ -258,7 +258,8 @@ data class SuiteModelView(
     val id: String,
     val name: String = "",
     val provider: String = "",
-    val ref: String? = null,
+    /** A model id, or one per mode ({t2v, i2v, …}). */
+    val ref: JsonElement? = null,
     val status: String = "active",
     val resolutions: List<SuiteResolution> = emptyList(),
     val licence: SuiteLicence = SuiteLicence(),
