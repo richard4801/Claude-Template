@@ -55,6 +55,11 @@ class FakeMuseApi(
     private val promptScripts = FakePromptScripts(promptLib, now)
 
     override fun events(): Flow<ApiEvent> = events
+
+    // Workstream 2: camera sessions (the demo studio's seeded session, chat playback, tokens).
+    override val camera: FakeCameraApi by lazy {
+        FakeCameraApi(now, { models.toList().map { it.id to it.name } }, { events.tryEmit(it) }, stepDelayMs = if (speed == 0.0) 0 else 700)
+    }
     override fun setToken(token: String?) {}
 
     override suspend fun signIn(req: SignInRequest): AuthResponse {

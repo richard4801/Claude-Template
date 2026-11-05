@@ -170,6 +170,8 @@ interface MuseApi {
     /** Owner only. */
     suspend fun suiteSettings(): SuiteSettings = throw ApiException("not_found", "This server doesn't have the AI suite yet")
     suspend fun patchSuiteSettings(req: SuiteSettingsPatch): SuiteSettings = throw ApiException("not_found", "This server doesn't have the AI suite yet")
+    // Workstream 2: camera sessions (plans/api.md "MCP & camera sessions"), owner only. See CameraApi.kt.
+    val camera: CameraApi get() = CameraApi.Unsupported
 
     // Developer
     suspend fun setFailNext(fail: Boolean)

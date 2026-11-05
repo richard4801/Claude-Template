@@ -115,3 +115,34 @@ If Desktop can't find `uvx`/`npx` (GUI apps don't inherit your shell PATH), use 
 - The relay and the pending calls live in the API's memory (one instance, like live events). A restart ends waiting calls with an error the chat shows.
 - Character height isn't in the character pack yet: proxies default to 1.68 m unless the session's cast sets `heightM`.
 - The MUSE Blender add-on operators (`bpy.ops.muse.*`) from the research's phase C3 are replaced for now by the fixed scripts in the Mac app; moving them into a real add-on later keeps the same tool contract.
+
+## Phase 2 · UI (Directed mode, Direct with Claude, Connections)
+_Spec: `design/screens/ai-suite-desktop__D6.jpg` (Mac) and `ai-suite-mobile__M5.jpg` (phone); exact copy and sizes in `design/source/ai_desktop.py` (`chat_panel`, the D6 block around lines 140–190) and `ai_mobile.py`. Owner only: members never see any of it. Use the studio's real characters (never "Sienna"); owner views may name models._
+
+**Data:** everything comes from the camera-session API (`plans/api.md` "MCP & camera sessions"): `GET /v1/camera-sessions[/{id}]`, `PATCH`, `PUT …/path`, `POST …/assets` + confirm, `POST …/shot-draft`, `POST …/chat` (SSE ChatEvents), live `camera`/`blender` events, `GET /v1/connections`, `/v1/mcp/tokens`.
+
+**Directed pane (Mac, D6)** — inside the suite's Camera control when "Directed · Blender" is picked (workstream 1 owns the header, Preset|Directed toggle, Cancel / Apply to shot):
+- Tabs **Blocking · Guides · History**.
+- Session strip: id chip (`cs_7Q2M` = first 4 of the id after `cs_`, upper-case), title, `9:16 · 24 fps · 6.0 s · rev 4`; view switch **Plan · Camera view · Side**; **Re-render** (sends the chat message "Re-render the guides for this revision.").
+- **Plan** (top-down, metres, X right, Y up on screen = +Y away from camera): grid (0.5 m), 1 m scale bar; each cast member's path from `blocking` as a dashed line with time ticks (`0.0s`, `1.2s`…) at keyframes, a round token with initials at the position at the playhead time, a small facing arrow, and the action label of the active key ("turns to camera"); the camera path from `cameraPath` (dotted), a camera glyph at the playhead and its **view cone** (horizontal FOV from focal mm and sensor 36 mm: `2·atan(18/f)`, toward `target`), label `CAM A · 35 mm · 1.5 m`. Fit the drawing to the bounds of every point (+1 m margin). Empty state: "No blocking yet · ask Claude in the chat, or block it in Blender from your Claude app."
+- **Drag** a character token or the camera at the playhead → moves that keyframe (or inserts one at the playhead) → `PUT …/path` (debounced 400 ms); note "Drag a token or the camera to adjust · Claude sees your edits".
+- **Camera view**: the newest `preview`/`keyframe_*` still nearest the playhead; **Side**: the same plan projected on X/Z (heights).
+- Legend row: one line style per character name, "Camera path & view".
+- **Timeline** (bottom): ruler 0…duration s, tracks CAMERA, one per character (upper-case name), CUTS; keyframes as red diamonds with their label (camera: derived "push 0.4 m · ease in-out" from consecutive keys' distance + ease, or "orbit 90°" from angle change; characters: `action`); the span between keys as a bar; red playhead with a time chip (`2.4 s`) — drag to scrub; END chip with the duration.
+- **Guides** tab: ready assets by kind (greybox, depth, pose, tracks, keyframes START/MID/END, camera.json, characters.json, .blend) with thumbnails/play for video, size, source (Mac app / your Claude / chat), time.
+- **History** tab: newest first, the transcript's tool steps and notes plus assets by time, grouped per revision when it's known ("rev 4 · Claude (chat) · set camera path and blocking · 2 min ago").
+
+**Direct with Claude panel (Mac right column, phone M5 full screen)**:
+- Header "Direct with Claude" + pill `● LIVE` (live events connected).
+- Status rows with a coloured dot: **Claude session** — "Working…" while `claude.chatBusy`, "Connected · your Claude app" when `appLastSeenAt` < 5 min, else "In MUSE (this chat)" / "Not set up" when `inAppChat` is false; **Blender <addonVersion>** — "Mac · localhost" when `relay.blender`, "Mac app online · Blender not connected", "Mac app offline"; **Renders** — "Uploading n of m to MUSE" while assets are pending, "Guides ready" when a greybox is ready, else "None yet".
+- Transcript: `user` messages as dark bubbles right-aligned (label "YOU · MAC APP"/"YOU · PHONE" from the source device if known, else "YOU"); assistant text under a `CLAUDE` label; tool messages as small outlined chips with a cube icon and the upper-case tool name (`BUILD_STAGE`, `PLACE_CHARACTER ×2` — consecutive same tool collapsed), red outline when `ok` is false.
+- **Guides ready · rev N** card when guides exist: `6.0 s · 24 fps`, thumbnails (greybox, depth, pose, START, MID, END).
+- **Working strip** while a turn streams: "CLAUDE · WORKING ON REV n+1", the last tool step or text as a quote, a progress bar (steps done / steps seen, or the render's own progress when the Mac reports it), percent.
+- Composer: "Direct the shot… “lower the camera, lens 50”" + send (disabled while busy; `chat_busy` → "Claude is still working on this shot"). `director_unavailable` → inline "Direct with Claude isn't set up on the server yet (ANTHROPIC_API_KEY) · you can still direct from your own Claude app" with a link to Connections.
+- Footer: "Claude never spends money. Generating waits for your tap · est. $1.92 at HD." (price from `shotDraft.estimate.usd`, quality from the draft request; without a draft: "Claude never spends money. Generating waits for your tap.").
+- Phone (M5): back, title "Direct with Claude", `…` menu (Copy session id, Open in Settings → Connections); session card (title, `cs_7Q2M · 6.0 s · rev 4`, pill GUIDES READY / BLOCKING / DRAFTING); status card; Plan view (read-only, no drag, no timeline); last user bubble; CLAUDE · WORKING strip; guides row with "rev 4 guides · Greybox · depth · pose · 3 keyframes · Use for Shot 01 →"; composer. Blender runs on the Mac, never on the phone.
+
+**Settings → Connections (owner)**:
+- **Claude & MCP**: MUSE MCP URL (copy), "New token" (name) → the token shown once in a copy box with "You won't see it again"; list (name, prefix…, created, last used, Revoke with confirm). Snippets to copy for Claude Code (`claude mcp add --transport http muse <url> --header "Authorization: Bearer <token>"`) and Claude Desktop (the `mcp-remote` JSON), link "Setup guide" (`docsUrl`).
+- **Blender relay** (Mac app): on/off switch (BlenderRelayService), status lines (Mac app online, Blender connected + add-on version, last call, last error), "Install the Blender add-on" steps (3 lines from "Setup (owner, once)"). On the phone the section is read-only status + "Runs in the MUSE Mac app".
+- **In-app chat**: "Direct with Claude in MUSE" available / "Needs ANTHROPIC_API_KEY on the server".
