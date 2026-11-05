@@ -29,6 +29,7 @@ struct SettingsView: View {
         case .costs: return "dollarsign.circle"
         case .studio: return "building.2"
         case .engines: return "server.rack"
+        case .prompts: return "text.quote"
         case .archived: return "archivebox"
         case .notif: return "bell"
         case .developer: return "hammer"
@@ -77,12 +78,13 @@ struct SettingsView: View {
                 ListRow(title: "Export size") { MonoValue("1080×1920 · 9:16") }
                 ListRow(title: "Keep test renders for", last: true) { MonoValue("30 days") }
             }
-            H2("House style")
-            TextBox(placeholder: PromptEngine.houseStyle, text: $store.houseStyle, lines: 3)
-            HStack {
-                Muted("Added to every photo prompt. Never-add lists are set per model.")
-                Spacer()
-                if store.houseStyle != PromptEngine.houseStyle { LinkText("Reset") { store.houseStyle = PromptEngine.houseStyle } }
+            if store.isOwner {
+                H2("House style")
+                HStack {
+                    Muted("The house style added to every photo prompt is in Settings → Prompts, with every other prompt. Never-add lists are set per model.")
+                    Spacer()
+                    LinkText("Open Prompts") { store.settingsSection = .prompts }
+                }
             }
         case .costs:
             H2("Costs & limits")
@@ -101,6 +103,8 @@ struct SettingsView: View {
             StudioSettingsSection()
         case .engines:
             EnginesSettingsSection()
+        case .prompts:
+            PromptsSettingsSection()
         case .archived:
             ArchivedModelsSection()
         case .notif:

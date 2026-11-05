@@ -71,4 +71,12 @@ public enum LiveEvents {
         guard e.type == "member", let m = e.member else { return }
         if let i = members.firstIndex(where: { $0.id == m.id }) { members[i] = m } else { members.append(m) }
     }
+
+    /// `prompts` events (owners only): a library entry was saved or reset on another device.
+    @discardableResult
+    public static func applyPrompts(_ library: inout PromptLibrary?, _ e: ApiEvent) -> PromptEntry? {
+        guard e.type == "prompts", let p = e.prompt else { return nil }
+        library?.apply(p)
+        return p
+    }
 }

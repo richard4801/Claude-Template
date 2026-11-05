@@ -83,6 +83,18 @@ public protocol MuseAPI: AnyObject, Sendable {
     func setTakeStatus(id: String, status: String) async throws -> Take
     func deleteTake(id: String) async throws
     func shoot(_ req: ShootRequest) async throws -> [Take]
+    /// POST /v1/shoots/preview (same body, free): the final prompt the server will send, the images and the price.
+    func shootPreview(_ req: ShootRequest) async throws -> ShootPreview
+
+    // Prompt library (owner only; members get owner_only). plans/api.md "Shoot references and the prompt library" §3.
+    /// GET /v1/prompts
+    func prompts() async throws -> PromptLibrary
+    /// PUT /v1/prompts/{key} {text}: `prompt_invalid` (message shown as-is). Saving the default text clears the override.
+    func setPrompt(key: String, text: String) async throws -> PromptEntry
+    /// DELETE /v1/prompts/{key}: back to the default.
+    func resetPrompt(key: String) async throws -> PromptEntry
+    /// POST /v1/prompts/preview {key, text?}
+    func previewPrompt(_ req: PromptPreviewRequest) async throws -> PromptPreview
 
     // Photo templates (plans/templates.md). Layers and variation pools only ever reach the template's owner.
     /// GET /v1/templates?scope=&q=&tag=

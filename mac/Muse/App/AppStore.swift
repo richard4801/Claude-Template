@@ -48,7 +48,7 @@ enum ShootState { case idle, busy, done }
 enum ShootTab: String, CaseIterable { case scene, camera, light, prompt }
 enum GalleryTab { case tests, final }
 enum SettingsSection: String, CaseIterable {
-    case appearance, defaults, costs, studio, engines, archived, notif, developer, about
+    case appearance, defaults, costs, studio, engines, prompts, archived, notif, developer, about
     var title: String {
         switch self {
         case .appearance: return "Appearance"
@@ -56,6 +56,7 @@ enum SettingsSection: String, CaseIterable {
         case .costs: return "Costs & limits"
         case .studio: return "Studio"
         case .engines: return "Engines"
+        case .prompts: return "Prompts"
         case .archived: return "Archived models"
         case .notif: return "Notifications"
         case .developer: return "Developer"
@@ -63,8 +64,8 @@ enum SettingsSection: String, CaseIterable {
         }
     }
 
-    /// Studio, Engines and Archived models are the owner's.
-    var ownerOnly: Bool { self == .studio || self == .engines || self == .archived }
+    /// Studio, Engines, Prompts and Archived models are the owner's.
+    var ownerOnly: Bool { self == .studio || self == .engines || self == .prompts || self == .archived }
 }
 
 enum PostTab: Hashable { case scheduled, posted }
@@ -139,7 +140,6 @@ final class AppStore {
     var pro: Bool { didSet { defaults.set(pro, forKey: "muse.pro") } }
     /// The Render picker's default (Draft). Until the user picks one, the server's `features.video` default applies.
     var defaultQuality: VideoQuality { didSet { defaults.set(defaultQuality.rawValue, forKey: "muse.defaultQuality") } }
-    var houseStyle: String { didSet { defaults.set(houseStyle, forKey: "muse.houseStyle") } }
     var notifyDone: Bool { didSet { defaults.set(notifyDone, forKey: "muse.notifyDone") } }
     var notifyFailed: Bool { didSet { defaults.set(notifyFailed, forKey: "muse.notifyFailed") } }
     var notifyLowBalance: Bool { didSet { defaults.set(notifyLowBalance, forKey: "muse.notifyLow") } }
@@ -257,6 +257,31 @@ final class AppStore {
     var shootTab: ShootTab = .scene
     /// "Edit as text": a hand-edited prompt used for the next shoot only.
     var promptOverride: String?
+    /// Up to 3 reference images (pose & framing, look & colour, scene), sent with shoots and template shoots.
+    var shootRefs: [ShootRef] = []
+    /// Reference images still uploading.
+    var shootRefsUploading = 0
+    var shootRefsDropTargeted = false
+    /// POST /v1/shoots/preview for the current choices: the Final prompt box, Copy, Edit as text and the Shoot price.
+    var shootPreview: ShootPreview?
+    /// The preview is the app's own (demo mode, or the server couldn't be reached).
+    var shootPreviewIsLocal = false
+    /// Bumped by `prompts` events so the preview refetches with the owner's new wording.
+    var promptsVersion = 0
+
+    // MARK: Prompt library (owner: Settings → Prompts)
+
+    var promptLibrary: PromptLibrary?
+    var promptLibraryError: String?
+    /// The entry open in the editor.
+    var promptEditKey: String?
+    var promptDraft = ""
+    /// The saved text the draft started from (a live update replaces an untouched draft, never one being edited).
+    var promptDraftBase = ""
+    var promptLivePreview: PromptPreview?
+    /// `prompt_invalid` while typing or on Save, shown under the editor as-is.
+    var promptError: String?
+    var promptSaving = false
 
     // MARK: Photo templates (plans/templates.md)
 
@@ -340,7 +365,8 @@ final class AppStore {
         d.removeObject(forKey: "muse.defaultSteps")
         d.removeObject(forKey: "muse.defaultEngine")
         defaultQuality = VideoQuality(id: d.string(forKey: "muse.defaultQuality")).replicateOrDefault
-        houseStyle = d.string(forKey: "muse.houseStyle") ?? PromptEngine.houseStyle
+        // The house style is the server's now (Settings → Prompts · House style).
+        d.removeObject(forKey: "muse.houseStyle")
         notifyDone = d.object(forKey: "muse.notifyDone") as? Bool ?? true
         notifyFailed = d.object(forKey: "muse.notifyFailed") as? Bool ?? true
         notifyLowBalance = d.object(forKey: "muse.notifyLow") as? Bool ?? true
@@ -433,6 +459,7 @@ final class AppStore {
         studioBalance = nil
         offlineMessage = nil
         resetModelTools()
+        resetShootAndPrompts()
         resetWarm()
         Task { await restoreSession() }
     }
@@ -514,6 +541,7 @@ final class AppStore {
         imageEngine = try? await api.imageEngine()
         stepModels = (try? await api.imageModels()) ?? []
         archivedModels = (try? await api.listArchivedModels()) ?? []
+        if settingsSection == .prompts { await loadPrompts() }
     }
 
     /// Runs an API call and shows its error as a toast, in MUSE's words.
@@ -575,6 +603,7 @@ final class AppStore {
             if e.type == "studio", let sb = e.studioBalance { studioBalance = sb }
             if e.type == "settings", e.settings == nil { Task { [weak self] in await self?.loadStudio() } }
         }
+        if isOwner, let p = LiveEvents.applyPrompts(&promptLibrary, e) { promptChanged(p) }
         if e.type == "settings", let st = e.settings {
             studioSettings = st
             syncQualityWithServer()
@@ -755,6 +784,7 @@ final class AppStore {
         studioBalance = nil
         lastInvite = nil
         resetModelTools()
+        resetShootAndPrompts()
         templates = []
         shootTemplate = nil
         templateDetail = nil
@@ -843,8 +873,14 @@ final class AppStore {
     var videoFeatures: VideoFeatures { studioSettings?.features.video ?? .fallback }
     /// `features.photo` from the server, or the contract's prices: photo estimates ("about $0.46").
     var photoPricing: PhotoPricing { studioSettings?.features.photo ?? .standard }
-    /// A 4-photo shoot's estimate (the server's `features.photo.estimates.shoot` when it sends one).
-    var shootEstimate: Double { photoPricing.estimates?.shoot ?? photoPricing.shoot() }
+    /// A 4-photo shoot's estimate: the preview's (it counts the reference images), else the server's `features.photo.estimates.shoot`.
+    var shootEstimate: Double {
+        if let p = shootPreview { return p.estimate }
+        if shootRefs.isEmpty { return photoPricing.estimates?.shoot ?? photoPricing.shoot() }
+        return localShootPreview.estimate
+    }
+    /// "about $0.27" on the Shoot button.
+    var shootEstimateLabel: String { shootPreview?.estimateLabel ?? PhotoPricing.label(shootEstimate) }
     var outfitSetEstimate: Double { photoPricing.estimates?.outfitSet ?? photoPricing.outfitSet() }
     func sheetAnglesEstimate(_ missing: Int) -> Double { photoPricing.estimates?.sheetAngle.map { $0 * Double(missing) } ?? photoPricing.sheetAngles(missing) }
     var loraSetEstimate: Double { photoPricing.estimates?.loraSet ?? photoPricing.loraSet() }
@@ -889,15 +925,19 @@ final class AppStore {
         return PromptEngine.memberView(p)
     }
 
-    /// Off: the shoot prompt keeps only identity, outfit, the user's direction and the seed line (no scene/camera/light/style/never-add presets).
+    /// Off: the shoot prompt keeps only identity, outfit, direction, reference and seed lines (no scene/camera/light/style/never-add presets).
     var shootPresets = true
 
-    var shootSlots: [PromptSlot] {
-        let all = PromptEngine.shoot(identity: identity(currentModel), outfitName: currentOutfit?.name ?? "outfit", settings: shoot, houseStyle: houseStyle)
-        return shootPresets ? all : all.filter { ["identity", "outfit", "direction", "seed"].contains($0.key) }
+    /// The app's own preview (demo/offline fallback): the server library's default wording.
+    var localShootPreview: ShootPreview {
+        PromptEngine.shootPreview(identity: identity(currentModel), outfitName: currentOutfit?.name ?? "outfit", settings: shoot, presets: shootPresets,
+                                  refs: shootRefs, pricing: photoPricing)
     }
 
-    var shootPromptText: String { shootSlots.map(\.text).joined(separator: "\n") }
+    /// The Final prompt box: the server's preview, or the local fallback until it arrives.
+    var shootPromptSlots: [PromptSlotView] { (shootPreview ?? localShootPreview).slots }
+    /// Copy and Edit as text: exactly what Shoot would send.
+    var shootPromptText: String { (shootPreview ?? localShootPreview).text }
 
     var runningJob: Job? { jobs.first { $0.isRunning } }
     var activeJobs: [Job] { jobs.filter(\.isActive).sorted { a, b in a.isRunning != b.isRunning ? a.isRunning : a.createdAt < b.createdAt } }

@@ -323,6 +323,19 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     public func setTakeStatus(id: String, status: String) async throws -> Take { absolutize(try await call("PATCH", "v1/takes/\(id)", SetTakeStatusRequest(status: status))) }
     public func deleteTake(id: String) async throws { _ = try await send(request("DELETE", "v1/takes/\(id)")) }
     public func shoot(_ req: ShootRequest) async throws -> [Take] { (try await call("POST", "v1/shoots", req) as [Take]).map(absolutize) }
+    public func shootPreview(_ req: ShootRequest) async throws -> ShootPreview { try await call("POST", "v1/shoots/preview", req) }
+
+    public func prompts() async throws -> PromptLibrary { try await call("GET", "v1/prompts") }
+    public func setPrompt(key: String, text: String) async throws -> PromptEntry { try await call("PUT", "v1/prompts/\(Self.pathKey(key))", SetPromptRequest(text: text)) }
+    public func resetPrompt(key: String) async throws -> PromptEntry { try await call("DELETE", "v1/prompts/\(Self.pathKey(key))") }
+    public func previewPrompt(_ req: PromptPreviewRequest) async throws -> PromptPreview { try await call("POST", "v1/prompts/preview", req) }
+
+    /// Library keys are dotted ("shoot.camera"); anything else is percent-encoded for the path.
+    static func pathKey(_ key: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: ".-_")
+        return key.addingPercentEncoding(withAllowedCharacters: allowed) ?? key
+    }
 
     /// Relative video and image links ("/uploads/x.mp4") become absolute.
     func absolutize(_ t: Take) -> Take {

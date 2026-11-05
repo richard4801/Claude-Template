@@ -15,7 +15,91 @@ struct ShootView: View {
                 ShootInspector().frame(width: 344)
             }
         }
+        // The server builds the prompt: refetch its preview ~300 ms after the last change (cancelled by the next one).
+        .task(id: store.shootPreviewKey) {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            await store.refreshShootPreview()
+        }
     }
+}
+
+/// Up to 3 reference images that guide the pose, the look or the scene. Her face, body and outfit always come from her own references.
+struct ShootReferences: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    var body: some View {
+        let feature = store.shootRefsFeature
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Lbl("References")
+                Muted("\(store.shootRefs.count)/\(ShootRef.max)")
+                Spacer()
+            }
+            Muted("Optional · up to \(ShootRef.max) photos to copy a pose, a look or a place. Her face, body, hair and outfit always come from her own references.")
+            HStack(alignment: .top, spacing: 14) {
+                ForEach(Array(store.shootRefs.enumerated()), id: \.offset) { i, ref in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Media(ref: ref.image, ratio: 0.75, radius: t.isA ? 0 : 6)
+                            .frame(width: 120)
+                            .overlay(alignment: .topTrailing) {
+                                Button { store.removeShootRef(i) } label: {
+                                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+                                        .frame(width: 22, height: 22).background(Circle().fill(.black.opacity(0.55)))
+                                }
+                                .buttonStyle(.plain)
+                                .help("Remove")
+                                .padding(6)
+                            }
+                            .overlay(alignment: .bottomLeading) {
+                                if let n = store.shootPreview?.refs[safe: i] {
+                                    Text(Self.badge(n))
+                                        .font(t.mono(10)).foregroundStyle(.white)
+                                        .padding(.horizontal, 6).padding(.vertical, 3)
+                                        .background(RoundedRectangle(cornerRadius: 4).fill(.black.opacity(0.55)))
+                                        .padding(6)
+                                }
+                            }
+                        ForEach(ShootGuide.allCases, id: \.self) { g in
+                            Chip(feature.label(g), on: ref.guides.contains(g)) { store.toggleShootRefGuide(i, g) }
+                        }
+                    }
+                    .frame(width: 120, alignment: .leading)
+                }
+                ForEach(0..<store.shootRefsUploading, id: \.self) { _ in
+                    Shimmer().frame(width: 120, height: 160).clipShape(RoundedRectangle(cornerRadius: t.isA ? 0 : 6))
+                }
+                if !store.shootRefsFull {
+                    Button { store.pickShootRefs() } label: {
+                        EmptyTile(icon: "photo.badge.plus", text: "Add a reference\nor drop photos here", targeted: store.shootRefsDropTargeted)
+                            .frame(width: 120)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer(minLength: 0)
+            }
+            if let p = store.shootPreview, p.droppedRefs > 0 {
+                Note(icon: "exclamationmark.triangle", warn: true, "This shot setup can take only \(p.images) images in all, so \(p.droppedRefs == 1 ? "1 reference isn't" : "\(p.droppedRefs) references aren't") sent.")
+            }
+        }
+        .padding(.bottom, 18)
+        .dropDestination(for: URL.self) { urls, _ in
+            let imgs = urls.filter(MediaImport.isImage)
+            guard !imgs.isEmpty, !store.shootRefsFull else { return false }
+            store.addShootRefs(imgs)
+            return true
+        } isTargeted: { store.shootRefsDropTargeted = $0 }
+    }
+    /// "Image 7" (its number in what is sent, as the prompt lines say) or "Not sent".
+    static func badge(_ r: ShootPreviewRef) -> String {
+        if r.dropped { return "Not sent" }
+        return r.index.map { "Image \($0)" } ?? ""
+    }
+}
+
+extension Array {
+    subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
 }
 
 struct ShootCanvas: View {
@@ -86,6 +170,7 @@ struct ShootCanvas: View {
                     }
                 }
                 .padding(.bottom, 18)
+                ShootReferences()
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 4), spacing: 14) {
                     ForEach(0..<4, id: \.self) { i in
                         switch store.shootState {
@@ -113,10 +198,10 @@ struct ShootCanvas: View {
                             store.go(.gallery)
                         }
                         if let tpl = store.shootTemplate {
-                            MButton("Shoot 4 more · \(PhotoPricing.label(store.shootEstimate))", icon: "arrow.triangle.2.circlepath") { store.startTemplateShoot() }
+                            MButton("Shoot 4 more · \(store.shootEstimateLabel)", icon: "arrow.triangle.2.circlepath") { store.startTemplateShoot() }
                             Muted(store.templateLockLook ? "Lock look is on: the same seed for \(tpl.name) on this model." : "Same template, a new moment every shot.")
                         } else {
-                            MButton("Shoot 4 more · \(PhotoPricing.label(store.shootEstimate))", icon: "arrow.triangle.2.circlepath") { store.startShoot() }
+                            MButton("Shoot 4 more · \(store.shootEstimateLabel)", icon: "arrow.triangle.2.circlepath") { store.startShoot() }
                             if store.shoot.lockSeed { Muted("Lock look is on: retakes keep the same face and styling.") }
                         }
                     }
@@ -204,7 +289,7 @@ struct ShootInspector: View {
                             TextBox(placeholder: "e.g. laughing mid-step, hair blowing, holding an iced coffee", text: $store.shoot.direction)
                             Muted("Adds detail. It can't change her identity or the never-add list.")
                         }
-                        OptionRow(title: "Presets", hint: store.shootPresets ? "Adds scene, camera, light, style and never-add lines" : "Off: only her identity, outfit and your direction are sent") {
+                        OptionRow(title: "Presets", hint: store.shootPresets ? "Adds scene, camera, light, style and never-add lines" : "Off: only her identity, outfit, your direction and references are sent") {
                             MToggle(isOn: Binding(get: { store.shootPresets }, set: { store.shootPresets = $0 }))
                         }
                         OptionRow(title: "Lock look", hint: "Same seed, so retakes stay consistent") { MToggle(isOn: $store.shoot.lockSeed) }
@@ -213,8 +298,8 @@ struct ShootInspector: View {
                                 TextBox(placeholder: "", text: Binding(get: { store.promptOverride ?? "" }, set: { store.promptOverride = $0 }), lines: 9, mono: true)
                             } else {
                                 VStack(alignment: .leading, spacing: 6) {
-                                    ForEach(store.shootSlots) { slot in
-                                        (Text(slot.key.uppercased() + "  ").font(t.mono(10)).foregroundColor(t.muted) + Text(slot.body).font(t.body(12.5)))
+                                    ForEach(Array(store.shootPromptSlots.enumerated()), id: \.offset) { _, slot in
+                                        (Text(slot.layer.uppercased() + "  ").font(t.mono(10)).foregroundColor(t.muted) + Text(PromptSlot(slot.layer, slot.text).body).font(t.body(12.5)))
                                             .fixedSize(horizontal: false, vertical: true)
                                     }
                                 }
@@ -225,6 +310,12 @@ struct ShootInspector: View {
                                 .background(RoundedRectangle(cornerRadius: t.controlRadius).fill(t.surface2))
                                 .overlay(RoundedRectangle(cornerRadius: t.controlRadius).strokeBorder(t.isC ? .clear : t.strongLine, lineWidth: t.lineWidth))
                             }
+                        }
+                        if let removed = store.shootPreview?.removed, !removed.isEmpty, store.promptOverride == nil {
+                            Muted("Left out of your direction: \(removed.joined(separator: "; ")). It would change her identity or add something on her never-add list.")
+                        }
+                        if store.shootPreviewIsLocal && !store.isDemo {
+                            Muted("Can't reach the server, so this is the app's own version. The server's wording applies when you shoot.")
                         }
                         HStack(spacing: 10) {
                             MButton("Copy", size: .small, fill: true) { store.copy(store.promptOverride ?? store.shootPromptText) }
@@ -243,7 +334,7 @@ struct ShootInspector: View {
             }
             VStack(alignment: .leading, spacing: 8) {
                 if store.isOwner { ModelChooser(step: .shot, target: .shoot) }
-                MButton(store.shootState == .busy ? "Shooting…" : "Shoot 4 · \(PhotoPricing.label(store.shootEstimate))", kind: .primary, size: .big, off: store.shootState == .busy) { store.startShoot() }
+                MButton(store.shootState == .busy ? "Shooting…" : "Shoot 4 · \(store.shootEstimateLabel)", kind: .primary, size: .big, off: store.shootState == .busy) { store.startShoot() }
             }
             .padding(.horizontal, 20)
             .padding(.top, 14)

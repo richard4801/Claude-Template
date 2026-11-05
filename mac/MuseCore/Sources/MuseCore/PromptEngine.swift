@@ -127,7 +127,7 @@ public enum PromptEngine {
         return (id.neverAdd + globalNever).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
     }
 
-    /// Photoshoot prompt, slot by slot. `houseStyle` is editable in Settings → Render defaults.
+    /// Photoshoot prompt, slot by slot: the demo/offline fallback (the server builds the real one from its prompt library).
     public static func shoot(identity: PromptIdentity, outfitName: String, settings s: ShootSettings, houseStyle: String = houseStyle) -> [PromptSlot] {
         var lensNote = ""
         if s.lens <= 24 { lensNote = ", slight wide-angle distortion" } else if s.lens >= 85 { lensNote = ", compressed background, creamy bokeh" }

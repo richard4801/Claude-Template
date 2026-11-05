@@ -358,7 +358,7 @@ struct TemplateInspector: View {
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     if store.isOwner { ModelChooser(step: .shot, target: .shoot) }
-                    MButton(store.shootState == .busy ? "Shooting…" : "Shoot 4 · \(PhotoPricing.label(store.shootEstimate))", icon: "camera", kind: .primary, size: .big,
+                    MButton(store.shootState == .busy ? "Shooting…" : "Shoot 4 · \(store.shootEstimateLabel)", icon: "camera", kind: .primary, size: .big,
                             off: store.shootState == .busy) { store.startTemplateShoot() }
                 }
                 .padding(.horizontal, 20)

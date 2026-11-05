@@ -697,6 +697,8 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
     public var templateName: String?
     public var shuffleSeed: Int64?
     public var variation: VariationDraw?
+    /// Photoshoot stills: the reference images it was shot with (2026-11-05).
+    public var refs: [ShootRef]?
 
     public init(id: String, kind: String = "take", jobId: String? = nil, index: Int = 1, of: Int = 1, title: String, label: String, engineLabel: String = "",
                 cost: Double = 0, seed: Int64 = 0, status: String = "test", thumb: ImageRef, prompt: String = "", createdAt: Int64 = 0) {
@@ -718,7 +720,7 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, kind, jobId, index, of, title, label, engineLabel, cost, seed, status, thumb, prompt, createdAt, videoUrl, durationSec, width, height,
-             templateId, templateName, shuffleSeed, variation
+             templateId, templateName, shuffleSeed, variation, refs
     }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -744,6 +746,7 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
         templateName = c.o(.templateName)
         shuffleSeed = c.o(.shuffleSeed)
         variation = c.o(.variation)
+        refs = c.o(.refs)
     }
 
     /// Made with a template.
@@ -796,10 +799,20 @@ public struct SetTakeStatusRequest: Codable, Sendable {
 public struct ShootRequest: Codable, Sendable {
     public var modelId: String
     public var outfitId: String
-    public var scene: String
-    public var prompt: String
+    /// The chip label or the user's own words (the server lower-cases it into the scene line). nil on template shoots.
+    public var scene: String?
+    /// "Edit as text" only: sent to the model exactly and nothing is built. nil = the server builds the prompt from the choices.
+    public var prompt: String?
     public var seed: Int64?
     public var count: Int
+    // The server-built photoshoot prompt (plans/api.md 2026-11-05 §2). nil fields are left out of the JSON.
+    /// false = only identity, outfit, direction, reference and seed lines.
+    public var presets: Bool?
+    public var camera: ShootCamera?
+    public var light: String?
+    public var grade: String?
+    /// Up to 3 reference images (pose & framing, look & colour, scene). Also on template shoots.
+    public var refs: [ShootRef]?
     // Template shoots (plans/templates.md). nil fields are left out of the JSON.
     public var templateId: String?
     /// Replaces the pose and body-angle draws.
@@ -813,7 +826,7 @@ public struct ShootRequest: Codable, Sendable {
     /// Owner only: per-run model override (step → "owner/name"); members never send it.
     public var models: ModelOverrides?
 
-    public init(modelId: String, outfitId: String, scene: String, prompt: String, seed: Int64? = nil, count: Int = 4) {
+    public init(modelId: String, outfitId: String, scene: String?, prompt: String?, seed: Int64? = nil, count: Int = 4) {
         self.modelId = modelId
         self.outfitId = outfitId
         self.scene = scene
@@ -824,14 +837,15 @@ public struct ShootRequest: Codable, Sendable {
 
     /// A template shoot: only the template id and the user's choices are sent.
     public static func template(_ templateId: String, modelId: String, outfitId: String, direction: String = "", shuffleSeed: Int64?, lockSeed: Bool = false,
-                                productImage: ImageRef? = nil, count: Int = 4) -> ShootRequest {
-        var r = ShootRequest(modelId: modelId, outfitId: outfitId, scene: "", prompt: "", count: count)
+                                productImage: ImageRef? = nil, refs: [ShootRef] = [], count: Int = 4) -> ShootRequest {
+        var r = ShootRequest(modelId: modelId, outfitId: outfitId, scene: nil, prompt: nil, count: count)
         r.templateId = templateId
         let d = direction.trimmingCharacters(in: .whitespacesAndNewlines)
         r.direction = d.isEmpty ? nil : d
         r.shuffleSeed = shuffleSeed
         r.lockSeed = lockSeed
         r.productImage = productImage
+        r.refs = refs.isEmpty ? nil : Array(refs.prefix(ShootRef.max))
         return r
     }
 }
@@ -961,6 +975,8 @@ public struct ApiEvent: Codable, Sendable {
     /// Owners only: `member` (one Members row) and `studio` (the studio balance card).
     public var member: Member?
     public var studioBalance: StudioBalance?
+    /// `prompts` events (owners only): a prompt-library entry was saved or reset.
+    public var prompt: PromptEntry?
 
     /// Not from the server: the stream (re)connected, so the app refetches what it may have missed.
     public static let connected = "connected"
@@ -969,7 +985,8 @@ public struct ApiEvent: Codable, Sendable {
                 takes: [Take] = [], wallet: Wallet? = nil, notice: EventNotice? = nil, gpu: WarmGpu? = nil,
                 event: String? = nil, warning: WarmGpuWarning? = nil, op: String? = nil, id: String? = nil, take: Take? = nil, template: MuseTemplate? = nil,
                 account: Account? = nil, modelId: String? = nil, platform: String? = nil, settings: StudioSettings? = nil, member: Member? = nil,
-                studioBalance: StudioBalance? = nil) {
+                studioBalance: StudioBalance? = nil, prompt: PromptEntry? = nil) {
+        self.prompt = prompt
         self.op = op
         self.id = id
         self.take = take
@@ -998,7 +1015,7 @@ public struct ApiEvent: Codable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case type, job, balance, model, outfit, lora, post, takes, wallet, notice, gpu, event, warning, tool
-        case op, id, take, template, account, modelId, platform, settings, member, studioBalance
+        case op, id, take, template, account, modelId, platform, settings, member, studioBalance, prompt
     }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -1026,6 +1043,7 @@ public struct ApiEvent: Codable, Sendable {
         settings = c.o(.settings)
         member = c.o(.member)
         studioBalance = c.o(.studioBalance)
+        prompt = c.o(.prompt)
     }
 }
 

@@ -21,7 +21,7 @@ public actor FakeMuseAPI: MuseAPI {
     private var runner: Task<Void, Never>?
     private var runningId: String?
     private let loraSeconds: Double
-    private var loras: [String: Lora] = [:]
+    var loras: [String: Lora] = [:]
     private var loraTasks: [String: Task<Void, Never>] = [:]
     private var accounts: [String: [Account]] = [:]
     private var posts: [Post] = []
@@ -35,6 +35,9 @@ public actor FakeMuseAPI: MuseAPI {
     /// Templates with their layers (the "server side"). Only the owner's ever leave the actor with layers.
     private var templates: [MuseTemplate]
     private var favourites: Set<String> = []
+    /// Demo prompt library overrides (Settings → Prompts) and when each was saved.
+    var promptOverrides: [String: String] = [:]
+    var promptUpdated: [String: Int64] = [:]
     /// The exact layers behind each shot (server-side record), for "Save as template".
     private var shotLayers: [String: TemplateLayers] = [:]
     /// Keep add-on engine ready (owner only): the rules run on a clock `warmSpeed`× real time (boot is sped up like renders).
@@ -775,20 +778,25 @@ public actor FakeMuseAPI: MuseAPI {
     public func shoot(_ req: ShootRequest) async throws -> [Take] {
         try checkOverrides(req.models)
         _ = try activeModel(req.modelId)
+        if let p = req.refsProblem { throw ApiError("bad_request", p) }
         if let tid = req.templateId { return try await templateShoot(tid, req) }
-        let count = max(1, min(8, req.count))
-        let cost = photoPricing.shoot(count: count)
+        let count = max(1, min(4, req.count))
+        let preview = try shootPreviewNow(req)
+        let cost = preview.estimate
         if cost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough in the studio balance · add a top-up in Credits") }
         charge(cost)
         hub.emit(ApiEvent(type: "balance", balance: bal))
         try? await Task.sleep(nanoseconds: UInt64(genDelay * 1_000_000_000))
         let o = outfits.first { $0.id == req.outfitId }
         let pool = [o?.front?.asset ?? "c_front", "c_tq", "g_front", "hero"]
-        let label = req.scene.components(separatedBy: "·").first?.trimmingCharacters(in: .whitespaces) ?? req.scene
+        let scene = req.scene ?? "Rooftop · golden hour"
+        let label = scene.components(separatedBy: "·").first?.trimmingCharacters(in: .whitespaces) ?? scene
         let t = nowMs()
         let shots = (0..<count).map { n in
-            Take(id: "s_\(shortId())", kind: "shot", index: n + 1, of: count, title: "Shoot · \(label.prefix(28))", label: "Shoot", cost: cost / Double(count),
-                 seed: req.seed ?? Int64.random(in: 1000...99999), thumb: .asset(pool[n % pool.count]), prompt: req.prompt, createdAt: t)
+            var take = Take(id: "s_\(shortId())", kind: "shot", index: n + 1, of: count, title: "Shoot · \(label.prefix(28))", label: "Shoot", cost: cost / Double(count),
+                            seed: req.seed ?? preview.seed ?? Int64.random(in: 1000...99999), thumb: .asset(pool[n % pool.count]), prompt: preview.text, createdAt: t)
+            take.refs = req.refs
+            return take
         }
         takes.insert(contentsOf: shots, at: 0)
         return shots
@@ -964,6 +972,7 @@ public actor FakeMuseAPI: MuseAPI {
             take.templateName = t.name
             take.shuffleSeed = shuffle
             take.variation = owner ? b.variation : nil
+            take.refs = req.refs
             shotLayers[take.id] = t.layers
             shots.append(take)
         }

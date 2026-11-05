@@ -284,17 +284,20 @@ extension AppStore {
     // MARK: Photoshoot
 
     func startShoot() {
-        guard shootState != .busy, let m = currentModel, let o = currentOutfit else {
+        guard shootState != .busy, currentModel != nil, currentOutfit != nil else {
             if currentOutfit == nil { showToast("Add an outfit first", action: "Add outfit") { [weak self] in self?.openOutfitSheet(for: nil) } }
+            return
+        }
+        if shootRefsUploading > 0 {
+            showToast("Wait a moment · the reference images are still uploading")
             return
         }
         if shootEstimate > balance.balance {
             notEnough("for a shoot")
             return
         }
-        let prompt = promptOverride ?? shootPromptText
-        var req = ShootRequest(modelId: m.id, outfitId: o.id, scene: shoot.effectiveScene, prompt: prompt, seed: shoot.lockSeed ? 48213 : nil)
-        req.models = shootOverrides
+        // The server builds the prompt from these choices; "Edit as text" sends the user's text instead (exactly).
+        guard let req = currentShootRequest() else { return }
         withAnimation { shootState = .busy }
         perform { [self] in
             do {

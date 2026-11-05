@@ -166,17 +166,19 @@ extension AppStore {
     }
 
     func startTemplateShoot() {
-        guard shootState != .busy, let t = shootTemplate, let m = currentModel, let o = currentOutfit else {
+        guard shootState != .busy, let t = shootTemplate, currentModel != nil, currentOutfit != nil else {
             if currentOutfit == nil { showToast("Add an outfit first", action: "Add outfit") { [weak self] in self?.openOutfitSheet(for: nil) } }
+            return
+        }
+        if shootRefsUploading > 0 {
+            showToast("Wait a moment · the reference images are still uploading")
             return
         }
         if shootEstimate > balance.balance {
             notEnough("for a shoot")
             return
         }
-        var req = ShootRequest.template(t.id, modelId: m.id, outfitId: o.id, direction: templateDirection, shuffleSeed: templateShuffle,
-                                        lockSeed: templateLockLook, productImage: t.acceptsProduct ? templateProduct : nil)
-        req.models = shootOverrides
+        guard let req = currentShootRequest() else { return }
         withAnimation { shootState = .busy }
         perform { [self] in
             do {

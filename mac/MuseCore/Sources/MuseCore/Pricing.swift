@@ -364,6 +364,10 @@ public struct PhotoPricing: Codable, Hashable, Sendable {
     public var maxRefs: Int
     public var loraShots: Int
     public var estimates: Estimates?
+    /// The shot model's image limit (identity references + reference images), 2026-11-05.
+    public var maxInputs: Int
+    /// Reference images per photoshoot. nil = an older server without them.
+    public var references: ShootReferencesFeature?
 
     public struct Estimates: Codable, Hashable, Sendable {
         public var shoot: Double?
@@ -379,7 +383,9 @@ public struct PhotoPricing: Codable, Hashable, Sendable {
     }
 
     public init(perRun: Double = 0.015, perInputMp: Double = 0.015, perOutputMp: Double = 0.015, perEdit: Double = 0.03, refMp: Double = 0.79, maxRefs: Int = 6,
-                loraShots: Int = 30, estimates: Estimates? = nil) {
+                loraShots: Int = 30, estimates: Estimates? = nil, maxInputs: Int = 8, references: ShootReferencesFeature? = nil) {
+        self.maxInputs = maxInputs
+        self.references = references
         self.perRun = perRun
         self.perInputMp = perInputMp
         self.perOutputMp = perOutputMp
@@ -390,7 +396,7 @@ public struct PhotoPricing: Codable, Hashable, Sendable {
         self.estimates = estimates
     }
 
-    enum CodingKeys: String, CodingKey { case perRun, perInputMp, perOutputMp, perEdit, refMp, maxRefs, loraShots, estimates }
+    enum CodingKeys: String, CodingKey { case perRun, perInputMp, perOutputMp, perEdit, refMp, maxRefs, loraShots, estimates, maxInputs, references }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         let z = PhotoPricing()
@@ -402,6 +408,8 @@ public struct PhotoPricing: Codable, Hashable, Sendable {
         maxRefs = c.v(.maxRefs, z.maxRefs)
         loraShots = c.v(.loraShots, z.loraShots)
         estimates = c.o(.estimates)
+        maxInputs = c.v(.maxInputs, z.maxInputs)
+        references = c.o(.references)
     }
 
     /// The contract's defaults (FLUX.2 [pro] and the edit model's published prices), for servers that don't send `features.photo`.
