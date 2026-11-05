@@ -67,6 +67,8 @@ interface MuseService {
     @GET("v1/takes") suspend fun takes(): List<Take>
     @PATCH("v1/takes/{id}") suspend fun setTake(@Path("id") id: String, @Body r: SetTakeStatusRequest): Take
     @DELETE("v1/takes/{id}") suspend fun deleteTake(@Path("id") id: String)
+    @POST("v1/takes/{id}/versions") suspend fun createVersion(@Path("id") id: String, @Body r: TakeVersionRequest): Take
+    @GET("v1/takes/{id}/versions") suspend fun versions(@Path("id") id: String): List<Take>
     @POST("v1/shoots") suspend fun shoot(@Body r: ShootRequest): List<Take>
     @GET("v1/templates") suspend fun templates(@Query("scope") scope: String, @Query("q") q: String?, @Query("tag") tag: String?): List<Template>
     @GET("v1/templates/{id}") suspend fun template(@Path("id") id: String): Template
@@ -250,9 +252,15 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     private suspend fun putPresigned(kind: String, mime: String, bytes: ByteArray, onProgress: (Float) -> Unit): String {
         val p = call { presign(PresignRequest(kind, mime, bytes.size.toLong())) }
         val ct = p.headers.entries.firstOrNull { it.key.equals("content-type", true) }?.value ?: mime
+        putToStorage(p, ProgressBody(bytes, ct.toMediaTypeOrNull(), onProgress))
+        return p.uploadId
+    }
+
+    /** The PUT of a presigned upload (never with our bearer token). */
+    private suspend fun putToStorage(p: PresignResponse, body: RequestBody) {
         val req = Request.Builder().url(p.url).apply {
             p.headers.forEach { (k, v) -> if (!k.equals("content-type", true)) header(k, v) }
-        }.method(p.method.ifBlank { "PUT" }, ProgressBody(bytes, ct.toMediaTypeOrNull(), onProgress)).build()
+        }.method(p.method.ifBlank { "PUT" }, body).build()
         withContext(Dispatchers.IO) {
             try {
                 storageClient.newCall(req).execute().use { r ->
@@ -262,12 +270,21 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
                 throw ApiException("upload_failed", "The upload was interrupted")
             }
         }
-        return p.uploadId
     }
 
     override suspend fun listJobs() = call { jobs() }.map { it.abs() }
     override suspend fun createJob(req: JobRequest) = call { createJob(req) }.abs()
     override suspend fun removeJob(jobId: String) = call { removeJob(jobId) }
+
+    /** Edited version: the MP4 (streamed from disk) and its JPEG go up with presigned PUTs, then the take is created. */
+    override suspend fun saveTakeVersion(takeId: String, video: EditedVideo, edits: EditListDto, onProgress: (Float) -> Unit): Take {
+        val p = call { presign(PresignRequest("clip", "video/mp4", video.file.length())) }
+        putToStorage(p, FileProgressBody(video.file, "video/mp4".toMediaType()) { onProgress(it * .97f) })
+        val thumbId = video.thumbJpeg?.let { putPresigned("image", "image/jpeg", it) {} }
+        val req = TakeVersionRequest(p.uploadId, thumbId, edits, video.durationSec, video.width, video.height, video.fps)
+        return call { createVersion(takeId, req) }.abs().also { onProgress(1f) }
+    }
+    override suspend fun takeVersions(takeId: String) = call { versions(takeId) }.map { it.abs() }
     override suspend fun listTakes() = call { takes() }.map { it.abs() }
     override suspend fun setTakeStatus(takeId: String, status: String) = call { setTake(takeId, SetTakeStatusRequest(status)) }.abs()
     override suspend fun deleteTake(takeId: String) = call { deleteTake(takeId) }

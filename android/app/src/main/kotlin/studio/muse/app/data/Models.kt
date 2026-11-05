@@ -227,6 +227,10 @@ data class Take(
     val durationSec: Double? = null,
     val width: Int? = null,
     val height: Int? = null,
+    /** Edited versions (kind "edit", plans/api.md "Video editor"): the take it was cut from, the edit list, the file's frame rate. */
+    val parentTakeId: String? = null,
+    val edits: EditListDto? = null,
+    val fps: Double? = null,
     /** Template shots: the template's id and name, the variation draw seed, and (template owner only) what was drawn. */
     val templateId: String? = null,
     val templateName: String? = null,

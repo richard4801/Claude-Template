@@ -84,6 +84,9 @@ dependencies {
     implementation(libs.coil.network.okhttp)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
+    // The on-device video editor (plans/video-editor.md): export with Transformer, frame-rate effects.
+    implementation(libs.media3.transformer)
+    implementation(libs.media3.effect)
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)
 

@@ -104,6 +104,9 @@ object Routes {
     fun templateUse(id: String) = "template/$id/use"
     fun saveTemplate(shotId: String) = "savetemplate/$shotId"
     fun post(takeId: String) = "post/$takeId"
+    /** The on-device video editor (plans/video-editor.md). */
+    const val EDIT_VIDEO = "editvideo/{id}"
+    fun editVideo(takeId: String) = "editvideo/$takeId"
 }
 
 /** Navigation helpers (the prototype's go/back/tab). */
@@ -202,6 +205,7 @@ fun MuseApp(
                     composable(Routes.SOURCE) { SourceScreen() }
                     composable(Routes.DIRECT) { DirectScreen() }
                     composable(Routes.RESULT) { e -> ResultScreen(e.arguments?.getString("id") ?: "") }
+                    composable(Routes.EDIT_VIDEO) { e -> VideoEditorScreen(e.arguments?.getString("id") ?: "") }
                     composable(Routes.LORA) { LoraScreen() }
                     composable(Routes.ACCOUNTS) { AccountsScreen() }
                     composable(Routes.POST) { e -> PostScreen(e.arguments?.getString("id") ?: "") }

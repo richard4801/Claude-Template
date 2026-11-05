@@ -53,6 +53,11 @@ interface MuseApi {
     suspend fun listTakes(): List<Take>
     suspend fun setTakeStatus(takeId: String, status: String): Take
     suspend fun deleteTake(takeId: String)
+    /** Saves a video edited on this device as a new take (kind "edit") linked to [takeId] (plans/api.md "Video editor"). Free. */
+    suspend fun saveTakeVersion(takeId: String, video: EditedVideo, edits: EditListDto, onProgress: (Float) -> Unit = {}): Take =
+        throw ApiException("unsupported", "Saving an edited video needs the studio server")
+    /** The edited versions of a take, newest first. */
+    suspend fun takeVersions(takeId: String): List<Take> = listTakes().filter { it.parentTakeId == takeId }.sortedByDescending { it.createdAt }
     suspend fun shoot(req: ShootRequest): List<Take>
 
     // Photo templates (plans/templates.md). Hidden layers come back only for the owner's own templates.

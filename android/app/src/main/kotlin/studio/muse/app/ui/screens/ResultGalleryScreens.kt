@@ -50,6 +50,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import studio.muse.app.AppContainer
 import studio.muse.app.data.Job
+import studio.muse.app.data.editable
 import studio.muse.app.data.Take
 import studio.muse.app.ui.LocalCelebrate
 import studio.muse.app.ui.LocalContainer
@@ -64,7 +65,11 @@ import studio.muse.core.Pricing
 
 data class ResultState(val takes: List<Take> = emptyList(), val job: Job? = null, val retryCost: Double = 0.0, val posts: List<studio.muse.app.data.Post> = emptyList(),
     /** The Upscale add-on (coming soon until the server says otherwise). */
-    val upscale: studio.muse.app.data.AddonInfo = studio.muse.app.data.VideoFeatures.DEFAULT.upscale)
+    val upscale: studio.muse.app.data.AddonInfo = studio.muse.app.data.VideoFeatures.DEFAULT.upscale,
+    /** Every take of the studio, for the edited versions of a video (plans/video-editor.md). */
+    val all: List<Take> = emptyList()) {
+    fun versions(t: Take) = all.filter { it.kind == "edit" && it.parentTakeId == t.id }.sortedByDescending { it.createdAt }
+}
 
 class ResultViewModel(private val c: AppContainer, private val id: String) : ViewModel() {
     val state: StateFlow<ResultState> = c.repo.state.map { s ->
@@ -73,7 +78,7 @@ class ResultViewModel(private val c: AppContainer, private val id: String) : Vie
         val takes = if (direct != null && direct.jobId == null) listOf(direct) else s.takes.filter { it.jobId == jobId }.sortedBy { it.index }
         val job = s.job(jobId)
         ResultState(takes, job, job?.let { Pricing.totalCost(it.request.spec()) } ?: 0.0, s.posts.filter { p -> takes.any { it.id == p.takeId } },
-            (s.video ?: studio.muse.app.data.VideoFeatures.DEFAULT).upscale)
+            (s.video ?: studio.muse.app.data.VideoFeatures.DEFAULT).upscale, s.takes)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, ResultState())
 
     fun approve(t: Take, celebrate: () -> Unit) = viewModelScope.launch {
@@ -154,7 +159,7 @@ fun ResultScreen(id: String) {
                             if (url != null) TakeVideo(url, t.thumb, p == pager.currentPage, Modifier.fillMaxSize())
                             else {
                                 RefImage(t?.thumb, Modifier.fillMaxSize(), 30)
-                                if (t?.kind == "take") PlayBadge()
+                                if (t?.kind == "take" || t?.kind == "edit") PlayBadge()
                             }
                         }
                     }
@@ -165,6 +170,7 @@ fun ResultScreen(id: String) {
                         MoreMenu(listOf(
                             MenuItem("export", "Download") { vm.export() },
                             MenuItem("upload", "Post") { take?.let { nav.go(Routes.post(it.id)) } },
+                            MenuItem("retry", "Edit video") { take?.let { if (it.editable) nav.go(Routes.editVideo(it.id)) else vm.toast("Only finished videos can be edited") } },
                             MenuItem("grid", "Save as template") { take?.let { if (it.shot) nav.go(Routes.saveTemplate(it.id)) else vm.toast("Templates are for photos · video templates come later") } },
                             MenuItem("spark", "Copy prompt") { clip.setText(AnnotatedString(take?.prompt?.ifBlank { null } ?: s.job?.prompt ?: "")); vm.toast("Prompt copied") },
                             MenuItem("grid", "Compare takes") { if (s.takes.size > 1) compare = !compare else vm.toast("Compare takes · needs 2+ takes") },
@@ -177,6 +183,7 @@ fun ResultScreen(id: String) {
                 Column(Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     SideAction("retry", if (s.job != null) "Retry · ${Pricing.money(s.retryCost)}" else "Retry") { vm.retry(nav) }
                     SideAction("export", "Export") { vm.export() }
+                    if (take?.editable == true) SideAction("retry", "Edit") { nav.go(Routes.editVideo(take.id)) }
                     SideAction("upload", "Post") { take?.let { nav.go(Routes.post(it.id)) } }
                     if (take?.shot == true) SideAction("grid", "Save look") { nav.go(Routes.saveTemplate(take.id)) }
                 }
@@ -206,6 +213,7 @@ fun ResultScreen(id: String) {
                         }
                     }
                     if (take.kind == "take" && take.videoUrl != null) UpscaleRow(s.upscale) { z -> vm.upscale(take, z) }
+                    if (take.editable) EditVideoRow(take, s.versions(take)) { nav.go(Routes.editVideo(take.id)) }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Cta2("Discard", { vm.discard(take, nav) }, Modifier.weight(1f))
                         Cta(if (take.final) "Approved ✓" else "Approve", { vm.approve(take, celebrate) }, Modifier.weight(1f))
@@ -269,7 +277,7 @@ fun GalleryScreen() {
                                         .let { if (m.isD) it.border(2.5.dp, Ink, shape) else it }.press { nav.go(Routes.result(t.jobId ?: t.id)) },
                                 ) {
                                     RefImage(t.thumb, Modifier.fillMaxSize(), 20)
-                                    if (t.kind == "take") PlayBadge()
+                                    if (t.kind == "take" || t.kind == "edit") PlayBadge()
                                     Box(Modifier.align(Alignment.BottomStart).padding(6.dp).clip(RoundedCornerShape(4.dp)).background(Color.Black.copy(alpha = .55f)).padding(horizontal = 6.dp, vertical = 2.dp)) {
                                         T((if (isNew) "New · " else "") + t.label, m.type.tiny.copy(fontSize = 11.5.sp, fontWeight = FontWeight.Bold), Color.White, maxLines = 1)
                                     }
