@@ -51,6 +51,7 @@ export async function registerCameraRoutes(app: FastifyInstance, ctx: Ctx) {
   });
   app.put<P>('/v1/camera-sessions/:id/path', { ...owner, bodyLimit: 2 * 1024 * 1024 }, async req => service.setPath(req.user, req.params.id, req.body));
   app.post<P>('/v1/camera-sessions/:id/shot-draft', owner, async req => service.shotDraft(req.user, req.params.id, req.body));
+  app.post<P>('/v1/camera-sessions/:id/shot-draft/job', owner, async req => service.linkJob(req.user, req.params.id, req.body));
 
   // ------------------------------------------------------------------ Direct with Claude (streams ChatEvents as SSE)
   app.post<P>('/v1/camera-sessions/:id/chat', owner, async (req, reply) => {

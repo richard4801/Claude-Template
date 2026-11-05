@@ -18,6 +18,8 @@ export type ShotDraftRow = {
   estimate: { usd: number; tokens: number }; camera: Record<string, unknown>; createdAt: number;
   /** The suite ShotRequest to send when the owner presses Generate (POST /v1/suite/shots). */
   request?: Record<string, unknown>; warnings?: string[];
+  /** The render job the owner started from this draft (POST /v1/suite/shots), linked back by the app. */
+  jobId?: string; linkedAt?: number;
 };
 
 export const cameraSessions = pgTable('camera_sessions', {

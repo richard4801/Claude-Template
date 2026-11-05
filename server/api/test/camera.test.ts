@@ -96,6 +96,17 @@ describe('camera sessions', () => {
     expect(d.body.camera.directed.cameraSessionId).toBe(s.id);
     expect((await a.ctx.db.select().from(ledger)).length).toBe(before);
     expect((await owner.req('GET', `/v1/camera-sessions/${s.id}`)).body.shotDraft.id).toBe(d.body.id);
+
+    // The owner pressed Generate in the app: the render job is linked back and the session follows it.
+    expect((await owner.req('POST', `/v1/camera-sessions/${s.id}/shot-draft/job`, { jobId: 'j_nope' })).status).toBe(400);
+    const jobId = 'j_cam_test';
+    await a.ctx.db.execute((await import('drizzle-orm')).sql`insert into jobs (id, studio_id, kind, title, model_id, model_name, request, state, cost, seed, created_at) select ${jobId}, studio_id, 'h3', 'Shot', ${modelId}, 'Demo model', '{}'::jsonb, 'running', 0, 1, 0 from users where id = ${owner.id}`);
+    const l = await owner.req('POST', `/v1/camera-sessions/${s.id}/shot-draft/job`, { jobId });
+    expect(l.body).toMatchObject({ status: 'generating', shotDraft: { jobId } });
+    await a.ctx.db.execute((await import('drizzle-orm')).sql`update jobs set state = 'done' where id = ${jobId}`);
+    expect((await owner.req('GET', `/v1/camera-sessions/${s.id}`)).body.status).toBe('done');
+    const empty = (await owner.req('POST', '/v1/camera-sessions', {})).body;
+    expect((await owner.req('POST', `/v1/camera-sessions/${empty.id}/shot-draft/job`, { jobId })).body.code).toBe('no_draft');
   });
 
   it('with the AI suite merged, the draft is the suite\'s estimate of a directed ShotRequest using the greybox', async () => {

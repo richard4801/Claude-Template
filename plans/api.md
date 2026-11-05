@@ -844,7 +844,7 @@ ShotDraft     { id: "sd_…", state: "draft", source: "suite"|"camera", prompt, 
                 estimate: { usd: number, tokens: number }, camera: CameraSpec, createdAt,
                 request: ShotRequest /* the suite's ("AI suite"): camera.mode "directed", camera.guide.video.key = the newest greybox,
                                         keyframes = "/uploads/cam/<sessionId>/<assetId>.<ext>" (the suite signs them when the shot runs); the app POSTs it to /v1/suite/shots when the owner presses Generate */,
-                warnings?: string[] }
+                warnings?: string[], jobId?: string /* linked render job */, linkedAt?: number }
 CameraSpec    { mode: "directed", presets?: {rig?, move?, angle?}, directed: { cameraSessionId,
                 guideAssets: Partial<Record<"greybox"|"depth"|"pose"|"tracks"|"keyframeStart"|"keyframeMid"|"keyframeEnd", assetId>>,
                 trajectories: { camera?: assetId /* camera_json */, characters?: assetId /* characters_json */ },
@@ -872,6 +872,7 @@ BlenderCall   { id: "bc_…", sessionId, tool: BlenderTool, args: object, outDir
 | `DELETE /v1/camera-sessions/{id}/assets/{assetId}` | → 204. |
 | `PUT /v1/camera-sessions/{id}/path` `{camera?: CameraPath, characters?: Blocking["characters"]}` | → `CameraSession` (status moves `drafting` → `blocking`). Every `modelId` must be in the cast. |
 | `POST /v1/camera-sessions/{id}/shot-draft` `{prompt?, targetModel?, durationSec?}` | → `ShotDraft`. Estimate only: no hold, no ledger row, no provider call. With the AI suite merged it is `ctx.suite.estimate(ShotRequest)` (same as `POST /v1/suite/shots/estimate`); without it, a local draft priced from the target model's $/s. Ready guide videos and stills are also recorded in `uploads` (kind `output`), because the suite only takes references it knows. |
+| `POST /v1/camera-sessions/{id}/shot-draft/job` `{jobId}` | → `CameraSession`. After the owner presses Generate (`POST /v1/suite/shots` with the draft's `request`), the app links the render job: status `generating`, then `done`/`failed` as the job ends (checked when the session is read). `no_draft` (409) without a draft; `bad_request` for a job of another studio. |
 | `POST /v1/camera-sessions/{id}/chat` `{message}` | → `text/event-stream` of `ChatEvent` (below). One turn at a time per session (`chat_busy`, 409); `director_unavailable` (503) without `ANTHROPIC_API_KEY`. |
 | `GET /v1/mcp/tokens` | → `[{id, name, prefix, createdAt, lastUsedAt?, expiresAt?}]` |
 | `POST /v1/mcp/tokens` `{name, expiresDays?: 1–365}` | → `{id, name, prefix, token /* "muse_pat_…", shown once */, createdAt, expiresAt?}` |
@@ -907,4 +908,5 @@ BlenderCall   { id: "bc_…", sessionId, tool: BlenderTool, args: object, outDir
 | `upload_missing` | 409 | confirm before the PUT arrived |
 | `chat_busy` | 409 | a chat turn is already running on that session |
 | `director_unavailable` | 503 | no `ANTHROPIC_API_KEY` on the server |
+| `no_draft` | 409 | linking a job to a session without a Shot draft |
 | `already_claimed` / `call_expired` | 409 / 410 | Blender call taken by another Mac / timed out (5 min) |

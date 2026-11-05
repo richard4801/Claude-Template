@@ -1,5 +1,5 @@
-// Wiring (the parent adds one line at the end of AppStore.connect()):
-//     BlenderRelayService.shared.configure(baseURL: (api as? HTTPMuseAPI)?.baseURL, isOwner: isOwner) { [serverKey] in Keychain.token(for: serverKey) }
+// Wired in AppStore.connect() with the in-memory session token (works with "Remember me" off):
+//     BlenderRelayService.shared.configure(baseURL: (api as? HTTPMuseAPI)?.baseURL, isOwner: isOwner) { [http = api as? HTTPMuseAPI] in http?.sessionToken }
 // and BlenderRelayService.shared.stop() in endSession(). Demo mode (no HTTP API) or a member never runs it.
 // The debug switch: BlenderRelayDebugView(service: .shared) in Settings → Developer (owner only).
 

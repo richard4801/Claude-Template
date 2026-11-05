@@ -3,12 +3,13 @@
 import crypto from 'node:crypto';
 import { and, asc, desc, eq, inArray, lt } from 'drizzle-orm';
 import type { AuthUser, Ctx } from '../ctx.js';
-import { models, uploads } from '../db/schema.js';
+import { jobs, models, uploads } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
 import { compact, uid } from '../lib/util.js';
 import type { BlenderRelayHub } from './relay.js';
 import { cameraAssets, cameraMessages, cameraSessions, type Blocking, type CameraAssetKind, type CameraPath, type CastMember } from './schema.js';
 import { createShotDraft, DEFAULT_TARGET } from './shots.js';
+import { z } from 'zod';
 import { ASSET_RULES, CreateSession, extOf, NewAsset, parse, PatchSession, SetPath, ShotDraftIn } from './validate.js';
 
 type SessionRow = typeof cameraSessions.$inferSelect;
@@ -79,7 +80,29 @@ export class CameraService {
     return v;
   }
 
-  async get(u: AuthUser, id: string) { return this.view(u, await this.row(u, id), { messages: true }); }
+  async get(u: AuthUser, id: string) { return this.view(u, await this.syncJob(u, await this.row(u, id)), { messages: true }); }
+
+  /** A generating session follows its linked render job: done → done, failed → failed. */
+  private async syncJob(u: AuthUser, s: SessionRow): Promise<SessionRow> {
+    const jobId = s.shotDraft?.jobId;
+    if (s.status !== 'generating' || !jobId) return s;
+    const [j] = await this.db.select({ state: jobs.state }).from(jobs).where(and(eq(jobs.id, jobId), eq(jobs.studioId, u.studioId)));
+    const next = !j ? null : j.state === 'done' ? 'done' : j.state === 'failed' ? 'failed' : null;
+    if (!next) return s;
+    await this.save(u, s, { status: next });
+    return this.row(u, s.id);
+  }
+
+  /** The owner pressed Generate on the draft: link the render job (the app calls this after POST /v1/suite/shots). */
+  async linkJob(u: AuthUser, id: string, body: unknown) {
+    const b = parse(z.object({ jobId: z.string().min(1).max(80) }).strict(), body);
+    const s = await this.row(u, id);
+    if (!s.shotDraft) throw new ApiError(409, 'no_draft', 'Make a Shot draft first');
+    const [j] = await this.db.select({ id: jobs.id, state: jobs.state }).from(jobs).where(and(eq(jobs.id, b.jobId), eq(jobs.studioId, u.studioId)));
+    if (!j) throw badRequest('jobId: no such job');
+    const status = j.state === 'done' ? 'done' : j.state === 'failed' ? 'failed' : 'generating';
+    return this.save(u, s, { shotDraft: { ...s.shotDraft, jobId: j.id, linkedAt: Date.now() }, status });
+  }
 
   async list(u: AuthUser, o: { status?: string; limit?: number } = {}) {
     const where = o.status ? and(eq(cameraSessions.studioId, u.studioId), eq(cameraSessions.status, o.status as SessionRow['status'])) : eq(cameraSessions.studioId, u.studioId);
