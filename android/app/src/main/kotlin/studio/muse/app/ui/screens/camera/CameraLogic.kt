@@ -220,6 +220,7 @@ data class StatusRow(val dot: Dot, val title: String, val text: String)
 
 object SessionText {
     const val FIVE_MIN = 5 * 60_000L
+    const val BURST_MS = 90_000L
 
     /** `cs_7Q2M`: the first 4 characters after `cs_`, upper-case. */
     fun idChip(id: String) = "cs_" + id.removePrefix("cs_").take(4).uppercase()
@@ -263,10 +264,13 @@ object SessionText {
 
     /** "Uploading n of m to MUSE" while assets are pending (m = the batch since the oldest pending one), else guides / none. */
     fun rendersRow(s: CameraSession): StatusRow {
-        val pending = s.assets.filter { !it.ready }
-        if (pending.isNotEmpty()) {
-            val since = pending.minOf { it.createdAt }
-            val batch = s.assets.filter { it.createdAt >= since }
+        val sorted = s.assets.sortedBy { it.createdAt }
+        val first = sorted.indexOfFirst { !it.ready }
+        if (first >= 0) {
+            // The batch: the pending uploads and the burst of uploads just before them (each within 90 s of the next).
+            var start = first
+            while (start > 0 && sorted[start].createdAt - sorted[start - 1].createdAt < BURST_MS) start--
+            val batch = sorted.drop(start)
             val done = batch.count { it.ready }
             return StatusRow(Dot.WARN, "Renders", "Uploading ${(done + 1).coerceAtMost(batch.size)} of ${batch.size} to MUSE")
         }

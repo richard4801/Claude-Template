@@ -234,8 +234,9 @@ fun PlanView(
         Canvas(Modifier.fillMaxSize().then(gestures)) {
             // Grid every 0.5 m, a heavier line every metre.
             val (gx, gy) = Plan.gridLines(b)
-            gx.forEach { x -> drawLine(m.t.line.copy(alpha = if (abs(x % 1.0) < 1e-6) .55f else .28f), Offset(fit.x(x), 0f), Offset(fit.x(x), size.height), 1f) }
-            gy.forEach { y -> drawLine(m.t.line.copy(alpha = if (abs(y % 1.0) < 1e-6) .55f else .28f), Offset(0f, fit.y(y)), Offset(size.width, fit.y(y)), 1f) }
+            val grid = m.t.muted
+            gx.forEach { x -> drawLine(grid.copy(alpha = if (abs(x % 1.0) < 1e-6) .22f else .1f), Offset(fit.x(x), 0f), Offset(fit.x(x), size.height), 1f) }
+            gy.forEach { y -> drawLine(grid.copy(alpha = if (abs(y % 1.0) < 1e-6) .22f else .1f), Offset(0f, fit.y(y)), Offset(size.width, fit.y(y)), 1f) }
             if (side) drawLine(m.t.ink.copy(alpha = .5f), Offset(0f, fit.y(0.0)), Offset(size.width, fit.y(0.0)), 1.5.dp.toPx())
 
             // Camera path (dotted), view cone, glyph, label.
@@ -268,11 +269,13 @@ fun PlanView(
                     drawPath(path, col, style = Stroke(1.6.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx())), cap = StrokeCap.Round))
                 }
                 val showTicks = !compact && !side
+                val token = Plan.characterAt(ks, playhead)?.let { pt(it.position, tr.modelId) }
                 ks.forEachIndexed { j, k ->
                     val o = pt(k.position, tr.modelId)
                     drawCircle(col, 2.5.dp.toPx(), o)
                     val dup = j > 0 && hypot((pt(ks[j - 1].position) - o).x.toDouble(), (pt(ks[j - 1].position) - o).y.toDouble()) < 6.0
-                    if (showTicks && !dup) label(measurer, Plan.tick(k.t), Offset(o.x - 8.dp.toPx(), o.y - 16.dp.toPx()), small.copy(color = col), null, null)
+                    val underToken = token != null && (token - o).getDistance() < 20.dp.toPx()
+                    if (showTicks && !dup && !underToken) label(measurer, Plan.tick(k.t), Offset(o.x - 8.dp.toPx(), o.y - 16.dp.toPx()), small.copy(color = col), null, null)
                 }
                 val at = Plan.characterAt(ks, playhead) ?: return@forEachIndexed
                 val o = pt(at.position, tr.modelId)

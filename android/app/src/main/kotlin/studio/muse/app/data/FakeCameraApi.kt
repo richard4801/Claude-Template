@@ -260,7 +260,7 @@ class FakeCameraApi(
     override suspend fun revokeToken(id: String) = lock.withLock { tokens.removeAll { it.id == id }; Unit }
 
     /** Tests: a relay change as the Mac would report it. */
-    fun setRelay(r: RelayStatus) {
+    fun reportRelay(r: RelayStatus) {
         relay = r
         emit(ApiEvent("blender", op = "relay", online = r.online, blender = r.blender, addonVersion = r.addonVersion))
     }
