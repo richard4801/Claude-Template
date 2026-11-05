@@ -27,5 +27,5 @@ _Started 2026-11-05._ Several Claude sessions build MUSE features at the same ti
 
 ## Status (each session updates its own line)
 - 1 · AI suite core: not started
-- 2 · MCP + Blender bridge: not started
+- 2 · MCP + Blender bridge: server done and pushed (camera sessions + migration 0008, /mcp with owner tokens, Direct with Claude chat with mocked Claude, Blender relay endpoints, tests green except 2 Replicate photo tests that also fail on the base); Mac relay (MuseCore Blender*.swift) in progress; setup doc plans/mcp-bridge.md
 - 3 · Editor engine v2: not started
