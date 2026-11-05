@@ -28,6 +28,8 @@ export const ShotRequestSchema = z.object({
   takes: z.number().int().min(1).max(4).default(1),
   /** Native sound where the model makes it. */
   audio: z.boolean().default(true),
+  /** The character speaks or sings on camera (lip sync). Off: the prompt says she does not speak (prompt scripts, workstream 4). */
+  speaking: z.boolean().default(false),
   camera: CameraSpecSchema.optional(),
   seed: z.number().int().min(0).max(2147483647).optional(),
   /** Owner only: a registry model id (and resolution) instead of the ladder. */
@@ -150,7 +152,7 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
   const t = o.texts ?? DEFAULT_TEXTS;
   const m = p.model, notes: string[] = [];
   const kind = kindOf(m, n);
-  const cam = compileCamera(r.camera, m, { texts: t, durationS: p.seconds, talking: n.withAudio && /\b(says|talks|speaks|tells|asks|"|“)/i.test(r.prompt) });
+  const cam = compileCamera(r.camera, m, { texts: t, durationS: p.seconds, talking: r.speaking });
   if (p.seconds !== r.duration) notes.push(`length set to ${p.seconds} s (this quality makes ${m.duration.allowed?.join(', ') ?? `${m.duration.min}–${m.duration.max}`} s)`);
 
   // ---- images: keyframes, then the character subset, then extra references, within the model's limits

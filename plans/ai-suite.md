@@ -197,3 +197,41 @@ The prompt is built in this order:
 2. **Seedance and AI faces:** Seedance may refuse realistic faces as references. If refusals show up, switch Seedance off for reference shots in suite settings, or move it down the ladder.
 3. **fal:** the H3 Max 3D-to-video adapter follows fal's queue API but is untested against real fal. It stays `preview` and is only available with `FAL_KEY`.
 4. **Price corrections:** each model has a `priceScale` (0.5–3) in settings, in case a provider changes prices before the registry is updated.
+
+## Next: building the suite prompts through prompt scripts (workstream 4)
+_Approved by the coordinator 2026-11-05. The port starts after `claude/muse-prompt-scripts` is merged into the main branch. Until then, today's builder stays._
+
+**Script `suite.camera`** (format `lines`, one section `camera`, kind `system`):
+- **Inputs:** `vocab` (enum kling/seedance/h3/veo/generic), `hasMove`, `hasFraming`, `hasRig`, `hasLight`, `hasPalette`, `hasStyle`, `hasPerformance`, `presets`.
+- **Rules:** one per vocab, each with condition `vocab is X`. Each rule places that vocab's format block (`suite.camera.format.<vocab>`).
+- **Vars:** `move`, `framing`, `rig`, `light`, `palette`, `style`, `performance`. The compiler computes them in code from the `suite.camera.*` wording lines and the per-model rules:
+  - the one-move rule
+  - mix compatibility
+  - the LTX camera enum
+  - the guide clip, used only on models that take a reference video
+- **Presets switch:** the style rules are `optional`, so switching Presets off leaves only the move and the framing.
+
+**Script `suite.shot`** (format `lines`). Each section and what fills it:
+
+| Section | Kind | Filled by |
+|---|---|---|
+| character | system | either `suite.shot.character` (tokens) or a new words-only block, chosen by `hasCharacterImages` |
+| outfit | system | — |
+| refs | system | `each` over `refs` items `{token, role, label}` |
+| lock | system | only when `roles` has more than one member |
+| frames | system | — |
+| **scene** | **user** | the user's prompt and direction through `{direction}`, with workstream 4's sanitiser |
+| guide | system | `each` over `videos` items `{token, use}` |
+| camera | system | the rendered `suite.camera` text as a var |
+| audio | system | workstream 4's `audio.lipsync` / `audio.beat` / `audio.silent` blocks, chosen by `audio` (speech/music/none) and `speaking` |
+| avoid | system | — |
+| footer | system | — |
+
+**Audio:**
+- `ShotRequest.speaking` (added; default false) is the talking flag.
+- With a source clip it is pre-set from `detectTalking`.
+- When audio references are added, non-speaking shots send `beatOnlyAudio`'s instrumental instead of raw audio.
+
+**Unchanged by the port:**
+- The shot API contract.
+- Every existing `suite.*` block key, so saved owner overrides keep working.

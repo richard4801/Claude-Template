@@ -100,6 +100,8 @@ describe('AI suite · camera compiler (unit)', () => {
     expect(v.usesGuide).toBe(false);
     expect(v.notes.join()).toMatch(/guide clip is not sent/);
     expect(compileCamera(CameraSpecSchema.parse({ move: { id: 'whip_pan' } }), modelById('h3')!).notes.join()).toMatch(/editor effect/);
+    expect(compileCamera(CameraSpecSchema.parse({ move: { id: 'orbit_360' } }), modelById('h3')!, { talking: true }).notes.join()).toMatch(/fight lip sync/);
+    expect(compileCamera(CameraSpecSchema.parse({ move: { id: 'handheld' } }), modelById('h3')!, { talking: true }).notes).toEqual([]);
     expect(() => CameraSpecSchema.parse({ move: { id: 'teleport' } })).toThrow();
   });
   it('owner wording overrides change what is sent (and a deleted line falls back)', () => {

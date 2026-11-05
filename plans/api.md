@@ -854,7 +854,8 @@ ShotRequest {
   references?: { images?: { image: ImageRef, role?: "product"|"location"|"style"|"prop"|"person", label? }[] /* ≤ 6 */,
                  videos?: { video: VideoRef, use?: "camera"|"motion"|"style" }[] /* ≤ 3 */ },
   duration? /* 2–30, default 5 */, aspectRatio?: "9:16"|"16:9"|"1:1"|"4:3"|"3:4"|"21:9" /* default 9:16 */,
-  quality?: "draft"|"standard"|"hd"|"cinema" /* default draft */, takes? /* 1–4 */, audio? /* native sound, default true */, seed?,
+  quality?: "draft"|"standard"|"hd"|"cinema" /* default draft */, takes? /* 1–4 */, audio? /* native sound, default true */,
+  speaking? /* default false: she speaks or sings on camera (lip sync); today it only drives the camera warnings; after the prompt-scripts port, off adds "does not speak, sing or mouth words" (workstream 4's talking flag) */, seed?,
   camera?: CameraSpec, dryRun?: boolean,
   clipId?, keepAudio? /* swap */, engineModel?, resolution? /* (owner) bypass the ladder */
 }

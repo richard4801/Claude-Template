@@ -244,7 +244,7 @@ export class SuiteService {
     await this.checkMedia(u.studioId, plan);
     const label = shotLabel(plan.tier, plan.resolution);
     const request = {
-      engine: 'suite', mode: plan.mode, quality: plan.tier, label, engineLabel: label, takeLabel: TIER_INFO[plan.tier].label, seconds: plan.seconds, takes: plan.takes, aspectRatio: plan.aspect, audio: plan.audio,
+      engine: 'suite', mode: plan.mode, quality: plan.tier, label, engineLabel: label, takeLabel: TIER_INFO[plan.tier].label, seconds: plan.seconds, takes: plan.takes, aspectRatio: plan.aspect, audio: plan.audio, speaking: r.speaking,
       prompt: r.prompt, direction: r.direction, camera: r.camera, frames: r.frames, references: r.references, modelId: r.modelId, outfitId: r.outfitId, keepAudio: true,
     };
     const perTake = 45 + plan.seconds * 10 * (plan.tier === 'draft' ? 0.6 : plan.tier === 'cinema' ? 2 : plan.tier === 'hd' ? 1.5 : 1);

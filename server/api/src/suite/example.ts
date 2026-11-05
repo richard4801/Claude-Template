@@ -16,7 +16,7 @@ export function suiteExample(key: string, t: PromptTexts): string {
   const vocab = /^suite\.camera\.format\.(\w+)$/.exec(key)?.[1] as CameraVocab | undefined;
   const model = (vocab && MODELS.find(m => m.camera.vocab === vocab && m.status === 'active' && !m.licence.blockNewFeatures)) || modelById('kling-v4')!;
   if (key.startsWith('suite.camera.')) return compileCamera(CAMERA, model, { texts: t, durationS: 8 }).text || '(empty)';
-  const req: ShotRequest = { prompt: 'She walks into the café, sees the camera and smiles.', duration: 8, aspectRatio: '9:16', quality: 'cinema', takes: 1, audio: true, camera: CAMERA,
+  const req: ShotRequest = { prompt: 'She walks into the café, sees the camera and smiles.', duration: 8, aspectRatio: '9:16', quality: 'cinema', takes: 1, audio: true, speaking: false, camera: CAMERA,
     references: { images: [{ image: { asset: 'g_front' }, role: 'product', label: 'the perfume bottle' }] },
     ...(key === 'suite.shot.frames' ? { frames: { start: { asset: 'g_front' }, end: { asset: 'g_tq' } } } : {}),
     ...(key === 'suite.shot.guide' ? { camera: { ...CAMERA, guide: { video: { url: 'https://example.com/greybox.mp4' }, use: 'camera' } } } : {}) };
