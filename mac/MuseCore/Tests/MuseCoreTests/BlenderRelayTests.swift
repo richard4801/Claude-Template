@@ -239,6 +239,11 @@ final class BlenderRelayTests: XCTestCase {
         XCTAssertEqual(keys[1], json(#"{"t":2,"position":[1,-3,1.6],"target":[0,0,1.5],"focalMm":50,"rollDeg":5,"ease":"cut"}"#))
         XCTAssertEqual(keys[2], json(#"{"t":4,"position":[2,-3,1.6],"target":[0,0,1.5],"focalMm":50,"rollDeg":5,"ease":"linear"}"#))
         XCTAssertEqual(c["sensorMm"], .number(36))
+        // A second key at the same time is a hard cut.
+        let cut = try BlenderArgs.data(.setCamera, json(#"{"keyframes":[{"t":0,"position":[0,-4,1.6]},{"t":2,"position":[0,-4,1.6]},{"t":2,"position":[3,0,1.6]}]}"#), outDir: "")
+        guard case .array(let ck)? = cut["keyframes"], case .object(let k1) = ck[1], case .object(let k2) = ck[2] else { return XCTFail() }
+        XCTAssertEqual(k1["ease"], .string("cut"))
+        XCTAssertEqual(k2["ease"], .string("in_out"))
         let lone = try BlenderArgs.data(.setCamera, json(#"{"keyframes":[{"t":0,"position":[0,-4,1.6]}]}"#), outDir: "")
         guard case .array(let k1)? = lone["keyframes"], case .object(let o)? = k1.first else { return XCTFail() }
         XCTAssertEqual(o["target"], json("[0,0,1.4]"))
@@ -414,9 +419,11 @@ final class BlenderRelayTests: XCTestCase {
             #"data: "outDir":"CameraSessions/cs_abc123XYZ","createdAt":1762300000000,"expiresAt":"2026-11-05T12:00:00.000Z"}}"#, "",
             #"data: {"type":"blender","op":"cancel","id":"bc_9"}"#, "",
             #"data: {"type":"blender","op":"relay","online":true,"blender":{"connected":true,"addonVersion":"1.8","protocol":15}}"#, "",
+            #"data: {"type":"blender","op":"relay","online":true,"blender":true,"addonVersion":"1.8"}"#, "",
         ]
         let events = lines.compactMap { f.feed($0) }
-        XCTAssertEqual(events.count, 3)
+        XCTAssertEqual(events.count, 4)
+        XCTAssertEqual(events[3], .relay(BlenderRelayStatus(online: true, blender: BlenderLink(connected: true, addonVersion: "1.8"))))
         guard case .call(let c) = events[0] else { return XCTFail() }
         XCTAssertEqual(c.id, "bc_9")
         XCTAssertEqual(c.knownTool, .status)

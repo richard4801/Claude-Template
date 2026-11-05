@@ -212,6 +212,8 @@ except Exception as e:
     frames = []
     for k in A["keyframes"]:
         f = sc.frame_start + int(round(k["t"] * fps))
+        if frames and f <= frames[-1]:
+            f = frames[-1] + 1
         o.location = k["position"]
         if k.get("facingDeg") is not None:
             prev = prev + ((k["facingDeg"] - prev + 180.0) % 360.0) - 180.0
@@ -287,6 +289,8 @@ except Exception as e:
     frames = []
     for k in A["keyframes"]:
         f = sc.frame_start + int(round(k["t"] * fps))
+        if frames and f <= frames[-1]:
+            f = frames[-1] + 1
         pos = Vector(k["position"])
         tp = Vector(k["target"])
         cam.location = pos

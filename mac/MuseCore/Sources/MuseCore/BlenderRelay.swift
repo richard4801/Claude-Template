@@ -230,7 +230,7 @@ public actor BlenderRelay {
         let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
         let size = (attrs[.size] as? NSNumber)?.int64Value
         let type = BlenderAssetKinds.contentType(forFile: file.lastPathComponent)
-        let ticket = try await api.createAsset(sessionId: sessionId, kind: kind, contentType: type, bytes: size, label: label)
+        let ticket = try await api.createAsset(sessionId: sessionId, kind: kind, contentType: type, bytes: (size ?? 0) > 0 ? size : nil, label: label)
         try await api.putUpload(url: ticket.upload.url, headers: ticket.upload.headers, contentType: type, file: file)
         return try await api.confirmAsset(sessionId: sessionId, assetId: ticket.asset.id).id
     }
@@ -324,7 +324,7 @@ public enum BlenderArgs {
             for (i, k) in keys.enumerated() {
                 let ko = try object(k, allowed: ["t", "position", "facingDeg", "action"], what: "keyframes[\(i)]")
                 let t = try number(ko, "t", 0...30, required: true)
-                guard t > last else { throw Invalid("keyframes must have ascending t") }
+                guard t >= last else { throw Invalid("keyframes must be in time order") }
                 last = t
                 var e: [String: JSONValue] = ["t": .number(t), "position": vec(try vec3(ko, "position", 1000))]
                 if ko["facingDeg"] != nil, ko["facingDeg"] != .null { e["facingDeg"] = .number(normalized(try number(ko, "facingDeg", -3600...3600, required: true))) }
@@ -360,7 +360,8 @@ public enum BlenderArgs {
     }
 
     /// CameraPath → fully resolved keys: a missing target is the previous key's (else the next one's, else [0, 0, 1.4]);
-    /// focal length likewise (else 35 mm); roll carries over (else 0); ease defaults to in_out; the key before each cut holds.
+    /// focal length likewise (else 35 mm); roll carries over (else 0); ease defaults to in_out; the key before each cut
+    /// (a `cuts` time, or a second key at the same t) holds.
     static func cameraPath(_ args: JSONValue) throws -> [String: JSONValue] {
         let o = try object(args, allowed: ["keyframes", "cuts", "sensorMm"])
         let keys = try array(o, "keyframes", 1...64)
@@ -370,7 +371,7 @@ public enum BlenderArgs {
         for (i, k) in keys.enumerated() {
             let ko = try object(k, allowed: ["t", "position", "target", "focalMm", "rollDeg", "ease"], what: "keyframes[\(i)]")
             let t = try number(ko, "t", 0...30, required: true)
-            guard t > last else { throw Invalid("keyframes must have ascending t") }
+            guard t >= last else { throw Invalid("keyframes must be in time order") }
             last = t
             let target = ko["target"] == nil || ko["target"] == .null ? nil : try vec3(ko, "target", 1000)
             let focal = ko["focalMm"] == nil || ko["focalMm"] == .null ? nil : try number(ko, "focalMm", 8...300, required: true)
@@ -392,6 +393,8 @@ public enum BlenderArgs {
         let sensor = try number(o, "sensorMm", 1...100, default: 36)
         var eases = ks.map { $0.ease ?? "in_out" }
         for c in cuts { if let i = ks.lastIndex(where: { $0.t < c }) { eases[i] = "cut" } }
+        // Two keys at the same time are a hard cut (the script puts the second one frame later).
+        for i in ks.indices.dropFirst() where ks[i].t == ks[i - 1].t { eases[i - 1] = "cut" }
         var out: [JSONValue] = []
         var roll = 0.0
         for (i, k) in ks.enumerated() {
@@ -518,7 +521,9 @@ public struct BlenderLiveEventFilter: Sendable {
         var id: String?
         var call: BlenderCall?
         var online: Bool?
-        var blender: BlenderLink?
+        /// The server sends `blender: boolean` (+ `addonVersion`); a link object is accepted too.
+        var blender: JSONValue?
+        var addonVersion: String?
     }
 
     /// One event's JSON (`{type: "blender", op: "call", call}` / `{op: "cancel", id}` / `{op: "relay", online, blender}`).
@@ -527,7 +532,17 @@ public struct BlenderLiveEventFilter: Sendable {
         switch e.op {
         case "call": return e.call.map { .call($0) }
         case "cancel": return e.id.map { .cancel($0) }
-        case "relay": return .relay(BlenderRelayStatus(online: e.online ?? false, blender: e.blender ?? BlenderLink(connected: false)))
+        case "relay":
+            var link = BlenderLink(connected: false, addonVersion: e.addonVersion)
+            switch e.blender {
+            case .bool(let b)?: link.connected = b
+            case .object(let o)?:
+                if case .bool(let b)? = o["connected"] { link.connected = b }
+                if case .string(let v)? = o["addonVersion"] { link.addonVersion = v }
+                if case .number(let n)? = o["protocol"], n.isFinite { link.protocol = Int(n) }
+            default: break
+            }
+            return .relay(BlenderRelayStatus(online: e.online ?? false, blender: link))
         default: return nil
         }
     }
