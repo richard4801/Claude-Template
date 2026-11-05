@@ -106,3 +106,51 @@ export const SUITE_SHOT_SCRIPT: Script = {
 
 registerScript(SUITE_CAMERA_SCRIPT);
 registerScript(SUITE_SHOT_SCRIPT);
+
+// ---------------------------------------------------------------- Recast: up to 4 people in one source clip
+const PEOPLE: InputDef = {
+  name: 'people', label: 'People recast', description: 'Each person in the source clip and the character who replaces them, in order.', type: 'list',
+  fields: [
+    { name: 'who', label: 'Who in the clip', description: '"the person on the left", "the second person to appear" …', type: 'text', sample: 'the person on the left' },
+    { name: 'name', label: 'Character', description: 'Her name.', type: 'text', sample: 'Mia' },
+    { name: 'refs', label: 'Her images', description: 'Her image tokens.', type: 'text', sample: '<Image 1> and <Image 2>' },
+    { name: 'look', label: 'Her look', description: 'Her written look.', type: 'text', sample: 'young woman, dark hair' },
+    { name: 'outfit', label: 'Outfit words', description: '" She wears the green set (<Image 3>)." or empty.', type: 'text', sample: ' She wears the green set (<Image 3>).' },
+    { name: 'never', label: 'Never-add', description: '" She never has: tattoos." or empty.', type: 'text', sample: '' },
+    { name: 'faceRef', label: 'Face crop', description: 'The token of a crop showing which person this is, or empty.', type: 'text', sample: '' },
+    en('speaking', 'Speaking', 'Whether this person speaks or sings in the clip.', [['yes', 'Speaking'], ['no', 'Not speaking'], ['unknown', 'Unknown (follow the clip)']], 'unknown'),
+  ],
+  sample: [{ who: 'the person on the left', name: 'Mia', refs: '<Image 1> and <Image 2>', look: 'young woman, dark hair', outfit: '', never: '', faceRef: '', speaking: 'yes' },
+    { who: 'the person on the right', name: 'Leo', refs: '<Image 3>', look: 'young man, short hair', outfit: '', never: '', faceRef: '<Image 4>', speaking: 'no' }],
+};
+export const SUITE_RECAST_SCRIPT: Script = {
+  id: 'suite.recast', group: 'suite', title: 'Recast (AI suite)', format: 'lines',
+  description: 'Same take, new cast: up to 4 people in one clip replaced by studio characters; motion, camera, cuts and the original audio are kept.',
+  inputs: [
+    PEOPLE, bool('several', 'Several people', 'More than one person is recast.', true),
+    bool('keepsCuts', 'Keep cuts', 'The model keeps the clip’s cuts and shot changes (multi-shot clips).'),
+  ],
+  sections: [
+    sec('task', 'Task'), sec('person', 'Each person', { each: 'people', pick: 'all', join: ' ' }), sec('identify', 'Who is who', { each: 'people', pick: 'all' }),
+    sec('lock', 'Cast lock'), sec('mouth', 'Mouths and voices', { each: 'people', pick: 'first' }), sec('cuts', 'Cuts'),
+    { id: 'direction', label: 'Direction from the user', kind: 'user', pick: 'first' }, sec('footer', 'Closing line'),
+  ],
+  rules: [
+    R('task', 'What recast does', 'task', 'suite.recast.task', [], { locked: true }),
+    R('person', 'Who replaces whom', 'person', 'suite.recast.person', [], { locked: true }),
+    R('identify', 'A face crop says who is who', 'identify', 'suite.recast.identify', [{ input: 'item.faceRef', op: 'notEmpty' }]),
+    R('lock', 'Nobody swaps looks', 'lock', 'suite.recast.lock', [is('several', true)]),
+    // Mouth wording per person only from these rules (the lip-sync fix): never invent speech for someone who doesn't talk.
+    R('mouth.speaking', 'Speaking: lips match the original audio', 'mouth', 'suite.recast.mouth.speaking', [is('item.speaking', 'yes')]),
+    R('mouth.silent', 'Not speaking: does not speak or mouth words', 'mouth', 'suite.recast.mouth.silent', [is('item.speaking', 'no')]),
+    R('mouth.follow', 'Unknown: the mouth follows the clip', 'mouth', 'suite.recast.mouth.follow', [is('item.speaking', 'unknown')]),
+    R('cuts', 'Keep every cut', 'cuts', 'suite.recast.cuts', [is('keepsCuts', true)]),
+    R('direction', 'The user’s direction', 'direction', 'suite.recast.direction', [], { locked: true }),
+    R('footer', 'Closing line', 'footer', 'suite.shot.footer'),
+  ],
+  vars: [
+    { name: 'source', description: 'the source clip token', sample: '<Video 1>' },
+    { name: 'count', description: '"one person" / "2 people"', sample: '2 people' },
+  ],
+};
+registerScript(SUITE_RECAST_SCRIPT);

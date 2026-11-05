@@ -4994,6 +4994,466 @@
    "stale": false,
    "updatedAt": null,
    "updatedBy": null
+  },
+  {
+   "id": "suite.recast",
+   "group": "suite",
+   "title": "Recast (AI suite)",
+   "description": "Same take, new cast: up to 4 people in one clip replaced by studio characters; motion, camera, cuts and the original audio are kept.",
+   "format": "lines",
+   "inputs": [
+    {
+     "name": "people",
+     "label": "People recast",
+     "description": "Each person in the source clip and the character who replaces them, in order.",
+     "type": "list",
+     "fields": [
+      {
+       "name": "who",
+       "label": "Who in the clip",
+       "description": "\"the person on the left\", \"the second person to appear\" …",
+       "type": "text",
+       "sample": "the person on the left"
+      },
+      {
+       "name": "name",
+       "label": "Character",
+       "description": "Her name.",
+       "type": "text",
+       "sample": "Mia"
+      },
+      {
+       "name": "refs",
+       "label": "Her images",
+       "description": "Her image tokens.",
+       "type": "text",
+       "sample": "<Image 1> and <Image 2>"
+      },
+      {
+       "name": "look",
+       "label": "Her look",
+       "description": "Her written look.",
+       "type": "text",
+       "sample": "young woman, dark hair"
+      },
+      {
+       "name": "outfit",
+       "label": "Outfit words",
+       "description": "\" She wears the green set (<Image 3>).\" or empty.",
+       "type": "text",
+       "sample": " She wears the green set (<Image 3>)."
+      },
+      {
+       "name": "never",
+       "label": "Never-add",
+       "description": "\" She never has: tattoos.\" or empty.",
+       "type": "text",
+       "sample": ""
+      },
+      {
+       "name": "faceRef",
+       "label": "Face crop",
+       "description": "The token of a crop showing which person this is, or empty.",
+       "type": "text",
+       "sample": ""
+      },
+      {
+       "name": "speaking",
+       "label": "Speaking",
+       "description": "Whether this person speaks or sings in the clip.",
+       "type": "enum",
+       "options": [
+        {
+         "id": "yes",
+         "label": "Speaking"
+        },
+        {
+         "id": "no",
+         "label": "Not speaking"
+        },
+        {
+         "id": "unknown",
+         "label": "Unknown (follow the clip)"
+        }
+       ],
+       "sample": "unknown"
+      }
+     ],
+     "sample": [
+      {
+       "who": "the person on the left",
+       "name": "Mia",
+       "refs": "<Image 1> and <Image 2>",
+       "look": "young woman, dark hair",
+       "outfit": "",
+       "never": "",
+       "faceRef": "",
+       "speaking": "yes"
+      },
+      {
+       "who": "the person on the right",
+       "name": "Leo",
+       "refs": "<Image 3>",
+       "look": "young man, short hair",
+       "outfit": "",
+       "never": "",
+       "faceRef": "<Image 4>",
+       "speaking": "no"
+      }
+     ]
+    },
+    {
+     "name": "several",
+     "label": "Several people",
+     "description": "More than one person is recast.",
+     "type": "bool",
+     "sample": true
+    },
+    {
+     "name": "keepsCuts",
+     "label": "Keep cuts",
+     "description": "The model keeps the clip’s cuts and shot changes (multi-shot clips).",
+     "type": "bool",
+     "sample": true
+    }
+   ],
+   "sections": [
+    {
+     "id": "task",
+     "label": "Task",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "person",
+     "label": "Each person",
+     "kind": "system",
+     "pick": "all",
+     "join": " ",
+     "each": "people"
+    },
+    {
+     "id": "identify",
+     "label": "Who is who",
+     "kind": "system",
+     "pick": "all",
+     "each": "people"
+    },
+    {
+     "id": "lock",
+     "label": "Cast lock",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "mouth",
+     "label": "Mouths and voices",
+     "kind": "system",
+     "pick": "first",
+     "each": "people"
+    },
+    {
+     "id": "cuts",
+     "label": "Cuts",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "direction",
+     "label": "Direction from the user",
+     "kind": "user",
+     "pick": "first"
+    },
+    {
+     "id": "footer",
+     "label": "Closing line",
+     "kind": "system",
+     "pick": "first"
+    }
+   ],
+   "values": [],
+   "targets": [
+    {
+     "id": "task",
+     "label": "Task"
+    },
+    {
+     "id": "person",
+     "label": "Each person"
+    },
+    {
+     "id": "identify",
+     "label": "Who is who"
+    },
+    {
+     "id": "lock",
+     "label": "Cast lock"
+    },
+    {
+     "id": "mouth",
+     "label": "Mouths and voices"
+    },
+    {
+     "id": "cuts",
+     "label": "Cuts"
+    },
+    {
+     "id": "direction",
+     "label": "Direction from the user"
+    },
+    {
+     "id": "footer",
+     "label": "Closing line"
+    }
+   ],
+   "vars": [
+    {
+     "name": "source",
+     "description": "the source clip token",
+     "sample": "<Video 1>"
+    },
+    {
+     "name": "count",
+     "description": "\"one person\" / \"2 people\"",
+     "sample": "2 people"
+    }
+   ],
+   "blocks": [
+    "suite.recast.task",
+    "suite.recast.person",
+    "suite.recast.identify",
+    "suite.recast.lock",
+    "suite.recast.mouth.speaking",
+    "suite.recast.mouth.silent",
+    "suite.recast.mouth.follow",
+    "suite.recast.cuts",
+    "suite.recast.direction",
+    "suite.shot.footer"
+   ],
+   "rules": [
+    {
+     "id": "task",
+     "label": "What recast does",
+     "target": "task",
+     "when": [],
+     "block": "suite.recast.task",
+     "locked": true
+    },
+    {
+     "id": "person",
+     "label": "Who replaces whom",
+     "target": "person",
+     "when": [],
+     "block": "suite.recast.person",
+     "locked": true
+    },
+    {
+     "id": "identify",
+     "label": "A face crop says who is who",
+     "target": "identify",
+     "when": [
+      {
+       "input": "item.faceRef",
+       "op": "notEmpty"
+      }
+     ],
+     "block": "suite.recast.identify"
+    },
+    {
+     "id": "lock",
+     "label": "Nobody swaps looks",
+     "target": "lock",
+     "when": [
+      {
+       "input": "several",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.recast.lock"
+    },
+    {
+     "id": "mouth.speaking",
+     "label": "Speaking: lips match the original audio",
+     "target": "mouth",
+     "when": [
+      {
+       "input": "item.speaking",
+       "op": "is",
+       "value": "yes"
+      }
+     ],
+     "block": "suite.recast.mouth.speaking"
+    },
+    {
+     "id": "mouth.silent",
+     "label": "Not speaking: does not speak or mouth words",
+     "target": "mouth",
+     "when": [
+      {
+       "input": "item.speaking",
+       "op": "is",
+       "value": "no"
+      }
+     ],
+     "block": "suite.recast.mouth.silent"
+    },
+    {
+     "id": "mouth.follow",
+     "label": "Unknown: the mouth follows the clip",
+     "target": "mouth",
+     "when": [
+      {
+       "input": "item.speaking",
+       "op": "is",
+       "value": "unknown"
+      }
+     ],
+     "block": "suite.recast.mouth.follow"
+    },
+    {
+     "id": "cuts",
+     "label": "Keep every cut",
+     "target": "cuts",
+     "when": [
+      {
+       "input": "keepsCuts",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.recast.cuts"
+    },
+    {
+     "id": "direction",
+     "label": "The user’s direction",
+     "target": "direction",
+     "when": [],
+     "block": "suite.recast.direction",
+     "locked": true
+    },
+    {
+     "id": "footer",
+     "label": "Closing line",
+     "target": "footer",
+     "when": [],
+     "block": "suite.shot.footer"
+    }
+   ],
+   "defaultRules": [
+    {
+     "id": "task",
+     "label": "What recast does",
+     "target": "task",
+     "when": [],
+     "block": "suite.recast.task",
+     "locked": true
+    },
+    {
+     "id": "person",
+     "label": "Who replaces whom",
+     "target": "person",
+     "when": [],
+     "block": "suite.recast.person",
+     "locked": true
+    },
+    {
+     "id": "identify",
+     "label": "A face crop says who is who",
+     "target": "identify",
+     "when": [
+      {
+       "input": "item.faceRef",
+       "op": "notEmpty"
+      }
+     ],
+     "block": "suite.recast.identify"
+    },
+    {
+     "id": "lock",
+     "label": "Nobody swaps looks",
+     "target": "lock",
+     "when": [
+      {
+       "input": "several",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.recast.lock"
+    },
+    {
+     "id": "mouth.speaking",
+     "label": "Speaking: lips match the original audio",
+     "target": "mouth",
+     "when": [
+      {
+       "input": "item.speaking",
+       "op": "is",
+       "value": "yes"
+      }
+     ],
+     "block": "suite.recast.mouth.speaking"
+    },
+    {
+     "id": "mouth.silent",
+     "label": "Not speaking: does not speak or mouth words",
+     "target": "mouth",
+     "when": [
+      {
+       "input": "item.speaking",
+       "op": "is",
+       "value": "no"
+      }
+     ],
+     "block": "suite.recast.mouth.silent"
+    },
+    {
+     "id": "mouth.follow",
+     "label": "Unknown: the mouth follows the clip",
+     "target": "mouth",
+     "when": [
+      {
+       "input": "item.speaking",
+       "op": "is",
+       "value": "unknown"
+      }
+     ],
+     "block": "suite.recast.mouth.follow"
+    },
+    {
+     "id": "cuts",
+     "label": "Keep every cut",
+     "target": "cuts",
+     "when": [
+      {
+       "input": "keepsCuts",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "suite.recast.cuts"
+    },
+    {
+     "id": "direction",
+     "label": "The user’s direction",
+     "target": "direction",
+     "when": [],
+     "block": "suite.recast.direction",
+     "locked": true
+    },
+    {
+     "id": "footer",
+     "label": "Closing line",
+     "target": "footer",
+     "when": [],
+     "block": "suite.shot.footer"
+    }
+   ],
+   "overridden": false,
+   "stale": false,
+   "updatedAt": null,
+   "updatedBy": null
   }
  ]
 }

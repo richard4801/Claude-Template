@@ -1855,6 +1855,230 @@
    "updatedBy": null
   },
   {
+   "key": "suite.recast.task",
+   "group": "suite",
+   "title": "Recast · task",
+   "description": "What the model must do with the source clip.",
+   "kind": "text",
+   "default": "Recast {source}: replace {count} with the characters below. Keep each person’s exact motion, timing, gestures and expressions, the camera, the framing, the background and the lighting of {source}.",
+   "current": "Recast {source}: replace {count} with the characters below. Keep each person’s exact motion, timing, gestures and expressions, the camera, the framing, the background and the lighting of {source}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "source",
+     "description": "the source clip token",
+     "required": true
+    },
+    {
+     "name": "count",
+     "description": "\"one person\" / \"2 people\"",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.recast.person",
+   "group": "suite",
+   "title": "Recast · one person",
+   "description": "One line per person recast.",
+   "kind": "text",
+   "default": "{who} in {source} becomes {name}, shown in {refs}: {look}.{outfit}{never}",
+   "current": "{who} in {source} becomes {name}, shown in {refs}: {look}.{outfit}{never}",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "who",
+     "description": "\"the person on the left\" …",
+     "required": true
+    },
+    {
+     "name": "source",
+     "description": "the source clip token",
+     "required": false
+    },
+    {
+     "name": "name",
+     "description": "her name",
+     "required": true
+    },
+    {
+     "name": "refs",
+     "description": "her image tokens",
+     "required": false
+    },
+    {
+     "name": "look",
+     "description": "her look",
+     "required": false
+    },
+    {
+     "name": "outfit",
+     "description": "\" She wears … (<Image 3>).\" or empty",
+     "required": false
+    },
+    {
+     "name": "never",
+     "description": "\" She never has: …\" or empty",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.recast.identify",
+   "group": "suite",
+   "title": "Recast · who is who",
+   "description": "When a face crop of the person is sent.",
+   "kind": "text",
+   "default": "{faceRef} shows which person {who} is.",
+   "current": "{faceRef} shows which person {who} is.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "faceRef",
+     "description": "the crop token",
+     "required": true
+    },
+    {
+     "name": "who",
+     "description": "who in the clip",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.recast.lock",
+   "group": "suite",
+   "title": "Recast · cast lock",
+   "description": "When several people are recast.",
+   "kind": "text",
+   "default": "Each person keeps their own character: never swap faces, hair, clothing or positions between them.",
+   "current": "Each person keeps their own character: never swap faces, hair, clothing or positions between them.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.recast.mouth.speaking",
+   "group": "suite",
+   "title": "Recast · speaking",
+   "description": "A person who speaks or sings in the clip.",
+   "kind": "text",
+   "default": "{name}’s lips match every word of the original audio.",
+   "current": "{name}’s lips match every word of the original audio.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "name",
+     "description": "her name",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.recast.mouth.silent",
+   "group": "suite",
+   "title": "Recast · not speaking",
+   "description": "A person who does not speak.",
+   "kind": "text",
+   "default": "{name}’s mouth follows {source} exactly; she does not speak, sing or mouth words.",
+   "current": "{name}’s mouth follows {source} exactly; she does not speak, sing or mouth words.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "name",
+     "description": "her name",
+     "required": false
+    },
+    {
+     "name": "source",
+     "description": "the source clip token",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.recast.mouth.follow",
+   "group": "suite",
+   "title": "Recast · speaking unknown",
+   "description": "When it isn’t known whether the person speaks.",
+   "kind": "text",
+   "default": "{name}’s mouth follows {source} exactly.",
+   "current": "{name}’s mouth follows {source} exactly.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "name",
+     "description": "her name",
+     "required": false
+    },
+    {
+     "name": "source",
+     "description": "the source clip token",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.recast.cuts",
+   "group": "suite",
+   "title": "Recast · cuts",
+   "description": "Models that keep a multi-shot clip’s cuts.",
+   "kind": "text",
+   "default": "Keep every cut and shot change of {source} at the same moments.",
+   "current": "Keep every cut and shot change of {source} at the same moments.",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [
+    {
+     "name": "source",
+     "description": "the source clip token",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.recast.direction",
+   "group": "suite",
+   "title": "Recast · user direction",
+   "description": "The user’s own words (anything that would change a character’s look is removed first).",
+   "kind": "text",
+   "default": "Direction: {direction}",
+   "current": "Direction: {direction}",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "direction",
+     "description": "the user’s direction",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
    "key": "suite.shot.footer",
    "group": "suite",
    "title": "Shot · closing line",
