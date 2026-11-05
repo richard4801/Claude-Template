@@ -201,6 +201,12 @@ extension AppStore {
         case 53: // Esc
             if warmPrompt != nil { answerWarmPrompt(turnOn: false); return true }
             if paletteOpen { closePalette(); return true }
+            // The overlay sheets, topmost first (RootView's order); each also has a close button.
+            if catalog != nil { catalog = nil; return true }
+            if versionsDraft != nil { versionsDraft = nil; return true }
+            if dressUpDraft != nil { dressUpDraft = nil; return true }
+            if enhanceDraft != nil { enhanceDraft = nil; return true }
+            if templateForm != nil { closeTemplateForm(); return true }
             if outfitSheet != nil { outfitSheet = nil; return true }
             if postDraft != nil { postDraft = nil; return true }
             if comparing { comparing = false; return true }

@@ -252,7 +252,15 @@ extension AppStore {
         }
     }
 
+    /// Delete a take (Result → Discard, Gallery → Delete take). It can't be undone, so it asks first.
     func discard(_ t: Take) {
+        let alert = NSAlert()
+        alert.messageText = "Delete \(t.caption)?"
+        alert.informativeText = t.isFinal ? "It's in your Final gallery. This can't be undone." : "This can't be undone."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.hasDestructiveAction = true
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
         perform { [self] in
             try await api.deleteTake(id: t.id)
             takes.removeAll { $0.id == t.id }
@@ -273,7 +281,7 @@ extension AppStore {
             return
         }
         let file = exportFile(t)
-        showToast("Exported 1080×1920", action: file == nil ? nil : "Show in Finder") {
+        showToast(file == nil ? "Couldn't save it to Downloads" : "Saved to Downloads › MUSE", action: file == nil ? nil : "Show in Finder") {
             if let file { NSWorkspace.shared.activateFileViewerSelecting([file]) }
         }
     }

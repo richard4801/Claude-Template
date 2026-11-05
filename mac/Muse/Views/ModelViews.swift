@@ -45,6 +45,11 @@ struct SheetSlotTile: View {
                         }
                     }
                     .onHover { h in withAnimation(.easeOut(duration: 0.15)) { hover = h } }
+                    // The hover buttons can't be reached without a mouse: VoiceOver gets them as actions.
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(label)
+                    .accessibilityAction(named: Text(primary), onPrimary)
+                    .if(secondary != nil) { $0.accessibilityAction(named: Text(secondary ?? ""), onSecondary) }
                     .contextMenu {
                         Button(primary, action: onPrimary)
                         if let secondary { Button(secondary, action: onSecondary) }
@@ -102,7 +107,10 @@ struct ProfileView: View {
                 }
             }
         } else {
-            Page { Note("No model yet.") }
+            Page {
+                Note("No model yet. Make one from your own reference images.")
+                MButton("New model", icon: "plus", kind: .primary) { store.go(.create) }.padding(.top, 12)
+            }
         }
     }
 
@@ -150,10 +158,12 @@ struct ProfileView: View {
         VStack(alignment: .leading, spacing: 0) {
             Eyebrow("Model").styled()
             H1(m.name)
-            SectionHeader(title: "Character sheet") {
+            // The actions sit on their own row: next to the title they overflowed the ~650 px column at 1280 px.
+            VStack(alignment: .leading, spacing: 0) {
+                SectionHeader(title: "Character sheet") { LinkText("Versions") { store.openVersions(m.id) } }
                 HStack(spacing: 10) {
                     Muted("Hover a shot to replace it")
-                    LinkText("Versions") { store.openVersions(m.id) }
+                    Spacer(minLength: 8)
                     MButton("Upload images", icon: "square.and.arrow.up", size: .small) { store.uploadSheet(m) }
                     if store.toolsFeatures?.enhance.available ?? false {
                         MButton("Enhance", icon: "wand.and.stars", size: .small) { store.openEnhance(m) }
@@ -162,6 +172,7 @@ struct ProfileView: View {
                         MButton("Dress up", icon: "tshirt", size: .small) { store.openDressUp(m) }
                     }
                 }
+                .padding(.bottom, 12)
             }
             VStack(alignment: .leading, spacing: 16) {
                 sheetGroup(m, "Face close-ups", SheetAngle.faceGroup)

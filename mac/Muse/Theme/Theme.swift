@@ -52,10 +52,25 @@ struct Theme {
     var lineWidth: CGFloat { isD ? 2.5 : 1 }
     var strongLine: Color { isD ? Color(hex: 0x111111) : line }
 
+    // Text colours that pass WCAG AA (4.5:1) on bg, surface and surface2; checked in MuseCoreTests/UxPolishTests.
+    /// Text links (`.link`): the accent, except where it's too light for text (Soft Tactile: its darker green; Creator Pop: blue).
+    var link: Color { isD ? blue : isC ? good : accent }
+    /// Text on the `.good` pill's `good.opacity(0.18)` tint.
+    var goodInk: Color {
+        switch id {
+        case .a: return Color(hex: 0x22552B)
+        case .b: return good
+        case .c: return Color(hex: 0x3E5737)
+        case .d: return Color(hex: 0x0A6B3D)
+        }
+    }
+    /// The fill behind `accentInk` text (the `.acc` pill, a chip that's on). Soft Tactile's accent is too light for white text.
+    var accentFill: Color { isC ? cta : accent }
+
     static func get(_ id: ThemeID) -> Theme {
         switch id {
         case .a:
-            return Theme(id: .a, bg: Color(hex: 0xEFEBE3), surface: Color(hex: 0xF8F5EF), surface2: Color(hex: 0xE7E1D6), ink: Color(hex: 0x141210), muted: Color(hex: 0x6E675E),
+            return Theme(id: .a, bg: Color(hex: 0xEFEBE3), surface: Color(hex: 0xF8F5EF), surface2: Color(hex: 0xE7E1D6), ink: Color(hex: 0x141210), muted: Color(hex: 0x67605A),
                          line: Color(hex: 0xCFC7BA), accent: Color(hex: 0xB5121B), accentInk: .white, cta: Color(hex: 0x141210), ctaInk: Color(hex: 0xF8F5EF),
                          good: Color(hex: 0x2F6B3A), warn: Color(hex: 0x9A5B00), warnBg: Color(hex: 0xF6E2C0), warnInk: Color(hex: 0x5B3600), rec: Color(hex: 0xB5121B),
                          r: 0, rLg: 0, stroke: 1, displayFamily: "Instrument Serif", bodyFamily: "Archivo", monoFamily: "IBM Plex Mono", isDark: false)

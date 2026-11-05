@@ -92,12 +92,16 @@ struct AuthView: View {
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityLabel(Self.attestations[i])
+                                .accessibilityValue(store.attest[i] ? "On" : "Off")
+                                .accessibilityAddTraits(.isToggle)
                             }
                         }
                         if let err = store.authError {
                             Note(icon: "exclamationmark.circle", warn: true, err)
                         }
-                        MButton(store.authBusy || store.restoring ? "…" : up ? "Create account" : "Sign in", kind: .primary, size: .big, off: up && !ok) {
+                        MButton(store.restoring ? "Checking your session…" : store.authBusy ? (up ? "Creating account…" : "Signing in…") : up ? "Create account" : "Sign in",
+                                kind: .primary, size: .big, off: up && !ok) {
                             up ? store.signUp() : store.signIn()
                         }
                         HStack(spacing: 4) {

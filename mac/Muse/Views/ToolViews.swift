@@ -460,7 +460,7 @@ struct DressUpSheetView: View {
                     Field("Outfit name") {
                         TextField("e.g. Denim day", text: Binding(get: { store.dressUpDraft?.name ?? "" }, set: { store.dressUpDraft?.name = $0 })).fieldChrome()
                     }
-                    Field("Engine") {
+                    Field("Options") {
                         HStack(spacing: 10) {
                             ForEach(f.options) { o in
                                 ChoiceTile(title: store.dressUpLabel(o), detail: o.detail ?? "", on: d.engine == o.id) {

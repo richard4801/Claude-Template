@@ -121,6 +121,19 @@ class ShootViewModel(private val c: AppContainer) : ViewModel() {
 
     fun edit(f: (ShootDraft) -> ShootDraft) { c.drafts.shoot.update(f); if (phase.value == "ready") phase.value = "idle" }
     fun outfit(id: String) { c.drafts.outfitId.value = id }
+    /** No model ready: a new one, or the first draft's character sheet. */
+    fun fixModel(nav: studio.muse.app.ui.Nav) {
+        val draft = c.repo.state.value.models.firstOrNull() ?: return nav.go(Routes.CREATE1)
+        c.drafts.modelId.value = draft.id
+        nav.go(Routes.CREATE3)
+    }
+    /** Shoot another (locked) model: her first outfit comes with her. */
+    fun model(id: String) {
+        if (c.drafts.modelId.value == id) return
+        c.drafts.modelId.value = id
+        c.repo.state.value.outfitsOf(id).firstOrNull()?.let { c.drafts.outfitId.value = it.id }
+        if (phase.value == "ready") phase.value = "idle"
+    }
     fun resetCamera() = edit { it.copy(shot = "Medium", lens = 35, aperture = "f/2.8") }
     fun toast(s: String) = c.repo.toast(s)
 
@@ -148,7 +161,7 @@ class ShootViewModel(private val c: AppContainer) : ViewModel() {
     fun shoot(celebrate: () -> Unit) = viewModelScope.launch {
         val s = state.value
         if (s.phase == "busy") return@launch
-        val model = s.model ?: return@launch c.repo.toast("Only Demo model is ready · Noor needs close-ups")
+        val model = s.model ?: return@launch c.repo.toast(NO_READY_MODEL)
         if (s.uploading) return@launch toast("Wait a moment · the reference photo is still uploading")
         phase.value = "busy"
         val shots = c.repo.shoot(s.draft.request(model.id, s.outfit?.id ?: ""))
@@ -179,24 +192,25 @@ fun ShootScreen() {
         Column(Modifier.fillMaxSize()) {
             TopBar("Photoshoot", onBack = { nav.back() }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                T("Templates", m.type.tiny.copy(fontWeight = FontWeight.Bold), if (m.isD) m.t.blue else m.t.accent, Modifier.press { nav.go(Routes.TEMPLATES) }.padding(8.dp))
+                T("Templates", m.type.tiny.copy(fontWeight = FontWeight.Bold), m.link, Modifier.press { nav.go(Routes.TEMPLATES) }.padding(8.dp))
                 MoreMenu(listOf(
                     MenuItem("grid", "Templates") { nav.go(Routes.TEMPLATES) },
                     MenuItem("spark", "Show prompt") { vm.edit { it.copy(tool = "spark") } },
-                    MenuItem("quality", "Save as preset") { vm.toast("Saved as preset \"${(d.scene ?: PromptEngine.DEFAULT_SCENE).substringBefore(" · ")} · ${d.lens}mm\"") },
                     MenuItem("retry", "Reset camera") { vm.resetCamera() },
-                    MenuItem("model", "Change model") { vm.toast("Only Demo model is ready · Noor needs close-ups") },
+                    MenuItem("model", "Change model") { vm.edit { it.copy(tool = "model") } },
                 ))
                 }
             }
             Canvas(220.dp) {
                 RefImage(s.outfit?.angles?.getOrNull(1) ?: s.outfit?.front, Modifier.fillMaxSize(), 20)
                 Viewfinder()
-                if (m.isB) Readout("${d.lens}MM · ${d.aperture.uppercase()} · 4300K", Modifier.padding(start = 14.dp, top = 12.dp))
+                if (m.isB) Readout("${d.lens}MM · ${d.aperture.uppercase()}", Modifier.padding(start = 14.dp, top = 12.dp))
                 Sticker((d.scene ?: PromptEngine.DEFAULT_SCENE).lowercase().take(24), "yellow", -4f, Modifier.align(Alignment.BottomStart).padding(12.dp))
             }
             ToolStrip(SHOOT_TOOLS, d.tool) { k -> vm.edit { it.copy(tool = k) } }
             BSheet(14.dp) {
+                // A new studio (or only drafts): say why there's nothing to shoot, and where to fix it.
+                if (s.model == null && d.tool != "model") NoModelNote(s.models.isEmpty()) { vm.fixModel(nav) }
                 when (d.tool) {
                     "spark" -> {
                         RowB { H3("Prompt"); Tiny("Built from your choices") }
@@ -232,7 +246,7 @@ fun ShootScreen() {
                         }
                     }
                     "camera" -> {
-                        RowB { H3("Camera"); T("Reset", m.type.tiny, if (m.isD) m.t.blue else m.t.accent, Modifier.press { vm.resetCamera() }.padding(6.dp)) }
+                        RowB { H3("Camera"); T("Reset", m.type.tiny, m.link, Modifier.press { vm.resetCamera() }.padding(6.dp)) }
                         Field("Shot") { Seg(listOf("Close", "Medium", "Full", "Wide").map { it to it }, d.shot, { v -> vm.edit { it.copy(shot = v) } }) }
                         Field("Lens · ${d.lens}mm") { ChipRow(listOf("16", "24", "35", "50", "85"), d.lens.toString(), { v -> vm.edit { it.copy(lens = v.toInt()) } }) { "${it}mm" } }
                         Field("Aperture") { ChipRow(listOf("f/1.4", "f/2.8", "f/5.6", "f/11"), d.aperture, { v -> vm.edit { it.copy(aperture = v) } }) }
@@ -263,10 +277,11 @@ fun ShootScreen() {
                         val templates by vm.templates.collectAsState()
                         if (templates.isNotEmpty()) TemplateStrip(templates, { t -> nav.go(Routes.template(t.id)) }, { nav.go(Routes.TEMPLATES) })
                         H3("Model")
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (s.model == null) NoModelNote(s.models.isEmpty()) { vm.fixModel(nav) }
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             s.models.forEach { md ->
                                 val on = md.id == s.model?.id
-                                Column(Modifier.width(74.dp).press { if (!md.locked) vm.toast("${md.name.substringBefore(' ')} needs close-ups first") }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Column(Modifier.width(74.dp).press { if (md.locked) vm.model(md.id) else vm.toast("${md.name.substringBefore(' ')} needs close-ups first") }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     val shape = RoundedCornerShape(m.t.r * .6f)
                                     Box(Modifier.fillMaxWidth().heightIn(min = 78.dp, max = 78.dp).let { if (on) it.border(2.dp, m.t.accent, shape) else it }.clip(shape)) {
                                         if (md.cover != null) RefImage(md.slot("face")?.image ?: md.cover, Modifier.fillMaxSize()) else ModelInitial(md, Modifier.fillMaxSize(), 26f)
@@ -283,10 +298,19 @@ fun ShootScreen() {
             when (s.phase) {
                 "ready" -> Cta("${c.drafts.freshShots.value} shots ready · View in Gallery", { nav.tab(Routes.GALLERY) }, Modifier.weight(1f), icon = "grid")
                 "busy" -> Cta("Shooting…", {}, Modifier.weight(1f), busy = true)
-                else -> Cta("Shoot 4 · ${s.preview?.estimateLabel?.ifBlank { null } ?: studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.shoot(photoPrices()))}", { vm.shoot(celebrate) }, Modifier.weight(1f))
+                else -> Cta(if (s.model == null) "Shoot 4" else "Shoot 4 · ${s.preview?.estimateLabel?.ifBlank { null } ?: studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.shoot(photoPrices()))}", { vm.shoot(celebrate) }, Modifier.weight(1f), off = s.model == null)
             }
         }
     }
+}
+
+/** Shown wherever there's no model ready to shoot (real studios start empty; drafts need their close-ups). */
+const val NO_READY_MODEL = "No model is ready yet · finish a character sheet first"
+
+@Composable
+private fun NoModelNote(noModels: Boolean, onFix: () -> Unit) {
+    NoteBox(if (noModels) "No models yet. Create one, then come back to shoot her." else "None of your models is ready yet. Add her close-ups to finish the character sheet.", icon = "model")
+    Cta2(if (noModels) "New model" else "Finish character sheet", onFix, Modifier.fillMaxWidth(), icon = if (noModels) "plus" else "grid", height = 46.dp)
 }
 
 @Composable
@@ -332,7 +356,7 @@ fun ReferencesPanel(refs: List<ShootRef>, preview: ShootPreview?, uploading: Boo
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 RowB {
                     T("Reference ${i + 1}", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink)
-                    T("Remove", m.type.tiny, if (m.isD) m.t.blue else m.t.accent, Modifier.press { onRemove(i) }.padding(4.dp))
+                    T("Remove", m.type.tiny, m.link, Modifier.press { onRemove(i) }.padding(4.dp))
                 }
                 FlowRow(hGap = 6.dp, vGap = 6.dp) { ShootRef.GUIDES.forEach { (id, label) -> Chip(label, id in r.guides, { onToggle(i, id) }) } }
             }

@@ -62,6 +62,13 @@ struct HomeView: View {
         return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"
     }
 
+    /// Takes made since the 1st of this month (the hint under "This month").
+    private var monthTakes: Int {
+        let start = Calendar.current.dateInterval(of: .month, for: Date())?.start ?? Date()
+        let ms = Int64(start.timeIntervalSince1970 * 1000)
+        return store.takes.filter { $0.createdAt >= ms }.count
+    }
+
     private var dateLine: String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_GB")
@@ -78,7 +85,7 @@ struct HomeView: View {
             }
             HStack(spacing: 14) {
                 KPI(label: "Balance", value: Pricing.money(store.creditUsd), hint: "≈ \(Pricing.videosLeft(store.creditUsd)) Draft videos", index: 0)
-                KPI(label: "This month", value: Pricing.money(store.balance.month), hint: "\(store.takes.count) renders", index: 1)
+                KPI(label: "This month", value: Pricing.money(store.balance.month), hint: "\(monthTakes) take\(monthTakes == 1 ? "" : "s") this month", index: 1)
                 KPI(label: "In the queue", value: "\(store.activeJobs.count)", hint: store.runningJob.map { $0.isWaiting ? MemberText.waitingToStart : "Rendering" } ?? "Nothing rendering", index: 2)
                 KPI(label: "To review", value: "\(store.toReview)", hint: "takes waiting for approval", index: 3)
             }
@@ -124,6 +131,9 @@ struct HomeView: View {
             .padding(.top, 22)
 
             SectionHeader(title: "Latest takes") { LinkText("Open gallery") { store.go(.gallery) } }
+            if store.takes.isEmpty {
+                Note(icon: "square.grid.2x2", "No takes yet. Finished videos and photoshoots show up here.")
+            }
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 6), spacing: 12) {
                 ForEach(store.takes.prefix(6)) { take in
                     Button { store.openTake(take.id) } label: { Media(ref: take.thumb, caption: take.caption) }.buttonStyle(.plain)
@@ -212,8 +222,12 @@ struct ModelCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(model.name).font(t.body(14, .bold)).foregroundStyle(t.ink).lineLimit(1)
                     if model.isDraft {
-                        HStack(spacing: 6) {
-                            Text("Draft ·").font(t.body(12)).foregroundStyle(t.muted)
+                        // A narrow card (five across at 1280 px) drops the "Draft ·" prefix rather than clip the pill.
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 6) {
+                                Text("Draft ·").font(t.body(12)).foregroundStyle(t.muted)
+                                Pill("needs face close-ups", .warn)
+                            }
                             Pill("needs face close-ups", .warn)
                         }
                     } else {

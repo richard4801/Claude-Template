@@ -30,9 +30,11 @@ class AppContainer(
     val media: studio.muse.app.platform.MediaReader? = null,
     initialPrefs: AppPrefs = AppPrefs(),
     val postAlarms: studio.muse.app.platform.PostAlarms? = null,
+    /** The real-API client for a server URL (tests swap in a stand-in; the app always uses HttpMuseApi). */
+    httpFactory: ((String) -> MuseApi)? = null,
 ) {
     val prefs: StateFlow<AppPrefs> = prefsStore.prefs.stateIn(scope, SharingStarted.Eagerly, initialPrefs)
-    val repo = MuseRepository(scope, prefsStore, fake)
+    val repo = if (httpFactory != null) MuseRepository(scope, prefsStore, fake, httpFactory) else MuseRepository(scope, prefsStore, fake)
     val drafts = Drafts()
     val warmUi = studio.muse.app.data.WarmUi()
     /** The renders started from the Video studio, so its stage can follow them (blurred preview, then the takes playing). */

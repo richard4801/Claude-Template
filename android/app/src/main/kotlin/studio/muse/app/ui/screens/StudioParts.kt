@@ -77,7 +77,8 @@ fun ToolStrip(tools: List<Pair<String, String>>, current: String, onSelect: (Str
                     ) { Ic(k, 20.dp, Ink) }
                     androidx.compose.material3.Text(l, style = labelStyle, color = if (on) Ink else m.t.muted, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Visible, modifier = Modifier.wrapContentWidth(unbounded = true))
                 }
-                else -> Column(Modifier.width(62.dp).press { onSelect(k) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                // Six tools (Photoshoot) share the width equally so labels don't run together at 360 dp (UX audit A-ToolStrip).
+                else -> Column((if (tools.size > 5) Modifier.weight(1f) else Modifier.width(62.dp)).press { onSelect(k) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     val c = if (on) m.t.accent else m.t.muted
                     Ic(k, 20.dp, c)
                     androidx.compose.material3.Text(if (m.isA) l.uppercase() else l, style = labelStyle, color = c, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Visible, modifier = Modifier.wrapContentWidth(unbounded = true))
