@@ -74,7 +74,7 @@ object EditJson {
     }
 
     private fun asset(o: Obj) = Asset(
-        id = o.str("id"), kind = o.enum("kind", "must be video, image or audio"),
+        id = o.str("id"), kind = o.enum("kind", "must be video, image, audio or lut"),
         take = o.strOrNull("take"), upload = o.strOrNull("upload"), library = o.strOrNull("library"),
         durationSec = o.numOrNull("durationSec"), width = o.intOrNull("width"), height = o.intOrNull("height"),
         hasAudio = o.boolOrNull("hasAudio"), url = o.strOrNull("url"),
@@ -111,7 +111,7 @@ object EditJson {
         startSec = o.numOrNull("startSec"), volume = o.numOrNull("volume"), muted = o.boolOrNull("muted"),
         fadeInSec = o.numOrNull("fadeInSec"), fadeOutSec = o.numOrNull("fadeOutSec"), audioAsset = o.strOrNull("audioAsset"),
         fit = o.enumOrNull("fit", "must be cover or contain"), transform = transform(o), crop = crop(o), opacity = o.numOrNull("opacity"),
-        keyframes = keyframes(o), filter = filter(o), adjust = adjust(o),
+        keyframes = keyframes(o), filter = filter(o), adjust = adjust(o), look = look(o),
         chroma = o.objOrNull("chroma")?.let { Chroma(it.str("color"), it.numOrNull("similarity"), it.numOrNull("smoothness"), it.numOrNull("spill")) },
         transitionIn = o.objOrNull("transitionIn")?.let { Transition(it.enum("kind", "unknown transition"), it.num("durationSec")) },
     )
@@ -119,7 +119,7 @@ object EditJson {
     private fun imageItem(o: Obj) = ImageItem(
         id = o.str("id"), asset = o.str("asset"), startSec = o.num("startSec"), durationSec = o.num("durationSec"),
         fit = o.enumOrNull("fit", "must be cover or contain"), transform = transform(o), crop = crop(o), opacity = o.numOrNull("opacity"),
-        keyframes = keyframes(o), filter = filter(o), adjust = adjust(o), animIn = anim(o, "animIn"), animOut = anim(o, "animOut"),
+        keyframes = keyframes(o), filter = filter(o), adjust = adjust(o), look = look(o), animIn = anim(o, "animIn"), animOut = anim(o, "animOut"),
     )
 
     private fun textItem(o: Obj) = TextItem(
@@ -140,6 +140,39 @@ object EditJson {
     private fun adjust(o: Obj) = o.objOrNull("adjust")?.let(::adjustOf)
     private fun adjustOf(a: Obj) = Adjust(a.numOrNull("exposure"), a.numOrNull("contrast"), a.numOrNull("saturation"), a.numOrNull("temperature"))
     private fun filter(o: Obj) = o.objOrNull("filter")?.let { FilterRef(it.str("id"), it.num("amount")) }
+    private fun look(o: Obj) = o.objOrNull("look")?.let(::lookOf)
+
+    /**
+     * A [Look] (plans/video-editor.md "Looks"). Shapes are checked here (an unknown key, curve or leak kind, a curve
+     * point that isn't `[x, y]`) with the reference's field paths; ranges and the LUT reference are [validate]'s.
+     */
+    internal fun lookOf(l: Obj): Look {
+        l.o.keys.firstOrNull { it !in Look.KEYS }?.let { l.bad(it, "is not a look setting") }
+        return Look(
+            lut = l.strOrNull("lut"), strength = l.numOrNull("strength"),
+            curves = l.objOrNull("curves")?.let { c ->
+                val m = LinkedHashMap<CurveChannel, List<CurvePoint>>()
+                for ((k, v) in c.o) {
+                    val ch = wireOf<CurveChannel>(k) ?: c.bad(k, "unknown curve")
+                    m[ch] = Obj.list(v, "${c.path}.$k").map { (e, f) ->
+                        val pt = (e as? JsonArray)?.takeIf { it.size == 2 }?.map { (it as? JsonPrimitive)?.takeIf { p -> !p.isString }?.doubleOrNull?.takeIf { d -> d.isFinite() } }
+                        if (pt == null || pt.any { it == null }) throw EditProblem(f, "must be [x, y], each 0–1")
+                        CurvePoint(pt[0]!!, pt[1]!!)
+                    }
+                }
+                m
+            },
+            lift = l.numOrNull("lift"), sharpen = l.numOrNull("sharpen"), chromatic = l.numOrNull("chromatic"),
+            halation = l.objOrNull("halation")?.let { Halation(it.num("amount"), it.numOrNull("radius"), it.numOrNull("threshold")) },
+            leak = l.objOrNull("leak")?.let { Leak(it.enum("kind", "one of ${LeakKind.entries.joinToString(", ") { k -> k.wire }}"), it.num("amount"), it.numOrNull("angle")) },
+            vignette = l.objOrNull("vignette")?.let { Vignette(it.num("amount"), it.numOrNull("size"), it.numOrNull("softness")) },
+            grain = l.objOrNull("grain")?.let { Grain(it.num("amount"), it.numOrNull("size")) },
+        )
+    }
+
+    /** Parses a look on its own (e.g. a pack entry); [path] names it in problems. */
+    fun parseLook(el: JsonElement, path: String = "look"): Look = lookOf(Obj.of(el, path))
+
     private fun anim(o: Obj, key: String) = o.objOrNull(key)?.let { Anim(it.enum("kind", "unknown animation"), it.num("durationSec")) }
 
     private fun keyframes(o: Obj): Keyframes? = o.objOrNull("keyframes")?.let { k ->
@@ -216,6 +249,21 @@ object EditJson {
         keyframes(v.keyframes)
         v.filter?.let { f -> put("filter", buildJsonObject { put("id", f.id); num("amount", f.amount) }) }
         v.adjust?.let { put("adjust", encodeAdjust(it)) }
+        v.look?.let { put("look", encodeLook(it)) }
+    }
+
+    fun encodeLook(l: Look) = buildJsonObject {
+        str("lut", l.lut); num("strength", l.strength)
+        l.curves?.let { c ->
+            put("curves", buildJsonObject {
+                for ((ch, pts) in c) put(ch.wire, JsonArray(pts.map { p -> buildJsonArray { add(number(p.x)); add(number(p.y)) } }))
+            })
+        }
+        num("lift", l.lift); num("sharpen", l.sharpen); num("chromatic", l.chromatic)
+        l.halation?.let { h -> put("halation", buildJsonObject { num("amount", h.amount); num("radius", h.radius); num("threshold", h.threshold) }) }
+        l.leak?.let { k -> put("leak", buildJsonObject { put("kind", k.kind.wire); num("amount", k.amount); num("angle", k.angle) }) }
+        l.vignette?.let { v -> put("vignette", buildJsonObject { num("amount", v.amount); num("size", v.size); num("softness", v.softness) }) }
+        l.grain?.let { g -> put("grain", buildJsonObject { num("amount", g.amount); num("size", g.size) }) }
     }
 
     fun encodeAdjust(a: Adjust) = buildJsonObject { num("exposure", a.exposure); num("contrast", a.contrast); num("saturation", a.saturation); num("temperature", a.temperature) }
