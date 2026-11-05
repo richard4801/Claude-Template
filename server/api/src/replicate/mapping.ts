@@ -90,7 +90,7 @@ export function mapModel(raw: RawModel, step: ImageStep): MapResult {
 
   // Image input: an array field first (several references), else a single one, plus image_2/image_3… as more images.
   const arr = ARRAY_IMAGE_NAMES.find(n => props[n] && isUriArray(props[n]!)) ?? names.find(n => /image/i.test(n) && !/mask|control/i.test(n) && isUriArray(props[n]!));
-  if (arr) m.image = { field: take(arr, 'images'), array: true, max: typeof props[arr]!.maxItems === 'number' ? props[arr]!.maxItems : null };
+  if (arr) m.image = { field: take(arr, 'images'), array: true, max: typeof props[arr]!.maxItems === 'number' ? props[arr]!.maxItems : maxImagesFromText(props[arr]!.description) };
   else {
     const single = SINGLE_IMAGE_NAMES.find(n => props[n] && isUri(props[n]!)) ?? names.find(n => /image|photo|img/i.test(n) && !/mask|control|style|depth|pose|background/i.test(n) && !EXTRA_IMAGE_RE.test(n) && isUri(props[n]!));
     if (single) m.image = { field: take(single, 'image'), array: false, max: 1 };
@@ -217,3 +217,19 @@ export function buildInput(m: Mapping, a: BuildArgs, extra: Record<string, unkno
 
 /** How many images the mapping can take in one prediction. */
 export const imageCapacity = (m: Mapping) => !m.image ? 0 : m.image.array ? (m.image.max ?? 16) : 1 + (m.extraImageFields?.length ?? 0);
+
+/**
+ * Many models state their image limit only in the field description ("Maximum 5 images", "supports up to 14 images",
+ * "List of 1-10 images"), not as JSON-schema maxItems. Returns that number, or null when the text doesn't say.
+ */
+export function maxImagesFromText(desc: unknown): number | null {
+  if (typeof desc !== 'string') return null;
+  const pats = [
+    /\bmax(?:imum)?(?:\s+of)?\s+(\d{1,2})\s+(?:input\s+|reference\s+)?images?\b/i,
+    /\bup\s+to\s+(\d{1,2})\s+(?:input\s+|reference\s+)?images?\b/i,
+    /\b\d{1,2}\s*[-\u2013]\s*(\d{1,2})\s+(?:input\s+|reference\s+)?images?\b/i,
+    /\bat\s+most\s+(\d{1,2})\s+(?:input\s+|reference\s+)?images?\b/i,
+  ];
+  for (const re of pats) { const m = re.exec(desc); if (m) { const n = Number(m[1]); if (n >= 1 && n <= 64) return n; } }
+  return null;
+}

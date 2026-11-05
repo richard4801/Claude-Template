@@ -453,11 +453,20 @@ export class ImageService {
     const price = await im.price(o.model).catch(() => ({ kind: 'unknown' } as const));
     let done;
     try {
-      const p = await this.ctx.replicate.create(o.model, input, { maxWaitMs: c.REPLICATE_IMAGE_MAX_WAIT_SEC * 1000, cancelled: o.cancelled,
-        ...(raw.is_official ? {} : { version: raw.latest_version?.id }) });
-      done = p.status === 'succeeded' ? p : await this.ctx.replicate.wait(p.id, { pollMs: Math.min(c.REPLICATE_POLL_MS, 1500), timeoutMs: c.IMAGE_TIMEOUT_SEC * 1000, cancelled: o.cancelled });
-      if (done.status !== 'succeeded') {
+      for (let attempt = 0; ; attempt++) {
+        const p = await this.ctx.replicate.create(o.model, input, { maxWaitMs: c.REPLICATE_IMAGE_MAX_WAIT_SEC * 1000, cancelled: o.cancelled,
+          ...(raw.is_official ? {} : { version: raw.latest_version?.id }) });
+        done = p.status === 'succeeded' ? p : await this.ctx.replicate.wait(p.id, { pollMs: Math.min(c.REPLICATE_POLL_MS, 1500), timeoutMs: c.IMAGE_TIMEOUT_SEC * 1000, cancelled: o.cancelled });
+        if (done.status === 'succeeded') break;
         const t = errorText(done.error);
+        // The model takes fewer images than we sent (its limit wasn't in the schema): keep the first N and try once more.
+        const limM = TOO_MANY_IMAGES_RE.exec(t), lim = limM ? Number(limM[1] ?? limM[2]) : 0;
+        const field = map.mapping.image?.array ? map.mapping.image.field : null;
+        if (attempt === 0 && lim > 0 && field && Array.isArray(input[field]) && (input[field] as unknown[]).length > lim) {
+          this.ctx.log.warn({ model: o.model, sent: (input[field] as unknown[]).length, max: lim }, 'model takes fewer images · retrying with fewer');
+          input[field] = (input[field] as unknown[]).slice(0, lim);
+          continue;
+        }
         throw new ReplicateError(t || 'prediction failed', SAFETY_RE.test(t) ? 'refused' : CREDIT_RE.test(t) ? 'out_of_credit' : 'failed');
       }
     } catch (e) { throw await this.photoError(o.studioId, e, 0, { model: o.model, step: o.step }); }
@@ -473,6 +482,9 @@ export class ImageService {
     return { image: stored.ref, cost: ex.usd, estimated: ex.estimated };
   }
 }
+
+/** "Maximum 5 input images allowed, but 7 were provided" and similar wordings. */
+const TOO_MANY_IMAGES_RE = /(?:maximum|max|at most|up to)\s+(\d{1,2})\s+(?:input\s+|reference\s+)?images?\b[^]*?(?:allowed|provided|exceed|supported)|only\s+(?:supports?|accepts?)\s+(\d{1,2})\s+images?/i;
 
 /** The first image URL in a prediction's output: a string, a list, or an object holding one. */
 export function firstUri(o: unknown): string | null {
