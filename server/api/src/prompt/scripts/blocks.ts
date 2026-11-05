@@ -8,6 +8,13 @@ const b = (key: string, title: string, description: string, def: string, placeho
   ({ key, group: 'video', title, description, kind: 'text', default: def, placeholders, ...extra });
 
 export const SCRIPT_BLOCK_DEFS: PromptDef[] = [
+  // ---- the reference sheet line (refs.collage): what each non-person panel shows (were fixed in code)
+  { key: 'refs.collage.outfit', group: 'references', title: 'Reference sheet · outfit panel', description: 'In the reference sheet line, for a panel with the outfit.',
+    kind: 'text', default: 'panel {panel} shows the outfit to wear', placeholders: [['panel', 'the panel number', true]], allowEmpty: false },
+  { key: 'refs.collage.product', group: 'references', title: 'Reference sheet · product panel', description: 'In the reference sheet line, for a panel with the product.',
+    kind: 'text', default: 'panel {panel} shows the product', placeholders: [['panel', 'the panel number', true]], allowEmpty: false },
+  { key: 'refs.collage.ref', group: 'references', title: 'Reference sheet · reference panel', description: 'In the reference sheet line, for a reference image’s panel.',
+    kind: 'text', default: 'panel {panel} guides the {guides} only', placeholders: [['panel', 'the panel number', true], ['guides', '"pose & framing and the look & colour" …', true]], allowEmpty: false },
   // ---- the user's own words in video prompts (a delimited user section; system text never rewrites it)
   b('video.user.direction', 'User section', 'The user’s own direction, after every system section (anything that would change her identity is removed first).',
     'Direction from the user: {direction}', [['direction', 'the user’s direction', true]], { allowEmpty: false }),

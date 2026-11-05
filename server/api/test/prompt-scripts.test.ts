@@ -1,7 +1,10 @@
 // Prompt scripts (plans/prompt-scripts.md): the runner, every script's rule branches, owner rule edits, and that the
 // default scripts reproduce the prompts the builders made before scripts.
 import { describe, expect, it } from 'vitest';
-import * as E from '../src/prompt/engine.js';
+import * as E from './legacy/engine.js';
+import * as LT from './legacy/templatePrompt.js';
+import { buildTemplatePrompt } from '../src/templates/prompt.js';
+import * as Live from '../src/prompt/engine.js';
 import { DEFAULT_TEXTS } from '../src/prompt/library.js';
 import * as B from '../src/prompt/scripts/builders.js';
 import { SCRIPTS, scriptDef } from '../src/prompt/scripts/defs.js';
@@ -31,6 +34,30 @@ describe('defaults reproduce the pre-script prompts exactly', () => {
     for (const a of E.OUTFIT_ANGLES) expect(B.outfitEditPrompt(a)).toBe(E.outfitEditPrompt(a));
     expect(B.loraCandidate(demo, E.SHEET_ANGLES[0], 13).text).toBe(`${E.characterSheetShot(demo, E.SHEET_ANGLES[0]).text}\nVariation: studio softbox, looking over shoulder.`);
     expect(B.enhancePrompt()).toBe(DEFAULT_TEXTS['enhance.prompt']);
+  });
+  it('template shoots: both views, every layer combination, product, seed, refs and direction', () => {
+    const layerSets = [{ scene: 'bedroom mirror', camera: 'phone in hand', light: 'window light', product: 'held up', style: 'casual', negative: 'no logos.' },
+      { style: 'flash' }, { scene: 'street', product: 'sipping it' }];
+    const pool = { pose: ['phone held low'], framing: ['full length'], expression: ['smiling'], background: ['unmade bed'], timeOfDay: ['late'] };
+    for (const layers of layerSets) for (const outfit of [{ name: 'Green set' }, { name: 'Knit', description: 'a knit.', source: 'described' as const }, null])
+      for (const lockSeed of [true, false]) for (const seed of [421337, undefined]) for (const hasProduct of [true, false])
+        for (const direction of [undefined, 'laughing, blonde hair']) for (const refs of [undefined, [{ index: 4, guides: ['look'] as E.ShootGuide[] }]]) {
+          const o = { templateId: 't1', templateName: 'Mirror selfie', layers, pool, identity: demo, outfit, shuffleSeed: 7, lockSeed, seed, hasProduct, direction, refs };
+          expect(buildTemplatePrompt(o)).toEqual(LT.buildTemplatePrompt(o));
+        }
+  });
+  it('reference sheet line (one-image models)', () => {
+    const cases: E.SheetPanel[][] = [
+      [{ label: 'face', role: 'person' }, { label: 'face ¾', role: 'person' }, { label: 'body', role: 'person' }, { label: 'outfit', role: 'outfit' }, { label: 'ref', role: 'ref', guides: ['look', 'scene'] }],
+      [{ label: 'face', role: 'person' }, { label: 'product', role: 'product' }, { label: 'r', role: 'ref', guides: ['pose'] }],
+      [{ label: 'outfit', role: 'outfit' }],
+    ];
+    for (const c of cases) expect(B.collageLine(c)).toBe(E.collageLine(c));
+  });
+  it('the live engine exports are the script builders', () => {
+    expect(Live.photoshoot).toBe(B.photoshoot);
+    expect(Live.videoSwap).toBe(B.videoSwap);
+    expect(Live.collageLine).toBe(B.collageLine);
   });
   it('dress up: body and close-ups, with and without the anchor', () => {
     const anchor = ` ${DEFAULT_TEXTS['dress.anchor']}`;

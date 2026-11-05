@@ -57,6 +57,17 @@ export function runScript(script: Script, o: RunOptions): ScriptResult {
 
   // 1. Placeholder values chosen by rules ("@name"): the first matching rule wins.
   for (const slot of script.values ?? []) {
+    if (slot.each) {
+      const pieces: string[] = [];
+      for (const item of (inputs[slot.each] as Item[] | undefined) ?? []) {
+        const r = rules.find(x => x.target === `@${slot.name}` && ruleOn(x, inputs, item));
+        if (!r) continue;
+        const t = render(r.block, { ...vars, ...itemVars(item) });
+        if (t) { fired.push(r.id); pieces.push(`${slot.itemPrefix ?? ''}${t}`); }
+      }
+      vars[slot.name] = pieces.length ? `${slot.prefix ?? ''}${pieces.join(slot.join ?? '')}` : '';
+      continue;
+    }
     const r = rules.find(x => x.target === `@${slot.name}` && ruleOn(x, inputs, null));
     if (!r) { if (vars[slot.name] == null) vars[slot.name] = ''; continue; }
     fired.push(r.id);
@@ -104,9 +115,9 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
 function inputFor(s: Script, name: string, target: string): InputDef | undefined {
   if (!name.startsWith('item.')) return s.inputs.find(i => i.name === name);
-  const sec = s.sections.find(x => x.id === target);
-  if (!sec?.each) return undefined;
-  return s.inputs.find(i => i.name === sec.each)?.fields?.find(f => f.name === name.slice(5));
+  const each = target.startsWith('@') ? (s.values ?? []).find(v => `@${v.name}` === target)?.each : s.sections.find(x => x.id === target)?.each;
+  if (!each) return undefined;
+  return s.inputs.find(i => i.name === each)?.fields?.find(f => f.name === name.slice(5));
 }
 
 /** Why a condition is wrong, or null. Messages are shown as-is in the editor. */

@@ -67,7 +67,12 @@ export type Section = {
   alias?: Record<string, string>;
 };
 /** A placeholder whose value is chosen by rules (target "@name"). `prefix` is put before a non-empty value. */
-export type ValueSlot = { name: string; label: string; prefix?: string };
+export type ValueSlot = {
+  name: string; label: string; prefix?: string;
+  /** Repeat over this list input: each item's first matching rule gives a piece ("item.<field>" conditions, item fields as
+   *  placeholders); the value is the pieces, each after `itemPrefix`, joined with `join`. */
+  each?: string; itemPrefix?: string; join?: string;
+};
 
 export type ScriptGroup = string;
 export type Script = {

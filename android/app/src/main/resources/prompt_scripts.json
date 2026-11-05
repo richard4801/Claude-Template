@@ -119,6 +119,229 @@
  ],
  "scripts": [
   {
+   "id": "refs.collage",
+   "group": "references",
+   "title": "Reference sheet line",
+   "description": "First line of a photo prompt when the shot model takes one image and MUSE sends one reference sheet of numbered panels.",
+   "format": "lines",
+   "inputs": [
+    {
+     "name": "panels",
+     "label": "Panels",
+     "description": "The sheet’s panels in order (her own images first).",
+     "type": "list",
+     "fields": [
+      {
+       "name": "panel",
+       "label": "Panel number",
+       "description": "1-based.",
+       "type": "number",
+       "sample": 4
+      },
+      {
+       "name": "role",
+       "label": "Shows",
+       "description": "What the panel shows.",
+       "type": "enum",
+       "options": [
+        {
+         "id": "person",
+         "label": "Her"
+        },
+        {
+         "id": "outfit",
+         "label": "The outfit"
+        },
+        {
+         "id": "product",
+         "label": "The product"
+        },
+        {
+         "id": "ref",
+         "label": "A reference image"
+        }
+       ],
+       "sample": "outfit"
+      },
+      {
+       "name": "guides",
+       "label": "Guides",
+       "description": "A reference image’s guides, in words.",
+       "type": "text",
+       "sample": "pose & framing"
+      }
+     ],
+     "sample": [
+      {
+       "panel": 1,
+       "role": "person",
+       "guides": ""
+      },
+      {
+       "panel": 2,
+       "role": "person",
+       "guides": ""
+      },
+      {
+       "panel": 3,
+       "role": "person",
+       "guides": ""
+      },
+      {
+       "panel": 4,
+       "role": "outfit",
+       "guides": ""
+      },
+      {
+       "panel": 5,
+       "role": "ref",
+       "guides": "pose & framing"
+      }
+     ]
+    }
+   ],
+   "sections": [
+    {
+     "id": "sheet",
+     "label": "Reference sheet",
+     "kind": "system"
+    }
+   ],
+   "values": [
+    {
+     "name": "panels",
+     "label": "Other panels",
+     "each": "panels",
+     "itemPrefix": "; "
+    }
+   ],
+   "targets": [
+    {
+     "id": "sheet",
+     "label": "Reference sheet"
+    },
+    {
+     "id": "@panels",
+     "label": "Other panels"
+    }
+   ],
+   "vars": [
+    {
+     "name": "person",
+     "description": "\"panel 1 shows\" / \"panels 1–3 show\"",
+     "sample": "panels 1–3 show"
+    }
+   ],
+   "blocks": [
+    "refs.collage.outfit",
+    "refs.collage.product",
+    "refs.collage.ref",
+    "refs.collage"
+   ],
+   "rules": [
+    {
+     "id": "panel.outfit",
+     "label": "Outfit panel",
+     "target": "@panels",
+     "when": [
+      {
+       "input": "item.role",
+       "op": "is",
+       "value": "outfit"
+      }
+     ],
+     "block": "refs.collage.outfit"
+    },
+    {
+     "id": "panel.product",
+     "label": "Product panel",
+     "target": "@panels",
+     "when": [
+      {
+       "input": "item.role",
+       "op": "is",
+       "value": "product"
+      }
+     ],
+     "block": "refs.collage.product"
+    },
+    {
+     "id": "panel.ref",
+     "label": "Reference panel",
+     "target": "@panels",
+     "when": [
+      {
+       "input": "item.role",
+       "op": "is",
+       "value": "ref"
+      }
+     ],
+     "block": "refs.collage.ref"
+    },
+    {
+     "id": "sheet",
+     "label": "Reference sheet",
+     "target": "sheet",
+     "when": [],
+     "block": "refs.collage",
+     "locked": true
+    }
+   ],
+   "defaultRules": [
+    {
+     "id": "panel.outfit",
+     "label": "Outfit panel",
+     "target": "@panels",
+     "when": [
+      {
+       "input": "item.role",
+       "op": "is",
+       "value": "outfit"
+      }
+     ],
+     "block": "refs.collage.outfit"
+    },
+    {
+     "id": "panel.product",
+     "label": "Product panel",
+     "target": "@panels",
+     "when": [
+      {
+       "input": "item.role",
+       "op": "is",
+       "value": "product"
+      }
+     ],
+     "block": "refs.collage.product"
+    },
+    {
+     "id": "panel.ref",
+     "label": "Reference panel",
+     "target": "@panels",
+     "when": [
+      {
+       "input": "item.role",
+       "op": "is",
+       "value": "ref"
+      }
+     ],
+     "block": "refs.collage.ref"
+    },
+    {
+     "id": "sheet",
+     "label": "Reference sheet",
+     "target": "sheet",
+     "when": [],
+     "block": "refs.collage",
+     "locked": true
+    }
+   ],
+   "overridden": false,
+   "stale": false,
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
    "id": "photoshoot",
    "group": "photoshoot",
    "title": "Photoshoot",

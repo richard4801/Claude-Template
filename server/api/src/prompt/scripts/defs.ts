@@ -212,7 +212,27 @@ const audioLine: Script = {
   vars: [{ name: 'subject', description: '<Subject 1> …', sample: '<Subject 1>' }, { name: 'audio', description: '<Audio 1> …', sample: '<Audio 1>' }],
 };
 
-export const SCRIPTS: Script[] = [photoshoot, template, sheet, outfitAngle, outfitEdit, enhance, dressup, loraCandidate, videoReplicate, videoEdit, audioLine];
+// ---------------------------------------------------------------- reference sheet (one-image shot models)
+const collage: Script = {
+  id: 'refs.collage', group: 'references', title: 'Reference sheet line', format: 'lines',
+  description: 'First line of a photo prompt when the shot model takes one image and MUSE sends one reference sheet of numbered panels.',
+  inputs: [{ name: 'panels', label: 'Panels', description: 'The sheet’s panels in order (her own images first).', type: 'list',
+    fields: [{ name: 'panel', label: 'Panel number', description: '1-based.', type: 'number', sample: 4 },
+      { name: 'role', label: 'Shows', description: 'What the panel shows.', type: 'enum', options: [{ id: 'person', label: 'Her' }, { id: 'outfit', label: 'The outfit' }, { id: 'product', label: 'The product' }, { id: 'ref', label: 'A reference image' }], sample: 'outfit' },
+      { name: 'guides', label: 'Guides', description: 'A reference image’s guides, in words.', type: 'text', sample: 'pose & framing' }],
+    sample: [{ panel: 1, role: 'person', guides: '' }, { panel: 2, role: 'person', guides: '' }, { panel: 3, role: 'person', guides: '' }, { panel: 4, role: 'outfit', guides: '' }, { panel: 5, role: 'ref', guides: 'pose & framing' }] }],
+  sections: [sec('sheet', 'Reference sheet', { layer: 'sheet' })],
+  values: [{ name: 'panels', label: 'Other panels', each: 'panels', itemPrefix: '; ' }],
+  rules: [
+    R('panel.outfit', 'Outfit panel', '@panels', 'refs.collage.outfit', [is('item.role', 'outfit')]),
+    R('panel.product', 'Product panel', '@panels', 'refs.collage.product', [is('item.role', 'product')]),
+    R('panel.ref', 'Reference panel', '@panels', 'refs.collage.ref', [is('item.role', 'ref')]),
+    R('sheet', 'Reference sheet', 'sheet', 'refs.collage', [], { locked: true }),
+  ],
+  vars: [{ name: 'person', description: '"panel 1 shows" / "panels 1–3 show"', sample: 'panels 1–3 show' }],
+};
+
+export const SCRIPTS: Script[] = [collage, photoshoot, template, sheet, outfitAngle, outfitEdit, enhance, dressup, loraCandidate, videoReplicate, videoEdit, audioLine];
 const BY_ID = new Map(SCRIPTS.map(s => [s.id, s]));
 export const scriptDef = (id: string) => BY_ID.get(id);
 /**

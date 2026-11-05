@@ -1130,6 +1130,71 @@
    "updatedBy": null
   },
   {
+   "key": "refs.collage.outfit",
+   "group": "references",
+   "title": "Reference sheet · outfit panel",
+   "description": "In the reference sheet line, for a panel with the outfit.",
+   "kind": "text",
+   "default": "panel {panel} shows the outfit to wear",
+   "current": "panel {panel} shows the outfit to wear",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "panel",
+     "description": "the panel number",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "refs.collage.product",
+   "group": "references",
+   "title": "Reference sheet · product panel",
+   "description": "In the reference sheet line, for a panel with the product.",
+   "kind": "text",
+   "default": "panel {panel} shows the product",
+   "current": "panel {panel} shows the product",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "panel",
+     "description": "the panel number",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "refs.collage.ref",
+   "group": "references",
+   "title": "Reference sheet · reference panel",
+   "description": "In the reference sheet line, for a reference image’s panel.",
+   "kind": "text",
+   "default": "panel {panel} guides the {guides} only",
+   "current": "panel {panel} guides the {guides} only",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "panel",
+     "description": "the panel number",
+     "required": true
+    },
+    {
+     "name": "guides",
+     "description": "\"pose & framing and the look & colour\" …",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
    "key": "video.user.direction",
    "group": "video",
    "title": "User section",

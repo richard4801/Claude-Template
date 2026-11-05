@@ -6,7 +6,7 @@ import { ApiError, notFound } from '../errors.js';
 import { allowEmpty, DEFAULT_TEXTS, fill, listOf, PROMPT_DEFS, PROMPT_GROUPS, promptDef, resolveTexts, validatePrompt, type PromptDef, type PromptTexts } from './library.js';
 import * as E from './engine.js';
 import { buildTemplatePrompt } from '../templates/prompt.js';
-import { withRules } from './scripts/builders.js';
+import { dressPrompt, withRules } from './scripts/builders.js';
 import { loadRules } from './scripts/service.js';
 
 export type PromptEntry = {
@@ -146,13 +146,10 @@ export function exampleFor(def: PromptDef, t: PromptTexts = DEFAULT_TEXTS): stri
 }
 
 /** The Dress up prompt for one sheet image (plans/api.md "Model tools" §5). */
-export function dressPrompt(slot: string, withAnchor: boolean, t: PromptTexts = DEFAULT_TEXTS) {
-  const face = ['face', 'faceTq', 'profile'].includes(slot);
-  const anchor = withAnchor && t['dress.anchor']!.trim() ? ` ${t['dress.anchor']!.trim()}` : '';
-  return fill(face ? t['dress.closeup']! : t['dress.body']!, { anchor });
-}
+export { dressPrompt };
 /** The LoRA candidate variations and the line for candidate `n`. */
 export const loraVariations = (t: PromptTexts = DEFAULT_TEXTS) => { const l = listOf(t['lora.variations']!, 'lines'); return l.length ? l : listOf(DEFAULT_TEXTS['lora.variations']!, 'lines'); };
+/** The variation line of LoRA candidate n (the candidate's whole prompt: scripts' loraCandidate). */
 export const loraVariationLine = (n: number, t: PromptTexts = DEFAULT_TEXTS) => { const v = loraVariations(t); return fill(t['lora.variation']!, { variation: v[n % v.length] }); };
 
 /** Every entry on its default, as GET /v1/prompts lists them for a studio with no overrides (the app's demo mode ships this). */

@@ -3,7 +3,7 @@
 // (PromptLibrary.texts) also carries the studio's rules (withRules), so owner rule edits reach every builder.
 import { DEFAULT_TEXTS, fill, listOf, type PromptTexts } from '../library.js';
 import {
-  cameraValues, imageRange, neverList, sanitizeDirection, seedFor, shootChoices, SHEET_ANGLES,
+  cameraValues, imageRange, neverList, panelSpan, SHOOT_GUIDES, type SheetPanel, sanitizeDirection, seedFor, shootChoices, SHEET_ANGLES,
   type BuiltPrompt, type H3Prompt, type Identity, type LayerKey, type OutfitSpec, type PromptSlot, type ReplicateSwapSpec, type SentRef, type SheetAngle, type ShootSpec, type VideoSwapSpec,
 } from '../engine.js';
 import { SCRIPT_BLOCK_DEFS } from './blocks.js';
@@ -164,4 +164,14 @@ export function replicateSwap(v: ReplicateSwapSpec & { speaking?: boolean }, t: 
 /** The audio sentence of a generated shot (workstream 1 calls this when it builds a shot prompt). */
 export function audioLine(o: { audio: 'speech' | 'music' | 'none'; speaking: boolean; subject?: string; audioTag?: string }, t: PromptTexts = DEFAULT_TEXTS) {
   return run('video.audio', t, { inputs: { audio: o.audio, speaking: o.speaking }, vars: { subject: o.subject ?? '<Subject 1>', audio: o.audioTag ?? '<Audio 1>' } }).text;
+}
+
+// ---------------------------------------------------------------- reference sheet line (one-image shot models)
+const GUIDE_WORDS: Record<string, string> = { pose: 'pose & framing', look: 'look & colour', scene: 'scene' };
+/** The line that tells a one-image model its input is a reference sheet (script `refs.collage`). */
+export function collageLine(panels: SheetPanel[], t: PromptTexts = DEFAULT_TEXTS) {
+  const person = panels.map((p, i) => (p.role === 'person' ? i + 1 : 0)).filter(Boolean);
+  const items = panels.map((p, i) => ({ panel: i + 1, role: p.role,
+    guides: SHOOT_GUIDES.filter(g => p.guides?.includes(g.id)).map(g => GUIDE_WORDS[g.id]).join(' and the ') }));
+  return run('refs.collage', t, { inputs: { panels: items }, vars: { person: panelSpan(person.length ? person : [1]) } }).text;
 }
