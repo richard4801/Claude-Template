@@ -48,19 +48,22 @@ enum VideoEditEngine {
         var cursor = CMTime.zero
         for seg in list.segments where seg.sourceLength > EditList.minSegment / 2 {
             let range = CMTimeRange(start: CMTime(seconds: seg.inSec, preferredTimescale: scale), end: CMTime(seconds: seg.outSec, preferredTimescale: scale))
+            let retimed = abs(seg.speed - 1) > 0.001
+            let outDur = retimed ? CMTime(seconds: seg.outputLength, preferredTimescale: scale) : range.duration
+            let inserted = CMTimeRange(start: cursor, duration: range.duration)
             try video.insertTimeRange(range, of: srcVideo, at: cursor)
-            if let audio, let srcAudio, !seg.muted {
-                try? audio.insertTimeRange(range, of: srcAudio, at: cursor)
+            if retimed { video.scaleTimeRange(inserted, toDuration: outDur) }
+            if let audio {
+                // Keep the audio track's timeline in step with the video: silence where it's muted (or the source has none).
+                let end = audio.timeRange.end
+                if end.isValid, end < cursor { audio.insertEmptyTimeRange(CMTimeRange(start: end, end: cursor)) }
+                if let srcAudio, !seg.muted, (try? audio.insertTimeRange(range, of: srcAudio, at: cursor)) != nil {
+                    if retimed { audio.scaleTimeRange(inserted, toDuration: outDur) }
+                } else {
+                    audio.insertEmptyTimeRange(CMTimeRange(start: cursor, duration: outDur))
+                }
             }
-            if abs(seg.speed - 1) > 0.001 {
-                let scaled = CMTime(seconds: seg.outputLength, preferredTimescale: scale)
-                let inserted = CMTimeRange(start: cursor, duration: range.duration)
-                video.scaleTimeRange(inserted, toDuration: scaled)
-                if let audio, !seg.muted { audio.scaleTimeRange(inserted, toDuration: scaled) }
-                cursor = cursor + scaled
-            } else {
-                cursor = cursor + range.duration
-            }
+            cursor = cursor + outDur
         }
 
         // A fixed frame rate at the source's own rate (speed changes would otherwise change it) and the upright size.
