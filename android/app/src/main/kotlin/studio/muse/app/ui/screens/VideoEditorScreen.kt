@@ -336,8 +336,21 @@ class VideoEditorViewModel(private val c: AppContainer, private val takeId: Stri
 
 // ======================================================================= screen
 
+/**
+ * The editor route ("Edit video" on a take). Replaced by the Edit suite (workstream 3, phase 2): it forwards there with
+ * the same take — v1 edited versions reopen through `fromV1`. The v1 content below stays for its tests and the take
+ * page's Edit row.
+ */
 @Composable
 fun VideoEditorScreen(takeId: String) {
+    val nav = LocalNav.current
+    studio.muse.app.ui.screens.edit.EditSuiteScreen(takeId, onBack = { nav.back() })
+}
+
+/** The v1 editor (before the Edit suite), kept for reference; not routed. */
+@Composable
+@Suppress("unused")
+fun VideoEditorV1Screen(takeId: String) {
     val c = LocalContainer.current
     val nav = LocalNav.current
     val context = LocalContext.current

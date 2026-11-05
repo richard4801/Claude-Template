@@ -91,6 +91,7 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
         t.duck?.let { d ->
             if (t.kind != TrackKind.MUSIC) bad("$f.duck", "only on a music track")
             num("$f.duck.level", d.level, 0.05, 1.0); num("$f.duck.fadeSec", d.fadeSec, 0.05, 2.0)
+            num("$f.duck.attackSec", d.attackSec, 0.05, 2.0); num("$f.duck.releaseSec", d.releaseSec, 0.05, 3.0)
             if (d.under.isEmpty()) bad("$f.duck.under", "must list voice and/or speech")
         }
         var prevEnd = Double.NEGATIVE_INFINITY
@@ -151,6 +152,11 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
         it.adjust?.let { a ->
             num("$f.adjust.exposure", a.exposure, -1.0, 1.0); num("$f.adjust.contrast", a.contrast, -1.0, 1.0)
             num("$f.adjust.saturation", a.saturation, -1.0, 1.0); num("$f.adjust.temperature", a.temperature, -1.0, 1.0)
+            num("$f.adjust.highlights", a.highlights, -1.0, 1.0); num("$f.adjust.shadows", a.shadows, -1.0, 1.0)
+        }
+        it.mask?.let { m ->
+            num("$f.mask.x", m.x, -1.0, 2.0); num("$f.mask.y", m.y, -1.0, 2.0); num("$f.mask.width", m.width, 0.01, 3.0); num("$f.mask.height", m.height, 0.01, 3.0)
+            num("$f.mask.rotation", m.rotation, -360.0, 360.0); num("$f.mask.feather", m.feather, 0.0, 1.0)
         }
         it.filter?.let { fl ->
             if (filterIds.isNotEmpty() && fl.id !in filterIds) bad("$f.filter.id", "unknown filter")
@@ -200,6 +206,15 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
     private fun videoClip(g: String, t: Track, ii: Int, c: VideoClip) {
         clipBase(g, c, setOf(AssetKind.VIDEO))
         num("$g.speed", c.speed, EditLimits.MIN_SPEED, EditLimits.MAX_SPEED, false)
+        c.speedCurve?.let { sc ->
+            if (sc.points.size < 2 || sc.points.size > 16) bad("$g.speedCurve.points", "2–16 points")
+            sc.points.forEachIndexed { j, pt ->
+                if (pt.x < 0 || pt.x > 1 || pt.speed < EditLimits.MIN_SPEED || pt.speed > EditLimits.MAX_SPEED)
+                    bad("$g.speedCurve.points.$j", "must be [x 0–1, speed ${fmt(EditLimits.MIN_SPEED)}–${fmt(EditLimits.MAX_SPEED)}]")
+                if (j > 0 && pt.x <= sc.points[j - 1].x) bad("$g.speedCurve.points.$j", "x must increase")
+            }
+            if (sc.points.first().x != 0.0 || sc.points.last().x != 1.0) bad("$g.speedCurve.points", "must start at x 0 and end at x 1")
+        }
         visual(g, c)
         keyframes("$g.keyframes", c.keyframes, clipLength(c), KfProp.entries.toSet())
         c.audioAsset?.let { aa -> val a = assets[aa]; if (a == null || (a.kind != AssetKind.VIDEO && a.kind != AssetKind.AUDIO)) bad("$g.audioAsset", "must be an audio or video asset") }
@@ -246,6 +261,8 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
         if (c.speed != null && c.speed != 1.0) bad("$g.speed", "audio clips play at 1×")
         keyframes("$g.keyframes", c.keyframes, clipLength(c), setOf(KfProp.VOLUME))
         c.beats?.let { b -> if (b.size > 2000 || b.any { !it.isFinite() || it < 0 }) bad("$g.beats", "must be up to 2000 times") }
+        c.strongBeats?.let { b -> if (b.size > 2000 || b.any { !it.isFinite() || it < 0 }) bad("$g.strongBeats", "must be up to 2000 times") }
+
     }
 
     private fun textStyle(f: String, s: TextStyle) {

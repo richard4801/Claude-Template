@@ -60,13 +60,13 @@ class EditOverlay(private val plan: RenderPlan) : CanvasOverlay(/* useInputFrame
             is CaptionPiece -> plan.captionFrame(piece, t)?.let { f ->
                 val st = piece.style
                 drawText(canvas, f.words.joinToString(" "), st.text, 0.5, st.y ?: 0.72, 1.0, 0.0, f.alpha,
-                    highlight = Highlight(f.words, f.highlighted, f.boxed, if (f.boxed == null) f.active else null, f.activeScale, hexArgb(st.highlightColor)),
+                    highlight = Highlight(f.words, f.highlighted, f.boxed, if (f.boxed == null) f.active else null, f.activeScale, hexArgb(st.highlightColor), f.stripe),
                     maxLines = st.maxLines ?: 2)
             }
         }
     }
 
-    private class Highlight(val words: List<String>, val on: List<Boolean>, val boxed: Int?, val scaled: Int?, val scale: Double, val color: Int)
+    private class Highlight(val words: List<String>, val on: List<Boolean>, val boxed: Int?, val scaled: Int?, val scale: Double, val color: Int, val stripe: Int? = null)
 
     private fun drawText(
         canvas: Canvas, text: String, s: TextStyle, cx: Double, cy: Double, scale: Double, rotationCw: Double, alpha: Double,
@@ -123,8 +123,20 @@ class EditOverlay(private val plan: RenderPlan) : CanvasOverlay(/* useInputFrame
             boxPaint.reset(); boxPaint.isAntiAlias = true; boxPaint.color = highlight.color
             canvas.drawRoundRect(RectF(minOf(x0, x1) - pad, fill.getLineTop(line) - pad / 2, maxOf(x0, x1) + pad, fill.getLineBottom(line) + pad / 2), pad, pad, boxPaint)
         }
+        if (highlight?.stripe != null) {
+            // Edit suite "Highlighter": a marker stripe over the lower 45 % of the active word's line.
+            val k = highlight.stripe
+            val start = wordStarts[k]; val end = start + highlight.words[k].length
+            val line = fill.getLineForOffset(start)
+            val x0 = fill.getPrimaryHorizontal(start); val x1 = if (fill.getLineForOffset(end) == line) fill.getPrimaryHorizontal(end) else fill.getLineRight(line)
+            val top = fill.getLineTop(line).toFloat(); val bottom = fill.getLineBottom(line).toFloat()
+            val pad = 0.08f * px
+            boxPaint.reset(); boxPaint.isAntiAlias = true; boxPaint.color = highlight.color
+            canvas.drawRect(RectF(minOf(x0, x1) - pad, bottom - 0.45f * (bottom - top), maxOf(x0, x1) + pad, bottom), boxPaint)
+        }
         s.shadow?.let { sh ->
             val shadow = TextPaint(paint)
+
             shadow.color = withAlpha(hexArgb(sh.color), sh.opacity)
             if (sh.blurPct > 0) shadow.maskFilter = BlurMaskFilter((sh.blurPct * px).toFloat().coerceAtLeast(0.5f), BlurMaskFilter.Blur.NORMAL)
             canvas.save(); canvas.translate(0f, (sh.dyPct * px).toFloat())

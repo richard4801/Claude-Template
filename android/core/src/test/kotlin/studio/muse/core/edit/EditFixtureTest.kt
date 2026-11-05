@@ -42,6 +42,9 @@ class EditFixtureTest {
         })
         assertJson("hooks", f["hooks"], hooks, 0.0)
         assertEquals(CaptionPreset.entries.map { it.wire }, f["captionStyles"]!!.obj.keys.toList())
+        assertJson("captionStyleLabels", f["captionStyleLabels"], JsonArray(Presets.CAPTION_STYLE_LABELS.map { (k, v) -> buildJsonArray { add(JsonPrimitive(k.wire)); add(JsonPrimitive(v)) } }), 0.0)
+        assertJson("transitionLabels", f["transitionLabels"], JsonArray(Presets.TRANSITION_LABELS.map { (k, v) -> buildJsonArray { add(JsonPrimitive(k)); add(JsonPrimitive(v)) } }), 0.0)
+        for ((k, _) in Presets.TRANSITION_LABELS) if (k != "cut") assertTrue(Presets.transitionOf(k) != null)
     }
 
     // ------------------------------------------------------------------ projects.json
@@ -84,6 +87,10 @@ class EditFixtureTest {
             assertEquals("$name: colour items", colors.keys, visuals.map { it.id }.toSet())
             for (v in visuals) assertJson("$name: colorMatrix ${v.id}", colors[v.id], numbers(colorMatrix(v.adjust, v.filter, Presets.FILTERS)))
             assertJson("$name: toV1", e["toV1"], toV1(p)?.let(EditJson::encodeV1) ?: JsonNull, 0.0)
+            assertJson("$name: pieces", e["pieces"], JsonObject(p.mainClips.filter { it.speedCurve != null }.associate { c ->
+                c.id to JsonArray(speedPieces(c).map { pc -> buildJsonObject { put("inSec", n(pc.inSec)); put("outSec", n(pc.outSec)); put("speed", n(pc.speed)) } })
+            }))
+            assertEquals("$name: srt", e["srt"]!!.str, toSrt(p))
             assertEquals("$name: valid", durationSec(p), validate(p), 0.0)
         }
     }
@@ -136,7 +143,10 @@ class EditFixtureTest {
             val kind = wireOf<TransitionKind>(c.obj["kind"]!!.str)!!
             val p = c.obj["p"]!!.num
             val s = transitionState(kind, p)
-            fun layer(l: LayerState) = buildJsonObject { put("opacity", n(l.opacity)); put("dx", n(l.dx)); put("dy", n(l.dy)); put("scale", n(l.scale)) }
+            fun layer(l: LayerState) = buildJsonObject {
+                put("opacity", n(l.opacity)); put("dx", n(l.dx)); put("dy", n(l.dy)); put("scale", n(l.scale))
+                put("rotation", n(l.rotation)); put("blur", n(l.blur)); put("rgbSplit", n(l.rgbSplit))
+            }
             assertJson("transition ${kind.wire} $p", c.obj["state"], buildJsonObject {
                 put("a", layer(s.a)); put("b", layer(s.b)); put("color", s.color?.let(::JsonPrimitive) ?: JsonNull)
             })
@@ -201,7 +211,73 @@ class EditFixtureTest {
         }
     }
 
+    // ------------------------------------------------------------------ Edit suite additions
+    @Test fun masks() {
+        for (c in fn["masks"]!!.arr) {
+            val m = EditJson.parse(maskProject(c.obj["mask"]!!)).tracks[0].items[0].let { (it as VideoClip).mask!! }
+            for (s in c.obj["samples"]!!.arr) {
+                val (u, v, want) = s.arr.map { it.num }
+                assertEquals("mask $m at $u,$v", want, maskAlpha(m, u, v), 1e-6)
+            }
+        }
+    }
+
+    private fun maskProject(mask: JsonElement): JsonElement = Fixtures.load("projects.json").arr[0].obj["project"]!!.obj.let { p ->
+        val tracks = p["tracks"]!!.arr
+        val main = tracks[0].obj
+        val clip = JsonObject(main["items"]!!.arr[0].obj + ("mask" to mask))
+        JsonObject(p + ("tracks" to JsonArray(listOf(JsonObject(main + ("items" to JsonArray(listOf(clip))))))))
+    }
+
+    @Test fun tone() {
+        for (c in fn["tone"]!!.arr) {
+            val sh = c.obj["shadows"]!!.num; val hi = c.obj["highlights"]!!.num
+            for (s in c.obj["samples"]!!.arr) assertEquals("tone $sh/$hi at ${s.arr[0].num}", s.arr[1].num, toneAdjust(s.arr[0].num, sh, hi), 1e-6)
+        }
+    }
+
+    private fun curveOf(e: JsonElement) = SpeedCurve(wireOf<SpeedPreset>(e.obj["preset"]!!.str)!!, e.obj["points"]!!.arr.map { SpeedPoint(it.arr[0].num, it.arr[1].num) })
+
+    @Test fun speedCurves() {
+        for (c in fn["speedCurves"]!!.arr) {
+            val co = c.obj["clip"]!!.obj
+            val clip = VideoClip("c", "src", co["inSec"]!!.num, co["outSec"]!!.num, co["speed"]!!.num, speedCurve = curveOf(co["speedCurve"]!!))
+            assertEquals("length", c.obj["length"]!!.num, clipLength(clip), 1e-6)
+            for (s in c.obj["curve"]!!.arr) assertEquals("curve at ${s.arr[0].num}", s.arr[1].num, r6(curveSpeed(clip.speedCurve!!, s.arr[0].num)), 1e-6)
+            for (s in c.obj["timeAt"]!!.arr) assertEquals("timeAt ${s.arr[0].num}", s.arr[1].num, r6(clipTimeAt(clip, s.arr[0].num)), 1e-6)
+            // clipSourceAt inverts clipTimeAt.
+            for (s in c.obj["timeAt"]!!.arr) assertEquals("sourceAt ${s.arr[1].num}", s.arr[0].num, clipSourceAt(clip, s.arr[1].num), 1e-5)
+            assertJson("sub", c.obj["sub"], EditJson.encodeSpeedCurve(subCurve(clip.speedCurve!!, 0.25, 0.8)))
+        }
+        val presets = fn["speedPresets"]!!.obj
+        assertEquals(presets.keys.toList(), SPEED_PRESETS.keys.map { it.wire })
+        for ((k, pts) in SPEED_PRESETS) assertJson("preset ${k.wire}", presets[k.wire], EditJson.encodeSpeedCurve(SpeedCurve(k, pts)).getValue("points"), 0.0)
+    }
+
+    @Test fun voice() {
+        for (c in fn["voice"]!!.arr) {
+            val o = c.obj
+            val chain = voiceChain(wireOf<VoiceEffect>(o["voiceEffect"]!!.str), (o["enhance"] as JsonPrimitive).booleanOrNull, o["sampleRate"]!!.num)
+            assertJson("chain $o", o["chain"], JsonArray(chain.map { b -> buildJsonObject { put("b0", n(b.b0)); put("b1", n(b.b1)); put("b2", n(b.b2)); put("a1", n(b.a1)); put("a2", n(b.a2)) } }), 1e-9)
+            val imp = DoubleArray(24).also { it[0] = 1.0 }
+            val out = runChain(chain, imp)
+            o["impulse"]!!.arr.forEachIndexed { i, w -> assertEquals("impulse $i", w.num, out[i], 1e-8) }
+            val streaming = BiquadChain(chain)
+            imp.forEachIndexed { i, x -> assertEquals("streaming $i", out[i], streaming.process(x), 1e-12) }
+        }
+    }
+
+    @Test fun duckTimes() {
+        for (c in fn["duckTimes"]!!.arr) {
+            val d = c.obj["duck"]!!.obj
+            val duck = Duck(fadeSec = d["fadeSec"]?.num, under = emptyList(), attackSec = d["attackSec"]?.num, releaseSec = d["releaseSec"]?.num)
+            val (a, r) = duckTimes(duck)
+            assertEquals(c.obj["times"]!!.arr[0].num, a, 1e-9); assertEquals(c.obj["times"]!!.arr[1].num, r, 1e-9)
+        }
+    }
+
     @Test fun suggestCutsMatches() {
+
         for ((i, c) in fn["suggestCuts"]!!.arr.withIndex()) {
             val words = c.obj["words"]!!.arr.map { Word(it.obj["text"]!!.str, it.obj["startSec"]!!.num, it.obj["endSec"]!!.num) }
             val o = c.obj["options"]!!.obj
