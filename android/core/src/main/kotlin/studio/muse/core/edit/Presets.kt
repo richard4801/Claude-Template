@@ -51,7 +51,26 @@ object Presets {
         CaptionPreset.KARAOKE to CaptionStyle(base(stroke = Stroke("#000000", 0.1)), CaptionPreset.KARAOKE, "#22D3EE", 0.72, 4, 2),
         CaptionPreset.POP to CaptionStyle(base(sizePct = 0.05, uppercase = true, stroke = BLACK_STROKE_14), CaptionPreset.POP, "#4ADE80", 0.7, 2, 1),
         CaptionPreset.SINGLE to CaptionStyle(base(sizePct = 0.065, uppercase = true, stroke = BLACK_STROKE_14), CaptionPreset.SINGLE, "#FFFFFF", 0.6, 1, 1),
+        /** Active word gets a marker stripe (highlightColor, lower 45 % of the line) behind it. */
+        CaptionPreset.HIGHLIGHTER to CaptionStyle(base(uppercase = true, stroke = Stroke("#000000", 0.08)), CaptionPreset.HIGHLIGHTER, "#22C55E", 0.72, 3, 2),
+        /** Text glows in highlightColor (shadow blur, no offset); the active word is pure highlightColor. */
+        CaptionPreset.NEON to CaptionStyle(base(uppercase = true, color = "#FFD1E8", shadow = Shadow("#FF2D87", 0.9, 0.5, 0.0)), CaptionPreset.NEON, "#FF2D87", 0.72, 3, 2),
     )
+
+    /** The names the Edit suite shows (design E1/E3, EM2), in its order; `highlight` and `single` stay for older projects. */
+    val CAPTION_STYLE_LABELS: List<Pair<CaptionPreset, String>> = listOf(
+        CaptionPreset.POP to "Word pop", CaptionPreset.KARAOKE to "Karaoke", CaptionPreset.BOX to "Bold box", CaptionPreset.PLAIN to "Minimal",
+        CaptionPreset.HIGHLIGHTER to "Highlighter", CaptionPreset.NEON to "Neon", CaptionPreset.HIGHLIGHT to "Highlight", CaptionPreset.SINGLE to "One word",
+    )
+
+    /** Transition names in the Edit suite (design E2): "cut" = no transition. */
+    val TRANSITION_LABELS: List<Pair<String, String>> = listOf(
+        "cut" to "Cut", "fade" to "X-fade", "zoom" to "Zoom", "whip" to "Whip", "slideLeft" to "Slide", "white" to "Flash",
+        "glitch" to "Glitch", "spin" to "Spin", "black" to "Dip to black",
+    )
+
+    /** The transition a label row means (null = Cut). */
+    fun transitionOf(wire: String): TransitionKind? = if (wire == "cut") null else wireOf<TransitionKind>(wire)
 
     /** Ready hook/text templates: choosing one copies style, position and animations into a TextItem. */
     val HOOKS: List<HookTemplate> = listOf(
