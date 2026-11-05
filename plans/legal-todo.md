@@ -7,3 +7,4 @@ To decide later; nothing here blocks current work.
 3. **AI-content labelling**: EU AI Act Art. 50 (from 2026-08-02), New York synthetic-performer ad disclosure, FTC fake-testimonial rule, platform labels (TikTok/YouTube/Meta). The AI-label switch is user-controlled and off by default (owner decision); C2PA metadata on export is an option.
 4. **Source clips of real people** (motion references from other creators' videos) and likeness/consent rules.
 5. **Licences of open models** used later (some are non-commercial or territory-limited; see `plans/research/ai-video-suite-research.md`).
+6. **Editor background removal** uses a GPL-3 video-matting model via Replicate (server-side only, nothing shipped in the apps). SAM 2 (Apache-2.0) is the swap-in if needed.

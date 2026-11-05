@@ -66,10 +66,14 @@ jobs:
       - name: Build app (unsigned)
         working-directory: mac
         run: |
-          set -o pipefail
+          set +e
           xcodebuild -project Muse.xcodeproj -scheme Muse -configuration Release \
             -destination 'generic/platform=macOS' -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CURRENT_PROJECT_VERSION=${{ github.run_number }} build | tee build.log | grep -E "error:|warning: .*Muse/|BUILD" || true
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CURRENT_PROJECT_VERSION=${{ github.run_number }} build > build.log 2>&1
+          status=$?
+          # Show errors and our own warnings either way; fail the job when xcodebuild failed (the old `| grep … || true` hid errors).
+          grep -E "error:|warning: .*Muse/|BUILD" build.log || true
+          if [ $status -ne 0 ]; then echo "xcodebuild failed ($status)"; tail -n 80 build.log; exit $status; fi
           test -d build/Build/Products/Release/MUSE.app
 
       - name: Ad-hoc sign and zip
