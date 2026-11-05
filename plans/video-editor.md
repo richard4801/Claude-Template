@@ -174,6 +174,27 @@ A filter preset (`filters.json`) is an `Adjust` (+ optional `tint`); with `amoun
 ## Export
 Same as v1: H.264 + AAC MP4 at the canvas size and fps (2K must work; Media3 encoder fallback may lower the size, the real size is sent). Progress 0–100 % with Cancel; the half-made file is deleted. Nothing is encoded on the server.
 
+## Looks (filters, 2026-11-05 · owner-approved "CapCut-grade filters")
+Every video/image item may carry **`look`** (additive to `filter`/`adjust`; projects stay `version: 2`, older apps ignore nothing because they never wrote it):
+```ts
+Look { lut?: string /* "pack:<id>" = a bundled look, or the id of an Asset of kind "lut" (an imported .cube upload) */,
+       strength?: number /* 0–1, LUT blended with the picture, default 1 */,
+       curves?: { rgb?, r?, g?, b?: [x, y][] /* 2–16 points, x rising, 0–1 */ },
+       lift?: 0–1 /* faded blacks */, sharpen?: 0–1, chromatic?: 0–1 /* chromatic aberration */,
+       halation?: { amount 0–1, radius? 0.05–1 (0.5), threshold? 0–0.99 (0.7) },
+       leak?: { kind: "warm"|"rose"|"amber"|"teal"|"rainbow", amount 0–1, angle? −360…360 (30) },
+       vignette?: { amount −1…1 /* < 0 lightens */, size? 0–1 (0.45), softness? 0–1 (0.5) },
+       grain?: { amount 0–1, size? 0.5–3 (1) } }
+Asset.kind gains "lut" (must be an `upload`; the server parses it when the project is saved).
+```
+**Pipeline** (reference `server/api/src/editor/look.ts` → `renderLook`; per item, sRGB 0–1, clamped after each step):
+1 sharpen: v + 1.5·s·(v − box(v, r)), r = max(1, round(0.0015·short side)) · 2 chromatic: R sampled at p + 0.006·c·(p − centre)·size, B at p − …, bilinear · 3 the colour matrix (`colorMatrix(adjust, filter)`) · 4 curves: master then the channel's own, monotone cubic (Fritsch–Carlson), flat outside the end points · 5 LUT: trilinear, `v + (lut(v) − v)·strength` · 6 lift: b + v(1 − b), b = 0.12·lift · 7 halation: highlights of box(v, r = max(1, round(0.04·radius·short))) above `threshold`, tinted (1, 0.35, 0.2)·amount, screened · 8 leak: `leakColor(u, v, t)` screened (a soft blob from the edge at `angle`, drifting 0.25·sin(0.6t) rad) · 9 vignette: m = smoothstep(size, size + max(0.05, softness), r), r = 1 at the corners; amount > 0: v·(1 − a·m); < 0: v + |a|·m·(1 − v) · 10 grain: mono, n = hash01(⌊x/cell⌋, ⌊y/cell⌋, frame) − 0.5 (lowbias32 integer hash), cell = max(1, round(short/1080·size)), v += 0.18·amount·n·(1 − |2·luma − 1|/2).
+Box blurs are separable, clamp-to-edge. The **GPU** versions (Android GlEffects, Mac Core Image) implement the same formulas; grain on the GPU may use a float hash (it is noise either way), everything else should match the CPU renderer within a few 1/255. Kotlin and Swift carry a CPU port of `renderLook` (fixture-checked) for **filter thumbnails** on the current frame (downscaled, ~96 px) and for tests.
+**Look pack:** 32 original looks in 8 groups (natural, film, moody, warm, cool, B&W, vintage, cinematic), each a parametric grade (`server/api/src/editor/lookpack.ts`: white balance, saturation and hue changes that **leave skin hues mostly alone**, S-curve, split-toning, highlight roll-off, fade, mono) baked by `npx tsx scripts/editor-looks.ts` into **17³ .cube** files + `looks.json` in `server/api/assets/lookpack/looks/` (single copy: the Android app adds that folder as an assets dir → `assets/looks/…`, the Mac app bundles it as the `looks` resource folder, the server reads it for photos). No third-party LUTs. Choosing a look sets `look = { lut: "pack:<id>", strength: 1, …its default effects }` (from `looks.json`); the user can change any part after.
+**Import:** the user's own .cube (3D, size 2–64, ≤ 12 MB; `TITLE`, `DOMAIN_MIN/MAX`, `LUT_3D_INPUT_RANGE` and comments understood; 1D LUTs refused): presign with `purpose: "lut"`, PUT, `POST /v1/editor/luts/validate` → `{size, title}` or the bad line; then add an asset `{id, kind: "lut", upload}` and `look.lut = <that id>`. The apps parse the same way (`parseCube`).
+**Fixtures:** `looks.json` (curves, LUT samples incl. a bundled cube, hash, vignette, leak, radii, bad/good cubes, and full renders of a 24×16 test picture for 10 looks); validation cases for `look` in `validation.json`.
+**Photos:** the same look on stills, server-side (sharp raw pixels → `renderLook`): `filter: Look` on `POST /v1/shoots` (also replaces a template's own look for those stills) and `afterEffects.look` on templates. Photos use bundled looks only.
+
 ## Phase 1 limitations (agreed 2026-11-05)
 - **Android** draws text, hooks and captions above every PiP/image layer, whatever the track order (they are composition-wide overlays).
 - **Mac** plays volumes above 1× at 1× (`AVAudioMix` is 0–1; a boost needs an audio tap). Android applies up to 2× (clamped, no wrap).

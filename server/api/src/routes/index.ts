@@ -28,6 +28,8 @@ import { inviteShareText, registerReleaseRoutes } from './releases.js';
 import { setViews } from '../services/tools.js';
 import { IMAGE_STEPS, type ImageStep } from '../replicate/mapping.js';
 import { CatalogError } from '../replicate/catalog.js';
+import { photoLook } from '../editor/photo.js'; // Editor v2 (workstream 3)
+import type { Look } from '../editor/look.js';
 
 /** SSE comment interval: well under any hosting proxy's idle timeout (Koyeb, Railway, Cloudflare: 60-100 s). */
 export const SSE_KEEPALIVE_MS = 10_000;
@@ -539,7 +541,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.post('/v1/shoots', async req => {
     const s = await planShoot(req.user, req.body);
-    if (s.kind === 'template') return templateShoot(req.user, s);
+    const filter = photoLook((req.body as { filter?: unknown } | null)?.filter); // Editor v2 look on the stills (workstream 3)
+    if (s.kind === 'template') return templateShoot(req.user, s, filter);
     const { b, m, o, count, plan } = s;
     const id = uid('shoot');
     const bill = await new PhotoBill(ctx, whoOf(req.user), id, count * plan.perShot, `Photoshoot · ${count} photo${count === 1 ? '' : 's'}`).start();
@@ -554,6 +557,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       throw e;
     }
     await bill.finish();
+    if (filter) r.images = await Promise.all(r.images.map(async img => (await ctx.templates.postProcess(img, { afterEffects: { look: filter } }, { studioId: req.user.studioId, userId: req.user.id })).ref));
     const ch = shootChoices(s.spec, s.texts);
     const label = (b.scene?.trim() || ch.scene).split(' · ')[0]!.slice(0, 28);
     const cv = cameraValues(ch.camera, s.texts);
@@ -573,8 +577,10 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
    * A template shoot: every still gets its own prompt (template layers + identity/outfit/never-add + its own variation
    * draws, or the user's direction in place of pose and angle), its own seed, and the template's after-effects.
    */
-  async function templateShoot(u: AuthUser, s: Extract<Awaited<ReturnType<typeof planShoot>>, { kind: 'template' }>) {
-    const { b, m, o, count, t, plan, identity, product } = s;
+  async function templateShoot(u: AuthUser, s: Extract<Awaited<ReturnType<typeof planShoot>>, { kind: 'template' }>, filter?: Look) {
+    const { b, m, o, count, plan, identity, product } = s;
+    // A `filter` on the request replaces the template's own look for these stills.
+    const t = filter ? { ...s.t, layers: { ...s.t.layers, afterEffects: { ...(s.t.layers.afterEffects ?? {}), look: filter } } } : s.t;
     const shuffleSeed = b.shuffleSeed ?? randomSeed();
     const id = uid('shoot');
     const bill = await new PhotoBill(ctx, whoOf(u), id, count * plan.perShot, `Photoshoot · ${count} photo${count === 1 ? '' : 's'}`).start();

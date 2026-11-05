@@ -7,7 +7,8 @@ const ms = (name: string) => bigint(name, { mode: 'number' });
 const money = (name: string) => doublePrecision(name);
 
 export type ImageRef = { asset?: string; url?: string };
-export type TemplateAfterEffects = { faceMotionBlur?: number; blurAngle?: number; grade?: string; grain?: number };
+export type TemplateAfterEffects = { faceMotionBlur?: number; blurAngle?: number; grade?: string; grain?: number;
+  /** Editor v2 look (workstream 3): the video editor's filter stack on the still (bundled looks only). */ look?: import('../editor/look.js').Look };
 export type TemplateLayers = { style?: string; scene?: string; camera?: string; light?: string; negative?: string; product?: string; afterEffects?: TemplateAfterEffects };
 export const POOL_SLOTS = ['pose', 'bodyAngle', 'framing', 'expression', 'background', 'hands', 'timeOfDay'] as const;
 export type PoolSlot = (typeof POOL_SLOTS)[number];

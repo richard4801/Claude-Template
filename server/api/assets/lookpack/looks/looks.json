@@ -1,0 +1,431 @@
+{
+ "version": 1,
+ "cubeSize": 17,
+ "looks": [
+  {
+   "id": "natural-clean",
+   "name": "Clean",
+   "category": "natural",
+   "file": "natural-clean.cube",
+   "look": {
+    "lut": "pack:natural-clean",
+    "strength": 1
+   }
+  },
+  {
+   "id": "natural-glow",
+   "name": "Glow",
+   "category": "natural",
+   "file": "natural-glow.cube",
+   "look": {
+    "lut": "pack:natural-glow",
+    "strength": 1,
+    "halation": {
+     "amount": 0.15,
+     "radius": 0.6,
+     "threshold": 0.75
+    }
+   }
+  },
+  {
+   "id": "natural-soft",
+   "name": "Soft",
+   "category": "natural",
+   "file": "natural-soft.cube",
+   "look": {
+    "lut": "pack:natural-soft",
+    "strength": 1
+   }
+  },
+  {
+   "id": "natural-pop",
+   "name": "Pop",
+   "category": "natural",
+   "file": "natural-pop.cube",
+   "look": {
+    "lut": "pack:natural-pop",
+    "strength": 1,
+    "sharpen": 0.25
+   }
+  },
+  {
+   "id": "natural-bright",
+   "name": "Bright",
+   "category": "natural",
+   "file": "natural-bright.cube",
+   "look": {
+    "lut": "pack:natural-bright",
+    "strength": 1
+   }
+  },
+  {
+   "id": "film-gold",
+   "name": "Gold 200",
+   "category": "film",
+   "file": "film-gold.cube",
+   "look": {
+    "lut": "pack:film-gold",
+    "strength": 1,
+    "grain": {
+     "amount": 0.22,
+     "size": 1.2
+    },
+    "halation": {
+     "amount": 0.12
+    }
+   }
+  },
+  {
+   "id": "film-pastel",
+   "name": "Pastel 400",
+   "category": "film",
+   "file": "film-pastel.cube",
+   "look": {
+    "lut": "pack:film-pastel",
+    "strength": 1,
+    "grain": {
+     "amount": 0.22,
+     "size": 1.2
+    }
+   }
+  },
+  {
+   "id": "film-cine",
+   "name": "Tungsten 500",
+   "category": "film",
+   "file": "film-cine.cube",
+   "look": {
+    "lut": "pack:film-cine",
+    "strength": 1,
+    "grain": {
+     "amount": 0.28,
+     "size": 1.3
+    },
+    "halation": {
+     "amount": 0.3,
+     "threshold": 0.65
+    }
+   }
+  },
+  {
+   "id": "film-chrome",
+   "name": "Chrome",
+   "category": "film",
+   "file": "film-chrome.cube",
+   "look": {
+    "lut": "pack:film-chrome",
+    "strength": 1,
+    "grain": {
+     "amount": 0.15,
+     "size": 1
+    }
+   }
+  },
+  {
+   "id": "moody-teal",
+   "name": "Teal shadow",
+   "category": "moody",
+   "file": "moody-teal.cube",
+   "look": {
+    "lut": "pack:moody-teal",
+    "strength": 1,
+    "vignette": {
+     "amount": 0.3
+    }
+   }
+  },
+  {
+   "id": "moody-forest",
+   "name": "Forest",
+   "category": "moody",
+   "file": "moody-forest.cube",
+   "look": {
+    "lut": "pack:moody-forest",
+    "strength": 1,
+    "vignette": {
+     "amount": 0.35
+    }
+   }
+  },
+  {
+   "id": "moody-night",
+   "name": "Night",
+   "category": "moody",
+   "file": "moody-night.cube",
+   "look": {
+    "lut": "pack:moody-night",
+    "strength": 1,
+    "vignette": {
+     "amount": 0.4
+    },
+    "grain": {
+     "amount": 0.18
+    }
+   }
+  },
+  {
+   "id": "moody-shadow",
+   "name": "Low key",
+   "category": "moody",
+   "file": "moody-shadow.cube",
+   "look": {
+    "lut": "pack:moody-shadow",
+    "strength": 1,
+    "vignette": {
+     "amount": 0.45,
+     "size": 0.35
+    }
+   }
+  },
+  {
+   "id": "warm-sunset",
+   "name": "Sunset",
+   "category": "warm",
+   "file": "warm-sunset.cube",
+   "look": {
+    "lut": "pack:warm-sunset",
+    "strength": 1,
+    "leak": {
+     "kind": "warm",
+     "amount": 0.2,
+     "angle": 35
+    }
+   }
+  },
+  {
+   "id": "warm-honey",
+   "name": "Honey",
+   "category": "warm",
+   "file": "warm-honey.cube",
+   "look": {
+    "lut": "pack:warm-honey",
+    "strength": 1
+   }
+  },
+  {
+   "id": "warm-peach",
+   "name": "Peach",
+   "category": "warm",
+   "file": "warm-peach.cube",
+   "look": {
+    "lut": "pack:warm-peach",
+    "strength": 1
+   }
+  },
+  {
+   "id": "warm-amber",
+   "name": "Amber",
+   "category": "warm",
+   "file": "warm-amber.cube",
+   "look": {
+    "lut": "pack:warm-amber",
+    "strength": 1,
+    "vignette": {
+     "amount": 0.2
+    }
+   }
+  },
+  {
+   "id": "cool-ice",
+   "name": "Ice",
+   "category": "cool",
+   "file": "cool-ice.cube",
+   "look": {
+    "lut": "pack:cool-ice",
+    "strength": 1
+   }
+  },
+  {
+   "id": "cool-mint",
+   "name": "Mint",
+   "category": "cool",
+   "file": "cool-mint.cube",
+   "look": {
+    "lut": "pack:cool-mint",
+    "strength": 1
+   }
+  },
+  {
+   "id": "cool-blue-hour",
+   "name": "Blue hour",
+   "category": "cool",
+   "file": "cool-blue-hour.cube",
+   "look": {
+    "lut": "pack:cool-blue-hour",
+    "strength": 1,
+    "vignette": {
+     "amount": 0.25
+    }
+   }
+  },
+  {
+   "id": "cool-crisp",
+   "name": "Crisp",
+   "category": "cool",
+   "file": "cool-crisp.cube",
+   "look": {
+    "lut": "pack:cool-crisp",
+    "strength": 1,
+    "sharpen": 0.3
+   }
+  },
+  {
+   "id": "bw-classic",
+   "name": "Classic B&W",
+   "category": "bw",
+   "file": "bw-classic.cube",
+   "look": {
+    "lut": "pack:bw-classic",
+    "strength": 1
+   }
+  },
+  {
+   "id": "bw-contrast",
+   "name": "Hard B&W",
+   "category": "bw",
+   "file": "bw-contrast.cube",
+   "look": {
+    "lut": "pack:bw-contrast",
+    "strength": 1,
+    "grain": {
+     "amount": 0.25,
+     "size": 1.1
+    }
+   }
+  },
+  {
+   "id": "bw-soft",
+   "name": "Soft B&W",
+   "category": "bw",
+   "file": "bw-soft.cube",
+   "look": {
+    "lut": "pack:bw-soft",
+    "strength": 1
+   }
+  },
+  {
+   "id": "bw-sepia",
+   "name": "Sepia",
+   "category": "bw",
+   "file": "bw-sepia.cube",
+   "look": {
+    "lut": "pack:bw-sepia",
+    "strength": 1,
+    "vignette": {
+     "amount": 0.3
+    }
+   }
+  },
+  {
+   "id": "vintage-70s",
+   "name": "1970s",
+   "category": "vintage",
+   "file": "vintage-70s.cube",
+   "look": {
+    "lut": "pack:vintage-70s",
+    "strength": 1,
+    "grain": {
+     "amount": 0.3,
+     "size": 1.5
+    },
+    "vignette": {
+     "amount": 0.3
+    }
+   }
+  },
+  {
+   "id": "vintage-instant",
+   "name": "Instant",
+   "category": "vintage",
+   "file": "vintage-instant.cube",
+   "look": {
+    "lut": "pack:vintage-instant",
+    "strength": 1,
+    "vignette": {
+     "amount": 0.25,
+     "softness": 0.7
+    },
+    "leak": {
+     "kind": "rose",
+     "amount": 0.12,
+     "angle": 140
+    }
+   }
+  },
+  {
+   "id": "vintage-faded",
+   "name": "Faded",
+   "category": "vintage",
+   "file": "vintage-faded.cube",
+   "look": {
+    "lut": "pack:vintage-faded",
+    "strength": 1,
+    "grain": {
+     "amount": 0.2
+    }
+   }
+  },
+  {
+   "id": "cine-teal-orange",
+   "name": "Blockbuster",
+   "category": "cinematic",
+   "file": "cine-teal-orange.cube",
+   "look": {
+    "lut": "pack:cine-teal-orange",
+    "strength": 1,
+    "vignette": {
+     "amount": 0.2
+    }
+   }
+  },
+  {
+   "id": "cine-bleach",
+   "name": "Bleach",
+   "category": "cinematic",
+   "file": "cine-bleach.cube",
+   "look": {
+    "lut": "pack:cine-bleach",
+    "strength": 1,
+    "grain": {
+     "amount": 0.15
+    }
+   }
+  },
+  {
+   "id": "cine-noir",
+   "name": "Neo noir",
+   "category": "cinematic",
+   "file": "cine-noir.cube",
+   "look": {
+    "lut": "pack:cine-noir",
+    "strength": 1,
+    "vignette": {
+     "amount": 0.45
+    },
+    "halation": {
+     "amount": 0.2,
+     "threshold": 0.75
+    }
+   }
+  },
+  {
+   "id": "cine-golden",
+   "name": "Golden hour",
+   "category": "cinematic",
+   "file": "cine-golden.cube",
+   "look": {
+    "lut": "pack:cine-golden",
+    "strength": 1,
+    "halation": {
+     "amount": 0.25,
+     "threshold": 0.7
+    },
+    "leak": {
+     "kind": "amber",
+     "amount": 0.15,
+     "angle": 20
+    }
+   }
+  }
+ ]
+}
