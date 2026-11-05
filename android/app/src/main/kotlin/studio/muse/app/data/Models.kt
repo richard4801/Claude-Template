@@ -2,6 +2,8 @@ package studio.muse.app.data
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import studio.muse.core.ClipUse
 import studio.muse.core.Engine
 import studio.muse.core.Pricing
@@ -121,6 +123,8 @@ data class Clip(
     val fps: Int,
     val checks: List<ClipCheck>,
     val thumb: ImageRef? = null,
+    /** Prompt scripts (workstream 4): the free talking detection; absent while it runs or when it failed. */
+    val audio: ClipAudio? = null,
 ) {
     val ok: Boolean get() = checks.none { it.status == "bad" }
 }
@@ -149,6 +153,8 @@ data class JobRequest(
     val quality: String? = null,
     /** Set by the server on replicate jobs: the $ per output second the job was priced at. */
     val pricePerSec: Double? = null,
+    /** Prompt scripts (workstream 4): the studio's "Performer is speaking" switch; null = the clip's detection. */
+    val speaking: Boolean? = null,
 ) {
     fun spec() = RenderSpec(Engine.fromId(engine), ClipUse.fromId(use), steps, lipSync, takes, clipSeconds, Quality.fromId(quality), pricePerSec)
 }
@@ -814,6 +820,8 @@ data class ApiEvent(
     val studioBalance: StudioBalance? = null,
     /** Owners only: type "prompts", one prompt-library entry after a save or reset. */
     val prompt: PromptEntry? = null,
+    /** Prompt scripts (workstream 4). Owners only: type "promptScript", one script after a save or reset. */
+    val script: ScriptView? = null,
 ) {
     companion object {
         /** Not from the server: the stream (re)connected, so the app refetches what it may have missed. */
@@ -939,3 +947,80 @@ data class DevFailRequest(val failNext: Boolean)
 data class ErrorBody(val error: String, val code: String? = null)
 
 class ApiException(val code: String, message: String) : Exception(message)
+
+// ---------------------------------------------------------------- Prompt scripts (workstream 4)
+// plans/api.md "Prompt scripts (2026-11-05)": inputs → rules → blocks. Owner only (Settings → Prompts → Scripts).
+
+/** A clip's audio as the server classified it on upload. kind: speech | music | silence | none. */
+@Serializable
+data class ClipAudio(val kind: String = "none", val speaking: Boolean = false, val detected: Boolean = false)
+
+@Serializable
+data class ScriptOption(val id: String, val label: String = "")
+
+/** One typed input. type: bool | enum | number | text | list; [fields] = a list's item fields; [sample] = the preview's value. */
+@Serializable
+data class InputDef(
+    val name: String, val label: String = "", val description: String = "", val type: String = "text",
+    val options: List<ScriptOption> = emptyList(), val fields: List<InputDef> = emptyList(), val sample: JsonElement? = null,
+)
+
+/** One condition: [input] is an input name, or "item.<field>" in a section that repeats per list item. */
+@Serializable
+data class Cond(val input: String, val op: String, val value: JsonElement? = null)
+
+/** A rule puts [block] in [target] (a section id, or "@value") when every condition holds. */
+@Serializable
+data class Rule(
+    val id: String, val label: String = "", val target: String, @SerialName("when") val conds: List<Cond> = emptyList(), val block: String,
+    val optional: Boolean? = null, val locked: Boolean? = null, val enabled: Boolean? = null,
+) {
+    val isLocked: Boolean get() = locked == true
+    val isOn: Boolean get() = enabled != false
+}
+
+@Serializable
+data class ScriptSection(val id: String, val label: String = "", val kind: String = "system", val each: String? = null, val heading: String? = null)
+
+@Serializable
+data class ScriptValue(val name: String, val label: String = "", val prefix: String? = null)
+
+@Serializable
+data class ScriptTarget(val id: String, val label: String = "")
+
+@Serializable
+data class ScriptVar(val name: String, val description: String = "", val sample: String = "")
+
+@Serializable
+data class ScriptView(
+    val id: String, val group: String = "", val title: String = "", val description: String = "", val format: String = "lines",
+    val inputs: List<InputDef> = emptyList(), val sections: List<ScriptSection> = emptyList(), val values: List<ScriptValue> = emptyList(),
+    val targets: List<ScriptTarget> = emptyList(), val vars: List<ScriptVar> = emptyList(), val blocks: List<String> = emptyList(),
+    val rules: List<Rule> = emptyList(), val defaultRules: List<Rule> = emptyList(), val overridden: Boolean = false, val stale: Boolean = false,
+    val updatedAt: Long? = null, val updatedBy: String? = null,
+)
+
+/** A test and the input types it applies to (GET /v1/prompt-scripts `ops`). */
+@Serializable
+data class CondOpInfo(val id: String, val label: String = "", val types: List<String> = emptyList())
+
+@Serializable
+data class PromptScriptsList(val groups: List<PromptGroupInfo> = emptyList(), val ops: List<CondOpInfo> = emptyList(), val scripts: List<ScriptView> = emptyList())
+
+@Serializable
+data class SaveScriptRules(val rules: List<Rule>)
+
+@Serializable
+data class ScriptPreviewRequest(
+    val id: String, val inputs: JsonObject? = null, val rules: List<Rule>? = null, val texts: Map<String, String>? = null, val direction: String? = null,
+)
+
+@Serializable
+data class ScriptPart(val section: String = "", val layer: String = "", val kind: String = "system", val text: String = "", val rules: List<String> = emptyList())
+
+/** POST /v1/prompt-scripts/preview: the script run on the sample values (with the editor's unsaved changes). */
+@Serializable
+data class ScriptPreview(
+    val id: String = "", val text: String = "", val parts: List<ScriptPart> = emptyList(), val fired: List<String> = emptyList(),
+    val inputs: JsonObject = JsonObject(emptyMap()),
+)
