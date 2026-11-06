@@ -98,7 +98,7 @@ extension AppStore {
         guard t.isOwner else { return }
         let alert = NSAlert()
         alert.messageText = "Delete \(t.name)?"
-        alert.informativeText = "Photos made with it stay in the Gallery. \(t.isPublic ? "No one in the studio will be able to use it any more." : "")"
+        alert.informativeText = "Photos made with it stay in the Library. \(t.isPublic ? "No one in the studio will be able to use it any more." : "")"
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")
         alert.buttons.first?.hasDestructiveAction = true

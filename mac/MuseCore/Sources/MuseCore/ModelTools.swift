@@ -95,7 +95,7 @@ public enum ImageStep: String, CaseIterable, Codable, Sendable, Identifiable {
 
     public var usedBy: String {
         switch self {
-        case .shot: return "Photoshoots, template shoots, outfit-set fronts, sheet fills, LoRA set"
+        case .shot: return "Photos, template photos, outfit-set fronts, sheet fills, LoRA set"
         case .edit: return "Outfit-set ¾, side and back"
         case .realism: return "Enhance step 1"
         case .upscale: return "Enhance step 2"

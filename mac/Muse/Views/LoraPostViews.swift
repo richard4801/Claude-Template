@@ -467,7 +467,7 @@ struct PostsView: View {
             SectionTitle(store.postTab == .scheduled ? "Scheduled" : "Posted")
             if list.isEmpty {
                 if store.postTab == .scheduled {
-                    EmptyState("Nothing scheduled", "Open a finished take and choose Post to schedule it here.", actionTitle: "Open gallery") { store.go(.gallery) }
+                    EmptyState("Nothing scheduled", "Open a finished take and choose Post to schedule it here.", actionTitle: "Open library") { store.go(.gallery) }
                 } else {
                     EmptyState("Nothing posted yet", "Posts you hand off to the apps show up here with their results.")
                 }
@@ -507,7 +507,7 @@ struct PostRow: View {
         HStack(spacing: Space.s3) {
             MediaFrame(ref: take?.thumb ?? p.thumb, ratio: 44.0 / 58.0).frame(width: 44)
             VStack(alignment: .leading, spacing: 2) {
-                Text(take?.caption ?? (p.title.isEmpty ? "Take" : p.title)).scaled(t.scale.label, t.roles.ink).lineLimit(1)
+                Text(take?.caption ?? (p.title.isEmpty ? "Take" : TakeText.displayTitle(p.title))).scaled(t.scale.label, t.roles.ink).lineLimit(1)
                 Text(p.caption.isEmpty ? "No caption" : p.caption).scaled(t.scale.caption, t.roles.ink2).lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

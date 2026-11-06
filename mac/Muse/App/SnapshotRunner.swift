@@ -42,6 +42,9 @@ enum SnapshotRunner {
                 ("lora", { store.go(.lora) }),
                 ("settings", { store.openSettings(.appearance) }),
                 ("settings_prompts", { store.openSettings(.prompts) }),
+                ("settings_studio", { store.openSettings(.studio) }),
+                ("credits", { store.go(.credits) }),
+                ("members", { store.go(.members) }),
                 ("chat", { store.go(.home); state.overlay = "chat" }),
             ]
             for theme in ThemeID.allCases {

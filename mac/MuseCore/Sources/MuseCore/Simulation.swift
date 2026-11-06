@@ -68,10 +68,10 @@ public enum SampleData {
             Take(id: "t_j1", jobId: "j1", title: "Kick test", label: "Fast · beta", engineLabel: "Fast · beta", cost: 0.13, seed: 7, thumb: .asset("vid_kick"), createdAt: now - 7_000_000),
             Take(id: "t_j2", jobId: "j2", title: "Bathroom", label: "Edit", engineLabel: "Edit", cost: 3.05, seed: 42, thumb: .asset("vid_bath"), createdAt: now - 83_640_000),
             Take(id: "t_g1", title: "Living room", label: "Standard", engineLabel: "Standard · 768P", cost: 0.66, seed: 48213, status: "final", thumb: .asset("vid_living"), createdAt: now - 90_000_000),
-            Take(id: "t_g4", kind: "shot", title: "Shoot · crystal", label: "Shoot", cost: 0.02, seed: 48213, thumb: .asset("c_front"), createdAt: now - 96_000_000),
+            Take(id: "t_g4", kind: "shot", title: "Photo · crystal", label: "Photo", cost: 0.02, seed: 48213, thumb: .asset("c_front"), createdAt: now - 96_000_000),
             Take(id: "t_g5", title: "Living room", label: "Edit", engineLabel: "Edit", cost: 0.98, seed: 48213, thumb: .asset("vid_living2"), createdAt: now - 95_000_000),
-            Take(id: "t_g6", kind: "shot", title: "Shoot · crystal ¾", label: "Shoot", cost: 0.02, seed: 48213, thumb: .asset("c_tq"), createdAt: now - 97_000_000),
-            Take(id: "t_g7", kind: "shot", title: "Shoot · green set", label: "Shoot", cost: 0.02, seed: 48213, thumb: .asset("g_front"), createdAt: now - 98_000_000),
+            Take(id: "t_g6", kind: "shot", title: "Photo · crystal ¾", label: "Photo", cost: 0.02, seed: 48213, thumb: .asset("c_tq"), createdAt: now - 97_000_000),
+            Take(id: "t_g7", kind: "shot", title: "Photo · green set", label: "Photo", cost: 0.02, seed: 48213, thumb: .asset("g_front"), createdAt: now - 98_000_000),
         ]
     }
 
