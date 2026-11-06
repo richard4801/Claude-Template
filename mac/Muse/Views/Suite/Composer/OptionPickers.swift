@@ -11,11 +11,13 @@ struct OptionGrid: View {
     var autoLine = "Matches the scene"
     var swatches = false
     var tileHeight: CGFloat = 96
+    /// The Auto tile's rendered still (`camera.autoPreviews`), when the catalog has one.
+    var autoPreview: PickerPreview? = nil
     var onPick: (String?) -> Void
 
     var body: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16), count: 4), alignment: .leading, spacing: 18) {
-            PickerOptionTile(name: "Auto", line: autoLine, auto: true, swatches: [], selected: selected == nil, height: tileHeight) { onPick(nil) }
+            PickerOptionTile(name: "Auto", line: autoLine, preview: autoPreview, auto: true, swatches: [], selected: selected == nil, height: tileHeight) { onPick(nil) }
             ForEach(ComposerCatalog.visible(options)) { o in
                 PickerOptionTile(name: o.label, line: o.description, preview: .option(o), swatches: swatches ? o.swatches : [],
                                  selected: selected == o.id || ComposerCatalog.survivor(options, selected) == o.id, height: tileHeight) { onPick(o.id) }
@@ -24,8 +26,53 @@ struct OptionGrid: View {
     }
 }
 
+/// Era as a decade slider: Auto off the left end, then the catalog's eras in order; the thumb snaps to each.
+struct EraSlider: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    var body: some View {
+        let c = store.suite.camera
+        let pos = ComposerEras.position(store.suite.pickerSettings.era, c)
+        let top = ComposerEras.maxPosition(c)
+        let stops = ComposerEras.stops(c)
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("ERA").font(t.mono(10.5, .medium)).tracking(1.2).foregroundStyle(t.muted)
+                Text(ComposerEras.label(at: pos, c)).font(Fonts.font("Instrument Serif", 46, .regular))
+                Text(pos == 0 ? "Today · the scene decides" : (stops[pos - 1].description.isEmpty ? "Sets, clothes and colour of the time" : stops[pos - 1].description))
+                    .font(t.body(13)).foregroundStyle(t.muted)
+            }
+            if top > 0 {
+                Slider(value: Binding(get: { Double(pos) }, set: { store.suite.pickerSettings.era = ComposerEras.era(at: $0, c) }),
+                       in: 0...Double(top), step: 1) { Text("Era") }
+                    .labelsHidden()
+                    .accessibilityValue(ComposerEras.label(at: pos, c))
+                HStack(spacing: 0) {
+                    ForEach(0...top, id: \.self) { i in
+                        Button { store.suite.pickerSettings.era = ComposerEras.era(at: Double(i), c) } label: {
+                            Text(ComposerEras.label(at: i, c)).font(t.mono(10.5, i == pos ? .semibold : .regular))
+                                .foregroundStyle(i == pos ? t.accent : t.muted)
+                                .lineLimit(1).minimumScaleFactor(0.7)
+                                .frame(maxWidth: .infinity)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, -18)
+            } else {
+                Muted("This server has no eras yet.")
+            }
+        }
+        .padding(.horizontal, 30).padding(.top, 20)
+        .frame(maxWidth: 640, alignment: .leading)
+    }
+}
+
 struct StyleStep: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
     var step: String
 
     var body: some View {
@@ -34,7 +81,22 @@ struct StyleStep: View {
         ScrollView {
             Group {
                 switch step {
-                case "era": OptionGrid(options: c.eras, selected: s.era, autoLine: "Today", tileHeight: 70) { store.suite.pickerSettings.era = $0 }
+                case "format":
+                    let items = ComposerWheels.formats(c)
+                    HStack(alignment: .top, spacing: 15) {
+                        WheelColumn(title: "Format", items: items, selected: Wheel.index(of: s.format, in: items, options: c.ugcFormats), plate: .format, width: 220) { v in
+                            store.suite.pickerSettings.format = v
+                        }
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("UGC AD FORMAT").font(t.mono(10.5, .medium)).tracking(1.2).foregroundStyle(t.muted)
+                            Text("How the ad plays out. Genre, era and tempo still apply on top.").font(t.body(13)).foregroundStyle(t.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .frame(maxWidth: 260, alignment: .leading)
+                        .padding(.top, 30)
+                        Spacer(minLength: 0)
+                    }
+                case "era": EraSlider()
                 case "tempo": OptionGrid(options: c.tempos, selected: s.tempo, autoLine: "The scene sets the pace", tileHeight: 70) { store.suite.pickerSettings.tempo = $0 }
                 default: OptionGrid(options: c.genres, selected: s.genre, autoLine: "From your prompt", tileHeight: 70) { store.suite.pickerSettings.genre = $0 }
                 }
@@ -107,7 +169,8 @@ struct LightingStep: View {
 
     var body: some View {
         ScrollView {
-            OptionGrid(options: store.suite.camera.lighting, selected: store.suite.pickerSettings.lighting, autoLine: "The scene's own light") {
+            OptionGrid(options: store.suite.camera.lighting, selected: store.suite.pickerSettings.lighting, autoLine: "The scene's own light",
+                       autoPreview: PickerPreview.auto(store.suite.camera.autoPreviews.lighting)) {
                 store.suite.pickerSettings.lighting = $0
             }
             .padding(.horizontal, 22).padding(.vertical, 18)

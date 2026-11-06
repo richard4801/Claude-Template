@@ -93,6 +93,30 @@ object PromptCodec {
         return Display(sb.toString(), chips, toDisplay, toFieldList.toIntArray())
     }
 
+    /**
+     * Drag to reorder: moves token [key] to field offset [to] (where it was dropped, between any two characters, also
+     * inside a text part). Dropping it where it already is changes nothing.
+     */
+    fun moveToken(t: PromptTokens, key: Long, to: Int): PromptTokens {
+        val s = encode(t)
+        val from = t.parts.indexOfFirst { it.key == key && it !is PromptPart.Text }.takeIf { it >= 0 } ?: return t
+        val at = s.indexOf(tokenChar(t.parts[from].key)).takeIf { it >= 0 } ?: return t
+        val c = s[at]
+        val rest = s.removeRange(at, at + 1)
+        val dest = (if (to > at) to - 1 else to).coerceIn(0, rest.length)
+        if (dest == at) return t
+        return decode(t, rest.substring(0, dest) + c + rest.substring(dest))
+    }
+
+    /** TalkBack's "Move left" / "Move right" on a token: one place among the prompt's parts (PromptTokens.reorder). */
+    fun nudge(t: PromptTokens, key: Long, by: Int): PromptTokens {
+        val i = t.parts.indexOfFirst { it.key == key && it !is PromptPart.Text }
+        if (i < 0) return t
+        val to = i + by
+        if (to < 0 || to > t.parts.lastIndex) return t
+        return t.reorder(key, to)
+    }
+
     /** Removes the typed trigger ("@no") that ends at [caret] and returns the new field text and caret. */
     fun dropTrigger(s: String, tr: Trigger, caret: Int): Pair<String, Int> = (s.substring(0, tr.start) + s.substring(caret.coerceIn(tr.start, s.length))) to tr.start
 

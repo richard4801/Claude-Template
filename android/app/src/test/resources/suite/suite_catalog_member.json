@@ -10,7 +10,8 @@
    "available": true,
    "resolution": "768P",
    "fromPerSec": 0.02,
-   "minSeconds": 2, "maxSeconds": 15,
+   "minSeconds": 2,
+   "maxSeconds": 15,
    "canKeyframes": true,
    "canReferences": true,
    "canGuide": true,
@@ -31,7 +32,8 @@
    "available": true,
    "resolution": "768P",
    "fromPerSec": 0.08,
-   "minSeconds": 2, "maxSeconds": 30,
+   "minSeconds": 2,
+   "maxSeconds": 30,
    "canKeyframes": true,
    "canReferences": true,
    "canGuide": true,
@@ -52,7 +54,8 @@
    "available": true,
    "resolution": "2K",
    "fromPerSec": 0.08,
-   "minSeconds": 3, "maxSeconds": 30,
+   "minSeconds": 3,
+   "maxSeconds": 30,
    "canKeyframes": true,
    "canReferences": true,
    "canGuide": true,
@@ -73,7 +76,8 @@
    "available": true,
    "resolution": "1080p",
    "fromPerSec": 0.13,
-   "minSeconds": 3, "maxSeconds": 30,
+   "minSeconds": 3,
+   "maxSeconds": 30,
    "canKeyframes": true,
    "canReferences": true,
    "canGuide": true,
@@ -86,6 +90,37 @@
     "audio": true,
     "framesWithRefs": true
    }
+  }
+ ],
+ "tools": [
+  {
+   "id": "shot",
+   "available": true
+  },
+  {
+   "id": "swap",
+   "available": true
+  },
+  {
+   "id": "recast",
+   "available": true
+  },
+  {
+   "id": "storyboard",
+   "available": true
+  },
+  {
+   "id": "talking",
+   "available": true
+  },
+  {
+   "id": "ugc_ad",
+   "available": true
+  },
+  {
+   "id": "extend",
+   "available": false,
+   "comingSoon": true
   }
  ],
  "modes": [
@@ -539,18 +574,18 @@
     "id": "webcam",
     "label": "Webcam",
     "description": "Laptop webcam look, flat and close",
-    "render": "body-08-phone",
+    "render": "body-11-webcam",
     "name": "Webcam",
-    "caption": "Laptop webcam · flat light · video call",
+    "caption": "Webcam · wide · flat light · video-call look",
     "visible": true
    },
    {
     "id": "security_cam",
     "label": "CCTV",
     "description": "High-angle surveillance look",
-    "render": "body-09-dv-camcorder",
+    "render": "body-12-cctv",
     "name": "CCTV",
-    "caption": "Security camera · high corner · wide",
+    "caption": "Security cam · high fixed angle · muted colour",
     "visible": true
    }
   ],
@@ -611,9 +646,9 @@
     "id": "swirl",
     "label": "Swirl bokeh",
     "description": "Petzval-style swirling background",
-    "render": "lens-04-warm-vintage",
+    "render": "lens-09-swirl",
     "name": "Swirl Bokeh",
-    "caption": "Petzval look · swirling background",
+    "caption": "Petzval-style portrait · swirling background",
     "visible": true
    },
    {
@@ -629,8 +664,8 @@
     "id": "tilt_shift",
     "label": "Tilt-shift",
     "description": "Miniature-looking focus band",
-    "render": "lens-06-macro",
-    "name": "Tilt-Shift",
+    "render": "lens-10-tilt-shift",
+    "name": "Tilt-shift",
     "caption": "Slanted focus band · miniature look",
     "visible": true
    },
@@ -2379,6 +2414,56 @@
     "id": "slow_motion",
     "label": "Slow motion",
     "description": "Stretched, graceful movement",
+    "visible": true
+   }
+  ],
+  "ugcFormats": [
+   {
+    "id": "unboxing",
+    "label": "Unboxing",
+    "description": "Open it on camera, first reaction",
+    "visible": true
+   },
+   {
+    "id": "review",
+    "label": "Review",
+    "description": "Honest take, pros and cons",
+    "visible": true
+   },
+   {
+    "id": "try_on",
+    "label": "Try-on",
+    "description": "Wear it, show the fit",
+    "visible": true
+   },
+   {
+    "id": "before_after",
+    "label": "Before & after",
+    "description": "The change it makes",
+    "visible": true
+   },
+   {
+    "id": "grwm",
+    "label": "GRWM",
+    "description": "Get ready with me",
+    "visible": true
+   },
+   {
+    "id": "haul",
+    "label": "Haul",
+    "description": "Several finds, one by one",
+    "visible": true
+   },
+   {
+    "id": "tutorial",
+    "label": "Tutorial",
+    "description": "How to use it, step by step",
+    "visible": true
+   },
+   {
+    "id": "testimonial",
+    "label": "Testimonial",
+    "description": "Why she recommends it",
     "visible": true
    }
   ],

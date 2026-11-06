@@ -14,6 +14,10 @@ export function buildInput(m: ModelSpec, p: ShotPlan, u: MediaUrls): Record<stri
   const i: Record<string, unknown> = { prompt: p.prompt };
   const frames = !!(u.start || u.end);
   switch (m.adapter) {
+    case 'hf-h3': // Higgsfield (api.higgsfield.ai): text-to-video / reference-to-video; 2K only; no watermark (labels are the user's choice)
+      i.duration = p.seconds; i.resolution = '2K'; i.aspect_ratio = p.aspect; i.aigc_watermark = false;
+      set(i, 'image_urls', u.refs.slice(0, 9)); set(i, 'video_urls', u.videos.slice(0, 3)); set(i, 'audio_urls', u.audio ? [u.audio] : undefined);
+      break;
     case 'minimax-h3':
       i.duration = p.seconds;
       if (m.resolutions.length > 1) i.resolution = p.resolution;

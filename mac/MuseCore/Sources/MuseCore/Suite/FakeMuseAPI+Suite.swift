@@ -149,6 +149,27 @@ extension FakeMuseAPI {
 
     public func suiteEstimate(_ req: ShotRequest) async throws -> ShotEstimate { try suitePlan(req) }
 
+    /// Demo mode's locations reuse demo stills.
+    static let demoLocations: [SuiteLocation] = [
+        SuiteLocation(id: "loc_demo_living", name: "Living room", image: .asset("vid_living"), createdAt: 1_762_300_000_000),
+        SuiteLocation(id: "loc_demo_bath", name: "Bathroom", image: .asset("vid_bath"), createdAt: 1_762_300_060_000),
+    ]
+
+    public func suiteLocations() async throws -> [SuiteLocation] { suiteLocationList.sorted { $0.createdAt > $1.createdAt } }
+
+    public func createSuiteLocation(_ new: NewSuiteLocation) async throws -> SuiteLocation {
+        guard let name = ComposerLocations.cleanName(new.name) else { throw ApiError("bad_request", "Give the location a name") }
+        guard new.image.url != nil || new.image.asset != nil else { throw ApiError("bad_request", "Pick a photo of the place") }
+        let l = SuiteLocation(id: "loc_" + shortId(), name: name, image: new.image, createdAt: Double(nowMs()))
+        suiteLocationList.append(l)
+        return l
+    }
+
+    public func deleteSuiteLocation(id: String) async throws {
+        guard suiteLocationList.contains(where: { $0.id == id }) else { throw ApiError("not_found", "Location not found") }
+        suiteLocationList.removeAll { $0.id == id }
+    }
+
     public func suiteCreateShot(_ req: ShotRequest) async throws -> Job {
         if req.mode == "swap" {
             // The existing character swap (POST /v1/jobs, engine replicate; Cinema → HD).

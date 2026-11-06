@@ -170,6 +170,9 @@ interface MuseService {
     @POST("v1/suite/camera/compile") suspend fun suiteCompile(@Body r: SuiteCompileRequest): SuiteCompiled
     @GET("v1/suite/settings") suspend fun suiteSettings(): SuiteSettings
     @PATCH("v1/suite/settings") suspend fun patchSuiteSettings(@Body r: SuiteSettingsPatch): SuiteSettings
+    @GET("v1/suite/locations") suspend fun suiteLocations(): List<SuiteLocation>
+    @POST("v1/suite/locations") suspend fun createSuiteLocation(@Body r: SuiteLocationCreate): SuiteLocation
+    @DELETE("v1/suite/locations/{id}") suspend fun deleteSuiteLocation(@Path("id") id: String): retrofit2.Response<Unit>
 }
 
 /**
@@ -447,6 +450,9 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun suiteCompile(req: SuiteCompileRequest) = call { suiteCompile(req) }
     override suspend fun suiteSettings() = call { suiteSettings() }
     override suspend fun patchSuiteSettings(req: SuiteSettingsPatch) = call { patchSuiteSettings(req) }
+    override suspend fun suiteLocations() = call { suiteLocations() }.map { it.copy(image = it.image.abs()) }
+    override suspend fun createSuiteLocation(req: SuiteLocationCreate) = call { createSuiteLocation(req) }.let { it.copy(image = it.image.abs()) }
+    override suspend fun deleteSuiteLocation(id: String) { call { deleteSuiteLocation(id) } }
     override suspend fun uploadSuiteMedia(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit): SuiteMediaRef {
         val p = call { editorPresign(EditorPresignRequest(mime, bytes.size.toLong())) }
         putToStorage(p, ProgressBody(bytes, mime.toMediaTypeOrNull(), onProgress))

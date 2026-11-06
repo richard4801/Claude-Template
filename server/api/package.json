@@ -25,6 +25,7 @@
     "@electric-sql/pglite": "^0.5.15",
     "@fastify/multipart": "^9.4.0",
     "@fastify/rate-limit": "^10.3.0",
+    "@higgsfield/client": "^0.2.6",
     "@neon/config": "^1.10.1",
     "@neon/env": "^1.6.9",
     "@node-rs/argon2": "^2.2.2",

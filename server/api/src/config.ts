@@ -179,6 +179,9 @@ const Env = z.object({
   IMAGE_CUSTOM_URL: str(),
   FAL_KEY: str(),
   FAL_QUEUE_URL: z.string().default('https://queue.fal.run'),
+  // Higgsfield API (owner's account): "key-id:key-secret". Unset = Higgsfield models are skipped (Replicate runs them).
+  HF_CREDENTIALS: str(),
+  HIGGSFIELD_API_URL: z.string().default('https://api.higgsfield.ai'),
   FAL_COST_PER_IMAGE: num(0.03),
   IMAGE_TIMEOUT_SEC: num(180),
 
@@ -273,7 +276,7 @@ export function describeConfig(c: Config) {
     suite: c.suiteMode,
     secrets: {
       RUNPOD_API_KEY: !!c.RUNPOD_API_KEY,
-      FAL_KEY: !!c.FAL_KEY,
+      FAL_KEY: !!c.FAL_KEY, HF_CREDENTIALS: !!c.HF_CREDENTIALS,
       REPLICATE_API_TOKEN: !!c.REPLICATE_API_TOKEN,
       R2_SECRET_ACCESS_KEY: !!c.R2_SECRET_ACCESS_KEY,
       WORKER_TOKEN: !!c.WORKER_TOKEN,

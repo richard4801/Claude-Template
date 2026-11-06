@@ -50,8 +50,73 @@ Spec `plans/claude-editing.md`. Workstream 3: edit sessions plus the editing MCP
 
 `migrateWithLock` skips any migration whose `when` is ≤ the last one applied, so the coordinator merges them in that order. 0013 waits until 0011 and 0012 have landed.
 
+## ▶ RESUMED (2026-11-06, owner chose "all four workstreams")
+Production is at `daab63d` (the Higgsfield H3 provider). `SUITE_MODE=live`, and HF_CREDENTIALS is set on Railway. Items 5 (go live) and 13 (Higgsfield) are done. The first Higgsfield HD shot was refused by Higgsfield's NSFW check: the API has no moderation setting, and the job was not charged.
+
+Assignments (each workstream branches from `claude/ecstatic-rubin-2egjfb` at `daab63d` or later, and merges back only after its tests pass):
+- **WS1, suite core (`claude/muse-suite-core`):** 1 (finish Extend & upscale; rebase onto `daab63d` first), 8 (Mac pills), 10 (8 s/10 s length, `#token` leak, audio levelling), 12a (the "Rise to reveal" move, the "single shot" alias).
+- **WS3, Edit suite (`claude/muse-editor-v2`):** 9 (the rig check: server rules plus the warning UI on both apps), including 12b (prompt vs. move).
+- **WS4, polish:** 11 (drum-style wheels: a prototype for the owner first, then both apps), 12c (preview art for the Tempo, Genre and Era tiles).
+- **WS2, MCP bridge (`claude/muse-mcp-bridge`):** 7 (`railway.json` migration), and getting 2–3 ready for the owner (the checklist is in `plans/claude-editing.md`). Item 6 (RunPod) waits for the owner's OK on spend.
+- **Shared files:** WS1, WS3 and WS4 all touch the composer. Rig-check UI goes in its own file/component; wheels are confined to the picker files; WS1 owns the bottom bar.
+
+When resuming:
+1. Finish and merge Extend and Upscale.
+2. The owner's Mac first-run checklist (`plans/claude-editing.md`).
+3. The real claude.ai connector handshake.
+4. Real-device checks.
+5. Go live with renders.
+6. The owner-approved RunPod step for SeedVR2.
+7. Migrate `railway.json` before 2026-12-01.
+8. **Owner-seen bug (Mac composer, about 1000 px wide):** the bottom pills wrap their labels ("Standar/d", "Speak/ing"), "Engine · A…" is cut off, and Generate shows "GENERATE…" with no price. Make the pills shrink to icon plus value, and keep the price visible. Workstream 1.
+9. **Rig check (owner asked, high priority):** the composer warns before Generate when choices clash with each other or with the prompt. Examples:
+   - DV camcorder, phone or CCTV with f/1.4–2.8 or Rack focus: deep focus, so the pull won't show.
+   - A wide lens (≤24 mm) with a close-up: it distorts.
+   - Worm's-eye with a chest-up close-up.
+   - Two opposing looks.
+   - A prompt that describes a move or angle different from the chips.
+
+   Show a one-line reason and a one-tap fix.
+10. **Owner's first live shot (H3 Standard):**
+   - It ran 10 s although 8 s was chosen.
+   - The "#Rack focus" token text leaked into the prompt as well as the compiled line.
+   - The audio came back very quiet (max about −50 dB), so add loudness levelling, or mark H3 sound as "faint".
+11. **Wheels must feel like a real scroll (owner):** the current Setup wheels feel "blocky and noisy" (boxed cards, thick borders and a check badge on each). Rebuild them as a drum picker:
+    - continuous momentum scroll with an eased snap;
+    - curved 3D falloff (items scale, fade and tilt off-centre);
+    - one fixed selection band across all wheels, with no per-card borders or badges;
+    - only the centred item shows its name and caption, cross-faded;
+    - a haptic tick per detent on the phone, and an optional click on the Mac;
+    - unboxed hardware renders on dark.
+
+    Prototype first for the owner to feel, then both apps.
+12. **From the owner's balcony test (H3 HD, 2K, 10 s):** the look was excellent (35 mm film, contre-jour, Golden warmth).
+    - Add a move "Rise to reveal": the camera starts below the subject's level (street or traffic) and rises up to find them. Today's "Crane up" starts at the subject and tilts down.
+    - The rig check should flag "prompt says open on X / reveal" against a move that can't do that.
+    - Tempo / Genre / Era tiles need preview art (they are text on dark).
+    - In Style → Tempo, add "single shot" as a search alias for "One take".
+13. **Higgsfield API as a provider (owner, 2026-11-06):** open.higgsfield.ai lists MiniMax H3 (text / image / reference to video) at **$0.065/s at 2K**. That is half of Replicate's and Fal's $0.13/s, priced "as of 16 Sep 2026" and shown against Fal, so treat it as their standing price. Clips are 1 / 5 / 10 / 15 s only.
+    - Add `higgsfield` as a provider in the suite registry, with the same H3 model on more than one provider, and route each tier to the cheapest provider that supports its inputs (9 refs, frames, video reference).
+    - Round lengths up to the allowed clip lengths, and show the price members actually pay.
+    - Needs the owner's Higgsfield API key (request_credential, never in chat), their API docs and terms checked, and a mock adapter first.
+    - **Docs read (2026-11-06):**
+      - **Endpoints and auth:** `POST https://api.higgsfield.ai/minimax/h3/{text-to-video|image-to-video|reference-to-video}` with `Authorization: Key KEY_ID:KEY_SECRET`. SDK `@higgsfield/client` (server only). Polling statuses: queued, in_progress, nsfw (a refusal: refund), canceled, failed, completed (`video.url`).
+      - **Reference to video:** `image_urls` ≤ 9, `video_urls` ≤ 3, `audio_urls` ≤ 3.
+      - **Image to video:** `image_url` (first frame) plus an optional `end_image_url`.
+      - **Common fields:** `duration` is an integer from 5 to 15; `resolution` is 2K only; `aspect_ratio` is auto, adaptive, 21:9, 16:9, 4:3, 1:1, 3:4 or 9:16; `aigc_watermark` defaults to false (keep false).
+      - **Pricing (reference to video):** $0.13 per output second before discount (shown $0.065 now), plus **$0.08 for each reference image beyond the first 5**. MUSE's identity (5) plus outfit (4) means +$0.32. Price that exactly, and consider capping at 5 images on this provider.
+      - **Mapping:** fits the HD tier, and could replace 768P Standard at about the same price.
+      - **Docs:** `https://dash.higgsfield.ai/models/minimax/h3/<endpoint>/llms.txt`.
+      - **Verified 2026-11-06 with the free estimate endpoint** (`POST https://api.higgsfield.ai/estimate/<model>`, which prices for this account without charging):
+        - The owner's key gets a **15% discount, not 50%**. H3 2K 10 s costs $1.105 (list $1.30), 5 s costs $0.553.
+        - With MUSE's usual 9 reference images, Higgsfield (about $1.38–1.42) costs **more** than Replicate ($1.30). It's only cheaper at ≤ 5 images.
+        - **Update (same day): the owner claimed the max-discount set** (MiniMax H3, Seedance 2.5, and Marketing Studio as the image model, the only image model eligible). The estimate now confirms **H3 at 50%**: 2K 10 s costs **$0.65**, 5 s costs $0.325. Seedance 2.5 shows 30% in the console; its estimate returns only the token-pricing description. Kling 4.0 is also 30%. Qwen Image 3 is not eligible for the max discount but is usable at list price (from $0.040 per image, 1–3 references for edits).
+        - **BUILT 2026-11-06 (coordinator):** `h3-hf` (provider `higgsfield`, adapter `hf-h3`) is first on the HD ladder. It handles text and reference shots; frame shots stay on Replicate H3. It is priced $0.065/s + $0.08 per reference image beyond 5. Out of credit, bad key or busy at start moves the shot to Replicate H3 2K and skips Higgsfield for 30 min. It is active only when `HF_CREDENTIALS` is set on Railway. Seedance 2.5 stays on Replicate ($0.23/s at 720p against Higgsfield's $0.32 after 30%). Tests: `test/suite-higgsfield.test.ts`.
+        - **Worth building:** H3 on Higgsfield is cheaper than Replicate even with 9 references (about $0.81–0.97 against $1.30 for 2K 10 s) and half price with ≤ 5. Route HD (and possibly Standard) H3 shots to Higgsfield. Keep Replicate as the fallback.
+        - The SDK setup and the example are in `server/api/examples/higgsfield/`. The API account has no credit yet.
+
 ## Status (each session updates its own line)
-- 1 · Video suite UI / **video composer: merged** into `claude/ecstatic-rubin-2egjfb` (merge 2317852) from `claude/muse-suite-core` (2026-11-06; plans/video-composer.md). Server: catalogue visible / mergedInto plus composer subsets, tier minSeconds, Look grading (`look` on estimates, jobs and takes; `gradeLook`; pack twins or swatch LUTs in assets/lookpack/palettes, resolved by workstream 3). Android + Mac: the composer shell (tool card, Auto chips, @/# prompt tokens, input slots with the END FRAME rule, bottom bar / Settings sheet, presets and the collapsed state), one dark picker shell (Camera Setup / Angle / Movement / Directed, Style, Look, Lighting), and tools on the shell (Shot, Character swap, Recast; Talking, UGC ad and Extend show Coming soon). The old Shot builder, camera bag and swap screens are deleted. Server 321 tests green; Android 1115 green + 216 suite Roborazzi; Mac CI green (run 42142683837). Previews are placeholders until workstream 2's loops land; tiles take a `loop` / video as data.
+- 1 · Video composer follow-ups (2026-11-06) on `claude/muse-suite-core`: Recast tap-a-face (faceCrop + personHint), swap add-on pills, Era decade slider, UGC ad format wheel (`ugcFormats`, `camera.style.format`), @location (`/v1/suite/locations`, **migration 0013 after 0011/0012**), drag-to-reorder tokens, owner engine pin; catalog `tools` (Talking and UGC ad live, Extend coming soon); real Webcam/CCTV/Swirl/Tilt-shift renders; Blender previews bundled (`previews/`, catalog `preview` per move/light/angle); first-run HTTP checks on both apps. Server 359 green; Android 1305 green (release APK 30.7 MB, +9.5 MB previews); Mac CI green (run 42152398143). Next: Extend & upscale backend.
 - 2 · MCP + Blender bridge: Claude editing B–E **merged** into `claude/ecstatic-rubin-2egjfb` from 2c017ba (migration 0011; Mac CI green, server 337, Android app 929 + core 95, MuseCore 368). OAuth 2.1 on /mcp (claude.ai custom connector, PKCE, CIMD + DCR, scopes, no generate:run), Claude chat threads with the Mac's Claude Code on the owner's plan and phone turns relayed to it, one chat component (ClaudeChat / ClaudeChatSheet / ClaudeChatView) for Camera stage and the Edit suite; migration 0011 (when 1793929987100). Previews' render script done; assets are the coordinator's.
 - 3 · Editor engine v2 / **PAUSED** (2026-11-06, owner's request). Everything is merged and live (prod 0326558): Claude editing part A (edit sessions, 17 editing tools, migration 0012), its follow-ups (local undo holds only this device's ops, optional version `name`, unsent edits kept per take with "Keep this device's changes / Use the latest") and the Edit suite chat (workstream 2's component on Android and Mac). Nothing in progress; no sub-agents running. Optional polish when resumed: Android conflict-sheet ✓ also means Keep, Android tablet double hairline, Mac chat header stacked under the panel header, Mac chat re-attaches on toggle.
 - 4 · App-wide polish & UX audit (phase 2): **merged** into `claude/ecstatic-rubin-2egjfb` (merge 3103642, 2026-11-05). plans/ux-audit.md covers every Android and Mac screen at 360/390 dp and 1280/1440 px in all 4 themes. Our screens: Android 42 findings (37 fixed, all high/med), Mac 43 (39 fixed, all high). Workstream 1–3 findings sent to them; **workstreams 1–3: re-record your Roborazzi baselines after rebasing** (Kit.kt 48 dp targets, theme tokens, StudioParts ToolStrip). Owner decisions open: ToS/AUP links, a MUSE domain, Settings → Developer for members, Soft Tactile warning/accent contrast.

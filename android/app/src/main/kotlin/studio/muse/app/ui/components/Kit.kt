@@ -368,7 +368,8 @@ fun Toggle(on: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
 @Composable
 fun MuseSlider(value: Int, min: Int, max: Int, onChange: (Int) -> Unit, modifier: Modifier = Modifier) {
     val m = muse
-    val frac = ((value - min).toFloat() / (max - min)).coerceIn(0f, 1f)
+    // A one-step range (a tier whose min and max length are the same) sits at the start instead of dividing by zero.
+    val frac = if (max <= min) 0f else ((value - min).toFloat() / (max - min)).coerceIn(0f, 1f)
     val trackH = when { m.isA -> 2.dp; m.isC -> 10.dp; m.isD -> 12.dp; else -> 6.dp }
     val thumb = when { m.isA -> 22.dp; m.isC -> 30.dp; m.isD -> 28.dp; else -> 24.dp }
     val trackBg = when { m.isA -> m.t.line; m.isD -> Color.White; else -> m.t.surface2 }

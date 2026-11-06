@@ -116,9 +116,9 @@ export class SuiteRunner {
     const cancelled = () => st.cancelled;
     try {
       if (!plan) throw new Error('the shot plan is missing');
-      const model = modelById(plan.modelId);
+      let model = modelById(plan.modelId);
       if (!model) throw new ReplicateError('model no longer in the registry', 'unavailable');
-      const provider = this.suite.providerFor(plan);
+      let provider = this.suite.providerFor(plan);
       const mock = provider.id === 'mock';
       if (!(await this.toolsReady())) throw new Error('ffmpeg is not installed on the server');
       await report(1, 0.01, 'Preparing');
@@ -156,7 +156,8 @@ export class SuiteRunner {
           }
         } else urls.audio = await this.videoUrl(plan.audioRef.ref, job.studioId);
       }
-      const input = buildInput(model, { ...plan, prompt }, urls);
+      let input = buildInput(model, { ...plan, prompt }, urls);
+      let ref = plan.ref;
       const takes: TakeState[] = prior.map(x => ({ ...x }));
       const outputs: Record<string, unknown>[] = [], billed: number[] = [];
       for (let i = 1; i <= n; i++) {
@@ -168,7 +169,24 @@ export class SuiteRunner {
         if (!status || status.status === 'canceled') {
           if (!(await report(i, 0.03, 'Starting'))) return;
           const takeInput = plan.seed != null && input.seed != null ? { ...input, seed: plan.seed + i - 1 } : input;
-          ts.id = await provider.start(plan.ref, takeInput, { cancelled, seconds: plan.seconds, onWait: async s => { await report(i, 0.03, `Waiting to start · retrying in ${s}s`); } });
+          const hooks = { cancelled, seconds: plan.seconds, onWait: async (s: number) => { await report(i, 0.03, `Waiting to start · retrying in ${s}s`); } };
+          try {
+            ts.id = await provider.start(ref, takeInput, hooks);
+          } catch (e) {
+            // Higgsfield refused before anything ran (no credit, bad key, busy, down): skip it for a while and run the
+            // same shot on Replicate H3 2K (same model, prompt and references). The quoted price stands (the studio
+            // absorbs the difference); the owner sees why in the log. Nothing was charged by Higgsfield.
+            const alt = modelById('h3');
+            const canMove = provider.id === 'higgsfield' && alt && e instanceof ReplicateError && ['out_of_credit', 'unavailable', 'rate_limited'].includes(e.kind)
+              && !takes.some(t => t.id) && this.suite.providers.replicate.configured();
+            if (!canMove) throw e;
+            this.suite.markDown('higgsfield');
+            ctx.log.warn({ job: job.id, reason: (e as Error).message }, 'higgsfield refused at start: running the shot on Replicate H3');
+            model = alt; provider = this.suite.providers.replicate; ref = typeof alt.ref === 'string' ? alt.ref : (alt.ref.ref2v ?? alt.ref.t2v ?? '');
+            input = buildInput(alt, { ...plan, prompt, resolution: '2K' }, urls);
+            const retryInput = plan.seed != null && input.seed != null ? { ...input, seed: plan.seed + i - 1 } : input;
+            ts.id = await provider.start(ref, retryInput, hooks);
+          }
           ts.provider = provider.id;
           await this.save(job.id, takes);
           status = { status: 'running' };

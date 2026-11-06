@@ -88,3 +88,57 @@ One component, in the Edit suite (a right panel on Mac and tablet, a sheet from 
 - **Server:** edit-session revisions and conflicts, every op and its undo, `get_frame` approximate render, OAuth flows (PKCE, wrong audience, member refused), and relay queue/claim/timeout.
 - **Mac:** a fake `claude` executable that replays a recorded stream-json transcript (no real Claude calls in CI), plus MuseCore tests for the stream parser and tool-chip mapping.
 - **Android:** relay chat with a fake server; Roborazzi for the chat sheet and the "Mac offline" state.
+
+## First run on your Mac (owner checklist)
+About 15 minutes. These are the few things only your own Mac and Claude account can check. Tick each one. If one fails, note what you saw: the exact message, or a screenshot.
+
+**Before you start:** the MUSE Mac app is up to date, you're signed in as the owner, and you have a Claude Pro or Max account.
+
+1. **Install Claude Code from MUSE.**
+   - Do: Settings → Connections → *Claude on your plan* → **Install**.
+   - Expect: a Terminal window opens and runs Anthropic's installer. When it's finished, go back to MUSE and press **Re-check**.
+   - ☐ Shows *Claude Code installed* with a version number.
+2. **Sign in to Claude.**
+   - Do: press **Sign in**.
+   - Expect: Terminal opens and then Claude's own sign-in page. Sign in with your Claude account. MUSE never sees your password.
+   - ☐ After **Re-check**, it shows *Signed in* (and the model name).
+3. **Open MUSE from the Dock or Finder, not from Terminal.**
+   - Do: quit MUSE, open it again from the Dock, and go back to Settings → Connections.
+   - ☐ It still shows *installed* and *signed in*. If it says *not installed*, apps opened from Finder can't see where Claude Code is installed. Note it and tell me.
+4. **First chat on the Mac.**
+   - Do: open a camera session in Camera stage and type *"What's in this session?"*.
+   - ☐ The reply streams in, shows *On your Claude plan*, and uses MUSE tool chips such as "Read camera session".
+   - ☐ No Terminal window opens and nothing asks for permission.
+5. **Claude can't touch your files.**
+   - Do: type *"Run ls in a terminal"*.
+   - ☐ Claude says it can't run commands. It has MUSE's tools only.
+6. **Stop.**
+   - Do: ask for something long (*"Describe every preset in detail"*) and press **Stop** while it's writing.
+   - ☐ It stops within a few seconds and the chat shows it was stopped.
+   - ☐ The next message still works.
+7. **From your phone.**
+   - Do: keep MUSE open on the Mac. On the phone, open the same camera session → Claude, and type *"Summarise the brief"*.
+   - ☐ The Mac shows *Answering from your phone*, and the answer streams onto the phone.
+   - ☐ **Stop** on the phone also stops it.
+8. **Mac offline.**
+   - Do: quit MUSE on the Mac, wait a minute, and send a message from the phone.
+   - ☐ The phone says *Your Mac is offline* and offers **Open in Claude**.
+   - ☐ The studio API key option doesn't appear, because it's off by default.
+9. **With Blender** (only if you use the Blender relay).
+   - Do: switch the relay on with Blender open, then ask *"Check Blender is connected"*.
+   - ☐ Claude can reach Blender. If it can't while the in-app Direct chat can, note it: Claude Code may not find `uvx` when MUSE is opened from Finder.
+10. **MUSE in the Claude app (claude.ai connector).**
+    - Do:
+      1. On claude.ai, or in the Claude app: Settings → Connectors → **Add custom connector**.
+      2. Paste the address from MUSE → Settings → Connections → *Add MUSE to Claude* (copy button).
+      3. Press **Connect**.
+    - ☐ MUSE's own sign-in page opens. Your owner email and password work, and **Allow** takes you back to Claude.
+    - ☐ In a new Claude chat, *"List my MUSE camera sessions"* works.
+    - ☐ The connection appears in MUSE → Settings → Connections, and **Revoke** there makes Claude ask to reconnect.
+    - ☐ (Optional) A member account is refused on the sign-in page.
+
+**What's being checked behind the scenes:**
+- Steps 4–6: the Claude Code options MUSE uses, and that Stop ends a turn cleanly.
+- Step 3: that apps opened from Finder can find Claude Code.
+- Steps 1–2: the Terminal install and sign-in scripts.
+- Step 10: the real claude.ai OAuth handshake, which is only tested with simulated clients.

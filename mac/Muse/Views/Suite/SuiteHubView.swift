@@ -94,7 +94,7 @@ struct SuiteHubView: View {
                 HStack {
                     Text(m.title).font(t.body(15, .semibold)).lineLimit(1)
                     Spacer(minLength: 4)
-                    if m.comingSoon { SuiteTag(text: SuiteText.comingSoon) }
+                    if store.isComingSoon(m) { SuiteTag(text: SuiteText.comingSoon) }
                 }
                 Text(m.tileLine).font(t.body(12.5)).foregroundStyle(t.muted).lineLimit(3).fixedSize(horizontal: false, vertical: true)
             }
@@ -103,10 +103,10 @@ struct SuiteHubView: View {
         }
         .background(t.surface)
         .overlay(Rectangle().strokeBorder(t.line, lineWidth: 1))
-        .opacity(m.comingSoon ? 0.82 : 1)
+        .opacity(store.isComingSoon(m) ? 0.82 : 1)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(m.title)\(m.comingSoon ? ", coming soon" : "")")
+        .accessibilityLabel("\(m.title)\(store.isComingSoon(m) ? ", coming soon" : "")")
     }
 
     // MARK: Recent takes

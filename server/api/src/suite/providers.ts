@@ -95,6 +95,57 @@ export class FalProvider implements VideoProvider {
 }
 
 /**
+ * Higgsfield's API (https://api.higgsfield.ai/<model>): submit → status_url (queued | in_progress | completed | failed |
+ * nsfw | canceled) → video.url. Auth "Key <key-id>:<key-secret>" from HF_CREDENTIALS (never logged). Failed and nsfw
+ * requests are not charged by Higgsfield. Ids carry the status and cancel URLs the API returned.
+ */
+export class HiggsfieldProvider implements VideoProvider {
+  id = 'higgsfield' as const;
+  constructor(private ctx: Ctx, private fetchFn: typeof fetch = fetch) {}
+  configured() { return !!this.ctx.config.HF_CREDENTIALS; }
+  private base() { return this.ctx.config.HIGGSFIELD_API_URL.replace(/\/$/, ''); }
+  private headers() { return { authorization: `Key ${this.ctx.config.HF_CREDENTIALS}`, 'content-type': 'application/json', accept: 'application/json' }; }
+  async start(ref: string, input: Record<string, unknown>, hooks: StartHooks) {
+    if (!this.configured()) throw new ReplicateError("Higgsfield isn't set up on the server", 'unavailable');
+    if (hooks.cancelled()) throw new ReplicateError('Cancelled', 'cancelled');
+    const res = await this.fetchFn(`${this.base()}/${ref}`, { method: 'POST', headers: this.headers(), body: JSON.stringify(input), signal: AbortSignal.timeout(60_000) })
+      .catch(e => { throw new ReplicateError(`Higgsfield unreachable (${(e as Error).name})`, 'unavailable'); });
+    const text = await res.text().catch(() => '');
+    if (res.status === 401) throw new ReplicateError("Higgsfield refused the server's key", 'unavailable', 401);
+    if (res.status === 402 || res.status === 403 || CREDIT_RE.test(text) || /not enough credits/i.test(text)) throw new ReplicateError('Higgsfield is out of credit', 'out_of_credit', res.status);
+    if (res.status === 429) throw new ReplicateError('Higgsfield is busy', 'rate_limited', 429);
+    if (res.status >= 500) throw new ReplicateError(`Higgsfield is having trouble (${res.status})`, 'unavailable', res.status);
+    if (!res.ok) throw new ReplicateError(`Higgsfield rejected the request (${res.status}: ${text.slice(0, 200)})`, SAFETY_RE.test(text) ? 'refused' : 'failed', res.status);
+    const j = JSON.parse(text) as { request_id: string; status_url?: string; cancel_url?: string };
+    const r = `${this.base()}/requests/${j.request_id}`;
+    return JSON.stringify({ id: j.request_id, s: j.status_url ?? `${r}/status`, c: j.cancel_url ?? `${r}/cancel` });
+  }
+  async get(id: string): Promise<ProviderStatus> {
+    const h = JSON.parse(id) as { s: string };
+    const res = await this.fetchFn(h.s, { headers: this.headers(), signal: AbortSignal.timeout(30_000) }).catch(() => null);
+    if (!res || !res.ok) return { status: 'running' };
+    const st = (await res.json().catch(() => ({}))) as { status?: string; error?: unknown; video?: { url?: string } };
+    if (st.status === 'completed') {
+      if (!st.video?.url) return { status: 'failed', error: new ReplicateError('Higgsfield finished without a video', 'failed') };
+      return { status: 'succeeded', url: st.video.url, billedSeconds: null };
+    }
+    if (st.status === 'nsfw') return { status: 'failed', error: new ReplicateError('Higgsfield’s content check refused this shot', 'refused') };
+    if (st.status === 'failed') { const t = errorText(st.error ?? 'failed'); return { status: 'failed', error: new ReplicateError(t, SAFETY_RE.test(t) ? 'refused' : 'failed') }; }
+    if (st.status === 'canceled') return { status: 'canceled' };
+    return { status: 'running' };
+  }
+  async cancel(id: string) {
+    try { await this.fetchFn(JSON.parse(id).c, { method: 'POST', headers: this.headers(), signal: AbortSignal.timeout(30_000) }); }
+    catch (e) { this.ctx.log.warn({ err: (e as Error).message }, 'higgsfield cancel failed'); }
+  }
+  async download(url: string, file: string) {
+    const res = await this.fetchFn(url, { signal: AbortSignal.timeout(10 * 60_000) }).catch(e => { throw new ReplicateError(`Couldn't download Higgsfield's output (${(e as Error).name})`, 'failed'); });
+    if (!res.ok || !res.body) throw new ReplicateError(`Couldn't download Higgsfield's output (${res.status})`, 'failed', res.status);
+    await pipeline(Readable.fromWeb(res.body as any), fs.createWriteStream(file));
+  }
+}
+
+/**
  * The mock provider: every call is recorded; a prediction finishes on its second poll with a test-pattern mp4 of the
  * requested length and shape (made with ffmpeg on download). `failNext` / `refuseNext` make the next one fail.
  */

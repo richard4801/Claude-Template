@@ -30,9 +30,11 @@ data class VideoDraft(
     val speaking: Boolean = false,
     /** The user switched "Performer is speaking" for this clip: a late detection no longer moves it. */
     val speakingTouched: Boolean = false,
+    /** AI suite: the picked clip's local file (content:// URI), so Recast can read its first frame on the device. */
+    val clipUri: String? = null,
 ) {
     /** A new or changed clip: the speaking switch starts again from that clip's detection. */
-    fun withClip(c: Clip?) = copy(clip = c, speaking = speakingFor(c), speakingTouched = false)
+    fun withClip(c: Clip?) = copy(clip = c, clipUri = null, speaking = speakingFor(c), speakingTouched = false)
 
     /** The user flips the switch. */
     fun toggleSpeaking() = copy(speaking = !speaking, speakingTouched = true)

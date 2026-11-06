@@ -142,7 +142,8 @@ final class SuiteComposerShellTests: XCTestCase {
         XCTAssertEqual(ComposerMoves.list(cat, group: "orbit", query: "dolly").first?.id, "dolly_in")
         XCTAssertEqual(ComposerMoves.groups(cat).first?.id, "featured")
         XCTAssertEqual(PickerPreview.move(featured[0]).still, PickerPreview.neutralMoveStill)
-        XCTAssertNil(PickerPreview.move(featured[0]).video)
+        // The rendered loop now comes with the catalog (design/previews).
+        XCTAssertEqual(PickerPreview.move(featured[0]).video, "moves/\(featured[0].id).mp4")
     }
 
     func testTheDraftsRequest() {

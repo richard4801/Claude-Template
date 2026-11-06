@@ -15,6 +15,7 @@ import { buildInput } from '../src/suite/inputs.js';
 import { buildPlan, billedSeconds, fit, needOf, perSecond, pickModel, ShotRequestSchema, type Character } from '../src/suite/plan.js';
 import { SUITE_PROMPT_DEFS, wordings } from '../src/suite/prompts.js';
 import { bakePalettes, PALETTE_DIR } from '../scripts/suite-looks.js';
+import { OUT as PREVIEWS_OUT, previewsModule } from '../scripts/suite-previews.js';
 import { generatedLooks, lutFor, shotLook } from '../src/suite/looks.js';
 import { DEFAULT_LADDER, inputSlotsOf, MODELS, modelById, NO_INPUTS, TIERS } from '../src/suite/registry.js';
 import { demoModel, makeApp, people, until, type Client } from './helpers.js';
@@ -204,7 +205,24 @@ describe('AI suite · composer catalogue (visible, merged)', () => {
     expect(old.text).toContain('clean digital cinema camera');
     // Hidden (not merged) ids compile as themselves.
     expect(compileCamera(CameraSpecSchema.parse({ rig: { aperture: 'f2', fps: '60' } }), model).text).toMatch(/f\/2, shallow depth of field.*60 fps/);
+    // UGC ad formats: in the catalog, and in the Style part of the prompt.
+    expect(cat.ugcFormats.map(f => f.id)).toEqual(['unboxing', 'review', 'try_on', 'before_after', 'grwm', 'haul', 'tutorial', 'testimonial']);
+    expect(compileCamera(CameraSpecSchema.parse({ style: { format: 'unboxing', genre: 'ugc' } }), model).text).toMatch(/unboxing video[^.]*first genuine reaction/i);
     expect(compileCamera(CameraSpecSchema.parse({ style: { tempo: 'slow_motion' }, move: { id: 'motion_blur' } }), model).text).toMatch(/streaking motion blur[\s\S]*slow motion|slow motion[\s\S]*streaking motion blur/);
+  });
+});
+
+describe('AI suite · composer previews', () => {
+  it('the catalogue names each move, lighting and angle preview (generated file matches design/previews/manifest.tsv)', () => {
+    expect(fs.readFileSync(PREVIEWS_OUT, 'utf8'), 'run npx tsx scripts/suite-previews.ts').toBe(previewsModule());
+    const cat = cameraCatalog();
+    expect(cat.moves.find(m => m.id === 'dolly_in')?.preview).toEqual({ video: 'moves/dolly_in.mp4', poster: 'moves/dolly_in.jpg', seconds: 2.5 });
+    expect(cat.moves.filter(m => !m.preview).map(m => m.id)).toEqual(['motion_blur']); // no loop yet: the apps draw the still
+    expect(cat.lighting.every(l => l.preview?.poster === `lighting/${l.id}.jpg`)).toBe(true);
+    expect([...cat.heights, ...cat.shotSizes].every(a => a.preview?.poster === `angles/${a.id}.jpg`)).toBe(true);
+    expect(cat.autoPreviews.lighting).toEqual({ poster: 'lighting/auto.jpg' });
+    for (const p of [...cat.moves, ...cat.lighting, ...cat.heights, ...cat.shotSizes].flatMap(x => x.preview ? [x.preview.poster, x.preview.video].filter(Boolean) : []))
+      expect(fs.existsSync(path.resolve(__dirname, '../../../design/previews', p!)), p).toBe(true);
   });
 });
 
@@ -270,6 +288,8 @@ describe.skipIf(!hasFfmpeg)('AI suite · Shot API on the mock provider', () => {
     for (const t of m.tiers) expect(Object.keys(t.inputs).sort()).toEqual(['audio', 'end', 'framesWithRefs', 'images', 'middle', 'start', 'videos']);
     expect(m.tiers[0].inputs).toMatchObject({ start: true, end: true, images: 6, videos: 3, audio: true });
     expect(m.tiers.map((t: any) => [t.minSeconds, t.maxSeconds])).toEqual([[2, 15], [2, 30], [3, 30], [3, 30]]);
+    expect(m.tools).toEqual([{ id: 'shot', available: true }, { id: 'swap', available: true }, { id: 'recast', available: true }, { id: 'storyboard', available: true },
+      { id: 'talking', available: true }, { id: 'ugc_ad', available: true }, { id: 'extend', available: false, comingSoon: true }]);
     expect(o.tiers[0].models[0].inputs).toEqual({ start: true, end: true, middle: 0, images: 6, videos: 3, audio: true, framesWithRefs: true });
   });
 

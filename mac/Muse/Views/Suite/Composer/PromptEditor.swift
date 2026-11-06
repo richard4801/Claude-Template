@@ -92,13 +92,18 @@ struct ComposerPromptBox: View {
                 Suggestion(id: "o:\($0.id)", title: $0.name, line: "\(lead.shortName)’s outfit", kind: "outfit", image: $0.angles.compactMap { $0 }.first)
             }
         }
+        // Locations, then "+ New location" last.
+        out += store.suite.locations.filter { q.isEmpty || $0.name.lowercased().contains(q) }.prefix(4).map {
+            Suggestion(id: "l:\($0.id)", title: $0.name, line: "Location · a reference image", kind: "location", image: $0.image)
+        }
+        out.append(Suggestion(id: "new-location", title: "+ New location", line: "A photo of a place, named for @", kind: "newLocation"))
         return out
     }
 
     private func suggestionList(_ typed: TypedTrigger) -> some View {
         let list = suggestions
         return VStack(alignment: .leading, spacing: 0) {
-            Text(typed.trigger.char == "#" ? "CAMERA MOVES · UP TO \(PromptTokens.maxMoves)" : "YOUR CAST")
+            Text(typed.trigger.char == "#" ? "CAMERA MOVES · UP TO \(PromptTokens.maxMoves)" : "YOUR CAST · OUTFITS · LOCATIONS")
                 .font(t.mono(10, .medium)).tracking(1.2).foregroundStyle(t.muted)
                 .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 6)
             ForEach(Array(list.enumerated()), id: \.element.id) { i, s in
@@ -107,6 +112,9 @@ struct ComposerPromptBox: View {
                         if s.kind == "move" {
                             Image(systemName: "arrow.up.and.down.and.arrow.left.and.right").font(.system(size: 11)).foregroundStyle(t.surface)
                                 .frame(width: 24, height: 24).background(t.ink)
+                        } else if s.kind == "newLocation" {
+                            Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
+                                .frame(width: 24, height: 24).overlay(Rectangle().strokeBorder(t.line, style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
                         } else {
                             MuseImage(ref: s.image).frame(width: 24, height: 24).clipped()
                         }
@@ -151,6 +159,23 @@ struct ComposerPromptBox: View {
         let (cut, caret) = store.suite.composer.tokens.removingTrigger(typed.trigger, part: typed.part, caret: typed.caret)
         var result: (PromptTokens, String?)
         switch s.kind {
+        case "location":
+            let id = String(s.id.dropFirst(2))
+            guard let loc = store.suite.locations.first(where: { $0.id == id }) else { return }
+            // The References limit refuses it with a message (toast); the typed @word is still taken out.
+            result = (store.addLocation(loc, to: cut, at: caret), nil)
+        case "newLocation":
+            store.suite.composer.tokens = cut
+            self.typed = nil
+            controller.suggesting = false
+            let st = store
+            let ctl = controller
+            Task { @MainActor in
+                guard let loc = await st.newLocation() else { return }
+                st.suite.composer.tokens = st.addLocation(loc, to: st.suite.composer.tokens, at: caret)
+                ctl.textView?.placeCaretAfter(key: st.suite.composer.tokens.lastKey)
+            }
+            return
         case "move":
             guard let m = s.move else { return }
             result = cut.addMove(m, at: caret, catalog: cat)
@@ -252,6 +277,8 @@ private extension NSAttributedString.Key {
 final class TokenTextView: NSTextView {
     weak var controller: PromptController?
     var onTokenClick: ((Int, NSRect) -> Void)?
+    /// A chip dragged to a new place: its key and the character index it was dropped at.
+    var onTokenDrop: ((Int, Int) -> Void)?
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
@@ -262,7 +289,22 @@ final class TokenTextView: NSTextView {
             let ch = lm.characterIndexForGlyph(at: g)
             if rect.contains(local), ch < storage.length, let key = storage.attribute(.museToken, at: ch, effectiveRange: nil) as? Int,
                (storage.string as NSString).character(at: ch) == 0xFFFC {
-                onTokenClick?(key, rect.offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y))
+                // A click opens the chip's menu; a drag moves the chip to where it is dropped (the caret shows where).
+                let start = event.locationInWindow
+                var dragging = false
+                while let next = window?.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
+                    let at = characterIndexForInsertion(at: convert(next.locationInWindow, from: nil))
+                    if next.type == .leftMouseUp {
+                        NSCursor.arrow.set()
+                        if dragging { onTokenDrop?(key, at) } else { onTokenClick?(key, rect.offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)) }
+                        break
+                    }
+                    if !dragging, hypot(next.locationInWindow.x - start.x, next.locationInWindow.y - start.y) > 4 {
+                        dragging = true
+                        NSCursor.closedHand.set()
+                    }
+                    if dragging { setSelectedRange(NSRange(location: min(at, storage.length), length: 0)) }
+                }
                 return
             }
         }
@@ -342,6 +384,10 @@ struct TokenTextEditor: NSViewRepresentable {
         tv.onTokenClick = { [weak tv] key, rect in
             guard let tv else { return }
             coord.parent.onTokenClick(key, rect, tv)
+        }
+        tv.onTokenDrop = { [weak tv] key, index in
+            guard let tv else { return }
+            coord.drop(key: key, at: index, in: tv)
         }
         controller.textView = tv
         scroll.documentView = tv
@@ -433,6 +479,14 @@ struct TokenTextEditor: NSViewRepresentable {
             report(tv)
         }
 
+        /// Drag to reorder: the chip goes where it was dropped (PromptTokens.move), then the caret sits after it.
+        func drop(key: Int, at index: Int, in tv: TokenTextView) {
+            let moved = shown.move(key: key, to: shown.caret(utf16: index))
+            guard moved != shown else { return }
+            parent.tokens = moved
+            tv.placeCaretAfter(key: key)
+        }
+
         func textViewDidChangeSelection(_ note: Notification) {
             guard !applying, let tv = note.object as? TokenTextView else { return }
             tv.typingAttributes = plain
@@ -467,6 +521,7 @@ struct TokenTextEditor: NSViewRepresentable {
         private func chipImage(_ p: PromptPart) -> NSImage {
             let th = parent.theme
             let isMove = p.move != nil
+            let isPlace: Bool = { if case .mention(let k, _, _, _) = p { return k == "location" }; return false }()
             let label: String = {
                 switch p {
                 case .move(_, let l, _, _, _): return l
@@ -496,7 +551,8 @@ struct TokenTextEditor: NSViewRepresentable {
                     arrows.draw(at: NSPoint(x: iconRect.midX - arrows.size().width / 2, y: iconRect.midY - arrows.size().height / 2))
                 } else {
                     line.setFill()
-                    NSBezierPath(ovalIn: iconRect.insetBy(dx: 2, dy: 2)).fill()
+                    // A place has a square plate, a character a round one.
+                    if isPlace { NSBezierPath(roundedRect: iconRect.insetBy(dx: 2, dy: 2), xRadius: 3, yRadius: 3).fill() } else { NSBezierPath(ovalIn: iconRect.insetBy(dx: 2, dy: 2)).fill() }
                     let initial = NSAttributedString(string: String(label.prefix(1)), attributes: [.font: NSFont.systemFont(ofSize: 10, weight: .bold), .foregroundColor: ink])
                     initial.draw(at: NSPoint(x: iconRect.midX - initial.size().width / 2, y: iconRect.midY - initial.size().height / 2))
                 }

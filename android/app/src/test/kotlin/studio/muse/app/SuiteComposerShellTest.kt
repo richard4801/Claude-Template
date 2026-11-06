@@ -84,9 +84,9 @@ class SuiteComposerShellTest {
         assertEquals(listOf(ComposerChip.LOOK), ComposerTool.SWAP.chips)
         assertTrue(ComposerTool.RECAST.chips.isEmpty())
         assertEquals(listOf(ComposerChip.CAMERA, ComposerChip.LOOK, ComposerChip.LIGHTING), ComposerTool.TALKING.chips)
-        // Tools without a backend keep their card but have no Generate.
+        // Without the catalog's `tools`, Talking, UGC ad and Extend keep their card but have no Generate.
         assertEquals(setOf(ComposerTool.TALKING, ComposerTool.UGC, ComposerTool.EXTEND), ComposerTool.entries.filter { !it.live }.toSet())
-        assertEquals("Coming soon", ComposerDraft(tool = ComposerTool.UGC).problem(s, RecastDraft()))
+        assertEquals("Coming soon", ComposerDraft(tool = ComposerTool.EXTEND).problem(s, RecastDraft()))
         assertEquals(ComposerTool.SHOT, ComposerTool.of("nope")); assertEquals(ComposerTool.SWAP, ComposerTool.of("swap"))
         // Talking's Movement shows talk-safe moves only.
         assertTrue(movesFor(cat, "featured", "", talkOnly = true).all { it.talkSafe })

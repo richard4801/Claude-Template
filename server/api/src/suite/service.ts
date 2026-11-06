@@ -18,7 +18,7 @@ import { shotLook } from './looks.js';
 import { compileCamera } from './compile.js';
 import { buildRecastPlan, pickRecast } from './recast.js';
 import { buildPlan, needOf, pickModel, shotLabel, ShotRequestSchema, type Character, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
-import { FalProvider, MockProvider, ReplicateProvider, type VideoProvider } from './providers.js';
+import { FalProvider, HiggsfieldProvider, MockProvider, ReplicateProvider, type VideoProvider } from './providers.js';
 import { DEFAULT_LADDER, inputSlotsOf, MODELS, modelById, modelView, MOCK_MODEL, TIER_INFO, TIERS, type ProviderId, type Tier } from './registry.js';
 import { SuiteRunner } from './runner.js';
 import { suiteSettings } from './schema.js';
@@ -38,7 +38,7 @@ export class SuiteService {
   readonly runner: SuiteRunner;
   constructor(private ctx: Ctx, fetchFn?: typeof fetch) {
     this.mock = new MockProvider(ctx);
-    this.providers = { replicate: new ReplicateProvider(ctx), fal: new FalProvider(ctx, fetchFn), mock: this.mock };
+    this.providers = { replicate: new ReplicateProvider(ctx), fal: new FalProvider(ctx, fetchFn), higgsfield: new HiggsfieldProvider(ctx, fetchFn), mock: this.mock };
     this.runner = new SuiteRunner(ctx, this);
   }
 
@@ -53,12 +53,18 @@ export class SuiteService {
   /** Providers a shot may be planned on. In mock mode every hosted one counts (the mock stands in, nothing is spent). */
   available(): Set<ProviderId> {
     if (this.mode === 'off') return new Set();
-    if (this.mode === 'mock') return new Set(['replicate', 'fal', 'mock']);
+    // Higgsfield counts in mock mode only when its key is set, so test prices match what live mode would run.
+    if (this.mode === 'mock') return new Set<ProviderId>(['replicate', 'fal', 'mock', ...(this.providers.higgsfield.configured() ? ['higgsfield' as const] : [])]);
     const s = new Set<ProviderId>();
     if (this.providers.replicate.configured()) s.add('replicate');
     if (this.providers.fal.configured()) s.add('fal');
+    if (this.providers.higgsfield.configured() && !this.isDown('higgsfield')) s.add('higgsfield');
     return s;
   }
+  /** A provider that refused at start (out of credit, bad key, down) is skipped for new shots for a while. */
+  private down = new Map<ProviderId, number>();
+  markDown(p: ProviderId, ms = 30 * 60_000) { this.down.set(p, Date.now() + ms); }
+  isDown(p: ProviderId) { return (this.down.get(p) ?? 0) > Date.now(); }
 
   // ------------------------------------------------------------------ settings (owner)
   async prefs(studioId: string): Promise<SuitePrefs> {
@@ -141,7 +147,15 @@ export class SuiteService {
         canKeyframes: usable.some(x => x.m!.modes.image), canReferences: usable.some(x => x.m!.modes.reference), canGuide: usable.some(x => x.m!.camera.referenceVideo), inputs: inputSlotsOf(usable.map(x => x.m!)) };
       return u.role === 'owner' ? { ...base, models: usable.map(x => ({ model: x.m!.id, name: x.m!.name, resolution: x.s.resolution, inputs: inputSlotsOf([x.m!]) })) } : base;
     });
-    return { enabled: this.mode !== 'off', test: this.mode === 'mock', defaultQuality: 'draft', tiers, modes: ['text', 'image', 'reference', 'swap', 'recast'], recastMaxPeople: 4,
+    // Composer tools (plans/video-composer.md "Tools on the shell"): which the apps can offer now. Talking and UGC ad are
+    // shots (audio / product references); Extend & upscale has no engine yet.
+    const on = this.mode !== 'off', any = (f: (i: ReturnType<typeof inputSlotsOf>) => boolean) => tiers.some(t => t.available && f(t.inputs));
+    const tools = [
+      { id: 'shot', available: on }, { id: 'swap', available: on }, { id: 'recast', available: on }, { id: 'storyboard', available: on },
+      { id: 'talking', available: on && any(i => i.audio) }, { id: 'ugc_ad', available: on && any(i => i.images > 0) },
+      { id: 'extend', available: false, comingSoon: true },
+    ];
+    return { enabled: this.mode !== 'off', test: this.mode === 'mock', defaultQuality: 'draft', tiers, tools, modes: ['text', 'image', 'reference', 'swap', 'recast'], recastMaxPeople: 4,
       aspectRatios: ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'], takesMax: 4, camera: cameraCatalog() };
   }
 

@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../ctx.js';
 import { ApiError } from '../errors.js';
 import { cameraCatalog } from '../suite/camera.js';
+import { createLocation, deleteLocation, listLocations } from '../suite/locations.js';
 
 export async function registerSuiteRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/v1/suite/catalog', async req => ctx.suite.catalog(req.user));
@@ -18,6 +19,10 @@ export async function registerSuiteRoutes(app: FastifyInstance, ctx: Ctx) {
     catch (e) { return nothingFits(e, req.user.role === 'owner', reply); }
   });
   app.get('/v1/suite/shots/:id', async req => ctx.suite.shot(req.user, (req.params as { id: string }).id));
+  // The studio's locations (composer @location).
+  app.get('/v1/suite/locations', async req => listLocations(ctx, req.user));
+  app.post('/v1/suite/locations', async req => createLocation(ctx, req.user, req.body));
+  app.delete('/v1/suite/locations/:id', async req => deleteLocation(ctx, req.user, (req.params as { id: string }).id));
   app.get('/v1/suite/settings', { config: { owner: true } }, async req => ctx.suite.settingsView(req.user.studioId));
   app.patch('/v1/suite/settings', { config: { owner: true } }, async req => ctx.suite.updateSettings(req.user, req.body));
 }

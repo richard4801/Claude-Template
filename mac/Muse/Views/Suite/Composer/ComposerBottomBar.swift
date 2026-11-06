@@ -22,7 +22,7 @@ struct ComposerBottomBar: View {
                 if tool == .swap {
                     listPill("speaking", icon: "text.bubble", title: "Speaking", value: store.suite.swap.speaking.label, help: "Speaking",
                              options: ComposerSpeaking.allCases.map { ($0.label, $0) }, selected: store.suite.swap.speaking) { store.suite.swap.speaking = $0 }
-                    addOnPill
+                    addOnPills
                 }
             } else {
                 shapePill
@@ -32,6 +32,7 @@ struct ComposerBottomBar: View {
                 listPill("speaking", icon: "text.bubble", title: "Speaking", value: store.suite.composer.speaking.label, help: "Speaking",
                          options: ComposerSpeaking.allCases.map { ($0.label, $0) }, selected: store.suite.composer.speaking) { store.suite.composer.speaking = $0 }
                 takesPill
+                if store.isOwner { enginePill }
             }
             Spacer(minLength: 8)
             PricingLink(estimate: estimate)
@@ -119,10 +120,94 @@ struct ComposerBottomBar: View {
         }
     }
 
-    private var addOnPill: some View {
-        let options: [(String, VideoQuality?)] = [("None · the ladder", nil)] + [VideoQuality.edit, .fast].filter { store.videoFeatures.isAvailable($0) }.map { ($0.label, Optional($0)) }
-        return listPill("addon", icon: "plus.square.on.square", title: "Add-on", value: store.suite.swap.addOn?.label ?? "None", help: "Add-ons",
-                        options: options, selected: store.suite.swap.addOn) { store.suite.swap.addOn = $0 }
+    /// Swap's add-ons as pills (Edit, Fast · beta, Upscale), each with its own price; tapping one again goes back to
+    /// the Quality ladder.
+    private var addOnPills: some View {
+        let pills = SwapAddOns.pills(store.videoFeatures, clipSeconds: store.clip?.durationSec, takes: store.takeCount, lipSync: store.lipSync)
+        return HStack(spacing: 6) {
+            ForEach(pills) { p in addOnPill(p) }
+        }
+    }
+
+    private func addOnPill(_ p: SwapAddOnPill) -> some View {
+        let on = p.quality != nil && p.quality == store.suite.swap.addOn
+        return Button {
+            if p.quality == nil {
+                // Upscale (once it ships) works on the finished take.
+                if let take = store.takes(of: store.swapJob).first(where: { $0.videoUrl != nil }), let size = store.videoFeatures.upscale?.sizes.first(where: \.available) {
+                    store.upscale(take, size: size)
+                } else {
+                    store.showToast("Upscale works on a finished take · generate it first")
+                }
+                return
+            }
+            store.suite.swap.addOn = SwapAddOns.toggle(store.suite.swap.addOn, p)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: on ? "checkmark" : "plus").font(.system(size: 10, weight: .bold))
+                Text(p.label).font(t.body(12.5, .medium))
+                Text(p.priceText).font(t.mono(11)).foregroundStyle(on ? t.ink : t.muted)
+            }
+            .foregroundStyle(t.ink)
+            .padding(.horizontal, 10).frame(height: 34)
+            .background(on ? t.surface : t.bg)
+            .overlay(RoundedRectangle(cornerRadius: t.controlRadius).strokeBorder(on ? t.accent : t.line, lineWidth: on ? 2 : 1))
+            .clipShape(RoundedRectangle(cornerRadius: t.controlRadius))
+            .opacity(p.available ? 1 : 0.5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!p.available)
+        .help(p.comingSoon ? "\(p.label) · coming soon" : p.detail)
+        .accessibilityLabel("\(p.label) add-on, \(p.priceText)\(on ? ", on" : "")")
+    }
+
+    /// Owner only: pin this shot's engine (one of the quality's models), "Engine · Auto" = the ladder.
+    private var enginePill: some View {
+        let tier = store.suite.catalog?.tier(store.suite.composer.quality)
+        let models = ComposerEngines.options(tier)
+        let label = ComposerEngines.label(store.suite.composer, tier)
+        return pill("engine", help: "Engine") {
+            Image(systemName: "server.rack")
+            Text(label).font(t.body(12.5, .medium)).lineLimit(1)
+        } popover: {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("ENGINE · OWNER").font(t.mono(10.5, .medium)).tracking(1.2).foregroundStyle(t.muted).padding(.horizontal, 14).padding(.vertical, 10)
+                engineRow("Auto", line: "The \(SuiteText.tierLabel(store.suite.composer.quality)) ladder", on: store.suite.composer.engineModel == nil) {
+                    store.suite.composer = ComposerEngines.pin(store.suite.composer, nil)
+                }
+                ForEach(models, id: \.self) { m in
+                    let on = store.suite.composer.engineModel == m.model && (store.suite.composer.resolution ?? m.resolution) == m.resolution
+                    engineRow("\(m.name) · \(m.resolution)", line: ComposerBar.acceptsLine(m.inputs ?? tier?.slots ?? .none), on: on) {
+                        store.suite.composer = ComposerEngines.pin(store.suite.composer, m)
+                    }
+                }
+                if models.isEmpty { Muted("No engines listed for this quality.").padding(14) }
+            }
+            .padding(.bottom, 6)
+            .frame(minWidth: 280, alignment: .leading)
+            .foregroundStyle(t.ink)
+        }
+    }
+
+    private func engineRow(_ title: String, line: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            action()
+            open = nil
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(t.accent).opacity(on ? 1 : 0).frame(width: 14)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).font(t.body(13, on ? .semibold : .regular))
+                    Text(line).font(t.mono(10)).foregroundStyle(t.muted)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(on ? t.bg : .clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func listPill<T: Hashable>(_ id: String, icon: String, title: String?, value: String, help: String, options: [(String, T)], selected: T,
@@ -217,9 +302,12 @@ struct QualityPopover: View {
                     let e = estimates[tier.id]
                     Button {
                         guard tier.available else { return }
-                        store.suite.toolQuality = tier.id
-                        if isSwap { store.suite.swap.addOn = nil }
-                        store.suite.composer.duration = ComposerBar.clampLength(store.suite.composer.duration, tier)
+                        if isSwap {
+                            store.suite.toolQuality = tier.id
+                            store.suite.swap.addOn = nil
+                        } else {
+                            store.setComposerQuality(tier.id)
+                        }
                         onPick()
                     } label: {
                         VStack(alignment: .leading, spacing: 3) {

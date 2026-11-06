@@ -28,6 +28,9 @@ class SuiteStore(private val c: AppContainer) {
     /** The video composer (every tool is a preset of it), its filled input slots and the open picker sheet. */
     val composer = MutableStateFlow(ComposerDraft())
     val composerSlots = MutableStateFlow(InputSlots())
+    /** Talking's own slots (audio, location photo) and UGC ad's (product photo, reference ad): ToolSlots.TALK_* / UGC_*. */
+    val talkingSlots = MutableStateFlow(InputSlots())
+    val ugcSlots = MutableStateFlow(InputSlots())
     val sheet = MutableStateFlow<ComposerSheet?>(null)
     /** The clip and people of Character swap and Recast (the composer's quality and takes are used). */
     val recast = MutableStateFlow(RecastDraft())
@@ -37,6 +40,23 @@ class SuiteStore(private val c: AppContainer) {
     /** Renders started from the composer this session (newest last): its pane follows them. */
     val shotJobs = MutableStateFlow<List<String>>(emptyList())
     val settings = MutableStateFlow<SuiteSettings?>(null)
+    /** The studio's locations library (`@location`); empty on a server without it. */
+    val locations = MutableStateFlow<List<studio.muse.app.data.SuiteLocation>>(emptyList())
+
+    /** Loads the locations quietly: an older server simply has none. */
+    suspend fun loadLocations() {
+        runCatching { c.repo.api.suiteLocations() }.onSuccess { locations.value = it }
+    }
+
+    /** "+ New location": uploads the photo, then adds it to the library. The new location, or null (with a toast). */
+    suspend fun createLocation(name: String, bytes: ByteArray, mime: String): studio.muse.app.data.SuiteLocation? {
+        val (img, err) = c.repo.attemptInline { uploadImage("${name.take(40)}.jpg", bytes, mime) }
+        if (img == null) { c.repo.toast(err ?: ErrorText.WENT_WRONG); return null }
+        val (loc, err2) = c.repo.attemptInline { createSuiteLocation(studio.muse.app.data.SuiteLocationCreate(name.trim().take(60), img)) }
+        if (loc == null) { c.repo.toast(err2 ?: ErrorText.WENT_WRONG); return null }
+        locations.update { listOf(loc) + it.filter { l -> l.id != loc.id } }
+        return loc
+    }
 
     val owner: Boolean get() = c.repo.state.value.wallet?.owner ?: c.prefs.value.owner
 

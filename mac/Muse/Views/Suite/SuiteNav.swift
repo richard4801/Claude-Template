@@ -15,7 +15,7 @@ struct SuiteNavGroup: View {
                         Rectangle().fill(on ? t.accent : .clear).frame(width: 5, height: 5)
                         Text(m.title).font(t.body(13, on ? .semibold : .regular)).lineLimit(1)
                         Spacer(minLength: 4)
-                        if m.comingSoon { Text("Soon").font(t.mono(9.5)).opacity(0.7) }
+                        if store.isComingSoon(m) { Text("Soon").font(t.mono(9.5)).opacity(0.7) }
                     }
                     .foregroundStyle(t.isD ? .white : on ? t.ink : t.muted)
                     .padding(.leading, 22)
@@ -24,7 +24,7 @@ struct SuiteNavGroup: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(m.title)\(m.comingSoon ? ", coming soon" : "")\(on ? ", selected" : "")")
+                .accessibilityLabel("\(m.title)\(store.isComingSoon(m) ? ", coming soon" : "")\(on ? ", selected" : "")")
             }
         }
     }

@@ -93,10 +93,11 @@ struct ComposerSlotCardView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("People, \(cast.count)")
-        .popover(isPresented: $peopleOpen, arrowEdge: .bottom) {
-            ScrollView { RecastCastList().padding(14) }
-                .frame(width: 300, height: 420)
-                .environment(store).environment(\.theme, t)
+        .sheet(isPresented: $peopleOpen) {
+            RecastFacePicker { peopleOpen = false }
+                .environment(store)
+                .environment(\.theme, PickerTheme.dark)
+                .environment(\.colorScheme, .dark)
         }
     }
 }
@@ -393,7 +394,7 @@ private struct ToolBrowserPanel: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(tool.title).font(t.body(14, .semibold))
-                        if tool.comingSoon { SuiteTag(text: "Soon") }
+                        if store.isComingSoon(tool) { SuiteTag(text: "Soon") }
                     }
                     Text(tool.tagline).font(t.body(12)).foregroundStyle(t.muted).lineLimit(1)
                 }
@@ -405,6 +406,6 @@ private struct ToolBrowserPanel: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(tool.title)\(tool.comingSoon ? ", coming soon" : "")\(on ? ", selected" : "")")
+        .accessibilityLabel("\(tool.title)\(store.isComingSoon(tool) ? ", coming soon" : "")\(on ? ", selected" : "")")
     }
 }
