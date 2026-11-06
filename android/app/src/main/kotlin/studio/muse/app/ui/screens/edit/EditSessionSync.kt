@@ -43,7 +43,10 @@ interface SessionHost {
     suspend fun renderFrame(project: EditProject, t: Double, width: Int): Pair<ByteArray?, String?>
     /** The suite's "Save to Gallery" (render + save as a version): the new version's take id. */
     suspend fun saveVersion(name: String?): Pair<String?, String?>
-    /** The export sheet run with [preset] (the owner's AI-label / C2PA switches untouched): the new version's take id. */
+    /**
+     * Never unattended ([OwnerExportGate]): the export sheet opens with [preset] (the owner's AI-label / C2PA switches
+     * untouched) and this answers when the owner's export finishes (the new version's take id) or the sheet is closed.
+     */
     suspend fun export(preset: JsonObject?): Pair<String?, String?>
 }
 

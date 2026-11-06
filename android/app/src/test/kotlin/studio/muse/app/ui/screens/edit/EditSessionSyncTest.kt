@@ -17,6 +17,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import studio.muse.app.data.ApiEvent
+import studio.muse.app.data.EditRequestAnswer
 import studio.muse.app.data.EditorEstimate
 import studio.muse.app.data.EditorJob
 import studio.muse.app.data.EditorSourceDto
@@ -43,7 +44,9 @@ class EditSessionSyncTest {
         val exports = ArrayList<JsonObject?>()
         override suspend fun renderFrame(project: EditProject, t: Double, width: Int): Pair<ByteArray?, String?> { frames += t to width; return byteArrayOf(1, 2, 3) to null }
         override suspend fun saveVersion(name: String?): Pair<String?, String?> { saves += name; return "t_v2" to null }
-        override suspend fun export(preset: JsonObject?): Pair<String?, String?> { exports += preset; return "t_v3" to null }
+        /** The app's real gate: the export sheet opens and waits for the owner. */
+        var gate: OwnerExportGate? = null
+        override suspend fun export(preset: JsonObject?): Pair<String?, String?> { exports += preset; return gate?.request(preset) ?: ("t_v3" to null) }
     }
 
     private fun project() = EditSuiteViewModel.newProject("t_j1", 12.0, SourceSize(1080, 1920, 30.0, true))
@@ -57,7 +60,7 @@ class EditSessionSyncTest {
         val api = FakeMuseApi(bg, null, speed = 0.0, genDelayMs = 0)
         val c = EditSuiteController(bg, NoAi())
         c.load(project(), "Kick test", "t_j1", null, reopened = true)
-        val host = StubHost()
+        val host = StubHost().also { it.gate = OwnerExportGate(bg, c) }
         val sync = EditSessionSync(bg, { api }, events?.invoke(api) ?: api.events(), c, host, "android-test", "Pixel", presenceMs = 3_600_000)
         assertTrue(sync.start("t_j1", EditJson.encode(project()), "t_v1"))
         runCurrent()
@@ -148,17 +151,45 @@ class EditSessionSyncTest {
         assertEquals(1, r.host.frames.size)
     }
 
-    @Test fun saveAndExportRequestsRunTheSuiteFlowsAndAnswer() = runTest {
+    @Test fun saveRequestsRunSaveToGalleryAndAnswer() = runTest {
         val r = rig()
         val save = r.api.claudeAppRequest(r.sid, "save", name = "Cut v2", device = "android-test")
         runCurrent()
         assertEquals(listOf<String?>("Cut v2"), r.host.saves)
         assertEquals("t_v2", r.api.editRequestAnswers[save.id]!!.versionId)
+    }
+
+    @Test fun exportRequestsOpenTheSheetAndWaitForTheOwner() = runTest {
+        val r = rig()
         val preset = JsonObject(mapOf("resolution" to JsonPrimitive("720p"), "aiLabel" to JsonPrimitive(true), "c2pa" to JsonPrimitive(true)))
         val ex = r.api.claudeAppRequest(r.sid, "export", preset = preset, device = "android-test")
-        runCurrent()
+        runCurrent(); advanceTimeBy(60_000); runCurrent()
+        // Not run unattended: the sheet is open with Claude's preset, the disclosure switches untouched, no answer yet.
         assertFalse(r.host.exports.single()!!.containsKey("aiLabel"))
-        assertEquals("done", r.api.editRequestAnswers[ex.id]!!.status)
+        val u = r.c.ui.value
+        assertEquals(Panel.EXPORT, u.panel)
+        assertEquals(studio.muse.core.edit.ExportResolution.HD, u.export.resolution)
+        assertFalse(u.export.aiLabel); assertFalse(u.export.contentCredentials)
+        assertNull(r.api.editRequestAnswers[ex.id])
+        assertTrue(r.host.gate!!.isWaiting)
+        // The owner taps EXPORT; when it's saved, the request is answered with the new version.
+        r.c.setPhase(SuitePhase.Exporting(.5f)); runCurrent()
+        r.host.gate!!.exported("t_v3")
+        r.c.update { it.copy(phase = SuitePhase.Ready, panel = null) }
+        runCurrent()
+        assertEquals(EditRequestAnswer("done", versionId = "t_v3"), r.api.editRequestAnswers[ex.id])
+        // Closing the sheet instead is a no: failed.
+        val ex2 = r.api.claudeAppRequest(r.sid, "export", preset = null, device = "android-test")
+        runCurrent()
+        assertEquals(Panel.EXPORT, r.c.ui.value.panel)
+        r.c.act(EditAction.Open(null)); runCurrent()
+        assertEquals("failed", r.api.editRequestAnswers[ex2.id]!!.status)
+        // Cancelling (the export sheet's Cancel) too.
+        val ex3 = r.api.claudeAppRequest(r.sid, "export", preset = null, device = "android-test")
+        runCurrent()
+        r.host.gate!!.cancelled(); runCurrent()
+        assertEquals("failed", r.api.editRequestAnswers[ex3.id]!!.status)
+        assertFalse(r.host.gate!!.isWaiting)
         // The preset never turns the owner's disclosure switches on.
         val s = studio.muse.core.edit.SessionSync.applyExportPreset(ExportSettings(), preset)
         assertFalse(s.aiLabel); assertFalse(s.contentCredentials)

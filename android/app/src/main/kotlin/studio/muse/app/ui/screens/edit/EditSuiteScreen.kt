@@ -449,12 +449,10 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
             val take = exportAndSave(toPhone = false) ?: return null to (lastExportError ?: "Couldn't save the video")
             return take.id to null
         }
-        override suspend fun export(preset: JsonObject?): Pair<String?, String?> {
-            controller.update { it.copy(export = studio.muse.core.edit.SessionSync.applyExportPreset(it.export, preset), panel = Panel.EXPORT) }
-            val take = exportAndSave(toPhone = true) ?: return null to (lastExportError ?: "Couldn't export the video")
-            return take.id to null
-        }
+        /** Never unattended: the export sheet opens with Claude's preset and waits for the owner's tap (or close). */
+        override suspend fun export(preset: JsonObject?): Pair<String?, String?> = exportGate.request(preset)
     } }
+    private val exportGate by lazy { OwnerExportGate(viewModelScope, controller) }
 
     // ------------------------------------------------------------ export
 
@@ -490,12 +488,13 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
             val (take, err) = c.repo.attemptInline { saveProjectVersion(u.sourceTakeId, made, EditJson.encode(saved)) { pr -> controller.setPhase(SuitePhase.Saving(pr)) } }
             if (toPhone) withContext(Dispatchers.IO) { saveToPhone(made.file, srt, u.title) }
             if (take == null) { lastExportError = err ?: "Couldn't save the video"; controller.setPhase(SuitePhase.Failed(lastExportError!!)); return null }
+            exportGate.exported(take.id) // answers an export Claude asked for, before the sheet closes
             controller.update { it.copy(phase = SuitePhase.Ready, savedTakeId = take.id, panel = null, message = if (toPhone) "Saved to Gallery and to this phone" else "Saved as a new version · Edited") }
             return take
         } finally { made.file.delete() }
     }
 
-    fun cancelExport() { exporting?.cancel(); controller.setPhase(SuitePhase.Ready) }
+    fun cancelExport() { exporting?.cancel(); controller.setPhase(SuitePhase.Ready); exportGate.cancelled() }
 
     /** The MP4 into Movies/MUSE (and the .srt into Downloads/MUSE on Android 10+). */
     private fun saveToPhone(mp4: File, srt: String?, title: String) {
