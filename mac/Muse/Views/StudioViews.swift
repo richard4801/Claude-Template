@@ -394,13 +394,15 @@ struct MemberRow: View {
                         Divider()
                         Button(m.disabled ? "Switch on" : "Switch off and sign out", role: m.disabled ? nil : ButtonRole.destructive) { store.setDisabled(m, !m.disabled) }
                     } label: {
-                        Image(nsImage: Ph.menuImage("ellipsis", 16))
+                        // A plain button-style menu draws its label as SwiftUI content, so the icon keeps the ink colour.
+                        Ph("ellipsis", 16).foregroundStyle(t.roles.ink)
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
                     }
-                    .menuStyle(.borderlessButton)
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
                     .menuIndicator(.hidden)
                     .fixedSize()
-                    .frame(width: 28, height: 28)
-                    .foregroundStyle(t.roles.ink)
                     .help("More for \(m.email)")
                     .accessibilityLabel("More for \(m.email)")
                 }
