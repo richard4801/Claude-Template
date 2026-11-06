@@ -429,16 +429,16 @@ object ExtendSlot {
  * problem (estimate not ok) shows the estimate's message and stops Generate.
  */
 object ComposerPrice {
-    /** The round button and pills: "—", "Free" or "$0.16". */
-    fun short(e: SuiteEstimate?): String = when {
-        e == null -> "—"
+    /** The round button and pills: "—", "Free" or "$0.16"; "…" while the estimate is on its way ([pricing]). */
+    fun short(e: SuiteEstimate?, pricing: Boolean = false): String = when {
+        e == null -> if (pricing) "…" else "—"
         e.test -> "Free"
         else -> Pricing.money(e.estimate)
     }
 
-    /** A full Generate button: "Generate · —", "Generate · Free", else the estimate's `buttonLabel`. */
-    fun button(e: SuiteEstimate?): String = when {
-        e == null -> "Generate · —"
+    /** A full Generate button: "Generate · —", "Generate · Pricing…" while estimating, "Generate · Free", else the estimate's `buttonLabel`. */
+    fun button(e: SuiteEstimate?, pricing: Boolean = false): String = when {
+        e == null -> if (pricing) "Generate · Pricing…" else "Generate · —"
         e.test -> "Generate · Free"
         else -> e.buttonLabel.ifBlank { "Generate · ${Pricing.money(e.estimate)}" }
     }
