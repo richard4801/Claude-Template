@@ -58,7 +58,7 @@ struct ComposerSlotCardView: View {
                     MuseImage(ref: poster)
                     LinearGradient(colors: [.clear, Color(hex: 0x0E0C0A, alpha: 0.78)], startPoint: .center, endPoint: .bottom)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("CLIP").font(t.mono(9.5, .medium)).tracking(1).foregroundStyle(Color(hex: 0xF8F5EF))
+                        Text("Clip").font(t.scale.micro.font).foregroundStyle(Color(hex: 0xF8F5EF))
                         Text(store.clip.map { "\(Pricing.trimNum($0.durationSec)) s · change" } ?? "Change").font(t.body(10.5)).foregroundStyle(Color(hex: 0xE7E1D6))
                     }
                     .padding(.horizontal, 8).padding(.bottom, 7)
@@ -85,7 +85,7 @@ struct ComposerSlotCardView: View {
                     }
                     if cast.isEmpty { Ph("plus", 14).frame(width: 30, height: 30).overlay(Circle().strokeBorder(t.line, lineWidth: 1)) }
                 }
-                Text("PEOPLE").font(t.mono(10, .medium)).tracking(1)
+                Text("People").font(t.scale.label.font)
                 Text(cast.isEmpty ? card.caption : "\(cast.count) of \(store.suite.catalog?.recastMaxPeople ?? 4) · edit").font(t.body(10.5)).foregroundStyle(t.muted)
             }
             .frame(width: size, height: size)
@@ -118,11 +118,10 @@ struct EmptySlotCard: View {
         // dashed outline is the card's only line.
         Button(action: action) {
             VStack(spacing: 5) {
-                Ph("plus", 13)
-                    .frame(width: 30, height: 30)
-                    .background(Circle().fill(t.surface2))
-                    .padding(.bottom, 3)
-                Text(card.slot.label.uppercased()).font(t.mono(10, .medium)).tracking(1).lineLimit(1).minimumScaleFactor(0.8)
+                // Workstream 4 (design direction, owner fix 4): a plain plus and the name of what the slot adds, sentence case.
+                Ph("plus", 16)
+                    .padding(.bottom, 2)
+                Text(card.slot.label).font(t.scale.label.font).lineLimit(1).minimumScaleFactor(0.8)
                 Text(card.caption).font(t.body(10.5)).foregroundStyle(t.muted).multilineTextAlignment(.center).lineLimit(2).padding(.horizontal, 6)
             }
             .opacity(off ? 0.42 : 1)
@@ -132,7 +131,7 @@ struct EmptySlotCard: View {
             .overlay(shape.strokeBorder(off ? t.line : t.muted.opacity(0.55), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
             .overlay(alignment: .topTrailing) {
                 if card.optional {
-                    Text("OPTIONAL").font(t.mono(8.5, .medium)).tracking(0.7).foregroundStyle(t.muted)
+                    Text("Optional").font(t.scale.micro.font).foregroundStyle(t.muted)
                         .padding(.top, 7).padding(.trailing, 8)
                         .opacity(off ? 0.42 : 1)
                 }
@@ -209,7 +208,7 @@ struct CharacterSlot: View {
 
     private var picker: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("YOUR CAST").font(t.mono(10.5, .medium)).tracking(1.2).foregroundStyle(t.muted).padding(12)
+            Text("Your cast").font(t.scale.label.font).foregroundStyle(t.muted).padding(12)
             if store.suiteCharacters.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Muted("Make a model with a character sheet to cast her.")
@@ -273,13 +272,13 @@ struct CollapsedComposer: View {
         let slots = ComposerSlots.collapsed(preset: presetId)
         HStack(alignment: .bottom, spacing: 28) {
             VStack(alignment: .leading, spacing: 8) {
-                Text(slots.first == .product ? "WHAT" : "WHO").font(t.mono(11)).tracking(1.4).foregroundStyle(t.muted)
+                Text(slots.first == .product ? "What" : "Who").font(t.scale.label.font).foregroundStyle(t.muted)
                 HStack(spacing: 10) {
                     ForEach(slots) { s in ComposerSlotCardView(card: ComposerSlotCard(slot: s, optional: false), size: 108) }
                 }
             }
             VStack(alignment: .leading, spacing: 8) {
-                Text("SHAPE").font(t.mono(11)).tracking(1.4).foregroundStyle(t.muted)
+                Text("Shape").font(t.scale.label.font).foregroundStyle(t.muted)
                 HStack(spacing: 10) {
                     ForEach(ComposerBar.shapes, id: \.self) { r in shape(r, on: d.aspect == r) }
                 }
@@ -310,7 +309,7 @@ struct CollapsedComposer: View {
         return Button { store.suite.composer.aspect = r } label: {
             VStack(spacing: 10) {
                 Rectangle().fill(on ? t.ink : .clear).frame(width: w, height: h).overlay(Rectangle().strokeBorder(t.ink, lineWidth: 1.5))
-                Text(r).font(t.mono(11, .medium)).tracking(1)
+                Text(r).font(t.scale.label.font).monospacedDigit()
             }
             .frame(width: 108, height: 108)
             .background(RoundedRectangle(cornerRadius: t.imageRadius).fill(on ? t.surface : t.bg))
@@ -369,7 +368,7 @@ private struct ToolBrowserPanel: View {
                 Rectangle().fill(t.line).frame(width: 1)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("PRESETS").font(t.mono(11, .medium)).tracking(1.4).foregroundStyle(t.muted)
+                        Text("Presets").font(t.scale.label.font).foregroundStyle(t.muted)
                         if store.suite.composer.tool == .photo {
                             // Photo tool (workstream 3): its presets are the photo templates.
                             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), alignment: .leading, spacing: 16) {

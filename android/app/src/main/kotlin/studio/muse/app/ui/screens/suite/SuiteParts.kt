@@ -181,7 +181,7 @@ fun SBadge(text: String, kind: String = "", modifier: Modifier = Modifier) {
     }
     val shape = RoundedCornerShape(if (m.isA) 1.dp else 6.dp)
     Box(modifier.heightIn(min = 22.dp).clip(shape).background(bg).border(1.dp, line, shape).padding(horizontal = 7.dp, vertical = 3.dp), contentAlignment = Alignment.Center) {
-        T(text.uppercase(), m.type.mono.copy(fontSize = 10.5.sp, letterSpacing = .08.sp, fontWeight = FontWeight.Medium), fg, maxLines = 1)
+        T(text, m.scale.micro, fg, maxLines = 1)
     }
 }
 
@@ -220,7 +220,7 @@ fun BoxScope.SuiteResultPane(
         StagePhase.QUEUED -> {
             BlurredStageArt(art, moving = true)
             Box(Modifier.align(Alignment.Center).background(Color(0xFF141210)).padding(horizontal = 10.dp, vertical = 5.dp)) {
-                T(pane.badge.uppercase(), m.type.mono.copy(fontSize = 12.sp, letterSpacing = 1.sp), Color.White, maxLines = 1)
+                T(pane.badge, m.scale.label, Color.White, maxLines = 1)
             }
             T(pane.step, m.type.tiny, Color.White.copy(alpha = .9f), Modifier.align(Alignment.BottomCenter).padding(14.dp), align = TextAlign.Center)
         }
@@ -228,7 +228,7 @@ fun BoxScope.SuiteResultPane(
             BlurredStageArt(art, moving = true)
             Box(Modifier.matchParentSize().background(Color.White.copy(alpha = (.32f * (1f - pane.progress)).coerceAtLeast(0f))))
             Column(Modifier.align(Alignment.Center).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                T(pane.headline.uppercase(), m.type.mono.copy(fontSize = 11.sp, letterSpacing = 1.4.sp), Color.White, maxLines = 1)
+                T(pane.headline, m.scale.label, Color.White, maxLines = 1)
                 T(pane.percent, studio.muse.app.ui.theme.museFor(studio.muse.app.ui.theme.ThemeId.A).type.h2.copy(fontSize = if (compact) 48.sp else 64.sp, lineHeight = if (compact) 48.sp else 62.sp), Color.White)
                 Bar(pane.progress, Modifier.width(150.dp), Color.White, 3.dp, Color.White.copy(alpha = .3f))
                 T(pane.step, m.type.tiny, Color.White.copy(alpha = .92f), align = TextAlign.Center, maxLines = 2)

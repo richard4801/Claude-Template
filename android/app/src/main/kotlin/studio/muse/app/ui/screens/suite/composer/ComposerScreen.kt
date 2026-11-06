@@ -464,8 +464,8 @@ private fun RoundGenerate(ui: ComposerUi) {
     val price = ComposerPrice.short(ui.est, ui.pricing)
     Column(Modifier.size(62.dp).alpha(if (ui.canGo) 1f else .5f).clip(CircleShape).background(m.t.cta).press(onClick = ui.onGenerate)
         .semantics { contentDescription = "Generate, $price"; role = Role.Button }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        SIc("sparkle", 18.dp, m.t.ctaInk)
-        T(price, m.type.mono.copy(fontSize = 11.sp, letterSpacing = .04.em), m.t.ctaInk, maxLines = 1)
+        T("Generate", m.scale.micro, m.t.ctaInk, maxLines = 1)
+        T(price, m.scale.label, m.t.ctaInk, maxLines = 1)
     }
 }
 
@@ -540,7 +540,7 @@ private fun ChipsRow(ui: ComposerUi, wide: Boolean = false) {
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     if (render == null) Box(Modifier.size(26.dp).dashedBox(m.t.muted), contentAlignment = Alignment.Center) { SIc("image", 14.dp, m.t.muted) }
                     else HardwareImage(render, Modifier.size(26.dp), sample = 8, gray = auto)
-                    T(chip.key, m.type.mono.copy(fontSize = 10.sp, letterSpacing = .08.em), m.t.muted, maxLines = 1)
+                    T(chip.title, m.scale.micro, m.t.muted, maxLines = 1)
                     T(value, m.type.body.copy(fontSize = 13.sp, fontWeight = if (auto) FontWeight.Normal else FontWeight.SemiBold), if (auto) m.t.muted else m.t.ink, maxLines = 1)
                 }
             }
@@ -609,7 +609,7 @@ private fun ExtendLength(ui: ComposerUi, modifier: Modifier = Modifier) {
     val range = ui.d.lengthRange(ui.catalog)
     Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            T("NEW PART", m.type.mono.copy(fontSize = 10.5.sp, letterSpacing = .14.em), m.t.muted, Modifier.weight(1f), maxLines = 1)
+            T("New part", m.scale.label, m.t.muted, Modifier.weight(1f), maxLines = 1)
             T("+${ui.d.duration} s", m.type.mono.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
         }
         Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics { contentDescription = "New part length, ${ui.d.duration} seconds" }, contentAlignment = Alignment.Center) {
@@ -655,11 +655,10 @@ private fun SlotCard(ui: ComposerUi, s: ToolSlot, modifier: Modifier) {
         val onImg = img != null
         Column(Modifier.align(if (onImg) Alignment.BottomStart else Alignment.Center).padding(horizontal = 6.dp, vertical = 6.dp).padding(top = if (onImg) 0.dp else 10.dp),
             horizontalAlignment = if (onImg) Alignment.Start else Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            if (!onImg) Box(Modifier.size(28.dp).clip(CircleShape).background(m.t.surface).border(1.dp, m.t.line, CircleShape), contentAlignment = Alignment.Center) {
-                if (filled != null) SIc("check", 14.dp, m.t.ink) else SIc("plus", 14.dp, m.t.ink)
-            }
+            // Workstream 4 (design direction): a plain plus, no icon in a circle; a filled slot shows its picture or name instead.
+            if (!onImg && filled == null) SIc("plus", 20.dp, m.t.ink)
             // On a picture every card reads the same way: the name (or the slot's own name) in bold, then the caption.
-            T(when { onImg && s.kind == "character" -> filled.second; onImg -> s.label; else -> s.label.uppercase() }, if (onImg) m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold) else m.type.mono.copy(fontSize = 9.5.sp, letterSpacing = .1.em),
+            T(when { onImg && s.kind == "character" -> filled.second; else -> s.label }, if (onImg) m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold) else m.scale.label,
                 if (onImg) Color(0xFFF8F5EF) else m.t.ink, maxLines = 1, align = if (onImg) null else TextAlign.Center)
             T(if (filled != null && !onImg) filled.second else sub, m.type.body.copy(fontSize = 10.5.sp, lineHeight = 13.sp), if (onImg) Color(0xFFE7E1D6) else m.t.muted, maxLines = if (onImg) 1 else 2,
                 align = if (onImg) null else TextAlign.Center)
@@ -685,9 +684,9 @@ private fun CollapsedBody(ui: ComposerUi, wide: Boolean) {
     val summary = listOfNotNull(SuiteRules.tierLabel(d.quality), "${d.duration} s", ui.cat.presets.firstOrNull { it.id == d.settings.preset }?.description?.lowercase()).joinToString(" · ")
     if (wide) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(28.dp)) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { T("WHO", m.type.mono.copy(fontSize = 10.5.sp, letterSpacing = .14.em), m.t.muted); SlotCard(ui, slot, Modifier.size(108.dp)) }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { T("Who", m.scale.label, m.t.muted); SlotCard(ui, slot, Modifier.size(108.dp)) }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                T("SHAPE", m.type.mono.copy(fontSize = 10.5.sp, letterSpacing = .14.em), m.t.muted)
+                T("Shape", m.scale.label, m.t.muted)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { ComposerDraft.SHAPES.forEach { a -> ShapeTile(a, a == d.aspect, Modifier.size(108.dp)) { ui.update { it.copy(aspect = a) } } } }
             }
             Spacer(Modifier.weight(1f))
@@ -727,7 +726,7 @@ private fun PresetRow(ui: ComposerUi, modifier: Modifier = Modifier, tileW: Dp, 
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // A fixed-height header: "Clear" keeps its 48 dp touch box without pushing the tiles down when a preset is picked.
         Row(Modifier.fillMaxWidth().height(20.dp), verticalAlignment = Alignment.CenterVertically) {
-            T("START FROM A PRESET", m.type.mono.copy(fontSize = 11.sp, letterSpacing = .16.em, fontWeight = FontWeight.Medium), m.t.ink, Modifier.weight(1f), maxLines = 1)
+            T("Start from a preset", m.scale.label, m.t.ink, Modifier.weight(1f), maxLines = 1)
             if (ui.d.settings.preset != null) Box(Modifier.requiredHeight(48.dp).widthIn(min = 48.dp).press { ui.update { it.clearPreset() } }
                 .semantics { contentDescription = "Clear preset"; role = Role.Button }, contentAlignment = Alignment.CenterEnd) { T("Clear", m.type.tiny, m.link) }
             else T("${ui.cat.presets.size} presets", m.type.tiny, m.t.muted)
@@ -771,7 +770,7 @@ private fun RecentTakes(ui: ComposerUi, job: studio.muse.app.data.Job?, recent: 
     val m = muse
     val pane = SuitePane.of(job, takes, ui.lead?.name)
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        T("RECENT TAKES", m.type.mono.copy(fontSize = 11.sp, letterSpacing = .16.em, fontWeight = FontWeight.Medium), m.t.ink, Modifier.padding(horizontal = if (wide) 0.dp else 16.dp))
+        T("Recent takes", m.scale.label, m.t.ink, Modifier.padding(horizontal = if (wide) 0.dp else 16.dp))
         BoxWithConstraints(Modifier.fillMaxWidth()) {
         val rowW = maxWidth - 32.dp
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = if (wide) 0.dp else 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -799,7 +798,7 @@ private fun RecentTakes(ui: ComposerUi, job: studio.muse.app.data.Job?, recent: 
                         Box(Modifier.align(Alignment.Center).size(30.dp).clip(CircleShape).background(Color.White.copy(alpha = .9f)), contentAlignment = Alignment.Center) { Ic("play", 14.dp, Color(0xFF141210)) }
                     } else {
                         BlurredStageArt(j.thumb, moving = false)
-                        T(if (p.phase == StagePhase.FAILED) "FAILED" else p.badge.uppercase(), m.type.mono.copy(fontSize = 10.sp), Color.White, Modifier.align(Alignment.Center), maxLines = 1)
+                        T(if (p.phase == StagePhase.FAILED) "Failed" else p.badge, m.scale.micro, Color.White, Modifier.align(Alignment.Center), maxLines = 1)
                     }
                 }
             }
@@ -852,7 +851,7 @@ private fun WideGenerate(ui: ComposerUi) {
     val m = muse
     Box(Modifier.height(48.dp).alpha(if (ui.canGo) 1f else .5f).clip(RoundedCornerShape(if (m.isA) 0.dp else 10.dp)).background(m.t.cta).press(onClick = ui.onGenerate)
         .semantics { role = Role.Button }.padding(horizontal = 22.dp), contentAlignment = Alignment.Center) {
-        T(ComposerPrice.button(ui.est, ui.pricing).let { if (m.isA) it.uppercase() else it }, m.type.mono.copy(fontSize = 12.5.sp, letterSpacing = .12.em, fontWeight = FontWeight.Medium), m.t.ctaInk, maxLines = 1)
+        T(ComposerPrice.button(ui.est, ui.pricing), m.scale.label, m.t.ctaInk, maxLines = 1)
     }
 }
 
@@ -904,7 +903,7 @@ private fun AddonPills(ui: ComposerUi) {
     val picked = ui.d.swapAddon
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            T("ADD-ONS", m.type.mono.copy(fontSize = 10.5.sp, letterSpacing = .14.em), m.t.muted, maxLines = 1)
+            T("Add-ons", m.scale.label, m.t.muted, maxLines = 1)
             ui.addons.forEach { p ->
                 val on = picked == p.addon
                 val shape = RoundedCornerShape(if (m.isA) 0.dp else 999.dp)

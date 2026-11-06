@@ -69,11 +69,11 @@ struct ComposerView: View {
         HStack(alignment: .bottom) {
             VStack(alignment: .leading, spacing: 6) {
                 Button { store.openSuite(.hub) } label: {
-                    Text("VIDEO SUITE").font(t.mono(11)).tracking(1.6).foregroundStyle(t.muted)
+                    Label("Back", ph: "chevron.left").font(t.scale.label.font).foregroundStyle(t.muted) // not "Video suite": Photo opens here too
                 }
                 .buttonStyle(.plain)
-                .help("Back to the Video suite")
-                .accessibilityLabel("Back to the Video suite")
+                .help("Back to the suite")
+                .accessibilityLabel("Back to the suite")
                 Text(store.suite.composer.tool.title).font(t.isA ? Fonts.font("Instrument Serif", 44, .regular) : t.display(34))
             }
             Spacer(minLength: 12)
@@ -115,7 +115,7 @@ struct RecentTakesRow: View {
                     .frame(width: 100, height: 178)
                     .clipped()
                     .overlay(overlay(state))
-                Text("\(j.title.uppercased()) · T\(max(1, j.take))").font(t.mono(10)).lineLimit(1).frame(width: 100, alignment: .leading)
+                Text("\(j.title), take \(max(1, j.take))").font(t.scale.caption.font).lineLimit(1).frame(width: 100, alignment: .leading)
             }
         }
         .buttonStyle(.plain)
@@ -138,8 +138,8 @@ struct RecentTakesRow: View {
             Ph("play.fill", 13).foregroundStyle(Color(hex: 0x141210))
                 .frame(width: 36, height: 36).background(Circle().fill(Color.white.opacity(0.9)))
         case .rendering(let p, _): Text("\(p)%").font(t.isA ? Fonts.font("Instrument Serif", 30, .regular) : t.display(22)).foregroundStyle(.white)
-        case .queued: Text(s.queueLine.uppercased()).font(t.mono(9)).foregroundStyle(.white).padding(4).background(Color.black.opacity(0.8))
-        case .failed: Text("RETRY FREE").font(t.mono(9, .semibold)).foregroundStyle(.white).padding(4).background(t.rec)
+        case .queued: Text(s.queueLine).font(t.scale.micro.font).foregroundStyle(.white).padding(4).background(Color.black.opacity(0.8))
+        case .failed: Text("Retry free").font(t.scale.micro.font).foregroundStyle(.white).padding(4).background(t.rec)
         case .empty: EmptyView()
         }
     }
@@ -333,7 +333,7 @@ struct ToolCardRow: View {
         HStack(spacing: 12) {
             HardwareImage(name: preset.flatMap { ComposerPresets.render($0, store.suite.camera) } ?? d.tool.render)
                 .frame(width: 34, height: 42).clipped()
-            Text((preset?.label ?? d.tool.title).uppercased()).font(t.mono(11, .medium)).tracking(1.5)
+            Text(preset?.label ?? d.tool.title).font(t.scale.label.font)
             Circle().fill(t.line).frame(width: 3, height: 3)
             Text(photoPreset.map { "Preset: \($0.name)" } ?? preset?.description ?? d.tool.tagline).font(t.body(13.5)).foregroundStyle(t.muted).lineLimit(1)
             Button { store.suite.browserOpen = true } label: {
@@ -390,7 +390,7 @@ struct SettingChip: View {
         } label: {
             HStack(spacing: 7) {
                 thumb(auto: sum.auto && !directed)
-                Text(chip.key).font(t.mono(9.5, .medium)).tracking(0.8).foregroundStyle(t.muted)
+                Text(chip.title).font(t.scale.micro.font).foregroundStyle(t.muted)
                 Text(locked ? "From preset" : directed ? "Directed" : sum.value).font(t.body(12.5, sum.auto && !directed ? .regular : .semibold))
                     .foregroundStyle(sum.auto && !directed ? t.ink.opacity(0.8) : t.ink)
                     .lineLimit(1).truncationMode(.tail).frame(maxWidth: 190, alignment: .leading)
@@ -445,7 +445,7 @@ struct ReferencesPopover: View {
         let ids = model.slots.visible(inputs).filter { $0.kind == .image || $0.kind == .video }
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("REFERENCES").font(t.mono(10.5, .medium)).tracking(1.2)
+                Text("References").font(t.scale.label.font)
                 Spacer()
                 Text(ComposerSlots.referencesCaption(inputs)).font(t.body(11.5)).foregroundStyle(t.muted)
             }
