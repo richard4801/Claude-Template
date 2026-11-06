@@ -278,3 +278,15 @@ extension EditV2 {
         }
     }
 }
+
+extension EditV2 {
+    /// A take graded with a suite look (workstream 1, `take.look.lut`) starts with that look on its main clip at full strength,
+    /// reversible like any look. Only for a starting project built from the take itself (not a saved edit list of its own); the
+    /// server does the same when it creates an edit session.
+    public static func withTakeLook(_ p: Project, take: Take) -> Project {
+        guard let lut = take.look?.lut, !lut.isEmpty, let first = p.mainClips.first, first.look == nil else { return p }
+        return p.updating(first.id) { it in
+            if case .video(var c) = it { c.look = Look(lut: lut, strength: 1); it = .video(c) }
+        } ?? p
+    }
+}
