@@ -50,8 +50,8 @@ public enum ComposerTool: String, CaseIterable, Sendable, Identifiable {
         }
     }
 
-    /// No backend yet: the tool card shows a quiet "Coming soon" and no Generate.
-    public var comingSoon: Bool { self == .talking || self == .ugc || self == .extend }
+    /// No backend yet: the tool card shows a quiet "Coming soon" and no Generate. (Extend is live: suite/extend.ts.)
+    public var comingSoon: Bool { self == .talking || self == .ugc }
 
     /// The tool's id in `catalog.tools` (UGC ad is "ugc_ad").
     public var wireId: String { self == .ugc ? "ugc_ad" : rawValue }
@@ -527,10 +527,13 @@ public struct ComposerDraft: Hashable, Sendable {
     /// Owner: the engine pinned for this shot (one of the tier's `models`), nil = Auto (the ladder). Members never set it.
     public var engineModel: String?
     public var resolution: String?
+    /// Extend: the video, After / Before and what happens (ComposerExtend.swift).
+    public var extend: ExtendDraft
 
     public init(tool: ComposerTool = .shot, tokens: PromptTokens = PromptTokens(), settings: ComposerSettings = ComposerSettings(), outfitId: String? = nil,
                 quality: String = "draft", aspect: String = "9:16", duration: Int = 8, sound: Bool = true, speaking: ComposerSpeaking = .auto, takes: Int = 1,
-                collapsed: String? = nil, directed: CameraSpec? = nil, engineModel: String? = nil, resolution: String? = nil) {
+                collapsed: String? = nil, directed: CameraSpec? = nil, engineModel: String? = nil, resolution: String? = nil, extend: ExtendDraft = ExtendDraft()) {
+        self.extend = extend
         self.engineModel = engineModel
         self.resolution = resolution
         self.tool = tool
@@ -591,6 +594,7 @@ public struct ComposerDraft: Hashable, Sendable {
             case .character where tokens.characterId == nil: return "Pick a character first"
             case .audio where !ready(SlotId(.audio)): return "Add the audio she says"
             case .product where !ready(SlotId(.image)): return "Add a photo of the product"
+            case .video where extend.source == nil: return "Pick a take or upload a video to extend"
             default: continue
             }
         }

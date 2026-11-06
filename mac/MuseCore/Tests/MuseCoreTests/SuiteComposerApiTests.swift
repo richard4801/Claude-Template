@@ -67,7 +67,9 @@ final class SuiteComposerApiTests: XCTestCase {
         XCTAssertFalse(c.camera.eras.isEmpty)
         if !c.tools.isEmpty {
             XCTAssertEqual(c.tools.map(\.id), ["shot", "swap", "recast", "storyboard", "talking", "ugc_ad", "extend"])
-            XCTAssertTrue(ComposerTool.extend.isComingSoon(in: c))
+            let extend = try XCTUnwrap(c.tools.first { $0.id == "extend" })
+            XCTAssertEqual(ComposerTool.extend.isComingSoon(in: c), !extend.available, "Extend follows catalog.tools")
+            XCTAssertTrue(extend.available, "mock mode can extend")
             XCTAssertFalse(ComposerTool.shot.isComingSoon(in: c))
         }
         // The bundled demo copy matches the server's lists.
@@ -177,5 +179,67 @@ final class SuiteComposerApiTests: XCTestCase {
             _ = try await m.suiteEstimate(pinned)
             XCTFail("members can't pin an engine")
         } catch let e as ApiError { XCTAssertEqual(e.code, "owner_only") }
+    }
+
+    // MARK: Extend and Upscale
+
+    func testAnExtendEstimateOnAnUploadedVideo() async throws {
+        let (boss, c) = try await owner()
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("extend-\(UUID().uuidString.prefix(6)).mp4")
+        try Data(repeating: 0x2A, count: 4096).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let ref = try await boss.uploadSuiteMedia(file, contentType: "video/mp4", progress: nil)
+        let src = try XCTUnwrap(ExtendSource.upload(ref, seconds: 4, name: "upload"), "the upload has a stored key: \(ref)")
+        var d = ComposerDraft(tool: .extend, quality: "draft", duration: 5).extending(src)
+        d.extend.prompt = "She turns away."
+        let r = try XCTUnwrap(d.extendRequest())
+        XCTAssertFalse(try encoded(r).contains("null"), "no explicit nulls")
+        let e = try await boss.suiteEstimate(r)
+        XCTAssertEqual(e.mode, "extend")
+        XCTAssertTrue(e.label.hasPrefix("Extend · Draft · "), e.label)
+        XCTAssertEqual(e.seconds, 5)
+        XCTAssertTrue(e.ok, e.message ?? "")
+        XCTAssertTrue(GeneratePrice.of(e).canGenerate)
+
+        // Before, on each quality: an estimate, or the server's own nothing_fits.
+        d.extend.direction = .before
+        for q in c.tiers.filter(\.available).map(\.id) {
+            d.quality = q
+            d.duration = ComposerBar.clampLength(5, c.tier(q))
+            do {
+                let eb = try await boss.suiteEstimate(try XCTUnwrap(d.extendRequest()))
+                XCTAssertTrue(eb.label.hasPrefix("Extend · "), eb.label)
+            } catch let e as ApiError { XCTAssertEqual(e.code, "nothing_fits", e.message) }
+        }
+
+        // A member's estimate names no engine; a video that isn't the studio's is refused.
+        let m = try await member(boss)
+        let me = try await m.suiteEstimate(try XCTUnwrap(ComposerDraft(tool: .extend, quality: "draft", duration: 5).extending(src).extendRequest()))
+        XCTAssertNil(me.engine)
+        XCTAssertTrue(SuiteText.isMemberSafe(me.label + me.buttonLabel + me.priceLine))
+        do {
+            _ = try await boss.suiteEstimate(.extendShot(SuiteVideoRef(key: "c/not_here.mp4", seconds: 4), duration: 5, quality: "draft"))
+            XCTFail("not in this studio")
+        } catch let e as ApiError { XCTAssertEqual(e.code, "bad_request") }
+    }
+
+    func testUpscaleIsRefusedWithA409OnAFreshServer() async throws {
+        let (boss, _) = try await owner()
+        // No UPSCALE_PRICES on the test server: every size is greyed and the add-on is coming soon.
+        let settings = try await boss.studioSettings()
+        let f = try XCTUnwrap(settings.features.video)
+        XCTAssertFalse(UpscaleOffer.isLive(f))
+        XCTAssertEqual(f.upscale?.sizes.map(\.id), ["1080p", "2k", "4k"])
+        XCTAssertTrue(f.upscale?.sizes.allSatisfy { !$0.available && $0.price == nil } ?? false)
+        XCTAssertEqual(UpscaleOffer.choices(f, seconds: 8).map(\.priceText), ["Soon", "Soon", "Soon"])
+        let takes = try await boss.listTakes()
+        let take = try XCTUnwrap(takes.first { $0.kind == "take" }, "the dev seed has render takes")
+        do {
+            _ = try await boss.upscale(takeId: take.id, UpscaleRequest(size: "2k"))
+            XCTFail("Upscale isn't priced here")
+        } catch let e as ApiError {
+            XCTAssertEqual(e.code, "upscale_unavailable")
+            XCTAssertNotNil(UpscaleOffer.refusal(e))
+        }
     }
 }

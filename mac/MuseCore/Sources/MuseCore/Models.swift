@@ -723,6 +723,9 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
     public var editsV2: EditV2.Project?
     /// AI suite (workstream 1): a suite take's Look {id, kind, label, lut}; the Edit suite opens with it applied.
     public var look: SuiteLook?
+    /// The stored file's key when the take has no `videoUrl` (demo mode's takes; the server's give it through `videoUrl`).
+    /// Not on the wire.
+    public var mediaKey: String?
 
     public init(id: String, kind: String = "take", jobId: String? = nil, index: Int = 1, of: Int = 1, title: String, label: String, engineLabel: String = "",
                 cost: Double = 0, seed: Int64 = 0, status: String = "test", thumb: ImageRef, prompt: String = "", createdAt: Int64 = 0) {
@@ -818,7 +821,7 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
     }
 
     /// A finished render take that Upscale could work on.
-    public var canUpscale: Bool { kind == "take" && videoUrl != nil }
+    public var canUpscale: Bool { kind == "take" && (videoUrl != nil || mediaKey != nil) }
 }
 
 public struct SetTakeStatusRequest: Codable, Sendable {

@@ -634,6 +634,19 @@ public struct SuiteVideoRef: Codable, Hashable, Sendable {
     }
 }
 
+/// `extend` on a shot request: `{video: {key} | {url}, direction: "after" | "before", join?}`. `join` nil = the server's
+/// default (source + extension as one clip).
+public struct SuiteExtend: Codable, Hashable, Sendable {
+    public var video: SuiteVideoRef
+    public var direction: String
+    public var join: Bool?
+    public init(video: SuiteVideoRef, direction: String = "after", join: Bool? = nil) {
+        self.video = video
+        self.direction = direction
+        self.join = join
+    }
+}
+
 public struct SuiteFrames: Codable, Hashable, Sendable {
     public var start: ImageRef?
     public var middle: [ImageRef]?
@@ -732,6 +745,8 @@ public struct ShotRequest: Codable, Hashable, Sendable {
     /// Owner only (bypass the ladder). Members never send these.
     public var engineModel: String?
     public var resolution: String?
+    /// Extend (`mode: "extend"`): the finished clip to continue and which way (suite/extend.ts).
+    public var extend: SuiteExtend?
 
     public init(mode: String? = nil, cast: [CastMember]? = nil, title: String? = nil, modelId: String? = nil, outfitId: String? = nil, prompt: String = "",
                 direction: String? = nil, frames: SuiteFrames? = nil, references: SuiteReferences? = nil, duration: Int = 5, aspectRatio: String = "9:16",
@@ -759,6 +774,14 @@ public struct ShotRequest: Codable, Hashable, Sendable {
         self.keepAudio = keepAudio
         self.engineModel = engineModel
         self.resolution = resolution
+    }
+
+    /// Extend: a longer take from a finished one (the new part is `duration` long; `prompt` is what happens next or before).
+    public static func extendShot(_ video: SuiteVideoRef, direction: String = "after", duration: Int, quality: String, takes: Int = 1, prompt: String = "",
+                              title: String? = nil) -> ShotRequest {
+        var r = ShotRequest(mode: "extend", title: title, prompt: prompt, duration: duration, quality: quality, takes: takes)
+        r.extend = SuiteExtend(video: video, direction: direction)
+        return r
     }
 
     /// Recast ("same take, new cast"): 1–4 people of the clip → studio characters.

@@ -19,6 +19,47 @@ enum FakeSuitePrices {
         "hd": Tier(resolution: "1080p", perSec: 0.45, maxSeconds: 30, model: "h3-max-recast", name: "MiniMax H3 Max Recast", provider: "fal"),
         "cinema": Tier(resolution: "1080p", perSec: 0.45, maxSeconds: 30, model: "h3-max-recast", name: "MiniMax H3 Max Recast", provider: "fal"),
     ]
+    /// Extend (server suite/extend.ts): each tier's extend ladder; the first model that can continue the clip wins.
+    struct Extender {
+        let model: String
+        let name: String
+        let resolution: String
+        /// $ per second as this model extends (with the clip as a video input, or from a frame).
+        let perSec: Double
+        let minSeconds: Int
+        let maxSeconds: Int
+        /// How it extends after / before (nil: it can't): "clip", "reference" or "frame".
+        let after: String?
+        let before: String?
+        /// The source lengths it takes (a longer clip sends only its last / first `sourceMax` seconds).
+        let sourceMin: Double
+        let sourceMax: Double
+    }
+    static let wan720 = Extender(model: "wan-2.7", name: "Wan 2.7", resolution: "720p", perSec: 0.10, minSeconds: 2, maxSeconds: 15, after: "clip", before: nil, sourceMin: 2, sourceMax: 10)
+    static let wan1080 = Extender(model: "wan-2.7", name: "Wan 2.7", resolution: "1080p", perSec: 0.10, minSeconds: 2, maxSeconds: 15, after: "clip", before: nil, sourceMin: 2, sourceMax: 10)
+    static let seed480 = Extender(model: "seedance-2.5", name: "Seedance 2.5", resolution: "480p", perSec: 0.4304, minSeconds: 4, maxSeconds: 30, after: "reference", before: "reference", sourceMin: 2, sourceMax: 30)
+    static let seed720 = Extender(model: "seedance-2.5", name: "Seedance 2.5", resolution: "720p", perSec: 0.9676, minSeconds: 4, maxSeconds: 30, after: "reference", before: "reference", sourceMin: 2, sourceMax: 30)
+    static let kling720 = Extender(model: "kling-v4", name: "Kling 4.0", resolution: "720p", perSec: 0.157, minSeconds: 3, maxSeconds: 30, after: "frame", before: "frame", sourceMin: 0.5, sourceMax: 600)
+    static let kling1080 = Extender(model: "kling-v4", name: "Kling 4.0", resolution: "1080p", perSec: 0.235, minSeconds: 3, maxSeconds: 30, after: "frame", before: "frame", sourceMin: 0.5, sourceMax: 600)
+    static let extend: [String: [Extender]] = [
+        "draft": [wan720, seed480, kling720],
+        "standard": [seed480, wan1080, kling720],
+        "hd": [seed720, wan1080, kling1080],
+        "cinema": [seed720, kling1080, wan1080],
+    ]
+
+    /// The server's `pickExtend`: the first step of the tier's ladder that extends this way, takes this source length and
+    /// makes this length (clamped into its range); nil = nothing fits.
+    static func pickExtend(_ tier: String, direction: String, sourceSeconds: Double, seconds: Int) -> (Extender, method: String, seconds: Int)? {
+        for m in extend[tier] ?? [] {
+            guard let method = direction == "before" ? m.before : m.after else { continue }
+            if sourceSeconds < m.sourceMin - 0.05 { continue }
+            if seconds > m.maxSeconds || seconds < m.minSeconds - 1 { continue }
+            return (m, method, max(m.minSeconds, min(seconds, m.maxSeconds)))
+        }
+        return nil
+    }
+
     static let capPerJob = 5.0
     static let capPerDay = 25.0
 }
@@ -54,13 +95,30 @@ extension FakeMuseAPI {
         let tier = SuiteText.tierIds.contains(r.quality) ? r.quality : "draft"
         if r.takes < 1 || r.takes > 4 { throw ApiError("bad_request", "Invalid shot: takes must be 1–4") }
         if r.engineModel != nil || r.resolution != nil, !suiteIsOwner { throw ApiError("owner_only", "Only the studio owner can pick the engine") }
-        let mode = r.mode ?? (r.frames?.start != nil || r.frames?.end != nil ? "image" : r.modelId != nil ? "reference" : "text")
+        let mode = r.mode ?? (r.extend != nil ? "extend" : nil) ?? (r.frames?.start != nil || r.frames?.end != nil ? "image" : r.modelId != nil ? "reference" : "text")
         var warnings: [String] = []
         let kind: String
         let p: FakeSuitePrices.Tier
         var seconds: Double
         var cast: [SuiteCastLine]?
         switch mode {
+        case "extend":
+            guard let x = r.extend else { throw ApiError("bad_request", "Extend needs the video to continue (extend.video)") }
+            if x.direction != "after" && x.direction != "before" { throw ApiError("bad_request", "Invalid shot: direction is after or before") }
+            let source = try extendSourceSeconds(x.video)
+            guard source > 0 else { throw ApiError("bad_request", "Extend needs the video’s length (extend.video.seconds)") }
+            guard let pick = FakeSuitePrices.pickExtend(tier, direction: x.direction, sourceSeconds: source, seconds: r.duration) else {
+                throw ApiError("nothing_fits", "\(SuiteText.tierLabel(tier)) can't extend this clip \(x.direction == "before" ? "backwards" : "forwards") · try another quality or length")
+            }
+            let m = pick.0
+            kind = "Extend"
+            p = FakeSuitePrices.Tier(resolution: m.resolution, perSec: m.perSec, maxSeconds: m.maxSeconds, model: m.model, name: m.name, provider: "replicate")
+            seconds = Double(pick.seconds)
+            if pick.method != "frame" && source > m.sourceMax + 0.05 {
+                warnings.append("only the \(x.direction == "before" ? "first" : "last") \(Pricing.trimNum(m.sourceMax)) s of the clip are sent to continue from")
+            }
+            if pick.method == "frame" { warnings.append(x.direction == "before" ? "ends on the clip’s first frame" : "continues from the clip’s last frame") }
+            if pick.seconds != r.duration { warnings.append("length set to \(pick.seconds) s (this quality makes \(m.minSeconds)–\(m.maxSeconds) s)") }
         case "recast", "swap":
             guard let id = r.clipId, let clip = suiteClip(id) else { throw ApiError("not_found", "Clip not found") }
             if mode == "recast" {
@@ -118,6 +176,16 @@ extension FakeMuseAPI {
             e.engine = SuiteEngine(model: p.model, name: p.name, provider: p.provider, resolution: p.resolution, perSec: p.perSec, billedPerTake: seconds, test: true)
         }
         return e
+    }
+
+    /// Extend's source length: a take of this studio by its stored key (its own length), else a demo upload (`seconds`).
+    func extendSourceSeconds(_ v: SuiteVideoRef) throws -> Double {
+        guard let key = v.key ?? SuiteKeys.key(fromUrl: v.url), SuiteKeys.isAccepted(key) else {
+            throw ApiError("bad_request", "Extend needs a take, clip or upload of this studio")
+        }
+        if let t = takes.first(where: { ($0.mediaKey ?? SuiteKeys.key(fromUrl: $0.videoUrl)) == key }) { return t.durationSec ?? v.seconds ?? 0 }
+        if key.hasPrefix("c/demo_") { return v.seconds ?? 0 }
+        throw ApiError("bad_request", "That video isn’t in this studio")
     }
 
     static func whoWords(_ m: CastMember, index: Int) -> String {
@@ -185,7 +253,7 @@ extension FakeMuseAPI {
         let lead = req.modelId ?? req.cast?.first?.characterId
         let m = lead.flatMap { id in models.first { $0.id == id } }
         let outfitId = req.outfitId ?? req.cast?.first?.outfitId ?? ""
-        let title = req.title ?? (e.mode == "recast" ? "Recast" : m.map { "\($0.name) · shot" } ?? "Shot")
+        let title = req.title ?? (e.mode == "recast" ? "Recast" : e.mode == "extend" ? "Extend" : m.map { "\($0.name) · shot" } ?? "Shot")
         var jr = JobRequest(title: title, modelId: lead ?? "", outfitId: outfitId, clipId: req.clipId ?? "", engine: "suite", steps: Pricing.stepsDefault,
                             use: ClipUse.full.rawValue, takes: req.takes, keepAudio: req.keepAudio ?? true, clipSeconds: e.seconds, quality: e.quality, speaking: req.speaking)
         jr.speakingSource = req.speaking == nil ? "default" : "switch"
@@ -195,6 +263,12 @@ extension FakeMuseAPI {
                     seed: Int64.random(in: 1000...99999), thumb: outfits.first { $0.id == outfitId }?.front ?? m?.cover)
         j.engineText = e.label
         if let look = e.look { suiteLooks[j.id] = look }
+        if e.mode == "extend", let x = req.extend {
+            // The take is the whole longer clip: source + extension (or the new part alone with join: false).
+            let source = try extendSourceSeconds(x.video)
+            suiteTakeSeconds[j.id] = x.join == false ? e.seconds : source + e.seconds
+            if let k = x.video.key, let t = takes.first(where: { $0.mediaKey == k || SuiteKeys.key(fromUrl: $0.videoUrl) == k }) { j.thumb = t.thumb }
+        }
         return try enqueueSuiteJob(j)
     }
 
