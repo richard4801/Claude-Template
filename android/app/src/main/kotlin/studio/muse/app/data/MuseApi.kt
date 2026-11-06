@@ -177,6 +177,22 @@ interface MuseApi {
     suspend fun uploadEditorFile(file: java.io.File, contentType: String, purpose: String? = null, onProgress: (Float) -> Unit = {}): String =
         throw ApiException("unsupported", "Uploading files needs the studio server")
 
+    // Edit sessions (workstream 3, plans/api.md "Edit sessions"), owner only. Defaults: not available (local editing only).
+    /** The take's open session, or a new one (from [OpenEditSessionRequest.project] when sent, else the take's saved edit). */
+    suspend fun openEditSession(req: OpenEditSessionRequest): EditSessionDto = throw ApiException("unsupported", "Editing with Claude needs the studio server")
+    suspend fun editSession(id: String): EditSessionDto = throw ApiException("not_found", "Edit session not found")
+    /** A local change as a JSON Patch against [EditPatchRequest.baseRevision]; `stale_revision` when the session moved on. */
+    suspend fun pushEditPatch(id: String, req: EditPatchRequest): EditChangeResult = throw ApiException("unsupported", "Editing with Claude needs the studio server")
+    /** Undoes one history entry (anyone's) as a new change. */
+    suspend fun undoEditEntry(id: String, req: EditUndoRequest): EditChangeResult = throw ApiException("unsupported", "Editing with Claude needs the studio server")
+    suspend fun editPresence(id: String, presence: EditPresence) {}
+    suspend fun leaveEditSession(id: String, device: String) {}
+    /** A PNG of a frame Claude asked for, uploaded with the image presign (`POST /v1/uploads/presign {kind:"image"}` + PUT): the upload id. */
+    suspend fun uploadEditFrame(png: ByteArray): String = throw ApiException("unsupported", "Uploading frames needs the studio server")
+    suspend fun answerEditFrame(id: String, requestId: String, uploadId: String) {}
+    suspend fun answerEditRequest(id: String, requestId: String, answer: EditRequestAnswer) {}
+    suspend fun answerEditPending(id: String, pendingId: String, approve: Boolean): EditPending = throw ApiException("not_found", "Waiting request not found")
+
     // AI suite (workstream 1, plans/api.md "AI suite"). Members never get engine names back; the owner does.
     suspend fun suiteCatalog(): SuiteCatalog = throw ApiException("not_found", "This server doesn't have the AI suite yet")
     suspend fun suiteEstimate(req: SuiteShotRequest): SuiteEstimate = throw ApiException("not_found", "This server doesn't have the AI suite yet")

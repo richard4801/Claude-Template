@@ -26,14 +26,16 @@ enum class EditTool(val label: String, val icon: String, val panel: Panel) {
 /** The bottom sheets. Speed, transform and export open from inside other panels / the top bar. */
 enum class Panel(val title: String) {
     EDIT("Edit"), SPEED("Speed"), TRANSFORM("Transform & keyframes"), AUDIO("Audio"), TEXT("Text & hooks"), CAPTIONS("Captions"),
-    EFFECTS("Effects"), FILTERS("Filters"), OVERLAY("Overlay"), RATIO("Ratio"), EXPORT("Export");
+    EFFECTS("Effects"), FILTERS("Filters"), OVERLAY("Overlay"), RATIO("Ratio"), EXPORT("Export"),
+    /** Edit sessions (workstream 3): the shared history (Claude's changes badged), owner only. */
+    HISTORY("History");
 
     /** The tool lit in the tool row while this panel is open. */
     val tool: EditTool?
         get() = when (this) {
             EDIT, SPEED, TRANSFORM -> EditTool.EDIT
             AUDIO -> EditTool.AUDIO; TEXT -> EditTool.TEXT; CAPTIONS -> EditTool.CAPTIONS; EFFECTS -> EditTool.EFFECTS
-            FILTERS -> EditTool.FILTERS; OVERLAY -> EditTool.OVERLAY; RATIO -> EditTool.RATIO; EXPORT -> null
+            FILTERS -> EditTool.FILTERS; OVERLAY -> EditTool.OVERLAY; RATIO -> EditTool.RATIO; EXPORT, HISTORY -> null
         }
 }
 
@@ -67,6 +69,31 @@ enum class BeatMarks { ALL, STRONG }
 
 /** One take the Edit home or the Overlay panel can open / add (a render or an edited version). */
 data class TakeChoice(val id: String, val title: String, val label: String, val thumb: ImageRef?, val durationSec: Double?, val edited: Boolean, val hasVideo: Boolean)
+
+/**
+ * Edit sessions (workstream 3, plans/claude-editing.md A): what the owner's editor shows about the session it shares
+ * with Claude. [history] is newest first (the server's entries; Claude's carry `byClaude`); [pending] are paid helpers
+ * Claude asked for, waiting for the owner's yes; [claudeNote] is the "Claude edited this" line ("Claude · Trimmed …").
+ */
+data class SessionUi(
+    val id: String,
+    val revision: Int = 0,
+    val history: List<studio.muse.app.data.EditHistoryEntry> = emptyList(),
+    val pending: List<studio.muse.app.data.EditPending> = emptyList(),
+    val claudeNote: String? = null,
+    /** The Claude panel (tablet) / sheet (phone) is open. */
+    val chatOpen: Boolean = false,
+    /** An answer to a pending ask is on its way. */
+    val answering: String? = null,
+) {
+    /** The first paid helper waiting for the owner. */
+    val asking: studio.muse.app.data.EditPending? get() = pending.firstOrNull { it.status == "waiting" && it.id != answering }
+    /** Claude's recent changes and looks (the Claude panel). */
+    val claudeEntries: List<studio.muse.app.data.EditHistoryEntry> get() = history.filter { it.byClaude }
+}
+
+/** "about $0.04" for a paid helper Claude asks to run (never a provider or model). */
+fun aboutUsd(usd: Double): String = "about $" + String.format(java.util.Locale.ROOT, "%.2f", usd)
 
 /** A look in the picker. */
 data class LookChoice(val id: String, val name: String, val category: String)
@@ -118,6 +145,8 @@ data class EditSuiteUi(
     val reopened: Boolean = false,
     /** Export finished and saved: the new version's take id. */
     val savedTakeId: String? = null,
+    /** Edit sessions (workstream 3): the live session shared with Claude; null for members and when offline/local only. */
+    val session: SessionUi? = null,
 ) {
     val duration: Double get() = project?.let(::durationSec) ?: 0.0
     val ready: Boolean get() = phase == SuitePhase.Ready && project != null

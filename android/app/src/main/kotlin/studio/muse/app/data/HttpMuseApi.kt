@@ -151,6 +151,16 @@ interface MuseService {
     @DELETE("v1/editor/jobs/{id}") suspend fun cancelEditorJob(@Path("id") id: String): retrofit2.Response<Unit>
     @POST("v1/takes/{id}/versions") suspend fun createVersionV2(@Path("id") id: String, @Body r: TakeVersionV2Request): Take
     @POST("v1/editor/uploads/presign") suspend fun editorPresign(@Body r: EditorPresignRequest): PresignResponse
+    // Edit sessions (workstream 3)
+    @POST("v1/edit-sessions") suspend fun openEditSession(@Body r: OpenEditSessionRequest): EditSessionDto
+    @GET("v1/edit-sessions/{id}") suspend fun editSession(@Path("id") id: String): EditSessionDto
+    @POST("v1/edit-sessions/{id}/patch") suspend fun pushEditPatch(@Path("id") id: String, @Body r: EditPatchRequest): EditChangeResult
+    @POST("v1/edit-sessions/{id}/undo") suspend fun undoEditEntry(@Path("id") id: String, @Body r: EditUndoRequest): EditChangeResult
+    @POST("v1/edit-sessions/{id}/presence") suspend fun editPresence(@Path("id") id: String, @Body r: EditPresence): JsonObject
+    @DELETE("v1/edit-sessions/{id}/presence/{device}") suspend fun leaveEditSession(@Path("id") id: String, @Path("device") device: String): retrofit2.Response<Unit>
+    @POST("v1/edit-sessions/{id}/frames/{rid}") suspend fun answerEditFrame(@Path("id") id: String, @Path("rid") rid: String, @Body r: EditFrameAnswer): JsonObject
+    @POST("v1/edit-sessions/{id}/requests/{rid}") suspend fun answerEditRequest(@Path("id") id: String, @Path("rid") rid: String, @Body r: EditRequestAnswer): JsonObject
+    @POST("v1/edit-sessions/{id}/pending/{pid}") suspend fun answerEditPending(@Path("id") id: String, @Path("pid") pid: String, @Body r: EditPendingAnswer): EditPending
 
     // AI suite (workstream 1)
     @GET("v1/suite/catalog") suspend fun suiteCatalog(): SuiteCatalog
@@ -378,6 +388,19 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         putToStorage(p, FileProgressBody(file, contentType.toMediaType(), onProgress))
         return p.uploadId
     }
+
+    // Edit sessions (workstream 3)
+    override suspend fun openEditSession(req: OpenEditSessionRequest) = call { openEditSession(req) }
+    override suspend fun editSession(id: String) = call { editSession(id) }
+    override suspend fun pushEditPatch(id: String, req: EditPatchRequest) = call { pushEditPatch(id, req) }
+    override suspend fun undoEditEntry(id: String, req: EditUndoRequest) = call { undoEditEntry(id, req) }
+    override suspend fun editPresence(id: String, presence: EditPresence) { call { editPresence(id, presence) } }
+    override suspend fun leaveEditSession(id: String, device: String) { call { leaveEditSession(id, device) } }
+    /** Always the image presign + PUT (the server checks the upload is an image of the studio; no confirm step). */
+    override suspend fun uploadEditFrame(png: ByteArray): String = putPresigned("image", "image/png", png) {}
+    override suspend fun answerEditFrame(id: String, requestId: String, uploadId: String) { call { answerEditFrame(id, requestId, EditFrameAnswer(uploadId)) } }
+    override suspend fun answerEditRequest(id: String, requestId: String, answer: EditRequestAnswer) { call { answerEditRequest(id, requestId, answer) } }
+    override suspend fun answerEditPending(id: String, pendingId: String, approve: Boolean) = call { answerEditPending(id, pendingId, EditPendingAnswer(approve)) }
 
     override suspend fun warmGpu() = call { warmGpu() }
     override suspend fun setWarmGpu(req: WarmRequest) = call { setWarmGpu(req) }
