@@ -25,7 +25,7 @@ The four approved themes stay, and each keeps its personality. What changes is t
 | `positive` · `caution` · `danger` | state only, never decoration | #2F6B3A · #8A5200 · #B5121B | #7BD88F · #F2C14E · #FF6B5E | #4E6B45 · #7F5418 · #A8382F | #0E7A45 · #9A4D00 · #C8102E |
 
 **Contrast, checked:**
-- **Text:** `ink` on `canvas` is 11.8–17.7:1. `ink2` on `canvas`, `raised` and `field` is ≥ 4.8:1 in every theme. Every `onAction` on its `action` is ≥ 6.0:1. `positive`, `caution` and `danger` on `canvas` are ≥ 4.6:1.
+- **Text:** `ink` on `canvas` is 11.8–17.7:1. `ink2` on `canvas`, `raised` and `field` is ≥ 4.8:1 in every theme. Every `onAction` on its `action` is ≥ 5.9:1 (Soft Tactile, white on #4E6B45, is the lowest at 5.98:1; the token tests assert AA, 4.5:1). `positive`, `caution` and `danger` on `canvas` are ≥ 4.6:1.
 - **Creator Pop's pink** is 2.2:1 on its canvas, so it is only ever a fill under `ink` text. In D, text links use the cobalt link colour, and the selection outline is `ink`.
 - **Hairlines** are 1.1–1.5:1, which is below the 3:1 UI minimum. So a hairline never carries meaning on its own: a selected or required state always uses `accent` or `ink`.
 
