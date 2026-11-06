@@ -432,18 +432,18 @@
    "id": "webcam",
    "label": "Webcam",
    "description": "Laptop webcam look, flat and close",
-   "render": "body-08-phone",
+   "render": "body-11-webcam",
    "name": "Webcam",
-   "caption": "Laptop webcam · flat light · video call",
+   "caption": "Webcam · wide · flat light · video-call look",
    "visible": true
   },
   {
    "id": "security_cam",
    "label": "CCTV",
    "description": "High-angle surveillance look",
-   "render": "body-09-dv-camcorder",
+   "render": "body-12-cctv",
    "name": "CCTV",
-   "caption": "Security camera · high corner · wide",
+   "caption": "Security cam · high fixed angle · muted colour",
    "visible": true
   }
  ],
@@ -504,9 +504,9 @@
    "id": "swirl",
    "label": "Swirl bokeh",
    "description": "Petzval-style swirling background",
-   "render": "lens-04-warm-vintage",
+   "render": "lens-09-swirl",
    "name": "Swirl Bokeh",
-   "caption": "Petzval look · swirling background",
+   "caption": "Petzval-style portrait · swirling background",
    "visible": true
   },
   {
@@ -522,8 +522,8 @@
    "id": "tilt_shift",
    "label": "Tilt-shift",
    "description": "Miniature-looking focus band",
-   "render": "lens-06-macro",
-   "name": "Tilt-Shift",
+   "render": "lens-10-tilt-shift",
+   "name": "Tilt-shift",
    "caption": "Slanted focus band · miniature look",
    "visible": true
   },
