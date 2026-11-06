@@ -106,7 +106,7 @@ public struct SwapAddOnPill: Hashable, Sendable, Identifiable {
 
 public enum SwapAddOns {
     public static func pills(_ f: VideoFeatures, clipSeconds: Double?, takes: Int = 1, lipSync: Bool = false) -> [SwapAddOnPill] {
-        f.shownAddons.map { a in
+        f.shownAddons.map { a -> SwapAddOnPill in
             let q = a.videoQuality
             let price: Double? = q.map { Pricing.totalCost(RenderSpec.addOn($0, clipSeconds: clipSeconds, takes: takes, lipSync: lipSync)) }
                 ?? a.sizes.filter(\.available).compactMap(\.price).min()

@@ -84,7 +84,7 @@ final class SuiteComposerExtrasTests: XCTestCase {
         XCTAssertEqual(up.priceText, "Soon")
         // Fast · beta shows only when the server has it.
         var off = f
-        off.addons = off.addons.map { var a = $0; if a.id == "fast" { a.available = false }; return a }
+        off.addons = off.addons.map { a0 -> AddonOption in var a = a0; if a.id == "fast" { a.available = false }; return a }
         XCTAssertEqual(SwapAddOns.pills(off, clipSeconds: 7).map(\.id), ["edit", "upscale"])
     }
 
@@ -151,7 +151,7 @@ final class SuiteComposerExtrasTests: XCTestCase {
         XCTAssertEqual(json, #"{"format":"grwm"}"#)
         // The wheel: Auto first, then the formats.
         let wheel = ComposerWheels.formats(cat)
-        XCTAssertEqual(wheel.first?.value, nil)
+        XCTAssertNil(wheel.first?.value)
         XCTAssertEqual(wheel.count, 9)
         XCTAssertEqual(Wheel.index(of: "haul", in: wheel), 6)
     }
