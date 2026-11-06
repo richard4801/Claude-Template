@@ -289,7 +289,7 @@ describe.skipIf(!hasFfmpeg)('AI suite · Shot API on the mock provider', () => {
     expect(m.tiers[0].inputs).toMatchObject({ start: true, end: true, images: 6, videos: 3, audio: true });
     expect(m.tiers.map((t: any) => [t.minSeconds, t.maxSeconds])).toEqual([[2, 15], [2, 30], [3, 30], [3, 30]]);
     expect(m.tools).toEqual([{ id: 'shot', available: true }, { id: 'swap', available: true }, { id: 'recast', available: true }, { id: 'storyboard', available: true },
-      { id: 'talking', available: true }, { id: 'ugc_ad', available: true }, { id: 'extend', available: false, comingSoon: true }]);
+      { id: 'talking', available: true }, { id: 'ugc_ad', available: true }, { id: 'extend', available: true }]);
     expect(o.tiers[0].models[0].inputs).toEqual({ start: true, end: true, middle: 0, images: 6, videos: 3, audio: true, framesWithRefs: true });
   });
 

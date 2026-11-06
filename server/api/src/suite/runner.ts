@@ -6,9 +6,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { and, eq } from 'drizzle-orm';
 import type { Ctx } from '../ctx.js';
-import { clips, jobs, uploads, type ImageRef } from '../db/schema.js';
+import { clips, jobs, takes, uploads, type ImageRef } from '../db/schema.js';
 import { ReplicateError } from '../replicate/client.js';
-import { mediaToolsAvailable, probe, restoreAudio, stripAudio, thumbnail } from '../replicate/media.js';
+import { mediaToolsAvailable, probe, restoreAudio, stripAudio, thumbnail, type MediaInfo } from '../replicate/media.js';
+import { frameOf, joinClips, segment } from './extendMedia.js';
 import { pipeline } from 'node:stream/promises';
 import { failureOf } from '../services/replicateVideo.js';
 import { beatOnlyAudio } from '../audio/beat.js';
@@ -91,7 +92,8 @@ export class SuiteRunner {
     if (key) {
       const [row] = await this.ctx.db.select({ id: uploads.id }).from(uploads).where(and(eq(uploads.storageKey, key), eq(uploads.studioId, studioId)));
       const clip = row ? null : (await this.ctx.db.select({ id: clips.id }).from(clips).where(and(eq(clips.storageKey, key), eq(clips.studioId, studioId))))[0];
-      if (!row && !clip && !key.startsWith('assets/')) throw new ReplicateError('a video is not in this studio', 'failed');
+      const take = row || clip ? null : (await this.ctx.db.select({ id: takes.id }).from(takes).where(and(eq(takes.mediaKey, key), eq(takes.studioId, studioId))))[0];
+      if (!row && !clip && !take && !key.startsWith('assets/')) throw new ReplicateError('a video is not in this studio', 'failed');
       return this.ctx.storage.presignGet(key, ttl);
     }
     if (v.url && /^https:\/\//.test(v.url)) return v.url;
@@ -156,6 +158,32 @@ export class SuiteRunner {
           }
         } else urls.audio = await this.videoUrl(plan.audioRef.ref, job.studioId);
       }
+      // Extend: the part of the source the model continues from, or the bridge frame (the source itself stays whole for the join).
+      let source: { file: string; info: MediaInfo } | undefined;
+      const ex = plan.extend;
+      if (ex) {
+        await report(1, 0.02, 'Preparing the clip');
+        const file = path.join(tmp, 'extend_source.mp4');
+        const obj = await ctx.storage.get(ex.source.key);
+        if (!obj) throw new ReplicateError('the clip to extend is missing', 'failed');
+        await pipeline(obj.body, fs.createWriteStream(file));
+        source = { file, info: await probe(c.FFPROBE_PATH, file) };
+        const put = async (name: string, f: string, contentType: string) => {
+          const key = `s/${job.id}/${name}`;
+          await putFile(ctx, { key, file: f, studioId: job.studioId, kind: 'output', userId: job.userId, contentType });
+          return ctx.storage.presignGet(key, c.REPLICATE_INPUT_URL_TTL_SEC);
+        };
+        if (ex.method === 'frame') {
+          const f = path.join(tmp, 'bridge.jpg');
+          await frameOf(c.FFMPEG_PATH, file, f, ex.direction === 'after' ? 'last' : 'first', source.info);
+          const url = await put('bridge.jpg', f, 'image/jpeg');
+          if (ex.direction === 'after') urls.start = url; else urls.end = url;
+        } else if (ex.useSeconds < source.info.duration - 0.05) {
+          const f = path.join(tmp, 'source_part.mp4');
+          await segment(c.FFMPEG_PATH, file, f, ex.useSeconds, ex.direction === 'after' ? 'end' : 'start', source.info);
+          urls.videos = [await put('source_part.mp4', f, 'video/mp4')];
+        }
+      }
       const input = buildInput(model, { ...plan, prompt }, urls);
       const takes: TakeState[] = prior.map(x => ({ ...x }));
       const outputs: Record<string, unknown>[] = [], billed: number[] = [];
@@ -197,6 +225,26 @@ export class SuiteRunner {
           const si = await probe(c.FFPROBE_PATH, src);
           if (si.audioCodec) await restoreAudio(c.FFMPEG_PATH, raw, src, take, si.audioCodec); else await fs.promises.copyFile(raw, take);
         } else if (!plan.audio && model.audio === 'always') await stripAudio(c.FFMPEG_PATH, raw, take); else await fs.promises.copyFile(raw, take);
+        let extension: Record<string, unknown> | undefined;
+        if (ex && source && ex.join) {
+          // One take: source then extension (after) or extension then source (before). The extension alone is kept too.
+          const ext = { file: path.join(tmp, `extension_${i}.mp4`), info: await probe(c.FFPROBE_PATH, take) };
+          await fs.promises.rename(take, ext.file);
+          let head: { file: string; info: MediaInfo } | null = source;
+          // ⚠ unverified: a continuation model may return the clip it continued from plus the new part (longer than asked).
+          if (ex.method === 'clip' && ex.direction === 'after' && ext.info.duration > plan.seconds + 1) {
+            const keep = source.info.duration - ex.useSeconds;
+            if (keep < 0.2) head = null;
+            else { const f = path.join(tmp, 'source_head.mp4'); await segment(c.FFMPEG_PATH, source.file, f, keep, 'start', source.info); head = { file: f, info: await probe(c.FFPROBE_PATH, f) }; }
+          }
+          if (!head) await fs.promises.copyFile(ext.file, take);
+          else if (ex.direction === 'after') await joinClips(c.FFMPEG_PATH, head, ext, take, source.info);
+          else await joinClips(c.FFMPEG_PATH, ext, head, take, source.info);
+          const extKey = `s/${job.id}/extension_${i}.mp4`;
+          const stored = await putFile(ctx, { key: extKey, file: ext.file, studioId: job.studioId, kind: 'output', userId: job.userId, contentType: 'video/mp4' });
+          extension = { name: `extension_${i}.mp4`, key: extKey, contentType: 'video/mp4', bytes: stored.bytes, durationSec: Math.round(ext.info.duration * 1000) / 1000 };
+          fs.rmSync(ext.file, { force: true });
+        }
         const info = await probe(c.FFPROBE_PATH, take);
         await thumbnail(c.FFMPEG_PATH, take, thumb, Math.min(1, info.duration / 2));
         const key = `s/${job.id}/take_${i}.mp4`, thumbKey = `s/${job.id}/take_${i}.jpg`;
@@ -209,6 +257,7 @@ export class SuiteRunner {
         ts.done = true; ts.key = key;
         await this.save(job.id, takes);
         outputs.push(ts.output); billed.push(ts.billed);
+        if (extension) outputs.push(extension);
         for (const f of [raw, take, thumb]) fs.rmSync(f, { force: true });
       }
       // Settle: price × billed seconds (+ fixed extras); the mock charges nothing unless SUITE_MOCK_CHARGE.
@@ -216,7 +265,7 @@ export class SuiteRunner {
       const actual = mock && !c.SUITE_MOCK_CHARGE ? 0 : exact;
       const fresh = ((await ctx.db.select({ stats: jobs.stats }).from(jobs).where(eq(jobs.id, job.id)))[0]?.stats ?? {}) as Record<string, any>;
       await ctx.jobs.complete(job.id, {
-        outputs, actualCostUsd: actual, settleNote: `${shotNote(plan.tier, plan.resolution, outputs.map(o => Number(o.durationSec) || plan.seconds), plan.mode === 'recast' ? 'Recast' : 'Shot')}${mock ? ' · test render' : ''}`,
+        outputs, actualCostUsd: actual, settleNote: `${shotNote(plan.tier, plan.resolution, outputs.map(o => Number(o.durationSec) || plan.seconds), plan.mode === 'recast' ? 'Recast' : plan.mode === 'extend' ? 'Extend' : 'Shot')}${mock ? ' · test render' : ''}`,
         stats: { ...fresh, suite: { ...(fresh.suite ?? {}), takes, billedSeconds: billed.reduce((a, b) => a + b, 0), exactCost: exact, separationCost } },
       });
     } catch (e) {

@@ -37,6 +37,13 @@ export type ModelSpec = {
    * are kept; `keepsAudio` = the source sound comes back (else MUSE puts it back by stream copy); `refsPerPerson` =
    * images per new person; `faceCrops` = a crop of who to replace can be sent; `sourceSeconds` = clip length range.
    */
+  /**
+   * Extend (a longer take from a finished one): how the model continues a source clip. `clip` = it takes the clip and
+   * continues it (Wan 2.7 i2v first_clip); `reference` = the clip as a reference video, extension asked in the prompt
+   * (Seedance 2.5 [Video1]); `frame` = a frame bridge: the source's last frame as the start image (after) or its first
+   * frame as the end image (before). `sourceSeconds` = the source length the model takes (longer sources are trimmed).
+   */
+  extend?: { after?: 'clip' | 'reference' | 'frame'; before?: 'reference' | 'frame'; sourceSeconds: [number, number] };
   recast?: { maxPeople: number; keepsCuts: boolean; keepsAudio: boolean; refsPerPerson: number; totalImages: number; faceCrops: boolean; sourceSeconds: [number, number]; maxShotSeconds?: number };
   frames: { start: boolean; end: boolean; middle: number; /** frames and references can be combined */ withRefs: boolean };
   refs: { images: number; videos: number; audios: number; /** all images (frames + refs) together */ totalImages?: number; videoSecondsMax?: number; videoSecondsMin?: number };
@@ -98,6 +105,8 @@ export const MODELS: ModelSpec[] = [
     resolutions: [R('720p', '720p', 720, 0.157, { perSecWithVideo: 0.094 }), R('1080p', '1080p', 1080, 0.235, { perSecWithVideo: 0.141 })],
     aspectRatios: ['9:16', '16:9', '1:1', '21:9'], audio: 'always', negativePrompt: false, seed: false,
     camera: { vocab: 'kling', refStyle: 'at', referenceVideo: true }, lora: false, promptMax: 26000,
+    // Extend by a frame bridge (base_video is an edit that keeps the length, not an extension). ⚠ end_image alone unverified.
+    extend: { after: 'frame', before: 'frame', sourceSeconds: [0.5, 600] },
     licence: hosted('Kling (hosted)'), status: 'active',
     notes: 'With a video input, billed seconds = output + the longer of the input videos or the output.' },
   { id: 'kling-v3-omni', name: 'Kling 3.0 Omni', provider: 'replicate', ref: 'kwaivgi/kling-v3-omni-video', adapter: 'kling-v3-omni',
@@ -122,6 +131,8 @@ export const MODELS: ModelSpec[] = [
     resolutions: [R('480p', '480p', 480, 0.1028, { perSecWithVideo: 0.4304 }), R('720p', '720p', 720, 0.2312, { perSecWithVideo: 0.9676 })],
     aspectRatios: AR_FULL, audio: 'flag', negativePrompt: false, seed: true,
     camera: { vocab: 'seedance', refStyle: 'bracket', referenceVideo: true }, lora: false,
+    // Extend: reference_videos are documented "for motion transfer, style reference, editing, and extension" ([Video1]); ≤ 30 s combined.
+    extend: { after: 'reference', before: 'reference', sourceSeconds: [2, 30] },
     licence: hosted('Seedance (hosted)', { notes: 'May refuse realistic faces as references.' }), status: 'active',
     notes: 'Video references cost about 4× the no-video price.' },
   // ---------------------------------------------------------------- Veo (Replicate)
@@ -137,6 +148,8 @@ export const MODELS: ModelSpec[] = [
     refs: { images: 5, videos: 3, audios: 0 }, duration: { min: 2, max: 15 },
     resolutions: [R('720p', '720p', 720, 0.10), R('1080p', '1080p', 1080, 0.10)], aspectRatios: ['9:16', '16:9', '1:1', '4:3', '3:4'],
     audio: 'always', negativePrompt: true, seed: true, camera: { vocab: 'wan', refStyle: 'none', referenceVideo: false }, lora: false,
+    // Extend after: i2v first_clip "Video clip to continue from (2–10 s)" (the last 10 s of a longer source).
+    extend: { after: 'clip', sourceSeconds: [2, 10] },
     licence: hosted('Wan (hosted)'), status: 'active',
     notes: 'i2v is $0.15/s at 1080p (priced per endpoint in the estimator); r2v max 10 s; r2v reference videos are identity, not camera; i2v has no aspect ratio.' },
   // ---------------------------------------------------------------- LTX-2.3 Pro (Replicate): the only camera enum
@@ -199,11 +212,20 @@ export const RECAST_LADDER: Record<Tier, LadderStep[]> = {
   cinema: [{ model: 'h3-max-recast', resolution: '1080P' }, { model: 'kling-v4', resolution: '1080p' }, { model: 'kling-o1', resolution: '1080p' }],
 };
 
+/** Extend: per tier, models that can continue a clip, best first (a true continuation before a frame bridge). */
+export const EXTEND_LADDER: Record<Tier, LadderStep[]> = {
+  draft: [{ model: 'wan-2.7', resolution: '720p' }, { model: 'seedance-2.5', resolution: '480p' }, { model: 'kling-v4', resolution: '720p' }],
+  standard: [{ model: 'seedance-2.5', resolution: '480p' }, { model: 'wan-2.7', resolution: '1080p' }, { model: 'kling-v4', resolution: '720p' }],
+  hd: [{ model: 'seedance-2.5', resolution: '720p' }, { model: 'wan-2.7', resolution: '1080p' }, { model: 'kling-v4', resolution: '1080p' }],
+  cinema: [{ model: 'seedance-2.5', resolution: '720p' }, { model: 'kling-v4', resolution: '1080p' }, { model: 'wan-2.7', resolution: '1080p' }],
+};
+
 /** The model used by the mock provider when SUITE_MODE=mock picks nothing better (it can do everything). */
 export const MOCK_MODEL: ModelSpec = {
   id: 'mock', name: 'Test renderer (no spend)', provider: 'mock', ref: 'mock/video', adapter: 'mock',
   modes: { text: true, image: true, reference: true, guide: true }, frames: { start: true, end: true, middle: 8, withRefs: true },
   refs: { images: 10, videos: 5, audios: 3 }, duration: { min: 2, max: 30 }, resolutions: [R('720p', '720p', 720, 0)], aspectRatios: AR_FULL,
+  extend: { after: 'clip', before: 'frame', sourceSeconds: [0.5, 600] },
   audio: 'flag', negativePrompt: true, seed: true, camera: { vocab: 'generic', refStyle: 'angle', referenceVideo: true }, lora: false,
   licence: hosted('Test'), status: 'active',
 };

@@ -8,7 +8,7 @@ import { and, eq, gte, ne, sql } from 'drizzle-orm';
 import { detectTalking } from '../audio/detect.js';
 import { resolveSpeaking } from '../audio/service.js';
 import type { AuthUser, Ctx } from '../ctx.js';
-import { clips, jobs, models, outfits, uploads, type ImageRef } from '../db/schema.js';
+import { clips, jobs, models, outfits, takes, uploads, type ImageRef } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
 import { dayStart, round2 } from '../lib/util.js';
 import * as P from '../pricing.js';
@@ -16,10 +16,11 @@ import { replicateReferencesFor } from '../services/jobs.js';
 import { cameraCatalog, CameraSpecSchema, resolvePreset } from './camera.js';
 import { shotLook } from './looks.js';
 import { compileCamera } from './compile.js';
+import { buildExtendPlan, pickExtend } from './extend.js';
 import { buildRecastPlan, pickRecast } from './recast.js';
 import { buildPlan, needOf, pickModel, shotLabel, ShotRequestSchema, type Character, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
 import { FalProvider, MockProvider, ReplicateProvider, type VideoProvider } from './providers.js';
-import { DEFAULT_LADDER, inputSlotsOf, MODELS, modelById, modelView, MOCK_MODEL, TIER_INFO, TIERS, type ProviderId, type Tier } from './registry.js';
+import { DEFAULT_LADDER, EXTEND_LADDER, inputSlotsOf, MODELS, modelById, modelView, MOCK_MODEL, TIER_INFO, TIERS, type ProviderId, type Tier } from './registry.js';
 import { SuiteRunner } from './runner.js';
 import { suiteSettings } from './schema.js';
 
@@ -142,12 +143,13 @@ export class SuiteService {
       return u.role === 'owner' ? { ...base, models: usable.map(x => ({ model: x.m!.id, name: x.m!.name, resolution: x.s.resolution, inputs: inputSlotsOf([x.m!]) })) } : base;
     });
     // Composer tools (plans/video-composer.md "Tools on the shell"): which the apps can offer now. Talking and UGC ad are
-    // shots (audio / product references); Extend & upscale has no engine yet.
+    // shots (audio / product references); Extend continues a finished take.
     const on = this.mode !== 'off', any = (f: (i: ReturnType<typeof inputSlotsOf>) => boolean) => tiers.some(t => t.available && f(t.inputs));
     const tools = [
       { id: 'shot', available: on }, { id: 'swap', available: on }, { id: 'recast', available: on }, { id: 'storyboard', available: on },
       { id: 'talking', available: on && any(i => i.audio) }, { id: 'ugc_ad', available: on && any(i => i.images > 0) },
-      { id: 'extend', available: false, comingSoon: true },
+      // Extend (suite/extend.ts): live when a tier has a model that continues clips. Upscale stays the take's add-on.
+      { id: 'extend', available: on && TIERS.some(t => EXTEND_LADDER[t].some(st => { const m = modelById(st.model); return !!m && avail.has(m.provider) && p.models?.[m.id]?.enabled !== false; })) },
     ];
     return { enabled: this.mode !== 'off', test: this.mode === 'mock', defaultQuality: 'draft', tiers, tools, modes: ['text', 'image', 'reference', 'swap', 'recast'], recastMaxPeople: 4,
       aspectRatios: ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'], takesMax: 4, camera: cameraCatalog() };
@@ -180,6 +182,7 @@ export class SuiteService {
     if (this.mode === 'off') throw new ApiError(400, 'engine_unavailable', "The AI suite isn't switched on yet");
     if (r.mode === 'swap') return { swap: true as const, ...(await this.swapEstimate(u, r)) };
     if (r.mode === 'recast' || r.cast?.length) return this.recastPlan(u, r);
+    if (r.mode === 'extend' || r.extend) return this.extendPlan(u, r);
     const prefs = await this.prefs(u.studioId);
     const character = await this.character(u.studioId, r.modelId, r.outfitId);
     const need = needOf(r, character);
@@ -203,6 +206,36 @@ export class SuiteService {
    * Recast (same take, new cast): up to 4 people in the source clip, each → a studio character. Speaking per person:
    * its switch; else, with one person, the clip's (switch → upload → detection); else unknown (the mouth follows the clip).
    */
+  /** Extend's source: a take, clip or upload in this studio, with its length (stored, else the client's `seconds`). */
+  private async extendSource(studioId: string, v: NonNullable<ShotRequest['extend']>['video']) {
+    const key = this.runner.storageKeyOf(v);
+    if (!key) throw badRequest('Extend needs a take, clip or upload of this studio');
+    const [t] = await this.ctx.db.select({ media: takes.media }).from(takes).where(and(eq(takes.mediaKey, key), eq(takes.studioId, studioId)));
+    if (t) return { key, seconds: Number((t.media as any)?.durationSec) || v.seconds || 0 };
+    const [c] = await this.ctx.db.select({ seconds: clips.durationSec }).from(clips).where(and(eq(clips.storageKey, key), eq(clips.studioId, studioId)));
+    if (c) return { key, seconds: c.seconds || v.seconds || 0 };
+    const [up] = await this.ctx.db.select({ id: uploads.id }).from(uploads).where(and(eq(uploads.storageKey, key), eq(uploads.studioId, studioId)));
+    if (up) return { key, seconds: v.seconds ?? 0 };
+    throw badRequest('That video isn’t in this studio');
+  }
+
+  private async extendPlan(u: AuthUser, r: ShotRequest) {
+    if (!r.extend) throw badRequest('Extend needs the video to continue (extend.video)');
+    const source = await this.extendSource(u.studioId, r.extend.video);
+    if (!(source.seconds > 0)) throw badRequest('Extend needs the video’s length (extend.video.seconds)');
+    const prefs = await this.prefs(u.studioId);
+    const need = { direction: r.extend.direction, sourceSeconds: source.seconds, seconds: r.duration, aspect: r.aspectRatio };
+    const pick = pickExtend(r.quality, need, { prefs, providers: this.available(), engineModel: r.engineModel, resolution: r.resolution });
+    if ('error' in pick) {
+      const e = new ApiError(400, 'nothing_fits', `${TIER_INFO[r.quality].label} can't extend this clip ${r.extend.direction === 'before' ? 'backwards' : 'forwards'} · try another quality or length`);
+      (e as any).tried = pick.tried;
+      throw e;
+    }
+    const texts = await this.ctx.prompts.texts(u.studioId);
+    const plan = buildExtendPlan(r, pick, source, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale });
+    return { swap: false as const, plan, pick: { ...pick, seconds: plan.seconds }, prefs, tried: pick.tried, talk: { speaking: false, source: 'default' as const } };
+  }
+
   private async recastPlan(u: AuthUser, r: ShotRequest) {
     if (!r.clipId) throw badRequest('Recast needs the source clip (clipId)');
     if (!r.cast?.length) throw badRequest('Recast needs a cast: who in the clip becomes which character');
@@ -292,7 +325,7 @@ export class SuiteService {
   estimateView(u: AuthUser, r: ShotRequest, plan: ShotPlan, caps: Awaited<ReturnType<SuiteService['checkCaps']>>, tried: { model: string; resolution: string; why: string }[]) {
     const res = plan.resolution.replace(/P$/, 'p');
     const base = {
-      quality: plan.tier, label: shotLabel(plan.tier, plan.resolution, plan.mode === 'recast' ? 'Recast' : 'Shot'), resolution: res, seconds: plan.seconds, takes: plan.takes, mode: plan.mode,
+      quality: plan.tier, label: shotLabel(plan.tier, plan.resolution, plan.mode === 'recast' ? 'Recast' : plan.mode === 'extend' ? 'Extend' : 'Shot'), resolution: res, seconds: plan.seconds, takes: plan.takes, mode: plan.mode,
       estimate: round2(plan.estimate), priceLine: `about ${P.money(plan.estimate)} · ${plan.seconds} s${plan.takes > 1 ? ` · ${plan.takes} takes` : ''}`,
       buttonLabel: `Generate · ${plan.seconds} s · ${P.money(plan.estimate)}${plan.takes > 1 ? ` · ${plan.takes} takes` : ''}`,
       caps, ok: caps.ok, code: caps.code, message: caps.message, warnings: [...plan.notes, ...plan.camera.notes], camera: { moves: plan.camera.moves, guideUsed: plan.camera.usesGuide },
@@ -338,7 +371,7 @@ export class SuiteService {
     if (!caps.ok) throw new ApiError(402, caps.code!, caps.message!);
     if (!(await this.runner.toolsReady())) throw new ApiError(400, 'engine_unavailable', "The AI suite isn't available right now");
     await this.checkMedia(u.studioId, plan);
-    const label = shotLabel(plan.tier, plan.resolution, plan.mode === 'recast' ? 'Recast' : 'Shot');
+    const label = shotLabel(plan.tier, plan.resolution, plan.mode === 'recast' ? 'Recast' : plan.mode === 'extend' ? 'Extend' : 'Shot');
     const request = {
       engine: 'suite', mode: plan.mode, quality: plan.tier, label, engineLabel: label, takeLabel: TIER_INFO[plan.tier].label, seconds: plan.seconds, takes: plan.takes, aspectRatio: plan.aspect, audio: plan.audio, speaking: p.talk.speaking, speakingSource: p.talk.source,
       prompt: r.prompt, direction: r.direction, camera: r.camera, frames: r.frames, references: r.references, modelId: r.modelId ?? plan.recast?.people[0]?.characterId, outfitId: r.outfitId,
@@ -373,7 +406,9 @@ export class SuiteService {
       if (v.video.key) {
         const [row] = await this.ctx.db.select({ id: uploads.id }).from(uploads).where(and(eq(uploads.storageKey, v.video.key), eq(uploads.studioId, studioId)));
         const [clip] = row ? [] : await this.ctx.db.select({ id: clips.id }).from(clips).where(and(eq(clips.storageKey, v.video.key), eq(clips.studioId, studioId)));
-        if (!row && !clip) throw badRequest('That video isn’t in this studio');
+        // Extend continues a finished take (its stored video).
+        const [take] = row || clip ? [] : await this.ctx.db.select({ id: takes.id }).from(takes).where(and(eq(takes.mediaKey, v.video.key), eq(takes.studioId, studioId)));
+        if (!row && !clip && !take) throw badRequest('That video isn’t in this studio');
       } else if (v.video.url && !/^https:\/\//.test(v.video.url) && !/\/uploads\//.test(v.video.url)) throw badRequest('Videos must be uploads or https links');
     }
   }

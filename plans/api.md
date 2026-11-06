@@ -1042,6 +1042,15 @@ ShotEstimate { quality, label /* "Shot · HD · 2K" */, resolution, seconds /* w
 | `GET /v1/suite/settings` (owner) | → <ul><li>`{mode, caps: {perJob, perDay}, spentToday}`</li><li>`ladder`, `defaultLadder`</li><li>`models[]`: the registry, each with `enabled`, `blocked`, `blockedReason`, `needsAck`, `configured` and `priceScale`</li><li>`providers: {replicate, fal, runpod}`</li></ul> |
 | `PATCH /v1/suite/settings` (owner) `{models?: {[id]: {enabled?, acknowledge?, priceScale? /* 0.5–3 */}}, ladder?: {[tier]: {model, resolution}[]} \| null, capPerJob? \| null, capPerDay? \| null}` | → the same. `409 model_blocked` for a model whose licence blocks new features, or one that was removed. |
 
+**Extend (composer, 2026-11-06; suite/extend.ts):** `POST /v1/suite/shots[/estimate]` with `mode: "extend"` and `extend: {video: VideoRef, direction: "after" | "before" (default after), join?: true}`, plus `duration` (the new part), `prompt` (what happens next or before), `quality` and `takes`.
+- **Source:** a take (`{key: take's stored video}`), clip or upload of this studio. Its length comes from the take or clip; for an upload, send `video.seconds`.
+- **Model:** the tier's extend ladder picks the first model that can continue the clip:
+  - Wan 2.7 `first_clip`: a true continuation, after only; it takes the last 10 s of a longer source.
+  - Seedance 2.5: the clip as `[Video1]`, after or before; about 4× price with video.
+  - A frame bridge on Kling 4.0: after starts on the source's last frame; before ends on its first frame.
+- **The take:** source + extension joined into one clip (after), or extension + source (before), unless `join: false`. The new part alone is kept as output `extension_<n>.mp4`.
+- **Labels:** `Extend · <Tier> · <res>`. `catalog.tools` lists `extend` as available when a tier can extend.
+
 **Look grading (composer):** shot requests take `gradeLook` (default true). The estimate and the job's `request` carry `look: {id, kind: "palette" | "stock", label, lut}` for the take: the chosen palette, else the film stock, presets included. It is null when nothing was chosen, for Recast, or when `gradeLook` is false. The Edit suite opens the take with that LUT applied as a reversible Look; `"palette:<id>"` LUTs come from `assets/lookpack/palettes/`.
 
 **Ledger notes:**

@@ -2093,6 +2093,96 @@
    "updatedBy": null
   },
   {
+   "key": "suite.extend.after",
+   "group": "suite",
+   "title": "Extend · after (video)",
+   "description": "Continue the source clip (models that take the clip itself).",
+   "kind": "text",
+   "default": "Continue {source} seamlessly from its last moment: same people, place, light, colour and camera style, no cut. Next: {direction}",
+   "current": "Continue {source} seamlessly from its last moment: same people, place, light, colour and camera style, no cut. Next: {direction}",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "source",
+     "description": "the source clip token",
+     "required": true
+    },
+    {
+     "name": "direction",
+     "description": "what happens next (or \"the action carries on naturally\")",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.extend.before",
+   "group": "suite",
+   "title": "Extend · before (video)",
+   "description": "The moments just before the source clip.",
+   "kind": "text",
+   "default": "Show the moments just before {source}, ending exactly where {source} begins: same people, place, light, colour and camera style, no cut. Before: {direction}",
+   "current": "Show the moments just before {source}, ending exactly where {source} begins: same people, place, light, colour and camera style, no cut. Before: {direction}",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "source",
+     "description": "the source clip token",
+     "required": true
+    },
+    {
+     "name": "direction",
+     "description": "what happens before (or \"the action leads naturally into it\")",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.extend.after.frame",
+   "group": "suite",
+   "title": "Extend · after (frame bridge)",
+   "description": "Models that continue from the source’s last frame.",
+   "kind": "text",
+   "default": "The shot starts exactly on the given first frame, the last moment of the previous shot, and continues it seamlessly: same people, place, light, colour and camera style. Next: {direction}",
+   "current": "The shot starts exactly on the given first frame, the last moment of the previous shot, and continues it seamlessly: same people, place, light, colour and camera style. Next: {direction}",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "direction",
+     "description": "what happens next",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "suite.extend.before.frame",
+   "group": "suite",
+   "title": "Extend · before (frame bridge)",
+   "description": "Models that end on the source’s first frame.",
+   "kind": "text",
+   "default": "The shot ends exactly on the given last frame, the first moment of the next shot, and leads into it seamlessly: same people, place, light, colour and camera style. Before: {direction}",
+   "current": "The shot ends exactly on the given last frame, the first moment of the next shot, and leads into it seamlessly: same people, place, light, colour and camera style. Before: {direction}",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "direction",
+     "description": "what happens before",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
    "key": "suite.shot.footer",
    "group": "suite",
    "title": "Shot · closing line",
