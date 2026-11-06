@@ -57,6 +57,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import studio.muse.app.ui.components.T
 import studio.muse.app.ui.screens.suite.SIc
+import studio.muse.app.ui.theme.MuseRoles
 import studio.muse.app.ui.theme.muse
 import studio.muse.core.RigDrumMath
 import kotlin.math.abs
@@ -75,6 +76,7 @@ import kotlin.math.roundToInt
 @Composable
 fun RigDrum(label: String, items: List<WheelItem>, selected: Int, onSelect: (WheelItem) -> Unit, modifier: Modifier = Modifier, rowHeight: Dp = 64.dp) {
     val m = muse
+    val bag = MuseRoles.bag   // the camera bag is dark in every theme (design tokens, §9)
     val n = items.size
     if (n == 0) return
     val loop = RigDrumMath.loops(n)
@@ -136,7 +138,7 @@ fun RigDrum(label: String, items: List<WheelItem>, selected: Int, onSelect: (Whe
 
     val item = items[shown]
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        T(label, m.type.body.copy(fontSize = 13.sp, lineHeight = 18.sp), m.t.muted, Modifier.padding(bottom = 6.dp), maxLines = 1)
+        T(label, m.type.body.copy(fontSize = 13.sp, lineHeight = 18.sp), bag.ink2, Modifier.padding(bottom = 6.dp), maxLines = 1)
         BoxWithConstraints(
             Modifier.fillMaxWidth().height(rowHeight * 5).clip(RoundedCornerShape(0.dp))
                 .semantics {
@@ -170,10 +172,10 @@ fun RigDrum(label: String, items: List<WheelItem>, selected: Int, onSelect: (Whe
             contentAlignment = Alignment.Center,
         ) {
             // The one selection mark: a band with hairlines.
-            Box(Modifier.fillMaxWidth().height(rowHeight).background(m.t.surface2.copy(alpha = .6f)))
+            Box(Modifier.fillMaxWidth().height(rowHeight).background(bag.field.copy(alpha = .6f)))
             Box(Modifier.fillMaxWidth().height(rowHeight).padding(0.dp)) {
-                Box(Modifier.fillMaxWidth().height(1.dp).background(m.t.line).align(Alignment.TopCenter))
-                Box(Modifier.fillMaxWidth().height(1.dp).background(m.t.line).align(Alignment.BottomCenter))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(bag.hairline).align(Alignment.TopCenter))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(bag.hairline).align(Alignment.BottomCenter))
             }
             items.forEachIndexed { i, it ->
                 val d = RigDrumMath.delta(i, pos, n, loop)
@@ -195,8 +197,8 @@ fun RigDrum(label: String, items: List<WheelItem>, selected: Int, onSelect: (Whe
         Crossfade(shown, animationSpec = tween(if (reduce) 0 else 200), label = "drum-name") { k ->
             val w = items[k.coerceIn(0, n - 1)]
             Column(Modifier.fillMaxWidth().heightIn(min = 54.dp).padding(top = 8.dp, start = 2.dp, end = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                T(w.name, m.type.body.copy(fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center), m.t.ink, maxLines = 1)
-                if (w.caption.isNotBlank()) T(w.caption, m.type.body.copy(fontSize = 12.sp, lineHeight = 16.sp, textAlign = TextAlign.Center), m.t.muted, maxLines = 2)
+                T(w.name, m.type.body.copy(fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center), bag.ink, maxLines = 1)
+                if (w.caption.isNotBlank()) T(w.caption, m.type.body.copy(fontSize = 12.sp, lineHeight = 16.sp, textAlign = TextAlign.Center), bag.ink2, maxLines = 2)
             }
         }
     }
@@ -205,8 +207,8 @@ fun RigDrum(label: String, items: List<WheelItem>, selected: Int, onSelect: (Whe
 /** An item's face on the drum: Auto is the aperture mark on a disc; the rest are their render or drawing. */
 @Composable
 private fun DrumFace(it: WheelItem, modifier: Modifier) {
-    val m = muse
-    if (it.id == null) Box(modifier.padding(4.dp).clip(CircleShape).background(m.t.surface2), contentAlignment = Alignment.Center) { SIc("aperture", 26.dp, m.t.ink) }
+    val bag = MuseRoles.bag
+    if (it.id == null) Box(modifier.padding(4.dp).clip(CircleShape).background(bag.field), contentAlignment = Alignment.Center) { SIc("aperture", 26.dp, bag.ink) }
     else PreviewTile(it.preview, modifier.clip(RoundedCornerShape(8.dp)))
 }
 

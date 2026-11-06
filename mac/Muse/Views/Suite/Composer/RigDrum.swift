@@ -28,12 +28,13 @@ struct RigDrum: View {
     enum Face { case render, focal, aperture }
 
     /// The camera bag's palette (design-direction §9, design/direction/render.py BAG), the same in every theme.
+    /// The camera bag's colours: the shared design tokens' `Roles.bag`, dark in every theme (design-direction §9).
     enum Bag {
-        static let raised = Color(hex: 0x141414)
-        static let field = Color(hex: 0x1E1F21)
-        static let ink = Color(hex: 0xECEAE5)
-        static let ink2 = Color(hex: 0xA9A6A0)
-        static let hairline = Color(hex: 0x2C3033)
+        static var raised: Color { Roles.bag.raised }
+        static var field: Color { Roles.bag.field }
+        static var ink: Color { Roles.bag.ink }
+        static var ink2: Color { Roles.bag.ink2 }
+        static var hairline: Color { Roles.bag.hairline }
     }
 
     @Environment(\.theme) private var t
