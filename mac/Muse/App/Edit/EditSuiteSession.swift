@@ -63,9 +63,9 @@ final class EditSuiteSession {
 
     let player = AVPlayer()
 
-    @ObservationIgnored private let api: any MuseAPI
+    @ObservationIgnored let api: any MuseAPI
     @ObservationIgnored private let lookupTake: (String) -> Take?
-    @ObservationIgnored private var sources = EditV2Engine.Sources()
+    @ObservationIgnored var sources = EditV2Engine.Sources()
     @ObservationIgnored private var builtProject: E.Project?
     @ObservationIgnored private var buildTask: Task<Void, Never>?
     @ObservationIgnored private var exportTask: Task<Void, Never>?
@@ -74,9 +74,36 @@ final class EditSuiteSession {
     /// "Remove background" on a clip: its own asset before the cut-out replaced it.
     @ObservationIgnored private var matteOriginal: [String: String] = [:]
 
-    init(take: Take, api: any MuseAPI, lookupTake: @escaping (String) -> Take?) {
+    // Claude in the Edit suite (edit sessions, owner only; EditSuiteLive.swift). Members keep the local editor.
+    /// The studio owner: the edit is shared live with Claude.
+    let isOwner: Bool
+    /// This Mac in edit sessions ("mac-1a2b3c4d").
+    let device = editSessionDeviceId()
+    /// The live session (nil for members, while opening, or when it couldn't be opened: then the editor works locally).
+    @ObservationIgnored var live: EditSessionSync?
+    /// What the views show of it (the sync itself isn't observed).
+    var liveHistory: [EditHistoryEntry] = []
+    var liveConnected = false
+    /// "Claude · Look · film-gold 70 %" when Claude's change lands.
+    var claudeToast: String?
+    /// A paid helper Claude asked for, waiting for the owner's answer (the confirmation sheet).
+    var askPending: EditPending?
+    /// Claude asked for an export: the export sheet opens with these settings.
+    var exportAsk: EditSuite.ExportSettings?
+    @ObservationIgnored var exportAskRequest: EditAppRequest?
+    /// A save/export Claude asked for that is rendering now (answered when it ends).
+    @ObservationIgnored var requestInExport: EditAppRequest?
+    @ObservationIgnored var liveTasks: [Task<Void, Never>] = []
+    @ObservationIgnored var flushTask: Task<Void, Never>?
+    @ObservationIgnored var applyingRemote = false
+    @ObservationIgnored var nextChangeLabel: String?
+    /// The app's gallery hook for versions saved on Claude's request.
+    @ObservationIgnored var onVersionSaved: ((Take) -> Void)?
+
+    init(take: Take, api: any MuseAPI, isOwner: Bool = false, lookupTake: @escaping (String) -> Take?) {
         self.take = take
         self.api = api
+        self.isOwner = isOwner
         self.lookupTake = lookupTake
         sourceTakeId = take.parentTakeId.flatMap { lookupTake($0) != nil ? $0 : nil } ?? take.id
         // A placeholder until load() reads the source.
@@ -127,6 +154,7 @@ final class EditSuiteSession {
             refreshMedia()
             refreshLookThumbs()
             if let n = try? await api.takeVersions(takeId: sourceTakeId).count { versionNumber = n + 1 }
+            if isOwner { await startLive() }
         } catch {
             phase = .failed((error as? ApiError)?.message ?? "Couldn't open this video")
         }
@@ -150,6 +178,7 @@ final class EditSuiteSession {
     }
 
     func close() {
+        stopLive()
         player.pause()
         player.replaceCurrentItem(with: nil)
         if let timeObserver { player.removeTimeObserver(timeObserver) }
@@ -192,11 +221,23 @@ final class EditSuiteSession {
     /// View-only changes (selection, zoom, tabs, snapping…).
     func view(_ f: (inout EditSuiteState) -> Void) { f(&state) }
 
-    func undo() { edit { $0.undo() } }
-    func redo() { edit { $0.redo() } }
+    func undo() { nextChangeLabel = "Undo"; edit { $0.undo() }; nextChangeLabel = nil }
+    func redo() { nextChangeLabel = "Redo"; edit { $0.redo() }; nextChangeLabel = nil }
 
     private func projectChanged() {
         Task { await ensureFiles(); rebuild(); refreshMedia() }
+        if !applyingRemote { liveLocalChange() }
+    }
+
+    /// A change from the live session (Claude's, another device's, a rebase): shown at once, undoable with ⌘Z like any edit.
+    func showRemote(_ p: E.Project) {
+        guard isReady, p != project else { return }
+        if !playing { state.playhead = playhead }
+        applyingRemote = true
+        if state.apply({ _ in p }) { projectChanged() }
+        applyingRemote = false
+        playhead = state.playhead
+        // A change arriving during a drag ends the drag where it is.
     }
 
     // MARK: Preview
@@ -667,8 +708,12 @@ final class EditSuiteSession {
 
     /// Renders with the sheet's settings (shape, size, fps, codec, captions), uploads and saves the new version. With
     /// `saveFileTo` the .mp4 (and the .srt) are also copied there.
-    func export(_ settings: EditSuite.ExportSettings, saveFileTo: URL?, onSaved: @escaping (Take) -> Void) {
-        guard isReady, !busy, exportProblem == nil else { return }
+    func export(_ settings: EditSuite.ExportSettings, saveFileTo: URL?, request: EditAppRequest? = nil, onSaved: @escaping (Take) -> Void) {
+        guard isReady, !busy, exportProblem == nil else {
+            if let request { answerRequest(request, .failed(exportProblem ?? "The Mac is busy · try again in a moment")) }
+            return
+        }
+        requestInExport = request
         pause()
         var p = project
         let size = settings.size
@@ -714,11 +759,17 @@ final class EditSuiteSession {
                 self.state.markSaved()
                 self.versionNumber += 1
                 self.notice = settings.labelAI ? "Saved · it will carry the AI label when you post" : "Saved as a new version · the original is kept"
+                if let r = self.requestInExport { self.answerRequest(r, .done(versionId: t.id)) }
+                self.requestInExport = nil
                 onSaved(t)
             } catch {
                 try? FileManager.default.removeItem(at: file)
                 guard let self else { return }
                 self.exportPhase = .idle
+                if let r = self.requestInExport {
+                    self.answerRequest(r, .failed((error as? ApiError)?.message ?? (error is CancellationError ? "The owner cancelled the export" : "Couldn't export the edit")))
+                }
+                self.requestInExport = nil
                 if !(error is CancellationError) && !Task.isCancelled {
                     self.lastError = (error as? ApiError)?.message ?? "Couldn't export the edit"
                 }
@@ -727,6 +778,8 @@ final class EditSuiteSession {
     }
 
     func cancelExport() {
+        if let r = requestInExport { answerRequest(r, .failed("The owner cancelled the export")) }
+        requestInExport = nil
         exportTask?.cancel()
         exportTask = nil
         exportPhase = .idle
