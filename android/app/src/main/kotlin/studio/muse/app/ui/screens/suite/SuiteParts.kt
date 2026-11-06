@@ -97,6 +97,9 @@ object SuiteIcons {
         "image" to "M4 5h16v14H4z M4 16l5-5 4 4 3-3 4 4 M15 9.5a1.5 1.5 0 1 0 0.01 0z",
         "sparkle" to "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z",
         "minus" to "M5 12h14",
+        // Extend: a clip with more after it; Upscale: corners pulled outwards.
+        "extend" to "M3 6h9v12H3z M15 12h6 M18 9l3 3-3 3",
+        "upscale" to "M4 14v6h6 M20 10V4h-6 M4 20l6.5-6.5 M20 4l-6.5 6.5",
     )
     private val cache = HashMap<String, ImageVector>()
     fun get(name: String): ImageVector = cache.getOrPut(name) {

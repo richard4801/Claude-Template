@@ -118,18 +118,19 @@ class ResultViewModel(private val c: AppContainer, private val id: String) : Vie
 
 /** The Upscale add-on on a finished render: 1080p / 2K / 4K, greyed with "Coming soon" until it ships. */
 @Composable
-private fun UpscaleRow(up: studio.muse.app.data.AddonInfo, onPick: (studio.muse.app.data.UpscaleSizeInfo) -> Unit) {
+private fun UpscaleRow(up: studio.muse.app.data.AddonInfo, seconds: Double?, onPick: (studio.muse.app.data.UpscaleSizeInfo) -> Unit) {
     val m = muse
     val sizes = up.sizes.ifEmpty { studio.muse.app.data.VideoFeatures.DEFAULT.upscale.sizes }
+    // Each size's price is the server's $ per output second × this take's length (UpscaleOffer), or "Soon".
+    val choices = studio.muse.app.data.UpscaleOffer.choices(up, seconds)
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         RowB {
             T(up.label.ifBlank { "Upscale" }, m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink)
-            if (!up.available || up.comingSoon) Pill("Coming soon")
+            if (!studio.muse.app.data.UpscaleOffer.live(up)) Pill("Coming soon")
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            sizes.forEach { z ->
-                val on = up.available && z.available
-                Cta2(z.label + (z.price?.let { " · ${Pricing.money(it)}" } ?: ""), { onPick(z) }, Modifier.weight(1f).graphicsLayer { alpha = if (on) 1f else .45f }, height = 40.dp)
+            sizes.zip(choices).forEach { (z, ch) ->
+                Cta2("${ch.label} · ${ch.priceText}", { onPick(z) }, Modifier.weight(1f).graphicsLayer { alpha = if (ch.available) 1f else .45f }, height = 48.dp)
             }
         }
         Tiny(up.detail.ifBlank { "Sharper 1080p, 2K or 4K from a finished take" })
@@ -219,7 +220,7 @@ fun ResultScreen(id: String) {
                             p.stats?.let { st -> T(" ${String.format(java.util.Locale.US, "%,d", st.views)} views · ${String.format(java.util.Locale.US, "%,d", st.likes)} likes", m.type.mono.copy(fontSize = 11.5.sp), m.t.muted) }
                         }
                     }
-                    if (take.kind == "take" && take.videoUrl != null) UpscaleRow(s.upscale) { z -> vm.upscale(take, z) }
+                    if (take.kind == "take" && take.videoUrl != null) UpscaleRow(s.upscale, take.durationSec) { z -> vm.upscale(take, z) }
                     if (take.editable) EditVideoRow(take, s.versions(take)) { nav.go(Routes.editVideo(take.id)) }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Cta2("Discard", { vm.discard(take, nav) }, Modifier.weight(1f))

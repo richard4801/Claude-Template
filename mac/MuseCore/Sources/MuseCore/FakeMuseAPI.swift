@@ -38,7 +38,7 @@ public actor FakeMuseAPI: MuseAPI {
     private var signedIn: User?
     private var members: [Member] = FakeMuseAPI.demoMembers()
     private var engine = ImageEngine(provider: "simulated", model: "bundled-stills", available: ["simulated": true, "fal": false, "custom-http": true])
-    var studio = StudioSettings(features: StudioFeatures(replicate: true, video: .fallback, photo: .standard, tools: ToolsFeatures()))
+    var studio = StudioSettings(features: StudioFeatures(replicate: true, video: .demo, photo: .standard, tools: ToolsFeatures()))
     /// The demo studio balance: one opening top-up, then what the owner records.
     private var topUps: [TopUp] = [TopUp(id: "tu_demo", amountUsd: 25, note: "Opening balance", paidAt: nowMs() - 864_000_000)]
     /// Templates with their layers (the "server side"). Only the owner's ever leave the actor with layers.
@@ -67,6 +67,8 @@ public actor FakeMuseAPI: MuseAPI {
     var suiteSettingsBox: SuiteSettings?
     /// AI suite (workstream 1): the Look each demo shot's takes carry (by job id), like the server's take.look.
     var suiteLooks: [String: SuiteLook] = [:]
+    /// AI suite (workstream 1): a job's take length when it isn't the request's (Extend: source + extension; Upscale: the take's).
+    var suiteTakeSeconds: [String: Double] = [:]
     /// AI suite (workstream 1): the demo studio's locations (@location), two to start with.
     var suiteLocationList: [SuiteLocation] = FakeMuseAPI.demoLocations
 
@@ -86,7 +88,7 @@ public actor FakeMuseAPI: MuseAPI {
         self.loraSeconds = loraSeconds
         let now = nowMs()
         jobs = SampleData.jobs(now: now)
-        takes = SampleData.takes(now: now)
+        takes = FakeMuseAPI.withDemoMedia(SampleData.takes(now: now), jobs: jobs)
         templates = StarterTemplates.all(ownerId: "u1", ownerName: "Studio owner", now: now) + StarterTemplates.memberTemplates(now: now)
         favourites = ["tpl_mirror_selfie"]
         for (meta, id) in [(SampleData.sampleMeta, SampleData.sampleClip), (SampleData.badMeta, SampleData.badClip)] {
@@ -793,6 +795,21 @@ public actor FakeMuseAPI: MuseAPI {
             var t = Take(id: "t_\(j.id)_\(k)", jobId: j.id, index: k, of: n, title: j.title, label: label, engineLabel: j.engineLabel,
                          cost: j.cost / Double(n), seed: j.seed + Int64(k - 1), thumb: thumb, prompt: j.prompt, createdAt: nowMs())
             t.look = j.request.engine == "suite" ? suiteLooks[j.id] : nil // AI suite (workstream 1): the shot's Look
+            // Its length and stored file (Extend and Upscale work on it).
+            t.durationSec = suiteTakeSeconds[j.id] ?? j.request.clipSeconds ?? j.lengthSec
+            t.mediaKey = "r/\(j.id)/take_\(k).mp4"
+            if j.request.isUpscale { t.label = j.engineText ?? "Upscale" }
+            return t
+        }
+    }
+
+    /// Demo takes: render takes get a length and a stored file key (no file: there is no video in demo mode).
+    static func withDemoMedia(_ list: [Take], jobs: [Job]) -> [Take] {
+        list.map { t0 in
+            var t = t0
+            guard t.kind == "take" else { return t }
+            if t.durationSec == nil { t.durationSec = t.jobId.flatMap { id in jobs.first { $0.id == id }?.lengthSec } ?? SampleData.sampleMeta.durationSec }
+            if t.mediaKey == nil && t.videoUrl == nil { t.mediaKey = "r/\(t.jobId ?? t.id)/take_\(t.index).mp4" }
             return t
         }
     }
@@ -1045,9 +1062,27 @@ public actor FakeMuseAPI: MuseAPI {
         return try studioBalance()
     }
 
+    /// POST /v1/takes/{id}/upscale, as the server: a size that isn't priced is `409 upscale_unavailable`; else a held job at
+    /// price × the take's seconds whose take is labelled "Upscale · 2K".
     public func upscale(takeId: String, _ req: UpscaleRequest) throws -> Job {
-        guard takes.contains(where: { $0.id == takeId }) else { throw ApiError("not_found", "Take not found") }
-        throw ApiError("upscale_unavailable", "Upscale is coming soon")
+        guard let t = takes.first(where: { $0.id == takeId }) else { throw ApiError("not_found", "Take not found") }
+        guard t.kind == "take" else { throw ApiError("bad_request", "Upscale works on a finished video take") }
+        let up = studio.features.video?.upscale
+        guard let size = up?.sizes.first(where: { $0.id == req.size }) else { throw ApiError("bad_request", "Invalid size") }
+        guard up?.available == true, up?.comingSoon != true, size.available, size.price != nil else { throw ApiError("upscale_unavailable", "Upscale is coming soon") }
+        guard let seconds = t.durationSec, seconds > 0, let cost = UpscaleOffer.cost(size, seconds: seconds) else {
+            throw ApiError("bad_request", "This take has no length on record · it can’t be upscaled")
+        }
+        let label = "Upscale · \(size.label)"
+        let src = t.jobId.flatMap { id in jobs.first { $0.id == id } }
+        let jr = JobRequest(title: "\(t.title) · \(label)", modelId: src?.modelId ?? "", outfitId: src?.outfitId ?? "", clipId: "", engine: "upscale", steps: 1,
+                            use: ClipUse.full.rawValue, takes: 1, keepAudio: true, clipSeconds: seconds)
+        let total = max(20, seconds * 6)
+        var j = Job(id: "jl_" + shortId(), title: jr.title, modelId: jr.modelId, modelName: src?.modelName ?? "", outfitId: jr.outfitId, request: jr, state: "queued",
+                    phase: MemberText.waitingToStart, secondsLeft: total, totalSeconds: total, cost: cost, createdAt: nowMs(), prompt: t.prompt, seed: t.seed, thumb: t.thumb)
+        j.engineText = label
+        suiteTakeSeconds[j.id] = seconds
+        return try enqueueSuiteJob(j)
     }
 
     public func setFailNext(_ fail: Bool) { failNext = fail }

@@ -46,7 +46,8 @@ enum class ComposerTool(
         "What she says, or describe the moment · # for a talk-safe move"),
     UGC("ugc", "UGC ad", "Product → ad", "grip-05-slider", false, listOf(ComposerChip.STYLE),
         "What the ad shows · type @ for your characters"),
-    EXTEND("extend", "Extend & upscale", "Longer, sharper", "stock-03-sensor", false, emptyList(), "");
+    /** Extend: a longer take from a finished one (after or before). Upscale lives on the finished take itself. */
+    EXTEND("extend", "Extend", "A longer take, after or before", "stock-03-sensor", false, emptyList(), "What happens next");
 
     /** The id in the catalog's `tools`. */
     val wire: String get() = if (this == UGC) "ugc_ad" else id
@@ -98,7 +99,12 @@ data class ComposerDraft(
     /** Owner only: the engine pinned for this shot (one of the tier's `models`) and its resolution; null = Auto (the ladder). */
     val engineModel: String? = null,
     val resolution: String? = null,
+    /** Extend: "after" (what happens next) or "before" (what happens before). */
+    val extendDirection: String = "after",
 ) {
+    /** The prompt's placeholder: Extend's follows the direction. */
+    val placeholder: String get() = if (tool == ComposerTool.EXTEND) studio.muse.app.data.ExtendRules.placeholder(extendDirection) else tool.placeholder
+
     /** The input slots on this quality, or on the pinned engine when the owner pinned one. */
     fun inputsFor(cat: SuiteCatalog?): SuiteInputs = cat?.tier(quality)?.slotsFor(engineModel) ?: SuiteInputs.NONE
 
@@ -190,7 +196,19 @@ data class ComposerDraft(
         }
         ComposerTool.SWAP -> when { recast.clipId == null -> "Choose the source clip"; characterId == null -> "Pick who she becomes"; else -> null }
         ComposerTool.RECAST -> recast.problem()
-        else -> "Coming soon"
+        ComposerTool.EXTEND -> {
+            val v = own[ToolSlots.EXTEND_VIDEO]
+            when {
+                v == null -> "Pick the video to extend"
+                own.uploading -> "Waiting for the upload"
+                v.error != null -> v.error
+                !v.ready -> "Pick the video to extend"
+                // An upload carries its own length (the server's limit is 60 s); a take's comes from the take.
+                v.media?.seconds?.let { it > studio.muse.app.data.ExtendRules.MAX_UPLOAD_SECONDS } == true -> "Pick a video up to 60 s"
+                v.use == ExtendSlot.UPLOAD && v.media?.seconds == null -> "Couldn't read that video's length"
+                else -> null
+            }
+        }
     }
 
     /**
@@ -247,6 +265,13 @@ data class ComposerDraft(
             )
         }
         ComposerTool.RECAST -> recast.copy(quality = quality, takes = takes).request()
+        // Extend: the VIDEO slot's take key (or upload key + seconds), the direction, the new part's length and the prompt.
+        // The shape comes from the source, so no aspect ratio; no camera, sound or speaking (the server doesn't take them here).
+        ComposerTool.EXTEND -> SuiteShotRequest(
+            mode = studio.muse.app.data.ExtendRules.MODE,
+            extend = own[ToolSlots.EXTEND_VIDEO]?.takeIf { it.ready }?.media?.let { m -> studio.muse.app.data.SuiteExtend(ExtendSlot.ref(m), extendDirection) },
+            title = title.trim().ifBlank { null }, prompt = tokens.promptText(), duration = duration, quality = quality, takes = takes,
+        )
         // Talking and UGC ad are shots: their own slots go in as references (the audio and an optional location photo;
         // the product photo and an optional reference ad), the rest is the composer's.
         ComposerTool.TALKING, ComposerTool.UGC -> {
@@ -302,7 +327,7 @@ object SwapAddons {
      */
     fun pills(video: VideoFeatures, fastBeta: Boolean, takes: Int, clipSeconds: Double?): List<AddonPill> = SwapAddon.entries.mapNotNull { a ->
         when (a) {
-            SwapAddon.UPSCALE -> AddonPill(a, video.upscale.available, if (video.upscale.available) "On the take" else "Soon")
+            SwapAddon.UPSCALE -> studio.muse.app.data.UpscaleOffer.live(video.upscale).let { live -> AddonPill(a, live, if (live) "On the take" else "Soon") }
             SwapAddon.FAST -> if (!fastBeta || !video.available(a.id)) null else AddonPill(a, true, price(a, takes, clipSeconds))
             SwapAddon.EDIT -> AddonPill(a, video.available(a.id), price(a, takes, clipSeconds))
         }
@@ -349,8 +374,11 @@ object ToolSlots {
             ToolSlot("location", "Location", "A photo of the place", optional = true))
         ComposerTool.UGC -> listOf(ToolSlot("character", "Character", "Your models"), ToolSlot("product", "Product", "A photo of it"),
             ToolSlot("refad", "Reference ad", "A video ad to follow", optional = true))
-        ComposerTool.EXTEND -> listOf(ToolSlot("video", "Video", "A take or a clip"))
+        ComposerTool.EXTEND -> listOf(ToolSlot("video", "Video", "A take or a video"))
     }
+
+    /** Extend's VIDEO slot (the store's extendSlots). */
+    val EXTEND_VIDEO = SlotId(SlotKind.VIDEO)
 
     /** Where the slot cards of Talking and UGC ad keep their files (the store's own slots of those tools). */
     val TALK_AUDIO = SlotId(SlotKind.AUDIO)
@@ -364,11 +392,36 @@ object ToolSlots {
         tool == ComposerTool.TALKING && kind == "location" -> TALK_LOCATION
         tool == ComposerTool.UGC && kind == "product" -> UGC_PRODUCT
         tool == ComposerTool.UGC && kind == "refad" -> UGC_REFAD
+        tool == ComposerTool.EXTEND && kind == "video" -> EXTEND_VIDEO
         else -> null
     }
 
     /** Tools whose chips are hidden on the shell. */
     fun chipsOf(tool: ComposerTool) = tool.chips
+}
+
+/**
+ * What goes in Extend's VIDEO slot. A take: its stored key only (the server reads its length). An upload: its key and the
+ * `seconds` read from the file. [SlotValue.use] tells them apart ("take" | "upload").
+ */
+object ExtendSlot {
+    const val TAKE = "take"
+    const val UPLOAD = "upload"
+
+    fun fromTake(t: studio.muse.app.data.Take, key: String): studio.muse.app.ui.screens.suite.SlotValue =
+        studio.muse.app.ui.screens.suite.SlotValue(
+            name = listOfNotNull(t.title.ifBlank { "Take" }, "Take ${t.index}", t.durationSec?.let { "${studio.muse.app.data.FakeSuite.fmtSeconds(Math.round(it * 10) / 10.0)} s" }).joinToString(" · "),
+            image = t.thumb, media = studio.muse.app.data.SuiteMediaRef(key = key), use = TAKE,
+        )
+
+    /** The video ref sent: a take is `{key}`; an upload `{key, seconds}` (or `{url, seconds}` for a link). */
+    fun ref(m: studio.muse.app.data.SuiteMediaRef): studio.muse.app.data.SuiteMediaRef =
+        if (m.key != null) studio.muse.app.data.SuiteMediaRef(key = m.key, seconds = m.seconds?.let { Math.round(it * 100) / 100.0 })
+        else studio.muse.app.data.SuiteMediaRef(url = m.url, seconds = m.seconds?.let { Math.round(it * 100) / 100.0 })
+
+    /** The takes that can go in the slot, newest first: finished renders with a stored video (demo: simulated takes too). */
+    fun candidates(takes: List<studio.muse.app.data.Take>, demo: Boolean, max: Int = 24): List<studio.muse.app.data.Take> =
+        takes.filter { studio.muse.app.data.ExtendRules.keyOf(it, demo) != null }.sortedByDescending { it.createdAt }.take(max)
 }
 
 /**

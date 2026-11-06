@@ -12,6 +12,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import studio.muse.app.data.CameraCatalog
 import studio.muse.app.data.FakeSuite
+import studio.muse.app.data.SuiteMoveOption
+import studio.muse.app.data.SuiteOption
 import studio.muse.app.data.SuiteShotRequest
 import studio.muse.app.ui.screens.suite.composer.Caret
 import studio.muse.app.ui.screens.suite.composer.ComposerCatalog
@@ -118,6 +120,21 @@ class SuiteComposerTest {
         assertNull(PromptTokens.activeTrigger("email me@home", 13))
         assertNull(PromptTokens.activeTrigger("#dolly in", 9))
         assertEquals("dolly_in", PromptTokens.searchMoves(cat, "dolly").first().id)
+    }
+
+    @Test fun `search finds catalog aliases`() {
+        // "single shot" finds Tempo "One take"; "pedestal" finds Rise to reveal.
+        val oneTake = SuiteOption("single_shot", "One take", aliases = listOf("single shot", "oner"))
+        assertTrue(oneTake.matches("Single shot"))
+        assertTrue(oneTake.matches("one"))
+        assertTrue(oneTake.matches(" "))
+        assertFalse(oneTake.matches("slow"))
+        val rise = SuiteMoveOption("rise_reveal", "Rise to reveal", category = "vertical", aliases = listOf("pedestal up"))
+        assertTrue(rise.matches("pedestal"))
+        assertTrue(rise.matches("rise-to"))
+        val json = Json { ignoreUnknownKeys = true }
+        assertEquals(listOf("single shot"), json.decodeFromString(SuiteOption.serializer(), """{"id":"single_shot","aliases":["single shot"]}""").aliases)
+        assertEquals(emptyList<String>(), json.decodeFromString(SuiteOption.serializer(), """{"id":"calm"}""").aliases)
     }
 
     @Test fun `the request, and the Look demo mode reports`() {
