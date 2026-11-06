@@ -65,6 +65,7 @@ When resuming:
 5. Go live with renders.
 6. The owner-approved RunPod step for SeedVR2.
 7. Migrate `railway.json` before 2026-12-01.
+8. **Owner-seen bug (Mac composer, about 1000 px wide):** the bottom pills wrap their labels ("Standar/d", "Speak/ing"), "Engine · A…" is cut off, and Generate shows "GENERATE…" with no price. Make the pills shrink to icon plus value, and keep the price visible. Workstream 1.
 
 ## Status (each session updates its own line)
 - 1 · Video composer follow-ups (2026-11-06) on `claude/muse-suite-core`: Recast tap-a-face (faceCrop + personHint), swap add-on pills, Era decade slider, UGC ad format wheel (`ugcFormats`, `camera.style.format`), @location (`/v1/suite/locations`, **migration 0013 after 0011/0012**), drag-to-reorder tokens, owner engine pin; catalog `tools` (Talking and UGC ad live, Extend coming soon); real Webcam/CCTV/Swirl/Tilt-shift renders; Blender previews bundled (`previews/`, catalog `preview` per move/light/angle); first-run HTTP checks on both apps. Server 359 green; Android 1305 green (release APK 30.7 MB, +9.5 MB previews); Mac CI green (run 42152398143). Next: Extend & upscale backend.
