@@ -10,7 +10,7 @@ struct ClaudeBadge: View {
     @Environment(\.theme) private var t
     var body: some View {
         HStack(spacing: 3) {
-            Image(systemName: "sparkle").font(.system(size: 8.5, weight: .bold)).accessibilityHidden(true)
+            Ph("sparkle", 8.5).accessibilityHidden(true)
             Text("Claude").font(t.mono(10.5, .semibold))
         }
         .foregroundStyle(t.accentInk)
@@ -84,7 +84,7 @@ struct EditSuiteClaudeToast: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "sparkle").font(.system(size: 13, weight: .semibold)).foregroundStyle(t.accent).accessibilityHidden(true)
+            Ph("sparkle", 13).foregroundStyle(t.accent).accessibilityHidden(true)
             Text(text).font(t.body(13)).foregroundStyle(t.ink).lineLimit(2)
             SuiteIconButton(systemName: "xmark", label: "Dismiss", size: 22, action: dismiss)
         }
@@ -189,7 +189,7 @@ struct EditSuiteClaudePanel: View {
     /// No edit session yet (still opening, or it couldn't be shared): no chat to attach to.
     private var noSession: some View {
         VStack(spacing: 10) {
-            Image(systemName: "bubble.left.and.text.bubble.right").font(.system(size: 22)).foregroundStyle(t.muted).accessibilityHidden(true)
+            Ph("bubble.left.and.text.bubble.right", 22).foregroundStyle(t.muted).accessibilityHidden(true)
             Text(session.isOwner ? "Sharing this edit with Claude…" : "Claude is for the studio owner")
                 .font(t.body(13, .semibold)).foregroundStyle(t.ink)
             Text("The chat opens once the edit is shared. If it doesn't, close and reopen the editor.")

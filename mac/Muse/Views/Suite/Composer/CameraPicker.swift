@@ -133,7 +133,7 @@ struct WheelColumn: View {
 
     private func chevron(_ icon: String, _ d: Int) -> some View {
         Button { step(d) } label: {
-            Image(systemName: icon).font(.system(size: 11, weight: .semibold)).foregroundStyle(t.muted).frame(width: 18, height: 18).contentShape(Rectangle())
+            Ph(icon, 11).foregroundStyle(t.muted).frame(width: 18, height: 18).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(d < 0 ? "Previous" : "Next")
@@ -160,7 +160,7 @@ struct WheelColumn: View {
         if item.value == nil {
             ZStack {
                 Color(hex: 0x121315)
-                Image(systemName: "sparkles").font(.system(size: 20, weight: .light)).foregroundStyle(t.muted)
+                Ph("sparkles", 20).foregroundStyle(t.muted)
             }
         } else {
             switch plate {
@@ -493,7 +493,7 @@ struct MoveTile: View {
 
     private func badge(_ text: String, icon: String) -> some View {
         HStack(spacing: 5) {
-            Image(systemName: icon).font(.system(size: 9))
+            Ph(icon, 9)
             Text(text.uppercased()).font(Fonts.font("JetBrains Mono", 9.5, .medium)).tracking(0.6)
                 .lineLimit(1).minimumScaleFactor(0.8)
         }

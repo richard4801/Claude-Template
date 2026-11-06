@@ -268,7 +268,7 @@ struct EditSuiteEditor: View {
                 SuiteToolButton(title: "Hook ideas", icon: "sparkles") { session.mode = .captions }
                 Button { showExport = true } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "square.and.arrow.up").font(.system(size: 13, weight: .semibold))
+                        Ph("square.and.arrow.up", 13)
                         Text("EXPORT").font(t.mono(12.5, .semibold)).tracking(1.4)
                     }
                     .foregroundStyle(t.bg)
@@ -298,7 +298,7 @@ struct EditSuiteEditor: View {
 
     private func message(_ text: String, warn: Bool, dismiss: @escaping () -> Void) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: warn ? "exclamationmark.triangle" : "checkmark.circle").foregroundStyle(warn ? t.warn : t.good)
+            Ph(warn ? "exclamationmark.triangle" : "checkmark.circle").foregroundStyle(warn ? t.warn : t.good)
             Text(text).font(t.body(13)).foregroundStyle(t.ink).lineLimit(2)
             SuiteIconButton(systemName: "xmark", label: "Dismiss", size: 22, action: dismiss)
         }

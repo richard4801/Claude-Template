@@ -245,7 +245,7 @@ struct ClaudeChatView: View {
             if status == .running {
                 ProgressView().controlSize(.mini)
             } else {
-                Image(systemName: bad ? "exclamationmark.triangle" : name.hasPrefix("blender_") ? "cube" : "wand.and.stars").font(.system(size: 9.5))
+                Ph(bad ? "exclamationmark.triangle" : name.hasPrefix("blender_") ? "cube" : "wand.and.stars", 9.5)
             }
             Text(summary).font(t.mono(10, .medium)).lineLimit(1)
         }
@@ -270,7 +270,7 @@ struct ClaudeChatView: View {
 
     private var phoneStrip: some View {
         HStack(spacing: 8) {
-            Image(systemName: "iphone").font(.system(size: 12, weight: .semibold))
+            Ph("iphone", 12)
             Text("Answering from your phone").font(t.body(12.5, .semibold))
             Spacer()
             ProgressView().controlSize(.small)
@@ -293,7 +293,7 @@ struct ClaudeChatView: View {
                     .fieldChrome()
                 if busy {
                     Button { model.stop() } label: {
-                        Image(systemName: "stop.fill").font(.system(size: 13, weight: .semibold))
+                        Ph("stop.fill", 13)
                     }
                     .buttonStyle(MuseButtonStyle(kind: .secondary))
                     .frame(width: 44)
@@ -302,7 +302,7 @@ struct ClaudeChatView: View {
                     .keyboardShortcut(".", modifiers: .command)
                 } else {
                     Button { model.send() } label: {
-                        Image(systemName: "paperplane.fill").font(.system(size: 14, weight: .semibold))
+                        Ph("paperplane.fill", 14)
                     }
                     .buttonStyle(MuseButtonStyle(kind: .primary, off: empty || model.thread == nil))
                     .frame(width: 44)

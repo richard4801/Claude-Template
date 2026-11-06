@@ -22,8 +22,7 @@ struct SuiteIconButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: size * 0.46, weight: .medium))
+            Ph(systemName, size * 0.46)
                 .foregroundStyle(disabled ? t.muted.opacity(0.45) : (on ? t.accent : (tint ?? t.ink)))
                 .frame(width: size, height: size)
                 .background(RoundedRectangle(cornerRadius: t.controlRadius).fill(hover && !disabled ? t.surface2 : .clear))
@@ -169,7 +168,7 @@ struct SuiteToolButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                if let icon { Image(systemName: icon).font(.system(size: 11.5, weight: .semibold)) }
+                if let icon { Ph(icon, 11.5) }
                 Text(title).font(t.body(12.5, .medium)).lineLimit(1)
             }
             .foregroundStyle(disabled ? t.muted.opacity(0.5) : (accent ? t.accentInk : filled ? t.bg : t.ink))

@@ -129,7 +129,7 @@ struct RecentTakesRow: View {
     @ViewBuilder private func overlay(_ s: SuiteResultState) -> some View {
         switch s {
         case .ready:
-            Image(systemName: "play.fill").font(.system(size: 13)).foregroundStyle(Color(hex: 0x141210))
+            Ph("play.fill", 13).foregroundStyle(Color(hex: 0x141210))
                 .frame(width: 36, height: 36).background(Circle().fill(Color.white.opacity(0.9)))
         case .rendering(let p, _): Text("\(p)%").font(t.isA ? Fonts.font("Instrument Serif", 30, .regular) : t.display(22)).foregroundStyle(.white)
         case .queued: Text(s.queueLine.uppercased()).font(t.mono(9)).foregroundStyle(.white).padding(4).background(Color.black.opacity(0.8))
@@ -239,10 +239,10 @@ struct ComposerCard: View {
                 ComposerSlotRow()
             }
             if let note = store.suite.composerSlots.slots.note(store.composerInputs), draft.tool == .shot {
-                Label(note, systemImage: "info.circle").font(t.body(11.5)).foregroundStyle(t.muted)
+                Label(note, ph: "info.circle").font(t.body(11.5)).foregroundStyle(t.muted)
             }
             if let p = currentProblem {
-                Label(p, systemImage: "exclamationmark.triangle").font(t.body(12, .semibold)).foregroundStyle(t.warn).fixedSize(horizontal: false, vertical: true)
+                Label(p, ph: "exclamationmark.triangle").font(t.body(12, .semibold)).foregroundStyle(t.warn).fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 16)
@@ -327,7 +327,7 @@ struct ToolCardRow: View {
             Circle().fill(t.line).frame(width: 3, height: 3)
             Text(preset?.description ?? d.tool.tagline).font(t.body(13.5)).foregroundStyle(t.muted).lineLimit(1)
             Button { store.suite.browserOpen = true } label: {
-                Label("Change", systemImage: "arrow.left.arrow.right").font(t.body(13, .semibold)).foregroundStyle(t.ink)
+                Label("Change", ph: "arrow.left.arrow.right").font(t.body(13, .semibold)).foregroundStyle(t.ink)
                     .padding(.horizontal, 12).frame(height: 30)
                     .overlay(RoundedRectangle(cornerRadius: t.controlRadius).strokeBorder(t.line, lineWidth: 1))
                     .contentShape(Rectangle())
@@ -339,14 +339,14 @@ struct ToolCardRow: View {
             if store.isComingSoon(d.tool) { SuiteTag(text: SuiteText.comingSoon) }
             if d.tool == .shot && d.collapsed == nil && !d.tokens.isEmpty {
                 Button { store.addShotToStoryboard() } label: {
-                    Image(systemName: "rectangle.split.3x1").frame(width: 28, height: 28).contentShape(Rectangle())
+                    Ph("rectangle.split.3x1").frame(width: 28, height: 28).contentShape(Rectangle())
                 }
                     .buttonStyle(.plain).foregroundStyle(t.muted).help("Add to storyboard")
                     .accessibilityLabel("Add to storyboard")
             }
             if store.isOwner && !store.isComingSoon(d.tool) {
                 Button { store.suite.showEngines = true } label: {
-                    Image(systemName: "server.rack").frame(width: 28, height: 28).contentShape(Rectangle())
+                    Ph("server.rack").frame(width: 28, height: 28).contentShape(Rectangle())
                 }
                     .buttonStyle(.plain).foregroundStyle(t.muted).help("Engines")
                     .accessibilityLabel("Engines (owner)")
@@ -397,7 +397,7 @@ struct SettingChip: View {
 
     @ViewBuilder private func thumb(auto: Bool) -> some View {
         if chip == .references {
-            Image(systemName: "photo").font(.system(size: 11)).foregroundStyle(t.muted)
+            Ph("photo", 11).foregroundStyle(t.muted)
                 .frame(width: 24, height: 24)
                 .overlay(Rectangle().strokeBorder(t.muted.opacity(0.6), style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
         } else {
@@ -448,7 +448,7 @@ struct ReferencesPopover: View {
             }
             let places = ComposerLocations.ids(store.suite.composer.tokens).compactMap { id in store.suite.locations.first { $0.id == id }?.name }
             if !places.isEmpty {
-                Label("@\(places.joined(separator: ", @")) · \(places.count == 1 ? "a location" : "locations") from the prompt", systemImage: "mappin.and.ellipse")
+                Label("@\(places.joined(separator: ", @")) · \(places.count == 1 ? "a location" : "locations") from the prompt", ph: "mappin.and.ellipse")
                     .font(t.body(11.5)).foregroundStyle(t.muted)
             }
             Muted("A product, place, style or prop · images up to 20 MB, clips up to 200 MB.")

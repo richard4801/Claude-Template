@@ -177,7 +177,7 @@ struct SuiteHubView: View {
 
     @ViewBuilder private func overlay(_ s: SuiteResultState) -> some View {
         switch s {
-        case .ready: Image(systemName: "play.circle.fill").font(.system(size: 30)).foregroundStyle(.white.opacity(0.9))
+        case .ready: Ph("play.circle.fill", 30).foregroundStyle(.white.opacity(0.9))
         case .rendering(let p, _): Text("\(p)%").font(t.isA ? Fonts.font("Instrument Serif", 30, .regular) : t.display(24)).foregroundStyle(.white)
         case .queued: Text(s.queueLine.uppercased()).font(t.mono(9.5)).foregroundStyle(.white).padding(4).background(Color.black.opacity(0.8))
         case .failed: Text("RETRY FREE").font(t.mono(9.5, .semibold)).foregroundStyle(.white).padding(4).background(t.rec)

@@ -39,7 +39,7 @@ struct EditSuiteBin: View {
                 let on = session.binTab == tab
                 Button { session.binTab = tab } label: {
                     VStack(spacing: 4) {
-                        Image(systemName: icon(tab)).font(.system(size: 15))
+                        Ph(icon(tab), 15)
                         Text(tab.label.uppercased()).font(t.mono(9, .medium)).tracking(0.6).lineLimit(1).minimumScaleFactor(0.7)
                     }
                     .foregroundStyle(on ? t.accent : t.muted)
@@ -96,7 +96,7 @@ struct EditSuiteBin: View {
                             .aspectRatio(9 / 16, contentMode: .fit)
                             .overlay(alignment: .topLeading) {
                                 if used {
-                                    Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                                    Ph("checkmark", 9).foregroundStyle(.white)
                                         .frame(width: 16, height: 16).background(t.accent).padding(5)
                                 }
                             }
@@ -133,7 +133,7 @@ struct EditSuiteBin: View {
             }
             ForEach(audio) { a in
                 HStack(spacing: 8) {
-                    Image(systemName: "waveform").foregroundStyle(t.muted)
+                    Ph("waveform").foregroundStyle(t.muted)
                     Text(session.state.assetNames[a.id] ?? a.id).font(t.body(12.5)).foregroundStyle(t.ink).lineLimit(1)
                     Spacer()
                     if let d = a.durationSec { Text(EditSuite.clock(d)).font(t.mono(11)).foregroundStyle(t.muted) }
@@ -141,7 +141,7 @@ struct EditSuiteBin: View {
                         Button("Add as music") { session.edit { $0.addAudio(a, kind: .music) } }
                         Button("Add as voice-over") { session.edit { $0.addAudio(a, kind: .voice) } }
                         Button("Add as sound effect") { session.edit { $0.addAudio(a, kind: .sfx) } }
-                    } label: { Image(systemName: "plus") }
+                    } label: { Ph("plus") }
                         .menuStyle(.borderlessButton)
                         .menuIndicator(.hidden)
                         .fixedSize()
@@ -184,7 +184,7 @@ struct EditSuiteBin: View {
                     HStack {
                         Text(EditV2.captionStyleLabel(p)).font(t.body(13)).foregroundStyle(t.ink)
                         Spacer()
-                        if session.state.captionStyle?.preset == p { Image(systemName: "checkmark").foregroundStyle(t.accent) }
+                        if session.state.captionStyle?.preset == p { Ph("checkmark").foregroundStyle(t.accent) }
                     }
                     .contentShape(Rectangle())
                 }
@@ -201,7 +201,7 @@ struct EditSuiteBin: View {
                 HookChip(template: h).frame(width: 96, height: 32)
                 Text(h.label).font(t.body(12.5)).foregroundStyle(t.ink).lineLimit(1)
                 Spacer()
-                Image(systemName: "plus").foregroundStyle(t.ink)
+                Ph("plus").foregroundStyle(t.ink)
             }
             .contentShape(Rectangle())
         }

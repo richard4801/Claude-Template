@@ -19,7 +19,7 @@ import studio.muse.core.edit.itemSpan
 /** The bottom tool row (EM1), in the design's order. */
 enum class EditTool(val label: String, val icon: String, val panel: Panel) {
     EDIT("Edit", "scissors", Panel.EDIT), AUDIO("Audio", "music", Panel.AUDIO), TEXT("Text", "type", Panel.TEXT),
-    CAPTIONS("Captions", "cc", Panel.CAPTIONS), EFFECTS("Effects", "sparkle", Panel.EFFECTS), FILTERS("Filters", "palette", Panel.FILTERS),
+    CAPTIONS("Captions", "cc", Panel.CAPTIONS), EFFECTS("Effects", "fx", Panel.EFFECTS), FILTERS("Filters", "palette", Panel.FILTERS),
     OVERLAY("Overlay", "layers", Panel.OVERLAY), RATIO("Ratio", "ratio", Panel.RATIO),
 }
 

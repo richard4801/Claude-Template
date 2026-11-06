@@ -94,11 +94,11 @@ At most **two families per theme**: one display face and one text face. Monospac
   - **Compose:** only a community port, `com.adamglin:phosphor-icon:1.0.0` (adamglin0, MIT, Compose Multiplatform). It's listed among Phosphor's community projects.
   - **Lucide** (ISC, plus MIT for its Feather-derived icons) was the alternative. It was rejected because it has no official Compose or SwiftUI package (lucide.dev/packages lists none), and because Phosphor's camera and media vocabulary is broader. Checked 2026-11-06.
 - **How we ship it:** we don't depend on a community Compose port. We **vendor the SVGs from the official core package** at a pinned version, so both apps draw the identical shapes from one source:
-  - **Android:** a script converts the icons we use into VectorDrawables (`ic_ph_<name>.xml`).
-  - **Mac:** the same SVGs go into the asset catalog as template images (`ph.<name>`).
-  - The icon list lives in `design/icons/icons.txt`, and the licence file goes with it.
+  - **The list:** `design/icons/icons.txt` names every icon we use and maps the old names to Phosphor names. `python3 design/icons/build.py` vendors the SVGs into `design/icons/phosphor/` (licence in `design/icons/LICENSE`) and generates both apps' code from them.
+  - **Android:** `ui/theme/PhosphorIcons.kt` holds the path data as ImageVectors. `Ic`, `EIc`, `SIc` and `CamIc` all draw from it, and the old names resolve through its alias table, so every icon in the app is Phosphor with no call-site change.
+  - **Mac:** the same SVGs are template vector images in `Resources/Phosphor.xcassets` (`ph.<name>`). Write `Ph("xmark", 14)` where the code had `Image(systemName: "xmark").font(.system(size: 14))`, and `Label("Reset", ph: "arrow.counterclockwise")` for `systemImage:`. SF names map through `PhosphorMap.swift`; an unmapped name still draws its SF Symbol until it's added to the list.
 - **One semantic name per meaning**, used on both apps. For example: back `caret-left`, close `x`, more `dots-three`, add `plus`, camera `video-camera`, photo `camera`, lens `aperture`, light `lightbulb-filament`, look `palette`, style `film-strip`, references `images`, settings `sliders-horizontal`, sound `speaker-high`, speaking `microphone`, queue `stack`, gallery `squares-four`, model `user`, price `coins`, warning `warning`, play `play`, pause `pause`.
-- **AI** has no icon. In particular, there is no sparkle on Generate or Auto. The Auto tile says "Auto" in text.
+- **AI** has no icon. In particular, there is no sparkle on Generate or Auto. Auto is the word "Auto" with the aperture mark (owner fix 2).
 - **Not allowed:**
   - icons in coloured circles;
   - an icon next to every label (only where it helps scanning: tab bars, toolbars, icon-only buttons);

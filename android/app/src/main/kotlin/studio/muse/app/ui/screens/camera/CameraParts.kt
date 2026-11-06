@@ -1,5 +1,6 @@
 package studio.muse.app.ui.screens.camera
 
+import studio.muse.app.ui.theme.PhosphorIcons
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -65,26 +66,9 @@ import kotlin.math.roundToInt
 
 // ---------------------------------------------------------------- icons the app's set doesn't have
 
+/** Draws MUSE's one icon set, Phosphor Regular (plans/design-direction.md §5). Old names resolve through [PhosphorIcons.ALIASES]. */
 object CamIcons {
-    private val PATHS = mapOf(
-        "send" to "M4 12l16-8-6 16-2.5-6.5z M11.5 13.5L20 4",
-        "cube" to "M12 3l8 4.5v9L12 21l-8-4.5v-9z M4 7.5l8 4.5 8-4.5 M12 12v9",
-        "copy" to "M9 9h10v11h-10z M5 15V4h10",
-        "refresh" to "M20 12a8 8 0 1 1 -2.3-5.6 M20 4v5h-5",
-        "link" to "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0 -5.7-5.7l-1 1 M14 10a4 4 0 0 0 -5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
-        "film" to "M4 5h16v14H4z M8 5v14M16 5v14M4 9h4M4 15h4M16 9h4M16 15h4",
-        "cam" to "M3 8h11v8H3z M14 11l6-3v8l-6-3z",
-        "stop" to "M7 7h10v10H7z",
-        "open" to "M14 4h6v6 M20 4l-9 9 M18 14v6H4V6h6",
-        "claude" to "M12 3v18 M3 12h18 M5.6 5.6l12.8 12.8 M18.4 5.6L5.6 18.4",
-    )
-    private val cache = HashMap<String, ImageVector>()
-    fun get(name: String): ImageVector = cache.getOrPut(name) {
-        ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {
-            addPath(addPathNodes(PATHS.getValue(name)), fill = null, stroke = SolidColor(Color.Black), strokeLineWidth = 1.7f,
-                strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round)
-        }.build()
-    }
+    fun get(name: String): ImageVector = PhosphorIcons.get(name)
 }
 
 @Composable

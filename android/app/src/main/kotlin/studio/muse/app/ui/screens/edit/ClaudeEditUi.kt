@@ -45,7 +45,6 @@ fun ClaudeBadge(modifier: Modifier = Modifier) {
         modifier.height(20.dp).clip(shape).background(m.t.accent.copy(alpha = .16f)).let { if (m.isD) it.border(1.5.dp, Ink, shape) else it }.padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        EIc("sparkle", 11.dp, m.t.accent)
         T("Claude", m.type.pill.copy(fontSize = 10.5.sp), m.t.accent, maxLines = 1)
     }
 }
@@ -102,7 +101,6 @@ fun ClaudeNote(text: String, onDismiss: () -> Unit, modifier: Modifier = Modifie
             .padding(horizontal = 14.dp, vertical = 9.dp).semantics { contentDescription = text },
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        EIc("sparkle", 14.dp, m.t.bg)
         T(text, m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.Medium), m.t.bg, maxLines = 1)
     }
 }

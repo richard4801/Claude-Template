@@ -132,7 +132,7 @@ struct InputSlotTile: View {
                 if let img = image { MuseImage(ref: img) }
                 VStack(alignment: image != nil ? .leading : .center, spacing: 4) {
                     if image == nil {
-                        Image(systemName: symbol).font(.system(size: compact ? 15 : 18, weight: .medium))
+                        Ph(symbol, compact ? 15 : 18)
                             .foregroundStyle(value?.error != nil ? t.rec : t.ink)
                     }
                     Text(id.title).font(t.body(compact ? 11 : 12, .bold)).lineLimit(1)
@@ -170,7 +170,7 @@ struct InputSlotTile: View {
         .overlay(alignment: .topTrailing) {
             if value != nil {
                 Button(action: onClear) {
-                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+                    Ph("xmark", 10).foregroundStyle(.white)
                         .frame(width: 22, height: 22).background(Circle().fill(Color.black.opacity(0.6)))
                         .padding(6).contentShape(Rectangle())
                 }

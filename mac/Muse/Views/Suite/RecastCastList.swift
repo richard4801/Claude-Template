@@ -48,7 +48,7 @@ struct RecastCastList: View {
                 Button {
                     store.suite.swap.people.removeAll { $0.id == p.id }
                     if on { selected = store.suite.swap.people.first?.id }
-                } label: { Image(systemName: "xmark").font(.system(size: 10)) }
+                } label: { Ph("xmark", 10) }
                     .buttonStyle(.plain).accessibilityLabel("Remove person \(i + 1)")
             }
             Text(faceLine(p)).font(t.body(11.5)).foregroundStyle(t.muted)

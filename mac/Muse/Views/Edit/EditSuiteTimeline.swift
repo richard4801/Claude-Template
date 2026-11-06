@@ -73,7 +73,7 @@ struct EditSuiteTimeline: View {
             }
             Spacer(minLength: 6)
             Text(EditSuite.clockTenths(session.duration)).font(t.mono(12)).foregroundStyle(t.muted).monospacedDigit()
-            Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(t.muted).accessibilityHidden(true)
+            Ph("magnifyingglass", 11).foregroundStyle(t.muted).accessibilityHidden(true)
             Slider(value: Binding(get: { log(s.zoom) }, set: { v in session.view { $0.zoom = exp(v) } }),
                    in: log(EditSuiteState.zoomRange.lowerBound)...log(EditSuiteState.zoomRange.upperBound))
                 .controlSize(.mini)
@@ -92,7 +92,7 @@ struct EditSuiteTimeline: View {
         let hidden = track?.hidden == true
         let locked = s.locked.contains(row.trackId)
         return HStack(spacing: 6) {
-            Image(systemName: row.icon).font(.system(size: 11)).foregroundStyle(t.muted).frame(width: 16).accessibilityHidden(true)
+            Ph(row.icon, 11).foregroundStyle(t.muted).frame(width: 16).accessibilityHidden(true)
             Text(row.label).font(t.mono(10.5, .medium)).tracking(1).foregroundStyle(t.ink).lineLimit(1)
             Spacer(minLength: 2)
             if row.kind.isAudio || row.kind == .main {
@@ -257,7 +257,7 @@ struct TimelineCanvas: View {
         .gesture(moveGesture(b, row: row, locked: locked))
         .overlay(alignment: .topLeading) {
             if row.kind == .main, let tr = b.transition {
-                Image(systemName: "diamond.fill").font(.system(size: 13)).foregroundStyle(t.accent)
+                Ph("diamond.fill", 13).foregroundStyle(t.accent)
                     .offset(x: x - 7, y: 3 + h / 2 - 7)
                     .help(EditV2.transitionLabel(tr))
                     .accessibilityLabel("Transition: \(EditV2.transitionLabel(tr))")
