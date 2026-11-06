@@ -44,9 +44,13 @@ public final class HTTPCameraAPI: CameraAPI, @unchecked Sendable {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    public init(baseURL: URL, session: URLSession = .shared, token: @escaping @Sendable () -> String?) {
+    /// The app's one shared GET /v1/events connection (performance pass).
+    private let hub: LiveEventHub
+
+    public init(baseURL: URL, session: URLSession = .shared, hub: LiveEventHub = .shared, token: @escaping @Sendable () -> String?) {
         self.baseURL = baseURL
         self.session = session
+        self.hub = hub
         self.token = token
     }
 
@@ -192,7 +196,17 @@ public final class HTTPCameraAPI: CameraAPI, @unchecked Sendable {
     /// GET /v1/events filtered to camera sessions and the relay. Reconnects with back-off while someone listens.
     /// (Linux builds have no streaming bytes API: they poll the list every 5 s instead.)
     public func events() -> AsyncStream<CameraLiveEvent> {
-        AsyncStream(bufferingPolicy: .bufferingNewest(256)) { cont in
+        // Apple platforms: the app's shared stream (LiveEventHub), mapped to these events. Linux: the polling fallback below.
+        if hub.canStream {
+            return hub.events(baseURL: baseURL, token: token(), session: session, buffer: 256) { f -> CameraLiveEvent? in
+                switch f {
+                case .connected: return .connected
+                case .disconnected: return .disconnected
+                case .payload(let p): return CameraLiveEvent.parse(Data(p.utf8))
+                }
+            }
+        }
+        return AsyncStream(bufferingPolicy: .bufferingNewest(256)) { cont in
             let task = Task { [weak self] in
                 var attempt = 0
                 while !Task.isCancelled, let self {
@@ -224,21 +238,8 @@ public final class HTTPCameraAPI: CameraAPI, @unchecked Sendable {
             try await Task.sleep(nanoseconds: 5_000_000_000)
         }
         #else
-        var r = request("GET", "v1/events", timeout: 40) // the server sends a comment every 10 s
-        r.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        let (bytes, resp) = try await session.bytes(for: r)
-        if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { throw ApiError("http_\(http.statusCode)", "Event stream refused") }
-        yield(.connected)
-        var filter = CameraLiveEventFilter()
-        var line = [UInt8]()
-        for try await b in bytes {
-            if b == 0x0A {
-                if let e = filter.feed(String(decoding: line, as: UTF8.self)) { yield(e) }
-                line.removeAll(keepingCapacity: true)
-            } else {
-                line.append(b)
-            }
-        }
+        // Apple platforms stream through the shared hub (`events()`); this fallback is never reached there.
+        throw ApiError("offline", "Live updates aren't available")
         #endif
     }
 }

@@ -476,7 +476,11 @@ extension AppStore {
     }
 
     func loadArchived() {
-        guard isOwner else { return }
-        perform { [self] in archivedModels = try await api.listArchivedModels() }
+        // Kept current by `model` events (archive / unarchive): refetch only when over a minute old.
+        guard isOwner, !listFreshness.isFresh("archived", maxAge: Self.listMaxAge) else { return }
+        perform { [self] in
+            archivedModels = try await api.listArchivedModels()
+            listFreshness.mark("archived")
+        }
     }
 }

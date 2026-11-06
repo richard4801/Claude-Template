@@ -10,6 +10,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import studio.muse.app.platform.Notifier
 import studio.muse.app.ui.MuseApp
 import studio.muse.app.ui.Routes
@@ -22,6 +25,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val container = (application as MuseApplication).container
+        // Cold start (plans/perf-audit.md "Android"): "Fully drawn" in logcat once the studio's lists have loaded (or there is
+        // nothing to load: signed out), on the frame after. `adb shell am start -W` reports TotalTime up to the first frame.
+        lifecycleScope.launch {
+            container.repo.state.first { it.loaded }
+            window.decorView.post { reportFullyDrawn() }
+        }
         pendingRoute.value = intent?.getStringExtra(Notifier.EXTRA_ROUTE)
         pendingHandoff.value = intent?.getStringExtra(Notifier.EXTRA_HANDOFF)
         setContent {
@@ -41,6 +50,11 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         (application as MuseApplication).container.repo.onForeground()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        (application as MuseApplication).container.repo.onBackground()
     }
 
     override fun onNewIntent(intent: Intent) {

@@ -1,57 +1,192 @@
 import AppKit
+import CoreGraphics
+import ImageIO
 import MuseCore
 import SwiftUI
 
-/// Loads images for `ImageRef`s: local files and data URLs synchronously (cached), http(s) asynchronously.
+/// Loads images for `ImageRef`s (performance pass, plans/perf-audit.md "Mac"):
+/// - decoded **at display size** with ImageIO (`CGImageSourceCreateThumbnailAtIndex`) on a background thread, so a 190 pt
+///   gallery tile holds a 768 px image instead of the 2–4K original, and nothing decodes on the main thread;
+/// - kept in an `NSCache` with a byte-cost limit (it was an unbounded dictionary of full-size images);
+/// - downloaded once per URL however many views ask at once, over a disk URLCache (`ImageDataLoader`).
 @MainActor
 final class ImageCache {
     static let shared = ImageCache()
-    private var cache: [String: NSImage] = [:]
-    private var inflight: Set<String> = []
 
-    func image(for url: String) -> NSImage? {
-        if let i = cache[url] { return i }
-        var img: NSImage?
-        if url.hasPrefix("file:"), let u = URL(string: url) {
-            img = NSImage(contentsOf: u)
-        } else if url.hasPrefix("data:"), let comma = url.firstIndex(of: ","), let d = Data(base64Encoded: String(url[url.index(after: comma)...])) {
-            img = NSImage(data: d)
+    /// Decoded bytes kept in memory at most (the system also trims it under memory pressure).
+    nonisolated static let memoryLimit = 192 << 20
+    /// The size `load(_:)` and `image(for:)` decode at when the caller doesn't say (full-frame uses like a poster grab).
+    nonisolated static let largeSide = 2048
+
+    private let memory: NSCache<NSString, NSImage> = {
+        let c = NSCache<NSString, NSImage>()
+        c.totalCostLimit = ImageCache.memoryLimit
+        c.countLimit = 800
+        c.delegate = ImageCacheStats.shared
+        return c
+    }()
+    private var inflight: [String: Task<NSImage?, Never>] = [:]
+    /// Which sizes of a URL are in memory, so a smaller tile can reuse a bigger decode (bounded by `memory`'s own evictions).
+    private var sizes: [String: Set<Int>] = [:]
+
+    private static func key(_ url: String, _ px: Int) -> NSString { "\(short(url))#\(px)" as NSString }
+
+    /// Cache keys for data URLs (Claude chat images, inline thumbs) are a few bytes, not the whole base64 image.
+    nonisolated static func short(_ url: String) -> String {
+        guard url.utf8.count > 512 else { return url }
+        return "h\(url.utf8.count)-\(url.hashValue)-\(url.suffix(24))"
+    }
+
+    /// A decode of `url` good for `px` (that size or bigger), else the biggest smaller one as a stand-in. Memory only, cheap.
+    func cached(_ url: String, px: Int) -> (image: NSImage, exact: Bool)? {
+        guard let known = sizes[Self.short(url)] else { return nil }
+        var best: (NSImage, Bool)?
+        var gone: [Int] = []
+        for s in known.sorted() {
+            guard let i = memory.object(forKey: Self.key(url, s)) else { gone.append(s); continue }
+            if s >= px || s == 0 {
+                best = (i, true)
+                break
+            }
+            best = (i, false) // a smaller decode stands in until the right size arrives
         }
-        if let img { cache[url] = img }
+        if !gone.isEmpty { // evicted: forget them so the bookkeeping stays as small as the cache
+            let left = known.subtracting(gone)
+            sizes[Self.short(url)] = left.isEmpty ? nil : left
+        }
+        return best.map { (image: $0.0, exact: $0.1) }
+    }
+
+    /// Decodes `url` at `px` (longest side, pixels) off the main thread; one decode per URL and size at a time.
+    func load(_ url: String, px: Int) async -> NSImage? {
+        if let c = cached(url, px: px), c.exact { return c.image }
+        let k = Self.key(url, px) as String
+        if let t = inflight[k] { return await t.value }
+        let t = Task.detached(priority: .userInitiated) { () -> NSImage? in
+            guard let cg = await ImageCache.decode(url, maxPixel: px) else { return nil }
+            return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+        }
+        inflight[k] = t
+        let img = await t.value
+        inflight[k] = nil
+        if let img { store(url, px, img) }
         return img
     }
 
-    func load(_ url: String) async -> NSImage? {
-        if let i = cache[url] { return i }
-        guard let u = URL(string: url), !inflight.contains(url) else { return nil }
-        inflight.insert(url)
-        defer { inflight.remove(url) }
-        guard let res = try? await URLSession.shared.data(from: u), let img = NSImage(data: res.0) else { return nil }
-        cache[url] = img
+    private func store(_ url: String, _ px: Int, _ img: NSImage) {
+        memory.setObject(img, forKey: Self.key(url, px), cost: Self.cost(img))
+        sizes[Self.short(url), default: []].insert(px)
+        ImageCacheStats.shared.added(Self.cost(img))
+    }
+
+    /// Bytes a decoded image holds (4 bytes a pixel).
+    nonisolated static func cost(_ img: NSImage) -> Int {
+        if let rep = img.representations.first { return max(1, rep.pixelsWide * rep.pixelsHigh * 4) }
+        return max(1, Int(img.size.width * img.size.height * 4))
+    }
+
+    /// Reads and downsamples off the main thread: local files straight from disk, data URLs inline, http(s) through the cache.
+    nonisolated static func decode(_ url: String, maxPixel: Int) async -> CGImage? {
+        let source: CGImageSource?
+        if url.hasPrefix("file:"), let u = URL(string: url) {
+            source = CGImageSourceCreateWithURL(u as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
+        } else if url.hasPrefix("data:"), let comma = url.firstIndex(of: ","), let d = Data(base64Encoded: String(url[url.index(after: comma)...])) {
+            source = CGImageSourceCreateWithData(d as CFData, [kCGImageSourceShouldCache: false] as CFDictionary)
+        } else if let u = URL(string: url), let d = try? await ImageDataLoader.shared.data(for: u) {
+            source = CGImageSourceCreateWithData(d as CFData, [kCGImageSourceShouldCache: false] as CFDictionary)
+        } else {
+            source = nil
+        }
+        guard let source else { return nil }
+        let opts: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true, // decode now, here, not on the main thread at first draw
+            kCGImageSourceThumbnailMaxPixelSize: max(1, maxPixel),
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, opts as CFDictionary)
+    }
+
+    // MARK: The older entry points (kept for their callers)
+
+    /// Local files and data URLs, synchronously (cached). Prefer `MuseImage`, which decodes off the main thread.
+    func image(for url: String) -> NSImage? {
+        if let c = cached(url, px: Self.largeSide) { return c.image }
+        guard url.hasPrefix("file:") || url.hasPrefix("data:") else { return nil }
+        let src: CGImageSource?
+        if url.hasPrefix("file:"), let u = URL(string: url) {
+            src = CGImageSourceCreateWithURL(u as CFURL, nil)
+        } else if let comma = url.firstIndex(of: ","), let d = Data(base64Encoded: String(url[url.index(after: comma)...])) {
+            src = CGImageSourceCreateWithData(d as CFData, nil)
+        } else {
+            src = nil
+        }
+        let opts: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+                                     kCGImageSourceShouldCacheImmediately: true, kCGImageSourceThumbnailMaxPixelSize: Self.largeSide]
+        guard let src, let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+        let img = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+        store(url, Self.largeSide, img)
         return img
     }
 
-    func put(_ url: String, _ img: NSImage) { cache[url] = img }
+    /// An http(s) image at up to 2048 px.
+    func load(_ url: String) async -> NSImage? { await load(url, px: Self.largeSide) }
+
+    /// An image this Mac already has (a just-uploaded file), so it shows at once under its new address.
+    func put(_ url: String, _ img: NSImage) {
+        memory.setObject(img, forKey: Self.key(url, 0), cost: Self.cost(img))
+        sizes[Self.short(url), default: []].insert(0)
+        ImageCacheStats.shared.added(Self.cost(img))
+    }
+}
+
+/// Roughly how many decoded bytes `ImageCache` holds (Settings → Developer → Performance).
+final class ImageCacheStats: NSObject, NSCacheDelegate, @unchecked Sendable {
+    static let shared = ImageCacheStats()
+    private let lock = NSLock()
+    private var bytes = 0
+    private var count = 0
+
+    func added(_ cost: Int) { lock.lock(); bytes += cost; count += 1; lock.unlock() }
+
+    func cache(_ cache: NSCache<AnyObject, AnyObject>, willEvictObject obj: Any) {
+        guard let img = obj as? NSImage else { return }
+        let c = ImageCache.cost(img)
+        lock.lock(); bytes = max(0, bytes - c); count = max(0, count - 1); lock.unlock()
+    }
+
+    var snapshot: (bytes: Int, count: Int) { lock.lock(); defer { lock.unlock() }; return (bytes, count) }
 }
 
 /// An `ImageRef` drawn to fill its frame. No photos are bundled: demo asset keys ("face", "g_front", …) are drawn as neutral
 /// silhouette placeholders, and anything that can't load falls back to the same art.
+/// Performance pass: decoded at the frame's pixel size, off the main thread (see `ImageCache`).
 struct MuseImage: View {
     var ref: ImageRef?
     var symbol: String?
-    @State private var remote: NSImage?
+    @Environment(\.displayScale) private var scale
+    @State private var loaded: NSImage?
+    @State private var loadedKey: String?
 
     var body: some View {
         GeometryReader { g in
-            content.frame(width: g.size.width, height: g.size.height).clipped()
-        }
-        .task(id: ref?.url) {
-            if let u = ref?.url, u.hasPrefix("http") { remote = await ImageCache.shared.load(u) }
+            let px = ImageDataLoader.pixelBucket(width: g.size.width, height: g.size.height, scale: scale)
+            content(px).frame(width: g.size.width, height: g.size.height).clipped()
+                .task(id: "\(ImageCache.short(ref?.url ?? ""))#\(px)") { await fetch(px) }
         }
     }
 
-    @ViewBuilder private var content: some View {
-        if let u = ref?.url, let img = (u.hasPrefix("http") ? remote : ImageCache.shared.image(for: u)) {
+    private func fetch(_ px: Int) async {
+        guard let u = ref?.url, px > 0 else { return }
+        if let c = ImageCache.shared.cached(u, px: px), c.exact { return }
+        if let img = await ImageCache.shared.load(u, px: px), !Task.isCancelled {
+            loaded = img
+            loadedKey = "\(ImageCache.short(u))#\(px)"
+        }
+    }
+
+    @ViewBuilder private func content(_ px: Int) -> some View {
+        if let u = ref?.url, let img = (loadedKey == "\(ImageCache.short(u))#\(px)" ? loaded : nil) ?? ImageCache.shared.cached(u, px: px)?.image {
             Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
         } else {
             Placeholder(key: ref?.asset ?? ref?.url ?? "empty", symbol: symbol)

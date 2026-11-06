@@ -10,11 +10,34 @@ extension AppStore {
     /// LoRAs, accounts and posts. Each call is allowed to fail on its own, so a server without these endpoints still loads.
     func loadSocial() async {
         let api = self.api
-        for m in models {
-            if let l = try? await api.lora(modelId: m.id) { loras[m.id] = l }
-            if let a = try? await api.listAccounts(modelId: m.id) { accounts[m.id] = a }
+        // Performance pass: side by side instead of two round trips per model one after another (same request count).
+        let ids = models.map(\.id)
+        async let postsReply = attempt { try await api.listPosts(state: nil) }
+        let perModel = await withTaskGroup(of: (String, Lora?, [Account]?).self) { group in
+            for id in ids {
+                group.addTask {
+                    async let l = attempt { try await api.lora(modelId: id) }
+                    async let a = attempt { try await api.listAccounts(modelId: id) }
+                    return (id, await l, await a)
+                }
+            }
+            var out: [(String, Lora?, [Account]?)] = []
+            for await r in group { out.append(r) }
+            return out
         }
-        if let p = try? await api.listPosts(state: nil) { posts = p }
+        for (id, l, a) in perModel {
+            if let l { loras[id] = l }
+            if let a { accounts[id] = a }
+        }
+        if let p = await postsReply { posts = p }
+        listFreshness.mark("posts")
+    }
+
+    /// The Posts screen appeared: refetch only when the list (kept current by `post` events) is over a minute old.
+    func loadPostsIfStale() async {
+        guard !listFreshness.isFresh("posts", maxAge: Self.listMaxAge) else { return }
+        if let fresh = try? await api.listPosts(state: nil) { posts = fresh }
+        listFreshness.mark("posts")
     }
 
     func applyLora(_ l: Lora) {

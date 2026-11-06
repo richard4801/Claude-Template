@@ -489,7 +489,7 @@ struct PostsView: View {
             if list.isEmpty {
                 Note(icon: "sparkles", store.postTab == .scheduled ? "Nothing scheduled. Open a finished take in the Gallery and click Post." : "Nothing posted yet.")
             } else {
-                VStack(spacing: 0) {
+                LazyVStack(spacing: 0) {
                     HStack(spacing: 12) {
                         Color.clear.frame(width: 44, height: 1)
                         Lbl("Post").frame(maxWidth: .infinity, alignment: .leading)
@@ -507,7 +507,7 @@ struct PostsView: View {
             Muted("For now MUSE opens each app (or its upload page) with your video and caption ready. Direct posting and auto-scheduling switch on per platform once it approves MUSE.")
                 .padding(.top, 16)
         }
-        .task { if let fresh = try? await store.api.listPosts(state: nil) { store.posts = fresh } }
+        .task { await store.loadPostsIfStale() }
     }
 }
 

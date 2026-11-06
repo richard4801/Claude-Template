@@ -1,0 +1,41 @@
+# MUSE Baseline Profile (performance, plans/perf-audit.md "Android").
+# Classes and methods on the cold-start path, compiled ahead of time at install (androidx.profileinstaller, which Compose
+# brings in). Compose, Navigation, Coil, OkHttp and kotlinx.serialization ship their own profiles; this file covers the app.
+# Hand-written with wildcards for now; regenerate it with a Macrobenchmark BaselineProfileRule when a device is at hand.
+
+# App start: Application, container, Activity
+HSPLstudio/muse/app/MuseApplication;->**(**)**
+HSPLstudio/muse/app/AppContainer**;->**(**)**
+HSPLstudio/muse/app/MainActivity**;->**(**)**
+Lstudio/muse/app/MuseApplication;
+Lstudio/muse/app/AppContainer**;
+Lstudio/muse/app/MainActivity**;
+
+# Data layer: preferences, repository, HTTP client, models and their serializers, the live stream
+HSPLstudio/muse/app/data/**;->**(**)**
+Lstudio/muse/app/data/**;
+HSPLstudio/muse/core/**;->**(**)**
+Lstudio/muse/core/**;
+
+# First screens: navigation host, theme, shared components, splash/sign-in, Home, Gallery, Queue
+HSPLstudio/muse/app/ui/MuseApp**;->**(**)**
+HSPLstudio/muse/app/ui/Nav;->**(**)**
+HSPLstudio/muse/app/ui/Routes;->**(**)**
+HSPLstudio/muse/app/ui/theme/**;->**(**)**
+HSPLstudio/muse/app/ui/components/**;->**(**)**
+HSPLstudio/muse/app/ui/screens/AuthScreens**;->**(**)**
+HSPLstudio/muse/app/ui/screens/HomeScreen**;->**(**)**
+HSPLstudio/muse/app/ui/screens/Home**;->**(**)**
+HSPLstudio/muse/app/ui/screens/ResultGalleryScreens**;->**(**)**
+HSPLstudio/muse/app/ui/screens/Gallery**;->**(**)**
+HSPLstudio/muse/app/ui/screens/QueueScreen**;->**(**)**
+HSPLstudio/muse/app/ui/screens/Queue**;->**(**)**
+HSPLstudio/muse/app/ui/screens/CommonKt;->**(**)**
+Lstudio/muse/app/ui/MuseApp**;
+Lstudio/muse/app/ui/theme/**;
+Lstudio/muse/app/ui/components/**;
+Lstudio/muse/app/ui/screens/AuthScreens**;
+Lstudio/muse/app/ui/screens/HomeScreen**;
+Lstudio/muse/app/ui/screens/Home**;
+Lstudio/muse/app/ui/screens/Gallery**;
+Lstudio/muse/app/ui/screens/Queue**;

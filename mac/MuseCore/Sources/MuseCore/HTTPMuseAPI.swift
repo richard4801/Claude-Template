@@ -45,9 +45,60 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    public init(baseURL: URL, session: URLSession = .shared) {
+    /// Performance pass: identical GETs in flight share one request; with `cacheCatalogs` (the app turns it on) the
+    /// slow-changing catalogs (`CatalogCachePolicy`) are kept for a few minutes, dropped on any write, on the live events
+    /// that change them, and on every (re)connect of the live stream.
+    private let gets = RequestCoalescer<Data>()
+    private let catalogCache = TTLCache<Data>()
+    private let cacheCatalogs: Bool
+    private let coalesceGets: Bool
+    /// The shared GET /v1/events connection (one per server and session for the whole app).
+    public let hub: LiveEventHub
+    private let statsLock = NSLock()
+    private var sentCount = 0
+    private var cacheHits = 0
+
+    public init(baseURL: URL, session: URLSession = .shared, cacheCatalogs: Bool = false, coalesceGets: Bool = true, hub: LiveEventHub = .shared) {
         self.baseURL = baseURL
         self.session = session
+        self.cacheCatalogs = cacheCatalogs
+        self.coalesceGets = coalesceGets
+        self.hub = hub
+    }
+
+    /// Requests sent, GETs answered by one already in flight, and catalog cache hits (Settings → Developer's readout).
+    public var requestStats: (sent: Int, joined: Int, cacheHits: Int) {
+        statsLock.lock()
+        defer { statsLock.unlock() }
+        return (sentCount, gets.joined, cacheHits)
+    }
+
+    private func bump(_ hit: Bool) {
+        statsLock.lock()
+        if hit { cacheHits += 1 } else { sentCount += 1 }
+        statsLock.unlock()
+    }
+
+    /// Forgets the cached catalogs (a manual Reload, a server switch).
+    public func invalidateCache() { catalogCache.invalidate() }
+
+    /// GET with coalescing and the catalog cache.
+    private func get(_ path: String) async throws -> Data {
+        let key = (currentToken ?? "") + " " + path
+        let ttl = cacheCatalogs ? CatalogCachePolicy.ttl(for: path) : nil
+        if ttl != nil, let d = catalogCache.get(key) {
+            bump(true)
+            return d
+        }
+        let version = catalogCache.version
+        let d: Data
+        if coalesceGets {
+            d = try await gets.run(key) { [self] in try await send(request("GET", path)) }
+        } else {
+            d = try await send(request("GET", path))
+        }
+        if let ttl { catalogCache.put(key, d, ttl: ttl, ifVersion: version) }
+        return d
     }
 
     public func setToken(_ token: String?) async { storeToken(token) }
@@ -91,6 +142,9 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     }
 
     private func send(_ r: URLRequest) async throws -> Data {
+        bump(false)
+        // Any write may change what a cached catalog says.
+        if r.httpMethod != "GET" { catalogCache.invalidate() }
         let (data, resp): (Data, URLResponse?)
         do {
             (data, resp) = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<(Data, URLResponse?), Error>) in
@@ -112,7 +166,8 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     }
 
     private func call<T: Decodable>(_ method: String, _ path: String) async throws -> T {
-        try decode(try await send(request(method, path)))
+        if method == "GET" { return try decode(try await get(path)) }
+        return try decode(try await send(request(method, path)))
     }
 
     private func call<T: Decodable, B: Encodable>(_ method: String, _ path: String, _ body: B) async throws -> T {
@@ -129,7 +184,8 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
 
     // AI suite (workstream 1): the JSON round trip for Suite/SuiteHTTP.swift.
     func suiteCall<T: Decodable>(_ method: String, _ path: String, body: Data? = nil) async throws -> T {
-        try decode(try await send(request(method, path, body: body)))
+        if method == "GET" && body == nil { return try decode(try await get(path)) }
+        return try decode(try await send(request(method, path, body: body)))
     }
     /// A call whose reply has nothing to read (DELETE).
     func suiteSend(_ method: String, _ path: String) async throws { _ = try await send(request(method, path)) }
@@ -614,9 +670,30 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
 
     public func setFailNext(_ fail: Bool) async throws { _ = try await send(request("POST", "v1/dev/fail-next", body: try encoder.encode(DevFailRequest(failNext: fail)))) }
 
-    /// Events from GET /v1/events. Reconnects with back-off while the subscriber is listening.
+    /// Events from GET /v1/events. Reconnects with back-off while the subscriber is listening. On Apple platforms every
+    /// subscriber shares the app's one connection (`LiveEventHub`); Linux builds (tests) poll instead.
     public func events() -> AsyncStream<ApiEvent> {
-        AsyncStream(bufferingPolicy: .bufferingNewest(256)) { cont in
+        if hub.canStream {
+            return hub.events(baseURL: baseURL, token: currentToken, session: session, buffer: 256) { [weak self] f -> ApiEvent? in
+                guard let self else { return nil }
+                switch f {
+                case .connected:
+                    self.catalogCache.invalidate()
+                    return ApiEvent(type: ApiEvent.connected)
+                case .payload(let p):
+                    guard let e = self.liveEvent(p) else { return nil }
+                    if let stale = CatalogCachePolicy.stale(forEvent: e.type) {
+                        if !stale.isEmpty { self.catalogCache.invalidate(stale) }
+                    } else {
+                        self.catalogCache.invalidate()
+                    }
+                    return e
+                case .disconnected:
+                    return nil
+                }
+            }
+        }
+        return AsyncStream(bufferingPolicy: .bufferingNewest(256)) { cont in
             let task = Task { [weak self] in
                 var attempt = 0
                 while !Task.isCancelled, let self {
@@ -640,12 +717,29 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
         }
     }
 
+    /// Restarts the shared live stream (a network change, wake from sleep).
+    public func reconnectEvents() { hub.reconnect(baseURL: baseURL) }
+
+    /// The shared live stream is open and heard from the server lately (it sends a keep-alive every 10 s).
+    public var liveStreamHealthy: Bool { hub.isHealthy(baseURL: baseURL) }
+
+    /// One SSE payload as an event, with its server paths made absolute.
+    func liveEvent(_ payload: String) -> ApiEvent? {
+        guard var e = try? decoder.decode(ApiEvent.self, from: Data(payload.utf8)) else { return nil }
+        if let l = e.lora { e.lora = absolutize(l) }
+        if let p = e.post { e.post = absolutize(p) }
+        if let j = e.job { e.job = absolutize(j) }
+        if let t = e.tool { e.tool = absolutize(t) }
+        if let m = e.model { e.model = absolutize(m) }
+        if let o = e.outfit { e.outfit = absolutize(o) }
+        if let t = e.take { e.take = absolutize(t) }
+        if let t = e.template { e.template = absolutize(t) }
+        e.takes = e.takes.map(absolutize)
+        return e
+    }
+
+    /// The polling fallback for builds without a streaming transport (Linux, for tests).
     private func stream(_ yield: @escaping (ApiEvent) -> Void) async throws {
-        var r = request("GET", "v1/events")
-        r.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        // The server sends a comment every 10 s (15 s on older builds): 40 s without a byte means the stream died quietly
-        // (the Mac slept, the network changed, a proxy dropped it), so the request times out and the loop reconnects.
-        r.timeoutInterval = 40
         #if canImport(FoundationNetworking)
         // swift-corelibs-foundation has no streaming bytes API; poll instead (Linux builds only, for tests).
         yield(ApiEvent(type: ApiEvent.connected))
@@ -657,30 +751,8 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
             try await Task.sleep(nanoseconds: 1_000_000_000)
         }
         #else
-        let (bytes, resp) = try await session.bytes(for: r)
-        if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { throw ApiError("http_\(http.statusCode)", "Event stream refused") }
-        yield(ApiEvent(type: ApiEvent.connected))
-        var parser = SSEParser()
-        var line = [UInt8]()
-        for try await b in bytes {
-            if b == 0x0A {
-                if let payload = parser.feed(String(decoding: line, as: UTF8.self)), let d = payload.data(using: .utf8), var e = try? decoder.decode(ApiEvent.self, from: d) {
-                    if let l = e.lora { e.lora = absolutize(l) }
-                    if let p = e.post { e.post = absolutize(p) }
-                    if let j = e.job { e.job = absolutize(j) }
-                    if let t = e.tool { e.tool = absolutize(t) }
-                    if let m = e.model { e.model = absolutize(m) }
-                    if let o = e.outfit { e.outfit = absolutize(o) }
-                    if let t = e.take { e.take = absolutize(t) }
-                    if let t = e.template { e.template = absolutize(t) }
-                    e.takes = e.takes.map(absolutize)
-                    yield(e)
-                }
-                line.removeAll(keepingCapacity: true)
-            } else {
-                line.append(b)
-            }
-        }
+        // Apple platforms stream through the shared hub (`events()`); this fallback is never reached there.
+        throw ApiError("offline", "Live updates aren't available")
         #endif
     }
 }

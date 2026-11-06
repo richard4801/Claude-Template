@@ -25,7 +25,10 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Performance (plans/perf-audit.md "Android"): R8 shrinks and optimises the code and drops unused resources.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
     compileOptions {
@@ -67,6 +70,16 @@ tasks.named("preBuild") { dependsOn(copyComposerPreviews) }
 kotlin {
     jvmToolchain(21)
     compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
+}
+
+// Performance: our data classes and Kotlin collections are immutable, so Compose may skip recomposing a screen part whose
+// inputs are equal (compose_stability.conf). Set -PcomposeReports=true to write the compiler's stability reports.
+composeCompiler {
+    stabilityConfigurationFiles.add(rootProject.layout.projectDirectory.file("compose_stability.conf"))
+    if (providers.gradleProperty("composeReports").orNull == "true") {
+        reportsDestination.set(layout.buildDirectory.dir("compose_compiler"))
+        metricsDestination.set(layout.buildDirectory.dir("compose_compiler"))
+    }
 }
 
 roborazzi {

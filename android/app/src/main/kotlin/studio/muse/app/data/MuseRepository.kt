@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 
 /** Everything the screens show, kept live from the active MuseApi. */
@@ -50,6 +52,15 @@ data class StudioState(
     fun job(id: String?) = jobs.firstOrNull { it.id == id }
     val running: Job? get() = jobs.firstOrNull { it.running }
 }
+
+/** Back in front within this long: no stream restart, no refetch (see [MuseRepository.onForeground]). */
+private const val QUICK_RETURN_MS = 30_000L
+
+/** The launch load's lists (fetched side by side in [MuseRepository.refresh]). */
+private data class Loaded(
+    val models: List<Model>, val outfits: List<Outfit>, val jobs: List<Job>, val takes: List<Take>, val balance: Balance,
+    val wallet: Wallet?, val posts: List<Post>, val features: StudioFeatures?,
+)
 
 /** A toast line, optionally tappable. */
 data class Toast(val message: String, val route: String? = null, val id: Long = System.nanoTime())
@@ -147,9 +158,18 @@ class MuseRepository(
         if (a !== fake && sessionToken == null) return
         val now = System.currentTimeMillis()
         if (now - eventsStartedAt < 5_000) return // just started (launch, rotation)
+        // Performance: back after a short trip (a share sheet, a post handoff, the notification shade) keeps the stream and
+        // the lists; a stream that dropped meanwhile reconnects by itself and catches up then.
+        val away = backgroundedAt?.let { now - it }
+        backgroundedAt = null
+        if (away != null && away < QUICK_RETURN_MS) return
         startEvents(a)
         catchUp()
     }
+
+    private var backgroundedAt: Long? = null
+    /** The app went to the background (Activity onStop). */
+    fun onBackground() { backgroundedAt = System.currentTimeMillis() }
 
     /** Refetch after a reconnect or on foreground; at most once every 3 s. */
     private fun catchUp() {
@@ -174,20 +194,28 @@ class MuseRepository(
     suspend fun refresh() {
         try {
             val a = api
-            val models = a.listModels()
-            val outfits = a.listOutfits()
-            val jobs = a.listJobs()
-            val takes = a.listTakes()
-            val bal = a.balance()
-            val wallet = runCatching { a.wallet() }.getOrNull()
-            // LoRAs, accounts and posts are newer endpoints: an older server without them still loads.
-            val loras = models.mapNotNull { m -> runCatching { a.lora(m.id) }.getOrNull()?.let { m.id to it } }.toMap()
-            val accounts = models.mapNotNull { m -> runCatching { a.listAccounts(m.id) }.getOrNull()?.let { m.id to it } }.toMap()
-            val posts = runCatching { a.listPosts() }.getOrDefault(emptyList())
-            // Keep add-on engine ready is owner-only: members never ask for it (the server answers 403 anyway).
-            val owner = wallet?.owner ?: (bal.role == "owner")
-            val warm = if (owner) runCatching { a.warmGpu() }.getOrNull() else null
-            val features = runCatching { a.studioSettings().features }.getOrNull()
+            // Performance: the lists load side by side (one round trip of wait instead of ~15 in a row); the per-model
+            // LoRA and accounts follow the models. Identical requests already in flight are shared by HttpMuseApi.
+            val (models, outfits, jobs, takes, bal, wallet, posts, features) = kotlinx.coroutines.coroutineScope {
+                val models = async { a.listModels() }
+                val outfits = async { a.listOutfits() }
+                val jobs = async { a.listJobs() }
+                val takes = async { a.listTakes() }
+                val bal = async { a.balance() }
+                val wallet = async { runCatching { a.wallet() }.getOrNull() }
+                // LoRAs, accounts and posts are newer endpoints: an older server without them still loads.
+                val posts = async { runCatching { a.listPosts() }.getOrDefault(emptyList()) }
+                val features = async { runCatching { a.studioSettings().features }.getOrNull() }
+                Loaded(models.await(), outfits.await(), jobs.await(), takes.await(), bal.await(), wallet.await(), posts.await(), features.await())
+            }
+            val (loras, accounts, warm) = kotlinx.coroutines.coroutineScope {
+                val loras = models.map { m -> async { runCatching { a.lora(m.id) }.getOrNull()?.let { m.id to it } } }
+                val accounts = models.map { m -> async { runCatching { a.listAccounts(m.id) }.getOrNull()?.let { m.id to it } } }
+                // Keep add-on engine ready is owner-only: members never ask for it (the server answers 403 anyway).
+                val owner = wallet?.owner ?: (bal.role == "owner")
+                val warm = async { if (owner) runCatching { a.warmGpu() }.getOrNull() else null }
+                Triple(loras.awaitAll().filterNotNull().toMap(), accounts.awaitAll().filterNotNull().toMap(), warm.await())
+            }
             if (a !== api) return
             _state.update {
                 StudioState(models, outfits, jobs.sortedByDescending { it.createdAt }, takes, bal, loras, accounts, posts, wallet, warm = warm, video = features?.video,
@@ -478,8 +506,11 @@ class MuseRepository(
     // ---- photo templates
     private fun putTemplate(t: Template) = _state.update { s -> s.copy(templates = s.templates.upsert(t) { it.id == t.id }) }
     /** [quiet]: no toast on failure (the Photo presets, against a server without templates). */
-    suspend fun loadTemplates(quiet: Boolean = false): List<Template>? =
-        (if (quiet) attemptInline { listTemplates("all") }.first else attempt { listTemplates("all") })?.also { l -> _state.update { it.copy(templates = l) } }
+    /** [force]: an explicit Refresh skips the short-lived list cache (the list is kept live by `template` events meanwhile). */
+    suspend fun loadTemplates(quiet: Boolean = false, force: Boolean = false): List<Template>? {
+        if (force) (api as? HttpMuseApi)?.invalidateReads("templates")
+        return (if (quiet) attemptInline { listTemplates("all") }.first else attempt { listTemplates("all") })?.also { l -> _state.update { it.copy(templates = l) } }
+    }
     suspend fun template(id: String) = attemptInline { template(id) }.also { (t, _) -> t?.let { putTemplate(it.copy(recent = null)) } }
     suspend fun templateDraft(shotId: String) = attemptInline { templateDraft(shotId) }
     suspend fun createTemplate(req: CreateTemplateRequest) = attemptInline { createTemplate(req) }.also { (t, _) -> t?.let(::putTemplate) }

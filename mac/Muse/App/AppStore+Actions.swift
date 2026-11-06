@@ -678,10 +678,13 @@ extension AppStore {
 
     // MARK: Studio (owner)
 
-    func loadMembers() {
+    func loadMembers(force: Bool = false) {
+        // Members are kept current by `member` and `wallet` events: refetch only when the list is over a minute old (or on Refresh).
+        guard force || !listFreshness.isFresh("members", maxAge: Self.listMaxAge) else { return }
         perform { [self] in
             members = try await api.listMembers()
             wallet = try? await api.wallet()
+            listFreshness.mark("members")
         }
     }
 

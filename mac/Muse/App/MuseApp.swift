@@ -9,6 +9,7 @@ struct MuseApp: App {
     @State private var store = AppStore()
 
     init() {
+        StartupMetrics.launched()
         Fonts.registerBundled()
     }
 
@@ -22,11 +23,11 @@ struct MuseApp: App {
                 .onAppear {
                     store.bootstrap()
                     KeyMonitor.shared.install(store)
-                    NetworkWatcher.shared.start { store.resumeLive() }
+                    NetworkWatcher.shared.start { store.resumeLive(force: true) }
                 }
                 // Back in front, or awake after sleep: restart the live stream and refetch what changed meanwhile.
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in store.resumeLive() }
-                .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in store.resumeLive() }
+                .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in store.resumeLive(force: true) }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1440, height: 900)

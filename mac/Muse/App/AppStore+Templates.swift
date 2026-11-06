@@ -10,6 +10,7 @@ extension AppStore {
     func loadTemplates() async {
         do {
             templates = try await api.listTemplates(TemplateQuery())
+            listFreshness.mark("templates")
         } catch let e as ApiError where e.code == "not_found" || e.code == "http_404" {
             templates = [] // a server without templates yet (server/mock)
         } catch {
@@ -21,7 +22,13 @@ extension AppStore {
 
     func openTemplates() {
         go(.templates)
-        Task { await loadTemplates() }
+        Task { await loadTemplatesIfStale() }
+    }
+
+    /// The library appeared: refetch only when the list (kept current by `template` events) is over a minute old.
+    func loadTemplatesIfStale() async {
+        guard !listFreshness.isFresh("templates", maxAge: Self.listMaxAge) else { return }
+        await loadTemplates()
     }
 
     /// The library's current tab, search and tag chip, applied locally (the same filter the server applies).

@@ -1,5 +1,6 @@
 package studio.muse.app.ui.screens
 
+import androidx.compose.ui.layout.onVisibilityChanged
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -246,11 +247,13 @@ fun StageVideo(url: String, poster: ImageRef?, muted: Boolean, modifier: Modifie
     }
     androidx.compose.runtime.DisposableEffect(player) { onDispose { player.release() } }
     androidx.compose.runtime.LaunchedEffect(player, muted) { player.volume = if (muted) 0f else 1f }
-    androidx.lifecycle.compose.LifecycleResumeEffect(player) {
-        player.playWhenReady = true
+    // Performance: plays only while at least a fifth of it is on screen (scrolled away → paused) and the app is in front.
+    var onScreen by remember { androidx.compose.runtime.mutableStateOf(true) }
+    androidx.lifecycle.compose.LifecycleResumeEffect(player, onScreen) {
+        player.playWhenReady = onScreen
         onPauseOrDispose { player.pause() }
     }
-    Box(modifier) {
+    Box(modifier.onVisibilityChanged(minFractionVisible = .2f) { onScreen = it }) {
         RefImage(poster, Modifier.fillMaxSize(), 25)
         androidx.compose.ui.viewinterop.AndroidView(
             factory = { ctx ->

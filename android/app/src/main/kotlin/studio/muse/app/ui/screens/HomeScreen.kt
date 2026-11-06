@@ -15,6 +15,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -58,6 +59,9 @@ data class HomeState(
     val loaded: Boolean = false,
     /** The last load failed (server unreachable): shown when there's nothing to show yet. */
     val error: String? = null,
+    val wallet: studio.muse.app.data.Wallet? = null,
+    /** Each model's latest outfit front (the card image of a locked model), by model id. */
+    val outfitFronts: Map<String, studio.muse.app.data.ImageRef?> = emptyMap(),
 )
 
 class HomeViewModel(private val c: AppContainer) : ViewModel() {
@@ -67,7 +71,8 @@ class HomeViewModel(private val c: AppContainer) : ViewModel() {
             s.models, featured, s.outfitsOf(featured?.id), s.balance,
             p.studioName.substringBefore(' '),
             s.running?.let { studio.muse.core.formatClock(it.secondsLeft) },
-            s.loaded, s.error,
+            s.loaded, s.error, s.wallet,
+            s.models.associate { m -> m.id to s.outfitsOf(m.id).lastOrNull()?.front },
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, HomeState())
 
@@ -111,8 +116,8 @@ fun HomeScreen() {
                         m.isC -> H2(greeting())
                         else -> H2("Your crew")
                     } }
-                    val wallet = LocalContainer.current.repo.state.collectAsState().value.wallet
-                    BalancePill(creditLabel(wallet, s.balance)) { nav.go(Routes.CREDITS) }
+                    // Performance: from HomeState (equal states are skipped), not the whole studio state, which changes on every live event.
+                    BalancePill(creditLabel(s.wallet, s.balance)) { nav.go(Routes.CREDITS) }
                 }
                 s.featured?.let { f -> FeatureCard(f, s.featuredOutfits) { vm.open(f, nav) } }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -130,7 +135,7 @@ fun HomeScreen() {
                 }
                 s.models.chunked(2).forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        row.forEach { model -> ModelCard(model, c.repo.state.value.outfitsOf(model.id).lastOrNull()?.front, Modifier.weight(1f)) { vm.open(model, nav) } }
+                        row.forEach { model -> key(model.id) { ModelCard(model, s.outfitFronts[model.id], Modifier.weight(1f)) { vm.open(model, nav) } } }
                         if (row.size == 1) Spacer(Modifier.weight(1f))
                     }
                 }

@@ -107,7 +107,7 @@ Checked and left as is:
 - **Fonts (32 TTFs, 1.2 MB compressed):** all used by the four themes. Subsetting them to Latin would save about 0.6 MB, but names in other scripts would fall back to the system font. That's a design call.
 - **R8 warnings:** R8 in AGP 8.13 warns that it can't read Kotlin 2.4 metadata (159 warnings). Nothing here reads that metadata at run time (no kotlin-reflect), so it is harmless. It goes away with a newer AGP or R8.
 - **The repository still makes 2 requests per model** (LoRA and accounts) on each load. Fewer requests needs a bulk server endpoint.
-- **The splash holds for 2.6 s** before Home (tap skips it). That is a design choice, not load time. Home's data is ready about 0.5 s after launch (see above), so the splash, not the network, sets when Home appears.
+- **Splash: show until ready (owner approved 2026-11-06).** It used to hold for a fixed 2.6 s (tap skipped it), so the splash, not the network, set when Home appeared. Now it leaves as soon as the saved session has loaded (that decides Home or Welcome), with a 300 ms minimum so a fast launch doesn't flash it (`SplashScreen`, `SPLASH_MIN_MS` in `AuthScreens.kt`). Before → after: 2600 ms → about 300 ms from first frame to Home on a warm session read (measure on a phone with the cold-start steps below). The Mac app has no timed splash, so nothing changed there.
 
 ### Tests
 

@@ -1,9 +1,14 @@
 package studio.muse.app.ui.screens
 
+import androidx.compose.ui.layout.onVisibilityChanged
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -271,17 +276,21 @@ fun GalleryScreen() {
             Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Wordmark(); Spacer(Modifier.weight(1f))
             }
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                if (m.isA) T("GALLERY", m.type.h2.copy(fontSize = 56.sp, lineHeight = 52.sp), m.t.ink) else H2("Gallery")
-                Seg(listOf("tests" to "Tests · ${s.tests.size}", "final" to "Final · ${s.finals.size}"), s.tab, vm::tab)
-                if (list.isEmpty() && !s.loaded) Tiny("Loading your renders…")
-                else if (list.isEmpty() && s.error != null) {
-                    NoteBox(s.error ?: "", warn = true)
-                    Cta2("Try again", { vm.retry() }, Modifier.fillMaxWidth(), icon = "retry", height = 46.dp)
-                } else if (list.isEmpty()) {
+            // Performance: a lazy list (only the rows on screen are composed and their thumbnails loaded), keyed by take.
+            val rows = remember(list) { list.chunked(3) }
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                item(key = "title", contentType = "title") { if (m.isA) T("GALLERY", m.type.h2.copy(fontSize = 56.sp, lineHeight = 52.sp), m.t.ink) else H2("Gallery") }
+                item(key = "tabs", contentType = "tabs") { Seg(listOf("tests" to "Tests · ${s.tests.size}", "final" to "Final · ${s.finals.size}"), s.tab, vm::tab) }
+                if (list.isEmpty() && !s.loaded) item(key = "loading", contentType = "note") { Tiny("Loading your renders…") }
+                else if (list.isEmpty() && s.error != null) item(key = "error", contentType = "note") {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        NoteBox(s.error ?: "", warn = true)
+                        Cta2("Try again", { vm.retry() }, Modifier.fillMaxWidth(), icon = "retry", height = 46.dp)
+                    }
+                } else if (list.isEmpty()) item(key = "empty", contentType = "note") {
                     NoteBox(if (s.tab == "final") "Nothing approved yet. Approve a take to move it here." else "No test renders yet. Make a video or a photo.", icon = "spark")
                 } else {
-                    list.chunked(3).forEachIndexed { r, row ->
+                    itemsIndexed(rows, key = { _, row -> row.first().id }, contentType = { _, _ -> "row" }) { r, row ->
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             row.forEachIndexed { i, t ->
                                 val idx = r * 3 + i
@@ -303,7 +312,7 @@ fun GalleryScreen() {
                         }
                     }
                 }
-                Tiny("Test renders stay separate from your Final gallery.")
+                item(key = "footer", contentType = "note") { Tiny("Test renders stay separate from your Final gallery.") }
             }
         }
         TabBar(Routes.GALLERY)
@@ -332,11 +341,13 @@ fun TakeVideo(url: String, poster: studio.muse.app.data.ImageRef?, active: Boole
         }
     }
     androidx.compose.runtime.DisposableEffect(player) { onDispose { player.release() } }
-    androidx.lifecycle.compose.LifecycleResumeEffect(player, active) {
-        player.playWhenReady = active
+    // Performance: plays only on the page showing, while it is on screen and the app is in front.
+    var onScreen by remember { mutableStateOf(true) }
+    androidx.lifecycle.compose.LifecycleResumeEffect(player, active, onScreen) {
+        player.playWhenReady = active && onScreen
         onPauseOrDispose { player.pause() }
     }
-    Box(modifier) {
+    Box(modifier.onVisibilityChanged(minFractionVisible = .2f) { onScreen = it }) {
         RefImage(poster, Modifier.fillMaxSize(), 30)
         androidx.compose.ui.viewinterop.AndroidView(
             factory = { ctx ->
