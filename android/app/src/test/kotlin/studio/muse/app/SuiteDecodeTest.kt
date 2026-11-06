@@ -33,6 +33,8 @@ class SuiteDecodeTest {
         assertTrue(o.enabled); assertTrue(o.test)
         assertEquals(listOf("draft", "standard", "hd", "cinema"), o.tiers.map { it.id })
         assertEquals("Draft", o.tiers[0].label)
+        assertEquals(listOf(2, 2, 3, 3), o.tiers.map { it.minSeconds })
+        assertEquals(listOf(15, 30, 30, 30), o.tiers.map { it.maxSeconds })
         assertTrue(o.tiers[0].models!!.isNotEmpty())
         assertEquals(4, o.recastMaxPeople)
         val mem = json.decodeFromString(SuiteCatalog.serializer(), res("suite_catalog_member"))

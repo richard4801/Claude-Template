@@ -71,7 +71,8 @@ class FakeSuite {
         val max = if (tier == "draft") 15 else 30
         val wanted = if (recast) (clipSeconds ?: 6.0) else (r.duration ?: 5).toDouble()
         if (wanted > max) throw ApiException("nothing_fits", "${SuiteRules.tierLabel(tier)} can't make this shot · try another quality, a shorter length or fewer references")
-        val seconds = ceil(wanted).coerceAtLeast(4.0)
+        val min = if (recast) 4.0 else (bundle.catalog.tier(tier)?.minSeconds ?: 4).toDouble()
+        val seconds = ceil(wanted).coerceAtLeast(min)
         val takes = if (recast) (r.takes ?: 1) else (r.takes ?: 1)
         val perSec = (if (recast) RECAST_PER_SEC else PER_SEC)[tier] ?: 0.02
         val estimate = round2(perSec * seconds * takes)

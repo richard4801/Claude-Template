@@ -130,6 +130,8 @@ data class SuiteTier(
     val resolution: String? = null,
     val fromPerSec: Double? = null,
     val maxSeconds: Int? = null,
+    /** The shortest take this tier makes (with [maxSeconds], the composer's Length slider range). */
+    val minSeconds: Int? = null,
     val canKeyframes: Boolean = false,
     val canReferences: Boolean = false,
     val canGuide: Boolean = false,
@@ -239,6 +241,8 @@ data class SuiteShotRequest(
     val quality: String? = null,
     val takes: Int? = null,
     val speaking: Boolean? = null,
+    /** Native sound (ambience and effects); null = the server's default (on). */
+    val audio: Boolean? = null,
     /** A preset spec, or a Directed mode spec from the camera stage (kept as JSON). */
     val camera: JsonElement? = null,
     val clipId: String? = null,
