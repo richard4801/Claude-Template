@@ -723,6 +723,8 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
     public var editsV2: EditV2.Project?
     /// AI suite (workstream 1): a suite take's Look {id, kind, label, lut}; the Edit suite opens with it applied.
     public var look: SuiteLook?
+    /// Edit suite (workstream 3): a version's name (`POST /v1/takes/{id}/versions {name?}`; Claude's save name).
+    public var name: String?
 
     public init(id: String, kind: String = "take", jobId: String? = nil, index: Int = 1, of: Int = 1, title: String, label: String, engineLabel: String = "",
                 cost: Double = 0, seed: Int64 = 0, status: String = "test", thumb: ImageRef, prompt: String = "", createdAt: Int64 = 0) {
@@ -745,6 +747,7 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, kind, jobId, index, of, title, label, engineLabel, cost, seed, status, thumb, prompt, createdAt, videoUrl, durationSec, width, height,
              templateId, templateName, shuffleSeed, variation, refs, parentTakeId, edits, fps, look
+        case name // Edit suite (workstream 3)
     }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -775,6 +778,7 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
         edits = c.o(.edits)
         fps = c.o(.fps)
         look = c.o(.look) // AI suite (workstream 1)
+        name = c.o(.name) // Edit suite (workstream 3)
         // Edit suite (workstream 3)
         editsV2 = edits == nil ? (try? c.decodeIfPresent(EditV2.Project.self, forKey: .edits)) ?? nil : nil
 

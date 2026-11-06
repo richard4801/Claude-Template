@@ -276,6 +276,16 @@ public struct EditSuiteState: Sendable {
         return true
     }
 
+    /// Edit sessions (workstream 3): shows a change from another device or Claude. It isn't a local undo step; the local steps
+    /// are rebased onto it (EditV2.History.adoptRemote). Returns whether the project changed.
+    @discardableResult
+    public mutating func applyRemote(_ p: E.Project) -> Bool {
+        guard p != project else { return false }
+        history.adoptRemote(p)
+        settle()
+        return true
+    }
+
     @discardableResult public mutating func undo() -> Bool { guard history.undo() else { return false }; settle(); return true }
     @discardableResult public mutating func redo() -> Bool { guard history.redo() else { return false }; settle(); return true }
 

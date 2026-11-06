@@ -170,16 +170,24 @@ public struct TakeVersionV2Request: Codable, Sendable, Equatable {
     public var width: Int
     public var height: Int
     public var fps: Double?
+    /// The version's name (1–80 characters after trimming; Claude's `save_version` name). Left out when empty.
+    public var name: String?
     public init(uploadId: String, thumbUploadId: String? = nil, thumb: ImageRef? = nil, edits: EditV2.Project, durationSec: Double, width: Int, height: Int,
-                fps: Double? = nil) {
+                fps: Double? = nil, name: String? = nil) {
         self.uploadId = uploadId; self.thumbUploadId = thumbUploadId; self.thumb = thumb; self.edits = edits; self.durationSec = durationSec
-        self.width = width; self.height = height; self.fps = fps
+        self.width = width; self.height = height; self.fps = fps; self.name = TakeVersionV2Request.versionName(name)
     }
 
-    public static func make(_ upload: EditedUpload, video: EditedVideo, edits: EditV2.Project) -> TakeVersionV2Request {
+    public static func make(_ upload: EditedUpload, video: EditedVideo, edits: EditV2.Project, name: String? = nil) -> TakeVersionV2Request {
         TakeVersionV2Request(uploadId: upload.uploadId, thumbUploadId: upload.thumbUploadId, thumb: upload.thumbUploadId == nil ? upload.thumb : nil,
                              edits: edits, durationSec: (video.durationSec * 1000).rounded() / 1000, width: video.width, height: video.height,
-                             fps: video.fps.map { ($0 * 100).rounded() / 100 })
+                             fps: video.fps.map { ($0 * 100).rounded() / 100 }, name: name)
+    }
+
+    /// The server's rule for a version name: trimmed, 1–80 characters (longer is cut at 80), nil when empty.
+    public static func versionName(_ s: String?) -> String? {
+        guard let t = s?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+        return String(t.prefix(80)).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// The server's rule: the file's length within max(0.5 s, 5 %) of the project's.
