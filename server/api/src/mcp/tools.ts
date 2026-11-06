@@ -147,12 +147,11 @@ export const toolByName = new Map(MUSE_TOOLS.map(t => [t.name, t]));
  * `{ mcpContent: [...], structuredContent? }` to send MCP content blocks (e.g. an image) as they are.
  */
 export function registerMcpTools(tools: MuseTool[]) {
+  // Idempotent by name (each app built in one process registers again): the newest definition wins.
   for (const t of tools) {
-    if (toolByName.has(t.name)) {
-      if (toolByName.get(t.name) === t) continue;
-      throw new Error(`MCP tool ${t.name} is already registered`);
-    }
-    MUSE_TOOLS.push(t); toolByName.set(t.name, t);
+    const i = MUSE_TOOLS.findIndex(x => x.name === t.name);
+    if (i >= 0) MUSE_TOOLS[i] = t; else MUSE_TOOLS.push(t);
+    toolByName.set(t.name, t);
   }
 }
 export const allowedBy = (t: MuseTool, scopes?: string[]) => !scopes || scopes.includes(t.scope);

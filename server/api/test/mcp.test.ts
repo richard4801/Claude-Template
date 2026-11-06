@@ -163,3 +163,14 @@ describe('director history repair', () => {
     expect(repairHistory([{ role: 'user', content: 'x' }] as any)).toHaveLength(1);
   });
 });
+
+describe('registerMcpTools', () => {
+  it('adds tools and is idempotent by name', async () => {
+    const { registerMcpTools, MUSE_TOOLS } = await import('../src/mcp/tools.js');
+    const t = { name: 'zz_test_tool', title: 'T', description: 'd', inputSchema: { type: 'object' }, scope: 'edit:read', run: async () => ({ mcpContent: [{ type: 'text', text: 'hi' }] }) };
+    registerMcpTools([t]); registerMcpTools([{ ...t }]);
+    expect(MUSE_TOOLS.filter(x => x.name === 'zz_test_tool')).toHaveLength(1);
+    const r = (await rpc('tools/call', { name: 'zz_test_tool', arguments: {} })).body.result;
+    expect(r).toEqual({ content: [{ type: 'text', text: 'hi' }] });
+  });
+});
