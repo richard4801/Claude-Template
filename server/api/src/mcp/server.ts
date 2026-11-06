@@ -55,7 +55,12 @@ export async function handleRpc(ctx: Ctx, camera: CameraService, user: AuthUser,
       try {
         const data = await tool.run(env, (p.arguments ?? {}) as Record<string, unknown>);
         const mc = data as { mcpContent?: unknown[]; structuredContent?: Record<string, unknown> } | null;
-        if (mc && Array.isArray(mc.mcpContent)) return ok(id, { content: mc.mcpContent, ...(mc.structuredContent ? { structuredContent: mc.structuredContent } : {}) });
+        if (mc && Array.isArray(mc.mcpContent)) {
+          // Clients that only read `content` (Claude Code's stream) still get the human label for their tool chip.
+          const label = typeof mc.structuredContent?.label === 'string' ? mc.structuredContent.label : null;
+          const content = label ? [...mc.mcpContent, { type: 'text', text: JSON.stringify({ label }) }] : mc.mcpContent;
+          return ok(id, { content, ...(mc.structuredContent ? { structuredContent: mc.structuredContent } : {}) });
+        }
         const structured = data && typeof data === 'object' && !Array.isArray(data) ? data : { result: data };
         return ok(id, { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: structured });
       } catch (e) {

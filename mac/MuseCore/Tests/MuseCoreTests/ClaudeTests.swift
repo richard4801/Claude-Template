@@ -30,7 +30,7 @@ final class ClaudeTests: XCTestCase {
         XCTAssertEqual(results.map(\.0), ["toolu_01", "toolu_02", "toolu_03", "toolu_04"])
         XCTAssertEqual(results.map(\.1), [false, false, false, true])
         XCTAssertEqual(results.map(\.2), [0, 1, 0, 0])
-        guard case .result(let ok, let subtype, _, let rsid, let cost)? = events.last else { return XCTFail("no result") }
+        guard case .result(let ok, let subtype, _, let rsid, let cost)? = events.last(where: { $0 != .ignored }) else { return XCTFail("no result") }
         XCTAssertTrue(ok)
         XCTAssertEqual(subtype, "success")
         XCTAssertEqual(rsid, sid)
@@ -128,7 +128,7 @@ final class ClaudeTests: XCTestCase {
         ])
         let b = ClaudeCommand(mcpURL: "https://muse.test/mcp", token: "t", blender: .init(uvx: "/opt/homebrew/bin/uvx"), resume: "sess-1")
         let a = b.arguments(configPath: "/c.json")
-        XCTAssertEqual(Array(a[11...13]), ["--allowedTools", "mcp__muse", "mcp__blender"])
+        XCTAssertEqual(Array(a[10...13]), ["--allowedTools", "mcp__muse", "mcp__blender", "--disallowedTools"])
         XCTAssertEqual(Array(a.suffix(2)), ["--resume", "sess-1"])
         XCTAssertFalse(a.contains("--model"))
     }
@@ -175,7 +175,7 @@ final class ClaudeTests: XCTestCase {
             case .user(_, let text, _): return "user:\(text)"
             case .assistant(_, let text, let s): return "assistant:\(text)\(s ? "…" : "")"
             case .tool(_, let name, let summary, let st): return "tool:\(name):\(summary):\(st.rawValue)"
-            case .image(_, let url): return "image:\(url.prefix(22))"
+            case .image(_, let url): return "image:\(url.prefix(21))"
             }
         }
         XCTAssertEqual(kinds, [

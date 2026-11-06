@@ -249,7 +249,8 @@ export class ClaudeService {
         }
         case 'done':
           relay({ type: 'done', ok: ev.ok, error: ev.error, model: ev.model });
-          if (turn) await this.finish(u, turn.id, ev.ok ? 'done' : 'failed', ev.ok ? undefined : (ev.error ?? 'Claude stopped with an error'));
+          // The Mac reports a Stop as done {ok: false, error: "Stopped"}.
+          if (turn) await this.finish(u, turn.id, ev.ok ? 'done' : ev.error === 'Stopped' ? 'stopped' : 'failed', ev.ok || ev.error === 'Stopped' ? undefined : (ev.error ?? 'Claude stopped with an error'));
           break;
       }
     }

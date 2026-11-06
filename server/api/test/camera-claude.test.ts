@@ -101,6 +101,7 @@ describe('phone → Mac relay', () => {
     await until(() => live.events.some(e => e.type === 'claude' && e.op === 'stop' && e.turnId === r.id));
     await owner.req('POST', `/v1/claude/threads/${t.id}/events`, { turnId: r.id, events: [{ type: 'done', ok: false, error: 'Stopped' }] });
     expect((await owner.req('GET', `/v1/claude/threads/${t.id}`)).body.activeTurn).toBeUndefined();
+    await until(() => live.events.some(e => e.type === 'claude' && e.op === 'turn' && e.turn.id === r.id && e.turn.state === 'stopped'));
     await live.stop();
   });
 

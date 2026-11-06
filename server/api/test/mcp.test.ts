@@ -172,5 +172,9 @@ describe('registerMcpTools', () => {
     expect(MUSE_TOOLS.filter(x => x.name === 'zz_test_tool')).toHaveLength(1);
     const r = (await rpc('tools/call', { name: 'zz_test_tool', arguments: {} })).body.result;
     expect(r).toEqual({ content: [{ type: 'text', text: 'hi' }] });
+    registerMcpTools([{ ...t, run: async () => ({ mcpContent: [{ type: 'image', data: 'AA==', mimeType: 'image/png' }], structuredContent: { label: 'Looked at 0:01.5' } }) }]);
+    const img = (await rpc('tools/call', { name: 'zz_test_tool', arguments: {} })).body.result;
+    expect(img.content.at(-1)).toEqual({ type: 'text', text: JSON.stringify({ label: 'Looked at 0:01.5' }) });
+    expect(img.structuredContent.label).toBe('Looked at 0:01.5');
   });
 });

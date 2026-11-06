@@ -202,7 +202,7 @@ struct ClaudeChatView: View {
         switch item {
         case .user(_, let text, let source): userBubble(text, source: source)
         case .assistant(_, let text, let streaming): assistant(text, streaming: streaming)
-        case .image(_, let url): frame(url)
+        case .image(_, let url): grabbedFrame(url)
         case .tool: EmptyView()
         }
     }
@@ -256,7 +256,7 @@ struct ClaudeChatView: View {
         .accessibilityLabel(bad ? "\(summary), failed" : summary)
     }
 
-    private func frame(_ url: String) -> some View {
+    private func grabbedFrame(_ url: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Lbl("Frame Claude grabbed")
             MuseImage(ref: ImageRef(url: service.resolve(url)), symbol: "photo")

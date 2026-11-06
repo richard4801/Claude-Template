@@ -31,7 +31,7 @@ public struct ProcessLauncher: ClaudeLauncher {
         p.standardInput = inPipe
         p.standardOutput = outPipe
         p.standardError = errPipe
-        try p.run()
+        try Self.spawn(p)
         let handle = ProcessHandle(p)
         // stdin: one line, then EOF.
         DispatchQueue.global().async {
@@ -70,6 +70,25 @@ public struct ProcessLauncher: ClaudeLauncher {
             onExit(p.terminationStatus, errBox.text)
         }
         return handle
+    }
+
+    /// Starts the process from a fresh thread whose signal mask is empty. The child inherits the spawning thread's mask
+    /// (on Linux, Foundation doesn't reset it), and Swift concurrency / Dispatch threads block nearly every signal: started
+    /// from one of them, Claude Code would never see Stop's SIGINT (or SIGTERM).
+    static func spawn(_ p: Process) throws {
+        final class Box: @unchecked Sendable { var error: Error? }
+        let box = Box()
+        let done = DispatchSemaphore(value: 0)
+        let thread = Thread {
+            var empty = sigset_t()
+            sigemptyset(&empty)
+            pthread_sigmask(SIG_SETMASK, &empty, nil)
+            do { try p.run() } catch { box.error = error }
+            done.signal()
+        }
+        thread.start()
+        done.wait()
+        if let e = box.error { throw e }
     }
 
     final class ErrBuffer: @unchecked Sendable {
@@ -117,7 +136,7 @@ public enum ClaudeShell {
                 p.standardOutput = out
                 p.standardError = err
                 p.standardInput = FileHandle.nullDevice
-                do { try p.run() } catch {
+                do { try ProcessLauncher.spawn(p) } catch {
                     cont.resume(returning: nil)
                     return
                 }

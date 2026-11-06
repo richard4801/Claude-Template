@@ -43,6 +43,8 @@ final class ClaudeCodeService: ObservableObject {
     private var listeners: [UUID: AsyncStream<Feed>.Continuation] = [:]
     private var tokens = ClaudeTokenCache()
     private var activeObserver: NSObjectProtocol?
+    /// Phone turns this Mac ran: their `{op: "event"}` echoes from the server are dropped (the local stream showed them).
+    private var ranTurns: Set<String> = []
     private static let demoAPI = FakeClaudeAPI()
 
     init() {}
@@ -96,6 +98,7 @@ final class ClaudeCodeService: ObservableObject {
             Task { [weak self] in
                 for await (tid, turn, e) in events {
                     guard let self else { break }
+                    if let turn { self.ranTurns.insert(turn) }
                     if case .done(_, _, let model?) = e, model != self.info.model { self.info.model = model }
                     self.broadcast(.local(threadId: tid, turnId: turn, e))
                 }
@@ -226,9 +229,10 @@ final class ClaudeCodeService: ObservableObject {
                 await relay.stop(turnId: id)
             case .status(let s):
                 status = s
-            case .event(let tid, _, _):
-                // This Mac's own turn comes back from the server too: the local stream already showed it.
-                if relayState.running[tid] != nil { continue }
+            case .event(let tid, let turnId, _):
+                // Only this Mac runs Claude Code: its own turns (no turnId) and the phone turns it ran come back from the
+                // server too, and the local stream already showed them (the echo can land after the run has ended).
+                if relayState.running[tid] != nil || turnId == nil || ranTurns.contains(turnId ?? "") { continue }
             default:
                 break
             }
