@@ -1,165 +1,19 @@
 package studio.muse.app.ui.screens.suite
 
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
-import studio.muse.app.data.CameraCatalog
 import studio.muse.app.data.Job
-import studio.muse.app.data.SuiteAngle
-import studio.muse.app.data.SuiteCameraSpec
 import studio.muse.app.data.SuiteCastMember
-import studio.muse.app.data.SuiteLighting
-import studio.muse.app.data.SuiteMove
-import studio.muse.app.data.SuiteOption
-import studio.muse.app.data.SuitePalette
-import studio.muse.app.data.SuiteRig
 import studio.muse.app.data.SuiteRules
 import studio.muse.app.data.SuiteShotRequest
 import studio.muse.app.data.Take
 import studio.muse.app.ui.screens.StagePhase
 import studio.muse.app.ui.screens.StudioStage
+import studio.muse.app.ui.screens.suite.composer.ComposerSettings
+import studio.muse.app.ui.screens.suite.composer.PromptPart
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
-// The AI suite's state, pure (no Compose, no I/O), so the rules are unit-tested: the camera bag (rig, light, look, at most
-// two moves with intensity and speed), the Shot, Recast and Storyboard drafts and the requests they send, and the
-// result pane's member-safe wording.
-
-private val specJson = Json { encodeDefaults = true; explicitNulls = false }
-
-/** One picked move: intensity 0–100 %, speed slow / normal / fast. */
-data class MovePick(val id: String, val intensity: Int = 60, val speed: String = "normal") {
-    fun wire() = SuiteMove(id, intensity.coerceIn(0, 100) / 100.0, speed)
-}
-
-/** The camera of a shot, as the camera bag edits it. Option ids come from the catalog. */
-data class CameraDraft(
-    val body: String? = "super35",
-    val lens: String? = "anamorphic",
-    val focalMm: Int? = 40,
-    val aperture: String? = "f2",
-    val shutter: String? = null,
-    val look: String? = null,
-    val lighting: String? = "soft_cross",
-    val palette: String? = "teal_orange",
-    val moves: List<MovePick> = listOf(MovePick("dolly_in", 60), MovePick("rack_focus", 50)),
-    /** The move the sheet edits (index into [moves]). */
-    val active: Int = 0,
-    val height: String? = "eye",
-    val shotSize: String? = "mcu",
-    /** Directed mode: the camera JSON the camera stage (workstream 2) applied. Null = Preset. */
-    val directed: JsonElement? = null,
-) {
-    val mixLabel: String get() = "Mix ${moves.size}/${SuiteRules.MAX_MOVES}"
-    val activeMove: MovePick? get() = moves.getOrNull(active) ?: moves.firstOrNull()
-
-    /**
-     * Taps a move in the library: a picked one comes out; a new one is added as move 2 when it mixes with move 1, replaces
-     * move 1 when it doesn't, and is refused at Mix 2/2. Returns the new draft and what to tell the user (null = nothing).
-     */
-    fun toggleMove(id: String, cat: CameraCatalog): Pair<CameraDraft, String?> {
-        val i = moves.indexOfFirst { it.id == id }
-        if (i >= 0) {
-            val rest = moves.filterIndexed { k, _ -> k != i }
-            return copy(moves = rest, active = 0) to null
-        }
-        val pick = MovePick(id, if (cat.move(id)?.category == "static") 0 else 60)
-        return when (moves.size) {
-            0 -> copy(moves = listOf(pick), active = 0) to null
-            1 -> if (SuiteRules.canMix(cat.move(moves[0].id), cat.move(id))) copy(moves = moves + pick, active = 1) to null
-                else copy(moves = listOf(pick), active = 0) to "${cat.moveLabel(moves[0].id)} and ${cat.moveLabel(id)} can't be combined · one move"
-            else -> this to "Mix 2/2 · tap a numbered move to take it out"
-        }
-    }
-
-    fun setActive(i: Int) = copy(active = i.coerceIn(0, (moves.size - 1).coerceAtLeast(0)))
-    fun tune(intensity: Int? = null, speed: String? = null): CameraDraft {
-        val a = activeMove ?: return this
-        val next = a.copy(intensity = intensity ?: a.intensity, speed = speed ?: a.speed)
-        return copy(moves = moves.map { if (it === a) next else it })
-    }
-
-    /** Keeps only ids the catalog knows (an older or newer server), so the shot never sends an unknown id. */
-    fun fit(cat: CameraCatalog): CameraDraft {
-        fun ok(id: String?, l: List<SuiteOption>) = id?.takeIf { x -> l.isEmpty() || l.any { it.id == x } }
-        return copy(body = ok(body, cat.bodies), lens = ok(lens, cat.lenses), aperture = ok(aperture, cat.apertures), shutter = ok(shutter, cat.shutters),
-            look = ok(look, cat.looks), lighting = ok(lighting, cat.lighting), palette = ok(palette, cat.palettes), height = ok(height, cat.heights), shotSize = ok(shotSize, cat.shotSizes),
-            moves = moves.filter { m -> cat.moves.isEmpty() || cat.moves.any { it.id == m.id } }.take(SuiteRules.MAX_MOVES),
-            focalMm = focalMm?.takeIf { f -> cat.focalLengths.isEmpty() || f in 8..200 })
-    }
-
-    /** The CameraSpec the shot sends: Directed mode's JSON as applied, else the preset spec. */
-    fun spec(): JsonElement = directed ?: specJson.encodeToJsonElement(SuiteCameraSpec.serializer(), presetSpec())
-
-    fun presetSpec() = SuiteCameraSpec(
-        mode = "preset",
-        rig = SuiteRig(body, lens, focalMm, aperture, look, null, shutter).takeIf { listOf(body, lens, focalMm, aperture, look, shutter).any { it != null } },
-        lighting = lighting?.let { SuiteLighting(it) },
-        palette = palette?.let { SuitePalette(it) },
-        move = moves.getOrNull(0)?.wire(),
-        mix = moves.getOrNull(1)?.wire(),
-        angle = SuiteAngle(height, shotSize).takeIf { height != null || shotSize != null },
-    )
-
-    /** "Super 35 · Anamorphic 40 mm · T2 · Soft Cross · Teal & Orange". */
-    fun summary(cat: CameraCatalog): String = listOfNotNull(
-        cat.bodies.find(body)?.let { short(it.title) },
-        cat.lenses.find(lens)?.let { short(it.title) + (focalMm?.let { f -> " $f mm" } ?: "") },
-        aperture?.let { tStop(it) },
-        cat.lighting.find(lighting)?.title,
-        cat.palettes.find(palette)?.title ?: cat.looks.find(look)?.title,
-    ).joinToString(" · ")
-
-    /** "Dolly in · 60%". */
-    fun moveTitle(cat: CameraCatalog): String = moves.firstOrNull()?.let { "${cat.moveLabel(it.id)} · ${it.intensity}%" } ?: "No move · locked-off"
-
-    /** "+ Rack focus · Eye · MCU". */
-    fun moveSub(cat: CameraCatalog): String = listOfNotNull(
-        moves.getOrNull(1)?.let { "+ ${cat.moveLabel(it.id)}" },
-        cat.heights.find(height)?.label?.removeSuffix(" level")?.removeSuffix(" angle"),
-        shotSize?.let { SHOT_SHORT[it] ?: cat.shotSizes.find(it)?.label },
-    ).joinToString(" · ")
-
-    companion object {
-        private val SHOT_SHORT = mapOf("els" to "EWS", "ls" to "WS", "full" to "Full", "cowboy" to "Cowboy", "ms" to "MS", "mcu" to "MCU", "cu" to "CU", "ecu" to "ECU", "ots" to "OTS", "pov" to "POV")
-        private fun List<SuiteOption>.find(id: String?) = firstOrNull { it.id == id }
-        /** "Super 35 Digital" → "Super 35"; "Anamorphic 2×" → "Anamorphic". */
-        fun short(s: String) = s.removeSuffix(" Digital").removeSuffix(" digital").removeSuffix(" 2×").removeSuffix(" Prime")
-        /** "f2" → "T2", "f1.4" → "T1.4" (cine lenses are marked in T-stops). */
-        fun tStop(id: String) = "T" + id.removePrefix("f")
-    }
-}
-
-/** The Shot builder (M2): one lead character and outfit, the scene in words, the camera, length and quality. */
-data class ShotDraft(
-    val title: String = "",
-    val modelId: String? = null,
-    val outfitId: String? = null,
-    val scene: String = "",
-    val sceneTab: String = "text",
-    val duration: Int = 5,
-    val quality: String = "draft",
-    val takes: Int = 1,
-    val aspect: String = "9:16",
-    /** null = the server decides (the audio's talking flag, else no). */
-    val speaking: Boolean? = null,
-    val camera: CameraDraft = CameraDraft(),
-    val tab: String = "camera",
-) {
-    fun request(): SuiteShotRequest = SuiteShotRequest(
-        title = title.trim().ifBlank { null }, modelId = modelId, outfitId = outfitId?.takeIf { modelId != null }, prompt = scene.trim(),
-        duration = duration, aspectRatio = aspect, quality = quality, takes = takes, speaking = speaking, camera = camera.spec(),
-    )
-
-    /** What stops Generate, in plain words (null = ready). */
-    fun problem(): String? = when {
-        modelId == null && scene.isBlank() -> "Pick a character or describe the shot"
-        else -> null
-    }
-
-    companion object {
-        val LENGTHS = listOf(3, 4, 5, 6, 8, 10)
-    }
-}
+// The AI suite's state, pure (no Compose, no I/O), so the rules are unit-tested: the Recast and Storyboard drafts and the
+// requests they send, and the result pane's member-safe wording. The composer's state is in composer/ComposerModel.kt.
 
 /** Recast: one person of the source clip and who they become. [hint]: left / center / right / foreground / background. */
 data class RecastPerson(val hint: String, val characterId: String? = null, val outfitId: String? = null, val speaking: Boolean? = null)
@@ -222,9 +76,10 @@ data class Storyboard(
     /** Shots Generate makes: never made, or failed (refunded). */
     fun pending(jobs: List<Job>): List<StoryShot> = shots.filter { s -> s.jobId == null || jobs.firstOrNull { it.id == s.jobId }?.failed == true }
 
-    fun request(s: StoryShot, camera: CameraDraft, index: Int): SuiteShotRequest = SuiteShotRequest(
+    /** One shot's request: the board's cast and quality, the composer's chips as the look lock, the shot's own move. */
+    fun request(s: StoryShot, look: ComposerSettings, index: Int): SuiteShotRequest = SuiteShotRequest(
         title = "$title · ${index + 1}", modelId = cast.firstOrNull(), prompt = s.prompt, duration = s.seconds, quality = quality,
-        camera = camera.copy(moves = listOf(MovePick(s.move, 60))).spec(),
+        camera = look.cameraJson(listOf(PromptPart.Move(s.move, s.move, "", 60, 1))),
     )
 
     fun withJob(shotId: String, jobId: String) = copy(shots = shots.map { if (it.id == shotId) it.copy(jobId = jobId) else it })

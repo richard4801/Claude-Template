@@ -131,6 +131,22 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     func suiteCall<T: Decodable>(_ method: String, _ path: String, body: Data? = nil) async throws -> T {
         try decode(try await send(request(method, path, body: body)))
     }
+    /// A reference video or audio track for a shot's input slots: editor presign (an upload in this studio) + PUT → its storage key.
+    public func uploadSuiteMedia(_ file: URL, contentType: String, progress: UploadProgress?) async throws -> SuiteVideoRef {
+        let body = UploadBody.file(file)
+        let ticket: PresignedUpload = try await call("POST", "v1/editor/uploads/presign", EditorPresignBody(contentType: contentType, bytes: body.size, purpose: nil))
+        guard let target = resolve(ticket.url) else { throw ApiError("upload_failed", "Couldn't upload the file") }
+        var put = URLRequest(url: target)
+        put.httpMethod = ticket.method.isEmpty ? "PUT" : ticket.method
+        put.timeoutInterval = 600
+        for (k, v) in ticket.headers { put.setValue(v, forHTTPHeaderField: k) }
+        if put.value(forHTTPHeaderField: "Content-Type") == nil { put.setValue(contentType, forHTTPHeaderField: "Content-Type") }
+        if target.host == baseURL.host, target.port == baseURL.port, let t = currentToken { put.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        try await putBytes(put, body: body, progress: progress)
+        guard let f = ticket.fileUrl else { throw ApiError("upload_failed", "The upload has no address") }
+        if let r = f.range(of: "/uploads/"), !f[r.upperBound...].isEmpty { return SuiteVideoRef(key: String(f[r.upperBound...])) }
+        return SuiteVideoRef(url: f)
+    }
     // End AI suite (workstream 1)
 
     /// Server image paths ("/files/x.jpg") become absolute so the app can load them.

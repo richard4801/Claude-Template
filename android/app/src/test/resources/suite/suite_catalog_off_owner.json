@@ -10,10 +10,19 @@
    "available": false,
    "resolution": null,
    "fromPerSec": null,
-   "maxSeconds": null,
+   "minSeconds": 2, "maxSeconds": null,
    "canKeyframes": false,
    "canReferences": false,
    "canGuide": false,
+   "inputs": {
+    "start": false,
+    "end": false,
+    "middle": 0,
+    "images": 0,
+    "videos": 0,
+    "audio": false,
+    "framesWithRefs": false
+   },
    "models": []
   },
   {
@@ -23,10 +32,19 @@
    "available": false,
    "resolution": null,
    "fromPerSec": null,
-   "maxSeconds": null,
+   "minSeconds": 2, "maxSeconds": null,
    "canKeyframes": false,
    "canReferences": false,
    "canGuide": false,
+   "inputs": {
+    "start": false,
+    "end": false,
+    "middle": 0,
+    "images": 0,
+    "videos": 0,
+    "audio": false,
+    "framesWithRefs": false
+   },
    "models": []
   },
   {
@@ -36,10 +54,19 @@
    "available": false,
    "resolution": null,
    "fromPerSec": null,
-   "maxSeconds": null,
+   "minSeconds": 3, "maxSeconds": null,
    "canKeyframes": false,
    "canReferences": false,
    "canGuide": false,
+   "inputs": {
+    "start": false,
+    "end": false,
+    "middle": 0,
+    "images": 0,
+    "videos": 0,
+    "audio": false,
+    "framesWithRefs": false
+   },
    "models": []
   },
   {
@@ -49,10 +76,19 @@
    "available": false,
    "resolution": null,
    "fromPerSec": null,
-   "maxSeconds": null,
+   "minSeconds": 3, "maxSeconds": null,
    "canKeyframes": false,
    "canReferences": false,
    "canGuide": false,
+   "inputs": {
+    "start": false,
+    "end": false,
+    "middle": 0,
+    "images": 0,
+    "videos": 0,
+    "audio": false,
+    "framesWithRefs": false
+   },
    "models": []
   }
  ],

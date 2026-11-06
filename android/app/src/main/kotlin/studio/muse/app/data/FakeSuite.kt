@@ -20,6 +20,8 @@ class FakeSuite {
     private val bundle: Bundle = json.decodeFromString(Bundle.serializer(), resource("/suite_demo.json"))
     val camera: CameraCatalog = json.decodeFromString(CameraCatalog.serializer(), resource("/suite_camera.json"))
     private var settings: SuiteSettings = bundle.settings.copy(mode = "mock")
+    /** The Look each demo shot's takes carry (by job id), like the server's take.look. */
+    val looks = mutableMapOf<String, SuiteLook>()
     /** Spent today on suite shots (demo, never settled: test renders). */
     var spentToday = 0.0
         private set
@@ -69,7 +71,8 @@ class FakeSuite {
         val max = if (tier == "draft") 15 else 30
         val wanted = if (recast) (clipSeconds ?: 6.0) else (r.duration ?: 5).toDouble()
         if (wanted > max) throw ApiException("nothing_fits", "${SuiteRules.tierLabel(tier)} can't make this shot · try another quality, a shorter length or fewer references")
-        val seconds = ceil(wanted).coerceAtLeast(4.0)
+        val min = if (recast) 4.0 else (bundle.catalog.tier(tier)?.minSeconds ?: 4).toDouble()
+        val seconds = ceil(wanted).coerceAtLeast(min)
         val takes = if (recast) (r.takes ?: 1) else (r.takes ?: 1)
         val perSec = (if (recast) RECAST_PER_SEC else PER_SEC)[tier] ?: 0.02
         val estimate = round2(perSec * seconds * takes)
@@ -95,10 +98,28 @@ class FakeSuite {
             speaking = SuiteSpeaking(r.speaking ?: false, if (r.speaking != null) "switch" else "default"),
             cast = castView, keepAudio = if (recast) r.keepAudio ?: true else null,
             prompt = if (owner) "Demo prompt · ${r.prompt.ifBlank { "the shot" }}" else "",
+            look = lookFor(r),
         )
         if (!owner) return base
         val (m, resId) = engineFor(tier, recast)
         return base.copy(engine = m?.let { SuiteEngine(it.id, it.name, it.provider, it.ref, resId, it.perSec(resId), seconds, it.licence, it.licence.notice) })
+    }
+
+    /** The server's rule (suite/looks.ts shotLook): the palette, else the film stock, presets included; none when grading is off. */
+    fun lookFor(r: SuiteShotRequest): SuiteLook? {
+        if (r.gradeLook == false) return null
+        val cam = r.camera as? kotlinx.serialization.json.JsonObject ?: return null
+        fun str(o: kotlinx.serialization.json.JsonElement?, vararg path: String): String? {
+            var e = o
+            for (k in path) e = (e as? kotlinx.serialization.json.JsonObject)?.get(k)
+            return (e as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
+        }
+        val preset = camera.presets.firstOrNull { it.id == str(cam, "preset") }?.spec
+        val pal = str(cam, "palette", "preset") ?: str(preset, "palette", "preset")
+        val stock = str(cam, "rig", "look") ?: str(preset, "rig", "look")
+        camera.palettes.firstOrNull { it.id == pal }?.let { o -> o.lut?.let { return SuiteLook(o.id, "palette", o.label, it) } }
+        camera.looks.firstOrNull { it.id == stock }?.let { o -> o.lut?.let { return SuiteLook(o.id, "stock", o.label, it) } }
+        return null
     }
 
     private fun cameraMove(r: SuiteShotRequest, key: String): String? = runCatching {

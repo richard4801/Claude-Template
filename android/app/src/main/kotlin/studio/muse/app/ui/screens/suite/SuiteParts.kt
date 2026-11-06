@@ -86,6 +86,17 @@ object SuiteIcons {
         "check" to "M5 12.5l4.5 4.5L19 7.5",
         "plus" to "M12 5v14M5 12h14",
         "chev" to "M9 5l7 7-7 7",
+        "chevd" to "M6 9l6 6 6-6",
+        "gauge" to "M4 16a8 8 0 1 1 16 0 M12 16l4-5",
+        "ratio" to "M8 3h8v18H8z",
+        "volume" to "M4 9h4l5-4v14l-5-4H4z M16.5 9a4 4 0 0 1 0 6 M19 6.5a7.5 7.5 0 0 1 0 11",
+        "talk" to "M4 5h16v11H9l-5 4z M8 10h8",
+        "layers" to "M12 3l9 5-9 5-9-5z M3 13l9 5 9-5",
+        "move" to "M12 3v18M3 12h18 M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3",
+        "search" to "M4 11a7 7 0 1 0 14 0a7 7 0 1 0 -14 0z M16 16l4.5 4.5",
+        "image" to "M4 5h16v14H4z M4 16l5-5 4 4 3-3 4 4 M15 9.5a1.5 1.5 0 1 0 0.01 0z",
+        "sparkle" to "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z",
+        "minus" to "M5 12h14",
     )
     private val cache = HashMap<String, ImageVector>()
     fun get(name: String): ImageVector = cache.getOrPut(name) {
@@ -117,10 +128,11 @@ object HardwareImages {
 
 /** A photoreal hardware render (no logos) from the catalog's `render`; a dark plate when there is none. */
 @Composable
-fun HardwareImage(render: String?, modifier: Modifier = Modifier, sample: Int = 2, scale: ContentScale = ContentScale.Crop) {
+fun HardwareImage(render: String?, modifier: Modifier = Modifier, sample: Int = 2, scale: ContentScale = ContentScale.Crop, gray: Boolean = false) {
     val ctx = LocalContext.current
     val bmp = remember(render, sample) { HardwareImages.load(ctx, render, sample) }
-    if (bmp != null) Image(bmp, null, modifier.background(Color(0xFF16181A)), contentScale = scale)
+    val filter = if (gray) remember { androidx.compose.ui.graphics.ColorFilter.colorMatrix(androidx.compose.ui.graphics.ColorMatrix().apply { setToSaturation(0f) }) } else null
+    if (bmp != null) Image(bmp, null, modifier.background(Color(0xFF16181A)), contentScale = scale, colorFilter = filter)
     else Box(modifier.background(Color(0xFF1E2124)))
 }
 
@@ -205,39 +217,6 @@ fun SBadge(text: String, kind: String = "", modifier: Modifier = Modifier) {
         T(text.uppercase(), m.type.mono.copy(fontSize = 10.5.sp, letterSpacing = .08.sp, fontWeight = FontWeight.Medium), fg, maxLines = 1)
     }
 }
-
-/** The tool tabs under the Shot pane: Cast · Scene · Camera · Length · Quality. */
-@Composable
-fun ToolTabs(items: List<Pair<String, String>>, selected: String, onSelect: (String) -> Unit) {
-    val m = muse
-    Row(Modifier.fillMaxWidth().height(62.dp).drawBehind { drawLine(m.t.line, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }, verticalAlignment = Alignment.CenterVertically) {
-        items.forEach { (icon, label) ->
-            val on = label == selected
-            val c = if (on) (if (m.isD) m.t.blue else m.t.accent) else m.t.muted
-            Column(Modifier.weight(1f).press { onSelect(label) }.semantics { contentDescription = label }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                SIc(icon, 20.dp, c)
-                T(label.uppercase(), m.type.mono.copy(fontSize = 9.5.sp, letterSpacing = .8.sp, fontWeight = FontWeight.Medium), c, maxLines = 1)
-            }
-        }
-    }
-}
-
-/** The text tabs of the camera bag: Body Lens Optics Light Look Move Angle (scrolls at 360 dp). */
-@Composable
-fun TextTabs(items: List<String>, selected: String, onSelect: (String) -> Unit, modifier: Modifier = Modifier) {
-    val m = muse
-    Row(modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).drawBehind { drawLine(m.t.line, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) },
-        horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-        items.forEach { x ->
-            val on = x == selected
-            Column(Modifier.width(androidx.compose.foundation.layout.IntrinsicSize.Max).press { onSelect(x) }.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                T(x, m.type.body.copy(fontSize = 14.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal), if (on) m.t.ink else m.t.muted, maxLines = 1)
-                Box(Modifier.height(2.dp).fillMaxWidth().background(if (on) m.t.accent else Color.Transparent))
-            }
-        }
-    }
-}
-
 
 /** The black (theme) Generate bar with the estimate's price: "GENERATE · 2 TAKES · $3.84". */
 @Composable

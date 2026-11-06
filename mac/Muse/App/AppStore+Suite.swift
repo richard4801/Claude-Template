@@ -5,6 +5,7 @@ import SwiftUI
 
 // AI suite (workstream 1): the Video suite's state and actions. Everything goes through `api` (the real /v1/suite, or demo
 // mode's fake). Prices always come from POST /v1/suite/shots/estimate; nothing is spent until someone presses Generate.
+// Shot, Character swap, Recast, Talking, UGC ad and Extend & upscale are tools of one composer (Views/Suite/Composer).
 
 enum SuiteMode: String, CaseIterable, Identifiable {
     case hub, shot, swap, storyboard, talking, ugc, extend, cameraStage
@@ -27,6 +28,18 @@ enum SuiteMode: String, CaseIterable, Identifiable {
     static let group: [SuiteMode] = [.shot, .swap, .storyboard, .talking, .ugc, .extend, .cameraStage]
     /// No backend yet: a quiet "Coming soon" tile, never a broken screen.
     var comingSoon: Bool { self == .talking || self == .ugc || self == .extend }
+
+    /// The composer's tool behind this mode (nil: Storyboard, Camera stage and the hub have their own screens).
+    var tool: ComposerTool? {
+        switch self {
+        case .shot: return .shot
+        case .swap: return .swap
+        case .talking: return .talking
+        case .ugc: return .ugc
+        case .extend: return .extend
+        default: return nil
+        }
+    }
 
     /// Hub tiles: the hardware render behind each, its line and shortcut hint (design/source/ai_desktop.py).
     var tileRender: String {
@@ -54,45 +67,40 @@ enum SuiteMode: String, CaseIterable, Identifiable {
     }
 }
 
-enum SceneTab: String, CaseIterable { case text, image, refs }
-enum BagTab: String, CaseIterable { case rig, light, move }
-enum BagTarget { case shot, storyboard }
-enum SwapKind: String { case swap, recast }
-
-/// The Shot builder's choices (D2).
-struct ShotDraft: Equatable {
-    var title = "New shot"
-    /// Up to 3 characters, lead first.
-    var castIds: [String] = []
-    var outfitByModel: [String: String] = [:]
-    var sceneTab: SceneTab = .text
-    var prompt = ""
-    var emotion: String?
-    var startFrame: ImageRef?
-    var endFrame: ImageRef?
-    var refs: [SuiteRefImage] = []
-    var duration = 5
-    var aspect = "9:16"
-    var quality = "draft"
-    var takes = 1
-    var audio = true
-    var camera = CameraSpec()
-    /// "preset" or "directed".
-    var cameraTab = "preset"
+extension ComposerTool {
+    /// The sidebar entry this tool lights up (Recast lives inside Character swap).
+    var mode: SuiteMode {
+        switch self {
+        case .shot: return .shot
+        case .swap, .recast: return .swap
+        case .talking: return .talking
+        case .ugc: return .ugc
+        case .storyboard: return .storyboard
+        case .extend: return .extend
+        }
+    }
 }
 
-/// Character swap and Recast (D7).
+enum SwapKind: String { case swap, recast }
+
+/// Character swap and Recast (tools of the composer).
 struct SwapDraft: Equatable {
     var kind: SwapKind = .swap
     var modelId: String?
     var outfitId: String?
     var quality = "standard"
     var keepAudio = true
+    var speaking: ComposerSpeaking = .auto
+    /// The prompt sits behind a toggle (off by default).
+    var promptOn = false
     /// Swap's add-ons (they stay add-ons: Edit, Fast · beta), off = the ladder.
     var addOn: VideoQuality?
     /// Recast: who in the clip becomes whom (1–4).
     var cast: [CastMember] = []
 }
+
+/// Which settings an open picker edits: the composer's, or the storyboard's look lock.
+enum PickerTarget { case composer, storyboard }
 
 @MainActor
 @Observable
@@ -102,31 +110,26 @@ final class SuiteState {
     var catalogError: String?
     var loadingCatalog = false
 
-    // Shot builder
-    var shot = ShotDraft()
+    // The composer
+    var composer = ComposerDraft()
+    let composerSlots = InputSlotsModel()
     var estimate: ShotEstimate?
     var estimateError: String?
-    /// The four tiers' estimates for the quality cards.
+    /// The four tiers' estimates for the Quality pill.
     var tierEstimates: [String: ShotEstimate] = [:]
     var shotJobIds: [String] = []
-    var shotTakeId: String?
     var generating = false
-    /// Owner: the Engines drawer instead of Camera in the Shot builder (D9).
+    /// Owner: the Engines sheet (D9).
     var showEngines = false
     var settings: SuiteSettings?
 
-    // Camera bag (D3–D5)
-    var bagOpen = false
-    var bagTab: BagTab = .rig
-    var bagDraft = CameraSpec()
-    var bagTarget: BagTarget = .shot
-    var bagDirected = false
-    var moveTag: String?
-    var bagNote: String?
-    /// Rigs saved from the bag on this Mac ("Save as rig…").
-    var savedRigs: [String: CameraSpec] = [:]
+    // The picker shell and the tool / preset browser
+    var picker: ComposerPicker?
+    var pickerStep = ""
+    var pickerTarget: PickerTarget = .composer
+    var browserOpen = false
 
-    // Character swap + Recast (D7)
+    // Character swap + Recast
     var swap = SwapDraft()
     var swapEstimate: ShotEstimate?
     var swapEstimates: [String: ShotEstimate] = [:]
@@ -135,6 +138,8 @@ final class SuiteState {
 
     // Storyboard (D8)
     var board = Storyboard()
+    /// The storyboard's look lock as composer settings (Style, Camera setup and angle, Look, Lighting).
+    var boardSettings = ComposerSettings()
     var boardShotId: String?
     var boardEstimate: Double?
     var boardEstimateError: String?
@@ -155,20 +160,73 @@ final class SuiteState {
         swapEstimates = [:]
         settings = nil
         board = Storyboard()
-        shot = ShotDraft()
+        boardSettings = ComposerSettings()
+        composer = ComposerDraft()
+        composerSlots.slots = InputSlots()
         swap = SwapDraft()
+        picker = nil
+        browserOpen = false
         mode = .hub
     }
 
     var camera: CameraCatalog { catalog?.camera ?? CameraCatalog() }
     var enabled: Bool { catalog?.enabled ?? true }
+
+    /// The quality the composer's tool renders at (Swap and Recast keep their own).
+    var toolQuality: String {
+        get { composer.tool == .swap || composer.tool == .recast ? swap.quality : composer.quality }
+        set {
+            if composer.tool == .swap || composer.tool == .recast { swap.quality = newValue } else { composer.quality = newValue }
+        }
+    }
+
+    /// The settings the open picker edits.
+    var pickerSettings: ComposerSettings {
+        get { pickerTarget == .storyboard ? boardSettings : composer.settings }
+        set {
+            if pickerTarget == .storyboard {
+                boardSettings = newValue
+                board.camera = newValue.cameraSpec() ?? CameraSpec()
+            } else {
+                composer.settings = newValue
+            }
+        }
+    }
 }
 
 extension AppStore {
     // MARK: Navigation
 
     func openSuite(_ mode: SuiteMode = .hub) {
+        if let tool = mode.tool {
+            let t: ComposerTool = tool == .swap && suite.swap.kind == .recast ? .recast : tool
+            if suite.composer.tool != t { suite.composer.collapsed = nil }
+            suite.composer.tool = t
+            if tool == .swap && clip == nil && isDemo { Task { await useSampleClip(bad: false, quiet: true) } }
+        }
         suite.mode = mode
+        go(.suite)
+        if suite.catalog == nil { Task { await loadSuite() } }
+    }
+
+    /// Change on the tool card, the hub tiles and the sidebar: the composer on that tool.
+    func openTool(_ tool: ComposerTool) {
+        suite.browserOpen = false
+        if tool == .swap || tool == .recast {
+            suite.swap.kind = tool == .recast ? .recast : .swap
+            if tool == .recast {
+                suite.swap.addOn = nil
+                if suite.swap.cast.isEmpty { addRecastPerson() }
+            }
+            if clip == nil && isDemo { Task { await useSampleClip(bad: false, quiet: true) } }
+        }
+        if tool == .storyboard {
+            openSuite(.storyboard)
+            return
+        }
+        if suite.composer.tool != tool { suite.composer.collapsed = nil }
+        suite.composer.tool = tool
+        suite.mode = tool.mode
         go(.suite)
         if suite.catalog == nil { Task { await loadSuite() } }
     }
@@ -189,11 +247,10 @@ extension AppStore {
             let c = try await api.suiteCatalog()
             suite.catalog = c
             suite.catalogError = nil
-            if suite.shot.castIds.isEmpty, let lead = suiteCharacters.first { suite.shot.castIds = [lead.id] }
             if suite.board.castIds.isEmpty, let lead = suiteCharacters.first { suite.board.castIds = [lead.id] }
             if suite.swap.modelId == nil { suite.swap.modelId = suiteCharacters.first?.id }
-            if suite.shot.quality.isEmpty || !SuiteText.tierIds.contains(suite.shot.quality) { suite.shot.quality = c.defaultQuality }
-            if suite.savedRigs.isEmpty { suite.savedRigs = Self.loadSavedRigs() }
+            if !SuiteText.tierIds.contains(suite.composer.quality) { suite.composer.quality = c.defaultQuality }
+            suite.composer.duration = ComposerBar.clampLength(suite.composer.duration, c.tier(suite.composer.quality))
             if isOwner { suite.settings = try? await api.suiteSettings() }
         } catch let e as ApiError {
             suite.catalogError = e.code == "not_found" || e.code == "http_404" ? "This server doesn't have the AI suite yet" : e.friendlyMessage
@@ -207,25 +264,30 @@ extension AppStore {
 
     func character(_ id: String?) -> MuseModel? { id.flatMap { i in models.first { $0.id == i } } }
 
-    // MARK: Shot builder
+    // MARK: The composer (Shot)
 
-    var shotRequest: ShotRequest {
-        let d = suite.shot
-        let lead = d.castIds.first
-        var refs = d.refs
-        // Other cast members ride as person references.
-        for id in d.castIds.dropFirst() {
-            if let m = character(id), let face = m.cover { refs.append(SuiteRefImage(image: face, role: "person", label: m.name)) }
+    /// What the chosen quality takes (start / end frames, references, audio).
+    var composerInputs: SuiteInputs { suite.catalog?.tier(suite.composer.quality)?.slots ?? .none }
+
+    var shotRequest: ShotRequest { suite.composer.request(suite.composerSlots.slots, composerInputs) }
+
+    /// The composer's character (the @mention the CHARACTER slot shows).
+    var composerCharacter: MuseModel? { character(suite.composer.tokens.characterId) }
+
+    /// Picks the character: an @ chip at the front of the prompt (it replaces the one there).
+    func setComposerCharacter(_ m: MuseModel?) {
+        var t = suite.composer.tokens
+        if let m {
+            t = t.addMention(kind: "character", id: m.id, label: m.shortName, at: Caret(0, 0)).0
+            if suite.composer.outfitId.map({ o in !outfits(for: m).contains { $0.id == o } }) ?? true { suite.composer.outfitId = outfits(for: m).first?.id }
+        } else if let k = t.parts.first(where: { if case .mention(let kind, _, _, _) = $0 { return kind == "character" }; return false })?.key {
+            t = t.remove(key: k)
+            suite.composer.outfitId = nil
         }
-        var cam = d.camera
-        if let e = d.emotion { cam.performance = .object(["emotion": .string(e)]) }
-        let frames = d.sceneTab == .image && (d.startFrame != nil || d.endFrame != nil) ? SuiteFrames(start: d.startFrame, end: d.endFrame) : nil
-        return ShotRequest(title: d.title, modelId: lead, outfitId: lead.flatMap { d.outfitByModel[$0] ?? outfits(for: character($0)).first?.id }, prompt: d.prompt,
-                           frames: frames, references: refs.isEmpty ? nil : SuiteReferences(images: Array(refs.prefix(6))), duration: d.duration, aspectRatio: d.aspect,
-                           quality: d.quality, takes: d.takes, audio: d.audio, camera: cam == CameraSpec() ? nil : cam)
+        suite.composer.tokens = t
     }
 
-    /// Prices for the Shot builder: the current choice and each tier (debounced by the caller's `.task(id:)`).
+    /// Prices for the composer: the current choice and each tier (debounced by the caller's `.task(id:)`).
     func estimateShot() async {
         guard suite.enabled, suite.catalog != nil else { return }
         let req = shotRequest
@@ -261,77 +323,75 @@ extension AppStore {
             showToast(p)
             return
         }
+        if suite.composerSlots.slots.uploading {
+            showToast("Wait for the upload to finish")
+            return
+        }
         let req = shotRequest
+        if req.prompt.isEmpty && req.modelId == nil && req.frames == nil {
+            showToast("Describe the scene or pick a character first")
+            return
+        }
         suite.generating = true
         perform { [self] in
             defer { suite.generating = false }
             let j = try await api.suiteCreateShot(req)
             upsert(j)
             suite.shotJobIds.append(j.id)
-            suite.shotTakeId = nil
             balance = try await api.balance()
             showToast("Rendering \(j.engineLabel) · \(Pricing.money(j.cost)). You'll get a notification when it's done.", action: "Open queue") { [weak self] in self?.go(.queue) }
         }
     }
 
-    /// The Shot builder's newest job (the result pane follows it).
+    /// The composer's newest job.
     var shotJob: Job? { suite.shotJobIds.last.flatMap { id in jobs.first { $0.id == id } } }
     func takes(of job: Job?) -> [Take] { job.map { j in takes.filter { $0.jobId == j.id }.sorted { $0.index < $1.index } } ?? [] }
 
-    func addShotRef(role: String) {
-        guard let url = MediaImport.pick(MediaImport.imageTypes, multiple: false, prompt: "Use image").first else { return }
-        perform { [self] in
-            let ref = try await uploadImage(url)
-            suite.shot.refs.append(SuiteRefImage(image: ref, role: role, label: role.capitalized))
-        }
+    /// The Recent takes row: the suite's newest jobs (any job before the first suite one).
+    var suiteRecentJobs: [Job] {
+        let suiteJobs = jobs.filter { $0.request.engine == "suite" }
+        return Array((suiteJobs.isEmpty ? jobs : suiteJobs).sorted { $0.createdAt > $1.createdAt }.prefix(6))
     }
 
-    func setShotFrame(end: Bool) {
-        guard let url = MediaImport.pick(MediaImport.imageTypes, multiple: false, prompt: "Use frame").first else { return }
-        perform { [self] in
-            let ref = try await uploadImage(url)
-            if end { suite.shot.endFrame = ref } else { suite.shot.startFrame = ref }
-            suite.shot.sceneTab = .image
-        }
-    }
-
-    func toggleCast(_ m: MuseModel) {
-        if let i = suite.shot.castIds.firstIndex(of: m.id) {
-            suite.shot.castIds.remove(at: i)
-        } else if suite.shot.castIds.count < 3 {
-            suite.shot.castIds.append(m.id)
-        } else {
-            showToast("Up to 3 in a shot")
-        }
-    }
-
-    /// The Shot builder's shot goes onto the storyboard (D2 "Add to storyboard").
+    /// The composer's shot goes onto the storyboard.
     func addShotToStoryboard() {
-        let d = suite.shot
-        suite.board.shots.append(StoryShot(title: d.title, prompt: d.prompt, moveId: d.camera.move?.id, seconds: d.duration))
-        if suite.board.castIds.isEmpty { suite.board.castIds = Array(d.castIds.prefix(3)) }
+        let d = suite.composer
+        suite.board.shots.append(StoryShot(title: d.title, prompt: d.tokens.promptText(), moveId: d.tokens.moves.first?.move?.id, seconds: d.duration))
+        if suite.board.castIds.isEmpty, let c = d.tokens.characterId { suite.board.castIds = [c] }
         showToast("Added to the storyboard", action: "Open") { [weak self] in self?.openSuite(.storyboard) }
     }
 
-    // MARK: Camera bag
-
-    func openBag(_ target: BagTarget, tab: BagTab = .rig) {
-        suite.bagTarget = target
-        suite.bagDraft = target == .shot ? suite.shot.camera : suite.board.camera
-        suite.bagDirected = target == .shot && suite.shot.cameraTab == "directed"
-        suite.bagTab = tab
-        suite.bagNote = nil
-        withAnimation(.easeOut(duration: 0.2)) { suite.bagOpen = true }
+    /// "Start from a preset": the preset's values in the chips, and the composer collapses to who + shape + Generate (C6).
+    func applyPreset(_ p: SuitePreset) {
+        suite.browserOpen = false
+        if suite.composer.tool != .shot {
+            suite.composer.tool = .shot
+            suite.mode = .shot
+        }
+        suite.composer = suite.composer.applying(preset: p, suite.camera)
     }
 
-    func closeBag(apply: Bool) {
-        if apply {
-            switch suite.bagTarget {
-            case .shot: suite.shot.camera = suite.bagDraft
-            case .storyboard: suite.board.camera = suite.bagDraft
-            }
+    // MARK: The picker shell
+
+    func openPicker(_ p: ComposerPicker, step: String? = nil, target: PickerTarget = .composer) {
+        suite.pickerTarget = target
+        suite.pickerStep = step ?? p.steps(owner: isOwner, target: target).first?.id ?? ""
+        withAnimation(.easeOut(duration: 0.18)) { suite.picker = p }
+    }
+
+    func closePicker() {
+        withAnimation(.easeIn(duration: 0.14)) { suite.picker = nil }
+    }
+
+    /// Movement: a move tile puts a #move chip in the prompt and closes the picker.
+    func insertMove(_ m: SuiteMoveOption) {
+        let (t, note) = suite.composer.tokens.addMove(m, catalog: suite.camera)
+        if let note {
+            showToast(note)
+            return
         }
-        withAnimation(.easeIn(duration: 0.15)) { suite.bagOpen = false }
+        suite.composer.tokens = t
+        closePicker()
     }
 
     /// Directed mode (workstream 2) hands back a CameraSpec as JSON.
@@ -341,34 +401,9 @@ extension AppStore {
             return
         }
         spec.mode = "directed"
-        suite.bagDraft = spec
-        suite.shot.cameraTab = "directed"
-        closeBag(apply: true)
+        suite.composer.directed = spec
+        closePicker()
         showToast("Directed camera applied")
-    }
-
-    func startBag(from preset: SuitePreset?) {
-        suite.bagDraft = preset.map(CameraSummary.fromPreset) ?? CameraSpec()
-    }
-
-    func toggleBagMove(_ id: String) {
-        let r = SuiteMoves.toggle(id, move: suite.bagDraft.move, mix: suite.bagDraft.mix, catalog: suite.camera)
-        suite.bagDraft.move = r.move
-        suite.bagDraft.mix = r.mix
-        suite.bagNote = r.note
-    }
-
-    func saveRig(_ name: String) {
-        let n = name.trimmingCharacters(in: .whitespaces)
-        guard !n.isEmpty else { return }
-        suite.savedRigs[n] = suite.bagDraft
-        if let d = try? JSONEncoder().encode(suite.savedRigs) { UserDefaults.standard.set(d, forKey: "muse.suite.rigs") }
-        showToast("Saved \(n)")
-    }
-
-    static func loadSavedRigs() -> [String: CameraSpec] {
-        guard let d = UserDefaults.standard.data(forKey: "muse.suite.rigs") else { return [:] }
-        return (try? JSONDecoder().decode([String: CameraSpec].self, from: d)) ?? [:]
     }
 
     // MARK: Character swap + Recast
@@ -379,12 +414,29 @@ extension AppStore {
         switch d.kind {
         case .swap:
             guard let m = d.modelId else { return nil }
-            return ShotRequest(mode: "swap", title: "\(character(m)?.shortName ?? "Swap") · swap", modelId: m, outfitId: d.outfitId ?? outfits(for: character(m)).first?.id,
-                               quality: d.quality, clipId: c.id, keepAudio: d.keepAudio)
+            var r = ShotRequest(mode: "swap", title: "\(character(m)?.shortName ?? "Swap") · swap", modelId: m, outfitId: d.outfitId ?? outfits(for: character(m)).first?.id,
+                                prompt: d.promptOn ? suite.composer.tokens.promptText() : "", quality: d.quality, speaking: d.speaking.value, clipId: c.id, keepAudio: d.keepAudio)
+            applyLook(&r)
+            if d.promptOn, let mv = suite.composer.tokens.moves.first?.move {
+                var cam = r.camera ?? CameraSpec(mode: "preset")
+                cam.move = mv
+                r.camera = cam
+            }
+            return r
         case .recast:
             guard !d.cast.isEmpty else { return nil }
-            return .recast(clipId: c.id, cast: d.cast, quality: d.quality, keepAudio: d.keepAudio, title: "Recast · \(c.name)")
+            var r = ShotRequest.recast(clipId: c.id, cast: d.cast, quality: d.quality, keepAudio: d.keepAudio, title: "Recast · \(c.name)")
+            applyLook(&r)
+            return r
         }
+    }
+
+    /// Swap and Recast show only the Look chip: camera and light come from the clip.
+    private func applyLook(_ r: inout ShotRequest) {
+        let look = suite.composer.settings
+        guard look.palette != nil || look.stock != nil else { return }
+        r.camera = CameraSpec(mode: "preset", rig: look.stock.map { CameraRig(look: $0) }, palette: look.palette.map { CameraPalette(preset: $0) })
+        if !look.gradeLook { r.gradeLook = false }
     }
 
     func estimateSwap() async {
@@ -511,7 +563,7 @@ extension AppStore {
         let t = job.request.quality ?? "draft"
         guard let i = SuiteText.tierIds.firstIndex(of: t), i > 0 else { return }
         if suite.shotJobIds.contains(job.id) {
-            suite.shot.quality = SuiteText.tierIds[i - 1]
+            suite.composer.quality = SuiteText.tierIds[i - 1]
             generateShot()
         } else if suite.swapJobIds.contains(job.id) {
             suite.swap.quality = SuiteText.tierIds[i - 1]
@@ -534,7 +586,7 @@ extension AppStore {
     }
 }
 
-/// Loads the camera bag's photoreal renders from the app bundle (`hardware/<name>.webp`).
+/// Loads the composer's photoreal hardware renders from the app bundle (`hardware/<name>.webp`).
 @MainActor
 enum HardwareRenders {
     private static var cache: [String: NSImage] = [:]
