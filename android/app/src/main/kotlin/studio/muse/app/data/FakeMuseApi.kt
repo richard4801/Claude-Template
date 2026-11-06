@@ -29,6 +29,7 @@ import studio.muse.core.edit.Canvas as EdCanvas // Edit sessions (workstream 3)
 import studio.muse.core.edit.EditJson as EdEditJson // Edit sessions (workstream 3)
 import studio.muse.core.edit.EditProject as EdEditProject // Edit sessions (workstream 3)
 import studio.muse.core.edit.JsonPatch as EdJsonPatch // Edit sessions (workstream 3)
+import studio.muse.core.edit.Look as EdLook // Edit sessions (workstream 3)
 import studio.muse.core.edit.PatchException as EdPatchException // Edit sessions (workstream 3)
 import studio.muse.core.edit.PatchOp as EdPatchOp // Edit sessions (workstream 3)
 import studio.muse.core.edit.Track as EdTrack // Edit sessions (workstream 3)
@@ -762,7 +763,8 @@ class FakeMuseApi(
             ?: EdEditJson.encode(EdEditProject(
                 2, t.id, EdCanvas(t.width ?: 1080, t.height ?: 1920, (t.fps ?: 30.0), "#000000"),
                 listOf(EdAsset("src", EdAssetKind.VIDEO, take = t.id, durationSec = t.durationSec ?: 8.0, width = t.width ?: 1080, height = t.height ?: 1920, hasAudio = true)),
-                listOf(EdTrack("main", EdTrackKind.MAIN, items = listOf(EdVideoClip("c1", "src", 0.0, t.durationSec ?: 8.0, 1.0)))),
+                listOf(EdTrack("main", EdTrackKind.MAIN, items = listOf(EdVideoClip("c1", "src", 0.0, t.durationSec ?: 8.0, 1.0,
+                    look = t.look?.lut?.takeIf { it.isNotBlank() }?.let { EdLook(lut = it, strength = 1.0) })))),
             ))
         val s = FakeEditSession("es_${++editSessionSeq}", t.id, project)
         editSessions[s.id] = s
