@@ -11,8 +11,10 @@ import { parse } from '../camera/validate.js';
 import { createToken, listTokens, revokeToken } from '../mcp/tokens.js';
 import { listGrants, resourceOf, revokeGrantOf, sessionToken } from '../mcp/oauth.js';
 import { registerMcpRoutes } from './mcp.js';
+import { registerClaudeRoutes } from '../camera/claudeRoutes.js';
+import type { ClaudeService } from '../camera/claude.js';
 
-export type CameraModule = { service: CameraService; relay: BlenderRelayHub; director: Director };
+export type CameraModule = { service: CameraService; relay: BlenderRelayHub; director: Director; claude?: ClaudeService };
 const modules = new WeakMap<Ctx, CameraModule>();
 /** The camera services of an app (tests use it to inject a fake Claude client). */
 export const cameraOf = (ctx: Ctx) => modules.get(ctx)!;
@@ -108,5 +110,6 @@ export async function registerCameraRoutes(app: FastifyInstance, ctx: Ctx) {
     return reply.status(204).send();
   });
 
+  modules.get(ctx)!.claude = await registerClaudeRoutes(app, ctx, service, director);
   await registerMcpRoutes(app, ctx, service);
 }
