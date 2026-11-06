@@ -40,7 +40,7 @@ enum ComposerPicker: String, Identifiable {
     }
 
     /// The left rail's sub-steps. Directed is the owner's (and only for the composer); a storyboard's look lock has no moves.
-    func steps(owner: Bool, target: PickerTarget) -> [PickerStep] {
+    func steps(owner: Bool, target: PickerTarget, ugc: Bool = false) -> [PickerStep] {
         switch self {
         case .camera:
             var s = [PickerStep(id: "setup", title: "Setup", icon: "slider.horizontal.3"), PickerStep(id: "angle", title: "Angle", icon: "eye")]
@@ -48,8 +48,10 @@ enum ComposerPicker: String, Identifiable {
             if owner && target == .composer { s.append(PickerStep(id: "directed", title: "Directed", icon: "cube", owner: true)) }
             return s
         case .style:
-            return [PickerStep(id: "genre", title: "Genre", icon: "theatermasks"), PickerStep(id: "era", title: "Era", icon: "clock"),
-                    PickerStep(id: "tempo", title: "Tempo", icon: "metronome")]
+            // UGC ad: the format wheel comes first, above genre, era and tempo.
+            let format = ugc ? [PickerStep(id: "format", title: "Format", icon: "shippingbox")] : []
+            return format + [PickerStep(id: "genre", title: "Genre", icon: "theatermasks"), PickerStep(id: "era", title: "Era", icon: "clock"),
+                             PickerStep(id: "tempo", title: "Tempo", icon: "metronome")]
         case .look: return [PickerStep(id: "look", title: "Look", icon: "camera.filters")]
         case .lighting: return [PickerStep(id: "lighting", title: "Lighting", icon: "lightbulb")]
         }
@@ -96,7 +98,9 @@ struct PickerShell: View {
     var picker: ComposerPicker
     @State private var moveQuery = ""
 
-    private var steps: [PickerStep] { picker.steps(owner: store.isOwner, target: store.suite.pickerTarget) }
+    private var steps: [PickerStep] {
+        picker.steps(owner: store.isOwner, target: store.suite.pickerTarget, ugc: store.suite.pickerTarget == .composer && store.suite.composer.tool == .ugc)
+    }
     private var step: String { steps.contains { $0.id == store.suite.pickerStep } ? store.suite.pickerStep : (steps.first?.id ?? "") }
 
     var body: some View {
@@ -214,6 +218,7 @@ struct PickerShell: View {
         case "angle": return s.height != nil || s.shotSize != nil
         case "movement": return !store.suite.composer.tokens.moves.isEmpty
         case "directed": return store.suite.composer.directed != nil
+        case "format": return s.format != nil
         case "genre": return s.genre != nil
         case "era": return s.era != nil
         case "tempo": return s.tempo != nil
