@@ -169,6 +169,13 @@ Kept on purpose, not by default: Instrument Serif titles in A (it's the theme's 
 3. **Middle dots:** only inside value pairs (§7).
 4. **Composer input slots:** each thumbnail has its own label under it (Character, Start frame, End frame), with "Optional" where it applies. The empty "+" slot carries the name of what it adds. The vague hint line "Character, start frame, end frame" is gone.
 
+**Drums approved by the owner, 2026-11-06** ("Let's use that style for our general Rig selection. When it has to do with Hardware like the Camera does."):
+- **Every hardware choice uses the drum**, one component per app: `RigDrum`. It covers Camera → Setup (Camera body, Lens, Focal, Aperture) and the Photo tool's rig. Android has `RigDrum` and `RigSetupDrums` in `suite/composer/RigDrum.kt` and `CameraPicker.kt`; the Mac has `RigDrum` in `Suite/Composer/RigDrum.swift`.
+- **The maths is shared and tested**: `RigDrumMath` in `android/core` and in MuseCore covers the detents, the loop, the rubber band, the fling and the spring.
+- **Feel:** Android ticks the haptics on each detent. The Mac has trackpad momentum, arrow keys and an optional soft click.
+- **Non-hardware choices** (Angle, Movement, Lighting, Look, Style, the UGC format) use grids or rows of tiles.
+- The old boxed wheels are deleted.
+
 Also: Photoshoot is now the **Photo** tool (WS3). The Mac sidebar lists Photo with the other tools, with no separate Photoshoot entry.
 
 The rollout starts now.

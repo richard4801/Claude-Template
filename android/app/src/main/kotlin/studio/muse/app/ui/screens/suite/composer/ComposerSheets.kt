@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -120,8 +121,14 @@ fun BoxScope.ComposerSheetHost(sheet: ComposerSheet, x: SheetContext) {
             PickerShell("Style", x.wide, x.close, tabs, tab, x.setTab, onReset = { set { it.reset(ComposerChip.STYLE) } }) {
                 // UGC ad: the ad format wheel sits above genre, era and tempo.
                 if (d.tool == ComposerTool.UGC && cam.ugcFormats.isNotEmpty()) {
-                    val f = CameraWheels.formats(cam)
-                    WheelRow("Format", f, CameraWheels.index(f, s.format, cam.ugcFormats), { w -> set { it.copy(format = w.id) } }, if (x.wide) 70.dp else 56.dp)
+                    // Not hardware, so a row of tiles rather than a drum (workstream 4).
+                    val f = CameraWheels.formats(cam); val fs = CameraWheels.index(f, s.format, cam.ugcFormats)
+                    SheetLabel("Format", modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 8.dp))
+                    androidx.compose.foundation.lazy.LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
+                        itemsIndexed(f, key = { i, w -> w.id ?: "auto$i" }) { i, w ->
+                            PickTile(w.name, w.caption, w.preview, i == fs, { set { it.copy(format = w.id) } }, Modifier.width(if (x.wide) 150.dp else 124.dp), aspect = 1.6f)
+                        }
+                    }
                     Spacer(Modifier.height(6.dp))
                 }
                 if (tab == "era") EraSlider(cam, s.era, x.wide) { id -> set { it.copy(era = id) } }

@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -76,7 +77,7 @@ import kotlin.math.abs
 /** One card of a wheel: null id = Auto. */
 data class WheelItem(val id: String?, val name: String, val caption: String, val preview: Preview)
 
-private val AUTO_CARD = WheelItem(null, "Auto", "The engine decides", Preview(draw = PreviewDraw.Auto))
+private val AUTO_CARD = WheelItem(null, "Auto", "Picks for the shot", Preview(draw = PreviewDraw.Auto))
 
 /** The wheels' cards, from the catalog's visible options (merged ids show as their survivor). */
 object CameraWheels {
@@ -85,10 +86,10 @@ object CameraWheels {
     fun lenses(c: CameraCatalog) = listOf(AUTO_CARD) + ComposerCatalog.visible(c.lenses).map(::opt)
     fun focals(c: CameraCatalog) = listOf(AUTO_CARD) + ComposerCatalog.focalSteps(c).map { mm ->
         val f = c.focals.firstOrNull { it.mm == mm }
-        WheelItem("$mm", "$mm mm" + (f?.description?.ifBlank { null }?.let { " · $it" } ?: ""), FOCAL_LINES[mm] ?: "", Preview(draw = PreviewDraw.Focal(mm)))
+        WheelItem("$mm", "$mm mm", FOCAL_LINES[mm] ?: f?.description.orEmpty(), Preview(draw = PreviewDraw.Focal(mm)))
     }
     fun apertures(c: CameraCatalog) = listOf(AUTO_CARD) + ComposerCatalog.visible(c.apertures).map { o ->
-        WheelItem(o.id, o.label + (o.description.ifBlank { null }?.let { " · $it" } ?: ""), APERTURE_LINES[o.id] ?: "", Preview(draw = PreviewDraw.Iris(o.id.removePrefix("f").toDoubleOrNull() ?: 4.0)))
+        WheelItem(o.id, o.label, APERTURE_LINES[o.id] ?: o.description, Preview(draw = PreviewDraw.Iris(o.id.removePrefix("f").toDoubleOrNull() ?: 4.0)))
     }
     fun heights(c: CameraCatalog) = listOf(AUTO_CARD) + ComposerCatalog.visible(c.heights).map { WheelItem(it.id, it.label, it.description, Preview(draw = PreviewDraw.Height(it.id), poster = it.preview?.poster)) }
     /** UGC ad's format wheel (catalog `ugcFormats`): a still with the format's big name until format loops exist. */
@@ -108,63 +109,22 @@ object CameraWheels {
     }
 }
 
-/**
- * A wheel on the phone: a horizontal snap row with three cards visible, the selection centred and outlined, the others
- * dimmed. Scrolling to a card or tapping it picks it at once.
- */
-@Composable
-fun WheelRow(title: String, items: List<WheelItem>, selected: Int, onSelect: (WheelItem) -> Unit, previewHeight: Dp = 62.dp) {
-    val m = muse
-    val pick by rememberUpdatedState(onSelect)
-    Column(Modifier.fillMaxWidth().padding(top = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SheetLabel(title, "${selected + 1} / ${items.size}", Modifier.padding(horizontal = 20.dp))
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val cardW = (maxWidth - 28.dp) / 2.6f
-            val side = (maxWidth - cardW) / 2
-            val state = rememberLazyListState(initialFirstVisibleItemIndex = selected)
-            // Settled on a card: that card is the choice (choices apply instantly).
-            LaunchedEffect(state, items) {
-                snapshotFlow { state.isScrollInProgress }.distinctUntilChanged().drop(1).filter { !it }.collect {
-                    val info = state.layoutInfo
-                    val mid = (info.viewportStartOffset + info.viewportEndOffset) / 2
-                    val c = info.visibleItemsInfo.minByOrNull { abs(it.offset + it.size / 2 - mid) }?.index ?: return@collect
-                    items.getOrNull(c)?.let { pick(it) }
-                }
-            }
-            // An outside change (Reset all, a preset): bring the selection to the centre.
-            LaunchedEffect(selected) { if (state.firstVisibleItemIndex != selected || state.firstVisibleItemScrollOffset != 0) state.animateScrollToItem(selected) }
-            LazyRow(state = state, contentPadding = PaddingValues(horizontal = side), horizontalArrangement = Arrangement.spacedBy(14.dp),
-                flingBehavior = rememberSnapFlingBehavior(state, SnapPosition.Center)) {
-                itemsIndexed(items, key = { i, it -> it.id ?: "auto$i" }) { i, it ->
-                    WheelCard(it, i == selected, Modifier.width(cardW), previewHeight) { pick(it) }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun WheelCard(it: WheelItem, on: Boolean, modifier: Modifier, previewHeight: Dp, onClick: () -> Unit) {
-    val m = muse
-    Column(modifier.alpha(if (on) 1f else .42f).press(onClick = onClick).semantics(mergeDescendants = true) { selected = on; role = Role.Button; contentDescription = it.name }) {
-        Box(Modifier.fillMaxWidth().picked(on, m.t.accent)) {
-            PreviewTile(it.preview, Modifier.fillMaxWidth().height(previewHeight).clip(RoundedCornerShape(10.dp))) { if (on) CheckBadge() }
-        }
-        T(it.name, m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold, lineHeight = 17.sp), m.t.ink, Modifier.padding(top = 6.dp, start = 3.dp), maxLines = 1)
-        if (it.caption.isNotBlank()) T(it.caption, m.type.body.copy(fontSize = 12.sp, lineHeight = 15.sp), m.t.muted, Modifier.padding(start = 3.dp), maxLines = 2)
-    }
-}
-
 /** The Camera picker's body for [tab]. */
 @Composable
 fun ColumnScope.CameraPickerBody(tab: String, d: ComposerDraft, cat: CameraCatalog, wide: Boolean, owner: Boolean, update: ((ComposerDraft) -> ComposerDraft) -> Unit, onMove: (SuiteMoveOption) -> Unit) {
     val s = d.settings
     fun set(f: (ComposerSettings) -> ComposerSettings) = update { it.copy(settings = f(it.settings)) }
     when (tab) {
-        "angle" -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
+        // Angle isn't hardware: a grid of Height then Framing tiles (workstream 4: the drums are for hardware only).
+        "angle" -> {
             val h = CameraWheels.heights(cat); val f = CameraWheels.framings(cat)
-            WheelRow("Height", h, CameraWheels.index(h, s.height), { w -> set { it.copy(height = w.id) } }, 96.dp)
-            WheelRow("Framing", f, CameraWheels.index(f, s.shotSize), { w -> set { it.copy(shotSize = w.id) } }, 96.dp)
+            val hs = CameraWheels.index(h, s.height); val fs = CameraWheels.index(f, s.shotSize)
+            TileGrid(wide) {
+                item(span = { GridItemSpan(maxLineSpan) }) { SheetLabel("Height") }
+                itemsIndexed(h, key = { i, w -> "h" + (w.id ?: "auto$i") }) { i, w -> PickTile(w.name, w.caption, w.preview, i == hs, { set { it.copy(height = w.id) } }) }
+                item(span = { GridItemSpan(maxLineSpan) }) { SheetLabel("Framing", modifier = Modifier.padding(top = 8.dp)) }
+                itemsIndexed(f, key = { i, w -> "f" + (w.id ?: "auto$i") }) { i, w -> PickTile(w.name, w.caption, w.preview, i == fs, { set { it.copy(shotSize = w.id) } }) }
+            }
         }
         "movement" -> MovementBody(d, cat, wide, onMove)
         "directed" -> if (owner) Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
@@ -173,14 +133,27 @@ fun ColumnScope.CameraPickerBody(tab: String, d: ComposerDraft, cat: CameraCatal
                 T("Directed camera applied · use the chips instead", muse.type.tiny, muse.t.accent)
             }
         }
-        else -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
-            val b = CameraWheels.bodies(cat); val l = CameraWheels.lenses(cat); val fo = CameraWheels.focals(cat); val a = CameraWheels.apertures(cat)
-            WheelRow("Camera", b, CameraWheels.index(b, s.body, cat.bodies), { w -> set { it.copy(body = w.id) } })
-            WheelRow("Lens", l, CameraWheels.index(l, s.lens, cat.lenses), { w -> set { it.copy(lens = w.id) } })
-            WheelRow("Focal", fo, CameraWheels.index(fo, s.focalMm?.toString()), { w -> set { it.copy(focalMm = w.id?.toIntOrNull()) } })
-            WheelRow("Aperture", a, CameraWheels.index(a, s.aperture?.let { ComposerCatalog.nearestAperture(cat, it) }), { w -> set { it.copy(aperture = w.id) } })
+        // Setup is hardware: four drums (workstream 4, RigDrum).
+        else -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 12.dp, bottom = 16.dp)) {
+            RigSetupDrums(cat, s, wide) { f -> set(f) }
         }
     }
+}
+
+/**
+ * Camera → Setup's four hardware drums: Camera, Lens, Focal and Aperture. The Photo tool's rig uses this too, so a body,
+ * lens, focal length or aperture is picked the same way everywhere.
+ */
+@Composable
+fun RigSetupDrums(cat: CameraCatalog, s: ComposerSettings, wide: Boolean, set: ((ComposerSettings) -> ComposerSettings) -> Unit) {
+    val b = CameraWheels.bodies(cat); val l = CameraWheels.lenses(cat); val fo = CameraWheels.focals(cat); val a = CameraWheels.apertures(cat)
+    val row = if (wide) 76.dp else 64.dp
+    RigDrums(listOf(
+        { md -> RigDrum("Camera", b, CameraWheels.index(b, s.body, cat.bodies), { w -> set { it.copy(body = w.id) } }, md, row) },
+        { md -> RigDrum("Lens", l, CameraWheels.index(l, s.lens, cat.lenses), { w -> set { it.copy(lens = w.id) } }, md, row) },
+        { md -> RigDrum("Focal", fo, CameraWheels.index(fo, s.focalMm?.toString()), { w -> set { it.copy(focalMm = w.id?.toIntOrNull()) } }, md, row) },
+        { md -> RigDrum("Aperture", a, CameraWheels.index(a, s.aperture?.let { ComposerCatalog.nearestAperture(cat, it) }), { w -> set { it.copy(aperture = w.id) } }, md, row) },
+    ))
 }
 
 /** The Camera picker's sub-steps (Directed only for the owner). */
