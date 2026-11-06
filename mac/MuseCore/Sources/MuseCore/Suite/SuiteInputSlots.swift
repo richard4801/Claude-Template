@@ -86,6 +86,9 @@ public enum SlotKind: String, CaseIterable, Hashable, Sendable {
     public var isFrame: Bool { self == .start || self == .middle || self == .end }
     var isMany: Bool { self == .middle || self == .image || self == .video }
 
+    /// The kind that must be filled before this one can be (the end frame needs a start frame), or nil.
+    public var prerequisite: SlotKind? { self == .end ? .start : nil }
+
     /// How many of this kind the tier takes.
     public func capacity(_ i: SuiteInputs) -> Int {
         switch self {
@@ -199,6 +202,18 @@ public struct InputSlots: Hashable, Sendable {
         return InputSlots(n)
     }
 
+    /// A dependent slot whose prerequisite is still empty (an end frame before a start frame): shown greyed, not pickable.
+    public func isWaiting(_ id: SlotId) -> Bool {
+        guard let pre = id.kind.prerequisite else { return false }
+        return filled(pre).isEmpty
+    }
+
+    /// Why a waiting slot is greyed ("After a start frame"), or nil when it can be filled.
+    public func waitingCaption(_ id: SlotId) -> String? {
+        guard isWaiting(id), let pre = id.kind.prerequisite else { return nil }
+        return "After a \(pre.label.lowercased())"
+    }
+
     public var uploading: Bool { values.values.contains { $0.uploading } }
     public var isEmpty: Bool { values.isEmpty }
 
@@ -222,7 +237,8 @@ public struct InputSlots: Hashable, Sendable {
     public func apply(to req: ShotRequest, _ inputs: SuiteInputs) -> ShotRequest {
         var r = req
         let start = sent(.start, inputs).first?.image
-        let end = sent(.end, inputs).first?.image
+        // The end frame rides only with a start frame (it is greyed until one exists).
+        let end = start == nil ? nil : sent(.end, inputs).first?.image
         let middle = sent(.middle, inputs).compactMap { $0.image }
         r.frames = (start != nil || end != nil || !middle.isEmpty) ? SuiteFrames(start: start, middle: middle.isEmpty ? nil : middle, end: end) : nil
         let images = sent(.image, inputs).compactMap { v -> SuiteRefImage? in

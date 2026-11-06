@@ -311,6 +311,8 @@ public struct SuiteTier: Codable, Hashable, Sendable, Identifiable {
     public var available: Bool
     public var resolution: String?
     public var fromPerSec: Double?
+    /// The Length slider's range (seconds).
+    public var minSeconds: Double?
     public var maxSeconds: Double?
     public var canKeyframes: Bool
     public var canReferences: Bool
@@ -320,13 +322,14 @@ public struct SuiteTier: Codable, Hashable, Sendable, Identifiable {
     public var models: [SuiteTierModel]?
 
     public init(id: String, label: String, detail: String, available: Bool = true, resolution: String? = nil, fromPerSec: Double? = nil, maxSeconds: Double? = nil,
-                canKeyframes: Bool = true, canReferences: Bool = true, canGuide: Bool = true, inputs: SuiteInputs? = nil, models: [SuiteTierModel]? = nil) {
+                minSeconds: Double? = nil, canKeyframes: Bool = true, canReferences: Bool = true, canGuide: Bool = true, inputs: SuiteInputs? = nil, models: [SuiteTierModel]? = nil) {
         self.id = id
         self.label = label
         self.detail = detail
         self.available = available
         self.resolution = resolution
         self.fromPerSec = fromPerSec
+        self.minSeconds = minSeconds
         self.maxSeconds = maxSeconds
         self.canKeyframes = canKeyframes
         self.canReferences = canReferences
@@ -335,7 +338,7 @@ public struct SuiteTier: Codable, Hashable, Sendable, Identifiable {
         self.models = models
     }
 
-    enum CodingKeys: String, CodingKey { case id, label, detail, available, resolution, fromPerSec, maxSeconds, canKeyframes, canReferences, canGuide, inputs, models }
+    enum CodingKeys: String, CodingKey { case id, label, detail, available, resolution, fromPerSec, minSeconds, maxSeconds, canKeyframes, canReferences, canGuide, inputs, models }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -344,6 +347,7 @@ public struct SuiteTier: Codable, Hashable, Sendable, Identifiable {
         available = c.v(.available, false)
         resolution = c.o(.resolution)
         fromPerSec = c.o(.fromPerSec)
+        minSeconds = c.o(.minSeconds)
         maxSeconds = c.o(.maxSeconds)
         canKeyframes = c.v(.canKeyframes, false)
         canReferences = c.v(.canReferences, false)
