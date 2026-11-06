@@ -66,6 +66,8 @@ struct ComposerView: View {
                     Text("VIDEO SUITE").font(t.mono(11)).tracking(1.6).foregroundStyle(t.muted)
                 }
                 .buttonStyle(.plain)
+                .help("Back to the Video suite")
+                .accessibilityLabel("Back to the Video suite")
                 Text(store.suite.composer.tool.title).font(t.isA ? Fonts.font("Instrument Serif", 44, .regular) : t.display(34))
             }
             Spacer(minLength: 12)
@@ -152,9 +154,9 @@ struct PresetsRow: View {
                     HStack(spacing: 12) {
                         ForEach(presets) { p in PresetTile(preset: p, selected: store.suite.composer.collapsed == p.id) { store.applyPreset(p) } }
                     }
-                    .padding(4)
+                    .padding(6)
                 }
-                .padding(-4)
+                .padding(-6)
             }
         }
     }
@@ -170,19 +172,17 @@ struct PresetTile: View {
     var action: () -> Void
 
     var body: some View {
+        // No play badge: a preset tile is a still (nothing plays), and the badge was one more mark on every tile.
         Button(action: action) {
             ZStack(alignment: .bottomLeading) {
                 PreviewView(preview: PickerPreview(still: ComposerPresets.render(preset, store.suite.camera)))
                 LinearGradient(colors: [.clear, Color(hex: 0x0A0908, alpha: 0.72)], startPoint: .center, endPoint: .bottom)
                 Text(preset.label).font(Fonts.font("Instrument Serif", 22, .regular)).foregroundStyle(Color(hex: 0xF8F5EF)).lineLimit(1)
                     .minimumScaleFactor(0.7).padding(.leading, 10).padding(.bottom, 8)
-                Image(systemName: "play.fill").font(.system(size: 8)).foregroundStyle(Color(hex: 0x141210))
-                    .frame(width: 20, height: 20).background(Circle().fill(Color(hex: 0xF8F5EF, alpha: 0.88)))
-                    .padding(7).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             }
             .frame(width: width, height: height)
-            .clipped()
-            .overlay(Rectangle().strokeBorder(selected ? t.ink : .clear, lineWidth: 2).padding(-5))
+            .clipShape(RoundedRectangle(cornerRadius: t.imageRadius))
+            .overlay(RoundedRectangle(cornerRadius: t.imageRadius + 4).strokeBorder(selected ? t.ink : .clear, lineWidth: 2).padding(-4))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -208,25 +208,30 @@ struct ComposerCard: View {
             } else if store.isComingSoon(draft.tool) {
                 comingSoonBody
             } else {
-                fullBody
+                // Above its siblings so the prompt's suggestion list draws over the rig check and the bottom bar.
+                fullBody.zIndex(1)
                 RigCheckRow()
                 Rectangle().fill(t.line).frame(height: 1)
                 ComposerBottomBar()
             }
         }
-        .background(t.surface)
-        .overlay(Rectangle().strokeBorder(t.line, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: t.cardRadius))
-        .shadow(color: Color(hex: 0x281E0A, alpha: 0.12), radius: 35, y: 26)
+        // Not clipped: the prompt's @ / # suggestion list drops below the prompt box and must float over the rest of the
+        // card and the presets (zIndex above). Fill and border are one rounded shape behind the content, so the border's
+        // corners aren't cut and it never crosses the list.
+        .background {
+            // A softer lift than before (radius 35, y 26, 12 %), and none in the dark theme where it couldn't be seen.
+            RoundedRectangle(cornerRadius: t.cardRadius).fill(t.surface)
+                .shadow(color: Color(hex: 0x281E0A, alpha: t.isDark ? 0 : 0.08), radius: 22, y: 12)
+                .overlay(RoundedRectangle(cornerRadius: t.cardRadius).strokeBorder(t.line, lineWidth: 1))
+        }
     }
 
     private var fullBody: some View {
         VStack(alignment: .leading, spacing: 14) {
             if !draft.tool.chips.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(draft.tool.chips, id: \.self) { c in SettingChip(chip: c) }
-                    }
+                // Wraps to a second line instead of scrolling: a hidden horizontal scroll cut the last chips at the edge.
+                FlowLayout(spacing: 6) {
+                    ForEach(draft.tool.chips, id: \.self) { c in SettingChip(chip: c) }
                 }
             }
             HStack(alignment: .top, spacing: 16) {
@@ -335,12 +340,16 @@ struct ToolCardRow: View {
             Spacer(minLength: 8)
             if store.isComingSoon(d.tool) { SuiteTag(text: SuiteText.comingSoon) }
             if d.tool == .shot && d.collapsed == nil && !d.tokens.isEmpty {
-                Button { store.addShotToStoryboard() } label: { Image(systemName: "rectangle.split.3x1") }
+                Button { store.addShotToStoryboard() } label: {
+                    Image(systemName: "rectangle.split.3x1").frame(width: 28, height: 28).contentShape(Rectangle())
+                }
                     .buttonStyle(.plain).foregroundStyle(t.muted).help("Add to storyboard")
                     .accessibilityLabel("Add to storyboard")
             }
             if store.isOwner && !store.isComingSoon(d.tool) {
-                Button { store.suite.showEngines = true } label: { Image(systemName: "server.rack") }
+                Button { store.suite.showEngines = true } label: {
+                    Image(systemName: "server.rack").frame(width: 28, height: 28).contentShape(Rectangle())
+                }
                     .buttonStyle(.plain).foregroundStyle(t.muted).help("Engines")
                     .accessibilityLabel("Engines (owner)")
             }

@@ -211,7 +211,7 @@ private struct StoryCard: View {
 
     @ViewBuilder private func tag(_ s: SuiteResultState) -> some View {
         switch s {
-        case .ready: SuiteTag(text: "Ready", color: t.good, filled: true)
+        case .ready: SuiteTag(text: "Ready", color: t.goodInk, filled: true)
         case .rendering(let p, _): SuiteTag(text: "Generating \(p)%", color: t.rec, filled: true)
         case .queued: SuiteTag(text: s.queueLine, color: t.rec, filled: true)
         case .failed: SuiteTag(text: "Failed", color: t.rec, filled: true)

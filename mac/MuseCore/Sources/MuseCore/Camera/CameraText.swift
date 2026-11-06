@@ -138,9 +138,12 @@ public enum CameraStatus {
     /// - inAppChat: from GET /v1/connections (nil = not known yet: assume available).
     /// - busy: a chat turn is streaming here (also counts when the server says chatBusy).
     /// - machine: this Mac's name ("Mac Studio"); "Mac" if unknown.
-    public static func rows(_ s: CameraSession, inAppChat: Bool?, busy: Bool, now: Double, machine: String? = nil) -> [CameraStatusRow] {
-        [claude(s, inAppChat: inAppChat, busy: busy, now: now), blender(s.relay, machine: machine), renders(s)]
+    public static func rows(_ s: CameraSession, inAppChat: Bool?, busy: Bool, now: Double, machine: String? = nil, thisMac: Bool = false) -> [CameraStatusRow] {
+        [claude(s, inAppChat: inAppChat, busy: busy, now: now), blender(s.relay, machine: machine, thisMac: thisMac), renders(s)]
     }
+
+    /// The Blender row's "offline" on the Mac app itself.
+    public static let offlineHere = "Relay off · turn it on in Connections"
 
     public static func claude(_ s: CameraSession, inAppChat: Bool?, busy: Bool, now: Double) -> CameraStatusRow {
         let t = "Claude session"
@@ -150,9 +153,11 @@ public enum CameraStatus {
         return CameraStatusRow(title: t, detail: "In MUSE (this chat)", tone: .good)
     }
 
-    public static func blender(_ r: CameraRelayPresence?, machine: String? = nil) -> CameraStatusRow {
+    /// - thisMac: the row is drawn by the Mac app itself, so "Mac app offline" would contradict the screen it's on: it says the
+    ///   relay is off instead (it's switched on in Connections).
+    public static func blender(_ r: CameraRelayPresence?, machine: String? = nil, thisMac: Bool = false) -> CameraStatusRow {
         let title = r?.addonVersion.map { "Blender \($0)" } ?? "Blender"
-        guard let r, r.online else { return CameraStatusRow(title: title, detail: "Mac app offline", tone: .off) }
+        guard let r, r.online else { return CameraStatusRow(title: title, detail: thisMac ? offlineHere : "Mac app offline", tone: .off) }
         if r.blender { return CameraStatusRow(title: title, detail: "\(machine ?? "Mac") · localhost", tone: .good) }
         return CameraStatusRow(title: title, detail: "Mac app online · Blender not connected", tone: .warn)
     }

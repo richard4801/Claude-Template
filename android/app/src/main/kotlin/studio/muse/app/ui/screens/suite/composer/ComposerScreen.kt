@@ -5,6 +5,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -39,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -127,6 +130,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
     LaunchedEffect(Unit) { if (store.catalog.value == null) store.load() }
     LaunchedEffect(Unit) { store.loadLocations() }
     val locations by store.locations.collectAsState()
+    val catalogError by store.catalogError.collectAsState()
     LaunchedEffect(toolId) { ComposerTool.entries.firstOrNull { it.id == toolId }?.let { t -> if (store.composer.value.tool != t) store.composer.update { it.withTool(t) } } }
     // The clip picked in New video becomes Character swap's / Recast's source.
     LaunchedEffect(video.clip?.id) { video.clip?.id?.let { id -> if (store.recast.value.clipId != id) store.recast.update { it.copy(clipId = id) } } }
@@ -252,6 +256,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
         addons = addonPills, onAddon = ::onAddon, owner = owner, locations = locations, refsUsed = d.referencesUsed(slots, inputs, own),
         lead = st.model(d.characterId), clipName = recast.clipId?.let { id -> video.clip?.takeIf { it.id == id }?.name ?: if (id == SampleData.SAMPLE_CLIP) SampleData.sampleMeta.name else "Your clip" },
         models = st.models, outfits = st.outfitsOf(d.characterId),
+        catalogNote = if (catalog == null) catalogError ?: "" else null, onRetryCatalog = { scope.launch { store.load() } },
         rigRow = { w -> ComposerRigRow(req.takeIf { live && addon == null && d.tool in ComposerDraft.PROMPT_TOOLS }, suiteEst, suiteEst == null && (estErr != null || problem != null), w) },
         update = ::update, open = ::open, onGenerate = ::generate, onSlot = ::onSlot, onClearSlot = { k ->
             when (k) {
@@ -355,6 +360,9 @@ class ComposerUi(
     val onAddon: (SwapAddon) -> Unit = {},
     /** The rig check's warning row (RigCheckRow.kt), drawn just above the bottom bar; the argument is `wide`. */
     val rigRow: @Composable (Boolean) -> Unit = {},
+    /** The catalog isn't here yet: "" while it loads, else why it couldn't load. null = loaded. */
+    val catalogNote: String? = null,
+    val onRetryCatalog: () -> Unit = {},
 ) {
     val toolSlots: List<ToolSlot> get() = ToolSlots.of(d.tool, inputs, slots, catalog?.recastMaxPeople ?: SuiteRules.MAX_CAST)
     val showPrompt: Boolean get() = d.tool == ComposerTool.SHOT || d.tool == ComposerTool.TALKING || d.tool == ComposerTool.UGC || d.tool == ComposerTool.EXTEND ||
@@ -372,7 +380,8 @@ private fun PhoneComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             RecentTakes(ui, job, recent, takes, openTake, retry, wide = false)
-            if (ui.empty || ui.d.collapsed) PresetRow(ui, Modifier.padding(horizontal = 16.dp), tileW = 128.dp, tileH = 84.dp)
+            if (ui.catalogNote != null) CatalogNote(ui, Modifier.padding(horizontal = 16.dp))
+            else if (ui.empty || ui.d.collapsed) PresetRow(ui, Modifier.padding(horizontal = 16.dp), tileW = 128.dp, tileH = 84.dp)
         }
         Column(Modifier.fillMaxWidth().drawBehind { drawLine(m.t.line, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }.background(m.t.surface).navigationBarsPadding()
             .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -482,15 +491,18 @@ private fun ToolRow(ui: ComposerUi, wide: Boolean) {
 
 /** The five setting chips (those the tool shows): a tiny visual, the mono label and the value ("Auto" or the picks). */
 @Composable
-private fun ChipsRow(ui: ComposerUi) {
+private fun ChipsRow(ui: ComposerUi, wide: Boolean = false) {
     val m = muse
     val d = ui.d
     val refsMax = SlotKind.IMAGE.capacity(ui.inputs)
     val refs = ui.refsUsed
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    // Wide: the chips wrap, so all five show and their values aren't cut. Phone: one scrolling line that fades at the
+    // right edge, so the chips past it read as "more this way".
+    val scroll = rememberScrollState()
+    val chipsBody: @Composable () -> Unit = {
         d.chips.forEach { chip ->
             val sum = ComposerCatalog.summary(chip, d.settings, ui.cat, refs, refsMax)
-            val value = if (chip == ComposerChip.CAMERA && d.directed != null) "Directed" else ComposerCatalog.ellipsize(sum.value, 26)
+            val value = if (chip == ComposerChip.CAMERA && d.directed != null) "Directed" else ComposerCatalog.ellipsize(sum.value, if (wide) 40 else 26)
             val auto = sum.auto && !(chip == ComposerChip.CAMERA && d.directed != null)
             val render = when (chip) {
                 ComposerChip.REFERENCES -> null
@@ -503,7 +515,7 @@ private fun ChipsRow(ui: ComposerUi) {
             Box(Modifier.heightIn(min = 48.dp).press {
                 ui.open(ComposerSheet(when (chip) { ComposerChip.REFERENCES -> SheetKind.REFERENCES; ComposerChip.STYLE -> SheetKind.STYLE; ComposerChip.CAMERA -> SheetKind.CAMERA; ComposerChip.LOOK -> SheetKind.LOOK; ComposerChip.LIGHTING -> SheetKind.LIGHTING }))
             }.semantics(mergeDescendants = true) { contentDescription = "${chip.title}: $value"; role = Role.Button }, contentAlignment = Alignment.Center) {
-                Row(Modifier.height(38.dp).clip(shape).background(m.t.bg).border(if (m.isD) 2.dp else 1.dp, m.t.line, shape).padding(start = 6.dp, end = 11.dp),
+                Row(Modifier.height(38.dp).clip(shape).background(m.t.bg).border(if (m.isD) 1.5.dp else 1.dp, m.t.line, shape).padding(start = 6.dp, end = 11.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     if (render == null) Box(Modifier.size(26.dp).dashedBox(m.t.muted), contentAlignment = Alignment.Center) { SIc("image", 14.dp, m.t.muted) }
                     else HardwareImage(render, Modifier.size(26.dp), sample = 8, gray = auto)
@@ -512,6 +524,18 @@ private fun ChipsRow(ui: ComposerUi) {
                 }
             }
         }
+    }
+    if (wide) FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) { chipsBody() }
+    else {
+        val fade = m.t.surface
+        Row(Modifier.fillMaxWidth().horizontalScroll(scroll).drawWithContent {
+            drawContent()
+            if (scroll.value < scroll.maxValue) {
+                val w = 28.dp.toPx()
+                drawRect(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(fade.copy(alpha = 0f), fade), startX = size.width - w, endX = size.width),
+                    topLeft = Offset(size.width - w, 0f), size = androidx.compose.ui.geometry.Size(w, size.height))
+            }
+        }, horizontalArrangement = Arrangement.spacedBy(6.dp)) { chipsBody() }
     }
 }
 
@@ -605,16 +629,16 @@ private fun SlotCard(ui: ComposerUi, s: ToolSlot, modifier: Modifier) {
             RefImage(img, Modifier.matchParentSize(), 20)
             Box(Modifier.matchParentSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(0f to Color.Transparent, .45f to Color.Transparent, 1f to Color(0xC70E0C0A))))
         }
-        if (s.optional && filled == null) Box(Modifier.align(Alignment.TopEnd).padding(5.dp).background(m.t.surface).border(1.dp, m.t.line).padding(horizontal = 4.dp, vertical = 1.dp)) {
-            T("OPTIONAL", m.type.mono.copy(fontSize = 8.5.sp, letterSpacing = .08.em), m.t.muted, maxLines = 1)
-        }
+        // "Optional" as a quiet word, not another boxed badge on a dashed card.
+        if (s.optional && filled == null) T("Optional", m.type.body.copy(fontSize = 10.5.sp), m.t.muted, Modifier.align(Alignment.TopEnd).padding(horizontal = 7.dp, vertical = 5.dp), maxLines = 1)
         val onImg = img != null
         Column(Modifier.align(if (onImg) Alignment.BottomStart else Alignment.Center).padding(horizontal = 6.dp, vertical = 6.dp).padding(top = if (onImg) 0.dp else 10.dp),
             horizontalAlignment = if (onImg) Alignment.Start else Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
             if (!onImg) Box(Modifier.size(28.dp).clip(CircleShape).background(m.t.surface).border(1.dp, m.t.line, CircleShape), contentAlignment = Alignment.Center) {
                 if (filled != null) SIc("check", 14.dp, m.t.ink) else SIc("plus", 14.dp, m.t.ink)
             }
-            T(if (onImg && s.kind == "character") filled.second else s.label.uppercase(), if (onImg && s.kind == "character") m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold) else m.type.mono.copy(fontSize = 9.5.sp, letterSpacing = .1.em),
+            // On a picture every card reads the same way: the name (or the slot's own name) in bold, then the caption.
+            T(when { onImg && s.kind == "character" -> filled.second; onImg -> s.label; else -> s.label.uppercase() }, if (onImg) m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold) else m.type.mono.copy(fontSize = 9.5.sp, letterSpacing = .1.em),
                 if (onImg) Color(0xFFF8F5EF) else m.t.ink, maxLines = 1, align = if (onImg) null else TextAlign.Center)
             T(if (filled != null && !onImg) filled.second else sub, m.type.body.copy(fontSize = 10.5.sp, lineHeight = 13.sp), if (onImg) Color(0xFFE7E1D6) else m.t.muted, maxLines = if (onImg) 1 else 2,
                 align = if (onImg) null else TextAlign.Center)
@@ -647,7 +671,7 @@ private fun CollapsedBody(ui: ComposerUi, wide: Boolean) {
             }
             Spacer(Modifier.weight(1f))
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                T(summary, m.type.body.copy(fontSize = 13.sp), m.t.muted, maxLines = 1)
+                T(summary, m.type.body.copy(fontSize = 13.sp), m.t.muted, Modifier.widthIn(max = 300.dp), maxLines = 2, align = TextAlign.End)
                 WideGenerate(ui)
                 EditSettingsLink(ui)
             }
@@ -680,19 +704,41 @@ private fun EditSettingsLink(ui: ComposerUi) {
 private fun PresetRow(ui: ComposerUi, modifier: Modifier = Modifier, tileW: Dp, tileH: Dp) {
     val m = muse
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        // A fixed-height header: "Clear" keeps its 48 dp touch box without pushing the tiles down when a preset is picked.
+        Row(Modifier.fillMaxWidth().height(20.dp), verticalAlignment = Alignment.CenterVertically) {
             T("START FROM A PRESET", m.type.mono.copy(fontSize = 11.sp, letterSpacing = .16.em, fontWeight = FontWeight.Medium), m.t.ink, Modifier.weight(1f), maxLines = 1)
-            if (ui.d.settings.preset != null) Box(Modifier.heightIn(min = 48.dp).press { ui.update { it.clearPreset() } }, contentAlignment = Alignment.CenterEnd) { T("Clear", m.type.tiny, m.t.muted) }
+            if (ui.d.settings.preset != null) Box(Modifier.requiredHeight(48.dp).widthIn(min = 48.dp).press { ui.update { it.clearPreset() } }
+                .semantics { contentDescription = "Clear preset"; role = Role.Button }, contentAlignment = Alignment.CenterEnd) { T("Clear", m.type.tiny, m.link) }
             else T("${ui.cat.presets.size} presets", m.type.tiny, m.t.muted)
         }
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        // The picked preset is scrolled into view (it can sit past the screen's edge).
+        val scroll = rememberScrollState()
+        val step = with(androidx.compose.ui.platform.LocalDensity.current) { (tileW + 16.dp).roundToPx() }
+        val pickedAt = ui.cat.presets.indexOfFirst { it.id == ui.d.settings.preset }
+        LaunchedEffect(pickedAt) { if (pickedAt > 0) scroll.animateScrollTo((pickedAt * step - step / 2).coerceAtLeast(0)) }
+        Row(Modifier.fillMaxWidth().horizontalScroll(scroll), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             ui.cat.presets.forEach { p ->
                 val on = ui.d.settings.preset == p.id
                 Box(Modifier.let { if (on) it.border(2.dp, m.t.ink).padding(3.dp) else it.padding(3.dp) }) {
                     PreviewTile(presetPreview(ui.cat, p.id, p.label), Modifier.size(tileW, tileH).press { ui.update { it.pickPreset(ui.cat, p.id, ui.models.firstOrNull()?.id) } }
-                        .semantics { contentDescription = "Preset ${p.label}"; role = Role.Button })
+                        .semantics { contentDescription = "Preset ${p.label}"; role = Role.Button; selected = on })
                 }
             }
+        }
+    }
+}
+
+/** While the catalog loads (presets, cameras, prices) or when it couldn't: say so, with Try again, instead of "0 presets". */
+@Composable
+private fun CatalogNote(ui: ComposerUi, modifier: Modifier = Modifier) {
+    val m = muse
+    val err = ui.catalogNote?.ifBlank { null }
+    Row(modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(if (m.isA) 0.dp else 10.dp)).background(m.t.surface2).padding(start = 14.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        T(err ?: "Loading presets and cameras…", m.type.body.copy(fontSize = 13.sp, lineHeight = 17.sp), if (err != null) m.t.ink else m.t.muted, Modifier.weight(1f).padding(vertical = 10.dp), maxLines = 3)
+        if (err != null) Box(Modifier.heightIn(min = 48.dp).widthIn(min = 48.dp).press(onClick = ui.onRetryCatalog).semantics { role = Role.Button }.padding(horizontal = 10.dp),
+            contentAlignment = Alignment.Center) {
+            T("Try again", m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), m.link, maxLines = 1)
         }
     }
 }
@@ -705,12 +751,20 @@ private fun RecentTakes(ui: ComposerUi, job: studio.muse.app.data.Job?, recent: 
     val pane = SuitePane.of(job, takes, ui.lead?.name)
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         T("RECENT TAKES", m.type.mono.copy(fontSize = 11.sp, letterSpacing = .16.em, fontWeight = FontWeight.Medium), m.t.ink, Modifier.padding(horizontal = if (wide) 0.dp else 16.dp))
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val rowW = maxWidth - 32.dp
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = if (wide) 0.dp else 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.Bottom) {
             // Nothing rendering yet: a wide empty card (the 9:16 pane is for a take in progress).
             val idle = pane.phase == StagePhase.IDLE
             val big = if (wide) 100.dp else 140.dp
-            Box((if (idle) Modifier.size(if (wide) 320.dp else 240.dp, if (wide) 178.dp else 200.dp) else Modifier.size(big, big * 16 / 9)).clip(RoundedCornerShape(if (m.isA) 0.dp else 10.dp))) {
+            // Phone: the empty card is as tall as a recent take (146 dp) so the presets under it stay in view at 360 dp.
+            val idleMod = when {
+                wide -> Modifier.size(320.dp, 178.dp)
+                recent.isEmpty() -> Modifier.size(rowW, 146.dp)
+                else -> Modifier.size(240.dp, 146.dp)
+            }
+            Box((if (idle) idleMod else Modifier.size(big, big * 16 / 9)).clip(RoundedCornerShape(if (m.isA) 0.dp else 10.dp))) {
                 SuiteResultPane(pane, ui.lead?.cover, emptyTitle = "Your shot appears here", emptyHint = "Describe it below, press Generate.", compact = true,
                     onRetry = { job?.let { retry(ui.d.request(ui.slots, ui.inputs, ui.recast)) } }, onTry = nextTier(ui.d.quality)?.let { t -> { ui.update { it.copy(quality = t) } } },
                     tryLabel = nextTier(ui.d.quality)?.let { "Try ${SuiteRules.tierLabel(it)}" }, onOpen = { job?.let { openTake(it.id) } })
@@ -728,6 +782,7 @@ private fun RecentTakes(ui: ComposerUi, job: studio.muse.app.data.Job?, recent: 
                     }
                 }
             }
+        }
         }
         if (job != null && pane.step.isNotBlank()) T("${job.title} · ${pane.step}", m.type.tiny, m.t.muted, Modifier.padding(horizontal = if (wide) 0.dp else 16.dp), maxLines = 1)
     }
@@ -752,7 +807,7 @@ private fun WideComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent:
                 Box(Modifier.padding(16.dp)) { CollapsedBody(ui, wide = true) }
             } else {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (ui.d.chips.isNotEmpty()) ChipsRow(ui)
+                    if (ui.d.chips.isNotEmpty()) ChipsRow(ui, wide = true)
                     if (ui.d.tool == ComposerTool.SWAP) SwapPromptToggle(ui)
                     if (ui.d.tool == ComposerTool.EXTEND) ExtendDirection(ui, Modifier.widthIn(max = 520.dp), captions = true)
                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -766,7 +821,8 @@ private fun WideComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent:
                 WideBar(ui)
             }
         }
-        if (ui.empty || ui.d.collapsed) PresetRow(ui, Modifier.widthIn(max = 960.dp).align(Alignment.CenterHorizontally), tileW = 150.dp, tileH = 96.dp)
+        if (ui.catalogNote != null) CatalogNote(ui, Modifier.widthIn(max = 960.dp).align(Alignment.CenterHorizontally))
+        else if (ui.empty || ui.d.collapsed) PresetRow(ui, Modifier.widthIn(max = 960.dp).align(Alignment.CenterHorizontally), tileW = 150.dp, tileH = 96.dp)
     }
 }
 
