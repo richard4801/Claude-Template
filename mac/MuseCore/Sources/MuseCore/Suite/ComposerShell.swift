@@ -423,6 +423,22 @@ public enum ComposerBar {
 
     /// The collapsed composer's shape tiles.
     public static let shapes = ["9:16", "1:1", "16:9"]
+
+    /// What a quality takes, for its card in the Quality pill ("Start + end frame · refs · clips").
+    public static func acceptsLine(_ i: SuiteInputs) -> String {
+        var parts: [String] = []
+        if i.start && i.end && i.middle > 0 {
+            parts.append("Start, middle, end")
+        } else if i.start && i.end {
+            parts.append("Start + end frame")
+        } else if i.start {
+            parts.append("Start frame")
+        }
+        if i.images > 0 { parts.append("refs") }
+        if i.videos > 0 { parts.append("clips") }
+        if i.audio { parts.append("audio") }
+        return parts.isEmpty ? "Prompt only" : parts.joined(separator: " · ")
+    }
 }
 
 // MARK: Presets (the beginner path)
@@ -507,4 +523,25 @@ public struct ComposerDraft: Hashable, Sendable {
         d.directed = nil
         return d
     }
+}
+
+// MARK: Typing a token
+
+extension PromptTokens {
+    /// Picking a suggestion: the `@…` / `#…` being typed in text part `part` (from `trigger.start` to `caret`) is taken out,
+    /// and the caret where the token goes is returned.
+    public func removingTrigger(_ trigger: PromptTrigger, part: Int, caret: Int) -> (PromptTokens, Caret) {
+        guard parts.indices.contains(part), let t = parts[part].text else { return (self, caretAtEnd) }
+        let chars = Array(t)
+        let s = min(max(trigger.start, 0), chars.count)
+        let e = min(max(caret, s), chars.count)
+        let rest = String(chars[0..<s]) + String(chars[e...])
+        return (setText(part: part, rest), Caret(part, s))
+    }
+
+    /// A token's place in the parts, by key.
+    public func index(ofKey key: Int) -> Int? { parts.firstIndex { $0.key == key } }
+
+    /// The newest token's key.
+    public var lastKey: Int? { parts.compactMap(\.key).max() }
 }

@@ -128,6 +128,9 @@ final class SuiteComposerShellTests: XCTestCase {
         XCTAssertEqual(ComposerBar.lengthRange(nil), 4...15)
         XCTAssertEqual(ComposerBar.takes(4), [1, 2, 3, 4])
         XCTAssertEqual(ComposerBar.takes(9), [1, 2, 3, 4])
+        XCTAssertEqual(ComposerBar.acceptsLine(all), "Start, middle, end · refs · clips · audio")
+        XCTAssertEqual(ComposerBar.acceptsLine(SuiteInputs(start: true, end: true, images: 6)), "Start + end frame · refs")
+        XCTAssertEqual(ComposerBar.acceptsLine(.none), "Prompt only")
         XCTAssertEqual(SuiteDemoCatalog.catalog.tier("hd")?.minSeconds, 3)
         XCTAssertEqual(ComposerSpeaking.auto.value, nil)
         XCTAssertEqual(ComposerSpeaking.on.value, true)
@@ -159,5 +162,19 @@ final class SuiteComposerShellTests: XCTestCase {
         d.directed = CameraSpec(mode: "directed")
         r = d.request(InputSlots(), all)
         XCTAssertEqual(r.camera?.mode, "directed")
+    }
+
+    func testPickingASuggestionReplacesWhatWasTyped() throws {
+        let typed = PromptTokens.text("She walks #dol now")
+        let trig = try XCTUnwrap(PromptTokens.activeTrigger("She walks #dol now", caret: 14))
+        let (cut, caret) = typed.removingTrigger(trig, part: 0, caret: 14)
+        XCTAssertEqual(cut.parts, [.text("She walks  now")])
+        XCTAssertEqual(caret, Caret(0, 10))
+        let dolly = try XCTUnwrap(cat.move("dolly_in"))
+        let (withMove, note) = cut.addMove(dolly, at: caret, catalog: cat)
+        XCTAssertNil(note)
+        XCTAssertEqual(withMove.display(), "She walks #Dolly in now")
+        XCTAssertEqual(withMove.index(ofKey: try XCTUnwrap(withMove.lastKey)), 1)
+        XCTAssertEqual(typed.removingTrigger(trig, part: 5, caret: 14).0, typed)
     }
 }

@@ -88,7 +88,7 @@ struct StoryboardView: View {
                 .accessibilityLabel("Choose the cast")
             }
             Rectangle().fill(t.line).frame(width: 1, height: 40)
-            Button { store.openBag(.storyboard) } label: {
+            Button { store.openPicker(.look, target: .storyboard) } label: {
                 HStack(spacing: 6) {
                     Text("LOOK LOCK").font(t.mono(10.5)).tracking(1.2).foregroundStyle(t.muted)
                     ForEach(CameraSummary.renders(suite.board.camera, suite.camera).prefix(2), id: \.self) { r in
@@ -110,6 +110,7 @@ struct StoryboardView: View {
         let preset = b.preset.flatMap { id in c.presets.first { $0.id == id }?.label }
         let palette = b.palette?.preset.flatMap { id in c.palettes.first { $0.id == id }?.title }
         let parts = [preset, palette].compactMap { $0 }
+        if parts.isEmpty, let l = ComposerCatalog.label(c.looks, store.suite.boardSettings.stock) { return l }
         return parts.isEmpty ? "Set the look" : parts.joined(separator: " · ")
     }
 
@@ -255,7 +256,7 @@ private struct StoryShotEditor: View {
                 }
                 Rectangle().fill(t.line).frame(height: 1)
                 Text("Camera").font(t.body(15, .semibold))
-                SuiteCameraSummary(spec: suite.board.camera) { store.openBag(.storyboard, tab: $0) }
+                BoardLookChips()
                 Muted("Keyframes come from \(store.character(suite.board.castIds.first)?.shortName ?? "the lead")’s sheet. Same cast, look and lens across all shots.")
                 if let j = job, j.isDone || j.isFailed {
                     SuiteResultPane(job: j, art: store.character(suite.board.castIds.first)?.cover, character: store.character(suite.board.castIds.first)).frame(maxWidth: 260)
@@ -272,6 +273,36 @@ private struct StoryShotEditor: View {
             }
         } else {
             Muted("Pick a shot to edit it.")
+        }
+    }
+}
+
+/// The storyboard's look lock as the composer's chips (Style, Camera, Look, Lighting); each opens the same picker shell.
+private struct BoardLookChips: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    var body: some View {
+        let s = store.suite.boardSettings
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach([ComposerChip.style, .camera, .look, .lighting], id: \.self) { chip in
+                let sum = ComposerCatalog.summary(chip, s, store.suite.camera)
+                Button {
+                    if let p = ComposerPicker(chip: chip) { store.openPicker(p, target: .storyboard) }
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(chip.key).font(t.mono(10, .medium)).tracking(1).foregroundStyle(t.muted).frame(width: 74, alignment: .leading)
+                        Text(sum.value).font(t.body(12.5, sum.auto ? .regular : .semibold)).lineLimit(1)
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.right").font(.system(size: 10)).foregroundStyle(t.muted)
+                    }
+                    .padding(.horizontal, 10).frame(height: 32)
+                    .overlay(Rectangle().strokeBorder(t.line, lineWidth: 1))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(sum.text(max: 80))
+            }
         }
     }
 }
