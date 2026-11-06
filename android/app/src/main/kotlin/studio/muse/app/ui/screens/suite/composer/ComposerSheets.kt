@@ -130,7 +130,11 @@ fun BoxScope.ComposerSheetHost(sheet: ComposerSheet, x: SheetContext) {
                         "tempo" -> Triple(cam.tempos, s.tempo) { id: String? -> set { it.copy(tempo = id) } }
                         else -> Triple(cam.genres, s.genre) { id: String? -> set { it.copy(genre = id) } }
                     }
-                    OptionGrid(ComposerCatalog.visible(list), cur, x.wide, put, preview = { o, i -> Preview(STYLE_STILLS[i % STYLE_STILLS.size], o.loop, PreviewDraw.Word(o.label)) })
+                    // Each option's own still (design/previews/{genres,tempos}); the placeholder with big type only for an option without one.
+                    OptionGrid(ComposerCatalog.visible(list), cur, x.wide, put, preview = { o, i ->
+                        val poster = o.preview?.poster
+                        if (poster != null) Preview(poster = poster) else Preview(STYLE_STILLS[i % STYLE_STILLS.size], o.loop, PreviewDraw.Word(o.label))
+                    })
                 }
             }
         }
@@ -190,7 +194,8 @@ private fun ColumnScope.EraSlider(cam: CameraCatalog, current: String?, wide: Bo
     val o = cam.eras.firstOrNull { it.id == stops[i] }
     val label = o?.label ?: "Auto"
     Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        PreviewTile(Preview(if (o == null) null else STYLE_STILLS[(i + 4) % STYLE_STILLS.size], o?.loop, if (o == null) PreviewDraw.Auto else PreviewDraw.Word(o.label)),
+        val eraPoster = o?.preview?.poster  // the era's own still (design/previews/eras)
+        PreviewTile(if (eraPoster != null) Preview(poster = eraPoster) else Preview(if (o == null) null else STYLE_STILLS[(i + 4) % STYLE_STILLS.size], o?.loop, if (o == null) PreviewDraw.Auto else PreviewDraw.Word(o.label)),
             Modifier.fillMaxWidth().height(if (wide) 170.dp else 150.dp).clip(RoundedCornerShape(12.dp)))
         Row(verticalAlignment = Alignment.Bottom) {
             T(label, m.type.h2.copy(fontSize = 30.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold), m.t.ink, Modifier.weight(1f), maxLines = 1)

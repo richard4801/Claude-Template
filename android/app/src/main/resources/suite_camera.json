@@ -2434,73 +2434,109 @@
    "id": "ugc",
    "label": "UGC",
    "description": "Authentic creator content",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "genres/ugc.jpg"
+   }
   },
   {
    "id": "commercial",
    "label": "Commercial",
    "description": "Polished ad",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "genres/commercial.jpg"
+   }
   },
   {
    "id": "drama",
    "label": "Drama",
    "description": "",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "genres/drama.jpg"
+   }
   },
   {
    "id": "action",
    "label": "Action",
    "description": "",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "genres/action.jpg"
+   }
   },
   {
    "id": "epic",
    "label": "Epic",
    "description": "",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "genres/epic.jpg"
+   }
   },
   {
    "id": "comedy",
    "label": "Comedy",
    "description": "",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "genres/comedy.jpg"
+   }
   },
   {
    "id": "romance",
    "label": "Romance",
    "description": "",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "genres/romance.jpg"
+   }
   },
   {
    "id": "horror",
    "label": "Horror",
    "description": "",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "genres/horror.jpg"
+   }
   },
   {
    "id": "noir",
    "label": "Noir",
    "description": "",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "genres/noir.jpg"
+   }
   },
   {
    "id": "documentary",
    "label": "Documentary",
    "description": "",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "genres/documentary.jpg"
+   }
   },
   {
    "id": "music_video",
    "label": "Music video",
    "description": "",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "genres/music_video.jpg"
+   }
   },
   {
    "id": "fashion",
    "label": "Fashion film",
    "description": "",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "genres/fashion.jpg"
+   }
   }
  ],
  "eras": [
@@ -2508,49 +2544,73 @@
    "id": "1960s",
    "label": "1960s",
    "description": "",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "eras/1960s.jpg"
+   }
   },
   {
    "id": "1970s",
    "label": "1970s",
    "description": "",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "eras/1970s.jpg"
+   }
   },
   {
    "id": "1980s",
    "label": "1980s",
    "description": "",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "eras/1980s.jpg"
+   }
   },
   {
    "id": "1990s",
    "label": "1990s",
    "description": "",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "eras/1990s.jpg"
+   }
   },
   {
    "id": "2000s",
    "label": "2000s",
    "description": "",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "eras/2000s.jpg"
+   }
   },
   {
    "id": "2010s",
    "label": "2010s",
    "description": "",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "eras/2010s.jpg"
+   }
   },
   {
    "id": "2020s",
    "label": "2020s",
    "description": "",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "eras/2020s.jpg"
+   }
   },
   {
    "id": "future",
    "label": "Near future",
    "description": "",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "eras/future.jpg"
+   }
   }
  ],
  "tempos": [
@@ -2558,37 +2618,55 @@
    "id": "calm",
    "label": "Calm",
    "description": "Slow, lingering",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "tempos/calm.jpg"
+   }
   },
   {
    "id": "steady",
    "label": "Steady",
    "description": "Even pacing",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "tempos/steady.jpg"
+   }
   },
   {
    "id": "dynamic",
    "label": "Dynamic",
    "description": "Energetic",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "tempos/dynamic.jpg"
+   }
   },
   {
    "id": "chaotic",
    "label": "Chaotic",
    "description": "Frantic",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "tempos/chaotic.jpg"
+   }
   },
   {
    "id": "single_shot",
    "label": "One take",
    "description": "One continuous take, no cuts",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "tempos/single_shot.jpg"
+   }
   },
   {
    "id": "slow_motion",
    "label": "Slow motion",
    "description": "Stretched, graceful movement",
-   "visible": true
+   "visible": true,
+   "preview": {
+    "poster": "tempos/slow_motion.jpg"
+   }
   }
  ],
  "ugcFormats": [
