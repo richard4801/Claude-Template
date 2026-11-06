@@ -16,6 +16,7 @@ import studio.muse.core.edit.LookImage
 import studio.muse.core.edit.LookLimits
 import studio.muse.core.edit.LookPack
 import studio.muse.core.edit.Lut
+import studio.muse.core.edit.SuiteLooks
 import studio.muse.core.edit.checkCube
 import studio.muse.core.edit.parseCube
 import studio.muse.core.edit.renderLook
@@ -44,14 +45,32 @@ class LookLibrary(context: Context) {
     }
 
     /**
-     * The LUT a look names: `pack:<id>` from the assets, otherwise the imported cube of that asset id in [files]
-     * (asset id → downloaded file). Null when there is no LUT or it can't be loaded (logged; the rest of the look
-     * still applies, so a missing download never breaks preview or export).
+     * The suite looks generated from palettes and film stocks (`assets/palettes/palettes.json` + cubes; parsed once).
+     * The folder ships with the suite-looks work and may be absent: then there are none.
+     */
+    val palettes: SuiteLooks by lazy {
+        try { assets.open("${SuiteLooks.ASSET_DIR}/${SuiteLooks.INDEX_FILE}").use { SuiteLooks.parse(it.readBytes().decodeToString()) } }
+        catch (e: java.io.IOException) { SuiteLooks.NONE }
+    }
+
+    /** The suite look ids a `palette:<id>` LUT may name (what the app validates projects against). */
+    val paletteIds: Set<String> get() = palettes.ids
+
+    /** A suite look's LUT. Throws when there is no such look or its file is broken. */
+    fun paletteLut(id: String): Lut = PACK_LUTS.getOrPut("${Look.PALETTE_PREFIX}$id") {
+        val e = palettes.entry(id) ?: throw IllegalArgumentException("no suite look $id")
+        assets.open("${SuiteLooks.ASSET_DIR}/${e.file}").use { parseCube(it.readBytes().decodeToString()) }
+    }
+
+    /**
+     * The LUT a look names: `pack:<id>` / `palette:<id>` from the assets, otherwise the imported cube of that asset id
+     * in [files] (asset id → downloaded file). Null when there is no LUT or it can't be loaded (logged; the rest of the
+     * look still applies, so a missing download never breaks preview or export).
      */
     fun lutFor(look: Look?, files: Map<String, File>): Lut? {
         val ref = look?.lut ?: return null
         return try {
-            look.packId?.let(::packLut) ?: files[ref]?.let(::importedLut)
+            look.packId?.let(::packLut) ?: look.paletteId?.let(::paletteLut) ?: look.lutAssetId?.let { files[it] }?.let(::importedLut)
         } catch (e: Exception) {
             Log.w(TAG, "look LUT $ref could not be loaded", e)
             null

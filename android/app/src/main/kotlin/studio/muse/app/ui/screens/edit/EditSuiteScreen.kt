@@ -290,6 +290,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
             controller.update { u ->
                 u.copy(
                     looks = runCatching { looks.pack.looks.map { LookChoice(it.id, it.name, it.category) } }.getOrDefault(emptyList()),
+                    suiteLooks = runCatching { looks.palettes.looks.associate { it.id to it.name } }.getOrDefault(emptyMap()),
                     takes = editableTakes(takes).filter { it.id != source.id },
                 )
             }
@@ -314,9 +315,9 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
     /** The project to start from: a saved v2 project, a v1 edit list, or the whole source as one clip. */
     private fun projectFor(source: Take, initial: studio.muse.app.data.EditListDto?): EditProject {
         val info = sourceInfo
-        initial?.project?.let { json -> runCatching { EditJson.parse(json) }.getOrNull()?.takeIf { problemOf(it) == null }?.let { return it } }
+        initial?.project?.let { json -> runCatching { EditJson.parse(json) }.getOrNull()?.takeIf { problemOf(it, paletteIds = looks.paletteIds) == null }?.let { return it } }
         val size = SourceSize(info?.width ?: source.width ?: 1080, info?.height ?: source.height ?: 1920, (info?.fps?.takeIf { it > 0 } ?: source.fps ?: 30.0).roundToInt().toDouble(), info?.hasAudio)
-        initial?.toEdit()?.let { e -> runCatching { fromV1(e, source.id, size) }.getOrNull()?.takeIf { problemOf(it) == null }?.let { return it } }
+        initial?.toEdit()?.let { e -> runCatching { fromV1(e, source.id, size) }.getOrNull()?.takeIf { problemOf(it, paletteIds = looks.paletteIds) == null }?.let { return it } }
         return newProject(source.id, info?.durationSec?.takeIf { it > 0 } ?: source.durationSec ?: 8.0, size)
     }
 
@@ -349,7 +350,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
             }.map { if (it is VideoClip && it.audioAsset != null && it.audioAsset !in have) it.copy(audioAsset = null) else it }
             if (t.kind == TrackKind.MAIN || items.isNotEmpty() || t.kind == TrackKind.CAPTION) t.copy(items = items) else null
         }
-        val looksOk = tracks.map { t -> t.copy(items = t.items.map { it -> if (it is VideoClip && it.look?.lut?.let { l -> !l.startsWith("pack:") && l !in have } == true) it.copy(look = it.look!!.copy(lut = null)) else it }) }
+        val looksOk = tracks.map { t -> t.copy(items = t.items.map { it -> if (it is VideoClip && it.look?.lutAssetId?.let { l -> l !in have } == true) it.copy(look = it.look!!.copy(lut = null)) else it }) }
         return p.copy(tracks = looksOk)
     }
 

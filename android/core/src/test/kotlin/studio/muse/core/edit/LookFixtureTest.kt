@@ -206,6 +206,41 @@ class LookFixtureTest {
         }
     }
 
+    @Test fun paletteLooksAreValidOnlyWhenShipped() {
+        val look = Look(lut = "palette:teal_neon", strength = 0.8)
+        assertEquals("teal_neon", look.paletteId)
+        assertNull(look.packId); assertNull(look.lutAssetId)
+        assertEquals("film-cine", Look(lut = "pack:film-cine").packId)
+        assertNull(Look(lut = "pack:film-cine").lutAssetId)
+        assertEquals("cube1", Look(lut = "cube1").lutAssetId)
+        assertNull(Look(lut = "cube1").paletteId)
+        val p = projectWith(look)
+        val none = problemOf(p)!!
+        assertEquals("edits.tracks.0.items.0.look.lut", none.field)
+        assertEquals("unknown look", none.reason)
+        assertNull(problemOf(p, paletteIds = setOf("teal_neon")))
+        assertEquals("unknown look", problemOf(p, paletteIds = setOf("other"))!!.reason)
+        assertEquals("must be \"pack:<id>\", \"palette:<id>\" or a lut asset id", problemOf(projectWith(Look(lut = "nope")))!!.reason)
+        assertEquals(p, EditJson.parse(EditJson.stringify(p)))
+    }
+
+    @Test fun suiteLooksIndexIsReadLeniently() {
+        val s = SuiteLooks.parse(
+            """{"version":1,"cubeSize":17,"looks":[
+              {"id":"teal_neon","name":"Teal Neon","kind":"palette","file":"teal_neon.cube","lut":"palette:teal_neon","swatches":["#00FFFF"]},
+              {"id":"bare","file":"bare.cube"},
+              {"id":"escape","name":"x","file":"../evil.cube"},
+              {"name":"no id","file":"a.cube"}]}""",
+        )
+        assertEquals(setOf("teal_neon", "bare"), s.ids)
+        assertEquals("Teal Neon", s.nameOf("teal_neon"))
+        assertEquals("bare", s.nameOf("bare"))
+        assertEquals("missing", s.nameOf("missing"))
+        assertEquals("teal_neon.cube", s.entry("teal_neon")!!.file)
+        assertTrue(SuiteLooks.parse("not json").ids.isEmpty())
+        assertTrue(SuiteLooks.parse("""{"looks":3}""").ids.isEmpty())
+    }
+
     @Test fun lookShapeProblemsNameTheField() {
         fun problem(json: String): String? = try { EditJson.parseLook(kotlinx.serialization.json.Json.parseToJsonElement(json)); null } catch (e: EditProblem) { e.field }
         assertEquals("look.bloom", problem("""{"bloom":1}"""))

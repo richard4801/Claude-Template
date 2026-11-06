@@ -549,6 +549,21 @@ private fun FiltersBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> U
             repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
         }
     }
+    // A suite look (generated from a palette or film stock) isn't in the picker: show it as the current look, with a way
+    // to remove it (picking any look above swaps it; the intensity slider below works on it like on any look).
+    look?.paletteId?.let { pid ->
+        val name = "Suite look · ${ui.suiteLooks[pid] ?: pid}"
+        Row(
+            Modifier.fillMaxWidth().background(m.t.surface2).border(2.dp, m.t.ink).padding(10.dp).semantics { contentDescription = "Current look: $name" },
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                T("Current look", m.type.tiny.copy(fontSize = 11.5.sp), m.t.muted, maxLines = 1)
+                T(name, m.type.body.copy(fontSize = 13.5.sp, fontWeight = FontWeight.Bold), m.t.ink, maxLines = 1)
+            }
+            SuiteButton("Remove", { act(EditAction.PickLook(null, null)) }, height = 34.dp)
+        }
+    }
     val strength = look?.strength ?: 1.0
     SuiteSlider(strength.toFloat(), { f, done -> act(EditAction.LookStrength(f.toDouble(), done)) }, label = "Intensity", valueText = "${(strength * 100).roundToInt()}%", enabled = look != null)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

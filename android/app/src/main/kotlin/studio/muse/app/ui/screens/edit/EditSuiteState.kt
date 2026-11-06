@@ -107,6 +107,11 @@ data class EditSuiteUi(
     val takes: List<TakeChoice> = emptyList(),
     /** The looks of the bundled pack, in pack order. */
     val looks: List<LookChoice> = emptyList(),
+    /**
+     * The suite looks the app ships (`palette:<id>` → name, from palettes.json; empty when none are shipped). Not listed
+     * in the picker; projects are validated against these ids and a clip's suite look shows as its current look.
+     */
+    val suiteLooks: Map<String, String> = emptyMap(),
     /** The last .cube import's verdict ("Teal grade · 33³" or the reason it can't be used). */
     val cubeNote: String? = null,
     /** True when the project was reopened from an edited version. */

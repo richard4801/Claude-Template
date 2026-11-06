@@ -33,7 +33,10 @@ data class Vignette(val amount: Double, val size: Double? = null, val softness: 
 data class Halation(val amount: Double, val radius: Double? = null, val threshold: Double? = null)
 data class Leak(val kind: LeakKind, val amount: Double, val angle: Double? = null)
 
-/** A look: every part optional. [lut] = "pack:<id>" (a bundled look) or the id of a project asset of kind "lut". */
+/**
+ * A look: every part optional. [lut] = "pack:<id>" (a bundled look), "palette:<id>" (a suite look generated from a
+ * palette or film stock) or the id of a project asset of kind "lut".
+ */
 data class Look(
     val lut: String? = null,
     val strength: Double? = null,
@@ -49,6 +52,12 @@ data class Look(
     /** The bundled look id when [lut] is "pack:<id>". */
     val packId: String? get() = lut?.takeIf { it.startsWith(PACK_PREFIX) }?.substring(PACK_PREFIX.length)
 
+    /** The suite look id when [lut] is "palette:<id>". */
+    val paletteId: String? get() = lut?.takeIf { it.startsWith(PALETTE_PREFIX) }?.substring(PALETTE_PREFIX.length)
+
+    /** The imported LUT asset id when [lut] names neither a bundled nor a suite look. */
+    val lutAssetId: String? get() = lut?.takeIf { !it.startsWith(PACK_PREFIX) && !it.startsWith(PALETTE_PREFIX) }
+
     /** True when the look changes nothing (whatever LUT it would load). */
     fun isNoop(hasLut: Boolean = lut != null): Boolean =
         !(hasLut && (strength ?: 1.0) > 0) && curvesFn(curves) == null && (lift ?: 0.0) <= 0 && (sharpen ?: 0.0) <= 0 && (chromatic ?: 0.0) <= 0 &&
@@ -56,6 +65,7 @@ data class Look(
 
     companion object {
         const val PACK_PREFIX = "pack:"
+        const val PALETTE_PREFIX = "palette:"
         val KEYS = listOf("lut", "strength", "curves", "lift", "sharpen", "chromatic", "halation", "leak", "vignette", "grain")
     }
 }

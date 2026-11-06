@@ -1,6 +1,9 @@
 package studio.muse.core.edit
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * The bundled look pack (plans/video-editor.md "Looks"): `looks.json` + one 17³ .cube per look, single copy in
@@ -53,6 +56,48 @@ class LookPack(val version: Int, val cubeSize: Int, val looks: List<Entry>) {
                     Entry(l.str("id"), l.str("name"), l.str("category"), l.str("file"), EditJson.lookOf(l.obj("look")))
                 },
             )
+        }
+    }
+}
+
+/**
+ * The suite looks generated from palettes and film stocks (`lut: "palette:<id>"`): `palettes.json`
+ * (`{version, cubeSize, looks: [{id, name, kind, file, lut, swatches}]}`) + one .cube per look, in
+ * server/api/assets/lookpack/palettes (the Android app ships it as `assets/palettes/`). The folder may be absent: then
+ * there are none. Read leniently like the reference's `paletteFiles` (photo.ts): an entry needs a text id and a plain
+ * `<name>.cube` file name, anything else is skipped; a missing or broken index is no suite looks.
+ */
+class SuiteLooks(val looks: List<Entry>) {
+    /** One suite look; [name] falls back to the id. */
+    data class Entry(val id: String, val name: String, val kind: String?, val file: String)
+
+    private val byId = looks.associateBy { it.id }
+
+    val ids: Set<String> get() = byId.keys
+    fun entry(id: String): Entry? = byId[id]
+
+    /** The display name of suite look [id] (the id itself when it isn't listed). */
+    fun nameOf(id: String): String = byId[id]?.name ?: id
+
+    companion object {
+        const val ASSET_DIR = "palettes"
+        const val INDEX_FILE = "palettes.json"
+        val NONE = SuiteLooks(emptyList())
+        private val FILE = Regex("^[A-Za-z0-9._-]+\\.cube$")
+
+        /** Parses palettes.json; never throws (bad entries are skipped, a bad file is [NONE]). */
+        fun parse(text: String): SuiteLooks {
+            val root = runCatching { Json.parseToJsonElement(text) }.getOrNull() as? JsonObject ?: return NONE
+            val arr = root["looks"] as? JsonArray ?: return NONE
+            fun JsonObject.text(k: String) = (this[k] as? JsonPrimitive)?.takeIf { it.isString }?.content
+            val seen = LinkedHashMap<String, Entry>()
+            for (e in arr) {
+                val o = e as? JsonObject ?: continue
+                val id = o.text("id") ?: continue
+                val file = o.text("file")?.takeIf { FILE.matches(it) } ?: continue
+                seen[id] = Entry(id, o.text("name")?.takeIf { it.isNotBlank() } ?: id, o.text("kind"), file)
+            }
+            return SuiteLooks(seen.values.toList())
         }
     }
 }
