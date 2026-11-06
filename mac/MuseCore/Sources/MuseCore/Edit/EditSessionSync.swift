@@ -256,6 +256,31 @@ public final class EditSessionSync {
         try? await api.leaveEditSession(sessionId: sessionId, device: device)
     }
 
+    // MARK: This device's unsent changes (drafts)
+
+    /// The change not on the server yet, to keep on this device (so closing, a crash or being offline never loses it).
+    public var draft: EditSessionDraft? {
+        local.map { EditSessionDraft(takeId: takeId, sessionId: sessionId, baseRevision: revision, project: $0, base: synced, label: localLabel,
+                                     savedAt: Date().timeIntervalSince1970) }
+    }
+
+    /// A draft this device kept for the take differs from the session's latest: ask "Keep this device's changes / Use the latest".
+    public func conflicts(with d: EditSessionDraft?) -> Bool {
+        guard let d, d.takeId == takeId else { return false }
+        return d.project != synced
+    }
+
+    /// "Keep this device's changes": the draft goes on top of the latest revision as one change. This device's changes are
+    /// re-applied on the latest (others' changes since stay); when they no longer fit, the device's whole project wins.
+    /// Returns the project to show.
+    @discardableResult
+    public func keep(_ d: EditSessionDraft) async throws -> Update {
+        let mine = d.base.flatMap { rebase(d.project, from: $0, onto: synced) } ?? d.project
+        localChanged(mine, label: d.label ?? "Changes from this device")
+        let u = try await flush()
+        return u ?? .project(current, entry: history.first)
+    }
+
     // MARK: Labels
 
     /// A short label for a local change ("Split", "Look", "Captions"…), from what changed.

@@ -27,6 +27,9 @@ extension EditSuiteSession {
             liveConnected = true
             // The session is the live copy: when it already holds other changes (Claude's, the phone's), they show here.
             if sync.synced != project { showRemote(sync.synced) }
+            // Edits this Mac made but never got to the server (closed, offline): ask before anything replaces them.
+            let saved = drafts.load(takeId: sourceTakeId)
+            if let d = saved, sync.conflicts(with: d) { draftAsk = d } else { drafts.remove(takeId: sourceTakeId) }
             mirrorLive()
             if let p = sync.waiting.first { askPending = p }
             listen(sync)
@@ -45,8 +48,11 @@ extension EditSuiteSession {
         live = nil
         liveConnected = false
         // The last change still goes out, then this Mac leaves the online list.
+        let drafts = self.drafts, takeId = sourceTakeId, asking = draftAsk != nil
         Task { @MainActor in
             _ = try? await sync.flush()
+            // Whatever still couldn't be sent stays on this Mac for next time.
+            if !asking { drafts.save(sync.draft, takeId: takeId) }
             await sync.leave()
         }
     }
@@ -88,6 +94,7 @@ extension EditSuiteSession {
         let label = nextChangeLabel
         nextChangeLabel = nil
         sync.localChanged(project, label: label)
+        saveDraft()
         flushTask?.cancel()
         flushTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: Self.pushAfter)
@@ -103,7 +110,33 @@ extension EditSuiteSession {
         } catch {
             lastError = (error as? ApiError)?.message ?? "Couldn't share that change with Claude"
         }
+        saveDraft()
         mirrorLive()
+    }
+
+    /// Keeps the unsent change on this Mac (removed once it reached the server).
+    func saveDraft() {
+        guard let sync = live, draftAsk == nil else { return }
+        drafts.save(sync.draft, takeId: sourceTakeId)
+    }
+
+    /// The owner's answer to "Keep this device's changes / Use the latest".
+    func resolveDraft(keep: Bool) {
+        guard let d = draftAsk else { return }
+        draftAsk = nil
+        guard keep, let sync = live else { drafts.remove(takeId: sourceTakeId); return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let u = try await sync.keep(d)
+                await self.handleLive(u)
+                self.notice = "Kept this Mac's changes on top of the latest edit"
+            } catch {
+                self.lastError = (error as? ApiError)?.message ?? "Couldn't send this Mac's changes"
+            }
+            self.saveDraft()
+            self.mirrorLive()
+        }
     }
 
     /// Undoes one change of the session's history (Claude's or any app's) on the server.
