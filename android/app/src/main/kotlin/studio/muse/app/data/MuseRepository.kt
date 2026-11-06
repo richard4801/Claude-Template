@@ -403,6 +403,11 @@ class MuseRepository(
         if (j != null) { _state.update { s -> s.copy(jobs = s.jobs.upsert(j) { it.id == j.id }.sortedByDescending { it.createdAt }) }; refreshBalance() }
     }
 
+    /** AI suite · Photo tool (workstream 3): the stills come back as takes, straight into the library. */
+    suspend fun createPhotos(req: PhotoRequest) = attemptInline { createPhotos(req) }.also { (r, _) ->
+        if (r != null) { _state.update { s -> s.copy(takes = LiveEvents.putTakes(s.takes, r.takes)) }; refreshBalance() }
+    }
+
     suspend fun removeJob(id: String) = attempt { removeJob(id) }?.also { _state.update { s -> s.copy(jobs = s.jobs.filterNot { it.id == id }) } }
 
     suspend fun setTakeStatus(id: String, status: String) = attempt { setTakeStatus(id, status) }?.also { t -> _state.update { s -> s.copy(takes = s.takes.upsert(t) { it.id == t.id }) } }
@@ -472,7 +477,7 @@ class MuseRepository(
 
     // ---- photo templates
     private fun putTemplate(t: Template) = _state.update { s -> s.copy(templates = s.templates.upsert(t) { it.id == t.id }) }
-    /** [quiet]: no toast on failure (the Photoshoot strip, against a server without templates). */
+    /** [quiet]: no toast on failure (the Photo presets, against a server without templates). */
     suspend fun loadTemplates(quiet: Boolean = false): List<Template>? =
         (if (quiet) attemptInline { listTemplates("all") }.first else attempt { listTemplates("all") })?.also { l -> _state.update { it.copy(templates = l) } }
     suspend fun template(id: String) = attemptInline { template(id) }.also { (t, _) -> t?.let { putTemplate(it.copy(recent = null)) } }

@@ -97,11 +97,6 @@ struct MuseCommands: Commands {
             .disabled(!signedIn)
             Divider()
             Button("Run Queue") { store.runQueue() }.disabled(!signedIn || !store.jobs.contains(where: \.isQueued))
-            Button("Show Shoot Prompt") {
-                store.shootTab = .prompt
-                store.go(.shoot)
-            }
-            .disabled(!signedIn)
         }
         CommandMenu("Theme") {
             ForEach(ThemeID.allCases) { id in

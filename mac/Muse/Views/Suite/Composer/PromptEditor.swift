@@ -80,6 +80,7 @@ struct ComposerPromptBox: View {
         guard let typed else { return [] }
         let q = typed.trigger.query.lowercased()
         if typed.trigger.char == "#" {
+            if store.suite.composer.tool == .photo { return [] } // Photo tool (workstream 3): a still has no camera moves
             return PromptTokens.searchMoves(store.suite.camera, q).prefix(8).map {
                 Suggestion(id: "m:\($0.id)", title: $0.label, line: $0.description, kind: "move", move: $0)
             }

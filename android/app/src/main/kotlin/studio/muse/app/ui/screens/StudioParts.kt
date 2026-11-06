@@ -41,7 +41,6 @@ import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
 
 val VIDEO_TOOLS = listOf("model" to "Model", "outfit" to "Outfit", "bg" to "Background", "audio" to "Sound", "quality" to "Quality")
-val SHOOT_TOOLS = listOf("model" to "Model", "outfit" to "Outfit", "bg" to "Scene", "camera" to "Camera", "light" to "Light", "spark" to "Prompt")
 
 /** The tool strip under the canvas (`.tools`), styled per theme. */
 @Composable
@@ -58,7 +57,7 @@ fun ToolStrip(tools: List<Pair<String, String>>, current: String, onSelect: (Str
             when {
                 m.isC -> {
                     val shape = RoundedCornerShape(16.dp)
-                    // Five tools get wider tiles so "Background" isn't cut on a 360 dp phone; six (Photoshoot) still fit.
+                    // Five tools get wider tiles so "Background" isn't cut on a 360 dp phone.
                     Column(
                         Modifier.width(if (tools.size <= 5) 62.dp else 54.dp).height(64.dp).shadow(6.dp, shape, ambientColor = Color(0x1A50463A), spotColor = Color(0x1A50463A)).clip(shape)
                             .background(if (on) m.t.accent else m.t.surface).press { onSelect(k) },
@@ -77,7 +76,7 @@ fun ToolStrip(tools: List<Pair<String, String>>, current: String, onSelect: (Str
                     ) { Ic(k, 20.dp, Ink) }
                     androidx.compose.material3.Text(l, style = labelStyle, color = if (on) Ink else m.t.muted, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Visible, modifier = Modifier.wrapContentWidth(unbounded = true))
                 }
-                // Six tools (Photoshoot) share the width equally so labels don't run together at 360 dp (UX audit A-ToolStrip).
+                // Six tools share the width equally so labels don't run together at 360 dp (UX audit A-ToolStrip).
                 else -> Column((if (tools.size > 5) Modifier.weight(1f) else Modifier.width(62.dp)).press { onSelect(k) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     val c = if (on) m.t.accent else m.t.muted
                     Ic(k, 20.dp, c)

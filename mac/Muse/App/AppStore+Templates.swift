@@ -2,7 +2,7 @@ import AppKit
 import MuseCore
 import SwiftUI
 
-/// Photo templates (plans/templates.md): the library, the detail, shooting with a template, and the template editor.
+/// Photo templates (plans/templates.md): the library, the detail, using one as a Photo preset, and the template editor.
 /// Layers and variation pools are only ever shown for templates the signed-in user owns; the server never sends them otherwise.
 extension AppStore {
     // MARK: Library
@@ -15,8 +15,8 @@ extension AppStore {
         } catch {
             return // offline: keep what we have
         }
-        // A template that's gone (deleted, made private, another account) can't be shot with any more.
-        if let t = shootTemplate { shootTemplate = templates.first { $0.id == t.id } }
+        // A template that's gone (deleted, made private, another account) can't be a Photo preset any more.
+        if let id = suite.photo.presetId, !templates.contains(where: { $0.id == id }) { suite.photo.presetId = nil }
     }
 
     func openTemplates() {
@@ -40,7 +40,6 @@ extension AppStore {
             if d.recent == nil { d.recent = templateDetail?.recent }
             templateDetail = d
         }
-        if shootTemplate?.id == t.id { shootTemplate = t }
     }
 
     // MARK: Detail
@@ -100,7 +99,7 @@ extension AppStore {
         perform { [self] in
             try await api.deleteTemplate(id: t.id)
             templates.removeAll { $0.id == t.id }
-            if shootTemplate?.id == t.id { shootTemplate = nil }
+            if suite.photo.presetId == t.id { suite.photo.presetId = nil }
             if screen == .template { go(.templates) }
             showToast("Template deleted")
         }
@@ -108,95 +107,9 @@ extension AppStore {
 
     // MARK: Using a template
 
-    /// Use: the Photoshoot screen with this template, a fresh shuffle, Lock look off and no direction.
+    /// Use: the AI suite's Photo tool with this template as its preset (Photoshoot is now the Photo tool, workstream 3).
     func useTemplate(_ t: MuseTemplate) {
-        shootTemplate = t
-        templateDirection = ""
-        templateLockLook = false
-        templateProduct = nil
-        templateShuffle = TemplateEngine.newShuffleSeed()
-        templatePrompt = nil
-        shootState = .idle
-        lastShots = []
-        go(.shoot)
-        refreshTemplatePrompt()
-    }
-
-    func stopUsingTemplate() {
-        shootTemplate = nil
-        templatePrompt = nil
-        shootState = .idle
-        lastShots = []
-    }
-
-    /// Shuffle: new variation draws, same template.
-    func shuffleTemplate() {
-        templateShuffle = TemplateEngine.newShuffleSeed()
-        refreshTemplatePrompt()
-        showToast("Shuffled: a new pose, angle and moment")
-    }
-
-    /// The prompt view's slots: the server's answer, or the locked view until it arrives (never the hidden layers).
-    var templatePromptSlots: [PromptSlotView] {
-        if let p = templatePrompt { return p.slots }
-        guard let t = shootTemplate else { return [] }
-        return TemplateEngine.lockedView(templateName: t.name, identity: identity(currentModel), outfitName: currentOutfit?.name,
-                                         direction: templateDirection, lockSeed: templateLockLook)
-    }
-
-    /// Asks the server for the prompt view (POST /v1/templates/{id}/prompt). Only needed in pro mode.
-    func refreshTemplatePrompt() {
-        guard pro, let t = shootTemplate, let m = currentModel else { return }
-        let req = TemplatePromptRequest(modelId: m.id, outfitId: currentOutfit?.id, direction: templateDirection, shuffleSeed: templateShuffle,
-                                        lockSeed: templateLockLook)
-        let api = self.api
-        Task { [weak self] in
-            let p = try? await api.templatePrompt(id: t.id, req)
-            guard let self, self.shootTemplate?.id == t.id else { return }
-            self.templatePrompt = p
-        }
-    }
-
-    func pickTemplateProduct() {
-        guard let url = MediaImport.pick(MediaImport.imageTypes, multiple: false, prompt: "Use photo").first else { return }
-        perform { [self] in
-            templateProduct = try await uploadImage(url)
-            showToast("Product photo added")
-        }
-    }
-
-    func startTemplateShoot() {
-        guard shootState != .busy, let t = shootTemplate, currentModel != nil, currentOutfit != nil else {
-            if currentOutfit == nil { showToast("Add an outfit first", action: "Add outfit") { [weak self] in self?.openOutfitSheet(for: nil) } }
-            return
-        }
-        if shootRefsUploading > 0 {
-            showToast("Wait a moment · the reference images are still uploading")
-            return
-        }
-        if shootEstimate > balance.balance {
-            notEnough("for a shoot")
-            return
-        }
-        guard let req = currentShootRequest() else { return }
-        withAnimation { shootState = .busy }
-        perform { [self] in
-            do {
-                let shots = try await api.shoot(req)
-                for s in shots.reversed() where !takes.contains(where: { $0.id == s.id }) { takes.insert(s, at: 0) }
-                lastShots = shots
-                fresh.formUnion(shots.map(\.id))
-                balance = try await api.balance()
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) { shootState = .done }
-                // Next shoot: new draws, unless the user keeps Lock look on (the seed is the server's to fix).
-                templateShuffle = TemplateEngine.newShuffleSeed()
-                refreshTemplatePrompt()
-                if let i = templates.firstIndex(where: { $0.id == t.id }) { templates[i].uses += 1 }
-            } catch {
-                shootState = .idle
-                throw error
-            }
-        }
+        openPhoto(preset: t.id)
     }
 
     // MARK: Creating and editing

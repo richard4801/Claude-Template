@@ -370,6 +370,18 @@ private struct ToolBrowserPanel: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("PRESETS").font(t.mono(11, .medium)).tracking(1.4).foregroundStyle(t.muted)
+                        if store.suite.composer.tool == .photo {
+                            // Photo tool (workstream 3): its presets are the photo templates.
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), alignment: .leading, spacing: 16) {
+                                ForEach(store.templates) { tpl in
+                                    PhotoPresetTile(template: tpl, selected: store.suite.photo.presetId == tpl.id) {
+                                        store.choosePhotoPreset(tpl)
+                                        store.suite.browserOpen = false
+                                    }
+                                }
+                            }
+                            if store.templates.isEmpty { Muted("No photo presets yet. Save a photo as a template and it shows up here.") }
+                        } else {
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 14) {
                             ForEach(store.suite.camera.presets) { p in
                                 VStack(alignment: .leading, spacing: 6) {
@@ -377,6 +389,7 @@ private struct ToolBrowserPanel: View {
                                     Text(p.description).font(t.body(11.5)).foregroundStyle(t.muted).lineLimit(2)
                                 }
                             }
+                        }
                         }
                     }
                     .padding(18)

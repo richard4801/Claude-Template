@@ -13,34 +13,15 @@ import studio.muse.app.data.FakePromptLibrary
 import studio.muse.app.data.ImageRef
 import studio.muse.app.data.PromptPreviewRequest
 import studio.muse.app.data.SampleData
-import studio.muse.app.data.ShootDraft
 import studio.muse.app.data.ShootRef
 import studio.muse.app.data.ShootRequest
 import studio.muse.core.PhotoPricing
 import studio.muse.core.PromptEngine
 
-/** Reference images in a photoshoot and the owner's prompt library, in demo mode (the server's rules, plans/api.md 2026-11-05). */
+/** Reference images in a shoot (POST /v1/shoots: template shoots and older clients) and the owner's prompt library, in demo mode (the server's rules, plans/api.md 2026-11-05). */
 class ShootReferencesTest {
     private val api = FakeMuseApi(MainScope(), null, speed = 0.0, genDelayMs = 0)
     private fun ref(a: String, vararg g: String) = ShootRef(ImageRef.asset(a), g.toList())
-
-    @Test fun draftBecomesTheServersShootRequest() {
-        val d = ShootDraft(scene = "Café window", lens = 85, direction = "  ", presets = false, refs = listOf(ref("c_front", "pose")))
-        val r = d.request(SampleData.DEMO, SampleData.GREEN)
-        assertNull(r.prompt)
-        assertNull(r.direction)
-        assertEquals("Café window", r.scene)
-        assertEquals(85, r.camera!!.lens)
-        assertEquals(false, r.presets)
-        assertEquals("Phone-natural", r.grade)
-        assertEquals(1, r.refs!!.size)
-        // Edit as text is sent exactly as written; a blank one isn't sent.
-        assertEquals(" My words ", d.copy(promptText = " My words ").request("m", "o").prompt)
-        assertNull(d.copy(promptText = "  ").request("m", "o").prompt)
-        assertNull(ShootDraft().request("m", "o").refs)
-        assertEquals("Rooftop · golden hour", ShootDraft().request("m", "o").scene)
-        assertEquals(500, ShootDraft(direction = "x".repeat(900)).request("m", "o").direction!!.length)
-    }
 
     @Test fun guidesStartOnTheFirstUnusedOneAndOneStaysOn() {
         assertEquals("pose", ShootRef.defaultGuide(emptyList()))
@@ -105,7 +86,7 @@ class ShootReferencesTest {
 
     @Test fun templateShootsTakeReferencesToo(): Unit = runBlocking {
         val tpl = api.listTemplates("all", null, null).first()
-        val req = ShootRequest(SampleData.DEMO, SampleData.GREEN, templateId = tpl.id, shuffleSeed = 3, refs = listOf(ref("c_front", "pose", "scene")))
+        val req = studio.muse.app.data.ShootRequest(SampleData.DEMO, SampleData.GREEN, templateId = tpl.id, shuffleSeed = 3, refs = listOf(ref("c_front", "pose", "scene")))
         val p = api.previewShoot(req)
         assertEquals(listOf(7), p.refs.map { it.index })
         val refLine = p.slots.single { it.layer == "reference" }
@@ -160,4 +141,39 @@ class ShootReferencesTest {
         assertFalse(api.resetPrompt("shoot.scene").overridden)
         assertFalse(api.savePrompt("style.house", lib.prompts.first { it.key == "style.house" }.default).overridden)
     }
+}
+
+/**
+ * The choices Photoshoot used to send, as a test fixture: the shoot pipeline (POST /v1/shoots) stays for template shoots and
+ * older clients, so these tests keep building its requests the way that screen did. Photoshoot itself is now the Photo tool.
+ */
+private data class ShootDraft(
+    val scene: String? = null,
+    val sceneCustom: String = "",
+    val shot: String = "Medium",
+    val lens: Int = 35,
+    val aperture: String = "f/2.8",
+    val light: String = "Golden hour",
+    val grade: String? = null,
+    val direction: String = "",
+    val lockSeed: Boolean = false,
+    /** Off: only identity, outfit, the user's direction, reference and seed lines are sent (no scene/camera/light/style/never-add presets). */
+    val presets: Boolean = true,
+    /** "Edit as text": the full prompt as the user wrote it. Sent instead of the built prompt while set. */
+    val promptText: String? = null,
+    /** Owner only: a model for this shoot, step → "owner/name" (the "Model" chooser). */
+    val models: Map<String, String> = emptyMap(),
+    /** Up to 3 reference images, each guiding pose, look and/or scene (never her face, body or outfit). */
+    val refs: List<ShootRef> = emptyList(),
+) {
+    /**
+     * The choices as the server's shoot request (plans/api.md "Shoot references and the prompt library" §2): the server builds the
+     * prompt from them. [promptText] ("Edit as text") is sent exactly as written, and only then.
+     */
+    fun request(modelId: String, outfitId: String, count: Int = 4) = studio.muse.app.data.ShootRequest(
+        modelId, outfitId, scene = (scene?.trim()?.ifBlank { null } ?: studio.muse.core.PromptEngine.DEFAULT_SCENE).take(200),
+        prompt = promptText?.takeIf { it.isNotBlank() }?.take(4000), count = count,
+        direction = direction.trim().ifBlank { null }?.take(500), lockSeed = lockSeed, models = models.ifEmpty { null }, presets = presets,
+        camera = studio.muse.app.data.CameraChoice(shot, lens, aperture), light = light, grade = grade ?: studio.muse.core.PromptEngine.DEFAULT_GRADE, refs = refs.take(ShootRef.MAX).ifEmpty { null },
+    )
 }

@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Where the model catalog was opened from: Settings (changes the step's default) or a per-run chooser (owner only).
 enum CatalogTarget: Equatable {
-    case settings, shoot, enhance, dressUp
+    case settings, enhance, dressUp
 }
 
 /// The owner's model catalog sheet for one image step.
@@ -61,7 +61,6 @@ extension AppStore {
     // MARK: Derived
 
     var toolsFeatures: ToolsFeatures? { studioSettings?.features.tools }
-    var shootOverrides: ModelOverrides? { isOwner && !shootModels.isEmpty ? shootModels : nil }
 
     func resetModelTools() {
         stepModels = []
@@ -70,7 +69,6 @@ extension AppStore {
         enhanceDraft = nil
         dressUpDraft = nil
         versionsDraft = nil
-        shootModels = [:]
         toolRuns = [:]
     }
 
@@ -214,9 +212,6 @@ extension AppStore {
                     throw error
                 }
             }
-        case .shoot:
-            shootModels[d.step.rawValue] = detail.model.id
-            catalog = nil
         case .enhance:
             enhanceDraft?.models[d.step.rawValue] = detail.model.id
             catalog = nil
@@ -241,7 +236,6 @@ extension AppStore {
     /// Per-run chooser → "Default".
     func clearOverride(_ step: ImageStep, target: CatalogTarget) {
         switch target {
-        case .shoot: shootModels[step.rawValue] = nil
         case .enhance:
             enhanceDraft?.models[step.rawValue] = nil
             refreshEnhanceEstimate()
@@ -254,7 +248,6 @@ extension AppStore {
 
     func modelOverride(_ step: ImageStep, target: CatalogTarget) -> String? {
         switch target {
-        case .shoot: return shootModels[step.rawValue]
         case .enhance: return enhanceDraft?.models[step.rawValue]
         case .dressUp: return dressUpDraft?.models[step.rawValue]
         case .settings: return nil

@@ -42,7 +42,7 @@ public actor FakeMuseAPI: MuseAPI {
     /// The demo studio balance: one opening top-up, then what the owner records.
     private var topUps: [TopUp] = [TopUp(id: "tu_demo", amountUsd: 25, note: "Opening balance", paidAt: nowMs() - 864_000_000)]
     /// Templates with their layers (the "server side"). Only the owner's ever leave the actor with layers.
-    private var templates: [MuseTemplate]
+    var templates: [MuseTemplate]
     private var favourites: Set<String> = []
     /// Demo prompt library overrides (Settings → Prompts) and when each was saved.
     var promptOverrides: [String: String] = [:]

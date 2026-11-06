@@ -15,7 +15,7 @@ struct RigCheckRow: View {
     /// Shots only: Swap and Recast take their camera from the clip.
     private var applies: Bool {
         switch store.suite.composer.tool {
-        case .shot, .talking, .ugc: return true
+        case .shot, .talking, .ugc, .photo: return true // Photo: the still rules, from the photo estimate's `rig`
         default: return false
         }
     }

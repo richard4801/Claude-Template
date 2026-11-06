@@ -190,7 +190,7 @@ struct LoraView: View {
                 // A real studio sees her own training shots, never the demo's sample art.
                 let kept = l.candidates.filter(\.keep)
                 if kept.isEmpty {
-                    Note(icon: "sparkles", "LoRA v\(l.version) is ready. Test it in a photoshoot.")
+                    Note(icon: "sparkles", "LoRA v\(l.version) is ready. Test it in Photo.")
                 } else {
                     Lbl("Trained on these \(kept.count) shots").padding(.bottom, 8)
                     LazyVGrid(columns: grid, spacing: 10) {
@@ -222,7 +222,7 @@ struct LoraView: View {
 
     private var info: some View {
         ListBox {
-            ListRow(icon: "camera", title: "Photo LoRA", hint: "Photoshoots · ~\(Int(LoraPricing.photoMinutes)) min · \(Pricing.money(LoraPricing.photoCost))") { EmptyView() }
+            ListRow(icon: "camera", title: "Photo LoRA", hint: "Photos · ~\(Int(LoraPricing.photoMinutes)) min · \(Pricing.money(LoraPricing.photoCost))") { EmptyView() }
             ListRow(icon: "video", title: "Video LoRA", hint: "Videos · ~\(Int(LoraPricing.videoMinutes)) min · \(Pricing.money(LoraPricing.videoCost))", last: true) { EmptyView() }
         }
     }
@@ -272,9 +272,9 @@ struct LoraView: View {
                 ListRow(title: "Trained on", last: true) { MonoValue("\(l.trainedOn ?? l.kept) shots · v\(l.version)") }
             }
             MButton("Retrain with more shots", fill: true) { store.retrainLora(m) }
-            MButton("Test it in a photoshoot", kind: .primary, size: .big) {
+            MButton("Test it in Photo", kind: .primary, size: .big) {
                 store.selectModel(m)
-                store.go(.shoot)
+                store.openPhoto(model: m.id)
             }
             Muted("Retraining makes v\(l.version + 1). v\(l.version) stays in use until the new one is ready, and older versions are kept.")
         default:
