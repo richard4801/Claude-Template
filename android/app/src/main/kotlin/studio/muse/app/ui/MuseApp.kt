@@ -84,6 +84,10 @@ import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.MuseTheme
 import studio.muse.app.ui.theme.ThemeId
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.MuseRadii
+import studio.muse.app.ui.theme.MuseRoles
+import studio.muse.app.ui.theme.MuseTypeScale
+import studio.muse.app.ui.theme.museFloat
 import kotlin.random.Random
 
 val LocalContainer = staticCompositionLocalOf<AppContainer> { error("no container") }
@@ -319,16 +323,15 @@ private fun BoxScope.ToastHost(container: AppContainer) {
     }
     val t = current ?: return
     val m = muse
-    val shape = RoundedCornerShape(m.t.r)
-    var mod = Modifier.statusBarsPadding().padding(start = 16.dp, end = 16.dp, top = 10.dp).fillMaxWidth()
-    mod = if (m.isD) mod.hardShadow(4.dp, m.t.r).clip(shape).background(m.t.yellow).border(2.5.dp, Ink, shape) else mod.clip(shape).background(m.t.ink)
+    val r = MuseRoles.of(m.id)
+    // A toast floats over content: ink on canvas, the one float shadow, no icon.
+    val shape = RoundedCornerShape(MuseRadii.of(m.id).control)
     Row(
-        mod.align(Alignment.TopCenter).press { current = null; t.route?.let { nav.go(it) } }.padding(horizontal = 14.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically,
+        Modifier.statusBarsPadding().padding(start = 16.dp, end = 16.dp, top = 10.dp).fillMaxWidth().align(Alignment.TopCenter)
+            .museFloat(m, shape).clip(shape).background(r.ink).press { current = null; t.route?.let { nav.go(it) } }.padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        val fg = if (m.isD) Ink else m.t.bg
-        Ic("spark", 18.dp, fg)
-        T(t.message, m.type.body.copy(fontSize = androidx.compose.ui.unit.TextUnit(14f, androidx.compose.ui.unit.TextUnitType.Sp), fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), fg)
+        T(t.message, MuseTypeScale.of(m.id).label, r.canvas)
     }
 }
 

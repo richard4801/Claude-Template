@@ -39,6 +39,9 @@ import studio.muse.app.ui.Routes
 import studio.muse.app.ui.components.*
 import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.MuseSpace
+import studio.muse.app.ui.theme.roles
+import studio.muse.app.ui.theme.scale
 import studio.muse.core.Pricing
 import studio.muse.core.RenderSpec
 
@@ -65,27 +68,31 @@ fun CreditsScreen() {
     LaunchedEffect(Unit) { c.repo.refreshWallet() }
     val w = s.wallet
     LaunchedEffect(w?.owner, w?.usd) { if (w?.owner == true) studio = c.repo.studioBalance().first }
-    ScreenBox {
+    ScreenBox(bg = muse.roles.canvas) {
         Column(Modifier.fillMaxSize()) {
-            TopBar("Credit", onBack = { nav.back() })
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 130.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            CalmTopBar("Credit", onBack = { nav.back() })
+            Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = MuseSpace.gutter).padding(top = MuseSpace.s2, bottom = 120.dp),
+                verticalArrangement = Arrangement.spacedBy(MuseSpace.s6),
+            ) {
                 when {
                     w == null -> LegacyBalance(s.balance, s.videos)
                     w.owner -> {
                         OwnerTokens(w, s.balance, live.studioBalance ?: studio)
-                        Field("Add a top-up") {
-                            Tiny("Record money you loaded into the studio, e.g. after paying the engines. Every render and photo is spent from it.")
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Field("Amount ($)", Modifier.weight(1f)) { Input(amount, { amount = Credit.filterInput(it) }, keyboard = androidx.compose.ui.text.input.KeyboardType.Decimal, placeholder = "20") }
-                                Field("Note (optional)", Modifier.weight(1.6f)) { Input(note, { note = it.take(200) }, placeholder = "Card, 4 Nov") }
+                        Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+                            Heading("Add a top-up")
+                            Caption("Record money you loaded into the studio, for example after paying the engines. Every render and photo is spent from it.")
+                            Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                                Labeled("Amount ($)", Modifier.weight(1f)) { Input(amount, { amount = Credit.filterInput(it) }, keyboard = androidx.compose.ui.text.input.KeyboardType.Decimal, placeholder = "20", calm = true) }
+                                Labeled("Note (optional)", Modifier.weight(1.6f)) { Input(note, { note = it.take(200) }, placeholder = "Card, 4 Nov", calm = true) }
                             }
+                            err?.let { Notice(it, tone = NoticeTone.DANGER) }
                         }
-                        err?.let { NoteBox(it, warn = true) }
                         studio?.topUps?.takeIf { it.isNotEmpty() }?.let { list ->
-                            Lbl("Top-ups")
-                            ListGroup {
+                            Column {
+                                Heading("Top-ups")
                                 list.take(8).forEach { t ->
-                                    Li("wallet", "Added ${Pricing.money(t.amountUsd)}", sub = listOfNotNull(t.note, java.text.SimpleDateFormat("d MMM", java.util.Locale.US).format(java.util.Date(t.paidAt))).joinToString(" · "), onClick = {}) {}
+                                    RowItem("Added ${Pricing.money(t.amountUsd)}", listOfNotNull(t.note, java.text.SimpleDateFormat("d MMM", java.util.Locale.US).format(java.util.Date(t.paidAt))).joinToString(" · "))
                                 }
                             }
                         }
@@ -94,9 +101,9 @@ fun CreditsScreen() {
                 }
             }
         }
-        if (w?.owner == true) Dock {
+        if (w?.owner == true) ActionDock {
             val usd = Credit.parseUsd(amount) ?: 0.0
-            Cta(if (busy) "Adding…" else "Add ${Pricing.money(usd)}", {
+            PrimaryButton(if (busy) "Adding…" else "Add ${Pricing.money(usd)}", {
                 if (!busy && usd > 0) scope.launch {
                     busy = true; err = null
                     val (r, e) = c.repo.addTopUp(usd, note)
@@ -108,57 +115,57 @@ fun CreditsScreen() {
     }
 }
 
+/** The balance: a label, the figure large and tabular, and the lines that explain it. No card. */
 @Composable
-private fun BigCard(label: String, value: String, sub: String, sub2: String? = null, sticker: String? = null) {
+private fun BigFigure(label: String, value: String, vararg lines: String?) {
     val m = muse
-    val shape = RoundedCornerShape(m.t.rLg)
-    val (bg, fg) = when { m.isB -> m.t.surface2 to m.t.ink; m.isC -> m.t.cta to Color.White; m.isD -> m.t.blue to Color.White; else -> m.t.ink to m.t.bg }
-    Box(Modifier.fillMaxWidth().let { if (m.isD) it.hardShadow(5.dp, m.t.rLg) else it }.clip(shape).background(bg).let { if (m.isD) it.border(2.5.dp, Ink, shape) else if (m.isB) it.border(1.dp, m.t.line, shape) else it }.padding(20.dp)) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Lbl(label, color = fg.copy(alpha = .8f))
-            T(value, m.type.mono.copy(fontSize = 46.sp, fontWeight = FontWeight.SemiBold, lineHeight = 50.sp), if (m.isB) m.t.accent else fg)
-            Tiny(sub, color = fg)
-            sub2?.let { Tiny(it, color = fg.copy(alpha = .85f)) }
-        }
-        sticker?.let { Sticker(it, "yellow", -6f, Modifier.align(Alignment.TopEnd)) }
+    Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
+        Caption(label)
+        T(value, m.scale.display.copy(fontFamily = m.scale.textFamily, fontWeight = FontWeight.SemiBold).tabular(), m.roles.ink)
+        lines.filterNotNull().forEach { Caption(it) }
     }
 }
 
 @Composable
 private fun MemberTokens(w: Wallet, b: Balance) {
-    BigCard(
-        "Balance", Pricing.money(w.usd), "≈ ${Pricing.draftVideosLeft(w.usd)} Draft videos",
+    BigFigure(
+        "Balance", Pricing.money(w.usd), "About ${Pricing.draftVideosLeft(w.usd)} Draft videos",
         if (w.heldTokens > 0) "${Pricing.money(if (w.heldUsd > 0) w.heldUsd else Credit.usdOf(w.heldTokens, w.tokenUsd))} on hold for running renders" else null,
     )
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
         Kpi("Today", Pricing.money(w.todayUsd), Modifier.weight(1f))
-        Kpi("Month", Pricing.money(w.monthUsd), Modifier.weight(1f))
+        Kpi("This month", Pricing.money(w.monthUsd), Modifier.weight(1f))
         Kpi("Per video", "~${Pricing.money(Pricing.estCost(Pricing.typicalVideo))}", Modifier.weight(1f))
     }
-    Field("Spend limits") {
+    Column {
+        Heading("Spend limits")
         LimitRow("Per job", Pricing.money(b.perJobLimit))
         LimitRow("Per day (you)", Pricing.money(b.perUserDayLimit ?: b.perDayLimit))
     }
-    NoteBox("Your credit comes from the studio owner. When you run low, ask them for more.", icon = "wallet")
-    Tiny("Videos and photos hold about their price when they start, then cost exactly what they took. If something goes wrong, you aren't charged.")
+    Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+        Body("Your credit comes from the studio owner. When you run low, ask them for more.", color = muse.roles.ink)
+        Caption("Videos and photos hold about their price when they start, then cost exactly what they took. If something goes wrong, you aren't charged.")
+    }
 }
 
 @Composable
 private fun OwnerTokens(w: Wallet, b: Balance, studio: StudioBalance?) {
     val nav = LocalNav.current
-    if (studio?.needsFirstTopUp ?: (b.needsFirstTopUp == true)) NoteBox("Add your first top-up: record what you loaded into the studio, then send members credit from it.", icon = "wallet")
-    OwnerBalanceCard(w, studio = studio)
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    if (studio?.needsFirstTopUp ?: (b.needsFirstTopUp == true)) Notice("Add your first top-up: record what you loaded into the studio, then send members credit from it.", tone = NoticeTone.CAUTION)
+    BigFigure(
+        "Studio balance", signedMoney(studio?.balanceUsd ?: w.studioBalance ?: w.usd),
+        "Free to spend or send ${signedMoney(w.availableToSend ?: 0.0)}",
+        w.membersUnspentUsd?.let { "Members hold ${Pricing.money(it)} in unspent credit${if (w.heldUsd > 0) ", ${Pricing.money(w.heldUsd)} on hold" else ""}" },
+        studio?.let { "Added ${Pricing.money(it.toppedUpUsd)}, spent ${Pricing.money(it.spentUsd)}" },
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
         Kpi("Today", Pricing.money(b.today), Modifier.weight(1f))
-        Kpi("Month", Pricing.money(b.month), Modifier.weight(1f))
+        Kpi("This month", Pricing.money(b.month), Modifier.weight(1f))
         Kpi("Per video", "~${Pricing.money(Pricing.estCost(Pricing.typicalVideo))}", Modifier.weight(1f))
     }
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        // No icon on Send credit: at 360 dp the label would be cut ("SEND CRE…").
-        Cta2("Members", { nav.go(Routes.MEMBERS) }, Modifier.weight(1f), icon = "model")
-        Cta("Send credit", { nav.go(Routes.MEMBERS) }, Modifier.weight(1.25f))
-    }
-    Field("Spend limits") {
+    SecondaryButton("Send credit to members", { nav.go(Routes.MEMBERS) }, Modifier.fillMaxWidth())
+    Column {
+        Heading("Spend limits")
         LimitRow("Per job", Pricing.money(b.perJobLimit))
         LimitRow("Studio per day", Pricing.money(b.perDayLimit))
         b.perUserDayLimit?.let { LimitRow("Each member per day", Pricing.money(it)) }
@@ -167,28 +174,19 @@ private fun OwnerTokens(w: Wallet, b: Balance, studio: StudioBalance?) {
 
 @Composable
 private fun LegacyBalance(b: Balance, videos: Int) {
-    BigCard("Balance", Pricing.money(b.balance), "≈ ${Pricing.draftVideosLeft(b.balance)} Draft videos")
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Kpi("Month", Pricing.money(b.month), Modifier.weight(1f))
+    BigFigure("Balance", Pricing.money(b.balance), "About ${Pricing.draftVideosLeft(b.balance)} Draft videos")
+    Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+        Kpi("This month", Pricing.money(b.month), Modifier.weight(1f))
         Kpi("Per video", "~${Pricing.money(Pricing.estCost(Pricing.typicalVideo))}", Modifier.weight(1f))
         Kpi("Videos", "$videos", Modifier.weight(1f))
     }
-    Field("Spend limits") {
+    Column {
+        Heading("Spend limits")
         LimitRow("Per job", Pricing.money(b.perJobLimit))
         LimitRow("Per day", Pricing.money(b.perDayLimit))
     }
-    Tiny("Videos are charged when they start and refunded in full if something goes wrong.")
+    Caption("Videos are charged when they start and refunded in full if something goes wrong.")
 }
 
 @Composable
-private fun LimitRow(label: String, value: String) {
-    val m = muse
-    val shape = RoundedCornerShape(m.t.r)
-    Row(
-        Modifier.fillMaxWidth().height(54.dp).let { if (m.isC) it.softShadow(m.t.r) else it }.clip(shape).background(m.t.surface)
-            .let { if (m.isC) it else it.border(if (m.isD) 2.5.dp else m.t.stroke, m.t.line, shape) }.padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Ic("shield", 20.dp); T(label, m.type.body, m.t.ink, Modifier.weight(1f)); T(value, m.type.mono.copy(fontSize = 12.5.sp), m.t.ink)
-    }
-}
+private fun LimitRow(label: String, value: String) = RowItem(label) { RowValue(value, muse.roles.ink) }

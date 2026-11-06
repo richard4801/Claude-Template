@@ -2,6 +2,8 @@ package studio.muse.app.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +27,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -43,7 +49,11 @@ import studio.muse.app.ui.Routes
 import studio.muse.app.ui.TabBar
 import studio.muse.app.ui.components.*
 import studio.muse.app.ui.theme.Ic
+import studio.muse.app.ui.theme.MuseSpace
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.radii
+import studio.muse.app.ui.theme.roles
+import studio.muse.app.ui.theme.scale
 import studio.muse.core.Pricing
 import java.util.Calendar
 import kotlinx.coroutines.launch
@@ -100,44 +110,46 @@ fun HomeScreen() {
     val s by vm.state.collectAsState()
     val m = muse
     val nav = LocalNav.current
-    ScreenBox {
+    ScreenBox(bg = m.roles.canvas) {
         Column(Modifier.fillMaxSize()) {
-            Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                Wordmark()
+            Row(Modifier.fillMaxWidth().height(56.dp).padding(start = MuseSpace.gutter, end = MuseSpace.s1), verticalAlignment = Alignment.CenterVertically) {
+                T("MUSE", m.scale.title.copy(fontFamily = m.scale.displayFamily), m.roles.ink)
                 Spacer(Modifier.weight(1f))
-                TbBtn("bell", { vm.bell() })
-                if (m.isC) TbBtn("user", { nav.tab(Routes.SETTINGS) })
+                // Performance: from HomeState (equal states are skipped), not the whole studio state, which changes on every live event.
+                BalancePill(creditLabel(s.wallet, s.balance)) { nav.go(Routes.CREDITS) }
+                BarButton("bell", "Notifications", { vm.bell() })
             }
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                RowB {
-                    Box(Modifier.weight(1f)) { when {
-                        m.isA -> T("YOUR\nMODELS", m.type.h2.copy(fontSize = 56.sp, lineHeight = 50.sp), m.t.ink)
-                        m.isB -> H2("Models")
-                        m.isC -> H2(greeting())
-                        else -> H2("Your crew")
-                    } }
-                    // Performance: from HomeState (equal states are skipped), not the whole studio state, which changes on every live event.
-                    BalancePill(creditLabel(s.wallet, s.balance)) { nav.go(Routes.CREDITS) }
-                }
-                s.featured?.let { f -> FeatureCard(f, s.featuredOutfits) { vm.open(f, nav) } }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    QuickAction("studio", "New video", Modifier.weight(1f)) { nav.go(Routes.SOURCE) }
-                    QuickAction("camera", "Photoshoot", Modifier.weight(1f)) { nav.go(Routes.SHOOT) }
-                    QuickAction("model", "New model", Modifier.weight(1f)) { nav.go(Routes.CREATE1) }
-                }
+            Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = MuseSpace.gutter).padding(top = MuseSpace.s2, bottom = 120.dp),
+                verticalArrangement = Arrangement.spacedBy(MuseSpace.s5),
+            ) {
+                DisplayTitle("Models")
                 when {
-                    s.models.isEmpty() && !s.loaded -> Tiny("Loading your models…")
-                    s.models.isEmpty() && s.error != null -> {
-                        NoteBox(s.error ?: "", warn = true)
-                        Cta2("Try again", { vm.retry() }, Modifier.fillMaxWidth(), icon = "retry", height = 46.dp)
-                    }
-                    s.models.isEmpty() -> EmptyModels { nav.go(Routes.CREATE1) }
-                    else -> RowB { H3("All models"); Tiny(plural(s.models.size, "model")) }
-                }
-                s.models.chunked(2).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        row.forEach { model -> key(model.id) { ModelCard(model, s.outfitFronts[model.id], Modifier.weight(1f)) { vm.open(model, nav) } } }
-                        if (row.size == 1) Spacer(Modifier.weight(1f))
+                    s.models.isEmpty() && !s.loaded -> HomeSkeleton()
+                    s.models.isEmpty() && s.error != null -> ErrorState("Can't load your models", s.error ?: "", onAction = { vm.retry() })
+                    s.models.isEmpty() -> EmptyState(
+                        "No models yet", "Create her once: a name and a few photos for the character sheet. Then she's ready for photoshoots and videos.",
+                        "New model", { nav.go(Routes.CREATE1) },
+                    )
+                    else -> {
+                        s.featured?.let { f ->
+                            Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
+                                Featured(f, s.featuredOutfits) { vm.open(f, nav) }
+                                Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                                    PrimaryButton("New video", { nav.go(Routes.SOURCE) }, Modifier.weight(1f), icon = "studio")
+                                    SecondaryButton("", { nav.go(Routes.SHOOT) }, icon = "camera", label = "Photoshoot")
+                                }
+                            }
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+                            Heading("All models") { BarButton("plus", "New model", { nav.go(Routes.CREATE1) }) }
+                            s.models.chunked(2).forEach { row ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+                                    row.forEach { model -> key(model.id) { ModelTile(model, s.outfitFronts[model.id], Modifier.weight(1f)) { vm.open(model, nav) } } }
+                                    if (row.size == 1) Spacer(Modifier.weight(1f))
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -149,94 +161,66 @@ fun HomeScreen() {
 @Composable
 fun BalancePill(balance: Double, onClick: () -> Unit) = BalancePill(Pricing.money(balance), onClick)
 
+/** The balance at the top of Home: a quiet tabular figure that opens Credit. */
 @Composable
 fun BalancePill(text: String, onClick: () -> Unit) {
     val m = muse
-    val shape = RoundedCornerShape(999.dp)
-    Box(Modifier.clip(shape).border(if (m.isD) 2.5.dp else m.t.stroke, m.t.line, shape).press(onClick = onClick).padding(horizontal = 10.dp, vertical = 4.dp)) {
-        T(text, m.type.mono.copy(fontSize = 13.sp), m.t.ink)
-    }
+    Box(
+        Modifier.heightIn(min = 48.dp).press(onClick = onClick)
+            .semantics { contentDescription = "Credit $text"; role = androidx.compose.ui.semantics.Role.Button }.padding(horizontal = MuseSpace.s2),
+        contentAlignment = Alignment.Center,
+    ) { T(text, m.scale.label.tabular(), m.roles.ink2, maxLines = 1) }
 }
 
 /** "1 model", "3 models". */
 fun plural(n: Int, word: String) = "$n $word${if (n == 1) "" else "s"}"
 
-/** A new studio: no models yet. */
+/** The first load: the featured picture, its name and the grid, as blocks. */
 @Composable
-private fun EmptyModels(onCreate: () -> Unit) {
-    val m = muse
-    val shape = RoundedCornerShape(m.t.r)
-    Column(
-        Modifier.fillMaxWidth().let { if (m.isC) it.softShadow(m.t.r) else it }.clip(shape).background(m.t.surface)
-            .let { if (m.isC) it else it.border(if (m.isD) 2.5.dp else m.t.stroke, m.t.line, shape) }.padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        T("No models yet", m.type.body.copy(fontSize = 22.sp, fontWeight = FontWeight.Medium, lineHeight = 26.sp), m.t.ink)
-        Tiny("Create her once: a name, a few photos for the character sheet, and she's ready for photoshoots and videos.")
-        Cta("New model", onCreate, Modifier.fillMaxWidth().padding(top = 6.dp), icon = "plus")
-    }
-}
-
-@Composable
-private fun FeatureCard(model: Model, outfits: List<Outfit>, onClick: () -> Unit) {
-    val m = muse
-    val shape = RoundedCornerShape(m.t.rLg)
-    Box(
-        Modifier.fillMaxWidth().height(300.dp).let { if (m.isD) it.hardShadow(5.dp, m.t.rLg) else it }.clip(shape)
-            .background(if (m.isD) m.t.blue else m.t.surface2).let { if (m.isD) it.border(2.5.dp, Ink, shape) else it }.press(onClick = onClick),
-    ) {
-        RefImage(outfits.firstOrNull()?.front ?: model.cover, Modifier.fillMaxSize(), 18)
-        Viewfinder()
-        Column(
-            Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .7f)))).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            Lbl("Featured", color = Color.White.copy(alpha = .8f))
-            T(model.name, m.type.featName, Color.White, upper = m.isA || m.isB)
-            Tiny("${if (model.locked) "Identity locked" else "Draft"} · ${plural(outfits.size, "outfit")}", color = Color.White)
+private fun HomeSkeleton() {
+    Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4), modifier = Modifier.semantics { contentDescription = "Loading your models" }) {
+        Skeleton(Modifier.fillMaxWidth().height(360.dp), containerShape())
+        SkeletonLines(2)
+        Skeleton(Modifier.fillMaxWidth().height(52.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+            repeat(2) { Skeleton(Modifier.weight(1f).aspectRatio(3f / 4f), containerShape()) }
         }
-        if (model.locked) Sticker("ready to shoot", "mint", -5f, Modifier.align(Alignment.TopEnd).padding(14.dp))
     }
 }
 
+/** The featured model: her picture, then her name and one meta line. No overlay on the photo. */
 @Composable
-private fun QuickAction(icon: String, label: String, modifier: Modifier, onClick: () -> Unit) {
+private fun Featured(model: Model, outfits: List<Outfit>, onClick: () -> Unit) {
     val m = muse
-    val shape = RoundedCornerShape(m.t.r)
-    var mod = modifier.height(84.dp)
-    mod = when {
-        m.isD -> mod.hardShadow(3.dp, m.t.r).clip(shape).background(m.t.surface).border(2.5.dp, Ink, shape)
-        m.isC -> mod.softShadow(m.t.r).clip(shape).background(m.t.surface)
-        m.isA -> mod.clip(shape).border(1.dp, m.t.line, shape)
-        else -> mod.clip(shape).background(m.t.surface).border(m.t.stroke, m.t.line, shape)
-    }
-    Column(mod.press(onClick = onClick).padding(12.dp), verticalArrangement = Arrangement.SpaceBetween) {
-        Ic(icon, 22.dp)
-        T(label, m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
-    }
-}
-
-@Composable
-private fun ModelCard(model: Model, img: studio.muse.app.data.ImageRef?, modifier: Modifier, onClick: () -> Unit) {
-    val m = muse
-    val shape = RoundedCornerShape(m.t.r)
-    var mod = modifier
-    mod = when {
-        m.isD -> mod.hardShadow(3.dp, m.t.r).clip(shape).background(m.t.surface).border(2.5.dp, Ink, shape)
-        m.isC -> mod.softShadow(m.t.r).clip(shape).background(m.t.surface)
-        m.isA -> mod.clip(shape).border(1.dp, m.t.line, shape)
-        else -> mod.clip(shape).background(m.t.surface).border(m.t.stroke, m.t.line, shape)
-    }
-    Column(mod.press(onClick = onClick)) {
-        Box(Modifier.fillMaxWidth().height(150.dp)) {
-            if (model.locked && img != null) { RefImage(img, Modifier.fillMaxSize(), 15); Viewfinder() }
-            else if (model.cover != null) RefImage(model.cover, Modifier.fillMaxSize(), 15)
-            else ModelInitial(model, Modifier.fillMaxSize())
+    Column(Modifier.press(onClick = onClick), verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+        Box(Modifier.fillMaxWidth().height(360.dp).clip(containerShape()).background(m.roles.field)) {
+            RefImage(outfits.firstOrNull()?.front ?: model.cover, Modifier.fillMaxSize(), 18)
         }
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            T(model.name, m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink, maxLines = 1)
-            Tiny("${model.niche} · ${model.age}")
-            if (model.locked) Pill("Locked", "good") else Pill("Draft · ${model.filled}/7 shots", "warn")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                T(model.name, m.scale.title, m.roles.ink, maxLines = 1)
+                Caption("${plural(outfits.size, "outfit")} · ${if (model.locked) "identity locked" else "draft"}")
+            }
+            Chevron()
+        }
+    }
+}
+
+/** A model in the grid: picture plus caption, no box. */
+@Composable
+private fun ModelTile(model: Model, img: studio.muse.app.data.ImageRef?, modifier: Modifier, onClick: () -> Unit) {
+    val m = muse
+    Column(modifier.press(onClick = onClick), verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+        Box(Modifier.fillMaxWidth().aspectRatio(3f / 4f).clip(containerShape()).background(m.roles.field), contentAlignment = Alignment.Center) {
+            when {
+                model.locked && img != null -> RefImage(img, Modifier.fillMaxSize(), 15)
+                model.cover != null -> RefImage(model.cover, Modifier.fillMaxSize(), 15)
+                else -> T(model.initial, m.scale.display, m.roles.ink2)
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            T(model.name, m.scale.label.copy(fontWeight = FontWeight.SemiBold), m.roles.ink, maxLines = 1)
+            Caption(if (model.locked) "${model.niche} · ${model.age}" else "Draft · ${model.filled} of 7 shots", maxLines = 1)
         }
     }
 }

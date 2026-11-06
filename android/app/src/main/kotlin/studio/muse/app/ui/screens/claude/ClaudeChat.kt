@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -68,12 +69,20 @@ import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.components.Lbl
 import studio.muse.app.ui.components.T
 import studio.muse.app.ui.components.press
-import studio.muse.app.ui.screens.camera.CamField
-import studio.muse.app.ui.screens.camera.CamIc
 import studio.muse.app.ui.screens.camera.ConnectionsScreen
-import studio.muse.app.ui.screens.camera.SendButton
-import studio.muse.app.ui.screens.camera.camBox
+import studio.muse.app.ui.screens.Caption
+import studio.muse.app.ui.screens.PrimaryButton
+import studio.muse.app.ui.screens.SecondaryButton
+import studio.muse.app.ui.screens.TextAction
+import studio.muse.app.ui.screens.containerShape
+import studio.muse.app.ui.screens.controlShape
+import studio.muse.app.ui.theme.Ic
+import studio.muse.app.ui.theme.MuseSpace
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.museFloat
+import studio.muse.app.ui.theme.radii
+import studio.muse.app.ui.theme.roles
+import studio.muse.app.ui.theme.scale
 
 /** What the chat can do (the store's actions, or test stubs). */
 class ClaudeChatActions(
@@ -127,7 +136,7 @@ fun ClaudeChat(store: ClaudeChatStore, title: String, modifier: Modifier = Modif
     ), modifier)
 }
 
-/** The chat, stateless: header with the mode line, the transcript, the Mac-offline card and the composer (Send / Stop). */
+/** The chat, stateless: header with the mode line, the transcript, the Mac-offline block and the composer (Send / Stop). */
 @Composable
 fun ClaudeChatContent(ui: ClaudeChatUi, title: String, actions: ClaudeChatActions, modifier: Modifier = Modifier, horizontal: Dp = 16.dp) {
     val m = muse
@@ -135,22 +144,23 @@ fun ClaudeChatContent(ui: ClaudeChatUi, title: String, actions: ClaudeChatAction
     val scroll = rememberScrollState()
     val lastLen = (items.lastOrNull() as? ChatItem.Assistant)?.text?.length ?: 0
     LaunchedEffect(items.size, lastLen) { scroll.animateScrollTo(scroll.maxValue) }
-    Column(modifier.background(m.t.bg).imePadding()) {
+    Column(modifier.background(m.roles.canvas).imePadding()) {
         ChatHeader(ui, title, horizontal)
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll).padding(horizontal = horizontal, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (!ui.loaded) T("Opening the chat…", m.type.tiny, m.t.muted)
-            else if (ui.error != null && ui.thread == null) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                T(ui.error, m.type.tiny, errorInk())
-                ChatBtn("Try again", icon = "refresh") { actions.retry() }
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll).padding(horizontal = horizontal, vertical = MuseSpace.s3), verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
+            if (!ui.loaded) ChatSkeleton()
+            else if (ui.error != null && ui.thread == null) Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                T("Can't open the chat", m.scale.heading, m.roles.ink)
+                T(ui.error, m.scale.body, m.roles.ink2)
+                SecondaryButton("Try again", { actions.retry() }, icon = "retry")
             }
             else if (items.isEmpty()) T(if (ui.contextKind == "edit") "Tell Claude what to change: trims, captions, the look, the music. Every change can be undone."
-                else "Tell Claude what happens in the shot: who moves where, when, and how the camera moves.", m.type.tiny, m.t.muted)
+                else "Tell Claude what happens in the shot: who moves where, when, and how the camera moves.", m.scale.body, m.roles.ink2)
             Transcript(items)
-            ClaudeText.ended(ui.turn)?.let { T(it, m.type.tiny, if (ui.turn?.state == "stopped") m.t.muted else errorInk()) }
+            ClaudeText.ended(ui.turn)?.let { T(it, m.scale.caption, if (ui.turn?.state == "stopped") m.roles.ink2 else m.roles.danger) }
             Fallback.decide(ui.status, ui.refusal, ui.contextKind)?.takeIf { ui.turn?.active != true }?.let { OfflineCard(it, ui, actions) }
             ui.notice?.let { n ->
                 Box(Modifier.heightIn(min = 48.dp).press(onClick = actions.dismissNotice).semantics { role = Role.Button; contentDescription = "$n. Dismiss" }, contentAlignment = Alignment.CenterStart) {
-                    T(n, m.type.tiny, errorInk())
+                    T(n, m.scale.caption, m.roles.danger)
                 }
             }
         }
@@ -158,30 +168,32 @@ fun ClaudeChatContent(ui: ClaudeChatUi, title: String, actions: ClaudeChatAction
     }
 }
 
-/**
- * Error and notice text: the accent where it reads as text (A red, B amber), else the dark warning brown (Soft Tactile's
- * sage accent is 3.2:1 and Creator Pop's pink 2.2:1 on their backgrounds, under WCAG AA).
- */
+/** Opening the chat: a few lines shaped like the transcript. */
 @Composable
-private fun errorInk(): Color = muse.let { m -> if (m.isA || m.isB) m.t.accent else m.t.warnPillInk }
+private fun ChatSkeleton() {
+    val m = muse
+    Column(Modifier.semantics { contentDescription = "Opening the chat" }, verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+        Box(Modifier.align(Alignment.End).width(180.dp).height(40.dp).clip(controlShape()).background(m.roles.field))
+        repeat(3) { i -> Box(Modifier.fillMaxWidth(if (i == 2) .5f else .9f).height(14.dp).clip(RoundedCornerShape(4.dp)).background(m.roles.field)) }
+    }
+}
 
 @Composable
 private fun ChatHeader(ui: ClaudeChatUi, title: String, horizontal: Dp) {
     val m = muse
     // No plan status yet (opening, or the thread couldn't load): don't claim "answered by your Mac" with a green dot.
     val s = if (ui.status == null && (!ui.loaded || ui.error != null)) StatusLineText(if (ui.loaded) "Not connected" else "Connecting…", Tone.OFF) else ClaudeText.status(ui)
-    Column(Modifier.fillMaxWidth().drawBehind { drawLine(m.t.line, Offset(0f, size.height), Offset(size.width, size.height), 1f) }
-        .padding(horizontal = horizontal, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        if (title.isNotBlank()) T(title, m.type.h3, m.t.ink, maxLines = 1)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(24.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = horizontal, vertical = MuseSpace.s3), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        if (title.isNotBlank()) T(title, m.scale.title, m.roles.ink, maxLines = 1)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2), modifier = Modifier.height(24.dp)) {
             Box(Modifier.size(8.dp).clip(CircleShape).background(toneColor(s.tone)))
-            T(s.text, m.type.tiny, if (s.tone == Tone.OFF) m.t.ink else m.t.muted, maxLines = 1, weight = if (s.tone == Tone.OFF) FontWeight.SemiBold else null)
+            T(s.text, m.scale.caption, if (s.tone == Tone.OFF) m.roles.ink else m.roles.ink2, maxLines = 1)
         }
     }
 }
 
 @Composable
-private fun toneColor(t: Tone): Color = when (t) { Tone.GOOD -> muse.t.good; Tone.WAIT -> Color(0xFFE08A1E); Tone.OFF -> muse.t.muted.copy(alpha = .6f) }
+private fun toneColor(t: Tone): Color = muse.roles.let { r -> when (t) { Tone.GOOD -> r.positive; Tone.WAIT -> r.caution; Tone.OFF -> r.ink2 } }
 
 @Composable
 private fun Transcript(items: List<ChatItem>) {
@@ -196,8 +208,10 @@ private fun Transcript(items: List<ChatItem>) {
             is ChatItem.Tool -> {
                 // Consecutive tool steps share one row of chips.
                 val run = items.drop(i).takeWhile { x -> x is ChatItem.Tool }.filterIsInstance<ChatItem.Tool>()
-                if (prev is ChatItem.User || prev == null) Lbl("Claude")
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { run.forEach { t -> ToolChipWords(t) } }
+                Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
+                    if (prev is ChatItem.User || prev == null) Caption("Claude")
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { run.forEach { t -> ToolChipWords(t) } }
+                }
                 i += run.size - 1
             }
         }
@@ -209,10 +223,10 @@ private fun Transcript(items: List<ChatItem>) {
 @Composable
 private fun UserBubble(u: ChatItem.User) {
     val m = muse
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Lbl(ClaudeText.youLabel(u.source))
-        Box(Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(if (m.isA) 0.dp else m.t.r * .6f)).background(m.t.ink).padding(horizontal = 12.dp, vertical = 10.dp)) {
-            T(u.text, m.type.body.copy(fontSize = 13.5.sp, lineHeight = 19.sp), m.t.bg)
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
+        Caption(ClaudeText.youLabel(u.source))
+        Box(Modifier.widthIn(max = 300.dp).clip(controlShape()).background(m.roles.field).padding(horizontal = MuseSpace.s3, vertical = 10.dp)) {
+            T(u.text, m.scale.body, m.roles.ink)
         }
     }
 }
@@ -220,22 +234,22 @@ private fun UserBubble(u: ChatItem.User) {
 @Composable
 private fun AssistantText(a: ChatItem.Assistant, label: Boolean) {
     val m = muse
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (label) Lbl("Claude")
-        T(if (a.streaming) a.text + " ▍" else a.text, m.type.body.copy(fontSize = 13.5.sp, lineHeight = 19.sp), m.t.ink)
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
+        if (label) Caption("Claude")
+        T(if (a.streaming) a.text + " ▍" else a.text, m.scale.body, m.roles.ink)
     }
 }
 
-/** A tool step in words ("Saved camera path", "Shot draft · $1.92"); a spinner dot while it runs, red when it failed. */
+/** A tool step in words ("Saved camera path", "Shot draft · $1.92"): a dot while it runs, a check when done, danger text when it failed. */
 @Composable
 private fun ToolChipWords(t: ChatItem.Tool) {
     val m = muse
-    val col = if (!t.ok) errorInk() else if (t.running) m.t.ink else m.t.muted
-    val shape = RoundedCornerShape(if (m.isA) 2.dp else 999.dp)
-    Row(Modifier.height(28.dp).clip(shape).background(if (t.running) m.t.surface2 else m.t.surface).border(1.dp, if (t.ok) m.t.line else col, shape).padding(horizontal = 10.dp),
+    val r = m.roles
+    val col = if (!t.ok) r.danger else if (t.running) r.ink else r.ink2
+    Row(Modifier.height(28.dp).clip(RoundedCornerShape(m.radii.chip)).background(r.field).padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (t.running) Box(Modifier.size(7.dp).clip(CircleShape).background(Color(0xFFE08A1E))) else CamIc(if (t.ok) "cube" else "stop", 12.dp, col)
-        T(t.text, m.type.tiny.copy(fontSize = 12.sp), col, maxLines = 1)
+        if (t.running) Box(Modifier.size(7.dp).clip(CircleShape).background(r.caution)) else if (t.ok) Ic("check", 16.dp, col)
+        T(t.text, m.scale.caption, col, maxLines = 1)
     }
 }
 
@@ -245,84 +259,81 @@ private fun FrameView(f: ChatItem.Image) {
     val bmp = remember(f.data) {
         f.data?.let { d -> runCatching { Base64.decode(d, Base64.DEFAULT).let { b -> BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() } }.getOrNull() }
     }
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Box(Modifier.width(180.dp).height(102.dp).camBox(m.t.surface2), contentAlignment = Alignment.Center) {
-            CamIc("film", 20.dp, m.t.muted)
+    Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
+        Box(Modifier.width(180.dp).height(102.dp).clip(containerShape()).background(m.roles.field), contentAlignment = Alignment.Center) {
             when {
                 bmp != null -> Image(bmp, "Frame Claude grabbed", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 f.url != null -> AsyncImage(f.url, "Frame Claude grabbed", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             }
         }
-        T("Frame Claude checked", m.type.tiny.copy(fontSize = 11.5.sp), m.t.muted)
+        Caption("Frame Claude checked")
     }
 }
 
-/** "Your Mac is offline": Open in Claude (+ the connector line), and the studio API key when it is on. */
+/** "Your Mac is offline": what to do, Open in Claude (+ the connector line), and the studio API key when it is on. No box. */
 @Composable
 private fun OfflineCard(f: FallbackChoice, ui: ClaudeChatUi, actions: ClaudeChatActions) {
     val m = muse
     val mac = ui.status?.mac
     val why = when {
         mac == null || !mac.online || ui.refusal != null && mac.ready -> "Open MUSE on your Mac to answer here on your Claude plan, or carry on in the Claude app."
-        !mac.claudeCode.installed -> "Install Claude Code from MUSE on your Mac (Settings → Claude), or carry on in the Claude app."
+        !mac.claudeCode.installed -> "Install Claude Code from MUSE on your Mac (Settings, Claude), or carry on in the Claude app."
         else -> "Sign in to Claude Code from MUSE on your Mac, or carry on in the Claude app."
     }
-    Column(Modifier.fillMaxWidth().camBox(m.t.surface2).padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(Modifier.size(8.dp).clip(CircleShape).background(m.t.muted.copy(alpha = .6f)))
-            T(if (mac != null && mac.online && !mac.ready) ClaudeText.status(ui.copy(refusal = null)).text else ClaudeText.OFFLINE, m.type.body.copy(fontSize = 14.sp), m.t.ink, weight = FontWeight.Bold)
-        }
-        T(why, m.type.tiny, m.t.muted)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            f.openInClaude?.let { url -> ChatBtn("Open in Claude", primary = true, icon = "open") { actions.openInClaude(url) } }
-            if (f.useApiKey) ChatBtn("Use the studio API key") { actions.useApiKey() }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            T(ClaudeText.CONNECTOR_NOTE + " ", m.type.tiny.copy(fontSize = 12.sp), m.t.muted, Modifier.weight(1f, fill = false))
-        }
-        Box(Modifier.heightIn(min = 48.dp).press(onClick = actions.openConnections).semantics { role = Role.Button }, contentAlignment = Alignment.CenterStart) {
-            T("Add MUSE in Connections →", m.type.tiny.copy(fontSize = 12.sp), m.link, weight = FontWeight.SemiBold)
-        }
-        if (f.useApiKey) T("The studio API key is billed per use.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
-        f.note?.let { T(it, m.type.tiny.copy(fontSize = 12.sp), m.t.muted) }
-    }
-}
-
-@Composable
-private fun ChatBtn(text: String, primary: Boolean = false, icon: String? = null, onClick: () -> Unit) {
-    val m = muse
-    val shape = RoundedCornerShape(if (m.isA) 2.dp else 999.dp)
-    Row(Modifier.height(48.dp).clip(shape).background(if (primary) m.t.cta else m.t.surface).border(1.dp, if (primary) m.t.cta else m.t.line, shape)
-        .press(onClick = onClick).semantics { role = Role.Button }.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (icon != null) CamIc(icon, 15.dp, if (primary) m.t.ctaInk else m.t.ink)
-        T(text, m.type.body.copy(fontSize = 13.sp), if (primary) m.t.ctaInk else m.t.ink, weight = FontWeight.SemiBold, maxLines = 1)
+    Column(Modifier.fillMaxWidth().padding(top = MuseSpace.s2), verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+        T(if (mac != null && mac.online && !mac.ready) ClaudeText.status(ui.copy(refusal = null)).text else ClaudeText.OFFLINE, m.scale.heading, m.roles.ink)
+        T(why, m.scale.body, m.roles.ink2)
+        Spacer(Modifier.height(MuseSpace.s1))
+        f.openInClaude?.let { url -> PrimaryButton("Open in Claude", { actions.openInClaude(url) }, Modifier.fillMaxWidth()) }
+        if (f.useApiKey) SecondaryButton("Use the studio API key", { actions.useApiKey() }, Modifier.fillMaxWidth())
+        T(ClaudeText.CONNECTOR_NOTE, m.scale.caption, m.roles.ink2)
+        TextAction("Add MUSE in Connections", actions.openConnections)
+        if (f.useApiKey) Caption("The studio API key is billed per use.")
+        f.note?.let { Caption(it) }
     }
 }
 
 @Composable
 private fun ChatComposer(ui: ClaudeChatUi, actions: ClaudeChatActions, horizontal: Dp) {
     val m = muse
-    Column(Modifier.fillMaxWidth().background(m.t.bg).drawBehind { drawLine(m.t.line, Offset(0f, 0f), Offset(size.width, 0f), 1f) }
-        .padding(horizontal = horizontal, vertical = 10.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            CamField(ui.draft, actions.edit, if (ui.contextKind == "edit") "Ask Claude to edit…" else "Direct the shot…", Modifier.weight(1f))
-            if (ui.busy) StopButton(actions.stop)
+    Column(Modifier.fillMaxWidth().background(m.roles.canvas).padding(horizontal = horizontal, vertical = MuseSpace.s2).navigationBarsPadding(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+            ChatField(ui.draft, actions.edit, if (ui.contextKind == "edit") "Ask Claude to edit…" else "Direct the shot…", Modifier.weight(1f))
+            if (ui.busy) SecondaryButton("Stop", actions.stop, label = "Stop", height = 48.dp)
             else SendButton(ui.loaded && ui.thread != null && ui.draft.isNotBlank(), actions.send)
         }
         // The header carries the mode line; here only the billed-per-use reminder while the studio key answers.
-        if (ui.turn?.api == true && ui.busy) T(ClaudeText.API, m.type.tiny.copy(fontSize = 11.5.sp), m.t.muted, maxLines = 1)
+        if (ui.turn?.api == true && ui.busy) Caption(ClaudeText.API, maxLines = 1)
     }
 }
 
+/** The composer's field: `raised`, a hairline edge, the control radius. */
 @Composable
-private fun StopButton(onClick: () -> Unit) {
+private fun ChatField(value: String, onChange: (String) -> Unit, placeholder: String, modifier: Modifier) {
     val m = muse
-    val shape = RoundedCornerShape(if (m.isA) 2.dp else 999.dp)
-    Row(Modifier.height(48.dp).clip(shape).background(m.t.surface).border(1.dp, m.t.ink, shape).press(onClick = onClick)
-        .semantics { contentDescription = "Stop"; role = Role.Button }.padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        CamIc("stop", 14.dp, m.t.ink)
-        T("Stop", m.type.body.copy(fontSize = 13.sp), m.t.ink, weight = FontWeight.SemiBold, maxLines = 1)
+    val shape = controlShape()
+    androidx.compose.foundation.text.BasicTextField(
+        value, onChange, modifier.height(48.dp).clip(shape).background(m.roles.raised).border(1.dp, m.roles.hairline, shape),
+        textStyle = m.scale.body.copy(color = m.roles.ink), singleLine = true,
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(m.roles.accent),
+        decorationBox = { inner ->
+            Box(Modifier.fillMaxSize().padding(horizontal = MuseSpace.s3), contentAlignment = Alignment.CenterStart) {
+                if (value.isEmpty()) T(placeholder, m.scale.body, m.roles.ink2, maxLines = 1)
+                inner()
+            }
+        },
+    )
+}
+
+/** Send: the one action in the chat, an arrow in the `action` fill. Quiet while there's nothing to send. */
+@Composable
+private fun SendButton(enabled: Boolean, onClick: () -> Unit) {
+    val m = muse
+    val shape = controlShape()
+    Box(Modifier.size(48.dp).clip(shape).background(if (enabled) m.roles.action else m.roles.field).let { if (m.isD && enabled) it.border(2.dp, m.roles.ink, shape) else it }
+        .press(enabled, onClick).semantics { contentDescription = "Send"; role = Role.Button }, contentAlignment = Alignment.Center) {
+        Ic("upload", 20.dp, if (enabled) m.roles.onAction else m.roles.ink2)
     }
 }
 
@@ -330,16 +341,8 @@ private fun StopButton(onClick: () -> Unit) {
 
 /** The "Claude" button that opens [ClaudeChatSheet] (48 dp tall). */
 @Composable
-fun ClaudeButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val m = muse
-    val shape = RoundedCornerShape(if (m.isA) 2.dp else 999.dp)
-    Row(modifier.height(48.dp).clip(shape).background(m.t.surface).border(1.dp, m.t.line, shape).press(onClick = onClick)
-        .semantics { contentDescription = "Claude"; role = Role.Button }.padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        CamIc("claude", 16.dp, m.t.accent)
-        T("Claude", m.type.body.copy(fontSize = 14.sp), m.t.ink, weight = FontWeight.SemiBold, maxLines = 1)
-    }
-}
+fun ClaudeButton(onClick: () -> Unit, modifier: Modifier = Modifier) =
+    SecondaryButton("Claude", onClick, modifier, label = "Claude", height = 48.dp)
 
 /** The chat as a sheet over the screen (88% of the height), with a scrim; Back and the scrim close it. */
 @Composable
@@ -349,18 +352,17 @@ fun ClaudeChatSheet(open: Boolean, onDismiss: () -> Unit, contextKind: String, c
     ClaudeSheetFrame(onDismiss, modifier) { ClaudeChat(store, title, Modifier.fillMaxSize()) }
 }
 
-/** The sheet's frame (scrim, handle, rounded top); [content] fills it. */
+/** The sheet's frame (scrim, handle, the container radius on top, the float shadow); [content] fills it. */
 @Composable
 fun ClaudeSheetFrame(onDismiss: () -> Unit, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     val m = muse
     BackHandler(onBack = onDismiss)
     BoxWithConstraints(modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .38f)).press(onClick = onDismiss).semantics { contentDescription = "Close Claude" })
-        val shape = RoundedCornerShape(topStart = if (m.isA) 2.dp else m.t.rLg, topEnd = if (m.isA) 2.dp else m.t.rLg)
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(maxHeight * .88f).clip(shape).background(m.t.bg)
-            .let { if (m.isD) it.border(2.5.dp, Color(0xFF111111), shape) else it }) {
+        val shape = RoundedCornerShape(topStart = m.radii.container, topEnd = m.radii.container)
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(maxHeight * .88f).museFloat(m, shape).clip(shape).background(m.roles.canvas)) {
             Box(Modifier.fillMaxWidth().height(20.dp), contentAlignment = Alignment.Center) {
-                Box(Modifier.width(40.dp).height(4.dp).clip(CircleShape).background(m.t.line))
+                Box(Modifier.width(40.dp).height(4.dp).clip(CircleShape).background(m.roles.hairline))
             }
             Box(Modifier.weight(1f).fillMaxWidth()) { content() }
         }
@@ -371,5 +373,5 @@ fun ClaudeSheetFrame(onDismiss: () -> Unit, modifier: Modifier = Modifier, conte
 @Composable
 fun ClaudeChatPanel(contextKind: String, contextId: String, title: String = "Claude", width: Dp = 380.dp, modifier: Modifier = Modifier) {
     val m = muse
-    ClaudeChat(contextKind, contextId, title, modifier.width(width).fillMaxHeight().drawBehind { drawLine(m.t.line, Offset(0f, 0f), Offset(0f, size.height), 1f) })
+    ClaudeChat(contextKind, contextId, title, modifier.width(width).fillMaxHeight().drawBehind { drawLine(m.roles.hairline, Offset(0f, 0f), Offset(0f, size.height), 1f) })
 }

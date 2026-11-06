@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -56,6 +57,11 @@ import studio.muse.app.ui.Routes
 import studio.muse.app.ui.components.*
 import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.MuseSpace
+import studio.muse.app.ui.theme.roles
+import studio.muse.app.ui.theme.scale
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import studio.muse.core.Pricing
 
 data class LoraState(val model: Model? = null, val lora: Lora = Lora(""), val balance: Double = 0.0, val photo: studio.muse.core.PhotoPrices = studio.muse.core.PhotoPrices(),
@@ -105,53 +111,51 @@ fun LoraScreen() {
     val s by vm.state.collectAsState()
     val nav = LocalNav.current
     val l = s.lora
-    ScreenBox {
+    ScreenBox(bg = muse.roles.canvas) {
         Column(Modifier.fillMaxSize()) {
-            TopBar("Identity LoRA", onBack = { nav.back() })
+            CalmTopBar("Identity LoRA", onBack = { nav.back() })
             Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 6.dp, bottom = 130.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = MuseSpace.gutter).padding(top = MuseSpace.s2, bottom = 120.dp),
+                verticalArrangement = Arrangement.spacedBy(MuseSpace.s5),
             ) {
                 when (l.state) {
                     "building" -> LoraGenerating()
                     "review" -> LoraReview(l, vm::toggle)
                     "training" -> LoraTraining(l, s.model, s.demo)
                     "ready" -> LoraDone(l, s.model, s.demo, vm::use, vm::retrain)
+                    "failed" -> {
+                        Notice("Training didn't finish, and the cost was refunded. Build a new training set to try again.", tone = NoticeTone.DANGER)
+                        LoraIntro(s.model)
+                    }
                     else -> LoraIntro(s.model)
                 }
             }
         }
-        Dock {
+        ActionDock {
             when (l.state) {
-                "building" -> Cta("Generating…", {}, Modifier.weight(1f), off = true, busy = true)
+                "building" -> PrimaryButton("Building the training set…", {}, Modifier.weight(1f), busy = true)
                 "review" -> when {
-                    l.kept < Pricing.LORA_MIN_KEEP -> Cta("Keep ${Pricing.LORA_MIN_KEEP - l.kept} more to train", { vm.toast("Keep at least 20 shots so the LoRA learns her well") }, Modifier.weight(1f), off = true)
-                    s.low -> Cta("Top up to train · ${Pricing.money(s.trainCost)}", { nav.go(Routes.CREDITS) }, Modifier.weight(1f))
-                    else -> Cta("Train · ~${minutesText(Pricing.loraTrainMinutes)} · ${Pricing.money(s.trainCost)}", vm::train, Modifier.weight(1f))
+                    l.kept < Pricing.LORA_MIN_KEEP -> PrimaryButton("Keep ${Pricing.LORA_MIN_KEEP - l.kept} more to train", { vm.toast("Keep at least 20 shots so the LoRA learns her well") }, Modifier.weight(1f), off = true)
+                    s.low -> PrimaryButton("Top up to train · ${Pricing.money(s.trainCost)}", { nav.go(Routes.CREDITS) }, Modifier.weight(1f))
+                    else -> PrimaryButton("Train · about ${minutesText(Pricing.loraTrainMinutes)} · ${Pricing.money(s.trainCost)}", vm::train, Modifier.weight(1f))
                 }
-                "training" -> Cta2("Back to profile", { nav.back() }, Modifier.weight(1f))
-                "ready" -> Cta("Test it in a photoshoot", { nav.go(Routes.SHOOT) }, Modifier.weight(1f))
-                else -> Cta("Build training set · ${studio.muse.core.PhotoPricing.about(s.setCost)}", vm::build, Modifier.weight(1f))
+                "training" -> SecondaryButton("Back to profile", { nav.back() }, Modifier.weight(1f))
+                "ready" -> PrimaryButton("Test it in a photoshoot", { nav.go(Routes.SHOOT) }, Modifier.weight(1f))
+                else -> PrimaryButton("Build training set · ${studio.muse.core.PhotoPricing.about(s.setCost)}", vm::build, Modifier.weight(1f))
             }
         }
     }
 }
 
-@Composable
-private fun small() = muse.type.body.copy(fontSize = 14.sp, lineHeight = 20.sp)
-
+/** Her picture, then a title and one line under it (no text over the photo). */
 @Composable
 private fun LoraHero(img: ImageRef?, title: String, sub: String) {
     val m = muse
-    val shape = RoundedCornerShape(m.t.rLg)
-    Box(Modifier.fillMaxWidth().height(180.dp).clip(shape).let { if (m.isD) it.border(2.5.dp, Ink, shape) else it }) {
-        RefImage(img, Modifier.fillMaxSize(), 20)
-        Column(
-            Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .65f))))
-                .padding(start = 14.dp, end = 14.dp, top = 30.dp, bottom = 12.dp),
-        ) {
-            T(title, m.type.body.copy(fontWeight = FontWeight.Bold), Color.White)
-            T(sub, m.type.tiny, Color.White)
+    Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+        Box(Modifier.fillMaxWidth().height(200.dp).clip(containerShape()).background(m.roles.field)) { RefImage(img, Modifier.fillMaxSize(), 20) }
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            T(title, m.scale.heading, m.roles.ink)
+            Caption(sub)
         }
     }
 }
@@ -186,42 +190,41 @@ private fun LoraIntro(model: Model?) {
     Text(
         buildAnnotatedString {
             append("A LoRA is a small add-on trained on one model. It keeps her ")
-            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("face and physique") }
+            withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = m.roles.ink)) { append("face and physique") }
             append(" the same in every photo and video, beyond what reference shots alone can hold.")
         },
-        style = small(), color = m.t.ink,
+        style = m.scale.body, color = m.roles.ink2,
     )
-    ListGroup {
-        TwoLineRow("Photo LoRA", "For photoshoots · ~${Pricing.LORA_PHOTO_MIN} min", "camera")
-        ListDivider()
-        TwoLineRow("Video LoRA", "For videos · ~${Pricing.LORA_VIDEO_MIN} min", "studio")
+    Column {
+        RowItem("Photo LoRA", "For photoshoots · about ${Pricing.LORA_PHOTO_MIN} min")
+        RowItem("Video LoRA", "For videos · about ${Pricing.LORA_VIDEO_MIN} min")
     }
-    Field("How it works") {
-        listOf("We generate 30 varied shots from her sheet", "You keep the ones that look like her", "We train both LoRAs on what you kept").forEachIndexed { i, t ->
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(Modifier.size(24.dp).clip(CircleShape).background(m.link).let { if (m.isD) it.border(2.dp, Ink, CircleShape) else it }, contentAlignment = Alignment.Center) {
-                    T("${i + 1}", m.type.body.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold), if (m.isD) Color.White else m.t.accentInk)
-                }
-                T(t, m.type.body.copy(fontSize = 13.sp), m.t.ink)
+    Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+        Heading("How it works")
+        listOf("We make 30 varied shots from her character sheet.", "You keep the ones that look like her.", "We train both LoRAs on what you kept.").forEachIndexed { i, t ->
+            Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+                T("${i + 1}", m.scale.body.tabular(), m.roles.ink2, Modifier.width(16.dp))
+                T(t, m.scale.body, m.roles.ink, Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-private fun ColumnScope.LoraGenerating() {
-    T("Generating 30 shots: new angles, outfits, light and expressions, full body included so her physique is learned too.", small(), muse.t.ink)
-    Grid4((0 until 12).toList()) { _, mod -> Box(mod.background(muse.t.surface2).shimmer()) }
+private fun LoraGenerating() {
+    Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
+        Body("Making 30 shots: new angles, outfits, light and expressions, full body included so her physique is learned too.")
+        Grid4((0 until 12).toList()) { _, mod -> Skeleton(mod) }
+    }
 }
 
-/** 4-column grid of 3:4 tiles (`.lgrid`). */
+/** 4-column grid of 3:4 tiles. */
 @Composable
 private fun <T> Grid4(items: List<T>, tile: @Composable (T, Modifier) -> Unit) {
-    val m = muse
-    val shape = RoundedCornerShape(m.t.r * .6f)
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    val shape = controlShape()
+    Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
         items.chunked(4).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
                 row.forEach { item -> Box(Modifier.weight(1f)) { tile(item, Modifier.fillMaxWidth().aspectRatio(.75f).clip(shape)) } }
                 repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
             }
@@ -237,25 +240,19 @@ private val dropped = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturat
 @Composable
 private fun LoraReview(l: Lora, toggle: (LoraCandidate) -> Unit) {
     val m = muse
-    RowB {
-        T("${l.kept} kept", m.type.h3, m.t.ink)
-        val ok = l.kept >= Pricing.LORA_MIN_KEEP
-        Pill(if (ok) "Enough to train" else "Keep at least ${Pricing.LORA_MIN_KEEP}", if (ok) "good" else "warn")
+    val ok = l.kept >= Pricing.LORA_MIN_KEEP
+    Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+        T("${l.kept} kept", m.scale.title.tabular(), m.roles.ink)
+        T(if (ok) "Enough to train" else "Keep at least ${Pricing.LORA_MIN_KEEP} to train", m.scale.caption, if (ok) m.roles.positive else m.roles.caution)
+        Caption("Tap a shot to drop it. Drop anything that doesn't look like her, or shows a tattoo or ring. ${l.flagged} were flagged for you.")
     }
-    Tiny("Tap a shot to drop it. Drop anything that doesn't look like her, or shows a tattoo or ring. ${l.flagged} were flagged for you.")
     Grid4(l.candidates) { cnd, mod ->
-        Box(mod.press { toggle(cnd) }) {
+        Box(mod.background(m.roles.field).press { toggle(cnd) }.semantics { contentDescription = if (cnd.keep) "Kept" else "Dropped" }) {
             RefImage(cnd.image, Modifier.fillMaxSize(), 15, if (cnd.keep) null else dropped)
-            if (cnd.flag != null) {
-                Box(Modifier.align(Alignment.BottomStart).padding(4.dp).clip(RoundedCornerShape(999.dp)).background(Color(0xFFF6E2C0)).padding(horizontal = 6.dp, vertical = 1.dp)) {
-                    T(cnd.flag, m.type.tiny.copy(fontSize = 10.sp, lineHeight = 13.sp, fontWeight = FontWeight.Bold), Color(0xFF6B3F00))
-                }
-            }
-            Box(
-                Modifier.align(Alignment.TopEnd).padding(4.dp).size(20.dp).clip(CircleShape).background(if (cnd.keep) (m.link) else Color.White),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (cnd.keep) Ic("check", 13.dp, if (m.isD) Color.White else m.t.accentInk) else T("✕", m.type.tiny.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold), Ink)
+            // One caption on a scrim where the picture needs it: why it was flagged, or that it's dropped.
+            val note = cnd.flag ?: if (!cnd.keep) "Dropped" else null
+            if (note != null) Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Color.Black.copy(alpha = .55f)).padding(horizontal = 6.dp, vertical = 3.dp)) {
+                T(note, m.scale.micro, Color.White, maxLines = 1)
             }
         }
     }
@@ -264,65 +261,47 @@ private fun LoraReview(l: Lora, toggle: (LoraCandidate) -> Unit) {
 @Composable
 private fun LoraTraining(l: Lora, model: Model?, demo: Boolean) {
     val m = muse
-    LoraHero(model?.slot("face")?.image ?: model?.cover, "Training on ${l.kept} shots", "You can leave this screen. We'll notify you.")
-    listOf("Photo LoRA" to l.photo.progress, "Video LoRA" to l.video.progress).forEach { (name, p) ->
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            RowB { T(name, m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink); T("${p.toInt()}%", m.type.mono.copy(fontSize = 11.5.sp), m.t.ink) }
-            Bar((p / 100).toFloat(), Modifier.fillMaxWidth(), color = m.link, height = 6.dp)
+    LoraHero(model?.slot("face")?.image ?: model?.cover, "Training on ${l.kept} shots", "You can leave this screen. We'll notify you when it's done.")
+    Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
+        listOf("Photo LoRA" to l.photo.progress, "Video LoRA" to l.video.progress).forEach { (name, p) ->
+            Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                RowB { T(name, m.scale.body, m.roles.ink); RowValue("${p.toInt()}%", m.roles.ink) }
+                ProgressLine((p / 100).toFloat(), Modifier.fillMaxWidth())
+            }
         }
+        val left = ((100 - l.progress) / 100 * Pricing.loraTrainMinutes).toInt().coerceAtLeast(1)
+        Caption("About $left min left" + if (demo) " · the demo runs 120× faster" else "")
     }
-    val left = ((100 - l.progress) / 100 * Pricing.loraTrainMinutes).toInt().coerceAtLeast(1)
-    T("~$left min left" + if (demo) " · demo runs 120× faster" else "", m.type.mono.copy(fontSize = 11.5.sp), m.t.muted)
 }
 
 @Composable
 private fun LoraDone(l: Lora, model: Model?, demo: Boolean, use: (Boolean) -> Unit, retrain: () -> Unit) {
     val m = muse
-    val shape = RoundedCornerShape(m.t.r * .6f)
     // The side-by-side is the demo's bundled pair; a real studio has no "with LoRA" still yet, so it shows her own photo.
-    if (demo) {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            listOf(Triple("c_face", "References only", false), Triple("face", "With LoRA v${l.version}", true)).forEach { (img, label, bold) ->
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    RefImage(ImageRef.asset(img), Modifier.fillMaxWidth().aspectRatio(.75f).clip(shape).let { if (m.isD) it.border(2.5.dp, Ink, shape) else it }, 15)
-                    T(label, m.type.tiny, if (bold) m.t.ink else m.t.muted, weight = if (bold) FontWeight.Bold else null)
+    if (demo) Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+            listOf(Triple("c_face", "References only", false), Triple("face", "With LoRA v${l.version}", true)).forEach { (img, label, mine) ->
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                    RefImage(ImageRef.asset(img), Modifier.fillMaxWidth().aspectRatio(.75f).clip(containerShape()), 15)
+                    T(label, m.scale.caption, if (mine) m.roles.ink else m.roles.ink2)
                 }
             }
         }
-        Tiny("Same prompt and seed. The LoRA keeps her face shape and build steady across angles.")
+        Caption("Same prompt and seed. The LoRA keeps her face shape and build steady across angles.")
     } else LoraHero(model?.slot("face")?.image ?: model?.cover, "LoRA v${l.version} ready", "Keeps her face shape and build steady across angles.")
-    ListGroup {
-        TwoLineRow("Use in new renders", "Photos and videos · identity + physique") { Toggle(l.use, { use(!l.use) }) }
-        ListDivider()
-        TwoLineRow("Trained on", null) { T("${l.trainedOn ?: l.kept} shots · v${l.version}", m.type.mono.copy(fontSize = 11.5.sp), m.t.ink) }
-        ListDivider()
-        TwoLineRow("Retrain with more shots", null, onClick = retrain) { Ic("chev", 16.dp) }
+    Column {
+        RowItem("Use in new renders", "Photos and videos · identity and physique", onClick = { use(!l.use) }) { Toggle(l.use, { use(!l.use) }) }
+        RowItem("Trained on") { RowValue("${l.trainedOn ?: l.kept} shots · v${l.version}") }
+        RowItem("Retrain with more shots", onClick = retrain) { Chevron() }
     }
-    if (model != null && l.use) Tiny("Prompts now add “+ LoRA ${studio.muse.core.LoraToken.of(model.name, l.version)}”.")
+    if (model != null && l.use) Caption("Prompts now add “+ LoRA ${studio.muse.core.LoraToken.of(model.name, l.version)}”.")
 }
 
-/** The two profile tiles above the dock: Identity LoRA and Accounts (`.pex`). */
+/** Identity LoRA and Accounts on her profile: two plain rows. */
 @Composable
 fun ProfileExtras(lora: Lora, connected: Int, onLora: () -> Unit, onAccounts: () -> Unit, modifier: Modifier = Modifier) {
-    Row(modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        ProfileTile("spark", "Identity LoRA", loraLine(lora), onLora, Modifier.weight(1f))
-        ProfileTile("export", "Accounts", "$connected of 5 connected", onAccounts, Modifier.weight(1f))
-    }
-}
-
-@Composable
-private fun ProfileTile(icon: String, title: String, sub: String, onClick: () -> Unit, modifier: Modifier) {
-    val m = muse
-    val shape = RoundedCornerShape(m.t.r)
-    val bg = if (m.isB) Color(0xFF17191B) else m.t.surface
-    var mod = modifier.heightIn(min = 52.dp)
-    mod = if (m.isD) mod.hardShadow(3.dp, m.t.r) else mod
-    mod = mod.clip(shape).background(bg).border(if (m.isD) 2.5.dp else m.t.stroke, m.t.line, shape)
-    Row(mod.press(onClick = onClick).padding(horizontal = 10.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Ic(icon, 18.dp, m.t.ink)
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            T(title, m.type.body.copy(fontSize = 13.sp, lineHeight = 16.sp, fontWeight = FontWeight.Bold), m.t.ink, maxLines = 1)
-            T(sub, m.type.tiny.copy(fontSize = 11.5.sp, lineHeight = 14.sp), m.t.muted, maxLines = 2)
-        }
+    Column(modifier.fillMaxWidth().padding(top = MuseSpace.s2)) {
+        RowItem("Identity LoRA", loraLine(lora), onClick = onLora) { Chevron() }
+        RowItem("Accounts", "$connected of 5 connected", onClick = onAccounts) { Chevron() }
     }
 }

@@ -88,10 +88,10 @@ fun ModelInitial(model: Model, modifier: Modifier = Modifier, size: Float = 42f)
 fun profileMenu(onSheet: () -> Unit, onOutfit: () -> Unit, onLora: () -> Unit = {}, onAccounts: () -> Unit = {},
     onEnhance: () -> Unit = {}, onDressUp: () -> Unit = {}, onArchive: (() -> Unit)? = null): List<MenuItem> = listOfNotNull(
     MenuItem("grid", "Character sheet", onClick = onSheet),
-    MenuItem("spark", "Enhance character sheet", onClick = onEnhance),
+    MenuItem("quality", "Enhance character sheet", onClick = onEnhance),
     MenuItem("outfit", "Dress up", onClick = onDressUp),
     MenuItem("outfit", "Add outfit", onClick = onOutfit),
-    MenuItem("spark", "Identity LoRA", onClick = onLora),
+    MenuItem("lock", "Identity LoRA", onClick = onLora),
     MenuItem("export", "Accounts", onClick = onAccounts),
     onArchive?.let { MenuItem("lock", "Archive model", danger = true, onClick = it) },
 )
