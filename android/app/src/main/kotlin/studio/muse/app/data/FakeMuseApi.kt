@@ -464,7 +464,8 @@ class FakeMuseApi(
                             Take("t_${cur.id}_$i", "take", cur.id, i, cur.request.takes, cur.title,
                                 when (cur.request.engine) { Engine.VIGGLE.id -> "Fast · beta"; Engine.REPLICATE.id -> Quality.fromId(cur.request.quality).label
                                     SuiteRules.ENGINE -> SuiteRules.tierLabel(cur.request.quality); else -> "Edit" }, cur.engineLabel,
-                                cur.cost / cur.request.takes, cur.seed + i - 1, "test", thumb, cur.prompt, now())
+                                cur.cost / cur.request.takes, cur.seed + i - 1, "test", thumb, cur.prompt, now(),
+                                look = if (cur.request.engine == SuiteRules.ENGINE) suite.looks[cur.id] else null)
                         }
                         takes.addAll(0, newTakes)
                         ApiEvent("job", job = done, takes = newTakes)
@@ -847,6 +848,7 @@ class FakeMuseApi(
             val m = lead?.let { id -> models.firstOrNull { it.id == id } }
             val o = (req.outfitId ?: req.cast?.firstOrNull()?.outfitId)?.let { id -> outfits.firstOrNull { it.id == id } }
             val j = suite.job("j_" + uid(), req, e, m, o, now())
+            e.look?.let { suite.looks[j.id] = it } // AI suite (workstream 1): the takes carry the shot's Look
             charge(j.cost)
             jobs += j
             j

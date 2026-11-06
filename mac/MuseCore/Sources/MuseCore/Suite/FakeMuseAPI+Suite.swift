@@ -173,6 +173,7 @@ extension FakeMuseAPI {
                     phase: MemberText.waitingToStart, secondsLeft: total, totalSeconds: total, cost: e.estimate, createdAt: nowMs(), prompt: e.prompt ?? "",
                     seed: Int64.random(in: 1000...99999), thumb: outfits.first { $0.id == outfitId }?.front ?? m?.cover)
         j.engineText = e.label
+        if let look = e.look { suiteLooks[j.id] = look }
         return try enqueueSuiteJob(j)
     }
 

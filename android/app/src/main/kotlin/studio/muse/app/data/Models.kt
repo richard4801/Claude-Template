@@ -249,6 +249,8 @@ data class Take(
     val variation: Map<String, String>? = null,
     /** Photoshoot stills: the reference images it was shot with (2026-11-05). */
     val refs: List<ShootRef>? = null,
+    /** AI suite (workstream 1): a suite take's Look; the Edit suite opens with it applied. */
+    val look: SuiteLook? = null,
 ) {
     val final get() = status == "final"
     val shot get() = kind == "shot"

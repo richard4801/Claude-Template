@@ -117,5 +117,10 @@ final class SuiteComposerTests: XCTestCase {
         var off = r
         off.gradeLook = false
         XCTAssertNil(SuiteLooks.look(for: off, camera: cat))
+        // Demo mode: the estimate names the Look, like the server.
+        let api = FakeMuseAPI(speed: 0, genDelay: 0.01)
+        _ = try await api.signIn(SignInRequest(email: "owner@studio.com", password: "x"))
+        let e = try await api.suiteEstimate(ShotRequest(modelId: SampleData.demo, prompt: "She waves.", duration: 6, quality: "hd", camera: CameraSpec(palette: CameraPalette(preset: "hyper_neon"))))
+        XCTAssertEqual(e.look?.lut, "palette:hyper_neon")
     }
 }

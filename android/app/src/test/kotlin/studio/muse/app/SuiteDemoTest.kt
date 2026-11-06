@@ -34,6 +34,7 @@ class SuiteDemoTest {
         assertTrue(cat.enabled && cat.test)
         assertEquals(16, cat.camera.library.size)
         val req = ShotDraft(modelId = SampleData.DEMO, outfitId = SampleData.GREEN, scene = "She orders at the counter.", duration = 6, quality = "standard", takes = 2).request()
+            .copy(camera = kotlinx.serialization.json.Json.parseToJsonElement("""{"mode":"preset","palette":{"preset":"hyper_neon"}}"""))
         val e = api.suiteEstimate(req)
         assertEquals("Shot · Standard · 768p", e.label)
         assertEquals("Generate · 6 s · $0.96 · 2 takes", e.buttonLabel) // the server's price for the same shot
@@ -52,6 +53,9 @@ class SuiteDemoTest {
         assertEquals("done", done.state)
         val takes = api.listTakes().filter { it.jobId == job.id }
         assertEquals(listOf("Standard", "Standard"), takes.map { it.label })
+        // Look grading: the estimate names the Look and both takes carry it (the Edit suite opens with it applied).
+        assertEquals("palette:hyper_neon", e.look?.lut)
+        assertEquals(listOf("palette:hyper_neon", "palette:hyper_neon"), takes.map { it.look?.lut })
         assertEquals(before, api.balance().balance, 1e-9) // test renders settle at $0
     }
 

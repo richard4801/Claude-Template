@@ -294,7 +294,7 @@ describe.skipIf(!hasFfmpeg)('AI suite · Shot API on the mock provider', () => {
 
   it('a shot runs on the mock: hold → takes delivered as made → settle $0 (test render), with real inputs recorded', async () => {
     const before = a.ctx.suite.mock.calls.length;
-    const r = await member.req('POST', '/v1/suite/shots', { modelId: model.id, prompt: 'She laughs.', duration: 5, takes: 2, aspectRatio: '9:16', camera: { move: { id: 'dolly_in', intensity: 0.5 } } });
+    const r = await member.req('POST', '/v1/suite/shots', { modelId: model.id, prompt: 'She laughs.', duration: 5, takes: 2, aspectRatio: '9:16', camera: { move: { id: 'dolly_in', intensity: 0.5 }, palette: { preset: 'hyper_neon' } } });
     expect(r.status).toBe(200);
     expect(r.body.request).toMatchObject({ engine: 'suite', engineLabel: 'Shot · Draft · 768p', quality: 'draft', seconds: 5, takes: 2 });
     expect(r.body.engineLabel).toBe('Shot · Draft · 768p');
@@ -310,6 +310,10 @@ describe.skipIf(!hasFfmpeg)('AI suite · Shot API on the mock provider', () => {
     expect(takes.length).toBe(2);
     expect(takes[0]).toMatchObject({ label: 'Draft', engineLabel: 'Shot · Draft · 768p', durationSec: 5, width: 180, height: 320 });
     expect(takes[0].videoUrl).toMatch(/\/uploads\/s\//);
+    // Look grading: the job request and every take carry the Look (the Edit suite opens with it applied).
+    const look = { id: 'hyper_neon', kind: 'palette', label: 'Hyper neon', lut: 'palette:hyper_neon' };
+    expect(r.body.request.look).toEqual(look);
+    for (const t of takes) expect(t.look).toEqual(look);
     const rows = await a.ctx.db.select().from(ledger).where(eq(ledger.jobId, r.body.id));
     expect(rows.find(x => x.kind === 'hold')!.note).toBe('Video · Shot · Draft · 768p · 5 s · 2 takes · hold');
     const settle = rows.find(x => x.kind === 'settle')!;

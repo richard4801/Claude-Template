@@ -20,6 +20,8 @@ class FakeSuite {
     private val bundle: Bundle = json.decodeFromString(Bundle.serializer(), resource("/suite_demo.json"))
     val camera: CameraCatalog = json.decodeFromString(CameraCatalog.serializer(), resource("/suite_camera.json"))
     private var settings: SuiteSettings = bundle.settings.copy(mode = "mock")
+    /** The Look each demo shot's takes carry (by job id), like the server's take.look. */
+    val looks = mutableMapOf<String, SuiteLook>()
     /** Spent today on suite shots (demo, never settled: test renders). */
     var spentToday = 0.0
         private set

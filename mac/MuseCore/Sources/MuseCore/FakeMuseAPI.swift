@@ -63,6 +63,8 @@ public actor FakeMuseAPI: MuseAPI {
     var sheetVersionsByModel: [String: [SheetVersion]] = [:]
     /// AI suite (workstream 1): the demo studio's suite settings (Engines), once changed.
     var suiteSettingsBox: SuiteSettings?
+    /// AI suite (workstream 1): the Look each demo shot's takes carry (by job id), like the server's take.look.
+    var suiteLooks: [String: SuiteLook] = [:]
 
     /// - Parameters:
     ///   - speed: simulation speed; 0 freezes the queue (tests).
@@ -784,8 +786,10 @@ public actor FakeMuseAPI: MuseAPI {
         let label = j.request.engine == "suite" ? SuiteText.tierLabel(j.request.quality) : j.videoQuality.label // AI suite (workstream 1): tier label
         return (1...n).map { k in
             let thumb = pool.isEmpty ? (j.thumb ?? .asset("g_front")) : pool[(k - 1) % pool.count]
-            return Take(id: "t_\(j.id)_\(k)", jobId: j.id, index: k, of: n, title: j.title, label: label, engineLabel: j.engineLabel,
-                        cost: j.cost / Double(n), seed: j.seed + Int64(k - 1), thumb: thumb, prompt: j.prompt, createdAt: nowMs())
+            var t = Take(id: "t_\(j.id)_\(k)", jobId: j.id, index: k, of: n, title: j.title, label: label, engineLabel: j.engineLabel,
+                         cost: j.cost / Double(n), seed: j.seed + Int64(k - 1), thumb: thumb, prompt: j.prompt, createdAt: nowMs())
+            t.look = j.request.engine == "suite" ? suiteLooks[j.id] : nil // AI suite (workstream 1): the shot's Look
+            return t
         }
     }
 
