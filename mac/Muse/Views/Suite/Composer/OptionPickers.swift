@@ -11,11 +11,13 @@ struct OptionGrid: View {
     var autoLine = "Matches the scene"
     var swatches = false
     var tileHeight: CGFloat = 96
+    /// The Auto tile's rendered still (`camera.autoPreviews`), when the catalog has one.
+    var autoPreview: PickerPreview? = nil
     var onPick: (String?) -> Void
 
     var body: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16), count: 4), alignment: .leading, spacing: 18) {
-            PickerOptionTile(name: "Auto", line: autoLine, auto: true, swatches: [], selected: selected == nil, height: tileHeight) { onPick(nil) }
+            PickerOptionTile(name: "Auto", line: autoLine, preview: autoPreview, auto: true, swatches: [], selected: selected == nil, height: tileHeight) { onPick(nil) }
             ForEach(ComposerCatalog.visible(options)) { o in
                 PickerOptionTile(name: o.label, line: o.description, preview: .option(o), swatches: swatches ? o.swatches : [],
                                  selected: selected == o.id || ComposerCatalog.survivor(options, selected) == o.id, height: tileHeight) { onPick(o.id) }
@@ -167,7 +169,8 @@ struct LightingStep: View {
 
     var body: some View {
         ScrollView {
-            OptionGrid(options: store.suite.camera.lighting, selected: store.suite.pickerSettings.lighting, autoLine: "The scene's own light") {
+            OptionGrid(options: store.suite.camera.lighting, selected: store.suite.pickerSettings.lighting, autoLine: "The scene's own light",
+                       autoPreview: PickerPreview.auto(store.suite.camera.autoPreviews.lighting)) {
                 store.suite.pickerSettings.lighting = $0
             }
             .padding(.horizontal, 22).padding(.vertical, 18)

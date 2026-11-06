@@ -259,9 +259,12 @@ public struct WheelItem: Hashable, Sendable, Identifiable {
     public var name: String
     public var caption: String
     public var render: String?
+    /// The card's rendered still in the bundled `previews/` folder (the Angle wheels), when the catalog has one.
+    public var preview: String?
     public var id: String { value ?? "auto" }
 
-    public init(value: String?, name: String, caption: String = "", render: String? = nil) {
+    public init(value: String?, name: String, caption: String = "", render: String? = nil, preview: String? = nil) {
+        self.preview = preview
         self.value = value
         self.name = name
         self.caption = caption
@@ -306,7 +309,7 @@ public enum Wheel {
 /// The wheels of the Camera picker (Setup and Angle): Auto first, then only the visible options.
 public enum ComposerWheels {
     static func options(_ list: [SuiteOption], render: String? = nil) -> [WheelItem] {
-        [.auto()] + ComposerCatalog.visible(list).map { WheelItem(value: $0.id, name: $0.label, caption: $0.description, render: $0.render ?? render) }
+        [.auto()] + ComposerCatalog.visible(list).map { WheelItem(value: $0.id, name: $0.label, caption: $0.description, render: $0.render ?? render, preview: $0.preview?.poster) }
     }
 
     public static func cameras(_ c: CameraCatalog) -> [WheelItem] { options(c.bodies) }
@@ -389,17 +392,50 @@ public enum ComposerMoves {
 /// A picker tile's preview: a still (a bundled render) now, a short muted loop later. Swapping the still for a loop is only
 /// a data change: set `video`; the still stays the fallback.
 public struct PickerPreview: Hashable, Sendable {
+    /// A bundled hardware render (`hardware/<name>.webp`).
     public var still: String?
+    /// A loop in the bundled `previews/` folder ("moves/dolly_in.mp4"), or a URL.
     public var video: String?
-    public init(still: String?, video: String? = nil) {
+    /// The preview's own still in `previews/` ("moves/dolly_in.jpg"): shown first, and the fallback; wins over `still`.
+    public var poster: String?
+    public init(still: String?, video: String? = nil, poster: String? = nil) {
         self.still = still
         self.video = video
+        self.poster = poster
     }
 
-    /// Moves share one neutral still (the same subject in every clip); the tile draws the move's arrow over it.
+    /// The tile has its own rendered preview (no drawn arrow needed).
+    public var hasRender: Bool { poster != nil || video != nil }
+
+    /// Moves without a preview share one neutral still (the same subject in every clip); the tile draws the move's arrow.
     public static let neutralMoveStill = "light-01-soft-cross"
-    public static func move(_ m: SuiteMoveOption) -> PickerPreview { PickerPreview(still: neutralMoveStill) }
-    public static func option(_ o: SuiteOption) -> PickerPreview { PickerPreview(still: o.render) }
+    public static func move(_ m: SuiteMoveOption) -> PickerPreview {
+        guard let p = m.preview, !p.poster.isEmpty || p.video != nil else { return PickerPreview(still: neutralMoveStill) }
+        return PickerPreview(still: neutralMoveStill, video: p.video, poster: p.poster.isEmpty ? nil : p.poster)
+    }
+    public static func option(_ o: SuiteOption) -> PickerPreview {
+        PickerPreview(still: o.render, video: o.preview?.video, poster: o.preview.flatMap { $0.poster.isEmpty ? nil : $0.poster })
+    }
+    /// An Auto tile with the catalog's preview (Lighting), else nil (the plain Auto art).
+    public static func auto(_ p: SuitePreview?) -> PickerPreview? {
+        guard let p, !p.poster.isEmpty else { return nil }
+        return PickerPreview(still: nil, video: p.video, poster: p.poster)
+    }
+
+    /// Where a `previews/` path lives in the app bundle: its subdirectory, file name and extension
+    /// ("moves/dolly_in.mp4" → previews/moves, dolly_in, mp4). nil for URLs and empty paths.
+    public static func bundled(_ path: String?, defaultExtension: String = "jpg") -> (subdirectory: String, name: String, ext: String)? {
+        guard var p = path?.trimmingCharacters(in: .whitespaces), !p.isEmpty, !p.contains("://"), !p.hasPrefix("file:") else { return nil }
+        while p.hasPrefix("/") { p.removeFirst() }
+        if p.hasPrefix("previews/") { p.removeFirst("previews/".count) }
+        let ns = p as NSString
+        let dir = ns.deletingLastPathComponent
+        let file = ns.lastPathComponent as NSString
+        let ext = file.pathExtension.isEmpty ? defaultExtension : file.pathExtension
+        let name = file.deletingPathExtension
+        guard !name.isEmpty else { return nil }
+        return (dir.isEmpty ? "previews" : "previews/\(dir)", name, ext)
+    }
 }
 
 // MARK: Bottom bar

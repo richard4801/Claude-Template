@@ -272,10 +272,13 @@ struct PickerOptionTile: View {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(spacing: 0) {
                     ZStack(alignment: .topLeading) {
-                        if auto {
+                        if auto, let p = preview, p.hasRender {
+                            // The Auto tile's own still (Lighting).
+                            PreviewView(preview: p, fallback: name)
+                        } else if auto {
                             LinearGradient(colors: [Color(hex: 0x1B1D20), Color(hex: 0x141518)], startPoint: .top, endPoint: .bottom)
                                 .overlay(Image(systemName: "sparkles").font(.system(size: 22, weight: .light)).foregroundStyle(t.muted))
-                        } else if let p = preview, p.still != nil || p.video != nil {
+                        } else if let p = preview, p.still != nil || p.hasRender {
                             PreviewView(preview: p, fallback: name)
                         } else {
                             // Style cards: big type until their stills exist.

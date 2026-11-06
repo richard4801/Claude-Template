@@ -1317,7 +1317,10 @@
     "id": "natural",
     "label": "Natural",
     "description": "Available light, as it is",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "lighting/natural.jpg"
+    }
    },
    {
     "id": "window",
@@ -1326,7 +1329,10 @@
     "render": "light-04-window",
     "name": "Window",
     "caption": "Soft daylight through sheer · natural & calm",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "lighting/window.jpg"
+    }
    },
    {
     "id": "soft_cross",
@@ -1335,7 +1341,10 @@
     "render": "light-01-soft-cross",
     "name": "Soft Cross",
     "caption": "Two softboxes crossing · even, flattering",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "lighting/soft_cross.jpg"
+    }
    },
    {
     "id": "contre_jour",
@@ -1344,7 +1353,10 @@
     "render": "light-02-contre-jour",
     "name": "Contre-jour",
     "caption": "Hard backlight through haze · rim & glow",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "lighting/contre_jour.jpg"
+    }
    },
    {
     "id": "overhead",
@@ -1353,7 +1365,10 @@
     "render": "light-03-overhead",
     "name": "Overhead Fall",
     "caption": "Butterfly silk overhead · beauty top-light",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "lighting/overhead.jpg"
+    }
    },
    {
     "id": "practicals",
@@ -1362,25 +1377,37 @@
     "render": "light-05-practicals",
     "name": "Practicals",
     "caption": "Lamps, neon, bulbs in shot · night mood",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "lighting/practicals.jpg"
+    }
    },
    {
     "id": "silhouette",
     "label": "Silhouette",
     "description": "Subject dark against bright",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "lighting/silhouette.jpg"
+    }
    },
    {
     "id": "golden_hour",
     "label": "Golden hour",
     "description": "Low warm sun",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "lighting/golden_hour.jpg"
+    }
    },
    {
     "id": "blue_hour",
     "label": "Blue hour",
     "description": "Cool dusk ambience",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "lighting/blue_hour.jpg"
+    }
    },
    {
     "id": "ring_light",
@@ -1389,49 +1416,73 @@
     "render": "light-06-ring-creator",
     "name": "Creator Ring",
     "caption": "Ring light + RGB tube · UGC talking head",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "lighting/ring_light.jpg"
+    }
    },
    {
     "id": "studio_3pt",
     "label": "Studio three-point",
     "description": "Key, fill and rim",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "lighting/studio_3pt.jpg"
+    }
    },
    {
     "id": "neon",
     "label": "Neon night",
     "description": "Coloured neon spill",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "lighting/neon.jpg"
+    }
    },
    {
     "id": "harsh_sun",
     "label": "Harsh noon sun",
     "description": "Hard shadows, bright",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "lighting/harsh_sun.jpg"
+    }
    },
    {
     "id": "overcast",
     "label": "Overcast",
     "description": "Flat soft daylight",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "lighting/overcast.jpg"
+    }
    },
    {
     "id": "candle",
     "label": "Candle / firelight",
     "description": "Warm flicker",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "lighting/candle.jpg"
+    }
    },
    {
     "id": "moonlight",
     "label": "Moonlight",
     "description": "Cool low-key night",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "lighting/moonlight.jpg"
+    }
    },
    {
     "id": "flash",
     "label": "On-camera flash",
     "description": "Party flash, hard and direct",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "lighting/flash.jpg"
+    }
    }
   ],
   "palettes": [
@@ -1900,7 +1951,12 @@
     "category": "static",
     "group": "ugc",
     "editorBetter": false,
-    "talkSafe": true
+    "talkSafe": true,
+    "preview": {
+     "video": "moves/static.mp4",
+     "poster": "moves/static.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "micro_push",
@@ -1909,7 +1965,12 @@
     "category": "push",
     "group": "ugc",
     "editorBetter": false,
-    "talkSafe": true
+    "talkSafe": true,
+    "preview": {
+     "video": "moves/micro_push.mp4",
+     "poster": "moves/micro_push.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "handheld",
@@ -1918,7 +1979,12 @@
     "category": "follow",
     "group": "ugc",
     "editorBetter": false,
-    "talkSafe": true
+    "talkSafe": true,
+    "preview": {
+     "video": "moves/handheld.mp4",
+     "poster": "moves/handheld.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "selfie",
@@ -1927,7 +1993,12 @@
     "category": "follow",
     "group": "ugc",
     "editorBetter": false,
-    "talkSafe": true
+    "talkSafe": true,
+    "preview": {
+     "video": "moves/selfie.mp4",
+     "poster": "moves/selfie.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "dolly_in",
@@ -1936,7 +2007,12 @@
     "category": "push",
     "group": "push",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/dolly_in.mp4",
+     "poster": "moves/dolly_in.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "dolly_out",
@@ -1945,7 +2021,12 @@
     "category": "push",
     "group": "push",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/dolly_out.mp4",
+     "poster": "moves/dolly_out.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "truck_left",
@@ -1954,7 +2035,12 @@
     "category": "lateral",
     "group": "pan",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/truck_left.mp4",
+     "poster": "moves/truck_left.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "truck_right",
@@ -1963,7 +2049,12 @@
     "category": "lateral",
     "group": "pan",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/truck_right.mp4",
+     "poster": "moves/truck_right.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "pan_left",
@@ -1972,7 +2063,12 @@
     "category": "rotate",
     "group": "pan",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/pan_left.mp4",
+     "poster": "moves/pan_left.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "pan_right",
@@ -1981,7 +2077,12 @@
     "category": "rotate",
     "group": "pan",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/pan_right.mp4",
+     "poster": "moves/pan_right.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "tilt_up",
@@ -1990,7 +2091,12 @@
     "category": "rotate",
     "group": "pan",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/tilt_up.mp4",
+     "poster": "moves/tilt_up.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "tilt_down",
@@ -1999,7 +2105,12 @@
     "category": "rotate",
     "group": "pan",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/tilt_down.mp4",
+     "poster": "moves/tilt_down.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "orbit_left",
@@ -2008,7 +2119,12 @@
     "category": "rotate",
     "group": "orbit",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/orbit_left.mp4",
+     "poster": "moves/orbit_left.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "orbit_right",
@@ -2017,7 +2133,12 @@
     "category": "rotate",
     "group": "orbit",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/orbit_right.mp4",
+     "poster": "moves/orbit_right.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "orbit_360",
@@ -2026,7 +2147,12 @@
     "category": "rotate",
     "group": "orbit",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/orbit_360.mp4",
+     "poster": "moves/orbit_360.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "crane_up",
@@ -2035,7 +2161,12 @@
     "category": "vertical",
     "group": "crane",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/crane_up.mp4",
+     "poster": "moves/crane_up.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "crane_down",
@@ -2044,7 +2175,12 @@
     "category": "vertical",
     "group": "crane",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/crane_down.mp4",
+     "poster": "moves/crane_down.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "crane_overhead",
@@ -2053,7 +2189,12 @@
     "category": "vertical",
     "group": "crane",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/crane_overhead.mp4",
+     "poster": "moves/crane_overhead.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "pedestal_up",
@@ -2062,7 +2203,12 @@
     "category": "vertical",
     "group": "crane",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/pedestal_up.mp4",
+     "poster": "moves/pedestal_up.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "pedestal_down",
@@ -2071,7 +2217,12 @@
     "category": "vertical",
     "group": "crane",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/pedestal_down.mp4",
+     "poster": "moves/pedestal_down.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "zoom_in",
@@ -2080,7 +2231,12 @@
     "category": "zoom",
     "group": "push",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/zoom_in.mp4",
+     "poster": "moves/zoom_in.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "zoom_out",
@@ -2089,7 +2245,12 @@
     "category": "zoom",
     "group": "push",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/zoom_out.mp4",
+     "poster": "moves/zoom_out.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "crash_zoom",
@@ -2098,7 +2259,12 @@
     "category": "zoom",
     "group": "push",
     "editorBetter": true,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/crash_zoom.mp4",
+     "poster": "moves/crash_zoom.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "dolly_zoom",
@@ -2107,7 +2273,12 @@
     "category": "zoom",
     "group": "push",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/dolly_zoom.mp4",
+     "poster": "moves/dolly_zoom.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "rack_focus",
@@ -2116,7 +2287,12 @@
     "category": "specialty",
     "group": "special",
     "editorBetter": false,
-    "talkSafe": true
+    "talkSafe": true,
+    "preview": {
+     "video": "moves/rack_focus.mp4",
+     "poster": "moves/rack_focus.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "follow",
@@ -2125,7 +2301,12 @@
     "category": "follow",
     "group": "follow",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/follow.mp4",
+     "poster": "moves/follow.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "track_side",
@@ -2134,7 +2315,12 @@
     "category": "follow",
     "group": "follow",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/track_side.mp4",
+     "poster": "moves/track_side.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "lead",
@@ -2143,7 +2329,12 @@
     "category": "follow",
     "group": "follow",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/lead.mp4",
+     "poster": "moves/lead.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "steadicam",
@@ -2152,7 +2343,12 @@
     "category": "follow",
     "group": "follow",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/steadicam.mp4",
+     "poster": "moves/steadicam.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "snorricam",
@@ -2161,7 +2357,12 @@
     "category": "specialty",
     "group": "special",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/snorricam.mp4",
+     "poster": "moves/snorricam.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "fpv",
@@ -2170,7 +2371,12 @@
     "category": "aerial",
     "group": "aerial",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/fpv.mp4",
+     "poster": "moves/fpv.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "drone_reveal",
@@ -2179,7 +2385,12 @@
     "category": "aerial",
     "group": "aerial",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/drone_reveal.mp4",
+     "poster": "moves/drone_reveal.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "flyover",
@@ -2188,7 +2399,12 @@
     "category": "aerial",
     "group": "aerial",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/flyover.mp4",
+     "poster": "moves/flyover.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "whip_pan",
@@ -2197,7 +2413,12 @@
     "category": "rotate",
     "group": "pan",
     "editorBetter": true,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/whip_pan.mp4",
+     "poster": "moves/whip_pan.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "dutch_push",
@@ -2206,7 +2427,12 @@
     "category": "push",
     "group": "push",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/dutch_push.mp4",
+     "poster": "moves/dutch_push.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "through_object",
@@ -2215,7 +2441,12 @@
     "category": "specialty",
     "group": "special",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/through_object.mp4",
+     "poster": "moves/through_object.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "top_down_spin",
@@ -2224,7 +2455,12 @@
     "category": "rotate",
     "group": "orbit",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/top_down_spin.mp4",
+     "poster": "moves/top_down_spin.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "bullet_time",
@@ -2233,7 +2469,12 @@
     "category": "time",
     "group": "orbit",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/bullet_time.mp4",
+     "poster": "moves/bullet_time.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "hyperlapse",
@@ -2242,7 +2483,12 @@
     "category": "time",
     "group": "special",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/hyperlapse.mp4",
+     "poster": "moves/hyperlapse.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "handheld_run",
@@ -2251,7 +2497,12 @@
     "category": "follow",
     "group": "follow",
     "editorBetter": false,
-    "talkSafe": false
+    "talkSafe": false,
+    "preview": {
+     "video": "moves/handheld_run.mp4",
+     "poster": "moves/handheld_run.jpg",
+     "seconds": 2.5
+    }
    },
    {
     "id": "motion_blur",
@@ -2301,6 +2552,11 @@
     "label": "Special"
    }
   ],
+  "autoPreviews": {
+   "lighting": {
+    "poster": "lighting/auto.jpg"
+   }
+  },
   "library": [
    {
     "id": "static",
@@ -2420,49 +2676,73 @@
     "id": "eye",
     "label": "Eye level",
     "description": "Neutral",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "angles/eye.jpg"
+    }
    },
    {
     "id": "shoulder",
     "label": "Shoulder level",
     "description": "Slightly below eye",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "angles/shoulder.jpg"
+    }
    },
    {
     "id": "low",
     "label": "Low angle",
     "description": "Heroic, looking up",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "angles/low.jpg"
+    }
    },
    {
     "id": "high",
     "label": "High angle",
     "description": "Looking down",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "angles/high.jpg"
+    }
    },
    {
     "id": "overhead",
     "label": "Overhead",
     "description": "Bird’s-eye",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "angles/overhead.jpg"
+    }
    },
    {
     "id": "worm",
     "label": "Worm’s-eye",
     "description": "From the ground up",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "angles/worm.jpg"
+    }
    },
    {
     "id": "ground",
     "label": "Ground level",
     "description": "Camera on the floor",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "angles/ground.jpg"
+    }
    },
    {
     "id": "hip",
     "label": "Hip level",
     "description": "Western-style",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "angles/hip.jpg"
+    }
    }
   ],
   "shotSizes": [
@@ -2470,73 +2750,109 @@
     "id": "els",
     "label": "Extreme wide",
     "description": "Tiny in a huge space",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "angles/els.jpg"
+    }
    },
    {
     "id": "ls",
     "label": "Wide",
     "description": "Whole body and place",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "angles/ls.jpg"
+    }
    },
    {
     "id": "full",
     "label": "Full body",
     "description": "Head to toe",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "angles/full.jpg"
+    }
    },
    {
     "id": "cowboy",
     "label": "Cowboy",
     "description": "Mid-thigh up",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "angles/cowboy.jpg"
+    }
    },
    {
     "id": "ms",
     "label": "Medium",
     "description": "Waist up",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "angles/ms.jpg"
+    }
    },
    {
     "id": "mcu",
     "label": "Medium close-up",
     "description": "Chest up",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "angles/mcu.jpg"
+    }
    },
    {
     "id": "cu",
     "label": "Close-up",
     "description": "Face",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "angles/cu.jpg"
+    }
    },
    {
     "id": "ecu",
     "label": "Extreme close-up",
     "description": "Eyes or a detail",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "angles/ecu.jpg"
+    }
    },
    {
     "id": "insert",
     "label": "Insert",
     "description": "An object or detail",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "angles/insert.jpg"
+    }
    },
    {
     "id": "ots",
     "label": "Over the shoulder",
     "description": "From behind another person",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "angles/ots.jpg"
+    }
    },
    {
     "id": "pov",
     "label": "POV",
     "description": "Through her eyes",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "angles/pov.jpg"
+    }
    },
    {
     "id": "two_shot",
     "label": "Two-shot",
     "description": "Two people in frame",
-    "visible": true
+    "visible": true,
+    "preview": {
+     "poster": "angles/two_shot.jpg"
+    }
    }
   ],
   "genres": [

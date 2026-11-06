@@ -22,9 +22,12 @@ public struct SuiteOption: Codable, Hashable, Sendable, Identifiable {
     /// Palettes and film stocks: 5 swatch colours (darkest first) and the LUT the take is graded with.
     public var swatches: [String]
     public var lut: String?
+    /// Lighting and angles: the composer tile's still (a file in the bundled `previews/` folder).
+    public var preview: SuitePreview?
 
     public init(id: String, label: String, description: String = "", render: String? = nil, name: String? = nil, caption: String? = nil,
-                visible: Bool = true, mergedInto: String? = nil, swatches: [String] = [], lut: String? = nil) {
+                visible: Bool = true, mergedInto: String? = nil, swatches: [String] = [], lut: String? = nil, preview: SuitePreview? = nil) {
+        self.preview = preview
         self.id = id
         self.label = label
         self.description = description
@@ -37,7 +40,7 @@ public struct SuiteOption: Codable, Hashable, Sendable, Identifiable {
         self.lut = lut
     }
 
-    enum CodingKeys: String, CodingKey { case id, label, description, render, name, caption, visible, mergedInto, swatches, lut }
+    enum CodingKeys: String, CodingKey { case id, label, description, render, name, caption, visible, mergedInto, swatches, lut, preview }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -50,6 +53,7 @@ public struct SuiteOption: Codable, Hashable, Sendable, Identifiable {
         mergedInto = c.o(.mergedInto)
         swatches = c.v(.swatches, [])
         lut = c.o(.lut)
+        preview = c.o(.preview)
     }
 
     /// The hardware name when there is one ("Super 35 Digital"), else the label.
@@ -66,8 +70,12 @@ public struct SuiteMoveOption: Codable, Hashable, Sendable, Identifiable {
     public var talkSafe: Bool
     /// The composer's Movement chip it sits under (see `CameraCatalog.moveGroups`).
     public var group: String
+    /// The Movement tile's loop and poster (files in the bundled `previews/` folder); nil = the drawn arrow.
+    public var preview: SuitePreview?
 
-    public init(id: String, label: String, description: String = "", category: String, editorBetter: Bool = false, talkSafe: Bool = false, group: String = "") {
+    public init(id: String, label: String, description: String = "", category: String, editorBetter: Bool = false, talkSafe: Bool = false, group: String = "",
+                preview: SuitePreview? = nil) {
+        self.preview = preview
         self.id = id
         self.label = label
         self.description = description
@@ -77,7 +85,7 @@ public struct SuiteMoveOption: Codable, Hashable, Sendable, Identifiable {
         self.group = group
     }
 
-    enum CodingKeys: String, CodingKey { case id, label, description, category, editorBetter, talkSafe, group }
+    enum CodingKeys: String, CodingKey { case id, label, description, category, editorBetter, talkSafe, group, preview }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -87,7 +95,34 @@ public struct SuiteMoveOption: Codable, Hashable, Sendable, Identifiable {
         editorBetter = c.v(.editorBetter, false)
         talkSafe = c.v(.talkSafe, false)
         group = c.v(.group, "")
+        preview = c.o(.preview)
     }
+}
+
+/// A composer preview: a poster still and, for moves, a short muted loop. Paths are relative to the bundled `previews/`
+/// folder ("moves/dolly_in.mp4", "lighting/window.jpg").
+public struct SuitePreview: Codable, Hashable, Sendable {
+    public var video: String?
+    public var poster: String
+    public var seconds: Double?
+    public init(video: String? = nil, poster: String, seconds: Double? = nil) {
+        self.video = video
+        self.poster = poster
+        self.seconds = seconds
+    }
+    enum CodingKeys: String, CodingKey { case video, poster, seconds }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        video = c.o(.video)
+        poster = c.v(.poster, "")
+        seconds = c.o(.seconds)
+    }
+}
+
+/// `camera.autoPreviews`: the Auto tile's preview per picker.
+public struct SuiteAutoPreviews: Codable, Hashable, Sendable {
+    public var lighting: SuitePreview?
+    public init(lighting: SuitePreview? = nil) { self.lighting = lighting }
 }
 
 /// The composer's focal wheel step (`visible` = one of the six shown to members).
@@ -243,6 +278,8 @@ public struct CameraCatalog: Codable, Hashable, Sendable {
     public var moves: [SuiteMoveOption]
     public var library: [SuiteLibraryMove]
     public var moveGroups: [SuiteMoveGroup]
+    /// The Auto tiles' previews (Lighting today).
+    public var autoPreviews: SuiteAutoPreviews
     public var heights: [SuiteOption]
     public var shotSizes: [SuiteOption]
     public var genres: [SuiteOption]
@@ -254,13 +291,13 @@ public struct CameraCatalog: Codable, Hashable, Sendable {
     public var limits: CameraLimits
 
     public init() {
-        presets = []; bodies = []; lenses = []; focalLengths = []; focals = []; moveGroups = []; apertures = []; looks = []; frameRates = []; shutters = []
+        presets = []; bodies = []; lenses = []; focalLengths = []; focals = []; moveGroups = []; autoPreviews = SuiteAutoPreviews(); apertures = []; looks = []; frameRates = []; shutters = []
         lighting = []; palettes = []; optics = []; grips = []; moves = []; library = []; heights = []; shotSizes = []
         genres = []; eras = []; tempos = []; ugcFormats = []; emotions = []; limits = CameraLimits()
     }
 
     enum CodingKeys: String, CodingKey {
-        case presets, bodies, lenses, focalLengths, focals, moveGroups, apertures, looks, frameRates, shutters, lighting, palettes, optics, grips, moves, library
+        case presets, bodies, lenses, focalLengths, focals, moveGroups, autoPreviews, apertures, looks, frameRates, shutters, lighting, palettes, optics, grips, moves, library
         case heights, shotSizes, genres, eras, tempos, ugcFormats, emotions, limits
     }
     public init(from d: Decoder) throws {
@@ -271,6 +308,7 @@ public struct CameraCatalog: Codable, Hashable, Sendable {
         focalLengths = c.v(.focalLengths, [])
         focals = c.v(.focals, [])
         moveGroups = c.v(.moveGroups, [])
+        autoPreviews = c.v(.autoPreviews, SuiteAutoPreviews())
         apertures = c.v(.apertures, [])
         looks = c.v(.looks, [])
         frameRates = c.v(.frameRates, [])
