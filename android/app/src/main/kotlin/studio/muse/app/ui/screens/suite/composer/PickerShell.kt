@@ -73,7 +73,9 @@ data class SheetTab(val key: String, val label: String, val set: Boolean = false
 @Composable
 fun BoxScope.PickerShell(
     title: String, wide: Boolean, onClose: () -> Unit, tabs: List<SheetTab> = emptyList(), tab: String = "", onTab: (String) -> Unit = {},
-    onReset: (() -> Unit)? = null, heightFraction: Float = .85f, footer: (@Composable ColumnScope.() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit,
+    onReset: (() -> Unit)? = null, heightFraction: Float = .85f, footer: (@Composable ColumnScope.() -> Unit)? = null,
+    /** A dim note after the title ("Camera · Setup", as in the drum prototype). */
+    titleNote: String? = null, content: @Composable ColumnScope.() -> Unit,
 ) {
     BackHandler(onBack = onClose)
     // The dimmed page: a tap outside closes the picker.
@@ -83,9 +85,9 @@ fun BoxScope.PickerShell(
         val m = muse
         if (wide) {
             Box(Modifier.matchParentSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                Column(Modifier.widthIn(max = 860.dp).fillMaxWidth().fillMaxHeight(.82f).heightIn(max = 600.dp).clip(RoundedCornerShape(18.dp)).background(m.t.bg)
+                Column(Modifier.widthIn(max = 860.dp).fillMaxWidth().heightIn(max = 800.dp).fillMaxHeight().clip(RoundedCornerShape(18.dp)).background(m.t.bg)
                     .border(1.dp, m.t.line, RoundedCornerShape(18.dp)).clickable(remember { MutableInteractionSource() }, null) {}) {
-                    Header(title, onReset, onClose, Modifier.padding(start = 24.dp, end = 14.dp).height(62.dp))
+                    Header(title, titleNote, onReset, onClose, Modifier.padding(start = 24.dp, end = 14.dp).height(62.dp))
                     Box(Modifier.fillMaxWidth().height(1.dp).background(m.t.line))
                     Row(Modifier.weight(1f)) {
                         if (tabs.isNotEmpty()) {
@@ -107,7 +109,7 @@ fun BoxScope.PickerShell(
                 Box(Modifier.fillMaxWidth().padding(top = 9.dp, bottom = 2.dp), contentAlignment = Alignment.Center) {
                     Box(Modifier.size(40.dp, 4.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF3A3F43)))
                 }
-                Header(title, onReset, onClose, Modifier.padding(start = 20.dp, end = 14.dp).height(56.dp))
+                Header(title, titleNote, onReset, onClose, Modifier.padding(start = 20.dp, end = 14.dp).height(56.dp))
                 if (tabs.isNotEmpty()) Segmented(tabs, tab, onTab, Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
                 Column(Modifier.weight(1f).padding(top = 8.dp)) { content() }
                 footer?.let { f -> Column(Modifier.fillMaxWidth().background(m.t.surface).navigationBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp)) { f() } }
@@ -118,12 +120,15 @@ fun BoxScope.PickerShell(
 }
 
 @Composable
-private fun Header(title: String, onReset: (() -> Unit)?, onClose: () -> Unit, modifier: Modifier) {
+private fun Header(title: String, note: String?, onReset: (() -> Unit)?, onClose: () -> Unit, modifier: Modifier) {
     val m = muse
     val bag = MuseRoles.bag
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         // Workstream 4 (design direction): sentence-case title on the type scale, no caps tracking.
-        T(title, m.scale.title, bag.ink, Modifier.weight(1f), maxLines = 1)
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.Bottom) {
+            T(title, m.scale.title, bag.ink, maxLines = 1)
+            if (note != null) T(" · $note", m.scale.title.copy(fontWeight = FontWeight.Normal), bag.ink2, maxLines = 1)
+        }
         if (onReset != null) {
             Box(Modifier.heightIn(min = 48.dp).press(onClick = onReset).semantics { contentDescription = "Reset all"; role = Role.Button }, contentAlignment = Alignment.Center) {
                 Row(Modifier.padding(horizontal = MuseSpace.s2), verticalAlignment = Alignment.CenterVertically) {

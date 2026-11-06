@@ -116,7 +116,8 @@ fun BoxScope.ComposerSheetHost(sheet: ComposerSheet, x: SheetContext) {
         SheetKind.CAMERA -> {
             val tabs = cameraTabs(s, x.owner, d.directed != null).filter { d.tool != ComposerTool.PHOTO || it.key in PhotoComposer.CAMERA_TABS } // Photo tool (workstream 3): Setup and Angle only
             val tab = sheet.tab.takeIf { t -> tabs.any { it.key == t } } ?: "setup"
-            PickerShell("Camera", x.wide, x.close, tabs, tab, x.setTab, onReset = { set { it.reset(ComposerChip.CAMERA) }; x.update { it.copy(directed = null) } }) {
+            PickerShell("Camera", x.wide, x.close, tabs, tab, x.setTab, onReset = { set { it.reset(ComposerChip.CAMERA) }; x.update { it.copy(directed = null) } },
+                titleNote = tabs.firstOrNull { it.key == tab }?.label) {
                 CameraPickerBody(tab, d, cam, x.wide, x.owner, x.update, x.onMove)
             }
         }

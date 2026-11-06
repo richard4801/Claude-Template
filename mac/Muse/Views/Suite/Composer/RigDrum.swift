@@ -3,11 +3,23 @@ import QuartzCore
 import MuseCore
 import SwiftUI
 
-// The drum wheel for every hardware choice in the rig (design/drum-wheels-prototype.html, styled like
-// plans/design-direction/picker-b.png). The maths lives in MuseCore (Suite/RigDrumMath.swift) and is tested there; this
-// file only draws the drum and turns the pointer, trackpad and keyboard into positions.
+// The drum wheel for every hardware choice in the rig: a faithful port of the owner-approved prototype
+// (design/drum-wheels-prototype.html), the same numbers as the Android port (RigDrum.kt): unboxed hardware renders with a
+// soft vignette, the focal wedge, the amber iris and the dashed "A" for Auto, the same 3D tilt, scale and fade, 84 pt rows
+// (112 when wide) and one band across all four drums. The maths lives in MuseCore (Suite/RigDrumMath.swift) and is tested
+// there; this file only draws the drum and turns the pointer, trackpad and keyboard into positions.
 
-/// One vertical drum: its label above, five rows with the pick centred in one selection band, and the pick's name and
+/// The prototype's camera-bag colours (its :root): the panel matches the renders' own backdrop so they sit unboxed.
+enum DrumBag {
+    static let panel = Color(hex: 0x141414)
+    static let band = Color.white.opacity(0.055)
+    static let hair = Color.white.opacity(0.14)
+    static let ink = Color(hex: 0xECE8E1)
+    static let dim = Color(hex: 0x8F8A82)
+    static let amber = Color(hex: 0xE7A54A)
+}
+
+/// One vertical drum: its label above, five rows with the pick centred in the selection band, and the pick's name and
 /// caption under it.
 ///
 /// ```swift
@@ -16,19 +28,20 @@ import SwiftUI
 ///     settings.body = item.value          // nil is Auto
 /// }
 /// ```
-/// - `items`: Auto (value nil) is drawn as the aperture mark on a disc; others draw their `render` (`hardware/<render>`)
-///   or `preview` poster, or, with `face: .focal` / `.aperture`, their number ("50", "2.8").
+/// - `items`: Auto (value nil) is the dashed circle with an "A"; others draw their `render` (`hardware/<render>`) or
+///   `preview` poster unboxed, or, with `face: .focal` / `.aperture`, the field-of-view wedge / the iris.
 /// - `selected`: the index in `items`. Change it from outside (Reset all, a preset) and the drum turns to it.
 /// - `onSelect` runs once when the drum comes to rest on a different item, never for the items it passes on the way.
 /// - Drums with 5 or more items loop; shorter ones stop and rubber-band at the ends.
-/// - The camera bag is always dark: put drums on `RigDrum.Bag.raised` (the drum draws no panel of its own). Several
-///   drums side by side with no spacing make one continuous selection band, as in Camera → Setup.
+/// - `rowHeight`: one detent, `RigDrum.row(wide:)` (84, or 112 when the drums are 720 pt wide or more).
+/// - `band`: draws the selection band for a drum on its own; `RigDrums` draws one band across all of them instead
+///   (pass `band: false` there).
 struct RigDrum: View {
     /// How an item that isn't Auto is drawn.
     enum Face { case render, focal, aperture }
 
-    /// The camera bag's palette (design-direction §9, design/direction/render.py BAG), the same in every theme.
     /// The camera bag's colours: the shared design tokens' `Roles.bag`, dark in every theme (design-direction §9).
+    /// Kept for older call sites; the drums themselves draw with `DrumBag`.
     enum Bag {
         static var raised: Color { Roles.bag.raised }
         static var field: Color { Roles.bag.field }
@@ -47,18 +60,29 @@ struct RigDrum: View {
     let items: [WheelItem]
     let selected: Int
     let face: Face
+    let rowHeight: CGFloat
+    let band: Bool
     let onSelect: (WheelItem) -> Void
 
-    /// One detent (row) and the picture inside it.
-    static let rowHeight: CGFloat = 68
-    static let picture: CGFloat = 64
+    /// Visible rows.
     static let rows: CGFloat = 5
+    /// The label's line and the gaps around the drum (the prototype's .col gap).
+    static let labelHeight: CGFloat = 18
+    static let gap: CGFloat = 10
+    /// From this drums-area width up the rows are 112 pt (the prototype's 720 px breakpoint).
+    static let wideWidth: CGFloat = 720
 
-    init(label: String, items: [WheelItem], selected: Int, face: Face = .render, onSelect: @escaping (WheelItem) -> Void) {
+    /// One detent: 84 pt, 112 when wide (the prototype's --item).
+    static func row(wide: Bool) -> CGFloat { wide ? 112 : 84 }
+
+    init(label: String, items: [WheelItem], selected: Int, face: Face = .render, rowHeight: CGFloat = 84, band: Bool = true,
+         onSelect: @escaping (WheelItem) -> Void) {
         self.label = label
         self.items = items
         self.selected = selected
         self.face = face
+        self.rowHeight = rowHeight
+        self.band = band
         self.onSelect = onSelect
         let n = items.count
         let start = n > 0 ? min(max(selected, 0), n - 1) : 0
@@ -68,19 +92,18 @@ struct RigDrum: View {
     private var count: Int { items.count }
     private var near: Int { RigDrumMath.nearest(model.pos, count: count, loop: model.loop) }
     private var current: WheelItem? { items.indices.contains(near) ? items[near] : nil }
+    private var wide: Bool { rowHeight > 100 }
 
     var body: some View {
-        VStack(spacing: 8) {
-            Text(label).font(t.body(13)).foregroundStyle(Bag.ink2).lineLimit(1)
+        VStack(spacing: 0) {
+            Text(label)
+                .font(Fonts.font(t.scale.textFamily, wide ? 13 : 12, .regular))
+                .foregroundStyle(DrumBag.dim)
+                .lineLimit(1)
+                .frame(height: Self.labelHeight)
             drum
-            VStack(spacing: 2) {
-                Text(current?.name ?? " ").font(t.body(14, .medium)).foregroundStyle(Bag.ink)
-                    .lineLimit(1).minimumScaleFactor(0.8)
-                Text(current?.caption ?? " ").font(t.body(13)).foregroundStyle(Bag.ink2)
-                    .lineLimit(2).multilineTextAlignment(.center)
-                    .frame(height: 36, alignment: .top)
-            }
-            .padding(.horizontal, 6)
+                .padding(.vertical, Self.gap)
+            nameBlock
         }
         .frame(maxWidth: .infinity)
         .onAppear {
@@ -95,38 +118,61 @@ struct RigDrum: View {
         .onChange(of: model.detent) { _, _ in tick() }
     }
 
-    private var drum: some View {
-        let h = Self.rowHeight
-        let loop = model.loop
-        let pos = model.pos
-        let band = near
-        return ZStack {
-            // The one selection mark: a hairline band with a faint field tint.
-            Rectangle().fill(Bag.field.opacity(0.6))
-                .overlay(alignment: .top) { Rectangle().fill(Bag.hairline).frame(height: 1) }
-                .overlay(alignment: .bottom) { Rectangle().fill(Bag.hairline).frame(height: 1) }
-                .frame(height: h)
-            ForEach(Array(items.indices), id: \.self) { i in
-                let look = RigDrumMath.look(delta: RigDrumMath.delta(item: i, pos: pos, count: count, loop: loop),
-                                            itemHeight: Double(h), selected: i == band)
-                if look.visible {
-                    itemFace(items[i])
-                        .frame(height: h)
-                        .scaleEffect(CGFloat(look.scale))
-                        .rotation3DEffect(.degrees(look.rotationDegrees), axis: (x: 1, y: 0, z: 0), perspective: 0.5)
-                        .colorMultiply(Color(white: look.brightness))
-                        .opacity(look.opacity)
-                        .offset(y: CGFloat(look.y))
-                        .accessibilityHidden(true)
+    /// The name in the band's item and its caption, cross-fading as the drum turns (the prototype's .name).
+    private var nameBlock: some View {
+        let i = near
+        let item = current
+        let caption = item?.caption ?? ""
+        return ZStack(alignment: .top) {
+            VStack(spacing: 3) {
+                Text(item?.name ?? " ")
+                    .font(Fonts.font("Barlow Condensed", wide ? 14.5 : 13, .semibold))
+                    .foregroundStyle(DrumBag.ink)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                if !caption.isEmpty {
+                    Text(caption)
+                        .font(Fonts.font(t.scale.textFamily, wide ? 10.5 : 9.5, .regular))
+                        .foregroundStyle(DrumBag.dim)
+                        .lineLimit(2)
+                        .lineSpacing(1)
+                        .multilineTextAlignment(.center)
                 }
             }
+            .padding(.horizontal, 4)
+            .frame(maxWidth: .infinity)
+            .id(i)
+            .transition(.opacity)
+        }
+        .frame(maxWidth: .infinity, minHeight: 50, alignment: .top)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: i)
+        .accessibilityHidden(true)
+    }
+
+    private var drum: some View {
+        let h = rowHeight
+        let loop = model.loop
+        let pos = model.pos
+        let sel = near
+        let showBand = band
+        return GeometryReader { g in
+            // The prototype's picture box: 96 % of the row high, at most 92 % of the column wide.
+            let box = CGSize(width: min(h * 0.96, g.size.width * 0.92), height: h * 0.96)
+            ZStack {
+                if showBand { DrumBandView(height: h) }
+                ForEach(Array(items.indices), id: \.self) { i in
+                    drumItem(i, pos: pos, loop: loop, selectedIndex: sel, rowHeight: h, box: box)
+                }
+            }
+            .frame(width: g.size.width, height: g.size.height)
         }
         .frame(maxWidth: .infinity)
         .frame(height: h * Self.rows)
         .clipped()
+        // The drum fades into the panel at the top and bottom (the prototype's mask).
         .mask {
-            LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.2),
-                                   .init(color: .black, location: 0.8), .init(color: .clear, location: 1)],
+            LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.22),
+                                   .init(color: .black, location: 0.78), .init(color: .clear, location: 1)],
                            startPoint: .top, endPoint: .bottom)
         }
         .contentShape(Rectangle())
@@ -138,7 +184,8 @@ struct RigDrum: View {
             })
         .onHover { inside in model.hover(inside, itemHeight: Double(h)) }
         .overlay {
-            RoundedRectangle(cornerRadius: 10).strokeBorder(t.accent, lineWidth: 2)
+            // The prototype's focus-visible ring: an amber inset outline.
+            RoundedRectangle(cornerRadius: 12).strokeBorder(DrumBag.amber, lineWidth: 2)
                 .opacity(focused ? 1 : 0)
                 .allowsHitTesting(false)
         }
@@ -160,43 +207,64 @@ struct RigDrum: View {
         }
     }
 
-    @ViewBuilder private func itemFace(_ item: WheelItem) -> some View {
-        let side = Self.picture
+    /// One item on the drum, placed by the prototype's 3D: y = R·sin, translateZ = R(cos − 1) under a 700 pt perspective,
+    /// scale (0.78 + 0.22·cos), opacity cos^2.2, a tilt about the x axis, and dimmed off the band.
+    @ViewBuilder
+    private func drumItem(_ i: Int, pos: Double, loop: Bool, selectedIndex: Int, rowHeight h: CGFloat, box: CGSize) -> some View {
+        let d = RigDrumMath.delta(item: i, pos: pos, count: count, loop: loop)
+        let look = RigDrumMath.look(delta: d, itemHeight: Double(h), selected: i == selectedIndex)
+        if abs(d) <= 2.6 && look.visible {
+            let persp = Self.perspective(delta: d, rowHeight: Double(h))
+            itemFace(items[i], box: box)
+                .scaleEffect(CGFloat(look.scale * persp))
+                .rotation3DEffect(.degrees(look.rotationDegrees), axis: (x: 1, y: 0, z: 0),
+                                  perspective: min(1, max(box.width, box.height) / 700))
+                .colorMultiply(Color(white: look.brightness))
+                .opacity(look.opacity)
+                .offset(y: CGFloat(look.y * persp))
+                .accessibilityHidden(true)
+        }
+    }
+
+    /// 700 / (700 − z) with z = R(cos − 1): the prototype's translateZ under its `perspective: 700px`.
+    static func perspective(delta d: Double, rowHeight h: Double) -> Double {
+        let r = h / (2 * sin(RigDrumMath.stepDegrees * .pi / 360))
+        let z = r * (cos(d * RigDrumMath.stepDegrees * .pi / 180) - 1)
+        return 700 / (700 - z)
+    }
+
+    @ViewBuilder
+    private func itemFace(_ item: WheelItem, box: CGSize) -> some View {
         if item.value == nil {
-            // Auto: the aperture mark on a field disc, the size of a render.
-            ZStack {
-                Circle().fill(Bag.field)
-                Ph("aperture", 26).foregroundStyle(Bag.ink2)
-            }
-            .frame(width: side, height: side)
-        } else if face == .focal || face == .aperture {
-            Text(numeral(item)).font(t.body(26, .semibold)).monospacedDigit().foregroundStyle(Bag.ink)
-                .lineLimit(1).minimumScaleFactor(0.6)
-                .frame(width: side * 1.6, height: side)
-        } else if let render = item.render {
-            HardwareImage(name: render).frame(width: side, height: side).mask { Self.softEdge(side) }
-        } else if let img = PreviewFiles.image(item.preview) {
-            Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
-                .frame(width: side, height: side).clipped().mask { Self.softEdge(side) }
+            Canvas { ctx, size in DrumGlyphs.auto(&ctx, size) }
+                .frame(width: box.width, height: box.height)
+        } else if face == .focal {
+            let mm = Double(item.value ?? "") ?? 50
+            Canvas { ctx, size in DrumGlyphs.focal(&ctx, size, mm: mm) }
+                .frame(width: box.width, height: box.height)
+        } else if face == .aperture {
+            let f = DrumGlyphs.fNumber(item)
+            Canvas { ctx, size in DrumGlyphs.iris(&ctx, size, f: f) }
+                .frame(width: box.width, height: box.height)
+        } else if let img = HardwareRenders.image(item.render) ?? PreviewFiles.image(item.preview) {
+            // Unboxed: aspect-fit, with the prototype's radial mask (solid to 62 % of the closest side, clear at 100 %).
+            Image(nsImage: img)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: box.width, height: box.height)
+                .mask {
+                    RadialGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.62),
+                                           .init(color: .clear, location: 1)],
+                                   center: .center, startRadius: 0, endRadius: min(box.width, box.height) / 2)
+                }
         } else {
-            Text(item.name).font(t.body(14, .medium)).foregroundStyle(Bag.ink)
+            Text(item.name)
+                .font(Fonts.font("Barlow Condensed", wide ? 14.5 : 13, .semibold))
+                .foregroundStyle(DrumBag.ink)
                 .lineLimit(2).multilineTextAlignment(.center).minimumScaleFactor(0.7)
-                .frame(width: side * 1.8, height: side)
+                .frame(width: box.width, height: box.height)
         }
-    }
-
-    /// The renders sit unboxed on the bag: their corners fade out.
-    private static func softEdge(_ side: CGFloat) -> RadialGradient {
-        RadialGradient(stops: [.init(color: .black, location: 0.72), .init(color: .clear, location: 1)],
-                       center: .center, startRadius: 0, endRadius: side * 0.72)
-    }
-
-    /// "50" for 50 mm, "2.8" for f/2.8.
-    private func numeral(_ item: WheelItem) -> String {
-        if face == .aperture {
-            return item.name.hasPrefix("f/") ? String(item.name.dropFirst(2)) : item.name
-        }
-        return item.value ?? item.name
     }
 
     private func commit() {
@@ -210,6 +278,152 @@ struct RigDrum: View {
         guard clickOn else { return }
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
         RigDrumModel.playClick()
+    }
+}
+
+/// The one selection band: a faint fill with hairlines top and bottom.
+struct DrumBandView: View {
+    var height: CGFloat
+    var body: some View {
+        Rectangle().fill(DrumBag.band)
+            .overlay(alignment: .top) { Rectangle().fill(DrumBag.hair).frame(height: 1) }
+            .overlay(alignment: .bottom) { Rectangle().fill(DrumBag.hair).frame(height: 1) }
+            .frame(maxWidth: .infinity)
+            .frame(height: height)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
+/// The rig's hardware drums side by side on the camera-bag panel under one selection band (the prototype's .bag):
+/// four equal columns, no gap. Each drum passes `rowHeight` and `band: false`.
+struct RigDrums<Content: View>: View {
+    var rowHeight: CGFloat
+    @ViewBuilder var content: Content
+
+    static var paddingTop: CGFloat { 14 }
+
+    var body: some View {
+        let bandTop = Self.paddingTop + RigDrum.labelHeight + RigDrum.gap + 2 * rowHeight
+        HStack(alignment: .top, spacing: 0) { content }
+            .padding(.top, Self.paddingTop)
+            .padding(.horizontal, 6)
+            .padding(.bottom, 16)
+            .background {
+                ZStack(alignment: .top) {
+                    RoundedRectangle(cornerRadius: 18).fill(DrumBag.panel)
+                    DrumBandView(height: rowHeight).offset(y: bandTop)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Camera setup wheels")
+    }
+}
+
+/// The prototype's live rig line: an amber tally dot and the four picks ("35mm film  ·  Warm vintage  ·  35 mm  ·  f/2.8").
+struct RigLine: View {
+    @Environment(\.theme) private var t
+    var names: [String]
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ZStack {
+                Circle().fill(RadialGradient(colors: [DrumBag.amber.opacity(0.45), DrumBag.amber.opacity(0)],
+                                             center: .center, startRadius: 0, endRadius: 7))
+                Circle().fill(DrumBag.amber).frame(width: 7, height: 7)
+            }
+            .frame(width: 14, height: 14)
+            line
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Your rig: \(names.joined(separator: ", "))")
+    }
+
+    private var line: Text {
+        let family = t.scale.textFamily
+        var out = Text(verbatim: "")
+        for (i, n) in names.enumerated() {
+            if i > 0 {
+                out = out + Text(verbatim: "  ·  ").font(Fonts.font(family, 13, .regular)).foregroundColor(DrumBag.dim)
+            }
+            out = out + Text(verbatim: n).font(Fonts.font(family, 13, .medium)).foregroundColor(DrumBag.ink)
+        }
+        return out
+    }
+}
+
+/// The prototype's drawings for the items without a render, in a 100-unit box centred in the frame.
+enum DrumGlyphs {
+    private static func unit(_ size: CGSize) -> (u: CGFloat, o: CGPoint) {
+        let u = min(size.width, size.height) / 100
+        return (u, CGPoint(x: (size.width - 100 * u) / 2, y: (size.height - 100 * u) / 2))
+    }
+
+    private static func circle(_ c: CGPoint, _ r: CGFloat) -> Path {
+        Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
+    }
+
+    /// Auto: a dashed circle with an "A", drawn as strokes so it sits exactly in the circle.
+    static func auto(_ ctx: inout GraphicsContext, _ size: CGSize) {
+        let (u, o) = unit(size)
+        let c = CGPoint(x: o.x + 50 * u, y: o.y + 50 * u)
+        ctx.stroke(circle(c, 30 * u), with: .color(DrumBag.ink.opacity(0.55)),
+                   style: StrokeStyle(lineWidth: 2 * u, dash: [4 * u, 5 * u]))
+        var a = Path()
+        a.move(to: CGPoint(x: o.x + 43 * u, y: o.y + 59 * u))
+        a.addLine(to: CGPoint(x: o.x + 50 * u, y: o.y + 41 * u))
+        a.addLine(to: CGPoint(x: o.x + 57 * u, y: o.y + 59 * u))
+        a.move(to: CGPoint(x: o.x + 45.6 * u, y: o.y + 53 * u))
+        a.addLine(to: CGPoint(x: o.x + 54.4 * u, y: o.y + 53 * u))
+        ctx.stroke(a, with: .color(DrumBag.ink.opacity(0.8)), lineWidth: 1.8 * u)
+    }
+
+    /// Focal length: the horizontal field-of-view wedge from a small camera block; narrower as the focal length grows.
+    static func focal(_ ctx: inout GraphicsContext, _ size: CGSize, mm: Double) {
+        let (u, o) = unit(size)
+        let half = atan(36 / (2 * max(mm, 1)))
+        let a = min(half, 1.2)
+        let l: CGFloat = 64
+        let apex = CGPoint(x: o.x + 18 * u, y: o.y + 50 * u)
+        var wedge = Path()
+        wedge.move(to: apex)
+        // y points down: from −a to +a through 0 is the arc on the right, as the SVG's sweep flag 1.
+        wedge.addArc(center: apex, radius: l * u, startAngle: .radians(-a), endAngle: .radians(a), clockwise: false)
+        wedge.closeSubpath()
+        ctx.fill(wedge, with: .color(DrumBag.amber.opacity(0.16)))
+        ctx.stroke(wedge, with: .color(DrumBag.amber.opacity(0.8)), lineWidth: 1.6 * u)
+        let block = Path(roundedRect: CGRect(x: o.x + 8 * u, y: o.y + 42 * u, width: 12 * u, height: 16 * u), cornerRadius: 2 * u)
+        ctx.fill(block, with: .color(DrumBag.ink.opacity(0.85)))
+    }
+
+    /// Aperture: the amber iris; its seven blades open wider at small f-numbers.
+    static func iris(_ ctx: inout GraphicsContext, _ size: CGSize, f: Double) {
+        let (u, o) = unit(size)
+        let c = CGPoint(x: o.x + 50 * u, y: o.y + 50 * u)
+        let open = CGFloat(6 + 30 * (1.4 / max(f, 0.1)).squareRoot())
+        ctx.stroke(circle(c, 38 * u), with: .color(DrumBag.ink.opacity(0.7)), lineWidth: 2 * u)
+        for k in 0..<7 {
+            let t = Double(k) * 2 * Double.pi / 7
+            var blade = Path()
+            blade.move(to: CGPoint(x: c.x + open * CGFloat(cos(t)) * u, y: c.y + open * CGFloat(sin(t)) * u))
+            blade.addLine(to: CGPoint(x: c.x + 38 * CGFloat(cos(t + 1.1)) * u, y: c.y + 38 * CGFloat(sin(t + 1.1)) * u))
+            ctx.stroke(blade, with: .color(DrumBag.ink.opacity(0.5)), lineWidth: 1.4 * u)
+        }
+        let pupil = circle(c, open * u)
+        ctx.fill(pupil, with: .color(DrumBag.amber.opacity(0.22)))
+        ctx.stroke(pupil, with: .color(DrumBag.amber), lineWidth: 1.6 * u)
+    }
+
+    /// The f-number of an aperture item: "f2.8" (its value) or "f/2.8" (its name) → 2.8.
+    static func fNumber(_ item: WheelItem) -> Double {
+        for s in [item.value ?? "", item.name] {
+            let digits = String(s.drop(while: { !$0.isNumber }))
+            if let f = Double(digits) { return f }
+        }
+        return 4
     }
 }
 
@@ -240,7 +454,7 @@ final class RigDrumModel {
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var lastTick: CFTimeInterval = 0
     @ObservationIgnored private var monitor: Any?
-    @ObservationIgnored private var itemHeight: Double = 68
+    @ObservationIgnored private var itemHeight: Double = 84
     @ObservationIgnored private var dragStart: Double = 0
     @ObservationIgnored private var dragMoved: Double = 0
     @ObservationIgnored private var history: [(t: CFTimeInterval, p: Double)] = []

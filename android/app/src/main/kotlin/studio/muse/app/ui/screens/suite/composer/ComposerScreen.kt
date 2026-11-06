@@ -97,6 +97,7 @@ import studio.muse.app.ui.screens.suite.nextTier
 import studio.muse.app.ui.screens.suite.rememberInputSlotPicker
 import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.scale
 
 // AI suite (workstream 1): the video composer (plans/video-composer.md, mockups composer__P1…P5 phone, C1…C6 wide). One
 // prompt-first shell; every tool is a preset of it. Phone: recent takes on top, the composer docked at the bottom with
@@ -488,11 +489,11 @@ private fun ToolRow(ui: ComposerUi, wide: Boolean) {
         val thumb = d.settings.preset?.let { presetPreview(ui.cat, it, "").still } ?: d.tool.render
         HardwareImage(thumb, Modifier.size(34.dp, 40.dp), sample = 8)
         if (wide) {
-            T(d.cardTitle(ui.cat).uppercase(), m.type.mono.copy(fontSize = 11.sp, letterSpacing = .14.em, fontWeight = FontWeight.Medium), m.t.ink, maxLines = 1)
+            T(d.cardTitle(ui.cat), m.scale.label, m.t.ink, maxLines = 1)
             Box(Modifier.size(3.dp).clip(CircleShape).background(m.t.line))
             T(d.cardTagline(ui.cat), m.type.body.copy(fontSize = 13.5.sp), m.t.muted, maxLines = 1)
         } else Column(Modifier.weight(1f)) {
-            T(d.cardTitle(ui.cat).uppercase(), m.type.mono.copy(fontSize = 11.5.sp, letterSpacing = .14.em, fontWeight = FontWeight.Medium), m.t.ink, maxLines = 1)
+            T(d.cardTitle(ui.cat), m.scale.label, m.t.ink, maxLines = 1)
             T(if (ui.live) d.cardTagline(ui.cat) else "Coming soon · ${d.tool.tagline}", m.type.body.copy(fontSize = 13.sp), m.t.muted, maxLines = 1)
         }
         val shape = RoundedCornerShape(if (m.isA) 0.dp else 8.dp)
@@ -814,10 +815,8 @@ private fun RecentTakes(ui: ComposerUi, job: studio.muse.app.data.Job?, recent: 
 private fun WideComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent: List<studio.muse.app.data.Job>, takes: List<studio.muse.app.data.Take>, openTake: (String) -> Unit) {
     val m = muse
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 32.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-        Column {
-            T("VIDEO SUITE", m.type.mono.copy(fontSize = 11.sp, letterSpacing = .16.em), m.t.muted)
-            T(ui.d.tool.title, m.type.h2, m.t.ink, upper = m.isB, maxLines = 1)
-        }
+        // Workstream 4 (design direction): the tool's name in sentence case, no caps eyebrow (Photo isn't part of "Video suite").
+        T(ui.d.tool.title, m.scale.display, m.t.ink, maxLines = 1)
         if (ui.photo != null) PhotoRecent(ui, takes, wide = true) else RecentTakes(ui, job, recent, takes, openTake, {}, wide = true) // Photo tool (workstream 3)
         val shape = RoundedCornerShape(if (m.isA) 0.dp else 14.dp)
         Column(Modifier.widthIn(max = 960.dp).fillMaxWidth().align(Alignment.CenterHorizontally).clip(shape).background(m.t.surface).border(if (m.isD) 2.5.dp else 1.dp, m.t.line, shape)) {

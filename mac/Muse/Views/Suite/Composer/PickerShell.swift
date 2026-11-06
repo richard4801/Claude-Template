@@ -1,8 +1,8 @@
 import MuseCore
 import SwiftUI
 
-// AI suite (workstream 1): the one picker shell (plans/video-composer.md "The picker shell"), C2–C4. A centred ~840×540
-// modal over a dimmed page with a title, Reset all and ×; sub-steps in a left rail with a dot on any step that has a
+// AI suite (workstream 1): the one picker shell (plans/video-composer.md "The picker shell"), C2–C4. A centred 840-wide modal (540 tall, Camera 680 for the Setup drums)
+// over a dimmed page with a title, Reset all and ×; sub-steps in a left rail with a dot on any step that has a
 // value. Choices apply instantly (no OK). Always dark (Theme B Camera Body), whatever the app theme.
 
 /// The chips that open a picker.
@@ -84,8 +84,11 @@ struct ComposerPickerHost: View {
                     .contentShape(Rectangle())
                     .onTapGesture { store.closePicker() }
                     .accessibilityHidden(true)
+                // Camera is taller so Setup's rig line, bag and drums fit with no dead area (Android caps its modal at 800).
                 PickerShell(picker: p)
-                    .frame(width: 840, height: 540)
+                    .frame(width: 840)
+                    .frame(maxHeight: p == .camera ? 680 : 540)
+                    .padding(.vertical, 24)
             }
             .transition(.opacity)
             .environment(\.theme, PickerTheme.dark)
@@ -131,8 +134,15 @@ struct PickerShell: View {
 
     private var header: some View {
         HStack(spacing: 14) {
-            Text(picker.title).font(t.scale.title.font).foregroundStyle(Roles.bag.ink)
-            if !(picker == .camera && step == "movement") {
+            // "Camera · Setup": the title, then the current step in dim regular (the drum prototype's header).
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                Text(picker.title).font(t.scale.title.font).foregroundStyle(Roles.bag.ink)
+                if let note = titleNote {
+                    Text(verbatim: " · \(note)").font(Fonts.font(t.scale.textFamily, t.scale.title.size, .regular)).foregroundStyle(DrumBag.dim)
+                }
+            }
+            .lineLimit(1)
+            if titleNote == nil && !(picker == .camera && step == "movement") {
                 Text(picker.subtitle).font(t.body(13)).foregroundStyle(t.muted)
             }
             Spacer(minLength: 8)
@@ -163,6 +173,12 @@ struct PickerShell: View {
         }
         .padding(.leading, 24).padding(.trailing, 14)
         .frame(height: 62)
+    }
+
+    /// The current step after the title ("Camera · Setup"), for the Camera picker.
+    private var titleNote: String? {
+        guard picker == .camera else { return nil }
+        return steps.first { $0.id == step }?.title
     }
 
     private var rail: some View {

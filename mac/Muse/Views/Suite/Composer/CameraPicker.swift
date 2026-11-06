@@ -2,38 +2,63 @@ import AppKit
 import MuseCore
 import SwiftUI
 
-// AI suite (workstream 1): the Camera picker's steps (C2, C3). Setup: four drums side by side (Camera, Lens, Focal,
+// AI suite (workstream 1): the Camera picker's steps (C2, C3). Setup: the live rig line and four drums side by side (Camera, Lens, Focal,
 // Aperture; RigDrum.swift) under one selection band, on the always-dark camera bag. Angle: Height and Framing as tile
 // grids. Movement: category chips + search over a 4-column grid; a move goes into the prompt as #move.
 
 // MARK: Setup
 
-/// Camera → Setup: the rig's four hardware drums. WS3's Photo tool reuses this view as is.
+/// Camera → Setup: the rig's four hardware drums, laid out as the prototype (design/drum-wheels-prototype.html): the live
+/// rig line, then the camera bag with four equal columns under one band, centred (at most 980 wide) with no dead area.
+/// WS3's Photo tool reuses this view as is.
 struct CameraSetupStep: View {
     @Environment(AppStore.self) private var store
+
+    /// The prototype's .wrap max width.
+    static let maxWidth: CGFloat = 980
 
     var body: some View {
         let c = store.suite.camera
         let s = store.suite.pickerSettings
         let cams = ComposerWheels.cameras(c), lenses = ComposerWheels.lenses(c), focals = ComposerWheels.focals(c), aps = ComposerWheels.apertures(c)
-        HStack(alignment: .top, spacing: 0) {
-            RigDrum(label: "Camera", items: cams, selected: Wheel.index(of: s.body, in: cams, options: c.bodies)) { item in
-                store.suite.pickerSettings.body = item.value
-            }
-            RigDrum(label: "Lens", items: lenses, selected: Wheel.index(of: s.lens, in: lenses, options: c.lenses)) { item in
-                store.suite.pickerSettings.lens = item.value
-            }
-            RigDrum(label: "Focal", items: focals, selected: ComposerWheels.focalIndex(s.focalMm, in: focals), face: .focal) { item in
-                store.suite.pickerSettings.focalMm = item.value.flatMap { Double($0) }
-            }
-            RigDrum(label: "Aperture", items: aps, selected: Wheel.index(of: s.aperture, in: aps, options: c.apertures), face: .aperture) { item in
-                store.suite.pickerSettings.aperture = item.value
+        let ci = Wheel.index(of: s.body, in: cams, options: c.bodies)
+        let li = Wheel.index(of: s.lens, in: lenses, options: c.lenses)
+        let fi = ComposerWheels.focalIndex(s.focalMm, in: focals)
+        let ai = Wheel.index(of: s.aperture, in: aps, options: c.apertures)
+        let names = [Self.name(cams, ci), Self.name(lenses, li), Self.name(focals, fi), Self.name(aps, ai)]
+        GeometryReader { g in
+            let width = min(max(g.size.width - 32, 0), Self.maxWidth)
+            // 112 pt rows once the drums area is 720 pt wide (the prototype's breakpoint), else 84.
+            let row = RigDrum.row(wide: width >= RigDrum.wideWidth)
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 18) {
+                    RigLine(names: names)
+                    RigDrums(rowHeight: row) {
+                        RigDrum(label: "Camera", items: cams, selected: ci, rowHeight: row, band: false) { item in
+                            store.suite.pickerSettings.body = item.value
+                        }
+                        RigDrum(label: "Lens", items: lenses, selected: li, rowHeight: row, band: false) { item in
+                            store.suite.pickerSettings.lens = item.value
+                        }
+                        RigDrum(label: "Focal", items: focals, selected: fi, face: .focal, rowHeight: row, band: false) { item in
+                            store.suite.pickerSettings.focalMm = item.value.flatMap { Double($0) }
+                        }
+                        RigDrum(label: "Aperture", items: aps, selected: ai, face: .aperture, rowHeight: row, band: false) { item in
+                            store.suite.pickerSettings.aperture = item.value
+                        }
+                    }
+                }
+                .frame(width: width)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 16)
+                // Centred both ways in the space the step has.
+                .frame(maxWidth: .infinity, minHeight: g.size.height)
             }
         }
-        .frame(maxWidth: 720)
-        .padding(.horizontal, 16).padding(.top, 16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(RigDrum.Bag.raised)
+    }
+
+    private static func name(_ items: [WheelItem], _ i: Int) -> String {
+        items.indices.contains(i) ? items[i].name : "Auto"
     }
 }
 

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -134,7 +135,7 @@ fun ColumnScope.CameraPickerBody(tab: String, d: ComposerDraft, cat: CameraCatal
             }
         }
         // Setup is hardware: four drums (workstream 4, RigDrum).
-        else -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 12.dp, bottom = 16.dp)) {
+        else -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 12.dp, bottom = 16.dp), verticalArrangement = Arrangement.Center) {
             RigSetupDrums(cat, s, wide) { f -> set(f) }
         }
     }
@@ -147,13 +148,21 @@ fun ColumnScope.CameraPickerBody(tab: String, d: ComposerDraft, cat: CameraCatal
 @Composable
 fun RigSetupDrums(cat: CameraCatalog, s: ComposerSettings, wide: Boolean, set: ((ComposerSettings) -> ComposerSettings) -> Unit) {
     val b = CameraWheels.bodies(cat); val l = CameraWheels.lenses(cat); val fo = CameraWheels.focals(cat); val a = CameraWheels.apertures(cat)
-    val row = if (wide) 76.dp else 64.dp
-    RigDrums(listOf(
-        { md -> RigDrum("Camera", b, CameraWheels.index(b, s.body, cat.bodies), { w -> set { it.copy(body = w.id) } }, md, row) },
-        { md -> RigDrum("Lens", l, CameraWheels.index(l, s.lens, cat.lenses), { w -> set { it.copy(lens = w.id) } }, md, row) },
-        { md -> RigDrum("Focal", fo, CameraWheels.index(fo, s.focalMm?.toString()), { w -> set { it.copy(focalMm = w.id?.toIntOrNull()) } }, md, row) },
-        { md -> RigDrum("Aperture", a, CameraWheels.index(a, s.aperture?.let { ComposerCatalog.nearestAperture(cat, it) }), { w -> set { it.copy(aperture = w.id) } }, md, row) },
-    ))
+    val bi = CameraWheels.index(b, s.body, cat.bodies); val li = CameraWheels.index(l, s.lens, cat.lenses)
+    val fi = CameraWheels.index(fo, s.focalMm?.toString()); val ai = CameraWheels.index(a, s.aperture?.let { ComposerCatalog.nearestAperture(cat, it) })
+    val row = drumRow(wide)
+    // The prototype's layout: the live rig line, then the bag with its four drums, centred with no dead area below.
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.widthIn(max = 980.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            RigLine(listOf(b[bi].name, l[li].name, fo[fi].name, a[ai].name))
+            RigDrums(row, listOf(
+                { md -> RigDrum("Camera", b, bi, { w -> set { it.copy(body = w.id) } }, md, row, band = false) },
+                { md -> RigDrum("Lens", l, li, { w -> set { it.copy(lens = w.id) } }, md, row, band = false) },
+                { md -> RigDrum("Focal", fo, fi, { w -> set { it.copy(focalMm = w.id?.toIntOrNull()) } }, md, row, band = false) },
+                { md -> RigDrum("Aperture", a, ai, { w -> set { it.copy(aperture = w.id) } }, md, row, band = false) },
+            ))
+        }
+    }
 }
 
 /** The Camera picker's sub-steps (Directed only for the owner). */
