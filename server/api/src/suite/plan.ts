@@ -5,7 +5,7 @@ import type { ImageRef } from '../db/schema.js';
 import { DEFAULT_TEXTS, listOf, type PromptTexts } from '../prompt/library.js';
 import { sanitizeDirection } from '../prompt/engine.js';
 import { run } from '../prompt/scripts/builders.js';
-import { CameraSpecSchema, VideoRefSchema, type VideoRef } from './camera.js';
+import { CameraSpecSchema, stripMoveTokens, VideoRefSchema, type VideoRef } from './camera.js';
 import { compileCamera, type CompiledCamera } from './compile.js';
 import { DEFAULT_LADDER, modelById, refFor, TIER_INFO, TIERS, type LadderStep, type ModelSpec, type ProviderId, type Resolution, type ShotMode, type Tier } from './registry.js';
 
@@ -251,7 +251,8 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
   const videoItems = videos.map((v, i) => ({ kind: v.use, video: named ? token(style, 'video', i + 1) : 'the reference video', use: VIDEO_USE[v.use] ?? VIDEO_USE.motion! }));
   const avoid = !m.negativePrompt && cam.avoid.length ? cam.avoid.map(a => a.charAt(0).toUpperCase() + a.slice(1)).join('. ') + '.' : '';
   const ident = character ? { name: character.name, look: character.look, neverAdd: character.neverAdd } : null;
-  const userWords = [r.prompt, r.direction].map(x => (x ?? '').trim()).filter(Boolean).join(' ');
+  // AI suite (workstream 1): `#Move` text is a chip, not prose (stripMoveTokens).
+  const userWords = stripMoveTokens([r.prompt, r.direction].map(x => (x ?? '').trim()).filter(Boolean).join(' '), cam.moves);
   const { clean, removed } = ident ? sanitizeDirection(userWords, ident, t) : { clean: userWords, removed: [] as string[] };
   if (removed.length) notes.push(`left out of the scene (it would change her look): ${removed.join('; ')}`);
   const audioSent: 'speech' | 'music' | 'none' = audioPlan ? (speaking ? 'speech' : 'music') : 'none';

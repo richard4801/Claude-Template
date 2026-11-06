@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { jobs, ledger } from '../src/db/schema.js';
 import { DEFAULT_TEXTS } from '../src/prompt/library.js';
-import { cameraCatalog, CameraSpecSchema, MOVES, PRESETS, resolvePreset } from '../src/suite/camera.js';
+import { cameraCatalog, CameraSpecSchema, MOVES, PRESETS, resolvePreset, stripMoveTokens } from '../src/suite/camera.js';
 import { compileCamera } from '../src/suite/compile.js';
 import { buildInput } from '../src/suite/inputs.js';
 import { buildPlan, billedSeconds, fit, needOf, perSecond, pickModel, ShotRequestSchema, type Character } from '../src/suite/plan.js';
@@ -133,6 +133,16 @@ describe('AI suite · plans, inputs and prices (unit)', () => {
     expect(i).toMatchObject({ duration: 6, resolution: '768P', ratio: '9:16', reference_image_urls: ['u0', 'u1', 'u2', 'u3', 'u4', 'u5', 'u6'] });
     expect(i).not.toHaveProperty('first_frame_image');
   });
+  it('a #Move written as text is a chip, not prose: out when compiled, plain words otherwise (owner\'s first live shot)', () => {
+    expect(stripMoveTokens('She looks up. #Rack focus as the tram passes', ['rack_focus'])).toBe('She looks up. as the tram passes');
+    expect(stripMoveTokens('#rack focus, she turns', ['rack_focus'])).toBe('she turns');
+    expect(stripMoveTokens('She turns #Rack focus', [])).toBe('She turns Rack focus');
+    expect(stripMoveTokens('#dolly_in to her face', ['dolly_in'])).toBe('to her face');
+    expect(stripMoveTokens('Price tag #42 on the shelf', [])).toBe('Price tag #42 on the shelf');
+    const p = plan('h3', '768P', req({ modelId: 'm', duration: 6, prompt: 'She smiles. #Rack focus', camera: { move: { id: 'rack_focus' } } }));
+    expect(p.prompt).not.toMatch(/#/);
+    expect(p.camera.moves).toEqual(['rack_focus']);
+  });
   it('Kling 4.0: @image tokens, middle keyframes count toward 10 images, guide clip → reference_videos and the video price', () => {
     const r = req({ modelId: 'm', frames: { start: { asset: 'face' }, middle: [{ asset: 'g_tq' }, { asset: 'g_side' }], end: { asset: 'g_back' } },
       camera: { guide: { video: { key: 'cam/g.mp4', seconds: 6 }, use: 'camera' } }, quality: 'cinema', duration: 6 });
@@ -189,6 +199,11 @@ describe('AI suite · composer catalogue (visible, merged)', () => {
     expect(shown(cat.shutters)).toEqual([]);
     expect(cat.tempos.map(t => t.label)).toContain('Slow motion');
     expect(cat.moves.find(m => m.id === 'motion_blur')).toMatchObject({ label: 'Motion blur streaks', group: 'special' });
+    // Owner's balcony test: Rise to reveal starts low on the street and rises to find the subject (Crane up tilts down).
+    expect(cat.moves.find(m => m.id === 'rise_reveal')).toMatchObject({ label: 'Rise to reveal', group: 'crane', aliases: expect.arrayContaining(['reveal']) });
+    expect(cat.library.map(m => m.id)).toContain('rise_reveal');
+    expect(MOVES.find(m => m.id === 'rise_reveal')!.wording).toMatch(/opens low[\s\S]*street[\s\S]*rises \{amount\}[\s\S]*reveal the subject/);
+    expect(cat.tempos.find(t => t.id === 'single_shot')).toMatchObject({ label: 'One take', aliases: expect.arrayContaining(['single shot']) });
     expect(Object.fromEntries(cat.bodies.filter(b => b.mergedInto).map(b => [b.id, b.mergedInto]))).toEqual({ super35: 'cinema_digital', modular_8k: 'cinema_digital', full_frame_cine: 'cinema_digital', creator_cine: 'vlog' });
     expect(cat.lenses.find(l => l.id === 'vintage')?.mergedInto).toBe('warm_vintage');
     expect(cat.lenses.find(l => l.id === 'cine_zoom')).toMatchObject({ visible: false });
@@ -217,7 +232,7 @@ describe('AI suite · composer previews', () => {
     expect(fs.readFileSync(PREVIEWS_OUT, 'utf8'), 'run npx tsx scripts/suite-previews.ts').toBe(previewsModule());
     const cat = cameraCatalog();
     expect(cat.moves.find(m => m.id === 'dolly_in')?.preview).toEqual({ video: 'moves/dolly_in.mp4', poster: 'moves/dolly_in.jpg', seconds: 2.5 });
-    expect(cat.moves.filter(m => !m.preview).map(m => m.id)).toEqual(['motion_blur']); // no loop yet: the apps draw the still
+    expect(cat.moves.filter(m => !m.preview).map(m => m.id)).toEqual(['rise_reveal', 'motion_blur']); // no loop yet: the apps draw the still
     expect(cat.lighting.every(l => l.preview?.poster === `lighting/${l.id}.jpg`)).toBe(true);
     expect([...cat.heights, ...cat.shotSizes].every(a => a.preview?.poster === `angles/${a.id}.jpg`)).toBe(true);
     expect(cat.autoPreviews.lighting).toEqual({ poster: 'lighting/auto.jpg' });

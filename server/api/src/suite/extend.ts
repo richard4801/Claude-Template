@@ -2,6 +2,7 @@
 // ladder, how the source is used (the clip itself, the clip as a reference, or a frame bridge), the prompt, the price.
 // The runner prepares the media (trims the source, grabs the bridge frame) and joins source + extension.
 import { DEFAULT_TEXTS, fill, type PromptTexts } from '../prompt/library.js';
+import { stripMoveTokens } from './camera.js';
 import { billedSeconds, perSecond, token, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
 import { EXTEND_LADDER, modelById, refFor, type LadderStep, type ModelSpec, type ProviderId, type Resolution, type Tier } from './registry.js';
 
@@ -48,7 +49,7 @@ export function pickExtend(tier: Tier, n: ExtendNeed, o: { prefs?: SuitePrefs; p
 export function buildExtendPlan(r: ShotRequest, p: ExtendPick, source: { key: string; seconds: number }, o: { texts?: PromptTexts; priceScale?: number }): ShotPlan {
   const t = o.texts ?? DEFAULT_TEXTS;
   const m = p.model, d = r.extend!.direction, notes: string[] = [];
-  const direction = [r.prompt, r.direction].map(x => (x ?? '').trim()).filter(Boolean).join(' ')
+  const direction = stripMoveTokens([r.prompt, r.direction].map(x => (x ?? '').trim()).filter(Boolean).join(' '), [])
     || (d === 'after' ? 'the action carries on naturally' : 'the action leads naturally into it');
   // How much of the source is sent: the model's range (Wan takes 2–10 s: the last 10 s of a longer clip).
   const useSeconds = p.method === 'frame' ? 0 : Math.min(source.seconds, m.extend!.sourceSeconds[1]);

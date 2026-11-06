@@ -10,6 +10,7 @@ import { clips, jobs, takes, uploads, type ImageRef } from '../db/schema.js';
 import { ReplicateError } from '../replicate/client.js';
 import { mediaToolsAvailable, probe, restoreAudio, stripAudio, thumbnail, type MediaInfo } from '../replicate/media.js';
 import { frameOf, joinClips, segment } from './extendMedia.js';
+import { finishPlan, finishTake, TARGET_LUFS } from './finish.js';
 import { pipeline } from 'node:stream/promises';
 import { failureOf } from '../services/replicateVideo.js';
 import { beatOnlyAudio } from '../audio/beat.js';
@@ -105,6 +106,7 @@ export class SuiteRunner {
     const plan = (job.stats as any)?.suite?.plan as ShotPlan | undefined;
     const prior = ((job.stats as any)?.suite?.takes ?? []) as TakeState[];
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-suite-'));
+    const finishNotes = new Set<string>(); // AI suite (workstream 1): what finishing did (length cut, sound levelled)
     const n = Math.max(1, plan?.takes ?? 1);
     const perTake = (job.totalSeconds || 90) / n;
     const report = async (i: number, f: number, label: string) => {
@@ -235,7 +237,7 @@ export class SuiteRunner {
         if (!(await report(i, 0.92, 'Finishing'))) return;
         const raw = path.join(tmp, `raw_${i}.mp4`), take = path.join(tmp, `take_${i}.mp4`), thumb = path.join(tmp, `take_${i}.jpg`);
         await provider.download(status.url, raw);
-        // Delivered as the provider made it: no trim, no re-encode. Sound off: the audio track is dropped by stream copy.
+        // Sound off: the audio track is dropped by stream copy. Then finishing (below) cuts to the planned length and levels the sound.
         if (plan.recast?.restoreAudio && plan.videos[0]?.video.key) {
           // Recast keeps the original sound: this model doesn't return it, so it goes back on by stream copy (no re-encode).
           const src = path.join(tmp, 'source');
@@ -243,6 +245,19 @@ export class SuiteRunner {
           const si = await probe(c.FFPROBE_PATH, src);
           if (si.audioCodec) await restoreAudio(c.FFMPEG_PATH, raw, src, take, si.audioCodec); else await fs.promises.copyFile(raw, take);
         } else if (!plan.audio && model.audio === 'always') await stripAudio(c.FFMPEG_PATH, raw, take); else await fs.promises.copyFile(raw, take);
+        // AI suite (workstream 1): the planned length (a provider may round up) and even loudness (~−16 LUFS) for the
+        // model's own sound. Recast keeps the original sound and length; Extend is cut by its join, not here.
+        if (!plan.recast) {
+          const ti = await probe(c.FFPROBE_PATH, take);
+          const fp = finishPlan(ti, ex ? null : plan.seconds, { level: true });
+          const fin = path.join(tmp, `finished_${i}.mp4`);
+          const did = await finishTake(c.FFMPEG_PATH, take, fin, ti, fp);
+          if (did) {
+            await fs.promises.rename(fin, take);
+            if (did.trimmedFrom) finishNotes.add(`cut to the planned ${plan.seconds} s (the render came back ${did.trimmedFrom} s)`);
+            if (did.levelledFrom != null) finishNotes.add(`sound levelled to ${TARGET_LUFS} LUFS (was ${did.levelledFrom})`);
+          }
+        }
         let extension: Record<string, unknown> | undefined;
         if (ex && source && ex.join) {
           // One take: source then extension (after) or extension then source (before). The extension alone is kept too.
@@ -284,7 +299,7 @@ export class SuiteRunner {
       const fresh = ((await ctx.db.select({ stats: jobs.stats }).from(jobs).where(eq(jobs.id, job.id)))[0]?.stats ?? {}) as Record<string, any>;
       await ctx.jobs.complete(job.id, {
         outputs, actualCostUsd: actual, settleNote: `${shotNote(plan.tier, plan.resolution, outputs.map(o => Number(o.durationSec) || plan.seconds), plan.mode === 'recast' ? 'Recast' : plan.mode === 'extend' ? 'Extend' : 'Shot')}${mock ? ' · test render' : ''}`,
-        stats: { ...fresh, suite: { ...(fresh.suite ?? {}), takes, billedSeconds: billed.reduce((a, b) => a + b, 0), exactCost: exact, separationCost } },
+        stats: { ...fresh, suite: { ...(fresh.suite ?? {}), takes, billedSeconds: billed.reduce((a, b) => a + b, 0), exactCost: exact, separationCost, ...(finishNotes.size ? { finished: [...finishNotes] } : {}) } },
       });
     } catch (e) {
       if (st.cancelled || (e instanceof ReplicateError && e.kind === 'cancelled')) return;

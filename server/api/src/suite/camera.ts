@@ -12,6 +12,8 @@ export type Option = {
   visible?: boolean;
   /** A true duplicate: this id still validates but compiles as its survivor, and pickers show the survivor. */
   mergedInto?: string;
+  /** Other words a picker's search finds it by ("single shot" → One take). */
+  aliases?: string[];
 };
 export type MoveOption = Option & {
   category: 'static' | 'push' | 'lateral' | 'rotate' | 'vertical' | 'zoom' | 'follow' | 'aerial' | 'specialty' | 'time';
@@ -182,6 +184,7 @@ export const MOVES: MoveOption[] = [
   m('orbit_360', '360 orbit', 'rotate', 'Full circle around the subject', 'a full 360-degree orbit around the subject', { avoid: 'faces may drift on full orbits' }),
   m('crane_up', 'Crane up', 'vertical', 'Rise up and look down', 'crane shot rising {amount} while tilting down to keep the subject framed', { amount: [1.5, 3.5, 'm'], ltx: 'jib_up' }),
   m('crane_down', 'Crane down', 'vertical', 'Descend toward the subject', 'crane shot descending {amount} toward the subject', { amount: [1.5, 3.5, 'm'], ltx: 'jib_down' }),
+  m('rise_reveal', 'Rise to reveal', 'vertical', 'Start low on the street, rise to find them', 'the shot opens low, below the subject’s eye level, on the street and passing traffic; the camera then rises {amount} on a crane to reveal the subject above', { amount: [2, 5, 'm'], ltx: 'jib_up', aliases: ['reveal', 'rise', 'pedestal up', 'jib up', 'boom up'] }),
   m('crane_overhead', 'Crane over the head', 'vertical', 'Sweep up and over', 'crane sweeps up and over the subject’s head into a top-down view'),
   m('pedestal_up', 'Pedestal up', 'vertical', 'Straight rise, no tilt', 'camera rises straight up {amount} without tilting', { amount: [0.5, 1.5, 'm'], ltx: 'jib_up' }),
   m('pedestal_down', 'Pedestal down', 'vertical', 'Straight drop, no tilt', 'camera lowers straight down {amount} without tilting', { amount: [0.5, 1.5, 'm'], ltx: 'jib_down' }),
@@ -250,7 +253,7 @@ export const ERAS: Option[] = ['1960s', '1970s', '1980s', '1990s', '2000s', '201
 export const TEMPOS: Option[] = [
   o('calm', 'Calm', 'Slow, lingering', 'calm lingering pacing'), o('steady', 'Steady', 'Even pacing', 'steady even pacing'),
   o('dynamic', 'Dynamic', 'Energetic', 'dynamic energetic pacing'), o('chaotic', 'Chaotic', 'Frantic', 'frantic chaotic pacing'),
-  o('single_shot', 'One take', 'One continuous take, no cuts', 'one continuous take with no cuts'),
+  { ...o('single_shot', 'One take', 'One continuous take, no cuts', 'one continuous take with no cuts'), aliases: ['single shot', 'oner', 'continuous take', 'no cuts'] },
   o('slow_motion', 'Slow motion', 'Stretched, graceful movement', 'high-frame-rate slow motion, every movement stretched and graceful'),
 ];
 /** UGC ad formats (composer: the UGC ad tool's Style wheel). */
@@ -404,7 +407,7 @@ export const HARDWARE: Record<string, { render: string; name: string; caption: s
 export const FEATURED_MOVES: { id: string; tag: 'ugc' | 'cinematic' | 'energy' | 'subtle'; label?: string }[] = [
   { id: 'static', tag: 'ugc', label: 'Locked-off' }, { id: 'handheld', tag: 'ugc' }, { id: 'selfie', tag: 'ugc' }, { id: 'follow', tag: 'ugc' },
   { id: 'micro_push', tag: 'subtle' }, { id: 'dolly_in', tag: 'cinematic' }, { id: 'dolly_out', tag: 'cinematic' }, { id: 'orbit_left', tag: 'cinematic', label: 'Orbit / arc' },
-  { id: 'crane_up', tag: 'cinematic' }, { id: 'track_side', tag: 'cinematic', label: 'Tracking' }, { id: 'fpv', tag: 'energy', label: 'FPV fly-through' },
+  { id: 'crane_up', tag: 'cinematic' }, { id: 'rise_reveal', tag: 'cinematic' }, { id: 'track_side', tag: 'cinematic', label: 'Tracking' }, { id: 'fpv', tag: 'energy', label: 'FPV fly-through' },
   { id: 'whip_pan', tag: 'energy' }, { id: 'crash_zoom', tag: 'energy' }, { id: 'handheld_run', tag: 'energy' }, { id: 'rack_focus', tag: 'subtle' }, { id: 'dutch_push', tag: 'subtle' },
 ];
 
@@ -431,9 +434,9 @@ export function moveGroup(m: MoveOption): (typeof MOVE_GROUPS)[number]['id'] {
 export function cameraCatalog() {
   // Composer previews (design/previews, bundled in the apps as `previews/`): move loops, lighting and angle stills.
   const pv = (group: string, id: string) => (PREVIEWS[`${group}/${id}`] ? { preview: PREVIEWS[`${group}/${id}`] } : {});
-  const v = (l: Option[], group?: string, previews?: string) => l.map(({ id, label, description, visible, mergedInto }) => {
+  const v = (l: Option[], group?: string, previews?: string) => l.map(({ id, label, description, visible, mergedInto, aliases }) => {
     const h = group ? HARDWARE[`${group}.${id}`] : undefined;
-    const vis = { visible: visible !== false, ...(mergedInto ? { mergedInto } : {}), ...(previews ? pv(previews, id) : {}) };
+    const vis = { visible: visible !== false, ...(mergedInto ? { mergedInto } : {}), ...(aliases ? { aliases } : {}), ...(previews ? pv(previews, id) : {}) };
     return h ? { id, label, description, render: h.render, name: h.name, caption: h.caption, ...vis } : { id, label, description, ...vis };
   });
   return {
@@ -446,7 +449,7 @@ export function cameraCatalog() {
     palettes: v(PALETTES, 'palettes').map(x => ({ ...x, swatches: swatchesOf('palettes', x.id) ?? [], lut: lutFor('palettes', x.id) })),
     optics: ['aperture', 'shutter'].map(id => ({ id, ...HARDWARE[`optics.${id}`]! })),
     grips: Object.entries(HARDWARE).filter(([k]) => k.startsWith('grips.')).map(([k, h]) => ({ move: k.slice(6), ...h })),
-    moves: MOVES.map(x => ({ id: x.id, label: x.label, description: x.description, category: x.category, group: moveGroup(x), editorBetter: !!x.editorBetter, talkSafe: !!x.talkSafe, ...pv('moves', x.id) })),
+    moves: MOVES.map(x => ({ id: x.id, label: x.label, description: x.description, category: x.category, group: moveGroup(x), editorBetter: !!x.editorBetter, talkSafe: !!x.talkSafe, ...(x.aliases ? { aliases: x.aliases } : {}), ...pv('moves', x.id) })),
     /** The composer's Movement chips, in order ("featured" = `library`). */
     moveGroups: MOVE_GROUPS,
     /** The Auto tile's preview per picker (same subject as the option tiles). */
@@ -455,4 +458,17 @@ export function cameraCatalog() {
     heights: v(HEIGHTS, undefined, 'angles'), shotSizes: v(SHOT_SIZES, undefined, 'angles'), genres: v(GENRES), eras: v(ERAS), tempos: v(TEMPOS), ugcFormats: v(UGC_FORMATS), emotions: [...EMOTIONS],
     limits: { intensity: [0, 1], dutchDeg: [0, 30], focalMm: [8, 200], paletteColors: 5, mixPairs: 'two moves of different kinds; not static, time or aerial' },
   };
+}
+
+// AI suite (workstream 1): a `#Move` chip written out as text ("#Rack focus", pasted or typed past the suggestion list)
+// is not prose. Taken out when that move is already compiled into the camera line; otherwise kept as plain words.
+const MOVE_TOKEN_RES = [...MOVES].sort((a, b) => b.label.length - a.label.length).map(mv => ({
+  id: mv.id, label: mv.label,
+  re: new RegExp(`#\\s?(?:${mv.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '[\\s_-]+')}|${mv.id})(?![\\p{L}\\p{N}_])`, 'giu'),
+}));
+export function stripMoveTokens(text: string, compiled: readonly string[]): string {
+  if (!text.includes('#')) return text;
+  let s = text;
+  for (const t of MOVE_TOKEN_RES) s = s.replace(t.re, compiled.includes(t.id) ? ' ' : t.label);
+  return s.replace(/[ \t]{2,}/g, ' ').replace(/ ([,.!?;:])/g, '$1').replace(/^[ ,]+|[ ,]+$/g, '').trim();
 }
