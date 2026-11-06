@@ -684,7 +684,7 @@ private fun ExportBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Un
     }
     when (val ph = ui.phase) {
         is SuitePhase.Exporting, is SuitePhase.Saving -> {
-            val (label, prog) = if (ph is SuitePhase.Exporting) "Making your video on this phone" to ph.progress else "Saving to Gallery" to (ph as SuitePhase.Saving).progress
+            val (label, prog) = if (ph is SuitePhase.Exporting) "Making your video on this phone" to ph.progress else "Saving to Library" to (ph as SuitePhase.Saving).progress
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     T("$label · ${(prog * 100).roundToInt()} %", m.type.body.copy(fontSize = 13.sp), m.t.ink, Modifier.weight(1f))
@@ -694,7 +694,7 @@ private fun ExportBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Un
             }
         }
         else -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            SuiteButton("Save to Gallery", { host.export(false) }, height = 54.dp, enabled = ui.ready)
+            SuiteButton("Save to Library", { host.export(false) }, height = 54.dp, enabled = ui.ready)
             SuiteButton("Export", { host.export(true) }, Modifier.weight(1f), primary = true, height = 54.dp, enabled = ui.ready)
         }
     }

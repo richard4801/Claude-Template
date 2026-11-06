@@ -122,7 +122,7 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
       expect(r.status, u).toBe(403); expect(r.body.code).toBe('owner_only');
     }
     const l = (await owner.req('GET', '/v1/prompts')).body;
-    expect(l.groups.map((g: any) => g.label)).toEqual(['Photoshoot', 'References', 'Character sheet', 'Outfits', 'Enhance', 'Dress up', 'Templates', 'Video', 'LoRA', 'AI suite']); // + AI suite (workstream 1)
+    expect(l.groups.map((g: any) => g.label)).toEqual(['Photo', 'References', 'Character sheet', 'Outfits', 'Enhance', 'Dress up', 'Templates', 'Video', 'LoRA', 'AI suite']); // + AI suite (workstream 1)
     expect(l.prompts).toHaveLength(73 + SUITE_PROMPT_DEFS.length);
     const refPose = l.prompts.find((p: any) => p.key === 'refs.pose');
     expect(refPose).toMatchObject({ group: 'references', current: refPose.default, overridden: false, allowEmpty: false, updatedAt: null,

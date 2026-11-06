@@ -5,7 +5,7 @@
 import { SUITE_PROMPT_DEFS } from '../suite/prompts.js';
 
 export const PROMPT_GROUPS = [
-  { id: 'photoshoot', label: 'Photoshoot' }, { id: 'references', label: 'References' }, { id: 'sheet', label: 'Character sheet' },
+  { id: 'photoshoot', label: 'Photo' }, { id: 'references', label: 'References' }, { id: 'sheet', label: 'Character sheet' },
   { id: 'outfits', label: 'Outfits' }, { id: 'enhance', label: 'Enhance' }, { id: 'dressup', label: 'Dress up' },
   { id: 'templates', label: 'Templates' }, { id: 'video', label: 'Video' }, { id: 'lora', label: 'LoRA' },
   // AI suite (workstream 1): suite/prompts.ts

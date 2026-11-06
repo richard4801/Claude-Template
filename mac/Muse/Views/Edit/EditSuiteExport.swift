@@ -62,7 +62,7 @@ struct EditSuiteExportSheet: View {
                     if let p = session.exportProblem { Note(warn: true, p) }
                     HStack(spacing: 12) {
                         Button { start(saveFile: false) } label: {
-                            Text("Save to Gallery").font(t.body(13.5, .semibold)).foregroundStyle(t.ink)
+                            Text("Save to Library").font(t.body(13.5, .semibold)).foregroundStyle(t.ink)
                                 .padding(.horizontal, 14).frame(height: 40)
                                 .overlay(Rectangle().strokeBorder(t.line))
                         }
@@ -161,7 +161,7 @@ struct EditSuiteExportProgress: View {
         let (title, value): (String, Double) = {
             switch session.exportPhase {
             case .rendering(let p): return ("Making the video on this Mac", p)
-            case .uploading(let p): return ("Saving to Gallery", p)
+            case .uploading(let p): return ("Saving to Library", p)
             case .idle: return ("", 0)
             }
         }()

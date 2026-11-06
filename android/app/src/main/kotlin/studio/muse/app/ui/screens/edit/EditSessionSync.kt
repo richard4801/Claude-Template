@@ -41,7 +41,7 @@ import studio.muse.core.edit.problemOf
 interface SessionHost {
     /** A PNG of the composition at timeline [t] seconds, [width] pixels wide. */
     suspend fun renderFrame(project: EditProject, t: Double, width: Int): Pair<ByteArray?, String?>
-    /** The suite's "Save to Gallery" (render + save as a version): the new version's take id. */
+    /** The suite's "Save to Library" (render + save as a version): the new version's take id. */
     suspend fun saveVersion(name: String?): Pair<String?, String?>
     /**
      * Never unattended ([OwnerExportGate]): the export sheet opens with [preset] (the owner's AI-label / C2PA switches

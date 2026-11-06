@@ -61,6 +61,7 @@ import studio.muse.app.ui.screens.suite.SIc
 import studio.muse.app.ui.screens.suite.SlotId
 import studio.muse.app.ui.screens.suite.SlotKind
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.scale
 
 // AI suite (workstream 1): every picker of the composer in the one shell — Camera, Style, Look, Lighting, References,
 // Settings, the tool and preset browser (Change), the character, a prompt token's intensity and Recast's people.
@@ -217,7 +218,7 @@ private fun ColumnScope.VideoBody(x: SheetContext) {
                     val key = studio.muse.app.data.ExtendRules.keyOf(t, demo = true)
                     val on = key != null && key == x.extendKey
                     val secs = t.durationSec?.let { "${studio.muse.app.data.FakeSuite.fmtSeconds(Math.round(it * 10) / 10.0)} s" }
-                    Column(Modifier.weight(1f).press { x.onPickTake(t) }.semantics(mergeDescendants = true) { selected = on; role = Role.Button; contentDescription = "${t.title}, take ${t.index}${secs?.let { ", $it" } ?: ""}" }) {
+                    Column(Modifier.weight(1f).press { x.onPickTake(t) }.semantics(mergeDescendants = true) { selected = on; role = Role.Button; contentDescription = "${t.shownTitle}, take ${t.index}${secs?.let { ", $it" } ?: ""}" }) {
                         Box(Modifier.fillMaxWidth().picked(on, m.t.accent)) {
                             Box(Modifier.fillMaxWidth().aspectRatio(9f / 16f).clip(RoundedCornerShape(10.dp)).background(m.t.surface2)) {
                                 RefImage(t.thumb, Modifier.fillMaxWidth().aspectRatio(9f / 16f), 20)
@@ -227,8 +228,8 @@ private fun ColumnScope.VideoBody(x: SheetContext) {
                                 if (on) CheckBadge()
                             }
                         }
-                        T(t.title, m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), m.t.ink, Modifier.padding(top = 6.dp, start = 3.dp), maxLines = 1)
-                        T("Take ${t.index} · ${t.label}", m.type.body.copy(fontSize = 11.5.sp), m.t.muted, Modifier.padding(start = 3.dp), maxLines = 1)
+                        T(t.shownTitle, m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), m.t.ink, Modifier.padding(top = 6.dp, start = 3.dp), maxLines = 1)
+                        T("Take ${t.index}, ${t.shownLabel}", m.type.body.copy(fontSize = 11.5.sp), m.t.muted, Modifier.padding(start = 3.dp), maxLines = 1)
                     }
                 }
                 repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
@@ -465,7 +466,7 @@ private fun ColumnScope.ToolsBody(x: SheetContext) {
                         .semantics(mergeDescendants = true) { selected = on; role = Role.Button }) {
                         PreviewTile(Preview(t.render), Modifier.fillMaxWidth().height(70.dp)) {
                             if (!t.isLive(x.catalog)) Box(Modifier.align(Alignment.TopEnd).padding(6.dp).background(Color.Black.copy(alpha = .6f)).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                                T("SOON", m.type.mono.copy(fontSize = 9.5.sp, letterSpacing = .1.em), Color.White)
+                                T("Soon", m.scale.micro, Color.White)
                             }
                         }
                         Column(Modifier.padding(10.dp)) {

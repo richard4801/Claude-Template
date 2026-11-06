@@ -262,7 +262,7 @@ fun PhotoRecent(ui: ComposerUi, takes: List<Take>, wide: Boolean, modifier: Modi
             }
             stills.forEach { t ->
                 Box(Modifier.height(h).aspectRatio(.8f).clip(shape).background(m.t.surface2).press { nav.go(Routes.result(t.id)) }
-                    .semantics { contentDescription = "${t.title} · ${t.label}"; role = Role.Button }) {
+                    .semantics { contentDescription = "${t.shownTitle}, ${t.shownLabel}"; role = Role.Button }) {
                     RefImage(t.thumb, Modifier.fillMaxSize(), 20)
                 }
             }

@@ -43,7 +43,7 @@ const SHOOT_VARS = [
 
 // ---------------------------------------------------------------- photo scripts
 const photoshoot: Script = {
-  id: 'photoshoot', group: 'photoshoot', title: 'Photoshoot', description: 'Every still of a photoshoot (no template).', format: 'lines',
+  id: 'photoshoot', group: 'photoshoot', title: 'Photo', description: 'Every still of the Photo tool (no template).', format: 'lines',
   inputs: [PRESETS, bool('lockSeed', 'Lock look', 'Lock look is on (a fixed seed for her).', false), OUTFIT_SOURCE,
     num('lens', 'Lens (mm)', 'The lens in mm.', 35), REFS],
   sections: [sec('identity', 'Identity'), sec('outfit', 'Outfit'), sec('scene', 'Scene'), sec('camera', 'Camera'), sec('light', 'Light'),

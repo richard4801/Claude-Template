@@ -92,7 +92,7 @@ fun SuiteResultScreen(jobId: String) {
         Column(Modifier.fillMaxSize()) {
             TopBar(job?.title ?: "Take", onBack = { nav.back() }) {
                 MoreMenu(listOfNotNull(
-                    MenuItem("grid", "Gallery") { nav.tab(Routes.GALLERY) },
+                    MenuItem("grid", "Library") { nav.tab(Routes.GALLERY) },
                     if (store.owner) MenuItem("quality", "Engines (owner)") { nav.go(Routes.SUITE_ENGINES) } else null,
                 ))
             }

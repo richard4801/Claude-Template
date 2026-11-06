@@ -74,8 +74,8 @@ fun BoxScope.UpscaleSheet(takeId: String, wide: Boolean, onStarted: (Job) -> Uni
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(Modifier.size(44.dp, 78.dp).clip(RoundedCornerShape(8.dp)).background(m.t.surface2)) { RefImage(take.thumb, Modifier.size(44.dp, 78.dp), 20) }
                 Column(Modifier.weight(1f)) {
-                    T(take.title, m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
-                    T(listOfNotNull("Take ${take.index}", secs?.let { "${FakeSuite.fmtSeconds(Math.round(it * 10) / 10.0)} s" }, take.label).joinToString(" · "), m.type.body.copy(fontSize = 12.5.sp), m.t.muted, maxLines = 1)
+                    T(take.shownTitle, m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
+                    T(listOfNotNull("Take ${take.index}", secs?.let { "${FakeSuite.fmtSeconds(Math.round(it * 10) / 10.0)} s" }, take.shownLabel).joinToString(" · "), m.type.body.copy(fontSize = 12.5.sp), m.t.muted, maxLines = 1)
                     T(up.detail.ifBlank { "Sharper 1080p, 2K or 4K from a finished take" }, m.type.body.copy(fontSize = 12.5.sp), m.t.muted, maxLines = 2)
                 }
             }

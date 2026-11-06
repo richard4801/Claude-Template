@@ -493,7 +493,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
             if (toPhone) withContext(Dispatchers.IO) { saveToPhone(made.file, srt, u.title) }
             if (take == null) { lastExportError = err ?: "Couldn't save the video"; controller.setPhase(SuitePhase.Failed(lastExportError!!)); return null }
             exportGate.exported(take.id) // answers an export Claude asked for, before the sheet closes
-            controller.update { it.copy(phase = SuitePhase.Ready, savedTakeId = take.id, panel = null, message = if (toPhone) "Saved to Gallery and to this phone" else "Saved as a new version · Edited") }
+            controller.update { it.copy(phase = SuitePhase.Ready, savedTakeId = take.id, panel = null, message = if (toPhone) "Saved to Library and to this phone" else "Saved as a new version · Edited") }
             return take
         } finally { made.file.delete() }
     }

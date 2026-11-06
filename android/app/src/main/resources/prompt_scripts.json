@@ -2,7 +2,7 @@
  "groups": [
   {
    "id": "photoshoot",
-   "label": "Photoshoot"
+   "label": "Photo"
   },
   {
    "id": "references",
@@ -349,8 +349,8 @@
   {
    "id": "photoshoot",
    "group": "photoshoot",
-   "title": "Photoshoot",
-   "description": "Every still of a photoshoot (no template).",
+   "title": "Photo",
+   "description": "Every still of the Photo tool (no template).",
    "format": "lines",
    "inputs": [
     {
