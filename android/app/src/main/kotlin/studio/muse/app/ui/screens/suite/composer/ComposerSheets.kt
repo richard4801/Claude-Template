@@ -198,19 +198,24 @@ private fun ColumnScope.EraSlider(cam: CameraCatalog, current: String?, wide: Bo
         }
         T(o?.description?.ifBlank { null } ?: if (o == null) "The engine picks the period from your prompt" else "", m.type.body.copy(fontSize = 13.sp), m.t.muted, maxLines = 2)
         if (n > 1) {
-            Box(Modifier.semantics {
-                contentDescription = "Era"; stateDescription = label
-                progressBarRangeInfo = androidx.compose.ui.semantics.ProgressBarRangeInfo(i.toFloat(), 0f..(n - 1).toFloat(), n - 2)
-                setProgress { v -> onPick(EraScale.snap(cam, v / (n - 1))); true }
-            }) { MuseSlider(i, 0, n - 1, { k -> onPick(EraScale.at(cam, k)) }) }
-            androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().height(48.dp)) {
-                val w = maxWidth
-                stops.forEachIndexed { k, id ->
-                    val on = k == i
-                    val x = w * (k.toFloat() / (n - 1)) - 24.dp
-                    Box(Modifier.offset(x = x.coerceIn(0.dp, w - 48.dp)).size(48.dp).press { onPick(id) }.semantics { role = Role.RadioButton; selected = on; contentDescription = EraScale.tick(cam, id) },
-                        contentAlignment = Alignment.TopCenter) {
-                        T(EraScale.tick(cam, id), m.type.mono.copy(fontSize = 10.5.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal), if (on) m.t.ink else m.t.muted, maxLines = 1, align = TextAlign.Center)
+            // Each stop sits over the middle of its tick's cell: the track is inset by half a cell on each side.
+            androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val cell = maxWidth / n
+                Column {
+                    Box(Modifier.padding(horizontal = cell / 2).semantics {
+                        contentDescription = "Era"; stateDescription = label
+                        progressBarRangeInfo = androidx.compose.ui.semantics.ProgressBarRangeInfo(i.toFloat(), 0f..(n - 1).toFloat(), n - 2)
+                        setProgress { v -> onPick(EraScale.snap(cam, v / (n - 1))); true }
+                    }) { MuseSlider(i, 0, n - 1, { k -> onPick(EraScale.at(cam, k)) }) }
+                    Row(Modifier.fillMaxWidth()) {
+                        stops.forEachIndexed { k, id ->
+                            val on = k == i
+                            Box(Modifier.weight(1f).height(48.dp).press { onPick(id) }.semantics { role = Role.RadioButton; selected = on; contentDescription = EraScale.tick(cam, id) },
+                                contentAlignment = Alignment.TopCenter) {
+                                T(EraScale.tick(cam, id), m.type.mono.copy(fontSize = if (cell < 40.dp) 9.5.sp else 11.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal),
+                                    if (on) m.t.ink else m.t.muted, maxLines = 1, align = TextAlign.Center)
+                            }
+                        }
                     }
                 }
             }
