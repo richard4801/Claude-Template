@@ -137,6 +137,7 @@ export class SuiteService {
       const base = { id: t, label: TIER_INFO[t].label, detail: TIER_INFO[t].detail, available: !!first,
         resolution: res?.label.split(' ')[0] ?? null, fromPerSec: usable.length ? round2(Math.min(...usable.map(x => x.m!.resolutions.find(r => r.id === x.s.resolution)!.perSec * (p.models?.[x.m!.id]?.priceScale ?? 1))) * 1000) / 1000 : null,
         maxSeconds: usable.length ? Math.max(...usable.map(x => x.m!.duration.max)) : null,
+        minSeconds: usable.length ? Math.min(...usable.map(x => x.m!.duration.min)) : null,
         canKeyframes: usable.some(x => x.m!.modes.image), canReferences: usable.some(x => x.m!.modes.reference), canGuide: usable.some(x => x.m!.camera.referenceVideo), inputs: inputSlotsOf(usable.map(x => x.m!)) };
       return u.role === 'owner' ? { ...base, models: usable.map(x => ({ model: x.m!.id, name: x.m!.name, resolution: x.s.resolution, inputs: inputSlotsOf([x.m!]) })) } : base;
     });

@@ -269,6 +269,7 @@ describe.skipIf(!hasFfmpeg)('AI suite · Shot API on the mock provider', () => {
     // Input slots: member-safe numbers per tier (the apps show a slot only when the tier takes it); per model for the owner.
     for (const t of m.tiers) expect(Object.keys(t.inputs).sort()).toEqual(['audio', 'end', 'framesWithRefs', 'images', 'middle', 'start', 'videos']);
     expect(m.tiers[0].inputs).toMatchObject({ start: true, end: true, images: 6, videos: 3, audio: true });
+    expect(m.tiers.map((t: any) => [t.minSeconds, t.maxSeconds])).toEqual([[2, 15], [2, 30], [3, 30], [3, 30]]);
     expect(o.tiers[0].models[0].inputs).toEqual({ start: true, end: true, middle: 0, images: 6, videos: 3, audio: true, framesWithRefs: true });
   });
 
