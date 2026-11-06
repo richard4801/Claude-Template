@@ -281,6 +281,42 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
         absolutize(try await call("POST", "v1/takes/\(Self.pathKey(takeId))/versions", req))
     }
 
+    // MARK: Edit sessions (workstream 3): the live edit shared with Claude (plans/api.md "Edit sessions")
+
+    private struct UndoBody: Encodable { var entryId: Int; var device: String }
+    private struct FrameBody: Encodable { var uploadId: String }
+    private struct ApproveBody: Encodable { var approve: Bool }
+    private struct OkReply: Decodable { var ok: Bool? }
+
+    private func es(_ id: String) -> String { "v1/edit-sessions/\(Self.pathKey(id))" }
+    public func openEditSession(_ req: EditSessionOpenRequest) async throws -> EditSession { try await call("POST", "v1/edit-sessions", req) }
+    public func editSession(id: String) async throws -> EditSession { try await call("GET", es(id)) }
+    public func pushEditPatch(sessionId: String, _ req: EditPatchRequest) async throws -> EditChangeResult { try await call("POST", "\(es(sessionId))/patch", req) }
+    public func undoEditChange(sessionId: String, entryId: Int, device: String) async throws -> EditChangeResult {
+        try await call("POST", "\(es(sessionId))/undo", UndoBody(entryId: entryId, device: device))
+    }
+    public func announceEditPresence(sessionId: String, _ p: EditPresence) async throws { let _: OkReply = try await call("POST", "\(es(sessionId))/presence", p) }
+    public func leaveEditSession(sessionId: String, device: String) async throws {
+        let _: OkReply = try await call("DELETE", "\(es(sessionId))/presence/\(Self.pathKey(device))")
+    }
+    public func uploadEditFrame(png: Data) async throws -> String {
+        guard let id = try await presignAndPut(kind: "image", contentType: "image/png", body: .data(png), progress: nil) else {
+            throw ApiError("upload_failed", "Couldn't upload the frame")
+        }
+        return id
+    }
+    public func answerEditFrame(sessionId: String, requestId: String, uploadId: String) async throws {
+        let _: OkReply = try await call("POST", "\(es(sessionId))/frames/\(Self.pathKey(requestId))", FrameBody(uploadId: uploadId))
+    }
+    public func answerEditAppRequest(sessionId: String, requestId: String, _ answer: EditAppRequestAnswer) async throws {
+        let _: EditAppRequest = try await call("POST", "\(es(sessionId))/requests/\(Self.pathKey(requestId))", answer)
+    }
+    public func answerEditPending(sessionId: String, pendingId: String, approve: Bool) async throws -> EditPending {
+        try await call("POST", "\(es(sessionId))/pending/\(Self.pathKey(pendingId))", ApproveBody(approve: approve))
+    }
+    public func closeEditSession(id: String) async throws { let _: OkReply = try await call("POST", "\(es(id))/close", Empty()) }
+    // End edit sessions (workstream 3)
+
     // MARK: Video editor (edited versions of a take)
 
 

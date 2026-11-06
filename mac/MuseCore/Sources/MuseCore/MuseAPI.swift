@@ -219,6 +219,32 @@ public protocol MuseAPI: AnyObject, Sendable {
     /// POST /v1/takes/{id}/versions with `edits: EditProject` (v2).
     func createTakeVersionV2(takeId: String, _ req: TakeVersionV2Request) async throws -> Take
 
+    // Edit sessions (workstream 3): the live edit shared with Claude (plans/api.md "Edit sessions"). Owner only. Types in
+    // Edit/EditSessionAPI.swift; the fake in Edit/FakeMuseAPI+EditSessions.swift.
+    /// POST /v1/edit-sessions {takeId, project?, device}: the take's open session, or a new one.
+    func openEditSession(_ req: EditSessionOpenRequest) async throws -> EditSession
+    /// GET /v1/edit-sessions/{id} (with history)
+    func editSession(id: String) async throws -> EditSession
+    /// POST …/{id}/patch {baseRevision, patch, label, device}: `stale_revision` when the session moved on.
+    func pushEditPatch(sessionId: String, _ req: EditPatchRequest) async throws -> EditChangeResult
+    /// POST …/{id}/undo {entryId, device}: `already_undone` / `cannot_undo`.
+    func undoEditChange(sessionId: String, entryId: Int, device: String) async throws -> EditChangeResult
+    /// POST …/{id}/presence (every 30 s)
+    func announceEditPresence(sessionId: String, _ p: EditPresence) async throws
+    /// DELETE …/{id}/presence/{device}
+    func leaveEditSession(sessionId: String, device: String) async throws
+    /// An exact frame for Claude: image presign + PUT (no confirm) → the uploadId.
+    func uploadEditFrame(png: Data) async throws -> String
+    /// POST …/{id}/frames/{requestId} {uploadId}
+    func answerEditFrame(sessionId: String, requestId: String, uploadId: String) async throws
+    /// POST …/{id}/requests/{requestId} {status, versionId?, error?}
+    func answerEditAppRequest(sessionId: String, requestId: String, _ answer: EditAppRequestAnswer) async throws
+    /// POST …/{id}/pending/{pendingId} {approve}
+    func answerEditPending(sessionId: String, pendingId: String, approve: Bool) async throws -> EditPending
+    /// POST …/{id}/close
+    func closeEditSession(id: String) async throws
+    // End edit sessions (workstream 3)
+
     // AI suite (workstream 1): plans/api.md "AI suite". Implemented in Suite/SuiteHTTP.swift and Suite/FakeMuseAPI+Suite.swift.
     /// GET /v1/suite/catalog
     func suiteCatalog() async throws -> SuiteCatalog
