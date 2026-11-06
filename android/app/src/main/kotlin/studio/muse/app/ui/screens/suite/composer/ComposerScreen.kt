@@ -171,6 +171,30 @@ fun SuiteComposerScreen(toolId: String? = null) {
             else -> c.repo.toast("${d.tool.title} is coming soon")
         }
     }
+    // Recast's "tap a face": the clip's first frame (the picked file, else its thumb; demo: the sample's stand-in still).
+    val frame = recast.clipId?.let { id ->
+        when {
+            video.clip?.id == id -> FrameSource(video.clipUri, video.clip?.thumb)
+            id == SampleData.SAMPLE_CLIP -> FrameSource(null, FirstFrame.DEMO)
+            else -> FrameSource(null, null)
+        }
+    }
+    fun tapFace(bmp: android.graphics.Bitmap, fx: Float, fy: Float): Int? {
+        val max = catalog?.recastMaxPeople ?: SuiteRules.MAX_CAST
+        val id = System.nanoTime()
+        val before = store.recast.value
+        val (next, i) = before.tapFace(fx, fy, max, id)
+        if (i == null) { c.repo.toast("Up to $max people · clear a face first"); return null }
+        if (next === before) return i
+        store.recast.value = next
+        scope.launch {
+            val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { runCatching { FirstFrame.cropJpeg(bmp, fx, fy) }.getOrNull() }
+            val (ref, err) = if (bytes == null) null to "Couldn't read that face" else c.repo.attemptInline { uploadImage("face-${i + 1}.jpg", bytes, "image/jpeg") }
+            store.recast.update { it.setCrop(id, ref) }
+            if (err != null) c.repo.toast(err)
+        }
+        return i
+    }
     val job = started.lastOrNull()?.let { id -> st.jobs.firstOrNull { it.id == id } }
     val ui = ComposerUi(
         d = d, cat = camCat, catalog = catalog, slots = slots, recast = recast, inputs = inputs, est = est, blocker = blocker, tierEstimates = tierEstimates,
@@ -215,6 +239,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
                     setTab = { t -> store.sheet.update { it?.copy(tab = t) } }, open = { open(it) }, close = { open(null) }, onMove = ::onMove,
                     onPickSlot = { id -> pickFile(id) }, onClearSlot = { id -> store.composerSlots.update { it.clear(id) } },
                     onPickCharacter = { id, o -> pickCharacter(id, o) }, onGenerate = ::generate, onStoryboard = { nav.go(Routes.SUITE_STORYBOARD) },
+                    frame = frame, onTapFace = ::tapFace,
                 ))
             }
         }

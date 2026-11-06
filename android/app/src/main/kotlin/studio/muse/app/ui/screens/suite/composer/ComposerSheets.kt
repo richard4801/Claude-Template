@@ -22,6 +22,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -82,6 +84,10 @@ class SheetContext(
     val onPickCharacter: (String?, String?) -> Unit,
     val onGenerate: () -> Unit,
     val onStoryboard: () -> Unit,
+    /** Recast: where the clip's first frame comes from (null = no clip yet). */
+    val frame: FrameSource? = null,
+    /** Recast: a tap on the first frame → the person's index (null = full). */
+    val onTapFace: (android.graphics.Bitmap, Float, Float) -> Int? = { _, _, _ -> null },
 ) {
     val cam: CameraCatalog get() = catalog?.camera ?: CameraCatalog()
 }
@@ -414,22 +420,47 @@ private fun ColumnScope.TokenBody(tok: PromptPart, x: SheetContext) {
 private fun ColumnScope.PeopleBody(x: SheetContext) {
     val m = muse
     val r = x.recast
+    val max = (x.catalog?.recastMaxPeople ?: SuiteRules.MAX_CAST).coerceIn(1, SuiteRules.MAX_CAST)
+    var active by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
+    val frame = rememberFirstFrame(x.frame)
     Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        T("Who in the clip becomes whom · up to ${x.catalog?.recastMaxPeople ?: SuiteRules.MAX_CAST}", m.type.body.copy(fontSize = 13.sp), m.t.muted)
+        if (x.frame != null) {
+            SheetLabel("Tap a face", "${r.people.count { it.tap != null }} / $max")
+            FacePicker(frame, r.people, active, max, { fx, fy -> frame?.let { b -> x.onTapFace(b, fx, fy)?.let { active = it } } },
+                Modifier.align(Alignment.CenterHorizontally), maxHeight = if (x.wide) 260.dp else 300.dp)
+            T("Tap each face to replace, then pick who replaces them · or use the position chips", m.type.body.copy(fontSize = 13.sp), m.t.muted)
+        } else T("Who in the clip becomes whom · up to $max", m.type.body.copy(fontSize = 13.sp), m.t.muted)
         r.people.forEachIndexed { i, p ->
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(m.t.surface).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    T("Person ${i + 1}", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, Modifier.weight(1f))
-                    if (r.people.size > 1) Box(Modifier.heightIn(min = 48.dp).press { x.updateRecast { it.remove(i) } }, contentAlignment = Alignment.Center) { T("Remove", m.type.tiny, m.t.muted) }
+            val on = i == active && r.people.size > 1
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(m.t.surface).let { if (on) it.border(2.dp, m.t.accent, RoundedCornerShape(12.dp)) else it }
+                .press { active = i }.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (p.tap != null) FaceBadge(i + 1)
+                    if (p.faceCrop != null) RefImage(p.faceCrop, Modifier.size(32.dp).clip(RoundedCornerShape(6.dp)), 50)
+                    Column(Modifier.weight(1f)) {
+                        T("Person ${i + 1}", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
+                        val where = when {
+                            p.cropping -> "Saving the face…"
+                            p.tap != null && !p.hintPicked -> "Face picked · ${RecastDraft.hintLabel(p.hint).lowercase()} of the frame"
+                            p.tap != null -> "Face picked"
+                            else -> "No face tapped · ${RecastDraft.hintLabel(p.hint).lowercase()}"
+                        }
+                        T(where, m.type.body.copy(fontSize = 12.sp), m.t.muted, maxLines = 1)
+                    }
+                    if (p.tap != null) Box(Modifier.heightIn(min = 48.dp).press { x.updateRecast { it.clearTap(i) } }.semantics { role = Role.Button; contentDescription = "Clear face ${i + 1}" }, contentAlignment = Alignment.Center) {
+                        T("Clear face", m.type.tiny, m.t.muted)
+                    }
+                    if (r.people.size > 1) Box(Modifier.heightIn(min = 48.dp).press { x.updateRecast { it.remove(i) }; active = 0 }, contentAlignment = Alignment.Center) { T("Remove", m.type.tiny, m.t.muted) }
                 }
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    RecastDraft.HINTS.forEach { h -> DarkChip(RecastDraft.hintLabel(h), p.hint == h) { x.updateRecast { it.update(i) { q -> q.copy(hint = h) } } } }
+                    RecastDraft.HINTS.forEach { h -> DarkChip(RecastDraft.hintLabel(h), p.hint == h) { x.updateRecast { it.pickHint(i, h) } } }
                 }
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     x.models.forEach { mod ->
-                        val on = mod.id == p.characterId
-                        Row(Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(10.dp)).background(m.t.surface2).let { if (on) it.border(2.dp, m.t.accent, RoundedCornerShape(10.dp)) else it }
-                            .press { x.updateRecast { it.update(i) { q -> q.copy(characterId = mod.id, outfitId = null) } } }.padding(6.dp),
+                        val picked = mod.id == p.characterId
+                        Row(Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(10.dp)).background(m.t.surface2).let { if (picked) it.border(2.dp, m.t.accent, RoundedCornerShape(10.dp)) else it }
+                            .press { x.updateRecast { it.update(i) { q -> q.copy(characterId = mod.id, outfitId = null) } }; active = i }
+                            .semantics(mergeDescendants = true) { selected = picked; role = Role.Button; contentDescription = "Person ${i + 1} becomes ${mod.name}" }.padding(6.dp),
                             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             RefImage(mod.cover, Modifier.size(30.dp, 38.dp).clip(RoundedCornerShape(4.dp)))
                             T(mod.name, m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
@@ -444,7 +475,7 @@ private fun ColumnScope.PeopleBody(x: SheetContext) {
                 }
             }
         }
-        if (r.canAdd) Box(Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(25.dp)).border(1.dp, m.t.line, RoundedCornerShape(25.dp)).press { x.updateRecast { it.add() } }, contentAlignment = Alignment.Center) {
+        if (r.canAdd(max)) Box(Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(25.dp)).border(1.dp, m.t.line, RoundedCornerShape(25.dp)).press { x.updateRecast { it.add() }; active = r.people.size }, contentAlignment = Alignment.Center) {
             T("Add a person", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink)
         }
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).press { x.updateRecast { it.copy(keepAudio = !it.keepAudio) } }, verticalAlignment = Alignment.CenterVertically) {

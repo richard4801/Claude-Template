@@ -229,6 +229,8 @@ data class SuiteCastMember(
     val personHint: String? = null,
     val personNote: String? = null,
     val speaking: Boolean? = null,
+    /** Who to replace: a square crop of their face from the clip's first frame ("tap a face"). */
+    val faceCrop: ImageRef? = null,
 )
 
 /** POST /v1/suite/shots[/estimate]. Nulls are left out, so the server's defaults apply. */
