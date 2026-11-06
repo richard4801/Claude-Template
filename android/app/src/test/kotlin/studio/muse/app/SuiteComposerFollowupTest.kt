@@ -15,6 +15,19 @@ import studio.muse.app.ui.screens.suite.FaceCrop
 import studio.muse.app.ui.screens.suite.FaceMath
 import studio.muse.app.ui.screens.suite.RecastDraft
 import studio.muse.app.ui.screens.suite.RecastPerson
+import studio.muse.app.ui.screens.suite.InputSlots
+import studio.muse.app.ui.screens.suite.SlotValue
+import studio.muse.app.ui.screens.suite.composer.ComposerDraft
+import studio.muse.app.ui.screens.suite.composer.ComposerSettings
+import studio.muse.app.ui.screens.suite.composer.ComposerTool
+import studio.muse.app.ui.screens.suite.composer.ToolSlots
+import studio.muse.app.data.SuiteCatalog
+import studio.muse.app.data.SuiteInputs
+import studio.muse.app.data.SuiteMediaRef
+import studio.muse.app.data.SuiteShotRequest
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /** The composer's follow-ups (AI suite, workstream 1): tap a face, swap add-ons, the era slider, UGC formats, @location, reorder, the engine pin. */
 class SuiteComposerFollowupTest {
@@ -102,5 +115,63 @@ class SuiteComposerFollowupTest {
         // Without a face picker the old rule holds.
         assertFalse(RecastDraft().add().people.map { it.hint }.toSet().size != 2)
         assertNotNull(RecastDraft(clipId = "c", people = listOf(RecastPerson("left", "x"), RecastPerson("left", "y"))).problem())
+    }
+
+    // ---------------------------------------------------------------- catalog tools, Talking and UGC ad requests
+
+    private val decoder = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true; coerceInputValues = true }
+    private fun res(name: String) = javaClass.getResource("/suite/$name.json")!!.readText()
+
+    @Test fun `the catalog's tools drive Coming soon, and an older catalog keeps the built-in list`() {
+        val cat = decoder.decodeFromString(SuiteCatalog.serializer(), res("suite_catalog_member"))
+        assertEquals(listOf("shot", "swap", "recast", "storyboard", "talking", "ugc_ad", "extend"), cat.tools!!.map { it.id })
+        assertTrue(ComposerTool.TALKING.isLive(cat)); assertTrue(ComposerTool.UGC.isLive(cat)); assertFalse(ComposerTool.EXTEND.isLive(cat))
+        assertTrue(cat.tools!!.last().comingSoon)
+        val off = decoder.decodeFromString(SuiteCatalog.serializer(), res("suite_catalog_off_owner"))
+        assertFalse(ComposerTool.SHOT.isLive(off))
+        val old = decoder.decodeFromString(SuiteCatalog.serializer(), """{"enabled":true,"tiers":[]}""")
+        assertNull(old.tools)
+        assertTrue(ComposerTool.SHOT.isLive(old)); assertFalse(ComposerTool.UGC.isLive(old)); assertFalse(ComposerTool.TALKING.isLive(old))
+        assertTrue(ComposerTool.SHOT.isLive(null))
+        assertEquals(ComposerTool.UGC, ComposerTool.of("ugc_ad"))
+        // The demo catalog says the same as the server's mock mode.
+        assertTrue(ComposerTool.UGC.isLive(fake.catalog(owner = false)))
+    }
+
+    @Test fun `Talking sends the audio as a reference, the speaking switch and an optional location photo`() {
+        val d = ComposerDraft(tool = ComposerTool.TALKING, modelId = SampleData.DEMO, quality = "standard")
+        val none = InputSlots()
+        assertEquals("Add the audio", d.problem(none, RecastDraft(), none))
+        assertEquals("Pick who talks", d.copy(modelId = null).problem(none, RecastDraft(), none))
+        val own = none.put(ToolSlots.TALK_AUDIO, SlotValue("line.m4a", media = SuiteMediaRef(key = "u/line.m4a")))
+        assertEquals("Waiting for the upload", d.problem(none, RecastDraft(), own.put(ToolSlots.TALK_LOCATION, SlotValue("cafe.jpg", progress = .4f))))
+        assertNull(d.problem(none, RecastDraft(), own))
+        val r = d.request(none, SuiteInputs(), RecastDraft(), own)
+        assertEquals(SampleData.DEMO, r.modelId)
+        assertEquals("u/line.m4a", r.references!!.audio!!.audio.key)
+        assertNull(r.references!!.images)
+        assertEquals(true, r.speaking)
+        assertEquals(false, d.copy(speaking = false).request(none, SuiteInputs(), RecastDraft(), own).speaking)
+        val withPlace = d.request(none, SuiteInputs(), RecastDraft(), own.put(ToolSlots.TALK_LOCATION, SlotValue("cafe.jpg", image = ImageRef(url = "/uploads/cafe.jpg"))))
+        val img = withPlace.references!!.images!!.single()
+        assertEquals("location", img.role); assertEquals("cafe", img.label); assertEquals("/uploads/cafe.jpg", img.image.url)
+        assertTrue(json.encodeToString(SuiteShotRequest.serializer(), r).contains("\"audio\":{\"audio\":{\"key\":\"u/line.m4a\"}}"))
+    }
+
+    @Test fun `UGC ad sends the product photo, an optional reference ad and the format`() {
+        val d = ComposerDraft(tool = ComposerTool.UGC, modelId = SampleData.DEMO, settings = ComposerSettings(format = "unboxing"))
+        val none = InputSlots()
+        assertEquals("Add the product photo", d.problem(none, RecastDraft(), none))
+        val own = none.put(ToolSlots.UGC_PRODUCT, SlotValue("serum.png", image = ImageRef(url = "/uploads/serum.png")))
+        assertNull(d.problem(none, RecastDraft(), own))
+        val r = d.request(none, SuiteInputs(), RecastDraft(), own)
+        val img = r.references!!.images!!.single()
+        assertEquals("product", img.role); assertEquals("serum", img.label)
+        assertNull(r.references!!.videos)
+        assertEquals("unboxing", (r.camera as JsonObject)["style"]!!.jsonObject["format"]!!.jsonPrimitive.content)
+        val ad = d.request(none, SuiteInputs(), RecastDraft(), own.put(ToolSlots.UGC_REFAD, SlotValue("ad.mp4", media = SuiteMediaRef(key = "u/ad.mp4"))))
+        val v = ad.references!!.videos!!.single()
+        assertEquals("u/ad.mp4", v.video.key); assertEquals("style", v.use)
+        assertNull(ad.speaking)
     }
 }

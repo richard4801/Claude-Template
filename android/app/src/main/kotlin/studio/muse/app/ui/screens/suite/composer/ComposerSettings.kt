@@ -34,6 +34,8 @@ data class ComposerSettings(
     val genre: String? = null,
     val era: String? = null,
     val tempo: String? = null,
+    /** UGC ad: the ad format (catalog `ugcFormats`: unboxing, review, try_on…), sent as `camera.style.format`. */
+    val format: String? = null,
     // Look: a palette and/or a film stock, and whether the take is graded with it (on by default)
     val palette: String? = null,
     val stock: String? = null,
@@ -46,7 +48,7 @@ data class ComposerSettings(
     /** "Reset all" in a picker: that chip back to Auto. */
     fun reset(chip: ComposerChip): ComposerSettings = when (chip) {
         ComposerChip.REFERENCES -> this
-        ComposerChip.STYLE -> copy(genre = null, era = null, tempo = null)
+        ComposerChip.STYLE -> copy(genre = null, era = null, tempo = null, format = null)
         ComposerChip.CAMERA -> copy(body = null, lens = null, focalMm = null, aperture = null, height = null, shotSize = null)
         ComposerChip.LOOK -> copy(palette = null, stock = null, gradeLook = true)
         ComposerChip.LIGHTING -> copy(lighting = null)
@@ -55,7 +57,7 @@ data class ComposerSettings(
     /** The picker's left-rail dot: does this chip have any non-Auto value? */
     fun isSet(chip: ComposerChip): Boolean = when (chip) {
         ComposerChip.REFERENCES -> false
-        ComposerChip.STYLE -> genre != null || era != null || tempo != null
+        ComposerChip.STYLE -> genre != null || era != null || tempo != null || format != null
         ComposerChip.CAMERA -> body != null || lens != null || focalMm != null || aperture != null || height != null || shotSize != null
         ComposerChip.LOOK -> palette != null || stock != null
         ComposerChip.LIGHTING -> lighting != null
@@ -99,7 +101,7 @@ data class ComposerSettings(
             palette?.let { put("palette", buildJsonObject { put("preset", it) }) }
             val angle = buildJsonObject { height?.let { put("height", it) }; shotSize?.let { put("shotSize", it) } }
             if (angle.isNotEmpty()) put("angle", angle)
-            val style = buildJsonObject { genre?.let { put("genre", it) }; era?.let { put("era", it) }; tempo?.let { put("tempo", it) } }
+            val style = buildJsonObject { genre?.let { put("genre", it) }; era?.let { put("era", it) }; tempo?.let { put("tempo", it) }; format?.let { put("format", it) } }
             if (style.isNotEmpty()) put("style", style)
             moves.getOrNull(0)?.let { put("move", it.wire()) }
             moves.getOrNull(1)?.let { put("mix", it.wire()) }
@@ -158,7 +160,7 @@ object ComposerCatalog {
     fun summary(chip: ComposerChip, s: ComposerSettings, cat: CameraCatalog, refs: Int = 0, refsMax: Int = 0): ChipSummary {
         val values: List<String> = when (chip) {
             ComposerChip.REFERENCES -> return ChipSummary(chip, emptyList(), refs == 0, "$refs/$refsMax")
-            ComposerChip.STYLE -> listOfNotNull(label(cat.genres, s.genre), label(cat.eras, s.era), label(cat.tempos, s.tempo))
+            ComposerChip.STYLE -> listOfNotNull(label(cat.ugcFormats, s.format), label(cat.genres, s.genre), label(cat.eras, s.era), label(cat.tempos, s.tempo))
             ComposerChip.CAMERA -> listOfNotNull(
                 label(cat.bodies, s.body), label(cat.lenses, s.lens), s.focalMm?.let { focalLabel(cat, it) },
                 label(cat.apertures, s.aperture), label(cat.heights, s.height), label(cat.shotSizes, s.shotSize),

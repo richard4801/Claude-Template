@@ -129,21 +129,27 @@ fun SuiteComposerScreen(toolId: String? = null) {
     if (catalog != null && !catalog.enabled) { SuiteOffScreen(d.tool.title); return }
     val camCat = catalog?.camera ?: studio.muse.app.data.CameraCatalog()
     val inputs = catalog?.tier(d.quality)?.slots ?: SuiteInputs.NONE
-    val req = d.request(slots, inputs, recast)
-    val problem = d.problem(slots, recast)
-    val (est, estErr) = rememberEstimate(req.takeIf { problem == null && d.tool.live }, catalog?.enabled == true)
+    val talkingSlots by store.talkingSlots.collectAsState()
+    val ugcSlots by store.ugcSlots.collectAsState()
+    val ownFlow = if (d.tool == ComposerTool.TALKING) store.talkingSlots else store.ugcSlots
+    val own = when (d.tool) { ComposerTool.TALKING -> talkingSlots; ComposerTool.UGC -> ugcSlots; else -> studio.muse.app.ui.screens.suite.InputSlots() }
+    val live = d.tool.isLive(catalog)
+    val req = d.request(slots, inputs, recast, own)
+    val problem = d.problem(slots, recast, own)
+    val (est, estErr) = rememberEstimate(req.takeIf { problem == null && live }, catalog?.enabled == true)
     val blocker = ComposerPrice.blocker(problem, est, estErr)
     val owner = store.owner || prefs.owner
     val wantTiers = sheet?.kind == SheetKind.SETTINGS || d.collapsed
     val tierEstimates = (catalog?.tiers?.map { it.id } ?: SuiteRules.TIERS).associateWith { t ->
-        rememberEstimate(req.copy(quality = t).takeIf { wantTiers && problem == null && d.tool.live }, catalog?.enabled == true).first
+        rememberEstimate(req.copy(quality = t).takeIf { wantTiers && problem == null && live }, catalog?.enabled == true).first
     }
     val uploader = remember(c) { InputSlotUploader(c) }
     val pickFile = rememberInputSlotPicker { id, uri -> scope.launch { uploader.upload(store.composerSlots, id, uri) } }
+    val pickOwn = rememberInputSlotPicker { id, uri -> scope.launch { uploader.upload(ownFlow, id, uri) } }
     fun update(f: (ComposerDraft) -> ComposerDraft) = store.composer.update(f)
     fun open(s: ComposerSheet?) { store.sheet.value = s }
     fun generate() {
-        if (!d.tool.live) { c.repo.toast("${d.tool.title} is coming soon"); return }
+        if (!live) { c.repo.toast("${d.tool.title} is coming soon"); return }
         if (blocker != null) { c.repo.toast(blocker); return }
         if (est == null) return
         open(null)
@@ -163,12 +169,12 @@ fun SuiteComposerScreen(toolId: String? = null) {
     }
     fun onSlot(s: ToolSlot) {
         when (s.kind) {
-            "character" -> if (d.tool.live || d.tool == ComposerTool.TALKING || d.tool == ComposerTool.UGC) open(ComposerSheet(SheetKind.CHARACTER))
+            "character" -> if (live || d.tool == ComposerTool.TALKING || d.tool == ComposerTool.UGC) open(ComposerSheet(SheetKind.CHARACTER))
             "start" -> pickFile(SlotId(SlotKind.START))
             "end" -> if (s.enabled) pickFile(SlotId(SlotKind.END)) else c.repo.toast("Add a start frame first")
             "clip" -> if (recast.clipId == null && c.repo.demo) store.recast.update { it.copy(clipId = SampleData.SAMPLE_CLIP) } else nav.go(Routes.SOURCE)
             "people" -> open(ComposerSheet(SheetKind.PEOPLE))
-            else -> c.repo.toast("${d.tool.title} is coming soon")
+            else -> ToolSlots.ownSlot(d.tool, s.kind)?.takeIf { live }?.let { pickOwn(it) } ?: c.repo.toast("${d.tool.title} is coming soon")
         }
     }
     // Recast's "tap a face": the clip's first frame (the picked file, else its thumb; demo: the sample's stand-in still).
@@ -197,7 +203,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
     }
     val job = started.lastOrNull()?.let { id -> st.jobs.firstOrNull { it.id == id } }
     val ui = ComposerUi(
-        d = d, cat = camCat, catalog = catalog, slots = slots, recast = recast, inputs = inputs, est = est, blocker = blocker, tierEstimates = tierEstimates,
+        d = d, cat = camCat, catalog = catalog, slots = slots, recast = recast, inputs = inputs, est = est, blocker = blocker, tierEstimates = tierEstimates, live = live, own = own,
         lead = st.model(d.characterId), clipName = recast.clipId?.let { id -> video.clip?.takeIf { it.id == id }?.name ?: if (id == SampleData.SAMPLE_CLIP) SampleData.sampleMeta.name else "Your clip" },
         models = st.models, outfits = st.outfitsOf(d.characterId),
         update = ::update, open = ::open, onGenerate = ::generate, onSlot = ::onSlot, onClearSlot = { k ->
@@ -206,6 +212,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
                 "end" -> store.composerSlots.update { it.clear(SlotId(SlotKind.END)) }
                 "character" -> pickCharacter(null, null)
                 "clip" -> store.recast.update { it.copy(clipId = null) }
+                else -> ToolSlots.ownSlot(d.tool, k)?.let { id -> ownFlow.update { it.clear(id) } }
             }
         },
         onPick = { base, at, sg ->
@@ -234,7 +241,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
             }
             sheet?.let { sh ->
                 ComposerSheetHost(sh, SheetContext(
-                    d = d, catalog = catalog, slots = slots, recast = recast, models = st.models, outfitsOf = { st.outfitsOf(it) }, owner = owner, wide = wide,
+                    d = d, catalog = catalog, slots = slots, recast = recast, models = st.models, outfitsOf = { st.outfitsOf(it) }, owner = owner, wide = wide, live = live,
                     estimate = est, blocker = blocker, tierEstimates = tierEstimates, update = ::update, updateRecast = { f -> store.recast.update(f) },
                     setTab = { t -> store.sheet.update { it?.copy(tab = t) } }, open = { open(it) }, close = { open(null) }, onMove = ::onMove,
                     onPickSlot = { id -> pickFile(id) }, onClearSlot = { id -> store.composerSlots.update { it.clear(id) } },
@@ -257,6 +264,10 @@ class ComposerUi(
     val est: SuiteEstimate?,
     val blocker: String?,
     val tierEstimates: Map<String, SuiteEstimate?>,
+    /** The tool can Generate now (catalog `tools`). */
+    val live: Boolean,
+    /** Talking's or UGC ad's own slots. */
+    val own: studio.muse.app.ui.screens.suite.InputSlots,
     val lead: studio.muse.app.data.Model?,
     val clipName: String?,
     val models: List<studio.muse.app.data.Model>,
@@ -272,7 +283,7 @@ class ComposerUi(
     val showPrompt: Boolean get() = d.tool == ComposerTool.SHOT || d.tool == ComposerTool.TALKING || d.tool == ComposerTool.UGC || (d.tool == ComposerTool.SWAP && d.swapPrompt)
     /** Before anything is typed or picked: the preset row shows under the composer. */
     val empty: Boolean get() = d.tool == ComposerTool.SHOT && d.tokens.isEmpty && d.characterId == null && slots.isEmpty && d.settings.preset == null
-    val canGo: Boolean get() = d.tool.live && blocker == null && est != null
+    val canGo: Boolean get() = live && blocker == null && est != null
 }
 
 // ---------------------------------------------------------------- phone
@@ -307,7 +318,7 @@ private fun PhoneComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent
 @Composable
 private fun PhoneBar(ui: ComposerUi) {
     val m = muse
-    if (!ui.d.tool.live) { ComingSoonLine(ui); return }
+    if (!ui.live) { ComingSoonLine(ui); return }
     ui.blocker?.takeIf { !ui.empty }?.let { T(it, m.type.tiny, m.t.muted, maxLines = 2) }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         BarButton(Modifier.press { ui.open(ComposerSheet(SheetKind.SETTINGS)) }.semantics { contentDescription = "Quality ${SuiteRules.tierLabel(ui.d.quality)}"; role = Role.Button }) {
@@ -369,7 +380,7 @@ private fun ToolRow(ui: ComposerUi, wide: Boolean) {
             T(d.cardTagline(ui.cat), m.type.body.copy(fontSize = 13.5.sp), m.t.muted, maxLines = 1)
         } else Column(Modifier.weight(1f)) {
             T(d.cardTitle(ui.cat).uppercase(), m.type.mono.copy(fontSize = 11.5.sp, letterSpacing = .14.em, fontWeight = FontWeight.Medium), m.t.ink, maxLines = 1)
-            T(if (d.tool.live) d.cardTagline(ui.cat) else "Coming soon · ${d.tool.tagline}", m.type.body.copy(fontSize = 13.sp), m.t.muted, maxLines = 1)
+            T(if (ui.live) d.cardTagline(ui.cat) else "Coming soon · ${d.tool.tagline}", m.type.body.copy(fontSize = 13.sp), m.t.muted, maxLines = 1)
         }
         val shape = RoundedCornerShape(if (m.isA) 0.dp else 8.dp)
         Box(Modifier.heightIn(min = 48.dp).press { ui.open(ComposerSheet(SheetKind.TOOLS)) }.semantics { contentDescription = "Change tool"; role = Role.Button }, contentAlignment = Alignment.Center) {
@@ -380,7 +391,7 @@ private fun ToolRow(ui: ComposerUi, wide: Boolean) {
         }
         if (wide) {
             Spacer(Modifier.weight(1f))
-            if (!d.tool.live) T("Coming soon", m.type.tiny, m.t.muted)
+            if (!ui.live) T("Coming soon", m.type.tiny, m.t.muted)
         }
     }
 }
@@ -447,14 +458,14 @@ private fun SwapPromptToggle(ui: ComposerUi) {
 @Composable
 private fun SlotCard(ui: ComposerUi, s: ToolSlot, modifier: Modifier) {
     val m = muse
-    val enabled = s.enabled && (ui.d.tool.live || s.kind == "character")
+    val enabled = s.enabled && (ui.live || s.kind == "character")
     val filled: Pair<studio.muse.app.data.ImageRef?, String>? = when (s.kind) {
         "character" -> ui.lead?.let { l -> (ui.outfits.firstOrNull { it.id == ui.d.characterOutfit }?.front ?: l.cover) to l.name.substringBefore(' ') }
         "start" -> ui.slots[SlotId(SlotKind.START)]?.let { v -> (v.image ?: v.preview?.let { studio.muse.app.data.ImageRef(url = it) }) to s.label }
         "end" -> ui.slots[SlotId(SlotKind.END)]?.let { v -> (v.image ?: v.preview?.let { studio.muse.app.data.ImageRef(url = it) }) to s.label }
         "clip" -> ui.recast.clipId?.let { null to (ui.clipName ?: "Clip") }
         "people" -> ui.recast.people.takeIf { p -> p.any { it.characterId != null } }?.let { p -> null to "${p.size} ${if (p.size == 1) "person" else "people"}" }
-        else -> null
+        else -> ToolSlots.ownSlot(ui.d.tool, s.kind)?.let { ui.own[it] }?.let { v -> (if (v.image != null || v.preview != null) (v.image ?: studio.muse.app.data.ImageRef(url = v.preview)) else null) to (v.error ?: if (v.uploading) "Uploading…" else v.name.ifBlank { s.label }) }
     }
     val shape = RoundedCornerShape(if (m.isA) 0.dp else 10.dp)
     val sub = when {
@@ -486,7 +497,7 @@ private fun SlotCard(ui: ComposerUi, s: ToolSlot, modifier: Modifier) {
             T(if (filled != null && !onImg) filled.second else sub, m.type.body.copy(fontSize = 10.5.sp, lineHeight = 13.sp), if (onImg) Color(0xFFE7E1D6) else m.t.muted, maxLines = if (onImg) 1 else 2,
                 align = if (onImg) null else TextAlign.Center)
         }
-        if (filled != null && s.kind in setOf("character", "start", "end", "clip")) {
+        if (filled != null && s.kind in setOf("character", "start", "end", "clip", "audio", "location", "product", "refad")) {
             Box(Modifier.align(Alignment.TopEnd).size(48.dp).press { ui.onClearSlot(s.kind) }.semantics { contentDescription = "Remove ${s.label}"; role = Role.Button }, contentAlignment = Alignment.Center) {
                 Box(Modifier.size(20.dp).clip(CircleShape).background(Color(0x8C0E0C0A)), contentAlignment = Alignment.Center) { SIc("close", 11.dp, Color(0xFFF8F5EF)) }
             }
@@ -649,7 +660,7 @@ private fun WideBar(ui: ComposerUi) {
     val m = muse
     val d = ui.d
     Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (!d.tool.live) { Box(Modifier.weight(1f)) { ComingSoonLine(ui) }; return@Row }
+        if (!ui.live) { Box(Modifier.weight(1f)) { ComingSoonLine(ui) }; return@Row }
         Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             val tiers = ui.catalog?.tiers?.ifEmpty { null }?.map { it.id } ?: SuiteRules.TIERS
             MenuPill("gauge", SuiteRules.tierLabel(d.quality), "Quality", tiers.map { t -> "${SuiteRules.tierLabel(t)} · ${ComposerPrice.short(ui.tierEstimates[t])}" to (t == d.quality) }) { i -> ui.update { it.copy(quality = tiers[i]).fit(ui.catalog) } }

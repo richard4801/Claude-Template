@@ -98,7 +98,8 @@ fun SuiteHubScreen() {
                 if (err != null && catalog == null) NoteBox(err!!, warn = true) { T("Try again", m.type.tiny.copy(fontWeight = FontWeight.Bold), m.t.accent, Modifier.press { scope.launch { store.load() } }) }
                 SUITE_MODES.chunked(2).forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        row.forEach { mode -> ModeTile(mode, Modifier.weight(1f)) { nav.go(mode.route) } }
+                        // "Coming soon" follows the catalog's `tools` (an older catalog: the built-in list).
+                        row.forEach { mode -> ModeTile(mode.copy(soon = !(catalog?.toolAvailable(if (mode.id == "ugc") "ugc_ad" else mode.id, !mode.soon) ?: !mode.soon)), Modifier.weight(1f)) { nav.go(mode.route) } }
                     }
                 }
                 LinkCard("cube", "Camera stage", "Direct the camera in Blender · Directed mode") { nav.go(Routes.CAMERA_STAGE) }

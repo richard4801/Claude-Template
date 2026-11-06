@@ -90,6 +90,8 @@ data class CameraCatalog(
     val eras: List<SuiteOption> = emptyList(),
     val tempos: List<SuiteOption> = emptyList(),
     val emotions: List<String> = emptyList(),
+    /** UGC ad: the ad formats (unboxing, review, try_on…), sent as `camera.style.format`. Older catalogs: none. */
+    val ugcFormats: List<SuiteOption> = emptyList(),
 ) {
     fun move(id: String?) = moves.firstOrNull { it.id == id }
     fun libraryMove(id: String?) = library.firstOrNull { it.id == id }
@@ -150,6 +152,17 @@ data class SuiteTier(
     fun slotsFor(engineModel: String?): SuiteInputs = engineModel?.let { id -> models?.firstOrNull { it.model == id }?.inputs } ?: slots
 }
 
+/** A composer tool the server offers now (`catalog.tools`): shot, swap, recast, storyboard, talking, ugc_ad, extend. */
+@Serializable
+data class SuiteToolInfo(val id: String, val available: Boolean = false, val comingSoon: Boolean = false)
+
+/** A place in the studio's locations library (`@location` in the prompt). GET/POST/DELETE /v1/suite/locations. */
+@Serializable
+data class SuiteLocation(val id: String, val name: String = "", val image: ImageRef = ImageRef(), val createdAt: Long = 0)
+
+@Serializable
+data class SuiteLocationCreate(val name: String, val image: ImageRef)
+
 /** GET /v1/suite/catalog. `enabled` false = the server's SUITE_MODE is off; `test` = mock renders (free). */
 @Serializable
 data class SuiteCatalog(
@@ -162,8 +175,12 @@ data class SuiteCatalog(
     val aspectRatios: List<String> = emptyList(),
     val takesMax: Int = 4,
     val camera: CameraCatalog = CameraCatalog(),
+    /** Which composer tools are live; null = an older server (the apps' built-in list applies). */
+    val tools: List<SuiteToolInfo>? = null,
 ) {
     fun tier(id: String?) = tiers.firstOrNull { it.id == id }
+    /** Whether a tool can Generate: the catalog's word, else [fallback]. */
+    fun toolAvailable(id: String, fallback: Boolean): Boolean = tools?.firstOrNull { it.id == id }?.available ?: fallback
 }
 
 // ---------------------------------------------------------------- the request

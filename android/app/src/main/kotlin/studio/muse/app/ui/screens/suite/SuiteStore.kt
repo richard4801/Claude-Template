@@ -28,6 +28,9 @@ class SuiteStore(private val c: AppContainer) {
     /** The video composer (every tool is a preset of it), its filled input slots and the open picker sheet. */
     val composer = MutableStateFlow(ComposerDraft())
     val composerSlots = MutableStateFlow(InputSlots())
+    /** Talking's own slots (audio, location photo) and UGC ad's (product photo, reference ad): ToolSlots.TALK_* / UGC_*. */
+    val talkingSlots = MutableStateFlow(InputSlots())
+    val ugcSlots = MutableStateFlow(InputSlots())
     val sheet = MutableStateFlow<ComposerSheet?>(null)
     /** The clip and people of Character swap and Recast (the composer's quality and takes are used). */
     val recast = MutableStateFlow(RecastDraft())

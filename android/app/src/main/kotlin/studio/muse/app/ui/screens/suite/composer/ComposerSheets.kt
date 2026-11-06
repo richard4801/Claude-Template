@@ -70,6 +70,8 @@ class SheetContext(
     val outfitsOf: (String?) -> List<studio.muse.app.data.Outfit>,
     val owner: Boolean,
     val wide: Boolean,
+    /** The tool can Generate now (catalog `tools`). */
+    val live: Boolean,
     val estimate: SuiteEstimate?,
     val blocker: String?,
     val tierEstimates: Map<String, SuiteEstimate?>,
@@ -238,7 +240,7 @@ private fun ColumnScope.SettingsBody(x: SheetContext) {
 @Composable
 private fun ColumnScope.SettingsFooter(x: SheetContext) {
     val m = muse
-    if (!x.d.tool.live) { T("Coming soon · ${x.d.tool.title} has no Generate yet", m.type.body.copy(fontSize = 14.sp), m.t.muted, Modifier.fillMaxWidth().padding(vertical = 14.dp), align = TextAlign.Center); return }
+    if (!x.live) { T("Coming soon · ${x.d.tool.title} has no Generate yet", m.type.body.copy(fontSize = 14.sp), m.t.muted, Modifier.fillMaxWidth().padding(vertical = 14.dp), align = TextAlign.Center); return }
     x.blocker?.let { T(it, m.type.tiny, m.t.warn, Modifier.fillMaxWidth().padding(bottom = 6.dp), align = TextAlign.Center, maxLines = 2) }
     val off = x.blocker != null || x.estimate == null
     Box(Modifier.fillMaxWidth().height(54.dp).clip(RoundedCornerShape(27.dp)).background(m.t.accent.copy(alpha = if (off) .45f else 1f)).press { x.onGenerate() }
@@ -312,13 +314,13 @@ private fun ColumnScope.ToolsBody(x: SheetContext) {
                     Column(Modifier.weight(1f).picked(on, m.t.accent).clip(RoundedCornerShape(10.dp)).background(m.t.surface).press { x.update { it.withTool(t) }; x.close() }
                         .semantics(mergeDescendants = true) { selected = on; role = Role.Button }) {
                         PreviewTile(Preview(t.render), Modifier.fillMaxWidth().height(70.dp)) {
-                            if (!t.live) Box(Modifier.align(Alignment.TopEnd).padding(6.dp).background(Color.Black.copy(alpha = .6f)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                            if (!t.isLive(x.catalog)) Box(Modifier.align(Alignment.TopEnd).padding(6.dp).background(Color.Black.copy(alpha = .6f)).padding(horizontal = 6.dp, vertical = 2.dp)) {
                                 T("SOON", m.type.mono.copy(fontSize = 9.5.sp, letterSpacing = .1.em), Color.White)
                             }
                         }
                         Column(Modifier.padding(10.dp)) {
                             T(t.title, m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
-                            T(if (t.live) t.tagline else "Coming soon", m.type.body.copy(fontSize = 12.sp), m.t.muted, maxLines = 1)
+                            T(if (t.isLive(x.catalog)) t.tagline else "Coming soon", m.type.body.copy(fontSize = 12.sp), m.t.muted, maxLines = 1)
                         }
                     }
                 }
