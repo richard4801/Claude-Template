@@ -397,7 +397,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   // Stored files. Keys are unguessable; image loaders in the apps can't send a bearer token.
   app.get('/uploads/*', { config: { public: true } }, async (req, reply) => {
     const key = (req.params as { '*': string })['*'];
-    if (!/^(u|c|g|r|l|t|assets)\/[A-Za-z0-9._\/-]+$/.test(key) || key.includes('..')) throw notFound('Upload');
+    // Every prefix the server writes and links as /uploads/<key>: s/ suite takes, cam/ camera-session stills, claude/ chat frames.
+    if (!/^(u|c|g|r|l|t|s|cam|claude|assets)\/[A-Za-z0-9._\/-]+$/.test(key) || key.includes('..')) throw notFound('Upload');
     if (ctx.storage.kind === 's3') {
       if (!(await ctx.storage.head(key))) throw notFound('Upload');
       return reply.redirect(await ctx.storage.presignGet(key, 3600), 302);
