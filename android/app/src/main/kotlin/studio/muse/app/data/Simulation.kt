@@ -52,8 +52,8 @@ object SampleData {
         Take("t_j2", "take", "j2", 1, 1, "Bathroom trend", "Edit", "Edit", 3.05, 42, "test", ImageRef.asset("c_front"), createdAt = now - 83_640_000),
         Take("t_g1", "take", null, 1, 1, "Living-room dance", "Edit", "Edit", 0.67, 42, "test", ImageRef.asset("g_tq"), createdAt = now - 90_000_000),
         Take("t_g5", "take", null, 1, 1, "Living-room dance", "Edit", "Edit", 0.99, 42, "test", ImageRef.asset("g_side"), createdAt = now - 95_000_000),
-        Take("t_g4", "shot", null, 1, 1, "Shoot", "Shoot", "", 0.03, 0, "test", ImageRef.asset("c_front"), createdAt = now - 96_000_000),
-        Take("t_g6", "shot", null, 1, 1, "Shoot", "Shoot", "", 0.03, 0, "test", ImageRef.asset("c_tq"), createdAt = now - 97_000_000),
+        Take("t_g4", "shot", null, 1, 1, "Photo", "Photo", "", 0.03, 0, "test", ImageRef.asset("c_front"), createdAt = now - 96_000_000),
+        Take("t_g6", "shot", null, 1, 1, "Photo", "Photo", "", 0.03, 0, "test", ImageRef.asset("c_tq"), createdAt = now - 97_000_000),
     )
 
     fun balance() = Balance(balance = 6.07, month = 18.93, today = 0.13, videos = 11, role = "owner", balanceSource = "studio", availableToSend = 4.17, studioBalance = 6.07, needsFirstTopUp = false)

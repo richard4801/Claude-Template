@@ -232,7 +232,7 @@ fun Cta2(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon:
 /** What TalkBack reads for an icon-only button (the icon's job, not its shape). Null: no default. */
 fun iconLabel(icon: String): String? = when (icon) {
     "back" -> "Back"; "close" -> "Close"; "more" -> "More options"; "bell" -> "Notifications"; "user" -> "Settings"
-    "plus" -> "Add"; "chev" -> "Next"; "quality" -> "Credit"; "grid" -> "Gallery"; "retry" -> "Retry"; "export" -> "Share"
+    "plus" -> "Add"; "chev" -> "Next"; "quality" -> "Credit"; "grid" -> "Library"; "retry" -> "Retry"; "export" -> "Share"
     "camera" -> "Photo"; "spark" -> "Prompt"; "play" -> "Play"; "upload" -> "Upload"; "check" -> "Done"
     else -> null
 }

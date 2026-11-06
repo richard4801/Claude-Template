@@ -158,7 +158,7 @@ class VideoEditorViewModel(private val c: AppContainer, private val takeId: Stri
             val target = take?.let { editTargetFor(it, takes) }
             if (target == null) { _ui.update { it.copy(phase = EditorPhase.Failed("This take has no video to edit", canRetry = false)) }; return@launch }
             sourceTakeId = target.source.id
-            _ui.update { it.copy(title = target.source.title, poster = target.source.thumb) }
+            _ui.update { it.copy(title = target.source.shownTitle, poster = target.source.thumb) }
             try {
                 val f = engine.fetchSource(target.source.videoUrl!!) { p -> _ui.update { it.copy(phase = EditorPhase.Loading(p)) } }
                 val i = engine.probe(f)
@@ -426,7 +426,7 @@ fun VideoEditorContent(
                 when (val ph = ui.phase) {
                     is EditorPhase.Loading -> Busy(if (ph.progress != null) "Getting the video · ${(ph.progress * 100).toInt()} %" else "Getting the video…", ph.progress, null, act)
                     is EditorPhase.Exporting -> Busy("Making your video on this phone · ${(ph.progress * 100).toInt()} %", ph.progress, "Cancel", act)
-                    is EditorPhase.Saving -> Busy("Saving to Gallery · ${(ph.progress * 100).toInt()} %", ph.progress, "Cancel", act)
+                    is EditorPhase.Saving -> Busy("Saving to Library · ${(ph.progress * 100).toInt()} %", ph.progress, "Cancel", act)
                     is EditorPhase.Failed -> {
                         NoteBox(ph.message, icon = "shield", warn = true)
                         if (ph.canRetry) Cta2("Try again", { act(EditorAction.Retry) }, Modifier.fillMaxWidth(), height = 46.dp)
@@ -593,7 +593,7 @@ fun EditVideoRow(take: studio.muse.app.data.Take, versions: List<studio.muse.app
             T("Edit video", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink)
             Tiny(when {
                 take.kind == "edit" -> "Edited version · change its cuts, the original stays"
-                versions.isNotEmpty() -> "${versions.size} edited version${if (versions.size == 1) "" else "s"} in Gallery · trim, split, speed, sound"
+                versions.isNotEmpty() -> "${versions.size} edited version${if (versions.size == 1) "" else "s"} in the Library · trim, split, speed, sound"
                 else -> "Trim, split, speed, sound · made on this phone, free"
             })
         }
