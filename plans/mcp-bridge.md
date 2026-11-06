@@ -106,9 +106,38 @@ If Desktop can't find `uvx`/`npx` (GUI apps don't inherit your shell PATH), use 
 
 **Cost of the in-app chat** (research §3.4.5, estimates ⚠): about $0.50–0.80 per directed shot on Opus 5.5 with caching (≈ 12 tool steps). The system prompt and tools are frozen and cached; each turn's volatile facts (revision, relay status) go into the user message; the conversation is stored append-only so the cache and thinking blocks stay valid. The owner's own Claude (b) costs MUSE nothing.
 
-## Auth: today and next
-- **Today:** owner personal access tokens (`muse_pat_…`, sha256 stored, revocable, optional expiry, refused for non-owners) in the `Authorization` header only (never a query string). `/mcp` answers 401 with `WWW-Authenticate: Bearer resource_metadata=…` and serves Protected Resource Metadata (RFC 9728) at `/.well-known/oauth-protected-resource` (with no authorization server listed yet). Browsers' `Origin` must match the API's own origin (DNS-rebinding protection). Rate limit 240 requests/min.
-- **Follow-up: OAuth 2.1** per the MCP authorization spec (2026-07-28): an authorization server (or Neon/Managed auth) with PKCE, resource indicators and audience-bound tokens; client registration through Client ID Metadata Documents; scopes `camera:read`, `camera:write`, `cast:read`, `assets:write`, `generate:estimate` (no `generate:run` for agents). That makes MUSE addable as a Claude custom connector (redirect `https://claude.ai/api/mcp/auth_callback`) without `mcp-remote`.
+## Auth (2026-11-06: OAuth 2.1 is live)
+- **OAuth 2.1** per the MCP authorization spec (2026-07-28), contract in `plans/api.md` "Claude on the owner's plan".
+  - Protected Resource Metadata (RFC 9728) points at MUSE's own authorization server (RFC 8414 metadata).
+  - PKCE S256 only; resource indicators; access tokens bound to `<base>/mcp` (1 h); rotating refresh tokens (30 days; reusing one revokes the connection).
+  - Clients: Client ID Metadata Documents, plus dynamic registration for clients that still use it. Redirects allowed: claude.ai and claude.com `/api/mcp/auth_callback`, and loopback for Claude Code.
+  - The consent page is MUSE's own: owner email + password. Members are refused.
+  - Scopes: `camera:read/write`, `edit:read/write`, `cast:read`, `assets:write`, `generate:estimate`. There is **no** `generate:run`.
+- **Personal access tokens** (`muse_pat_…`) keep working with every scope.
+- **Short-lived token for the Mac app's Claude Code:** `POST /v1/mcp/session-token`. It isn't listed as a connection.
+- **Owner:** Settings → Connections lists connected apps (`GET /v1/mcp/grants`); revoking one ends its tokens at once.
+
+### Add MUSE to Claude (phone, desktop, web, on your Claude plan)
+1. claude.ai (or the Claude app) → Settings → Connectors → **Add custom connector**.
+2. Paste `https://<your-muse-api>/mcp` (Settings → Connections → copy).
+3. Sign in with your **MUSE owner** email and password on MUSE's page and press **Allow**.
+4. MUSE's tools now appear in Claude on every device signed in to that Claude account. Claude Code: `claude mcp add --transport http muse https://<your-muse-api>/mcp`, then `/mcp` to sign in.
+
+## Claude in MUSE on the owner's plan (Mac Claude Code runner)
+The Mac app runs the owner's own **Claude Code** in the background (`plans/claude-editing.md` part C):
+- **Billing:** turns bill to the Claude account Claude Code is signed in with.
+- **Credentials:** MUSE never reads Claude's credentials.
+- **Install and sign-in:** Anthropic's script `curl -fsSL https://claude.ai/install.sh | bash` (→ `~/.local/bin/claude`) and `claude auth login` both run in a **visible Terminal**.
+- **Status:** `claude --version` and `claude auth status` (JSON; exit 0 when signed in).
+- **One run per message:**
+  `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --mcp-config <0600 file> --strict-mcp-config --allowedTools mcp__muse [mcp__blender] --disallowedTools Bash Edit Write NotebookEdit WebFetch WebSearch --permission-mode dontAsk --setting-sources user [--resume <claudeSessionId>]`
+  - The working folder is `~/MUSE/Claude/<threadId>/`.
+  - The MCP config holds MUSE's `/mcp` with a short-lived owner token; the file is deleted after the run.
+  - The session id comes from the `system`/`init` event and is stored on the thread.
+- **Stop:** SIGINT, documented to end the turn cleanly; SIGTERM after 5 s.
+- **Mirroring:** the stream is mirrored to the server (`POST /v1/claude/threads/{id}/events`), so the phone sees it live.
+- **Phone messages:** they become turns the Mac claims (the Blender relay's pattern). When the Mac is offline, the phone offers **Open in Claude** (MUSE as a connector) or the studio API key (off by default, billed per use).
+- **To verify on a real build** (the docs leave these open): the exact `tool_result` block shape, whether `--mcp-config` needs the `mcpServers` wrapper (we send it), and the `auth status` JSON fields.
 
 ## Known limits
 - Hosted video models treat guides as strong suggestions, not frame-accurate paths (research §3.3). Keep ≤ 3 characters and one camera move per shot.
