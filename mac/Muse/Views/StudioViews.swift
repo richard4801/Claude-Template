@@ -519,7 +519,7 @@ struct EnginesSettingsSection: View {
     @ViewBuilder private var imageEngineSection: some View {
         H2("Image engine")
         if let e = store.imageEngine {
-            Muted("Makes photoshoots, outfit sets and missing sheet angles. Members only see the photos and their price.")
+            Muted("Makes photos, outfit sets and missing sheet angles. Members only see the photos and their price.")
             HStack(spacing: 8) {
                 ForEach(ImageEngine.providers) { p in
                     Chip(p.label + (e.isAvailable(p.id) ? "" : " · not set up"), on: provider == p.id) {

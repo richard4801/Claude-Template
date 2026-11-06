@@ -36,6 +36,8 @@ class SuiteStore(private val c: AppContainer) {
     val sheet = MutableStateFlow<ComposerSheet?>(null)
     /** Rig-check warnings hidden with × until the composer's choices change. */
     val rigDismissed = MutableStateFlow(RigDismissals())
+    /** Photo tool (workstream 3): its count, preset, product and references, and the run (PhotoTool.kt). */
+    val photo = studio.muse.app.ui.screens.suite.composer.PhotoStore(c)
     /** The clip and people of Character swap and Recast (the composer's quality and takes are used). */
     val recast = MutableStateFlow(RecastDraft())
     val board = MutableStateFlow<Storyboard?>(null)

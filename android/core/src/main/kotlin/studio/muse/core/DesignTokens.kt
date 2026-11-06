@@ -20,7 +20,7 @@ object DesignTokens {
     data class Radii(val container: Int, val control: Int, val chip: Int)
 
     /** The one `float` shadow (§4): y offset and blur in dp/pt, colour = the theme's ink at [alpha]. Null in Camera Body (no shadows). */
-    data class Float(val y: Int, val blur: Int, val alpha: Double)
+    data class FloatShadow(val y: Int, val blur: Int, val alpha: Double)
 
     /** One step of the type scale (§3). */
     data class Step(val size: Int, val lineHeight: Int, val weight: Int, val display: Boolean = false)
@@ -54,7 +54,7 @@ object DesignTokens {
         else -> error("Unknown theme $theme")
     }
 
-    fun float(theme: Char): Float? = if (theme.lowercaseChar() == 'b') null else Float(y = 12, blur = 32, alpha = 0.14)
+    fun float(theme: Char): FloatShadow? = if (theme.lowercaseChar() == 'b') null else FloatShadow(y = 12, blur = 32, alpha = 0.14)
 
     fun families(theme: Char): Families = when (theme.lowercaseChar()) {
         'a' -> Families("Instrument Serif", "Archivo")

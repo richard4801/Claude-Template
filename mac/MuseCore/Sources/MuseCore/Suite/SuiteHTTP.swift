@@ -17,6 +17,13 @@ extension HTTPMuseAPI {
         r.dryRun = nil
         return (try await suiteCall("POST", "v1/suite/rig-check", body: body(r)) as RigCheckResult).rig
     }
+    // Photo tool (workstream 3)
+    public func suitePhotoEstimate(_ req: PhotoRequest) async throws -> PhotoEstimate {
+        try await suiteCall("POST", "v1/suite/photos/estimate", body: body(req))
+    }
+    public func suiteCreatePhotos(_ req: PhotoRequest) async throws -> [Take] {
+        (try await suiteCall("POST", "v1/suite/photos", body: body(req)) as PhotoResult).takes.map(absolutize)
+    }
     public func suiteCreateShot(_ req: ShotRequest) async throws -> Job {
         var r = req
         r.dryRun = nil

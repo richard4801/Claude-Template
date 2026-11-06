@@ -72,7 +72,6 @@ struct Shell: View {
         case .profile: ProfileView()
         case .create: CreateModelView()
         case .studio: StudioView()
-        case .shoot: ShootView()
         case .queue: QueueView()
         case .gallery: GalleryView()
         case .result: ResultView()
@@ -237,10 +236,10 @@ struct Sidebar: View {
                     // AI suite (workstream 1): Video suite opens its hub.
                     if item.screen == .suite { store.openSuite(.hub) } else { store.go(item.screen) }
                 }
-                // AI suite (workstream 1): the Video suite's modes under it; Edit is top level after Photoshoot.
+                // AI suite (workstream 1): the Video suite's modes under it (Photo among them, workstream 3), then Templates (the
+                // Photo presets) and the top-level Edit. Photoshoot is gone: it is the Photo tool.
                 if item.screen == .suite && !compact { SuiteNavGroup() }
-                if item.screen == .shoot {
-                    // Photoshoot → Templates
+                if item.screen == .suite {
                     NavRow(icon: "square.on.square.dashed", title: "Templates", on: store.screen.navParent == .templates, compact: compact,
                            trailing: .key("⇧⌘T")) { store.openTemplates() }
                         .padding(.leading, compact ? 0 : 14)

@@ -4,7 +4,8 @@ import Observation
 import SwiftUI
 
 enum Screen: String, CaseIterable {
-    case home, models, profile, create, studio, shoot, queue, gallery, result, settings, credits, lora, posts, members, templates, template, editor
+    // Photoshoot is gone: it is the AI suite's Photo tool (workstream 3); `openPhoto()` is the route to it.
+    case home, models, profile, create, studio, queue, gallery, result, settings, credits, lora, posts, members, templates, template, editor
     // AI suite (workstream 1): the Video suite (hub and modes) and the top-level Edit.
     case suite, edit
 
@@ -32,7 +33,6 @@ struct NavItem: Identifiable {
         NavItem(screen: .home, title: "Home", icon: "house", key: "1"),
         NavItem(screen: .models, title: "Models", icon: "person", key: "2"),
         NavItem(screen: .suite, title: "Video suite", icon: "video", key: "3"), // AI suite (workstream 1): was "Video studio"
-        NavItem(screen: .shoot, title: "Photoshoot", icon: "camera", key: "4"),
         NavItem(screen: .queue, title: "Queue", icon: "list.bullet.below.rectangle", key: "5"),
         NavItem(screen: .gallery, title: "Gallery", icon: "square.grid.2x2", key: "6"),
         NavItem(screen: .posts, title: "Posts", icon: "paperplane", key: "7"),
@@ -48,7 +48,6 @@ enum DataSource: String, CaseIterable, Codable {
 let defaultServerURL = "https://angelic-elegance-production-c42b.up.railway.app"
 
 enum ShootState { case idle, busy, done }
-enum ShootTab: String, CaseIterable { case scene, camera, light, prompt }
 enum GalleryTab { case tests, final }
 enum SettingsSection: String, CaseIterable {
     case appearance, defaults, costs, studio, engines, prompts, archived, notif, developer, about
@@ -271,24 +270,9 @@ final class AppStore {
     var upscaling = false
     var clipDropTargeted = false
 
-    // MARK: Photoshoot
+    // MARK: Prompt library versions
 
-    var shoot = ShootSettings()
-    var shootState: ShootState = .idle
-    var lastShots: [Take] = []
-    var shootTab: ShootTab = .scene
-    /// "Edit as text": a hand-edited prompt used for the next shoot only.
-    var promptOverride: String?
-    /// Up to 3 reference images (pose & framing, look & colour, scene), sent with shoots and template shoots.
-    var shootRefs: [ShootRef] = []
-    /// Reference images still uploading.
-    var shootRefsUploading = 0
-    var shootRefsDropTargeted = false
-    /// POST /v1/shoots/preview for the current choices: the Final prompt box, Copy, Edit as text and the Shoot price.
-    var shootPreview: ShootPreview?
-    /// The preview is the app's own (demo mode, or the server couldn't be reached).
-    var shootPreviewIsLocal = false
-    /// Bumped by `prompts` events so the preview refetches with the owner's new wording.
+    /// Bumped by `prompts` events (the owner saved or reset an entry).
     var promptsVersion = 0
 
     // MARK: Prompt library (owner: Settings → Prompts)
@@ -334,17 +318,6 @@ final class AppStore {
     /// The detail screen's template (GET /v1/templates/{id}, with recent results).
     var openTemplateId: String?
     var templateDetail: MuseTemplate?
-    /// Shooting with this template on the Photoshoot screen (nil = the Scene / Camera / Light inspector).
-    var shootTemplate: MuseTemplate?
-    var templateDirection = ""
-    /// Shuffle re-rolls this; the same value gives the same variation draws.
-    var templateShuffle: Int64 = TemplateEngine.newShuffleSeed()
-    /// "Lock look" for templates: off by default, so every shot gets a new seed.
-    var templateLockLook = false
-    /// Optional product photo for templates that take one (Product moment).
-    var templateProduct: ImageRef?
-    /// The prompt view (pro mode) from POST /v1/templates/{id}/prompt.
-    var templatePrompt: TemplatePrompt?
     /// The template editor sheet (Save as template, Edit, New template).
     var templateForm: TemplateForm?
     var templateFormBusy = false
@@ -376,8 +349,6 @@ final class AppStore {
     var enhanceDraft: EnhanceDraft?
     var dressUpDraft: DressUpDraft?
     var versionsDraft: VersionsDraft?
-    /// Owner: per-run model for Shoot (step → "owner/name"; empty = the defaults).
-    var shootModels: [String: String] = [:]
     /// Enhance and Dress up runs by id (from `tool` events and the API).
     var toolRuns: [String: ToolRun] = [:]
 
@@ -506,7 +477,7 @@ final class AppStore {
         studioBalance = nil
         offlineMessage = nil
         resetModelTools()
-        resetShootAndPrompts()
+        resetPromptLibrary()
         resetWarm()
         suite.reset() // AI suite (workstream 1)
         Task { await restoreSession() }
@@ -692,7 +663,7 @@ final class AppStore {
         }
         if e.type == "template" {
             LiveEvents.applyTemplates(&templates, e)
-            if let t = shootTemplate { shootTemplate = templates.first { $0.id == t.id } }
+            if let id = suite.photo.presetId, !templates.contains(where: { $0.id == id }) { suite.photo.presetId = nil }
             if let d = templateDetail, let t = templates.first(where: { $0.id == d.id }) { var n = t; n.recent = d.recent; templateDetail = n }
         }
         if let id = LiveEvents.isModelDelete(e), let m = models.first(where: { $0.id == id }) {
@@ -897,11 +868,9 @@ final class AppStore {
         stageJobIds = []
         stageTakeId = nil
         resetModelTools()
-        resetShootAndPrompts()
+        resetPromptLibrary()
         templates = []
-        shootTemplate = nil
         templateDetail = nil
-        templatePrompt = nil
         templateForm = nil
         resetWarm()
         authTab = .signIn
@@ -986,14 +955,6 @@ final class AppStore {
     var videoFeatures: VideoFeatures { studioSettings?.features.video ?? .fallback }
     /// `features.photo` from the server, or the contract's prices: photo estimates ("about $0.46").
     var photoPricing: PhotoPricing { studioSettings?.features.photo ?? .standard }
-    /// A 4-photo shoot's estimate: the preview's (it counts the reference images), else the server's `features.photo.estimates.shoot`.
-    var shootEstimate: Double {
-        if let p = shootPreview { return p.estimate }
-        if shootRefs.isEmpty { return photoPricing.estimates?.shoot ?? photoPricing.shoot() }
-        return localShootPreview.estimate
-    }
-    /// "about $0.27" on the Shoot button.
-    var shootEstimateLabel: String { shootPreview?.estimateLabel ?? PhotoPricing.label(shootEstimate) }
     var outfitSetEstimate: Double { photoPricing.estimates?.outfitSet ?? photoPricing.outfitSet() }
     func sheetAnglesEstimate(_ missing: Int) -> Double { photoPricing.estimates?.sheetAngle.map { $0 * Double(missing) } ?? photoPricing.sheetAngles(missing) }
     var loraSetEstimate: Double { photoPricing.estimates?.loraSet ?? photoPricing.loraSet() }
@@ -1047,20 +1008,6 @@ final class AppStore {
                                                     keepBackground: background == "keep", backgroundMotion: motion, keepAudio: keepAudio, spec: spec))
         return PromptEngine.memberView(p)
     }
-
-    /// Off: the shoot prompt keeps only identity, outfit, direction, reference and seed lines (no scene/camera/light/style/never-add presets).
-    var shootPresets = true
-
-    /// The app's own preview (demo/offline fallback): the server library's default wording.
-    var localShootPreview: ShootPreview {
-        PromptEngine.shootPreview(identity: identity(currentModel), outfitName: currentOutfit?.name ?? "outfit", settings: shoot, presets: shootPresets,
-                                  refs: shootRefs, pricing: photoPricing)
-    }
-
-    /// The Final prompt box: the server's preview, or the local fallback until it arrives.
-    var shootPromptSlots: [PromptSlotView] { (shootPreview ?? localShootPreview).slots }
-    /// Copy and Edit as text: exactly what Shoot would send.
-    var shootPromptText: String { (shootPreview ?? localShootPreview).text }
 
     var runningJob: Job? { jobs.first { $0.isRunning } }
     var activeJobs: [Job] { jobs.filter(\.isActive).sorted { a, b in a.isRunning != b.isRunning ? a.isRunning : a.createdAt < b.createdAt } }

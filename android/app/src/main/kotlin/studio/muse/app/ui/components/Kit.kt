@@ -233,7 +233,7 @@ fun Cta2(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon:
 fun iconLabel(icon: String): String? = when (icon) {
     "back" -> "Back"; "close" -> "Close"; "more" -> "More options"; "bell" -> "Notifications"; "user" -> "Settings"
     "plus" -> "Add"; "chev" -> "Next"; "quality" -> "Credit"; "grid" -> "Gallery"; "retry" -> "Retry"; "export" -> "Share"
-    "camera" -> "Photoshoot"; "spark" -> "Prompt"; "play" -> "Play"; "upload" -> "Upload"; "check" -> "Done"
+    "camera" -> "Photo"; "spark" -> "Prompt"; "play" -> "Play"; "upload" -> "Upload"; "check" -> "Done"
     else -> null
 }
 

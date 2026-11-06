@@ -128,17 +128,14 @@ fun HomeScreen() {
                     s.models.isEmpty() && !s.loaded -> HomeSkeleton()
                     s.models.isEmpty() && s.error != null -> ErrorState("Can't load your models", s.error ?: "", onAction = { vm.retry() })
                     s.models.isEmpty() -> EmptyState(
-                        "No models yet", "Create her once: a name and a few photos for the character sheet. Then she's ready for photoshoots and videos.",
+                        "No models yet", "Create her once: a name and a few photos for the character sheet. Then she's ready for photos and videos.",
                         "New model", { nav.go(Routes.CREATE1) },
                     )
                     else -> {
                         s.featured?.let { f ->
                             Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
                                 Featured(f, s.featuredOutfits) { vm.open(f, nav) }
-                                Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
-                                    PrimaryButton("New video", { nav.go(Routes.SOURCE) }, Modifier.weight(1f), icon = "studio")
-                                    SecondaryButton("", { nav.go(Routes.SHOOT) }, icon = "camera", label = "Photoshoot")
-                                }
+                                PrimaryButton("New video", { nav.go(Routes.SOURCE) }, Modifier.fillMaxWidth(), icon = "studio")
                             }
                         }
                         Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {

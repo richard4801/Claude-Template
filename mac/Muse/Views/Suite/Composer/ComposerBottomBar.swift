@@ -50,7 +50,7 @@ struct ComposerBottomBar: View {
     /// `compact`: the owner's Engine pill shows only its icon (the engine is its tooltip).
     @ViewBuilder private func pills(spacing: CGFloat, compact: Bool) -> some View {
         HStack(spacing: spacing) {
-            qualityPill
+            if tool != .photo { qualityPill } // Photo tool (workstream 3): stills render at the shoot's size, no Quality
             if isSwap {
                 listPill("sound", icon: store.suite.swap.keepAudio ? "speaker.wave.2" : "speaker.slash", value: store.suite.swap.keepAudio ? "On" : "Off",
                          help: "Clip sound", options: [("On", true), ("Off", false)], selected: store.suite.swap.keepAudio) { store.suite.swap.keepAudio = $0 }
@@ -63,6 +63,11 @@ struct ComposerBottomBar: View {
                 // Extend: the new part's length on this quality, and takes. The shape and sound follow the video.
                 lengthPill
                 takesPill
+            } else if tool == .photo {
+                // Photo tool (workstream 3): one Photos 1–4 count in place of Shape, Length, Sound, Speaking and Takes.
+                let n = store.suite.photo.count
+                listPill("photos", icon: "photo.on.rectangle", value: "\(n)", help: "Photos",
+                         options: PhotoDraft.counts.map { ("\($0) photo\($0 == 1 ? "" : "s")", $0) }, selected: n) { store.suite.photo.count = $0 }
             } else {
                 shapePill
                 lengthPill
@@ -79,9 +84,15 @@ struct ComposerBottomBar: View {
 
     // MARK: Price
 
-    private var estimate: ShotEstimate? { isSwap ? store.suite.swapEstimate : store.suite.estimate }
+    private var estimate: ShotEstimate? {
+        if tool == .photo { return store.suite.photoEstimate?.asShotEstimate } // Photo tool (workstream 3)
+        return isSwap ? store.suite.swapEstimate : store.suite.estimate
+    }
 
-    private var price: GeneratePrice { GeneratePrice.of(estimate) }
+    private var price: GeneratePrice {
+        if tool == .photo { return GeneratePrice.photo(store.suite.photoEstimate) } // Photo tool (workstream 3): "Generate · 4 photos · $0.24"
+        return GeneratePrice.of(estimate)
+    }
 
     private var generateLabel: String {
         if isSwap, let q = store.suite.swap.addOn { return "Generate · \(Pricing.money(Pricing.totalCost(store.spec(for: q))))" }
@@ -91,6 +102,8 @@ struct ComposerBottomBar: View {
 
     /// No price yet and no reason why: the estimate is on its way (Extend without a video has no price to wait for).
     private var pricing: Bool {
+        // Photo tool (workstream 3): pricing while a request exists and its estimate hasn't come back or failed.
+        if tool == .photo { return store.suite.photoEstimate == nil && store.suite.photoError == nil && store.photoRequest != nil }
         guard estimate == nil, store.suite.enabled else { return false }
         if isSwap { return store.suite.swapError == nil && store.swapRequest != nil }
         if tool == .extend && store.suite.composer.extendRequest() == nil { return false }
@@ -103,6 +116,7 @@ struct ComposerBottomBar: View {
     }
 
     private func generate() {
+        if tool == .photo { return store.generatePhoto() } // Photo tool (workstream 3): POST /v1/suite/photos
         if isSwap { store.generateSwap() } else { store.generateShot() }
     }
 
@@ -419,7 +433,10 @@ struct PricingLink: View {
         .popover(isPresented: $open, arrowEdge: .top) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("HOW IS THIS PRICED?").font(t.mono(10.5, .medium)).tracking(1.2).foregroundStyle(t.muted)
-                Text("You pay per second of video, per take, at the quality you pick. The price is worked out before anything renders, and a failed take is refunded in full.")
+                // Photo tool (workstream 3): photos are priced per photo, from the images sent and the size made.
+                Text(store.suite.composer.tool == .photo
+                     ? "You pay per photo: the price counts her reference images, your references and the size made. It is worked out before anything is made, and photos that fail aren't charged."
+                     : "You pay per second of video, per take, at the quality you pick. The price is worked out before anything renders, and a failed take is refunded in full.")
                     .font(t.body(12.5)).fixedSize(horizontal: false, vertical: true)
                 if let e = estimate {
                     Divider()

@@ -231,13 +231,16 @@ describe('AI suite · composer previews', () => {
   it('the catalogue names each move, lighting and angle preview (generated file matches design/previews/manifest.tsv)', () => {
     expect(fs.readFileSync(PREVIEWS_OUT, 'utf8'), 'run npx tsx scripts/suite-previews.ts').toBe(previewsModule());
     const cat = cameraCatalog();
-    expect(cat.moves.find(m => m.id === 'dolly_in')?.preview).toEqual({ video: 'moves/dolly_in.mp4', poster: 'moves/dolly_in.jpg', seconds: 2.5 });
+    expect(cat.moves.find(m => m.id === 'dolly_in')?.preview).toEqual({ video: 'moves/dolly_in.mp4', poster: 'moves/dolly_in.webp', seconds: 2.5 });
     expect(cat.moves.filter(m => !m.preview).map(m => m.id)).toEqual(['rise_reveal', 'motion_blur']); // no loop yet: the apps draw the still
-    expect(cat.lighting.every(l => l.preview?.poster === `lighting/${l.id}.jpg`)).toBe(true);
-    expect([...cat.heights, ...cat.shotSizes].every(a => a.preview?.poster === `angles/${a.id}.jpg`)).toBe(true);
-    expect(cat.autoPreviews.lighting).toEqual({ poster: 'lighting/auto.jpg' });
+    expect(cat.lighting.every(l => l.preview?.poster === `lighting/${l.id}.webp`)).toBe(true);
+    expect([...cat.heights, ...cat.shotSizes].every(a => a.preview?.poster === `angles/${a.id}.webp`)).toBe(true);
+    expect(cat.autoPreviews.lighting).toEqual({ poster: 'lighting/auto.webp' });
     for (const p of [...cat.moves, ...cat.lighting, ...cat.heights, ...cat.shotSizes].flatMap(x => x.preview ? [x.preview.poster, x.preview.video].filter(Boolean) : []))
       expect(fs.existsSync(path.resolve(__dirname, '../../../design/previews', p!)), p).toBe(true);
+    // Compressed (design/previews/source/compress_previews.py; plans/perf-audit.md): loops at CRF 24 stay small.
+    for (const m of cat.moves.filter(x => x.preview?.video))
+      expect(fs.statSync(path.resolve(__dirname, '../../../design/previews', m.preview!.video!)).size, m.id).toBeLessThan(80 * 1024);
   });
 });
 
@@ -304,7 +307,7 @@ describe.skipIf(!hasFfmpeg)('AI suite · Shot API on the mock provider', () => {
     expect(m.tiers[0].inputs).toMatchObject({ start: true, end: true, images: 6, videos: 3, audio: true });
     expect(m.tiers.map((t: any) => [t.minSeconds, t.maxSeconds])).toEqual([[2, 15], [2, 30], [3, 30], [3, 30]]);
     expect(m.tools).toEqual([{ id: 'shot', available: true }, { id: 'swap', available: true }, { id: 'recast', available: true }, { id: 'storyboard', available: true },
-      { id: 'talking', available: true }, { id: 'ugc_ad', available: true }, { id: 'extend', available: true }]);
+      { id: 'talking', available: true }, { id: 'ugc_ad', available: true }, { id: 'extend', available: true }, { id: 'photo', available: true }]);
     expect(o.tiers[0].models[0].inputs).toEqual({ start: true, end: true, middle: 0, images: 6, videos: 3, audio: true, framesWithRefs: true });
   });
 

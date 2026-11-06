@@ -177,7 +177,7 @@ struct GalleryView: View {
                         if store.galleryTab == .final {
                             EmptyState("Nothing approved yet", "Approve a test take and it moves here, ready to post.", actionTitle: "Show tests") { store.galleryTab = .tests }
                         } else {
-                            EmptyState("No takes yet", "Every video and photo you render lands here as a test take first.", actionTitle: "Start a photoshoot") { store.go(.shoot) }
+                            EmptyState("No takes yet", "Every video and photo you render lands here as a test take first.", actionTitle: "New photo") { store.openTool(.photo) }
                         }
                     } else {
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.s4), count: 6), alignment: .leading, spacing: Space.s5) {
@@ -367,7 +367,7 @@ struct ResultView: View {
                     ("Outfit", outfit?.name ?? store.currentOutfit?.name ?? "—"),
                     ("Made with", take.isVideo ? (job?.engineLabel ?? (take.displayEngineLabel.isEmpty ? "Video" : take.displayEngineLabel)) : "Photo"),
                     ("Cost", Pricing.money(take.cost)),
-                    ("Seed", "\(take.seed)\(take.isVideo || (!take.isTemplateShot && store.shoot.lockSeed) ? ", locked" : "")"),
+                    ("Seed", "\(take.seed)\(take.isVideo ? ", locked" : "")"),
                 ]
                 let templateRow: [(String, String)] = take.templateName.map { name in [("Template", name)] } ?? []
                 let editRow: [(String, String)] = take.isEdit

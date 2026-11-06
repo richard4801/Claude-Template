@@ -154,9 +154,10 @@ fun SuiteComposerScreen(toolId: String? = null) {
     val clipSeconds = recast.clipId?.let { id -> video.clip?.takeIf { it.id == id }?.durationSec ?: if (id == SampleData.SAMPLE_CLIP) SampleData.sampleMeta.durationSec else null }
     val addon = d.swapAddon
     val addonPills = if (d.tool == ComposerTool.SWAP) SwapAddons.pills(st.video ?: studio.muse.app.data.VideoFeatures.DEFAULT, prefs.fastBeta, d.takes, clipSeconds) else emptyList()
-    val (suiteEst, estErr) = rememberEstimate(req.takeIf { problem == null && live && addon == null }, catalog?.enabled == true)
-    val est = if (addon != null) clipSeconds?.takeIf { problem == null }?.let { SwapAddons.estimate(addon, d.takes, it) } else suiteEst
-    val blocker = ComposerPrice.blocker(problem, est, estErr)
+    val photo = rememberPhotoTool(d) // Photo tool (workstream 3): its own estimate (POST /v1/suite/photos/estimate) and Generate
+    val (suiteEst, estErr) = rememberEstimate(req.takeIf { problem == null && live && addon == null && photo == null }, catalog?.enabled == true)
+    val est = if (addon != null) clipSeconds?.takeIf { problem == null }?.let { SwapAddons.estimate(addon, d.takes, it) } else photo?.est ?: suiteEst
+    val blocker = ComposerPrice.blocker(problem, est, photo?.error ?: estErr)
     val owner = store.owner || prefs.owner
     val wantTiers = sheet?.kind == SheetKind.SETTINGS || d.collapsed
     val tierEstimates = (catalog?.tiers?.map { it.id } ?: SuiteRules.TIERS).associateWith { t ->
@@ -182,6 +183,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
         if (blocker != null) { c.repo.toast(blocker); return }
         if (est == null) return
         open(null)
+        if (photo != null) { photo.generate(); return } // Photo tool (workstream 3): POST /v1/suite/photos
         if (addon != null) {
             scope.launch { c.repo.createJob(SwapAddons.request(d, recast, addon, clipSeconds))?.let { j -> store.shotJobs.update { (it - j.id) + j.id } } }
             return
@@ -259,7 +261,8 @@ fun SuiteComposerScreen(toolId: String? = null) {
         lead = st.model(d.characterId), clipName = recast.clipId?.let { id -> video.clip?.takeIf { it.id == id }?.name ?: if (id == SampleData.SAMPLE_CLIP) SampleData.sampleMeta.name else "Your clip" },
         models = st.models, outfits = st.outfitsOf(d.characterId),
         catalogNote = if (catalog == null) catalogError ?: "" else null, onRetryCatalog = { scope.launch { store.load() } },
-        rigRow = { w -> ComposerRigRow(req.takeIf { live && addon == null && d.tool in ComposerDraft.PROMPT_TOOLS }, suiteEst, suiteEst == null && (estErr != null || problem != null), w) },
+        photo = photo, // Photo tool (workstream 3)
+        rigRow = { w -> if (photo != null) PhotoRigRow(photo, w) else ComposerRigRow(req.takeIf { live && addon == null && d.tool in ComposerDraft.PROMPT_TOOLS }, suiteEst, suiteEst == null && (estErr != null || problem != null), w) },
         update = ::update, open = ::open, onGenerate = ::generate, onSlot = ::onSlot, onClearSlot = { k ->
             when (k) {
                 "start" -> store.composerSlots.update { it.clear(SlotId(SlotKind.START)) }
@@ -273,7 +276,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
             val (t, msg) = when (sg) {
                 is Suggestion.Character -> base.addMention("character", sg.model.id, sg.model.name.substringBefore(' '), at)
                 is Suggestion.Dress -> base.addMention("outfit", sg.outfit.id, sg.outfit.name, at)
-                is Suggestion.Move -> base.addMove(sg.move, at)
+                is Suggestion.Move -> if (photo != null) base to studio.muse.app.data.PhotoRules.NO_MOVEMENT else base.addMove(sg.move, at) // Photo tool (workstream 3)
                 // A location is a reference image: refused when References are full on this quality.
                 is Suggestion.Place -> d.locationProblem(slots, inputs, own, sg.location.id)?.let { base to it } ?: base.addMention("location", sg.location.id, sg.location.name, at)
                 Suggestion.NewPlace -> {
@@ -362,6 +365,8 @@ class ComposerUi(
     val onAddon: (SwapAddon) -> Unit = {},
     /** The rig check's warning row (RigCheckRow.kt), drawn just above the bottom bar; the argument is `wide`. */
     val rigRow: @Composable (Boolean) -> Unit = {},
+    /** Photo tool (workstream 3): its draft, estimate and Generate; null on the other tools. */
+    val photo: PhotoUi? = null,
     /** The catalog isn't here yet: "" while it loads, else why it couldn't load. null = loaded. */
     val catalogNote: String? = null,
     val onRetryCatalog: () -> Unit = {},
@@ -370,7 +375,7 @@ class ComposerUi(
     val pricing: Boolean get() = live && est == null && blocker == null
     val toolSlots: List<ToolSlot> get() = ToolSlots.of(d.tool, inputs, slots, catalog?.recastMaxPeople ?: SuiteRules.MAX_CAST)
     val showPrompt: Boolean get() = d.tool == ComposerTool.SHOT || d.tool == ComposerTool.TALKING || d.tool == ComposerTool.UGC || d.tool == ComposerTool.EXTEND ||
-        (d.tool == ComposerTool.SWAP && d.swapPrompt)
+        (d.tool == ComposerTool.SWAP && d.swapPrompt) || d.tool == ComposerTool.PHOTO // Photo tool (workstream 3)
     /** Before anything is typed or picked: the preset row shows under the composer. */
     val empty: Boolean get() = d.tool == ComposerTool.SHOT && d.tokens.isEmpty && d.characterId == null && slots.isEmpty && d.settings.preset == null
     val canGo: Boolean get() = live && blocker == null && est != null
@@ -383,7 +388,9 @@ private fun PhoneComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent
     val m = muse
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            RecentTakes(ui, job, recent, takes, openTake, retry, wide = false)
+            // Photo tool (workstream 3): the library's recent stills and the photo presets (templates) instead.
+            if (ui.photo != null) { PhotoRecent(ui, takes, wide = false, Modifier.padding(horizontal = 16.dp)); PhotoPresets(wide = false, Modifier.padding(horizontal = 16.dp)) }
+            else RecentTakes(ui, job, recent, takes, openTake, retry, wide = false)
             if (ui.catalogNote != null) CatalogNote(ui, Modifier.padding(horizontal = 16.dp))
             else if (ui.empty || ui.d.collapsed) PresetRow(ui, Modifier.padding(horizontal = 16.dp), tileW = 128.dp, tileH = 84.dp)
         }
@@ -398,7 +405,8 @@ private fun PhoneComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent
             if (ui.d.tool == ComposerTool.SWAP) SwapPromptToggle(ui)
             if (ui.d.tool == ComposerTool.EXTEND) ExtendDirection(ui)
             if (ui.showPrompt) Prompt(ui)
-            if (ui.d.tool == ComposerTool.EXTEND) Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (ui.photo != null) PhotoSlotRow(ui, wide = false) // Photo tool (workstream 3)
+            else if (ui.d.tool == ComposerTool.EXTEND) Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 ui.toolSlots.forEach { s -> SlotCard(ui, s, Modifier.width(112.dp).height(96.dp)) }
                 ExtendLength(ui, Modifier.weight(1f))
             } else Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -417,6 +425,14 @@ private fun PhoneBar(ui: ComposerUi) {
     val m = muse
     if (!ui.live) { ComingSoonLine(ui); return }
     ui.blocker?.takeIf { !ui.empty }?.let { T(it, m.type.tiny, m.t.muted, maxLines = 2) }
+    // Photo tool (workstream 3): one Photos 1–4 list in place of Quality, Settings and the length/takes summary.
+    ui.photo?.let { p ->
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            MenuPill("layers", photoCountLabel(p.draft.count), "Photos", PhotoComposer.countItems(p.draft.count)) { i -> p.setCount(i + 1) }
+            Spacer(Modifier.weight(1f)); ComposerPrice.line(ui.est)?.let { T(it, m.type.body.copy(fontSize = 13.sp), m.t.muted, maxLines = 1) }; RoundGenerate(ui)
+        }
+        return
+    }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         BarButton(Modifier.press { ui.open(ComposerSheet(SheetKind.SETTINGS)) }.semantics { contentDescription = "Quality ${SuiteRules.tierLabel(ui.d.quality)}"; role = Role.Button }) {
             SIc("gauge", 18.dp, m.t.muted); T(SuiteRules.tierLabel(ui.d.quality), m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1); SIc("chevd", 14.dp, m.t.muted)
@@ -802,7 +818,7 @@ private fun WideComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent:
             T("VIDEO SUITE", m.type.mono.copy(fontSize = 11.sp, letterSpacing = .16.em), m.t.muted)
             T(ui.d.tool.title, m.type.h2, m.t.ink, upper = m.isB, maxLines = 1)
         }
-        RecentTakes(ui, job, recent, takes, openTake, {}, wide = true)
+        if (ui.photo != null) PhotoRecent(ui, takes, wide = true) else RecentTakes(ui, job, recent, takes, openTake, {}, wide = true) // Photo tool (workstream 3)
         val shape = RoundedCornerShape(if (m.isA) 0.dp else 14.dp)
         Column(Modifier.widthIn(max = 960.dp).fillMaxWidth().align(Alignment.CenterHorizontally).clip(shape).background(m.t.surface).border(if (m.isD) 2.5.dp else 1.dp, m.t.line, shape)) {
             Box(Modifier.padding(horizontal = 14.dp, vertical = 6.dp)) { ToolRow(ui, wide = true) }
@@ -816,7 +832,8 @@ private fun WideComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent:
                     if (ui.d.tool == ComposerTool.EXTEND) ExtendDirection(ui, Modifier.widthIn(max = 520.dp), captions = true)
                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         if (ui.showPrompt) Prompt(ui, Modifier.weight(1f), maxHeight = 160.dp) else Spacer(Modifier.weight(1f))
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { ui.toolSlots.forEach { s -> SlotCard(ui, s, Modifier.size(104.dp)) } }
+                        if (ui.photo != null) Box(Modifier.widthIn(max = 452.dp)) { PhotoSlotRow(ui, wide = true) } // Photo tool (workstream 3)
+                        else Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { ui.toolSlots.forEach { s -> SlotCard(ui, s, Modifier.size(104.dp)) } }
                     }
                     if (ui.addons.isNotEmpty()) AddonPills(ui)
                     ui.rigRow(true)
@@ -826,6 +843,7 @@ private fun WideComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent:
             }
         }
         if (ui.catalogNote != null) CatalogNote(ui, Modifier.widthIn(max = 960.dp).align(Alignment.CenterHorizontally))
+        else if (ui.photo != null) PhotoPresets(wide = true, Modifier.widthIn(max = 960.dp).align(Alignment.CenterHorizontally)) // Photo tool (workstream 3)
         else if (ui.empty || ui.d.collapsed) PresetRow(ui, Modifier.widthIn(max = 960.dp).align(Alignment.CenterHorizontally), tileW = 150.dp, tileH = 96.dp)
     }
 }
@@ -849,6 +867,8 @@ private fun WideBar(ui: ComposerUi) {
         // Icon + value pills; when they don't all fit, the row scrolls and fades at the edge that has more (WS4 audit).
         val scroll = rememberScrollState()
         Row(Modifier.weight(1f).barScrollFade(scroll).horizontalScroll(scroll), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Photo tool (workstream 3): one Photos 1–4 list; no Quality, Shape, Length, Sound, Speaking or Takes (stills render at the shoot's size).
+            ui.photo?.let { p -> MenuPill("layers", photoCountLabel(p.draft.count), "Photos", PhotoComposer.countItems(p.draft.count)) { i -> p.setCount(i + 1) }; return@Row }
             val tiers = ui.catalog?.tiers?.ifEmpty { null }?.map { it.id } ?: SuiteRules.TIERS
             MenuPill("gauge", SuiteRules.tierLabel(d.quality), "Quality", tiers.map { t -> "${SuiteRules.tierLabel(t)} · ${ComposerPrice.short(ui.tierEstimates[t])}" to (t == d.quality) }) { i -> ui.update { it.copy(quality = tiers[i]).fit(ui.catalog) } }
             val engines = ui.catalog?.tier(d.quality)?.models.orEmpty()

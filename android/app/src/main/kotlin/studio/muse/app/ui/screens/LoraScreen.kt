@@ -140,7 +140,7 @@ fun LoraScreen() {
                     else -> PrimaryButton("Train · about ${minutesText(Pricing.loraTrainMinutes)} · ${Pricing.money(s.trainCost)}", vm::train, Modifier.weight(1f))
                 }
                 "training" -> SecondaryButton("Back to profile", { nav.back() }, Modifier.weight(1f))
-                "ready" -> PrimaryButton("Test it in a photoshoot", { nav.go(Routes.SHOOT) }, Modifier.weight(1f))
+                "ready" -> PrimaryButton("Test it in a photo", { studio.muse.app.ui.screens.suite.composer.openPhoto(c, nav, s.model?.id, null) }, Modifier.weight(1f))
                 else -> PrimaryButton("Build training set · ${studio.muse.core.PhotoPricing.about(s.setCost)}", vm::build, Modifier.weight(1f))
             }
         }
@@ -196,7 +196,7 @@ private fun LoraIntro(model: Model?) {
         style = m.scale.body, color = m.roles.ink2,
     )
     Column {
-        RowItem("Photo LoRA", "For photoshoots · about ${Pricing.LORA_PHOTO_MIN} min")
+        RowItem("Photo LoRA", "For photos · about ${Pricing.LORA_PHOTO_MIN} min")
         RowItem("Video LoRA", "For videos · about ${Pricing.LORA_VIDEO_MIN} min")
     }
     Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {

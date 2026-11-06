@@ -81,40 +81,6 @@ data class VideoDraft(
     }
 }
 
-/** Photoshoot tool state. */
-data class ShootDraft(
-    val scene: String? = null,
-    val sceneCustom: String = "",
-    val shot: String = "Medium",
-    val lens: Int = 35,
-    val aperture: String = "f/2.8",
-    val light: String = "Golden hour",
-    val grade: String? = null,
-    val direction: String = "",
-    val lockSeed: Boolean = false,
-    /** Off: only identity, outfit, the user's direction, reference and seed lines are sent (no scene/camera/light/style/never-add presets). */
-    val presets: Boolean = true,
-    /** "Edit as text": the full prompt as the user wrote it. Sent instead of the built prompt while set. */
-    val promptText: String? = null,
-    val tool: String = "camera",
-    val lastShots: Int = 0,
-    /** Owner only: a model for this shoot, step → "owner/name" (the "Model" chooser). */
-    val models: Map<String, String> = emptyMap(),
-    /** Up to 3 reference images, each guiding pose, look and/or scene (never her face, body or outfit). */
-    val refs: List<ShootRef> = emptyList(),
-) {
-    /**
-     * The choices as the server's shoot request (plans/api.md "Shoot references and the prompt library" §2): the server builds the
-     * prompt from them. [promptText] ("Edit as text") is sent exactly as written, and only then.
-     */
-    fun request(modelId: String, outfitId: String, count: Int = 4) = ShootRequest(
-        modelId, outfitId, scene = (scene?.trim()?.ifBlank { null } ?: studio.muse.core.PromptEngine.DEFAULT_SCENE).take(200),
-        prompt = promptText?.takeIf { it.isNotBlank() }?.take(4000), count = count,
-        direction = direction.trim().ifBlank { null }?.take(500), lockSeed = lockSeed, models = models.ifEmpty { null }, presets = presets,
-        camera = CameraChoice(shot, lens, aperture), light = light, grade = grade ?: studio.muse.core.PromptEngine.DEFAULT_GRADE, refs = refs.take(ShootRef.MAX).ifEmpty { null },
-    )
-}
-
 /** Using a template: the user's own choices (the template's layers stay on the server). Lock look is off by default. */
 data class TemplateUseDraft(
     val templateId: String? = null,
@@ -123,7 +89,7 @@ data class TemplateUseDraft(
     val lockSeed: Boolean = false,
     val product: ImageRef? = null,
     val showPrompt: Boolean = false,
-    /** Up to 3 reference images (pose, look, scene), as in Photoshoot. */
+    /** Up to 3 reference images (pose, look, scene), as in the Photo tool. */
     val refs: List<ShootRef> = emptyList(),
 )
 
@@ -147,7 +113,6 @@ class Drafts {
     val modelId = MutableStateFlow(SampleData.DEMO)
     val outfitId = MutableStateFlow(SampleData.GREEN)
     val video = MutableStateFlow(VideoDraft())
-    val shoot = MutableStateFlow(ShootDraft())
     val templateUse = MutableStateFlow(TemplateUseDraft())
     val templateFilter = MutableStateFlow(TemplateFilter())
     val model = MutableStateFlow(ModelDraft())
@@ -192,7 +157,6 @@ class Drafts {
 
     /** Signing out or switching studios: reference images are that account's uploads, and "Edit as text" was written for its prompts. */
     fun forgetAccount() {
-        shoot.update { it.copy(refs = emptyList(), promptText = null) }
         templateUse.update { it.copy(refs = emptyList()) }
     }
 }

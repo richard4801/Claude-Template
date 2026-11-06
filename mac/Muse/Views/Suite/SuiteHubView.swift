@@ -41,7 +41,7 @@ struct SuiteRootView: View {
         } else {
             switch s.mode {
             case .hub: SuiteHubView()
-            case .shot, .swap, .talking, .ugc, .extend: ComposerView()
+            case .shot, .swap, .talking, .ugc, .extend, .photo: ComposerView()
             case .storyboard: StoryboardView()
             case .cameraStage: CameraStageView()
             }

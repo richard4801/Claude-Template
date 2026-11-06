@@ -57,6 +57,18 @@ Before Generate, the composer warns when choices clash with each other or with t
   - `no_reveal`: "open on X" / "reveal" with a move that starts on the subject (Crane up, Dolly in, Static…) → Rise to reveal (or Tilt up) after a rise, else Dolly out reveal.
   - `talk_move`: speaking with a move that isn’t talk-safe → Lock it off (alt: Handheld UGC).
 
+## Photo tool (workstream 3, owner 2026-11-06)
+Photoshoot is removed from both apps and becomes the **Photo** tool on the composer shell.
+- **Tool card:** "Photo", with the tagline "Stills of your character". Catalogue `tools` has `{id: "photo", available: true}`, independent of the video engines.
+- **Slots:** each with its own small sentence-case label (design direction): Character (with the outfit inside), Product (Optional), References (up to 3, each tagged pose / look / scene, as before).
+- **One primary action:** the filled "Generate · price" button; everything else is quieter.
+- **Chips:** Style, Camera (Setup, Angle; no Movement tab), Look and Lighting. Tempo is hidden in Style.
+- **Bottom bar:** WS1's bar with a **Photos 1–4** count (default 4) in place of Length, Sound, Speaking and Takes. Quality and Shape aren't shown, since stills render at the shoot's size. The live price comes from `POST /v1/suite/photos/estimate`.
+- **Presets:** the preset gallery for Photo lists the photo templates (`GET /v1/templates`). Choosing one sends `presetId`, and the chips show the preset's own camera and light as locked.
+- **Rig check:** the still rules only, from the estimate's `rig`.
+- **Results:** the takes open in the normal results / library viewer. Old shoots stay in the library.
+- **Entry points:** removed (navigation, Home tile). Deep links to Photoshoot open Suite → Photo. The outfit set generator links that opened Photoshoot's Outfit tool now open the Photo tool with that outfit preselected.
+
 ## The picker shell (one shell, learnt once)
 - **Desktop:** a centred modal (about 820×520) over a dimmed page, with a title, **Reset all** and ×. Sub-steps sit in a left rail; a dot marks a step that has a value. Choices apply instantly, with no OK button.
 - **Phone:** a bottom sheet (about 85% height) with a grab handle, title, Reset all and ×. Sub-steps become a segmented control at the top, and choices apply instantly.

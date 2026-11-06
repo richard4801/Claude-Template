@@ -67,6 +67,7 @@ data class SuiteMode(val id: String, val title: String, val sub: String, val ren
 val SUITE_MODES = listOf(
     SuiteMode("shot", "Shot", "Text/image → video", "palette-01-naturalistic", Routes.SUITE_SHOT),
     SuiteMode("swap", "Character swap", "Into a real clip", "palette-04-bleached-warm", Routes.SUITE_SWAP),
+    SuiteMode("photo", "Photo", "Stills of your character", "lens-01-clean-prime", Routes.SUITE_PHOTO), // Photo tool (workstream 3): Photoshoot moved here
     SuiteMode("storyboard", "Storyboard", "Shots, one cast", "palette-02-teal-orange", Routes.SUITE_STORYBOARD),
     SuiteMode("talking", "Talking", "Voice & lipsync", "light-06-ring-creator", Routes.suiteCompose("talking"), soon = true),
     SuiteMode("ugc", "UGC ad", "Product → ad", "grip-05-slider", Routes.suiteCompose("ugc"), soon = true),

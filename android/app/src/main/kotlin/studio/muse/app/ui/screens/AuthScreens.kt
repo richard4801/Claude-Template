@@ -24,6 +24,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +44,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -121,17 +126,26 @@ fun authVm(): AuthViewModel {
     return viewModel { AuthViewModel(c) }
 }
 
+/** The splash stays at least this long, so a fast launch doesn't flash it. */
+const val SPLASH_MIN_MS = 300L
+
 @Composable
 fun SplashScreen() {
     val m = muse
     val nav = LocalNav.current
     val c = LocalContainer.current
-    val signedIn = c.prefs.collectAsState().value.token != null
-    val next = { if (signedIn) nav.reset(Routes.HOME) else nav.go(Routes.WELCOME) }
-    // The latest [next]: the saved session usually loads after the first frame, so the first one would still say signed out.
-    val latestNext by androidx.compose.runtime.rememberUpdatedState(next)
-    LaunchedEffect(Unit) { delay(2600); latestNext() }
-    Box(Modifier.fillMaxSize().background(m.roles.canvas).press { next() }) {
+    var left by remember { mutableStateOf(false) }
+    val go = { signedIn: Boolean -> if (!left) { left = true; if (signedIn) nav.reset(Routes.HOME) else nav.go(Routes.WELCOME) } }
+    // Show until ready (owner decision 2026-11-06, plans/perf-audit.md): leave as soon as the saved session has loaded, which
+    // decides the first screen, with a short minimum so the splash doesn't flash. No fixed hold.
+    LaunchedEffect(Unit) {
+        val start = android.os.SystemClock.uptimeMillis()
+        val signedIn = c.prefsStore.prefs.first().token != null
+        delay((SPLASH_MIN_MS - (android.os.SystemClock.uptimeMillis() - start)).coerceAtLeast(0))
+        go(signedIn)
+    }
+    val scope = rememberCoroutineScope()
+    Box(Modifier.fillMaxSize().background(m.roles.canvas).press { scope.launch { go(c.prefsStore.prefs.first().token != null) } }) {
         Column(Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(start = MuseSpace.s6, end = MuseSpace.s6, bottom = MuseSpace.s7)) {
             // The wordmark is the brand mark: the display face, larger than any screen title.
             T("MUSE", m.scale.display.copy(fontSize = 56.sp, lineHeight = 60.sp), m.roles.ink)

@@ -106,7 +106,7 @@ fun ProfileScreen() {
     ProfileContent(
         s,
         ProfileActions(
-            select = vm::select, addOutfit = { nav.go(Routes.OUTFIT) }, video = { nav.go(Routes.SOURCE) }, shoot = { nav.go(Routes.SHOOT) },
+            select = vm::select, addOutfit = { nav.go(Routes.OUTFIT) }, video = { nav.go(Routes.SOURCE) }, shoot = { studio.muse.app.ui.screens.suite.composer.openPhoto(c, nav, s.model?.id, s.outfits.getOrNull(s.selected)?.id) },
             back = { nav.back() }, settings = { nav.tab(Routes.SETTINGS) }, sheet = { nav.go(Routes.CREATE3) },
             lora = { nav.go(Routes.LORA) }, accounts = { nav.go(Routes.ACCOUNTS) },
             enhance = { nav.go(Routes.ENHANCE) }, dressUp = { nav.go(Routes.DRESSUP) },
@@ -147,7 +147,7 @@ fun ProfileContent(s: ProfileState, a: ProfileActions) {
         }
         ActionDock {
             PrimaryButton("Make a video", a.video, Modifier.weight(1f))
-            SecondaryButton("Shoot", a.shoot, icon = "camera")
+            SecondaryButton("Photo", a.shoot, icon = "camera")
         }
     }
 }

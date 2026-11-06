@@ -470,7 +470,7 @@ private fun EnginesSection(vm: OwnerViewModel, st: StudioSettings, s: OwnerState
     SecondaryButton(if (s.busy) "Saving…" else "Save engine settings", { vm.saveStudio(StudioSettingsPatch(maxGpus = gpus, overheadPayer = payer)) }, Modifier.fillMaxWidth())
     Column(Modifier.padding(top = MuseSpace.s4), verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
         Heading("Image engine")
-        Caption("Makes character-sheet angles, outfit sets and photoshoots. Members pay exactly what each photo costs.")
+        Caption("Makes character-sheet angles, outfit sets and photos. Members pay exactly what each photo costs.")
     }
     val en = s.engine
     if (en != null) EngineForm(vm, en, s)
