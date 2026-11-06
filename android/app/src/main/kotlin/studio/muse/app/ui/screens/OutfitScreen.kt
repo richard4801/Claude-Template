@@ -79,14 +79,15 @@ class OutfitViewModel(private val c: AppContainer) : ViewModel() {
         edit { it.copy(previewId = o.id) }
     }
 
-    fun save(celebrate: () -> Unit, onDone: () -> Unit) = viewModelScope.launch {
+    /** Saves the set, then [onDone] with the character and the new outfit (the screen opens Suite → Photo with them picked). */
+    fun save(celebrate: () -> Unit, onDone: (modelId: String?, outfitId: String) -> Unit) = viewModelScope.launch {
         val id = state.value.draft.previewId ?: return@launch
         val o = c.repo.saveOutfit(id) ?: return@launch
         c.drafts.outfitId.value = o.id
         c.drafts.outfit.value = OutfitDraft()
         celebrate()
-        c.repo.toast("Outfit saved · selected for your next shoot")
-        onDone()
+        c.repo.toast("Outfit saved · ready in Photo")
+        onDone(state.value.model?.id, o.id)
     }
 }
 
@@ -137,7 +138,7 @@ fun OutfitScreen() {
         Dock {
             if (s.done) {
                 Cta2("Retake", { vm.generate() }, icon = "retry")
-                Cta("Save outfit", { vm.save(celebrate) { nav.back() } }, Modifier.weight(1f))
+                Cta("Save outfit", { vm.save(celebrate) { mid, oid -> nav.back(); studio.muse.app.ui.screens.suite.composer.openPhoto(c, nav, mid, oid) } }, Modifier.weight(1f))
             } else {
                 Cta(
                     if (s.busy) "Generating…" else if (s.draft.mode == "own") "Use my images" else "Generate outfit set · ${studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.outfitSet(photoPrices()))}",

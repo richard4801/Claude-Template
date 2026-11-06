@@ -59,7 +59,7 @@ import studio.muse.core.Pricing
 class ScreenshotTest(private val theme: String, private val screen: String) {
     companion object {
         val SCREENS = listOf(
-            "splash", "welcome", "signin", "signup", "home", "profile", "create1", "create3", "outfit", "shoot", "shoot_prompt",
+            "splash", "welcome", "signin", "signup", "home", "profile", "create1", "create3", "outfit",
             "source", "source_bad", "direct", "queue", "queue_run", "result", "gallery", "settings", "credits",
             "profile_lora", "lora_intro", "lora_gen", "lora_review", "lora_ready_to_train", "lora_training", "lora_done",
             "accounts", "post", "post_schedule", "posts", "posts_posted",
@@ -70,7 +70,6 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "signin_typed_server", "signin_shown_server", "signin_noremember_server", "signup_shown_server",
             // Photo templates (plans/templates.md): library, detail (owner and someone else's), using one (locked prompt line), Save as template.
             "templates", "templates_mine", "template_detail", "template_detail_other", "template_edit", "template_use", "template_use_prompt", "save_template",
-            "shoot_templates",
             // Keep add-on engine ready (owner only, Settings → Engines): the cost warning on switch-on, the owner's indicator (on, getting ready)
             // and the 5-minute warning. No nudge, switch or bar for members.
             "warm_confirm", "warm_bar", "warm_starting", "warm_warning",
@@ -79,8 +78,8 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             // Model tools (plans/api.md "Model tools"): the owner's image models and catalog picker, Enhance setup and review,
             // Dress up setup and the Both side-by-side review, archived models.
             "image_models", "catalog", "enhance_setup", "enhance_review", "dressup_setup", "dressup_review", "archived",
-            // Shoot references and the prompt library (2026-11-05): 3 reference images with their guides, owner Settings → Prompts and one prompt's editor.
-            "shoot_refs", "shoot_refs_prompt", "prompts", "prompt_edit",
+            // The prompt library (2026-11-05): owner Settings → Prompts and one prompt's editor. (Photoshoot's screens moved to the Photo tool: SuitePhotoScreenshotTest.)
+            "prompts", "prompt_edit",
         )
 
         @JvmStatic
@@ -132,7 +131,6 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             }
             "post_schedule" -> c.drafts.postStartScheduled.value = true
             "posts_posted" -> c.drafts.postsTab.value = "posted"
-            "shoot_prompt" -> c.drafts.shoot.update { it.copy(tool = "spark", direction = "laughing mid-step, hair blowing") }
             "source", "direct" -> c.drafts.video.update { it.copy(clip = sample) }
             "source_bad" -> c.drafts.video.update {
                 it.copy(clip = Clip(SampleData.BAD_CLIP, "Mirror trend (download)", 22.0, 1080, 1920, 30, ClipRules.checks(SampleData.badMeta)), showBadExample = true)
@@ -141,14 +139,6 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "templates_mine" -> c.drafts.templateFilter.value = studio.muse.app.data.TemplateFilter(tab = "mine")
             "template_use" -> c.drafts.templateUse.value = studio.muse.app.data.TemplateUseDraft("tpl_mirror-selfie")
             "template_use_prompt" -> c.drafts.templateUse.value = studio.muse.app.data.TemplateUseDraft("tpl_maya_walk", direction = "sitting on the steps, looking back over her shoulder", shuffleSeed = 7, showPrompt = true)
-            "shoot_templates" -> c.drafts.shoot.update { it.copy(tool = "model") }
-            "shoot_refs" -> c.drafts.shoot.update { it.copy(tool = "bg", refs = listOf(
-                studio.muse.app.data.ShootRef(ImageRef.asset("c_front"), listOf("pose")),
-                studio.muse.app.data.ShootRef(ImageRef.asset("c_tq"), listOf("look", "scene")),
-                studio.muse.app.data.ShootRef(ImageRef.asset("g_side"), listOf("scene")))) }
-            "shoot_refs_prompt" -> c.drafts.shoot.update { it.copy(tool = "spark", direction = "sitting on the steps", refs = listOf(
-                studio.muse.app.data.ShootRef(ImageRef.asset("c_front"), listOf("pose")),
-                studio.muse.app.data.ShootRef(ImageRef.asset("c_tq"), listOf("look", "scene")))) }
             "prompts" -> runBlocking { fake.savePrompt("style.house", "realistic phone photo, visible skin texture, true colour, no filter") }
             "prompt_edit" -> runBlocking { fake.savePrompt("refs.pose", "Copy the pose and framing from image {refIndex}, but keep her own hands.") }
             "warm_confirm" -> c.warmUi.confirm()
@@ -226,10 +216,8 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "enhance_setup", "enhance_review" -> Routes.ENHANCE
             "dressup_setup", "dressup_review" -> Routes.DRESSUP
             "archived" -> Routes.ARCHIVED
-            "shoot_refs", "shoot_refs_prompt" -> Routes.SHOOT
             "prompts" -> Routes.PROMPTS
             "prompt_edit" -> Routes.SETTINGS
-            "shoot_prompt" -> Routes.SHOOT
             "source_bad" -> Routes.SOURCE
             "queue_run" -> Routes.QUEUE
             "result", "post", "post_schedule", "result_specs", "result_upscale" -> Routes.HOME
@@ -244,7 +232,6 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
             "posts_posted" -> Routes.POSTS
             "templates", "templates_mine" -> Routes.TEMPLATES
             "template_detail", "template_detail_other", "template_edit", "template_use", "template_use_prompt", "save_template" -> Routes.HOME
-            "shoot_templates" -> Routes.SHOOT
             "quality_draft", "quality_hd", "quality_edit" -> Routes.DIRECT
             "warm_confirm", "warm_starting" -> Routes.STUDIO
             "warm_bar", "warm_warning" -> Routes.HOME
@@ -267,16 +254,6 @@ class ScreenshotTest(private val theme: String, private val screen: String) {
         }
         if (screen == "signin_noremember_server") compose.onNodeWithText("Remember me").performClick()
         if (screen == "template_edit") compose.onNodeWithText("Edit").performClick()
-        // The References panel is below the scene chips: scroll the sheet to its end (all three in, so no Add button).
-        // A semantics scroll, not performScrollTo: that waits for the scroll animation, which never ends on the paused clock.
-        if (screen == "shoot_refs") {
-            compose.onNodeWithText("Add reference photo", substring = true).assertDoesNotExist()
-            compose.onNode(hasScrollAction() and hasAnyDescendant(hasText("Reference 3")), useUnmergedTree = true)
-                .performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 5000f) }
-        }
-        // The Final prompt with the two reference lines (REF), after the direction.
-        if (screen == "shoot_refs_prompt") compose.onNode(hasScrollAction() and hasAnyDescendant(hasText("Final prompt", ignoreCase = true)), useUnmergedTree = true)
-            .performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 1250f) }
         if (screen == "template_use_prompt") {
             // The prompt view for someone else's template: one locked "Template: …" line, the hidden layers never arrive.
             // (No compose waits here: the canvas animates, so the UI never goes idle with a paused clock.)

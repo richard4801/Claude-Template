@@ -96,7 +96,8 @@ class ResultViewModel(private val c: AppContainer, private val id: String) : Vie
     }
 
     fun retry(nav: Nav) {
-        val j = state.value.job ?: return c.repo.toast("This one was a photoshoot · shoot again from Photoshoot")
+        // A still has no job: Retry opens Suite → Photo (Photoshoot moved there).
+        val j = state.value.job ?: return studio.muse.app.ui.screens.suite.composer.openPhoto(c, nav, null, null)
         c.drafts.loadJob(j)
         nav.go(Routes.DIRECT)
     }
@@ -278,7 +279,7 @@ fun GalleryScreen() {
                     NoteBox(s.error ?: "", warn = true)
                     Cta2("Try again", { vm.retry() }, Modifier.fillMaxWidth(), icon = "retry", height = 46.dp)
                 } else if (list.isEmpty()) {
-                    NoteBox(if (s.tab == "final") "Nothing approved yet. Approve a take to move it here." else "No test renders yet. Make a video or a photoshoot.", icon = "spark")
+                    NoteBox(if (s.tab == "final") "Nothing approved yet. Approve a take to move it here." else "No test renders yet. Make a video or a photo.", icon = "spark")
                 } else {
                     list.chunked(3).forEachIndexed { r, row ->
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
