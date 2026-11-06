@@ -64,6 +64,7 @@ class FakeMuseApi(
     override val camera: FakeCameraApi by lazy {
         FakeCameraApi(now, { models.toList().map { it.id to it.name } }, { events.tryEmit(it) }, stepDelayMs = if (speed == 0.0) 0 else 700)
     }
+    override val claude: FakeClaudeApi by lazy { FakeClaudeApi(scope, now, { events.tryEmit(it) }, stepDelayMs = if (speed == 0.0) 0 else 700) }
     override fun setToken(token: String?) {}
 
     override suspend fun signIn(req: SignInRequest): AuthResponse {
