@@ -13,24 +13,29 @@ import studio.muse.app.data.SuiteRules
 import studio.muse.app.data.SuiteSettings
 import studio.muse.app.data.SuiteSettingsPatch
 import studio.muse.app.data.SuiteShotRequest
+import studio.muse.app.ui.screens.suite.composer.ComposerDraft
+import studio.muse.app.ui.screens.suite.composer.ComposerSheet
 
 /**
- * The AI suite's session state (one per app): the catalog (null until loaded), the Shot / Recast / Storyboard drafts, the
- * camera bag's working copy and the renders started from each screen. Members only ever hold member-safe copies: the
+ * The AI suite's session state (one per app): the catalog (null until loaded), the composer, Recast and Storyboard drafts
+ * and the renders started from each screen. Members only ever hold member-safe copies: the
  * catalog and estimates go through [SuiteRules.memberSafe] whatever the server sent.
  */
 class SuiteStore(private val c: AppContainer) {
     val catalog = MutableStateFlow<SuiteCatalog?>(null)
     /** Why the catalog couldn't load (offline, an older server), shown on the hub. */
     val catalogError = MutableStateFlow<String?>(null)
-    val shot = MutableStateFlow(ShotDraft())
+    /** The video composer (every tool is a preset of it), its filled input slots and the open picker sheet. */
+    val composer = MutableStateFlow(ComposerDraft())
+    val composerSlots = MutableStateFlow(InputSlots())
+    val sheet = MutableStateFlow<ComposerSheet?>(null)
+    /** The clip and people of Character swap and Recast (the composer's quality and takes are used). */
     val recast = MutableStateFlow(RecastDraft())
     val board = MutableStateFlow<Storyboard?>(null)
-    /** The camera bag's working copy; Apply to shot puts it into [shot]. */
-    val bag = MutableStateFlow<CameraDraft?>(null)
-    /** Renders started from the Shot and Swap screens this session (newest last): their panes follow them. */
+    /** The request of each composer render (by job id), for Retake on the result. */
+    val requests = MutableStateFlow<Map<String, SuiteShotRequest>>(emptyMap())
+    /** Renders started from the composer this session (newest last): its pane follows them. */
     val shotJobs = MutableStateFlow<List<String>>(emptyList())
-    val swapJobs = MutableStateFlow<List<String>>(emptyList())
     val settings = MutableStateFlow<SuiteSettings?>(null)
 
     val owner: Boolean get() = c.repo.state.value.wallet?.owner ?: c.prefs.value.owner
@@ -40,7 +45,7 @@ class SuiteStore(private val c: AppContainer) {
             val cat = c.repo.api.suiteCatalog()
             catalog.value = if (owner) cat else SuiteRules.memberSafe(cat)
             catalogError.value = null
-            shot.update { it.copy(camera = it.camera.fit(cat.camera), quality = if (it.quality in cat.tiers.map { t -> t.id } || cat.tiers.isEmpty()) it.quality else cat.defaultQuality) }
+            composer.update { d -> d.copy(quality = if (d.quality in cat.tiers.map { t -> t.id } || cat.tiers.isEmpty()) d.quality else cat.defaultQuality).fit(cat) }
             if (board.value == null && c.repo.demo) board.value = demoBoard()
         } catch (e: ApiException) {
             catalogError.value = ErrorText.of(e)
@@ -57,7 +62,7 @@ class SuiteStore(private val c: AppContainer) {
     suspend fun generate(req: SuiteShotRequest, into: MutableStateFlow<List<String>>? = null): Job? {
         val (j, err) = c.repo.createSuiteShot(req)
         if (err != null) c.repo.toast(memberSafeText(err))
-        if (j != null) into?.update { (it - j.id) + j.id }
+        if (j != null) { into?.update { (it - j.id) + j.id }; requests.update { it + (j.id to req) } }
         return j
     }
 

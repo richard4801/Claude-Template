@@ -23,6 +23,8 @@ data class SuiteOption(
     /** Palettes and film stocks: 5 swatch colours (darkest first) and the LUT the take is graded with. */
     val swatches: List<String> = emptyList(),
     val lut: String? = null,
+    /** A short looping preview (mp4/webm URL). Until the loops exist, pickers show the still ([render]). */
+    val loop: String? = null,
 ) {
     /** The card's title: the hardware name when it has a render ("Super 35 Digital"), else the label. */
     val title: String get() = name ?: label
@@ -46,6 +48,8 @@ data class SuiteMoveOption(
     val talkSafe: Boolean = false,
     /** The composer's Movement chip it sits under (see CameraCatalog.moveGroups). */
     val group: String = "",
+    /** A short looping preview (mp4/webm URL); until it exists the tile shows a still with a motion arrow. */
+    val loop: String? = null,
 )
 
 /** One of the 16 featured moves of the camera bag (UGC first), with its filter tag: ugc / cinematic / energy / subtle. */
@@ -378,7 +382,7 @@ data class SuiteSettings(
 
 /** POST /v1/suite/camera/compile: what the camera becomes on a quality's first model (owner also gets the engine). */
 @Serializable
-data class SuiteCompileRequest(val camera: SuiteCameraSpec, val quality: String? = null, val duration: Int? = null)
+data class SuiteCompileRequest(val camera: JsonElement, val quality: String? = null, val duration: Int? = null)
 
 @Serializable
 data class SuiteCompiled(val text: String = "", val moves: List<String> = emptyList(), val guideUsed: Boolean = false, val warnings: List<String> = emptyList(), val engine: SuiteEngine? = null)

@@ -60,7 +60,7 @@ fun SuiteStoryboardScreen() {
     val store = c.suite
     val cat by store.catalog.collectAsState()
     val b0 by store.board.collectAsState()
-    val shot by store.shot.collectAsState()
+    val shot by store.composer.collectAsState()
     val st by c.repo.state.collectAsState()
     val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { if (store.catalog.value == null) store.load() }
@@ -69,7 +69,7 @@ fun SuiteStoryboardScreen() {
     val cam = catalog?.camera ?: studio.muse.app.data.CameraCatalog()
     val board = b0
     val pending = board?.pending(st.jobs).orEmpty()
-    val reqs = board?.let { b -> pending.map { s -> s.id to b.request(s, shot.camera, b.shots.indexOf(s)) } }.orEmpty()
+    val reqs = board?.let { b -> pending.map { s -> s.id to b.request(s, shot.settings, b.shots.indexOf(s)) } }.orEmpty()
     // The price of every shot Generate makes: the sum of their estimates.
     val total = produceState<Pair<Double?, String?>>(null to null, reqs, catalog?.enabled) {
         if (reqs.isEmpty() || catalog?.enabled != true) { value = null to null; return@produceState }
@@ -82,8 +82,9 @@ fun SuiteStoryboardScreen() {
         Column(Modifier.fillMaxSize()) {
             TopBar("Storyboard", onBack = { nav.back() }) {
                 MoreMenu(listOf(MenuItem("plus", "Add the current Shot") {
-                    val s = StoryShot("s" + System.nanoTime(), shot.title.ifBlank { shot.scene.take(32).ifBlank { "New shot" } }, shot.scene, shot.camera.moves.firstOrNull()?.id ?: "static", shot.duration)
-                    store.board.update { b -> (b ?: Storyboard("Untitled storyboard", listOfNotNull(shot.modelId))).let { it.copy(shots = it.shots + s) } }
+                    val scene = shot.tokens.promptText()
+                    val s = StoryShot("s" + System.nanoTime(), shot.title.ifBlank { scene.take(32).ifBlank { "New shot" } }, scene, shot.tokens.moves.firstOrNull()?.id ?: "static", shot.duration)
+                    store.board.update { b -> (b ?: Storyboard("Untitled storyboard", listOfNotNull(shot.characterId))).let { it.copy(shots = it.shots + s) } }
                 }))
             }
             if (board == null || board.shots.isEmpty()) {

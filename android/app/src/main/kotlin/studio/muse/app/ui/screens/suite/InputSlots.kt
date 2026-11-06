@@ -36,6 +36,19 @@ enum class SlotKind(val label: String, val hint: String, val mime: String) {
         VIDEO -> i.videos.coerceIn(0, 3)
         AUDIO -> if (i.audio) 1 else 0
     }
+
+    /** A slot that stays greyed until another kind is filled: the end frame needs a start frame. */
+    val needs: SlotKind? get() = if (this == END) START else null
+
+    /** The slot's caption, which states its limit ("Up to 6 images", "The first frame sets the shape"). */
+    fun caption(i: SuiteInputs): String = when (this) {
+        START -> "Sets the shape"
+        END -> "Where it lands"
+        MIDDLE -> capacity(i).let { "Up to $it in between" }
+        IMAGE -> capacity(i).let { if (it == 1) "One image" else "Up to $it images" }
+        VIDEO -> capacity(i).let { if (it == 1) "One clip" else "Up to $it clips" }
+        AUDIO -> "One track"
+    }
 }
 
 /** One slot: its kind and its place among slots of the same kind (0-based). */
@@ -108,6 +121,12 @@ data class InputSlots(val values: Map<SlotId, SlotValue> = emptyMap()) {
         return InputSlots(moved)
     }
 
+    /**
+     * A dependent slot is greyed (not pickable) until its prerequisite holds a value: END FRAME waits for a start frame.
+     * A filled dependent slot stays enabled so it can be cleared.
+     */
+    fun enabled(id: SlotId): Boolean = id in values || id.kind.needs?.let { need -> values.keys.any { it.kind == need } } ?: true
+
     val uploading: Boolean get() = values.values.any { it.uploading }
     val isEmpty: Boolean get() = values.isEmpty()
 
@@ -130,7 +149,8 @@ data class InputSlots(val values: Map<SlotId, SlotValue> = emptyMap()) {
     /** [req] with the frames and references of the ready slots this tier takes (others left out, as the server would refuse them). */
     fun applyTo(req: SuiteShotRequest, inputs: SuiteInputs): SuiteShotRequest {
         val start = sent(SlotKind.START, inputs).firstOrNull()?.image
-        val end = sent(SlotKind.END, inputs).firstOrNull()?.image
+        // An end frame needs a start frame: without one it is kept but not sent.
+        val end = sent(SlotKind.END, inputs).firstOrNull()?.image?.takeIf { start != null }
         val middle = sent(SlotKind.MIDDLE, inputs).mapNotNull { it.image }
         val frames = if (start != null || end != null || middle.isNotEmpty()) SuiteFrames(start, middle.ifEmpty { null }, end) else null
         val images = sent(SlotKind.IMAGE, inputs).mapNotNull { v -> v.image?.let { SuiteRefImage(it, v.role, v.name.substringBeforeLast('.').take(80).ifBlank { null }) } }

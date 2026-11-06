@@ -862,7 +862,10 @@ class FakeMuseApi(
         val j = jobs.firstOrNull { it.id == id && it.request.engine == SuiteRules.ENGINE } ?: throw ApiException("not_found", "Shot not found")
         SuiteShot(j, emptyList(), if (suiteOwner) suite.estimate(SuiteShotRequest(prompt = j.prompt.ifBlank { "shot" }, quality = j.request.quality), true, models, null).engine else null)
     }
-    override suspend fun suiteCompile(req: SuiteCompileRequest) = SuiteCompiled("Camera: ${req.camera.move?.id ?: "static"}", listOfNotNull(req.camera.move?.id, req.camera.mix?.id))
+    override suspend fun suiteCompile(req: SuiteCompileRequest): SuiteCompiled {
+        fun id(k: String) = ((req.camera as? kotlinx.serialization.json.JsonObject)?.get(k) as? kotlinx.serialization.json.JsonObject)?.get("id")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+        return SuiteCompiled("Camera: ${id("move") ?: "static"}", listOfNotNull(id("move"), id("mix")))
+    }
     override suspend fun suiteSettings() = lock.withLock {
         if (!suiteOwner) throw ApiException("owner_only", "Only the studio owner can do that")
         suite.settings()
