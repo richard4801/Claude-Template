@@ -54,6 +54,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.semantics.semantics
 import studio.muse.app.AppContainer
 import studio.muse.app.data.Job
@@ -68,6 +69,10 @@ import studio.muse.app.ui.TabBar
 import studio.muse.app.ui.components.*
 import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.MuseSpace
+import studio.muse.app.ui.theme.roles
+import studio.muse.app.ui.theme.scale
+import studio.muse.app.ui.theme.radii
 import studio.muse.core.Pricing
 
 data class ResultState(val takes: List<Take> = emptyList(), val job: Job? = null, val retryCost: Double = 0.0, val posts: List<studio.muse.app.data.Post> = emptyList(),
@@ -129,17 +134,14 @@ private fun UpscaleRow(up: studio.muse.app.data.AddonInfo, seconds: Double?, onP
     val sizes = up.sizes.ifEmpty { studio.muse.app.data.VideoFeatures.DEFAULT.upscale.sizes }
     // Each size's price is the server's $ per output second × this take's length (UpscaleOffer), or "Soon".
     val choices = studio.muse.app.data.UpscaleOffer.choices(up, seconds)
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        RowB {
-            T(up.label.ifBlank { "Upscale" }, m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink)
-            if (!studio.muse.app.data.UpscaleOffer.live(up)) Pill("Coming soon")
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+        Heading(up.label.ifBlank { "Upscale" }) { if (!studio.muse.app.data.UpscaleOffer.live(up)) Caption("Coming soon") }
+        Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
             sizes.zip(choices).forEach { (z, ch) ->
-                Cta2("${ch.label} · ${ch.priceText}", { onPick(z) }, Modifier.weight(1f).graphicsLayer { alpha = if (ch.available) 1f else .45f }, height = 48.dp)
+                SecondaryButton("${ch.label} · ${ch.priceText}", { onPick(z) }, Modifier.weight(1f).graphicsLayer { alpha = if (ch.available) 1f else .45f }, height = 48.dp)
             }
         }
-        Tiny(up.detail.ifBlank { "Sharper 1080p, 2K or 4K from a finished take" })
+        Caption(up.detail.ifBlank { "Sharper 1080p, 2K or 4K from a finished take" })
     }
 }
 
@@ -186,13 +188,12 @@ fun ResultScreen(id: String) {
                             MenuItem("upload", "Post") { take?.let { nav.go(Routes.post(it.id)) } },
                             MenuItem("retry", "Edit video") { take?.let { if (it.editable) nav.go(Routes.editVideo(it.id)) else vm.toast("Only finished videos can be edited") } },
                             MenuItem("grid", "Save as template") { take?.let { if (it.shot) nav.go(Routes.saveTemplate(it.id)) else vm.toast("Templates are for photos · video templates come later") } },
-                            MenuItem("spark", "Copy prompt") { clip.setText(AnnotatedString(take?.prompt?.ifBlank { null } ?: s.job?.prompt ?: "")); vm.toast("Prompt copied") },
+                            MenuItem("export", "Copy prompt") { clip.setText(AnnotatedString(take?.prompt?.ifBlank { null } ?: s.job?.prompt ?: "")); vm.toast("Prompt copied") },
                             MenuItem("grid", "Compare takes") { if (s.takes.size > 1) compare = !compare else vm.toast("Compare takes · needs 2+ takes") },
                             MenuItem("shield", "Delete take", danger = true) { take?.let { vm.discard(it, nav) } },
                         ), tint = Color.White)
                     }
                 }
-                Box(Modifier.fillMaxSize()) { Viewfinder(bottomInset = 30.dp) }
                 // A real video has the player's own controls along the bottom: keep the side actions above them.
                 Column(Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = if (take?.videoUrl != null) 96.dp else 40.dp), verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     SideAction("retry", if (s.job != null) "Retry · ${Pricing.money(s.retryCost)}" else "Retry") { vm.retry(nav) }
@@ -202,35 +203,35 @@ fun ResultScreen(id: String) {
                     if (take?.shot == true) SideAction("grid", "Save look") { nav.go(Routes.saveTemplate(take.id)) }
                 }
             }
-            val shape = RoundedCornerShape(topStart = if (m.isA) 0.dp else m.t.rLg, topEnd = if (m.isA) 0.dp else m.t.rLg)
             Column(
-                Modifier.fillMaxWidth().offset(y = (-20).dp).clip(shape).background(m.t.bg).navigationBarsPadding().padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                Modifier.fillMaxWidth().background(m.roles.canvas).navigationBarsPadding()
+                    .padding(start = MuseSpace.gutter, end = MuseSpace.gutter, top = MuseSpace.s4, bottom = MuseSpace.s1),
+                verticalArrangement = Arrangement.spacedBy(MuseSpace.s4),
             ) {
                 if (take == null) {
-                    T("Nothing here any more.", m.type.body, m.t.muted)
-                    Cta("Back to Gallery", { nav.tab(Routes.GALLERY) }, Modifier.fillMaxWidth())
+                    ErrorState("This take isn't here any more", "It may have been discarded. Your other takes are in the Library.", null)
+                    PrimaryButton("Back to Library", { nav.tab(Routes.GALLERY) }, Modifier.fillMaxWidth())
                 } else {
-                    RowB(align = Alignment.Top) {
-                        Column(Modifier.weight(1f)) {
-                            H3(take.title)
-                            take.templateName?.let { Tiny("Template: $it", weight = FontWeight.Bold) }
-                            Tiny(listOf(take.engineLabel, Pricing.money(take.cost)).filter { it.isNotBlank() }.joinToString(" · "))
-                            takeSpecs(take)?.let { T(it, m.type.mono.copy(fontSize = 11.5.sp), m.t.muted) }
+                    Row(verticalAlignment = Alignment.Top) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            T(take.title, m.scale.heading, m.roles.ink)
+                            take.templateName?.let { Caption("Template: $it") }
+                            Caption(listOf(take.engineLabel, Pricing.money(take.cost)).filter { it.isNotBlank() }.joinToString(" · "))
+                            takeSpecs(take)?.let { T(it, m.scale.caption.tabular(), m.roles.ink2) }
                         }
-                        Pill(if (take.final) "Final" else "Test", if (take.final) "good" else "")
+                        RowValue(if (take.final) "Final" else "Test", if (take.final) m.roles.positive else m.roles.ink2)
                     }
                     s.posts.firstOrNull { it.takeId == take.id && it.stats != null }?.let { p ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s1), verticalAlignment = Alignment.CenterVertically) {
                             p.platforms.mapNotNull { studio.muse.app.data.Platform.of(it) }.forEach { PlatformBadge(it, 16.dp) }
-                            p.stats?.let { st -> T(" ${String.format(java.util.Locale.US, "%,d", st.views)} views · ${String.format(java.util.Locale.US, "%,d", st.likes)} likes", m.type.mono.copy(fontSize = 11.5.sp), m.t.muted) }
+                            p.stats?.let { st -> T(" ${String.format(java.util.Locale.US, "%,d", st.views)} views · ${String.format(java.util.Locale.US, "%,d", st.likes)} likes", m.scale.caption.tabular(), m.roles.ink2) }
                         }
                     }
                     if (take.kind == "take" && take.videoUrl != null) UpscaleRow(s.upscale, take.durationSec) { z -> vm.upscale(take, z) }
                     if (take.editable) EditVideoRow(take, s.versions(take)) { nav.go(Routes.editVideo(take.id)) }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Cta2("Discard", { vm.discard(take, nav) }, Modifier.weight(1f))
-                        Cta(if (take.final) "Approved ✓" else "Approve", { vm.approve(take, celebrate) }, Modifier.weight(1f))
+                    Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                        SecondaryButton("Discard", { vm.discard(take, nav) }, Modifier.weight(1f))
+                        PrimaryButton(if (take.final) "Approved" else "Approve", { vm.approve(take, celebrate) }, Modifier.weight(1f))
                     }
                 }
             }
@@ -240,9 +241,9 @@ fun ResultScreen(id: String) {
 
 @Composable
 private fun SideAction(icon: String, label: String, onClick: () -> Unit) {
-    Column(Modifier.press(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(Modifier.widthIn(min = 48.dp).press(onClick = onClick).semantics(mergeDescendants = true) {}, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Ic(icon, 22.dp, Color.White)
-        T(label, muse.type.tiny.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold, shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = .5f), blurRadius = 3f)), Color.White)
+        T(label, muse.scale.micro.copy(shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = .5f), blurRadius = 3f)).tabular(), Color.White)
     }
 }
 
@@ -271,49 +272,50 @@ fun GalleryScreen() {
     val fresh = remember { s.fresh }
     LaunchedEffect(Unit) { vm.seen() }
     val list = if (s.tab == "final") s.finals else s.tests
-    ScreenBox {
-        Column(Modifier.fillMaxSize()) {
-            Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                Wordmark(); Spacer(Modifier.weight(1f))
+    ScreenBox(bg = m.roles.canvas) {
+        // Performance: a lazy list (only the rows on screen are composed and their thumbnails loaded), keyed by take.
+        val rows = remember(list) { list.chunked(3) }
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = MuseSpace.gutter, end = MuseSpace.gutter, top = MuseSpace.s4, bottom = 120.dp),
+            verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+            item(key = "title", contentType = "title") { DisplayTitle("Library") }
+            item(key = "tabs", contentType = "tabs") {
+                Segmented(listOf("tests" to "Tests · ${s.tests.size}", "final" to "Final · ${s.finals.size}"), s.tab, vm::tab, Modifier.padding(bottom = MuseSpace.s2))
             }
-            // Performance: a lazy list (only the rows on screen are composed and their thumbnails loaded), keyed by take.
-            val rows = remember(list) { list.chunked(3) }
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                item(key = "title", contentType = "title") { if (m.isA) T("GALLERY", m.type.h2.copy(fontSize = 56.sp, lineHeight = 52.sp), m.t.ink) else H2("Gallery") }
-                item(key = "tabs", contentType = "tabs") { Seg(listOf("tests" to "Tests · ${s.tests.size}", "final" to "Final · ${s.finals.size}"), s.tab, vm::tab) }
-                if (list.isEmpty() && !s.loaded) item(key = "loading", contentType = "note") { Tiny("Loading your renders…") }
-                else if (list.isEmpty() && s.error != null) item(key = "error", contentType = "note") {
-                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        NoteBox(s.error ?: "", warn = true)
-                        Cta2("Try again", { vm.retry() }, Modifier.fillMaxWidth(), icon = "retry", height = 46.dp)
-                    }
-                } else if (list.isEmpty()) item(key = "empty", contentType = "note") {
-                    NoteBox(if (s.tab == "final") "Nothing approved yet. Approve a take to move it here." else "No test renders yet. Make a video or a photo.", icon = "spark")
-                } else {
-                    itemsIndexed(rows, key = { _, row -> row.first().id }, contentType = { _, _ -> "row" }) { r, row ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            row.forEachIndexed { i, t ->
-                                val idx = r * 3 + i
-                                val isNew = s.tab == "tests" && idx < fresh
-                                val shape = RoundedCornerShape(m.t.r * .6f)
-                                Box(
-                                    Modifier.weight(1f).height(170.dp).let { if (isNew) it.border(3.dp, m.t.accent, shape) else it }.clip(shape)
-                                        .let { if (m.isD) it.border(2.5.dp, Ink, shape) else it }.press { nav.go(Routes.result(t.jobId ?: t.id)) }
-                                        .semantics(mergeDescendants = true) { contentDescription = "${t.title} · ${t.label}" },
-                                ) {
-                                    RefImage(t.thumb, Modifier.fillMaxSize(), 20)
-                                    if (t.kind == "take" || t.kind == "edit") PlayBadge()
-                                    Box(Modifier.align(Alignment.BottomStart).padding(6.dp).clip(RoundedCornerShape(4.dp)).background(Color.Black.copy(alpha = .55f)).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                                        T((if (isNew) "New · " else "") + t.label, m.type.tiny.copy(fontSize = 11.5.sp, fontWeight = FontWeight.Bold), Color.White, maxLines = 1)
-                                    }
+            if (list.isEmpty() && !s.loaded) items(2, key = { "skeleton$it" }, contentType = { "row" }) {
+                Row(Modifier.semantics { contentDescription = "Loading your renders" }, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                    repeat(3) { Skeleton(Modifier.weight(1f).height(170.dp), containerShape()) }
+                }
+            }
+            else if (list.isEmpty() && s.error != null) item(key = "error", contentType = "note") {
+                ErrorState("Can't load your renders", s.error ?: "", onAction = { vm.retry() })
+            } else if (list.isEmpty()) item(key = "empty", contentType = "note") {
+                if (s.tab == "final") EmptyState("Nothing approved yet", "Approve a take you want to keep and it moves here.", "Show test renders", { vm.tab("tests") }, primary = false)
+                else EmptyState("No test renders yet", "Videos and photos you make land here first. Approve the ones you keep.", "New video", { nav.go(Routes.SOURCE) })
+            } else {
+                itemsIndexed(rows, key = { _, row -> row.first().id }, contentType = { _, _ -> "row" }) { r, row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                        row.forEachIndexed { i, t ->
+                            val idx = r * 3 + i
+                            val isNew = s.tab == "tests" && idx < fresh
+                            val shape = containerShape()
+                            Box(
+                                Modifier.weight(1f).height(170.dp).clip(shape).background(m.roles.field).let { if (isNew) it.border(2.dp, m.roles.selection, shape) else it }
+                                    .press { nav.go(Routes.result(t.jobId ?: t.id)) }
+                                    .semantics(mergeDescendants = true) { contentDescription = "${t.title} · ${t.label}" },
+                            ) {
+                                RefImage(t.thumb, Modifier.fillMaxSize(), 20)
+                                // One caption on a scrim: what it is (duration or Photo), and New for the ones just made.
+                                Box(Modifier.align(Alignment.BottomStart).padding(MuseSpace.s1).clip(RoundedCornerShape(m.radii.chip)).background(Color.Black.copy(alpha = .55f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)) {
+                                    T((if (isNew) "New · " else "") + t.label, m.scale.micro.tabular(), Color.White, maxLines = 1)
                                 }
                             }
-                            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                         }
+                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
-                item(key = "footer", contentType = "note") { Tiny("Test renders stay separate from your Final gallery.") }
             }
+            if (list.isNotEmpty()) item(key = "footer", contentType = "note") { Caption("Test renders stay separate from your Final gallery.", Modifier.padding(top = MuseSpace.s2)) }
         }
         TabBar(Routes.GALLERY)
     }
