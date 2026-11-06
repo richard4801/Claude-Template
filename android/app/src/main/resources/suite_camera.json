@@ -893,7 +893,7 @@
    "description": "Available light, as it is",
    "visible": true,
    "preview": {
-    "poster": "lighting/natural.jpg"
+    "poster": "lighting/natural.webp"
    }
   },
   {
@@ -905,7 +905,7 @@
    "caption": "Soft daylight through sheer · natural & calm",
    "visible": true,
    "preview": {
-    "poster": "lighting/window.jpg"
+    "poster": "lighting/window.webp"
    }
   },
   {
@@ -917,7 +917,7 @@
    "caption": "Two softboxes crossing · even, flattering",
    "visible": true,
    "preview": {
-    "poster": "lighting/soft_cross.jpg"
+    "poster": "lighting/soft_cross.webp"
    }
   },
   {
@@ -929,7 +929,7 @@
    "caption": "Hard backlight through haze · rim & glow",
    "visible": true,
    "preview": {
-    "poster": "lighting/contre_jour.jpg"
+    "poster": "lighting/contre_jour.webp"
    }
   },
   {
@@ -941,7 +941,7 @@
    "caption": "Butterfly silk overhead · beauty top-light",
    "visible": true,
    "preview": {
-    "poster": "lighting/overhead.jpg"
+    "poster": "lighting/overhead.webp"
    }
   },
   {
@@ -953,7 +953,7 @@
    "caption": "Lamps, neon, bulbs in shot · night mood",
    "visible": true,
    "preview": {
-    "poster": "lighting/practicals.jpg"
+    "poster": "lighting/practicals.webp"
    }
   },
   {
@@ -962,7 +962,7 @@
    "description": "Subject dark against bright",
    "visible": true,
    "preview": {
-    "poster": "lighting/silhouette.jpg"
+    "poster": "lighting/silhouette.webp"
    }
   },
   {
@@ -971,7 +971,7 @@
    "description": "Low warm sun",
    "visible": true,
    "preview": {
-    "poster": "lighting/golden_hour.jpg"
+    "poster": "lighting/golden_hour.webp"
    }
   },
   {
@@ -980,7 +980,7 @@
    "description": "Cool dusk ambience",
    "visible": true,
    "preview": {
-    "poster": "lighting/blue_hour.jpg"
+    "poster": "lighting/blue_hour.webp"
    }
   },
   {
@@ -992,7 +992,7 @@
    "caption": "Ring light + RGB tube · UGC talking head",
    "visible": true,
    "preview": {
-    "poster": "lighting/ring_light.jpg"
+    "poster": "lighting/ring_light.webp"
    }
   },
   {
@@ -1001,7 +1001,7 @@
    "description": "Key, fill and rim",
    "visible": true,
    "preview": {
-    "poster": "lighting/studio_3pt.jpg"
+    "poster": "lighting/studio_3pt.webp"
    }
   },
   {
@@ -1010,7 +1010,7 @@
    "description": "Coloured neon spill",
    "visible": true,
    "preview": {
-    "poster": "lighting/neon.jpg"
+    "poster": "lighting/neon.webp"
    }
   },
   {
@@ -1019,7 +1019,7 @@
    "description": "Hard shadows, bright",
    "visible": true,
    "preview": {
-    "poster": "lighting/harsh_sun.jpg"
+    "poster": "lighting/harsh_sun.webp"
    }
   },
   {
@@ -1028,7 +1028,7 @@
    "description": "Flat soft daylight",
    "visible": true,
    "preview": {
-    "poster": "lighting/overcast.jpg"
+    "poster": "lighting/overcast.webp"
    }
   },
   {
@@ -1037,7 +1037,7 @@
    "description": "Warm flicker",
    "visible": true,
    "preview": {
-    "poster": "lighting/candle.jpg"
+    "poster": "lighting/candle.webp"
    }
   },
   {
@@ -1046,7 +1046,7 @@
    "description": "Cool low-key night",
    "visible": true,
    "preview": {
-    "poster": "lighting/moonlight.jpg"
+    "poster": "lighting/moonlight.webp"
    }
   },
   {
@@ -1055,7 +1055,7 @@
    "description": "Party flash, hard and direct",
    "visible": true,
    "preview": {
-    "poster": "lighting/flash.jpg"
+    "poster": "lighting/flash.webp"
    }
   }
  ],
@@ -1528,7 +1528,7 @@
    "talkSafe": true,
    "preview": {
     "video": "moves/static.mp4",
-    "poster": "moves/static.jpg",
+    "poster": "moves/static.webp",
     "seconds": 2.5
    }
   },
@@ -1542,7 +1542,7 @@
    "talkSafe": true,
    "preview": {
     "video": "moves/micro_push.mp4",
-    "poster": "moves/micro_push.jpg",
+    "poster": "moves/micro_push.webp",
     "seconds": 2.5
    }
   },
@@ -1556,7 +1556,7 @@
    "talkSafe": true,
    "preview": {
     "video": "moves/handheld.mp4",
-    "poster": "moves/handheld.jpg",
+    "poster": "moves/handheld.webp",
     "seconds": 2.5
    }
   },
@@ -1570,7 +1570,7 @@
    "talkSafe": true,
    "preview": {
     "video": "moves/selfie.mp4",
-    "poster": "moves/selfie.jpg",
+    "poster": "moves/selfie.webp",
     "seconds": 2.5
    }
   },
@@ -1584,7 +1584,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/dolly_in.mp4",
-    "poster": "moves/dolly_in.jpg",
+    "poster": "moves/dolly_in.webp",
     "seconds": 2.5
    }
   },
@@ -1598,7 +1598,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/dolly_out.mp4",
-    "poster": "moves/dolly_out.jpg",
+    "poster": "moves/dolly_out.webp",
     "seconds": 2.5
    }
   },
@@ -1612,7 +1612,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/truck_left.mp4",
-    "poster": "moves/truck_left.jpg",
+    "poster": "moves/truck_left.webp",
     "seconds": 2.5
    }
   },
@@ -1626,7 +1626,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/truck_right.mp4",
-    "poster": "moves/truck_right.jpg",
+    "poster": "moves/truck_right.webp",
     "seconds": 2.5
    }
   },
@@ -1640,7 +1640,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/pan_left.mp4",
-    "poster": "moves/pan_left.jpg",
+    "poster": "moves/pan_left.webp",
     "seconds": 2.5
    }
   },
@@ -1654,7 +1654,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/pan_right.mp4",
-    "poster": "moves/pan_right.jpg",
+    "poster": "moves/pan_right.webp",
     "seconds": 2.5
    }
   },
@@ -1668,7 +1668,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/tilt_up.mp4",
-    "poster": "moves/tilt_up.jpg",
+    "poster": "moves/tilt_up.webp",
     "seconds": 2.5
    }
   },
@@ -1682,7 +1682,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/tilt_down.mp4",
-    "poster": "moves/tilt_down.jpg",
+    "poster": "moves/tilt_down.webp",
     "seconds": 2.5
    }
   },
@@ -1696,7 +1696,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/orbit_left.mp4",
-    "poster": "moves/orbit_left.jpg",
+    "poster": "moves/orbit_left.webp",
     "seconds": 2.5
    }
   },
@@ -1710,7 +1710,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/orbit_right.mp4",
-    "poster": "moves/orbit_right.jpg",
+    "poster": "moves/orbit_right.webp",
     "seconds": 2.5
    }
   },
@@ -1724,7 +1724,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/orbit_360.mp4",
-    "poster": "moves/orbit_360.jpg",
+    "poster": "moves/orbit_360.webp",
     "seconds": 2.5
    }
   },
@@ -1738,7 +1738,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/crane_up.mp4",
-    "poster": "moves/crane_up.jpg",
+    "poster": "moves/crane_up.webp",
     "seconds": 2.5
    }
   },
@@ -1752,7 +1752,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/crane_down.mp4",
-    "poster": "moves/crane_down.jpg",
+    "poster": "moves/crane_down.webp",
     "seconds": 2.5
    }
   },
@@ -1766,7 +1766,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/crane_overhead.mp4",
-    "poster": "moves/crane_overhead.jpg",
+    "poster": "moves/crane_overhead.webp",
     "seconds": 2.5
    }
   },
@@ -1780,7 +1780,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/pedestal_up.mp4",
-    "poster": "moves/pedestal_up.jpg",
+    "poster": "moves/pedestal_up.webp",
     "seconds": 2.5
    }
   },
@@ -1794,7 +1794,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/pedestal_down.mp4",
-    "poster": "moves/pedestal_down.jpg",
+    "poster": "moves/pedestal_down.webp",
     "seconds": 2.5
    }
   },
@@ -1808,7 +1808,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/zoom_in.mp4",
-    "poster": "moves/zoom_in.jpg",
+    "poster": "moves/zoom_in.webp",
     "seconds": 2.5
    }
   },
@@ -1822,7 +1822,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/zoom_out.mp4",
-    "poster": "moves/zoom_out.jpg",
+    "poster": "moves/zoom_out.webp",
     "seconds": 2.5
    }
   },
@@ -1836,7 +1836,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/crash_zoom.mp4",
-    "poster": "moves/crash_zoom.jpg",
+    "poster": "moves/crash_zoom.webp",
     "seconds": 2.5
    }
   },
@@ -1850,7 +1850,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/dolly_zoom.mp4",
-    "poster": "moves/dolly_zoom.jpg",
+    "poster": "moves/dolly_zoom.webp",
     "seconds": 2.5
    }
   },
@@ -1864,7 +1864,7 @@
    "talkSafe": true,
    "preview": {
     "video": "moves/rack_focus.mp4",
-    "poster": "moves/rack_focus.jpg",
+    "poster": "moves/rack_focus.webp",
     "seconds": 2.5
    }
   },
@@ -1878,7 +1878,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/follow.mp4",
-    "poster": "moves/follow.jpg",
+    "poster": "moves/follow.webp",
     "seconds": 2.5
    }
   },
@@ -1892,7 +1892,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/track_side.mp4",
-    "poster": "moves/track_side.jpg",
+    "poster": "moves/track_side.webp",
     "seconds": 2.5
    }
   },
@@ -1906,7 +1906,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/lead.mp4",
-    "poster": "moves/lead.jpg",
+    "poster": "moves/lead.webp",
     "seconds": 2.5
    }
   },
@@ -1920,7 +1920,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/steadicam.mp4",
-    "poster": "moves/steadicam.jpg",
+    "poster": "moves/steadicam.webp",
     "seconds": 2.5
    }
   },
@@ -1934,7 +1934,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/snorricam.mp4",
-    "poster": "moves/snorricam.jpg",
+    "poster": "moves/snorricam.webp",
     "seconds": 2.5
    }
   },
@@ -1948,7 +1948,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/fpv.mp4",
-    "poster": "moves/fpv.jpg",
+    "poster": "moves/fpv.webp",
     "seconds": 2.5
    }
   },
@@ -1962,7 +1962,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/drone_reveal.mp4",
-    "poster": "moves/drone_reveal.jpg",
+    "poster": "moves/drone_reveal.webp",
     "seconds": 2.5
    }
   },
@@ -1976,7 +1976,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/flyover.mp4",
-    "poster": "moves/flyover.jpg",
+    "poster": "moves/flyover.webp",
     "seconds": 2.5
    }
   },
@@ -1990,7 +1990,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/whip_pan.mp4",
-    "poster": "moves/whip_pan.jpg",
+    "poster": "moves/whip_pan.webp",
     "seconds": 2.5
    }
   },
@@ -2004,7 +2004,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/dutch_push.mp4",
-    "poster": "moves/dutch_push.jpg",
+    "poster": "moves/dutch_push.webp",
     "seconds": 2.5
    }
   },
@@ -2018,7 +2018,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/through_object.mp4",
-    "poster": "moves/through_object.jpg",
+    "poster": "moves/through_object.webp",
     "seconds": 2.5
    }
   },
@@ -2032,7 +2032,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/top_down_spin.mp4",
-    "poster": "moves/top_down_spin.jpg",
+    "poster": "moves/top_down_spin.webp",
     "seconds": 2.5
    }
   },
@@ -2046,7 +2046,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/bullet_time.mp4",
-    "poster": "moves/bullet_time.jpg",
+    "poster": "moves/bullet_time.webp",
     "seconds": 2.5
    }
   },
@@ -2060,7 +2060,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/hyperlapse.mp4",
-    "poster": "moves/hyperlapse.jpg",
+    "poster": "moves/hyperlapse.webp",
     "seconds": 2.5
    }
   },
@@ -2074,7 +2074,7 @@
    "talkSafe": false,
    "preview": {
     "video": "moves/handheld_run.mp4",
-    "poster": "moves/handheld_run.jpg",
+    "poster": "moves/handheld_run.webp",
     "seconds": 2.5
    }
   },
@@ -2128,7 +2128,7 @@
  ],
  "autoPreviews": {
   "lighting": {
-   "poster": "lighting/auto.jpg"
+   "poster": "lighting/auto.webp"
   }
  },
  "library": [
@@ -2252,7 +2252,7 @@
    "description": "Neutral",
    "visible": true,
    "preview": {
-    "poster": "angles/eye.jpg"
+    "poster": "angles/eye.webp"
    }
   },
   {
@@ -2261,7 +2261,7 @@
    "description": "Slightly below eye",
    "visible": true,
    "preview": {
-    "poster": "angles/shoulder.jpg"
+    "poster": "angles/shoulder.webp"
    }
   },
   {
@@ -2270,7 +2270,7 @@
    "description": "Heroic, looking up",
    "visible": true,
    "preview": {
-    "poster": "angles/low.jpg"
+    "poster": "angles/low.webp"
    }
   },
   {
@@ -2279,7 +2279,7 @@
    "description": "Looking down",
    "visible": true,
    "preview": {
-    "poster": "angles/high.jpg"
+    "poster": "angles/high.webp"
    }
   },
   {
@@ -2288,7 +2288,7 @@
    "description": "Bird’s-eye",
    "visible": true,
    "preview": {
-    "poster": "angles/overhead.jpg"
+    "poster": "angles/overhead.webp"
    }
   },
   {
@@ -2297,7 +2297,7 @@
    "description": "From the ground up",
    "visible": true,
    "preview": {
-    "poster": "angles/worm.jpg"
+    "poster": "angles/worm.webp"
    }
   },
   {
@@ -2306,7 +2306,7 @@
    "description": "Camera on the floor",
    "visible": true,
    "preview": {
-    "poster": "angles/ground.jpg"
+    "poster": "angles/ground.webp"
    }
   },
   {
@@ -2315,7 +2315,7 @@
    "description": "Western-style",
    "visible": true,
    "preview": {
-    "poster": "angles/hip.jpg"
+    "poster": "angles/hip.webp"
    }
   }
  ],
@@ -2326,7 +2326,7 @@
    "description": "Tiny in a huge space",
    "visible": true,
    "preview": {
-    "poster": "angles/els.jpg"
+    "poster": "angles/els.webp"
    }
   },
   {
@@ -2335,7 +2335,7 @@
    "description": "Whole body and place",
    "visible": true,
    "preview": {
-    "poster": "angles/ls.jpg"
+    "poster": "angles/ls.webp"
    }
   },
   {
@@ -2344,7 +2344,7 @@
    "description": "Head to toe",
    "visible": true,
    "preview": {
-    "poster": "angles/full.jpg"
+    "poster": "angles/full.webp"
    }
   },
   {
@@ -2353,7 +2353,7 @@
    "description": "Mid-thigh up",
    "visible": true,
    "preview": {
-    "poster": "angles/cowboy.jpg"
+    "poster": "angles/cowboy.webp"
    }
   },
   {
@@ -2362,7 +2362,7 @@
    "description": "Waist up",
    "visible": true,
    "preview": {
-    "poster": "angles/ms.jpg"
+    "poster": "angles/ms.webp"
    }
   },
   {
@@ -2371,7 +2371,7 @@
    "description": "Chest up",
    "visible": true,
    "preview": {
-    "poster": "angles/mcu.jpg"
+    "poster": "angles/mcu.webp"
    }
   },
   {
@@ -2380,7 +2380,7 @@
    "description": "Face",
    "visible": true,
    "preview": {
-    "poster": "angles/cu.jpg"
+    "poster": "angles/cu.webp"
    }
   },
   {
@@ -2389,7 +2389,7 @@
    "description": "Eyes or a detail",
    "visible": true,
    "preview": {
-    "poster": "angles/ecu.jpg"
+    "poster": "angles/ecu.webp"
    }
   },
   {
@@ -2398,7 +2398,7 @@
    "description": "An object or detail",
    "visible": true,
    "preview": {
-    "poster": "angles/insert.jpg"
+    "poster": "angles/insert.webp"
    }
   },
   {
@@ -2407,7 +2407,7 @@
    "description": "From behind another person",
    "visible": true,
    "preview": {
-    "poster": "angles/ots.jpg"
+    "poster": "angles/ots.webp"
    }
   },
   {
@@ -2416,7 +2416,7 @@
    "description": "Through her eyes",
    "visible": true,
    "preview": {
-    "poster": "angles/pov.jpg"
+    "poster": "angles/pov.webp"
    }
   },
   {
@@ -2425,7 +2425,7 @@
    "description": "Two people in frame",
    "visible": true,
    "preview": {
-    "poster": "angles/two_shot.jpg"
+    "poster": "angles/two_shot.webp"
    }
   }
  ],

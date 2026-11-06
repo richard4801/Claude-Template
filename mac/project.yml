@@ -42,7 +42,7 @@ targets:
         buildPhase: resources
       # AI suite (workstream 1): the composer previews (design/previews: move loops, lighting and angle stills), bundled as
       # `previews` (the catalog's preview paths are relative to it). A folder reference copies the whole folder, so its
-      # small README, manifest and source/ (about 0.3 MB of the 9.7 MB) come along.
+      # small README, manifest and source/ (about 0.3 MB of the 2.8 MB after compress_previews.py) come along.
       - path: ../design/previews
         type: folder
         buildPhase: resources

@@ -402,7 +402,7 @@ public struct PickerPreview: Hashable, Sendable {
     public var still: String?
     /// A loop in the bundled `previews/` folder ("moves/dolly_in.mp4"), or a URL.
     public var video: String?
-    /// The preview's own still in `previews/` ("moves/dolly_in.jpg"): shown first, and the fallback; wins over `still`.
+    /// The preview's own still in `previews/` ("moves/dolly_in.webp"): shown first, and the fallback; wins over `still`.
     public var poster: String?
     public init(still: String?, video: String? = nil, poster: String? = nil) {
         self.still = still
