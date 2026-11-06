@@ -15,6 +15,7 @@ import { buildInput } from '../src/suite/inputs.js';
 import { buildPlan, billedSeconds, fit, needOf, perSecond, pickModel, ShotRequestSchema, type Character } from '../src/suite/plan.js';
 import { SUITE_PROMPT_DEFS, wordings } from '../src/suite/prompts.js';
 import { bakePalettes, PALETTE_DIR } from '../scripts/suite-looks.js';
+import { OUT as PREVIEWS_OUT, previewsModule } from '../scripts/suite-previews.js';
 import { generatedLooks, lutFor, shotLook } from '../src/suite/looks.js';
 import { DEFAULT_LADDER, inputSlotsOf, MODELS, modelById, NO_INPUTS, TIERS } from '../src/suite/registry.js';
 import { demoModel, makeApp, people, until, type Client } from './helpers.js';
@@ -208,6 +209,20 @@ describe('AI suite · composer catalogue (visible, merged)', () => {
     expect(cat.ugcFormats.map(f => f.id)).toEqual(['unboxing', 'review', 'try_on', 'before_after', 'grwm', 'haul', 'tutorial', 'testimonial']);
     expect(compileCamera(CameraSpecSchema.parse({ style: { format: 'unboxing', genre: 'ugc' } }), model).text).toMatch(/unboxing video[^.]*first genuine reaction/i);
     expect(compileCamera(CameraSpecSchema.parse({ style: { tempo: 'slow_motion' }, move: { id: 'motion_blur' } }), model).text).toMatch(/streaking motion blur[\s\S]*slow motion|slow motion[\s\S]*streaking motion blur/);
+  });
+});
+
+describe('AI suite · composer previews', () => {
+  it('the catalogue names each move, lighting and angle preview (generated file matches design/previews/manifest.tsv)', () => {
+    expect(fs.readFileSync(PREVIEWS_OUT, 'utf8'), 'run npx tsx scripts/suite-previews.ts').toBe(previewsModule());
+    const cat = cameraCatalog();
+    expect(cat.moves.find(m => m.id === 'dolly_in')?.preview).toEqual({ video: 'moves/dolly_in.mp4', poster: 'moves/dolly_in.jpg', seconds: 2.5 });
+    expect(cat.moves.filter(m => !m.preview).map(m => m.id)).toEqual(['motion_blur']); // no loop yet: the apps draw the still
+    expect(cat.lighting.every(l => l.preview?.poster === `lighting/${l.id}.jpg`)).toBe(true);
+    expect([...cat.heights, ...cat.shotSizes].every(a => a.preview?.poster === `angles/${a.id}.jpg`)).toBe(true);
+    expect(cat.autoPreviews.lighting).toEqual({ poster: 'lighting/auto.jpg' });
+    for (const p of [...cat.moves, ...cat.lighting, ...cat.heights, ...cat.shotSizes].flatMap(x => x.preview ? [x.preview.poster, x.preview.video].filter(Boolean) : []))
+      expect(fs.existsSync(path.resolve(__dirname, '../../../design/previews', p!)), p).toBe(true);
   });
 });
 

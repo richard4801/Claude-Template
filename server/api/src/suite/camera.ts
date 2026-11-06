@@ -4,6 +4,7 @@
 // the prompt library (keys suite.camera.*, owner-editable, one "id: wording" per line) with these defaults.
 import { z } from 'zod';
 import { lutFor, swatchesOf } from './looks.js';
+import { PREVIEWS } from './previews.data.js';
 
 export type Option = {
   id: string; label: string; description: string; wording: string;
@@ -428,9 +429,11 @@ export function moveGroup(m: MoveOption): (typeof MOVE_GROUPS)[number]['id'] {
 
 /** Everything the Camera picker shows (member-safe: ids, labels, descriptions, renders and look captions). */
 export function cameraCatalog() {
-  const v = (l: Option[], group?: string) => l.map(({ id, label, description, visible, mergedInto }) => {
+  // Composer previews (design/previews, bundled in the apps as `previews/`): move loops, lighting and angle stills.
+  const pv = (group: string, id: string) => (PREVIEWS[`${group}/${id}`] ? { preview: PREVIEWS[`${group}/${id}`] } : {});
+  const v = (l: Option[], group?: string, previews?: string) => l.map(({ id, label, description, visible, mergedInto }) => {
     const h = group ? HARDWARE[`${group}.${id}`] : undefined;
-    const vis = { visible: visible !== false, ...(mergedInto ? { mergedInto } : {}) };
+    const vis = { visible: visible !== false, ...(mergedInto ? { mergedInto } : {}), ...(previews ? pv(previews, id) : {}) };
     return h ? { id, label, description, render: h.render, name: h.name, caption: h.caption, ...vis } : { id, label, description, ...vis };
   });
   return {
@@ -438,16 +441,18 @@ export function cameraCatalog() {
     bodies: v(BODIES, 'bodies'), lenses: v(LENSES, 'lenses'), focalLengths: FOCALS,
     /** The composer's focal wheel (the other lengths stay valid for owners and Directed mode). */
     focals: FOCALS.map(mm => { const s = FOCAL_STEPS.find(x => x.mm === mm); return { mm, label: s?.label ?? `${mm}mm`, description: s?.description ?? '', visible: !!s }; }), apertures: v(APERTURES), looks: v(LOOKS, 'looks').map(x => ({ ...x, swatches: swatchesOf('looks', x.id) ?? [], lut: lutFor('looks', x.id) })), frameRates: v(FRAME_RATES), shutters: v(SHUTTERS),
-    lighting: v(LIGHTING, 'lighting'),
+    lighting: v(LIGHTING, 'lighting', 'lighting'),
     // Look (suite/looks.ts): each palette and film stock has a swatch strip and the LUT the take is graded with.
     palettes: v(PALETTES, 'palettes').map(x => ({ ...x, swatches: swatchesOf('palettes', x.id) ?? [], lut: lutFor('palettes', x.id) })),
     optics: ['aperture', 'shutter'].map(id => ({ id, ...HARDWARE[`optics.${id}`]! })),
     grips: Object.entries(HARDWARE).filter(([k]) => k.startsWith('grips.')).map(([k, h]) => ({ move: k.slice(6), ...h })),
-    moves: MOVES.map(x => ({ id: x.id, label: x.label, description: x.description, category: x.category, group: moveGroup(x), editorBetter: !!x.editorBetter, talkSafe: !!x.talkSafe })),
+    moves: MOVES.map(x => ({ id: x.id, label: x.label, description: x.description, category: x.category, group: moveGroup(x), editorBetter: !!x.editorBetter, talkSafe: !!x.talkSafe, ...pv('moves', x.id) })),
     /** The composer's Movement chips, in order ("featured" = `library`). */
     moveGroups: MOVE_GROUPS,
+    /** The Auto tile's preview per picker (same subject as the option tiles). */
+    autoPreviews: { ...(PREVIEWS['lighting/auto'] ? { lighting: PREVIEWS['lighting/auto'] } : {}) },
     library: FEATURED_MOVES.map(f => { const m = MOVES.find(x => x.id === f.id)!; return { id: m.id, label: f.label ?? m.label, tag: f.tag, description: m.description, category: m.category }; }),
-    heights: v(HEIGHTS), shotSizes: v(SHOT_SIZES), genres: v(GENRES), eras: v(ERAS), tempos: v(TEMPOS), ugcFormats: v(UGC_FORMATS), emotions: [...EMOTIONS],
+    heights: v(HEIGHTS, undefined, 'angles'), shotSizes: v(SHOT_SIZES, undefined, 'angles'), genres: v(GENRES), eras: v(ERAS), tempos: v(TEMPOS), ugcFormats: v(UGC_FORMATS), emotions: [...EMOTIONS],
     limits: { intensity: [0, 1], dutchDeg: [0, 30], focalMm: [8, 200], paletteColors: 5, mixPairs: 'two moves of different kinds; not static, time or aerial' },
   };
 }
