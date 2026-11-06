@@ -80,7 +80,7 @@ def mannequin(name, m, height=1.75):
     bpy.ops.mesh.primitive_uv_sphere_add(radius=0.115, location=(0, 0, 1.66 * s)); h = obj(bpy.context.object, name + '_head', m, body); h.scale = (0.85, 0.95, 1.12)
     legs = [limb(f'{name}_leg_{sd}', 0.88 * s, 0.065, m, body, (x * 0.1, 0, 0.9 * s)) for sd, x in (('l', -1), ('r', 1))]
     arms = [limb(f'{name}_arm_{sd}', 0.66 * s, 0.045, m, body, (x * 0.19, 0, 1.45 * s)) for sd, x in (('l', -1), ('r', 1))]
-    for a, x in zip(arms, (-1, 1)): a.rotation_euler = (0, x * math.radians(4), 0)
+    for a, x in zip(arms, (-1, 1)): a.rotation_euler = (0, x * math.radians(8), 0)
     root['legs'], root['arms'] = [l.name for l in legs], [a.name for a in arms]
     return root
 
@@ -234,7 +234,7 @@ def pose(hero, f, st):
     legs = [bpy.data.objects[n] for n in hero['legs']]; arms = [bpy.data.objects[n] for n in hero['arms']]
     hero.location = (0, 0, 0); hero.rotation_euler = (0, 0, 0)
     for l in legs: l.rotation_euler = (0, 0, 0)
-    for i, a in enumerate(arms): a.rotation_euler = (0, (1 if i else -1) * math.radians(4), 0)
+    for i, a in enumerate(arms): a.rotation_euler = (0, (1 if i else -1) * math.radians(8), 0)
     if st.get('pose') == 'jump':
         hero.location = (0, 0, 0.32)
         legs[0].rotation_euler = (math.radians(-55), 0, 0); legs[1].rotation_euler = (math.radians(25), 0, 0)
