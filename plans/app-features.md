@@ -117,6 +117,21 @@ _Decided 2026-11-04: consent and rights are **not** shown as in-app features. Th
 - **[idea]** **MUSE MCP connector**: a hosted MCP server on the MUSE backend so Claude (web, desktop, phone, Claude Code) can look things up, manage models, quote and start paid work (only on an approved quote, inside spend caps), and draft posts (confirm step), with changes showing live in the apps. Needs the backend on a public HTTPS host (Railway is the likely pick, ~$5/month).
 - **[idea]** **HyperFrames editing**: a house editing style (captions, hook title, handle, end card) applied to approved takes as HyperFrames projects. Edited versions always need approval. Open/edit in HyperFrames Studio on the Mac and send back for a re-render. Waiting on the user's 2–3 reference videos for the style.
 
+### Blackmagic Camera (parked 2026-11-06 by the owner)
+Research: `plans/research/blackmagic-camera.md`. Since app version 3.4 (July 2026), the free Blackmagic Camera app (iOS and Android) can be remote-controlled over Blackmagic's Camera REST API with a notification WebSocket:
+- Local network only, while the app is open, with no password.
+- It covers record, settings, slate, presets and the clip list.
+- It provides no clips, gyro data, preview or cloud API.
+
+Ideas, best first:
+1. A "Shoot for MUSE" preset for cleaner swap sources.
+2. MUSE Looks as monitoring LUTs.
+3. Read clip metadata on upload into the camera spec, with warnings.
+4. Android auto-import from the app's folder.
+5. Remote record and slate from MUSE.
+
+Not possible: a tracked phone camera for Blender, or pulling from Blackmagic Cloud.
+
 ## 11. Prototype plan
 1. List every screen for Mac and Android (Characters, New Video, Job status, Gallery, Export, Settings/Costs, Consent records).
 2. Design wireframes, then a clickable prototype for both, mobile-first for Android.
