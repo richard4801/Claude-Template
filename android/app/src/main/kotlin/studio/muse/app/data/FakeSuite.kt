@@ -104,11 +104,16 @@ class FakeSuite {
             cast = castView, keepAudio = if (recast) r.keepAudio ?: true else null,
             prompt = if (owner) "Demo prompt · ${r.prompt.ifBlank { "the shot" }}" else "",
             look = lookFor(r),
+            rig = rig(r),
         )
         if (!owner) return base
         val (m, resId) = engineFor(tier, recast)
         return base.copy(engine = m?.let { SuiteEngine(it.id, it.name, it.provider, it.ref, resId, it.perSec(resId), seconds, it.licence, it.licence.notice) })
     }
+
+    /** The rig check (server suite/rigcheck.ts, ported in [RigRules]): swap and recast have none. */
+    fun rig(r: SuiteShotRequest): List<SuiteRigWarning> =
+        if (r.mode == "swap" || r.mode == "recast" || !r.cast.isNullOrEmpty()) emptyList() else RigRules.check(r.prompt, r.camera, r.speaking == true, camera)
 
     /** The server's rule (suite/looks.ts shotLook): the palette, else the film stock, presets included; none when grading is off. */
     fun lookFor(r: SuiteShotRequest): SuiteLook? {

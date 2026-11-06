@@ -1006,6 +1006,7 @@ class FakeMuseApi(
     private fun suiteClipSeconds(id: String?) = clips[id]?.durationSec ?: if (id == SampleData.SAMPLE_CLIP) SampleData.sampleMeta.durationSec else null
     override suspend fun suiteCatalog() = suite.catalog(suiteOwner).let { if (suiteEnabled) it else it.copy(enabled = false, test = false, tiers = it.tiers.map { t -> t.copy(available = false) }) }
     override suspend fun suiteEstimate(req: SuiteShotRequest) = lock.withLock { suiteOn(); suite.estimate(req, suiteOwner, models, suiteClipSeconds(req.clipId)) }
+    override suspend fun suiteRigCheck(req: SuiteShotRequest) = lock.withLock { suiteOn(); SuiteRigCheck(suite.rig(req)) }
     override suspend fun createSuiteShot(req: SuiteShotRequest): Job {
         val job = lock.withLock {
             suiteOn()

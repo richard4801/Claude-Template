@@ -1,0 +1,42 @@
+{
+ "rig": [
+  {
+   "id": "deep_focus",
+   "severity": "warn",
+   "reason": "Phone keeps everything in focus, so the rack focus won’t show",
+   "fix": {
+    "label": "Use Cinema camera",
+    "patch": {
+     "camera": {
+      "rig": {
+       "body": "cinema_digital"
+      }
+     }
+    }
+   },
+   "alt": {
+    "label": "Drop the rack focus",
+    "patch": {
+     "camera": {
+      "move": {
+       "id": "static"
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "talk_move",
+   "severity": "warn",
+   "reason": "Dolly in can fight lip sync on a speaking shot",
+   "fix": {
+    "label": "Drop Dolly in",
+    "patch": {
+     "camera": {
+      "mix": null
+     }
+    }
+   }
+  }
+ ]
+}
