@@ -53,6 +53,9 @@ data class StudioState(
     val running: Job? get() = jobs.firstOrNull { it.running }
 }
 
+/** Back in front within this long: no stream restart, no refetch (see [MuseRepository.onForeground]). */
+private const val QUICK_RETURN_MS = 30_000L
+
 /** The launch load's lists (fetched side by side in [MuseRepository.refresh]). */
 private data class Loaded(
     val models: List<Model>, val outfits: List<Outfit>, val jobs: List<Job>, val takes: List<Take>, val balance: Balance,
@@ -155,9 +158,18 @@ class MuseRepository(
         if (a !== fake && sessionToken == null) return
         val now = System.currentTimeMillis()
         if (now - eventsStartedAt < 5_000) return // just started (launch, rotation)
+        // Performance: back after a short trip (a share sheet, a post handoff, the notification shade) keeps the stream and
+        // the lists; a stream that dropped meanwhile reconnects by itself and catches up then.
+        val away = backgroundedAt?.let { now - it }
+        backgroundedAt = null
+        if (away != null && away < QUICK_RETURN_MS) return
         startEvents(a)
         catchUp()
     }
+
+    private var backgroundedAt: Long? = null
+    /** The app went to the background (Activity onStop). */
+    fun onBackground() { backgroundedAt = System.currentTimeMillis() }
 
     /** Refetch after a reconnect or on foreground; at most once every 3 s. */
     private fun catchUp() {

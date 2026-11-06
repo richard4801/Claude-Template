@@ -67,7 +67,7 @@ struct TemplatesView: View {
             .padding(.top, 28)
             .padding(.bottom, 40)
         }
-        .task { await store.loadTemplates() }
+        .task { await store.loadTemplatesIfStale() }
     }
 
     private var emptyTitle: String {

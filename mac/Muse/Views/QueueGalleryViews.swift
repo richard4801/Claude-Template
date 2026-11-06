@@ -85,7 +85,8 @@ struct JobTable: View {
     var header: Bool
 
     var body: some View {
-        VStack(spacing: 0) {
+        // Lazy (performance pass): the finished list grows with every render; rows are built as they scroll into view.
+        LazyVStack(spacing: 0) {
             if header {
                 HStack(spacing: 12) {
                     Color.clear.frame(width: 44, height: 1)
@@ -454,7 +455,12 @@ struct TakePlayer: View {
         .clipShape(RoundedRectangle(cornerRadius: t.isA ? 0 : t.cardRadius * 0.6))
         .onAppear { load() }
         .onChange(of: url) { load() }
-        .onDisappear { player?.pause() }
+        .onDisappear {
+            // Off screen: release the player and its item (decoder, buffers), not just pause it. onAppear makes a new one.
+            player?.pause()
+            player?.replaceCurrentItem(with: nil)
+            player = nil
+        }
     }
 
     private func load() {

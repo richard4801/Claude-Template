@@ -182,6 +182,12 @@ final class AppStore {
     @ObservationIgnored private var eventsStartedAt = Date.distantPast
     @ObservationIgnored private var lastCatchUp = Date.distantPast
     @ObservationIgnored private var toastTask: Task<Void, Never>?
+    /// Performance pass: a reload already running is joined, not repeated.
+    @ObservationIgnored private var reloadTask: Task<Void, Never>?
+    /// When each live-kept list was last loaded, so a screen's `.task` doesn't refetch it (Credit, Templates, Posts, Members).
+    @ObservationIgnored var listFreshness = Freshness()
+    /// How old a live-kept list may be before a screen appearing refetches it. The live stream keeps it current meanwhile.
+    static let listMaxAge: TimeInterval = 60
     var offlineMessage: String?
     var loading = false
 
@@ -440,7 +446,7 @@ final class AppStore {
     var serverHost: String { (api as? HTTPMuseAPI)?.baseURL.host ?? "demo" }
 
     private func makeAPI() -> any MuseAPI {
-        if dataSource == .http, let u = URL(string: baseURL.trimmingCharacters(in: .whitespaces)), u.scheme != nil { return HTTPMuseAPI(baseURL: u) }
+        if dataSource == .http, let u = URL(string: baseURL.trimmingCharacters(in: .whitespaces)), u.scheme != nil { return HTTPMuseAPI(baseURL: u, cacheCatalogs: true) }
         return fake
     }
 
@@ -485,6 +491,7 @@ final class AppStore {
     /// Switches between demo mode and a server, then restores that server's session (or asks to sign in).
     func applyDataSource() {
         eventsTask?.cancel()
+        listFreshness.invalidateAll()
         api = makeAPI()
         clip = nil
         clipFile = nil
@@ -527,9 +534,18 @@ final class AppStore {
 
     /// The app became active again, or the Mac woke from sleep or changed networks: the stream may have died quietly,
     /// so it starts afresh and the lists are refetched (anything changed on the phone meanwhile shows up).
-    func resumeLive() {
+    /// Performance pass: just coming back to the front (`force` false) does nothing while the shared stream is healthy (it
+    /// heard the server's 10 s keep-alive lately), so ⌘-Tab no longer refetches every list. Wake and network changes force it.
+    func resumeLive(force: Bool = false) {
         guard user != nil, eventsTask != nil, Date().timeIntervalSince(eventsStartedAt) > 5 else { return }
-        startEvents()
+        if let http = api as? HTTPMuseAPI {
+            if !force && http.liveStreamHealthy { return }
+            // The connection is shared with the other listeners: restart it (they all hear `connected` again).
+            eventsStartedAt = Date()
+            http.reconnectEvents()
+        } else {
+            startEvents()
+        }
         catchUp()
     }
 
@@ -540,7 +556,28 @@ final class AppStore {
         Task { [weak self] in await self?.reload() }
     }
 
+    /// Settings → Developer → Reload: forget the cached catalogs too.
+    func forceReload() async {
+        (api as? HTTPMuseAPI)?.invalidateCache()
+        listFreshness.invalidateAll()
+        await reload()
+    }
+
+    /// One reload at a time: a caller arriving while one runs waits for it instead of sending every request again.
     func reload() async {
+        if let running = reloadTask {
+            await running.value
+            return
+        }
+        let t = Task { [weak self] in
+            await self?.reloadNow()
+            self?.reloadTask = nil // on the main actor, before anyone else can see the finished task
+        }
+        reloadTask = t
+        await t.value
+    }
+
+    private func reloadNow() async {
         loading = true
         defer { loading = false }
         let api = self.api
@@ -557,14 +594,18 @@ final class AppStore {
             takes = tt
             balance = bb
             offlineMessage = nil
-            await loadStudio()
+            StartupMetrics.firstContentShown(models: mm.count, takes: tt.count)
             if !models.contains(where: { $0.id == modelId }), let first = models.first(where: { !$0.isDraft }) ?? models.first { modelId = first.id }
             if !models.contains(where: { $0.id == profileModelId }), let first = models.first { profileModelId = first.id }
             // The sample clip is demo mode's only: on a server the studio starts empty until a clip is uploaded.
             if clip == nil && isDemo { await useSampleClip(bad: false, quiet: true) }
-            await loadSocial()
-            await loadTemplates()
-            await loadWarmGpu()
+            // Performance pass: the rest loads side by side (it used to be one request after another: ~16 round trips).
+            async let studio: Void = loadStudio()
+            async let social: Void = loadSocial()
+            async let tpl: Void = loadTemplates()
+            async let warm: Void = loadWarmGpu()
+            _ = await (studio, social, tpl, warm)
+            for k in ["studio", "templates", "posts", "members", "archived"] { listFreshness.mark(k) }
         } catch let e as ApiError where e.endsSession {
             endSession(e.friendlyMessage)
         } catch {
@@ -575,17 +616,34 @@ final class AppStore {
     /// Wallet, and for the owner: members, the studio balance, the engines and the image engine. Servers without them (server/mock) are fine.
     func loadStudio() async {
         let api = self.api
-        wallet = try? await api.wallet()
+        let owner = isOwner
+        // Side by side (performance pass); each may fail on its own (servers without them).
+        async let w = attempt { try await api.wallet() }
         // Everyone reads the studio settings: `features.video` drives the Render picker and add-ons, `features.photo` the photo estimates.
-        studioSettings = try? await api.studioSettings()
+        async let st = attempt { try await api.studioSettings() }
+        async let mem = attempt(owner) { try await api.listMembers() }
+        async let sb = attempt(owner) { try await api.studioBalance() }
+        async let ie = attempt(owner) { try await api.imageEngine() }
+        async let sm = attempt(owner) { try await api.imageModels() }
+        async let ar = attempt(owner) { try await api.listArchivedModels() }
+        wallet = await w
+        studioSettings = await st
         syncQualityWithServer()
+        let (m, b, e, s, a) = await (mem, sb, ie, sm, ar)
+        listFreshness.mark("studio")
         guard isOwner else { return }
-        if let m = try? await api.listMembers() { members = m }
-        studioBalance = try? await api.studioBalance()
-        imageEngine = try? await api.imageEngine()
-        stepModels = (try? await api.imageModels()) ?? []
-        archivedModels = (try? await api.listArchivedModels()) ?? []
+        if let m { members = m }
+        studioBalance = b
+        imageEngine = e
+        stepModels = s ?? []
+        archivedModels = a ?? []
         if settingsSection == .prompts { await loadPrompts() }
+    }
+
+    /// A screen appeared (Credit, Settings): the studio data the live stream keeps current, unless it's over a minute old.
+    func loadStudioIfStale() async {
+        guard !listFreshness.isFresh("studio", maxAge: Self.listMaxAge) else { return }
+        await loadStudio()
     }
 
     /// Runs an API call and shows its error as a toast, in MUSE's words.
@@ -621,9 +679,12 @@ final class AppStore {
             if streamConnects > 1 { catchUp() }
             return
         }
+        // Performance pass: with @Observable, passing a list `inout` counts as changing it, so every event (a Claude
+        // streaming delta, a camera message, a balance tick) used to re-render every view that reads jobs, takes, posts,
+        // accounts and members. Each list is now touched only by the events that can change it.
         let jobBefore = e.job.flatMap { j in jobs.first { $0.id == j.id } }
-        LiveEvents.applyJobs(&jobs, e)
-        LiveEvents.applyTakes(&takes, e)
+        if e.job != nil || e.type == "job" { LiveEvents.applyJobs(&jobs, e) }
+        if e.type == "take" || !e.takes.isEmpty { LiveEvents.applyTakes(&takes, e) }
         if let j = e.job, e.op != "delete" {
             let wasActive = jobBefore.map(\.isActive) ?? true
             if wasActive && j.isDone { jobFinished(j, newTakes: e.takes) }
@@ -640,16 +701,16 @@ final class AppStore {
             accounts[id] = nil
             posts.removeAll { $0.modelId == id && !$0.isOut }
         }
-        LiveEvents.applyPosts(&posts, e)
-        LiveEvents.applyAccounts(&accounts, e)
+        if e.type == "post" || e.post != nil { LiveEvents.applyPosts(&posts, e) }
+        if e.type == "account" { LiveEvents.applyAccounts(&accounts, e) }
         if isOwner {
-            LiveEvents.applyMembers(&members, e)
+            if e.type == "member" { LiveEvents.applyMembers(&members, e) }
             if e.type == "studio", let sb = e.studioBalance { studioBalance = sb }
             if e.type == "settings", e.settings == nil { Task { [weak self] in await self?.loadStudio() } }
         }
-        if isOwner, let p = LiveEvents.applyPrompts(&promptLibrary, e) { promptChanged(p) }
+        if isOwner, e.type == "prompts", let p = LiveEvents.applyPrompts(&promptLibrary, e) { promptChanged(p) }
         // Prompt scripts (workstream 4): a script saved or reset elsewhere; a late `clip` event with the talking detection.
-        if isOwner, let v = LiveEvents.applyPromptScript(&scriptList, e) { promptScriptChanged(v) }
+        if isOwner, e.type == "promptScript", let v = LiveEvents.applyPromptScript(&scriptList, e) { promptScriptChanged(v) }
         if e.type == "clip", let c = e.clip, c.id == clip?.id { clip = c }
         if e.type == "settings", let st = e.settings {
             studioSettings = st
@@ -821,6 +882,8 @@ final class AppStore {
     /// Back to the sign-in screen, with `message` under the form (session ended, account switched off).
     func endSession(_ message: String?, forgetToken: Bool = true) {
         eventsTask?.cancel()
+        listFreshness.invalidateAll()
+        (api as? HTTPMuseAPI)?.invalidateCache()
         BlenderRelayService.shared.stop() // workstream 2
         if !isDemo { Keychain.deleteToken(for: serverKey) }
         user = nil
@@ -1016,6 +1079,12 @@ final class AppStore {
     var openedTake: Take? { takes.first { $0.id == openTakeId } ?? takes.first }
 
     func job(for take: Take) -> Job? { take.jobId.flatMap { id in jobs.first { $0.id == id } } }
+}
+
+/// Runs one API call off the main actor for `async let` fan-out; nil when `on` is false or the call fails.
+func attempt<T: Sendable>(_ on: Bool = true, _ call: @Sendable () async throws -> T) async -> T? {
+    guard on else { return nil }
+    return try? await call()
 }
 
 /// Screen transitions per theme (the prototype's `MOTION`).

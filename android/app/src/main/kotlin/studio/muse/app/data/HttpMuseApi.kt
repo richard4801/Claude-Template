@@ -228,16 +228,21 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
 
     override fun setToken(token: String?) { if (token != this.token) reads.clear(); this.token = token }
 
-    /** Identical reads in flight share one request; catalogs ([ttlMs] > 0) answer from memory until a write or a live event changes them. */
+    /**
+     * Identical reads in flight share one request. Catalogs ([ttlMs] > 0) also answer from memory, but only while the live
+     * stream is connected: its events (and every reconnect) drop what changed, so nothing stale is served. Without the
+     * stream (not collected, offline, reconnecting) every read goes to the server.
+     */
     private val reads = RequestCache()
-    private suspend fun <T> shared(key: String, ttlMs: Long = 0, block: suspend () -> T): T = reads.get("$key|$token", ttlMs, block)
+    @Volatile private var live = false
+    private suspend fun <T> shared(key: String, ttlMs: Long = 0, block: suspend () -> T): T = reads.get("$key|$token", if (live) ttlMs else 0, block)
     /** Forget cached catalogs (an explicit Refresh). */
     fun invalidateReads(vararg prefixes: String) { if (prefixes.isEmpty()) reads.clear() else reads.invalidate(*prefixes) }
 
     /** A live event says a cached catalog changed: drop it. A (re)connect drops them all, so a catch-up refetches everything. */
     private fun onLive(e: ApiEvent) {
         when (e.type) {
-            ApiEvent.CONNECTED -> reads.clear()
+            ApiEvent.CONNECTED -> { reads.clear(); live = true }
             "settings" -> reads.invalidate("settings/", "suite/", "image-models")
             "prompts" -> reads.invalidate("prompts", "prompt-scripts")
             "promptScript" -> reads.invalidate("prompt-scripts")
@@ -511,6 +516,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (_: Throwable) {
+            } finally {
+                live = false; reads.clear()
             }
             if (opened) fails = 0
             delay(minOf(10_000L, 1000L * ++fails))

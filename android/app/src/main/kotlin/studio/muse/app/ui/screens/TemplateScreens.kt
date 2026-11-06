@@ -8,6 +8,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -118,26 +121,32 @@ fun TemplatesScreen() {
                     MenuItem("retry", "Refresh") { vm.load(force = true) },
                 ))
             }
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Seg(listOf("all" to "All", "mine" to "Mine", "public" to "Public", "favourites" to "Favourites"), s.filter.tab, { v -> vm.edit { it.copy(tab = v) } }, small = true)
-                Input(s.filter.query, { v -> vm.edit { it.copy(query = v) } }, placeholder = "Search by name or tag")
-                if (s.tags.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    s.tags.forEach { tag -> Chip(tag, s.filter.tag.equals(tag, true), { vm.edit { it.copy(tag = if (it.tag.equals(tag, true)) null else tag) } }) }
+            // Performance: a lazy grid of rows (only the cards on screen are composed and their covers loaded), keyed by template.
+            val pairs = remember(s.shown) { s.shown.distinctBy { it.id }.chunked(2) }
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                item(key = "tabs", contentType = "tabs") { Seg(listOf("all" to "All", "mine" to "Mine", "public" to "Public", "favourites" to "Favourites"), s.filter.tab, { v -> vm.edit { it.copy(tab = v) } }, small = true) }
+                item(key = "search", contentType = "search") { Input(s.filter.query, { v -> vm.edit { it.copy(query = v) } }, placeholder = "Search by name or tag") }
+                if (s.tags.isNotEmpty()) item(key = "tags", contentType = "tags") {
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        s.tags.forEach { tag -> Chip(tag, s.filter.tag.equals(tag, true), { vm.edit { it.copy(tag = if (it.tag.equals(tag, true)) null else tag) } }) }
+                    }
                 }
-                if (s.shown.isEmpty() && s.loaded) NoteBox(
-                    when (s.filter.tab) {
-                        "mine" -> "No templates of yours yet. Open a photo you like and tap Save as template."
-                        "favourites" -> "No favourites yet. Open a template and tap Favourite."
-                        else -> if (s.filter.query.isNotBlank() || s.filter.tag != null) "Nothing matches. Try another word or tag." else "No templates yet."
-                    }, icon = "grid",
-                )
-                s.shown.chunked(2).forEach { pair ->
+                if (s.shown.isEmpty() && s.loaded) item(key = "empty", contentType = "note") {
+                    NoteBox(
+                        when (s.filter.tab) {
+                            "mine" -> "No templates of yours yet. Open a photo you like and tap Save as template."
+                            "favourites" -> "No favourites yet. Open a template and tap Favourite."
+                            else -> if (s.filter.query.isNotBlank() || s.filter.tag != null) "Nothing matches. Try another word or tag." else "No templates yet."
+                        }, icon = "grid",
+                    )
+                }
+                items(pairs, key = { it.first().id }, contentType = { "pair" }) { pair ->
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         pair.forEach { t -> TemplateCard(t, Modifier.weight(1f)) { nav.go(Routes.template(t.id)) } }
                         if (pair.size == 1) Box(Modifier.weight(1f))
                     }
                 }
-                if (s.shown.isNotEmpty()) Tiny("Same look, a different moment every time: each shot draws a new pose, angle and framing. A template's prompt stays with the person who made it.", color = m.t.muted)
+                if (s.shown.isNotEmpty()) item(key = "footer", contentType = "note") { Tiny("Same look, a different moment every time: each shot draws a new pose, angle and framing. A template's prompt stays with the person who made it.", color = m.t.muted) }
             }
         }
     }

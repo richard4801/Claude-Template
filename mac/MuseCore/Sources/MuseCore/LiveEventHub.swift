@@ -86,12 +86,13 @@ public final class LiveEventHub: @unchecked Sendable {
         }
     }
 
-    /// Restarts every connection to `baseURL` (its listeners stay subscribed and get `.disconnected` then `.connected`).
+    /// Restarts every connection to `baseURL` (its listeners stay subscribed and hear `.connected` again once it reopens).
     public func reconnect(baseURL: URL) {
         lock.lock()
         let keys = channels.keys.filter { $0.base == baseURL.absoluteString }
-        for k in keys { start(k) }
+        let old = keys.compactMap { start($0) }
         lock.unlock()
+        for t in old { t.cancel() } // outside the lock: cancelling runs the transport's cancellation handlers
     }
 
     // MARK: Subscriptions
@@ -121,24 +122,29 @@ public final class LiveEventHub: @unchecked Sendable {
 
     private func unsubscribe(_ id: UUID) {
         lock.lock()
-        defer { lock.unlock() }
-        guard let key = owners.removeValue(forKey: id), let ch = channels[key] else { return }
-        ch.subscribers[id] = nil
-        if ch.subscribers.isEmpty {
-            ch.generation = -1
-            ch.task?.cancel()
-            ch.task = nil
-            ch.open = false
-            channels[key] = nil
-            parsers[key] = nil
+        var closing: Task<Void, Never>?
+        if let key = owners.removeValue(forKey: id), let ch = channels[key] {
+            ch.subscribers[id] = nil
+            if ch.subscribers.isEmpty {
+                ch.generation = -1
+                closing = ch.task
+                ch.task = nil
+                ch.open = false
+                channels[key] = nil
+                parsers[key] = nil
+            }
         }
+        lock.unlock()
+        closing?.cancel()
     }
 
     // MARK: The connection (lock held by callers of `start`)
 
-    private func start(_ key: Key) {
-        guard let ch = channels[key], let transport else { return }
-        ch.task?.cancel()
+    /// Starts (or restarts) the reader; returns the previous reader for the caller to cancel once the lock is released.
+    @discardableResult
+    private func start(_ key: Key) -> Task<Void, Never>? {
+        guard let ch = channels[key], let transport else { return nil }
+        let previous = ch.task
         nextGeneration += 1
         ch.generation = nextGeneration // hub-wide, so a cancelled reader never matches a newer channel for the same key
         ch.open = false
@@ -168,6 +174,7 @@ public final class LiveEventHub: @unchecked Sendable {
                 try? await Task.sleep(nanoseconds: self.retryDelay(attempt))
             }
         }
+        return previous
     }
 
     private func countOpen() {

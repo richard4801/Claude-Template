@@ -7,6 +7,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -428,12 +431,12 @@ fun CatalogScreen() {
                 Lbl("${STEP_NAMES[step] ?: step}${if (c.drafts.catalogFor.value == "run") " · this run only" else " · studio default"}")
                 Input(q, vm::search, placeholder = "Search, or paste owner/model")
             }
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 10.dp, bottom = 40.dp),
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 40.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                err?.let { NoteBox(it, warn = true) }
-                if (loading && list.isEmpty()) repeat(4) { Box(Modifier.fillMaxWidth().height(86.dp).clip(RoundedCornerShape(m.t.r)).background(m.t.surface2).shimmer()) }
-                list.forEach { cm -> CatalogRow(cm) { vm.choose(cm) { nav.back() } } }
-                if (!loading && list.isEmpty() && err == null) Tiny("No models found")
+                err?.let { e -> item(key = "error", contentType = "note") { NoteBox(e, warn = true) } }
+                if (loading && list.isEmpty()) items(4, key = { "shimmer$it" }, contentType = { "shimmer" }) { Box(Modifier.fillMaxWidth().height(86.dp).clip(RoundedCornerShape(m.t.r)).background(m.t.surface2).shimmer()) }
+                items(list, contentType = { "model" }) { cm -> CatalogRow(cm) { vm.choose(cm) { nav.back() } } }
+                if (!loading && list.isEmpty() && err == null) item(key = "none", contentType = "note") { Tiny("No models found") }
             }
         }
     }

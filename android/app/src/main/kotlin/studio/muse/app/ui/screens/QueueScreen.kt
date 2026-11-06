@@ -3,6 +3,9 @@ package studio.muse.app.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -66,7 +69,8 @@ data class QueueState(
     val balance: Balance = Balance(0.0, 0.0),
     val loaded: Boolean = false,
 ) {
-    val all get() = running + done
+    /** Running first, then done; one row per job id (the lazy list's keys). */
+    val all: List<Job> by lazy { (running + done).distinctBy { it.id } }
     val empty get() = loaded && running.isEmpty() && done.isEmpty() && failed == null
 }
 
@@ -217,14 +221,16 @@ private fun QueueA(vm: QueueViewModel, s: QueueState) {
             Wordmark(); Spacer(Modifier.weight(1f))
             T("RENDER QUEUE ", m.type.mono.copy(fontSize = 12.5.sp, letterSpacing = .12.em), m.t.ink); T("●", m.type.mono, m.t.accent)
         }
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 120.dp)) {
-            Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween) {
-                T("YOUR\nRENDERS", m.type.h2.copy(fontSize = 58.sp, lineHeight = 52.sp), m.t.ink)
-                T("${if (s.running.isNotEmpty()) "${s.running.size} RUNNING · " else ""}${s.done.size} DONE", m.type.mono.copy(fontSize = 12.5.sp), m.t.ink)
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 120.dp)) {
+            item(key = "head", contentType = "head") {
+                Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween) {
+                    T("YOUR\nRENDERS", m.type.h2.copy(fontSize = 58.sp, lineHeight = 52.sp), m.t.ink)
+                    T("${if (s.running.isNotEmpty()) "${s.running.size} RUNNING · " else ""}${s.done.size} DONE", m.type.mono.copy(fontSize = 12.5.sp), m.t.ink)
+                }
             }
-            if (s.empty) { Spacer(Modifier.height(16.dp)); EmptyQueue() }
-            s.failed?.let { Spacer(Modifier.height(14.dp)); FailCard(vm, it) }
-            s.all.forEach { j ->
+            if (s.empty) item(key = "empty", contentType = "empty") { Column { Spacer(Modifier.height(16.dp)); EmptyQueue() } }
+            s.failed?.let { f -> item(key = "failed", contentType = "failed") { Column { Spacer(Modifier.height(14.dp)); FailCard(vm, f) } } }
+            items(s.all, key = { it.id }, contentType = { "job" }) { j ->
                 Row(
                     Modifier.fillMaxWidth().drawBehind { drawLine(m.t.line, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }.press { vm.open(j, nav) }.padding(vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -239,7 +245,7 @@ private fun QueueA(vm: QueueViewModel, s: QueueState) {
                     MoreMenu(jobMenu(vm, j), tint = m.t.muted)
                 }
             }
-            Cta2("New video", { nav.go(Routes.SOURCE) }, Modifier.fillMaxWidth().padding(top = 16.dp), icon = "plus")
+            item(key = "new", contentType = "cta") { Cta2("New video", { nav.go(Routes.SOURCE) }, Modifier.fillMaxWidth().padding(top = 16.dp), icon = "plus") }
         }
     }
 }
@@ -251,13 +257,15 @@ private fun QueueB(vm: QueueViewModel, s: QueueState) {
     val nav = LocalNav.current
     Column(Modifier.fillMaxSize()) {
         TopBar("Render queue")
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            RowB {
-                T(if (s.running.isNotEmpty()) "${s.running.size} ACTIVE" else "NOTHING RUNNING", m.type.mono.copy(fontSize = 12.5.sp), m.t.accent)
-                Pill(if (s.running.isNotEmpty()) "● Rendering" else "Idle", if (s.running.isNotEmpty()) "good" else "")
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item(key = "head", contentType = "head") {
+                RowB {
+                    T(if (s.running.isNotEmpty()) "${s.running.size} ACTIVE" else "NOTHING RUNNING", m.type.mono.copy(fontSize = 12.5.sp), m.t.accent)
+                    Pill(if (s.running.isNotEmpty()) "● Rendering" else "Idle", if (s.running.isNotEmpty()) "good" else "")
+                }
             }
-            if (s.empty) EmptyQueue()
-            s.all.forEach { j ->
+            if (s.empty) item(key = "empty", contentType = "empty") { EmptyQueue() }
+            items(s.all, key = { it.id }, contentType = { "job" }) { j ->
                 val shape = RoundedCornerShape(m.t.r)
                 Row(
                     Modifier.fillMaxWidth().clip(shape).background(m.t.surface).border(1.dp, m.t.line, shape).press { vm.open(j, nav) }.padding(10.dp),
@@ -276,11 +284,13 @@ private fun QueueB(vm: QueueViewModel, s: QueueState) {
                     }
                 }
             }
-            s.failed?.let { FailCard(vm, it) }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Kpi("Month", Pricing.money(s.balance.month), Modifier.weight(1f))
-                Kpi("Balance", Pricing.money(s.balance.balance), Modifier.weight(1f))
-                Kpi("Rendering", "${s.running.size}", Modifier.weight(1f))
+            s.failed?.let { f -> item(key = "failed", contentType = "failed") { FailCard(vm, f) } }
+            item(key = "kpis", contentType = "kpis") {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Kpi("Month", Pricing.money(s.balance.month), Modifier.weight(1f))
+                    Kpi("Balance", Pricing.money(s.balance.balance), Modifier.weight(1f))
+                    Kpi("Rendering", "${s.running.size}", Modifier.weight(1f))
+                }
             }
         }
     }
@@ -311,12 +321,12 @@ private fun QueueC(vm: QueueViewModel, s: QueueState) {
             Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Wordmark(); Spacer(Modifier.weight(1f)); TbBtn("user", { nav.tab(Routes.SETTINGS) })
             }
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                H2("Render queue")
-                EmptyQueue()
-                s.failed?.let { FailCard(vm, it) }
-                if (s.done.isNotEmpty()) Lbl("Finished")
-                s.done.forEach { j ->
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                item(key = "title", contentType = "title") { H2("Render queue") }
+                item(key = "empty", contentType = "empty") { EmptyQueue() }
+                s.failed?.let { f -> item(key = "failed", contentType = "failed") { FailCard(vm, f) } }
+                if (s.done.isNotEmpty()) item(key = "finished", contentType = "label") { Lbl("Finished") }
+                items(s.done.distinctBy { it.id }, key = { it.id }, contentType = { "job" }) { j ->
                     Row(Modifier.fillMaxWidth().softShadow(m.t.r).clip(RoundedCornerShape(m.t.r)).background(m.t.surface).press { vm.open(j, nav) }.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Box(Modifier.size(54.dp, 72.dp).clip(RoundedCornerShape(m.t.r * .5f))) { RefImage(j.thumb, Modifier.fillMaxSize(), 20) }
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -374,16 +384,18 @@ private fun QueueD(vm: QueueViewModel, s: QueueState) {
             Wordmark(); T("RENDER QUEUE", m.type.tiny.copy(fontWeight = FontWeight.Bold), m.t.ink, Modifier.weight(1f), align = androidx.compose.ui.text.style.TextAlign.End)
             TbBtn("quality", { nav.go(Routes.CREDITS) })
         }
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Box(Modifier.fillMaxWidth()) {
-                Box(Modifier.padding(top = 6.dp).rotate(-4f).hardShadow(4.dp, 14.dp, m.t.accent).clip(RoundedCornerShape(14.dp)).background(Ink).padding(horizontal = 14.dp, vertical = 10.dp)) {
-                    T("YOUR RENDERS", m.type.hand.copy(fontSize = 30.sp, lineHeight = 30.sp), Color.White)
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item(key = "head", contentType = "head") {
+                Box(Modifier.fillMaxWidth()) {
+                    Box(Modifier.padding(top = 6.dp).rotate(-4f).hardShadow(4.dp, 14.dp, m.t.accent).clip(RoundedCornerShape(14.dp)).background(Ink).padding(horizontal = 14.dp, vertical = 10.dp)) {
+                        T("YOUR RENDERS", m.type.hand.copy(fontSize = 30.sp, lineHeight = 30.sp), Color.White)
+                    }
+                    Doodle(Doodles.crown, Modifier.align(Alignment.TopEnd).padding(end = 4.dp))
                 }
-                Doodle(Doodles.crown, Modifier.align(Alignment.TopEnd).padding(end = 4.dp))
             }
-            if (s.empty) EmptyQueue()
-            s.failed?.let { FailCard(vm, it) }
-            s.all.forEach { j ->
+            if (s.empty) item(key = "empty", contentType = "empty") { EmptyQueue() }
+            s.failed?.let { f -> item(key = "failed", contentType = "failed") { FailCard(vm, f) } }
+            items(s.all, key = { it.id }, contentType = { "job" }) { j ->
                 val shape = RoundedCornerShape(16.dp)
                 Row(
                     Modifier.fillMaxWidth().hardShadow(3.dp, 16.dp).clip(shape).background(Color.White).border(2.5.dp, Ink, shape).press { vm.open(j, nav) }.padding(12.dp),
@@ -405,7 +417,7 @@ private fun QueueD(vm: QueueViewModel, s: QueueState) {
                     }
                 }
             }
-            Cta("New video", { nav.go(Routes.SOURCE) }, Modifier.fillMaxWidth().padding(top = 6.dp), icon = "plus", big = true)
+            item(key = "new", contentType = "cta") { Cta("New video", { nav.go(Routes.SOURCE) }, Modifier.fillMaxWidth().padding(top = 6.dp), icon = "plus", big = true) }
         }
     }
 }

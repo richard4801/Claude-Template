@@ -7,6 +7,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -352,10 +355,10 @@ fun PostsScreen() {
     ScreenBox {
         Column(Modifier.fillMaxSize()) {
             TopBar("Posts", onBack = { nav.back() })
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 6.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Seg(listOf("scheduled" to "Scheduled · ${s.scheduled.size}", "posted" to "Posted · ${s.out.size}"), s.tab, vm::tab)
-                if (list.isEmpty()) NoteBox(if (s.tab == "scheduled") "Nothing scheduled. Open a finished take and tap Post." else "Nothing posted yet.", icon = "spark")
-                list.forEach { p ->
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                item(key = "tabs", contentType = "tabs") { Seg(listOf("scheduled" to "Scheduled · ${s.scheduled.size}", "posted" to "Posted · ${s.out.size}"), s.tab, vm::tab) }
+                if (list.isEmpty()) item(key = "empty", contentType = "note") { NoteBox(if (s.tab == "scheduled") "Nothing scheduled. Open a finished take and tap Post." else "Nothing posted yet.", icon = "spark") }
+                items(list.distinctBy { it.id }, key = { it.id }, contentType = { "post" }) { p ->
                     var menu by remember { mutableStateOf(false) }
                     Box {
                         PostRow(p) { menu = true }

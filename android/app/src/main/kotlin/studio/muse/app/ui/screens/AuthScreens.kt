@@ -124,7 +124,9 @@ fun SplashScreen() {
     val c = LocalContainer.current
     val signedIn = c.prefs.collectAsState().value.token != null
     val next = { if (signedIn) nav.reset(Routes.HOME) else nav.go(Routes.WELCOME) }
-    LaunchedEffect(Unit) { delay(2600); next() }
+    // The latest [next]: the saved session usually loads after the first frame, so the first one would still say signed out.
+    val latestNext by androidx.compose.runtime.rememberUpdatedState(next)
+    LaunchedEffect(Unit) { delay(2600); latestNext() }
     Box(Modifier.fillMaxSize().background(if (m.isD) m.t.blue else Color.Black).press { next() }) {
         if (m.isD) {
             val shape = RoundedCornerShape(22.dp)

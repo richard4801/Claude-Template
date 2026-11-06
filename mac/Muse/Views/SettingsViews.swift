@@ -150,9 +150,11 @@ struct SettingsView: View {
                     MButton("Fail next", size: .small) { store.setFailNext() }
                 }
                 ListRow(title: "Reload everything", hint: "Fetches models, outfits, jobs, takes and balance again.", last: true) {
-                    MButton("Reload", size: .small) { Task { await store.reload() } }
+                    MButton("Reload", size: .small) { Task { await store.forceReload() } }
                 }
             }
+            H2("Performance")
+            PerfReadout()
         case .about:
             H2("About")
             ListBox {

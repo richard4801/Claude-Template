@@ -48,7 +48,7 @@ struct CreditsView: View {
                 }
             }
         }
-        .task { await store.loadStudio() }
+        .task { await store.loadStudioIfStale() }
     }
 
     private var myJobs: [Job] {
@@ -176,7 +176,7 @@ struct MembersView: View {
                 InviteCodeCard(invite: inv).padding(.top, 16)
             }
             SectionHeader(title: "People") {
-                LinkText("Refresh") { store.loadMembers() }
+                LinkText("Refresh") { store.loadMembers(force: true) }
             }
             if people.isEmpty {
                 Note(icon: "person.2", "No one here yet. Invite someone: they sign up with the code and you send them credit.")

@@ -13,6 +13,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import studio.muse.app.BuildConfig
@@ -135,7 +136,8 @@ class DataStorePrefs(private val context: Context, private val cipher: TokenCiph
         )
     }
 
-    override val prefs: Flow<AppPrefs> = context.dataStore.data.map(::read)
+    // Performance: the Keystore decrypt of the token (a binder call) runs off the main thread at launch.
+    override val prefs: Flow<AppPrefs> = context.dataStore.data.map(::read).flowOn(kotlinx.coroutines.Dispatchers.IO)
 
     override suspend fun update(f: (AppPrefs) -> AppPrefs) {
         context.dataStore.edit { p ->

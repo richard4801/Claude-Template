@@ -34,6 +34,7 @@ class RequestCountTest {
     private lateinit var server: ServerSocket
     private val counts = ConcurrentHashMap<String, AtomicInteger>()
     private val latencyMs = 40L
+    private val streams = AtomicInteger()
     private lateinit var scope: CoroutineScope
 
     private fun body(path: String): String? = when (path) {
@@ -68,7 +69,14 @@ class RequestCountTest {
                         while (true) { val h = input.readLine() ?: break; if (h.isEmpty()) break }
                         val (method, target) = requestLine.split(" ").let { it[0] to it[1] }
                         val path = target.substringBefore('?')
-                        if (path != "/v1/events") counts.computeIfAbsent("$method $path") { AtomicInteger() }.incrementAndGet()
+                        if (path == "/v1/events") {
+                            // The live stream: open (the app's "connected"), then held until the test ends.
+                            s.getOutputStream().apply { write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n\r\n: hi\n\n".toByteArray()); flush() }
+                            streams.incrementAndGet()
+                            while (!server.isClosed) Thread.sleep(50)
+                            return@use
+                        }
+                        counts.computeIfAbsent("$method $path") { AtomicInteger() }.incrementAndGet()
                         Thread.sleep(latencyMs)
                         val b = if (path == "/v1/events") null else body(path)
                         val bytes = (b ?: """{"error":"no","code":"not_found"}""").toByteArray()
@@ -100,6 +108,10 @@ class RequestCountTest {
         val launch = total()
         report("launch (${launchMs} ms at ${latencyMs} ms latency)")
         assertEquals("one request per list, no repeats", 0, counts.filterValues { it.get() > 1 }.keys.filterNot { it.contains("/v1/models/") }.size)
+
+        // The live stream is up (catalogs may then be cached: its events drop what changed).
+        withTimeout(10_000) { while (streams.get() == 0) kotlinx.coroutines.delay(20) }
+        kotlinx.coroutines.delay(300)
 
         // A catch-up (reconnect) racing a "Try again" tap: the same lists at the same moment.
         counts.clear()

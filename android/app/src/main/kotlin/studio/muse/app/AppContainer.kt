@@ -74,7 +74,8 @@ class AppContainer(
     companion object {
         fun create(context: Context): AppContainer {
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-            File(context.cacheDir, "sfx").deleteRecursively() // WAVs left by the removed UI sound effects
+            // WAVs left by the removed UI sound effects: deleted off the main thread (no disk I/O on the launch path).
+            scope.launch(Dispatchers.IO) { File(context.cacheDir, "sfx").deleteRecursively() }
             val fake = FakeMuseApi(scope, File(context.filesDir, "uploads"))
             return AppContainer(scope, DataStorePrefs(context), fake, Notifier(context), studio.muse.app.platform.MediaReader(context), postAlarms = studio.muse.app.platform.PostAlarms(context))
         }
