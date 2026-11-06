@@ -254,6 +254,8 @@ public protocol MuseAPI: AnyObject, Sendable {
     func suiteCompileCamera(_ req: CameraCompileRequest) async throws -> CameraCompiled
     /// POST /v1/suite/shots/estimate: holds nothing. `nothing_fits` / `engine_unavailable` as ApiError.
     func suiteEstimate(_ req: ShotRequest) async throws -> ShotEstimate
+    /// POST /v1/suite/rig-check → `{rig}`: the rig check alone (free, no planning), for when the estimate fails (workstream 3).
+    func suiteRigCheck(_ req: ShotRequest) async throws -> [RigWarning]
     /// POST /v1/suite/shots → a render job (`request.engine: "suite"`); progress arrives as `job` events.
     func suiteCreateShot(_ req: ShotRequest) async throws -> Job
     /// GET /v1/suite/shots/{id}

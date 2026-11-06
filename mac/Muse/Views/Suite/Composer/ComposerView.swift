@@ -209,6 +209,7 @@ struct ComposerCard: View {
                 comingSoonBody
             } else {
                 fullBody
+                RigCheckRow()
                 Rectangle().fill(t.line).frame(height: 1)
                 ComposerBottomBar()
             }

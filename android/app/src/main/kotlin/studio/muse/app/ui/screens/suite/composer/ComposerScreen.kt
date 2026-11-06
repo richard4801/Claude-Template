@@ -79,6 +79,7 @@ import studio.muse.app.ui.screens.BlurredStageArt
 import studio.muse.app.ui.screens.ScreenBox
 import studio.muse.app.ui.screens.StagePhase
 import studio.muse.app.ui.screens.suite.HardwareImage
+import studio.muse.app.ui.screens.suite.ComposerRigRow
 import studio.muse.app.ui.screens.suite.InputSlotUploader
 import studio.muse.app.ui.screens.suite.SIc
 import studio.muse.app.ui.screens.suite.SlotId
@@ -228,6 +229,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
         addons = addonPills, onAddon = ::onAddon, owner = owner, locations = locations, refsUsed = d.referencesUsed(slots, inputs, own),
         lead = st.model(d.characterId), clipName = recast.clipId?.let { id -> video.clip?.takeIf { it.id == id }?.name ?: if (id == SampleData.SAMPLE_CLIP) SampleData.sampleMeta.name else "Your clip" },
         models = st.models, outfits = st.outfitsOf(d.characterId),
+        rigRow = { w -> ComposerRigRow(req.takeIf { live && addon == null && d.tool in ComposerDraft.PROMPT_TOOLS }, suiteEst, suiteEst == null && (estErr != null || problem != null), w) },
         update = ::update, open = ::open, onGenerate = ::generate, onSlot = ::onSlot, onClearSlot = { k ->
             when (k) {
                 "start" -> store.composerSlots.update { it.clear(SlotId(SlotKind.START)) }
@@ -324,6 +326,8 @@ class ComposerUi(
     /** Character swap's add-on pills (empty on other tools). */
     val addons: List<AddonPill> = emptyList(),
     val onAddon: (SwapAddon) -> Unit = {},
+    /** The rig check's warning row (RigCheckRow.kt), drawn just above the bottom bar; the argument is `wide`. */
+    val rigRow: @Composable (Boolean) -> Unit = {},
 ) {
     val toolSlots: List<ToolSlot> get() = ToolSlots.of(d.tool, inputs, slots, catalog?.recastMaxPeople ?: SuiteRules.MAX_CAST)
     val showPrompt: Boolean get() = d.tool == ComposerTool.SHOT || d.tool == ComposerTool.TALKING || d.tool == ComposerTool.UGC || (d.tool == ComposerTool.SWAP && d.swapPrompt)
@@ -357,6 +361,7 @@ private fun PhoneComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent
                 repeat((3 - ui.toolSlots.size).coerceAtLeast(0)) { Spacer(Modifier.weight(1f)) }
             }
             if (ui.addons.isNotEmpty()) AddonPills(ui)
+            ui.rigRow(false)
             PhoneBar(ui)
         }
     }
@@ -685,6 +690,7 @@ private fun WideComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent:
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { ui.toolSlots.forEach { s -> SlotCard(ui, s, Modifier.size(104.dp)) } }
                     }
                     if (ui.addons.isNotEmpty()) AddonPills(ui)
+                    ui.rigRow(true)
                 }
                 Box(Modifier.fillMaxWidth().height(1.dp).background(m.t.line))
                 WideBar(ui)

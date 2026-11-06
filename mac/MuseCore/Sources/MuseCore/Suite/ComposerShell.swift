@@ -637,3 +637,233 @@ extension PromptTokens {
     /// The newest token's key.
     public var lastKey: Int? { parts.compactMap(\.key).max() }
 }
+
+// MARK: The rig check (workstream 3, plans/video-composer.md "Rig check")
+
+extension JSONValue {
+    /// JSON Merge Patch (RFC 7386): objects merge key by key, null removes a key, anything else replaces.
+    public func mergePatched(_ patch: JSONValue) -> JSONValue {
+        guard case .object(let p) = patch else { return patch }
+        var out: [String: JSONValue] = [:]
+        if case .object(let o) = self { out = o }
+        for (k, v) in p {
+            if case .null = v { out.removeValue(forKey: k) } else { out[k] = (out[k] ?? .null).mergePatched(v) }
+        }
+        return .object(out)
+    }
+
+    /// A Codable value as JSON (nil when it can't be encoded).
+    static func encoding<T: Encodable>(_ v: T) -> JSONValue? {
+        guard let d = try? JSONEncoder().encode(v) else { return nil }
+        return try? JSONDecoder().decode(JSONValue.self, from: d)
+    }
+
+    /// This JSON as a Codable value (nil when it doesn't fit).
+    func decoded<T: Decodable>(_ type: T.Type) -> T? {
+        guard let d = try? JSONEncoder().encode(self) else { return nil }
+        return try? JSONDecoder().decode(T.self, from: d)
+    }
+}
+
+/// A rig fix's merge patch applied to the composer's choices, the way a tap in the picker would set them: rig, angle,
+/// look, lighting and style values go into the chips (null = Auto), `move` / `mix` become the prompt's #move chips (first
+/// = move, second = mix; `mix: null` takes the second chip out). Owner's Directed camera: the patch merges into it.
+public enum RigFixes {
+    public static func apply(_ patch: JSONValue, to draft: ComposerDraft, catalog: CameraCatalog) -> ComposerDraft {
+        guard case .object(let top) = patch else { return draft }
+        var d = draft
+        for (k, v) in top {
+            switch k {
+            case "camera": d = camera(v, d, catalog)
+            case "speaking":
+                if case .null = v { d.speaking = .auto } else if case .bool(let b) = v { d.speaking = b ? .on : .off }
+            case "audio": if case .bool(let b) = v { d.sound = b }
+            case "aspectRatio": if case .string(let s) = v { d.aspect = s }
+            case "duration": if case .number(let n) = v { d.duration = Int(n.rounded()) }
+            case "takes": if case .number(let n) = v { d.takes = min(max(Int(n.rounded()), 1), 4) }
+            default: continue
+            }
+        }
+        return d
+    }
+
+    private static func camera(_ v: JSONValue, _ draft: ComposerDraft, _ cat: CameraCatalog) -> ComposerDraft {
+        var d = draft
+        if let directed = d.directed {
+            d.directed = (JSONValue.encoding(directed) ?? .null).mergePatched(v).decoded(CameraSpec.self)
+            return d
+        }
+        var s = d.settings
+        guard case .object(let c) = v else {
+            if case .null = v {
+                s = s.reset(.camera).reset(.look).reset(.lighting).reset(.style)
+                s.gradeLook = d.settings.gradeLook
+                d.settings = s
+                d.tokens = d.tokens.settingMoves([], catalog: cat)
+            }
+            return d
+        }
+        for (k, x) in c {
+            switch k {
+            case "rig":
+                if case .null = x { s.body = nil; s.lens = nil; s.focalMm = nil; s.aperture = nil; s.stock = nil }
+                for (f, y) in fields(x) {
+                    switch f {
+                    case "body": set(&s.body, y)
+                    case "lens": set(&s.lens, y)
+                    case "aperture": set(&s.aperture, y)
+                    case "look": set(&s.stock, y)
+                    case "focalMm": set(&s.focalMm, y)
+                    default: continue
+                    }
+                }
+            case "angle":
+                if case .null = x { s.height = nil; s.shotSize = nil }
+                for (f, y) in fields(x) {
+                    if f == "height" { set(&s.height, y) } else if f == "shotSize" { set(&s.shotSize, y) }
+                }
+            case "palette":
+                if case .null = x { s.palette = nil }
+                if let y = fields(x)["preset"] { set(&s.palette, y) }
+            case "lighting":
+                if case .null = x { s.lighting = nil }
+                if let y = fields(x)["preset"] { set(&s.lighting, y) }
+            case "style":
+                if case .null = x { s.genre = nil; s.era = nil; s.tempo = nil; s.format = nil }
+                for (f, y) in fields(x) {
+                    switch f {
+                    case "genre": set(&s.genre, y)
+                    case "era": set(&s.era, y)
+                    case "tempo": set(&s.tempo, y)
+                    case "format": set(&s.format, y)
+                    default: continue
+                    }
+                }
+            case "preset": set(&s.preset, x)
+            default: continue
+            }
+        }
+        d.settings = s
+        if c["move"] != nil || c["mix"] != nil {
+            let cur = d.tokens.moves.compactMap(\.move)
+            let merged = { (key: String, old: SuiteMove?) -> SuiteMove? in
+                guard let p = c[key] else { return old }
+                if case .null = p { return nil }
+                return (old.flatMap { JSONValue.encoding($0) } ?? .null).mergePatched(p).decoded(SuiteMove.self)
+            }
+            var want: [SuiteMove] = []
+            for m in [merged("move", cur.first), merged("mix", cur.count > 1 ? cur[1] : nil)] {
+                if let m, !want.contains(where: { $0.id == m.id }) { want.append(m) }
+            }
+            d.tokens = d.tokens.settingMoves(want, catalog: cat)
+        }
+        return d
+    }
+
+    private static func fields(_ v: JSONValue) -> [String: JSONValue] {
+        if case .object(let o) = v { return o }
+        return [:]
+    }
+
+    private static func set(_ field: inout String?, _ v: JSONValue) {
+        switch v {
+        case .null: field = nil
+        case .string(let s): field = s
+        default: break
+        }
+    }
+
+    private static func set(_ field: inout Double?, _ v: JSONValue) {
+        switch v {
+        case .null: field = nil
+        case .number(let n): field = n
+        default: break
+        }
+    }
+}
+
+extension ComposerDraft {
+    /// The draft with a rig fix (or alt) applied.
+    public func applying(_ fix: RigFix, catalog: CameraCatalog) -> ComposerDraft { RigFixes.apply(fix.patch, to: self, catalog: catalog) }
+}
+
+extension PromptTokens {
+    /// The #move chips set to `want` (first = move, second = mix). A chip that stays keeps its place, key and label; a
+    /// changed move takes the place of the chip it replaces; a chip no longer wanted goes; a new one goes at the end.
+    /// Unlike a picker tap this never refuses: the server drops a pair it can't mix (and says so in the estimate).
+    public func settingMoves(_ want: [SuiteMove], catalog: CameraCatalog) -> PromptTokens {
+        let percent = { (m: SuiteMove, fallback: Int) -> Int in m.intensity.map { min(max(Int(($0 * 100).rounded()), 0), 100) } ?? fallback }
+        let token = { (m: SuiteMove, key: Int, fallback: Int) -> PromptPart in
+            let o = catalog.move(m.id)
+            return .move(id: m.id, label: o?.label ?? m.id, category: o?.category ?? "", intensity: percent(m, fallback), key: key)
+        }
+        var parts = self.parts
+        var pending = want.filter { w in !parts.contains { $0.moveInfo?.id == w.id } }
+        var drop: [Int] = []
+        for i in parts.indices {
+            guard let info = parts[i].moveInfo, let key = parts[i].key else { continue }
+            if let w = want.first(where: { $0.id == info.id }) {
+                parts[i] = .move(id: info.id, label: info.label, category: info.category, intensity: percent(w, info.intensity), key: key)
+            } else if !pending.isEmpty {
+                parts[i] = token(pending.removeFirst(), key, info.intensity)
+            } else {
+                drop.append(key)
+            }
+        }
+        var out = PromptTokens(parts)
+        for k in drop { out = out.remove(key: k) }
+        var next = (out.parts.compactMap(\.key).max() ?? 0) + 1
+        for w in pending {
+            out.parts.append(token(w, next, 50))
+            next += 1
+        }
+        // The order says which is the move and which the mix.
+        let at = out.parts.indices.filter { out.parts[$0].moveInfo != nil }
+        let ids = at.compactMap { out.parts[$0].moveInfo?.id }
+        if ids.count == want.count, ids != want.map(\.id) {
+            let byId = Dictionary(at.map { (out.parts[$0].moveInfo!.id, out.parts[$0]) }, uniquingKeysWith: { a, _ in a })
+            for (n, i) in at.enumerated() { if let p = byId[want[n].id] { out.parts[i] = p } }
+        }
+        return out
+    }
+}
+
+/// What the rig check reads from the composer's choices: the camera (chips, #moves or Directed) and the Speaking switch.
+public struct RigChoices: Hashable, Sendable {
+    public var camera: CameraSpec?
+    public var speaking: Bool?
+    public init(camera: CameraSpec? = nil, speaking: Bool? = nil) {
+        self.camera = camera
+        self.speaking = speaking
+    }
+    public init(_ r: ShotRequest) { self.init(camera: r.camera, speaking: r.speaking) }
+}
+
+/// The × on a rig warning: it stays hidden until the choices change. Typing in the prompt isn't a change of choices, but
+/// a warning whose line changes (the prompt now says something else) shows again.
+public struct RigDismissals: Hashable, Sendable {
+    public private(set) var choices: RigChoices?
+    /// Rule id → the reason line that was dismissed.
+    public private(set) var hidden: [String: String] = [:]
+
+    public init() {}
+
+    /// The choices now: a change forgets every dismissal.
+    public mutating func sync(_ c: RigChoices) {
+        if c != choices {
+            choices = c
+            hidden = [:]
+        }
+    }
+
+    public mutating func dismiss(_ w: RigWarning, at c: RigChoices) {
+        sync(c)
+        hidden[w.id] = w.reason
+    }
+
+    /// The warnings to show for these choices.
+    public func visible(_ list: [RigWarning], at c: RigChoices) -> [RigWarning] {
+        guard c == choices, !hidden.isEmpty else { return list }
+        return list.filter { hidden[$0.id] != $0.reason }
+    }
+}

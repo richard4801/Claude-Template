@@ -12,6 +12,11 @@ extension HTTPMuseAPI {
     public func suiteEstimate(_ req: ShotRequest) async throws -> ShotEstimate {
         try await suiteCall("POST", "v1/suite/shots/estimate", body: body(req))
     }
+    public func suiteRigCheck(_ req: ShotRequest) async throws -> [RigWarning] {
+        var r = req
+        r.dryRun = nil
+        return (try await suiteCall("POST", "v1/suite/rig-check", body: body(r)) as RigCheckResult).rig
+    }
     public func suiteCreateShot(_ req: ShotRequest) async throws -> Job {
         var r = req
         r.dryRun = nil

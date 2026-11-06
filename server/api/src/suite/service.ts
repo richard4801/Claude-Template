@@ -22,6 +22,7 @@ import { FalProvider, HiggsfieldProvider, MockProvider, ReplicateProvider, type 
 import { DEFAULT_LADDER, inputSlotsOf, MODELS, modelById, modelView, MOCK_MODEL, TIER_INFO, TIERS, type ProviderId, type Tier } from './registry.js';
 import { SuiteRunner } from './runner.js';
 import { suiteSettings } from './schema.js';
+import { rigCheck } from './rigcheck.js';
 
 /**
  * Estimate for removing the vocals of an audio reference (beat-only audio), held with the shot; the job settles the
@@ -286,6 +287,12 @@ export class SuiteService {
     return out;
   }
 
+  /** POST /v1/suite/rig-check: the rig check alone (free, no planning), so the composer can warn even when no engine fits. */
+  rigCheck(u: AuthUser, body: unknown) {
+    const r = this.parse(body, u);
+    return { rig: r.mode === 'swap' || r.mode === 'recast' ? [] : rigCheck({ prompt: r.prompt, camera: r.camera, speaking: r.speaking ?? false }) };
+  }
+
   /** POST /v1/suite/shots/estimate: price, caps and (owner) the engine. Never holds or runs anything. */
   async estimate(u: AuthUser, body: unknown) {
     const r = this.parse(body, u);
@@ -305,6 +312,8 @@ export class SuiteService {
       ...(plan.recast ? { cast: plan.recast.people, keepAudio: plan.recast.keepAudio } : {}),
       prompt: plan.prompt, test: this.mode === 'mock',
       look: shotLook(r.camera ? resolvePreset(r.camera) : undefined, r.gradeLook),
+      // Rig check (workstream 3): clashes between the choices and with the prompt; never blocks Generate.
+      rig: plan.mode === 'recast' ? [] : rigCheck({ prompt: r.prompt, camera: r.camera, speaking: plan.speaking }),
     };
     if (u.role !== 'owner') return base;
     const m = modelById(plan.modelId)!;
@@ -326,7 +335,7 @@ export class SuiteService {
     const rr: P.RenderReq = { engine: 'replicate', quality: req.quality, takes: req.takes, clipSeconds: clip?.durationSec, pricePerSec: this.ctx.jobs.qualityPrice(req.quality) };
     const est = P.totalCost(rr);
     return { req, view: { quality: r.quality, mode: 'swap', label: P.engineLabel(rr), seconds: P.replicateSeconds(rr.clipSeconds), takes: req.takes, estimate: round2(est), priceLine: P.priceLine(rr),
-      buttonLabel: P.genLabel(rr), ok: true, warnings: r.quality === 'cinema' ? ['Swap tops out at HD'] : [], test: false } };
+      buttonLabel: P.genLabel(rr), ok: true, warnings: r.quality === 'cinema' ? ['Swap tops out at HD'] : [], rig: [], test: false } };
   }
 
   // ------------------------------------------------------------------ create
