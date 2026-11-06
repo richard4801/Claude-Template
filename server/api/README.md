@@ -175,6 +175,27 @@ Each user then gets their own H100 pod when they render. It shuts down 3 minutes
 #### 5. Hosted photo models (optional)
 For fal.ai: create a key at **fal.ai** → **Dashboard** → **Keys**, and add it as `FAL_KEY`. Then pick **fal** in the app's Settings → Image engine. The default model is `fal-ai/bytedance/seedream/v4/edit`; change it in the same place.
 
+### Railway: move off `railway.json` before 1 December 2026
+Railway has deprecated `railway.json` ("Config as Code"). Existing files "stop being read on **2026-12-01** (hard cutoff)" (docs.railway.com/infrastructure-as-code). The replacement is Infrastructure as Code: a `.railway/railway.ts` file applied with the Railway CLI.
+- **Until then nothing breaks.** `server/api/railway.json` still validates against Railway's current schema (checked 2026-11-06), and the server builds.
+- **Committing a `.railway/` file changes nothing on its own.** Railway "doesn't read `.railway/` during deploys". Only `railway config apply` (or the optional `railwayapp/config` GitHub workflow) changes the live service. So the owner runs these steps, logged in to their own Railway account.
+
+**Steps (about 10 minutes, owner):**
+1. **Check the dashboard settings first.** Our file sets four things that IaC can't express or that the docs don't say carry over. In Railway → the API service → **Settings**, make sure:
+   - **Restart policy** is *On Failure* with **5** max retries. IaC has no restart key; the dashboard default is On Failure, 10.
+   - **Healthcheck path** is `/health`, timeout **60**.
+   - **Replicas** is **1**. It must be exactly one: live events and the money lock are in memory.
+   - **Root directory** is `/server/api`. The Dockerfile there is used automatically: "Railway will look for and use a `Dockerfile` at the root of the source directory".
+2. **Install the CLI and log in.** From the repo root: `npm i -g @railway/cli` (or `brew install railway`), then `railway login` and `railway link` (pick the MUSE project and the API service).
+3. **Preview the generated file.** Run `railway config migrate`. It reads `server/api/railway.json` and prints a `.railway/railway.ts` with the service's real name. Expect `source: github(…, { rootDirectory: "server/api" })`, `healthcheck: "/health"`, `healthcheckTimeout: 60` and `replicas: 1`.
+4. **Write it.** Run `railway config migrate --apply`. This writes the file without switching the service over. Then from the repo root run `npm install railway`, the SDK the file imports.
+5. **Check it.** Run `railway config plan`. It should show **no changes**, or only the settings from step 1. **Stop** if it wants to create, rename or delete a service.
+6. **Switch over.** Run `railway config migrate cutover`. It switches the service off `railway.json` and saves the old path, so `railway config migrate undo` can roll back. Then run `railway config apply`.
+7. **Commit `.railway/railway.ts`.** Then delete `server/api/railway.json` in a commit **after** the cutover, or with `--delete-files`. A service can't be managed by both systems at once.
+8. **Verify.** Redeploy, and `GET /health` must answer `{ok: true…}`. In Settings, the restart policy, healthcheck and replicas must still be as in step 1.
+
+If the CLI behaves differently from these steps, stop after step 4. Nothing has changed in production until step 6.
+
 ## All variables
 
 | Variable | Default | What |
