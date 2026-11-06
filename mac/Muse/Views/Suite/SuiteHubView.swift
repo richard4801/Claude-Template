@@ -79,7 +79,7 @@ struct SuiteHubView: View {
     private var header: some View {
         HStack(alignment: .bottom, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
-                Text((store.user?.studioName ?? "MUSE Studio").uppercased()).font(t.mono(11)).tracking(1.6).foregroundStyle(t.muted)
+                Text(store.user?.studioName ?? "MUSE Studio").font(t.scale.caption.font).foregroundStyle(t.muted)
                 Text("Video suite").font(t.isA ? Fonts.font("Instrument Serif", 56, .regular) : t.display(40))
                 Text("Make a shot, swap your character into a clip, or plan a whole story — with your cast and a real camera.").font(t.body(14)).foregroundStyle(t.muted)
             }
@@ -156,7 +156,7 @@ struct SuiteHubView: View {
                     .overlay(MuseImage(ref: take?.thumb ?? j.thumb).blur(radius: state == .ready ? 0 : 10))
                     .overlay(overlay(state))
                     .clipped()
-                Text(j.title.uppercased()).font(t.mono(10)).tracking(0.6).lineLimit(1)
+                Text(j.title).font(t.scale.caption.font).lineLimit(1)
                 stateTag(state)
             }
             .frame(maxWidth: 110)
@@ -179,8 +179,8 @@ struct SuiteHubView: View {
         switch s {
         case .ready: Ph("play.circle.fill", 30).foregroundStyle(.white.opacity(0.9))
         case .rendering(let p, _): Text("\(p)%").font(t.isA ? Fonts.font("Instrument Serif", 30, .regular) : t.display(24)).foregroundStyle(.white)
-        case .queued: Text(s.queueLine.uppercased()).font(t.mono(9.5)).foregroundStyle(.white).padding(4).background(Color.black.opacity(0.8))
-        case .failed: Text("RETRY FREE").font(t.mono(9.5, .semibold)).foregroundStyle(.white).padding(4).background(t.rec)
+        case .queued: Text(s.queueLine).font(t.scale.micro.font).foregroundStyle(.white).padding(4).background(Color.black.opacity(0.8))
+        case .failed: Text("Retry free").font(t.scale.micro.font).foregroundStyle(.white).padding(4).background(t.rec)
         case .empty: EmptyView()
         }
     }

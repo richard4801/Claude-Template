@@ -15,16 +15,14 @@ struct ModalCard<Content: View>: View {
         ZStack {
             Color.black.opacity(0.38).onTapGesture { withAnimation { close() } }
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) { content() }
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 26)
+                VStack(alignment: .leading, spacing: Space.s4) { content() }
+                    .padding(Space.s6)
             }
             .frame(width: width)
             .frame(maxHeight: 760)
-            .background(RoundedRectangle(cornerRadius: t.rLg).fill(t.bg))
-            .overlay(RoundedRectangle(cornerRadius: t.rLg).strokeBorder(t.strongLine, lineWidth: t.lineWidth))
-            .modifier(ThemeShadow(kind: .card, radius: t.rLg))
-            .shadow(color: .black.opacity(0.35), radius: 40, y: 30)
+            .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.raised))
+            .clipShape(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous))
+            .museFloat(t)
             .padding(30)
         }
     }
@@ -37,13 +35,15 @@ struct ModalHeader: View {
     var close: () -> Void
 
     var body: some View {
+        // Sheet title (`title` step, sentence case); the old eyebrow is a quiet line under it.
         HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                Eyebrow(eyebrow).styled()
-                Text(t.headingsUppercase ? title.uppercased() : title).font(t.isA ? Fonts.font("Instrument Serif", 44, .regular) : t.display(30, t.isD ? .heavy : .bold))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).scaled(t.scale.title, t.roles.ink).accessibilityAddTraits(.isHeader)
+                if !eyebrow.isEmpty { Text(eyebrow).scaled(t.scale.caption, t.roles.ink2) }
             }
             Spacer()
-            IconButton(systemName: "xmark", help: "Close") { withAnimation { close() } }
+            RIconButton(systemName: "xmark", help: "Close") { withAnimation { close() } }
+                .keyboardShortcut(.cancelAction)
         }
     }
 }
@@ -589,17 +589,16 @@ struct ArchivedModelsSection: View {
     @Environment(\.theme) private var t
 
     var body: some View {
-        H2("Archived models")
-        Muted("Archived models are hidden from every list and picker. Their outfits, photos, renders and posts are kept. Restore one to use her again.")
+        SectionTitle("Archived models", top: 0)
+        Text("Archived models are hidden from every list and picker. Their outfits, photos, renders and posts are kept. Restore one to use her again.")
+            .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            .padding(.bottom, Space.s3)
         if store.archivedModels.isEmpty {
-            Note(icon: "archivebox", "Nothing archived. Archive a model from her profile's ⋯ menu.")
+            EmptyState("Nothing archived", "Archive a model from the ⋯ menu on her profile. She stays here until you restore her.")
         } else {
-            ListBox {
-                ForEach(Array(store.archivedModels.enumerated()), id: \.element.id) { i, m in
-                    ListRow(title: m.name, hint: [m.niche, m.archivedAt.map { "Archived " + Date(timeIntervalSince1970: Double($0) / 1000).formatted(date: .abbreviated, time: .omitted) } ?? ""]
-                        .filter { !$0.isEmpty }.joined(separator: " · "), last: i == store.archivedModels.count - 1) {
-                        MButton("Restore", icon: "arrow.uturn.backward", size: .small) { store.unarchiveModel(m) }
-                    }
+            ForEach(store.archivedModels) { m in
+                SettingRow(m.name, hint: ScreenCopy.meta([m.niche, m.archivedAt.map { "Archived " + Date(timeIntervalSince1970: Double($0) / 1000).formatted(date: .abbreviated, time: .omitted) }], limit: 2)) {
+                    RButton("Restore", small: true) { store.unarchiveModel(m) }
                 }
             }
         }

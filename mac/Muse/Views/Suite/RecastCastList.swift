@@ -43,7 +43,7 @@ struct RecastCastList: View {
             HStack(spacing: 8) {
                 Text("\(i + 1)").font(t.mono(11, .semibold)).foregroundStyle(t.accentInk)
                     .frame(width: 20, height: 20).background(Circle().fill(t.accent))
-                Text("PERSON \(i + 1)").font(t.mono(10.5)).tracking(1)
+                Text("Person \(i + 1)").font(t.scale.label.font)
                 Spacer()
                 Button {
                     store.suite.swap.people.removeAll { $0.id == p.id }

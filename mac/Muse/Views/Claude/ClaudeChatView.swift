@@ -43,12 +43,12 @@ struct ClaudeChatView: View {
         VStack(spacing: 0) {
             if showsHeader {
                 header
-                Rectangle().fill(t.line).frame(height: 1)
+                Rectangle().fill(t.roles.hairline).frame(height: 1)
             }
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(t.surface)
+        .background(t.roles.raised)
         .task(id: "\(contextKind)|\(contextId)|\(service.configured)|\(service.baseURL?.absoluteString ?? "")") {
             await model.attach(service, contextKind: contextKind, contextId: contextId)
         }
@@ -59,24 +59,28 @@ struct ClaudeChatView: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(title).font(t.body(16, .bold)).foregroundStyle(t.ink)
+            Text(title).scaled(t.scale.heading, t.roles.ink).accessibilityAddTraits(.isHeader)
             Spacer()
-            if model.busy { ProgressView().controlSize(.small) }
+            if model.busy { Text("Working…").scaled(t.scale.caption, t.roles.ink2) }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
+        .padding(.horizontal, Space.s4)
+        .padding(.vertical, Space.s3)
     }
 
     @ViewBuilder private var content: some View {
         if !store.isOwner {
-            centered { Muted("Claude chat is for the studio owner.", size: 13) }
+            centered { EmptyState("Owner only", "Claude chat is for the studio owner. Ask them to run this edit with Claude.") }
         } else if !service.configured {
-            centered { Muted("Sign in to your MUSE server to chat with Claude.", size: 13) }
+            centered {
+                EmptyState("Not connected", "Sign in to your MUSE server to chat with Claude. Demo mode has no Claude chat.",
+                           actionTitle: "Open settings") { store.openSettings(.developer) }
+            }
         } else if !service.checkedOnce || (service.checking && !service.info.installed) {
             centered {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Muted("Looking for Claude Code on this Mac…", size: 13)
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    Text("Looking for Claude Code on this Mac…").scaled(t.scale.caption, t.roles.ink2)
+                    SkeletonBlock(width: 200, height: 10)
+                    SkeletonBlock(width: 140, height: 10)
                 }
             }
         } else if !service.info.installed {
@@ -91,41 +95,42 @@ struct ClaudeChatView: View {
     }
 
     private func centered<C: View>(@ViewBuilder _ c: () -> C) -> some View {
-        VStack { c() }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
+        VStack(alignment: .leading) { c() }.padding(Space.s5).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     // MARK: Setup states
 
     private func setup(installed: Bool) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                Text(installed ? "Sign in to Claude" : "Use Claude on your own plan").font(t.body(15, .bold)).foregroundStyle(t.ink)
-                Muted(installed
-                      ? "Claude Code is installed. Sign in with your Claude account so chats here run on your subscription."
-                      : "MUSE runs Anthropic's Claude Code on this Mac, signed in to your Claude subscription. Nothing is billed to the studio.", size: 13)
+            VStack(alignment: .leading, spacing: Space.s3) {
+                Text(installed ? "Sign in to Claude" : "Use Claude on your own plan").scaled(t.scale.heading, t.roles.ink)
+                Text(installed
+                     ? "Claude Code is installed. Sign in with your Claude account so chats here run on your subscription."
+                     : "MUSE runs Anthropic's Claude Code on this Mac, signed in to your Claude subscription. Nothing is billed to the studio.")
+                    .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
                 if !installed {
                     step(1, "Install", "Opens Terminal and runs Anthropic's official installer (claude.ai/install.sh).", primary: true) { service.openInstall() }
                 }
                 step(installed ? 1 : 2, "Sign in", "Opens Claude's own sign-in page. MUSE never sees your password or keys.", primary: installed, off: !installed) { service.openSignIn() }
-                HStack(spacing: 8) {
-                    MButton(service.checking ? "Checking…" : "Re-check", icon: "arrow.clockwise", size: .small, off: service.checking) {
+                HStack(spacing: Space.s2) {
+                    RButton(service.checking ? "Checking…" : "Check again", kind: .plain, small: true, off: service.checking) {
                         Task { await service.recheck() }
                     }
-                    if let v = service.info.version { Text("Claude Code \(v)").font(t.mono(11)).foregroundStyle(t.muted) }
+                    if let v = service.info.version { Text("Claude Code \(v)").scaled(t.scale.micro, t.roles.ink2) }
                 }
-                if let e = service.lastError { Text(e).font(t.body(12)).foregroundStyle(t.rec).fixedSize(horizontal: false, vertical: true) }
+                if let e = service.lastError { InlineNotice(e, tone: .danger) }
             }
-            .padding(18)
+            .padding(Space.s4)
         }
         .frame(maxHeight: .infinity)
     }
 
     private func step(_ n: Int, _ title: String, _ hint: String, primary: Bool, off: Bool = false, action: @escaping () -> Void) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text("\(n)").font(t.mono(12, .semibold)).foregroundStyle(t.muted).frame(width: 14)
-            VStack(alignment: .leading, spacing: 6) {
-                MButton(title, kind: primary ? .primary : .secondary, size: .small, off: off, action: action)
-                Muted(hint)
+        HStack(alignment: .top, spacing: Space.s3) {
+            Text("\(n)").monospacedDigit().scaled(t.scale.label, t.roles.ink2).frame(width: 14).padding(.top, 6)
+            VStack(alignment: .leading, spacing: Space.s1) {
+                RButton(title, kind: primary ? .action : .quiet, small: true, off: off, action: action)
+                Text(hint).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -136,15 +141,21 @@ struct ClaudeChatView: View {
         let items = model.transcript.items
         return ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: Space.s3) {
                     if let accessory { accessory }
-                    if model.loading, items.isEmpty { ProgressView().controlSize(.small) }
-                    if let e = model.loadError { Note(icon: "exclamationmark.circle", warn: true, e) }
+                    if model.loading, items.isEmpty {
+                        VStack(alignment: .leading, spacing: Space.s2) {
+                            SkeletonBlock(width: 220, height: 10)
+                            SkeletonBlock(width: 260, height: 10)
+                            SkeletonBlock(width: 160, height: 10)
+                        }
+                    }
+                    if let e = model.loadError { InlineNotice("Couldn't load this chat. \(e)", tone: .danger) }
                     if items.isEmpty, !model.loading, model.loadError == nil {
                         Text(contextKind == "edit"
                              ? "Ask Claude to edit: trim, add captions, change the Look, check a frame. Every change can be undone."
                              : "Tell Claude what happens in the shot: who walks where, when they turn, how the camera moves.")
-                            .font(t.body(13)).foregroundStyle(t.muted).fixedSize(horizontal: false, vertical: true)
+                            .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
                     }
                     ForEach(chunks(items)) { chunk in
                         switch chunk {
@@ -152,11 +163,11 @@ struct ClaudeChatView: View {
                         case .chips(_, let tools): chipRow(tools)
                         }
                     }
-                    if let e = model.transcript.lastError, !model.busy { Note(icon: "exclamationmark.triangle", warn: true, e) }
+                    if let e = model.transcript.lastError, !model.busy { InlineNotice(e, tone: .danger) }
                     Color.clear.frame(height: 1).id("end")
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 14)
+                .padding(.horizontal, Space.s4)
+                .padding(.vertical, Space.s3)
             }
             .onChange(of: scrollKey(items)) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
             .onAppear { proxy.scrollTo("end", anchor: .bottom) }
@@ -208,11 +219,11 @@ struct ClaudeChatView: View {
     }
 
     private func userBubble(_ text: String, source: String) -> some View {
-        VStack(alignment: .trailing, spacing: 4) {
-            Lbl(source == "phone" ? "You · phone" : "You")
-            Text(text).font(t.body(13)).foregroundStyle(t.bg).lineSpacing(3)
-                .padding(.horizontal, 12).padding(.vertical, 10)
-                .background(RoundedRectangle(cornerRadius: t.isA ? 0 : t.r).fill(t.ink))
+        VStack(alignment: .trailing, spacing: Space.s1) {
+            Text(source == "phone" ? "You, from your phone" : "You").scaled(t.scale.micro, t.roles.ink2)
+            Text(text).scaled(t.scale.body, t.roles.ink)
+                .padding(.horizontal, Space.s3).padding(.vertical, Space.s2)
+                .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field))
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -221,10 +232,10 @@ struct ClaudeChatView: View {
     }
 
     private func assistant(_ text: String, streaming: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Lbl("Claude")
-            (Text(text) + Text(streaming ? " ▍" : "").foregroundStyle(t.muted))
-                .font(t.body(13)).foregroundStyle(t.ink).lineSpacing(3)
+        VStack(alignment: .leading, spacing: Space.s1) {
+            Text("Claude").scaled(t.scale.micro, t.roles.ink2)
+            (Text(text) + Text(streaming ? " ▍" : "").foregroundStyle(t.roles.ink2))
+                .scaled(t.scale.body, t.roles.ink)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -232,7 +243,7 @@ struct ClaudeChatView: View {
     }
 
     private func chipRow(_ tools: [ClaudeChatItem]) -> some View {
-        FlowLayout(spacing: 4) {
+        FlowLayout(spacing: Space.s1) {
             ForEach(tools) { item in
                 if case .tool(_, let name, let summary, let status) = item { chip(name: name, summary: summary, status: status) }
             }
@@ -241,62 +252,56 @@ struct ClaudeChatView: View {
 
     private func chip(name: String, summary: String, status: ClaudeToolStatus) -> some View {
         let bad = status == .error
-        return HStack(spacing: 5) {
-            if status == .running {
-                ProgressView().controlSize(.mini)
-            } else {
-                Ph(bad ? "exclamationmark.triangle" : name.hasPrefix("blender_") ? "cube" : "wand.and.stars", 9.5)
-            }
-            Text(summary).font(t.mono(10, .medium)).lineLimit(1)
+        // A tool step: its summary in the text face; only a failure or a running step gets a mark.
+        return HStack(spacing: Space.s1) {
+            if status == .running { ProgressView().controlSize(.mini) }
+            Text(bad ? "\(summary) failed" : summary).font(t.scale.micro.font).lineLimit(1)
         }
-        .foregroundStyle(bad ? t.rec : t.muted)
-        .padding(.horizontal, 7).frame(height: 22)
-        .overlay(RoundedRectangle(cornerRadius: t.isA ? 0 : 4).strokeBorder(bad ? t.rec : t.line, lineWidth: 1))
+        .foregroundStyle(bad ? t.roles.danger : t.roles.ink2)
+        .padding(.horizontal, Space.s2).frame(height: 22)
+        .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(t.roles.field))
         .help(bad ? "\(summary) (\(ClaudeChipText.words(name)))" : ClaudeChipText.words(name))
         .accessibilityLabel(bad ? "\(summary), failed" : summary)
     }
 
     private func grabbedFrame(_ url: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Lbl("Frame Claude grabbed")
+        VStack(alignment: .leading, spacing: Space.s1) {
+            Text("Frame Claude grabbed").scaled(t.scale.micro, t.roles.ink2)
             MuseImage(ref: ImageRef(url: service.resolve(url)), symbol: "photo")
                 .frame(width: 240, height: 135)
-                .clipShape(RoundedRectangle(cornerRadius: t.isA ? 0 : t.r))
-                .overlay(RoundedRectangle(cornerRadius: t.isA ? 0 : t.r).strokeBorder(t.line, lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).strokeBorder(t.roles.hairline, lineWidth: t.isDark || t.isD ? 0 : 1))
         }
     }
 
     // MARK: Phone strip and composer
 
     private var phoneStrip: some View {
-        HStack(spacing: 8) {
-            Ph("iphone", 12)
-            Text("Answering from your phone").font(t.body(12.5, .semibold))
+        HStack(spacing: Space.s2) {
+            Text("Answering a chat from your phone").scaled(t.scale.caption, t.roles.ink)
             Spacer()
             ProgressView().controlSize(.small)
         }
-        .foregroundStyle(t.ink)
-        .padding(.horizontal, 18).padding(.vertical, 8)
-        .background(t.surface2)
-        .overlay(alignment: .top) { Rectangle().fill(t.line).frame(height: 1) }
+        .padding(.horizontal, Space.s4).padding(.vertical, Space.s2)
+        .background(t.roles.field)
         .accessibilityElement(children: .combine)
     }
 
     private var composer: some View {
         let busy = model.busy
         let empty = model.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .bottom, spacing: 8) {
+        return VStack(alignment: .leading, spacing: Space.s2) {
+            HStack(alignment: .bottom, spacing: Space.s2) {
                 TextField(placeholder ?? "Ask Claude…", text: $model.composer, axis: .vertical)
                     .lineLimit(1...5)
                     .onSubmit { if !busy { model.send() } }
-                    .fieldChrome()
+                    .roleField(multiline: true)
                 if busy {
                     Button { model.stop() } label: {
                         Ph("stop.fill", 13)
                     }
-                    .buttonStyle(MuseButtonStyle(kind: .secondary))
-                    .frame(width: 44)
+                    .buttonStyle(RButtonStyle(kind: .quiet))
+                    .frame(width: 40)
                     .help("Stop Claude")
                     .accessibilityLabel("Stop Claude")
                     .keyboardShortcut(".", modifiers: .command)
@@ -304,23 +309,20 @@ struct ClaudeChatView: View {
                     Button { model.send() } label: {
                         Ph("paperplane.fill", 14)
                     }
-                    .buttonStyle(MuseButtonStyle(kind: .primary, off: empty || model.thread == nil))
-                    .frame(width: 44)
+                    .buttonStyle(RButtonStyle(kind: .action, off: empty || model.thread == nil))
+                    .frame(width: 40)
                     .disabled(empty || model.thread == nil)
                     .help("Send to Claude")
                     .accessibilityLabel("Send to Claude")
                     .keyboardShortcut(.return, modifiers: .command)
                 }
             }
-            HStack(spacing: 6) {
-                Circle().fill(t.good).frame(width: 6, height: 6)
-                Text(modeLine).font(t.mono(10.5)).foregroundStyle(t.muted).lineLimit(1)
-            }
-            .help("Runs in Claude Code on this Mac, billed to the Claude account it is signed in with")
-            if let footer { Text(footer).font(t.body(12)).foregroundStyle(t.muted).fixedSize(horizontal: false, vertical: true) }
+            Text(modeLine).scaled(t.scale.micro, t.roles.ink2).lineLimit(1)
+                .help("Runs in Claude Code on this Mac, billed to the Claude account it is signed in with")
+            if let footer { Text(footer).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true) }
         }
-        .padding(.horizontal, 18).padding(.top, 10).padding(.bottom, 14)
-        .overlay(alignment: .top) { Rectangle().fill(t.line).frame(height: 1) }
+        .padding(.horizontal, Space.s4).padding(.top, Space.s3).padding(.bottom, Space.s4)
+        .overlay(alignment: .top) { Rectangle().fill(t.roles.hairline).frame(height: 1) }
     }
 
     /// "On your Claude plan · claude-sonnet-4-5" (the model name is owner only; this view is too).

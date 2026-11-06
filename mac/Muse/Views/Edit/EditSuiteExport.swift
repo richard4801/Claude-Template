@@ -69,7 +69,7 @@ struct EditSuiteExportSheet: View {
                         .buttonStyle(.plain)
                         .disabled(session.exportProblem != nil)
                         Button { start(saveFile: true) } label: {
-                            Text("EXPORT").font(t.mono(13, .semibold)).tracking(1.6).foregroundStyle(t.bg)
+                            Text("Export").font(t.body(14, .semibold)).foregroundStyle(t.bg)
                                 .padding(.horizontal, 24).frame(height: 50)
                                 .background(Rectangle().fill(t.ink))
                         }

@@ -50,6 +50,12 @@ import studio.muse.app.ui.Routes
 import studio.muse.app.ui.components.*
 import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.MuseSpace
+import studio.muse.app.ui.theme.roles
+import studio.muse.app.ui.theme.scale
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import studio.muse.core.Pricing
 import studio.muse.core.SheetAngle
 
@@ -123,11 +129,12 @@ class CreateModelViewModel(private val c: AppContainer) : ViewModel() {
     }
 }
 
+/** "Step 1 of 2" and the step's title. */
 @Composable
-private fun StepBars(n: Int) {
-    val m = muse
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        repeat(2) { i -> Box(Modifier.weight(1f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(if (i < n) m.t.accent else m.t.surface2)) }
+private fun StepTitle(step: Int, title: String) {
+    Column(Modifier.padding(horizontal = MuseSpace.gutter), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Caption("Step $step of 2")
+        DisplayTitle(title)
     }
 }
 
@@ -138,24 +145,26 @@ fun CreateBasicsScreen() {
     val s by vm.state.collectAsState()
     val nav = LocalNav.current
     val m = muse
-    ScreenBox {
+    ScreenBox(bg = m.roles.canvas) {
         Column(Modifier.fillMaxSize()) {
-            TopBar("New model", onBack = { nav.back() })
-            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                StepBars(1); Lbl("Step 1 of 2"); H2("Who is she?")
-            }
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 130.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Field("Name") { Input(s.draft.name, { v -> vm.edit { it.copy(name = v) } }, placeholder = "Her name") }
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row { Lbl("Age · "); T("${s.draft.age}", m.type.mono.copy(fontSize = 11.5.sp, fontWeight = FontWeight.Bold), m.t.ink) }
-                    MuseSlider(s.draft.age, 18, 70, { v -> if (v != s.draft.age) vm.edit { it.copy(age = v) } })
-                    Scale("18", "70")
+            CalmTopBar("New model", onBack = { nav.back() })
+            StepTitle(1, "Who is she?")
+            Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = MuseSpace.gutter).padding(top = MuseSpace.s5, bottom = 120.dp),
+                verticalArrangement = Arrangement.spacedBy(MuseSpace.s5),
+            ) {
+                Labeled("Name") { Input(s.draft.name, { v -> vm.edit { it.copy(name = v) } }, placeholder = "Her name", calm = true) }
+                Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
+                    RowB { T("Age", m.scale.label, m.roles.ink); T("${s.draft.age}", m.scale.label.tabular(), m.roles.ink) }
+                    MuseSlider(s.draft.age, 18, 70, { v -> if (v != s.draft.age) vm.edit { it.copy(age = v) } }, calm = true)
                 }
-                Field("Niche") { ChipRow(NICHES, s.draft.niche, { v -> vm.edit { it.copy(niche = v) } }) }
-                NoteBox("Models are always 18+ and original. No lookalikes of real people.")
+                Labeled("Niche") {
+                    FlowRow(hGap = MuseSpace.s2, vGap = 0.dp) { NICHES.forEach { n -> ChoiceChip(n, n == s.draft.niche, { vm.edit { it.copy(niche = n) } }) } }
+                }
+                Notice("Models are always 18+ and original. No lookalikes of real people.")
             }
         }
-        Dock { Cta("Next: Character sheet", { vm.next { nav.go(Routes.CREATE3) } }, Modifier.weight(1f), busy = s.creating, off = s.draft.name.isBlank()) }
+        ActionDock { PrimaryButton("Next: character sheet", { vm.next { nav.go(Routes.CREATE3) } }, Modifier.weight(1f), busy = s.creating, off = s.draft.name.isBlank()) }
     }
 }
 
@@ -174,54 +183,54 @@ fun CharacterSheetScreen() {
     val model = s.model
     val filled = model?.filled ?: 0
     val faces = model?.slots?.count { (it.key == "face" || it.key == "profile") && it.image != null } ?: 0
-    ScreenBox {
+    ScreenBox(bg = m.roles.canvas) {
         Column(Modifier.fillMaxSize()) {
-            TopBar(if (model != null && model.locked) model.name else "New model", onBack = { nav.back() })
-            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                StepBars(2); Lbl("Step 2 of 2"); H2("Character sheet")
-            }
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 8.dp, bottom = 130.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                T("Upload your model's images. Tap a slot to add or replace a shot.", m.type.body, m.t.muted)
-                SheetAngle.DISPLAY.chunked(3).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        row.forEach { a ->
-                            val slot = model?.slot(a.key)
-                            Column(Modifier.weight(1f).press { pendingSlot = a.key; pickOne.launch(img) }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                val shape = RoundedCornerShape(m.t.r * .6f)
-                                when {
-                                    slot?.busy == true -> Box(Modifier.fillMaxWidth().height(132.dp).clip(shape).background(m.t.surface2).shimmer())
-                                    slot?.image != null -> Box(Modifier.fillMaxWidth().height(132.dp).clip(shape).let { if (m.isD) it.border(2.5.dp, Ink, shape) else it }) { RefImage(slot.image, Modifier.fillMaxSize()) }
-                                    else -> Box(Modifier.fillMaxWidth().height(132.dp).clip(shape).background(m.t.surface).dashed(m.t.line, m.t.r * .6f, m.t.stroke), contentAlignment = Alignment.Center) { Ic("upload", 20.dp, m.t.muted) }
-                                }
-                                val label = androidx.compose.ui.text.buildAnnotatedString {
-                                    append(a.label)
-                                    if (slot?.image != null && !slot.busy) {
-                                        append(" · ")
-                                        withStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold, color = if (slot.source == "generated") m.t.accent else m.t.muted)) {
-                                            append(if (slot.source == "generated") "filled in" else "yours")
-                                        }
+            CalmTopBar(if (model != null && model.locked) model.name else "New model", onBack = { nav.back() })
+            StepTitle(2, "Character sheet")
+            Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = MuseSpace.gutter).padding(top = MuseSpace.s3, bottom = 120.dp),
+                verticalArrangement = Arrangement.spacedBy(MuseSpace.s5),
+            ) {
+                Body("Upload your model's images. Tap a slot to add or replace a shot.")
+                Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
+                    SheetAngle.DISPLAY.chunked(3).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                            row.forEach { a ->
+                                val slot = model?.slot(a.key)
+                                Column(
+                                    Modifier.weight(1f).press { pendingSlot = a.key; pickOne.launch(img) }.semantics { contentDescription = "${a.label}: ${if (slot?.image != null) "replace" else "add"} image" },
+                                    verticalArrangement = Arrangement.spacedBy(MuseSpace.s1),
+                                ) {
+                                    val tile = Modifier.fillMaxWidth().aspectRatio(3f / 4f)
+                                    when {
+                                        slot?.busy == true -> Skeleton(tile, containerShape())
+                                        slot?.image != null -> Box(tile.clip(containerShape())) { RefImage(slot.image, Modifier.fillMaxSize()) }
+                                        else -> Box(tile.clip(containerShape()).background(m.roles.field), contentAlignment = Alignment.Center) { Ic("upload", 20.dp, m.roles.ink2) }
                                     }
+                                    val src = if (slot?.image != null && !slot.busy) (if (slot.source == "generated") " · filled in" else " · yours") else ""
+                                    Caption(a.label + src, maxLines = 1)
                                 }
-                                androidx.compose.material3.Text(label, style = m.type.tiny.copy(fontSize = 12.sp), color = m.t.muted, maxLines = 2)
                             }
+                            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                         }
-                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
-                Cta2("Upload images", { pickMany.launch(img) }, Modifier.fillMaxWidth(), icon = "upload", height = 44.dp)
-                if (filled > 0) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Cta2("Enhance", { nav.go(Routes.ENHANCE) }, Modifier.weight(1f), icon = "spark", height = 44.dp)
-                    Cta2("Dress up", { nav.go(Routes.DRESSUP) }, Modifier.weight(1f), icon = "outfit", height = 44.dp)
+                Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                    SecondaryButton("Upload images", { pickMany.launch(img) }, Modifier.fillMaxWidth(), icon = "upload")
+                    if (filled in 1..6) {
+                        val miss = 7 - filled
+                        SecondaryButton("Fill $miss missing angle${if (miss > 1) "s" else ""} · ${studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.sheetAngles(photoPrices(), miss, filled))}",
+                            { vm.fill() }, Modifier.fillMaxWidth())
+                    }
+                    if (filled > 0) Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                        SecondaryButton("Enhance", { nav.go(Routes.ENHANCE) }, Modifier.weight(1f))
+                        SecondaryButton("Dress up", { nav.go(Routes.DRESSUP) }, Modifier.weight(1f))
+                    }
                 }
-                if (filled in 1..6) {
-                    val miss = 7 - filled
-                    Opt("Fill missing angles from your images", "Optional. Adds the $miss missing angle${if (miss > 1) "s" else ""} of your model · ${studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.sheetAngles(photoPrices(), miss, filled))}", icon = "spark", onClick = { vm.fill() })
-                }
-                if (faces < 2) NoteBox("Tip: two face close-ups keep her face sharp and consistent in videos. You can still save without them.", warn = true)
-                else NoteBox("$filled of 7 shots. ${if (filled < 7) "More angles help when she turns. Optional." else "Full sheet. Her identity is locked."}", icon = "check")
+                if (faces < 2) Notice("Two face close-ups keep her face sharp and consistent in videos. You can still save without them.", tone = NoticeTone.CAUTION)
+                else Notice("$filled of 7 shots. ${if (filled < 7) "More angles help when she turns." else "Full sheet: her identity is locked."}", tone = if (filled == 7) NoticeTone.POSITIVE else NoticeTone.NEUTRAL)
             }
         }
-        Dock { Cta("Save model · $filled/7", { vm.save(celebrate) { nav.reset(Routes.HOME) } }, Modifier.weight(1f)) }
+        ActionDock { PrimaryButton("Save model · $filled of 7", { vm.save(celebrate) { nav.reset(Routes.HOME) } }, Modifier.weight(1f)) }
     }
 }
-

@@ -62,7 +62,7 @@ struct HomeView: View {
         return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"
     }
 
-    /// Takes made since the 1st of this month (the hint under "This month").
+    /// Takes made since the 1st of this month.
     private var monthTakes: Int {
         let start = Calendar.current.dateInterval(of: .month, for: Date())?.start ?? Date()
         let ms = Int64(start.timeIntervalSince1970 * 1000)
@@ -76,105 +76,87 @@ struct HomeView: View {
         return f.string(from: Date()).replacingOccurrences(of: ",", with: "")
     }
 
+    /// First load with nothing to show yet: skeletons shaped like the page.
+    private var firstLoad: Bool { store.loading && store.takes.isEmpty && store.models.isEmpty }
+
     var body: some View {
         let r = store.runningJob ?? store.activeJobs.first
-        Page {
-            PageHeader(eyebrow: dateLine, title: greeting) {
-                MButton("New video", icon: "plus", kind: .primary) { store.go(.studio) }
+        ScreenPage {
+            ScreenTitle(greeting, subtitle: dateLine) {
+                RButton("New video", kind: .action) { store.go(.studio) }
+                    .help("New video (⌘N)")
             }
-            HStack(spacing: 14) {
-                KPI(label: "Balance", value: Pricing.money(store.creditUsd), hint: "≈ \(Pricing.videosLeft(store.creditUsd)) Draft videos", index: 0)
-                KPI(label: "This month", value: Pricing.money(store.balance.month), hint: "\(monthTakes) take\(monthTakes == 1 ? "" : "s") this month", index: 1)
-                KPI(label: "In the queue", value: "\(store.activeJobs.count)", hint: store.runningJob.map { $0.isWaiting ? MemberText.waitingToStart : "Rendering" } ?? "Nothing rendering", index: 2)
-                KPI(label: "To review", value: "\(store.toReview)", hint: "takes waiting for approval", index: 3)
+            // Four plain facts on the canvas, not four boxed stat cards.
+            HStack(alignment: .top, spacing: Space.s7) {
+                fact("Balance", Pricing.money(store.creditUsd), "About \(Pricing.videosLeft(store.creditUsd)) Draft videos") { store.go(.credits) }
+                fact("This month", Pricing.money(store.balance.month), ScreenCopy.count(monthTakes, "take"), nil)
+                fact("In the queue", "\(store.activeJobs.count)", store.runningJob.map { $0.isWaiting ? MemberText.waitingToStart : "Rendering" } ?? "Nothing rendering") { store.go(.queue) }
+                fact("To review", "\(store.toReview)", "Waiting for approval") { store.go(.gallery) }
+                Spacer(minLength: 0)
             }
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack {
-                        H2("Pick up where you left off")
-                        Spacer()
-                        if r?.isRunning == true { Sticker("live!", rotation: 4) }
-                    }
-                    if let r {
-                        HStack(alignment: .center, spacing: 18) {
-                            Media(ref: r.thumb).frame(width: 150)
-                            VStack(alignment: .leading, spacing: 12) {
-                                Lbl("\(r.isRunning ? "Rendering" : "Queued") · \(r.engineLabel)")
-                                Text(r.title).font(t.h2).foregroundStyle(t.ink)
-                                ProgressLine(value: r.progress / 100)
-                                Text(r.isRunning ? r.progressLine : "Starts when you press Run queue").font(t.mono(12)).foregroundStyle(t.muted)
-                                HStack {
-                                    if r.isQueued && store.runningJob == nil {
-                                        MButton("Run queue · \(Pricing.money(store.queuedCost))", icon: "play.fill", kind: .primary, size: .small) { store.runQueue() }
-                                    }
-                                    MButton("Open queue", size: .small) { store.go(.queue) }
-                                }
-                            }
+            .redacted(reason: firstLoad ? .placeholder : [])
+
+            if let r {
+                SectionTitle("In progress") { RButton("Open queue", kind: .plain, small: true) { store.go(.queue) } }
+                HStack(alignment: .center, spacing: Space.s5) {
+                    MediaFrame(ref: r.thumb).frame(width: 96)
+                    VStack(alignment: .leading, spacing: Space.s2) {
+                        Text(r.title).scaled(t.scale.heading, t.roles.ink).lineLimit(1)
+                        Text(r.isRunning ? r.progressLine : "Starts when you run the queue").monospacedDigit().scaled(t.scale.caption, t.roles.ink2)
+                        RProgress(value: r.progress / 100).frame(maxWidth: 360)
+                        if r.isQueued && store.runningJob == nil {
+                            RButton("Run queue · \(Pricing.money(store.queuedCost))", small: true) { store.runQueue() }
+                                .padding(.top, Space.s1)
                         }
-                    } else {
-                        Note("Nothing rendering. Start a new video or a photo.")
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+
+            SectionTitle("Latest takes") {
+                if !store.takes.isEmpty { RButton("Open gallery", kind: .plain, small: true) { store.go(.gallery) } }
+            }
+            if firstLoad {
+                SkeletonGrid(columns: 6, count: 6)
+            } else if store.takes.isEmpty {
+                EmptyState("No takes yet", "Finished videos and photos land here, newest first.", actionTitle: "New photo") { store.openTool(.photo) }
+            } else {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.s4), count: 6), alignment: .leading, spacing: Space.s5) {
+                    ForEach(store.takes.prefix(6)) { take in
+                        Button { store.openTake(take.id) } label: {
+                            MediaTile(ref: take.thumb, caption: take.caption, meta: take.isVideo ? "Video" : "Photo")
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open \(take.caption)")
                     }
                 }
-                .card()
-                .frame(maxWidth: .infinity)
+            }
 
-                VStack(alignment: .leading, spacing: 10) {
-                    H2("Create").padding(.bottom, 4)
-                    QuickAction(icon: "video", title: "New video", hint: "Swap your model into a real clip", key: "⌘N") { store.go(.studio) }
-                    QuickAction(icon: "person.badge.plus", title: "New model", hint: "Upload your own reference images", key: nil) { store.go(.create) }
-                }
-                .card()
-                .frame(minWidth: 300, maxWidth: 440)
+            SectionTitle("Your models") {
+                if !store.models.isEmpty { RButton("All models", kind: .plain, small: true) { store.go(.models) } }
             }
-            .padding(.top, 22)
+            ModelGrid(limit: 5)
+        }
+    }
 
-            SectionHeader(title: "Latest takes") { LinkText("Open gallery") { store.go(.gallery) } }
-            if store.takes.isEmpty {
-                Note(icon: "square.grid.2x2", "No takes yet. Finished videos and photos show up here.")
+    /// A label, a figure and a short line. Clickable facts go where the number comes from.
+    private func fact(_ label: String, _ value: String, _ hint: String, _ action: (() -> Void)?) -> some View {
+        let content = VStack(alignment: .leading, spacing: 2) {
+            Text(label).scaled(t.scale.caption, t.roles.ink2)
+            Text(value).monospacedDigit().scaled(t.scale.title, t.roles.ink).lineLimit(1)
+            Text(hint).scaled(t.scale.caption, t.roles.ink2).lineLimit(1)
+        }
+        return Group {
+            if let action {
+                Button(action: action) { content.contentShape(Rectangle()) }.buttonStyle(.plain).help("Open \(label.lowercased())")
+            } else {
+                content
             }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 6), spacing: 12) {
-                ForEach(store.takes.prefix(6)) { take in
-                    Button { store.openTake(take.id) } label: { Media(ref: take.thumb, caption: take.caption) }.buttonStyle(.plain)
-                }
-            }
-            SectionHeader(title: "Your models") { LinkText("All models") { store.go(.models) } }
-            ModelGrid(limit: 4)
         }
     }
 }
 
-struct QuickAction: View {
-    @Environment(\.theme) private var t
-    var icon: String
-    var title: String
-    var hint: String
-    var key: String?
-    var action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: icon).font(.system(size: 16)).frame(width: 38, height: 38)
-                    .background(RoundedRectangle(cornerRadius: t.isC ? 19 : t.controlRadius).fill(t.surface2))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(t.body(14, .bold))
-                    Muted(hint)
-                }
-                Spacer()
-                if let key { KeyCap(key) }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(RoundedRectangle(cornerRadius: t.controlRadius).fill(t.isA ? .clear : t.surface))
-            .overlay(RoundedRectangle(cornerRadius: t.controlRadius).strokeBorder(t.isC ? .clear : t.strongLine, lineWidth: t.lineWidth))
-            .modifier(ThemeShadow(kind: t.isC ? .button : .none, radius: t.controlRadius))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-/// Model cards + the dashed "New model" tile (`.grid5`).
+/// The models as picture-plus-caption tiles. The empty state says what a model is and starts one.
 struct ModelGrid: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
@@ -182,20 +164,15 @@ struct ModelGrid: View {
 
     var body: some View {
         let list = limit.map { Array(store.models.prefix($0)) } ?? store.models
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 5), alignment: .leading, spacing: 14) {
-            ForEach(list) { m in ModelCard(model: m) }
-            Button { store.go(.create) } label: {
-                VStack(spacing: 6) {
-                    Image(systemName: "plus").font(.system(size: 20))
-                    Text("New model").font(t.body(14))
-                    if limit == nil { Text("Bring your own images").font(t.body(12)) }
-                }
-                .foregroundStyle(t.muted)
-                .frame(maxWidth: .infinity, minHeight: 200, maxHeight: .infinity)
-                .overlay(RoundedRectangle(cornerRadius: t.cardRadius).strokeBorder(t.line, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])))
-                .contentShape(Rectangle())
+        if store.loading && store.models.isEmpty {
+            SkeletonGrid(columns: 5, count: limit ?? 5, ratio: 0.75)
+        } else if list.isEmpty {
+            EmptyState("No models yet", "A model is a character you build from your own reference images. It keeps the same face in every photo and video.",
+                       actionTitle: "New model") { store.go(.create) }
+        } else {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.s5), count: 5), alignment: .leading, spacing: Space.s5) {
+                ForEach(list) { m in ModelCard(model: m) }
             }
-            .buttonStyle(.plain)
         }
     }
 }
@@ -206,40 +183,26 @@ struct ModelCard: View {
     var model: MuseModel
 
     var body: some View {
+        let meta = model.isDraft ? "Draft · needs face close-ups" : ScreenCopy.meta([model.niche, ScreenCopy.count(store.outfits(for: model).count, "outfit")], limit: 2)
         Button { store.openProfile(model.id) } label: {
-            VStack(alignment: .leading, spacing: 0) {
-                Group {
-                    if let cover = model.cover {
-                        Media(ref: cover, ratio: 0.75, radius: 0) {
-                            Pill("\(model.filled)/\(SheetAngle.allCases.count) shots", model.isLocked ? .good : .warn)
-                        }
-                    } else {
-                        InitialTile(letter: model.initial)
-                    }
+            VStack(alignment: .leading, spacing: Space.s2) {
+                if let cover = model.cover {
+                    MediaFrame(ref: cover, ratio: 0.75)
+                } else {
+                    let shape = RoundedRectangle(cornerRadius: t.radii.container, style: .continuous)
+                    Color.clear.aspectRatio(0.75, contentMode: .fit)
+                        .background(shape.fill(t.roles.field))
+                        .overlay(Text(model.initial).font(t.scale.display.font).foregroundStyle(t.roles.ink2))
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(model.name).font(t.body(14, .bold)).foregroundStyle(t.ink).lineLimit(1)
-                    if model.isDraft {
-                        // A narrow card (five across at 1280 px) drops the "Draft ·" prefix rather than clip the pill.
-                        ViewThatFits(in: .horizontal) {
-                            HStack(spacing: 6) {
-                                Text("Draft ·").font(t.body(12)).foregroundStyle(t.muted)
-                                Pill("needs face close-ups", .warn)
-                            }
-                            Pill("needs face close-ups", .warn)
-                        }
-                    } else {
-                        Muted("\(model.niche) · \(store.outfits(for: model).count) outfits")
-                    }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.name).scaled(t.scale.label, t.roles.ink).lineLimit(1)
+                    Text(meta).scaled(t.scale.caption, model.isDraft ? t.roles.caution : t.roles.ink2).lineLimit(1)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
             }
-            .clipShape(RoundedRectangle(cornerRadius: t.cardRadius, style: .continuous))
-            .surface()
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help("Open \(model.name)")
     }
 }
 
@@ -247,9 +210,9 @@ struct ModelsView: View {
     @Environment(AppStore.self) private var store
 
     var body: some View {
-        Page {
-            PageHeader(eyebrow: "Library", title: "Models") {
-                MButton("New model", icon: "plus", kind: .primary) { store.go(.create) }
+        ScreenPage {
+            ScreenTitle("Models") {
+                RButton("New model", kind: .action) { store.go(.create) }
             }
             ModelGrid()
         }

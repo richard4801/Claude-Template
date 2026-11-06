@@ -58,6 +58,9 @@ import studio.muse.app.ui.TabBar
 import studio.muse.app.ui.components.*
 import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.MuseSpace
+import studio.muse.app.ui.theme.roles
+import studio.muse.app.ui.theme.scale
 import studio.muse.core.Pricing
 import studio.muse.core.formatClock
 import studio.muse.core.formatTimecode
@@ -104,12 +107,29 @@ fun QueueScreen() {
     val vm: QueueViewModel = viewModel { QueueViewModel(c) }
     val s by vm.state.collectAsState()
     val m = muse
-    ScreenBox {
-        when {
-            m.isA -> QueueA(vm, s)
-            m.isB -> QueueB(vm, s)
-            m.isC -> QueueC(vm, s)
-            else -> QueueD(vm, s)
+    val nav = LocalNav.current
+    ScreenBox(bg = m.roles.canvas) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = MuseSpace.gutter, end = MuseSpace.gutter, top = MuseSpace.s4, bottom = 120.dp)) {
+            item(key = "head", contentType = "head") {
+                Column(Modifier.padding(bottom = MuseSpace.s4), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    DisplayTitle("Queue")
+                    if (!s.empty && s.loaded) Caption(listOfNotNull(s.running.size.takeIf { it > 0 }?.let { "$it rendering" }, "${s.done.size} done").joinToString(" · "))
+                }
+            }
+            if (!s.loaded && s.all.isEmpty()) items(3, key = { "skeleton$it" }, contentType = { "skeleton" }) {
+                Row(Modifier.padding(vertical = MuseSpace.s2), horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3), verticalAlignment = Alignment.CenterVertically) {
+                    Skeleton(Modifier.size(56.dp, 72.dp)); SkeletonLines(3, Modifier.weight(1f))
+                }
+            }
+            if (s.empty) item(key = "empty", contentType = "empty") {
+                EmptyState("Nothing rendering", "Videos you start show up here while they render, with their price and time left. You're not being charged.",
+                    "New video", { nav.go(Routes.SOURCE) })
+            }
+            s.failed?.let { f -> item(key = "failed", contentType = "failed") { FailCard(vm, f) } }
+            items(s.all, key = { it.id }, contentType = { "job" }) { j -> JobRow(vm, j) }
+            if (!s.empty && s.loaded) item(key = "new", contentType = "cta") {
+                PrimaryButton("New video", { nav.go(Routes.SOURCE) }, Modifier.fillMaxWidth().padding(top = MuseSpace.s5), icon = "plus")
+            }
         }
         TabBar(Routes.QUEUE)
     }
@@ -122,43 +142,48 @@ private fun jobMenu(vm: QueueViewModel, j: Job): List<MenuItem> {
     return listOf(
         MenuItem("play", "Watch") { if (j.done) nav.go(Routes.result(j.id)) else vm.toast("Still rendering") },
         MenuItem("retry", "Run again with same settings") { vm.rerun(j, nav) },
-        MenuItem("spark", "Copy prompt") { clip.setText(AnnotatedString(j.prompt.ifBlank { j.title })); vm.toast("Prompt copied") },
+        MenuItem("export", "Copy prompt") { clip.setText(AnnotatedString(j.prompt.ifBlank { j.title })); vm.toast("Prompt copied") },
         MenuItem("shield", "Remove from list", danger = true) { vm.remove(j) },
     )
 }
 
-/** Failed render: refund shown, one-tap Retry with the same settings. */
+/** Failed render: what happened, the refund, and one way to try again with the same settings. */
 @Composable
 private fun FailCard(vm: QueueViewModel, j: Job) {
     val m = muse
     val nav = LocalNav.current
-    NoteBox("", warn = true) {
-        Column(Modifier.weight(1f)) {
-            T("Render failed · ${j.title}", m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.Bold), m.t.ink)
-            Tiny(j.failLine(), color = m.t.ink)
+    Row(Modifier.fillMaxWidth().padding(vertical = MuseSpace.s3), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            T("${j.title} didn't render", m.scale.heading, m.roles.danger)
+            Caption(j.failLine())
         }
-        Cta2("Retry", { vm.retry(j, nav) }, height = 40.dp)
+        SecondaryButton("Try again", { vm.retry(j, nav) }, height = 48.dp)
     }
 }
 
+/** One render: thumbnail, title, one status line, progress while it runs. No box. */
 @Composable
-private fun EmptyQueue() {
+private fun JobRow(vm: QueueViewModel, j: Job) {
     val m = muse
     val nav = LocalNav.current
-    val shape = RoundedCornerShape(m.t.r)
-    Column(
-        Modifier.fillMaxWidth().let { if (m.isC) it.softShadow(m.t.r) else it }.clip(shape).background(m.t.surface)
-            .let { if (m.isC) it else it.border(if (m.isD) 2.5.dp else m.t.stroke, m.t.line, shape) }.padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+    Row(
+        Modifier.fillMaxWidth().press { vm.open(j, nav) }.padding(vertical = MuseSpace.s2),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3),
     ) {
-        T("Queue", m.type.body, m.t.muted)
-        T("Nothing rendering right now", m.type.body.copy(fontSize = 22.sp, fontWeight = FontWeight.Medium, lineHeight = 26.sp), m.t.ink)
-        Tiny("You're not being charged.")
-        Cta2("New video", { nav.go(Routes.SOURCE) }, Modifier.fillMaxWidth().padding(top = 6.dp), icon = "plus")
+        Box(Modifier.size(56.dp, 72.dp).clip(controlShape()).background(m.roles.field)) { RefImage(j.thumb, Modifier.fillMaxSize(), 20) }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
+            T(j.title, m.scale.body.copy(fontWeight = FontWeight.Medium), m.roles.ink, maxLines = 1)
+            if (j.running) {
+                T(j.statusLine(), m.scale.caption.tabular(), if (j.paused) m.roles.caution else m.roles.ink2, maxLines = 2)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                    ProgressLine((j.progress / 100).toFloat(), Modifier.weight(1f))
+                    RowValue("${Pricing.jsRound(j.progress)}%", m.roles.ink)
+                }
+            } else T(j.costLines().joinToString(" · "), m.scale.caption.tabular(), m.roles.ink2, maxLines = 1)
+        }
+        MoreMenu(jobMenu(vm, j), tint = m.roles.ink2)
     }
 }
-
-private fun Job.clockText() = if (done) formatTimecode(totalSeconds) else formatClock(etaSeconds ?: secondsLeft)
 
 /**
  * What a running job is doing, in outcomes (plans/api.md "App clean-up" §1): "Rendering · about 2 min · $0.14",
@@ -204,220 +229,12 @@ fun Job.costLines(): List<String> = listOf(
     "Render ${Pricing.money(cost)}${if (refunded > 0) " · ${Pricing.money(refunded)} refunded" else ""}",
 )
 
-@Composable
-private fun JobMeta(j: Job) {
-    val m = muse
-    if (j.running) T(j.statusLine(), m.type.tiny, if (j.paused) m.t.warn else m.t.muted, maxLines = 2)
-    j.costLines().forEach { Tiny(it) }
-}
-
-// ---------------- A · Editorial: big serif title, hairline rows
-@Composable
-private fun QueueA(vm: QueueViewModel, s: QueueState) {
-    val m = muse
-    val nav = LocalNav.current
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().height(52.dp).drawBehind { drawLine(m.t.line, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Wordmark(); Spacer(Modifier.weight(1f))
-            T("RENDER QUEUE ", m.type.mono.copy(fontSize = 12.5.sp, letterSpacing = .12.em), m.t.ink); T("●", m.type.mono, m.t.accent)
-        }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 120.dp)) {
-            item(key = "head", contentType = "head") {
-                Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween) {
-                    T("YOUR\nRENDERS", m.type.h2.copy(fontSize = 58.sp, lineHeight = 52.sp), m.t.ink)
-                    T("${if (s.running.isNotEmpty()) "${s.running.size} RUNNING · " else ""}${s.done.size} DONE", m.type.mono.copy(fontSize = 12.5.sp), m.t.ink)
-                }
-            }
-            if (s.empty) item(key = "empty", contentType = "empty") { Column { Spacer(Modifier.height(16.dp)); EmptyQueue() } }
-            s.failed?.let { f -> item(key = "failed", contentType = "failed") { Column { Spacer(Modifier.height(14.dp)); FailCard(vm, f) } } }
-            items(s.all, key = { it.id }, contentType = { "job" }) { j ->
-                Row(
-                    Modifier.fillMaxWidth().drawBehind { drawLine(m.t.line, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }.press { vm.open(j, nav) }.padding(vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    Box(Modifier.size(56.dp, 70.dp)) { RefImage(j.thumb, Modifier.fillMaxSize(), 20) }
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        T(j.title, m.type.body.copy(fontWeight = FontWeight.Medium), m.t.ink)
-                        T("9:16 · ${j.engineLabel.uppercase()}", m.type.mono.copy(fontSize = 11.5.sp, letterSpacing = .08.em), m.t.muted)
-                        RowB { Bar((j.progress / 100).toFloat(), Modifier.weight(1f), m.t.ink, 2.dp, m.t.line); Spacer(Modifier.width(8.dp)); T("${Pricing.jsRound(j.progress)}%", m.type.mono.copy(fontSize = 12.5.sp), m.t.ink) }
-                        JobMeta(j)
-                    }
-                    MoreMenu(jobMenu(vm, j), tint = m.t.muted)
-                }
-            }
-            item(key = "new", contentType = "cta") { Cta2("New video", { nav.go(Routes.SOURCE) }, Modifier.fillMaxWidth().padding(top = 16.dp), icon = "plus") }
-        }
-    }
-}
-
-// ---------------- B · Camera Body: time codes, tally lights, KPIs
-@Composable
-private fun QueueB(vm: QueueViewModel, s: QueueState) {
-    val m = muse
-    val nav = LocalNav.current
-    Column(Modifier.fillMaxSize()) {
-        TopBar("Render queue")
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item(key = "head", contentType = "head") {
-                RowB {
-                    T(if (s.running.isNotEmpty()) "${s.running.size} ACTIVE" else "NOTHING RUNNING", m.type.mono.copy(fontSize = 12.5.sp), m.t.accent)
-                    Pill(if (s.running.isNotEmpty()) "● Rendering" else "Idle", if (s.running.isNotEmpty()) "good" else "")
-                }
-            }
-            if (s.empty) item(key = "empty", contentType = "empty") { EmptyQueue() }
-            items(s.all, key = { it.id }, contentType = { "job" }) { j ->
-                val shape = RoundedCornerShape(m.t.r)
-                Row(
-                    Modifier.fillMaxWidth().clip(shape).background(m.t.surface).border(1.dp, m.t.line, shape).press { vm.open(j, nav) }.padding(10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Box(Modifier.size(54.dp, 72.dp).clip(RoundedCornerShape(m.t.r * .5f))) { RefImage(j.thumb, Modifier.fillMaxSize(), 20) }
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        RowB {
-                            T(j.clockText(), m.type.mono.copy(fontSize = 15.sp), m.t.ink)
-                            T("● ${if (j.done) "DONE" else "RENDERING"}", m.type.mono.copy(fontSize = 11.sp, letterSpacing = .08.em), if (j.done) m.t.ink else m.t.accent)
-                        }
-                        Tiny("${j.modelName} · ${j.title}")
-                        T(if (j.running) j.statusLine() else "9:16 · 24fps · ${j.engineLabel}", m.type.mono.copy(fontSize = 12.sp), if (j.paused) m.t.warn else m.t.muted, maxLines = 1)
-                        RowB { Bar((j.progress / 100).toFloat(), Modifier.weight(1f)); Spacer(Modifier.width(8.dp)); T("${Pricing.jsRound(j.progress)}%", m.type.mono.copy(fontSize = 12.5.sp), m.t.ink) }
-                        j.costLines().forEach { Tiny(it) }
-                    }
-                }
-            }
-            s.failed?.let { f -> item(key = "failed", contentType = "failed") { FailCard(vm, f) } }
-            item(key = "kpis", contentType = "kpis") {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Kpi("Month", Pricing.money(s.balance.month), Modifier.weight(1f))
-                    Kpi("Balance", Pricing.money(s.balance.balance), Modifier.weight(1f))
-                    Kpi("Rendering", "${s.running.size}", Modifier.weight(1f))
-                }
-            }
-        }
-    }
-}
-
+/** A figure with its label above it: no box, tabular so a row of them lines up. */
 @Composable
 fun Kpi(label: String, value: String, modifier: Modifier = Modifier) {
     val m = muse
-    val shape = RoundedCornerShape(m.t.r)
-    var mod = modifier
-    mod = when {
-        m.isA -> mod.drawBehind { drawLine(m.t.ink, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }.padding(vertical = 8.dp)
-        m.isC -> mod.softShadow(m.t.r).clip(shape).background(m.t.surface).padding(12.dp)
-        m.isD -> mod.hardShadow(3.dp, m.t.r).clip(shape).background(m.t.surface).border(2.5.dp, Ink, shape).padding(12.dp)
-        else -> mod.clip(shape).background(m.t.surface).border(m.t.stroke, m.t.line, shape).padding(12.dp)
-    }
-    Column(mod, verticalArrangement = Arrangement.spacedBy(2.dp)) { Lbl(label); T(value, m.type.mono.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold), m.t.ink) }
-}
-
-// ---------------- C · Soft Tactile: countdown with stages, or idle card + finished list
-@Composable
-private fun QueueC(vm: QueueViewModel, s: QueueState) {
-    val m = muse
-    val nav = LocalNav.current
-    val r = s.running.firstOrNull()
-    if (r == null) {
-        Column(Modifier.fillMaxSize()) {
-            Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                Wordmark(); Spacer(Modifier.weight(1f)); TbBtn("user", { nav.tab(Routes.SETTINGS) })
-            }
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                item(key = "title", contentType = "title") { H2("Render queue") }
-                item(key = "empty", contentType = "empty") { EmptyQueue() }
-                s.failed?.let { f -> item(key = "failed", contentType = "failed") { FailCard(vm, f) } }
-                if (s.done.isNotEmpty()) item(key = "finished", contentType = "label") { Lbl("Finished") }
-                items(s.done.distinctBy { it.id }, key = { it.id }, contentType = { "job" }) { j ->
-                    Row(Modifier.fillMaxWidth().softShadow(m.t.r).clip(RoundedCornerShape(m.t.r)).background(m.t.surface).press { vm.open(j, nav) }.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Box(Modifier.size(54.dp, 72.dp).clip(RoundedCornerShape(m.t.r * .5f))) { RefImage(j.thumb, Modifier.fillMaxSize(), 20) }
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            RowB { T(j.title, m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink); T(Pricing.money(j.cost), m.type.mono.copy(fontSize = 12.5.sp), m.t.ink) }
-                            Tiny("${j.engineLabel} · took ${formatTimecode(j.totalSeconds)}")
-                            Pill("Done", "good")
-                        }
-                    }
-                }
-            }
-        }
-        return
-    }
-    val stages = listOf("Model processing" to 30.0, "Outfit generation" to 55.0, "Video rendering" to 92.0, "Finalizing" to 100.0)
-    Column(Modifier.fillMaxSize()) {
-        TopBar("Render queue")
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            T("Time left", m.type.body, m.t.muted, Modifier.padding(top = 8.dp))
-            T(formatClock(r.etaSeconds ?: r.secondsLeft), m.type.body.copy(fontSize = 104.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-.04).em, lineHeight = 104.sp), m.t.ink)
-            T(if (r.queuePosition != null) r.statusLine() else "Generating your video… ${memberPhase(r.phase)}", m.type.body, m.t.muted)
-            r.costLines().forEach { Tiny(it) }
-            stages.forEachIndexed { i, (name, lim) ->
-                val prev = if (i == 0) 0.0 else stages[i - 1].second
-                val sp = ((r.progress - prev) / (lim - prev) * 100).coerceIn(0.0, 100.0)
-                val st = if (sp >= 100) "done" else if (sp > 0) "run" else ""
-                Row(Modifier.fillMaxWidth().softShadow(20.dp).clip(RoundedCornerShape(20.dp)).background(m.t.surface).padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Box(
-                        Modifier.size(28.dp).clip(CircleShape).background(if (st == "done") m.t.accent else if (st == "run") Color.Transparent else m.t.surface2).drawBehind {
-                            if (st == "run") {
-                                drawCircle(m.t.surface2, style = Stroke(3.dp.toPx()), radius = size.minDimension / 2 - 1.5.dp.toPx())
-                                drawArc(m.t.accent, -90f, 90f, false, style = Stroke(3.dp.toPx()), topLeft = Offset(1.5.dp.toPx(), 1.5.dp.toPx()),
-                                    size = androidx.compose.ui.geometry.Size(size.width - 3.dp.toPx(), size.height - 3.dp.toPx()))
-                            }
-                        },
-                        contentAlignment = Alignment.Center,
-                    ) { if (st == "done") Ic("check", 14.dp, Color.White) }
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        RowB { T(name, m.type.body, m.t.ink); T("${Pricing.jsRound(sp)}%", m.type.mono.copy(fontSize = 12.5.sp), m.t.ink) }
-                        Bar((sp / 100).toFloat())
-                    }
-                }
-            }
-            RowB { Tiny("${s.done.size} finished · see Gallery"); T("Open ›", m.type.tiny, m.t.accent, Modifier.press { nav.tab(Routes.GALLERY) }) }
-        }
-    }
-}
-
-// ---------------- D · Creator Pop: marker header, chunky cards, big percentages
-@Composable
-private fun QueueD(vm: QueueViewModel, s: QueueState) {
-    val m = muse
-    val nav = LocalNav.current
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Wordmark(); T("RENDER QUEUE", m.type.tiny.copy(fontWeight = FontWeight.Bold), m.t.ink, Modifier.weight(1f), align = androidx.compose.ui.text.style.TextAlign.End)
-            TbBtn("quality", { nav.go(Routes.CREDITS) })
-        }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item(key = "head", contentType = "head") {
-                Box(Modifier.fillMaxWidth()) {
-                    Box(Modifier.padding(top = 6.dp).rotate(-4f).hardShadow(4.dp, 14.dp, m.t.accent).clip(RoundedCornerShape(14.dp)).background(Ink).padding(horizontal = 14.dp, vertical = 10.dp)) {
-                        T("YOUR RENDERS", m.type.hand.copy(fontSize = 30.sp, lineHeight = 30.sp), Color.White)
-                    }
-                    Doodle(Doodles.crown, Modifier.align(Alignment.TopEnd).padding(end = 4.dp))
-                }
-            }
-            if (s.empty) item(key = "empty", contentType = "empty") { EmptyQueue() }
-            s.failed?.let { f -> item(key = "failed", contentType = "failed") { FailCard(vm, f) } }
-            items(s.all, key = { it.id }, contentType = { "job" }) { j ->
-                val shape = RoundedCornerShape(16.dp)
-                Row(
-                    Modifier.fillMaxWidth().hardShadow(3.dp, 16.dp).clip(shape).background(Color.White).border(2.5.dp, Ink, shape).press { vm.open(j, nav) }.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    val ts = RoundedCornerShape(10.dp)
-                    Box(Modifier.size(56.dp, 74.dp).clip(ts).border(2.dp, Ink, ts)) { RefImage(j.thumb, Modifier.fillMaxSize(), 20) }
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        T("${j.modelName} · ${j.title}", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink, maxLines = 1)
-                        T(if (j.running) j.statusLine() else j.engineLabel, m.type.tiny, if (j.paused) m.t.warn else m.t.muted, maxLines = 2)
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            val bs = RoundedCornerShape(9.dp)
-                            Box(Modifier.weight(1f).height(16.dp).clip(bs).background(Color.White).border(2.dp, Ink, bs)) {
-                                Bar((j.progress / 100).toFloat(), Modifier.fillMaxWidth(), if (j.done) m.t.accent else m.t.blue, 16.dp, Color.Transparent)
-                            }
-                            T("${Pricing.jsRound(j.progress)}%", m.type.h2.copy(fontSize = 28.sp, lineHeight = 30.sp), m.t.ink)
-                        }
-                        Tiny(if (j.done) "Done · ${Pricing.money(j.cost)}" else "~${formatClock(j.etaSeconds ?: j.secondsLeft)} left · ${Pricing.money(j.cost)}")
-                    }
-                }
-            }
-            item(key = "new", contentType = "cta") { Cta("New video", { nav.go(Routes.SOURCE) }, Modifier.fillMaxWidth().padding(top = 6.dp), icon = "plus", big = true) }
-        }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Caption(label)
+        T(value, m.scale.heading.tabular(), m.roles.ink, maxLines = 1)
     }
 }

@@ -97,6 +97,9 @@ import studio.muse.app.R
 import studio.muse.app.data.ImageRef
 import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.radii
+import studio.muse.app.ui.theme.roles
+import studio.muse.app.ui.theme.scale
 import kotlin.math.roundToInt
 
 val Ink = Color(0xFF111111)
@@ -147,17 +150,17 @@ fun T(
     )
 }
 
-/** Small uppercase label (`.lbl`). */
+/** Small label (`.lbl`): sentence case in the caption step (plans/design-direction.md §3, no tracked caps). */
 @Composable
 fun Lbl(text: String, modifier: Modifier = Modifier, color: Color = muse.t.muted) {
-    T(text, muse.type.lbl, color, modifier, upper = !muse.isC)
+    T(text, muse.scale.caption.copy(fontWeight = FontWeight.Medium), color, modifier)
 }
 
 @Composable
 fun Tiny(text: String, modifier: Modifier = Modifier, color: Color = muse.t.muted, weight: FontWeight? = null) = T(text, muse.type.tiny, color, modifier, weight = weight)
 
 @Composable
-fun H2(text: String, modifier: Modifier = Modifier) = T(text, muse.type.h2, muse.t.ink, modifier, upper = muse.isA || muse.isB)
+fun H2(text: String, modifier: Modifier = Modifier) = T(text, muse.type.h2, muse.t.ink, modifier)
 
 @Composable
 fun H3(text: String, modifier: Modifier = Modifier) = T(text, muse.type.h3, muse.t.ink, modifier)
@@ -366,14 +369,16 @@ fun Toggle(on: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
  * The themed slider (`.slider`). Reports integer values in [min]..[max]. Drag or tap anywhere on the generous hit area.
  */
 @Composable
-fun MuseSlider(value: Int, min: Int, max: Int, onChange: (Int) -> Unit, modifier: Modifier = Modifier) {
+fun MuseSlider(value: Int, min: Int, max: Int, onChange: (Int) -> Unit, modifier: Modifier = Modifier,
+    /** The design-direction slider (restyled screens): ink fill on the `field` track, a `raised` thumb with an ink edge. */
+    calm: Boolean = false) {
     val m = muse
     // A one-step range (a tier whose min and max length are the same) sits at the start instead of dividing by zero.
     val frac = if (max <= min) 0f else ((value - min).toFloat() / (max - min)).coerceIn(0f, 1f)
-    val trackH = when { m.isA -> 2.dp; m.isC -> 10.dp; m.isD -> 12.dp; else -> 6.dp }
-    val thumb = when { m.isA -> 22.dp; m.isC -> 30.dp; m.isD -> 28.dp; else -> 24.dp }
-    val trackBg = when { m.isA -> m.t.line; m.isD -> Color.White; else -> m.t.surface2 }
-    val fill = when { m.isA -> m.t.ink; m.isD -> m.t.blue; else -> m.t.accent }
+    val trackH = when { calm -> 4.dp; m.isA -> 2.dp; m.isC -> 10.dp; m.isD -> 12.dp; else -> 6.dp }
+    val thumb = when { calm -> 24.dp; m.isA -> 22.dp; m.isC -> 30.dp; m.isD -> 28.dp; else -> 24.dp }
+    val trackBg = when { calm -> m.roles.field; m.isA -> m.t.line; m.isD -> Color.White; else -> m.t.surface2 }
+    val fill = when { calm -> m.roles.ink; m.isA -> m.t.ink; m.isD -> m.t.blue; else -> m.t.accent }
     val w = remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
     fun at(x: Float) = (min + ((x / w.floatValue).coerceIn(0f, 1f) * (max - min))).roundToInt()
     Box(
@@ -383,18 +388,18 @@ fun MuseSlider(value: Int, min: Int, max: Int, onChange: (Int) -> Unit, modifier
         contentAlignment = Alignment.CenterStart,
     ) {
         val tshape = RoundedCornerShape(trackH / 2)
-        Box(Modifier.fillMaxWidth().height(trackH).clip(tshape).background(trackBg).let { if (m.isD) it.border(2.dp, Ink, tshape) else it }) {
+        Box(Modifier.fillMaxWidth().height(trackH).clip(tshape).background(trackBg).let { if (m.isD && !calm) it.border(2.dp, Ink, tshape) else it }) {
             Box(Modifier.fillMaxWidth(frac).height(trackH).background(fill))
         }
         val density = LocalDensity.current
         Box(
             Modifier.offset { IntOffset(((w.floatValue * frac) - with(density) { thumb.toPx() } / 2).roundToInt(), 0) }.size(thumb)
-                .let { if (m.isC) it.shadow(6.dp, CircleShape) else it }
+                .let { if (m.isC && !calm) it.shadow(6.dp, CircleShape) else it }
                 .clip(CircleShape)
-                .background(when { m.isA -> m.t.ink; m.isC -> m.t.accent; else -> m.t.surface })
+                .background(when { calm -> m.roles.raised; m.isA -> m.t.ink; m.isC -> m.t.accent; else -> m.t.surface })
                 .border(
-                    when { m.isA -> 0.dp; m.isC -> 4.dp; m.isD -> 2.5.dp; else -> 2.dp },
-                    when { m.isC -> m.t.surface; m.isD -> Ink; else -> m.t.accent }, CircleShape,
+                    when { calm -> 2.dp; m.isA -> 0.dp; m.isC -> 4.dp; m.isD -> 2.5.dp; else -> 2.dp },
+                    when { calm -> m.roles.ink; m.isC -> m.t.surface; m.isD -> Ink; else -> m.t.accent }, CircleShape,
                 ),
         )
     }
@@ -453,13 +458,16 @@ fun Input(
     password: Boolean = false, keyboard: KeyboardType = KeyboardType.Text, trailing: (@Composable () -> Unit)? = null,
     /** What the OS password manager should offer here (Username, Password, NewPassword). */
     autofill: ContentType? = null,
+    /** The design-direction field (restyled screens): `field` fill, a hairline edge, the control radius, the body step. */
+    calm: Boolean = false,
 ) {
     val m = muse
     // Password fields get an eye that shows or hides what's typed; hidden by default.
     var shown by rememberSaveable { mutableStateOf(false) }
-    val shape = RoundedCornerShape(m.t.r)
+    val shape = RoundedCornerShape(if (calm) m.radii.control else m.t.r)
     var mod = modifier.fillMaxWidth().let { if (area) it.heightIn(min = 84.dp) else it.height(52.dp) }
     mod = when {
+        calm -> mod.clip(shape).background(m.roles.field).border(1.dp, m.roles.hairline, shape)
         m.isC -> mod.softShadow(m.t.r).clip(shape).background(m.t.surface)
         else -> mod.clip(shape).background(m.t.surface).border(if (m.isD) 2.5.dp else m.t.stroke, m.t.line, shape)
     }
@@ -467,11 +475,11 @@ fun Input(
         val endPad = (if (trailing != null) 64.dp else 0.dp) + (if (password) 36.dp else 0.dp)
         BasicTextField(
             value, onChange, Modifier.fillMaxWidth().padding(end = endPad).let { f -> if (autofill != null) f.semantics { contentType = autofill } else f },
-            textStyle = m.type.body.copy(fontSize = 15.5.sp, color = m.t.ink, lineHeight = 22.sp), singleLine = !area,
+            textStyle = if (calm) m.scale.body.copy(color = m.roles.ink) else m.type.body.copy(fontSize = 15.5.sp, color = m.t.ink, lineHeight = 22.sp), singleLine = !area,
             cursorBrush = SolidColor(m.t.accent), visualTransformation = if (password && !shown) PasswordVisualTransformation('•') else VisualTransformation.None,
             keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else keyboard),
             decorationBox = { inner ->
-                if (value.isEmpty() && placeholder.isNotEmpty()) T(placeholder, m.type.body.copy(fontSize = 15.5.sp), m.t.muted.copy(alpha = .8f))
+                if (value.isEmpty() && placeholder.isNotEmpty()) T(placeholder, if (calm) m.scale.body else m.type.body.copy(fontSize = 15.5.sp), if (calm) m.roles.ink2 else m.t.muted.copy(alpha = .8f))
                 inner()
             },
         )
@@ -479,9 +487,9 @@ fun Input(
             if (password) {
                 val label = if (shown) "Hide password" else "Show password"
                 Box(
-                    Modifier.size(40.dp).clip(CircleShape).clickable(onClickLabel = label) { shown = !shown }.semantics { contentDescription = label; role = Role.Button },
+                    Modifier.size(if (calm) 48.dp else 40.dp).clip(CircleShape).clickable(onClickLabel = label) { shown = !shown }.semantics { contentDescription = label; role = Role.Button },
                     contentAlignment = Alignment.Center,
-                ) { Ic(if (shown) "eye_off" else "eye", 20.dp, m.t.muted) }
+                ) { Ic(if (shown) "eye_off" else "eye", 20.dp, if (calm) m.roles.ink2 else m.t.muted) }
             }
             trailing?.invoke()
         }
@@ -516,7 +524,8 @@ fun TopBar(title: String = "", onBack: (() -> Unit)? = null, backIcon: String = 
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (onBack != null) TbBtn(backIcon, onBack) else Spacer(Modifier.size(48.dp))
-            T(title, m.type.topTitle, color, Modifier.weight(1f), upper = m.isB, align = TextAlign.Center, maxLines = 1)
+            // Sentence case in the heading step in every theme (plans/design-direction.md §3).
+            T(title, m.scale.heading, color, Modifier.weight(1f), align = TextAlign.Center, maxLines = 1)
             if (right != null) right() else Spacer(Modifier.size(48.dp))
         }
     }

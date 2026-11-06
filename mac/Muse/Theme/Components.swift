@@ -93,8 +93,7 @@ struct Eyebrow: View {
     var text: String
     init(_ text: String) { self.text = text }
     var body: some View {
-        (t.isA ? Text("№ ").foregroundColor(t.accent) : Text(""))
-            + Text(text.uppercased()).foregroundColor(t.muted)
+        Text(text).foregroundColor(t.roles.ink2)
     }
 }
 
@@ -104,7 +103,7 @@ extension Eyebrow {
 
 private struct EyebrowFont: ViewModifier {
     @Environment(\.theme) private var t
-    func body(content: Content) -> some View { content.font(t.mono(11)).tracking(1.3) }
+    func body(content: Content) -> some View { content.font(t.scale.caption.font) }
 }
 
 /// `.lbl`
@@ -117,7 +116,7 @@ struct Lbl: View {
         self.color = color
     }
     var body: some View {
-        Text(text.uppercased()).font(t.label).tracking(t.isD ? 0.7 : 0.9).foregroundStyle(color ?? t.muted)
+        Text(text).font(t.scale.caption.font.weight(.medium)).foregroundStyle(color ?? t.muted) // sentence case, no tracking
     }
 }
 

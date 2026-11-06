@@ -60,6 +60,7 @@ import studio.muse.app.ui.screens.BlurredStageArt
 import studio.muse.app.ui.screens.creditLabel
 import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.scale
 
 /** A mode of the Video suite: each opens the composer on its tool (Storyboard has its own screen). [soon] = no backend yet. */
 data class SuiteMode(val id: String, val title: String, val sub: String, val render: String, val route: String, val soon: Boolean = false)
@@ -96,7 +97,7 @@ fun SuiteHubScreen() {
             // The wordmark alone: a bell here did nothing when tapped (Home's bell is the one with the render status).
             Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) { Wordmark() }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
-                T("Video suite", m.type.h2, m.t.ink, Modifier.weight(1f), upper = m.isB, maxLines = 1)
+                T("Video suite", m.scale.display, m.t.ink, Modifier.weight(1f), maxLines = 1)
                 Pill(creditLabel(st.wallet, st.balance))
             }
             val catalog = cat
@@ -144,7 +145,7 @@ private fun ModeTile(mode: SuiteMode, modifier: Modifier, onClick: () -> Unit) {
         Box(Modifier.fillMaxWidth().height(78.dp)) {
             HardwareImage(mode.render, Modifier.fillMaxSize(), sample = 4)
             if (mode.soon) Box(Modifier.align(Alignment.TopEnd).padding(6.dp).background(Color.Black.copy(alpha = .55f)).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                T("SOON", m.type.mono.copy(fontSize = 9.5.sp, letterSpacing = 1.sp), Color.White)
+                T("Soon", m.scale.micro, Color.White)
             }
         }
         Column(Modifier.padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -180,11 +181,11 @@ private fun RecentTile(j: Job, takes: List<studio.muse.app.data.Take>, onClick: 
                     Box(Modifier.align(Alignment.BottomCenter).padding(8.dp).size(30.dp).clip(RoundedCornerShape(999.dp)).background(Color.White.copy(alpha = .9f)), contentAlignment = Alignment.Center) { Ic("play", 14.dp, Color(0xFF141210)) } }
                 StagePhase.RENDERING -> { BlurredStageArt(j.thumb, moving = false); T(pane.percent, m.type.body.copy(fontSize = 22.sp), Color.White, Modifier.align(Alignment.Center)) }
                 StagePhase.QUEUED -> { BlurredStageArt(j.thumb, moving = false); Box(Modifier.align(Alignment.BottomStart).background(Color(0xFF141210)).padding(horizontal = 4.dp, vertical = 2.dp)) {
-                    T(pane.badge.uppercase(), m.type.mono.copy(fontSize = 8.5.sp), Color.White, maxLines = 1) } }
-                else -> { BlurredStageArt(j.thumb, moving = false); T("FAILED", m.type.mono.copy(fontSize = 10.sp), Color.White, Modifier.align(Alignment.Center)) }
+                    T(pane.badge, m.scale.micro, Color.White, maxLines = 1) } }
+                else -> { BlurredStageArt(j.thumb, moving = false); T("Failed", m.scale.label, Color.White, Modifier.align(Alignment.Center)) }
             }
         }
-        T(j.title.uppercase(), m.type.mono.copy(fontSize = 9.5.sp), m.t.muted, maxLines = 1)
+        T(j.title, m.scale.caption, m.t.muted, maxLines = 1)
     }
 }
 

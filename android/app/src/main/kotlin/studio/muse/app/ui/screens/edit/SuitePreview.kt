@@ -43,6 +43,7 @@ import studio.muse.app.ui.components.T
 import studio.muse.app.ui.components.press
 import studio.muse.app.ui.theme.Fonts
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.scale
 import studio.muse.core.edit.CaptionPreset
 import studio.muse.core.edit.CaptionStyle
 import studio.muse.core.edit.EditProject
@@ -87,7 +88,7 @@ fun SuitePreview(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier 
                 .border(1.dp, if (ui.safeArea != null) muse.t.accent else Color.White.copy(alpha = .3f), RoundedCornerShape(2.dp))
                 .press { act(EditAction.SafeAreaOf(next)) }.padding(horizontal = 8.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
-        ) { T((ui.safeArea?.label?.let { "$it safe area" } ?: "Safe area off").uppercase(), muse.type.mono.copy(fontSize = 9.5.sp), Color.White, maxLines = 1) }
+        ) { T(ui.safeArea?.label?.let { "$it safe area" } ?: "Safe area off", muse.scale.micro, Color.White, maxLines = 1) }
     }
 }
 

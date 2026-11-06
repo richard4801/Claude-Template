@@ -62,6 +62,7 @@ import studio.muse.app.ui.screens.StagePhase
 import studio.muse.app.ui.screens.StageVideo
 import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.scale
 
 /**
  * M8 · a shot's result (D10's states in one place): the take playing inline, the takes strip (finished takes, and the one
@@ -178,7 +179,7 @@ private fun androidx.compose.foundation.layout.RowScope.Action(icon: String, lab
     Column(Modifier.weight(1f).widthIn(max = 72.dp).heightIn(min = 48.dp).press(enabled = enabled, onClick = onClick).semantics(mergeDescendants = true) { contentDescription = label },
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically)) {
         SIc(icon, 20.dp, if (enabled) m.t.ink else m.t.muted.copy(alpha = .5f))
-        T(label.uppercase(), m.type.mono.copy(fontSize = 9.5.sp, letterSpacing = .8.sp), if (enabled) m.t.muted else m.t.muted.copy(alpha = .5f))
+        T(label, m.scale.micro, if (enabled) m.t.muted else m.t.muted.copy(alpha = .5f))
     }
 }
 

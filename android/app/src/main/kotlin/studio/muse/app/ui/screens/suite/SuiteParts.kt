@@ -65,6 +65,7 @@ import studio.muse.app.ui.screens.StagePhase
 import studio.muse.app.ui.screens.StageVideo
 import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.scale
 
 // ---------------------------------------------------------------- icons the app's set doesn't have
 
@@ -263,7 +264,7 @@ fun Modifier.suiteCard(m: studio.muse.app.ui.theme.Muse, on: Boolean = false): M
 /** Section label in ink ("CAMERA BODIES"). */
 @Composable
 fun SLbl(text: String, modifier: Modifier = Modifier, color: Color = muse.t.ink) =
-    T(text.uppercase(), muse.type.mono.copy(fontSize = 11.sp, letterSpacing = 1.4.sp, fontWeight = FontWeight.Medium), color, modifier, maxLines = 1)
+    T(text, muse.scale.label, color, modifier, maxLines = 1) // sentence case, text face (plans/design-direction.md §3)
 
 @Composable
 fun SuiteFill(modifier: Modifier = Modifier) = Box(modifier.fillMaxSize())

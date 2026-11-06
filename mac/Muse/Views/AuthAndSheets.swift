@@ -16,9 +16,9 @@ struct AuthView: View {
         let up = store.authTab == .signUp
         let ok = store.attest[0] && store.attest[1] && (store.isDemo || !store.authInvite.trimmingCharacters(in: .whitespaces).isEmpty)
         VStack(spacing: 0) {
-            HStack(spacing: 14) {
+            HStack(spacing: Space.s3) {
                 Color.clear.frame(width: 64, height: 1)
-                Text("MUSE Studio").font(t.body(13, .semibold)).foregroundStyle(t.muted)
+                Text("MUSE Studio").scaled(t.scale.label, t.roles.ink2)
                 Spacer()
                 ThemeDots()
             }
@@ -27,109 +27,89 @@ struct AuthView: View {
             .frame(height: 52)
             .background(WindowDragArea())
             .background(t.chrome)
-            .overlay(alignment: .bottom) { Rectangle().fill(t.isC ? .clear : t.strongLine).frame(height: t.lineWidth) }
+            .overlay(alignment: .bottom) { Rectangle().fill(t.roles.hairline.opacity(t.isC ? 0 : 1)).frame(height: 1) }
 
             HStack(spacing: 0) {
-                ZStack(alignment: .bottomLeading) {
-                    BrandSplash()
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("AI MODEL STUDIO").font(t.mono(11)).tracking(1.3).foregroundStyle(.white.opacity(0.8))
-                        Text(t.headingsUppercase ? "YOUR MODELS.\nREAL MOTION." : "Your models.\nReal motion.").font(t.h1).foregroundStyle(.white)
-                        Text("Build original AI models from your own images, dress them, shoot them, and put them into real clips.")
-                            .font(t.body(14)).foregroundStyle(.white.opacity(0.9)).frame(maxWidth: 420, alignment: .leading)
-                    }
-                    .padding(44)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
+                BrandSplash()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Eyebrow(up ? "Create account" : "Welcome back").styled()
-                        H1(up ? "Join MUSE" : "Sign in")
+                    VStack(alignment: .leading, spacing: Space.s3) {
+                        Text(up ? "Create your account" : "Sign in").scaled(t.scale.display, t.roles.ink).accessibilityAddTraits(.isHeader)
                         if up && !store.isDemo {
-                            Muted("MUSE is invite-only. Use the email your invite was sent to and the code from the studio owner.", size: 13)
+                            Text("MUSE is invite-only. Use the email your invite was sent to and the code from the studio owner.")
+                                .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
                         }
                         Group {
                             if store.isDemo {
                                 // Apple and Google sign-in are mocked: demo mode only.
                                 SSOButton(icon: "apple.logo", title: "Continue with Apple") { store.signInSSO("Apple") }
                                 SSOButton(icon: "g.circle", title: "Continue with Google") { store.signInSSO("Google") }
-                                HStack {
-                                    Rectangle().fill(t.line).frame(height: 1)
-                                    Text("or with email").font(t.body(12)).foregroundStyle(t.muted).fixedSize()
-                                    Rectangle().fill(t.line).frame(height: 1)
+                                Text("Or with email").scaled(t.scale.caption, t.roles.ink2).padding(.top, Space.s2)
+                            }
+                            RField("Email") {
+                                TextField("you@studio.com", text: $store.authEmail).roleField().textContentType(.username)
+                            }
+                            RField("Password", hint: up && !store.isDemo ? "8 or more characters" : nil) {
+                                PasswordField(placeholder: "Password", text: $store.authPassword, isNew: up) {
+                                    up ? store.signUp() : store.signIn()
                                 }
                             }
-                            TextField("you@studio.com", text: $store.authEmail).fieldChrome().textContentType(.username)
-                            PasswordField(placeholder: up && !store.isDemo ? "Password (8 or more characters)" : "Password", text: $store.authPassword, isNew: up) {
-                                up ? store.signUp() : store.signIn()
-                            }
                             if !up {
-                                CheckBox(on: $store.rememberMe, label: "Remember me", hint: "Stay signed in on this Mac")
+                                Toggle(isOn: $store.rememberMe) {
+                                    Text("Remember me on this Mac").scaled(t.scale.caption, t.roles.ink)
+                                }
+                                .toggleStyle(.checkbox)
                             }
                             if up {
-                                TextField(store.isDemo ? "Invite code (not needed in demo mode)" : "Invite code · MUSE-XXXX-XXXX-XXXX", text: $store.authInvite)
-                                    .fieldChrome()
-                                    .font(t.mono(14))
-                                    .onSubmit { store.signUp() }
+                                RField("Invite code", hint: store.isDemo ? "Not needed in demo mode" : nil) {
+                                    TextField("MUSE-XXXX-XXXX-XXXX", text: $store.authInvite)
+                                        .roleField()
+                                        .onSubmit { store.signUp() }
+                                }
                             }
                         }
                         if up {
                             ForEach(0..<2, id: \.self) { i in
-                                Button { store.attest[i].toggle() } label: {
-                                    HStack(alignment: .top, spacing: 10) {
-                                        ZStack {
-                                            RoundedRectangle(cornerRadius: 5).fill(store.attest[i] ? t.accent : .clear)
-                                            RoundedRectangle(cornerRadius: 5).strokeBorder(store.attest[i] ? t.accent : t.line, lineWidth: 1.5)
-                                            if store.attest[i] { Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(t.accentInk) }
-                                        }
-                                        .frame(width: 20, height: 20)
-                                        .padding(.top, 1)
-                                        Text(Self.attestations[i]).font(t.body(13)).foregroundStyle(t.ink).multilineTextAlignment(.leading)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                    .contentShape(Rectangle())
+                                Toggle(isOn: $store.attest[i]) {
+                                    Text(Self.attestations[i]).scaled(t.scale.caption, t.roles.ink).fixedSize(horizontal: false, vertical: true)
                                 }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel(Self.attestations[i])
-                                .accessibilityValue(store.attest[i] ? "On" : "Off")
-                                .accessibilityAddTraits(.isToggle)
+                                .toggleStyle(.checkbox)
                             }
                         }
                         if let err = store.authError {
-                            Note(icon: "exclamationmark.circle", warn: true, err)
+                            InlineNotice(err, tone: .danger)
                         }
-                        MButton(store.restoring ? "Checking your session…" : store.authBusy ? (up ? "Creating account…" : "Signing in…") : up ? "Create account" : "Sign in",
-                                kind: .primary, size: .big, off: up && !ok) {
+                        RButton(store.restoring ? "Checking your session…" : store.authBusy ? (up ? "Creating account…" : "Signing in…") : up ? "Create account" : "Sign in",
+                                kind: .action, fill: true, off: up && !ok) {
                             up ? store.signUp() : store.signIn()
                         }
-                        HStack(spacing: 4) {
-                            Text(up ? "Already have an account?" : "New here?").font(t.body(12)).foregroundStyle(t.muted)
-                            LinkText(up ? "Sign in" : "Create an account") {
+                        .padding(.top, Space.s2)
+                        HStack(spacing: Space.s1) {
+                            Text(up ? "Already have an account?" : "New here?").scaled(t.scale.caption, t.roles.ink2)
+                            RButton(up ? "Sign in" : "Create an account", kind: .plain, small: true) {
                                 store.authError = nil
-                                withAnimation { store.authTab = up ? .signIn : .signUp }
+                                withAnimation(.easeOut(duration: 0.2)) { store.authTab = up ? .signIn : .signUp }
                             }
                         }
-                        VStack(alignment: .leading, spacing: 14) {
-                        HStack(spacing: 4) {
-                            Image(systemName: store.isDemo ? "play.circle" : "server.rack").font(.system(size: 11))
-                            Text(store.isDemo ? "Demo mode · nothing leaves this Mac" : "Server: \(store.serverHost)").font(t.body(12))
-                            Text("·").font(t.body(12))
-                            LinkText(store.isDemo ? "Use the MUSE server" : "Try demo mode") {
-                                store.authError = nil
-                                store.dataSource = store.isDemo ? .http : .fake
-                                store.applyDataSource()
+                        VStack(alignment: .leading, spacing: Space.s2) {
+                            HStack(spacing: Space.s1) {
+                                Text(store.isDemo ? "Demo mode: nothing leaves this Mac." : "Server: \(store.serverHost)").scaled(t.scale.caption, t.roles.ink2)
+                                RButton(store.isDemo ? "Use the MUSE server" : "Try demo mode", kind: .plain, small: true) {
+                                    store.authError = nil
+                                    store.dataSource = store.isDemo ? .http : .fake
+                                    store.applyDataSource()
+                                }
                             }
+                            Text("By continuing you agree to the MUSE Terms and Acceptable Use Policy.").scaled(t.scale.caption, t.roles.ink2)
+                            Text("Build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?")").scaled(t.scale.micro, t.roles.ink2)
                         }
-                        .foregroundStyle(t.muted)
-                        Text("By continuing you agree to the MUSE Terms and Acceptable Use Policy.").font(t.body(12)).foregroundStyle(t.muted)
-                        Text("Build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?")").font(t.mono(11)).foregroundStyle(t.muted.opacity(0.7))
-                        }
+                        .padding(.top, Space.s5)
                     }
-                    .frame(maxWidth: 420, alignment: .leading)
-                    .padding(.horizontal, 56)
-                    .padding(.vertical, 60)
+                    .frame(maxWidth: 400, alignment: .leading)
+                    .padding(.horizontal, Space.s7)
+                    .padding(.vertical, Space.s7)
                     .frame(maxWidth: .infinity, minHeight: 600)
                 }
                 .frame(maxWidth: .infinity)
@@ -146,45 +126,32 @@ struct SSOButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: icon).font(.system(size: 16))
-                Text(title).font(t.body(14, .semibold))
+            HStack(spacing: Space.s2) {
+                Ph(icon, 14)
+                Text(title)
             }
-            .foregroundStyle(t.ink)
-            .frame(maxWidth: .infinity)
-            .frame(height: 46)
-            .background(RoundedRectangle(cornerRadius: t.isC ? 23 : t.controlRadius).fill(t.surface))
-            .overlay(RoundedRectangle(cornerRadius: t.isC ? 23 : t.controlRadius).strokeBorder(t.isC ? .clear : t.strongLine, lineWidth: t.lineWidth))
-            .modifier(ThemeShadow(kind: .button, radius: t.isC ? 23 : t.controlRadius))
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RButtonStyle(kind: .quiet, fill: true))
     }
 }
 
-/// The sign-in splash: an abstract brand gradient with the MUSE wordmark. No photo of a person.
+/// The sign-in panel: the wordmark and one line on a flat tone. No gradient wash, no photo of a person.
 struct BrandSplash: View {
     @Environment(\.theme) private var t
 
     var body: some View {
-        GeometryReader { g in
-            ZStack {
-                LinearGradient(colors: [Color(hex: 0x1B1530), Color(hex: 0x3B2A5C), Color(hex: 0x8A4B6E)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                RadialGradient(colors: [Color(hex: 0xF2B48C).opacity(0.55), .clear], center: UnitPoint(x: 0.78, y: 0.22), startRadius: 4, endRadius: g.size.width * 0.6)
-                RadialGradient(colors: [Color(hex: 0x6C8CF5).opacity(0.35), .clear], center: UnitPoint(x: 0.12, y: 0.7), startRadius: 4, endRadius: g.size.width * 0.55)
-                Circle().strokeBorder(.white.opacity(0.10), lineWidth: 1).frame(width: g.size.width * 0.9).offset(x: g.size.width * 0.28, y: -g.size.height * 0.18)
-                Circle().strokeBorder(.white.opacity(0.07), lineWidth: 1).frame(width: g.size.width * 0.6).offset(x: g.size.width * 0.32, y: -g.size.height * 0.14)
-                Text("MUSE")
-                    .font(Fonts.font("Instrument Serif", min(180, g.size.width * 0.28), .regular))
-                    .tracking(6)
-                    .foregroundStyle(.white.opacity(0.92))
-                    .shadow(color: .black.opacity(0.25), radius: 18, y: 8)
-                    .offset(y: -g.size.height * 0.12)
-                LinearGradient(colors: [.clear, .black.opacity(0.35)], startPoint: .center, endPoint: .bottom)
-            }
-            .frame(width: g.size.width, height: g.size.height)
+        VStack(alignment: .leading, spacing: Space.s3) {
+            Spacer()
+            Text("MUSE").font(Fonts.font(t.scale.displayFamily, 64, .regular)).foregroundStyle(t.roles.ink)
+            Text("Your models, in real motion.").scaled(t.scale.title, t.roles.ink)
+            Text("Build original AI models from your own images, dress them, shoot them, and put them into real clips.")
+                .scaled(t.scale.body, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 420, alignment: .leading)
         }
-        .accessibilityLabel("MUSE")
+        .padding(Space.s7)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        .background(t.roles.field)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -199,69 +166,71 @@ struct OutfitSheetView: View {
             let model = store.models.first { $0.id == d.modelId }
             ZStack {
                 Color.black.opacity(0.38).onTapGesture { withAnimation { store.outfitSheet = nil } }
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: Space.s5) {
                     HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Eyebrow(model?.shortName ?? "Model").styled()
-                            Text(t.headingsUppercase ? "NEW OUTFIT SET" : "New outfit set").font(t.isA ? Fonts.font("Instrument Serif", 48, .regular) : t.display(32, t.isD ? .heavy : .bold))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("New outfit").scaled(t.scale.title, t.roles.ink).accessibilityAddTraits(.isHeader)
+                            Text(model.map { "For \($0.shortName)" } ?? "For this model").scaled(t.scale.caption, t.roles.ink2)
                         }
                         Spacer()
-                        IconButton(systemName: "xmark", help: "Close") { withAnimation { store.outfitSheet = nil } }
+                        RIconButton(systemName: "xmark", help: "Close") { withAnimation { store.outfitSheet = nil } }
+                            .keyboardShortcut(.cancelAction)
                     }
-                    Seg(OutfitMode.allCases.map { ($0, $0.label) }, selection: Binding(get: { d.mode }, set: { m in
+                    RSeg(OutfitMode.allCases.map { ($0, $0.label) }, selection: Binding(get: { d.mode }, set: { m in
                         store.outfitSheet?.mode = m
                         store.outfitSheet?.state = .idle
                         store.outfitSheet?.outfitId = nil
                         store.outfitSheet?.images = []
                     }))
+                    .frame(maxWidth: 420)
                     switch d.mode {
                     case .describe:
-                        TextBox(placeholder: "e.g. sheer crystal mini dress, silver strappy heels",
-                                text: Binding(get: { store.outfitSheet?.description ?? "" }, set: { store.outfitSheet?.description = $0 }), lines: 2)
+                        RTextBox(placeholder: "e.g. sheer crystal mini dress, silver strappy heels",
+                                 text: Binding(get: { store.outfitSheet?.description ?? "" }, set: { store.outfitSheet?.description = $0 }), lines: 2)
                     case .photo, .own:
                         dropZone(d)
                     }
-                    HStack(spacing: 16) {
+                    HStack(alignment: .top, spacing: Space.s4) {
                         ForEach(0..<4, id: \.self) { i in
                             let label = ["Front", "¾", "Side", "Back"][i]
-                            VStack(alignment: .leading, spacing: 6) {
+                            VStack(alignment: .leading, spacing: Space.s2) {
                                 switch d.state {
-                                case .busy: Shimmer()
+                                case .busy: SkeletonBlock(ratio: 0.75, radius: t.radii.container)
                                 case .done:
-                                    Media(ref: d.angles.indices.contains(i) ? d.angles[i] : nil, ratio: 0.75) {
-                                        Pill(d.mode == .own ? "yours" : "AI", d.mode == .own ? .yours : .acc)
+                                    MediaFrame(ref: d.angles.indices.contains(i) ? d.angles[i] : nil, ratio: 0.75) {
+                                        if d.mode != .own { StateTag("AI", .onMedia) }
                                     }
                                 case .idle:
                                     if d.mode == .own && d.images.indices.contains(i) {
-                                        Media(ref: ImageRef(url: d.images[i].absoluteString), ratio: 0.75) { Pill("yours", .yours) }
+                                        MediaFrame(ref: ImageRef(url: d.images[i].absoluteString), ratio: 0.75)
                                     } else {
-                                        EmptyTile(icon: "tshirt", text: label)
+                                        Color.clear.aspectRatio(0.75, contentMode: .fit)
+                                            .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.field))
                                     }
                                 }
-                                Text(label).font(t.body(12))
+                                Text(label).scaled(t.scale.caption, t.roles.ink2)
                             }
                         }
                     }
-                    Muted("All four angles use one seed, so the outfit matches from every side. Never add: logos.")
-                    HStack {
-                        Spacer()
+                    HStack(spacing: Space.s3) {
+                        Text("All four angles use one seed, so the outfit matches from every side. Never add: logos.")
+                            .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: Space.s4)
                         if d.state == .done {
-                            if d.mode != .own { MButton("Retake · \(PhotoPricing.label(store.outfitSetEstimate))") { store.outfitGenerate() } }
-                            MButton("Save outfit", kind: .primary) { store.outfitSave() }
+                            if d.mode != .own { RButton("Retake · \(Pricing.money(store.outfitSetEstimate))") { store.outfitGenerate() } }
+                            RButton("Save outfit", kind: .action) { store.outfitSave() }
+                                .keyboardShortcut(.defaultAction)
                         } else {
-                            MButton(d.mode == .own ? "Use my images" : "Generate 4 angles · \(PhotoPricing.label(store.outfitSetEstimate))", kind: .primary, off: d.state == .busy) {
+                            RButton(d.mode == .own ? "Use my images" : "Make 4 angles · \(Pricing.money(store.outfitSetEstimate))", kind: .action, off: d.state == .busy) {
                                 store.outfitGenerate()
                             }
                         }
                     }
                 }
-                .padding(.horizontal, 28)
-                .padding(.vertical, 26)
+                .padding(Space.s6)
                 .frame(width: 760)
-                .background(RoundedRectangle(cornerRadius: t.rLg).fill(t.bg))
-                .overlay(RoundedRectangle(cornerRadius: t.rLg).strokeBorder(t.strongLine, lineWidth: t.lineWidth))
-                .modifier(ThemeShadow(kind: .card, radius: t.rLg))
-                .shadow(color: .black.opacity(0.35), radius: 40, y: 30)
+                .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.raised))
+                .museFloat(t)
             }
         }
     }
@@ -272,20 +241,9 @@ struct OutfitSheetView: View {
             let urls = MediaImport.pick(MediaImport.imageTypes, multiple: !photo, prompt: "Use")
             if !urls.isEmpty { store.outfitSheet?.images = photo ? [urls[0]] : Array(urls.prefix(4)) }
         } label: {
-            HStack(spacing: 14) {
-                Image(systemName: "square.and.arrow.up").font(.system(size: 20))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(d.images.isEmpty ? (photo ? "Drop a product photo" : "Drop your 4 angle images") : d.images.map(\.lastPathComponent).joined(separator: ", "))
-                        .font(t.body(14, .bold)).lineLimit(1)
-                    Muted(photo ? "It's used as a reference image, so the outfit matches." : "Front, ¾, side and back, in that order. Any you skip can be filled in.")
-                }
-                Spacer()
-            }
-            .foregroundStyle(t.ink)
-            .padding(20)
-            .background(RoundedRectangle(cornerRadius: t.cardRadius).fill(targeted ? t.accent.opacity(0.08) : t.surface))
-            .overlay(RoundedRectangle(cornerRadius: t.cardRadius).strokeBorder(targeted ? t.accent : t.line, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])))
-            .contentShape(Rectangle())
+            DropZone(title: d.images.isEmpty ? (photo ? "Drop a product photo" : "Drop your 4 angle images") : d.images.map(\.lastPathComponent).joined(separator: ", "),
+                     hint: photo ? "It's used as a reference image, so the outfit matches." : "Front, ¾, side and back, in that order. Any you skip can be filled in.",
+                     buttonTitle: "Choose files", targeted: targeted)
         }
         .buttonStyle(.plain)
         .dropDestination(for: URL.self) { urls, _ in
@@ -326,42 +284,14 @@ struct PasswordField: View {
                 shown.toggle()
                 if had { DispatchQueue.main.async { focused = true } }
             } label: {
-                Image(systemName: shown ? "eye.slash" : "eye").font(.system(size: 13)).foregroundStyle(t.muted)
-                    .frame(width: 24, height: 24)
+                Ph(shown ? "eye.slash" : "eye", 13).foregroundStyle(t.roles.ink2)
+                    .frame(width: 28, height: 28)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(shown ? "Hide password" : "Show password")
             .accessibilityLabel(shown ? "Hide password" : "Show password")
         }
-        .fieldChrome(focused: focused)
-    }
-}
-
-/// A themed checkbox row.
-struct CheckBox: View {
-    @Environment(\.theme) private var t
-    @Binding var on: Bool
-    var label: String
-    var hint: String?
-
-    var body: some View {
-        Button { on.toggle() } label: {
-            HStack(spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 5).fill(on ? t.accent : .clear)
-                    RoundedRectangle(cornerRadius: 5).strokeBorder(on ? t.accent : t.line, lineWidth: 1.5)
-                    if on { Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(t.accentInk) }
-                }
-                .frame(width: 20, height: 20)
-                Text(label).font(t.body(13)).foregroundStyle(t.ink)
-                if let hint { Text(hint).font(t.body(12)).foregroundStyle(t.muted) }
-                Spacer(minLength: 0)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
-        .accessibilityValue(on ? "On" : "Off")
+        .roleField(focused: focused)
     }
 }

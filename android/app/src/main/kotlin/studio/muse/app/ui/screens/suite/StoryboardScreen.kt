@@ -47,6 +47,7 @@ import studio.muse.app.ui.screens.BlurredStageArt
 import studio.muse.app.ui.screens.ScreenBox
 import studio.muse.app.ui.screens.StagePhase
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.scale
 
 /**
  * M7 · Storyboard: shots with one cast and a look lock (the Shot's camera: body, lens and look stay the same; each shot
@@ -89,14 +90,15 @@ fun SuiteStoryboardScreen() {
             }
             if (board == null || board.shots.isEmpty()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    T("No storyboard yet", m.type.h2, m.t.ink, upper = m.isB)
+                    T("No storyboard yet", m.scale.title, m.t.ink)
                     Tiny("Build a Shot, then add it here. Every shot keeps the same cast, look and lens; each has its own move and length.")
                     Cta2("Build a Shot", { nav.go(Routes.SUITE_SHOT) }, Modifier.fillMaxWidth())
                 }
                 return@Column
             }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(top = 10.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                T("${board.title} · ${board.seconds} s", m.type.h2, m.t.ink, upper = m.isB, maxLines = 2)
+                T(board.title, m.scale.title, m.t.ink, maxLines = 2)
+                T("${board.seconds} s", m.scale.caption, m.t.muted, maxLines = 1)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     board.cast.forEach { id -> RefImage(st.model(id)?.cover, Modifier.size(26.dp, 32.dp).background(m.t.surface2)) }
                     SBadge("Look lock · ${cam.presets.firstOrNull { it.id == board.lookLock }?.label ?: board.lookLock}", "ink")

@@ -11,38 +11,37 @@ struct ClaudeConnectionsSection: View {
     @State private var savingFallback = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SectionHeader("Claude on your plan")
-            Muted("Chats in MUSE run in Anthropic's Claude Code on this Mac, signed in to your Claude subscription. Your phone's chats are answered here while this Mac is on. MUSE never sees your Claude password or keys.", size: 13)
-            VStack(alignment: .leading, spacing: 8) {
-                line("Claude Code", codeLine, codeTone)
-                line("This Mac", service.configured ? (service.answeringFromPhone ? "Answering from your phone" : "Ready for your phone's chats") : "Off (owner, signed in to a MUSE server)",
-                     service.configured && service.info.ready ? .good : .off)
-                if let m = service.info.model { line("Model", m, .neutral) }
-                if let e = service.lastError { line("Last error", e, .bad) }
-                HStack(spacing: 8) {
-                    if !service.info.installed {
-                        MButton("Install", icon: "arrow.down.circle", kind: .primary, size: .small) { service.openInstall() }
-                    }
-                    if !service.info.signedIn {
-                        MButton("Sign in", icon: "person.crop.circle", kind: service.info.installed ? .primary : .secondary, size: .small, off: !service.info.installed) {
-                            service.openSignIn()
-                        }
-                    }
-                    MButton(service.checking ? "Checking…" : "Re-check", icon: "arrow.clockwise", size: .small, off: service.checking) {
-                        Task { await service.recheck() }
+        VStack(alignment: .leading, spacing: Space.s2) {
+            SectionTitle("Claude on your plan", top: 0)
+            Text("Chats in MUSE run in Anthropic's Claude Code on this Mac, signed in to your Claude subscription. Your phone's chats are answered here while this Mac is on. MUSE never sees your Claude password or keys.")
+                .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, Space.s2)
+            line("Claude Code", codeLine, codeTone)
+            line("This Mac", service.configured ? (service.answeringFromPhone ? "Answering from your phone" : "Ready for your phone's chats") : "Off (owner, signed in to a MUSE server)",
+                 service.configured && service.info.ready ? .good : .off)
+            if let m = service.info.model { line("Model", m, .neutral) }
+            if let e = service.lastError { line("Last error", e, .bad) }
+            HStack(spacing: Space.s2) {
+                if !service.info.installed {
+                    RButton("Install Claude Code", kind: .action, small: true) { service.openInstall() }
+                }
+                if !service.info.signedIn {
+                    RButton("Sign in", kind: service.info.installed ? .action : .quiet, small: true, off: !service.info.installed) {
+                        service.openSignIn()
                     }
                 }
-                if !service.info.installed {
-                    Muted("Install opens Terminal and runs Anthropic's official installer. Sign in opens Claude's own sign-in page.")
+                RButton(service.checking ? "Checking…" : "Check again", kind: .plain, small: true, off: service.checking) {
+                    Task { await service.recheck() }
                 }
             }
-            .padding(14)
-            .surface(shadow: .none)
+            .padding(.top, Space.s2)
+            if !service.info.installed {
+                Text("Install opens Terminal and runs Anthropic's official installer. Sign in opens Claude's own sign-in page.")
+                    .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
 
-            OptionRow(title: "Use the studio API key when Claude Code can't answer",
-                      hint: fallbackHint) {
-                MToggle(isOn: Binding(get: { service.status?.apiFallback.enabled ?? false }, set: { on in
+            SettingRow("Use the studio API key when Claude Code can't answer", hint: fallbackHint) {
+                RSwitch(label: "Use the studio API key when Claude Code can't answer", isOn: Binding(get: { service.status?.apiFallback.enabled ?? false }, set: { on in
                     savingFallback = true
                     Task {
                         await service.setApiFallback(on)
@@ -51,37 +50,37 @@ struct ClaudeConnectionsSection: View {
                 }))
                 .disabled(savingFallback || service.status?.apiFallback.available != true)
             }
+            .padding(.top, Space.s3)
 
-            SectionHeader("Add MUSE to Claude")
-            Muted("Use MUSE from the Claude apps on your phone and desktop, on your Claude plan.", size: 13)
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(steps.enumerated()), id: \.offset) { i, s in
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text("\(i + 1)").font(t.mono(11, .semibold)).foregroundStyle(t.muted)
-                        Text(s).font(t.body(13)).foregroundStyle(t.ink).fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                HStack(spacing: 8) {
-                    Text(connectorUrl).font(t.mono(12)).foregroundStyle(t.ink).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    MButton(copied ? "Copied" : "Copy", icon: copied ? "checkmark" : "doc.on.doc", size: .small) {
-                        CameraModel.copy(connectorUrl)
-                        copied = true
-                        Task {
-                            try? await Task.sleep(nanoseconds: 1_500_000_000)
-                            copied = false
-                        }
-                    }
-                }
-                .padding(.horizontal, 12).frame(minHeight: 40)
-                .background(RoundedRectangle(cornerRadius: t.controlRadius).fill(t.surface))
-                .overlay(RoundedRectangle(cornerRadius: t.controlRadius).strokeBorder(t.strongLine, lineWidth: t.lineWidth))
-                LinkText("Open claude.ai connector settings") {
-                    if let u = URL(string: "https://claude.ai/settings/connectors") { openURL(u) }
+            SectionTitle("Add MUSE to Claude")
+            Text("Use MUSE from the Claude apps on your phone and desktop, on your Claude plan.")
+                .scaled(t.scale.caption, t.roles.ink2).padding(.bottom, Space.s2)
+            ForEach(Array(steps.enumerated()), id: \.offset) { i, s in
+                HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+                    Text("\(i + 1)").monospacedDigit().scaled(t.scale.caption, t.roles.ink2).frame(width: 14, alignment: .leading)
+                    Text(s).scaled(t.scale.body, t.roles.ink).fixedSize(horizontal: false, vertical: true)
                 }
             }
+            HStack(spacing: Space.s2) {
+                Text(connectorUrl).scaled(t.scale.body, t.roles.ink).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                RButton(copied ? "Copied" : "Copy URL", small: true) {
+                    CameraModel.copy(connectorUrl)
+                    copied = true
+                    Task {
+                        try? await Task.sleep(nanoseconds: 1_500_000_000)
+                        copied = false
+                    }
+                }
+            }
+            .padding(.leading, Space.s3).padding(.trailing, Space.s1).frame(minHeight: 36)
+            .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field))
+            .padding(.top, Space.s2)
+            RButton("Open claude.ai connector settings", kind: .plain, small: true) {
+                if let u = URL(string: "https://claude.ai/settings/connectors") { openURL(u) }
+            }
         }
-        .padding(.bottom, 4)
+        .padding(.bottom, Space.s1)
         .task { await service.refreshStatus() }
     }
 
@@ -104,19 +103,21 @@ struct ClaudeConnectionsSection: View {
 
     private var codeLine: String {
         if service.checking && !service.checkedOnce { return "Checking…" }
-        let v = service.info.version.map { " · \($0)" } ?? ""
+        let v = service.info.version.map { " (\($0))" } ?? ""
         if !service.info.installed { return "Not installed" }
-        if !service.info.signedIn { return "Installed\(v) · signed out" }
+        if !service.info.signedIn { return "Installed\(v), signed out" }
         return "Signed in\(v)"
     }
 
     private var codeTone: CameraTone { service.info.ready ? .good : service.info.installed ? .warn : .off }
 
     private func line(_ label: String, _ value: String, _ tone: CameraTone) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Circle().fill(tone == .good ? t.good : tone == .warn ? t.warn : tone == .bad ? t.rec : tone == .off ? t.muted : t.line).frame(width: 7, height: 7)
-            Text(label).font(t.body(13, .semibold)).foregroundStyle(t.ink).frame(width: 90, alignment: .leading)
-            Text(value).font(t.body(13)).foregroundStyle(tone == .bad ? t.rec : t.ink).textSelection(.enabled).lineLimit(3)
+        // State colour only with state: the value carries it; no dot.
+        let r = t.roles
+        let color: Color = tone == .good ? r.positive : tone == .warn ? r.caution : tone == .bad ? r.danger : tone == .off ? r.ink2 : r.ink
+        return HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
+            Text(label).scaled(t.scale.caption, r.ink2).frame(width: 96, alignment: .leading)
+            Text(value).scaled(t.scale.body, color).textSelection(.enabled).lineLimit(3)
             Spacer(minLength: 0)
         }
     }

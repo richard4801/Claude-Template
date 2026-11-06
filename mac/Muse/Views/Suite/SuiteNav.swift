@@ -15,7 +15,7 @@ struct SuiteNavGroup: View {
                         Rectangle().fill(on ? t.accent : .clear).frame(width: 5, height: 5)
                         Text(m.title).font(t.body(13, on ? .semibold : .regular)).lineLimit(1)
                         Spacer(minLength: 4)
-                        if store.isComingSoon(m) { Text("Soon").font(t.mono(9.5)) }
+                        if store.isComingSoon(m) { Text("Soon").font(t.scale.micro.font) }
                     }
                     .foregroundStyle(t.isD ? .white : on ? t.ink : t.muted)
                     .padding(.leading, 22)

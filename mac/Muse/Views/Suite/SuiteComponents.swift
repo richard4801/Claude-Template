@@ -30,8 +30,8 @@ struct SuiteTag: View {
     var filled = false
     var body: some View {
         let c = color ?? t.muted
-        Text(text.uppercased())
-            .font(t.mono(9.5, .medium)).tracking(0.8)
+        Text(text)
+            .font(t.scale.micro.font)
             .foregroundStyle(filled ? Self.ink(on: c) : c)
             .padding(.horizontal, 6).frame(height: 18)
             .background(Rectangle().fill(filled ? c : .clear))
@@ -66,7 +66,7 @@ struct SuiteSectionHead<Trailing: View>: View {
     @ViewBuilder var trailing: () -> Trailing
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(title.uppercased()).font(t.mono(11, .medium)).tracking(1.2).foregroundStyle(t.ink)
+            Text(title).font(t.scale.heading.font).foregroundStyle(t.ink) // sentence case (plans/design-direction.md §3)
             Spacer(minLength: 8)
             trailing()
         }
@@ -99,7 +99,7 @@ struct SuiteSeg<T: Hashable>: View {
                 let (v, l) = options[i]
                 let on = v == selection
                 Button { onPick(v) } label: {
-                    Text(l.uppercased()).font(t.mono(11, on ? .semibold : .regular)).tracking(0.6)
+                    Text(l).font(t.body(12, on ? .semibold : .regular))
                         .foregroundStyle(on ? t.bg : t.muted)
                         .frame(maxWidth: .infinity).frame(height: 30)
                         .background(on ? t.ink : t.surface)
@@ -169,7 +169,7 @@ struct SuiteResultPane: View {
                 .overlay(Color.black.opacity(0.18))
             VStack(spacing: 14) {
                 if let p = percent {
-                    Text(takeLine.uppercased()).font(t.mono(11, .medium)).tracking(1.4).foregroundStyle(.white)
+                    Text(takeLine).font(t.scale.label.font).foregroundStyle(.white)
                     Text("\(p)%").font(t.isA ? Fonts.font("Instrument Serif", 72, .regular) : t.display(60)).foregroundStyle(.white)
                         .contentTransition(.numericText())
                     GeometryReader { g in
@@ -194,7 +194,7 @@ struct SuiteResultPane: View {
                         Text("About \(Job.aboutTime(j.secondsLeft)) left · you can leave this screen").font(t.body(11.5)).foregroundStyle(.white.opacity(0.9))
                     }
                 } else {
-                    Text(state.queueLine.uppercased()).font(t.mono(11, .medium)).tracking(1.4).foregroundStyle(.white)
+                    Text(state.queueLine).font(t.scale.label.font).foregroundStyle(.white)
                         .padding(.horizontal, 10).frame(height: 24).background(Color.black.opacity(0.8))
                     Text("Leaving is safe · we'll tell you when it's ready").font(t.body(11.5)).foregroundStyle(.white.opacity(0.9))
                 }
@@ -257,12 +257,12 @@ struct SuiteResultPane: View {
                 Text(message).font(t.body(12)).foregroundStyle(.white.opacity(0.9)).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
                 if let j = job {
                     Button { store.retakeShot(j) } label: {
-                        Text("RETRY FREE").font(t.mono(11, .semibold)).tracking(1).foregroundStyle(.white).padding(.horizontal, 12).frame(height: 26).background(t.rec)
+                        Text("Retry free").font(t.scale.label.font).foregroundStyle(.white).padding(.horizontal, 12).frame(height: 26).background(t.rec)
                     }
                     .buttonStyle(.plain)
                     if let lower {
                         Button { store.tryCheaper(j) } label: {
-                            Text("TRY \(SuiteText.tierLabel(lower).uppercased())").font(t.mono(11, .semibold)).tracking(1).foregroundStyle(.white)
+                            Text("Try \(SuiteText.tierLabel(lower))").font(t.scale.label.font).foregroundStyle(.white)
                                 .padding(.horizontal, 12).frame(height: 26).overlay(Rectangle().strokeBorder(.white, lineWidth: 1))
                         }
                         .buttonStyle(.plain)

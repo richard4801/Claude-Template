@@ -40,7 +40,7 @@ struct EditSuiteBin: View {
                 Button { session.binTab = tab } label: {
                     VStack(spacing: 4) {
                         Ph(icon(tab), 15)
-                        Text(tab.label.uppercased()).font(t.mono(9, .medium)).tracking(0.6).lineLimit(1).minimumScaleFactor(0.7)
+                        Text(tab.label).font(t.scale.micro.font).lineLimit(1).minimumScaleFactor(0.7)
                     }
                     .foregroundStyle(on ? t.accent : t.muted)
                     .frame(maxWidth: .infinity)
@@ -84,7 +84,7 @@ struct EditSuiteBin: View {
         let list = store.editSuiteTakes
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
-                Text("FROM THE AI SUITE").font(t.mono(11, .medium)).tracking(1.1).foregroundStyle(t.ink)
+                Text("From the AI suite").font(t.scale.label.font).foregroundStyle(t.ink)
                 Text(session.title).font(t.body(12)).foregroundStyle(t.muted).lineLimit(1)
             }
             if list.isEmpty { Note("No video takes yet.") }
@@ -106,7 +106,7 @@ struct EditSuiteBin: View {
                                         .padding(.horizontal, 4).padding(.vertical, 1).background(Color.black.opacity(0.55)).padding(4)
                                 }
                             }
-                        Text(tk.title.uppercased()).font(t.mono(9.5)).foregroundStyle(t.muted).lineLimit(1)
+                        Text(tk.title).font(t.scale.micro.font).foregroundStyle(t.muted).lineLimit(1)
                     }
                     .contentShape(Rectangle())
                     .onTapGesture(count: 2) { session.addTake(tk) }
@@ -141,7 +141,7 @@ struct EditSuiteBin: View {
                         Button("Add as music") { session.edit { $0.addAudio(a, kind: .music) } }
                         Button("Add as voice-over") { session.edit { $0.addAudio(a, kind: .voice) } }
                         Button("Add as sound effect") { session.edit { $0.addAudio(a, kind: .sfx) } }
-                    } label: { Ph("plus") }
+                    } label: { Image(nsImage: Ph.menuImage("plus", 16)) } // a Menu label ignores frames; the image comes at its size
                         .menuStyle(.borderlessButton)
                         .menuIndicator(.hidden)
                         .fixedSize()

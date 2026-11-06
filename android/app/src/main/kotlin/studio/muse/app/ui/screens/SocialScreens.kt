@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -66,6 +67,9 @@ import studio.muse.app.ui.Routes
 import studio.muse.app.ui.components.*
 import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.MuseSpace
+import studio.muse.app.ui.theme.roles
+import studio.muse.app.ui.theme.scale
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -165,26 +169,26 @@ fun AccountsScreen() {
     val s by vm.state.collectAsState()
     val nav = LocalNav.current
     val m = muse
-    ScreenBox {
+    ScreenBox(bg = m.roles.canvas) {
         Column(Modifier.fillMaxSize()) {
-            TopBar("Accounts", onBack = { nav.back() })
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 6.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                T("${firstName(s.model)}'s own accounts. Posts from her renders go here, not to your personal accounts.", m.type.body.copy(fontSize = 14.sp, lineHeight = 20.sp), m.t.ink)
-                ListGroup {
-                    Platform.entries.forEachIndexed { i, p ->
-                        if (i > 0) ListDivider()
+            CalmTopBar("Accounts", onBack = { nav.back() })
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = MuseSpace.gutter).padding(top = MuseSpace.s2, bottom = 120.dp),
+                verticalArrangement = Arrangement.spacedBy(MuseSpace.s5)) {
+                Body("${firstName(s.model)}'s own accounts. Posts from her renders go here, not to your personal accounts.")
+                Column {
+                    Platform.entries.forEach { p ->
                         val a = s.accounts.firstOrNull { it.platform == p.id }
-                        TwoLineRow(p.label, a?.handle ?: "Not connected", lead = { PlatformBadge(p, 32.dp) }) {
+                        RowItem(p.label, a?.handle ?: "Not connected", lead = { PlatformBadge(p, 32.dp) }) {
                             when {
-                                a != null -> T("Disconnect", m.type.tiny.copy(fontWeight = FontWeight.SemiBold), m.link, Modifier.press { vm.disconnect(p) }.padding(vertical = 8.dp))
-                                p.id in s.busy -> Cta2("Signing in…", {}, Modifier.shimmer(), height = 36.dp)
-                                else -> Cta2("Connect", { vm.connect(p) }, height = 36.dp)
+                                a != null -> TextAction("Disconnect", { vm.disconnect(p) })
+                                p.id in s.busy -> SecondaryButton("Signing in…", {}, height = 48.dp)
+                                else -> SecondaryButton("Connect", { vm.connect(p) }, height = 48.dp)
                             }
                         }
                     }
                 }
-                NoteBox("For now MUSE opens each app with your video and caption ready to post. Direct posting and auto-scheduling switch on per platform once it approves MUSE.")
-                ListGroup { Li("queue", "Scheduled and posted", onClick = { nav.go(Routes.POSTS) }) { Tiny("${s.posts}"); Ic("chev", 16.dp) } }
+                Notice("For now MUSE opens each app with your video and caption ready to post. Direct posting and auto-scheduling switch on per platform once it approves MUSE.")
+                RowItem("Scheduled and posted", onClick = { nav.go(Routes.POSTS) }) { RowValue("${s.posts}"); Chevron() }
             }
         }
     }
@@ -255,48 +259,44 @@ fun PostScreen(takeId: String) {
     val m = muse
     val d = s.draft
     val notif = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { vm.go(context) { nav.back() } }
-    ScreenBox {
+    ScreenBox(bg = m.roles.canvas) {
         Column(Modifier.fillMaxSize()) {
-            TopBar("Post", onBack = { nav.back() })
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 6.dp, bottom = 130.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    val shape = RoundedCornerShape(m.t.r * .6f)
-                    RefImage(s.take?.thumb, Modifier.size(54.dp, 72.dp).clip(shape).let { if (m.isD) it.border(2.5.dp, Ink, shape) else it }, 20)
-                    Column(Modifier.weight(1f)) {
-                        T(s.take?.title ?: "", m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink)
-                        Tiny("${s.model?.name ?: ""} · 1080×1920")
+            CalmTopBar("Post", onBack = { nav.back() })
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = MuseSpace.gutter).padding(top = MuseSpace.s2, bottom = 120.dp),
+                verticalArrangement = Arrangement.spacedBy(MuseSpace.s5)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(56.dp, 72.dp).clip(controlShape()).background(m.roles.field)) { RefImage(s.take?.thumb, Modifier.fillMaxSize(), 20) }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        T(s.take?.title ?: "", m.scale.heading, m.roles.ink)
+                        Caption("${s.model?.name ?: ""} · 1080×1920")
                     }
                 }
-                Field("Post to") {
-                    if (s.connected.isNotEmpty()) FlowRow {
+                Labeled("Post to") {
+                    if (s.connected.isNotEmpty()) FlowRow(hGap = MuseSpace.s2, vGap = 0.dp) {
                         s.connected.forEach { p -> PlatformChip(p, p.id in d.platforms) { vm.platform(p) } }
                     }
-                    if (s.connected.size < 5) T(
-                        if (s.connected.isEmpty()) "+ Connect ${firstName(s.model)}'s accounts" else "+ Connect more accounts",
-                        m.type.tiny.copy(fontWeight = FontWeight.SemiBold), m.link, Modifier.press { nav.go(Routes.ACCOUNTS) }.padding(vertical = 4.dp),
-                    )
+                    if (s.connected.size < 5) TextAction(if (s.connected.isEmpty()) "Connect ${firstName(s.model)}'s accounts" else "Connect more accounts", { nav.go(Routes.ACCOUNTS) })
                 }
-                Field("Caption") { Input(d.caption, vm::caption, placeholder = "Write a caption and hashtags", area = true) }
-                ListGroup {
-                    TwoLineRow("Mark as AI-generated", "Turns on the platform's own AI label") { Toggle(d.aiLabel, vm::ai) }
-                    ListDivider()
-                    TwoLineRow("Paid partnership", "Turns on the platform's branded-content tag") { Toggle(d.paidPartnership, vm::paid) }
+                Labeled("Caption") { Input(d.caption, vm::caption, placeholder = "Write a caption and hashtags", area = true, calm = true) }
+                Column {
+                    RowItem("Mark as AI-generated", "Turns on the platform's own AI label", onClick = vm::ai) { Toggle(d.aiLabel, vm::ai) }
+                    RowItem("Paid partnership", "Turns on the platform's branded-content tag", onClick = vm::paid) { Toggle(d.paidPartnership, vm::paid) }
+                    val noField = d.platforms.filter { it == Platform.X.id }
+                    if ((d.aiLabel || d.paidPartnership) && noField.isNotEmpty()) Caption("X has no field for these labels, so they won't be set there.")
                 }
-                val noField = d.platforms.filter { it == Platform.X.id }
-                if ((d.aiLabel || d.paidPartnership) && noField.isNotEmpty()) Tiny("X has no field for these labels, so they won't be set there.")
-                Field("When") {
-                    Seg(listOf("now" to "Now", "later" to "Schedule"), if (d.later) "later" else "now", { vm.later(it == "later") })
+                Labeled("When") {
+                    Segmented(listOf("now" to "Now", "later" to "Schedule"), if (d.later) "later" else "now", { vm.later(it == "later") })
                     if (d.later) {
-                        FlowRow { s.slots.forEachIndexed { i, at -> Chip(PostTime.label(at), d.slot == i, { vm.slot(i) }) } }
-                        Tiny("We'll notify you at that time and open each app with the post ready.")
+                        FlowRow(hGap = MuseSpace.s2, vGap = 0.dp) { s.slots.forEachIndexed { i, at -> ChoiceChip(PostTime.label(at), d.slot == i, { vm.slot(i) }) } }
+                        Caption("We'll notify you at that time and open each app with the post ready.")
                     }
                 }
             }
         }
-        Dock {
+        ActionDock {
             val n = d.platforms.size
             val label = if (!d.later) (if (n == 0) "Pick an account to post" else "Post to $n account${if (n == 1) "" else "s"}") else "Schedule · ${s.slots.getOrNull(d.slot)?.let { PostTime.label(it) } ?: ""}"
-            Cta(label, {
+            PrimaryButton(label, {
                 when {
                     n == 0 -> vm.toast("Pick at least one account")
                     d.later && Build.VERSION.SDK_INT >= 33 &&
@@ -309,21 +309,17 @@ fun PostScreen(takeId: String) {
     }
 }
 
+/** A platform to post to: its badge and name; the chosen ones carry the selection outline. */
 @Composable
 private fun PlatformChip(p: Platform, on: Boolean, onClick: () -> Unit) {
     val m = muse
-    val shape = RoundedCornerShape(if (m.isA) 2.dp else 999.dp)
-    val (bg, fg) = when {
-        !on -> (if (m.isB) m.t.surface2 else m.t.surface) to m.t.ink
-        m.isD -> m.t.blue to Color.White
-        m.isB -> m.t.accent to m.t.accentInk
-        else -> m.t.accent to Color.White
-    }
-    var mod = Modifier.height(36.dp).clip(shape).background(bg)
-    mod = when { m.isD -> mod.border(2.5.dp, Ink, shape); m.isC -> mod; else -> mod.border(m.t.stroke, if (on) bg else m.t.line, shape) }
-    Row(mod.press(onClick = onClick).padding(start = 6.dp, end = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        PlatformBadge(p, 20.dp)
-        T(p.label, m.type.chip, fg, maxLines = 1)
+    val shape = RoundedCornerShape(studio.muse.app.ui.theme.MuseRadii.of(m.id).chip)
+    Box(Modifier.heightIn(min = 48.dp).press(onClick = onClick), contentAlignment = Alignment.Center) {
+        Row(Modifier.height(36.dp).clip(shape).background(m.roles.field).let { if (on) it.border(2.dp, m.roles.selection, shape) else it }.padding(start = 6.dp, end = MuseSpace.s3),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+            PlatformBadge(p, 20.dp)
+            T(p.label, m.scale.label, m.roles.ink, maxLines = 1, weight = if (on) FontWeight.SemiBold else null)
+        }
     }
 }
 
@@ -352,12 +348,18 @@ fun PostsScreen() {
     val context = LocalContext.current
     val m = muse
     val list = if (s.tab == "scheduled") s.scheduled else s.out
-    ScreenBox {
+    ScreenBox(bg = m.roles.canvas) {
         Column(Modifier.fillMaxSize()) {
-            TopBar("Posts", onBack = { nav.back() })
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                item(key = "tabs", contentType = "tabs") { Seg(listOf("scheduled" to "Scheduled · ${s.scheduled.size}", "posted" to "Posted · ${s.out.size}"), s.tab, vm::tab) }
-                if (list.isEmpty()) item(key = "empty", contentType = "note") { NoteBox(if (s.tab == "scheduled") "Nothing scheduled. Open a finished take and tap Post." else "Nothing posted yet.", icon = "spark") }
+            CalmTopBar("Posts", onBack = { nav.back() })
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = MuseSpace.gutter, end = MuseSpace.gutter, top = MuseSpace.s2, bottom = 120.dp),
+                verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                item(key = "tabs", contentType = "tabs") {
+                    Segmented(listOf("scheduled" to "Scheduled · ${s.scheduled.size}", "posted" to "Posted · ${s.out.size}"), s.tab, vm::tab, Modifier.padding(bottom = MuseSpace.s3))
+                }
+                if (list.isEmpty()) item(key = "empty", contentType = "note") {
+                    if (s.tab == "scheduled") EmptyState("Nothing scheduled", "Open a finished take in the Library and tap Post to schedule it.")
+                    else EmptyState("Nothing posted yet", "Posts you hand off to TikTok, Instagram and the rest show up here with their views and likes.")
+                }
                 items(list.distinctBy { it.id }, key = { it.id }, contentType = { "post" }) { p ->
                     var menu by remember { mutableStateOf(false) }
                     Box {
@@ -372,30 +374,24 @@ fun PostsScreen() {
     }
 }
 
+/** One post: thumbnail, title, where and when, and its numbers once it's out. No box. */
 @Composable
 private fun PostRow(p: Post, onClick: () -> Unit) {
     val m = muse
-    val shape = RoundedCornerShape(m.t.r)
-    var mod = Modifier.fillMaxWidth()
-    mod = when {
-        m.isC -> mod.softShadow(m.t.r).clip(shape).background(m.t.surface)
-        m.isD -> mod.hardShadow(3.dp, m.t.r).clip(shape).background(m.t.surface).border(2.5.dp, Ink, shape)
-        else -> mod.clip(shape).background(m.t.surface).border(m.t.stroke, m.t.line, shape)
-    }
-    Row(mod.press(onClick = onClick).padding(10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-        RefImage(p.thumb, Modifier.size(54.dp, 72.dp).clip(RoundedCornerShape(m.t.r * .6f)), 20)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            T(p.title, m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold), m.t.ink, maxLines = 1)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    Row(Modifier.fillMaxWidth().press(onClick = onClick).padding(vertical = MuseSpace.s2), horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(56.dp, 72.dp).clip(controlShape()).background(m.roles.field)) { RefImage(p.thumb, Modifier.fillMaxSize(), 20) }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
+            T(p.title, m.scale.body.copy(fontWeight = FontWeight.Medium), m.roles.ink, maxLines = 1)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
                 p.platforms.mapNotNull { Platform.of(it) }.forEach { PlatformBadge(it, 18.dp) }
-                Spacer(Modifier.width(4.dp))
-                Tiny(when {
+                Spacer(Modifier.width(MuseSpace.s1))
+                Caption(when {
                     p.scheduled -> p.whenMillis?.let { PostTime.label(it) } ?: "Scheduled"
                     p.state == "handoff" -> "Handed off ${PostTime.ago(p.createdAt)}"
                     else -> "Posted ${PostTime.ago(p.postedAt)}"
-                })
+                }, maxLines = 1)
             }
-            statsLine(p)?.let { T(it, m.type.mono.copy(fontSize = 11.5.sp), m.t.muted) }
+            statsLine(p)?.let { T(it, m.scale.caption.tabular(), m.roles.ink2, maxLines = 1) }
         }
     }
 }

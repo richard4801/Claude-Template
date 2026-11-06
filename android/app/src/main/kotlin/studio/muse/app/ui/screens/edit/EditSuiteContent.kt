@@ -41,6 +41,7 @@ import studio.muse.app.ui.components.T
 import studio.muse.app.ui.components.press
 import studio.muse.app.ui.screens.ScreenBox
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.scale
 import kotlin.math.floor
 
 /** "0:04.2" (minutes, seconds, tenths). */
@@ -153,7 +154,7 @@ private fun TopRow(ui: EditSuiteUi, act: (EditAction) -> Unit, onClose: () -> Un
             Modifier.height(30.dp).clip(shape).background(m.t.cta).press(enabled = ui.project != null) { act(EditAction.Open(Panel.EXPORT)) }.padding(horizontal = 12.dp)
                 .semantics { contentDescription = "Export" },
             contentAlignment = Alignment.Center,
-        ) { T("EXPORT", m.type.mono.copy(fontSize = 10.5.sp, letterSpacing = .14.em, fontWeight = FontWeight.Medium), m.t.ctaInk, maxLines = 1) }
+        ) { T("Export", m.scale.label, m.t.ctaInk, maxLines = 1) }
     }
 }
 

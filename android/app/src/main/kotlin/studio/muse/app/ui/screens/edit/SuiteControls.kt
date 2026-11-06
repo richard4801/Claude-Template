@@ -48,6 +48,7 @@ import studio.muse.app.ui.components.T
 import studio.muse.app.ui.components.Toggle
 import studio.muse.app.ui.components.press
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.scale
 import kotlin.math.roundToInt
 
 /*
@@ -77,11 +78,11 @@ fun SheetFrame(title: String, onDone: () -> Unit, modifier: Modifier = Modifier,
     }
 }
 
-/** A mono, letter-spaced section label (`.lbl.ink`). */
+/** A section label: sentence case on the type scale (design direction; was mono caps). */
 @Composable
 fun SuiteLabel(text: String, modifier: Modifier = Modifier, color: Color = muse.t.ink) {
     val m = muse
-    T(text, m.type.lbl.copy(fontSize = 11.sp, letterSpacing = .12.em), color, modifier, upper = !m.isC, maxLines = 1)
+    T(text, m.scale.label, color, modifier, maxLines = 1)
 }
 
 /** A value in mono (`0.5 s`, `−3 dB`). */
@@ -175,8 +176,7 @@ fun SuiteSeg(options: List<Pair<String, String>>, selected: String?, onSelect: (
                 (if (fill) Modifier.weight(1f) else Modifier.width((l.length * 9 + 22).dp.coerceAtLeast(48.dp))).minimumInteractiveComponentSize().height(height).background(bg).press { onSelect(k) },
                 contentAlignment = Alignment.Center,
             ) {
-                T(l, if (m.isA || m.isB) m.type.mono.copy(fontSize = 11.sp, letterSpacing = .08.em, fontWeight = FontWeight.Medium) else m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
-                    fg, upper = m.isA || m.isB, maxLines = 1, align = TextAlign.Center)
+                T(l, m.scale.label, fg, maxLines = 1, align = TextAlign.Center)
             }
         }
     }
@@ -208,8 +208,7 @@ fun SuiteButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) { EIc(icon, 15.dp, if (enabled) fg else m.t.muted); Spacer(Modifier.width(8.dp)) }
-        T(text, if (primary && m.isA) m.type.cta.copy(fontSize = 13.sp) else m.type.body.copy(fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold), if (enabled) fg else m.t.muted,
-            upper = primary && m.isA, maxLines = 1)
+        T(text, m.scale.label, if (enabled) fg else m.t.muted, maxLines = 1)
     }
 }
 
