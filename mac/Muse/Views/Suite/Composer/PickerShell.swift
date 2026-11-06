@@ -29,12 +29,13 @@ enum ComposerPicker: String, Identifiable {
         }
     }
 
-    var title: String { rawValue.uppercased() }
+    /// Sentence case ("Camera"), per the design direction: no caps tracking.
+    var title: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
 
     var subtitle: String {
         switch self {
-        case .camera: return "Scroll a wheel · applies instantly"
-        case .style: return "Genre, era and tempo · applies instantly"
+        case .camera: return "Choices apply instantly"
+        case .style: return "Genre, era and tempo, applied instantly"
         case .look, .lighting: return "Applies instantly"
         }
     }
@@ -125,12 +126,12 @@ struct PickerShell: View {
         .shadow(color: .black.opacity(0.55), radius: 60, y: 40)
         .onExitCommand { store.closePicker() }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(picker.title.capitalized) picker")
+        .accessibilityLabel("\(picker.title) picker")
     }
 
     private var header: some View {
         HStack(spacing: 14) {
-            Text(picker.title).font(Fonts.font("Barlow Condensed", 24, .bold)).tracking(2)
+            Text(picker.title).font(t.scale.title.font).foregroundStyle(Roles.bag.ink)
             if !(picker == .camera && step == "movement") {
                 Text(picker.subtitle).font(t.body(13)).foregroundStyle(t.muted)
             }
@@ -145,16 +146,15 @@ struct PickerShell: View {
                 .background(Capsule().fill(t.surface2))
             }
             Button { reset() } label: {
-                Label("Reset all", ph: "arrow.counterclockwise").font(t.body(13, .semibold)).foregroundStyle(t.muted)
-                    .padding(.horizontal, 12).frame(height: 32)
-                    .overlay(Capsule().strokeBorder(t.line, lineWidth: 1))
-                    .contentShape(Capsule())
+                Text("Reset all").font(t.scale.label.font).foregroundStyle(Roles.bag.ink2)
+                    .padding(.horizontal, 8).frame(height: 32)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("Reset")
             Button { store.closePicker() } label: {
-                Ph("xmark", 14).frame(width: 34, height: 34).background(Circle().fill(t.surface2))
-                    .contentShape(Circle())
+                Ph("xmark", 18).foregroundStyle(Roles.bag.ink).frame(width: 34, height: 34)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .keyboardShortcut(.cancelAction)
@@ -175,8 +175,7 @@ struct PickerShell: View {
                         Text(s.title).font(t.body(15, .semibold))
                         Spacer(minLength: 4)
                         if s.owner {
-                            Text("OWNER").font(t.mono(9, .medium)).tracking(0.8).foregroundStyle(t.muted)
-                                .padding(.horizontal, 6).frame(height: 18).overlay(Capsule().strokeBorder(t.line, lineWidth: 1))
+                            Text("Owner").font(t.scale.micro.font).foregroundStyle(t.muted)
                         } else if hasValue(s.id) {
                             Circle().fill(t.accent).frame(width: 6, height: 6).accessibilityHidden(true)
                         }
@@ -192,7 +191,7 @@ struct PickerShell: View {
             Spacer(minLength: 0)
             if picker == .camera {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("YOUR CAMERA").font(t.mono(10.5, .medium)).tracking(1.2).foregroundStyle(t.muted)
+                    Text("Your camera").font(t.scale.label.font).foregroundStyle(t.muted)
                     Text(cameraLine).font(t.body(12)).lineSpacing(3).fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.horizontal, 6).padding(.bottom, 4)
@@ -280,7 +279,7 @@ struct PickerOptionTile: View {
                             PreviewView(preview: p, fallback: name)
                         } else if auto {
                             LinearGradient(colors: [Color(hex: 0x1B1D20), Color(hex: 0x141518)], startPoint: .top, endPoint: .bottom)
-                                .overlay(Ph("sparkles", 22).foregroundStyle(t.muted))
+                                .overlay(Ph("aperture", 22).foregroundStyle(t.muted)) // Auto: the aperture mark, as on the drums
                         } else if let p = preview, p.still != nil || p.hasRender {
                             PreviewView(preview: p, fallback: name)
                         } else {
@@ -311,14 +310,10 @@ struct PickerOptionTile: View {
     static let autoStrip = ["#1E2023", "#26292C", "#2F3236", "#383C40", "#42464A", "#4D5155", "#585C60", "#64686C", "#707478", "#7D8185"]
 }
 
-/// The amber check on a picked tile or card.
+/// Was the amber check on a picked tile. One selection mark per control (the outline), so it draws nothing now;
+/// the call site goes in the next restyle pass.
 struct PickCheck: View {
-    @Environment(\.theme) private var t
-    var body: some View {
-        Ph("checkmark", 10).foregroundStyle(t.accentInk)
-            .frame(width: 20, height: 20).background(Circle().fill(t.accent))
-            .accessibilityHidden(true)
-    }
+    var body: some View { EmptyView() }
 }
 
 /// A palette's colour strip, darkest first.

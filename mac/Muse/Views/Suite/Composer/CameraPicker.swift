@@ -160,7 +160,7 @@ struct MoveTile: View {
     private func badge(_ text: String, icon: String) -> some View {
         HStack(spacing: 5) {
             Ph(icon, 9)
-            Text(text.uppercased()).font(Fonts.font("JetBrains Mono", 9.5, .medium)).tracking(0.6)
+            Text(text).font(t.scale.micro.font)
                 .lineLimit(1).minimumScaleFactor(0.8)
         }
         .foregroundStyle(Color(hex: 0xECEAE5))
