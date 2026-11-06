@@ -104,6 +104,11 @@ When resuming:
       - **Pricing (reference to video):** $0.13 per output second before discount (shown $0.065 now), plus **$0.08 for each reference image beyond the first 5**. MUSE's identity (5) plus outfit (4) means +$0.32. Price that exactly, and consider capping at 5 images on this provider.
       - **Mapping:** fits the HD tier, and could replace 768P Standard at about the same price.
       - **Docs:** `https://dash.higgsfield.ai/models/minimax/h3/<endpoint>/llms.txt`.
+      - **Verified 2026-11-06 with the free estimate endpoint** (`POST https://api.higgsfield.ai/estimate/<model>`, which prices for this account without charging):
+        - The owner's key gets a **15% discount, not 50%**. H3 2K 10 s costs $1.105 (list $1.30), 5 s costs $0.553.
+        - With MUSE's usual 9 reference images, Higgsfield (about $1.38–1.42) costs **more** than Replicate ($1.30). It's only cheaper at ≤ 5 images.
+        - Not worth building unless the 50% tier applies to the account. Re-check with the estimate endpoint first.
+        - The SDK setup and the example are in `server/api/examples/higgsfield/`. The API account has no credit yet.
 
 ## Status (each session updates its own line)
 - 1 · Video composer follow-ups (2026-11-06) on `claude/muse-suite-core`: Recast tap-a-face (faceCrop + personHint), swap add-on pills, Era decade slider, UGC ad format wheel (`ugcFormats`, `camera.style.format`), @location (`/v1/suite/locations`, **migration 0013 after 0011/0012**), drag-to-reorder tokens, owner engine pin; catalog `tools` (Talking and UGC ad live, Extend coming soon); real Webcam/CCTV/Swirl/Tilt-shift renders; Blender previews bundled (`previews/`, catalog `preview` per move/light/angle); first-run HTTP checks on both apps. Server 359 green; Android 1305 green (release APK 30.7 MB, +9.5 MB previews); Mac CI green (run 42152398143). Next: Extend & upscale backend.
