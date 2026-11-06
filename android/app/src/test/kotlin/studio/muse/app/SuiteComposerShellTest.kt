@@ -126,6 +126,8 @@ class SuiteComposerShellTest {
     @Test fun `the price reads dash until known, Free for test renders, else the estimate's`() {
         assertEquals("—", ComposerPrice.short(null))
         assertEquals("Generate · —", ComposerPrice.button(null))
+        assertEquals("…", ComposerPrice.short(null, pricing = true))
+        assertEquals("Generate · Pricing…", ComposerPrice.button(null, pricing = true))
         assertNull(ComposerPrice.line(null))
         val e = SuiteEstimate(estimate = .16, priceLine = "about $0.16 · 8 s", buttonLabel = "Generate · 8 s · $0.16")
         assertEquals("$0.16", ComposerPrice.short(e))

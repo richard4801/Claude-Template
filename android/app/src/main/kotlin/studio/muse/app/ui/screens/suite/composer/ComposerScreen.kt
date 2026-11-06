@@ -3,6 +3,8 @@ package studio.muse.app.ui.screens.suite.composer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -356,6 +358,8 @@ class ComposerUi(
     /** The rig check's warning row (RigCheckRow.kt), drawn just above the bottom bar; the argument is `wide`. */
     val rigRow: @Composable (Boolean) -> Unit = {},
 ) {
+    /** No price yet and no reason why: the estimate is on its way (the button says "Pricing…"). */
+    val pricing: Boolean get() = live && est == null && blocker == null
     val toolSlots: List<ToolSlot> get() = ToolSlots.of(d.tool, inputs, slots, catalog?.recastMaxPeople ?: SuiteRules.MAX_CAST)
     val showPrompt: Boolean get() = d.tool == ComposerTool.SHOT || d.tool == ComposerTool.TALKING || d.tool == ComposerTool.UGC || d.tool == ComposerTool.EXTEND ||
         (d.tool == ComposerTool.SWAP && d.swapPrompt)
@@ -431,7 +435,7 @@ private fun BarButton(modifier: Modifier, square: Boolean = false, content: @Com
 @Composable
 private fun RoundGenerate(ui: ComposerUi) {
     val m = muse
-    val price = ComposerPrice.short(ui.est)
+    val price = ComposerPrice.short(ui.est, ui.pricing)
     Column(Modifier.size(62.dp).alpha(if (ui.canGo) 1f else .5f).clip(CircleShape).background(m.t.cta).press(onClick = ui.onGenerate)
         .semantics { contentDescription = "Generate, $price"; role = Role.Button }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         SIc("sparkle", 18.dp, m.t.ctaInk)
@@ -775,7 +779,7 @@ private fun WideGenerate(ui: ComposerUi) {
     val m = muse
     Box(Modifier.height(48.dp).alpha(if (ui.canGo) 1f else .5f).clip(RoundedCornerShape(if (m.isA) 0.dp else 10.dp)).background(m.t.cta).press(onClick = ui.onGenerate)
         .semantics { role = Role.Button }.padding(horizontal = 22.dp), contentAlignment = Alignment.Center) {
-        T(ComposerPrice.button(ui.est).let { if (m.isA) it.uppercase() else it }, m.type.mono.copy(fontSize = 12.5.sp, letterSpacing = .12.em, fontWeight = FontWeight.Medium), m.t.ctaInk, maxLines = 1)
+        T(ComposerPrice.button(ui.est, ui.pricing).let { if (m.isA) it.uppercase() else it }, m.type.mono.copy(fontSize = 12.5.sp, letterSpacing = .12.em, fontWeight = FontWeight.Medium), m.t.ctaInk, maxLines = 1)
     }
 }
 
@@ -786,13 +790,15 @@ private fun WideBar(ui: ComposerUi) {
     val d = ui.d
     Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (!ui.live) { Box(Modifier.weight(1f)) { ComingSoonLine(ui) }; return@Row }
-        Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        // Icon + value pills; when they don't all fit, the row scrolls and fades at the edge that has more (WS4 audit).
+        val scroll = rememberScrollState()
+        Row(Modifier.weight(1f).barScrollFade(scroll).horizontalScroll(scroll), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             val tiers = ui.catalog?.tiers?.ifEmpty { null }?.map { it.id } ?: SuiteRules.TIERS
             MenuPill("gauge", SuiteRules.tierLabel(d.quality), "Quality", tiers.map { t -> "${SuiteRules.tierLabel(t)} · ${ComposerPrice.short(ui.tierEstimates[t])}" to (t == d.quality) }) { i -> ui.update { it.copy(quality = tiers[i]).fit(ui.catalog) } }
             val engines = ui.catalog?.tier(d.quality)?.models.orEmpty()
             if (ui.owner && engines.isNotEmpty() && d.tool in ComposerDraft.PROMPT_TOOLS) {
                 val items = listOf("Auto" to (d.engineModel == null)) + engines.map { e -> (e.name.ifBlank { e.model } + (e.resolution.ifBlank { null }?.let { " · $it" } ?: "")) to (e.model == d.engineModel) }
-                MenuPill("cube", "Engine · ${d.engineLabel(ui.catalog)}", "Engine (owner)", items) { i -> ui.update { it.pin(engines.getOrNull(i - 1)) } }
+                MenuPill("cube", d.engineLabel(ui.catalog), "Engine (owner)", items) { i -> ui.update { it.pin(engines.getOrNull(i - 1)) } }
             }
             val range = d.lengthRange(ui.catalog)
             if (d.tool == ComposerTool.EXTEND) {
@@ -801,9 +807,9 @@ private fun WideBar(ui: ComposerUi) {
             } else {
                 MenuPill("ratio", d.aspect, "Shape", ComposerDraft.SHAPES.map { it to (it == d.aspect) }) { i -> ui.update { it.copy(aspect = ComposerDraft.SHAPES[i]) } }
                 SliderPill("clock", "${d.duration}s", "Length", d.duration, range) { v -> ui.update { it.copy(duration = v) } }
-                Pill("volume", "Sound", if (d.sound) "On" else "Off", "Sound") { ui.update { it.copy(sound = !it.sound) } }
+                Pill("volume", if (d.sound) "On" else "Off", null, "Sound") { ui.update { it.copy(sound = !it.sound) } }
                 val sp = listOf(null, true, false)
-                MenuPill("talk", "Speaking ${when (d.speaking) { true -> "On"; false -> "Off"; null -> "Auto" }}", "Speaking", listOf("Auto", "On", "Off").mapIndexed { i, l -> l to (sp[i] == d.speaking) }) { i -> ui.update { it.copy(speaking = sp[i]) } }
+                MenuPill("talk", when (d.speaking) { true -> "On"; false -> "Off"; null -> "Auto" }, "Speaking", listOf("Auto", "On", "Off").mapIndexed { i, l -> l to (sp[i] == d.speaking) }) { i -> ui.update { it.copy(speaking = sp[i]) } }
             }
             val max = ui.catalog?.takesMax ?: 4
             MenuPill("layers", "${d.takes}/$max", "Takes", (1..max).map { "$it take${if (it > 1) "s" else ""}" to (it == d.takes) }) { i -> ui.update { it.copy(takes = i + 1) } }
@@ -883,3 +889,21 @@ private fun SliderPill(icon: String, label: String, tip: String, value: Int, ran
         }
     }
 }
+
+/**
+ * The bottom bar's scroll cue (AI suite, workstream 1): the pills fade out over 24 dp at an edge with more to scroll to,
+ * so a cut-off pill reads as "scroll", not as a bug. An alpha mask, so it works on any theme's background.
+ */
+private fun Modifier.barScrollFade(scroll: androidx.compose.foundation.ScrollState): Modifier =
+    graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            val w = 24.dp.toPx().coerceAtMost(size.width / 2)
+            if (scroll.canScrollForward) drawRect(
+                androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color.Black, Color.Transparent), startX = size.width - w, endX = size.width),
+                topLeft = androidx.compose.ui.geometry.Offset(size.width - w, 0f), size = androidx.compose.ui.geometry.Size(w, size.height),
+                blendMode = androidx.compose.ui.graphics.BlendMode.DstIn)
+            if (scroll.canScrollBackward) drawRect(
+                androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color.Transparent, Color.Black), startX = 0f, endX = w),
+                size = androidx.compose.ui.geometry.Size(w, size.height), blendMode = androidx.compose.ui.graphics.BlendMode.DstIn)
+        }
