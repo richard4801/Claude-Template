@@ -72,3 +72,72 @@ These can't be measured here.
   For detail, use Instruments **Allocations** (with VM Tracker), or `footprint MUSE` / `vmmap --summary MUSE` in Terminal. Compare with the CI artifact from before this pass.
 - **Scrolling:** use Instruments' **SwiftUI** template (View Body and View Properties) plus **Animation Hitches**. Scroll a Gallery with 200+ takes, and leave Claude Code streaming in the background to confirm the lists no longer re-render per event.
 - **Network:** Settings → Developer → Performance shows "Live updates" (should read `1 · N`) and "Requests" (sent, joined, cache hits). For a wire view, use Proxyman or Charles, or `nettop -p MUSE`. ⌘-Tab away and back: no new requests while "Live updates" is 1.
+
+## Android
+
+Scope: performance only, no visual changes. The AI Suite (`ui/screens/suite/**`), the Edit suite and video editor (`ui/screens/edit/**`) and Photoshoot (`ShootScreen.kt`) were off limits, and their files are untouched. Their shared infrastructure was in scope: the HTTP layer, the repository's loading, the build (R8, resources, Baseline Profile) and the Compose compiler setup.
+
+### Findings
+
+Request counts come from `RequestCountTest`. It runs the real `MuseRepository` and `HttpMuseApi` against a local stand-in server with a fixed 40 ms per request, and an owner with three models. The "before" numbers were measured on the unchanged code (`d91b992`) with the same test.
+
+| Finding | Severity | Fix | Before → after |
+|---|---|---|---|
+| The release build had R8 off (`isMinifyEnabled = false`): about 41 MB of raw dex in 4 files, plus Kotlin debug probes and unused resources. | High | R8 with `proguard-android-optimize.txt` plus `app/proguard-rules.pro` (keeps for the kotlinx.serialization models, the Retrofit service and suspend signatures, and the demo JSON read by absolute path), and `isShrinkResources = true`. | Release APK (unsigned) **31.9 MB → 20.4 MB**. The ~37 MB reported before was likely a debug build, which has no R8 and is unchanged. Dex 14.8 MB (40.7 MB raw) → **3.6 MB** (7.3 MB raw). `resources.arsc` 0.77 → 0.40 MB. |
+| The launch load ran about 16 requests one after another: models, outfits, jobs, takes, balance, wallet, posts and settings, then LoRA and accounts per model, then the GPU state. | High | `MuseRepository.refresh()` runs them side by side (`coroutineScope` and `async`). The per-model LoRA and accounts follow the models as a second batch. Same requests, same error handling. | 16 requests either way. **1356 ms → 252 ms** at 40 ms per request (single runs, each the first test in a fresh JVM): about 16 round trips → 3. With a real ~150 ms round trip to Railway, roughly 2.4 s → 0.5 s before Home, Gallery and a model's profile have their data. |
+| Identical GETs in flight were each sent, for example a reconnect catch-up racing a "Try again" tap, or two screens asking for one catalog. | Medium | `RequestCache` (`data/RequestCache.kt`) in `HttpMuseApi`. Identical reads in flight (same path and session token) share one request and its error. If the caller that started a request leaves its screen, the others ask again. | Two refreshes at once: **30 → 14** requests |
+| Screens refetched catalogs every time they opened: Templates, the prompt library and each prompt's editor, the owner's studio settings and image engine, image models, the suite catalog, settings and locations. | Medium | The same `RequestCache` keeps catalogs in memory (5 min, templates 60 s), **only while the live stream is connected**. Writes, the matching live events (`settings`, `prompts`, `promptScript`, `template`, `suite`) and every stream (re)connect drop them. A reply fetched across an invalidation is not stored. Without a stream (tests, offline) every read goes to the server. Templates → Refresh still forces a fetch. | Templates ×2, prompt library ×2, settings and image engine ×2, suite catalog ×3 at once: **11 → 4** requests |
+| Every return to the app (Activity `onStart`) restarted the live stream and refetched all lists (about 16 requests), including rotation and coming back from a share sheet or a post handoff. | Medium | `onBackground()` from `onStop`. A return within 30 s keeps the stream and the lists. A stream that dropped meanwhile reconnects by itself and catches up then. | A quick share or handoff round trip: about 16 → **0** requests (by construction, not measured) |
+| None of the long lists were lazy: Gallery, Queue (all four theme layouts), Posts, Templates and the image-model catalog composed every row and loaded every thumbnail (`Column` + `verticalScroll`). | High | `LazyColumn` with stable keys (take, job, post and template ids, de-duplicated) and `contentType`, using the same padding and spacing. Posts' per-row menu state now follows its post (it was positional). | 1016 Roborazzi screenshots: identical pixels before and after. The 4 `template_use_prompt` shots differ only in the random seed text, which changes on every run. With 300 takes, Gallery composes about 6 rows instead of 100. |
+| Home read the whole studio state in composition (`repo.state.collectAsState()` for the wallet, `repo.state.value` for the model cards), so it recomposed on every live event, render progress included. | Medium | The wallet and each model's card image are in `HomeState` (equal states are skipped), and the model cards are keyed. | Not measurable here (Layout Inspector recomposition counts on a device) |
+| Compose treated many data classes as unstable (JSON fields, `File`, arrays) or unknown, so screens re-ran parts whose inputs hadn't changed. | Medium | `android/compose_stability.conf`: `kotlin.collections.*`, `studio.muse.app.data.*`, `studio.muse.core.**` and the kotlinx JSON types, all immutable. `-PcomposeReports=true` writes the compiler reports. | Clean compiles: unstable classes **116 → 55** (what's left: ViewModels, the Activity, platform engines), runtime-checked classes 112 → 13, skippable composables 782 → 814, unstable composable parameters 32 → 23 (ViewModels and players) |
+| Video previews kept playing when scrolled off screen: `StageVideo` played whenever the app was resumed, and `TakeVideo` whenever its page was current. | Medium | Both play only while at least 20% is on screen (`Modifier.onVisibilityChanged`), as well as resumed and, for `TakeVideo`, on the current page. Players were already released on dispose. | Not measurable here |
+| The launch path did disk and Keystore work on the main thread: deleting the old `sfx` cache dir in `AppContainer.create`, and the AES-GCM Keystore decrypt of the session token (a binder call) inside the prefs flow, which runs on `Dispatchers.Main`. | Medium | The delete runs on `Dispatchers.IO`. `DataStorePrefs.prefs` is `flowOn(Dispatchers.IO)`. | Not measurable here (Perfetto or StrictMode on a device) |
+| Splash bug: `LaunchedEffect(Unit)` captured the first `next`, from before the saved session had loaded, so after 2.6 s a signed-in user could be sent to Welcome. | Low (bug) | `rememberUpdatedState(next)` | — |
+| No Baseline Profile for the app's own code: only the libraries' profiles shipped. | Medium | `app/src/main/baseline-prof.txt` (wildcard rules for the start path: Application, container, data layer, `core`, theme, components, splash, Home, Gallery, Queue). AGP expands and R8-rewrites it into `assets/dexopt/baseline.prof` (19,836 rules in the release build), and `profileinstaller` (from Compose) installs it. | Not measurable here. A Macrobenchmark `BaselineProfileRule` on a device should replace the hand-written rules later. |
+| There was no "fully drawn" signal for cold start. | — | `MainActivity` calls `reportFullyDrawn()` on the frame after the studio's lists load (or at once when signed out). | See "How to measure on a phone" |
+
+Checked and left as is:
+- **Images:** every network image goes through `RefImage` → Coil `AsyncImage`. That resolves the target size from the layout, so grids decode at tile size, not full resolution. Coil's default memory cache, disk cache and hardware bitmaps are on, and the bundled samples are 3 to 6 KB. What can't be fixed in the app is that model sheet slots and outfit fronts are full-size uploads, so a 150 dp card still downloads the whole file. Server-side thumbnail URLs are needed for that (a server change).
+- **Native libraries:** about 20 KB per ABI (4 ABIs), so ABI splits aren't worth it.
+- **`assets/previews` (10.7 MB, now more than half the APK):** the 40 move loops meet their spec (320×400, 204–253 KB each). They belong to the AI Suite (WS1), so they were not re-encoded here. Options for the owner:
+  - re-encode them at a lower bitrate (about −4 MB);
+  - deliver them on demand (Play Asset Delivery or the server).
+- **`assets/hardware` (2.8 MB WebP, 1024 px):** already WebP. The suite decodes them with `inSampleSize` 2 to 8, so shrinking the files would change what the suite shows (owner: WS1). Re-encoding at quality 80 would save about 1 MB.
+- **Fonts (32 TTFs, 1.2 MB compressed):** all used by the four themes. Subsetting them to Latin would save about 0.6 MB, but names in other scripts would fall back to the system font. That's a design call.
+- **R8 warnings:** R8 in AGP 8.13 warns that it can't read Kotlin 2.4 metadata (159 warnings). Nothing here reads that metadata at run time (no kotlin-reflect), so it is harmless. It goes away with a newer AGP or R8.
+- **The repository still makes 2 requests per model** (LoRA and accounts) on each load. Fewer requests needs a bulk server endpoint.
+- **The splash holds for 2.6 s** before Home (tap skips it). That is a design choice, not load time. Home's data is ready about 0.5 s after launch (see above), so the splash, not the network, sets when Home appears.
+
+### Tests
+
+From `android/`: `./gradlew :core:test :app:testDebugUnitTest` (run as `recordRoborazziDebug` to also write the screenshots).
+
+| | core | app | Failures |
+|---|---|---|---|
+| Before (`d91b992`) | 105 | 1255 | — |
+| After | 105 | 1260 | 0 |
+
+The new tests are `RequestCountTest` (the numbers above; it prints `[requests] …`) and `RequestCacheTest` (4 tests: coalescing, errors shared, a cancelled caller, TTL and invalidation). The contract tests against `server/mock` and `server/api` (`HttpMuseApiTest`, `RealApiContractTest`, `SuiteHttpFirstRunTest`) pass unchanged.
+
+An earlier draft cached catalogs without the live stream and broke two of them, because another client's change wasn't seen. That is why caching now needs a connected stream.
+
+Release build: `./gradlew :app:assembleRelease` builds `app-release-unsigned.apk`, because no release signing is configured. Before shipping, smoke-test the R8 build on a phone:
+1. Sign in.
+2. Check that Home loads.
+3. Open a take with video.
+4. Open Templates and the owner's Settings → Prompts.
+5. Turn on demo mode.
+
+### How to measure on a phone
+
+These can't be measured here (no device or emulator).
+
+- **Cold start** (target under about 1.5 s on a mid phone):
+  1. Install the release build: sign it with a debug key, or add a signing config.
+  2. Run `adb shell am start -W -S studio.muse.app/.MainActivity`. `-S` force-stops the app first, so this is a cold start. **TotalTime** is the time to the first frame, which is the splash.
+  3. Run `adb logcat -s ActivityTaskManager`. The line `Displayed studio.muse.app/.MainActivity: +N ms` is the same first frame. `Fully drawn studio.muse.app/.MainActivity: +N ms` comes when the studio's lists have loaded, which is when Home's content is ready.
+  4. Run it 5 times and record the median of each. For the Baseline Profile's effect, compare with `adb shell cmd package compile -m verify -f studio.muse.app` (no profile) against a fresh install (profile applied), or `adb shell cmd package compile -m speed-profile -f studio.muse.app`.
+- **Scrolling:** with Profile GPU Rendering (Developer options → "Profile HWUI rendering" → bars), or with `adb shell dumpsys gfxinfo studio.muse.app reset` then `adb shell dumpsys gfxinfo studio.muse.app` after scrolling Gallery or Queue with 200+ items. Read "Janky frames" and the 90th and 95th percentiles. Layout Inspector's recomposition counts show Home no longer recomposing on every live event while a render runs.
+- **Network:** Android Studio's Network Inspector, or the server log. Expect one request per list at launch, and none when going to another app and back within 30 s.
+- **APK:** run `apkanalyzer apk summary` or Build → Analyze APK on `app-release-unsigned.apk` (20.4 MB at this pass).
