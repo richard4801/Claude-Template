@@ -9,6 +9,8 @@ struct ComposerBottomBar: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
     @State private var open: String?
+    /// The swap take the Upscale pill's picker is open for.
+    @State private var upscaleTake: Take?
 
     private var tool: ComposerTool { store.suite.composer.tool }
     private var isSwap: Bool { tool == .swap || tool == .recast }
@@ -24,6 +26,10 @@ struct ComposerBottomBar: View {
                              options: ComposerSpeaking.allCases.map { ($0.label, $0) }, selected: store.suite.swap.speaking) { store.suite.swap.speaking = $0 }
                     addOnPills
                 }
+            } else if tool == .extend {
+                // Extend: the new part's length on this quality, and takes. The shape and sound follow the video.
+                lengthPill
+                takesPill
             } else {
                 shapePill
                 lengthPill
@@ -90,7 +96,7 @@ struct ComposerBottomBar: View {
         } popover: {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("LENGTH").font(t.mono(10.5, .medium)).tracking(1.2)
+                    Text(tool == .extend ? "ADDED LENGTH" : "LENGTH").font(t.mono(10.5, .medium)).tracking(1.2)
                     Spacer()
                     Text("\(store.suite.composer.duration) s").font(t.mono(13, .medium))
                 }
@@ -123,7 +129,8 @@ struct ComposerBottomBar: View {
     /// Swap's add-ons as pills (Edit, Fast · beta, Upscale), each with its own price; tapping one again goes back to
     /// the Quality ladder.
     private var addOnPills: some View {
-        let pills = SwapAddOns.pills(store.videoFeatures, clipSeconds: store.clip?.durationSec, takes: store.takeCount, lipSync: store.lipSync)
+        let pills = SwapAddOns.pills(store.videoFeatures, clipSeconds: store.clip?.durationSec, takes: store.takeCount, lipSync: store.lipSync,
+                                     upscaleSeconds: swapTake?.durationSec)
         return HStack(spacing: 6) {
             ForEach(pills) { p in addOnPill(p) }
         }
@@ -133,9 +140,9 @@ struct ComposerBottomBar: View {
         let on = p.quality != nil && p.quality == store.suite.swap.addOn
         return Button {
             if p.quality == nil {
-                // Upscale (once it ships) works on the finished take.
-                if let take = store.takes(of: store.swapJob).first(where: { $0.videoUrl != nil }), let size = store.videoFeatures.upscale?.sizes.first(where: \.available) {
-                    store.upscale(take, size: size)
+                // Upscale works on the finished swap take: its sizes and prices in a small picker.
+                if let take = swapTake {
+                    upscaleTake = take
                 } else {
                     store.showToast("Upscale works on a finished take · generate it first")
                 }
@@ -159,8 +166,17 @@ struct ComposerBottomBar: View {
         .buttonStyle(.plain)
         .disabled(!p.available)
         .help(p.comingSoon ? "\(p.label) · coming soon" : p.detail)
+        .popover(item: p.quality == nil ? $upscaleTake : .constant(nil), arrowEdge: .top) { take in
+            UpscalePicker(take: take) { upscaleTake = nil }
+                .environment(store)
+                .environment(\.theme, PickerTheme.dark)
+                .environment(\.colorScheme, .dark)
+        }
         .accessibilityLabel("\(p.label) add-on, \(p.priceText)\(on ? ", on" : "")")
     }
+
+    /// The finished swap take (a render with a stored file) Upscale works on.
+    private var swapTake: Take? { store.takes(of: store.swapJob).first { $0.canUpscale } }
 
     /// Owner only: pin this shot's engine (one of the quality's models), "Engine · Auto" = the ladder.
     private var enginePill: some View {

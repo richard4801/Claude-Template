@@ -223,6 +223,15 @@ struct SuiteResultPane: View {
                     MButton("Share", icon: "square.and.arrow.up", size: .small) { store.openPostSheet(take) }
                 }
                 .padding(.top, 8)
+                // Finish the take: a longer version (Extend) or a sharper one (Upscale).
+                let canExtend = ExtendSource.take(take) != nil
+                if canExtend || take.canUpscale {
+                    HStack(spacing: 6) {
+                        if canExtend { MButton("Extend", icon: "arrow.right.to.line", size: .small) { store.openExtend(take) } }
+                        if take.canUpscale { UpscaleButton(take: take, size: .small) }
+                    }
+                    .padding(.top, 6)
+                }
             }
         }
     }
