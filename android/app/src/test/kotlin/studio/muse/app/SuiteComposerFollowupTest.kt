@@ -28,6 +28,12 @@ import studio.muse.app.data.SuiteShotRequest
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import studio.muse.app.data.VideoDraft
+import studio.muse.app.data.VideoFeatures
+import studio.muse.app.ui.screens.suite.composer.SwapAddon
+import studio.muse.app.ui.screens.suite.composer.SwapAddons
+import studio.muse.core.Pricing
+import studio.muse.core.VideoOption
 
 /** The composer's follow-ups (AI suite, workstream 1): tap a face, swap add-ons, the era slider, UGC formats, @location, reorder, the engine pin. */
 class SuiteComposerFollowupTest {
@@ -173,5 +179,46 @@ class SuiteComposerFollowupTest {
         val v = ad.references!!.videos!!.single()
         assertEquals("u/ad.mp4", v.video.key); assertEquals("style", v.use)
         assertNull(ad.speaking)
+    }
+
+    // ---------------------------------------------------------------- 2. Character swap add-ons
+
+    @Test fun `swap add-ons are pills with their own prices, beside the quality ladder`() {
+        val vf = VideoFeatures.DEFAULT
+        val pills = SwapAddons.pills(vf, fastBeta = true, takes = 1, clipSeconds = 9.4)
+        assertEquals(listOf(SwapAddon.EDIT, SwapAddon.FAST, SwapAddon.UPSCALE), pills.map { it.addon })
+        // The prices are the add-on estimate's (the same formula as the video studio and the server).
+        val edit = VideoDraft(takes = 1).pick(VideoOption.EDIT).spec().copy(clipSeconds = 9.4)
+        assertEquals(Pricing.money(Pricing.totalCost(edit)), pills[0].price)
+        val fast = VideoDraft(takes = 1).pick(VideoOption.FAST).spec().copy(clipSeconds = 9.4)
+        assertEquals(Pricing.money(Pricing.totalCost(fast)), pills[1].price)
+        assertFalse(pills[2].available); assertEquals("Soon", pills[2].price)
+        // Fast · beta only with its switch on; no clip yet = no price.
+        assertEquals(listOf(SwapAddon.EDIT, SwapAddon.UPSCALE), SwapAddons.pills(vf, false, 1, 9.4).map { it.addon })
+        assertEquals("—", SwapAddons.pills(vf, true, 1, null)[0].price)
+        // Two takes cost twice.
+        val e2 = SwapAddons.estimate(SwapAddon.EDIT, 2, 9.4)
+        assertEquals(Pricing.totalCost(edit) * 2, e2.estimate, 1e-9)
+        assertEquals(Pricing.genLabel(edit.copy(takes = 2)), e2.buttonLabel)
+        assertTrue(e2.buttonLabel.startsWith("Generate · "))
+    }
+
+    @Test fun `an add-on sends a video job on its own engine, and the ladder stays the default`() {
+        val d = ComposerDraft(tool = ComposerTool.SWAP, modelId = SampleData.DEMO, outfitId = SampleData.GREEN, quality = "hd", takes = 2, speaking = true)
+        assertNull(d.swapAddon)
+        val recast = RecastDraft(clipId = SampleData.SAMPLE_CLIP, keepAudio = false)
+        // Without an add-on: the suite's swap at the picked quality.
+        assertEquals("hd", d.request(InputSlots(), SuiteInputs(), recast).quality)
+        val e = d.copy(addon = "edit")
+        assertEquals(SwapAddon.EDIT, e.swapAddon)
+        val r = SwapAddons.request(e, recast, SwapAddon.EDIT, 9.4)
+        assertEquals("h3", r.engine); assertEquals("full", r.use); assertEquals(Pricing.STEPS_DEFAULT, r.steps)
+        assertEquals(SampleData.DEMO, r.modelId); assertEquals(SampleData.GREEN, r.outfitId); assertEquals(SampleData.SAMPLE_CLIP, r.clipId)
+        assertEquals(2, r.takes); assertFalse(r.keepAudio); assertEquals(true, r.speaking); assertNull(r.quality)
+        val f = SwapAddons.request(d.copy(addon = "fast"), recast, SwapAddon.FAST, 9.4)
+        assertEquals("viggle", f.engine)
+        // Upscale is never a render choice, and add-ons are Character swap's only.
+        assertNull(d.copy(addon = "upscale").swapAddon)
+        assertNull(d.copy(tool = ComposerTool.SHOT, addon = "edit").swapAddon)
     }
 }

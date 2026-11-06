@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -136,7 +137,12 @@ fun SuiteComposerScreen(toolId: String? = null) {
     val live = d.tool.isLive(catalog)
     val req = d.request(slots, inputs, recast, own)
     val problem = d.problem(slots, recast, own)
-    val (est, estErr) = rememberEstimate(req.takeIf { problem == null && live }, catalog?.enabled == true)
+    // Character swap's add-ons (Edit, Fast · beta) are priced by the add-on estimate (the video studio's), not the ladder's.
+    val clipSeconds = recast.clipId?.let { id -> video.clip?.takeIf { it.id == id }?.durationSec ?: if (id == SampleData.SAMPLE_CLIP) SampleData.sampleMeta.durationSec else null }
+    val addon = d.swapAddon
+    val addonPills = if (d.tool == ComposerTool.SWAP) SwapAddons.pills(st.video ?: studio.muse.app.data.VideoFeatures.DEFAULT, prefs.fastBeta, d.takes, clipSeconds) else emptyList()
+    val (suiteEst, estErr) = rememberEstimate(req.takeIf { problem == null && live && addon == null }, catalog?.enabled == true)
+    val est = if (addon != null) clipSeconds?.takeIf { problem == null }?.let { SwapAddons.estimate(addon, d.takes, it) } else suiteEst
     val blocker = ComposerPrice.blocker(problem, est, estErr)
     val owner = store.owner || prefs.owner
     val wantTiers = sheet?.kind == SheetKind.SETTINGS || d.collapsed
@@ -153,7 +159,19 @@ fun SuiteComposerScreen(toolId: String? = null) {
         if (blocker != null) { c.repo.toast(blocker); return }
         if (est == null) return
         open(null)
+        if (addon != null) {
+            scope.launch { c.repo.createJob(SwapAddons.request(d, recast, addon, clipSeconds))?.let { j -> store.shotJobs.update { (it - j.id) + j.id } } }
+            return
+        }
         scope.launch { store.generate(req, store.shotJobs) }
+    }
+    fun onAddon(a: SwapAddon) {
+        val pill = addonPills.firstOrNull { it.addon == a } ?: return
+        when {
+            a == SwapAddon.UPSCALE -> c.repo.toast(if (pill.available) "Upscale a finished take from its result" else "Upscale is coming soon")
+            !pill.available -> c.repo.toast("${a.label} isn't available right now")
+            else -> update { it.copy(addon = if (it.addon == a.id) null else a.id) }
+        }
     }
     fun pickCharacter(id: String?, outfit: String?) = update { x ->
         val t = when {
@@ -204,6 +222,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
     val job = started.lastOrNull()?.let { id -> st.jobs.firstOrNull { it.id == id } }
     val ui = ComposerUi(
         d = d, cat = camCat, catalog = catalog, slots = slots, recast = recast, inputs = inputs, est = est, blocker = blocker, tierEstimates = tierEstimates, live = live, own = own,
+        addons = addonPills, onAddon = ::onAddon,
         lead = st.model(d.characterId), clipName = recast.clipId?.let { id -> video.clip?.takeIf { it.id == id }?.name ?: if (id == SampleData.SAMPLE_CLIP) SampleData.sampleMeta.name else "Your clip" },
         models = st.models, outfits = st.outfitsOf(d.characterId),
         update = ::update, open = ::open, onGenerate = ::generate, onSlot = ::onSlot, onClearSlot = { k ->
@@ -278,6 +297,9 @@ class ComposerUi(
     val onSlot: (ToolSlot) -> Unit,
     val onClearSlot: (String) -> Unit,
     val onPick: (PromptTokens, Caret, Suggestion) -> PromptTokens?,
+    /** Character swap's add-on pills (empty on other tools). */
+    val addons: List<AddonPill> = emptyList(),
+    val onAddon: (SwapAddon) -> Unit = {},
 ) {
     val toolSlots: List<ToolSlot> get() = ToolSlots.of(d.tool, inputs, slots, catalog?.recastMaxPeople ?: SuiteRules.MAX_CAST)
     val showPrompt: Boolean get() = d.tool == ComposerTool.SHOT || d.tool == ComposerTool.TALKING || d.tool == ComposerTool.UGC || (d.tool == ComposerTool.SWAP && d.swapPrompt)
@@ -310,6 +332,7 @@ private fun PhoneComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent
                 ui.toolSlots.forEach { s -> SlotCard(ui, s, Modifier.weight(1f).height(96.dp)) }
                 repeat((3 - ui.toolSlots.size).coerceAtLeast(0)) { Spacer(Modifier.weight(1f)) }
             }
+            if (ui.addons.isNotEmpty()) AddonPills(ui)
             PhoneBar(ui)
         }
     }
@@ -636,6 +659,7 @@ private fun WideComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent:
                         if (ui.showPrompt) Prompt(ui, Modifier.weight(1f), maxHeight = 160.dp) else Spacer(Modifier.weight(1f))
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { ui.toolSlots.forEach { s -> SlotCard(ui, s, Modifier.size(104.dp)) } }
                     }
+                    if (ui.addons.isNotEmpty()) AddonPills(ui)
                 }
                 Box(Modifier.fillMaxWidth().height(1.dp).background(m.t.line))
                 WideBar(ui)
@@ -675,6 +699,34 @@ private fun WideBar(ui: ComposerUi) {
         }
         ui.blocker?.takeIf { !ui.empty }?.let { T(it, m.type.tiny, m.t.warn, Modifier.widthIn(max = 200.dp), maxLines = 2) }
         WideGenerate(ui)
+    }
+}
+
+/**
+ * Character swap's add-ons as pills beside the quality ladder: Edit, Fast · beta, Upscale, each with its own price. One
+ * picked replaces the quality render; tapping it again goes back to the ladder.
+ */
+@Composable
+private fun AddonPills(ui: ComposerUi) {
+    val m = muse
+    val picked = ui.d.swapAddon
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            T("ADD-ONS", m.type.mono.copy(fontSize = 10.5.sp, letterSpacing = .14.em), m.t.muted, maxLines = 1)
+            ui.addons.forEach { p ->
+                val on = picked == p.addon
+                val shape = RoundedCornerShape(if (m.isA) 0.dp else 999.dp)
+                Box(Modifier.heightIn(min = 48.dp).press { ui.onAddon(p.addon) }
+                    .semantics(mergeDescendants = true) { selected = on; role = Role.Button; contentDescription = "Add-on ${p.addon.label}, ${p.price}" }, contentAlignment = Alignment.Center) {
+                    Row(Modifier.height(36.dp).alpha(if (p.available) 1f else .5f).clip(shape).background(if (on) m.t.ink else m.t.bg).border(if (on) 2.dp else 1.dp, if (on) m.t.ink else m.t.line, shape)
+                        .padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        T(p.addon.label, m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), if (on) m.t.bg else m.t.ink, maxLines = 1)
+                        T(p.price, m.type.mono.copy(fontSize = 12.sp), if (on) m.t.bg.copy(alpha = .8f) else m.t.muted, maxLines = 1)
+                    }
+                }
+            }
+        }
+        picked?.let { T("${it.label} · ${it.detail} · tap again for ${SuiteRules.tierLabel(ui.d.quality)}", m.type.tiny, m.t.muted, maxLines = 2) }
     }
 }
 

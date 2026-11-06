@@ -7,6 +7,10 @@ import studio.muse.app.data.SuiteCatalog
 import studio.muse.app.data.SuiteEstimate
 import studio.muse.app.data.SuiteInputs
 import studio.muse.app.data.SuiteRules
+import studio.muse.app.data.JobRequest
+import studio.muse.app.data.VideoDraft
+import studio.muse.app.data.VideoFeatures
+import studio.muse.core.VideoOption
 import studio.muse.app.data.SuiteRefAudio
 import studio.muse.app.data.SuiteRefImage
 import studio.muse.app.data.SuiteRefVideo
@@ -88,7 +92,11 @@ data class ComposerDraft(
     val title: String = "",
     /** Directed mode (owner): the camera JSON the camera stage applied; it replaces the chips' camera when set. */
     val directed: String? = null,
+    /** Character swap: an add-on (edit | fast) instead of the quality render; null = the quality ladder. */
+    val addon: String? = null,
 ) {
+    /** The picked add-on of Character swap (null on other tools or on the quality ladder). */
+    val swapAddon: SwapAddon? get() = if (tool == ComposerTool.SWAP) SwapAddon.of(addon)?.takeIf { it.option != null } else null
     /** The tool card's name and tagline: the preset's when one was picked, else the tool's. */
     fun cardTitle(cat: CameraCatalog): String = settings.preset?.let { id -> cat.presets.firstOrNull { it.id == id }?.label } ?: tool.title
     fun cardTagline(cat: CameraCatalog): String = settings.preset?.let { id -> cat.presets.firstOrNull { it.id == id }?.description } ?: tool.tagline
@@ -207,6 +215,58 @@ data class ComposerDraft(
         val PHOTO_PRESETS = setOf("product_hero")
         val SHAPES = listOf("9:16", "1:1", "16:9")
     }
+}
+
+/**
+ * Character swap's add-ons (plans/api.md "App clean-up" §2): Edit and Fast · beta render the swap on their own engines
+ * (POST /v1/jobs), Upscale sharpens a finished take (coming soon). They sit beside the quality ladder as pills; the
+ * ladder stays the main choice.
+ */
+enum class SwapAddon(val id: String, val label: String, val option: VideoOption?, val detail: String) {
+    EDIT("edit", "Edit", VideoOption.EDIT, VideoOption.EDIT.detail),
+    FAST("fast", "Fast · beta", VideoOption.FAST, VideoOption.FAST.detail),
+    UPSCALE("upscale", "Upscale", null, "Sharper 1080p, 2K or 4K from a finished take");
+
+    companion object {
+        fun of(id: String?) = entries.firstOrNull { it.id == id }
+    }
+}
+
+/** A pill: the add-on, whether it can be picked now, and its price ("$0.67", "—", "Soon"). */
+data class AddonPill(val addon: SwapAddon, val available: Boolean, val price: String)
+
+object SwapAddons {
+    /**
+     * The pills: Edit, Fast · beta (only with the Fast beta switch on and when the server offers it) and Upscale
+     * (greyed "Soon" until the server says it's available).
+     */
+    fun pills(video: VideoFeatures, fastBeta: Boolean, takes: Int, clipSeconds: Double?): List<AddonPill> = SwapAddon.entries.mapNotNull { a ->
+        when (a) {
+            SwapAddon.UPSCALE -> AddonPill(a, video.upscale.available, if (video.upscale.available) "On the take" else "Soon")
+            SwapAddon.FAST -> if (!fastBeta || !video.available(a.id)) null else AddonPill(a, true, price(a, takes, clipSeconds))
+            SwapAddon.EDIT -> AddonPill(a, video.available(a.id), price(a, takes, clipSeconds))
+        }
+    }
+
+    /** The add-on's render, set up exactly as the video studio sends it: the whole clip, the default steps. */
+    fun draft(a: SwapAddon, takes: Int, keepAudio: Boolean, speaking: Boolean?): VideoDraft =
+        VideoDraft(takes = takes, keepAudio = keepAudio, speaking = speaking ?: false).pick(a.option ?: VideoOption.EDIT)
+
+    /** The price from the add-on estimate (the server's formula, Pricing): "—" without a clip length. */
+    fun price(a: SwapAddon, takes: Int, clipSeconds: Double?): String =
+        if (clipSeconds == null || a.option == null) "—" else Pricing.money(Pricing.totalCost(draft(a, takes, true, null).spec().copy(clipSeconds = clipSeconds)))
+
+    /** The add-on's estimate as the Generate button shows it ("Generate · 10 min · $0.67", "about $0.67"). */
+    fun estimate(a: SwapAddon, takes: Int, clipSeconds: Double): SuiteEstimate {
+        val spec = draft(a, takes, true, null).spec().copy(clipSeconds = clipSeconds)
+        return SuiteEstimate(quality = a.id, label = a.label, takes = takes, mode = "swap", estimate = Pricing.totalCost(spec),
+            priceLine = Pricing.optionPriceLine(spec), buttonLabel = Pricing.genLabel(spec))
+    }
+
+    /** POST /v1/jobs for the add-on: the clip, the character and outfit, takes, the clip's audio and the speaking switch. */
+    fun request(d: ComposerDraft, recast: RecastDraft, a: SwapAddon, clipSeconds: Double?): JobRequest =
+        draft(a, d.takes, recast.keepAudio, d.speaking).request(d.title.trim().ifBlank { "Character swap · ${a.label}" }, d.characterId.orEmpty(),
+            d.characterOutfit.orEmpty(), recast.clipId.orEmpty(), clipSeconds)
 }
 
 /**
