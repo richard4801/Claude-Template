@@ -75,7 +75,10 @@ class EditSessionSync(
     private val paletteIds: Set<String> = emptySet(),
     private val debounceMs: Long = 500,
     private val presenceMs: Long = 30_000,
+    /** Where this device's unsent edits are kept per take (survive the app closing); null = not kept. */
+    private val drafts: EditDrafts? = null,
 ) : SessionActions {
+    private var draftTake: String? = null
     private val mutex = Mutex()
     private val jobs = ArrayList<Job>()
     var sessionId: String? = null
@@ -85,20 +88,56 @@ class EditSessionSync(
     /** The project as the server has it at [revision]. */
     private var synced: JsonElement? = null
 
-    /** Opens the session for [takeId]. False when there is none to be had (no server, a member): the editor stays local. */
+    /** The owner hasn't yet picked between this device's edits and the session's latest: nothing is sent or merged. */
+    private var conflict = false
+    /** The last [start] failed for lack of a connection (worth trying again), not because there is no session to have. */
+    var offline = false
+        private set
+
+    /**
+     * Opens the session for [takeId]. False when there is none to be had (no server, a member: the editor stays local)
+     * or no connection ([offline]). When this device already has edits the session doesn't, the owner is asked first
+     * ([SessionUi.conflict]): nothing is dropped silently.
+     */
     suspend fun start(takeId: String, initial: JsonObject? = null, baseVersionId: String? = null): Boolean {
-        val s = try { api().openEditSession(OpenEditSessionRequest(takeId, initial, baseVersionId, device)) } catch (_: ApiException) { return false } catch (_: java.io.IOException) { return false }
+        offline = false
+        val s = try { api().openEditSession(OpenEditSessionRequest(takeId, initial, baseVersionId, device)) }
+            catch (_: ApiException) { return false } catch (_: java.io.IOException) { offline = true; return false }
         val server = parse(s.project) ?: return false
         mutex.withLock {
             sessionId = s.id; revision = s.revision; synced = s.project
-            if (controller.project != server) controller.replaceProject(server)
-            controller.update { it.copy(session = SessionUi(s.id, s.revision, s.history, s.pending)) }
+            val local = controller.project
+            if (local != server) {
+                // This device's edits on the very project the session still has: nothing to ask, they just go up.
+                // On a session that moved on: ask. No edits here: the session's project.
+                if (controller.editedLocally && local != null) { if (server != controller.loadedProject) conflict = true }
+                else controller.replaceProject(server)
+            }
+            controller.update { it.copy(session = SessionUi(s.id, s.revision, s.history, s.pending, conflict = conflict)) }
             controller.sessionActions = this
         }
         jobs += scope.launch { events.collect { ev -> if (ev.type == "edit" && ev.sessionId == s.id) onEvent(ev) } }
         jobs += scope.launch { controller.ui.map { it.project }.distinctUntilChanged().debounce(debounceMs).collect { flush() } }
         jobs += scope.launch { while (isActive) { presence(); delay(presenceMs) } }
         return true
+    }
+
+    /** [start], tried again every [retryMs] while there is no connection (the editor keeps working locally meanwhile). */
+    suspend fun connect(takeId: String, initial: JsonObject? = null, baseVersionId: String? = null, retryMs: Long = 15_000): Boolean {
+        if (drafts != null && draftTake == null) {
+            draftTake = takeId
+            // Unsent edits from last time come back first (then the session decides whether to ask).
+            drafts.read(takeId)?.let { (b, p) ->
+                val base = parse(b); val proj = parse(p)
+                if (base != null && proj != null) controller.restoreDraft(base, proj) else drafts.clear(takeId)
+            }
+            jobs += scope.launch { controller.ui.map { it.project }.distinctUntilChanged().collect { saveDraft() } }
+        }
+        while (true) {
+            if (start(takeId, initial, baseVersionId)) return true
+            if (!offline) return false
+            delay(retryMs)
+        }
     }
 
     /** Stops syncing and leaves (presence removed) on [leaveScope], which outlives the editor. */
@@ -108,6 +147,18 @@ class EditSessionSync(
         controller.sessionActions = null
         leaveScope.launch { runCatching { api().leaveEditSession(id, device) } }
     }
+
+    /** Keeps this device's unsent edits on disk (on every change); none kept once the session has them all. */
+    private fun saveDraft() {
+        val store = drafts ?: return
+        val take = draftTake ?: return
+        if (!controller.editedLocally) return
+        val now = local() ?: return
+        val base = (synced ?: controller.loadedProject?.let(EditJson::encode)) as? JsonObject ?: return
+        if (JsonPatch.jsonEqual(base, now)) store.clear(take) else store.write(take, base, now)
+    }
+
+    private fun draftSent() { val t = draftTake ?: return; drafts?.clear(t) }
 
     private suspend fun presence() {
         val id = sessionId ?: return
@@ -131,17 +182,19 @@ class EditSessionSync(
         mutex.withLock { pushLocked() }
     }
 
-    private suspend fun pushLocked() {
+    private suspend fun pushLocked(labelOverride: String? = null) {
         val id = sessionId ?: return
+        if (conflict) return
         repeat(3) {
             val base = synced ?: return
             val now = local() ?: return
             val patch = JsonPatch.diff(base, now)
             if (patch.isEmpty()) return
-            val label = controller.takeLabels()
+            val label = controller.takeLabels().let { labelOverride ?: it }
             try {
                 val r = api().pushEditPatch(id, EditPatchRequest(revision, JsonPatch.encode(patch), label, device))
                 revision = r.revision; synced = now
+                if (JsonPatch.jsonEqual(local(), now)) draftSent() // the session has everything this device made
                 addEntries(listOfNotNull(r.entry))
                 return
             } catch (e: ApiException) {
@@ -169,12 +222,23 @@ class EditSessionSync(
         return true
     }
 
-    private fun adoptLocked(server: JsonElement, rev: Int, keepLocal: Boolean, tag: Any? = null) {
+    /**
+     * The server's project moved from [synced] to [server] (someone else's change): the local project gets it (with the
+     * local pending change rebased on top when [keepLocal]), and so does every local undo/redo state, so local undo
+     * never takes back someone else's change. While the owner hasn't resolved a conflict, only the server side moves.
+     */
+    private fun adoptLocked(server: JsonElement, rev: Int, keepLocal: Boolean) {
         val base = synced ?: server
+        synced = server; revision = rev
+        if (conflict) return
         val now = local() ?: return
         val (merged, _) = if (keepLocal) SessionSync.rebase(base, now, server, ::valid) else server to false
-        synced = server; revision = rev
-        if (!JsonPatch.jsonEqual(merged, now)) parse(merged)?.let { controller.applyRemote(it, tag) }
+        val remote = JsonPatch.diff(base, server)
+        val carry: (EditProject) -> EditProject? = { st ->
+            if (remote.isEmpty()) st
+            else try { parse(JsonPatch.apply(EditJson.encode(st), remote)) } catch (_: PatchException) { null }
+        }
+        if (!JsonPatch.jsonEqual(merged, now) || remote.isNotEmpty()) parse(merged)?.let { controller.applyRemote(it, carry) }
     }
 
     // ------------------------------------------------------------------ server → local
@@ -204,7 +268,7 @@ class EditSessionSync(
             try { JsonPatch.apply(base, PatchOp.listOf(ev.patch)) } catch (_: PatchException) { null }
         } else null
         if (server == null) { refetchLocked(); entry?.let { addEntries(listOf(it), it.undoes) }; return }
-        adoptLocked(server, rev, keepLocal = true, tag = entry?.takeIf { it.byClaude }?.id)
+        adoptLocked(server, rev, keepLocal = true)
         if (entry != null) {
             addEntries(listOf(entry), entry.undoes)
             if (entry.byClaude) controller.updateSession { it.copy(claudeNote = "Claude · ${entry.label}") }
@@ -250,18 +314,46 @@ class EditSessionSync(
                 try {
                     val r = api().undoEditEntry(id, EditUndoRequest(entryId, device))
                     val s = api().editSession(id)
-                    val server = parse(s.project)
-                    val now = local()
-                    if (server != null && now != null && JsonPatch.jsonEqual(now, synced)) {
-                        synced = s.project; revision = s.revision
-                        controller.undoneRemotely(server)
-                    } else adoptLocked(s.project, s.revision, keepLocal = true)
+                    adoptLocked(s.project, s.revision, keepLocal = true) // like any change from the session
                     controller.updateSession { it.copy(revision = s.revision, history = s.history.ifEmpty { it.history }) }
                     addEntries(listOfNotNull(r.entry), entryId)
                 } catch (e: ApiException) {
                     controller.update { it.copy(message = e.message ?: "Couldn't undo that") }
                 } catch (_: java.io.IOException) {
                     controller.update { it.copy(message = "Couldn't reach the studio · try again") }
+                }
+            }
+        }
+    }
+
+    /**
+     * The owner's pick after [start] found edits on this device the session doesn't have: keep them (sent as one change
+     * on top of the latest revision) or use the latest (this device's edits are dropped).
+     */
+    override fun resolveConflict(keepLocal: Boolean) {
+        scope.launch {
+            mutex.withLock {
+                if (!conflict) return@withLock
+                conflict = false
+                controller.updateSession { it.copy(conflict = false) }
+                if (keepLocal) {
+                    // This device's edits (since it loaded the project) on top of the latest; where they no longer
+                    // apply, the device's whole project goes up as it is.
+                    val base = controller.loadedProject?.let(EditJson::encode)
+                    val now = local(); val server = synced
+                    if (base != null && now != null && server != null) {
+                        val (merged, kept) = SessionSync.rebase(base, now, server, ::valid)
+                        val remote = JsonPatch.diff(base, server)
+                        if (kept) parse(merged)?.let { p ->
+                            controller.applyRemote(p) { st -> try { parse(JsonPatch.apply(EditJson.encode(st), remote)) } catch (_: PatchException) { null } }
+                        }
+                    }
+                    pushLocked(labelOverride = "This device's changes")
+                }
+                else {
+                    controller.takeLabels()
+                    synced?.let(::parse)?.let(controller::replaceProject)
+                    draftSent() // discarded on purpose
                 }
             }
         }

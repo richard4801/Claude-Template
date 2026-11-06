@@ -344,8 +344,9 @@ describe('versions with a v2 project', () => {
   it('the export "Label as AI-generated" choice is kept on the version (off unless sent)', async () => {
     const up = await upload(a, owner, 'clip', Buffer.from('edited v2 label'));
     const p = project();
-    const r = await owner.req('POST', `/v1/takes/${src}/versions`, { uploadId: up, edits: p, durationSec: M.durationSec(p), width: 1080, height: 1920, aiLabel: true });
+    const r = await owner.req('POST', `/v1/takes/${src}/versions`, { uploadId: up, edits: p, durationSec: M.durationSec(p), width: 1080, height: 1920, aiLabel: true, name: '  Claude cut  ' });
     expect(r.body.aiLabel).toBe(true);
+    expect(r.body.name).toBe('Claude cut');
     const up2 = await upload(a, owner, 'clip', Buffer.from('edited v2 nolabel'));
     expect((await owner.req('POST', `/v1/takes/${src}/versions`, { uploadId: up2, edits: p, durationSec: M.durationSec(p), width: 1080, height: 1920 })).body.aiLabel).toBeUndefined();
     expect((await owner.req('POST', '/v1/editor/uploads/presign', { contentType: 'video/quicktime' })).body).toMatchObject({ method: 'PUT' });

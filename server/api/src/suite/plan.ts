@@ -162,7 +162,8 @@ export function billedSeconds(m: ModelSpec, seconds: number, o: { videoInput: bo
   return s;
 }
 /** Fixed extra per take (fal H3 Max reference tokens, an estimate). */
-export const extraPerTake = (m: ModelSpec) => (m.adapter === 'fal-h3-3d' ? 0.5 : 0);
+/** Higgsfield H3: the first 5 reference images are included, each further one costs $0.08 per take. */
+export const extraPerTake = (m: ModelSpec, refImages = 0) => (m.adapter === 'fal-h3-3d' ? 0.5 : m.adapter === 'hf-h3' ? 0.08 * Math.max(0, refImages - 5) : 0);
 
 export type ImagePlan = { start?: ImageRef; middle: ImageRef[]; end?: ImageRef; refs: { label: string; role: string; image: ImageRef }[] };
 export type ShotPlan = {
@@ -284,7 +285,7 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
   const perSec = perSecond(m, p.resolution, { videoInput, audio: r.audio, kind }) * (o.priceScale ?? 1);
   const guideSeconds = videos[0]?.video.seconds;
   const billed = billedSeconds(m, p.seconds, { videoInput, guideSeconds });
-  const extraCost = extraPerTake(m);
+  const extraCost = extraPerTake(m, images.refs.length);
   const separation = audioPlan?.beatOnly ? o.separationUsd ?? 0 : 0;
   const estimate = Math.round(((perSec * billed + extraCost) * r.takes + separation) * 10000) / 10000;
 

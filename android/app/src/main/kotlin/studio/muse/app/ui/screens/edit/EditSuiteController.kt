@@ -147,12 +147,15 @@ sealed interface EditAction {
     /** The owner's answer to a paid helper Claude asked for. */
     data class AnswerPending(val id: String, val approve: Boolean) : EditAction
     data object ClearClaudeNote : EditAction
+    /** Opening a session while this device has edits it doesn't: keep them (pushed on top) or use the latest. */
+    data class ResolveConflict(val keepLocal: Boolean) : EditAction
 }
 
 /** Edit sessions (workstream 3): what the controller hands to the session sync. */
 interface SessionActions {
     fun undoEntry(entryId: Long)
     fun answerPending(id: String, approve: Boolean)
+    fun resolveConflict(keepLocal: Boolean)
 }
 
 /**
@@ -186,6 +189,8 @@ class EditSuiteController(
     fun load(project: EditProject, title: String, sourceTakeId: String, poster: studio.muse.app.data.ImageRef?, reopened: Boolean) {
         history = ProjectHistory(project)
         dragBase = null
+        editedLocally = false
+        loadedProject = project
         _ui.update {
             it.copy(
                 project = project, title = title, sourceTakeId = sourceTakeId, poster = poster, reopened = reopened, phase = SuitePhase.Ready,
@@ -213,26 +218,33 @@ class EditSuiteController(
     }
 
     /**
-     * A change that came from the session (Claude's, another device's, or the server's answer to a rebase): one undo
-     * step tagged [tag] (a history entry id when Undo should go through the server).
+     * A change that came from the session (Claude's, another device's, a server undo): the project becomes [next]
+     * without an undo step, and the undo/redo states carry the same change ([carry]) — local undo only ever takes back
+     * this device's own edits. Undoing someone else's change goes through the History panel (server undo).
      */
-    fun applyRemote(next: EditProject, tag: Any? = null) {
+    fun applyRemote(next: EditProject, carry: (EditProject) -> EditProject?) {
         val h = history ?: return
         dragBase = null
-        if (h.apply(next, tag)) synced()
+        if (h.rebase(next, carry)) synced()
     }
 
-    /** The server undid the step that made the current project and sent [server]: a local undo when it gives the same project. */
-    fun undoneRemotely(server: EditProject) {
-        val h = history ?: return
-        if (h.currentTag != null && h.undo() && h.current == server) { synced(); return }
-        if (h.current != server) h.apply(server)
-        synced()
+    /** True once this device changed the project since it was loaded (edits the session may not have yet). */
+    var editedLocally: Boolean = false
+        private set
+
+    /** The project as loaded (before this device's edits). */
+    var loadedProject: EditProject? = initial.project
+        private set
+
+    /** This device's unsent edits from last time ([project], made on [base]): shown as one local undo step. */
+    fun restoreDraft(base: EditProject, project: EditProject) {
+        replaceProject(base)
+        if (base != project) { history?.apply(project); labels += "This device's changes"; editedLocally = true; synced() }
     }
 
     /** Starts over from [p] (the session's project when it differs from the one the app built), no undo step. */
     fun replaceProject(p: EditProject) {
-        history = ProjectHistory(p); dragBase = null
+        history = ProjectHistory(p); dragBase = null; editedLocally = false; loadedProject = p
         _ui.update { it.copy(project = p, canUndo = false, canRedo = false, selectedId = null, playheadSec = it.playheadSec.coerceIn(0.0, durationSec(p))) }
     }
 
@@ -273,6 +285,7 @@ class EditSuiteController(
             if (dragBase == null) { dragBase = base; h.apply(next) } else h.amend(next)
         } else if (dragBase != null) { h.amend(next); dragBase = null } else h.apply(next)
         labels += actionLabel
+        editedLocally = true
         synced()
         return true
     }
@@ -301,16 +314,13 @@ class EditSuiteController(
         val u = _ui.value
         labelOf(a)?.let { actionLabel = it }
         when (a) {
-            EditAction.Undo -> {
-                dragBase = null
-                // A change that came from the session (Claude's) is undone on the server, so its history shows it.
-                val tag = history?.currentTag
-                val s = sessionActions
-                if (tag is Long && s != null) s.undoEntry(tag)
-                else if (history?.undo() == true) { labels += "Undo"; synced() }
-            }
-            EditAction.Redo -> { dragBase = null; if (history?.redo() == true) { labels += "Redo"; synced() } }
-            is EditAction.ClaudePanel -> updateSession { it.copy(chatOpen = a.open) }
+            // Local undo/redo: this device's own edits only (changes from elsewhere are undone in the History panel).
+            EditAction.Undo -> { dragBase = null; if (history?.undo() == true) { labels += "Undo"; editedLocally = true; synced() } }
+            EditAction.Redo -> { dragBase = null; if (history?.redo() == true) { labels += "Redo"; editedLocally = true; synced() } }
+            is EditAction.ResolveConflict -> sessionActions?.resolveConflict(a.keepLocal)
+            is EditAction.ClaudePanel ->
+                if (u.session == null) { if (a.open) say("Claude joins once this edit is online · check your connection") }
+                else updateSession { it.copy(chatOpen = a.open) }
             is EditAction.UndoEntry -> sessionActions?.undoEntry(a.entryId)
             is EditAction.AnswerPending -> sessionActions?.answerPending(a.id, a.approve)
             EditAction.ClearClaudeNote -> updateSession { it.copy(claudeNote = null) }

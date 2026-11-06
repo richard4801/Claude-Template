@@ -146,7 +146,6 @@ struct EditSuiteEditor: View {
         }
         // Claude asked for an export: the sheet opens with its preset; the owner confirms.
         .onChange(of: session.exportAsk) { _, ask in if ask != nil { showExport = true } }
-        .environment(session)
     }
 
     private var editor: some View {
@@ -217,6 +216,16 @@ struct EditSuiteEditor: View {
             }
         }
         .sheet(item: $session.askPending) { p in EditSuiteClaudeAsk(session: session, pending: p) }
+        // Edits this Mac never got to the server, and the session moved on: never dropped without asking.
+        .alert("This Mac has changes that aren't in the latest edit",
+               isPresented: Binding(get: { session.draftAsk != nil }, set: { _ in }),
+               actions: {
+                   Button("Keep this device's changes") { session.resolveDraft(keep: true) }
+                   Button("Use the latest", role: .destructive) { session.resolveDraft(keep: false) }
+               },
+               message: {
+                   Text("Keep puts this Mac's changes on top of the latest version (from Claude or your other devices). Use the latest discards them.")
+               })
         .overlay { if session.busy { EditSuiteExportProgress(session: session) } }
     }
 

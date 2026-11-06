@@ -7,6 +7,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.captureRoboImage
+import kotlinx.coroutines.cancel
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -35,7 +36,7 @@ class ClaudeEditScreenshotTest(private val theme: String, private val state: Str
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}_{1}")
         fun params(): List<Array<Any>> = listOf("a", "b", "c", "d").flatMap { t ->
-            listOf("history", "note", "pending", "panel").map { arrayOf<Any>(t, it) }
+            listOf("history", "note", "pending", "panel", "conflict", "panel_tablet", "offline").map { arrayOf<Any>(t, it) }
         }
 
         fun history(): List<EditHistoryEntry> = listOf(
@@ -57,6 +58,12 @@ class ClaudeEditScreenshotTest(private val theme: String, private val state: Str
     })
 
     @Test fun capture() {
+        if (state == "panel_tablet") org.robolectric.RuntimeEnvironment.setQualifiers("w1024dp-h768dp-mdpi")
+        // Workstream 2's chat reads the app container (its store loads the demo backend's thread for this edit).
+        val scope = kotlinx.coroutines.MainScope()
+        val fake = studio.muse.app.data.FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0)
+        val c = studio.muse.app.AppContainer(scope, studio.muse.app.data.MemoryPrefs(studio.muse.app.data.AppPrefs(theme = theme, useFake = true, token = "t",
+            studioName = "Jenne Studio", role = "owner", email = "jenne@studio.com")), fake, null)
         val p = EditSuiteScreenshotTest.sampleProject()
         var session = SessionUi("es_1", 5, history())
         var ui = EditSuiteUi(
@@ -68,14 +75,21 @@ class ClaudeEditScreenshotTest(private val theme: String, private val state: Str
             "note" -> session = session.copy(claudeNote = "Claude · Trimmed 0:00.5–0:06.0")
             "pending" -> session = session.copy(pending = listOf(EditPending("pa_1", "matte", "Remove background", 0.04)))
             "panel" -> session = session.copy(chatOpen = true)
+            "conflict" -> session = session.copy(conflict = true)
+            "panel_tablet" -> session = session.copy(chatOpen = true)
         }
-        ui = ui.copy(session = session)
+        // offline: the owner's editor before its session is there (the Claude button dimmed).
+        ui = if (state == "offline") ui.copy(session = null, claudeOwner = true) else ui.copy(session = session, claudeOwner = true)
         compose.setContent {
             MuseTheme(ThemeId.fromKey(theme)) {
-                EditSuiteContent(ui, frames(), SuiteHost(), act = {}, onClose = {}) { mod -> RefImage(ui.poster, mod, 30) }
+                val nav = studio.muse.app.ui.Nav(androidx.navigation.compose.rememberNavController())
+                androidx.compose.runtime.CompositionLocalProvider(studio.muse.app.ui.LocalContainer provides c, studio.muse.app.ui.LocalNav provides nav) {
+                    EditSuiteContent(ui, frames(), SuiteHost(), act = {}, onClose = {}) { mod -> RefImage(ui.poster, mod, 30) }
+                }
             }
         }
         shadowOf(Looper.getMainLooper()).idle()
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/edit_claude_${theme}_$state.png")
+        scope.cancel()
     }
 }

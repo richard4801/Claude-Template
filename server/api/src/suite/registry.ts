@@ -4,7 +4,7 @@
 // 2026-11-05 (replicate.com/<owner>/<name>/api, fal.ai/models/<id>/llms.txt). Member-facing data never names any of this;
 // only owner views (Settings → Engines / the suite settings) do.
 
-export type ProviderId = 'replicate' | 'fal' | 'runpod' | 'mock';
+export type ProviderId = 'replicate' | 'fal' | 'higgsfield' | 'runpod' | 'mock';
 export type ShotMode = 'text' | 'image' | 'reference' | 'swap';
 export type Tier = 'draft' | 'standard' | 'hd' | 'cinema';
 export const TIERS: Tier[] = ['draft', 'standard', 'hd', 'cinema'];
@@ -20,7 +20,7 @@ export type RefStyle = 'angle' /* <Image 1>, <Video 1> */ | 'at' /* @image_1, @v
 /** Which camera wording template the compiler uses (prompt library keys suite.camera.format.*). */
 export type CameraVocab = 'kling' | 'seedance' | 'h3' | 'veo' | 'wan' | 'ltx' | 'generic';
 /** Which input mapper builds the provider input (suite/inputs.ts). */
-export type Adapter = 'minimax-h3' | 'kling-v4' | 'kling-v3-omni' | 'seedance' | 'veo' | 'wan-2.7' | 'ltx-2.3' | 'fal-h3-3d' | 'fal-h3-recast' | 'kling-o1' | 'wan-animate' | 'mock';
+export type Adapter = 'minimax-h3' | 'kling-v4' | 'kling-v3-omni' | 'seedance' | 'veo' | 'wan-2.7' | 'ltx-2.3' | 'fal-h3-3d' | 'fal-h3-recast' | 'kling-o1' | 'wan-animate' | 'hf-h3' | 'mock';
 
 export type Resolution = { id: string; label: string; shortSide: number; perSec: number; perSecWithVideo?: number; audioPerSec?: number };
 
@@ -135,6 +135,19 @@ export const MODELS: ModelSpec[] = [
     extend: { after: 'reference', before: 'reference', sourceSeconds: [2, 30] },
     licence: hosted('Seedance (hosted)', { notes: 'May refuse realistic faces as references.' }), status: 'active',
     notes: 'Video references cost about 4× the no-video price.' },
+  // ---------------------------------------------------------------- MiniMax H3 on Higgsfield (owner's max-discount plan)
+  // api.higgsfield.ai: separate endpoints per kind; reference-to-video takes up to 9 images, 3 videos, 3 audios but no
+  // keyframes, so frame shots stay on Replicate H3 (modes.image false). 2K only, 5–15 s. $0.13/s list, 50% off on the
+  // owner's claimed plan (verified with POST /estimate on 2026-11-06) = $0.065/s; each reference image beyond the 5
+  // included costs $0.08 (extraPerTake). Out of credit / bad key at start → the shot moves to Replicate H3 (runner).
+  { id: 'h3-hf', name: 'MiniMax H3 (Higgsfield)', provider: 'higgsfield',
+    ref: { t2v: 'minimax/h3/text-to-video', ref2v: 'minimax/h3/reference-to-video' }, adapter: 'hf-h3',
+    modes: { text: true, image: false, reference: true }, frames: { start: false, end: false, middle: 0, withRefs: false },
+    refs: { images: 9, videos: 3, audios: 3 }, duration: { min: 5, max: 15 },
+    resolutions: [R('2K', '2K', 1440, 0.065)], aspectRatios: AR_FULL,
+    audio: 'always', negativePrompt: false, seed: false, camera: { vocab: 'h3', refStyle: 'angle', referenceVideo: true }, lora: false,
+    licence: hosted('MiniMax H3 via Higgsfield (hosted)'), status: 'active',
+    notes: '50% max-discount price; each reference image beyond 5 adds $0.08.' },
   // ---------------------------------------------------------------- Veo (Replicate)
   { id: 'veo-3.1-lite', name: 'Veo 3.1 Lite', provider: 'replicate', ref: 'google/veo-3.1-lite', adapter: 'veo',
     modes: { text: true, image: true, reference: false }, frames: { start: true, end: true, middle: 0, withRefs: false },
@@ -243,7 +256,7 @@ export const DEFAULT_LADDER: Record<Tier, LadderStep[]> = {
     { model: 'seedance-2.0', resolution: '480p' }, { model: 'wan-2.7', resolution: '720p' }],
   standard: [{ model: 'h3', resolution: '768P' }, { model: 'kling-v4', resolution: '720p' }, { model: 'seedance-2.0', resolution: '720p' },
     { model: 'wan-2.7', resolution: '1080p' }, { model: 'ltx-2.3', resolution: '1080p' }],
-  hd: [{ model: 'h3', resolution: '2K' }, { model: 'kling-v4', resolution: '1080p' }, { model: 'veo-3.1-lite', resolution: '1080p' },
+  hd: [{ model: 'h3-hf', resolution: '2K' }, { model: 'h3', resolution: '2K' }, { model: 'kling-v4', resolution: '1080p' }, { model: 'veo-3.1-lite', resolution: '1080p' },
     { model: 'seedance-2.0', resolution: '1080p' }, { model: 'ltx-2.3', resolution: '2k' }],
   cinema: [{ model: 'kling-v4', resolution: '1080p' }, { model: 'seedance-2.5', resolution: '720p' }, { model: 'seedance-2.0', resolution: '1080p' },
     { model: 'h3', resolution: '2K' }, { model: 'kling-v3-omni', resolution: '1080p' }],

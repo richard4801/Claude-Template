@@ -254,6 +254,8 @@ data class Take(
     val refs: List<ShootRef>? = null,
     /** AI suite (workstream 1): a suite take's Look; the Edit suite opens with it applied. */
     val look: SuiteLook? = null,
+    /** Edit sessions (workstream 3): an edited version's name (1–80 characters), e.g. from Claude's save_version. */
+    val name: String? = null,
 ) {
     val final get() = status == "final"
     val shot get() = kind == "shot"
@@ -1120,7 +1122,12 @@ data class TakeVersionV2Request(
     val width: Int,
     val height: Int,
     val fps: Double? = null,
+    /** Edit sessions (workstream 3): the version's name, 1–80 characters trimmed (Claude's save_version name). */
+    val name: String? = null,
 )
+
+/** Edit sessions (workstream 3): a version name as the server takes it (trimmed, at most 80 characters; blank = none). */
+fun versionName(raw: String?): String? = raw?.trim()?.take(80)?.trim()?.ifEmpty { null }
 
 /** POST /v1/editor/uploads/presign (voice-over / music / .cube). */
 @Serializable

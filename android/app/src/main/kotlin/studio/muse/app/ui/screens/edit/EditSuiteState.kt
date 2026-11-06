@@ -85,6 +85,11 @@ data class SessionUi(
     val chatOpen: Boolean = false,
     /** An answer to a pending ask is on its way. */
     val answering: String? = null,
+    /**
+     * This device has edits the session doesn't (made before it connected) and the session moved on: "Keep this
+     * device's changes" / "Use the latest". Nothing is sent until the owner picks.
+     */
+    val conflict: Boolean = false,
 ) {
     /** The first paid helper waiting for the owner. */
     val asking: studio.muse.app.data.EditPending? get() = pending.firstOrNull { it.status == "waiting" && it.id != answering }
@@ -147,6 +152,8 @@ data class EditSuiteUi(
     val savedTakeId: String? = null,
     /** Edit sessions (workstream 3): the live session shared with Claude; null for members and when offline/local only. */
     val session: SessionUi? = null,
+    /** The owner's editor: the Claude button shows (dimmed until the session is there). */
+    val claudeOwner: Boolean = false,
 ) {
     val duration: Double get() = project?.let(::durationSec) ?: 0.0
     val ready: Boolean get() = phase == SuitePhase.Ready && project != null

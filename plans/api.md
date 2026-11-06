@@ -556,6 +556,7 @@ DenoiseResult  { asset?: { kind: "audio", upload | take, url?, durationSec }, su
 |---|---|
 | `POST /v1/takes/{id}/versions` with `edits: EditProject` | As in "Video editor", but `edits.version: 2`: checked by the v2 rules (JSON ≤ 256 KB; `durationSec` must match the project's duration within max(0.5 s, 5 %)); every `take`/`upload` asset must be this studio's (`not_found`) and of a fitting kind (`bad_request`). v1 lists are unchanged. |
 | `POST /v1/takes/{id}/versions` `{…, aiLabel?: boolean}` | Edit suite export "Label as AI-generated" (default off): kept with the version and returned as `Take.aiLabel: true`; posting uses it for the platform's AI label. C2PA signing is not implemented yet. |
+| `POST /v1/takes/{id}/versions` `{…, name?: string}` | Optional version name, 1–80 characters after trimming (the Edit suite's save, or the `name` in Claude's `save_version` request). Kept with the version and returned as `Take.name`. |
 | `POST /v1/editor/validate` `{project}` | → `{ok: true, durationSec}` or `bad_request` naming the first broken field (`edits.tracks.2.items.0.speed: …`). Free. |
 | `GET /v1/editor/features` | → `{captions: {available, languages}, cuts: {available, defaults}, matte: {available, maxSec: 120}, denoise: {available}, maxSourceSec: 600}` |
 | `GET /v1/editor/presets` | → `{filters, captionStyles, hooks}` (the same tables the apps carry). |
