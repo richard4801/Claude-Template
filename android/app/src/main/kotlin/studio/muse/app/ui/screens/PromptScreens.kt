@@ -42,6 +42,9 @@ import studio.muse.app.ui.Routes
 import studio.muse.app.ui.components.*
 import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.MuseSpace
+import studio.muse.app.ui.theme.roles
+import studio.muse.app.ui.theme.scale
 
 /**
  * Owner Settings → Prompts (plans/api.md "Shoot references and the prompt library" §3): every prompt the server sends
@@ -132,29 +135,29 @@ fun PromptsScreen() {
     val err by vm.error.collectAsState()
     val nav = LocalNav.current
     val m = muse
-    ScreenBox {
+    ScreenBox(bg = m.roles.canvas) {
         Column(Modifier.fillMaxSize()) {
-            TopBar("Prompts", onBack = { nav.back() })
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 6.dp, bottom = 40.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            CalmTopBar("Prompts", onBack = { nav.back() })
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = MuseSpace.gutter).padding(top = MuseSpace.s2, bottom = 40.dp),
+                verticalArrangement = Arrangement.spacedBy(MuseSpace.s5)) {
                 // Prompt scripts (workstream 4): Blocks (the texts) | Scripts (which block is used when).
                 val tab by c.drafts.promptsTab.collectAsState()
-                Seg(listOf("blocks" to "Blocks", "scripts" to "Scripts"), tab, { c.drafts.promptsTab.value = it }, Modifier.fillMaxWidth())
+                Segmented(listOf("blocks" to "Blocks", "scripts" to "Scripts"), tab, { c.drafts.promptsTab.value = it })
                 if (tab == "scripts") { PromptScriptsList(); return@Column }
-                T("Every prompt MUSE sends when it makes a photo, an outfit set, a sheet angle, a LoRA set or a video. A saved edit is used for every new render in your studio, by you and your members. Work already running keeps its prompt.",
-                    m.type.body, m.t.muted)
-                err?.let { NoteBox(it, warn = true); Cta2("Try again", { vm.load() }, Modifier.fillMaxWidth(), icon = "retry", height = 46.dp) }
+                Body("Every prompt MUSE sends when it makes a photo, an outfit set, a sheet angle, a LoRA set or a video. A saved edit is used for every new render in your studio, by you and your members. Work already running keeps its prompt.")
                 val l = lib
-                if (l == null && err == null) Tiny("Loading…")
+                if (l == null && err != null) ErrorState("Can't load the prompts", err ?: "", onAction = { vm.load() })
+                else err?.let { Notice(it, tone = NoticeTone.DANGER) }
+                if (l == null && err == null) repeat(3) { SkeletonLines(3) }
                 l?.groups?.forEach { g ->
                     val items = l.prompts.filter { it.group == g.id }
                     if (items.isEmpty()) return@forEach
-                    RowB { Lbl(g.label); Tiny("${items.count { it.overridden }.takeIf { it > 0 }?.let { "$it edited · " } ?: ""}${items.size}") }
-                    ListGroup {
+                    Column {
+                        Heading(g.label) { Caption("${items.count { it.overridden }.takeIf { it > 0 }?.let { "$it edited of " } ?: ""}${items.size}") }
                         items.forEach { p ->
-                            Li("spark", p.title, sub = p.current.replace('\n', ' ').take(90).ifBlank { "(empty · left out)" }, onClick = { nav.go(Routes.prompt(p.key)) }) {
-                                if (p.overridden) Pill("Edited", "warn")
-                                Ic("chev", 14.dp)
+                            RowItem(p.title, p.current.replace('\n', ' ').take(90).ifBlank { "Empty, left out" }, onClick = { nav.go(Routes.prompt(p.key)) }) {
+                                if (p.overridden) RowValue("Edited", m.roles.caution)
+                                Chevron()
                             }
                         }
                     }
@@ -176,31 +179,32 @@ fun PromptEditScreen(key: String) {
     val busy by vm.busy.collectAsState()
     val nav = LocalNav.current
     var confirmReset by remember { mutableStateOf(false) }
-    ScreenBox {
+    ScreenBox(bg = muse.roles.canvas) {
         Column(Modifier.fillMaxSize()) {
-            TopBar(entry?.title ?: "Prompt", onBack = { nav.back() })
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 6.dp, bottom = 120.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                val e = entry ?: run { problem?.let { NoteBox(it, warn = true) } ?: Tiny("Loading…"); return@Column }
+            CalmTopBar(entry?.title ?: "Prompt", onBack = { nav.back() })
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = MuseSpace.gutter).padding(top = MuseSpace.s2, bottom = 120.dp),
+                verticalArrangement = Arrangement.spacedBy(MuseSpace.s5)) {
+                val e = entry ?: run { problem?.let { Notice(it, tone = NoticeTone.DANGER) } ?: SkeletonLines(4); return@Column }
                 val text = draft ?: e.current
                 PromptEditorBody(e, group, text, preview, problem, vm::type, vm::insert)
-                if (text != e.current) Cta2("Undo changes", { vm.undo() }, Modifier.fillMaxWidth(), icon = "retry", height = 46.dp)
-                if (e.overridden) {
+                if (text != e.current) SecondaryButton("Undo changes", { vm.undo() }, Modifier.fillMaxWidth(), icon = "retry")
+                if (e.overridden) Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
                     if (confirmReset) {
-                        NoteBox("Reset “${e.title}” to its default? Every new photo and video in your studio goes back to MUSE's default text. Your version is not kept.", warn = true)
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Cta2("Reset to default", { confirmReset = false; vm.reset() }, Modifier.weight(1f), height = 46.dp)
-                            Cta2("Cancel", { confirmReset = false }, Modifier.weight(1f), height = 46.dp)
+                        T("Reset “${e.title}” to its default?", muse.scale.heading, muse.roles.ink)
+                        Body("Every new photo and video in your studio goes back to MUSE's default text. Your version is not kept.")
+                        Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                            SecondaryButton("Reset to default", { confirmReset = false; vm.reset() }, Modifier.weight(1f))
+                            SecondaryButton("Keep my version", { confirmReset = false }, Modifier.weight(1f))
                         }
-                    } else Cta2("Reset to default", { confirmReset = true }, Modifier.fillMaxWidth(), icon = "retry", height = 46.dp)
-                    e.updatedBy?.let { by -> Tiny("Last saved by $by${e.updatedAt?.let { " · " + savedAt(it) } ?: ""}") }
+                    } else SecondaryButton("Reset to default", { confirmReset = true }, Modifier.fillMaxWidth(), icon = "retry")
+                    e.updatedBy?.let { by -> Caption("Last saved by $by${e.updatedAt?.let { ", " + savedAt(it) } ?: ""}") }
                 }
             }
         }
-        Dock(tight = true) {
+        ActionDock {
             val changed = draft != null && draft != entry?.current
             val blocked = !changed || busy || problem != null
-            Cta(if (busy) "Saving…" else if (changed) "Save" else "Saved", { if (!blocked) vm.save() }, Modifier.weight(1f), off = blocked && !busy, busy = busy)
+            PrimaryButton(if (busy) "Saving…" else if (changed) "Save prompt" else "Saved", { if (!blocked) vm.save() }, Modifier.weight(1f), off = blocked && !busy, busy = busy)
         }
     }
 }
@@ -211,34 +215,34 @@ private fun savedAt(ms: Long): String = java.text.DateFormat.getDateTimeInstance
 @Composable
 fun PromptEditorBody(entry: PromptEntry, group: String?, text: String, preview: PromptPreview?, problem: String?, onType: (String) -> Unit, onInsert: (String) -> Unit) {
     val m = muse
-    RowB { Lbl(group ?: groupLabel(entry.group)); if (entry.overridden) Pill("Edited", "warn") else Pill("Default") }
-    if (entry.description.isNotBlank()) T(entry.description, m.type.body, m.t.muted)
-    Field(when (entry.kind) { "list" -> "Text · comma-separated"; "lines" -> "Text · one per line"; else -> "Text" }) {
-        Input(text, onType, area = true, placeholder = if (entry.allowEmpty) "Empty leaves this line out" else entry.default)
+    Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
+        Caption((group ?: groupLabel(entry.group)) + if (entry.overridden) " · edited" else " · default")
+        if (entry.description.isNotBlank()) Body(entry.description)
     }
-    problem?.let { NoteBox(it, warn = true) }
-    if (entry.placeholders.isNotEmpty()) {
-        Lbl("Placeholders · tap to add")
-        FlowRow(hGap = 6.dp, vGap = 6.dp) {
-            entry.placeholders.forEach { p -> Chip("{${p.name}}" + if (p.required) " *" else "", "{${p.name}}" in text, { onInsert(p.name) }) }
+    Labeled(when (entry.kind) { "list" -> "Text, comma-separated"; "lines" -> "Text, one per line"; else -> "Text" }) {
+        Input(text, onType, area = true, placeholder = if (entry.allowEmpty) "Empty leaves this line out" else entry.default, calm = true)
+        problem?.let { Notice(it, tone = NoticeTone.DANGER) }
+    }
+    if (entry.placeholders.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+        Heading("Placeholders")
+        Caption("Tap one to add it. * is needed.")
+        FlowRow(hGap = MuseSpace.s2, vGap = 0.dp) {
+            entry.placeholders.forEach { p -> ChoiceChip("{${p.name}}" + if (p.required) " *" else "", "{${p.name}}" in text, { onInsert(p.name) }) }
         }
-        entry.placeholders.forEach { p -> Tiny("{${p.name}}${if (p.required) " · needed" else ""}${if (p.description.isNotBlank()) ": ${p.description}" else ""}") }
+        entry.placeholders.forEach { p -> Caption("{${p.name}}${if (p.required) ", needed" else ""}${if (p.description.isNotBlank()) ": ${p.description}" else ""}") }
     }
-    Lbl("Preview")
-    val shape = RoundedCornerShape(m.t.r)
-    Column(Modifier.fillMaxWidth().clip(shape).background(m.t.surface2).border(if (m.isD) 2.5.dp else m.t.stroke, m.t.line, shape).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        T(preview?.text?.ifBlank { "(empty · this line is left out)" } ?: "Building the preview…", m.type.body.copy(fontWeight = FontWeight.Bold, fontSize = 13.sp, lineHeight = 18.sp), m.t.ink)
+    Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+        Heading("Preview")
+        T(preview?.text?.ifBlank { "Empty: this line is left out." } ?: "Building the preview…", m.scale.body, m.roles.ink)
         if (preview != null && preview.example.isNotBlank() && preview.example != preview.text) {
-            Tiny("In a whole prompt (sample model):")
-            T(preview.example, m.type.mono.copy(fontSize = 11.sp, lineHeight = 15.sp), m.t.muted)
+            Caption("In a whole prompt, with the sample model:")
+            T(preview.example, m.scale.caption, m.roles.ink2)
         }
     }
-    if (entry.overridden || text != entry.default) {
-        Lbl("Default")
-        T(entry.default.ifBlank { "(empty)" }, m.type.mono.copy(fontSize = 11.sp, lineHeight = 15.sp), m.t.muted)
+    if (entry.overridden || text != entry.default) Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+        Heading("Default")
+        T(entry.default.ifBlank { "Empty" }, m.scale.caption, m.roles.ink2)
     }
-    Spacer(Modifier.padding(2.dp))
 }
 
 private fun groupLabel(id: String) = when (id) {
