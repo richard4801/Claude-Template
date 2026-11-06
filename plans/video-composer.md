@@ -60,7 +60,8 @@ Before Generate, the composer warns when choices clash with each other or with t
 ## Photo tool (workstream 3, owner 2026-11-06)
 Photoshoot is removed from both apps and becomes the **Photo** tool on the composer shell.
 - **Tool card:** "Photo", with the tagline "Stills of your character". Catalogue `tools` has `{id: "photo", available: true}`, independent of the video engines.
-- **Slots:** CHARACTER (with the outfit picker inside), PRODUCT (Optional), REFERENCES (up to 3, each tagged pose / look / scene, as before).
+- **Slots:** each with its own small sentence-case label (design direction): Character (with the outfit inside), Product (Optional), References (up to 3, each tagged pose / look / scene, as before).
+- **One primary action:** the filled "Generate · price" button; everything else is quieter.
 - **Chips:** Style, Camera (Setup, Angle; no Movement tab), Look and Lighting. Tempo is hidden in Style.
 - **Bottom bar:** WS1's bar with a **Photos 1–4** count (default 4) in place of Length, Sound, Speaking and Takes. Quality and Shape aren't shown, since stills render at the shoot's size. The live price comes from `POST /v1/suite/photos/estimate`.
 - **Presets:** the preset gallery for Photo lists the photo templates (`GET /v1/templates`). Choosing one sends `presetId`, and the chips show the preset's own camera and light as locked.
