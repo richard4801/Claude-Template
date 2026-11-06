@@ -44,6 +44,8 @@ import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.components.Cta
 import studio.muse.app.ui.components.Cta2
 import studio.muse.app.ui.components.T
+import studio.muse.app.ui.screens.claude.ClaudeChatStore
+import studio.muse.app.ui.screens.claude.rememberClaudeChatStore
 import studio.muse.app.ui.theme.muse
 
 /** Wide windows get D6 (plan, timeline and chat side by side). */
@@ -78,17 +80,20 @@ fun rememberNow(): Long {
 }
 
 @Composable
-private fun chatActions(store: CameraStore, c: AppContainer, onBack: () -> Unit, onConnections: () -> Unit, use: (() -> Unit)?, useLabel: String): ChatActions {
+private fun chatActions(store: CameraStore, c: AppContainer, onBack: () -> Unit, onConnections: () -> Unit, use: (() -> Unit)?, useLabel: String, chat: ClaudeChatStore?): ChatActions {
     val clip = LocalClipboardManager.current
     return ChatActions(
-        send = store::send, back = onBack, openConnections = onConnections,
+        send = { chat?.send(it) ?: false }, back = onBack, openConnections = onConnections,
         copyId = { id -> clip.setText(AnnotatedString(id)); c.repo.toast("Session id copied · say “Open camera session $id” to your Claude") },
-        use = use, useLabel = useLabel, dismissNotice = store::dismissNotice,
+        use = use, useLabel = useLabel, dismissNotice = store::dismissNotice, chat = chat,
     )
 }
 
-private fun paneActions(store: CameraStore, back: (() -> Unit)?) =
-    PaneActions(store::setPlayhead, store::dragCharacter, store::dragCamera, { store.rerender() }, back)
+/** Re-render goes to Claude on the owner's plan (the Mac runs it), like any chat message. */
+private fun paneActions(store: CameraStore, chat: ClaudeChatStore?, back: (() -> Unit)?) =
+    PaneActions(store::setPlayhead, store::dragCharacter, store::dragCamera, { chat?.send(RERENDER) }, back)
+
+private const val RERENDER = "Re-render the guides for this revision."
 
 /** The Video suite's "Camera stage": the sessions list → a session (phone: M5 Direct with Claude; wide: D6). */
 @Composable
@@ -112,6 +117,7 @@ fun CameraStageScreen() = OwnerOnly {
             }.onFailure { c.repo.toast(it.message ?: "Couldn't make a draft") }
         }
     }
+    val chat = openId?.let { rememberClaudeChatStore("camera", it) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= WIDE
         val id = openId
@@ -120,9 +126,9 @@ fun CameraStageScreen() = OwnerOnly {
                 val cast = c.repo.state.value.models.take(2).map { it.id }
                 store.newSession("New camera session", cast) { openId = it }
             })
-            wide -> DirectedCameraPaneContent(ui, now, chatActions(store, c, { openId = null }, { connections = true }, draft, "Make a Shot draft"),
-                paneActions(store) { openId = null; store.loadList() })
-            else -> DirectWithClaudeContent(ui, now, chatActions(store, c, { openId = null; store.loadList() }, { connections = true }, draft, "Make a Shot draft"))
+            wide -> DirectedCameraPaneContent(ui, now, chatActions(store, c, { openId = null }, { connections = true }, draft, "Make a Shot draft", chat),
+                paneActions(store, chat) { openId = null; store.loadList() })
+            else -> DirectWithClaudeContent(ui, now, chatActions(store, c, { openId = null; store.loadList() }, { connections = true }, draft, "Make a Shot draft", chat))
         }
     }
 }
@@ -151,9 +157,10 @@ fun DirectedModePanel(shotTitle: String, onApply: (String) -> Unit) = OwnerOnly 
         }
     }
     val useLabel = "Use for ${shotTitle.ifBlank { "this shot" }}"
+    val chat = ui.openId?.let { rememberClaudeChatStore("camera", it) }
     if (connections) { Dialog({ connections = false }, DialogProperties(usePlatformDefaultWidth = false)) { ConnectionsScreen { connections = false } }; }
     if (chatOpen) Dialog({ chatOpen = false }, DialogProperties(usePlatformDefaultWidth = false)) {
-        DirectWithClaudeContent(ui, now, chatActions(store, c, { chatOpen = false }, { connections = true }, { chatOpen = false; apply() }, useLabel))
+        DirectWithClaudeContent(ui, now, chatActions(store, c, { chatOpen = false }, { connections = true }, { chatOpen = false; apply() }, useLabel, chat))
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val s = ui.session
@@ -164,7 +171,7 @@ fun DirectedModePanel(shotTitle: String, onApply: (String) -> Unit) = OwnerOnly 
                 Cta2("New camera session", { store.newSession(shotTitle.ifBlank { "New camera session" }, c.repo.state.value.models.take(2).map { it.id }) { store.open(it) } },
                     Modifier.fillMaxWidth(), icon = "plus", height = 48.dp)
             }
-            maxWidth >= WIDE -> DirectedCameraPaneContent(ui, now, chatActions(store, c, {}, { connections = true }, apply, useLabel), paneActions(store, null))
+            maxWidth >= WIDE -> DirectedCameraPaneContent(ui, now, chatActions(store, c, {}, { connections = true }, apply, useLabel, chat), paneActions(store, chat, null))
             else -> Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (ui.sessions.size > 1) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ui.sessions.take(3).forEach { x -> studio.muse.app.ui.components.Chip(x.title.take(18), x.id == ui.openId, { store.open(x.id) }) }
@@ -194,13 +201,18 @@ fun ConnectionsScreen(onBack: () -> Unit) = OwnerOnly {
     var tokens by remember { mutableStateOf<List<McpToken>>(emptyList()) }
     var created by remember { mutableStateOf<McpToken?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var claude by remember { mutableStateOf<studio.muse.app.data.ClaudePlanStatus?>(null) }
     val api = { c.repo.api.camera }
     LaunchedEffect(Unit) {
         runCatching { api().connections() }.onSuccess { conn = it }.onFailure { error = it.message }
         runCatching { api().tokens() }.onSuccess { tokens = it }
     }
+    LaunchedEffect(Unit) { runCatching { c.repo.api.claude.status() }.onSuccess { claude = it } }
     LaunchedEffect(Unit) {
-        c.repo.live.collect { ev -> if (ev.type == "blender" && ev.op == "relay" && ev.online != null) conn = conn?.copy(relay = studio.muse.app.data.RelayStatus(ev.online, ev.blender ?: false, ev.addonVersion)) }
+        c.repo.live.collect { ev ->
+            if (ev.type == "blender" && ev.op == "relay" && ev.online != null) conn = conn?.copy(relay = studio.muse.app.data.RelayStatus(ev.online, ev.blender ?: false, ev.addonVersion))
+            if (ev.type == "claude") ev.claude?.status?.let { claude = it }
+        }
     }
     ConnectionsContent(conn, tokens, created, now, error, ConnectionActions(
         back = onBack,
@@ -208,5 +220,6 @@ fun ConnectionsScreen(onBack: () -> Unit) = OwnerOnly {
         revoke = { id -> scope.launch { runCatching { api().revokeToken(id) }.onSuccess { tokens = tokens.filterNot { it.id == id }; if (created?.id == id) created = null; c.repo.toast("Token revoked") }.onFailure { error = it.message } } },
         copy = { text, msg -> clip.setText(AnnotatedString(text)); c.repo.toast(msg) },
         openDocs = { runCatching { uri.openUri(it) } },
-    ))
+        setApiFallback = { on -> scope.launch { runCatching { c.repo.api.claude.setApiFallback(on) }.onSuccess { claude = it; c.repo.toast(if (on) "API fallback on · billed per use" else "API fallback off") }.onFailure { error = it.message } } },
+    ), claude)
 }

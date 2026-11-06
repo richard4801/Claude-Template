@@ -206,18 +206,25 @@ fun EditProject.trimClip(clipId: String, inSec: Double, outSec: Double): EditPro
 class ProjectHistory(initial: EditProject, private val limit: Int = 100) {
     private val past = ArrayDeque<EditProject>()
     private val future = ArrayDeque<EditProject>()
+    // Edit sessions (workstream 3): the tag of the step that made each state (null = a local change; a session
+    // history entry id for a change that came from elsewhere, e.g. Claude's), so undo can go through the server.
+    private val pastTags = ArrayDeque<Any?>()
+    private val futureTags = ArrayDeque<Any?>()
     var current: EditProject = initial
+        private set
+    /** The tag of the step that made [current] (null for a local change or the start). */
+    var currentTag: Any? = null
         private set
     val canUndo get() = past.isNotEmpty()
     val canRedo get() = future.isNotEmpty()
 
-    /** Applies [next] when it's a change. Returns whether it applied. */
-    fun apply(next: EditProject?): Boolean {
+    /** Applies [next] when it's a change (as a step tagged [tag]). Returns whether it applied. */
+    fun apply(next: EditProject?, tag: Any? = null): Boolean {
         if (next == null || next == current) return false
-        past.addLast(current)
-        while (past.size > limit) past.removeFirst()
-        future.clear()
-        current = next
+        past.addLast(current); pastTags.addLast(currentTag)
+        while (past.size > limit) { past.removeFirst(); pastTags.removeFirst() }
+        future.clear(); futureTags.clear()
+        current = next; currentTag = tag
         return true
     }
 
@@ -227,7 +234,7 @@ class ProjectHistory(initial: EditProject, private val limit: Int = 100) {
      */
     fun amend(next: EditProject?): Boolean {
         if (next == null || next == current) return false
-        future.clear()
+        future.clear(); futureTags.clear()
         current = next
         return true
     }
@@ -235,6 +242,16 @@ class ProjectHistory(initial: EditProject, private val limit: Int = 100) {
     /** Applies an operation on the current project (e.g. `edit { it.splitAt(3.2) }`). */
     fun edit(op: (EditProject) -> EditProject?): Boolean = apply(op(current))
 
-    fun undo(): Boolean { val p = past.removeLastOrNull() ?: return false; future.addLast(current); current = p; return true }
-    fun redo(): Boolean { val n = future.removeLastOrNull() ?: return false; past.addLast(current); current = n; return true }
+    fun undo(): Boolean {
+        val p = past.removeLastOrNull() ?: return false
+        future.addLast(current); futureTags.addLast(currentTag)
+        current = p; currentTag = pastTags.removeLastOrNull()
+        return true
+    }
+    fun redo(): Boolean {
+        val n = future.removeLastOrNull() ?: return false
+        past.addLast(current); pastTags.addLast(currentTag)
+        current = n; currentTag = futureTags.removeLastOrNull()
+        return true
+    }
 }

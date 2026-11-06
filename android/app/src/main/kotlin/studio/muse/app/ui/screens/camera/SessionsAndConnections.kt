@@ -22,10 +22,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import studio.muse.app.data.CameraSession
+import studio.muse.app.data.ClaudePlanStatus
 import studio.muse.app.data.Connections
 import studio.muse.app.data.McpToken
 import studio.muse.app.ui.components.Cta2
@@ -33,6 +35,7 @@ import studio.muse.app.ui.components.Input
 import studio.muse.app.ui.components.Lbl
 import studio.muse.app.ui.components.Pill
 import studio.muse.app.ui.components.T
+import studio.muse.app.ui.components.Toggle
 import studio.muse.app.ui.components.TopBar
 import studio.muse.app.ui.components.press
 import studio.muse.app.ui.theme.muse
@@ -109,6 +112,15 @@ object ConnectionText {
         t.expiresAt?.let { "expires ${day(it)}" },
     ).joinToString(" · ")
 
+    const val MAC_SETUP = "Set up on your Mac: open MUSE → Settings → Connections → Claude on your plan, then Install Claude Code and Sign in (Claude's own page; MUSE never sees your Claude password)."
+
+    val CONNECTOR_STEPS = listOf(
+        "Open claude.ai or the Claude app → Settings → Connectors",
+        "Add custom connector, and name it MUSE",
+        "Paste this URL:",
+        "Connect, then sign in with your MUSE owner account",
+    )
+
     val INSTALL = listOf(
         "1 · Install Blender and uv, then run: uvx mcp-for-blender install-addon",
         "2 · In Blender: Edit → Preferences → Add-ons → enable “Interface: MCP for Blender”",
@@ -122,18 +134,49 @@ class ConnectionActions(
     val revoke: (String) -> Unit = {},
     val copy: (String, String) -> Unit = { _, _ -> },
     val openDocs: (String) -> Unit = {},
+    /** PATCH /v1/claude/settings {apiFallback}. */
+    val setApiFallback: (Boolean) -> Unit = {},
 )
 
 @Composable
-fun ConnectionsContent(conn: Connections?, tokens: List<McpToken>, created: McpToken?, now: Long, error: String?, actions: ConnectionActions) {
+fun ConnectionsContent(conn: Connections?, tokens: List<McpToken>, created: McpToken?, now: Long, error: String?, actions: ConnectionActions, claude: ClaudePlanStatus? = null) {
     val m = muse
     Column(Modifier.fillMaxSize().background(m.t.bg)) {
         TopBar("Connections", onBack = actions.back)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 14.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             if (error != null) T(error, m.type.tiny, m.t.accent)
             val url = conn?.mcpUrl.orEmpty()
+            // Claude on your plan (claude-editing.md parts C and D)
+            Section("Claude on your plan") {
+                T("MUSE's chat runs on your own Claude subscription through Claude Code on your Mac. Messages from this phone go to your Mac, which answers them.", m.type.tiny, m.t.muted)
+                ClaudePlanRows(claude).forEach { StatusLine(it) }
+                if (claude?.mac?.ready != true) T(ConnectionText.MAC_SETUP, m.type.tiny, m.t.ink)
+                Box(Modifier.fillMaxWidth().height(1.dp).background(m.t.line))
+                val fb = claude?.apiFallback
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        T("API fallback", m.type.body.copy(fontSize = 13.5.sp), m.t.ink, weight = FontWeight.SemiBold)
+                        T(when {
+                            claude == null -> "…"
+                            fb?.available != true -> "Needs ANTHROPIC_API_KEY on the server"
+                            else -> "When your Mac is offline, answer on the studio API key · billed per use · off by default"
+                        }, m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+                    }
+                    Toggle(fb?.enabled == true, { if (fb?.available == true) actions.setApiFallback(!fb.enabled) },
+                        Modifier.graphicsLayer { alpha = if (fb?.available == true) 1f else .45f })
+                }
+            }
+            // Add MUSE to Claude (the custom connector, claude-editing.md part B)
+            Section("Add MUSE to Claude") {
+                T("Use MUSE from the Claude apps on your phone, Mac and the web, on your Claude plan.", m.type.tiny, m.t.muted)
+                val curl = claude?.connectorUrl?.takeIf { it.isNotBlank() } ?: url
+                ConnectionText.CONNECTOR_STEPS.forEachIndexed { i, step ->
+                    T("${i + 1} · $step", m.type.tiny, m.t.ink)
+                    if (i == 2) CopyBox(curl.ifEmpty { "…" }) { actions.copy(curl, "Connector URL copied") }
+                }
+            }
             // Claude & MCP
-            Section("Claude & MCP") {
+            Section("Claude & MCP · tokens") {
                 T("Use MUSE from your own Claude app (Claude Code or Claude Desktop) with a token. Tokens only work for the studio owner.", m.type.tiny, m.t.muted)
                 Lbl("MUSE MCP URL")
                 CopyBox(url.ifEmpty { "…" }) { actions.copy(url, "MCP URL copied") }
@@ -167,13 +210,20 @@ fun ConnectionsContent(conn: Connections?, tokens: List<McpToken>, created: McpT
                 Lbl("Install the Blender add-on")
                 ConnectionText.INSTALL.forEach { T(it, m.type.tiny, m.t.ink) }
             }
-            // In-app chat
-            Section("In-app chat") {
-                StatusLine(StatusRow(if (conn?.inAppChat == true) Dot.GOOD else Dot.OFF, "Direct with Claude in MUSE",
-                    if (conn == null) "…" else if (conn.inAppChat) "Available" else "Needs ANTHROPIC_API_KEY on the server"))
-            }
         }
     }
+}
+
+/** The Mac's Claude Code: the app online, Claude Code installed (version), signed in (model, owner only). */
+fun ClaudePlanRows(s: ClaudePlanStatus?): List<StatusRow> {
+    val mac = s?.mac
+    val cc = mac?.claudeCode
+    return listOf(
+        StatusRow(if (mac?.online == true) Dot.GOOD else Dot.OFF, "Mac app", if (s == null) "…" else if (mac!!.online) "Online" else "Offline"),
+        StatusRow(if (cc?.installed == true) Dot.GOOD else Dot.OFF, "Claude Code", if (s == null) "…" else if (cc!!.installed) "Installed" + (cc.version?.let { " · $it" } ?: "") else "Not installed"),
+        StatusRow(if (cc?.signedIn == true) Dot.GOOD else if (cc?.installed == true) Dot.WARN else Dot.OFF, "Signed in",
+            if (s == null) "…" else if (cc!!.signedIn) "Yes" + (cc.model?.let { " · $it" } ?: "") else "No"),
+    )
 }
 
 @Composable

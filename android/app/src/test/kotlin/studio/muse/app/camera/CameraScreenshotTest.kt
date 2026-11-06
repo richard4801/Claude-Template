@@ -31,7 +31,6 @@ import studio.muse.app.ui.Nav
 import studio.muse.app.ui.screens.camera.CameraStageScreen
 import studio.muse.app.ui.screens.camera.CameraUi
 import studio.muse.app.ui.screens.camera.ChatActions
-import studio.muse.app.ui.screens.camera.ChatNotice
 import studio.muse.app.ui.screens.camera.ChatTurn
 import studio.muse.app.ui.screens.camera.ConnectionActions
 import studio.muse.app.ui.screens.camera.ConnectionsContent
@@ -44,7 +43,7 @@ import studio.muse.app.ui.theme.ThemeId
 
 /**
  * Directed (Blender) mode in all four themes (plans/mcp-bridge.md "Phase 2 · UI"): phone M5 Direct with Claude (working with
- * guides, idle, Blender offline, director unavailable), owner Settings → Connections (tokens + a new token shown once),
+ * guides, idle, Blender offline, Mac offline · with the Claude chat on the owner's plan), owner Settings → Connections (tokens + a new token shown once),
  * the Camera stage sessions list (through CameraStageScreen and the demo studio), the Shot builder's Directed tab (DirectedModePanel) and the wide D6 pane at 1280 dp.
  * PNGs land in app/build/outputs/roborazzi/camera_<theme>_<screen>_<width>.png.
  */
@@ -54,7 +53,7 @@ import studio.muse.app.ui.theme.ThemeId
 class CameraScreenshotTest(private val theme: String, private val screen: String, private val width: Int) {
     companion object {
         private val CASES = listOf(
-            "m5_working" to 390, "m5_working" to 360, "m5_idle" to 390, "m5_blender_offline" to 390, "m5_unavailable" to 390,
+            "m5_working" to 390, "m5_working" to 360, "m5_idle" to 390, "m5_blender_offline" to 390, "m5_mac_offline" to 390,
             "connections" to 390, "connections" to 360, "sessions" to 390, "sessions" to 360, "panel" to 360, "pane" to 1280,
         )
 
@@ -87,10 +86,10 @@ class CameraScreenshotTest(private val theme: String, private val screen: String
                 turn = ChatTurn(ask, seed.revision, toolsSeen = 2, toolsDone = 1, text = "Easing the orbit to 45°/s and pivoting around ${seed.characters[1].name.substringBefore(' ')}…", renderProgress = .64f),
                 sentHere = setOf(ask))
             "m5_blender_offline" -> base.copy(session = base.session!!.copy(relay = RelayStatus(false, false)))
-            "m5_unavailable" -> base.copy(session = base.session!!.copy(claude = ClaudeStatus(false, null)), connections = conn.copy(inAppChat = false),
-                notice = ChatNotice.of("director_unavailable", null))
+            "m5_mac_offline" -> base.copy(session = base.session!!.copy(claude = ClaudeStatus(false, null), relay = RelayStatus(false, false)))
             else -> base
         }
+        if (screen == "m5_mac_offline") fake.claude.setMac(online = false)
         val tokens = runBlocking { cam.tokens() }
         val created = if (screen == "connections") runBlocking { cam.createToken("Claude Desktop · Studio Mac") } else null
         compose.mainClock.autoAdvance = false
@@ -113,9 +112,9 @@ class CameraScreenshotTest(private val theme: String, private val screen: String
         when (screen) {
             "sessions" -> check(compose.onAllNodesWithText("Café walk-and-talk").fetchSemanticsNodes().isNotEmpty())
             "connections" -> check(compose.onAllNodesWithText("You won't see it again", substring = true).fetchSemanticsNodes().isNotEmpty())
-            "m5_unavailable" -> check(compose.onAllNodesWithText("ANTHROPIC_API_KEY", substring = true).fetchSemanticsNodes().isNotEmpty())
+            "m5_mac_offline" -> check(compose.onAllNodesWithText("Open in Claude").fetchSemanticsNodes().isNotEmpty())
             "panel" -> check(compose.onAllNodesWithText("Open Direct with Claude").fetchSemanticsNodes().isNotEmpty())
-            "m5_working" -> check(compose.onAllNodesWithText("64%").fetchSemanticsNodes().isNotEmpty())
+            "m5_working", "m5_idle" -> check(compose.onAllNodesWithText("Saved camera path").fetchSemanticsNodes().isNotEmpty())
         }
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/camera_${theme}_${screen}_$width.png")
     }

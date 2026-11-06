@@ -150,6 +150,16 @@ export function clipTimeAt(c: { inSec: number; outSec: number; speed?: number; s
   }
   return acc;
 }
+/** Source time at `t` seconds from the clip's start on the timeline (the inverse of clipTimeAt; clamped to the clip). */
+export function clipSourceAt(c: { inSec: number; outSec: number; speed?: number; speedCurve?: SpeedCurve }, t: number): number {
+  let acc = 0;
+  for (const p of speedPieces(c)) {
+    const len = (p.outSec - p.inSec) / p.speed;
+    if (t <= acc + len) return Math.min(p.outSec, p.inSec + Math.max(0, t - acc) * p.speed);
+    acc += len;
+  }
+  return c.outSec;
+}
 /** A curve cut down to the source range [x0, x1] of its clip, rescaled to 0–1 (preset becomes custom). */
 export function subCurve(c: SpeedCurve, x0: number, x1: number): SpeedCurve {
   const inner = c.points.filter(p => p[0] > x0 + 1e-9 && p[0] < x1 - 1e-9).map(p => [r6((p[0] - x0) / (x1 - x0)), p[1]] as [number, number]);

@@ -84,7 +84,8 @@ struct EditSuiteExportSheet: View {
         .frame(width: 600, height: 700)
         .background(t.surface)
         .onAppear {
-            settings = session.state.export
+            // Claude's export request opens the sheet with its preset (Edit sessions, workstream 3).
+            settings = session.exportAsk ?? session.state.export
             // Disclosure is chosen per export and starts off every time (owner rule).
             settings.labelAI = false
             settings.c2pa = false
@@ -143,7 +144,10 @@ struct EditSuiteExportSheet: View {
             dest = url
         }
         session.view { $0.export = settings }
-        session.export(settings, saveFileTo: dest, onSaved: onSaved)
+        // A Claude export request is answered when this export ends (Edit sessions, workstream 3).
+        let request = session.exportAskRequest
+        session.exportAskRequest = nil
+        session.export(settings, saveFileTo: dest, request: request, onSaved: onSaved)
         dismiss()
     }
 }

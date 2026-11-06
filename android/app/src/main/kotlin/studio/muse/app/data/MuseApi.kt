@@ -162,6 +162,8 @@ interface MuseApi {
 
     // Workstream 2: camera sessions (plans/api.md "MCP & camera sessions"), owner only. See CameraApi.kt.
     val camera: CameraApi get() = CameraApi.Unsupported
+    /** Claude on the owner's plan: chat threads relayed to the Mac's Claude Code (plans/api.md "Claude on the owner's plan"). See ClaudeApi.kt. */
+    val claude: ClaudeApi get() = ClaudeApi.Unsupported
 
     // Edit suite (workstream 3): AI helpers and v2 versions (plans/api.md "Editor v2"). Defaults: not available.
     /** What a helper would cost (free ones say so). */
@@ -176,6 +178,22 @@ interface MuseApi {
     /** Uploads a voice-over / music file (or with purpose "lut" a .cube) for the editor; returns the upload id. */
     suspend fun uploadEditorFile(file: java.io.File, contentType: String, purpose: String? = null, onProgress: (Float) -> Unit = {}): String =
         throw ApiException("unsupported", "Uploading files needs the studio server")
+
+    // Edit sessions (workstream 3, plans/api.md "Edit sessions"), owner only. Defaults: not available (local editing only).
+    /** The take's open session, or a new one (from [OpenEditSessionRequest.project] when sent, else the take's saved edit). */
+    suspend fun openEditSession(req: OpenEditSessionRequest): EditSessionDto = throw ApiException("unsupported", "Editing with Claude needs the studio server")
+    suspend fun editSession(id: String): EditSessionDto = throw ApiException("not_found", "Edit session not found")
+    /** A local change as a JSON Patch against [EditPatchRequest.baseRevision]; `stale_revision` when the session moved on. */
+    suspend fun pushEditPatch(id: String, req: EditPatchRequest): EditChangeResult = throw ApiException("unsupported", "Editing with Claude needs the studio server")
+    /** Undoes one history entry (anyone's) as a new change. */
+    suspend fun undoEditEntry(id: String, req: EditUndoRequest): EditChangeResult = throw ApiException("unsupported", "Editing with Claude needs the studio server")
+    suspend fun editPresence(id: String, presence: EditPresence) {}
+    suspend fun leaveEditSession(id: String, device: String) {}
+    /** A PNG of a frame Claude asked for, uploaded with the image presign (`POST /v1/uploads/presign {kind:"image"}` + PUT): the upload id. */
+    suspend fun uploadEditFrame(png: ByteArray): String = throw ApiException("unsupported", "Uploading frames needs the studio server")
+    suspend fun answerEditFrame(id: String, requestId: String, uploadId: String) {}
+    suspend fun answerEditRequest(id: String, requestId: String, answer: EditRequestAnswer) {}
+    suspend fun answerEditPending(id: String, pendingId: String, approve: Boolean): EditPending = throw ApiException("not_found", "Waiting request not found")
 
     // AI suite (workstream 1, plans/api.md "AI suite"). Members never get engine names back; the owner does.
     suspend fun suiteCatalog(): SuiteCatalog = throw ApiException("not_found", "This server doesn't have the AI suite yet")

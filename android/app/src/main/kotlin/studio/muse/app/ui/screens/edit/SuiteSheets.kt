@@ -117,6 +117,7 @@ fun SuiteSheet(ui: EditSuiteUi, panel: Panel, host: SuiteHost, act: (EditAction)
             Panel.OVERLAY -> OverlayBody(ui, host, act)
             Panel.RATIO -> RatioBody(ui, act)
             Panel.EXPORT -> ExportBody(ui, host, act)
+            Panel.HISTORY -> HistoryBody(ui, act) // Edit sessions (workstream 3)
         }
     }
 }

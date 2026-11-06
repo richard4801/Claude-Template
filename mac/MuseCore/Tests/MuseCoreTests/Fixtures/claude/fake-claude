@@ -1,0 +1,47 @@
+#!/bin/bash
+# A stand-in for Anthropic's `claude` CLI in MuseCore tests (no real Claude anywhere).
+#   claude --version            → "2.1.211 (Claude Code)"
+#   claude auth status          → JSON; exit 0 signed in, 1 signed out (FAKE_CLAUDE_SIGNED_OUT=1)
+#   claude -p … (stream-json)   → reads one stdin line, replays FAKE_CLAUDE_TRANSCRIPT (default: claude-stream.jsonl next to
+#                                 this script) one line at a time; FAKE_CLAUDE_HANG=1 prints init then waits for SIGINT;
+#                                 FAKE_CLAUDE_NO_SESSION=1 refuses --resume like an unknown session.
+# FAKE_CLAUDE_LOG gets the arguments, the stdin line and the mcp config file's mode and contents.
+here="$(cd "$(dirname "$0")" && pwd)"
+case "$1" in
+  --version) echo "2.1.211 (Claude Code)"; exit 0 ;;
+  auth)
+    if [ "$2" = "status" ]; then
+      if [ "$FAKE_CLAUDE_SIGNED_OUT" = "1" ]; then echo '{"loggedIn":false,"authMethod":"none"}'; exit 1; fi
+      echo '{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"max"}'; exit 0
+    fi
+    exit 2 ;;
+esac
+
+config=""; resume=""; prev=""
+for a in "$@"; do
+  [ "$prev" = "--mcp-config" ] && config="$a"
+  [ "$prev" = "--resume" ] && resume="$a"
+  prev="$a"
+done
+IFS= read -r line
+if [ -n "$FAKE_CLAUDE_LOG" ]; then
+  { for a in "$@"; do echo "ARG:$a"; done
+    echo "STDIN:$line"
+    echo "CWD:$(pwd)"
+    if [ -n "$config" ]; then echo "MODE:$(stat -c %a "$config" 2>/dev/null || stat -f %Lp "$config")"; echo "CONFIG:$(cat "$config")"; fi
+  } >> "$FAKE_CLAUDE_LOG"
+fi
+if [ "$FAKE_CLAUDE_NO_SESSION" = "1" ] && [ -n "$resume" ]; then
+  echo "No conversation found with session ID: $resume" >&2
+  exit 1
+fi
+transcript="${FAKE_CLAUDE_TRANSCRIPT:-$here/claude-stream.jsonl}"
+if [ "$FAKE_CLAUDE_HANG" = "1" ]; then
+  trap 'echo "interrupted" >&2; exit 130' INT
+  head -n 1 "$transcript"
+  while true; do sleep 0.05; done
+fi
+while IFS= read -r l || [ -n "$l" ]; do
+  printf '%s\n' "$l"
+done < "$transcript"
+exit 0

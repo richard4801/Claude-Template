@@ -86,16 +86,30 @@ fun EditSuiteContent(
                     editor(Modifier.weight(1f).fillMaxHeight())
                     Box(Modifier.width(1.dp).fillMaxHeight().background(m.t.line))
                     Box(Modifier.width(380.dp).fillMaxHeight()) {
-                        if (ui.project != null) SuiteSheet(ui, ui.panel ?: Panel.EDIT, host, act, Modifier.fillMaxSize())
+                        // Edit sessions (workstream 3): the Claude panel takes the inspector's place while open.
+                        if (ui.session?.chatOpen == true) ClaudePanel(ui, act, Modifier.fillMaxSize())
+                        else if (ui.project != null) SuiteSheet(ui, ui.panel ?: Panel.EDIT, host, act, Modifier.fillMaxSize())
                     }
                 }
             } else {
                 editor(Modifier.fillMaxSize())
                 val panel = ui.panel
-                if (panel != null && ui.project != null) {
+                if (ui.session?.chatOpen == true) {
+                    Scrim { act(EditAction.ClaudePanel(false)) }
+                    ClaudeSheet(ui, act, Modifier.align(Alignment.BottomCenter).heightIn(max = maxHeight * .62f).navigationBarsPadding())
+                } else if (panel != null && ui.project != null) {
                     Box(Modifier.fillMaxSize().background(Color(0x40141210)).press { act(EditAction.Open(null)) })
                     SuiteSheet(ui, panel, host, act, Modifier.align(Alignment.BottomCenter).heightIn(max = maxHeight * .62f).navigationBarsPadding())
                 }
+            }
+            // Edit sessions (workstream 3): Claude's change landed; a paid helper Claude asked for waits for the owner.
+            ui.session?.claudeNote?.let { note ->
+                androidx.compose.runtime.LaunchedEffect(note) { kotlinx.coroutines.delay(4000); act(EditAction.ClearClaudeNote) }
+                ClaudeNote(note, { act(EditAction.ClearClaudeNote) }, Modifier.align(Alignment.TopCenter).padding(top = 58.dp, start = 16.dp, end = 16.dp))
+            }
+            ui.session?.asking?.let { p ->
+                Scrim { act(EditAction.AnswerPending(p.id, false)) }
+                PendingSheet(p, act, Modifier.align(Alignment.BottomCenter).widthIn(max = 560.dp).navigationBarsPadding())
             }
             // Loading / failure over everything.
             when (val ph = ui.phase) {
@@ -132,6 +146,7 @@ private fun TopRow(ui: EditSuiteUi, act: (EditAction) -> Unit, onClose: () -> Un
             studio.muse.app.ui.components.FitText(ui.title.ifBlank { "Edit" }, m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold), m.t.ink, Modifier.weight(1f, fill = false))
             if (ui.reopened) { Spacer(Modifier.width(6.dp)); Pill("Edited", "good") }
         }
+        if (ui.session != null) { ClaudeButton(ui.session.chatOpen) { act(EditAction.ClaudePanel(!ui.session.chatOpen)) }; Spacer(Modifier.width(8.dp)) }
         val shape = RoundedCornerShape(if (m.isA) 0.dp else if (m.isB) 8.dp else 999.dp)
         Box(
             Modifier.height(30.dp).clip(shape).background(m.t.cta).press(enabled = ui.project != null) { act(EditAction.Open(Panel.EXPORT)) }.padding(horizontal = 12.dp)
@@ -150,6 +165,9 @@ private fun Transport(ui: EditSuiteUi, act: (EditAction) -> Unit) {
             EIc(if (ui.playing) "pause" else "play", 20.dp, m.t.ink)
         }
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+            if (ui.session != null) Box(Modifier.size(42.dp, 48.dp).press { act(EditAction.Open(if (ui.panel == Panel.HISTORY) null else Panel.HISTORY)) }.semantics { contentDescription = "History" }, contentAlignment = Alignment.Center) {
+                EIc("clock", 18.dp, if (ui.panel == Panel.HISTORY) m.t.accent else m.t.ink)
+            }
             Box(Modifier.size(42.dp, 48.dp).press(enabled = ui.canUndo) { act(EditAction.Undo) }.semantics { contentDescription = "Undo" }, contentAlignment = Alignment.Center) { EIc("undo", 18.dp, if (ui.canUndo) m.t.ink else m.t.muted) }
             Box(Modifier.size(42.dp, 48.dp).press(enabled = ui.canRedo) { act(EditAction.Redo) }.semantics { contentDescription = "Redo" }, contentAlignment = Alignment.Center) { EIc("redo", 18.dp, if (ui.canRedo) m.t.ink else m.t.muted) }
             Box(Modifier.size(42.dp, 48.dp).press { act(EditAction.Fullscreen) }.semantics { contentDescription = "Fullscreen" }, contentAlignment = Alignment.Center) { EIc("expand", 18.dp, if (ui.fullscreen) m.t.ink else m.t.muted) }

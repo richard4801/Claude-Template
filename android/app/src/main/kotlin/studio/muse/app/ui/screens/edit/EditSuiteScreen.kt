@@ -259,6 +259,10 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
     private val _player = MutableStateFlow<CompositionPlayer?>(null)
     val player: StateFlow<CompositionPlayer?> = _player.asStateFlow()
     private var work: Job? = null
+    private var exporting: Job? = null
+    private var lastExportError: String? = null
+    /** Edit sessions (workstream 3): the owner's live session with Claude (null for members / local only). */
+    private var sync: EditSessionSync? = null
 
     init {
         load()
@@ -303,8 +307,9 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                 val project = projectFor(source, target?.initial)
                 for (a in project.assets) if (a.take == source.id && a.kind == AssetKind.VIDEO) sourceFile?.let { files[a.id] = it }
                 controller.load(project, source.title, source.id, source.thumb, reopened = take.kind == "edit")
+                startSession(source.id, project, fromVersion = if (target?.initial != null && take.kind == "edit") take.id else null)
                 loadFrames(project)
-                fetchTakeAssets(project)
+                fetchTakeAssets(controller.project ?: project)
             } catch (e: kotlinx.coroutines.CancellationException) { throw e
             } catch (e: Exception) {
                 controller.setPhase(SuitePhase.Failed("Couldn't open the video · check your connection and try again"))
@@ -318,7 +323,8 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         initial?.project?.let { json -> runCatching { EditJson.parse(json) }.getOrNull()?.takeIf { problemOf(it, paletteIds = looks.paletteIds) == null }?.let { return it } }
         val size = SourceSize(info?.width ?: source.width ?: 1080, info?.height ?: source.height ?: 1920, (info?.fps?.takeIf { it > 0 } ?: source.fps ?: 30.0).roundToInt().toDouble(), info?.hasAudio)
         initial?.toEdit()?.let { e -> runCatching { fromV1(e, source.id, size) }.getOrNull()?.takeIf { problemOf(it, paletteIds = looks.paletteIds) == null }?.let { return it } }
-        return newProject(source.id, info?.durationSec?.takeIf { it > 0 } ?: source.durationSec ?: 8.0, size)
+        // A suite take graded with a look (workstream 1, Take.look) starts with it on its main clip (reversible like any look).
+        return newProject(source.id, info?.durationSec?.takeIf { it > 0 } ?: source.durationSec ?: 8.0, size, lut = source.look?.lut)
     }
 
     private suspend fun loadFrames(p: EditProject) {
@@ -419,41 +425,76 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         }
     }
 
-    // ------------------------------------------------------------ export
-    private var exporting: Job? = null
-
-    fun export(toPhone: Boolean) {
-        val p = controller.project ?: return
-        val u = controller.ui.value
-        if (sourceFile == null) return c.repo.toast("This video has no file to render · open a finished render")
-        pause()
-        exporting?.cancel()
-        exporting = viewModelScope.launch {
-            val s = u.export
-            controller.setPhase(SuitePhase.Exporting(0f))
-            val made = try {
-                val plan = composer.plan(exportProject(playable(p), s), files)
-                composer.export(plan, files, if (s.codec == ExportCodec.HEVC) androidx.media3.common.MimeTypes.VIDEO_H265 else androidx.media3.common.MimeTypes.VIDEO_H264) { pr ->
-                    controller.setPhase(SuitePhase.Exporting(pr))
-                }
-            } catch (e: kotlinx.coroutines.CancellationException) { controller.setPhase(SuitePhase.Ready); throw e
-            } catch (e: Exception) {
-                controller.setPhase(SuitePhase.Failed("This phone couldn't make the video · try 1080p or H.264")); return@launch
-            }
-            val srt = if (s.captions == CaptionExport.SRT) toSrt(p).takeIf { it.isNotEmpty() } else null
-            controller.setPhase(SuitePhase.Saving(0f))
-            try {
-                // The saved project is the edit as made (canvas = the exported size and fps; captions kept for reopening).
-                val saved = p.copy(canvas = p.canvas.copy(width = made.width, height = made.height, fps = s.fps.toDouble()))
-                val (take, err) = c.repo.attemptInline { saveProjectVersion(u.sourceTakeId, made, EditJson.encode(saved)) { pr -> controller.setPhase(SuitePhase.Saving(pr)) } }
-                if (toPhone) withContext(Dispatchers.IO) { saveToPhone(made.file, srt, u.title) }
-                if (take == null) { controller.setPhase(SuitePhase.Failed(err ?: "Couldn't save the video")); return@launch }
-                controller.update { it.copy(phase = SuitePhase.Ready, savedTakeId = take.id, panel = null, message = if (toPhone) "Saved to Gallery and to this phone" else "Saved as a new version · Edited") }
-            } finally { made.file.delete() }
-        }
+    // ------------------------------------------------------------ Edit sessions (workstream 3): owner only
+    /** The owner's editor joins the take's edit session (Claude edits it too); members and offline stay local. */
+    private suspend fun startSession(sourceTakeId: String, project: EditProject, fromVersion: String?) {
+        if (!(c.repo.demo || c.prefs.value.owner)) return
+        val s = EditSessionSync(viewModelScope, { c.repo.api }, c.repo.live, controller, sessionHost, deviceId(), Build.MODEL ?: "Android phone", looks.paletteIds)
+        // The app's own project goes up only when it was built from a saved version (else the server starts from the take).
+        if (s.start(sourceTakeId, if (fromVersion != null) EditJson.encode(project) else null, fromVersion)) sync = s
     }
 
-    fun cancelExport() { exporting?.cancel(); controller.setPhase(SuitePhase.Ready) }
+    private fun deviceId(): String {
+        val raw = runCatching { android.provider.Settings.Secure.getString(app.contentResolver, android.provider.Settings.Secure.ANDROID_ID) }.getOrNull() ?: "device"
+        return "android-" + raw.hashCode().toUInt().toString(16)
+    }
+
+    private val sessionHost by lazy { object : SessionHost {
+        override suspend fun renderFrame(project: EditProject, t: Double, width: Int): Pair<ByteArray?, String?> {
+            if (sourceFile == null) return null to "No video file"
+            return runCatching { studio.muse.app.platform.edit.FrameStill(app, looks).png(composer.plan(playable(project), files), files, t, width) }
+                .fold({ it to null }, { null to "Couldn't render the frame" })
+        }
+        override suspend fun saveVersion(name: String?): Pair<String?, String?> {
+            val take = exportAndSave(toPhone = false) ?: return null to (lastExportError ?: "Couldn't save the video")
+            return take.id to null
+        }
+        /** Never unattended: the export sheet opens with Claude's preset and waits for the owner's tap (or close). */
+        override suspend fun export(preset: JsonObject?): Pair<String?, String?> = exportGate.request(preset)
+    } }
+    private val exportGate by lazy { OwnerExportGate(viewModelScope, controller) }
+
+    // ------------------------------------------------------------ export
+
+    fun export(toPhone: Boolean) {
+        exporting?.cancel()
+        exporting = viewModelScope.launch { exportAndSave(toPhone) }
+    }
+
+    /** Renders and saves a new version (and a copy on the phone); the saved take, or null with [lastExportError]. */
+    private suspend fun exportAndSave(toPhone: Boolean): Take? {
+        lastExportError = null
+        val p = controller.project ?: return null
+        val u = controller.ui.value
+        if (sourceFile == null) { c.repo.toast("This video has no file to render · open a finished render"); lastExportError = "No video file"; return null }
+        withContext(Dispatchers.Main) { pause() }
+        val s = u.export
+        controller.setPhase(SuitePhase.Exporting(0f))
+        val made = try {
+            val plan = composer.plan(exportProject(playable(p), s), files)
+            composer.export(plan, files, if (s.codec == ExportCodec.HEVC) androidx.media3.common.MimeTypes.VIDEO_H265 else androidx.media3.common.MimeTypes.VIDEO_H264) { pr ->
+                controller.setPhase(SuitePhase.Exporting(pr))
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) { controller.setPhase(SuitePhase.Ready); throw e
+        } catch (e: Exception) {
+            lastExportError = "This phone couldn't make the video · try 1080p or H.264"
+            controller.setPhase(SuitePhase.Failed(lastExportError!!)); return null
+        }
+        val srt = if (s.captions == CaptionExport.SRT) toSrt(p).takeIf { it.isNotEmpty() } else null
+        controller.setPhase(SuitePhase.Saving(0f))
+        try {
+            // The saved project is the edit as made (canvas = the exported size and fps; captions kept for reopening).
+            val saved = p.copy(canvas = p.canvas.copy(width = made.width, height = made.height, fps = s.fps.toDouble()))
+            val (take, err) = c.repo.attemptInline { saveProjectVersion(u.sourceTakeId, made, EditJson.encode(saved)) { pr -> controller.setPhase(SuitePhase.Saving(pr)) } }
+            if (toPhone) withContext(Dispatchers.IO) { saveToPhone(made.file, srt, u.title) }
+            if (take == null) { lastExportError = err ?: "Couldn't save the video"; controller.setPhase(SuitePhase.Failed(lastExportError!!)); return null }
+            exportGate.exported(take.id) // answers an export Claude asked for, before the sheet closes
+            controller.update { it.copy(phase = SuitePhase.Ready, savedTakeId = take.id, panel = null, message = if (toPhone) "Saved to Gallery and to this phone" else "Saved as a new version · Edited") }
+            return take
+        } finally { made.file.delete() }
+    }
+
+    fun cancelExport() { exporting?.cancel(); controller.setPhase(SuitePhase.Ready); exportGate.cancelled() }
 
     /** The MP4 into Movies/MUSE (and the .srt into Downloads/MUSE on Android 10+). */
     private fun saveToPhone(mp4: File, srt: String?, title: String) {
@@ -477,15 +518,20 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
 
     override fun onCleared() {
         work?.cancel(); exporting?.cancel()
+        sync?.stop(c.scope); sync = null
         _player.value?.release(); _player.value = null
     }
 
     companion object {
-        /** The whole source as one clip on a canvas the size of the source. */
-        fun newProject(takeId: String, durationSec: Double, size: SourceSize): EditProject = EditProject(
+        /**
+         * The whole source as one clip on a canvas the size of the source. [lut]: the take's suite look (workstream 1,
+         * `Take.look.lut`, e.g. "palette:<id>"), put on the clip at full strength like the server's edit sessions do.
+         */
+        fun newProject(takeId: String, durationSec: Double, size: SourceSize, lut: String? = null): EditProject = EditProject(
             2, takeId, Canvas(size.width, size.height, size.fps, "#000000"),
             listOf(Asset("src", AssetKind.VIDEO, take = takeId, durationSec = durationSec, width = size.width, height = size.height, hasAudio = size.hasAudio ?: true)),
-            listOf(Track("main", TrackKind.MAIN, items = listOf(VideoClip("c1", "src", 0.0, durationSec, 1.0)))),
+            listOf(Track("main", TrackKind.MAIN, items = listOf(VideoClip("c1", "src", 0.0, durationSec, 1.0,
+                look = lut?.takeIf { it.isNotBlank() }?.let { studio.muse.core.edit.Look(lut = it, strength = 1.0) })))),
         )
     }
 }

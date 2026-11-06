@@ -119,6 +119,8 @@ struct EditSuiteEditor: View {
     @FocusState private var focused: Bool
     @State private var showExport = false
     @State private var showBin = true
+    /// The Claude panel on the right (owner only).
+    @State private var showClaude = false
 
     var body: some View {
         Group {
@@ -137,16 +139,21 @@ struct EditSuiteEditor: View {
                 editor
             }
         }
-        .sheet(isPresented: $showExport) {
+        .sheet(isPresented: $showExport, onDismiss: { session.exportAskClosed(started: false) }) {
             EditSuiteExportSheet(session: session) { take in
                 store.editSuiteSaved(take)
             }
         }
+        // Claude asked for an export: the sheet opens with its preset; the owner confirms.
+        .onChange(of: session.exportAsk) { _, ask in if ask != nil { showExport = true } }
+        .environment(session)
     }
 
     private var editor: some View {
         GeometryReader { g in
-            let w = g.size.width
+            let full = g.size.width
+            // The Claude panel takes its width from the editor.
+            let w = showClaude && session.isOwner ? full - (full >= 1300 ? 360 : 320) : full
             let binW: CGFloat = w >= 1300 ? 300 : w >= 1080 ? 248 : 220
             let inspW: CGFloat = w >= 1300 ? 360 : 300
             let bin = showBin && w >= 900
@@ -154,22 +161,31 @@ struct EditSuiteEditor: View {
             VStack(spacing: 0) {
                 topBar
                 SuiteRule()
-                if session.mode == .captions {
-                    EditSuiteCaptionsMode(session: session)
-                } else {
-                    HStack(spacing: 0) {
-                        if bin {
-                            EditSuiteBin(session: session).frame(width: binW)
-                            SuiteRule(vertical: true)
+                HStack(spacing: 0) {
+                    VStack(spacing: 0) {
+                        if session.mode == .captions {
+                            EditSuiteCaptionsMode(session: session)
+                        } else {
+                            HStack(spacing: 0) {
+                                if bin {
+                                    EditSuiteBin(session: session).frame(width: binW)
+                                    SuiteRule(vertical: true)
+                                }
+                                EditSuitePreview(session: session, showBin: $showBin, binHidden: !bin)
+                                    .frame(minWidth: 320, maxWidth: .infinity)
+                                SuiteRule(vertical: true)
+                                EditSuiteInspector(session: session).frame(width: inspW)
+                            }
+                            .frame(maxHeight: .infinity)
+                            SuiteRule()
+                            EditSuiteTimeline(session: session).frame(height: timelineH)
                         }
-                        EditSuitePreview(session: session, showBin: $showBin, binHidden: !bin)
-                            .frame(minWidth: 320, maxWidth: .infinity)
-                        SuiteRule(vertical: true)
-                        EditSuiteInspector(session: session).frame(width: inspW)
                     }
-                    .frame(maxHeight: .infinity)
-                    SuiteRule()
-                    EditSuiteTimeline(session: session).frame(height: timelineH)
+                    if showClaude && session.isOwner {
+                        SuiteRule(vertical: true)
+                        EditSuiteClaudePanel(session: session) { showClaude = false }
+                            .frame(width: full >= 1300 ? 360 : 320)
+                    }
                 }
             }
         }
@@ -195,6 +211,12 @@ struct EditSuiteEditor: View {
             return .handled
         }
         .overlay(alignment: .bottom) { messages.padding(.bottom, 16) }
+        .overlay(alignment: .top) {
+            if let text = session.claudeToast {
+                EditSuiteClaudeToast(text: text) { session.claudeToast = nil }.padding(.top, 62)
+            }
+        }
+        .sheet(item: $session.askPending) { p in EditSuiteClaudeAsk(session: session, pending: p) }
         .overlay { if session.busy { EditSuiteExportProgress(session: session) } }
     }
 
@@ -208,6 +230,11 @@ struct EditSuiteEditor: View {
                 Text(session.saveLine).font(t.body(12)).foregroundStyle(t.muted).lineLimit(1)
             }
             .frame(minWidth: 120, alignment: .leading)
+            if session.isOwner {
+                SuiteToolButton(title: "Claude", icon: "sparkle", filled: showClaude) { showClaude.toggle() }
+                    .accessibilityLabel(showClaude ? "Hide Claude" : "Show Claude")
+                    .help(session.liveConnected ? "This edit is shared live with Claude" : "Claude")
+            }
             Spacer(minLength: 8)
             if session.mode == .captions {
                 EditSeg(options: [(EditSuiteSession.Mode.captions, "Transcript"), (.timeline, "Timeline")], selection: session.mode) { session.mode = $0 }

@@ -68,6 +68,10 @@ export function noiseSuggestion(words: Word[]): { level: 'none' | 'light' | 'str
   return { level: 'none', reason: 'The voice is already clear', confidence: conf };
 }
 
+const services = new WeakMap<Ctx, EditorAiService>();
+/** One service per app (routes, edit sessions and MCP tools share it). */
+export const editorAi = (ctx: Ctx) => { let s = services.get(ctx); if (!s) { s = new EditorAiService(ctx); services.set(ctx, s); } return s; };
+
 export class EditorAiService {
   readonly provider: EditorProvider;
   private stopping = new Set<string>();
@@ -87,9 +91,14 @@ export class EditorAiService {
   private emit(r: Row) {
     void this.ctx.hub.emit(r.studioId, v => (v.userId === r.userId || v.role === 'owner' ? { type: 'editor', editorJob: this.view(r, v.role) } : null));
   }
+  /** Called when a job finishes (done, failed or cancelled): edit sessions apply results Claude asked for. */
+  readonly finished = new Set<(r: Row) => void | Promise<void>>();
   private async patch(id: string, set: Partial<Row>) {
     const [r] = await this.ctx.db.update(editorJobs).set(set).where(eq(editorJobs.id, id)).returning();
-    if (r) this.emit(r);
+    if (r) {
+      this.emit(r);
+      if (r.state !== 'running') for (const f of this.finished) void Promise.resolve(f(r)).catch(e => this.ctx.log.warn({ err: (e as Error).message, job: r.id }, 'editor job listener failed'));
+    }
     return r;
   }
 
