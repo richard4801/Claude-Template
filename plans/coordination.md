@@ -107,7 +107,8 @@ When resuming:
       - **Verified 2026-11-06 with the free estimate endpoint** (`POST https://api.higgsfield.ai/estimate/<model>`, which prices for this account without charging):
         - The owner's key gets a **15% discount, not 50%**. H3 2K 10 s costs $1.105 (list $1.30), 5 s costs $0.553.
         - With MUSE's usual 9 reference images, Higgsfield (about $1.38–1.42) costs **more** than Replicate ($1.30). It's only cheaper at ≤ 5 images.
-        - Not worth building unless the 50% tier applies to the account. Re-check with the estimate endpoint first.
+        - **Update (same day): the owner claimed the max-discount set** (MiniMax H3, Seedance 2.5, and Marketing Studio as the image model, the only image model eligible). The estimate now confirms **H3 at 50%**: 2K 10 s costs **$0.65**, 5 s costs $0.325. Seedance 2.5 shows 30% in the console; its estimate returns only the token-pricing description. Kling 4.0 is also 30%. Qwen Image 3 is not eligible for the max discount but is usable at list price (from $0.040 per image, 1–3 references for edits).
+        - **Worth building:** H3 on Higgsfield is cheaper than Replicate even with 9 references (about $0.81–0.97 against $1.30 for 2K 10 s) and half price with ≤ 5. Route HD (and possibly Standard) H3 shots to Higgsfield. Keep Replicate as the fallback.
         - The SDK setup and the example are in `server/api/examples/higgsfield/`. The API account has no credit yet.
 
 ## Status (each session updates its own line)
