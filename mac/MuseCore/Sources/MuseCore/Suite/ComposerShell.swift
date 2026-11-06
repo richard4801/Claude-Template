@@ -527,14 +527,16 @@ public struct ComposerDraft: Hashable, Sendable {
         if r.modelId != nil, r.outfitId == nil { r.outfitId = outfitId }
         if let d = directed { r.camera = d }
         r = slots.apply(to: r, inputs)
+        let images = r.references?.images
+        let roled = { (role: String) -> [SuiteRefImage]? in images?.map { x -> SuiteRefImage in var i = x; i.role = role; return i } }
         switch tool {
         case .talking:
             // Talking: she says the AUDIO slot's words (speaking on unless switched off); the optional image is where.
             if r.speaking == nil { r.speaking = true }
-            r.references?.images = r.references?.images?.map { x -> SuiteRefImage in var i = x; i.role = "location"; return i }
+            if r.references != nil { r.references!.images = roled("location") }
         case .ugc:
             // UGC ad: the PRODUCT slot is the product; the optional reference ad rides in references.videos.
-            r.references?.images = r.references?.images?.map { x -> SuiteRefImage in var i = x; i.role = "product"; return i }
+            if r.references != nil { r.references!.images = roled("product") }
         default: break
         }
         r = ComposerLocations.apply(r, tokens: tokens, locations: locations, inputs: inputs)
