@@ -398,6 +398,10 @@ class EditSessionSyncTest {
         assertFalse(sync.start("t_j1"))
         assertNull(c.ui.value.session)
         assertNull(c.sessionActions)
+        // The Claude button without a session says why instead of opening (no crash, nothing opens).
+        c.act(EditAction.ClaudePanel(true))
+        assertNull(c.ui.value.session)
+        assertTrue(c.ui.value.message!!.startsWith("Claude joins once this edit is online"))
         c.act(EditAction.Seek(5.0)); c.act(EditAction.Split); c.act(EditAction.Undo)
         assertEquals(1, c.project!!.mainClips.size)
     }
