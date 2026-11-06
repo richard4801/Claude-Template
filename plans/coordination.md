@@ -50,12 +50,15 @@ Spec `plans/claude-editing.md`. Workstream 3: edit sessions plus the editing MCP
 
 `migrateWithLock` skips any migration whose `when` is ≤ the last one applied, so the coordinator merges them in that order. 0013 waits until 0011 and 0012 have landed.
 
-## ⏸ PAUSED (2026-11-06, owner's request)
-All work is paused until the owner resumes it. Production is at `0326558`: composer complete, Claude editing, Edit suite chat, migrations to 0013. Builds: Android APK (37 MB) and Mac Build 135 are on /get. `SUITE_MODE=mock` (free test renders).
+## ▶ RESUMED (2026-11-06, owner chose "all four workstreams")
+Production is at `daab63d` (the Higgsfield H3 provider). `SUITE_MODE=live`, and HF_CREDENTIALS is set on Railway. Items 5 (go live) and 13 (Higgsfield) are done. The first Higgsfield HD shot was refused by Higgsfield's NSFW check: the API has no moderation setting, and the job was not charged.
 
-Not merged, kept on their branches:
-- **Workstream 1** (`claude/muse-suite-core`): Extend and Upscale. The server and the gpu/worker handler are done; the clients were in progress.
-- **Workstreams 2 and 3:** finished, nothing pending.
+Assignments (each workstream branches from `claude/ecstatic-rubin-2egjfb` at `daab63d` or later, and merges back only after its tests pass):
+- **WS1, suite core (`claude/muse-suite-core`):** 1 (finish Extend & upscale; rebase onto `daab63d` first), 8 (Mac pills), 10 (8 s/10 s length, `#token` leak, audio levelling), 12a (the "Rise to reveal" move, the "single shot" alias).
+- **WS3, Edit suite (`claude/muse-editor-v2`):** 9 (the rig check: server rules plus the warning UI on both apps), including 12b (prompt vs. move).
+- **WS4, polish:** 11 (drum-style wheels: a prototype for the owner first, then both apps), 12c (preview art for the Tempo, Genre and Era tiles).
+- **WS2, MCP bridge (`claude/muse-mcp-bridge`):** 7 (`railway.json` migration), and getting 2–3 ready for the owner (the checklist is in `plans/claude-editing.md`). Item 6 (RunPod) waits for the owner's OK on spend.
+- **Shared files:** WS1, WS3 and WS4 all touch the composer. Rig-check UI goes in its own file/component; wheels are confined to the picker files; WS1 owns the bottom bar.
 
 When resuming:
 1. Finish and merge Extend and Upscale.
