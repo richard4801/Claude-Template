@@ -247,7 +247,7 @@ struct MediaTile<Badge: View>: View {
             if caption != nil || (meta?.isEmpty == false) {
                 VStack(alignment: .leading, spacing: 2) {
                     if let caption { Text(caption).scaled(t.scale.caption, t.roles.ink).lineLimit(1) }
-                    if let meta, !meta.isEmpty { Text(meta).scaled(t.scale.micro, t.roles.ink2).lineLimit(1).monospacedDigit() }
+                    if let meta, !meta.isEmpty { Text(meta).monospacedDigit().scaled(t.scale.micro, t.roles.ink2).lineLimit(1) }
                 }
             }
         }
@@ -659,7 +659,7 @@ struct RowValue: View {
     @Environment(\.theme) private var t
     var text: String
     init(_ text: String) { self.text = text }
-    var body: some View { Text(text).scaled(t.scale.body, t.roles.ink).monospacedDigit().textSelection(.enabled) }
+    var body: some View { Text(text).monospacedDigit().scaled(t.scale.body, t.roles.ink).textSelection(.enabled) }
 }
 
 /// A thin progress bar: field track, ink fill (accent is for selection).

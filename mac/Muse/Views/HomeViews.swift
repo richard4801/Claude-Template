@@ -103,7 +103,7 @@ struct HomeView: View {
                     MediaFrame(ref: r.thumb).frame(width: 96)
                     VStack(alignment: .leading, spacing: Space.s2) {
                         Text(r.title).scaled(t.scale.heading, t.roles.ink).lineLimit(1)
-                        Text(r.isRunning ? r.progressLine : "Starts when you run the queue").scaled(t.scale.caption, t.roles.ink2).monospacedDigit()
+                        Text(r.isRunning ? r.progressLine : "Starts when you run the queue").monospacedDigit().scaled(t.scale.caption, t.roles.ink2)
                         RProgress(value: r.progress / 100).frame(maxWidth: 360)
                         if r.isQueued && store.runningJob == nil {
                             RButton("Run queue · \(Pricing.money(store.queuedCost))", small: true) { store.runQueue() }
@@ -144,7 +144,7 @@ struct HomeView: View {
     private func fact(_ label: String, _ value: String, _ hint: String, _ action: (() -> Void)?) -> some View {
         let content = VStack(alignment: .leading, spacing: 2) {
             Text(label).scaled(t.scale.caption, t.roles.ink2)
-            Text(value).scaled(t.scale.title, t.roles.ink).monospacedDigit().lineLimit(1)
+            Text(value).monospacedDigit().scaled(t.scale.title, t.roles.ink).lineLimit(1)
             Text(hint).scaled(t.scale.caption, t.roles.ink2).lineLimit(1)
         }
         return Group {

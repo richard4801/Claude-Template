@@ -370,7 +370,7 @@ struct BalanceBox: View {
         Button { store.go(.credits) } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Balance").scaled(t.scale.caption, ink2)
-                Text(Pricing.money(store.creditUsd)).scaled(t.scale.title, ink).monospacedDigit()
+                Text(Pricing.money(store.creditUsd)).monospacedDigit().scaled(t.scale.title, ink)
                 Text("About \(Pricing.videosLeft(store.creditUsd)) Draft videos").scaled(t.scale.caption, ink2)
             }
             .padding(.horizontal, 10)

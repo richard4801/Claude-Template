@@ -7,34 +7,19 @@ struct SettingsView: View {
 
     var body: some View {
         @Bindable var store = store
-        Page {
-            PageHeader(eyebrow: "Preferences", title: "Settings")
-            HStack(alignment: .top, spacing: 36) {
+        ScreenPage {
+            ScreenTitle("Settings")
+            HStack(alignment: .top, spacing: Space.s6) {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(SettingsSection.allCases.filter { !$0.ownerOnly || store.isOwner }, id: \.self) { s in
-                        SettingsNavRow(icon: icon(s), title: s.title, on: store.settingsSection == s) { store.settingsSection = s }
+                        SettingsNavRow(title: s.title, on: store.settingsSection == s) { store.settingsSection = s }
                     }
                     if store.isOwner { SuiteConnectionsRow() } // AI suite (workstream 1): Connections (owner) → ConnectionsView
                 }
-                .frame(width: 220)
-                VStack(alignment: .leading, spacing: 16) { section }
-                    .frame(maxWidth: 900, alignment: .leading)
+                .frame(width: 200)
+                VStack(alignment: .leading, spacing: Space.s2) { section }
+                    .frame(maxWidth: 760, alignment: .leading)
             }
-        }
-    }
-
-    private func icon(_ s: SettingsSection) -> String {
-        switch s {
-        case .appearance: return "paintpalette"
-        case .defaults: return "slider.horizontal.3"
-        case .costs: return "dollarsign.circle"
-        case .studio: return "building.2"
-        case .engines: return "server.rack"
-        case .prompts: return "text.quote"
-        case .archived: return "archivebox"
-        case .notif: return "bell"
-        case .developer: return "hammer"
-        case .about: return "info.circle"
         }
     }
 
@@ -42,64 +27,54 @@ struct SettingsView: View {
         @Bindable var store = store
         switch store.settingsSection {
         case .appearance:
-            H2("Theme")
-            HStack(spacing: 16) {
+            SectionTitle("Theme", top: 0)
+            HStack(alignment: .top, spacing: Space.s5) {
                 ForEach(ThemeID.allCases) { id in
                     let on = id == store.themeID
+                    let shape = RoundedRectangle(cornerRadius: t.radii.container, style: .continuous)
                     Button { store.setTheme(id) } label: {
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: Space.s2) {
                             ThemePreview(theme: Theme.get(id)).aspectRatio(16 / 10, contentMode: .fit)
-                                .clipShape(RoundedRectangle(cornerRadius: t.cardRadius * 0.6))
-                                .overlay(RoundedRectangle(cornerRadius: t.cardRadius * 0.6).strokeBorder(.black.opacity(0.12), lineWidth: 1))
-                            HStack {
-                                Text(id.name).font(t.body(14, .semibold))
-                                Spacer()
-                                if on { Image(systemName: "checkmark").font(.system(size: 13, weight: .bold)) }
-                            }
-                            .padding(.horizontal, 4)
-                            .padding(.bottom, 4)
+                                .clipShape(shape)
+                                .overlay(shape.strokeBorder(t.roles.hairline, lineWidth: 1))
+                                .overlay(shape.strokeBorder(t.roles.selection, lineWidth: on ? 2 : 0).padding(-4))
+                            Text(id.name).scaled(t.scale.label, on ? t.roles.ink : t.roles.ink2)
                         }
-                        .padding(8)
-                        .surface()
-                        .overlay(RoundedRectangle(cornerRadius: t.cardRadius).strokeBorder(on ? t.accent : .clear, lineWidth: 2))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Theme: \(id.name)")
+                    .accessibilityAddTraits(on ? .isSelected : [])
                 }
             }
-            ListBox {
-                ListRow(icon: "sparkles", title: "Pro mode", hint: "Show and edit the prompts behind every render", last: true) { MToggle(isOn: $store.pro) }
-            }
+            SectionTitle("Prompts")
+            SettingRow("Pro mode", hint: "Show and edit the prompts behind every render") { RSwitch(label: "Pro mode", isOn: $store.pro) }
         case .defaults:
-            H2("Render defaults")
-            ListBox {
-                ListRow(title: "Default render", hint: "Add-ons (Edit, Fast · beta) are picked per video") {
-                    Seg(VideoQuality.renders.map { ($0, $0.label) }, selection: $store.defaultQuality) { store.setQuality($0) }.frame(width: 300)
-                }
-                ListRow(title: "Export size", hint: "Export saves the render as it was made") { MonoValue("9:16 · as rendered") }
-                ListRow(title: "Keep test renders for", last: true) { MonoValue("30 days") }
+            SectionTitle("Render defaults", top: 0)
+            SettingRow("Default render", hint: "Add-ons (Edit, Fast, in beta) are picked per video") {
+                RSeg(VideoQuality.renders.map { ($0, $0.label) }, selection: $store.defaultQuality) { store.setQuality($0) }.frame(width: 300)
             }
+            SettingRow("Export size", hint: "Export saves the render as it was made") { RowValue("9:16, as rendered") }
+            SettingRow("Keep test renders for") { RowValue("30 days") }
             if store.isOwner {
-                H2("House style")
-                HStack {
-                    Muted("The house style added to every photo prompt is in Settings → Prompts, with every other prompt. Never-add lists are set per model.")
-                    Spacer()
-                    LinkText("Open Prompts") { store.settingsSection = .prompts }
+                SectionTitle("House style")
+                SettingRow("House style and never-add lists", hint: "The house style added to every photo prompt is under Prompts. Never-add lists are set per model.") {
+                    RButton("Open Prompts", kind: .plain, small: true) { store.settingsSection = .prompts }
                 }
             }
         case .costs:
-            H2("Costs & limits")
-            HStack(spacing: 14) {
-                KPI(label: "Balance", value: Pricing.money(store.creditUsd), index: 0)
-                KPI(label: "This month", value: Pricing.money(store.balance.month), index: 1)
-                KPI(label: "Draft video (10 s)", value: "~\(Pricing.money(Pricing.typicalVideo))", index: 2)
+            SectionTitle("Costs and limits", top: 0)
+            HStack(alignment: .top, spacing: Space.s7) {
+                fact("Balance", Pricing.money(store.creditUsd))
+                fact("This month", Pricing.money(store.balance.month))
+                fact("Draft video (10 s)", "About \(Pricing.money(Pricing.typicalVideo))")
+                Spacer(minLength: 0)
             }
-            ListBox {
-                ListRow(icon: "checkmark.shield", title: "Spend cap per job", hint: store.isOwner ? "Change it in Settings → Studio" : "Set by the studio owner") { MonoValue(Pricing.money(store.balance.perJobLimit)) }
-                ListRow(icon: "checkmark.shield", title: store.isMember ? "My cap per day" : "Spend cap per day") { MonoValue(Pricing.money(store.balance.perDayLimit)) }
-                ListRow(icon: "bell", title: "Warn before a job goes over budget", last: true) { MToggle(isOn: $store.warnOverBudget) }
-            }
-            MButton("Credit", icon: "dollarsign.circle", kind: .primary) { store.go(.credits) }
+            .padding(.bottom, Space.s4)
+            SettingRow("Spend cap per job", hint: store.isOwner ? "Change it under Studio" : "Set by the studio owner") { RowValue(Pricing.money(store.balance.perJobLimit)) }
+            SettingRow(store.isMember ? "My cap per day" : "Spend cap per day") { RowValue(Pricing.money(store.balance.perDayLimit)) }
+            SettingRow("Warn before a job goes over budget") { RSwitch(label: "Warn before a job goes over budget", isOn: $store.warnOverBudget) }
+            RButton("Open credit", kind: .action) { store.go(.credits) }.padding(.top, Space.s4)
         case .studio:
             StudioSettingsSection()
         case .engines:
@@ -110,109 +85,94 @@ struct SettingsView: View {
         case .archived:
             ArchivedModelsSection()
         case .notif:
-            H2("Notifications")
-            ListBox {
-                ListRow(icon: "bell", title: "Notifications", hint: "Sound and alerts follow your Mac's notification settings") {
-                    MButton("Open System Settings", size: .small) { Notifier.openSystemSettings() }
-                }
-                ListRow(title: "Render finished") { MToggle(isOn: $store.notifyDone) }
-                ListRow(title: "Render failed") { MToggle(isOn: $store.notifyFailed) }
-                ListRow(title: "Balance below $5") { MToggle(isOn: $store.notifyLowBalance) }
-                ListRow(title: "Also notify my Android phone", hint: "Sent by the server to the MUSE Android app", last: true) { MToggle(isOn: $store.notifyPhone) }
+            SectionTitle("Notifications", top: 0)
+            SettingRow("Alerts and sound", hint: "Follow your Mac's notification settings") {
+                RButton("Open System Settings", small: true) { Notifier.openSystemSettings() }
             }
-            HStack {
-                MButton("Send a test notification", icon: "bell", size: .small) {
-                    Notifier.shared.post(title: "MUSE test", body: "Notifications are working. Renders will tell you when they finish or fail.")
-                    store.showToast("Test notification sent. If nothing appears, allow MUSE in System Settings → Notifications.")
-                }
+            SettingRow("Render finished") { RSwitch(label: "Render finished", isOn: $store.notifyDone) }
+            SettingRow("Render failed") { RSwitch(label: "Render failed", isOn: $store.notifyFailed) }
+            SettingRow("Balance below $5") { RSwitch(label: "Balance below $5", isOn: $store.notifyLowBalance) }
+            SettingRow("Also notify my Android phone", hint: "Sent by the server to the MUSE Android app") { RSwitch(label: "Also notify my Android phone", isOn: $store.notifyPhone) }
+            RButton("Send a test notification", small: true) {
+                Notifier.shared.post(title: "MUSE test", body: "Notifications are working. Renders will tell you when they finish or fail.")
+                store.showToast("Test notification sent. If nothing appears, allow MUSE in System Settings › Notifications.")
             }
+            .padding(.top, Space.s3)
         case .developer:
-            H2("Data source")
-            Muted("MUSE talks to the MUSE server by default (\(defaultServerURL)). Demo mode runs everything inside the app with sample data and no account. You can also point MUSE at another server, such as a local server/api or server/mock. Each server keeps its own sign-in.")
-            Seg(DataSource.allCases.map { ($0, $0.label) }, selection: $store.dataSource) { _ in store.applyDataSource() }.frame(maxWidth: 460)
-            Field("Server base URL", trailing: store.baseURL == defaultServerURL ? nil : "Use the MUSE server", trailingAction: {
-                store.baseURL = defaultServerURL
-                store.applyDataSource()
-            }) {
-                HStack(spacing: 10) {
-                    TextField(defaultServerURL, text: $store.baseURL).fieldChrome().font(t.mono(13))
-                        .onSubmit { store.applyDataSource() }
-                    MButton("Reconnect", size: .regular) { store.applyDataSource() }
-                    MButton("Test", size: .regular) { store.testConnection() }
+            SectionTitle("Data source", top: 0)
+            Text("MUSE talks to the MUSE server by default (\(defaultServerURL)). Demo mode runs everything inside the app with sample data and no account. You can also point MUSE at another server, such as a local server/api or server/mock. Each server keeps its own sign-in.")
+                .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, Space.s2)
+            RSeg(DataSource.allCases.map { ($0, $0.label) }, selection: $store.dataSource) { _ in store.applyDataSource() }.frame(maxWidth: 460)
+            RField("Server base URL", hint: "Remote servers need HTTPS. Plain HTTP works for this Mac and the local network only.") {
+                HStack(spacing: Space.s2) {
+                    RTextField(placeholder: defaultServerURL, text: $store.baseURL) { store.applyDataSource() }
+                    RButton("Reconnect") { store.applyDataSource() }
+                    RButton("Test connection") { store.testConnection() }
+                    if store.baseURL != defaultServerURL {
+                        RButton("Use the MUSE server", kind: .plain) {
+                            store.baseURL = defaultServerURL
+                            store.applyDataSource()
+                        }
+                    }
                 }
             }
+            .padding(.top, Space.s3)
             .opacity(store.dataSource == .http ? 1 : 0.5)
-            Muted("Remote servers need HTTPS. Plain HTTP works for this Mac and the local network only.")
-            if let msg = store.offlineMessage { Note(icon: "wifi.exclamationmark", warn: true, msg) }
-            H2("Testing")
-            ListBox {
-                ListRow(title: "Fail the next render", hint: "It stops partway and the cost is refunded, to test failure handling and notifications. Demo mode, server/mock, and dev servers only.") {
-                    MButton("Fail next", size: .small) { store.setFailNext() }
-                }
-                ListRow(title: "Reload everything", hint: "Fetches models, outfits, jobs, takes and balance again.", last: true) {
-                    MButton("Reload", size: .small) { Task { await store.forceReload() } }
-                }
+            if let msg = store.offlineMessage {
+                InlineNotice("\(msg) Check the address, then Test connection.", tone: .caution).padding(.top, Space.s2)
             }
-            H2("Performance")
+            SectionTitle("Testing")
+            SettingRow("Fail the next render", hint: "It stops partway and the cost is refunded, to test failure handling and notifications. Demo mode, server/mock and dev servers only.") {
+                RButton("Fail next render", small: true) { store.setFailNext() }
+            }
+            SettingRow("Reload everything", hint: "Fetches models, outfits, jobs, takes and balance again.") {
+                RButton("Reload", small: true) { Task { await store.forceReload() } }
+            }
+            SectionTitle("Performance")
             PerfReadout()
         case .about:
-            H2("About")
-            ListBox {
-                ListRow(title: "Version") { MonoValue("\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))") }
-                ListRow(title: "Fonts", hint: "Instrument Serif, Archivo, IBM Plex Mono, Barlow, JetBrains Mono, Outfit, DM Mono, Bricolage Grotesque, Figtree (SIL OFL) · Permanent Marker (Apache 2.0)") { EmptyView() }
-                RowButton(title: "Terms of Service") { store.showToast("The Terms of Service open on the MUSE website") }
-                RowButton(title: "Acceptable Use Policy") { store.showToast("The Acceptable Use Policy opens on the MUSE website") }
-                RowButton(title: "Sign out", last: true) { store.signOut() }
-            }
+            SectionTitle("About", top: 0)
+            SettingRow("Version") { RowValue("\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))") }
+            SettingRow("Fonts", hint: "Instrument Serif, Archivo, IBM Plex Mono, Barlow, JetBrains Mono, Outfit, DM Mono, Bricolage Grotesque, Figtree (SIL OFL); Permanent Marker (Apache 2.0)")
+            SettingRow("Terms of Service") { RButton("Open", kind: .plain, small: true) { store.showToast("The Terms of Service open on the MUSE website") } }
+            SettingRow("Acceptable Use Policy") { RButton("Open", kind: .plain, small: true) { store.showToast("The Acceptable Use Policy opens on the MUSE website") } }
+            SettingRow("Account", hint: store.user?.email) { RButton("Sign out", kind: .danger, small: true) { store.signOut() } }
+        }
+    }
+
+    private func fact(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).scaled(t.scale.caption, t.roles.ink2)
+            Text(value).monospacedDigit().scaled(t.scale.title, t.roles.ink)
         }
     }
 }
 
-/// A Settings section in the list on the left. Like the sidebar's NavRow, but drawn for the page background: the sidebar's
-/// Creator Pop colours (white on blue) were white on cream here.
+/// A Settings section in the list on the left: text only, the selected one on the `field` tone with the accent mark.
 private struct SettingsNavRow: View {
     @Environment(\.theme) private var t
-    var icon: String
     var title: String
     var on: Bool
     var action: () -> Void
     @State private var hover = false
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: t.isA ? 0 : t.isC ? 14 : t.isD ? 12 : t.r, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: t.radii.control, style: .continuous)
         Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: icon).font(.system(size: 15, weight: on ? .semibold : .regular)).frame(width: 20)
-                Text(t.navUppercase ? title.uppercased() : title).font(t.navFont).tracking(t.isA ? 1 : t.isB ? 1.2 : 0).lineLimit(1)
-                Spacer(minLength: 4)
-            }
-            .foregroundStyle(on ? (t.isA || t.isB ? t.accent : t.ink) : hover ? t.ink : t.muted)
-            .padding(.horizontal, 10)
-            .frame(height: t.isA ? 38 : 40)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(shape.fill(on ? (t.isA ? Color.clear : t.isD ? t.yellow : t.isB ? t.surface2 : t.surface) : hover && !t.isA ? t.surface2 : Color.clear))
-            .overlay(shape.strokeBorder(on && t.isD ? Color(hex: 0x111111) : Color.clear, lineWidth: 2.5))
-            .overlay(alignment: .leading) {
-                if on && t.isA { Rectangle().fill(t.accent).frame(width: 2).padding(.vertical, 10) }
-                if on && t.isB { Rectangle().fill(t.accent).frame(width: 3) }
-            }
-            .contentShape(Rectangle())
+            Text(title).font(t.scale.label.font).lineLimit(1)
+                .foregroundStyle(on || hover ? t.roles.ink : t.roles.ink2)
+                .padding(.horizontal, Space.s3)
+                .frame(height: 32)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(shape.fill(on ? t.roles.field : hover ? t.roles.field.opacity(0.6) : .clear))
+                .overlay(shape.strokeBorder(t.roles.selection, lineWidth: on && t.isD ? 2 : 0))
+                .overlay(alignment: .leading) { if on && !t.isD { Capsule().fill(t.roles.accent).frame(width: 3, height: 16) } }
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
         .accessibilityAddTraits(on ? .isSelected : [])
-    }
-}
-
-struct RowButton: View {
-    var title: String
-    var last = false
-    var action: () -> Void
-    var body: some View {
-        Button(action: action) {
-            ListRow(title: title, last: last) { Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)) }.contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 }
 

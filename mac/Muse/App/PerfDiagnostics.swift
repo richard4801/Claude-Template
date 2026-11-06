@@ -72,23 +72,23 @@ struct PerfReadout: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 2)) { _ in
-            ListBox {
-                ListRow(title: "Start-up", hint: "From launch to the first lists in the app (also in Console: subsystem studio.muse.mac, category perf).") {
-                    MonoValue(StartupMetrics.firstContentMs.map { "\(Int($0)) ms" } ?? "–")
+            VStack(alignment: .leading, spacing: 0) {
+                SettingRow("Start-up", hint: "From launch to the first lists in the app (also in Console: subsystem studio.muse.mac, category perf).") {
+                    RowValue(StartupMetrics.firstContentMs.map { "\(Int($0)) ms" } ?? "–")
                 }
-                ListRow(title: "Memory", hint: "Footprint (Activity Monitor's Memory) · resident.") {
-                    MonoValue("\(MemoryReport.mb(MemoryReport.footprint())) · \(MemoryReport.mb(MemoryReport.resident()))")
+                SettingRow("Memory", hint: "Footprint (Activity Monitor's Memory), then resident.") {
+                    RowValue("\(MemoryReport.mb(MemoryReport.footprint())) · \(MemoryReport.mb(MemoryReport.resident()))")
                 }
-                ListRow(title: "Images in memory", hint: "Decoded at display size; the cache gives way at \(ImageCache.memoryLimit >> 20) MB or when the Mac needs memory.") {
+                SettingRow("Images in memory", hint: "Decoded at display size; the cache gives way at \(ImageCache.memoryLimit >> 20) MB or when the Mac needs memory.") {
                     let s = ImageCacheStats.shared.snapshot
-                    MonoValue("\(s.count) · \(MemoryReport.mb(UInt64(s.bytes))) · \(ImageDataLoader.shared.downloads) downloads")
+                    RowValue("\(s.count) · \(MemoryReport.mb(UInt64(s.bytes))) · \(ImageDataLoader.shared.downloads) downloads")
                 }
-                ListRow(title: "Live updates", hint: "Connections to the server's live stream (one is shared by every part of the app) · listeners.") {
-                    MonoValue("\(LiveEventHub.shared.openConnections) · \(LiveEventHub.shared.subscriberCount)")
+                SettingRow("Live updates", hint: "Connections to the server's live stream (one is shared by every part of the app), then listeners.") {
+                    RowValue("\(LiveEventHub.shared.openConnections) · \(LiveEventHub.shared.subscriberCount)")
                 }
-                ListRow(title: "Requests", hint: "Sent · answered by one already in flight · answered from the catalog cache.", last: true) {
+                SettingRow("Requests", hint: "Sent, answered by one already in flight, answered from the catalog cache.") {
                     let r = (store.api as? HTTPMuseAPI)?.requestStats
-                    MonoValue(r.map { "\($0.sent) · \($0.joined) · \($0.cacheHits)" } ?? "demo")
+                    RowValue(r.map { "\($0.sent) · \($0.joined) · \($0.cacheHits)" } ?? "Demo")
                 }
             }
         }
