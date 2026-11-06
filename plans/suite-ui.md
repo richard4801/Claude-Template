@@ -91,3 +91,14 @@ _Started 2026-11-05. Owner-approved designs. Backend: `plans/api.md` "AI suite" 
   - Android: `ui/screens/suite/InputSlots.kt` (rules) and `InputSlotViews.kt` (`InputSlotUploader`, `rememberInputSlotPicker`, `InputSlotTile`).
   - Mac: `MuseCore/Suite/SuiteInputSlots.swift` (rules) and `Muse/Views/Suite/InputSlotViews.swift` (`InputSlotsModel`, `InputSlotTile`).
   - The rules have no layout. A screen lays out the tiles from `visible(...)`, and `applyTo` / `apply(to:)` fills the request's `frames` and `references`.
+
+## Composer groundwork (no layout; plans/video-composer.md)
+- **Catalogue:** options carry `visible` and `mergedInto`, plus `focals`, `moveGroups`, move `group`, and palette and film-stock `swatches` / `lut`. Clients show only visible options and label merged ids as their survivor. Server details are in plans/api.md.
+- **Chips and tokens:**
+  - Android: `ui/screens/suite/composer/ComposerSettings.kt` (chips, summaries, presets into chips, the camera spec, `composerRequest`) and `PromptTokens.kt` (`#move` / `@mention` tokens, the mix rule, triggers, search).
+  - Mac: `MuseCore/Suite/Composer.swift` (same rules, same tests).
+- **Look grading:**
+  - Estimates and jobs carry `look {id, kind, label, lut}`. The toggle is `gradeLook` (default on).
+  - Demo mode returns the same Look as the server.
+  - The Edit suite applying `palette:<id>` LUTs is pending with workstream 3.
+- **Waiting on the coordinator's go:** the composer and picker layouts.

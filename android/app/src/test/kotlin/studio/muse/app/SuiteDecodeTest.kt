@@ -46,7 +46,10 @@ class SuiteDecodeTest {
         assertEquals("body-02-super35", s35.render)
         assertEquals("Super 35 Digital", s35.name)
         assertEquals("Alexa 35 look · Super 35 · 4.6K", s35.caption)
-        assertNull(c.bodies.first { it.id == "vlog" }.render)
+        // Composer: Super 35 is merged into Cinema camera; the Creator camera (vlog) shows the creator-cine render.
+        assertEquals("cinema_digital", s35.mergedInto)
+        assertFalse(s35.visible)
+        assertEquals("body-07-creator-cine", c.bodies.first { it.id == "vlog" }.render)
         assertEquals(listOf("aperture", "shutter"), c.optics.map { it.id })
         assertEquals("grip-01-dolly", c.grips.first { it.move == "dolly_in" }.render)
         assertEquals(16, c.library.size)

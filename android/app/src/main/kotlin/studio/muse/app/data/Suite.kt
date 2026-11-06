@@ -16,10 +16,25 @@ data class SuiteOption(
     val render: String? = null,
     val name: String? = null,
     val caption: String? = null,
+    /** Composer: false = not offered to members (owners and Directed mode keep it). */
+    val visible: Boolean = true,
+    /** A merged duplicate: pickers show the survivor with this id instead. */
+    val mergedInto: String? = null,
+    /** Palettes and film stocks: 5 swatch colours (darkest first) and the LUT the take is graded with. */
+    val swatches: List<String> = emptyList(),
+    val lut: String? = null,
 ) {
     /** The card's title: the hardware name when it has a render ("Super 35 Digital"), else the label. */
     val title: String get() = name ?: label
 }
+
+/** The composer's focal wheel step (`visible` = one of the six shown to members). */
+@Serializable
+data class SuiteFocal(val mm: Int, val label: String = "", val description: String = "", val visible: Boolean = true)
+
+/** A Movement chip (Featured, UGC, Push…). */
+@Serializable
+data class SuiteMoveGroup(val id: String, val label: String = "")
 
 @Serializable
 data class SuiteMoveOption(
@@ -29,6 +44,8 @@ data class SuiteMoveOption(
     val category: String = "",
     val editorBetter: Boolean = false,
     val talkSafe: Boolean = false,
+    /** The composer's Movement chip it sits under (see CameraCatalog.moveGroups). */
+    val group: String = "",
 )
 
 /** One of the 16 featured moves of the camera bag (UGC first), with its filter tag: ugc / cinematic / energy / subtle. */
@@ -51,6 +68,7 @@ data class CameraCatalog(
     val bodies: List<SuiteOption> = emptyList(),
     val lenses: List<SuiteOption> = emptyList(),
     val focalLengths: List<Int> = emptyList(),
+    val focals: List<SuiteFocal> = emptyList(),
     val apertures: List<SuiteOption> = emptyList(),
     val looks: List<SuiteOption> = emptyList(),
     val frameRates: List<SuiteOption> = emptyList(),
@@ -61,6 +79,7 @@ data class CameraCatalog(
     val grips: List<SuiteGrip> = emptyList(),
     val moves: List<SuiteMoveOption> = emptyList(),
     val library: List<SuiteLibraryMove> = emptyList(),
+    val moveGroups: List<SuiteMoveGroup> = emptyList(),
     val heights: List<SuiteOption> = emptyList(),
     val shotSizes: List<SuiteOption> = emptyList(),
     val genres: List<SuiteOption> = emptyList(),
@@ -224,6 +243,8 @@ data class SuiteShotRequest(
     val camera: JsonElement? = null,
     val clipId: String? = null,
     val keepAudio: Boolean? = null,
+    /** "Grade the take with this look" (default on at the server). */
+    val gradeLook: Boolean? = null,
     /** Input slots (InputSlots.kt): start / middle / end frames and references, only those the tier takes. */
     val frames: SuiteFrames? = null,
     val references: SuiteReferences? = null,
@@ -268,6 +289,10 @@ data class SuiteEngine(
 @Serializable
 data class SuiteTried(val model: String = "", val resolution: String = "", val why: String = "")
 
+/** The take's Look: a palette or film stock and its LUT (`pack:<id>` or `palette:<id>`), applied in the Edit suite. */
+@Serializable
+data class SuiteLook(val id: String, val kind: String = "palette", val label: String = "", val lut: String = "")
+
 /** POST /v1/suite/shots/estimate. Every Generate shows [buttonLabel] / [priceLine]; a cap problem shows [message]. */
 @Serializable
 data class SuiteEstimate(
@@ -289,6 +314,8 @@ data class SuiteEstimate(
     val prompt: String = "",
     val test: Boolean = false,
     val speaking: SuiteSpeaking? = null,
+    /** The Look the take will be graded with (null = none / grading off). */
+    val look: SuiteLook? = null,
     val cast: List<SuiteEstimateCast>? = null,
     val keepAudio: Boolean? = null,
     /** owner */

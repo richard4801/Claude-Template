@@ -14,6 +14,15 @@
    "canKeyframes": false,
    "canReferences": false,
    "canGuide": false,
+   "inputs": {
+    "start": false,
+    "end": false,
+    "middle": 0,
+    "images": 0,
+    "videos": 0,
+    "audio": false,
+    "framesWithRefs": false
+   },
    "models": []
   },
   {
@@ -27,6 +36,15 @@
    "canKeyframes": false,
    "canReferences": false,
    "canGuide": false,
+   "inputs": {
+    "start": false,
+    "end": false,
+    "middle": 0,
+    "images": 0,
+    "videos": 0,
+    "audio": false,
+    "framesWithRefs": false
+   },
    "models": []
   },
   {
@@ -40,6 +58,15 @@
    "canKeyframes": false,
    "canReferences": false,
    "canGuide": false,
+   "inputs": {
+    "start": false,
+    "end": false,
+    "middle": 0,
+    "images": 0,
+    "videos": 0,
+    "audio": false,
+    "framesWithRefs": false
+   },
    "models": []
   },
   {
@@ -53,6 +80,15 @@
    "canKeyframes": false,
    "canReferences": false,
    "canGuide": false,
+   "inputs": {
+    "start": false,
+    "end": false,
+    "middle": 0,
+    "images": 0,
+    "videos": 0,
+    "audio": false,
+    "framesWithRefs": false
+   },
    "models": []
   }
  ],

@@ -15,17 +15,29 @@ public struct SuiteOption: Codable, Hashable, Sendable, Identifiable {
     public var render: String?
     public var name: String?
     public var caption: String?
+    /// Composer: false = not offered to members (owners and Directed mode keep it).
+    public var visible: Bool
+    /// A merged duplicate: pickers show the survivor with this id instead.
+    public var mergedInto: String?
+    /// Palettes and film stocks: 5 swatch colours (darkest first) and the LUT the take is graded with.
+    public var swatches: [String]
+    public var lut: String?
 
-    public init(id: String, label: String, description: String = "", render: String? = nil, name: String? = nil, caption: String? = nil) {
+    public init(id: String, label: String, description: String = "", render: String? = nil, name: String? = nil, caption: String? = nil,
+                visible: Bool = true, mergedInto: String? = nil, swatches: [String] = [], lut: String? = nil) {
         self.id = id
         self.label = label
         self.description = description
         self.render = render
         self.name = name
         self.caption = caption
+        self.visible = visible
+        self.mergedInto = mergedInto
+        self.swatches = swatches
+        self.lut = lut
     }
 
-    enum CodingKeys: String, CodingKey { case id, label, description, render, name, caption }
+    enum CodingKeys: String, CodingKey { case id, label, description, render, name, caption, visible, mergedInto, swatches, lut }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -34,6 +46,10 @@ public struct SuiteOption: Codable, Hashable, Sendable, Identifiable {
         render = c.o(.render)
         name = c.o(.name)
         caption = c.o(.caption)
+        visible = c.v(.visible, true)
+        mergedInto = c.o(.mergedInto)
+        swatches = c.v(.swatches, [])
+        lut = c.o(.lut)
     }
 
     /// The hardware name when there is one ("Super 35 Digital"), else the label.
@@ -48,17 +64,20 @@ public struct SuiteMoveOption: Codable, Hashable, Sendable, Identifiable {
     public var category: String
     public var editorBetter: Bool
     public var talkSafe: Bool
+    /// The composer's Movement chip it sits under (see `CameraCatalog.moveGroups`).
+    public var group: String
 
-    public init(id: String, label: String, description: String = "", category: String, editorBetter: Bool = false, talkSafe: Bool = false) {
+    public init(id: String, label: String, description: String = "", category: String, editorBetter: Bool = false, talkSafe: Bool = false, group: String = "") {
         self.id = id
         self.label = label
         self.description = description
         self.category = category
         self.editorBetter = editorBetter
         self.talkSafe = talkSafe
+        self.group = group
     }
 
-    enum CodingKeys: String, CodingKey { case id, label, description, category, editorBetter, talkSafe }
+    enum CodingKeys: String, CodingKey { case id, label, description, category, editorBetter, talkSafe, group }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -67,6 +86,53 @@ public struct SuiteMoveOption: Codable, Hashable, Sendable, Identifiable {
         category = c.v(.category, "")
         editorBetter = c.v(.editorBetter, false)
         talkSafe = c.v(.talkSafe, false)
+        group = c.v(.group, "")
+    }
+}
+
+/// The composer's focal wheel step (`visible` = one of the six shown to members).
+public struct SuiteFocal: Codable, Hashable, Sendable {
+    public var mm: Double
+    public var label: String
+    public var description: String
+    public var visible: Bool
+    public init(mm: Double, label: String = "", description: String = "", visible: Bool = true) {
+        self.mm = mm
+        self.label = label
+        self.description = description
+        self.visible = visible
+    }
+    enum CodingKeys: String, CodingKey { case mm, label, description, visible }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        mm = try c.decode(Double.self, forKey: .mm)
+        label = c.v(.label, "")
+        description = c.v(.description, "")
+        visible = c.v(.visible, true)
+    }
+}
+
+/// A Movement chip (Featured, UGC, Push…).
+public struct SuiteMoveGroup: Codable, Hashable, Sendable, Identifiable {
+    public var id: String
+    public var label: String
+    public init(id: String, label: String) {
+        self.id = id
+        self.label = label
+    }
+}
+
+/// The take's Look: a palette or film stock and its LUT (`pack:<id>` or `palette:<id>`), applied in the Edit suite.
+public struct SuiteLook: Codable, Hashable, Sendable {
+    public var id: String
+    public var kind: String
+    public var label: String
+    public var lut: String
+    public init(id: String, kind: String = "palette", label: String = "", lut: String = "") {
+        self.id = id
+        self.kind = kind
+        self.label = label
+        self.lut = lut
     }
 }
 
@@ -165,6 +231,7 @@ public struct CameraCatalog: Codable, Hashable, Sendable {
     public var bodies: [SuiteOption]
     public var lenses: [SuiteOption]
     public var focalLengths: [Double]
+    public var focals: [SuiteFocal]
     public var apertures: [SuiteOption]
     public var looks: [SuiteOption]
     public var frameRates: [SuiteOption]
@@ -175,6 +242,7 @@ public struct CameraCatalog: Codable, Hashable, Sendable {
     public var grips: [SuiteHardware]
     public var moves: [SuiteMoveOption]
     public var library: [SuiteLibraryMove]
+    public var moveGroups: [SuiteMoveGroup]
     public var heights: [SuiteOption]
     public var shotSizes: [SuiteOption]
     public var genres: [SuiteOption]
@@ -184,13 +252,13 @@ public struct CameraCatalog: Codable, Hashable, Sendable {
     public var limits: CameraLimits
 
     public init() {
-        presets = []; bodies = []; lenses = []; focalLengths = []; apertures = []; looks = []; frameRates = []; shutters = []
+        presets = []; bodies = []; lenses = []; focalLengths = []; focals = []; moveGroups = []; apertures = []; looks = []; frameRates = []; shutters = []
         lighting = []; palettes = []; optics = []; grips = []; moves = []; library = []; heights = []; shotSizes = []
         genres = []; eras = []; tempos = []; emotions = []; limits = CameraLimits()
     }
 
     enum CodingKeys: String, CodingKey {
-        case presets, bodies, lenses, focalLengths, apertures, looks, frameRates, shutters, lighting, palettes, optics, grips, moves, library
+        case presets, bodies, lenses, focalLengths, focals, moveGroups, apertures, looks, frameRates, shutters, lighting, palettes, optics, grips, moves, library
         case heights, shotSizes, genres, eras, tempos, emotions, limits
     }
     public init(from d: Decoder) throws {
@@ -199,6 +267,8 @@ public struct CameraCatalog: Codable, Hashable, Sendable {
         bodies = c.v(.bodies, [])
         lenses = c.v(.lenses, [])
         focalLengths = c.v(.focalLengths, [])
+        focals = c.v(.focals, [])
+        moveGroups = c.v(.moveGroups, [])
         apertures = c.v(.apertures, [])
         looks = c.v(.looks, [])
         frameRates = c.v(.frameRates, [])
@@ -572,6 +642,8 @@ public struct ShotRequest: Codable, Hashable, Sendable {
     public var dryRun: Bool?
     public var clipId: String?
     public var keepAudio: Bool?
+    /// "Grade the take with this look" (nil = the server's default, on).
+    public var gradeLook: Bool?
     /// Owner only (bypass the ladder). Members never send these.
     public var engineModel: String?
     public var resolution: String?
@@ -759,6 +831,8 @@ public struct ShotEstimate: Codable, Hashable, Sendable {
     public var keepAudio: Bool?
     public var engine: SuiteEngine?
     public var tried: [SuiteTried]?
+    /// The Look the take will be graded with (nil = none, or grading off).
+    public var look: SuiteLook?
 
     public init(quality: String, label: String, resolution: String, seconds: Double, takes: Int, mode: String, estimate: Double, priceLine: String, buttonLabel: String,
                 ok: Bool = true, code: String? = nil, message: String? = nil, caps: SuiteCaps? = nil, warnings: [String] = [], camera: SuiteEstimateCamera = SuiteEstimateCamera(),
@@ -788,7 +862,7 @@ public struct ShotEstimate: Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case quality, label, resolution, seconds, takes, mode, estimate, priceLine, buttonLabel, ok, code, message, caps, warnings, camera, prompt, test, speaking
-        case cast, keepAudio, engine, tried
+        case cast, keepAudio, engine, tried, look
     }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -814,6 +888,7 @@ public struct ShotEstimate: Codable, Hashable, Sendable {
         keepAudio = c.o(.keepAudio)
         engine = c.o(.engine)
         tried = c.o(.tried)
+        look = c.o(.look)
     }
 
     /// The line to show when it can't be made as is (a cap), or nil.
