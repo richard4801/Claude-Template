@@ -27,9 +27,21 @@ data class SuiteOption(
     val loop: String? = null,
     /** Lighting and angles: the bundled preview still (`previews/<poster>`). */
     val preview: SuitePreviewRef? = null,
+    /** Other words a picker's search finds it by ("single shot" → One take). */
+    val aliases: List<String> = emptyList(),
 ) {
     /** The card's title: the hardware name when it has a render ("Super 35 Digital"), else the label. */
     val title: String get() = name ?: label
+
+    /** A picker search: the label, the hardware name, the id's words or an alias contains [query]. */
+    fun matches(query: String): Boolean = suiteSearchMatches(query, listOf(label, name.orEmpty(), id.replace('_', ' ')) + aliases)
+}
+
+/** A picker search (AI suite, workstream 1): blank matches everything; else any of [words] contains it ("_"/"-" as spaces). */
+fun suiteSearchMatches(query: String, words: List<String>): Boolean {
+    val norm = { s: String -> s.lowercase().replace('_', ' ').replace('-', ' ') }
+    val q = norm(query).trim()
+    return q.isEmpty() || words.any { norm(it).contains(q) }
 }
 
 /** The composer's focal wheel step (`visible` = one of the six shown to members). */
@@ -54,7 +66,12 @@ data class SuiteMoveOption(
     val loop: String? = null,
     /** The bundled loop and its poster (`previews/moves/<id>.mp4|jpg`); null = the drawn still with an arrow. */
     val preview: SuitePreviewRef? = null,
-)
+    /** Other words the Movement search finds it by ("reveal" → Rise to reveal). */
+    val aliases: List<String> = emptyList(),
+) {
+    /** The Movement search: the label, the id's words or an alias contains [query]. */
+    fun matches(query: String): Boolean = suiteSearchMatches(query, listOf(label, id.replace('_', ' ')) + aliases)
+}
 
 /** A bundled composer preview: paths relative to the app's `previews/` assets. */
 @Serializable

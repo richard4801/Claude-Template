@@ -24,10 +24,13 @@ public struct SuiteOption: Codable, Hashable, Sendable, Identifiable {
     public var lut: String?
     /// Lighting and angles: the composer tile's still (a file in the bundled `previews/` folder).
     public var preview: SuitePreview?
+    /// Other words a picker's search finds it by ("single shot" → One take).
+    public var aliases: [String]
 
     public init(id: String, label: String, description: String = "", render: String? = nil, name: String? = nil, caption: String? = nil,
-                visible: Bool = true, mergedInto: String? = nil, swatches: [String] = [], lut: String? = nil, preview: SuitePreview? = nil) {
+                visible: Bool = true, mergedInto: String? = nil, swatches: [String] = [], lut: String? = nil, preview: SuitePreview? = nil, aliases: [String] = []) {
         self.preview = preview
+        self.aliases = aliases
         self.id = id
         self.label = label
         self.description = description
@@ -40,7 +43,7 @@ public struct SuiteOption: Codable, Hashable, Sendable, Identifiable {
         self.lut = lut
     }
 
-    enum CodingKeys: String, CodingKey { case id, label, description, render, name, caption, visible, mergedInto, swatches, lut, preview }
+    enum CodingKeys: String, CodingKey { case id, label, description, render, name, caption, visible, mergedInto, swatches, lut, preview, aliases }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -54,10 +57,16 @@ public struct SuiteOption: Codable, Hashable, Sendable, Identifiable {
         swatches = c.v(.swatches, [])
         lut = c.o(.lut)
         preview = c.o(.preview)
+        aliases = c.v(.aliases, [])
     }
 
     /// The hardware name when there is one ("Super 35 Digital"), else the label.
     public var title: String { name ?? label }
+
+    /// A picker search: the label, the hardware name, the id's words or an alias contains `query`.
+    public func matches(_ query: String) -> Bool {
+        suiteSearchMatches(query, [label, name ?? "", id.replacingOccurrences(of: "_", with: " ")] + aliases)
+    }
 }
 
 /// A camera move from the full list.
@@ -72,10 +81,13 @@ public struct SuiteMoveOption: Codable, Hashable, Sendable, Identifiable {
     public var group: String
     /// The Movement tile's loop and poster (files in the bundled `previews/` folder); nil = the drawn arrow.
     public var preview: SuitePreview?
+    /// Other words the Movement search finds it by ("reveal" → Rise to reveal).
+    public var aliases: [String]
 
     public init(id: String, label: String, description: String = "", category: String, editorBetter: Bool = false, talkSafe: Bool = false, group: String = "",
-                preview: SuitePreview? = nil) {
+                preview: SuitePreview? = nil, aliases: [String] = []) {
         self.preview = preview
+        self.aliases = aliases
         self.id = id
         self.label = label
         self.description = description
@@ -85,7 +97,7 @@ public struct SuiteMoveOption: Codable, Hashable, Sendable, Identifiable {
         self.group = group
     }
 
-    enum CodingKeys: String, CodingKey { case id, label, description, category, editorBetter, talkSafe, group, preview }
+    enum CodingKeys: String, CodingKey { case id, label, description, category, editorBetter, talkSafe, group, preview, aliases }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -96,7 +108,21 @@ public struct SuiteMoveOption: Codable, Hashable, Sendable, Identifiable {
         talkSafe = c.v(.talkSafe, false)
         group = c.v(.group, "")
         preview = c.o(.preview)
+        aliases = c.v(.aliases, [])
     }
+
+    /// The Movement search: the label, the id's words or an alias contains `query`.
+    public func matches(_ query: String) -> Bool {
+        suiteSearchMatches(query, [label, id.replacingOccurrences(of: "_", with: " ")] + aliases)
+    }
+}
+
+/// A picker search (AI suite, workstream 1): empty matches everything; otherwise any of `words` contains the query
+/// (case-insensitive, "_" and "-" read as spaces).
+public func suiteSearchMatches(_ query: String, _ words: [String]) -> Bool {
+    let norm = { (s: String) in s.lowercased().replacingOccurrences(of: "[_-]", with: " ", options: .regularExpression) }
+    let q = norm(query).trimmingCharacters(in: .whitespaces)
+    return q.isEmpty || words.contains { norm($0).contains(q) }
 }
 
 /// A composer preview: a poster still and, for moves, a short muted loop. Paths are relative to the bundled `previews/`

@@ -406,9 +406,8 @@ public struct PromptTokens: Hashable, Sendable {
 
     /// Moves matching a # query (label or id), the catalog's featured moves first.
     public static func searchMoves(_ cat: CameraCatalog, _ query: String) -> [SuiteMoveOption] {
-        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         let featured = cat.library.map(\.id)
-        return cat.moves.filter { q.isEmpty || $0.label.lowercased().contains(q) || $0.id.replacingOccurrences(of: "_", with: " ").contains(q) }
+        return cat.moves.filter { $0.matches(query) }
             .sorted { (featured.firstIndex(of: $0.id) ?? Int.max) < (featured.firstIndex(of: $1.id) ?? Int.max) }
     }
 }

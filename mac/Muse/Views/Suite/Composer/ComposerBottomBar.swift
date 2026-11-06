@@ -16,13 +16,45 @@ struct ComposerBottomBar: View {
     private var isSwap: Bool { tool == .swap || tool == .recast }
 
     var body: some View {
-        HStack(spacing: 8) {
+        // About 1000 px wide (owner): each pill is icon + value and never wraps; Generate always shows its price. When
+        // the row is still too wide the pills tighten, "How is this priced?" becomes a "?" and then the pills scroll.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                pills(spacing: 8)
+                Spacer(minLength: 8)
+                PricingLink(estimate: estimate)
+                generateButton
+            }
+            HStack(spacing: 6) {
+                pills(spacing: 5)
+                Spacer(minLength: 6)
+                PricingLink(estimate: estimate, compact: true)
+                generateButton
+            }
+            HStack(spacing: 6) {
+                ScrollView(.horizontal, showsIndicators: false) { pills(spacing: 5).padding(.vertical, 2) }
+                PricingLink(estimate: estimate, compact: true)
+                generateButton
+            }
+        }
+        .padding(.leading, 16).padding(.trailing, 12)
+        .frame(height: 62)
+    }
+
+    private var generateButton: some View {
+        GenerateButton(label: generateLabel, enabled: canGenerate, busy: store.suite.generating) { generate() }
+            .fixedSize()
+            .layoutPriority(2)
+    }
+
+    @ViewBuilder private func pills(spacing: CGFloat) -> some View {
+        HStack(spacing: spacing) {
             qualityPill
             if isSwap {
-                listPill("sound", icon: "speaker.wave.2", title: "Clip sound", value: store.suite.swap.keepAudio ? "On" : "Off", help: "Sound",
-                         options: [("On", true), ("Off", false)], selected: store.suite.swap.keepAudio) { store.suite.swap.keepAudio = $0 }
+                listPill("sound", icon: store.suite.swap.keepAudio ? "speaker.wave.2" : "speaker.slash", value: store.suite.swap.keepAudio ? "On" : "Off",
+                         help: "Clip sound", options: [("On", true), ("Off", false)], selected: store.suite.swap.keepAudio) { store.suite.swap.keepAudio = $0 }
                 if tool == .swap {
-                    listPill("speaking", icon: "text.bubble", title: "Speaking", value: store.suite.swap.speaking.label, help: "Speaking",
+                    listPill("speaking", icon: "text.bubble", value: store.suite.swap.speaking.label, help: "Speaking",
                              options: ComposerSpeaking.allCases.map { ($0.label, $0) }, selected: store.suite.swap.speaking) { store.suite.swap.speaking = $0 }
                     addOnPills
                 }
@@ -33,19 +65,15 @@ struct ComposerBottomBar: View {
             } else {
                 shapePill
                 lengthPill
-                listPill("sound", icon: "speaker.wave.2", title: "Sound", value: store.suite.composer.sound ? "On" : "Off", help: "Sound",
-                         options: [("On", true), ("Off", false)], selected: store.suite.composer.sound) { store.suite.composer.sound = $0 }
-                listPill("speaking", icon: "text.bubble", title: "Speaking", value: store.suite.composer.speaking.label, help: "Speaking",
+                listPill("sound", icon: store.suite.composer.sound ? "speaker.wave.2" : "speaker.slash", value: store.suite.composer.sound ? "On" : "Off",
+                         help: "Sound", options: [("On", true), ("Off", false)], selected: store.suite.composer.sound) { store.suite.composer.sound = $0 }
+                listPill("speaking", icon: "text.bubble", value: store.suite.composer.speaking.label, help: "Speaking",
                          options: ComposerSpeaking.allCases.map { ($0.label, $0) }, selected: store.suite.composer.speaking) { store.suite.composer.speaking = $0 }
                 takesPill
                 if store.isOwner { enginePill }
             }
-            Spacer(minLength: 8)
-            PricingLink(estimate: estimate)
-            GenerateButton(label: generateLabel, enabled: canGenerate, busy: store.suite.generating) { generate() }
         }
-        .padding(.leading, 16).padding(.trailing, 12)
-        .frame(height: 62)
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     // MARK: Price
@@ -83,7 +111,7 @@ struct ComposerBottomBar: View {
 
     private var shapePill: some View {
         let ratios = store.suite.catalog?.aspectRatios ?? ComposerBar.shapes
-        return listPill("shape", icon: "rectangle.portrait", title: nil, value: store.suite.composer.aspect, help: "Shape",
+        return listPill("shape", icon: "rectangle.portrait", value: store.suite.composer.aspect, help: "Shape",
                         options: ratios.map { ($0, $0) }, selected: store.suite.composer.aspect) { store.suite.composer.aspect = $0 }
     }
 
@@ -185,7 +213,7 @@ struct ComposerBottomBar: View {
         let label = ComposerEngines.label(store.suite.composer, tier)
         return pill("engine", help: "Engine") {
             Image(systemName: "server.rack")
-            Text(label).font(t.body(12.5, .medium)).lineLimit(1)
+            Text(label.replacingOccurrences(of: "Engine · ", with: "")).font(t.body(12.5, .medium))
         } popover: {
             VStack(alignment: .leading, spacing: 0) {
                 Text("ENGINE · OWNER").font(t.mono(10.5, .medium)).tracking(1.2).foregroundStyle(t.muted).padding(.horizontal, 14).padding(.vertical, 10)
@@ -226,12 +254,12 @@ struct ComposerBottomBar: View {
         .buttonStyle(.plain)
     }
 
-    private func listPill<T: Hashable>(_ id: String, icon: String, title: String?, value: String, help: String, options: [(String, T)], selected: T,
+    /// Icon + value (the name is the tooltip and the list's title).
+    private func listPill<T: Hashable>(_ id: String, icon: String, value: String, help: String, options: [(String, T)], selected: T,
                                        onPick: @escaping (T) -> Void) -> some View {
         pill(id, help: help) {
             Image(systemName: icon)
-            if let title { Text(title).font(t.body(12.5, .medium)) }
-            Text(value).font(t.body(12.5, title == nil ? .medium : .regular)).foregroundStyle(title == nil ? t.ink : t.muted)
+            Text(value).font(t.body(12.5, .medium))
         } popover: {
             PillList(title: help, options: options, selected: selected) {
                 onPick($0)
@@ -243,7 +271,9 @@ struct ComposerBottomBar: View {
     private func pill<Label: View, Pop: View>(_ id: String, help: String, @ViewBuilder label: () -> Label, @ViewBuilder popover: @escaping () -> Pop) -> some View {
         let isOpen = open == id
         return Button { open = isOpen ? nil : id } label: {
-            HStack(spacing: 7) { label() }
+            HStack(spacing: 6) { label() }
+                .lineLimit(1)
+                .fixedSize()
                 .font(.system(size: 13))
                 .foregroundStyle(t.ink)
                 .padding(.horizontal, 11).frame(height: 34)
@@ -254,6 +284,7 @@ struct ComposerBottomBar: View {
         }
         .buttonStyle(.plain)
         .help(help)
+        .accessibilityLabel(help)
         .popover(isPresented: Binding(get: { open == id }, set: { if !$0 && open == id { open = nil } }), arrowEdge: .top) {
             popover().environment(store).environment(\.theme, t)
         }
@@ -360,13 +391,21 @@ struct PricingLink: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
     var estimate: ShotEstimate?
+    /// A narrow bar: a "?" in place of the words.
+    var compact = false
     @State private var open = false
 
     var body: some View {
         Button { open.toggle() } label: {
-            Text("How is this priced?").font(t.body(12)).foregroundStyle(t.ink).underline(color: t.line)
+            if compact {
+                Image(systemName: "questionmark.circle").font(.system(size: 15)).foregroundStyle(t.muted).frame(width: 26, height: 34).contentShape(Rectangle())
+            } else {
+                Text("How is this priced?").font(t.body(12)).foregroundStyle(t.ink).underline(color: t.line).lineLimit(1).fixedSize()
+            }
         }
         .buttonStyle(.plain)
+        .help("How is this priced?")
+        .accessibilityLabel("How is this priced?")
         .popover(isPresented: $open, arrowEdge: .top) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("HOW IS THIS PRICED?").font(t.mono(10.5, .medium)).tracking(1.2).foregroundStyle(t.muted)
