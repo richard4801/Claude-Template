@@ -167,7 +167,7 @@ class FakeClaudeApi(
         return mutableListOf(
             ClaudeMessage("cmsg_s1", t.id, "user", "mac", "Lower the camera to chest height and switch to a 50 mm lens.", "tu_s1", createdAt = t0 - 30 * min),
             ClaudeMessage("cmsg_s2", t.id, "tool", "mac", "", "tu_s1", ClaudeToolRef("toolu_s1", "mcp__muse__set_camera_path", true, null), createdAt = t0 - 29 * min),
-            ClaudeMessage("cmsg_s3", t.id, "tool", "mac", "", "tu_s1", ClaudeToolRef("toolu_s2", "mcp__muse__create_shot_draft", true, "Shot draft · estimate \$1.92"), createdAt = t0 - 29 * min),
+            ClaudeMessage("cmsg_s3", t.id, "tool", "mac", "", "tu_s1", ClaudeToolRef("toolu_s2", "mcp__muse__create_shot_draft", true, "Shot draft · \$1.92"), createdAt = t0 - 29 * min),
             ClaudeMessage("cmsg_s4", t.id, "assistant", "mac", "Done: the camera sits at 1.2 m with a 50 mm lens, and the Shot draft is ready to generate when you are.", "tu_s1", createdAt = t0 - 28 * min),
         )
     }

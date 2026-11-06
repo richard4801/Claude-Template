@@ -39,8 +39,12 @@ public enum ClaudeChipText {
     }
 
     /// The chip for a tool while it runs (input only) or when its result is in.
+    /// A result whose JSON carries a string `label` (workstream 3's editing tools put a human label in their structured content)
+    /// uses that label as the chip.
     public static func summary(tool: String, input: JSONValue?, result: String? = nil, isError: Bool = false) -> String {
-        let base = describe(shortName(tool), input: object(input), result: result.flatMap(parseResult))
+        let parsed = result.flatMap(parseResult)
+        if !isError, let label = parsed?.jStr("label")?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty { return label }
+        let base = describe(shortName(tool), input: object(input), result: parsed)
         return isError ? "\(base) · failed" : base
     }
 
@@ -82,7 +86,8 @@ public enum ClaudeChipText {
         case "get_frame": return a.jNum("t").map { "Grabbed frame · \(time($0))" } ?? "Grabbed a frame"
         case "get_contact_sheet": return "Contact sheet"
         case "save_version": return a.jStr("name").map { "Saved version · \($0)" } ?? "Saved a version"
-        case "export": return a.jStr("preset").map { "Export · \(label($0))" } ?? "Export"
+        case "undo_edit": return "Undid the last change"
+        case "export", "export_video": return a.jStr("preset").map { "Export · \(label($0))" } ?? "Export"
         default:
             if name.hasPrefix("blender_") {
                 return "Blender · " + words(String(name.dropFirst("blender_".count))).lowercased()
@@ -144,9 +149,12 @@ public enum ClaudeChipText {
     private static func object(_ v: JSONValue?) -> [String: JSONValue] { if case .object(let o)? = v { return o }; return [:] }
 
     /// Tool results are JSON text (MUSE's MCP server sends `JSON.stringify(data)`).
+    /// Several text parts are joined with newlines: the first one that is a JSON object counts.
     private static func parseResult(_ s: String) -> [String: JSONValue]? {
-        guard let v = try? JSONDecoder().decode(JSONValue.self, from: Data(s.utf8)), case .object(let o) = v else { return nil }
-        return o
+        for part in [s] + s.split(separator: "\n").map(String.init) {
+            if let v = try? JSONDecoder().decode(JSONValue.self, from: Data(part.utf8)), case .object(let o) = v { return o }
+        }
+        return nil
     }
 
     /// `estimate.usd` of a Shot draft (or of `{draft}` / `{shotDraft}`).

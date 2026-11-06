@@ -28,8 +28,8 @@ object ChipText {
     fun words(name: String): String = bare(name).removePrefix("blender_").replace('_', ' ').trim().replaceFirstChar { it.uppercase() }.ifEmpty { "Tool" }
 
     /**
-     * The chip's words, the same mapping as the Mac: `set_camera_path` → "Saved camera path", `create_shot_draft` →
-     * "Shot draft · $1.92", other tools → the summary the Mac sent ("Trimmed 0:03–0:05"), else the name in words.
+     * The chip's words: the summary the Mac sent, as is ("Trimmed to 0:00.5–0:06.0", "Shot draft · estimate $1.92"); without
+     * one, the same mapping as the Mac (`set_camera_path` → "Saved camera path", editing tools in words), else the name in words.
      */
     fun of(name: String, summary: String? = null, running: Boolean = false): String {
         val n = bare(name)
@@ -40,14 +40,31 @@ object ChipText {
             "get_frame" -> "Grabbing a frame…"
             else -> words(n) + "…"
         }
+        // The Mac (and the server) fill the summary from the tool result's label: shown as is.
+        if (s != null) return s
         return when (n) {
             "set_camera_path" -> "Saved camera path"
-            "create_shot_draft" -> "Shot draft" + (usd(s)?.let { " · $it" } ?: "")
+            "create_shot_draft" -> "Shot draft"
             "attach_guide_media" -> "Upload link ready"
             "blender_render_guides" -> "Rendered guides"
-            "get_frame" -> s ?: "Grabbed a frame"
-            "save_version" -> s ?: "Saved a version"
-            else -> s ?: words(n)
+            "list_takes" -> "Looked at your takes"
+            "open_edit" -> "Opened the edit"
+            "get_edit" -> "Read the edit"
+            "apply_edit_ops" -> "Edited"
+            "undo_edit" -> "Undid an edit"
+            "list_looks" -> "Looked at the Looks"
+            "list_caption_styles" -> "Looked at caption styles"
+            "auto_captions" -> "Added captions"
+            "cut_silences" -> "Cut silences"
+            "cut_fillers" -> "Cut filler words"
+            "remove_background" -> "Removed the background"
+            "detect_beats" -> "Found the beats"
+            "denoise" -> "Cleaned up the audio"
+            "get_frame" -> "Grabbed a frame"
+            "get_contact_sheet" -> "Checked a contact sheet"
+            "save_version" -> "Saved a version"
+            "export_video" -> "Started an export"
+            else -> words(n)
         }
     }
 }
