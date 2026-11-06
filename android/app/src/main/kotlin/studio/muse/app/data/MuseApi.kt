@@ -171,7 +171,7 @@ interface MuseApi {
     suspend fun editorJob(id: String): EditorJob = throw ApiException("not_found", "Job not found")
     suspend fun cancelEditorJob(id: String) {}
     /** Saves a video made by the Edit suite as a new version of [takeId] with its v2 project. */
-    suspend fun saveProjectVersion(takeId: String, video: EditedVideo, project: kotlinx.serialization.json.JsonObject, onProgress: (Float) -> Unit = {}): Take =
+    suspend fun saveProjectVersion(takeId: String, video: EditedVideo, project: kotlinx.serialization.json.JsonObject, name: String? = null /* 1–80 chars (edit sessions, workstream 3) */, onProgress: (Float) -> Unit = {}): Take =
         throw ApiException("unsupported", "Saving an edited video needs the studio server")
     /** Uploads a voice-over / music file (or with purpose "lut" a .cube) for the editor; returns the upload id. */
     suspend fun uploadEditorFile(file: java.io.File, contentType: String, purpose: String? = null, onProgress: (Float) -> Unit = {}): String =

@@ -47,6 +47,24 @@ class SessionSyncTest {
         assertEquals(owners, SessionSync.applyExportPreset(owners, null))
     }
 
+    @Test fun aRemoteChangeIsCarriedThroughTheUndoStatesNotUndone() {
+        val a = EditProject(2, "t", Canvas(1080, 1920, 30.0, "#000000"),
+            listOf(Asset("src", AssetKind.VIDEO, take = "t", durationSec = 10.0)), listOf(Track("main", TrackKind.MAIN, items = listOf(VideoClip("c1", "src", 0.0, 10.0, 1.0)))))
+        val h = ProjectHistory(a)
+        val split = a.splitAt(4.0)!!
+        h.apply(split)
+        // Elsewhere: the background changed. Every state gets it; undo takes back only the split.
+        val bg: (EditProject) -> EditProject? = { it.copy(canvas = it.canvas.copy(background = "#111111")) }
+        assertTrue(h.rebase(bg(split)!!, bg))
+        h.undo()
+        assertEquals(bg(a), h.current)
+        h.redo()
+        assertEquals(bg(split), h.current)
+        // A state the change doesn't fit is dropped with everything older.
+        h.rebase(h.current.copy(canvas = h.current.canvas.copy(fps = 25.0))) { null }
+        assertFalse(h.canUndo)
+    }
+
     @Test fun historyStepsCarryTheirTagsThroughUndoAndRedo() {
         val a = EditProject(2, "t", Canvas(1080, 1920, 30.0, "#000000"),
             listOf(Asset("src", AssetKind.VIDEO, take = "t", durationSec = 10.0)), listOf(Track("main", TrackKind.MAIN, items = listOf(VideoClip("c1", "src", 0.0, 10.0, 1.0)))))

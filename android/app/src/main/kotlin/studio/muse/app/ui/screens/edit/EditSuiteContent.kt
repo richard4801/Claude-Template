@@ -107,7 +107,10 @@ fun EditSuiteContent(
                 androidx.compose.runtime.LaunchedEffect(note) { kotlinx.coroutines.delay(4000); act(EditAction.ClearClaudeNote) }
                 ClaudeNote(note, { act(EditAction.ClearClaudeNote) }, Modifier.align(Alignment.TopCenter).padding(top = 58.dp, start = 16.dp, end = 16.dp))
             }
-            ui.session?.asking?.let { p ->
+            if (ui.session?.conflict == true) {
+                Box(Modifier.fillMaxSize().background(Color(0x40141210)).press { })
+                ConflictSheet(act, Modifier.align(Alignment.BottomCenter).widthIn(max = 560.dp).navigationBarsPadding())
+            } else ui.session?.asking?.let { p ->
                 Scrim { act(EditAction.AnswerPending(p.id, false)) }
                 PendingSheet(p, act, Modifier.align(Alignment.BottomCenter).widthIn(max = 560.dp).navigationBarsPadding())
             }
