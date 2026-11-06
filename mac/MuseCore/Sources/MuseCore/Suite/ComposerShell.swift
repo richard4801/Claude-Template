@@ -53,8 +53,15 @@ public enum ComposerTool: String, CaseIterable, Sendable, Identifiable {
     /// No backend yet: the tool card shows a quiet "Coming soon" and no Generate.
     public var comingSoon: Bool { self == .talking || self == .ugc || self == .extend }
 
-    /// "Coming soon" until the server lists the tool among the catalog's `modes` (UGC ad once it says "ugc").
-    public func isComingSoon(modes: [String]) -> Bool { comingSoon && !modes.contains(rawValue) }
+    /// The tool's id in `catalog.tools` (UGC ad is "ugc_ad").
+    public var wireId: String { self == .ugc ? "ugc_ad" : rawValue }
+
+    /// "Coming soon" as the catalog's `tools` say (not available); a catalog without `tools`, or without this tool,
+    /// keeps the app's own list (`comingSoon`).
+    public func isComingSoon(in catalog: SuiteCatalog?) -> Bool {
+        guard let t = catalog?.tools.first(where: { $0.id == wireId }) else { return comingSoon }
+        return !t.available
+    }
 
     /// The setting chips above the prompt (the spec's tools table).
     public var chips: [ComposerChip] {
@@ -155,7 +162,7 @@ public enum ComposerSlot: String, CaseIterable, Sendable, Identifiable {
         case .startFrame: return SlotId(.start)
         case .endFrame: return SlotId(.end)
         case .audio: return SlotId(.audio)
-        case .product: return SlotId(.image)
+        case .product, .location: return SlotId(.image)
         case .referenceAd: return SlotId(.video)
         default: return nil
         }
@@ -520,12 +527,36 @@ public struct ComposerDraft: Hashable, Sendable {
         if r.modelId != nil, r.outfitId == nil { r.outfitId = outfitId }
         if let d = directed { r.camera = d }
         r = slots.apply(to: r, inputs)
+        switch tool {
+        case .talking:
+            // Talking: she says the AUDIO slot's words (speaking on unless switched off); the optional image is where.
+            if r.speaking == nil { r.speaking = true }
+            r.references?.images = r.references?.images?.map { x -> SuiteRefImage in var i = x; i.role = "location"; return i }
+        case .ugc:
+            // UGC ad: the PRODUCT slot is the product; the optional reference ad rides in references.videos.
+            r.references?.images = r.references?.images?.map { x -> SuiteRefImage in var i = x; i.role = "product"; return i }
+        default: break
+        }
         r = ComposerLocations.apply(r, tokens: tokens, locations: locations, inputs: inputs)
         if let e = engineModel {
             r.engineModel = e
             r.resolution = resolution
         }
         return r
+    }
+
+    /// What the tool still needs before Generate (its required slots), as a line to show; nil when it can go.
+    public func missing(_ slots: InputSlots) -> String? {
+        let ready = { (id: SlotId) -> Bool in slots[id]?.ready ?? false }
+        for s in tool.required {
+            switch s {
+            case .character where tokens.characterId == nil: return "Pick a character first"
+            case .audio where !ready(SlotId(.audio)): return "Add the audio she says"
+            case .product where !ready(SlotId(.image)): return "Add a photo of the product"
+            default: continue
+            }
+        }
+        return nil
     }
 
     /// What this shot's inputs follow: the pinned engine's (`tier.slots(for:)`), else the tier's.

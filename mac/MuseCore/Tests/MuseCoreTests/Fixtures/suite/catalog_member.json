@@ -88,6 +88,37 @@
    }
   }
  ],
+ "tools": [
+  {
+   "id": "shot",
+   "available": true
+  },
+  {
+   "id": "swap",
+   "available": true
+  },
+  {
+   "id": "recast",
+   "available": true
+  },
+  {
+   "id": "storyboard",
+   "available": true
+  },
+  {
+   "id": "talking",
+   "available": true
+  },
+  {
+   "id": "ugc_ad",
+   "available": true
+  },
+  {
+   "id": "extend",
+   "available": false,
+   "comingSoon": true
+  }
+ ],
  "modes": [
   "text",
   "image",

@@ -156,14 +156,11 @@ final class SuiteComposerExtrasTests: XCTestCase {
         XCTAssertEqual(Wheel.index(of: "haul", in: wheel), 6)
     }
 
-    func testUgcDecodesOnOlderCatalogsAndStaysComingSoon() throws {
+    func testUgcDecodesOnOlderCatalogs() throws {
         let old = try JSONDecoder().decode(CameraCatalog.self, from: Data(#"{"eras":[{"id":"1980s","label":"1980s"}]}"#.utf8))
         XCTAssertEqual(old.ugcFormats, [])
         XCTAssertEqual(ComposerWheels.formats(old).count, 1)
         XCTAssertEqual(ComposerCatalog.formatLabel(old, "try_on"), "Try on", "an id the catalog doesn't list reads as words")
-        XCTAssertTrue(ComposerTool.ugc.isComingSoon(modes: catalog.modes))
-        XCTAssertFalse(ComposerTool.ugc.isComingSoon(modes: catalog.modes + ["ugc"]))
-        XCTAssertFalse(ComposerTool.shot.isComingSoon(modes: []))
         XCTAssertEqual(ComposerTool.ugc.required, [.character, .product])
         XCTAssertEqual(ComposerTool.ugc.optional, [.referenceAd])
         XCTAssertEqual(ComposerSlot.referenceAd.slotId, SlotId(.video))

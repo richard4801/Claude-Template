@@ -371,9 +371,13 @@ public struct SuiteCatalog: Codable, Hashable, Sendable {
     public var aspectRatios: [String]
     public var takesMax: Int
     public var camera: CameraCatalog
+    /// Which composer tools are live (shot, swap, recast, storyboard, talking, ugc_ad, extend). Empty on older servers:
+    /// the app's own "Coming soon" list then applies.
+    public var tools: [SuiteToolStatus]
 
     public init(enabled: Bool, test: Bool, defaultQuality: String = "draft", tiers: [SuiteTier], modes: [String] = SuiteCatalog.allModes, recastMaxPeople: Int = 4,
-                aspectRatios: [String] = ["9:16", "16:9", "1:1", "4:3", "3:4", "21:9"], takesMax: Int = 4, camera: CameraCatalog) {
+                aspectRatios: [String] = ["9:16", "16:9", "1:1", "4:3", "3:4", "21:9"], takesMax: Int = 4, camera: CameraCatalog, tools: [SuiteToolStatus] = []) {
+        self.tools = tools
         self.enabled = enabled
         self.test = test
         self.defaultQuality = defaultQuality
@@ -387,9 +391,10 @@ public struct SuiteCatalog: Codable, Hashable, Sendable {
 
     public static let allModes = ["text", "image", "reference", "swap", "recast"]
 
-    enum CodingKeys: String, CodingKey { case enabled, test, defaultQuality, tiers, modes, recastMaxPeople, aspectRatios, takesMax, camera }
+    enum CodingKeys: String, CodingKey { case enabled, test, defaultQuality, tiers, modes, recastMaxPeople, aspectRatios, takesMax, camera, tools }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
+        tools = c.v(.tools, [])
         enabled = c.v(.enabled, false)
         test = c.v(.test, false)
         defaultQuality = c.v(.defaultQuality, "draft")
@@ -402,6 +407,34 @@ public struct SuiteCatalog: Codable, Hashable, Sendable {
     }
 
     public func tier(_ id: String) -> SuiteTier? { tiers.first { $0.id == id } }
+}
+
+/// `catalog.tools[]`: one composer tool and whether the apps can offer it now.
+public struct SuiteToolStatus: Codable, Hashable, Sendable, Identifiable {
+    public var id: String
+    public var available: Bool
+    public var comingSoon: Bool
+
+    public init(id: String, available: Bool, comingSoon: Bool = false) {
+        self.id = id
+        self.available = available
+        self.comingSoon = comingSoon
+    }
+
+    enum CodingKeys: String, CodingKey { case id, available, comingSoon }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        available = c.v(.available, false)
+        comingSoon = c.v(.comingSoon, false)
+    }
+
+    public func encode(to e: Encoder) throws {
+        var c = e.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(available, forKey: .available)
+        if comingSoon { try c.encode(comingSoon, forKey: .comingSoon) }
+    }
 }
 
 // MARK: Camera spec (what a shot sends)
