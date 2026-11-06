@@ -87,6 +87,11 @@ When resuming:
     - unboxed hardware renders on dark.
 
     Prototype first for the owner to feel, then both apps.
+12. **From the owner's balcony test (H3 HD, 2K, 10 s):** the look was excellent (35 mm film, contre-jour, Golden warmth).
+    - Add a move "Rise to reveal": the camera starts below the subject's level (street or traffic) and rises up to find them. Today's "Crane up" starts at the subject and tilts down.
+    - The rig check should flag "prompt says open on X / reveal" against a move that can't do that.
+    - Tempo / Genre / Era tiles need preview art (they are text on dark).
+    - In Style → Tempo, add "single shot" as a search alias for "One take".
 
 ## Status (each session updates its own line)
 - 1 · Video composer follow-ups (2026-11-06) on `claude/muse-suite-core`: Recast tap-a-face (faceCrop + personHint), swap add-on pills, Era decade slider, UGC ad format wheel (`ugcFormats`, `camera.style.format`), @location (`/v1/suite/locations`, **migration 0013 after 0011/0012**), drag-to-reorder tokens, owner engine pin; catalog `tools` (Talking and UGC ad live, Extend coming soon); real Webcam/CCTV/Swirl/Tilt-shift renders; Blender previews bundled (`previews/`, catalog `preview` per move/light/angle); first-run HTTP checks on both apps. Server 359 green; Android 1305 green (release APK 30.7 MB, +9.5 MB previews); Mac CI green (run 42152398143). Next: Extend & upscale backend.
