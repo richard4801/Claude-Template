@@ -53,7 +53,7 @@ Before Generate, the composer warns when choices clash with each other or with t
   - `wide_close`: ≤ 24 mm on a close-up or extreme close-up (not Fisheye) → 85mm (alt: Medium shot).
   - `worm_close`: Worm’s-eye with medium close-up or closer → Low angle (alt: Full body).
   - `look_clash` (tip): film stock against palette, black and white against colour, warm against cold, saturated against muted → keep one.
-  - `prompt_move` / `prompt_angle` / `prompt_size` (tip): the prompt names a different move, angle or framing from the chips. Negated words ("no zoom") and the composer’s own #tokens don’t count.
+  - `prompt_move` / `prompt_angle` (warn), `prompt_size` (tip): the prompt names a different move, angle or framing from the chips. Negated words ("no zoom") and the composer’s own #tokens don’t count.
   - `no_reveal`: "open on X" / "reveal" with a move that starts on the subject (Crane up, Dolly in, Static…) → Rise to reveal (or Tilt up) after a rise, else Dolly out reveal.
   - `talk_move`: speaking with a move that isn’t talk-safe → Lock it off (alt: Handheld UGC).
 
