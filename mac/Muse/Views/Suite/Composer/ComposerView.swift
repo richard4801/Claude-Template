@@ -40,7 +40,7 @@ struct ComposerView: View {
             try? await Task.sleep(nanoseconds: 300_000_000)
             if Task.isCancelled { return }
             switch s.composer.tool {
-            case .shot, .talking, .ugc: if !store.isComingSoon(s.composer.tool) { await store.estimateShot() }
+            case .shot, .talking, .ugc, .extend: if !store.isComingSoon(s.composer.tool) { await store.estimateShot() }
             case .swap, .recast: await store.estimateSwap()
             default: break
             }
@@ -51,7 +51,7 @@ struct ComposerView: View {
                     Spacer()
                     Button("Done") { s.showEngines = false }.keyboardShortcut(.cancelAction).padding(12)
                 }
-                ScrollView { SuiteEnginesPanel(estimate: s.composer.tool == .shot ? s.estimate : s.swapEstimate).padding(20) }
+                ScrollView { SuiteEnginesPanel(estimate: s.composer.tool == .swap || s.composer.tool == .recast ? s.swapEstimate : s.estimate).padding(20) }
             }
             .frame(minWidth: 560, minHeight: 520)
             .environment(store)
@@ -280,6 +280,8 @@ struct ComposerCard: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
+        case .extend:
+            ExtendPromptArea()
         default:
             ComposerPromptBox(placeholder: draft.tool.promptPlaceholder).frame(maxWidth: .infinity, alignment: .topLeading)
         }

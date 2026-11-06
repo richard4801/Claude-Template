@@ -30,6 +30,7 @@ struct ComposerSlotCardView: View {
             case .character: CharacterSlot(card: card, size: size)
             case .clip: clipSlot
             case .people: peopleSlot
+            case .video: ExtendVideoSlot(card: card, size: size)
             default:
                 if let id = card.slot.slotId {
                     inputSlot(id)

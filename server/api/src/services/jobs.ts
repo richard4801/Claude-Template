@@ -238,7 +238,7 @@ export class JobService {
 
   /** Capabilities of the pod image (runpod mode) or everything (simulated). */
   capabilities(): string[] {
-    if (this.ctx.gpu.mode === 'simulated') return ['h3', 'viggle', 'latentsync', 'lora-train'];
+    if (this.ctx.gpu.mode === 'simulated') return ['h3', 'viggle', 'latentsync', 'lora-train', 'upscale'];
     return this.ctx.config.RUNPOD_WORKER_CAPABILITIES.split(',').map(x => x.trim()).filter(Boolean);
   }
   /** What the apps can offer right now. Replace-audio isn't wired on the GPU yet (keepAudio:false gives a silent take). */
@@ -251,8 +251,13 @@ export class JobService {
     const addons = [
       { id: 'edit', label: P.EDIT.label, detail: P.EDIT.detail, available: caps.includes('h3'), sends: { engine: 'h3', use: 'full', steps: P.STEPS_DEFAULT } },
       { id: 'fast', label: P.FAST.label, detail: P.FAST.detail, available: caps.includes('viggle'), sends: { engine: 'viggle', use: 'full' } },
-      { id: 'upscale', label: P.UPSCALE.label, detail: P.UPSCALE.detail, available: false, comingSoon: true,
-        sizes: P.UPSCALE_SIZES.map(z => ({ ...z, available: false, price: null })) },
+      // Upscale: offered per size once it is priced (UPSCALE_PRICES, measured) and the pods can run it. `price` = $/output second.
+      ...(() => {
+        const prices = P.upscalePrices(this.ctx.config.UPSCALE_PRICES), can = caps.includes('upscale');
+        const sizes = P.UPSCALE_SIZES.map(z => ({ ...z, available: can && !!prices[z.id], price: can ? prices[z.id]?.usdPerSec ?? null : null }));
+        const on = sizes.some(z => z.available);
+        return [{ id: 'upscale', label: P.UPSCALE.label, detail: P.UPSCALE.detail, available: on, ...(on ? {} : { comingSoon: true }), sizes }];
+      })(),
     ];
     const video = { defaultEngine: this.ctx.config.videoEngineDefault === 'viggle' ? 'h3' : this.ctx.config.videoEngineDefault, defaultQuality: this.ctx.config.VIDEO_QUALITY_DEFAULT,
       minSeconds: P.REPLICATE_MIN_SEC, maxSeconds: P.REPLICATE_MAX_SEC, options, addons };
@@ -304,7 +309,7 @@ export class JobService {
     if (v!.kind === 'lora-train') await this.ctx.lora.onProgress(v!, 0);
     return v!;
   }
-  workerKind(j: JobRow): 'h3' | 'viggle' | 'lora-train' { return j.kind === 'lora-train' ? 'lora-train' : j.request.engine === 'viggle' ? 'viggle' : 'h3'; }
+  workerKind(j: JobRow): 'h3' | 'viggle' | 'lora-train' | 'upscale' { return j.kind === 'lora-train' ? 'lora-train' : j.request.engine === 'viggle' ? 'viggle' : j.request.engine === 'upscale' ? 'upscale' : 'h3'; }
 
   /** Progress for a claimed job. Returns false if the job is no longer running (deleted or failed): the GPU should stop. */
   async progress(jobId: string, fields: { progress: number; take?: number; step?: number; totalSteps?: number; phase?: string; secondsLeft?: number }) {

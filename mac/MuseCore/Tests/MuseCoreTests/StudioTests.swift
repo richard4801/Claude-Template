@@ -235,11 +235,11 @@ final class StudioTests: XCTestCase {
         XCTAssertNotNil(owner.features.photo)
         _ = try await api.warmGpu()
 
-        // Upscale is coming soon.
+        // Upscale: 4K isn't offered in demo mode (1080p and 2K are; SuiteExtendUpscaleTests runs them).
         let all = await api.listTakes()
         let take = try XCTUnwrap(all.first { $0.isVideo })
         do {
-            _ = try await api.upscale(takeId: take.id, UpscaleRequest(size: "2k"))
+            _ = try await api.upscale(takeId: take.id, UpscaleRequest(size: "4k"))
             XCTFail()
         } catch let e as ApiError {
             XCTAssertEqual(e.code, "upscale_unavailable")

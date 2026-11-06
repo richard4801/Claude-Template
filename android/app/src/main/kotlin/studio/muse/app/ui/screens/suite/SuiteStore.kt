@@ -64,6 +64,46 @@ class SuiteStore(private val c: AppContainer) {
 
     val owner: Boolean get() = c.repo.state.value.wallet?.owner ?: c.prefs.value.owner
 
+    /** Extend's VIDEO slot (ToolSlots.EXTEND_VIDEO): one of the studio's takes, or an uploaded video with its length. */
+    val extendSlots = MutableStateFlow(InputSlots())
+    /** The take the Upscale sheet is open for (null = closed); [upscaleSoon]: the server just said Upscale is coming soon. */
+    val upscaleFor = MutableStateFlow<String?>(null)
+    val upscaleSoon = MutableStateFlow(false)
+
+    /** Puts [t] in Extend's VIDEO slot. False when the take has no stored video to continue from. */
+    fun pickExtendTake(t: studio.muse.app.data.Take): Boolean {
+        val key = studio.muse.app.data.ExtendRules.keyOf(t, c.repo.demo) ?: return false
+        extendSlots.value = InputSlots().put(studio.muse.app.ui.screens.suite.composer.ToolSlots.EXTEND_VIDEO, studio.muse.app.ui.screens.suite.composer.ExtendSlot.fromTake(t, key))
+        return true
+    }
+
+    /** "Extend" on a finished take: the composer on Extend with that take in the VIDEO slot. */
+    fun startExtend(t: studio.muse.app.data.Take): Boolean {
+        if (!pickExtendTake(t)) { c.repo.toast("This take has no video to extend yet"); return false }
+        composer.update { it.withTool(studio.muse.app.ui.screens.suite.composer.ComposerTool.EXTEND).fit(catalog.value) }
+        sheet.value = null
+        return true
+    }
+
+    /** Opens the Upscale sheet on [takeId] (the sizes start pickable again). */
+    fun openUpscale(takeId: String) { upscaleSoon.value = false; upscaleFor.value = takeId }
+
+    /**
+     * Upscale [takeId] to [size]: the job (followed like any render), or null. `upscale_unavailable` (409) greys every size
+     * with "Upscale is coming soon" and keeps the sheet open; other errors are a toast.
+     */
+    suspend fun upscale(takeId: String, size: String): Job? {
+        val (j, code, msg) = c.repo.upscaleInline(takeId, size)
+        if (j != null) {
+            shotJobs.update { (it - j.id) + j.id }
+            upscaleFor.value = null
+            return j
+        }
+        if (code == studio.muse.app.data.UpscaleOffer.UNAVAILABLE) upscaleSoon.value = true
+        else c.repo.toast(memberSafeText(msg ?: ErrorText.WENT_WRONG))
+        return null
+    }
+
     suspend fun load() {
         try {
             val cat = c.repo.api.suiteCatalog()

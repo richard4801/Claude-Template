@@ -105,6 +105,21 @@ final class SuiteComposerTests: XCTestCase {
         XCTAssertEqual(PromptTokens.searchMoves(cat, "dolly").first?.id, "dolly_in")
     }
 
+    func testSearchFindsAliases() throws {
+        // "single shot" finds Tempo "One take"; "reveal" finds Rise to reveal (catalog aliases).
+        let oneTake = SuiteOption(id: "single_shot", label: "One take", aliases: ["single shot", "oner"])
+        XCTAssertTrue(oneTake.matches("Single shot"))
+        XCTAssertTrue(oneTake.matches("one"))
+        XCTAssertTrue(oneTake.matches(""))
+        XCTAssertFalse(oneTake.matches("slow"))
+        let rise = SuiteMoveOption(id: "rise_reveal", label: "Rise to reveal", category: "vertical", aliases: ["pedestal up"])
+        XCTAssertTrue(rise.matches("pedestal"))
+        XCTAssertTrue(rise.matches("rise-to"))
+        let json = Data(#"{"id":"single_shot","label":"One take","aliases":["single shot"]}"#.utf8)
+        XCTAssertEqual(try JSONDecoder().decode(SuiteOption.self, from: json).aliases, ["single shot"])
+        XCTAssertEqual(try JSONDecoder().decode(SuiteOption.self, from: Data(#"{"id":"calm"}"#.utf8)).aliases, [])
+    }
+
     func testTheRequestAndTheLook() async throws {
         let p = PromptTokens.text(" waves").addMention(kind: "character", id: "m_maya", label: "Maya", at: Caret(0, 0)).0
         let r = composerRequest(p, ComposerSettings(palette: "hyper_neon"), quality: "hd")
