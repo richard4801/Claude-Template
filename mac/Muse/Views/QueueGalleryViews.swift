@@ -39,7 +39,7 @@ struct QueueView: View {
             ForEach(store.visibleFailures) { f in
                 HStack(alignment: .center, spacing: Space.s3) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("\(f.title) didn't finish").scaled(t.scale.label, t.roles.danger)
+                        Text("\(TakeText.displayTitle(f.title)) didn't finish").scaled(t.scale.label, t.roles.danger)
                         Text(ScreenCopy.failure(f.failureLine, charged: false)).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: Space.s3)
@@ -63,7 +63,7 @@ struct QueueView: View {
             let finished = store.finishedJobs
             SectionTitle("Finished") { Text(ScreenCopy.count(finished.count, "job")).scaled(t.scale.caption, t.roles.ink2) }
             if finished.isEmpty {
-                Text("Finished renders stay here and in the Gallery.").scaled(t.scale.body, t.roles.ink2)
+                Text("Finished renders stay here and in the Library.").scaled(t.scale.body, t.roles.ink2)
             } else {
                 JobTable(jobs: finished, header: false)
             }
@@ -108,7 +108,7 @@ struct JobRow: View {
         HStack(spacing: Space.s3) {
             MediaFrame(ref: j.thumb, ratio: 44.0 / 58.0).frame(width: 44)
             VStack(alignment: .leading, spacing: 2) {
-                Text(j.title).scaled(t.scale.label, t.roles.ink).lineLimit(1)
+                Text(TakeText.displayTitle(j.title)).scaled(t.scale.label, t.roles.ink).lineLimit(1)
                 Text(ScreenCopy.meta([j.modelName.split(separator: " ").first.map(String.init) ?? j.modelName, j.engineLabel,
                                       "\(Pricing.trimNum(j.lengthSec)) s" + (j.request.takes > 1 ? ", \(j.request.takes) takes" : "")]))
                     .scaled(t.scale.caption, t.roles.ink2).lineLimit(1)
@@ -166,7 +166,7 @@ struct GalleryView: View {
                 CompareView().transition(MotionStyle.of(t.id).transition)
             } else {
                 ScreenPage {
-                    ScreenTitle("Gallery", subtitle: "Tests stay separate from Final. Select takes to compare them side by side.") {
+                    ScreenTitle("Library", subtitle: "Tests stay separate from Final. Select takes to compare them side by side.") {
                         RSeg([(GalleryTab.tests, "Tests \(store.takes.count)"), (GalleryTab.final, "Final \(store.takes.filter(\.isFinal).count)")], selection: $store.galleryTab)
                             .frame(width: 240)
                     }
@@ -309,7 +309,7 @@ struct ResultView: View {
             GeometryReader { g in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        Crumb(parent: "Gallery", title: take.caption) { store.go(.gallery) }
+                        Crumb(parent: "Library", title: take.caption) { store.go(.gallery) }
                         HStack(alignment: .top, spacing: Space.s6) {
                             Spacer(minLength: 0)
                             Group {
@@ -332,7 +332,7 @@ struct ResultView: View {
             }
         } else {
             ScreenPage {
-                EmptyState("Nothing open", "Pick a take in the Gallery to see it here.", actionTitle: "Open gallery") { store.go(.gallery) }
+                EmptyState("Nothing open", "Pick a take in the Library to see it here.", actionTitle: "Open library") { store.go(.gallery) }
             }
         }
     }

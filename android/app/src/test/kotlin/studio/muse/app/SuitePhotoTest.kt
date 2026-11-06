@@ -208,7 +208,7 @@ class SuitePhotoTest {
         assertTrue(r.takes.all { it.kind == "shot" && it.title.startsWith("Photo · ") })
         assertEquals(before - e.estimate, api.balance().balance, 1e-9)
         val library = api.listTakes()
-        assertTrue(library.any { it.id == old.id && it.title.startsWith("Shoot · ") })
+        assertTrue(library.any { it.id == old.id && it.title.startsWith("Photo · ") })
         assertTrue(r.takes.all { t -> library.any { it.id == t.id } })
         // The composer's recent strip lists both, newest first.
         assertTrue(PhotoComposer.recent(library).map { it.id }.containsAll(r.takes.map { it.id } + old.id))

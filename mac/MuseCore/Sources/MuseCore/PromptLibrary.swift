@@ -221,7 +221,7 @@ public enum PromptPlaceholders {
 /// The demo backend's library: the photoshoot and reference entries with the server's default wording.
 public enum PromptLibraryDefaults {
     public static let groups: [PromptGroupRef] = [
-        PromptGroupRef(id: "photoshoot", label: "Photoshoot"), PromptGroupRef(id: "references", label: "References"),
+        PromptGroupRef(id: "photoshoot", label: "Photo"), PromptGroupRef(id: "references", label: "References"),
         PromptGroupRef(id: "sheet", label: "Character sheet"), PromptGroupRef(id: "outfits", label: "Outfits"),
         PromptGroupRef(id: "enhance", label: "Enhance"), PromptGroupRef(id: "dressup", label: "Dress up"),
         PromptGroupRef(id: "templates", label: "Templates"), PromptGroupRef(id: "video", label: "Video"), PromptGroupRef(id: "lora", label: "LoRA"),

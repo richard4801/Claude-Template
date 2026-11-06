@@ -303,35 +303,21 @@ struct SuiteOffView: View {
 
 /// Settings → Connections (owner): opens workstream 2's ConnectionsView.
 struct SuiteConnectionsRow: View {
-    @Environment(\.theme) private var t
     @State private var open = false
 
     var body: some View {
-        Button { open = true } label: {
-            HStack(spacing: 12) {
-                Ph("link", 15).frame(width: 20)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(t.navUppercase ? "CONNECTIONS" : "Connections").font(t.navFont).lineLimit(1)
-                    Text("Claude & MCP · Blender relay").font(t.body(11)).foregroundStyle(t.muted).lineLimit(1)
+        // Same row as the other Settings sections (SettingsViews.swift): text only, no icon or subtitle.
+        SettingsNavRow(title: "Connections", on: open) { open = true }
+            .help("Claude and MCP, and the Blender relay")
+            .sheet(isPresented: $open) {
+                VStack(spacing: 0) {
+                    HStack {
+                        Spacer()
+                        Button("Done") { open = false }.keyboardShortcut(.cancelAction).padding(12)
+                    }
+                    ConnectionsView()
                 }
-                Spacer(minLength: 0)
+                .frame(minWidth: 720, minHeight: 520)
             }
-            .foregroundStyle(t.isD ? .white : t.muted)
-            .padding(.horizontal, 10)
-            .frame(height: 46)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Connections, Claude and MCP, Blender relay")
-        .sheet(isPresented: $open) {
-            VStack(spacing: 0) {
-                HStack {
-                    Spacer()
-                    Button("Done") { open = false }.keyboardShortcut(.cancelAction).padding(12)
-                }
-                ConnectionsView()
-            }
-            .frame(minWidth: 720, minHeight: 520)
-        }
     }
 }

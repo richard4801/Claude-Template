@@ -120,7 +120,7 @@ final class EditSuiteSession {
     var duration: Double { state.duration }
     var isReady: Bool { phase == .ready }
     var busy: Bool { exportPhase != .idle }
-    var title: String { take.title.isEmpty ? "Edit" : take.title }
+    var title: String { take.title.isEmpty ? "Edit" : take.displayTitle }
 
     // MARK: Loading
 
@@ -165,7 +165,7 @@ final class EditSuiteSession {
     }
 
     private func name(of a: E.Asset) -> String {
-        if let t = a.take, let tk = lookupTake(t) { return tk.title.isEmpty ? "Take" : tk.title }
+        if let t = a.take, let tk = lookupTake(t) { return tk.title.isEmpty ? "Take" : tk.displayTitle }
         if a.kind == .audio { return a.library ?? "Audio" }
         return a.kind.rawValue.capitalized
     }
@@ -409,7 +409,7 @@ final class EditSuiteSession {
         guard let d = t.durationSec, d > 0 else { lastError = "That take has no video yet"; return }
         let id = project.newId("t")
         let a = E.Asset(id: id, kind: .video, take: t.id, durationSec: d, width: t.width, height: t.height, hasAudio: true, url: t.videoUrl)
-        state.assetNames[id] = t.title.isEmpty ? "Take" : t.title
+        state.assetNames[id] = t.title.isEmpty ? "Take" : t.displayTitle
         edit { $0.addVideo(a, overlay: overlay) }
     }
 

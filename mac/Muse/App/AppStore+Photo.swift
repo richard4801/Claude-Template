@@ -99,7 +99,7 @@ extension AppStore {
             balance = try await api.balance()
             // The stills open in the normal result view; the rest are in the Gallery's tests.
             if let first = shots.first { openTake(first.id) }
-            showToast("\(shots.count) photo\(shots.count == 1 ? "" : "s") saved to the Gallery")
+            showToast("\(shots.count) photo\(shots.count == 1 ? "" : "s") saved to the Library")
         }
     }
 

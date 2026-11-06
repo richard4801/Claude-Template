@@ -805,17 +805,18 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
     public var isFinal: Bool { status == "final" }
     /// Video takes: renders and their edited versions.
     public var isVideo: Bool { kind == "take" || kind == "edit" }
-    /// Gallery caption: "Living-room dance · Draft". Older servers' labels ("10 steps") read "Edit".
+    /// Library caption: "Living-room dance · Draft". Older servers' labels ("10 steps") read "Edit".
     public var caption: String {
-        if kind == "shot" { return title.isEmpty ? label : "\(title) \(index)" }
-        let t = of > 1 ? "\(title) · take \(index)" : title
+        if kind == "shot" { return title.isEmpty ? displayLabel : "\(displayTitle) \(index)" }
+        let t = of > 1 ? "\(displayTitle) · take \(index)" : displayTitle
         return displayLabel.isEmpty ? t : "\(t) · \(displayLabel)"
     }
 
     /// `label` for members: "Draft", "Standard", "HD", "Edit", "Fast · beta".
     public var displayLabel: String {
         if label == "Fast" { return "Fast · beta" }
-        return MemberText.isSafe(label) ? label : "Edit"
+        let l = TakeText.displayTitle(label)
+        return MemberText.isSafe(l) ? l : "Edit"
     }
 
     /// `engineLabel` for members ("" on photos: the engine is never shown on a photo).

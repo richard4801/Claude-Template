@@ -65,7 +65,7 @@ class FakeTemplates(private val me: String = "u1", private val now: () -> Long =
             val dir = Regex("^Direction: (.+)$", RegexOption.MULTILINE).find(shot.prompt)?.groupValues?.get(1)?.trimEnd('.')
             if (dir != null) p + ("pose" to (listOf(dir) + p["pose"].orEmpty()).take(12)) else p
         }
-        return TemplateDraft(src?.name ?: shot.title.removePrefix("Shoot · "), src?.tags.orEmpty(), layers, pool, shot.thumb, shot.id)
+        return TemplateDraft(src?.name ?: takeDisplayTitle(shot.title).removePrefix("Photo · "), src?.tags.orEmpty(), layers, pool, shot.thumb, shot.id)
     }
 
     fun create(req: CreateTemplateRequest, shot: Take?): Template {

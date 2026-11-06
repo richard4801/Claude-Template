@@ -844,7 +844,7 @@ public actor FakeMuseAPI: MuseAPI {
         let label = scene.components(separatedBy: "·").first?.trimmingCharacters(in: .whitespaces) ?? scene
         let t = nowMs()
         let shots = (0..<count).map { n in
-            var take = Take(id: "s_\(shortId())", kind: "shot", index: n + 1, of: count, title: "Shoot · \(label.prefix(28))", label: "Shoot", cost: cost / Double(count),
+            var take = Take(id: "s_\(shortId())", kind: "shot", index: n + 1, of: count, title: "Photo · \(label.prefix(28))", label: "Photo", cost: cost / Double(count),
                             seed: req.seed ?? preview.seed ?? Int64.random(in: 1000...99999), thumb: .asset(pool[n % pool.count]), prompt: preview.text, createdAt: t)
             take.refs = req.refs
             return take
@@ -896,7 +896,7 @@ public actor FakeMuseAPI: MuseAPI {
         }
         let model = models.first { shot.prompt.hasPrefix($0.name) }
         let layers = shotLayers[shot.id] ?? TemplateLayers.from(prompt: shot.prompt, neverAdd: model?.neverAdd ?? [])
-        var name = shot.title.replacingOccurrences(of: "Shoot · ", with: "")
+        var name = TakeText.displayTitle(shot.title).replacingOccurrences(of: "Photo · ", with: "")
         if let tn = shot.templateName { name = tn }
         name = name.prefix(1).uppercased() + name.dropFirst()
         var pool = TemplateEngine.suggestPool(layers: layers, name: name)
@@ -1017,7 +1017,7 @@ public actor FakeMuseAPI: MuseAPI {
             let seed = Int64.random(in: 1000...999_999)
             let b = try templateBuild(t, modelId: req.modelId, outfitId: req.outfitId, direction: req.direction, shuffleSeed: shuffle, index: n,
                                       lockSeed: req.lockSeed ?? false, seed: seed, hasProduct: hasProduct)
-            var take = Take(id: "s_\(shortId())", kind: "shot", index: n + 1, of: count, title: "Template · \(t.name)", label: "Shoot", cost: cost / Double(count),
+            var take = Take(id: "s_\(shortId())", kind: "shot", index: n + 1, of: count, title: "Template · \(t.name)", label: "Photo", cost: cost / Double(count),
                             seed: b.seed ?? seed, thumb: .asset(pool[(n + Int(shuffle % 3)) % pool.count]), prompt: owner ? b.fullText : b.visibleText, createdAt: now)
             take.templateId = t.id
             take.templateName = t.name

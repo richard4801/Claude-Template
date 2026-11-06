@@ -50,7 +50,7 @@ extension FakeMuseAPI {
         let ids = Set(shots.map(\.id))
         let titled = { (t: Take) -> Take in
             var x = t
-            let rest = t.title.replacingOccurrences(of: "Shoot · ", with: "").replacingOccurrences(of: "Template · ", with: "")
+            let rest = t.displayTitle.replacingOccurrences(of: "Photo · ", with: "").replacingOccurrences(of: "Template · ", with: "")
             x.title = "Photo · \(rest)"
             return x
         }

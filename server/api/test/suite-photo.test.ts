@@ -88,7 +88,7 @@ describe('Photo tool · routes (fake image engine)', () => {
     expect((await member.req('POST', '/v1/suite/photos/estimate', { modelId: 'nope' })).status).toBe(404);
   });
 
-  it('create: photos saved as "Photo" takes, graded with the Look; /v1/shoots still makes "Shoot" takes', async () => {
+  it('create: photos saved as "Photo" takes, graded with the Look; the legacy /v1/shoots makes "Photo" takes too (Photoshoot is gone)', async () => {
     const r = (await member.req('POST', '/v1/suite/photos', { modelId: model.id, prompt: 'A café window seat.', count: 2, camera: { palette: { preset: 'classic_bw' } } })).body;
     expect(r.tool).toBe('photo');
     expect(r.takes).toHaveLength(2);
@@ -97,7 +97,7 @@ describe('Photo tool · routes (fake image engine)', () => {
     const plain = (await member.req('POST', '/v1/suite/photos', { modelId: model.id, count: 1, gradeLook: false, camera: { palette: { preset: 'classic_bw' } } })).body;
     expect(plain.takes[0].thumb.url).not.toMatch(/\/uploads\/g\/fx_/);
     const old = (await member.req('POST', '/v1/shoots', { modelId: model.id, count: 1 })).body;
-    expect(old[0].title).toMatch(/^Shoot · /);
+    expect(old[0].title).toMatch(/^Photo · /);
   });
 
   it('a Photo preset is a photo template: its own camera and light, the template pipeline', async () => {

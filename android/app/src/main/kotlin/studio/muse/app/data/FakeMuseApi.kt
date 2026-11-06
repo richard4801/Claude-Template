@@ -545,7 +545,7 @@ class FakeMuseApi(
                     val id = "s_${uid()}"
                     tpl.recordShot(id, req.templateId, b.full.withRefLines(refLines), b.draws)
                     // Stored with the public prompt; shotView() swaps in the full one for the template's owner.
-                    Take(id, "shot", null, n + 1, req.count, "Shoot · $name", "${name.take(28)} · ${n + 1}", "", each,
+                    Take(id, "shot", null, n + 1, req.count, "Photo · $name", "${name.take(28)} · ${n + 1}", "", each,
                         b.shown.seed ?: 0, "test", ImageRef.asset(k), b.visible.withRefLines(refLines), t + n, templateId = req.templateId, templateName = name, shuffleSeed = shuffle,
                         refs = refs)
                 }.also { tpl.bumpUses(req.templateId) }
@@ -553,7 +553,7 @@ class FakeMuseApi(
                 val label = (req.scene?.takeIf { it.isNotBlank() } ?: PromptEngine.DEFAULT_SCENE).substringBefore(" · ").take(28)
                 val built = previewNow(req)
                 pool.take(req.count).mapIndexed { n, k ->
-                    Take("s_${uid()}", "shot", null, n + 1, req.count, "Shoot · $label", "$label · ${n + 1}", "", each,
+                    Take("s_${uid()}", "shot", null, n + 1, req.count, "Photo · $label", "$label · ${n + 1}", "", each,
                         req.seed ?: built.seed ?: 0, "test", ImageRef.asset(k), built.text, t, refs = refs)
                 }
             }
@@ -1163,7 +1163,7 @@ class FakeMuseApi(
         val made = shoot(shoot)
         return lock.withLock {
             val ids = made.map { it.id }.toSet()
-            for (i in takes.indices) if (takes[i].id in ids) takes[i] = takes[i].copy(title = "Photo · " + takes[i].title.removePrefix("Shoot · "))
+            for (i in takes.indices) if (takes[i].id in ids) takes[i] = takes[i].copy(title = "Photo · " + takes[i].title.removePrefix("Photo · ").removePrefix("Shoot · "))
             PhotoResult(takes = takes.filter { it.id in ids }.map { tpl.shotView(it) })
         }
     }
