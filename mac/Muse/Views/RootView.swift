@@ -51,10 +51,11 @@ struct Shell: View {
                             .id(store.screen)
                             .transition(MotionStyle.of(t.id).transition)
                         if let msg = store.offlineMessage {
-                            Note(icon: "wifi.exclamationmark", warn: true, text: Text("\(msg) · ") + Text("Settings → Developer").bold())
+                            // Offline: what happened, and where to fix it. Floats over the screen like a toast.
+                            InlineNotice(msg, tone: .caution, actionTitle: "Check connection") { store.openSettings(.developer) }
                                 .frame(maxWidth: 560)
-                                .padding(.top, 10)
-                                .onTapGesture { store.openSettings(.developer) }
+                                .museFloat(t)
+                                .padding(.top, Space.s3)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -109,7 +110,7 @@ struct ThemeDots: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text("Theme").font(t.body(11)).foregroundStyle(t.muted).padding(.trailing, 2)
+            Text("Theme").scaled(t.scale.micro, t.roles.ink2).padding(.trailing, 2)
             ForEach(ThemeID.allCases) { id in
                 let th = Theme.get(id)
                 let on = id == store.themeID
@@ -119,16 +120,16 @@ struct ThemeDots: View {
                         .frame(width: 16, height: 16)
                         .overlay(Circle().strokeBorder(.black.opacity(0.25), lineWidth: 1))
                         .padding(2)
-                        .overlay(Circle().strokeBorder(on ? t.accent : .clear, lineWidth: 2))
+                        .overlay(Circle().strokeBorder(on ? t.roles.selection : .clear, lineWidth: 2))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help(id.name)
                 .accessibilityLabel("Theme: \(id.name)\(on ? ", selected" : "")")
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .overlay(Capsule().strokeBorder(t.strongLine, lineWidth: t.lineWidth))
+        .padding(.horizontal, Space.s2)
     }
 }
 
@@ -139,49 +140,46 @@ struct TitleBar: View {
     var body: some View {
         HStack(spacing: 14) {
             Color.clear.frame(width: 64, height: 1)
-            Text("MUSE Studio").font(t.body(13, .semibold)).foregroundStyle(t.muted)
+            Text("MUSE Studio").scaled(t.scale.label, t.roles.ink2)
             Spacer(minLength: 12)
             Button { store.openPalette() } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "sparkle").font(.system(size: 12))
-                    Text("Search or jump to…").font(t.body(13))
+                HStack(spacing: Space.s2) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 12))
+                    Text("Search or jump to…").font(t.scale.caption.font)
                     Spacer()
-                    KeyCap("⌘K")
+                    Text("⌘K").font(t.scale.micro.font)
                 }
-                .foregroundStyle(t.muted)
-                .padding(.horizontal, 10)
-                .frame(width: 420, height: 32)
-                .background(RoundedRectangle(cornerRadius: t.isC ? 16 : t.controlRadius).fill(t.isD ? t.surface2 : t.surface2))
-                .overlay(RoundedRectangle(cornerRadius: t.isC ? 16 : t.controlRadius).strokeBorder(t.isC ? .clear : t.strongLine, lineWidth: t.lineWidth))
+                .foregroundStyle(t.roles.ink2)
+                .padding(.horizontal, Space.s3)
+                .frame(width: 420, height: 28)
+                .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help("Search or jump to a screen (⌘K)")
             .layoutPriority(1)
             Spacer(minLength: 12)
             HStack(spacing: 10) {
                 if let p = store.uploadProgress {
                     HStack(spacing: 8) {
-                        Image(systemName: "arrow.up.circle").font(.system(size: 12))
-                        Text("\(Int((p * 100).rounded()))%").font(t.mono(12))
-                        ProgressLine(value: p, height: 4).frame(width: 60)
+                        Text("Uploading \(Int((p * 100).rounded()))%").font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
+                        RProgress(value: p).frame(width: 60)
                     }
-                    .padding(.horizontal, 10)
-                    .frame(height: 30)
-                    .background(Capsule().fill(t.surface2))
+                    .padding(.horizontal, Space.s2)
+                    .frame(height: 28)
                     .help(store.uploadLabel)
                     .transition(.opacity)
                 }
                 if let r = store.runningJob {
                     Button { store.go(.queue) } label: {
-                        HStack(spacing: 8) {
-                            LED(on: !r.isWaiting)
-                            Text(r.isWaiting ? (r.queuePosition.map { $0 <= 1 ? "Waiting to start" : "#\($0) in line" } ?? "Waiting to start") : "\(Int(r.progress.rounded()))%")
-                                .font(t.mono(12))
-                            ProgressLine(value: r.progress / 100, height: 4).frame(width: 60)
+                        HStack(spacing: Space.s2) {
+                            Text(r.isWaiting ? (r.queuePosition.map { $0 <= 1 ? "Waiting to start" : "#\($0) in line" } ?? "Waiting to start") : "Rendering \(Int(r.progress.rounded()))%")
+                                .font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
+                            RProgress(value: r.progress / 100).frame(width: 60)
                         }
-                        .padding(.horizontal, 10)
-                        .frame(height: 30)
-                        .background(Capsule().fill(t.surface2))
+                        .padding(.horizontal, Space.s2)
+                        .frame(height: 28)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help(r.progressLine)
@@ -210,6 +208,7 @@ struct TitleBar: View {
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .frame(width: 34, height: 34)
+                .help("Account")
                 .accessibilityLabel("Account: \(store.user?.email ?? "signed in")")
             }
         }
@@ -218,7 +217,7 @@ struct TitleBar: View {
         .frame(height: 52)
         .background(WindowDragArea())
         .background(t.chrome)
-        .overlay(alignment: .bottom) { Rectangle().fill(t.isC ? .clear : t.strongLine).frame(height: t.lineWidth) }
+        .overlay(alignment: .bottom) { Rectangle().fill(t.isD ? t.roles.hairline : t.roles.hairline.opacity(t.isC ? 0 : 1)).frame(height: 1) }
     }
 }
 
@@ -249,7 +248,7 @@ struct Sidebar: View {
                 }
             }
             if !compact {
-                Text("CREATE").font(t.mono(10.5)).tracking(1).foregroundStyle(t.isD ? .white.opacity(0.75) : t.muted).padding(.horizontal, 10).padding(.top, 16).padding(.bottom, 6)
+                groupLabel("Create")
             } else {
                 Divider().padding(.vertical, 8)
             }
@@ -257,7 +256,7 @@ struct Sidebar: View {
             NavRow(icon: "person.badge.plus", title: "New model", on: store.screen == .create, compact: compact, trailing: .none) { store.go(.create) }
             if store.isOwner {
                 if !compact {
-                    Text("STUDIO").font(t.mono(10.5)).tracking(1).foregroundStyle(t.isD ? .white.opacity(0.75) : t.muted).padding(.horizontal, 10).padding(.top, 16).padding(.bottom, 6)
+                    groupLabel("Studio")
                 } else {
                     Divider().padding(.vertical, 8)
                 }
@@ -272,7 +271,14 @@ struct Sidebar: View {
         .padding(.bottom, 14)
         .frame(width: compact ? 72 : 228)
         .background(t.sidebarBg)
-        .overlay(alignment: .trailing) { Rectangle().fill(t.isC ? .clear : t.strongLine).frame(width: t.lineWidth) }
+        .overlay(alignment: .trailing) { Rectangle().fill(t.isC || t.isD ? .clear : t.roles.hairline).frame(width: 1) }
+    }
+
+    /// A sidebar group label: sentence case in the caption step, not tracked caps.
+    private func groupLabel(_ text: String) -> some View {
+        Text(text).scaled(t.scale.caption, t.isD ? .white.opacity(0.8) : t.roles.ink2)
+            .padding(.horizontal, 10).padding(.top, Space.s5).padding(.bottom, Space.s1)
+            .accessibilityAddTraits(.isHeader)
     }
 
     @ViewBuilder private var wordmark: some View {
@@ -304,53 +310,50 @@ struct NavRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                Image(systemName: icon).font(.system(size: 15, weight: on ? .semibold : .regular)).frame(width: 20)
+                Image(systemName: icon).font(.system(size: 14, weight: .regular)).frame(width: 20)
                 if !compact {
-                    Text(t.navUppercase ? title.uppercased() : title).font(t.navFont).tracking(t.isA ? 1 : t.isB ? 1.2 : 0).lineLimit(1)
+                    Text(title).font(t.scale.label.font).lineLimit(1)
                     Spacer(minLength: 4)
                     switch trailing {
                     case .none: EmptyView()
-                    case .key(let k): Text(k).font(t.mono(10.5)).opacity(0.7)
-                    case .count(let n):
-                        Text("\(n)").font(t.mono(11)).foregroundStyle(t.accentInk).padding(.horizontal, 7).frame(height: 18).background(Capsule().fill(t.accent))
+                    case .key(let k): Text(k).font(t.scale.micro.font).opacity(0.6)
+                    case .count(let n): Text("\(n)").font(t.scale.micro.font).monospacedDigit().accessibilityLabel("\(n) in the queue")
                     }
                 }
             }
             .foregroundStyle(fg)
             .padding(.horizontal, 10)
-            .frame(height: t.isA ? 38 : 40)
+            .frame(height: 32)
             .frame(maxWidth: .infinity, alignment: compact ? .center : .leading)
             .background(background)
             .overlay(alignment: .leading) {
-                if on && t.isA { Rectangle().fill(t.accent).frame(width: 2).padding(.vertical, 10) }
-                if on && t.isB { Rectangle().fill(t.accent).frame(width: 3) }
+                // The one selection mark: a short accent bar (Creator Pop marks it with its outline instead).
+                if on && !t.isD { Capsule().fill(t.roles.accent).frame(width: 3, height: 16) }
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(compact ? title : "")
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(on ? .isSelected : [])
         .onHover { hover = $0 }
     }
 
     private var fg: Color {
         if t.isD { return on ? Color(hex: 0x111111) : .white }
-        if on { return t.isA || t.isB ? t.accent : t.ink }
-        return hover ? t.ink : t.muted
+        return on || hover ? t.roles.ink : t.roles.ink2
     }
 
     @ViewBuilder private var background: some View {
-        let shape = RoundedRectangle(cornerRadius: t.isA ? 0 : t.isC ? 14 : t.isD ? 12 : t.r, style: .continuous)
-        switch t.id {
-        case .a: Color.clear
-        case .b: shape.fill(on ? Color(hex: 0x24282B) : hover ? t.surface2 : .clear)
-        case .c:
-            if on { shape.fill(t.surface).modifier(ThemeShadow(kind: .button, radius: 14)) } else { shape.fill(hover ? t.surface2 : .clear) }
-        case .d:
+        let shape = RoundedRectangle(cornerRadius: t.radii.control, style: .continuous)
+        if t.isD {
             if on {
-                shape.fill(t.yellow).overlay(shape.strokeBorder(Color(hex: 0x111111), lineWidth: 2.5)).modifier(ThemeShadow(kind: .button, radius: 12))
+                shape.fill(t.yellow).overlay(shape.strokeBorder(Color(hex: 0x111111), lineWidth: 2))
             } else {
                 shape.fill(hover ? .white.opacity(0.14) : .clear)
             }
+        } else {
+            shape.fill(on ? t.roles.field : hover ? t.roles.field.opacity(0.6) : .clear)
         }
     }
 }
@@ -361,40 +364,22 @@ struct BalanceBox: View {
     @Environment(\.theme) private var t
 
     var body: some View {
-        let onDark = t.isC
+        // Creator Pop's sidebar is blue: white text there; ink elsewhere. No box: the figure sits on the sidebar.
+        let ink: Color = t.isD ? .white : t.roles.ink
+        let ink2: Color = t.isD ? .white.opacity(0.8) : t.roles.ink2
         Button { store.go(.credits) } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Lbl("Balance", color: onDark ? .white.opacity(0.75) : nil)
-                Text(Pricing.money(store.creditUsd))
-                    .font(t.isA ? Fonts.font("Instrument Serif", 34, .regular) : t.mono(22, .medium))
-                    .foregroundStyle(onDark ? .white : t.ink)
-                Text("≈ \(Pricing.videosLeft(store.creditUsd)) Draft videos").font(t.body(12)).foregroundStyle(onDark ? .white.opacity(0.75) : t.muted)
-                GeometryReader { g in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(onDark ? .white.opacity(0.25) : t.line)
-                        Capsule().fill(onDark ? .white : t.accent).frame(width: g.size.width * min(1, store.creditUsd / 25))
-                    }
-                }
-                .frame(height: 4)
-                .padding(.top, 6)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Balance").scaled(t.scale.caption, ink2)
+                Text(Pricing.money(store.creditUsd)).scaled(t.scale.title, ink).monospacedDigit()
+                Text("About \(Pricing.videosLeft(store.creditUsd)) Draft videos").scaled(t.scale.caption, ink2)
             }
-            .padding(t.isA ? EdgeInsets(top: 12, leading: 4, bottom: 4, trailing: 4) : EdgeInsets(top: 14, leading: 14, bottom: 14, trailing: 14))
+            .padding(.horizontal, 10)
+            .padding(.vertical, Space.s2)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(bg)
-            .overlay(alignment: .top) { if t.isA { Rectangle().fill(t.ink).frame(height: 1) } }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    @ViewBuilder private var bg: some View {
-        let shape = RoundedRectangle(cornerRadius: t.rLg, style: .continuous)
-        switch t.id {
-        case .a: Color.clear
-        case .b: shape.fill(t.surface2)
-        case .c: shape.fill(Color(hex: 0x5A6E52))
-        case .d: shape.fill(.white).overlay(shape.strokeBorder(Color(hex: 0x111111), lineWidth: 2.5)).modifier(ThemeShadow(kind: .card, radius: t.rLg))
-        }
+        .help("Open credit")
     }
 }
 
@@ -405,31 +390,32 @@ struct ToastView: View {
     var body: some View {
         VStack {
             if let toast = store.toast {
-                HStack(spacing: 12) {
-                    Image(systemName: "sparkle").font(.system(size: 13))
-                    Text(toast.message).font(t.body(13.5)).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: Space.s3) {
+                    Text(toast.message).scaled(t.scale.caption, t.roles.ink).fixedSize(horizontal: false, vertical: true)
                     if let label = toast.actionLabel {
                         Button {
                             store.toast = nil
                             toast.action?()
                         } label: {
-                            // The toast's own text colour, bold and underlined: it clears 4.5:1 on the toast in every theme.
-                            Text(label).font(t.body(13.5, .bold)).underline().foregroundStyle(t.bg)
+                            Text(label).font(t.scale.label.font).foregroundStyle(t.roles.link)
                         }
                         .buttonStyle(.plain)
                     }
                 }
-                .foregroundStyle(t.bg)
-                .padding(.leading, 16).padding(.trailing, 14).padding(.vertical, 12)
+                .padding(.horizontal, Space.s4).padding(.vertical, Space.s3)
                 .frame(maxWidth: 420, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: t.controlRadius).fill(t.ink).shadow(color: .black.opacity(0.3), radius: 15, y: 12))
+                .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.raised))
+                .overlay(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).strokeBorder(t.roles.hairline, lineWidth: t.isDark ? 1 : 0))
+                .museFloat(t)
                 .id(toast.id)
-                .transition(.move(edge: .trailing).combined(with: .opacity))
+                .transition(.opacity)
+                .accessibilityElement(children: .combine)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         .padding(.top, 66)
         .padding(.trailing, 20)
+        .animation(.easeOut(duration: 0.2), value: store.toast?.id)
     }
 }
 
@@ -447,27 +433,26 @@ struct PaletteView: View {
             VStack(spacing: 0) {
                 TextField("Type a command or screen…", text: $store.paletteQuery)
                     .textFieldStyle(.plain)
-                    .font(t.body(16))
-                    .padding(.horizontal, 18)
-                    .frame(height: 54)
+                    .font(t.scale.body.font)
+                    .padding(.horizontal, Space.s4)
+                    .frame(height: 48)
                     .focused($focused)
                     .onChange(of: store.paletteQuery) { store.paletteIndex = 0 }
-                Rectangle().fill(t.strongLine).frame(height: t.lineWidth)
+                Rectangle().fill(t.roles.hairline).frame(height: 1)
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(spacing: 0) {
-                            if cmds.isEmpty { Text("No matches").foregroundStyle(t.muted).frame(maxWidth: .infinity, alignment: .leading).padding(12) }
+                            if cmds.isEmpty { Text("Nothing matches. Try a screen name, like Gallery.").foregroundStyle(t.roles.ink2).frame(maxWidth: .infinity, alignment: .leading).padding(12) }
                             ForEach(Array(cmds.enumerated()), id: \.offset) { i, c in
                                 Button { store.runPalette(i) } label: {
                                     HStack(spacing: 12) {
-                                        Image(systemName: c.icon).frame(width: 18)
-                                        Text(c.title).font(t.body(13.5, t.isD ? .bold : .regular))
+                                        Text(c.title).font(t.scale.label.font).foregroundStyle(t.roles.ink)
                                         Spacer()
-                                        if !c.shortcut.isEmpty { KeyCap(c.shortcut) }
+                                        if !c.shortcut.isEmpty { Text(c.shortcut).font(t.scale.micro.font).foregroundStyle(t.roles.ink2) }
                                     }
                                     .padding(.horizontal, 10)
-                                    .frame(height: 36)
-                                    .background(RoundedRectangle(cornerRadius: t.controlRadius * 0.6).fill(i == store.paletteIndex ? t.surface2 : .clear))
+                                    .frame(height: 32)
+                                    .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(i == store.paletteIndex ? t.roles.field : .clear))
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
@@ -482,9 +467,9 @@ struct PaletteView: View {
                 }
             }
             .frame(width: 560)
-            .surface(t.surface, radius: t.rLg)
-            .clipShape(RoundedRectangle(cornerRadius: t.rLg))
-            .shadow(color: .black.opacity(0.35), radius: 40, y: 30)
+            .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.raised))
+            .clipShape(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous))
+            .museFloat(t)
             .padding(.top, 120)
         }
         .onAppear { focused = true }

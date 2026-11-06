@@ -9,68 +9,61 @@ struct QueueView: View {
     var body: some View {
         let r = store.runningJob
         let active = store.activeJobs
-        Page {
-            PageHeader(eyebrow: "Jobs", title: "Queue") {
+        let rendering = active.contains { $0.isRunning && !$0.isWaiting }
+        ScreenPage {
+            ScreenTitle("Queue", subtitle: rendering ? "Rendering" : r != nil ? MemberText.waitingToStart : "Nothing rendering") {
                 if active.contains(where: \.isQueued) && r == nil {
-                    MButton("Run queue · \(Pricing.money(store.queuedCost))", icon: "play.fill", kind: .primary) { store.runQueue() }
+                    RButton("Run queue · \(Pricing.money(store.queuedCost))", kind: .action) { store.runQueue() }
                 }
             }
-            HStack(spacing: 14) {
-                HStack(spacing: 12) {
-                    let rendering = active.contains { $0.isRunning && !$0.isWaiting }
-                    LED(on: rendering).id(rendering)
+            // Plain facts on the canvas, grouped by space.
+            HStack(alignment: .top, spacing: Space.s7) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Spent today").scaled(t.scale.caption, t.roles.ink2)
+                    Text("\(Pricing.money(store.todaySpent)) of \(Pricing.money(store.balance.perDayLimit))").monospacedDigit().scaled(t.scale.title, t.roles.ink)
+                    RProgress(value: store.todaySpent / max(1, store.balance.perDayLimit)).frame(width: 180).padding(.top, Space.s1)
+                }
+                Button { store.go(.credits) } label: {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(rendering ? "Rendering" : r != nil ? MemberText.waitingToStart : "Nothing rendering").font(t.body(14, .bold))
-                        Muted(r.map { $0.progressLine } ?? "Renders start when you press Generate. You only pay for what you make.")
+                        Text("Balance").scaled(t.scale.caption, t.roles.ink2)
+                        Text(Pricing.money(store.creditUsd)).monospacedDigit().scaled(t.scale.title, t.roles.ink)
                     }
-                    Spacer(minLength: 0)
+                    .contentShape(Rectangle())
                 }
-                .card()
-                .frame(maxWidth: .infinity)
-                VStack(alignment: .leading, spacing: 4) {
-                    Lbl("Spent today")
-                    (Text(Pricing.money(store.todaySpent)).font(t.mono(20)) + Text(" of \(Pricing.money(store.balance.perDayLimit)) cap").font(t.body(12)).foregroundColor(t.muted))
-                    ProgressLine(value: store.todaySpent / max(1, store.balance.perDayLimit))
-                }
-                .card()
-                .frame(maxWidth: 300)
-                VStack(alignment: .leading, spacing: 4) {
-                    Lbl("Balance")
-                    Text(Pricing.money(store.creditUsd)).font(t.mono(20))
-                    LinkText("Credit") { store.go(.credits) }
-                }
-                .card()
-                .frame(maxWidth: 300)
+                .buttonStyle(.plain)
+                .help("Open credit")
+                Spacer(minLength: 0)
             }
-            .padding(.bottom, 22)
+            .padding(.bottom, Space.s5)
 
             ForEach(store.visibleFailures) { f in
-                HStack(spacing: 12) {
-                    Image(systemName: "exclamationmark.shield").font(.system(size: 16))
-                    (Text("Render failed · \(f.title)").bold() + Text(" · \(f.failureLine)"))
-                        .font(t.body(13))
-                    Spacer()
-                    MButton("Retry · \(Pricing.money(Pricing.totalCost(f.request.spec)))", size: .small) { store.retry(f) }
-                    LinkText("Dismiss") { store.dismissFailure(f) }
+                HStack(alignment: .center, spacing: Space.s3) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(f.title) didn't finish").scaled(t.scale.label, t.roles.danger)
+                        Text(ScreenCopy.failure(f.failureLine, charged: false)).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: Space.s3)
+                    RButton("Retry · \(Pricing.money(Pricing.totalCost(f.request.spec)))", small: true) { store.retry(f) }
+                    RButton("Dismiss", kind: .plain, small: true) { store.dismissFailure(f) }
                 }
-                .foregroundStyle(t.warnInk)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(RoundedRectangle(cornerRadius: t.controlRadius).fill(t.warnBg))
-                .padding(.bottom, 18)
+                .padding(.horizontal, Space.s4)
+                .padding(.vertical, Space.s3)
+                .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field))
+                .padding(.bottom, Space.s3)
             }
 
-            SectionHeader(title: "Active", top: 0) { Muted("\(active.count) job\(active.count == 1 ? "" : "s")") }
-            if active.isEmpty {
-                Note(icon: "list.bullet.below.rectangle", text: Text("Nothing in the queue, so you're not paying for anything. "))
-                MButton("Start a new video", size: .small) { store.go(.studio) }.padding(.top, 8)
+            SectionTitle("Active", top: Space.s3) { Text(ScreenCopy.count(active.count, "job")).scaled(t.scale.caption, t.roles.ink2) }
+            if store.loading && store.jobs.isEmpty {
+                SkeletonRows(count: 3)
+            } else if active.isEmpty {
+                EmptyState("Nothing in the queue", "Renders wait here until they start, so nothing is being charged right now.", actionTitle: "New video") { store.go(.studio) }
             } else {
                 JobTable(jobs: active, header: true)
             }
             let finished = store.finishedJobs
-            SectionHeader(title: "Finished") { Muted("\(finished.count) job\(finished.count == 1 ? "" : "s")") }
+            SectionTitle("Finished") { Text(ScreenCopy.count(finished.count, "job")).scaled(t.scale.caption, t.roles.ink2) }
             if finished.isEmpty {
-                Note(icon: "checkmark.circle", "Nothing finished yet. Finished renders stay here and in the Gallery.")
+                Text("Finished renders stay here and in the Gallery.").scaled(t.scale.body, t.roles.ink2)
             } else {
                 JobTable(jobs: finished, header: false)
             }
@@ -88,16 +81,16 @@ struct JobTable: View {
         // Lazy (performance pass): the finished list grows with every render; rows are built as they scroll into view.
         LazyVStack(spacing: 0) {
             if header {
-                HStack(spacing: 12) {
+                HStack(spacing: Space.s3) {
                     Color.clear.frame(width: 44, height: 1)
-                    Lbl("Clip").frame(maxWidth: .infinity, alignment: .leading)
-                    Lbl("Status").frame(width: 280, alignment: .leading)
-                    Lbl("Cost").frame(width: 80, alignment: .leading)
+                    Text("Clip").frame(maxWidth: .infinity, alignment: .leading)
+                    Text("Status").frame(width: 280, alignment: .leading)
+                    Text("Cost").frame(width: 80, alignment: .leading)
                     Color.clear.frame(width: 140, height: 1)
                 }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 10)
-                Rectangle().fill(t.strongLine).frame(height: t.lineWidth)
+                .scaled(t.scale.caption, t.roles.ink2)
+                .padding(.horizontal, Space.s3)
+                .padding(.bottom, Space.s2)
             }
             ForEach(jobs) { j in JobRow(job: j) }
         }
@@ -112,55 +105,53 @@ struct JobRow: View {
 
     var body: some View {
         let j = job
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Media(ref: j.thumb, ratio: 44.0 / 58.0, radius: t.isA ? 0 : 6).frame(width: 44)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(j.title).font(t.body(14, .bold))
-                    Muted("\(j.modelName.split(separator: " ").first.map(String.init) ?? j.modelName) · \(j.engineLabel) · \(Pricing.trimNum(j.lengthSec))s\(j.request.takes > 1 ? " · \(j.request.takes) takes" : "")")
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                Group {
-                    if j.isDone {
-                        Pill("✓ Done", .good)
-                    } else if j.isWaiting {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Pill(j.queuePosition.map { $0 <= 1 ? "Next" : "#\($0) in line" } ?? "Waiting")
-                            Text(j.progressLine).font(t.mono(11.5)).foregroundStyle(t.muted)
-                        }
-                    } else if j.isRunning {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ProgressLine(value: j.progress / 100)
-                            Text(j.progressLine).font(t.mono(11.5)).foregroundStyle(t.muted)
-                        }
-                    } else if j.isFailed {
-                        Pill("Failed · refunded", .warn)
-                    } else {
-                        Pill("Queued")
-                    }
-                }
-                .frame(width: 280, alignment: .leading)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(Pricing.money(j.cost)).font(t.mono(13))
-                }
-                .frame(width: 80, alignment: .leading)
-                HStack(spacing: 4) {
-                    if j.isDone { MButton("Review", size: .small) { store.watch(j) } }
-                    MoreMenu {
-                        Button("Watch") { store.watch(j) }
-                        Button("Run again with same settings") { store.runAgain(j) }
-                        Button("Copy prompt") { if j.prompt.isEmpty { store.showToast("No prompt was saved for this job") } else { store.copy(j.prompt) } }
-                        Divider()
-                        Button("Remove from list", role: .destructive) { store.removeJob(j) }
-                    }
-                }
-                .frame(width: 140, alignment: .trailing)
+        HStack(spacing: Space.s3) {
+            MediaFrame(ref: j.thumb, ratio: 44.0 / 58.0).frame(width: 44)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(j.title).scaled(t.scale.label, t.roles.ink).lineLimit(1)
+                Text(ScreenCopy.meta([j.modelName.split(separator: " ").first.map(String.init) ?? j.modelName, j.engineLabel,
+                                      "\(Pricing.trimNum(j.lengthSec)) s" + (j.request.takes > 1 ? ", \(j.request.takes) takes" : "")]))
+                    .scaled(t.scale.caption, t.roles.ink2).lineLimit(1)
             }
-            .padding(12)
-            .background(hover ? t.surface : .clear)
-            .onHover { hover = $0 }
-            Rectangle().fill(t.isD ? Color(hex: 0x111111) : t.line).frame(height: t.lineWidth)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Group {
+                if j.isDone {
+                    StateTag("Done", .positive)
+                } else if j.isWaiting {
+                    VStack(alignment: .leading, spacing: Space.s1) {
+                        Text(j.queuePosition.map { $0 <= 1 ? "Next" : "#\($0) in line" } ?? "Waiting").scaled(t.scale.label, t.roles.ink)
+                        Text(j.progressLine).monospacedDigit().scaled(t.scale.micro, t.roles.ink2)
+                    }
+                } else if j.isRunning {
+                    VStack(alignment: .leading, spacing: Space.s1) {
+                        RProgress(value: j.progress / 100)
+                        Text(j.progressLine).monospacedDigit().scaled(t.scale.micro, t.roles.ink2)
+                    }
+                } else if j.isFailed {
+                    StateTag("Failed, not charged", .danger)
+                } else {
+                    Text("Queued").scaled(t.scale.label, t.roles.ink2)
+                }
+            }
+            .frame(width: 280, alignment: .leading)
+            Text(Pricing.money(j.cost)).monospacedDigit().scaled(t.scale.body, t.roles.ink)
+                .frame(width: 80, alignment: .leading)
+            HStack(spacing: Space.s1) {
+                if j.isDone { RButton("Review", small: true) { store.watch(j) } }
+                MoreMenu {
+                    Button("Watch") { store.watch(j) }
+                    Button("Run again with same settings") { store.runAgain(j) }
+                    Button("Copy prompt") { if j.prompt.isEmpty { store.showToast("No prompt was saved for this job") } else { store.copy(j.prompt) } }
+                    Divider()
+                    Button("Remove from list", role: .destructive) { store.removeJob(j) }
+                }
+            }
+            .frame(width: 140, alignment: .trailing)
         }
+        .padding(.horizontal, Space.s3)
+        .padding(.vertical, Space.s2)
+        .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(hover ? t.roles.field.opacity(0.6) : .clear))
+        .onHover { hover = $0 }
     }
 }
 
@@ -174,39 +165,46 @@ struct GalleryView: View {
             if store.comparing {
                 CompareView().transition(MotionStyle.of(t.id).transition)
             } else {
-                Page {
-                    PageHeader(eyebrow: "Results", title: "Gallery") {
-                        Seg([(GalleryTab.tests, "Tests · \(store.takes.count)"), (GalleryTab.final, "Final · \(store.takes.filter(\.isFinal).count)")], selection: $store.galleryTab)
-                            .frame(width: 300)
+                ScreenPage {
+                    ScreenTitle("Gallery", subtitle: "Tests stay separate from Final. Select takes to compare them side by side.") {
+                        RSeg([(GalleryTab.tests, "Tests \(store.takes.count)"), (GalleryTab.final, "Final \(store.takes.filter(\.isFinal).count)")], selection: $store.galleryTab)
+                            .frame(width: 240)
                     }
-                    Muted("Test renders stay separate from your Final gallery. Select takes to compare them side by side.").padding(.top, -8).padding(.bottom, 16)
                     let list = store.galleryList
-                    if list.isEmpty {
-                        Note(store.galleryTab == .final ? "Nothing approved yet. Approve a take to move it here." : "No test renders yet. Make a video or a photoshoot.")
+                    if store.loading && store.takes.isEmpty {
+                        SkeletonGrid(columns: 6, count: 12)
+                    } else if list.isEmpty {
+                        if store.galleryTab == .final {
+                            EmptyState("Nothing approved yet", "Approve a test take and it moves here, ready to post.", actionTitle: "Show tests") { store.galleryTab = .tests }
+                        } else {
+                            EmptyState("No takes yet", "Every video and photo you render lands here as a test take first.", actionTitle: "Start a photoshoot") { store.go(.shoot) }
+                        }
                     } else {
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 6), spacing: 14) {
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.s4), count: 6), alignment: .leading, spacing: Space.s5) {
                             ForEach(list) { take in GalleryTile(take: take) }
                         }
                     }
                     Color.clear.frame(height: 60)
                 }
                 if !store.picked.isEmpty {
-                    HStack(spacing: 14) {
-                        Text("\(store.picked.count) selected").font(t.body(14, .semibold))
-                        MButton("Compare", kind: .primary, size: .small, off: store.picked.count < 2) { store.openCompare() }
-                        MButton("Clear", size: .small) { store.picked = [] }
+                    HStack(spacing: Space.s3) {
+                        Text("\(store.picked.count) selected").scaled(t.scale.label, t.roles.ink)
+                        RButton("Compare", kind: .action, small: true, off: store.picked.count < 2) { store.openCompare() }
+                            .help(store.picked.count < 2 ? "Select at least 2 takes" : "Compare the selected takes")
+                        RButton("Clear", kind: .plain, small: true) { store.picked = [] }
+                            .keyboardShortcut(.cancelAction)
                     }
-                    .foregroundStyle(t.bg)
-                    .padding(.leading, 18)
-                    .padding(.trailing, 10)
-                    .padding(.vertical, 10)
-                    .background(Capsule().fill(t.ink).shadow(color: .black.opacity(0.3), radius: 15, y: 12))
-                    .padding(.bottom, 22)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .padding(.leading, Space.s4)
+                    .padding(.trailing, Space.s2)
+                    .padding(.vertical, Space.s2)
+                    .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.raised))
+                    .museFloat(t)
+                    .padding(.bottom, Space.s5)
+                    .transition(.opacity)
                 }
             }
         }
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.picked.isEmpty)
+        .animation(.easeOut(duration: 0.2), value: store.picked.isEmpty)
     }
 }
 
@@ -214,30 +212,36 @@ struct GalleryTile: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
     var take: Take
+    @State private var hover = false
 
     var body: some View {
         let picked = store.picked.contains(take.id)
         let fresh = store.fresh.contains(take.id)
         Button { store.openTake(take.id) } label: {
-            Media(ref: take.thumb, caption: (fresh ? "New · " : "") + take.caption, selectedColor: picked ? t.accent : fresh ? t.good : nil) {
-                if take.isVideo { Image(systemName: "play.fill").font(.system(size: 12)).foregroundStyle(.white).shadow(radius: 2) }
-            }
+            MediaTile(ref: take.thumb, caption: take.caption, meta: fresh ? "New" : take.isVideo ? "Video" : "Photo", selected: picked)
         }
         .buttonStyle(.plain)
+        .help("Open \(take.caption)")
         .overlay(alignment: .topTrailing) {
-            Button { store.togglePick(take.id) } label: {
-                ZStack {
-                    Circle().fill(picked ? t.accent : .black.opacity(0.25))
-                    Circle().strokeBorder(picked ? t.accent : .white, lineWidth: 2)
-                    if picked { Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white) }
+            if hover || picked || !store.picked.isEmpty {
+                Button { store.togglePick(take.id) } label: {
+                    ZStack {
+                        Circle().fill(picked ? t.roles.selection : .black.opacity(0.3))
+                        Circle().strokeBorder(.white, lineWidth: 1.5)
+                        if picked { Image(systemName: "checkmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(t.isD ? .white : t.roles.canvas) }
+                    }
+                    .frame(width: 22, height: 22)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
                 }
-                .frame(width: 24, height: 24)
+                .buttonStyle(.plain)
+                .padding(Space.s1)
+                .help(picked ? "Deselect" : "Select to compare")
+                .accessibilityLabel(picked ? "Deselect \(take.caption)" : "Select \(take.caption) to compare")
             }
-            .buttonStyle(.plain)
-            .padding(8)
-            .help("Select to compare")
-            .accessibilityLabel(picked ? "Deselect \(take.caption)" : "Select \(take.caption) to compare")
         }
+        .onHover { hover = $0 }
+        .accessibilityAction(named: Text(picked ? "Deselect" : "Select to compare")) { store.togglePick(take.id) }
         .contextMenu {
             Button(picked ? "Deselect" : "Select to compare") { store.togglePick(take.id) }
             Button(take.isFinal ? "Move back to Tests" : "Approve") { take.isFinal ? store.unapprove(take) : store.approve(take) }
@@ -260,20 +264,26 @@ struct CompareView: View {
 
     var body: some View {
         let items = store.picked.compactMap { id in store.takes.first { $0.id == id } }
-        Page {
-            PageHeader(eyebrow: "Compare takes", title: "\(items.count) takes side by side") {
-                MButton("Done") { withAnimation { store.comparing = false } }
+        ScreenPage {
+            ScreenTitle("Compare takes", subtitle: "\(items.count) takes side by side") {
+                RButton("Done") { withAnimation { store.comparing = false } }
+                    .keyboardShortcut(.cancelAction)
             }
-            HStack(alignment: .top, spacing: 22) {
+            HStack(alignment: .top, spacing: Space.s5) {
                 ForEach(items) { take in
-                    VStack(alignment: .leading, spacing: 10) {
-                        Media(ref: take.thumb)
-                        Text(take.caption).font(t.body(14, .bold))
-                        Text(meta(take)).font(t.mono(12)).foregroundStyle(t.muted)
-                        HStack {
-                            MButton(take.isFinal ? "Approved ✓" : "Approve", kind: take.isFinal ? .secondary : .primary, size: .small, fill: true) { store.approve(take) }
-                            MButton("Open", size: .small) { store.openTake(take.id) }
+                    VStack(alignment: .leading, spacing: Space.s2) {
+                        MediaFrame(ref: take.thumb)
+                        Text(take.caption).scaled(t.scale.heading, t.roles.ink).lineLimit(1).padding(.top, Space.s1)
+                        Text(meta(take)).monospacedDigit().scaled(t.scale.caption, t.roles.ink2)
+                        HStack(spacing: Space.s2) {
+                            if take.isFinal {
+                                StateTag("Approved", .positive)
+                            } else {
+                                RButton("Approve", small: true) { store.approve(take) }
+                            }
+                            RButton("Open", kind: .plain, small: true) { store.openTake(take.id) }
                         }
+                        .padding(.top, Space.s1)
                     }
                     .frame(maxWidth: 300)
                 }
@@ -284,7 +294,7 @@ struct CompareView: View {
 
     private func meta(_ take: Take) -> String {
         let engine = take.displayEngineLabel.isEmpty ? (take.isVideo ? "Video" : "Photo") : take.displayEngineLabel
-        return "\(engine) · \(Pricing.money(take.cost)) · seed \(take.seed)"
+        return ScreenCopy.meta([engine, Pricing.money(take.cost), "seed \(take.seed)"])
     }
 }
 
@@ -297,115 +307,132 @@ struct ResultView: View {
             let job = store.job(for: take)
             let outfit = job.flatMap { j in store.outfits.first { $0.id == j.outfitId } }
             GeometryReader { g in
-              ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                Breadcrumb(parent: "Gallery", title: take.caption) { store.go(.gallery) }
-                    HStack(alignment: .top, spacing: 28) {
-                        Spacer(minLength: 0)
-                        Group {
-                            if let v = take.videoUrl, let u = URL(string: v) {
-                                TakePlayer(url: u, caption: take.mediaLine ?? "video")
-                            } else {
-                                Media(ref: take.thumb, caption: take.isVideo ? (take.mediaLine ?? "\(Take.clock(job?.lengthSec ?? 5.2)) · 768×1344") : nil, captionIcon: take.isVideo ? "play.fill" : nil)
-                            }
-                        }
-                        .frame(height: min(720, max(360, g.size.height - 110)))
-                        VStack(alignment: .leading, spacing: 16) {
-                            HStack(alignment: .top) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Eyebrow(take.isVideo ? "Video take" : "Photo").styled()
-                                    Text(t.headingsUppercase ? take.caption.uppercased() : take.caption).font(t.isA ? Fonts.font("Instrument Serif", 30, .regular) : t.display(26))
-                                }
-                                Spacer()
-                                Pill(take.isFinal ? "Final" : "Test", take.isFinal ? .good : .neutral)
-                                MoreMenu {
-                                    if store.canEdit(take) { Button("Edit video…") { store.openEditor(take) } }
-                                    Button("Post…") { store.openPostSheet(take) }
-                                    Button("Download") { store.export(take) }
-                                    Button("Share…") { store.share(take) }
-                                    Button("Copy prompt") { store.copy(take.prompt.isEmpty ? (job?.prompt ?? "") : take.prompt) }
-                                    if !take.isVideo {
-                                        Button("Save as template…") { store.saveAsTemplate(take) }.disabled(!store.canSaveAsTemplate(take))
-                                    }
-                                    Button("Compare takes") { store.compareFromResult() }
-                                    Divider()
-                                    Button("Delete take", role: .destructive) { store.discard(take) }
-                                }
-                            }
-                            ListBox {
-                                let base: [(String, String)] = [
-                                    ("Model", job?.modelName ?? store.currentModel?.name ?? "—"),
-                                    ("Outfit", outfit?.name ?? store.currentOutfit?.name ?? "—"),
-                                    ("Made with", take.isVideo ? (job?.engineLabel ?? (take.displayEngineLabel.isEmpty ? "Video" : take.displayEngineLabel)) : "Photo"),
-                                    ("Cost", Pricing.money(take.cost)),
-                                    ("Seed", "\(take.seed)\(take.isVideo || (!take.isTemplateShot && store.shoot.lockSeed) ? " · locked" : "")"),
-                                ]
-                                let templateRow: [(String, String)] = take.templateName.map { name in [("Template", name)] } ?? []
-                                let editRow: [(String, String)] = take.isEdit
-                                    ? [("Edited from", take.parentTakeId.flatMap { id in store.takes.first { $0.id == id }?.caption } ?? "A take that was deleted")] : []
-                                let rows: [(String, String)] = base + templateRow + editRow
-                                let media: [(String, String)] = take.isVideo ? [
-                                    ("Length", take.durationSec.map { "\(Pricing.trimNum($0))s" } ?? "—"),
-                                    ("Size", take.width.flatMap { w in take.height.map { "\(w)×\($0)" } } ?? "—"),
-                                ] : []
-                                let allRows = rows + media
-                                ForEach(Array(allRows.enumerated()), id: \.offset) { i, row in
-                                    ListRow(title: row.0, last: i == allRows.count - 1) { MonoValue(row.1) }
-                                }
-                            }
-                            HStack {
-                                MButton("Discard", fill: true) { store.discard(take) }
-                                MButton(take.isFinal ? "Approved ✓" : "Approve", kind: .primary, fill: true) { store.approve(take) }
-                            }
-                            HStack {
-                                MButton("Retake with changes", icon: "arrow.triangle.2.circlepath", fill: true) { store.retake(take) }
-                                MButton("Export", icon: "square.and.arrow.up", fill: true) { store.export(take) }
-                                    .help("Save it to Downloads › MUSE")
-                            }
-                            if store.canEdit(take) {
-                                MButton(take.isEdit ? "Edit again" : "Edit video", icon: "scissors", fill: true) { store.openEditor(take) }
-                                    .help("Trim, split, change speed or mute. Saved as a new version; the original is kept.")
-                            }
-                            if ExtendSource.take(take) != nil || take.canUpscale {
-                                HStack {
-                                    if ExtendSource.take(take) != nil {
-                                        MButton("Extend", icon: "arrow.right.to.line", fill: true) { store.openExtend(take) }
-                                            .help("A longer take: what happens next, or before")
-                                    }
-                                    if take.canUpscale { UpscaleButton(take: take, fill: true) }
-                                }
-                            }
-                            MButton(store.model(for: take).map { "Post to \($0.shortName)'s accounts" } ?? "Post", icon: "paperplane", kind: .primary, fill: true) {
-                                store.openPostSheet(take)
-                            }
-                            if !take.isVideo {
-                                if store.canSaveAsTemplate(take) {
-                                    MButton("Save as template", icon: "square.on.square.dashed", fill: true) { store.saveAsTemplate(take) }
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Crumb(parent: "Gallery", title: take.caption) { store.go(.gallery) }
+                        HStack(alignment: .top, spacing: Space.s6) {
+                            Spacer(minLength: 0)
+                            Group {
+                                if let v = take.videoUrl, let u = URL(string: v) {
+                                    TakePlayer(url: u, caption: take.mediaLine ?? "Video")
                                 } else {
-                                    Muted("Made with \(take.templateName ?? "someone else's template"). Its look stays with its creator, so it can't be saved as a new template.")
+                                    MediaFrame(ref: take.thumb)
                                 }
                             }
-                            if let posted = store.posts(for: take).first(where: \.isOut) {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Lbl(posted.state == "posted" ? "Posted" : "Handed off")
-                                    HStack(spacing: 6) { ForEach(posted.platforms) { PlatformBadge(platform: $0, size: 20) } }
-                                    if let s = posted.stats { Text(s.line).font(t.mono(12)) }
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .card(14)
-                            }
+                            .frame(height: min(720, max(360, g.size.height - 110)))
+                            inspector(take, job: job, outfit: outfit)
+                                .frame(width: 360)
+                            Spacer(minLength: 0)
                         }
-                        .frame(width: 380)
+                    }
+                    .padding(.horizontal, Space.gutter)
+                    .padding(.top, Space.s5)
+                    .padding(.bottom, Space.s7)
+                }
+            }
+        } else {
+            ScreenPage {
+                EmptyState("Nothing open", "Pick a take in the Gallery to see it here.", actionTitle: "Open gallery") { store.go(.gallery) }
+            }
+        }
+    }
+
+    @ViewBuilder private func inspector(_ take: Take, job: Job?, outfit: Outfit?) -> some View {
+        VStack(alignment: .leading, spacing: Space.s4) {
+            HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+                VStack(alignment: .leading, spacing: Space.s1) {
+                    Text(take.caption).scaled(t.scale.title, t.roles.ink).fixedSize(horizontal: false, vertical: true)
+                    Text(take.isFinal ? "Final" : "Test").scaled(t.scale.caption, take.isFinal ? t.roles.positive : t.roles.ink2)
+                }
+                Spacer()
+                MoreMenu {
+                    if store.canEdit(take) { Button("Edit video…") { store.openEditor(take) } }
+                    Button("Post…") { store.openPostSheet(take) }
+                    Button("Download") { store.export(take) }
+                    Button("Share…") { store.share(take) }
+                    Button("Copy prompt") { store.copy(take.prompt.isEmpty ? (job?.prompt ?? "") : take.prompt) }
+                    if !take.isVideo {
+                        Button("Save as template…") { store.saveAsTemplate(take) }.disabled(!store.canSaveAsTemplate(take))
+                    }
+                    Button("Compare takes") { store.compareFromResult() }
+                    Divider()
+                    Button("Delete take", role: .destructive) { store.discard(take) }
+                }
+            }
+
+            // Details: label and value, grouped by space (no box).
+            VStack(alignment: .leading, spacing: Space.s2) {
+                let base: [(String, String)] = [
+                    ("Model", job?.modelName ?? store.currentModel?.name ?? "—"),
+                    ("Outfit", outfit?.name ?? store.currentOutfit?.name ?? "—"),
+                    ("Made with", take.isVideo ? (job?.engineLabel ?? (take.displayEngineLabel.isEmpty ? "Video" : take.displayEngineLabel)) : "Photo"),
+                    ("Cost", Pricing.money(take.cost)),
+                    ("Seed", "\(take.seed)\(take.isVideo || (!take.isTemplateShot && store.shoot.lockSeed) ? ", locked" : "")"),
+                ]
+                let templateRow: [(String, String)] = take.templateName.map { name in [("Template", name)] } ?? []
+                let editRow: [(String, String)] = take.isEdit
+                    ? [("Edited from", take.parentTakeId.flatMap { id in store.takes.first { $0.id == id }?.caption } ?? "A take that was deleted")] : []
+                let media: [(String, String)] = take.isVideo ? [
+                    ("Length", take.durationSec.map { "\(Pricing.trimNum($0)) s" } ?? "—"),
+                    ("Size", take.width.flatMap { w in take.height.map { "\(w)×\($0)" } } ?? "—"),
+                ] : []
+                let allRows = base + templateRow + editRow + media
+                ForEach(Array(allRows.enumerated()), id: \.offset) { _, row in
+                    HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
+                        Text(row.0).scaled(t.scale.caption, t.roles.ink2).frame(width: 96, alignment: .leading)
+                        Text(row.1).monospacedDigit().scaled(t.scale.body, t.roles.ink).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 0)
                     }
                 }
-                .padding(.horizontal, 36)
-                .padding(.top, 28)
-                .padding(.bottom, 48)
-              }
             }
-        } else {
-            Page { Note("Nothing to show yet. Finished takes appear in the Gallery.") }
+
+            // One action per screen: Approve a test take; once it's final, Post it.
+            VStack(alignment: .leading, spacing: Space.s2) {
+                if take.isFinal {
+                    RButton(store.model(for: take).map { "Post to \($0.shortName)'s accounts" } ?? "Post", kind: .action, fill: true) { store.openPostSheet(take) }
+                } else {
+                    RButton("Approve", kind: .action, fill: true) { store.approve(take) }
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .help("Move to Final (⌘↩)")
+                    RButton(store.model(for: take).map { "Post to \($0.shortName)'s accounts" } ?? "Post", fill: true) { store.openPostSheet(take) }
+                }
+                HStack(spacing: Space.s2) {
+                    RButton("Retake with changes", fill: true) { store.retake(take) }
+                    RButton("Export", fill: true) { store.export(take) }
+                        .help("Save it to Downloads › MUSE")
+                }
+                if store.canEdit(take) {
+                    RButton(take.isEdit ? "Edit again" : "Edit video", fill: true) { store.openEditor(take) }
+                        .help("Trim, split, change speed or mute. Saved as a new version; the original is kept.")
+                }
+                if ExtendSource.take(take) != nil || take.canUpscale {
+                    HStack(spacing: Space.s2) {
+                        if ExtendSource.take(take) != nil {
+                            RButton("Extend", fill: true) { store.openExtend(take) }
+                                .help("A longer take: what happens next, or before")
+                        }
+                        if take.canUpscale { UpscaleButton(take: take, fill: true) }
+                    }
+                }
+                if !take.isVideo {
+                    if store.canSaveAsTemplate(take) {
+                        RButton("Save as template", fill: true) { store.saveAsTemplate(take) }
+                    } else {
+                        Text("Made with \(take.templateName ?? "someone else's template"). Its look stays with its creator, so it can't be saved as a new template.")
+                            .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                RButton("Delete take", kind: .danger) { store.discard(take) }
+            }
+
+            if let posted = store.posts(for: take).first(where: \.isOut) {
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    Text(posted.state == "posted" ? "Posted" : "Handed off").scaled(t.scale.heading, t.roles.ink)
+                    HStack(spacing: Space.s1) { ForEach(posted.platforms) { PlatformBadge(platform: $0, size: 20) } }
+                    if let s = posted.stats { Text(s.line).monospacedDigit().scaled(t.scale.caption, t.roles.ink2) }
+                }
+                .padding(.top, Space.s3)
+            }
         }
     }
 }
@@ -424,14 +451,14 @@ struct TakePlayer: View {
             } else {
                 Rectangle().fill(Color.black)
             }
-            Text(caption).font(t.mono(11.5)).foregroundStyle(.white)
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(Capsule().fill(.black.opacity(0.55)))
-                .padding(10)
+            Text(caption).font(t.scale.micro.font).monospacedDigit().foregroundStyle(.white)
+                .padding(.horizontal, Space.s2).padding(.vertical, 2)
+                .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(.black.opacity(0.55)))
+                .padding(Space.s3)
                 .allowsHitTesting(false)
         }
         .aspectRatio(768.0 / 1344.0, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: t.isA ? 0 : t.cardRadius * 0.6))
+        .clipShape(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous))
         .onAppear { load() }
         .onChange(of: url) { load() }
         .onDisappear {

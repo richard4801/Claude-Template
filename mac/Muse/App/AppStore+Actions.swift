@@ -269,15 +269,15 @@ extension AppStore {
         let alert = NSAlert()
         alert.messageText = "Delete \(t.caption)?"
         alert.informativeText = t.isFinal ? "It's in your Final gallery. This can't be undone." : "This can't be undone."
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Delete take")
+        alert.addButton(withTitle: "Keep")
         alert.buttons.first?.hasDestructiveAction = true
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         perform { [self] in
             try await api.deleteTake(id: t.id)
             takes.removeAll { $0.id == t.id }
             picked.removeAll { $0 == t.id }
-            showToast("Take discarded")
+            showToast("Take deleted")
             go(.gallery)
         }
     }
