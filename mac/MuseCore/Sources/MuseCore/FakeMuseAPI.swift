@@ -13,6 +13,8 @@ public actor FakeMuseAPI: MuseAPI {
     /// Edit suite (workstream 3): editor AI jobs in demo mode, and editor uploads (music, voice-overs, .cube) by id.
     var editorJobs: [String: EditorJob] = [:]
     var editorFiles: [String: URL] = [:]
+    /// Edit sessions (workstream 3): the live edits shared with Claude, in memory (Edit/FakeMuseAPI+EditSessions.swift).
+    var editSessions: [String: FakeEditSessionRecord] = [:]
 
     let hub = EventHub()
 

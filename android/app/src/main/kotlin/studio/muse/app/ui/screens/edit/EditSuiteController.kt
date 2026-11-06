@@ -140,6 +140,19 @@ sealed interface EditAction {
     data class AddPip(val take: TakeChoice) : EditAction
     data class Ratio(val shape: ExportShape) : EditAction
     data class ExportOf(val settings: ExportSettings) : EditAction
+    // Edit sessions (workstream 3): owner only, handled by the session sync ([EditSuiteController.sessionActions]).
+    data class ClaudePanel(val open: Boolean) : EditAction
+    /** Undo one history entry through the server (Claude's, or any). */
+    data class UndoEntry(val entryId: Long) : EditAction
+    /** The owner's answer to a paid helper Claude asked for. */
+    data class AnswerPending(val id: String, val approve: Boolean) : EditAction
+    data object ClearClaudeNote : EditAction
+}
+
+/** Edit sessions (workstream 3): what the controller hands to the session sync. */
+interface SessionActions {
+    fun undoEntry(entryId: Long)
+    fun answerPending(id: String, approve: Boolean)
 }
 
 /**
@@ -183,6 +196,67 @@ class EditSuiteController(
 
     val project: EditProject? get() = history?.current
 
+    // ------------------------------------------------------------------ Edit sessions (workstream 3)
+    /** Set by the session sync for the owner; null = a purely local editor (members, offline). */
+    var sessionActions: SessionActions? = null
+    /** True while a slider/drag is between its first move and its end (one undo step, not synced yet). */
+    val dragging: Boolean get() = dragBase != null
+    /** The labels of the local changes since the sync last took them (for the session history). */
+    private val labels = ArrayList<String>()
+    private var actionLabel: String = "Edit"
+
+    /** The labels of local changes since the last call ("Split · Look"), and forgets them. */
+    fun takeLabels(): String {
+        val out = labels.distinct().let { if (it.size > 3) it.take(3) + "…" else it }.joinToString(" · ").ifBlank { "Edit" }
+        labels.clear()
+        return out
+    }
+
+    /**
+     * A change that came from the session (Claude's, another device's, or the server's answer to a rebase): one undo
+     * step tagged [tag] (a history entry id when Undo should go through the server).
+     */
+    fun applyRemote(next: EditProject, tag: Any? = null) {
+        val h = history ?: return
+        dragBase = null
+        if (h.apply(next, tag)) synced()
+    }
+
+    /** The server undid the step that made the current project and sent [server]: a local undo when it gives the same project. */
+    fun undoneRemotely(server: EditProject) {
+        val h = history ?: return
+        if (h.currentTag != null && h.undo() && h.current == server) { synced(); return }
+        if (h.current != server) h.apply(server)
+        synced()
+    }
+
+    /** Starts over from [p] (the session's project when it differs from the one the app built), no undo step. */
+    fun replaceProject(p: EditProject) {
+        history = ProjectHistory(p); dragBase = null
+        _ui.update { it.copy(project = p, canUndo = false, canRedo = false, selectedId = null, playheadSec = it.playheadSec.coerceIn(0.0, durationSec(p))) }
+    }
+
+    fun updateSession(f: (SessionUi) -> SessionUi) = _ui.update { u -> u.session?.let { u.copy(session = f(it)) } ?: u }
+
+    /** The history label of an action that changes the project (null for the rest). */
+    private fun labelOf(a: EditAction): String? = when (a) {
+        EditAction.Undo -> "Undo"; EditAction.Redo -> "Redo"
+        EditAction.Split -> "Split"; EditAction.Delete -> "Delete"; EditAction.Duplicate -> "Duplicate"
+        is EditAction.Speed, is EditAction.CurvePreset, is EditAction.CurvePoint, is EditAction.AddCurvePoint -> "Speed"
+        is EditAction.SetTransform -> "Transform"; is EditAction.AddKeyframe -> "Keyframe"; is EditAction.SetMask -> "Mask"
+        EditAction.RemoveBackground -> "Remove background"; is EditAction.SetTransition, EditAction.TransitionToAll -> "Transition"
+        is EditAction.Volume -> "Volume"; is EditAction.Fades -> "Fades"; is EditAction.AutoDuck, is EditAction.DuckTimes -> "Ducking"
+        is EditAction.NoiseReduction -> "Noise reduction"; is EditAction.Enhance -> "Enhance voice"; is EditAction.Voice -> "Voice effect"
+        EditAction.DetectBeats -> "Beats"; is EditAction.AddAudio -> if (a.voiceOver) "Voice-over" else "Music"
+        is EditAction.AddHook -> "Hook"; is EditAction.EditText -> "Text"; EditAction.AutoCaptions -> "Captions"
+        is EditAction.CaptionStyleOf, is EditAction.CaptionFont, is EditAction.CaptionColors, is EditAction.CaptionY,
+        is EditAction.CaptionWordsPerPage, is EditAction.WordHighlight -> "Caption style"
+        is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
+        is EditAction.PickLook, is EditAction.LookStrength, EditAction.LookToAll, is EditAction.ImportedCube -> "Look"
+        is EditAction.AdjustField -> "Adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
+        else -> null
+    }
+
     private fun say(msg: String) = _ui.update { it.copy(message = msg) }
 
     /**
@@ -198,6 +272,7 @@ class EditSuiteController(
         if (!done) {
             if (dragBase == null) { dragBase = base; h.apply(next) } else h.amend(next)
         } else if (dragBase != null) { h.amend(next); dragBase = null } else h.apply(next)
+        labels += actionLabel
         synced()
         return true
     }
@@ -224,9 +299,21 @@ class EditSuiteController(
     // =================================================================== actions
     fun act(a: EditAction) {
         val u = _ui.value
+        labelOf(a)?.let { actionLabel = it }
         when (a) {
-            EditAction.Undo -> { dragBase = null; if (history?.undo() == true) synced() }
-            EditAction.Redo -> { dragBase = null; if (history?.redo() == true) synced() }
+            EditAction.Undo -> {
+                dragBase = null
+                // A change that came from the session (Claude's) is undone on the server, so its history shows it.
+                val tag = history?.currentTag
+                val s = sessionActions
+                if (tag is Long && s != null) s.undoEntry(tag)
+                else if (history?.undo() == true) { labels += "Undo"; synced() }
+            }
+            EditAction.Redo -> { dragBase = null; if (history?.redo() == true) { labels += "Redo"; synced() } }
+            is EditAction.ClaudePanel -> updateSession { it.copy(chatOpen = a.open) }
+            is EditAction.UndoEntry -> sessionActions?.undoEntry(a.entryId)
+            is EditAction.AnswerPending -> sessionActions?.answerPending(a.id, a.approve)
+            EditAction.ClearClaudeNote -> updateSession { it.copy(claudeNote = null) }
             EditAction.PlayPause -> _ui.update { it.copy(playing = !it.playing) }
             is EditAction.Seek -> _ui.update { it.copy(playheadSec = a.sec.coerceIn(0.0, it.duration)) }
             is EditAction.Zoom -> _ui.update { it.copy(pxPerSec = a.pxPerSec.coerceIn(8f, 240f)) }
@@ -407,7 +494,10 @@ class EditSuiteController(
         jobs[key] = scope.launch {
             val (result, err) = backend.run(kind, src, options) { j -> setAi(key) { it.copy(progress = j.progress, phase = j.phase) } }
             setAi(key) { it.copy(running = false, progress = if (result != null) 100 else it.progress, done = result != null, error = err) }
-            if (result != null) apply(result) else if (err != null) say(err)
+            if (result != null) {
+                actionLabel = when (key) { "captions" -> "Captions"; "silences" -> "Cut silences"; "denoise" -> "Noise reduction"; "beats" -> "Beats"; "matte" -> "Remove background"; else -> "Edit" }
+                apply(result)
+            } else if (err != null) say(err)
         }
     }
 

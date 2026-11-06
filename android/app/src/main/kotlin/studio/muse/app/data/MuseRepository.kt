@@ -237,6 +237,7 @@ class MuseRepository(
         ev.job?.let { j -> if (ev.op != "delete" && (prevJob == null || prevJob.running) && (j.done || j.failed)) listener?.onJobFinished(j) }
         if (ev.type in setOf("member", "invite", "settings", "studio", "prompts", "promptScript", "clip")) _live.tryEmit(ev)
         if (ev.type == "camera" || ev.type == "blender" || ev.type == "claude") _live.tryEmit(ev) // Workstream 2: camera sessions, Claude chat
+        if (ev.type == "edit") _live.tryEmit(ev) // Edit sessions (workstream 3): the open Edit suite applies them
     }
 
     /** A `wallet` event: refresh the balance, and say so when the owner sent or took back tokens. */

@@ -12,7 +12,10 @@ extension AppStore {
     /// A new suite session for a take (nil for a photo or a take without video).
     func makeEditSuiteSession(takeId: String) -> EditSuiteSession? {
         guard let t = takes.first(where: { $0.id == takeId }), t.isVideo, t.videoUrl != nil else { return nil }
-        return EditSuiteSession(take: t, api: api) { [weak self] id in self?.takes.first { $0.id == id } }
+        // The owner's edit is shared live with Claude (edit sessions); members keep the local editor.
+        let s = EditSuiteSession(take: t, api: api, isOwner: isOwner) { [weak self] id in self?.takes.first { $0.id == id } }
+        s.onVersionSaved = { [weak self] t in self?.editSuiteSaved(t) }
+        return s
     }
 
     /// A version the suite saved: into the gallery, marked new.

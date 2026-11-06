@@ -23,6 +23,20 @@ import studio.muse.core.PhotoPricing
 import studio.muse.core.PromptEngine
 import studio.muse.core.SourcePerformer
 import studio.muse.core.VideoSwapSpec
+import studio.muse.core.edit.Asset as EdAsset // Edit sessions (workstream 3)
+import studio.muse.core.edit.AssetKind as EdAssetKind // Edit sessions (workstream 3)
+import studio.muse.core.edit.Canvas as EdCanvas // Edit sessions (workstream 3)
+import studio.muse.core.edit.EditJson as EdEditJson // Edit sessions (workstream 3)
+import studio.muse.core.edit.EditProject as EdEditProject // Edit sessions (workstream 3)
+import studio.muse.core.edit.JsonPatch as EdJsonPatch // Edit sessions (workstream 3)
+import studio.muse.core.edit.Look as EdLook // Edit sessions (workstream 3)
+import studio.muse.core.edit.PatchException as EdPatchException // Edit sessions (workstream 3)
+import studio.muse.core.edit.PatchOp as EdPatchOp // Edit sessions (workstream 3)
+import studio.muse.core.edit.Track as EdTrack // Edit sessions (workstream 3)
+import studio.muse.core.edit.TrackKind as EdTrackKind // Edit sessions (workstream 3)
+import studio.muse.core.edit.VideoClip as EdVideoClip // Edit sessions (workstream 3)
+import studio.muse.core.edit.durationSec as edDurationSec // Edit sessions (workstream 3)
+import studio.muse.core.edit.problemOf as edProblemOf // Edit sessions (workstream 3)
 import java.io.File
 import java.util.UUID
 
@@ -693,6 +707,157 @@ class FakeMuseApi(
     }
 
     override suspend fun uploadEditorFile(file: java.io.File, contentType: String, purpose: String?, onProgress: (Float) -> Unit): String { onProgress(1f); return "up_${purpose ?: "audio"}_${++editorSeq}" }
+
+    // ---- Edit sessions (workstream 3): in memory, with the server's revision checks (plans/api.md "Edit sessions").
+    // The demo studio is its owner. `claude*` stand in for Claude's MCP calls (demo and tests).
+    private class FakeEditSession(
+        val id: String, val takeId: String, var project: kotlinx.serialization.json.JsonObject, var revision: Int = 0,
+        val history: MutableList<Triple<EditHistoryEntry, List<EdPatchOp>, List<EdPatchOp>>> = mutableListOf(),
+        val pending: MutableList<EditPending> = mutableListOf(), val requests: MutableList<EditAppRequest> = mutableListOf(),
+        val online: MutableMap<String, EditPresence> = mutableMapOf(),
+    )
+    private val editSessions = mutableMapOf<String, FakeEditSession>()
+    private var editSessionSeq = 0
+    private var editEntrySeq = 0L
+    /** What the app answered (tests read these). */
+    val editFrameAnswers = mutableMapOf<String, String>()
+    val editRequestAnswers = mutableMapOf<String, EditRequestAnswer>()
+    val editUploads = mutableMapOf<String, ByteArray>()
+    /** Every patch an app pushed, in order (label, patch). */
+    val editPushes = mutableListOf<Pair<String, List<EdPatchOp>>>()
+
+    private fun editView(s: FakeEditSession) = EditSessionDto(
+        s.id, s.takeId, null, s.revision, s.project, durationSec = runCatching { edDurationSec(EdEditJson.parse(s.project)) }.getOrDefault(0.0),
+        pending = s.pending.filter { it.status == "waiting" || it.status == "running" }, online = s.online.values.toList(), requests = s.requests.takeLast(10),
+        history = s.history.asReversed().take(60).map { it.first },
+    )
+
+    private fun editRow(id: String) = editSessions[id] ?: throw ApiException("not_found", "Edit session not found")
+
+    private fun editCheck(p: kotlinx.serialization.json.JsonElement, takeId: String): kotlinx.serialization.json.JsonObject {
+        val project = try { EdEditJson.parse(p) } catch (e: Exception) { throw ApiException("bad_request", "project: ${e.message}") }
+        edProblemOf(project)?.let { throw ApiException("bad_request", "project.${it.field}: ${it.reason}") }
+        if (project.sourceTakeId != takeId) throw ApiException("bad_request", "project.sourceTakeId: must be the session's take")
+        return p as kotlinx.serialization.json.JsonObject
+    }
+
+    /** Stores [next] as one change with its patch and inverse, and tells the apps (like the server's commit). */
+    private fun editCommit(s: FakeEditSession, next: kotlinx.serialization.json.JsonObject, author: String, kind: String, label: String, undoes: Long? = null): EditHistoryEntry? {
+        val patch = EdJsonPatch.diff(s.project, next)
+        val inverse = EdJsonPatch.diff(next, s.project)
+        if (patch.isEmpty()) return null
+        val base = s.revision
+        s.project = next; s.revision++
+        val entry = EditHistoryEntry(++editEntrySeq, s.revision, author, author == "claude", kind, label.take(200), undoes, false, now())
+        s.history += Triple(entry, patch, inverse)
+        if (undoes != null) s.history.replaceAll { if (it.first.id == undoes) it.copy(first = it.first.copy(undone = true)) else it }
+        events.tryEmit(ApiEvent("edit", sessionId = s.id, op = "patch", revision = s.revision, baseRevision = base, patch = EdJsonPatch.encode(patch), entry = entry))
+        return entry
+    }
+
+    private fun editStale(s: FakeEditSession, base: Int) = ApiException("stale_revision", "The edit moved on (revision ${s.revision}, you sent $base) · get it again and re-apply")
+
+    override suspend fun openEditSession(req: OpenEditSessionRequest): EditSessionDto = lock.withLock {
+        val t = takes.firstOrNull { it.id == req.takeId } ?: throw ApiException("not_found", "Take not found")
+        if (req.fresh != true) editSessions.values.lastOrNull { it.takeId == t.id }?.let { return@withLock editView(it) }
+        val project = req.project?.let { editCheck(it, t.id) } ?: (t.edits?.project?.takeIf { (it["sourceTakeId"] as? kotlinx.serialization.json.JsonPrimitive)?.content == t.id })
+            ?: EdEditJson.encode(EdEditProject(
+                2, t.id, EdCanvas(t.width ?: 1080, t.height ?: 1920, (t.fps ?: 30.0), "#000000"),
+                listOf(EdAsset("src", EdAssetKind.VIDEO, take = t.id, durationSec = t.durationSec ?: 8.0, width = t.width ?: 1080, height = t.height ?: 1920, hasAudio = true)),
+                listOf(EdTrack("main", EdTrackKind.MAIN, items = listOf(EdVideoClip("c1", "src", 0.0, t.durationSec ?: 8.0, 1.0,
+                    look = t.look?.lut?.takeIf { it.isNotBlank() }?.let { EdLook(lut = it, strength = 1.0) })))),
+            ))
+        val s = FakeEditSession("es_${++editSessionSeq}", t.id, project)
+        editSessions[s.id] = s
+        editView(s)
+    }
+
+    override suspend fun editSession(id: String): EditSessionDto = lock.withLock { editView(editRow(id)) }
+
+    override suspend fun pushEditPatch(id: String, req: EditPatchRequest): EditChangeResult = lock.withLock {
+        val s = editRow(id)
+        if (req.baseRevision != s.revision) throw editStale(s, req.baseRevision)
+        val ops = try { EdPatchOp.listOf(req.patch) } catch (e: EdPatchException) { throw ApiException("bad_request", "patch: ${e.message}") }
+        val next = try { EdJsonPatch.apply(s.project, ops) } catch (e: EdPatchException) { throw ApiException("bad_request", "patch: ${e.message}") }
+        editCheck(next, s.takeId)
+        editPushes += req.label to ops
+        val entry = editCommit(s, next as kotlinx.serialization.json.JsonObject, "app:${req.device}", "edit", req.label.ifBlank { "Edit" })
+        EditChangeResult(s.revision, entry)
+    }
+
+    override suspend fun undoEditEntry(id: String, req: EditUndoRequest): EditChangeResult = lock.withLock {
+        val s = editRow(id)
+        val e = s.history.firstOrNull { it.first.id == req.entryId } ?: throw ApiException("not_found", "Change not found")
+        if (e.first.undone) throw ApiException("already_undone", "That change was already undone")
+        val next = try { editCheck(EdJsonPatch.apply(s.project, e.third), s.takeId) }
+            catch (_: Exception) { throw ApiException("cannot_undo", "Later changes touch the same parts · undo those first") }
+        val entry = editCommit(s, next, "app:${req.device}", "undo", "Undo: ${e.first.label}", undoes = e.first.id)
+        EditChangeResult(s.revision, entry)
+    }
+
+    override suspend fun editPresence(id: String, presence: EditPresence) { lock.withLock { editRow(id).online[presence.device] = presence } }
+    override suspend fun leaveEditSession(id: String, device: String) { lock.withLock { editSessions[id]?.online?.remove(device) } }
+
+    override suspend fun uploadEditFrame(png: ByteArray): String = lock.withLock { "up_frame_${++editorSeq}".also { editUploads[it] = png } }
+
+    override suspend fun answerEditFrame(id: String, requestId: String, uploadId: String) {
+        lock.withLock { editRow(id); if (uploadId !in editUploads) throw ApiException("bad_request", "uploadId: an image upload of the studio"); editFrameAnswers[requestId] = uploadId }
+    }
+
+    override suspend fun answerEditRequest(id: String, requestId: String, answer: EditRequestAnswer) {
+        lock.withLock {
+            val s = editRow(id)
+            val i = s.requests.indexOfFirst { it.id == requestId }.takeIf { it >= 0 } ?: throw ApiException("not_found", "Request not found")
+            s.requests[i] = s.requests[i].copy(status = if (answer.status == "failed") "failed" else "done", versionId = answer.versionId, error = answer.error)
+            editRequestAnswers[requestId] = answer
+            events.tryEmit(ApiEvent("edit", sessionId = id, op = "app_request", request = s.requests[i]))
+        }
+    }
+
+    override suspend fun answerEditPending(id: String, pendingId: String, approve: Boolean): EditPending = lock.withLock {
+        val s = editRow(id)
+        val i = s.pending.indexOfFirst { it.id == pendingId && it.status == "waiting" }.takeIf { it >= 0 } ?: throw ApiException("not_found", "Waiting request not found")
+        s.pending[i] = s.pending[i].copy(status = if (approve) "running" else "declined", jobId = if (approve) "ej_${++editorSeq}" else null)
+        events.tryEmit(ApiEvent("edit", sessionId = id, op = "pending", pending = s.pending[i]))
+        s.pending[i]
+    }
+
+    /** Claude's change (MCP apply_edit_ops): [change] on the current project, committed as Claude's, badged. Null when stale or no change. */
+    suspend fun claudeEdit(sessionId: String, label: String, baseRevision: Int? = null, change: (EdEditProject) -> EdEditProject?): EditHistoryEntry? = lock.withLock {
+        val s = editRow(sessionId)
+        if (baseRevision != null && baseRevision != s.revision) throw editStale(s, baseRevision)
+        val next = change(EdEditJson.parse(s.project)) ?: return@withLock null
+        editCommit(s, editCheck(EdEditJson.encode(next), s.takeId), "claude", "edit", label)
+    }
+
+    /** Claude's get_frame when this app is online: a frame_request event; the answer lands in [editFrameAnswers]. */
+    fun claudeFrame(sessionId: String, t: Double, width: Int = 540, device: String = ""): String {
+        val rid = "fr_${++editorSeq}"
+        events.tryEmit(ApiEvent("edit", sessionId = sessionId, op = "frame_request", requestId = rid, t = t, width = width, revision = editSessions[sessionId]?.revision, device = device))
+        return rid
+    }
+
+    /** Claude's save_version / export_video: an app_request (the owner's AI-label and C2PA switches never travel). */
+    suspend fun claudeAppRequest(sessionId: String, kind: String, name: String? = null, preset: kotlinx.serialization.json.JsonObject? = null, device: String = ""): EditAppRequest = lock.withLock {
+        val s = editRow(sessionId)
+        val clean = preset?.let { kotlinx.serialization.json.JsonObject(it.filterKeys { k -> k != "aiLabel" && k != "c2pa" }) }
+        val r = EditAppRequest("ar_${++editorSeq}", kind, name, clean, device, "sent", at = now())
+        s.requests += r
+        events.tryEmit(ApiEvent("edit", sessionId = sessionId, op = "app_request", request = r))
+        r
+    }
+
+    /** A paid helper Claude asked for with confirm: true; waits for the owner's answer in the app. */
+    suspend fun claudeAsk(sessionId: String, kind: String, label: String, estimateUsd: Double): EditPending = lock.withLock {
+        val s = editRow(sessionId)
+        val p = EditPending("pa_${++editorSeq}", kind, label, estimateUsd, "waiting", createdAt = now())
+        s.pending += p
+        events.tryEmit(ApiEvent("edit", sessionId = sessionId, op = "pending", pending = p))
+        p
+    }
+
+    /** The session's current project (tests). */
+    suspend fun editProjectOf(sessionId: String): kotlinx.serialization.json.JsonObject = lock.withLock { editRow(sessionId).project }
 
 
     // ---- the demo studio's owner side: members, tokens, invites, settings (in memory, like the real API's rules)

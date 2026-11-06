@@ -7,6 +7,8 @@ import * as M from '../src/editor/model.js';
 import { CAPTION_STYLES, CAPTION_STYLE_LABELS, FILTERS, HOOKS, TRANSITION_LABELS } from '../src/editor/presets.js';
 import { suggestCuts } from '../src/editor/cuts.js';
 import { runChain, voiceChain } from '../src/editor/audio.js';
+import { applyPatch, diff } from '../src/editor/jsonpatch.js';
+import { applyOps } from '../src/editor/ops.js';
 import * as K from '../src/editor/look.js';
 import { CUBE_SIZE, LOOK_IDS, grade, packLook } from '../src/editor/lookpack.js';
 
@@ -268,7 +270,27 @@ const looks = {
 };
 for (const b of looks.badCubes) { let ok = true; try { K.parseCube(b.text); } catch { ok = false; } if (ok) throw new Error(`bad cube "${b.name}" parsed`); }
 
+// ------------------------------------------------------------------ JSON Patch (edit sessions)
+const pp = (x: unknown) => JSON.parse(JSON.stringify(x));
+const basePj = projects[8]!.project;
+const patchPairs: { name: string; a: unknown; b: unknown }[] = [
+  { name: 'same', a: { x: 1 }, b: { x: 1 } },
+  { name: 'scalar change and added key', a: { x: 1, y: 'a' }, b: { x: 2, y: 'a', z: [1, 2] } },
+  { name: 'removed key, nested', a: { o: { p: 1, q: { r: true } } }, b: { o: { q: { r: false } } } },
+  { name: 'array same length', a: { l: [1, { k: 2 }, 3] }, b: { l: [1, { k: 5 }, 4] } },
+  { name: 'array different length', a: { l: [1, 2, 3] }, b: { l: [1, 3] } },
+  { name: 'type change and escapes', a: { 'a/b': 1, 't~x': { v: null } }, b: { 'a/b': '1', 't~x': { v: [null] } } },
+  { name: 'root replace', a: [1], b: { not: 'an array' } },
+  ...['trim', 'look', 'transition', 'add_hook'].map(op => {
+    const ops: Record<string, unknown> = { trim: { op: 'trim', clipId: 'c1', inSec: 0.5, outSec: 9 }, look: { op: 'look', itemId: 'all', look: 'film-gold', strength: 0.6 },
+      transition: { op: 'split', at: 4 }, add_hook: { op: 'add_hook', template: 'hook-question' } };
+    return { name: `project: ${op}`, a: pp(basePj), b: applyOps(basePj, [ops[op] as never]).project };
+  }),
+];
+const jsonpatch = patchPairs.map(c => { const d = diff(c.a, c.b); const back = applyPatch(c.a, d); if (JSON.stringify(back) !== JSON.stringify(c.b) && c.name !== 'same') throw new Error(`patch ${c.name}`); return { ...c, patch: d, inverse: diff(c.b, c.a) }; });
+
 const files: Record<string, unknown> = {
+  'jsonpatch.json': jsonpatch,
   'looks.json': looks,
   'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS, captionStyleLabels: CAPTION_STYLE_LABELS, transitionLabels: TRANSITION_LABELS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
