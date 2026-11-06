@@ -47,7 +47,7 @@ def pages():
             ('Owner only', 'Engine names, provider cost and licence flags appear only here. Members see the tier ladder in D2.')]),
         ('D10', 'Result states', 'Empty, queued, rendering, ready, failed — one pane everywhere.', A.states(), []),
     ]))
-    for mod, key in [('ai_mobile', 'AI Suite — Mobile'), ('edit_desktop', 'Edit Suite — Desktop'), ('edit_mobile', 'Edit Suite — Mobile'), ('library', 'Hardware Library')]:
+    for mod, key in [('ai_mobile', 'AI Suite — Mobile'), ('edit_desktop', 'Edit Suite — Desktop'), ('edit_mobile', 'Edit Suite — Mobile'), ('library', 'Hardware Library'), ('composer', 'Video composer')]:
         try:
             m = importlib.import_module(mod)
             P.append(m.page())

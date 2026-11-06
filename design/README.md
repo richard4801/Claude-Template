@@ -7,6 +7,9 @@ The owner reviewed and approved the AI Suite and Edit Suite designs ("They're go
 - `hardware/` — the 40 photoreal hardware renders (no logos; WebP ≤1024 px) + `manifest.tsv` (name, group, spec caption, prompt line). Ship these in the apps for the camera bag.
 - `source/` — the Python generators that produced the screens (HTML), for exact sizes, colours and copy.
 
+## Revision 2026-11-05/06: video composer replaces the camera bag
+The owner rejected the camera-bag screens (D2–D5, D3d, M2–M4: hardware laid out as shelves) as overwhelming. They are superseded by the **video composer** (spec: `plans/video-composer.md`; mockups `screens/composer__C1…C6` desktop, `composer__P1…P5` phone, `composer__overview.jpg`; generator `source/composer.py`): one prompt-first composer with Auto chips, one picker shell, hardware as three-card wheels, model-driven input slots and presets as the beginner path. Pending the owner's approval of these mockups.
+
 ## Decisions for the open design questions (defaults; owner may change later)
 1. Hardware captions keep real model names as a "look" caption (e.g. "Alexa 35 look"); no logos on images.
 2. One quality ladder everywhere: Draft / Standard / HD / Cinema (character swap and Recast included; add-ons stay add-ons).
