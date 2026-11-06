@@ -1,0 +1,133 @@
+// AI suite · MiniMax H3 on Higgsfield (api.higgsfield.ai) against a FAKE Higgsfield + Replicate (no money).
+// HD shots run on Higgsfield first (50% max-discount price + $0.08 per reference image beyond 5); out of credit / bad
+// key at start moves the same shot to Replicate H3 2K; without HF_CREDENTIALS the Higgsfield model is skipped.
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
+import { ledger } from '../src/db/schema.js';
+import { extraPerTake } from '../src/suite/plan.js';
+import { DEFAULT_LADDER, modelById } from '../src/suite/registry.js';
+import { demoModel, makeApp, people, until } from './helpers.js';
+
+const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version']); execFileSync('ffprobe', ['-version']); return true; } catch { return false; } })();
+
+describe('Higgsfield H3 in the registry', () => {
+  it('is first on the HD ladder, 2K only, 5–15 s, no keyframes (frame shots stay on Replicate H3)', () => {
+    expect(DEFAULT_LADDER.hd[0]).toEqual({ model: 'h3-hf', resolution: '2K' });
+    expect(DEFAULT_LADDER.hd[1]).toEqual({ model: 'h3', resolution: '2K' });
+    const m = modelById('h3-hf')!;
+    expect(m).toMatchObject({ provider: 'higgsfield', duration: { min: 5, max: 15 }, modes: { image: false }, refs: { images: 9, videos: 3, audios: 3 } });
+    expect(m.resolutions.map(r => [r.id, r.perSec])).toEqual([['2K', 0.065]]);
+  });
+  it('charges $0.08 per reference image beyond the 5 included', () => {
+    const m = modelById('h3-hf')!;
+    expect(extraPerTake(m, 3)).toBe(0);
+    expect(extraPerTake(m, 5)).toBe(0);
+    expect(extraPerTake(m, 9)).toBeCloseTo(0.32, 9);
+    expect(extraPerTake(modelById('h3')!, 9)).toBe(0);
+  });
+});
+
+describe.skipIf(!hasFfmpeg)('AI suite · Higgsfield H3 against a FAKE Higgsfield + Replicate (no money)', () => {
+  let server: http.Server, dir: string, base = '';
+  const hf: { url: string; auth?: string; input: any }[] = [];
+  const rep: { model: string; input: any }[] = [];
+  let hfMode: 'ok' | 'no_credit' = 'ok';
+  beforeAll(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-hf-fake-'));
+    const file = path.join(dir, 'out.mp4');
+    execFileSync('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=288x512:rate=24', '-f', 'lavfi', '-i', 'sine=frequency=440', '-t', '6', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', file]);
+    server = http.createServer((q, res) => {
+      let body = '';
+      q.on('data', c => (body += c));
+      q.on('end', () => {
+        const url = q.url ?? '';
+        const json = (s: number, o: unknown) => { res.writeHead(s, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
+        if (url === '/out.mp4') { res.writeHead(200, { 'content-type': 'video/mp4' }); fs.createReadStream(file).pipe(res); return; }
+        // Higgsfield
+        if (url.startsWith('/hf/')) {
+          if (q.headers.authorization !== 'Key hfid:hfsecret') return json(401, { detail: 'Invalid API credentials' });
+          const sub = url.slice(3);
+          if (q.method === 'POST' && sub.startsWith('/minimax/h3/')) {
+            hf.push({ url: sub, auth: q.headers.authorization, input: JSON.parse(body) });
+            if (hfMode === 'no_credit') return json(403, { detail: 'Not enough credits' });
+            const id = `00000000-0000-0000-0000-00000000000${hf.length}`;
+            return json(200, { status: 'queued', request_id: id, status_url: `${base}/hf/requests/${id}/status`, cancel_url: `${base}/hf/requests/${id}/cancel` });
+          }
+          if (/^\/requests\/[0-9a-f-]+\/status$/.test(sub)) return json(200, { status: 'completed', request_id: 'x', video: { url: `${base}/out.mp4` } });
+          return json(404, {});
+        }
+        // Replicate
+        if (q.headers.authorization !== 'Bearer r8_suite') return json(401, {});
+        const m = /^\/v1\/models\/([^/]+\/[^/]+)\/predictions$/.exec(url);
+        if (m && q.method === 'POST') { rep.push({ model: m[1]!, input: JSON.parse(body).input }); return json(201, { id: `p${rep.length}`, status: 'starting' }); }
+        if (/^\/v1\/predictions\/p\d+$/.test(url)) return json(200, { id: 'p', status: 'succeeded', output: `${base}/out.mp4`, metrics: { video_output_duration_seconds: 6 } });
+        json(404, {});
+      });
+    });
+    await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+    base = `http://127.0.0.1:${(server.address() as any).port}`;
+  });
+  afterAll(() => { server?.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+
+  const env = (extra: Record<string, string> = {}) => ({ SUITE_MODE: 'live', SUITE_POLL_MS: '10', REPLICATE_API_TOKEN: 'r8_suite', REPLICATE_API_URL: `${base}/v1`,
+    REPLICATE_POLL_MS: '10', IMAGE_PROVIDER: 'simulated', HIGGSFIELD_API_URL: `${base}/hf`, ...extra });
+  const shot = async (a: Awaited<ReturnType<typeof makeApp>>, owner: any) => {
+    const m = await demoModel(owner);
+    const r = (await owner.req('POST', '/v1/suite/shots', { modelId: m.id, prompt: 'She turns to the camera.', duration: 6, quality: 'hd', camera: { preset: 'talking_head' } })).body;
+    expect(r.id).toBeTruthy();
+    const j = await until(async () => { const x = (await owner.req('GET', `/v1/suite/shots/${r.id}`)).body.job; return x?.state === 'done' || x?.state === 'failed' ? x : null; }, 20_000);
+    const settle = (await a.ctx.db.select().from(ledger).where(eq(ledger.jobId, r.id))).find(x => x.kind === 'settle');
+    return { j, settle };
+  };
+
+  it('HD runs on Higgsfield with the key, 2K, the shot aspect, no watermark, and settles at the discounted price', async () => {
+    hf.length = 0; rep.length = 0; hfMode = 'ok';
+    const a = await makeApp(env({ HF_CREDENTIALS: 'hfid:hfsecret' }));
+    const { owner } = await people(a, 0, { topUp: 100 });
+    try {
+      const { j, settle } = await shot(a, owner);
+      expect(j.state).toBe('done');
+      expect(rep).toHaveLength(0);
+      expect(hf).toHaveLength(1);
+      expect(hf[0]!.url).toBe('/minimax/h3/reference-to-video');
+      expect(hf[0]!.input).toMatchObject({ duration: 6, resolution: '2K', aspect_ratio: '9:16', aigc_watermark: false });
+      const n = hf[0]!.input.image_urls.length;
+      expect(n).toBeGreaterThan(0);
+      expect(settle!.amountUsd).toBeCloseTo(0.065 * 6 + 0.08 * Math.max(0, n - 5), 6);
+    } finally { await a.close(); }
+  });
+
+  it('out of credit at start: the same shot runs on Replicate H3 2K and later shots skip Higgsfield', async () => {
+    hf.length = 0; rep.length = 0; hfMode = 'no_credit';
+    const a = await makeApp(env({ HF_CREDENTIALS: 'hfid:hfsecret' }));
+    const { owner } = await people(a, 0, { topUp: 100 });
+    try {
+      const first = await shot(a, owner);
+      expect(first.j.state).toBe('done');
+      expect(hf).toHaveLength(1);
+      expect(rep).toHaveLength(1);
+      expect(rep[0]).toMatchObject({ model: 'minimax/h3', input: { resolution: '2K' } });
+      const second = await shot(a, owner);
+      expect(second.j.state).toBe('done');
+      expect(hf).toHaveLength(1); // skipped while marked down
+      expect(rep).toHaveLength(2);
+    } finally { await a.close(); }
+  });
+
+  it('without HF_CREDENTIALS the Higgsfield model is skipped and HD runs on Replicate H3 2K', async () => {
+    hf.length = 0; rep.length = 0; hfMode = 'ok';
+    const a = await makeApp(env());
+    const { owner } = await people(a, 0, { topUp: 100 });
+    try {
+      const { j } = await shot(a, owner);
+      expect(j.state).toBe('done');
+      expect(hf).toHaveLength(0);
+      expect(rep[0]).toMatchObject({ model: 'minimax/h3', input: { resolution: '2K' } });
+    } finally { await a.close(); }
+  });
+});
