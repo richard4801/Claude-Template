@@ -245,3 +245,28 @@ public struct Storyboard: Codable, Hashable, Sendable {
         }
     }
 }
+
+// MARK: Layout (plans/ux-audit-2-mac.md)
+
+public enum SuiteLayout {
+    /// Columns for a grid of `count` equal tiles at least `minimum` wide in `width`: the fewest rows that fit, then the
+    /// fewest empty places in the last row, so 6 tiles in room for 5 read 3 + 3 rather than 5 + 1. Unknown width (0) → 3.
+    public static func balancedColumns(count: Int, width: Double, minimum: Double, spacing: Double) -> Int {
+        guard count > 0 else { return 1 }
+        guard width > 0 else { return min(count, 3) }
+        let fit = max(1, Int(((width + spacing) / (minimum + spacing)).rounded(.down)))
+        if count <= fit { return count }
+        var best = 1
+        var bestKey = (Int.max, Int.max)
+        for c in 1...fit {
+            let rows = (count + c - 1) / c
+            let empty = rows * c - count
+            let key = (rows, empty)
+            if key < bestKey {
+                bestKey = key
+                best = c
+            }
+        }
+        return best
+    }
+}

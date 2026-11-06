@@ -30,7 +30,11 @@ struct SuiteRootView: View {
                 .padding(36)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    Muted("Loading the Video suite…", size: 13)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         } else if !s.enabled {
             SuiteOffView()
@@ -49,16 +53,22 @@ struct SuiteRootView: View {
 struct SuiteHubView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
+    /// The tile grid's width, for balanced columns (6 tiles read 3 + 3, not 5 + 1).
+    @State private var tilesWidth: CGFloat = 0
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
                 header
                 tiles
+                // Recent takes get the room; the camera stage link sits under the cast (it is one line).
                 HStack(alignment: .top, spacing: 28) {
                     recent.frame(maxWidth: .infinity, alignment: .topLeading)
-                    stage.frame(maxWidth: .infinity, alignment: .topLeading)
-                    cast.frame(width: 260, alignment: .topLeading)
+                    VStack(alignment: .leading, spacing: 26) {
+                        cast
+                        stage
+                    }
+                    .frame(width: 260, alignment: .topLeading)
                 }
             }
             .padding(.horizontal, 32)
@@ -80,11 +90,16 @@ struct SuiteHubView: View {
     }
 
     private var tiles: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 12)], spacing: 12) {
-            ForEach(SuiteMode.group.filter { $0 != .cameraStage }) { m in
+        let modes = SuiteMode.group.filter { $0 != .cameraStage }
+        let n = SuiteLayout.balancedColumns(count: modes.count, width: Double(tilesWidth), minimum: 200, spacing: 12)
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: n), spacing: 12) {
+            ForEach(modes) { m in
                 Button { store.openSuite(m) } label: { tile(m) }.buttonStyle(.plain)
             }
         }
+        .frame(maxWidth: .infinity)
+        .background(GeometryReader { g in Color.clear.preference(key: HubTilesWidthKey.self, value: g.size.width) })
+        .onPreferenceChange(HubTilesWidthKey.self) { tilesWidth = $0 }
     }
 
     private func tile(_ m: SuiteMode) -> some View {
@@ -102,7 +117,8 @@ struct SuiteHubView: View {
             .frame(maxWidth: .infinity, minHeight: 96, alignment: .topLeading)
         }
         .background(t.surface)
-        .overlay(Rectangle().strokeBorder(t.line, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: t.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: t.cardRadius).strokeBorder(t.line, lineWidth: 1))
         .opacity(store.isComingSoon(m) ? 0.82 : 1)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
@@ -146,6 +162,17 @@ struct SuiteHubView: View {
             .frame(maxWidth: 110)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("\(j.title), \(stateWords(state))")
+    }
+
+    private func stateWords(_ s: SuiteResultState) -> String {
+        switch s {
+        case .ready: return "ready"
+        case .rendering(let p, _): return "rendering \(p) percent"
+        case .queued: return s.queueLine
+        case .failed: return "failed"
+        case .empty: return ""
+        }
     }
 
     @ViewBuilder private func overlay(_ s: SuiteResultState) -> some View {
@@ -160,9 +187,10 @@ struct SuiteHubView: View {
 
     @ViewBuilder private func stateTag(_ s: SuiteResultState) -> some View {
         switch s {
-        case .ready: SuiteTag(text: "Ready", color: t.good)
+        case .ready: SuiteTag(text: "Ready", color: t.goodInk)
         case .rendering: SuiteTag(text: "Rendering", color: t.rec)
-        case .queued: SuiteTag(text: s.queueLine)
+        // Short: the picture above already says "Waiting to start" / "#2 in line" (the long line overflowed the tile).
+        case .queued: SuiteTag(text: "In line")
         case .failed: SuiteTag(text: "Failed", color: t.rec)
         case .empty: EmptyView()
         }
@@ -197,7 +225,7 @@ struct SuiteHubView: View {
                 HStack {
                     Text(m.name).font(t.body(13.5, .semibold)).lineLimit(1)
                     Spacer(minLength: 4)
-                    SuiteTag(text: faces ? "Locked" : "Needs close-ups", color: faces ? t.good : t.warn)
+                    SuiteTag(text: faces ? "Locked" : "Needs close-ups", color: faces ? t.goodInk : t.warnInk)
                 }
                 HStack(spacing: 2) {
                     ForEach(m.slots.filter { $0.image != nil }.prefix(7), id: \.key) { s in
@@ -209,4 +237,9 @@ struct SuiteHubView: View {
         .padding(.vertical, 6)
         .overlay(alignment: .bottom) { Rectangle().fill(t.line).frame(height: 1) }
     }
+}
+
+private struct HubTilesWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }

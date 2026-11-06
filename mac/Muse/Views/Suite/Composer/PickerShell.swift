@@ -176,7 +176,7 @@ struct PickerShell: View {
                             Text("OWNER").font(t.mono(9, .medium)).tracking(0.8).foregroundStyle(t.muted)
                                 .padding(.horizontal, 6).frame(height: 18).overlay(Capsule().strokeBorder(t.line, lineWidth: 1))
                         } else if hasValue(s.id) {
-                            Circle().fill(t.accent).frame(width: 6, height: 6).accessibilityLabel("has a value")
+                            Circle().fill(t.accent).frame(width: 6, height: 6).accessibilityHidden(true)
                         }
                     }
                     .foregroundStyle(on ? t.ink : t.muted)
@@ -185,7 +185,7 @@ struct PickerShell: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(s.title)\(on ? ", selected" : "")")
+                .accessibilityLabel("\(s.title)\(s.owner ? ", owner" : hasValue(s.id) ? ", set" : "")\(on ? ", selected" : "")")
             }
             Spacer(minLength: 0)
             if picker == .camera {
@@ -254,7 +254,8 @@ struct PickerShell: View {
     }
 }
 
-/// A picker grid's tile: the preview (still, or a muted loop on hover), the name and a line; outlined when picked.
+/// A picker grid's tile: the preview (still, or a muted loop on hover), the name and a line; outlined when picked (the
+/// outline alone: a check badge on top of it was a second mark for the same thing).
 /// The first tile of every grid is Auto.
 struct PickerOptionTile: View {
     @Environment(\.theme) private var t
@@ -287,7 +288,6 @@ struct PickerOptionTile: View {
                                     Text(name).font(Fonts.font("Instrument Serif", 26, .regular)).foregroundStyle(t.ink).lineLimit(1).minimumScaleFactor(0.6).padding(10)
                                 }
                         }
-                        if selected { PickCheck().padding(8) }
                     }
                     .frame(height: height)
                     .clipped()

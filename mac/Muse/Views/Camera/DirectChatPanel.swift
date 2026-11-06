@@ -33,7 +33,9 @@ struct DirectChatPanel: View {
                                accessory: CameraGuides.card(session).map { AnyView(guidesCard($0)) })
             }
         }
-        .frame(width: 404)
+        // 404 px when there's room; down to 300 in the Camera picker's Directed step and in a 1100–1280 px window, where a
+        // fixed 404 next to the 560 px minimum of the blocking view ran off the edge.
+        .frame(minWidth: 300, idealWidth: 404, maxWidth: 404)
         .frame(maxHeight: .infinity)
         .background(t.surface)
         .overlay(alignment: .leading) { Rectangle().fill(t.line).frame(width: 1) }
@@ -47,13 +49,13 @@ struct DirectChatPanel: View {
                 Text("Direct with Claude").font(t.body(16, .bold)).foregroundStyle(t.ink)
                 Spacer()
                 if model.live {
-                    Text(t.isA ? "● LIVE" : "● Live").font(t.mono(10.5, .medium)).tracking(0.8).foregroundStyle(t.good)
+                    Text(t.isA ? "● LIVE" : "● Live").font(t.mono(10.5, .medium)).tracking(0.8).foregroundStyle(t.goodInk)
                         .padding(.horizontal, 8).frame(height: 22)
-                        .overlay(RoundedRectangle(cornerRadius: t.isA ? 0 : 11).strokeBorder(t.good, lineWidth: 1))
+                        .overlay(RoundedRectangle(cornerRadius: t.isA ? 0 : 11).strokeBorder(t.goodInk, lineWidth: 1))
                         .help("Live updates are connected")
                 }
             }
-            ForEach(CameraStatus.rows(session, inAppChat: model.connections?.inAppChat, busy: model.busy, now: model.now, machine: model.machine), id: \.title) { row in
+            ForEach(CameraStatus.rows(session, inAppChat: model.connections?.inAppChat, busy: model.busy, now: model.now, machine: model.machine, thisMac: true), id: \.title) { row in
                 HStack(spacing: 8) {
                     Circle().fill(color(row.tone)).frame(width: 7, height: 7)
                     Text(row.title).font(t.body(13, .semibold)).foregroundStyle(t.ink)
@@ -81,7 +83,7 @@ struct DirectChatPanel: View {
         switch tone {
         case .good: return t.good
         case .warn: return t.warn
-        case .bad: return t.accent
+        case .bad: return t.rec
         case .neutral: return t.ink
         case .off: return t.muted
         }
@@ -147,9 +149,9 @@ struct DirectChatPanel: View {
             Image(systemName: "cube").font(.system(size: 9.5))
             Text(c.text).font(t.mono(9.5, .medium)).tracking(0.5)
         }
-        .foregroundStyle(c.ok ? t.muted : t.accent)
+        .foregroundStyle(c.ok ? t.muted : t.rec)
         .padding(.horizontal, 7).frame(height: 20)
-        .overlay(RoundedRectangle(cornerRadius: t.isA ? 0 : 4).strokeBorder(c.ok ? t.line : t.accent, lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: t.isA ? 0 : 4).strokeBorder(c.ok ? t.line : t.rec, lineWidth: 1))
         .help(c.ok ? c.text : "\(c.text) · failed")
     }
 
@@ -174,7 +176,7 @@ struct DirectChatPanel: View {
                     MButton(useLabel, kind: .primary, size: .small, off: model.applying) { onUse() }
                     if model.applying { ProgressView().controlSize(.small) }
                 }
-                if let e = model.applyError { Text(e).font(t.body(12)).foregroundStyle(t.accent) }
+                if let e = model.applyError { Text(e).font(t.body(12)).foregroundStyle(t.rec).fixedSize(horizontal: false, vertical: true) }
             }
         }
         .padding(12)
@@ -226,6 +228,7 @@ struct DirectChatPanel: View {
                 Button { model.send() } label: {
                     Image(systemName: "paperplane.fill").font(.system(size: 14, weight: .semibold))
                 }
+                .accessibilityLabel("Send to Claude")
                 .buttonStyle(MuseButtonStyle(kind: .primary, off: blocked || model.composer.trimmingCharacters(in: .whitespaces).isEmpty))
                 .frame(width: 44)
                 .disabled(blocked)
