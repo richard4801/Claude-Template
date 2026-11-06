@@ -61,7 +61,7 @@ struct StoryboardView: View {
         return HStack(alignment: .bottom, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
                 Button { store.openSuite(.hub) } label: {
-                    Text("VIDEO SUITE · STORYBOARD").font(t.mono(11)).tracking(1.6).foregroundStyle(t.muted)
+                    Text("Video suite").font(t.scale.caption.font).foregroundStyle(t.muted)
                 }
                 .buttonStyle(.plain)
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -73,7 +73,7 @@ struct StoryboardView: View {
             Spacer(minLength: 12)
             SuiteTestBadge()
             HStack(spacing: 6) {
-                Text("CAST").font(t.mono(10.5)).tracking(1.2).foregroundStyle(t.muted)
+                Text("Cast").font(t.scale.label.font).foregroundStyle(t.muted)
                 ForEach(suite.board.castIds, id: \.self) { id in
                     MuseImage(ref: store.character(id)?.cover).frame(width: 28, height: 36).clipped().help(store.character(id)?.name ?? "")
                 }
@@ -90,7 +90,7 @@ struct StoryboardView: View {
             Rectangle().fill(t.line).frame(width: 1, height: 40)
             Button { store.openPicker(.look, target: .storyboard) } label: {
                 HStack(spacing: 6) {
-                    Text("LOOK LOCK").font(t.mono(10.5)).tracking(1.2).foregroundStyle(t.muted)
+                    Text("Look lock").font(t.scale.label.font).foregroundStyle(t.muted)
                     ForEach(CameraSummary.renders(suite.board.camera, suite.camera).prefix(2), id: \.self) { r in
                         HardwareImage(name: r).frame(width: 30, height: 30).clipped()
                     }
@@ -122,7 +122,7 @@ struct StoryboardView: View {
         let busy = states.filter { if case .rendering = $0 { return true }; if case .queued = $0 { return true }; return false }.count
         let toGo = b.toGenerate.count
         return HStack(spacing: 16) {
-            Text("SEQUENCE").font(t.mono(10.5)).tracking(1.2)
+            Text("Sequence").font(t.scale.label.font)
             GeometryReader { g in
                 HStack(spacing: 2) {
                     ForEach(Array(b.shots.enumerated()), id: \.element.id) { i, s in
@@ -137,8 +137,8 @@ struct StoryboardView: View {
             Text("\(ready) ready · \(busy) generating · \(toGo) to go").font(t.body(12)).foregroundStyle(t.muted).fixedSize()
             MButton("Assemble in Edit", icon: "scissors", size: .small) { store.openEdit() }
             Button { store.generateBoard() } label: {
-                Text("GENERATE \(toGo) SHOT\(toGo == 1 ? "" : "S") · \(SuiteText.tierLabel(b.quality).uppercased())\(store.suite.boardEstimate.map { " · \(Pricing.money($0))" } ?? "")")
-                    .font(t.mono(12.5, .semibold)).tracking(1.6).foregroundStyle(t.ctaInk)
+                Text("Generate \(toGo) shot\(toGo == 1 ? "" : "s"), \(SuiteText.tierLabel(b.quality))\(store.suite.boardEstimate.map { " · \(Pricing.money($0))" } ?? "")")
+                    .font(t.body(14, .semibold)).foregroundStyle(t.ctaInk)
                     .padding(.horizontal, 22).frame(height: 48).background(t.cta.opacity(toGo == 0 || store.suite.generating ? 0.45 : 1))
             }
             .buttonStyle(.plain)
@@ -236,22 +236,22 @@ private struct StoryShotEditor: View {
                 }
                 TextBox(placeholder: "What happens in this shot.", text: $suite.board.shots[i].prompt, lines: 4)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("LINE").font(t.mono(10.5)).tracking(1)
+                    Text("Line").font(t.scale.label.font)
                     TextField("What she says (optional)", text: $suite.board.shots[i].line).textFieldStyle(.plain).fieldChrome()
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("MOVE").font(t.mono(10.5)).tracking(1)
+                    Text("Move").font(t.scale.label.font)
                     Menu(suite.board.shots[i].moveId.flatMap { id in suite.camera.libraryMove(id)?.label } ?? "Look lock move") {
                         Button("Look lock move") { suite.board.shots[i].moveId = nil }
                         ForEach(suite.camera.library) { m in Button("\(m.label) · \(m.tag)") { suite.board.shots[i].moveId = m.id } }
                     }
                 }
                 HStack(spacing: 12) {
-                    Text("LENGTH").font(t.mono(10.5)).tracking(1).frame(width: 64, alignment: .leading)
+                    Text("Length").font(t.scale.label.font).frame(width: 64, alignment: .leading)
                     SuiteSeg(options: [3, 4, 5, 8].map { ($0, "\($0)s") }, selection: suite.board.shots[i].seconds) { suite.board.shots[i].seconds = $0 }
                 }
                 HStack(spacing: 12) {
-                    Text("QUALITY").font(t.mono(10.5)).tracking(1).frame(width: 64, alignment: .leading)
+                    Text("Quality").font(t.scale.label.font).frame(width: 64, alignment: .leading)
                     SuiteSeg(options: SuiteText.tierIds.map { ($0, $0 == "standard" ? "Std" : SuiteText.tierLabel($0)) }, selection: suite.board.quality) { suite.board.quality = $0 }
                 }
                 Rectangle().fill(t.line).frame(height: 1)
