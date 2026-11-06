@@ -8,6 +8,7 @@ import { EditProblem, LIMITS, validate, type EditProject } from './model.js';
 import { FILTERS } from './presets.js';
 import { CubeError, parseCube, type Lut } from './look.js';
 import { LOOK_IDS } from './lookpack.js';
+import { paletteIds } from './photo.js';
 import { ApiError } from '../errors.js';
 
 const lutCache = new Map<string, Lut>();
@@ -36,7 +37,7 @@ export async function checkProject(ctx: Ctx, studioId: string, project: unknown,
   if (JSON.stringify(project ?? null).length > LIMITS.maxJsonBytes) throw badRequest(`edits: at most ${LIMITS.maxJsonBytes / 1024} KB`);
   if (!project || typeof project !== 'object' || Array.isArray(project)) throw badRequest('edits: must be an object');
   let r: { durationSec: number };
-  try { r = validate(project as EditProject, FILTERS, LOOK_IDS); } catch (e) {
+  try { r = validate(project as EditProject, FILTERS, LOOK_IDS, paletteIds()); } catch (e) {
     if (e instanceof EditProblem) throw badRequest(e.message);
     throw badRequest(`edits: ${(e as Error).message}`); // a missing nested object
   }

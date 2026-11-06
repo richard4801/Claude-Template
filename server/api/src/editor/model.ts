@@ -593,7 +593,7 @@ const HEX = /^#[0-9A-Fa-f]{6}$/;
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
 /** All the rules of plans/video-editor.md "Rules". Throws EditProblem (field path + message) on the first one broken. */
-export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: Set<string> = new Set()): { durationSec: number } {
+export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: Set<string> = new Set(), paletteIds: Set<string> = new Set()): { durationSec: number } {
   const bad = (f: string, m: string): never => { throw new EditProblem(f, m); };
   const num = (f: string, v: unknown, lo: number, hi: number, optional = true) => {
     if (v === undefined && optional) return;
@@ -668,7 +668,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
       if (typeof it.filter.id !== 'string' || (filterIds.size && !filterIds.has(it.filter.id))) bad(`${f}.filter.id`, 'unknown filter');
       num(`${f}.filter.amount`, it.filter.amount, 0, 1, false);
     }
-    const lp = lookProblem(it.look, assetKinds, lookIds);
+    const lp = lookProblem(it.look, assetKinds, lookIds, paletteIds);
     if (lp) bad(lp.field ? `${f}.look.${lp.field}` : `${f}.look`, lp.message);
   };
   const anim = (f: string, a: Anim | undefined, text: boolean) => {
