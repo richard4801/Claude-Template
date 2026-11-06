@@ -15,16 +15,14 @@ struct ModalCard<Content: View>: View {
         ZStack {
             Color.black.opacity(0.38).onTapGesture { withAnimation { close() } }
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) { content() }
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 26)
+                VStack(alignment: .leading, spacing: Space.s4) { content() }
+                    .padding(Space.s6)
             }
             .frame(width: width)
             .frame(maxHeight: 760)
-            .background(RoundedRectangle(cornerRadius: t.rLg).fill(t.bg))
-            .overlay(RoundedRectangle(cornerRadius: t.rLg).strokeBorder(t.strongLine, lineWidth: t.lineWidth))
-            .modifier(ThemeShadow(kind: .card, radius: t.rLg))
-            .shadow(color: .black.opacity(0.35), radius: 40, y: 30)
+            .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.raised))
+            .clipShape(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous))
+            .museFloat(t)
             .padding(30)
         }
     }
@@ -37,13 +35,15 @@ struct ModalHeader: View {
     var close: () -> Void
 
     var body: some View {
+        // Sheet title (`title` step, sentence case); the old eyebrow is a quiet line under it.
         HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                Eyebrow(eyebrow).styled()
-                Text(t.headingsUppercase ? title.uppercased() : title).font(t.isA ? Fonts.font("Instrument Serif", 44, .regular) : t.display(30, t.isD ? .heavy : .bold))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).scaled(t.scale.title, t.roles.ink).accessibilityAddTraits(.isHeader)
+                if !eyebrow.isEmpty { Text(eyebrow).scaled(t.scale.caption, t.roles.ink2) }
             }
             Spacer()
-            IconButton(systemName: "xmark", help: "Close") { withAnimation { close() } }
+            RIconButton(systemName: "xmark", help: "Close") { withAnimation { close() } }
+                .keyboardShortcut(.cancelAction)
         }
     }
 }
