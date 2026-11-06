@@ -96,6 +96,14 @@ When resuming:
     - Add `higgsfield` as a provider in the suite registry, with the same H3 model on more than one provider, and route each tier to the cheapest provider that supports its inputs (9 refs, frames, video reference).
     - Round lengths up to the allowed clip lengths, and show the price members actually pay.
     - Needs the owner's Higgsfield API key (request_credential, never in chat), their API docs and terms checked, and a mock adapter first.
+    - **Docs read (2026-11-06):**
+      - **Endpoints and auth:** `POST https://api.higgsfield.ai/minimax/h3/{text-to-video|image-to-video|reference-to-video}` with `Authorization: Key KEY_ID:KEY_SECRET`. SDK `@higgsfield/client` (server only). Polling statuses: queued, in_progress, nsfw (a refusal: refund), canceled, failed, completed (`video.url`).
+      - **Reference to video:** `image_urls` ≤ 9, `video_urls` ≤ 3, `audio_urls` ≤ 3.
+      - **Image to video:** `image_url` (first frame) plus an optional `end_image_url`.
+      - **Common fields:** `duration` is an integer from 5 to 15; `resolution` is 2K only; `aspect_ratio` is auto, adaptive, 21:9, 16:9, 4:3, 1:1, 3:4 or 9:16; `aigc_watermark` defaults to false (keep false).
+      - **Pricing (reference to video):** $0.13 per output second before discount (shown $0.065 now), plus **$0.08 for each reference image beyond the first 5**. MUSE's identity (5) plus outfit (4) means +$0.32. Price that exactly, and consider capping at 5 images on this provider.
+      - **Mapping:** fits the HD tier, and could replace 768P Standard at about the same price.
+      - **Docs:** `https://dash.higgsfield.ai/models/minimax/h3/<endpoint>/llms.txt`.
 
 ## Status (each session updates its own line)
 - 1 · Video composer follow-ups (2026-11-06) on `claude/muse-suite-core`: Recast tap-a-face (faceCrop + personHint), swap add-on pills, Era decade slider, UGC ad format wheel (`ugcFormats`, `camera.style.format`), @location (`/v1/suite/locations`, **migration 0013 after 0011/0012**), drag-to-reorder tokens, owner engine pin; catalog `tools` (Talking and UGC ad live, Extend coming soon); real Webcam/CCTV/Swirl/Tilt-shift renders; Blender previews bundled (`previews/`, catalog `preview` per move/light/angle); first-run HTTP checks on both apps. Server 359 green; Android 1305 green (release APK 30.7 MB, +9.5 MB previews); Mac CI green (run 42152398143). Next: Extend & upscale backend.
