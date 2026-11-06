@@ -402,7 +402,6 @@ class CatalogViewModel(private val c: AppContainer) : ViewModel() {
             val put: (Map<String, String>) -> Map<String, String> = { it + (step to m.id) }
             if (step == "realism" || step == "upscale") c.drafts.enhance.update { it.copy(models = put(it.models)) }
             else if (step == "dressA" || step == "dressB") c.drafts.dressUp.update { it.copy(models = put(it.models)) }
-            else c.drafts.shoot.update { it.copy(models = put(it.models)) }
             c.repo.toast("This run uses ${m.id}")
             return@launch done()
         }

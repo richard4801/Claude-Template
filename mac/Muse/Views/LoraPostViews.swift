@@ -172,7 +172,7 @@ struct LoraView: View {
                 // A real studio sees her own training shots, never the demo's sample art.
                 let kept = l.candidates.filter(\.keep)
                 if kept.isEmpty {
-                    EmptyState("Version \(l.version) is ready", "Test it in a photoshoot to see her face hold across angles.")
+                    EmptyState("Version \(l.version) is ready", "Test it in Photo to see her face hold across angles.")
                 } else {
                     SectionTitle("Trained on these \(kept.count) shots", top: 0)
                     LazyVGrid(columns: grid, spacing: Space.s3) {
@@ -207,7 +207,7 @@ struct LoraView: View {
 
     private var info: some View {
         VStack(alignment: .leading, spacing: Space.s2) {
-            SettingRow("Photo LoRA", hint: "For photoshoots, about \(Int(LoraPricing.photoMinutes)) min, \(Pricing.money(LoraPricing.photoCost))")
+            SettingRow("Photo LoRA", hint: "For photos, about \(Int(LoraPricing.photoMinutes)) min, \(Pricing.money(LoraPricing.photoCost))")
             SettingRow("Video LoRA", hint: "For videos, about \(Int(LoraPricing.videoMinutes)) min, \(Pricing.money(LoraPricing.videoCost))")
         }
     }
@@ -255,9 +255,9 @@ struct LoraView: View {
                 RSwitch(label: "Use in new renders", isOn: Binding(get: { store.lora(for: m).use }, set: { store.setLoraUse(m, $0) }))
             }
             SettingRow("Trained on") { RowValue("\(l.trainedOn ?? l.kept) shots, version \(l.version)") }
-            RButton("Test it in a photoshoot", kind: .action, fill: true) {
+            RButton("Test it in Photo", kind: .action, fill: true) {
                 store.selectModel(m)
-                store.go(.shoot)
+                store.openPhoto(model: m.id)
             }
             RButton("Retrain with more shots", fill: true) { store.retrainLora(m) }
             Text("Retraining makes version \(l.version + 1). Version \(l.version) stays in use until the new one is ready, and older versions are kept.")

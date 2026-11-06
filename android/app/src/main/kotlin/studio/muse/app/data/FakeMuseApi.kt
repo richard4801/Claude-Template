@@ -1122,6 +1122,52 @@ class FakeMuseApi(
     }
     override suspend fun deleteSuiteLocation(id: String) { lock.withLock { suite.locations.removeAll { it.id == id } } }
 
+    // ---- AI suite · Photo tool (workstream 3): the shoot pipeline above, priced like its preview, with the still rig check.
+    /** The Photo request as the shoot it runs: the prompt is the scene, the preset is the template. */
+    private fun photoShoot(req: PhotoRequest): ShootRequest {
+        val count = req.count ?: PhotoRules.DEFAULT_COUNT
+        if (count !in 1..PhotoRules.MAX_COUNT) throw ApiException("bad_request", "Invalid photo: count must be 1–${PhotoRules.MAX_COUNT}")
+        if ((req.references?.size ?: 0) > ShootRef.MAX) throw ApiException("bad_request", "Up to ${ShootRef.MAX} reference images")
+        ShootRef.problem(req.references)?.let { throw ApiException("bad_request", it) }
+        return ShootRequest(req.modelId, req.outfitId.orEmpty(), scene = req.prompt.trim().ifBlank { null }?.take(200), seed = req.seed, count = count,
+            templateId = req.presetId, shuffleSeed = req.shuffleSeed, lockSeed = req.lockSeed, productImage = req.productImage, refs = req.references?.ifEmpty { null })
+    }
+
+    override suspend fun photoEstimate(req: PhotoRequest): PhotoEstimate = lock.withLock {
+        val shoot = photoShoot(req)
+        if (req.presetId != null) tpl.name(req.presetId) // not_found for an unknown preset
+        val p = previewNow(shoot)
+        photoEstimateOf(req, shoot.count, p.estimate, p.text)
+    }
+
+    /** The server's PhotoEstimate for [total] (count × perPhoto): notes for what a still can't use, the still rig rules, the look. */
+    private fun photoEstimateOf(req: PhotoRequest, count: Int, total: Double, prompt: String): PhotoEstimate {
+        val cam = req.camera as? JsonObject
+        val notes = buildList {
+            if (cam?.get("move") != null || cam?.get("mix") != null) add(PhotoRules.NO_MOVEMENT)
+            if ((cam?.get("style") as? JsonObject)?.get("tempo") != null) add(PhotoRules.NO_TEMPO)
+            if (req.presetId != null && cam != null && cam.keys.any { it != "mode" }) add(PhotoRules.PRESET_RIG)
+        }
+        val still = cam?.let { JsonObject(it - "move" - "mix") }
+        val rig = RigRules.check(req.prompt, still, false, suite.camera).filter { it.id in PhotoRules.STILL_RULES }
+        val look = suite.lookFor(SuiteShotRequest(camera = req.camera, gradeLook = req.gradeLook))
+        val preset = req.presetId?.let { PhotoPresetRef(it, tpl.name(it)) }
+        return PhotoEstimate(count = count, perPhoto = total / count, estimate = total, priceLine = "${PhotoPricing.about(total)} · ${PhotoRules.noun(count)}",
+            buttonLabel = PhotoRules.button(count, Pricing.money(total)), warnings = notes, rig = rig, look = look,
+            prompt = if (preset == null) prompt else null, preset = preset)
+    }
+
+    /** POST /v1/suite/photos: holds and makes the stills as a shoot does, saved as "Photo · …" takes. */
+    override suspend fun createPhotos(req: PhotoRequest): PhotoResult {
+        val shoot = lock.withLock { photoShoot(req) }
+        val made = shoot(shoot)
+        return lock.withLock {
+            val ids = made.map { it.id }.toSet()
+            for (i in takes.indices) if (takes[i].id in ids) takes[i] = takes[i].copy(title = "Photo · " + takes[i].title.removePrefix("Shoot · "))
+            PhotoResult(takes = takes.filter { it.id in ids }.map { tpl.shotView(it) })
+        }
+    }
+
     /** Test hook: put a job in a fixed state (no runner). */
     suspend fun debugPut(job: Job) = lock.withLock {
         jobs.removeAll { it.id == job.id }

@@ -149,9 +149,10 @@ struct ProfileView: View {
                     store.selectModel(m)
                     store.go(.studio)
                 }
-                RButton("Photoshoot", fill: true) {
+                // Photoshoot is the AI suite's Photo tool now (workstream 3): it opens with her preselected.
+                RButton("Photo", fill: true) {
                     store.selectModel(m)
-                    store.go(.shoot)
+                    store.openPhoto(model: m.id)
                 }
                 MoreMenu {
                     Button("Edit character sheet") { store.uploadSheet(m) }

@@ -66,7 +66,7 @@ final class SuiteComposerApiTests: XCTestCase {
         XCTAssertFalse(c.camera.focals.isEmpty)
         XCTAssertFalse(c.camera.eras.isEmpty)
         if !c.tools.isEmpty {
-            XCTAssertEqual(c.tools.map(\.id), ["shot", "swap", "recast", "storyboard", "talking", "ugc_ad", "extend"])
+            XCTAssertEqual(c.tools.map(\.id), ["shot", "swap", "recast", "storyboard", "talking", "ugc_ad", "extend", "photo"])
             let extend = try XCTUnwrap(c.tools.first { $0.id == "extend" })
             XCTAssertEqual(ComposerTool.extend.isComingSoon(in: c), !extend.available, "Extend follows catalog.tools")
             XCTAssertTrue(extend.available, "mock mode can extend")

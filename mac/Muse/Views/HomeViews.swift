@@ -83,7 +83,6 @@ struct HomeView: View {
         let r = store.runningJob ?? store.activeJobs.first
         ScreenPage {
             ScreenTitle(greeting, subtitle: dateLine) {
-                RButton("Photoshoot") { store.go(.shoot) }
                 RButton("New video", kind: .action) { store.go(.studio) }
                     .help("New video (⌘N)")
             }
@@ -120,7 +119,7 @@ struct HomeView: View {
             if firstLoad {
                 SkeletonGrid(columns: 6, count: 6)
             } else if store.takes.isEmpty {
-                EmptyState("No takes yet", "Finished videos and photos land here, newest first.", actionTitle: "Start a photoshoot") { store.go(.shoot) }
+                EmptyState("No takes yet", "Finished videos and photos land here, newest first.", actionTitle: "New photo") { store.openTool(.photo) }
             } else {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.s4), count: 6), alignment: .leading, spacing: Space.s5) {
                     ForEach(store.takes.prefix(6)) { take in

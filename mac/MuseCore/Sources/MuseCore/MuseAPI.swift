@@ -256,6 +256,10 @@ public protocol MuseAPI: AnyObject, Sendable {
     func suiteEstimate(_ req: ShotRequest) async throws -> ShotEstimate
     /// POST /v1/suite/rig-check → `{rig}`: the rig check alone (free, no planning), for when the estimate fails (workstream 3).
     func suiteRigCheck(_ req: ShotRequest) async throws -> [RigWarning]
+    /// POST /v1/suite/photos/estimate: the Photo tool's price, still rig check and Look (workstream 3). Holds nothing.
+    func suitePhotoEstimate(_ req: PhotoRequest) async throws -> PhotoEstimate
+    /// POST /v1/suite/photos → the stills as takes ("Photo · …"); holds count × per photo, settles to the exact cost.
+    func suiteCreatePhotos(_ req: PhotoRequest) async throws -> [Take]
     /// POST /v1/suite/shots → a render job (`request.engine: "suite"`); progress arrives as `job` events.
     func suiteCreateShot(_ req: ShotRequest) async throws -> Job
     /// GET /v1/suite/shots/{id}

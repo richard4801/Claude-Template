@@ -30,6 +30,7 @@ import { IMAGE_STEPS, type ImageStep } from '../replicate/mapping.js';
 import { CatalogError } from '../replicate/catalog.js';
 import { photoLook } from '../editor/photo.js'; // Editor v2 (workstream 3)
 import type { Look } from '../editor/look.js';
+import { PhotoRequestSchema, photoButton, photoFilter, photoRigCheck, stillRig, type StillRig } from '../suite/photo.js'; // AI suite Photo tool (workstream 3)
 
 /** SSE comment interval: well under any hosting proxy's idle timeout (Koyeb, Railway, Cloudflare: 60-100 s). */
 export const SSE_KEEPALIVE_MS = 10_000;
@@ -507,7 +508,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     imageEngine: ImageEngineOverride.optional() }).passthrough();
 
   /** Everything a shoot (or its preview) needs: the model, outfit, images to send, the prompt and the estimate. */
-  async function planShoot(u: AuthUser, body: unknown) {
+  async function planShoot(u: AuthUser, body: unknown, still?: StillRig) {
     const b = parse(ShootBody, body);
     const m = await model(u, b.modelId, true);
     const o = await outfitOf(u, b.outfitId);
@@ -527,7 +528,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const plan = await ctx.images.shotPlan(u.studioId, ids, refsIn, 2, b.imageEngine, stepModels);
     const identity = await identityOf(m, sentOf(ids, plan));
     const spec = { identity, outfit: outfitSpec(o) ?? { name: 'outfit' }, scene: b.scene, light: b.light, grade: b.grade, direction: b.direction, lockSeed: b.lockSeed,
-      presets: b.presets, refs: plan.sent, camera: b.camera ? { shot: b.camera.shot, lensMm: b.camera.lens, aperture: b.camera.aperture } : undefined };
+      presets: b.presets, refs: plan.sent, camera: b.camera ? { shot: b.camera.shot, lensMm: b.camera.lens, aperture: b.camera.aperture } : undefined,
+      // AI suite Photo tool (workstream 3): the composer's rig compiled for a still (suite/photo.ts) in place of the shoot pickers.
+      ...(still ? { scene: still.scene, light: still.light, grade: still.grade, direction: still.direction, camera: still.camera } : {}) };
     const built = photoshoot(spec, texts);
     const custom = b.prompt?.trim() || null;
     return { kind: 'plain' as const, b, m, o, count, stepModels, texts, refsIn, identity, plan, spec, built, custom };
@@ -555,10 +558,16 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post('/v1/shoots', async req => {
     const s = await planShoot(req.user, req.body);
     const filter = photoLook((req.body as { filter?: unknown } | null)?.filter); // Editor v2 look on the stills (workstream 3)
-    if (s.kind === 'template') return templateShoot(req.user, s, filter);
+    return runShoot(req, s, filter);
+  });
+
+  /** Runs a planned shoot: holds, generates, grades and saves the stills (`/v1/shoots` and the suite's Photo tool). */
+  async function runShoot(req: { user: AuthUser }, s: Awaited<ReturnType<typeof planShoot>>, filter?: Look, o2: { noun?: string } = {}) {
+    const noun = o2.noun ?? 'Shoot', billNoun = o2.noun ?? 'Photoshoot';
+    if (s.kind === 'template') return templateShoot(req.user, s, filter, noun, billNoun);
     const { b, m, o, count, plan } = s;
     const id = uid('shoot');
-    const bill = await new PhotoBill(ctx, whoOf(req.user), id, count * plan.perShot, `Photoshoot · ${count} photo${count === 1 ? '' : 's'}`).start();
+    const bill = await new PhotoBill(ctx, whoOf(req.user), id, count * plan.perShot, `${billNoun} · ${count} photo${count === 1 ? '' : 's'}`).start();
     const prompt = s.custom ?? s.built.text;
     const seed = b.seed ?? s.built.seed ?? undefined;
     let r;
@@ -578,25 +587,25 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const layers = b.presets === false ? {} : { scene: ch.scene.toLowerCase(), camera: `${cv.shot} shot, ${cv.lens}mm lens, ${cv.aperture}${cv.lensNote}`, light: `${ch.light.toLowerCase()}; grade: ${ch.grade.toLowerCase()}` };
     const rows = r.images.map((img, n) => ({
       id: uid('s'), studioId: req.user.studioId, userId: req.user.id, kind: 'shot' as const, jobId: null, modelId: m.id, index: n + 1, of: r.images.length,
-      title: `Shoot · ${label}`, label: `${label} · ${n + 1}`, engineLabel: ctx.images.shotLabel(r.selection), cost: r.costs[n] ?? 0, seed: r.seed ?? seed ?? 0, status: 'test' as const,
+      title: `${noun} · ${label}`, label: `${label} · ${n + 1}`, engineLabel: ctx.images.shotLabel(r.selection), cost: r.costs[n] ?? 0, seed: r.seed ?? seed ?? 0, status: 'test' as const,
       thumb: img, prompt, mediaKey: ctx.images.keyOf(img), layers, refs: s.refsIn.length ? s.refsIn : null, createdAt: Date.now() + n,
     }));
     const inserted = await db.insert(takes).values(rows).returning();
     emitTakes(req.user.studioId, inserted);
     return inserted.map(t => takeView(t, pub, req.user.id));
-  });
+  }
 
   /**
    * A template shoot: every still gets its own prompt (template layers + identity/outfit/never-add + its own variation
    * draws, or the user's direction in place of pose and angle), its own seed, and the template's after-effects.
    */
-  async function templateShoot(u: AuthUser, s: Extract<Awaited<ReturnType<typeof planShoot>>, { kind: 'template' }>, filter?: Look) {
+  async function templateShoot(u: AuthUser, s: Extract<Awaited<ReturnType<typeof planShoot>>, { kind: 'template' }>, filter?: Look, noun = 'Shoot', billNoun = 'Photoshoot') {
     const { b, m, o, count, plan, identity, product } = s;
     // A `filter` on the request replaces the template's own look for these stills.
     const t = filter ? { ...s.t, layers: { ...s.t.layers, afterEffects: { ...(s.t.layers.afterEffects ?? {}), look: filter } } } : s.t;
     const shuffleSeed = b.shuffleSeed ?? randomSeed();
     const id = uid('shoot');
-    const bill = await new PhotoBill(ctx, whoOf(u), id, count * plan.perShot, `Photoshoot · ${count} photo${count === 1 ? '' : 's'}`).start();
+    const bill = await new PhotoBill(ctx, whoOf(u), id, count * plan.perShot, `${billNoun} · ${count} photo${count === 1 ? '' : 's'}`).start();
     const now = Date.now();
     const rows: (typeof takes.$inferInsert)[] = [];
     try {
@@ -609,7 +618,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
         const fx = await ctx.templates.postProcess(r.images[0]!, t.layers, { studioId: u.studioId, userId: u.id });
         rows.push({
           id: uid('s'), studioId: u.studioId, userId: u.id, kind: 'shot', jobId: null, modelId: m.id, index: n + 1, of: count,
-          title: `Shoot · ${t.name}`.slice(0, 60), label: `${t.name.slice(0, 28)} · ${n + 1}`, engineLabel: ctx.images.shotLabel(r.selection), cost: r.costUsd,
+          title: `${noun} · ${t.name}`.slice(0, 60), label: `${t.name.slice(0, 28)} · ${n + 1}`, engineLabel: ctx.images.shotLabel(r.selection), cost: r.costUsd,
           seed: p.seed ?? r.seed ?? 0, status: 'test', thumb: fx.ref, prompt: p.fullText, publicPrompt: p.visibleText, mediaKey: fx.key,
           layers: t.layers, templateId: t.id, templateName: t.name, templateOwnerId: t.ownerId, variation: p.variation, shuffleSeed, refs: s.refsIn.length ? s.refsIn : null, createdAt: now + n,
         });
@@ -624,6 +633,31 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     await ctx.templates.bumpUses(t.id);
     return inserted.map(x => takeView(x, pub, u.id));
   }
+
+  // ------------------------------------------------------------------ AI suite · Photo tool (workstream 3)
+  // Photoshoot on the composer (plans/api.md "Photo tool"): the shoot pipeline above with the composer's rig compiled for
+  // a still (suite/photo.ts). Same count, pricing and bill as a shoot; `/v1/shoots` stays for older clients.
+  const photoPlan = async (u: AuthUser, body: unknown) => {
+    const r = PhotoRequestSchema.safeParse(body ?? {});
+    if (!r.success) throw badRequest(`Invalid photo: ${r.error.issues[0]?.path.join('.')} ${r.error.issues[0]?.message}`);
+    const p = r.data, still = stillRig(p), graded = photoFilter(p);
+    const shoot = { modelId: p.modelId, outfitId: p.outfitId, count: p.count, seed: p.seed, lockSeed: p.lockSeed, refs: p.references, templateId: p.presetId,
+      shuffleSeed: p.shuffleSeed, productImage: p.productImage, presets: true };
+    const s = await planShoot(u, shoot, p.presetId ? undefined : still);
+    const notes = [...still.notes, ...(p.presetId && (still.camera || still.light || still.grade || still.direction) ? ['The preset sets its own camera and light'] : [])];
+    return { p, s, notes, graded };
+  };
+  app.post('/v1/suite/photos/estimate', async req => {
+    const { p, s, notes, graded } = await photoPlan(req.user, req.body);
+    const estimate = s.count * s.plan.perShot, money = P.aboutMoney(estimate);
+    return { tool: 'photo', count: s.count, perPhoto: s.plan.perShot, estimate, priceLine: `${money} · ${s.count} photo${s.count === 1 ? '' : 's'}`,
+      buttonLabel: photoButton(s.count, P.money(estimate)), ok: true, warnings: notes, rig: photoRigCheck(p), look: graded?.look ?? null,
+      ...(s.kind === 'template' ? { preset: { id: s.t.id, name: s.t.name } } : { prompt: s.custom ?? s.built.text }) };
+  });
+  app.post('/v1/suite/photos', async req => {
+    const { s, graded } = await photoPlan(req.user, req.body);
+    return { tool: 'photo', takes: await runShoot(req, s, graded?.filter, { noun: 'Photo' }) };
+  });
 
   // ------------------------------------------------------------------ photo templates
   app.get('/v1/templates', async req => ctx.templates.list(req.user, (req.query ?? {}) as any));

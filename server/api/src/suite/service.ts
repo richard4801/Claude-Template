@@ -157,6 +157,8 @@ export class SuiteService {
       { id: 'talking', available: on && any(i => i.audio) }, { id: 'ugc_ad', available: on && any(i => i.images > 0) },
       // Extend (suite/extend.ts): live when a tier has a model that continues clips. Upscale stays the take's add-on.
       { id: 'extend', available: on && TIERS.some(t => EXTEND_LADDER[t].some(st => { const m = modelById(st.model); return !!m && avail.has(m.provider) && p.models?.[m.id]?.enabled !== false; })) },
+      // Photo (workstream 3): stills on the shoot pipeline (POST /v1/suite/photos), so it doesn't depend on the video engines.
+      { id: 'photo', available: true },
     ];
     return { enabled: this.mode !== 'off', test: this.mode === 'mock', defaultQuality: 'draft', tiers, tools, modes: ['text', 'image', 'reference', 'swap', 'recast'], recastMaxPeople: 4,
       aspectRatios: ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'], takesMax: 4, camera: cameraCatalog() };

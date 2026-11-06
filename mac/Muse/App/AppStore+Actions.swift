@@ -304,47 +304,8 @@ extension AppStore {
         } else if t.isVideo {
             go(.studio)
         } else {
-            go(.shoot)
+            openPhoto(model: model(for: t)?.id) // a still: the AI suite's Photo tool (workstream 3)
         }
-    }
-
-    // MARK: Photoshoot
-
-    func startShoot() {
-        guard shootState != .busy, currentModel != nil, currentOutfit != nil else {
-            if currentOutfit == nil { showToast("Add an outfit first", action: "Add outfit") { [weak self] in self?.openOutfitSheet(for: nil) } }
-            return
-        }
-        if shootRefsUploading > 0 {
-            showToast("Wait a moment · the reference images are still uploading")
-            return
-        }
-        if shootEstimate > balance.balance {
-            notEnough("for a shoot")
-            return
-        }
-        // The server builds the prompt from these choices; "Edit as text" sends the user's text instead (exactly).
-        guard let req = currentShootRequest() else { return }
-        withAnimation { shootState = .busy }
-        perform { [self] in
-            do {
-                let shots = try await api.shoot(req)
-                for s in shots.reversed() where !takes.contains(where: { $0.id == s.id }) { takes.insert(s, at: 0) }
-                lastShots = shots
-                fresh.formUnion(shots.map(\.id))
-                promptOverride = nil
-                balance = try await api.balance()
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) { shootState = .done }
-            } catch {
-                shootState = .idle
-                throw error
-            }
-        }
-    }
-
-    func resetCamera() {
-        shoot.resetCamera()
-        showToast("Camera reset")
     }
 
     // MARK: Profile
@@ -640,7 +601,8 @@ extension AppStore {
             outfitIdByModel[d.modelId] = o.id
             let who = models.first { $0.id == d.modelId }?.shortName ?? "your model"
             withAnimation { outfitSheet = nil }
-            showToast("Outfit saved to \(who)")
+            // The outfit set generator's way on (was Photoshoot's Outfit tool): Photo with her and this outfit (workstream 3).
+            showToast("Outfit saved to \(who)", action: "Use in Photo") { [weak self] in self?.openPhoto(model: d.modelId, outfit: o.id) }
         }
     }
 
@@ -848,7 +810,7 @@ extension AppStore {
     var paletteCommands: [PaletteCommand] {
         var all: [PaletteCommand] = [
             PaletteCommand(title: "New video", icon: "video", shortcut: "⌘N") { [weak self] in self?.go(.studio) },
-            PaletteCommand(title: "Photoshoot", icon: "camera", shortcut: "⌘4") { [weak self] in self?.go(.shoot) },
+            PaletteCommand(title: "Photo", icon: "camera", shortcut: "") { [weak self] in self?.openTool(.photo) }, // the AI suite's Photo tool (workstream 3)
             PaletteCommand(title: "Templates", icon: "square.on.square.dashed", shortcut: "⇧⌘T") { [weak self] in self?.openTemplates() },
             PaletteCommand(title: "New template", icon: "plus.square.on.square", shortcut: "") { [weak self] in self?.newTemplate() },
             PaletteCommand(title: "New model", icon: "person.badge.plus", shortcut: "") { [weak self] in self?.go(.create) },

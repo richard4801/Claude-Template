@@ -77,7 +77,7 @@ import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
 import studio.muse.core.Pricing
 
-// ======================================================================= Library (Photoshoot → Templates)
+// ======================================================================= Library (Suite → Photo → All templates)
 
 data class TemplatesState(val filter: TemplateFilter = TemplateFilter(), val shown: List<Template> = emptyList(), val tags: List<String> = emptyList(), val loaded: Boolean = false)
 
@@ -680,16 +680,6 @@ fun SaveTemplateScreen(shotId: String) {
         Dock(tight = true) {
             Cta("Save template", { vm.save { id -> nav.back(); nav.go(Routes.template(id)) } }, Modifier.weight(1f), busy = s.busy, off = s.draft == null)
         }
-    }
-}
-
-/** A strip of templates for the Photoshoot screen, with "See all". */
-@Composable
-fun TemplateStrip(templates: List<Template>, onOpen: (Template) -> Unit, onAll: () -> Unit) {
-    val m = muse
-    RowB { H3("Templates"); T("See all", m.type.tiny.copy(fontWeight = FontWeight.Bold), m.link, Modifier.press(onClick = onAll).padding(6.dp)) }
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        templates.take(8).forEach { t -> TemplateCard(t, Modifier.width(112.dp), 140.dp) { onOpen(t) } }
     }
 }
 

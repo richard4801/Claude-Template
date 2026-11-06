@@ -113,7 +113,7 @@ fun BoxScope.ComposerSheetHost(sheet: ComposerSheet, x: SheetContext) {
     fun set(f: (ComposerSettings) -> ComposerSettings) = x.update { it.copy(settings = f(it.settings)) }
     when (sheet.kind) {
         SheetKind.CAMERA -> {
-            val tabs = cameraTabs(s, x.owner, d.directed != null)
+            val tabs = cameraTabs(s, x.owner, d.directed != null).filter { d.tool != ComposerTool.PHOTO || it.key in PhotoComposer.CAMERA_TABS } // Photo tool (workstream 3): Setup and Angle only
             val tab = sheet.tab.takeIf { t -> tabs.any { it.key == t } } ?: "setup"
             PickerShell("Camera", x.wide, x.close, tabs, tab, x.setTab, onReset = { set { it.reset(ComposerChip.CAMERA) }; x.update { it.copy(directed = null) } }) {
                 CameraPickerBody(tab, d, cam, x.wide, x.owner, x.update, x.onMove)
@@ -121,6 +121,7 @@ fun BoxScope.ComposerSheetHost(sheet: ComposerSheet, x: SheetContext) {
         }
         SheetKind.STYLE -> {
             val tabs = listOf(SheetTab("genre", "Genre", s.genre != null), SheetTab("era", "Era", s.era != null), SheetTab("tempo", "Tempo", s.tempo != null))
+                .filter { d.tool != ComposerTool.PHOTO || it.key in PhotoComposer.STYLE_TABS } // Photo tool (workstream 3): no Tempo
             val tab = sheet.tab.takeIf { t -> tabs.any { it.key == t } } ?: "genre"
             PickerShell("Style", x.wide, x.close, tabs, tab, x.setTab, onReset = { set { it.reset(ComposerChip.STYLE) } }) {
                 // UGC ad: the ad format wheel sits above genre, era and tempo.
@@ -168,7 +169,8 @@ fun BoxScope.ComposerSheetHost(sheet: ComposerSheet, x: SheetContext) {
             OptionGrid(ComposerCatalog.visible(cam.lighting), s.lighting, x.wide, { id -> set { it.copy(lighting = id) } }, autoCaption = "Matches the scene",
                 autoPoster = cam.autoPreviews.lighting?.poster, preview = { o, _ -> Preview(o.render, o.loop, PreviewDraw.Light(o.id), poster = o.preview?.poster) })
         }
-        SheetKind.REFERENCES -> PickerShell("References", x.wide, x.close) { ReferencesBody(x) }
+        SheetKind.REFERENCES -> if (d.tool == ComposerTool.PHOTO) PhotoReferencesSheet(x) // Photo tool (workstream 3): pose / look / scene references
+            else PickerShell("References", x.wide, x.close) { ReferencesBody(x) }
         SheetKind.SETTINGS -> PickerShell("Settings", x.wide, x.close, heightFraction = .9f, footer = { SettingsFooter(x) }) { SettingsBody(x) }
         SheetKind.TOOLS -> PickerShell("Tools", x.wide, x.close) { ToolsBody(x) }
         SheetKind.CHARACTER -> PickerShell("Character", x.wide, x.close, heightFraction = .7f) { CharacterBody(x) }
