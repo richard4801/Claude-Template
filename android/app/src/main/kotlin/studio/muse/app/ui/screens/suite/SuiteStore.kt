@@ -15,6 +15,8 @@ import studio.muse.app.data.SuiteSettingsPatch
 import studio.muse.app.data.SuiteShotRequest
 import studio.muse.app.ui.screens.suite.composer.ComposerDraft
 import studio.muse.app.ui.screens.suite.composer.ComposerSheet
+import studio.muse.app.ui.screens.suite.composer.RigDismissals
+import studio.muse.app.data.SuiteRigWarning
 
 /**
  * The AI suite's session state (one per app): the catalog (null until loaded), the composer, Recast and Storyboard drafts
@@ -32,6 +34,8 @@ class SuiteStore(private val c: AppContainer) {
     val talkingSlots = MutableStateFlow(InputSlots())
     val ugcSlots = MutableStateFlow(InputSlots())
     val sheet = MutableStateFlow<ComposerSheet?>(null)
+    /** Rig-check warnings hidden with × until the composer's choices change. */
+    val rigDismissed = MutableStateFlow(RigDismissals())
     /** The clip and people of Character swap and Recast (the composer's quality and takes are used). */
     val recast = MutableStateFlow(RecastDraft())
     val board = MutableStateFlow<Storyboard?>(null)
@@ -77,6 +81,10 @@ class SuiteStore(private val c: AppContainer) {
         val (e, err) = c.repo.attemptInline { suiteEstimate(req) }
         return (e?.let { if (owner) it else SuiteRules.memberSafe(it) }) to err?.let { memberSafeText(it) }
     }
+
+    /** The rig check alone, for when the estimate fails: quiet (an older server or no network = no warnings). */
+    suspend fun rigCheck(req: SuiteShotRequest): List<SuiteRigWarning> =
+        runCatching { c.repo.api.suiteRigCheck(req).rig }.getOrDefault(emptyList()).let { if (owner) it else SuiteRules.memberSafe(it) }
 
     /** Generate: the job, or the plain reason it couldn't start (as a toast too). Claude never calls this: only a tap does. */
     suspend fun generate(req: SuiteShotRequest, into: MutableStateFlow<List<String>>? = null): Job? {

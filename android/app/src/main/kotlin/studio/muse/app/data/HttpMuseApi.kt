@@ -165,6 +165,7 @@ interface MuseService {
     // AI suite (workstream 1)
     @GET("v1/suite/catalog") suspend fun suiteCatalog(): SuiteCatalog
     @POST("v1/suite/shots/estimate") suspend fun suiteEstimate(@Body r: SuiteShotRequest): SuiteEstimate
+    @POST("v1/suite/rig-check") suspend fun suiteRigCheck(@Body r: SuiteShotRequest): SuiteRigCheck
     @POST("v1/suite/shots") suspend fun createSuiteShot(@Body r: SuiteShotRequest): Job
     @GET("v1/suite/shots/{id}") suspend fun suiteShot(@Path("id") id: String): SuiteShot
     @POST("v1/suite/camera/compile") suspend fun suiteCompile(@Body r: SuiteCompileRequest): SuiteCompiled
@@ -445,6 +446,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     // AI suite (workstream 1)
     override suspend fun suiteCatalog() = call { suiteCatalog() }
     override suspend fun suiteEstimate(req: SuiteShotRequest) = call { suiteEstimate(req.copy(dryRun = null)) }
+    override suspend fun suiteRigCheck(req: SuiteShotRequest) = call { suiteRigCheck(req.copy(dryRun = null)) }
     override suspend fun createSuiteShot(req: SuiteShotRequest) = call { createSuiteShot(req.copy(dryRun = null)) }.abs()
     override suspend fun suiteShot(id: String) = call { suiteShot(id) }.let { it.copy(job = it.job.abs()) }
     override suspend fun suiteCompile(req: SuiteCompileRequest) = call { suiteCompile(req) }

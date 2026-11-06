@@ -49,6 +49,8 @@ class SuiteHttpFirstRunTest {
     private val bodies = mutableMapOf<String, String>()
     private var catalogBody = ""
     private var locationsOn = true
+    private var estimateRes = "suite_estimate_member"
+    private var rigCheckOn = true
     private fun res(name: String) = javaClass.getResource("/suite/$name.json")!!.readText()
 
     @Before fun start() {
@@ -69,7 +71,8 @@ class SuiteHttpFirstRunTest {
                         synchronized(bodies) { bodies["$method $path"] = body }
                         val (code, out) = when {
                             path == "/v1/suite/catalog" -> 200 to catalogBody
-                            path == "/v1/suite/shots/estimate" -> 200 to res("suite_estimate_member")
+                            path == "/v1/suite/shots/estimate" -> 200 to res(estimateRes)
+                            path == "/v1/suite/rig-check" && rigCheckOn -> 200 to res("suite_rigcheck_member")
                             path.startsWith("/v1/suite/locations") && !locationsOn -> 404 to """{"error":"Not found","code":"not_found"}"""
                             path == "/v1/suite/locations" && method == "GET" ->
                                 200 to """[{"id":"loc_1","name":"Sunlit loft","image":{"url":"/uploads/loft.jpg"},"createdAt":1762300000000}]"""
@@ -88,6 +91,25 @@ class SuiteHttpFirstRunTest {
     }
 
     @After fun stop() = server.close()
+
+    @Test fun `the rig check comes with the estimate and alone from rig-check, an older server has none`() = runBlocking {
+        val req = SuiteShotRequest(prompt = "x", camera = Json.parseToJsonElement("""{"mode":"preset","rig":{"body":"phone","aperture":"f1.4"}}"""))
+        // An estimate without `rig` (an older server) decodes to no warnings.
+        assertTrue(api.suiteEstimate(req).rig.isEmpty())
+        estimateRes = "suite_estimate_rig_member"
+        val e = api.suiteEstimate(req)
+        assertEquals(listOf("deep_focus", "look_clash"), e.rig.map { it.id })
+        assertEquals("tip", e.rig[1].severity); assertTrue(e.rig[1].tip)
+        assertEquals("Use Cinema camera", e.rig[0].fix.label)
+        // rig-check: the same strict body, the same list shape; `mix: null` stays a null to remove.
+        val r = api.suiteRigCheck(req).rig
+        checkStrict(bodies["POST /v1/suite/rig-check"]!!)
+        assertEquals(listOf("deep_focus", "talk_move"), r.map { it.id })
+        assertEquals(JsonNull, r[1].fix.patch["camera"]!!.jsonObject["mix"])
+        assertNull(r[1].alt)
+        rigCheckOn = false
+        try { api.suiteRigCheck(req); throw AssertionError("expected not_found") } catch (x: ApiException) { assertEquals("not_found", x.code) }
+    }
 
     @Test fun `catalogs decode over HTTP, with and without the new fields`() = runBlocking {
         catalogBody = res("suite_catalog_member")

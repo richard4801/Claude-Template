@@ -198,6 +198,8 @@ interface MuseApi {
     // AI suite (workstream 1, plans/api.md "AI suite"). Members never get engine names back; the owner does.
     suspend fun suiteCatalog(): SuiteCatalog = throw ApiException("not_found", "This server doesn't have the AI suite yet")
     suspend fun suiteEstimate(req: SuiteShotRequest): SuiteEstimate = throw ApiException("not_found", "This server doesn't have the AI suite yet")
+    /** The rig check alone, for when the estimate fails (free, pure). An API without it: no warnings. */
+    suspend fun suiteRigCheck(req: SuiteShotRequest): SuiteRigCheck = SuiteRigCheck()
     /** A render job (`request.engine == "suite"`) on the usual job pipeline: job, take and balance events follow. */
     suspend fun createSuiteShot(req: SuiteShotRequest): Job = throw ApiException("not_found", "This server doesn't have the AI suite yet")
     suspend fun suiteShot(id: String): SuiteShot = throw ApiException("not_found", "This server doesn't have the AI suite yet")
