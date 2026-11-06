@@ -222,33 +222,35 @@ struct FocalDiagram: View {
     var mm: Double
     var on: Bool
     var body: some View {
-        Canvas { ctx, size in
-            let w = size.width, h = size.height
-            var grid = Path()
-            var y: CGFloat = 8
-            while y < h { grid.move(to: CGPoint(x: 0, y: y)); grid.addLine(to: CGPoint(x: w, y: y)); y += 12 }
-            ctx.stroke(grid, with: .color(lineInk.opacity(0.05)), lineWidth: 1)
-            let half = min(ComposerWheels.fieldOfView(mm) / 2, 60) * .pi / 180
-            let cx = w / 2, cy = h - 13, len = h - 26
-            let dx = len * CGFloat(tan(half))
-            var wedge = Path()
-            wedge.move(to: CGPoint(x: cx, y: cy))
-            wedge.addLine(to: CGPoint(x: cx - dx, y: cy - len))
-            wedge.addLine(to: CGPoint(x: cx + dx, y: cy - len))
-            wedge.closeSubpath()
-            let col = on ? amber : lineInk
-            ctx.fill(wedge, with: .color(on ? amber.opacity(0.16) : lineInk.opacity(0.08)))
-            var edges = Path()
-            edges.move(to: CGPoint(x: cx - dx, y: cy - len))
-            edges.addLine(to: CGPoint(x: cx, y: cy))
-            edges.addLine(to: CGPoint(x: cx + dx, y: cy - len))
-            ctx.stroke(edges, with: .color(col.opacity(0.9)), lineWidth: 1.5)
-            ctx.fill(Path(ellipseIn: CGRect(x: cx - 4.5, y: cy - len + 4.5, width: 9, height: 9)), with: .color(lineInk))
-            ctx.fill(Path(roundedRect: CGRect(x: cx - 5, y: cy - 2, width: 10, height: 12), cornerRadius: 2), with: .color(lineInk.opacity(0.75)))
-            ctx.draw(Text("\(Int(ComposerWheels.fieldOfView(mm).rounded()))°").font(.system(size: 9.5, design: .monospaced)).foregroundColor(Color(hex: 0xA9A6A0)),
-                     at: CGPoint(x: min(cx + dx + 14, w - 14), y: cy - len + 8))
-        }
+        Canvas { ctx, size in draw(&ctx, size) }
         .background(Color(hex: 0x121315))
+    }
+
+    private func draw(_ ctx: inout GraphicsContext, _ size: CGSize) {
+        let w = size.width, h = size.height
+        var grid = Path()
+        var y: CGFloat = 8
+        while y < h { grid.move(to: CGPoint(x: 0, y: y)); grid.addLine(to: CGPoint(x: w, y: y)); y += 12 }
+        ctx.stroke(grid, with: .color(lineInk.opacity(0.05)), lineWidth: 1)
+        let half = min(ComposerWheels.fieldOfView(mm) / 2, 60) * .pi / 180
+        let cx = w / 2, cy = h - 13, len = h - 26
+        let dx = len * CGFloat(tan(half))
+        var wedge = Path()
+        wedge.move(to: CGPoint(x: cx, y: cy))
+        wedge.addLine(to: CGPoint(x: cx - dx, y: cy - len))
+        wedge.addLine(to: CGPoint(x: cx + dx, y: cy - len))
+        wedge.closeSubpath()
+        let col = on ? amber : lineInk
+        ctx.fill(wedge, with: .color(on ? amber.opacity(0.16) : lineInk.opacity(0.08)))
+        var edges = Path()
+        edges.move(to: CGPoint(x: cx - dx, y: cy - len))
+        edges.addLine(to: CGPoint(x: cx, y: cy))
+        edges.addLine(to: CGPoint(x: cx + dx, y: cy - len))
+        ctx.stroke(edges, with: .color(col.opacity(0.9)), lineWidth: 1.5)
+        ctx.fill(Path(ellipseIn: CGRect(x: cx - 4.5, y: cy - len + 4.5, width: 9, height: 9)), with: .color(lineInk))
+        ctx.fill(Path(roundedRect: CGRect(x: cx - 5, y: cy - 2, width: 10, height: 12), cornerRadius: 2), with: .color(lineInk.opacity(0.75)))
+        ctx.draw(Text("\(Int(ComposerWheels.fieldOfView(mm).rounded()))°").font(.system(size: 9.5, design: .monospaced)).foregroundColor(Color(hex: 0xA9A6A0)),
+                 at: CGPoint(x: min(cx + dx + 14, w - 14), y: cy - len + 8))
     }
 }
 
@@ -259,23 +261,26 @@ struct IrisPlate: View {
     var body: some View {
         ZStack {
             HardwareImage(name: render ?? "optic-01-iris").scaleEffect(1.25)
-            Canvas { ctx, size in
-                let r = size.height * (stop <= 1.6 ? 0.40 : stop <= 3.2 ? 0.27 : stop <= 6.4 ? 0.15 : 0.09)
-                let c = CGPoint(x: size.width / 2, y: size.height / 2)
-                var hex = Path()
-                for k in 0..<6 {
-                    let a = (30 + Double(k) * 60) * .pi / 180
-                    let p = CGPoint(x: c.x + r * cos(a), y: c.y + r * sin(a))
-                    if k == 0 { hex.move(to: p) } else { hex.addLine(to: p) }
-                }
-                hex.closeSubpath()
-                var mask = Path(CGRect(origin: .zero, size: size))
-                mask.addPath(hex)
-                ctx.fill(mask, with: .color(Color(hex: 0x080809, alpha: 0.58)), style: FillStyle(eoFill: true))
-                ctx.stroke(hex, with: .color(lineInk.opacity(0.55)), lineWidth: 1)
-            }
+            Canvas { ctx, size in draw(&ctx, size) }
         }
         .clipped()
+    }
+
+    private func draw(_ ctx: inout GraphicsContext, _ size: CGSize) {
+        let k: CGFloat = stop <= 1.6 ? 0.40 : (stop <= 3.2 ? 0.27 : (stop <= 6.4 ? 0.15 : 0.09))
+        let r = size.height * k
+        let c = CGPoint(x: size.width / 2, y: size.height / 2)
+        var hex = Path()
+        for k in 0..<6 {
+            let a = (30 + Double(k) * 60) * .pi / 180
+            let p = CGPoint(x: c.x + r * CGFloat(cos(a)), y: c.y + r * CGFloat(sin(a)))
+            if k == 0 { hex.move(to: p) } else { hex.addLine(to: p) }
+        }
+        hex.closeSubpath()
+        var mask = Path(CGRect(origin: .zero, size: size))
+        mask.addPath(hex)
+        ctx.fill(mask, with: .color(Color(hex: 0x080809, alpha: 0.58)), style: FillStyle(eoFill: true))
+        ctx.stroke(hex, with: .color(lineInk.opacity(0.55)), lineWidth: 1)
     }
 }
 
@@ -284,46 +289,48 @@ struct HeightDiagram: View {
     var id: String
     var on: Bool
     var body: some View {
-        Canvas { ctx, size in
-            let w = size.width, h = size.height
-            let ground = h - 10
-            var floor = Path()
-            floor.move(to: CGPoint(x: 8, y: ground)); floor.addLine(to: CGPoint(x: w - 8, y: ground))
-            ctx.stroke(floor, with: .color(lineInk.opacity(0.3)), lineWidth: 1)
-            // The figure on the right.
-            let fx = w * 0.7, top = ground - (h - 22)
-            let fh = ground - top
-            ctx.fill(Path(ellipseIn: CGRect(x: fx - 5, y: top, width: 10, height: 10)), with: .color(lineInk.opacity(0.85)))
-            var figure = Path()
-            figure.move(to: CGPoint(x: fx, y: top + 10)); figure.addLine(to: CGPoint(x: fx, y: top + fh * 0.6))
-            figure.move(to: CGPoint(x: fx, y: top + fh * 0.6)); figure.addLine(to: CGPoint(x: fx - 6, y: ground))
-            figure.move(to: CGPoint(x: fx, y: top + fh * 0.6)); figure.addLine(to: CGPoint(x: fx + 6, y: ground))
-            figure.move(to: CGPoint(x: fx - 9, y: top + fh * 0.3)); figure.addLine(to: CGPoint(x: fx + 9, y: top + fh * 0.3))
-            ctx.stroke(figure, with: .color(lineInk.opacity(0.85)), lineWidth: 1.6)
-            // The camera on the left at the height.
-            let frac: Double = {
-                switch id {
-                case "overhead": return 1.15
-                case "high": return 1.0
-                case "eye": return 0.9
-                case "shoulder": return 0.78
-                case "hip": return 0.5
-                case "low": return 0.32
-                case "worm": return 0.06
-                case "ground": return 0.02
-                default: return 0.9
-                }
-            }()
-            let camX = id == "overhead" ? fx - 4 : w * 0.24
-            let camY = max(8, ground - fh * CGFloat(frac))
-            let col = on ? amber : lineInk
-            ctx.fill(Path(roundedRect: CGRect(x: camX - 7, y: camY - 5, width: 14, height: 10), cornerRadius: 2), with: .color(col))
-            var sight = Path()
-            sight.move(to: CGPoint(x: camX + (id == "overhead" ? 0 : 7), y: camY + (id == "overhead" ? 5 : 0)))
-            sight.addLine(to: CGPoint(x: fx, y: top + fh * 0.25))
-            ctx.stroke(sight, with: .color(col.opacity(0.8)), style: StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
-        }
+        Canvas { ctx, size in draw(&ctx, size) }
         .background(Color(hex: 0x121315))
+    }
+
+    private func draw(_ ctx: inout GraphicsContext, _ size: CGSize) {
+        let w = size.width, h = size.height
+        let ground = h - 10
+        var floor = Path()
+        floor.move(to: CGPoint(x: 8, y: ground)); floor.addLine(to: CGPoint(x: w - 8, y: ground))
+        ctx.stroke(floor, with: .color(lineInk.opacity(0.3)), lineWidth: 1)
+        // The figure on the right.
+        let fx = w * 0.7, top = ground - (h - 22)
+        let fh = ground - top
+        ctx.fill(Path(ellipseIn: CGRect(x: fx - 5, y: top, width: 10, height: 10)), with: .color(lineInk.opacity(0.85)))
+        var figure = Path()
+        figure.move(to: CGPoint(x: fx, y: top + 10)); figure.addLine(to: CGPoint(x: fx, y: top + fh * 0.6))
+        figure.move(to: CGPoint(x: fx, y: top + fh * 0.6)); figure.addLine(to: CGPoint(x: fx - 6, y: ground))
+        figure.move(to: CGPoint(x: fx, y: top + fh * 0.6)); figure.addLine(to: CGPoint(x: fx + 6, y: ground))
+        figure.move(to: CGPoint(x: fx - 9, y: top + fh * 0.3)); figure.addLine(to: CGPoint(x: fx + 9, y: top + fh * 0.3))
+        ctx.stroke(figure, with: .color(lineInk.opacity(0.85)), lineWidth: 1.6)
+        // The camera on the left at the height.
+        let frac: Double = {
+            switch id {
+            case "overhead": return 1.15
+            case "high": return 1.0
+            case "eye": return 0.9
+            case "shoulder": return 0.78
+            case "hip": return 0.5
+            case "low": return 0.32
+            case "worm": return 0.06
+            case "ground": return 0.02
+            default: return 0.9
+            }
+        }()
+        let camX = id == "overhead" ? fx - 4 : w * 0.24
+        let camY = max(8, ground - fh * CGFloat(frac))
+        let col = on ? amber : lineInk
+        ctx.fill(Path(roundedRect: CGRect(x: camX - 7, y: camY - 5, width: 14, height: 10), cornerRadius: 2), with: .color(col))
+        var sight = Path()
+        sight.move(to: CGPoint(x: camX + (id == "overhead" ? 0 : 7), y: camY + (id == "overhead" ? 5 : 0)))
+        sight.addLine(to: CGPoint(x: fx, y: top + fh * 0.25))
+        ctx.stroke(sight, with: .color(col.opacity(0.8)), style: StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
     }
 }
 
@@ -332,49 +339,51 @@ struct FramingDiagram: View {
     var id: String
     var on: Bool
     var body: some View {
-        Canvas { ctx, size in
-            let w = size.width, h = size.height
-            // The figure, always the same size; the frame tightens around it.
-            let fx = w / 2, top: CGFloat = 10, fh = h - 16
-            var fig = Path()
-            fig.addEllipse(in: CGRect(x: fx - 5, y: top, width: 10, height: 10))
-            fig.move(to: CGPoint(x: fx, y: top + 10)); fig.addLine(to: CGPoint(x: fx, y: top + fh * 0.6))
-            fig.move(to: CGPoint(x: fx, y: top + fh * 0.6)); fig.addLine(to: CGPoint(x: fx - 6, y: top + fh))
-            fig.move(to: CGPoint(x: fx, y: top + fh * 0.6)); fig.addLine(to: CGPoint(x: fx + 6, y: top + fh))
-            fig.move(to: CGPoint(x: fx - 9, y: top + fh * 0.3)); fig.addLine(to: CGPoint(x: fx + 9, y: top + fh * 0.3))
-            ctx.stroke(fig, with: .color(lineInk.opacity(0.7)), lineWidth: 1.4)
-            if id == "two_shot" || id == "ots" {
-                let ox = id == "ots" ? fx - 26 : fx + 24
-                var b = Path()
-                b.addEllipse(in: CGRect(x: ox - 5, y: top + (id == "ots" ? 6 : 0), width: id == "ots" ? 16 : 10, height: id == "ots" ? 16 : 10))
-                ctx.stroke(b, with: .color(lineInk.opacity(0.5)), lineWidth: 1.4)
-            }
-            // The frame: (top, bottom) as fractions of the figure.
-            let span: (Double, Double, Double) = {
-                switch id {
-                case "els": return (-0.25, 1.25, 2.6)
-                case "ls": return (-0.12, 1.08, 1.5)
-                case "full": return (-0.06, 1.04, 1.0)
-                case "cowboy": return (-0.05, 0.72, 0.9)
-                case "ms": return (-0.05, 0.55, 0.8)
-                case "mcu": return (-0.04, 0.4, 0.7)
-                case "cu": return (-0.03, 0.22, 0.6)
-                case "ecu": return (0.0, 0.08, 0.45)
-                case "insert": return (0.25, 0.45, 0.45)
-                case "two_shot": return (-0.08, 0.6, 1.3)
-                case "ots": return (-0.06, 0.5, 1.2)
-                case "pov": return (0.1, 0.9, 1.3)
-                default: return (-0.05, 0.55, 0.8)
-                }
-            }()
-            let y0 = top + fh * CGFloat(span.0), y1 = top + fh * CGFloat(span.1)
-            let fhgt = max(8, y1 - y0)
-            let fw = min(w - 6, fhgt * CGFloat(span.2) * 0.9)
-            let shift: CGFloat = id == "ots" ? -8 : (id == "two_shot" ? 12 : 0)
-            let rect = CGRect(x: fx - fw / 2 + shift, y: max(3, y0), width: fw, height: min(h - 6, fhgt))
-            ctx.stroke(Path(rect), with: .color(on ? amber : lineInk), style: StrokeStyle(lineWidth: 1.5, dash: id == "pov" ? [4, 3] : []))
-        }
+        Canvas { ctx, size in draw(&ctx, size) }
         .background(Color(hex: 0x121315))
+    }
+
+    private func draw(_ ctx: inout GraphicsContext, _ size: CGSize) {
+        let w = size.width, h = size.height
+        // The figure, always the same size; the frame tightens around it.
+        let fx = w / 2, top: CGFloat = 10, fh = h - 16
+        var fig = Path()
+        fig.addEllipse(in: CGRect(x: fx - 5, y: top, width: 10, height: 10))
+        fig.move(to: CGPoint(x: fx, y: top + 10)); fig.addLine(to: CGPoint(x: fx, y: top + fh * 0.6))
+        fig.move(to: CGPoint(x: fx, y: top + fh * 0.6)); fig.addLine(to: CGPoint(x: fx - 6, y: top + fh))
+        fig.move(to: CGPoint(x: fx, y: top + fh * 0.6)); fig.addLine(to: CGPoint(x: fx + 6, y: top + fh))
+        fig.move(to: CGPoint(x: fx - 9, y: top + fh * 0.3)); fig.addLine(to: CGPoint(x: fx + 9, y: top + fh * 0.3))
+        ctx.stroke(fig, with: .color(lineInk.opacity(0.7)), lineWidth: 1.4)
+        if id == "two_shot" || id == "ots" {
+            let ox = id == "ots" ? fx - 26 : fx + 24
+            var b = Path()
+            b.addEllipse(in: CGRect(x: ox - 5, y: top + (id == "ots" ? 6 : 0), width: id == "ots" ? 16 : 10, height: id == "ots" ? 16 : 10))
+            ctx.stroke(b, with: .color(lineInk.opacity(0.5)), lineWidth: 1.4)
+        }
+        // The frame: (top, bottom) as fractions of the figure.
+        let span: (Double, Double, Double) = {
+            switch id {
+            case "els": return (-0.25, 1.25, 2.6)
+            case "ls": return (-0.12, 1.08, 1.5)
+            case "full": return (-0.06, 1.04, 1.0)
+            case "cowboy": return (-0.05, 0.72, 0.9)
+            case "ms": return (-0.05, 0.55, 0.8)
+            case "mcu": return (-0.04, 0.4, 0.7)
+            case "cu": return (-0.03, 0.22, 0.6)
+            case "ecu": return (0.0, 0.08, 0.45)
+            case "insert": return (0.25, 0.45, 0.45)
+            case "two_shot": return (-0.08, 0.6, 1.3)
+            case "ots": return (-0.06, 0.5, 1.2)
+            case "pov": return (0.1, 0.9, 1.3)
+            default: return (-0.05, 0.55, 0.8)
+            }
+        }()
+        let y0 = top + fh * CGFloat(span.0), y1 = top + fh * CGFloat(span.1)
+        let fhgt = max(8, y1 - y0)
+        let fw = min(w - 6, fhgt * CGFloat(span.2) * 0.9)
+        let shift: CGFloat = id == "ots" ? -8 : (id == "two_shot" ? 12 : 0)
+        let rect = CGRect(x: fx - fw / 2 + shift, y: max(3, y0), width: fw, height: min(h - 6, fhgt))
+        ctx.stroke(Path(rect), with: .color(on ? amber : lineInk), style: StrokeStyle(lineWidth: 1.5, dash: id == "pov" ? [4, 3] : []))
     }
 }
 

@@ -113,7 +113,7 @@ extension FakeMuseAPI {
                              warnings: warnings, camera: SuiteEstimateCamera(moves: moves), prompt: suitePrompt(r), test: true,
                              speaking: SuiteSpeaking(speaking: speaking, source: r.speaking == nil ? "default" : "switch"), cast: cast,
                              keepAudio: mode == "recast" || mode == "swap" ? (r.keepAudio ?? true) : nil)
-        e.look = mode == "recast" ? nil : SuiteLooks.look(for: r, camera: SuiteDemoCatalog.catalog.camera)
+        e.look = SuiteLooks.look(for: r, camera: SuiteDemoCatalog.catalog.camera)
         if suiteIsOwner {
             e.engine = SuiteEngine(model: p.model, name: p.name, provider: p.provider, resolution: p.resolution, perSec: p.perSec, billedPerTake: seconds, test: true)
         }

@@ -57,8 +57,8 @@ public enum ComposerTool: String, CaseIterable, Sendable, Identifiable {
     public var chips: [ComposerChip] {
         switch self {
         case .shot: return ComposerChip.allCases
-        case .swap: return [.look]
-        case .recast, .extend: return []
+        case .swap, .recast: return [.look]
+        case .extend: return []
         case .talking: return [.camera, .look, .lighting]
         case .ugc: return [.style]
         case .storyboard: return [.style, .look]

@@ -46,7 +46,7 @@ final class SuiteComposerShellTests: XCTestCase {
         XCTAssertEqual(ComposerSlots.cards(.shot, inputs: .none).map(\.slot), [.character])
         XCTAssertEqual(ComposerTool.shot.chips, ComposerChip.allCases)
         XCTAssertEqual(ComposerTool.swap.chips, [.look])
-        XCTAssertEqual(ComposerTool.recast.chips, [])
+        XCTAssertEqual(ComposerTool.recast.chips, [.look])
         XCTAssertEqual(ComposerTool.talking.chips, [.camera, .look, .lighting])
         XCTAssertEqual(ComposerTool.shell.filter(\.comingSoon), [.talking, .ugc, .extend])
         XCTAssertEqual(ComposerSlot.clip.caption, "Clip 3–30 s")

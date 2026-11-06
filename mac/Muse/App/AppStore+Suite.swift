@@ -416,12 +416,7 @@ extension AppStore {
             guard let m = d.modelId else { return nil }
             var r = ShotRequest(mode: "swap", title: "\(character(m)?.shortName ?? "Swap") · swap", modelId: m, outfitId: d.outfitId ?? outfits(for: character(m)).first?.id,
                                 prompt: d.promptOn ? suite.composer.tokens.promptText() : "", quality: d.quality, speaking: d.speaking.value, clipId: c.id, keepAudio: d.keepAudio)
-            // Swap shows only the Look chip: camera and light come from the clip.
-            let look = suite.composer.settings
-            if look.palette != nil || look.stock != nil {
-                r.camera = CameraSpec(mode: "preset", rig: look.stock.map { CameraRig(look: $0) }, palette: look.palette.map { CameraPalette(preset: $0) })
-                if !look.gradeLook { r.gradeLook = false }
-            }
+            applyLook(&r)
             if d.promptOn, let mv = suite.composer.tokens.moves.first?.move {
                 var cam = r.camera ?? CameraSpec(mode: "preset")
                 cam.move = mv
@@ -430,8 +425,18 @@ extension AppStore {
             return r
         case .recast:
             guard !d.cast.isEmpty else { return nil }
-            return .recast(clipId: c.id, cast: d.cast, quality: d.quality, keepAudio: d.keepAudio, title: "Recast · \(c.name)")
+            var r = ShotRequest.recast(clipId: c.id, cast: d.cast, quality: d.quality, keepAudio: d.keepAudio, title: "Recast · \(c.name)")
+            applyLook(&r)
+            return r
         }
+    }
+
+    /// Swap and Recast show only the Look chip: camera and light come from the clip.
+    private func applyLook(_ r: inout ShotRequest) {
+        let look = suite.composer.settings
+        guard look.palette != nil || look.stock != nil else { return }
+        r.camera = CameraSpec(mode: "preset", rig: look.stock.map { CameraRig(look: $0) }, palette: look.palette.map { CameraPalette(preset: $0) })
+        if !look.gradeLook { r.gradeLook = false }
     }
 
     func estimateSwap() async {
