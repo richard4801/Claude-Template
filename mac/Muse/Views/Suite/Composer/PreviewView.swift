@@ -11,6 +11,8 @@ struct PreviewView: View {
     var fallback = ""
     /// Play the loop while the tile is visible (Movement); otherwise only on hover.
     var autoplay = false
+    /// With Reduce motion on, loops play only under the pointer (a Movement page otherwise runs a dozen at once).
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovering = false
     @State private var looper: StageLooper?
 
@@ -25,11 +27,13 @@ struct PreviewView: View {
         }
         .onHover { h in
             hovering = h
-            if h { start() } else if !autoplay { stop() }
+            if h { start() } else if !playsOnScreen { stop() }
         }
-        .onAppear { if autoplay { start() } }
+        .onAppear { if playsOnScreen { start() } }
         .onDisappear { stop() }
     }
+
+    private var playsOnScreen: Bool { autoplay && !reduceMotion }
 
     private var videoURL: URL? {
         guard let v = preview.video, !v.isEmpty else { return nil }

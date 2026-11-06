@@ -23,7 +23,8 @@ struct DirectedBody: View {
                 case .history: CameraHistoryTab(session: session, now: model.now).padding(.horizontal, 28).padding(.vertical, 14)
                 }
             }
-            .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
+            // 340, not 560: with the chat beside it, 560 overflowed the Camera picker (663 px) and 1100–1280 px windows.
+            .frame(minWidth: 340, maxWidth: .infinity, maxHeight: .infinity)
             DirectChatPanel(model: model, session: session, useLabel: useLabel, onUse: onUse) { showConnections = true }
         }
         .sheet(isPresented: $showConnections) {
@@ -73,7 +74,7 @@ struct DirectedBody: View {
                 .frame(minHeight: 260, maxHeight: .infinity)
                 .overlay(Rectangle().strokeBorder(t.line, lineWidth: 1))
                 CameraPlanLegend(session: session, editable: model.viewMode == .plan)
-                if let e = model.applyError, model.tab == .blocking { Text(e).font(t.body(12)).foregroundStyle(t.accent) }
+                if let e = model.applyError, model.tab == .blocking { Text(e).font(t.body(12)).foregroundStyle(t.rec) }
             }
             .padding(.horizontal, 28)
             .padding(.top, 14)
@@ -90,23 +91,61 @@ struct SessionStrip: View {
     var session: CameraSession
 
     var body: some View {
-        HStack(spacing: 12) {
-            Button { CameraModel.copy(session.id) } label: {
-                Text(CameraText.idChip(session.id).uppercased()).font(t.mono(11, .medium)).tracking(0.8).foregroundStyle(t.bg)
-                    .padding(.horizontal, 9).frame(height: 24)
-                    .background(RoundedRectangle(cornerRadius: t.isA ? 0 : 4).fill(t.ink))
+        // One row when it fits; otherwise (the Camera picker's Directed step, a 1100–1280 px window) id + title over the
+        // view switch, then the meta line and Re-render, instead of running off the edge.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                idChip
+                title
+                meta
+                Spacer(minLength: 8)
+                views.frame(width: t.isA ? 260 : 300)
+                rerender
             }
-            .buttonStyle(.plain)
-            .help("Copy the session id (\(session.id)) · say “Open camera session \(session.id)” to your Claude")
-            Text(session.title).font(t.body(14, .bold)).foregroundStyle(t.ink).lineLimit(2)
-            Text(CameraText.stripMeta(session)).font(t.mono(11.5)).foregroundStyle(t.muted).lineLimit(1)
-            Spacer(minLength: 8)
-            Seg(CameraModel.ViewMode.allCases.map { ($0, $0.rawValue) }, selection: $model.viewMode)
-                .frame(width: t.isA ? 260 : 300)
-            MButton("Re-render", icon: "arrow.clockwise", size: .small, off: model.busy) { model.rerender() }
-                .help(model.busy ? CameraText.chatBusy : "Ask Claude to render the guides again for this revision")
+            .frame(minHeight: 40)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 12) {
+                    idChip
+                    title
+                    Spacer(minLength: 0)
+                }
+                views.frame(maxWidth: t.isA ? 260 : 300)
+                HStack(spacing: 12) {
+                    meta
+                    Spacer(minLength: 8)
+                    rerender
+                }
+            }
+            .padding(.vertical, 4)
         }
-        .frame(minHeight: 40)
+    }
+
+    private var idChip: some View {
+        Button { CameraModel.copy(session.id) } label: {
+            Text(CameraText.idChip(session.id).uppercased()).font(t.mono(11, .medium)).tracking(0.8).foregroundStyle(t.bg)
+                .padding(.horizontal, 9).frame(height: 24)
+                .background(RoundedRectangle(cornerRadius: t.isA ? 0 : 4).fill(t.ink))
+        }
+        .buttonStyle(.plain)
+        .help("Copy the session id (\(session.id)) · say “Open camera session \(session.id)” to your Claude")
+        .accessibilityLabel("Copy the session id")
+    }
+
+    private var title: some View {
+        Text(session.title).font(t.body(14, .bold)).foregroundStyle(t.ink).lineLimit(2)
+    }
+
+    private var meta: some View {
+        Text(CameraText.stripMeta(session)).font(t.mono(11.5)).foregroundStyle(t.muted).lineLimit(1)
+    }
+
+    private var views: some View {
+        Seg(CameraModel.ViewMode.allCases.map { ($0, $0.rawValue) }, selection: $model.viewMode)
+    }
+
+    private var rerender: some View {
+        MButton("Re-render", icon: "arrow.clockwise", size: .small, off: model.busy) { model.rerender() }
+            .help(model.busy ? CameraText.chatBusy : "Ask Claude to render the guides again for this revision")
     }
 }
 

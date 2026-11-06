@@ -412,7 +412,7 @@ struct CameraMovementStep: View {
         let inPrompt = Set(store.suite.composer.tokens.moves.compactMap { $0.move?.id })
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
-                Text("Tap to add to your prompt").font(t.body(13))
+                Text("Click to add to your prompt").font(t.body(13))
                 Text("·").foregroundStyle(t.muted)
                 HStack(spacing: 4) {
                     Text("or type").foregroundStyle(t.muted)
@@ -475,12 +475,9 @@ struct MoveTile: View {
                         .overlay { if !pv.hasRender { MoveArrow(move: move) } }
                     VStack(alignment: .leading, spacing: 4) {
                         if talkSafeBadge { badge("Talk-safe", icon: "text.bubble") }
-                        if move.editorBetter { badge("Better done in Edit", icon: "scissors") }
+                        if move.editorBetter { badge("Better in Edit", icon: "scissors") }
                     }
                     .padding(8)
-                    if inPrompt {
-                        PickCheck().padding(8).frame(maxWidth: .infinity, alignment: .topTrailing)
-                    }
                 }
                 .frame(height: 130)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -498,6 +495,7 @@ struct MoveTile: View {
         HStack(spacing: 5) {
             Image(systemName: icon).font(.system(size: 9))
             Text(text.uppercased()).font(Fonts.font("JetBrains Mono", 9.5, .medium)).tracking(0.6)
+                .lineLimit(1).minimumScaleFactor(0.8)
         }
         .foregroundStyle(Color(hex: 0xECEAE5))
         .padding(.leading, 6).padding(.trailing, 8).frame(height: 20)

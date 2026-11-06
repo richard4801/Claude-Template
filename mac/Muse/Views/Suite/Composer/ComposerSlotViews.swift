@@ -62,7 +62,8 @@ struct ComposerSlotCardView: View {
                     }
                     .padding(.horizontal, 8).padding(.bottom, 7)
                 }
-                .frame(width: size, height: size).clipped()
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: t.imageRadius))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -87,8 +88,8 @@ struct ComposerSlotCardView: View {
                 Text(cast.isEmpty ? card.caption : "\(cast.count) of \(store.suite.catalog?.recastMaxPeople ?? 4) · edit").font(t.body(10.5)).foregroundStyle(t.muted)
             }
             .frame(width: size, height: size)
-            .background(t.bg)
-            .overlay(Rectangle().strokeBorder(t.line, style: StrokeStyle(lineWidth: 1, dash: cast.isEmpty ? [4, 3] : [])))
+            .background(RoundedRectangle(cornerRadius: t.imageRadius).fill(t.bg))
+            .overlay(RoundedRectangle(cornerRadius: t.imageRadius).strokeBorder(t.line, style: StrokeStyle(lineWidth: 1, dash: cast.isEmpty ? [4, 3] : [])))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -102,7 +103,7 @@ struct ComposerSlotCardView: View {
     }
 }
 
-/// An empty slot card: dashed square, "+", the caps label, its caption and an Optional pill.
+/// An empty slot card: dashed outline, "+", the caps label, its caption and an "Optional" caption.
 struct EmptySlotCard: View {
     @Environment(\.theme) private var t
     var card: ComposerSlotCard
@@ -111,12 +112,14 @@ struct EmptySlotCard: View {
 
     var body: some View {
         let off = disabled || card.waiting
+        let shape = RoundedRectangle(cornerRadius: t.imageRadius)
+        // Quieter than before: the + sits on a plain disc (no ring) and "Optional" is a caption, not a boxed pill, so the
+        // dashed outline is the card's only line.
         Button(action: action) {
             VStack(spacing: 5) {
                 Image(systemName: "plus").font(.system(size: 13, weight: .medium))
                     .frame(width: 30, height: 30)
-                    .background(Circle().fill(t.surface))
-                    .overlay(Circle().strokeBorder(t.line, lineWidth: 1))
+                    .background(Circle().fill(t.surface2))
                     .padding(.bottom, 3)
                 Text(card.slot.label.uppercased()).font(t.mono(10, .medium)).tracking(1).lineLimit(1).minimumScaleFactor(0.8)
                 Text(card.caption).font(t.body(10.5)).foregroundStyle(t.muted).multilineTextAlignment(.center).lineLimit(2).padding(.horizontal, 6)
@@ -124,14 +127,13 @@ struct EmptySlotCard: View {
             .opacity(off ? 0.42 : 1)
             .padding(.top, card.optional ? 14 : 0)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(off ? Color.clear : t.bg)
-            .overlay(Rectangle().strokeBorder(off ? t.line : t.muted.opacity(0.55), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+            .background(shape.fill(off ? Color.clear : t.bg))
+            .overlay(shape.strokeBorder(off ? t.line : t.muted.opacity(0.55), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
             .overlay(alignment: .topTrailing) {
                 if card.optional {
                     Text("OPTIONAL").font(t.mono(8.5, .medium)).tracking(0.7).foregroundStyle(t.muted)
-                        .padding(.horizontal, 5).frame(height: 16)
-                        .background(t.surface).overlay(Rectangle().strokeBorder(t.line, lineWidth: 1))
-                        .padding(6)
+                        .padding(.top, 7).padding(.trailing, 8)
+                        .opacity(off ? 0.42 : 1)
                 }
             }
             .contentShape(Rectangle())
@@ -174,6 +176,7 @@ struct CharacterSlot: View {
                 MuseImage(ref: m.cover).frame(width: size, height: size).clipped()
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Character: \(m.shortName). Change")
             LinearGradient(colors: [.clear, Color(hex: 0x0E0C0A, alpha: 0.78)], startPoint: .center, endPoint: .bottom).allowsHitTesting(false)
             VStack(alignment: .leading, spacing: 1) {
                 Text(m.shortName).font(t.body(13, .semibold)).foregroundStyle(Color(hex: 0xF8F5EF)).lineLimit(1)
@@ -197,9 +200,10 @@ struct CharacterSlot: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             .accessibilityLabel("Remove \(m.shortName)")
             .opacity(isSwap ? 0 : 1)
+            .accessibilityHidden(isSwap)
         }
         .frame(width: size, height: size)
-        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: t.imageRadius))
     }
 
     private var picker: some View {
@@ -308,8 +312,8 @@ struct CollapsedComposer: View {
                 Text(r).font(t.mono(11, .medium)).tracking(1)
             }
             .frame(width: 108, height: 108)
-            .background(on ? t.surface : t.bg)
-            .overlay(Rectangle().strokeBorder(on ? t.ink : t.line, lineWidth: on ? 2 : 1))
+            .background(RoundedRectangle(cornerRadius: t.imageRadius).fill(on ? t.surface : t.bg))
+            .overlay(RoundedRectangle(cornerRadius: t.imageRadius).strokeBorder(on ? t.ink : t.line, lineWidth: on ? 2 : 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
