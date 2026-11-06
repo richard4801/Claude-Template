@@ -125,7 +125,8 @@ fun RigCheckRow(
         enter = fadeIn(tween(180)) + expandVertically(tween(220), expandFrom = Alignment.Bottom),
         exit = fadeOut(tween(150)) + shrinkVertically(tween(200), shrinkTowards = Alignment.Bottom)) {
         val shape = RoundedCornerShape(if (m.isA) 0.dp else 10.dp)
-        Column(Modifier.fillMaxWidth().clip(shape).background(m.t.surface2).border(if (m.isD) 2.dp else 1.dp, m.t.line, shape).animateContentSize(tween(200))) {
+        // A tinted panel with no outline: it sits between the slot cards and the bar, which already carry borders.
+        Column(Modifier.fillMaxWidth().clip(shape).background(m.t.surface2).animateContentSize(tween(200))) {
             val rows = if (expanded) list else list.take(1)
             rows.forEachIndexed { i, w ->
                 key(RigDismissals.key(w)) {

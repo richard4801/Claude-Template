@@ -27,4 +27,11 @@ public enum Contrast {
         func m(_ s: UInt32) -> UInt32 { UInt32((c(fg, s) * alpha + c(bg, s) * (1 - alpha)).rounded()) }
         return (m(16) << 16) | (m(8) << 8) | m(0)
     }
+
+    /// The text colour for a solid `fill` (a filled tag, a badge): white or near-black, whichever reads better on it.
+    /// White wins a tie. Used where a theme's fill is light in one theme and dark in another (Camera Body's green, amber).
+    public static let darkInk: UInt32 = 0x111111
+    public static func bestInk(on fill: UInt32) -> UInt32 {
+        ratio(0xFFFFFF, fill) >= ratio(darkInk, fill) ? 0xFFFFFF : darkInk
+    }
 }

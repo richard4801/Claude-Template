@@ -5,6 +5,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -82,10 +87,13 @@ fun SuiteHubScreen() {
     val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { store.load() }
     ScreenBox {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(top = 10.dp, bottom = 110.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Wordmark(); Spacer(Modifier.weight(1f)); Ic("bell", 22.dp, m.t.ink)
-            }
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+        // Tablets: three mode tiles a row (two would be 400 dp wide strips) and a readable column.
+        val cols = if (maxWidth >= 600.dp) 3 else 2
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(top = 10.dp, bottom = 110.dp)
+            .widthIn(max = 960.dp).align(Alignment.TopCenter), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // The wordmark alone: a bell here did nothing when tapped (Home's bell is the one with the render status).
+            Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) { Wordmark() }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
                 T("Video suite", m.type.h2, m.t.ink, Modifier.weight(1f), upper = m.isB, maxLines = 1)
                 Pill(creditLabel(st.wallet, st.balance))
@@ -95,11 +103,18 @@ fun SuiteHubScreen() {
             if (catalog != null && !catalog.enabled) {
                 SuiteOff(store.owner || prefs.owner)
             } else {
-                if (err != null && catalog == null) NoteBox(err!!, warn = true) { T("Try again", m.type.tiny.copy(fontWeight = FontWeight.Bold), m.t.accent, Modifier.press { scope.launch { store.load() } }) }
-                SUITE_MODES.chunked(2).forEach { row ->
+                // The reason and Try again (NoteBox with content drops its text, so both go in the content).
+                if (err != null && catalog == null) NoteBox(err!!, warn = true) {
+                    T(err!!, m.type.body.copy(fontSize = 13.sp, lineHeight = 18.sp), m.t.ink, Modifier.weight(1f))
+                    Box(Modifier.heightIn(min = 48.dp).press { scope.launch { store.load() } }.semantics { role = Role.Button }, contentAlignment = Alignment.Center) {
+                        T("Try again", m.type.tiny.copy(fontWeight = FontWeight.Bold), m.link)
+                    }
+                }
+                SUITE_MODES.chunked(cols).forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         // "Coming soon" follows the catalog's `tools` (an older catalog: the built-in list).
                         row.forEach { mode -> ModeTile(mode.copy(soon = !(catalog?.toolAvailable(if (mode.id == "ugc") "ugc_ad" else mode.id, !mode.soon) ?: !mode.soon)), Modifier.weight(1f)) { nav.go(mode.route) } }
+                        repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
                 LinkCard("cube", "Camera stage", "Direct the camera in Blender · Directed mode") { nav.go(Routes.CAMERA_STAGE) }
@@ -107,13 +122,15 @@ fun SuiteHubScreen() {
                 val recent = st.jobs.filter { it.request.engine == SuiteRules.ENGINE }.take(8)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     SLbl("Recent takes", Modifier.weight(1f))
-                    T("All →", m.type.tiny, m.t.muted, Modifier.press { nav.tab(Routes.GALLERY) })
+                    Box(Modifier.heightIn(min = 48.dp).widthIn(min = 48.dp).press { nav.tab(Routes.GALLERY) }.semantics { contentDescription = "All takes"; role = Role.Button },
+                        contentAlignment = Alignment.CenterEnd) { T("All →", m.type.tiny, m.t.muted) }
                 }
                 if (recent.isEmpty()) Tiny("Your shots show up here while they render and when they're ready.")
                 else Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     recent.forEach { j -> RecentTile(j, st.takes.filter { it.jobId == j.id }) { nav.go(Routes.suiteTake(j.id)) } }
                 }
             }
+        }
         }
         TabBar(Routes.SUITE)
     }
@@ -141,10 +158,10 @@ fun LinkCard(icon: String, title: String, sub: String, onClick: () -> Unit) {
     val m = muse
     Row(Modifier.fillMaxWidth().suiteCard(m).press(onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Box(Modifier.size(30.dp, 44.dp).background(m.t.surface2), contentAlignment = Alignment.Center) { SIc(icon, 18.dp, m.t.muted) }
+        Box(Modifier.size(30.dp, 44.dp).clip(RoundedCornerShape(if (m.isA) 0.dp else 6.dp)).background(m.t.surface2), contentAlignment = Alignment.Center) { SIc(icon, 18.dp, m.t.muted) }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             T(title, m.type.body.copy(fontSize = 13.5.sp, fontWeight = FontWeight.Bold), m.t.ink, maxLines = 1)
-            T(sub, m.type.tiny.copy(fontSize = 12.sp), m.t.muted, maxLines = 1)
+            T(sub, m.type.tiny.copy(fontSize = 12.sp), m.t.muted, maxLines = 2)
         }
         SIc("chev", 18.dp, m.t.ink)
     }
@@ -154,7 +171,8 @@ fun LinkCard(icon: String, title: String, sub: String, onClick: () -> Unit) {
 private fun RecentTile(j: Job, takes: List<studio.muse.app.data.Take>, onClick: () -> Unit) {
     val m = muse
     val pane = SuitePane.of(j, takes, j.modelName)
-    Column(Modifier.width(72.dp).press(onClick = onClick), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(Modifier.width(72.dp).press(onClick = onClick).semantics(mergeDescendants = true) { contentDescription = "${j.title}, ${pane.badge.ifBlank { "ready" }}" },
+        verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Box(Modifier.size(72.dp, 128.dp).clip(RoundedCornerShape(if (m.isA) 0.dp else 8.dp))) {
             when (pane.phase) {
                 StagePhase.READY -> { RefImage(takes.firstOrNull()?.thumb ?: j.thumb, Modifier.fillMaxSize(), 20)
@@ -189,7 +207,7 @@ fun SuiteOff(owner: Boolean) {
             }
             Row(Modifier.fillMaxWidth().background(m.t.surface2).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 T(SuiteRules.MODE_VAR, m.type.mono.copy(fontSize = 14.sp), m.t.ink, Modifier.weight(1f))
-                Row(Modifier.press { clip.setText(AnnotatedString(SuiteRules.MODE_VAR)); c.repo.toast("Copied ${SuiteRules.MODE_VAR}") }.semantics { contentDescription = "Copy ${SuiteRules.MODE_VAR}" },
+                Row(Modifier.heightIn(min = 48.dp).press { clip.setText(AnnotatedString(SuiteRules.MODE_VAR)); c.repo.toast("Copied ${SuiteRules.MODE_VAR}") }.semantics { contentDescription = "Copy ${SuiteRules.MODE_VAR}" },
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     SIc("copy", 16.dp, m.t.ink); T("Copy", m.type.tiny.copy(fontWeight = FontWeight.Bold), m.t.ink)
                 }
