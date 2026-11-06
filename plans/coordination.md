@@ -60,6 +60,20 @@ Assignments (each workstream branches from `claude/ecstatic-rubin-2egjfb` at `da
 - **WS2, MCP bridge (`claude/muse-mcp-bridge`):** 7 (`railway.json` migration), and getting 2–3 ready for the owner (the checklist is in `plans/claude-editing.md`). Item 6 (RunPod) waits for the owner's OK on spend.
 - **Shared files:** WS1, WS3 and WS4 all touch the composer. Rig-check UI goes in its own file/component; wheels are confined to the picker files; WS1 owns the bottom bar.
 
+### Added 2026-11-06 (owner): Photoshoot folds into the AI Suite, plus a whole-app professional review
+- **Owner's decisions:**
+  - Photoshoot is **removed fully** and becomes a **Photo** tool on the suite composer, with the full rig (camera, lens, focal length, aperture, angle, lighting, look, style).
+  - Templates become Photo presets. Old shoots stay in the library.
+  - Icons: **one professional set**, used everywhere.
+  - The review is **split across sessions**.
+- **Rules for every session:** load the skill `.claude/skills/muse-design-review/SKILL.md`. The direction lives in `plans/design-direction.md` (WS4 writes it first).
+- **WS3:** the Photo tool. Server: a suite tool `photo` reusing the shoots pipeline, the rig compiled for stills (no movement or tempo), the rig-check subset. Both apps: the Photo tool card plus presets from the templates. Remove the Photoshoot entry points, with a redirect, and keep shoot history.
+- **WS4:**
+  1. Pause audit-2 and fold its findings in.
+  2. Write `plans/design-direction.md` plus 3 key screens (Home, composer, a picker) for the owner to approve.
+  3. Restyle **part A**: the AI Suite, pickers and Edit suite. Do the composer after WS1 and WS3 merge.
+- **WS2:** a **performance pass** across both apps now (startup, scrolling, image sizes, duplicate requests). After the direction is approved, restyle **part B**: Home, Library, Cast and models, LoRA, Settings, onboarding, chat.
+
 When resuming:
 1. Finish and merge Extend and Upscale.
 2. The owner's Mac first-run checklist (`plans/claude-editing.md`).
