@@ -55,6 +55,8 @@ export const ShotRequestSchema = z.object({
    */
   speaking: z.boolean().optional(),
   camera: CameraSpecSchema.optional(),
+  /** "Grade the take with this look" (composer, on by default): the Look's LUT is applied after the render as an editable Look. */
+  gradeLook: z.boolean().default(true),
   seed: z.number().int().min(0).max(2147483647).optional(),
   /** Owner only: a registry model id (and resolution) instead of the ladder. */
   engineModel: z.string().max(40).optional(),

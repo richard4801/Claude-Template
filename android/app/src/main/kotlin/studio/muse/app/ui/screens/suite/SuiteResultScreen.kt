@@ -77,11 +77,8 @@ fun SuiteResultScreen(jobId: String) {
     val pane = SuitePane.of(job, st.takes, job?.modelName)
     val retake: () -> Unit = {
         scope.launch {
-            when (jobId) {
-                in store.shotJobs.value -> store.generate(store.shot.value.request(), store.shotJobs)?.let { nav.go(Routes.suiteTake(it.id)) }
-                in store.swapJobs.value -> store.generate(store.recast.value.request(), store.swapJobs)?.let { nav.go(Routes.suiteTake(it.id)) }
-                else -> nav.go(Routes.SUITE_SHOT)
-            }
+            val again = store.requests.value[jobId]
+            if (again != null) store.generate(again, store.shotJobs)?.let { nav.go(Routes.suiteTake(it.id)) } else nav.go(Routes.SUITE_SHOT)
         }
     }
     ScreenBox {

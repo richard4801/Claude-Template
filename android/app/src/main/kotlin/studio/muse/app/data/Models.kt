@@ -249,6 +249,8 @@ data class Take(
     val variation: Map<String, String>? = null,
     /** Photoshoot stills: the reference images it was shot with (2026-11-05). */
     val refs: List<ShootRef>? = null,
+    /** AI suite (workstream 1): a suite take's Look; the Edit suite opens with it applied. */
+    val look: SuiteLook? = null,
 ) {
     val final get() = status == "final"
     val shot get() = kind == "shot"
@@ -730,7 +732,9 @@ data class ImageEnginePatch(val provider: String, val model: String? = null, val
 data class PresignRequest(val kind: String, val contentType: String, val bytes: Long? = null)
 
 @Serializable
-data class PresignResponse(val uploadId: String, val method: String = "PUT", val url: String, val headers: Map<String, String> = emptyMap(), val expiresAt: Long = 0)
+data class PresignResponse(val uploadId: String, val method: String = "PUT", val url: String, val headers: Map<String, String> = emptyMap(), val expiresAt: Long = 0,
+    /** AI suite (workstream 1): the editor presign's stored-file URL (…/uploads/<key>). */
+    val fileUrl: String? = null)
 
 @Serializable
 data class ConfirmClipRequest(val meta: ClipMeta)

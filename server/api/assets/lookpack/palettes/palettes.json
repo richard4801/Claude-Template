@@ -1,0 +1,216 @@
+{
+ "version": 1,
+ "cubeSize": 17,
+ "looks": [
+  {
+   "id": "bleached_warm",
+   "name": "Bleached warm",
+   "kind": "palette",
+   "file": "bleached_warm.cube",
+   "lut": "palette:bleached_warm",
+   "swatches": [
+    "#4A4038",
+    "#8A7562",
+    "#C4A788",
+    "#E3CDB0",
+    "#F7EBD8"
+   ]
+  },
+  {
+   "id": "hyper_neon",
+   "name": "Hyper neon",
+   "kind": "palette",
+   "file": "hyper_neon.cube",
+   "lut": "palette:hyper_neon",
+   "swatches": [
+    "#14061F",
+    "#5A0F7A",
+    "#E0218A",
+    "#1FD6E8",
+    "#F6F0FF"
+   ]
+  },
+  {
+   "id": "sodium_decay",
+   "name": "Sodium decay",
+   "kind": "palette",
+   "file": "sodium_decay.cube",
+   "lut": "palette:sodium_decay",
+   "swatches": [
+    "#1A1405",
+    "#4F3B10",
+    "#A0721C",
+    "#D9A23A",
+    "#F2D486"
+   ]
+  },
+  {
+   "id": "cold_steel",
+   "name": "Cold steel",
+   "kind": "palette",
+   "file": "cold_steel.cube",
+   "lut": "palette:cold_steel",
+   "swatches": [
+    "#0F151C",
+    "#2E3B48",
+    "#5E6E7E",
+    "#9AA8B6",
+    "#DCE3EA"
+   ]
+  },
+  {
+   "id": "muted_earth",
+   "name": "Muted earth",
+   "kind": "palette",
+   "file": "muted_earth.cube",
+   "lut": "palette:muted_earth",
+   "swatches": [
+    "#2A271C",
+    "#56513A",
+    "#857A5A",
+    "#B4A27F",
+    "#DED2B6"
+   ]
+  },
+  {
+   "id": "cyber_magenta",
+   "name": "Cyber magenta",
+   "kind": "palette",
+   "file": "cyber_magenta.cube",
+   "lut": "palette:cyber_magenta",
+   "swatches": [
+    "#0D0516",
+    "#3B0E52",
+    "#B5179E",
+    "#2BC4E0",
+    "#F2E6FF"
+   ]
+  },
+  {
+   "id": "desert_sand",
+   "name": "Desert sand",
+   "kind": "palette",
+   "file": "desert_sand.cube",
+   "lut": "palette:desert_sand",
+   "swatches": [
+    "#3B2C1C",
+    "#7A5E40",
+    "#B8976E",
+    "#DDC29C",
+    "#F6E9D2"
+   ]
+  },
+  {
+   "id": "retro_80s",
+   "name": "Retro 80s",
+   "kind": "palette",
+   "file": "retro_80s.cube",
+   "lut": "palette:retro_80s",
+   "swatches": [
+    "#1B0A2E",
+    "#4E1F6B",
+    "#C2407E",
+    "#F58A6B",
+    "#FFD9A8"
+   ]
+  },
+  {
+   "id": "nineties_mall",
+   "name": "90s mall",
+   "kind": "palette",
+   "file": "nineties_mall.cube",
+   "lut": "palette:nineties_mall",
+   "swatches": [
+    "#2A1A12",
+    "#7A3A1E",
+    "#D0662E",
+    "#F2B24A",
+    "#FFF0C4"
+   ]
+  },
+  {
+   "id": "y2k_gloss",
+   "name": "Y2K gloss",
+   "kind": "palette",
+   "file": "y2k_gloss.cube",
+   "lut": "palette:y2k_gloss",
+   "swatches": [
+    "#0E1A2A",
+    "#2F5C86",
+    "#7FB7E0",
+    "#C8E6F7",
+    "#F7FBFF"
+   ]
+  },
+  {
+   "id": "candy_pop",
+   "name": "Candy pop",
+   "kind": "palette",
+   "file": "candy_pop.cube",
+   "lut": "palette:candy_pop",
+   "swatches": [
+    "#2A0E3A",
+    "#E0397E",
+    "#FF9F1C",
+    "#2EC4B6",
+    "#FFF3B0"
+   ]
+  },
+  {
+   "id": "autumn",
+   "name": "Autumn",
+   "kind": "palette",
+   "file": "autumn.cube",
+   "lut": "palette:autumn",
+   "swatches": [
+    "#2A1306",
+    "#6B2E0E",
+    "#B5561C",
+    "#D9962E",
+    "#F2D9A6"
+   ]
+  },
+  {
+   "id": "kodachrome_like",
+   "name": "Rich vintage slide",
+   "kind": "palette",
+   "file": "kodachrome_like.cube",
+   "lut": "palette:kodachrome_like",
+   "swatches": [
+    "#160C08",
+    "#7A1A14",
+    "#C9472B",
+    "#2F5FA0",
+    "#F2DFB8"
+   ]
+  },
+  {
+   "id": "stock-cross_process",
+   "name": "Cross-processed",
+   "kind": "stock",
+   "file": "stock-cross_process.cube",
+   "lut": "palette:stock-cross_process",
+   "swatches": [
+    "#0E1A0A",
+    "#2E5A1E",
+    "#9AB82E",
+    "#E8E04A",
+    "#F6F8D8"
+   ]
+  },
+  {
+   "id": "stock-reversal_16",
+   "name": "16mm reversal",
+   "kind": "stock",
+   "file": "stock-reversal_16.cube",
+   "lut": "palette:stock-reversal_16",
+   "swatches": [
+    "#100806",
+    "#5A1E14",
+    "#C8502E",
+    "#3A7AB0",
+    "#F6E6C0"
+   ]
+  }
+ ]
+}

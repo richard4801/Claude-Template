@@ -99,7 +99,7 @@ async function helper(env: ToolEnv, a: Record<string, unknown>, o: { kind: 'capt
 const brief = (kind: string, r: Record<string, unknown>) => kind === 'cuts' ? { cuts: r.cuts, savedSec: r.savedSec } : kind === 'beats' ? { bpm: r.bpm, beats: (r.beats as unknown[])?.length, strong: (r.strong as unknown[])?.length }
   : kind === 'captions' ? { language: r.language, words: (r.words as unknown[])?.length } : { done: true };
 
-export const EDIT_TOOLS: EditTool[] = [
+const TOOLS: EditTool[] = [
   {
     name: 'list_takes', title: 'List takes to edit', scope: 'edit:read', readOnly: true, idempotent: true,
     description: 'Recent video takes and edited versions in the studio (newest first), optionally filtered by title. Use a take id with open_edit.',
@@ -268,6 +268,39 @@ export const EDIT_TOOLS: EditTool[] = [
     },
   },
 ];
+
+/** The chip text the chat shows for a call (structuredContent.label), from what the tool did. */
+export function chipLabel(name: string, args: Record<string, unknown>, r: Record<string, unknown>): string {
+  const st = (r.structuredContent ?? r) as Record<string, unknown>;
+  switch (name) {
+    case 'list_takes': return `Listed ${(r.takes as unknown[] | undefined)?.length ?? 0} takes`;
+    case 'open_edit': return 'Opened the edit';
+    case 'get_edit': return 'Read the edit';
+    case 'apply_edit_ops': return (r.changes as string[] | undefined)?.join(' · ') || 'Edited';
+    case 'undo_edit': return String((r.entry as { label?: string } | null | undefined)?.label ?? 'Undid a change');
+    case 'list_looks': return 'Looked at the looks';
+    case 'list_caption_styles': return 'Looked at caption styles';
+    case 'get_frame': return `Looked at ${t2(Number(st.t ?? args.t ?? 0))}${st.approximate ? ' (approximate)' : ''}`;
+    case 'get_contact_sheet': return `Contact sheet · ${(st.times as unknown[] | undefined)?.length ?? 0} frames`;
+    case 'save_version': return r.sent ? `Asked ${String(r.device)} to save a version` : 'Could not save (no app open)';
+    case 'export_video': return r.sent ? `Asked ${String(r.device)} to export` : 'Could not export (no app open)';
+    default: {
+      const title = TOOLS.find(t => t.name === name)?.title ?? name;
+      if (r.needsConfirmation) return `${title} · about $${Number(r.estimateUsd).toFixed(2)}`;
+      if (r.waitingForOwner) return `${title} · waiting for your OK`;
+      return r.applied ? `${title} · applied` : r.state === 'running' ? `${title} · running` : title;
+    }
+  }
+}
+/** Every tool's result carries `label` (in structuredContent for image results) for the chat's tool chips. */
+export const EDIT_TOOLS: EditTool[] = TOOLS.map(t => ({
+  ...t,
+  run: async (env: ToolEnv, a: Record<string, unknown>) => {
+    const r = (await t.run(env, a)) as Record<string, unknown>;
+    const label = chipLabel(t.name, a, r);
+    return r.mcpContent ? { ...r, structuredContent: { ...(r.structuredContent as object), label } } : { ...r, label };
+  },
+}));
 
 /** Errors tools may throw are ApiErrors (the MCP server turns them into tool errors Claude can read). */
 export const isToolError = (e: unknown) => e instanceof ApiError;

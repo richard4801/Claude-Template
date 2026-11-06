@@ -2,7 +2,8 @@ import MuseCore
 import SwiftUI
 
 // AI suite (workstream 1): the Video suite screen (Screen.suite). It loads the catalog, shows the suite-off state when the
-// server has it switched off, and otherwise the hub (D1) or the chosen mode; the camera bag opens over it (always dark).
+// server has it switched off, and otherwise the hub (D1), the composer (Shot, Character swap, Talking, UGC ad, Extend),
+// the storyboard or the camera stage. Pickers open over it, always dark.
 
 struct SuiteRootView: View {
     @Environment(AppStore.self) private var store
@@ -11,9 +12,8 @@ struct SuiteRootView: View {
     var body: some View {
         ZStack {
             content
-            if store.suite.bagOpen {
-                CameraBagView().transition(.opacity)
-            }
+            // The storyboard's look lock opens the same picker shell (the composer has its own host).
+            if store.suite.mode == .storyboard { ComposerPickerHost() }
         }
         .task(id: store.serverKey) { await store.loadSuite() }
     }
@@ -37,11 +37,9 @@ struct SuiteRootView: View {
         } else {
             switch s.mode {
             case .hub: SuiteHubView()
-            case .shot: ShotBuilderView()
-            case .swap: SwapView()
+            case .shot, .swap, .talking, .ugc, .extend: ComposerView()
             case .storyboard: StoryboardView()
             case .cameraStage: CameraStageView()
-            case .talking, .ugc, .extend: SuiteComingSoonView(mode: s.mode)
             }
         }
     }

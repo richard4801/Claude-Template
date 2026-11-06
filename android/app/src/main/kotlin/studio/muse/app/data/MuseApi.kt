@@ -203,6 +203,9 @@ interface MuseApi {
     /** Owner only. */
     suspend fun suiteSettings(): SuiteSettings = throw ApiException("not_found", "This server doesn't have the AI suite yet")
     suspend fun patchSuiteSettings(req: SuiteSettingsPatch): SuiteSettings = throw ApiException("not_found", "This server doesn't have the AI suite yet")
+    /** A reference video or audio track for a shot's input slots: uploaded to this studio, handed back as its storage key. */
+    suspend fun uploadSuiteMedia(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit = {}): SuiteMediaRef =
+        throw ApiException("unsupported", "Uploading files needs the studio server")
 
     // Developer
     suspend fun setFailNext(fail: Boolean)
