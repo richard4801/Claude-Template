@@ -110,7 +110,8 @@ final class EditSuiteSession {
             } else if let v1 = take.edits, take.parentTakeId == sourceTakeId {
                 project = E.fromV1(v1.fitted(to: info.duration, sourceTakeId: sourceTakeId), facts)
             } else {
-                project = E.fromV1(EditList(sourceTakeId: sourceTakeId, sourceDurationSec: info.duration), facts)
+                // A take graded with a suite look starts with it on the main clip (reversible like any look).
+                project = E.withTakeLook(E.fromV1(EditList(sourceTakeId: sourceTakeId, sourceDurationSec: info.duration), facts), take: srcTake)
             }
             project.sourceTakeId = sourceTakeId
             state = EditSuiteState(project)

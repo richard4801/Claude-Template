@@ -107,8 +107,8 @@ extension FakeMuseAPI {
             guard let t = takes.first(where: { $0.id == req.takeId }) else { throw ApiError("not_found", "Take not found") }
             guard t.isVideo else { throw ApiError("bad_request", "takeId: must be a video take") }
             if let p2 = t.editsV2 { project = p2 } else {
-                project = EditV2.fromV1(EditList(sourceTakeId: t.id, sourceDurationSec: t.durationSec ?? 8),
-                                        EditV2.SourceFacts(width: t.width ?? 1080, height: t.height ?? 1920, fps: t.fps ?? 30, hasAudio: true))
+                project = EditV2.withTakeLook(EditV2.fromV1(EditList(sourceTakeId: t.id, sourceDurationSec: t.durationSec ?? 8),
+                                        EditV2.SourceFacts(width: t.width ?? 1080, height: t.height ?? 1920, fps: t.fps ?? 30, hasAudio: true)), take: t)
             }
         }
         let now = Double(nowMs())
