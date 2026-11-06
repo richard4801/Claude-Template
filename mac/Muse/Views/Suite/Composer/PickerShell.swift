@@ -137,7 +137,7 @@ struct PickerShell: View {
             Spacer(minLength: 8)
             if picker == .camera && step == "movement" {
                 HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").font(.system(size: 12))
+                    Ph("magnifyingglass", 12)
                     TextField("Search \(store.suite.camera.moves.count) moves", text: $moveQuery).textFieldStyle(.plain).font(t.body(13))
                 }
                 .foregroundStyle(t.muted)
@@ -145,7 +145,7 @@ struct PickerShell: View {
                 .background(Capsule().fill(t.surface2))
             }
             Button { reset() } label: {
-                Label("Reset all", systemImage: "arrow.counterclockwise").font(t.body(13, .semibold)).foregroundStyle(t.muted)
+                Label("Reset all", ph: "arrow.counterclockwise").font(t.body(13, .semibold)).foregroundStyle(t.muted)
                     .padding(.horizontal, 12).frame(height: 32)
                     .overlay(Capsule().strokeBorder(t.line, lineWidth: 1))
                     .contentShape(Capsule())
@@ -153,7 +153,7 @@ struct PickerShell: View {
             .buttonStyle(.plain)
             .help("Reset")
             Button { store.closePicker() } label: {
-                Image(systemName: "xmark").font(.system(size: 14, weight: .semibold)).frame(width: 34, height: 34).background(Circle().fill(t.surface2))
+                Ph("xmark", 14).frame(width: 34, height: 34).background(Circle().fill(t.surface2))
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
@@ -171,7 +171,7 @@ struct PickerShell: View {
                 let on = s.id == step
                 Button { store.suite.pickerStep = s.id } label: {
                     HStack(spacing: 11) {
-                        Image(systemName: s.icon).font(.system(size: 15)).frame(width: 18)
+                        Ph(s.icon, 15).frame(width: 18)
                         Text(s.title).font(t.body(15, .semibold))
                         Spacer(minLength: 4)
                         if s.owner {
@@ -280,7 +280,7 @@ struct PickerOptionTile: View {
                             PreviewView(preview: p, fallback: name)
                         } else if auto {
                             LinearGradient(colors: [Color(hex: 0x1B1D20), Color(hex: 0x141518)], startPoint: .top, endPoint: .bottom)
-                                .overlay(Image(systemName: "sparkles").font(.system(size: 22, weight: .light)).foregroundStyle(t.muted))
+                                .overlay(Ph("sparkles", 22).foregroundStyle(t.muted))
                         } else if let p = preview, p.still != nil || p.hasRender {
                             PreviewView(preview: p, fallback: name)
                         } else {
@@ -315,7 +315,7 @@ struct PickerOptionTile: View {
 struct PickCheck: View {
     @Environment(\.theme) private var t
     var body: some View {
-        Image(systemName: "checkmark").font(.system(size: 10, weight: .heavy)).foregroundStyle(t.accentInk)
+        Ph("checkmark", 10).foregroundStyle(t.accentInk)
             .frame(width: 20, height: 20).background(Circle().fill(t.accent))
             .accessibilityHidden(true)
     }

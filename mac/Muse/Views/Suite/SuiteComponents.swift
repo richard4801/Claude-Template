@@ -182,7 +182,7 @@ struct SuiteResultPane: View {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(Array(SuiteResultState.steps(character: character?.shortName).enumerated()), id: \.offset) { i, s in
                             HStack(spacing: 10) {
-                                Image(systemName: i < step ? "checkmark" : i == step ? "chevron.right" : "clock").font(.system(size: 11, weight: .semibold))
+                                Ph(i < step ? "checkmark" : i == step ? "chevron.right" : "clock", 11)
                                     .foregroundStyle(i < step ? t.good : i == step ? t.rec : t.muted).frame(width: 14)
                                 Text(s).font(t.body(12.5)).foregroundStyle(i <= step ? t.ink : t.muted)
                             }
@@ -219,7 +219,7 @@ struct SuiteResultPane: View {
             .overlay(alignment: .topTrailing) {
                 if take?.videoUrl != nil {
                     Button { muted.toggle() } label: {
-                        Image(systemName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill").font(.system(size: 11, weight: .semibold)).foregroundStyle(.white)
+                        Ph(muted ? "speaker.slash.fill" : "speaker.wave.2.fill", 11).foregroundStyle(.white)
                             .frame(width: 26, height: 26).background(Circle().fill(.black.opacity(0.5)))
                     }
                     .buttonStyle(.plain).padding(6)
@@ -281,7 +281,7 @@ struct SuiteOffView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Image(systemName: "video.slash").font(.system(size: 28)).foregroundStyle(t.muted)
+            Ph("video.slash", 28).foregroundStyle(t.muted)
             if store.isOwner {
                 Text(SuiteText.offOwnerTitle).font(t.isA ? Fonts.font("Instrument Serif", 40, .regular) : t.display(30))
                 Text(SuiteText.offOwnerBody).font(t.body(14)).foregroundStyle(t.muted).fixedSize(horizontal: false, vertical: true)
@@ -309,7 +309,7 @@ struct SuiteConnectionsRow: View {
     var body: some View {
         Button { open = true } label: {
             HStack(spacing: 12) {
-                Image(systemName: "link").font(.system(size: 15)).frame(width: 20)
+                Ph("link", 15).frame(width: 20)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(t.navUppercase ? "CONNECTIONS" : "Connections").font(t.navFont).lineLimit(1)
                     Text("Claude & MCP · Blender relay").font(t.body(11)).foregroundStyle(t.muted).lineLimit(1)

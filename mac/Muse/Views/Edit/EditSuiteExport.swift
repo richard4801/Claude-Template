@@ -118,7 +118,7 @@ struct EditSuiteExportSheet: View {
     private var disclosure: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Image(systemName: "checkmark.shield").foregroundStyle(t.ink).accessibilityHidden(true)
+                Ph("checkmark.shield").foregroundStyle(t.ink).accessibilityHidden(true)
                 Text("Disclosure").font(t.body(14, .semibold)).foregroundStyle(t.ink)
                 Spacer()
                 Text("Your choice, per export").font(t.body(12)).foregroundStyle(t.muted)

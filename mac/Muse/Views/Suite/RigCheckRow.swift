@@ -72,7 +72,7 @@ struct RigCheckRow: View {
                 }
                 if less {
                     Button { expanded = false } label: {
-                        Image(systemName: "chevron.up").font(.system(size: 9, weight: .semibold)).foregroundStyle(t.muted)
+                        Ph("chevron.up", 9).foregroundStyle(t.muted)
                             .frame(width: 20, height: 22).contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -80,7 +80,7 @@ struct RigCheckRow: View {
                     .accessibilityLabel("Show fewer")
                 }
                 Button { store.dismissRigWarning(w) } label: {
-                    Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)).foregroundStyle(t.muted)
+                    Ph("xmark", 9).foregroundStyle(t.muted)
                         .frame(width: 20, height: 22).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

@@ -25,7 +25,7 @@ The four approved themes stay, and each keeps its personality. What changes is t
 | `positive` · `caution` · `danger` | state only, never decoration | #2F6B3A · #8A5200 · #B5121B | #7BD88F · #F2C14E · #FF6B5E | #4E6B45 · #7F5418 · #A8382F | #0E7A45 · #9A4D00 · #C8102E |
 
 **Contrast, checked:**
-- **Text:** `ink` on `canvas` is 11.8–17.7:1. `ink2` on `canvas`, `raised` and `field` is ≥ 4.8:1 in every theme. Every `onAction` on its `action` is ≥ 6.0:1. `positive`, `caution` and `danger` on `canvas` are ≥ 4.6:1.
+- **Text:** `ink` on `canvas` is 11.8–17.7:1. `ink2` on `canvas`, `raised` and `field` is ≥ 4.8:1 in every theme. Every `onAction` on its `action` is ≥ 5.9:1 (Soft Tactile, white on #4E6B45, is the lowest at 5.98:1; the token tests assert AA, 4.5:1). `positive`, `caution` and `danger` on `canvas` are ≥ 4.6:1.
 - **Creator Pop's pink** is 2.2:1 on its canvas, so it is only ever a fill under `ink` text. In D, text links use the cobalt link colour, and the selection outline is `ink`.
 - **Hairlines** are 1.1–1.5:1, which is below the 3:1 UI minimum. So a hairline never carries meaning on its own: a selected or required state always uses `accent` or `ink`.
 
@@ -94,11 +94,11 @@ At most **two families per theme**: one display face and one text face. Monospac
   - **Compose:** only a community port, `com.adamglin:phosphor-icon:1.0.0` (adamglin0, MIT, Compose Multiplatform). It's listed among Phosphor's community projects.
   - **Lucide** (ISC, plus MIT for its Feather-derived icons) was the alternative. It was rejected because it has no official Compose or SwiftUI package (lucide.dev/packages lists none), and because Phosphor's camera and media vocabulary is broader. Checked 2026-11-06.
 - **How we ship it:** we don't depend on a community Compose port. We **vendor the SVGs from the official core package** at a pinned version, so both apps draw the identical shapes from one source:
-  - **Android:** a script converts the icons we use into VectorDrawables (`ic_ph_<name>.xml`).
-  - **Mac:** the same SVGs go into the asset catalog as template images (`ph.<name>`).
-  - The icon list lives in `design/icons/icons.txt`, and the licence file goes with it.
+  - **The list:** `design/icons/icons.txt` names every icon we use and maps the old names to Phosphor names. `python3 design/icons/build.py` vendors the SVGs into `design/icons/phosphor/` (licence in `design/icons/LICENSE`) and generates both apps' code from them.
+  - **Android:** `ui/theme/PhosphorIcons.kt` holds the path data as ImageVectors. `Ic`, `EIc`, `SIc` and `CamIc` all draw from it, and the old names resolve through its alias table, so every icon in the app is Phosphor with no call-site change.
+  - **Mac:** the same SVGs are template vector images in `Resources/Phosphor.xcassets` (`ph.<name>`). Write `Ph("xmark", 14)` where the code had `Image(systemName: "xmark").font(.system(size: 14))`, and `Label("Reset", ph: "arrow.counterclockwise")` for `systemImage:`. SF names map through `PhosphorMap.swift`; an unmapped name still draws its SF Symbol until it's added to the list.
 - **One semantic name per meaning**, used on both apps. For example: back `caret-left`, close `x`, more `dots-three`, add `plus`, camera `video-camera`, photo `camera`, lens `aperture`, light `lightbulb-filament`, look `palette`, style `film-strip`, references `images`, settings `sliders-horizontal`, sound `speaker-high`, speaking `microphone`, queue `stack`, gallery `squares-four`, model `user`, price `coins`, warning `warning`, play `play`, pause `pause`.
-- **AI** has no icon. In particular, there is no sparkle on Generate or Auto. The Auto tile says "Auto" in text.
+- **AI** has no icon. In particular, there is no sparkle on Generate or Auto. Auto is the word "Auto" with the aperture mark (owner fix 2).
 - **Not allowed:**
   - icons in coloured circles;
   - an icon next to every label (only where it helps scanning: tab bars, toolbars, icon-only buttons);
@@ -129,7 +129,8 @@ Motion only **answers a user action or shows progress**.
   - Nothing is called "Submit" or "OK".
 - **Names:** one name per thing everywhere (Shot, Take, Character, Cast, Preset, Look). The action label and its confirmation match ("Publish" → "Published").
 - **Errors:** what happened, plus how to fix it. "Something went wrong" stays only as the last fallback, and always comes with "· you weren't charged" when that's true.
-- **Meta lines:** at most one middle-dot line per item (for example "8 s · 9:16 · HD"), never chains of four or more.
+- **Middle dots:** "·" only joins a value pair: "35 mm film · Anamorphic", "UGC · Calm", the media badge "9:16 · 8 s", and the price on the action ("Generate · $0.64"). Anywhere else, write a short phrase ("2 outfits, identity locked") or use two lines. (Owner, 2026-11-06.)
+- **Picker captions** say what you'll see, in 3–5 plain words ("Fine grain, warm halation", "Oval bokeh, flares", "Soft background"), never specs or brand names ("35mm 4-perf · Vision3 500T look", "Speed Panchro"). Two lines at most.
 - **Members:** never see model, provider or GPU names (owner views may).
 
 ## 8. Checked against the slop list (skill §1)
@@ -143,7 +144,7 @@ Motion only **answers a user action or shows progress**.
 | ALL-CAPS tracked section labels | "RECENT TAKES", "CAMERA", "LENS"… | sentence-case headings or nothing (§3) |
 | Monospace as decoration | mono caps on chips ("REFERENCES 0/6") | text face; tabular figures only for numbers |
 | Pills and badges on everything | check badges, counts "5 / 11" on every wheel, "Optional" tags | one selection mark; counts only where they inform |
-| Middle-dot chains | "Identity locked · 2 outfits · …" | at most one short meta line per item |
+| Middle-dot chains | "Identity locked · 2 outfits · …" | "·" only inside a value pair; otherwise a phrase or two lines (§7) |
 | More than 2 typefaces | three per theme (display, body, mono) | two (§3) |
 | Equal weight, no primary | several filled buttons and accents per screen | one `action` per screen; `accent` only marks selection (§2) |
 | Hover glows and fade-slide | glows on D's cards, staggered entrances | motion only on action or progress (§6) |
@@ -154,11 +155,29 @@ Kept on purpose, not by default: Instrument Serif titles in A (it's the theme's 
 ## 9. Redesigned key screens (for the owner's approval)
 `plans/design-direction/` holds three screens redesigned with these rules, in Camera Body (B, dark) and Editorial (A, light). Each is next to today's version.
 - **Home** (phone 390): `home-b.png`, `home-a.png`
-- **Composer** (phone 390, and Mac 1280): `composer-b.png`, `composer-a.png`, `composer-mac-b.png`
+- **Composer** (phone 390, and Mac 1280 and 1000): `composer-b.png`, `composer-a.png`, `composer-mac-b.png`, `composer-mac-1000-b.png`
 - **Picker** (Camera → Setup with the drum, phone 390): `picker-b.png`, `picker-a.png`. The camera bag is always dark (design/README decision 3), so in Editorial the sheet is dark too, with Editorial's type.
 - **Today, for comparison:** `today.png` (Android, from the current screenshot tests).
 - **Regenerate:** `python3 design/direction/render.py`, with `PHOSPHOR` pointing at an unpacked `@phosphor-icons/core` 2.1.1 (`npm pack @phosphor-icons/core`). The imagery is the Blender preview stills and the hardware renders, with no placeholders or people.
 
-The rollout starts after the owner approves.
+**Approved by the owner on 2026-11-06, with four fixes, now in the renders:**
+1. **Mac composer:** the preview fills the height between the title and the prompt bar, and the bar sits right under it, with no empty bands. At 1000 px the bar follows the pill rule: icon plus value, with labels moved into tooltips, and the price on Generate always visible (`composer-mac-1000-b.png`).
+2. **Drums never show an empty neighbour.**
+   - A drum with 5 or more options loops.
+   - Auto is a real option with its own visual: the aperture mark on a `field` disc, the same size as the hardware renders.
+   - Captions follow §7: what you'll see, in two lines at most.
+3. **Middle dots:** only inside value pairs (§7).
+4. **Composer input slots:** each thumbnail has its own label under it (Character, Start frame, End frame), with "Optional" where it applies. The empty "+" slot carries the name of what it adds. The vague hint line "Character, start frame, end frame" is gone.
+
+**Drums approved by the owner, 2026-11-06** ("Let's use that style for our general Rig selection. When it has to do with Hardware like the Camera does."):
+- **Every hardware choice uses the drum**, one component per app: `RigDrum`. It covers Camera → Setup (Camera body, Lens, Focal, Aperture) and the Photo tool's rig. Android has `RigDrum` and `RigSetupDrums` in `suite/composer/RigDrum.kt` and `CameraPicker.kt`; the Mac has `RigDrum` in `Suite/Composer/RigDrum.swift`.
+- **The maths is shared and tested**: `RigDrumMath` in `android/core` and in MuseCore covers the detents, the loop, the rubber band, the fling and the spring.
+- **Feel:** Android ticks the haptics on each detent. The Mac has trackpad momentum, arrow keys and an optional soft click.
+- **Non-hardware choices** (Angle, Movement, Lighting, Look, Style, the UGC format) use grids or rows of tiles.
+- The old boxed wheels are deleted.
+
+Also: Photoshoot is now the **Photo** tool (WS3). The Mac sidebar lists Photo with the other tools, with no separate Photoshoot entry.
+
+The rollout starts now.
 - **Part A (WS4):** AI Suite, pickers, Edit suite; the composer last, after WS1's bottom bar and WS3's Photo tool merge.
 - **Part B (WS2):** Home, Library, Cast and models, LoRA, Settings, onboarding, chat.

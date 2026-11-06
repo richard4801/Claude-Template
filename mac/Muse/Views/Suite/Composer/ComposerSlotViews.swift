@@ -83,7 +83,7 @@ struct ComposerSlotCardView: View {
                         MuseImage(ref: store.character(m.characterId)?.cover).frame(width: 24, height: 30).clipped()
                             .overlay(Rectangle().strokeBorder(t.surface, lineWidth: 1.5))
                     }
-                    if cast.isEmpty { Image(systemName: "plus").font(.system(size: 14)).frame(width: 30, height: 30).overlay(Circle().strokeBorder(t.line, lineWidth: 1)) }
+                    if cast.isEmpty { Ph("plus", 14).frame(width: 30, height: 30).overlay(Circle().strokeBorder(t.line, lineWidth: 1)) }
                 }
                 Text("PEOPLE").font(t.mono(10, .medium)).tracking(1)
                 Text(cast.isEmpty ? card.caption : "\(cast.count) of \(store.suite.catalog?.recastMaxPeople ?? 4) · edit").font(t.body(10.5)).foregroundStyle(t.muted)
@@ -118,7 +118,7 @@ struct EmptySlotCard: View {
         // dashed outline is the card's only line.
         Button(action: action) {
             VStack(spacing: 5) {
-                Image(systemName: "plus").font(.system(size: 13, weight: .medium))
+                Ph("plus", 13)
                     .frame(width: 30, height: 30)
                     .background(Circle().fill(t.surface2))
                     .padding(.bottom, 3)
@@ -193,7 +193,7 @@ struct CharacterSlot: View {
             }
             .padding(.horizontal, 8).padding(.bottom, 7)
             Button { clear() } label: {
-                Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Color(hex: 0xF8F5EF))
+                Ph("xmark", 9).foregroundStyle(Color(hex: 0xF8F5EF))
                     .frame(width: 20, height: 20).background(Circle().fill(Color(hex: 0x0E0C0A, alpha: 0.55)))
             }
             .buttonStyle(.plain)
@@ -229,7 +229,7 @@ struct CharacterSlot: View {
                             Text("\(m.niche) · \(store.outfits(for: m).count) outfits").font(t.body(11.5)).foregroundStyle(t.muted)
                         }
                         Spacer(minLength: 0)
-                        if m.id == current?.id { Image(systemName: "checkmark").foregroundStyle(t.accent) }
+                        if m.id == current?.id { Ph("checkmark").foregroundStyle(t.accent) }
                     }
                     .padding(.horizontal, 12).padding(.vertical, 6)
                     .contentShape(Rectangle())
@@ -350,7 +350,7 @@ private struct ToolBrowserPanel: View {
                 Text("One composer · pick a tool, or start from a preset").font(t.body(13)).foregroundStyle(t.muted)
                 Spacer()
                 Button { store.suite.browserOpen = false } label: {
-                    Image(systemName: "xmark").font(.system(size: 14, weight: .semibold)).frame(width: 34, height: 34).background(Circle().fill(t.surface2))
+                    Ph("xmark", 14).frame(width: 34, height: 34).background(Circle().fill(t.surface2))
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(.cancelAction)

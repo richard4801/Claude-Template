@@ -83,7 +83,7 @@ struct StoryboardView: View {
                             if let i = suite.board.castIds.firstIndex(of: m.id) { suite.board.castIds.remove(at: i) } else if suite.board.castIds.count < 3 { suite.board.castIds.append(m.id) }
                         }
                     }
-                } label: { Image(systemName: "plus") }
+                } label: { Ph("plus") }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 .accessibilityLabel("Choose the cast")
             }
@@ -294,7 +294,7 @@ private struct BoardLookChips: View {
                         Text(chip.key).font(t.mono(10, .medium)).tracking(1).foregroundStyle(t.muted).frame(width: 74, alignment: .leading)
                         Text(sum.value).font(t.body(12.5, sum.auto ? .regular : .semibold)).lineLimit(1)
                         Spacer(minLength: 4)
-                        Image(systemName: "chevron.right").font(.system(size: 10)).foregroundStyle(t.muted)
+                        Ph("chevron.right", 10).foregroundStyle(t.muted)
                     }
                     .padding(.horizontal, 10).frame(height: 32)
                     .overlay(Rectangle().strokeBorder(t.line, lineWidth: 1))

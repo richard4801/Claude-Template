@@ -146,7 +146,7 @@ struct DirectChatPanel: View {
 
     private func toolChip(_ c: ToolChip) -> some View {
         HStack(spacing: 5) {
-            Image(systemName: "cube").font(.system(size: 9.5))
+            Ph("cube", 9.5)
             Text(c.text).font(t.mono(9.5, .medium)).tracking(0.5)
         }
         .foregroundStyle(c.ok ? t.muted : t.rec)
@@ -226,7 +226,7 @@ struct DirectChatPanel: View {
                     .onSubmit { model.send() }
                     .fieldChrome()
                 Button { model.send() } label: {
-                    Image(systemName: "paperplane.fill").font(.system(size: 14, weight: .semibold))
+                    Ph("paperplane.fill", 14)
                 }
                 .accessibilityLabel("Send to Claude")
                 .buttonStyle(MuseButtonStyle(kind: .primary, off: blocked || model.composer.trimmingCharacters(in: .whitespaces).isEmpty))
@@ -255,7 +255,7 @@ struct GuideThumb: View {
                 MuseImage(ref: ImageRef(url: u), symbol: "photo")
             } else {
                 LinearGradient(colors: [t.surface2, t.line], startPoint: .top, endPoint: .bottom)
-                Image(systemName: item.isVideo ? "play.fill" : "doc.text").font(.system(size: 12)).foregroundStyle(t.ink.opacity(0.7))
+                Ph(item.isVideo ? "play.fill" : "doc.text", 12).foregroundStyle(t.ink.opacity(0.7))
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: t.isA ? 0 : 4))

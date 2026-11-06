@@ -180,7 +180,7 @@ struct CameraEmptyState: View {
             if loading {
                 ProgressView().controlSize(.small)
             } else {
-                Image(systemName: "cube.transparent").font(.system(size: 28)).foregroundStyle(t.muted)
+                Ph("cube.transparent", 28).foregroundStyle(t.muted)
                 Text("No camera sessions yet").font(t.body(15, .bold)).foregroundStyle(t.ink)
                 Text("Block a shot in Blender with Claude: who stands where, how they move, how the camera moves. MUSE keeps the guides and a Shot draft; you press Generate.")
                     .font(t.body(13)).foregroundStyle(t.muted).multilineTextAlignment(.center).frame(maxWidth: 420)

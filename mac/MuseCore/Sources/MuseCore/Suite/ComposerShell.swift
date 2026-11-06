@@ -271,7 +271,8 @@ public enum GeneratePrice: Equatable, Sendable {
 
 // MARK: Wheels
 
-/// One card on a hardware wheel. `id` nil is Auto.
+/// One item on a hardware drum (`RigDrum` on the Mac). `value` nil is Auto. `caption` is what you'll see, in plain
+/// words (the option's `description`), never its spec line.
 public struct WheelItem: Hashable, Sendable, Identifiable {
     public var value: String?
     public var name: String
@@ -292,21 +293,7 @@ public struct WheelItem: Hashable, Sendable, Identifiable {
     public static func auto(_ caption: String = "The scene decides") -> WheelItem { WheelItem(value: nil, name: "Auto", caption: caption) }
 }
 
-/// A wheel's three visible cards: previous, selected (centred) and next.
-public struct WheelWindow<T: Hashable>: Hashable {
-    public var previous: T?
-    public var selected: T
-    public var next: T?
-}
-
 public enum Wheel {
-    /// The three cards around `selected` (clamped into the list); nil when the list is empty.
-    public static func window<T: Hashable>(_ items: [T], selected: Int) -> WheelWindow<T>? {
-        guard !items.isEmpty else { return nil }
-        let i = min(max(selected, 0), items.count - 1)
-        return WheelWindow(previous: i > 0 ? items[i - 1] : nil, selected: items[i], next: i + 1 < items.count ? items[i + 1] : nil)
-    }
-
     /// One wheel step up (-1) or down (+1), stopping at the ends.
     public static func step(_ index: Int, by delta: Int, count: Int) -> Int {
         guard count > 0 else { return 0 }
@@ -326,29 +313,30 @@ public enum Wheel {
 
 /// The wheels of the Camera picker (Setup and Angle): Auto first, then only the visible options.
 public enum ComposerWheels {
-    static func options(_ list: [SuiteOption], render: String? = nil) -> [WheelItem] {
-        [.auto()] + ComposerCatalog.visible(list).map { WheelItem(value: $0.id, name: $0.label, caption: $0.description, render: $0.render ?? render, preview: $0.preview?.poster) }
+    /// Auto's caption on the hardware drums.
+    public static let autoCaption = "Picks for the shot"
+
+    static func options(_ list: [SuiteOption], render: String? = nil, auto: String = "The scene decides") -> [WheelItem] {
+        [.auto(auto)] + ComposerCatalog.visible(list).map { WheelItem(value: $0.id, name: $0.label, caption: $0.description, render: $0.render ?? render, preview: $0.preview?.poster) }
     }
 
-    public static func cameras(_ c: CameraCatalog) -> [WheelItem] { options(c.bodies) }
-    public static func lenses(_ c: CameraCatalog) -> [WheelItem] { options(c.lenses) }
+    public static func cameras(_ c: CameraCatalog) -> [WheelItem] { options(c.bodies, auto: autoCaption) }
+    public static func lenses(_ c: CameraCatalog) -> [WheelItem] { options(c.lenses, auto: autoCaption) }
     public static func heights(_ c: CameraCatalog) -> [WheelItem] { options(c.heights) }
     public static func framings(_ c: CameraCatalog) -> [WheelItem] { options(c.shotSizes) }
 
-    /// "f/1.4 · Dreamy blur" cards on the iris render.
+    /// "f/2.8" with what it does as the caption ("Subject pops, gentle blur"); the iris render rides along.
     public static func apertures(_ c: CameraCatalog) -> [WheelItem] {
         let iris = c.optic("aperture")?.render
-        return [.auto()] + ComposerCatalog.visible(c.apertures).map {
-            WheelItem(value: $0.id, name: $0.description.isEmpty ? $0.label : "\($0.label) · \($0.description)", caption: apertureCaption($0.id), render: iris)
+        return [.auto(autoCaption)] + ComposerCatalog.visible(c.apertures).map {
+            WheelItem(value: $0.id, name: $0.label, caption: apertureCaption($0.id), render: iris)
         }
     }
 
-    /// "50 mm · Natural"; the value is the focal length in mm as text ("50").
+    /// "50 mm" with what it shows as the caption ("Like your eye sees"); the value is the focal length as text ("50").
     public static func focals(_ c: CameraCatalog) -> [WheelItem] {
-        [.auto()] + ComposerCatalog.focalSteps(c).map { mm in
-            let f = c.focals.first { $0.mm == mm }
-            let name = "\(focalText(mm)) mm" + ((f?.description).map { $0.isEmpty ? "" : " · \($0)" } ?? "")
-            return WheelItem(value: focalText(mm), name: name, caption: focalCaption(mm))
+        [.auto(autoCaption)] + ComposerCatalog.focalSteps(c).map { mm in
+            WheelItem(value: focalText(mm), name: "\(focalText(mm)) mm", caption: focalCaption(mm))
         }
     }
 
@@ -359,10 +347,10 @@ public enum ComposerWheels {
         return items.firstIndex { $0.value == focalText(mm) } ?? 0
     }
 
-    static func focalCaption(_ mm: Double) -> String {
+    public static func focalCaption(_ mm: Double) -> String {
         switch mm {
-        case ..<20: return "Huge space, stretched edges"
-        case ..<30: return "Room and story around her"
+        case ..<20: return "Huge space, bent edges"
+        case ..<30: return "Room and context"
         case ..<45: return "Everyday, a touch wide"
         case ..<70: return "Like your eye sees"
         case ..<110: return "Flattering, tighter faces"
@@ -370,7 +358,7 @@ public enum ComposerWheels {
         }
     }
 
-    static func apertureCaption(_ id: String) -> String {
+    public static func apertureCaption(_ id: String) -> String {
         guard let f = Double(id.dropFirst()) else { return "" }
         switch f {
         case ..<2: return "Background melts away"

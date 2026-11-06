@@ -4,6 +4,8 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
+    /// The camera drums' soft click per stop (RigDrum.swift), off by default.
+    @AppStorage("rigDrumClick") private var rigDrumClick = false
 
     var body: some View {
         @Bindable var store = store
@@ -49,6 +51,7 @@ struct SettingsView: View {
             }
             SectionTitle("Prompts")
             SettingRow("Pro mode", hint: "Show and edit the prompts behind every render") { RSwitch(label: "Pro mode", isOn: $store.pro) }
+            SettingRow("Click on each camera stop", hint: "A soft tick as the camera drums turn") { RSwitch(label: "Click on each camera stop", isOn: $rigDrumClick) }
         case .defaults:
             SectionTitle("Render defaults", top: 0)
             SettingRow("Default render", hint: "Add-ons (Edit, Fast, in beta) are picked per video") {

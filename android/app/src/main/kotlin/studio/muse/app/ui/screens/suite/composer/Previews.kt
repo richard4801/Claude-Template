@@ -135,7 +135,7 @@ fun PreviewTile(p: Preview, modifier: Modifier = Modifier, overlay: @Composable 
         else when (val d = p.draw) {
             null -> HardwareImage(p.still, Modifier.matchParentSize(), sample = 4)
             PreviewDraw.Auto -> Box(Modifier.matchParentSize().background(Brush.verticalGradient(listOf(Color(0xFF1A1C1E), Color(0xFF111213)))), contentAlignment = Alignment.Center) {
-                SIc("sparkle", 22.dp, Color(0xFF8C8A86))
+                SIc("aperture", 22.dp, Color(0xFF8C8A86)) // Auto: the aperture mark, as on the drums
             }
             is PreviewDraw.Move -> {
                 HardwareImage(p.still ?: NEUTRAL_STILL, Modifier.matchParentSize(), sample = 4, gray = true)

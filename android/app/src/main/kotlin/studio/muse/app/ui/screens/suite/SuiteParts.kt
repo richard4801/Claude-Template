@@ -1,5 +1,6 @@
 package studio.muse.app.ui.screens.suite
 
+import studio.muse.app.ui.theme.PhosphorIcons
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.util.LruCache
@@ -67,47 +68,9 @@ import studio.muse.app.ui.theme.muse
 
 // ---------------------------------------------------------------- icons the app's set doesn't have
 
+/** Draws MUSE's one icon set, Phosphor Regular (plans/design-direction.md §5). Old names resolve through [PhosphorIcons.ALIASES]. */
 object SuiteIcons {
-    private val PATHS = mapOf(
-        "users" to "M6 8a3 3 0 1 0 6 0a3 3 0 1 0 -6 0z M2.5 20c.6-3.4 3-5.3 6.5-5.3s5.9 1.9 6.5 5.3 M15 5.2a3 3 0 0 1 0 5.6 M17.6 14.9c2.2.7 3.6 2.4 4 5.1",
-        "type" to "M5 7V4h14v3 M12 4v16 M9 20h6",
-        "clock" to "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0z M12 7v5l3 2",
-        "sliders" to "M4 6h9M17 6h3 M4 12h3M11 12h9 M4 18h11M19 18h1 M15 4v4 M9 10v4 M17 16v4",
-        "close" to "M6 6l12 12M18 6L6 18",
-        "bag" to "M5 8h14l-1 12H6z M9 8V6a3 3 0 0 1 6 0v2",
-        "heart" to "M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z",
-        "refresh" to "M20 12a8 8 0 1 1-2.3-5.7 M20 4v5h-5",
-        "scissors" to "M4 6.5a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0 -5 0z M4 17.5a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0 -5 0z M8.5 8l11.5 10M8.5 16L20 6",
-        "share" to "M12 3v12M7 8l5-5 5 5 M5 14v6h14v-6",
-        "copy" to "M9 9h11v11H9z M5 15H4V4h11v1",
-        "swap" to "M4 8h15l-3-3M20 16H5l3 3",
-        "film" to "M4 4h16v16H4z M8 4v16M16 4v16M4 8h4M4 12h4M4 16h4M16 8h4M16 12h4M16 16h4",
-        "cube" to "M12 3l8 4.5v9L12 21l-8-4.5v-9z M12 12l8-4.5M12 12v9M12 12L4 7.5",
-        "check" to "M5 12.5l4.5 4.5L19 7.5",
-        "plus" to "M12 5v14M5 12h14",
-        "chev" to "M9 5l7 7-7 7",
-        "chevd" to "M6 9l6 6 6-6",
-        "gauge" to "M4 16a8 8 0 1 1 16 0 M12 16l4-5",
-        "ratio" to "M8 3h8v18H8z",
-        "volume" to "M4 9h4l5-4v14l-5-4H4z M16.5 9a4 4 0 0 1 0 6 M19 6.5a7.5 7.5 0 0 1 0 11",
-        "talk" to "M4 5h16v11H9l-5 4z M8 10h8",
-        "layers" to "M12 3l9 5-9 5-9-5z M3 13l9 5 9-5",
-        "move" to "M12 3v18M3 12h18 M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3",
-        "search" to "M4 11a7 7 0 1 0 14 0a7 7 0 1 0 -14 0z M16 16l4.5 4.5",
-        "image" to "M4 5h16v14H4z M4 16l5-5 4 4 3-3 4 4 M15 9.5a1.5 1.5 0 1 0 0.01 0z",
-        "sparkle" to "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z",
-        "minus" to "M5 12h14",
-        // Extend: a clip with more after it; Upscale: corners pulled outwards.
-        "extend" to "M3 6h9v12H3z M15 12h6 M18 9l3 3-3 3",
-        "upscale" to "M4 14v6h6 M20 10V4h-6 M4 20l6.5-6.5 M20 4l-6.5 6.5",
-    )
-    private val cache = HashMap<String, ImageVector>()
-    fun get(name: String): ImageVector = cache.getOrPut(name) {
-        ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {
-            addPath(addPathNodes(PATHS[name] ?: error("Unknown icon $name")), stroke = SolidColor(Color.Black), strokeLineWidth = 1.7f,
-                strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round)
-        }.build()
-    }
+    fun get(name: String): ImageVector = PhosphorIcons.get(name)
 }
 
 @Composable

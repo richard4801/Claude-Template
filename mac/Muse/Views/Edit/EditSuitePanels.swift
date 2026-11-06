@@ -64,7 +64,7 @@ struct TransformPanel: View {
                     .frame(width: 230)
             }
             HStack(spacing: 6) {
-                Image(systemName: "diamond.fill").font(.system(size: 9)).foregroundStyle(t.muted)
+                Ph("diamond.fill", 9).foregroundStyle(t.muted)
                 Text("adds a keyframe at the playhead").font(t.body(12)).foregroundStyle(t.muted)
             }
         }
@@ -279,7 +279,7 @@ struct TransitionsPanel: View {
                     let on = current == key
                     Button { set(key) } label: {
                         VStack(spacing: 5) {
-                            Image(systemName: icon).font(.system(size: 15))
+                            Ph(icon, 15)
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 40)
                                 .background(Rectangle().fill(on ? t.surface : t.surface2))

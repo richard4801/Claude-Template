@@ -218,7 +218,7 @@ fun SuiteButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier
  * while it runs, and its error after.
  */
 @Composable
-fun AiButton(label: String, task: AiTask?, onRun: () -> Unit, modifier: Modifier = Modifier, icon: String = "wand") {
+fun AiButton(label: String, task: AiTask?, onRun: () -> Unit, modifier: Modifier = Modifier, icon: String? = null) { // AI has no icon (design-direction §5)
     val m = muse
     val running = task?.running == true
     val price = task?.price

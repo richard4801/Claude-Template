@@ -298,7 +298,7 @@ struct ClaudeChatView: View {
                     .roleField(multiline: true)
                 if busy {
                     Button { model.stop() } label: {
-                        Image(systemName: "stop.fill").font(.system(size: 13, weight: .semibold))
+                        Ph("stop.fill", 13)
                     }
                     .buttonStyle(RButtonStyle(kind: .quiet))
                     .frame(width: 40)
@@ -307,7 +307,7 @@ struct ClaudeChatView: View {
                     .keyboardShortcut(".", modifiers: .command)
                 } else {
                     Button { model.send() } label: {
-                        Image(systemName: "paperplane.fill").font(.system(size: 14, weight: .semibold))
+                        Ph("paperplane.fill", 14)
                     }
                     .buttonStyle(RButtonStyle(kind: .action, off: empty || model.thread == nil))
                     .frame(width: 40)

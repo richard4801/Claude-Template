@@ -111,10 +111,10 @@ struct ComposerPromptBox: View {
                 Button { pick(s, typed) } label: {
                     HStack(spacing: 10) {
                         if s.kind == "move" {
-                            Image(systemName: "arrow.up.and.down.and.arrow.left.and.right").font(.system(size: 11)).foregroundStyle(t.surface)
+                            Ph("arrow.up.and.down.and.arrow.left.and.right", 11).foregroundStyle(t.surface)
                                 .frame(width: 24, height: 24).background(t.ink)
                         } else if s.kind == "newLocation" {
-                            Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
+                            Ph("plus", 11)
                                 .frame(width: 24, height: 24).overlay(Rectangle().strokeBorder(t.line, style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
                         } else {
                             MuseImage(ref: s.image).frame(width: 24, height: 24).clipped()
@@ -255,7 +255,7 @@ struct TokenMenu: View {
                 EmptyView()
             }
             Button(role: .destructive, action: onRemove) {
-                Label("Remove", systemImage: "trash").font(t.body(13, .semibold))
+                Label("Remove", ph: "trash").font(t.body(13, .semibold))
             }
             .buttonStyle(.plain)
             .foregroundStyle(t.rec)

@@ -22,7 +22,7 @@ struct EditSuitePreview: View {
                     let on = session.state.safeArea == a
                     Button { session.view { $0.safeArea = on ? nil : a } } label: {
                         HStack(spacing: 5) {
-                            if a == .tiktok { Image(systemName: "music.note").font(.system(size: 9, weight: .bold)) }
+                            if a == .tiktok { Ph("music.note", 9) }
                             Text(a.label.uppercased()).font(t.mono(10.5, .medium)).tracking(1)
                         }
                         .foregroundStyle(on ? Color(hex: 0xFF5A5F) : Color(hex: 0xA9A6A0))

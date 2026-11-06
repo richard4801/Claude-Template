@@ -218,7 +218,7 @@ struct CameraStillView: View {
             }
         } else {
             VStack(spacing: 6) {
-                Image(systemName: "camera.viewfinder").font(.system(size: 22)).foregroundStyle(t.muted)
+                Ph("camera.viewfinder", 22).foregroundStyle(t.muted)
                 Text("No camera stills yet · Re-render to make the keyframes").font(t.body(13)).foregroundStyle(t.muted)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -242,7 +242,7 @@ struct CameraPlanLegend: View {
                 }
             }
             HStack(spacing: 6) {
-                Image(systemName: "video.fill").font(.system(size: 11)).foregroundStyle(t.ink)
+                Ph("video.fill", 11).foregroundStyle(t.ink)
                 Text("Camera path & view").font(t.body(12)).foregroundStyle(t.ink)
             }
             Spacer(minLength: 8)

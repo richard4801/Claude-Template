@@ -197,7 +197,7 @@ struct EditSuiteCaptionsMode: View {
                                 HookChip(template: h).frame(width: 96, height: 32)
                                 Text(hookText(h) ?? h.label).font(t.body(13)).foregroundStyle(t.ink).lineLimit(1)
                                 Spacer()
-                                Image(systemName: "plus").foregroundStyle(t.ink)
+                                Ph("plus").foregroundStyle(t.ink)
                             }
                             .padding(.vertical, 10)
                             .overlay(alignment: .bottom) { SuiteRule() }
