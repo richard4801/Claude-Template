@@ -407,7 +407,7 @@ export const HARDWARE: Record<string, { render: string; name: string; caption: s
 export const FEATURED_MOVES: { id: string; tag: 'ugc' | 'cinematic' | 'energy' | 'subtle'; label?: string }[] = [
   { id: 'static', tag: 'ugc', label: 'Locked-off' }, { id: 'handheld', tag: 'ugc' }, { id: 'selfie', tag: 'ugc' }, { id: 'follow', tag: 'ugc' },
   { id: 'micro_push', tag: 'subtle' }, { id: 'dolly_in', tag: 'cinematic' }, { id: 'dolly_out', tag: 'cinematic' }, { id: 'orbit_left', tag: 'cinematic', label: 'Orbit / arc' },
-  { id: 'crane_up', tag: 'cinematic' }, { id: 'rise_reveal', tag: 'cinematic' }, { id: 'track_side', tag: 'cinematic', label: 'Tracking' }, { id: 'fpv', tag: 'energy', label: 'FPV fly-through' },
+  { id: 'crane_up', tag: 'cinematic' }, { id: 'track_side', tag: 'cinematic', label: 'Tracking' }, { id: 'fpv', tag: 'energy', label: 'FPV fly-through' },
   { id: 'whip_pan', tag: 'energy' }, { id: 'crash_zoom', tag: 'energy' }, { id: 'handheld_run', tag: 'energy' }, { id: 'rack_focus', tag: 'subtle' }, { id: 'dutch_push', tag: 'subtle' },
 ];
 

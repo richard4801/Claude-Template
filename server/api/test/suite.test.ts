@@ -201,7 +201,7 @@ describe('AI suite · composer catalogue (visible, merged)', () => {
     expect(cat.moves.find(m => m.id === 'motion_blur')).toMatchObject({ label: 'Motion blur streaks', group: 'special' });
     // Owner's balcony test: Rise to reveal starts low on the street and rises to find the subject (Crane up tilts down).
     expect(cat.moves.find(m => m.id === 'rise_reveal')).toMatchObject({ label: 'Rise to reveal', group: 'crane', aliases: expect.arrayContaining(['reveal']) });
-    expect(cat.library.map(m => m.id)).toContain('rise_reveal');
+    expect(cat.library).toHaveLength(16); // the owner's 16 featured moves; Rise to reveal sits in the Crane chip
     expect(MOVES.find(m => m.id === 'rise_reveal')!.wording).toMatch(/opens low[\s\S]*street[\s\S]*rises \{amount\}[\s\S]*reveal the subject/);
     expect(cat.tempos.find(t => t.id === 'single_shot')).toMatchObject({ label: 'One take', aliases: expect.arrayContaining(['single shot']) });
     expect(Object.fromEntries(cat.bodies.filter(b => b.mergedInto).map(b => [b.id, b.mergedInto]))).toEqual({ super35: 'cinema_digital', modular_8k: 'cinema_digital', full_frame_cine: 'cinema_digital', creator_cine: 'vlog' });
