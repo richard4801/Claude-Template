@@ -63,6 +63,7 @@ const VersionBody = z.object({
   width: z.number().int().min(16).max(4096),
   height: z.number().int().min(16).max(4096),
   fps: z.number().finite().min(1).max(240).optional(),
+  name: z.string().trim().min(1).max(80).optional(), // optional version name (Edit suite save, or Claude's save_version name)
   aiLabel: z.boolean().optional(), // Edit suite export "Label as AI-generated" (workstream 3); off unless the user switched it on
 });
 
@@ -160,7 +161,7 @@ export async function registerVersionRoutes(app: FastifyInstance, ctx: Ctx) {
       templateId: src.templateId, templateName: src.templateName, templateOwnerId: src.templateOwnerId,
       mediaKey: up.storageKey,
       media: { durationSec: b.durationSec, width: b.width, height: b.height, ...(b.fps ? { fps: b.fps } : {}), bytes: head.size, contentType: up.contentType,
-        parentTakeId: src.id, edits, ...(b.aiLabel ? { aiLabel: true } : {}) },
+        parentTakeId: src.id, edits, ...(b.name ? { name: b.name } : {}), ...(b.aiLabel ? { aiLabel: true } : {}) },
       createdAt: Date.now(),
     }).returning();
     emitTake(row!);
