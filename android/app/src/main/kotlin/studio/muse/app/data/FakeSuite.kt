@@ -98,7 +98,7 @@ class FakeSuite {
             speaking = SuiteSpeaking(r.speaking ?: false, if (r.speaking != null) "switch" else "default"),
             cast = castView, keepAudio = if (recast) r.keepAudio ?: true else null,
             prompt = if (owner) "Demo prompt · ${r.prompt.ifBlank { "the shot" }}" else "",
-            look = if (recast) null else lookFor(r),
+            look = lookFor(r),
         )
         if (!owner) return base
         val (m, resId) = engineFor(tier, recast)

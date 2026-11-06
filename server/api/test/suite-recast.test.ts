@@ -131,6 +131,10 @@ describe.skipIf(!hasFfmpeg)('Recast · API on the mock provider', () => {
     expect(JSON.stringify(e.body)).not.toMatch(PROVIDER_WORDS);
     const o = (await owner.req('POST', '/v1/suite/shots/estimate', { mode: 'recast', clipId: 'c_two', quality: 'hd', cast: [{ characterId: mia.id }] })).body;
     expect(o.engine).toMatchObject({ model: 'h3-max-recast', provider: 'fal', resolution: '1080P' });
+    // Look grading applies to Recast too (Character swap / Recast show the Look chip).
+    expect(o.look).toBeNull();
+    const graded = (await owner.req('POST', '/v1/suite/shots/estimate', { mode: 'recast', clipId: 'c_two', quality: 'hd', cast: [{ characterId: mia.id }], camera: { palette: { preset: 'teal_orange' } } })).body;
+    expect(graded.look).toMatchObject({ id: 'teal_orange', lut: 'pack:cine-teal-orange' });
     // One person, no switch: the clip's own talking flag decides.
     expect(o.cast[0].speaking).toBe('yes');
     expect(o.speaking).toEqual({ speaking: true, source: 'upload' });

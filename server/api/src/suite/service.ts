@@ -290,7 +290,7 @@ export class SuiteService {
       caps, ok: caps.ok, code: caps.code, message: caps.message, warnings: [...plan.notes, ...plan.camera.notes], camera: { moves: plan.camera.moves, guideUsed: plan.camera.usesGuide },
       ...(plan.recast ? { cast: plan.recast.people, keepAudio: plan.recast.keepAudio } : {}),
       prompt: plan.prompt, test: this.mode === 'mock',
-      look: plan.recast ? null : shotLook(r.camera ? resolvePreset(r.camera) : undefined, r.gradeLook),
+      look: shotLook(r.camera ? resolvePreset(r.camera) : undefined, r.gradeLook),
     };
     if (u.role !== 'owner') return base;
     const m = modelById(plan.modelId)!;
@@ -336,7 +336,7 @@ export class SuiteService {
       prompt: r.prompt, direction: r.direction, camera: r.camera, frames: r.frames, references: r.references, modelId: r.modelId ?? plan.recast?.people[0]?.characterId, outfitId: r.outfitId,
       keepAudio: plan.recast?.keepAudio ?? true, ...(plan.recast ? { clipId: r.clipId, cast: plan.recast.people } : {}),
       // The take's Look (suite/looks.ts): the Edit suite opens with this LUT applied (reversible).
-      look: plan.recast ? null : shotLook(r.camera ? resolvePreset(r.camera) : undefined, r.gradeLook),
+      look: shotLook(r.camera ? resolvePreset(r.camera) : undefined, r.gradeLook),
     };
     const perTake = 45 + plan.seconds * 10 * (plan.tier === 'draft' ? 0.6 : plan.tier === 'cinema' ? 2 : plan.tier === 'hd' ? 1.5 : 1);
     const seed = r.seed ?? 1000 + Math.floor(Math.random() * 99000);
