@@ -1336,6 +1336,20 @@
    "updatedBy": null
   },
   {
+   "key": "suite.camera.ugcFormats",
+   "group": "suite",
+   "title": "Camera · UGC ad formats",
+   "description": "One per line: \"id: wording\". Delete a line to go back to its default; the ids are fixed.",
+   "kind": "lines",
+   "default": "unboxing: unboxing video: hands open the package on camera, first genuine reaction to the product\nreview: honest product review talking to camera, showing the product while explaining what she likes\ntry_on: try-on video: she puts it on and shows the fit from a few angles in a mirror or to camera\nbefore_after: before-and-after video: the same moment before the product, then the visible result after\ngrwm: get-ready-with-me video: casual routine to camera, the product used as one natural step\nhaul: haul video: several items held up to camera one by one with quick excited comments\ntutorial: quick tutorial: step-by-step how to use the product, close-ups of each step\ntestimonial: testimonial: she tells camera sincerely why she recommends the product, product visible in hand",
+   "current": "unboxing: unboxing video: hands open the package on camera, first genuine reaction to the product\nreview: honest product review talking to camera, showing the product while explaining what she likes\ntry_on: try-on video: she puts it on and shows the fit from a few angles in a mirror or to camera\nbefore_after: before-and-after video: the same moment before the product, then the visible result after\ngrwm: get-ready-with-me video: casual routine to camera, the product used as one natural step\nhaul: haul video: several items held up to camera one by one with quick excited comments\ntutorial: quick tutorial: step-by-step how to use the product, close-ups of each step\ntestimonial: testimonial: she tells camera sincerely why she recommends the product, product visible in hand",
+   "overridden": false,
+   "allowEmpty": true,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
    "key": "suite.camera.format.kling",
    "group": "suite",
    "title": "Camera block · short imperative",

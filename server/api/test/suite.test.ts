@@ -204,6 +204,9 @@ describe('AI suite · composer catalogue (visible, merged)', () => {
     expect(old.text).toContain('clean digital cinema camera');
     // Hidden (not merged) ids compile as themselves.
     expect(compileCamera(CameraSpecSchema.parse({ rig: { aperture: 'f2', fps: '60' } }), model).text).toMatch(/f\/2, shallow depth of field.*60 fps/);
+    // UGC ad formats: in the catalog, and in the Style part of the prompt.
+    expect(cat.ugcFormats.map(f => f.id)).toEqual(['unboxing', 'review', 'try_on', 'before_after', 'grwm', 'haul', 'tutorial', 'testimonial']);
+    expect(compileCamera(CameraSpecSchema.parse({ style: { format: 'unboxing', genre: 'ugc' } }), model).text).toMatch(/unboxing video[^.]*first genuine reaction/i);
     expect(compileCamera(CameraSpecSchema.parse({ style: { tempo: 'slow_motion' }, move: { id: 'motion_blur' } }), model).text).toMatch(/streaking motion blur[\s\S]*slow motion|slow motion[\s\S]*streaking motion blur/);
   });
 });

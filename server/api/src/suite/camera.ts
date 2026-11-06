@@ -252,6 +252,17 @@ export const TEMPOS: Option[] = [
   o('single_shot', 'One take', 'One continuous take, no cuts', 'one continuous take with no cuts'),
   o('slow_motion', 'Slow motion', 'Stretched, graceful movement', 'high-frame-rate slow motion, every movement stretched and graceful'),
 ];
+/** UGC ad formats (composer: the UGC ad tool's Style wheel). */
+export const UGC_FORMATS: Option[] = [
+  o('unboxing', 'Unboxing', 'Open it on camera, first reaction', 'unboxing video: hands open the package on camera, first genuine reaction to the product'),
+  o('review', 'Review', 'Honest take, pros and cons', 'honest product review talking to camera, showing the product while explaining what she likes'),
+  o('try_on', 'Try-on', 'Wear it, show the fit', 'try-on video: she puts it on and shows the fit from a few angles in a mirror or to camera'),
+  o('before_after', 'Before & after', 'The change it makes', 'before-and-after video: the same moment before the product, then the visible result after'),
+  o('grwm', 'GRWM', 'Get ready with me', 'get-ready-with-me video: casual routine to camera, the product used as one natural step'),
+  o('haul', 'Haul', 'Several finds, one by one', 'haul video: several items held up to camera one by one with quick excited comments'),
+  o('tutorial', 'Tutorial', 'How to use it, step by step', 'quick tutorial: step-by-step how to use the product, close-ups of each step'),
+  o('testimonial', 'Testimonial', 'Why she recommends it', 'testimonial: she tells camera sincerely why she recommends the product, product visible in hand'),
+];
 export const EMOTIONS = ['joy', 'trust', 'fear', 'surprise', 'sadness', 'disgust', 'anger', 'hope', 'calm', 'confidence', 'playful', 'flirty'] as const;
 
 /** Ready-made rigs (UGC first): a partial spec merged under whatever the user sets. */
@@ -295,7 +306,7 @@ export const CameraSpecSchema = z.object({
   /** A second move mixed with the first (only compatible pairs; dropped on models that want one move). */
   mix: MoveSchema.optional(),
   angle: z.object({ height: z.enum(ids(HEIGHTS)).optional(), shotSize: z.enum(ids(SHOT_SIZES)).optional(), dutchDeg: z.number().min(0).max(30).optional() }).optional(),
-  style: z.object({ genre: z.enum(ids(GENRES)).optional(), era: z.enum(ids(ERAS)).optional(), tempo: z.enum(ids(TEMPOS)).optional() }).optional(),
+  style: z.object({ genre: z.enum(ids(GENRES)).optional(), era: z.enum(ids(ERAS)).optional(), tempo: z.enum(ids(TEMPOS)).optional(), format: z.enum(ids(UGC_FORMATS)).optional() }).optional(),
   /** Character performance: an emotion, optionally changing to another at `atS`. */
   performance: z.object({ emotion: z.enum(EMOTIONS), to: z.enum(EMOTIONS).optional(), atS: z.number().min(0).max(30).optional(), intensity: z.number().min(0).max(1).default(0.6) }).optional(),
   /**
@@ -437,7 +448,7 @@ export function cameraCatalog() {
     /** The composer's Movement chips, in order ("featured" = `library`). */
     moveGroups: MOVE_GROUPS,
     library: FEATURED_MOVES.map(f => { const m = MOVES.find(x => x.id === f.id)!; return { id: m.id, label: f.label ?? m.label, tag: f.tag, description: m.description, category: m.category }; }),
-    heights: v(HEIGHTS), shotSizes: v(SHOT_SIZES), genres: v(GENRES), eras: v(ERAS), tempos: v(TEMPOS), emotions: [...EMOTIONS],
+    heights: v(HEIGHTS), shotSizes: v(SHOT_SIZES), genres: v(GENRES), eras: v(ERAS), tempos: v(TEMPOS), ugcFormats: v(UGC_FORMATS), emotions: [...EMOTIONS],
     limits: { intensity: [0, 1], dutchDeg: [0, 30], focalMm: [8, 200], paletteColors: 5, mixPairs: 'two moves of different kinds; not static, time or aerial' },
   };
 }

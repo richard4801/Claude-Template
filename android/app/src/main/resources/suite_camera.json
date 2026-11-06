@@ -2275,6 +2275,56 @@
    "visible": true
   }
  ],
+ "ugcFormats": [
+  {
+   "id": "unboxing",
+   "label": "Unboxing",
+   "description": "Open it on camera, first reaction",
+   "visible": true
+  },
+  {
+   "id": "review",
+   "label": "Review",
+   "description": "Honest take, pros and cons",
+   "visible": true
+  },
+  {
+   "id": "try_on",
+   "label": "Try-on",
+   "description": "Wear it, show the fit",
+   "visible": true
+  },
+  {
+   "id": "before_after",
+   "label": "Before & after",
+   "description": "The change it makes",
+   "visible": true
+  },
+  {
+   "id": "grwm",
+   "label": "GRWM",
+   "description": "Get ready with me",
+   "visible": true
+  },
+  {
+   "id": "haul",
+   "label": "Haul",
+   "description": "Several finds, one by one",
+   "visible": true
+  },
+  {
+   "id": "tutorial",
+   "label": "Tutorial",
+   "description": "How to use it, step by step",
+   "visible": true
+  },
+  {
+   "id": "testimonial",
+   "label": "Testimonial",
+   "description": "Why she recommends it",
+   "visible": true
+  }
+ ],
  "emotions": [
   "joy",
   "trust",

@@ -3,7 +3,7 @@
 import type { PromptDef } from '../prompt/library.js';
 // The suite's prompt scripts register with workstream 4's engine when this module loads.
 import './scripts.js';
-import { APERTURES, BODIES, ERAS, FRAME_RATES, GENRES, HEIGHTS, LENSES, LIGHTING, LOOKS, MOVES, PALETTES, SHOT_SIZES, SHUTTERS, TEMPOS, type Option } from './camera.js';
+import { APERTURES, BODIES, ERAS, FRAME_RATES, GENRES, HEIGHTS, LENSES, LIGHTING, LOOKS, MOVES, PALETTES, SHOT_SIZES, SHUTTERS, TEMPOS, UGC_FORMATS, type Option } from './camera.js';
 
 type Ph = [name: string, description: string, required?: true];
 const def = (key: string, title: string, description: string, d: string, placeholders: Ph[] = [], extra: Partial<PromptDef> = {}): PromptDef =>
@@ -30,6 +30,7 @@ export const SUITE_PROMPT_DEFS: PromptDef[] = [
   lines('suite.camera.genres', 'genres', GENRES),
   lines('suite.camera.eras', 'eras', ERAS),
   lines('suite.camera.tempos', 'tempo', TEMPOS),
+  lines('suite.camera.ugcFormats', 'UGC ad formats', UGC_FORMATS),
   // Per-model camera block grammar. Empty parts drop out with their label.
   def('suite.camera.format.kling', 'Camera block · short imperative', 'Used by models that like short camera commands.',
     'Camera: {move}. {framing}. {rig}. Lighting: {light}. Colour: {palette}. {style}. {performance}', FMT_PH),

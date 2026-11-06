@@ -2,7 +2,7 @@
 // Data-driven: wording from the prompt library (suite.camera.*), grammar per model family (suite.camera.format.<vocab>),
 // parameters only where a model has a real field (LTX camera_motion, fps). Notes are for the owner/debug view.
 import { DEFAULT_TEXTS, fill, type PromptTexts } from '../prompt/library.js';
-import { APERTURES, BODIES, canMix, canonicalSpec, ERAS, focalWords, FRAME_RATES, GENRES, HEIGHTS, LENSES, LIGHTING, LOOKS, MOVES, PALETTES, resolvePreset, SHOT_SIZES, SHUTTERS, TEMPOS,
+import { APERTURES, BODIES, canMix, canonicalSpec, ERAS, focalWords, FRAME_RATES, GENRES, HEIGHTS, LENSES, LIGHTING, LOOKS, MOVES, PALETTES, resolvePreset, SHOT_SIZES, SHUTTERS, TEMPOS, UGC_FORMATS,
   type CameraSpec, type MoveOption } from './camera.js';
 import { wordings } from './prompts.js';
 import { run } from '../prompt/scripts/builders.js';
@@ -90,7 +90,7 @@ export function compileCamera(input: CameraSpec | undefined, model: Pick<ModelSp
   const p = spec.palette ?? {};
   const palette = [word('suite.camera.palettes', PALETTES, p.preset), p.colors?.length ? `palette built on ${p.colors.join(', ')}` : ''].filter(Boolean).join(', ');
   const s = spec.style ?? {};
-  const style = [word('suite.camera.genres', GENRES, s.genre), word('suite.camera.eras', ERAS, s.era), word('suite.camera.tempos', TEMPOS, s.tempo)].filter(Boolean).join(', ');
+  const style = [word('suite.camera.ugcFormats', UGC_FORMATS, s.format), word('suite.camera.genres', GENRES, s.genre), word('suite.camera.eras', ERAS, s.era), word('suite.camera.tempos', TEMPOS, s.tempo)].filter(Boolean).join(', ');
   const perf = spec.performance;
   const performance = perf ? `Performance: ${perf.intensity > 0.7 ? 'strong' : perf.intensity < 0.34 ? 'subtle' : 'clear'} ${perf.emotion}${perf.to ? `, turning to ${perf.to}${perf.atS != null ? ` at ${perf.atS}s` : ''}` : ''}.` : '';
 
