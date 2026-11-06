@@ -39,3 +39,7 @@ palette-03-hyper-neon.png	89:38	Colour palette	Hyper Neon	Magenta & cyan · deep
 palette-04-bleached-warm.png	89:39	Colour palette	Bleached Warm	Sun-faded · milky shadows · nostalgic
 palette-05-sodium-decay.png	89:40	Colour palette	Sodium Decay	Street-lamp yellow-green · gritty
 palette-06-classic-bw.png	90:2	Colour palette	Classic B&W	Silver tones · rich blacks · grain
+body-11-webcam.png	replicate	Camera body	Webcam	Webcam · wide · flat light · video-call look
+body-12-cctv.png	replicate	Camera body	CCTV	Security cam · high fixed angle · muted colour
+lens-09-swirl.png	replicate	Lens	Swirl Bokeh	Petzval-style portrait · swirling background
+lens-10-tilt-shift.png	replicate	Lens	Tilt-shift	Slanted focus band · miniature look

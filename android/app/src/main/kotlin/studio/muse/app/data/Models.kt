@@ -844,6 +844,9 @@ data class ApiEvent(
     val online: Boolean? = null,
     val blender: Boolean? = null,
     val addonVersion: String? = null,
+    // Workstream 2: Claude on the owner's plan. type "claude" (op thread | message | event | turn | stop | status): its fields
+    // clash with the ones above (message, event, status), so the stream reads it apart into [claude] (see claudeLiveOf).
+    val claude: ClaudeLive? = null,
     // Edit sessions (workstream 3): type "edit" (owners only), with sessionId and op = patch | log | pending |
     // frame_request | app_request | closed. patch: revision, baseRevision, patch, entry · log: entry · pending: pending ·
     // frame_request: requestId, t, width, revision, device · app_request: request.

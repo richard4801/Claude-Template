@@ -1,8 +1,10 @@
 import MuseCore
 import SwiftUI
 
-/// "Direct with Claude" (D6 right column, `chat_panel` in design/source/ai_desktop.py): status rows, the shared transcript
-/// with tool chips, the Guides ready card, the working strip while a turn streams, the composer and the no-spend footer.
+/// "Direct with Claude" (D6 right column, `chat_panel` in design/source/ai_desktop.py): status rows, then the chat.
+/// The chat is ClaudeChatView on the owner's own Claude Code ("On your Claude plan"), with the Guides ready card on top and
+/// the no-spend footer. The older in-app chat on the studio's API key is only offered when the owner turned that fallback on
+/// (Settings → Connections; billed per use): its transcript, working strip and composer are kept below for that mode.
 struct DirectChatPanel: View {
     @Environment(\.theme) private var t
     @Bindable var model: CameraModel
@@ -11,14 +13,25 @@ struct DirectChatPanel: View {
     var useLabel: String?
     var onUse: (() -> Void)?
     var onOpenConnections: () -> Void
+    @ObservedObject var claude: ClaudeCodeService = .shared
+    @State private var useApiKey = false
+
+    private var fallbackOn: Bool { claude.status?.apiFallback.usable == true }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Rectangle().fill(t.line).frame(height: 1)
-            transcript
-            if let turn = model.turn, !turn.finished { working(turn) }
-            composer
+            if fallbackOn { modePicker }
+            if fallbackOn && useApiKey {
+                transcript
+                if let turn = model.turn, !turn.finished { working(turn) }
+                composer
+            } else {
+                ClaudeChatView(contextKind: "camera", contextId: session.id, title: "Direct with Claude", showsHeader: false,
+                               footer: CameraText.footer(session.shotDraft), placeholder: CameraText.composerPlaceholder,
+                               accessory: CameraGuides.card(session).map { AnyView(guidesCard($0)) })
+            }
         }
         .frame(width: 404)
         .frame(maxHeight: .infinity)
@@ -52,6 +65,16 @@ struct DirectChatPanel: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
+    }
+
+    /// Only while the studio API key fallback is on: your Claude plan (default) or the studio's key (billed per use).
+    private var modePicker: some View {
+        HStack(spacing: 8) {
+            Seg([(false, "Your Claude plan"), (true, "Studio API key")], selection: $useApiKey)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 18).padding(.vertical, 8)
+        .help("The studio API key is billed per use")
     }
 
     private func color(_ tone: CameraTone) -> Color {

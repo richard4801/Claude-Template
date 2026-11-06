@@ -1,6 +1,7 @@
 // Wired in AppStore.connect() with the in-memory session token (works with "Remember me" off):
 //     BlenderRelayService.shared.configure(baseURL: (api as? HTTPMuseAPI)?.baseURL, isOwner: isOwner) { [http = api as? HTTPMuseAPI] in http?.sessionToken }
 // and BlenderRelayService.shared.stop() in endSession(). Demo mode (no HTTP API) or a member never runs it.
+// The same two calls also configure / stop ClaudeCodeService (Claude on the owner's plan), so AppStore stays untouched.
 // The debug switch: BlenderRelayDebugView(service: .shared) in Settings → Developer (owner only).
 
 import Combine
@@ -52,19 +53,27 @@ final class BlenderRelayService: ObservableObject {
 
     /// After sign-in / reconnect. A different server restarts the relay; a member, demo mode or no token stops it.
     func configure(baseURL: URL?, isOwner: Bool, token: @escaping @Sendable () -> String?) {
-        if baseURL != self.baseURL { stop() }
+        if baseURL != self.baseURL { stopRelay() }
         self.baseURL = baseURL
         self.isOwner = isOwner
         self.token = token
         refresh()
+        // Claude on the owner's plan (workstream 2): owner only; demo mode runs it against a fake.
+        ClaudeCodeService.shared.configure(baseURL: baseURL, isOwner: isOwner, token: token)
+    }
+
+    /// Sign-out (AppStore.endSession): the relay and the Claude Code runner both stop.
+    func stop() {
+        stopRelay()
+        ClaudeCodeService.shared.stop()
     }
 
     private func refresh() {
         let shouldRun = enabled && isOwner && baseURL != nil && token != nil
-        if shouldRun, !running { start() } else if !shouldRun, running { stop() }
+        if shouldRun, !running { start() } else if !shouldRun, running { stopRelay() }
     }
 
-    func stop() {
+    private func stopRelay() {
         loops.forEach { $0.cancel() }
         loops = []
         worker?.cancel()

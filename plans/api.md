@@ -1148,3 +1148,75 @@ BlenderCall   { id: "bc_…", sessionId, tool: BlenderTool, args: object, outDir
 | `director_unavailable` | 503 | no `ANTHROPIC_API_KEY` on the server |
 | `no_draft` | 409 | linking a job to a session without a Shot draft |
 | `already_claimed` / `call_expired` | 409 / 410 | Blender call taken by another Mac / timed out (5 min) |
+
+## Claude on the owner's plan: OAuth, chat threads, Mac runner (2026-11-06)
+_Workstream 2. Spec: `plans/claude-editing.md` parts B–E. Owner only (members get `owner_only`)._
+
+### OAuth 2.1 for `/mcp` (claude.ai custom connector, Claude Code)
+- `GET /.well-known/oauth-protected-resource` (RFC 9728): `{resource: <base>/mcp, authorization_servers: [<base>], scopes_supported, bearer_methods_supported: ["header"]}`.
+- `GET /.well-known/oauth-authorization-server` (RFC 8414): issuer `<base>`, `/oauth/authorize`, `/oauth/token`, `/oauth/register`, `/oauth/revoke`, `code_challenge_methods_supported: ["S256"]`, `grant_types_supported: ["authorization_code", "refresh_token"]`, `token_endpoint_auth_methods_supported: ["none"]`, `client_id_metadata_document_supported: true`.
+- **Clients:**
+  - **Client ID Metadata Document:** `client_id` is an https URL whose JSON lists `client_id` (equal to the URL) and `redirect_uris`. It is fetched with a 5 s timeout, at most 64 KB, public hosts only.
+  - **Dynamic registration:** `POST /oauth/register` `{redirect_uris, client_name?}` → `{client_id, client_id_issued_at, redirect_uris, token_endpoint_auth_method: "none"}`.
+  - **Allowed redirects:** `https://claude.ai/api/mcp/auth_callback`, `https://claude.com/api/mcp/auth_callback`, loopback `http://localhost:<port>/…` and `http://127.0.0.1:<port>/…` (Claude Code), plus `OAUTH_EXTRA_REDIRECTS`.
+- **`GET /oauth/authorize`:**
+  - Parameters: `response_type=code`, `client_id`, `redirect_uri`, `code_challenge` (S256 only), `state`, `scope?`, `resource` (must be `<base>/mcp`).
+  - It shows MUSE's sign-in + consent page (owner email and password; the scopes in words).
+  - `POST /oauth/authorize` → 302 `redirect_uri?code&state&iss`. A member gets the page "Only the studio owner can connect Claude".
+  - Codes are single use, valid for 10 min, and bound to the client, redirect, challenge, resource and scopes.
+- **`POST /oauth/token`** (form-encoded):
+  - `grant_type=authorization_code` with `code`, `redirect_uri`, `client_id`, `code_verifier`, `resource`.
+  - `grant_type=refresh_token` with `refresh_token`, `client_id`, `resource?`. Refresh tokens rotate; reusing a used one revokes the whole family.
+  - → `{access_token: "muse_oat_…", token_type: "Bearer", expires_in: 3600, refresh_token: "muse_ort_…" /* 30 days */, scope}`.
+  - Errors are RFC 6749 `{error, error_description}`.
+- **`POST /oauth/revoke`** `token=` → 200.
+- **Scopes:** `camera:read camera:write edit:read edit:write cast:read assets:write generate:estimate`. No `generate:run`. A missing `scope` means all of them.
+  - `/mcp` accepts personal tokens (every scope) and OAuth access tokens whose audience is `<base>/mcp` (a token for another audience → 401).
+  - `tools/list` shows only the tools the token's scopes allow. Calling another tool → `isError` `insufficient_scope`.
+- **Owner grants:** `GET /v1/mcp/grants` → `[{id, clientName, clientId, scopes, createdAt, lastUsedAt?}]`; `DELETE /v1/mcp/grants/{id}` revokes that grant's tokens.
+- **Mac app's own token:** `POST /v1/mcp/session-token` `{ttlMinutes?: 5–720, default 240}` → `{token: "muse_oat_…", expiresAt, mcpUrl}`, an owner access token with every scope for the local Claude Code's `--mcp-config`.
+
+### Claude chat threads (one per camera or edit session; Mac runs Claude Code, the phone relays)
+```ts
+ClaudeThread  { id: "ct_…", contextKind: "camera"|"edit", contextId, claudeSessionId?: string /* Claude Code session for --resume, set by the Mac */, createdAt, updatedAt }
+ClaudeMessage { id, threadId, role: "user"|"assistant"|"tool", source: "mac"|"phone"|"api", text, turnId?,
+                tool?: { id, name, ok?: boolean, summary?: string }, image?: { url } /* a frame Claude grabbed */, createdAt }
+ClaudeTurn    { id: "tu_…", threadId, text, from: "phone"|"mac", state: "queued"|"running"|"done"|"failed"|"stopped", error?, createdAt, claimedAt?, finishedAt? }
+ClaudeEvent   = { type: "user", text } | { type: "text", delta } | { type: "assistant", text }
+              | { type: "tool", id, name, status: "running"|"done"|"error", summary?, input? }
+              | { type: "image", data /* base64 ≤ 2 MB */, mimeType: "image/png"|"image/jpeg" }
+              | { type: "done", ok: boolean, error?, model? /* owner only */ }
+ClaudeStatus  { mac: { online: boolean, claudeCode: { installed: boolean, signedIn: boolean, version?, model? }, answeringTurn?: string },
+                apiFallback: { available: boolean /* ANTHROPIC_API_KEY set */, enabled: boolean }, connectorUrl /* <base>/mcp */, openInClaudeUrl }
+```
+| | |
+|---|---|
+| `GET /v1/claude/status` | → `ClaudeStatus` |
+| `PATCH /v1/claude/settings` `{apiFallback: boolean}` | → `ClaudeStatus`. The fallback is off by default and billed per use. |
+| `POST /v1/claude/mac/heartbeat` `{claudeCode: {installed, signedIn, version?, model?}}` | From the Mac app, every 20 s. The Mac counts as offline after 45 s. → `{ok, pending: ClaudeTurn[]}` |
+| `POST /v1/claude/threads` `{contextKind, contextId}` | Get or create. → `ClaudeThread`. A camera `contextId` must be one of the owner's sessions. |
+| `GET /v1/claude/threads/{id}` | → `ClaudeThread & {messages: ClaudeMessage[] /* last 100, oldest first */, activeTurn?: ClaudeTurn}` |
+| `PATCH /v1/claude/threads/{id}` `{claudeSessionId}` | The Mac stores Claude Code's session id. |
+| `POST /v1/claude/threads/{id}/messages` `{text}` | From a device that can't run Claude (the phone).<ul><li>→ 202 `{message, turn}`: the turn is queued for the Mac, which gets a `claude` `{op: "turn"}` event.</li><li>`mac_offline` (409) with `{fallback: {openInClaudeUrl, apiFallback: boolean}}`.</li><li>`claude_busy` (409) while a turn on that thread is queued or running.</li></ul> |
+| `GET /v1/claude/turns` | Queued turns for the Mac (catch-up). |
+| `POST /v1/claude/turns/{id}/claim` | → `ClaudeTurn` (`running`). `already_claimed` (409), `turn_expired` (410). |
+| `POST /v1/claude/turns/{id}/stop` | The phone's Stop. Emits `claude` `{op: "stop", turnId}`; the Mac interrupts and sends `done`. |
+| `POST /v1/claude/threads/{id}/events` `{turnId?, events: ClaudeEvent[]}` | The Mac mirrors its local Claude Code stream (its own turns, without `turnId`, and claimed ones). `user`, `assistant`, `tool` and `image` events are stored as messages; `text` deltas are only relayed live. `done` ends the turn. ≤ 4 MB. |
+| `POST /v1/claude/threads/{id}/api-turn` `{text}` | The fallback when it is on and the key is set. It streams `ChatEvent`s like the camera chat. Camera threads only for now. |
+
+**Timeouts:** a queued turn not claimed within 90 s fails with "Your Mac didn't pick this up". A running turn that sends nothing for 10 min fails.
+
+**Live events** (owners' devices): `claude` with one of:
+- `{op: "thread", thread}`
+- `{op: "message", threadId, message}`
+- `{op: "event", threadId, turnId?, event}` (streaming text and tool progress)
+- `{op: "turn", turn}`
+- `{op: "stop", turnId}`
+- `{op: "status", status}`
+
+| code | status | when |
+|---|---|---|
+| `mac_offline` | 409 | a phone message while the Mac with Claude Code isn't online and ready |
+| `claude_busy` | 409 | a turn on that thread is already queued or running |
+| `turn_expired` | 410 | claiming a turn that timed out |
+| `fallback_off` | 409 | `api-turn` while the API fallback is off or no key is set |
