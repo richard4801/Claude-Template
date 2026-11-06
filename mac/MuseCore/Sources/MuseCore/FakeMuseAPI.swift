@@ -65,6 +65,8 @@ public actor FakeMuseAPI: MuseAPI {
     var suiteSettingsBox: SuiteSettings?
     /// AI suite (workstream 1): the Look each demo shot's takes carry (by job id), like the server's take.look.
     var suiteLooks: [String: SuiteLook] = [:]
+    /// AI suite (workstream 1): the demo studio's locations (@location), two to start with.
+    var suiteLocationList: [SuiteLocation] = FakeMuseAPI.demoLocations
 
     /// - Parameters:
     ///   - speed: simulation speed; 0 freezes the queue (tests).

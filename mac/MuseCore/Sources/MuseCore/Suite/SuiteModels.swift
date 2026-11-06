@@ -248,18 +248,20 @@ public struct CameraCatalog: Codable, Hashable, Sendable {
     public var genres: [SuiteOption]
     public var eras: [SuiteOption]
     public var tempos: [SuiteOption]
+    /// UGC ad's formats (Unboxing, Review, Try-on…), the Style picker's format wheel. Empty on older servers.
+    public var ugcFormats: [SuiteOption]
     public var emotions: [String]
     public var limits: CameraLimits
 
     public init() {
         presets = []; bodies = []; lenses = []; focalLengths = []; focals = []; moveGroups = []; apertures = []; looks = []; frameRates = []; shutters = []
         lighting = []; palettes = []; optics = []; grips = []; moves = []; library = []; heights = []; shotSizes = []
-        genres = []; eras = []; tempos = []; emotions = []; limits = CameraLimits()
+        genres = []; eras = []; tempos = []; ugcFormats = []; emotions = []; limits = CameraLimits()
     }
 
     enum CodingKeys: String, CodingKey {
         case presets, bodies, lenses, focalLengths, focals, moveGroups, apertures, looks, frameRates, shutters, lighting, palettes, optics, grips, moves, library
-        case heights, shotSizes, genres, eras, tempos, emotions, limits
+        case heights, shotSizes, genres, eras, tempos, ugcFormats, emotions, limits
     }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -284,6 +286,7 @@ public struct CameraCatalog: Codable, Hashable, Sendable {
         genres = c.v(.genres, [])
         eras = c.v(.eras, [])
         tempos = c.v(.tempos, [])
+        ugcFormats = c.v(.ugcFormats, [])
         emotions = c.v(.emotions, [])
         limits = c.v(.limits, CameraLimits())
     }
@@ -478,10 +481,13 @@ public struct CameraStyle: Codable, Hashable, Sendable {
     public var genre: String?
     public var era: String?
     public var tempo: String?
-    public init(genre: String? = nil, era: String? = nil, tempo: String? = nil) {
+    /// UGC ad only: the format (`catalog.camera.ugcFormats` id: unboxing, review, try_on…).
+    public var format: String?
+    public init(genre: String? = nil, era: String? = nil, tempo: String? = nil, format: String? = nil) {
         self.genre = genre
         self.era = era
         self.tempo = tempo
+        self.format = format
     }
 }
 
@@ -613,8 +619,12 @@ public struct CastMember: Codable, Hashable, Sendable {
     public var personIndex: Int?
     public var personHint: String?
     public var personNote: String?
+    /// The face tapped on the clip's first frame (an uploaded square crop): who to replace.
+    public var faceCrop: ImageRef?
     public var speaking: Bool?
-    public init(characterId: String, outfitId: String? = nil, personIndex: Int? = nil, personHint: String? = nil, personNote: String? = nil, speaking: Bool? = nil) {
+    public init(characterId: String, outfitId: String? = nil, personIndex: Int? = nil, personHint: String? = nil, personNote: String? = nil, faceCrop: ImageRef? = nil,
+                speaking: Bool? = nil) {
+        self.faceCrop = faceCrop
         self.characterId = characterId
         self.outfitId = outfitId
         self.personIndex = personIndex

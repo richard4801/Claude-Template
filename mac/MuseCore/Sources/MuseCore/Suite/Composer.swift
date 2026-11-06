@@ -25,6 +25,8 @@ public struct ComposerSettings: Hashable, Sendable {
     public var genre: String?
     public var era: String?
     public var tempo: String?
+    /// UGC ad: the format wheel (unboxing, review, try_on…).
+    public var format: String?
     // Look: a palette and/or a film stock; the take is graded with it unless switched off
     public var palette: String?
     public var stock: String?
@@ -36,7 +38,8 @@ public struct ComposerSettings: Hashable, Sendable {
 
     public init(body: String? = nil, lens: String? = nil, focalMm: Double? = nil, aperture: String? = nil, height: String? = nil, shotSize: String? = nil,
                 genre: String? = nil, era: String? = nil, tempo: String? = nil, palette: String? = nil, stock: String? = nil, gradeLook: Bool = true,
-                lighting: String? = nil, preset: String? = nil) {
+                lighting: String? = nil, preset: String? = nil, format: String? = nil) {
+        self.format = format
         self.body = body
         self.lens = lens
         self.focalMm = focalMm
@@ -58,7 +61,7 @@ public struct ComposerSettings: Hashable, Sendable {
         var s = self
         switch chip {
         case .references: break
-        case .style: s.genre = nil; s.era = nil; s.tempo = nil
+        case .style: s.genre = nil; s.era = nil; s.tempo = nil; s.format = nil
         case .camera: s.body = nil; s.lens = nil; s.focalMm = nil; s.aperture = nil; s.height = nil; s.shotSize = nil
         case .look: s.palette = nil; s.stock = nil; s.gradeLook = true
         case .lighting: s.lighting = nil
@@ -70,7 +73,7 @@ public struct ComposerSettings: Hashable, Sendable {
     public func isSet(_ chip: ComposerChip) -> Bool {
         switch chip {
         case .references: return false
-        case .style: return genre != nil || era != nil || tempo != nil
+        case .style: return genre != nil || era != nil || tempo != nil || format != nil
         case .camera: return body != nil || lens != nil || focalMm != nil || aperture != nil || height != nil || shotSize != nil
         case .look: return palette != nil || stock != nil
         case .lighting: return lighting != nil
@@ -91,7 +94,7 @@ public struct ComposerSettings: Hashable, Sendable {
     public func cameraSpec(moves: [PromptPart] = []) -> CameraSpec? {
         let rig = CameraRig(body: body, lens: lens, focalMm: focalMm, aperture: aperture, look: stock)
         let angle = CameraAngle(height: height, shotSize: shotSize)
-        let style = CameraStyle(genre: genre, era: era, tempo: tempo)
+        let style = CameraStyle(genre: genre, era: era, tempo: tempo, format: format)
         let mv = moves.compactMap { $0.move }
         let spec = CameraSpec(mode: "preset", rig: rig.isEmpty ? nil : rig, lighting: lighting.map { CameraLighting(preset: $0) },
                               palette: palette.map { CameraPalette(preset: $0) }, move: mv.first, mix: mv.count > 1 ? mv[1] : nil,
@@ -148,6 +151,14 @@ public enum ComposerCatalog {
         return vis.min { stops($0) < stops($1) }?.id ?? id
     }
 
+    /// A UGC format's label ("Unboxing"); an id the catalog doesn't list yet reads as its own words ("try_on" → "Try on").
+    public static func formatLabel(_ cat: CameraCatalog, _ id: String?) -> String? {
+        guard let id else { return nil }
+        if let l = cat.ugcFormats.first(where: { $0.id == id })?.label { return l }
+        let words = id.replacingOccurrences(of: "_", with: " ")
+        return words.prefix(1).uppercased() + words.dropFirst()
+    }
+
     public static func ellipsize(_ s: String, _ max: Int) -> String {
         guard s.count > max, max >= 2 else { return s }
         var t = String(s.prefix(max - 1))
@@ -160,7 +171,7 @@ public enum ComposerCatalog {
         let values: [String]
         switch chip {
         case .references: return ChipSummary(chip: chip, values: [], auto: refs == 0, counter: "\(refs)/\(refsMax)")
-        case .style: values = [label(cat.genres, s.genre), label(cat.eras, s.era), label(cat.tempos, s.tempo)].compactMap { $0 }
+        case .style: values = [formatLabel(cat, s.format), label(cat.genres, s.genre), label(cat.eras, s.era), label(cat.tempos, s.tempo)].compactMap { $0 }
         case .camera:
             values = [label(cat.bodies, s.body), label(cat.lenses, s.lens), s.focalMm.map { focalLabel(cat, $0) }, label(cat.apertures, s.aperture),
                       label(cat.heights, s.height), label(cat.shotSizes, s.shotSize)].compactMap { $0 }
@@ -271,6 +282,7 @@ public struct PromptTokens: Hashable, Sendable {
     /// Adds an @ chip. One character and one outfit per shot (a new one replaces the old); an outfit needs a character.
     public func addMention(kind: String, id: String, label: String, at: Caret? = nil) -> (PromptTokens, String?) {
         if kind == "outfit" && characterId == nil { return (self, "Pick a character first") }
+        if kind == "location", mentions.contains(where: { $0.mentionInfo?.kind == "location" && $0.mentionInfo?.id == id }) { return (self, "\(label) is already in the shot") }
         if kind != "location", let i = parts.firstIndex(where: { $0.mentionInfo?.kind == kind }), let old = parts[i].mentionInfo, let k = parts[i].key {
             if old.id == id { return (self, nil) }
             var out = parts
@@ -295,6 +307,39 @@ public struct PromptTokens: Hashable, Sendable {
         let t = out.remove(at: i)
         out.insert(t, at: min(max(index, 0), out.count))
         return PromptTokens(out).joined()
+    }
+
+    /// Drag to reorder: the token goes where it was dropped (a caret in the parts as they are now, a text split there).
+    /// Dropping it on itself, or right next to itself, changes nothing.
+    public func move(key: Int, to caret: Caret) -> PromptTokens {
+        guard let i = parts.firstIndex(where: { $0.key == key }) else { return self }
+        if caret.part == i { return self }
+        let token = parts[i]
+        var rest = parts
+        rest.remove(at: i)
+        let at = caret.part > i ? Caret(caret.part - 1, caret.offset) : caret
+        return PromptTokens(rest).inserting(token, at: at).joined()
+    }
+
+    /// The caret at a UTF-16 offset of the text as the editor shows it (a token is one character).
+    public func caret(utf16 offset: Int) -> Caret {
+        var pos = 0
+        for (i, p) in parts.enumerated() {
+            if let t = p.text {
+                let len = (t as NSString).length
+                if offset <= pos + len {
+                    let o = min(max(offset - pos, 0), len)
+                    let idx = String.Index(utf16Offset: o, in: t)
+                    return Caret(i, t.distance(from: t.startIndex, to: idx))
+                }
+                pos += len
+            } else {
+                if offset <= pos { return Caret(i, 0) }
+                if offset == pos + 1 { return Caret(i, 1) }
+                pos += 1
+            }
+        }
+        return caretAtEnd
     }
 
     public func setIntensity(key: Int, _ v: Int) -> PromptTokens {

@@ -53,6 +53,9 @@ public enum ComposerTool: String, CaseIterable, Sendable, Identifiable {
     /// No backend yet: the tool card shows a quiet "Coming soon" and no Generate.
     public var comingSoon: Bool { self == .talking || self == .ugc || self == .extend }
 
+    /// "Coming soon" until the server lists the tool among the catalog's `modes` (UGC ad once it says "ugc").
+    public func isComingSoon(modes: [String]) -> Bool { comingSoon && !modes.contains(rawValue) }
+
     /// The setting chips above the prompt (the spec's tools table).
     public var chips: [ComposerChip] {
         switch self {
@@ -153,6 +156,7 @@ public enum ComposerSlot: String, CaseIterable, Sendable, Identifiable {
         case .endFrame: return SlotId(.end)
         case .audio: return SlotId(.audio)
         case .product: return SlotId(.image)
+        case .referenceAd: return SlotId(.video)
         default: return nil
         }
     }
@@ -477,10 +481,15 @@ public struct ComposerDraft: Hashable, Sendable {
     public var collapsed: String?
     /// Owner: the camera from Directed mode (it replaces the chips' camera).
     public var directed: CameraSpec?
+    /// Owner: the engine pinned for this shot (one of the tier's `models`), nil = Auto (the ladder). Members never set it.
+    public var engineModel: String?
+    public var resolution: String?
 
     public init(tool: ComposerTool = .shot, tokens: PromptTokens = PromptTokens(), settings: ComposerSettings = ComposerSettings(), outfitId: String? = nil,
                 quality: String = "draft", aspect: String = "9:16", duration: Int = 8, sound: Bool = true, speaking: ComposerSpeaking = .auto, takes: Int = 1,
-                collapsed: String? = nil, directed: CameraSpec? = nil) {
+                collapsed: String? = nil, directed: CameraSpec? = nil, engineModel: String? = nil, resolution: String? = nil) {
+        self.engineModel = engineModel
+        self.resolution = resolution
         self.tool = tool
         self.tokens = tokens
         self.settings = settings
@@ -501,13 +510,27 @@ public struct ComposerDraft: Hashable, Sendable {
         return words.isEmpty ? tool.title : words
     }
 
-    /// The shot request: the prompt and chips, the bottom bar, then the input slots this tier takes.
-    public func request(_ slots: InputSlots, _ inputs: SuiteInputs) -> ShotRequest {
-        var r = composerRequest(tokens, settings, quality: quality, aspectRatio: aspect, duration: duration, takes: takes, speaking: speaking.value, title: title)
+    /// The shot request: the prompt and chips, the bottom bar, the input slots this tier takes, then the @locations
+    /// (as location references, while the References limit has room) and the owner's pinned engine.
+    public func request(_ slots: InputSlots, _ inputs: SuiteInputs, locations: [SuiteLocation] = []) -> ShotRequest {
+        var s = settings
+        if tool != .ugc { s.format = nil }
+        var r = composerRequest(tokens, s, quality: quality, aspectRatio: aspect, duration: duration, takes: takes, speaking: speaking.value, title: title)
         r.audio = sound
         if r.modelId != nil, r.outfitId == nil { r.outfitId = outfitId }
         if let d = directed { r.camera = d }
-        return slots.apply(to: r, inputs)
+        r = slots.apply(to: r, inputs)
+        r = ComposerLocations.apply(r, tokens: tokens, locations: locations, inputs: inputs)
+        if let e = engineModel {
+            r.engineModel = e
+            r.resolution = resolution
+        }
+        return r
+    }
+
+    /// What this shot's inputs follow: the pinned engine's (`tier.slots(for:)`), else the tier's.
+    public func inputs(_ catalog: SuiteCatalog?) -> SuiteInputs {
+        catalog?.tier(quality)?.slots(for: engineModel) ?? .none
     }
 
     /// Picking a preset: its values go in the chips, its move becomes a #move, and the composer collapses (C6).
