@@ -473,7 +473,7 @@ private fun EnginesSection(vm: OwnerViewModel, st: StudioSettings, s: OwnerState
     Cta2(if (s.busy) "Saving…" else "Save engine settings", { vm.saveStudio(StudioSettingsPatch(maxGpus = gpus, overheadPayer = payer)) }, Modifier.fillMaxWidth())
     Spacer(Modifier.height(4.dp))
     H3("Image engine")
-    Tiny("Makes character-sheet angles, outfit sets and photoshoots. Members pay exactly what each photo costs.")
+    Tiny("Makes character-sheet angles, outfit sets and photos. Members pay exactly what each photo costs.")
     val en = s.engine
     if (en != null) EngineForm(vm, en, s)
 }

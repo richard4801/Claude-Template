@@ -174,6 +174,9 @@ interface MuseService {
     @GET("v1/suite/locations") suspend fun suiteLocations(): List<SuiteLocation>
     @POST("v1/suite/locations") suspend fun createSuiteLocation(@Body r: SuiteLocationCreate): SuiteLocation
     @DELETE("v1/suite/locations/{id}") suspend fun deleteSuiteLocation(@Path("id") id: String): retrofit2.Response<Unit>
+    // AI suite · Photo tool (workstream 3)
+    @POST("v1/suite/photos/estimate") suspend fun photoEstimate(@Body r: PhotoRequest): PhotoEstimate
+    @POST("v1/suite/photos") suspend fun createPhotos(@Body r: PhotoRequest): PhotoResult
 }
 
 /**
@@ -455,6 +458,9 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun suiteLocations() = call { suiteLocations() }.map { it.copy(image = it.image.abs()) }
     override suspend fun createSuiteLocation(req: SuiteLocationCreate) = call { createSuiteLocation(req) }.let { it.copy(image = it.image.abs()) }
     override suspend fun deleteSuiteLocation(id: String) { call { deleteSuiteLocation(id) } }
+    // AI suite · Photo tool (workstream 3): making the stills answers when they exist, so it gets the long read timeout (as shoots).
+    override suspend fun photoEstimate(req: PhotoRequest) = call { photoEstimate(req) }
+    override suspend fun createPhotos(req: PhotoRequest) = callLong { createPhotos(req) }.let { r -> r.copy(takes = r.takes.map { it.abs() }) }
     override suspend fun uploadSuiteMedia(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit): SuiteMediaRef {
         val p = call { editorPresign(EditorPresignRequest(mime, bytes.size.toLong())) }
         putToStorage(p, ProgressBody(bytes, mime.toMediaTypeOrNull(), onProgress))

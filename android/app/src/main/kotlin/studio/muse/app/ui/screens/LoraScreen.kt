@@ -130,7 +130,7 @@ fun LoraScreen() {
                     else -> Cta("Train · ~${minutesText(Pricing.loraTrainMinutes)} · ${Pricing.money(s.trainCost)}", vm::train, Modifier.weight(1f))
                 }
                 "training" -> Cta2("Back to profile", { nav.back() }, Modifier.weight(1f))
-                "ready" -> Cta("Test it in a photoshoot", { nav.go(Routes.SHOOT) }, Modifier.weight(1f))
+                "ready" -> Cta("Test it in a photo", { studio.muse.app.ui.screens.suite.composer.openPhoto(c, nav, s.model?.id, null) }, Modifier.weight(1f))
                 else -> Cta("Build training set · ${studio.muse.core.PhotoPricing.about(s.setCost)}", vm::build, Modifier.weight(1f))
             }
         }
@@ -192,7 +192,7 @@ private fun LoraIntro(model: Model?) {
         style = small(), color = m.t.ink,
     )
     ListGroup {
-        TwoLineRow("Photo LoRA", "For photoshoots · ~${Pricing.LORA_PHOTO_MIN} min", "camera")
+        TwoLineRow("Photo LoRA", "For photos · ~${Pricing.LORA_PHOTO_MIN} min", "camera")
         ListDivider()
         TwoLineRow("Video LoRA", "For videos · ~${Pricing.LORA_VIDEO_MIN} min", "studio")
     }

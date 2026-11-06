@@ -117,7 +117,6 @@ fun HomeScreen() {
                 s.featured?.let { f -> FeatureCard(f, s.featuredOutfits) { vm.open(f, nav) } }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     QuickAction("studio", "New video", Modifier.weight(1f)) { nav.go(Routes.SOURCE) }
-                    QuickAction("camera", "Photoshoot", Modifier.weight(1f)) { nav.go(Routes.SHOOT) }
                     QuickAction("model", "New model", Modifier.weight(1f)) { nav.go(Routes.CREATE1) }
                 }
                 when {
@@ -167,7 +166,7 @@ private fun EmptyModels(onCreate: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         T("No models yet", m.type.body.copy(fontSize = 22.sp, fontWeight = FontWeight.Medium, lineHeight = 26.sp), m.t.ink)
-        Tiny("Create her once: a name, a few photos for the character sheet, and she's ready for photoshoots and videos.")
+        Tiny("Create her once: a name, a few photos for the character sheet, and she's ready for photos and videos.")
         Cta("New model", onCreate, Modifier.fillMaxWidth().padding(top = 6.dp), icon = "plus")
     }
 }

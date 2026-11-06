@@ -95,6 +95,7 @@ object Routes {
     const val SPLASH = "splash"; const val WELCOME = "welcome"; const val SIGNIN = "signin"; const val SIGNUP = "signup"
     const val HOME = "home"; const val GALLERY = "gallery"; const val QUEUE = "queue"; const val SETTINGS = "settings"; const val CREDITS = "credits"
     const val PROFILE = "profile"; const val CREATE1 = "create1"; const val CREATE3 = "create3"; const val OUTFIT = "outfit"
+    /** Photoshoot's old route: kept only so old links redirect to Suite → Photo ([redirect]). */
     const val SHOOT = "shoot"; const val SOURCE = "source"; const val DIRECT = "direct"; const val RESULT = "result/{id}"
     const val LORA = "lora"; const val ACCOUNTS = "accounts"; const val POST = "post/{id}"; const val POSTS = "posts"
     const val MEMBERS = "members"; const val INVITE = "invite"; const val STUDIO = "studio"
@@ -123,11 +124,21 @@ object Routes {
     fun suiteCompose(tool: String) = "suite/compose/$tool"
     const val CAMERA_STAGE = "camera-stage"; const val EDIT = "edit"; const val EDIT_TAKE = "edit/{id}"; const val CONNECTIONS = "connections"
     fun editTake(takeId: String) = "edit/$takeId"
+
+    /** Photo tool (workstream 3): the AI suite composer on Photo. */
+    val SUITE_PHOTO = suiteCompose("photo")
+
+    /**
+     * Routes that moved (workstream 3): Photoshoot is now the Photo tool on the composer, so an old link to it ("shoot",
+     * "shoot/…", "shoot?…", from a notification or an older build) opens Suite → Photo. Every other route is unchanged.
+     */
+    fun redirect(route: String): String = if (route == SHOOT || route.startsWith("$SHOOT/") || route.startsWith("$SHOOT?")) SUITE_PHOTO else route
 }
 
 /** Navigation helpers (the prototype's go/back/tab). */
 class Nav(val controller: NavHostController) {
-    fun go(route: String) {
+    fun go(to: String) {
+        val route = Routes.redirect(to)
         if (controller.currentDestination?.route == route) return
         controller.navigate(route) { launchSingleTop = true }
     }
@@ -136,7 +147,8 @@ class Nav(val controller: NavHostController) {
         if (!controller.popBackStack()) controller.navigate(Routes.HOME)
     }
 
-    fun tab(route: String) {
+    fun tab(to: String) {
+        val route = Routes.redirect(to)
         controller.navigate(route) {
             popUpTo(Routes.HOME) { saveState = false; inclusive = route == Routes.HOME }
             launchSingleTop = true
@@ -217,7 +229,8 @@ fun MuseApp(
                     composable(Routes.CREATE1) { CreateBasicsScreen() }
                     composable(Routes.CREATE3) { CharacterSheetScreen() }
                     composable(Routes.OUTFIT) { OutfitScreen() }
-                    composable(Routes.SHOOT) { ShootScreen() }
+                    // Photoshoot is the Photo tool now (workstream 3): an old "shoot" route that reaches the graph directly opens Suite → Photo.
+                    composable(Routes.SHOOT) { LaunchedEffect(Unit) { nav.navigate(Routes.SUITE_PHOTO) { popUpTo(Routes.SHOOT) { inclusive = true }; launchSingleTop = true } } }
                     composable(Routes.SOURCE) { SourceScreen() }
                     composable(Routes.DIRECT) { DirectScreen() }
                     composable(Routes.RESULT) { e -> ResultScreen(e.arguments?.getString("id") ?: "") }
@@ -403,7 +416,7 @@ fun BoxScope.TabBar(active: String) {
                             MenuItem("model", "Character swap") { nav.go(Routes.SUITE_SWAP) },
                             MenuItem("grid", "Storyboard") { nav.go(Routes.SUITE_STORYBOARD) },
                             MenuItem("retry", "Edit") { nav.go(Routes.EDIT) },
-                            MenuItem("camera", "Photoshoot") { nav.go(Routes.SHOOT) },
+                            MenuItem("camera", "Photo") { nav.go(Routes.SUITE_PHOTO) },
                             MenuItem("model", "New model") { nav.go(Routes.CREATE1) },
                         ))
                     }

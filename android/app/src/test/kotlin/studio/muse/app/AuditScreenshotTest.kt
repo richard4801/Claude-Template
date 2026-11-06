@@ -50,11 +50,11 @@ class AuditScreenshotTest(private val theme: String, private val screen: String)
         /** Demo studio (the owner), populated. */
         val DEMO = listOf(
             "welcome", "signin", "signup", "home", "gallery", "queue", "settings", "credits", "profile", "create1", "create3", "outfit",
-            "shoot", "shoot_prompt", "result", "templates", "template_detail", "posts", "posts_posted", "post", "accounts", "lora", "members", "invite",
+            "photo", "result", "templates", "template_detail", "posts", "posts_posted", "post", "accounts", "lora", "members", "invite",
             "studio_settings", "prompts", "enhance", "dressup", "archived",
         )
         /** The real API as a new member: nothing made yet. */
-        val EMPTY = listOf("home_empty", "gallery_empty", "queue_empty", "shoot_empty", "posts_empty", "templates_empty", "settings_empty", "profile_empty", "credits_empty")
+        val EMPTY = listOf("home_empty", "gallery_empty", "queue_empty", "photo_empty", "posts_empty", "templates_empty", "settings_empty", "profile_empty", "credits_empty")
         /** The real API, first load still on its way / the server can't be reached. */
         val LOADING = listOf("home_loading", "gallery_loading", "home_error", "gallery_error")
         val SCREENS = DEMO + EMPTY + LOADING
@@ -103,12 +103,11 @@ class AuditScreenshotTest(private val theme: String, private val screen: String)
         }
         when (screen) {
             "posts_posted" -> c.drafts.postsTab.value = "posted"
-            "shoot_prompt" -> c.drafts.shoot.update { it.copy(tool = "spark", direction = "laughing mid-step, hair blowing") }
         }
         val base = screen.substringBefore('_')
         val route = when (base) {
             "home" -> Routes.HOME; "gallery" -> Routes.GALLERY; "queue" -> Routes.QUEUE; "settings" -> Routes.SETTINGS; "credits" -> Routes.CREDITS
-            "shoot" -> Routes.SHOOT; "posts" -> Routes.POSTS; "templates" -> Routes.TEMPLATES; "profile" -> Routes.PROFILE
+            "photo" -> Routes.SUITE_PHOTO; "posts" -> Routes.POSTS; "templates" -> Routes.TEMPLATES; "profile" -> Routes.PROFILE
             "studio" -> Routes.STUDIO; "template", "result", "post" -> Routes.HOME
             else -> screen
         }
