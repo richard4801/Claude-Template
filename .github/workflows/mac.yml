@@ -83,6 +83,28 @@ jobs:
           codesign --force --deep --sign - "$APP"
           ditto -c -k --keepParent "$APP" MUSE-mac.zip
 
+      # Review screenshots of the key screens in the four themes (SnapshotRunner, demo mode, no server). Never fails the build.
+      - name: Review screenshots
+        continue-on-error: true
+        working-directory: mac
+        run: |
+          APP=build/Build/Products/Release/MUSE.app
+          EXE="$APP/Contents/MacOS/$(defaults read "$PWD/$APP/Contents/Info" CFBundleExecutable)"
+          mkdir -p snapshots
+          MUSE_SNAPSHOT_DIR="$PWD/snapshots" "$EXE" > snapshots.log 2>&1 &
+          pid=$!
+          for i in $(seq 1 240); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          kill $pid 2>/dev/null || true
+          ls -la snapshots | head -100
+          tail -n 40 snapshots.log || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mac-screenshots
+          path: mac/snapshots
+          if-no-files-found: ignore
+
       - uses: actions/upload-artifact@v4
         with:
           name: MUSE-mac

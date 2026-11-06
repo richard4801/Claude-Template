@@ -23,6 +23,7 @@ struct RootView: View {
             if store.catalog != nil && store.isOwner { ModelCatalogSheet().transition(.opacity) }
             if store.paletteOpen { PaletteView().transition(.opacity) }
             if store.warmPrompt != nil && store.isOwner { WarmPromptView().transition(.opacity) }
+            SnapshotOverlay()
             ToastView()
         }
         .environment(\.theme, t)

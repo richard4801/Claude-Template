@@ -22,6 +22,7 @@ struct MuseApp: App {
                 .preferredColorScheme(store.theme.isDark ? .dark : .light)
                 .onAppear {
                     store.bootstrap()
+                    SnapshotRunner.runIfRequested(store) // review screenshots, only with MUSE_SNAPSHOT_DIR set
                     KeyMonitor.shared.install(store)
                     NetworkWatcher.shared.start { store.resumeLive(force: true) }
                 }
