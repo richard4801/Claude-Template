@@ -74,6 +74,9 @@ object CamIcons {
         "link" to "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0 -5.7-5.7l-1 1 M14 10a4 4 0 0 0 -5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
         "film" to "M4 5h16v14H4z M8 5v14M16 5v14M4 9h4M4 15h4M16 9h4M16 15h4",
         "cam" to "M3 8h11v8H3z M14 11l6-3v8l-6-3z",
+        "stop" to "M7 7h10v10H7z",
+        "open" to "M14 4h6v6 M20 4l-9 9 M18 14v6H4V6h6",
+        "claude" to "M12 3v18 M3 12h18 M5.6 5.6l12.8 12.8 M18.4 5.6L5.6 18.4",
     )
     private val cache = HashMap<String, ImageVector>()
     fun get(name: String): ImageVector = cache.getOrPut(name) {

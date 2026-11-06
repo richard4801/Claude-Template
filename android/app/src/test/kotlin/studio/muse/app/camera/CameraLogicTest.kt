@@ -132,7 +132,8 @@ class CameraLogicTest {
         val conn = Connections(inAppChat = true)
         assertEquals("Connected · your Claude app", SessionText.claudeRow(seed.copy(claude = ClaudeStatus(false, now - 60_000)), conn, false, now).text)
         assertEquals("In MUSE (this chat)", SessionText.claudeRow(seed.copy(claude = ClaudeStatus(false, now - 6 * 60_000)), conn, false, now).text)
-        assertEquals("Not set up", SessionText.claudeRow(seed.copy(claude = ClaudeStatus()), Connections(inAppChat = false), false, now).text)
+        // Without the server key the chat still runs on the owner's plan (the Mac).
+        assertEquals("In MUSE (this chat)", SessionText.claudeRow(seed.copy(claude = ClaudeStatus()), Connections(inAppChat = false), false, now).text)
         assertEquals("Working…", SessionText.claudeRow(seed.copy(claude = ClaudeStatus(true)), conn, false, now).text)
         assertEquals("Working…", SessionText.claudeRow(seed, conn, true, now).text)
 

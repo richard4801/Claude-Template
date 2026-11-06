@@ -1,6 +1,6 @@
 // Camera sessions (Directed camera mode), their assets and transcript, and MCP personal access tokens
 // (plans/api.md "MCP & camera sessions", plans/mcp-bridge.md). Migration 0008. Re-exported from db/schema.ts.
-import { bigint, index, integer, jsonb, doublePrecision, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
+import { bigint, boolean, index, integer, jsonb, doublePrecision, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
 
 const ms = (name: string) => bigint(name, { mode: 'number' });
 
@@ -86,3 +86,90 @@ export const mcpTokens = pgTable('mcp_tokens', {
   lastUsedAt: ms('last_used_at'),
   revokedAt: ms('revoked_at'),
 }, t => [uniqueIndex('mcp_tokens_hash_idx').on(t.tokenHash), index('mcp_tokens_user_idx').on(t.userId)]);
+
+// ---------------------------------------------------------------- OAuth 2.1 for /mcp (migration 0011)
+/** Dynamically registered clients (Client ID Metadata Document clients are fetched, not stored). */
+export const oauthClients = pgTable('oauth_clients', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  redirectUris: jsonb('redirect_uris').$type<string[]>().notNull(),
+  createdAt: ms('created_at').notNull(),
+});
+
+/** Authorization codes: single use, 10 minutes, bound to client, redirect, PKCE challenge, resource and scopes. */
+export const oauthCodes = pgTable('oauth_codes', {
+  codeHash: text('code_hash').primaryKey(),
+  clientId: text('client_id').notNull(),
+  clientName: text('client_name').notNull(),
+  userId: text('user_id').notNull(),
+  studioId: text('studio_id').notNull(),
+  redirectUri: text('redirect_uri').notNull(),
+  codeChallenge: text('code_challenge').notNull(),
+  resource: text('resource').notNull(),
+  scopes: jsonb('scopes').$type<string[]>().notNull(),
+  expiresAt: ms('expires_at').notNull(),
+  usedAt: ms('used_at'),
+});
+
+/** Access and refresh tokens (sha256 only). `grantId` groups one consent's rotating tokens. */
+export const oauthTokens = pgTable('oauth_tokens', {
+  id: text('id').primaryKey(),
+  grantId: text('grant_id').notNull(),
+  kind: text('kind').notNull().$type<'access' | 'refresh'>(),
+  tokenHash: text('token_hash').notNull(),
+  clientId: text('client_id').notNull(),
+  clientName: text('client_name').notNull(),
+  userId: text('user_id').notNull(),
+  studioId: text('studio_id').notNull(),
+  scopes: jsonb('scopes').$type<string[]>().notNull(),
+  audience: text('audience').notNull(),
+  createdAt: ms('created_at').notNull(),
+  expiresAt: ms('expires_at').notNull(),
+  usedAt: ms('used_at'),
+  lastUsedAt: ms('last_used_at'),
+  revokedAt: ms('revoked_at'),
+}, t => [uniqueIndex('oauth_tokens_hash_idx').on(t.tokenHash), index('oauth_tokens_grant_idx').on(t.grantId), index('oauth_tokens_user_idx').on(t.userId)]);
+
+// ---------------------------------------------------------------- Claude chat threads (Mac Claude Code + phone relay)
+export const claudeThreads = pgTable('claude_threads', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  ownerId: text('owner_id').notNull(),
+  contextKind: text('context_kind').notNull().$type<'camera' | 'edit'>(),
+  contextId: text('context_id').notNull(),
+  claudeSessionId: text('claude_session_id'),
+  createdAt: ms('created_at').notNull(),
+  updatedAt: ms('updated_at').notNull(),
+}, t => [uniqueIndex('claude_threads_context_idx').on(t.ownerId, t.contextKind, t.contextId)]);
+
+export const claudeMessages = pgTable('claude_messages', {
+  id: text('id').primaryKey(),
+  threadId: text('thread_id').notNull().references(() => claudeThreads.id, { onDelete: 'cascade' }),
+  role: text('role').notNull().$type<'user' | 'assistant' | 'tool'>(),
+  source: text('source').notNull().$type<'mac' | 'phone' | 'api'>(),
+  text: text('text').notNull().default(''),
+  turnId: text('turn_id'),
+  tool: jsonb('tool').$type<{ id: string; name: string; ok?: boolean; summary?: string }>(),
+  imageKey: text('image_key'),
+  createdAt: ms('created_at').notNull(),
+}, t => [index('claude_messages_thread_idx').on(t.threadId, t.createdAt)]);
+
+export const claudeTurns = pgTable('claude_turns', {
+  id: text('id').primaryKey(),
+  threadId: text('thread_id').notNull().references(() => claudeThreads.id, { onDelete: 'cascade' }),
+  ownerId: text('owner_id').notNull(),
+  text: text('text').notNull(),
+  from: text('from').notNull().$type<'phone' | 'mac'>(),
+  state: text('state').notNull().$type<'queued' | 'running' | 'done' | 'failed' | 'stopped'>(),
+  error: text('error'),
+  createdAt: ms('created_at').notNull(),
+  claimedAt: ms('claimed_at'),
+  lastEventAt: ms('last_event_at'),
+  finishedAt: ms('finished_at'),
+}, t => [index('claude_turns_thread_idx').on(t.threadId, t.createdAt)]);
+
+export const claudeSettings = pgTable('claude_settings', {
+  studioId: text('studio_id').primaryKey(),
+  apiFallback: boolean('api_fallback').notNull().default(false),
+  updatedAt: ms('updated_at').notNull(),
+});

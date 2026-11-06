@@ -40,12 +40,12 @@ describe('MCP transport and auth', () => {
   it('needs a token: 401 with the protected-resource metadata pointer', async () => {
     const r = await rpc('initialize', {}, { token: null });
     expect(r.status).toBe(401);
-    expect(r.headers['www-authenticate']).toMatch(/^Bearer resource_metadata=".*\/\.well-known\/oauth-protected-resource"$/);
+    expect(r.headers['www-authenticate']).toMatch(/^Bearer resource_metadata=".*\/\.well-known\/oauth-protected-resource", scope="camera:read .*generate:estimate"$/);
     expect((await rpc('tools/list', {}, { token: 'muse_pat_wrong' })).status).toBe(401);
     // A normal app session token is not an MCP token.
     expect((await rpc('tools/list', {}, { token: owner.token })).status).toBe(401);
     const meta = await a.app.inject({ method: 'GET', url: '/.well-known/oauth-protected-resource' });
-    expect(JSON.parse(meta.body)).toMatchObject({ resource: expect.stringMatching(/\/mcp$/), bearer_methods_supported: ['header'] });
+    expect(JSON.parse(meta.body)).toMatchObject({ resource: expect.stringMatching(/\/mcp$/), bearer_methods_supported: ['header'], authorization_servers: [expect.any(String)] });
   });
 
   it('initialize, notifications, ping, unknown method, GET/DELETE 405, bad Origin, bad protocol header, batches', async () => {
@@ -161,5 +161,20 @@ describe('director history repair', () => {
     expect(JSON.stringify(r.slice(0, 2))).toBe(before);
     expect(r[2]).toEqual({ role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: expect.stringMatching(/interrupted/), is_error: true }] });
     expect(repairHistory([{ role: 'user', content: 'x' }] as any)).toHaveLength(1);
+  });
+});
+
+describe('registerMcpTools', () => {
+  it('adds tools and is idempotent by name', async () => {
+    const { registerMcpTools, MUSE_TOOLS } = await import('../src/mcp/tools.js');
+    const t = { name: 'zz_test_tool', title: 'T', description: 'd', inputSchema: { type: 'object' }, scope: 'edit:read', run: async () => ({ mcpContent: [{ type: 'text', text: 'hi' }] }) };
+    registerMcpTools([t]); registerMcpTools([{ ...t }]);
+    expect(MUSE_TOOLS.filter(x => x.name === 'zz_test_tool')).toHaveLength(1);
+    const r = (await rpc('tools/call', { name: 'zz_test_tool', arguments: {} })).body.result;
+    expect(r).toEqual({ content: [{ type: 'text', text: 'hi' }] });
+    registerMcpTools([{ ...t, run: async () => ({ mcpContent: [{ type: 'image', data: 'AA==', mimeType: 'image/png' }], structuredContent: { label: 'Looked at 0:01.5' } }) }]);
+    const img = (await rpc('tools/call', { name: 'zz_test_tool', arguments: {} })).body.result;
+    expect(img.content.at(-1)).toEqual({ type: 'text', text: JSON.stringify({ label: 'Looked at 0:01.5' }) });
+    expect(img.structuredContent.label).toBe('Looked at 0:01.5');
   });
 });
