@@ -141,3 +141,32 @@ These can't be measured here (no device or emulator).
 - **Scrolling:** with Profile GPU Rendering (Developer options → "Profile HWUI rendering" → bars), or with `adb shell dumpsys gfxinfo studio.muse.app reset` then `adb shell dumpsys gfxinfo studio.muse.app` after scrolling Gallery or Queue with 200+ items. Read "Janky frames" and the 90th and 95th percentiles. Layout Inspector's recomposition counts show Home no longer recomposing on every live event while a render runs.
 - **Network:** Android Studio's Network Inspector, or the server log. Expect one request per list at launch, and none when going to another app and back within 30 s.
 - **APK:** run `apkanalyzer apk summary` or Build → Analyze APK on `app-release-unsigned.apk` (20.4 MB at this pass).
+
+## Bundled media compression (AI suite, workstream 1, 2026-11-06)
+
+The owner approved re-encoding the bundled previews and hardware renders, as suggested above. One script does it: `design/previews/source/compress_previews.py`. Run it after a render; it skips what is already compressed. Both apps bundle the same files: Android copies `design/previews` at build time (and keeps its own copy of `design/hardware` in `assets/hardware`), and the Mac app bundles both folders.
+
+| What | Encoding | Before | After | Worst SSIM vs the original |
+|---|---|---|---|---|
+| 40 move loops (`moves/*.mp4`, 320×400, 2.5 s) | H.264 CRF 24, x264 veryslow, High@3.1, yuv420p, GOP 60, no audio, faststart | 8.36 MB (~740 kbps) | **1.22 MB** (~100 kbps) | 0.990 |
+| 40 move posters (`moves/*`, 320×400) | JPEG → WebP q80, same size | 336 KB | **117 KB** | 0.992 |
+| 20 angle stills (`angles/*`, 320×400) | JPEG → WebP q80 | 182 KB | **55 KB** | 0.991 |
+| 18 lighting stills (`lighting/*`, 640×400) | JPEG → WebP q80 | 235 KB | **63 KB** | 0.992 |
+| 26 Style stills (`genres/`, `eras/`, `tempos/`, 640×400) | unchanged JPEG | 1.09 MB | 1.09 MB | — |
+| 44 hardware renders (`design/hardware`, Android `assets/hardware`, 1024²) | WebP → WebP q80, 1024 px kept | 2.66 MB | **1.94 MB** each copy | 0.969 at 1024 px, 0.987 at 512 px |
+| **Android `assets/previews` + `assets/hardware`** | | **12.8 MB** | **4.5 MB** | |
+
+- **No visible loss:**
+  - Each group was compared side by side at display size: mid-motion frames of the fastest moves (whip pan, crash zoom, FPV, running handheld), the lowest-SSIM stills, and the lowest-SSIM hardware render (Sodium Decay) at 400–512 px.
+  - None showed a difference, including the dark gradients where banding would show first.
+  - SSIM is ffmpeg's `ssim` filter, over all channels.
+- **Sizes:** the stills stay at their current size. That is about their largest display size at 2× (Mac tiles are about 150 pt tall; Android tiles are up to about 510 px on a 3× phone). The hardware renders stay at 1024 px because the camera bag and the drum wheels may show them larger than the composer does.
+- **Why the Style stills stay JPEG:**
+  - Their film grain and VHS lines are the point.
+  - At WebP q80 they save only 0.26 MB (SSIM 0.960, and the scanlines soften when zoomed).
+  - At q88 or higher, WebP is larger than the JPEG.
+- **Why H.264, not HEVC:** at 320×400 the loops are already about 30 KB each. H.264 plays on every Android decoder and in AVPlayer with no fallback needed.
+- **Paths:** the posters, angle and lighting stills are now `.webp`. This covers the manifest, the generated `server/api/src/suite/previews.data.ts`, both demo catalogs and the test fixtures. Android `BitmapFactory` and macOS ImageIO (11+) decode WebP.
+- **Tests:**
+  - The server previews test checks that every path exists and that every loop is under 80 KB.
+  - The Android unit and screenshot tests and the Mac CI pass.

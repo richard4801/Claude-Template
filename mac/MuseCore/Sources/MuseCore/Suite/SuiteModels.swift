@@ -126,7 +126,7 @@ public func suiteSearchMatches(_ query: String, _ words: [String]) -> Bool {
 }
 
 /// A composer preview: a poster still and, for moves, a short muted loop. Paths are relative to the bundled `previews/`
-/// folder ("moves/dolly_in.mp4", "lighting/window.jpg").
+/// folder ("moves/dolly_in.mp4", "lighting/window.webp").
 public struct SuitePreview: Codable, Hashable, Sendable {
     public var video: String?
     public var poster: String

@@ -2,13 +2,16 @@
 
 Preview loops and stills for the video composer's pickers (`plans/video-composer.md` "Assets needed"). There is one studio set and one grey mannequin; only the camera (moves, angles) or the lights (lighting) change.
 
-- `moves/<id>.mp4` + `moves/<id>.jpg`: all 40 moves in `server/api/src/suite/camera.ts` `MOVES`.
+- `moves/<id>.mp4` + `moves/<id>.webp`: all 40 moves in `server/api/src/suite/camera.ts` `MOVES`.
   - 2.5 s (60 frames at 24 fps), 320×400.
-  - H.264 under 300 KB, re-encoded at a lower bitrate until it fits.
+  - H.264 CRF 24, no audio, faststart: about 30 KB each (`compress_previews.py`).
   - The poster is frame 36.
-- `lighting/<id>.jpg`: 640×400, one per `LIGHTING` option plus `auto`.
-- `angles/<id>.jpg`: 320×400, one per `HEIGHTS` and `SHOT_SIZES` option.
+- `lighting/<id>.webp`: 640×400, one per `LIGHTING` option plus `auto`.
+- `angles/<id>.webp`: 320×400, one per `HEIGHTS` and `SHOT_SIZES` option.
+- `genres/`, `eras/`, `tempos/`: the Style stills (`source/style_stills.py`), JPEG on purpose (their grain loses detail as WebP).
 - `manifest.tsv`: `id file poster seconds bytes`. The id is `<kind>/<option id>`.
+- `source/compress_previews.py` runs after a render: loops to CRF 24, plain stills to WebP q80, the manifest updated
+  (`--hardware` also re-encodes `design/hardware`). Before and after sizes: `plans/perf-audit.md`.
 - `source/render_previews.py` builds the set procedurally, saves it as `source/muse_preview_set.blend`, and renders everything with Cycles on the CPU. No GPU and no paid APIs.
 
 ## Render
