@@ -563,7 +563,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
 
   /** Runs a planned shoot: holds, generates, grades and saves the stills (`/v1/shoots` and the suite's Photo tool). */
   async function runShoot(req: { user: AuthUser }, s: Awaited<ReturnType<typeof planShoot>>, filter?: Look, o2: { noun?: string } = {}) {
-    const noun = o2.noun ?? 'Shoot', billNoun = o2.noun ?? 'Photoshoot';
+    const noun = o2.noun ?? 'Photo', billNoun = o2.noun ?? 'Photo'; // Photoshoot is gone: legacy /v1/shoots takes are "Photo" too
     if (s.kind === 'template') return templateShoot(req.user, s, filter, noun, billNoun);
     const { b, m, o, count, plan } = s;
     const id = uid('shoot');
@@ -599,7 +599,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
    * A template shoot: every still gets its own prompt (template layers + identity/outfit/never-add + its own variation
    * draws, or the user's direction in place of pose and angle), its own seed, and the template's after-effects.
    */
-  async function templateShoot(u: AuthUser, s: Extract<Awaited<ReturnType<typeof planShoot>>, { kind: 'template' }>, filter?: Look, noun = 'Shoot', billNoun = 'Photoshoot') {
+  async function templateShoot(u: AuthUser, s: Extract<Awaited<ReturnType<typeof planShoot>>, { kind: 'template' }>, filter?: Look, noun = 'Photo', billNoun = 'Photo') {
     const { b, m, o, count, plan, identity, product } = s;
     // A `filter` on the request replaces the template's own look for these stills.
     const t = filter ? { ...s.t, layers: { ...s.t.layers, afterEffects: { ...(s.t.layers.afterEffects ?? {}), look: filter } } } : s.t;

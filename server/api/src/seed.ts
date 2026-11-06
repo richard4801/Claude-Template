@@ -64,8 +64,8 @@ export async function seedDev(ctx: Ctx, o: { onlyIfEmpty?: boolean; reset?: bool
     t('t_j2', 'take', 'j2', 'Bathroom trend', 'Edit', 'Edit', 3.05, 42, 'c_front', now - 83_640_000),
     t('t_g1', 'take', null, 'Living-room dance', 'Edit', 'Edit', 0.67, 42, 'g_tq', now - 90_000_000),
     t('t_g5', 'take', null, 'Living-room dance', 'Edit', 'Edit', 0.99, 42, 'g_side', now - 95_000_000),
-    t('t_g4', 'shot', null, 'Shoot', 'Shoot', '', 0.03, 0, 'c_front', now - 96_000_000),
-    t('t_g6', 'shot', null, 'Shoot', 'Shoot', '', 0.03, 0, 'c_tq', now - 97_000_000),
+    t('t_g4', 'shot', null, 'Photo', 'Photo', '', 0.03, 0, 'c_front', now - 96_000_000),
+    t('t_g6', 'shot', null, 'Photo', 'Photo', '', 0.03, 0, 'c_tq', now - 97_000_000),
   ]);
   // The mock's "today $0.13, this month $18.93" as ledger rows.
   const today = dayStart(now), month = monthStart(now);

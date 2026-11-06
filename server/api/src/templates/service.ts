@@ -141,7 +141,7 @@ export class TemplateService {
     }
     let layers = cleanLayers(s.layers ?? undefined);
     let pool: VariationPool = {};
-    let name = s.templateName ?? s.title.replace(/^Shoot · /, '');
+    let name = s.templateName ?? s.title.replace(/^(Shoot|Photo) · /, '');
     let tags: string[] = [];
     if (s.templateId) {
       const [t] = await this.ctx.db.select().from(templates).where(eq(templates.id, s.templateId));
