@@ -268,7 +268,7 @@ extension AppStore {
     func discard(_ t: Take) {
         let alert = NSAlert()
         alert.messageText = "Delete \(t.caption)?"
-        alert.informativeText = t.isFinal ? "It's in your Final gallery. This can't be undone." : "This can't be undone."
+        alert.informativeText = t.isFinal ? "It's in Final in your Library. This can't be undone." : "This can't be undone."
         alert.addButton(withTitle: "Delete take")
         alert.addButton(withTitle: "Keep")
         alert.buttons.first?.hasDestructiveAction = true
@@ -817,7 +817,7 @@ extension AppStore {
             PaletteCommand(title: "Home", icon: "house", shortcut: "⌘1") { [weak self] in self?.go(.home) },
             PaletteCommand(title: "Models", icon: "person", shortcut: "⌘2") { [weak self] in self?.go(.models) },
             PaletteCommand(title: "Queue", icon: "list.bullet.below.rectangle", shortcut: "⌘5") { [weak self] in self?.go(.queue) },
-            PaletteCommand(title: "Gallery", icon: "square.grid.2x2", shortcut: "⌘6") { [weak self] in self?.go(.gallery) },
+            PaletteCommand(title: "Library", icon: "square.grid.2x2", shortcut: "⌘6") { [weak self] in self?.go(.gallery) },
             PaletteCommand(title: "Posts", icon: "paperplane", shortcut: "⌘7") { [weak self] in self?.go(.posts) },
             PaletteCommand(title: "Identity LoRA", icon: "sparkles", shortcut: "") { [weak self] in
                 guard let self, let m = self.profileModel ?? self.currentModel else { return }

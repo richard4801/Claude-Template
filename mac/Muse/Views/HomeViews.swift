@@ -101,7 +101,7 @@ struct HomeView: View {
                 HStack(alignment: .center, spacing: Space.s5) {
                     MediaFrame(ref: r.thumb).frame(width: 96)
                     VStack(alignment: .leading, spacing: Space.s2) {
-                        Text(r.title).scaled(t.scale.heading, t.roles.ink).lineLimit(1)
+                        Text(TakeText.displayTitle(r.title)).scaled(t.scale.heading, t.roles.ink).lineLimit(1)
                         Text(r.isRunning ? r.progressLine : "Starts when you run the queue").monospacedDigit().scaled(t.scale.caption, t.roles.ink2)
                         RProgress(value: r.progress / 100).frame(maxWidth: 360)
                         if r.isQueued && store.runningJob == nil {
@@ -114,7 +114,7 @@ struct HomeView: View {
             }
 
             SectionTitle("Latest takes") {
-                if !store.takes.isEmpty { RButton("Open gallery", kind: .plain, small: true) { store.go(.gallery) } }
+                if !store.takes.isEmpty { RButton("Open library", kind: .plain, small: true) { store.go(.gallery) } }
             }
             if firstLoad {
                 SkeletonGrid(columns: 6, count: 6)

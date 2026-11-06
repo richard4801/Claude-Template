@@ -267,7 +267,7 @@ final class ShootReferencesTests: XCTestCase {
         let api = FakeMuseAPI(speed: 0, genDelay: 0)
         _ = try await api.signIn(SignInRequest(email: "you@studio.com", password: ""))
         let lib = try await api.prompts()
-        XCTAssertEqual(lib.sections.first?.group.label, "Photoshoot")
+        XCTAssertEqual(lib.sections.first?.group.label, "Photo")
         XCTAssertTrue(lib.prompts.allSatisfy { !$0.overridden })
         let events = api.events()
         do {

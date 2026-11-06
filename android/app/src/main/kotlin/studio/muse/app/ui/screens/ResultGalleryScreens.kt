@@ -95,7 +95,7 @@ class ResultViewModel(private val c: AppContainer, private val id: String) : Vie
 
     fun approve(t: Take, celebrate: () -> Unit) = viewModelScope.launch {
         if (t.final) return@launch
-        if (c.repo.setTakeStatus(t.id, "final") != null) { celebrate(); c.repo.toast("Moved to Final gallery") }
+        if (c.repo.setTakeStatus(t.id, "final") != null) { celebrate(); c.repo.toast("Moved to Final") }
     }
 
     fun discard(t: Take, nav: Nav) = viewModelScope.launch {
@@ -214,7 +214,7 @@ fun ResultScreen(id: String) {
                 } else {
                     Row(verticalAlignment = Alignment.Top) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            T(take.title, m.scale.heading, m.roles.ink)
+                            T(take.shownTitle, m.scale.heading, m.roles.ink)
                             take.templateName?.let { Caption("Template: $it") }
                             Caption(listOf(take.engineLabel, Pricing.money(take.cost)).filter { it.isNotBlank() }.joinToString(" · "))
                             takeSpecs(take)?.let { T(it, m.scale.caption.tabular(), m.roles.ink2) }
@@ -301,13 +301,13 @@ fun GalleryScreen() {
                             Box(
                                 Modifier.weight(1f).height(170.dp).clip(shape).background(m.roles.field).let { if (isNew) it.border(2.dp, m.roles.selection, shape) else it }
                                     .press { nav.go(Routes.result(t.jobId ?: t.id)) }
-                                    .semantics(mergeDescendants = true) { contentDescription = "${t.title} · ${t.label}" },
+                                    .semantics(mergeDescendants = true) { contentDescription = "${t.shownTitle} · ${t.shownLabel}" },
                             ) {
                                 RefImage(t.thumb, Modifier.fillMaxSize(), 20)
                                 // One caption on a scrim: what it is (duration or Photo), and New for the ones just made.
                                 Box(Modifier.align(Alignment.BottomStart).padding(MuseSpace.s1).clip(RoundedCornerShape(m.radii.chip)).background(Color.Black.copy(alpha = .55f))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)) {
-                                    T((if (isNew) "New · " else "") + t.label, m.scale.micro.tabular(), Color.White, maxLines = 1)
+                                    T((if (isNew) "New · " else "") + t.shownLabel, m.scale.micro.tabular(), Color.White, maxLines = 1)
                                 }
                             }
                         }
@@ -315,7 +315,7 @@ fun GalleryScreen() {
                     }
                 }
             }
-            if (list.isNotEmpty()) item(key = "footer", contentType = "note") { Caption("Test renders stay separate from your Final gallery.", Modifier.padding(top = MuseSpace.s2)) }
+            if (list.isNotEmpty()) item(key = "footer", contentType = "note") { Caption("Test renders stay separate from your Final takes.", Modifier.padding(top = MuseSpace.s2)) }
         }
         TabBar(Routes.GALLERY)
     }

@@ -585,8 +585,8 @@ fun TemplateUseScreen(id: String) {
         Dock(tight = true) {
             when (s.phase) {
                 "ready" -> Cta("${c.drafts.freshShots.value} shots ready · View in Gallery", { nav.tab(Routes.GALLERY) }, Modifier.weight(1f), icon = "grid")
-                "busy" -> Cta("Shooting…", {}, Modifier.weight(1f), busy = true)
-                else -> Cta("Shoot 4 · ${s.preview?.estimateLabel?.ifBlank { null } ?: studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.shoot(photoPrices()))}",
+                "busy" -> Cta("Generating…", {}, Modifier.weight(1f), busy = true)
+                else -> Cta("Generate 4 · ${s.preview?.estimateLabel?.ifBlank { null } ?: studio.muse.core.PhotoPricing.about(studio.muse.core.PhotoPricing.shoot(photoPrices()))}",
                     { vm.shoot(celebrate) }, Modifier.weight(1f), icon = "camera")
             }
         }

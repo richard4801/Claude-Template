@@ -442,7 +442,7 @@ struct PaletteView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(spacing: 0) {
-                            if cmds.isEmpty { Text("Nothing matches. Try a screen name, like Gallery.").foregroundStyle(t.roles.ink2).frame(maxWidth: .infinity, alignment: .leading).padding(12) }
+                            if cmds.isEmpty { Text("Nothing matches. Try a screen name, like Library.").foregroundStyle(t.roles.ink2).frame(maxWidth: .infinity, alignment: .leading).padding(12) }
                             ForEach(Array(cmds.enumerated()), id: \.offset) { i, c in
                                 Button { store.runPalette(i) } label: {
                                     HStack(spacing: 12) {

@@ -259,6 +259,18 @@ data class Take(
 ) {
     val final get() = status == "final"
     val shot get() = kind == "shot"
+    /** The title and badge as members see them ([takeDisplayTitle]): old Photoshoot takes read "Photo". */
+    val shownTitle get() = takeDisplayTitle(title)
+    val shownLabel get() = takeDisplayTitle(label)
+}
+
+/**
+ * Photoshoot is now the Photo tool (workstream 3), but takes made before keep their stored titles ("Shoot · Café window",
+ * a bare "Shoot" badge). Every take title, label or badge shown to a member goes through this, so they all read "Photo".
+ */
+fun takeDisplayTitle(raw: String): String = when (raw) {
+    "Shoot", "Photoshoot" -> "Photo"
+    else -> raw.replace(Regex("^(?:Photoshoot|Shoot)( ·)"), "Photo$1")
 }
 
 @Serializable

@@ -77,23 +77,17 @@ struct KeepReadyRow: View {
 
     var body: some View {
         let g = store.warmLive
-        VStack(alignment: .leading, spacing: 8) {
-            ListRow(icon: "bolt", title: WarmGpuText.switchLabel, hint: hint(g), last: store.warmWarning == nil) {
-                MToggle(isOn: Binding(get: { store.warmOn }, set: { store.setWarmSwitch($0) })).disabled(store.warmBusy || !store.warmAvailable)
+        VStack(alignment: .leading, spacing: Space.s2) {
+            SettingRow(WarmGpuText.switchLabel, hint: hint(g)) {
+                RSwitch(label: WarmGpuText.switchLabel, isOn: Binding(get: { store.warmOn }, set: { store.setWarmSwitch($0) }))
+                    .disabled(store.warmBusy || !store.warmAvailable)
             }
             if let w = store.warmWarning, g.isOn {
-                HStack(spacing: 10) {
-                    Image(systemName: "clock").font(.system(size: 13, weight: .semibold))
-                    Text(WarmGpuText.warningTitle(w)).font(t.body(13, .semibold))
-                    Spacer()
-                    if w.reason != "cap" || g.canExtend {
-                        MButton(WarmGpuText.keepWarm, size: .small, off: store.warmBusy) { store.keepWarm() }
-                    }
+                if w.reason != "cap" || g.canExtend {
+                    InlineNotice(WarmGpuText.warningTitle(w), tone: .caution, actionTitle: WarmGpuText.keepWarm) { if !store.warmBusy { store.keepWarm() } }
+                } else {
+                    InlineNotice(WarmGpuText.warningTitle(w), tone: .caution)
                 }
-                .foregroundStyle(t.warnInk)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(RoundedRectangle(cornerRadius: t.controlRadius).fill(t.warnBg))
             }
         }
     }

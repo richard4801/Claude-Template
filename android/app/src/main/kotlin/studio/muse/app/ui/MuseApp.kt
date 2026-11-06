@@ -71,6 +71,15 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.statusBars
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.Role
+import studio.muse.app.ui.theme.MuseSpace
+import studio.muse.app.ui.theme.roles
+import studio.muse.app.ui.theme.scale
 import studio.muse.app.AppContainer
 import studio.muse.app.data.Toast
 import studio.muse.app.ui.components.Ink
@@ -390,46 +399,50 @@ private fun BoxScope.ConfettiLayer(bursts: MutableList<Long>) {
     })
 }
 
-/** Bottom bar: Home · Studio (the Video suite) · + · Queue · You. Same in every theme. + opens the create menu. */
+/** One tab of the bottom bar: its Phosphor icon, its sentence-case name and the route it opens. */
+data class TabItem(val icon: String, val label: String, val route: String)
+
+/**
+ * The bottom bar's five tabs (design/direction/render.py, approved 2026-11-06): Home, Suite, Library, Queue, You. No centre "+":
+ * creating lives on Home ("New video", "New model") and in Suite (Shot, Character swap, Photo, Storyboard, Edit).
+ */
+val TAB_ITEMS = listOf(
+    TabItem("house", "Home", Routes.HOME),
+    TabItem("video-camera", "Suite", Routes.SUITE),
+    TabItem("squares-four", "Library", Routes.GALLERY),
+    TabItem("stack", "Queue", Routes.QUEUE),
+    TabItem("user", "You", Routes.SETTINGS),
+)
+
+/**
+ * Bottom bar, the same in every theme: canvas, one hairline on top, five equal tabs. Inactive tabs are ink2; the active tab is
+ * the theme's selection colour (accent; Creator Pop's ink), with a short bar of it above the icon. Labels in the text face, sentence case.
+ */
 @Composable
 fun BoxScope.TabBar(active: String) {
     val m = muse
+    val r = m.roles
     val nav = LocalNav.current
-    var plus by remember { mutableStateOf(false) }
-    val items = listOf(Triple("home", "Home", Routes.HOME), Triple("studio", "Studio", Routes.SUITE), Triple("plus", "", ""), Triple("queue", "Queue", Routes.QUEUE), Triple("user", "You", Routes.SETTINGS))
-    val bg = when { m.isA -> m.t.bg; m.isB -> Color(0xFF0B0C0D); m.isD -> Color.White; else -> m.t.surface }
     Column(
-        Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(bg).drawBehind {
-            if (!m.isC) drawLine(if (m.isD) Ink else m.t.line, Offset(0f, 0f), Offset(size.width, 0f), (if (m.isD) 2.5.dp else m.t.stroke).toPx())
+        Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(r.canvas).drawBehind {
+            drawLine(r.hairline, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx())
         }.navigationBarsPadding(),
     ) {
-        Row(Modifier.fillMaxWidth().height(66.dp).padding(horizontal = 14.dp), horizontalArrangement = Arrangement.SpaceAround, verticalAlignment = Alignment.CenterVertically) {
-            items.forEach { (icon, label, route) ->
-                if (icon == "plus") {
-                    Box {
-                        val shape = RoundedCornerShape(if (m.isA) 2.dp else 999.dp)
-                        Box(
-                            Modifier.size(50.dp).let { if (m.isD) it.hardShadow(3.dp, 999.dp) else it }.clip(shape).background(m.t.cta)
-                                .let { if (m.isD) it.border(2.5.dp, Ink, shape) else it }.press { plus = true }
-                                .semantics { contentDescription = "Create" },
-                            contentAlignment = Alignment.Center,
-                        ) { Ic("plus", 24.dp, m.t.ctaInk) }
-                        MuseMenu(plus, { plus = false }, listOf(
-                            MenuItem("studio", "Shot") { nav.go(Routes.SUITE_SHOT) },
-                            MenuItem("model", "Character swap") { nav.go(Routes.SUITE_SWAP) },
-                            MenuItem("grid", "Storyboard") { nav.go(Routes.SUITE_STORYBOARD) },
-                            MenuItem("retry", "Edit") { nav.go(Routes.EDIT) },
-                            MenuItem("camera", "Photo") { nav.go(Routes.SUITE_PHOTO) },
-                            MenuItem("model", "New model") { nav.go(Routes.CREATE1) },
-                        ))
-                    }
-                } else {
-                    val on = route == active
-                    val c = if (on) (if (m.isD) m.t.blue else m.t.accent) else m.t.muted
-                    Column(Modifier.width(60.dp).press { if (!on) nav.tab(route) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Ic(icon, 22.dp, c)
-                        T(label, m.type.tab.copy(fontWeight = if (on && m.isD) androidx.compose.ui.text.font.FontWeight.ExtraBold else null), c, upper = m.isA, maxLines = 1)
-                    }
+        Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
+            TAB_ITEMS.forEach { t ->
+                val on = t.route == active
+                val c = if (on) r.selection else r.ink2
+                Column(
+                    Modifier.weight(1f).fillMaxHeight().press { if (!on) nav.tab(t.route) }
+                        .semantics(mergeDescendants = true) { selected = on; role = Role.Tab; contentDescription = t.label }
+                        .testTag("tab_${t.route}"),
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+                ) {
+                    Box(Modifier.width(24.dp).height(2.dp).background(if (on) r.selection else Color.Transparent))
+                    Spacer(Modifier.height(MuseSpace.s2))
+                    Ic(t.icon, 24.dp, c)
+                    Spacer(Modifier.height(MuseSpace.s1))
+                    T(t.label, m.scale.micro, c, maxLines = 1)
                 }
             }
         }

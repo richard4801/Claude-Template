@@ -267,7 +267,7 @@ fun PostScreen(takeId: String) {
                 Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(56.dp, 72.dp).clip(controlShape()).background(m.roles.field)) { RefImage(s.take?.thumb, Modifier.fillMaxSize(), 20) }
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        T(s.take?.title ?: "", m.scale.heading, m.roles.ink)
+                        T(s.take?.shownTitle ?: "", m.scale.heading, m.roles.ink)
                         Caption("${s.model?.name ?: ""} · 1080×1920")
                     }
                 }
@@ -381,7 +381,7 @@ private fun PostRow(p: Post, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().press(onClick = onClick).padding(vertical = MuseSpace.s2), horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(56.dp, 72.dp).clip(controlShape()).background(m.roles.field)) { RefImage(p.thumb, Modifier.fillMaxSize(), 20) }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
-            T(p.title, m.scale.body.copy(fontWeight = FontWeight.Medium), m.roles.ink, maxLines = 1)
+            T(studio.muse.app.data.takeDisplayTitle(p.title), m.scale.body.copy(fontWeight = FontWeight.Medium), m.roles.ink, maxLines = 1)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
                 p.platforms.mapNotNull { Platform.of(it) }.forEach { PlatformBadge(it, 18.dp) }
                 Spacer(Modifier.width(MuseSpace.s1))

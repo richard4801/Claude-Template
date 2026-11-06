@@ -79,7 +79,7 @@ class PromptEditViewModel(private val c: AppContainer, val key: String) : ViewMo
             val (lib, e) = c.repo.prompts()
             val found = lib?.prompts?.firstOrNull { it.key == key }
             entry.value = found
-            groupLabel.value = lib?.groups?.firstOrNull { it.id == found?.group }?.label
+            groupLabel.value = lib?.groups?.firstOrNull { it.id == found?.group }?.label?.let { studio.muse.app.data.takeDisplayTitle(it) }
             problem.value = e ?: if (lib != null && found == null) "That prompt isn't in this studio's library." else null
             if (draft.value == null) draft.value = found?.current
             // The saved text's preview at once, then ~350 ms after the last keystroke.
@@ -153,7 +153,7 @@ fun PromptsScreen() {
                     val items = l.prompts.filter { it.group == g.id }
                     if (items.isEmpty()) return@forEach
                     Column {
-                        Heading(g.label) { Caption("${items.count { it.overridden }.takeIf { it > 0 }?.let { "$it edited of " } ?: ""}${items.size}") }
+                        Heading(studio.muse.app.data.takeDisplayTitle(g.label)) { Caption("${items.count { it.overridden }.takeIf { it > 0 }?.let { "$it edited of " } ?: ""}${items.size}") }
                         items.forEach { p ->
                             RowItem(p.title, p.current.replace('\n', ' ').take(90).ifBlank { "Empty, left out" }, onClick = { nav.go(Routes.prompt(p.key)) }) {
                                 if (p.overridden) RowValue("Edited", m.roles.caution)
@@ -246,6 +246,6 @@ fun PromptEditorBody(entry: PromptEntry, group: String?, text: String, preview: 
 }
 
 private fun groupLabel(id: String) = when (id) {
-    "photoshoot" -> "Photoshoot"; "references" -> "References"; "sheet" -> "Character sheet"; "outfits" -> "Outfits"; "enhance" -> "Enhance"
+    "photoshoot" -> "Photo"; "references" -> "References"; "sheet" -> "Character sheet"; "outfits" -> "Outfits"; "enhance" -> "Enhance"
     "dressup" -> "Dress up"; "templates" -> "Templates"; "video" -> "Video"; "lora" -> "LoRA"; else -> id
 }

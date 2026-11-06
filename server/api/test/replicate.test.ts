@@ -417,9 +417,9 @@ describe('photos on Replicate (fake Replicate server)', () => {
     // The hold was the estimate; the settle is the exact sum.
     const holds = await a.ctx.db.select().from(ledger).where(eq(ledger.kind, 'hold'));
     const hold = holds.at(-1)!;
-    expect(hold.note).toBe('Photoshoot · 2 photos · hold');
+    expect(hold.note).toBe('Photo · 2 photos · hold');
     const settle = (await a.ctx.db.select().from(ledger).where(eq(ledger.jobId, hold.jobId!))).find(x => x.kind === 'settle')!;
-    expect(settle.note).toBe('Photoshoot · 2 photos');
+    expect(settle.note).toBe('Photo · 2 photos');
     expect(settle.amountUsd).toBeCloseTo(shots[0].cost + shots[1].cost, 12);
     // References were shrunk to fit 1024 px.
     const rx = fs.readdirSync(path.join(a.dir, 'rx'));
@@ -503,7 +503,7 @@ describe('photos on Replicate (fake Replicate server)', () => {
     expect(r.body.error).toBe("Something went wrong making the photos · you weren't charged");
     expect(fake.state.creates.length).toBe(n0 + 2);
     const over = (await a.ctx.db.select().from(ledger).where(eq(ledger.kind, 'overhead'))).at(-1)!;
-    expect(over.note).toMatch(/^Photos that didn't finish · Photoshoot · 2 photos/);
+    expect(over.note).toMatch(/^Photos that didn't finish · Photo · 2 photos/);
     expect(over.amountUsd).toBeGreaterThan(0.015);
     const sb1 = (await owner.req('GET', '/v1/studio/balance')).body;
     expect(sb0.balanceUsd - sb1.balanceUsd).toBeCloseTo(over.amountUsd, 9);

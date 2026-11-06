@@ -356,7 +356,7 @@ extension AppStore {
     func deleteModel(_ m: MuseModel) {
         let alert = NSAlert()
         alert.messageText = "Delete \(m.name)?"
-        alert.informativeText = "This deletes her character sheet, outfits, Identity LoRA and training set, and disconnects her accounts. Finished takes stay in the Gallery."
+        alert.informativeText = "This deletes her character sheet, outfits, Identity LoRA and training set, and disconnects her accounts. Finished takes stay in the Library."
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")
         alert.buttons.first?.hasDestructiveAction = true

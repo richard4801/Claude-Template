@@ -85,26 +85,31 @@ struct ImageModelsSection: View {
     @Environment(\.theme) private var t
 
     var body: some View {
-        H2("Image models")
-        Muted("Every image step runs on a Replicate model. Pick any public model for a step; members only see the photos and their price.")
+        SectionTitle("Image models")
+        Text("Every image step runs on a Replicate model. Pick any public model for a step; members only see the photos and their price.")
+            .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: 620, alignment: .leading)
+            .padding(.bottom, Space.s3)
         if store.stepModels.isEmpty {
-            Note(icon: "photo.stack", "This server doesn't offer model choice yet.")
+            InlineNotice("This server doesn't offer model choice yet.")
         } else {
-            ListBox {
-                ForEach(Array(store.stepModels.enumerated()), id: \.element.id) { i, s in
-                    ListRow(icon: "photo.stack", title: s.label,
-                            hint: [s.model + (s.isDefault ? " · default" : ""), s.priceLine, s.compatible ? (s.warnings.first ?? "") : "Not compatible · " + s.reasons.joined(separator: ", "),
-                                   s.extra.isEmpty ? "" : "\(s.extra.count) advanced input\(s.extra.count == 1 ? "" : "s")"].filter { !$0.isEmpty }.joined(separator: " · "),
-                            last: i == store.stepModels.count - 1) {
-                        HStack(spacing: 8) {
-                            if !s.compatible { Pill("Check", .warn) }
-                            if !s.isDefault, let step = s.imageStep { LinkText("Default") { store.resetImageModel(step) } }
-                            if let step = s.imageStep { MButton("Change", size: .small) { store.openCatalog(step, target: .settings) } }
-                        }
+            ForEach(store.stepModels, id: \.id) { s in
+                SettingRow(s.label, hint: hint(s)) {
+                    HStack(spacing: Space.s2) {
+                        if !s.compatible { StateTag("Check", .caution) }
+                        if !s.isDefault, let step = s.imageStep { RButton("Use default", kind: .plain, small: true) { store.resetImageModel(step) } }
+                        if let step = s.imageStep { RButton("Change", small: true) { store.openCatalog(step, target: .settings) } }
                     }
                 }
             }
         }
+    }
+
+    /// The model, its price and anything to check, as short sentences.
+    private func hint(_ s: StepModel) -> String {
+        let lines = [s.model + (s.isDefault ? " (default)" : ""), s.priceLine, s.compatible ? (s.warnings.first ?? "") : "Not compatible: " + s.reasons.joined(separator: ", "),
+                     s.extra.isEmpty ? "" : "\(s.extra.count) advanced input\(s.extra.count == 1 ? "" : "s")"]
+        return lines.filter { !$0.isEmpty }.joined(separator: "\n")
     }
 }
 

@@ -79,7 +79,7 @@ public enum PromptScriptDemo {
             ScriptVar(name: "light", description: "the light, lower case", sample: "golden hour"),
             ScriptVar(name: "grade", description: "the grade, lower case", sample: "phone-natural"),
         ]
-        return ScriptView(id: "photoshoot", group: "photoshoot", title: "Photoshoot", description: "Every still of a photoshoot (no template).", format: "lines",
+        return ScriptView(id: "photoshoot", group: "photoshoot", title: "Photo", description: "Every still from the Photo tool (no template).", format: "lines",
                           inputs: inputs, sections: sections, values: [ScriptValueSlot(name: "lensNote", label: "Lens note")], vars: vars, defaultRules: rules)
     }()
 

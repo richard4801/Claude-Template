@@ -153,7 +153,7 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
                 }.resume()
             }
         } catch let e as URLError where e.code == .timedOut {
-            throw ApiError("still_working", "Still working on it. It keeps going on the server, and the results will appear in Gallery.")
+            throw ApiError("still_working", "Still working on it. It keeps going on the server, and the results will appear in the Library.")
         } catch {
             throw ApiError("offline", "Can't reach the server at \(baseURL.absoluteString)")
         }

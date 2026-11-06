@@ -153,7 +153,8 @@ struct SettingsView: View {
 }
 
 /// A Settings section in the list on the left: text only, the selected one on the `field` tone with the accent mark.
-private struct SettingsNavRow: View {
+/// Also used by Settings → Connections (SuiteConnectionsRow), so every item in the list looks the same.
+struct SettingsNavRow: View {
     @Environment(\.theme) private var t
     var title: String
     var on: Bool

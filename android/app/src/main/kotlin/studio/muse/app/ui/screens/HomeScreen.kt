@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -43,6 +46,7 @@ import studio.muse.app.AppContainer
 import studio.muse.app.data.Balance
 import studio.muse.app.data.Model
 import studio.muse.app.data.Outfit
+import studio.muse.app.data.Take
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.LocalNav
 import studio.muse.app.ui.Routes
@@ -72,7 +76,12 @@ data class HomeState(
     val wallet: studio.muse.app.data.Wallet? = null,
     /** Each model's latest outfit front (the card image of a locked model), by model id. */
     val outfitFronts: Map<String, studio.muse.app.data.ImageRef?> = emptyMap(),
+    /** The newest takes (at most [RECENT_TAKES]), from the same studio state the Library lists: no request of its own. */
+    val recent: List<Take> = emptyList(),
 )
+
+/** How many takes Home's "Recent takes" row shows. */
+const val RECENT_TAKES = 8
 
 class HomeViewModel(private val c: AppContainer) : ViewModel() {
     val state: StateFlow<HomeState> = combine(c.repo.state, c.prefs) { s, p ->
@@ -83,6 +92,7 @@ class HomeViewModel(private val c: AppContainer) : ViewModel() {
             s.running?.let { studio.muse.core.formatClock(it.secondsLeft) },
             s.loaded, s.error, s.wallet,
             s.models.associate { m -> m.id to s.outfitsOf(m.id).lastOrNull()?.front },
+            s.takes.take(RECENT_TAKES),
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, HomeState())
 
@@ -138,6 +148,7 @@ fun HomeScreen() {
                                 PrimaryButton("New video", { nav.go(Routes.SOURCE) }, Modifier.fillMaxWidth(), icon = "studio")
                             }
                         }
+                        if (s.recent.isNotEmpty()) RecentTakes(s.recent, onLibrary = { nav.tab(Routes.GALLERY) }) { t -> nav.go(Routes.result(t.jobId ?: t.id)) }
                         Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
                             Heading("All models") { BarButton("plus", "New model", { nav.go(Routes.CREATE1) }) }
                             s.models.chunked(2).forEach { row ->
@@ -218,6 +229,32 @@ private fun ModelTile(model: Model, img: studio.muse.app.data.ImageRef?, modifie
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             T(model.name, m.scale.label.copy(fontWeight = FontWeight.SemiBold), m.roles.ink, maxLines = 1)
             Caption(if (model.locked) "${model.niche} · ${model.age}" else "Draft · ${model.filled} of 7 shots", maxLines = 1)
+        }
+    }
+}
+
+/**
+ * "Recent takes": the newest takes as pictures with one caption on a scrim (duration or Photo), as in the Library. "Library"
+ * on the right opens the whole Library; a tile opens its take. Lazy and keyed, so only the tiles on screen load thumbnails.
+ */
+@Composable
+private fun RecentTakes(takes: List<Take>, onLibrary: () -> Unit, onOpen: (Take) -> Unit) {
+    val m = muse
+    Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+        Heading("Recent takes") { TextAction("Library", onLibrary, color = m.roles.ink2) }
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+            items(takes, key = { it.id }, contentType = { "take" }) { t ->
+                Box(
+                    Modifier.size(width = 104.dp, height = 140.dp).clip(containerShape()).background(m.roles.field).press { onOpen(t) }
+                        .semantics(mergeDescendants = true) { contentDescription = "${t.shownTitle} · ${t.shownLabel}"; role = androidx.compose.ui.semantics.Role.Button },
+                ) {
+                    RefImage(t.thumb, Modifier.fillMaxSize(), 12)
+                    Box(Modifier.align(Alignment.BottomStart).padding(MuseSpace.s1).clip(RoundedCornerShape(m.radii.chip)).background(Color.Black.copy(alpha = .55f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)) {
+                        T(t.shownLabel, m.scale.micro.tabular(), Color.White, maxLines = 1)
+                    }
+                }
+            }
         }
     }
 }

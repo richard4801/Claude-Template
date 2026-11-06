@@ -34,7 +34,7 @@ struct NavItem: Identifiable {
         NavItem(screen: .models, title: "Models", icon: "person", key: "2"),
         NavItem(screen: .suite, title: "Video suite", icon: "video", key: "3"), // AI suite (workstream 1): was "Video studio"
         NavItem(screen: .queue, title: "Queue", icon: "list.bullet.below.rectangle", key: "5"),
-        NavItem(screen: .gallery, title: "Gallery", icon: "square.grid.2x2", key: "6"),
+        NavItem(screen: .gallery, title: "Library", icon: "square.grid.2x2", key: "6"),
         NavItem(screen: .posts, title: "Posts", icon: "paperplane", key: "7"),
     ]
 }
