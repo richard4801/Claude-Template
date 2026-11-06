@@ -14,9 +14,9 @@ final class ImageCache {
     static let shared = ImageCache()
 
     /// Decoded bytes kept in memory at most (the system also trims it under memory pressure).
-    static let memoryLimit = 192 << 20
+    nonisolated static let memoryLimit = 192 << 20
     /// The size `load(_:)` and `image(for:)` decode at when the caller doesn't say (full-frame uses like a poster grab).
-    static let largeSide = 2048
+    nonisolated static let largeSide = 2048
 
     private let memory: NSCache<NSString, NSImage> = {
         let c = NSCache<NSString, NSImage>()
