@@ -123,6 +123,7 @@ describe('edit sessions API and Claude tools', () => {
     const before = (await svc.row(ownerUser, opened.sessionId)).project;
     const r = await tool('apply_edit_ops').run(env(), { sessionId: opened.sessionId, baseRevision: opened.revision, ops: [{ op: 'split', at: 2 }, { op: 'look', itemId: 'all', look: 'warm-honey', strength: 0.7 }, { op: 'add_hook', template: 'hook-bold', text: '3 things' }] }) as any;
     expect(r.changes).toEqual(['Split at 0:02.0', 'Look · warm-honey 70 %', 'Added hook “3 things”']);
+    expect(r.label).toBe('Split at 0:02.0 · Look · warm-honey 70 % · Added hook “3 things”');
     expect(r.entry).toMatchObject({ author: 'claude', byClaude: true });
     await expect(tool('apply_edit_ops').run(env(), { sessionId: opened.sessionId, baseRevision: opened.revision, ops: [{ op: 'ratio', ratio: '1:1' }] })).rejects.toMatchObject({ code: 'stale_revision' });
     const got = await tool('get_edit').run(env(), { sessionId: opened.sessionId }) as any;
@@ -142,7 +143,7 @@ describe('edit sessions API and Claude tools', () => {
     const svc = editSessionsOf(a.ctx);
     const sid = (await owner.req('POST', '/v1/edit-sessions', { takeId })).body.id;
     const approx = await tool('get_frame').run(env(), { sessionId: sid, t: 1.5, width: 120 }) as any;
-    expect(approx.structuredContent).toMatchObject({ approximate: true, t: 1.5 });
+    expect(approx.structuredContent).toMatchObject({ approximate: true, t: 1.5, label: 'Looked at 0:01.5 (approximate)' });
     expect(approx.mcpContent[0]).toMatchObject({ type: 'image', mimeType: 'image/png' });
     const meta = await sharp(Buffer.from(approx.mcpContent[0].data, 'base64')).metadata();
     expect(meta.width).toBe(120);
@@ -182,6 +183,7 @@ describe('edit sessions API and Claude tools', () => {
     const sid = (await owner.req('POST', '/v1/edit-sessions', { takeId })).body.id;
     const est = await tool('remove_background').run(env(), { sessionId: sid }) as any;
     expect(est).toMatchObject({ needsConfirmation: true });
+    expect(String(est.label)).toMatch(/^Remove background · about \$/);
     expect(est.estimateUsd).toBeGreaterThan(0);
     const asked = await tool('remove_background').run(env(), { sessionId: sid, confirm: true }) as any;
     expect(asked).toMatchObject({ waitingForOwner: true });
