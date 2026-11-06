@@ -182,7 +182,7 @@ struct GalleryView: View {
                     Muted("Test renders stay separate from your Final gallery. Select takes to compare them side by side.").padding(.top, -8).padding(.bottom, 16)
                     let list = store.galleryList
                     if list.isEmpty {
-                        Note(store.galleryTab == .final ? "Nothing approved yet. Approve a take to move it here." : "No test renders yet. Make a video or a photoshoot.")
+                        Note(store.galleryTab == .final ? "Nothing approved yet. Approve a take to move it here." : "No test renders yet. Make a video or a photo.")
                     } else {
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 6), spacing: 14) {
                             ForEach(list) { take in GalleryTile(take: take) }
@@ -338,7 +338,7 @@ struct ResultView: View {
                                     ("Outfit", outfit?.name ?? store.currentOutfit?.name ?? "—"),
                                     ("Made with", take.isVideo ? (job?.engineLabel ?? (take.displayEngineLabel.isEmpty ? "Video" : take.displayEngineLabel)) : "Photo"),
                                     ("Cost", Pricing.money(take.cost)),
-                                    ("Seed", "\(take.seed)\(take.isVideo || (!take.isTemplateShot && store.shoot.lockSeed) ? " · locked" : "")"),
+                                    ("Seed", "\(take.seed)\(take.isVideo ? " · locked" : "")"),
                                 ]
                                 let templateRow: [(String, String)] = take.templateName.map { name in [("Template", name)] } ?? []
                                 let editRow: [(String, String)] = take.isEdit

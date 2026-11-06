@@ -39,6 +39,9 @@ enum class ComposerTool(
 ) {
     SHOT("shot", "Shot", "Your character in a scene", "palette-04-bleached-warm", true, ComposerChip.entries.toList(),
         "Describe the scene · type @ for your characters, # for a camera move"),
+    /** Photo tool (workstream 3): Photoshoot on the composer (PhotoTool.kt). Stills: no moves, no tempo. */
+    PHOTO("photo", "Photo", "Stills of your character", "lens-01-clean-prime", true, PhotoComposer.CHIPS,
+        "Describe the scene and what she does · type @ for your characters"),
     SWAP("swap", "Character swap", "Your character into a real clip", "palette-01-naturalistic", true, listOf(ComposerChip.LOOK),
         "What changes in the clip (optional)"),
     RECAST("recast", "Recast", "Swap up to 4 people in a clip", "palette-02-teal-orange", true, emptyList(), ""),
@@ -195,6 +198,8 @@ data class ComposerDraft(
             else -> null
         }
         ComposerTool.SWAP -> when { recast.clipId == null -> "Choose the source clip"; characterId == null -> "Pick who she becomes"; else -> null }
+        // Photo tool (workstream 3): the uploads and the run are checked by PhotoComposer.problem.
+        ComposerTool.PHOTO -> if (characterId == null) "Pick a character" else null
         ComposerTool.RECAST -> recast.problem()
         ComposerTool.EXTEND -> {
             val v = own[ToolSlots.EXTEND_VIDEO]
@@ -375,6 +380,9 @@ object ToolSlots {
         ComposerTool.UGC -> listOf(ToolSlot("character", "Character", "Your models"), ToolSlot("product", "Product", "A photo of it"),
             ToolSlot("refad", "Reference ad", "A video ad to follow", optional = true))
         ComposerTool.EXTEND -> listOf(ToolSlot("video", "Video", "A take or a video"))
+        // Photo tool (workstream 3): drawn by PhotoSlotRow (PhotoViews.kt), with sentence-case labels.
+        ComposerTool.PHOTO -> listOf(ToolSlot("character", "Character", "Your models"), ToolSlot("outfit", "Outfit", "Her outfits"),
+            ToolSlot("product", "Product", "A photo of it", optional = true), ToolSlot("refs", "References", "Pose, look or scene", optional = true))
     }
 
     /** Extend's VIDEO slot (the store's extendSlots). */
