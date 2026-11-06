@@ -2,8 +2,8 @@ import MuseCore
 import SwiftUI
 
 // Claude in the Edit suite (workstream 3, plans/claude-editing.md A and E), owner only: the "Claude" badge, the shared
-// history with server undo, the "Claude edited this" toast, the confirmation sheet for paid helpers, and the right panel's
-// chat host (a placeholder until workstream 2's chat view is merged).
+// history with server undo, the "Claude edited this" toast, the confirmation sheet for paid helpers, and the right panel with
+// workstream 2's chat (ClaudeChatView) about this edit session.
 
 /// The small "Claude" badge on Claude's changes.
 struct ClaudeBadge: View {
@@ -150,51 +150,6 @@ struct EditSuiteClaudeAsk: View {
     }
 }
 
-/// The right panel's chat (E). Workstream 2 builds the shared chat view, `ClaudeChatView(contextKind:contextId:title:)`; until
-/// it is merged this placeholder shows Claude's recent changes to this edit. Swapping it is one line in `EditSuiteClaudePanel`.
-struct ClaudeChatHost: View {
-    @Environment(\.theme) private var t
-    @Environment(EditSuiteSession.self) private var session: EditSuiteSession?
-    var contextKind: String
-    var contextId: String
-    var title: String
-
-    var body: some View {
-        let mine = (session?.liveHistory ?? []).filter(\.byClaude)
-        VStack(alignment: .leading, spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    SuiteLabel("Claude's changes", trailing: title)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                    if mine.isEmpty {
-                        Text("Claude hasn't changed this edit yet. Add MUSE to Claude, open this take there, and its changes show up here live.")
-                            .font(t.body(12.5)).foregroundStyle(t.muted)
-                            .padding(.horizontal, 12)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    ForEach(mine.prefix(12)) { e in
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Image(systemName: e.kind == "tool" ? "eye" : "wand.and.stars").font(.system(size: 11)).foregroundStyle(t.muted)
-                                .accessibilityHidden(true)
-                            Text(e.label).font(t.body(12.5)).foregroundStyle(e.undone ? t.muted : t.ink).strikethrough(e.undone).lineLimit(3)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                    }
-                }
-            }
-            SuiteRule()
-            Text("Chat with Claude arrives with the next update")
-                .font(t.body(12.5)).foregroundStyle(t.muted)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Claude for \(contextKind) \(contextId)")
-    }
-}
-
 /// The right panel the top bar's "Claude" toggle shows (owner only): the chat, and the session's history with undo.
 struct EditSuiteClaudePanel: View {
     @Environment(\.theme) private var t
@@ -218,15 +173,29 @@ struct EditSuiteClaudePanel: View {
             SuiteRule()
             if tab == 0 {
                 if let id = session.live?.sessionId {
-                    ClaudeChatHost(contextKind: "edit", contextId: id, title: session.title)
+                    // Workstream 2's chat on the owner's Claude Code, about this edit session.
+                    ClaudeChatView(contextKind: "edit", contextId: id, title: session.title)
                 } else {
-                    Text("Opening the shared edit…").font(t.body(12.5)).foregroundStyle(t.muted)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    noSession
                 }
             } else {
                 ScrollView { EditSuiteHistoryList(session: session) }
             }
         }
         .background(t.chrome)
+    }
+
+    /// No edit session yet (still opening, or it couldn't be shared): no chat to attach to.
+    private var noSession: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "bubble.left.and.text.bubble.right").font(.system(size: 22)).foregroundStyle(t.muted).accessibilityHidden(true)
+            Text(session.isOwner ? "Sharing this edit with Claude…" : "Claude is for the studio owner")
+                .font(t.body(13, .semibold)).foregroundStyle(t.ink)
+            Text("The chat opens once the edit is shared. If it doesn't, close and reopen the editor.")
+                .font(t.body(12)).foregroundStyle(t.muted).multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
