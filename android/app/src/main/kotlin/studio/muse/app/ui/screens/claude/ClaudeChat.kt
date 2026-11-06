@@ -288,7 +288,8 @@ private fun ChatComposer(ui: ClaudeChatUi, actions: ClaudeChatActions, horizonta
             if (ui.busy) StopButton(actions.stop)
             else SendButton(ui.loaded && ui.thread != null && ui.draft.isNotBlank(), actions.send)
         }
-        T(if (ui.turn?.api == true && ui.busy) ClaudeText.API else ClaudeText.MODE, m.type.tiny.copy(fontSize = 11.5.sp), m.t.muted, maxLines = 1)
+        // The header carries the mode line; here only the billed-per-use reminder while the studio key answers.
+        if (ui.turn?.api == true && ui.busy) T(ClaudeText.API, m.type.tiny.copy(fontSize = 11.5.sp), m.t.muted, maxLines = 1)
     }
 }
 

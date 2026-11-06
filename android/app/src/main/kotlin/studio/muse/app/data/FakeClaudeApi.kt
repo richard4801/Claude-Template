@@ -78,8 +78,11 @@ class FakeClaudeApi(
             if (turns.values.any { it.threadId == threadId && it.active }) return ClaudeSend.Busy
             val turn = ClaudeTurn(uid("tu_"), threadId, text.take(8000), "phone", "queued", createdAt = now())
             turns[turn.id] = turn
-            store(ClaudeMessage(uid("cmsg_"), threadId, "user", "phone", turn.text, turn.id, createdAt = now())) to turn
+            val m = ClaudeMessage(uid("cmsg_"), threadId, "user", "phone", turn.text, turn.id, createdAt = now())
+            messages.getOrPut(threadId) { mutableListOf() } += m
+            m to turn
         }
+        live(ClaudeLive("message", threadId = threadId, message = m))
         live(ClaudeLive("turn", turn = turn))
         if (macClaims) jobs[turn.id] = scope.launch { runOnMac(turn) }
         return ClaudeSend.Sent(m, turn)
