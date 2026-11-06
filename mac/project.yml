@@ -30,7 +30,7 @@ targets:
         type: folder
         buildPhase: resources
       # Suite looks generated from palettes and film stocks (palettes.json + .cube files), bundled as `palettes`.
-      # Shipped by another workstream: optional, so a checkout without the folder still generates (no suite looks).
+      # Suite looks (palettes.json + .cube from the video suite). The folder is kept in the repo (README) because the build copies it.
       - path: ../server/api/assets/lookpack/palettes
         type: folder
         buildPhase: resources
