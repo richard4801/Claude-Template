@@ -202,7 +202,7 @@ struct TitleBar: View {
                     Divider()
                     Button("Sign out", role: .destructive) { store.signOut() }
                 } label: {
-                    Ph("person.crop.circle", 16).foregroundStyle(t.ink)
+                    Image(nsImage: Ph.menuImage("person.crop.circle", 16)).foregroundStyle(t.ink) // Menu labels ignore frames
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)

@@ -150,17 +150,17 @@ fun T(
     )
 }
 
-/** Small uppercase label (`.lbl`). */
+/** Small label (`.lbl`): sentence case in the caption step (plans/design-direction.md §3, no tracked caps). */
 @Composable
 fun Lbl(text: String, modifier: Modifier = Modifier, color: Color = muse.t.muted) {
-    T(text, muse.type.lbl, color, modifier, upper = !muse.isC)
+    T(text, muse.scale.caption.copy(fontWeight = FontWeight.Medium), color, modifier)
 }
 
 @Composable
 fun Tiny(text: String, modifier: Modifier = Modifier, color: Color = muse.t.muted, weight: FontWeight? = null) = T(text, muse.type.tiny, color, modifier, weight = weight)
 
 @Composable
-fun H2(text: String, modifier: Modifier = Modifier) = T(text, muse.type.h2, muse.t.ink, modifier, upper = muse.isA || muse.isB)
+fun H2(text: String, modifier: Modifier = Modifier) = T(text, muse.type.h2, muse.t.ink, modifier)
 
 @Composable
 fun H3(text: String, modifier: Modifier = Modifier) = T(text, muse.type.h3, muse.t.ink, modifier)
@@ -524,7 +524,8 @@ fun TopBar(title: String = "", onBack: (() -> Unit)? = null, backIcon: String = 
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (onBack != null) TbBtn(backIcon, onBack) else Spacer(Modifier.size(48.dp))
-            T(title, m.type.topTitle, color, Modifier.weight(1f), upper = m.isB, align = TextAlign.Center, maxLines = 1)
+            // Sentence case in the heading step in every theme (plans/design-direction.md §3).
+            T(title, m.scale.heading, color, Modifier.weight(1f), align = TextAlign.Center, maxLines = 1)
             if (right != null) right() else Spacer(Modifier.size(48.dp))
         }
     }

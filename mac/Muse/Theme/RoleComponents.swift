@@ -1,3 +1,4 @@
+import AppKit
 import MuseCore
 import SwiftUI
 
@@ -786,5 +787,22 @@ struct DropZone: View {
         .background(shape.fill(t.roles.field))
         .overlay(shape.strokeBorder(targeted ? t.roles.selection : t.roles.hairline, style: StrokeStyle(lineWidth: targeted ? 2 : 1, dash: targeted ? [] : [5, 4])))
         .contentShape(shape)
+    }
+}
+
+extension Ph {
+    /// For a `Menu` label on macOS, which ignores SwiftUI frames: the Phosphor icon as an NSImage already at its point
+    /// size, drawn as a template so it takes the label's colour. Falls back to the SF Symbol when the name isn't mapped.
+    static func menuImage(_ name: String, _ size: CGFloat) -> NSImage {
+        let side = (size * 1.25).rounded()
+        guard let p = resolve(name), let src = NSImage(named: "ph.\(p)") else {
+            return NSImage(systemSymbolName: name, accessibilityDescription: nil) ?? NSImage()
+        }
+        let img = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            src.draw(in: rect)
+            return true
+        }
+        img.isTemplate = true
+        return img
     }
 }

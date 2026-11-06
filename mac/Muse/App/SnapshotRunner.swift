@@ -22,7 +22,11 @@ enum SnapshotRunner {
         guard let dir else { return }
         Task { @MainActor in
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            if let w = mainWindow { w.setContentSize(NSSize(width: 1440, height: 900)); w.center() }
+            if let w = mainWindow {
+                // 1440 × 900, or the screen's visible area when it is smaller (CI runners have small screens).
+                let vis = (w.screen ?? NSScreen.main)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+                w.setFrame(NSRect(x: vis.minX, y: vis.maxY - min(900, vis.height), width: min(1440, vis.width), height: min(900, vis.height)), display: true)
+            }
             store.dataSource = .fake
             store.applyDataSource()
             try? await Task.sleep(for: .seconds(1))
