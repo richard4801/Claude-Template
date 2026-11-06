@@ -16,10 +16,27 @@ data class SuiteOption(
     val render: String? = null,
     val name: String? = null,
     val caption: String? = null,
+    /** Composer: false = not offered to members (owners and Directed mode keep it). */
+    val visible: Boolean = true,
+    /** A merged duplicate: pickers show the survivor with this id instead. */
+    val mergedInto: String? = null,
+    /** Palettes and film stocks: 5 swatch colours (darkest first) and the LUT the take is graded with. */
+    val swatches: List<String> = emptyList(),
+    val lut: String? = null,
+    /** A short looping preview (mp4/webm URL). Until the loops exist, pickers show the still ([render]). */
+    val loop: String? = null,
 ) {
     /** The card's title: the hardware name when it has a render ("Super 35 Digital"), else the label. */
     val title: String get() = name ?: label
 }
+
+/** The composer's focal wheel step (`visible` = one of the six shown to members). */
+@Serializable
+data class SuiteFocal(val mm: Int, val label: String = "", val description: String = "", val visible: Boolean = true)
+
+/** A Movement chip (Featured, UGC, Push…). */
+@Serializable
+data class SuiteMoveGroup(val id: String, val label: String = "")
 
 @Serializable
 data class SuiteMoveOption(
@@ -29,6 +46,10 @@ data class SuiteMoveOption(
     val category: String = "",
     val editorBetter: Boolean = false,
     val talkSafe: Boolean = false,
+    /** The composer's Movement chip it sits under (see CameraCatalog.moveGroups). */
+    val group: String = "",
+    /** A short looping preview (mp4/webm URL); until it exists the tile shows a still with a motion arrow. */
+    val loop: String? = null,
 )
 
 /** One of the 16 featured moves of the camera bag (UGC first), with its filter tag: ugc / cinematic / energy / subtle. */
@@ -51,6 +72,7 @@ data class CameraCatalog(
     val bodies: List<SuiteOption> = emptyList(),
     val lenses: List<SuiteOption> = emptyList(),
     val focalLengths: List<Int> = emptyList(),
+    val focals: List<SuiteFocal> = emptyList(),
     val apertures: List<SuiteOption> = emptyList(),
     val looks: List<SuiteOption> = emptyList(),
     val frameRates: List<SuiteOption> = emptyList(),
@@ -61,6 +83,7 @@ data class CameraCatalog(
     val grips: List<SuiteGrip> = emptyList(),
     val moves: List<SuiteMoveOption> = emptyList(),
     val library: List<SuiteLibraryMove> = emptyList(),
+    val moveGroups: List<SuiteMoveGroup> = emptyList(),
     val heights: List<SuiteOption> = emptyList(),
     val shotSizes: List<SuiteOption> = emptyList(),
     val genres: List<SuiteOption> = emptyList(),
@@ -73,9 +96,33 @@ data class CameraCatalog(
     fun moveLabel(id: String?) = libraryMove(id)?.label ?: move(id)?.label ?: id.orEmpty()
 }
 
-/** owner: the models a tier runs, in ladder order. */
+/**
+ * The input slots a tier (or, for the owner, one engine) takes: start / end / middle frames, reference images and videos,
+ * one audio track. Counts are already capped to what a shot request can carry. `framesWithRefs` false = with a start or
+ * end frame, references are not sent on this quality.
+ */
 @Serializable
-data class SuiteTierModel(val model: String, val name: String = "", val resolution: String = "")
+data class SuiteInputs(
+    val start: Boolean = false,
+    val end: Boolean = false,
+    val middle: Int = 0,
+    val images: Int = 0,
+    val videos: Int = 0,
+    val audio: Boolean = false,
+    val framesWithRefs: Boolean = false,
+) {
+    companion object {
+        val NONE = SuiteInputs()
+        /** A server from before `inputs`: keyframes = start + end, references = images and videos. */
+        fun legacy(canKeyframes: Boolean, canReferences: Boolean) = SuiteInputs(
+            start = canKeyframes, end = canKeyframes, images = if (canReferences) 6 else 0, videos = if (canReferences) 3 else 0, framesWithRefs = canKeyframes && canReferences,
+        )
+    }
+}
+
+/** owner: the models a tier runs, in ladder order, each with the inputs it takes. */
+@Serializable
+data class SuiteTierModel(val model: String, val name: String = "", val resolution: String = "", val inputs: SuiteInputs? = null)
 
 /** A quality tier (Draft / Standard / HD / Cinema). */
 @Serializable
@@ -87,12 +134,21 @@ data class SuiteTier(
     val resolution: String? = null,
     val fromPerSec: Double? = null,
     val maxSeconds: Int? = null,
+    /** The shortest take this tier makes (with [maxSeconds], the composer's Length slider range). */
+    val minSeconds: Int? = null,
     val canKeyframes: Boolean = false,
     val canReferences: Boolean = false,
     val canGuide: Boolean = false,
+    /** What the tier takes (see [slots]). */
+    val inputs: SuiteInputs? = null,
     /** owner */
     val models: List<SuiteTierModel>? = null,
-)
+) {
+    /** The input slots this tier takes ([inputs], or worked out from the older flags). */
+    val slots: SuiteInputs get() = inputs ?: SuiteInputs.legacy(canKeyframes, canReferences)
+    /** Owner: what one engine of this tier takes (falls back to the tier's). */
+    fun slotsFor(engineModel: String?): SuiteInputs = engineModel?.let { id -> models?.firstOrNull { it.model == id }?.inputs } ?: slots
+}
 
 /** GET /v1/suite/catalog. `enabled` false = the server's SUITE_MODE is off; `test` = mock renders (free). */
 @Serializable
@@ -143,6 +199,27 @@ data class SuiteCameraSpec(
     val angle: SuiteAngle? = null,
 )
 
+/** A reference video or audio track: an upload's storage key (or an https link). */
+@Serializable
+data class SuiteMediaRef(val key: String? = null, val url: String? = null, val seconds: Double? = null)
+
+@Serializable
+data class SuiteFrames(val start: ImageRef? = null, val middle: List<ImageRef>? = null, val end: ImageRef? = null)
+
+/** role: product | location | style | prop | person. */
+@Serializable
+data class SuiteRefImage(val image: ImageRef, val role: String = "product", val label: String? = null)
+
+/** use: camera | motion | style. */
+@Serializable
+data class SuiteRefVideo(val video: SuiteMediaRef, val use: String = "motion")
+
+@Serializable
+data class SuiteRefAudio(val audio: SuiteMediaRef)
+
+@Serializable
+data class SuiteReferences(val images: List<SuiteRefImage>? = null, val videos: List<SuiteRefVideo>? = null, val audio: SuiteRefAudio? = null)
+
 /** Recast: one person of the source clip → a studio character. */
 @Serializable
 data class SuiteCastMember(
@@ -168,10 +245,17 @@ data class SuiteShotRequest(
     val quality: String? = null,
     val takes: Int? = null,
     val speaking: Boolean? = null,
+    /** Native sound (ambience and effects); null = the server's default (on). */
+    val audio: Boolean? = null,
     /** A preset spec, or a Directed mode spec from the camera stage (kept as JSON). */
     val camera: JsonElement? = null,
     val clipId: String? = null,
     val keepAudio: Boolean? = null,
+    /** "Grade the take with this look" (default on at the server). */
+    val gradeLook: Boolean? = null,
+    /** Input slots (InputSlots.kt): start / middle / end frames and references, only those the tier takes. */
+    val frames: SuiteFrames? = null,
+    val references: SuiteReferences? = null,
     val dryRun: Boolean? = null,
     /** owner only */
     val engineModel: String? = null,
@@ -213,6 +297,10 @@ data class SuiteEngine(
 @Serializable
 data class SuiteTried(val model: String = "", val resolution: String = "", val why: String = "")
 
+/** The take's Look: a palette or film stock and its LUT (`pack:<id>` or `palette:<id>`), applied in the Edit suite. */
+@Serializable
+data class SuiteLook(val id: String, val kind: String = "palette", val label: String = "", val lut: String = "")
+
 /** POST /v1/suite/shots/estimate. Every Generate shows [buttonLabel] / [priceLine]; a cap problem shows [message]. */
 @Serializable
 data class SuiteEstimate(
@@ -234,6 +322,8 @@ data class SuiteEstimate(
     val prompt: String = "",
     val test: Boolean = false,
     val speaking: SuiteSpeaking? = null,
+    /** The Look the take will be graded with (null = none / grading off). */
+    val look: SuiteLook? = null,
     val cast: List<SuiteEstimateCast>? = null,
     val keepAudio: Boolean? = null,
     /** owner */
@@ -292,7 +382,7 @@ data class SuiteSettings(
 
 /** POST /v1/suite/camera/compile: what the camera becomes on a quality's first model (owner also gets the engine). */
 @Serializable
-data class SuiteCompileRequest(val camera: SuiteCameraSpec, val quality: String? = null, val duration: Int? = null)
+data class SuiteCompileRequest(val camera: JsonElement, val quality: String? = null, val duration: Int? = null)
 
 @Serializable
 data class SuiteCompiled(val text: String = "", val moves: List<String> = emptyList(), val guideUsed: Boolean = false, val warnings: List<String> = emptyList(), val engine: SuiteEngine? = null)

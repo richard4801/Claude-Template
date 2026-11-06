@@ -246,6 +246,25 @@ export function refFor(m: ModelSpec, kind: 't2v' | 'i2v' | 'ref2v' | 'guide'): s
   return m.ref[kind] ?? m.ref.ref2v ?? m.ref.i2v ?? m.ref.t2v ?? '';
 }
 
+/**
+ * AI suite (workstream 1): which input slots a model (or a tier, over its usable ladder models) accepts, member-safe
+ * numbers only. Capped to what a shot request may carry (plan.ts ShotRequestSchema). The apps show a slot only when
+ * its count is above 0 / its flag is on. `framesWithRefs` false = with a start/end frame, references are not sent.
+ */
+export type InputSlots = { start: boolean; end: boolean; middle: number; images: number; videos: number; audio: boolean; framesWithRefs: boolean };
+export const NO_INPUTS: InputSlots = { start: false, end: false, middle: 0, images: 0, videos: 0, audio: false, framesWithRefs: false };
+export function inputSlotsOf(ms: ModelSpec[]): InputSlots {
+  return ms.reduce<InputSlots>((a, m) => ({
+    start: a.start || (m.modes.image && m.frames.start),
+    end: a.end || (m.modes.image && m.frames.end),
+    middle: Math.max(a.middle, m.modes.image ? Math.min(8, m.frames.middle) : 0),
+    images: Math.max(a.images, Math.min(6, m.refs.images)),
+    videos: Math.max(a.videos, Math.min(3, m.refs.videos)),
+    audio: a.audio || m.refs.audios > 0,
+    framesWithRefs: a.framesWithRefs || (m.modes.image && m.frames.withRefs),
+  }), NO_INPUTS);
+}
+
 /** Owner view of a model (Settings → AI suite). */
 export function modelView(m: ModelSpec, s?: { enabled?: boolean; acknowledgedAt?: number | null; priceScale?: number }, configured = true) {
   const blocked = m.status === 'removed' || !!m.licence.blockNewFeatures;

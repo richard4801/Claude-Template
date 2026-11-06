@@ -46,22 +46,24 @@ Developer settings also include "Fast · beta engine (Viggle)", which flags Fast
 ## Video suite (AI suite, plans/suite-ui.md)
 - **Navigation:** the bottom bar's **Studio** tab is the Video suite hub (`ui/screens/suite/`). The centre **+** opens Shot, Character swap, Storyboard, Edit, Photoshoot and New model. Edit is top-level (`Routes.EDIT`), and "Edit video" on a take opens `EditSuiteScreen`. The Camera stage and the owner-only Settings → Connections open workstream 2's screens (`ui/screens/camera/CameraEntry.kt`).
 - **Data:**
-  - `data/Suite.kt` holds the `/v1/suite` types: the catalog, which carries the camera bag's `render` / `name` / `caption` and the 16-move `library`; the estimate; shots; settings.
+  - `data/Suite.kt` holds the `/v1/suite` types: the catalog (options with `render` / `name` / `caption`, `visible` / `mergedInto`, swatches and LUTs, move groups, tiers with `minSeconds` / `maxSeconds` and `inputs`); the estimate; shots; settings.
   - Every Generate shows the estimate's `buttonLabel`.
   - Suite shots are ordinary render jobs (`request.engine == "suite"`), so live job events move their result panes.
   - Members get member-safe copies only (`SuiteRules.memberSafe`).
 - **Screens:**
   - The hub, with a suite-off state for the owner (SUITE_MODE in Railway → Variables, with Copy) and for members.
-  - Character swap + Recast (up to 4 people), Storyboard, the result states, and the owner's Engines.
-  - Talking, UGC ad and Extend & upscale show as "Coming soon".
-- **Paused:** the Shot builder and the camera bag are built but paused, because the owner asked for a prompt-first composer.
-  - `suite/SuiteCamera.kt` gives any picker the camera as option groups (each option with its render, name and caption), all set to "Auto" by default.
+  - **The video composer** (`suite/composer/`, plans/video-composer.md): one prompt-first shell, and every tool is a preset of it. Shot, Character swap and Recast generate; Talking, UGC ad and Extend & upscale keep their tool card with a quiet "Coming soon". The hub tiles and `Routes.suiteCompose(tool)` open it on a tool; Change switches tool in place.
+    - Five Auto chips, a prompt with inline `@character` / `#move` tokens (`PromptBox.kt`, `PromptEditing.kt`), slot cards that follow the tier (END FRAME waits for a start frame), Quality · Settings · a round Generate with the price ("—", "Free" for test renders, else the estimate's).
+    - One always-dark picker shell (`PickerShell.kt`): Camera (Setup wheels, Angle, Movement, Directed for the owner), Style, Look (with "Grade the take with this look"), Lighting, References, Settings, the tool and preset browser. Phone: an 85% bottom sheet; 600 dp and wider: a centred modal with a left rail, and the composer's bar has pills.
+    - Presets: "Start from a preset" collapses the composer to who + shape + Generate; "Edit settings" opens it with the preset's values.
+    - Previews (`Previews.kt`) are stills today (hardware renders, or diagrams drawn in code); a catalog option's `loop` (mp4/webm) makes a tile autoplay muted, with the still as fallback in battery saver.
+  - Storyboard, the result states, and the owner's Engines.
 - **Assets and demo mode:**
   - The 40 hardware renders ship in `app/src/main/assets/hardware/`.
   - Demo mode answers the suite from `resources/suite_camera.json` and `suite_demo.json` (the server's own answers) through `data/FakeSuite.kt`.
 - **Tests:**
   - `Suite*Test`: real server responses in `test/resources/suite/`, the state logic, demo mode end to end, and member safety.
-  - Screenshots: `./gradlew :app:recordRoborazziDebug --tests 'studio.muse.app.SuiteScreenshotTest'` writes `suite_<theme>_<screen>_<390|360>.png`.
+  - Screenshots: `./gradlew :app:recordRoborazziDebug --tests 'studio.muse.app.Suite*'` writes `suite_<theme>_<screen>_<390|360>.png` and the composer's `suite_composer_<theme>_<screen>_<360|390|840>.png` (empty, filled, preset and every picker).
 
 ## Video studio stage (owner request 2026-11-05)
 - **New video** starts empty on a server: a dashed "Choose a clip · up to 15s works best · 9:16 · one person" area. "Use the sample clip" and "Preview: what a failing clip looks like" are demo mode's only. Without a clip the Video studio's canvas shows an empty "No clip yet" placeholder.

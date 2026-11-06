@@ -20,7 +20,10 @@ import studio.muse.app.data.SuiteEstimate
 import studio.muse.app.data.SuiteRules
 import studio.muse.app.ui.screens.suite.RecastDraft
 import studio.muse.app.ui.screens.suite.RecastPerson
-import studio.muse.app.ui.screens.suite.ShotDraft
+import studio.muse.app.data.SuiteInputs
+import studio.muse.app.ui.screens.suite.InputSlots
+import studio.muse.app.ui.screens.suite.composer.ComposerDraft
+import studio.muse.app.ui.screens.suite.composer.PromptTokens
 
 /** Demo mode's suite end to end (no server), and the member-safety rules on every answer a member gets. */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -28,12 +31,18 @@ class SuiteDemoTest {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
     private fun res(name: String) = javaClass.getResource("/suite/$name.json")!!.readText()
 
+    /** A composer Shot's request (no slots), as Generate sends it. */
+    private fun shot(scene: String, modelId: String? = null, outfitId: String? = null, duration: Int = 5, quality: String = "draft", takes: Int = 1) =
+        ComposerDraft(tokens = PromptTokens().withText(scene), modelId = modelId, outfitId = outfitId, duration = duration, quality = quality, takes = takes)
+            .request(InputSlots(), SuiteInputs.NONE, RecastDraft())
+
     @Test fun demoShotEstimatesRendersAndSettlesFree() = runTest {
         val api = FakeMuseApi(backgroundScope, now = { testScheduler.currentTime })
         val cat = api.suiteCatalog()
         assertTrue(cat.enabled && cat.test)
         assertEquals(16, cat.camera.library.size)
-        val req = ShotDraft(modelId = SampleData.DEMO, outfitId = SampleData.GREEN, scene = "She orders at the counter.", duration = 6, quality = "standard", takes = 2).request()
+        val req = shot("She orders at the counter.", SampleData.DEMO, SampleData.GREEN, duration = 6, quality = "standard", takes = 2)
+            .copy(camera = kotlinx.serialization.json.Json.parseToJsonElement("""{"mode":"preset","palette":{"preset":"hyper_neon"}}"""))
         val e = api.suiteEstimate(req)
         assertEquals("Shot · Standard · 768p", e.label)
         assertEquals("Generate · 6 s · $0.96 · 2 takes", e.buttonLabel) // the server's price for the same shot
@@ -52,6 +61,9 @@ class SuiteDemoTest {
         assertEquals("done", done.state)
         val takes = api.listTakes().filter { it.jobId == job.id }
         assertEquals(listOf("Standard", "Standard"), takes.map { it.label })
+        // Look grading: the estimate names the Look and both takes carry it (the Edit suite opens with it applied).
+        assertEquals("palette:hyper_neon", e.look?.lut)
+        assertEquals(listOf("palette:hyper_neon", "palette:hyper_neon"), takes.map { it.look?.lut })
         assertEquals(before, api.balance().balance, 1e-9) // test renders settle at $0
     }
 
@@ -72,9 +84,9 @@ class SuiteDemoTest {
         val api = FakeMuseApi(backgroundScope)
         api.suiteEnabled = false
         assertFalse(api.suiteCatalog().enabled)
-        try { api.suiteEstimate(ShotDraft(scene = "x").request()); fail() } catch (x: ApiException) { assertEquals("engine_unavailable", x.code) }
+        try { api.suiteEstimate(shot("x")); fail() } catch (x: ApiException) { assertEquals("engine_unavailable", x.code) }
         api.suiteEnabled = true
-        val big = api.suiteEstimate(ShotDraft(scene = "x", quality = "cinema", duration = 10, takes = 4).request())
+        val big = api.suiteEstimate(shot("x", quality = "cinema", duration = 10, takes = 4))
         assertFalse(big.ok)
         assertEquals("suite_over_job_limit", big.code)
         assertTrue(big.message!!.contains("per-shot limit"))
@@ -96,7 +108,7 @@ class SuiteDemoTest {
         val api = FakeMuseApi(backgroundScope)
         api.suiteOwner = false
         assertFalse(SuiteRules.PROVIDER_WORDS.containsMatchIn(json.encodeToString(SuiteCatalog.serializer(), api.suiteCatalog())))
-        val e = api.suiteEstimate(ShotDraft(modelId = SampleData.DEMO, scene = "x").request())
+        val e = api.suiteEstimate(shot("x", SampleData.DEMO))
         assertNull(e.engine)
         assertFalse(SuiteRules.PROVIDER_WORDS.containsMatchIn(json.encodeToString(SuiteEstimate.serializer(), e)))
         try { api.suiteSettings(); fail() } catch (x: ApiException) { assertEquals("owner_only", x.code) }

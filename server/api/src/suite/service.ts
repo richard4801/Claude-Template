@@ -13,12 +13,13 @@ import { ApiError, badRequest, notFound } from '../errors.js';
 import { dayStart, round2 } from '../lib/util.js';
 import * as P from '../pricing.js';
 import { replicateReferencesFor } from '../services/jobs.js';
-import { cameraCatalog, CameraSpecSchema } from './camera.js';
+import { cameraCatalog, CameraSpecSchema, resolvePreset } from './camera.js';
+import { shotLook } from './looks.js';
 import { compileCamera } from './compile.js';
 import { buildRecastPlan, pickRecast } from './recast.js';
 import { buildPlan, needOf, pickModel, shotLabel, ShotRequestSchema, type Character, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
 import { FalProvider, MockProvider, ReplicateProvider, type VideoProvider } from './providers.js';
-import { DEFAULT_LADDER, MODELS, modelById, modelView, MOCK_MODEL, TIER_INFO, TIERS, type ProviderId, type Tier } from './registry.js';
+import { DEFAULT_LADDER, inputSlotsOf, MODELS, modelById, modelView, MOCK_MODEL, TIER_INFO, TIERS, type ProviderId, type Tier } from './registry.js';
 import { SuiteRunner } from './runner.js';
 import { suiteSettings } from './schema.js';
 
@@ -136,8 +137,9 @@ export class SuiteService {
       const base = { id: t, label: TIER_INFO[t].label, detail: TIER_INFO[t].detail, available: !!first,
         resolution: res?.label.split(' ')[0] ?? null, fromPerSec: usable.length ? round2(Math.min(...usable.map(x => x.m!.resolutions.find(r => r.id === x.s.resolution)!.perSec * (p.models?.[x.m!.id]?.priceScale ?? 1))) * 1000) / 1000 : null,
         maxSeconds: usable.length ? Math.max(...usable.map(x => x.m!.duration.max)) : null,
-        canKeyframes: usable.some(x => x.m!.modes.image), canReferences: usable.some(x => x.m!.modes.reference), canGuide: usable.some(x => x.m!.camera.referenceVideo) };
-      return u.role === 'owner' ? { ...base, models: usable.map(x => ({ model: x.m!.id, name: x.m!.name, resolution: x.s.resolution })) } : base;
+        minSeconds: usable.length ? Math.min(...usable.map(x => x.m!.duration.min)) : null,
+        canKeyframes: usable.some(x => x.m!.modes.image), canReferences: usable.some(x => x.m!.modes.reference), canGuide: usable.some(x => x.m!.camera.referenceVideo), inputs: inputSlotsOf(usable.map(x => x.m!)) };
+      return u.role === 'owner' ? { ...base, models: usable.map(x => ({ model: x.m!.id, name: x.m!.name, resolution: x.s.resolution, inputs: inputSlotsOf([x.m!]) })) } : base;
     });
     return { enabled: this.mode !== 'off', test: this.mode === 'mock', defaultQuality: 'draft', tiers, modes: ['text', 'image', 'reference', 'swap', 'recast'], recastMaxPeople: 4,
       aspectRatios: ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'], takesMax: 4, camera: cameraCatalog() };
@@ -288,6 +290,7 @@ export class SuiteService {
       caps, ok: caps.ok, code: caps.code, message: caps.message, warnings: [...plan.notes, ...plan.camera.notes], camera: { moves: plan.camera.moves, guideUsed: plan.camera.usesGuide },
       ...(plan.recast ? { cast: plan.recast.people, keepAudio: plan.recast.keepAudio } : {}),
       prompt: plan.prompt, test: this.mode === 'mock',
+      look: shotLook(r.camera ? resolvePreset(r.camera) : undefined, r.gradeLook),
     };
     if (u.role !== 'owner') return base;
     const m = modelById(plan.modelId)!;
@@ -332,6 +335,8 @@ export class SuiteService {
       engine: 'suite', mode: plan.mode, quality: plan.tier, label, engineLabel: label, takeLabel: TIER_INFO[plan.tier].label, seconds: plan.seconds, takes: plan.takes, aspectRatio: plan.aspect, audio: plan.audio, speaking: p.talk.speaking, speakingSource: p.talk.source,
       prompt: r.prompt, direction: r.direction, camera: r.camera, frames: r.frames, references: r.references, modelId: r.modelId ?? plan.recast?.people[0]?.characterId, outfitId: r.outfitId,
       keepAudio: plan.recast?.keepAudio ?? true, ...(plan.recast ? { clipId: r.clipId, cast: plan.recast.people } : {}),
+      // The take's Look (suite/looks.ts): the Edit suite opens with this LUT applied (reversible).
+      look: shotLook(r.camera ? resolvePreset(r.camera) : undefined, r.gradeLook),
     };
     const perTake = 45 + plan.seconds * 10 * (plan.tier === 'draft' ? 0.6 : plan.tier === 'cinema' ? 2 : plan.tier === 'hd' ? 1.5 : 1);
     const seed = r.seed ?? 1000 + Math.floor(Math.random() * 99000);

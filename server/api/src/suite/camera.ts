@@ -3,8 +3,15 @@
 // into what each model can consume. Labels and descriptions here are member-facing; the wording sent to models lives in
 // the prompt library (keys suite.camera.*, owner-editable, one "id: wording" per line) with these defaults.
 import { z } from 'zod';
+import { lutFor, swatchesOf } from './looks.js';
 
-export type Option = { id: string; label: string; description: string; wording: string };
+export type Option = {
+  id: string; label: string; description: string; wording: string;
+  /** Composer (plans/video-composer.md "Catalogue"): false = not offered to members (owners and Directed mode keep it). */
+  visible?: boolean;
+  /** A true duplicate: this id still validates but compiles as its survivor, and pickers show the survivor. */
+  mergedInto?: string;
+};
 export type MoveOption = Option & {
   category: 'static' | 'push' | 'lateral' | 'rotate' | 'vertical' | 'zoom' | 'follow' | 'aerial' | 'specialty' | 'time';
   /** Distance or angle at intensity 0 and 1 ("0.8 m", "60°"), for the {amount} placeholder. */
@@ -20,48 +27,59 @@ export type MoveOption = Option & {
 };
 
 const o = (id: string, label: string, description: string, wording: string): Option => ({ id, label, description, wording });
+/** Hidden from members (still valid, compiles as itself). */
+const hidden = (x: Option): Option => ({ ...x, visible: false });
+/** Merged into a survivor (still valid, compiles as the survivor). */
+const merged = (x: Option, into: string): Option => ({ ...x, visible: false, mergedInto: into });
 
 // ---------------------------------------------------------------- rig
 export const BODIES: Option[] = [
   o('phone', 'Phone', 'Modern smartphone: deep focus, natural HDR', 'a modern smartphone camera, deep focus, natural HDR, true-to-life colour'),
-  o('vlog', 'Vlog camera', 'Compact creator camera, crisp and bright', 'a compact vlogging camera, crisp detail, bright creator look'),
-  o('cinema_digital', 'Cinema digital', 'Large-format digital cinema camera, clean and rich', 'large-format digital cinema camera, clean high-dynamic-range image, rich skin tones'),
-  o('super35', 'Super 35 digital', 'Classic S35 cinema sensor', 'Super 35 digital cinema sensor, filmic highlight roll-off'),
+  o('vlog', 'Creator camera', 'Compact creator camera, crisp and bright', 'a compact creator camera, crisp detail, bright clean creator look'),
+  o('cinema_digital', 'Cinema camera', 'Clean digital cinema, rich skin tones', 'clean digital cinema camera, high-dynamic-range image, rich skin tones'),
+  merged(o('super35', 'Super 35 digital', 'Classic S35 cinema sensor', 'Super 35 digital cinema sensor, filmic highlight roll-off'), 'cinema_digital'),
   o('film_35', '35mm film', 'Fine grain, halation, organic colour', '35mm motion-picture film, fine grain, gentle halation, organic colour'),
   o('film_16', '16mm film', 'Visible grain, softer, indie feel', '16mm film, visible grain, softer detail, indie documentary texture'),
   o('film_8', 'Super 8', 'Home-movie grain, gate weave, warm', 'Super 8 home-movie film, heavy grain, slight gate weave, warm faded colour'),
-  o('large_format_65', '65mm large format', 'Epic, huge sensor, shallow depth', '65mm large-format film camera, epic scale, extremely shallow depth of field, pristine detail'),
+  o('large_format_65', 'Large format 65mm', 'Epic, huge sensor, shallow depth', '65mm large-format film camera, epic scale, extremely shallow depth of field, pristine detail'),
   o('camcorder', 'DV camcorder', '2000s camcorder: video texture, sharpening', 'early-2000s DV camcorder footage, video texture, edge sharpening, slightly blown highlights'),
-  o('modular_8k', 'Modular 8K', 'Modular 8K digital: razor detail, big sensor', 'modular 8K digital cinema camera, razor-sharp detail, large sensor rendering'),
-  o('full_frame_cine', 'Full-frame cine', 'Full-frame cinema sensor, creamy depth', 'full-frame digital cinema camera, creamy shallow depth of field, rich colour'),
-  o('creator_cine', 'Creator cine', 'Compact full-frame creator camera, 4K 120', 'compact full-frame creator cinema camera, clean 4K image, smooth high-frame-rate motion'),
-  o('webcam', 'Webcam / FaceTime', 'Laptop webcam look, flat and close', 'laptop webcam footage, flat lighting, slight softness, video-call framing'),
+  merged(o('modular_8k', 'Modular 8K', 'Modular 8K digital: razor detail, big sensor', 'modular 8K digital cinema camera, razor-sharp detail, large sensor rendering'), 'cinema_digital'),
+  merged(o('full_frame_cine', 'Full-frame cine', 'Full-frame cinema sensor, creamy depth', 'full-frame digital cinema camera, creamy shallow depth of field, rich colour'), 'cinema_digital'),
+  merged(o('creator_cine', 'Creator cine', 'Compact full-frame creator camera, 4K 120', 'compact full-frame creator cinema camera, clean 4K image, smooth high-frame-rate motion'), 'vlog'),
+  o('webcam', 'Webcam', 'Laptop webcam look, flat and close', 'laptop webcam footage, flat lighting, slight softness, video-call framing'),
   o('security_cam', 'CCTV', 'High-angle surveillance look', 'security camera footage, high fixed angle, wide lens, muted colour'),
 ];
 export const LENSES: Option[] = [
   o('clean', 'Clean sharp', 'Modern clinical prime', 'clean modern prime lens, edge-to-edge sharpness'),
-  o('vintage', 'Vintage prime', 'Soft contrast, gentle flare', 'vintage prime lens, softer contrast, gentle flare'),
+  merged(o('vintage', 'Vintage prime', 'Soft contrast, gentle flare', 'vintage prime lens, softer contrast, gentle flare'), 'warm_vintage'),
   o('warm_vintage', 'Warm vintage', '70s-style warm prime', 'warm 1970s cinema prime, creamy rendering, amber flare'),
   o('anamorphic', 'Anamorphic', 'Oval bokeh, horizontal flares', 'anamorphic lens, oval bokeh, horizontal blue lens flares'),
   o('vintage_anamorphic', 'Vintage anamorphic', 'Character, falloff, streaks', 'vintage anamorphic lens, strong edge falloff, warm streak flares'),
-  o('halation', 'Halation diffusion', 'Glowing highlights, dreamy', 'diffusion filter, glowing highlights with halation, dreamy softness'),
+  o('halation', 'Halation', 'Glowing highlights, dreamy', 'diffusion filter, glowing highlights with halation, dreamy softness'),
   o('swirl', 'Swirl bokeh', 'Petzval-style swirling background', 'Petzval-style portrait lens, swirling bokeh'),
   o('macro', 'Macro', 'Extreme close detail', 'macro lens, extreme close-up detail, razor-thin focus'),
   o('tilt_shift', 'Tilt-shift', 'Miniature-looking focus band', 'tilt-shift lens, narrow slanted focus band, miniature look'),
   o('fisheye', 'Fisheye', 'Ultra-wide barrel distortion', 'fisheye lens, strong barrel distortion'),
-  o('cine_zoom', 'Cine zoom', 'Long cinema zoom, crash zooms', 'long cinema zoom lens, smooth zooms, slightly compressed perspective'),
+  // Zooms are moves now (composer): hidden, still valid.
+  hidden(o('cine_zoom', 'Cine zoom', 'Long cinema zoom, crash zooms', 'long cinema zoom lens, smooth zooms, slightly compressed perspective')),
 ];
 export const FOCALS: number[] = [8, 14, 18, 24, 26, 35, 50, 65, 85, 100, 135];
+/** The composer's focal wheel: the six steps that read differently to a model (the others share their wording bucket). */
+export const FOCAL_STEPS: { mm: number; label: string; description: string }[] = [
+  { mm: 14, label: '14mm', description: 'Ultra-wide' }, { mm: 24, label: '24mm', description: 'Wide' }, { mm: 35, label: '35mm', description: 'Everyday' },
+  { mm: 50, label: '50mm', description: 'Natural' }, { mm: 85, label: '85mm', description: 'Portrait' }, { mm: 135, label: '135mm', description: 'Telephoto' },
+];
 export const focalWords = (mm: number) => `${mm}mm lens (${mm <= 14 ? 'ultra-wide' : mm <= 24 ? 'wide' : mm <= 35 ? 'moderate wide' : mm <= 50 ? 'natural perspective' : mm <= 85 ? 'portrait telephoto, compressed background' : 'long telephoto, strongly compressed background'})`;
 export const APERTURES: Option[] = [
-  o('f1.2', 'f/1.2', 'Wafer-thin focus', 'f/1.2, wafer-thin depth of field, heavy background blur'),
-  o('f1.4', 'f/1.4 · wide open', 'Very shallow focus', 'f/1.4, very shallow depth of field, creamy bokeh'),
-  o('f2', 'f/2', 'Shallow focus', 'f/2, shallow depth of field'),
+  // Composer: four visible steps; the in-between stops stay valid (hidden) and compile as themselves.
+  hidden(o('f1.2', 'f/1.2', 'Wafer-thin focus', 'f/1.2, wafer-thin depth of field, heavy background blur')),
+  o('f1.4', 'f/1.4', 'Dreamy blur', 'f/1.4, very shallow depth of field, creamy bokeh'),
+  hidden(o('f2', 'f/2', 'Shallow focus', 'f/2, shallow depth of field')),
   o('f2.8', 'f/2.8', 'Soft background', 'f/2.8, soft background separation'),
-  o('f4', 'f/4 · moderate', 'Moderate depth', 'f/4, moderate depth of field'),
-  o('f5.6', 'f/5.6', 'Most of the scene sharp', 'f/5.6, most of the scene in focus'),
-  o('f8', 'f/8', 'Deep focus', 'f/8, deep focus'),
-  o('f11', 'f/11 · deep focus', 'Everything sharp', 'f/11, everything sharp from foreground to background'),
+  hidden(o('f4', 'f/4', 'Moderate depth', 'f/4, moderate depth of field')),
+  o('f5.6', 'f/5.6', 'Natural', 'f/5.6, most of the scene in focus'),
+  hidden(o('f8', 'f/8', 'Deep focus', 'f/8, deep focus')),
+  o('f11', 'f/11', 'Everything sharp', 'f/11, everything sharp from foreground to background'),
 ];
 export const LOOKS: Option[] = [
   o('digital_clean', 'Clean digital', 'Neutral and true', 'neutral clean digital colour science'),
@@ -82,12 +100,14 @@ export const FRAME_RATES: Option[] = [
   o('48', '48 fps', 'Crisp, smooth motion', '48 fps, crisp smooth motion'),
   o('60', '60 fps', 'Hyper-smooth, sports feel', '60 fps hyper-smooth motion'),
   o('slowmo', 'Slow motion', 'High-frame-rate slow motion', 'high-frame-rate slow motion, every movement stretched and graceful'),
-];
+// Composer: models output their own frame rate, so members don't see these (Slow motion lives in Style → Tempo, motion
+// blur in the "Motion blur streaks" move). Owners and Directed mode keep the raw fields.
+].map(hidden);
 export const SHUTTERS: Option[] = [
   o('normal', 'Normal shutter', 'Natural blur', ''),
   o('low', 'Low shutter', 'Long streaky motion blur', 'slow shutter, long streaking motion blur on movement'),
   o('narrow', 'Narrow shutter', 'Staccato, crisp action', 'narrow shutter angle, staccato crisp motion, no motion blur'),
-];
+].map(hidden);
 
 // ---------------------------------------------------------------- light and colour
 export const LIGHTING: Option[] = [
@@ -184,6 +204,7 @@ export const MOVES: MoveOption[] = [
   m('bullet_time', 'Bullet time', 'time', 'Frozen moment, camera circles', 'frozen moment while the camera circles the subject (bullet time)'),
   m('hyperlapse', 'Hyperlapse', 'time', 'Moving time-lapse', 'hyperlapse: camera moves forward while time speeds up'),
   m('handheld_run', 'Action handheld', 'follow', 'Energetic running camera', 'energetic handheld camera running with the action, urgent'),
+  m('motion_blur', 'Motion blur streaks', 'specialty', 'Long streaky blur on movement', 'slow shutter look, long streaking motion blur on anything that moves'),
 ];
 /** Moves that can be mixed: different categories, never two of the same category, never with static/time. */
 export function canMix(a: MoveOption, b: MoveOption) {
@@ -228,7 +249,8 @@ export const ERAS: Option[] = ['1960s', '1970s', '1980s', '1990s', '2000s', '201
 export const TEMPOS: Option[] = [
   o('calm', 'Calm', 'Slow, lingering', 'calm lingering pacing'), o('steady', 'Steady', 'Even pacing', 'steady even pacing'),
   o('dynamic', 'Dynamic', 'Energetic', 'dynamic energetic pacing'), o('chaotic', 'Chaotic', 'Frantic', 'frantic chaotic pacing'),
-  o('single_shot', 'Single shot', 'One continuous take, no cuts', 'one continuous take with no cuts'),
+  o('single_shot', 'One take', 'One continuous take, no cuts', 'one continuous take with no cuts'),
+  o('slow_motion', 'Slow motion', 'Stretched, graceful movement', 'high-frame-rate slow motion, every movement stretched and graceful'),
 ];
 export const EMOTIONS = ['joy', 'trust', 'fear', 'surprise', 'sadness', 'disgust', 'anger', 'hope', 'calm', 'confidence', 'playful', 'flirty'] as const;
 
@@ -287,6 +309,19 @@ export const CameraSpecSchema = z.object({
 export type CameraSpec = z.infer<typeof CameraSpecSchema>;
 export type CameraSpecInput = z.input<typeof CameraSpecSchema>;
 
+/** Every option list by CameraSpec field, for merges and visibility. */
+const RIG_LISTS = { body: BODIES, lens: LENSES, aperture: APERTURES, look: LOOKS, fps: FRAME_RATES, shutter: SHUTTERS } as const;
+const survivor = (list: Option[], id?: string) => (id ? list.find(x => x.id === id)?.mergedInto ?? id : id);
+
+/** Merged ids (plans/video-composer.md "Catalogue") replaced by their survivors, so an old id compiles as the option members see. */
+export function canonicalSpec(spec: CameraSpec): CameraSpec {
+  if (!spec.rig && !spec.lighting && !spec.palette) return spec;
+  const rig = spec.rig ? Object.fromEntries(Object.entries(spec.rig).map(([k, v]) => [k, k in RIG_LISTS && typeof v === 'string' ? survivor(RIG_LISTS[k as keyof typeof RIG_LISTS] as Option[], v) : v])) as CameraSpec['rig'] : undefined;
+  return { ...spec, rig,
+    lighting: spec.lighting ? { ...spec.lighting, preset: survivor(LIGHTING, spec.lighting.preset) as never } : undefined,
+    palette: spec.palette ? { ...spec.palette, preset: survivor(PALETTES, spec.palette.preset) as never } : undefined };
+}
+
 /** The spec with its preset merged underneath (the user's choices win). */
 export function resolvePreset(spec: CameraSpec): CameraSpec {
   const p = spec.preset ? PRESETS.find(x => x.id === spec.preset)?.spec : undefined;
@@ -302,7 +337,14 @@ export function resolvePreset(spec: CameraSpec): CameraSpec {
  * option, with the spec caption shown under the picture (owner decision: real model names only as a "look" caption).
  */
 export const HARDWARE: Record<string, { render: string; name: string; caption: string }> = {
-  'bodies.cinema_digital': { render: 'body-01-large-format', name: 'Large Format Digital', caption: 'Alexa LF look · Large format · 4.5K' },
+  'bodies.cinema_digital': { render: 'body-02-super35', name: 'Cinema Camera', caption: 'Alexa · Venice · RED look · clean digital cinema' },
+  'bodies.large_format_65': { render: 'body-01-large-format', name: 'Large Format 65mm', caption: '65mm look · huge sensor · epic, shallow depth' },
+  'bodies.vlog': { render: 'body-07-creator-cine', name: 'Creator Camera', caption: 'FX3 · ZV look · compact · 4K' },
+  // TODO(render): own stills for Webcam, CCTV, Swirl bokeh and Tilt-shift (plans/video-composer.md "Assets"); closest render for now.
+  'bodies.webcam': { render: 'body-08-phone', name: 'Webcam', caption: 'Laptop webcam · flat light · video call' },
+  'bodies.security_cam': { render: 'body-09-dv-camcorder', name: 'CCTV', caption: 'Security camera · high corner · wide' },
+  'lenses.swirl': { render: 'lens-04-warm-vintage', name: 'Swirl Bokeh', caption: 'Petzval look · swirling background' },
+  'lenses.tilt_shift': { render: 'lens-06-macro', name: 'Tilt-Shift', caption: 'Slanted focus band · miniature look' },
   'bodies.super35': { render: 'body-02-super35', name: 'Super 35 Digital', caption: 'Alexa 35 look · Super 35 · 4.6K' },
   'bodies.modular_8k': { render: 'body-03-modular8k', name: 'Modular 8K', caption: 'V-Raptor look · VistaVision · 8K' },
   'bodies.full_frame_cine': { render: 'body-04-fullframe', name: 'Full-Frame Cine', caption: 'Venice 2 look · Full frame · 8.6K' },
@@ -355,19 +397,45 @@ export const FEATURED_MOVES: { id: string; tag: 'ugc' | 'cinematic' | 'energy' |
   { id: 'whip_pan', tag: 'energy' }, { id: 'crash_zoom', tag: 'energy' }, { id: 'handheld_run', tag: 'energy' }, { id: 'rack_focus', tag: 'subtle' }, { id: 'dutch_push', tag: 'subtle' },
 ];
 
+/** The composer's Movement chips (plans/video-composer.md "Camera picker"); each move belongs to one besides Featured. */
+export const MOVE_GROUPS = [
+  { id: 'featured', label: 'Featured' }, { id: 'ugc', label: 'UGC' }, { id: 'push', label: 'Push' }, { id: 'pan', label: 'Pan & tilt' },
+  { id: 'orbit', label: 'Orbit' }, { id: 'crane', label: 'Crane' }, { id: 'follow', label: 'Follow' }, { id: 'aerial', label: 'Aerial' }, { id: 'special', label: 'Special' },
+] as const;
+const UGC_MOVES = ['static', 'handheld', 'selfie', 'micro_push'];
+export function moveGroup(m: MoveOption): (typeof MOVE_GROUPS)[number]['id'] {
+  if (UGC_MOVES.includes(m.id)) return 'ugc';
+  if (m.id.startsWith('orbit') || m.id === 'top_down_spin' || m.id === 'bullet_time') return 'orbit';
+  switch (m.category) {
+    case 'push': case 'zoom': return 'push';
+    case 'lateral': case 'rotate': return 'pan';
+    case 'vertical': return 'crane';
+    case 'follow': return 'follow';
+    case 'aerial': return 'aerial';
+    default: return 'special';
+  }
+}
+
 /** Everything the Camera picker shows (member-safe: ids, labels, descriptions, renders and look captions). */
 export function cameraCatalog() {
-  const v = (l: Option[], group?: string) => l.map(({ id, label, description }) => {
+  const v = (l: Option[], group?: string) => l.map(({ id, label, description, visible, mergedInto }) => {
     const h = group ? HARDWARE[`${group}.${id}`] : undefined;
-    return h ? { id, label, description, render: h.render, name: h.name, caption: h.caption } : { id, label, description };
+    const vis = { visible: visible !== false, ...(mergedInto ? { mergedInto } : {}) };
+    return h ? { id, label, description, render: h.render, name: h.name, caption: h.caption, ...vis } : { id, label, description, ...vis };
   });
   return {
     presets: PRESETS.map(({ id, label, description, spec }) => ({ id, label, description, spec })),
-    bodies: v(BODIES, 'bodies'), lenses: v(LENSES, 'lenses'), focalLengths: FOCALS, apertures: v(APERTURES), looks: v(LOOKS, 'looks'), frameRates: v(FRAME_RATES), shutters: v(SHUTTERS),
-    lighting: v(LIGHTING, 'lighting'), palettes: v(PALETTES, 'palettes'),
+    bodies: v(BODIES, 'bodies'), lenses: v(LENSES, 'lenses'), focalLengths: FOCALS,
+    /** The composer's focal wheel (the other lengths stay valid for owners and Directed mode). */
+    focals: FOCALS.map(mm => { const s = FOCAL_STEPS.find(x => x.mm === mm); return { mm, label: s?.label ?? `${mm}mm`, description: s?.description ?? '', visible: !!s }; }), apertures: v(APERTURES), looks: v(LOOKS, 'looks').map(x => ({ ...x, swatches: swatchesOf('looks', x.id) ?? [], lut: lutFor('looks', x.id) })), frameRates: v(FRAME_RATES), shutters: v(SHUTTERS),
+    lighting: v(LIGHTING, 'lighting'),
+    // Look (suite/looks.ts): each palette and film stock has a swatch strip and the LUT the take is graded with.
+    palettes: v(PALETTES, 'palettes').map(x => ({ ...x, swatches: swatchesOf('palettes', x.id) ?? [], lut: lutFor('palettes', x.id) })),
     optics: ['aperture', 'shutter'].map(id => ({ id, ...HARDWARE[`optics.${id}`]! })),
     grips: Object.entries(HARDWARE).filter(([k]) => k.startsWith('grips.')).map(([k, h]) => ({ move: k.slice(6), ...h })),
-    moves: MOVES.map(x => ({ id: x.id, label: x.label, description: x.description, category: x.category, editorBetter: !!x.editorBetter, talkSafe: !!x.talkSafe })),
+    moves: MOVES.map(x => ({ id: x.id, label: x.label, description: x.description, category: x.category, group: moveGroup(x), editorBetter: !!x.editorBetter, talkSafe: !!x.talkSafe })),
+    /** The composer's Movement chips, in order ("featured" = `library`). */
+    moveGroups: MOVE_GROUPS,
     library: FEATURED_MOVES.map(f => { const m = MOVES.find(x => x.id === f.id)!; return { id: m.id, label: f.label ?? m.label, tag: f.tag, description: m.description, category: m.category }; }),
     heights: v(HEIGHTS), shotSizes: v(SHOT_SIZES), genres: v(GENRES), eras: v(ERAS), tempos: v(TEMPOS), emotions: [...EMOTIONS],
     limits: { intensity: [0, 1], dutchDeg: [0, 30], focalMm: [8, 200], paletteColors: 5, mixPairs: 'two moves of different kinds; not static, time or aerial' },

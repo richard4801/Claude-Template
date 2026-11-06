@@ -102,92 +102,6 @@ struct SuiteSeg<T: Hashable>: View {
     }
 }
 
-/// The quality ladder as cards with each tier's price (from the estimates).
-struct SuiteTierCards: View {
-    @Environment(AppStore.self) private var store
-    @Environment(\.theme) private var t
-    var selection: String
-    var estimates: [String: ShotEstimate]
-    var columns = 2
-    var onPick: (String) -> Void
-
-    var body: some View {
-        let tiers = store.suite.catalog?.tiers ?? SuiteText.tierIds.map { SuiteTier(id: $0, label: SuiteText.tierLabel($0), detail: "") }
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: columns), spacing: 8) {
-            ForEach(tiers) { tier in card(tier) }
-        }
-    }
-
-    private func card(_ tier: SuiteTier) -> some View {
-        let on = tier.id == selection
-        let e = estimates[tier.id]
-        return Button { if tier.available { onPick(tier.id) } } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(tier.label).font(t.body(13.5, .semibold))
-                    Spacer(minLength: 4)
-                    Text(e.map { Pricing.money($0.estimate) } ?? "—").font(t.isA ? Fonts.font("Instrument Serif", 22, .regular) : t.mono(15, .medium))
-                }
-                Text(tier.available ? tier.detail : "Not available right now").font(t.body(11.5)).foregroundStyle(t.muted).lineLimit(2)
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(t.surface)
-            .overlay(Rectangle().strokeBorder(on ? t.ink : t.line, lineWidth: on ? 2 : 1))
-            .opacity(tier.available ? 1 : 0.5)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(tier.label)\(e.map { ", \(Pricing.money($0.estimate))" } ?? "")\(on ? ", selected" : "")")
-    }
-}
-
-/// The big Generate bar: what it makes, the price, and the button with the estimate's own label.
-struct SuiteGenerateBar: View {
-    @Environment(AppStore.self) private var store
-    @Environment(\.theme) private var t
-    var estimate: ShotEstimate?
-    var error: String?
-    var summary: String
-    var busy: Bool
-    var action: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(summary).font(t.body(13))
-                Spacer()
-                Text(estimate.map { Pricing.money($0.estimate) } ?? "—").font(t.isA ? Fonts.font("Instrument Serif", 30, .regular) : t.mono(20, .medium))
-            }
-            if let e = estimate {
-                HStack {
-                    Text("Balance after").font(t.body(12)).foregroundStyle(t.muted)
-                    Spacer()
-                    Text(Pricing.money(max(0, store.creditUsd - e.estimate))).font(t.mono(12))
-                }
-                ForEach(e.warnings.filter(SuiteText.isMemberSafe), id: \.self) { w in
-                    Label(w, systemImage: "info.circle").font(t.body(11.5)).foregroundStyle(t.muted)
-                }
-                if let p = e.problem { Label(p, systemImage: "exclamationmark.triangle").font(t.body(12, .semibold)).foregroundStyle(t.warn) }
-            }
-            if let error { Label(error, systemImage: "exclamationmark.triangle").font(t.body(12)).foregroundStyle(t.warn).fixedSize(horizontal: false, vertical: true) }
-            Button(action: action) {
-                Text((estimate?.buttonLabel ?? "Generate").uppercased())
-                    .font(t.mono(13, .semibold)).tracking(2)
-                    .foregroundStyle(t.ctaInk)
-                    .frame(maxWidth: .infinity).frame(height: 50)
-                    .background(t.cta.opacity(canGo ? 1 : 0.45))
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!canGo)
-            .keyboardShortcut(.return, modifiers: .command)
-        }
-    }
-
-    private var canGo: Bool { !busy && estimate != nil && (estimate?.ok ?? false) }
-}
-
 /// D10: the 9:16 result pane (empty, in line, rendering with the blurred picture and three named steps, ready, failed).
 struct SuiteResultPane: View {
     @Environment(AppStore.self) private var store
@@ -362,26 +276,6 @@ struct SuiteOffView: View {
             }
         }
         .frame(maxWidth: 560, alignment: .leading)
-        .padding(36)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-}
-
-/// Talking, UGC ad, Extend & upscale: no backend yet.
-struct SuiteComingSoonView: View {
-    @Environment(AppStore.self) private var store
-    @Environment(\.theme) private var t
-    var mode: SuiteMode
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("VIDEO SUITE · \(mode.title.uppercased())").font(t.mono(11)).tracking(1.4).foregroundStyle(t.muted)
-            Text(mode.title).font(t.isA ? Fonts.font("Instrument Serif", 48, .regular) : t.display(34))
-            HardwareImage(name: mode.tileRender).frame(width: 360, height: 200).clipped().opacity(0.85)
-            Pill(SuiteText.comingSoon)
-            Text(mode.tileLine).font(t.body(14)).foregroundStyle(t.muted)
-            MButton("Back to the Video suite", icon: "chevron.left", size: .small) { store.openSuite(.hub) }
-        }
         .padding(36)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }

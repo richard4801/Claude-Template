@@ -52,17 +52,22 @@ fun SuiteEnginesScreen() {
     val owner = store.owner
     val cat by store.catalog.collectAsState()
     val settings by store.settings.collectAsState()
-    val shot by store.shot.collectAsState()
+    val shot by store.composer.collectAsState()
+    val slots by store.composerSlots.collectAsState()
+    val recast by store.recast.collectAsState()
     val scope = rememberCoroutineScope()
     LaunchedEffect(owner) { if (owner) { if (store.catalog.value == null) store.load(); store.loadSettings() } }
     ScreenBox {
         Column(Modifier.fillMaxSize()) {
             TopBar("Engines", onBack = { nav.back() })
             if (!owner) { Column(Modifier.padding(16.dp)) { NoteBox("Only the studio owner can see this.") }; return@Column }
-            val req = shot.request()
-            val est = produceState<studio.muse.app.data.SuiteEstimate?>(null, req, cat?.enabled) { value = if (cat?.enabled == true && shot.problem() == null) store.estimate(req).first else null }.value
-            val compiled = produceState<studio.muse.app.data.SuiteCompiled?>(null, shot.camera, shot.quality) {
-                value = c.repo.attemptInline { suiteCompile(SuiteCompileRequest(shot.camera.presetSpec(), shot.quality, shot.duration)) }.first
+            val inputs = cat?.tier(shot.quality)?.slots ?: studio.muse.app.data.SuiteInputs.NONE
+            val req = shot.request(slots, inputs, recast)
+            val ready = shot.problem(slots, recast) == null
+            val est = produceState<studio.muse.app.data.SuiteEstimate?>(null, req, cat?.enabled) { value = if (cat?.enabled == true && ready) store.estimate(req).first else null }.value
+            val camera = req.camera ?: kotlinx.serialization.json.JsonObject(mapOf("mode" to kotlinx.serialization.json.JsonPrimitive("preset")))
+            val compiled = produceState<studio.muse.app.data.SuiteCompiled?>(null, camera, shot.quality) {
+                value = c.repo.attemptInline { suiteCompile(SuiteCompileRequest(camera, shot.quality, shot.duration)) }.first
             }.value
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

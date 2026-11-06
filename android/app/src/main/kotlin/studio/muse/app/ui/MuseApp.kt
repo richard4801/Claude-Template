@@ -116,10 +116,11 @@ object Routes {
     fun editVideo(takeId: String) = "editvideo/$takeId"
     // AI suite (workstream 1): the Video suite and its modes; Edit top-level (workstream 3); the camera stage and Connections (workstream 2).
     const val SUITE = "suite"; const val SUITE_SHOT = "suite/shot"; const val SUITE_SWAP = "suite/swap"; const val SUITE_STORYBOARD = "suite/storyboard"
-    const val SUITE_CAMERA = "suite/camera/{tab}"; const val SUITE_TAKE = "suite/take/{id}"; const val SUITE_ENGINES = "suite/engines"; const val SUITE_SOON = "suite/soon/{mode}"
-    fun suiteCamera(tab: String) = "suite/camera/$tab"
+    const val SUITE_TAKE = "suite/take/{id}"; const val SUITE_ENGINES = "suite/engines"
+    /** The video composer on a tool (shot, swap, recast, talking, ugc, extend); Shot and Character swap have their own routes too. */
+    const val SUITE_COMPOSE = "suite/compose/{tool}"
     fun suiteTake(jobId: String) = "suite/take/$jobId"
-    fun suiteSoon(mode: String) = "suite/soon/$mode"
+    fun suiteCompose(tool: String) = "suite/compose/$tool"
     const val CAMERA_STAGE = "camera-stage"; const val EDIT = "edit"; const val EDIT_TAKE = "edit/{id}"; const val CONNECTIONS = "connections"
     fun editTake(takeId: String) = "edit/$takeId"
 }
@@ -224,13 +225,12 @@ fun MuseApp(
                     composable(Routes.EDIT_VIDEO) { e -> studio.muse.app.ui.screens.edit.EditSuiteScreen(e.arguments?.getString("id"), onBack = { n.back() }) }
                     // AI suite (workstream 1)
                     composable(Routes.SUITE) { studio.muse.app.ui.screens.suite.SuiteHubScreen() }
-                    composable(Routes.SUITE_SHOT) { studio.muse.app.ui.screens.suite.SuiteShotScreen() }
-                    composable(Routes.SUITE_SWAP) { studio.muse.app.ui.screens.suite.SuiteSwapScreen() }
+                    composable(Routes.SUITE_SHOT) { studio.muse.app.ui.screens.suite.composer.SuiteComposerScreen("shot") }
+                    composable(Routes.SUITE_SWAP) { studio.muse.app.ui.screens.suite.composer.SuiteComposerScreen("swap") }
+                    composable(Routes.SUITE_COMPOSE) { e -> studio.muse.app.ui.screens.suite.composer.SuiteComposerScreen(e.arguments?.getString("tool")) }
                     composable(Routes.SUITE_STORYBOARD) { studio.muse.app.ui.screens.suite.SuiteStoryboardScreen() }
-                    composable(Routes.SUITE_CAMERA) { e -> studio.muse.app.ui.screens.suite.CameraBagScreen(e.arguments?.getString("tab") ?: "Body") }
                     composable(Routes.SUITE_TAKE) { e -> studio.muse.app.ui.screens.suite.SuiteResultScreen(e.arguments?.getString("id") ?: "") }
                     composable(Routes.SUITE_ENGINES) { studio.muse.app.ui.screens.suite.SuiteEnginesScreen() }
-                    composable(Routes.SUITE_SOON) { e -> studio.muse.app.ui.screens.suite.SuiteSoonScreen(e.arguments?.getString("mode") ?: "") }
                     composable(Routes.CAMERA_STAGE) { studio.muse.app.ui.screens.camera.CameraStageScreen() }
                     composable(Routes.EDIT) { studio.muse.app.ui.screens.edit.EditSuiteScreen(null, onBack = { n.back() }) }
                     composable(Routes.EDIT_TAKE) { e -> studio.muse.app.ui.screens.edit.EditSuiteScreen(e.arguments?.getString("id"), onBack = { n.back() }) }

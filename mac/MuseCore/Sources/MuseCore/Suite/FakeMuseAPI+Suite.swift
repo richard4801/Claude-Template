@@ -24,6 +24,14 @@ enum FakeSuitePrices {
 }
 
 extension FakeMuseAPI {
+    /// Demo mode: the file stays on this Mac; the slot gets a demo storage key.
+    public func uploadSuiteMedia(_ file: URL, contentType: String, progress: UploadProgress?) async throws -> SuiteVideoRef {
+        progress?(0)
+        let ext = file.pathExtension.isEmpty ? (contentType.hasPrefix("audio/") ? "m4a" : "mp4") : file.pathExtension
+        progress?(1)
+        return SuiteVideoRef(key: "c/demo_\(shortId()).\(ext)")
+    }
+
     public func suiteCatalog() async throws -> SuiteCatalog {
         var c = SuiteDemoCatalog.catalog
         c.enabled = true
@@ -105,6 +113,7 @@ extension FakeMuseAPI {
                              warnings: warnings, camera: SuiteEstimateCamera(moves: moves), prompt: suitePrompt(r), test: true,
                              speaking: SuiteSpeaking(speaking: speaking, source: r.speaking == nil ? "default" : "switch"), cast: cast,
                              keepAudio: mode == "recast" || mode == "swap" ? (r.keepAudio ?? true) : nil)
+        e.look = SuiteLooks.look(for: r, camera: SuiteDemoCatalog.catalog.camera)
         if suiteIsOwner {
             e.engine = SuiteEngine(model: p.model, name: p.name, provider: p.provider, resolution: p.resolution, perSec: p.perSec, billedPerTake: seconds, test: true)
         }
@@ -164,6 +173,7 @@ extension FakeMuseAPI {
                     phase: MemberText.waitingToStart, secondsLeft: total, totalSeconds: total, cost: e.estimate, createdAt: nowMs(), prompt: e.prompt ?? "",
                     seed: Int64.random(in: 1000...99999), thumb: outfits.first { $0.id == outfitId }?.front ?? m?.cover)
         j.engineText = e.label
+        if let look = e.look { suiteLooks[j.id] = look }
         return try enqueueSuiteJob(j)
     }
 

@@ -9,12 +9,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { jobs, ledger } from '../src/db/schema.js';
 import { DEFAULT_TEXTS } from '../src/prompt/library.js';
-import { CameraSpecSchema, MOVES, PRESETS, resolvePreset } from '../src/suite/camera.js';
+import { cameraCatalog, CameraSpecSchema, MOVES, PRESETS, resolvePreset } from '../src/suite/camera.js';
 import { compileCamera } from '../src/suite/compile.js';
 import { buildInput } from '../src/suite/inputs.js';
 import { buildPlan, billedSeconds, fit, needOf, perSecond, pickModel, ShotRequestSchema, type Character } from '../src/suite/plan.js';
 import { SUITE_PROMPT_DEFS, wordings } from '../src/suite/prompts.js';
-import { DEFAULT_LADDER, MODELS, modelById, TIERS } from '../src/suite/registry.js';
+import { bakePalettes, PALETTE_DIR } from '../scripts/suite-looks.js';
+import { generatedLooks, lutFor, shotLook } from '../src/suite/looks.js';
+import { DEFAULT_LADDER, inputSlotsOf, MODELS, modelById, NO_INPUTS, TIERS } from '../src/suite/registry.js';
 import { demoModel, makeApp, people, until, type Client } from './helpers.js';
 
 const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version']); execFileSync('ffprobe', ['-version']); return true; } catch { return false; } })();
@@ -174,6 +176,77 @@ describe('AI suite · plans, inputs and prices (unit)', () => {
   });
 });
 
+describe('AI suite · composer catalogue (visible, merged)', () => {
+  const cat = cameraCatalog();
+  const shown = (l: { id: string; visible?: boolean; label: string }[]) => l.filter(x => x.visible).map(x => x.label);
+  it('members see the composer lists; merged and hidden ids stay in the API', () => {
+    expect(shown(cat.bodies)).toEqual(['Phone', 'Creator camera', 'Cinema camera', '35mm film', '16mm film', 'Super 8', 'Large format 65mm', 'DV camcorder', 'Webcam', 'CCTV']);
+    expect(shown(cat.lenses)).toEqual(['Clean sharp', 'Warm vintage', 'Anamorphic', 'Vintage anamorphic', 'Halation', 'Swirl bokeh', 'Macro', 'Tilt-shift', 'Fisheye']);
+    expect(cat.focals.filter(f => f.visible).map(f => f.mm)).toEqual([14, 24, 35, 50, 85, 135]);
+    expect(cat.apertures.filter(a => a.visible).map(a => `${a.label} ${a.description}`)).toEqual(['f/1.4 Dreamy blur', 'f/2.8 Soft background', 'f/5.6 Natural', 'f/11 Everything sharp']);
+    expect(shown(cat.frameRates)).toEqual([]);
+    expect(shown(cat.shutters)).toEqual([]);
+    expect(cat.tempos.map(t => t.label)).toContain('Slow motion');
+    expect(cat.moves.find(m => m.id === 'motion_blur')).toMatchObject({ label: 'Motion blur streaks', group: 'special' });
+    expect(Object.fromEntries(cat.bodies.filter(b => b.mergedInto).map(b => [b.id, b.mergedInto]))).toEqual({ super35: 'cinema_digital', modular_8k: 'cinema_digital', full_frame_cine: 'cinema_digital', creator_cine: 'vlog' });
+    expect(cat.lenses.find(l => l.id === 'vintage')?.mergedInto).toBe('warm_vintage');
+    expect(cat.lenses.find(l => l.id === 'cine_zoom')).toMatchObject({ visible: false });
+    // Every visible hardware option has a render (some are stand-ins until their own stills exist).
+    for (const b of [...cat.bodies, ...cat.lenses].filter(x => x.visible)) expect((b as { render?: string }).render, b.id).toBeTruthy();
+    expect(cat.moveGroups.map(g => g.label)).toEqual(['Featured', 'UGC', 'Push', 'Pan & tilt', 'Orbit', 'Crane', 'Follow', 'Aerial', 'Special']);
+    for (const m of cat.moves) expect(cat.moveGroups.map(g => g.id)).toContain(m.group);
+  });
+  it('old ids still validate and compile as their survivor', () => {
+    const model = modelById('h3')!;
+    const old = compileCamera(CameraSpecSchema.parse({ rig: { body: 'super35', lens: 'vintage' } }), model);
+    const now = compileCamera(CameraSpecSchema.parse({ rig: { body: 'cinema_digital', lens: 'warm_vintage' } }), model);
+    expect(old.text).toBe(now.text);
+    expect(old.text).toContain('clean digital cinema camera');
+    // Hidden (not merged) ids compile as themselves.
+    expect(compileCamera(CameraSpecSchema.parse({ rig: { aperture: 'f2', fps: '60' } }), model).text).toMatch(/f\/2, shallow depth of field.*60 fps/);
+    expect(compileCamera(CameraSpecSchema.parse({ style: { tempo: 'slow_motion' }, move: { id: 'motion_blur' } }), model).text).toMatch(/streaking motion blur[\s\S]*slow motion|slow motion[\s\S]*streaking motion blur/);
+  });
+});
+
+describe('AI suite · Look grading', () => {
+  it('every palette and film stock names a LUT: a pack twin, else one generated from its swatches (committed files match)', () => {
+    const cat = cameraCatalog();
+    for (const x of [...cat.palettes, ...cat.looks]) {
+      expect(x.swatches, x.id).toHaveLength(5);
+      expect(x.lut, x.id).toMatch(/^(pack|palette):/);
+    }
+    expect(lutFor('palettes', 'teal_orange')).toBe('pack:cine-teal-orange');
+    expect(lutFor('palettes', 'hyper_neon')).toBe('palette:hyper_neon');
+    expect(lutFor('looks', 'cross_process')).toBe('palette:stock-cross_process');
+    const files = bakePalettes();
+    for (const [n, body] of Object.entries(files)) expect(fs.readFileSync(path.join(PALETTE_DIR, n), 'utf8'), `${n}: run npx tsx scripts/suite-looks.ts`).toBe(body);
+    expect(fs.readdirSync(PALETTE_DIR).filter(f => f.endsWith('.cube'))).toHaveLength(generatedLooks().length);
+    for (const l of [...cat.palettes, ...cat.looks].filter(x => x.lut!.startsWith('palette:'))) expect(fs.existsSync(path.join(PALETTE_DIR, `${l.lut!.slice(8)}.cube`)), l.id).toBe(true);
+  });
+  it("a shot's look: the palette, else the film stock (presets included); none when grading is off", () => {
+    expect(shotLook(CameraSpecSchema.parse({ palette: { preset: 'hyper_neon' }, rig: { look: 'slide_film' } }), true)).toEqual({ id: 'hyper_neon', kind: 'palette', label: 'Hyper neon', lut: 'palette:hyper_neon' });
+    expect(shotLook(CameraSpecSchema.parse({ rig: { look: 'slide_film' } }), true)).toMatchObject({ kind: 'stock', lut: 'pack:film-chrome' });
+    expect(shotLook(resolvePreset(CameraSpecSchema.parse({ preset: 'noir' })), true)).toMatchObject({ id: 'low_key_noir', lut: 'pack:cine-noir' });
+    expect(shotLook(CameraSpecSchema.parse({ palette: { preset: 'hyper_neon' } }), false)).toBeNull();
+    expect(shotLook(CameraSpecSchema.parse({ move: { id: 'static' } }), true)).toBeNull();
+  });
+});
+
+describe('AI suite · input slots', () => {
+  it('a tier takes what any of its models takes, capped to what a shot request can carry', () => {
+    expect(inputSlotsOf([])).toEqual(NO_INPUTS);
+    const kling = modelById('kling-o1')!; // recast-only: no keyframes
+    expect(inputSlotsOf([kling])).toMatchObject({ start: false, end: false, middle: 0 });
+    const many = MODELS.find(m => m.frames.middle >= 8 && m.modes.image)!;
+    const s = inputSlotsOf([kling, many]);
+    expect(s).toMatchObject({ start: true, end: true, middle: 8 });
+    expect(inputSlotsOf(MODELS).images).toBe(6);
+    expect(inputSlotsOf(MODELS).videos).toBe(3);
+    const noRefs = MODELS.find(m => m.modes.image && m.refs.images === 0 && m.refs.audios === 0)!;
+    expect(inputSlotsOf([noRefs])).toMatchObject({ start: true, images: 0, videos: 0, audio: false, framesWithRefs: false });
+  });
+});
+
 describe.skipIf(!hasFfmpeg)('AI suite · Shot API on the mock provider', () => {
   let a: Awaited<ReturnType<typeof makeApp>>, owner: Client, member: Client, model: { id: string };
   beforeAll(async () => {
@@ -192,7 +265,12 @@ describe.skipIf(!hasFfmpeg)('AI suite · Shot API on the mock provider', () => {
     expect(m.camera.moves.length).toBeGreaterThanOrEqual(30);
     expect(JSON.stringify(m.tiers)).not.toMatch(PROVIDER_WORDS);
     const o = (await owner.req('GET', '/v1/suite/catalog')).body;
-    expect(o.tiers[0].models[0]).toEqual({ model: 'h3-lite', name: 'MiniMax H3 Lite', resolution: '768P' });
+    expect(o.tiers[0].models[0]).toMatchObject({ model: 'h3-lite', name: 'MiniMax H3 Lite', resolution: '768P' });
+    // Input slots: member-safe numbers per tier (the apps show a slot only when the tier takes it); per model for the owner.
+    for (const t of m.tiers) expect(Object.keys(t.inputs).sort()).toEqual(['audio', 'end', 'framesWithRefs', 'images', 'middle', 'start', 'videos']);
+    expect(m.tiers[0].inputs).toMatchObject({ start: true, end: true, images: 6, videos: 3, audio: true });
+    expect(m.tiers.map((t: any) => [t.minSeconds, t.maxSeconds])).toEqual([[2, 15], [2, 30], [3, 30], [3, 30]]);
+    expect(o.tiers[0].models[0].inputs).toEqual({ start: true, end: true, middle: 0, images: 6, videos: 3, audio: true, framesWithRefs: true });
   });
 
   it('estimate: price, caps and warnings for a member; the owner also gets the engine and the inputs', async () => {
@@ -209,11 +287,15 @@ describe.skipIf(!hasFfmpeg)('AI suite · Shot API on the mock provider', () => {
     expect(none.body.tried.length).toBe(5);
     const nm = await member.req('POST', '/v1/suite/shots/estimate', { prompt: 'x', duration: 30, quality: 'draft' });
     expect(nm.body.tried).toBeUndefined();
+    // Look grading: the estimate names the take's Look (off with gradeLook: false).
+    const lk = (await member.req('POST', '/v1/suite/shots/estimate', { ...body, camera: { preset: 'cinematic' } })).body;
+    expect(lk.look).toEqual({ id: 'teal_orange', kind: 'palette', label: 'Teal & orange', lut: 'pack:cine-teal-orange' });
+    expect((await member.req('POST', '/v1/suite/shots/estimate', { ...body, camera: { preset: 'cinematic' }, gradeLook: false })).body.look).toBeNull();
   });
 
   it('a shot runs on the mock: hold → takes delivered as made → settle $0 (test render), with real inputs recorded', async () => {
     const before = a.ctx.suite.mock.calls.length;
-    const r = await member.req('POST', '/v1/suite/shots', { modelId: model.id, prompt: 'She laughs.', duration: 5, takes: 2, aspectRatio: '9:16', camera: { move: { id: 'dolly_in', intensity: 0.5 } } });
+    const r = await member.req('POST', '/v1/suite/shots', { modelId: model.id, prompt: 'She laughs.', duration: 5, takes: 2, aspectRatio: '9:16', camera: { move: { id: 'dolly_in', intensity: 0.5 }, palette: { preset: 'hyper_neon' } } });
     expect(r.status).toBe(200);
     expect(r.body.request).toMatchObject({ engine: 'suite', engineLabel: 'Shot · Draft · 768p', quality: 'draft', seconds: 5, takes: 2 });
     expect(r.body.engineLabel).toBe('Shot · Draft · 768p');
@@ -229,6 +311,10 @@ describe.skipIf(!hasFfmpeg)('AI suite · Shot API on the mock provider', () => {
     expect(takes.length).toBe(2);
     expect(takes[0]).toMatchObject({ label: 'Draft', engineLabel: 'Shot · Draft · 768p', durationSec: 5, width: 180, height: 320 });
     expect(takes[0].videoUrl).toMatch(/\/uploads\/s\//);
+    // Look grading: the job request and every take carry the Look (the Edit suite opens with it applied).
+    const look = { id: 'hyper_neon', kind: 'palette', label: 'Hyper neon', lut: 'palette:hyper_neon' };
+    expect(r.body.request.look).toEqual(look);
+    for (const t of takes) expect(t.look).toEqual(look);
     const rows = await a.ctx.db.select().from(ledger).where(eq(ledger.jobId, r.body.id));
     expect(rows.find(x => x.kind === 'hold')!.note).toBe('Video · Shot · Draft · 768p · 5 s · 2 takes · hold');
     const settle = rows.find(x => x.kind === 'settle')!;
