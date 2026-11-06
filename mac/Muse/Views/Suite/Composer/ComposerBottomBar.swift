@@ -125,9 +125,9 @@ struct ComposerBottomBar: View {
     private var qualityPill: some View {
         let q = store.suite.toolQuality
         return pill("quality", help: "Quality") {
-            Image(systemName: "gauge.with.dots.needle.33percent")
+            Ph("gauge.with.dots.needle.33percent", 13)
             Text(isSwap && store.suite.swap.addOn != nil ? store.suite.swap.addOn!.label : SuiteText.tierLabel(q)).font(t.body(12.5, .medium))
-            Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+            Ph("chevron.down", 9)
         } popover: {
             QualityPopover(onPick: { open = nil })
         }
@@ -143,12 +143,12 @@ struct ComposerBottomBar: View {
         let tier = store.suite.catalog?.tier(store.suite.composer.quality)
         let range = ComposerBar.lengthRange(tier)
         return pill("length", help: "Length") {
-            Image(systemName: "clock")
+            Ph("clock", 13)
             Text("\(store.suite.composer.duration)s").font(t.body(12.5, .medium))
         } popover: {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text(tool == .extend ? "ADDED LENGTH" : "LENGTH").font(t.mono(10.5, .medium)).tracking(1.2)
+                    Text(tool == .extend ? "Added length" : "Length").font(t.scale.label.font)
                     Spacer()
                     Text("\(store.suite.composer.duration) s").font(t.mono(13, .medium))
                 }
@@ -168,7 +168,7 @@ struct ComposerBottomBar: View {
     private var takesPill: some View {
         let max = store.suite.catalog?.takesMax ?? 4
         return pill("takes", help: "Takes") {
-            Image(systemName: "square.stack")
+            Ph("square.stack", 13)
             Text("\(store.suite.composer.takes)").font(t.body(12.5, .medium)) + Text(" /\(min(max, 4))").font(t.body(12.5)).foregroundColor(t.muted)
         } popover: {
             PillList(title: "Takes", options: ComposerBar.takes(max).map { ("\($0) take\($0 == 1 ? "" : "s")", $0) }, selected: store.suite.composer.takes) {
@@ -203,7 +203,7 @@ struct ComposerBottomBar: View {
             store.suite.swap.addOn = SwapAddOns.toggle(store.suite.swap.addOn, p)
         } label: {
             HStack(spacing: 6) {
-                if !on { Image(systemName: "plus").font(.system(size: 10, weight: .bold)) }
+                if !on { Ph("plus", 10) }
                 Text(p.label).font(t.body(12.5, .medium))
                 Text(p.priceText).font(t.mono(11)).foregroundStyle(t.muted)
             }
@@ -236,11 +236,11 @@ struct ComposerBottomBar: View {
         let models = ComposerEngines.options(tier)
         let label = ComposerEngines.label(store.suite.composer, tier)
         return pill("engine", help: label) {
-            Image(systemName: "server.rack")
+            Ph("server.rack", 13)
             if !compact { Text(label.replacingOccurrences(of: "Engine · ", with: "")).font(t.body(12.5, .medium)) }
         } popover: {
             VStack(alignment: .leading, spacing: 0) {
-                Text("ENGINE · OWNER").font(t.mono(10.5, .medium)).tracking(1.2).foregroundStyle(t.muted).padding(.horizontal, 14).padding(.vertical, 10)
+                Text("Engine (owner)").font(t.scale.label.font).foregroundStyle(t.muted).padding(.horizontal, 14).padding(.vertical, 10)
                 engineRow("Auto", line: "The \(SuiteText.tierLabel(store.suite.composer.quality)) ladder", on: store.suite.composer.engineModel == nil) {
                     store.suite.composer = ComposerEngines.pin(store.suite.composer, nil)
                 }
@@ -264,7 +264,7 @@ struct ComposerBottomBar: View {
             open = nil
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(t.accent).opacity(on ? 1 : 0).frame(width: 14)
+                Ph("checkmark", 11).foregroundStyle(t.accent).opacity(on ? 1 : 0).frame(width: 14)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title).font(t.body(13, on ? .semibold : .regular))
                     Text(line).font(t.mono(10)).foregroundStyle(t.muted)
@@ -282,7 +282,7 @@ struct ComposerBottomBar: View {
     private func listPill<T: Hashable>(_ id: String, icon: String, value: String, help: String, options: [(String, T)], selected: T,
                                        onPick: @escaping (T) -> Void) -> some View {
         pill(id, help: help) {
-            Image(systemName: icon)
+            Ph(icon, 13)
             Text(value).font(t.body(12.5, .medium))
         } popover: {
             PillList(title: help, options: options, selected: selected) {
@@ -325,13 +325,13 @@ struct PillList<T: Hashable>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(title.uppercased()).font(t.mono(10.5, .medium)).tracking(1.2).foregroundStyle(t.muted).padding(.horizontal, 14).padding(.vertical, 10)
+            Text(title).font(t.scale.label.font).foregroundStyle(t.muted).padding(.horizontal, 14).padding(.vertical, 10)
             ForEach(options.indices, id: \.self) { i in
                 let (label, v) = options[i]
                 let on = v == selected
                 Button { onPick(v) } label: {
                     HStack(spacing: 10) {
-                        Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(t.accent).opacity(on ? 1 : 0).frame(width: 14)
+                        Ph("checkmark", 11).foregroundStyle(t.accent).opacity(on ? 1 : 0).frame(width: 14)
                         Text(label).font(t.body(13, on ? .semibold : .regular))
                         Spacer(minLength: 0)
                     }
@@ -362,7 +362,7 @@ struct QualityPopover: View {
         let seconds: Int? = isSwap ? (store.suite.swapEstimate?.seconds).map { Int($0) } : store.suite.composer.duration
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("QUALITY").font(t.mono(11, .medium)).tracking(1.4)
+                Text("Quality").font(t.scale.label.font)
                 Text(seconds.map { "per \($0) s take · slots follow what each accepts" } ?? "slots follow what each accepts").font(t.body(12)).foregroundStyle(t.muted)
                 Spacer(minLength: 8)
                 PricingLink(estimate: isSwap ? store.suite.swapEstimate : store.suite.estimate)
@@ -384,7 +384,7 @@ struct QualityPopover: View {
                         VStack(alignment: .leading, spacing: 3) {
                             HStack(alignment: .firstTextBaseline) {
                                 Text(tier.label).font(t.body(13, .bold))
-                                if on { Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(t.accent) }
+                                if on { Ph("checkmark", 11).foregroundStyle(t.accent) }
                                 Spacer(minLength: 4)
                                 Text(e.map { Pricing.money($0.estimate / Double(max(1, $0.takes))) } ?? "—")
                                     .font(t.isA ? Fonts.font("Instrument Serif", 23, .regular) : t.mono(15, .medium))
@@ -422,7 +422,7 @@ struct PricingLink: View {
     var body: some View {
         Button { open.toggle() } label: {
             if compact {
-                Image(systemName: "questionmark.circle").font(.system(size: 15)).foregroundStyle(t.muted).frame(width: 28, height: 34).contentShape(Rectangle())
+                Ph("questionmark.circle", 15).foregroundStyle(t.muted).frame(width: 28, height: 34).contentShape(Rectangle())
             } else {
                 Text("How is this priced?").font(t.body(12)).foregroundStyle(t.ink).underline(color: t.muted).lineLimit(1).fixedSize()
             }
@@ -432,7 +432,7 @@ struct PricingLink: View {
         .accessibilityLabel("How is this priced?")
         .popover(isPresented: $open, arrowEdge: .top) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("HOW IS THIS PRICED?").font(t.mono(10.5, .medium)).tracking(1.2).foregroundStyle(t.muted)
+                Text("How is this priced?").font(t.scale.label.font).foregroundStyle(t.muted)
                 // Photo tool (workstream 3): photos are priced per photo, from the images sent and the size made.
                 Text(store.suite.composer.tool == .photo
                      ? "You pay per photo: the price counts her reference images, your references and the size made. It is worked out before anything is made, and photos that fail aren't charged."
@@ -474,7 +474,7 @@ struct GenerateButton: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 if busy { ProgressView().controlSize(.small).tint(t.ctaInk) }
-                Text(label.uppercased()).font(t.mono(12.5, .medium)).tracking(1.8).lineLimit(1)
+                Text(label).font(t.body(14, .semibold)).lineLimit(1)
             }
             .foregroundStyle(t.ctaInk)
             .padding(.horizontal, 22).frame(height: height)

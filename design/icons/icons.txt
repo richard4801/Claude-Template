@@ -238,6 +238,9 @@ stop.circle.fill stop-circle
 sun.max sun
 waveform.path waveform
 
+questionmark.circle question
+photo.on.rectangle images
+
 [extra]
 aperture
 coins

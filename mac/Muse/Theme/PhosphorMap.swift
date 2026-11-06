@@ -136,6 +136,8 @@ enum PhosphorMap {
         "stop.circle.fill": "stop-circle",
         "sun.max": "sun",
         "waveform.path": "waveform",
+        "questionmark.circle": "question",
+        "photo.on.rectangle": "images",
     ]
 
     /// Every vendored Phosphor name (asset `ph.<name>` in Phosphor.xcassets).
@@ -224,6 +226,7 @@ enum PhosphorMap {
         "play-circle",
         "plus",
         "plus-circle",
+        "question",
         "rectangle",
         "rewind",
         "scissors",
