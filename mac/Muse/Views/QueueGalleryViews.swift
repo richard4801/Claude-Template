@@ -366,7 +366,15 @@ struct ResultView: View {
                                 MButton(take.isEdit ? "Edit again" : "Edit video", icon: "scissors", fill: true) { store.openEditor(take) }
                                     .help("Trim, split, change speed or mute. Saved as a new version; the original is kept.")
                             }
-                            if take.canUpscale { UpscaleBox(take: take) }
+                            if ExtendSource.take(take) != nil || take.canUpscale {
+                                HStack {
+                                    if ExtendSource.take(take) != nil {
+                                        MButton("Extend", icon: "arrow.right.to.line", fill: true) { store.openExtend(take) }
+                                            .help("A longer take: what happens next, or before")
+                                    }
+                                    if take.canUpscale { UpscaleButton(take: take, fill: true) }
+                                }
+                            }
                             MButton(store.model(for: take).map { "Post to \($0.shortName)'s accounts" } ?? "Post", icon: "paperplane", kind: .primary, fill: true) {
                                 store.openPostSheet(take)
                             }
@@ -399,35 +407,6 @@ struct ResultView: View {
         } else {
             Page { Note("Nothing to show yet. Finished takes appear in the Gallery.") }
         }
-    }
-}
-
-/// Upscale on a finished render take: 1080p / 2K / 4K. Greyed with "Coming soon" until the server offers it.
-struct UpscaleBox: View {
-    @Environment(AppStore.self) private var store
-    @Environment(\.theme) private var t
-    var take: Take
-
-    var body: some View {
-        let addon = store.videoFeatures.upscale ?? AddonOption.defaults[2]
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Lbl("Upscale")
-                Spacer()
-                if addon.comingSoon || !addon.available { Pill("Coming soon") }
-            }
-            HStack(spacing: 8) {
-                ForEach(addon.sizes) { size in
-                    let on = addon.available && size.available
-                    MButton(size.price.map { "\(size.label) · \(Pricing.money($0))" } ?? size.label, size: .small, off: !on || store.upscaling, fill: true) {
-                        store.upscale(take, size: size)
-                    }
-                    .help("\(size.label) · \(size.sizeLine)")
-                }
-            }
-            Muted(addon.shownDetail)
-        }
-        .card(14)
     }
 }
 

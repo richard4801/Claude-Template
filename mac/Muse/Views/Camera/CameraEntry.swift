@@ -64,7 +64,7 @@ struct CameraStageView: View {
     private var relayLine: some View {
         let r = model.connections?.relay ?? model.selected?.relay
         let row = CameraStatus.blender(r, machine: model.machine)
-        let text = r?.blender == true ? "Blender on Mac · connected" : r?.online == true ? "Mac app online · Blender not connected" : "Blender on Mac · offline"
+        let text = r?.blender == true ? "Blender on Mac · connected" : r?.online == true ? "Mac app online · Blender not connected" : "Blender relay off"
         return HStack(spacing: 6) {
             Circle().fill(row.tone == .good ? t.good : row.tone == .warn ? t.warn : t.muted).frame(width: 7, height: 7)
             Text(text).font(t.body(12)).foregroundStyle(t.muted)

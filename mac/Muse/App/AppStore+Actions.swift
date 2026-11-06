@@ -141,17 +141,29 @@ extension AppStore {
         go(.studio)
     }
 
-    /// Upscale a finished take (1080p / 2K / 4K). The server answers `upscale_unavailable` ("Upscale is coming soon") until it ships.
+    /// Upscale a finished take (1080p / 2K / 4K): a job held at the size's price × the take's length, followed like any render.
+    /// `409 upscale_unavailable` (not offered for this size, or not any more): say so and re-read the sizes.
     func upscale(_ take: Take, size: UpscaleSize) {
         guard !upscaling else { return }
         upscaling = true
-        perform { [self] in
+        Task { @MainActor [self] in
             defer { upscaling = false }
-            let j = try await api.upscale(takeId: take.id, UpscaleRequest(size: size.id))
-            upsert(j)
-            balance = try await api.balance()
-            showToast("Upscaling to \(size.label) · \(Pricing.money(j.cost)). You'll get a notification when it's done.", action: "Open queue") { [weak self] in
-                self?.go(.queue)
+            do {
+                let j = try await api.upscale(takeId: take.id, UpscaleRequest(size: size.id))
+                upsert(j)
+                balance = try await api.balance()
+                showToast("Upscaling to \(size.label) · \(Pricing.money(j.cost)). You'll get a notification when it's done.", action: "Open queue") { [weak self] in
+                    self?.go(.queue)
+                }
+            } catch let e as ApiError {
+                if let m = UpscaleOffer.refusal(e) {
+                    showToast(m)
+                    if let s = try? await api.studioSettings() { studioSettings = s }
+                } else {
+                    handle(e)
+                }
+            } catch {
+                showToast(error.localizedDescription)
             }
         }
     }

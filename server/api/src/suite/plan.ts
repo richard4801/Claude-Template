@@ -5,7 +5,7 @@ import type { ImageRef } from '../db/schema.js';
 import { DEFAULT_TEXTS, listOf, type PromptTexts } from '../prompt/library.js';
 import { sanitizeDirection } from '../prompt/engine.js';
 import { run } from '../prompt/scripts/builders.js';
-import { CameraSpecSchema, VideoRefSchema, type VideoRef } from './camera.js';
+import { CameraSpecSchema, stripMoveTokens, VideoRefSchema, type VideoRef } from './camera.js';
 import { compileCamera, type CompiledCamera } from './compile.js';
 import { DEFAULT_LADDER, modelById, refFor, TIER_INFO, TIERS, type LadderStep, type ModelSpec, type ProviderId, type Resolution, type ShotMode, type Tier } from './registry.js';
 
@@ -27,7 +27,11 @@ export const CastSchema = z.object({
 }).strict();
 
 export const ShotRequestSchema = z.object({
-  mode: z.enum(['text', 'image', 'reference', 'swap', 'recast']).optional(),
+  mode: z.enum(['text', 'image', 'reference', 'swap', 'recast', 'extend']).optional(),
+  /** Extend: the finished clip to continue (a take, clip or upload in this studio) and which way. suite/extend.ts. */
+  extend: z.object({ video: VideoRefSchema, direction: z.enum(['after', 'before']).default('after'),
+    /** Deliver source + extension as one clip (default) or the new part alone. */
+    join: z.boolean().default(true) }).optional(),
   /** Recast: who in the source clip (`clipId`) becomes which studio character; 1–4 people (suite/recast.ts). */
   cast: z.array(CastSchema).min(1).max(4).optional(),
   title: z.string().max(200).optional(),
@@ -163,13 +167,16 @@ export const extraPerTake = (m: ModelSpec, refImages = 0) => (m.adapter === 'fal
 
 export type ImagePlan = { start?: ImageRef; middle: ImageRef[]; end?: ImageRef; refs: { label: string; role: string; image: ImageRef }[] };
 export type ShotPlan = {
-  tier: Tier; mode: Need['mode'] | 'recast'; modelId: string; provider: ProviderId; ref: string; kind: 't2v' | 'i2v' | 'ref2v' | 'guide'; resolution: string;
+  tier: Tier; mode: Need['mode'] | 'recast' | 'extend'; modelId: string; provider: ProviderId; ref: string; kind: 't2v' | 'i2v' | 'ref2v' | 'guide'; resolution: string;
   seconds: number; aspect: string; audio: boolean; takes: number; seed?: number; prompt: string; negative?: string; params: Record<string, unknown>;
   images: ImagePlan; videos: { video: VideoRef; use: string }[];
   /** The audio reference and whether only its instrumental is sent (performer not speaking). */
   audioRef?: { ref: VideoRef; beatOnly: boolean }; promptNoAudio?: string; speaking: boolean; separationUsd: number; perSec: number; billedPerTake: number; extraPerTake: number; estimate: number;
   camera: Pick_<CompiledCamera, 'moves' | 'notes' | 'usesGuide'>; notes: string[];
   /** Recast only: keep the source sound (put back by stream copy when the model doesn't), and who became whom. */
+  /** Extend only: how the source is used and how the take is assembled (the runner prepares the media). */
+  extend?: { direction: 'after' | 'before'; method: 'clip' | 'reference' | 'frame'; source: { key: string; seconds: number }; join: boolean;
+    /** Send only this many seconds from the source's end (after) or start (before). */ useSeconds: number };
   recast?: { keepAudio: boolean; restoreAudio: boolean; people: { characterId: string; outfitId?: string; who: string; speaking: 'yes' | 'no' | 'unknown' }[] };
 };
 type Pick_<T, K extends keyof T> = { [P in K]: T[P] };
@@ -244,7 +251,8 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
   const videoItems = videos.map((v, i) => ({ kind: v.use, video: named ? token(style, 'video', i + 1) : 'the reference video', use: VIDEO_USE[v.use] ?? VIDEO_USE.motion! }));
   const avoid = !m.negativePrompt && cam.avoid.length ? cam.avoid.map(a => a.charAt(0).toUpperCase() + a.slice(1)).join('. ') + '.' : '';
   const ident = character ? { name: character.name, look: character.look, neverAdd: character.neverAdd } : null;
-  const userWords = [r.prompt, r.direction].map(x => (x ?? '').trim()).filter(Boolean).join(' ');
+  // AI suite (workstream 1): `#Move` text is a chip, not prose (stripMoveTokens).
+  const userWords = stripMoveTokens([r.prompt, r.direction].map(x => (x ?? '').trim()).filter(Boolean).join(' '), cam.moves);
   const { clean, removed } = ident ? sanitizeDirection(userWords, ident, t) : { clean: userWords, removed: [] as string[] };
   if (removed.length) notes.push(`left out of the scene (it would change her look): ${removed.join('; ')}`);
   const audioSent: 'speech' | 'music' | 'none' = audioPlan ? (speaking ? 'speech' : 'music') : 'none';
@@ -291,8 +299,8 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
 }
 
 /** "Video · Shot · HD 1080p · 5 s" (ledger) / "Shot · HD · 1080p" (job label). Never names a model. */
-export const shotLabel = (tier: Tier, resolution: string, kind: 'Shot' | 'Recast' = 'Shot') => `${kind} · ${TIER_INFO[tier].label} · ${/^\d+$/.test(resolution) ? `${resolution}p` : resolution.replace(/P$/, 'p')}`;
-export const shotNote = (tier: Tier, resolution: string, seconds: number[], kind: 'Shot' | 'Recast' = 'Shot') => {
+export const shotLabel = (tier: Tier, resolution: string, kind: 'Shot' | 'Recast' | 'Extend' = 'Shot') => `${kind} · ${TIER_INFO[tier].label} · ${/^\d+$/.test(resolution) ? `${resolution}p` : resolution.replace(/P$/, 'p')}`;
+export const shotNote = (tier: Tier, resolution: string, seconds: number[], kind: 'Shot' | 'Recast' | 'Extend' = 'Shot') => {
   const fmt = (v: number) => String(Math.round(v * 10) / 10);
   const s = seconds.length > 1 ? (seconds.every(v => v === seconds[0]) ? `${seconds.length} × ${fmt(seconds[0]!)} s` : `${fmt(seconds.reduce((a, b) => a + b, 0))} s`) : `${fmt(seconds[0] ?? 0)} s`;
   return `Video · ${kind} ${TIER_INFO[tier].label} ${/^\d+$/.test(resolution) ? `${resolution}p` : resolution.replace(/P$/, 'p')} · ${s}`;

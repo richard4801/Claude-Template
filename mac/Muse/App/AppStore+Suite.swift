@@ -27,8 +27,8 @@ enum SuiteMode: String, CaseIterable, Identifiable {
 
     /// The modes in the sidebar group, in order.
     static let group: [SuiteMode] = [.shot, .swap, .storyboard, .talking, .ugc, .extend, .cameraStage]
-    /// No backend yet: a quiet "Coming soon" tile, never a broken screen.
-    var comingSoon: Bool { self == .talking || self == .ugc || self == .extend }
+    /// No backend yet: a quiet "Coming soon" tile, never a broken screen. (The catalog's `tools` win when it has them.)
+    var comingSoon: Bool { self == .talking || self == .ugc }
 
     /// The composer's tool behind this mode (nil: Storyboard, Camera stage and the hub have their own screens).
     var tool: ComposerTool? {
@@ -146,6 +146,8 @@ final class SuiteState {
     var rigDismissals = RigDismissals()
     var shotJobIds: [String] = []
     var generating = false
+    /// Extend: the VIDEO slot's upload in flight (0…1), nil when none.
+    var extendUpload: Double?
     /// Owner: the Engines sheet (D9).
     var showEngines = false
     var settings: SuiteSettings?
@@ -336,6 +338,7 @@ extension AppStore {
 
     /// Prices for the composer: the current choice and each tier (debounced by the caller's `.task(id:)`).
     func estimateShot() async {
+        if suite.composer.tool == .extend { return await estimateExtend() }
         guard suite.enabled, suite.catalog != nil else { return }
         let req = shotRequest
         suite.rigDismissals.sync(RigChoices(req))
@@ -385,6 +388,7 @@ extension AppStore {
     }
 
     func generateShot() {
+        if suite.composer.tool == .extend { return generateExtend() }
         guard !suite.generating else { return }
         if let p = suite.estimate?.problem {
             showToast(p)
@@ -420,7 +424,7 @@ extension AppStore {
 
     /// The Recent takes row: the suite's newest jobs (any job before the first suite one).
     var suiteRecentJobs: [Job] {
-        let suiteJobs = jobs.filter { $0.request.engine == "suite" }
+        let suiteJobs = jobs.filter { $0.request.engine == "suite" || $0.request.isUpscale }
         return Array((suiteJobs.isEmpty ? jobs : suiteJobs).sorted { $0.createdAt > $1.createdAt }.prefix(6))
     }
 

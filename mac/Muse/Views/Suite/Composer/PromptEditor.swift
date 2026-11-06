@@ -46,7 +46,7 @@ struct ComposerPromptBox: View {
             if store.suite.composer.tokens.isEmpty {
                 HStack(spacing: 0) {
                     Rectangle().fill(t.accent).frame(width: 2, height: 21)
-                    Text(placeholder).font(t.body(16)).foregroundStyle(Color(hex: 0x8C847A)).padding(.leading, 3).lineLimit(2)
+                    Text(placeholder).font(t.body(16)).foregroundStyle(t.muted).padding(.leading, 3).lineLimit(2)
                 }
                 .padding(.top, 4)
                 .allowsHitTesting(false)
@@ -398,9 +398,11 @@ struct TokenTextEditor: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let tv = scroll.documentView as? TokenTextView else { return }
-        if context.coordinator.shown != tokens {
+        // A theme switch re-draws the text and chips too (they carry the old theme's ink and plate colours otherwise).
+        if context.coordinator.shown != tokens || context.coordinator.shownTheme != theme.id {
             let sel = tv.selectedRange()
             context.coordinator.apply(tokens, to: tv)
+            tv.insertionPointColor = NSColor(theme.accent)
             tv.setSelectedRange(NSRange(location: min(sel.location, tv.textStorage?.length ?? 0), length: 0))
         }
     }
@@ -409,6 +411,8 @@ struct TokenTextEditor: NSViewRepresentable {
         var parent: TokenTextEditor
         /// The tokens the view shows now.
         var shown = PromptTokens()
+        /// The theme they were drawn in.
+        var shownTheme: ThemeID?
         private var applying = false
 
         init(_ parent: TokenTextEditor) { self.parent = parent }
@@ -442,6 +446,7 @@ struct TokenTextEditor: NSViewRepresentable {
             tv.textStorage?.setAttributedString(out)
             tv.typingAttributes = plain
             shown = tokens
+            shownTheme = parent.theme.id
         }
 
         /// The tokens the view holds now (chips by key, everything else text).
@@ -531,7 +536,8 @@ struct TokenTextEditor: NSViewRepresentable {
             }()
             let bold = Fonts.nsFont(th.bodyFamily, 14, .semibold) ?? .boldSystemFont(ofSize: 14)
             let mono = Fonts.nsFont(th.monoFamily, 13, .medium) ?? .monospacedSystemFont(ofSize: 13, weight: .medium)
-            let sigil = NSAttributedString(string: isMove ? "#" : "@", attributes: [.font: mono, .foregroundColor: NSColor(th.accent)])
+            // `link`, not the accent: the accent on the chip plate was 3.3:1 in Soft Tactile and 2.0:1 in Creator Pop.
+            let sigil = NSAttributedString(string: isMove ? "#" : "@", attributes: [.font: mono, .foregroundColor: NSColor(th.link)])
             let text = NSAttributedString(string: label, attributes: [.font: bold, .foregroundColor: NSColor(th.ink)])
             let icon: CGFloat = 21, h: CGFloat = 27, gap: CGFloat = 6
             let w = 3 + icon + gap + sigil.size().width + 1 + text.size().width + 9

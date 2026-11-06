@@ -174,7 +174,8 @@ struct EditSuiteClaudePanel: View {
             if tab == 0 {
                 if let id = session.live?.sessionId {
                     // Workstream 2's chat on the owner's Claude Code, about this edit session.
-                    ClaudeChatView(contextKind: "edit", contextId: id, title: session.title)
+                    // No second header: this panel already has one (badge, sharing state, close).
+                    ClaudeChatView(contextKind: "edit", contextId: id, title: session.title, showsHeader: false)
                 } else {
                     noSession
                 }

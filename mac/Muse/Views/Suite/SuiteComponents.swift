@@ -32,11 +32,19 @@ struct SuiteTag: View {
         let c = color ?? t.muted
         Text(text.uppercased())
             .font(t.mono(9.5, .medium)).tracking(0.8)
-            .foregroundStyle(filled ? Color.white : c)
+            .foregroundStyle(filled ? Self.ink(on: c) : c)
             .padding(.horizontal, 6).frame(height: 18)
             .background(Rectangle().fill(filled ? c : .clear))
             .overlay(Rectangle().strokeBorder(c, lineWidth: 1))
             .fixedSize()
+    }
+
+    /// White or near-black on a filled tag, whichever reads (Camera Body's green and amber fills are light).
+    static func ink(on fill: Color) -> Color {
+        guard let n = NSColor(fill).usingColorSpace(.sRGB) else { return .white }
+        func byte(_ v: CGFloat) -> UInt32 { UInt32((min(max(v, 0), 1) * 255).rounded()) }
+        let hex = (byte(n.redComponent) << 16) | (byte(n.greenComponent) << 8) | byte(n.blueComponent)
+        return Contrast.bestInk(on: hex) == 0xFFFFFF ? .white : Color(hex: Contrast.darkInk)
     }
 }
 
@@ -44,7 +52,10 @@ struct SuiteTag: View {
 struct SuiteTestBadge: View {
     @Environment(AppStore.self) private var store
     var body: some View {
-        if store.suite.catalog?.test == true { Pill(SuiteText.testBadge, .warn).help("The server makes free test-pattern renders (SUITE_MODE=mock)") }
+        if store.suite.catalog?.test == true {
+            Pill(SuiteText.testBadge, .warn)
+                .help(store.isOwner ? "The server makes free test-pattern renders (SUITE_MODE=mock)" : "Renders here are free test patterns for now")
+        }
     }
 }
 
@@ -204,7 +215,7 @@ struct SuiteResultPane: View {
                     MuseImage(ref: take?.thumb ?? job?.thumb ?? art)
                 }
             }
-            .overlay(alignment: .topLeading) { SuiteTag(text: "Ready", color: t.good, filled: true).padding(8) }
+            .overlay(alignment: .topLeading) { SuiteTag(text: "Ready", color: t.goodInk, filled: true).padding(8) }
             .overlay(alignment: .topTrailing) {
                 if take?.videoUrl != nil {
                     Button { muted.toggle() } label: {
@@ -223,6 +234,15 @@ struct SuiteResultPane: View {
                     MButton("Share", icon: "square.and.arrow.up", size: .small) { store.openPostSheet(take) }
                 }
                 .padding(.top, 8)
+                // Finish the take: a longer version (Extend) or a sharper one (Upscale).
+                let canExtend = ExtendSource.take(take) != nil
+                if canExtend || take.canUpscale {
+                    HStack(spacing: 6) {
+                        if canExtend { MButton("Extend", icon: "arrow.right.to.line", size: .small) { store.openExtend(take) } }
+                        if take.canUpscale { UpscaleButton(take: take, size: .small) }
+                    }
+                    .padding(.top, 6)
+                }
             }
         }
     }

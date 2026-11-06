@@ -124,7 +124,8 @@ struct InputSlotTile: View {
     }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: t.cardRadius)
+        // The same corner as the composer's empty slot cards beside it (cardRadius was 28 px in Soft Tactile on a 104 px tile).
+        let shape = RoundedRectangle(cornerRadius: t.imageRadius)
         Button(action: onPick) {
             ZStack(alignment: image != nil ? .bottomLeading : .center) {
                 shape.fill(t.surface)

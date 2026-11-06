@@ -114,9 +114,9 @@ struct ClaudeConnectionsSection: View {
 
     private func line(_ label: String, _ value: String, _ tone: CameraTone) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Circle().fill(tone == .good ? t.good : tone == .warn ? t.warn : tone == .bad ? t.accent : tone == .off ? t.muted : t.line).frame(width: 7, height: 7)
+            Circle().fill(tone == .good ? t.good : tone == .warn ? t.warn : tone == .bad ? t.rec : tone == .off ? t.muted : t.line).frame(width: 7, height: 7)
             Text(label).font(t.body(13, .semibold)).foregroundStyle(t.ink).frame(width: 90, alignment: .leading)
-            Text(value).font(t.body(13)).foregroundStyle(tone == .bad ? t.accent : t.ink).textSelection(.enabled).lineLimit(3)
+            Text(value).font(t.body(13)).foregroundStyle(tone == .bad ? t.rec : t.ink).textSelection(.enabled).lineLimit(3)
             Spacer(minLength: 0)
         }
     }

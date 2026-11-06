@@ -8,6 +8,8 @@ package studio.muse.app.ui.screens.camera
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -173,8 +175,9 @@ fun DirectedModePanel(shotTitle: String, onApply: (String) -> Unit) = OwnerOnly 
             }
             maxWidth >= WIDE -> DirectedCameraPaneContent(ui, now, chatActions(store, c, {}, { connections = true }, apply, useLabel, chat), paneActions(store, chat, null))
             else -> Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (ui.sessions.size > 1) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ui.sessions.take(3).forEach { x -> studio.muse.app.ui.components.Chip(x.title.take(18), x.id == ui.openId, { store.open(x.id) }) }
+                // Whole titles in a row that scrolls (take(18) cut them mid-word: "Kitchen dance · in").
+                if (ui.sessions.size > 1) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ui.sessions.take(3).forEach { x -> studio.muse.app.ui.components.Chip(x.title, x.id == ui.openId, { store.open(x.id) }) }
                 }
                 if (s != null) {
                     SessionHeader(s)

@@ -97,19 +97,21 @@ public struct SwapAddOnPill: Hashable, Sendable, Identifiable {
     public var quality: VideoQuality?
     public var price: Double?
 
-    /// "about $0.67", "Soon", or "—".
+    /// "about $0.67", "Soon", or "—" (Upscale before the take is done: "from $0.19" once it is).
     public var priceText: String {
         if comingSoon || !available { return "Soon" }
+        if quality == nil { return price.map { "from " + Pricing.money($0) } ?? "on the take" }
         return price.map { "about " + Pricing.money($0) } ?? "—"
     }
 }
 
 public enum SwapAddOns {
-    public static func pills(_ f: VideoFeatures, clipSeconds: Double?, takes: Int = 1, lipSync: Bool = false) -> [SwapAddOnPill] {
+    /// `upscaleSeconds`: the finished take's length (Upscale's price is per output second × that), nil before it is done.
+    public static func pills(_ f: VideoFeatures, clipSeconds: Double?, takes: Int = 1, lipSync: Bool = false, upscaleSeconds: Double? = nil) -> [SwapAddOnPill] {
         f.shownAddons.map { a -> SwapAddOnPill in
             let q = a.videoQuality
             let price: Double? = q.map { Pricing.totalCost(RenderSpec.addOn($0, clipSeconds: clipSeconds, takes: takes, lipSync: lipSync)) }
-                ?? a.sizes.filter(\.available).compactMap(\.price).min()
+                ?? a.sizes.compactMap { UpscaleOffer.cost($0, seconds: upscaleSeconds) }.min()
             return SwapAddOnPill(id: a.id, label: a.label, detail: a.shownDetail, available: a.available && !a.comingSoon, comingSoon: a.comingSoon,
                                  quality: q, price: price)
         }

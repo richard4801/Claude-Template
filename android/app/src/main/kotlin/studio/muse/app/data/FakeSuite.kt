@@ -58,7 +58,8 @@ class FakeSuite {
      * The estimate for a shot (server rules): seconds snap to the tier's limits, price = $/s × seconds × takes.
      * [characters]: the studio's characters (recast checks their sheets).
      */
-    fun estimate(r: SuiteShotRequest, owner: Boolean, characters: List<Model>, clipSeconds: Double?): SuiteEstimate {
+    fun estimate(r: SuiteShotRequest, owner: Boolean, characters: List<Model>, clipSeconds: Double?, extendSource: Double? = null): SuiteEstimate {
+        if (r.mode == ExtendRules.MODE || r.extend != null) return extendEstimate(r, owner, extendSource)
         val tier = r.quality ?: "draft"
         val recast = r.mode == "recast" || !r.cast.isNullOrEmpty()
         if (recast) {
@@ -111,6 +112,49 @@ class FakeSuite {
         return base.copy(engine = m?.let { SuiteEngine(it.id, it.name, it.provider, it.ref, resId, it.perSec(resId), seconds, it.licence, it.licence.notice) })
     }
 
+    /**
+     * Extend (server suite/extend.ts): the tier's extend ladder picks the engine for the direction (Draft after = 720p, the
+     * others on the 480p/720p reference engine); the new part's length snaps to that engine's range; price = $/s × seconds
+     * × takes. [sourceSeconds]: the source's length, resolved by the caller (take, clip or upload); null = not in this studio.
+     */
+    fun extendEstimate(r: SuiteShotRequest, owner: Boolean, sourceSeconds: Double?): SuiteEstimate {
+        val ex = r.extend ?: throw ApiException("bad_request", "Extend needs the video to continue (extend.video)")
+        if (ex.video.key == null && ex.video.url == null) throw ApiException("bad_request", "Invalid shot: a video needs key or url")
+        val source = sourceSeconds ?: throw ApiException("bad_request", "That video isn’t in this studio")
+        if (!(source > 0)) throw ApiException("bad_request", "Extend needs the video’s length (extend.video.seconds)")
+        val tier = r.quality ?: "draft"
+        val before = ex.direction == "before"
+        val step = extendStep(tier, before)
+        val wanted = r.duration ?: 5
+        if (source < 0.5 || wanted > step.max) throw ApiException("nothing_fits", "${SuiteRules.tierLabel(tier)} can't extend this clip ${if (before) "backwards" else "forwards"} · try another quality or length")
+        val seconds = wanted.coerceIn(step.min, step.max).toDouble()
+        val takes = r.takes ?: 1
+        val estimate = round2(step.perSec * seconds * takes)
+        val secs = fmtSeconds(seconds)
+        val caps = caps(estimate)
+        val warnings = buildList { if (seconds.toInt() != wanted) add("length set to $secs s (this quality makes ${step.min}–${step.max} s)") }
+        val base = SuiteEstimate(
+            quality = tier, label = "Extend · ${SuiteRules.tierLabel(tier)} · ${step.res}", resolution = step.res, seconds = seconds, takes = takes, mode = ExtendRules.MODE,
+            estimate = estimate, priceLine = "about ${Pricing.money(estimate)} · $secs s${if (takes > 1) " · $takes takes" else ""}",
+            buttonLabel = "Generate · $secs s · ${Pricing.money(estimate)}${if (takes > 1) " · $takes takes" else ""}",
+            ok = caps.ok, code = caps.code, message = caps.message, caps = caps, warnings = warnings, camera = SuiteEstimateCamera(), test = true,
+            speaking = SuiteSpeaking(false, "default"), prompt = if (owner) "Demo prompt · ${r.prompt.ifBlank { if (before) "the action leads naturally into it" else "the action carries on naturally" }}" else "",
+        )
+        if (!owner) return base
+        val m = settings.model(step.model)
+        return base.copy(engine = m?.let { SuiteEngine(it.id, it.name, it.provider, it.ref, step.res, step.perSec, seconds, it.licence, it.licence.notice) })
+    }
+
+    /** The first step of the demo's extend ladder for a tier and direction. */
+    private fun extendStep(tier: String, before: Boolean): ExtendStep = when {
+        tier == "draft" && !before -> EXTEND_STEPS.getValue("wan")
+        tier == "draft" || tier == "standard" -> EXTEND_STEPS.getValue("seedance480")
+        else -> EXTEND_STEPS.getValue("seedance720")
+    }
+
+    /** What each finished take of a job lasts (extend: source + the new part), by job id. */
+    val takeSeconds = mutableMapOf<String, Double>()
+
     /** The rig check (server suite/rigcheck.ts, ported in [RigRules]): swap and recast have none. */
     fun rig(r: SuiteShotRequest): List<SuiteRigWarning> =
         if (r.mode == "swap" || r.mode == "recast" || !r.cast.isNullOrEmpty()) emptyList() else RigRules.check(r.prompt, r.camera, r.speaking == true, camera)
@@ -160,9 +204,12 @@ class FakeSuite {
     }
 
     /** The render job for a shot (the fake pipeline runs it with [SuiteClock]). */
-    fun job(id: String, r: SuiteShotRequest, e: SuiteEstimate, model: Model?, outfit: Outfit?, createdAt: Long): Job {
+    fun job(id: String, r: SuiteShotRequest, e: SuiteEstimate, model: Model?, outfit: Outfit?, createdAt: Long, extendSource: Double? = null): Job {
         if (!e.ok) throw ApiException(e.code ?: "suite_over_job_limit", e.message ?: "Over the studio's limit")
         spentToday += e.estimate
+        // Extend: the take is the whole longer clip (source + the new part, joined); other shots last what they render.
+        takeSeconds[id] = if (e.mode == ExtendRules.MODE) (extendSource ?: 0.0) + e.seconds else e.seconds
+        if (e.mode == ExtendRules.MODE) return job0(id, r.copy(title = r.title ?: "Extend"), e, null, null, createdAt)
         val recast = e.mode == "recast"
         val lead = model ?: return job0(id, r, e, null, null, createdAt)
         return job0(id, r, e, lead, outfit, createdAt).copy(modelId = lead.id, modelName = lead.name, thumb = outfit?.front ?: lead.cover,
@@ -186,12 +233,21 @@ class FakeSuite {
         val RECAST_RES_LABEL = mapOf("draft" to "480p", "standard" to "720p", "hd" to "1080p", "cinema" to "1080p")
         private val RECAST_MODEL = mapOf("draft" to "wan-2.2-animate", "standard" to "kling-o1", "hd" to "h3-max-recast", "cinema" to "h3-max-recast")
         private val RECAST_RES = mapOf("draft" to "480", "standard" to "720p", "hd" to "1080P", "cinema" to "1080P")
+        /** The demo's extend engines (the server's EXTEND_LADDER first steps): resolution, $ per output second with the clip, lengths. */
+        val EXTEND_STEPS = mapOf(
+            "wan" to ExtendStep("wan-2.7", "720p", 0.10, 2, 15),
+            "seedance480" to ExtendStep("seedance-2.5", "480p", 0.4304, 4, 30),
+            "seedance720" to ExtendStep("seedance-2.5", "720p", 0.9676, 4, 30),
+        )
 
         private fun resource(path: String) = FakeSuite::class.java.getResource(path)?.readText() ?: error("missing $path")
         fun round2(v: Double) = (v * 100).roundToInt() / 100.0
         fun fmtSeconds(s: Double) = if (s == floor(s)) s.toInt().toString() else String.format(java.util.Locale.US, "%.1f", s)
     }
 }
+
+/** One step of the demo's extend ladder (owner-only words: [model] never reaches a member). */
+data class ExtendStep(val model: String, val res: String, val perSec: Double, val min: Int, val max: Int)
 
 /** How a suite shot moves in demo mode: per take 45 s + 10 s per output second, scaled by the tier (the server's estimate). */
 object SuiteClock {
