@@ -50,6 +50,22 @@ Spec `plans/claude-editing.md`. Workstream 3: edit sessions plus the editing MCP
 
 `migrateWithLock` skips any migration whose `when` is ≤ the last one applied, so the coordinator merges them in that order. 0013 waits until 0011 and 0012 have landed.
 
+## ⏸ PAUSED (2026-11-06, owner's request)
+All work is paused until the owner resumes it. Production is at `0326558`: composer complete, Claude editing, Edit suite chat, migrations to 0013. Builds: Android APK (37 MB) and Mac Build 135 are on /get. `SUITE_MODE=mock` (free test renders).
+
+Not merged, kept on their branches:
+- **Workstream 1** (`claude/muse-suite-core`): Extend and Upscale. The server and the gpu/worker handler are done; the clients were in progress.
+- **Workstreams 2 and 3:** finished, nothing pending.
+
+When resuming:
+1. Finish and merge Extend and Upscale.
+2. The owner's Mac first-run checklist (`plans/claude-editing.md`).
+3. The real claude.ai connector handshake.
+4. Real-device checks.
+5. Go live with renders.
+6. The owner-approved RunPod step for SeedVR2.
+7. Migrate `railway.json` before 2026-12-01.
+
 ## Status (each session updates its own line)
 - 1 · Video composer follow-ups (2026-11-06) on `claude/muse-suite-core`: Recast tap-a-face (faceCrop + personHint), swap add-on pills, Era decade slider, UGC ad format wheel (`ugcFormats`, `camera.style.format`), @location (`/v1/suite/locations`, **migration 0013 after 0011/0012**), drag-to-reorder tokens, owner engine pin; catalog `tools` (Talking and UGC ad live, Extend coming soon); real Webcam/CCTV/Swirl/Tilt-shift renders; Blender previews bundled (`previews/`, catalog `preview` per move/light/angle); first-run HTTP checks on both apps. Server 359 green; Android 1305 green (release APK 30.7 MB, +9.5 MB previews); Mac CI green (run 42152398143). Next: Extend & upscale backend.
 - 2 · MCP + Blender bridge: Claude editing B–E **merged** into `claude/ecstatic-rubin-2egjfb` from 2c017ba (migration 0011; Mac CI green, server 337, Android app 929 + core 95, MuseCore 368). OAuth 2.1 on /mcp (claude.ai custom connector, PKCE, CIMD + DCR, scopes, no generate:run), Claude chat threads with the Mac's Claude Code on the owner's plan and phone turns relayed to it, one chat component (ClaudeChat / ClaudeChatSheet / ClaudeChatView) for Camera stage and the Edit suite; migration 0011 (when 1793929987100). Previews' render script done; assets are the coordinator's.
