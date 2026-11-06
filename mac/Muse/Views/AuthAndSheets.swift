@@ -127,7 +127,7 @@ struct SSOButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: Space.s2) {
-                Image(systemName: icon).font(.system(size: 14))
+                Ph(icon, 14)
                 Text(title)
             }
         }
@@ -284,7 +284,7 @@ struct PasswordField: View {
                 shown.toggle()
                 if had { DispatchQueue.main.async { focused = true } }
             } label: {
-                Image(systemName: shown ? "eye.slash" : "eye").font(.system(size: 13)).foregroundStyle(t.roles.ink2)
+                Ph(shown ? "eye.slash" : "eye", 13).foregroundStyle(t.roles.ink2)
                     .frame(width: 28, height: 28)
                     .contentShape(Rectangle())
             }

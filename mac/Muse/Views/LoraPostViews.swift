@@ -309,7 +309,7 @@ struct CandidateTile: View {
             .grayscale(c.keep ? 0 : 1)
             .brightness(c.keep ? 0 : -0.35)
             .overlay(alignment: .topTrailing) {
-                Image(systemName: c.keep ? "checkmark" : "xmark").font(.system(size: 10, weight: .semibold))
+                Ph(c.keep ? "checkmark" : "xmark", 10)
                     .foregroundStyle(c.keep ? (t.isD ? Color.white : t.roles.canvas) : Color(hex: 0x111111))
                     .frame(width: 20, height: 20)
                     .background(Circle().fill(c.keep ? t.roles.selection : Color.white))

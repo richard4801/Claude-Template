@@ -143,7 +143,7 @@ struct TitleBar: View {
             Spacer(minLength: 12)
             Button { store.openPalette() } label: {
                 HStack(spacing: Space.s2) {
-                    Image(systemName: "magnifyingglass").font(.system(size: 12))
+                    Ph("magnifyingglass", 12)
                     Text("Search or jump to…").font(t.scale.caption.font)
                     Spacer()
                     Text("⌘K").font(t.scale.micro.font)
@@ -201,7 +201,7 @@ struct TitleBar: View {
                     Divider()
                     Button("Sign out", role: .destructive) { store.signOut() }
                 } label: {
-                    Image(systemName: "person.crop.circle").font(.system(size: 16)).foregroundStyle(t.ink)
+                    Ph("person.crop.circle", 16).foregroundStyle(t.ink)
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
@@ -309,7 +309,7 @@ struct NavRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                Image(systemName: icon).font(.system(size: 14, weight: .regular)).frame(width: 20)
+                Ph(icon, 14).frame(width: 20)
                 if !compact {
                     Text(title).font(t.scale.label.font).lineLimit(1)
                     Spacer(minLength: 4)

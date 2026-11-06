@@ -205,7 +205,7 @@ struct RIconButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemName).font(.system(size: 14, weight: .regular)).foregroundStyle(t.roles.ink)
+            Ph(systemName, 14).foregroundStyle(t.roles.ink)
                 .frame(width: 28, height: 28)
                 .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(hover ? t.roles.field : .clear))
                 .contentShape(Rectangle())
@@ -722,7 +722,7 @@ struct RemovableTag: View {
         HStack(spacing: Space.s1) {
             Text(text).font(t.scale.label.font).foregroundStyle(t.roles.ink)
             Button(action: onRemove) {
-                Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(t.roles.ink2)
+                Ph("xmark", 10).foregroundStyle(t.roles.ink2)
                     .frame(width: 20, height: 20)
                     .contentShape(Rectangle())
             }

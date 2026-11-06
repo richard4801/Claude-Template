@@ -228,7 +228,7 @@ struct GalleryTile: View {
                     ZStack {
                         Circle().fill(picked ? t.roles.selection : .black.opacity(0.3))
                         Circle().strokeBorder(.white, lineWidth: 1.5)
-                        if picked { Image(systemName: "checkmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(t.isD ? .white : t.roles.canvas) }
+                        if picked { Ph("checkmark", 11).foregroundStyle(t.isD ? .white : t.roles.canvas) }
                     }
                     .frame(width: 22, height: 22)
                     .frame(width: 28, height: 28)
