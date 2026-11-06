@@ -191,6 +191,11 @@ interface MuseApi {
     suspend fun uploadSuiteMedia(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit = {}): SuiteMediaRef =
         throw ApiException("unsupported", "Uploading files needs the studio server")
 
+    /** The studio's locations (`@location` in the composer's prompt). */
+    suspend fun suiteLocations(): List<SuiteLocation> = throw ApiException("not_found", "This server doesn't have locations yet")
+    suspend fun createSuiteLocation(req: SuiteLocationCreate): SuiteLocation = throw ApiException("not_found", "This server doesn't have locations yet")
+    suspend fun deleteSuiteLocation(id: String): Unit = throw ApiException("not_found", "This server doesn't have locations yet")
+
     // Developer
     suspend fun setFailNext(fail: Boolean)
 

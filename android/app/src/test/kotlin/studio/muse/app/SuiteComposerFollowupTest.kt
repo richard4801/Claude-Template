@@ -38,6 +38,13 @@ import studio.muse.app.ui.screens.suite.composer.EraScale
 import studio.muse.app.ui.screens.suite.composer.ComposerCatalog
 import studio.muse.app.ui.screens.suite.composer.ComposerChip
 import studio.muse.app.ui.screens.suite.composer.CameraWheels
+import studio.muse.app.data.SuiteLocation
+import studio.muse.app.data.SuiteLocationCreate
+import studio.muse.app.ui.screens.suite.SlotId
+import studio.muse.app.ui.screens.suite.SlotKind
+import studio.muse.app.ui.screens.suite.composer.PromptTokens
+import studio.muse.app.ui.screens.suite.composer.Suggestion
+import studio.muse.app.ui.screens.suite.composer.suggestions
 
 /** The composer's follow-ups (AI suite, workstream 1): tap a face, swap add-ons, the era slider, UGC formats, @location, reorder, the engine pin. */
 class SuiteComposerFollowupTest {
@@ -272,5 +279,76 @@ class SuiteComposerFollowupTest {
         // The request sends it (UGC ad).
         val r = ComposerDraft(tool = ComposerTool.UGC, settings = ComposerSettings(format = "grwm")).request(InputSlots(), SuiteInputs(), RecastDraft())
         assertEquals("grwm", (r.camera as JsonObject)["style"]!!.jsonObject["format"]!!.jsonPrimitive.content)
+    }
+
+    // ---------------------------------------------------------------- 5. @location
+
+    private val loft = SuiteLocation("loc_loft", "Sunlit loft", ImageRef(url = "/uploads/loft.jpg"))
+    private val street = SuiteLocation("loc_street", "Night street", ImageRef(url = "/uploads/street.jpg"))
+
+    @Test fun `a location token reads as its name and goes out as a location reference`() {
+        var t = PromptTokens().withText("She dances in ")
+        t = t.addMention("location", loft.id, loft.name).first
+        val d = ComposerDraft(tokens = t, modelId = SampleData.DEMO)
+        val inputs = SuiteInputs(images = 3)
+        val r = d.request(InputSlots(), inputs, RecastDraft(), locations = listOf(loft, street))
+        assertEquals("She dances in Sunlit loft", r.prompt)
+        val img = r.references!!.images!!.single()
+        assertEquals("location", img.role); assertEquals("Sunlit loft", img.label); assertEquals("/uploads/loft.jpg", img.image.url)
+        // After the slots' own images.
+        val slots = InputSlots().put(SlotId(SlotKind.IMAGE), SlotValue("bag.jpg", image = ImageRef(url = "/uploads/bag.jpg")))
+        val both = d.request(slots, inputs, RecastDraft(), locations = listOf(loft))
+        assertEquals(listOf("product", "location"), both.references!!.images!!.map { it.role })
+        // A location the library no longer has is left out.
+        assertNull(d.request(InputSlots(), inputs, RecastDraft(), locations = emptyList()).references)
+        // UGC ad and Talking take them too; Character swap doesn't.
+        assertEquals("location", d.copy(tool = ComposerTool.UGC).request(InputSlots(), inputs, RecastDraft(), locations = listOf(loft)).references!!.images!!.single().role)
+        assertNull(d.copy(tool = ComposerTool.SWAP).request(InputSlots(), inputs, RecastDraft(clipId = "c"), locations = listOf(loft)).references)
+    }
+
+    @Test fun `locations count against the References limit and are refused when it is full`() {
+        val one = SuiteInputs(images = 1)
+        val d = ComposerDraft(quality = "draft")
+        assertNull(d.locationProblem(InputSlots(), one))
+        assertEquals("Draft doesn't take reference images · try another quality", d.locationProblem(InputSlots(), SuiteInputs()))
+        val withLoft = d.copy(tokens = d.tokens.addMention("location", loft.id, loft.name).first)
+        assertEquals(1, withLoft.referencesUsed(InputSlots(), one))
+        assertEquals("References are full · up to 1 on Draft", withLoft.locationProblem(InputSlots(), one))
+        // The same place again is not a new reference.
+        assertNull(withLoft.locationProblem(InputSlots(), one, id = loft.id))
+        // A filled image slot counts too.
+        val slots = InputSlots().put(SlotId(SlotKind.IMAGE), SlotValue("bag.jpg", image = ImageRef(url = "b")))
+        assertEquals("References are full · up to 1 on Draft", d.locationProblem(slots, one))
+        // If the quality drops, the request never carries more than the limit.
+        val two = withLoft.copy(tokens = withLoft.tokens.addMention("location", street.id, street.name).first)
+        assertEquals(1, two.request(InputSlots(), one, RecastDraft(), locations = listOf(loft, street)).references!!.images!!.size)
+    }
+
+    @Test fun `@ offers characters, outfits and locations, ending with New location`() {
+        val models = SampleData.models()
+        val tr = PromptTokens.activeTrigger("in the @", 8)
+        val list = suggestions(tr, models, emptyList(), fake.camera, false, listOf(loft, street))
+        assertTrue(list.first() is Suggestion.Character)
+        assertEquals(listOf(Suggestion.Place(loft), Suggestion.Place(street), Suggestion.NewPlace), list.takeLast(3))
+        val q = suggestions(PromptTokens.activeTrigger("@night", 6), models, emptyList(), fake.camera, false, listOf(loft, street))
+        assertEquals(listOf(Suggestion.Place(street), Suggestion.NewPlace), q)
+        // # never offers places.
+        assertTrue(suggestions(PromptTokens.activeTrigger("#", 1), models, emptyList(), fake.camera, false, listOf(loft)).none { it is Suggestion.Place })
+    }
+
+    @Test fun `demo mode has two locations and adds, lists and deletes them`() = kotlinx.coroutines.runBlocking {
+        val api = studio.muse.app.data.FakeMuseApi(kotlinx.coroutines.MainScope(), null, speed = 0.0, genDelayMs = 0)
+        val list = api.suiteLocations()
+        assertEquals(2, list.size)
+        assertTrue(list.all { it.image.asset != null && it.name.isNotBlank() })
+        val made = api.createSuiteLocation(SuiteLocationCreate("Rooftop", ImageRef(url = "file:///x.jpg")))
+        assertEquals("Rooftop", api.suiteLocations().first().name)
+        api.deleteSuiteLocation(made.id)
+        assertEquals(2, api.suiteLocations().size)
+        // A server without locations says so (the composer then simply has none).
+        val old = object : studio.muse.app.data.MuseApi by api {
+            override suspend fun suiteLocations(): List<SuiteLocation> = super<studio.muse.app.data.MuseApi>.suiteLocations()
+        }
+        assertEquals("not_found", runCatching { old.suiteLocations() }.exceptionOrNull().let { (it as studio.muse.app.data.ApiException).code })
     }
 }

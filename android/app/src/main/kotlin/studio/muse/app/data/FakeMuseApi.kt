@@ -880,6 +880,13 @@ class FakeMuseApi(
         return SuiteMediaRef(key = "c/demo_${uid()}.$ext")
     }
 
+    override suspend fun suiteLocations() = lock.withLock { suite.locations.toList() }
+    override suspend fun createSuiteLocation(req: SuiteLocationCreate) = lock.withLock {
+        if (req.name.isBlank() || req.name.length > 60) throw ApiException("bad_request", "Name the location (up to 60 characters)")
+        SuiteLocation("loc_" + uid(), req.name.trim(), req.image, now()).also { suite.locations.add(0, it) }
+    }
+    override suspend fun deleteSuiteLocation(id: String) { lock.withLock { suite.locations.removeAll { it.id == id } } }
+
     /** Test hook: put a job in a fixed state (no runner). */
     suspend fun debugPut(job: Job) = lock.withLock {
         jobs.removeAll { it.id == job.id }

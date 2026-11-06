@@ -40,6 +40,23 @@ class SuiteStore(private val c: AppContainer) {
     /** Renders started from the composer this session (newest last): its pane follows them. */
     val shotJobs = MutableStateFlow<List<String>>(emptyList())
     val settings = MutableStateFlow<SuiteSettings?>(null)
+    /** The studio's locations library (`@location`); empty on a server without it. */
+    val locations = MutableStateFlow<List<studio.muse.app.data.SuiteLocation>>(emptyList())
+
+    /** Loads the locations quietly: an older server simply has none. */
+    suspend fun loadLocations() {
+        runCatching { c.repo.api.suiteLocations() }.onSuccess { locations.value = it }
+    }
+
+    /** "+ New location": uploads the photo, then adds it to the library. The new location, or null (with a toast). */
+    suspend fun createLocation(name: String, bytes: ByteArray, mime: String): studio.muse.app.data.SuiteLocation? {
+        val (img, err) = c.repo.attemptInline { uploadImage("${name.take(40)}.jpg", bytes, mime) }
+        if (img == null) { c.repo.toast(err ?: ErrorText.WENT_WRONG); return null }
+        val (loc, err2) = c.repo.attemptInline { createSuiteLocation(studio.muse.app.data.SuiteLocationCreate(name.trim().take(60), img)) }
+        if (loc == null) { c.repo.toast(err2 ?: ErrorText.WENT_WRONG); return null }
+        locations.update { listOf(loc) + it.filter { l -> l.id != loc.id } }
+        return loc
+    }
 
     val owner: Boolean get() = c.repo.state.value.wallet?.owner ?: c.prefs.value.owner
 

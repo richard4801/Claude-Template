@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import studio.muse.app.data.CameraCatalog
 import studio.muse.app.data.Model
 import studio.muse.app.data.Outfit
+import studio.muse.app.data.SuiteLocation
 import studio.muse.app.ui.components.RefImage
 import studio.muse.app.ui.components.T
 import studio.muse.app.ui.components.press
@@ -87,15 +88,22 @@ sealed interface Suggestion {
     data class Character(val model: Model) : Suggestion
     data class Dress(val outfit: Outfit) : Suggestion
     data class Move(val move: studio.muse.app.data.SuiteMoveOption) : Suggestion
+    data class Place(val location: SuiteLocation) : Suggestion
+    /** "+ New location": pick a photo, name it, and it joins the library. */
+    data object NewPlace : Suggestion
 }
 
-/** The suggestions for a trigger: @ = the studio's characters (and the picked one's outfits), # = moves matching the word. */
-fun suggestions(tr: Trigger?, models: List<Model>, outfits: List<Outfit>, cat: CameraCatalog, talkOnly: Boolean): List<Suggestion> {
+/**
+ * The suggestions for a trigger: @ = the studio's characters, the picked one's outfits and the studio's locations, ending
+ * with "+ New location"; # = moves matching the word.
+ */
+fun suggestions(tr: Trigger?, models: List<Model>, outfits: List<Outfit>, cat: CameraCatalog, talkOnly: Boolean, locations: List<SuiteLocation> = emptyList(), places: Boolean = true): List<Suggestion> {
     tr ?: return emptyList()
     val q = tr.query.lowercase()
     return if (tr.char == '@') {
         models.filter { q.isEmpty() || it.name.lowercase().contains(q) }.map { Suggestion.Character(it) } +
-            outfits.filter { q.isEmpty() || it.name.lowercase().contains(q) }.map { Suggestion.Dress(it) }
+            outfits.filter { q.isEmpty() || it.name.lowercase().contains(q) }.map { Suggestion.Dress(it) } +
+            (if (places) locations.filter { q.isEmpty() || it.name.lowercase().contains(q) }.map { Suggestion.Place(it) } + Suggestion.NewPlace else emptyList())
     } else PromptTokens.searchMoves(cat, tr.query).filter { !talkOnly || it.talkSafe }.take(10).map { Suggestion.Move(it) }
 }
 
@@ -107,17 +115,19 @@ fun suggestions(tr: Trigger?, models: List<Model>, outfits: List<Outfit>, cat: C
 fun PromptBox(
     tokens: PromptTokens, placeholder: String, models: List<Model>, outfits: List<Outfit>, cat: CameraCatalog, talkOnly: Boolean,
     onChange: (PromptTokens) -> Unit, onPick: (PromptTokens, Caret, Suggestion) -> PromptTokens?, onToken: (Long) -> Unit, modifier: Modifier = Modifier,
-    minHeight: androidx.compose.ui.unit.Dp = 52.dp, maxHeight: androidx.compose.ui.unit.Dp = 132.dp,
+    minHeight: androidx.compose.ui.unit.Dp = 52.dp, maxHeight: androidx.compose.ui.unit.Dp = 132.dp, locations: List<SuiteLocation> = emptyList(),
+    /** Test hook: the field starts with this caret (an open @ menu in screenshots). */
+    initialCaret: Int? = null,
 ) {
     val m = muse
     val encoded = PromptCodec.encode(tokens)
-    var field by remember { mutableStateOf(TextFieldValue(encoded, TextRange(encoded.length))) }
+    var field by remember { mutableStateOf(TextFieldValue(encoded, TextRange(initialCaret?.coerceIn(0, encoded.length) ?: encoded.length))) }
     // An outside change (a move added from the picker, a preset): take it, caret at the end.
     LaunchedEffect(encoded) { if (field.text != encoded) field = TextFieldValue(encoded, TextRange(encoded.length)) }
     val latest by rememberUpdatedState(tokens)
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val trigger = if (field.selection.collapsed) PromptCodec.triggerAt(field.text, field.selection.start) else null
-    val list = suggestions(trigger, models, outfits, cat, talkOnly)
+    val list = suggestions(trigger, models, outfits, cat, talkOnly, locations)
     val transformation = remember(tokens, m.t.surface2) { TokenTransformation(tokens, m.t.surface2, m.t.ink, m.t.accent) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Box(Modifier.fillMaxWidth().heightIn(min = minHeight, max = maxHeight).padding(vertical = 4.dp)) {
@@ -172,7 +182,10 @@ fun PromptBox(
 private fun SuggestionChip(s: Suggestion, onClick: () -> Unit) {
     val m = muse
     val shape = RoundedCornerShape(if (m.isA) 2.dp else 999.dp)
-    val label = when (s) { is Suggestion.Character -> "@" + s.model.name; is Suggestion.Dress -> "@" + s.outfit.name; is Suggestion.Move -> "#" + s.move.label }
+    val label = when (s) {
+        is Suggestion.Character -> "@" + s.model.name; is Suggestion.Dress -> "@" + s.outfit.name; is Suggestion.Move -> "#" + s.move.label
+        is Suggestion.Place -> "@" + s.location.name; Suggestion.NewPlace -> "+ New location"
+    }
     Row(Modifier.height(48.dp).press(onClick = onClick).semantics(mergeDescendants = true) { role = Role.Button; contentDescription = "Add $label" }, verticalAlignment = Alignment.CenterVertically) {
         Row(Modifier.height(36.dp).clip(shape).background(m.t.surface2).border(1.dp, m.t.line, shape).padding(start = 4.dp, end = 10.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -181,6 +194,8 @@ private fun SuggestionChip(s: Suggestion, onClick: () -> Unit) {
                     is Suggestion.Character -> RefImage(s.model.cover, Modifier.size(28.dp), 20)
                     is Suggestion.Dress -> RefImage(s.outfit.front, Modifier.size(28.dp), 20)
                     is Suggestion.Move -> MovePictogram(s.move.id, s.move.category, Modifier.size(28.dp), ink = m.t.bg, accent = m.t.accent)
+                    is Suggestion.Place -> RefImage(s.location.image, Modifier.size(28.dp), 50)
+                    Suggestion.NewPlace -> T("+", m.type.body.copy(fontSize = 18.sp, fontWeight = FontWeight.Bold), m.t.bg)
                 }
             }
             T(label, m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)

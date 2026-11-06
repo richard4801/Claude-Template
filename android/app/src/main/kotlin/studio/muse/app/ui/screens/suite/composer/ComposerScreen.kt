@@ -123,6 +123,8 @@ fun SuiteComposerScreen(toolId: String? = null) {
     val started by store.shotJobs.collectAsState()
     val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { if (store.catalog.value == null) store.load() }
+    LaunchedEffect(Unit) { store.loadLocations() }
+    val locations by store.locations.collectAsState()
     LaunchedEffect(toolId) { ComposerTool.entries.firstOrNull { it.id == toolId }?.let { t -> if (store.composer.value.tool != t) store.composer.update { it.withTool(t) } } }
     // The clip picked in New video becomes Character swap's / Recast's source.
     LaunchedEffect(video.clip?.id) { video.clip?.id?.let { id -> if (store.recast.value.clipId != id) store.recast.update { it.copy(clipId = id) } } }
@@ -135,7 +137,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
     val ownFlow = if (d.tool == ComposerTool.TALKING) store.talkingSlots else store.ugcSlots
     val own = when (d.tool) { ComposerTool.TALKING -> talkingSlots; ComposerTool.UGC -> ugcSlots; else -> studio.muse.app.ui.screens.suite.InputSlots() }
     val live = d.tool.isLive(catalog)
-    val req = d.request(slots, inputs, recast, own)
+    val req = d.request(slots, inputs, recast, own, locations)
     val problem = d.problem(slots, recast, own)
     // Character swap's add-ons (Edit, Fast · beta) are priced by the add-on estimate (the video studio's), not the ladder's.
     val clipSeconds = recast.clipId?.let { id -> video.clip?.takeIf { it.id == id }?.durationSec ?: if (id == SampleData.SAMPLE_CLIP) SampleData.sampleMeta.durationSec else null }
@@ -222,7 +224,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
     val job = started.lastOrNull()?.let { id -> st.jobs.firstOrNull { it.id == id } }
     val ui = ComposerUi(
         d = d, cat = camCat, catalog = catalog, slots = slots, recast = recast, inputs = inputs, est = est, blocker = blocker, tierEstimates = tierEstimates, live = live, own = own,
-        addons = addonPills, onAddon = ::onAddon,
+        addons = addonPills, onAddon = ::onAddon, locations = locations, refsUsed = d.referencesUsed(slots, inputs, own),
         lead = st.model(d.characterId), clipName = recast.clipId?.let { id -> video.clip?.takeIf { it.id == id }?.name ?: if (id == SampleData.SAMPLE_CLIP) SampleData.sampleMeta.name else "Your clip" },
         models = st.models, outfits = st.outfitsOf(d.characterId),
         update = ::update, open = ::open, onGenerate = ::generate, onSlot = ::onSlot, onClearSlot = { k ->
@@ -239,6 +241,11 @@ fun SuiteComposerScreen(toolId: String? = null) {
                 is Suggestion.Character -> base.addMention("character", sg.model.id, sg.model.name.substringBefore(' '), at)
                 is Suggestion.Dress -> base.addMention("outfit", sg.outfit.id, sg.outfit.name, at)
                 is Suggestion.Move -> base.addMove(sg.move, at)
+                // A location is a reference image: refused when References are full on this quality.
+                is Suggestion.Place -> d.locationProblem(slots, inputs, own, sg.location.id)?.let { base to it } ?: base.addMention("location", sg.location.id, sg.location.name, at)
+                Suggestion.NewPlace -> {
+                    d.locationProblem(slots, inputs, own)?.let { base to it } ?: run { open(ComposerSheet(SheetKind.NEW_LOCATION)); base to null }
+                }
             }
             if (msg != null) c.repo.toast(msg)
             if (t === base) null else { update { it.copy(tokens = t, modelId = t.character?.id ?: it.modelId) }; t }
@@ -266,6 +273,17 @@ fun SuiteComposerScreen(toolId: String? = null) {
                     onPickSlot = { id -> pickFile(id) }, onClearSlot = { id -> store.composerSlots.update { it.clear(id) } },
                     onPickCharacter = { id, o -> pickCharacter(id, o) }, onGenerate = ::generate, onStoryboard = { nav.go(Routes.SUITE_STORYBOARD) },
                     frame = frame, onTapFace = ::tapFace,
+                    onCreateLocation = { name, uri ->
+                        scope.launch {
+                            val media = c.media ?: return@launch c.repo.toast("Couldn't read that photo")
+                            val bytes = media.bytes(uri) ?: return@launch c.repo.toast("Couldn't read that photo")
+                            val loc = store.createLocation(name, bytes, media.mime(uri).takeIf { it.startsWith("image/") } ?: "image/jpeg") ?: return@launch
+                            open(null)
+                            val cur = store.composer.value
+                            if (cur.locationProblem(store.composerSlots.value, inputs, own) == null)
+                                update { it.copy(tokens = it.tokens.addMention("location", loc.id, loc.name).first) }
+                        }
+                    },
                 ))
             }
         }
@@ -297,6 +315,9 @@ class ComposerUi(
     val onSlot: (ToolSlot) -> Unit,
     val onClearSlot: (String) -> Unit,
     val onPick: (PromptTokens, Caret, Suggestion) -> PromptTokens?,
+    /** The studio's locations (`@location`) and the reference images in use (slots + @locations). */
+    val locations: List<studio.muse.app.data.SuiteLocation> = emptyList(),
+    val refsUsed: Int = 0,
     /** Character swap's add-on pills (empty on other tools). */
     val addons: List<AddonPill> = emptyList(),
     val onAddon: (SwapAddon) -> Unit = {},
@@ -425,7 +446,7 @@ private fun ChipsRow(ui: ComposerUi) {
     val m = muse
     val d = ui.d
     val refsMax = SlotKind.IMAGE.capacity(ui.inputs)
-    val refs = ui.slots.values.keys.count { it.kind == SlotKind.IMAGE }
+    val refs = ui.refsUsed
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         d.chips.forEach { chip ->
             val sum = ComposerCatalog.summary(chip, d.settings, ui.cat, refs, refsMax)
@@ -462,7 +483,8 @@ private fun Modifier.dashedBox(c: Color): Modifier = drawBehind {
 private fun Prompt(ui: ComposerUi, modifier: Modifier = Modifier, maxHeight: Dp = 120.dp) {
     PromptBox(ui.d.tokens, ui.d.tool.placeholder, ui.models, ui.outfits, ui.cat, ui.d.tool == ComposerTool.TALKING,
         onChange = { t -> ui.update { it.copy(tokens = t, modelId = if (it.tokens.character != null && t.character == null && it.modelId == it.tokens.character?.id) null else (t.character?.id ?: it.modelId)) } },
-        onPick = ui.onPick, onToken = { k -> ui.open(ComposerSheet(SheetKind.TOKEN, token = k)) }, modifier = modifier.fillMaxWidth(), maxHeight = maxHeight)
+        onPick = ui.onPick, onToken = { k -> ui.open(ComposerSheet(SheetKind.TOKEN, token = k)) }, modifier = modifier.fillMaxWidth(), maxHeight = maxHeight,
+        locations = ui.locations)
 }
 
 @Composable

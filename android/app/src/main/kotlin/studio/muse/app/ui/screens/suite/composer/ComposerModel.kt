@@ -11,6 +11,7 @@ import studio.muse.app.data.JobRequest
 import studio.muse.app.data.VideoDraft
 import studio.muse.app.data.VideoFeatures
 import studio.muse.core.VideoOption
+import studio.muse.app.data.SuiteLocation
 import studio.muse.app.data.SuiteRefAudio
 import studio.muse.app.data.SuiteRefImage
 import studio.muse.app.data.SuiteRefVideo
@@ -179,7 +180,45 @@ data class ComposerDraft(
      * The request Generate sends (and the estimate prices). Shot: the prompt, tokens, chips and bottom bar, plus the input
      * slots the tier takes. Character swap and Recast: the clip and cast (Recast's people), the quality, takes and the Look.
      */
-    fun request(slots: InputSlots, inputs: SuiteInputs, recast: RecastDraft, own: InputSlots = InputSlots()): SuiteShotRequest = when (tool) {
+    fun request(slots: InputSlots, inputs: SuiteInputs, recast: RecastDraft, own: InputSlots = InputSlots(), locations: List<SuiteLocation> = emptyList()): SuiteShotRequest =
+        baseRequest(slots, inputs, recast, own).let { r -> if (tool in PROMPT_TOOLS) withLocations(r, inputs, locations) else r }
+
+    /**
+     * The prompt's @locations as references: `{image, role: "location", label: name}` after the slots' images, never more
+     * than the quality's References limit (`inputs.images`). A location the library no longer has is left out.
+     */
+    fun withLocations(r: SuiteShotRequest, inputs: SuiteInputs, locations: List<SuiteLocation>): SuiteShotRequest {
+        val places = tokens.mentions.filter { it.kind == "location" }.mapNotNull { m -> locations.firstOrNull { it.id == m.id } }
+        if (places.isEmpty()) return r
+        val have = r.references?.images.orEmpty()
+        val room = (SlotKind.IMAGE.capacity(inputs) - have.size).coerceAtLeast(0)
+        val add = places.distinctBy { it.id }.take(room).map { SuiteRefImage(it.image, "location", it.name.take(80)) }
+        if (add.isEmpty()) return r
+        return r.copy(references = (r.references ?: SuiteReferences()).copy(images = have + add))
+    }
+
+    /** Reference images in use: the filled image slots the quality takes, plus the prompt's @locations. */
+    fun referencesUsed(slots: InputSlots, inputs: SuiteInputs, own: InputSlots = InputSlots()): Int {
+        val cap = SlotKind.IMAGE.capacity(inputs)
+        val slotImages = when (tool) {
+            ComposerTool.TALKING, ComposerTool.UGC -> own.values.keys.count { it.kind == SlotKind.IMAGE }
+            else -> slots.values.keys.count { it.kind == SlotKind.IMAGE && it.index < cap }
+        }
+        return slotImages + tokens.mentions.filter { it.kind == "location" }.distinctBy { it.id }.size
+    }
+
+    /** Why another @location can't go in (null = it can): the References limit is `inputs.images`. */
+    fun locationProblem(slots: InputSlots, inputs: SuiteInputs, own: InputSlots = InputSlots(), id: String? = null): String? {
+        if (id != null && tokens.mentions.any { it.kind == "location" && it.id == id }) return null
+        val cap = SlotKind.IMAGE.capacity(inputs)
+        return when {
+            cap == 0 -> "${SuiteRules.tierLabel(quality)} doesn't take reference images · try another quality"
+            referencesUsed(slots, inputs, own) >= cap -> "References are full · up to $cap on ${SuiteRules.tierLabel(quality)}"
+            else -> null
+        }
+    }
+
+    private fun baseRequest(slots: InputSlots, inputs: SuiteInputs, recast: RecastDraft, own: InputSlots): SuiteShotRequest = when (tool) {
         ComposerTool.SWAP -> {
             val person = recast.people.first().copy(characterId = characterId, outfitId = characterOutfit, speaking = speaking)
             recast.copy(people = listOf(person), quality = quality, takes = takes).request().copy(
@@ -213,6 +252,8 @@ data class ComposerDraft(
     companion object {
         /** Presets that start from a product photo rather than a character. */
         val PHOTO_PRESETS = setOf("product_hero")
+        /** Tools with a prompt that takes @ tokens and reference images. */
+        val PROMPT_TOOLS = setOf(ComposerTool.SHOT, ComposerTool.TALKING, ComposerTool.UGC)
         val SHAPES = listOf("9:16", "1:1", "16:9")
     }
 }

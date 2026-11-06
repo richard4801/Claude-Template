@@ -94,6 +94,8 @@ class SheetContext(
     val frame: FrameSource? = null,
     /** Recast: a tap on the first frame → the person's index (null = full). */
     val onTapFace: (android.graphics.Bitmap, Float, Float) -> Int? = { _, _, _ -> null },
+    /** "+ New location": a name and a photo; the screen uploads it and adds it to the library. */
+    val onCreateLocation: (String, android.net.Uri) -> Unit = { _, _ -> },
 ) {
     val cam: CameraCatalog get() = catalog?.camera ?: CameraCatalog()
 }
@@ -167,6 +169,7 @@ fun BoxScope.ComposerSheetHost(sheet: ComposerSheet, x: SheetContext) {
             PickerShell(PromptCodec.chipText(tok), x.wide, x.close, heightFraction = .42f) { TokenBody(tok, x) }
         }
         SheetKind.PEOPLE -> PickerShell("People", x.wide, x.close) { PeopleBody(x) }
+        SheetKind.NEW_LOCATION -> PickerShell("New location", x.wide, x.close, heightFraction = .7f) { NewLocationBody(x) }
     }
 }
 
@@ -539,6 +542,40 @@ private fun ColumnScope.PeopleBody(x: SheetContext) {
                 T("The original sound, put back after the render", m.type.body.copy(fontSize = 12.sp), m.t.muted)
             }
             Toggle(r.keepAudio, { x.updateRecast { it.copy(keepAudio = !it.keepAudio) } })
+        }
+    }
+}
+
+/** "+ New location": pick a photo of the place, name it, Save. It joins the studio's library and the prompt. */
+@Composable
+private fun ColumnScope.NewLocationBody(x: SheetContext) {
+    val m = muse
+    var name by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
+    var photo by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var saving by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    // A failed save (a toast says why) lets the user try again.
+    androidx.compose.runtime.LaunchedEffect(saving) { if (saving) { kotlinx.coroutines.delay(6000); saving = false } }
+    val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { u -> if (u != null) photo = u.toString() }
+    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        T("A photo of the place. Type @ and its name to put it in a shot · it counts as a reference image.", m.type.body.copy(fontSize = 13.sp), m.t.muted)
+        Box(Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(12.dp)).background(m.t.surface).border(1.dp, m.t.line, RoundedCornerShape(12.dp))
+            .press { pick.launch("image/*") }.semantics(mergeDescendants = true) { role = Role.Button; contentDescription = if (photo == null) "Pick a photo" else "Change the photo" },
+            contentAlignment = Alignment.Center) {
+            if (photo != null) RefImage(studio.muse.app.data.ImageRef(url = photo), Modifier.fillMaxWidth().height(180.dp), 50)
+            else Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                SIc("image", 22.dp, m.t.muted); T("Pick a photo", m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), m.t.ink)
+            }
+        }
+        SheetLabel("Name", "${name.length}/60")
+        Box(Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(12.dp)).background(m.t.surface2).padding(horizontal = 16.dp), contentAlignment = Alignment.CenterStart) {
+            androidx.compose.foundation.text.BasicTextField(name, { name = it.take(60) }, Modifier.fillMaxWidth().semantics { contentDescription = "Location name" }, singleLine = true,
+                textStyle = m.type.body.copy(fontSize = 15.sp, color = m.t.ink), cursorBrush = androidx.compose.ui.graphics.SolidColor(m.t.accent),
+                decorationBox = { inner -> if (name.isEmpty()) T("Sunlit loft, Night street…", m.type.body.copy(fontSize = 15.sp), m.t.muted); inner() })
+        }
+        val ok = name.isNotBlank() && photo != null && !saving
+        Box(Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(26.dp)).background(m.t.accent.copy(alpha = if (ok) 1f else .45f))
+            .press(enabled = ok) { saving = true; x.onCreateLocation(name, android.net.Uri.parse(photo)) }.semantics { role = Role.Button }, contentAlignment = Alignment.Center) {
+            T(if (saving) "Saving…" else "Save location", m.type.body.copy(fontSize = 16.sp, fontWeight = FontWeight.Bold), Color(0xFF1A1205), maxLines = 1)
         }
     }
 }

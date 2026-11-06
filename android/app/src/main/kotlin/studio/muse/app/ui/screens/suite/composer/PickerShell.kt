@@ -56,7 +56,7 @@ import studio.muse.app.ui.theme.muse
 // apply instantly: there is no OK button.
 
 /** Which picker is open. [tab] is its sub-step; [token] the prompt token a token sheet edits. */
-enum class SheetKind { CAMERA, STYLE, LOOK, LIGHTING, REFERENCES, SETTINGS, TOOLS, CHARACTER, TOKEN, PEOPLE }
+enum class SheetKind { CAMERA, STYLE, LOOK, LIGHTING, REFERENCES, SETTINGS, TOOLS, CHARACTER, TOKEN, PEOPLE, NEW_LOCATION }
 
 data class ComposerSheet(val kind: SheetKind, val tab: String = "", val token: Long = 0)
 
