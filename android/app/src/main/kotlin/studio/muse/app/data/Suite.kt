@@ -25,6 +25,8 @@ data class SuiteOption(
     val lut: String? = null,
     /** A short looping preview (mp4/webm URL). Until the loops exist, pickers show the still ([render]). */
     val loop: String? = null,
+    /** Lighting and angles: the bundled preview still (`previews/<poster>`). */
+    val preview: SuitePreviewRef? = null,
 ) {
     /** The card's title: the hardware name when it has a render ("Super 35 Digital"), else the label. */
     val title: String get() = name ?: label
@@ -50,7 +52,17 @@ data class SuiteMoveOption(
     val group: String = "",
     /** A short looping preview (mp4/webm URL); until it exists the tile shows a still with a motion arrow. */
     val loop: String? = null,
+    /** The bundled loop and its poster (`previews/moves/<id>.mp4|jpg`); null = the drawn still with an arrow. */
+    val preview: SuitePreviewRef? = null,
 )
+
+/** A bundled composer preview: paths relative to the app's `previews/` assets. */
+@Serializable
+data class SuitePreviewRef(val video: String? = null, val poster: String? = null, val seconds: Double? = null)
+
+/** The Auto tiles' previews (`camera.autoPreviews`). */
+@Serializable
+data class SuiteAutoPreviews(val lighting: SuitePreviewRef? = null)
 
 /** One of the 16 featured moves of the camera bag (UGC first), with its filter tag: ugc / cinematic / energy / subtle. */
 @Serializable
@@ -92,6 +104,7 @@ data class CameraCatalog(
     val emotions: List<String> = emptyList(),
     /** UGC ad: the ad formats (unboxing, review, try_on…), sent as `camera.style.format`. Older catalogs: none. */
     val ugcFormats: List<SuiteOption> = emptyList(),
+    val autoPreviews: SuiteAutoPreviews = SuiteAutoPreviews(),
 ) {
     fun move(id: String?) = moves.firstOrNull { it.id == id }
     fun libraryMove(id: String?) = library.firstOrNull { it.id == id }

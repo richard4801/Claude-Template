@@ -51,7 +51,17 @@ android {
         resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}", "/META-INF/LICENSE*", "/META-INF/NOTICE*")
     }
     sourceSets["main"].assets.srcDir("../../server/api/assets/lookpack") // the look pack (single copy) → assets/looks/…
+    // AI suite: the composer's preview loops and stills (design/previews, rendered in Blender) → assets/previews/…
+    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/composerPreviews"))
 }
+
+// AI suite (workstream 1): copies design/previews (moves, lighting, angles only) into a generated assets dir, so the
+// files have a single committed copy.
+val copyComposerPreviews by tasks.registering(Sync::class) {
+    from("../../design/previews") { include("moves/**", "lighting/**", "angles/**") }
+    into(layout.buildDirectory.dir("generated/composerPreviews/previews"))
+}
+tasks.named("preBuild") { dependsOn(copyComposerPreviews) }
 
 kotlin {
     jvmToolchain(21)

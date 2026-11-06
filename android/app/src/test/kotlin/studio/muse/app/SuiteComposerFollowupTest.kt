@@ -415,4 +415,27 @@ class SuiteComposerFollowupTest {
         // The prompt text follows the order; the moves stay in camera.move.
         assertEquals("walks in slowly Demo", end.promptText())
     }
+
+    // ---------------------------------------------------------------- composer previews (design/previews → assets/previews)
+
+    @Test fun `moves, lighting and angles carry bundled previews, and every file exists`() {
+        val cam = fake.camera
+        val moves = cam.moves.filter { it.preview != null }
+        assertTrue(moves.size >= 39)
+        assertNull(cam.move("motion_blur")?.preview)
+        val dolly = cam.move("dolly_in")!!.preview!!
+        assertEquals("moves/dolly_in.mp4", dolly.video); assertEquals("moves/dolly_in.jpg", dolly.poster)
+        assertEquals("lighting/auto.jpg", cam.autoPreviews.lighting!!.poster)
+        assertTrue(cam.lighting.all { it.preview?.poster?.startsWith("lighting/") == true })
+        assertTrue((cam.heights + cam.shotSizes).all { it.preview?.poster?.startsWith("angles/") == true })
+        // The files the tiles open (the Gradle copy bundles design/previews as assets/previews).
+        val root = listOf(java.io.File("../../design/previews"), java.io.File("../design/previews")).first { it.isDirectory }
+        val paths = moves.flatMap { listOfNotNull(it.preview!!.video, it.preview!!.poster) } + cam.lighting.mapNotNull { it.preview?.poster } +
+            (cam.heights + cam.shotSizes).mapNotNull { it.preview?.poster } + listOfNotNull(cam.autoPreviews.lighting?.poster)
+        val missing = paths.filterNot { java.io.File(root, it).isFile }
+        assertTrue("missing previews: $missing", missing.isEmpty())
+        // An older catalog: no previews, the drawn stills stay.
+        val old = decoder.decodeFromString(studio.muse.app.data.CameraCatalog.serializer(), """{"moves":[{"id":"dolly_in","label":"Dolly in"}],"lighting":[{"id":"window"}]}""")
+        assertNull(old.moves.single().preview); assertNull(old.lighting.single().preview); assertNull(old.autoPreviews.lighting)
+    }
 }

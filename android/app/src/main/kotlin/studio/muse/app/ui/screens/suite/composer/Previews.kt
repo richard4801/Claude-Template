@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
@@ -44,7 +45,61 @@ import kotlin.math.sin
 // battery saver.
 
 /** What a tile shows. [still] is a bundled hardware render; [loop] an optional looping mp4/webm; [draw] a code diagram. */
-data class Preview(val still: String? = null, val loop: String? = null, val draw: PreviewDraw? = null, val swatches: List<String> = emptyList())
+data class Preview(
+    val still: String? = null, val loop: String? = null, val draw: PreviewDraw? = null, val swatches: List<String> = emptyList(),
+    /** A bundled preview still (`assets/previews/<poster>`): shown first, and as the fallback for [video]. */
+    val poster: String? = null,
+    /** A bundled preview loop (`assets/previews/<video>`): plays muted and looping while the tile is on screen. */
+    val video: String? = null,
+)
+
+/** The bundled composer previews (assets/previews, from design/previews), decoded once and scaled down. */
+object PreviewImages {
+    private val cache = android.util.LruCache<String, androidx.compose.ui.graphics.ImageBitmap>(48)
+    fun load(ctx: Context, path: String?, sample: Int = 1): androidx.compose.ui.graphics.ImageBitmap? {
+        if (path.isNullOrBlank()) return null
+        val key = "$path@$sample"
+        cache.get(key)?.let { return it }
+        return runCatching {
+            ctx.assets.open("previews/$path").use { s -> android.graphics.BitmapFactory.decodeStream(s, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }) }?.let {
+                it.asImageBitmap()
+            }
+        }.getOrNull()?.also { cache.put(key, it) }
+    }
+
+    /** Unit tests (Robolectric) can't decode video: the posters show there. */
+    val videoOff: Boolean get() = android.os.Build.FINGERPRINT == "robolectric"
+}
+
+/** A bundled loop, muted and looping, over its poster; it plays only while the tile is composed (on screen). */
+@Composable
+private fun PreviewLoop(path: String, modifier: Modifier) {
+    val ctx = LocalContext.current
+    val player = remember(path) {
+        androidx.media3.exoplayer.ExoPlayer.Builder(ctx).build().apply {
+            setMediaItem(androidx.media3.common.MediaItem.fromUri("asset:///previews/$path"))
+            repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
+            volume = 0f
+            prepare()
+        }
+    }
+    androidx.compose.runtime.DisposableEffect(player) { onDispose { player.release() } }
+    androidx.lifecycle.compose.LifecycleResumeEffect(player) {
+        player.playWhenReady = true
+        onPauseOrDispose { player.pause() }
+    }
+    androidx.compose.ui.viewinterop.AndroidView(
+        factory = { c ->
+            androidx.media3.ui.PlayerView(c).apply {
+                this.player = player
+                useController = false
+                resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+            }
+        },
+        modifier = modifier, update = { it.player = player },
+    )
+}
 
 /** Previews drawn in code: the Auto plate, focal fields of view, the iris, angle and framing diagrams, a move's arrow. */
 sealed interface PreviewDraw {
@@ -73,7 +128,11 @@ const val NEUTRAL_STILL = "light-03-overhead"
 fun PreviewTile(p: Preview, modifier: Modifier = Modifier, overlay: @Composable BoxScope.() -> Unit = {}) {
     val loops = rememberLoopsAllowed()
     Box(modifier.background(Color(0xFF101112))) {
-        when (val d = p.draw) {
+        val ctx = LocalContext.current
+        val poster = remember(p.poster) { PreviewImages.load(ctx, p.poster) }
+        // A bundled preview replaces the drawn still (and the move's arrow); without one, the drawing stays.
+        if (poster != null) androidx.compose.foundation.Image(poster, null, Modifier.matchParentSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+        else when (val d = p.draw) {
             null -> HardwareImage(p.still, Modifier.matchParentSize(), sample = 4)
             PreviewDraw.Auto -> Box(Modifier.matchParentSize().background(Brush.verticalGradient(listOf(Color(0xFF1A1C1E), Color(0xFF111213)))), contentAlignment = Alignment.Center) {
                 SIc("sparkle", 22.dp, Color(0xFF8C8A86))
@@ -99,7 +158,8 @@ fun PreviewTile(p: Preview, modifier: Modifier = Modifier, overlay: @Composable 
             }
             else -> Canvas(Modifier.matchParentSize()) { diagram(d) }
         }
-        if (p.loop != null && loops) StageVideo(p.loop, null, muted = true, modifier = Modifier.matchParentSize())
+        if (p.video != null && poster != null && loops && !PreviewImages.videoOff) PreviewLoop(p.video, Modifier.matchParentSize())
+        else if (p.loop != null && loops && !PreviewImages.videoOff) StageVideo(p.loop, null, muted = true, modifier = Modifier.matchParentSize())
         overlay()
     }
 }

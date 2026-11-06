@@ -157,7 +157,7 @@ fun BoxScope.ComposerSheetHost(sheet: ComposerSheet, x: SheetContext) {
         }
         SheetKind.LIGHTING -> PickerShell("Lighting", x.wide, x.close, onReset = { set { it.reset(ComposerChip.LIGHTING) } }) {
             OptionGrid(ComposerCatalog.visible(cam.lighting), s.lighting, x.wide, { id -> set { it.copy(lighting = id) } }, autoCaption = "Matches the scene",
-                preview = { o, _ -> Preview(o.render, o.loop, PreviewDraw.Light(o.id)) })
+                autoPoster = cam.autoPreviews.lighting?.poster, preview = { o, _ -> Preview(o.render, o.loop, PreviewDraw.Light(o.id), poster = o.preview?.poster) })
         }
         SheetKind.REFERENCES -> PickerShell("References", x.wide, x.close) { ReferencesBody(x) }
         SheetKind.SETTINGS -> PickerShell("Settings", x.wide, x.close, heightFraction = .9f, footer = { SettingsFooter(x) }) { SettingsBody(x) }
@@ -227,11 +227,11 @@ private fun ColumnScope.EraSlider(cam: CameraCatalog, current: String?, wide: Bo
 @Composable
 private fun ColumnScope.OptionGrid(
     list: List<SuiteOption>, current: String?, wide: Boolean, onPick: (String?) -> Unit, header: String? = null, autoCaption: String = "The engine decides",
-    preview: (SuiteOption, Int) -> Preview, autoSwatches: List<String> = emptyList(),
+    preview: (SuiteOption, Int) -> Preview, autoSwatches: List<String> = emptyList(), autoPoster: String? = null,
 ) {
     val sel = current?.let { c -> list.firstOrNull { it.id == c }?.mergedInto ?: c }
     TileGrid(wide, header = header?.let { h -> { T(h, muse.type.body.copy(fontSize = 12.5.sp), muse.t.muted) } }) {
-        item { PickTile("Auto", autoCaption, Preview(draw = PreviewDraw.Auto, swatches = autoSwatches), sel == null, { onPick(null) }) }
+        item { PickTile("Auto", autoCaption, Preview(draw = PreviewDraw.Auto, swatches = autoSwatches, poster = autoPoster), sel == null, { onPick(null) }) }
         items(list.size) { i -> val o = list[i]; PickTile(o.label, o.description, preview(o, i), sel == o.id, { onPick(o.id) }) }
     }
 }
