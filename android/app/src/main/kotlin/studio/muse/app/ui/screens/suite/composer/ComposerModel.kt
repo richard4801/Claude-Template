@@ -95,7 +95,18 @@ data class ComposerDraft(
     val directed: String? = null,
     /** Character swap: an add-on (edit | fast) instead of the quality render; null = the quality ladder. */
     val addon: String? = null,
+    /** Owner only: the engine pinned for this shot (one of the tier's `models`) and its resolution; null = Auto (the ladder). */
+    val engineModel: String? = null,
+    val resolution: String? = null,
 ) {
+    /** The input slots on this quality, or on the pinned engine when the owner pinned one. */
+    fun inputsFor(cat: SuiteCatalog?): SuiteInputs = cat?.tier(quality)?.slotsFor(engineModel) ?: SuiteInputs.NONE
+
+    /** Pins one of the tier's engines (null = Auto). */
+    fun pin(m: studio.muse.app.data.SuiteTierModel?): ComposerDraft = copy(engineModel = m?.model, resolution = m?.resolution?.ifBlank { null })
+
+    /** The Settings row's value: "Auto", or the pinned engine's name (owner only: members' catalogs carry no engines). */
+    fun engineLabel(cat: SuiteCatalog?): String = engineModel?.let { id -> cat?.tier(quality)?.models?.firstOrNull { it.model == id }?.let { m -> m.name.ifBlank { m.model } + (m.resolution.ifBlank { null }?.let { " · $it" } ?: "") } ?: id } ?: "Auto"
     /** The picked add-on of Character swap (null on other tools or on the quality ladder). */
     val swapAddon: SwapAddon? get() = if (tool == ComposerTool.SWAP) SwapAddon.of(addon)?.takeIf { it.option != null } else null
     /** The tool card's name and tagline: the preset's when one was picked, else the tool's. */
@@ -148,7 +159,13 @@ data class ComposerDraft(
     }
 
     /** Keeps the length inside the tier's range after a quality change. */
-    fun fit(cat: SuiteCatalog?): ComposerDraft = lengthRange(cat).let { r -> if (duration in r) this else copy(duration = duration.coerceIn(r)) }
+    fun fit(cat: SuiteCatalog?): ComposerDraft {
+        val r = lengthRange(cat)
+        val sized = if (duration in r) this else copy(duration = duration.coerceIn(r))
+        // A pin that isn't one of this quality's engines (or a catalog without engines, a member's) goes back to Auto.
+        val ok = engineModel == null || cat?.tier(quality)?.models?.any { it.model == engineModel } == true
+        return if (ok) sized else sized.copy(engineModel = null, resolution = null)
+    }
 
     /** Phone bar summary: "8 s · 9:16" and "1 take". */
     val barSummary: Pair<String, String> get() = "$duration s · $aspect" to "$takes take${if (takes > 1) "s" else ""}"
@@ -181,7 +198,9 @@ data class ComposerDraft(
      * slots the tier takes. Character swap and Recast: the clip and cast (Recast's people), the quality, takes and the Look.
      */
     fun request(slots: InputSlots, inputs: SuiteInputs, recast: RecastDraft, own: InputSlots = InputSlots(), locations: List<SuiteLocation> = emptyList()): SuiteShotRequest =
-        baseRequest(slots, inputs, recast, own).let { r -> if (tool in PROMPT_TOOLS) withLocations(r, inputs, locations) else r }
+        baseRequest(slots, inputs, recast, own).let { r ->
+            if (tool in PROMPT_TOOLS) withLocations(r, inputs, locations).copy(engineModel = engineModel, resolution = resolution.takeIf { engineModel != null }) else r
+        }
 
     /**
      * The prompt's @locations as references: `{image, role: "location", label: name}` after the slots' images, never more

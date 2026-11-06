@@ -131,7 +131,8 @@ fun SuiteComposerScreen(toolId: String? = null) {
     val catalog = cat
     if (catalog != null && !catalog.enabled) { SuiteOffScreen(d.tool.title); return }
     val camCat = catalog?.camera ?: studio.muse.app.data.CameraCatalog()
-    val inputs = catalog?.tier(d.quality)?.slots ?: SuiteInputs.NONE
+    // The owner's pinned engine decides the slots (tier.slotsFor); members never have one.
+    val inputs = d.inputsFor(catalog)
     val talkingSlots by store.talkingSlots.collectAsState()
     val ugcSlots by store.ugcSlots.collectAsState()
     val ownFlow = if (d.tool == ComposerTool.TALKING) store.talkingSlots else store.ugcSlots
@@ -149,7 +150,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
     val owner = store.owner || prefs.owner
     val wantTiers = sheet?.kind == SheetKind.SETTINGS || d.collapsed
     val tierEstimates = (catalog?.tiers?.map { it.id } ?: SuiteRules.TIERS).associateWith { t ->
-        rememberEstimate(req.copy(quality = t).takeIf { wantTiers && problem == null && live }, catalog?.enabled == true).first
+        rememberEstimate(req.copy(quality = t, engineModel = null, resolution = null).takeIf { wantTiers && problem == null && live }, catalog?.enabled == true).first
     }
     val uploader = remember(c) { InputSlotUploader(c) }
     val pickFile = rememberInputSlotPicker { id, uri -> scope.launch { uploader.upload(store.composerSlots, id, uri) } }
@@ -224,7 +225,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
     val job = started.lastOrNull()?.let { id -> st.jobs.firstOrNull { it.id == id } }
     val ui = ComposerUi(
         d = d, cat = camCat, catalog = catalog, slots = slots, recast = recast, inputs = inputs, est = est, blocker = blocker, tierEstimates = tierEstimates, live = live, own = own,
-        addons = addonPills, onAddon = ::onAddon, locations = locations, refsUsed = d.referencesUsed(slots, inputs, own),
+        addons = addonPills, onAddon = ::onAddon, owner = owner, locations = locations, refsUsed = d.referencesUsed(slots, inputs, own),
         lead = st.model(d.characterId), clipName = recast.clipId?.let { id -> video.clip?.takeIf { it.id == id }?.name ?: if (id == SampleData.SAMPLE_CLIP) SampleData.sampleMeta.name else "Your clip" },
         models = st.models, outfits = st.outfitsOf(d.characterId),
         update = ::update, open = ::open, onGenerate = ::generate, onSlot = ::onSlot, onClearSlot = { k ->
@@ -318,6 +319,8 @@ class ComposerUi(
     /** The studio's locations (`@location`) and the reference images in use (slots + @locations). */
     val locations: List<studio.muse.app.data.SuiteLocation> = emptyList(),
     val refsUsed: Int = 0,
+    /** The studio owner (the engine pin); members never see engines. */
+    val owner: Boolean = false,
     /** Character swap's add-on pills (empty on other tools). */
     val addons: List<AddonPill> = emptyList(),
     val onAddon: (SwapAddon) -> Unit = {},
@@ -710,6 +713,11 @@ private fun WideBar(ui: ComposerUi) {
         Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             val tiers = ui.catalog?.tiers?.ifEmpty { null }?.map { it.id } ?: SuiteRules.TIERS
             MenuPill("gauge", SuiteRules.tierLabel(d.quality), "Quality", tiers.map { t -> "${SuiteRules.tierLabel(t)} · ${ComposerPrice.short(ui.tierEstimates[t])}" to (t == d.quality) }) { i -> ui.update { it.copy(quality = tiers[i]).fit(ui.catalog) } }
+            val engines = ui.catalog?.tier(d.quality)?.models.orEmpty()
+            if (ui.owner && engines.isNotEmpty() && d.tool in ComposerDraft.PROMPT_TOOLS) {
+                val items = listOf("Auto" to (d.engineModel == null)) + engines.map { e -> (e.name.ifBlank { e.model } + (e.resolution.ifBlank { null }?.let { " · $it" } ?: "")) to (e.model == d.engineModel) }
+                MenuPill("cube", "Engine · ${d.engineLabel(ui.catalog)}", "Engine (owner)", items) { i -> ui.update { it.pin(engines.getOrNull(i - 1)) } }
+            }
             MenuPill("ratio", d.aspect, "Shape", ComposerDraft.SHAPES.map { it to (it == d.aspect) }) { i -> ui.update { it.copy(aspect = ComposerDraft.SHAPES[i]) } }
             val range = d.lengthRange(ui.catalog)
             SliderPill("clock", "${d.duration}s", "Length", d.duration, range) { v -> ui.update { it.copy(duration = v) } }

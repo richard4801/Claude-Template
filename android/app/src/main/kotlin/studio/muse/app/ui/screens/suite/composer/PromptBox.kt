@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -83,6 +85,12 @@ private class TokenTransformation(val tokens: PromptTokens, val chipBg: Color, v
     override fun hashCode() = tokens.hashCode()
 }
 
+/** Shorter than the text field's own long press, so a chip is picked up before text selection starts. */
+private const val LONG_PRESS_MS = 380L
+
+/** Tells "lifted (maybe null)" apart from "timed out" in a timeout. */
+private class Box1<T>(val v: T)
+
 /** A suggestion under the prompt while @ or # is being typed. */
 sealed interface Suggestion {
     data class Character(val model: Model) : Suggestion
@@ -126,6 +134,8 @@ fun PromptBox(
     LaunchedEffect(encoded) { if (field.text != encoded) field = TextFieldValue(encoded, TextRange(encoded.length)) }
     val latest by rememberUpdatedState(tokens)
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    var dragging by remember { mutableStateOf<PromptPart?>(null) }
+    var dragAt by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     val trigger = if (field.selection.collapsed) PromptCodec.triggerAt(field.text, field.selection.start) else null
     val list = suggestions(trigger, models, outfits, cat, talkOnly, locations)
     val transformation = remember(tokens, m.t.surface2) { TokenTransformation(tokens, m.t.surface2, m.t.ink, m.t.accent) }
@@ -138,15 +148,53 @@ fun PromptBox(
                     field = v.copy(text = clean)
                     onChange(PromptCodec.decode(latest, clean))
                 },
-                Modifier.fillMaxWidth().semantics { contentDescription = "Prompt. $placeholder" }.pointerInput(Unit) {
+                Modifier.fillMaxWidth().semantics {
+                    contentDescription = "Prompt. $placeholder"
+                    // TalkBack: each token can move one place left or right (drag to reorder for touch).
+                    customActions = tokens.parts.filter { it !is PromptPart.Text }.flatMap { p ->
+                        val name = PromptCodec.chipText(p)
+                        listOf(
+                            androidx.compose.ui.semantics.CustomAccessibilityAction("Move left · $name") { onChange(PromptCodec.nudge(latest, p.key, -1)); true },
+                            androidx.compose.ui.semantics.CustomAccessibilityAction("Move right · $name") { onChange(PromptCodec.nudge(latest, p.key, 1)); true },
+                        )
+                    }
+                }.pointerInput(Unit) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                        val up = waitForUpOrCancellation(PointerEventPass.Initial) ?: return@awaitEachGesture
-                        val l = layout ?: return@awaitEachGesture
-                        if ((up.position - down.position).getDistance() > 24f) return@awaitEachGesture
-                        val o = l.getOffsetForPosition(up.position)
-                        val d = PromptCodec.display(latest, PromptCodec.encode(latest))
-                        d.chips.firstOrNull { (r, _) -> o in r }?.let { (_, p) -> onToken(p.key) }
+                        val l0 = layout
+                        val d0 = PromptCodec.display(latest, PromptCodec.encode(latest))
+                        val chip = l0?.let { l -> l.getOffsetForPosition(down.position).let { o -> d0.chips.firstOrNull { (r, _) -> o in r }?.second } }
+                        // On a chip: a long press picks it up to drag it to a new place; a tap opens its sheet.
+                        val quick = if (chip != null) withTimeoutOrNull(LONG_PRESS_MS) { Box1(waitForUpOrCancellation(PointerEventPass.Initial)) }
+                            else Box1(waitForUpOrCancellation(PointerEventPass.Initial))
+                        if (quick != null) {
+                            val up = quick.v ?: return@awaitEachGesture
+                            val l = layout ?: return@awaitEachGesture
+                            if ((up.position - down.position).getDistance() > 24f) return@awaitEachGesture
+                            val o = l.getOffsetForPosition(up.position)
+                            val d = PromptCodec.display(latest, PromptCodec.encode(latest))
+                            d.chips.firstOrNull { (r, _) -> o in r }?.let { (_, p) -> onToken(p.key) }
+                            return@awaitEachGesture
+                        }
+                        val held = chip ?: return@awaitEachGesture
+                        dragging = held; dragAt = down.position
+                        while (true) {
+                            val ev = awaitPointerEvent(PointerEventPass.Initial)
+                            val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                            ch.consume()
+                            dragAt = ch.position
+                            if (!ch.pressed) {
+                                val l = layout
+                                if (l != null) {
+                                    val d = PromptCodec.display(latest, PromptCodec.encode(latest))
+                                    val to = d.displayToField(l.getOffsetForPosition(ch.position))
+                                    val next = PromptCodec.moveToken(latest, held.key, to)
+                                    if (next != latest) onChange(next)
+                                }
+                                break
+                            }
+                        }
+                        dragging = null
                     }
                 },
                 textStyle = m.type.body.copy(fontSize = 16.sp, lineHeight = 25.sp, color = m.t.ink),
@@ -160,6 +208,16 @@ fun PromptBox(
                     }
                 },
             )
+        }
+        dragging?.let { p ->
+            val dens = androidx.compose.ui.platform.LocalDensity.current
+            // The picked-up chip follows the finger; it lands where it's let go.
+            Box(Modifier.size(0.dp)) {
+                Box(Modifier.offset { androidx.compose.ui.unit.IntOffset(dragAt.x.toInt() - with(dens) { 30.dp.roundToPx() }, dragAt.y.toInt() - with(dens) { 70.dp.roundToPx() }) }
+                    .clip(RoundedCornerShape(8.dp)).background(m.t.ink).padding(horizontal = 10.dp, vertical = 6.dp)) {
+                    T(PromptCodec.chipText(p), m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), m.t.bg, maxLines = 1)
+                }
+            }
         }
         if (trigger != null && list.isNotEmpty()) {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

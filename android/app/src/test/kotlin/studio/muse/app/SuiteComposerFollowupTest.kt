@@ -45,6 +45,8 @@ import studio.muse.app.ui.screens.suite.SlotKind
 import studio.muse.app.ui.screens.suite.composer.PromptTokens
 import studio.muse.app.ui.screens.suite.composer.Suggestion
 import studio.muse.app.ui.screens.suite.composer.suggestions
+import studio.muse.app.data.SuiteRules
+import studio.muse.app.ui.screens.suite.composer.PromptCodec
 
 /** The composer's follow-ups (AI suite, workstream 1): tap a face, swap add-ons, the era slider, UGC formats, @location, reorder, the engine pin. */
 class SuiteComposerFollowupTest {
@@ -350,5 +352,67 @@ class SuiteComposerFollowupTest {
             override suspend fun suiteLocations(): List<SuiteLocation> = super<studio.muse.app.data.MuseApi>.suiteLocations()
         }
         assertEquals("not_found", runCatching { old.suiteLocations() }.exceptionOrNull().let { (it as studio.muse.app.data.ApiException).code })
+    }
+
+    // ---------------------------------------------------------------- 7. The owner's engine pin
+
+    @Test fun `the owner's engine pin decides the slots and goes out with the shot, and members never have one`() {
+        val owner = decoder.decodeFromString(SuiteCatalog.serializer(), res("suite_catalog_owner"))
+        var d = ComposerDraft(quality = "standard", modelId = SampleData.DEMO)
+        assertEquals("Auto", d.engineLabel(owner))
+        assertEquals(8, d.inputsFor(owner).middle)
+        val ltx = owner.tier("standard")!!.models!!.first { it.model == "ltx-2.3" }
+        d = d.pin(ltx)
+        assertEquals("ltx-2.3", d.engineModel); assertEquals("1080p", d.resolution)
+        // The slots follow the engine: this one takes no references and no middle frames.
+        assertEquals(0, d.inputsFor(owner).images); assertEquals(0, d.inputsFor(owner).middle)
+        assertEquals(owner.tier("standard")!!.slotsFor("ltx-2.3"), d.inputsFor(owner))
+        val shown = ToolSlots.of(ComposerTool.SHOT, d.inputsFor(owner), InputSlots())
+        assertEquals(listOf("character", "start", "end"), shown.map { it.kind })
+        assertTrue(d.engineLabel(owner).endsWith("· 1080p"))
+        val r = d.request(InputSlots(), d.inputsFor(owner), RecastDraft())
+        assertEquals("ltx-2.3", r.engineModel); assertEquals("1080p", r.resolution)
+        // A quality whose engines don't include it goes back to Auto; so does a member's catalog (no engines).
+        assertNull(d.copy(quality = "cinema").fit(owner).engineModel)
+        assertEquals("ltx-2.3", d.copy(quality = "standard").fit(owner).engineModel)
+        val member = SuiteRules.memberSafe(owner)
+        assertNull(d.fit(member).engineModel)
+        assertEquals(member.tier("standard")!!.slots, ComposerDraft(quality = "standard").inputsFor(member))
+        // Auto sends no engine.
+        val auto = d.pin(null).request(InputSlots(), owner.tier("standard")!!.slots, RecastDraft())
+        assertNull(auto.engineModel); assertNull(auto.resolution)
+        // Character swap and Recast never carry a shot engine.
+        assertNull(d.copy(tool = ComposerTool.RECAST).request(InputSlots(), SuiteInputs(), RecastDraft(clipId = "c")).engineModel)
+    }
+
+    // ---------------------------------------------------------------- 6. Drag to reorder tokens
+
+    @Test fun `a dragged token lands where it is dropped, and Move left or right nudges it one place`() {
+        val cat = fake.camera
+        var t = PromptTokens().withText("walks in slowly")
+        t = t.addMention("character", SampleData.DEMO, "Demo", studio.muse.app.ui.screens.suite.composer.Caret(0, 0)).first
+        t = t.addMove(cat.move("dolly_in")!!).first
+        assertEquals("@Demowalks in slowly#Dolly in", t.display())
+        val dolly = t.moves.single()
+        val demo = t.character!!
+        // Drop the move between "walks" and " in" (field offset 1 + 5 = after "walks").
+        val moved = PromptCodec.moveToken(t, dolly.key, 6)
+        assertEquals("@Demowalks#Dolly in in slowly", moved.display())
+        assertEquals(listOf("dolly_in"), moved.moves.map { it.id })
+        // Drop the character at the very end.
+        val end = PromptCodec.moveToken(t, demo.key, PromptCodec.encode(t).length)
+        assertEquals("walks in slowly#Dolly in@Demo", end.display())
+        // Dropped where it is: unchanged.
+        assertSame(t, PromptCodec.moveToken(t, demo.key, 0))
+        assertSame(t, PromptCodec.moveToken(t, demo.key, 1))
+        // An unknown key: unchanged.
+        assertSame(t, PromptCodec.moveToken(t, 999, 3))
+        // TalkBack: Move left / Move right is reorder by one part; at the ends nothing happens.
+        assertEquals("walks in slowly@Demo#Dolly in", PromptCodec.nudge(t, demo.key, 1).display())
+        assertEquals("@Demowalks in slowly#Dolly in", PromptCodec.nudge(t, demo.key, -1).display())
+        assertEquals(t.reorder(dolly.key, 1), PromptCodec.nudge(t, dolly.key, -1))
+        assertSame(t, PromptCodec.nudge(t, dolly.key, 1))
+        // The prompt text follows the order; the moves stay in camera.move.
+        assertEquals("walks in slowly Demo", end.promptText())
     }
 }

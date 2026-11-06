@@ -234,7 +234,7 @@ private fun ColumnScope.OptionGrid(
 @Composable
 private fun ColumnScope.ReferencesBody(x: SheetContext) {
     val m = muse
-    val inputs = x.catalog?.tier(x.d.quality)?.slots ?: studio.muse.app.data.SuiteInputs.NONE
+    val inputs = x.d.inputsFor(x.catalog)
     val kinds = listOf(SlotKind.IMAGE, SlotKind.VIDEO, SlotKind.AUDIO, SlotKind.MIDDLE).filter { it.capacity(inputs) > 0 }
     Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         if (kinds.isEmpty()) T("${SuiteRules.tierLabel(x.d.quality)} doesn't take references · try another quality", m.type.body.copy(fontSize = 14.sp), m.t.muted)
@@ -270,6 +270,23 @@ private fun ColumnScope.SettingsBody(x: SheetContext) {
                 T(if (t.available) ComposerPrice.short(e) else "", m.type.mono.copy(fontSize = 16.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
                 Box(Modifier.width(20.dp)) { if (on) SIc("check", 18.dp, m.t.accent) }
             }
+        }
+        // Owner only: pin an engine of this quality for this shot ("Engine · Auto"). Members never see engines.
+        val engines = x.catalog?.tier(d.quality)?.models.orEmpty()
+        if (x.owner && engines.isNotEmpty() && d.tool in ComposerDraft.PROMPT_TOOLS) {
+            var open by androidx.compose.runtime.remember(d.quality) { androidx.compose.runtime.mutableStateOf(d.engineModel != null) }
+            Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(12.dp)).background(m.t.surface).press { open = !open }
+                .semantics(mergeDescendants = true) { role = Role.Button; contentDescription = "Engine, owner only: ${d.engineLabel(x.catalog)}" }.padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                T("Engine · ${d.engineLabel(x.catalog)}", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, Modifier.weight(1f), maxLines = 1)
+                T("OWNER", m.type.mono.copy(fontSize = 10.sp, letterSpacing = .12.em), m.t.muted, maxLines = 1)
+                SIc(if (open) "chevd" else "chev", 16.dp, m.t.muted)
+            }
+            if (open) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                DarkChip("Auto", d.engineModel == null) { x.update { it.pin(null) } }
+                engines.forEach { e -> DarkChip(e.name.ifBlank { e.model } + (e.resolution.ifBlank { null }?.let { " · $it" } ?: ""), e.model == d.engineModel) { x.update { it.pin(e) } } }
+            }
+            if (open) T("The input slots follow the pinned engine", m.type.tiny, m.t.muted)
         }
         SheetLabel("Shape", modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -463,6 +480,15 @@ private fun ColumnScope.TokenBody(tok: PromptPart, x: SheetContext) {
         } else if (tok is PromptPart.Mention && tok.kind == "character") {
             Row(Modifier.heightIn(min = 48.dp).press { x.open(ComposerSheet(SheetKind.CHARACTER)) }, verticalAlignment = Alignment.CenterVertically) {
                 T("Change character", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink)
+            }
+        }
+        // Reorder without dragging: one place left or right (long-press and drag in the prompt does the same).
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            listOf(-1 to "Move left", 1 to "Move right").forEach { (by, label) ->
+                Box(Modifier.weight(1f).height(48.dp).clip(RoundedCornerShape(24.dp)).background(m.t.surface2)
+                    .press { x.update { it.copy(tokens = PromptCodec.nudge(it.tokens, tok.key, by)) } }.semantics { role = Role.Button }, contentAlignment = Alignment.Center) {
+                    T(label, m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
+                }
             }
         }
         Spacer(Modifier.weight(1f))
