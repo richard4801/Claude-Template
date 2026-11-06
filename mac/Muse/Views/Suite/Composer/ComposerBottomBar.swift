@@ -408,7 +408,7 @@ struct PricingLink: View {
     var body: some View {
         Button { open.toggle() } label: {
             if compact {
-                Image(systemName: "questionmark.circle").font(.system(size: 15)).foregroundStyle(t.muted).frame(width: 26, height: 34).contentShape(Rectangle())
+                Image(systemName: "questionmark.circle").font(.system(size: 15)).foregroundStyle(t.muted).frame(width: 28, height: 34).contentShape(Rectangle())
             } else {
                 Text("How is this priced?").font(t.body(12)).foregroundStyle(t.ink).underline(color: t.muted).lineLimit(1).fixedSize()
             }
