@@ -403,6 +403,11 @@ class MuseRepository(
         if (j != null) { _state.update { s -> s.copy(jobs = s.jobs.upsert(j) { it.id == j.id }.sortedByDescending { it.createdAt }) }; refreshBalance() }
     }
 
+    /** AI suite · Photo tool (workstream 3): the stills come back as takes, straight into the library. */
+    suspend fun createPhotos(req: PhotoRequest) = attemptInline { createPhotos(req) }.also { (r, _) ->
+        if (r != null) { _state.update { s -> s.copy(takes = LiveEvents.putTakes(s.takes, r.takes)) }; refreshBalance() }
+    }
+
     suspend fun removeJob(id: String) = attempt { removeJob(id) }?.also { _state.update { s -> s.copy(jobs = s.jobs.filterNot { it.id == id }) } }
 
     suspend fun setTakeStatus(id: String, status: String) = attempt { setTakeStatus(id, status) }?.also { t -> _state.update { s -> s.copy(takes = s.takes.upsert(t) { it.id == t.id }) } }

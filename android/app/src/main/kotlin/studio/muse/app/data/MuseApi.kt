@@ -216,6 +216,10 @@ interface MuseApi {
     suspend fun createSuiteLocation(req: SuiteLocationCreate): SuiteLocation = throw ApiException("not_found", "This server doesn't have locations yet")
     suspend fun deleteSuiteLocation(id: String): Unit = throw ApiException("not_found", "This server doesn't have locations yet")
 
+    // AI suite · Photo tool (workstream 3, plans/api.md "Photo tool"): Photoshoot on the composer. Free estimate; create holds and makes the stills.
+    suspend fun photoEstimate(req: PhotoRequest): PhotoEstimate = throw ApiException("not_found", "This server doesn't have the Photo tool yet")
+    suspend fun createPhotos(req: PhotoRequest): PhotoResult = throw ApiException("not_found", "This server doesn't have the Photo tool yet")
+
     // Developer
     suspend fun setFailNext(fail: Boolean)
 
