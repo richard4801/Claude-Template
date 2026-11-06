@@ -318,7 +318,9 @@ class EditSuiteController(
             EditAction.Undo -> { dragBase = null; if (history?.undo() == true) { labels += "Undo"; editedLocally = true; synced() } }
             EditAction.Redo -> { dragBase = null; if (history?.redo() == true) { labels += "Redo"; editedLocally = true; synced() } }
             is EditAction.ResolveConflict -> sessionActions?.resolveConflict(a.keepLocal)
-            is EditAction.ClaudePanel -> updateSession { it.copy(chatOpen = a.open) }
+            is EditAction.ClaudePanel ->
+                if (u.session == null) { if (a.open) say("Claude joins once this edit is online · check your connection") }
+                else updateSession { it.copy(chatOpen = a.open) }
             is EditAction.UndoEntry -> sessionActions?.undoEntry(a.entryId)
             is EditAction.AnswerPending -> sessionActions?.answerPending(a.id, a.approve)
             EditAction.ClearClaudeNote -> updateSession { it.copy(claudeNote = null) }

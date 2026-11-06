@@ -152,6 +152,8 @@ data class EditSuiteUi(
     val savedTakeId: String? = null,
     /** Edit sessions (workstream 3): the live session shared with Claude; null for members and when offline/local only. */
     val session: SessionUi? = null,
+    /** The owner's editor: the Claude button shows (dimmed until the session is there). */
+    val claudeOwner: Boolean = false,
 ) {
     val duration: Double get() = project?.let(::durationSec) ?: 0.0
     val ready: Boolean get() = phase == SuitePhase.Ready && project != null

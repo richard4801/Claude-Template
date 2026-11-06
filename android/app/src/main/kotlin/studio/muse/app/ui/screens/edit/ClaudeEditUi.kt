@@ -14,8 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,31 +33,8 @@ import studio.muse.app.ui.theme.muse
 /*
  * Edit sessions (workstream 3, plans/claude-editing.md A and E): what the owner sees of Claude in the Edit suite — the
  * "Claude" badge in the history, the "Claude edited this" note, the confirmation sheet for paid helpers Claude asks
- * for, and the Claude panel (a sheet on the phone, a right panel on a tablet) hosting the chat.
+ * for, and workstream 2's chat (a sheet on the phone, a right panel on a tablet) for the edit's session.
  */
-
-/** The session the open editor shares with Claude (for [ClaudeChatHost], whose parameters are only the context). */
-val LocalEditSession = staticCompositionLocalOf<SessionUi?> { null }
-
-/**
- * PLACEHOLDER for workstream 2's shared chat (`studio.muse.app.ui.screens.claude.ClaudeChat` / `ClaudeChatSheet`, same
- * parameters). Until it lands: the session's recent Claude changes and a note. Swapping is one line at each call site
- * ([ClaudePanel] and [ClaudeSheet]).
- */
-@Composable
-fun ClaudeChatHost(contextKind: String, contextId: String, title: String, modifier: Modifier = Modifier) {
-    val m = muse
-    val session = LocalEditSession.current?.takeIf { it.id == contextId && contextKind == "edit" }
-    val entries = session?.claudeEntries.orEmpty().take(12)
-    Column(modifier.semantics { contentDescription = "Claude for $title" }, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SuiteLabel("Claude's recent changes", color = m.t.muted)
-        if (entries.isEmpty()) T("Nothing yet · ask Claude in the Claude app (MUSE connector) to edit this video", m.type.body.copy(fontSize = 13.sp), m.t.muted)
-        entries.forEach { e -> HistoryRow(e, onUndo = null) }
-        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(m.t.r)).background(m.t.surface).padding(12.dp)) {
-            T("Chat with Claude arrives with the next update", m.type.body.copy(fontSize = 13.5.sp), m.t.ink)
-        }
-    }
-}
 
 /** The small "Claude" badge on Claude's history entries. */
 @Composable
@@ -167,42 +143,32 @@ fun ConflictSheet(act: (EditAction) -> Unit, modifier: Modifier = Modifier) {
     }
 }
 
-/** The "Claude" button in the editor's top bar (owner only). */
+/**
+ * The "Claude" button in the editor's top bar (owner only): workstream 2's 48 dp button. Before the edit's session is
+ * there (offline, still connecting) it shows dimmed and says why instead of opening.
+ */
 @Composable
-fun ClaudeButton(on: Boolean, onClick: () -> Unit) {
-    val m = muse
-    val shape = RoundedCornerShape(if (m.isA) 0.dp else if (m.isB) 8.dp else 999.dp)
-    Row(
-        Modifier.height(30.dp).clip(shape).background(if (on) m.t.accent.copy(alpha = .18f) else m.t.surface)
-            .let { if (m.isD) it.border(2.dp, Ink, shape) else it }.press(onClick = onClick).padding(horizontal = 10.dp)
-            .semantics { contentDescription = "Claude" },
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp),
-    ) {
-        EIc("sparkle", 14.dp, if (on) m.t.accent else m.t.ink)
-        T("CLAUDE", m.type.mono.copy(fontSize = 10.5.sp, letterSpacing = .12.em, fontWeight = FontWeight.Medium), if (on) m.t.accent else m.t.ink, maxLines = 1)
-    }
+fun EditClaudeButton(ui: EditSuiteUi, act: (EditAction) -> Unit) {
+    val s = ui.session
+    studio.muse.app.ui.screens.claude.ClaudeButton(
+        onClick = { act(EditAction.ClaudePanel(!(s?.chatOpen ?: false))) },
+        modifier = if (s == null) Modifier.alpha(.45f) else Modifier,
+    )
 }
 
-/** Tablet: the Claude panel on the right (the chat's one panel call site). */
+/** Tablet / wide: workstream 2's chat as the right panel, for this edit's session (the chat's one panel call site). */
 @Composable
-fun ClaudePanel(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier = Modifier) {
+fun EditClaudePanel(ui: EditSuiteUi, modifier: Modifier = Modifier) {
     val s = ui.session ?: return
-    CompositionLocalProvider(LocalEditSession provides s) {
-        SheetFrame("Claude", { act(EditAction.ClaudePanel(false)) }, modifier) {
-            ClaudeChatHost(contextKind = "edit", contextId = s.id, title = ui.title, modifier = Modifier.fillMaxWidth())
-        }
-    }
+    studio.muse.app.ui.screens.claude.ClaudeChatPanel(contextKind = "edit", contextId = s.id, title = ui.title.ifBlank { "Claude" }, width = 380.dp, modifier = modifier)
 }
 
-/** Phone: the Claude sheet (the chat's one sheet call site). */
+/** Phone: workstream 2's chat sheet for this edit's session (the chat's one sheet call site). */
 @Composable
-fun ClaudeSheet(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier = Modifier) {
+fun EditClaudeSheet(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     val s = ui.session ?: return
-    CompositionLocalProvider(LocalEditSession provides s) {
-        SheetFrame("Claude", { act(EditAction.ClaudePanel(false)) }, modifier) {
-            ClaudeChatHost(contextKind = "edit", contextId = s.id, title = ui.title, modifier = Modifier.fillMaxWidth())
-        }
-    }
+    studio.muse.app.ui.screens.claude.ClaudeChatSheet(open = s.chatOpen, onDismiss = { act(EditAction.ClaudePanel(false)) },
+        contextKind = "edit", contextId = s.id, title = ui.title.ifBlank { "Claude" })
 }
 
 /** Kept for layout: a full-size scrim that closes what it covers. */

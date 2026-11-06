@@ -429,6 +429,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
     /** The owner's editor joins the take's edit session (Claude edits it too); members and offline stay local. */
     private fun startSession(sourceTakeId: String, project: EditProject, fromVersion: String?) {
         if (!(c.repo.demo || c.prefs.value.owner)) return
+        controller.update { it.copy(claudeOwner = true) } // the Claude button shows, dimmed until the session is there
         val s = EditSessionSync(viewModelScope, { c.repo.api }, c.repo.live, controller, sessionHost, deviceId(), Build.MODEL ?: "Android phone", looks.paletteIds,
             drafts = FileEditDrafts(File(app.filesDir, "edit-drafts")))
         sync = s
