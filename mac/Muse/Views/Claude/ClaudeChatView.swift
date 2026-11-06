@@ -113,7 +113,7 @@ struct ClaudeChatView: View {
                     }
                     if let v = service.info.version { Text("Claude Code \(v)").font(t.mono(11)).foregroundStyle(t.muted) }
                 }
-                if let e = service.lastError { Text(e).font(t.body(12)).foregroundStyle(t.accent) }
+                if let e = service.lastError { Text(e).font(t.body(12)).foregroundStyle(t.rec).fixedSize(horizontal: false, vertical: true) }
             }
             .padding(18)
         }
@@ -249,9 +249,9 @@ struct ClaudeChatView: View {
             }
             Text(summary).font(t.mono(10, .medium)).lineLimit(1)
         }
-        .foregroundStyle(bad ? t.accent : t.muted)
+        .foregroundStyle(bad ? t.rec : t.muted)
         .padding(.horizontal, 7).frame(height: 22)
-        .overlay(RoundedRectangle(cornerRadius: t.isA ? 0 : 4).strokeBorder(bad ? t.accent : t.line, lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: t.isA ? 0 : 4).strokeBorder(bad ? t.rec : t.line, lineWidth: 1))
         .help(bad ? "\(summary) (\(ClaudeChipText.words(name)))" : ClaudeChipText.words(name))
         .accessibilityLabel(bad ? "\(summary), failed" : summary)
     }
@@ -298,6 +298,7 @@ struct ClaudeChatView: View {
                     .buttonStyle(MuseButtonStyle(kind: .secondary))
                     .frame(width: 44)
                     .help("Stop Claude")
+                    .accessibilityLabel("Stop Claude")
                     .keyboardShortcut(".", modifiers: .command)
                 } else {
                     Button { model.send() } label: {
@@ -307,6 +308,7 @@ struct ClaudeChatView: View {
                     .frame(width: 44)
                     .disabled(empty || model.thread == nil)
                     .help("Send to Claude")
+                    .accessibilityLabel("Send to Claude")
                     .keyboardShortcut(.return, modifiers: .command)
                 }
             }

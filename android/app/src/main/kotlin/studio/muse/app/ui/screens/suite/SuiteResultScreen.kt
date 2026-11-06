@@ -15,6 +15,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.selected
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -92,7 +95,8 @@ fun SuiteResultScreen(jobId: String) {
                     if (store.owner) MenuItem("quality", "Engines (owner)") { nav.go(Routes.SUITE_ENGINES) } else null,
                 ))
             }
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(top = 12.dp, bottom = 100.dp),
+            // Bottom: room for the action row (92 dp up, ~68 dp tall) so the takes strip is never under it.
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(top = 12.dp, bottom = 172.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 if (job == null) { Tiny("This shot isn't here any more."); return@Column }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -101,7 +105,11 @@ fun SuiteResultScreen(jobId: String) {
                     Spacer(Modifier.weight(1f))
                     T(when (pane.phase) { StagePhase.READY -> "Ready" + (job.finishedAt?.let { " · ${ago(it)}" } ?: ""); StagePhase.FAILED -> "Failed · not charged"; else -> pane.badge }, m.type.tiny, m.t.muted, maxLines = 1)
                 }
-                Box(Modifier.fillMaxWidth(.66f).widthIn(max = 280.dp).aspectRatio(9f / 16f).clip(RoundedCornerShape(if (m.isA) 0.dp else 12.dp))) {
+                // Two thirds of a phone's width, at most 300 dp, and short enough that the takes strip shows above the actions
+                // without scrolling (a tablet's would be a 1000 dp tall player that hides the takes).
+                val cfg = LocalConfiguration.current
+                val playerW = minOf(cfg.screenWidthDp * .66f, 300f, (cfg.screenHeightDp - 400f).coerceAtLeast(160f) * 9f / 16f).dp
+                Box(Modifier.width(playerW).aspectRatio(9f / 16f).clip(RoundedCornerShape(if (m.isA) 0.dp else 12.dp))) {
                     if (take != null) {
                         val url = take.videoUrl
                         if (url != null) StageVideo(url, take.thumb, true, Modifier.fillMaxSize()) else RefImage(take.thumb, Modifier.fillMaxSize(), 20)
@@ -150,7 +158,7 @@ fun SuiteResultScreen(jobId: String) {
 private fun TakeThumb(t: Take, on: Boolean, onClick: () -> Unit) {
     val m = muse
     Box(Modifier.size(56.dp, 100.dp).clip(RoundedCornerShape(if (m.isA) 0.dp else 8.dp)).border(if (on) 2.dp else 0.dp, if (on) m.t.ink else Color.Transparent)
-        .press(onClick = onClick).semantics { contentDescription = "Take ${t.index}" }) {
+        .press(onClick = onClick).semantics { contentDescription = "Take ${t.index}"; selected = on }) {
         RefImage(t.thumb, Modifier.fillMaxSize(), 20)
         Box(Modifier.align(Alignment.Center).size(26.dp).clip(RoundedCornerShape(999.dp)).background(Color.White.copy(alpha = .9f)), contentAlignment = Alignment.Center) { Ic("play", 12.dp, Color(0xFF141210)) }
     }
@@ -165,7 +173,9 @@ object TakeActions {
 @Composable
 private fun androidx.compose.foundation.layout.RowScope.Action(icon: String, label: String, enabled: Boolean, onClick: () -> Unit) {
     val m = muse
-    Column(Modifier.weight(1f).heightIn(min = 48.dp).press(enabled = enabled, onClick = onClick).semantics(mergeDescendants = true) { contentDescription = label },
+    // Six actions (Keep, Retake, Edit, Extend, Upscale, Share): an equal share on a phone, at most 72 dp each on a tablet
+    // (WS4 audit), spread by the row's SpaceBetween.
+    Column(Modifier.weight(1f).widthIn(max = 72.dp).heightIn(min = 48.dp).press(enabled = enabled, onClick = onClick).semantics(mergeDescendants = true) { contentDescription = label },
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically)) {
         SIc(icon, 20.dp, if (enabled) m.t.ink else m.t.muted.copy(alpha = .5f))
         T(label.uppercase(), m.type.mono.copy(fontSize = 9.5.sp, letterSpacing = .8.sp), if (enabled) m.t.muted else m.t.muted.copy(alpha = .5f))

@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -83,6 +84,8 @@ class ClaudeChatActions(
     val useApiKey: () -> Unit = {},
     val openConnections: () -> Unit = {},
     val dismissNotice: () -> Unit = {},
+    /** The thread couldn't load: try again. */
+    val retry: () -> Unit = {},
 )
 
 /** A store for one thread, fed by the app's live `claude` events, loaded once. */
@@ -120,6 +123,7 @@ fun ClaudeChat(store: ClaudeChatStore, title: String, modifier: Modifier = Modif
         useApiKey = { store.useApiKey() },
         openConnections = onOpenConnections ?: { connections = true },
         dismissNotice = store::dismissNotice,
+        retry = { store.load() },
     ), modifier)
 }
 
@@ -135,22 +139,37 @@ fun ClaudeChatContent(ui: ClaudeChatUi, title: String, actions: ClaudeChatAction
         ChatHeader(ui, title, horizontal)
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll).padding(horizontal = horizontal, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (!ui.loaded) T("Opening the chat…", m.type.tiny, m.t.muted)
-            else if (ui.error != null && ui.thread == null) T(ui.error, m.type.tiny, m.t.accent)
+            else if (ui.error != null && ui.thread == null) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                T(ui.error, m.type.tiny, errorInk())
+                ChatBtn("Try again", icon = "refresh") { actions.retry() }
+            }
             else if (items.isEmpty()) T(if (ui.contextKind == "edit") "Tell Claude what to change: trims, captions, the look, the music. Every change can be undone."
                 else "Tell Claude what happens in the shot: who moves where, when, and how the camera moves.", m.type.tiny, m.t.muted)
             Transcript(items)
-            ClaudeText.ended(ui.turn)?.let { T(it, m.type.tiny, if (ui.turn?.state == "stopped") m.t.muted else m.t.accent) }
+            ClaudeText.ended(ui.turn)?.let { T(it, m.type.tiny, if (ui.turn?.state == "stopped") m.t.muted else errorInk()) }
             Fallback.decide(ui.status, ui.refusal, ui.contextKind)?.takeIf { ui.turn?.active != true }?.let { OfflineCard(it, ui, actions) }
-            ui.notice?.let { n -> T(n, m.type.tiny, m.t.accent, Modifier.press(onClick = actions.dismissNotice)) }
+            ui.notice?.let { n ->
+                Box(Modifier.heightIn(min = 48.dp).press(onClick = actions.dismissNotice).semantics { role = Role.Button; contentDescription = "$n. Dismiss" }, contentAlignment = Alignment.CenterStart) {
+                    T(n, m.type.tiny, errorInk())
+                }
+            }
         }
         ChatComposer(ui, actions, horizontal)
     }
 }
 
+/**
+ * Error and notice text: the accent where it reads as text (A red, B amber), else the dark warning brown (Soft Tactile's
+ * sage accent is 3.2:1 and Creator Pop's pink 2.2:1 on their backgrounds, under WCAG AA).
+ */
+@Composable
+private fun errorInk(): Color = muse.let { m -> if (m.isA || m.isB) m.t.accent else m.t.warnPillInk }
+
 @Composable
 private fun ChatHeader(ui: ClaudeChatUi, title: String, horizontal: Dp) {
     val m = muse
-    val s = ClaudeText.status(ui)
+    // No plan status yet (opening, or the thread couldn't load): don't claim "answered by your Mac" with a green dot.
+    val s = if (ui.status == null && (!ui.loaded || ui.error != null)) StatusLineText(if (ui.loaded) "Not connected" else "Connecting…", Tone.OFF) else ClaudeText.status(ui)
     Column(Modifier.fillMaxWidth().drawBehind { drawLine(m.t.line, Offset(0f, size.height), Offset(size.width, size.height), 1f) }
         .padding(horizontal = horizontal, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         if (title.isNotBlank()) T(title, m.type.h3, m.t.ink, maxLines = 1)
@@ -211,9 +230,9 @@ private fun AssistantText(a: ChatItem.Assistant, label: Boolean) {
 @Composable
 private fun ToolChipWords(t: ChatItem.Tool) {
     val m = muse
-    val col = if (!t.ok) m.t.accent else if (t.running) m.t.ink else m.t.muted
+    val col = if (!t.ok) errorInk() else if (t.running) m.t.ink else m.t.muted
     val shape = RoundedCornerShape(if (m.isA) 2.dp else 999.dp)
-    Row(Modifier.height(28.dp).clip(shape).background(if (t.running) m.t.surface2 else m.t.surface).border(1.dp, if (t.ok) m.t.line else m.t.accent, shape).padding(horizontal = 10.dp),
+    Row(Modifier.height(28.dp).clip(shape).background(if (t.running) m.t.surface2 else m.t.surface).border(1.dp, if (t.ok) m.t.line else col, shape).padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         if (t.running) Box(Modifier.size(7.dp).clip(CircleShape).background(Color(0xFFE08A1E))) else CamIc(if (t.ok) "cube" else "stop", 12.dp, col)
         T(t.text, m.type.tiny.copy(fontSize = 12.sp), col, maxLines = 1)
@@ -261,7 +280,9 @@ private fun OfflineCard(f: FallbackChoice, ui: ClaudeChatUi, actions: ClaudeChat
         Row(verticalAlignment = Alignment.CenterVertically) {
             T(ClaudeText.CONNECTOR_NOTE + " ", m.type.tiny.copy(fontSize = 12.sp), m.t.muted, Modifier.weight(1f, fill = false))
         }
-        T("Add MUSE in Connections →", m.type.tiny.copy(fontSize = 12.sp), m.link, Modifier.press(onClick = actions.openConnections), weight = FontWeight.SemiBold)
+        Box(Modifier.heightIn(min = 48.dp).press(onClick = actions.openConnections).semantics { role = Role.Button }, contentAlignment = Alignment.CenterStart) {
+            T("Add MUSE in Connections →", m.type.tiny.copy(fontSize = 12.sp), m.link, weight = FontWeight.SemiBold)
+        }
         if (f.useApiKey) T("The studio API key is billed per use.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
         f.note?.let { T(it, m.type.tiny.copy(fontSize = 12.sp), m.t.muted) }
     }
@@ -271,7 +292,7 @@ private fun OfflineCard(f: FallbackChoice, ui: ClaudeChatUi, actions: ClaudeChat
 private fun ChatBtn(text: String, primary: Boolean = false, icon: String? = null, onClick: () -> Unit) {
     val m = muse
     val shape = RoundedCornerShape(if (m.isA) 2.dp else 999.dp)
-    Row(Modifier.height(44.dp).clip(shape).background(if (primary) m.t.cta else m.t.surface).border(1.dp, if (primary) m.t.cta else m.t.line, shape)
+    Row(Modifier.height(48.dp).clip(shape).background(if (primary) m.t.cta else m.t.surface).border(1.dp, if (primary) m.t.cta else m.t.line, shape)
         .press(onClick = onClick).semantics { role = Role.Button }.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         if (icon != null) CamIc(icon, 15.dp, if (primary) m.t.ctaInk else m.t.ink)
         T(text, m.type.body.copy(fontSize = 13.sp), if (primary) m.t.ctaInk else m.t.ink, weight = FontWeight.SemiBold, maxLines = 1)
