@@ -200,6 +200,44 @@ final class EditV2LookTests: XCTestCase {
         XCTAssertEqual(E.lookProblem(E.Look(vignette: E.Vignette(amount: 0.5, softness: 2)), assetKinds: [:], packIds: [])?.field, "vignette.softness")
     }
 
+    func testPaletteLooksNeedTheShippedPalettes() throws {
+        let l = E.Look(lut: "palette:teal_neon", strength: 0.8)
+        XCTAssertEqual(l.paletteId, "teal_neon")
+        XCTAssertNil(l.packId); XCTAssertNil(l.lutAssetId)
+        XCTAssertEqual(E.Look(lut: "pack:film-cine").packId, "film-cine")
+        XCTAssertNil(E.Look(lut: "pack:film-cine").lutAssetId)
+        XCTAssertEqual(E.Look(lut: "cube1").lutAssetId, "cube1")
+        XCTAssertNil(E.Look(lut: "cube1").paletteId)
+        XCTAssertEqual(E.lookProblem(l, assetKinds: [:], packIds: []), E.EditProblem("lut", "unknown look"))
+        XCTAssertNil(E.lookProblem(l, assetKinds: [:], packIds: [], paletteIds: ["teal_neon"]))
+        XCTAssertEqual(E.lookProblem(l, assetKinds: [:], packIds: [], paletteIds: ["other"])?.message, "unknown look")
+        XCTAssertEqual(E.lookProblem(E.Look(lut: "nope"), assetKinds: [:], packIds: [])?.message, #"must be "pack:<id>", "palette:<id>" or a lut asset id"#)
+        // Through validate: the fixture's case, then the same project with the palette shipped.
+        let c = try XCTUnwrap(editorFixture("validation").array.first { $0["name"].string == "palette look unknown without palettes" })
+        let p = try c["project"].decode(E.Project.self)
+        XCTAssertEqual(E.problem(p)?.field, "edits.tracks.0.items.0.look.lut")
+        XCTAssertNil(E.problem(p, paletteIds: ["teal_neon"]))
+    }
+
+    func testSuiteLooksIndexIsReadLeniently() {
+        let s = E.SuiteLooks.decode(Data(#"""
+        {"version":1,"cubeSize":17,"looks":[
+          {"id":"teal_neon","name":"Teal Neon","kind":"palette","file":"teal_neon.cube","lut":"palette:teal_neon","swatches":["#00FFFF"]},
+          {"id":"bare","file":"bare.cube"},
+          {"id":"escape","name":"x","file":"../evil.cube"},
+          {"name":"no id","file":"a.cube"}]}
+        """#.utf8))
+        XCTAssertEqual(s.ids, ["teal_neon", "bare"])
+        XCTAssertEqual(s.looks.map(\.id), ["teal_neon", "bare"])
+        XCTAssertEqual(s.name(of: "teal_neon"), "Teal Neon")
+        XCTAssertEqual(s.name(of: "bare"), "bare")
+        XCTAssertEqual(s.name(of: "missing"), "missing")
+        XCTAssertEqual(s.entry("teal_neon")?.file, "teal_neon.cube")
+        XCTAssertTrue(E.SuiteLooks.decode(Data("not json".utf8)).looks.isEmpty)
+        XCTAssertTrue(E.SuiteLooks.load(directory: URL(fileURLWithPath: "/nonexistent-palettes")).looks.isEmpty)
+        XCTAssertTrue(E.SuiteLooks.load(directory: nil).looks.isEmpty)
+    }
+
     // MARK: GPU tables
 
     /// Trilinear lookup in an RGBA cube (red fastest), as Core Image samples a colour cube.

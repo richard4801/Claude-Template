@@ -83,7 +83,8 @@ struct TransformPanel: View {
     }
 }
 
-/// Filters & LUTs: the 32 bundled looks drawn on the current frame, by category; intensity; .cube import.
+/// Filters & LUTs: the 32 bundled looks drawn on the current frame, by category; intensity; .cube import. A suite look
+/// ("palette:<id>", generated from a palette or film stock) isn't listed: it shows as the current look card.
 struct LooksPanel: View {
     @Environment(\.theme) private var t
     @Bindable var session: EditSuiteSession
@@ -109,6 +110,7 @@ struct LooksPanel: View {
                     tile(id: e.id, name: e.name, image: session.lookThumbs[e.id], on: current == e.id)
                 }
             }
+            if let pid = visual.look?.paletteId { suiteLookCard(name: EditV2LookLibrary.shared.palettes.name(of: pid)) }
             if pack == nil { Note(warn: true, "The look pack is missing from this build.") }
             if let look = visual.look, look.lut != nil {
                 SuiteSlider("Intensity", value: look.strength ?? 1, range: 0...1, format: { "\(Int(($0 * 100).rounded()))%" }) { v in
@@ -122,6 +124,21 @@ struct LooksPanel: View {
             }
         }
         .task(id: session.state.selection) { session.refreshLookThumbs() }
+    }
+
+    /// The clip's suite look: picking a look above swaps it, Remove clears it, the intensity slider works on it as on any look.
+    private func suiteLookCard(name: String) -> some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Current look").font(t.body(11)).foregroundStyle(t.muted)
+                Text("Suite look · \(name)").font(t.body(12.5, .semibold)).foregroundStyle(t.ink).lineLimit(1)
+            }
+            Spacer()
+            SuiteToolButton(title: "Remove", icon: "xmark") { session.applyLook(nil) }
+        }
+        .padding(10)
+        .background(t.surface2)
+        .overlay(Rectangle().strokeBorder(t.ink, lineWidth: 2))
     }
 
     private func tile(id: String?, name: String, image: CGImage?, on: Bool) -> some View {
