@@ -129,7 +129,8 @@ Motion only **answers a user action or shows progress**.
   - Nothing is called "Submit" or "OK".
 - **Names:** one name per thing everywhere (Shot, Take, Character, Cast, Preset, Look). The action label and its confirmation match ("Publish" → "Published").
 - **Errors:** what happened, plus how to fix it. "Something went wrong" stays only as the last fallback, and always comes with "· you weren't charged" when that's true.
-- **Meta lines:** at most one middle-dot line per item (for example "8 s · 9:16 · HD"), never chains of four or more.
+- **Middle dots:** "·" only joins a value pair: "35 mm film · Anamorphic", "UGC · Calm", the media badge "9:16 · 8 s", and the price on the action ("Generate · $0.64"). Anywhere else, write a short phrase ("2 outfits, identity locked") or use two lines. (Owner, 2026-11-06.)
+- **Picker captions** say what you'll see, in 3–5 plain words ("Fine grain, warm halation", "Oval bokeh, flares", "Soft background"), never specs or brand names ("35mm 4-perf · Vision3 500T look", "Speed Panchro"). Two lines at most.
 - **Members:** never see model, provider or GPU names (owner views may).
 
 ## 8. Checked against the slop list (skill §1)
@@ -143,7 +144,7 @@ Motion only **answers a user action or shows progress**.
 | ALL-CAPS tracked section labels | "RECENT TAKES", "CAMERA", "LENS"… | sentence-case headings or nothing (§3) |
 | Monospace as decoration | mono caps on chips ("REFERENCES 0/6") | text face; tabular figures only for numbers |
 | Pills and badges on everything | check badges, counts "5 / 11" on every wheel, "Optional" tags | one selection mark; counts only where they inform |
-| Middle-dot chains | "Identity locked · 2 outfits · …" | at most one short meta line per item |
+| Middle-dot chains | "Identity locked · 2 outfits · …" | "·" only inside a value pair; otherwise a phrase or two lines (§7) |
 | More than 2 typefaces | three per theme (display, body, mono) | two (§3) |
 | Equal weight, no primary | several filled buttons and accents per screen | one `action` per screen; `accent` only marks selection (§2) |
 | Hover glows and fade-slide | glows on D's cards, staggered entrances | motion only on action or progress (§6) |
@@ -154,11 +155,22 @@ Kept on purpose, not by default: Instrument Serif titles in A (it's the theme's 
 ## 9. Redesigned key screens (for the owner's approval)
 `plans/design-direction/` holds three screens redesigned with these rules, in Camera Body (B, dark) and Editorial (A, light). Each is next to today's version.
 - **Home** (phone 390): `home-b.png`, `home-a.png`
-- **Composer** (phone 390, and Mac 1280): `composer-b.png`, `composer-a.png`, `composer-mac-b.png`
+- **Composer** (phone 390, and Mac 1280 and 1000): `composer-b.png`, `composer-a.png`, `composer-mac-b.png`, `composer-mac-1000-b.png`
 - **Picker** (Camera → Setup with the drum, phone 390): `picker-b.png`, `picker-a.png`. The camera bag is always dark (design/README decision 3), so in Editorial the sheet is dark too, with Editorial's type.
 - **Today, for comparison:** `today.png` (Android, from the current screenshot tests).
 - **Regenerate:** `python3 design/direction/render.py`, with `PHOSPHOR` pointing at an unpacked `@phosphor-icons/core` 2.1.1 (`npm pack @phosphor-icons/core`). The imagery is the Blender preview stills and the hardware renders, with no placeholders or people.
 
-The rollout starts after the owner approves.
+**Approved by the owner on 2026-11-06, with four fixes, now in the renders:**
+1. **Mac composer:** the preview fills the height between the title and the prompt bar, and the bar sits right under it, with no empty bands. At 1000 px the bar follows the pill rule: icon plus value, with labels moved into tooltips, and the price on Generate always visible (`composer-mac-1000-b.png`).
+2. **Drums never show an empty neighbour.**
+   - A drum with 5 or more options loops.
+   - Auto is a real option with its own visual: the aperture mark on a `field` disc, the same size as the hardware renders.
+   - Captions follow §7: what you'll see, in two lines at most.
+3. **Middle dots:** only inside value pairs (§7).
+4. **Composer input slots:** each thumbnail has its own label under it (Character, Start frame, End frame), with "Optional" where it applies. The empty "+" slot carries the name of what it adds. The vague hint line "Character, start frame, end frame" is gone.
+
+Also: Photoshoot is now the **Photo** tool (WS3). The Mac sidebar lists Photo with the other tools, with no separate Photoshoot entry.
+
+The rollout starts now.
 - **Part A (WS4):** AI Suite, pickers, Edit suite; the composer last, after WS1's bottom bar and WS3's Photo tool merge.
 - **Part B (WS2):** Home, Library, Cast and models, LoRA, Settings, onboarding, chat.
