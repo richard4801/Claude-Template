@@ -101,4 +101,14 @@ _Started 2026-11-05. Owner-approved designs. Backend: `plans/api.md` "AI suite" 
   - Estimates and jobs carry `look {id, kind, label, lut}`. The toggle is `gradeLook` (default on).
   - Demo mode returns the same Look as the server.
   - The Edit suite applying `palette:<id>` LUTs is pending with workstream 3.
-- **Waiting on the coordinator's go:** the composer and picker layouts.
+- **Composer (built 2026-11-06):**
+  - Android: `ui/screens/suite/composer/**` (ComposerScreen, PickerShell, CameraPicker, ComposerSheets, PromptBox, Previews, ComposerModel).
+  - Mac: `Muse/Views/Suite/Composer/**`, with `MuseCore/Suite/ComposerShell.swift`.
+  - Removed: ShotScreen / CameraBag / SwapScreen and the Mac ShotBuilder / CameraBag / Swap views.
+  - Deferred:
+    - the decade slider for Era
+    - UGC ad's format wheel, plus swap's Edit / Fast / Upscale add-on pills
+    - "tap a face" in Recast
+    - `@location` and drag-to-reorder tokens in the UI
+    - the owner's per-shot engine pin on Mac
+    - the real move and lighting loops (workstream 2)
