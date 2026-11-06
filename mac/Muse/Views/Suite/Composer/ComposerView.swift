@@ -40,7 +40,7 @@ struct ComposerView: View {
             try? await Task.sleep(nanoseconds: 300_000_000)
             if Task.isCancelled { return }
             switch s.composer.tool {
-            case .shot: await store.estimateShot()
+            case .shot, .talking, .ugc: if !store.isComingSoon(s.composer.tool) { await store.estimateShot() }
             case .swap, .recast: await store.estimateSwap()
             default: break
             }
@@ -205,7 +205,7 @@ struct ComposerCard: View {
             Rectangle().fill(t.line).frame(height: 1)
             if let pid = draft.collapsed, draft.tool == .shot {
                 CollapsedComposer(presetId: pid)
-            } else if draft.tool.comingSoon {
+            } else if store.isComingSoon(draft.tool) {
                 comingSoonBody
             } else {
                 fullBody
@@ -270,7 +270,7 @@ struct ComposerCard: View {
         case .recast:
             VStack(alignment: .leading, spacing: 6) {
                 Text("Same take, new cast").font(t.body(16, .semibold))
-                Text("Say who in the clip becomes whom (up to \(store.suite.catalog?.recastMaxPeople ?? 4) people). The motion, camera, framing and sound stay.")
+                Text("Open PEOPLE, click each face on the first frame and pick who replaces them (up to \(store.suite.catalog?.recastMaxPeople ?? 4) people). The motion, camera, framing and sound stay.")
                     .font(t.body(14)).foregroundStyle(t.muted).fixedSize(horizontal: false, vertical: true)
                 if let lines = store.suite.swapEstimate?.cast {
                     ForEach(lines, id: \.self) { l in
@@ -286,6 +286,12 @@ struct ComposerCard: View {
 
     private var comingSoonBody: some View {
         VStack(alignment: .leading, spacing: 14) {
+            // The chips already work (UGC ad's Style has its format wheel), so the settings are ready when the tool is.
+            if !draft.tool.chips.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(draft.tool.chips, id: \.self) { c in SettingChip(chip: c) }
+                }
+            }
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
                     Pill(SuiteText.comingSoon)
@@ -324,13 +330,13 @@ struct ToolCardRow: View {
             .padding(.leading, 6)
             .help("Change the tool or start from a preset")
             Spacer(minLength: 8)
-            if d.tool.comingSoon { SuiteTag(text: SuiteText.comingSoon) }
+            if store.isComingSoon(d.tool) { SuiteTag(text: SuiteText.comingSoon) }
             if d.tool == .shot && d.collapsed == nil && !d.tokens.isEmpty {
                 Button { store.addShotToStoryboard() } label: { Image(systemName: "rectangle.split.3x1") }
                     .buttonStyle(.plain).foregroundStyle(t.muted).help("Add to storyboard")
                     .accessibilityLabel("Add to storyboard")
             }
-            if store.isOwner && !d.tool.comingSoon {
+            if store.isOwner && !store.isComingSoon(d.tool) {
                 Button { store.suite.showEngines = true } label: { Image(systemName: "server.rack") }
                     .buttonStyle(.plain).foregroundStyle(t.muted).help("Engines")
                     .accessibilityLabel("Engines (owner)")
@@ -353,7 +359,8 @@ struct SettingChip: View {
     var body: some View {
         let s = store.suite.composer.settings
         let cat = store.suite.camera
-        let refs = store.suite.composerSlots.slots.values.keys.filter { $0.kind == .image }.count
+        // @locations count against the References limit too.
+        let refs = ComposerLocations.used(store.suite.composer.tokens, slots: store.suite.composerSlots.slots)
         let sum = ComposerCatalog.summary(chip, s, cat, refs: refs, refsMax: SlotKind.image.capacity(store.composerInputs))
         let directed = chip == .camera && store.suite.composer.directed != nil
         Button {
@@ -428,6 +435,11 @@ struct ReferencesPopover: View {
                             .frame(width: 84, height: 84)
                     }
                 }
+            }
+            let places = ComposerLocations.ids(store.suite.composer.tokens).compactMap { id in store.suite.locations.first { $0.id == id }?.name }
+            if !places.isEmpty {
+                Label("@\(places.joined(separator: ", @")) · \(places.count == 1 ? "a location" : "locations") from the prompt", systemImage: "mappin.and.ellipse")
+                    .font(t.body(11.5)).foregroundStyle(t.muted)
             }
             Muted("A product, place, style or prop · images up to 20 MB, clips up to 200 MB.")
         }
