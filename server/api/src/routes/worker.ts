@@ -84,6 +84,12 @@ export async function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx) {
       for (const n of ['lora_photo.safetensors', 'lora_video.safetensors']) await out(n, `l/${j.modelId}/v${j.request.version}/${n}`, 'application/octet-stream');
       params = { token, version: j.request.version, rank: j.request.rank ?? 16, photoMinutes: j.request.photoMinutes, videoMinutes: j.request.videoMinutes,
         captions: Object.fromEntries(kept.map((c, i) => [`train_${String(i + 1).padStart(2, '0')}.jpg`, `${token}, ${c.label}`])) };
+    } else if (kind === 'upscale') {
+      // Upscale (SeedVR2): the finished take in, one upscaled take out at the size's frame (aspect kept, long side fitted).
+      const r = j.request, z = P.UPSCALE_SIZES.find(x => x.id === r.size);
+      await addKey('source.mp4', r.sourceKey ?? null);
+      await out('take_1.mp4', `r/${j.id}/take_1.mp4`, 'video/mp4');
+      params = { engine: 'upscale', size: r.size, width: z?.width, height: z?.height, seconds: r.seconds, source: 'source.mp4', keepAudio: true };
     } else {
       const r = j.request;
       const [clip] = r.clipId ? await ctx.db.select().from(clips).where(eq(clips.id, r.clipId)) : [];
@@ -104,7 +110,7 @@ export async function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx) {
     await ctx.db.update(jobs).set({ outputs: outputs.map(o => ({ name: o.name, key: o.key })) }).where(eq(jobs.id, j.id));
     return {
       job: { id: j.id, kind, params, inputs, outputs: outputs.map(({ name, uploadUrl, contentType }) => ({ name, uploadUrl, contentType })), prompt: j.prompt, seed: j.seed,
-        steps: kind === 'lora-train' ? null : j.request.engine === 'viggle' ? 4 : j.request.steps ?? P.STEPS_DEFAULT },
+        steps: kind === 'lora-train' || kind === 'upscale' ? null : j.request.engine === 'viggle' ? 4 : j.request.steps ?? P.STEPS_DEFAULT },
     };
   }
 
@@ -159,7 +165,9 @@ export async function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx) {
     const load = Math.min(b.gpuSeconds ?? 0, b.stats?.load_s ?? 0);
     const rate = pod.costPerHr || ctx.config.GPU_HOURLY_USD;
     if (load > 0 && !manual && !j.warmSessionId) await pool.chargeWarmup(pod, load, j.id, 'Add-on start-up: model load');
-    await ctx.jobs.complete(j.id, { outputs: reported, gpuSeconds: b.gpuSeconds == null ? undefined : b.gpuSeconds - load, costPerHr: rate, stats: b.stats ?? null });
+    // Upscale is sold at its quoted price per output second (measured), not by GPU time.
+    const fixed = j.request.engine === 'upscale' && typeof j.request.usd === 'number' ? { actualCostUsd: j.request.usd, settleNote: `${P.upscaleLabel(j.request.size)} · ${j.request.seconds} s` } : {};
+    await ctx.jobs.complete(j.id, { outputs: reported, gpuSeconds: b.gpuSeconds == null ? undefined : b.gpuSeconds - load, costPerHr: rate, stats: b.stats ?? null, ...fixed });
     await pool.jobEnded(pod.id, Date.now());
     return reply.status(204).send();
   });

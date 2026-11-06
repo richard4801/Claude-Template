@@ -111,6 +111,12 @@ const Env = z.object({
    * needs "latentsync". Add "viggle" once an H200 image exists, "lora-train" once training is wired.
    */
   RUNPOD_WORKER_CAPABILITIES: z.string().default('h3,latentsync'),
+  /**
+   * Upscale (SeedVR2 on the add-on GPU; plans/app-cleanup.md decision 6), measured per size:
+   * {"1080p": {"usdPerSec": 0.05, "gpuSecPerSec": 20}, "2k": {…}, "4k": {…}} = dollars and GPU seconds per output second.
+   * Empty: Upscale stays "coming soon". A size is offered only when it is priced and the pods can run "upscale".
+   */
+  UPSCALE_PRICES: z.string().default(''),
   /** Optional static worker token for running a worker by hand (dev). Pods get their own per-pod token. */
   WORKER_TOKEN: str(),
   PRESIGN_TTL_SEC: num(3600),

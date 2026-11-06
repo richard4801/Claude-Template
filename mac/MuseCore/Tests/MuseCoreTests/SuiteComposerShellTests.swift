@@ -48,7 +48,7 @@ final class SuiteComposerShellTests: XCTestCase {
         XCTAssertEqual(ComposerTool.swap.chips, [.look])
         XCTAssertEqual(ComposerTool.recast.chips, [.look])
         XCTAssertEqual(ComposerTool.talking.chips, [.camera, .look, .lighting])
-        XCTAssertEqual(ComposerTool.shell.filter(\.comingSoon), [.talking, .ugc, .extend])
+        XCTAssertEqual(ComposerTool.shell.filter(\.comingSoon), [.talking, .ugc])
         XCTAssertEqual(ComposerSlot.clip.caption, "Clip 3–30 s")
         XCTAssertEqual(ComposerSlots.referencesCaption(all), "Up to 6 images")
         XCTAssertEqual(ComposerSlots.referencesCaption(.none), "Not on this quality")

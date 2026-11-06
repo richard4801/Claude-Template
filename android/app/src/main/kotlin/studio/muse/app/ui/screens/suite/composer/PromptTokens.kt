@@ -171,9 +171,8 @@ data class PromptTokens(val parts: List<PromptPart> = emptyList()) {
 
         /** Moves matching a # query (label or id, case-insensitive), the picker's search; [cat]'s Featured first. */
         fun searchMoves(cat: CameraCatalog, query: String): List<SuiteMoveOption> {
-            val q = query.trim().lowercase()
             val featured = cat.library.map { it.id }
-            return cat.moves.filter { q.isEmpty() || it.label.lowercase().contains(q) || it.id.replace('_', ' ').contains(q) }
+            return cat.moves.filter { it.matches(query) }
                 .sortedBy { m -> featured.indexOf(m.id).let { if (it < 0) Int.MAX_VALUE else it } }
         }
     }

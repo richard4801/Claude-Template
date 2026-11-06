@@ -8,7 +8,7 @@ import type { jobs, pods } from '../db/schema.js';
 
 export type JobRow = typeof jobs.$inferSelect;
 export type PodRow = typeof pods.$inferSelect;
-export type WorkKind = 'h3' | 'viggle' | 'lora-train';
+export type WorkKind = 'h3' | 'viggle' | 'lora-train' | 'upscale';
 
 export interface GpuController {
   readonly mode: 'simulated' | 'runpod';
@@ -30,10 +30,10 @@ export function gpuTable(c: Config): Record<WorkKind, string[]> {
   if (cache?.raw === c.GPU_TABLE) return cache.table;
   let t: Record<string, string[]>;
   try { t = JSON.parse(c.GPU_TABLE); } catch { throw new Error('Bad configuration: GPU_TABLE is not valid JSON'); }
-  const table = { h3: t.h3 ?? [], viggle: t.viggle ?? [], 'lora-train': t['lora-train'] ?? t.h3 ?? [] };
+  const table = { h3: t.h3 ?? [], viggle: t.viggle ?? [], 'lora-train': t['lora-train'] ?? t.h3 ?? [], upscale: t.upscale ?? t.h3 ?? [] };
   cache = { raw: c.GPU_TABLE, table };
   return table;
 }
 /** Can a pod with this GPU run this kind of job? */
 export const gpuCanRun = (c: Config, gpuType: string, kind: WorkKind) => gpuTable(c)[kind].includes(gpuType);
-export const workKindOf = (j: JobRow): WorkKind => j.kind === 'lora-train' ? 'lora-train' : j.request.engine === 'viggle' ? 'viggle' : 'h3';
+export const workKindOf = (j: JobRow): WorkKind => j.kind === 'lora-train' ? 'lora-train' : j.request.engine === 'viggle' ? 'viggle' : j.request.engine === 'upscale' ? 'upscale' : 'h3';

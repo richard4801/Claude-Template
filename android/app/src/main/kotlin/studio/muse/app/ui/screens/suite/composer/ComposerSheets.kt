@@ -97,6 +97,11 @@ class SheetContext(
     val onTapFace: (android.graphics.Bitmap, Float, Float) -> Int? = { _, _, _ -> null },
     /** "+ New location": a name and a photo; the screen uploads it and adds it to the library. */
     val onCreateLocation: (String, android.net.Uri) -> Unit = { _, _ -> },
+    /** Extend's VIDEO picker: the studio's takes that can be extended, the key in the slot now, and the two ways to fill it. */
+    val takes: List<studio.muse.app.data.Take> = emptyList(),
+    val extendKey: String? = null,
+    val onPickTake: (studio.muse.app.data.Take) -> Unit = {},
+    val onUploadVideo: () -> Unit = {},
 ) {
     val cam: CameraCatalog get() = catalog?.camera ?: CameraCatalog()
 }
@@ -181,6 +186,52 @@ fun BoxScope.ComposerSheetHost(sheet: ComposerSheet, x: SheetContext) {
         }
         SheetKind.PEOPLE -> PickerShell("People", x.wide, x.close) { PeopleBody(x) }
         SheetKind.NEW_LOCATION -> PickerShell("New location", x.wide, x.close, heightFraction = .7f) { NewLocationBody(x) }
+        SheetKind.VIDEO -> PickerShell("Video", x.wide, x.close, heightFraction = .75f) { VideoBody(x) }
+    }
+}
+
+/** Extend's VIDEO picker: upload a video, or one of the studio's finished takes (newest first). */
+@Composable
+private fun ColumnScope.VideoBody(x: SheetContext) {
+    val m = muse
+    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(12.dp)).background(m.t.surface).press { x.onUploadVideo() }
+            .semantics(mergeDescendants = true) { role = Role.Button; contentDescription = "Upload a video" }.padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.size(32.dp).clip(RoundedCornerShape(16.dp)).background(m.t.surface2), contentAlignment = Alignment.Center) { SIc("plus", 16.dp, m.t.ink) }
+            Column(Modifier.weight(1f)) {
+                T("Upload a video", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
+                T("Up to 60 s · from your phone", m.type.body.copy(fontSize = 12.sp), m.t.muted, maxLines = 1)
+            }
+            SIc("chev", 16.dp, m.t.muted)
+        }
+        SheetLabel("Your takes", if (x.takes.isEmpty()) null else "${x.takes.size}", Modifier.padding(top = 6.dp))
+        if (x.takes.isEmpty()) T("Finished takes show up here · make a shot first, or upload a video.", m.type.body.copy(fontSize = 13.sp), m.t.muted)
+        val cols = if (x.wide) 5 else 3
+        x.takes.chunked(cols).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                row.forEach { t ->
+                    val key = studio.muse.app.data.ExtendRules.keyOf(t, demo = true)
+                    val on = key != null && key == x.extendKey
+                    val secs = t.durationSec?.let { "${studio.muse.app.data.FakeSuite.fmtSeconds(Math.round(it * 10) / 10.0)} s" }
+                    Column(Modifier.weight(1f).press { x.onPickTake(t) }.semantics(mergeDescendants = true) { selected = on; role = Role.Button; contentDescription = "${t.title}, take ${t.index}${secs?.let { ", $it" } ?: ""}" }) {
+                        Box(Modifier.fillMaxWidth().picked(on, m.t.accent)) {
+                            Box(Modifier.fillMaxWidth().aspectRatio(9f / 16f).clip(RoundedCornerShape(10.dp)).background(m.t.surface2)) {
+                                RefImage(t.thumb, Modifier.fillMaxWidth().aspectRatio(9f / 16f), 20)
+                                if (secs != null) Box(Modifier.align(Alignment.BottomEnd).padding(6.dp).background(Color.Black.copy(alpha = .6f)).padding(horizontal = 5.dp, vertical = 1.dp)) {
+                                    T(secs, m.type.mono.copy(fontSize = 10.sp), Color.White, maxLines = 1)
+                                }
+                                if (on) CheckBadge()
+                            }
+                        }
+                        T(t.title, m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), m.t.ink, Modifier.padding(top = 6.dp, start = 3.dp), maxLines = 1)
+                        T("Take ${t.index} · ${t.label}", m.type.body.copy(fontSize = 11.5.sp), m.t.muted, Modifier.padding(start = 3.dp), maxLines = 1)
+                    }
+                }
+                repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
     }
 }
 
@@ -305,19 +356,25 @@ private fun ColumnScope.SettingsBody(x: SheetContext) {
             }
             if (open) T("The input slots follow the pinned engine", m.type.tiny, m.t.muted)
         }
-        SheetLabel("Shape", modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ComposerDraft.SHAPES.forEach { a -> ShapeTile(a, a == d.aspect, Modifier.weight(1f).height(72.dp), dark = true) { x.update { it.copy(aspect = a) } } }
+        // Extend: the shape, sound and speaking come from the source clip; the length is the new part's.
+        val extend = d.tool == ComposerTool.EXTEND
+        if (!extend) {
+            SheetLabel("Shape", modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ComposerDraft.SHAPES.forEach { a -> ShapeTile(a, a == d.aspect, Modifier.weight(1f).height(72.dp), dark = true) { x.update { it.copy(aspect = a) } } }
+            }
         }
         val range = d.lengthRange(x.catalog)
-        SheetLabel("Length", "${d.duration} s", Modifier.padding(top = 14.dp))
+        SheetLabel(if (extend) "New part" else "Length", if (extend) "+${d.duration} s" else "${d.duration} s", Modifier.padding(top = 14.dp))
         MuseSlider(d.duration.coerceIn(range), range.first, range.last, { v -> x.update { it.copy(duration = v) } })
         Row(Modifier.fillMaxWidth()) { T("${range.first} s", m.type.mono.copy(fontSize = 12.sp), m.t.muted, Modifier.weight(1f)); T("${range.last} s", m.type.mono.copy(fontSize = 12.sp), m.t.muted) }
         Box(Modifier.padding(vertical = 8.dp).fillMaxWidth().height(1.dp).background(m.t.line))
-        SettingRow("Sound", "Ambience and effects", onClick = { x.update { it.copy(sound = !it.sound) } }) { Toggle(d.sound, { x.update { it.copy(sound = !it.sound) } }) }
-        SettingRow("Speaking", "Lips move to the words") {
-            MiniSeg(listOf("auto" to "Auto", "on" to "On", "off" to "Off"), when (d.speaking) { true -> "on"; false -> "off"; null -> "auto" }) { k ->
-                x.update { it.copy(speaking = when (k) { "on" -> true; "off" -> false; else -> null }) }
+        if (!extend) {
+            SettingRow("Sound", "Ambience and effects", onClick = { x.update { it.copy(sound = !it.sound) } }) { Toggle(d.sound, { x.update { it.copy(sound = !it.sound) } }) }
+            SettingRow("Speaking", "Lips move to the words") {
+                MiniSeg(listOf("auto" to "Auto", "on" to "On", "off" to "Off"), when (d.speaking) { true -> "on"; false -> "off"; null -> "auto" }) { k ->
+                    x.update { it.copy(speaking = when (k) { "on" -> true; "off" -> false; else -> null }) }
+                }
             }
         }
         SettingRow("Takes", "Up to ${x.catalog?.takesMax ?: 4} at once") {

@@ -100,6 +100,8 @@ users users-three
 bag bag
 swap swap
 cube cube
+extend arrow-line-right
+upscale arrows-out-simple
 
 [mac]
 xmark x
