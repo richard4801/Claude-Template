@@ -838,6 +838,19 @@ data class ApiEvent(
     val online: Boolean? = null,
     val blender: Boolean? = null,
     val addonVersion: String? = null,
+    // Edit sessions (workstream 3): type "edit" (owners only), with sessionId and op = patch | log | pending |
+    // frame_request | app_request | closed. patch: revision, baseRevision, patch, entry · log: entry · pending: pending ·
+    // frame_request: requestId, t, width, revision, device · app_request: request.
+    val revision: Int? = null,
+    val baseRevision: Int? = null,
+    val patch: kotlinx.serialization.json.JsonArray? = null,
+    val entry: EditHistoryEntry? = null,
+    val pending: EditPending? = null,
+    val requestId: String? = null,
+    val t: Double? = null,
+    val width: Int? = null,
+    val device: String? = null,
+    val request: EditAppRequest? = null,
 ) {
     companion object {
         /** Not from the server: the stream (re)connected, so the app refetches what it may have missed. */
@@ -1116,3 +1129,58 @@ object EditsFieldSerializer : kotlinx.serialization.KSerializer<EditListDto> {
         json.encodeJsonElement(value.project ?: json.json.encodeToJsonElement(EditListDto.serializer(), value))
     }
 }
+
+// ---------------------------------------------------------------- Edit sessions (workstream 3)
+// plans/api.md "Edit sessions" (plans/claude-editing.md A): the live, revisioned copy of a take's EditProject v2 the
+// owner's apps and Claude share. Owner only. Changes travel as JSON Patch (studio.muse.core.edit.JsonPatch).
+
+/** One change in a session's history (newest first). author: "app:<device>" or "claude". kind: edit | undo | tool | reset. */
+@Serializable
+data class EditHistoryEntry(
+    val id: Long, val revision: Int = 0, val author: String = "", val byClaude: Boolean = false, val kind: String = "edit",
+    val label: String = "", val undoes: Long? = null, val undone: Boolean = false, val createdAt: Long = 0,
+)
+
+/** A paid helper Claude asked for, waiting for the owner's yes. status: waiting | approved | declined | running | done | failed. */
+@Serializable
+data class EditPending(val id: String, val kind: String = "", val label: String = "", val estimateUsd: Double = 0.0, val status: String = "waiting", val jobId: String? = null, val createdAt: Long = 0)
+
+/** Claude asked an online app to save a version or export. kind: save | export; status: sent | done | failed. */
+@Serializable
+data class EditAppRequest(
+    val id: String, val kind: String = "save", val name: String? = null, val preset: JsonObject? = null, val device: String = "",
+    val status: String = "sent", val versionId: String? = null, val error: String? = null, val at: Long = 0,
+)
+
+@Serializable
+data class EditPresence(val device: String, val label: String = "", val platform: String = "other", val canRender: Boolean = true)
+
+@Serializable
+data class EditSessionDto(
+    val id: String, val takeId: String = "", val baseVersionId: String? = null, val revision: Int = 0, val project: JsonObject,
+    val durationSec: Double = 0.0, val status: String = "open", val updatedBy: String = "", val updatedAt: Long = 0,
+    val pending: List<EditPending> = emptyList(), val online: List<EditPresence> = emptyList(), val requests: List<EditAppRequest> = emptyList(),
+    val history: List<EditHistoryEntry> = emptyList(),
+)
+
+@Serializable
+data class OpenEditSessionRequest(val takeId: String, val project: JsonObject? = null, val baseVersionId: String? = null, val device: String? = null, val fresh: Boolean? = null)
+
+@Serializable
+data class EditPatchRequest(val baseRevision: Int, val patch: kotlinx.serialization.json.JsonArray, val label: String, val device: String)
+
+@Serializable
+data class EditUndoRequest(val entryId: Long, val device: String)
+
+/** POST …/patch, …/undo → the new revision and its history entry (null when nothing changed). */
+@Serializable
+data class EditChangeResult(val revision: Int, val entry: EditHistoryEntry? = null)
+
+@Serializable
+data class EditFrameAnswer(val uploadId: String)
+
+@Serializable
+data class EditRequestAnswer(val status: String, val versionId: String? = null, val error: String? = null)
+
+@Serializable
+data class EditPendingAnswer(val approve: Boolean)
