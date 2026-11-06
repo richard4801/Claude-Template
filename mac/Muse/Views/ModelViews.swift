@@ -34,7 +34,7 @@ struct SheetSlotTile: View {
                                 Color.black.opacity(0.45)
                                 VStack(spacing: 6) {
                                     if targeted {
-                                        Text("Drop to replace").font(t.body(12, .semibold)).foregroundStyle(.white)
+                                        Text("Drop to replace").font(t.scale.label.font).foregroundStyle(.white)
                                     } else {
                                         HoverChip(primary, action: onPrimary)
                                         if let secondary { HoverChip(secondary, action: onSecondary) }

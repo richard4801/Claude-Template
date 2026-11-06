@@ -295,31 +295,3 @@ struct PasswordField: View {
         .roleField(focused: focused)
     }
 }
-
-/// A themed checkbox row.
-struct CheckBox: View {
-    @Environment(\.theme) private var t
-    @Binding var on: Bool
-    var label: String
-    var hint: String?
-
-    var body: some View {
-        Button { on.toggle() } label: {
-            HStack(spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 5).fill(on ? t.accent : .clear)
-                    RoundedRectangle(cornerRadius: 5).strokeBorder(on ? t.accent : t.line, lineWidth: 1.5)
-                    if on { Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(t.accentInk) }
-                }
-                .frame(width: 20, height: 20)
-                Text(label).font(t.body(13)).foregroundStyle(t.ink)
-                if let hint { Text(hint).font(t.body(12)).foregroundStyle(t.muted) }
-                Spacer(minLength: 0)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
-        .accessibilityValue(on ? "On" : "Off")
-    }
-}
