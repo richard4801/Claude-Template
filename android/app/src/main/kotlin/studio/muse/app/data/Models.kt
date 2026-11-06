@@ -159,6 +159,9 @@ data class JobRequest(
     /** AI suite (workstream 1), set by the server on suite jobs: text | image | reference | swap | recast, and the seconds each take renders. */
     val mode: String? = null,
     val seconds: Double? = null,
+    /** Set by the server on upscale jobs (`engine: "upscale"`): the take being sharpened and the size (1080p | 2k | 4k). */
+    val takeId: String? = null,
+    val size: String? = null,
 ) {
     fun spec() = RenderSpec(Engine.fromId(engine), ClipUse.fromId(use), steps, lipSync, takes, clipSeconds, Quality.fromId(quality), pricePerSec)
 }
@@ -653,6 +656,16 @@ data class VideoFeatures(
             addons = studio.muse.core.VideoOption.ADDONS.map { AddonInfo(it.id, it.label, it.detail) } + AddonInfo("upscale", "Upscale", "Sharper 1080p, 2K or 4K from a finished take",
                 available = false, comingSoon = true, sizes = studio.muse.core.UpscaleSize.entries.map { UpscaleSizeInfo(it.id, it.label, it.width, it.height) }),
         )
+
+        /** Demo mode's $ per output second for Upscale: 1080p and 2K priced, 4K not yet (like an unmeasured size on the server). */
+        val DEMO_UPSCALE_PRICES = mapOf("1080p" to 0.02, "2k" to 0.04)
+
+        /** Demo mode: [DEFAULT] with Upscale live at [DEMO_UPSCALE_PRICES]. */
+        val DEMO = DEFAULT.copy(addons = DEFAULT.addons.map { a ->
+            if (a.id != "upscale") a else a.copy(available = true, comingSoon = false, sizes = a.sizes.map { z ->
+                DEMO_UPSCALE_PRICES[z.id]?.let { p -> z.copy(available = true, price = p) } ?: z.copy(available = false, price = null)
+            })
+        })
     }
 
     fun option(id: String) = options.firstOrNull { it.id == id }

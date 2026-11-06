@@ -263,10 +263,20 @@ data class SuiteCastMember(
     val faceCrop: ImageRef? = null,
 )
 
+/**
+ * Extend (plans/api.md "Extend (composer, 2026-11-06)"): the finished clip to continue and which way. [video] is a take's
+ * stored key (the part after `/uploads/` in its `videoUrl`), a clip's `storageKey` or an upload's `{key, seconds}`;
+ * [join] null = the server's default (source + new part as one clip).
+ */
+@Serializable
+data class SuiteExtend(val video: SuiteMediaRef, val direction: String = "after", val join: Boolean? = null)
+
 /** POST /v1/suite/shots[/estimate]. Nulls are left out, so the server's defaults apply. */
 @Serializable
 data class SuiteShotRequest(
     val mode: String? = null,
+    /** mode "extend": the clip to continue ([SuiteExtend]); `duration` is the new part, `prompt` what happens next or before. */
+    val extend: SuiteExtend? = null,
     val cast: List<SuiteCastMember>? = null,
     val title: String? = null,
     val modelId: String? = null,
@@ -425,6 +435,31 @@ data class SuiteModelPatch(val enabled: Boolean? = null)
 
 @Serializable
 data class SuiteSettingsPatch(val models: Map<String, SuiteModelPatch>? = null)
+
+/** Extend's shared rules: where a take's stored key comes from, and the two directions. */
+object ExtendRules {
+    const val MODE = "extend"
+    val DIRECTIONS = listOf("after", "before")
+    /** The server's VideoRef limit for an upload's `seconds`. */
+    const val MAX_UPLOAD_SECONDS = 60.0
+    private val KEY = Regex("^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+
+    /** A take's stored video key: the part after `/uploads/` in its `videoUrl` (no query string); null when it has no file there. */
+    fun keyOf(videoUrl: String?): String? {
+        val u = videoUrl ?: return null
+        if (!u.contains("/uploads/")) return null
+        return u.substringAfter("/uploads/").substringBefore('?').substringBefore('#').takeIf { KEY.matches(it) }
+    }
+
+    /** Demo mode's stand-in key for a simulated take (it has no file): FakeMuseApi resolves it back to the take. */
+    fun demoKey(takeId: String) = "takes/$takeId/take.mp4"
+
+    /** The key Extend sends for [t]: its stored video, or (demo only) the stand-in. Null = this take can't be extended. */
+    fun keyOf(t: Take, demo: Boolean): String? =
+        if (t.kind != "take") null else keyOf(t.videoUrl) ?: if (demo && t.videoUrl == null) demoKey(t.id) else null
+
+    fun placeholder(direction: String) = if (direction == "before") "What happens before" else "What happens next"
+}
 
 /** Fixed suite wording and the rules both apps share. */
 object SuiteRules {

@@ -478,8 +478,10 @@ class FakeMuseApi(
                             val thumb = o?.angles?.filterNotNull()?.let { if (it.isEmpty()) null else it[(i - 1) % it.size] } ?: cur.thumb ?: ImageRef.asset("g_front")
                             Take("t_${cur.id}_$i", "take", cur.id, i, cur.request.takes, cur.title,
                                 when (cur.request.engine) { Engine.VIGGLE.id -> "Fast · beta"; Engine.REPLICATE.id -> Quality.fromId(cur.request.quality).label
-                                    SuiteRules.ENGINE -> SuiteRules.tierLabel(cur.request.quality); else -> "Edit" }, cur.engineLabel,
+                                    SuiteRules.ENGINE -> SuiteRules.tierLabel(cur.request.quality); UPSCALE_ENGINE -> cur.engineLabel; else -> "Edit" }, cur.engineLabel,
                                 cur.cost / cur.request.takes, cur.seed + i - 1, "test", thumb, cur.prompt, now(),
+                                // AI suite: how long the take lasts (Extend: source + the new part; Upscale: the source take's length).
+                                durationSec = when (cur.request.engine) { SuiteRules.ENGINE -> suite.takeSeconds[cur.id] ?: cur.request.seconds; UPSCALE_ENGINE -> cur.request.seconds; else -> null },
                                 look = if (cur.request.engine == SuiteRules.ENGINE) suite.looks[cur.id] else null)
                         }
                         takes.addAll(0, newTakes)
@@ -652,7 +654,43 @@ class FakeMuseApi(
         return sb
     }
 
-    override suspend fun upscale(takeId: String, size: String): Job = throw ApiException("upscale_unavailable", "Upscale is coming soon")
+    /**
+     * Upscale (server routes POST /v1/takes/{id}/upscale): a finished render take, a size the features price, held at
+     * price × the take's seconds; `upscale_unavailable` (409) while the add-on or the size isn't available.
+     */
+    override suspend fun upscale(takeId: String, size: String): Job {
+        val job = lock.withLock {
+            val t = takes.firstOrNull { it.id == takeId } ?: throw ApiException("not_found", "Take not found")
+            if (t.kind != "take") throw ApiException("bad_request", "Only a finished render can be upscaled")
+            if (size !in setOf("1080p", "2k", "4k")) throw ApiException("bad_request", "Pick 1080p, 2K or 4K")
+            val up = (studio.features.video ?: VideoFeatures.DEMO).upscale
+            val z = up.sizes.firstOrNull { it.id == size }
+            if (!up.available || z == null || !z.available || z.price == null) throw ApiException(UpscaleOffer.UNAVAILABLE, UpscaleOffer.SOON_TEXT)
+            val src = jobs.firstOrNull { it.id == t.jobId }
+            val secs = UpscaleOffer.seconds(t, src) ?: 8.0
+            val cost = UpscaleOffer.price(z, secs) ?: 0.0
+            if (cost > balance.balance + 1e-9) throw ApiException("insufficient_balance", "Not enough balance · top up in Credits")
+            val req = JobRequest(title = t.title, modelId = src?.modelId.orEmpty(), outfitId = src?.outfitId.orEmpty(), engine = UPSCALE_ENGINE, takes = 1, seconds = secs, takeId = t.id, size = z.id)
+            val total = SuiteClock.total(req)
+            val p = SuiteClock.progress(req, 0.0)
+            val j = Job("j_" + uid(), t.title, req.modelId, src?.modelName.orEmpty(), req.outfitId, req, "running", 0.0, 1, 0, p.totalSteps, p.phase, total, total, cost,
+                createdAt = now(), prompt = t.prompt, seed = t.seed, thumb = t.thumb, serverEngineLabel = "Upscale · ${z.label}")
+            charge(cost)
+            jobs += j
+            j
+        }
+        events.tryEmit(ApiEvent("balance", balance = balance))
+        events.tryEmit(ApiEvent("job", job = job))
+        run(job)
+        return job
+    }
+
+    /** Test hook: Upscale live at the demo prices (true) or coming soon like a server without measured prices (false). */
+    suspend fun debugSetUpscale(live: Boolean) = lock.withLock {
+        val v = studio.features.video ?: VideoFeatures.DEMO
+        val up = if (live) VideoFeatures.DEMO.upscale else VideoFeatures.DEFAULT.upscale
+        studio = studio.copy(features = studio.features.copy(video = v.copy(addons = v.addons.map { if (it.id == "upscale") up else it })))
+    }
 
     override suspend fun setFailNext(fail: Boolean) {
         failNext = fail
@@ -863,7 +901,7 @@ class FakeMuseApi(
     // ---- the demo studio's owner side: members, tokens, invites, settings (in memory, like the real API's rules)
     private val members = SampleData.members(now()).toMutableList()
     private val invites = mutableListOf<InviteInfo>()
-    private var studio = StudioSettings(features = StudioFeatures(replicate = true, video = VideoFeatures.DEFAULT, photo = PhotoFeatures(), tools = FakeCatalog.ownerTools()),
+    private var studio = StudioSettings(features = StudioFeatures(replicate = true, video = VideoFeatures.DEMO, photo = PhotoFeatures(), tools = FakeCatalog.ownerTools()),
         engines = Engines(listOf(EngineStatus("replicate", "Replicate", "Draft, Standard and HD video · photos", keySet = false, status = "simulated"),
             EngineStatus("runpod", "RunPod", "Edit, Fast · beta, Upscale", keySet = false, status = "simulated"))))
     private val photoPrices get() = (studio.features.photo ?: PhotoFeatures()).prices
@@ -1004,11 +1042,40 @@ class FakeMuseApi(
     private fun suiteOn() { if (!suiteEnabled) throw ApiException("engine_unavailable", "The AI suite isn't switched on yet") }
     private fun suiteClipSeconds(id: String?) = clips[id]?.durationSec ?: if (id == SampleData.SAMPLE_CLIP) SampleData.sampleMeta.durationSec else null
     override suspend fun suiteCatalog() = suite.catalog(suiteOwner).let { if (suiteEnabled) it else it.copy(enabled = false, test = false, tiers = it.tiers.map { t -> t.copy(available = false) }) }
-    override suspend fun suiteEstimate(req: SuiteShotRequest) = lock.withLock { suiteOn(); suite.estimate(req, suiteOwner, models, suiteClipSeconds(req.clipId)) }
+    /** Suite uploads of this demo studio (their keys), so Extend can tell an upload of the studio from a stranger's key. */
+    private val suiteUploads = mutableSetOf<String>()
+
+    /**
+     * Extend's source (server SuiteService.extendSource): a take of the studio (its stored key, or demo's stand-in for a
+     * simulated take), else an upload of the studio with the client's `seconds`. The length, or null = not in this studio.
+     */
+    private fun extendSourceOf(req: SuiteShotRequest): Pair<Take?, Double?> {
+        val v = req.extend?.video ?: return null to null
+        val key = v.key ?: ExtendRules.keyOf(v.url) ?: return null to null
+        takes.firstOrNull { ExtendRules.keyOf(it, demo = true) == key }?.let { t ->
+            return t to (UpscaleOffer.seconds(t, jobs.firstOrNull { it.id == t.jobId }) ?: v.seconds ?: 0.0)
+        }
+        if (key in suiteUploads) return null to (v.seconds ?: 0.0)
+        return null to null
+    }
+
+    override suspend fun suiteEstimate(req: SuiteShotRequest) = lock.withLock { suiteOn(); suite.estimate(req, suiteOwner, models, suiteClipSeconds(req.clipId), extendSourceOf(req).second) }
     override suspend fun createSuiteShot(req: SuiteShotRequest): Job {
         val job = lock.withLock {
             suiteOn()
-            val e = suite.estimate(req, suiteOwner, models, suiteClipSeconds(req.clipId))
+            val (srcTake, srcSeconds) = extendSourceOf(req)
+            val e = suite.estimate(req, suiteOwner, models, suiteClipSeconds(req.clipId), srcSeconds)
+            if (e.mode == ExtendRules.MODE) {
+                if (e.estimate > balance.balance + 1e-9) throw ApiException("insufficient_balance", "Not enough balance · top up in Credits")
+                val src = jobs.firstOrNull { it.id == srcTake?.jobId }
+                val m = models.firstOrNull { it.id == src?.modelId }
+                val j = suite.job("j_" + uid(), req, e, null, null, now(), srcSeconds).let { j ->
+                    j.copy(modelId = m?.id.orEmpty(), modelName = m?.name.orEmpty(), thumb = srcTake?.thumb ?: src?.thumb, title = req.title ?: srcTake?.title?.let { "$it · extended" } ?: j.title)
+                }
+                charge(j.cost)
+                jobs += j
+                return@withLock j
+            }
             if (e.estimate > balance.balance + 1e-9) throw ApiException("insufficient_balance", "Not enough balance · top up in Credits")
             val lead = req.modelId ?: req.cast?.firstOrNull()?.characterId
             val m = lead?.let { id -> models.firstOrNull { it.id == id } }
@@ -1043,7 +1110,7 @@ class FakeMuseApi(
     override suspend fun uploadSuiteMedia(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit): SuiteMediaRef {
         onProgress(1f)
         val ext = name.substringAfterLast('.', if (mime.startsWith("audio/")) "m4a" else "mp4")
-        return SuiteMediaRef(key = "c/demo_${uid()}.$ext")
+        return SuiteMediaRef(key = "c/demo_${uid()}.$ext").also { r -> lock.withLock { suiteUploads += r.key!! } }
     }
 
     override suspend fun suiteLocations() = lock.withLock { suite.locations.toList() }
@@ -1262,6 +1329,8 @@ class FakeMuseApi(
     private fun uid() = UUID.randomUUID().toString().take(8)
 
     companion object {
+        /** `request.engine` of an Upscale job (the server's). */
+        const val UPSCALE_ENGINE = "upscale"
         /** The prompt identity; names her Identity LoRA when it's trained and switched on. */
         fun identity(m: Model, lora: Lora? = null) = Identity(m.name, m.look.ifBlank { "${m.age}-year-old woman" }, m.filled.coerceAtLeast(1), m.neverAdd, lora?.token(m.name))
     }
