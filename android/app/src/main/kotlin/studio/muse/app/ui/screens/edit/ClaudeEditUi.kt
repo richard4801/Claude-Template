@@ -149,6 +149,24 @@ fun PendingSheet(p: studio.muse.app.data.EditPending, act: (EditAction) -> Unit,
     }
 }
 
+/**
+ * Opening the shared edit found changes on this device the session doesn't have, and the session moved on. Nothing is
+ * dropped silently: keep them (sent on top of the latest) or use the latest (this device's changes are discarded).
+ */
+@Composable
+fun ConflictSheet(act: (EditAction) -> Unit, modifier: Modifier = Modifier) {
+    val m = muse
+    SheetFrame("Two versions of this edit", { act(EditAction.ResolveConflict(true)) }, modifier, scroll = false) {
+        T("This phone has changes that aren't in the shared edit yet, and the shared edit changed since (on another device or by Claude).",
+            m.type.body.copy(fontSize = 13.5.sp), m.t.ink)
+        T("Keep this device's changes puts them on top of the latest. Use the latest discards them.", m.type.body.copy(fontSize = 13.sp), m.t.muted)
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SuiteButton("Keep this device's changes", { act(EditAction.ResolveConflict(true)) }, Modifier.fillMaxWidth(), icon = "check", primary = true)
+            SuiteButton("Use the latest", { act(EditAction.ResolveConflict(false)) }, Modifier.fillMaxWidth(), icon = "refresh")
+        }
+    }
+}
+
 /** The "Claude" button in the editor's top bar (owner only). */
 @Composable
 fun ClaudeButton(on: Boolean, onClick: () -> Unit) {

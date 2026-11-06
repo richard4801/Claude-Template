@@ -35,7 +35,7 @@ class ClaudeEditScreenshotTest(private val theme: String, private val state: Str
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}_{1}")
         fun params(): List<Array<Any>> = listOf("a", "b", "c", "d").flatMap { t ->
-            listOf("history", "note", "pending", "panel").map { arrayOf<Any>(t, it) }
+            listOf("history", "note", "pending", "panel", "conflict").map { arrayOf<Any>(t, it) }
         }
 
         fun history(): List<EditHistoryEntry> = listOf(
@@ -68,6 +68,7 @@ class ClaudeEditScreenshotTest(private val theme: String, private val state: Str
             "note" -> session = session.copy(claudeNote = "Claude · Trimmed 0:00.5–0:06.0")
             "pending" -> session = session.copy(pending = listOf(EditPending("pa_1", "matte", "Remove background", 0.04)))
             "panel" -> session = session.copy(chatOpen = true)
+            "conflict" -> session = session.copy(conflict = true)
         }
         ui = ui.copy(session = session)
         compose.setContent {

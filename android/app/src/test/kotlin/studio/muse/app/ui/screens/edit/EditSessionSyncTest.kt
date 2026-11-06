@@ -2,6 +2,9 @@ package studio.muse.app.ui.screens.edit
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import studio.muse.core.edit.splitAt
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.TestScope
@@ -111,12 +114,32 @@ class EditSessionSyncTest {
         assertNull(r.c.ui.value.session!!.claudeNote)
     }
 
-    @Test fun undoingClaudesChangeGoesThroughTheServer() = runTest {
+    @Test fun remoteChangesAreNotInLocalUndo() = runTest {
+        val r = rig()
+        r.c.act(EditAction.Seek(5.0)); r.c.act(EditAction.Split); settle()
+        r.api.claudeEdit(r.sid, "Background") { it.copy(canvas = it.canvas.copy(background = "#111111")) }
+        runCurrent()
+        assertEquals("#111111", r.c.project!!.canvas.background)
+        // Undo takes back this device's split only; Claude's change stays.
+        r.c.act(EditAction.Undo)
+        assertEquals(1, r.c.project!!.mainClips.size)
+        assertEquals("#111111", r.c.project!!.canvas.background)
+        assertFalse(r.c.ui.value.canUndo) // nothing of Claude's to undo locally
+        r.c.act(EditAction.Redo)
+        assertEquals(2, r.c.project!!.mainClips.size)
+        assertEquals("#111111", r.c.project!!.canvas.background)
+        settle()
+        assertEquals("#111111", EditJson.parse(r.api.editProjectOf(r.sid)).canvas.background) // never reverted on the server
+    }
+
+    @Test fun undoingClaudesChangeGoesThroughTheHistoryPanel() = runTest {
         val r = rig()
         val entry = r.api.claudeEdit(r.sid, "Trimmed 0:00.5–0:06.0") { p -> p.copy(tracks = p.tracks.map { t -> t.copy(items = t.items.map { (it as VideoClip).copy(inSec = 0.5, outSec = 6.0) }) }) }!!
         runCurrent()
-        assertTrue(r.c.ui.value.canUndo)
-        r.c.act(EditAction.Undo)
+        assertFalse(r.c.ui.value.canUndo) // not this device's change
+        r.c.act(EditAction.Undo); runCurrent()
+        assertEquals(0.5, r.c.project!!.mainClips.single().inSec, 1e-9)
+        r.c.act(EditAction.UndoEntry(entry.id))
         runCurrent(); settle()
         assertEquals(project(), r.c.project)
         assertEquals(project(), EditJson.parse(r.api.editProjectOf(r.sid)))
@@ -128,6 +151,133 @@ class EditSessionSyncTest {
         r.c.act(EditAction.Seek(4.0)); r.c.act(EditAction.Split); settle()
         r.c.act(EditAction.Undo); settle()
         assertEquals(listOf("Split", "Undo"), r.api.editPushes.map { it.first })
+    }
+
+    @Test fun localEditsBeforeTheSessionAskKeep() = runTest {
+        val (api, c, sync) = conflictRig()
+        assertTrue(c.ui.value.session!!.conflict)
+        settle()
+        assertTrue(api.editPushes.isEmpty()) // nothing is sent until the owner picks
+        assertEquals(2, c.project!!.mainClips.size) // this device's edit is still shown
+        c.act(EditAction.ResolveConflict(keepLocal = true)); runCurrent(); settle()
+        assertFalse(c.ui.value.session!!.conflict)
+        assertEquals("This device's changes", api.editPushes.single().first)
+        val server = EditJson.parse(api.editProjectOf(sync.sessionId!!))
+        assertEquals(2, server.mainClips.size) // pushed on top of the latest revision…
+        assertEquals("#222222", server.canvas.background) // …which keeps the other device's change
+        assertEquals(server, c.project)
+        assertEquals(2, sync.revision)
+    }
+
+    @Test fun localEditsBeforeTheSessionAskUseTheLatest() = runTest {
+        val (api, c, sync) = conflictRig()
+        c.act(EditAction.ResolveConflict(keepLocal = false)); runCurrent(); settle()
+        assertFalse(c.ui.value.session!!.conflict)
+        assertTrue(api.editPushes.isEmpty())
+        assertEquals(EditJson.parse(api.editProjectOf(sync.sessionId!!)), c.project)
+        assertEquals("#222222", c.project!!.canvas.background)
+        assertEquals(1, c.project!!.mainClips.size)
+        assertFalse(c.ui.value.canUndo)
+    }
+
+    private class MemDrafts : EditDrafts {
+        val map = HashMap<String, Pair<JsonObject, JsonObject>>()
+        override fun read(takeId: String) = map[takeId]
+        override fun write(takeId: String, base: JsonObject, project: JsonObject) { map[takeId] = base to project }
+        override fun clear(takeId: String) { map.remove(takeId) }
+    }
+
+    @Test fun unsentEditsSurviveTheAppClosingAndKeepPreservesClaudesChange() = runTest {
+        val bg = backgroundScope
+        val api = FakeMuseApi(bg, null, speed = 0.0, genDelayMs = 0)
+        val sid = api.openEditSession(studio.muse.app.data.OpenEditSessionRequest("t_j1", EditJson.encode(project()))).id
+        val drafts = MemDrafts()
+        // 1. Offline: the phone splits; the edit is written down at once.
+        val offlineApi = object : studio.muse.app.data.MuseApi by api {
+            override suspend fun openEditSession(req: studio.muse.app.data.OpenEditSessionRequest): studio.muse.app.data.EditSessionDto = throw java.io.IOException("no network")
+        }
+        val c1 = EditSuiteController(bg, NoAi()).also { it.load(project(), "Kick test", "t_j1", null, reopened = true) }
+        val s1 = EditSessionSync(bg, { offlineApi }, api.events(), c1, StubHost(), "android-test", "Pixel", presenceMs = 3_600_000, drafts = drafts)
+        bg.launch { s1.connect("t_j1", null, null, retryMs = 60_000) }
+        runCurrent()
+        c1.act(EditAction.Seek(5.0)); c1.act(EditAction.Split); runCurrent()
+        assertEquals(2, EditJson.parse(drafts.read("t_j1")!!.second).mainClips.size)
+        // 2. The app closes. Meanwhile Claude changes the background.
+        s1.stop(bg)
+        api.claudeEdit(sid, "Background") { it.copy(canvas = it.canvas.copy(background = "#222222")) }
+        // 3. Reopened online: the unsent split comes back, and the owner is asked.
+        val c2 = EditSuiteController(bg, NoAi()).also { it.load(project(), "Kick test", "t_j1", null, reopened = true) }
+        val s2 = EditSessionSync(bg, { api }, api.events(), c2, StubHost(), "android-test", "Pixel", presenceMs = 3_600_000, drafts = drafts)
+        assertTrue(bg.async { s2.connect("t_j1", null, null) }.await())
+        runCurrent()
+        assertEquals(2, c2.project!!.mainClips.size)
+        assertTrue(c2.ui.value.session!!.conflict)
+        // 4. Keep: only this device's split goes on top of the latest; Claude's background stays.
+        c2.act(EditAction.ResolveConflict(true)); runCurrent(); settle()
+        val server = EditJson.parse(api.editProjectOf(sid))
+        assertEquals(2, server.mainClips.size)
+        assertEquals("#222222", server.canvas.background)
+        assertEquals(server, c2.project)
+        assertNull(drafts.read("t_j1")) // the session has them now
+    }
+
+    @Test fun unsentEditsOnAnUnchangedSessionGoUpWithoutAsking() = runTest {
+        val bg = backgroundScope
+        val api = FakeMuseApi(bg, null, speed = 0.0, genDelayMs = 0)
+        api.openEditSession(studio.muse.app.data.OpenEditSessionRequest("t_j1", EditJson.encode(project())))
+        val split = project().splitAt(5.0)
+        val drafts = MemDrafts().also { it.write("t_j1", EditJson.encode(project()), EditJson.encode(split!!)) }
+        val c = EditSuiteController(bg, NoAi()).also { it.load(project(), "Kick test", "t_j1", null, reopened = true) }
+        val s = EditSessionSync(bg, { api }, api.events(), c, StubHost(), "android-test", "Pixel", presenceMs = 3_600_000, drafts = drafts)
+        assertTrue(bg.async { s.connect("t_j1", null, null) }.await())
+        runCurrent(); settle()
+        assertFalse(c.ui.value.session!!.conflict)
+        assertEquals(2, EditJson.parse(api.editProjectOf(s.sessionId!!)).mainClips.size)
+        assertNull(drafts.read("t_j1"))
+        assertTrue(c.ui.value.canUndo) // the restored edits are this device's own
+    }
+
+    @Test fun fileDraftsRoundTrip() {
+        val dir = java.nio.file.Files.createTempDirectory("drafts").toFile()
+        try {
+            val d = FileEditDrafts(dir)
+            assertNull(d.read("t_j1"))
+            d.write("t_j1", EditJson.encode(project()), EditJson.encode(project().copy(canvas = project().canvas.copy(background = "#111111"))))
+            val (b, p) = FileEditDrafts(dir).read("t_j1")!! // a new instance: what the next app start sees
+            assertEquals(project(), EditJson.parse(b))
+            assertEquals("#111111", EditJson.parse(p).canvas.background)
+            d.clear("t_j1")
+            assertNull(d.read("t_j1"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun noEditsOnThisDeviceMeansNoQuestion() = runTest {
+        val r = rig()
+        assertFalse(r.c.ui.value.session!!.conflict)
+    }
+
+    /** The session moved on (another device) while this phone edited offline; then the phone connects. */
+    private suspend fun TestScope.conflictRig(): Triple<FakeMuseApi, EditSuiteController, EditSessionSync> {
+        val bg = backgroundScope
+        val api = FakeMuseApi(bg, null, speed = 0.0, genDelayMs = 0)
+        val s = api.openEditSession(studio.muse.app.data.OpenEditSessionRequest("t_j1", EditJson.encode(project())))
+        api.claudeEdit(s.id, "Background") { it.copy(canvas = it.canvas.copy(background = "#222222")) }
+        var offline = true
+        val flaky = object : studio.muse.app.data.MuseApi by api {
+            override suspend fun openEditSession(req: studio.muse.app.data.OpenEditSessionRequest) =
+                if (offline) throw java.io.IOException("no network") else api.openEditSession(req)
+        }
+        val c = EditSuiteController(bg, NoAi())
+        c.load(project(), "Kick test", "t_j1", null, reopened = true)
+        val sync = EditSessionSync(bg, { flaky }, api.events(), c, StubHost(), "android-test", "Pixel", presenceMs = 3_600_000)
+        val joined = bg.async { sync.connect("t_j1", EditJson.encode(project()), "t_v1", retryMs = 10_000) }
+        runCurrent()
+        assertTrue(sync.offline)
+        c.act(EditAction.Seek(5.0)); c.act(EditAction.Split) // edited while offline
+        offline = false
+        advanceTimeBy(10_001); runCurrent()
+        assertTrue(joined.await())
+        return Triple(api, c, sync)
     }
 
     @Test fun historySheetUndoesAnyEntry() = runTest {
@@ -157,6 +307,24 @@ class EditSessionSyncTest {
         runCurrent()
         assertEquals(listOf<String?>("Cut v2"), r.host.saves)
         assertEquals("t_v2", r.api.editRequestAnswers[save.id]!!.versionId)
+    }
+
+    @Test fun theSaveNameGoesWithTheVersion() = runTest {
+        // The request the real API gets: `name`, trimmed and at most 80 characters; none when blank.
+        val json = kotlinx.serialization.json.Json { explicitNulls = false; encodeDefaults = true }
+        val req = studio.muse.app.data.TakeVersionV2Request("up_1", null, EditJson.encode(project()), 12.0, 1080, 1920, 30.0, name = studio.muse.app.data.versionName("  Cut v2 "))
+        assertTrue(json.encodeToString(studio.muse.app.data.TakeVersionV2Request.serializer(), req).contains("\"name\":\"Cut v2\""))
+        assertNull(studio.muse.app.data.versionName("   "))
+        assertEquals(80, studio.muse.app.data.versionName("x".repeat(120))!!.length)
+        val unnamed = req.copy(name = null)
+        assertFalse(json.encodeToString(studio.muse.app.data.TakeVersionV2Request.serializer(), unnamed).contains("\"name\""))
+        // The demo backend keeps it on the new version (Take.name), like the server.
+        val api = FakeMuseApi(backgroundScope, null, speed = 0.0, genDelayMs = 0)
+        val f = java.io.File.createTempFile("edit", ".mp4")
+        try {
+            val t = api.saveProjectVersion("t_j1", studio.muse.app.data.EditedVideo(f, null, 12.0, 1080, 1920, 30.0), EditJson.encode(project()), name = " Cut v2 ")
+            assertEquals("Cut v2", t.name)
+        } finally { f.delete() }
     }
 
     @Test fun exportRequestsOpenTheSheetAndWaitForTheOwner() = runTest {
