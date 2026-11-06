@@ -37,7 +37,7 @@ struct EditSuiteCaptionsMode: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 HStack {
-                    Text("TRANSCRIPT · WORD-TIMED").font(t.mono(11, .medium)).tracking(1.1).foregroundStyle(t.ink)
+                    Text("Transcript, timed to the word").font(t.scale.label.font).foregroundStyle(t.ink)
                     Spacer()
                     if let lang = session.jobs[.captions]?.result?.language { Text(languageName(lang)).font(t.body(12)).foregroundStyle(t.muted) }
                 }

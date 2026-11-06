@@ -93,7 +93,7 @@ struct EditSuiteTimeline: View {
         let locked = s.locked.contains(row.trackId)
         return HStack(spacing: 6) {
             Ph(row.icon, 11).foregroundStyle(t.muted).frame(width: 16).accessibilityHidden(true)
-            Text(row.label).font(t.mono(10.5, .medium)).tracking(1).foregroundStyle(t.ink).lineLimit(1)
+            Text(row.label).font(t.scale.micro.font).foregroundStyle(t.ink).lineLimit(1)
             Spacer(minLength: 2)
             if row.kind.isAudio || row.kind == .main {
                 SuiteIconButton(systemName: track?.muted == true ? "speaker.slash" : "speaker.wave.1",

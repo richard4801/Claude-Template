@@ -250,7 +250,7 @@ struct EditSuiteEditor: View {
                     .frame(width: 200)
                 Spacer(minLength: 8)
                 Button { session.mode = .timeline } label: {
-                    Text("DONE").font(t.mono(12.5, .semibold)).tracking(1.2).foregroundStyle(t.bg)
+                    Text("Done").font(t.body(13, .semibold)).foregroundStyle(t.bg)
                         .padding(.horizontal, 16).frame(height: 36).background(Rectangle().fill(t.ink))
                 }
                 .buttonStyle(.plain)
@@ -269,7 +269,7 @@ struct EditSuiteEditor: View {
                 Button { showExport = true } label: {
                     HStack(spacing: 8) {
                         Ph("square.and.arrow.up", 13)
-                        Text("EXPORT").font(t.mono(12.5, .semibold)).tracking(1.4)
+                        Text("Export").font(t.body(13, .semibold))
                     }
                     .foregroundStyle(t.bg)
                     .padding(.horizontal, 18)

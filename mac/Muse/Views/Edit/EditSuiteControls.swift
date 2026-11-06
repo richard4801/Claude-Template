@@ -44,7 +44,7 @@ struct SuiteLabel: View {
     init(_ text: String, trailing: String? = nil) { self.text = text; self.trailing = trailing }
     var body: some View {
         HStack {
-            Text(text.uppercased()).font(t.mono(11, .medium)).tracking(1.1).foregroundStyle(t.ink)
+            Text(text).font(t.scale.label.font).foregroundStyle(t.ink)
             Spacer(minLength: 4)
             if let trailing { Text(trailing).font(t.body(12)).foregroundStyle(t.muted) }
         }
@@ -66,9 +66,8 @@ struct EditSeg<T: Hashable>: View {
                 let (v, l) = options[i]
                 let on = v == selection
                 Button { action(v) } label: {
-                    Text(mono ? l.uppercased() : l)
-                        .font(mono ? t.mono(11.5, on ? .semibold : .regular) : t.body(13, on ? .semibold : .regular))
-                        .tracking(mono ? 0.8 : 0)
+                    Text(l) // sentence case everywhere (design direction); `mono` is kept for old call sites
+                        .font(t.body(13, on ? .semibold : .regular))
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                         .foregroundStyle(on ? t.bg : t.muted)
@@ -110,7 +109,7 @@ struct SuiteSlider: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(label.uppercased()).font(t.mono(11)).tracking(1).foregroundStyle(t.ink)
+                Text(label).font(t.scale.label.font).foregroundStyle(t.ink)
                 Spacer(minLength: 4)
                 Text(format(draft ?? value)).font(t.mono(11.5)).foregroundStyle(t.ink)
             }

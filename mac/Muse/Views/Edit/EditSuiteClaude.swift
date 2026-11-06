@@ -136,7 +136,7 @@ struct EditSuiteClaudeAsk: View {
                     dismiss()
                     Task { await session.answerPending(p, approve: true) }
                 } label: {
-                    Text("Allow").font(t.mono(13, .semibold)).tracking(1.2).foregroundStyle(t.bg)
+                    Text("Allow").font(t.body(13, .semibold)).foregroundStyle(t.bg)
                         .padding(.horizontal, 22).frame(height: 38)
                         .background(Rectangle().fill(t.ink))
                 }
