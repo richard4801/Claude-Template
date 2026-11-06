@@ -65,6 +65,12 @@ import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.MuseTheme
 import studio.muse.app.ui.theme.ThemeId
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.MuseSpace
+import studio.muse.app.ui.theme.roles
+import studio.muse.app.ui.theme.scale
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import studio.muse.core.Pricing
 import studio.muse.core.RenderSpec
 
@@ -136,81 +142,77 @@ fun SettingsScreen() {
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { notifOn = it }
     val studio by vm.c.repo.state.collectAsState()
     val preview = remember(studio.models, studio.outfits) { previewProfileState(studio, vm.demo) }
-    ScreenBox {
-        Column(Modifier.fillMaxSize()) {
-            TopBar("Settings")
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Field("Theme") {
-                    ThemeId.entries.chunked(2).forEach { row ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            row.forEach { t -> ThemeCard(t, t.key == s.prefs.theme, Modifier.weight(1f), preview) { vm.theme(t) } }
-                        }
+    ScreenBox(bg = m.roles.canvas) {
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = MuseSpace.gutter).padding(top = MuseSpace.s4, bottom = 120.dp),
+            verticalArrangement = Arrangement.spacedBy(MuseSpace.s6),
+        ) {
+            DisplayTitle("Settings")
+            Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+                Heading("Theme")
+                ThemeId.entries.chunked(2).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+                        row.forEach { t -> ThemeCard(t, t.key == s.prefs.theme, Modifier.weight(1f), preview) { vm.theme(t) } }
                     }
                 }
-                ListGroup {
-                    Li("bell", "Notifications", sub = "Sound and alerts follow your phone's notification settings", onClick = {
-                        // Off on Android 13+: ask once from here; after that (or when on) open the system page.
-                        if (!notifOn && Build.VERSION.SDK_INT >= 33 && !notifAskedHere) { notifAskedHere = true; notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
-                        else vm.openNotificationSettings(context)
-                    }) { Tiny(if (notifOn) "On" else "Off"); Ic("chev", 16.dp) }
-                    s.modelName?.let { name -> Li("export", "$name's accounts", onClick = { nav.go(Routes.ACCOUNTS) }) { Tiny("${s.connected}/5"); Ic("chev", 16.dp) } }
-                    Li("queue", "Scheduled posts", onClick = { nav.go(Routes.POSTS) }) { Tiny("${s.scheduled}"); Ic("chev", 16.dp) }
-                    Li("wallet", "Credit", onClick = { nav.go(Routes.CREDITS) }) { Tiny(creditLabel(s.wallet, s.balance)); Ic("chev", 16.dp) }
-                    Li("user", "Sign out", sub = s.prefs.email.ifBlank { null }, onClick = { vm.signOut { nav.reset(Routes.WELCOME) } }) { Ic("chev", 16.dp) }
+            }
+            Column {
+                RowItem("Notifications", "Sound and alerts follow your phone's notification settings", onClick = {
+                    // Off on Android 13+: ask once from here; after that (or when on) open the system page.
+                    if (!notifOn && Build.VERSION.SDK_INT >= 33 && !notifAskedHere) { notifAskedHere = true; notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
+                    else vm.openNotificationSettings(context)
+                }) { RowValue(if (notifOn) "On" else "Off"); Chevron() }
+                s.modelName?.let { name -> RowItem("$name's accounts", onClick = { nav.go(Routes.ACCOUNTS) }) { RowValue("${s.connected} of 5"); Chevron() } }
+                RowItem("Scheduled posts", onClick = { nav.go(Routes.POSTS) }) { RowValue("${s.scheduled}"); Chevron() }
+                RowItem("Credit", onClick = { nav.go(Routes.CREDITS) }) { RowValue(creditLabel(s.wallet, s.balance)); Chevron() }
+            }
+            if (s.prefs.owner) Column {
+                Heading("Studio")
+                RowItem("Members", "Send credit, set caps, switch accounts off", onClick = { nav.go(Routes.MEMBERS) }) { Chevron() }
+                RowItem("Invite someone", onClick = { nav.go(Routes.INVITE) }) { Chevron() }
+                RowItem("Studio settings", "Caps and engines", onClick = { nav.go(Routes.STUDIO) }) { Chevron() }
+                RowItem("Prompts", "Every prompt the studio sends: edit or reset", onClick = { nav.go(Routes.PROMPTS) }) { Chevron() }
+                RowItem("Connections", "Claude, MCP and the Blender relay", onClick = { nav.go(Routes.CONNECTIONS) }) { Chevron() } // AI suite (workstream 1 → 2)
+            }
+            Column {
+                Heading("Developer")
+                RowItem("Demo mode", "The sample studio, in the app, no server", onClick = { vm.useFake(!s.prefs.useFake) { nav.reset(if (s.prefs.useFake) Routes.WELCOME else Routes.HOME) } }) {
+                    Toggle(s.prefs.useFake, { vm.useFake(!s.prefs.useFake) { nav.reset(if (s.prefs.useFake) Routes.WELCOME else Routes.HOME) } })
                 }
-                if (s.prefs.owner) {
-                    Lbl("Studio")
-                    ListGroup {
-                        Li("model", "Members", sub = "Send credit, caps, switch accounts off", onClick = { nav.go(Routes.MEMBERS) }) { Ic("chev", 16.dp) }
-                        Li("mail", "Invite someone", onClick = { nav.go(Routes.INVITE) }) { Ic("chev", 16.dp) }
-                        Li("quality", "Studio settings", sub = "Caps and engines", onClick = { nav.go(Routes.STUDIO) }) { Ic("chev", 16.dp) }
-                        Li("spark", "Prompts", sub = "Every prompt the studio sends · edit or reset", onClick = { nav.go(Routes.PROMPTS) }) { Ic("chev", 16.dp) }
-                        Li("export", "Connections", sub = "Claude & MCP · Blender relay", onClick = { nav.go(Routes.CONNECTIONS) }) { Ic("chev", 16.dp) } // AI suite (workstream 1 → 2)
-                    }
+                if (!s.prefs.useFake) Labeled("Server", Modifier.padding(vertical = MuseSpace.s2)) {
+                    Input(s.prefs.serverUrl, vm::serverUrl, placeholder = BuildConfig.DEFAULT_SERVER_URL, keyboard = androidx.compose.ui.text.input.KeyboardType.Uri, calm = true)
+                    if (s.prefs.serverUrl != BuildConfig.DEFAULT_SERVER_URL) TextAction("Use the MUSE server", { vm.resetServer { nav.reset(Routes.WELCOME) } })
                 }
-                Lbl("Developer")
-                ListGroup {
-                    Li("studio", "Demo mode", sub = "The sample studio, in the app, no server", onClick = { vm.useFake(!s.prefs.useFake) { nav.reset(if (s.prefs.useFake) Routes.WELCOME else Routes.HOME) } }) {
-                        Toggle(s.prefs.useFake, { vm.useFake(!s.prefs.useFake) { nav.reset(if (s.prefs.useFake) Routes.WELCOME else Routes.HOME) } })
-                    }
-                    if (!s.prefs.useFake) Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Tiny("Server")
-                        Input(s.prefs.serverUrl, vm::serverUrl, placeholder = BuildConfig.DEFAULT_SERVER_URL, keyboard = androidx.compose.ui.text.input.KeyboardType.Uri)
-                        if (s.prefs.serverUrl != BuildConfig.DEFAULT_SERVER_URL) T("Use the MUSE server", m.type.tiny.copy(fontWeight = FontWeight.Bold), m.link,
-                            Modifier.press { vm.resetServer { nav.reset(Routes.WELCOME) } }.padding(vertical = 4.dp))
-                    }
-                    Li("quality", "Fast · beta", onClick = { vm.fastBeta() }) { Toggle(s.prefs.fastBeta, { vm.fastBeta() }) }
-                    // A demo-studio test switch: the real server has no such thing.
-                    if (vm.demo) Li("shield", "Next render fails (test)", onClick = { vm.failNext() }) { Toggle(s.failNext, { vm.failNext() }) }
-                }
-                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    // Model names are owner-only (plans/app-cleanup.md); the owner sees the licence attribution.
-                    if (s.prefs.owner) Tiny("Video model: MiniMax H3 · Lip sync: LatentSync")
-                    Tiny("MUSE ${BuildConfig.VERSION_NAME}" + if (s.prefs.owner) " · MiniMax H3 licence terms apply" else " · third-party model licence terms apply")
-                }
+                RowItem("Fast · beta", onClick = { vm.fastBeta() }) { Toggle(s.prefs.fastBeta, { vm.fastBeta() }) }
+                // A demo-studio test switch: the real server has no such thing.
+                if (vm.demo) RowItem("Next render fails (test)", onClick = { vm.failNext() }) { Toggle(s.failNext, { vm.failNext() }) }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                SecondaryButton("Sign out", { vm.signOut { nav.reset(Routes.WELCOME) } }, Modifier.fillMaxWidth())
+                if (s.prefs.email.isNotBlank()) Caption("Signed in as ${s.prefs.email}")
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
+                // Model names are owner-only (plans/app-cleanup.md); the owner sees the licence attribution.
+                if (s.prefs.owner) Caption("Video model: MiniMax H3. Lip sync: LatentSync.")
+                Caption("MUSE ${BuildConfig.VERSION_NAME}. " + if (s.prefs.owner) "MiniMax H3 licence terms apply." else "Third-party model licence terms apply.")
             }
         }
         TabBar(Routes.SETTINGS)
     }
 }
 
-/** Live preview: the real profile layout rendered in that theme, scaled down. */
+/** Live preview: the real profile layout rendered in that theme, scaled down. The chosen one has the selection outline. */
 @Composable
 private fun ThemeCard(t: ThemeId, on: Boolean, modifier: Modifier, preview: ProfileState, onClick: () -> Unit) {
     val m = muse
-    val shape = RoundedCornerShape(m.t.r)
-    var mod = modifier
-    mod = when {
-        m.isD -> mod.hardShadow(3.dp, m.t.r).clip(shape).background(m.t.surface).border(if (on) 3.dp else 2.5.dp, if (on) m.t.accent else Ink, shape)
-        m.isC -> mod.softShadow(m.t.r).clip(shape).background(m.t.surface).let { if (on) it.border(2.dp, m.t.accent, shape) else it }
-        else -> mod.clip(shape).background(m.t.surface).border(if (on) 2.dp else m.t.stroke, if (on) m.t.accent else m.t.line, shape)
-    }
-    Box(mod.press(onClick = onClick).padding(10.dp)) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            ThemePreview(t, preview, Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(m.t.r * .6f)).border(1.dp, Color.Black.copy(alpha = .12f), RoundedCornerShape(m.t.r * .6f)))
-            T(t.label, m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), m.t.ink)
+    val shape = containerShape()
+    Column(modifier.press(onClick = onClick).semantics { selected = on; contentDescription = "${t.label} theme" }, verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+        // The chosen theme has the selection outline; the others a hairline edge (none in Creator Pop, whose hairline is ink).
+        val edge = Modifier.let { if (on) it.border(2.dp, m.roles.selection, shape).padding(2.dp) else if (m.isD) it else it.border(1.dp, m.roles.hairline, shape).padding(1.dp) }
+        Box(Modifier.fillMaxWidth().height(170.dp).clip(shape).then(edge)) {
+            ThemePreview(t, preview, Modifier.fillMaxSize())
         }
-        if (on) Box(Modifier.align(Alignment.TopEnd).size(22.dp).clip(CircleShape).background(m.t.accent), contentAlignment = Alignment.Center) { Ic("check", 14.dp, m.t.accentInk) }
+        T(t.label, m.scale.label.copy(fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium), if (on) m.roles.ink else m.roles.ink2)
     }
 }
 

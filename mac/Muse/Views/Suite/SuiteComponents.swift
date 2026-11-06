@@ -66,7 +66,7 @@ struct SuiteSectionHead<Trailing: View>: View {
     @ViewBuilder var trailing: () -> Trailing
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(title.uppercased()).font(t.mono(11, .medium)).tracking(1.2).foregroundStyle(t.ink)
+            Text(title).font(t.scale.heading.font).foregroundStyle(t.ink) // sentence case (plans/design-direction.md §3)
             Spacer(minLength: 8)
             trailing()
         }

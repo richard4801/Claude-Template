@@ -141,7 +141,7 @@ struct EditSuiteBin: View {
                         Button("Add as music") { session.edit { $0.addAudio(a, kind: .music) } }
                         Button("Add as voice-over") { session.edit { $0.addAudio(a, kind: .voice) } }
                         Button("Add as sound effect") { session.edit { $0.addAudio(a, kind: .sfx) } }
-                    } label: { Ph("plus") }
+                    } label: { Image(nsImage: Ph.menuImage("plus", 16)) } // a Menu label ignores frames; the image comes at its size
                         .menuStyle(.borderlessButton)
                         .menuIndicator(.hidden)
                         .fixedSize()

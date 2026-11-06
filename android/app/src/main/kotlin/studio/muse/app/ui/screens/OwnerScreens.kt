@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -57,6 +58,9 @@ import studio.muse.app.ui.Routes
 import studio.muse.app.ui.components.*
 import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.MuseSpace
+import studio.muse.app.ui.theme.roles
+import studio.muse.app.ui.theme.scale
 import studio.muse.core.Pricing
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -214,7 +218,7 @@ fun Card(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
 
 @Composable
 fun InlineNote(text: String, error: Boolean) {
-    NoteBox(text, warn = error, icon = if (error) "shield" else "check")
+    Notice(text, tone = if (error) NoticeTone.DANGER else NoticeTone.POSITIVE)
 }
 
 // ======================================================================= Owner balance (the studio balance + available to send)
@@ -223,16 +227,12 @@ fun InlineNote(text: String, error: Boolean) {
 @Composable
 fun OwnerBalanceCard(w: Wallet, modifier: Modifier = Modifier, studio: studio.muse.app.data.StudioBalance? = null) {
     val m = muse
-    val shape = RoundedCornerShape(m.t.rLg)
-    val (bg, fg) = when { m.isB -> m.t.surface2 to m.t.ink; m.isC -> m.t.cta to androidx.compose.ui.graphics.Color.White; m.isD -> m.t.blue to androidx.compose.ui.graphics.Color.White; else -> m.t.ink to m.t.bg }
-    Box(modifier.fillMaxWidth().let { if (m.isD) it.hardShadow(5.dp, m.t.rLg) else it }.clip(shape).background(bg).let { if (m.isD) it.border(2.5.dp, Ink, shape) else if (m.isB) it.border(1.dp, m.t.line, shape) else it }.padding(20.dp)) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Lbl("Studio balance", color = fg.copy(alpha = .8f))
-            T(signedMoney(studio?.balanceUsd ?: w.studioBalance ?: w.usd), m.type.mono.copy(fontSize = 42.sp, fontWeight = FontWeight.SemiBold, lineHeight = 46.sp), if (m.isB) m.t.accent else fg)
-            T("Free to spend or send ${signedMoney(w.availableToSend ?: 0.0)}", m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), fg)
-            w.membersUnspentUsd?.let { Tiny("Members hold ${Pricing.money(it)} in unspent credit${if (w.heldUsd > 0) " · ${Pricing.money(w.heldUsd)} on hold" else ""}", color = fg.copy(alpha = .85f)) }
-            studio?.let { Tiny("Added ${Pricing.money(it.toppedUpUsd)} · spent ${Pricing.money(it.spentUsd)}", color = fg.copy(alpha = .85f)) }
-        }
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
+        Caption("Studio balance")
+        T(signedMoney(studio?.balanceUsd ?: w.studioBalance ?: w.usd), m.scale.display.copy(fontFamily = m.scale.textFamily, fontWeight = FontWeight.SemiBold).tabular(), m.roles.ink)
+        Caption("Free to spend or send ${signedMoney(w.availableToSend ?: 0.0)}")
+        w.membersUnspentUsd?.let { Caption("Members hold ${Pricing.money(it)} in unspent credit${if (w.heldUsd > 0) ", ${Pricing.money(w.heldUsd)} on hold" else ""}") }
+        studio?.let { Caption("Added ${Pricing.money(it.toppedUpUsd)}, spent ${Pricing.money(it.spentUsd)}") }
     }
 }
 
@@ -247,16 +247,16 @@ fun MembersScreen() {
     val nav = LocalNav.current
     val m = muse
     LaunchedEffect(Unit) { vm.loadMembers() }
-    ScreenBox {
+    ScreenBox(bg = muse.roles.canvas) {
         Column(Modifier.fillMaxSize()) {
-            TopBar("Members", onBack = { nav.back() }) { TbBtn("plus", { nav.go(Routes.INVITE) }) }
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            CalmTopBar("Members", onBack = { nav.back() }, right = { BarButton("plus", "Invite someone", { nav.go(Routes.INVITE) }) })
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = MuseSpace.gutter).padding(top = MuseSpace.s2, bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(MuseSpace.s5)) {
                 studio.wallet?.takeIf { it.owner }?.let { OwnerBalanceCard(it) }
                 val people = s.members.filterNot { it.owner }
-                if (people.isEmpty()) NoteBox("No members yet. Invite someone, then send them credit to render with.", icon = "user")
+                if (people.isEmpty()) EmptyState("No members yet", "Invite someone, then send them credit to render with.", "Invite someone", { nav.go(Routes.INVITE) }, primary = false)
                 people.forEach { mem -> MemberCard(vm, mem, open == mem.id, s) }
-                Cta2("Invite someone", { nav.go(Routes.INVITE) }, Modifier.fillMaxWidth(), icon = "plus")
-                Tiny("Amounts are in US dollars. You can't send more than the studio balance has free. Add top-ups in Credit.")
+                if (people.isNotEmpty()) SecondaryButton("Invite someone", { nav.go(Routes.INVITE) }, Modifier.fillMaxWidth(), icon = "plus")
+                Caption("Amounts are in US dollars. You can't send more than the studio balance has free. Add top-ups in Credit.")
             }
         }
     }
@@ -266,20 +266,17 @@ fun MembersScreen() {
 private fun MemberCard(vm: OwnerViewModel, mem: Member, open: Boolean, s: OwnerState) {
     val m = muse
     val rate = vm.wallet.collectAsState().value.wallet?.tokenUsd ?: Credit.DEFAULT_TOKEN_USD
-    Card {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.fillMaxWidth().press { vm.toggleOpen(mem.id) }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    T(mem.email, m.type.body.copy(fontWeight = FontWeight.Bold), m.t.ink, maxLines = 1)
-                    T("Balance ${Pricing.money(mem.usd)}", m.type.mono.copy(fontSize = 13.sp), m.t.ink)
-                    Tiny("Today ${Pricing.money(mem.todayUsd)} · Month ${Pricing.money(mem.monthUsd)} · Active ${ago(mem.lastActiveAt)}")
-                    Tiny("Daily cap " + (mem.capPerDay?.let { Pricing.money(it) } ?: "· studio default") + if (mem.heldTokens > 0) " · ${Pricing.money(Credit.usdOf(mem.heldTokens, rate))} on hold" else "")
-                }
-                if (mem.disabled) Pill("Off", "warn") else Pill("Active", "good")
-                Ic(if (open) "check" else "chev", 16.dp)
+    Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).press { vm.toggleOpen(mem.id) }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                T(mem.email, m.scale.heading, m.roles.ink, maxLines = 1)
+                T("${Pricing.money(mem.usd)}${if (mem.disabled) " · switched off" else ""}", m.scale.body.tabular(), if (mem.disabled) m.roles.caution else m.roles.ink)
+                Caption("Today ${Pricing.money(mem.todayUsd)} · this month ${Pricing.money(mem.monthUsd)} · active ${ago(mem.lastActiveAt)}")
+                Caption("Daily cap " + (mem.capPerDay?.let { Pricing.money(it) } ?: "is the studio default") + if (mem.heldTokens > 0) ", ${Pricing.money(Credit.usdOf(mem.heldTokens, rate))} on hold" else "")
             }
-            if (open) MemberEditor(vm, mem, s)
+            Ic(if (open) "check" else "chev", 16.dp, m.roles.ink2)
         }
+        if (open) MemberEditor(vm, mem, s)
     }
 }
 
@@ -291,27 +288,27 @@ private fun MemberEditor(vm: OwnerViewModel, mem: Member, s: OwnerState) {
     var note by remember(mem.id) { mutableStateOf("") }
     var cap by remember(mem.id) { mutableStateOf(mem.capPerDay?.let { Pricing.toFixed(it, 2) } ?: "") }
     Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Seg(listOf("send" to "Send credit", "back" to "Take back"), mode, { mode = it })
+        Segmented(listOf("send" to "Send credit", "back" to "Take back"), mode, { mode = it })
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Field("Amount ($)", Modifier.weight(1f)) { Input(amount, { amount = Credit.filterInput(it) }, keyboard = KeyboardType.Decimal, placeholder = "5.00") }
-            Field("Note (optional)", Modifier.weight(1.6f)) { Input(note, { note = it.take(200) }, placeholder = "For the dance set") }
+            Labeled("Amount ($)", Modifier.weight(1f)) { Input(amount, { amount = Credit.filterInput(it) }, keyboard = KeyboardType.Decimal, placeholder = "5.00", calm = true) }
+            Labeled("Note (optional)", Modifier.weight(1.6f)) { Input(note, { note = it.take(200) }, placeholder = "For the dance set", calm = true) }
         }
         val usd = Pricing.money(Credit.parseUsd(amount) ?: 0.0)
-        Cta(
+        PrimaryButton(
             if (s.busy) "Working…" else if (mode == "send") "Send $usd" else "Take back $usd",
             { vm.send(mem, amount, note, mode == "back") }, Modifier.fillMaxWidth(), busy = s.busy,
         )
-        if (mode == "back") Tiny("Only unused credit comes back. Credit on hold for a running render stays with it.")
-        Field("Daily cap ($)") {
+        if (mode == "back") Caption("Only unused credit comes back. Credit on hold for a running render stays with it.")
+        Labeled("Daily cap ($)") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Input(cap, { cap = it.filter { c -> c.isDigit() || c == '.' } }, Modifier.weight(1f), placeholder = "Studio default", keyboard = KeyboardType.Decimal)
-                Cta2("Save cap", { vm.setCap(mem, cap) }, height = 46.dp)
+                Input(cap, { cap = it.filter { c -> c.isDigit() || c == '.' } }, Modifier.weight(1f), placeholder = "Studio default", keyboard = KeyboardType.Decimal, calm = true)
+                SecondaryButton("Save cap", { vm.setCap(mem, cap) }, height = 48.dp)
             }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Column(Modifier.weight(1f)) {
-                T("Account on", m.type.body, m.t.ink)
-                Tiny(if (mem.disabled) "Switched off: can't sign in or render" else "Can sign in and render")
+                T("Account on", m.scale.body, m.roles.ink)
+                Caption(if (mem.disabled) "Switched off: can't sign in or render" else "Can sign in and render")
             }
             Toggle(!mem.disabled, { vm.setEnabled(mem, mem.disabled) })
         }
@@ -330,21 +327,22 @@ fun InviteScreen() {
     val m = muse
     var email by remember { mutableStateOf("") }
     LaunchedEffect(Unit) { vm.loadInvites() }
-    ScreenBox {
+    ScreenBox(bg = muse.roles.canvas) {
         Column(Modifier.fillMaxSize()) {
-            TopBar("Invite someone", onBack = { nav.back() })
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                T("MUSE is invite-only. Make a code, then send it to them. It works once, for that email, for 14 days.", m.type.body, m.t.muted)
-                Field("Their email") { Input(email, { email = it.trim() }, keyboard = KeyboardType.Email, placeholder = "name@example.com") }
-                Cta(if (s.busy) "Making a code…" else "Create invite code", { vm.invite(email) }, Modifier.fillMaxWidth(), busy = s.busy, icon = "plus")
+            CalmTopBar("Invite someone", onBack = { nav.back() })
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = MuseSpace.gutter).padding(top = MuseSpace.s2, bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(MuseSpace.s5)) {
+                T("MUSE is invite-only. Make a code, then send it to them. It works once, for that email, for 14 days.", m.scale.body, m.roles.ink2)
+                Labeled("Their email") { Input(email, { email = it.trim() }, keyboard = KeyboardType.Email, placeholder = "name@example.com", calm = true) }
+                PrimaryButton(if (s.busy) "Making a code…" else "Create invite code", { vm.invite(email) }, Modifier.fillMaxWidth(), busy = s.busy)
                 s.note?.takeIf { it.first == "invite" }?.let { InlineNote(it.second, it.third) }
                 created?.let { InviteCodeCard(it) }
                 if (s.invites.isNotEmpty()) {
-                    Lbl("Invites")
-                    ListGroup {
+                    Heading("Invites")
+                    Column {
                         s.invites.take(12).forEach { i ->
-                            Li("user", i.email ?: "Any email", sub = inviteStatus(i), onClick = {}) {
-                                Pill(if (i.usedAt != null) "Joined" else if (i.expiresAt < System.currentTimeMillis()) "Expired" else "Waiting", if (i.usedAt != null) "good" else "")
+                            RowItem(i.email ?: "Any email", inviteStatus(i)) {
+                                val expired = i.usedAt == null && i.expiresAt < System.currentTimeMillis()
+                                RowValue(if (i.usedAt != null) "Joined" else if (expired) "Expired" else "Waiting", if (i.usedAt != null) m.roles.positive else m.roles.ink2)
                             }
                         }
                     }
@@ -370,18 +368,16 @@ private fun InviteCodeCard(inv: InviteCreated) {
     val repo = LocalContainer.current.repo
     val serverUrl = LocalContainer.current.prefs.collectAsState().value.serverUrl
     val message = inv.shareMessage(serverUrl)
-    Card {
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Lbl("Invite code${inv.email?.let { " for $it" } ?: ""}")
-            T(inv.code, m.type.mono.copy(fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp), m.t.ink, align = TextAlign.Center)
-            Tiny("Shown once. Share sends the download link with the code; Copy copies the code only.", Modifier.fillMaxWidth().padding(bottom = 2.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Cta2("Copy", { clip.setText(AnnotatedString(inv.code)); repo.toast("Invite code copied") }, Modifier.weight(1f), icon = "grid")
-                Cta("Share", {
-                    val send = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, message); putExtra(Intent.EXTRA_SUBJECT, "Your MUSE invite") }
-                    runCatching { context.startActivity(Intent.createChooser(send, "Share invite").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                }, Modifier.weight(1f), icon = "export")
-            }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+        Caption("Invite code${inv.email?.let { " for $it" } ?: ""}")
+        T(inv.code, m.scale.title.tabular(), m.roles.ink)
+        Caption("Shown once. Share sends the download link with the code. Copy copies the code only.")
+        Row(Modifier.padding(top = MuseSpace.s2), horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+            SecondaryButton("Copy code", { clip.setText(AnnotatedString(inv.code)); repo.toast("Invite code copied") }, Modifier.weight(1f))
+            SecondaryButton("Share", {
+                val send = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, message); putExtra(Intent.EXTRA_SUBJECT, "Your MUSE invite") }
+                runCatching { context.startActivity(Intent.createChooser(send, "Share invite").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            }, Modifier.weight(1f), icon = "export")
         }
     }
 }
@@ -395,15 +391,14 @@ fun StudioSettingsScreen() {
     val nav = LocalNav.current
     val m = muse
     LaunchedEffect(Unit) { vm.loadSettings() }
-    ScreenBox {
+    ScreenBox(bg = muse.roles.canvas) {
         Column(Modifier.fillMaxSize()) {
-            TopBar("Studio settings", onBack = { nav.back() })
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            CalmTopBar("Studio settings", onBack = { nav.back() })
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = MuseSpace.gutter).padding(top = MuseSpace.s2, bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(MuseSpace.s5)) {
                 val st = s.settings
-                if (st == null) T("Loading…", m.type.body, m.t.muted) else {
+                if (st == null) repeat(3) { SkeletonLines(3) } else {
                     StudioForm(vm, st, s)
                     // Engines: the only place provider names, GPUs and start-up appear (owner only; plans/api.md "App clean-up" §5).
-                    Spacer(Modifier.height(4.dp))
                     EnginesSection(vm, st, s)
                 }
             }
@@ -417,18 +412,18 @@ private fun StudioForm(vm: OwnerViewModel, st: StudioSettings, s: OwnerState) {
     var perDay by remember(st) { mutableStateOf(Pricing.toFixed(st.capPerDay, 2)) }
     var perUser by remember(st) { mutableStateOf(Pricing.toFixed(st.capPerUserDay, 2)) }
     val m = muse
-    Field("Spending caps ($)") {
+    Labeled("Spending caps ($)") {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CapInput("Per job", perJob, { perJob = it }, Modifier.weight(1f))
             CapInput("Studio / day", perDay, { perDay = it }, Modifier.weight(1f))
             CapInput("Member / day", perUser, { perUser = it }, Modifier.weight(1f))
         }
     }
-    Cta(if (s.busy) "Saving…" else "Save caps", {
+    PrimaryButton(if (s.busy) "Saving…" else "Save caps", {
         vm.saveStudio(StudioSettingsPatch(capPerJob = perJob.toDoubleOrNull(), capPerDay = perDay.toDoubleOrNull(), capPerUserDay = perUser.toDoubleOrNull()))
     }, Modifier.fillMaxWidth(), busy = s.busy)
     s.note?.takeIf { it.first == "studio" }?.let { InlineNote(it.second, it.third) }
-    if (!st.features.replaceAudio) Tiny("Replace audio isn't available yet: turning Keep audio off gives a silent take.", color = m.t.muted)
+    if (!st.features.replaceAudio) Caption("Replace audio isn't available yet: turning Keep audio off gives a silent take.", color = m.roles.ink2)
 }
 
 /**
@@ -442,38 +437,41 @@ private fun EnginesSection(vm: OwnerViewModel, st: StudioSettings, s: OwnerState
     val studio by c.repo.state.collectAsState()
     var gpus by remember(st) { mutableStateOf(st.maxGpus) }
     var payer by remember(st) { mutableStateOf(st.overheadPayer) }
-    H3("Engines")
-    Tiny("Members only ever see results, time and price. Engines, keys and GPUs live here.")
+    Column(Modifier.padding(top = MuseSpace.s4), verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
+        Heading("Engines")
+        Caption("Members only ever see results, time and price. Engines, keys and GPUs live here.")
+    }
     val list = st.engines?.list.orEmpty()
-    if (list.isEmpty()) Tiny("This server doesn't report engine status.")
-    else ListGroup {
+    if (list.isEmpty()) Caption("This server doesn't report engine status.")
+    else Column {
         list.forEach { e ->
-            Li(if (e.id == "replicate") "spark" else "studio", e.name.ifBlank { e.id }, sub = listOfNotNull(e.usedFor.ifBlank { null }, if (e.keySet) "key set" else "no key",
-                e.balanceUsd?.let { "balance ${Pricing.money(it)}" }, e.message).joinToString(" · "), onClick = {}) {
-                Pill(engineStatusLabel(e.status), if (e.status == "ready") "good" else if (e.status == "simulated") "" else "warn")
+            RowItem(e.name.ifBlank { e.id }, listOfNotNull(e.usedFor.ifBlank { null }, if (e.keySet) "key set" else "no key",
+                e.balanceUsd?.let { "balance ${Pricing.money(it)}" }).joinToString(" · ") + (e.message?.let { ". $it" } ?: "")) {
+                RowValue(engineStatusLabel(e.status), if (e.status == "ready") m.roles.positive else if (e.status == "simulated") m.roles.ink2 else m.roles.caution)
             }
         }
     }
     val navX = LocalNav.current
-    ListGroup {
-        Li("spark", "Image models", sub = "Any Replicate model for new shots, edits, Enhance and Dress up", onClick = { navX.go(Routes.IMAGE_MODELS) }) { Ic("chev", 14.dp) }
-        Li("user", "Archived models", sub = "Hidden models · restore any time", onClick = { navX.go(Routes.ARCHIVED) }) { Ic("chev", 14.dp) }
+    Column {
+        RowItem("Image models", "Any Replicate model for new shots, edits, Enhance and Dress up", onClick = { navX.go(Routes.IMAGE_MODELS) }) { Chevron() }
+        RowItem("Archived models", "Hidden models you can restore any time", onClick = { navX.go(Routes.ARCHIVED) }) { Chevron() }
     }
-    Lbl("Add-on engine (Edit, Fast · beta, Upscale)")
+    Heading("Add-on engine (Edit, Fast · beta, Upscale)")
     WarmSwitchRow(c, studio.warm)
-    Tiny("Turns off after ${st.engines?.keepReady?.idleMinutes ?: st.warmIdleMinutes} min without renders, and after ${(st.engines?.keepReady?.maxMinutes ?: st.warmMaxMinutes) / 60.0} h at most (Keep ready extends it once).".replace(".0 h", " h"))
-    Field("Add-on GPUs at once · $gpus") {
-        MuseSlider(gpus, 0, 8, { gpus = it })
-        Tiny(if (gpus == 0) "0 pauses Edit and Fast · beta." else "Each member's Edit renders run on their own H100 while it's free.")
+    Caption("Turns off after ${st.engines?.keepReady?.idleMinutes ?: st.warmIdleMinutes} min without renders, and after ${(st.engines?.keepReady?.maxMinutes ?: st.warmMaxMinutes) / 60.0} h at most (Keep ready extends it once).".replace(".0 h", " h"))
+    Labeled("Add-on GPUs at once · $gpus") {
+        MuseSlider(gpus, 0, 8, { gpus = it }, calm = true)
+        Caption(if (gpus == 0) "0 pauses Edit and Fast · beta." else "Each member's Edit renders run on their own H100 while it's free.")
     }
-    Field("Who pays start-up") {
-        Seg(listOf("user" to "The member", "owner" to "The studio (me)"), payer, { payer = it })
-        Tiny("Starting an add-on GPU costs about ${Pricing.money(0.5 / 60 * 3.99)}. It's charged with the render, never shown to members as its own line.")
+    Labeled("Who pays start-up") {
+        Segmented(listOf("user" to "The member", "owner" to "The studio (me)"), payer, { payer = it })
+        Caption("Starting an add-on GPU costs about ${Pricing.money(0.5 / 60 * 3.99)}. It's charged with the render, never shown to members as its own line.")
     }
-    Cta2(if (s.busy) "Saving…" else "Save engine settings", { vm.saveStudio(StudioSettingsPatch(maxGpus = gpus, overheadPayer = payer)) }, Modifier.fillMaxWidth())
-    Spacer(Modifier.height(4.dp))
-    H3("Image engine")
-    Tiny("Makes character-sheet angles, outfit sets and photos. Members pay exactly what each photo costs.")
+    SecondaryButton(if (s.busy) "Saving…" else "Save engine settings", { vm.saveStudio(StudioSettingsPatch(maxGpus = gpus, overheadPayer = payer)) }, Modifier.fillMaxWidth())
+    Column(Modifier.padding(top = MuseSpace.s4), verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
+        Heading("Image engine")
+        Caption("Makes character-sheet angles, outfit sets and photos. Members pay exactly what each photo costs.")
+    }
     val en = s.engine
     if (en != null) EngineForm(vm, en, s)
 }
@@ -485,8 +483,8 @@ fun engineStatusLabel(status: String) = when (status) {
 @Composable
 private fun CapInput(label: String, value: String, onChange: (String) -> Unit, modifier: Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Tiny(label)
-        Input(value, { onChange(it.filter { c -> c.isDigit() || c == '.' }) }, keyboard = KeyboardType.Decimal)
+        Caption(label)
+        Input(value, { onChange(it.filter { c -> c.isDigit() || c == '.' }) }, keyboard = KeyboardType.Decimal, calm = true)
     }
 }
 
@@ -496,21 +494,21 @@ private fun EngineForm(vm: OwnerViewModel, en: ImageEngine, s: OwnerState) {
     var model by remember(en) { mutableStateOf(en.model) }
     var url by remember(en) { mutableStateOf(en.url ?: "") }
     val providers = listOf("replicate", "simulated", "fal", "custom-http")
-    Seg(providers.map { it to (engineLabel(it) + if (en.available[it] == false) " ·  off" else "") }, provider, { p ->
+    Segmented(providers.map { it to (engineLabel(it) + if (en.available[it] == false) " ·  off" else "") }, provider, { p ->
         provider = p
         model = if (p == en.provider) en.model else when (p) { "fal" -> "fal-ai/bytedance/seedream/v4/edit"; "simulated" -> "bundled-stills"; else -> "" } // replicate: the server's default
-    }, small = true)
-    if (en.available[provider] == false) NoteBox(if (provider == "fal") "fal isn't set up on the server. Add FAL_KEY to the server's variables first." else if (provider == "replicate") "Replicate isn't set up on the server (REPLICATE_API_TOKEN)." else "This engine isn't set up on the server.", warn = true)
+    })
+    if (en.available[provider] == false) Notice(if (provider == "fal") "fal isn't set up on the server. Add FAL_KEY to the server's variables first." else if (provider == "replicate") "Replicate isn't set up on the server (REPLICATE_API_TOKEN)." else "This engine isn't set up on the server.", tone = NoticeTone.CAUTION)
     when (provider) {
-        "simulated" -> Tiny("Free stand-in stills from the bundled references. Good for testing.")
-        "replicate" -> Tiny(if (en.provider == "replicate") "${en.label ?: "FLUX.2 [pro] · Replicate"}: new shots from the model's reference photos; outfit angles are edits of the front." else "FLUX.2 [pro] for new shots and Qwen edit for outfit angles, hosted on Replicate.")
-        "fal" -> Field("fal model id") { Input(model, { model = it.trim() }, placeholder = "fal-ai/bytedance/seedream/v4/edit") }
+        "simulated" -> Caption("Free stand-in stills from the bundled references. Good for testing.")
+        "replicate" -> Caption(if (en.provider == "replicate") "${en.label ?: "FLUX.2 [pro] · Replicate"}: new shots from the model's reference photos; outfit angles are edits of the front." else "FLUX.2 [pro] for new shots and Qwen edit for outfit angles, hosted on Replicate.")
+        "fal" -> Labeled("fal model id") { Input(model, { model = it.trim() }, placeholder = "fal-ai/bytedance/seedream/v4/edit", calm = true) }
         else -> {
-            Field("Engine URL (https)") { Input(url, { url = it.trim() }, keyboard = KeyboardType.Uri, placeholder = "https://images.example.com/v1/generate") }
-            Field("Model (optional)") { Input(model, { model = it.trim() }, placeholder = "my-model") }
+            Labeled("Engine URL (https)") { Input(url, { url = it.trim() }, keyboard = KeyboardType.Uri, placeholder = "https://images.example.com/v1/generate", calm = true) }
+            Labeled("Model (optional)") { Input(model, { model = it.trim() }, placeholder = "my-model", calm = true) }
         }
     }
-    Cta2(if (s.busy) "Saving…" else "Use ${engineLabel(provider)}", {
+    SecondaryButton(if (s.busy) "Saving…" else "Use ${engineLabel(provider)}", {
         vm.saveEngine(ImageEnginePatch(provider, model.ifBlank { null }, url.ifBlank { null }.takeIf { provider == "custom-http" }))
     }, Modifier.fillMaxWidth())
     s.note?.takeIf { it.first == "engine" }?.let { InlineNote(it.second, it.third) }

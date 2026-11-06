@@ -83,7 +83,7 @@ struct StoryboardView: View {
                             if let i = suite.board.castIds.firstIndex(of: m.id) { suite.board.castIds.remove(at: i) } else if suite.board.castIds.count < 3 { suite.board.castIds.append(m.id) }
                         }
                     }
-                } label: { Ph("plus") }
+                } label: { Image(nsImage: Ph.menuImage("plus", 16)) } // a Menu label ignores frames; the image comes at its size
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 .accessibilityLabel("Choose the cast")
             }

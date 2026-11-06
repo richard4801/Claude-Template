@@ -117,7 +117,8 @@ struct Theme {
         }
     }
 
-    var headingsUppercase: Bool { isA || isB }
+    /// Sentence case everywhere (plans/design-direction.md §3): no theme sets headings in caps any more.
+    var headingsUppercase: Bool { false }
 
     /// Big numbers (KPIs, balance).
     func figure(_ size: CGFloat) -> Font { isA ? Fonts.font("Instrument Serif", size * 1.6, .regular) : mono(size, .medium) }
@@ -132,7 +133,7 @@ struct Theme {
         }
     }
 
-    var navUppercase: Bool { isA || isB }
+    var navUppercase: Bool { false }
 }
 
 /// Font lookup by family + weight (works for the bundled variable fonts), with a system fallback.
