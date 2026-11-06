@@ -89,19 +89,12 @@ struct StyleStep: View {
             Group {
                 switch step {
                 case "format":
-                    let items = ComposerWheels.formats(c)
-                    HStack(alignment: .top, spacing: 15) {
-                        WheelColumn(title: "Format", items: items, selected: Wheel.index(of: s.format, in: items, options: c.ugcFormats), plate: .format, width: 220) { v in
-                            store.suite.pickerSettings.format = v
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("How the ad plays out. Genre, era and tempo still apply on top.").font(t.body(13)).foregroundStyle(t.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        OptionGrid(options: c.ugcFormats, selected: s.format, autoLine: "Picks the format from your prompt", tileHeight: 70) {
+                            store.suite.pickerSettings.format = $0
                         }
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("UGC AD FORMAT").font(t.mono(10.5, .medium)).tracking(1.2).foregroundStyle(t.muted)
-                            Text("How the ad plays out. Genre, era and tempo still apply on top.").font(t.body(13)).foregroundStyle(t.muted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .frame(maxWidth: 260, alignment: .leading)
-                        .padding(.top, 30)
-                        Spacer(minLength: 0)
                     }
                 case "era": EraSlider()
                 case "tempo": OptionGrid(options: c.tempos, selected: s.tempo, autoLine: "The scene sets the pace", tileHeight: 70) { store.suite.pickerSettings.tempo = $0 }

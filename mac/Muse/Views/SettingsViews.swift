@@ -4,6 +4,8 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
+    /// The camera drums' soft click per stop (RigDrum.swift), off by default.
+    @AppStorage("rigDrumClick") private var rigDrumClick = false
 
     var body: some View {
         @Bindable var store = store
@@ -68,7 +70,8 @@ struct SettingsView: View {
                 }
             }
             ListBox {
-                ListRow(icon: "sparkles", title: "Pro mode", hint: "Show and edit the prompts behind every render", last: true) { MToggle(isOn: $store.pro) }
+                ListRow(icon: "sparkles", title: "Pro mode", hint: "Show and edit the prompts behind every render") { MToggle(isOn: $store.pro) }
+                ListRow(title: "Click on each camera stop", hint: "A soft tick as the camera drums turn", last: true) { MToggle(isOn: $rigDrumClick) }
             }
         case .defaults:
             H2("Render defaults")

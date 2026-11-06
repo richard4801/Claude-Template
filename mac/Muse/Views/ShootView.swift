@@ -225,6 +225,18 @@ struct ShootCanvas: View {
     }
 }
 
+/// The Shoot camera's hardware as drum items: focal lengths ("35 mm") and apertures ("f/2.8"), no Auto.
+enum ShootRig {
+    static let focals: [WheelItem] = ShootSettings.lenses.map {
+        WheelItem(value: String($0), name: "\($0) mm", caption: ComposerWheels.focalCaption(Double($0)))
+    }
+    static let apertures: [WheelItem] = ShootSettings.apertures.map {
+        WheelItem(value: $0, name: $0, caption: ComposerWheels.apertureCaption("f" + String($0.dropFirst(2))))
+    }
+    static func focalIndex(_ mm: Int) -> Int { focals.firstIndex(where: { $0.value == String(mm) }) ?? 0 }
+    static func apertureIndex(_ f: String) -> Int { apertures.firstIndex(where: { $0.value == f }) ?? 0 }
+}
+
 struct ShootInspector: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
@@ -271,17 +283,17 @@ struct ShootInspector: View {
                         }
                     case .camera:
                         Field("Shot") { Seg(ShootSettings.shots.map { ($0, $0) }, selection: $store.shoot.shot) }
-                        Field("Lens · \(store.shoot.lens)mm") {
-                            FlowLayout {
-                                ForEach(ShootSettings.lenses, id: \.self) { l in Chip("\(l)mm", on: store.shoot.lens == l) { store.shoot.lens = l } }
+                        // Hardware choices are drums on the always-dark camera bag (RigDrum.swift).
+                        HStack(alignment: .top, spacing: 0) {
+                            RigDrum(label: "Focal", items: ShootRig.focals, selected: ShootRig.focalIndex(store.shoot.lens), face: .focal) { item in
+                                if let mm = item.value.flatMap({ Int($0) }) { store.shoot.lens = mm }
                             }
-                            Muted(store.shoot.lensHint)
-                        }
-                        Field("Aperture") {
-                            FlowLayout {
-                                ForEach(ShootSettings.apertures, id: \.self) { a in Chip(a, on: store.shoot.aperture == a) { store.shoot.aperture = a } }
+                            RigDrum(label: "Aperture", items: ShootRig.apertures, selected: ShootRig.apertureIndex(store.shoot.aperture), face: .aperture) { item in
+                                if let f = item.value { store.shoot.aperture = f }
                             }
                         }
+                        .padding(.vertical, 14).padding(.horizontal, 8)
+                        .background(RoundedRectangle(cornerRadius: t.cardRadius).fill(RigDrum.Bag.raised))
                         LinkText("Reset camera") { store.resetCamera() }
                     case .light:
                         Field("Light") {

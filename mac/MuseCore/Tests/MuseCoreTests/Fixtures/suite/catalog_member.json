@@ -457,7 +457,7 @@
    {
     "id": "phone",
     "label": "Phone",
-    "description": "Modern smartphone: deep focus, natural HDR",
+    "description": "Everything sharp, bright HDR",
     "render": "body-08-phone",
     "name": "Phone UGC",
     "caption": "Phone · 24 mm · deep focus · HDR",
@@ -466,7 +466,7 @@
    {
     "id": "vlog",
     "label": "Creator camera",
-    "description": "Compact creator camera, crisp and bright",
+    "description": "Crisp, bright, close",
     "render": "body-07-creator-cine",
     "name": "Creator Camera",
     "caption": "FX3 · ZV look · compact · 4K",
@@ -475,7 +475,7 @@
    {
     "id": "cinema_digital",
     "label": "Cinema camera",
-    "description": "Clean digital cinema, rich skin tones",
+    "description": "Clean, rich skin tones",
     "render": "body-02-super35",
     "name": "Cinema Camera",
     "caption": "Alexa · Venice · RED look · clean digital cinema",
@@ -484,7 +484,7 @@
    {
     "id": "super35",
     "label": "Super 35 digital",
-    "description": "Classic S35 cinema sensor",
+    "description": "Classic cinema depth",
     "render": "body-02-super35",
     "name": "Super 35 Digital",
     "caption": "Alexa 35 look · Super 35 · 4.6K",
@@ -494,7 +494,7 @@
    {
     "id": "film_35",
     "label": "35mm film",
-    "description": "Fine grain, halation, organic colour",
+    "description": "Fine grain, warm halation",
     "render": "body-05-film35",
     "name": "35mm Film",
     "caption": "35mm 4-perf · Vision3 500T look",
@@ -503,7 +503,7 @@
    {
     "id": "film_16",
     "label": "16mm film",
-    "description": "Visible grain, softer, indie feel",
+    "description": "Visible grain, indie feel",
     "render": "body-06-film16",
     "name": "Super 16 Film",
     "caption": "Super 16 · grain · documentary",
@@ -512,7 +512,7 @@
    {
     "id": "film_8",
     "label": "Super 8",
-    "description": "Home-movie grain, gate weave, warm",
+    "description": "Heavy grain, warm flicker",
     "render": "body-10-super8",
     "name": "Super 8",
     "caption": "Super 8 · home movie · 18 fps",
@@ -521,7 +521,7 @@
    {
     "id": "large_format_65",
     "label": "Large format 65mm",
-    "description": "Epic, huge sensor, shallow depth",
+    "description": "Epic width, shallow focus",
     "render": "body-01-large-format",
     "name": "Large Format 65mm",
     "caption": "65mm look · huge sensor · epic, shallow depth",
@@ -530,7 +530,7 @@
    {
     "id": "camcorder",
     "label": "DV camcorder",
-    "description": "2000s camcorder: video texture, sharpening",
+    "description": "2000s video, crisp edges",
     "render": "body-09-dv-camcorder",
     "name": "DV Camcorder",
     "caption": "MiniDV · 2000s · 480i texture",
@@ -539,7 +539,7 @@
    {
     "id": "modular_8k",
     "label": "Modular 8K",
-    "description": "Modular 8K digital: razor detail, big sensor",
+    "description": "Razor detail, wide frame",
     "render": "body-03-modular8k",
     "name": "Modular 8K",
     "caption": "V-Raptor look · VistaVision · 8K",
@@ -549,7 +549,7 @@
    {
     "id": "full_frame_cine",
     "label": "Full-frame cine",
-    "description": "Full-frame cinema sensor, creamy depth",
+    "description": "Creamy depth, soft skin",
     "render": "body-04-fullframe",
     "name": "Full-Frame Cine",
     "caption": "Venice 2 look · Full frame · 8.6K",
@@ -559,7 +559,7 @@
    {
     "id": "creator_cine",
     "label": "Creator cine",
-    "description": "Compact full-frame creator camera, 4K 120",
+    "description": "Crisp, smooth slow motion",
     "render": "body-07-creator-cine",
     "name": "Creator Cine",
     "caption": "FX3 look · Full frame · 4K 120",
@@ -569,7 +569,7 @@
    {
     "id": "webcam",
     "label": "Webcam",
-    "description": "Laptop webcam look, flat and close",
+    "description": "Flat, close, video-call feel",
     "render": "body-11-webcam",
     "name": "Webcam",
     "caption": "Webcam · wide · flat light · video-call look",
@@ -578,7 +578,7 @@
    {
     "id": "security_cam",
     "label": "CCTV",
-    "description": "High-angle surveillance look",
+    "description": "High angle, muted colour",
     "render": "body-12-cctv",
     "name": "CCTV",
     "caption": "Security cam · high fixed angle · muted colour",
@@ -589,7 +589,7 @@
    {
     "id": "clean",
     "label": "Clean sharp",
-    "description": "Modern clinical prime",
+    "description": "Sharp, clean, modern",
     "render": "lens-01-clean-prime",
     "name": "Clean Sharp Prime",
     "caption": "Master Prime look · spherical · T1.3",
@@ -605,7 +605,7 @@
    {
     "id": "warm_vintage",
     "label": "Warm vintage",
-    "description": "70s-style warm prime",
+    "description": "Warm, soft, gentle falloff",
     "render": "lens-04-warm-vintage",
     "name": "Warm Vintage Prime",
     "caption": "Speed Panchro look · warm · gentle falloff",
@@ -614,7 +614,7 @@
    {
     "id": "anamorphic",
     "label": "Anamorphic",
-    "description": "Oval bokeh, horizontal flares",
+    "description": "Oval bokeh, flares",
     "render": "lens-02-anamorphic",
     "name": "Anamorphic 2×",
     "caption": "Master Anamorphic look · oval bokeh · blue flares",
@@ -623,7 +623,7 @@
    {
     "id": "vintage_anamorphic",
     "label": "Vintage anamorphic",
-    "description": "Character, falloff, streaks",
+    "description": "Amber streaks, soft edges",
     "render": "lens-03-vintage-anamorphic",
     "name": "Vintage Anamorphic",
     "caption": "1970s C-series look · amber flares · soft edges",
@@ -641,7 +641,7 @@
    {
     "id": "swirl",
     "label": "Swirl bokeh",
-    "description": "Petzval-style swirling background",
+    "description": "Swirling background blur",
     "render": "lens-09-swirl",
     "name": "Swirl Bokeh",
     "caption": "Petzval-style portrait · swirling background",
@@ -650,7 +650,7 @@
    {
     "id": "macro",
     "label": "Macro",
-    "description": "Extreme close detail",
+    "description": "Tiny details, very close",
     "render": "lens-06-macro",
     "name": "Macro",
     "caption": "100 mm macro · 1:1 · product & detail",
@@ -659,7 +659,7 @@
    {
     "id": "tilt_shift",
     "label": "Tilt-shift",
-    "description": "Miniature-looking focus band",
+    "description": "Miniature, slanted focus",
     "render": "lens-10-tilt-shift",
     "name": "Tilt-shift",
     "caption": "Slanted focus band · miniature look",
@@ -668,7 +668,7 @@
    {
     "id": "fisheye",
     "label": "Fisheye",
-    "description": "Ultra-wide barrel distortion",
+    "description": "Bent edges, huge view",
     "render": "lens-08-fisheye",
     "name": "Ultra-wide / Fisheye",
     "caption": "14 mm & fisheye · skate & FPV energy",
@@ -677,7 +677,7 @@
    {
     "id": "cine_zoom",
     "label": "Cine zoom",
-    "description": "Long cinema zoom, crash zooms",
+    "description": "Smooth zooms, crash zooms",
     "render": "lens-07-cine-zoom",
     "name": "Cine Zoom",
     "caption": "Optimo look · 24–290 mm · crash zoom",
