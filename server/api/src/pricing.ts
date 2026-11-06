@@ -12,6 +12,8 @@ export type RenderReq = {
   engine?: string; steps?: number; use?: string; lipSync?: boolean; takes?: number; clipSeconds?: number | null;
   /** Replicate only: the quality and the $/output-second it was priced at (stored on the job at submit time). */
   quality?: string; pricePerSec?: number;
+  /** Upscale only (engine "upscale"): the size, the take's seconds, and the GPU seconds and dollars it was priced at. */
+  size?: string; seconds?: number; gpuSeconds?: number; usd?: number;
 };
 
 // ---- Replicate (hosted MiniMax H3): Draft / Standard / HD, billed per output second (plans/api.md "Pricing").
@@ -69,6 +71,27 @@ export function photoPredictionCost(p: PhotoPrices, kind: 'shot' | 'edit', measu
 }
 export const REPLICATE_MIN_SEC = 4, REPLICATE_MAX_SEC = 15, SAMPLE_CLIP_SEC = 9.4;
 export const isReplicate = (r: RenderReq) => r.engine === 'replicate';
+export const isUpscale = (r: RenderReq) => r.engine === 'upscale';
+
+// ---- Upscale (SeedVR2 on the add-on GPU; plans/app-cleanup.md decision 6). Priced from measured times per size:
+// config UPSCALE_PRICES = {"2k": {"usdPerSec": …, "gpuSecPerSec": …}, …} (dollars and GPU seconds per output second).
+export type UpscalePrice = { usdPerSec: number; gpuSecPerSec: number };
+export const UPSCALE_STARTUP_SEC = 60;
+export function upscalePrices(raw: string | undefined): Partial<Record<UpscaleSize, UpscalePrice>> {
+  if (!raw?.trim()) return {};
+  try {
+    const o = JSON.parse(raw) as Record<string, Partial<UpscalePrice>>;
+    const out: Partial<Record<UpscaleSize, UpscalePrice>> = {};
+    for (const z of UPSCALE_SIZES) { const v = o[z.id]; if (v && v.usdPerSec! > 0 && v.gpuSecPerSec! > 0) out[z.id] = { usdPerSec: v.usdPerSec!, gpuSecPerSec: v.gpuSecPerSec! }; }
+    return out;
+  } catch { throw new Error('Bad configuration: UPSCALE_PRICES is not valid JSON'); }
+}
+/** The request for upscaling a take of `seconds` to `size` at `price` (stored on the job, so later price changes don't move it). */
+export function upscaleRequest(size: UpscaleSize, seconds: number, price: UpscalePrice) {
+  const usd = Math.round(price.usdPerSec * seconds * 10000) / 10000;
+  return { engine: 'upscale', size, seconds, gpuSeconds: Math.round(UPSCALE_STARTUP_SEC + price.gpuSecPerSec * seconds), usd, takes: 1 };
+}
+export const upscaleLabel = (size?: string) => `${UPSCALE.label} · ${UPSCALE_SIZES.find(z => z.id === size)?.label ?? size ?? ''}`;
 /** A replicate job's quality (Draft when it names none, the default). */
 export const qualityOf = (r: RenderReq): Quality => (QUALITY_IDS as string[]).includes(r.quality ?? '') ? r.quality as Quality : 'draft';
 /** Whole output seconds Replicate renders for a clip: rounded up, 4–15 (no clip length = the 9.4 s sample). */
@@ -104,6 +127,7 @@ export function lengthSec(r: RenderReq) {
 /** Minutes for one take. */
 export function estMin(r: RenderReq) {
   if (isReplicate(r)) return replicateTakeSeconds(r) / 60;
+  if (isUpscale(r)) return (r.gpuSeconds ?? UPSCALE_STARTUP_SEC) / 60;
   const L = lengthSec(r);
   if (r.engine === 'viggle') return VIGGLE_MIN_5S * (L / BASE_LEN);
   return (r.steps ?? STEPS_DEFAULT) * secPerLen(L) / 60 + GPU_STARTUP_MIN + (r.lipSync ? LIP_SYNC_MIN : 0);
@@ -111,6 +135,7 @@ export function estMin(r: RenderReq) {
 /** Dollars for one take. */
 export function estCost(r: RenderReq) {
   if (isReplicate(r)) return pricePerSecOf(r) * replicateSeconds(r.clipSeconds);
+  if (isUpscale(r)) return r.usd ?? 0;
   const L = lengthSec(r);
   return r.engine === 'viggle' ? VIGGLE_COST_5S * (L / BASE_LEN) : estMin(r) / 60 * GPU_PER_HOUR;
 }
@@ -122,8 +147,8 @@ export const totalCost = (r: RenderReq) => estCost(r) * nTakes(r);
 export const money = (v: number) => '$' + v.toFixed(2);
 /** "Standard · 768P", "HD · 2K", "Exact edit · 10 steps", "Fast · beta". */
 export const engineLabel = (r: RenderReq) => isReplicate(r) ? `${QUALITY_INFO[qualityOf(r)].label} · ${QUALITY_INFO[qualityOf(r)].resolution}`
-  : r.engine === 'viggle' ? FAST.label : EDIT.label;
-export const takeLabel = (r: RenderReq) => isReplicate(r) ? QUALITY_INFO[qualityOf(r)].label : r.engine === 'viggle' ? FAST.label : EDIT.label;
+  : isUpscale(r) ? upscaleLabel(r.size) : r.engine === 'viggle' ? FAST.label : EDIT.label;
+export const takeLabel = (r: RenderReq) => isReplicate(r) ? QUALITY_INFO[qualityOf(r)].label : isUpscale(r) ? upscaleLabel(r.size) : r.engine === 'viggle' ? FAST.label : EDIT.label;
 
 /** "Generate · 10 min · $0.67" (the app's button label). */
 export function genLabel(r: RenderReq) {
@@ -153,11 +178,15 @@ export const loraTrainMinutes = () => LORA_PHOTO_MIN + LORA_VIDEO_MIN;
 export const loraTrainCost = () => Math.round(loraTrainMinutes() / 60 * GPU_PER_HOUR * 100) / 100; // $6.65
 
 const leftText = (s: number) => s >= 60 ? `~${Math.ceil(s / 60)} min left` : `~${Math.ceil(s)}s left`;
-export const totalStepsFor = (r: RenderReq) => isReplicate(r) ? nTakes(r) : r.engine === 'viggle' ? 4 : r.steps ?? STEPS_DEFAULT;
+export const totalStepsFor = (r: RenderReq) => isReplicate(r) || isUpscale(r) ? nTakes(r) : r.engine === 'viggle' ? 4 : r.steps ?? STEPS_DEFAULT;
 
 /** Where a render is after `elapsed` GPU seconds (start-up, steps, lip sync per take). Same as the mock. */
 export function progressAt(r: RenderReq, elapsed: number) {
   const total = totalSeconds(r), n = nTakes(r), perTake = total / n;
+  if (isUpscale(r)) {
+    const e = Math.min(Math.max(elapsed, 0), total), start = Math.min(UPSCALE_STARTUP_SEC, total / 2);
+    return { progress: Math.min(100, e / total * 100), take: 1, step: 0, totalSteps: 1, phase: e >= total ? 'Done' : `${e < start ? 'Getting ready' : 'Upscaling'} · ${leftText(total - e)}`, secondsLeft: total - e };
+  }
   if (isReplicate(r)) {
     const e = Math.min(Math.max(elapsed, 0), total), take = Math.min(n, Math.floor(e / perTake) + 1);
     return { progress: Math.min(100, e / total * 100), take, step: take - 1, totalSteps: n, phase: e >= total ? 'Done' : `${n > 1 ? `take ${take}/${n} · ` : ''}Rendering · ${leftText(total - e)}`, secondsLeft: total - e };
@@ -203,6 +232,7 @@ export function workerPhaseLabel(raw?: string) {
 
 /** Simulated seconds at which a failing job breaks (step 3 of take 1). */
 export function failAt(r: RenderReq) {
+  if (isUpscale(r)) return totalSeconds(r) * 0.4;
   const perTake = totalSeconds(r) / nTakes(r), viggle = r.engine === 'viggle';
   const totalSteps = totalStepsFor(r), startup = viggle ? 0 : 30, lip = !viggle && r.lipSync ? 240 : 0;
   return startup + (perTake - startup - lip) * 2.5 / totalSteps;

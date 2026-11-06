@@ -17,4 +17,7 @@ def build_handlers(h3_backend: H3Backend, *, lipsync: bool = True) -> list[JobHa
         # Viggle-Animate needs >80 GB VRAM (H200 NVL) and its own diffusers pin: not on the H100 pod.
         DisabledHandler("viggle", "viggle", NOT_ON_POD),
         DisabledHandler("lora-train", "lora-train", "not enabled yet"),
+        # Upscale (SeedVR2, plans/app-cleanup.md decision 6): the server sends `source.mp4` + size/width/height and
+        # expects `take_1.mp4`. Not installed on the pod image yet; the server offers it only when pods report "upscale".
+        DisabledHandler("upscale", "upscale", "SeedVR2 not installed on this pod yet"),
     ]
