@@ -33,6 +33,10 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -112,12 +116,20 @@ fun BoxScope.ComposerSheetHost(sheet: ComposerSheet, x: SheetContext) {
             val tabs = listOf(SheetTab("genre", "Genre", s.genre != null), SheetTab("era", "Era", s.era != null), SheetTab("tempo", "Tempo", s.tempo != null))
             val tab = sheet.tab.takeIf { t -> tabs.any { it.key == t } } ?: "genre"
             PickerShell("Style", x.wide, x.close, tabs, tab, x.setTab, onReset = { set { it.reset(ComposerChip.STYLE) } }) {
-                val (list, cur, put) = when (tab) {
-                    "era" -> Triple(cam.eras, s.era) { id: String? -> set { it.copy(era = id) } }
-                    "tempo" -> Triple(cam.tempos, s.tempo) { id: String? -> set { it.copy(tempo = id) } }
-                    else -> Triple(cam.genres, s.genre) { id: String? -> set { it.copy(genre = id) } }
+                // UGC ad: the ad format wheel sits above genre, era and tempo.
+                if (d.tool == ComposerTool.UGC && cam.ugcFormats.isNotEmpty()) {
+                    val f = CameraWheels.formats(cam)
+                    WheelRow("Format", f, CameraWheels.index(f, s.format, cam.ugcFormats), { w -> set { it.copy(format = w.id) } }, if (x.wide) 70.dp else 56.dp)
+                    Spacer(Modifier.height(6.dp))
                 }
-                OptionGrid(ComposerCatalog.visible(list), cur, x.wide, put, preview = { o, i -> Preview(STYLE_STILLS[i % STYLE_STILLS.size], o.loop, PreviewDraw.Word(o.label)) })
+                if (tab == "era") EraSlider(cam, s.era, x.wide) { id -> set { it.copy(era = id) } }
+                else {
+                    val (list, cur, put) = when (tab) {
+                        "tempo" -> Triple(cam.tempos, s.tempo) { id: String? -> set { it.copy(tempo = id) } }
+                        else -> Triple(cam.genres, s.genre) { id: String? -> set { it.copy(genre = id) } }
+                    }
+                    OptionGrid(ComposerCatalog.visible(list), cur, x.wide, put, preview = { o, i -> Preview(STYLE_STILLS[i % STYLE_STILLS.size], o.loop, PreviewDraw.Word(o.label)) })
+                }
             }
         }
         SheetKind.LOOK -> {
@@ -161,6 +173,47 @@ fun BoxScope.ComposerSheetHost(sheet: ComposerSheet, x: SheetContext) {
 /** Placeholder stills for Style cards until their own stills are made (any render reads as a mood; the big type says what). */
 private val STYLE_STILLS = listOf("palette-04-bleached-warm", "palette-02-teal-orange", "palette-05-sodium-decay", "light-02-contre-jour", "palette-03-hyper-neon",
     "palette-06-classic-bw", "light-05-practicals", "stock-02-16mm", "palette-01-naturalistic", "light-04-window", "body-10-super8", "light-01-soft-cross")
+
+/**
+ * Era as a decade slider: Auto off the left end, then the catalog's eras in order; it snaps to each stop. The ticks under
+ * the track are tappable too (48 dp), and TalkBack can set it like any slider.
+ */
+@Composable
+private fun ColumnScope.EraSlider(cam: CameraCatalog, current: String?, wide: Boolean, onPick: (String?) -> Unit) {
+    val m = muse
+    val stops = EraScale.stops(cam)
+    val n = stops.size
+    val i = EraScale.index(cam, current)
+    val o = cam.eras.firstOrNull { it.id == stops[i] }
+    val label = o?.label ?: "Auto"
+    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        PreviewTile(Preview(if (o == null) null else STYLE_STILLS[(i + 4) % STYLE_STILLS.size], o?.loop, if (o == null) PreviewDraw.Auto else PreviewDraw.Word(o.label)),
+            Modifier.fillMaxWidth().height(if (wide) 170.dp else 150.dp).clip(RoundedCornerShape(12.dp)))
+        Row(verticalAlignment = Alignment.Bottom) {
+            T(label, m.type.h2.copy(fontSize = 30.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold), m.t.ink, Modifier.weight(1f), maxLines = 1)
+            T(if (o == null) "AUTO" else "ERA", m.type.mono.copy(fontSize = 12.sp, letterSpacing = .14.em), m.t.muted, maxLines = 1)
+        }
+        T(o?.description?.ifBlank { null } ?: if (o == null) "The engine picks the period from your prompt" else "", m.type.body.copy(fontSize = 13.sp), m.t.muted, maxLines = 2)
+        if (n > 1) {
+            Box(Modifier.semantics {
+                contentDescription = "Era"; stateDescription = label
+                progressBarRangeInfo = androidx.compose.ui.semantics.ProgressBarRangeInfo(i.toFloat(), 0f..(n - 1).toFloat(), n - 2)
+                setProgress { v -> onPick(EraScale.snap(cam, v / (n - 1))); true }
+            }) { MuseSlider(i, 0, n - 1, { k -> onPick(EraScale.at(cam, k)) }) }
+            androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().height(48.dp)) {
+                val w = maxWidth
+                stops.forEachIndexed { k, id ->
+                    val on = k == i
+                    val x = w * (k.toFloat() / (n - 1)) - 24.dp
+                    Box(Modifier.offset(x = x.coerceIn(0.dp, w - 48.dp)).size(48.dp).press { onPick(id) }.semantics { role = Role.RadioButton; selected = on; contentDescription = EraScale.tick(cam, id) },
+                        contentAlignment = Alignment.TopCenter) {
+                        T(EraScale.tick(cam, id), m.type.mono.copy(fontSize = 10.5.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal), if (on) m.t.ink else m.t.muted, maxLines = 1, align = TextAlign.Center)
+                    }
+                }
+            }
+        }
+    }
+}
 
 /** A grid of options with Auto first (null). */
 @Composable

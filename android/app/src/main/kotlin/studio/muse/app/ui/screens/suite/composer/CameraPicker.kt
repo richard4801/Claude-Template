@@ -91,7 +91,12 @@ object CameraWheels {
         WheelItem(o.id, o.label + (o.description.ifBlank { null }?.let { " · $it" } ?: ""), APERTURE_LINES[o.id] ?: "", Preview(draw = PreviewDraw.Iris(o.id.removePrefix("f").toDoubleOrNull() ?: 4.0)))
     }
     fun heights(c: CameraCatalog) = listOf(AUTO_CARD) + ComposerCatalog.visible(c.heights).map { WheelItem(it.id, it.label, it.description, Preview(draw = PreviewDraw.Height(it.id))) }
-    fun framings(c: CameraCatalog) = listOf(AUTO_CARD) + ComposerCatalog.visible(c.shotSizes).map { WheelItem(it.id, it.label, it.description, Preview(draw = PreviewDraw.Framing(it.id))) }
+    /** UGC ad's format wheel (catalog `ugcFormats`): a still with the format's big name until format loops exist. */
+    fun formats(c: CameraCatalog) = listOf(AUTO_CARD.copy(caption = "Fits the product")) + ComposerCatalog.visible(c.ugcFormats).mapIndexed { i, o ->
+        WheelItem(o.id, o.label, o.description, Preview(o.render ?: FORMAT_STILLS[i % FORMAT_STILLS.size], o.loop, PreviewDraw.Word(o.label)))
+    }
+    private val FORMAT_STILLS = listOf("light-06-ring-creator", "palette-04-bleached-warm", "palette-01-naturalistic", "light-04-window", "palette-03-hyper-neon", "light-05-practicals", "stock-02-16mm", "light-01-soft-cross")
+    fun framings(c: CameraCatalog) =listOf(AUTO_CARD) + ComposerCatalog.visible(c.shotSizes).map { WheelItem(it.id, it.label, it.description, Preview(draw = PreviewDraw.Framing(it.id))) }
 
     private val FOCAL_LINES = mapOf(14 to "Huge space, bent edges", 24 to "Room and context", 35 to "Everyday, a touch wide", 50 to "Like your eye sees", 85 to "Flattering, tighter faces", 135 to "Compressed, far away")
     private val APERTURE_LINES = mapOf("f1.4" to "Background melts away", "f2.8" to "Subject pops, gentle blur", "f5.6" to "Most of the scene sharp", "f11" to "Front to back in focus")

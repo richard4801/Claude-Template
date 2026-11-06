@@ -110,6 +110,32 @@ data class ComposerSettings(
     }
 }
 
+/**
+ * Style → Era as a decade slider: Auto off the left end, then the catalog's visible eras in order (1960s … 2020s, Near
+ * future). A drag snaps to the nearest stop.
+ */
+object EraScale {
+    /** The stops: null (Auto) first, then the eras. */
+    fun stops(cat: CameraCatalog): List<String?> = listOf<String?>(null) + ComposerCatalog.visible(cat.eras).map { it.id }
+
+    /** The stop an era sits at (through merges); Auto and unknown ids = 0. */
+    fun index(cat: CameraCatalog, id: String?): Int = stops(cat).indexOf(ComposerCatalog.survivor(cat.eras, id)).coerceAtLeast(0)
+
+    fun at(cat: CameraCatalog, index: Int): String? = stops(cat).let { it[index.coerceIn(0, it.lastIndex)] }
+
+    /** The era at a place along the track (0 = the left end, 1 = the right end), snapped to the nearest stop. */
+    fun snap(cat: CameraCatalog, fraction: Float): String? {
+        val n = stops(cat).size
+        return at(cat, kotlin.math.round(fraction.coerceIn(0f, 1f) * (n - 1)).toInt())
+    }
+
+    /** The tick under a stop: "Auto", "60s" for a decade, else the label ("Near future"). */
+    fun tick(cat: CameraCatalog, id: String?): String {
+        val l = ComposerCatalog.label(cat.eras, id) ?: return "Auto"
+        return Regex("^(?:19|20)(\\d0)s$").find(l)?.let { "${it.groupValues[1]}s" } ?: l.substringAfterLast(' ').replaceFirstChar { it.uppercase() }
+    }
+}
+
 /** A chip as the composer draws it: its mono label and its value ("Auto", or the non-Auto values joined). */
 data class ChipSummary(val chip: ComposerChip, val values: List<String>, val auto: Boolean, val counter: String? = null) {
     /** "Auto", "35mm film, Anamorphic", or for References "2/9". */

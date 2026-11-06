@@ -34,6 +34,10 @@ import studio.muse.app.ui.screens.suite.composer.SwapAddon
 import studio.muse.app.ui.screens.suite.composer.SwapAddons
 import studio.muse.core.Pricing
 import studio.muse.core.VideoOption
+import studio.muse.app.ui.screens.suite.composer.EraScale
+import studio.muse.app.ui.screens.suite.composer.ComposerCatalog
+import studio.muse.app.ui.screens.suite.composer.ComposerChip
+import studio.muse.app.ui.screens.suite.composer.CameraWheels
 
 /** The composer's follow-ups (AI suite, workstream 1): tap a face, swap add-ons, the era slider, UGC formats, @location, reorder, the engine pin. */
 class SuiteComposerFollowupTest {
@@ -220,5 +224,53 @@ class SuiteComposerFollowupTest {
         // Upscale is never a render choice, and add-ons are Character swap's only.
         assertNull(d.copy(addon = "upscale").swapAddon)
         assertNull(d.copy(tool = ComposerTool.SHOT, addon = "edit").swapAddon)
+    }
+
+    // ---------------------------------------------------------------- 3. Era as a decade slider · 4. UGC formats
+
+    @Test fun `the era slider snaps to the catalog's eras in order, with Auto off the left end`() {
+        val cat = fake.camera
+        val stops = EraScale.stops(cat)
+        assertEquals(listOf(null, "1960s", "1970s", "1980s", "1990s", "2000s", "2010s", "2020s", "future"), stops)
+        assertNull(EraScale.snap(cat, 0f))
+        assertNull(EraScale.snap(cat, .06f))
+        assertEquals("1960s", EraScale.snap(cat, .07f))
+        assertEquals("1990s", EraScale.snap(cat, .5f))
+        assertEquals("future", EraScale.snap(cat, 1f))
+        assertEquals("future", EraScale.snap(cat, 7f))
+        assertNull(EraScale.snap(cat, -1f))
+        assertEquals(4, EraScale.index(cat, "1990s")); assertEquals(0, EraScale.index(cat, null)); assertEquals(0, EraScale.index(cat, "1850s"))
+        assertEquals("2020s", EraScale.at(cat, 7)); assertEquals("future", EraScale.at(cat, 99))
+        assertEquals(listOf("Auto", "60s", "70s", "80s", "90s", "00s", "10s", "20s", "Future"), stops.map { EraScale.tick(cat, it) })
+        // Hidden eras are not stops.
+        val fewer = cat.copy(eras = cat.eras.map { if (it.id == "1970s") it.copy(visible = false) else it })
+        assertFalse("1970s" in EraScale.stops(fewer))
+        // An empty catalog: only Auto.
+        assertEquals(listOf(null), EraScale.stops(studio.muse.app.data.CameraCatalog()))
+        assertNull(EraScale.snap(studio.muse.app.data.CameraCatalog(), .7f))
+    }
+
+    @Test fun `the UGC format goes in camera style and leads the Style chip`() {
+        val cat = fake.camera
+        assertEquals(listOf("unboxing", "review", "try_on", "before_after", "grwm", "haul", "tutorial", "testimonial"), cat.ugcFormats.map { it.id })
+        val s = ComposerSettings(format = "try_on", era = "1990s")
+        val style = s.cameraJson()!!["style"]!!.jsonObject
+        assertEquals("try_on", style["format"]!!.jsonPrimitive.content); assertEquals("1990s", style["era"]!!.jsonPrimitive.content)
+        val sum = ComposerCatalog.summary(ComposerChip.STYLE, s, cat)
+        assertEquals("Try-on, 1990s", sum.value)
+        assertEquals("Style · Try-on, 1990s", sum.text())
+        assertTrue(s.isSet(ComposerChip.STYLE)); assertNull(s.reset(ComposerChip.STYLE).format)
+        assertNull(ComposerSettings().cameraJson())
+        // The format wheel: Auto first, then each format.
+        val wheel = CameraWheels.formats(cat)
+        assertEquals(listOf(null) + cat.ugcFormats.map { it.id }, wheel.map { it.id })
+        assertEquals(3, CameraWheels.index(wheel, "try_on", cat.ugcFormats))
+        // An older catalog without ugcFormats still decodes; the label falls back to the id.
+        val old = decoder.decodeFromString(studio.muse.app.data.CameraCatalog.serializer(), """{"eras":[]}""")
+        assertTrue(old.ugcFormats.isEmpty())
+        assertEquals("review", ComposerCatalog.summary(ComposerChip.STYLE, ComposerSettings(format = "review"), old).value)
+        // The request sends it (UGC ad).
+        val r = ComposerDraft(tool = ComposerTool.UGC, settings = ComposerSettings(format = "grwm")).request(InputSlots(), SuiteInputs(), RecastDraft())
+        assertEquals("grwm", (r.camera as JsonObject)["style"]!!.jsonObject["format"]!!.jsonPrimitive.content)
     }
 }
