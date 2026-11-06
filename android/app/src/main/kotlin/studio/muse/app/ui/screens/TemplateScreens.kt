@@ -86,7 +86,7 @@ class TemplatesViewModel(private val c: AppContainer) : ViewModel() {
             .mapNotNull { e -> all.firstNotNullOfOrNull { t -> t.tags.firstOrNull { it.lowercase() == e.key } } }.take(12), l || all.isNotEmpty())
     }.stateIn(viewModelScope, SharingStarted.Eagerly, TemplatesState())
 
-    fun load() = viewModelScope.launch { c.repo.loadTemplates(); loaded.value = true }
+    fun load(force: Boolean = false) = viewModelScope.launch { c.repo.loadTemplates(force = force); loaded.value = true }
     fun edit(f: (TemplateFilter) -> TemplateFilter) = c.drafts.templateFilter.update(f)
     fun favourite(t: Template) = viewModelScope.launch { c.repo.favouriteTemplate(t.id, !t.favourite) }
 
@@ -115,7 +115,7 @@ fun TemplatesScreen() {
             TopBar("Templates", onBack = { nav.back() }) {
                 MoreMenu(listOf(
                     MenuItem("camera", "Make one from a photo") { c.drafts.galleryTab.value = "tests"; nav.tab(Routes.GALLERY); c.repo.toast("Open a photo you like · then Save as template") },
-                    MenuItem("retry", "Refresh") { vm.load() },
+                    MenuItem("retry", "Refresh") { vm.load(force = true) },
                 ))
             }
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

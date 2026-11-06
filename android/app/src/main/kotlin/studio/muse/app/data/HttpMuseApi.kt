@@ -182,6 +182,10 @@ interface MuseService {
  */
 enum class UploadMode { AUTO, PRESIGNED, MULTIPART }
 
+/** How long catalogs stay in memory (also dropped by writes, live events and every reconnect). */
+private const val CATALOG_TTL = 5 * 60_000L
+private const val TEMPLATES_TTL = 60_000L
+
 /** MuseApi over HTTP. Progress comes from the SSE stream at GET /v1/events. */
 class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMode.AUTO) : MuseApi {
     private val base = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
@@ -222,7 +226,25 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         .build()
         .create(MuseService::class.java)
 
-    override fun setToken(token: String?) { this.token = token }
+    override fun setToken(token: String?) { if (token != this.token) reads.clear(); this.token = token }
+
+    /** Identical reads in flight share one request; catalogs ([ttlMs] > 0) answer from memory until a write or a live event changes them. */
+    private val reads = RequestCache()
+    private suspend fun <T> shared(key: String, ttlMs: Long = 0, block: suspend () -> T): T = reads.get("$key|$token", ttlMs, block)
+    /** Forget cached catalogs (an explicit Refresh). */
+    fun invalidateReads(vararg prefixes: String) { if (prefixes.isEmpty()) reads.clear() else reads.invalidate(*prefixes) }
+
+    /** A live event says a cached catalog changed: drop it. A (re)connect drops them all, so a catch-up refetches everything. */
+    private fun onLive(e: ApiEvent) {
+        when (e.type) {
+            ApiEvent.CONNECTED -> reads.clear()
+            "settings" -> reads.invalidate("settings/", "suite/", "image-models")
+            "prompts" -> reads.invalidate("prompts", "prompt-scripts")
+            "promptScript" -> reads.invalidate("prompt-scripts")
+            "template" -> reads.invalidate("templates")
+            "suite" -> reads.invalidate("suite/")
+        }
+    }
 
     // Workstream 2: camera sessions
     override val camera: CameraApi by lazy { HttpCameraApi(base, client, json) }
@@ -252,14 +274,14 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun signIn(req: SignInRequest) = call { signIn(req) }
     override suspend fun signUp(req: SignUpRequest) = call { signUp(req.copy(inviteCode = req.inviteCode?.trim()?.ifBlank { null })) }
     override suspend fun signOut() { call { signOut() } }
-    override suspend fun me() = call { me() }
+    override suspend fun me() = shared("me") { call { me() } }
     override suspend fun createInvite(req: CreateInviteRequest) = call { createInvite(req) }
-    override suspend fun listInvites() = call { invites() }
-    override suspend fun listModels() = call { models() }.map { it.abs() }
+    override suspend fun listInvites() = shared("invites") { call { invites() } }
+    override suspend fun listModels() = shared("models") { call { models() }.map { it.abs() } }
     override suspend fun createModel(req: CreateModelRequest) = call { createModel(req) }.abs()
     override suspend fun setSlot(modelId: String, slot: String, req: SetSlotRequest) = call { setSlot(modelId, slot, req) }.abs()
     override suspend fun fillAngles(modelId: String) = call { fillAngles(modelId) }.let { it.copy(model = it.model.abs()) }
-    override suspend fun listOutfits() = call { outfits() }.map { it.abs() }
+    override suspend fun listOutfits() = shared("outfits") { call { outfits() }.map { it.abs() } }
     override suspend fun createOutfit(req: CreateOutfitRequest) = callLong { createOutfit(req) }.abs()
     override suspend fun saveOutfit(outfitId: String) = call { saveOutfit(outfitId) }.abs()
 
@@ -317,7 +339,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         }
     }
 
-    override suspend fun listJobs() = call { jobs() }.map { it.abs() }
+    override suspend fun listJobs() = shared("jobs") { call { jobs() }.map { it.abs() } }
     override suspend fun createJob(req: JobRequest) = call { createJob(req) }.abs()
     override suspend fun removeJob(jobId: String) = call { removeJob(jobId) }
 
@@ -329,39 +351,40 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         val req = TakeVersionRequest(p.uploadId, thumbId, edits, video.durationSec, video.width, video.height, video.fps)
         return call { createVersion(takeId, req) }.abs().also { onProgress(1f) }
     }
-    override suspend fun takeVersions(takeId: String) = call { versions(takeId) }.map { it.abs() }
-    override suspend fun listTakes() = call { takes() }.map { it.abs() }
+    override suspend fun takeVersions(takeId: String) = shared("versions/$takeId") { call { versions(takeId) }.map { it.abs() } }
+    override suspend fun listTakes() = shared("takes") { call { takes() }.map { it.abs() } }
     override suspend fun setTakeStatus(takeId: String, status: String) = call { setTake(takeId, SetTakeStatusRequest(status)) }.abs()
     override suspend fun deleteTake(takeId: String) = call { deleteTake(takeId) }
-    override suspend fun shoot(req: ShootRequest) = callLong { shoot(req) }.map { it.abs() }
-    override suspend fun listTemplates(scope: String, q: String?, tag: String?) = call { templates(scope, q?.ifBlank { null }, tag?.ifBlank { null }) }.map { it.abs() }
-    override suspend fun template(id: String) = call { template(id) }.abs()
-    override suspend fun createTemplate(req: CreateTemplateRequest) = call { createTemplate(req) }.abs()
+    override suspend fun shoot(req: ShootRequest) = callLong { shoot(req) }.map { it.abs() }.also { reads.invalidate("templates") }
+    override suspend fun listTemplates(scope: String, q: String?, tag: String?) =
+        shared("templates?$scope&$q&$tag", TEMPLATES_TTL) { call { templates(scope, q?.ifBlank { null }, tag?.ifBlank { null }) }.map { it.abs() } }
+    override suspend fun template(id: String) = shared("templates/$id") { call { template(id) }.abs() }
+    override suspend fun createTemplate(req: CreateTemplateRequest) = call { createTemplate(req) }.abs().also { reads.invalidate("templates") }
     override suspend fun templateDraft(fromShotId: String) = call { templateDraft(TemplateDraftRequest(fromShotId)) }.let { it.copy(cover = it.cover?.abs()) }
-    override suspend fun patchTemplate(id: String, req: PatchTemplateRequest) = call { patchTemplate(id, req) }.abs()
-    override suspend fun deleteTemplate(id: String) { call { deleteTemplate(id).also { r -> if (!r.isSuccessful) throw HttpException(r) } } }
-    override suspend fun duplicateTemplate(id: String) = call { duplicateTemplate(id) }.abs()
-    override suspend fun favouriteTemplate(id: String, on: Boolean) = call { if (on) favourite(id) else unfavourite(id) }.abs()
+    override suspend fun patchTemplate(id: String, req: PatchTemplateRequest) = call { patchTemplate(id, req) }.abs().also { reads.invalidate("templates") }
+    override suspend fun deleteTemplate(id: String) { call { deleteTemplate(id).also { r -> if (!r.isSuccessful) throw HttpException(r) } }; reads.invalidate("templates") }
+    override suspend fun duplicateTemplate(id: String) = call { duplicateTemplate(id) }.abs().also { reads.invalidate("templates") }
+    override suspend fun favouriteTemplate(id: String, on: Boolean) = call { if (on) favourite(id) else unfavourite(id) }.abs().also { reads.invalidate("templates") }
     override suspend fun templatePrompt(id: String, req: TemplatePromptRequest) = call { templatePrompt(id, req) }
     override suspend fun previewShoot(req: ShootRequest) = call { previewShoot(req) }
-    override suspend fun prompts() = call { prompts() }
-    override suspend fun savePrompt(key: String, text: String) = call { savePrompt(key, PromptText(text)) }
-    override suspend fun resetPrompt(key: String) = call { resetPrompt(key) }
+    override suspend fun prompts() = shared("prompts", CATALOG_TTL) { call { prompts() } }
+    override suspend fun savePrompt(key: String, text: String) = call { savePrompt(key, PromptText(text)) }.also { reads.invalidate("prompts", "prompt-scripts") }
+    override suspend fun resetPrompt(key: String) = call { resetPrompt(key) }.also { reads.invalidate("prompts", "prompt-scripts") }
     override suspend fun previewPrompt(req: PromptPreviewRequest) = call { previewPrompt(req) }
     // Prompt scripts (workstream 4)
-    override suspend fun listPromptScripts() = call { promptScripts() }
-    override suspend fun getPromptScript(id: String) = call { promptScript(id) }
-    override suspend fun savePromptScript(id: String, rules: List<Rule>) = call { savePromptScript(id, SaveScriptRules(rules)) }
-    override suspend fun resetPromptScript(id: String) = call { resetPromptScript(id) }
+    override suspend fun listPromptScripts() = shared("prompt-scripts", CATALOG_TTL) { call { promptScripts() } }
+    override suspend fun getPromptScript(id: String) = shared("prompt-scripts/$id") { call { promptScript(id) } }
+    override suspend fun savePromptScript(id: String, rules: List<Rule>) = call { savePromptScript(id, SaveScriptRules(rules)) }.also { reads.invalidate("prompt-scripts") }
+    override suspend fun resetPromptScript(id: String) = call { resetPromptScript(id) }.also { reads.invalidate("prompt-scripts") }
     override suspend fun previewPromptScript(id: String, inputs: JsonObject?, rules: List<Rule>?, texts: Map<String, String>?, direction: String?) =
         call { previewPromptScript(ScriptPreviewRequest(id, inputs, rules, texts, direction)) }
-    override suspend fun balance() = call { balance() }
+    override suspend fun balance() = shared("balance") { call { balance() } }
     override suspend fun topUp(req: TopUpRequest) = call { topUp(req) }
-    override suspend fun wallet() = call { wallet() }
-    override suspend fun studioBalance() = call { studioBalance() }
+    override suspend fun wallet() = shared("wallet") { call { wallet() } }
+    override suspend fun studioBalance() = shared("studio-balance") { call { studioBalance() } }
     override suspend fun addTopUp(req: AddTopUpRequest) = call { addTopUp(req) }
     override suspend fun upscale(takeId: String, size: String) = call { upscale(takeId, UpscaleRequest(size)) }
-    override suspend fun listMembers() = call { members() }
+    override suspend fun listMembers() = shared("members") { call { members() } }
     override suspend fun transfer(req: TransferRequest) = call { transfer(req) }
     override suspend fun reclaim(req: ReclaimRequest) = call { reclaim(req) }
     override suspend fun patchMember(memberId: String, patch: MemberPatch) = call {
@@ -370,10 +393,10 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
             patch.disabled?.let { put("disabled", JsonPrimitive(it)) }
         })
     }
-    override suspend fun studioSettings() = call { studioSettings() }
-    override suspend fun patchStudioSettings(req: StudioSettingsPatch) = call { patchStudioSettings(req) }
-    override suspend fun imageEngine() = call { imageEngine() }
-    override suspend fun setImageEngine(req: ImageEnginePatch) = call { setImageEngine(req) }
+    override suspend fun studioSettings() = shared("settings/studio", CATALOG_TTL) { call { studioSettings() } }
+    override suspend fun patchStudioSettings(req: StudioSettingsPatch) = call { patchStudioSettings(req) }.also { reads.invalidate("settings/") }
+    override suspend fun imageEngine() = shared("settings/image-engine", CATALOG_TTL) { call { imageEngine() } }
+    override suspend fun setImageEngine(req: ImageEnginePatch) = call { setImageEngine(req) }.also { reads.invalidate("settings/") }
     override suspend fun setFailNext(fail: Boolean) = call { failNext(DevFailRequest(fail)) }
 
     // Edit suite (workstream 3)
@@ -407,54 +430,55 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun answerEditRequest(id: String, requestId: String, answer: EditRequestAnswer) { call { answerEditRequest(id, requestId, answer) } }
     override suspend fun answerEditPending(id: String, pendingId: String, approve: Boolean) = call { answerEditPending(id, pendingId, EditPendingAnswer(approve)) }
 
-    override suspend fun warmGpu() = call { warmGpu() }
+    override suspend fun warmGpu() = shared("gpu/warm") { call { warmGpu() } }
     override suspend fun setWarmGpu(req: WarmRequest) = call { setWarmGpu(req) }
     override suspend fun updateModel(modelId: String, req: UpdateModelRequest) = call { updateModel(modelId, req) }.abs()
     override suspend fun deleteModel(modelId: String) = call { deleteModel(modelId) }
-    override suspend fun imageModels() = call { imageModels() }
-    override suspend fun imageCatalog(step: String, q: String?, collection: String?) = call { imageCatalog(step, q?.ifBlank { null }, collection?.ifBlank { null }) }
+    override suspend fun imageModels() = shared("image-models", CATALOG_TTL) { call { imageModels() } }
+    override suspend fun imageCatalog(step: String, q: String?, collection: String?) =
+        shared("image-models/catalog?$step&$q&$collection", CATALOG_TTL) { call { imageCatalog(step, q?.ifBlank { null }, collection?.ifBlank { null }) } }
     override suspend fun imageModel(id: String, step: String) = call { imageModel(id, step) }
-    override suspend fun setImageModel(step: String, req: SetStepModelRequest) = call { setImageModel(step, req) }
-    override suspend fun resetImageModel(step: String) = call { resetImageModel(step) }
+    override suspend fun setImageModel(step: String, req: SetStepModelRequest) = call { setImageModel(step, req) }.also { reads.invalidate("image-models") }
+    override suspend fun resetImageModel(step: String) = call { resetImageModel(step) }.also { reads.invalidate("image-models") }
     override suspend fun enhanceEstimate(modelId: String, req: EnhanceRequest) = call { enhanceEstimate(modelId, req) }
     override suspend fun startEnhance(modelId: String, req: EnhanceRequest) = call { startEnhance(modelId, req) }.abs()
     override suspend fun dressUpEstimate(modelId: String, req: DressUpRequest) = call { dressUpEstimate(modelId, req) }
     override suspend fun startDressUp(modelId: String, req: DressUpRequest) = call { startDressUp(modelId, req) }.abs()
-    override suspend fun toolRuns(modelId: String?) = call { toolRuns(modelId) }.map { it.abs() }
+    override suspend fun toolRuns(modelId: String?) = shared("tool-runs?$modelId") { call { toolRuns(modelId) }.map { it.abs() } }
     override suspend fun toolRun(id: String) = call { toolRun(id) }.abs()
     override suspend fun decideTool(id: String, slot: String, req: DecideRequest) = call { decideTool(id, slot, req) }.abs()
     override suspend fun pickTool(id: String, pick: String) = call { pickTool(id, PickRequest(pick)) }.abs()
     override suspend fun retryTool(id: String, slot: String, engine: String?) = call { retryTool(id, slot, RetryRequest(engine)) }.abs()
     override suspend fun applyTool(id: String, name: String?) = call { applyTool(id, ApplyRequest(name)) }.let { r -> r.copy(run = r.run.abs(), model = r.model.abs(), outfit = r.outfit?.abs()) }
     override suspend fun discardTool(id: String) { call { discardTool(id) } }
-    override suspend fun sheetVersions(modelId: String) = call { sheetVersions(modelId) }.map { it.abs() }
+    override suspend fun sheetVersions(modelId: String) = shared("sheet-versions/$modelId") { call { sheetVersions(modelId) }.map { it.abs() } }
     override suspend fun restoreSheet(modelId: String, versionId: String) = call { restoreSheet(modelId, versionId) }.abs()
     override suspend fun archiveModel(modelId: String, archived: Boolean) = call { if (archived) archiveModel(modelId) else unarchiveModel(modelId) }.abs()
-    override suspend fun archivedModels() = call { archivedModels() }.map { it.abs() }
+    override suspend fun archivedModels() = shared("models?archived") { call { archivedModels() }.map { it.abs() } }
     override suspend fun runQueue() = call { runQueue() }.map { it.abs() }
-    override suspend fun lora(modelId: String) = call { lora(modelId) }.abs()
+    override suspend fun lora(modelId: String) = shared("lora/$modelId") { call { lora(modelId) }.abs() }
     override suspend fun buildLoraSet(modelId: String) = call { buildLoraSet(modelId) }.abs()
     override suspend fun keepCandidate(modelId: String, candidateId: String, keep: Boolean) = call { keepCandidate(modelId, candidateId, KeepRequest(keep)) }.abs()
     override suspend fun trainLora(modelId: String) = call { trainLora(modelId) }.abs()
     override suspend fun patchLora(modelId: String, req: PatchLoraRequest) = call { patchLora(modelId, req) }.abs()
-    override suspend fun listAccounts(modelId: String) = call { accounts(modelId) }
+    override suspend fun listAccounts(modelId: String) = shared("accounts/$modelId") { call { accounts(modelId) } }
     override suspend fun connectAccount(modelId: String, platform: String) = call { connect(modelId, platform) }
     override suspend fun disconnectAccount(modelId: String, platform: String) = call { disconnect(modelId, platform) }
-    override suspend fun listPosts(state: String?) = call { posts(state) }.map { it.abs() }
+    override suspend fun listPosts(state: String?) = shared("posts?$state") { call { posts(state) }.map { it.abs() } }
     override suspend fun createPost(req: CreatePostRequest) = call { createPost(req) }.abs()
     override suspend fun deletePost(postId: String) = call { deletePost(postId) }
     // AI suite (workstream 1)
-    override suspend fun suiteCatalog() = call { suiteCatalog() }
+    override suspend fun suiteCatalog() = shared("suite/catalog", CATALOG_TTL) { call { suiteCatalog() } }
     override suspend fun suiteEstimate(req: SuiteShotRequest) = call { suiteEstimate(req.copy(dryRun = null)) }
     override suspend fun suiteRigCheck(req: SuiteShotRequest) = call { suiteRigCheck(req.copy(dryRun = null)) }
     override suspend fun createSuiteShot(req: SuiteShotRequest) = call { createSuiteShot(req.copy(dryRun = null)) }.abs()
     override suspend fun suiteShot(id: String) = call { suiteShot(id) }.let { it.copy(job = it.job.abs()) }
     override suspend fun suiteCompile(req: SuiteCompileRequest) = call { suiteCompile(req) }
-    override suspend fun suiteSettings() = call { suiteSettings() }
-    override suspend fun patchSuiteSettings(req: SuiteSettingsPatch) = call { patchSuiteSettings(req) }
-    override suspend fun suiteLocations() = call { suiteLocations() }.map { it.copy(image = it.image.abs()) }
-    override suspend fun createSuiteLocation(req: SuiteLocationCreate) = call { createSuiteLocation(req) }.let { it.copy(image = it.image.abs()) }
-    override suspend fun deleteSuiteLocation(id: String) { call { deleteSuiteLocation(id) } }
+    override suspend fun suiteSettings() = shared("suite/settings", CATALOG_TTL) { call { suiteSettings() } }
+    override suspend fun patchSuiteSettings(req: SuiteSettingsPatch) = call { patchSuiteSettings(req) }.also { reads.invalidate("suite/") }
+    override suspend fun suiteLocations() = shared("suite/locations", CATALOG_TTL) { call { suiteLocations() }.map { it.copy(image = it.image.abs()) } }
+    override suspend fun createSuiteLocation(req: SuiteLocationCreate) = call { createSuiteLocation(req) }.let { it.copy(image = it.image.abs()) }.also { reads.invalidate("suite/locations") }
+    override suspend fun deleteSuiteLocation(id: String) { call { deleteSuiteLocation(id) }; reads.invalidate("suite/locations") }
     override suspend fun uploadSuiteMedia(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit): SuiteMediaRef {
         val p = call { editorPresign(EditorPresignRequest(mime, bytes.size.toLong())) }
         putToStorage(p, ProgressBody(bytes, mime.toMediaTypeOrNull(), onProgress))
@@ -483,7 +507,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         while (true) {
             var opened = false
             try {
-                eventStream().collect { if (it.type == ApiEvent.CONNECTED) opened = true; emit(it) }
+                eventStream().collect { if (it.type == ApiEvent.CONNECTED) opened = true; onLive(it); emit(it) }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (_: Throwable) {
