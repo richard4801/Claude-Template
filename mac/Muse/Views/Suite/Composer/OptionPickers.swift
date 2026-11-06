@@ -37,6 +37,13 @@ struct EraSlider: View {
         let top = ComposerEras.maxPosition(c)
         let stops = ComposerEras.stops(c)
         VStack(alignment: .leading, spacing: 18) {
+            // The era's own still (design/previews/eras), as on Android; nothing for Auto.
+            if pos > 0, let img = PreviewFiles.image(stops[pos - 1].preview?.poster) {
+                Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
+                    .frame(maxWidth: .infinity).frame(height: 150).clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .accessibilityHidden(true)
+            }
             VStack(alignment: .leading, spacing: 4) {
                 Text("ERA").font(t.mono(10.5, .medium)).tracking(1.2).foregroundStyle(t.muted)
                 Text(ComposerEras.label(at: pos, c)).font(Fonts.font("Instrument Serif", 46, .regular))
