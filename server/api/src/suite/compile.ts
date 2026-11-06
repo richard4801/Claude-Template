@@ -2,7 +2,7 @@
 // Data-driven: wording from the prompt library (suite.camera.*), grammar per model family (suite.camera.format.<vocab>),
 // parameters only where a model has a real field (LTX camera_motion, fps). Notes are for the owner/debug view.
 import { DEFAULT_TEXTS, fill, type PromptTexts } from '../prompt/library.js';
-import { APERTURES, BODIES, canMix, ERAS, focalWords, FRAME_RATES, GENRES, HEIGHTS, LENSES, LIGHTING, LOOKS, MOVES, PALETTES, resolvePreset, SHOT_SIZES, SHUTTERS, TEMPOS,
+import { APERTURES, BODIES, canMix, canonicalSpec, ERAS, focalWords, FRAME_RATES, GENRES, HEIGHTS, LENSES, LIGHTING, LOOKS, MOVES, PALETTES, resolvePreset, SHOT_SIZES, SHUTTERS, TEMPOS,
   type CameraSpec, type MoveOption } from './camera.js';
 import { wordings } from './prompts.js';
 import { run } from '../prompt/scripts/builders.js';
@@ -36,7 +36,7 @@ export function compileCamera(input: CameraSpec | undefined, model: Pick<ModelSp
   const t = o.texts ?? DEFAULT_TEXTS;
   const out: CompiledCamera = { text: '', params: {}, avoid: [], usesGuide: false, moves: [], notes: [] };
   if (!input) return out;
-  const spec = resolvePreset(input);
+  const spec = canonicalSpec(resolvePreset(input));
   const w = (key: string, list: Parameters<typeof wordings>[1]) => wordings(t[key], list);
   const word = (key: string, list: Parameters<typeof wordings>[1], id?: string) => (id ? w(key, list).get(id) ?? '' : '');
 
