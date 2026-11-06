@@ -40,12 +40,12 @@ describe('MCP transport and auth', () => {
   it('needs a token: 401 with the protected-resource metadata pointer', async () => {
     const r = await rpc('initialize', {}, { token: null });
     expect(r.status).toBe(401);
-    expect(r.headers['www-authenticate']).toMatch(/^Bearer resource_metadata=".*\/\.well-known\/oauth-protected-resource"$/);
+    expect(r.headers['www-authenticate']).toMatch(/^Bearer resource_metadata=".*\/\.well-known\/oauth-protected-resource", scope="camera:read .*generate:estimate"$/);
     expect((await rpc('tools/list', {}, { token: 'muse_pat_wrong' })).status).toBe(401);
     // A normal app session token is not an MCP token.
     expect((await rpc('tools/list', {}, { token: owner.token })).status).toBe(401);
     const meta = await a.app.inject({ method: 'GET', url: '/.well-known/oauth-protected-resource' });
-    expect(JSON.parse(meta.body)).toMatchObject({ resource: expect.stringMatching(/\/mcp$/), bearer_methods_supported: ['header'] });
+    expect(JSON.parse(meta.body)).toMatchObject({ resource: expect.stringMatching(/\/mcp$/), bearer_methods_supported: ['header'], authorization_servers: [expect.any(String)] });
   });
 
   it('initialize, notifications, ping, unknown method, GET/DELETE 405, bad Origin, bad protocol header, batches', async () => {

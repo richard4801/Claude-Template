@@ -9,6 +9,7 @@ import { BlenderRelayHub } from '../camera/relay.js';
 import { CameraService } from '../camera/service.js';
 import { parse } from '../camera/validate.js';
 import { createToken, listTokens, revokeToken } from '../mcp/tokens.js';
+import { listGrants, resourceOf, revokeGrantOf, sessionToken } from '../mcp/oauth.js';
 import { registerMcpRoutes } from './mcp.js';
 
 export type CameraModule = { service: CameraService; relay: BlenderRelayHub; director: Director };
@@ -76,6 +77,14 @@ export async function registerCameraRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/v1/mcp/tokens', owner, async req => listTokens(ctx, req.user));
   app.post('/v1/mcp/tokens', owner, async req => createToken(ctx, req.user, req.body));
   app.delete<P>('/v1/mcp/tokens/:id', owner, async (req, reply) => { await revokeToken(ctx, req.user, req.params.id); return reply.status(204).send(); });
+  // OAuth connections (claude.ai connector, Claude Code) and the Mac app's own short-lived token for its local Claude Code.
+  app.get('/v1/mcp/grants', owner, async req => listGrants(ctx, req.user));
+  app.delete<P>('/v1/mcp/grants/:id', owner, async (req, reply) => { await revokeGrantOf(ctx, req.user, req.params.id); return reply.status(204).send(); });
+  app.post('/v1/mcp/session-token', owner, async req => {
+    const b = parse(z.object({ ttlMinutes: z.number().int().min(5).max(720).optional() }).strict(), req.body ?? {});
+    const t = await sessionToken(ctx, req.user, b.ttlMinutes ?? 240);
+    return { token: t.access_token, expiresAt: t.expiresAt, mcpUrl: resourceOf(ctx) };
+  });
 
   // ------------------------------------------------------------------ Blender relay (the owner's Mac app)
   app.post('/v1/blender/relay', owner, async req => relay.heartbeat(req.user, parse(z.object({
