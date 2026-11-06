@@ -131,7 +131,18 @@ struct ComposerBottomBar: View {
 
     private func addOnPill(_ p: SwapAddOnPill) -> some View {
         let on = p.quality != nil && p.quality == store.suite.swap.addOn
-        return Button { store.suite.swap.addOn = SwapAddOns.toggle(store.suite.swap.addOn, p) } label: {
+        return Button {
+            if p.quality == nil {
+                // Upscale (once it ships) works on the finished take.
+                if let take = store.takes(of: store.swapJob).first(where: { $0.videoUrl != nil }), let size = store.videoFeatures.upscale?.sizes.first(where: \.available) {
+                    store.upscale(take, size: size)
+                } else {
+                    store.showToast("Upscale works on a finished take · generate it first")
+                }
+                return
+            }
+            store.suite.swap.addOn = SwapAddOns.toggle(store.suite.swap.addOn, p)
+        } label: {
             HStack(spacing: 6) {
                 Image(systemName: on ? "checkmark" : "plus").font(.system(size: 10, weight: .bold))
                 Text(p.label).font(t.body(12.5, .medium))
