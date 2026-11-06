@@ -424,8 +424,8 @@ class SuiteComposerFollowupTest {
         assertTrue(moves.size >= 39)
         assertNull(cam.move("motion_blur")?.preview)
         val dolly = cam.move("dolly_in")!!.preview!!
-        assertEquals("moves/dolly_in.mp4", dolly.video); assertEquals("moves/dolly_in.jpg", dolly.poster)
-        assertEquals("lighting/auto.jpg", cam.autoPreviews.lighting!!.poster)
+        assertEquals("moves/dolly_in.mp4", dolly.video); assertEquals("moves/dolly_in.webp", dolly.poster)
+        assertEquals("lighting/auto.webp", cam.autoPreviews.lighting!!.poster)
         assertTrue(cam.lighting.all { it.preview?.poster?.startsWith("lighting/") == true })
         assertTrue((cam.heights + cam.shotSizes).all { it.preview?.poster?.startsWith("angles/") == true })
         // The files the tiles open (the Gradle copy bundles design/previews as assets/previews).

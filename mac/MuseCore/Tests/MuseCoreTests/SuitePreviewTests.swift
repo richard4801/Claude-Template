@@ -8,7 +8,7 @@ final class SuitePreviewTests: XCTestCase {
 
     func testPreviewsDecodeFromTheCatalog() throws {
         let dolly = try XCTUnwrap(cat.move("dolly_in"))
-        XCTAssertEqual(dolly.preview, SuitePreview(video: "moves/dolly_in.mp4", poster: "moves/dolly_in.jpg", seconds: 2.5))
+        XCTAssertEqual(dolly.preview, SuitePreview(video: "moves/dolly_in.mp4", poster: "moves/dolly_in.webp", seconds: 2.5))
         XCTAssertNil(cat.move("motion_blur")?.preview, "no loop yet: the drawn still stays")
         XCTAssertNil(cat.move("rise_reveal")?.preview, "no loop yet: the drawn still stays")
         XCTAssertEqual(cat.moves.filter { $0.preview != nil }.count, cat.moves.count - 2)
@@ -17,7 +17,7 @@ final class SuitePreviewTests: XCTestCase {
         XCTAssertTrue(cat.lighting.allSatisfy { $0.preview?.poster.hasPrefix("lighting/") == true })
         XCTAssertTrue(cat.heights.allSatisfy { $0.preview?.poster.hasPrefix("angles/") == true })
         XCTAssertTrue(cat.shotSizes.allSatisfy { $0.preview?.poster.hasPrefix("angles/") == true })
-        XCTAssertEqual(cat.autoPreviews.lighting?.poster, "lighting/auto.jpg")
+        XCTAssertEqual(cat.autoPreviews.lighting?.poster, "lighting/auto.webp")
         // Older catalogs: no previews, no autoPreviews.
         let old = try JSONDecoder().decode(CameraCatalog.self, from: Data(#"{"moves":[{"id":"dolly_in","label":"Dolly in","category":"push"}],"lighting":[{"id":"window","label":"Window"}]}"#.utf8))
         XCTAssertNil(old.moves.first?.preview)
@@ -32,7 +32,7 @@ final class SuitePreviewTests: XCTestCase {
         let dolly = try XCTUnwrap(cat.move("dolly_in"))
         let p = PickerPreview.move(dolly)
         XCTAssertEqual(p.video, "moves/dolly_in.mp4")
-        XCTAssertEqual(p.poster, "moves/dolly_in.jpg")
+        XCTAssertEqual(p.poster, "moves/dolly_in.webp")
         XCTAssertTrue(p.hasRender)
         let blur = try XCTUnwrap(cat.move("motion_blur"))
         XCTAssertFalse(PickerPreview.move(blur).hasRender)
@@ -40,7 +40,7 @@ final class SuitePreviewTests: XCTestCase {
         let light = try XCTUnwrap(cat.lighting.first)
         XCTAssertEqual(PickerPreview.option(light).poster, light.preview?.poster)
         XCTAssertEqual(PickerPreview.option(light).still, light.render)
-        XCTAssertEqual(PickerPreview.auto(cat.autoPreviews.lighting)?.poster, "lighting/auto.jpg")
+        XCTAssertEqual(PickerPreview.auto(cat.autoPreviews.lighting)?.poster, "lighting/auto.webp")
         XCTAssertNil(PickerPreview.auto(nil))
         XCTAssertNil(PickerPreview.auto(SuitePreview(poster: "")))
     }
@@ -50,7 +50,7 @@ final class SuitePreviewTests: XCTestCase {
         XCTAssertEqual(m.subdirectory, "previews/moves")
         XCTAssertEqual(m.name, "dolly_in")
         XCTAssertEqual(m.ext, "mp4")
-        let l = try XCTUnwrap(PickerPreview.bundled("lighting/auto.jpg"))
+        let l = try XCTUnwrap(PickerPreview.bundled("lighting/auto.webp"))
         XCTAssertEqual(l.subdirectory, "previews/lighting")
         XCTAssertEqual(l.name, "auto")
         XCTAssertEqual(PickerPreview.bundled("/previews/angles/eye")?.subdirectory, "previews/angles")

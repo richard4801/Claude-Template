@@ -5,7 +5,8 @@
 #
 # Writes design/previews/{moves,lighting,angles}/ and design/previews/manifest.tsv (id, file, poster, seconds, bytes),
 # and saves the set as design/previews/source/muse_preview_set.blend. Moves: 320x400, 24 fps, 60 frames (2.5 s), H.264
-# under 300 KB plus a poster JPG. Lighting: 640x400 JPG. Angles: 320x400 JPG. Ids come from server/api/src/suite/camera.ts.
+# under 300 KB plus a poster JPG. Lighting: 640x400 JPG. Angles: 320x400 JPG. Then run compress_previews.py (CRF 24 loops,
+# WebP stills, manifest). Ids come from server/api/src/suite/camera.ts.
 import math, os, shutil, sys, tempfile
 
 import bpy
