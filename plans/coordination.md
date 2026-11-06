@@ -92,6 +92,10 @@ When resuming:
     - The rig check should flag "prompt says open on X / reveal" against a move that can't do that.
     - Tempo / Genre / Era tiles need preview art (they are text on dark).
     - In Style → Tempo, add "single shot" as a search alias for "One take".
+13. **Higgsfield API as a provider (owner, 2026-11-06):** open.higgsfield.ai lists MiniMax H3 (text / image / reference to video) at **$0.065/s at 2K**. That is half of Replicate's and Fal's $0.13/s, priced "as of 16 Sep 2026" and shown against Fal, so treat it as their standing price. Clips are 1 / 5 / 10 / 15 s only.
+    - Add `higgsfield` as a provider in the suite registry, with the same H3 model on more than one provider, and route each tier to the cheapest provider that supports its inputs (9 refs, frames, video reference).
+    - Round lengths up to the allowed clip lengths, and show the price members actually pay.
+    - Needs the owner's Higgsfield API key (request_credential, never in chat), their API docs and terms checked, and a mock adapter first.
 
 ## Status (each session updates its own line)
 - 1 · Video composer follow-ups (2026-11-06) on `claude/muse-suite-core`: Recast tap-a-face (faceCrop + personHint), swap add-on pills, Era decade slider, UGC ad format wheel (`ugcFormats`, `camera.style.format`), @location (`/v1/suite/locations`, **migration 0013 after 0011/0012**), drag-to-reorder tokens, owner engine pin; catalog `tools` (Talking and UGC ad live, Extend coming soon); real Webcam/CCTV/Swirl/Tilt-shift renders; Blender previews bundled (`previews/`, catalog `preview` per move/light/angle); first-run HTTP checks on both apps. Server 359 green; Android 1305 green (release APK 30.7 MB, +9.5 MB previews); Mac CI green (run 42152398143). Next: Extend & upscale backend.
