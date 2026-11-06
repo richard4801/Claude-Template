@@ -224,7 +224,7 @@ public final class ClaudeScriptedLauncher: ClaudeLauncher, @unchecked Sendable {
     public private(set) var launches: [(arguments: [String], cwd: URL, stdin: String, config: String?)] = []
 
     /// `script` gets the user's text and returns the lines to print.
-    public init(delay: Double = 0, script: @escaping @Sendable (String) -> [String] = ClaudeDemoScript.lines) {
+    public init(delay: Double = 0, script: @escaping @Sendable (String) -> [String] = { ClaudeDemoScript.lines($0) }) {
         self.delay = delay
         self.script = script
     }
@@ -301,6 +301,6 @@ public enum ClaudeDemoScript {
                        "content": .array([.object(["type": .string("text"), "text": .string(outro)])])])])),
             j(.object(["type": .string("result"), "subtype": .string("success"), "is_error": .bool(false), "result": .string(outro), "session_id": .string(sid),
                        "total_cost_usd": .number(0)])),
-        ] + (text.isEmpty ? [] : [])
+        ]
     }
 }
