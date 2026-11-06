@@ -1,0 +1,330 @@
+<title>Camera Setup Drums</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one dark camera-bag panel; four vertical drums side by side under a single fixed selection band;
+   the centred item's name and spec caption sit under each drum. Dark-only by design (the camera bag is always dark). */
+:root {
+  --ground: #121212;      /* matches the renders' backdrop so they sit unboxed */
+  --panel: #141414;      /* the renders' own backdrop: no visible disc around them */
+  --band: rgba(255, 255, 255, .055);
+  --hair: rgba(255, 255, 255, .14);
+  --ink: #ece8e1;
+  --dim: #8f8a82;
+  --amber: #e7a54a;       /* tally-light accent */
+  --display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --item: 84px;           /* one detent */
+  --rows: 5;              /* visible rows */
+  color-scheme: dark;
+}
+@media (min-width: 720px) { :root { --item: 112px; } }
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  background: var(--ground); color: var(--ink); font-family: var(--display);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 28px; overscroll-behavior: none;
+}
+.wrap { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+h1 { font-size: 22px; font-weight: 600; letter-spacing: .01em; margin: 0; text-wrap: balance; }
+h1 span { color: var(--dim); font-weight: 400; }
+.rig { font-family: var(--mono); font-size: 12px; color: var(--dim); letter-spacing: .02em; }
+.rig b { color: var(--ink); font-weight: 500; }
+.tally { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--amber); margin-right: 8px; vertical-align: 1px; box-shadow: 0 0 10px var(--amber); }
+
+.bag { position: relative; background: var(--panel); border-radius: 18px; padding: 14px 6px 16px; }
+.cols { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; position: relative; }
+.col { min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.label { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: .14em; color: var(--dim); }
+.drum {
+  position: relative; width: 100%; height: calc(var(--item) * var(--rows)); overflow: hidden;
+  perspective: 700px; touch-action: none; cursor: grab; outline: none; user-select: none; -webkit-user-select: none;
+  /* fade the drum's top and bottom into the panel */
+  mask-image: linear-gradient(to bottom, transparent 0, #000 22%, #000 78%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 22%, #000 78%, transparent 100%);
+}
+.drum:active { cursor: grabbing; }
+.drum:focus-visible { box-shadow: inset 0 0 0 2px var(--amber); border-radius: 12px; }
+.item {
+  position: absolute; left: 0; right: 0; top: 50%; height: var(--item); margin-top: calc(var(--item) / -2);
+  display: grid; place-items: center; transform-style: preserve-3d; will-change: transform, opacity; backface-visibility: hidden;
+}
+.item img, .item svg { height: calc(var(--item) * .96); width: calc(var(--item) * .96); max-width: 92%; object-fit: contain; display: block; pointer-events: none; }
+.item img { -webkit-mask-image: radial-gradient(closest-side, #000 62%, transparent 100%); mask-image: radial-gradient(closest-side, #000 62%, transparent 100%); }
+/* One fixed selection band across all four drums. */
+.band {
+  position: absolute; left: 0; right: 0; height: var(--item); pointer-events: none;
+  background: var(--band); border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair);
+}
+.name { position: relative; width: 100%; height: 50px; text-align: center; }
+.name > div { position: absolute; inset: 0; padding: 0 4px; transition: opacity .18s ease, transform .18s ease; }
+.name > div.out { opacity: 0; transform: translateY(4px); }
+.name strong { display: block; font-size: 14.5px; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; }
+.name small { display: block; margin-top: 3px; font-family: var(--mono); font-size: 10.5px; line-height: 1.35; color: var(--dim); overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+@media (max-width: 480px) { .name strong { font-size: 13px; } .name small { font-size: 9.5px; } .label { font-size: 9.5px; letter-spacing: .1em; } }
+
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; font-size: 13px; color: var(--dim); }
+.toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.toggle input { accent-color: var(--amber); width: 18px; height: 18px; }
+.note { font-size: 13px; line-height: 1.5; color: var(--dim); max-width: 64ch; margin: 0; }
+.note b { color: var(--ink); font-weight: 500; }
+@media (prefers-reduced-motion: reduce) { .name > div { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Camera <span>· Setup</span></h1>
+    <div class="rig" id="rig" aria-live="polite"></div>
+  </header>
+
+  <section class="bag" aria-label="Camera setup wheels">
+    <div class="band" aria-hidden="true"></div>
+    <div class="cols" id="cols"></div>
+  </section>
+
+  <div class="controls">
+    <label class="toggle" id="hapticRow"><input type="checkbox" id="haptic" checked> Haptic tick (phone)</label>
+    <label class="toggle"><input type="checkbox" id="click"> Click sound</label>
+  </div>
+  <p class="note"><b>Prototype.</b> Flick a wheel: it keeps moving, slows down and settles on the nearest stop. Drag slowly to place it by hand, scroll with a trackpad or mouse, tap an item to go to it, or use the arrow keys. Only the item in the band shows its name; the rest tilt away along the drum.</p>
+</div>
+
+<script>
+(() => {
+  const H = 'hardware/';
+  const WHEELS = [
+    { key: 'camera', label: 'Camera', start: 4, items: [
+      { name: 'Auto', cap: 'The engine decides', draw: 'auto' },
+      { name: 'Phone', cap: 'Phone · 24 mm · deep focus · HDR', img: 'body-08-phone' },
+      { name: 'Creator camera', cap: 'FX3 · ZV look · compact · 4K', img: 'body-07-creator-cine' },
+      { name: 'Cinema camera', cap: 'Alexa · Venice · RED look · clean digital', img: 'body-02-super35' },
+      { name: '35mm film', cap: '35mm 4-perf · Vision3 500T look', img: 'body-05-film35' },
+      { name: '16mm film', cap: 'Super 16 · grain · documentary', img: 'body-06-film16' },
+      { name: 'Super 8', cap: 'Home movie · 18 fps · warm', img: 'body-10-super8' },
+      { name: 'Large format 65mm', cap: '65mm look · epic, shallow depth', img: 'body-01-large-format' },
+      { name: 'DV camcorder', cap: 'MiniDV · 2000s · 480i texture', img: 'body-09-dv-camcorder' },
+      { name: 'Webcam', cap: 'Wide · flat light · video-call look', img: 'body-11-webcam' },
+      { name: 'CCTV', cap: 'High fixed angle · muted colour', img: 'body-12-cctv' },
+    ]},
+    { key: 'lens', label: 'Lens', start: 2, items: [
+      { name: 'Auto', cap: 'The engine decides', draw: 'auto' },
+      { name: 'Clean sharp', cap: 'Master Prime look · spherical · T1.3', img: 'lens-01-clean-prime' },
+      { name: 'Warm vintage', cap: 'Speed Panchro look · warm falloff', img: 'lens-04-warm-vintage' },
+      { name: 'Anamorphic', cap: 'Oval bokeh · blue flares', img: 'lens-02-anamorphic' },
+      { name: 'Vintage anamorphic', cap: '1970s look · amber flares · soft edges', img: 'lens-03-vintage-anamorphic' },
+      { name: 'Halation', cap: '1/4 mist · bloom on highlights', img: 'lens-05-halation' },
+      { name: 'Swirl bokeh', cap: 'Petzval-style · swirling background', img: 'lens-09-swirl' },
+      { name: 'Macro', cap: '100 mm · 1:1 · product & detail', img: 'lens-06-macro' },
+      { name: 'Tilt-shift', cap: 'Slanted focus band · miniature look', img: 'lens-10-tilt-shift' },
+      { name: 'Fisheye', cap: '14 mm & fisheye · skate & FPV energy', img: 'lens-08-fisheye' },
+    ]},
+    { key: 'focal', label: 'Focal', start: 3, items: [
+      { name: 'Auto', cap: 'The engine decides', draw: 'auto' },
+      ...[[14, 'Ultra-wide · big spaces'], [24, 'Wide · rooms & streets'], [35, 'Everyday · how a phone sees'], [50, 'Natural · like the eye'],
+          [85, 'Portrait · soft, compressed'], [135, 'Telephoto · flat, far away']].map(([mm, cap]) => ({ name: mm + 'mm', cap, draw: 'focal', mm })),
+    ]},
+    { key: 'aperture', label: 'Aperture', start: 2, items: [
+      { name: 'Auto', cap: 'The engine decides', draw: 'auto' },
+      ...[[1.4, 'Dreamy blur'], [2.8, 'Soft background'], [5.6, 'Natural depth'], [11, 'Everything sharp']].map(([f, cap]) => ({ name: 'f/' + f, cap, draw: 'iris', f })),
+    ]},
+  ];
+
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const STEP = 21;            // degrees between detents on the drum
+  const $ = s => document.querySelector(s);
+  const hapticBox = $('#haptic'), clickBox = $('#click');
+  if (!('vibrate' in navigator)) $('#hapticRow').hidden = true;
+
+  // ---- drawings for the items without a render (stroke in the ink colour on dark)
+  const ink = getComputedStyle(document.documentElement).getPropertyValue('--ink').trim() || '#ece8e1';
+  const amber = getComputedStyle(document.documentElement).getPropertyValue('--amber').trim() || '#e7a54a';
+  function drawing(it) {
+    const ns = 'http://www.w3.org/2000/svg', s = document.createElementNS(ns, 'svg');
+    s.setAttribute('viewBox', '0 0 100 100'); s.setAttribute('aria-hidden', 'true');
+    let body = '';
+    if (it.draw === 'auto') {
+      body = `<circle cx="50" cy="50" r="30" fill="none" stroke="${ink}" stroke-opacity=".55" stroke-width="2" stroke-dasharray="4 5"/>
+              <text x="50" y="58" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="22" fill="${ink}" fill-opacity=".8">A</text>`;
+    } else if (it.draw === 'focal') {
+      const half = Math.atan(36 / (2 * it.mm)), L = 64, a = Math.min(half, 1.2);
+      const x2 = 18 + L * Math.cos(a), y = L * Math.sin(a);
+      body = `<path d="M18 50 L${x2.toFixed(1)} ${(50 - y).toFixed(1)} A ${L} ${L} 0 0 1 ${x2.toFixed(1)} ${(50 + y).toFixed(1)} Z" fill="${amber}" fill-opacity=".16" stroke="${amber}" stroke-opacity=".8" stroke-width="1.6"/>
+              <rect x="8" y="42" width="12" height="16" rx="2" fill="${ink}" fill-opacity=".85"/>`;
+    } else if (it.draw === 'iris') {
+      const open = 6 + 30 * (1.4 / it.f) ** .5;  // wider opening at small f-numbers
+      let blades = '';
+      for (let k = 0; k < 7; k++) {
+        const t = k * 2 * Math.PI / 7, x = 50 + open * Math.cos(t), y = 50 + open * Math.sin(t);
+        const x3 = 50 + 38 * Math.cos(t + 1.1), y3 = 50 + 38 * Math.sin(t + 1.1);
+        blades += `<line x1="${x.toFixed(1)}" y1="${y.toFixed(1)}" x2="${x3.toFixed(1)}" y2="${y3.toFixed(1)}" stroke="${ink}" stroke-opacity=".5" stroke-width="1.4"/>`;
+      }
+      body = `<circle cx="50" cy="50" r="38" fill="none" stroke="${ink}" stroke-opacity=".7" stroke-width="2"/>${blades}
+              <circle cx="50" cy="50" r="${open.toFixed(1)}" fill="${amber}" fill-opacity=".22" stroke="${amber}" stroke-width="1.6"/>`;
+    }
+    s.innerHTML = body;
+    return s;
+  }
+
+  // ---- click sound (Web Audio; starts only after the first user gesture)
+  let ctx = null;
+  function tickSound() {
+    if (!clickBox.checked) return;
+    try {
+      ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+      const t = ctx.currentTime, len = 0.018, buf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * len), ctx.sampleRate), d = buf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 6);
+      const src = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), g = ctx.createGain();
+      bp.type = 'bandpass'; bp.frequency.value = 3200; bp.Q.value = 1.2; g.gain.value = 0.35;
+      src.buffer = buf; src.connect(bp).connect(g).connect(ctx.destination); src.start(t);
+    } catch (e) { /* no audio here */ }
+  }
+  function detent() {
+    if (hapticBox.checked && navigator.vibrate) { try { navigator.vibrate(6); } catch (e) {} }
+    tickSound();
+  }
+
+  // ---- one drum
+  const rig = $('#rig');
+  const drums = [];
+  function updateRig() {
+    rig.innerHTML = '<span class="tally" aria-hidden="true"></span>' + drums.map(d => `<b>${d.w.items[d.sel].name}</b>`).join(' · ');
+  }
+
+  function makeDrum(w) {
+    const col = document.createElement('div'); col.className = 'col';
+    col.innerHTML = `<div class="label">${w.label}</div>`;
+    const drum = document.createElement('div'); drum.className = 'drum'; drum.tabIndex = 0;
+    drum.setAttribute('role', 'slider'); drum.setAttribute('aria-label', w.label);
+    drum.setAttribute('aria-valuemin', '0'); drum.setAttribute('aria-valuemax', String(w.items.length - 1));
+    const els = w.items.map((it, i) => {
+      const el = document.createElement('div'); el.className = 'item';
+      if (it.img) { const im = new Image(); im.src = H + it.img + '.webp'; im.alt = ''; im.decoding = 'async'; im.draggable = false; el.appendChild(im); }
+      else el.appendChild(drawing(it));
+      el.dataset.i = i; drum.appendChild(el); return el;
+    });
+    const name = document.createElement('div'); name.className = 'name';
+    col.append(drum, name);
+
+    const d = { w, drum, els, name, pos: w.start, sel: w.start, vel: 0, anim: null, last: null };
+    const max = w.items.length - 1;
+    const itemPx = () => drum.clientHeight / 5;
+
+    function showName(i) {
+      // Cross-fade: every older label fades out and is removed; only the newest one stays.
+      const olds = [...name.children];
+      const n = document.createElement('div'); n.className = 'out';
+      n.innerHTML = `<strong>${w.items[i].name}</strong><small>${w.items[i].cap}</small>`;
+      name.appendChild(n);
+      requestAnimationFrame(() => { if (n.isConnected && n === name.lastElementChild) n.classList.remove('out'); });
+      olds.forEach(o => { o.classList.add('out'); setTimeout(() => o.remove(), reduce ? 0 : 200); });
+      drum.setAttribute('aria-valuenow', String(i)); drum.setAttribute('aria-valuetext', `${w.items[i].name}, ${w.items[i].cap}`);
+    }
+    function render() {
+      const R = itemPx() / (2 * Math.sin(STEP * Math.PI / 360));  // drum radius so neighbours sit one detent apart
+      const near = Math.round(Math.min(max, Math.max(0, d.pos)));
+      els.forEach((el, i) => {
+        const deg = (i - d.pos) * STEP;
+        if (Math.abs(deg) > 95) { el.style.visibility = 'hidden'; return; }
+        el.style.visibility = 'visible';
+        const rad = deg * Math.PI / 180, falloff = Math.cos(rad);
+        el.style.transform = `translateY(${(R * Math.sin(rad)).toFixed(2)}px) translateZ(${(R * (falloff - 1)).toFixed(2)}px) rotateX(${(-deg).toFixed(2)}deg) scale(${(0.78 + 0.22 * falloff).toFixed(3)})`;
+        el.style.opacity = Math.max(0, Math.pow(falloff, 2.2)).toFixed(3);
+        el.style.filter = i === near ? 'none' : `brightness(${(0.55 + 0.35 * falloff).toFixed(2)})`;
+      });
+      if (near !== d.sel) { d.sel = near; detent(); showName(near); updateRig(); }
+    }
+    // Rubber band beyond the ends.
+    const clampSoft = p => p < 0 ? -Math.min(0.6, -p * 0.35) : p > max ? max + Math.min(0.6, (p - max) * 0.35) : p;
+
+    function stop() { if (d.anim) cancelAnimationFrame(d.anim); d.anim = null; }
+    function snapTo(target, fromVel = 0) {
+      stop();
+      target = Math.max(0, Math.min(max, target));
+      if (reduce) { d.pos = target; render(); return; }
+      // Critically damped spring: an eased settle with no overshoot.
+      let x = d.pos - target, v = fromVel, t0 = performance.now();
+      const k = 170, c = 2 * Math.sqrt(k);
+      const step = now => {
+        const dt = Math.min(0.032, (now - t0) / 1000); t0 = now;
+        const a = -k * x - c * v; v += a * dt; x += v * dt;
+        d.pos = target + x; render();
+        if (Math.abs(x) < 0.002 && Math.abs(v) < 0.01) { d.pos = target; render(); d.anim = null; return; }
+        d.anim = requestAnimationFrame(step);
+      };
+      d.anim = requestAnimationFrame(step);
+    }
+    function fling(v) {  // v: items per second
+      stop();
+      if (reduce) { snapTo(Math.round(d.pos + v * 0.25)); return; }
+      const tau = 0.325;  // momentum time constant (s): like a native scroll
+      const amplitude = v * tau, start = d.pos, t0 = performance.now();
+      const target = Math.round(Math.max(0, Math.min(max, start + amplitude)));
+      const amp = target - start;  // aim the decay at a detent, so it lands on a stop
+      const step = now => {
+        const t = (now - t0) / 1000, e = Math.exp(-t / tau);
+        d.pos = target - amp * e; render();
+        if (Math.abs(amp * e) < 0.06) { snapTo(target, amp * e / -tau); return; }
+        d.anim = requestAnimationFrame(step);
+      };
+      d.anim = requestAnimationFrame(step);
+    }
+
+    // Pointer: drag follows the finger 1:1; release flings with the measured velocity.
+    let drag = null;
+    drum.addEventListener('pointerdown', e => {
+      stop(); drum.setPointerCapture(e.pointerId);
+      drag = { y: e.clientY, pos: d.pos, moved: 0, hist: [{ t: performance.now(), p: d.pos }], target: e.target.closest('.item') };
+    });
+    drum.addEventListener('pointermove', e => {
+      if (!drag) return;
+      const dy = e.clientY - drag.y; drag.moved = Math.max(drag.moved, Math.abs(dy));
+      d.pos = clampSoft(drag.pos - dy / itemPx()); render();
+      const now = performance.now(); drag.hist.push({ t: now, p: d.pos });
+      while (drag.hist.length > 2 && now - drag.hist[0].t > 100) drag.hist.shift();
+    });
+    const end = e => {
+      if (!drag) return;
+      const g = drag; drag = null;
+      if (g.moved < 6 && g.target) { snapTo(Number(g.target.dataset.i)); return; }  // a tap goes to that item
+      const a = g.hist[0], b = g.hist[g.hist.length - 1], dt = (b.t - a.t) / 1000;
+      const v = dt > 0 ? (b.p - a.p) / dt : 0;
+      if (d.pos < 0 || d.pos > max || Math.abs(v) < 0.8) snapTo(Math.round(d.pos)); else fling(v);
+    };
+    drum.addEventListener('pointerup', end); drum.addEventListener('pointercancel', end);
+
+    // Trackpad / mouse wheel: scroll continuously, settle on the nearest stop once the scrolling stops.
+    let idle = null;
+    drum.addEventListener('wheel', e => {
+      e.preventDefault(); stop();
+      const px = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+      d.pos = clampSoft(d.pos + px / itemPx() * 0.9); render();
+      clearTimeout(idle); idle = setTimeout(() => snapTo(Math.round(d.pos)), 110);
+    }, { passive: false });
+
+    drum.addEventListener('keydown', e => {
+      const k = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
+      if (k) { e.preventDefault(); snapTo(Math.round(d.pos) + k); }
+      if (e.key === 'Home') { e.preventDefault(); snapTo(0); }
+      if (e.key === 'End') { e.preventDefault(); snapTo(max); }
+    });
+
+    d.render = render; d.showName = showName;
+    drums.push(d);
+    return col;
+  }
+
+  const cols = $('#cols');
+  WHEELS.forEach(w => cols.appendChild(makeDrum(w)));
+  // The band sits exactly on the drums' centre row, whatever the label and padding heights.
+  const band = document.querySelector('.band'), bag = document.querySelector('.bag');
+  const placeBand = () => { const dr = drums[0].drum; band.style.top = (dr.getBoundingClientRect().top - bag.getBoundingClientRect().top + dr.clientHeight / 2 - dr.clientHeight / 10) + 'px'; };
+  drums.forEach(d => { d.render(); d.showName(d.sel); });
+  updateRig(); placeBand();
+  addEventListener('resize', () => { drums.forEach(d => d.render()); placeBand(); });
+  document.fonts && document.fonts.ready.then(placeBand);
+})();
+</script>

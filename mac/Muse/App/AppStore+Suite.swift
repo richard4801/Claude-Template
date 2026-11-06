@@ -141,6 +141,9 @@ final class SuiteState {
     var estimateError: String?
     /// The four tiers' estimates for the Quality pill.
     var tierEstimates: [String: ShotEstimate] = [:]
+    /// The rig check (workstream 3): the estimate's `rig`, or POST /v1/suite/rig-check's when the estimate fails.
+    var rig: [RigWarning] = []
+    var rigDismissals = RigDismissals()
     var shotJobIds: [String] = []
     var generating = false
     /// Extend: the VIDEO slot's upload in flight (0…1), nil when none.
@@ -182,6 +185,8 @@ final class SuiteState {
         catalogError = nil
         estimate = nil
         tierEstimates = [:]
+        rig = []
+        rigDismissals = RigDismissals()
         shotJobIds = []
         swapJobIds = []
         swapEstimate = nil
@@ -336,14 +341,34 @@ extension AppStore {
         if suite.composer.tool == .extend { return await estimateExtend() }
         guard suite.enabled, suite.catalog != nil else { return }
         let req = shotRequest
+        suite.rigDismissals.sync(RigChoices(req))
         do {
-            suite.estimate = try await api.suiteEstimate(req)
+            let e = try await api.suiteEstimate(req)
+            suite.estimate = e
             suite.estimateError = nil
+            suite.rig = e.rig
         } catch let e as ApiError {
             suite.estimate = nil
             suite.estimateError = e.friendlyMessage
+            // The warnings still show when no engine fits (the rig check needs no planning).
+            suite.rig = (try? await api.suiteRigCheck(req)) ?? []
         } catch {}
         suite.tierEstimates = await tierPrices(req)
+    }
+
+    // MARK: The rig check (workstream 3)
+
+    /// The rig warnings the composer shows: a dismissed one stays hidden until the choices change.
+    var rigWarnings: [RigWarning] { suite.rigDismissals.visible(suite.rig, at: RigChoices(shotRequest)) }
+
+    /// A warning's fix (or alt), applied to the choices like a tap in the picker; the line goes until the re-check.
+    func applyRigFix(_ fix: RigFix, of w: RigWarning) {
+        suite.composer = suite.composer.applying(fix, catalog: suite.camera)
+        suite.rig.removeAll { $0.id == w.id }
+    }
+
+    func dismissRigWarning(_ w: RigWarning) {
+        suite.rigDismissals.dismiss(w, at: RigChoices(shotRequest))
     }
 
     /// One estimate per tier (free; nothing is held).

@@ -360,6 +360,29 @@ data class SuiteTried(val model: String = "", val resolution: String = "", val w
 @Serializable
 data class SuiteLook(val id: String, val kind: String = "palette", val label: String = "", val lut: String = "")
 
+/** A rig-check fix: its button label and a JSON Merge Patch (RFC 7386) over the shot request (objects merge, null removes). */
+@Serializable
+data class SuiteRigFix(val label: String = "", val patch: JsonObject = JsonObject(emptyMap()))
+
+/**
+ * One rig-check warning (plans/video-composer.md "Rig check"): choices that clash with each other or with the prompt.
+ * [severity] "warn" = the shot won't come out as chosen, "tip" = a taste clash. Never stops Generate.
+ */
+@Serializable
+data class SuiteRigWarning(
+    val id: String,
+    val severity: String = "warn",
+    val reason: String = "",
+    val fix: SuiteRigFix = SuiteRigFix(),
+    val alt: SuiteRigFix? = null,
+) {
+    val tip: Boolean get() = severity == "tip"
+}
+
+/** POST /v1/suite/rig-check: the rig check alone (no planning), for when the estimate fails. */
+@Serializable
+data class SuiteRigCheck(val rig: List<SuiteRigWarning> = emptyList())
+
 /** POST /v1/suite/shots/estimate. Every Generate shows [buttonLabel] / [priceLine]; a cap problem shows [message]. */
 @Serializable
 data class SuiteEstimate(
@@ -385,6 +408,8 @@ data class SuiteEstimate(
     val look: SuiteLook? = null,
     val cast: List<SuiteEstimateCast>? = null,
     val keepAudio: Boolean? = null,
+    /** The rig check: empty when nothing clashes (or on an older server); never changes [ok]. */
+    val rig: List<SuiteRigWarning> = emptyList(),
     /** owner */
     val engine: SuiteEngine? = null,
     /** owner */
@@ -500,7 +525,12 @@ object SuiteRules {
 
     /** The member's view of an estimate: no engine, no tried steps, no model words in what's shown. */
     fun memberSafe(e: SuiteEstimate): SuiteEstimate = e.copy(engine = null, tried = null, prompt = "",
-        warnings = e.warnings.filterNot { PROVIDER_WORDS.containsMatchIn(it) })
+        warnings = e.warnings.filterNot { PROVIDER_WORDS.containsMatchIn(it) }, rig = memberSafe(e.rig))
+
+    /** Rig warnings whose words name no provider or model (they never should; this keeps it so). */
+    fun memberSafe(rig: List<SuiteRigWarning>): List<SuiteRigWarning> = rig.filterNot { w ->
+        listOfNotNull(w.reason, w.fix.label, w.alt?.label).any { PROVIDER_WORDS.containsMatchIn(it) }
+    }
 
     /** The member's view of the catalog: tiers without their models. */
     fun memberSafe(c: SuiteCatalog): SuiteCatalog = c.copy(tiers = c.tiers.map { it.copy(models = null) })

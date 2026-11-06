@@ -55,10 +55,11 @@ android {
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/composerPreviews"))
 }
 
-// AI suite (workstream 1): copies design/previews (moves, lighting, angles only) into a generated assets dir, so the
+// AI suite (workstream 1): copies design/previews (moves, lighting, angles and the Style stills) into a generated assets dir, so the
 // files have a single committed copy.
 val copyComposerPreviews by tasks.registering(Sync::class) {
-    from("../../design/previews") { include("moves/**", "lighting/**", "angles/**") }
+    // + the Style tile stills (genres, eras, tempos: workstream 4, design/previews/source/style_stills.py)
+    from("../../design/previews") { include("moves/**", "lighting/**", "angles/**", "genres/**", "eras/**", "tempos/**") }
     into(layout.buildDirectory.dir("generated/composerPreviews/previews"))
 }
 tasks.named("preBuild") { dependsOn(copyComposerPreviews) }

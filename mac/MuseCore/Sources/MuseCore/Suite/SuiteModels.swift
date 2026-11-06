@@ -967,10 +967,14 @@ public struct ShotEstimate: Codable, Hashable, Sendable {
     public var tried: [SuiteTried]?
     /// The Look the take will be graded with (nil = none, or grading off).
     public var look: SuiteLook?
+    /// The rig check (workstream 3): clashes between the choices, or with the prompt. Empty when nothing clashes; never changes `ok`.
+    public var rig: [RigWarning]
 
     public init(quality: String, label: String, resolution: String, seconds: Double, takes: Int, mode: String, estimate: Double, priceLine: String, buttonLabel: String,
                 ok: Bool = true, code: String? = nil, message: String? = nil, caps: SuiteCaps? = nil, warnings: [String] = [], camera: SuiteEstimateCamera = SuiteEstimateCamera(),
-                prompt: String? = nil, test: Bool = false, speaking: SuiteSpeaking? = nil, cast: [SuiteCastLine]? = nil, keepAudio: Bool? = nil, engine: SuiteEngine? = nil) {
+                prompt: String? = nil, test: Bool = false, speaking: SuiteSpeaking? = nil, cast: [SuiteCastLine]? = nil, keepAudio: Bool? = nil, engine: SuiteEngine? = nil,
+                rig: [RigWarning] = []) {
+        self.rig = rig
         self.quality = quality
         self.label = label
         self.resolution = resolution
@@ -996,7 +1000,7 @@ public struct ShotEstimate: Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case quality, label, resolution, seconds, takes, mode, estimate, priceLine, buttonLabel, ok, code, message, caps, warnings, camera, prompt, test, speaking
-        case cast, keepAudio, engine, tried, look
+        case cast, keepAudio, engine, tried, look, rig
     }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -1023,10 +1027,95 @@ public struct ShotEstimate: Codable, Hashable, Sendable {
         engine = c.o(.engine)
         tried = c.o(.tried)
         look = c.o(.look)
+        rig = c.v(.rig, RigWarnings()).list
     }
 
     /// The line to show when it can't be made as is (a cap), or nil.
     public var problem: String? { ok ? nil : (message ?? caps?.message ?? "This shot is over the studio's limits") }
+}
+
+// MARK: Rig check (workstream 3, plans/video-composer.md "Rig check")
+
+/// A one-tap way out of a rig clash: a JSON Merge Patch (RFC 7386) over the ShotRequest. Objects merge, a value replaces,
+/// null removes. Today every patch is under `camera`; `RigFixes` applies one to the composer's choices.
+public struct RigFix: Codable, Hashable, Sendable {
+    public var label: String
+    public var patch: JSONValue
+
+    public init(label: String, patch: JSONValue) {
+        self.label = label
+        self.patch = patch
+    }
+
+    enum CodingKeys: String, CodingKey { case label, patch }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        label = c.v(.label, "")
+        patch = c.v(.patch, JSONValue.object([:]))
+    }
+}
+
+/// One clash the rig check found: a reason line, the fix and, when there is a natural one, a second way out.
+public struct RigWarning: Codable, Hashable, Sendable, Identifiable {
+    /// The rule (deep_focus, wide_close, worm_close, look_clash, prompt_move, prompt_angle, prompt_size, no_reveal, talk_move); one warning per rule.
+    public var id: String
+    /// "warn": the shot won't come out as chosen. "tip": a taste clash worth a look.
+    public var severity: String
+    public var reason: String
+    public var fix: RigFix
+    public var alt: RigFix?
+
+    public init(id: String, severity: String = "warn", reason: String, fix: RigFix, alt: RigFix? = nil) {
+        self.id = id
+        self.severity = severity
+        self.reason = reason
+        self.fix = fix
+        self.alt = alt
+    }
+
+    /// Anything but "tip" reads as a warning.
+    public var isTip: Bool { severity == "tip" }
+
+    enum CodingKeys: String, CodingKey { case id, severity, reason, fix, alt }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        severity = c.v(.severity, "warn")
+        reason = c.v(.reason, "")
+        fix = try c.decode(RigFix.self, forKey: .fix)
+        alt = c.o(.alt)
+    }
+}
+
+/// A list of warnings that skips an entry it can't read (a newer server's shape) instead of dropping the whole list.
+struct RigWarnings: Codable, Hashable, Sendable {
+    var list: [RigWarning] = []
+    init(_ list: [RigWarning] = []) { self.list = list }
+    private struct Maybe: Decodable {
+        let value: RigWarning?
+        init(from d: Decoder) throws { value = try? RigWarning(from: d) }
+    }
+    init(from d: Decoder) throws {
+        var c = try d.unkeyedContainer()
+        var out: [RigWarning] = []
+        while !c.isAtEnd {
+            guard let m = try? c.decode(Maybe.self) else { break }
+            if let w = m.value { out.append(w) }
+        }
+        list = out
+    }
+    func encode(to e: Encoder) throws { try list.encode(to: e) }
+}
+
+/// POST /v1/suite/rig-check → `{rig}`: the rig check alone, for when the estimate fails.
+public struct RigCheckResult: Codable, Hashable, Sendable {
+    public var rig: [RigWarning]
+    public init(rig: [RigWarning] = []) { self.rig = rig }
+    enum CodingKeys: String, CodingKey { case rig }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        rig = c.v(.rig, RigWarnings()).list
+    }
 }
 
 /// GET /v1/suite/shots/{id}: the job and its warnings; `engine` is the owner's.

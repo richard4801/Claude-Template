@@ -1061,6 +1061,7 @@ class FakeMuseApi(
     }
 
     override suspend fun suiteEstimate(req: SuiteShotRequest) = lock.withLock { suiteOn(); suite.estimate(req, suiteOwner, models, suiteClipSeconds(req.clipId), extendSourceOf(req).second) }
+    override suspend fun suiteRigCheck(req: SuiteShotRequest) = lock.withLock { suiteOn(); SuiteRigCheck(suite.rig(req)) }
     override suspend fun createSuiteShot(req: SuiteShotRequest): Job {
         val job = lock.withLock {
             suiteOn()

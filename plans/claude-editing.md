@@ -95,10 +95,10 @@ About 15 minutes. These are the few things only your own Mac and Claude account 
 **Before you start:** the MUSE Mac app is up to date, you're signed in as the owner, and you have a Claude Pro or Max account.
 
 1. **Install Claude Code from MUSE.**
-   - Do: Settings → Connections → *Claude on your plan* → **Install**.
-   - Expect: a Terminal window opens and runs Anthropic's installer. When it's finished, go back to MUSE and press **Re-check**.
+   - Do: on the Mac, Settings → Connections → *Claude on your plan* → **Install**.
+   - Expect: a Terminal window opens and runs Anthropic's installer. When it finishes, the same window goes straight on to Claude's sign-in, so finish signing in there if it opens. Then go back to MUSE and press **Re-check**.
    - ☐ Shows *Claude Code installed* with a version number.
-2. **Sign in to Claude.**
+2. **Sign in to Claude** (skip this if you already signed in at the end of step 1 and MUSE shows *Signed in*).
    - Do: press **Sign in**.
    - Expect: Terminal opens and then Claude's own sign-in page. Sign in with your Claude account. MUSE never sees your password.
    - ☐ After **Re-check**, it shows *Signed in* (and the model name).
@@ -107,7 +107,7 @@ About 15 minutes. These are the few things only your own Mac and Claude account 
    - ☐ It still shows *installed* and *signed in*. If it says *not installed*, apps opened from Finder can't see where Claude Code is installed. Note it and tell me.
 4. **First chat on the Mac.**
    - Do: open a camera session in Camera stage and type *"What's in this session?"*.
-   - ☐ The reply streams in, shows *On your Claude plan*, and uses MUSE tool chips such as "Read camera session".
+   - ☐ The reply streams in, shows *On your Claude plan*, and uses MUSE tool chips such as "Read the camera session".
    - ☐ No Terminal window opens and nothing asks for permission.
 5. **Claude can't touch your files.**
    - Do: type *"Run ls in a terminal"*.

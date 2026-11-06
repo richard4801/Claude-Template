@@ -1,0 +1,417 @@
+[
+ {
+  "in": {
+   "camera": {
+    "rig": {
+     "body": "phone",
+     "aperture": "f1.4"
+    },
+    "move": {
+     "id": "rack_focus"
+    }
+   }
+  },
+  "out": [
+   {
+    "id": "deep_focus",
+    "severity": "warn",
+    "reason": "Phone keeps everything in focus, so the rack focus won’t show",
+    "fix": {
+     "label": "Use Cinema camera",
+     "patch": {
+      "camera": {
+       "rig": {
+        "body": "cinema_digital"
+       }
+      }
+     }
+    },
+    "alt": {
+     "label": "Drop the rack focus",
+     "patch": {
+      "camera": {
+       "move": {
+        "id": "static"
+       }
+      }
+     }
+    }
+   }
+  ]
+ },
+ {
+  "in": {
+   "camera": {
+    "rig": {
+     "body": "webcam"
+    },
+    "move": {
+     "id": "handheld"
+    },
+    "mix": {
+     "id": "rack_focus"
+    }
+   }
+  },
+  "out": [
+   {
+    "id": "deep_focus",
+    "severity": "warn",
+    "reason": "Webcam keeps everything in focus, so the rack focus won’t show",
+    "fix": {
+     "label": "Use Cinema camera",
+     "patch": {
+      "camera": {
+       "rig": {
+        "body": "cinema_digital"
+       }
+      }
+     }
+    },
+    "alt": {
+     "label": "Drop the rack focus",
+     "patch": {
+      "camera": {
+       "mix": null
+      }
+     }
+    }
+   }
+  ]
+ },
+ {
+  "in": {
+   "camera": {
+    "rig": {
+     "focalMm": 14
+    },
+    "angle": {
+     "shotSize": "cu",
+     "height": "worm"
+    }
+   }
+  },
+  "out": [
+   {
+    "id": "wide_close",
+    "severity": "warn",
+    "reason": "A 14mm lens this close stretches the face",
+    "fix": {
+     "label": "Use 85mm",
+     "patch": {
+      "camera": {
+       "rig": {
+        "focalMm": 85
+       }
+      }
+     }
+    },
+    "alt": {
+     "label": "Medium shot",
+     "patch": {
+      "camera": {
+       "angle": {
+        "shotSize": "ms"
+       }
+      }
+     }
+    }
+   },
+   {
+    "id": "worm_close",
+    "severity": "warn",
+    "reason": "Worm’s-eye from the ground can’t frame a close-up",
+    "fix": {
+     "label": "Low angle",
+     "patch": {
+      "camera": {
+       "angle": {
+        "height": "low"
+       }
+      }
+     }
+    },
+    "alt": {
+     "label": "Full body",
+     "patch": {
+      "camera": {
+       "angle": {
+        "shotSize": "full"
+       }
+      }
+     }
+    }
+   }
+  ]
+ },
+ {
+  "in": {
+   "camera": {
+    "rig": {
+     "look": "bw_film"
+    },
+    "palette": {
+     "preset": "hyper_neon"
+    }
+   }
+  },
+  "out": [
+   {
+    "id": "look_clash",
+    "severity": "tip",
+    "reason": "Black & white film is black and white, so Hyper neon won’t show",
+    "fix": {
+     "label": "Keep Black & white film",
+     "patch": {
+      "camera": {
+       "palette": {
+        "preset": "naturalistic"
+       }
+      }
+     }
+    },
+    "alt": {
+     "label": "Keep Hyper neon",
+     "patch": {
+      "camera": {
+       "rig": {
+        "look": "digital_clean"
+       }
+      }
+     }
+    }
+   }
+  ]
+ },
+ {
+  "in": {
+   "camera": {
+    "rig": {
+     "look": "tungsten_stock"
+    },
+    "palette": {
+     "preset": "golden_warmth"
+    }
+   }
+  },
+  "out": [
+   {
+    "id": "look_clash",
+    "severity": "tip",
+    "reason": "Tungsten cinema stock and Golden warmth pull the colour opposite ways",
+    "fix": {
+     "label": "Keep Tungsten cinema stock",
+     "patch": {
+      "camera": {
+       "palette": {
+        "preset": "naturalistic"
+       }
+      }
+     }
+    },
+    "alt": {
+     "label": "Keep Golden warmth",
+     "patch": {
+      "camera": {
+       "rig": {
+        "look": "digital_clean"
+       }
+      }
+     }
+    }
+   }
+  ]
+ },
+ {
+  "in": {
+   "prompt": "She walks in, the camera pushes in on her face, low angle, close-up",
+   "camera": {
+    "move": {
+     "id": "orbit_left"
+    },
+    "angle": {
+     "height": "high",
+     "shotSize": "ls"
+    }
+   }
+  },
+  "out": [
+   {
+    "id": "prompt_move",
+    "severity": "warn",
+    "reason": "The prompt says “pushes in” but the move is Orbit left",
+    "fix": {
+     "label": "Use Dolly in",
+     "patch": {
+      "camera": {
+       "move": {
+        "id": "dolly_in"
+       }
+      }
+     }
+    }
+   },
+   {
+    "id": "prompt_angle",
+    "severity": "warn",
+    "reason": "The prompt says “low angle” but the angle is High angle",
+    "fix": {
+     "label": "Use Low angle",
+     "patch": {
+      "camera": {
+       "angle": {
+        "height": "low"
+       }
+      }
+     }
+    }
+   },
+   {
+    "id": "prompt_size",
+    "severity": "tip",
+    "reason": "The prompt says “close-up” but the framing is Wide",
+    "fix": {
+     "label": "Use Close-up",
+     "patch": {
+      "camera": {
+       "angle": {
+        "shotSize": "cu"
+       }
+      }
+     }
+    }
+   }
+  ]
+ },
+ {
+  "in": {
+   "prompt": "Open on the rainy street, then find her at the window",
+   "camera": {
+    "move": {
+     "id": "dolly_in"
+    }
+   }
+  },
+  "out": [
+   {
+    "id": "no_reveal",
+    "severity": "warn",
+    "reason": "The prompt opens on something else, but Dolly in can’t reveal",
+    "fix": {
+     "label": "Use Dolly out reveal",
+     "patch": {
+      "camera": {
+       "move": {
+        "id": "dolly_out"
+       }
+      }
+     }
+    }
+   }
+  ]
+ },
+ {
+  "in": {
+   "prompt": "Open on the street",
+   "camera": {
+    "move": {
+     "id": "crane_up"
+    }
+   }
+  },
+  "out": [
+   {
+    "id": "no_reveal",
+    "severity": "warn",
+    "reason": "The prompt opens on something else, but Crane up starts at the subject",
+    "fix": {
+     "label": "Use Tilt up",
+     "patch": {
+      "camera": {
+       "move": {
+        "id": "tilt_up"
+       }
+      }
+     }
+    }
+   }
+  ]
+ },
+ {
+  "in": {
+   "prompt": "no zoom, #Dolly in please",
+   "camera": {
+    "move": {
+     "id": "static"
+    }
+   }
+  },
+  "out": []
+ },
+ {
+  "in": {
+   "speaking": true,
+   "camera": {
+    "move": {
+     "id": "orbit_left"
+    }
+   }
+  },
+  "out": [
+   {
+    "id": "talk_move",
+    "severity": "warn",
+    "reason": "Orbit left can fight lip sync on a speaking shot",
+    "fix": {
+     "label": "Lock it off",
+     "patch": {
+      "camera": {
+       "move": {
+        "id": "static"
+       }
+      }
+     }
+    },
+    "alt": {
+     "label": "Handheld UGC",
+     "patch": {
+      "camera": {
+       "move": {
+        "id": "handheld"
+       }
+      }
+     }
+    }
+   }
+  ]
+ },
+ {
+  "in": {
+   "speaking": true,
+   "camera": {
+    "move": {
+     "id": "handheld"
+    },
+    "mix": {
+     "id": "dolly_in",
+     "intensity": 0.4
+    }
+   }
+  },
+  "out": [
+   {
+    "id": "talk_move",
+    "severity": "warn",
+    "reason": "Dolly in can fight lip sync on a speaking shot",
+    "fix": {
+     "label": "Drop Dolly in",
+     "patch": {
+      "camera": {
+       "mix": null
+      }
+     }
+    }
+   }
+  ]
+ }
+]

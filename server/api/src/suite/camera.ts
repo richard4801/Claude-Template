@@ -455,7 +455,7 @@ export function cameraCatalog() {
     /** The Auto tile's preview per picker (same subject as the option tiles). */
     autoPreviews: { ...(PREVIEWS['lighting/auto'] ? { lighting: PREVIEWS['lighting/auto'] } : {}) },
     library: FEATURED_MOVES.map(f => { const m = MOVES.find(x => x.id === f.id)!; return { id: m.id, label: f.label ?? m.label, tag: f.tag, description: m.description, category: m.category }; }),
-    heights: v(HEIGHTS, undefined, 'angles'), shotSizes: v(SHOT_SIZES, undefined, 'angles'), genres: v(GENRES), eras: v(ERAS), tempos: v(TEMPOS), ugcFormats: v(UGC_FORMATS), emotions: [...EMOTIONS],
+    heights: v(HEIGHTS, undefined, 'angles'), shotSizes: v(SHOT_SIZES, undefined, 'angles'), genres: v(GENRES, undefined, 'genres'), eras: v(ERAS, undefined, 'eras'), tempos: v(TEMPOS, undefined, 'tempos'), /* WS4: Style tile stills (design/previews/source/style_stills.py) */ ugcFormats: v(UGC_FORMATS), emotions: [...EMOTIONS],
     limits: { intensity: [0, 1], dutchDeg: [0, 30], focalMm: [8, 200], paletteColors: 5, mixPairs: 'two moves of different kinds; not static, time or aerial' },
   };
 }

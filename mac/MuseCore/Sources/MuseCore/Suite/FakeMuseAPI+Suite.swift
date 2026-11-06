@@ -172,6 +172,7 @@ extension FakeMuseAPI {
                              speaking: SuiteSpeaking(speaking: speaking, source: r.speaking == nil ? "default" : "switch"), cast: cast,
                              keepAudio: mode == "recast" || mode == "swap" ? (r.keepAudio ?? true) : nil)
         e.look = SuiteLooks.look(for: r, camera: SuiteDemoCatalog.catalog.camera)
+        e.rig = mode == "recast" || mode == "swap" ? [] : FakeRigCheck.check(prompt: r.prompt, camera: r.camera, speaking: speaking)
         if suiteIsOwner {
             e.engine = SuiteEngine(model: p.model, name: p.name, provider: p.provider, resolution: p.resolution, perSec: p.perSec, billedPerTake: seconds, test: true)
         }
@@ -216,6 +217,12 @@ extension FakeMuseAPI {
     }
 
     public func suiteEstimate(_ req: ShotRequest) async throws -> ShotEstimate { try suitePlan(req) }
+
+    /// The rig check alone: no character, engine or price needed (swap and recast have none).
+    public func suiteRigCheck(_ req: ShotRequest) async throws -> [RigWarning] {
+        if req.mode == "swap" || req.mode == "recast" { return [] }
+        return FakeRigCheck.check(prompt: req.prompt, camera: req.camera, speaking: req.speaking ?? false)
+    }
 
     /// Demo mode's locations reuse demo stills.
     static let demoLocations: [SuiteLocation] = [
