@@ -50,7 +50,7 @@ fun ClaudeChatHost(contextKind: String, contextId: String, title: String, modifi
     val m = muse
     val session = LocalEditSession.current?.takeIf { it.id == contextId && contextKind == "edit" }
     val entries = session?.claudeEntries.orEmpty().take(12)
-    Column(modifier.padding(horizontal = 16.dp).semantics { contentDescription = "Claude for $title" }, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(modifier.semantics { contentDescription = "Claude for $title" }, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         SuiteLabel("Claude's recent changes", color = m.t.muted)
         if (entries.isEmpty()) T("Nothing yet · ask Claude in the Claude app (MUSE connector) to edit this video", m.type.body.copy(fontSize = 13.sp), m.t.muted)
         entries.forEach { e -> HistoryRow(e, onUndo = null) }
@@ -102,7 +102,7 @@ fun HistoryRow(e: EditHistoryEntry, onUndo: ((Long) -> Unit)?) {
 
 private fun whoOf(e: EditHistoryEntry): String = when {
     e.byClaude -> if (e.kind == "tool") "Claude looked" else "Claude"
-    e.author.startsWith("app:") -> "This studio's app"
+    e.author.startsWith("app:") -> "You"
     else -> "You"
 }
 
