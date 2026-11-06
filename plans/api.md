@@ -587,6 +587,32 @@ DenoiseResult  { asset?: { kind: "audio", upload | take, url?, durationSec }, su
 | `POST /v1/shoots` `{…, filter?: Look}` | The look is applied to every still on the server (bundled looks only: `lut: "pack:<id>"`); with a template it replaces the template's own look. `bad_request` `filter.<field>: …`. |
 | Templates `layers.afterEffects.look?: Look` | Kept with the template and applied to its stills after the grade (bundled looks only). |
 
+**Edit sessions (2026-11-06, Claude in the Edit suite)** — spec `plans/claude-editing.md` A, `plans/video-editor.md` "Edit sessions and edit ops". Owner only (`403 owner_only` for members). Migration 0012.
+
+```ts
+EditSession { id /* es_… */, takeId, baseVersionId?, revision, project: EditProject, durationSec, status: "open"|"closed", updatedBy /* "app:<device>"|"claude" */, updatedAt,
+              pending: Pending[], online: {device, label, platform: "android"|"mac"|"other", canRender}[], requests: AppRequest[], history?: HistoryEntry[] /* newest first, ≤ 60 */ }
+HistoryEntry { id, revision, author, byClaude, kind: "edit"|"undo"|"tool"|"reset", label, undoes?, undone, createdAt }
+Pending      { id, kind: "captions"|"cuts"|"matte"|"denoise"|"beats", label, estimateUsd, status: "waiting"|"approved"|"declined"|"running"|"done"|"failed", jobId?, createdAt }
+AppRequest   { id, kind: "save"|"export", name?, preset?, device, status: "sent"|"done"|"failed", versionId?, error?, at }
+PatchOp      { op: "add"|"remove"|"replace", path /* JSON Pointer */, value? }
+```
+| | |
+|---|---|
+| `POST /v1/edit-sessions` `{takeId, project?, baseVersionId?, device?, fresh?}` | → `EditSession`: the take's open session, or a new one (from `project`, else the take's saved edit list, else untouched; a graded suite take starts with its look). |
+| `GET /v1/edit-sessions?takeId=` · `GET /v1/edit-sessions/{id}` · `GET …/{id}/history?limit=` | Sessions, one session (with history), the history. |
+| `POST …/{id}/patch` `{baseRevision, patch: PatchOp[], label, device}` | → `{revision, entry}`. `409 stale_revision` when the session moved on; `bad_request` with the field when the result breaks a rule. |
+| `POST …/{id}/reset` `{baseRevision, project, device, label?}` | Replaces the whole project (undoable). |
+| `POST …/{id}/undo` `{entryId, device}` | Applies that change's inverse as a new change; `409 already_undone` / `cannot_undo` (later changes touch the same parts). |
+| `POST …/{id}/presence` `{device, label, platform, canRender}` (every 30 s) · `DELETE …/{id}/presence/{device}` | Which apps have the edit open (Claude's frames and save/export go to one of them, the Mac first). |
+| `POST …/{id}/frames/{requestId}` `{uploadId}` | The app's answer to a `frame_request` (a PNG uploaded with the image presign). |
+| `POST …/{id}/requests/{requestId}` `{status: "done"|"failed", versionId?, error?}` | The app's answer to an `app_request`. |
+| `POST …/{id}/pending/{pendingId}` `{approve: boolean}` | The owner's answer to a paid helper Claude asked for (yes starts the job, holding the cost as usual). |
+| `GET …/{id}/frame?t=&width=` | The approximate server frame (PNG) Claude sees when no app renders. |
+| `POST …/{id}/close` | Closes it (the next open starts a new one). |
+
+Events: `{type: "edit", sessionId, op: "patch", revision, baseRevision, patch, entry}` · `{op: "log", entry}` (Claude looked at something) · `{op: "pending", pending}` · `{op: "frame_request", requestId, t, width, revision, device}` · `{op: "app_request", request}` · `{op: "closed"}` — owners only.
+
 ## Types
 
 ```ts
@@ -640,7 +666,7 @@ Platform   "tiktok"|"instagram"|"facebook"|"youtube"|"x"
 Account    { modelId, platform: Platform, handle, connectedAt, canPostDirect: boolean /* false until that platform approves MUSE */ }
 Post       { id, modelId, takeId, title, thumb: ImageRef, platforms: Platform[], caption, aiLabel: boolean, paidPartnership: boolean,
              when: "now"|ISO time, state: "scheduled"|"handoff"|"posted"|"failed", createdAt, postedAt?, stats?: { views, likes, comments } }
-ApiEvent   { type: "job"|"take"|"balance"|"wallet"|"model"|"outfit"|"lora"|"post"|"gpu"|"tool"|"template"|"clip"|"settings"|"member"|"invite"|"studio"|"account"|"prompts"|"editor" /* "Editor v2" */,
+ApiEvent   { type: "job"|"take"|"balance"|"wallet"|"model"|"outfit"|"lora"|"post"|"gpu"|"tool"|"template"|"clip"|"settings"|"member"|"invite"|"studio"|"account"|"prompts"|"editor" /* "Editor v2" */|"edit" /* "Edit sessions" */,
              prompt?: PromptEntry /* "prompts", owners only (2026-11-05) */,
              op?: "delete"|"used" /* with id: remove that item */, id?, take?: Take, template?: Template, clip?: Clip, settings?: StudioSettings,
              imageEngine? /* owners */, imageModels? /* owners */, member?: Member /* owners */, invite? /* owners */, studioBalance?: StudioBalance /* owners */,

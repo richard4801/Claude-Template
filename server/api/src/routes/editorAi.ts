@@ -11,7 +11,10 @@ import { LOOK_LIMITS } from '../editor/look.js';
 import { LOOK_IDS } from '../editor/lookpack.js';
 import { LOOK_DIR } from '../editor/photo.js';
 import { uid } from '../lib/util.js';
-import { EditorAiService } from '../editor/service.js';
+import { editorAi } from '../editor/service.js';
+import { registerEditSessionRoutes } from '../editor/sessionRoutes.js';
+import { EDIT_TOOLS } from '../editor/mcpTools.js';
+import * as mcpTools from '../mcp/tools.js';
 import { checkProject, lutOfUpload } from '../editor/versions.js';
 import { CAPTION_STYLES, FILTERS, HOOKS } from '../editor/presets.js';
 
@@ -19,7 +22,11 @@ const VIDEO_EXT: Record<string, string> = { 'video/mp4': 'mp4', 'video/quicktime
 const AUDIO_EXT: Record<string, string> = { 'audio/mp4': 'm4a', 'audio/aac': 'aac', 'audio/mpeg': 'mp3', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/flac': 'flac' };
 
 export async function registerEditorAiRoutes(app: FastifyInstance, ctx: Ctx) {
-  const svc = new EditorAiService(ctx);
+  const svc = editorAi(ctx);
+  registerEditSessionRoutes(app, ctx); // Edit sessions shared with Claude (plans/claude-editing.md A)
+  // Claude's editing tools on MUSE's MCP server: workstream 2's registry (mcp/tools.ts registerMcpTools) when it exists.
+  const register = (mcpTools as { registerMcpTools?: (tools: unknown[]) => void }).registerMcpTools;
+  if (register) register(EDIT_TOOLS);
   ctx.later(() => void svc.recover().then(n => { if (n) ctx.log.info({ n }, 'editor jobs interrupted by the restart were failed and released'); }).catch(e => ctx.log.warn({ err: (e as Error).message }, 'editor recover failed')), 0);
 
   app.get('/v1/editor/features', async () => svc.features());

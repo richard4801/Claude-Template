@@ -4,6 +4,7 @@ export type EventType = 'job' | 'take' | 'balance' | 'wallet' | 'model' | 'outfi
   | 'settings' | 'member' | 'invite' | 'studio' | 'account' | 'prompts'
   | 'camera' | 'blender' /* workstream 2: camera sessions and the Blender relay (owners only) */
   | 'editor' /* Editor v2 AI jobs (workstream 3) */
+  | 'edit' /* Edit sessions shared with Claude (workstream 3) */
   | 'promptScript' // prompt scripts (workstream 4)
   ;
 export type ApiEvent = { type: EventType; [k: string]: unknown };

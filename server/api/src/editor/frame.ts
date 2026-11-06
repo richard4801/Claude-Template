@@ -1,0 +1,126 @@
+// Approximate frames of an edit for Claude (get_frame / get_contact_sheet when no MUSE app is online to render the exact
+// frame): the source frame at the mapped source time (ffmpeg, one still), fitted to the canvas, the item's colour and
+// Look (reference renderer), then text and the caption page drawn as SVG. Flagged approximate: no overlays/PiP,
+// transitions, masks or keyframes. Nothing is encoded but stills.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
+import { and, eq } from 'drizzle-orm';
+import sharp from 'sharp';
+import type { Ctx } from '../ctx.js';
+import { takes, uploads } from '../db/schema.js';
+import { uid } from '../lib/util.js';
+import { mediaToolsAvailable, thumbnail } from '../replicate/media.js';
+import { renderLook, type Lut } from './look.js';
+import * as M from './model.js';
+import { packLut } from './photo.js';
+import { FILTERS } from './presets.js';
+import { lutOfUpload } from './versions.js';
+
+const xml = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c]!);
+const FONT: Record<string, string> = { sans: 'DejaVu Sans, Arial, sans-serif', serif: 'DejaVu Serif, Georgia, serif', rounded: 'DejaVu Sans, Arial, sans-serif',
+  condensed: 'DejaVu Sans Condensed, Arial Narrow, sans-serif', mono: 'DejaVu Sans Mono, monospace', marker: 'DejaVu Sans, cursive' };
+
+/** The key of an asset's stored media (a take's video or an upload), or null. */
+async function mediaKey(ctx: Ctx, studioId: string, a: M.Asset): Promise<string | null> {
+  if (a.take) { const [t] = await ctx.db.select({ k: takes.mediaKey }).from(takes).where(and(eq(takes.id, a.take), eq(takes.studioId, studioId))); return t?.k ?? null; }
+  if (a.upload) { const [u] = await ctx.db.select({ k: uploads.storageKey }).from(uploads).where(and(eq(uploads.id, a.upload), eq(uploads.studioId, studioId))); return u?.k ?? null; }
+  return null;
+}
+
+/** One still at `sec` of the stored media, as raw RGB at the given box (cover/contain), or null. */
+async function still(ctx: Ctx, key: string, sec: number, w: number, h: number, fit: M.Fit): Promise<Buffer | null> {
+  if (!(await mediaToolsAvailable(ctx.config.FFMPEG_PATH, ctx.config.FFPROBE_PATH))) return null;
+  const tmp = path.join(os.tmpdir(), uid('frm')), jpg = `${tmp}.jpg`;
+  let input = `${tmp}${path.extname(key)}`;
+  try {
+    if (ctx.storage.kind === 's3') input = await ctx.storage.presignGet(key, 600);
+    else { const o = await ctx.storage.get(key); if (!o) return null; await pipeline(o.body as NodeJS.ReadableStream, fs.createWriteStream(input)); }
+    await thumbnail(ctx.config.FFMPEG_PATH, input, jpg, sec);
+    return await sharp(jpg).resize(w, h, { fit: fit === 'contain' ? 'contain' : 'cover', background: '#000000' }).removeAlpha().raw().toBuffer();
+  } catch { return null; } finally {
+    for (const f of [jpg, `${tmp}${path.extname(key)}`]) await fs.promises.rm(f, { force: true }).catch(() => {});
+  }
+}
+
+/** SVG for the text items and the caption page showing at t. */
+function overlaySvg(p: M.EditProject, t: number, W: number, H: number): string {
+  const parts: string[] = [];
+  const textEl = (s: M.TextStyle, x: number, y: number, body: string, scale = 1) => {
+    const size = Math.max(6, s.sizePct * H * scale), stroke = s.stroke ? ` stroke="${s.stroke.color}" stroke-width="${(s.stroke.widthPct * size).toFixed(1)}" paint-order="stroke"` : '';
+    const anchor = s.align === 'left' ? 'start' : s.align === 'right' ? 'end' : 'middle';
+    return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-family="${FONT[s.font] ?? FONT.sans}" font-weight="${s.weight}" font-size="${size.toFixed(1)}" fill="${s.color}" text-anchor="${anchor}" dominant-baseline="middle"${stroke}>${body}</text>`;
+  };
+  for (const tr of p.tracks.filter(x => x.kind === 'text' && !x.hidden)) for (const it of tr.items as M.TextItem[]) {
+    if (t < it.startSec || t >= it.startSec + it.durationSec) continue;
+    const s = it.style, lines = (s.uppercase ? it.text.toUpperCase() : it.text).split('\n'), size = s.sizePct * H * (it.transform?.scale ?? 1);
+    const x = (it.transform?.x ?? 0.5) * W, y0 = (it.transform?.y ?? 0.5) * H - ((lines.length - 1) * size * (s.lineHeight ?? 1.15)) / 2;
+    lines.forEach((ln, i) => parts.push(textEl(s, x, y0 + i * size * (s.lineHeight ?? 1.15), xml(ln), it.transform?.scale ?? 1)));
+  }
+  const ct = p.tracks.find(x => x.kind === 'caption' && x.caption && !x.hidden)?.caption;
+  const at = ct ? M.captionAt(p, t) : null;
+  if (ct && at) {
+    const page = M.captionPages(p)[at.page]!, s = ct.style;
+    const words = page.words.map((w, k) => {
+      const lit = s.preset === 'karaoke' ? k <= at.word : k === at.word && s.preset !== 'plain';
+      const txt = xml(s.uppercase ? w.text.toUpperCase() : w.text);
+      return lit ? `<tspan fill="${s.highlightColor}">${txt}</tspan>` : txt;
+    }).join(' ');
+    parts.push(textEl(s, W / 2, (s.y ?? 0.72) * H, words));
+  }
+  return parts.length ? `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">${parts.join('')}</svg>` : '';
+}
+
+/** An approximate PNG of the edit at timeline second t, `width` px wide. */
+export async function approximateFrame(ctx: Ctx, studioId: string, p: M.EditProject, t: number, width = 540): Promise<{ png: Buffer; width: number; height: number; note: string }> {
+  const W = Math.max(32, Math.min(Math.round(width), p.canvas.width)), H = Math.max(32, Math.round((W * p.canvas.height) / p.canvas.width));
+  const d = M.durationSec(p);
+  t = Math.min(Math.max(0, t), Math.max(0, d - 1e-3));
+  const spans = M.timeline(p), main = M.mainTrack(p);
+  let k = spans.length - 1;
+  for (let i = spans.length - 1; i >= 0; i--) if (t >= spans[i]!.startSec) { k = i; break; }
+  const clip = main.items[k] as M.VideoClip, asset = p.assets.find(a => a.id === clip.asset);
+  const src = M.clipSourceAt(clip, t - spans[k]!.startSec);
+  let note = 'approximate: the source frame with its look, text and captions; no overlays, transitions, masks or keyframes';
+  let rgb: Buffer | null = null;
+  const key = asset ? await mediaKey(ctx, studioId, asset) : null;
+  if (key) rgb = await still(ctx, key, src, W, H, clip.fit ?? 'cover');
+  if (!rgb) { rgb = Buffer.alloc(W * H * 3, 0); note = 'approximate: the source frame could not be read here, so only text and captions are drawn'; }
+  // Colour and look.
+  const lookRef = clip.look?.lut;
+  let lut: Lut | null = null;
+  if (lookRef) {
+    if (lookRef.startsWith('pack:') || lookRef.startsWith('palette:')) lut = packLut(lookRef);
+    else { const a = p.assets.find(x => x.id === lookRef); if (a?.upload) lut = await lutOfUpload(ctx, studioId, a.upload).catch(() => null); }
+  }
+  const hasColour = clip.look || clip.filter || clip.adjust;
+  if (hasColour) {
+    const f = new Float32Array(W * H * 3);
+    for (let i = 0; i < f.length; i++) f[i] = rgb[i]! / 255;
+    const out = renderLook({ width: W, height: H, data: f }, clip.look ?? {}, {
+      matrix: M.colorMatrix(clip.adjust, clip.filter, FILTERS), tone: clip.adjust ? { shadows: clip.adjust.shadows, highlights: clip.adjust.highlights } : null,
+      lut, frame: Math.round(t * p.canvas.fps), fps: p.canvas.fps,
+    });
+    for (let i = 0; i < out.data.length; i++) rgb[i] = Math.round(out.data[i]! * 255);
+  }
+  let img = sharp(rgb, { raw: { width: W, height: H, channels: 3 } });
+  const svg = overlaySvg(p, t, W, H);
+  if (svg) img = img.composite([{ input: Buffer.from(svg) }]);
+  return { png: await img.png().toBuffer(), width: W, height: H, note };
+}
+
+/** A strip of approximate frames every `everySec` (at most 40), 6 per row, each 160 px wide with its time. */
+export async function contactSheet(ctx: Ctx, studioId: string, p: M.EditProject, everySec = 1): Promise<{ png: Buffer; times: number[] }> {
+  const d = M.durationSec(p), step = Math.max(0.25, everySec, d / 40);
+  const times: number[] = [];
+  for (let t = 0; t < d - 1e-6 && times.length < 40; t += step) times.push(Math.round(t * 100) / 100);
+  const tiles = await Promise.all(times.map(t => approximateFrame(ctx, studioId, p, t, 160)));
+  const tw = 160, th = tiles[0]?.height ?? 284, cols = Math.min(6, times.length), rows = Math.ceil(times.length / 6), lab = 18;
+  const comps = await Promise.all(tiles.map(async (tl, i) => {
+    const label = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${tw}" height="${lab}"><rect width="100%" height="100%" fill="#111"/><text x="4" y="13" font-size="12" fill="#fff" font-family="DejaVu Sans Mono, monospace">${times[i]!.toFixed(1)} s</text></svg>`);
+    return { input: await sharp(tl.png).extend({ bottom: lab, background: '#111111' }).composite([{ input: label, top: th, left: 0 }]).png().toBuffer(), left: (i % 6) * tw, top: Math.floor(i / 6) * (th + lab) };
+  }));
+  const png = await sharp({ create: { width: Math.max(1, cols) * tw, height: Math.max(1, rows) * (th + lab), channels: 3, background: '#111111' } }).composite(comps).png().toBuffer();
+  return { png, times };
+}
