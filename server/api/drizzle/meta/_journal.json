@@ -78,6 +78,13 @@
       "when": 1793896375493,
       "tag": "0010_prompt_scripts",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1793929987397,
+      "tag": "0013_suite_locations",
+      "breakpoints": true
     }
   ]
 }
