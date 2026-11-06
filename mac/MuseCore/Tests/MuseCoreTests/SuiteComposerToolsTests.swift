@@ -12,16 +12,17 @@ final class SuiteComposerToolsTests: XCTestCase {
 
     func testComingSoonFollowsTheCatalogsTools() throws {
         let c = SuiteDemoCatalog.catalog
-        XCTAssertEqual(c.tools.map(\.id), ["shot", "swap", "recast", "storyboard", "talking", "ugc_ad", "extend"])
+        XCTAssertEqual(c.tools.map(\.id), ["shot", "swap", "recast", "storyboard", "talking", "ugc_ad", "extend", "photo"])
         XCTAssertFalse(ComposerTool.talking.isComingSoon(in: c))
         XCTAssertFalse(ComposerTool.ugc.isComingSoon(in: c), "ugc_ad is UGC ad")
-        XCTAssertTrue(ComposerTool.extend.isComingSoon(in: c))
-        XCTAssertEqual(c.tools.last, SuiteToolStatus(id: "extend", available: false, comingSoon: true))
+        XCTAssertFalse(ComposerTool.extend.isComingSoon(in: c), "Extend is live (suite/extend.ts)")
+        XCTAssertEqual(c.tools.last, SuiteToolStatus(id: "photo", available: true))
+        XCTAssertFalse(ComposerTool.photo.isComingSoon(in: c), "Photo is live (suite/photo.ts)")
         // A catalog without tools keeps the app's own list.
         let old = try JSONDecoder().decode(SuiteCatalog.self, from: Data(#"{"enabled":true,"tiers":[]}"#.utf8))
         XCTAssertEqual(old.tools, [])
-        XCTAssertEqual(ComposerTool.shell.filter { $0.isComingSoon(in: old) }, [.talking, .ugc, .extend])
-        XCTAssertEqual(ComposerTool.shell.filter { $0.isComingSoon(in: nil) }, [.talking, .ugc, .extend])
+        XCTAssertEqual(ComposerTool.shell.filter { $0.isComingSoon(in: old) }, [.talking, .ugc])
+        XCTAssertEqual(ComposerTool.shell.filter { $0.isComingSoon(in: nil) }, [.talking, .ugc])
         // A server that switches a tool off.
         var off = c
         off.tools = [SuiteToolStatus(id: "shot", available: false)]

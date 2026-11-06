@@ -10,6 +10,8 @@ import Foundation
 /// Shot, Character swap, Recast, Talking, UGC ad, Storyboard and Extend & upscale: one composer with a different tool card.
 public enum ComposerTool: String, CaseIterable, Sendable, Identifiable {
     case shot, swap, recast, talking, ugc, storyboard, extend
+    /// Stills of the character (workstream 3): Photoshoot on the shell (SuitePhoto.swift).
+    case photo
     public var id: String { rawValue }
 
     public var title: String {
@@ -21,6 +23,7 @@ public enum ComposerTool: String, CaseIterable, Sendable, Identifiable {
         case .ugc: return "UGC ad"
         case .storyboard: return "Storyboard"
         case .extend: return "Extend & upscale"
+        case .photo: return "Photo"
         }
     }
 
@@ -34,6 +37,7 @@ public enum ComposerTool: String, CaseIterable, Sendable, Identifiable {
         case .ugc: return "Your character with your product"
         case .storyboard: return "Scenes with one cast, one look"
         case .extend: return "Longer, smoother, sharper"
+        case .photo: return "Stills of your character"
         }
     }
 
@@ -47,11 +51,12 @@ public enum ComposerTool: String, CaseIterable, Sendable, Identifiable {
         case .ugc: return "grip-05-slider"
         case .storyboard: return "palette-05-sodium-decay"
         case .extend: return "stock-03-sensor"
+        case .photo: return "light-04-window"
         }
     }
 
-    /// No backend yet: the tool card shows a quiet "Coming soon" and no Generate.
-    public var comingSoon: Bool { self == .talking || self == .ugc || self == .extend }
+    /// No backend yet: the tool card shows a quiet "Coming soon" and no Generate. (Extend is live: suite/extend.ts.)
+    public var comingSoon: Bool { self == .talking || self == .ugc }
 
     /// The tool's id in `catalog.tools` (UGC ad is "ugc_ad").
     public var wireId: String { self == .ugc ? "ugc_ad" : rawValue }
@@ -72,6 +77,8 @@ public enum ComposerTool: String, CaseIterable, Sendable, Identifiable {
         case .talking: return [.camera, .look, .lighting]
         case .ugc: return [.style]
         case .storyboard: return [.style, .look]
+        // Photo: no References chip (references are a slot), and Style has no tempo, Camera no movement.
+        case .photo: return [.style, .camera, .look, .lighting]
         }
     }
 
@@ -85,6 +92,7 @@ public enum ComposerTool: String, CaseIterable, Sendable, Identifiable {
         case .ugc: return [.character, .product]
         case .storyboard: return [.scenes]
         case .extend: return [.video]
+        case .photo: return [.character]
         }
     }
 
@@ -93,6 +101,7 @@ public enum ComposerTool: String, CaseIterable, Sendable, Identifiable {
         case .shot: return [.character, .startFrame, .endFrame]
         case .talking: return [.location]
         case .ugc: return [.referenceAd]
+        case .photo: return [.product, .references]
         default: return []
         }
     }
@@ -100,7 +109,7 @@ public enum ComposerTool: String, CaseIterable, Sendable, Identifiable {
     /// Whether the prompt box shows (Swap keeps it behind a toggle, off by default).
     public var showsPrompt: Bool {
         switch self {
-        case .shot, .talking, .ugc: return true
+        case .shot, .talking, .ugc, .photo: return true
         default: return false
         }
     }
@@ -110,17 +119,23 @@ public enum ComposerTool: String, CaseIterable, Sendable, Identifiable {
         case .talking: return "What does she say? · type @ for your characters"
         case .ugc: return "Describe the ad · type @ for your characters, # for a camera move"
         case .swap: return "Anything to change? · type # for a camera move"
+        case .photo: return "Describe the scene and what she does · type @ for your characters"
         default: return "Describe the scene · type @ for your characters, # for a camera move"
         }
     }
 
     /// The tools on the shell, in the browser's order.
-    public static let shell: [ComposerTool] = [.shot, .swap, .recast, .talking, .ugc, .storyboard, .extend]
+    public static let shell: [ComposerTool] = [.shot, .photo, .swap, .recast, .talking, .ugc, .storyboard, .extend]
+
+    /// Photo makes stills: no movement, tempo, length, sound, speaking, quality or shape.
+    public var isStill: Bool { self == .photo }
 }
 
 /// A square slot card beside the prompt.
 public enum ComposerSlot: String, CaseIterable, Sendable, Identifiable {
     case character, startFrame, endFrame, clip, people, audio, location, product, referenceAd, scenes, video
+    /// Photo: up to 3 reference images, each guiding the pose, the look or the scene.
+    case references
     public var id: String { rawValue }
 
     public var label: String {
@@ -136,6 +151,7 @@ public enum ComposerSlot: String, CaseIterable, Sendable, Identifiable {
         case .referenceAd: return "Reference ad"
         case .scenes: return "Scenes"
         case .video: return "Video"
+        case .references: return "References"
         }
     }
 
@@ -153,6 +169,7 @@ public enum ComposerSlot: String, CaseIterable, Sendable, Identifiable {
         case .referenceAd: return "An ad to follow"
         case .scenes: return "+ Add scene"
         case .video: return "The take to finish"
+        case .references: return "Up to 3 · pose, look or scene"
         }
     }
 
@@ -193,7 +210,8 @@ public enum ComposerSlots {
     public static func cards(_ tool: ComposerTool, inputs: SuiteInputs, slots: InputSlots = InputSlots()) -> [ComposerSlotCard] {
         let all = tool.required.map { ($0, false) } + tool.optional.map { ($0, true) }
         return all.compactMap { slot, optional -> ComposerSlotCard? in
-            if let id = slot.slotId, id.kind.capacity(inputs) == 0, !tool.comingSoon { return nil }
+            // Photo doesn't render on a video tier, so its PRODUCT slot never depends on what a tier takes.
+            if let id = slot.slotId, id.kind.capacity(inputs) == 0, !tool.comingSoon, !tool.isStill { return nil }
             if let id = slot.slotId, slots.isWaiting(id) {
                 return ComposerSlotCard(slot: slot, optional: optional, waiting: true, caption: slots.waitingCaption(id))
             }
@@ -527,10 +545,13 @@ public struct ComposerDraft: Hashable, Sendable {
     /// Owner: the engine pinned for this shot (one of the tier's `models`), nil = Auto (the ladder). Members never set it.
     public var engineModel: String?
     public var resolution: String?
+    /// Extend: the video, After / Before and what happens (ComposerExtend.swift).
+    public var extend: ExtendDraft
 
     public init(tool: ComposerTool = .shot, tokens: PromptTokens = PromptTokens(), settings: ComposerSettings = ComposerSettings(), outfitId: String? = nil,
                 quality: String = "draft", aspect: String = "9:16", duration: Int = 8, sound: Bool = true, speaking: ComposerSpeaking = .auto, takes: Int = 1,
-                collapsed: String? = nil, directed: CameraSpec? = nil, engineModel: String? = nil, resolution: String? = nil) {
+                collapsed: String? = nil, directed: CameraSpec? = nil, engineModel: String? = nil, resolution: String? = nil, extend: ExtendDraft = ExtendDraft()) {
+        self.extend = extend
         self.engineModel = engineModel
         self.resolution = resolution
         self.tool = tool
@@ -591,6 +612,7 @@ public struct ComposerDraft: Hashable, Sendable {
             case .character where tokens.characterId == nil: return "Pick a character first"
             case .audio where !ready(SlotId(.audio)): return "Add the audio she says"
             case .product where !ready(SlotId(.image)): return "Add a photo of the product"
+            case .video where extend.source == nil: return "Pick a take or upload a video to extend"
             default: continue
             }
         }

@@ -55,6 +55,7 @@ export function buildInput(m: ModelSpec, p: ShotPlan, u: MediaUrls): Record<stri
       i.duration = p.kind === 'ref2v' ? Math.min(10, p.seconds) : p.seconds; i.resolution = p.resolution;
       if (p.kind !== 'i2v') i.aspect_ratio = p.aspect;
       set(i, 'negative_prompt', p.negative); set(i, 'seed', p.seed);
+      if (p.extend?.method === 'clip') { i.first_clip = u.videos[0]; break; } // Extend: continue the clip (2–10 s)
       if (p.kind === 'i2v') { set(i, 'first_frame', u.start); if (u.start) set(i, 'last_frame', u.end); }
       if (p.kind === 'ref2v') { set(i, 'reference_images', u.refs); set(i, 'reference_videos', u.videos); }
       break;

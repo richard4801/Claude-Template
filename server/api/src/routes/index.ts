@@ -457,14 +457,26 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     emitTakes(u!.studioId, [u!]);
     return takeView(u!, pub, req.user.id);
   });
-  // Upscale a finished render (plans/api.md "App clean-up" §2): the contract is in place, the engine job comes later.
+  // Upscale a finished render (plans/api.md "App clean-up" §2): SeedVR2 on the add-on GPU, priced per output second
+  // (UPSCALE_PRICES, measured). A job like any add-on render: held, queued for a pod, settled at the quoted price.
   app.post<{ Params: { id: string } }>('/v1/takes/:id/upscale', async req => {
     const b = parse(z.object({ size: z.enum(P.UPSCALE_SIZES.map(x => x.id) as [P.UpscaleSize, ...P.UpscaleSize[]]) }), req.body);
     const [t] = await db.select().from(takes).where(and(eq(takes.id, req.params.id), eq(takes.studioId, req.user.studioId)));
     if (!t) throw notFound('Take');
     if (t.kind !== 'take') throw badRequest('Upscale works on a finished video take');
-    void b;
-    throw new ApiError(409, 'upscale_unavailable', 'Upscale is coming soon');
+    const up = ctx.jobs.features().video.addons.find(a => a.id === 'upscale') as { sizes?: { id: string; available: boolean }[] } | undefined;
+    const size = up?.sizes?.find(x => x.id === b.size);
+    const price = P.upscalePrices(ctx.config.UPSCALE_PRICES)[b.size];
+    if (!size?.available || !price) throw new ApiError(409, 'upscale_unavailable', 'Upscale is coming soon');
+    if (!t.mediaKey) throw badRequest('This take has no video file to upscale');
+    const seconds = Math.round((Number(t.media?.durationSec) || 0) * 1000) / 1000;
+    if (!(seconds > 0)) throw badRequest('This take has no length on record · it can’t be upscaled');
+    const request = { ...P.upscaleRequest(b.size, seconds, price), takeId: t.id, sourceKey: t.mediaKey };
+    const job = await ctx.jobs.createInternal(req.user, {
+      kind: 'render', title: `${t.title} · ${P.upscaleLabel(b.size)}`, modelId: t.modelId ?? '', modelName: '', outfitId: '', request,
+      cost: request.usd, prompt: t.prompt ?? '', seed: t.seed, thumb: t.thumb ?? null, totalSeconds: P.totalSeconds(request), totalSteps: 1, phase: 'Queued',
+    });
+    return ctx.jobs.view(job);
   });
   app.delete<{ Params: { id: string } }>('/v1/takes/:id', async (req, reply) => {
     const gone = await db.delete(takes).where(and(eq(takes.id, req.params.id), eq(takes.studioId, req.user.studioId))).returning({ id: takes.id });

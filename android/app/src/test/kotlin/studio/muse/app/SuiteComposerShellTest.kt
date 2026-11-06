@@ -86,7 +86,7 @@ class SuiteComposerShellTest {
         assertEquals(listOf(ComposerChip.CAMERA, ComposerChip.LOOK, ComposerChip.LIGHTING), ComposerTool.TALKING.chips)
         // Without the catalog's `tools`, Talking, UGC ad and Extend keep their card but have no Generate.
         assertEquals(setOf(ComposerTool.TALKING, ComposerTool.UGC, ComposerTool.EXTEND), ComposerTool.entries.filter { !it.live }.toSet())
-        assertEquals("Coming soon", ComposerDraft(tool = ComposerTool.EXTEND).problem(s, RecastDraft()))
+        assertEquals("Pick the video to extend", ComposerDraft(tool = ComposerTool.EXTEND).problem(s, RecastDraft()))
         assertEquals(ComposerTool.SHOT, ComposerTool.of("nope")); assertEquals(ComposerTool.SWAP, ComposerTool.of("swap"))
         // Talking's Movement shows talk-safe moves only.
         assertTrue(movesFor(cat, "featured", "", talkOnly = true).all { it.talkSafe })
@@ -126,6 +126,8 @@ class SuiteComposerShellTest {
     @Test fun `the price reads dash until known, Free for test renders, else the estimate's`() {
         assertEquals("—", ComposerPrice.short(null))
         assertEquals("Generate · —", ComposerPrice.button(null))
+        assertEquals("…", ComposerPrice.short(null, pricing = true))
+        assertEquals("Generate · Pricing…", ComposerPrice.button(null, pricing = true))
         assertNull(ComposerPrice.line(null))
         val e = SuiteEstimate(estimate = .16, priceLine = "about $0.16 · 8 s", buttonLabel = "Generate · 8 s · $0.16")
         assertEquals("$0.16", ComposerPrice.short(e))

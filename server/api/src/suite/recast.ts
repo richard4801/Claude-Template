@@ -3,6 +3,7 @@
 // recast ladder, each person's reference subset, who-is-who words, the suite.recast prompt script, inputs and price.
 import type { ImageRef } from '../db/schema.js';
 import { sanitizeDirection } from '../prompt/engine.js';
+import { stripMoveTokens } from './camera.js';
 import { DEFAULT_TEXTS, type PromptTexts } from '../prompt/library.js';
 import { run } from '../prompt/scripts/builders.js';
 import { billedSeconds, joinTokens, perSecond, token, type Character, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
@@ -101,7 +102,7 @@ export function buildRecastPlan(r: ShotRequest, members: CastMember[], p: Recast
     };
   });
   // The user's words: sanitised against every recast character's identity and never-add list.
-  let direction = [r.prompt, r.direction].map(x => (x ?? '').trim()).filter(Boolean).join(' ');
+  let direction = stripMoveTokens([r.prompt, r.direction].map(x => (x ?? '').trim()).filter(Boolean).join(' '), []);
   for (const x of ordered) {
     const s = sanitizeDirection(direction, { name: x.character.name, look: x.character.look, neverAdd: x.character.neverAdd }, t);
     if (s.removed.length) notes.push(`left out of the direction (it would change ${x.character.name}'s look): ${s.removed.join('; ')}`);

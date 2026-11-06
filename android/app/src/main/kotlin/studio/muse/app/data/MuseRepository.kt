@@ -492,10 +492,21 @@ class MuseRepository(
     suspend fun addTopUp(amountUsd: Double, note: String?) =
         attemptInline { addTopUp(AddTopUpRequest(amountUsd, note?.trim()?.ifBlank { null })) }.also { (r, _) -> if (r != null) { _state.update { it.copy(studioBalance = r) }; refreshBalance() } }
 
-    /** Upscale a finished render (coming soon). */
+    /** Upscale a finished render (POST /v1/takes/{id}/upscale): the job, followed like any render. */
     suspend fun upscale(takeId: String, size: String) = attempt { upscale(takeId, size) }?.also { j ->
         _state.update { s -> s.copy(jobs = s.jobs.upsert(j) { it.id == j.id }.sortedByDescending { it.createdAt }) }
         refreshBalance()
+    }
+
+    /** Like [upscale], but hands back the error code and friendly text (`upscale_unavailable` greys the sheet) instead of a toast. */
+    suspend fun upscaleInline(takeId: String, size: String): Triple<Job?, String?, String?> = try {
+        val j = api.upscale(takeId, size)
+        _state.update { s -> s.copy(jobs = s.jobs.upsert(j) { it.id == j.id }.sortedByDescending { it.createdAt }) }
+        refreshBalance()
+        Triple(j, null, null)
+    } catch (e: ApiException) {
+        if (e.code in ErrorText.SIGN_OUT_CODES) endSession(ErrorText.of(e))
+        Triple(null, e.code, ErrorText.of(e))
     }
 
     suspend fun setFailNext(fail: Boolean) = attempt { setFailNext(fail) }

@@ -10,6 +10,8 @@ import UniformTypeIdentifiers
 
 enum SuiteMode: String, CaseIterable, Identifiable {
     case hub, shot, swap, storyboard, talking, ugc, extend, cameraStage
+    /// Photo tool (workstream 3): Photoshoot on the composer.
+    case photo
     var id: String { rawValue }
 
     var title: String {
@@ -22,13 +24,14 @@ enum SuiteMode: String, CaseIterable, Identifiable {
         case .ugc: return "UGC ad"
         case .extend: return "Extend & upscale"
         case .cameraStage: return "Camera stage"
+        case .photo: return "Photo"
         }
     }
 
     /// The modes in the sidebar group, in order.
-    static let group: [SuiteMode] = [.shot, .swap, .storyboard, .talking, .ugc, .extend, .cameraStage]
-    /// No backend yet: a quiet "Coming soon" tile, never a broken screen.
-    var comingSoon: Bool { self == .talking || self == .ugc || self == .extend }
+    static let group: [SuiteMode] = [.shot, .photo, .swap, .storyboard, .talking, .ugc, .extend, .cameraStage]
+    /// No backend yet: a quiet "Coming soon" tile, never a broken screen. (The catalog's `tools` win when it has them.)
+    var comingSoon: Bool { self == .talking || self == .ugc }
 
     /// The composer's tool behind this mode (nil: Storyboard, Camera stage and the hub have their own screens).
     var tool: ComposerTool? {
@@ -38,6 +41,7 @@ enum SuiteMode: String, CaseIterable, Identifiable {
         case .talking: return .talking
         case .ugc: return .ugc
         case .extend: return .extend
+        case .photo: return .photo
         default: return nil
         }
     }
@@ -51,6 +55,7 @@ enum SuiteMode: String, CaseIterable, Identifiable {
         case .talking: return "light-06-ring-creator"
         case .ugc: return "grip-05-slider"
         case .extend: return "stock-03-sensor"
+        case .photo: return "light-04-window"
         default: return "body-02-super35"
         }
     }
@@ -63,6 +68,7 @@ enum SuiteMode: String, CaseIterable, Identifiable {
         case .talking: return "Script → voice → talking clip, or re-dub a take."
         case .ugc: return "Product refs or a link → review, unboxing, before/after."
         case .extend: return "Longer, smoother, sharper. Finish any take."
+        case .photo: return "Stills of your character in any scene, camera and light."
         default: return "Block the shot in Blender and use it as the camera."
         }
     }
@@ -78,6 +84,7 @@ extension ComposerTool {
         case .ugc: return .ugc
         case .storyboard: return .storyboard
         case .extend: return .extend
+        case .photo: return .photo
         }
     }
 }
@@ -146,8 +153,17 @@ final class SuiteState {
     var rigDismissals = RigDismissals()
     var shotJobIds: [String] = []
     var generating = false
+    /// Extend: the VIDEO slot's upload in flight (0…1), nil when none.
+    var extendUpload: Double?
     /// Owner: the Engines sheet (D9).
     var showEngines = false
+
+    // Photo tool (workstream 3): the count, preset and references; the estimate from POST /v1/suite/photos/estimate.
+    var photo = PhotoDraft()
+    var photoEstimate: PhotoEstimate?
+    var photoError: String?
+    /// Reference images still uploading.
+    var photoRefsUploading = 0
     var settings: SuiteSettings?
 
     // The picker shell and the tool / preset browser
@@ -190,6 +206,10 @@ final class SuiteState {
         swapEstimate = nil
         swapEstimates = [:]
         settings = nil
+        photo = PhotoDraft() // Photo tool (workstream 3)
+        photoEstimate = nil
+        photoError = nil
+        photoRefsUploading = 0
         board = Storyboard()
         boardSettings = ComposerSettings()
         composer = ComposerDraft()
@@ -233,6 +253,7 @@ extension AppStore {
             let t: ComposerTool = tool == .swap && suite.swap.kind == .recast ? .recast : tool
             if suite.composer.tool != t { suite.composer.collapsed = nil }
             suite.composer.tool = t
+            if t == .photo { preparePhoto() } // Photo tool (workstream 3)
             if tool == .swap && clip == nil && isDemo { Task { await useSampleClip(bad: false, quiet: true) } }
         }
         suite.mode = mode
@@ -258,6 +279,7 @@ extension AppStore {
         if suite.composer.tool != tool { suite.composer.collapsed = nil }
         // The UGC format belongs to UGC ad.
         if tool != .ugc { suite.composer.settings.format = nil }
+        if tool == .photo { preparePhoto() } // Photo tool (workstream 3): no #moves or tempo in a still
         suite.composer.tool = tool
         suite.mode = tool.mode
         go(.suite)
@@ -336,6 +358,7 @@ extension AppStore {
 
     /// Prices for the composer: the current choice and each tier (debounced by the caller's `.task(id:)`).
     func estimateShot() async {
+        if suite.composer.tool == .extend { return await estimateExtend() }
         guard suite.enabled, suite.catalog != nil else { return }
         let req = shotRequest
         suite.rigDismissals.sync(RigChoices(req))
@@ -356,7 +379,13 @@ extension AppStore {
     // MARK: The rig check (workstream 3)
 
     /// The rig warnings the composer shows: a dismissed one stays hidden until the choices change.
-    var rigWarnings: [RigWarning] { suite.rigDismissals.visible(suite.rig, at: RigChoices(shotRequest)) }
+    var rigWarnings: [RigWarning] { suite.rigDismissals.visible(suite.rig, at: rigChoices) }
+
+    /// What a dismissal is tied to: the shot's choices, or the Photo request's (workstream 3).
+    var rigChoices: RigChoices {
+        if suite.composer.tool == .photo { return photoRequest.map { RigChoices($0) } ?? RigChoices() }
+        return RigChoices(shotRequest)
+    }
 
     /// A warning's fix (or alt), applied to the choices like a tap in the picker; the line goes until the re-check.
     func applyRigFix(_ fix: RigFix, of w: RigWarning) {
@@ -365,7 +394,7 @@ extension AppStore {
     }
 
     func dismissRigWarning(_ w: RigWarning) {
-        suite.rigDismissals.dismiss(w, at: RigChoices(shotRequest))
+        suite.rigDismissals.dismiss(w, at: rigChoices)
     }
 
     /// One estimate per tier (free; nothing is held).
@@ -385,6 +414,7 @@ extension AppStore {
     }
 
     func generateShot() {
+        if suite.composer.tool == .extend { return generateExtend() }
         guard !suite.generating else { return }
         if let p = suite.estimate?.problem {
             showToast(p)
@@ -420,7 +450,7 @@ extension AppStore {
 
     /// The Recent takes row: the suite's newest jobs (any job before the first suite one).
     var suiteRecentJobs: [Job] {
-        let suiteJobs = jobs.filter { $0.request.engine == "suite" }
+        let suiteJobs = jobs.filter { $0.request.engine == "suite" || $0.request.isUpscale }
         return Array((suiteJobs.isEmpty ? jobs : suiteJobs).sorted { $0.createdAt > $1.createdAt }.prefix(6))
     }
 
@@ -447,7 +477,8 @@ extension AppStore {
     func openPicker(_ p: ComposerPicker, step: String? = nil, target: PickerTarget = .composer) {
         suite.pickerTarget = target
         let ugc = target == .composer && suite.composer.tool == .ugc
-        suite.pickerStep = step ?? p.steps(owner: isOwner, target: target, ugc: ugc).first?.id ?? ""
+        let photo = target == .composer && suite.composer.tool == .photo // Photo tool (workstream 3)
+        suite.pickerStep = step ?? p.steps(owner: isOwner, target: target, ugc: ugc, photo: photo).first?.id ?? ""
         withAnimation(.easeOut(duration: 0.18)) { suite.picker = p }
     }
 

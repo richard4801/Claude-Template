@@ -1,8 +1,8 @@
 import MuseCore
 import SwiftUI
 
-// Photoshoot → Templates (plans/templates.md): the library, the detail, the template inspector on the Photoshoot screen and
-// the template editor. Prompt layers are only ever drawn from `layers`/`variationPool`, which the server sends to the owner only.
+// Templates (plans/templates.md): the library, the detail and the template editor. "Use" opens the AI suite's Photo tool
+// with the template as its preset (workstream 3). Prompt layers are only ever drawn from `layers`/`variationPool`, which the server sends to the owner only.
 
 /// The library: All / Mine / Public / Favourites, search, tag chips and cards.
 struct TemplatesView: View {
@@ -14,9 +14,9 @@ struct TemplatesView: View {
         let list = store.templateList
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                PageHeader(eyebrow: "Photoshoot", title: "Templates") {
+                PageHeader(eyebrow: "Photo presets", title: "Templates") {
                     HStack(spacing: 10) {
-                        MButton("Photoshoot", icon: "camera") { store.go(.shoot) }
+                        MButton("Open Photo", icon: "camera") { store.openTool(.photo) }
                         if store.pro { MButton("New template", icon: "plus", kind: .primary) { store.newTemplate() } }
                     }
                 }
@@ -275,114 +275,6 @@ struct LayersSummary: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: t.controlRadius).fill(t.surface2))
         }
-    }
-}
-
-/// The Photoshoot inspector while shooting with a template: the template, Direction, Shuffle, Lock look (off), the prompt
-/// view in pro mode, and Shoot.
-struct TemplateInspector: View {
-    @Environment(AppStore.self) private var store
-    @Environment(\.theme) private var t
-
-    var body: some View {
-        @Bindable var store = store
-        if let tpl = store.shootTemplate {
-            VStack(spacing: 0) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        HStack(spacing: 12) {
-                            Media(ref: tpl.cover, ratio: 0.75, radius: t.imageRadius, symbol: "square.on.square.dashed").frame(width: 64)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Lbl("Template")
-                                Text(tpl.name).font(t.body(15, .semibold)).foregroundStyle(t.ink).lineLimit(2)
-                                Text("by \(store.ownerLabel(tpl))").font(t.body(12)).foregroundStyle(t.muted)
-                            }
-                            Spacer(minLength: 0)
-                        }
-                        HStack(spacing: 14) {
-                            LinkText("Change template") { store.openTemplates() }
-                            LinkText("Shoot without a template") { store.stopUsingTemplate() }
-                        }
-                        Field("Direction · optional") {
-                            TextBox(placeholder: "e.g. sitting on the steps, looking back over her shoulder", text: $store.templateDirection)
-                            Muted("Places her your way: it replaces the template's pose and angle. The rest of the look still applies.")
-                        }
-                        if tpl.acceptsProduct {
-                            Field("Product photo · optional") {
-                                HStack(spacing: 10) {
-                                    if let p = store.templateProduct {
-                                        Media(ref: p, ratio: 1, radius: t.imageRadius).frame(width: 56)
-                                        LinkText("Replace") { store.pickTemplateProduct() }
-                                        LinkText("Remove") { store.templateProduct = nil }
-                                    } else {
-                                        MButton("Add product photo", icon: "photo", size: .small, fill: false) { store.pickTemplateProduct() }
-                                    }
-                                }
-                            }
-                        }
-                        VStack(alignment: .leading, spacing: 8) {
-                            MButton("Shuffle", icon: "shuffle", fill: true) { store.shuffleTemplate() }
-                            Muted("New pose, angle, framing and moment. Same template.")
-                        }
-                        OptionRow(title: "Lock look", hint: store.templateLockLook ? "Same seed every shot for this model" : "Off: every shot gets a new seed") {
-                            MToggle(isOn: $store.templateLockLook)
-                        }
-                        if store.pro {
-                            Field("Final prompt") {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    ForEach(store.templatePromptSlots) { slot in
-                                        if slot.locked {
-                                            HStack(spacing: 6) {
-                                                Image(systemName: "lock.fill").font(.system(size: 10))
-                                                Text(slot.text).font(t.body(12.5, .semibold))
-                                            }
-                                            .foregroundStyle(t.ink)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(RoundedRectangle(cornerRadius: t.controlRadius * 0.6).fill(t.surface))
-                                            .help("The template's layers stay with its creator")
-                                        } else {
-                                            (Text(slot.layer.uppercased() + "  ").font(t.mono(10)).foregroundColor(t.muted) + Text(slot.body).font(t.body(12.5)))
-                                                .fixedSize(horizontal: false, vertical: true)
-                                        }
-                                    }
-                                }
-                                .textSelection(.enabled)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 10)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(RoundedRectangle(cornerRadius: t.controlRadius).fill(t.surface2))
-                                .overlay(RoundedRectangle(cornerRadius: t.controlRadius).strokeBorder(t.isC ? .clear : t.strongLine, lineWidth: t.lineWidth))
-                                Muted(tpl.isOwner ? "Your template: you see every layer. Others see one locked line." : "Built on the server. Your own layers are shown; the template's stay hidden.")
-                            }
-                            MButton("Copy", size: .small, fill: true) { store.copy(store.templatePromptSlots.map(\.text).joined(separator: "\n")) }
-                        }
-                    }
-                    .padding(20)
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    if store.isOwner { ModelChooser(step: .shot, target: .shoot) }
-                    MButton(store.shootState == .busy ? "Shooting…" : "Shoot 4 · \(store.shootEstimateLabel)", icon: "camera", kind: .primary, size: .big,
-                            off: store.shootState == .busy) { store.startTemplateShoot() }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 14)
-                .padding(.bottom, 18)
-                .overlay(alignment: .top) { Rectangle().fill(t.isC ? .clear : t.strongLine).frame(height: t.lineWidth) }
-            }
-            .background(t.chrome)
-            .overlay(alignment: .leading) { Rectangle().fill(t.isC ? .clear : t.strongLine).frame(width: t.lineWidth) }
-            .task(id: promptKey) {
-                // Debounced: typing a direction asks for the prompt view once the typing pauses.
-                try? await Task.sleep(nanoseconds: 300_000_000)
-                if !Task.isCancelled { store.refreshTemplatePrompt() }
-            }
-        }
-    }
-
-    private var promptKey: String {
-        [store.shootTemplate?.id ?? "", store.modelId, store.currentOutfit?.id ?? "", store.templateDirection, "\(store.templateShuffle)",
-         "\(store.templateLockLook)", "\(store.pro)"].joined(separator: "|")
     }
 }
 
