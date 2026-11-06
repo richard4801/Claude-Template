@@ -276,6 +276,33 @@ extension EditV2 {
             current = next
             return true
         }
+
+        /// Edit sessions (workstream 3): a change from another device or from Claude becomes the current project without an
+        /// undo step of its own, and every local step is rebased onto it (the remote change applied to each snapshot), so
+        /// ⌘Z / ⇧⌘Z only ever undo this device's own edits. A step the remote change doesn't fit is dropped with everything
+        /// beyond it (older undo steps, further redo steps); steps that would change nothing are dropped too. Undoing someone
+        /// else's change is the server's undo (the History list).
+        public mutating func adoptRemote(_ next: Project) {
+            let base = current
+            guard next != base else { return }
+            let patch = try? JSONPatch.diff(JSONPatch.encode(base), JSONPatch.encode(next))
+            func moved(_ s: Project) -> Project? {
+                guard let patch, let doc = try? JSONPatch.apply(JSONPatch.encode(s), patch) else { return nil }
+                return try? JSONPatch.decode(Project.self, doc)
+            }
+            func rebased(_ stack: [Project]) -> [Project] {
+                var out: [Project] = []
+                var after = next
+                for s in stack.reversed() { // nearest step first
+                    guard let m = moved(s) else { break }
+                    if m != after { out.append(m); after = m }
+                }
+                return out.reversed()
+            }
+            undoStack = rebased(undoStack)
+            redoStack = rebased(redoStack)
+            current = next
+        }
     }
 }
 

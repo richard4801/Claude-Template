@@ -87,17 +87,15 @@ fun EditSuiteContent(
                     Box(Modifier.width(1.dp).fillMaxHeight().background(m.t.line))
                     Box(Modifier.width(380.dp).fillMaxHeight()) {
                         // Edit sessions (workstream 3): the Claude panel takes the inspector's place while open.
-                        if (ui.session?.chatOpen == true) ClaudePanel(ui, act, Modifier.fillMaxSize())
+                        if (ui.session?.chatOpen == true) EditClaudePanel(ui, Modifier.fillMaxSize())
                         else if (ui.project != null) SuiteSheet(ui, ui.panel ?: Panel.EDIT, host, act, Modifier.fillMaxSize())
                     }
                 }
             } else {
                 editor(Modifier.fillMaxSize())
                 val panel = ui.panel
-                if (ui.session?.chatOpen == true) {
-                    Scrim { act(EditAction.ClaudePanel(false)) }
-                    ClaudeSheet(ui, act, Modifier.align(Alignment.BottomCenter).heightIn(max = maxHeight * .62f).navigationBarsPadding())
-                } else if (panel != null && ui.project != null) {
+                if (ui.session?.chatOpen == true) EditClaudeSheet(ui, act) // workstream 2's sheet: its own scrim and frame
+                else if (panel != null && ui.project != null) {
                     Box(Modifier.fillMaxSize().background(Color(0x40141210)).press { act(EditAction.Open(null)) })
                     SuiteSheet(ui, panel, host, act, Modifier.align(Alignment.BottomCenter).heightIn(max = maxHeight * .62f).navigationBarsPadding())
                 }
@@ -107,7 +105,10 @@ fun EditSuiteContent(
                 androidx.compose.runtime.LaunchedEffect(note) { kotlinx.coroutines.delay(4000); act(EditAction.ClearClaudeNote) }
                 ClaudeNote(note, { act(EditAction.ClearClaudeNote) }, Modifier.align(Alignment.TopCenter).padding(top = 58.dp, start = 16.dp, end = 16.dp))
             }
-            ui.session?.asking?.let { p ->
+            if (ui.session?.conflict == true) {
+                Box(Modifier.fillMaxSize().background(Color(0x40141210)).press { })
+                ConflictSheet(act, Modifier.align(Alignment.BottomCenter).widthIn(max = 560.dp).navigationBarsPadding())
+            } else ui.session?.asking?.let { p ->
                 Scrim { act(EditAction.AnswerPending(p.id, false)) }
                 PendingSheet(p, act, Modifier.align(Alignment.BottomCenter).widthIn(max = 560.dp).navigationBarsPadding())
             }
@@ -146,7 +147,7 @@ private fun TopRow(ui: EditSuiteUi, act: (EditAction) -> Unit, onClose: () -> Un
             studio.muse.app.ui.components.FitText(ui.title.ifBlank { "Edit" }, m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold), m.t.ink, Modifier.weight(1f, fill = false))
             if (ui.reopened) { Spacer(Modifier.width(6.dp)); Pill("Edited", "good") }
         }
-        if (ui.session != null) { ClaudeButton(ui.session.chatOpen) { act(EditAction.ClaudePanel(!ui.session.chatOpen)) }; Spacer(Modifier.width(8.dp)) }
+        if (ui.claudeOwner || ui.session != null) { EditClaudeButton(ui, act); Spacer(Modifier.width(8.dp)) }
         val shape = RoundedCornerShape(if (m.isA) 0.dp else if (m.isB) 8.dp else 999.dp)
         Box(
             Modifier.height(30.dp).clip(shape).background(m.t.cta).press(enabled = ui.project != null) { act(EditAction.Open(Panel.EXPORT)) }.padding(horizontal = 12.dp)

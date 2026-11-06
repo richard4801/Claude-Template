@@ -427,11 +427,15 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
 
     // ------------------------------------------------------------ Edit sessions (workstream 3): owner only
     /** The owner's editor joins the take's edit session (Claude edits it too); members and offline stay local. */
-    private suspend fun startSession(sourceTakeId: String, project: EditProject, fromVersion: String?) {
+    private fun startSession(sourceTakeId: String, project: EditProject, fromVersion: String?) {
         if (!(c.repo.demo || c.prefs.value.owner)) return
-        val s = EditSessionSync(viewModelScope, { c.repo.api }, c.repo.live, controller, sessionHost, deviceId(), Build.MODEL ?: "Android phone", looks.paletteIds)
+        controller.update { it.copy(claudeOwner = true) } // the Claude button shows, dimmed until the session is there
+        val s = EditSessionSync(viewModelScope, { c.repo.api }, c.repo.live, controller, sessionHost, deviceId(), Build.MODEL ?: "Android phone", looks.paletteIds,
+            drafts = FileEditDrafts(File(app.filesDir, "edit-drafts")))
+        sync = s
         // The app's own project goes up only when it was built from a saved version (else the server starts from the take).
-        if (s.start(sourceTakeId, if (fromVersion != null) EditJson.encode(project) else null, fromVersion)) sync = s
+        // Offline: the editor works locally and joins when the connection is back (asking first if this device has edits).
+        viewModelScope.launch { s.connect(sourceTakeId, if (fromVersion != null) EditJson.encode(project) else null, fromVersion) }
     }
 
     private fun deviceId(): String {
@@ -446,7 +450,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                 .fold({ it to null }, { null to "Couldn't render the frame" })
         }
         override suspend fun saveVersion(name: String?): Pair<String?, String?> {
-            val take = exportAndSave(toPhone = false) ?: return null to (lastExportError ?: "Couldn't save the video")
+            val take = exportAndSave(toPhone = false, name = name) ?: return null to (lastExportError ?: "Couldn't save the video")
             return take.id to null
         }
         /** Never unattended: the export sheet opens with Claude's preset and waits for the owner's tap (or close). */
@@ -462,7 +466,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
     }
 
     /** Renders and saves a new version (and a copy on the phone); the saved take, or null with [lastExportError]. */
-    private suspend fun exportAndSave(toPhone: Boolean): Take? {
+    private suspend fun exportAndSave(toPhone: Boolean, name: String? = null): Take? {
         lastExportError = null
         val p = controller.project ?: return null
         val u = controller.ui.value
@@ -485,7 +489,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         try {
             // The saved project is the edit as made (canvas = the exported size and fps; captions kept for reopening).
             val saved = p.copy(canvas = p.canvas.copy(width = made.width, height = made.height, fps = s.fps.toDouble()))
-            val (take, err) = c.repo.attemptInline { saveProjectVersion(u.sourceTakeId, made, EditJson.encode(saved)) { pr -> controller.setPhase(SuitePhase.Saving(pr)) } }
+            val (take, err) = c.repo.attemptInline { saveProjectVersion(u.sourceTakeId, made, EditJson.encode(saved), name) { pr -> controller.setPhase(SuitePhase.Saving(pr)) } }
             if (toPhone) withContext(Dispatchers.IO) { saveToPhone(made.file, srt, u.title) }
             if (take == null) { lastExportError = err ?: "Couldn't save the video"; controller.setPhase(SuitePhase.Failed(lastExportError!!)); return null }
             exportGate.exported(take.id) // answers an export Claude asked for, before the sheet closes

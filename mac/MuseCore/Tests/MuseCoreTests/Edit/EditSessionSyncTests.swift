@@ -284,4 +284,88 @@ final class EditSessionSyncTests: XCTestCase {
         XCTAssertEqual(e.who(thisDevice: "mac-1"), "Claude")
         XCTAssertEqual(EditHistoryEntry(id: 4, revision: 3, author: "app:mac-1", label: "Trim").who(thisDevice: "mac-1"), "This Mac")
     }
+
+    func testLocalUndoOnlyUndoesThisDevicesEdits() async throws {
+        let base = try fixture()
+        var s = EditSuiteState(base)
+        let mine = try withText(base, "t1", "Mine")
+        XCTAssertTrue(s.apply { _ in mine })
+        // Claude changes the background (a remote patch): not an undo step here.
+        var remote = mine
+        remote.canvas.background = "#111111"
+        XCTAssertTrue(s.applyRemote(remote))
+        XCTAssertTrue(s.canUndo)
+        XCTAssertTrue(s.undo())
+        XCTAssertEqual(s.project.canvas.background, "#111111", "undo keeps Claude's change")
+        XCTAssertEqual(s.project.tracks.flatMap(\.items).compactMap(\.textItem).first { $0.id == "t1" }?.text,
+                       base.tracks.flatMap(\.items).compactMap(\.textItem).first { $0.id == "t1" }?.text)
+        XCTAssertFalse(s.canUndo, "nothing of this Mac's left to undo")
+        XCTAssertTrue(s.redo())
+        XCTAssertEqual(s.project, remote)
+
+        // A local step the remote change no longer fits is dropped (and so is everything older).
+        let edited = try withText(base, "t2", "Edited")
+        var t = EditSuiteState(base)
+        XCTAssertTrue(t.apply { _ in edited })
+        let ti = try XCTUnwrap(base.tracks.firstIndex { $0.kind == .text })
+        var removed = t.project
+        removed.tracks[ti].items.removeAll { $0.id == "t2" }
+        XCTAssertTrue(t.applyRemote(removed))
+        XCTAssertFalse(t.canUndo, "undoing would bring back t2's old text into a track that no longer has it")
+        XCTAssertEqual(t.project, removed)
+    }
+
+    func testVersionNameIsTrimmedAndSent() async throws {
+        XCTAssertNil(TakeVersionV2Request.versionName("   "))
+        XCTAssertNil(TakeVersionV2Request.versionName(nil))
+        XCTAssertEqual(TakeVersionV2Request.versionName("  Cut v2 "), "Cut v2")
+        XCTAssertEqual(TakeVersionV2Request.versionName(String(repeating: "a", count: 100))?.count, 80)
+        let r = TakeVersionV2Request(uploadId: "up_1", edits: try fixture(), durationSec: 8, width: 1080, height: 1920, name: " Cut v2 ")
+        guard case .object(let o) = try JSONPatch.encode(r) else { return XCTFail("an object") }
+        XCTAssertEqual(o["name"], .string("Cut v2"))
+        let unnamed = TakeVersionV2Request(uploadId: "up_1", edits: try fixture(), durationSec: 8, width: 1, height: 1)
+        guard case .object(let o2) = try JSONPatch.encode(unnamed) else { return XCTFail("an object") }
+        XCTAssertNil(o2["name"])
+        let take = try JSONDecoder().decode(Take.self, from: Data(#"{"id":"tk_1","kind":"edit","name":"Cut v2"}"#.utf8))
+        XCTAssertEqual(take.name, "Cut v2")
+    }
+
+    func testDraftKeptOnThisDeviceIsAskedAboutAndKeptOnTop() async throws {
+        let api = FakeMuseAPI(speed: 0)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("drafts-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = EditSessionDrafts(directory: dir)
+        // This Mac edits, but the change never reaches the server (closed while offline).
+        let first = try await open(api)
+        let mine = try withText(first.current, "t1", "Mine")
+        first.localChanged(mine, label: "Text")
+        store.save(first.draft, takeId: first.takeId)
+        let saved = try XCTUnwrap(store.load(takeId: first.takeId))
+        XCTAssertEqual(saved.project, mine)
+        XCTAssertEqual(saved.baseRevision, 0)
+        // Meanwhile Claude changed the edit.
+        try await api.fakeClaudePatch(sessionId: first.sessionId, [.replace("/canvas/background", .string("#111111"))], label: "Background")
+
+        // Reopening: the draft differs from the latest, so the owner is asked; Keep puts it on top.
+        let again = try await open(api)
+        XCTAssertTrue(again.conflicts(with: saved))
+        let u = try await again.keep(saved)
+        guard case .project(let p, _) = u else { return XCTFail("expected a project") }
+        XCTAssertEqual(p.canvas.background, "#111111")
+        XCTAssertEqual(p.tracks.flatMap(\.items).compactMap(\.textItem).first { $0.id == "t1" }?.text, "Mine")
+        XCTAssertEqual(again.revision, 2)
+        XCTAssertNil(again.draft, "sent: nothing left to keep")
+        store.save(again.draft, takeId: again.takeId)
+        XCTAssertNil(store.load(takeId: again.takeId))
+        XCTAssertEqual(again.history.first?.label, "Text")
+        XCTAssertFalse(again.conflicts(with: EditSessionDraft(takeId: again.takeId, sessionId: again.sessionId, baseRevision: 2, project: again.synced)))
+
+        // "Use the latest": the draft is discarded and the session is unchanged.
+        let other = try withText(again.current, "t2", "Other")
+        store.save(EditSessionDraft(takeId: again.takeId, sessionId: again.sessionId, baseRevision: 1, project: other), takeId: again.takeId)
+        XCTAssertTrue(again.conflicts(with: store.load(takeId: again.takeId)))
+        store.remove(takeId: again.takeId)
+        XCTAssertNil(store.load(takeId: again.takeId))
+        XCTAssertEqual(again.revision, 2)
+    }
 }

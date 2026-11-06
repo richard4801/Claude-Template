@@ -97,6 +97,10 @@ final class EditSuiteSession {
     @ObservationIgnored var flushTask: Task<Void, Never>?
     @ObservationIgnored var applyingRemote = false
     @ObservationIgnored var nextChangeLabel: String?
+    /// This Mac's edits not on the server yet, per take (never dropped silently).
+    @ObservationIgnored let drafts = EditSessionDrafts.standard
+    /// A kept draft differs from the session's latest: "Keep this device's changes / Use the latest".
+    var draftAsk: EditSessionDraft?
     /// The app's gallery hook for versions saved on Claude's request.
     @ObservationIgnored var onVersionSaved: ((Take) -> Void)?
 
@@ -234,7 +238,9 @@ final class EditSuiteSession {
         guard isReady, p != project else { return }
         if !playing { state.playhead = playhead }
         applyingRemote = true
-        if state.apply({ _ in p }) { projectChanged() }
+        // Not a local undo step: ⌘Z keeps undoing only this Mac's own edits (Claude's and other devices' changes are undone
+        // from the History list, on the server).
+        if state.applyRemote(p) { projectChanged() }
         applyingRemote = false
         playhead = state.playhead
         // A change arriving during a drag ends the drag where it is.
@@ -752,7 +758,8 @@ final class EditSuiteSession {
                         if case .uploading = self?.exportPhase { self?.exportPhase = .uploading(v) }
                     }
                 })
-                let t = try await self.api.createTakeVersionV2(takeId: sourceId, .make(up, video: video, edits: p))
+                // Claude's save request may name the version.
+                let t = try await self.api.createTakeVersionV2(takeId: sourceId, .make(up, video: video, edits: p, name: request?.name))
                 try? FileManager.default.removeItem(at: file)
                 self.exportPhase = .idle
                 self.savedAt = Date()

@@ -152,6 +152,7 @@ extension FakeMuseAPI {
         t.fps = req.fps
         t.parentTakeId = takeId
         t.editsV2 = req.edits
+        t.name = TakeVersionV2Request.versionName(req.name)
         t.templateId = src.templateId
         t.templateName = src.templateName
         usedUploads.insert(req.uploadId)

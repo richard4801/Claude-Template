@@ -242,6 +242,26 @@ class ProjectHistory(initial: EditProject, private val limit: Int = 100) {
     /** Applies an operation on the current project (e.g. `edit { it.splitAt(3.2) }`). */
     fun edit(op: (EditProject) -> EditProject?): Boolean = apply(op(current))
 
+    /**
+     * Edit sessions (workstream 3): a change made elsewhere (another device, Claude) landed, so the current project is
+     * now [next] — not an undo step. Every undo/redo state gets the same change through [carry] so undo only takes
+     * back this device's own edits and never the other change; where [carry] can't apply it (null), that state and the
+     * ones beyond it are dropped. False when nothing changed.
+     */
+    fun rebase(next: EditProject, carry: (EditProject) -> EditProject?): Boolean {
+        if (next == current && past.isEmpty() && future.isEmpty()) return false
+        fun carried(states: ArrayDeque<EditProject>, tags: ArrayDeque<Any?>) {
+            // Nearest the current state is last; keep the run of states (from the nearest) that the change fits.
+            val out = ArrayList<EditProject>(); val outTags = ArrayList<Any?>()
+            for (i in states.indices.reversed()) { val s = carry(states[i]) ?: break; out += s; outTags += tags.getOrNull(i) }
+            states.clear(); tags.clear()
+            out.asReversed().forEach(states::addLast); outTags.asReversed().forEach(tags::addLast)
+        }
+        carried(past, pastTags); carried(future, futureTags)
+        current = next
+        return true
+    }
+
     fun undo(): Boolean {
         val p = past.removeLastOrNull() ?: return false
         future.addLast(current); futureTags.addLast(currentTag)
