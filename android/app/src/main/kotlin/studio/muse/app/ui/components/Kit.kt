@@ -369,14 +369,16 @@ fun Toggle(on: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
  * The themed slider (`.slider`). Reports integer values in [min]..[max]. Drag or tap anywhere on the generous hit area.
  */
 @Composable
-fun MuseSlider(value: Int, min: Int, max: Int, onChange: (Int) -> Unit, modifier: Modifier = Modifier) {
+fun MuseSlider(value: Int, min: Int, max: Int, onChange: (Int) -> Unit, modifier: Modifier = Modifier,
+    /** The design-direction slider (restyled screens): ink fill on the `field` track, a `raised` thumb with an ink edge. */
+    calm: Boolean = false) {
     val m = muse
     // A one-step range (a tier whose min and max length are the same) sits at the start instead of dividing by zero.
     val frac = if (max <= min) 0f else ((value - min).toFloat() / (max - min)).coerceIn(0f, 1f)
-    val trackH = when { m.isA -> 2.dp; m.isC -> 10.dp; m.isD -> 12.dp; else -> 6.dp }
-    val thumb = when { m.isA -> 22.dp; m.isC -> 30.dp; m.isD -> 28.dp; else -> 24.dp }
-    val trackBg = when { m.isA -> m.t.line; m.isD -> Color.White; else -> m.t.surface2 }
-    val fill = when { m.isA -> m.t.ink; m.isD -> m.t.blue; else -> m.t.accent }
+    val trackH = when { calm -> 4.dp; m.isA -> 2.dp; m.isC -> 10.dp; m.isD -> 12.dp; else -> 6.dp }
+    val thumb = when { calm -> 24.dp; m.isA -> 22.dp; m.isC -> 30.dp; m.isD -> 28.dp; else -> 24.dp }
+    val trackBg = when { calm -> m.roles.field; m.isA -> m.t.line; m.isD -> Color.White; else -> m.t.surface2 }
+    val fill = when { calm -> m.roles.ink; m.isA -> m.t.ink; m.isD -> m.t.blue; else -> m.t.accent }
     val w = remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
     fun at(x: Float) = (min + ((x / w.floatValue).coerceIn(0f, 1f) * (max - min))).roundToInt()
     Box(
@@ -386,18 +388,18 @@ fun MuseSlider(value: Int, min: Int, max: Int, onChange: (Int) -> Unit, modifier
         contentAlignment = Alignment.CenterStart,
     ) {
         val tshape = RoundedCornerShape(trackH / 2)
-        Box(Modifier.fillMaxWidth().height(trackH).clip(tshape).background(trackBg).let { if (m.isD) it.border(2.dp, Ink, tshape) else it }) {
+        Box(Modifier.fillMaxWidth().height(trackH).clip(tshape).background(trackBg).let { if (m.isD && !calm) it.border(2.dp, Ink, tshape) else it }) {
             Box(Modifier.fillMaxWidth(frac).height(trackH).background(fill))
         }
         val density = LocalDensity.current
         Box(
             Modifier.offset { IntOffset(((w.floatValue * frac) - with(density) { thumb.toPx() } / 2).roundToInt(), 0) }.size(thumb)
-                .let { if (m.isC) it.shadow(6.dp, CircleShape) else it }
+                .let { if (m.isC && !calm) it.shadow(6.dp, CircleShape) else it }
                 .clip(CircleShape)
-                .background(when { m.isA -> m.t.ink; m.isC -> m.t.accent; else -> m.t.surface })
+                .background(when { calm -> m.roles.raised; m.isA -> m.t.ink; m.isC -> m.t.accent; else -> m.t.surface })
                 .border(
-                    when { m.isA -> 0.dp; m.isC -> 4.dp; m.isD -> 2.5.dp; else -> 2.dp },
-                    when { m.isC -> m.t.surface; m.isD -> Ink; else -> m.t.accent }, CircleShape,
+                    when { calm -> 2.dp; m.isA -> 0.dp; m.isC -> 4.dp; m.isD -> 2.5.dp; else -> 2.dp },
+                    when { calm -> m.roles.ink; m.isC -> m.t.surface; m.isD -> Ink; else -> m.t.accent }, CircleShape,
                 ),
         )
     }

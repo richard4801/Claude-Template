@@ -156,7 +156,7 @@ fun CreateBasicsScreen() {
                 Labeled("Name") { Input(s.draft.name, { v -> vm.edit { it.copy(name = v) } }, placeholder = "Her name", calm = true) }
                 Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s1)) {
                     RowB { T("Age", m.scale.label, m.roles.ink); T("${s.draft.age}", m.scale.label.tabular(), m.roles.ink) }
-                    MuseSlider(s.draft.age, 18, 70, { v -> if (v != s.draft.age) vm.edit { it.copy(age = v) } })
+                    MuseSlider(s.draft.age, 18, 70, { v -> if (v != s.draft.age) vm.edit { it.copy(age = v) } }, calm = true)
                 }
                 Labeled("Niche") {
                     FlowRow(hGap = MuseSpace.s2, vGap = 0.dp) { NICHES.forEach { n -> ChoiceChip(n, n == s.draft.niche, { vm.edit { it.copy(niche = n) } }) } }

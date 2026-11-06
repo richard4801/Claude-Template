@@ -460,7 +460,7 @@ private fun EnginesSection(vm: OwnerViewModel, st: StudioSettings, s: OwnerState
     WarmSwitchRow(c, studio.warm)
     Caption("Turns off after ${st.engines?.keepReady?.idleMinutes ?: st.warmIdleMinutes} min without renders, and after ${(st.engines?.keepReady?.maxMinutes ?: st.warmMaxMinutes) / 60.0} h at most (Keep ready extends it once).".replace(".0 h", " h"))
     Labeled("Add-on GPUs at once · $gpus") {
-        MuseSlider(gpus, 0, 8, { gpus = it })
+        MuseSlider(gpus, 0, 8, { gpus = it }, calm = true)
         Caption(if (gpus == 0) "0 pauses Edit and Fast · beta." else "Each member's Edit renders run on their own H100 while it's free.")
     }
     Labeled("Who pays start-up") {
