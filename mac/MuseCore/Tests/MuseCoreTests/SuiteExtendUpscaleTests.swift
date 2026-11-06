@@ -64,11 +64,11 @@ final class SuiteExtendUpscaleTests: XCTestCase {
         XCTAssertNotNil(ExtendSource.uploadProblem(seconds: 0))
 
         // The VIDEO slot's takes: video takes with a file, newest first.
-        var a = take(id: "a", url: "https://h/uploads/r/a/take_1.mp4")
+        var a = take("a", url: "https://h/uploads/r/a/take_1.mp4")
         a.createdAt = 1
-        var b = take(id: "b", url: "https://h/uploads/r/b/take_1.mp4")
+        var b = take("b", url: "https://h/uploads/r/b/take_1.mp4")
         b.createdAt = 2
-        XCTAssertEqual(ComposerExtend.takes([a, take(id: "c", url: nil), b]).map(\.id), ["b", "a"])
+        XCTAssertEqual(ComposerExtend.takes([a, take("c", url: nil), b]).map(\.id), ["b", "a"])
     }
 
     // MARK: Extend · the request
@@ -200,7 +200,7 @@ final class SuiteExtendUpscaleTests: XCTestCase {
 
     func testDemoUpscaleRunsAsAJob() async throws {
         let a = try await api(speed: 600)
-        let s = try await a.studioSettings()
+        let s = await a.studioSettings()
         let up = try XCTUnwrap(s.features.video?.upscale)
         XCTAssertTrue(up.available)
         XCTAssertEqual(up.sizes.map(\.id), ["1080p", "2k", "4k"])
@@ -216,7 +216,7 @@ final class SuiteExtendUpscaleTests: XCTestCase {
         var made: [Take] = []
         for await e in events {
             guard let x = e.job, x.id == j.id, x.isDone else { continue }
-            made = e.takes ?? []
+            made = e.takes
             break
         }
         let out = try XCTUnwrap(made.first)
@@ -280,7 +280,7 @@ final class SuiteExtendUpscaleTests: XCTestCase {
         var made: [Take] = []
         for await ev in events {
             guard let x = ev.job, x.id == j.id, x.isDone else { continue }
-            made = ev.takes ?? []
+            made = ev.takes
             break
         }
         let out = try XCTUnwrap(made.first)
