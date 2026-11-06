@@ -173,7 +173,9 @@ object TakeActions {
 @Composable
 private fun androidx.compose.foundation.layout.RowScope.Action(icon: String, label: String, enabled: Boolean, onClick: () -> Unit) {
     val m = muse
-    Column(Modifier.weight(1f).heightIn(min = 48.dp).press(enabled = enabled, onClick = onClick).semantics(mergeDescendants = true) { contentDescription = label },
+    // Six actions (Keep, Retake, Edit, Extend, Upscale, Share): an equal share on a phone, at most 72 dp each on a tablet
+    // (WS4 audit), spread by the row's SpaceBetween.
+    Column(Modifier.weight(1f).widthIn(max = 72.dp).heightIn(min = 48.dp).press(enabled = enabled, onClick = onClick).semantics(mergeDescendants = true) { contentDescription = label },
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically)) {
         SIc(icon, 20.dp, if (enabled) m.t.ink else m.t.muted.copy(alpha = .5f))
         T(label.uppercase(), m.type.mono.copy(fontSize = 9.5.sp, letterSpacing = .8.sp), if (enabled) m.t.muted else m.t.muted.copy(alpha = .5f))
