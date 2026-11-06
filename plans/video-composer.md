@@ -43,6 +43,20 @@ Prompt-first. A composer left entirely on defaults is a complete, one-tap state.
   - A "~" prefix with "How is this priced?" for estimates.
   - "Free" for test renders.
 
+## Rig check (workstream 3)
+Before Generate, the composer warns when choices clash with each other or with the prompt. It shows one line of reason and a one-tap fix, and **never blocks Generate**.
+- **Where:** a warning row just above the bottom bar, in its own component (Android `ui/screens/suite/RigCheckRow.kt`, Mac `Views/Suite/RigCheckRow.swift`). The first warning shows; "+N" opens the rest. Each line has its fix button (and the alt, when there is one) and a × that hides that warning until the choices change.
+- **Source:** `rig` on `POST /v1/suite/shots/estimate`. When the estimate fails, `POST /v1/suite/rig-check` returns the same list. Server: `server/api/src/suite/rigcheck.ts` (pure, keyword map, no LLM).
+- **Fix:** a JSON Merge Patch over the ShotRequest, applied to the composer's choices like a tap on the picker would be.
+- **Rules:**
+  - `deep_focus`: DV camcorder, Phone, Webcam or CCTV with f/1.2–2.8 or Rack focus → Use Cinema camera (alt: drop the rack, or f/11).
+  - `wide_close`: ≤ 24 mm on a close-up or extreme close-up (not Fisheye) → 85mm (alt: Medium shot).
+  - `worm_close`: Worm’s-eye with medium close-up or closer → Low angle (alt: Full body).
+  - `look_clash` (tip): film stock against palette, black and white against colour, warm against cold, saturated against muted → keep one.
+  - `prompt_move` / `prompt_angle` / `prompt_size` (tip): the prompt names a different move, angle or framing from the chips. Negated words ("no zoom") and the composer’s own #tokens don’t count.
+  - `no_reveal`: "open on X" / "reveal" with a move that starts on the subject (Crane up, Dolly in, Static…) → Rise to reveal (or Tilt up) after a rise, else Dolly out reveal.
+  - `talk_move`: speaking with a move that isn’t talk-safe → Lock it off (alt: Handheld UGC).
+
 ## The picker shell (one shell, learnt once)
 - **Desktop:** a centred modal (about 820×520) over a dimmed page, with a title, **Reset all** and ×. Sub-steps sit in a left rail; a dot marks a step that has a value. Choices apply instantly, with no OK button.
 - **Phone:** a bottom sheet (about 85% height) with a grab handle, title, Reset all and ×. Sub-steps become a segmented control at the top, and choices apply instantly.

@@ -1024,9 +1024,15 @@ ShotRequest {
 ShotEstimate { quality, label /* "Shot · HD · 2K" */, resolution, seconds /* what will render */, takes, mode, estimate, priceLine /* "about $0.78 · 6 s" */,
   buttonLabel /* "Generate · 6 s · $0.78" */, ok, code, message, caps: { perJob, perDay, spentToday, leftToday, ok, code, message },
   warnings: string[] /* e.g. "length set to 6 s", "one camera move per shot: … dropped", "the guide clip is not sent" */,
+  rig: RigWarning[] /* the rig check (workstream 3): empty when nothing clashes; never changes ok */,
   camera: { moves: string[], guideUsed: boolean }, prompt, test, speaking: { speaking: boolean, source: "switch"|"upload"|"detected"|"default" },
   cast?: { characterId, outfitId?, who /* "the person on the left" */, speaking: "yes"|"no"|"unknown" }[], keepAudio? /* recast */,
   engine?, input?, tried? /* (owner): model, provider, ref, $/s, billed seconds, licence and notice; the inputs; the ladder steps tried */ }
+// Rig check (workstream 3, plans/video-composer.md "Rig check"). A fix is a JSON Merge Patch (RFC 7386) over the ShotRequest:
+// objects merge, a value replaces, null removes (only `camera.mix` is ever removed). Today every patch is under `camera`.
+RigWarning { id: "deep_focus"|"wide_close"|"worm_close"|"look_clash"|"prompt_move"|"prompt_angle"|"prompt_size"|"no_reveal"|"talk_move",
+  severity: "warn" /* won't come out as chosen */ | "tip" /* a taste clash */, reason /* one line, e.g. "DV camcorder keeps everything in focus, so the rack focus won’t show" */,
+  fix: { label /* "Use Cinema camera" */, patch }, alt?: { label /* "Drop the rack focus" */, patch } }
 ```
 
 ### Endpoints
@@ -1038,6 +1044,7 @@ ShotEstimate { quality, label /* "Shot · HD · 2K" */, resolution, seconds /* w
 | `GET /v1/suite/targets` | → per quality, what a guide clip (Blender render) should be: `{quality, label, available, minSeconds, maxSeconds, guideSeconds: {min, max}, aspectRatios, shortSide, fps: 24, keyframes: {start, middle /* max count */, end}}`, plus `model`, `name` and `resolution` (owner). Only models that take a reference video count. |
 | `POST /v1/suite/camera/compile` `{camera, quality?, duration?, engineModel? (owner)}` | → `{text, moves, guideUsed, warnings}`, plus `engine`, `params` and `avoid` (owner). This is what the camera becomes on that quality's first model. Free. |
 | `POST /v1/suite/shots/estimate` `ShotRequest` | → `ShotEstimate`. Holds nothing and runs nothing. <ul><li>`400 nothing_fits` ("Draft can't make this shot · try another quality, a shorter length or fewer references"), with `tried` (owner).</li><li>`400 engine_unavailable` when the suite is off.</li><li>`403 owner_only` for `engineModel`/`resolution` from a member.</li></ul> |
+| `POST /v1/suite/rig-check` `ShotRequest` | → `{rig: RigWarning[]}`. The rig check alone: no character, engine or price needed, so the composer can still warn when the estimate fails. Swap and recast return `[]`. Free, pure, no provider call. The speaking switch counts only when it is set (the estimate also uses the uploaded audio's talking flag). |
 | `POST /v1/suite/shots` `ShotRequest` | → `Job`: a render job, `request.engine: "suite"`, `engineLabel: "Shot · Standard · 768p"`. <ul><li>The same live `job`/`take`/`balance` events, `DELETE /v1/jobs/{id}` cancels, and failures refund in full (`provider_failed`/`provider_refused`/`provider_timeout`/`provider_out_of_credit`).</li><li>Takes have `label` = the tier ("Draft"…). They are the provider's file **as delivered** (no trim).</li><li>`dryRun: true` → `{dryRun: true, estimate}` and nothing is held.</li><li>`402 suite_over_job_limit` / `suite_over_day_limit`, then the wallet's own cap and balance codes.</li><li>`mode: "swap"` is the existing character swap: `POST /v1/jobs` with `engine: "replicate"`, Cinema → HD.</li></ul> |
 | `GET /v1/suite/shots/{id}` | → `{job, warnings}`, plus `engine` and `runs` (owner) |
 | `GET /v1/suite/settings` (owner) | → <ul><li>`{mode, caps: {perJob, perDay}, spentToday}`</li><li>`ladder`, `defaultLadder`</li><li>`models[]`: the registry, each with `enabled`, `blocked`, `blockedReason`, `needsAck`, `configured` and `priceScale`</li><li>`providers: {replicate, fal, runpod}`</li></ul> |

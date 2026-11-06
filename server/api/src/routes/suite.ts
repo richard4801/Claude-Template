@@ -10,6 +10,7 @@ export async function registerSuiteRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/v1/suite/camera', async () => cameraCatalog());
   app.get('/v1/suite/targets', async req => ctx.suite.targets(req.user));
   app.post('/v1/suite/camera/compile', async req => ctx.suite.compile(req.user, req.body));
+  app.post('/v1/suite/rig-check', async req => ctx.suite.rigCheck(req.user, req.body)); // workstream 3
   app.post('/v1/suite/shots/estimate', async (req, reply) => {
     try { return await ctx.suite.estimate(req.user, req.body); }
     catch (e) { return nothingFits(e, req.user.role === 'owner', reply); }
