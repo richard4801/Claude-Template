@@ -66,6 +66,18 @@ When resuming:
 6. The owner-approved RunPod step for SeedVR2.
 7. Migrate `railway.json` before 2026-12-01.
 8. **Owner-seen bug (Mac composer, about 1000 px wide):** the bottom pills wrap their labels ("Standar/d", "Speak/ing"), "Engine · A…" is cut off, and Generate shows "GENERATE…" with no price. Make the pills shrink to icon plus value, and keep the price visible. Workstream 1.
+9. **Rig check (owner asked, high priority):** the composer warns before Generate when choices clash with each other or with the prompt. Examples:
+   - DV camcorder, phone or CCTV with f/1.4–2.8 or Rack focus: deep focus, so the pull won't show.
+   - A wide lens (≤24 mm) with a close-up: it distorts.
+   - Worm's-eye with a chest-up close-up.
+   - Two opposing looks.
+   - A prompt that describes a move or angle different from the chips.
+
+   Show a one-line reason and a one-tap fix.
+10. **Owner's first live shot (H3 Standard):**
+   - It ran 10 s although 8 s was chosen.
+   - The "#Rack focus" token text leaked into the prompt as well as the compiled line.
+   - The audio came back very quiet (max about −50 dB), so add loudness levelling, or mark H3 sound as "faint".
 
 ## Status (each session updates its own line)
 - 1 · Video composer follow-ups (2026-11-06) on `claude/muse-suite-core`: Recast tap-a-face (faceCrop + personHint), swap add-on pills, Era decade slider, UGC ad format wheel (`ugcFormats`, `camera.style.format`), @location (`/v1/suite/locations`, **migration 0013 after 0011/0012**), drag-to-reorder tokens, owner engine pin; catalog `tools` (Talking and UGC ad live, Extend coming soon); real Webcam/CCTV/Swirl/Tilt-shift renders; Blender previews bundled (`previews/`, catalog `preview` per move/light/angle); first-run HTTP checks on both apps. Server 359 green; Android 1305 green (release APK 30.7 MB, +9.5 MB previews); Mac CI green (run 42152398143). Next: Extend & upscale backend.
