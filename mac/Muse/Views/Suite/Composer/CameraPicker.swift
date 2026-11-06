@@ -230,7 +230,7 @@ struct FocalDiagram: View {
             ctx.stroke(grid, with: .color(lineInk.opacity(0.05)), lineWidth: 1)
             let half = min(ComposerWheels.fieldOfView(mm) / 2, 60) * .pi / 180
             let cx = w / 2, cy = h - 13, len = h - 26
-            let dx = len * tan(half)
+            let dx = len * CGFloat(tan(half))
             var wedge = Path()
             wedge.move(to: CGPoint(x: cx, y: cy))
             wedge.addLine(to: CGPoint(x: cx - dx, y: cy - len))
@@ -315,7 +315,7 @@ struct HeightDiagram: View {
                 }
             }()
             let camX = id == "overhead" ? fx - 4 : w * 0.24
-            let camY = max(8, ground - fh * frac)
+            let camY = max(8, ground - fh * CGFloat(frac))
             let col = on ? amber : lineInk
             ctx.fill(Path(roundedRect: CGRect(x: camX - 7, y: camY - 5, width: 14, height: 10), cornerRadius: 2), with: .color(col))
             var sight = Path()
@@ -367,10 +367,11 @@ struct FramingDiagram: View {
                 default: return (-0.05, 0.55, 0.8)
                 }
             }()
-            let y0 = top + fh * span.0, y1 = top + fh * span.1
+            let y0 = top + fh * CGFloat(span.0), y1 = top + fh * CGFloat(span.1)
             let fhgt = max(8, y1 - y0)
-            let fw = min(w - 6, fhgt * span.2 * 0.9)
-            let rect = CGRect(x: fx - fw / 2 + (id == "ots" ? -8 : id == "two_shot" ? 12 : 0), y: max(3, y0), width: fw, height: min(h - 6, fhgt))
+            let fw = min(w - 6, fhgt * CGFloat(span.2) * 0.9)
+            let shift: CGFloat = id == "ots" ? -8 : (id == "two_shot" ? 12 : 0)
+            let rect = CGRect(x: fx - fw / 2 + shift, y: max(3, y0), width: fw, height: min(h - 6, fhgt))
             ctx.stroke(Path(rect), with: .color(on ? amber : lineInk), style: StrokeStyle(lineWidth: 1.5, dash: id == "pov" ? [4, 3] : []))
         }
         .background(Color(hex: 0x121315))
