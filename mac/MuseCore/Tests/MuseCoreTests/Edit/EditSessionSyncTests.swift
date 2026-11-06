@@ -262,4 +262,26 @@ final class EditSessionSyncTests: XCTestCase {
         XCTAssertTrue(s.undo())
         XCTAssertNil(s.project.mainClips.first?.look)
     }
+
+    func testExportPresetNeverTouchesDisclosureAndFrameSize() async throws {
+        var base = EditSuite.ExportSettings()
+        base.labelAI = true
+        let s = base.applying(preset: ["ratio": .string("1:1"), "resolution": .string("4k"), "fps": .number(60), "codec": .string("hevc"),
+                                       "captions": .string("srt"), "aiLabel": .bool(false), "c2pa": .bool(true)])
+        XCTAssertEqual(s.ratio, .square)
+        XCTAssertEqual(s.resolution, .k4)
+        XCTAssertEqual(s.fps, 60)
+        XCTAssertEqual(s.codec, .hevc)
+        XCTAssertEqual(s.captions, .srt)
+        XCTAssertTrue(s.labelAI)
+        XCTAssertFalse(s.c2pa)
+        XCTAssertEqual(base.applying(preset: ["fps": .number(25), "resolution": .string("8k")]), base)
+        let size = editFrameSize(canvas: E.Canvas(width: 1080, height: 1920, fps: 30), width: 540)
+        XCTAssertEqual(size.width, 540)
+        XCTAssertEqual(size.height, 960)
+        let e = EditHistoryEntry(id: 3, revision: 2, author: "claude", label: "Look · film-gold 70 %")
+        XCTAssertEqual(e.claudeToast, "Claude · Look · film-gold 70 %")
+        XCTAssertEqual(e.who(thisDevice: "mac-1"), "Claude")
+        XCTAssertEqual(EditHistoryEntry(id: 4, revision: 3, author: "app:mac-1", label: "Trim").who(thisDevice: "mac-1"), "This Mac")
+    }
 }

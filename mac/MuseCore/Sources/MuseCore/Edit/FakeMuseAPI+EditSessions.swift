@@ -27,6 +27,12 @@ public struct FakeEditSessionRecord: Sendable {
 }
 
 extension FakeMuseAPI {
+    /// The fake has no suite-look files: any `palette:<id>` the project names is taken as shipped.
+    static func palettes(_ p: EditV2.Project) -> Set<String> {
+        let luts = p.tracks.flatMap(\.items).compactMap { $0.videoClip?.look?.lut ?? $0.imageItem?.look?.lut }
+        return Set(luts.filter { $0.hasPrefix("palette:") }.map { String($0.dropFirst(8)) })
+    }
+
     private func editOwner() throws { guard isOwner else { throw ApiError("owner_only", "Editing with Claude is for the studio owner") } }
 
     private func record(_ id: String) throws -> FakeEditSessionRecord {
@@ -57,7 +63,7 @@ extension FakeMuseAPI {
     private func checked(_ doc: JSONValue, takeId: String) throws -> EditV2.Project {
         let p: EditV2.Project
         do { p = try JSONPatch.decode(EditV2.Project.self, doc) } catch { throw ApiError("bad_request", "project: not an edit project") }
-        if let problem = EditV2.problem(p) { throw ApiError("bad_request", "project.\(problem.description)") }
+        if let problem = EditV2.problem(p, paletteIds: Self.palettes(p)) { throw ApiError("bad_request", "project.\(problem.description)") }
         if p.sourceTakeId != takeId { throw ApiError("bad_request", "project.sourceTakeId: must be the session's take") }
         return p
     }
@@ -100,7 +106,7 @@ extension FakeMuseAPI {
         }
         let project: EditV2.Project
         if let p = req.project {
-            if let problem = EditV2.problem(p) { throw ApiError("bad_request", "project.\(problem.description)") }
+            if let problem = EditV2.problem(p, paletteIds: Self.palettes(p)) { throw ApiError("bad_request", "project.\(problem.description)") }
             if p.sourceTakeId != req.takeId { throw ApiError("bad_request", "project.sourceTakeId: must be the session's take") }
             project = p
         } else {
