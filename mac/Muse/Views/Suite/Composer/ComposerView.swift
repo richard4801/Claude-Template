@@ -12,6 +12,7 @@ private struct ComposerPriceKey: Equatable {
     var swap: SwapDraft
     var clipId: String?
     var catalogLoaded: Bool
+    var photo: PhotoDraft // Photo tool (workstream 3): count, preset and references re-price too
 }
 
 struct ComposerView: View {
@@ -27,7 +28,11 @@ struct ComposerView: View {
                     RecentTakesRow().padding(.top, 20)
                     Spacer(minLength: 28)
                     ComposerCard().zIndex(2)
-                    PresetsRow().padding(.top, 26).padding(.bottom, 30)
+                    if s.composer.tool == .photo {
+                        PhotoPresetsRow().padding(.top, 26).padding(.bottom, 30) // Photo tool (workstream 3): the photo templates
+                    } else {
+                        PresetsRow().padding(.top, 26).padding(.bottom, 30)
+                    }
                 }
                 .frame(maxWidth: 960)
                 .padding(.horizontal, 32)
@@ -36,12 +41,13 @@ struct ComposerView: View {
             ComposerPickerHost()
             if s.browserOpen { ToolBrowser().transition(.opacity) }
         }
-        .task(id: ComposerPriceKey(draft: s.composer, slots: s.composerSlots.slots, swap: s.swap, clipId: store.clip?.id, catalogLoaded: s.catalog != nil)) {
+        .task(id: ComposerPriceKey(draft: s.composer, slots: s.composerSlots.slots, swap: s.swap, clipId: store.clip?.id, catalogLoaded: s.catalog != nil, photo: s.photo)) {
             try? await Task.sleep(nanoseconds: 300_000_000)
             if Task.isCancelled { return }
             switch s.composer.tool {
             case .shot, .talking, .ugc, .extend: if !store.isComingSoon(s.composer.tool) { await store.estimateShot() }
             case .swap, .recast: await store.estimateSwap()
+            case .photo: await store.estimatePhoto() // Photo tool (workstream 3)
             default: break
             }
         }
@@ -236,7 +242,7 @@ struct ComposerCard: View {
             }
             HStack(alignment: .top, spacing: 16) {
                 promptArea
-                ComposerSlotRow()
+                if draft.tool == .photo { PhotoSlotRow() } else { ComposerSlotRow() } // Photo tool (workstream 3)
             }
             if let note = store.suite.composerSlots.slots.note(store.composerInputs), draft.tool == .shot {
                 Label(note, systemImage: "info.circle").font(t.body(11.5)).foregroundStyle(t.muted)
@@ -253,6 +259,7 @@ struct ComposerCard: View {
         case .swap, .recast:
             if store.clip == nil { return "Choose a clip first" }
             return store.suite.swapEstimate?.problem ?? store.suite.swapError
+        case .photo: return store.suite.photoError // Photo tool (workstream 3)
         default: return store.suite.estimate?.problem ?? store.suite.estimateError
         }
     }
@@ -322,12 +329,13 @@ struct ToolCardRow: View {
     var body: some View {
         let d = store.suite.composer
         let preset = d.collapsed.flatMap { id in store.suite.camera.presets.first { $0.id == id } }
+        let photoPreset = d.tool == .photo ? store.photoPreset : nil // Photo tool (workstream 3)
         HStack(spacing: 12) {
             HardwareImage(name: preset.flatMap { ComposerPresets.render($0, store.suite.camera) } ?? d.tool.render)
                 .frame(width: 34, height: 42).clipped()
             Text((preset?.label ?? d.tool.title).uppercased()).font(t.mono(11, .medium)).tracking(1.5)
             Circle().fill(t.line).frame(width: 3, height: 3)
-            Text(preset?.description ?? d.tool.tagline).font(t.body(13.5)).foregroundStyle(t.muted).lineLimit(1)
+            Text(photoPreset.map { "Preset: \($0.name)" } ?? preset?.description ?? d.tool.tagline).font(t.body(13.5)).foregroundStyle(t.muted).lineLimit(1)
             Button { store.suite.browserOpen = true } label: {
                 Label("Change", systemImage: "arrow.left.arrow.right").font(t.body(13, .semibold)).foregroundStyle(t.ink)
                     .padding(.horizontal, 12).frame(height: 30)
@@ -346,7 +354,7 @@ struct ToolCardRow: View {
                     .buttonStyle(.plain).foregroundStyle(t.muted).help("Add to storyboard")
                     .accessibilityLabel("Add to storyboard")
             }
-            if store.isOwner && !store.isComingSoon(d.tool) {
+            if store.isOwner && !store.isComingSoon(d.tool) && d.tool != .photo { // Photo (workstream 3) runs on the image steps, not the video engines
                 Button { store.suite.showEngines = true } label: {
                     Image(systemName: "server.rack").frame(width: 28, height: 28).contentShape(Rectangle())
                 }
@@ -375,13 +383,15 @@ struct SettingChip: View {
         let refs = ComposerLocations.used(store.suite.composer.tokens, slots: store.suite.composerSlots.slots)
         let sum = ComposerCatalog.summary(chip, s, cat, refs: refs, refsMax: SlotKind.image.capacity(store.composerInputs))
         let directed = chip == .camera && store.suite.composer.directed != nil
+        // Photo tool (workstream 3): a Photo preset sets its own camera and light, so those chips show it, locked.
+        let locked = (chip == .camera || chip == .lighting) && store.suite.composer.tool == .photo && store.suite.photo.presetId != nil
         Button {
             if chip == .references { refsOpen = true } else if let p = ComposerPicker(chip: chip) { store.openPicker(p) }
         } label: {
             HStack(spacing: 7) {
                 thumb(auto: sum.auto && !directed)
                 Text(chip.key).font(t.mono(9.5, .medium)).tracking(0.8).foregroundStyle(t.muted)
-                Text(directed ? "Directed" : sum.value).font(t.body(12.5, sum.auto && !directed ? .regular : .semibold))
+                Text(locked ? "From preset" : directed ? "Directed" : sum.value).font(t.body(12.5, sum.auto && !directed ? .regular : .semibold))
                     .foregroundStyle(sum.auto && !directed ? t.ink.opacity(0.8) : t.ink)
                     .lineLimit(1).truncationMode(.tail).frame(maxWidth: 190, alignment: .leading)
             }
@@ -392,8 +402,9 @@ struct SettingChip: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(sum.text(max: 60))
-        .accessibilityLabel(sum.text(max: 80))
+        .disabled(locked)
+        .help(locked ? "\(chip.title) comes from the preset" : sum.text(max: 60))
+        .accessibilityLabel(locked ? "\(chip.title), from the preset" : sum.text(max: 80))
         .popover(isPresented: $refsOpen, arrowEdge: .bottom) { ReferencesPopover().environment(store).environment(\.theme, t) }
     }
 

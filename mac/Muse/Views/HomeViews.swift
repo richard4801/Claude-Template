@@ -80,7 +80,6 @@ struct HomeView: View {
         let r = store.runningJob ?? store.activeJobs.first
         Page {
             PageHeader(eyebrow: dateLine, title: greeting) {
-                MButton("Photoshoot", icon: "camera") { store.go(.shoot) }
                 MButton("New video", icon: "plus", kind: .primary) { store.go(.studio) }
             }
             HStack(spacing: 14) {
@@ -113,7 +112,7 @@ struct HomeView: View {
                             }
                         }
                     } else {
-                        Note("Nothing rendering. Start a new video or a photoshoot.")
+                        Note("Nothing rendering. Start a new video or a photo.")
                     }
                 }
                 .card()
@@ -122,7 +121,6 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     H2("Create").padding(.bottom, 4)
                     QuickAction(icon: "video", title: "New video", hint: "Swap your model into a real clip", key: "⌘N") { store.go(.studio) }
-                    QuickAction(icon: "camera", title: "Photoshoot", hint: "Stills in any scene, camera and light", key: nil) { store.go(.shoot) }
                     QuickAction(icon: "person.badge.plus", title: "New model", hint: "Upload your own reference images", key: nil) { store.go(.create) }
                 }
                 .card()
@@ -132,7 +130,7 @@ struct HomeView: View {
 
             SectionHeader(title: "Latest takes") { LinkText("Open gallery") { store.go(.gallery) } }
             if store.takes.isEmpty {
-                Note(icon: "square.grid.2x2", "No takes yet. Finished videos and photoshoots show up here.")
+                Note(icon: "square.grid.2x2", "No takes yet. Finished videos and photos show up here.")
             }
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 6), spacing: 12) {
                 ForEach(store.takes.prefix(6)) { take in
