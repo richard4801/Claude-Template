@@ -49,6 +49,9 @@ import studio.muse.app.ui.screens.suite.SIc
 import studio.muse.app.ui.theme.MuseTheme
 import studio.muse.app.ui.theme.ThemeId
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.scale
+import studio.muse.app.ui.theme.MuseSpace
+import studio.muse.app.ui.theme.MuseRoles
 
 // AI suite (workstream 1): the one picker shell (plans/video-composer.md "The picker shell"), always dark whatever the app
 // theme. Phone: a bottom sheet of about 85% height with a grab handle, title, Reset all and ×, sub-steps as a segmented
@@ -117,18 +120,19 @@ fun BoxScope.PickerShell(
 @Composable
 private fun Header(title: String, onReset: (() -> Unit)?, onClose: () -> Unit, modifier: Modifier) {
     val m = muse
+    val bag = MuseRoles.bag
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        T(title.uppercase(), m.type.h2.copy(fontSize = 26.sp, lineHeight = 26.sp, letterSpacing = .08.em, fontWeight = FontWeight.Bold), m.t.ink, Modifier.weight(1f), maxLines = 1)
+        // Workstream 4 (design direction): sentence-case title on the type scale, no caps tracking.
+        T(title, m.scale.title, bag.ink, Modifier.weight(1f), maxLines = 1)
         if (onReset != null) {
             Box(Modifier.heightIn(min = 48.dp).press(onClick = onReset).semantics { contentDescription = "Reset all"; role = Role.Button }, contentAlignment = Alignment.Center) {
-                Row(Modifier.height(34.dp).clip(RoundedCornerShape(17.dp)).border(1.dp, m.t.line, RoundedCornerShape(17.dp)).padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    SIc("refresh", 14.dp, m.t.muted); T("Reset all", m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), m.t.muted, maxLines = 1)
+                Row(Modifier.padding(horizontal = MuseSpace.s2), verticalAlignment = Alignment.CenterVertically) {
+                    T("Reset all", m.scale.label, bag.ink2, maxLines = 1)
                 }
             }
         }
         Box(Modifier.size(48.dp).press(onClick = onClose).semantics { contentDescription = "Close"; role = Role.Button }, contentAlignment = Alignment.Center) {
-            Box(Modifier.size(36.dp).clip(CircleShape).background(m.t.surface2), contentAlignment = Alignment.Center) { SIc("close", 16.dp, m.t.ink) }
+            SIc("close", 24.dp, bag.ink)
         }
     }
 }
@@ -159,27 +163,29 @@ private fun RailItem(t: SheetTab, on: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** A dark section label with an optional right-hand note ("CAMERA … 5 / 11"). */
+/** A section heading in the camera bag, sentence case, with an optional note on the right. */
 @Composable
 fun SheetLabel(text: String, right: String? = null, modifier: Modifier = Modifier) {
     val m = muse
+    val bag = MuseRoles.bag
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        T(text.uppercase(), m.type.mono.copy(fontSize = 12.sp, letterSpacing = .16.em, fontWeight = FontWeight.Medium), m.t.ink, Modifier.weight(1f), maxLines = 1)
-        if (right != null) T(right, m.type.mono.copy(fontSize = 12.5.sp), m.t.muted, maxLines = 1)
+        T(text, m.scale.heading, bag.ink, Modifier.weight(1f), maxLines = 1)
+        if (right != null) T(right, m.scale.caption, bag.ink2, maxLines = 1)
     }
 }
 
-/** The check badge on a selected card. */
+/**
+ * Was a check badge on a selected card. The design direction keeps one selection mark per control (the outline from
+ * [picked]), so it draws nothing; the call sites go in the next restyle pass.
+ */
+@Suppress("UnusedReceiverParameter")
 @Composable
-fun BoxScope.CheckBadge() {
-    Box(Modifier.align(Alignment.TopStart).padding(7.dp).size(20.dp).clip(CircleShape).background(muse.t.accent), contentAlignment = Alignment.Center) {
-        SIc("check", 13.dp, Color(0xFF1A1205))
-    }
-}
+fun BoxScope.CheckBadge() = Unit
 
-/** The outline of a selected card (accent, outset look). */
+/** The one selection mark on a card: a 2 dp outline in the bag's selection colour ([accent] is kept for old call sites). */
+@Suppress("UNUSED_PARAMETER")
 fun Modifier.picked(on: Boolean, accent: Color, radius: Dp = 10.dp): Modifier =
-    if (on) this.border(2.dp, accent, RoundedCornerShape(radius + 3.dp)).padding(3.dp) else this.padding(3.dp)
+    if (on) this.border(2.dp, MuseRoles.bag.selection, RoundedCornerShape(radius + 3.dp)).padding(3.dp) else this.padding(3.dp)
 
 /** Fills the remaining height of a sheet with a Column that scrolls. */
 @Composable
