@@ -146,7 +146,6 @@ struct EditSuiteEditor: View {
         }
         // Claude asked for an export: the sheet opens with its preset; the owner confirms.
         .onChange(of: session.exportAsk) { _, ask in if ask != nil { showExport = true } }
-        .environment(session)
     }
 
     private var editor: some View {
