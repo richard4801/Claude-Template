@@ -5,17 +5,19 @@ package studio.muse.core.edit
  * on the first one broken, else returns the project's duration. Shape problems (missing fields, wrong types, unknown
  * kinds) are caught earlier by [EditJson.parse] with the same field paths. [presets] = the known filters (the
  * reference defaults to none, which skips the filter-id check; the apps always pass the bundled table); [lookIds] = the
- * bundled looks a `pack:` LUT may name (empty skips that check, like the reference).
+ * bundled looks a `pack:` LUT may name (empty skips that check, like the reference); [paletteIds] = the suite looks a
+ * `palette:` LUT may name (empty = none, so every `palette:` look is refused, like the reference).
  */
-fun validate(p: EditProject, presets: List<FilterPreset> = Presets.FILTERS, lookIds: Set<String> = LookPack.IDS): Double = Validator(p, presets, lookIds).run()
+fun validate(p: EditProject, presets: List<FilterPreset> = Presets.FILTERS, lookIds: Set<String> = LookPack.IDS, paletteIds: Set<String> = emptySet()): Double =
+    Validator(p, presets, lookIds, paletteIds).run()
 
 /** The first problem, or null when [p] is valid. */
-fun problemOf(p: EditProject, presets: List<FilterPreset> = Presets.FILTERS, lookIds: Set<String> = LookPack.IDS): EditProblem? =
-    try { validate(p, presets, lookIds); null } catch (e: EditProblem) { e }
+fun problemOf(p: EditProject, presets: List<FilterPreset> = Presets.FILTERS, lookIds: Set<String> = LookPack.IDS, paletteIds: Set<String> = emptySet()): EditProblem? =
+    try { validate(p, presets, lookIds, paletteIds); null } catch (e: EditProblem) { e }
 
 private val HEX = Regex("^#[0-9A-Fa-f]{6}$")
 
-private class Validator(val p: EditProject, presets: List<FilterPreset>, private val lookIds: Set<String>) {
+private class Validator(val p: EditProject, presets: List<FilterPreset>, private val lookIds: Set<String>, private val paletteIds: Set<String>) {
     private val assets = HashMap<String, Asset>()
     private val ids = HashSet<String>()
     private val filterIds = presets.map { it.id }.toSet()
@@ -169,7 +171,8 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
     private fun look(f: String, l: Look) {
         l.lut?.let { lut ->
             if (lut.startsWith(Look.PACK_PREFIX)) { if (lookIds.isNotEmpty() && lut.substring(Look.PACK_PREFIX.length) !in lookIds) bad("$f.lut", "unknown look") }
-            else if (assets[lut]?.kind != AssetKind.LUT) bad("$f.lut", "must be \"pack:<id>\" or a lut asset id")
+            else if (lut.startsWith(Look.PALETTE_PREFIX)) { if (lut.substring(Look.PALETTE_PREFIX.length) !in paletteIds) bad("$f.lut", "unknown look") }
+            else if (assets[lut]?.kind != AssetKind.LUT) bad("$f.lut", "must be \"pack:<id>\", \"palette:<id>\" or a lut asset id")
         }
         num("$f.strength", l.strength, 0.0, 1.0); num("$f.lift", l.lift, 0.0, 1.0); num("$f.sharpen", l.sharpen, 0.0, 1.0); num("$f.chromatic", l.chromatic, 0.0, 1.0)
         l.curves?.forEach { (ch, pts) ->

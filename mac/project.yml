@@ -29,6 +29,11 @@ targets:
       - path: ../server/api/assets/lookpack/looks
         type: folder
         buildPhase: resources
+      # Suite looks (palettes.json + .cube from the video suite). The folder is kept in the repo (README) because the build copies it.
+      - path: ../server/api/assets/lookpack/palettes
+        type: folder
+        buildPhase: resources
+        optional: true
       # AI suite (workstream 1): the 40 hardware renders for the camera bag (design/hardware), bundled as `hardware`.
       - path: ../design/hardware
         type: folder

@@ -209,6 +209,27 @@ class EditSuiteControllerTest {
         assertEquals(c.p(), back)
     }
 
+    @Test fun suiteLooksNeedTheShippedPalettes() = runTest {
+        val c = controller()
+        val suite = studio.muse.core.edit.Look(lut = "palette:teal_neon", strength = 1.0)
+        // No palettes shipped: a palette look is refused like the reference ("unknown look").
+        c.act(EditAction.PickLook(null, suite))
+        assertNull(c.p().mainClips[0].look)
+        assertNotNull(c.ui.value.message)
+        // Shipped: it applies, its intensity changes, and it can be swapped or removed like any look.
+        c.update { it.copy(suiteLooks = mapOf("teal_neon" to "Teal Neon")) }
+        c.act(EditAction.PickLook(null, suite))
+        assertEquals("teal_neon", c.p().mainClips[0].look!!.paletteId)
+        c.act(EditAction.LookStrength(0.6))
+        assertEquals(0.6, c.p().mainClips[0].look!!.strength!!, 1e-9)
+        c.act(EditAction.PickLook("film-gold", studio.muse.core.edit.Look(lut = "pack:film-gold", strength = 1.0)))
+        assertEquals("film-gold", c.p().mainClips[0].look!!.packId)
+        c.act(EditAction.Undo)
+        assertEquals("teal_neon", c.p().mainClips[0].look!!.paletteId)
+        c.act(EditAction.PickLook(null, null))
+        assertNull(c.p().mainClips[0].look)
+    }
+
     @Test fun hooksTextAndPip() = runTest {
         val c = controller()
         c.act(EditAction.Seek(1.0)); c.act(EditAction.AddHook("hook-list"))

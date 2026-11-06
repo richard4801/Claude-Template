@@ -55,6 +55,62 @@ extension EditV2 {
     /// The look to set when the user picks bundled look `id` from `pack`.
     public static func packLook(_ id: String, pack: LookPack) -> Look? { pack.packLook(id) }
 
+    /// The suite looks generated from palettes and film stocks (`lut: "palette:<id>"`): palettes.json
+    /// (`{version, cubeSize, looks: [{id, name, kind, file, lut, swatches}]}`) + one .cube per look, in
+    /// server/api/assets/lookpack/palettes (the Mac app ships it as the `palettes` resource folder). The folder may be
+    /// absent: then there are none. Read leniently like the reference's `paletteFiles` (photo.ts): an entry needs a text
+    /// id and a plain `<name>.cube` file name, anything else is skipped; a missing or broken index is no suite looks.
+    public struct SuiteLooks: Hashable, Sendable {
+        public struct Entry: Hashable, Sendable, Identifiable {
+            public var id: String
+            /// The display name (falls back to the id).
+            public var name: String
+            public var kind: String?
+            /// The .cube file name in the palettes folder.
+            public var file: String
+            public init(id: String, name: String, kind: String? = nil, file: String) { self.id = id; self.name = name; self.kind = kind; self.file = file }
+        }
+        public var looks: [Entry]
+        public init(looks: [Entry] = []) { self.looks = looks }
+
+        public static let none = SuiteLooks()
+        public static let fileName = "palettes.json"
+
+        /// Parses palettes.json; never throws (bad entries are skipped, a bad file is `none`).
+        public static func decode(_ data: Data) -> SuiteLooks {
+            guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let arr = root["looks"] as? [Any] else { return none }
+            var out: [Entry] = []
+            var seen: [String: Int] = [:]
+            for el in arr {
+                guard let o = el as? [String: Any], let id = o["id"] as? String, let file = o["file"] as? String, isPlainCube(file) else { continue }
+                let name = (o["name"] as? String).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 } ?? id
+                let e = Entry(id: id, name: name, kind: o["kind"] as? String, file: file)
+                if let i = seen[id] { out[i] = e } else { seen[id] = out.count; out.append(e) }
+            }
+            return SuiteLooks(looks: out)
+        }
+        /// Reads palettes.json from `directory` (nil or missing = none).
+        public static func load(directory: URL?) -> SuiteLooks {
+            guard let directory, let data = try? Data(contentsOf: directory.appendingPathComponent(fileName)) else { return none }
+            return decode(data)
+        }
+        /// `^[A-Za-z0-9._-]+\.cube$`, like the reference.
+        static func isPlainCube(_ f: String) -> Bool {
+            guard f.hasSuffix(".cube"), f.count > 5 else { return false }
+            return f.unicodeScalars.allSatisfy { ($0.isASCII && CharacterSet.alphanumerics.contains($0)) || $0 == "." || $0 == "_" || $0 == "-" }
+        }
+
+        public var ids: Set<String> { Set(looks.map(\.id)) }
+        public func entry(_ id: String) -> Entry? { looks.first { $0.id == id } }
+        /// The display name of suite look `id` (the id itself when it isn't listed).
+        public func name(of id: String) -> String { entry(id)?.name ?? id }
+        /// Parses one suite look's .cube from the palettes folder.
+        public func lut(_ id: String, in directory: URL) throws -> Lut {
+            guard let e = entry(id) else { throw CubeError("unknown look \(id)") }
+            return try parseCube(String(decoding: Data(contentsOf: directory.appendingPathComponent(e.file)), as: UTF8.self))
+        }
+    }
+
     // MARK: Tables for the GPU renderer
 
     /// True when steps 3–6 change nothing (no matrix, curves, LUT or lift): the cube can be skipped.

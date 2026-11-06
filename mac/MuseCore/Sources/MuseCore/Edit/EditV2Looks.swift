@@ -95,7 +95,8 @@ extension EditV2 {
         public init(kind: LeakKind, amount: Double, angle: Double? = nil) { self.kind = kind; self.amount = amount; self.angle = angle }
     }
 
-    /// A look: every part optional. `lut` = "pack:<id>" (a bundled look) or the id of a project asset of kind "lut".
+    /// A look: every part optional. `lut` = "pack:<id>" (a bundled look), "palette:<id>" (a suite look generated from a
+    /// palette or film stock) or the id of a project asset of kind "lut".
     public struct Look: Codable, Hashable, Sendable {
         public var lut: String?
         /// 0–1, the LUT blended with the picture (default 1).
@@ -150,8 +151,10 @@ extension EditV2 {
 
         /// The bundled look's id when `lut` is "pack:<id>".
         public var packId: String? { lut.flatMap { $0.hasPrefix("pack:") ? String($0.dropFirst(5)) : nil } }
-        /// The imported LUT's asset id when `lut` isn't a pack reference.
-        public var lutAssetId: String? { lut.flatMap { $0.hasPrefix("pack:") ? nil : $0 } }
+        /// The suite look's id when `lut` is "palette:<id>".
+        public var paletteId: String? { lut.flatMap { $0.hasPrefix("palette:") ? String($0.dropFirst(8)) : nil } }
+        /// The imported LUT's asset id when `lut` is neither a pack nor a palette reference.
+        public var lutAssetId: String? { lut.flatMap { $0.hasPrefix("pack:") || $0.hasPrefix("palette:") ? nil : $0 } }
 
         /// The colour-only part (curves, LUT, strength, lift): what the per-item colour cube bakes.
         public var colorPart: ColorPart { ColorPart(lut: lut, strength: strength, curves: curves, lift: lift) }
@@ -529,8 +532,8 @@ extension EditV2 {
     // MARK: Validation (called by validate)
 
     /// The first problem of an item's look (field relative to the look, "" = the look itself), or nil.
-    /// `packIds` empty = any "pack:<id>" is accepted.
-    public static func lookProblem(_ look: Look?, assetKinds: [String: AssetKind], packIds: Set<String>) -> EditProblem? {
+    /// `packIds` empty = any "pack:<id>" is accepted; a "palette:<id>" must be in `paletteIds` (empty = none shipped).
+    public static func lookProblem(_ look: Look?, assetKinds: [String: AssetKind], packIds: Set<String>, paletteIds: Set<String> = []) -> EditProblem? {
         guard let l = look else { return nil }
         func num(_ f: String, _ v: Double?, _ lo: Double, _ hi: Double, optional: Bool = true) -> EditProblem? {
             guard let v else { return optional ? nil : EditProblem(f, "must be a number from \(fmtNum(lo)) to \(fmtNum(hi))") }
@@ -539,8 +542,10 @@ extension EditV2 {
         if let lut = l.lut {
             if lut.hasPrefix("pack:") {
                 if !packIds.isEmpty && !packIds.contains(String(lut.dropFirst(5))) { return EditProblem("lut", "unknown look") }
+            } else if lut.hasPrefix("palette:") {
+                if !paletteIds.contains(String(lut.dropFirst(8))) { return EditProblem("lut", "unknown look") }
             } else if assetKinds[lut] != .lut {
-                return EditProblem("lut", "must be \"pack:<id>\" or a lut asset id")
+                return EditProblem("lut", "must be \"pack:<id>\", \"palette:<id>\" or a lut asset id")
             }
         }
         if let p = num("strength", l.strength, 0, 1) ?? num("lift", l.lift, 0, 1) ?? num("sharpen", l.sharpen, 0, 1) ?? num("chromatic", l.chromatic, 0, 1) {

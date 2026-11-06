@@ -8,7 +8,8 @@ import { sql } from 'drizzle-orm';
 import { takes } from '../src/db/schema.js';
 import * as K from '../src/editor/look.js';
 import { LOOKS, LOOK_IDS, grade, packLook } from '../src/editor/lookpack.js';
-import { applyLookToImage, packLut } from '../src/editor/photo.js';
+import { applyLookToImage, packLut, paletteIds, usePaletteDir, PALETTE_DIR } from '../src/editor/photo.js';
+import os from 'node:os';
 import * as M from '../src/editor/model.js';
 import { bakeAll, LOOK_DIR } from '../scripts/editor-looks.js';
 import { demoModel, makeApp, people, type Client } from './helpers.js';
@@ -51,6 +52,27 @@ describe('the look pack', () => {
     const f = new Float32Array(40 * 30 * 3).fill(0).map((_, i) => [198, 134, 103][i % 3]! / 255);
     const ref = K.renderLook({ width: 40, height: 30, data: f }, look, { lut: packLut('pack:film-gold') });
     for (let i = 0; i < out.length; i += 97) expect(Math.abs(out[i]! - Math.round(ref.data[i]! * 255))).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('suite palette looks ("palette:<id>", workstream 1)', () => {
+  it('resolve from palettes.json when the folder is there; refused when it is not', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'palettes-'));
+    try {
+      usePaletteDir(path.join(dir, 'none'));
+      expect(paletteIds().size).toBe(0);
+      expect(packLut('palette:teal_neon')).toBeNull();
+      expect(K.lookProblem({ lut: 'palette:teal_neon' }, new Map(), LOOK_IDS, paletteIds())).toMatchObject({ field: 'lut', message: 'unknown look' });
+      fs.writeFileSync(path.join(dir, 'teal_neon.cube'), K.writeCube(5, 'Teal neon', (r, g, b) => [r * 0.8, g, b * 1.1]));
+      fs.writeFileSync(path.join(dir, 'palettes.json'), JSON.stringify({ version: 1, cubeSize: 5, looks: [{ id: 'teal_neon', name: 'Teal neon', kind: 'palette', file: 'teal_neon.cube', lut: 'palette:teal_neon', swatches: [] }, { id: 'evil', file: '../x.cube' }] }));
+      usePaletteDir(dir);
+      expect([...paletteIds()]).toEqual(['teal_neon']);
+      expect(packLut('palette:teal_neon')!.size).toBe(5);
+      expect(K.lookProblem({ lut: 'palette:teal_neon', strength: 0.7 }, new Map(), LOOK_IDS, paletteIds())).toBeNull();
+      const p = M.fromV1({ version: 1, sourceTakeId: 't', sourceDurationSec: 5, segments: [{ inSec: 0, outSec: 5, speed: 1 }], mute: false }, { width: 16, height: 16, fps: 30 });
+      (p.tracks[0]!.items[0] as M.VideoClip).look = { lut: 'palette:teal_neon' };
+      expect(M.validate(p, [], LOOK_IDS, paletteIds()).durationSec).toBe(5);
+    } finally { usePaletteDir(PALETTE_DIR); fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });
 

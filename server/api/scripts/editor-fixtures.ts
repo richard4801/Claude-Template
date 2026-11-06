@@ -128,6 +128,7 @@ const validation: { name: string; project: unknown; ok: boolean; field?: string 
   { name: 'voice effect ok', project: mut(p => { p.tracks[0].items[0].voiceEffect = 'radio'; p.tracks[0].items[0].enhance = true; }), ok: true },
   { name: 'voice effect bad', project: mut(p => { p.tracks[0].items[0].voiceEffect = 'robot'; }), ok: false, field: 'edits.tracks.0.items.0.voiceEffect' },
   { name: 'adjust highlights', project: mut(p => { p.tracks[0].items[0].adjust = { highlights: -0.4, shadows: 2 }; }), ok: false, field: 'edits.tracks.0.items.0.adjust.shadows' },
+  { name: 'palette look unknown without palettes', project: mut(p => { p.tracks[0].items[0].look = { lut: 'palette:teal_neon', strength: 0.8 }; }), ok: false, field: 'edits.tracks.0.items.0.look.lut' },
   { name: 'look ok', project: mut(p => { p.tracks[0].items[0].look = { ...packLook('film-cine'), curves: { rgb: [[0, 0.05], [1, 0.95]] } }; }), ok: true },
   { name: 'look with imported lut', project: mut(p => { p.assets.push({ id: 'cube1', kind: 'lut', upload: 'up_cube' }); p.tracks[2].items[0].look = { lut: 'cube1', strength: 0.6 }; }), ok: true },
   { name: 'look unknown pack', project: mut(p => { p.tracks[0].items[0].look = { lut: 'pack:nope' }; }), ok: false, field: 'edits.tracks.0.items.0.look.lut' },

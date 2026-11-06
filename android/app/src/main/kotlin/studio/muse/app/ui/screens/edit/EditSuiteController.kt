@@ -194,7 +194,7 @@ class EditSuiteController(
         val base = h.current
         val next = op(base)
         if (next == null) { if (refused != null && done) say(refused); if (done) endDrag(); return false }
-        problemOf(next)?.let { p -> if (done) { say(refused ?: friendly(p.field, p.reason)); endDrag() }; return false }
+        problemOf(next, paletteIds = _ui.value.suiteLooks.keys)?.let { p -> if (done) { say(refused ?: friendly(p.field, p.reason)); endDrag() }; return false }
         if (!done) {
             if (dragBase == null) { dragBase = base; h.apply(next) } else h.amend(next)
         } else if (dragBase != null) { h.amend(next); dragBase = null } else h.apply(next)

@@ -133,7 +133,7 @@ class EditCompositionEngine(private val context: Context, private val looks: Loo
 
     /** The plan for [project] with its asset files probed ([files]: asset id → local file; imported LUTs are not probed). */
     fun plan(project: EditProject, files: Map<String, File>): RenderPlan =
-        planRender(project, project.assets.filter { it.id in files && it.kind != AssetKind.LUT }.associate { it.id to probe(files.getValue(it.id), it.kind) })
+        planRender(project, project.assets.filter { it.id in files && it.kind != AssetKind.LUT }.associate { it.id to probe(files.getValue(it.id), it.kind) }, paletteIds = looks.paletteIds)
 
     /** The Media3 composition for [plan] (also what the preview plays). */
     fun composition(plan: RenderPlan, files: Map<String, File>): Composition {

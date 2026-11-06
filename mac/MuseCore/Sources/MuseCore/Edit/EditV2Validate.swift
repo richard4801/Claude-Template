@@ -14,15 +14,16 @@ extension EditV2 {
     }
 
     /// The first rule broken, or nil.
-    /// `lookIds` = the bundled looks a "pack:<id>" may name (empty = any).
-    public static func problem(_ p: Project, presets: [FilterPreset] = filters, lookIds: Set<String> = Set(lookPackIds)) -> EditProblem? {
-        do { _ = try validate(p, presets: presets, lookIds: lookIds); return nil } catch let e as EditProblem { return e } catch { return EditProblem("edits", "\(error)") }
+    /// `lookIds` = the bundled looks a "pack:<id>" may name (empty = any); `paletteIds` = the suite looks a
+    /// "palette:<id>" may name (empty = none shipped, so any is refused).
+    public static func problem(_ p: Project, presets: [FilterPreset] = filters, lookIds: Set<String> = Set(lookPackIds), paletteIds: Set<String> = []) -> EditProblem? {
+        do { _ = try validate(p, presets: presets, lookIds: lookIds, paletteIds: paletteIds); return nil } catch let e as EditProblem { return e } catch { return EditProblem("edits", "\(error)") }
     }
 
     /// Checks every rule; throws the first EditProblem. Returns the project's duration.
     @discardableResult
-    public static func validate(_ p: Project, presets: [FilterPreset] = filters, lookIds: Set<String> = Set(lookPackIds)) throws -> Double {
-        var v = Validator(p: p, filterIds: Set(presets.map(\.id)), lookIds: lookIds)
+    public static func validate(_ p: Project, presets: [FilterPreset] = filters, lookIds: Set<String> = Set(lookPackIds), paletteIds: Set<String> = []) throws -> Double {
+        var v = Validator(p: p, filterIds: Set(presets.map(\.id)), lookIds: lookIds, paletteIds: paletteIds)
         return try v.run()
     }
 }
@@ -32,10 +33,13 @@ private struct Validator {
     let p: EditV2.Project
     let filterIds: Set<String>
     let lookIds: Set<String>
+    let paletteIds: Set<String>
     var assets: [String: EditV2.Asset] = [:]
     var assetKinds: [String: EditV2.AssetKind] = [:]
 
-    init(p: EditV2.Project, filterIds: Set<String>, lookIds: Set<String>) { self.p = p; self.filterIds = filterIds; self.lookIds = lookIds }
+    init(p: EditV2.Project, filterIds: Set<String>, lookIds: Set<String>, paletteIds: Set<String>) {
+        self.p = p; self.filterIds = filterIds; self.lookIds = lookIds; self.paletteIds = paletteIds
+    }
 
     func bad(_ f: String, _ m: String) -> EditV2.EditProblem { EditV2.EditProblem(f, m) }
 
@@ -277,7 +281,7 @@ private struct Validator {
             if !filterIds.isEmpty && !filterIds.contains(fl.id) { throw bad("\(f).filter.id", "unknown filter") }
             try num("\(f).filter.amount", fl.amount, 0, 1, optional: false)
         }
-        if let lp = EditV2.lookProblem(look, assetKinds: assetKinds, packIds: lookIds) {
+        if let lp = EditV2.lookProblem(look, assetKinds: assetKinds, packIds: lookIds, paletteIds: paletteIds) {
             throw bad(lp.field.isEmpty ? "\(f).look" : "\(f).look.\(lp.field)", lp.message)
         }
     }

@@ -291,10 +291,11 @@ data class RenderPlan(
 
 /**
  * Plans the render of [project]: [infos] = probed file facts per asset id (assets without an entry use the project's
- * own width/height/duration/hasAudio). Throws [EditProblem] when the project isn't valid.
+ * own width/height/duration/hasAudio); [paletteIds] = the suite looks the app ships. Throws [EditProblem] when the
+ * project isn't valid.
  */
-fun planRender(project: EditProject, infos: Map<String, MediaInfo>, presets: List<FilterPreset> = Presets.FILTERS): RenderPlan {
-    val total = validate(project, presets)
+fun planRender(project: EditProject, infos: Map<String, MediaInfo>, presets: List<FilterPreset> = Presets.FILTERS, paletteIds: Set<String> = emptySet()): RenderPlan {
+    val total = validate(project, presets, paletteIds = paletteIds)
     val p = project
     val cv = p.canvas
     val totalUs = RenderPlan.us(total)

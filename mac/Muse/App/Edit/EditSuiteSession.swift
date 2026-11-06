@@ -660,7 +660,7 @@ final class EditSuiteSession {
 
     /// Problems that stop an export (shown on the sheet).
     var exportProblem: String? {
-        if let p = E.problem(project) { return p.message.prefix(1).uppercased() + p.message.dropFirst() }
+        if let p = E.problem(project, paletteIds: EditV2LookLibrary.shared.paletteIds) { return p.message.prefix(1).uppercased() + p.message.dropFirst() }
         return nil
     }
 

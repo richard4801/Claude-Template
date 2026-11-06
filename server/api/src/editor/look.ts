@@ -278,16 +278,18 @@ export function renderLook(img: Image, look: Look, o: { matrix?: number[] | null
 }
 
 // ------------------------------------------------------------------ validation (called by model.ts validate)
-export function lookProblem(look: unknown, assetKinds: Map<string, string>, packIds: Set<string>): { field: string; message: string } | null {
+/** `lut` is "pack:<id>" (a bundled look), "palette:<id>" (a suite look generated from a palette or film stock) or a lut asset id. */
+export function lookProblem(look: unknown, assetKinds: Map<string, string>, packIds: Set<string>, paletteIds: Set<string> = new Set()): { field: string; message: string } | null {
   if (look === undefined) return null;
   if (!look || typeof look !== 'object' || Array.isArray(look)) return { field: '', message: 'must be an object' };
   const l = look as Look;
   const num = (f: string, v: unknown, lo: number, hi: number, opt = true) =>
     (v === undefined && opt) ? null : (typeof v !== 'number' || !Number.isFinite(v) || v < lo || v > hi) ? { field: f, message: `must be a number from ${lo} to ${hi}` } : null;
   if (l.lut !== undefined) {
-    if (typeof l.lut !== 'string') return { field: 'lut', message: 'must be "pack:<id>" or a lut asset id' };
+    if (typeof l.lut !== 'string') return { field: 'lut', message: 'must be "pack:<id>", "palette:<id>" or a lut asset id' };
     if (l.lut.startsWith('pack:')) { if (packIds.size && !packIds.has(l.lut.slice(5))) return { field: 'lut', message: 'unknown look' }; }
-    else if (assetKinds.get(l.lut) !== 'lut') return { field: 'lut', message: 'must be "pack:<id>" or a lut asset id' };
+    else if (l.lut.startsWith('palette:')) { if (!paletteIds.has(l.lut.slice(8))) return { field: 'lut', message: 'unknown look' }; }
+    else if (assetKinds.get(l.lut) !== 'lut') return { field: 'lut', message: 'must be "pack:<id>", "palette:<id>" or a lut asset id' };
   }
   const simple = num('strength', l.strength, 0, 1) ?? num('lift', l.lift, 0, 1) ?? num('sharpen', l.sharpen, 0, 1) ?? num('chromatic', l.chromatic, 0, 1);
   if (simple) return simple;

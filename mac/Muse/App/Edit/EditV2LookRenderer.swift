@@ -6,7 +6,8 @@ import MuseCore
 // server/api/assets/lookpack/looks), .cube import, the Core Image version of the filter stack used by the compositor,
 // and filter thumbnails drawn with MuseCore's CPU renderer (EditV2.renderLook).
 
-/// The bundled look pack: looks.json and its 17³ .cube files, parsed once.
+/// The bundled look pack: looks.json and its 17³ .cube files, parsed once; and the suite looks generated from palettes
+/// and film stocks (the `palettes` resource folder: palettes.json + cubes, absent = none).
 final class EditV2LookLibrary: @unchecked Sendable {
     typealias E = EditV2
     static let shared = EditV2LookLibrary()
@@ -17,8 +18,43 @@ final class EditV2LookLibrary: @unchecked Sendable {
     private var loaded = false
     private var cachedPack: E.LookPack?
     private var luts: [String: E.Lut] = [:]
+    /// The `palettes` folder in the app bundle (nil when it isn't shipped).
+    let palettesDirectory: URL?
+    private var palettesLoaded = false
+    private var cachedPalettes = E.SuiteLooks.none
 
-    init(directory: URL? = Bundle.main.url(forResource: "looks", withExtension: nil)) { self.directory = directory }
+    init(directory: URL? = Bundle.main.url(forResource: "looks", withExtension: nil),
+         palettesDirectory: URL? = Bundle.main.url(forResource: "palettes", withExtension: nil)) {
+        self.directory = directory
+        self.palettesDirectory = palettesDirectory
+    }
+
+    /// palettes.json (none when the folder or its index is missing).
+    var palettes: E.SuiteLooks {
+        lock.lock()
+        defer { lock.unlock() }
+        if !palettesLoaded {
+            palettesLoaded = true
+            cachedPalettes = E.SuiteLooks.load(directory: palettesDirectory)
+        }
+        return cachedPalettes
+    }
+
+    /// The suite look ids a "palette:<id>" may name (what the app validates projects against).
+    var paletteIds: Set<String> { palettes.ids }
+
+    /// A suite look's LUT (parsed on first use).
+    func lut(paletteId id: String) -> E.Lut? {
+        let key = "palette:" + id
+        lock.lock()
+        if let l = luts[key] { lock.unlock(); return l }
+        lock.unlock()
+        guard let palettesDirectory, let l = try? palettes.lut(id, in: palettesDirectory) else { return nil }
+        lock.lock()
+        luts[key] = l
+        lock.unlock()
+        return l
+    }
 
     /// looks.json (nil when the folder is missing from the bundle).
     var pack: E.LookPack? {
@@ -46,10 +82,11 @@ final class EditV2LookLibrary: @unchecked Sendable {
         return l
     }
 
-    /// The LUT a look's `lut` names: "pack:<id>" from the bundle, else an imported asset's (by asset id).
+    /// The LUT a look's `lut` names: "pack:<id>" / "palette:<id>" from the bundle, else an imported asset's (by asset id).
     func lut(for ref: String?, imported: [String: E.Lut]) -> E.Lut? {
         guard let ref else { return nil }
         if ref.hasPrefix("pack:") { return lut(packId: String(ref.dropFirst(5))) }
+        if ref.hasPrefix("palette:") { return lut(paletteId: String(ref.dropFirst(8))) }
         return imported[ref]
     }
 
