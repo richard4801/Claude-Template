@@ -37,7 +37,7 @@ const merged = (x: Option, into: string): Option => ({ ...x, visible: false, mer
 
 // ---------------------------------------------------------------- rig
 export const BODIES: Option[] = [
-  o('phone', 'Phone', 'Everything sharp, bright HDR', 'a modern smartphone camera, deep focus, natural HDR, true-to-life colour'),
+  o('phone', 'Phone', 'Sharp, bright, everyday', 'a modern smartphone camera, deep focus, natural HDR, true-to-life colour'),
   o('vlog', 'Creator camera', 'Crisp, bright, close', 'a compact creator camera, crisp detail, bright clean creator look'),
   o('cinema_digital', 'Cinema camera', 'Clean, rich skin tones', 'clean digital cinema camera, high-dynamic-range image, rich skin tones'),
   merged(o('super35', 'Super 35 digital', 'Classic cinema depth', 'Super 35 digital cinema sensor, filmic highlight roll-off'), 'cinema_digital'),
