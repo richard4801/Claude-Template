@@ -43,6 +43,13 @@ The owner rejected the camera-bag page (hardware laid out as shelves). Hardware 
 ## Phase 3 (2026-11-06): Claude in the Edit suite
 Spec `plans/claude-editing.md`. Workstream 3: edit sessions plus the editing MCP tools (A), and the chat panel inside the Edit suite. Workstream 2: OAuth on `/mcp` for the claude.ai connector (B), the Mac chat on the owner's local Claude Code (C), the phone chat relayed to the Mac (D), and the shared chat component (E). Owner-only. The chat runs on the owner's Claude subscription; the API key is an opt-in fallback.
 
+**Migration order (strict):** prod's last migration is 0010 (`when` 1793896375493). Reserved:
+- 0011: workstream 2, OAuth and chat threads, `when` 1793929987100.
+- 0012: workstream 3, edit sessions, `when` 1793929987200.
+- 0013: workstream 1, suite locations, `when` 1793929987397.
+
+`migrateWithLock` skips any migration whose `when` is ≤ the last one applied, so the coordinator merges them in that order. 0013 waits until 0011 and 0012 have landed.
+
 ## Status (each session updates its own line)
 - 1 · Video suite UI / **video composer: built on `claude/muse-suite-core`** (2026-11-06; plans/video-composer.md). Server: catalogue visible / mergedInto plus composer subsets, tier minSeconds, Look grading (`look` on estimates, jobs and takes; `gradeLook`; pack twins or swatch LUTs in assets/lookpack/palettes, resolved by workstream 3). Android + Mac: the composer shell (tool card, Auto chips, @/# prompt tokens, input slots with the END FRAME rule, bottom bar / Settings sheet, presets and the collapsed state), one dark picker shell (Camera Setup / Angle / Movement / Directed, Style, Look, Lighting), and tools on the shell (Shot, Character swap, Recast; Talking, UGC ad and Extend show Coming soon). The old Shot builder, camera bag and swap screens are deleted. Server 321 tests green; Android 1115 green + 216 suite Roborazzi; Mac CI green (run 42142683837). Previews are placeholders until workstream 2's loops land; tiles take a `loop` / video as data.
 - 2 · MCP + Blender bridge: phase 2 UI **merged** into `claude/ecstatic-rubin-2egjfb` (merge 8d13154, 2026-11-05; server 314 green, flow SSE test flaky under load on prod too). Directed mode, Direct with Claude, Camera stage and Settings → Connections on Android (811 tests green incl. 44 camera Roborazzi, 4 themes) and Mac (CI green); entry points in ui/screens/camera/CameraEntry.kt and Muse/Views/Camera/CameraEntry.swift (take ours over workstream 1's stubs); server adds GET /v1/connections and session `claude` presence. Waiting on the revised Camera-picker design (showHeader flag then).
