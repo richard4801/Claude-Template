@@ -1,0 +1,319 @@
+// Claude on the owner's plan (plans/claude-editing.md C–D; plans/api.md "Claude on the owner's plan").
+// Wired from BlenderRelayService.configure / stop (workstream 2), so AppStore stays untouched:
+//     ClaudeCodeService.shared.configure(baseURL:isOwner:token:) after sign-in; .stop() on sign-out.
+// Demo mode (no HTTP API) runs a scripted Claude Code stream against FakeClaudeAPI; a member never runs it.
+
+import AppKit
+import Combine
+import Foundation
+import MuseCore
+
+/// The Mac runner for Claude chat: finds Anthropic's Claude Code (signed in to the owner's subscription; MUSE never reads its
+/// credentials), runs each turn headless through ClaudeRelay, mirrors it to the server, heartbeats every 20 s with the install
+/// state, and answers the phone's turns (live `claude` `{op: "turn"}` + catch-up) one at a time per thread.
+@MainActor
+final class ClaudeCodeService: ObservableObject {
+    static let shared = ClaudeCodeService()
+
+    /// What the chat views and the Connections section listen to.
+    enum Feed: Sendable {
+        /// A `claude` live event from the server (echoes of this Mac's own running turns are filtered out).
+        case live(ClaudeLiveEvent)
+        /// This Mac's Claude Code stream for a thread.
+        case local(threadId: String, turnId: String?, ClaudeEvent)
+    }
+
+    @Published private(set) var info = ClaudeCodeInfo()
+    @Published private(set) var executable: String?
+    @Published private(set) var checking = false
+    @Published private(set) var checkedOnce = false
+    @Published private(set) var status: ClaudeStatus?
+    @Published private(set) var relayState = ClaudeRelayState()
+    @Published private(set) var lastError: String?
+    /// Signed in as the owner (or demo mode): the chat can run.
+    @Published private(set) var configured = false
+    @Published private(set) var isDemo = false
+    @Published private(set) var isOwner = false
+
+    private(set) var api: (any ClaudeAPI)?
+    private(set) var baseURL: URL?
+    private var relay: ClaudeRelay?
+    private var loops: [Task<Void, Never>] = []
+    private var pollTask: Task<Void, Never>?
+    private var listeners: [UUID: AsyncStream<Feed>.Continuation] = [:]
+    private var tokens = ClaudeTokenCache()
+    private var activeObserver: NSObjectProtocol?
+    /// Phone turns this Mac ran: their `{op: "event"}` echoes from the server are dropped (the local stream showed them).
+    private var ranTurns: Set<String> = []
+    private static let demoAPI = FakeClaudeAPI()
+
+    init() {}
+
+    // MARK: Wiring
+
+    /// After sign-in / reconnect. A different server restarts it; a member stops it; no server + owner = demo mode.
+    func configure(baseURL: URL?, isOwner: Bool, token: @escaping @Sendable () -> String?) {
+        let demo = baseURL == nil
+        if configured, baseURL == self.baseURL, isOwner == self.isOwner, demo == isDemo { return }
+        stop()
+        self.isOwner = isOwner
+        guard isOwner else { return }
+        self.baseURL = baseURL
+        isDemo = demo
+        if let baseURL {
+            api = HTTPClaudeAPI(baseURL: baseURL, token: token)
+        } else {
+            api = Self.demoAPI
+        }
+        configured = true
+        start()
+    }
+
+    func stop() {
+        loops.forEach { $0.cancel() }
+        loops = []
+        pollTask?.cancel()
+        pollTask = nil
+        if let relay { Task { await relay.close() } }
+        relay = nil
+        api = nil
+        status = nil
+        relayState = ClaudeRelayState()
+        configured = false
+        tokens = ClaudeTokenCache()
+        if let o = activeObserver { NotificationCenter.default.removeObserver(o) }
+        activeObserver = nil
+    }
+
+    private func start() {
+        guard let api else { return }
+        // Events from the relay's background tasks arrive here in order through one stream.
+        let (events, sink) = AsyncStream<(String, String?, ClaudeEvent)>.makeStream(bufferingPolicy: .unbounded)
+        let (states, stateSink) = AsyncStream<ClaudeRelayState>.makeStream(bufferingPolicy: .bufferingNewest(8))
+        let relay = ClaudeRelay(api: api, makeRunner: { [weak self] in await self?.makeRunner() },
+                                blender: { [weak self] in await self?.blenderServer() },
+                                onEvent: { sink.yield(($0, $1, $2)) }, onState: { stateSink.yield($0) })
+        self.relay = relay
+        loops = [
+            Task { [weak self] in
+                for await (tid, turn, e) in events {
+                    guard let self else { break }
+                    if let turn { self.ranTurns.insert(turn) }
+                    if case .done(_, _, let model?) = e, model != self.info.model { self.info.model = model }
+                    self.broadcast(.local(threadId: tid, turnId: turn, e))
+                }
+            },
+            Task { [weak self] in
+                for await s in states { self?.relayState = s }
+            },
+            Task { [weak self] in await self?.listen(api, relay) },
+            Task { [weak self] in
+                await self?.recheck()
+                if self?.isDemo == false { await self?.heartbeatLoop(api, relay) }
+            },
+        ]
+        Task { await refreshStatus() }
+        activeObserver = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in await self?.recheck() }
+        }
+    }
+
+    // MARK: Install and sign-in
+
+    private var environment: [String: String] {
+        ClaudeCommand.environment(ProcessInfo.processInfo.environment, executable: executable ?? "/usr/local/bin/claude", home: NSHomeDirectory())
+    }
+
+    /// `claude --version` + `claude auth status` (Re-check, app activation, after Install / Sign in).
+    func recheck() async {
+        if isDemo {
+            info = ClaudeCodeInfo(installed: true, signedIn: true, version: "demo", model: info.model ?? "claude-sonnet-demo")
+            checkedOnce = true
+            return
+        }
+        guard !checking else { return }
+        checking = true
+        defer {
+            checking = false
+            checkedOnce = true
+        }
+        let exe = ClaudeCodeLocator.find(home: NSHomeDirectory(), path: ProcessInfo.processInfo.environment["PATH"])
+        executable = exe
+        var next = await ClaudeShell.probe(executable: exe, environment: environment)
+        next.model = info.model
+        let changed = next.installed != info.installed || next.signedIn != info.signedIn
+        info = next
+        if changed, let api, configured { _ = try? await api.heartbeat(info) }
+    }
+
+    /// Install runs Anthropic's official installer in a Terminal window the owner sees.
+    func openInstall() { openTerminal(name: "Install Claude Code.command", script: ClaudeCodeLocator.installScript()) }
+
+    /// Sign in opens Claude's own sign-in (`claude auth login`) in Terminal.
+    func openSignIn() {
+        guard let exe = executable ?? ClaudeCodeLocator.find(home: NSHomeDirectory(), path: ProcessInfo.processInfo.environment["PATH"]) else {
+            openInstall()
+            return
+        }
+        openTerminal(name: "Sign in to Claude.command", script: ClaudeCodeLocator.signInScript(executable: exe))
+    }
+
+    private func openTerminal(name: String, script: String) {
+        let dir = ClaudeTurnRunner.defaultRoot
+        let file = dir.appendingPathComponent(name)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try Data(script.utf8).write(to: file)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            p.arguments = ["-a", "Terminal", file.path]
+            try p.run()
+            lastError = nil
+        } catch {
+            lastError = "Couldn't open Terminal: \(error.localizedDescription)"
+            return
+        }
+        // Watch for the change for a few minutes (the app may stay frontmost).
+        pollTask?.cancel()
+        let before = info
+        pollTask = Task { [weak self] in
+            for _ in 0..<45 {
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                guard let self, !Task.isCancelled else { return }
+                await self.recheck()
+                if self.info.installed != before.installed || self.info.signedIn != before.signedIn, self.info.ready { return }
+            }
+        }
+    }
+
+    // MARK: Server
+
+    func refreshStatus() async {
+        guard let api else { return }
+        if let s = try? await api.status() { status = s }
+    }
+
+    func setApiFallback(_ on: Bool) async {
+        guard let api else { return }
+        do {
+            status = try await api.setApiFallback(on)
+            lastError = nil
+        } catch {
+            lastError = (error as? ApiError)?.message ?? error.localizedDescription
+        }
+    }
+
+    private func heartbeatLoop(_ api: any ClaudeAPI, _ relay: ClaudeRelay) async {
+        while !Task.isCancelled {
+            do {
+                let reply = try await api.heartbeat(info)
+                await relay.offer(reply.pending)
+            } catch {
+                if !Task.isCancelled { lastError = "Heartbeat: \((error as? ApiError)?.message ?? error.localizedDescription)" }
+            }
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
+        }
+    }
+
+    private func listen(_ api: any ClaudeAPI, _ relay: ClaudeRelay) async {
+        for await e in api.events() {
+            if Task.isCancelled { break }
+            switch e {
+            case .connected:
+                if let turns = try? await api.pendingTurns() { await relay.offer(turns) }
+                await refreshStatus()
+            case .turn(let t):
+                await relay.offer([t])
+            case .stop(let id):
+                await relay.stop(turnId: id)
+            case .status(let s):
+                status = s
+            case .event(let tid, let turnId, _):
+                // Only this Mac runs Claude Code: its own turns (no turnId) and the phone turns it ran come back from the
+                // server too, and the local stream already showed them (the echo can land after the run has ended).
+                if relayState.running[tid] != nil || turnId == nil || ranTurns.contains(turnId ?? "") { continue }
+            default:
+                break
+            }
+            broadcast(.live(e))
+        }
+    }
+
+    // MARK: Turns
+
+    private func makeRunner() -> ClaudeTurnRunner? {
+        guard let api, info.ready else { return nil }
+        if isDemo {
+            return ClaudeTurnRunner(api: api, launcher: ClaudeScriptedLauncher(delay: 0.12), tokens: tokens, executable: "claude",
+                                    root: FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-demo-claude"), environment: [:])
+        }
+        guard let exe = executable else { return nil }
+        return ClaudeTurnRunner(api: api, tokens: tokens, executable: exe, environment: environment)
+    }
+
+    /// Blender's MCP server joins the run while the Blender relay is on (and uv is installed).
+    private func blenderServer() -> ClaudeCommand.Blender? {
+        guard !isDemo, BlenderRelayService.shared.running,
+              let uvx = ClaudeCodeLocator.findUvx(home: NSHomeDirectory(), path: ProcessInfo.processInfo.environment["PATH"]) else { return nil }
+        return ClaudeCommand.Blender(uvx: uvx)
+    }
+
+    /// Opens (or creates) the thread of a camera or edit session.
+    func openThread(contextKind: String, contextId: String) async throws -> ClaudeThreadDetail {
+        guard let api else { throw ApiError("offline", "Sign in to your MUSE server first") }
+        let t = try await api.thread(contextKind: contextKind, contextId: contextId)
+        let d = try await api.threadDetail(t.id)
+        await relay?.remember(threadId: t.id, claudeSessionId: d.thread.claudeSessionId)
+        return d
+    }
+
+    func threadDetail(_ id: String) async throws -> ClaudeThreadDetail {
+        guard let api else { throw ApiError("offline", "Sign in to your MUSE server first") }
+        return try await api.threadDetail(id)
+    }
+
+    /// A turn typed on this Mac (queued behind the thread's running turn).
+    func send(threadId: String, text: String) {
+        guard let relay else { return }
+        Task { await relay.submit(threadId: threadId, text: text) }
+    }
+
+    /// Stop: this Mac's run of the thread, or (a turn running elsewhere) ask the server to stop it.
+    func stop(threadId: String, remoteTurnId: String?) {
+        if relayState.running[threadId] != nil {
+            Task { await relay?.stop(threadId: threadId) }
+        } else if let id = remoteTurnId, let api {
+            Task { try? await api.stopTurn(id) }
+        }
+    }
+
+    func isRunning(threadId: String) -> Bool { relayState.running[threadId] != nil }
+    func isAnsweringPhone(threadId: String) -> Bool { relayState.running[threadId]?.fromPhone == true }
+    var answeringFromPhone: Bool { relayState.answeringFromPhone }
+
+    /// The studio API key fallback (camera threads only): ChatEvents like the camera chat.
+    func apiTurn(threadId: String, text: String) -> AsyncThrowingStream<ChatEvent, Error>? { api?.apiTurn(threadId: threadId, text: text) }
+
+    /// A server link ("/uploads/…") made absolute; data: and http(s) URLs as they are.
+    func resolve(_ url: String) -> String {
+        guard url.hasPrefix("/"), let base = baseURL else { return url }
+        var s = base.absoluteString
+        if s.hasSuffix("/") { s.removeLast() }
+        return s + url
+    }
+
+    // MARK: Feed
+
+    func feed() -> AsyncStream<Feed> {
+        AsyncStream(bufferingPolicy: .bufferingNewest(1024)) { cont in
+            let id = UUID()
+            listeners[id] = cont
+            cont.onTermination = { [weak self] _ in Task { @MainActor in self?.listeners[id] = nil } }
+        }
+    }
+
+    private func broadcast(_ f: Feed) {
+        for l in listeners.values { l.yield(f) }
+    }
+}

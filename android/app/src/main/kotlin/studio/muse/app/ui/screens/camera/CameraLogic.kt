@@ -249,7 +249,6 @@ object SessionText {
     fun claudeRow(s: CameraSession, conn: Connections?, busy: Boolean, now: Long): StatusRow = when {
         busy || s.claude.chatBusy -> StatusRow(Dot.WARN, "Claude session", "Working…")
         s.claude.appLastSeenAt?.let { now - it < FIVE_MIN } == true -> StatusRow(Dot.GOOD, "Claude session", "Connected · your Claude app")
-        conn?.inAppChat == false -> StatusRow(Dot.OFF, "Claude session", "Not set up")
         else -> StatusRow(Dot.GOOD, "Claude session", "In MUSE (this chat)")
     }
 

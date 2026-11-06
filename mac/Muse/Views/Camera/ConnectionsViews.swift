@@ -1,7 +1,8 @@
 import MuseCore
 import SwiftUI
 
-/// Settings → Connections (owner): Claude & MCP (URL, tokens, snippets), the Blender relay on this Mac, and the in-app chat.
+/// Settings → Connections (owner): Claude & MCP (URL, tokens, snippets), Claude on your plan, Add MUSE to Claude, the Blender
+/// relay on this Mac, and the in-app chat.
 struct ConnectionsContent: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
@@ -19,6 +20,8 @@ struct ConnectionsContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             claudeSection
+            // Claude on the owner's plan (Claude Code on this Mac, the API key fallback) and "Add MUSE to Claude".
+            ClaudeConnectionsSection()
             blenderSection
             chatSection
         }

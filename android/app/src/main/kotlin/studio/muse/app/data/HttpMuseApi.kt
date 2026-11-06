@@ -212,6 +212,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
 
     // Workstream 2: camera sessions
     override val camera: CameraApi by lazy { HttpCameraApi(base, client, json) }
+    override val claude: ClaudeApi by lazy { HttpClaudeApi(base, client, json) }
 
     /** Turns `{"error": "...", "code": "..."}` bodies into [ApiException]. The UI words the codes (see [ErrorText]). */
     private suspend fun <T> call(block: suspend MuseService.() -> T): T = callOn(svc, block)
@@ -471,6 +472,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
                 trySend(ApiEvent(ApiEvent.CONNECTED))
             }
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
+                // Workstream 2: `claude` events are read apart (their fields clash with ApiEvent's).
+                claudeLiveOf(json, data)?.let { l -> trySend(ApiEvent("claude", op = l.op, claude = l.absolute(base))); return }
                 runCatching { json.decodeFromString(ApiEvent.serializer(), data) }.onSuccess { e ->
                     trySend(e.copy(lora = e.lora?.abs(), post = e.post?.abs(), job = e.job?.abs(), model = e.model?.abs(), outfit = e.outfit?.abs(), takes = e.takes.map { it.abs() },
                         tool = e.tool?.abs(), take = e.take?.abs(), template = e.template?.abs(), clip = e.clip?.let { c -> c.copy(thumb = c.thumb?.abs()) }))

@@ -162,6 +162,8 @@ interface MuseApi {
 
     // Workstream 2: camera sessions (plans/api.md "MCP & camera sessions"), owner only. See CameraApi.kt.
     val camera: CameraApi get() = CameraApi.Unsupported
+    /** Claude on the owner's plan: chat threads relayed to the Mac's Claude Code (plans/api.md "Claude on the owner's plan"). See ClaudeApi.kt. */
+    val claude: ClaudeApi get() = ClaudeApi.Unsupported
 
     // Edit suite (workstream 3): AI helpers and v2 versions (plans/api.md "Editor v2"). Defaults: not available.
     /** What a helper would cost (free ones say so). */

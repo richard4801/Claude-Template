@@ -4,23 +4,25 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Ctx } from '../ctx.js';
 import type { CameraService } from '../camera/service.js';
 import { authenticatePat } from '../mcp/tokens.js';
+import { authenticateAccessToken, registerOAuthRoutes, resourceOf, SCOPES } from '../mcp/oauth.js';
 import { handleRpc, PROTOCOL_VERSIONS, rpcError } from '../mcp/server.js';
 
 export async function registerMcpRoutes(app: FastifyInstance, ctx: Ctx, camera: CameraService) {
   if (!ctx.config.MCP_ENABLED) return;
+  await registerOAuthRoutes(app, ctx);
   const metadataUrl = () => `${ctx.publicBase()}/.well-known/oauth-protected-resource`;
 
   app.get('/.well-known/oauth-protected-resource', { config: { public: true } }, async () => ({
-    resource: `${ctx.publicBase()}/mcp`,
-    // OAuth 2.1 is the follow-up (plans/mcp-bridge.md); today the owner pastes a personal access token.
-    authorization_servers: [],
+    resource: resourceOf(ctx),
+    authorization_servers: [ctx.publicBase()],
+    scopes_supported: [...SCOPES],
     bearer_methods_supported: ['header'],
     resource_name: 'MUSE',
     resource_documentation: 'https://github.com/richard4801/claude-template/blob/main/plans/mcp-bridge.md',
   }));
 
   const unauthorized = (reply: FastifyReply, message: string) => reply.status(401)
-    .header('www-authenticate', `Bearer resource_metadata="${metadataUrl()}"`)
+    .header('www-authenticate', `Bearer resource_metadata="${metadataUrl()}", scope="${SCOPES.join(' ')}"`)
     .send(rpcError(null, -32001, message));
 
   const handler = async (req: FastifyRequest, reply: FastifyReply) => {
@@ -30,9 +32,13 @@ export async function registerMcpRoutes(app: FastifyInstance, ctx: Ctx, camera: 
     const pv = req.headers['mcp-protocol-version'];
     if (typeof pv === 'string' && !PROTOCOL_VERSIONS.includes(pv)) return reply.status(400).send(rpcError(null, -32000, `Unsupported MCP-Protocol-Version ${pv}`));
     const h = req.headers.authorization;
-    const user = await authenticatePat(ctx, h?.startsWith('Bearer ') ? h.slice(7).trim() : null);
-    if (!user) return unauthorized(reply, 'A MUSE owner access token is required (MUSE → Settings → Claude & MCP)');
-    const res = await handleRpc(ctx, camera, user, req.body);
+    const token = h?.startsWith('Bearer ') ? h.slice(7).trim() : '';
+    // Personal access tokens have every scope; OAuth tokens only theirs, and only for this audience.
+    const pat = await authenticatePat(ctx, token);
+    const oauth = pat ? null : await authenticateAccessToken(ctx, token, resourceOf(ctx));
+    const user = pat ?? oauth?.user;
+    if (!user) return unauthorized(reply, 'Connect with your MUSE owner account (OAuth) or a MUSE access token (Settings → Connections)');
+    const res = await handleRpc(ctx, camera, user, req.body, oauth?.scopes);
     if (!res) return reply.status(202).send();
     return reply.header('content-type', 'application/json').send(res);
   };

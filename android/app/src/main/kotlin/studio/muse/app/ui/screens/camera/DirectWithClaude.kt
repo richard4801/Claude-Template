@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -22,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,6 +50,9 @@ import studio.muse.app.ui.components.Pill
 import studio.muse.app.ui.components.T
 import studio.muse.app.ui.components.TopBar
 import studio.muse.app.ui.components.press
+import studio.muse.app.ui.screens.claude.ClaudeChat
+import studio.muse.app.ui.screens.claude.ClaudeChatStore
+import studio.muse.app.ui.screens.claude.rememberClaudeChatStore
 import studio.muse.app.ui.theme.muse
 
 /** What the chat screens can do (the store's actions, or test stubs). */
@@ -59,17 +65,19 @@ class ChatActions(
     val use: (() -> Unit)? = null,
     val useLabel: String = "Use for Shot 01",
     val dismissNotice: () -> Unit = {},
+    /** The session's Claude thread (held by the screen so the pane's Re-render goes through it); null: the chat makes its own. */
+    val chat: ClaudeChatStore? = null,
 )
 
 /**
- * Phone M5 · Direct with Claude: session card, status, read-only plan, the last exchange or the working strip, the guides
- * row and the composer. Blender runs on the Mac, never on the phone.
+ * Phone M5 · Direct with Claude: session card, status, read-only plan and guides on top (scrolls, at most 45% of the height),
+ * then the Claude chat on the owner's plan (claude-editing.md part E). Blender runs on the Mac, never on the phone.
  */
 @Composable
 fun DirectWithClaudeContent(ui: CameraUi, now: Long, actions: ChatActions) {
     val m = muse
     val s = ui.session
-    Column(Modifier.fillMaxSize().background(m.t.bg).imePadding()) {
+    Column(Modifier.fillMaxSize().background(m.t.bg)) {
         TopBar("Direct with Claude", onBack = actions.back, right = {
             MoreMenu(listOf(
                 MenuItem("check", "Copy session id") { s?.let { actions.copyId(it.id) } },
@@ -82,22 +90,25 @@ fun DirectWithClaudeContent(ui: CameraUi, now: Long, actions: ChatActions) {
             }
             return@Column
         }
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            SessionHeader(s)
-            Column(Modifier.fillMaxWidth().camBox().padding(horizontal = 12.dp, vertical = 6.dp)) {
-                SessionText.rows(s, ui.connections, ui.turn != null, now).forEach { StatusLine(it) }
+        val chat = actions.chat ?: rememberClaudeChatStore("camera", s.id)
+        val chatUi by chat.ui.collectAsState()
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val top = maxHeight * .45f
+            Column(Modifier.fillMaxSize()) {
+                Column(Modifier.fillMaxWidth().heightIn(max = top).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SessionHeader(s)
+                    Column(Modifier.fillMaxWidth().camBox().padding(horizontal = 12.dp, vertical = 6.dp)) {
+                        SessionText.rows(s, ui.connections, chatUi.busy, now).forEach { StatusLine(it) }
+                    }
+                    PlanView(s, ui.playhead, Modifier.fillMaxWidth().height(160.dp).camBox(), compact = true)
+                    if (SessionText.hasGuides(s)) GuidesRow(s, actions)
+                    T(SessionText.footer(s), m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+                }
+                ClaudeChat(chat, "", Modifier.weight(1f).fillMaxWidth().drawBehind { drawLine(m.t.line, Offset(0f, 0f), Offset(size.width, 0f), 1f) },
+                    onOpenConnections = actions.openConnections)
             }
-            PlanView(s, ui.playhead, Modifier.fillMaxWidth().height(196.dp).camBox(), compact = true)
-            val turns = Transcript.turns(ui.messages, ui.sentHere)
-            val lastYou = ui.turn?.message ?: turns.filterIsInstance<Turn.You>().lastOrNull()?.text
-            if (lastYou != null) YouBubble(lastYou, null, 290.dp)
-            val t = ui.turn
-            if (t != null) WorkingBlock(t, compact = true)
-            else turns.lastOrNull()?.let { if (it is Turn.Claude) ClaudeBlock(it) }
-            ui.notice?.let { NoticeView(it, actions) }
-            if (SessionText.hasGuides(s)) GuidesRow(s, actions)
         }
-        Composer(placeholder = "Direct the shot…", busy = ui.busy, footer = SessionText.footer(s), onSend = actions.send, horizontal = 16.dp)
     }
 }
 
@@ -195,11 +206,13 @@ fun Composer(placeholder: String, busy: Boolean, footer: String?, onSend: (Strin
 
 // ---------------------------------------------------------------- the panel (wide windows, D6 right column)
 
-/** D6's right column: header with LIVE and the status rows, the whole transcript, the guides card, the working strip, the composer. */
+/** D6's right column: header with LIVE and the status rows, the guides card, then the Claude chat on the owner's plan. */
 @Composable
 fun ChatPanel(ui: CameraUi, now: Long, actions: ChatActions, modifier: Modifier = Modifier) {
     val m = muse
     val s = ui.session ?: return
+    val chat = actions.chat ?: rememberClaudeChatStore("camera", s.id)
+    val chatUi by chat.ui.collectAsState()
     Column(modifier.fillMaxHeight().background(m.t.bg).drawBehind { drawLine(m.t.line, Offset(0f, 0f), Offset(0f, size.height), 1f) }) {
         Column(Modifier.fillMaxWidth().drawBehind { drawLine(m.t.line, Offset(0f, size.height), Offset(size.width, size.height), 1f) }.padding(horizontal = 18.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -207,29 +220,10 @@ fun ChatPanel(ui: CameraUi, now: Long, actions: ChatActions, modifier: Modifier 
                 T("Direct with Claude", m.type.h3, m.t.ink, Modifier.weight(1f), maxLines = 1)
                 LivePill(ui.live)
             }
-            SessionText.rows(s, ui.connections, ui.turn != null, now).forEach { StatusLine(it) }
+            SessionText.rows(s, ui.connections, chatUi.busy, now).forEach { StatusLine(it) }
         }
-        val scroll = rememberScrollState()
-        LaunchedEffect(ui.messages.size, ui.turn?.text?.length) { scroll.animateScrollTo(scroll.maxValue) }
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll).padding(horizontal = 18.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            val turns = Transcript.turns(ui.messages, ui.sentHere)
-            if (turns.isEmpty() && ui.turn == null) T("Tell Claude what happens in the shot: who moves where, when, and how the camera moves.", m.type.tiny, m.t.muted)
-            turns.forEach { t ->
-                when (t) {
-                    is Turn.You -> YouBubble(t.text, t.label, 300.dp)
-                    is Turn.Claude -> ClaudeBlock(t)
-                }
-            }
-            ui.turn?.let { if (turns.filterIsInstance<Turn.You>().lastOrNull()?.text != it.message) YouBubble(it.message, "YOU · PHONE", 300.dp) }
-            if (SessionText.hasGuides(s)) GuidesCard(s, actions)
-            ui.notice?.let { NoticeView(it, actions) }
-        }
-        ui.turn?.let { t ->
-            Box(Modifier.fillMaxWidth().background(m.t.surface2).drawBehind { drawLine(m.t.line, Offset(0f, 0f), Offset(size.width, 0f), 1f) }.padding(horizontal = 18.dp, vertical = 10.dp)) {
-                WorkingBlock(t, compact = false)
-            }
-        }
-        Composer(placeholder = "Direct the shot… “lower the camera, lens 50”", busy = ui.busy, footer = SessionText.footer(s), onSend = actions.send, horizontal = 18.dp)
+        if (SessionText.hasGuides(s)) Box(Modifier.padding(horizontal = 18.dp, vertical = 12.dp)) { GuidesCard(s, actions) }
+        ClaudeChat(chat, "", Modifier.weight(1f).fillMaxWidth(), onOpenConnections = actions.openConnections)
     }
 }
 
