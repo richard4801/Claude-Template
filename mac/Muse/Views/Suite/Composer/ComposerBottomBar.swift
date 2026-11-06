@@ -20,19 +20,19 @@ struct ComposerBottomBar: View {
         // the row is still too wide the pills tighten, "How is this priced?" becomes a "?" and then the pills scroll.
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
-                pills(spacing: 8)
+                pills(spacing: 8, compact: false)
                 Spacer(minLength: 8)
                 PricingLink(estimate: estimate)
                 generateButton
             }
             HStack(spacing: 6) {
-                pills(spacing: 5)
+                pills(spacing: 5, compact: true)
                 Spacer(minLength: 6)
                 PricingLink(estimate: estimate, compact: true)
                 generateButton
             }
             HStack(spacing: 6) {
-                ScrollView(.horizontal, showsIndicators: false) { pills(spacing: 5).padding(.vertical, 2) }
+                ScrollView(.horizontal, showsIndicators: false) { pills(spacing: 5, compact: true).padding(.vertical, 2) }
                 PricingLink(estimate: estimate, compact: true)
                 generateButton
             }
@@ -47,7 +47,8 @@ struct ComposerBottomBar: View {
             .layoutPriority(2)
     }
 
-    @ViewBuilder private func pills(spacing: CGFloat) -> some View {
+    /// `compact`: the owner's Engine pill shows only its icon (the engine is its tooltip).
+    @ViewBuilder private func pills(spacing: CGFloat, compact: Bool) -> some View {
         HStack(spacing: spacing) {
             qualityPill
             if isSwap {
@@ -70,7 +71,7 @@ struct ComposerBottomBar: View {
                 listPill("speaking", icon: "text.bubble", value: store.suite.composer.speaking.label, help: "Speaking",
                          options: ComposerSpeaking.allCases.map { ($0.label, $0) }, selected: store.suite.composer.speaking) { store.suite.composer.speaking = $0 }
                 takesPill
-                if store.isOwner { enginePill }
+                if store.isOwner { enginePill(compact: compact) }
             }
         }
         .fixedSize(horizontal: true, vertical: false)
@@ -84,7 +85,16 @@ struct ComposerBottomBar: View {
 
     private var generateLabel: String {
         if isSwap, let q = store.suite.swap.addOn { return "Generate · \(Pricing.money(Pricing.totalCost(store.spec(for: q))))" }
+        if pricing { return "Generate · Pricing…" }
         return price.buttonText
+    }
+
+    /// No price yet and no reason why: the estimate is on its way (Extend without a video has no price to wait for).
+    private var pricing: Bool {
+        guard estimate == nil, store.suite.enabled else { return false }
+        if isSwap { return store.suite.swapError == nil && store.swapRequest != nil }
+        if tool == .extend && store.suite.composer.extendRequest() == nil { return false }
+        return store.suite.estimateError == nil
     }
 
     private var canGenerate: Bool {
@@ -179,9 +189,9 @@ struct ComposerBottomBar: View {
             store.suite.swap.addOn = SwapAddOns.toggle(store.suite.swap.addOn, p)
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: on ? "checkmark" : "plus").font(.system(size: 10, weight: .bold))
+                if !on { Image(systemName: "plus").font(.system(size: 10, weight: .bold)) }
                 Text(p.label).font(t.body(12.5, .medium))
-                Text(p.priceText).font(t.mono(11)).foregroundStyle(on ? t.ink : t.muted)
+                Text(p.priceText).font(t.mono(11)).foregroundStyle(t.muted)
             }
             .foregroundStyle(t.ink)
             .padding(.horizontal, 10).frame(height: 34)
@@ -207,13 +217,13 @@ struct ComposerBottomBar: View {
     private var swapTake: Take? { store.takes(of: store.swapJob).first { $0.canUpscale } }
 
     /// Owner only: pin this shot's engine (one of the quality's models), "Engine · Auto" = the ladder.
-    private var enginePill: some View {
+    private func enginePill(compact: Bool) -> some View {
         let tier = store.suite.catalog?.tier(store.suite.composer.quality)
         let models = ComposerEngines.options(tier)
         let label = ComposerEngines.label(store.suite.composer, tier)
-        return pill("engine", help: "Engine") {
+        return pill("engine", help: label) {
             Image(systemName: "server.rack")
-            Text(label.replacingOccurrences(of: "Engine · ", with: "")).font(t.body(12.5, .medium))
+            if !compact { Text(label.replacingOccurrences(of: "Engine · ", with: "")).font(t.body(12.5, .medium)) }
         } popover: {
             VStack(alignment: .leading, spacing: 0) {
                 Text("ENGINE · OWNER").font(t.mono(10.5, .medium)).tracking(1.2).foregroundStyle(t.muted).padding(.horizontal, 14).padding(.vertical, 10)
@@ -400,7 +410,7 @@ struct PricingLink: View {
             if compact {
                 Image(systemName: "questionmark.circle").font(.system(size: 15)).foregroundStyle(t.muted).frame(width: 26, height: 34).contentShape(Rectangle())
             } else {
-                Text("How is this priced?").font(t.body(12)).foregroundStyle(t.ink).underline(color: t.line).lineLimit(1).fixedSize()
+                Text("How is this priced?").font(t.body(12)).foregroundStyle(t.ink).underline(color: t.muted).lineLimit(1).fixedSize()
             }
         }
         .buttonStyle(.plain)
