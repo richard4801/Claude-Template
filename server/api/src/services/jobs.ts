@@ -342,7 +342,8 @@ export class JobService {
       label: isSuite(u) ? u.request.takeLabel ?? u.request.engineLabel : P.takeLabel(u.request), engineLabel: isSuite(u) ? u.request.engineLabel : P.engineLabel(u.request), cost: (o.actualCostUsd ?? u.cost) / n, seed: u.seed + i, status: 'test' as const,
       thumb: (outputs.find(x => x.name === `take_${i + 1}.mp4`)?.thumb as ImageRef | undefined) ?? (angles.length ? angles[i % angles.length]! : u.thumb), prompt: u.prompt,
       mediaKey: (outputs.find(x => x.name === `take_${i + 1}.mp4`)?.key as string | undefined) ?? null,
-      media: mediaOf(outputs.find(x => x.name === `take_${i + 1}.mp4`)), createdAt: now,
+      // AI suite (workstream 1): a suite take keeps the Look it is graded with (the Edit suite opens with it applied).
+      media: withLook(mediaOf(outputs.find(x => x.name === `take_${i + 1}.mp4`)), isSuite(u) ? (u.request as { look?: unknown }).look : null), createdAt: now,
     }));
     const inserted = await this.ctx.db.insert(takes).values(rows).returning();
     this.emitJob(u, { takes: inserted.map(t => takeView(t, this.ctx.config.PUBLIC_URL)) });
@@ -521,6 +522,11 @@ export function replicateReferencesFor(m: typeof models.$inferSelect, o?: typeof
   return out;
 }
 
+/** AI suite (workstream 1): `media.look` = the suite take's Look {id, kind, label, lut} (absent when grading was off). */
+function withLook(m: Record<string, unknown> | null, look: unknown) {
+  return look && typeof look === 'object' ? { ...(m ?? {}), look } : m;
+}
+
 function mediaOf(o?: Record<string, unknown>) {
   if (!o) return null;
   const m: Record<string, unknown> = {};
@@ -546,6 +552,7 @@ export function takeView(t: typeof takes.$inferSelect, publicUrl?: string, viewe
     templateId: t.templateId, templateName: t.templateName, shuffleSeed: t.shuffleSeed, variation: shown.variation, refs: t.refs?.length ? t.refs : undefined,
     videoUrl: (t.kind === 'take' || (t.kind as string) === 'edit') && t.mediaKey ? `${publicUrl ?? ''}/uploads/${t.mediaKey}` : undefined,
     durationSec: t.media?.durationSec, width: t.media?.width, height: t.media?.height,
+    look: t.kind === 'take' ? t.media?.look : undefined, // AI suite (workstream 1): a suite take's Look
     // Edited versions (plans/api.md "Video editor"): the source take and the edit list live in `media`.
     ...((t.kind as string) === 'edit' ? { parentTakeId: t.media?.parentTakeId, edits: t.media?.edits, fps: t.media?.fps, ...(t.media?.aiLabel ? { aiLabel: true } : {}) /* Edit suite (workstream 3) */ } : {}),
   }) as Record<string, unknown> & { jobId?: string | null };

@@ -29,11 +29,13 @@ import studio.muse.app.ui.screens.suite.RecastDraft
 import studio.muse.app.ui.screens.suite.RecastPerson
 import studio.muse.app.ui.screens.suite.StoryShot
 import studio.muse.app.ui.screens.suite.Storyboard
+import studio.muse.app.ui.screens.suite.composer.ComposerDraft
+import studio.muse.app.ui.screens.suite.composer.ComposerTool
 
 /**
  * The Video suite in all four themes on a 390 dp and a 360 dp phone: the hub (M1), suite off for the owner and a member,
- * Character swap and Recast (M6), Storyboard (M7), the result states (M8 / D10: ready, rendering, in line, failed) and
- * the owner's Engines (D9). The Shot builder and camera bag are paused for a redesign and not recorded.
+ * Character swap and Recast (the composer on those tools), Storyboard (M7), the result states (M8 / D10: ready, rendering,
+ * in line, failed) and the owner's Engines (D9). The composer itself is in SuiteComposerScreenshotTest.
  * PNGs: app/build/outputs/roborazzi/suite_<theme>_<screen>_<width>.png.
  */
 @RunWith(ParameterizedRobolectricTestRunner::class)
@@ -95,13 +97,20 @@ class SuiteScreenshotTest(private val theme: String, private val screen: String,
                         StoryShot("s5", "Selfie review, close", "Demo gives the café a 10/10.", "selfie", 5),
                     ))
                 }
-                "swap" -> c.suite.recast.value = RecastDraft(SampleData.SAMPLE_CLIP, listOf(RecastPerson("center", SampleData.DEMO)), quality = "standard")
-                "swap_recast" -> c.suite.recast.value = RecastDraft(SampleData.SAMPLE_CLIP, listOf(RecastPerson("left", SampleData.DEMO, speaking = true), RecastPerson("right", SampleData.NOOR, speaking = false)), quality = "hd")
+                "swap" -> {
+                    c.suite.recast.value = RecastDraft(SampleData.SAMPLE_CLIP, listOf(RecastPerson("center", SampleData.DEMO)))
+                    c.suite.composer.value = ComposerDraft(tool = ComposerTool.SWAP, modelId = SampleData.DEMO, outfitId = SampleData.GREEN, quality = "standard")
+                }
+                "swap_recast" -> {
+                    c.suite.recast.value = RecastDraft(SampleData.SAMPLE_CLIP, listOf(RecastPerson("left", SampleData.DEMO, speaking = true), RecastPerson("right", SampleData.NOOR, speaking = false)))
+                    c.suite.composer.value = ComposerDraft(tool = ComposerTool.RECAST, quality = "hd")
+                }
             }
         }
         val route = when {
             screen.startsWith("hub") -> Routes.SUITE
-            screen.startsWith("swap") -> Routes.SUITE_SWAP
+            screen == "swap" -> Routes.SUITE_SWAP
+            screen == "swap_recast" -> Routes.suiteCompose("recast")
             screen == "storyboard" -> Routes.SUITE_STORYBOARD
             screen == "engines" -> Routes.SUITE_ENGINES
             else -> Routes.suiteTake("js")

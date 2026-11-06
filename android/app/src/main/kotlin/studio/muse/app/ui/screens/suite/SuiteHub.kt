@@ -56,16 +56,16 @@ import studio.muse.app.ui.screens.creditLabel
 import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
 
-/** A mode of the Video suite. [route] null = coming soon (no backend yet). */
-data class SuiteMode(val id: String, val title: String, val sub: String, val render: String, val route: String?)
+/** A mode of the Video suite: each opens the composer on its tool (Storyboard has its own screen). [soon] = no backend yet. */
+data class SuiteMode(val id: String, val title: String, val sub: String, val render: String, val route: String, val soon: Boolean = false)
 
 val SUITE_MODES = listOf(
     SuiteMode("shot", "Shot", "Text/image → video", "palette-01-naturalistic", Routes.SUITE_SHOT),
     SuiteMode("swap", "Character swap", "Into a real clip", "palette-04-bleached-warm", Routes.SUITE_SWAP),
     SuiteMode("storyboard", "Storyboard", "Shots, one cast", "palette-02-teal-orange", Routes.SUITE_STORYBOARD),
-    SuiteMode("talking", "Talking", "Voice & lipsync", "light-06-ring-creator", null),
-    SuiteMode("ugc", "UGC ad", "Product → ad", "grip-05-slider", null),
-    SuiteMode("extend", "Extend & upscale", "Longer, sharper", "stock-03-sensor", null),
+    SuiteMode("talking", "Talking", "Voice & lipsync", "light-06-ring-creator", Routes.suiteCompose("talking"), soon = true),
+    SuiteMode("ugc", "UGC ad", "Product → ad", "grip-05-slider", Routes.suiteCompose("ugc"), soon = true),
+    SuiteMode("extend", "Extend & upscale", "Longer, sharper", "stock-03-sensor", Routes.suiteCompose("extend"), soon = true),
 )
 
 /** M1 · the Video suite hub: mode tiles, the camera stage, Edit, recent takes. Suite off: the owner's or member's state. */
@@ -98,7 +98,7 @@ fun SuiteHubScreen() {
                 if (err != null && catalog == null) NoteBox(err!!, warn = true) { T("Try again", m.type.tiny.copy(fontWeight = FontWeight.Bold), m.t.accent, Modifier.press { scope.launch { store.load() } }) }
                 SUITE_MODES.chunked(2).forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        row.forEach { mode -> ModeTile(mode, Modifier.weight(1f)) { nav.go(mode.route ?: Routes.suiteSoon(mode.id)) } }
+                        row.forEach { mode -> ModeTile(mode, Modifier.weight(1f)) { nav.go(mode.route) } }
                     }
                 }
                 LinkCard("cube", "Camera stage", "Direct the camera in Blender · Directed mode") { nav.go(Routes.CAMERA_STAGE) }
@@ -124,13 +124,13 @@ private fun ModeTile(mode: SuiteMode, modifier: Modifier, onClick: () -> Unit) {
     Column(modifier.suiteCard(m).press(onClick = onClick).semantics(mergeDescendants = true) { contentDescription = mode.title }) {
         Box(Modifier.fillMaxWidth().height(78.dp)) {
             HardwareImage(mode.render, Modifier.fillMaxSize(), sample = 4)
-            if (mode.route == null) Box(Modifier.align(Alignment.TopEnd).padding(6.dp).background(Color.Black.copy(alpha = .55f)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+            if (mode.soon) Box(Modifier.align(Alignment.TopEnd).padding(6.dp).background(Color.Black.copy(alpha = .55f)).padding(horizontal = 6.dp, vertical = 2.dp)) {
                 T("SOON", m.type.mono.copy(fontSize = 9.5.sp, letterSpacing = 1.sp), Color.White)
             }
         }
         Column(Modifier.padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             T(mode.title, m.type.body.copy(fontSize = 13.5.sp, fontWeight = FontWeight.Bold), m.t.ink, maxLines = 1)
-            T(if (mode.route == null) "Coming soon" else mode.sub, m.type.tiny.copy(fontSize = 12.sp), m.t.muted, maxLines = 1)
+            T(if (mode.soon) "Coming soon" else mode.sub, m.type.tiny.copy(fontSize = 12.sp), m.t.muted, maxLines = 1)
         }
     }
 }
@@ -197,25 +197,6 @@ fun SuiteOff(owner: Boolean) {
         } else {
             T("The AI suite isn't on yet", m.type.h3, m.t.ink)
             Tiny("Ask the studio owner to switch it on. Your other tools work as usual.")
-        }
-    }
-}
-
-/** Talking · lipsync, UGC ad, Extend & upscale: no backend yet, so a quiet coming-soon state. */
-@Composable
-fun SuiteSoonScreen(id: String) {
-    val nav = LocalNav.current
-    val m = muse
-    val mode = SUITE_MODES.firstOrNull { it.id == id } ?: SUITE_MODES.last()
-    ScreenBox {
-        Column(Modifier.fillMaxSize()) {
-            TopBar(mode.title, onBack = { nav.back() })
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                HardwareImage(mode.render, Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(if (m.isA) 0.dp else m.t.r)), sample = 2)
-                T("Coming soon", m.type.h2, m.t.ink, upper = m.isB)
-                T("${mode.title} (${mode.sub.lowercase()}) is on its way to the Video suite. Until then, Shot and Character swap make most of it.", m.type.body, m.t.muted)
-                Cta2("Make a Shot", { nav.go(Routes.SUITE_SHOT) }, Modifier.fillMaxWidth())
-            }
         }
     }
 }
