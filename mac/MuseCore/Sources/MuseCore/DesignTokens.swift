@@ -20,7 +20,7 @@ public enum DesignTokens {
     /// container > control > chip (§4). 999 = fully round.
     public struct Radii: Equatable, Sendable { public let container, control, chip: Double }
     /// The one `float` shadow (§4): y offset and blur in pt, colour = the theme's ink at `alpha`.
-    public struct Float: Equatable, Sendable { public let y, blur, alpha: Double }
+    public struct FloatShadow: Equatable, Sendable { public let y, blur, alpha: Double }
     /// One step of the type scale (§3).
     public struct Step: Equatable, Sendable { public let size, lineHeight: Double; public let weight: Int }
     /// Two families per theme (§3): display for titles only, text for everything else.
@@ -57,7 +57,7 @@ public enum DesignTokens {
     }
 
     /// None in Camera Body: the dark theme never uses a shadow.
-    public static func float(_ theme: String) -> Float? { theme == "b" ? nil : Float(y: 12, blur: 32, alpha: 0.14) }
+    public static func float(_ theme: String) -> FloatShadow? { theme == "b" ? nil : FloatShadow(y: 12, blur: 32, alpha: 0.14) }
 
     public static func families(_ theme: String) -> Families {
         switch theme {

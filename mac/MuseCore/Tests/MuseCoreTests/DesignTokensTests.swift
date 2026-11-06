@@ -39,7 +39,9 @@ final class DesignTokensTests: XCTestCase {
 
     func testScaleRadiiAndSpaceMatchTheDirection() {
         XCTAssertEqual(DesignTokens.space, [4, 8, 12, 16, 24, 32, 48])
-        XCTAssertEqual([DesignTokens.display, .title, .heading, .body, .label, .caption, .micro].map(\.size), [28, 20, 16, 15, 14, 13, 11])
+        let steps: [DesignTokens.Step] = [DesignTokens.display, DesignTokens.title, DesignTokens.heading, DesignTokens.body,
+                                          DesignTokens.label, DesignTokens.caption, DesignTokens.micro]
+        XCTAssertEqual(steps.map { $0.size }, [28, 20, 16, 15, 14, 13, 11])
         for t in DesignTokens.themes {
             let r = DesignTokens.radii(t)
             XCTAssertGreaterThanOrEqual(r.container, r.control, t)
