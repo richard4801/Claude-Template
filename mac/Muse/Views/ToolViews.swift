@@ -589,17 +589,16 @@ struct ArchivedModelsSection: View {
     @Environment(\.theme) private var t
 
     var body: some View {
-        H2("Archived models")
-        Muted("Archived models are hidden from every list and picker. Their outfits, photos, renders and posts are kept. Restore one to use her again.")
+        SectionTitle("Archived models", top: 0)
+        Text("Archived models are hidden from every list and picker. Their outfits, photos, renders and posts are kept. Restore one to use her again.")
+            .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            .padding(.bottom, Space.s3)
         if store.archivedModels.isEmpty {
-            Note(icon: "archivebox", "Nothing archived. Archive a model from her profile's ⋯ menu.")
+            EmptyState("Nothing archived", "Archive a model from the ⋯ menu on her profile. She stays here until you restore her.")
         } else {
-            ListBox {
-                ForEach(Array(store.archivedModels.enumerated()), id: \.element.id) { i, m in
-                    ListRow(title: m.name, hint: [m.niche, m.archivedAt.map { "Archived " + Date(timeIntervalSince1970: Double($0) / 1000).formatted(date: .abbreviated, time: .omitted) } ?? ""]
-                        .filter { !$0.isEmpty }.joined(separator: " · "), last: i == store.archivedModels.count - 1) {
-                        MButton("Restore", icon: "arrow.uturn.backward", size: .small) { store.unarchiveModel(m) }
-                    }
+            ForEach(store.archivedModels) { m in
+                SettingRow(m.name, hint: ScreenCopy.meta([m.niche, m.archivedAt.map { "Archived " + Date(timeIntervalSince1970: Double($0) / 1000).formatted(date: .abbreviated, time: .omitted) }], limit: 2)) {
+                    RButton("Restore", small: true) { store.unarchiveModel(m) }
                 }
             }
         }
