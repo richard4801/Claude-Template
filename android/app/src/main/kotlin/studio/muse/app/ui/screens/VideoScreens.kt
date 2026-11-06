@@ -149,7 +149,7 @@ class NewVideoViewModel(private val c: AppContainer) : ViewModel() {
             val thumb = media.clipThumb(uri)
             val bytes = if (c.repo.api is studio.muse.app.data.HttpMuseApi) media.bytes(uri) else null
             val clip = c.repo.uploadClip(meta, bytes, media.mime(uri).takeIf { it.startsWith("video/") } ?: "video/mp4") ?: return@launch
-            edit { it.withClip(clip.copy(thumb = thumb?.let { t -> ImageRef(url = t) })).copy(showBadExample = false) }
+            edit { it.withClip(clip.copy(thumb = thumb?.let { t -> ImageRef(url = t) })).copy(showBadExample = false, clipUri = uri.toString()) }
         } catch (e: Exception) {
             c.repo.toast("Couldn't read that clip")
         } finally {

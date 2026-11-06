@@ -264,6 +264,12 @@ public protocol MuseAPI: AnyObject, Sendable {
     func updateSuiteSettings(_ patch: SuiteSettingsPatch) async throws -> SuiteSettings
     /// Input slots: a reference video or audio track uploaded to this studio → its storage key.
     func uploadSuiteMedia(_ file: URL, contentType: String, progress: UploadProgress?) async throws -> SuiteVideoRef
+    /// GET /v1/suite/locations: the studio's saved places (@location in a prompt).
+    func suiteLocations() async throws -> [SuiteLocation]
+    /// POST /v1/suite/locations {name, image}
+    func createSuiteLocation(_ new: NewSuiteLocation) async throws -> SuiteLocation
+    /// DELETE /v1/suite/locations/{id}
+    func deleteSuiteLocation(id: String) async throws
     // End AI suite (workstream 1)
 
     // Developer

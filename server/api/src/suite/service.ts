@@ -141,7 +141,15 @@ export class SuiteService {
         canKeyframes: usable.some(x => x.m!.modes.image), canReferences: usable.some(x => x.m!.modes.reference), canGuide: usable.some(x => x.m!.camera.referenceVideo), inputs: inputSlotsOf(usable.map(x => x.m!)) };
       return u.role === 'owner' ? { ...base, models: usable.map(x => ({ model: x.m!.id, name: x.m!.name, resolution: x.s.resolution, inputs: inputSlotsOf([x.m!]) })) } : base;
     });
-    return { enabled: this.mode !== 'off', test: this.mode === 'mock', defaultQuality: 'draft', tiers, modes: ['text', 'image', 'reference', 'swap', 'recast'], recastMaxPeople: 4,
+    // Composer tools (plans/video-composer.md "Tools on the shell"): which the apps can offer now. Talking and UGC ad are
+    // shots (audio / product references); Extend & upscale has no engine yet.
+    const on = this.mode !== 'off', any = (f: (i: ReturnType<typeof inputSlotsOf>) => boolean) => tiers.some(t => t.available && f(t.inputs));
+    const tools = [
+      { id: 'shot', available: on }, { id: 'swap', available: on }, { id: 'recast', available: on }, { id: 'storyboard', available: on },
+      { id: 'talking', available: on && any(i => i.audio) }, { id: 'ugc_ad', available: on && any(i => i.images > 0) },
+      { id: 'extend', available: false, comingSoon: true },
+    ];
+    return { enabled: this.mode !== 'off', test: this.mode === 'mock', defaultQuality: 'draft', tiers, tools, modes: ['text', 'image', 'reference', 'swap', 'recast'], recastMaxPeople: 4,
       aspectRatios: ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'], takesMax: 4, camera: cameraCatalog() };
   }
 

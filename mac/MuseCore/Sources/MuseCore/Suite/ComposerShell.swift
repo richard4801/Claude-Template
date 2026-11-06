@@ -53,6 +53,16 @@ public enum ComposerTool: String, CaseIterable, Sendable, Identifiable {
     /// No backend yet: the tool card shows a quiet "Coming soon" and no Generate.
     public var comingSoon: Bool { self == .talking || self == .ugc || self == .extend }
 
+    /// The tool's id in `catalog.tools` (UGC ad is "ugc_ad").
+    public var wireId: String { self == .ugc ? "ugc_ad" : rawValue }
+
+    /// "Coming soon" as the catalog's `tools` say (not available); a catalog without `tools`, or without this tool,
+    /// keeps the app's own list (`comingSoon`).
+    public func isComingSoon(in catalog: SuiteCatalog?) -> Bool {
+        guard let t = catalog?.tools.first(where: { $0.id == wireId }) else { return comingSoon }
+        return !t.available
+    }
+
     /// The setting chips above the prompt (the spec's tools table).
     public var chips: [ComposerChip] {
         switch self {
@@ -152,7 +162,8 @@ public enum ComposerSlot: String, CaseIterable, Sendable, Identifiable {
         case .startFrame: return SlotId(.start)
         case .endFrame: return SlotId(.end)
         case .audio: return SlotId(.audio)
-        case .product: return SlotId(.image)
+        case .product, .location: return SlotId(.image)
+        case .referenceAd: return SlotId(.video)
         default: return nil
         }
     }
@@ -248,9 +259,12 @@ public struct WheelItem: Hashable, Sendable, Identifiable {
     public var name: String
     public var caption: String
     public var render: String?
+    /// The card's rendered still in the bundled `previews/` folder (the Angle wheels), when the catalog has one.
+    public var preview: String?
     public var id: String { value ?? "auto" }
 
-    public init(value: String?, name: String, caption: String = "", render: String? = nil) {
+    public init(value: String?, name: String, caption: String = "", render: String? = nil, preview: String? = nil) {
+        self.preview = preview
         self.value = value
         self.name = name
         self.caption = caption
@@ -295,7 +309,7 @@ public enum Wheel {
 /// The wheels of the Camera picker (Setup and Angle): Auto first, then only the visible options.
 public enum ComposerWheels {
     static func options(_ list: [SuiteOption], render: String? = nil) -> [WheelItem] {
-        [.auto()] + ComposerCatalog.visible(list).map { WheelItem(value: $0.id, name: $0.label, caption: $0.description, render: $0.render ?? render) }
+        [.auto()] + ComposerCatalog.visible(list).map { WheelItem(value: $0.id, name: $0.label, caption: $0.description, render: $0.render ?? render, preview: $0.preview?.poster) }
     }
 
     public static func cameras(_ c: CameraCatalog) -> [WheelItem] { options(c.bodies) }
@@ -378,17 +392,50 @@ public enum ComposerMoves {
 /// A picker tile's preview: a still (a bundled render) now, a short muted loop later. Swapping the still for a loop is only
 /// a data change: set `video`; the still stays the fallback.
 public struct PickerPreview: Hashable, Sendable {
+    /// A bundled hardware render (`hardware/<name>.webp`).
     public var still: String?
+    /// A loop in the bundled `previews/` folder ("moves/dolly_in.mp4"), or a URL.
     public var video: String?
-    public init(still: String?, video: String? = nil) {
+    /// The preview's own still in `previews/` ("moves/dolly_in.jpg"): shown first, and the fallback; wins over `still`.
+    public var poster: String?
+    public init(still: String?, video: String? = nil, poster: String? = nil) {
         self.still = still
         self.video = video
+        self.poster = poster
     }
 
-    /// Moves share one neutral still (the same subject in every clip); the tile draws the move's arrow over it.
+    /// The tile has its own rendered preview (no drawn arrow needed).
+    public var hasRender: Bool { poster != nil || video != nil }
+
+    /// Moves without a preview share one neutral still (the same subject in every clip); the tile draws the move's arrow.
     public static let neutralMoveStill = "light-01-soft-cross"
-    public static func move(_ m: SuiteMoveOption) -> PickerPreview { PickerPreview(still: neutralMoveStill) }
-    public static func option(_ o: SuiteOption) -> PickerPreview { PickerPreview(still: o.render) }
+    public static func move(_ m: SuiteMoveOption) -> PickerPreview {
+        guard let p = m.preview, !p.poster.isEmpty || p.video != nil else { return PickerPreview(still: neutralMoveStill) }
+        return PickerPreview(still: neutralMoveStill, video: p.video, poster: p.poster.isEmpty ? nil : p.poster)
+    }
+    public static func option(_ o: SuiteOption) -> PickerPreview {
+        PickerPreview(still: o.render, video: o.preview?.video, poster: o.preview.flatMap { $0.poster.isEmpty ? nil : $0.poster })
+    }
+    /// An Auto tile with the catalog's preview (Lighting), else nil (the plain Auto art).
+    public static func auto(_ p: SuitePreview?) -> PickerPreview? {
+        guard let p, !p.poster.isEmpty else { return nil }
+        return PickerPreview(still: nil, video: p.video, poster: p.poster)
+    }
+
+    /// Where a `previews/` path lives in the app bundle: its subdirectory, file name and extension
+    /// ("moves/dolly_in.mp4" → previews/moves, dolly_in, mp4). nil for URLs and empty paths.
+    public static func bundled(_ path: String?, defaultExtension: String = "jpg") -> (subdirectory: String, name: String, ext: String)? {
+        guard var p = path?.trimmingCharacters(in: .whitespaces), !p.isEmpty, !p.contains("://"), !p.hasPrefix("file:") else { return nil }
+        while p.hasPrefix("/") { p.removeFirst() }
+        if p.hasPrefix("previews/") { p.removeFirst("previews/".count) }
+        let ns = p as NSString
+        let dir = ns.deletingLastPathComponent
+        let file = ns.lastPathComponent as NSString
+        let ext = file.pathExtension.isEmpty ? defaultExtension : file.pathExtension
+        let name = file.deletingPathExtension
+        guard !name.isEmpty else { return nil }
+        return (dir.isEmpty ? "previews" : "previews/\(dir)", name, ext)
+    }
 }
 
 // MARK: Bottom bar
@@ -477,10 +524,15 @@ public struct ComposerDraft: Hashable, Sendable {
     public var collapsed: String?
     /// Owner: the camera from Directed mode (it replaces the chips' camera).
     public var directed: CameraSpec?
+    /// Owner: the engine pinned for this shot (one of the tier's `models`), nil = Auto (the ladder). Members never set it.
+    public var engineModel: String?
+    public var resolution: String?
 
     public init(tool: ComposerTool = .shot, tokens: PromptTokens = PromptTokens(), settings: ComposerSettings = ComposerSettings(), outfitId: String? = nil,
                 quality: String = "draft", aspect: String = "9:16", duration: Int = 8, sound: Bool = true, speaking: ComposerSpeaking = .auto, takes: Int = 1,
-                collapsed: String? = nil, directed: CameraSpec? = nil) {
+                collapsed: String? = nil, directed: CameraSpec? = nil, engineModel: String? = nil, resolution: String? = nil) {
+        self.engineModel = engineModel
+        self.resolution = resolution
         self.tool = tool
         self.tokens = tokens
         self.settings = settings
@@ -501,13 +553,53 @@ public struct ComposerDraft: Hashable, Sendable {
         return words.isEmpty ? tool.title : words
     }
 
-    /// The shot request: the prompt and chips, the bottom bar, then the input slots this tier takes.
-    public func request(_ slots: InputSlots, _ inputs: SuiteInputs) -> ShotRequest {
-        var r = composerRequest(tokens, settings, quality: quality, aspectRatio: aspect, duration: duration, takes: takes, speaking: speaking.value, title: title)
+    /// The shot request: the prompt and chips, the bottom bar, the input slots this tier takes, then the @locations
+    /// (as location references, while the References limit has room) and the owner's pinned engine.
+    public func request(_ slots: InputSlots, _ inputs: SuiteInputs, locations: [SuiteLocation] = []) -> ShotRequest {
+        var s = settings
+        if tool != .ugc { s.format = nil }
+        var r = composerRequest(tokens, s, quality: quality, aspectRatio: aspect, duration: duration, takes: takes, speaking: speaking.value, title: title)
         r.audio = sound
         if r.modelId != nil, r.outfitId == nil { r.outfitId = outfitId }
         if let d = directed { r.camera = d }
-        return slots.apply(to: r, inputs)
+        r = slots.apply(to: r, inputs)
+        let images = r.references?.images
+        let roled = { (role: String) -> [SuiteRefImage]? in images?.map { x -> SuiteRefImage in var i = x; i.role = role; return i } }
+        switch tool {
+        case .talking:
+            // Talking: she says the AUDIO slot's words (speaking on unless switched off); the optional image is where.
+            if r.speaking == nil { r.speaking = true }
+            if r.references != nil { r.references!.images = roled("location") }
+        case .ugc:
+            // UGC ad: the PRODUCT slot is the product; the optional reference ad rides in references.videos.
+            if r.references != nil { r.references!.images = roled("product") }
+        default: break
+        }
+        r = ComposerLocations.apply(r, tokens: tokens, locations: locations, inputs: inputs)
+        if let e = engineModel {
+            r.engineModel = e
+            r.resolution = resolution
+        }
+        return r
+    }
+
+    /// What the tool still needs before Generate (its required slots), as a line to show; nil when it can go.
+    public func missing(_ slots: InputSlots) -> String? {
+        let ready = { (id: SlotId) -> Bool in slots[id]?.ready ?? false }
+        for s in tool.required {
+            switch s {
+            case .character where tokens.characterId == nil: return "Pick a character first"
+            case .audio where !ready(SlotId(.audio)): return "Add the audio she says"
+            case .product where !ready(SlotId(.image)): return "Add a photo of the product"
+            default: continue
+            }
+        }
+        return nil
+    }
+
+    /// What this shot's inputs follow: the pinned engine's (`tier.slots(for:)`), else the tier's.
+    public func inputs(_ catalog: SuiteCatalog?) -> SuiteInputs {
+        catalog?.tier(quality)?.slots(for: engineModel) ?? .none
     }
 
     /// Picking a preset: its values go in the chips, its move becomes a #move, and the composer collapses (C6).

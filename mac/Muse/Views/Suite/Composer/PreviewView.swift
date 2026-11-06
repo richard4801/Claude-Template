@@ -2,34 +2,39 @@ import AVFoundation
 import MuseCore
 import SwiftUI
 
-// AI suite (workstream 1): a picker preview. Today every preview is a still (a bundled hardware render); when a tile's
-// `PickerPreview.video` is set (a looping mp4/webm, bundled name or URL) it plays muted while the pointer is over it, and
-// the still stays the fallback. Swapping stills for loops is only a data change.
+// AI suite (workstream 1): a picker preview. A tile shows its rendered poster (design/previews, bundled as `previews/`),
+// else a bundled hardware render; when it has a loop (`PickerPreview.video`) the loop plays muted and looping while the
+// tile is on screen (`autoplay`) or under the pointer, and the poster stays the first frame and the fallback.
 
 struct PreviewView: View {
     var preview: PickerPreview
     var fallback = ""
+    /// Play the loop while the tile is visible (Movement); otherwise only on hover.
+    var autoplay = false
     @State private var hovering = false
     @State private var looper: StageLooper?
 
     var body: some View {
         ZStack {
-            HardwareImage(name: preview.still ?? fallback)
+            if let img = PreviewFiles.image(preview.poster) {
+                Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
+            } else {
+                HardwareImage(name: preview.still ?? fallback)
+            }
             if let looper { PlayerLayerView(player: looper.player).allowsHitTesting(false) }
         }
         .onHover { h in
             hovering = h
-            if h { start() } else { stop() }
+            if h { start() } else if !autoplay { stop() }
         }
+        .onAppear { if autoplay { start() } }
         .onDisappear { stop() }
     }
 
     private var videoURL: URL? {
         guard let v = preview.video, !v.isEmpty else { return nil }
         if v.hasPrefix("http") || v.hasPrefix("file:") { return URL(string: v) }
-        let ext = (v as NSString).pathExtension.isEmpty ? "mp4" : (v as NSString).pathExtension
-        let name = (v as NSString).deletingPathExtension
-        return Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "previews") ?? Bundle.main.url(forResource: name, withExtension: ext)
+        return PreviewFiles.url(v, defaultExtension: "mp4")
     }
 
     private func start() {
@@ -40,6 +45,25 @@ struct PreviewView: View {
     private func stop() {
         looper?.stop()
         looper = nil
+    }
+}
+
+/// The bundled `previews/` folder (design/previews): posters and loops by their catalog path.
+@MainActor
+enum PreviewFiles {
+    private static var cache: [String: NSImage] = [:]
+
+    static func url(_ path: String?, defaultExtension: String = "jpg") -> URL? {
+        guard let b = PickerPreview.bundled(path, defaultExtension: defaultExtension) else { return nil }
+        return Bundle.main.url(forResource: b.name, withExtension: b.ext, subdirectory: b.subdirectory)
+    }
+
+    static func image(_ path: String?) -> NSImage? {
+        guard let path, !path.isEmpty else { return nil }
+        if let i = cache[path] { return i }
+        guard let u = url(path), let img = NSImage(contentsOf: u) else { return nil }
+        cache[path] = img
+        return img
     }
 }
 

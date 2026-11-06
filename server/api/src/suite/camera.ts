@@ -4,6 +4,7 @@
 // the prompt library (keys suite.camera.*, owner-editable, one "id: wording" per line) with these defaults.
 import { z } from 'zod';
 import { lutFor, swatchesOf } from './looks.js';
+import { PREVIEWS } from './previews.data.js';
 
 export type Option = {
   id: string; label: string; description: string; wording: string;
@@ -252,6 +253,17 @@ export const TEMPOS: Option[] = [
   o('single_shot', 'One take', 'One continuous take, no cuts', 'one continuous take with no cuts'),
   o('slow_motion', 'Slow motion', 'Stretched, graceful movement', 'high-frame-rate slow motion, every movement stretched and graceful'),
 ];
+/** UGC ad formats (composer: the UGC ad tool's Style wheel). */
+export const UGC_FORMATS: Option[] = [
+  o('unboxing', 'Unboxing', 'Open it on camera, first reaction', 'unboxing video: hands open the package on camera, first genuine reaction to the product'),
+  o('review', 'Review', 'Honest take, pros and cons', 'honest product review talking to camera, showing the product while explaining what she likes'),
+  o('try_on', 'Try-on', 'Wear it, show the fit', 'try-on video: she puts it on and shows the fit from a few angles in a mirror or to camera'),
+  o('before_after', 'Before & after', 'The change it makes', 'before-and-after video: the same moment before the product, then the visible result after'),
+  o('grwm', 'GRWM', 'Get ready with me', 'get-ready-with-me video: casual routine to camera, the product used as one natural step'),
+  o('haul', 'Haul', 'Several finds, one by one', 'haul video: several items held up to camera one by one with quick excited comments'),
+  o('tutorial', 'Tutorial', 'How to use it, step by step', 'quick tutorial: step-by-step how to use the product, close-ups of each step'),
+  o('testimonial', 'Testimonial', 'Why she recommends it', 'testimonial: she tells camera sincerely why she recommends the product, product visible in hand'),
+];
 export const EMOTIONS = ['joy', 'trust', 'fear', 'surprise', 'sadness', 'disgust', 'anger', 'hope', 'calm', 'confidence', 'playful', 'flirty'] as const;
 
 /** Ready-made rigs (UGC first): a partial spec merged under whatever the user sets. */
@@ -295,7 +307,7 @@ export const CameraSpecSchema = z.object({
   /** A second move mixed with the first (only compatible pairs; dropped on models that want one move). */
   mix: MoveSchema.optional(),
   angle: z.object({ height: z.enum(ids(HEIGHTS)).optional(), shotSize: z.enum(ids(SHOT_SIZES)).optional(), dutchDeg: z.number().min(0).max(30).optional() }).optional(),
-  style: z.object({ genre: z.enum(ids(GENRES)).optional(), era: z.enum(ids(ERAS)).optional(), tempo: z.enum(ids(TEMPOS)).optional() }).optional(),
+  style: z.object({ genre: z.enum(ids(GENRES)).optional(), era: z.enum(ids(ERAS)).optional(), tempo: z.enum(ids(TEMPOS)).optional(), format: z.enum(ids(UGC_FORMATS)).optional() }).optional(),
   /** Character performance: an emotion, optionally changing to another at `atS`. */
   performance: z.object({ emotion: z.enum(EMOTIONS), to: z.enum(EMOTIONS).optional(), atS: z.number().min(0).max(30).optional(), intensity: z.number().min(0).max(1).default(0.6) }).optional(),
   /**
@@ -340,11 +352,10 @@ export const HARDWARE: Record<string, { render: string; name: string; caption: s
   'bodies.cinema_digital': { render: 'body-02-super35', name: 'Cinema Camera', caption: 'Alexa · Venice · RED look · clean digital cinema' },
   'bodies.large_format_65': { render: 'body-01-large-format', name: 'Large Format 65mm', caption: '65mm look · huge sensor · epic, shallow depth' },
   'bodies.vlog': { render: 'body-07-creator-cine', name: 'Creator Camera', caption: 'FX3 · ZV look · compact · 4K' },
-  // TODO(render): own stills for Webcam, CCTV, Swirl bokeh and Tilt-shift (plans/video-composer.md "Assets"); closest render for now.
-  'bodies.webcam': { render: 'body-08-phone', name: 'Webcam', caption: 'Laptop webcam · flat light · video call' },
-  'bodies.security_cam': { render: 'body-09-dv-camcorder', name: 'CCTV', caption: 'Security camera · high corner · wide' },
-  'lenses.swirl': { render: 'lens-04-warm-vintage', name: 'Swirl Bokeh', caption: 'Petzval look · swirling background' },
-  'lenses.tilt_shift': { render: 'lens-06-macro', name: 'Tilt-Shift', caption: 'Slanted focus band · miniature look' },
+  'bodies.webcam': { render: 'body-11-webcam', name: 'Webcam', caption: 'Webcam · wide · flat light · video-call look' },
+  'bodies.security_cam': { render: 'body-12-cctv', name: 'CCTV', caption: 'Security cam · high fixed angle · muted colour' },
+  'lenses.swirl': { render: 'lens-09-swirl', name: 'Swirl Bokeh', caption: 'Petzval-style portrait · swirling background' },
+  'lenses.tilt_shift': { render: 'lens-10-tilt-shift', name: 'Tilt-shift', caption: 'Slanted focus band · miniature look' },
   'bodies.super35': { render: 'body-02-super35', name: 'Super 35 Digital', caption: 'Alexa 35 look · Super 35 · 4.6K' },
   'bodies.modular_8k': { render: 'body-03-modular8k', name: 'Modular 8K', caption: 'V-Raptor look · VistaVision · 8K' },
   'bodies.full_frame_cine': { render: 'body-04-fullframe', name: 'Full-Frame Cine', caption: 'Venice 2 look · Full frame · 8.6K' },
@@ -418,9 +429,11 @@ export function moveGroup(m: MoveOption): (typeof MOVE_GROUPS)[number]['id'] {
 
 /** Everything the Camera picker shows (member-safe: ids, labels, descriptions, renders and look captions). */
 export function cameraCatalog() {
-  const v = (l: Option[], group?: string) => l.map(({ id, label, description, visible, mergedInto }) => {
+  // Composer previews (design/previews, bundled in the apps as `previews/`): move loops, lighting and angle stills.
+  const pv = (group: string, id: string) => (PREVIEWS[`${group}/${id}`] ? { preview: PREVIEWS[`${group}/${id}`] } : {});
+  const v = (l: Option[], group?: string, previews?: string) => l.map(({ id, label, description, visible, mergedInto }) => {
     const h = group ? HARDWARE[`${group}.${id}`] : undefined;
-    const vis = { visible: visible !== false, ...(mergedInto ? { mergedInto } : {}) };
+    const vis = { visible: visible !== false, ...(mergedInto ? { mergedInto } : {}), ...(previews ? pv(previews, id) : {}) };
     return h ? { id, label, description, render: h.render, name: h.name, caption: h.caption, ...vis } : { id, label, description, ...vis };
   });
   return {
@@ -428,16 +441,18 @@ export function cameraCatalog() {
     bodies: v(BODIES, 'bodies'), lenses: v(LENSES, 'lenses'), focalLengths: FOCALS,
     /** The composer's focal wheel (the other lengths stay valid for owners and Directed mode). */
     focals: FOCALS.map(mm => { const s = FOCAL_STEPS.find(x => x.mm === mm); return { mm, label: s?.label ?? `${mm}mm`, description: s?.description ?? '', visible: !!s }; }), apertures: v(APERTURES), looks: v(LOOKS, 'looks').map(x => ({ ...x, swatches: swatchesOf('looks', x.id) ?? [], lut: lutFor('looks', x.id) })), frameRates: v(FRAME_RATES), shutters: v(SHUTTERS),
-    lighting: v(LIGHTING, 'lighting'),
+    lighting: v(LIGHTING, 'lighting', 'lighting'),
     // Look (suite/looks.ts): each palette and film stock has a swatch strip and the LUT the take is graded with.
     palettes: v(PALETTES, 'palettes').map(x => ({ ...x, swatches: swatchesOf('palettes', x.id) ?? [], lut: lutFor('palettes', x.id) })),
     optics: ['aperture', 'shutter'].map(id => ({ id, ...HARDWARE[`optics.${id}`]! })),
     grips: Object.entries(HARDWARE).filter(([k]) => k.startsWith('grips.')).map(([k, h]) => ({ move: k.slice(6), ...h })),
-    moves: MOVES.map(x => ({ id: x.id, label: x.label, description: x.description, category: x.category, group: moveGroup(x), editorBetter: !!x.editorBetter, talkSafe: !!x.talkSafe })),
+    moves: MOVES.map(x => ({ id: x.id, label: x.label, description: x.description, category: x.category, group: moveGroup(x), editorBetter: !!x.editorBetter, talkSafe: !!x.talkSafe, ...pv('moves', x.id) })),
     /** The composer's Movement chips, in order ("featured" = `library`). */
     moveGroups: MOVE_GROUPS,
+    /** The Auto tile's preview per picker (same subject as the option tiles). */
+    autoPreviews: { ...(PREVIEWS['lighting/auto'] ? { lighting: PREVIEWS['lighting/auto'] } : {}) },
     library: FEATURED_MOVES.map(f => { const m = MOVES.find(x => x.id === f.id)!; return { id: m.id, label: f.label ?? m.label, tag: f.tag, description: m.description, category: m.category }; }),
-    heights: v(HEIGHTS), shotSizes: v(SHOT_SIZES), genres: v(GENRES), eras: v(ERAS), tempos: v(TEMPOS), emotions: [...EMOTIONS],
+    heights: v(HEIGHTS, undefined, 'angles'), shotSizes: v(SHOT_SIZES, undefined, 'angles'), genres: v(GENRES), eras: v(ERAS), tempos: v(TEMPOS), ugcFormats: v(UGC_FORMATS), emotions: [...EMOTIONS],
     limits: { intensity: [0, 1], dutchDeg: [0, 30], focalMm: [8, 200], paletteColors: 5, mixPairs: 'two moves of different kinds; not static, time or aerial' },
   };
 }

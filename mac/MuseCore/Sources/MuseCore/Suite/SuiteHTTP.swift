@@ -26,4 +26,16 @@ extension HTTPMuseAPI {
     public func updateSuiteSettings(_ patch: SuiteSettingsPatch) async throws -> SuiteSettings {
         try await suiteCall("PATCH", "v1/suite/settings", body: body(patch))
     }
+    public func suiteLocations() async throws -> [SuiteLocation] {
+        let list: [SuiteLocation] = try await suiteCall("GET", "v1/suite/locations")
+        return list.map { var l = $0; l.image = absolutize(l.image); return l }
+    }
+    public func createSuiteLocation(_ new: NewSuiteLocation) async throws -> SuiteLocation {
+        var l: SuiteLocation = try await suiteCall("POST", "v1/suite/locations", body: body(new))
+        l.image = absolutize(l.image)
+        return l
+    }
+    public func deleteSuiteLocation(id: String) async throws {
+        try await suiteSend("DELETE", "v1/suite/locations/\(id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? id)")
+    }
 }

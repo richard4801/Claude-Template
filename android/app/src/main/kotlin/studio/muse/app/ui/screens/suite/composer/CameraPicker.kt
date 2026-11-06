@@ -90,8 +90,13 @@ object CameraWheels {
     fun apertures(c: CameraCatalog) = listOf(AUTO_CARD) + ComposerCatalog.visible(c.apertures).map { o ->
         WheelItem(o.id, o.label + (o.description.ifBlank { null }?.let { " · $it" } ?: ""), APERTURE_LINES[o.id] ?: "", Preview(draw = PreviewDraw.Iris(o.id.removePrefix("f").toDoubleOrNull() ?: 4.0)))
     }
-    fun heights(c: CameraCatalog) = listOf(AUTO_CARD) + ComposerCatalog.visible(c.heights).map { WheelItem(it.id, it.label, it.description, Preview(draw = PreviewDraw.Height(it.id))) }
-    fun framings(c: CameraCatalog) = listOf(AUTO_CARD) + ComposerCatalog.visible(c.shotSizes).map { WheelItem(it.id, it.label, it.description, Preview(draw = PreviewDraw.Framing(it.id))) }
+    fun heights(c: CameraCatalog) = listOf(AUTO_CARD) + ComposerCatalog.visible(c.heights).map { WheelItem(it.id, it.label, it.description, Preview(draw = PreviewDraw.Height(it.id), poster = it.preview?.poster)) }
+    /** UGC ad's format wheel (catalog `ugcFormats`): a still with the format's big name until format loops exist. */
+    fun formats(c: CameraCatalog) = listOf(AUTO_CARD.copy(caption = "Fits the product")) + ComposerCatalog.visible(c.ugcFormats).mapIndexed { i, o ->
+        WheelItem(o.id, o.label, o.description, Preview(o.render ?: FORMAT_STILLS[i % FORMAT_STILLS.size], o.loop, PreviewDraw.Word(o.label)))
+    }
+    private val FORMAT_STILLS = listOf("light-06-ring-creator", "palette-04-bleached-warm", "palette-01-naturalistic", "light-04-window", "palette-03-hyper-neon", "light-05-practicals", "stock-02-16mm", "light-01-soft-cross")
+    fun framings(c: CameraCatalog) =listOf(AUTO_CARD) + ComposerCatalog.visible(c.shotSizes).map { WheelItem(it.id, it.label, it.description, Preview(draw = PreviewDraw.Framing(it.id), poster = it.preview?.poster)) }
 
     private val FOCAL_LINES = mapOf(14 to "Huge space, bent edges", 24 to "Room and context", 35 to "Everyday, a touch wide", 50 to "Like your eye sees", 85 to "Flattering, tighter faces", 135 to "Compressed, far away")
     private val APERTURE_LINES = mapOf("f1.4" to "Background melts away", "f2.8" to "Subject pops, gentle blur", "f5.6" to "Most of the scene sharp", "f11" to "Front to back in focus")
@@ -232,7 +237,7 @@ private fun ColumnScope.MovementBody(d: ComposerDraft, cat: CameraCatalog, wide:
             val on = mv.id in inPrompt
             Column(Modifier.press { onMove(mv) }.semantics(mergeDescendants = true) { role = Role.Button; selected = on; contentDescription = "Add ${mv.label}" }) {
                 Box(Modifier.fillMaxWidth().picked(on, m.t.accent)) {
-                    PreviewTile(Preview(loop = mv.loop, draw = PreviewDraw.Move(mv.id, mv.category)), Modifier.fillMaxWidth().aspectRatio(1.12f).clip(RoundedCornerShape(10.dp))) {
+                    PreviewTile(Preview(loop = mv.loop, draw = PreviewDraw.Move(mv.id, mv.category), poster = mv.preview?.poster, video = mv.preview?.video), Modifier.fillMaxWidth().aspectRatio(1.12f).clip(RoundedCornerShape(10.dp))) {
                         if (d.speaking == true && mv.talkSafe) Row(Modifier.align(Alignment.TopStart).padding(8.dp).height(20.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xBD0D0E0F))
                             .border(1.dp, Color.White.copy(alpha = .08f), RoundedCornerShape(10.dp)).padding(horizontal = 7.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             SIc("talk", 11.dp, Color(0xFFECEAE5)); T("TALK-SAFE", m.type.mono.copy(fontSize = 9.5.sp, letterSpacing = .06.em), Color(0xFFECEAE5), maxLines = 1)

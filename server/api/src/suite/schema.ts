@@ -1,5 +1,5 @@
-// AI suite tables (migration 0007). Re-exported from db/schema.ts.
-import { bigint, doublePrecision, jsonb, pgTable, text } from 'drizzle-orm/pg-core';
+// AI suite tables (migrations 0007, 0013). Re-exported from db/schema.ts.
+import { bigint, doublePrecision, index, jsonb, pgTable, text } from 'drizzle-orm/pg-core';
 import type { LadderStep, Tier } from './registry.js';
 
 /**
@@ -15,3 +15,13 @@ export const suiteSettings = pgTable('suite_settings', {
   updatedBy: text('updated_by'),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 });
+
+/** The studio's locations (composer `@location`): a named place with a reference image, sent as a "location" reference. */
+export const suiteLocations = pgTable('suite_locations', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  name: text('name').notNull(),
+  image: jsonb('image').$type<{ asset?: string; url?: string }>().notNull(),
+  createdBy: text('created_by'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+}, t => [index('suite_locations_studio_idx').on(t.studioId)]);

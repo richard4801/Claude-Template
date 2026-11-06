@@ -25,6 +25,8 @@ data class SuiteOption(
     val lut: String? = null,
     /** A short looping preview (mp4/webm URL). Until the loops exist, pickers show the still ([render]). */
     val loop: String? = null,
+    /** Lighting and angles: the bundled preview still (`previews/<poster>`). */
+    val preview: SuitePreviewRef? = null,
 ) {
     /** The card's title: the hardware name when it has a render ("Super 35 Digital"), else the label. */
     val title: String get() = name ?: label
@@ -50,7 +52,17 @@ data class SuiteMoveOption(
     val group: String = "",
     /** A short looping preview (mp4/webm URL); until it exists the tile shows a still with a motion arrow. */
     val loop: String? = null,
+    /** The bundled loop and its poster (`previews/moves/<id>.mp4|jpg`); null = the drawn still with an arrow. */
+    val preview: SuitePreviewRef? = null,
 )
+
+/** A bundled composer preview: paths relative to the app's `previews/` assets. */
+@Serializable
+data class SuitePreviewRef(val video: String? = null, val poster: String? = null, val seconds: Double? = null)
+
+/** The Auto tiles' previews (`camera.autoPreviews`). */
+@Serializable
+data class SuiteAutoPreviews(val lighting: SuitePreviewRef? = null)
 
 /** One of the 16 featured moves of the camera bag (UGC first), with its filter tag: ugc / cinematic / energy / subtle. */
 @Serializable
@@ -90,6 +102,9 @@ data class CameraCatalog(
     val eras: List<SuiteOption> = emptyList(),
     val tempos: List<SuiteOption> = emptyList(),
     val emotions: List<String> = emptyList(),
+    /** UGC ad: the ad formats (unboxing, review, try_on…), sent as `camera.style.format`. Older catalogs: none. */
+    val ugcFormats: List<SuiteOption> = emptyList(),
+    val autoPreviews: SuiteAutoPreviews = SuiteAutoPreviews(),
 ) {
     fun move(id: String?) = moves.firstOrNull { it.id == id }
     fun libraryMove(id: String?) = library.firstOrNull { it.id == id }
@@ -150,6 +165,17 @@ data class SuiteTier(
     fun slotsFor(engineModel: String?): SuiteInputs = engineModel?.let { id -> models?.firstOrNull { it.model == id }?.inputs } ?: slots
 }
 
+/** A composer tool the server offers now (`catalog.tools`): shot, swap, recast, storyboard, talking, ugc_ad, extend. */
+@Serializable
+data class SuiteToolInfo(val id: String, val available: Boolean = false, val comingSoon: Boolean = false)
+
+/** A place in the studio's locations library (`@location` in the prompt). GET/POST/DELETE /v1/suite/locations. */
+@Serializable
+data class SuiteLocation(val id: String, val name: String = "", val image: ImageRef = ImageRef(), val createdAt: Long = 0)
+
+@Serializable
+data class SuiteLocationCreate(val name: String, val image: ImageRef)
+
 /** GET /v1/suite/catalog. `enabled` false = the server's SUITE_MODE is off; `test` = mock renders (free). */
 @Serializable
 data class SuiteCatalog(
@@ -162,8 +188,12 @@ data class SuiteCatalog(
     val aspectRatios: List<String> = emptyList(),
     val takesMax: Int = 4,
     val camera: CameraCatalog = CameraCatalog(),
+    /** Which composer tools are live; null = an older server (the apps' built-in list applies). */
+    val tools: List<SuiteToolInfo>? = null,
 ) {
     fun tier(id: String?) = tiers.firstOrNull { it.id == id }
+    /** Whether a tool can Generate: the catalog's word, else [fallback]. */
+    fun toolAvailable(id: String, fallback: Boolean): Boolean = tools?.firstOrNull { it.id == id }?.available ?: fallback
 }
 
 // ---------------------------------------------------------------- the request
@@ -229,6 +259,8 @@ data class SuiteCastMember(
     val personHint: String? = null,
     val personNote: String? = null,
     val speaking: Boolean? = null,
+    /** Who to replace: a square crop of their face from the clip's first frame ("tap a face"). */
+    val faceCrop: ImageRef? = null,
 )
 
 /** POST /v1/suite/shots[/estimate]. Nulls are left out, so the server's defaults apply. */

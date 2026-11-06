@@ -10,7 +10,8 @@
    "available": false,
    "resolution": null,
    "fromPerSec": null,
-   "minSeconds": 2, "maxSeconds": null,
+   "minSeconds": 2,
+   "maxSeconds": null,
    "canKeyframes": false,
    "canReferences": false,
    "canGuide": false,
@@ -32,7 +33,8 @@
    "available": false,
    "resolution": null,
    "fromPerSec": null,
-   "minSeconds": 2, "maxSeconds": null,
+   "minSeconds": 2,
+   "maxSeconds": null,
    "canKeyframes": false,
    "canReferences": false,
    "canGuide": false,
@@ -54,7 +56,8 @@
    "available": false,
    "resolution": null,
    "fromPerSec": null,
-   "minSeconds": 3, "maxSeconds": null,
+   "minSeconds": 3,
+   "maxSeconds": null,
    "canKeyframes": false,
    "canReferences": false,
    "canGuide": false,
@@ -76,7 +79,8 @@
    "available": false,
    "resolution": null,
    "fromPerSec": null,
-   "minSeconds": 3, "maxSeconds": null,
+   "minSeconds": 3,
+   "maxSeconds": null,
    "canKeyframes": false,
    "canReferences": false,
    "canGuide": false,
@@ -90,6 +94,37 @@
     "framesWithRefs": false
    },
    "models": []
+  }
+ ],
+ "tools": [
+  {
+   "id": "shot",
+   "available": false
+  },
+  {
+   "id": "swap",
+   "available": false
+  },
+  {
+   "id": "recast",
+   "available": false
+  },
+  {
+   "id": "storyboard",
+   "available": false
+  },
+  {
+   "id": "talking",
+   "available": false
+  },
+  {
+   "id": "ugc_ad",
+   "available": false
+  },
+  {
+   "id": "extend",
+   "available": false,
+   "comingSoon": true
   }
  ],
  "modes": [

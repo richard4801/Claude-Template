@@ -7,6 +7,15 @@ import studio.muse.app.data.SuiteCatalog
 import studio.muse.app.data.SuiteEstimate
 import studio.muse.app.data.SuiteInputs
 import studio.muse.app.data.SuiteRules
+import studio.muse.app.data.JobRequest
+import studio.muse.app.data.VideoDraft
+import studio.muse.app.data.VideoFeatures
+import studio.muse.core.VideoOption
+import studio.muse.app.data.SuiteLocation
+import studio.muse.app.data.SuiteRefAudio
+import studio.muse.app.data.SuiteRefImage
+import studio.muse.app.data.SuiteRefVideo
+import studio.muse.app.data.SuiteReferences
 import studio.muse.app.data.SuiteShotRequest
 import studio.muse.app.ui.screens.suite.InputSlots
 import studio.muse.app.ui.screens.suite.RecastDraft
@@ -39,8 +48,14 @@ enum class ComposerTool(
         "What the ad shows · type @ for your characters"),
     EXTEND("extend", "Extend & upscale", "Longer, sharper", "stock-03-sensor", false, emptyList(), "");
 
+    /** The id in the catalog's `tools`. */
+    val wire: String get() = if (this == UGC) "ugc_ad" else id
+
+    /** Can Generate now: the catalog's `tools` says (an older catalog without it: [live]). */
+    fun isLive(cat: SuiteCatalog?): Boolean = cat?.toolAvailable(wire, live) ?: live
+
     companion object {
-        fun of(id: String?): ComposerTool = entries.firstOrNull { it.id == id } ?: SHOT
+        fun of(id: String?): ComposerTool = entries.firstOrNull { it.id == id || it.wire == id } ?: SHOT
     }
 }
 
@@ -78,7 +93,22 @@ data class ComposerDraft(
     val title: String = "",
     /** Directed mode (owner): the camera JSON the camera stage applied; it replaces the chips' camera when set. */
     val directed: String? = null,
+    /** Character swap: an add-on (edit | fast) instead of the quality render; null = the quality ladder. */
+    val addon: String? = null,
+    /** Owner only: the engine pinned for this shot (one of the tier's `models`) and its resolution; null = Auto (the ladder). */
+    val engineModel: String? = null,
+    val resolution: String? = null,
 ) {
+    /** The input slots on this quality, or on the pinned engine when the owner pinned one. */
+    fun inputsFor(cat: SuiteCatalog?): SuiteInputs = cat?.tier(quality)?.slotsFor(engineModel) ?: SuiteInputs.NONE
+
+    /** Pins one of the tier's engines (null = Auto). */
+    fun pin(m: studio.muse.app.data.SuiteTierModel?): ComposerDraft = copy(engineModel = m?.model, resolution = m?.resolution?.ifBlank { null })
+
+    /** The Settings row's value: "Auto", or the pinned engine's name (owner only: members' catalogs carry no engines). */
+    fun engineLabel(cat: SuiteCatalog?): String = engineModel?.let { id -> cat?.tier(quality)?.models?.firstOrNull { it.model == id }?.let { m -> m.name.ifBlank { m.model } + (m.resolution.ifBlank { null }?.let { " · $it" } ?: "") } ?: id } ?: "Auto"
+    /** The picked add-on of Character swap (null on other tools or on the quality ladder). */
+    val swapAddon: SwapAddon? get() = if (tool == ComposerTool.SWAP) SwapAddon.of(addon)?.takeIf { it.option != null } else null
     /** The tool card's name and tagline: the preset's when one was picked, else the tool's. */
     fun cardTitle(cat: CameraCatalog): String = settings.preset?.let { id -> cat.presets.firstOrNull { it.id == id }?.label } ?: tool.title
     fun cardTagline(cat: CameraCatalog): String = settings.preset?.let { id -> cat.presets.firstOrNull { it.id == id }?.description } ?: tool.tagline
@@ -129,7 +159,13 @@ data class ComposerDraft(
     }
 
     /** Keeps the length inside the tier's range after a quality change. */
-    fun fit(cat: SuiteCatalog?): ComposerDraft = lengthRange(cat).let { r -> if (duration in r) this else copy(duration = duration.coerceIn(r)) }
+    fun fit(cat: SuiteCatalog?): ComposerDraft {
+        val r = lengthRange(cat)
+        val sized = if (duration in r) this else copy(duration = duration.coerceIn(r))
+        // A pin that isn't one of this quality's engines (or a catalog without engines, a member's) goes back to Auto.
+        val ok = engineModel == null || cat?.tier(quality)?.models?.any { it.model == engineModel } == true
+        return if (ok) sized else sized.copy(engineModel = null, resolution = null)
+    }
 
     /** Phone bar summary: "8 s · 9:16" and "1 take". */
     val barSummary: Pair<String, String> get() = "$duration s · $aspect" to "$takes take${if (takes > 1) "s" else ""}"
@@ -138,8 +174,20 @@ data class ComposerDraft(
      * What stops Generate, in plain words (null = ready). [slots] are the filled input slots; [recast] carries the clip and
      * the people for Character swap and Recast.
      */
-    fun problem(slots: InputSlots, recast: RecastDraft): String? = when (tool) {
+    fun problem(slots: InputSlots, recast: RecastDraft, own: InputSlots = InputSlots()): String? = when (tool) {
         ComposerTool.SHOT -> if (characterId == null && tokens.isEmpty && slots.isEmpty) "Pick a character or describe the shot" else if (slots.uploading) "Waiting for the upload" else null
+        ComposerTool.TALKING -> when {
+            characterId == null -> "Pick who talks"
+            own.uploading -> "Waiting for the upload"
+            own[ToolSlots.TALK_AUDIO]?.ready != true -> "Add the audio"
+            else -> null
+        }
+        ComposerTool.UGC -> when {
+            characterId == null -> "Pick who presents it"
+            own.uploading -> "Waiting for the upload"
+            own[ToolSlots.UGC_PRODUCT]?.ready != true -> "Add the product photo"
+            else -> null
+        }
         ComposerTool.SWAP -> when { recast.clipId == null -> "Choose the source clip"; characterId == null -> "Pick who she becomes"; else -> null }
         ComposerTool.RECAST -> recast.problem()
         else -> "Coming soon"
@@ -149,7 +197,47 @@ data class ComposerDraft(
      * The request Generate sends (and the estimate prices). Shot: the prompt, tokens, chips and bottom bar, plus the input
      * slots the tier takes. Character swap and Recast: the clip and cast (Recast's people), the quality, takes and the Look.
      */
-    fun request(slots: InputSlots, inputs: SuiteInputs, recast: RecastDraft): SuiteShotRequest = when (tool) {
+    fun request(slots: InputSlots, inputs: SuiteInputs, recast: RecastDraft, own: InputSlots = InputSlots(), locations: List<SuiteLocation> = emptyList()): SuiteShotRequest =
+        baseRequest(slots, inputs, recast, own).let { r ->
+            if (tool in PROMPT_TOOLS) withLocations(r, inputs, locations).copy(engineModel = engineModel, resolution = resolution.takeIf { engineModel != null }) else r
+        }
+
+    /**
+     * The prompt's @locations as references: `{image, role: "location", label: name}` after the slots' images, never more
+     * than the quality's References limit (`inputs.images`). A location the library no longer has is left out.
+     */
+    fun withLocations(r: SuiteShotRequest, inputs: SuiteInputs, locations: List<SuiteLocation>): SuiteShotRequest {
+        val places = tokens.mentions.filter { it.kind == "location" }.mapNotNull { m -> locations.firstOrNull { it.id == m.id } }
+        if (places.isEmpty()) return r
+        val have = r.references?.images.orEmpty()
+        val room = (SlotKind.IMAGE.capacity(inputs) - have.size).coerceAtLeast(0)
+        val add = places.distinctBy { it.id }.take(room).map { SuiteRefImage(it.image, "location", it.name.take(80)) }
+        if (add.isEmpty()) return r
+        return r.copy(references = (r.references ?: SuiteReferences()).copy(images = have + add))
+    }
+
+    /** Reference images in use: the filled image slots the quality takes, plus the prompt's @locations. */
+    fun referencesUsed(slots: InputSlots, inputs: SuiteInputs, own: InputSlots = InputSlots()): Int {
+        val cap = SlotKind.IMAGE.capacity(inputs)
+        val slotImages = when (tool) {
+            ComposerTool.TALKING, ComposerTool.UGC -> own.values.keys.count { it.kind == SlotKind.IMAGE }
+            else -> slots.values.keys.count { it.kind == SlotKind.IMAGE && it.index < cap }
+        }
+        return slotImages + tokens.mentions.filter { it.kind == "location" }.distinctBy { it.id }.size
+    }
+
+    /** Why another @location can't go in (null = it can): the References limit is `inputs.images`. */
+    fun locationProblem(slots: InputSlots, inputs: SuiteInputs, own: InputSlots = InputSlots(), id: String? = null): String? {
+        if (id != null && tokens.mentions.any { it.kind == "location" && it.id == id }) return null
+        val cap = SlotKind.IMAGE.capacity(inputs)
+        return when {
+            cap == 0 -> "${SuiteRules.tierLabel(quality)} doesn't take reference images · try another quality"
+            referencesUsed(slots, inputs, own) >= cap -> "References are full · up to $cap on ${SuiteRules.tierLabel(quality)}"
+            else -> null
+        }
+    }
+
+    private fun baseRequest(slots: InputSlots, inputs: SuiteInputs, recast: RecastDraft, own: InputSlots): SuiteShotRequest = when (tool) {
         ComposerTool.SWAP -> {
             val person = recast.people.first().copy(characterId = characterId, outfitId = characterOutfit, speaking = speaking)
             recast.copy(people = listOf(person), quality = quality, takes = takes).request().copy(
@@ -159,6 +247,20 @@ data class ComposerDraft(
             )
         }
         ComposerTool.RECAST -> recast.copy(quality = quality, takes = takes).request()
+        // Talking and UGC ad are shots: their own slots go in as references (the audio and an optional location photo;
+        // the product photo and an optional reference ad), the rest is the composer's.
+        ComposerTool.TALKING, ComposerTool.UGC -> {
+            val r = composerRequest(tokens, settings, quality, aspect, duration, takes, speaking, title.trim().ifBlank { null })
+            val talking = tool == ComposerTool.TALKING
+            val image = own[if (talking) ToolSlots.TALK_LOCATION else ToolSlots.UGC_PRODUCT]?.takeIf { it.ready }
+                ?.let { v -> v.image?.let { SuiteRefImage(it, if (talking) "location" else "product", v.name.substringBeforeLast('.').take(80).ifBlank { null }) } }
+            val audio = if (talking) own[ToolSlots.TALK_AUDIO]?.takeIf { it.ready }?.media?.let { SuiteRefAudio(it) } else null
+            val video = if (talking) null else own[ToolSlots.UGC_REFAD]?.takeIf { it.ready }?.media?.let { SuiteRefVideo(it, "style") }
+            val refs = SuiteReferences(listOfNotNull(image).ifEmpty { null }, listOfNotNull(video).ifEmpty { null }, audio)
+            r.copy(modelId = characterId, outfitId = characterOutfit, audio = if (sound) null else false,
+                speaking = if (talking) speaking ?: true else speaking,
+                references = refs.takeIf { it.images != null || it.videos != null || it.audio != null })
+        }
         else -> {
             val r = composerRequest(tokens, settings, quality, aspect, duration, takes, speaking, title.trim().ifBlank { null })
             val camera = directed?.let { runCatching { kotlinx.serialization.json.Json.parseToJsonElement(it) }.getOrNull() } ?: r.camera
@@ -169,8 +271,62 @@ data class ComposerDraft(
     companion object {
         /** Presets that start from a product photo rather than a character. */
         val PHOTO_PRESETS = setOf("product_hero")
+        /** Tools with a prompt that takes @ tokens and reference images. */
+        val PROMPT_TOOLS = setOf(ComposerTool.SHOT, ComposerTool.TALKING, ComposerTool.UGC)
         val SHAPES = listOf("9:16", "1:1", "16:9")
     }
+}
+
+/**
+ * Character swap's add-ons (plans/api.md "App clean-up" §2): Edit and Fast · beta render the swap on their own engines
+ * (POST /v1/jobs), Upscale sharpens a finished take (coming soon). They sit beside the quality ladder as pills; the
+ * ladder stays the main choice.
+ */
+enum class SwapAddon(val id: String, val label: String, val option: VideoOption?, val detail: String) {
+    EDIT("edit", "Edit", VideoOption.EDIT, VideoOption.EDIT.detail),
+    FAST("fast", "Fast · beta", VideoOption.FAST, VideoOption.FAST.detail),
+    UPSCALE("upscale", "Upscale", null, "Sharper 1080p, 2K or 4K from a finished take");
+
+    companion object {
+        fun of(id: String?) = entries.firstOrNull { it.id == id }
+    }
+}
+
+/** A pill: the add-on, whether it can be picked now, and its price ("$0.67", "—", "Soon"). */
+data class AddonPill(val addon: SwapAddon, val available: Boolean, val price: String)
+
+object SwapAddons {
+    /**
+     * The pills: Edit, Fast · beta (only with the Fast beta switch on and when the server offers it) and Upscale
+     * (greyed "Soon" until the server says it's available).
+     */
+    fun pills(video: VideoFeatures, fastBeta: Boolean, takes: Int, clipSeconds: Double?): List<AddonPill> = SwapAddon.entries.mapNotNull { a ->
+        when (a) {
+            SwapAddon.UPSCALE -> AddonPill(a, video.upscale.available, if (video.upscale.available) "On the take" else "Soon")
+            SwapAddon.FAST -> if (!fastBeta || !video.available(a.id)) null else AddonPill(a, true, price(a, takes, clipSeconds))
+            SwapAddon.EDIT -> AddonPill(a, video.available(a.id), price(a, takes, clipSeconds))
+        }
+    }
+
+    /** The add-on's render, set up exactly as the video studio sends it: the whole clip, the default steps. */
+    fun draft(a: SwapAddon, takes: Int, keepAudio: Boolean, speaking: Boolean?): VideoDraft =
+        VideoDraft(takes = takes, keepAudio = keepAudio, speaking = speaking ?: false).pick(a.option ?: VideoOption.EDIT)
+
+    /** The price from the add-on estimate (the server's formula, Pricing): "—" without a clip length. */
+    fun price(a: SwapAddon, takes: Int, clipSeconds: Double?): String =
+        if (clipSeconds == null || a.option == null) "—" else Pricing.money(Pricing.totalCost(draft(a, takes, true, null).spec().copy(clipSeconds = clipSeconds)))
+
+    /** The add-on's estimate as the Generate button shows it ("Generate · 10 min · $0.67", "about $0.67"). */
+    fun estimate(a: SwapAddon, takes: Int, clipSeconds: Double): SuiteEstimate {
+        val spec = draft(a, takes, true, null).spec().copy(clipSeconds = clipSeconds)
+        return SuiteEstimate(quality = a.id, label = a.label, takes = takes, mode = "swap", estimate = Pricing.totalCost(spec),
+            priceLine = Pricing.optionPriceLine(spec), buttonLabel = Pricing.genLabel(spec))
+    }
+
+    /** POST /v1/jobs for the add-on: the clip, the character and outfit, takes, the clip's audio and the speaking switch. */
+    fun request(d: ComposerDraft, recast: RecastDraft, a: SwapAddon, clipSeconds: Double?): JobRequest =
+        draft(a, d.takes, recast.keepAudio, d.speaking).request(d.title.trim().ifBlank { "Character swap · ${a.label}" }, d.characterId.orEmpty(),
+            d.characterOutfit.orEmpty(), recast.clipId.orEmpty(), clipSeconds)
 }
 
 /**
@@ -189,11 +345,26 @@ object ToolSlots {
         }
         ComposerTool.SWAP -> listOf(ToolSlot("clip", "Clip", "Clip 3–30 s"), ToolSlot("character", "Character", "Your models"))
         ComposerTool.RECAST -> listOf(ToolSlot("clip", "Clip", "Clip 3–30 s"), ToolSlot("people", "People", "1–$recastMax people"))
-        ComposerTool.TALKING -> listOf(ToolSlot("character", "Character", "Your models"), ToolSlot("audio", "Audio", "Record or upload"),
+        ComposerTool.TALKING -> listOf(ToolSlot("character", "Character", "Your models"), ToolSlot("audio", "Audio", "One voice track"),
             ToolSlot("location", "Location", "A photo of the place", optional = true))
         ComposerTool.UGC -> listOf(ToolSlot("character", "Character", "Your models"), ToolSlot("product", "Product", "A photo of it"),
-            ToolSlot("refad", "Reference ad", "An ad to follow", optional = true))
+            ToolSlot("refad", "Reference ad", "A video ad to follow", optional = true))
         ComposerTool.EXTEND -> listOf(ToolSlot("video", "Video", "A take or a clip"))
+    }
+
+    /** Where the slot cards of Talking and UGC ad keep their files (the store's own slots of those tools). */
+    val TALK_AUDIO = SlotId(SlotKind.AUDIO)
+    val TALK_LOCATION = SlotId(SlotKind.IMAGE)
+    val UGC_PRODUCT = SlotId(SlotKind.IMAGE)
+    val UGC_REFAD = SlotId(SlotKind.VIDEO)
+
+    /** The own slot behind a slot card of Talking or UGC ad (null for the others). */
+    fun ownSlot(tool: ComposerTool, kind: String): SlotId? = when {
+        tool == ComposerTool.TALKING && kind == "audio" -> TALK_AUDIO
+        tool == ComposerTool.TALKING && kind == "location" -> TALK_LOCATION
+        tool == ComposerTool.UGC && kind == "product" -> UGC_PRODUCT
+        tool == ComposerTool.UGC && kind == "refad" -> UGC_REFAD
+        else -> null
     }
 
     /** Tools whose chips are hidden on the shell. */

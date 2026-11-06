@@ -58,7 +58,7 @@ struct CameraAngleStep: View {
 // MARK: Wheels
 
 /// What a wheel card shows above its name: a hardware render or a diagram drawn in code.
-enum WheelPlate { case render, focal, iris, height, framing }
+enum WheelPlate { case render, focal, iris, height, framing, format }
 
 /// One wheel: exactly three cards (previous, selected and next), the selection centred and outlined.
 struct WheelColumn: View {
@@ -167,8 +167,18 @@ struct WheelColumn: View {
             case .render: HardwareImage(name: item.render).background(Color(hex: 0x101112))
             case .focal: FocalDiagram(mm: Double(item.value ?? "") ?? 50, on: on)
             case .iris: IrisPlate(render: item.render, stop: Double(item.value?.dropFirst() ?? "") ?? 2.8)
-            case .height: HeightDiagram(id: item.value ?? "eye", on: on)
-            case .framing: FramingDiagram(id: item.value ?? "ms", on: on)
+            // Angles: the rendered still when bundled, else the line diagram.
+            case .height:
+                if let img = PreviewFiles.image(item.preview) { Image(nsImage: img).resizable().aspectRatio(contentMode: .fill) } else { HeightDiagram(id: item.value ?? "eye", on: on) }
+            case .framing:
+                if let img = PreviewFiles.image(item.preview) { Image(nsImage: img).resizable().aspectRatio(contentMode: .fill) } else { FramingDiagram(id: item.value ?? "ms", on: on) }
+            case .format:
+                // Style cards: big type until their stills exist.
+                LinearGradient(colors: [Color(hex: 0x23262A), Color(hex: 0x141518)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    .overlay(alignment: .bottomLeading) {
+                        Text(item.name).font(Fonts.font("Instrument Serif", 30, .regular)).foregroundStyle(on ? amber : lineInk)
+                            .lineLimit(1).minimumScaleFactor(0.6).padding(12)
+                    }
             }
         }
     }
@@ -459,8 +469,10 @@ struct MoveTile: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 9) {
                 ZStack(alignment: .topLeading) {
-                    PreviewView(preview: .move(move))
-                        .overlay(MoveArrow(move: move))
+                    // The rendered loop plays while the tile is on screen; the drawn arrow only where there's no preview.
+                    let pv = PickerPreview.move(move)
+                    PreviewView(preview: pv, autoplay: true)
+                        .overlay { if !pv.hasRender { MoveArrow(move: move) } }
                     VStack(alignment: .leading, spacing: 4) {
                         if talkSafeBadge { badge("Talk-safe", icon: "text.bubble") }
                         if move.editorBetter { badge("Better done in Edit", icon: "scissors") }

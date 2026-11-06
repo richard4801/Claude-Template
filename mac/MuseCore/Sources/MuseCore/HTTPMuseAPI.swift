@@ -131,6 +131,8 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     func suiteCall<T: Decodable>(_ method: String, _ path: String, body: Data? = nil) async throws -> T {
         try decode(try await send(request(method, path, body: body)))
     }
+    /// A call whose reply has nothing to read (DELETE).
+    func suiteSend(_ method: String, _ path: String) async throws { _ = try await send(request(method, path)) }
     /// A reference video or audio track for a shot's input slots: editor presign (an upload in this studio) + PUT → its storage key.
     public func uploadSuiteMedia(_ file: URL, contentType: String, progress: UploadProgress?) async throws -> SuiteVideoRef {
         let body = UploadBody.file(file)

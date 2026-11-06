@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -51,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import studio.muse.app.data.CameraCatalog
 import studio.muse.app.data.Model
 import studio.muse.app.data.Outfit
+import studio.muse.app.data.SuiteLocation
 import studio.muse.app.ui.components.RefImage
 import studio.muse.app.ui.components.T
 import studio.muse.app.ui.components.press
@@ -82,20 +85,33 @@ private class TokenTransformation(val tokens: PromptTokens, val chipBg: Color, v
     override fun hashCode() = tokens.hashCode()
 }
 
+/** Shorter than the text field's own long press, so a chip is picked up before text selection starts. */
+private const val LONG_PRESS_MS = 380L
+
+/** Tells "lifted (maybe null)" apart from "timed out" in a timeout. */
+private class Box1<T>(val v: T)
+
 /** A suggestion under the prompt while @ or # is being typed. */
 sealed interface Suggestion {
     data class Character(val model: Model) : Suggestion
     data class Dress(val outfit: Outfit) : Suggestion
     data class Move(val move: studio.muse.app.data.SuiteMoveOption) : Suggestion
+    data class Place(val location: SuiteLocation) : Suggestion
+    /** "+ New location": pick a photo, name it, and it joins the library. */
+    data object NewPlace : Suggestion
 }
 
-/** The suggestions for a trigger: @ = the studio's characters (and the picked one's outfits), # = moves matching the word. */
-fun suggestions(tr: Trigger?, models: List<Model>, outfits: List<Outfit>, cat: CameraCatalog, talkOnly: Boolean): List<Suggestion> {
+/**
+ * The suggestions for a trigger: @ = the studio's characters, the picked one's outfits and the studio's locations, ending
+ * with "+ New location"; # = moves matching the word.
+ */
+fun suggestions(tr: Trigger?, models: List<Model>, outfits: List<Outfit>, cat: CameraCatalog, talkOnly: Boolean, locations: List<SuiteLocation> = emptyList(), places: Boolean = true): List<Suggestion> {
     tr ?: return emptyList()
     val q = tr.query.lowercase()
     return if (tr.char == '@') {
         models.filter { q.isEmpty() || it.name.lowercase().contains(q) }.map { Suggestion.Character(it) } +
-            outfits.filter { q.isEmpty() || it.name.lowercase().contains(q) }.map { Suggestion.Dress(it) }
+            outfits.filter { q.isEmpty() || it.name.lowercase().contains(q) }.map { Suggestion.Dress(it) } +
+            (if (places) locations.filter { q.isEmpty() || it.name.lowercase().contains(q) }.map { Suggestion.Place(it) } + Suggestion.NewPlace else emptyList())
     } else PromptTokens.searchMoves(cat, tr.query).filter { !talkOnly || it.talkSafe }.take(10).map { Suggestion.Move(it) }
 }
 
@@ -107,17 +123,21 @@ fun suggestions(tr: Trigger?, models: List<Model>, outfits: List<Outfit>, cat: C
 fun PromptBox(
     tokens: PromptTokens, placeholder: String, models: List<Model>, outfits: List<Outfit>, cat: CameraCatalog, talkOnly: Boolean,
     onChange: (PromptTokens) -> Unit, onPick: (PromptTokens, Caret, Suggestion) -> PromptTokens?, onToken: (Long) -> Unit, modifier: Modifier = Modifier,
-    minHeight: androidx.compose.ui.unit.Dp = 52.dp, maxHeight: androidx.compose.ui.unit.Dp = 132.dp,
+    minHeight: androidx.compose.ui.unit.Dp = 52.dp, maxHeight: androidx.compose.ui.unit.Dp = 132.dp, locations: List<SuiteLocation> = emptyList(),
+    /** Test hook: the field starts with this caret (an open @ menu in screenshots). */
+    initialCaret: Int? = null,
 ) {
     val m = muse
     val encoded = PromptCodec.encode(tokens)
-    var field by remember { mutableStateOf(TextFieldValue(encoded, TextRange(encoded.length))) }
+    var field by remember { mutableStateOf(TextFieldValue(encoded, TextRange(initialCaret?.coerceIn(0, encoded.length) ?: encoded.length))) }
     // An outside change (a move added from the picker, a preset): take it, caret at the end.
     LaunchedEffect(encoded) { if (field.text != encoded) field = TextFieldValue(encoded, TextRange(encoded.length)) }
     val latest by rememberUpdatedState(tokens)
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    var dragging by remember { mutableStateOf<PromptPart?>(null) }
+    var dragAt by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     val trigger = if (field.selection.collapsed) PromptCodec.triggerAt(field.text, field.selection.start) else null
-    val list = suggestions(trigger, models, outfits, cat, talkOnly)
+    val list = suggestions(trigger, models, outfits, cat, talkOnly, locations)
     val transformation = remember(tokens, m.t.surface2) { TokenTransformation(tokens, m.t.surface2, m.t.ink, m.t.accent) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Box(Modifier.fillMaxWidth().heightIn(min = minHeight, max = maxHeight).padding(vertical = 4.dp)) {
@@ -128,15 +148,53 @@ fun PromptBox(
                     field = v.copy(text = clean)
                     onChange(PromptCodec.decode(latest, clean))
                 },
-                Modifier.fillMaxWidth().semantics { contentDescription = "Prompt. $placeholder" }.pointerInput(Unit) {
+                Modifier.fillMaxWidth().semantics {
+                    contentDescription = "Prompt. $placeholder"
+                    // TalkBack: each token can move one place left or right (drag to reorder for touch).
+                    customActions = tokens.parts.filter { it !is PromptPart.Text }.flatMap { p ->
+                        val name = PromptCodec.chipText(p)
+                        listOf(
+                            androidx.compose.ui.semantics.CustomAccessibilityAction("Move left · $name") { onChange(PromptCodec.nudge(latest, p.key, -1)); true },
+                            androidx.compose.ui.semantics.CustomAccessibilityAction("Move right · $name") { onChange(PromptCodec.nudge(latest, p.key, 1)); true },
+                        )
+                    }
+                }.pointerInput(Unit) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                        val up = waitForUpOrCancellation(PointerEventPass.Initial) ?: return@awaitEachGesture
-                        val l = layout ?: return@awaitEachGesture
-                        if ((up.position - down.position).getDistance() > 24f) return@awaitEachGesture
-                        val o = l.getOffsetForPosition(up.position)
-                        val d = PromptCodec.display(latest, PromptCodec.encode(latest))
-                        d.chips.firstOrNull { (r, _) -> o in r }?.let { (_, p) -> onToken(p.key) }
+                        val l0 = layout
+                        val d0 = PromptCodec.display(latest, PromptCodec.encode(latest))
+                        val chip = l0?.let { l -> l.getOffsetForPosition(down.position).let { o -> d0.chips.firstOrNull { (r, _) -> o in r }?.second } }
+                        // On a chip: a long press picks it up to drag it to a new place; a tap opens its sheet.
+                        val quick = if (chip != null) withTimeoutOrNull(LONG_PRESS_MS) { Box1(waitForUpOrCancellation(PointerEventPass.Initial)) }
+                            else Box1(waitForUpOrCancellation(PointerEventPass.Initial))
+                        if (quick != null) {
+                            val up = quick.v ?: return@awaitEachGesture
+                            val l = layout ?: return@awaitEachGesture
+                            if ((up.position - down.position).getDistance() > 24f) return@awaitEachGesture
+                            val o = l.getOffsetForPosition(up.position)
+                            val d = PromptCodec.display(latest, PromptCodec.encode(latest))
+                            d.chips.firstOrNull { (r, _) -> o in r }?.let { (_, p) -> onToken(p.key) }
+                            return@awaitEachGesture
+                        }
+                        val held = chip ?: return@awaitEachGesture
+                        dragging = held; dragAt = down.position
+                        while (true) {
+                            val ev = awaitPointerEvent(PointerEventPass.Initial)
+                            val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                            ch.consume()
+                            dragAt = ch.position
+                            if (!ch.pressed) {
+                                val l = layout
+                                if (l != null) {
+                                    val d = PromptCodec.display(latest, PromptCodec.encode(latest))
+                                    val to = d.displayToField(l.getOffsetForPosition(ch.position))
+                                    val next = PromptCodec.moveToken(latest, held.key, to)
+                                    if (next != latest) onChange(next)
+                                }
+                                break
+                            }
+                        }
+                        dragging = null
                     }
                 },
                 textStyle = m.type.body.copy(fontSize = 16.sp, lineHeight = 25.sp, color = m.t.ink),
@@ -150,6 +208,16 @@ fun PromptBox(
                     }
                 },
             )
+        }
+        dragging?.let { p ->
+            val dens = androidx.compose.ui.platform.LocalDensity.current
+            // The picked-up chip follows the finger; it lands where it's let go.
+            Box(Modifier.size(0.dp)) {
+                Box(Modifier.offset { androidx.compose.ui.unit.IntOffset(dragAt.x.toInt() - with(dens) { 30.dp.roundToPx() }, dragAt.y.toInt() - with(dens) { 70.dp.roundToPx() }) }
+                    .clip(RoundedCornerShape(8.dp)).background(m.t.ink).padding(horizontal = 10.dp, vertical = 6.dp)) {
+                    T(PromptCodec.chipText(p), m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), m.t.bg, maxLines = 1)
+                }
+            }
         }
         if (trigger != null && list.isNotEmpty()) {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -172,7 +240,10 @@ fun PromptBox(
 private fun SuggestionChip(s: Suggestion, onClick: () -> Unit) {
     val m = muse
     val shape = RoundedCornerShape(if (m.isA) 2.dp else 999.dp)
-    val label = when (s) { is Suggestion.Character -> "@" + s.model.name; is Suggestion.Dress -> "@" + s.outfit.name; is Suggestion.Move -> "#" + s.move.label }
+    val label = when (s) {
+        is Suggestion.Character -> "@" + s.model.name; is Suggestion.Dress -> "@" + s.outfit.name; is Suggestion.Move -> "#" + s.move.label
+        is Suggestion.Place -> "@" + s.location.name; Suggestion.NewPlace -> "+ New location"
+    }
     Row(Modifier.height(48.dp).press(onClick = onClick).semantics(mergeDescendants = true) { role = Role.Button; contentDescription = "Add $label" }, verticalAlignment = Alignment.CenterVertically) {
         Row(Modifier.height(36.dp).clip(shape).background(m.t.surface2).border(1.dp, m.t.line, shape).padding(start = 4.dp, end = 10.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -181,6 +252,8 @@ private fun SuggestionChip(s: Suggestion, onClick: () -> Unit) {
                     is Suggestion.Character -> RefImage(s.model.cover, Modifier.size(28.dp), 20)
                     is Suggestion.Dress -> RefImage(s.outfit.front, Modifier.size(28.dp), 20)
                     is Suggestion.Move -> MovePictogram(s.move.id, s.move.category, Modifier.size(28.dp), ink = m.t.bg, accent = m.t.accent)
+                    is Suggestion.Place -> RefImage(s.location.image, Modifier.size(28.dp), 50)
+                    Suggestion.NewPlace -> T("+", m.type.body.copy(fontSize = 18.sp, fontWeight = FontWeight.Bold), m.t.bg)
                 }
             }
             T(label, m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)

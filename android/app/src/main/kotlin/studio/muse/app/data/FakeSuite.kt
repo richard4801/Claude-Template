@@ -22,6 +22,11 @@ class FakeSuite {
     private var settings: SuiteSettings = bundle.settings.copy(mode = "mock")
     /** The Look each demo shot's takes carry (by job id), like the server's take.look. */
     val looks = mutableMapOf<String, SuiteLook>()
+    /** The demo studio's locations library (two places, from the demo's own images), newest first. */
+    val locations = mutableListOf(
+        SuiteLocation("loc_loft", "Sunlit loft", ImageRef.asset("g_front"), 1_762_300_000_000),
+        SuiteLocation("loc_studio", "Grey studio", ImageRef.asset("hero"), 1_762_200_000_000),
+    )
     /** Spent today on suite shots (demo, never settled: test renders). */
     var spentToday = 0.0
         private set

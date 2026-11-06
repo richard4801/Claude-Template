@@ -92,6 +92,13 @@
       "when": 1793929987200,
       "tag": "0012_edit_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1793929987397,
+      "tag": "0013_suite_locations",
+      "breakpoints": true
     }
   ]
 }
