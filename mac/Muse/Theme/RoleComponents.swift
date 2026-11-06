@@ -682,3 +682,109 @@ struct RProgress: View {
         .accessibilityValue("\(Int((max(0, min(1, value)) * 100).rounded())) percent")
     }
 }
+
+/// A choice chip (chip radius). Off: `field`. On: the one selection outline, ink text.
+struct ChoiceChip: View {
+    @Environment(\.theme) private var t
+    var text: String
+    var on: Bool
+    var action: () -> Void
+
+    init(_ text: String, on: Bool = false, action: @escaping () -> Void) {
+        self.text = text
+        self.on = on
+        self.action = action
+    }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous)
+        Button(action: action) {
+            Text(text).font(t.scale.label.font).lineLimit(1)
+                .foregroundStyle(on ? t.roles.ink : t.roles.ink2)
+                .padding(.horizontal, Space.s3)
+                .frame(height: 28)
+                .background(shape.fill(t.roles.field))
+                .overlay(shape.strokeBorder(t.roles.selection, lineWidth: on ? 2 : 0))
+                .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
+/// A tag with a remove button ("tattoos ×").
+struct RemovableTag: View {
+    @Environment(\.theme) private var t
+    var text: String
+    var onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: Space.s1) {
+            Text(text).font(t.scale.label.font).foregroundStyle(t.roles.ink)
+            Button(action: onRemove) {
+                Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(t.roles.ink2)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Remove")
+            .accessibilityLabel("Remove \(text)")
+        }
+        .padding(.leading, Space.s3)
+        .padding(.trailing, Space.s1)
+        .frame(height: 28)
+        .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(t.roles.field))
+    }
+}
+
+/// A multi-line text box with the role chrome.
+struct RTextBox: View {
+    @Environment(\.theme) private var t
+    var placeholder: String
+    @Binding var text: String
+    var lines: Int = 3
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if text.isEmpty {
+                Text(placeholder).font(t.scale.body.font).foregroundStyle(t.roles.ink2).padding(.top, 1).padding(.leading, 5).allowsHitTesting(false)
+            }
+            TextEditor(text: $text)
+                .font(t.scale.body.font)
+                .scrollContentBackground(.hidden)
+                .focused($focused)
+                .frame(height: CGFloat(lines) * 21)
+        }
+        .roleField(focused: focused, multiline: true)
+    }
+}
+
+/// A drop target for files: a dashed hairline on `field` (the dash means "drop here"), the selection colour while targeted.
+struct DropZone: View {
+    @Environment(\.theme) private var t
+    var title: String
+    var hint: String
+    var buttonTitle: String?
+    var targeted: Bool
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: t.radii.container, style: .continuous)
+        HStack(spacing: Space.s4) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).scaled(t.scale.label, t.roles.ink).lineLimit(1)
+                Text(hint).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: Space.s3)
+            if let buttonTitle {
+                Text(buttonTitle).font(t.scale.label.font).foregroundStyle(t.roles.ink)
+                    .padding(.horizontal, Space.s4).frame(height: 32)
+                    .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.raised))
+            }
+        }
+        .padding(Space.s5)
+        .background(shape.fill(t.roles.field))
+        .overlay(shape.strokeBorder(targeted ? t.roles.selection : t.roles.hairline, style: StrokeStyle(lineWidth: targeted ? 2 : 1, dash: targeted ? [] : [5, 4])))
+        .contentShape(shape)
+    }
+}

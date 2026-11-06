@@ -23,17 +23,6 @@ struct PlatformBadge: View {
     }
 }
 
-/// `.ico-sq`
-struct IconSquare: View {
-    @Environment(\.theme) private var t
-    var systemName: String
-    var body: some View {
-        Image(systemName: systemName).font(.system(size: 18))
-            .frame(width: 44, height: 44)
-            .background(RoundedRectangle(cornerRadius: t.isA ? 0 : t.r).fill(t.surface2))
-    }
-}
-
 // MARK: Profile
 
 struct ProfileLoraCard: View {
@@ -44,20 +33,19 @@ struct ProfileLoraCard: View {
     var body: some View {
         let l = store.lora(for: model)
         let untrained = l.state == "none" && l.version == 0
-        SectionHeader(title: "Identity LoRA") { Muted("Locks face and physique across photos and videos") }
-        HStack(spacing: 16) {
-            IconSquare(systemName: "sparkles")
+        SectionTitle("Identity LoRA") { Text("Keeps her face and build the same everywhere").scaled(t.scale.caption, t.roles.ink2) }
+        HStack(spacing: Space.s4) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(store.loraLine(l)).font(t.body(14, .bold))
-                Muted(l.version > 0 && l.state == "ready"
-                      ? "Trained on \(l.trainedOn ?? l.kept) shots you approved"
-                      : "Train a photo and a video LoRA from \(LoraPricing.candidates) shots you approve · about \(Pricing.money(store.loraSetEstimate + LoraPricing.trainCost))")
+                Text(store.loraLine(l)).scaled(t.scale.label, t.roles.ink)
+                Text(l.version > 0 && l.state == "ready"
+                     ? "Trained on \(l.trainedOn ?? l.kept) shots you approved"
+                     : "Train a photo and a video LoRA from \(LoraPricing.candidates) shots you approve, about \(Pricing.money(store.loraSetEstimate + LoraPricing.trainCost))")
+                    .scaled(t.scale.caption, t.roles.ink2)
             }
-            Spacer(minLength: 8)
-            if l.state == "training" { ProgressLine(value: l.progress / 100).frame(width: 120) }
-            MButton(untrained ? "Train LoRA" : "Open", kind: untrained ? .primary : .secondary) { store.openLora(model.id) }
+            Spacer(minLength: Space.s2)
+            if l.state == "training" { RProgress(value: l.progress / 100).frame(width: 120) }
+            RButton(untrained ? "Set up LoRA" : "Open LoRA", small: true) { store.openLora(model.id) }
         }
-        .card(16)
     }
 }
 
@@ -68,13 +56,14 @@ struct ProfileAccounts: View {
 
     var body: some View {
         let connected = store.accounts(for: model).count
-        SectionHeader(title: "Accounts") { Muted("\(model.shortName)'s own social accounts · \(connected) of \(Platform.allCases.count) connected") }
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), alignment: .leading, spacing: 12) {
+        SectionTitle("Accounts") { Text("\(connected) of \(Platform.allCases.count) connected").scaled(t.scale.caption, t.roles.ink2) }
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.s5), count: 3), alignment: .leading, spacing: Space.s3) {
             ForEach(Platform.allCases) { p in AccountCard(model: model, platform: p, allowDisconnect: true) }
         }
     }
 }
 
+/// One platform account: badge, name, handle and its action. A row on the canvas, not a card.
 struct AccountCard: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
@@ -84,24 +73,23 @@ struct AccountCard: View {
 
     var body: some View {
         let a = store.account(model, platform)
-        HStack(spacing: 12) {
-            PlatformBadge(platform: platform, size: 30)
+        HStack(spacing: Space.s3) {
+            PlatformBadge(platform: platform, size: 28)
             VStack(alignment: .leading, spacing: 1) {
-                Text(platform.label).font(t.body(13, .bold))
-                Text(a?.handle ?? "Not connected").font(t.body(12)).foregroundStyle(t.muted).lineLimit(1)
+                Text(platform.label).scaled(t.scale.label, t.roles.ink)
+                Text(a?.handle ?? "Not connected").scaled(t.scale.caption, t.roles.ink2).lineLimit(1)
             }
-            Spacer(minLength: 4)
+            Spacer(minLength: Space.s1)
             if a != nil {
-                if allowDisconnect { LinkText("Disconnect") { store.disconnect(model, platform) } }
+                if allowDisconnect { RButton("Disconnect", kind: .plain, small: true) { store.disconnect(model, platform) } }
             } else if store.isConnecting(model, platform) {
-                Text("Signing in…").font(t.body(12)).foregroundStyle(t.muted)
+                Text("Signing in…").scaled(t.scale.caption, t.roles.ink2)
             } else {
-                MButton("Connect", size: .small) { store.connect(model, platform) }
+                RButton("Connect", small: true) { store.connect(model, platform) }
             }
         }
-        .padding(14)
+        .frame(minHeight: 40)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .surface()
     }
 }
 
@@ -117,198 +105,196 @@ struct LoraView: View {
             HStack(spacing: 0) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        HStack(spacing: 6) {
-                            LinkText("Models") { store.go(.models) }
-                            Text("›").foregroundStyle(t.muted)
-                            LinkText(m.name) { store.openProfile(m.id) }
-                            Text("›").foregroundStyle(t.muted)
-                            Text("Identity LoRA").foregroundStyle(t.muted)
+                        HStack(spacing: Space.s1) {
+                            Button { store.go(.models) } label: { Text("Models").foregroundStyle(t.roles.link) }.buttonStyle(.plain)
+                            Text("›").foregroundStyle(t.roles.ink2)
+                            Button { store.openProfile(m.id) } label: { Text(m.name).foregroundStyle(t.roles.link) }.buttonStyle(.plain)
+                            Text("›").foregroundStyle(t.roles.ink2)
+                            Text("Identity LoRA").foregroundStyle(t.roles.ink2)
                         }
-                        .font(t.body(12))
-                        .padding(.bottom, 10)
-                        PageHeader(eyebrow: "Identity LoRA", title: m.shortName + (l.version > 0 && l.state == "ready" ? " · v\(l.version)" : ""))
+                        .typeStep(t.scale.caption)
+                        .padding(.bottom, Space.s3)
+                        ScreenTitle("Identity LoRA", subtitle: m.shortName + (l.version > 0 && l.state == "ready" ? ", version \(l.version)" : ""))
                         center(m, l)
                     }
-                    .padding(.horizontal, 36)
-                    .padding(.top, 28)
-                    .padding(.bottom, 48)
+                    .padding(.horizontal, Space.gutter)
+                    .padding(.top, Space.s5)
+                    .padding(.bottom, Space.s7)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(maxWidth: .infinity)
+                // The inspector: one tone up from the canvas, no shadow.
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) { side(m, l) }
-                        .padding(20)
+                    VStack(alignment: .leading, spacing: Space.s4) { side(m, l) }
+                        .padding(Space.s5)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(width: 344)
-                .background(t.isD ? Color.white : t.surface)
-                .overlay(alignment: .leading) { Rectangle().fill(t.isC ? t.line : t.strongLine).frame(width: t.lineWidth) }
+                .background(t.roles.raised)
+                .overlay(alignment: .leading) { Rectangle().fill(t.roles.hairline).frame(width: 1) }
             }
         } else {
-            Page { Note("No model yet.") }
+            ScreenPage {
+                EmptyState("No model yet", "A LoRA is trained on one model. Make a model first.", actionTitle: "New model") { store.go(.create) }
+            }
         }
     }
 
-    private var grid: [GridItem] { Array(repeating: GridItem(.flexible(), spacing: 10), count: 6) }
+    private var grid: [GridItem] { Array(repeating: GridItem(.flexible(), spacing: Space.s3), count: 6) }
 
     @ViewBuilder private func center(_ m: MuseModel, _ l: Lora) -> some View {
         switch l.state {
         case "building":
-            LazyVGrid(columns: grid, spacing: 10) {
-                ForEach(0..<18, id: \.self) { _ in Shimmer().aspectRatio(0.75, contentMode: .fit) }
-            }
+            SkeletonGrid(columns: 6, count: 18, ratio: 0.75, caption: false, spacing: Space.s3)
         case "review":
             HStack(alignment: .firstTextBaseline) {
-                H2("\(l.kept) of \(l.candidates.count) kept")
+                Text("\(l.kept) of \(l.candidates.count) kept").scaled(t.scale.heading, t.roles.ink)
                 Spacer()
-                Muted("Click a shot to drop it or bring it back · \(l.flagged) were flagged for you")
+                Text("Click a shot to drop it or bring it back. \(l.flagged) were flagged for you.").scaled(t.scale.caption, t.roles.ink2)
             }
-            .padding(.bottom, 12)
-            LazyVGrid(columns: grid, spacing: 10) {
+            .padding(.bottom, Space.s3)
+            LazyVGrid(columns: grid, spacing: Space.s3) {
                 ForEach(l.candidates) { c in CandidateTile(candidate: c) { store.toggleCandidate(m, c) } }
             }
         case "training":
-            LazyVGrid(columns: grid, spacing: 10) {
-                ForEach(l.candidates.filter(\.keep).prefix(18)) { c in Media(ref: c.image, ratio: 0.75) }
+            LazyVGrid(columns: grid, spacing: Space.s3) {
+                ForEach(l.candidates.filter(\.keep).prefix(18)) { c in MediaFrame(ref: c.image, ratio: 0.75) }
             }
         case "ready":
             if store.isDemo {
-                HStack(alignment: .top, spacing: 22) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Media(ref: .asset("c_face"), ratio: 0.75, radius: t.cardRadius)
-                        Muted("References only")
-                    }
-                    .frame(width: 280)
-                    VStack(alignment: .leading, spacing: 8) {
-                        Media(ref: .asset("face"), ratio: 0.75, radius: t.cardRadius)
-                        Text("With LoRA v\(l.version)").font(t.body(12, .bold))
-                    }
-                    .frame(width: 280)
+                HStack(alignment: .top, spacing: Space.s5) {
+                    MediaTile(ref: .asset("c_face"), ratio: 0.75, caption: "References only").frame(width: 280)
+                    MediaTile(ref: .asset("face"), ratio: 0.75, caption: "With LoRA version \(l.version)").frame(width: 280)
                 }
-                Muted("Same prompt and seed. The LoRA keeps her face shape, freckles and build steady across angles.").padding(.top, 12)
+                Text("Same prompt and seed. The LoRA keeps her face shape, freckles and build steady across angles.")
+                    .scaled(t.scale.body, t.roles.ink2).padding(.top, Space.s3)
             } else {
                 // A real studio sees her own training shots, never the demo's sample art.
                 let kept = l.candidates.filter(\.keep)
                 if kept.isEmpty {
-                    Note(icon: "sparkles", "LoRA v\(l.version) is ready. Test it in a photoshoot.")
+                    EmptyState("Version \(l.version) is ready", "Test it in a photoshoot to see her face hold across angles.")
                 } else {
-                    Lbl("Trained on these \(kept.count) shots").padding(.bottom, 8)
-                    LazyVGrid(columns: grid, spacing: 10) {
-                        ForEach(kept.prefix(18)) { c in Media(ref: c.image, ratio: 0.75) }
+                    SectionTitle("Trained on these \(kept.count) shots", top: 0)
+                    LazyVGrid(columns: grid, spacing: Space.s3) {
+                        ForEach(kept.prefix(18)) { c in MediaFrame(ref: c.image, ratio: 0.75) }
                     }
                 }
             }
         default:
             // Her own sheet images (faded) when she has them; the neutral sample art only in demo mode or for an empty sheet.
             let own = m.slots.compactMap(\.image).prefix(6)
-            LazyVGrid(columns: grid, spacing: 10) {
+            if l.state == "failed" {
+                ErrorState("The last training stopped", "You weren't charged for the part that failed. Build a new set to try again.")
+                    .padding(.bottom, Space.s3)
+            }
+            LazyVGrid(columns: grid, spacing: Space.s3) {
                 if own.isEmpty {
                     ForEach(Array(["g_front", "g_tq", "face", "c_front", "g_side", "profile"].enumerated()), id: \.offset) { _, k in
-                        Media(ref: store.isDemo ? ImageRef.asset(k) : nil, ratio: 0.75).opacity(0.35)
+                        MediaFrame(ref: store.isDemo ? ImageRef.asset(k) : nil, ratio: 0.75).opacity(0.35)
                     }
                 } else {
                     ForEach(Array(own.enumerated()), id: \.offset) { _, img in
-                        Media(ref: img, ratio: 0.75).opacity(0.35)
+                        MediaFrame(ref: img, ratio: 0.75).opacity(0.35)
                     }
                 }
             }
-            Note(icon: "sparkles", "We generate \(LoraPricing.candidates) varied shots from her character sheet: new angles, outfits, light and expressions, with full-body shots so her physique is learned too. You keep the ones that look like her.")
-                .padding(.top, 16)
-            if l.state == "failed" {
-                Note(icon: "exclamationmark.shield", warn: true, "The last training stopped. Nothing was charged for the part that failed. Build a new set to try again.").padding(.top, 10)
-            }
+            Text("We make \(LoraPricing.candidates) varied shots from her character sheet: new angles, outfits, light and expressions, with full-body shots so her build is learned too. You keep the ones that look like her.")
+                .scaled(t.scale.body, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 640, alignment: .leading)
+                .padding(.top, Space.s4)
         }
     }
 
     private var info: some View {
-        ListBox {
-            ListRow(icon: "camera", title: "Photo LoRA", hint: "Photoshoots · ~\(Int(LoraPricing.photoMinutes)) min · \(Pricing.money(LoraPricing.photoCost))") { EmptyView() }
-            ListRow(icon: "video", title: "Video LoRA", hint: "Videos · ~\(Int(LoraPricing.videoMinutes)) min · \(Pricing.money(LoraPricing.videoCost))", last: true) { EmptyView() }
+        VStack(alignment: .leading, spacing: Space.s2) {
+            SettingRow("Photo LoRA", hint: "For photoshoots, about \(Int(LoraPricing.photoMinutes)) min, \(Pricing.money(LoraPricing.photoCost))")
+            SettingRow("Video LoRA", hint: "For videos, about \(Int(LoraPricing.videoMinutes)) min, \(Pricing.money(LoraPricing.videoCost))")
         }
     }
 
     @ViewBuilder private func side(_ m: MuseModel, _ l: Lora) -> some View {
         switch l.state {
         case "building":
-            Muted("Generating \(LoraPricing.candidates) shots…", size: 13)
+            Text("Making \(LoraPricing.candidates) shots…").scaled(t.scale.label, t.roles.ink)
             info
-            MButton("Generating…", kind: .primary, size: .big, off: true) {}
+            RButton("Making shots…", kind: .action, fill: true, off: true) {}
         case "review":
             let enough = l.kept >= LoraPricing.minKept
             let cost = LoraPricing.trainCost
             HStack {
-                Text("\(l.kept) kept").font(t.body(14, .bold))
+                Text("\(l.kept) kept").scaled(t.scale.heading, t.roles.ink)
                 Spacer()
-                Pill(enough ? "Enough to train" : "Keep at least \(LoraPricing.minKept)", enough ? .good : .warn)
+                Text(enough ? "Enough to train" : "Keep at least \(LoraPricing.minKept)").scaled(t.scale.caption, enough ? t.roles.positive : t.roles.caution)
             }
-            Muted("Drop anything that doesn't look like her, or shows a tattoo, ring or choker. The LoRA learns whatever you keep.")
+            Text("Drop anything that doesn't look like her, or shows a tattoo, ring or choker. The LoRA learns whatever you keep.")
+                .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
             info
             HStack(spacing: 0) {
                 est("Time", LoraPricing.timeLabel)
                 est("Cost", Pricing.money(cost))
                 est("After", Pricing.money(max(0, store.balance.balance - cost)))
             }
-            .card(14)
+            .padding(.vertical, Space.s2)
             if !enough {
-                MButton("Keep \(LoraPricing.minKept - l.kept) more to train", kind: .primary, size: .big, off: true) { store.trainLora(m) }
+                RButton("Keep \(LoraPricing.minKept - l.kept) more to train", kind: .action, fill: true, off: true) { store.trainLora(m) }
             } else if cost > store.balance.balance + 1e-9 {
-                Note(icon: "creditcard", warn: true, text: store.isMember ? Text(store.notEnoughMessage) : Text("Not enough balance. ") + Text("Credit").bold())
-                    .onTapGesture { store.go(.credits) }
-                MButton("Train both LoRAs · \(Pricing.money(cost))", kind: .primary, size: .big, off: true) { store.trainLora(m) }
+                InlineNotice(store.isMember ? store.notEnoughMessage : "Not enough balance to train.", tone: .caution,
+                             actionTitle: store.isMember ? nil : "Add credit") { store.go(.credits) }
+                RButton("Train both LoRAs · \(Pricing.money(cost))", kind: .action, fill: true, off: true) { store.trainLora(m) }
             } else {
-                MButton("Train both LoRAs · \(Pricing.money(cost))", kind: .primary, size: .big) { store.trainLora(m) }
+                RButton("Train both LoRAs · \(Pricing.money(cost))", kind: .action, fill: true) { store.trainLora(m) }
             }
         case "training":
-            Text("Training on \(l.kept) shots").font(t.body(14, .bold))
-            Muted("You can keep working. We'll notify you when it's done.")
+            Text("Training on \(l.kept) shots").scaled(t.scale.heading, t.roles.ink)
+            Text("You can keep working. We'll notify you when it's done.").scaled(t.scale.caption, t.roles.ink2)
             bar("Photo LoRA", l.photo.progress > 0 || l.progress == 0 ? l.photo.progress : LoraPricing.photoProgress(l.progress))
             bar("Video LoRA", l.video.progress > 0 || l.progress == 0 ? l.video.progress : LoraPricing.videoProgress(l.progress))
-            Text(LoraPricing.timeLeftLine(progress: l.progress, demo: store.isDemo)).font(t.mono(11.5)).foregroundStyle(t.muted)
+            Text(LoraPricing.timeLeftLine(progress: l.progress, demo: store.isDemo)).monospacedDigit().scaled(t.scale.caption, t.roles.ink2)
         case "ready":
-            ListBox {
-                ListRow(title: "Use in new renders", hint: "Photos and videos") {
-                    MToggle(isOn: Binding(get: { store.lora(for: m).use }, set: { store.setLoraUse(m, $0) }))
-                }
-                ListRow(title: "Trained on", last: true) { MonoValue("\(l.trainedOn ?? l.kept) shots · v\(l.version)") }
+            SettingRow("Use in new renders", hint: "Photos and videos") {
+                RSwitch(label: "Use in new renders", isOn: Binding(get: { store.lora(for: m).use }, set: { store.setLoraUse(m, $0) }))
             }
-            MButton("Retrain with more shots", fill: true) { store.retrainLora(m) }
-            MButton("Test it in a photoshoot", kind: .primary, size: .big) {
+            SettingRow("Trained on") { RowValue("\(l.trainedOn ?? l.kept) shots, version \(l.version)") }
+            RButton("Test it in a photoshoot", kind: .action, fill: true) {
                 store.selectModel(m)
                 store.go(.shoot)
             }
-            Muted("Retraining makes v\(l.version + 1). v\(l.version) stays in use until the new one is ready, and older versions are kept.")
+            RButton("Retrain with more shots", fill: true) { store.retrainLora(m) }
+            Text("Retraining makes version \(l.version + 1). Version \(l.version) stays in use until the new one is ready, and older versions are kept.")
+                .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
         default:
-            (Text("A LoRA is a small add-on trained on one model. It keeps her ") + Text("face and physique").bold()
+            (Text("A LoRA is a small add-on trained on one model. It keeps her ") + Text("face and build").bold()
                 + Text(" the same in every photo and video, beyond what \(max(1, m.filled)) reference shots can hold."))
-                .font(t.body(13))
+                .scaled(t.scale.body, t.roles.ink)
                 .fixedSize(horizontal: false, vertical: true)
             info
-            MButton("Build training set · \(PhotoPricing.label(store.loraSetEstimate))", kind: .primary, size: .big) { store.buildTrainingSet(m) }
-            Muted("About \(Pricing.money(store.loraSetEstimate + LoraPricing.trainCost)) in all: about \(Pricing.money(store.loraSetEstimate)) for the training set and \(Pricing.money(LoraPricing.trainCost)) to train. Estimates until we've measured a real run.")
+            RButton("Build training set · \(Pricing.money(store.loraSetEstimate))", kind: .action, fill: true) { store.buildTrainingSet(m) }
+            Text("About \(Pricing.money(store.loraSetEstimate + LoraPricing.trainCost)) in all: about \(Pricing.money(store.loraSetEstimate)) for the training set and \(Pricing.money(LoraPricing.trainCost)) to train. Estimates until we've measured a real run.")
+                .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private func est(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Lbl(label)
-            Text(value).font(t.mono(14, .medium))
+            Text(label).scaled(t.scale.caption, t.roles.ink2)
+            Text(value).monospacedDigit().scaled(t.scale.heading, t.roles.ink)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func bar(_ name: String, _ p: Double) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Space.s1) {
             HStack {
-                Text(name).font(t.body(13))
+                Text(name).scaled(t.scale.caption, t.roles.ink)
                 Spacer()
-                Text("\(Int(p.rounded()))%").font(t.mono(11.5))
+                Text("\(Int(p.rounded()))%").monospacedDigit().scaled(t.scale.caption, t.roles.ink2)
             }
-            ProgressLine(value: p / 100)
+            RProgress(value: p / 100)
         }
     }
 }
 
-/// One training shot (`.lt`): click to keep or drop. Dropped shots go grey; flagged ones carry an amber tag.
+/// One training shot: click to keep or drop. Dropped shots go grey; flagged ones carry a caution tag.
 struct CandidateTile: View {
     @Environment(\.theme) private var t
     var candidate: LoraCandidate
@@ -317,33 +303,24 @@ struct CandidateTile: View {
     var body: some View {
         let c = candidate
         Button(action: action) {
-            Media(ref: c.image, ratio: 0.75)
-                .grayscale(c.keep ? 0 : 1)
-                .brightness(c.keep ? 0 : -0.35)
-                .overlay(alignment: .topTrailing) {
-                    ZStack {
-                        Circle().fill(c.keep ? t.accent : .white)
-                        if c.keep {
-                            Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundStyle(t.accentInk)
-                        } else {
-                            Text("✕").font(.system(size: 11, weight: .bold)).foregroundStyle(Color(hex: 0x111111))
-                        }
-                    }
-                    .frame(width: 22, height: 22)
-                    .padding(6)
-                }
-                .overlay(alignment: .bottomLeading) {
-                    if let f = c.flag {
-                        Text(f).font(.system(size: 11, weight: .bold)).foregroundStyle(Color(hex: 0x6B3F00))
-                            .padding(.horizontal, 7).padding(.vertical, 1)
-                            .background(Capsule().fill(Color(hex: 0xF6E2C0)))
-                            .padding(6)
-                    }
-                }
-                .contentShape(Rectangle())
+            MediaFrame(ref: c.image, ratio: 0.75) {
+                if let f = c.flag { StateTag(f, .onMedia) }
+            }
+            .grayscale(c.keep ? 0 : 1)
+            .brightness(c.keep ? 0 : -0.35)
+            .overlay(alignment: .topTrailing) {
+                Image(systemName: c.keep ? "checkmark" : "xmark").font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(c.keep ? (t.isD ? Color.white : t.roles.canvas) : Color(hex: 0x111111))
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(c.keep ? t.roles.selection : Color.white))
+                    .padding(Space.s2)
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(c.label + (c.flag.map { " · flagged: \($0)" } ?? ""))
+        .help(c.label + (c.flag.map { ", flagged: \($0)" } ?? "") + (c.keep ? ". Click to drop it." : ". Click to keep it."))
+        .accessibilityLabel(c.label)
+        .accessibilityValue(c.keep ? "Kept" : "Dropped")
     }
 }
 
@@ -361,105 +338,108 @@ struct PostSheetView: View {
             let suggestions = PostTime.suggestions()
             ZStack {
                 Color.black.opacity(0.38).onTapGesture { withAnimation { store.postDraft = nil } }
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: Space.s5) {
                     HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Eyebrow(model?.shortName ?? "Model").styled()
-                            Text(t.headingsUppercase ? "POST" : "Post").font(t.isA ? Fonts.font("Instrument Serif", 48, .regular) : t.display(32, t.isD ? .heavy : .bold))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Post").scaled(t.scale.title, t.roles.ink).accessibilityAddTraits(.isHeader)
+                            Text(model.map { "To \($0.shortName)'s accounts" } ?? "To her accounts").scaled(t.scale.caption, t.roles.ink2)
                         }
                         Spacer()
-                        IconButton(systemName: "xmark", help: "Close") { withAnimation { store.postDraft = nil } }
+                        RIconButton(systemName: "xmark", help: "Close") { withAnimation { store.postDraft = nil } }
                     }
-                    HStack(alignment: .top, spacing: 22) {
-                        Media(ref: take?.thumb, caption: take?.caption).frame(width: 170)
-                        VStack(alignment: .leading, spacing: 16) {
-                            Field("Post to") {
-                                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top, spacing: Space.s5) {
+                        MediaTile(ref: take?.thumb, caption: take?.caption).frame(width: 160)
+                        VStack(alignment: .leading, spacing: Space.s4) {
+                            RField("Post to") {
+                                VStack(alignment: .leading, spacing: Space.s2) {
                                     if !connected.isEmpty {
-                                        FlowLayout {
+                                        FlowLayout(spacing: Space.s2) {
                                             ForEach(connected) { p in platformChip(p, on: d.platforms.contains(p)) }
                                         }
                                     } else {
-                                        Muted("No accounts connected yet.")
+                                        Text("No accounts connected yet.").scaled(t.scale.caption, t.roles.ink2)
                                     }
                                     if connected.count < Platform.allCases.count {
-                                        LinkText(connected.isEmpty ? "+ Connect \(model?.shortName ?? "her")'s accounts" : "+ Connect more accounts") { store.connectFromPostSheet() }
+                                        RButton(connected.isEmpty ? "Connect \(model?.shortName ?? "her")'s accounts" : "Connect more accounts", kind: .plain, small: true) {
+                                            store.connectFromPostSheet()
+                                        }
                                     }
                                 }
                             }
-                            Field("Caption") {
-                                TextBox(placeholder: "Write a caption and hashtags", text: Binding(get: { store.postDraft?.caption ?? "" }, set: { store.postDraft?.caption = $0 }), lines: 3)
+                            RField("Caption") {
+                                RTextBox(placeholder: "Write a caption and hashtags", text: Binding(get: { store.postDraft?.caption ?? "" }, set: { store.postDraft?.caption = $0 }), lines: 3)
                             }
-                            ListBox {
-                                ListRow(title: "Mark as AI-generated", hint: labelHint("Turns on the platform's own AI label", d.platforms.filter { !$0.hasAILabel })) {
-                                    MToggle(isOn: Binding(get: { store.postDraft?.aiLabel ?? false }, set: { store.postDraft?.aiLabel = $0 }))
+                            VStack(alignment: .leading, spacing: Space.s1) {
+                                SettingRow("Mark as AI-generated", hint: labelHint("Turns on the platform's own AI label", d.platforms.filter { !$0.hasAILabel })) {
+                                    RSwitch(label: "Mark as AI-generated", isOn: Binding(get: { store.postDraft?.aiLabel ?? false }, set: { store.postDraft?.aiLabel = $0 }))
                                 }
-                                ListRow(title: "Paid partnership", hint: labelHint("Turns on the platform's branded-content tag", d.platforms.filter { !$0.hasPaidLabel }), last: true) {
-                                    MToggle(isOn: Binding(get: { store.postDraft?.paidPartnership ?? false }, set: { store.postDraft?.paidPartnership = $0 }))
+                                SettingRow("Paid partnership", hint: labelHint("Turns on the platform's branded-content tag", d.platforms.filter { !$0.hasPaidLabel })) {
+                                    RSwitch(label: "Paid partnership", isOn: Binding(get: { store.postDraft?.paidPartnership ?? false }, set: { store.postDraft?.paidPartnership = $0 }))
                                 }
                             }
-                            Field("When") {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Seg([(false, "Now"), (true, "Schedule")], selection: Binding(get: { store.postDraft?.schedule ?? false }, set: { store.postDraft?.schedule = $0 }))
-                                        .frame(width: 300)
+                            RField("When") {
+                                VStack(alignment: .leading, spacing: Space.s3) {
+                                    RSeg([(false, "Now"), (true, "Schedule")], selection: Binding(get: { store.postDraft?.schedule ?? false }, set: { store.postDraft?.schedule = $0 }))
+                                        .frame(width: 240)
                                     if d.schedule {
-                                        FlowLayout {
+                                        FlowLayout(spacing: Space.s2) {
                                             ForEach(suggestions, id: \.self) { s in
-                                                Chip(PostTime.label(s), on: abs(d.when.timeIntervalSince(s)) < 30) { store.postDraft?.when = s }
+                                                ChoiceChip(PostTime.label(s), on: abs(d.when.timeIntervalSince(s)) < 30) { store.postDraft?.when = s }
                                             }
                                         }
                                         DatePicker("Or pick a time", selection: Binding(get: { store.postDraft?.when ?? Date() }, set: { store.postDraft?.when = $0 }),
                                                    in: Date()..., displayedComponents: [.date, .hourAndMinute])
                                             .datePickerStyle(.compact)
-                                            .font(t.body(12))
+                                            .font(t.scale.caption.font)
                                             .fixedSize()
-                                        Muted("We'll notify you at that time and open each app with the post ready.")
+                                        Text("We'll notify you at that time and open each app with the post ready.").scaled(t.scale.caption, t.roles.ink2)
                                     }
                                 }
                             }
                         }
                     }
-                    HStack {
-                        Muted("For now MUSE opens each app (or its upload page) with your video saved and the caption copied. You press Post there.")
-                        Spacer(minLength: 16)
-                        MButton("Cancel") { withAnimation { store.postDraft = nil } }
-                        MButton(d.schedule ? "Schedule · \(PostTime.label(d.when))" : "Post to \(d.platforms.count) account\(d.platforms.count == 1 ? "" : "s")",
-                                kind: .primary, off: d.platforms.isEmpty || d.busy) { store.submitPost() }
+                    HStack(spacing: Space.s3) {
+                        Text("MUSE opens each app (or its upload page) with your video saved and the caption copied. You press Post there.")
+                            .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: Space.s4)
+                        RButton("Cancel", kind: .plain) { withAnimation { store.postDraft = nil } }
+                            .keyboardShortcut(.cancelAction)
+                        RButton(d.schedule ? "Schedule · \(PostTime.label(d.when))" : "Post to \(ScreenCopy.count(d.platforms.count, "account"))",
+                                kind: .action, off: d.platforms.isEmpty || d.busy) { store.submitPost() }
+                            .keyboardShortcut(.defaultAction)
                     }
                 }
-                .padding(.horizontal, 28)
-                .padding(.vertical, 26)
+                .padding(Space.s6)
                 .frame(width: 820)
-                .background(RoundedRectangle(cornerRadius: t.rLg).fill(t.bg))
-                .overlay(RoundedRectangle(cornerRadius: t.rLg).strokeBorder(t.strongLine, lineWidth: t.lineWidth))
-                .modifier(ThemeShadow(kind: .card, radius: t.rLg))
-                .shadow(color: .black.opacity(0.35), radius: 40, y: 30)
+                .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.raised))
+                .museFloat(t)
             }
         }
     }
 
     /// The hint, plus which selected platforms have no such field (socials.md: "the toggle shows as unavailable for that platform").
     private func labelHint(_ base: String, _ missing: [Platform]) -> String {
-        missing.isEmpty ? base : "\(base) · not available on \(missing.map(\.label).joined(separator: ", "))"
+        missing.isEmpty ? base : "\(base). Not available on \(missing.map(\.label).joined(separator: ", "))."
     }
 
     private func platformChip(_ p: Platform, on: Bool) -> some View {
-        let shape = RoundedRectangle(cornerRadius: t.isA ? 0 : 16, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous)
         return Button {
             store.togglePostPlatform(p)
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: Space.s2) {
                 PlatformBadge(platform: p, size: 18)
-                Text(p.label).font(t.body(13, on ? .semibold : .regular))
+                Text(p.label).font(t.scale.label.font)
             }
-            .foregroundStyle(t.ink)
-            .padding(.leading, 6).padding(.trailing, 12)
-            .frame(height: 32)
-            .background(shape.fill(on ? t.accent.opacity(0.14) : t.surface))
-            .overlay(shape.strokeBorder(on ? t.accent : t.line, lineWidth: on ? 2 : 1))
+            .foregroundStyle(on ? t.roles.ink : t.roles.ink2)
+            .padding(.leading, Space.s1).padding(.trailing, Space.s3)
+            .frame(height: 28)
+            .background(shape.fill(t.roles.field))
+            .overlay(shape.strokeBorder(t.roles.selection, lineWidth: on ? 2 : 0))
             .contentShape(shape)
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 }
 
@@ -473,39 +453,43 @@ struct PostsView: View {
         @Bindable var store = store
         let list = store.postTab == .scheduled ? store.scheduledPosts : store.postedPosts
         let m = store.currentModel
-        Page {
-            PageHeader(eyebrow: "Social", title: "Posts") {
-                Seg([(PostTab.scheduled, "Scheduled · \(store.scheduledPosts.count)"), (PostTab.posted, "Posted · \(store.postedPosts.count)")], selection: $store.postTab)
-                    .frame(width: 320)
+        ScreenPage {
+            ScreenTitle("Posts") {
+                RSeg([(PostTab.scheduled, "Scheduled \(store.scheduledPosts.count)"), (PostTab.posted, "Posted \(store.postedPosts.count)")], selection: $store.postTab)
+                    .frame(width: 260)
             }
             if let m {
-                // Five cards in one row left ~25 px for the name and handle at 1280 px: a wrapping grid instead.
-                Lbl("\(m.shortName)'s accounts").padding(.bottom, 8)
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 12)], alignment: .leading, spacing: 12) {
+                SectionTitle("\(m.shortName)'s accounts", top: 0)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: Space.s5)], alignment: .leading, spacing: Space.s3) {
                     ForEach(Platform.allCases) { p in AccountCard(model: m, platform: p, allowDisconnect: false) }
                 }
-                .padding(.bottom, 22)
             }
+            SectionTitle(store.postTab == .scheduled ? "Scheduled" : "Posted")
             if list.isEmpty {
-                Note(icon: "sparkles", store.postTab == .scheduled ? "Nothing scheduled. Open a finished take in the Gallery and click Post." : "Nothing posted yet.")
+                if store.postTab == .scheduled {
+                    EmptyState("Nothing scheduled", "Open a finished take and choose Post to schedule it here.", actionTitle: "Open gallery") { store.go(.gallery) }
+                } else {
+                    EmptyState("Nothing posted yet", "Posts you hand off to the apps show up here with their results.")
+                }
             } else {
                 LazyVStack(spacing: 0) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: Space.s3) {
                         Color.clear.frame(width: 44, height: 1)
-                        Lbl("Post").frame(maxWidth: .infinity, alignment: .leading)
-                        Lbl("Accounts").frame(width: 150, alignment: .leading)
-                        Lbl(store.postTab == .scheduled ? "When" : "Results").frame(width: 300, alignment: .leading)
-                        Lbl("Labels").frame(width: 110, alignment: .leading)
+                        Text("Post").frame(maxWidth: .infinity, alignment: .leading)
+                        Text("Accounts").frame(width: 150, alignment: .leading)
+                        Text(store.postTab == .scheduled ? "When" : "Results").frame(width: 300, alignment: .leading)
+                        Text("Labels").frame(width: 110, alignment: .leading)
                         Color.clear.frame(width: 34, height: 1)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 10)
-                    Rectangle().fill(t.strongLine).frame(height: t.lineWidth)
+                    .scaled(t.scale.caption, t.roles.ink2)
+                    .padding(.horizontal, Space.s3)
+                    .padding(.bottom, Space.s2)
                     ForEach(list) { p in PostRow(post: p) }
                 }
             }
-            Muted("For now MUSE opens each app (or its upload page) with your video and caption ready. Direct posting and auto-scheduling switch on per platform once it approves MUSE.")
-                .padding(.top, 16)
+            Text("For now MUSE opens each app (or its upload page) with your video and caption ready. Direct posting and auto-scheduling switch on per platform once it approves MUSE.")
+                .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                .padding(.top, Space.s5)
         }
         .task { await store.loadPostsIfStale() }
     }
@@ -515,48 +499,50 @@ struct PostRow: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
     var post: Post
+    @State private var hover = false
 
     var body: some View {
         let p = post
         let take = store.take(for: p)
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Media(ref: take?.thumb ?? p.thumb, ratio: 44.0 / 58.0, radius: t.isA ? 0 : 6).frame(width: 44)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(take?.caption ?? (p.title.isEmpty ? "Take" : p.title)).font(t.body(14, .bold)).lineLimit(1)
-                    Muted(p.caption.isEmpty ? "No caption" : p.caption)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: 4) { ForEach(p.platforms) { PlatformBadge(platform: $0, size: 20) } }
-                    .frame(width: 150, alignment: .leading)
-                Group {
-                    if p.isScheduled {
-                        Text(p.scheduledDate.map { PostTime.label($0) } ?? p.when)
-                    } else if let s = p.stats {
-                        Text(s.line)
-                    } else {
-                        Text(p.state == "failed" ? "Failed" : "Opened in each app")
-                    }
-                }
-                .font(t.mono(12))
-                .frame(width: 300, alignment: .leading)
-                Text([p.aiLabel ? "AI label" : "", p.paidPartnership ? "Paid" : ""].filter { !$0.isEmpty }.joined(separator: " · ").ifEmpty("—"))
-                    .font(t.body(12)).foregroundStyle(t.muted)
-                    .frame(width: 110, alignment: .leading)
-                MoreMenu {
-                    if p.isScheduled {
-                        Button("Open the apps now") { store.handoff(p) }
-                        Button("Cancel scheduled post", role: .destructive) { store.cancelPost(p) }
-                    } else {
-                        Button("Open the apps again") { store.handoff(p) }
-                    }
-                    if let take { Button("Open take") { store.openTake(take.id) } }
+        HStack(spacing: Space.s3) {
+            MediaFrame(ref: take?.thumb ?? p.thumb, ratio: 44.0 / 58.0).frame(width: 44)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(take?.caption ?? (p.title.isEmpty ? "Take" : p.title)).scaled(t.scale.label, t.roles.ink).lineLimit(1)
+                Text(p.caption.isEmpty ? "No caption" : p.caption).scaled(t.scale.caption, t.roles.ink2).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: Space.s1) { ForEach(p.platforms) { PlatformBadge(platform: $0, size: 20) } }
+                .frame(width: 150, alignment: .leading)
+            Group {
+                if p.isScheduled {
+                    Text(p.scheduledDate.map { PostTime.label($0) } ?? p.when).monospacedDigit().foregroundStyle(t.roles.ink)
+                } else if let s = p.stats {
+                    Text(s.line).monospacedDigit().foregroundStyle(t.roles.ink)
+                } else if p.state == "failed" {
+                    Text("Failed").foregroundStyle(t.roles.danger)
+                } else {
+                    Text("Opened in each app").foregroundStyle(t.roles.ink2)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            Rectangle().fill(t.line).frame(height: t.lineWidth)
+            .typeStep(t.scale.caption)
+            .frame(width: 300, alignment: .leading)
+            Text([p.aiLabel ? "AI label" : "", p.paidPartnership ? "Paid" : ""].filter { !$0.isEmpty }.joined(separator: ", ").ifEmpty("—"))
+                .scaled(t.scale.caption, t.roles.ink2)
+                .frame(width: 110, alignment: .leading)
+            MoreMenu {
+                if p.isScheduled {
+                    Button("Open the apps now") { store.handoff(p) }
+                    Button("Cancel scheduled post", role: .destructive) { store.cancelPost(p) }
+                } else {
+                    Button("Open the apps again") { store.handoff(p) }
+                }
+                if let take { Button("Open take") { store.openTake(take.id) } }
+            }
         }
+        .padding(.horizontal, Space.s3)
+        .padding(.vertical, Space.s2)
+        .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(hover ? t.roles.field.opacity(0.6) : .clear))
+        .onHover { hover = $0 }
     }
 }
 

@@ -22,10 +22,11 @@ struct SheetSlotTile: View {
         VStack(alignment: .leading, spacing: 6) {
             Group {
                 if busy {
-                    Shimmer()
+                    SkeletonBlock(ratio: 0.75, radius: t.radii.container)
                 } else if let ref {
-                    Media(ref: ref, ratio: 0.75, symbol: nil, selectedColor: targeted ? t.accent : nil) {
-                        Pill(ai ? "AI" : "yours", ai ? .acc : .yours)
+                    // Only the AI-made shots carry a tag; your own images need none.
+                    MediaFrame(ref: ref, ratio: 0.75, selected: targeted) {
+                        if ai { StateTag("AI", .onMedia) }
                     }
                     .overlay {
                         if hover || targeted {
@@ -40,7 +41,7 @@ struct SheetSlotTile: View {
                                     }
                                 }
                             }
-                            .clipShape(RoundedRectangle(cornerRadius: t.imageRadius))
+                            .clipShape(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous))
                             .transition(.opacity)
                         }
                     }
@@ -60,7 +61,18 @@ struct SheetSlotTile: View {
                         }
                     }
                 } else {
-                    Button(action: onPrimary) { EmptyTile(text: "Add", targeted: targeted) }.buttonStyle(.plain)
+                    Button(action: onPrimary) {
+                        let shape = RoundedRectangle(cornerRadius: t.radii.container, style: .continuous)
+                        Color.clear.aspectRatio(0.75, contentMode: .fit)
+                            .background(shape.fill(t.roles.field))
+                            .overlay(shape.strokeBorder(targeted ? t.roles.selection : t.roles.hairline,
+                                                        style: StrokeStyle(lineWidth: targeted ? 2 : 1, dash: targeted ? [] : [5, 4])))
+                            .overlay(Text(targeted ? "Drop to add" : "Add").scaled(t.scale.caption, t.roles.ink2))
+                            .contentShape(shape)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Add \(label)")
+                    .accessibilityLabel("Add \(label)")
                 }
             }
             .dropDestination(for: URL.self) { urls, _ in
@@ -68,7 +80,7 @@ struct SheetSlotTile: View {
                 onDrop(u)
                 return true
             } isTargeted: { targeted = $0 }
-            Text(label).font(t.body(12)).foregroundStyle(t.ink)
+            Text(label).scaled(t.scale.caption, t.roles.ink2)
         }
     }
 }
@@ -95,36 +107,49 @@ struct ProfileView: View {
     @Environment(\.theme) private var t
     @State private var newNever = ""
     @State private var addingNever = false
-    @State private var sheetTargeted = false
+    @FocusState private var neverFocused: Bool
 
     var body: some View {
         if let m = store.profileModel {
-            Page {
-                Breadcrumb(parent: "Models", title: m.name) { store.go(.models) }
-                HStack(alignment: .top, spacing: 28) {
-                    left(m).frame(width: 300)
+            ScreenPage {
+                Crumb(parent: "Models", title: m.name) { store.go(.models) }
+                HStack(alignment: .top, spacing: Space.s6) {
+                    left(m).frame(width: 280)
                     right(m)
                 }
             }
+        } else if store.loading {
+            ScreenPage {
+                HStack(alignment: .top, spacing: Space.s6) {
+                    SkeletonBlock(ratio: 0.75, radius: t.radii.container).frame(width: 280)
+                    VStack(alignment: .leading, spacing: Space.s4) {
+                        SkeletonBlock(width: 220, height: 24)
+                        SkeletonGrid(columns: 4, count: 8, ratio: 0.75)
+                    }
+                }
+            }
         } else {
-            Page {
-                Note("No model yet. Make one from your own reference images.")
-                MButton("New model", icon: "plus", kind: .primary) { store.go(.create) }.padding(.top, 12)
+            ScreenPage {
+                EmptyState("No model yet", "A model is a character you build from your own reference images.", actionTitle: "New model", actionKind: .action) { store.go(.create) }
             }
         }
     }
 
     private func left(_ m: MuseModel) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Group {
-                if let c = m.cover { Media(ref: c, ratio: 0.75, radius: t.cardRadius) } else { InitialTile(letter: m.initial, size: 120).surface() }
+        VStack(alignment: .leading, spacing: Space.s4) {
+            if let c = m.cover {
+                MediaFrame(ref: c, ratio: 0.75)
+            } else {
+                let shape = RoundedRectangle(cornerRadius: t.radii.container, style: .continuous)
+                Color.clear.aspectRatio(0.75, contentMode: .fit).background(shape.fill(t.roles.field))
+                    .overlay(Text(m.initial).font(t.scale.display.font).foregroundStyle(t.roles.ink2))
             }
-            HStack(spacing: 10) {
-                MButton("New video", icon: "video", kind: .primary, fill: true) {
+            HStack(spacing: Space.s2) {
+                RButton("New video", kind: .action, fill: true) {
                     store.selectModel(m)
                     store.go(.studio)
                 }
-                MButton("Shoot", icon: "camera", fill: true) {
+                RButton("Photoshoot", fill: true) {
                     store.selectModel(m)
                     store.go(.shoot)
                 }
@@ -142,39 +167,39 @@ struct ProfileView: View {
                     Button("Delete model…", role: .destructive) { store.deleteModel(m) }
                 }
             }
-            VStack(alignment: .leading, spacing: 8) {
-                Lbl("Niche")
-                Text(m.niche.isEmpty ? "—" : m.niche)
-                Lbl("Personality")
-                Text(m.personality.isEmpty ? "—" : m.personality).fixedSize(horizontal: false, vertical: true)
-                Lbl("Notes")
-                Text(m.notes.isEmpty ? "—" : m.notes).font(t.body(13)).foregroundStyle(t.muted).fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: Space.s3) {
+                detail("Niche", m.niche)
+                detail("Personality", m.personality)
+                detail("Notes", m.notes)
             }
-            .card()
+            .padding(.top, Space.s2)
+        }
+    }
+
+    private func detail(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).scaled(t.scale.caption, t.roles.ink2)
+            Text(value.isEmpty ? "—" : value).scaled(t.scale.body, t.roles.ink).fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private func right(_ m: MuseModel) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Eyebrow("Model").styled()
-            H1(m.name)
-            // The actions sit on their own row: next to the title they overflowed the ~650 px column at 1280 px.
-            VStack(alignment: .leading, spacing: 0) {
-                SectionHeader(title: "Character sheet") { LinkText("Versions") { store.openVersions(m.id) } }
-                HStack(spacing: 10) {
-                    Muted("Hover a shot to replace it")
-                    Spacer(minLength: 8)
-                    MButton("Upload images", icon: "square.and.arrow.up", size: .small) { store.uploadSheet(m) }
-                    if store.toolsFeatures?.enhance.available ?? false {
-                        MButton("Enhance", icon: "wand.and.stars", size: .small) { store.openEnhance(m) }
-                    }
-                    if store.toolsFeatures?.dressUp.available ?? false {
-                        MButton("Dress up", icon: "tshirt", size: .small) { store.openDressUp(m) }
-                    }
+            Text(m.name).scaled(t.scale.display, t.roles.ink).accessibilityAddTraits(.isHeader)
+            SectionTitle("Character sheet", top: Space.s5) { RButton("Versions", kind: .plain, small: true) { store.openVersions(m.id) } }
+            HStack(spacing: Space.s2) {
+                Text("Hover a shot to replace it, or drop an image on it.").scaled(t.scale.caption, t.roles.ink2)
+                Spacer(minLength: Space.s2)
+                RButton("Upload images", small: true) { store.uploadSheet(m) }
+                if store.toolsFeatures?.enhance.available ?? false {
+                    RButton("Enhance", small: true) { store.openEnhance(m) }
                 }
-                .padding(.bottom, 12)
+                if store.toolsFeatures?.dressUp.available ?? false {
+                    RButton("Dress up", small: true) { store.openDressUp(m) }
+                }
             }
-            VStack(alignment: .leading, spacing: 16) {
+            .padding(.bottom, Space.s4)
+            VStack(alignment: .leading, spacing: Space.s5) {
                 sheetGroup(m, "Face close-ups", SheetAngle.faceGroup)
                 sheetGroup(m, "Full body", SheetAngle.bodyGroup)
             }
@@ -183,69 +208,63 @@ struct ProfileView: View {
                 return true
             }
             if !m.hasBothFaces && m.filled > 0 {
-                Note(icon: "exclamationmark.shield", warn: true, "No \(m.slot("face")?.image == nil ? "face" : "profile") close-up yet. Faces come out softer without both close-ups.")
-                    .padding(.top, 14)
+                InlineNotice("No \(m.slot("face")?.image == nil ? "face" : "profile") close-up yet. Faces come out softer without both close-ups.", tone: .caution,
+                             actionTitle: "Upload images") { store.uploadSheet(m) }
+                    .padding(.top, Space.s4)
             }
 
-            VStack(alignment: .leading, spacing: 0) {
-                ProfileLoraCard(model: m)
-                ProfileAccounts(model: m)
-            }
+            ProfileLoraCard(model: m)
+            ProfileAccounts(model: m)
 
-            SectionHeader(title: "Outfits") {
-                MButton("Add outfit", icon: "plus", size: .small) { store.openOutfitSheet(for: m.id) }
+            SectionTitle("Outfits") {
+                RButton("Add outfit", small: true) { store.openOutfitSheet(for: m.id) }
             }
             let fits = store.outfits(for: m)
             if fits.isEmpty {
-                Note(icon: "tshirt", "No outfits yet. Describe one, use a product photo, or upload your own four angles.")
+                Text("No outfits yet. Describe one, use a product photo, or upload your own four angles.").scaled(t.scale.body, t.roles.ink2)
             }
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], alignment: .leading, spacing: 16) {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: Space.s6), GridItem(.flexible(), spacing: Space.s6)], alignment: .leading, spacing: Space.s5) {
                 ForEach(fits) { o in
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text(o.name).font(t.body(14, .bold))
-                            if o.isDressUp { Pill("Dress up") }
+                    VStack(alignment: .leading, spacing: Space.s2) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(o.name).scaled(t.scale.label, t.roles.ink).lineLimit(1)
                             Spacer()
-                            Muted(o.isDressUp ? "body · then faces" : "front · ¾ · side · back")
+                            Text(o.isDressUp ? "Dress up: body, then faces" : "Front, ¾, side, back").scaled(t.scale.caption, t.roles.ink2)
                         }
-                        HStack(spacing: 8) {
-                            ForEach(0..<4, id: \.self) { i in Media(ref: o.angles.indices.contains(i) ? o.angles[i] : nil, ratio: 0.75) }
+                        HStack(spacing: Space.s2) {
+                            ForEach(0..<4, id: \.self) { i in MediaFrame(ref: o.angles.indices.contains(i) ? o.angles[i] : nil, ratio: 0.75) }
                         }
                         if let faces = o.faces, faces.contains(where: { $0 != nil }) {
-                            HStack(spacing: 8) {
-                                ForEach(0..<faces.count, id: \.self) { i in Media(ref: faces[i], ratio: 0.75) }
+                            HStack(spacing: Space.s2) {
+                                ForEach(0..<faces.count, id: \.self) { i in MediaFrame(ref: faces[i], ratio: 0.75) }
                                 Spacer()
                             }
                             .frame(maxWidth: 220)
                         }
                     }
-                    .padding(12)
-                    .surface()
                 }
             }
 
-            VStack(alignment: .leading, spacing: 0) {
-            SectionHeader(title: "Never add") { Muted("Removed from every render automatically") }
-            FlowLayout(spacing: 8) {
+            SectionTitle("Never add") { Text("Removed from every render").scaled(t.scale.caption, t.roles.ink2) }
+            FlowLayout(spacing: Space.s2) {
                 ForEach(Array(store.neverList(m).enumerated()), id: \.offset) { i, item in
-                    RemovableChip(text: item) { store.removeNever(m, at: i) }
+                    RemovableTag(text: item) { store.removeNever(m, at: i) }
                 }
                 if addingNever {
                     TextField("e.g. necklaces", text: $newNever)
-                        .textFieldStyle(.plain)
-                        .font(t.body(13))
-                        .frame(width: 140, height: 32)
-                        .padding(.horizontal, 12)
-                        .overlay(RoundedRectangle(cornerRadius: t.isA ? 0 : 16).strokeBorder(t.accent, lineWidth: 1))
+                        .focused($neverFocused)
+                        .frame(width: 160)
+                        .roleField(focused: neverFocused)
+                        .onAppear { neverFocused = true }
                         .onSubmit {
                             store.addNever(m, newNever)
                             newNever = ""
                             addingNever = false
                         }
+                        .onExitCommand { addingNever = false }
                 } else {
-                    Chip("Add", icon: "plus") { addingNever = true }
+                    RButton("Add", small: true) { addingNever = true }
                 }
-            }
             }
         }
     }
@@ -254,10 +273,10 @@ struct ProfileView: View {
 extension ProfileView {
     /// One group of the character sheet (face close-ups, or the full body).
     func sheetGroup(_ m: MuseModel, _ title: String, _ angles: [SheetAngle]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Lbl(title)
+        VStack(alignment: .leading, spacing: Space.s2) {
+            Text(title).scaled(t.scale.label, t.roles.ink)
             // Four columns for both groups, so every tile is the same size.
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), alignment: .leading, spacing: 12) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.s3), count: 4), alignment: .leading, spacing: Space.s3) {
                 ForEach(angles) { a in
                     let s = m.slot(a.rawValue)
                     SheetSlotTile(label: a.label, ref: s?.image, ai: s?.isAI ?? false, busy: s?.busy ?? false, primary: "Replace", secondary: "Retake with AI",
@@ -276,65 +295,51 @@ struct CreateModelView: View {
     var body: some View {
         @Bindable var store = store
         let c = store.create
-        Page {
-            Breadcrumb(parent: "Models", title: "New model") { store.cancelCreate() }
+        ScreenPage {
+            Crumb(parent: "Models", title: "New model") { store.cancelCreate() }
             if c.step == 1 {
-                PageHeader(eyebrow: "New model", title: "Basics")
-                stepper(1)
-                VStack(alignment: .leading, spacing: 18) {
-                    Field("Name") { TextField("e.g. Noor", text: $store.create.name).fieldChrome() }
-                    Field("Age") {
-                        HStack(spacing: 12) {
-                            NumStepper(value: c.age, dec: { store.create.age = max(18, c.age - 1) }, inc: { store.create.age = min(70, c.age + 1) })
-                            Muted("Characters must be clearly adult (18+).")
+                ScreenTitle("New model", subtitle: "Step 1 of 2: the basics")
+                VStack(alignment: .leading, spacing: Space.s5) {
+                    RField("Name") { RTextField(placeholder: "e.g. Noor", text: $store.create.name) }
+                    RField("Age", hint: "Characters must be clearly adult (18+)") {
+                        HStack(spacing: Space.s2) {
+                            RIconButton(systemName: "minus", help: "Younger") { store.create.age = max(18, c.age - 1) }
+                            Text("\(c.age)").monospacedDigit().scaled(t.scale.body, t.roles.ink).frame(minWidth: 32)
+                                .accessibilityLabel("Age \(c.age)")
+                            RIconButton(systemName: "plus", help: "Older") { store.create.age = min(70, c.age + 1) }
                         }
                     }
-                    Field("Niche") {
-                        FlowLayout {
-                            ForEach(Niches.all, id: \.self) { n in Chip(n, on: c.niche == n) { store.create.niche = n } }
+                    RField("Niche") {
+                        FlowLayout(spacing: Space.s2) {
+                            ForEach(Niches.all, id: \.self) { n in ChoiceChip(n, on: c.niche == n) { store.create.niche = n } }
                         }
                     }
-                    VStack(alignment: .leading, spacing: 8) {
-                        (Text("PERSONALITY ").font(t.label).foregroundColor(t.muted) + Text("(optional)").font(t.body(12)).foregroundColor(t.muted))
-                        TextField("e.g. warm, a little dry, morning-routine energy", text: $store.create.personality).fieldChrome()
+                    RField("Personality", hint: "Optional") {
+                        RTextField(placeholder: "e.g. warm, a little dry, morning-routine energy", text: $store.create.personality)
                     }
-                    VStack(alignment: .leading, spacing: 8) {
-                        (Text("NOTES ").font(t.label).foregroundColor(t.muted) + Text("(optional)").font(t.body(12)).foregroundColor(t.muted))
-                        TextBox(placeholder: "Anything about the look you want kept", text: $store.create.notes, lines: 3)
+                    RField("Notes", hint: "Optional") {
+                        RTextBox(placeholder: "Anything about the look you want kept", text: $store.create.notes, lines: 3)
                     }
-                    HStack {
-                        MButton("Cancel") { store.cancelCreate() }
-                        MButton("Next: character sheet", kind: .primary) { store.createNext() }
+                    HStack(spacing: Space.s2) {
+                        RButton("Next: character sheet", kind: .action) { store.createNext() }
+                            .keyboardShortcut(.defaultAction)
+                        RButton("Cancel", kind: .plain) { store.cancelCreate() }
+                            .keyboardShortcut(.cancelAction)
                     }
-                    .padding(.top, 8)
+                    .padding(.top, Space.s2)
                 }
-                .frame(maxWidth: 640, alignment: .leading)
+                .frame(maxWidth: 560, alignment: .leading)
             } else {
-                PageHeader(eyebrow: "New model · \(c.name.isEmpty ? "Untitled" : c.name)", title: "Character sheet") {
-                    MButton("Back") { store.createBack() }
-                    MButton("Save model", kind: .primary, off: c.busy) { store.createSave() }
+                ScreenTitle("Character sheet", subtitle: "Step 2 of 2: \(c.name.isEmpty ? "untitled model" : c.name)") {
+                    RButton("Back") { store.createBack() }
+                    RButton(c.busy ? "Saving…" : "Save model", kind: .action, off: c.busy) { store.createSave() }
                 }
-                stepper(2)
                 Button {
                     store.addDraftImages(MediaImport.pick(MediaImport.imageTypes, multiple: true, prompt: "Add images"))
                 } label: {
-                    HStack(spacing: 18) {
-                        Image(systemName: "square.and.arrow.up").font(.system(size: 22)).frame(width: 52, height: 52)
-                            .background(RoundedRectangle(cornerRadius: t.controlRadius).fill(t.surface2))
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Drop your reference images here").font(t.body(14, .bold))
-                            Muted("Or click to choose. We sort them into the slots below, and you can move any image to another slot.")
-                        }
-                        Spacer()
-                        Text("Choose files").font(t.body(14, .semibold)).padding(.horizontal, 16).frame(height: 40)
-                            .background(RoundedRectangle(cornerRadius: t.controlRadius).fill(t.surface))
-                            .overlay(RoundedRectangle(cornerRadius: t.controlRadius).strokeBorder(t.strongLine, lineWidth: t.lineWidth))
-                    }
-                    .foregroundStyle(t.ink)
-                    .padding(26)
-                    .background(RoundedRectangle(cornerRadius: t.cardRadius).fill(dropTargeted ? t.accent.opacity(0.08) : t.surface))
-                    .overlay(RoundedRectangle(cornerRadius: t.cardRadius).strokeBorder(dropTargeted ? t.accent : t.line, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])))
-                    .contentShape(Rectangle())
+                    DropZone(title: "Drop your reference images here",
+                             hint: "Or choose files. We sort them into the slots below, and you can move any image to another slot.",
+                             buttonTitle: "Choose files", targeted: dropTargeted)
                 }
                 .buttonStyle(.plain)
                 .dropDestination(for: URL.self) { urls, _ in
@@ -342,8 +347,10 @@ struct CreateModelView: View {
                     return true
                 } isTargeted: { dropTargeted = $0 }
 
-                SectionHeader(title: "\(c.filled)/\(SheetAngle.allCases.count) shots") { Muted("Two face close-ups give the sharpest face") }
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 7), alignment: .leading, spacing: 12) {
+                SectionTitle("\(c.filled) of \(SheetAngle.allCases.count) shots") {
+                    Text("Two face close-ups give the sharpest face").scaled(t.scale.caption, t.roles.ink2)
+                }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.s3), count: 7), alignment: .leading, spacing: Space.s3) {
                     ForEach(SheetAngle.faceGroup + SheetAngle.bodyGroup) { a in
                         let slot = c.slots[a]
                         SheetSlotTile(label: a.label, ref: ref(slot), ai: isAI(slot), busy: slot == .busy, primary: "Replace", secondary: "Remove",
@@ -352,22 +359,20 @@ struct CreateModelView: View {
                     }
                 }
                 if c.faces < 2 && c.filled > 0 {
-                    Note(icon: "exclamationmark.shield", warn: true,
-                         "No \(c.faces > 0 ? "profile" : "face") close-up yet. You can still save, but faces come out softer without both close-ups.")
-                        .padding(.top, 16)
+                    InlineNotice("No \(c.faces > 0 ? "profile" : "face") close-up yet. You can still save, but faces come out softer without both close-ups.", tone: .caution)
+                        .padding(.top, Space.s4)
                 }
                 if c.filled > 0 && c.filled < SheetAngle.allCases.count && !c.busy {
                     let missing = SheetAngle.allCases.count - c.filled
-                    HStack {
+                    HStack(spacing: Space.s4) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Fill missing angles from your images").font(t.body(14, .bold))
-                            Muted("Optional. AI makes the \(missing) empty angle\(missing > 1 ? "s" : "") from what you uploaded · \(PhotoPricing.label(store.sheetAnglesEstimate(missing)))")
+                            Text("Fill the missing angles").scaled(t.scale.label, t.roles.ink)
+                            Text("Optional. Makes the \(ScreenCopy.count(missing, "empty angle")) from the images you added.").scaled(t.scale.caption, t.roles.ink2)
                         }
                         Spacer()
-                        MButton("Fill \(missing)") { store.fillMissing() }
+                        RButton("Fill \(missing) · \(Pricing.money(store.sheetAnglesEstimate(missing)))") { store.fillMissing() }
                     }
-                    .card()
-                    .padding(.top, 16)
+                    .padding(.top, Space.s5)
                 }
             }
         }
@@ -384,24 +389,5 @@ struct CreateModelView: View {
     private func isAI(_ s: DraftSlot?) -> Bool {
         if case .remote(_, let ai)? = s { return ai }
         return false
-    }
-
-    private func stepper(_ step: Int) -> some View {
-        HStack(spacing: 10) {
-            stepDot(1, "Basics", on: step == 1)
-            Rectangle().fill(t.line).frame(width: 40, height: 1)
-            stepDot(2, "Character sheet", on: step == 2)
-        }
-        .padding(.bottom, 22)
-    }
-
-    private func stepDot(_ n: Int, _ label: String, on: Bool) -> some View {
-        HStack(spacing: 8) {
-            Text("\(n)").font(t.body(12, .semibold)).frame(width: 26, height: 26)
-                .background(Circle().fill(on ? t.accent : .clear))
-                .overlay(Circle().strokeBorder(on ? t.accent : t.line, lineWidth: t.lineWidth))
-                .foregroundStyle(on ? t.accentInk : t.muted)
-            Text(label).font(t.body(14, .semibold)).foregroundStyle(on ? t.ink : t.muted)
-        }
     }
 }
