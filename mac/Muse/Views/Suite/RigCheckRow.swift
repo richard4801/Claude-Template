@@ -1,6 +1,7 @@
 import MuseCore
 import SwiftUI
 
+// Source of truth for the rules and wording: server/api/src/suite/rigcheck.ts (the demo port must match it).
 // AI suite · the rig check (workstream 3, plans/video-composer.md "Rig check"): one line just above the composer's bottom
 // bar when the choices clash with each other or with the prompt. A severity dot, the reason (cut short, the whole line in
 // the tooltip), the one-tap fix and the alt when there is one, "+N" for the rest, × to hide a warning until the choices
