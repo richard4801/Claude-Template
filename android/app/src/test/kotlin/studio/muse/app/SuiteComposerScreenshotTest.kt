@@ -72,7 +72,7 @@ class SuiteComposerScreenshotTest(private val theme: String, private val screen:
         }
         when (screen) {
             "empty" -> Unit
-            "preset" -> c.suite.composer.value = ComposerDraft().pickPreset(cat, "cinematic")
+            "preset" -> c.suite.composer.value = ComposerDraft().pickPreset(cat, "cinematic", SampleData.DEMO)
             else -> {
                 c.suite.composer.value = filled
                 c.suite.composerSlots.value = InputSlots().put(SlotId(SlotKind.START), SlotValue("window.jpg", image = ImageRef.asset("g_tq")))

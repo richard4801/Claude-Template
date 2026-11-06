@@ -283,7 +283,7 @@ private fun PhoneComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent
 private fun PhoneBar(ui: ComposerUi) {
     val m = muse
     if (!ui.d.tool.live) { ComingSoonLine(ui); return }
-    ui.blocker?.takeIf { ui.est != null || !ui.d.tokens.isEmpty || ui.d.characterId != null }?.let { T(it, m.type.tiny, m.t.muted, maxLines = 2) }
+    ui.blocker?.takeIf { !ui.empty }?.let { T(it, m.type.tiny, m.t.muted, maxLines = 2) }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         BarButton(Modifier.press { ui.open(ComposerSheet(SheetKind.SETTINGS)) }.semantics { contentDescription = "Quality ${SuiteRules.tierLabel(ui.d.quality)}"; role = Role.Button }) {
             SIc("gauge", 18.dp, m.t.muted); T(SuiteRules.tierLabel(ui.d.quality), m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1); SIc("chevd", 14.dp, m.t.muted)
@@ -462,7 +462,7 @@ private fun SlotCard(ui: ComposerUi, s: ToolSlot, modifier: Modifier) {
                 align = if (onImg) null else TextAlign.Center)
         }
         if (filled != null && s.kind in setOf("character", "start", "end", "clip")) {
-            Box(Modifier.align(Alignment.TopEnd).size(40.dp).press { ui.onClearSlot(s.kind) }.semantics { contentDescription = "Remove ${s.label}"; role = Role.Button }, contentAlignment = Alignment.Center) {
+            Box(Modifier.align(Alignment.TopEnd).size(48.dp).press { ui.onClearSlot(s.kind) }.semantics { contentDescription = "Remove ${s.label}"; role = Role.Button }, contentAlignment = Alignment.Center) {
                 Box(Modifier.size(20.dp).clip(CircleShape).background(Color(0x8C0E0C0A)), contentAlignment = Alignment.Center) { SIc("close", 11.dp, Color(0xFFF8F5EF)) }
             }
         }
@@ -531,7 +531,7 @@ private fun PresetRow(ui: ComposerUi, modifier: Modifier = Modifier, tileW: Dp, 
             ui.cat.presets.forEach { p ->
                 val on = ui.d.settings.preset == p.id
                 Box(Modifier.let { if (on) it.border(2.dp, m.t.ink).padding(3.dp) else it.padding(3.dp) }) {
-                    PreviewTile(presetPreview(ui.cat, p.id, p.label), Modifier.size(tileW, tileH).press { ui.update { it.pickPreset(ui.cat, p.id) } }
+                    PreviewTile(presetPreview(ui.cat, p.id, p.label), Modifier.size(tileW, tileH).press { ui.update { it.pickPreset(ui.cat, p.id, ui.models.firstOrNull()?.id) } }
                         .semantics { contentDescription = "Preset ${p.label}"; role = Role.Button })
                 }
             }
@@ -549,8 +549,10 @@ private fun RecentTakes(ui: ComposerUi, job: studio.muse.app.data.Job?, recent: 
         T("RECENT TAKES", m.type.mono.copy(fontSize = 11.sp, letterSpacing = .16.em, fontWeight = FontWeight.Medium), m.t.ink, Modifier.padding(horizontal = if (wide) 0.dp else 16.dp))
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = if (wide) 0.dp else 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.Bottom) {
+            // Nothing rendering yet: a wide empty card (the 9:16 pane is for a take in progress).
+            val idle = pane.phase == StagePhase.IDLE
             val big = if (wide) 100.dp else 140.dp
-            Box(Modifier.size(big, big * 16 / 9).clip(RoundedCornerShape(if (m.isA) 0.dp else 10.dp))) {
+            Box((if (idle) Modifier.size(if (wide) 320.dp else 240.dp, if (wide) 178.dp else 200.dp) else Modifier.size(big, big * 16 / 9)).clip(RoundedCornerShape(if (m.isA) 0.dp else 10.dp))) {
                 SuiteResultPane(pane, ui.lead?.cover, emptyTitle = "Your shot appears here", emptyHint = "Describe it below, press Generate.", compact = true,
                     onRetry = { job?.let { retry(ui.d.request(ui.slots, ui.inputs, ui.recast)) } }, onTry = nextTier(ui.d.quality)?.let { t -> { ui.update { it.copy(quality = t) } } },
                     tryLabel = nextTier(ui.d.quality)?.let { "Try ${SuiteRules.tierLabel(it)}" }, onOpen = { job?.let { openTake(it.id) } })
@@ -635,7 +637,7 @@ private fun WideBar(ui: ComposerUi) {
             val max = ui.catalog?.takesMax ?: 4
             MenuPill("layers", "${d.takes}/$max", "Takes", (1..max).map { "$it take${if (it > 1) "s" else ""}" to (it == d.takes) }) { i -> ui.update { it.copy(takes = i + 1) } }
         }
-        ui.blocker?.takeIf { ui.est != null }?.let { T(it, m.type.tiny, m.t.warn, Modifier.widthIn(max = 200.dp), maxLines = 2) }
+        ui.blocker?.takeIf { !ui.empty }?.let { T(it, m.type.tiny, m.t.warn, Modifier.widthIn(max = 200.dp), maxLines = 2) }
         WideGenerate(ui)
     }
 }

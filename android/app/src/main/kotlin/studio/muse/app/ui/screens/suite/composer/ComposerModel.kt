@@ -92,9 +92,10 @@ data class ComposerDraft(
 
     /**
      * Picks a ready-made combo (the beginner path): the tool card becomes the preset, the chips take its values, its move
-     * becomes the prompt's #move, and the composer collapses to who + shape + Generate.
+     * becomes the prompt's #move, and the composer collapses to who + shape + Generate. [defaultCharacter] fills an empty
+     * CHARACTER slot so the preset is a one-tap state.
      */
-    fun pickPreset(cat: CameraCatalog, id: String): ComposerDraft {
+    fun pickPreset(cat: CameraCatalog, id: String, defaultCharacter: String? = null): ComposerDraft {
         val p = cat.presets.firstOrNull { it.id == id } ?: return this
         var t = tokens
         t.moves.forEach { t = t.remove(it.key) }
@@ -102,7 +103,9 @@ data class ComposerDraft(
         val mvId = (mv?.get("id") as? JsonPrimitive)?.content
         val intensity = (mv?.get("intensity") as? JsonPrimitive)?.content?.toDoubleOrNull()
         cat.move(mvId)?.let { m -> t = t.addMove(m, t.caretAtEnd, ((intensity ?: .5) * 100).toInt()).first }
-        return copy(tool = ComposerTool.SHOT, settings = settings.fromPreset(cat, id), tokens = t, collapsed = true)
+        // One tap from here: the studio's first character stands in until another is picked (not for photo presets).
+        val who = modelId ?: defaultCharacter?.takeIf { id !in PHOTO_PRESETS }
+        return copy(tool = ComposerTool.SHOT, settings = settings.fromPreset(cat, id), tokens = t, collapsed = true, modelId = who)
     }
 
     /** "Edit settings": the full composer with the preset's values in the chips. */

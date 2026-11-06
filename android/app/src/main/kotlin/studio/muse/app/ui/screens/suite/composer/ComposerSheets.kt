@@ -129,6 +129,7 @@ fun BoxScope.ComposerSheetHost(sheet: ComposerSheet, x: SheetContext) {
                 val list = ComposerCatalog.visible(if (stock) cam.looks else cam.palettes)
                 OptionGrid(list, if (stock) s.stock else s.palette, x.wide, { id -> set { if (stock) it.copy(stock = id) else it.copy(palette = id) } },
                     header = "${list.size} ${if (stock) "film stocks" else "palettes"} · each with an exact grade", autoCaption = "Matches the scene",
+                    autoSwatches = listOf("#2A2C2E", "#3A3D40", "#4B4F52", "#5D6165", "#707478"),
                     preview = { o, _ -> Preview(o.render, o.loop, if (o.render == null) PreviewDraw.Swatch(o.swatches) else null, o.swatches.ifEmpty { listOf("#222222", "#555555", "#888888", "#BBBBBB", "#EEEEEE") }) })
             }
         }
@@ -157,11 +158,11 @@ private val STYLE_STILLS = listOf("palette-04-bleached-warm", "palette-02-teal-o
 @Composable
 private fun ColumnScope.OptionGrid(
     list: List<SuiteOption>, current: String?, wide: Boolean, onPick: (String?) -> Unit, header: String? = null, autoCaption: String = "The engine decides",
-    preview: (SuiteOption, Int) -> Preview,
+    preview: (SuiteOption, Int) -> Preview, autoSwatches: List<String> = emptyList(),
 ) {
     val sel = current?.let { c -> list.firstOrNull { it.id == c }?.mergedInto ?: c }
     TileGrid(wide, header = header?.let { h -> { T(h, muse.type.body.copy(fontSize = 12.5.sp), muse.t.muted) } }) {
-        item { PickTile("Auto", autoCaption, Preview(draw = PreviewDraw.Auto), sel == null, { onPick(null) }) }
+        item { PickTile("Auto", autoCaption, Preview(draw = PreviewDraw.Auto, swatches = autoSwatches), sel == null, { onPick(null) }) }
         items(list.size) { i -> val o = list[i]; PickTile(o.label, o.description, preview(o, i), sel == o.id, { onPick(o.id) }) }
     }
 }
@@ -215,7 +216,7 @@ private fun ColumnScope.SettingsBody(x: SheetContext) {
         MuseSlider(d.duration.coerceIn(range), range.first, range.last, { v -> x.update { it.copy(duration = v) } })
         Row(Modifier.fillMaxWidth()) { T("${range.first} s", m.type.mono.copy(fontSize = 12.sp), m.t.muted, Modifier.weight(1f)); T("${range.last} s", m.type.mono.copy(fontSize = 12.sp), m.t.muted) }
         Box(Modifier.padding(vertical = 8.dp).fillMaxWidth().height(1.dp).background(m.t.line))
-        SettingRow("Sound", "Ambience and effects") { Toggle(d.sound, { x.update { it.copy(sound = !it.sound) } }) }
+        SettingRow("Sound", "Ambience and effects", onClick = { x.update { it.copy(sound = !it.sound) } }) { Toggle(d.sound, { x.update { it.copy(sound = !it.sound) } }) }
         SettingRow("Speaking", "Lips move to the words") {
             MiniSeg(listOf("auto" to "Auto", "on" to "On", "off" to "Off"), when (d.speaking) { true -> "on"; false -> "off"; null -> "auto" }) { k ->
                 x.update { it.copy(speaking = when (k) { "on" -> true; "off" -> false; else -> null }) }
@@ -241,9 +242,10 @@ private fun ColumnScope.SettingsFooter(x: SheetContext) {
 }
 
 @Composable
-private fun SettingRow(title: String, sub: String, control: @Composable () -> Unit) {
+private fun SettingRow(title: String, sub: String, onClick: (() -> Unit)? = null, control: @Composable () -> Unit) {
     val m = muse
-    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).let { if (onClick != null) it.press(onClick = onClick).semantics(mergeDescendants = true) { role = Role.Switch } else it },
+        verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             T(title, m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
             T(sub, m.type.body.copy(fontSize = 12.sp), m.t.muted, maxLines = 1)
@@ -258,7 +260,7 @@ private fun MiniSeg(items: List<Pair<String, String>>, sel: String, onPick: (Str
     Row(Modifier.clip(RoundedCornerShape(10.dp)).background(m.t.surface2).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
         items.forEach { (k, l) ->
             val on = k == sel
-            Box(Modifier.size(52.dp, 42.dp).clip(RoundedCornerShape(7.dp)).background(if (on) m.t.ink else Color.Transparent).press { onPick(k) }
+            Box(Modifier.size(52.dp, 48.dp).clip(RoundedCornerShape(7.dp)).background(if (on) m.t.ink else Color.Transparent).press { onPick(k) }
                 .semantics { selected = on; role = Role.RadioButton; contentDescription = l }, contentAlignment = Alignment.Center) {
                 T(l, m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), if (on) Color(0xFF0D0E0F) else m.t.muted, maxLines = 1)
             }
@@ -331,7 +333,7 @@ private fun ColumnScope.ToolsBody(x: SheetContext) {
                 row.forEach { p ->
                     val on = x.d.settings.preset == p.id
                     Box(Modifier.weight(1f).picked(on, m.t.accent)) {
-                        PreviewTile(presetPreview(cam, p.id, p.label), Modifier.fillMaxWidth().height(84.dp).clip(RoundedCornerShape(10.dp)).press { x.update { it.pickPreset(cam, p.id) }; x.close() }
+                        PreviewTile(presetPreview(cam, p.id, p.label), Modifier.fillMaxWidth().height(84.dp).clip(RoundedCornerShape(10.dp)).press { x.update { it.pickPreset(cam, p.id, x.models.firstOrNull()?.id) }; x.close() }
                             .semantics { contentDescription = "Preset ${p.label}"; role = Role.Button })
                     }
                 }
@@ -445,7 +447,7 @@ private fun ColumnScope.PeopleBody(x: SheetContext) {
         if (r.canAdd) Box(Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(25.dp)).border(1.dp, m.t.line, RoundedCornerShape(25.dp)).press { x.updateRecast { it.add() } }, contentAlignment = Alignment.Center) {
             T("Add a person", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink)
         }
-        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).press { x.updateRecast { it.copy(keepAudio = !it.keepAudio) } }, verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 T("Keep the clip's audio", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink)
                 T("The original sound, put back after the render", m.type.body.copy(fontSize = 12.sp), m.t.muted)

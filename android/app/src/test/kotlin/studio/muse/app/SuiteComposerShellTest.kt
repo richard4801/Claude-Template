@@ -100,6 +100,10 @@ class SuiteComposerShellTest {
         assertTrue(d.collapsed)
         assertEquals("Cinematic", d.cardTitle(cat)); assertEquals("Film look, shallow focus, slow push", d.cardTagline(cat))
         assertEquals("character", d.collapsedSlot().kind)
+        assertNull(d.modelId)
+        assertEquals(SampleData.DEMO, ComposerDraft().pickPreset(cat, "cinematic", SampleData.DEMO).modelId) // one tap: the studio's first character
+        assertNull(ComposerDraft().pickPreset(cat, "product_hero", SampleData.DEMO).modelId)
+        assertEquals(SampleData.NOOR, ComposerDraft(modelId = SampleData.NOOR).pickPreset(cat, "cinematic", SampleData.DEMO).modelId)
         assertEquals("film_35", d.settings.body); assertEquals("teal_orange", d.settings.palette); assertEquals("cinematic", d.settings.preset)
         assertEquals("f2.8", d.settings.aperture) // f/2 isn't offered to members: the nearest visible step
         val mv = d.tokens.moves.single()

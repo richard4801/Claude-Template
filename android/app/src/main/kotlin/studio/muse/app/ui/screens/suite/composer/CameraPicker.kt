@@ -220,7 +220,7 @@ private fun ColumnScope.MovementBody(d: ComposerDraft, cat: CameraCatalog, wide:
         }
     }
     if (searching) {
-        Box(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().height(44.dp).clip(RoundedCornerShape(22.dp)).background(m.t.surface2).padding(horizontal = 16.dp), contentAlignment = Alignment.CenterStart) {
+        Box(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().height(48.dp).clip(RoundedCornerShape(24.dp)).background(m.t.surface2).padding(horizontal = 16.dp), contentAlignment = Alignment.CenterStart) {
             BasicTextField(query, { query = it.take(40) }, Modifier.fillMaxWidth(), singleLine = true, textStyle = m.type.body.copy(fontSize = 14.sp, color = m.t.ink), cursorBrush = SolidColor(m.t.accent),
                 decorationBox = { inner -> if (query.isEmpty()) T("Search ${cat.moves.size} moves", m.type.body.copy(fontSize = 14.sp), m.t.muted); inner() })
         }
