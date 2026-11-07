@@ -197,14 +197,19 @@ final class PerfHubTests: XCTestCase {
     func testCoalescerSharesOneRequestAndForgetsAfter() async throws {
         let c = RequestCoalescer<Int>()
         let calls = LockedCounter()
-        async let a = c.run("k") { calls.bump(); try await Task.sleep(nanoseconds: 30_000_000); return 7 }
+        // Deterministic order: the slow request is in flight before the second caller asks (async let children may start
+        // in any order, so starting both at once let "8" win now and then).
+        let first = Task { try await c.run("k") { calls.bump(); try await Task.sleep(nanoseconds: 300_000_000); return 7 } }
+        let deadline = Date().addingTimeInterval(5)
+        while c.inflightCount == 0 && Date() < deadline { await Task.yield() }
+        XCTAssertEqual(c.inflightCount, 1)
         async let b = c.run("k") { calls.bump(); return 8 }
         async let d = c.run("other") { calls.bump(); return 9 }
-        let (x, y, z) = try await (a, b, d)
+        let (x, y, z) = try await (first.value, b, d)
         XCTAssertEqual(x, 7)
+        XCTAssertEqual(y, 7, "the second caller shares the request in flight")
         XCTAssertEqual(z, 9)
-        XCTAssertTrue(y == 7 || y == 8)
-        XCTAssertLessThanOrEqual(calls.value, 3)
+        XCTAssertEqual(calls.value, 2, "one request for \"k\", one for \"other\"")
         XCTAssertEqual(c.inflightCount, 0)
         let again = try await c.run("k") { calls.bump(); return 1 }
         XCTAssertEqual(again, 1, "nothing is kept once the work ends")
