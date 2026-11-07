@@ -806,3 +806,25 @@ extension Ph {
         return img
     }
 }
+
+/// A floating panel over the screen (outfit sheet, post sheet): its content scrolls inside the panel, which is at most
+/// 760 pt tall and keeps a 30 pt margin to the window, so a short window never clips it (owner, 2026-11-07).
+private struct FloatingPanel: ViewModifier {
+    @Environment(\.theme) private var t
+    var width: CGFloat
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: t.radii.container, style: .continuous)
+        ScrollView(.vertical) { content }
+            .frame(width: width)
+            .frame(maxHeight: 760)
+            .background(shape.fill(t.roles.raised))
+            .clipShape(shape)
+            .museFloat(t)
+            .padding(30)
+    }
+}
+
+extension View {
+    func floatingPanel(width: CGFloat) -> some View { modifier(FloatingPanel(width: width)) }
+}

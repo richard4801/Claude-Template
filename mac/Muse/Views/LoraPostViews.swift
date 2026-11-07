@@ -410,9 +410,7 @@ struct PostSheetView: View {
                     }
                 }
                 .padding(Space.s6)
-                .frame(width: 820)
-                .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.raised))
-                .museFloat(t)
+                .floatingPanel(width: 820)
             }
         }
     }

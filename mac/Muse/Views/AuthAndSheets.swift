@@ -228,9 +228,7 @@ struct OutfitSheetView: View {
                     }
                 }
                 .padding(Space.s6)
-                .frame(width: 760)
-                .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.raised))
-                .museFloat(t)
+                .floatingPanel(width: 760)
             }
         }
     }
