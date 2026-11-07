@@ -177,15 +177,81 @@ public enum EditSuite {
 
     /// "0:18"
     public static func clock(_ s: Double) -> String {
-        let n = Int(max(0, s).rounded())
+        let n = Int(finiteSeconds(s).rounded())
         return "\(n / 60):" + (n % 60 < 10 ? "0" : "") + "\(n % 60)"
     }
 
     /// "0:04.2"
     public static func clockTenths(_ s: Double) -> String {
-        let t = Int((max(0, s) * 10).rounded())
+        let t = Int((finiteSeconds(s) * 10).rounded())
         let sec = (t / 10) % 60, m = t / 600
         return "\(m):" + (sec < 10 ? "0" : "") + "\(sec).\(t % 10)"
+    }
+
+    // MARK: Waveform peaks (owner crash 2026-11-07)
+
+    /// Peak levels of decoded 16-bit PCM at any rate and channel count: each frame's loudest channel, kept as the max of
+    /// each block of `block` frames (so a long take never holds every sample), then sliced into equal parts and normalised.
+    public struct Peaks: Sendable {
+        public let block: Int
+        public private(set) var blocks: [Int32] = []
+        private var cur: Int32 = 0
+        private var inBlock = 0
+        public init(block: Int = 64) { self.block = max(1, block) }
+
+        /// Adds interleaved samples (`channels` per frame; a trailing partial frame is ignored).
+        public mutating func add(interleaved s: [Int16], channels: Int) {
+            let ch = max(1, channels)
+            var i = 0
+            while i + ch <= s.count {
+                var m: Int32 = 0
+                for c in 0..<ch { m = max(m, abs(Int32(s[i + c]))) }
+                cur = max(cur, m)
+                inBlock += 1
+                if inBlock == block { blocks.append(cur); cur = 0; inBlock = 0 }
+                i += ch
+            }
+        }
+
+        /// `count` peaks (0…1) over everything added, the loudest scaled to 1 (quiet sound stays small: floor 0.05).
+        /// Empty when nothing was added or `count` < 1.
+        public func slices(_ count: Int) -> [Float] {
+            var all = blocks
+            if inBlock > 0 { all.append(cur) }
+            guard count > 0, !all.isEmpty else { return [] }
+            let n = min(count, all.count)
+            var out: [Float] = []
+            out.reserveCapacity(n)
+            for k in 0..<n {
+                let a = k * all.count / n, b = max(a + 1, (k + 1) * all.count / n)
+                out.append(Float(all[a..<min(b, all.count)].max() ?? 0) / 32768)
+            }
+            let top = max(0.05, out.max() ?? 1)
+            return out.map { min(1, $0 / top) }
+        }
+    }
+
+    // MARK: Safe numbers (owner blocker 2026-11-07: Int(inf / NaN) crashed the editor on real takes)
+
+    /// Seconds a clock can show: NaN, negative and infinite become 0, and anything past 100 hours is capped.
+    public static func finiteSeconds(_ s: Double) -> Double { s.isFinite ? min(max(0, s), 360_000) : 0 }
+    /// An Int from a Double that may be NaN or infinite (`Int(x)` traps on those): nil when it isn't a finite number.
+    public static func int(_ x: Double) -> Int? { x.isFinite && abs(x) < 1e15 ? Int(x) : nil }
+    /// The most thumbnail tiles a timeline block draws.
+    public static let maxTiles = 400
+    /// Thumbnail tiles across a block `width` wide: at least 1, at most `maxTiles`, whatever the width (NaN, infinite).
+    public static func tileCount(width: Double, tileWidth: Double) -> Int {
+        guard tileWidth > 0, let n = int((width / tileWidth).rounded(.up)) else { return 1 }
+        return min(maxTiles, max(1, n))
+    }
+    /// Which of `count` frames (or waveform peaks) spread over the source shows source time `source`. The source length
+    /// is the asset's `durationSec`, else `fallbackSec`; when neither is a positive finite number, frame 0. Nil when
+    /// there are no frames. Never out of range, never traps.
+    public static func frameIndex(source: Double, durationSec: Double?, fallbackSec: Double, count: Int) -> Int? {
+        guard count > 0 else { return nil }
+        let d = [durationSec ?? .nan, fallbackSec].first { $0.isFinite && $0 > 0 }
+        guard let d, source.isFinite, let i = int(source / d * Double(count)) else { return 0 }
+        return min(count - 1, max(0, i))
     }
 
     /// One row of the timeline (top to bottom as the design draws them: hook/text, captions, overlays, stickers, video,

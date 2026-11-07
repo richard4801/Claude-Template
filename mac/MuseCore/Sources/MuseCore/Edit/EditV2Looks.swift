@@ -200,6 +200,43 @@ extension EditV2 {
 
     // MARK: .cube
 
+    /// Three plain decimal numbers ("0.25 -1e-3 1") from a .cube data line's bytes, or nil (the caller then uses the general
+    /// parser). Only `0-9 . + - e E`, spaces, tabs and a trailing CR are accepted; each number must be a complete decimal.
+    static func fastTriple<C: Collection>(_ line: C) -> (Float, Float, Float)? where C.Element == UInt8 {
+        var out: [Double] = []
+        out.reserveCapacity(3)
+        var i = line.startIndex
+        func isSpace(_ b: UInt8) -> Bool { b == 32 || b == 9 || b == 13 }
+        while i != line.endIndex {
+            let b = line[i]
+            if isSpace(b) { i = line.index(after: i); continue }
+            // One number: [sign] digits [. digits] [e [sign] digits]
+            var neg = false
+            if b == 45 || b == 43 { neg = b == 45; i = line.index(after: i) }
+            var mant = 0.0, digits = 0, scale = 0
+            while i != line.endIndex, (48...57).contains(line[i]) { mant = mant * 10 + Double(line[i] - 48); digits += 1; i = line.index(after: i) }
+            if i != line.endIndex, line[i] == 46 {
+                i = line.index(after: i)
+                while i != line.endIndex, (48...57).contains(line[i]) { mant = mant * 10 + Double(line[i] - 48); digits += 1; scale -= 1; i = line.index(after: i) }
+            }
+            guard digits > 0, digits <= 17 else { return nil }
+            if i != line.endIndex, line[i] == 101 || line[i] == 69 {
+                i = line.index(after: i)
+                var eneg = false, e = 0, ed = 0
+                if i != line.endIndex, line[i] == 45 || line[i] == 43 { eneg = line[i] == 45; i = line.index(after: i) }
+                while i != line.endIndex, (48...57).contains(line[i]) { e = e * 10 + Int(line[i] - 48); ed += 1; i = line.index(after: i); if e > 400 { return nil } }
+                guard ed > 0 else { return nil }
+                scale += eneg ? -e : e
+            }
+            guard i == line.endIndex || isSpace(line[i]) else { return nil }
+            let v = (neg ? -mant : mant) * pow(10, Double(scale))
+            guard v.isFinite else { return nil }
+            out.append(v)
+            if out.count > 3 { return nil }
+        }
+        return out.count == 3 ? (Float(out[0]), Float(out[1]), Float(out[2])) : nil
+    }
+
     /// Parses an Adobe/Resolve .cube 3D LUT (red changes fastest). Throws CubeError with the line on anything invalid.
     public static func parseCube(_ text: String) throws -> Lut {
         let maxB = LookLimits.maxCubeBytes
@@ -211,6 +248,14 @@ extension EditV2 {
         var n = 0
         let lines = text.utf8.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: false)
         for (i, raw) in lines.enumerated() {
+            // Fast path (owner report 2026-11-07: parsing the packs with String ops was slow): a line of only digits, signs,
+            // dots, exponents and spaces is read as three numbers straight from its bytes. Anything else, and any line
+            // this can't read cleanly, takes the general path below (same results and errors as before).
+            if data != nil, n < size * size * size, let v = fastTriple(raw) {
+                data![n * 3] = v.0; data![n * 3 + 1] = v.1; data![n * 3 + 2] = v.2
+                n += 1
+                continue
+            }
             var text = String(decoding: raw, as: UTF8.self)
             if let hash = text.firstIndex(of: "#") { text = String(text[..<hash]) }
             let line = text.trimmingCharacters(in: .whitespacesAndNewlines)

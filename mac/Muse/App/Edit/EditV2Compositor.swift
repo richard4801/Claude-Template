@@ -113,8 +113,8 @@ final class EditV2Scene: @unchecked Sendable {
 
     func render(_ request: AVAsynchronousVideoCompositionRequest, into out: CVPixelBuffer) {
         let t = request.compositionTime.seconds
-        let fps = plan.fps > 0 ? plan.fps : 30
-        let frameNo = Int((t * fps).rounded())
+        let fps = plan.fps.isFinite && plan.fps > 0 ? plan.fps : 30
+        let frameNo = EditSuite.int((t * fps).rounded()) ?? 0   // never Int(NaN / inf) (owner blocker 2026-11-07)
         var image = CIImage(color: color(plan.background)).cropped(to: canvas)
 
         // Main track (bottom layer).

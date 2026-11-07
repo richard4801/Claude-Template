@@ -138,7 +138,7 @@ struct TimelineCanvas: View {
     private var z: CGFloat { CGFloat(s.zoom) }
 
     var body: some View {
-        let width = max(600, CGFloat(session.duration) * z + 160)
+        let width = min(2_000_000, max(600, CGFloat(EditSuite.finiteSeconds(session.duration)) * z + 160)) // finite (owner blocker 2026-11-07)
         VStack(alignment: .leading, spacing: 0) {
             ruler(width: width)
             ForEach(s.rows) { row in
@@ -155,8 +155,9 @@ struct TimelineCanvas: View {
     private func ruler(width: CGFloat) -> some View {
         let step: Double = z >= 120 ? 0.5 : z >= 50 ? 2 : z >= 24 ? 5 : 10
         return Canvas { ctx, size in
-            var tt = 0.0
-            while CGFloat(tt) * z <= size.width {
+            var tt = 0.0, ticks = 0
+            while CGFloat(tt) * z <= size.width, ticks < 20_000, z > 0 {
+                ticks += 1
                 let x = CGFloat(tt) * z
                 ctx.stroke(Path { p in p.move(to: CGPoint(x: x, y: 12)); p.addLine(to: CGPoint(x: x, y: size.height)) }, with: .color(t.line), lineWidth: 1)
                 ctx.draw(Text(EditSuite.clockTenths(tt).replacingOccurrences(of: ".0", with: "")).font(t.mono(9.5)).foregroundColor(t.muted),
@@ -172,7 +173,7 @@ struct TimelineCanvas: View {
     }
 
     private var playhead: some View {
-        let x = CGFloat(session.playhead) * z
+        let x = CGFloat(EditSuite.finiteSeconds(session.playhead)) * z
         return ZStack(alignment: .top) {
             Rectangle().fill(t.accent).frame(width: 1.5)
             Text(EditSuite.clockTenths(session.playhead)).font(t.mono(10, .semibold)).foregroundStyle(.white)
@@ -227,8 +228,8 @@ struct TimelineCanvas: View {
     }
 
     @ViewBuilder private func block(_ b: EditSuite.Block, row: EditSuite.Row, locked: Bool) -> some View {
-        let x = CGFloat(b.startSec) * z
-        let w = max(4, CGFloat(b.endSec - b.startSec) * z)
+        let x = CGFloat(EditSuite.finiteSeconds(b.startSec)) * z
+        let w = max(4, CGFloat(EditSuite.finiteSeconds(b.endSec - b.startSec)) * z)
         let h = Self.rowHeight(row.kind) - 6
         let selected = b.itemId != nil && b.itemId == s.selection
         ZStack(alignment: .leading) {
@@ -298,16 +299,17 @@ struct TimelineCanvas: View {
 
     /// Frames of the clip's source across the block.
     private func strip(_ c: EditV2.VideoClip, width: CGFloat, height: CGFloat) -> some View {
+        // Owner blocker 2026-11-07: a 0 / NaN duration made `Int(src / dur …)` trap. The index math is in MuseCore (tested).
         let frames = session.strips[c.asset] ?? []
-        let dur = session.project.asset(c.asset)?.durationSec ?? max(c.outSec, 0.1)
-        let tileW = max(16, height * 0.75)
-        let n = max(1, Int((width / tileW).rounded(.up)))
+        let dur = session.project.asset(c.asset)?.durationSec
+        let tileW = max(16, height.isFinite ? height * 0.75 : 16)
+        let n = EditSuite.tileCount(width: Double(width), tileWidth: Double(tileW))
         return HStack(spacing: 0) {
             ForEach(0..<n, id: \.self) { k in
                 let src = c.inSec + (Double(k) + 0.5) / Double(n) * (c.outSec - c.inSec)
-                let i = frames.isEmpty ? -1 : min(frames.count - 1, max(0, Int(src / dur * Double(frames.count))))
+                let i = EditSuite.frameIndex(source: src, durationSec: dur, fallbackSec: c.outSec, count: frames.count) ?? -1
                 Group {
-                    if i >= 0 {
+                    if i >= 0 && i < frames.count {
                         Image(decorative: frames[i], scale: 1).resizable().aspectRatio(contentMode: .fill)
                     } else {
                         Color(hex: 0x33302C)
@@ -323,15 +325,16 @@ struct TimelineCanvas: View {
     /// The asset's peaks between in and out.
     private func wave(asset: String, inSec: Double, outSec: Double, width: CGFloat, height: CGFloat, kind: EditV2.TrackKind) -> some View {
         let peaks = session.waves[asset] ?? []
-        let dur = session.project.asset(asset)?.durationSec ?? outSec
+        let dur = session.project.asset(asset)?.durationSec
         let tint: Color = kind == .music ? Color(hex: 0x2F9E57) : kind == .voice ? Color(hex: 0x6E6AE0) : Color(hex: 0xB45A00)
         return Canvas { ctx, size in
-            guard !peaks.isEmpty, dur > 0 else { return }
-            let bars = max(1, Int(size.width / 3))
+            guard !peaks.isEmpty else { return }
+            let bars = EditSuite.tileCount(width: Double(size.width), tileWidth: 3)
             for k in 0..<bars {
                 let src = inSec + (Double(k) + 0.5) / Double(bars) * (outSec - inSec)
-                let i = min(peaks.count - 1, max(0, Int(src / dur * Double(peaks.count))))
-                let v = CGFloat(peaks[i]) * (size.height - 4)
+                guard let i = EditSuite.frameIndex(source: src, durationSec: dur, fallbackSec: outSec, count: peaks.count) else { return }
+                let pk = Double(peaks[i])
+                let v = CGFloat(pk.isFinite ? min(1, max(0, pk)) : 0) * max(0, size.height - 4)
                 let x = CGFloat(k) * 3 + 1
                 ctx.fill(Path(CGRect(x: x, y: (size.height - v) / 2, width: 2, height: max(1, v))), with: .color(tint))
             }

@@ -96,6 +96,17 @@ describe('edit sessions API and Claude tools', () => {
   afterAll(async () => { await a.close(); });
   const env = () => ({ ctx: a.ctx, user: ownerUser, source: 'mcp' as const });
 
+  it('a live take with 0 or missing facts opens on a sane project (owner blocker 2026-11-07)', async () => {
+    for (const [id, media] of [['take_zero', { durationSec: 0, width: 0, height: 0, fps: 0 }], ['take_none', {}], ['take_nan', { durationSec: 'x', width: null, fps: -3 }]] as const) {
+      await a.ctx.db.insert(takes).values({ id, studioId: ownerUser.studioId, userId: null, kind: 'take', jobId: null, modelId: null, index: 1, of: 1, title: 't', label: 'HD',
+        engineLabel: '', cost: 0, seed: 0, status: 'test', thumb: null, prompt: '', mediaKey: `c/${takeId}.mp4`, media: media as never, createdAt: Date.now() });
+      const s = (await owner.req('POST', '/v1/edit-sessions', { takeId: id })).body;
+      expect(s.project.canvas, id).toEqual({ width: 1080, height: 1920, fps: 30, background: '#000000' });
+      expect(s.project.assets[0].durationSec, id).toBe(1);
+      expect(s.durationSec, id).toBe(1);
+    }
+  });
+
   it('owner opens a session (one per take), members are refused', async () => {
     const s = (await owner.req('POST', '/v1/edit-sessions', { takeId, device: 'mac-1' })).body;
     expect(s).toMatchObject({ takeId, revision: 0, durationSec: 6 });

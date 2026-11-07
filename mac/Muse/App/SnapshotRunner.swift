@@ -91,6 +91,7 @@ enum SnapshotRunner {
             state.overlay = nil
             store.themeID = .a
             await fitCheck(store, dir: dir)
+            await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
             await scrollCheck(store, dir: dir)
             store.signOut()
             try? await Task.sleep(for: .seconds(1))
@@ -265,11 +266,11 @@ enum SnapshotRunner {
     }
 
 
-    private static var mainWindow: NSWindow? { NSApp.windows.first { $0.isVisible && $0.contentView != nil && $0.canBecomeMain } }
+    static var mainWindow: NSWindow? { NSApp.windows.first { $0.isVisible && $0.contentView != nil && $0.canBecomeMain } }
 
     /// Draws the window's content into a PNG. Also asks `screencapture` for the same window (`…_sc.png`), which
     /// includes layer-only content (video, some images) if the runner allows screen capture.
-    private static func capture(_ url: URL) {
+    static func capture(_ url: URL) {
         guard let window = mainWindow, let view = window.contentView else { return }
         view.layoutSubtreeIfNeeded()
         if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
