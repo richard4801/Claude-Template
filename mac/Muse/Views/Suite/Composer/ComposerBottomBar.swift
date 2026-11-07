@@ -46,6 +46,7 @@ struct ComposerBottomBar: View {
 
     private var generateButton: some View {
         GenerateButton(label: generateLabel, enabled: canGenerate, busy: store.suite.generating) { generate() }
+            .background { if SnapshotRunner.dir != nil { GenerateFrameProbe() } } // CI fit check (owner fix A2)
             .fixedSize()
             .layoutPriority(2)
     }
@@ -535,5 +536,18 @@ struct GenerateButton: View {
         .keyboardShortcut(.return, modifiers: .command)
         .help("Generate")
         .accessibilityLabel(label)
+    }
+}
+
+
+/// Review mode only (SnapshotRunner): reports where Generate sits in the window, so CI can check it is fully on screen.
+private struct GenerateFrameProbe: View {
+    var body: some View {
+        GeometryReader { g in
+            let f = g.frame(in: .global)
+            Color.clear
+                .onAppear { SnapshotRunner.state.generateFrame = f }
+                .onChange(of: f) { _, v in SnapshotRunner.state.generateFrame = v }
+        }
     }
 }

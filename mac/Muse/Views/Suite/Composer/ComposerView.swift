@@ -24,6 +24,9 @@ private struct ComposerPriceKey: Equatable {
 /// (compact sidebar) gives about 930; a 1280 one about 1050.
 private let composerNarrowWidth: CGFloat = 1000
 
+/// Below this window height the composer page scrolls as a whole (header, a short picture, the prompt bar).
+let composerMinHeight: CGFloat = 520
+
 struct ComposerView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
@@ -33,9 +36,15 @@ struct ComposerView: View {
     var body: some View {
         let s = store.suite
         ZStack {
+            // The page fills the window; the picture gives up height first so the prompt bar and Generate stay on
+            // screen. Below `composerMinHeight` the whole page scrolls instead (owner fix A2).
             GeometryReader { g in
-                page(narrow: g.size.width < composerNarrowWidth)
-                    .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
+                let fits = g.size.height >= composerMinHeight
+                ScrollView(.vertical, showsIndicators: !fits) {
+                    page(narrow: g.size.width < composerNarrowWidth)
+                        .frame(width: g.size.width, height: max(g.size.height, composerMinHeight), alignment: .topLeading)
+                }
+                .scrollDisabled(fits)
             }
             ComposerPickerHost()
             if s.browserOpen { ToolBrowser().transition(.opacity) }
@@ -84,6 +93,7 @@ struct ComposerView: View {
     private func page(narrow: Bool) -> some View {
         VStack(alignment: .leading, spacing: Space.s3) {
             header
+                .layoutPriority(1)
             if presetsOpen && hasPresets {
                 if store.suite.composer.tool == .photo {
                     PhotoPresetsRow() // Photo tool (workstream 3): the photo templates
@@ -93,7 +103,6 @@ struct ComposerView: View {
             }
             HStack(alignment: .top, spacing: Space.s4) {
                 ComposerMediaPane()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 ScrollView(.vertical, showsIndicators: false) {
                     ComposerRail(narrow: narrow)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -101,11 +110,15 @@ struct ComposerView: View {
                 .frame(width: narrow ? 264 : 300)
                 .frame(maxHeight: .infinity, alignment: .top)
             }
-            .frame(maxHeight: .infinity)
+            .frame(minHeight: 0, maxHeight: .infinity)
             .zIndex(0)
-            // Above the main row so the prompt's @ / # list, which opens upwards, draws over the picture.
+            // Above the main row so the prompt's @ / # list, which opens upwards, draws over the picture. It keeps its
+            // full height; the row above takes what is left.
             ComposerPromptBar()
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
                 .zIndex(1)
+                .accessibilityIdentifier("composer.promptBar")
         }
         .padding(.horizontal, Space.s5)
         .padding(.top, Space.s4)
@@ -163,8 +176,9 @@ struct ComposerView: View {
 
 // MARK: The picture
 
-/// The left pane: the take in progress or the latest take of this composer; before any, the scene's current light (the
-/// lighting option's preview, else the catalog's Auto preview), with the shape and length on a scrim tag.
+/// The left pane: the take in progress or the latest take of this composer. Before any take it is a quiet empty canvas:
+/// the shot's shape outlined on the surface tone with a one-line hint (no sample or scene stills, owner fix A1). Swap,
+/// Recast and Extend show the member's own clip or video instead, since that is what they work on.
 struct ComposerMediaPane: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
@@ -188,6 +202,15 @@ struct ComposerMediaPane: View {
         }
     }
 
+    /// The member's own media for the tools that work on a clip or a video.
+    private var ownMedia: ImageRef? {
+        switch tool {
+        case .swap, .recast: return store.clipPoster
+        case .extend: return store.suite.composer.extend.source?.thumb
+        default: return nil
+        }
+    }
+
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: t.radii.container)
         let current = job
@@ -195,49 +218,71 @@ struct ComposerMediaPane: View {
             if case .empty = SuiteResultState.of(current) { return true }
             return false
         }()
-        ZStack(alignment: .bottomLeading) {
-            shape.fill(t.roles.field)
-            if idle {
-                Color.clear
-                    .overlay(still)
-                    .clipped()
-                    .accessibilityHidden(true)
-                if let tag {
-                    Text(tag).font(t.scale.micro.font).monospacedDigit().foregroundStyle(.white).lineLimit(1)
-                        .padding(.horizontal, 7).padding(.vertical, 3)
-                        .background(RoundedRectangle(cornerRadius: t.radii.chip).fill(Color.black.opacity(0.55)))
-                        .padding(Space.s2)
-                        .accessibilityLabel(tagLabel ?? tag)
+        Group {
+            if idle, let media = ownMedia {
+                ZStack(alignment: .bottomLeading) {
+                    shape.fill(t.roles.field)
+                    Color.clear.overlay(MuseImage(ref: media)).clipped().accessibilityHidden(true)
+                    if let tag { tagText(tag).padding(Space.s3) }
                 }
+                .clipShape(shape)
+            } else if idle {
+                emptyCanvas
             } else {
-                SuiteResultPane(job: current, art: art, character: store.composerCharacter)
-                    .padding(Space.s3)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ZStack {
+                    shape.fill(t.roles.field)
+                    SuiteResultPane(job: current, art: art, character: store.composerCharacter)
+                        .padding(Space.s3)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .clipShape(shape)
             }
         }
-        .clipShape(shape)
+        // Takes whatever height the page gives it (owner fix A2: the prompt bar and Generate always stay on screen).
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+        .clipped()
         .accessibilityElement(children: .contain)
     }
 
-    /// Before any take: the clip or the video when the tool works on one, else the scene's light.
-    @ViewBuilder private var still: some View {
-        if (tool == .swap || tool == .recast), let poster = store.clipPoster {
-            MuseImage(ref: poster)
-        } else if tool == .extend, let thumb = store.suite.composer.extend.source?.thumb {
-            MuseImage(ref: thumb)
-        } else {
-            PreviewView(preview: lightPreview, fallback: tool.render)
+    /// No take yet: the shape's outline, centred, with the hint inside and the shape and length under it.
+    private var emptyCanvas: some View {
+        let shape = RoundedRectangle(cornerRadius: t.radii.container)
+        return VStack(spacing: Space.s2) {
+            Text(hint).font(t.scale.body.font).foregroundStyle(t.roles.ink2).multilineTextAlignment(.center)
+            if let tag {
+                Text(tag).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2.opacity(0.8))
+                    .accessibilityLabel(tagLabel ?? tag)
+            }
+        }
+        .padding(Space.s4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(shape.fill(t.roles.raised))
+        .overlay(shape.strokeBorder(t.roles.hairline, lineWidth: 1))
+        .aspectRatio(aspectRatio, contentMode: .fit)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// "16:9" → 16/9; anything unreadable is 16:9.
+    private var aspectRatio: CGFloat {
+        let parts = store.suite.composer.aspect.split(separator: ":").compactMap { Double($0) }
+        guard parts.count == 2, parts[0] > 0, parts[1] > 0 else { return 16.0 / 9.0 }
+        return CGFloat(parts[0] / parts[1])
+    }
+
+    private var hint: String {
+        switch tool {
+        case .photo: return "Your photos appear here"
+        case .swap, .recast: return "Choose a clip to start"
+        case .extend: return "Choose a video to extend"
+        default: return "Your shot appears here"
         }
     }
 
-    /// The selected lighting option's preview poster, else the catalog's Auto lighting preview, else its hardware render.
-    private var lightPreview: PickerPreview {
-        let cam = store.suite.camera
-        let id = ComposerCatalog.survivor(cam.lighting, store.suite.composer.settings.lighting)
-        let option = id.flatMap { i in cam.lighting.first { $0.id == i } }
-        if let p = option?.preview, !p.poster.isEmpty { return PickerPreview(still: option?.render, poster: p.poster) }
-        if let auto = cam.autoPreviews.lighting, !auto.poster.isEmpty { return PickerPreview(still: option?.render, poster: auto.poster) }
-        return PickerPreview(still: option?.render ?? tool.render)
+    private func tagText(_ tag: String) -> some View {
+        Text(tag).font(t.scale.micro.font).monospacedDigit().foregroundStyle(.white).lineLimit(1)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: t.radii.chip).fill(Color.black.opacity(0.55)))
+            .accessibilityLabel(tagLabel ?? tag)
     }
 
     /// "16:9 · 8 s" (shape · length); Extend shows the added length; Photo and the clip tools take theirs from elsewhere.

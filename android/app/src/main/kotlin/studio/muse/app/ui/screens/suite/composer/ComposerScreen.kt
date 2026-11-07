@@ -420,26 +420,44 @@ private fun PhoneComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent
 }
 
 /**
- * The picture at the top: the take in progress or the latest take; before any, the scene's current light (the lighting
- * preview), with the shape and length on a small scrim tag ("9:16 · 8 s").
+ * The picture at the top: the take in progress or the latest take. Before any take it is a quiet empty canvas: the shot's
+ * shape outlined on the surface tone with a one-line hint and the shape and length under it (owner fix A1: no sample or
+ * scene stills).
  */
 @Composable
 private fun MediaHero(ui: ComposerUi, job: studio.muse.app.data.Job?, takes: List<studio.muse.app.data.Take>, openTake: (String) -> Unit, retry: (SuiteShotRequest) -> Unit, modifier: Modifier) {
     val m = muse
     val pane = SuitePane.of(job, takes, ui.lead?.name)
     val shape = RoundedCornerShape(m.radii.container)
+    if (pane.phase == StagePhase.IDLE) { EmptyCanvas(ui, modifier); return }
     Box(modifier.clip(shape).background(m.roles.field)) {
-        if (pane.phase != StagePhase.IDLE) {
+        run {
             SuiteResultPane(pane, ui.lead?.cover, emptyTitle = "", emptyHint = "", compact = true,
                 onRetry = { job?.let { retry(ui.d.request(ui.slots, ui.inputs, ui.recast)) } }, onTry = nextTier(ui.d.quality)?.let { t -> { ui.update { it.copy(quality = t) } } },
                 tryLabel = nextTier(ui.d.quality)?.let { "Try ${SuiteRules.tierLabel(it)}" }, onOpen = { job?.let { openTake(it.id) } })
-        } else {
-            val poster = ui.cat.lighting.firstOrNull { it.id == ui.d.settings.lighting }?.preview?.poster ?: ui.cat.autoPreviews.lighting?.poster
-            PreviewTile(Preview(poster = poster, still = if (poster == null) ui.d.tool.render else null), Modifier.matchParentSize())
         }
-        val tag = if (ui.photo != null) null else if (ui.d.tool == ComposerTool.EXTEND) "+${ui.d.duration} s" else "${ui.d.aspect} · ${ui.d.duration} s"
-        if (tag != null && pane.phase == StagePhase.IDLE) T(tag, m.scale.micro, Color.White, Modifier.align(Alignment.BottomStart).padding(8.dp)
-            .clip(RoundedCornerShape(m.radii.chip)).background(Color.Black.copy(alpha = .55f)).padding(horizontal = 7.dp, vertical = 3.dp), maxLines = 1)
+    }
+}
+
+/** No take yet: the shot's shape (9:16, 16:9, …) outlined on the surface tone, centred, with a one-line hint. */
+@Composable
+private fun EmptyCanvas(ui: ComposerUi, modifier: Modifier) {
+    val m = muse
+    val shape = RoundedCornerShape(m.radii.container)
+    val ratio = ui.d.aspect.split(":").mapNotNull { it.trim().toFloatOrNull() }.takeIf { it.size == 2 && it[0] > 0f && it[1] > 0f }?.let { it[0] / it[1] } ?: (16f / 9f)
+    val hint = when {
+        ui.photo != null -> "Your photos appear here"
+        ui.d.tool == ComposerTool.SWAP || ui.d.tool == ComposerTool.RECAST -> "Choose a clip to start"
+        ui.d.tool == ComposerTool.EXTEND -> "Choose a video to extend"
+        else -> "Your shot appears here"
+    }
+    val tag = if (ui.photo != null) null else if (ui.d.tool == ComposerTool.EXTEND) "+${ui.d.duration} s" else "${ui.d.aspect} · ${ui.d.duration} s"
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Column(Modifier.aspectRatio(ratio).clip(shape).background(m.roles.raised).border(1.dp, m.roles.hairline, shape).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) {
+            T(hint, m.scale.label, m.roles.ink2, align = TextAlign.Center, maxLines = 2)
+            if (tag != null) T(tag, m.scale.caption, m.roles.ink2, align = TextAlign.Center, maxLines = 1)
+        }
     }
 }
 
