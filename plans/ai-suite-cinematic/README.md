@@ -21,7 +21,7 @@ The Suite is each theme's own "dark room". Every colour is a darker or lighter s
 - **Creator Pop:** its ink deepened with its cobalt, with the pink as the mark and on Generate, and ink text.
 - **Glass and text:** the dock's glass is tinted with the theme's surface colour, and text on the stage is the theme's light surface colour.
 - **Fonts, radii and accent** are the theme's own. The room's corner follows the theme's container radius, capped at 20: Editorial stays nearly square.
-- **The edge:** the sidebar and top bar stay exactly in their theme. The Suite is a rounded room set 8 pt into the shell, with a hairline of its own light, so the transition is intentional rather than a hard seam.
+- **The edge:** the sidebar and top bar stay exactly in their theme. The Suite is a rounded room set 8 pt into the shell, with a hairline of its own light, and a soft inner shadow along its top and left edges, so the transition is intentional rather than a hard seam.
 - **Pickers** use the same room tone, so the pickers and the stage match. The drums inside keep the camera-bag palette.
 
 ### Contrast, checked per theme (WCAG: text 4.5:1, marks 3:1)
@@ -29,7 +29,7 @@ The Suite is each theme's own "dark room". Every colour is a darker or lighter s
 |---|---|---|---|---|---|---|
 | Editorial (a) | #1C1211 | 16.9:1 | 7.4:1 | 6.3:1 | 3.8:1 | 8.9:1 |
 | Camera Body (b) | #0D0E0F | 16.1:1 | 7.0:1 | 9.3:1 | 9.7:1 | 11.5:1 |
-| Soft Tactile (c) | #1C231E | 14.1:1 | 6.6:1 | 6.3:1 | 5.9:1 | 7.8:1 |
+| Soft Tactile (c) | #202721 | 13.4:1 | 6.4:1 | 6.3:1 | 5.6:1 | 7.4:1 |
 | Creator Pop (d) | #0F1634 | 17.7:1 | 7.8:1 | 8.0:1 | 7.5:1 | 8.7:1 |
 
 

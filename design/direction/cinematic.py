@@ -63,7 +63,7 @@ def room(k):
     elif k == "a":  # Editorial: its ink black, warmed a touch by its red; red as the mark
         s0 = mix(r["ink"], r["accent"], .05); w = r["raised"]; acc = mix(r["accent"], "#FFFFFF", .22); gen = r["accent"]; ongen = r["raised"]
     elif k == "c":  # Soft Tactile: deep olive charcoal from its ink and sage; the sage lifted for the mark
-        s0 = mix(mix(r["ink"], r["accent"], .32), "#000000", .42); w = r["raised"]; acc = mix(r["accent"], "#D8E8C8", .45); gen = acc; ongen = mix(r["ink"], "#000000", .3)
+        s0 = mix(mix(r["ink"], r["accent"], .34), "#000000", .36); w = r["raised"]; acc = mix(r["accent"], "#D8E8C8", .45); gen = acc; ongen = mix(r["ink"], "#000000", .3)
     else:           # Creator Pop: its ink deepened with its cobalt; the pink as the mark
         s0 = mix(mix(r["ink"], r["link"], .22), "#000000", .25); w = r["raised"]; acc = r["accent"]; gen = r["accent"]; ongen = r["ink"]
     w2 = mix(w, s0, .36)
@@ -147,7 +147,7 @@ def sidebar(tool):
 def app(t, w, h, tool, suite_html):
     return (f'<div style="display:flex;flex-direction:column;height:100%">{topbar(t, w)}<div class="row" style="flex:1;min-height:0;align-items:stretch">'
             f'{sidebar(tool)}<div class="grow" style="padding:8px 8px 8px 0;background:var(--canvas);display:flex">'
-            f'<div class="suite grow" style="border-radius:{min(t["rc"], 20)}px;box-shadow:inset 0 0 0 1px var(--sl),0 1px 0 var(--sl)">{suite_html}<div class="grain"></div></div></div></div></div>')
+            f'<div class="suite grow" style="border-radius:{min(t["rc"], 20)}px;box-shadow:inset 0 0 0 1px var(--sl),inset 0 10px 28px -8px rgba(0,0,0,.45),inset 10px 0 28px -8px rgba(0,0,0,.35)">{suite_html}<div class="grain"></div></div></div></div></div>')
 
 # ---------------------------------------------------------------- the stage
 def ambient(img, opacity=.55):
