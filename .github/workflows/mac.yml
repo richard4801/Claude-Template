@@ -93,10 +93,21 @@ jobs:
           mkdir -p snapshots
           MUSE_SNAPSHOT_DIR="$PWD/snapshots" "$EXE" > snapshots.log 2>&1 &
           pid=$!
-          for i in $(seq 1 240); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          for i in $(seq 1 600); do kill -0 $pid 2>/dev/null || break; sleep 1; done
           kill $pid 2>/dev/null || true
           ls -la snapshots | head -100
           tail -n 40 snapshots.log || true
+
+      # Every main page and Settings pane must scroll with a real scroll event (owner blocker 2026-11-07). Fails on a STUCK
+      # page as long as at least one page MOVED (so the synthetic events themselves work on this runner).
+      - name: Scroll check
+        working-directory: mac
+        run: |
+          f=snapshots/scroll-check.txt
+          if [ ! -f "$f" ]; then echo "no scroll-check.txt (review mode didn't finish)"; exit 1; fi
+          cat "$f"
+          if grep -q '^MOVED' "$f" && grep -q '^STUCK' "$f"; then echo "Some pages don't scroll"; exit 1; fi
+          if ! grep -q '^MOVED' "$f"; then echo "::warning::No page moved: synthetic scroll events may not reach the app on this runner"; fi
 
       - uses: actions/upload-artifact@v4
         if: always()

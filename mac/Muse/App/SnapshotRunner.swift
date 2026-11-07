@@ -85,6 +85,8 @@ enum SnapshotRunner {
             }
             store.suite.picker = nil
             state.overlay = nil
+            store.themeID = .a
+            await scrollCheck(store, dir: dir)
             store.signOut()
             try? await Task.sleep(for: .seconds(1))
             capture(dir.appendingPathComponent("mac_a_signin.png"))
@@ -116,6 +118,85 @@ enum SnapshotRunner {
         store.suite.composer = d
         // The character goes in front of the text, with her first outfit.
         store.setComposerCharacter(store.character(SampleData.demo))
+    }
+
+    // MARK: Scroll check (CI): every main page and Settings pane must scroll with a real scroll event
+
+    /// Writes `scroll-check.txt`: one line per page, `MOVED`, `FITS` (nothing to scroll) or `STUCK` (scrollable but a
+    /// synthetic scroll didn't move it). Mac CI fails on any STUCK line when at least one page MOVED (the events work).
+    private static func scrollCheck(_ store: AppStore, dir: URL) async {
+        NSApp.activate(ignoringOtherApps: true)
+        mainWindow?.makeKeyAndOrderFront(nil)
+        var lines: [String] = []
+        func check(_ name: String, _ show: @MainActor () -> Void) async {
+            store.suite.picker = nil
+            state.scrollTo = nil
+            show()
+            try? await Task.sleep(for: .seconds(1.5))
+            lines.append(await scrollOnce(name))
+        }
+        let pages: [(String, Screen)] = [("home", .home), ("library", .gallery), ("models", .models), ("queue", .queue), ("credits", .credits),
+                                          ("members", .members), ("posts", .posts), ("templates", .templates), ("lora", .lora),
+                                          ("suite", .suite), ("edit", .edit)]
+        for (name, screen) in pages { await check(name) { store.go(screen) } }
+        await check("cast") { store.openProfile(SampleData.demo) }
+        for section in SettingsSection.allCases { await check("settings_\(section.rawValue)") { store.openSettings(section) } }
+        // The drum's scroll monitor must not outlive the picker: hover a drum, close the picker under the pointer, scroll Home.
+        store.openTool(.shot)
+        store.openPicker(.camera, step: "setup")
+        try? await Task.sleep(for: .seconds(2))
+        if let w = mainWindow, let content = w.contentView { postMouseMove(at: content.convert(NSPoint(x: content.bounds.midX, y: content.bounds.midY), to: nil), in: w) }
+        try? await Task.sleep(for: .seconds(0.5))
+        store.suite.picker = nil
+        await check("home_after_picker") { store.go(.home) }
+        let text = lines.joined(separator: "\n") + "\n"
+        try? text.write(to: dir.appendingPathComponent("scroll-check.txt"), atomically: true, encoding: .utf8)
+    }
+
+    /// The largest scroll view in the window whose content is taller than its viewport, or the largest one at all.
+    private static func mainScrollView(in view: NSView) -> NSScrollView? {
+        var all: [NSScrollView] = []
+        func walk(_ v: NSView) {
+            if let s = v as? NSScrollView, !s.isHiddenOrHasHiddenAncestor, s.bounds.width > 200, s.bounds.height > 200 { all.append(s) }
+            v.subviews.forEach(walk)
+        }
+        walk(view)
+        func area(_ s: NSScrollView) -> CGFloat { s.bounds.width * s.bounds.height }
+        let scrollable = all.filter { ($0.documentView?.frame.height ?? 0) > $0.contentView.bounds.height + 4 }
+        return (scrollable.max { area($0) < area($1) }) ?? all.max { area($0) < area($1) }
+    }
+
+    private static func scrollOnce(_ name: String) async -> String {
+        guard let w = mainWindow, let content = w.contentView else { return "UNTESTED \(name) no window" }
+        guard let sv = mainScrollView(in: content) else { return "FITS \(name) no scroll view" }
+        let doc = sv.documentView?.frame.height ?? 0, viewport = sv.contentView.bounds.height
+        guard doc > viewport + 4 else { return "FITS \(name) content \(Int(doc)) <= viewport \(Int(viewport))" }
+        let before = sv.contentView.bounds.origin.y
+        let mid = sv.convert(NSPoint(x: sv.bounds.midX, y: sv.bounds.midY), to: nil)
+        postMouseMove(at: mid, in: w)
+        try? await Task.sleep(for: .seconds(0.2))
+        postScroll(at: mid, in: w, dy: -300)
+        try? await Task.sleep(for: .seconds(0.8))
+        let after = sv.contentView.bounds.origin.y
+        return abs(after - before) > 1 ? "MOVED \(name) \(Int(before)) -> \(Int(after))" : "STUCK \(name) offset \(Int(before)), content \(Int(doc)) > viewport \(Int(viewport))"
+    }
+
+    /// A point in window coordinates → Quartz global coordinates (top-left of the main display).
+    private static func globalPoint(_ p: NSPoint, in w: NSWindow) -> CGPoint {
+        let s = w.convertPoint(toScreen: p)
+        let h = NSScreen.screens.first?.frame.height ?? 0
+        return CGPoint(x: s.x, y: h - s.y)
+    }
+
+    private static func postMouseMove(at p: NSPoint, in w: NSWindow) {
+        guard let e = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: globalPoint(p, in: w), mouseButton: .left) else { return }
+        e.postToPid(getpid())
+    }
+
+    private static func postScroll(at p: NSPoint, in w: NSWindow, dy: Int32) {
+        guard let e = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: dy, wheel2: 0, wheel3: 0) else { return }
+        e.location = globalPoint(p, in: w)
+        e.postToPid(getpid())
     }
 
     private static var mainWindow: NSWindow? { NSApp.windows.first { $0.isVisible && $0.contentView != nil && $0.canBecomeMain } }
