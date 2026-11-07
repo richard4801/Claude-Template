@@ -49,7 +49,7 @@ struct DirectChatPanel: View {
                 Text("Direct with Claude").font(t.body(16, .bold)).foregroundStyle(t.ink)
                 Spacer()
                 if model.live {
-                    Text(t.isA ? "● LIVE" : "● Live").font(t.mono(10.5, .medium)).tracking(0.8).foregroundStyle(t.goodInk)
+                    Text(t.isA ? "● LIVE" : "● Live").font(t.body(10.5, .medium).monospacedDigit()).foregroundStyle(t.goodInk)
                         .padding(.horizontal, 8).frame(height: 22)
                         .overlay(RoundedRectangle(cornerRadius: t.isA ? 0 : 11).strokeBorder(t.goodInk, lineWidth: 1))
                         .help("Live updates are connected")
@@ -147,7 +147,7 @@ struct DirectChatPanel: View {
     private func toolChip(_ c: ToolChip) -> some View {
         HStack(spacing: 5) {
             Ph("cube", 9.5)
-            Text(c.text).font(t.mono(9.5, .medium)).tracking(0.5)
+            Text(c.text).font(t.body(9.5, .medium).monospacedDigit())
         }
         .foregroundStyle(c.ok ? t.muted : t.rec)
         .padding(.horizontal, 7).frame(height: 20)
@@ -160,14 +160,14 @@ struct DirectChatPanel: View {
             HStack {
                 Text("Guides ready · rev \(session.revision)").font(t.body(13, .bold)).foregroundStyle(t.ink)
                 Spacer()
-                Text("\(CameraText.seconds(session.durationSec)) · \(Int(session.fps)) fps").font(t.mono(11)).foregroundStyle(t.muted)
+                Text("\(CameraText.seconds(session.durationSec)) · \(Int(session.fps)) fps").font(t.body(11).monospacedDigit()).foregroundStyle(t.muted)
             }
             HStack(alignment: .top, spacing: 8) {
                 ForEach(items) { g in
                     let still = g.asset.kind.hasPrefix("keyframe_")
                     VStack(spacing: 4) {
                         GuideThumb(item: g).frame(width: still ? 32 : 44, height: still ? 56 : 78)
-                        Text(g.label).font(t.mono(9.5)).foregroundStyle(t.muted)
+                        Text(g.label).font(t.body(9.5).monospacedDigit()).foregroundStyle(t.muted)
                     }
                 }
             }
@@ -201,12 +201,12 @@ struct DirectChatPanel: View {
             HStack {
                 Lbl(turn.title, color: t.ink)
                 Spacer()
-                Text(turn.percent()).font(t.mono(11)).foregroundStyle(t.ink)
+                Text(turn.percent()).font(t.body(11).monospacedDigit()).foregroundStyle(t.ink)
             }
             if let q = turn.quote { Text(q).font(t.body(12)).foregroundStyle(t.ink).lineLimit(2) }
             HStack(spacing: 10) {
                 ProgressLine(value: turn.progress(), height: 4)
-                Text("\(turn.stepsDone) / \(max(turn.stepsSeen, 1)) steps").font(t.mono(11)).foregroundStyle(t.muted).fixedSize()
+                Text("\(turn.stepsDone) / \(max(turn.stepsSeen, 1)) steps").font(t.body(11).monospacedDigit()).foregroundStyle(t.muted).fixedSize()
             }
         }
         .padding(.horizontal, 18).padding(.vertical, 10)

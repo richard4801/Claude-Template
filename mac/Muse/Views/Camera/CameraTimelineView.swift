@@ -23,19 +23,19 @@ struct CameraTimelineView: View {
                 let ruler = CameraPathTicks.ruler(duration: duration)
                 ForEach(ruler.indices, id: \.self) { i in
                     Rectangle().fill(t.line).frame(width: 1, height: rulerHeight).offset(x: x(ruler[i].t))
-                    Text(ruler[i].label).font(t.mono(10.5)).foregroundStyle(t.muted).offset(x: x(ruler[i].t) + 4, y: 4)
+                    Text(ruler[i].label).font(t.body(10.5).monospacedDigit()).foregroundStyle(t.muted).offset(x: x(ruler[i].t) + 4, y: 4)
                 }
                 ForEach(Array(tracks.enumerated()), id: \.element.id) { i, track in
                     lane(track, top: rulerHeight + CGFloat(i) * rowHeight, x: x, laneW: laneW)
                 }
                 // END chip on the cuts row.
                 if let last = tracks.indices.last {
-                    chip(CameraTimeline.endLabel(session.durationSec).uppercased(), accent: false)
+                    chip(CameraTimeline.endLabel(session.durationSec), accent: false)
                         .offset(x: x(duration) - 74, y: rulerHeight + CGFloat(last) * rowHeight + 7)
                 }
                 // Playhead
                 Rectangle().fill(t.accent).frame(width: 2, height: g.size.height).offset(x: x(playhead) - 1)
-                chip(CameraTimeline.playheadLabel(playhead).uppercased(), accent: true)
+                chip(CameraTimeline.playheadLabel(playhead), accent: true)
                     .offset(x: x(playhead) + 5, y: g.size.height - 24)
             }
             .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
@@ -63,7 +63,7 @@ struct CameraTimelineView: View {
             Rectangle().fill(t.line).frame(width: laneW + 16, height: 1).offset(x: labelWidth, y: rowHeight - 1)
             ForEach(Array(track.spans.enumerated()), id: \.offset) { _, span in
                 let w = max(2, x(span.end) - x(span.start))
-                Text(span.label).font(t.mono(10.5, .medium)).lineLimit(1)
+                Text(span.label).font(t.body(10.5, .medium).monospacedDigit()).lineLimit(1)
                     .foregroundStyle(span.accent ? t.accent : span.muted ? t.muted : t.ink)
                     .padding(.leading, 10)
                     .frame(width: w, height: 22, alignment: .leading)
@@ -83,7 +83,7 @@ struct CameraTimelineView: View {
     }
 
     private func chip(_ text: String, accent: Bool) -> some View {
-        Text(text).font(t.mono(10.5, .medium)).tracking(0.6)
+        Text(text).font(t.body(10.5, .medium).monospacedDigit())
             .foregroundStyle(accent ? t.accent : t.ink)
             .padding(.horizontal, 8).frame(height: 20)
             .background(t.surface)

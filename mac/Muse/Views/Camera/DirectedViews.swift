@@ -122,7 +122,7 @@ struct SessionStrip: View {
 
     private var idChip: some View {
         Button { CameraModel.copy(session.id) } label: {
-            Text(CameraText.idChip(session.id).uppercased()).font(t.mono(11, .medium)).tracking(0.8).foregroundStyle(t.bg)
+            Text(CameraText.idChip(session.id).uppercased()).font(t.body(11, .medium).monospacedDigit()).foregroundStyle(t.bg)
                 .padding(.horizontal, 9).frame(height: 24)
                 .background(RoundedRectangle(cornerRadius: t.isA ? 0 : 4).fill(t.ink))
         }
@@ -136,7 +136,7 @@ struct SessionStrip: View {
     }
 
     private var meta: some View {
-        Text(CameraText.stripMeta(session)).font(t.mono(11.5)).foregroundStyle(t.muted).lineLimit(1)
+        Text(CameraText.stripMeta(session)).font(t.body(11.5).monospacedDigit()).foregroundStyle(t.muted).lineLimit(1)
     }
 
     private var views: some View {
@@ -171,7 +171,7 @@ struct CameraGuidesTab: View {
                     HStack(spacing: 14) {
                         GuideThumb(item: g).frame(width: g.isImage ? 40 : 54, height: 70)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(g.label).font(t.mono(12, .semibold)).foregroundStyle(t.ink)
+                            Text(g.label).font(t.body(12, .semibold).monospacedDigit()).foregroundStyle(t.ink)
                             Text([g.size, "from \(g.source)", g.asset.createdAt.map { CameraText.ago($0, now: Date().timeIntervalSince1970 * 1000) }]
                                 .compactMap { $0 }.joined(separator: " · ")).font(t.body(12)).foregroundStyle(t.muted)
                         }
@@ -231,7 +231,7 @@ struct CameraSessionRow: View {
                 Pill(pill.text, pill.tone == .good ? .good : pill.tone == .warn ? .warn : pill.tone == .bad ? .acc : .neutral)
             }
             Text(CameraText.cast(session)).font(t.body(12)).foregroundStyle(t.muted).lineLimit(1)
-            Text("\(CameraText.idChip(session.id)) · \(CameraText.seconds(session.durationSec)) · rev \(session.revision)").font(t.mono(11)).foregroundStyle(t.muted)
+            Text("\(CameraText.idChip(session.id)) · \(CameraText.seconds(session.durationSec)) · rev \(session.revision)").font(t.body(11).monospacedDigit()).foregroundStyle(t.muted)
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
         .background(RoundedRectangle(cornerRadius: t.controlRadius).fill(selected ? t.surface2 : .clear))
