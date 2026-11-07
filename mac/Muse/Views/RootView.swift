@@ -227,6 +227,19 @@ struct Sidebar: View {
     var compact: Bool
 
     var body: some View {
+        // Scrolls when the window is shorter than the list (owner fix A2: "Balance" was cut off); fills it otherwise, so
+        // Settings and Balance stay at the bottom.
+        GeometryReader { g in
+            ScrollView(.vertical, showsIndicators: false) {
+                list.frame(minHeight: g.size.height, alignment: .top)
+            }
+        }
+        .frame(width: compact ? 72 : 228)
+        .background(t.sidebarBg)
+        .overlay(alignment: .trailing) { Rectangle().fill(t.isC || t.isD ? .clear : t.roles.hairline).frame(width: 1) }
+    }
+
+    private var list: some View {
         VStack(alignment: .leading, spacing: 2) {
             wordmark.padding(.horizontal, compact ? 0 : 10).padding(.top, 4).padding(.bottom, 18)
                 .frame(maxWidth: .infinity, alignment: compact ? .center : .leading)
@@ -269,9 +282,6 @@ struct Sidebar: View {
         .padding(.horizontal, compact ? 8 : 12)
         .padding(.top, t.isC ? 22 : 18)
         .padding(.bottom, 14)
-        .frame(width: compact ? 72 : 228)
-        .background(t.sidebarBg)
-        .overlay(alignment: .trailing) { Rectangle().fill(t.isC || t.isD ? .clear : t.roles.hairline).frame(width: 1) }
     }
 
     /// A sidebar group label: sentence case in the caption step, not tracked caps.

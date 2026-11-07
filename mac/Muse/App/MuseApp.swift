@@ -13,12 +13,17 @@ struct MuseApp: App {
         Fonts.registerBundled()
     }
 
+    private static var firstSize: CGSize {
+        let vis = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1440, height: 900)
+        return CGSize(width: min(1440, max(1100, vis.width)), height: min(900, max(600, vis.height)))
+    }
+
     var body: some Scene {
         Window("MUSE Studio", id: "main") {
             RootView()
                 .environment(store)
                 .environment(\.theme, store.theme)
-                .frame(minWidth: 1100, minHeight: 720)
+                .frame(minWidth: 1100, minHeight: 600) // 600: fits a 13" MacBook with the Dock showing (owner fix A2)
                 .preferredColorScheme(store.theme.isDark ? .dark : .light)
                 .onAppear {
                     store.bootstrap()
@@ -31,7 +36,8 @@ struct MuseApp: App {
                 .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in store.resumeLive(force: true) }
         }
         .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 1440, height: 900)
+        // First launch: 1440 × 900, or the screen's visible area when that is smaller, so nothing starts below the Dock.
+        .defaultSize(width: Self.firstSize.width, height: Self.firstSize.height)
         .commands { MuseCommands(store: store) }
     }
 }

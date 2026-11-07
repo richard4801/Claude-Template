@@ -136,12 +136,15 @@ enum SnapshotRunner {
         var lines: [String] = []
         let screens: [(String, @MainActor () -> Void)] = [
             ("composer", { store.openTool(.shot); fillDemoDraft(store) }),
-            ("composer_empty", { store.openTool(.shot); store.suite.composer.tokens = PromptTokens(); store.suite.composer.collapsed = nil }),
+            // Empty draft: the presets strip opens by default (worst case for height). Switching tools re-evaluates it.
+            ("composer_empty", { store.openTool(.photo); Task { @MainActor in
+                try? await Task.sleep(for: .seconds(0.4))
+                store.openTool(.shot); store.suite.composer.tokens = PromptTokens(); store.suite.composer.collapsed = nil } }),
             ("composer_photo", { store.openPhoto(model: SampleData.demo) }),
         ]
         for theme in [ThemeID.c, ThemeID.b] {
             store.themeID = theme
-            for (width, height) in [(1440, 900), (1280, 800)] {
+            for (width, height) in [(1440, 900), (1280, 800), (1100, 620)] {
                 w.setFrame(NSRect(x: full.minX, y: full.maxY - CGFloat(height), width: CGFloat(width), height: CGFloat(height)), display: true)
                 for (name, show) in screens {
                     store.suite.picker = nil
