@@ -38,6 +38,7 @@ import retrofit2.http.PUT
 import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.QueryMap
 import java.util.concurrent.TimeUnit
 
 /** Retrofit description of plans/api.md. */
@@ -174,6 +175,13 @@ interface MuseService {
     @GET("v1/suite/locations") suspend fun suiteLocations(): List<SuiteLocation>
     @POST("v1/suite/locations") suspend fun createSuiteLocation(@Body r: SuiteLocationCreate): SuiteLocation
     @DELETE("v1/suite/locations/{id}") suspend fun deleteSuiteLocation(@Path("id") id: String): retrofit2.Response<Unit>
+    // AI suite build step 2: saved rigs, a model's default rig, the takes feed
+    @GET("v1/suite/rigs") suspend fun suiteRigs(): List<SuiteRigView>
+    @POST("v1/suite/rigs") suspend fun createSuiteRig(@Body r: SuiteRigCreate): SuiteRigView
+    @PATCH("v1/suite/rigs/{id}") suspend fun updateSuiteRig(@Path("id") id: String, @Body r: SuiteRigPatch): SuiteRigView
+    @DELETE("v1/suite/rigs/{id}") suspend fun deleteSuiteRig(@Path("id") id: String): retrofit2.Response<Unit>
+    @PATCH("v1/models/{id}") suspend fun patchModelJson(@Path("id") id: String, @Body r: JsonObject): Model
+    @GET("v1/suite/feed") suspend fun suiteFeed(@QueryMap q: Map<String, String>): SuiteFeedPage
     // AI suite · Photo tool (workstream 3)
     @POST("v1/suite/photos/estimate") suspend fun photoEstimate(@Body r: PhotoRequest): PhotoEstimate
     @POST("v1/suite/photos") suspend fun createPhotos(@Body r: PhotoRequest): PhotoResult
@@ -487,6 +495,18 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun suiteLocations() = shared("suite/locations", CATALOG_TTL) { call { suiteLocations() }.map { it.copy(image = it.image.abs()) } }
     override suspend fun createSuiteLocation(req: SuiteLocationCreate) = call { createSuiteLocation(req) }.let { it.copy(image = it.image.abs()) }.also { reads.invalidate("suite/locations") }
     override suspend fun deleteSuiteLocation(id: String) { call { deleteSuiteLocation(id) }; reads.invalidate("suite/locations") }
+    // AI suite build step 2: saved rigs (changing ones read fresh), a model's default rig, the takes feed (never cached: it moves).
+    override suspend fun suiteRigs() = shared("suite/rigs") { call { suiteRigs() } }
+    override suspend fun createSuiteRig(name: String, rig: SuiteRig) = call { createSuiteRig(SuiteRigCreate(name, rig)) }.also { reads.invalidate("suite/rigs") }
+    override suspend fun updateSuiteRig(id: String, name: String?, rig: SuiteRig?) = call { updateSuiteRig(id, SuiteRigPatch(name, rig)) }.also { reads.invalidate("suite/rigs") }
+    override suspend fun deleteSuiteRig(id: String) { call { deleteSuiteRig(id).also { r -> if (!r.isSuccessful) throw HttpException(r) } }; reads.invalidate("suite/rigs") }
+    /** `{"defaultRig": {...}}`, or `{"defaultRig": null}` to clear (an all-Auto rig, sent as `{}`, clears it too). */
+    override suspend fun setModelDefaultRig(modelId: String, rig: SuiteRig?): Model {
+        val body = JsonObject(mapOf("defaultRig" to (rig?.toJson() ?: JsonNull)))
+        return call { patchModelJson(modelId, body) }.abs().also { reads.invalidate("models") }
+    }
+    override suspend fun suiteFeed(q: SuiteFeedQuery) = call { suiteFeed(q.params()) }
+        .let { p -> p.copy(items = p.items.map { it.copy(poster = it.poster?.abs(), videoUrl = it.videoUrl?.absUrl()) }) }
     // AI suite · Photo tool (workstream 3): making the stills answers when they exist, so it gets the long read timeout (as shoots).
     override suspend fun photoEstimate(req: PhotoRequest) = call { photoEstimate(req) }
     override suspend fun createPhotos(req: PhotoRequest) = callLong { createPhotos(req) }.let { r -> r.copy(takes = r.takes.map { it.abs() }) }

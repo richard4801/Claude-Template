@@ -56,7 +56,8 @@ class FakeMuseApi(
 ) : MuseApi {
     private val lock = Mutex()
     private val events = MutableSharedFlow<ApiEvent>(extraBufferCapacity = 256)
-    private val models = SampleData.models().toMutableList()
+    // AI suite build step 2: the demo model comes with a default rig (filled into Auto rows when she's @-mentioned).
+    private val models = SampleData.models().map { if (it.id == SampleData.DEMO) it.copy(defaultRig = FakeSuiteRigs.DEMO_DEFAULT_RIG) else it }.toMutableList()
     private val outfits = SampleData.outfits().toMutableList()
     private val jobs = SampleData.jobs(now()).toMutableList()
     private val takes = SampleData.takes(now()).toMutableList()
@@ -482,7 +483,8 @@ class FakeMuseApi(
                                 cur.cost / cur.request.takes, cur.seed + i - 1, "test", thumb, cur.prompt, now(),
                                 // AI suite: how long the take lasts (Extend: source + the new part; Upscale: the source take's length).
                                 durationSec = when (cur.request.engine) { SuiteRules.ENGINE -> suite.takeSeconds[cur.id] ?: cur.request.seconds; UPSCALE_ENGINE -> cur.request.seconds; else -> null },
-                                look = if (cur.request.engine == SuiteRules.ENGINE) suite.looks[cur.id] else null)
+                                look = if (cur.request.engine == SuiteRules.ENGINE) suite.looks[cur.id] else null,
+                                draft = cur.draft) // AI suite build step 2: every take keeps its job's draft
                         }
                         takes.addAll(0, newTakes)
                         ApiEvent("job", job = done, takes = newTakes)
@@ -501,7 +503,7 @@ class FakeMuseApi(
     }
 
     override suspend fun removeJob(jobId: String) {
-        lock.withLock { jobs.removeAll { it.id == jobId } }
+        lock.withLock { jobs.removeAll { it.id == jobId }; hiddenJobs += jobId }
         runners.remove(jobId)?.cancel()
     }
 
@@ -558,6 +560,7 @@ class FakeMuseApi(
                 }
             }
             takes.addAll(0, shots)
+            shots.forEach { takeModels[it.id] = req.modelId } // the feed's model filter (a still has no job to say who)
             shots.map { tpl.shotView(it) }
         }
     }
@@ -1065,6 +1068,7 @@ class FakeMuseApi(
     override suspend fun createSuiteShot(req: SuiteShotRequest): Job {
         val job = lock.withLock {
             suiteOn()
+            FakeSuiteRigs.checkDraft(req.draft) // a bad draft is refused before anything is held (server draftOf)
             val (srcTake, srcSeconds) = extendSourceOf(req)
             val e = suite.estimate(req, suiteOwner, models, suiteClipSeconds(req.clipId), srcSeconds)
             if (e.mode == ExtendRules.MODE) {
@@ -1072,7 +1076,8 @@ class FakeMuseApi(
                 val src = jobs.firstOrNull { it.id == srcTake?.jobId }
                 val m = models.firstOrNull { it.id == src?.modelId }
                 val j = suite.job("j_" + uid(), req, e, null, null, now(), srcSeconds).let { j ->
-                    j.copy(modelId = m?.id.orEmpty(), modelName = m?.name.orEmpty(), thumb = srcTake?.thumb ?: src?.thumb, title = req.title ?: srcTake?.title?.let { "$it · extended" } ?: j.title)
+                    j.copy(modelId = m?.id.orEmpty(), modelName = m?.name.orEmpty(), thumb = srcTake?.thumb ?: src?.thumb, title = req.title ?: srcTake?.title?.let { "$it · extended" } ?: j.title,
+                        draft = req.draft)
                 }
                 charge(j.cost)
                 jobs += j
@@ -1082,7 +1087,7 @@ class FakeMuseApi(
             val lead = req.modelId ?: req.cast?.firstOrNull()?.characterId
             val m = lead?.let { id -> models.firstOrNull { it.id == id } }
             val o = (req.outfitId ?: req.cast?.firstOrNull()?.outfitId)?.let { id -> outfits.firstOrNull { it.id == id } }
-            val j = suite.job("j_" + uid(), req, e, m, o, now())
+            val j = suite.job("j_" + uid(), req, e, m, o, now()).copy(draft = req.draft)
             e.look?.let { suite.looks[j.id] = it } // AI suite (workstream 1): the takes carry the shot's Look
             charge(j.cost)
             jobs += j
@@ -1122,6 +1127,34 @@ class FakeMuseApi(
     }
     override suspend fun deleteSuiteLocation(id: String) { lock.withLock { suite.locations.removeAll { it.id == id } } }
 
+    // ---- AI suite build step 2 (plans/api.md "The new Suite's server pieces"): saved rigs, default rigs, the takes feed.
+    /** Who the demo acts as while [suiteOwner] is false (a member of the demo studio). */
+    var suiteMemberId = FakeSuiteRigs.MEMBER_ID
+    private val suiteUserId get() = if (suiteOwner) FakeSuiteRigs.OWNER_ID else suiteMemberId
+    val suiteRigStore by lazy { FakeSuiteRigs(now) { suite.camera } }
+    /** Jobs deleted from Queue: the feed drops them with their takes. */
+    private val hiddenJobs = mutableSetOf<String>()
+    /** Each photo's character (a still has no job to say it), for the feed's model filter. */
+    private val takeModels = mutableMapOf<String, String>()
+
+    override suspend fun suiteRigs() = lock.withLock { suiteRigStore.list(suiteUserId, suiteOwner) }
+    override suspend fun createSuiteRig(name: String, rig: SuiteRig) = lock.withLock { suiteRigStore.create(suiteUserId, name, rig) }
+    override suspend fun updateSuiteRig(id: String, name: String?, rig: SuiteRig?) = lock.withLock { suiteRigStore.update(suiteUserId, suiteOwner, id, name, rig) }
+    override suspend fun deleteSuiteRig(id: String) { lock.withLock { suiteRigStore.delete(suiteUserId, suiteOwner, id) } }
+    override suspend fun setModelDefaultRig(modelId: String, rig: SuiteRig?): Model {
+        val m = lock.withLock {
+            rig?.let { FakeSuiteRigs.check(it, suite.camera, "defaultRig") }
+            val m = model(modelId).copy(defaultRig = rig?.takeIf { !it.isEmpty }) // null or {} clears it
+            replaceModel(m)
+            m
+        }
+        events.tryEmit(ApiEvent("model", model = m))
+        return m
+    }
+    override suspend fun suiteFeed(q: SuiteFeedQuery): SuiteFeedPage = lock.withLock {
+        FakeSuiteFeed.page(q, jobs.toList(), takes.toList(), models.toList(), hiddenJobs.toSet(), takeModels.toMap())
+    }
+
     // ---- AI suite · Photo tool (workstream 3): the shoot pipeline above, priced like its preview, with the still rig check.
     /** The Photo request as the shoot it runs: the prompt is the scene, the preset is the template. */
     private fun photoShoot(req: PhotoRequest): ShootRequest {
@@ -1159,11 +1192,12 @@ class FakeMuseApi(
 
     /** POST /v1/suite/photos: holds and makes the stills as a shoot does, saved as "Photo · …" takes. */
     override suspend fun createPhotos(req: PhotoRequest): PhotoResult {
-        val shoot = lock.withLock { photoShoot(req) }
+        val shoot = lock.withLock { FakeSuiteRigs.checkDraft(req.draft); photoShoot(req) }
         val made = shoot(shoot)
         return lock.withLock {
             val ids = made.map { it.id }.toSet()
-            for (i in takes.indices) if (takes[i].id in ids) takes[i] = takes[i].copy(title = "Photo · " + takes[i].title.removePrefix("Photo · ").removePrefix("Shoot · "))
+            // AI suite build step 2: every still keeps the composer draft ("Reuse settings").
+            for (i in takes.indices) if (takes[i].id in ids) takes[i] = takes[i].copy(title = "Photo · " + takes[i].title.removePrefix("Photo · ").removePrefix("Shoot · "), draft = req.draft)
             PhotoResult(takes = takes.filter { it.id in ids }.map { tpl.shotView(it) })
         }
     }

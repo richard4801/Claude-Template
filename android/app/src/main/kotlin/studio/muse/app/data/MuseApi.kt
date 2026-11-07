@@ -216,6 +216,19 @@ interface MuseApi {
     suspend fun createSuiteLocation(req: SuiteLocationCreate): SuiteLocation = throw ApiException("not_found", "This server doesn't have locations yet")
     suspend fun deleteSuiteLocation(id: String): Unit = throw ApiException("not_found", "This server doesn't have locations yet")
 
+    // AI suite build step 2 (plans/api.md "The new Suite's server pieces"): saved rigs, a model's default rig, the takes feed.
+    /** A member's own rigs; the owner gets every rig in the studio, theirs first ([SuiteRigView.mine]). Ordered by last change. */
+    suspend fun suiteRigs(): List<SuiteRigView> = throw ApiException("not_found", "This server doesn't have saved rigs yet")
+    /** Name 1–60 characters (trimmed); at most 100 rigs per person (`too_many_rigs`). Unknown ids → `bad_request`. */
+    suspend fun createSuiteRig(name: String, rig: SuiteRig): SuiteRigView = throw ApiException("not_found", "This server doesn't have saved rigs yet")
+    /** Your own rig, or any for the owner (anyone else's reads as `not_found`). Null leaves it; [rig] replaces the whole rig. */
+    suspend fun updateSuiteRig(id: String, name: String? = null, rig: SuiteRig? = null): SuiteRigView = throw ApiException("not_found", "This server doesn't have saved rigs yet")
+    suspend fun deleteSuiteRig(id: String): Unit = throw ApiException("not_found", "This server doesn't have saved rigs yet")
+    /** The model's default rig (`PATCH /v1/models/{id} {defaultRig}`); null (or an all-Auto rig) clears it. Anyone in the studio may set it. */
+    suspend fun setModelDefaultRig(modelId: String, rig: SuiteRig?): Model = throw ApiException("not_found", "This server doesn't have default rigs yet")
+    /** The takes rail: newest first, queued/running/failed jobs as one card each, every done take and photo as its own. */
+    suspend fun suiteFeed(q: SuiteFeedQuery = SuiteFeedQuery()): SuiteFeedPage = throw ApiException("not_found", "This server doesn't have the takes feed yet")
+
     // AI suite · Photo tool (workstream 3, plans/api.md "Photo tool"): Photoshoot on the composer. Free estimate; create holds and makes the stills.
     suspend fun photoEstimate(req: PhotoRequest): PhotoEstimate = throw ApiException("not_found", "This server doesn't have the Photo tool yet")
     suspend fun createPhotos(req: PhotoRequest): PhotoResult = throw ApiException("not_found", "This server doesn't have the Photo tool yet")
