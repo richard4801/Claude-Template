@@ -204,8 +204,9 @@ enum SnapshotRunner {
                 Task { @MainActor in try? await Task.sleep(for: .seconds(0.6)); store.openPicker(.camera, step: "setup") } }),
             // Diagnosis (coordinator): Photo, then Shot and the panel in the same tick. The fit check logs whether the
             // body saw the picker and whether the panel's view appeared (PANEL lines).
-            ("cinema_rig_sametick", { store.newSuite = true; state.cinemaEmpty = false; store.openPhoto(model: SampleData.demo)
-                store.openTool(.shot); fillDemoDraft(store); store.openPicker(.style) }),
+            // The original failure: the Photo screen fully drawn, then Shot and the panel in one tick.
+            ("cinema_photo_again", { store.newSuite = true; state.cinemaEmpty = false; store.openPhoto(model: SampleData.demo) }),
+            ("cinema_rig_sametick", { store.newSuite = true; state.cinemaEmpty = false; store.openTool(.shot); fillDemoDraft(store); store.openPicker(.style) }),
         ]
         // The runner's screen clamps the window's height (the 1440 × 900 and 1280 × 800 shots are about 684 pt tall).
         await run(ThemeID.allCases, [(1440, 900), (1280, 800)], cinema)
