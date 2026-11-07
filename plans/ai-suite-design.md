@@ -223,3 +223,13 @@ The owner rejected the first mocks as "scanty" and "plain": "Leave the original 
 
   This is a direction only: no Higgsfield branding or assets.
 - **Unchanged from the plan:** everything functional. That covers modes, rig depth, the rig check, pinned Generate with the price, the results feed and its actions, presets, saved rigs and the model default rig.
+
+## MOCKS APPROVED (owner, 2026-11-07): "Yeah I like it"
+- **Approved mocks:** `plans/ai-suite-cinematic/` at 66ed2c2 on `claude/muse-prompt-scripts`. That is the cinematic Suite derived from each theme: a rounded "room" set into the unchanged shell, the stage, the glass dock with image chips, the takes rail and the imagery pickers.
+- **Build order:**
+  1. **Mac Shot and Photo**, behind a Settings switch "Try the new Suite", on the owner's account first.
+  2. **Server:** saved rigs, the model default rig, a full draft per job (for Reuse settings), and the takes feed.
+  3. The rig panel tabs in the new style.
+  4. The other six tools.
+  5. Android.
+  6. Remove the old Suite screens.
