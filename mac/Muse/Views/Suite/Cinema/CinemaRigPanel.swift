@@ -197,7 +197,7 @@ struct CinemaRigPanel: View {
 
     @ViewBuilder private var content: some View {
         switch tab {
-        case .camera: ScrollView { CameraSetupStep() } // short windows scroll; the drums keep their own scroll inside them
+        case .camera: CameraSetupStep() // fills the panel (it sizes the drums to the height it gets; a ScrollView collapsed it)
         case .angle: ScrollView { CameraAngleStep().padding(24) }
         case .move: CameraMovementStep(query: $moveQuery)
         case .directed:
