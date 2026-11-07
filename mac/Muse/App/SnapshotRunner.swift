@@ -173,14 +173,35 @@ enum SnapshotRunner {
         guard let sv = mainScrollView(in: content) else { return "FITS \(name) no scroll view" }
         let doc = sv.documentView?.frame.height ?? 0, viewport = sv.contentView.bounds.height
         guard doc > viewport + 4 else { return "FITS \(name) content \(Int(doc)) <= viewport \(Int(viewport))" }
-        let before = sv.contentView.bounds.origin.y
         let mid = sv.convert(NSPoint(x: sv.bounds.midX, y: sv.bounds.midY), to: nil)
-        postMouseMove(at: mid, in: w)
-        try? await Task.sleep(for: .seconds(0.2))
-        postScroll(at: mid, in: w, dy: -300)
-        try? await Task.sleep(for: .seconds(0.8))
-        let after = sv.contentView.bounds.origin.y
-        return abs(after - before) > 1 ? "MOVED \(name) \(Int(before)) -> \(Int(after))" : "STUCK \(name) offset \(Int(before)), content \(Int(doc)) > viewport \(Int(viewport))"
+        func offset() -> CGFloat { sv.contentView.bounds.origin.y }
+        // 1. Through the app, as a real event: NSApp.sendEvent runs local event monitors (a monitor that swallows
+        //    scrolls makes this fail).
+        let start = offset()
+        if let ev = scrollEvent(at: mid, in: w, dy: -240) { NSApp.sendEvent(ev) }
+        try? await Task.sleep(for: .seconds(0.6))
+        if abs(offset() - start) > 1 { return "MOVED \(name) (app) \(Int(start)) -> \(Int(offset()))" }
+        // 2. To the view under the pointer: fails when the content isn't in a scroll view or something covers it.
+        let hitPoint = content.superview.map { $0.convert(mid, from: nil) } ?? mid
+        guard let hit = content.hitTest(hitPoint) else { return "STUCK \(name) nothing under the pointer" }
+        guard hit === sv || hit.isDescendant(of: sv) else {
+            return "STUCK \(name) covered by \(type(of: hit)), content \(Int(doc)) > viewport \(Int(viewport))"
+        }
+        let start2 = offset()
+        if let ev = scrollEvent(at: mid, in: w, dy: -240) { hit.scrollWheel(with: ev) }
+        try? await Task.sleep(for: .seconds(0.6))
+        if abs(offset() - start2) > 1 { return "MOVED \(name) (view) \(Int(start2)) -> \(Int(offset()))" }
+        return "STUCK \(name) offset \(Int(start2)), content \(Int(doc)) > viewport \(Int(viewport)), hit \(type(of: hit))"
+    }
+
+    /// A continuous (trackpad-like) scroll event at a point in the window, addressed to that window.
+    private static func scrollEvent(at p: NSPoint, in w: NSWindow, dy: Int32) -> NSEvent? {
+        guard let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: dy, wheel2: 0, wheel3: 0) else { return nil }
+        cg.location = globalPoint(p, in: w)
+        cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        cg.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(w.windowNumber))
+        cg.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(w.windowNumber))
+        return NSEvent(cgEvent: cg)
     }
 
     /// A point in window coordinates → Quartz global coordinates (top-left of the main display).
@@ -195,11 +216,6 @@ enum SnapshotRunner {
         e.postToPid(getpid())
     }
 
-    private static func postScroll(at p: NSPoint, in w: NSWindow, dy: Int32) {
-        guard let e = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: dy, wheel2: 0, wheel3: 0) else { return }
-        e.location = globalPoint(p, in: w)
-        e.postToPid(getpid())
-    }
 
     private static var mainWindow: NSWindow? { NSApp.windows.first { $0.isVisible && $0.contentView != nil && $0.canBecomeMain } }
 
