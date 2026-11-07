@@ -541,7 +541,7 @@ struct GenerateButton: View {
 
 
 /// Review mode only (SnapshotRunner): reports where Generate sits in the window, so CI can check it is fully on screen.
-private struct GenerateFrameProbe: View {
+struct GenerateFrameProbe: View { // also used by the cinematic Suite (CinemaSuiteView)
     var body: some View {
         GeometryReader { g in
             let f = g.frame(in: .global)

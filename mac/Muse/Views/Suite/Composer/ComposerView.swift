@@ -11,7 +11,7 @@ import SwiftUI
 // Pickers open over the page, always dark.
 
 /// Re-price when anything that changes the request changes.
-private struct ComposerPriceKey: Equatable {
+struct ComposerPriceKey: Equatable { // also used by the cinematic Suite (CinemaSuiteView)
     var draft: ComposerDraft
     var slots: InputSlots
     var swap: SwapDraft

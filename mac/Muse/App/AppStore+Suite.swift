@@ -444,6 +444,10 @@ extension AppStore {
         }
     }
 
+    /// The cinematic Suite is on (owner switch) for this tool: Shot and Photo only in build step 1.
+    var cinemaSuite: Bool { newSuite && isOwner }
+    func usesCinema(_ mode: SuiteMode) -> Bool { cinemaSuite && (mode == .shot || mode == .photo) }
+
     /// The composer's newest job.
     var shotJob: Job? { suite.shotJobIds.last.flatMap { id in jobs.first { $0.id == id } } }
     func takes(of job: Job?) -> [Take] { job.map { j in takes.filter { $0.jobId == j.id }.sorted { $0.index < $1.index } } ?? [] }

@@ -242,6 +242,7 @@ questionmark.circle question
 photo.on.rectangle images
 
 [extra]
+frame-corners
 aperture
 coins
 microphone-slash

@@ -192,6 +192,7 @@ enum PhosphorMap {
         "fast-forward",
         "file-text",
         "film-strip",
+        "frame-corners",
         "gauge",
         "google-logo",
         "hard-drives",

@@ -35,6 +35,8 @@ struct Theme {
     let stroke: CGFloat
     let displayFamily, bodyFamily, monoFamily: String
     let isDark: Bool
+    /// The cinematic Suite's dark room (Theme.room): its own roles in place of the theme's. nil everywhere else.
+    var rolesOverride: Roles? = nil
 
     var isA: Bool { id == .a }
     var isB: Bool { id == .b }

@@ -83,7 +83,7 @@ struct Radii {
 }
 
 extension Theme {
-    var roles: Roles { Roles.of(id) }
+    var roles: Roles { rolesOverride ?? Roles.of(id) } // the cinematic Suite's room overrides them (Theme.room)
     var scale: TypeScale { TypeScale.of(id) }
     var radii: Radii { Radii.of(id) }
 }

@@ -17,6 +17,8 @@ enum SnapshotRunner {
         var scrollTo: String?
         /// Generate's frame in the window (SwiftUI global space, top-left origin), for the composer fit check.
         var generateFrame: CGRect?
+        /// The cinematic Suite shows its empty state (the demo studio already has takes).
+        var cinemaEmpty = false
     }
 
     static let state = State()
@@ -143,29 +145,41 @@ enum SnapshotRunner {
                 store.openTool(.shot); store.suite.composer.tokens = PromptTokens(); store.suite.composer.collapsed = nil } }),
             ("composer_photo", { store.openPhoto(model: SampleData.demo) }),
         ]
-        for theme in [ThemeID.c, ThemeID.b] {
-            store.themeID = theme
-            for (width, height) in [(1440, 900), (1280, 800), (1100, 620)] {
-                w.setFrame(NSRect(x: full.minX, y: full.maxY - CGFloat(height), width: CGFloat(width), height: CGFloat(height)), display: true)
-                for (name, show) in screens {
-                    store.suite.picker = nil
-                    store.suite.browserOpen = false
-                    state.generateFrame = nil
-                    show()
-                    try? await Task.sleep(for: .seconds(1.5))
-                    w.contentView?.layoutSubtreeIfNeeded()
-                    let content = w.contentView?.bounds.size ?? .zero
-                    let label = "\(name) \(width)x\(height) \(theme.rawValue)"
-                    if let g = state.generateFrame {
-                        let inside = g.minX >= 0 && g.minY >= 0 && g.maxX <= content.width + 0.5 && g.maxY <= content.height + 0.5
-                        lines.append("\(inside ? "FITS" : "CUT") \(label) generate \(Int(g.minX)),\(Int(g.minY)) \(Int(g.width))x\(Int(g.height)) in \(Int(content.width))x\(Int(content.height))")
-                    } else {
-                        lines.append("CUT \(label) generate not drawn")
+        func run(_ themes: [ThemeID], _ sizes: [(Int, Int)], _ screens: [(String, @MainActor () -> Void)]) async {
+            for theme in themes {
+                store.themeID = theme
+                for (width, height) in sizes {
+                    w.setFrame(NSRect(x: full.minX, y: full.maxY - CGFloat(height), width: CGFloat(width), height: CGFloat(height)), display: true)
+                    for (name, show) in screens {
+                        store.suite.picker = nil
+                        store.suite.browserOpen = false
+                        state.generateFrame = nil
+                        show()
+                        try? await Task.sleep(for: .seconds(1.5))
+                        w.contentView?.layoutSubtreeIfNeeded()
+                        let content = w.contentView?.bounds.size ?? .zero
+                        let label = "\(name) \(width)x\(height) \(theme.rawValue)"
+                        if let g = state.generateFrame {
+                            let inside = g.minX >= 0 && g.minY >= 0 && g.maxX <= content.width + 0.5 && g.maxY <= content.height + 0.5
+                            lines.append("\(inside ? "FITS" : "CUT") \(label) generate \(Int(g.minX)),\(Int(g.minY)) \(Int(g.width))x\(Int(g.height)) in \(Int(content.width))x\(Int(content.height))")
+                        } else {
+                            lines.append("CUT \(label) generate not drawn")
+                        }
+                        capture(dir.appendingPathComponent("mac_\(theme.rawValue)_\(name)_\(width)x\(height).png"))
                     }
-                    capture(dir.appendingPathComponent("mac_\(theme.rawValue)_\(name)_\(width)x\(height).png"))
                 }
             }
         }
+        await run([.c, .b], [(1440, 900), (1280, 800), (1100, 620)], screens)
+        // The cinematic Suite (owner switch "Try the new Suite"): Shot, its empty state and Photo in all four themes.
+        let cinema: [(String, @MainActor () -> Void)] = [
+            ("cinema_shot", { store.newSuite = true; state.cinemaEmpty = false; store.openTool(.shot); fillDemoDraft(store) }),
+            ("cinema_empty", { store.newSuite = true; state.cinemaEmpty = true; store.openTool(.shot); store.suite.composer.tokens = PromptTokens() }),
+            ("cinema_photo", { store.newSuite = true; state.cinemaEmpty = false; store.openPhoto(model: SampleData.demo) }),
+        ]
+        await run(ThemeID.allCases, [(1440, 900), (1280, 800)], cinema)
+        store.newSuite = false
+        state.cinemaEmpty = false
         w.setFrame(full, display: true)
         try? await Task.sleep(for: .seconds(1))
         try? (lines.joined(separator: "\n") + "\n").write(to: dir.appendingPathComponent("fit-check.txt"), atomically: true, encoding: .utf8)
