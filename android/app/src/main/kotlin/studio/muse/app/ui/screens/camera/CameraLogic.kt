@@ -337,7 +337,7 @@ object SessionText {
 // ---------------------------------------------------------------- transcript
 
 /** BUILD_STAGE: the upper-case tool name without the `blender_` prefix. */
-fun toolChipName(name: String) = name.removePrefix("blender_").uppercase()
+fun toolChipName(name: String) = name.removePrefix("blender_").replace('_', ' ').replaceFirstChar { it.uppercase() }
 
 data class ToolChip(val name: String, val count: Int, val ok: Boolean) {
     val label get() = if (count > 1) "$name ×$count" else name

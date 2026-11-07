@@ -59,6 +59,7 @@ import studio.muse.app.ui.components.Pill
 import studio.muse.app.ui.components.T
 import studio.muse.app.ui.components.press
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.scale
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.hypot
@@ -107,7 +108,7 @@ fun LivePill(live: Boolean) = Pill(if (live) "● Live" else "Offline", if (live
 fun IdChip(id: String, modifier: Modifier = Modifier) {
     val m = muse
     Box(modifier.clip(RoundedCornerShape(if (m.isA) 2.dp else 6.dp)).background(m.t.ink).padding(horizontal = 8.dp, vertical = 4.dp)) {
-        T(SessionText.idChip(id), m.type.mono.copy(fontSize = 11.5.sp, letterSpacing = .06.sp), m.t.bg, maxLines = 1)
+        T(SessionText.idChip(id), m.scale.caption.copy(fontFeatureSettings = "tnum"), m.t.bg, maxLines = 1)
     }
 }
 
@@ -328,7 +329,7 @@ fun TimelineView(session: CameraSession, playhead: Double, onScrub: (Double) -> 
         add("CAMERA" to Timeline.cameraSpans(session.cameraPath).map { Triple(it, it.label.startsWith("orbit"), true) } to session.cameraPath?.keyframes.orEmpty().map { it.t })
         session.blocking?.characters.orEmpty().forEach { tr ->
             val name = session.characters.firstOrNull { it.modelId == tr.modelId }?.name ?: "?"
-            add(name.uppercase() to Timeline.characterSpans(tr.keyframes, dur).map { Triple(it, false, true) } to tr.keyframes.filter { !it.action.isNullOrBlank() }.map { it.t })
+            add(name to Timeline.characterSpans(tr.keyframes, dur).map { Triple(it, false, true) } to tr.keyframes.filter { !it.action.isNullOrBlank() }.map { it.t })
         }
         add("CUTS" to emptyList<Triple<Span, Boolean, Boolean>>() to session.cameraPath?.cuts.orEmpty())
     }
@@ -373,7 +374,7 @@ fun TimelineView(session: CameraSession, playhead: Double, onScrub: (Double) -> 
                     drawLine(m.t.line, Offset(trackStart, top + laneH.toPx() - 1), Offset(size.width, top + laneH.toPx() - 1), 1f)
                 }
                 // END chip
-                val end = measurer.measure("END ${SessionText.seconds(dur)}".uppercase(), mono.copy(color = m.t.muted))
+                val end = measurer.measure("End ${SessionText.seconds(dur)}", mono.copy(color = m.t.muted))
                 val lastTop = 26.dp.toPx() + laneH.toPx() * (lanes.size - 1)
                 val ex = xOf(dur) - end.size.width - 14.dp.toPx()
                 drawRect(m.t.line, Offset(ex - 6, lastTop + 8.dp.toPx()), Size(end.size.width + 12f, end.size.height + 6f), style = Stroke(1f))
@@ -381,7 +382,7 @@ fun TimelineView(session: CameraSession, playhead: Double, onScrub: (Double) -> 
                 // Playhead + time chip
                 val px = xOf(playhead)
                 drawLine(m.t.accent, Offset(px, 0f), Offset(px, size.height), 2.dp.toPx())
-                val chip = measurer.measure(Plan.chip(playhead).uppercase(), mono.copy(color = m.t.accent))
+                val chip = measurer.measure(Plan.chip(playhead), mono.copy(color = m.t.accent))
                 val cx = (px + 6.dp.toPx()).coerceAtMost(size.width - chip.size.width - 12f)
                 val cy = size.height - chip.size.height - 10.dp.toPx()
                 drawRect(m.t.surface, Offset(cx - 6, cy - 3), Size(chip.size.width + 12f, chip.size.height + 6f))
@@ -423,7 +424,7 @@ fun CameraStill(session: CameraSession, playhead: Double, modifier: Modifier = M
         if (best == null) T("No stills yet · they arrive with the guides", m.type.tiny, m.t.muted)
         else Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
             GuideThumb("greybox", best, Modifier.height(220.dp).width(124.dp), frame = (at(best) / dur.coerceAtLeast(.1) * 2).roundToInt())
-            T("${SessionText.assetLabel(best.kind)} · ${Plan.chip(at(best))}", m.type.mono.copy(fontSize = 11.sp), m.t.muted)
+            T("${SessionText.assetLabel(best.kind)} · ${Plan.chip(at(best))}", m.scale.caption.copy(fontFeatureSettings = "tnum"), m.t.muted)
         }
     }
 }
@@ -436,7 +437,7 @@ fun ToolChipView(c: ToolChip) {
     Row(Modifier.height(22.dp).border(1.dp, if (c.ok) m.t.line else m.t.accent, RoundedCornerShape(if (m.isA) 2.dp else 999.dp)).padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
         CamIc("cube", 11.dp, col)
-        T(c.label, m.type.mono.copy(fontSize = 9.5.sp, letterSpacing = .8.sp), col, maxLines = 1)
+        T(c.label, m.scale.caption.copy(fontFeatureSettings = "tnum"), col, maxLines = 1)
     }
 }
 

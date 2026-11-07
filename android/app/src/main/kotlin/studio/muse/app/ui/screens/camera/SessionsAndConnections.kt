@@ -39,6 +39,7 @@ import studio.muse.app.ui.components.Toggle
 import studio.muse.app.ui.components.TopBar
 import studio.muse.app.ui.components.press
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.scale
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -75,7 +76,7 @@ fun SessionRow(s: CameraSession, onClick: () -> Unit) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             T(s.title, m.type.body.copy(fontSize = 14.sp), m.t.ink, weight = FontWeight.Bold, maxLines = 1)
             T(s.characters.joinToString(" · ") { it.name }.ifEmpty { "No cast yet" }, m.type.tiny, m.t.muted, maxLines = 1)
-            T(SessionText.subtitle(s), m.type.mono.copy(fontSize = 11.5.sp), m.t.muted, maxLines = 1)
+            T(SessionText.subtitle(s), m.scale.caption.copy(fontFeatureSettings = "tnum"), m.t.muted, maxLines = 1)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 Box(Modifier.size(6.dp).clip(CircleShape).background(dotColor(SessionText.blenderRow(s).dot)))
                 T(relayShort(s), m.type.tiny.copy(fontSize = 11.5.sp), m.t.muted, maxLines = 1)

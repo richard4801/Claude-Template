@@ -54,6 +54,7 @@ import studio.muse.app.ui.screens.claude.ClaudeChat
 import studio.muse.app.ui.screens.claude.ClaudeChatStore
 import studio.muse.app.ui.screens.claude.rememberClaudeChatStore
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.scale
 
 /** What the chat screens can do (the store's actions, or test stubs). */
 class ChatActions(
@@ -118,7 +119,7 @@ fun SessionHeader(s: CameraSession) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             T(s.title, m.type.body.copy(fontSize = 15.sp), m.t.ink, weight = FontWeight.Bold, maxLines = 1)
-            T(SessionText.subtitle(s), m.type.mono.copy(fontSize = 12.sp), m.t.muted, maxLines = 1)
+            T(SessionText.subtitle(s), m.scale.caption.copy(fontFeatureSettings = "tnum"), m.t.muted, maxLines = 1)
         }
         val (label, kind) = SessionText.pill(s)
         Pill(label, kind)
@@ -155,12 +156,12 @@ fun WorkingBlock(t: ChatTurn, compact: Boolean) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Lbl(if (compact) "Claude · working" else t.title, Modifier.weight(1f), color = if (compact) m.t.muted else m.t.ink)
-            if (!compact) T(t.percent, m.type.mono.copy(fontSize = 12.sp), m.t.ink)
+            if (!compact) T(t.percent, m.scale.caption.copy(fontFeatureSettings = "tnum"), m.t.ink)
         }
         T(if (compact) t.quote else "↳ “${t.message.take(60)}” — ${t.quote}", m.type.body.copy(fontSize = 13.5.sp, lineHeight = 19.sp), m.t.ink)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Bar(t.progress, Modifier.weight(1f), color = m.t.accent, height = 3.dp, track = m.t.line)
-            T(if (compact) t.percent else if (t.waitingMac) "waiting for the Mac" else "step ${t.toolsDone} / ${t.toolsSeen.coerceAtLeast(1)}", m.type.mono.copy(fontSize = 12.sp), if (compact) m.t.ink else m.t.muted)
+            T(if (compact) t.percent else if (t.waitingMac) "waiting for the Mac" else "step ${t.toolsDone} / ${t.toolsSeen.coerceAtLeast(1)}", m.scale.caption.copy(fontFeatureSettings = "tnum"), if (compact) m.t.ink else m.t.muted)
         }
     }
 }
@@ -234,20 +235,20 @@ fun GuidesCard(s: CameraSession, actions: ChatActions) {
     Column(Modifier.fillMaxWidth().camBox().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             T("Guides ready · rev ${s.revision}", m.type.body.copy(fontSize = 13.5.sp), m.t.ink, Modifier.weight(1f), weight = FontWeight.Bold)
-            T("${SessionText.seconds(s.durationSec)} · ${s.fps} fps", m.type.mono.copy(fontSize = 11.5.sp), m.t.muted)
+            T("${SessionText.seconds(s.durationSec)} · ${s.fps} fps", m.scale.caption.copy(fontFeatureSettings = "tnum"), m.t.muted)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("greybox" to "GREYBOX", "depth" to "DEPTH", "pose" to "POSE").forEach { (k, l) ->
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     GuideThumb(k, s.assets.lastOrNull { it.kind == k && it.ready }, Modifier.width(44.dp).height(78.dp))
-                    T(l, m.type.mono.copy(fontSize = 9.sp), m.t.muted)
+                    T(l, m.scale.caption.copy(fontFeatureSettings = "tnum"), m.t.muted)
                 }
             }
             Box(Modifier.width(1.dp).height(78.dp).background(m.t.line))
             listOf("keyframe_start" to "START", "keyframe_mid" to "MID", "keyframe_end" to "END").forEachIndexed { i, (k, l) ->
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     GuideThumb("greybox", s.assets.lastOrNull { it.kind == k && it.ready }, Modifier.width(32.dp).height(56.dp), frame = i)
-                    T(l, m.type.mono.copy(fontSize = 9.sp), m.t.muted)
+                    T(l, m.scale.caption.copy(fontFeatureSettings = "tnum"), m.t.muted)
                 }
             }
         }

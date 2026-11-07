@@ -155,7 +155,7 @@ class CameraLogicTest {
 
     @Test fun toolChipsCollapse() {
         val chips = collapseTools(listOf("blender_setup_scene" to true, "blender_place_character" to true, "blender_place_character" to false, "blender_render_guides" to true, "blender_setup_scene" to true))
-        assertEquals(listOf("SETUP_SCENE", "PLACE_CHARACTER ×2", "RENDER_GUIDES", "SETUP_SCENE"), chips.map { it.label })
+        assertEquals(listOf("Setup scene", "Place character ×2", "Render guides", "Setup scene"), chips.map { it.label })
         assertEquals(listOf(true, false, true, true), chips.map { it.ok })
     }
 
@@ -166,7 +166,7 @@ class CameraLogicTest {
         assertEquals("YOU", you.label)
         val claude = turns[1] as Turn.Claude
         assertTrue(claude.text.startsWith("Built the café"))
-        assertEquals(listOf("SETUP_SCENE", "PLACE_CHARACTER ×2", "SET_CAMERA", "RENDER_GUIDES"), claude.tools.map { it.label })
+        assertEquals(listOf("Setup scene", "Place character ×2", "Set camera", "Render guides"), claude.tools.map { it.label })
         assertEquals("YOU · PHONE", (Transcript.turns(seed.messages!!, setOf(you.text))[0] as Turn.You).label)
     }
 

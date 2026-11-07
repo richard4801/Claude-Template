@@ -37,6 +37,7 @@ import studio.muse.app.ui.components.T
 import studio.muse.app.ui.components.TbBtn
 import studio.muse.app.ui.components.press
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.scale
 
 /** The editing actions of the Directed pane. */
 class PaneActions(
@@ -94,7 +95,7 @@ private fun BlockingTab(ui: CameraUi, pane: PaneActions, modifier: Modifier) {
             Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 IdChip(s.id)
                 T(s.title, m.type.body.copy(fontSize = 14.5.sp, lineHeight = 18.sp), m.t.ink, Modifier.widthIn(max = 150.dp), weight = FontWeight.Bold, maxLines = 2)
-                T(SessionText.specLine(s), m.type.mono.copy(fontSize = 12.sp), m.t.muted, Modifier.weight(1f), maxLines = 2)
+                T(SessionText.specLine(s), m.scale.caption.copy(fontFeatureSettings = "tnum"), m.t.muted, Modifier.weight(1f), maxLines = 2)
                 Seg(listOf("plan" to "Plan", "camera" to "Camera view", "side" to "Side"), view, { view = it }, Modifier.width(300.dp), small = true)
                 SmallBtn("Re-render", icon = "refresh", onClick = pane.rerender)
             }
@@ -164,14 +165,14 @@ object History {
 private fun HistoryTab(s: CameraSession, messages: List<CameraMessage>, now: Long, modifier: Modifier) {
     val m = muse
     Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp, vertical = 18.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        T("rev ${s.revision} · now", m.type.mono.copy(fontSize = 12.sp), m.t.muted)
+        T("rev ${s.revision} · now", m.scale.caption.copy(fontFeatureSettings = "tnum"), m.t.muted)
         Spacer(Modifier.height(8.dp))
         History.lines(messages, s.assets).forEach { l ->
             Row(Modifier.fillMaxWidth().drawBehind { drawLine(m.t.line, Offset(0f, size.height), Offset(size.width, size.height), 1f) }.padding(vertical = 9.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 T(l.who, m.type.body.copy(fontSize = 13.sp), m.t.ink, Modifier.width(170.dp), weight = FontWeight.SemiBold, maxLines = 1)
                 T(l.what, m.type.body.copy(fontSize = 13.sp), if (l.failed) m.t.accent else m.t.ink, Modifier.weight(1f), maxLines = 2)
-                T(SessionText.ago(l.at, now), m.type.mono.copy(fontSize = 11.5.sp), m.t.muted, maxLines = 1)
+                T(SessionText.ago(l.at, now), m.scale.caption.copy(fontFeatureSettings = "tnum"), m.t.muted, maxLines = 1)
             }
         }
     }

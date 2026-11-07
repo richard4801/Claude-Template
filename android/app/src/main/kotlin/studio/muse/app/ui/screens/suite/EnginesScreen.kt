@@ -36,6 +36,7 @@ import studio.muse.app.ui.components.Toggle
 import studio.muse.app.ui.components.TopBar
 import studio.muse.app.ui.screens.ScreenBox
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.scale
 import studio.muse.core.Pricing
 
 /**
@@ -80,7 +81,7 @@ fun SuiteEnginesScreen() {
                     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).line(m).padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         T(t.label, m.type.body.copy(fontWeight = FontWeight.Bold, fontSize = 14.sp), m.t.ink, Modifier.width(78.dp))
                         T(first?.let { "${it.name} ${it.resolution}" } ?: "Nothing available", m.type.body.copy(fontSize = 14.sp), m.t.ink, Modifier.weight(1f), maxLines = 2)
-                        T(per?.let { "$" + "%.4f".format(java.util.Locale.US, it).trimEnd('0').let { s -> if (s.endsWith(".")) s + "0" else s } + "/s" } ?: "", m.type.mono.copy(fontSize = 12.sp), m.t.ink)
+                        T(per?.let { "$" + "%.4f".format(java.util.Locale.US, it).trimEnd('0').let { s -> if (s.endsWith(".")) s + "0" else s } + "/s" } ?: "", m.scale.caption.copy(fontFeatureSettings = "tnum"), m.t.ink)
                     }
                 }
                 val engine = est?.engine
@@ -100,7 +101,7 @@ fun SuiteEnginesScreen() {
                         T(Pricing.money(est.estimate), m.type.h2.copy(fontSize = 26.sp), m.t.ink)
                     }
                     val provider = engine?.perSec?.let { p -> p * (engine.billedPerTake ?: est.seconds) * est.takes }
-                    if (provider != null) Row { Tiny("Provider cost", Modifier.weight(1f)); T(Pricing.money(provider), m.type.mono, m.t.ink) }
+                    if (provider != null) Row { Tiny("Provider cost", Modifier.weight(1f)); T(Pricing.money(provider), m.scale.caption.copy(fontFeatureSettings = "tnum"), m.t.ink) }
                     est.tried?.takeIf { it.isNotEmpty() }?.let { tr -> Tiny("Skipped: " + tr.joinToString(" · ") { "${it.model} ${it.resolution} (${it.why})" }) }
                 }
                 SLbl("Models")
