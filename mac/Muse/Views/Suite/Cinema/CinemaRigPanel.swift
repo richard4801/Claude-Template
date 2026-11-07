@@ -87,7 +87,6 @@ struct CinemaRigPanel: View {
             }
             .frame(width: g.size.width, height: g.size.height)
         }
-        .transition(.opacity)
     }
 
     private var panel: some View {
@@ -198,7 +197,7 @@ struct CinemaRigPanel: View {
 
     @ViewBuilder private var content: some View {
         switch tab {
-        case .camera: CameraSetupStep()
+        case .camera: ScrollView { CameraSetupStep() } // short windows scroll; the drums keep their own scroll inside them
         case .angle: ScrollView { CameraAngleStep().padding(24) }
         case .move: CameraMovementStep(query: $moveQuery)
         case .directed:
