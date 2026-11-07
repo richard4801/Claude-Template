@@ -15,6 +15,8 @@ enum SnapshotRunner {
         var overlay: String?
         /// Settings scrolls to this anchor (a view `.id`), for the scrolled shots.
         var scrollTo: String?
+        /// Generate's frame in the window (SwiftUI global space, top-left origin), for the composer fit check.
+        var generateFrame: CGRect?
     }
 
     static let state = State()
@@ -88,6 +90,7 @@ enum SnapshotRunner {
             store.suite.picker = nil
             state.overlay = nil
             store.themeID = .a
+            await fitCheck(store, dir: dir)
             await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
             await scrollCheck(store, dir: dir)
             store.signOut()
@@ -121,6 +124,51 @@ enum SnapshotRunner {
         store.suite.composer = d
         // The character goes in front of the text, with her first outfit.
         store.setComposerCharacter(store.character(SampleData.demo))
+    }
+
+    // MARK: Fit check (CI): Generate is fully on screen at the common Mac window sizes (owner fix A2)
+
+    /// Writes `fit-check.txt` and `mac_<theme>_<screen>_<w>x<h>.png`: one line per tool and size, `FITS` when Generate
+    /// lies inside the window's content, else `CUT`. Mac CI fails on any CUT line. Sizes larger than the runner's
+    /// screen are fine: the window is drawn off screen and captured from its own content view.
+    private static func fitCheck(_ store: AppStore, dir: URL) async {
+        guard let w = mainWindow else { return }
+        let full = w.frame
+        var lines: [String] = []
+        let screens: [(String, @MainActor () -> Void)] = [
+            ("composer", { store.openTool(.shot); fillDemoDraft(store) }),
+            // Empty draft: the presets strip opens by default (worst case for height). Switching tools re-evaluates it.
+            ("composer_empty", { store.openTool(.photo); Task { @MainActor in
+                try? await Task.sleep(for: .seconds(0.4))
+                store.openTool(.shot); store.suite.composer.tokens = PromptTokens(); store.suite.composer.collapsed = nil } }),
+            ("composer_photo", { store.openPhoto(model: SampleData.demo) }),
+        ]
+        for theme in [ThemeID.c, ThemeID.b] {
+            store.themeID = theme
+            for (width, height) in [(1440, 900), (1280, 800), (1100, 620)] {
+                w.setFrame(NSRect(x: full.minX, y: full.maxY - CGFloat(height), width: CGFloat(width), height: CGFloat(height)), display: true)
+                for (name, show) in screens {
+                    store.suite.picker = nil
+                    store.suite.browserOpen = false
+                    state.generateFrame = nil
+                    show()
+                    try? await Task.sleep(for: .seconds(1.5))
+                    w.contentView?.layoutSubtreeIfNeeded()
+                    let content = w.contentView?.bounds.size ?? .zero
+                    let label = "\(name) \(width)x\(height) \(theme.rawValue)"
+                    if let g = state.generateFrame {
+                        let inside = g.minX >= 0 && g.minY >= 0 && g.maxX <= content.width + 0.5 && g.maxY <= content.height + 0.5
+                        lines.append("\(inside ? "FITS" : "CUT") \(label) generate \(Int(g.minX)),\(Int(g.minY)) \(Int(g.width))x\(Int(g.height)) in \(Int(content.width))x\(Int(content.height))")
+                    } else {
+                        lines.append("CUT \(label) generate not drawn")
+                    }
+                    capture(dir.appendingPathComponent("mac_\(theme.rawValue)_\(name)_\(width)x\(height).png"))
+                }
+            }
+        }
+        w.setFrame(full, display: true)
+        try? await Task.sleep(for: .seconds(1))
+        try? (lines.joined(separator: "\n") + "\n").write(to: dir.appendingPathComponent("fit-check.txt"), atomically: true, encoding: .utf8)
     }
 
     // MARK: Scroll check (CI): every main page and Settings pane must scroll with a real scroll event

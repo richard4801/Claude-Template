@@ -98,6 +98,15 @@ jobs:
           ls -la snapshots | head -100
           tail -n 40 snapshots.log || true
 
+      # Generate must be fully on screen in the composer at 1440 × 900 and 1280 × 800 (owner fix A2). Fails on any CUT line.
+      - name: Composer fit check
+        working-directory: mac
+        run: |
+          f=snapshots/fit-check.txt
+          if [ ! -f "$f" ]; then echo "no fit-check.txt (review mode didn't finish)"; exit 1; fi
+          cat "$f"
+          if grep -q '^CUT' "$f"; then echo "Generate is cut off"; exit 1; fi
+
       # Opening Edit with takes shaped like live ones must not crash (owner blocker 2026-11-07). The review run writes each
       # step before it runs (SnapshotRunner+Edit.swift), so a crash leaves the step that crashed as the last START line.
       - name: Edit check
