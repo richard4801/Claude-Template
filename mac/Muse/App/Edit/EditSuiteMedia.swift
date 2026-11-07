@@ -44,40 +44,49 @@ enum EditSuiteMedia {
         return await VideoEditEngine.thumbnails(a, duration: d, count: count, height: height).map(\.1)
     }
 
+    /// What the waveform asks the reader for: 16-bit little-endian interleaved PCM at the track's own sample rate and channel
+    /// count. Never a sample rate or channel count: the reader's converter raises an uncatchable exception on ones it can't do.
+    static let pcmReaderSettings: [String: Any] = [
+        AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false,
+        AVLinearPCMIsBigEndianKey: false, AVLinearPCMIsNonInterleaved: false,
+    ]
+
     /// Peak levels (0…1) of a file's sound in `count` equal slices of its whole length; empty without sound.
+    ///
+    /// Owner crash 2026-11-07: asking the reader to resample to 2 kHz mono made `AVAssetReaderTrackOutput` raise an
+    /// Objective-C exception on real AAC takes (44.1 / 48 kHz stereo), which Swift can't catch. The reader now decodes to
+    /// 16-bit PCM at the track's own rate and channels (`pcmReaderSettings`: no rate, no channel count), and
+    /// the down-mix (loudest channel) and the slicing happen here (`EditSuite.Peaks`, tested in MuseCore).
     static func waveform(_ url: URL, count: Int = 400) async -> [Float] {
         await Task.detached(priority: .utility) { () -> [Float] in
+            guard count > 0 else { return [] }
             let asset = AVURLAsset(url: url)
-            guard let track = try? await asset.loadTracks(withMediaType: .audio).first, let reader = try? AVAssetReader(asset: asset) else { return [] }
-            let settings: [String: Any] = [
-                AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false,
-                AVLinearPCMIsBigEndianKey: false, AVLinearPCMIsNonInterleaved: false, AVNumberOfChannelsKey: 1, AVSampleRateKey: 2000,
-            ]
-            let out = AVAssetReaderTrackOutput(track: track, outputSettings: settings)
+            guard let track = try? await asset.loadTracks(withMediaType: .audio).first,
+                  let formats = try? await track.load(.formatDescriptions), !formats.isEmpty,
+                  let reader = try? AVAssetReader(asset: asset) else { return [] }
+            let out = AVAssetReaderTrackOutput(track: track, outputSettings: pcmReaderSettings)
+            out.alwaysCopiesSampleData = false
             guard reader.canAdd(out) else { return [] }
             reader.add(out)
             guard reader.startReading() else { return [] }
-            var samples: [Int16] = []
+            var peaks = EditSuite.Peaks()
             while let sb = out.copyNextSampleBuffer() {
                 guard let bb = CMSampleBufferGetDataBuffer(sb) else { continue }
+                var channels = 1
+                if let fd = CMSampleBufferGetFormatDescription(sb), let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fd)?.pointee {
+                    channels = max(1, Int(asbd.mChannelsPerFrame))
+                }
                 let len = CMBlockBufferGetDataLength(bb) / 2 * 2
+                guard len > 0 else { continue }
                 var chunk = [Int16](repeating: 0, count: len / 2)
-                _ = chunk.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(bb, atOffset: 0, dataLength: len, destination: $0.baseAddress!) }
-                samples += chunk
+                let ok = chunk.withUnsafeMutableBytes { raw -> Bool in
+                    guard let base = raw.baseAddress else { return false }
+                    return CMBlockBufferCopyDataBytes(bb, atOffset: 0, dataLength: len, destination: base) == kCMBlockBufferNoErr
+                }
+                if ok { peaks.add(interleaved: chunk, channels: channels) }
             }
-            guard !samples.isEmpty, count > 0 else { return [] }
-            let per = max(1, samples.count / count)
-            var peaks: [Float] = []
-            var i = 0
-            while i < samples.count && peaks.count < count {
-                let end = min(samples.count, i + per)
-                var m: Int32 = 0
-                for k in i..<end { m = max(m, abs(Int32(samples[k]))) }
-                peaks.append(Float(m) / 32768)
-                i = end
-            }
-            let top = max(0.05, peaks.max() ?? 1)
-            return peaks.map { min(1, $0 / top) }
+            if reader.status == .failed { return [] }
+            return peaks.slices(count)
         }.value
     }
 

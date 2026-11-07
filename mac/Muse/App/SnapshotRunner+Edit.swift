@@ -2,8 +2,9 @@ import AppKit
 import AVFoundation
 import MuseCore
 
-/// Edit check (Mac CI, owner blocker 2026-11-07: the app crashed on opening Edit with real takes). In review mode only: makes
-/// real MP4s shaped like live takes (no audio track, odd frame rates, a rotated file, a 15 s take trimmed to 8 s), puts
+/// Edit check (Mac CI, owner blocker 2026-11-07: the app crashed on opening Edit with real takes; the crash was the waveform
+/// reader on real AAC sound). In review mode only: makes real MP4s shaped like live takes (48 kHz stereo and 44.1 kHz mono
+/// AAC, one without sound, odd frame rates, a rotated file, a 15 s take trimmed to 8 s), checks their waveforms, puts
 /// them in the demo store as takes with the missing or zero facts the server can send (durationSec / width / height null
 /// or 0, a suite look), and opens each path into editing: the Edit home, the Edit suite on each take, and the older
 /// editor from the Library. Every step is written to `edit-check.txt` before it runs and flushed, so a crash leaves the
@@ -24,13 +25,22 @@ extension SnapshotRunner {
         try? FileManager.default.createDirectory(at: media, withIntermediateDirectories: true)
         let short = media.appendingPathComponent("short.mp4"), long = media.appendingPathComponent("long.mp4"), turned = media.appendingPathComponent("turned.mp4")
         do {
-            try await makeVideo(short, seconds: 3, fps: 24, width: 360, height: 640)
-            try await makeVideo(long, seconds: 15, fps: 30, width: 432, height: 768)
+            // Live takes have real AAC sound (owner crash 2026-11-07: the waveform reader raised on 44.1 / 48 kHz AAC).
+            try await makeVideo(short, seconds: 3, fps: 24, width: 360, height: 640, audio: (44_100, 1))
+            try await makeVideo(long, seconds: 15, fps: 30, width: 432, height: 768, audio: (48_000, 2))
             try await makeVideo(turned, seconds: 4, fps: 25, width: 640, height: 360, rotated: true)
             note("MADE videos")
         } catch {
             note("FAIL making the test videos: \(error.localizedDescription)")
             return
+        }
+        // The crash's own path, on its own: waveforms of the files with sound must come back, and the silent one empty.
+        for (name, url, sound) in [("mono_44k", short, true), ("stereo_48k", long, true), ("silent", turned, false)] {
+            note("START waveform_\(name)")
+            let w = await EditSuiteMedia.waveform(url)
+            if sound && (w.isEmpty || (w.max() ?? 0) <= 0) { note("FAIL waveform_\(name): no peaks (\(w.count))") }
+            else if !sound && !w.isEmpty { note("FAIL waveform_\(name): peaks without sound") }
+            else { note("DONE waveform_\(name) (\(w.count) peaks)") }
         }
         let lut = store.suite.camera.palettes.first { ($0.lut ?? "").isEmpty == false }
         let look: [String: Any] = ["id": lut?.id ?? "teal_orange", "kind": "palette", "label": lut?.label ?? "Teal & orange", "lut": lut?.lut ?? "pack:teal-orange"]
@@ -76,9 +86,53 @@ extension SnapshotRunner {
         note("ALL DONE")
     }
 
-    /// A short H.264 MP4 with no audio track: grey frames that change brightness (so strips differ). `rotated` stores it
-    /// landscape with a 90° preferredTransform, as some phone files are.
-    static func makeVideo(_ url: URL, seconds: Double, fps: Int32, width w: Int, height h: Int, rotated: Bool = false) async throws {
+    /// A short H.264 MP4: grey frames that change brightness (so strips differ). `rotated` stores it landscape with a 90°
+    /// preferredTransform, as some phone files are. `audio` (sample rate, channels) adds an AAC track of a rising tone.
+    static func makeVideo(_ url: URL, seconds: Double, fps: Int32, width w: Int, height h: Int, rotated: Bool = false,
+                          audio: (rate: Double, channels: Int)? = nil) async throws {
+        try? FileManager.default.removeItem(at: url)
+        guard let audio else { return try await writeFrames(url, seconds: seconds, fps: fps, width: w, height: h, rotated: rotated) }
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-edit-check", isDirectory: true)
+        let silent = tmp.appendingPathComponent("v-\(UUID().uuidString).mp4"), sound = tmp.appendingPathComponent("a-\(UUID().uuidString).m4a")
+        defer { try? FileManager.default.removeItem(at: silent); try? FileManager.default.removeItem(at: sound) }
+        try await writeFrames(silent, seconds: seconds, fps: fps, width: w, height: h, rotated: rotated)
+        try writeTone(sound, seconds: seconds, rate: audio.rate, channels: audio.channels)
+        // Video and sound into one MP4, as the providers deliver them (no re-encode).
+        let comp = AVMutableComposition()
+        let va = AVURLAsset(url: silent), aa = AVURLAsset(url: sound)
+        guard let vSrc = try await va.loadTracks(withMediaType: .video).first, let aSrc = try await aa.loadTracks(withMediaType: .audio).first,
+              let vT = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid),
+              let aT = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+            throw ApiError("edit_check", "Couldn't mux the test video")
+        }
+        let vDur = try await va.load(.duration), aDur = try await aa.load(.duration)
+        try vT.insertTimeRange(CMTimeRange(start: .zero, duration: vDur), of: vSrc, at: .zero)
+        vT.preferredTransform = try await vSrc.load(.preferredTransform)
+        try aT.insertTimeRange(CMTimeRange(start: .zero, duration: min(vDur, aDur)), of: aSrc, at: .zero)
+        guard let ex = AVAssetExportSession(asset: comp, presetName: AVAssetExportPresetPassthrough) else { throw ApiError("edit_check", "Couldn't mux the test video") }
+        ex.outputURL = url
+        ex.outputFileType = .mp4
+        await ex.export()
+        if ex.status != .completed { throw ex.error ?? ApiError("edit_check", "Couldn't mux the test video") }
+    }
+
+    /// An AAC .m4a of a tone that rises in volume (so the waveform has a shape).
+    static func writeTone(_ url: URL, seconds: Double, rate: Double, channels: Int) throws {
+        guard let fmt = AVAudioFormat(standardFormatWithSampleRate: rate, channels: AVAudioChannelCount(channels)),
+              let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(seconds * rate)), let data = buf.floatChannelData else {
+            throw ApiError("edit_check", "Couldn't make the test sound")
+        }
+        buf.frameLength = buf.frameCapacity
+        let n = Int(buf.frameLength)
+        for c in 0..<channels {
+            for i in 0..<n { data[c][i] = Float(sin(2 * Double.pi * 440 * Double(i) / rate) * 0.8 * Double(i) / Double(n)) }
+        }
+        let file = try AVAudioFile(forWriting: url, settings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: rate,
+                                                              AVNumberOfChannelsKey: channels, AVEncoderBitRateKey: 96_000])
+        try file.write(from: buf)
+    }
+
+    static func writeFrames(_ url: URL, seconds: Double, fps: Int32, width w: Int, height h: Int, rotated: Bool) async throws {
         try? FileManager.default.removeItem(at: url)
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: w, AVVideoHeightKey: h])

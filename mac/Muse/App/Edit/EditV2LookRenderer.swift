@@ -45,13 +45,30 @@ final class EditV2LookLibrary: @unchecked Sendable {
 
     /// A suite look's LUT (parsed on first use).
     func lut(paletteId id: String) -> E.Lut? {
-        let key = "palette:" + id
+        guard let palettesDirectory else { return nil }
+        return once("palette:" + id) { try? self.palettes.lut(id, in: palettesDirectory) }
+    }
+
+    /// Parses each LUT once: the first caller parses and the others (thumbnail threads opening Edit at the same time) wait
+    /// for its result instead of parsing it again (owner report 2026-11-07: ~8 threads parsed the same packs at once).
+    private var parsing: [String: NSLock] = [:]
+    private var failed: Set<String> = []
+    private func once(_ key: String, _ parse: () -> E.Lut?) -> E.Lut? {
         lock.lock()
         if let l = luts[key] { lock.unlock(); return l }
+        if failed.contains(key) { lock.unlock(); return nil }
+        let keyLock = parsing[key] ?? NSLock()
+        parsing[key] = keyLock
         lock.unlock()
-        guard let palettesDirectory, let l = try? palettes.lut(id, in: palettesDirectory) else { return nil }
+        keyLock.lock()
+        defer { keyLock.unlock() }
         lock.lock()
-        luts[key] = l
+        if let l = luts[key] { lock.unlock(); return l }
+        if failed.contains(key) { lock.unlock(); return nil }
+        lock.unlock()
+        let l = parse()
+        lock.lock()
+        if let l { luts[key] = l } else { failed.insert(key) }
         lock.unlock()
         return l
     }
@@ -72,14 +89,8 @@ final class EditV2LookLibrary: @unchecked Sendable {
 
     /// A bundled look's LUT (parsed on first use).
     func lut(packId id: String) -> E.Lut? {
-        lock.lock()
-        if let l = luts[id] { lock.unlock(); return l }
-        lock.unlock()
-        guard let pack, let directory, let l = try? pack.lut(id, in: directory) else { return nil }
-        lock.lock()
-        luts[id] = l
-        lock.unlock()
-        return l
+        guard let pack, let directory else { return nil }
+        return once(id) { try? pack.lut(id, in: directory) }
     }
 
     /// The LUT a look's `lut` names: "pack:<id>" / "palette:<id>" from the bundle, else an imported asset's (by asset id).

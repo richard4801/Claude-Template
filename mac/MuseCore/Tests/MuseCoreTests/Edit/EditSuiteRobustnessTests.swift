@@ -97,3 +97,41 @@ final class EditSuiteBundledLooksTests: XCTestCase {
         XCTAssertGreaterThan(n, 32)
     }
 }
+
+/// The waveform's down-mix and slicing (owner crash 2026-11-07: the reader now decodes at the file's own rate and channels).
+final class EditSuitePeaksTests: XCTestCase {
+    func testStereoAndMonoAtAnyRate() {
+        // 1 s of 48 kHz stereo: silent left, a loud right channel in the second half.
+        var st = [Int16](repeating: 0, count: 48_000 * 2)
+        for f in 24_000..<48_000 { st[f * 2 + 1] = 16_000 }
+        var p = EditSuite.Peaks()
+        p.add(interleaved: st, channels: 2)
+        let s = p.slices(10)
+        XCTAssertEqual(s.count, 10)
+        XCTAssertEqual(Array(s[0..<5]), [0, 0, 0, 0, 0])
+        XCTAssertEqual(Array(s[5...]), [1, 1, 1, 1, 1])
+        // 44.1 kHz mono, fed in odd-sized chunks.
+        var m = EditSuite.Peaks()
+        let mono = (0..<44_100).map { Int16(clamping: $0 % 2 == 0 ? $0 / 4 : -$0 / 4) }
+        var i = 0
+        while i < mono.count { let j = min(mono.count, i + 1_003); m.add(interleaved: Array(mono[i..<j]), channels: 1); i = j }
+        let ms = m.slices(400)
+        XCTAssertEqual(ms.count, 400)
+        XCTAssertEqual(ms.last, 1)
+        XCTAssertLessThan(ms.first!, 0.05)
+    }
+
+    func testEdges() {
+        XCTAssertEqual(EditSuite.Peaks().slices(400), [])
+        var p = EditSuite.Peaks()
+        p.add(interleaved: [5, 6, 7], channels: 2)   // a partial frame is ignored
+        XCTAssertEqual(p.slices(0), [])
+        XCTAssertEqual(p.slices(400).count, 1)        // never more slices than blocks
+        p.add(interleaved: [Int16.min, 0], channels: 0)
+        XCTAssertEqual(p.slices(3).count, 1)
+        var q = EditSuite.Peaks(block: 1)
+        q.add(interleaved: [Int16](repeating: 100, count: 10), channels: 1)
+        XCTAssertEqual(q.slices(4).count, 4)
+        XCTAssertLessThan(q.slices(4)[0], 1)          // quiet stays quiet (0.05 floor)
+    }
+}

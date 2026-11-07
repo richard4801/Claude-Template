@@ -188,6 +188,49 @@ public enum EditSuite {
         return "\(m):" + (sec < 10 ? "0" : "") + "\(sec).\(t % 10)"
     }
 
+    // MARK: Waveform peaks (owner crash 2026-11-07)
+
+    /// Peak levels of decoded 16-bit PCM at any rate and channel count: each frame's loudest channel, kept as the max of
+    /// each block of `block` frames (so a long take never holds every sample), then sliced into equal parts and normalised.
+    public struct Peaks: Sendable {
+        public let block: Int
+        public private(set) var blocks: [Int32] = []
+        private var cur: Int32 = 0
+        private var inBlock = 0
+        public init(block: Int = 64) { self.block = max(1, block) }
+
+        /// Adds interleaved samples (`channels` per frame; a trailing partial frame is ignored).
+        public mutating func add(interleaved s: [Int16], channels: Int) {
+            let ch = max(1, channels)
+            var i = 0
+            while i + ch <= s.count {
+                var m: Int32 = 0
+                for c in 0..<ch { m = max(m, abs(Int32(s[i + c]))) }
+                cur = max(cur, m)
+                inBlock += 1
+                if inBlock == block { blocks.append(cur); cur = 0; inBlock = 0 }
+                i += ch
+            }
+        }
+
+        /// `count` peaks (0…1) over everything added, the loudest scaled to 1 (quiet sound stays small: floor 0.05).
+        /// Empty when nothing was added or `count` < 1.
+        public func slices(_ count: Int) -> [Float] {
+            var all = blocks
+            if inBlock > 0 { all.append(cur) }
+            guard count > 0, !all.isEmpty else { return [] }
+            let n = min(count, all.count)
+            var out: [Float] = []
+            out.reserveCapacity(n)
+            for k in 0..<n {
+                let a = k * all.count / n, b = max(a + 1, (k + 1) * all.count / n)
+                out.append(Float(all[a..<min(b, all.count)].max() ?? 0) / 32768)
+            }
+            let top = max(0.05, out.max() ?? 1)
+            return out.map { min(1, $0 / top) }
+        }
+    }
+
     // MARK: Safe numbers (owner blocker 2026-11-07: Int(inf / NaN) crashed the editor on real takes)
 
     /// Seconds a clock can show: NaN, negative and infinite become 0, and anything past 100 hours is capped.
