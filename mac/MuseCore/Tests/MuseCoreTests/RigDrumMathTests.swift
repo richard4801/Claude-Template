@@ -116,3 +116,25 @@ final class RigDrumMathTests: XCTestCase {
         XCTAssertFalse(M.look(delta: -5, itemHeight: 76, selected: false).visible)
     }
 }
+
+/// The cinematic rig panel sizes the drums to the height it has (coordinator, 2026-11-07): at 800 pt windows every row
+/// fits without clipping. CI's window is capped at 684 pt, so the sizes are forced here.
+final class RigDrumFitTests: XCTestCase {
+    func testRowsFitTheRigPanelAtCommonWindowHeights() {
+        // The rig panel's content height at window heights 900, 800, 700 and CI's 684 (the panel's chrome taken off).
+        for (window, content) in [(900.0, 674.0), (800.0, 574.0), (700.0, 474.0), (684.0, 458.0)] {
+            let row = RigDrumMath.fitRow(width: 960, height: content)
+            XCTAssertLessThanOrEqual(RigDrumMath.fitHeight(row: row), content, "window \(window): rows of \(row) pt overflow \(content) pt")
+            XCTAssertGreaterThanOrEqual(row, RigDrumMath.minRow)
+        }
+    }
+
+    func testRoomyPanelsKeepThePrototypeRows() {
+        XCTAssertEqual(RigDrumMath.fitRow(width: 960, height: 2000), 112)
+        XCTAssertEqual(RigDrumMath.fitRow(width: 640, height: 2000), 84)
+    }
+
+    func testTinyPanelsStopAtTheSmallestReadableRow() {
+        XCTAssertEqual(RigDrumMath.fitRow(width: 960, height: 200), RigDrumMath.minRow)
+    }
+}

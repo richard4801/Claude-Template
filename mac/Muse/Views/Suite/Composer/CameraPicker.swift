@@ -16,6 +16,9 @@ struct CameraSetupStep: View {
 
     /// The prototype's .wrap max width.
     static let maxWidth: CGFloat = 980
+    /// The cinematic Suite's rig panel: rows sized so all five fit the height it has (RigDrumMath.fitRow). The old
+    /// picker keeps the prototype's 84 / 112 rows.
+    var fitHeight = false
 
     var body: some View {
         let c = store.suite.camera
@@ -29,7 +32,8 @@ struct CameraSetupStep: View {
         GeometryReader { g in
             let width = min(max(g.size.width - 32, 0), Self.maxWidth)
             // 112 pt rows once the drums area is 720 pt wide (the prototype's breakpoint), else 84.
-            let row = RigDrum.row(wide: width >= RigDrum.wideWidth)
+            let row = fitHeight ? CGFloat(RigDrumMath.fitRow(width: Double(width), height: Double(g.size.height)))
+                                : RigDrum.row(wide: width >= RigDrum.wideWidth)
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 18) {
                     RigLine(names: names)

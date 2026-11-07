@@ -21,6 +21,17 @@ enum SnapshotRunner {
         var cinemaEmpty = false
         /// Bumped by the fit check after each screen change: Generate's probe reports its frame again.
         var probeTick = 0
+        /// The rig panel's view is on screen (its onAppear / onDisappear), for the same-tick diagnosis.
+        var rigPanelOnScreen = false
+    }
+
+    /// The last CinemaSuiteView body: did it see the picker open, and when (not observed: a plain static).
+    static var suiteBodySawPicker = false
+    static var suiteBodyCount = 0
+    static func noteSuiteBody(pickerOpen: Bool) {
+        guard dir != nil else { return }
+        suiteBodySawPicker = pickerOpen
+        suiteBodyCount += 1
     }
 
     static let state = State()
@@ -170,6 +181,9 @@ enum SnapshotRunner {
                         } else {
                             lines.append("CUT \(label) generate not drawn")
                         }
+                        if name.contains("rig") {
+                            lines.append("PANEL \(label) picker=\(store.suite.picker?.rawValue ?? "nil") bodySawPicker=\(suiteBodySawPicker) bodies=\(suiteBodyCount) appeared=\(state.rigPanelOnScreen)")
+                        }
                         capture(dir.appendingPathComponent("mac_\(theme.rawValue)_\(name)_\(width)x\(height).png"))
                     }
                 }
@@ -188,6 +202,10 @@ enum SnapshotRunner {
                 Task { @MainActor in try? await Task.sleep(for: .seconds(0.6)); store.openPicker(.style) } }),
             ("cinema_rig_camera", { store.newSuite = true; state.cinemaEmpty = false; store.openTool(.shot); fillDemoDraft(store)
                 Task { @MainActor in try? await Task.sleep(for: .seconds(0.6)); store.openPicker(.camera, step: "setup") } }),
+            // Diagnosis (coordinator): Photo, then Shot and the panel in the same tick. The fit check logs whether the
+            // body saw the picker and whether the panel's view appeared (PANEL lines).
+            ("cinema_rig_sametick", { store.newSuite = true; state.cinemaEmpty = false; store.openPhoto(model: SampleData.demo)
+                store.openTool(.shot); fillDemoDraft(store); store.openPicker(.style) }),
         ]
         // The runner's screen clamps the window's height (the 1440 × 900 and 1280 × 800 shots are about 684 pt tall).
         await run(ThemeID.allCases, [(1440, 900), (1280, 800)], cinema)

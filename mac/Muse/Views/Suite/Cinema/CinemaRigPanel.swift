@@ -111,6 +111,8 @@ struct CinemaRigPanel: View {
         .onExitCommand { store.closePicker() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Rig")
+        .onAppear { if SnapshotRunner.dir != nil { SnapshotRunner.state.rigPanelOnScreen = true } }
+        .onDisappear { if SnapshotRunner.dir != nil { SnapshotRunner.state.rigPanelOnScreen = false } }
     }
 
     private var header: some View {
@@ -197,7 +199,7 @@ struct CinemaRigPanel: View {
 
     @ViewBuilder private var content: some View {
         switch tab {
-        case .camera: CameraSetupStep() // fills the panel (it sizes the drums to the height it gets; a ScrollView collapsed it)
+        case .camera: CameraSetupStep(fitHeight: true) // all five rows fit the panel's height (RigDrumMath.fitRow)
         case .angle: ScrollView { CameraAngleStep().padding(24) }
         case .move: CameraMovementStep(query: $moveQuery)
         case .directed:

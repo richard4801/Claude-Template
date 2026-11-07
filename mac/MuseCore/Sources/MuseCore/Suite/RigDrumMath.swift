@@ -101,3 +101,26 @@ public enum RigDrumMath {
                         brightness: selected ? 1 : 0.55 + 0.35 * falloff)
     }
 }
+
+// MARK: Fitting the drums to a height (the cinematic Suite's rig panel)
+
+public extension RigDrumMath {
+    /// The drums' fixed chrome around their five rows, top to bottom: the step's padding (16), the rig line (20) and its
+    /// spacing (18), the bag's top padding (14), the label (18), the gaps above and below the rows (10 + 10), the name and
+    /// caption block (50), the bag's bottom padding (16) and the step's bottom padding (16).
+    static let fitChrome = 188.0
+    static let fitRows = 5.0
+    /// Smallest row that still reads (a render, its name and the focal / aperture glyphs).
+    static let minRow = 56.0
+
+    /// The row height that fits all five rows in `height` without clipping: the width's row (84, or 112 from 720 pt
+    /// wide) when there is room, else what fits, never under `minRow`.
+    static func fitRow(width: Double, height: Double) -> Double {
+        let byWidth = width >= 720 ? 112.0 : 84.0
+        let byHeight = ((height - fitChrome) / fitRows).rounded(.down)
+        return max(minRow, min(byWidth, byHeight))
+    }
+
+    /// The height the drums take at a row height (the inverse, for checks).
+    static func fitHeight(row: Double) -> Double { fitChrome + fitRows * row }
+}

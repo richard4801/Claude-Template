@@ -32,6 +32,7 @@ struct CinemaSuiteView: View {
     var body: some View {
         let t = shell.room()
         let s = store.suite
+        let _ = SnapshotRunner.noteSuiteBody(pickerOpen: s.picker != nil) // review mode only: did the body see the picker?
         GeometryReader { g in
             let railW: CGFloat = g.size.width >= 1150 ? 260 : 228
             HStack(spacing: 0) {
