@@ -50,6 +50,8 @@ enum SnapshotRunner {
                 ("settings_prompts", { store.openSettings(.prompts) }),
                 ("settings_studio", { store.openSettings(.studio) }),
                 ("settings_connections", { store.openSettings(.connections) }),
+                // Before (prod fffebeb): Connections as the sheet it used to be, over Settings.
+                ("settings_connections_before", { store.openSettings(.appearance); state.overlay = "connections_before" }),
                 ("settings_connections_scrolled", { store.openSettings(.connections); Task { @MainActor in
                     try? await Task.sleep(for: .seconds(1)); state.scrollTo = "connections.blender" } }),
                 ("credits", { store.go(.credits) }),
@@ -213,7 +215,9 @@ enum SnapshotRunner {
         let sc = url.deletingPathExtension().appendingPathExtension("sc.png")
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        p.arguments = ["-x", "-o", "-l", String(window.windowNumber), sc.path]
+        // A sheet is its own window: shots with one ("…_before") take the whole screen.
+        let whole = url.lastPathComponent.contains("_before")
+        p.arguments = whole ? ["-x", sc.path] : ["-x", "-o", "-l", String(window.windowNumber), sc.path]
         try? p.run()
         p.waitUntilExit()
     }
@@ -224,6 +228,18 @@ struct SnapshotOverlay: View {
     @Environment(\.theme) private var t
 
     var body: some View {
+        // "Before" for the owner's Connections report: the old sheet exactly as it was presented (SuiteConnectionsRow).
+        Color.clear.allowsHitTesting(false)
+            .sheet(isPresented: Binding(get: { SnapshotRunner.state.overlay == "connections_before" }, set: { if !$0 { SnapshotRunner.state.overlay = nil } })) {
+                VStack(spacing: 0) {
+                    HStack {
+                        Spacer()
+                        Button("Done") { SnapshotRunner.state.overlay = nil }.padding(12)
+                    }
+                    ConnectionsView()
+                }
+                .frame(minWidth: 720, minHeight: 520)
+            }
         if SnapshotRunner.state.overlay == "chat" {
             HStack(spacing: 0) {
                 Spacer()
