@@ -21,8 +21,6 @@ enum SnapshotRunner {
         var cinemaEmpty = false
         /// Bumped by the fit check after each screen change: Generate's probe reports its frame again.
         var probeTick = 0
-        /// Generate's frame per window number (the offscreen review windows of the cinematic Suite).
-        var generateFrames: [Int: CGRect] = [:]
     }
 
     static let state = State()
@@ -155,6 +153,7 @@ enum SnapshotRunner {
                 for (width, height) in sizes {
                     w.setFrame(NSRect(x: full.minX, y: full.maxY - CGFloat(height), width: CGFloat(width), height: CGFloat(height)), display: true)
                     for (name, show) in screens {
+                        NSLog("[snapshot] fit %@ %dx%d %@", name, width, height, theme.rawValue)
                         store.suite.picker = nil
                         store.suite.browserOpen = false
                         state.generateFrame = nil
@@ -177,47 +176,14 @@ enum SnapshotRunner {
             }
         }
         await run([.c, .b], [(1440, 900), (1280, 800), (1100, 620)], screens)
-        // The cinematic Suite (owner switch "Try the new Suite"): Shot, its empty state and Photo in all four themes, at the
-        // true 1440 × 900 and 1280 × 800.
+        // The cinematic Suite (owner switch "Try the new Suite"): Shot, its empty state and Photo in all four themes.
         let cinema: [(String, @MainActor () -> Void)] = [
             ("cinema_shot", { store.newSuite = true; state.cinemaEmpty = false; store.openTool(.shot); fillDemoDraft(store) }),
             ("cinema_empty", { store.newSuite = true; state.cinemaEmpty = true; store.openTool(.shot); store.suite.composer.tokens = PromptTokens() }),
             ("cinema_photo", { store.newSuite = true; state.cinemaEmpty = false; store.openPhoto(model: SampleData.demo) }),
         ]
-        // The main window goes borderless for these shots (borderless windows aren't clamped to the screen), then back.
-        let mask = w.styleMask
-        w.styleMask = [.borderless]
-        for (width, height) in [(1440, 900), (1280, 800)] {
-            w.setFrame(NSRect(x: full.minX, y: full.maxY - CGFloat(height), width: CGFloat(width), height: CGFloat(height)), display: true)
-            for theme in ThemeID.allCases {
-                store.themeID = theme
-                for (name, show) in cinema {
-                    let label = "\(name) \(width)x\(height) \(theme.rawValue)"
-                    NSLog("[snapshot] %@", label)
-                    store.suite.picker = nil
-                    store.suite.browserOpen = false
-                    state.generateFrames[w.windowNumber] = nil
-                    show()
-                    try? await Task.sleep(for: .seconds(1.8))
-                    state.probeTick += 1
-                    try? await Task.sleep(for: .seconds(0.3))
-                    let host = w.contentView
-                    host?.layoutSubtreeIfNeeded()
-                    let size = host?.bounds.size ?? .zero
-                    if let g = state.generateFrames[w.windowNumber] {
-                        let inside = g.minX >= 0 && g.minY >= 0 && g.maxX <= size.width + 0.5 && g.maxY <= size.height + 0.5
-                        lines.append("\(inside ? "FITS" : "CUT") \(label) generate \(Int(g.minX)),\(Int(g.minY)) \(Int(g.width))x\(Int(g.height)) in \(Int(size.width))x\(Int(size.height))")
-                    } else {
-                        lines.append("CUT \(label) generate not drawn")
-                    }
-                    if let host, let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
-                        host.cacheDisplay(in: host.bounds, to: rep)
-                        try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("mac_\(theme.rawValue)_\(name)_\(width)x\(height).png"))
-                    }
-                }
-            }
-        }
-        w.styleMask = mask
+        // The runner's screen clamps the window's height (the 1440 × 900 and 1280 × 800 shots are about 684 pt tall).
+        await run(ThemeID.allCases, [(1440, 900), (1280, 800)], cinema)
         store.newSuite = false
         state.cinemaEmpty = false
         w.setFrame(full, display: true)
