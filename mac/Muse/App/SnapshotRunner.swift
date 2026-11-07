@@ -182,8 +182,12 @@ enum SnapshotRunner {
             ("cinema_empty", { store.newSuite = true; state.cinemaEmpty = true; store.openTool(.shot); store.suite.composer.tokens = PromptTokens() }),
             ("cinema_photo", { store.newSuite = true; state.cinemaEmpty = false; store.openPhoto(model: SampleData.demo) }),
             // Build step 3: the rig panel on Style (arc carousel, era ruler, tempo) and on Camera (the drums).
-            ("cinema_rig_style", { store.newSuite = true; state.cinemaEmpty = false; store.openTool(.shot); fillDemoDraft(store); store.openPicker(.style) }),
-            ("cinema_rig_camera", { store.newSuite = true; state.cinemaEmpty = false; store.openTool(.shot); fillDemoDraft(store); store.openPicker(.camera, step: "setup") }),
+            // The picker opens a moment after the tool switch, as a person would (switching from Photo and opening the
+            // panel in the same tick sometimes drew the room without it).
+            ("cinema_rig_style", { store.newSuite = true; state.cinemaEmpty = false; store.openTool(.shot); fillDemoDraft(store)
+                Task { @MainActor in try? await Task.sleep(for: .seconds(0.6)); store.openPicker(.style) } }),
+            ("cinema_rig_camera", { store.newSuite = true; state.cinemaEmpty = false; store.openTool(.shot); fillDemoDraft(store)
+                Task { @MainActor in try? await Task.sleep(for: .seconds(0.6)); store.openPicker(.camera, step: "setup") } }),
         ]
         // The runner's screen clamps the window's height (the 1440 × 900 and 1280 × 800 shots are about 684 pt tall).
         await run(ThemeID.allCases, [(1440, 900), (1280, 800)], cinema)
