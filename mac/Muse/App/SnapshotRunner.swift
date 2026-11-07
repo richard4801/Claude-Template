@@ -21,6 +21,8 @@ enum SnapshotRunner {
         var cinemaEmpty = false
         /// Bumped by the fit check after each screen change: Generate's probe reports its frame again.
         var probeTick = 0
+        /// Generate's frame per window number (the offscreen review windows of the cinematic Suite).
+        var generateFrames: [Int: CGRect] = [:]
     }
 
     static let state = State()
@@ -175,13 +177,46 @@ enum SnapshotRunner {
             }
         }
         await run([.c, .b], [(1440, 900), (1280, 800), (1100, 620)], screens)
-        // The cinematic Suite (owner switch "Try the new Suite"): Shot, its empty state and Photo in all four themes.
+        // The cinematic Suite (owner switch "Try the new Suite"): Shot, its empty state and Photo in all four themes, at the
+        // true 1440 × 900 and 1280 × 800 (an offscreen borderless window: the runner's screen clamps titled windows).
         let cinema: [(String, @MainActor () -> Void)] = [
             ("cinema_shot", { store.newSuite = true; state.cinemaEmpty = false; store.openTool(.shot); fillDemoDraft(store) }),
             ("cinema_empty", { store.newSuite = true; state.cinemaEmpty = true; store.openTool(.shot); store.suite.composer.tokens = PromptTokens() }),
             ("cinema_photo", { store.newSuite = true; state.cinemaEmpty = false; store.openPhoto(model: SampleData.demo) }),
         ]
-        await run(ThemeID.allCases, [(1440, 900), (1280, 800)], cinema)
+        for (width, height) in [(1440, 900), (1280, 800)] {
+            let win = NSWindow(contentRect: NSRect(x: -20000, y: -20000, width: width, height: height), styleMask: [.borderless], backing: .buffered, defer: false)
+            let host = NSHostingView(rootView: SnapshotRoot(store: store))
+            host.frame = NSRect(x: 0, y: 0, width: width, height: height)
+            win.contentView = host
+            win.orderFrontRegardless()
+            for theme in ThemeID.allCases {
+                store.themeID = theme
+                for (name, show) in cinema {
+                    store.suite.picker = nil
+                    store.suite.browserOpen = false
+                    state.generateFrames[win.windowNumber] = nil
+                    show()
+                    try? await Task.sleep(for: .seconds(1.8))
+                    state.probeTick += 1
+                    try? await Task.sleep(for: .seconds(0.3))
+                    host.layoutSubtreeIfNeeded()
+                    let label = "\(name) \(width)x\(height) \(theme.rawValue)"
+                    if let g = state.generateFrames[win.windowNumber] {
+                        let inside = g.minX >= 0 && g.minY >= 0 && g.maxX <= CGFloat(width) + 0.5 && g.maxY <= CGFloat(height) + 0.5
+                        lines.append("\(inside ? "FITS" : "CUT") \(label) generate \(Int(g.minX)),\(Int(g.minY)) \(Int(g.width))x\(Int(g.height)) in \(width)x\(height)")
+                    } else {
+                        lines.append("CUT \(label) generate not drawn")
+                    }
+                    if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                        host.cacheDisplay(in: host.bounds, to: rep)
+                        try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("mac_\(theme.rawValue)_\(name)_\(width)x\(height).png"))
+                    }
+                }
+            }
+            win.orderOut(nil)
+            win.contentView = nil
+        }
         store.newSuite = false
         state.cinemaEmpty = false
         w.setFrame(full, display: true)
@@ -303,6 +338,17 @@ enum SnapshotRunner {
         p.arguments = whole ? ["-x", sc.path] : ["-x", "-o", "-l", String(window.windowNumber), sc.path]
         try? p.run()
         p.waitUntilExit()
+    }
+}
+
+/// The app's root for the offscreen review windows: the same environment as MuseApp's window.
+private struct SnapshotRoot: View {
+    let store: AppStore
+    var body: some View {
+        RootView()
+            .environment(store)
+            .environment(\.theme, store.theme)
+            .preferredColorScheme(store.theme.isDark ? .dark : .light)
     }
 }
 

@@ -541,15 +541,27 @@ struct GenerateButton: View {
 
 
 /// Review mode only (SnapshotRunner): reports where Generate sits in the window, so CI can check it is fully on screen.
-struct GenerateFrameProbe: View { // also used by the cinematic Suite (CinemaSuiteView)
-    var body: some View {
-        GeometryReader { g in
-            let f = g.frame(in: .global)
-            Color.clear
-                .onAppear { SnapshotRunner.state.generateFrame = f }
-                .onChange(of: f) { _, v in SnapshotRunner.state.generateFrame = v }
-                // The runner asks again after each screen change (the frame may not have moved at all).
-                .onChange(of: SnapshotRunner.state.probeTick) { _, _ in SnapshotRunner.state.generateFrame = f }
+struct GenerateFrameProbe: NSViewRepresentable { // also used by the cinematic Suite (CinemaSuiteView)
+    /// Read here so the probe updates when the runner asks again after a screen change (the frame may not have moved).
+    var tick = SnapshotRunner.state.probeTick
+
+    func makeNSView(context: Context) -> ProbeView { ProbeView() }
+    func updateNSView(_ v: ProbeView, context: Context) {
+        v.report()
+        DispatchQueue.main.async { v.report() }
+    }
+
+    /// Reports Generate's frame in its window's content (top-left origin), per window: the main window's goes to
+    /// `generateFrame`, every window's (the offscreen review windows too) to `generateFrames`.
+    final class ProbeView: NSView {
+        override func layout() { super.layout(); report() }
+        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); report() }
+        func report() {
+            guard let w = window, let cv = w.contentView else { return }
+            let r = convert(bounds, to: cv)
+            let f = cv.isFlipped ? r : CGRect(x: r.minX, y: cv.bounds.height - r.maxY, width: r.width, height: r.height)
+            SnapshotRunner.state.generateFrames[w.windowNumber] = f
+            if w.canBecomeMain { SnapshotRunner.state.generateFrame = f }
         }
     }
 }
