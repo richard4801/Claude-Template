@@ -93,6 +93,8 @@ extension AppStore {
         suite.generating = true
         perform { [self] in
             defer { suite.generating = false }
+            var req = req
+            req.draft = ComposerDrafts.draft(suite.composer, photo: suite.photo) // Reuse settings
             let shots = try await api.suiteCreatePhotos(req)
             for s in shots.reversed() where !takes.contains(where: { $0.id == s.id }) { takes.insert(s, at: 0) }
             fresh.formUnion(shots.map(\.id))

@@ -65,6 +65,9 @@ struct CinemaSuiteView: View {
             }
         }
         .onChange(of: s.composer.tool) { _, _ in picked = nil }
+        // A model's default rig when it is @-mentioned (fills Auto rows only, with Undo).
+        .onChange(of: s.composer.tokens.characterId) { _, new in if new != nil { store.applyDefaultRigIfAny() } }
+        .task(id: store.serverKey) { await store.loadSavedRigs() }
     }
 }
 
@@ -539,7 +542,7 @@ struct CinemaPresetsButton: View {
 
     var body: some View {
         Button { open.toggle() } label: {
-            Text("Presets").font(t.scale.caption.font.weight(.medium)).foregroundStyle(t.roles.ink2)
+            Text("Presets").font(t.scale.caption.font.weight(.medium)).foregroundStyle(t.roles.ink2) // presets and saved rigs
                 .padding(.horizontal, 10).frame(height: 30)
                 .background(t.roles.ink.opacity(open ? 0.08 : 0)).clipShape(RoundedRectangle(cornerRadius: 8))
                 .contentShape(Rectangle())
@@ -551,8 +554,25 @@ struct CinemaPresetsButton: View {
         }
     }
 
+    @State private var rigName = ""
+
     @ViewBuilder private var list: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if store.suite.composer.tool != .photo || !store.suite.savedRigs.isEmpty {
+                Text("Saved rigs").font(t.scale.micro.font).foregroundStyle(t.roles.ink2).padding(.horizontal, 14).padding(.top, 4).padding(.bottom, 4)
+                ForEach(store.suite.savedRigs.prefix(8)) { r in
+                    row(r.name, r.mine ? "" : "From the studio", on: false) { store.applySavedRig(r); open = false }
+                }
+                HStack(spacing: 6) {
+                    TextField("Name this rig", text: $rigName).textFieldStyle(.plain).font(t.scale.caption.font).foregroundStyle(t.roles.ink)
+                        .onSubmit { save() }
+                    Button("Save rig") { save() }.buttonStyle(.plain).font(t.scale.caption.font.weight(.medium)).foregroundStyle(t.roles.accent)
+                        .disabled(rigName.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                Rectangle().fill(t.roles.hairline).frame(height: 1).padding(.vertical, 4)
+                Text("Presets").font(t.scale.micro.font).foregroundStyle(t.roles.ink2).padding(.horizontal, 14).padding(.bottom, 4)
+            }
             if store.suite.composer.tool == .photo {
                 ForEach(store.templates.prefix(8)) { tpl in
                     row(tpl.name, tpl.tags.prefix(3).joined(separator: ", "), on: store.suite.photo.presetId == tpl.id) { store.choosePhotoPreset(tpl); open = false }
@@ -564,6 +584,11 @@ struct CinemaPresetsButton: View {
             }
         }
         .padding(.vertical, 8)
+    }
+
+    private func save() {
+        store.saveRig(named: rigName)
+        rigName = ""
     }
 
     private func row(_ title: String, _ line: String, on: Bool, action: @escaping () -> Void) -> some View {

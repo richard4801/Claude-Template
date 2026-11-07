@@ -3,7 +3,7 @@ import SwiftUI
 
 // The cinematic Suite's takes rail (mock 1-shot): renders in progress with live progress at the top, then the takes,
 // newest first. The take on the stage carries the accent ring; the hovered one lifts and shows its four actions plus More.
-// Photo shows its stills in two columns. Reuse settings and Vary wait for the server's saved drafts (build step 2).
+// Photo shows its stills in two columns. Reuse settings and Vary restore the take's draft (build step 2).
 
 struct CinemaTakesRail: View {
     @Environment(AppStore.self) private var store
@@ -113,13 +113,13 @@ struct CinemaTakeCard: View {
     }
 
     @ViewBuilder private var actions: some View {
-        action("shuffle", "Vary") { store.showToast("Vary arrives with saved drafts") }
+        action("shuffle", "Vary") { store.reuseSettings(take, vary: true) }
         if !photo { action("arrow-line-right", "Extend") { store.openExtend(take) } }
         action("frame-corners", "Use as start frame") { useAsStart() }
         if !photo { action("scissors", "Open in Edit") { store.openEdit(takeId: take.id) } }
         Menu {
             Button("Open") { store.openTake(take.id) }
-            Button("Reuse settings") { store.showToast("Reuse settings arrives with saved drafts") }
+            Button("Reuse settings") { store.reuseSettings(take) }
             Button("Post…") { store.openPostSheet(take) }
         } label: {
             Ph("dots-three", 15).foregroundStyle(.white).frame(width: 28, height: 28)

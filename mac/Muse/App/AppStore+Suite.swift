@@ -144,6 +144,8 @@ final class SuiteState {
     // The composer
     var composer = ComposerDraft()
     let composerSlots = InputSlotsModel()
+    /// The cinematic Suite's saved rigs (GET /v1/suite/rigs): members see theirs, the owner sees all.
+    var savedRigs: [SuiteRigView] = []
     var estimate: ShotEstimate?
     var estimateError: String?
     /// The four tiers' estimates for the Quality pill.
@@ -428,7 +430,8 @@ extension AppStore {
             showToast(need)
             return
         }
-        let req = shotRequest
+        var req = shotRequest
+        req.draft = ComposerDrafts.draft(suite.composer) // Reuse settings (the server keeps it on the job and its takes)
         if req.prompt.isEmpty && req.modelId == nil && req.frames == nil {
             showToast("Describe the scene or pick a character first")
             return
