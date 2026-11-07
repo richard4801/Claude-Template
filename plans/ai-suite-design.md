@@ -198,3 +198,15 @@ Research: `plans/research/ai-suite-competitors.md`. It covers 16 products (Runwa
    - Copy: "9:16, 10 s, 1 take, sound on"; values in caption style ("35 mm film, anamorphic").
 9. **Camera stage on Android** stays as today (view and follow a session). Directing stays Mac-only.
 10. **Naming:** "Video suite" disappears; the place is called **Create**. The interim rename to "Suite" is dropped.
+
+## APPROVED by the owner (2026-11-07), with the coordinator's recommendations
+- **Opening screen:** the app opens on **Create**, and Home is folded away:
+  - balance goes in the sidebar footer;
+  - running jobs show in the feed;
+  - Library gets a "To review" filter with a badge.
+  - Mac sidebar: **Create · Library · Models · Edit · Posts** (+ Settings). Phone tabs: **Create · Library · Models · You**.
+- **Posts** stays in the sidebar, owner only.
+- **Saved rigs and model default rigs** are for everyone, from day one.
+- **Built beside the old screens:** the new Create sits behind a Settings switch, "Try the new Create", on the owner's account first. The old screens are deleted only after the owner is happy.
+- **Shot and Photo first.** Judge those before porting the other six tools.
+- **No Draft/Final toggle:** the quality tiers already cover it.
