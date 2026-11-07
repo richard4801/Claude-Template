@@ -5,11 +5,33 @@ These mocks follow the owner's brief, relayed by the coordinator: "a real sleek 
 - Only the Suite pages change.
 
 The mocks are rendered by `design/direction/cinematic.py`. File names are `<screen>-<width>-<theme>.png`:
-- Mac at 1440 × 900 and 1280 × 800.
-- Phone at 390.
-- Theme `c` is Soft Tactile (the owner's) and `b` is Camera Body.
+- All four themes (a Editorial, b Camera Body, c Soft Tactile, d Creator Pop): every Mac screen at 1440 × 900, plus the phone at 390.
+- Soft Tactile (the owner's theme) also at 1280 × 800.
 
-`overview-c.png` and `overview-b.png` show every screen on one page.
+Each image includes the existing sidebar, so the fit with the shell is visible.
+
+- `themes-shot-1440.png` puts the Shot screen side by side in the four themes.
+- `overview-<theme>.png` shows every screen of one theme on one page.
+
+## It comes from the theme, not a separate skin (owner: "make sure it doesn't clash with our existing theme")
+The Suite is each theme's own "dark room". Every colour is a darker or lighter shade of that theme's tokens, so no new hues are added. The derivation is `room()` in `design/direction/cinematic.py`.
+- **Editorial:** its ink black, warmed a touch by its red. Red marks selection, and Generate is red with cream text.
+- **Camera Body:** its own dark, with amber.
+- **Soft Tactile:** a deep olive charcoal mixed from its ink and its sage. The sage is lifted for the selection mark and Generate, with ink text.
+- **Creator Pop:** its ink deepened with its cobalt, with the pink as the mark and on Generate, and ink text.
+- **Glass and text:** the dock's glass is tinted with the theme's surface colour, and text on the stage is the theme's light surface colour.
+- **Fonts, radii and accent** are the theme's own. The room's corner follows the theme's container radius, capped at 20: Editorial stays nearly square.
+- **The edge:** the sidebar and top bar stay exactly in their theme. The Suite is a rounded room set 8 pt into the shell, with a hairline of its own light, so the transition is intentional rather than a hard seam.
+- **Pickers** use the same room tone, so the pickers and the stage match. The drums inside keep the camera-bag palette.
+
+### Contrast, checked per theme (WCAG: text 4.5:1, marks 3:1)
+| Theme | Stage tone | Text on stage | Muted text | Generate label | Selection mark | Warning |
+|---|---|---|---|---|---|---|
+| Editorial (a) | #1C1211 | 16.9:1 | 7.4:1 | 6.3:1 | 3.8:1 | 8.9:1 |
+| Camera Body (b) | #0D0E0F | 16.1:1 | 7.0:1 | 9.3:1 | 9.7:1 | 11.5:1 |
+| Soft Tactile (c) | #1C231E | 14.1:1 | 6.6:1 | 6.3:1 | 5.9:1 | 7.8:1 |
+| Creator Pop (d) | #0F1634 | 17.7:1 | 7.8:1 | 8.0:1 | 7.5:1 | 8.7:1 |
+
 
 ## Screens
 1. **`1-shot`: the working state.**
@@ -37,8 +59,7 @@ The mocks are rendered by `design/direction/cinematic.py`. File names are `<scre
 6. **`p1-shot` (phone):** the stage, a filmstrip of takes under it, and the glass dock. The chips scroll sideways, and Generate is full width.
 
 ## How it is built
-- **The Suite is always dark:** near-black #0C0B0A with a faint static grain, whatever the app theme, like the camera bag.
-- **Accent:** Camera Body uses its amber. Soft Tactile uses its moss lifted to #7FA36F so it reads on the dark (white text on the dark is well above AA, and the Generate label is dark on the accent).
+- **The Suite is each theme's dark room** (see above), with a faint static grain.
 - **Selection** is one kind of mark everywhere: an accent ring plus glow on the selected chip, take, genre and tempo.
 - **Type:** sentence case, three sizes (17, 13 and 11) plus 15 for the prompt. No caps or mono.
 - **Imagery is ours only:** the Blender preview stills (the café street at dusk, the mannequin set), the move loop posters, the hardware renders and the app's drums. There's no Higgsfield branding or assets.
