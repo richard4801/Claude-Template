@@ -73,4 +73,52 @@ extension AppStore {
         }
         suite.composer.tokens = t
     }
+
+    // MARK: The takes rail (GET /v1/suite/feed)
+
+    /// The tools a composer's rail shows: Shot with what it extends and upscales, Photo its stills.
+    func feedTools(photo: Bool) -> [String] { photo ? ["photo"] : ["shot", "extend", "upscale"] }
+
+    /// First page (reset) or the next one. Running cards keep live progress from the jobs stream (`feedProgress`).
+    func loadFeed(photo: Bool, reset: Bool = true) async {
+        if !reset && suite.feedCursor == nil { return }
+        guard !suite.feedLoading else { return }
+        suite.feedLoading = true
+        defer { suite.feedLoading = false }
+        let q = SuiteFeedQuery(tool: feedTools(photo: photo), status: suite.feedFilter.statuses, cursor: reset ? nil : suite.feedCursor)
+        guard let page = try? await api.suiteFeed(q) else { return }
+        if reset {
+            suite.feed = page.items
+        } else {
+            let seen = Set(suite.feed.map(\.id))
+            suite.feed += page.items.filter { !seen.contains($0.id) }
+        }
+        suite.feedCursor = page.nextCursor
+    }
+
+    /// A running card's progress from the live job (the feed's value is from when the page was fetched).
+    func feedJob(_ item: SuiteFeedItem) -> Job? { item.jobId.flatMap { id in jobs.first { $0.id == id } } }
+    func feedTake(_ item: SuiteFeedItem) -> Take? { item.takeId.flatMap { id in takes.first { $0.id == id } } }
+}
+
+/// The rail's filter ("All ▾").
+enum CinemaFeedFilter: String, CaseIterable, Identifiable {
+    case all, rendering, finished, failed
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .all: return "All"
+        case .rendering: return "Rendering"
+        case .finished: return "Finished"
+        case .failed: return "Failed"
+        }
+    }
+    var statuses: [String] {
+        switch self {
+        case .all: return []
+        case .rendering: return ["queued", "running"]
+        case .finished: return ["done"]
+        case .failed: return ["failed"]
+        }
+    }
 }

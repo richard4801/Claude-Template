@@ -41,6 +41,7 @@ struct CinemaSuiteView: View {
                     .frame(width: railW)
             }
             .background(t.roles.canvas)
+            .overlay(CinemaGrain())
             .clipShape(RoundedRectangle(cornerRadius: shell.roomRadius))
             .overlay(RoundedRectangle(cornerRadius: shell.roomRadius).strokeBorder(t.roles.hairline.opacity(0.7), lineWidth: 1))
             // A soft inner shadow along the top and left: the room is set into the shell, not pasted on it.
@@ -468,7 +469,16 @@ struct CinemaPills: View {
                     PillList(title: "Photos", options: PhotoDraft.counts.map { ("\($0) photo\($0 == 1 ? "" : "s")", $0) }, selected: n) { store.suite.photo.count = $0; open = nil }
                 }
             } else {
-                pill("quality", icon: "gauge", value: SuiteText.tierLabel(store.suite.toolQuality), help: "Quality") { QualityPopover(onPick: { open = nil }) }
+                // The owner's engine lives inside Quality (plans/ai-suite-design.md), not as its own pill.
+                let tier = store.suite.catalog?.tier(d.quality)
+                let pinned = store.isOwner && d.engineModel != nil
+                let qValue = SuiteText.tierLabel(store.suite.toolQuality) + (pinned ? ", " + ComposerBottomBar.engineName(ComposerEngines.label(d, tier)) : "")
+                pill("quality", icon: "gauge", value: qValue, help: "Quality") {
+                    VStack(alignment: .leading, spacing: 0) {
+                        QualityPopover(onPick: { open = nil })
+                        if store.isOwner { CinemaEngineList(onPick: { open = nil }) }
+                    }
+                }
                 let ratios = store.suite.catalog?.aspectRatios ?? ComposerBar.shapes
                 pill("shape", icon: "crop", value: d.aspect, help: "Shape") {
                     PillList(title: "Shape", options: ratios.map { ($0, $0) }, selected: d.aspect) { store.suite.composer.aspect = $0; open = nil }
@@ -600,6 +610,78 @@ struct CinemaPresetsButton: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 14).padding(.vertical, 7)
             .background(on ? t.roles.ink.opacity(0.08) : .clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+
+// MARK: Grain and the owner's engine
+
+/// The room's faint film grain: one 128 px noise tile, drawn once and tiled (static: nothing animates).
+struct CinemaGrain: View {
+    private static let tile: NSImage = {
+        let n = 128
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: n, pixelsHigh: n, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+                                         isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: n * 4, bitsPerPixel: 32),
+              let data = rep.bitmapData else { return NSImage() }
+        var x: UInt32 = 0x9E37_79B9
+        for i in 0..<(n * n) {
+            x = x &* 1_664_525 &+ 1_013_904_223
+            let v = UInt8(truncatingIfNeeded: x >> 24)
+            data[i * 4] = v; data[i * 4 + 1] = v; data[i * 4 + 2] = v; data[i * 4 + 3] = 255
+        }
+        let img = NSImage(size: NSSize(width: n, height: n))
+        img.addRepresentation(rep)
+        return img
+    }()
+
+    var body: some View {
+        Image(nsImage: Self.tile).resizable(resizingMode: .tile)
+            .opacity(0.05).blendMode(.overlay)
+            .allowsHitTesting(false).accessibilityHidden(true)
+    }
+}
+
+/// Owner only, under the quality tiers: pin this shot's engine, or Auto (the tier's ladder).
+struct CinemaEngineList: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    var onPick: () -> Void
+
+    var body: some View {
+        let d = store.suite.composer
+        let tier = store.suite.catalog?.tier(d.quality)
+        let models = ComposerEngines.options(tier)
+        VStack(alignment: .leading, spacing: 0) {
+            Rectangle().fill(t.roles.hairline).frame(height: 1).padding(.vertical, 4)
+            Text("Engine (owner)").font(t.scale.micro.font).foregroundStyle(t.roles.ink2).padding(.horizontal, 14).padding(.vertical, 6)
+            row("Auto", "The \(SuiteText.tierLabel(d.quality)) ladder", on: d.engineModel == nil) { store.suite.composer = ComposerEngines.pin(store.suite.composer, nil) }
+            ForEach(models, id: \.self) { m in
+                let on = d.engineModel == m.model && (d.resolution ?? m.resolution) == m.resolution
+                row("\(m.name), \(m.resolution)", ComposerBottomBar.plainAccepts(m.inputs ?? tier?.slots ?? .none), on: on) {
+                    store.suite.composer = ComposerEngines.pin(store.suite.composer, m)
+                }
+            }
+        }
+        .padding(.bottom, 6)
+    }
+
+    private func row(_ title: String, _ line: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            action()
+            onPick()
+        } label: {
+            HStack(spacing: 10) {
+                Ph("checkmark", 11).foregroundStyle(t.roles.accent).opacity(on ? 1 : 0).frame(width: 14)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).font(t.scale.caption.font.weight(on ? .semibold : .regular)).foregroundStyle(t.roles.ink)
+                    Text(line).font(t.scale.micro.font).foregroundStyle(t.roles.ink2).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 5)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

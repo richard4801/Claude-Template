@@ -146,6 +146,11 @@ final class SuiteState {
     let composerSlots = InputSlotsModel()
     /// The cinematic Suite's saved rigs (GET /v1/suite/rigs): members see theirs, the owner sees all.
     var savedRigs: [SuiteRigView] = []
+    /// The cinematic Suite's takes rail (GET /v1/suite/feed): the loaded cards, the next page and the rail's filter.
+    var feed: [SuiteFeedItem] = []
+    var feedCursor: String?
+    var feedFilter: CinemaFeedFilter = .all
+    var feedLoading = false
     var estimate: ShotEstimate?
     var estimateError: String?
     /// The four tiers' estimates for the Quality pill.
