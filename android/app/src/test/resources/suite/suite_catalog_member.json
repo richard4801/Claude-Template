@@ -854,7 +854,7 @@
    {
     "id": "portrait_negative",
     "label": "Portrait negative film",
-    "description": "Soft warm skin, pastel highlights",
+    "description": "Soft warm skin, pastels",
     "visible": true,
     "swatches": [
      "#2E2A2E",
@@ -941,7 +941,7 @@
    {
     "id": "reversal_16",
     "label": "16mm reversal",
-    "description": "Visible grain, punchy colour, halation",
+    "description": "Grain, punchy colour, glow",
     "render": "stock-02-16mm",
     "name": "16mm reversal",
     "caption": "Super 16 · visible grain · halation",
@@ -1038,7 +1038,7 @@
    {
     "id": "window",
     "label": "Window light",
-    "description": "Soft side light from a window",
+    "description": "Soft side light",
     "render": "light-04-window",
     "name": "Window",
     "caption": "Soft daylight through sheer · natural & calm",
@@ -1101,7 +1101,7 @@
    {
     "id": "ring_light",
     "label": "Ring light",
-    "description": "Creator ring light, catchlights",
+    "description": "Even light, ring in the eyes",
     "render": "light-06-ring-creator",
     "name": "Creator Ring",
     "caption": "Ring light + RGB tube · UGC talking head",
@@ -2135,7 +2135,7 @@
    {
     "id": "eye",
     "label": "Eye level",
-    "description": "Neutral",
+    "description": "Straight on, neutral",
     "visible": true
    },
    {
@@ -2159,7 +2159,7 @@
    {
     "id": "overhead",
     "label": "Overhead",
-    "description": "Bird’s-eye",
+    "description": "Straight down from above",
     "visible": true
    },
    {
@@ -2177,7 +2177,7 @@
    {
     "id": "hip",
     "label": "Hip level",
-    "description": "Western-style",
+    "description": "Low, tense, standoff",
     "visible": true
    }
   ],
@@ -2221,7 +2221,7 @@
    {
     "id": "cu",
     "label": "Close-up",
-    "description": "Face",
+    "description": "Face fills the frame",
     "visible": true
    },
    {
@@ -2271,61 +2271,61 @@
    {
     "id": "drama",
     "label": "Drama",
-    "description": "",
+    "description": "Quiet, emotional, close",
     "visible": true
    },
    {
     "id": "action",
     "label": "Action",
-    "description": "",
+    "description": "Fast cuts, big movement",
     "visible": true
    },
    {
     "id": "epic",
     "label": "Epic",
-    "description": "",
+    "description": "Wide, grand, sweeping",
     "visible": true
    },
    {
     "id": "comedy",
     "label": "Comedy",
-    "description": "",
+    "description": "Bright, light, playful",
     "visible": true
    },
    {
     "id": "romance",
     "label": "Romance",
-    "description": "",
+    "description": "Warm, soft, intimate",
     "visible": true
    },
    {
     "id": "horror",
     "label": "Horror",
-    "description": "",
+    "description": "Dark corners, tension",
     "visible": true
    },
    {
     "id": "noir",
     "label": "Noir",
-    "description": "",
+    "description": "Hard shadows, smoke",
     "visible": true
    },
    {
     "id": "documentary",
     "label": "Documentary",
-    "description": "",
+    "description": "Handheld, real moments",
     "visible": true
    },
    {
     "id": "music_video",
     "label": "Music video",
-    "description": "",
+    "description": "Bold colour, stylised",
     "visible": true
    },
    {
     "id": "fashion",
     "label": "Fashion film",
-    "description": "",
+    "description": "Clean frames, posed",
     "visible": true
    }
   ],
@@ -2333,49 +2333,49 @@
    {
     "id": "1960s",
     "label": "1960s",
-    "description": "",
+    "description": "Soft colour, film grain",
     "visible": true
    },
    {
     "id": "1970s",
     "label": "1970s",
-    "description": "",
+    "description": "Warm, faded, grainy",
     "visible": true
    },
    {
     "id": "1980s",
     "label": "1980s",
-    "description": "",
+    "description": "Neon, punchy colour",
     "visible": true
    },
    {
     "id": "1990s",
     "label": "1990s",
-    "description": "",
+    "description": "Camcorder look, flash",
     "visible": true
    },
    {
     "id": "2000s",
     "label": "2000s",
-    "description": "",
+    "description": "Digital, crisp, glossy",
     "visible": true
    },
    {
     "id": "2010s",
     "label": "2010s",
-    "description": "",
+    "description": "Clean, bright, social",
     "visible": true
    },
    {
     "id": "2020s",
     "label": "2020s",
-    "description": "",
+    "description": "Phone-native, vivid",
     "visible": true
    },
    {
     "id": "future",
     "label": "Near future",
-    "description": "",
+    "description": "Cool, sleek, minimal",
     "visible": true
    }
   ],

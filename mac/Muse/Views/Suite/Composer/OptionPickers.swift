@@ -8,7 +8,7 @@ import SwiftUI
 struct OptionGrid: View {
     var options: [SuiteOption]
     var selected: String?
-    var autoLine = "Matches the scene"
+    var autoLine = "Picks for the shot" // one Auto caption in every grid (design direction)
     var swatches = false
     var tileHeight: CGFloat = 96
     /// The Auto tile's rendered still (`camera.autoPreviews`), when the catalog has one.
@@ -92,13 +92,13 @@ struct StyleStep: View {
                     VStack(alignment: .leading, spacing: 14) {
                         Text("How the ad plays out. Genre, era and tempo still apply on top.").font(t.body(13)).foregroundStyle(t.muted)
                             .fixedSize(horizontal: false, vertical: true)
-                        OptionGrid(options: c.ugcFormats, selected: s.format, autoLine: "Picks the format from your prompt", tileHeight: 70) {
+                        OptionGrid(options: c.ugcFormats, selected: s.format) {
                             store.suite.pickerSettings.format = $0
                         }
                     }
                 case "era": EraSlider()
-                case "tempo": OptionGrid(options: c.tempos, selected: s.tempo, autoLine: "The scene sets the pace", tileHeight: 70) { store.suite.pickerSettings.tempo = $0 }
-                default: OptionGrid(options: c.genres, selected: s.genre, autoLine: "From your prompt", tileHeight: 70) { store.suite.pickerSettings.genre = $0 }
+                case "tempo": OptionGrid(options: c.tempos, selected: s.tempo) { store.suite.pickerSettings.tempo = $0 }
+                default: OptionGrid(options: c.genres, selected: s.genre) { store.suite.pickerSettings.genre = $0 }
                 }
             }
             .padding(.horizontal, 22).padding(.vertical, 18)
@@ -169,7 +169,7 @@ struct LightingStep: View {
 
     var body: some View {
         ScrollView {
-            OptionGrid(options: store.suite.camera.lighting, selected: store.suite.pickerSettings.lighting, autoLine: "The scene's own light",
+            OptionGrid(options: store.suite.camera.lighting, selected: store.suite.pickerSettings.lighting,
                        autoPreview: PickerPreview.auto(store.suite.camera.autoPreviews.lighting)) {
                 store.suite.pickerSettings.lighting = $0
             }

@@ -169,13 +169,13 @@ fun BoxScope.ComposerSheetHost(sheet: ComposerSheet, x: SheetContext) {
                 val stock = tab == "stock"
                 val list = ComposerCatalog.visible(if (stock) cam.looks else cam.palettes)
                 OptionGrid(list, if (stock) s.stock else s.palette, x.wide, { id -> set { if (stock) it.copy(stock = id) else it.copy(palette = id) } },
-                    header = "${list.size} ${if (stock) "film stocks" else "palettes"} · each with an exact grade", autoCaption = "Matches the scene",
+                    header = "${list.size} ${if (stock) "film stocks" else "palettes"}, each with an exact grade",
                     autoSwatches = listOf("#2A2C2E", "#3A3D40", "#4B4F52", "#5D6165", "#707478"),
                     preview = { o, _ -> Preview(o.render, o.loop, if (o.render == null) PreviewDraw.Swatch(o.swatches) else null, o.swatches.ifEmpty { listOf("#222222", "#555555", "#888888", "#BBBBBB", "#EEEEEE") }) })
             }
         }
         SheetKind.LIGHTING -> PickerShell("Lighting", x.wide, x.close, onReset = { set { it.reset(ComposerChip.LIGHTING) } }) {
-            OptionGrid(ComposerCatalog.visible(cam.lighting), s.lighting, x.wide, { id -> set { it.copy(lighting = id) } }, autoCaption = "Matches the scene",
+            OptionGrid(ComposerCatalog.visible(cam.lighting), s.lighting, x.wide, { id -> set { it.copy(lighting = id) } },
                 autoPoster = cam.autoPreviews.lighting?.poster, preview = { o, _ -> Preview(o.render, o.loop, PreviewDraw.Light(o.id), poster = o.preview?.poster) })
         }
         SheetKind.REFERENCES -> if (d.tool == ComposerTool.PHOTO) PhotoReferencesSheet(x) // Photo tool (workstream 3): pose / look / scene references
@@ -293,7 +293,7 @@ private fun ColumnScope.EraSlider(cam: CameraCatalog, current: String?, wide: Bo
 /** A grid of options with Auto first (null). */
 @Composable
 private fun ColumnScope.OptionGrid(
-    list: List<SuiteOption>, current: String?, wide: Boolean, onPick: (String?) -> Unit, header: String? = null, autoCaption: String = "The engine decides",
+    list: List<SuiteOption>, current: String?, wide: Boolean, onPick: (String?) -> Unit, header: String? = null, autoCaption: String = "Picks for the shot", // one Auto caption in every grid (design direction)
     preview: (SuiteOption, Int) -> Preview, autoSwatches: List<String> = emptyList(), autoPoster: String? = null,
 ) {
     val sel = current?.let { c -> list.firstOrNull { it.id == c }?.mergedInto ?: c }

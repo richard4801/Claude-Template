@@ -249,7 +249,8 @@ fun PickTile(name: String, caption: String, preview: Preview, on: Boolean, onCli
             }
         }
         T(name, m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), m.t.ink, Modifier.padding(top = 6.dp, start = 3.dp), maxLines = 1)
-        if (caption.isNotBlank()) T(caption, m.type.body.copy(fontSize = 12.sp, lineHeight = 15.sp), m.t.muted, Modifier.padding(start = 3.dp), maxLines = 1)
+        // Captions say what you see in 3–5 words; two lines so none is cut (design direction §7).
+        if (caption.isNotBlank()) T(caption, m.type.body.copy(fontSize = 12.sp, lineHeight = 15.sp), m.t.muted, Modifier.padding(start = 3.dp), maxLines = 2)
     }
 }
 

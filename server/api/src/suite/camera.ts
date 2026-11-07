@@ -87,13 +87,13 @@ export const APERTURES: Option[] = [
 export const LOOKS: Option[] = [
   o('digital_clean', 'Clean digital', 'Neutral and true', 'neutral clean digital colour science'),
   o('phone_hdr', 'Phone HDR', 'Bright, punchy, social-ready', 'bright punchy smartphone HDR processing'),
-  o('portrait_negative', 'Portrait negative film', 'Soft warm skin, pastel highlights', 'portrait colour-negative film stock, soft warm skin tones, pastel highlights'),
+  o('portrait_negative', 'Portrait negative film', 'Soft warm skin, pastels', 'portrait colour-negative film stock, soft warm skin tones, pastel highlights'),
   o('tungsten_stock', 'Tungsten cinema stock', 'Night-friendly, cool shadows', 'tungsten-balanced cinema film stock, cool shadows, glowing practicals'),
   o('slide_film', 'Slide film', 'Saturated, contrasty', 'saturated slide film, deep contrast'),
   o('bw_film', 'Black & white film', 'Silver grain monochrome', 'black-and-white film, silver grain, rich blacks'),
   o('bleach_bypass', 'Bleach bypass', 'Desaturated, harsh contrast', 'bleach-bypass process, desaturated colour, harsh contrast'),
   o('cross_process', 'Cross-processed', 'Shifted, surreal colour', 'cross-processed film, shifted greens and yellows'),
-  o('reversal_16', '16mm reversal', 'Visible grain, punchy colour, halation', '16mm reversal film, visible grain, punchy saturated colour, halation'),
+  o('reversal_16', '16mm reversal', 'Grain, punchy colour, glow', '16mm reversal film, visible grain, punchy saturated colour, halation'),
   o('faded_print', 'Faded print', 'Lifted blacks, nostalgic', 'faded film print, lifted blacks, nostalgic colour'),
 ];
 export const FRAME_RATES: Option[] = [
@@ -115,7 +115,7 @@ export const SHUTTERS: Option[] = [
 // ---------------------------------------------------------------- light and colour
 export const LIGHTING: Option[] = [
   o('natural', 'Natural', 'Available light, as it is', 'natural available light'),
-  o('window', 'Window light', 'Soft side light from a window', 'soft daylight from a window to one side'),
+  o('window', 'Window light', 'Soft side light', 'soft daylight from a window to one side'),
   o('soft_cross', 'Soft cross', 'Two soft sources crossing', 'soft cross-lighting from two diffused sources'),
   o('contre_jour', 'Contre-jour', 'Backlit, glowing rim', 'contre-jour backlight, glowing hair rim, slight haze'),
   o('overhead', 'Overhead fall', 'Top light, sculpted shadows', 'hard overhead light falling on the subject, sculpted shadows'),
@@ -123,7 +123,7 @@ export const LIGHTING: Option[] = [
   o('silhouette', 'Silhouette', 'Subject dark against bright', 'subject in silhouette against a bright background'),
   o('golden_hour', 'Golden hour', 'Low warm sun', 'low golden-hour sun, long warm shadows'),
   o('blue_hour', 'Blue hour', 'Cool dusk ambience', 'cool blue-hour dusk light, city lights coming on'),
-  o('ring_light', 'Ring light', 'Creator ring light, catchlights', 'ring light in front of the subject, round catchlights, even soft face light'),
+  o('ring_light', 'Ring light', 'Even light, ring in the eyes', 'ring light in front of the subject, round catchlights, even soft face light'),
   o('studio_3pt', 'Studio three-point', 'Key, fill and rim', 'three-point studio lighting: soft key, gentle fill, crisp rim light'),
   o('neon', 'Neon night', 'Coloured neon spill', 'neon signs spilling magenta and cyan light'),
   o('harsh_sun', 'Harsh noon sun', 'Hard shadows, bright', 'harsh midday sun, hard shadows, bright highlights'),
@@ -219,14 +219,14 @@ export function canMix(a: MoveOption, b: MoveOption) {
 
 // ---------------------------------------------------------------- angle and framing
 export const HEIGHTS: Option[] = [
-  o('eye', 'Eye level', 'Neutral', 'eye-level camera'),
+  o('eye', 'Eye level', 'Straight on, neutral', 'eye-level camera'),
   o('shoulder', 'Shoulder level', 'Slightly below eye', 'shoulder-height camera'),
   o('low', 'Low angle', 'Heroic, looking up', 'low angle looking up at the subject'),
   o('high', 'High angle', 'Looking down', 'high angle looking down at the subject'),
-  o('overhead', 'Overhead', 'Bird’s-eye', 'overhead bird’s-eye view'),
+  o('overhead', 'Overhead', 'Straight down from above', 'overhead bird’s-eye view'),
   o('worm', 'Worm’s-eye', 'From the ground up', 'worm’s-eye view from the ground'),
   o('ground', 'Ground level', 'Camera on the floor', 'ground-level camera'),
-  o('hip', 'Hip level', 'Western-style', 'hip-level camera'),
+  o('hip', 'Hip level', 'Low, tense, standoff', 'hip-level camera'),
 ];
 export const SHOT_SIZES: Option[] = [
   o('els', 'Extreme wide', 'Tiny in a huge space', 'extreme wide shot'),
@@ -235,7 +235,7 @@ export const SHOT_SIZES: Option[] = [
   o('cowboy', 'Cowboy', 'Mid-thigh up', 'cowboy shot from mid-thigh up'),
   o('ms', 'Medium', 'Waist up', 'medium shot from the waist up'),
   o('mcu', 'Medium close-up', 'Chest up', 'medium close-up from the chest up'),
-  o('cu', 'Close-up', 'Face', 'close-up on the face'),
+  o('cu', 'Close-up', 'Face fills the frame', 'close-up on the face'),
   o('ecu', 'Extreme close-up', 'Eyes or a detail', 'extreme close-up'),
   o('insert', 'Insert', 'An object or detail', 'insert shot of a detail'),
   o('ots', 'Over the shoulder', 'From behind another person', 'over-the-shoulder shot'),
@@ -244,12 +244,14 @@ export const SHOT_SIZES: Option[] = [
 ];
 export const GENRES: Option[] = [
   o('ugc', 'UGC', 'Authentic creator content', 'authentic creator-made social video'), o('commercial', 'Commercial', 'Polished ad', 'polished commercial'),
-  o('drama', 'Drama', '', 'dramatic'), o('action', 'Action', '', 'high-energy action'), o('epic', 'Epic', '', 'epic, grand scale'),
-  o('comedy', 'Comedy', '', 'light comedic'), o('romance', 'Romance', '', 'romantic, intimate'), o('horror', 'Horror', '', 'tense horror'),
-  o('noir', 'Noir', '', 'film-noir'), o('documentary', 'Documentary', '', 'observational documentary'), o('music_video', 'Music video', '', 'stylised music video'),
-  o('fashion', 'Fashion film', '', 'editorial fashion film'),
+  o('drama', 'Drama', 'Quiet, emotional, close', 'dramatic'), o('action', 'Action', 'Fast cuts, big movement', 'high-energy action'), o('epic', 'Epic', 'Wide, grand, sweeping', 'epic, grand scale'),
+  o('comedy', 'Comedy', 'Bright, light, playful', 'light comedic'), o('romance', 'Romance', 'Warm, soft, intimate', 'romantic, intimate'), o('horror', 'Horror', 'Dark corners, tension', 'tense horror'),
+  o('noir', 'Noir', 'Hard shadows, smoke', 'film-noir'), o('documentary', 'Documentary', 'Handheld, real moments', 'observational documentary'), o('music_video', 'Music video', 'Bold colour, stylised', 'stylised music video'),
+  o('fashion', 'Fashion film', 'Clean frames, posed', 'editorial fashion film'),
 ];
-export const ERAS: Option[] = ['1960s', '1970s', '1980s', '1990s', '2000s', '2010s', '2020s', 'future'].map(e => o(e, e === 'future' ? 'Near future' : e, '', e === 'future' ? 'near-future' : `${e} era`));
+/** What each era looks like on screen (picker captions: see-what-you-get, design direction §7). */
+const ERA_LOOKS: Record<string, string> = {'1960s': 'Soft colour, film grain', '1970s': 'Warm, faded, grainy', '1980s': 'Neon, punchy colour', '1990s': 'Camcorder look, flash', '2000s': 'Digital, crisp, glossy', '2010s': 'Clean, bright, social', '2020s': 'Phone-native, vivid', 'future': 'Cool, sleek, minimal'};
+export const ERAS: Option[] = ['1960s', '1970s', '1980s', '1990s', '2000s', '2010s', '2020s', 'future'].map(e => o(e, e === 'future' ? 'Near future' : e, ERA_LOOKS[e] ?? '', e === 'future' ? 'near-future' : `${e} era`));
 export const TEMPOS: Option[] = [
   o('calm', 'Calm', 'Slow, lingering', 'calm lingering pacing'), o('steady', 'Steady', 'Even pacing', 'steady even pacing'),
   o('dynamic', 'Dynamic', 'Energetic', 'dynamic energetic pacing'), o('chaotic', 'Chaotic', 'Frantic', 'frantic chaotic pacing'),

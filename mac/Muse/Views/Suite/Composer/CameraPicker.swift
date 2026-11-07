@@ -75,11 +75,11 @@ struct CameraAngleStep: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Height").font(t.body(16, .semibold))
-                OptionGrid(options: c.heights, selected: s.height, autoLine: "The scene decides", tileHeight: 84) {
+                OptionGrid(options: c.heights, selected: s.height) {
                     store.suite.pickerSettings.height = $0
                 }
                 Text("Framing").font(t.body(16, .semibold)).padding(.top, 20)
-                OptionGrid(options: c.shotSizes, selected: s.shotSize, autoLine: "The scene decides", tileHeight: 84) {
+                OptionGrid(options: c.shotSizes, selected: s.shotSize) {
                     store.suite.pickerSettings.shotSize = $0
                 }
             }
