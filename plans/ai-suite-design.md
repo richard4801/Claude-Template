@@ -210,3 +210,16 @@ Research: `plans/research/ai-suite-competitors.md`. It covers 16 products (Runwa
 - **Built beside the old screens:** the new Create sits behind a Settings switch, "Try the new Create", on the owner's account first. The old screens are deleted only after the owner is happy.
 - **Shot and Photo first.** Judge those before porting the other six tools.
 - **No Draft/Final toggle:** the quality tiers already cover it.
+
+## REVISION (owner, 2026-11-07, after the first mocks)
+The owner rejected the first mocks as "scanty" and "plain": "Leave the original layout as is and just focus on the AI Studio optimization… Give it a real sleek design."
+- **The app shell stays as it is today.** Sidebar, Home, Library, Models, Queue and Templates are unchanged; the "Create" rename and the Home removal are dropped. Only the AI Suite pages are redesigned.
+- **Visual direction: "Higgsfield cinematic".** The Suite is a dark, image-led film tool:
+  - a large stage with ambient glow;
+  - a floating frosted-glass composer dock;
+  - tall image chips for every rig control;
+  - glow on selection;
+  - imagery-rich pickers (drums, arc carousels, swatch tiles, loop grids).
+
+  This is a direction only: no Higgsfield branding or assets.
+- **Unchanged from the plan:** everything functional. That covers modes, rig depth, the rig check, pinned Generate with the price, the results feed and its actions, presets, saved rigs and the model default rig.
