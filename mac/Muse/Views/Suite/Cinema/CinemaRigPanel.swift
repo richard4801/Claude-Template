@@ -83,7 +83,7 @@ struct CinemaRigPanel: View {
                     .onTapGesture { store.closePicker() }
                     .accessibilityHidden(true)
                 panel
-                    .frame(width: min(g.size.width - 80, 1040), height: min(g.size.height - 48, 760))
+                    .frame(width: max(0, min(g.size.width - 80, 1040)), height: max(0, min(g.size.height - 48, 760)))
             }
             .frame(width: g.size.width, height: g.size.height)
         }
@@ -236,7 +236,7 @@ struct CinemaStylePicker: View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Genre").font(t.scale.caption.font).foregroundStyle(t.roles.ink2).padding(.horizontal, 24).padding(.top, 14)
             GeometryReader { g in
-                let base = min(300, (g.size.height - 70) / 1.25)
+                let base = max(40, min(300, (g.size.height - 70) / 1.25)) // never negative (a first layout pass can be 0 tall)
                 ZStack {
                     ForEach(Array(genres.enumerated()), id: \.offset) { i, o in
                         let d = i - sel

@@ -115,7 +115,7 @@ struct CinemaStageArea: View {
             let dockH: CGFloat = 330
             let top: CGFloat = 64
             let availH = max(120, g.size.height - dockH - top - 16)
-            let stageW = min(availH * 16 / 9, g.size.width - 120)
+            let stageW = max(0, min(availH * 16 / 9, g.size.width - 120))
             let stageH = stageW * 9 / 16
             ZStack(alignment: .top) {
                 if !empty, let img = running?.thumb ?? stage?.thumb { CinemaAmbient(ref: img) }
