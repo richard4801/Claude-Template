@@ -24,6 +24,7 @@ final class EditSuiteRobustnessTests: XCTestCase {
         for r in s.rows { _ = s.blocks(r.trackId) }
         _ = s.beats; _ = s.bpm; _ = s.transcript(); _ = s.silenceCuts(); _ = s.fillerCuts
         _ = s.snapped(.nan); _ = s.snapped(.infinity); _ = s.snapped(3)
+        _ = EditList.clock(.infinity); _ = EditList.clock(.nan); _ = EditList.clock(s.duration)
         s.select(at: 1)
         _ = s.trimming("c1", .start, to: 2); _ = s.trimming("c1", .end, to: .nan)
         _ = s.moving("c1", to: 1)

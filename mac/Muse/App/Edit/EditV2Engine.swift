@@ -36,7 +36,9 @@ enum EditV2Engine {
     }
 
     static let timescale: CMTimeScale = 6000
-    static func time(_ s: Double) -> CMTime { CMTime(seconds: max(0, s), preferredTimescale: timescale) }
+    /// A composition time; NaN, negative and infinite seconds become 0 (owner blocker 2026-11-07: AVFoundation raises an
+    /// Objective-C exception, which Swift can't catch, on an invalid time range).
+    static func time(_ s: Double) -> CMTime { CMTime(seconds: EditSuite.finiteSeconds(s), preferredTimescale: timescale) }
 
     // MARK: Sources
 
@@ -181,8 +183,9 @@ enum EditV2Engine {
         let scene = EditV2Scene(project: project, plan: plan, laneTracks: trackIds, sources: sources, burnCaptions: burnCaptions)
         let vc = AVMutableVideoComposition()
         vc.customVideoCompositorClass = EditV2Compositor.self
-        vc.renderSize = CGSize(width: plan.width, height: plan.height)
-        let fps = plan.fps > 0 ? plan.fps : 30
+        // A zero or odd render size makes AVFoundation refuse (or raise on) the video composition.
+        vc.renderSize = CGSize(width: max(2, plan.width / 2 * 2), height: max(2, plan.height / 2 * 2))
+        let fps = plan.fps.isFinite && plan.fps > 0 ? min(plan.fps, 240) : 30
         vc.frameDuration = CMTime(value: 1000, timescale: CMTimeScale(max(1, (fps * 1000).rounded())))
         let end = max(comp.duration, time(plan.durationSec))
         var instructions: [EditV2Instruction] = []
@@ -194,12 +197,20 @@ enum EditV2Engine {
             let ids = Set(plan.videoSegments(from: a, to: b).compactMap { trackIds[$0.lane] })
             instructions.append(EditV2Instruction(timeRange: CMTimeRange(start: start, end: stop), trackIDs: ids.sorted(), scene: scene))
         }
-        // Instructions must cover the timeline without gaps.
-        for i in 1..<max(1, instructions.count) where instructions[i].timeRange.start != instructions[i - 1].timeRange.end {
-            instructions[i] = EditV2Instruction(timeRange: CMTimeRange(start: instructions[i - 1].timeRange.end, end: instructions[i].timeRange.end),
-                                                trackIDs: instructions[i].trackIDs, scene: scene)
+        // Instructions must cover the timeline from 0 without gaps or overlaps, each with a positive duration (AVFoundation
+        // raises on anything else). Each starts where the previous ended; one that would end before it starts is dropped.
+        var tiled: [EditV2Instruction] = []
+        var cursor = CMTime.zero
+        for ins in instructions {
+            let stop = ins.timeRange.end
+            guard stop.isNumeric, stop > cursor else { continue }
+            tiled.append(EditV2Instruction(timeRange: CMTimeRange(start: cursor, end: stop), trackIDs: ins.trackIDs, scene: scene))
+            cursor = stop
         }
-        vc.instructions = instructions
+        if end.isNumeric, end > cursor {
+            tiled.append(EditV2Instruction(timeRange: CMTimeRange(start: cursor, end: end), trackIDs: tiled.last?.trackIDs ?? [], scene: scene))
+        }
+        vc.instructions = tiled
         return Built(composition: comp, videoComposition: vc, audioMix: mix, plan: plan)
     }
 

@@ -284,7 +284,7 @@ public struct EditList: Codable, Hashable, Sendable {
 
     /// "0:03.40": minutes, seconds and hundredths, as the editor shows times.
     public static func clock(_ s: Double) -> String {
-        let cs = Int((max(0, s) * 100).rounded())
+        let cs = Int((EditSuite.finiteSeconds(s) * 100).rounded())   // never Int(inf / NaN) (owner blocker 2026-11-07)
         return "\(cs / 6000):" + String(format: "%02d.%02d", (cs / 100) % 60, cs % 100)
     }
 

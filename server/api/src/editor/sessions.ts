@@ -91,10 +91,12 @@ export class EditSessions {
     const media = (t.media ?? {}) as { durationSec?: number; width?: number; height?: number; fps?: number; edits?: unknown; parentTakeId?: string };
     const e = media.edits as { version?: number } | undefined;
     if (e?.version === 2) return e as unknown as M.EditProject;
-    if (e?.version === 1) return M.fromV1(e as M.EditListV1, { width: media.width ?? 1080, height: media.height ?? 1920, fps: media.fps ?? 30 });
-    const d = Number(media.durationSec) || 1;
-    const p = M.fromV1({ version: 1, sourceTakeId: t.id, sourceDurationSec: d, segments: [{ inSec: 0, outSec: d, speed: 1 }], mute: false },
-      { width: media.width ?? 1080, height: media.height ?? 1920, fps: media.fps ?? 30 });
+    // Live takes can carry 0 or no width / height / fps / duration (owner blocker 2026-11-07): never a 0×0 canvas or a 0 s clip.
+    const pos = (v: unknown, d: number) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d; };
+    const facts = { width: Math.round(pos(media.width, 1080)), height: Math.round(pos(media.height, 1920)), fps: pos(media.fps, 30) };
+    if (e?.version === 1) return M.fromV1(e as M.EditListV1, facts);
+    const d = pos(media.durationSec, 1);
+    const p = M.fromV1({ version: 1, sourceTakeId: t.id, sourceDurationSec: d, segments: [{ inSec: 0, outSec: d, speed: 1 }], mute: false }, facts);
     // A suite take graded with a look (workstream 1) starts with it on the main clip (reversible like any look).
     const look = (media as { look?: { lut?: string } }).look;
     if (look?.lut) (p.tracks[0]!.items[0] as M.VideoClip).look = { lut: look.lut, strength: 1 };
