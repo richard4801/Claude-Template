@@ -137,6 +137,9 @@ public struct MuseModel: Codable, Hashable, Sendable, Identifiable {
     /// Archived models vanish from every list and picker; the owner restores them in Settings → Archived models.
     public var archived: Bool
     public var archivedAt: Int64?
+    /// AI suite (workstream 1): her default rig, filled into the composer's rows still on Auto when she's @-mentioned
+    /// (`applyDefaultRig`). nil = none. Set with `setModelDefaultRig`.
+    public var defaultRig: SuiteRig?
 
     public init(id: String, name: String, age: Int = 24, niche: String, look: String = "", neverAdd: [String] = [], slots: [SheetSlot] = [],
                 outfitIds: [String] = [], personality: String = "", notes: String = "", archived: Bool = false, archivedAt: Int64? = nil) {
@@ -154,7 +157,10 @@ public struct MuseModel: Codable, Hashable, Sendable, Identifiable {
         self.notes = notes
     }
 
-    enum CodingKeys: String, CodingKey { case id, name, age, niche, look, neverAdd, slots, outfitIds, personality, notes, archived, archivedAt }
+    enum CodingKeys: String, CodingKey {
+        case id, name, age, niche, look, neverAdd, slots, outfitIds, personality, notes, archived, archivedAt
+        case defaultRig // AI suite (workstream 1)
+    }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -169,6 +175,7 @@ public struct MuseModel: Codable, Hashable, Sendable, Identifiable {
         notes = c.v(.notes, "")
         archived = c.v(.archived, false)
         archivedAt = c.o(.archivedAt) ?? (c.o(.archivedAt) as Double?).map { Int64($0) }
+        defaultRig = c.o(.defaultRig) // AI suite (workstream 1)
     }
 
     /// The sheet's filled slots (what Enhance and Dress up work on).
@@ -510,6 +517,8 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
     public var errorCode: String?
     /// Replicate, done: output seconds Replicate billed, summed over takes.
     public var billedSeconds: Double?
+    /// AI suite (workstream 1): the composer's draft it was made from ("Reuse settings"). nil for jobs made without one.
+    public var draft: SuiteDraft?
 
     public init(id: String, title: String, modelId: String, modelName: String, outfitId: String, request: JobRequest, state: String, progress: Double = 0,
                 take: Int = 1, step: Int = 0, totalSteps: Int = 10, phase: String = "", secondsLeft: Double = 0, totalSeconds: Double = 0, cost: Double = 0,
@@ -542,6 +551,7 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
         case id, title, modelId, modelName, outfitId, request, state, progress, take, step, totalSteps, phase, secondsLeft, totalSeconds, cost, refunded, error,
              createdAt, finishedAt, prompt, seed, thumb, queuePosition, etaSeconds, blocked, warmupCost, userId, warm, errorCode, billedSeconds
         case engineText = "engineLabel"
+        case draft // AI suite (workstream 1)
     }
 
     public init(from d: Decoder) throws {
@@ -577,6 +587,7 @@ public struct Job: Codable, Hashable, Sendable, Identifiable {
         engineText = c.o(.engineText)
         errorCode = c.o(.errorCode)
         billedSeconds = c.o(.billedSeconds)
+        draft = c.o(.draft) // AI suite (workstream 1)
     }
 
     /// Waiting in line before it starts (real API): `queuePosition` is set and nothing has rendered yet.
@@ -728,6 +739,8 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
     public var mediaKey: String?
     /// Edit suite (workstream 3): a version's name (`POST /v1/takes/{id}/versions {name?}`; Claude's save name).
     public var name: String?
+    /// AI suite (workstream 1): the composer's draft it was made from (its job's, or the photo run's): "Reuse settings".
+    public var draft: SuiteDraft?
 
     public init(id: String, kind: String = "take", jobId: String? = nil, index: Int = 1, of: Int = 1, title: String, label: String, engineLabel: String = "",
                 cost: Double = 0, seed: Int64 = 0, status: String = "test", thumb: ImageRef, prompt: String = "", createdAt: Int64 = 0) {
@@ -751,6 +764,7 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
         case id, kind, jobId, index, of, title, label, engineLabel, cost, seed, status, thumb, prompt, createdAt, videoUrl, durationSec, width, height,
              templateId, templateName, shuffleSeed, variation, refs, parentTakeId, edits, fps, look
         case name // Edit suite (workstream 3)
+        case draft // AI suite (workstream 1)
     }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -782,6 +796,7 @@ public struct Take: Codable, Hashable, Sendable, Identifiable {
         fps = c.o(.fps)
         look = c.o(.look) // AI suite (workstream 1)
         name = c.o(.name) // Edit suite (workstream 3)
+        draft = c.o(.draft) // AI suite (workstream 1)
         // Edit suite (workstream 3)
         editsV2 = edits == nil ? (try? c.decodeIfPresent(EditV2.Project.self, forKey: .edits)) ?? nil : nil
 

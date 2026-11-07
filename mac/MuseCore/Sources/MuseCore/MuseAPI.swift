@@ -276,6 +276,20 @@ public protocol MuseAPI: AnyObject, Sendable {
     func createSuiteLocation(_ new: NewSuiteLocation) async throws -> SuiteLocation
     /// DELETE /v1/suite/locations/{id}
     func deleteSuiteLocation(id: String) async throws
+    // Build step 2 (plans/api.md "The new Suite's server pieces"). Types in Suite/SuiteRigsFeed.swift; the fake in
+    // Suite/FakeMuseAPI+RigsFeed.swift. Drafts ride on ShotRequest / PhotoRequest (`draft`) and come back as Job / Take `draft`.
+    /// GET /v1/suite/rigs: a member's own saved rigs; the owner gets every rig in the studio, theirs first.
+    func suiteRigs() async throws -> [SuiteRigView]
+    /// POST /v1/suite/rigs {name, rig}: name 1–60 characters (trimmed), at most 100 per person (`too_many_rigs`).
+    func createSuiteRig(name: String, rig: SuiteRig) async throws -> SuiteRigView
+    /// PATCH /v1/suite/rigs/{id} {name?, rig?}: `rig` replaces the whole rig. Someone else's rig is `not_found` (the owner may change any).
+    func updateSuiteRig(id: String, name: String?, rig: SuiteRig?) async throws -> SuiteRigView
+    /// DELETE /v1/suite/rigs/{id}: same permissions as PATCH.
+    func deleteSuiteRig(id: String) async throws
+    /// PATCH /v1/models/{id} {defaultRig}: her default rig; nil (sent as null) or an all-Auto rig clears it.
+    func setModelDefaultRig(modelId: String, rig: SuiteRig?) async throws -> MuseModel
+    /// GET /v1/suite/feed?tool=&status=&model=&cursor=&limit=: the takes rail, newest first. Pass `nextCursor` back until nil.
+    func suiteFeed(_ q: SuiteFeedQuery) async throws -> SuiteFeedPage
     // End AI suite (workstream 1)
 
     // Developer

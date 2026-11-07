@@ -773,6 +773,8 @@ public struct ShotRequest: Codable, Hashable, Sendable {
     public var resolution: String?
     /// Extend (`mode: "extend"`): the finished clip to continue and which way (suite/extend.ts).
     public var extend: SuiteExtend?
+    /// The composer's full draft, stored with the job and its takes for "Reuse settings" (left out when nil; estimates ignore it).
+    public var draft: SuiteDraft?
 
     public init(mode: String? = nil, cast: [CastMember]? = nil, title: String? = nil, modelId: String? = nil, outfitId: String? = nil, prompt: String = "",
                 direction: String? = nil, frames: SuiteFrames? = nil, references: SuiteReferences? = nil, duration: Int = 5, aspectRatio: String = "9:16",
