@@ -19,6 +19,8 @@ enum SnapshotRunner {
         var generateFrame: CGRect?
         /// The cinematic Suite shows its empty state (the demo studio already has takes).
         var cinemaEmpty = false
+        /// Bumped by the fit check after each screen change: Generate's probe reports its frame again.
+        var probeTick = 0
     }
 
     static let state = State()
@@ -156,6 +158,8 @@ enum SnapshotRunner {
                         state.generateFrame = nil
                         show()
                         try? await Task.sleep(for: .seconds(1.5))
+                        state.probeTick += 1
+                        try? await Task.sleep(for: .seconds(0.3))
                         w.contentView?.layoutSubtreeIfNeeded()
                         let content = w.contentView?.bounds.size ?? .zero
                         let label = "\(name) \(width)x\(height) \(theme.rawValue)"

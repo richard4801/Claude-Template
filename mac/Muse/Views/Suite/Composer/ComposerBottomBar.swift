@@ -548,6 +548,8 @@ struct GenerateFrameProbe: View { // also used by the cinematic Suite (CinemaSui
             Color.clear
                 .onAppear { SnapshotRunner.state.generateFrame = f }
                 .onChange(of: f) { _, v in SnapshotRunner.state.generateFrame = v }
+                // The runner asks again after each screen change (the frame may not have moved at all).
+                .onChange(of: SnapshotRunner.state.probeTick) { _, _ in SnapshotRunner.state.generateFrame = f }
         }
     }
 }
