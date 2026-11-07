@@ -175,3 +175,26 @@ Research: `plans/research/ai-suite-competitors.md`. It covers 16 products (Runwa
 1. **Home:** keep it as the dashboard, or make Create the screen the app opens on?
 2. **Posts:** does it stay in the sidebar, or move under Library?
 3. **Saved rigs:** should members also get saved rigs and model default rigs, or the owner only at first?
+
+## Refinements after the design review (WS4, 2026-11-07)
+1. **Queue:**
+   - A "Queued" group sits at the top of the feed, with **Run · $cost**.
+   - **Compare** becomes multi-select in the feed.
+   - Model jobs (model photos, LoRA training) show on Home and in Models.
+2. **One way to add a move.** The `#chips` in the prompt are the source of truth. The Move row only summarises them ("Dolly in, +1") and opens the same picker; there is never a second list.
+3. **A model's default rig never overwrites the user.**
+   - It fills only rows still on Auto, then shows "Applied Zelphira's rig · Undo".
+   - With two @ models in the prompt, nothing applies automatically.
+4. **Storyboard's scene list and Recast's face picker open over the feed.** Like the rig panel, they use the big area. The composer column keeps the cast, the shared rig and Generate.
+5. **Generate is pinned.** The composer footer (Quality, the settings line, Generate) is pinned to the column's bottom and only the middle scrolls. The CI fit check asserts it.
+6. **Server additions, in build step 3:**
+   - Each job stores its full draft (tokens with their chip keys, rig ids, slots), so **Reuse settings** restores it exactly.
+   - **Library collections** (a new table and API).
+7. **The feed stays calm:**
+   - Cards show posters only. Only the hovered card plays, and nothing plays off-screen.
+   - On the phone, long-press or the viewer shows a take's details.
+8. **Fewer actions per take:**
+   - Four up front: Vary, Extend, Use as start frame, Open in Edit. The rest go under More.
+   - Copy: "9:16, 10 s, 1 take, sound on"; values in caption style ("35 mm film, anamorphic").
+9. **Camera stage on Android** stays as today (view and follow a session). Directing stays Mac-only.
+10. **Naming:** "Video suite" disappears; the place is called **Create**. The interim rename to "Suite" is dropped.
