@@ -514,7 +514,9 @@ fun Check(text: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = M
 
 /** Top bar (`.top`): back · title · action. */
 @Composable
-fun TopBar(title: String = "", onBack: (() -> Unit)? = null, backIcon: String = "back", over: Boolean = false, right: (@Composable () -> Unit)? = null) {
+fun TopBar(title: String = "", onBack: (() -> Unit)? = null, backIcon: String = "back", over: Boolean = false,
+           /** Workstream 4: a tappable title with a chevron ("Shot ▾"), e.g. the composer's tool switch. */ onTitle: (() -> Unit)? = null,
+           right: (@Composable () -> Unit)? = null) {
     val m = muse
     val color = if (over) Color.White else m.t.ink
     CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides color) {
@@ -525,7 +527,14 @@ fun TopBar(title: String = "", onBack: (() -> Unit)? = null, backIcon: String = 
         ) {
             if (onBack != null) TbBtn(backIcon, onBack) else Spacer(Modifier.size(48.dp))
             // Sentence case in the heading step in every theme (plans/design-direction.md §3).
-            T(title, m.scale.heading, color, Modifier.weight(1f), align = TextAlign.Center, maxLines = 1)
+            if (onTitle == null) T(title, m.scale.heading, color, Modifier.weight(1f), align = TextAlign.Center, maxLines = 1)
+            else Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.heightIn(min = 48.dp).clickable(onClick = onTitle).semantics { contentDescription = "$title, change tool"; role = androidx.compose.ui.semantics.Role.Button }
+                    .padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    T(title, m.scale.heading, color, maxLines = 1)
+                    Ic("caret-down", 16.dp, color)
+                }
+            }
             if (right != null) right() else Spacer(Modifier.size(48.dp))
         }
     }

@@ -36,6 +36,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -97,6 +98,9 @@ import studio.muse.app.ui.screens.suite.nextTier
 import studio.muse.app.ui.screens.suite.rememberInputSlotPicker
 import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
+import androidx.compose.foundation.layout.aspectRatio
+import studio.muse.app.ui.theme.radii
+import studio.muse.app.ui.theme.roles
 import studio.muse.app.ui.theme.scale
 
 // AI suite (workstream 1): the video composer (plans/video-composer.md, mockups composer__P1…P5 phone, C1…C6 wide). One
@@ -293,7 +297,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wide = ComposerLayout.wide(maxWidth.value.toInt())
             Column(Modifier.fillMaxSize()) {
-                TopBar(if (wide) "" else d.tool.title, onBack = { nav.back() }) {
+                TopBar(if (wide) "" else d.tool.title, onBack = { nav.back() }, onTitle = if (wide) null else ({ open(ComposerSheet(SheetKind.TOOLS)) })) {
                     MoreMenu(listOfNotNull(
                         MenuItem("grid", "Storyboard") { nav.go(Routes.SUITE_STORYBOARD) },
                         if (owner) MenuItem("quality", "Engines (owner)") { nav.go(Routes.SUITE_ENGINES) } else null,
@@ -384,88 +388,182 @@ class ComposerUi(
 
 // ---------------------------------------------------------------- phone
 
+// Workstream 4: the phone composer follows the approved render (plans/design-direction/composer-b.png): the picture first,
+// then the prompt, the input slots with their names under them, plain setting rows, and one full-width Generate.
 @Composable
 private fun PhoneComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent: List<studio.muse.app.data.Job>, takes: List<studio.muse.app.data.Take>, openTake: (String) -> Unit, retry: (SuiteShotRequest) -> Unit) {
     val m = muse
     Column(Modifier.fillMaxSize()) {
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            // Photo tool (workstream 3): the library's recent stills and the photo presets (templates) instead.
-            if (ui.photo != null) { PhotoRecent(ui, takes, wide = false, Modifier.padding(horizontal = 16.dp)); PhotoPresets(wide = false, Modifier.padding(horizontal = 16.dp)) }
-            else RecentTakes(ui, job, recent, takes, openTake, retry, wide = false)
-            if (ui.catalogNote != null) CatalogNote(ui, Modifier.padding(horizontal = 16.dp))
-            else if (ui.empty || ui.d.collapsed) PresetRow(ui, Modifier.padding(horizontal = 16.dp), tileW = 128.dp, tileH = 84.dp)
-        }
-        Column(Modifier.fillMaxWidth().drawBehind { drawLine(m.t.line, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }.background(m.t.surface).navigationBarsPadding()
-            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            ToolRow(ui, wide = false)
-            if (ui.d.collapsed) {
-                CollapsedBody(ui, wide = false)
-                return@Column
-            }
-            if (ui.d.chips.isNotEmpty()) ChipsRow(ui)
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(top = 8.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            // Photo tool (workstream 3): the library's recent stills and the photo presets (templates) in place of the hero.
+            if (ui.photo != null) { PhotoRecent(ui, takes, wide = false); PhotoPresets(wide = false) }
+            else MediaHero(ui, job, takes, openTake, retry, Modifier.fillMaxWidth().aspectRatio(4f / 3f))
+            if (ui.catalogNote != null) CatalogNote(ui)
+            else if (ui.photo == null && (ui.empty || ui.d.collapsed)) PresetRow(ui, tileW = 120.dp, tileH = 76.dp)
+            if (ui.d.collapsed) { CollapsedBody(ui, wide = false); return@Column }
             if (ui.d.tool == ComposerTool.SWAP) SwapPromptToggle(ui)
             if (ui.d.tool == ComposerTool.EXTEND) ExtendDirection(ui)
-            if (ui.showPrompt) Prompt(ui)
+            // The prompt sits on the raised tone, as in the render.
+            if (ui.showPrompt) Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(m.radii.control)).background(m.roles.raised).padding(horizontal = 14.dp, vertical = 12.dp)) { Prompt(ui) }
             if (ui.photo != null) PhotoSlotRow(ui, wide = false) // Photo tool (workstream 3)
-            else if (ui.d.tool == ComposerTool.EXTEND) Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                ui.toolSlots.forEach { s -> SlotCard(ui, s, Modifier.width(112.dp).height(96.dp)) }
-                ExtendLength(ui, Modifier.weight(1f))
-            } else Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                ui.toolSlots.forEach { s -> SlotCard(ui, s, Modifier.weight(1f).height(96.dp)) }
-                repeat((3 - ui.toolSlots.size).coerceAtLeast(0)) { Spacer(Modifier.weight(1f)) }
-            }
+            else SlotThumbs(ui)
+            if (ui.d.tool == ComposerTool.EXTEND) ExtendLength(ui, Modifier.fillMaxWidth())
+            SettingRows(ui)
             if (ui.addons.isNotEmpty()) AddonPills(ui)
             ui.rigRow(false)
+        }
+        Column(Modifier.fillMaxWidth().drawBehind { drawLine(m.t.line, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }.background(m.t.bg).navigationBarsPadding()
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             PhoneBar(ui)
         }
     }
 }
 
+/**
+ * The picture at the top: the take in progress or the latest take; before any, the scene's current light (the lighting
+ * preview), with the shape and length on a small scrim tag ("9:16 · 8 s").
+ */
+@Composable
+private fun MediaHero(ui: ComposerUi, job: studio.muse.app.data.Job?, takes: List<studio.muse.app.data.Take>, openTake: (String) -> Unit, retry: (SuiteShotRequest) -> Unit, modifier: Modifier) {
+    val m = muse
+    val pane = SuitePane.of(job, takes, ui.lead?.name)
+    val shape = RoundedCornerShape(m.radii.container)
+    Box(modifier.clip(shape).background(m.roles.field)) {
+        if (pane.phase != StagePhase.IDLE) {
+            SuiteResultPane(pane, ui.lead?.cover, emptyTitle = "", emptyHint = "", compact = true,
+                onRetry = { job?.let { retry(ui.d.request(ui.slots, ui.inputs, ui.recast)) } }, onTry = nextTier(ui.d.quality)?.let { t -> { ui.update { it.copy(quality = t) } } },
+                tryLabel = nextTier(ui.d.quality)?.let { "Try ${SuiteRules.tierLabel(it)}" }, onOpen = { job?.let { openTake(it.id) } })
+        } else {
+            val poster = ui.cat.lighting.firstOrNull { it.id == ui.d.settings.lighting }?.preview?.poster ?: ui.cat.autoPreviews.lighting?.poster
+            PreviewTile(Preview(poster = poster, still = if (poster == null) ui.d.tool.render else null), Modifier.matchParentSize())
+        }
+        val tag = if (ui.photo != null) null else if (ui.d.tool == ComposerTool.EXTEND) "+${ui.d.duration} s" else "${ui.d.aspect} · ${ui.d.duration} s"
+        if (tag != null && pane.phase == StagePhase.IDLE) T(tag, m.scale.micro, Color.White, Modifier.align(Alignment.BottomStart).padding(8.dp)
+            .clip(RoundedCornerShape(m.radii.chip)).background(Color.Black.copy(alpha = .55f)).padding(horizontal = 7.dp, vertical = 3.dp), maxLines = 1)
+    }
+}
+
+/** The input slots as thumbnails with their names under them; an empty one is a dashed "+" named for what it adds (owner fix 4). */
+@Composable
+private fun SlotThumbs(ui: ComposerUi) {
+    val m = muse
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
+        ui.toolSlots.forEach { s ->
+            val filled = slotFill(ui, s)
+            val enabled = s.enabled && (ui.live || s.kind == "character")
+            Column(Modifier.width(72.dp).alpha(if (enabled) 1f else .45f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                val shape = RoundedCornerShape(m.radii.control)
+                Box(Modifier.padding(bottom = 6.dp).size(64.dp).clip(shape).press { ui.onSlot(s) }
+                    .let { if (filled?.first == null) it.dashed(m.t.muted.copy(alpha = .7f)) else it }
+                    .semantics(mergeDescendants = true) { role = Role.Button; contentDescription = "${s.label}${if (s.optional) ", optional" else ""}${filled?.let { ": " + it.second } ?: ""}" },
+                    contentAlignment = Alignment.Center) {
+                    val img = filled?.first
+                    if (img != null) RefImage(img, Modifier.matchParentSize(), 20) else SIc("plus", 20.dp, m.t.muted)
+                    if (filled != null && s.kind in setOf("character", "start", "end", "clip", "audio", "location", "product", "refad", "video"))
+                        Box(Modifier.align(Alignment.TopEnd).size(28.dp).press { ui.onClearSlot(s.kind) }.semantics { contentDescription = "Remove ${s.label}"; role = Role.Button }, contentAlignment = Alignment.Center) {
+                            Box(Modifier.size(18.dp).clip(CircleShape).background(Color(0x8C0E0C0A)), contentAlignment = Alignment.Center) { SIc("close", 10.dp, Color(0xFFF8F5EF)) }
+                        }
+                }
+                T(s.label, m.scale.caption, if (filled != null) m.t.ink else m.t.muted, maxLines = 1)
+                if (s.optional && filled == null) T("Optional", m.scale.caption, m.t.muted, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** What a slot holds now: its picture (null without one) and its name. Null when the slot is empty. */
+private fun slotFill(ui: ComposerUi, s: ToolSlot): Pair<studio.muse.app.data.ImageRef?, String>? = when (s.kind) {
+    "character" -> ui.lead?.let { l -> (ui.outfits.firstOrNull { it.id == ui.d.characterOutfit }?.front ?: l.cover) to l.name.substringBefore(' ') }
+    "start" -> ui.slots[SlotId(SlotKind.START)]?.let { v -> (v.image ?: v.preview?.let { studio.muse.app.data.ImageRef(url = it) }) to s.label }
+    "end" -> ui.slots[SlotId(SlotKind.END)]?.let { v -> (v.image ?: v.preview?.let { studio.muse.app.data.ImageRef(url = it) }) to s.label }
+    "clip" -> ui.recast.clipId?.let { null to (ui.clipName ?: "Clip") }
+    "people" -> ui.recast.people.takeIf { p -> p.any { it.characterId != null } }?.let { p -> null to "${p.size} ${if (p.size == 1) "person" else "people"}" }
+    else -> ToolSlots.ownSlot(ui.d.tool, s.kind)?.let { ui.own[it] }?.let { v -> (if (v.image != null || v.preview != null) (v.image ?: studio.muse.app.data.ImageRef(url = v.preview)) else null) to (v.error ?: if (v.uploading) "Uploading…" else v.name.ifBlank { s.label }) }
+}
+
+/** The settings as plain rows (the render): icon, name, value on the right, chevron. Auto values stay quiet. */
+@Composable
+private fun SettingRows(ui: ComposerUi) {
+    val m = muse
+    val d = ui.d
+    val refsMax = SlotKind.IMAGE.capacity(ui.inputs)
+    val order = listOf(ComposerChip.CAMERA, ComposerChip.LIGHTING, ComposerChip.LOOK, ComposerChip.STYLE, ComposerChip.REFERENCES)
+    Column(Modifier.fillMaxWidth()) {
+        order.filter { it in d.chips }.forEach { chip ->
+            val sum = ComposerCatalog.summary(chip, d.settings, ui.cat, ui.refsUsed, refsMax)
+            val directed = chip == ComposerChip.CAMERA && d.directed != null
+            // Camera reads as the body and lens ("35 mm film · Anamorphic"); Style as genre · tempo: value pairs (design direction §7).
+            val cam = if (chip == ComposerChip.CAMERA) listOfNotNull(
+                ui.cat.bodies.firstOrNull { it.id == ComposerCatalog.survivor(ui.cat.bodies, d.settings.body) }?.label,
+                ui.cat.lenses.firstOrNull { it.id == ComposerCatalog.survivor(ui.cat.lenses, d.settings.lens) }?.label,
+            ).joinToString(" · ").ifBlank { null } else null
+            val value = when {
+                directed -> "Directed"
+                cam != null -> cam
+                chip == ComposerChip.STYLE && !sum.auto -> sum.value.replace(", ", " · ")
+                else -> sum.value
+            }
+            val (icon, name) = when (chip) {
+                ComposerChip.CAMERA -> "film" to "Camera"; ComposerChip.LIGHTING -> "light" to "Light"; ComposerChip.LOOK -> "palette" to "Look"
+                ComposerChip.STYLE -> "sliders" to "Style"; ComposerChip.REFERENCES -> "image" to "References"
+            }
+            SettingRow(icon, name, value, auto = sum.auto && !directed) {
+                ui.open(ComposerSheet(when (chip) { ComposerChip.REFERENCES -> SheetKind.REFERENCES; ComposerChip.STYLE -> SheetKind.STYLE; ComposerChip.CAMERA -> SheetKind.CAMERA; ComposerChip.LOOK -> SheetKind.LOOK; ComposerChip.LIGHTING -> SheetKind.LIGHTING }))
+            }
+        }
+        if (ui.photo == null) {
+            // Shape, length, sound, speaking and takes live in Settings; the row says what they are now.
+            val (a, b) = if (d.tool == ComposerTool.EXTEND) "+${d.duration} s ${if (d.extendDirection == "before") "before" else "after"}" to d.barSummary.second else d.barSummary
+            SettingRow("ratio", "Settings", "$a, $b", auto = false) { ui.open(ComposerSheet(SheetKind.SETTINGS)) }
+        }
+    }
+}
+
+@Composable
+private fun SettingRow(icon: String, name: String, value: String, auto: Boolean, onClick: () -> Unit) {
+    val m = muse
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).press(onClick = onClick).semantics(mergeDescendants = true) { role = Role.Button; contentDescription = "$name: $value" },
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        SIc(icon, 20.dp, m.t.muted)
+        T(name, m.scale.label, m.t.muted, maxLines = 1)
+        T(value, m.scale.label.copy(fontWeight = if (auto) FontWeight.Normal else FontWeight.Medium), if (auto) m.t.muted else m.t.ink, Modifier.weight(1f), maxLines = 1, align = TextAlign.End)
+        SIc("chev", 16.dp, m.t.muted)
+    }
+}
+
+/** The bottom bar (the render): Quality, sound, and the one filled Generate with the price in its label. */
 @Composable
 private fun PhoneBar(ui: ComposerUi) {
     val m = muse
     if (!ui.live) { ComingSoonLine(ui); return }
     ui.blocker?.takeIf { !ui.empty }?.let { T(it, m.type.tiny, m.t.muted, maxLines = 2) }
-    // Photo tool (workstream 3): one Photos 1–4 list in place of Quality, Settings and the length/takes summary.
-    ui.photo?.let { p ->
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            MenuPill("layers", photoCountLabel(p.draft.count), "Photos", PhotoComposer.countItems(p.draft.count)) { i -> p.setCount(i + 1) }
-            Spacer(Modifier.weight(1f)); ComposerPrice.line(ui.est)?.let { T(it, m.type.body.copy(fontSize = 13.sp), m.t.muted, maxLines = 1) }; RoundGenerate(ui)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        // Photo tool (workstream 3): one Photos 1–4 list in place of Quality and sound.
+        val p = ui.photo
+        if (p != null) MenuPill("layers", photoCountLabel(p.draft.count), "Photos", PhotoComposer.countItems(p.draft.count)) { i -> p.setCount(i + 1) }
+        else {
+            Row(Modifier.heightIn(min = 48.dp).press { ui.open(ComposerSheet(SheetKind.SETTINGS)) }.semantics { contentDescription = "Quality ${SuiteRules.tierLabel(ui.d.quality)}"; role = Role.Button }
+                .padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                T(SuiteRules.tierLabel(ui.d.quality), m.scale.label, m.t.ink, maxLines = 1); SIc("chevd", 14.dp, m.t.muted)
+            }
+            if (ui.d.tool != ComposerTool.EXTEND) Box(Modifier.size(48.dp).press { ui.update { it.copy(sound = !it.sound) } }
+                .semantics { contentDescription = if (ui.d.sound) "Sound on" else "Sound off"; role = Role.Switch }, contentAlignment = Alignment.Center) {
+                SIc(if (ui.d.sound) "audio" else "mute", 20.dp, m.t.ink)
+            }
         }
-        return
-    }
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        BarButton(Modifier.press { ui.open(ComposerSheet(SheetKind.SETTINGS)) }.semantics { contentDescription = "Quality ${SuiteRules.tierLabel(ui.d.quality)}"; role = Role.Button }) {
-            SIc("gauge", 18.dp, m.t.muted); T(SuiteRules.tierLabel(ui.d.quality), m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1); SIc("chevd", 14.dp, m.t.muted)
-        }
-        BarButton(Modifier.width(48.dp).press { ui.open(ComposerSheet(SheetKind.SETTINGS)) }.semantics { contentDescription = "Settings"; role = Role.Button }, square = true) { SIc("sliders", 20.dp, m.t.ink) }
-        Spacer(Modifier.weight(1f))
-        val (a, b) = if (ui.d.tool == ComposerTool.EXTEND) "+${ui.d.duration} s ${if (ui.d.extendDirection == "before") "before" else "after"}" to ui.d.barSummary.second else ui.d.barSummary
-        Column(horizontalAlignment = Alignment.End) {
-            T(a, m.type.body.copy(fontSize = 13.sp), m.t.muted, maxLines = 1)
-            T(b, m.type.body.copy(fontSize = 13.sp), m.t.muted, maxLines = 1)
-        }
-        RoundGenerate(ui)
+        Spacer(Modifier.width(4.dp))
+        GenerateButton(ui, Modifier.weight(1f))
     }
 }
 
+/** The one filled action: "Generate · $0.64" ("Generate · —" before a price). */
 @Composable
-private fun BarButton(modifier: Modifier, square: Boolean = false, content: @Composable RowScope.() -> Unit) {
+private fun GenerateButton(ui: ComposerUi, modifier: Modifier) {
     val m = muse
-    val shape = RoundedCornerShape(if (m.isA) 0.dp else 10.dp)
-    Row(modifier.height(48.dp).clip(shape).background(m.t.bg).border(if (m.isD) 2.dp else 1.dp, m.t.line, shape).padding(horizontal = if (square) 0.dp else 12.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), content = content)
-}
-
-/** The phone's round Generate: a spark and the live price ("—", "Free", "$0.16"). */
-@Composable
-private fun RoundGenerate(ui: ComposerUi) {
-    val m = muse
-    val price = ComposerPrice.short(ui.est, ui.pricing)
-    Column(Modifier.size(62.dp).alpha(if (ui.canGo) 1f else .5f).clip(CircleShape).background(m.t.cta).press(onClick = ui.onGenerate)
-        .semantics { contentDescription = "Generate, $price"; role = Role.Button }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        T("Generate", m.scale.micro, m.t.ctaInk, maxLines = 1)
-        T(price, m.scale.label, m.t.ctaInk, maxLines = 1)
+    val label = ComposerPrice.button(ui.est, ui.pricing)
+    Box(modifier.height(48.dp).alpha(if (ui.canGo) 1f else .5f).clip(RoundedCornerShape(m.radii.control)).background(m.roles.action).press(onClick = ui.onGenerate)
+        .semantics { contentDescription = label; role = Role.Button }, contentAlignment = Alignment.Center) {
+        T(label, m.scale.label.copy(fontWeight = FontWeight.SemiBold), m.roles.onAction, maxLines = 1)
     }
 }
 
@@ -626,14 +724,7 @@ private fun ExtendLength(ui: ComposerUi, modifier: Modifier = Modifier) {
 private fun SlotCard(ui: ComposerUi, s: ToolSlot, modifier: Modifier) {
     val m = muse
     val enabled = s.enabled && (ui.live || s.kind == "character")
-    val filled: Pair<studio.muse.app.data.ImageRef?, String>? = when (s.kind) {
-        "character" -> ui.lead?.let { l -> (ui.outfits.firstOrNull { it.id == ui.d.characterOutfit }?.front ?: l.cover) to l.name.substringBefore(' ') }
-        "start" -> ui.slots[SlotId(SlotKind.START)]?.let { v -> (v.image ?: v.preview?.let { studio.muse.app.data.ImageRef(url = it) }) to s.label }
-        "end" -> ui.slots[SlotId(SlotKind.END)]?.let { v -> (v.image ?: v.preview?.let { studio.muse.app.data.ImageRef(url = it) }) to s.label }
-        "clip" -> ui.recast.clipId?.let { null to (ui.clipName ?: "Clip") }
-        "people" -> ui.recast.people.takeIf { p -> p.any { it.characterId != null } }?.let { p -> null to "${p.size} ${if (p.size == 1) "person" else "people"}" }
-        else -> ToolSlots.ownSlot(ui.d.tool, s.kind)?.let { ui.own[it] }?.let { v -> (if (v.image != null || v.preview != null) (v.image ?: studio.muse.app.data.ImageRef(url = v.preview)) else null) to (v.error ?: if (v.uploading) "Uploading…" else v.name.ifBlank { s.label }) }
-    }
+    val filled = slotFill(ui, s)
     val shape = RoundedCornerShape(if (m.isA) 0.dp else 10.dp)
     val sub = when {
         filled == null -> s.caption
@@ -707,7 +798,6 @@ private fun CollapsedBody(ui: ComposerUi, wide: Boolean) {
             EditSettingsLink(ui)
             T(summary, m.type.body.copy(fontSize = 12.5.sp), m.t.muted, maxLines = 2)
         }
-        RoundGenerate(ui)
     }
 }
 
@@ -739,9 +829,12 @@ private fun PresetRow(ui: ComposerUi, modifier: Modifier = Modifier, tileW: Dp, 
         Row(Modifier.fillMaxWidth().horizontalScroll(scroll), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             ui.cat.presets.forEach { p ->
                 val on = ui.d.settings.preset == p.id
-                Box(Modifier.let { if (on) it.border(2.dp, m.t.ink).padding(3.dp) else it.padding(3.dp) }) {
-                    PreviewTile(presetPreview(ui.cat, p.id, p.label), Modifier.size(tileW, tileH).press { ui.update { it.pickPreset(ui.cat, p.id, ui.models.firstOrNull()?.id) } }
-                        .semantics { contentDescription = "Preset ${p.label}"; role = Role.Button; selected = on })
+                Column(Modifier.width(tileW + 6.dp).press { ui.update { it.pickPreset(ui.cat, p.id, ui.models.firstOrNull()?.id) } }
+                    .semantics(mergeDescendants = true) { contentDescription = "Preset ${p.label}"; role = Role.Button; selected = on }) {
+                    Box(Modifier.picked(on, m.t.accent, m.radii.control)) {
+                        PreviewTile(presetPreview(ui.cat, p.id, p.label).copy(draw = null), Modifier.size(tileW, tileH).clip(RoundedCornerShape(m.radii.control)))
+                    }
+                    T(p.label, m.scale.caption, if (on) m.t.ink else m.t.muted, Modifier.padding(top = 4.dp, start = 3.dp), maxLines = 1)
                 }
             }
         }
@@ -810,49 +903,52 @@ private fun RecentTakes(ui: ComposerUi, job: studio.muse.app.data.Job?, recent: 
 
 // ---------------------------------------------------------------- tablet and desktop
 
+// Workstream 4: tablets follow the approved desktop render (plans/design-direction/composer-mac-b.png): the picture fills
+// the height on the left, Setup and Inputs on the right, and the prompt bar with the pills and Generate along the bottom.
 @Composable
 private fun WideComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent: List<studio.muse.app.data.Job>, takes: List<studio.muse.app.data.Take>, openTake: (String) -> Unit) {
     val m = muse
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 32.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-        // Workstream 4 (design direction): the tool's name in sentence case, no caps eyebrow (Photo isn't part of "Video suite").
-        T(ui.d.tool.title, m.scale.display, m.t.ink, maxLines = 1)
-        if (ui.photo != null) PhotoRecent(ui, takes, wide = true) else RecentTakes(ui, job, recent, takes, openTake, {}, wide = true) // Photo tool (workstream 3)
-        val shape = RoundedCornerShape(if (m.isA) 0.dp else 14.dp)
-        Column(Modifier.widthIn(max = 960.dp).fillMaxWidth().align(Alignment.CenterHorizontally).clip(shape).background(m.t.surface).border(if (m.isD) 2.5.dp else 1.dp, m.t.line, shape)) {
-            Box(Modifier.padding(horizontal = 14.dp, vertical = 6.dp)) { ToolRow(ui, wide = true) }
-            Box(Modifier.fillMaxWidth().height(1.dp).background(m.t.line))
-            if (ui.d.collapsed) {
-                Box(Modifier.padding(16.dp)) { CollapsedBody(ui, wide = true) }
-            } else {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (ui.d.chips.isNotEmpty()) ChipsRow(ui, wide = true)
-                    if (ui.d.tool == ComposerTool.SWAP) SwapPromptToggle(ui)
-                    if (ui.d.tool == ComposerTool.EXTEND) ExtendDirection(ui, Modifier.widthIn(max = 520.dp), captions = true)
-                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        if (ui.showPrompt) Prompt(ui, Modifier.weight(1f), maxHeight = 160.dp) else Spacer(Modifier.weight(1f))
-                        if (ui.photo != null) Box(Modifier.widthIn(max = 452.dp)) { PhotoSlotRow(ui, wide = true) } // Photo tool (workstream 3)
-                        else Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { ui.toolSlots.forEach { s -> SlotCard(ui, s, Modifier.size(104.dp)) } }
-                    }
-                    if (ui.addons.isNotEmpty()) AddonPills(ui)
-                    ui.rigRow(true)
-                }
-                Box(Modifier.fillMaxWidth().height(1.dp).background(m.t.line))
-                WideBar(ui)
+    var presets by remember { mutableStateOf(ui.empty) }
+    Column(Modifier.fillMaxSize().padding(horizontal = 24.dp).padding(top = 8.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.heightIn(min = 48.dp).press { ui.open(ComposerSheet(SheetKind.TOOLS)) }.semantics { contentDescription = "${ui.d.tool.title}, change tool"; role = Role.Button },
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                T(ui.d.tool.title, m.scale.title, m.t.ink, maxLines = 1); SIc("chevd", 16.dp, m.t.muted)
+            }
+            Spacer(Modifier.weight(1f))
+            if (ui.photo == null) Box(Modifier.heightIn(min = 48.dp).press { presets = !presets }.semantics { role = Role.Button }.padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
+                T(if (presets) "Hide presets" else "Presets", m.scale.label, m.t.muted, maxLines = 1)
             }
         }
-        if (ui.catalogNote != null) CatalogNote(ui, Modifier.widthIn(max = 960.dp).align(Alignment.CenterHorizontally))
-        else if (ui.photo != null) PhotoPresets(wide = true, Modifier.widthIn(max = 960.dp).align(Alignment.CenterHorizontally)) // Photo tool (workstream 3)
-        else if (ui.empty || ui.d.collapsed) PresetRow(ui, Modifier.widthIn(max = 960.dp).align(Alignment.CenterHorizontally), tileW = 150.dp, tileH = 96.dp)
+        if (ui.catalogNote != null) CatalogNote(ui)
+        else if (ui.photo != null) PhotoPresets(wide = true) // Photo tool (workstream 3)
+        else if (presets || ui.d.collapsed) PresetRow(ui, tileW = 150.dp, tileH = 96.dp)
+        Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            MediaHero(ui, job, takes, openTake, {}, Modifier.weight(1f).fillMaxHeight())
+            Column(Modifier.width(300.dp).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (ui.d.collapsed) { CollapsedBody(ui, wide = false); return@Column }
+                T("Setup", m.scale.heading, m.t.ink)
+                SettingRows(ui)
+                T("Inputs", m.scale.heading, m.t.ink, Modifier.padding(top = 8.dp))
+                if (ui.photo != null) PhotoSlotRow(ui, wide = false) else SlotThumbs(ui) // Photo tool (workstream 3)
+                if (ui.d.tool == ComposerTool.SWAP) SwapPromptToggle(ui)
+                if (ui.d.tool == ComposerTool.EXTEND) { ExtendDirection(ui); ExtendLength(ui, Modifier.fillMaxWidth()) }
+                if (ui.addons.isNotEmpty()) AddonPills(ui)
+                ui.rigRow(true)
+            }
+        }
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(m.radii.control)).background(m.roles.raised).padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (ui.showPrompt) Prompt(ui, Modifier.fillMaxWidth(), maxHeight = 96.dp)
+            WideBar(ui)
+        }
     }
 }
 
 @Composable
 private fun WideGenerate(ui: ComposerUi) {
     val m = muse
-    Box(Modifier.height(48.dp).alpha(if (ui.canGo) 1f else .5f).clip(RoundedCornerShape(if (m.isA) 0.dp else 10.dp)).background(m.t.cta).press(onClick = ui.onGenerate)
-        .semantics { role = Role.Button }.padding(horizontal = 22.dp), contentAlignment = Alignment.Center) {
-        T(ComposerPrice.button(ui.est, ui.pricing), m.scale.label, m.t.ctaInk, maxLines = 1)
-    }
+    GenerateButton(ui, Modifier.widthIn(min = 200.dp))
 }
 
 /** The desktop bar: Quality, Shape, Length, Sound, Speaking and Takes pills (each a small list or slider), then Generate. */
@@ -860,7 +956,7 @@ private fun WideGenerate(ui: ComposerUi) {
 private fun WideBar(ui: ComposerUi) {
     val m = muse
     val d = ui.d
-    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (!ui.live) { Box(Modifier.weight(1f)) { ComingSoonLine(ui) }; return@Row }
         // Icon + value pills; when they don't all fit, the row scrolls and fades at the edge that has more (WS4 audit).
         val scroll = rememberScrollState()
