@@ -111,10 +111,10 @@ public extension RigDrumMath {
     static let fitChrome = 188.0
     static let fitRows = 5.0
     /// Smallest row that still reads (a render, its name and the focal / aperture glyphs).
-    static let minRow = 56.0
+    static let minRow = 50.0
 
     /// The row height that fits all five rows in `height` without clipping: the width's row (84, or 112 from 720 pt
-    /// wide) when there is room, else what fits, never under `minRow`.
+    /// wide) when there is room, else what fits (54 pt in a 684 pt window), never under `minRow`.
     static func fitRow(width: Double, height: Double) -> Double {
         let byWidth = width >= 720 ? 112.0 : 84.0
         let byHeight = ((height - fitChrome) / fitRows).rounded(.down)
