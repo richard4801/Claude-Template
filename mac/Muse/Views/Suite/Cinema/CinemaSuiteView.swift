@@ -54,9 +54,16 @@ struct CinemaSuiteView: View {
         .environment(\.theme, t)
         .environment(\.colorScheme, .dark)
         .overlay {
-            ComposerPickerHost()
+            // Build step 3: the rig panel in the room's style (the old picker shell elsewhere).
+            if s.picker != nil {
+                CinemaRigPanel()
+                    .padding([.top, .trailing, .bottom], 8)
+                    .environment(\.theme, shell.room())
+                    .environment(\.colorScheme, .dark)
+            }
             if s.browserOpen { ToolBrowser().transition(.opacity) }
         }
+        .animation(.easeOut(duration: 0.18), value: s.picker)
         .task(id: ComposerPriceKey(draft: s.composer, slots: s.composerSlots.slots, swap: s.swap, clipId: store.clip?.id, catalogLoaded: s.catalog != nil, photo: s.photo)) {
             try? await Task.sleep(nanoseconds: 300_000_000)
             if Task.isCancelled { return }
