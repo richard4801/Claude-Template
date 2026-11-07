@@ -1,9 +1,14 @@
 import MuseCore
 import SwiftUI
 
-// AI suite (workstream 1): the video composer page (plans/video-composer.md, C1, C5, C6). Recent takes on top, the
-// composer (tool card, Auto chips, prompt with tokens, slot cards, bottom bar) and "Start from a preset" below. Picking a
-// preset collapses the composer to who + shape + Generate, with "Edit settings". Pickers open over the page, always dark.
+// AI suite: the composer page, laid out as the owner-approved render (plans/design-direction/composer-mac-b.png and
+// composer-mac-1000-b.png; plans/design-direction.md §9 fix 1; design/direction/render.py `composer_mac`).
+// - Header: the tool's title (it opens the tool browser) and a quiet "Presets" link for the presets strip.
+// - Main row, filling the height: the picture on the left (the take in progress or the latest take; before any, the
+//   scene's light), and on the right a 300 pt rail (264 when narrow) with Setup rows, the Inputs thumbnails and the
+//   tool's own controls.
+// - The prompt bar right under it: the prompt, then the bottom bar's pills and Generate (the one filled action).
+// Pickers open over the page, always dark.
 
 /// Re-price when anything that changes the request changes.
 private struct ComposerPriceKey: Equatable {
@@ -15,32 +20,28 @@ private struct ComposerPriceKey: Equatable {
     var photo: PhotoDraft // Photo tool (workstream 3): count, preset and references re-price too
 }
 
+/// The composer's width below which the rail narrows to 264 and the bar's pills go to icon plus value. A 1000 pt window
+/// (compact sidebar) gives about 930; a 1280 one about 1050.
+private let composerNarrowWidth: CGFloat = 1000
+
 struct ComposerView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
+    /// The presets strip under the header: shown by default while the draft is empty.
+    @State private var presetsOpen = false
 
     var body: some View {
         let s = store.suite
         ZStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    header
-                    RecentTakesRow().padding(.top, 20)
-                    Spacer(minLength: 28)
-                    ComposerCard().zIndex(2)
-                    if s.composer.tool == .photo {
-                        PhotoPresetsRow().padding(.top, 26).padding(.bottom, 30) // Photo tool (workstream 3): the photo templates
-                    } else {
-                        PresetsRow().padding(.top, 26).padding(.bottom, 30)
-                    }
-                }
-                .frame(maxWidth: 960)
-                .padding(.horizontal, 32)
-                .frame(maxWidth: .infinity)
+            GeometryReader { g in
+                page(narrow: g.size.width < composerNarrowWidth)
+                    .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
             }
             ComposerPickerHost()
             if s.browserOpen { ToolBrowser().transition(.opacity) }
         }
+        .onAppear { presetsOpen = draftIsEmpty }
+        .onChange(of: s.composer.tool) { _, _ in presetsOpen = draftIsEmpty }
         .task(id: ComposerPriceKey(draft: s.composer, slots: s.composerSlots.slots, swap: s.swap, clipId: store.clip?.id, catalogLoaded: s.catalog != nil, photo: s.photo)) {
             try? await Task.sleep(nanoseconds: 300_000_000)
             if Task.isCancelled { return }
@@ -65,193 +66,458 @@ struct ComposerView: View {
         }
     }
 
+    private var draftIsEmpty: Bool {
+        let d = store.suite.composer
+        if d.tool == .photo { return store.suite.photo.presetId == nil && d.tokens.isEmpty }
+        return d.tokens.isEmpty && d.collapsed == nil
+    }
+
+    /// Shot has the catalog's presets; Photo has the photo templates. The other tools have none.
+    private var hasPresets: Bool {
+        switch store.suite.composer.tool {
+        case .shot: return !store.suite.camera.presets.isEmpty
+        case .photo: return true
+        default: return false
+        }
+    }
+
+    private func page(narrow: Bool) -> some View {
+        VStack(alignment: .leading, spacing: Space.s3) {
+            header
+            if presetsOpen && hasPresets {
+                if store.suite.composer.tool == .photo {
+                    PhotoPresetsRow() // Photo tool (workstream 3): the photo templates
+                } else {
+                    PresetsRow()
+                }
+            }
+            HStack(alignment: .top, spacing: Space.s4) {
+                ComposerMediaPane()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ScrollView(.vertical, showsIndicators: false) {
+                    ComposerRail(narrow: narrow)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(width: narrow ? 264 : 300)
+                .frame(maxHeight: .infinity, alignment: .top)
+            }
+            .frame(maxHeight: .infinity)
+            .zIndex(0)
+            // Above the main row so the prompt's @ / # list, which opens upwards, draws over the picture.
+            ComposerPromptBar()
+                .zIndex(1)
+        }
+        .padding(.horizontal, Space.s5)
+        .padding(.top, Space.s4)
+        .padding(.bottom, 20)
+    }
+
     private var header: some View {
-        HStack(alignment: .bottom) {
-            VStack(alignment: .leading, spacing: 6) {
-                Button { store.openSuite(.hub) } label: {
-                    Label("Back", ph: "chevron.left").font(t.scale.label.font).foregroundStyle(t.muted) // not "Video suite": Photo opens here too
+        let d = store.suite.composer
+        let preset = d.collapsed.flatMap { id in store.suite.camera.presets.first { $0.id == id } }
+        let photoPreset = d.tool == .photo ? store.photoPreset : nil // Photo tool (workstream 3)
+        return HStack(spacing: Space.s3) {
+            Button { store.suite.browserOpen = true } label: {
+                HStack(spacing: Space.s2) {
+                    Text(d.tool.title).font(t.scale.title.font).foregroundStyle(t.roles.ink).lineLimit(1)
+                    Ph("caret-down", 14).foregroundStyle(t.roles.ink2)
+                }
+                .frame(minHeight: 32)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Change the tool or start from a preset")
+            .accessibilityLabel("\(d.tool.title), change tool")
+            if let name = preset?.label ?? photoPreset?.name {
+                Text(name).font(t.scale.label.font).foregroundStyle(t.roles.ink2).lineLimit(1)
+            }
+            if store.isComingSoon(d.tool) { SuiteTag(text: SuiteText.comingSoon) }
+            SuiteTestBadge()
+            Spacer(minLength: Space.s3)
+            if d.tool == .shot && d.collapsed == nil && !d.tokens.isEmpty {
+                Button { store.addShotToStoryboard() } label: {
+                    Ph("rectangle.split.3x1", 16).frame(width: 32, height: 32).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(t.roles.ink2).help("Add to storyboard")
+                .accessibilityLabel("Add to storyboard")
+            }
+            if store.isOwner && !store.isComingSoon(d.tool) && d.tool != .photo { // Photo (workstream 3) runs on the image steps, not the video engines
+                Button { store.suite.showEngines = true } label: {
+                    Ph("server.rack", 16).frame(width: 32, height: 32).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(t.roles.ink2).help("Engines")
+                .accessibilityLabel("Engines (owner)")
+            }
+            if hasPresets {
+                Button { presetsOpen.toggle() } label: {
+                    Text(presetsOpen ? "Hide presets" : "Presets").font(t.scale.label.font).foregroundStyle(t.roles.ink2)
+                        .frame(minHeight: 32).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Back to the suite")
-                .accessibilityLabel("Back to the suite")
-                Text(store.suite.composer.tool.title).font(t.isA ? Fonts.font("Instrument Serif", 44, .regular) : t.display(34))
+                .help(presetsOpen ? "Hide the presets" : "Start from a preset")
             }
-            Spacer(minLength: 12)
-            SuiteTestBadge()
         }
-        .padding(.top, 22)
+        .frame(height: 32)
     }
 }
 
-// MARK: Recent takes (C1)
+// MARK: The picture
 
-struct RecentTakesRow: View {
+/// The left pane: the take in progress or the latest take of this composer; before any, the scene's current light (the
+/// lighting option's preview, else the catalog's Auto preview), with the shape and length on a scrim tag.
+struct ComposerMediaPane: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SuiteSectionHead(title: "Recent takes") { LinkText("See all in Queue →") { store.go(.queue) } }
-            let jobs = store.suiteRecentJobs
-            if jobs.isEmpty {
-                Muted("Your takes show up here as they render.").frame(height: 60, alignment: .topLeading)
-            } else {
-                HStack(alignment: .top, spacing: 20) {
-                    ForEach(jobs) { j in tile(j) }
-                }
-            }
+    private var tool: ComposerTool { store.suite.composer.tool }
+
+    private var job: Job? {
+        switch tool {
+        case .swap, .recast: return store.swapJob
+        case .photo: return nil // Photo's stills open in the take view (AppStore+Photo)
+        default: return store.shotJob
         }
     }
 
-    private func tile(_ j: Job) -> some View {
-        let state = SuiteResultState.of(j)
-        let take = store.takes(of: j).first
-        return Button {
-            if let take { store.openTake(take.id) } else { store.go(.queue) }
-        } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                MuseImage(ref: take?.thumb ?? j.thumb)
-                    .blur(radius: state == .ready ? 0 : 10)
-                    .frame(width: 100, height: 178)
+    /// The picture under the result pane's blur: the start frame, the clip or the video being extended.
+    private var art: ImageRef? {
+        switch tool {
+        case .swap, .recast: return store.clipPoster
+        case .extend: return store.suite.composer.extend.source?.thumb
+        default: return store.suite.composerSlots.slots[SlotId(.start)]?.image
+        }
+    }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: t.radii.container)
+        let current = job
+        let idle: Bool = {
+            if case .empty = SuiteResultState.of(current) { return true }
+            return false
+        }()
+        ZStack(alignment: .bottomLeading) {
+            shape.fill(t.roles.field)
+            if idle {
+                Color.clear
+                    .overlay(still)
                     .clipped()
-                    .overlay(overlay(state))
-                Text("\(j.title), take \(max(1, j.take))").font(t.scale.caption.font).lineLimit(1).frame(width: 100, alignment: .leading)
+                    .accessibilityHidden(true)
+                if let tag {
+                    Text(tag).font(t.scale.micro.font).monospacedDigit().foregroundStyle(.white).lineLimit(1)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(RoundedRectangle(cornerRadius: t.radii.chip).fill(Color.black.opacity(0.55)))
+                        .padding(Space.s2)
+                        .accessibilityLabel(tagLabel ?? tag)
+                }
+            } else {
+                SuiteResultPane(job: current, art: art, character: store.composerCharacter)
+                    .padding(Space.s3)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(j.title), \(label(state))")
+        .clipShape(shape)
+        .accessibilityElement(children: .contain)
     }
 
-    private func label(_ s: SuiteResultState) -> String {
-        switch s {
-        case .ready: return "ready"
-        case .rendering(let p, _): return "rendering \(p) percent"
-        case .queued: return s.queueLine
-        case .failed: return "failed"
-        case .empty: return ""
+    /// Before any take: the clip or the video when the tool works on one, else the scene's light.
+    @ViewBuilder private var still: some View {
+        if (tool == .swap || tool == .recast), let poster = store.clipPoster {
+            MuseImage(ref: poster)
+        } else if tool == .extend, let thumb = store.suite.composer.extend.source?.thumb {
+            MuseImage(ref: thumb)
+        } else {
+            PreviewView(preview: lightPreview, fallback: tool.render)
         }
     }
 
-    @ViewBuilder private func overlay(_ s: SuiteResultState) -> some View {
-        switch s {
-        case .ready:
-            Ph("play.fill", 13).foregroundStyle(Color(hex: 0x141210))
-                .frame(width: 36, height: 36).background(Circle().fill(Color.white.opacity(0.9)))
-        case .rendering(let p, _): Text("\(p)%").font(t.isA ? Fonts.font("Instrument Serif", 30, .regular) : t.display(22)).foregroundStyle(.white)
-        case .queued: Text(s.queueLine).font(t.scale.micro.font).foregroundStyle(.white).padding(4).background(Color.black.opacity(0.8))
-        case .failed: Text("Retry free").font(t.scale.micro.font).foregroundStyle(.white).padding(4).background(t.rec)
-        case .empty: EmptyView()
+    /// The selected lighting option's preview poster, else the catalog's Auto lighting preview, else its hardware render.
+    private var lightPreview: PickerPreview {
+        let cam = store.suite.camera
+        let id = ComposerCatalog.survivor(cam.lighting, store.suite.composer.settings.lighting)
+        let option = id.flatMap { i in cam.lighting.first { $0.id == i } }
+        if let p = option?.preview, !p.poster.isEmpty { return PickerPreview(still: option?.render, poster: p.poster) }
+        if let auto = cam.autoPreviews.lighting, !auto.poster.isEmpty { return PickerPreview(still: option?.render, poster: auto.poster) }
+        return PickerPreview(still: option?.render ?? tool.render)
+    }
+
+    /// "16:9 · 8 s" (shape · length); Extend shows the added length; Photo and the clip tools take theirs from elsewhere.
+    private var tag: String? {
+        let d = store.suite.composer
+        switch tool {
+        case .photo, .swap, .recast: return nil
+        case .extend: return "+\(d.duration) s"
+        default: return "\(d.aspect) · \(d.duration) s"
+        }
+    }
+
+    private var tagLabel: String? {
+        let d = store.suite.composer
+        switch tool {
+        case .photo, .swap, .recast: return nil
+        case .extend: return "Adds \(d.duration) seconds"
+        default: return "Shape \(d.aspect), \(d.duration) seconds"
         }
     }
 }
 
-// MARK: Presets (the beginner path)
+// MARK: The rail (Setup, Inputs, the tool's own controls)
 
-struct PresetsRow: View {
+struct ComposerRail: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
+    var narrow: Bool
+
+    /// The render's order: Camera, Light, Look, Style, References.
+    private static let order: [ComposerChip] = [.camera, .lighting, .look, .style, .references]
 
     var body: some View {
-        let presets = store.suite.camera.presets
-        if !presets.isEmpty && store.suite.composer.tool == .shot {
-            VStack(alignment: .leading, spacing: 10) {
-                SuiteSectionHead(title: "Start from a preset") { LinkText("All \(presets.count) presets →") { store.suite.browserOpen = true } }
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(presets) { p in PresetTile(preset: p, selected: store.suite.composer.collapsed == p.id) { store.applyPreset(p) } }
+        let d = store.suite.composer
+        let soon = store.isComingSoon(d.tool)
+        VStack(alignment: .leading, spacing: 0) {
+            if let pid = d.collapsed, d.tool == .shot {
+                CollapsedComposer(presetId: pid, narrow: narrow)
+            } else {
+                if hasSetup {
+                    Text("Setup").font(t.scale.heading.font).foregroundStyle(t.roles.ink).padding(.bottom, Space.s1)
+                    ForEach(Self.order.filter { d.tool.chips.contains($0) }, id: \.self) { chip in
+                        SetupChipRow(chip: chip)
                     }
-                    .padding(6)
+                    if hasSettingsRow { SetupSettingsRow() }
                 }
-                .padding(-6)
+                Text("Inputs").font(t.scale.heading.font).foregroundStyle(t.roles.ink)
+                    .padding(.top, hasSetup ? Space.s5 : 0).padding(.bottom, Space.s2)
+                Group {
+                    if d.tool == .photo {
+                        PhotoSlotRow(size: narrow ? 56 : 64, spacing: narrow ? Space.s2 : 10) // Photo tool (workstream 3)
+                    } else {
+                        ComposerSlotRow(size: narrow ? 64 : 72, thumbs: true)
+                    }
+                }
+                .disabled(soon)
+                .opacity(soon ? 0.55 : 1)
+                if let note = store.suite.composerSlots.slots.note(store.composerInputs), d.tool == .shot {
+                    Text(note).font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, Space.s2)
+                }
+                toolControls
+                    .padding(.top, Space.s4)
             }
+        }
+    }
+
+    private var hasSetup: Bool { !store.suite.composer.tool.chips.isEmpty || hasSettingsRow }
+
+    /// Shape, length and takes: the tools that render a new video of their own length.
+    private var hasSettingsRow: Bool {
+        switch store.suite.composer.tool {
+        case .shot, .talking, .ugc, .extend: return true
+        default: return false
+        }
+    }
+
+    /// What the old card carried for each tool: Swap's prompt switch, Extend's direction and length, the rig check.
+    @ViewBuilder private var toolControls: some View {
+        let tool = store.suite.composer.tool
+        VStack(alignment: .leading, spacing: Space.s3) {
+            if tool == .swap {
+                Toggle(isOn: Binding(get: { store.suite.swap.promptOn }, set: { store.suite.swap.promptOn = $0 })) {
+                    Text("Add a prompt").font(t.scale.label.font).foregroundStyle(t.roles.ink)
+                }
+                .toggleStyle(.switch).controlSize(.small)
+            }
+            if tool == .recast, let lines = store.suite.swapEstimate?.cast {
+                VStack(alignment: .leading, spacing: Space.s1) {
+                    ForEach(lines, id: \.self) { l in
+                        Text("\(l.who.capitalized(with: nil)) → \(store.character(l.characterId)?.shortName ?? "")")
+                            .font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                    }
+                }
+            }
+            if tool == .extend { ExtendDirectionControl() }
+            RigCheckRow()
         }
     }
 }
 
-struct PresetTile: View {
-    @Environment(AppStore.self) private var store
+/// A Setup row: icon, name in muted, the value on the right (muted while Auto), chevron. Opens its picker.
+struct ComposerSetupRow: View {
     @Environment(\.theme) private var t
-    var preset: SuitePreset
-    var selected: Bool
-    var width: CGFloat = 150
-    var height: CGFloat = 96
+    var icon: String
+    var name: String
+    var value: String
+    var auto: Bool
+    var help: String?
     var action: () -> Void
 
     var body: some View {
-        // No play badge: a preset tile is a still (nothing plays), and the badge was one more mark on every tile.
         Button(action: action) {
-            ZStack(alignment: .bottomLeading) {
-                PreviewView(preview: PickerPreview(still: ComposerPresets.render(preset, store.suite.camera)))
-                LinearGradient(colors: [.clear, Color(hex: 0x0A0908, alpha: 0.72)], startPoint: .center, endPoint: .bottom)
-                Text(preset.label).font(Fonts.font("Instrument Serif", 22, .regular)).foregroundStyle(Color(hex: 0xF8F5EF)).lineLimit(1)
-                    .minimumScaleFactor(0.7).padding(.leading, 10).padding(.bottom, 8)
+            HStack(spacing: Space.s3) {
+                Ph(icon, 18).foregroundStyle(t.roles.ink2).frame(width: 24)
+                Text(name).font(t.scale.label.font).foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize()
+                Spacer(minLength: Space.s2)
+                Text(value).font(t.scale.label.font).foregroundStyle(auto ? t.roles.ink2 : t.roles.ink)
+                    .lineLimit(1).truncationMode(.tail)
+                Ph("caret-right", 12).foregroundStyle(t.roles.ink2)
             }
-            .frame(width: width, height: height)
-            .clipShape(RoundedRectangle(cornerRadius: t.imageRadius))
-            .overlay(RoundedRectangle(cornerRadius: t.imageRadius + 4).strokeBorder(selected ? t.ink : .clear, lineWidth: 2).padding(-4))
+            .frame(height: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(preset.description)
-        .accessibilityLabel("\(preset.label) preset\(selected ? ", selected" : "")")
+        .help(help ?? "\(name): \(value)")
+        .accessibilityLabel("\(name), \(value)")
     }
 }
 
-// MARK: The composer card
+/// Camera, Light, Look, Style and References as Setup rows. Camera reads "body · lens", Style "genre · tempo".
+struct SetupChipRow: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    var chip: ComposerChip
+    @State private var refsOpen = false
 
-struct ComposerCard: View {
+    var body: some View {
+        let v = value
+        // Photo tool (workstream 3): a Photo preset sets its own camera and light, so those rows show it, locked.
+        let locked = (chip == .camera || chip == .lighting) && store.suite.composer.tool == .photo && store.suite.photo.presetId != nil
+        ComposerSetupRow(icon: icon, name: name, value: locked ? "From preset" : v.text, auto: locked || v.auto,
+                         help: locked ? "\(name) comes from the preset" : nil) {
+            if chip == .references { refsOpen = true } else if let p = ComposerPicker(chip: chip) { store.openPicker(p) }
+        }
+        .disabled(locked)
+        .popover(isPresented: $refsOpen, arrowEdge: .leading) { ReferencesPopover().environment(store).environment(\.theme, t) }
+    }
+
+    private var name: String {
+        switch chip {
+        case .camera: return "Camera"
+        case .lighting: return "Light"
+        case .look: return "Look"
+        case .style: return "Style"
+        case .references: return "References"
+        }
+    }
+
+    private var icon: String {
+        switch chip {
+        case .camera: return "film-strip"
+        case .lighting: return "lightbulb-filament"
+        case .look: return "palette"
+        case .style: return "sliders-horizontal"
+        case .references: return "image"
+        }
+    }
+
+    private var value: (text: String, auto: Bool) {
+        let d = store.suite.composer
+        let s = d.settings
+        let cat = store.suite.camera
+        if chip == .camera && d.directed != nil { return ("Directed", false) }
+        switch chip {
+        case .camera:
+            let pair = [ComposerCatalog.label(cat.bodies, s.body), ComposerCatalog.label(cat.lenses, s.lens)].compactMap { $0 }
+            if !pair.isEmpty { return (pair.joined(separator: " · "), false) }
+        case .style:
+            let pair = [ComposerCatalog.label(cat.genres, s.genre), ComposerCatalog.label(cat.tempos, s.tempo)].compactMap { $0 }
+            if !pair.isEmpty { return (pair.joined(separator: " · "), false) }
+        default:
+            break
+        }
+        // @locations count against the References limit too.
+        let refs = ComposerLocations.used(d.tokens, slots: store.suite.composerSlots.slots)
+        let sum = ComposerCatalog.summary(chip, s, cat, refs: refs, refsMax: SlotKind.image.capacity(store.composerInputs))
+        return (sum.value.replacingOccurrences(of: ", ", with: " · "), sum.auto)
+    }
+}
+
+/// Settings: shape, length and takes ("8 s · 16:9, 1 take"), in a small panel.
+struct SetupSettingsRow: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    @State private var open = false
+
+    var body: some View {
+        let d = store.suite.composer
+        let takes = "\(d.takes) take\(d.takes == 1 ? "" : "s")"
+        let value = d.tool == .extend ? "+\(d.duration) s \(d.extend.direction.label.lowercased()), \(takes)" : "\(d.duration) s · \(d.aspect), \(takes)"
+        ComposerSetupRow(icon: "crop", name: "Settings", value: value, auto: false, help: "Shape, length and takes") { open = true }
+            .popover(isPresented: $open, arrowEdge: .leading) {
+                ComposerSettingsPanel().environment(store).environment(\.theme, t)
+            }
+    }
+}
+
+/// The Settings row's panel: Shape, Length and Takes (the bar keeps Quality, Sound and Speaking).
+struct ComposerSettingsPanel: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    var body: some View {
+        let d = store.suite.composer
+        let range = ComposerBar.lengthRange(store.suite.catalog?.tier(d.quality))
+        let listed = store.suite.catalog?.aspectRatios ?? []
+        let ratios = listed.isEmpty ? ComposerBar.shapes : listed
+        let maxTakes = store.suite.catalog?.takesMax ?? 4
+        VStack(alignment: .leading, spacing: Space.s4) {
+            if d.tool != .extend {
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    Text("Shape").font(t.scale.label.font).foregroundStyle(t.roles.ink2)
+                    SuiteSeg(options: ratios.map { ($0, $0) }, selection: d.aspect) { store.suite.composer.aspect = $0 }
+                        .accessibilityLabel("Shape")
+                }
+            }
+            VStack(alignment: .leading, spacing: Space.s2) {
+                HStack {
+                    Text(d.tool == .extend ? "Added length" : "Length").font(t.scale.label.font).foregroundStyle(t.roles.ink2)
+                    Spacer(minLength: Space.s2)
+                    Text("\(d.duration) s").font(t.scale.label.font).monospacedDigit()
+                }
+                Slider(value: Binding(get: { Double(store.suite.composer.duration) }, set: { store.suite.composer.duration = Int($0.rounded()) }),
+                       in: Double(range.lowerBound)...Double(max(range.upperBound, range.lowerBound + 1)), step: 1) { Text("Length") }
+                    .labelsHidden()
+                HStack {
+                    Text("\(range.lowerBound) s").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                    Spacer()
+                    Text("\(range.upperBound) s on \(SuiteText.tierLabel(d.quality))").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                }
+            }
+            VStack(alignment: .leading, spacing: Space.s2) {
+                Text("Takes").font(t.scale.label.font).foregroundStyle(t.roles.ink2)
+                SuiteSeg(options: ComposerBar.takes(maxTakes).map { ($0, "\($0)") }, selection: d.takes) { store.suite.composer.takes = $0 }
+                    .accessibilityLabel("Takes")
+            }
+        }
+        .padding(Space.s4)
+        .frame(width: 280, alignment: .leading)
+        .foregroundStyle(t.roles.ink)
+    }
+}
+
+// MARK: The prompt bar
+
+/// The prompt on top, the bottom bar under it (pills, "How is this priced?", Generate), on the raised tone.
+struct ComposerPromptBar: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
 
     private var draft: ComposerDraft { store.suite.composer }
 
     var body: some View {
-        VStack(spacing: 0) {
-            ToolCardRow()
-            Rectangle().fill(t.line).frame(height: 1)
-            if let pid = draft.collapsed, draft.tool == .shot {
-                CollapsedComposer(presetId: pid)
-            } else if store.isComingSoon(draft.tool) {
-                comingSoonBody
+        VStack(alignment: .leading, spacing: Space.s1) {
+            if store.isComingSoon(draft.tool) {
+                comingSoon
             } else {
-                // Above its siblings so the prompt's suggestion list draws over the rig check and the bottom bar.
-                fullBody.zIndex(1)
-                RigCheckRow()
-                Rectangle().fill(t.line).frame(height: 1)
-                ComposerBottomBar()
-            }
-        }
-        // Not clipped: the prompt's @ / # suggestion list drops below the prompt box and must float over the rest of the
-        // card and the presets (zIndex above). Fill and border are one rounded shape behind the content, so the border's
-        // corners aren't cut and it never crosses the list.
-        .background {
-            // A softer lift than before (radius 35, y 26, 12 %), and none in the dark theme where it couldn't be seen.
-            RoundedRectangle(cornerRadius: t.cardRadius).fill(t.surface)
-                .shadow(color: Color(hex: 0x281E0A, alpha: t.isDark ? 0 : 0.08), radius: 22, y: 12)
-                .overlay(RoundedRectangle(cornerRadius: t.cardRadius).strokeBorder(t.line, lineWidth: 1))
-        }
-    }
-
-    private var fullBody: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if !draft.tool.chips.isEmpty {
-                // Wraps to a second line instead of scrolling: a hidden horizontal scroll cut the last chips at the edge.
-                FlowLayout(spacing: 6) {
-                    ForEach(draft.tool.chips, id: \.self) { c in SettingChip(chip: c) }
-                }
-            }
-            HStack(alignment: .top, spacing: 16) {
                 promptArea
-                if draft.tool == .photo { PhotoSlotRow() } else { ComposerSlotRow() } // Photo tool (workstream 3)
-            }
-            if let note = store.suite.composerSlots.slots.note(store.composerInputs), draft.tool == .shot {
-                Label(note, ph: "info.circle").font(t.body(11.5)).foregroundStyle(t.muted)
-            }
-            if let p = currentProblem {
-                Label(p, ph: "exclamationmark.triangle").font(t.body(12, .semibold)).foregroundStyle(t.warn).fixedSize(horizontal: false, vertical: true)
+                if let p = currentProblem {
+                    Label(p, ph: "exclamationmark.triangle").font(t.scale.caption.font).foregroundStyle(t.warn)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                ComposerBottomBar(settingsInRail: true)
             }
         }
-        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 16)
+        .padding(.leading, Space.s4).padding(.trailing, Space.s3).padding(.top, Space.s3).padding(.bottom, Space.s2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.raised))
     }
 
     private var currentProblem: String? {
@@ -267,170 +533,91 @@ struct ComposerCard: View {
     @ViewBuilder private var promptArea: some View {
         switch draft.tool {
         case .swap:
-            VStack(alignment: .leading, spacing: 10) {
-                Toggle(isOn: Binding(get: { store.suite.swap.promptOn }, set: { store.suite.swap.promptOn = $0 })) {
-                    Text("Add a prompt").font(t.body(13))
-                }
-                .toggleStyle(.switch).controlSize(.small)
-                if store.suite.swap.promptOn {
-                    ComposerPromptBox(placeholder: draft.tool.promptPlaceholder, minHeight: 80)
-                } else {
-                    Text("Your character takes over the clip: its motion, camera, framing and cuts stay as they are.").font(t.body(14)).foregroundStyle(t.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            if store.suite.swap.promptOn {
+                promptBox
+            } else {
+                Text("Your character takes over the clip: its motion, camera, framing and cuts stay as they are.")
+                    .font(t.scale.body.font).foregroundStyle(t.roles.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
         case .recast:
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Same take, new cast").font(t.body(16, .semibold))
-                Text("Open PEOPLE, click each face on the first frame and pick who replaces them (up to \(store.suite.catalog?.recastMaxPeople ?? 4) people). The motion, camera, framing and sound stay.")
-                    .font(t.body(14)).foregroundStyle(t.muted).fixedSize(horizontal: false, vertical: true)
-                if let lines = store.suite.swapEstimate?.cast {
-                    ForEach(lines, id: \.self) { l in
-                        Text("\(l.who.capitalized(with: nil)) → \(store.character(l.characterId)?.shortName ?? "")").font(t.body(12)).foregroundStyle(t.muted)
+            Text("Same take, new cast. Click each face on the first frame in People and pick who replaces them (up to \(store.suite.catalog?.recastMaxPeople ?? 4) people). The motion, camera, framing and sound stay.")
+                .font(t.scale.body.font).foregroundStyle(t.roles.ink2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+        case .extend:
+            ExtendPromptField()
+        default:
+            promptBox
+        }
+    }
+
+    private var promptBox: some View {
+        ComposerPromptBox(placeholder: draft.tool.promptPlaceholder, minHeight: 48, maxHeight: 72, suggestionsAbove: true)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var comingSoon: some View {
+        // The Setup rows already work (UGC ad's Style has its format wheel), so the settings are ready when the tool is.
+        HStack(spacing: Space.s3) {
+            Pill(SuiteText.comingSoon)
+            Text(draft.tool.mode.tileLine).font(t.scale.body.font).foregroundStyle(t.roles.ink2).lineLimit(2)
+            Spacer(minLength: 0)
+        }
+        .frame(minHeight: 48)
+    }
+}
+
+// MARK: Presets (the beginner path)
+
+/// The presets strip under the header: real stills with their names under them.
+struct PresetsRow: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    var body: some View {
+        let presets = store.suite.camera.presets
+        if !presets.isEmpty && store.suite.composer.tool == .shot {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: Space.s3) {
+                    ForEach(presets) { p in
+                        PresetTile(preset: p, selected: store.suite.composer.collapsed == p.id, width: 132, height: 84) { store.applyPreset(p) }
                     }
                 }
+                .padding(Space.s1)
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        case .extend:
-            ExtendPromptArea()
-        default:
-            ComposerPromptBox(placeholder: draft.tool.promptPlaceholder).frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(-Space.s1)
         }
-    }
-
-    private var comingSoonBody: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            // The chips already work (UGC ad's Style has its format wheel), so the settings are ready when the tool is.
-            if !draft.tool.chips.isEmpty {
-                HStack(spacing: 6) {
-                    ForEach(draft.tool.chips, id: \.self) { c in SettingChip(chip: c) }
-                }
-            }
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Pill(SuiteText.comingSoon)
-                    Text(draft.tool.mode.tileLine).font(t.body(15)).foregroundStyle(t.muted).fixedSize(horizontal: false, vertical: true)
-                    Text("It will use the same composer: these slots, the chips and the price on Generate.").font(t.body(12.5)).foregroundStyle(t.muted)
-                }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-                ComposerSlotRow().disabled(true).opacity(0.55)
-            }
-        }
-        .padding(16)
     }
 }
 
-/// The tool card row: thumbnail, NAME · tagline, Change (the tool and preset browser).
-struct ToolCardRow: View {
+struct PresetTile: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
+    var preset: SuitePreset
+    var selected: Bool
+    var width: CGFloat = 150
+    var height: CGFloat = 96
+    var action: () -> Void
 
     var body: some View {
-        let d = store.suite.composer
-        let preset = d.collapsed.flatMap { id in store.suite.camera.presets.first { $0.id == id } }
-        let photoPreset = d.tool == .photo ? store.photoPreset : nil // Photo tool (workstream 3)
-        HStack(spacing: 12) {
-            HardwareImage(name: preset.flatMap { ComposerPresets.render($0, store.suite.camera) } ?? d.tool.render)
-                .frame(width: 34, height: 42).clipped()
-            Text(preset?.label ?? d.tool.title).font(t.scale.label.font)
-            Circle().fill(t.line).frame(width: 3, height: 3)
-            Text(photoPreset.map { "Preset: \($0.name)" } ?? preset?.description ?? d.tool.tagline).font(t.body(13.5)).foregroundStyle(t.muted).lineLimit(1)
-            Button { store.suite.browserOpen = true } label: {
-                Label("Change", ph: "arrow.left.arrow.right").font(t.body(13, .semibold)).foregroundStyle(t.ink)
-                    .padding(.horizontal, 12).frame(height: 30)
-                    .overlay(RoundedRectangle(cornerRadius: t.controlRadius).strokeBorder(t.line, lineWidth: 1))
-                    .contentShape(Rectangle())
+        // The still, and its name under it in sentence case (no words over the picture, no play badge: nothing plays).
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: Space.s2) {
+                Color.clear
+                    .overlay(PreviewView(preview: PickerPreview(still: ComposerPresets.render(preset, store.suite.camera))))
+                    .frame(width: width, height: height)
+                    .clipShape(RoundedRectangle(cornerRadius: t.radii.container))
+                    .overlay(RoundedRectangle(cornerRadius: t.radii.container + 3).strokeBorder(selected ? t.roles.selection : .clear, lineWidth: 2).padding(-3))
+                Text(preset.label).font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1)
+                    .frame(width: width, alignment: .leading)
             }
-            .buttonStyle(.plain)
-            .padding(.leading, 6)
-            .help("Change the tool or start from a preset")
-            Spacer(minLength: 8)
-            if store.isComingSoon(d.tool) { SuiteTag(text: SuiteText.comingSoon) }
-            if d.tool == .shot && d.collapsed == nil && !d.tokens.isEmpty {
-                Button { store.addShotToStoryboard() } label: {
-                    Ph("rectangle.split.3x1").frame(width: 28, height: 28).contentShape(Rectangle())
-                }
-                    .buttonStyle(.plain).foregroundStyle(t.muted).help("Add to storyboard")
-                    .accessibilityLabel("Add to storyboard")
-            }
-            if store.isOwner && !store.isComingSoon(d.tool) && d.tool != .photo { // Photo (workstream 3) runs on the image steps, not the video engines
-                Button { store.suite.showEngines = true } label: {
-                    Ph("server.rack").frame(width: 28, height: 28).contentShape(Rectangle())
-                }
-                    .buttonStyle(.plain).foregroundStyle(t.muted).help("Engines")
-                    .accessibilityLabel("Engines (owner)")
-            }
-        }
-        .padding(.leading, 12).padding(.trailing, 16)
-        .frame(height: 58)
-    }
-}
-
-// MARK: Setting chips
-
-/// A setting chip: a tiny visual, the mono label and the value ("Auto" until picked).
-struct SettingChip: View {
-    @Environment(AppStore.self) private var store
-    @Environment(\.theme) private var t
-    var chip: ComposerChip
-    @State private var refsOpen = false
-
-    var body: some View {
-        let s = store.suite.composer.settings
-        let cat = store.suite.camera
-        // @locations count against the References limit too.
-        let refs = ComposerLocations.used(store.suite.composer.tokens, slots: store.suite.composerSlots.slots)
-        let sum = ComposerCatalog.summary(chip, s, cat, refs: refs, refsMax: SlotKind.image.capacity(store.composerInputs))
-        let directed = chip == .camera && store.suite.composer.directed != nil
-        // Photo tool (workstream 3): a Photo preset sets its own camera and light, so those chips show it, locked.
-        let locked = (chip == .camera || chip == .lighting) && store.suite.composer.tool == .photo && store.suite.photo.presetId != nil
-        Button {
-            if chip == .references { refsOpen = true } else if let p = ComposerPicker(chip: chip) { store.openPicker(p) }
-        } label: {
-            HStack(spacing: 7) {
-                thumb(auto: sum.auto && !directed)
-                Text(chip.title).font(t.scale.micro.font).foregroundStyle(t.muted)
-                Text(locked ? "From preset" : directed ? "Directed" : sum.value).font(t.body(12.5, sum.auto && !directed ? .regular : .semibold))
-                    .foregroundStyle(sum.auto && !directed ? t.ink.opacity(0.8) : t.ink)
-                    .lineLimit(1).truncationMode(.tail).frame(maxWidth: 190, alignment: .leading)
-            }
-            .padding(.leading, 5).padding(.trailing, 11).frame(height: 34)
-            .background(t.bg)
-            .overlay(RoundedRectangle(cornerRadius: t.controlRadius).strokeBorder(t.line, lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: t.controlRadius))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(locked)
-        .help(locked ? "\(chip.title) comes from the preset" : sum.text(max: 60))
-        .accessibilityLabel(locked ? "\(chip.title), from the preset" : sum.text(max: 80))
-        .popover(isPresented: $refsOpen, arrowEdge: .bottom) { ReferencesPopover().environment(store).environment(\.theme, t) }
-    }
-
-    @ViewBuilder private func thumb(auto: Bool) -> some View {
-        if chip == .references {
-            Ph("photo", 11).foregroundStyle(t.muted)
-                .frame(width: 24, height: 24)
-                .overlay(Rectangle().strokeBorder(t.muted.opacity(0.6), style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
-        } else {
-            HardwareImage(name: render)
-                .frame(width: 24, height: 24).clipped()
-                .grayscale(auto ? 1 : 0).brightness(auto ? -0.04 : 0)
-        }
-    }
-
-    private var render: String {
-        let s = store.suite.composer.settings
-        let c = store.suite.camera
-        let r = { (list: [SuiteOption], id: String?) -> String? in ComposerCatalog.survivor(list, id).flatMap { i in list.first { $0.id == i }?.render } }
-        switch chip {
-        case .style: return "stock-02-16mm"
-        case .camera: return r(c.bodies, s.body) ?? r(c.lenses, s.lens) ?? "body-05-film35"
-        case .look: return r(c.palettes, s.palette) ?? r(c.looks, s.stock) ?? "palette-02-teal-orange"
-        case .lighting: return r(c.lighting, s.lighting) ?? "light-04-window"
-        case .references: return ""
-        }
+        .help(preset.description)
+        .accessibilityLabel("\(preset.label) preset\(selected ? ", selected" : "")")
     }
 }
 

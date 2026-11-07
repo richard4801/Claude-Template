@@ -12,9 +12,10 @@ struct PhotoSlotRow: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
     var size: CGFloat = 96
+    var spacing: CGFloat = 12
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: spacing) {
             column("Character") { PhotoCharacterCard(size: size) }
             column("Outfit") { PhotoOutfitCard(size: size) }
             column("Product", optional: true) { productCard }
@@ -22,12 +23,14 @@ struct PhotoSlotRow: View {
         }
     }
 
+    /// The thumbnail with its name under it and "Optional" where it applies (plans/design-direction.md §9 fix 4).
     private func column<C: View>(_ label: String, optional: Bool = false, @ViewBuilder _ content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label).font(t.body(13, .medium)).foregroundStyle(t.ink).lineLimit(1).minimumScaleFactor(0.85)
-            content().frame(width: size, height: size)
-            Text(optional ? "Optional" : " ").font(t.body(12)).foregroundStyle(t.muted).lineLimit(1)
-                .accessibilityHidden(!optional)
+        VStack(alignment: .leading, spacing: 2) {
+            content().frame(width: size, height: size).padding(.bottom, Space.s1)
+            Text(label).font(t.scale.micro.font).foregroundStyle(t.roles.ink).lineLimit(1).minimumScaleFactor(0.85)
+            if optional {
+                Text("Optional").font(t.scale.micro.font).foregroundStyle(t.roles.ink2).lineLimit(1)
+            }
         }
         .frame(width: size, alignment: .leading)
     }

@@ -11,6 +11,7 @@ struct ExtendVideoSlot: View {
     var card: ComposerSlotCard
     var size: CGFloat
     @State private var open = false
+    @Environment(\.slotThumbs) private var thumbs
 
     var body: some View {
         let source = store.suite.composer.extend.source
@@ -52,13 +53,16 @@ struct ExtendVideoSlot: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            LinearGradient(colors: [.clear, Color(hex: 0x0E0C0A, alpha: 0.78)], startPoint: .center, endPoint: .bottom).allowsHitTesting(false)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("VIDEO").font(t.mono(9.5, .medium)).tracking(1).foregroundStyle(Color(hex: 0xF8F5EF))
-                Text("\(s.caption) · change").font(t.body(10.5)).foregroundStyle(Color(hex: 0xE7E1D6)).lineLimit(1)
+            .help("\(s.name), change")
+            if !thumbs {
+                LinearGradient(colors: [.clear, Color(hex: 0x0E0C0A, alpha: 0.78)], startPoint: .center, endPoint: .bottom).allowsHitTesting(false)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("VIDEO").font(t.mono(9.5, .medium)).tracking(1).foregroundStyle(Color(hex: 0xF8F5EF))
+                    Text("\(s.caption) · change").font(t.body(10.5)).foregroundStyle(Color(hex: 0xE7E1D6)).lineLimit(1)
+                }
+                .padding(.horizontal, 8).padding(.bottom, 7)
+                .allowsHitTesting(false)
             }
-            .padding(.horizontal, 8).padding(.bottom, 7)
-            .allowsHitTesting(false)
             Button { store.setExtendSource(nil) } label: {
                 Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Color(hex: 0xF8F5EF))
                     .frame(width: 20, height: 20).background(Circle().fill(Color(hex: 0x0E0C0A, alpha: 0.55)))
@@ -69,6 +73,7 @@ struct ExtendVideoSlot: View {
             .accessibilityLabel("Remove the video")
         }
         .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: thumbs ? t.radii.control : 0))
         .accessibilityLabel("Video, \(s.name), \(s.caption)")
     }
 }
@@ -135,32 +140,47 @@ struct ExtendVideoPicker: View {
     }
 }
 
-/// Extend's prompt area: After / Before and what happens.
-struct ExtendPromptArea: View {
+/// Extend's After / Before switch and the new part's length (the composer's Setup rail).
+struct ExtendDirectionControl: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
 
     var body: some View {
         let d = store.suite.composer.extend
-        VStack(alignment: .leading, spacing: 10) {
+        let range = ComposerBar.lengthRange(store.suite.catalog?.tier(store.suite.composer.quality))
+        VStack(alignment: .leading, spacing: Space.s2) {
             SuiteSeg(options: ExtendDirection.allCases.map { ($0, $0.label) }, selection: d.direction) { store.suite.composer.extend.direction = $0 }
-                .frame(width: 220)
                 .accessibilityLabel("Extend after or before")
-            Text(d.direction.promptTitle.uppercased()).font(t.mono(10, .medium)).tracking(1).foregroundStyle(t.muted)
-            TextField(d.direction.placeholder, text: Binding(get: { store.suite.composer.extend.prompt }, set: { store.suite.composer.extend.prompt = $0 }),
-                      axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(t.body(15))
-                .lineLimit(3...6)
-                .padding(10)
-                .background(t.bg)
-                .overlay(Rectangle().strokeBorder(t.line, lineWidth: 1))
-                .accessibilityLabel(d.direction.promptTitle)
+            HStack {
+                Text("Added length").font(t.scale.label.font).foregroundStyle(t.roles.ink2)
+                Spacer(minLength: Space.s2)
+                Text("+\(store.suite.composer.duration) s").font(t.scale.label.font).monospacedDigit()
+            }
+            Slider(value: Binding(get: { Double(store.suite.composer.duration) }, set: { store.suite.composer.duration = Int($0.rounded()) }),
+                   in: Double(range.lowerBound)...Double(max(range.upperBound, range.lowerBound + 1)), step: 1) { Text("Added length") }
+                .labelsHidden()
             Text(d.direction == .after ? "The take carries on from its last moment. You get the whole longer clip." :
                     "New footage leads into the take's first moment. You get the whole longer clip.")
-                .font(t.body(12)).foregroundStyle(t.muted).fixedSize(horizontal: false, vertical: true)
+                .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+}
+
+/// Extend's prompt (the composer's prompt bar): what happens in the new part.
+struct ExtendPromptField: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    var body: some View {
+        let d = store.suite.composer.extend
+        TextField(d.direction.placeholder, text: Binding(get: { store.suite.composer.extend.prompt }, set: { store.suite.composer.extend.prompt = $0 }),
+                  axis: .vertical)
+            .textFieldStyle(.plain)
+            .font(t.body(16))
+            .lineLimit(2...3)
+            .padding(.vertical, Space.s1)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .topLeading)
+            .accessibilityLabel(d.direction.promptTitle)
     }
 }
 

@@ -28,6 +28,10 @@ struct ComposerPromptBox: View {
     @Environment(\.theme) private var t
     var placeholder: String
     var minHeight: CGFloat = 104
+    /// The tallest the box grows before it scrolls (the composer's prompt bar keeps it short so the picture keeps the height).
+    var maxHeight: CGFloat = 180
+    /// The @ / # list opens above the box (the prompt bar sits at the bottom of the window).
+    var suggestionsAbove = false
     @State private var typed: TypedTrigger?
     @State private var highlight = 0
     @State private var controller = PromptController()
@@ -53,10 +57,14 @@ struct ComposerPromptBox: View {
                 .accessibilityHidden(true)
             }
         }
-        .frame(minHeight: minHeight, maxHeight: max(minHeight, 180))
-        .overlay(alignment: .bottomLeading) {
+        .frame(minHeight: minHeight, maxHeight: max(minHeight, maxHeight))
+        .overlay(alignment: suggestionsAbove ? .topLeading : .bottomLeading) {
             if let typed, !suggestions.isEmpty {
-                suggestionList(typed).alignmentGuide(.bottom) { $0[.top] - 4 }
+                if suggestionsAbove {
+                    suggestionList(typed).alignmentGuide(.top) { $0[.bottom] + 4 }
+                } else {
+                    suggestionList(typed).alignmentGuide(.bottom) { $0[.top] - 4 }
+                }
             }
         }
         .onAppear {

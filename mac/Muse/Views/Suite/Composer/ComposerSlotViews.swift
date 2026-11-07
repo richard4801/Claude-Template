@@ -5,14 +5,92 @@ import SwiftUI
 // preset-collapsed composer (C6) and the tool and preset browser that Change opens. Frame, product and audio slots are
 // the shot's input slots (InputSlotTile once filled); which show comes from MuseCore's ComposerSlots.
 
+/// The composer's slot cards. `thumbs` (the Inputs rail, plans/design-direction.md §9 fix 4): small thumbnails with
+/// their name under each and "Optional" where it applies; an empty one is a dashed box with a plain +.
 struct ComposerSlotRow: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
     var size: CGFloat = 104
+    var thumbs = false
 
     var body: some View {
         let cards = ComposerSlots.cards(store.suite.composer.tool, inputs: store.composerInputs, slots: store.suite.composerSlots.slots)
-        HStack(alignment: .top, spacing: 10) {
-            ForEach(cards) { c in ComposerSlotCardView(card: c, size: size) }
+        if thumbs {
+            HStack(alignment: .top, spacing: Space.s3) {
+                ForEach(cards) { c in thumb(c) }
+            }
+        } else {
+            HStack(alignment: .top, spacing: 10) {
+                ForEach(cards) { c in ComposerSlotCardView(card: c, size: size) }
+            }
+        }
+    }
+
+    private func thumb(_ c: ComposerSlotCard) -> some View {
+        let filled = isFilled(c.slot)
+        return VStack(alignment: .leading, spacing: 2) {
+            ComposerSlotCardView(card: c, size: size)
+                .environment(\.slotThumbs, true)
+                .padding(.bottom, Space.s1)
+            Text(c.slot.label).font(t.scale.micro.font).foregroundStyle(filled ? t.roles.ink : t.roles.ink2).lineLimit(1)
+            if c.slot == .character && filled {
+                CharacterOutfitLine()
+            } else if c.optional && !filled {
+                Text("Optional").font(t.scale.micro.font).foregroundStyle(t.roles.ink2).lineLimit(1)
+            }
+        }
+        .frame(width: size + Space.s1, alignment: .leading)
+    }
+
+    private func isFilled(_ slot: ComposerSlot) -> Bool {
+        let tool = store.suite.composer.tool
+        switch slot {
+        case .character: return (tool == .swap || tool == .recast ? store.character(store.suite.swap.modelId) : store.composerCharacter) != nil
+        case .clip: return store.clipPoster != nil
+        case .people: return !store.suite.swap.cast.isEmpty
+        case .video: return store.suite.composer.extend.source != nil
+        default: return slot.slotId.map { store.suite.composerSlots.slots[$0] != nil } ?? false
+        }
+    }
+}
+
+/// The Inputs rail draws slots as bare thumbnails: the name goes under them, so the card itself carries no text.
+private struct SlotThumbsKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var slotThumbs: Bool {
+        get { self[SlotThumbsKey.self] }
+        set { self[SlotThumbsKey.self] = newValue }
+    }
+}
+
+/// Under the Character thumbnail: the outfit, a small menu (it lived on the card's scrim before).
+struct CharacterOutfitLine: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    private var isSwap: Bool { store.suite.composer.tool == .swap || store.suite.composer.tool == .recast }
+
+    var body: some View {
+        let m = isSwap ? store.character(store.suite.swap.modelId) : store.composerCharacter
+        let outfits = m.map { store.outfits(for: $0) } ?? []
+        let current = isSwap ? store.suite.swap.outfitId : store.suite.composer.outfitId
+        let outfit = outfits.first { $0.id == current } ?? outfits.first
+        if !outfits.isEmpty {
+            Menu {
+                ForEach(outfits) { o in
+                    Button(o.name) {
+                        if isSwap { store.suite.swap.outfitId = o.id } else { store.suite.composer.outfitId = o.id }
+                    }
+                }
+            } label: {
+                Text(outfit?.name ?? "Outfit").font(t.scale.micro.font).foregroundStyle(t.roles.ink2).lineLimit(1)
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .help("Outfit")
+            .accessibilityLabel("Outfit, \(outfit?.name ?? "")")
         }
     }
 }
@@ -23,6 +101,7 @@ struct ComposerSlotCardView: View {
     var card: ComposerSlotCard
     var size: CGFloat = 104
     @State private var peopleOpen = false
+    @Environment(\.slotThumbs) private var thumbs
 
     var body: some View {
         Group {
@@ -56,12 +135,14 @@ struct ComposerSlotCardView: View {
             Button { store.pickClip() } label: {
                 ZStack(alignment: .bottomLeading) {
                     MuseImage(ref: poster)
+                    if !thumbs {
                     LinearGradient(colors: [.clear, Color(hex: 0x0E0C0A, alpha: 0.78)], startPoint: .center, endPoint: .bottom)
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Clip").font(t.scale.micro.font).foregroundStyle(Color(hex: 0xF8F5EF))
                         Text(store.clip.map { "\(Pricing.trimNum($0.durationSec)) s · change" } ?? "Change").font(t.body(10.5)).foregroundStyle(Color(hex: 0xE7E1D6))
                     }
                     .padding(.horizontal, 8).padding(.bottom, 7)
+                    }
                 }
                 .frame(width: size, height: size)
                 .clipShape(RoundedRectangle(cornerRadius: t.imageRadius))
@@ -85,8 +166,10 @@ struct ComposerSlotCardView: View {
                     }
                     if cast.isEmpty { Ph("plus", 14).frame(width: 30, height: 30).overlay(Circle().strokeBorder(t.line, lineWidth: 1)) }
                 }
-                Text("People").font(t.scale.label.font)
-                Text(cast.isEmpty ? card.caption : "\(cast.count) of \(store.suite.catalog?.recastMaxPeople ?? 4) · edit").font(t.body(10.5)).foregroundStyle(t.muted)
+                if !thumbs {
+                    Text("People").font(t.scale.label.font)
+                    Text(cast.isEmpty ? card.caption : "\(cast.count) of \(store.suite.catalog?.recastMaxPeople ?? 4) · edit").font(t.body(10.5)).foregroundStyle(t.muted)
+                }
             }
             .frame(width: size, height: size)
             .background(RoundedRectangle(cornerRadius: t.imageRadius).fill(t.bg))
@@ -107,16 +190,42 @@ struct ComposerSlotCardView: View {
 /// An empty slot card: dashed outline, "+", the caps label, its caption and an "Optional" caption.
 struct EmptySlotCard: View {
     @Environment(\.theme) private var t
+    @Environment(\.slotThumbs) private var thumbs
     var card: ComposerSlotCard
     var disabled = false
     var action: () -> Void
 
     var body: some View {
         let off = disabled || card.waiting
+        if thumbs {
+            thumbBody(off: off)
+        } else {
+            cardBody(off: off)
+        }
+    }
+
+    /// The Inputs rail: a dashed box with a plain + (its name is under it).
+    private func thumbBody(off: Bool) -> some View {
+        let shape = RoundedRectangle(cornerRadius: t.radii.control)
+        return Button(action: action) {
+            Ph("plus", 18)
+                .foregroundStyle(t.roles.ink2)
+                .opacity(off ? 0.42 : 1)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(shape.strokeBorder(t.roles.ink2.opacity(off ? 0.35 : 0.7), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])))
+                .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .disabled(off)
+        .help(card.waiting ? card.caption : "\(card.slot.label): \(card.caption)")
+        .accessibilityLabel("\(card.slot.label), \(card.caption)\(card.optional ? ", optional" : "")\(off ? ", not available yet" : "")")
+    }
+
+    private func cardBody(off: Bool) -> some View {
         let shape = RoundedRectangle(cornerRadius: t.imageRadius)
         // Quieter than before: the + sits on a plain disc (no ring) and "Optional" is a caption, not a boxed pill, so the
         // dashed outline is the card's only line.
-        Button(action: action) {
+        return Button(action: action) {
             VStack(spacing: 5) {
                 // Workstream 4 (design direction, owner fix 4): a plain plus and the name of what the slot adds, sentence case.
                 Ph("plus", 16)
@@ -152,6 +261,7 @@ struct CharacterSlot: View {
     var card: ComposerSlotCard
     var size: CGFloat
     @State private var open = false
+    @Environment(\.slotThumbs) private var thumbs
 
     private var isSwap: Bool { store.suite.composer.tool == .swap || store.suite.composer.tool == .recast }
     private var current: MuseModel? { isSwap ? store.character(store.suite.swap.modelId) : store.composerCharacter }
@@ -177,6 +287,8 @@ struct CharacterSlot: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Character: \(m.shortName). Change")
+            .help(m.shortName)
+            if !thumbs {
             LinearGradient(colors: [.clear, Color(hex: 0x0E0C0A, alpha: 0.78)], startPoint: .center, endPoint: .bottom).allowsHitTesting(false)
             VStack(alignment: .leading, spacing: 1) {
                 Text(m.shortName).font(t.body(13, .semibold)).foregroundStyle(Color(hex: 0xF8F5EF)).lineLimit(1)
@@ -191,6 +303,7 @@ struct CharacterSlot: View {
                 }
             }
             .padding(.horizontal, 8).padding(.bottom, 7)
+            }
             Button { clear() } label: {
                 Ph("xmark", 9).foregroundStyle(Color(hex: 0xF8F5EF))
                     .frame(width: 20, height: 20).background(Circle().fill(Color(hex: 0x0E0C0A, alpha: 0.55)))
@@ -203,7 +316,7 @@ struct CharacterSlot: View {
             .accessibilityHidden(isSwap)
         }
         .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: t.imageRadius))
+        .clipShape(RoundedRectangle(cornerRadius: thumbs ? t.radii.control : t.imageRadius))
     }
 
     private var picker: some View {
@@ -261,59 +374,60 @@ struct CharacterSlot: View {
 
 // MARK: The preset-collapsed composer (C6)
 
+/// The rail when a preset is picked: the preset and its line, who (or what) is in it, the shape, and "Edit settings".
+/// Generate stays in the prompt bar.
 struct CollapsedComposer: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
     var presetId: String
+    var narrow = false
 
     var body: some View {
         let d = store.suite.composer
         let preset = store.suite.camera.presets.first { $0.id == presetId }
         let slots = ComposerSlots.collapsed(preset: presetId)
-        HStack(alignment: .bottom, spacing: 28) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(slots.first == .product ? "What" : "Who").font(t.scale.label.font).foregroundStyle(t.muted)
-                HStack(spacing: 10) {
-                    ForEach(slots) { s in ComposerSlotCardView(card: ComposerSlotCard(slot: s, optional: false), size: 108) }
+        let side: CGFloat = narrow ? 64 : 72
+        VStack(alignment: .leading, spacing: Space.s2) {
+            Text(preset?.label ?? "Preset").font(t.scale.heading.font).foregroundStyle(t.roles.ink)
+            Text(ComposerPresets.summary(preset, quality: d.quality, seconds: d.duration)).font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(slots.first == .product ? "What" : "Who").font(t.scale.heading.font).foregroundStyle(t.roles.ink).padding(.top, Space.s4)
+            HStack(spacing: Space.s3) {
+                ForEach(slots) { s in
+                    ComposerSlotCardView(card: ComposerSlotCard(slot: s, optional: false), size: side)
+                        .environment(\.slotThumbs, true)
                 }
             }
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Shape").font(t.scale.label.font).foregroundStyle(t.muted)
-                HStack(spacing: 10) {
-                    ForEach(ComposerBar.shapes, id: \.self) { r in shape(r, on: d.aspect == r) }
-                }
+            Text("Shape").font(t.scale.heading.font).foregroundStyle(t.roles.ink).padding(.top, Space.s4)
+            HStack(spacing: Space.s2) {
+                ForEach(ComposerBar.shapes, id: \.self) { r in shape(r, on: d.aspect == r, side: side) }
             }
-            Spacer(minLength: 12)
-            VStack(alignment: .trailing, spacing: 12) {
-                Text(ComposerPresets.summary(preset, quality: d.quality, seconds: d.duration)).font(t.body(12)).foregroundStyle(t.muted).multilineTextAlignment(.trailing)
-                if let p = store.suite.estimate?.problem { Text(p).font(t.body(12, .semibold)).foregroundStyle(t.warn) }
-                GenerateButton(label: GeneratePrice.of(store.suite.estimate).buttonText, enabled: GeneratePrice.of(store.suite.estimate).canGenerate,
-                               busy: store.suite.generating, height: 52) { store.generateShot() }
-                HStack(spacing: 12) {
-                    PricingLink(estimate: store.suite.estimate)
-                    Button { store.suite.composer.collapsed = nil } label: {
-                        Text("Edit settings").font(t.body(13)).foregroundStyle(t.ink).underline(color: t.line)
-                    }
-                    .buttonStyle(.plain)
+            HStack(spacing: Space.s3) {
+                PricingLink(estimate: store.suite.estimate)
+                Button { store.suite.composer.collapsed = nil } label: {
+                    Text("Edit settings").font(t.scale.label.font).foregroundStyle(t.roles.link)
                 }
+                .buttonStyle(.plain)
             }
+            .padding(.top, Space.s4)
         }
-        .padding(.leading, 16).padding(.trailing, 20).padding(.top, 20).padding(.bottom, 22)
     }
 
-    private func shape(_ r: String, on: Bool) -> some View {
+    private func shape(_ r: String, on: Bool, side: CGFloat) -> some View {
         let parts = r.split(separator: ":").compactMap { Double($0) }
         let ratio = CGFloat(parts.count == 2 && parts[1] > 0 ? parts[0] / parts[1] : 1)
-        let w: CGFloat = ratio >= 1 ? 72 : 60 * ratio
-        let h: CGFloat = ratio >= 1 ? 72 / ratio : 60
+        let box = side * 0.5
+        let w: CGFloat = ratio >= 1 ? box : box * ratio
+        let h: CGFloat = ratio >= 1 ? box / ratio : box
+        let tile = RoundedRectangle(cornerRadius: t.radii.control)
         return Button { store.suite.composer.aspect = r } label: {
-            VStack(spacing: 10) {
-                Rectangle().fill(on ? t.ink : .clear).frame(width: w, height: h).overlay(Rectangle().strokeBorder(t.ink, lineWidth: 1.5))
-                Text(r).font(t.scale.label.font).monospacedDigit()
+            VStack(spacing: Space.s1) {
+                Rectangle().fill(on ? t.roles.ink : Color.clear).frame(width: w, height: h).overlay(Rectangle().strokeBorder(t.roles.ink, lineWidth: 1.5))
+                Text(r).font(t.scale.micro.font).monospacedDigit()
             }
-            .frame(width: 108, height: 108)
-            .background(RoundedRectangle(cornerRadius: t.imageRadius).fill(on ? t.surface : t.bg))
-            .overlay(RoundedRectangle(cornerRadius: t.imageRadius).strokeBorder(on ? t.ink : t.line, lineWidth: on ? 2 : 1))
+            .frame(width: side, height: side)
+            .background(tile.fill(on ? t.roles.field : Color.clear))
+            .overlay(tile.strokeBorder(on ? t.roles.selection : t.roles.hairline, lineWidth: on ? 2 : 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

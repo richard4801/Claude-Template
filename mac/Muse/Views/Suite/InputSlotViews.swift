@@ -95,6 +95,8 @@ final class InputSlotsModel {
 /// image (or the file's name for video/audio), upload progress, or the error; a remove button in the corner.
 struct InputSlotTile: View {
     @Environment(\.theme) private var t
+    /// The composer's Inputs rail: the slot's name is under the thumbnail, so a filled picture carries no title.
+    @Environment(\.slotThumbs) private var thumbs
     var id: SlotId
     var value: SlotValue?
     var compact = false
@@ -135,10 +137,12 @@ struct InputSlotTile: View {
                         Ph(symbol, compact ? 15 : 18)
                             .foregroundStyle(value?.error != nil ? t.rec : t.ink)
                     }
+                    if !(thumbs && image != nil) {
                     Text(id.title).font(t.body(compact ? 11 : 12, .bold)).lineLimit(1)
                         .foregroundStyle(image != nil ? Color.white : t.ink)
                         .padding(.horizontal, image != nil ? 6 : 0).padding(.vertical, image != nil ? 2 : 0)
                         .background(image != nil ? Color.black.opacity(0.55) : Color.clear, in: RoundedRectangle(cornerRadius: 4))
+                    }
                     if let e = value?.error {
                         Text(e).font(t.body(11)).foregroundStyle(image != nil ? Color.white : t.rec).lineLimit(2).multilineTextAlignment(image != nil ? .leading : .center)
                     } else if let v = value, !id.kind.isImage {

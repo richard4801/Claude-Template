@@ -11,6 +11,9 @@ struct ComposerBottomBar: View {
     @State private var open: String?
     /// The swap take the Upscale pill's picker is open for.
     @State private var upscaleTake: Take?
+    /// The composer's Setup rail has a Settings row (shape, length and takes), so the bar keeps Quality, Sound and Speaking
+    /// (plans/design-direction/composer-mac-b.png).
+    var settingsInRail = false
 
     private var tool: ComposerTool { store.suite.composer.tool }
     private var isSwap: Bool { tool == .swap || tool == .recast }
@@ -37,8 +40,8 @@ struct ComposerBottomBar: View {
                 generateButton
             }
         }
-        .padding(.leading, 16).padding(.trailing, 12)
-        .frame(height: 62)
+        // The prompt bar around it gives the padding; the bar sits right under the prompt (owner fix 1).
+        .frame(minHeight: 48)
     }
 
     private var generateButton: some View {
@@ -61,21 +64,25 @@ struct ComposerBottomBar: View {
                 }
             } else if tool == .extend {
                 // Extend: the new part's length on this quality, and takes. The shape and sound follow the video.
-                lengthPill
-                takesPill
+                if !settingsInRail {
+                    lengthPill
+                    takesPill
+                }
             } else if tool == .photo {
                 // Photo tool (workstream 3): one Photos 1–4 count in place of Shape, Length, Sound, Speaking and Takes.
                 let n = store.suite.photo.count
                 listPill("photos", icon: "photo.on.rectangle", value: "\(n)", help: "Photos",
                          options: PhotoDraft.counts.map { ("\($0) photo\($0 == 1 ? "" : "s")", $0) }, selected: n) { store.suite.photo.count = $0 }
             } else {
-                shapePill
-                lengthPill
+                if !settingsInRail {
+                    shapePill
+                    lengthPill
+                }
                 listPill("sound", icon: store.suite.composer.sound ? "speaker.wave.2" : "speaker.slash", value: store.suite.composer.sound ? "On" : "Off",
                          help: "Sound", options: [("On", true), ("Off", false)], selected: store.suite.composer.sound) { store.suite.composer.sound = $0 }
                 listPill("speaking", icon: "text.bubble", value: store.suite.composer.speaking.label, help: "Speaking",
                          options: ComposerSpeaking.allCases.map { ($0.label, $0) }, selected: store.suite.composer.speaking) { store.suite.composer.speaking = $0 }
-                takesPill
+                if !settingsInRail { takesPill }
                 if store.isOwner { enginePill(compact: compact) }
             }
         }
@@ -227,6 +234,20 @@ struct ComposerBottomBar: View {
         .accessibilityLabel("\(p.label) add-on, \(p.priceText)\(on ? ", on" : "")")
     }
 
+    /// What a quality takes in plain words for its card: "Start and end frame, references, clips" (from
+    /// ComposerBar.acceptsLine's "Start + end frame · refs · clips").
+    static func plainAccepts(_ i: SuiteInputs) -> String {
+        ComposerBar.acceptsLine(i)
+            .replacingOccurrences(of: " + ", with: " and ")
+            .replacingOccurrences(of: " · ", with: ", ")
+            .replacingOccurrences(of: "refs", with: "references")
+    }
+
+    /// "Engine · MiniMax H3 · 2K" → "MiniMax H3 · 2K".
+    static func engineName(_ label: String) -> String {
+        label.hasPrefix("Engine · ") ? String(label.dropFirst("Engine · ".count)) : label
+    }
+
     /// The finished swap take (a render with a stored file) Upscale works on.
     private var swapTake: Take? { store.takes(of: store.swapJob).first { $0.canUpscale } }
 
@@ -235,9 +256,13 @@ struct ComposerBottomBar: View {
         let tier = store.suite.catalog?.tier(store.suite.composer.quality)
         let models = ComposerEngines.options(tier)
         let label = ComposerEngines.label(store.suite.composer, tier)
+        let pinned = store.suite.composer.engineModel != nil
+        // Pinned: the engine's own name ("MiniMax H3 · 2K"), whole, at every width; the full label is the tooltip.
         return pill("engine", help: label) {
             Ph("server.rack", 13)
-            if !compact { Text(label.replacingOccurrences(of: "Engine · ", with: "")).font(t.body(12.5, .medium)) }
+            if pinned || !compact {
+                Text(ComposerBottomBar.engineName(label)).font(t.body(12.5, .medium)).lineLimit(1).fixedSize()
+            }
         } popover: {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Engine (owner)").font(t.scale.label.font).foregroundStyle(t.muted).padding(.horizontal, 14).padding(.vertical, 10)
@@ -299,11 +324,10 @@ struct ComposerBottomBar: View {
                 .lineLimit(1)
                 .fixedSize()
                 .font(.system(size: 13))
-                .foregroundStyle(t.ink)
-                .padding(.horizontal, 11).frame(height: 34)
-                .background(isOpen ? t.surface : t.bg)
-                .overlay(RoundedRectangle(cornerRadius: t.controlRadius).strokeBorder(isOpen ? t.ink : t.line, lineWidth: isOpen ? 2 : 1))
-                .clipShape(RoundedRectangle(cornerRadius: t.controlRadius))
+                .foregroundStyle(t.roles.ink)
+                // Quiet text pills on the prompt bar (the render): no box, the field tone only while its list is open.
+                .padding(.horizontal, 8).frame(height: 34)
+                .background(RoundedRectangle(cornerRadius: t.radii.chip).fill(isOpen ? t.roles.field : Color.clear))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -360,7 +384,29 @@ struct QualityPopover: View {
         let estimates = isSwap ? store.suite.swapEstimates : store.suite.tierEstimates
         let tiers = store.suite.catalog?.tiers ?? []
         let seconds: Int? = isSwap ? (store.suite.swapEstimate?.seconds).map { Int($0) } : store.suite.composer.duration
+        // An owner's engine pin sets the quality: the tiers grey out and the pinned engine's one price shows.
+        let pinned = !isSwap && store.suite.composer.engineModel != nil
         VStack(alignment: .leading, spacing: 10) {
+            if pinned {
+                let engine = ComposerBottomBar.engineName(ComposerEngines.label(store.suite.composer, store.suite.catalog?.tier(store.suite.composer.quality)))
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Engine pinned: \(engine). Quality is set by the engine.").font(t.scale.label.font)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 12) {
+                        if let e = store.suite.estimate {
+                            Text("\(Pricing.money(e.estimate / Double(max(1, e.takes)))) per take").font(t.scale.caption.font).monospacedDigit()
+                        }
+                        Button {
+                            store.suite.composer = ComposerEngines.pin(store.suite.composer, nil)
+                            onPick()
+                        } label: {
+                            Text("Unpin").font(t.scale.label.font).foregroundStyle(t.link)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Back to Auto: the quality's ladder picks the engine")
+                    }
+                }
+            }
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("Quality").font(t.scale.label.font)
                 Text(seconds.map { "per \($0) s take · slots follow what each accepts" } ?? "slots follow what each accepts").font(t.body(12)).foregroundStyle(t.muted)
@@ -372,7 +418,7 @@ struct QualityPopover: View {
                     let on = tier.id == store.suite.toolQuality && !(isSwap && store.suite.swap.addOn != nil)
                     let e = estimates[tier.id]
                     Button {
-                        guard tier.available else { return }
+                        guard tier.available, !pinned else { return }
                         if isSwap {
                             store.suite.toolQuality = tier.id
                             store.suite.swap.addOn = nil
@@ -386,20 +432,22 @@ struct QualityPopover: View {
                                 Text(tier.label).font(t.body(13, .bold))
                                 if on { Ph("checkmark", 11).foregroundStyle(t.accent) }
                                 Spacer(minLength: 4)
-                                Text(e.map { Pricing.money($0.estimate / Double(max(1, $0.takes))) } ?? "—")
+                                Text(pinned ? "" : e.map { Pricing.money($0.estimate / Double(max(1, $0.takes))) } ?? "—")
                                     .font(t.isA ? Fonts.font("Instrument Serif", 23, .regular) : t.mono(15, .medium))
                             }
                             Text(tier.available ? tier.detail : "Not available right now").font(t.body(12)).foregroundStyle(t.muted).lineLimit(1)
-                            Text(ComposerBar.acceptsLine(tier.slots)).font(t.mono(10)).foregroundStyle(t.muted).lineLimit(2).padding(.top, 3)
+                            Text(ComposerBottomBar.plainAccepts(tier.slots)).font(t.scale.caption.font).foregroundStyle(t.muted)
+                                .fixedSize(horizontal: false, vertical: true).padding(.top, 3)
                         }
                         .padding(.horizontal, 12).padding(.vertical, 10)
                         .frame(width: 136, alignment: .leading)
                         .background(on ? t.surface : t.bg)
                         .overlay(Rectangle().strokeBorder(on ? t.ink : t.line, lineWidth: on ? 2 : 1))
-                        .opacity(tier.available ? 1 : 0.5)
+                        .opacity(pinned ? 0.45 : tier.available ? 1 : 0.5)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .disabled(pinned)
                     .accessibilityLabel("\(tier.label)\(e.map { ", \(Pricing.money($0.estimate))" } ?? "")\(on ? ", selected" : "")")
                 }
             }
