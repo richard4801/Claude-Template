@@ -19,9 +19,23 @@ struct CinemaTakesRail: View {
         return "\(photo)-\(store.suite.feedFilter.rawValue)-\(store.jobs.count)-\(settled)-\(store.takes.count)-\(store.serverKey)"
     }
 
+    @State private var filterOpen = false
+
+    /// The feed's cards; when the feed has none on "All" (a studio whose takes predate the feed, the demo), the takes the
+    /// app already has, so the rail never contradicts the stage.
+    private func railItems(_ localTakes: [Take]) -> [SuiteFeedItem] {
+        if !store.suite.feed.isEmpty || store.suite.feedFilter != .all { return store.suite.feed }
+        return localTakes.prefix(40).map { tk in
+            var it = SuiteFeedItem(id: "local-\(tk.id)", kind: photo ? "photo" : "take", status: "done", tool: photo ? "photo" : "shot", jobId: tk.jobId,
+                                   title: tk.displayLabel, createdAt: tk.createdAt, poster: tk.thumb, durationSec: tk.durationSec, summary: tk.displayLabel)
+            it.takeId = tk.id
+            return it
+        }
+    }
+
     var body: some View {
-        let items = store.suite.feed
         let localTakes = store.cinemaTakes(photo: photo)
+        let items = railItems(localTakes)
         let onStage = picked ?? (photo ? localTakes.first?.id : (store.takes(of: store.shotJob).last ?? localTakes.first)?.id)
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -81,22 +95,26 @@ struct CinemaTakesRail: View {
     }
 
     private var filterMenu: some View {
-        Menu {
-            ForEach(CinemaFeedFilter.allCases) { f in
-                Button(f == store.suite.feedFilter ? "✓ \(f.label)" : f.label) { store.suite.feedFilter = f }
-            }
-        } label: {
+        Button { filterOpen.toggle() } label: {
             HStack(spacing: 4) {
                 Text(store.suite.feedFilter.label).font(t.scale.caption.font.weight(.medium))
                 Ph("caret-down", 11)
             }
             .foregroundStyle(t.roles.ink)
             .padding(.horizontal, 10).frame(height: 28)
-            .background(t.roles.ink.opacity(0.08)).clipShape(RoundedRectangle(cornerRadius: 8))
+            .background(t.roles.ink.opacity(filterOpen ? 0.14 : 0.08)).clipShape(RoundedRectangle(cornerRadius: 8))
+            .contentShape(Rectangle())
         }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .buttonStyle(.plain)
         .help("Show")
         .accessibilityLabel("Show \(store.suite.feedFilter.label)")
+        .popover(isPresented: $filterOpen, arrowEdge: .bottom) {
+            PillList(title: "Show", options: CinemaFeedFilter.allCases.map { ($0.label, $0) }, selected: store.suite.feedFilter) {
+                store.suite.feedFilter = $0
+                filterOpen = false
+            }
+            .environment(\.theme, t).environment(\.colorScheme, .dark)
+        }
     }
 }
 
@@ -177,12 +195,13 @@ struct CinemaTakeCard: View {
     var selected: Bool
     var onPick: () -> Void
     @State private var hover = false
+    @State private var moreOpen = false
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: max(t.radii.control - 4, 8))
         ZStack(alignment: .bottomLeading) {
             Color.clear.overlay(MuseImage(ref: item.poster ?? take?.thumb)).clipped()
-            if hover {
+            if hover || moreOpen {
                 LinearGradient(colors: [.clear, .black.opacity(0.7)], startPoint: .center, endPoint: .bottom)
                 VStack(alignment: .leading, spacing: 6) {
                     Text(item.summary).font(t.scale.micro.font).foregroundStyle(.white.opacity(0.85)).lineLimit(1)
@@ -216,19 +235,37 @@ struct CinemaTakeCard: View {
             if !photo { action("arrow-line-right", "Extend") { store.openExtend(take) } }
             action("frame-corners", "Use as start frame") { useAsStart(take) }
             if !photo { action("scissors", "Open in Edit") { store.openEdit(takeId: take.id) } }
-            Menu {
-                Button("Open") { open() }
-                Button("Reuse settings") { store.reuseSettings(take) }
-                Button("Post…") { store.openPostSheet(take) }
-            } label: {
+            Button { moreOpen.toggle() } label: {
                 Ph("dots-three", 15).foregroundStyle(.white).frame(width: 28, height: 28)
                     .background(.black.opacity(0.5)).clipShape(RoundedRectangle(cornerRadius: 8))
+                    .contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .buttonStyle(.plain)
             .help("More")
+            .accessibilityLabel("More")
+            .popover(isPresented: $moreOpen, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 0) {
+                    moreRow("Open") { open() }
+                    moreRow("Reuse settings") { store.reuseSettings(take) }
+                    moreRow("Post…") { store.openPostSheet(take) }
+                }
+                .padding(.vertical, 6).frame(width: 200)
+                .environment(\.theme, t).environment(\.colorScheme, .dark)
+            }
         } else {
             action("arrow-square-out", "Open") { open() }
         }
+    }
+
+    private func moreRow(_ title: String, _ run: @escaping () -> Void) -> some View {
+        Button {
+            moreOpen = false
+            run()
+        } label: {
+            Text(title).font(t.scale.caption.font).foregroundStyle(t.roles.ink)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).frame(height: 30).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func action(_ icon: String, _ name: String, _ run: @escaping () -> Void) -> some View {
