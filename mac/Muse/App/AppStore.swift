@@ -50,7 +50,7 @@ let defaultServerURL = "https://angelic-elegance-production-c42b.up.railway.app"
 enum ShootState { case idle, busy, done }
 enum GalleryTab { case tests, final }
 enum SettingsSection: String, CaseIterable {
-    case appearance, defaults, costs, studio, engines, prompts, archived, notif, developer, about
+    case appearance, defaults, costs, studio, engines, prompts, archived, notif, developer, about, connections
     var title: String {
         switch self {
         case .appearance: return "Appearance"
@@ -63,11 +63,12 @@ enum SettingsSection: String, CaseIterable {
         case .notif: return "Notifications"
         case .developer: return "Developer"
         case .about: return "About"
+        case .connections: return "Connections"
         }
     }
 
-    /// Studio, Engines, Prompts and Archived models are the owner's.
-    var ownerOnly: Bool { self == .studio || self == .engines || self == .prompts || self == .archived }
+    /// Studio, Engines, Prompts, Archived models and Connections are the owner's.
+    var ownerOnly: Bool { self == .studio || self == .engines || self == .prompts || self == .archived || self == .connections }
 }
 
 enum PostTab: Hashable { case scheduled, posted }

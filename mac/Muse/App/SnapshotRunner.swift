@@ -13,6 +13,8 @@ enum SnapshotRunner {
     @Observable @MainActor final class State {
         /// Shown over the current screen: "chat" puts the Claude chat panel up.
         var overlay: String?
+        /// Settings scrolls to this anchor (a view `.id`), for the scrolled shots.
+        var scrollTo: String?
     }
 
     static let state = State()
@@ -47,6 +49,9 @@ enum SnapshotRunner {
                 ("settings", { store.openSettings(.appearance) }),
                 ("settings_prompts", { store.openSettings(.prompts) }),
                 ("settings_studio", { store.openSettings(.studio) }),
+                ("settings_connections", { store.openSettings(.connections) }),
+                ("settings_connections_scrolled", { store.openSettings(.connections); Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(1)); state.scrollTo = "connections.blender" } }),
                 ("credits", { store.go(.credits) }),
                 ("members", { store.go(.members) }),
                 ("chat", { store.go(.home); state.overlay = "chat" }),
@@ -61,6 +66,7 @@ enum SnapshotRunner {
                 store.themeID = theme
                 for (name, show) in shots {
                     state.overlay = nil
+                    state.scrollTo = nil
                     store.suite.picker = nil
                     store.suite.browserOpen = false
                     show()
