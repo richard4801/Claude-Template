@@ -9,6 +9,7 @@ struct SettingsView: View {
 
     var body: some View {
         @Bindable var store = store
+        ScrollViewReader { proxy in
         ScreenPage {
             ScreenTitle("Settings")
             HStack(alignment: .top, spacing: Space.s6) {
@@ -16,12 +17,14 @@ struct SettingsView: View {
                     ForEach(SettingsSection.allCases.filter { !$0.ownerOnly || store.isOwner }, id: \.self) { s in
                         SettingsNavRow(title: s.title, on: store.settingsSection == s) { store.settingsSection = s }
                     }
-                    if store.isOwner { SuiteConnectionsRow() } // AI suite (workstream 1): Connections (owner) → ConnectionsView
                 }
                 .frame(width: 200)
                 VStack(alignment: .leading, spacing: Space.s2) { section }
                     .frame(maxWidth: 760, alignment: .leading)
             }
+        }
+        // Review screenshots only (SnapshotRunner): scroll a section to an anchor.
+        .onChange(of: SnapshotRunner.state.scrollTo) { _, id in if let id { proxy.scrollTo(id, anchor: .top) } }
         }
     }
 
@@ -134,6 +137,9 @@ struct SettingsView: View {
             }
             SectionTitle("Performance")
             PerfReadout()
+        case .connections:
+            // A normal detail pane in the same column as the other sections (it used to be a sheet over Settings).
+            ConnectionsView()
         case .about:
             SectionTitle("About", top: 0)
             SettingRow("Version") { RowValue("\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))") }

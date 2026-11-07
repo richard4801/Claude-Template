@@ -1,0 +1,24 @@
+MOVED home (view) 0 -> 240
+MOVED library (view) 0 -> 136
+FITS models content 412 <= viewport 696
+FITS queue content 646 <= viewport 696
+MOVED credits (view) 0 -> 153
+FITS members content 512 <= viewport 696
+FITS posts content 482 <= viewport 696
+MOVED templates (view) 0 -> 240
+FITS lora content 363 <= viewport 696
+FITS suite content 454 <= viewport 460
+FITS edit content 252 <= viewport 696
+MOVED cast (view) 0 -> 240
+FITS settings_appearance content 513 <= viewport 696
+FITS settings_defaults content 513 <= viewport 696
+FITS settings_costs content 513 <= viewport 696
+FITS settings_studio content 513 <= viewport 696
+MOVED settings_engines (view) 0 -> 240
+MOVED settings_prompts (view) 240 -> 480
+FITS settings_archived content 513 <= viewport 696
+FITS settings_notif content 513 <= viewport 696
+MOVED settings_developer (view) 0 -> 135
+FITS settings_about content 513 <= viewport 696
+MOVED settings_connections (view) 0 -> 240
+MOVED home_after_picker (view) 0 -> 240

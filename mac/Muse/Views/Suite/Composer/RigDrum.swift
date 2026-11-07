@@ -183,6 +183,11 @@ struct RigDrum: View {
                 model.endDrag(tapOffset: Double(g.location.y - h * Self.rows / 2), itemHeight: Double(h))
             })
         .onHover { inside in model.hover(inside, itemHeight: Double(h)) }
+        .background(GeometryReader { g in
+            Color.clear
+                .onAppear { model.hitFrame = g.frame(in: .global) }
+                .onChange(of: g.frame(in: .global)) { _, f in model.hitFrame = f }
+        })
         .overlay {
             // The prototype's focus-visible ring: an amber inset outline.
             RoundedRectangle(cornerRadius: 12).strokeBorder(DrumBag.amber, lineWidth: 2)
@@ -454,6 +459,10 @@ final class RigDrumModel {
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var lastTick: CFTimeInterval = 0
     @ObservationIgnored private var monitor: Any?
+    /// The drum's frame in its window (SwiftUI global space: top-left origin) and that window. The scroll monitor only
+    /// takes events inside it, so it can never swallow the app's scrolling (owner blocker 2026-11-07).
+    @ObservationIgnored var hitFrame: CGRect = .null
+    @ObservationIgnored private weak var hitWindow: NSWindow?
     @ObservationIgnored private var itemHeight: Double = 84
     @ObservationIgnored private var dragStart: Double = 0
     @ObservationIgnored private var dragMoved: Double = 0
@@ -551,8 +560,16 @@ final class RigDrumModel {
         itemHeight = h
         if inside {
             guard monitor == nil else { return }
+            hitWindow = NSApp.keyWindow ?? NSApp.mainWindow
             monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] e in
                 guard let model = self else { return e }
+                // Only scrolls over this drum, in its own visible window. Anything else passes through, and a monitor
+                // left behind (the drum went away without a hover-out, e.g. a sheet closed under the pointer) removes itself.
+                let owns = MainActor.assumeIsolated { model.owns(e) }
+                guard owns else {
+                    DispatchQueue.main.async { MainActor.assumeIsolated { model.removeMonitor() } }
+                    return e
+                }
                 let dy = Double(e.scrollingDeltaY), dx = Double(e.scrollingDeltaX)
                 guard abs(dy) >= abs(dx) else { return e }
                 let precise = e.hasPreciseScrollingDeltas
@@ -700,6 +717,14 @@ final class RigDrumModel {
     private func removeMonitor() {
         if let m = monitor { NSEvent.removeMonitor(m) }
         monitor = nil
+    }
+
+    /// Whether a scroll event is over this drum: same window, window on screen, pointer inside the drum's frame.
+    private func owns(_ e: NSEvent) -> Bool {
+        guard let w = hitWindow, e.window === w, w.isVisible, let content = w.contentView, !hitFrame.isNull, !hitFrame.isEmpty else { return false }
+        let p = content.convert(e.locationInWindow, from: nil)
+        let top = content.isFlipped ? p.y : content.bounds.height - p.y
+        return hitFrame.contains(CGPoint(x: p.x, y: top))
     }
 
     func tearDown() {

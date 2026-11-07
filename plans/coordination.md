@@ -50,6 +50,16 @@ Spec `plans/claude-editing.md`. Workstream 3: edit sessions plus the editing MCP
 
 `migrateWithLock` skips any migration whose `when` is ≤ the last one applied, so the coordinator merges them in that order. 0013 waits until 0011 and 0012 have landed.
 
+## Owner's standing rule for production pushes (2026-11-07)
+The owner said: "Push anything that's green on all checks and that I've already approved in principle (fixes, approved designs). Still ask me for new features or anything that spends money."
+- The coordinator pushes to `claude/ecstatic-rubin-2egjfb` without asking when:
+  - all checks are green on the exact head: server tests, Android tests and Mac CI;
+  - **and** the change is a fix, or matches a design the owner already approved.
+- The coordinator asks first for:
+  - new features or screens the owner hasn't seen;
+  - anything that spends money;
+  - design changes the owner hasn't approved.
+
 ## ▶ RESUMED (2026-11-06, owner chose "all four workstreams")
 Production is at `daab63d` (the Higgsfield H3 provider). `SUITE_MODE=live`, and HF_CREDENTIALS is set on Railway. Items 5 (go live) and 13 (Higgsfield) are done. The first Higgsfield HD shot was refused by Higgsfield's NSFW check: the API has no moderation setting, and the job was not charged.
 
