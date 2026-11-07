@@ -28,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -331,15 +332,24 @@ private fun ColumnScope.SettingsBody(x: SheetContext) {
     val tiers = x.catalog?.tiers?.ifEmpty { null } ?: SuiteRules.TIERS.map { studio.muse.app.data.SuiteTier(it, SuiteRules.tierLabel(it), available = true) }
     Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         SheetLabel("Quality", "per ${d.duration} s take", Modifier.padding(top = 4.dp, bottom = 4.dp))
+        // An engine pinned by the owner sets the quality: every tier would show the same price, so say so once (owner bug).
+        val pinned = x.owner && d.engineModel != null
+        if (pinned) Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            T("Engine pinned: ${d.engineLabel(x.catalog)}. Quality is set by the engine${x.estimate?.let { ", ${ComposerPrice.short(it)}" } ?: ""}.",
+                m.scale.caption, m.t.ink, Modifier.weight(1f), maxLines = 3)
+            Box(Modifier.heightIn(min = 48.dp).press { x.update { it.pin(null) } }.semantics { role = Role.Button }.padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
+                T("Unpin", m.scale.label, m.link, maxLines = 1)
+            }
+        }
         tiers.forEach { t ->
             val on = t.id == d.quality
             val e = x.tierEstimates[t.id]
-            Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(12.dp)).background(m.t.surface).let { if (on) it.border(2.dp, m.t.accent, RoundedCornerShape(12.dp)) else it }
-                .press(enabled = t.available) { x.update { it.copy(quality = t.id).fit(x.catalog) } }.semantics(mergeDescendants = true) { selected = on; role = Role.RadioButton }
+            Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).alpha(if (pinned) .45f else 1f).clip(RoundedCornerShape(12.dp)).background(m.t.surface).let { if (on) it.border(2.dp, m.t.accent, RoundedCornerShape(12.dp)) else it }
+                .press(enabled = t.available && !pinned) { x.update { it.copy(quality = t.id).fit(x.catalog) } }.semantics(mergeDescendants = true) { selected = on; role = Role.RadioButton }
                 .padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 T(t.label, m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), if (t.available) m.t.ink else m.t.muted, Modifier.width(78.dp), maxLines = 1)
-                T(if (t.available) t.detail else "Not available", m.type.body.copy(fontSize = 12.5.sp), m.t.muted, Modifier.weight(1f), maxLines = 1)
-                T(if (t.available) ComposerPrice.short(e) else "", m.type.mono.copy(fontSize = 16.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
+                T(if (t.available) t.detail else "Not available", m.scale.caption, m.t.muted, Modifier.weight(1f), maxLines = 2)
+                T(if (t.available && !pinned) ComposerPrice.short(e) else "", m.scale.label.copy(fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum"), m.t.ink, maxLines = 1)
                 Box(Modifier.width(20.dp)) { if (on) SIc("check", 18.dp, m.t.accent) }
             }
         }
@@ -351,7 +361,7 @@ private fun ColumnScope.SettingsBody(x: SheetContext) {
                 .semantics(mergeDescendants = true) { role = Role.Button; contentDescription = "Engine, owner only: ${d.engineLabel(x.catalog)}" }.padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 T("Engine · ${d.engineLabel(x.catalog)}", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, Modifier.weight(1f), maxLines = 1)
-                T("OWNER", m.type.mono.copy(fontSize = 10.sp, letterSpacing = .12.em), m.t.muted, maxLines = 1)
+                T("Owner", m.scale.micro, m.t.muted, maxLines = 1)
                 SIc(if (open) "chevd" else "chev", 16.dp, m.t.muted)
             }
             if (open) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
