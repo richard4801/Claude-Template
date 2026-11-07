@@ -181,3 +181,30 @@ Also: Photoshoot is now the **Photo** tool (WS3). The Mac sidebar lists Photo wi
 The rollout starts now.
 - **Part A (WS4):** AI Suite, pickers, Edit suite; the composer last, after WS1's bottom bar and WS3's Photo tool merge.
 - **Part B (WS2):** Home, Library, Cast and models, LoRA, Settings, onboarding, chat.
+
+## 10. Sleek composer (owner request B, 2026-11-07): proposal, awaiting approval
+
+The owner tested the Mac at prod 8d229f2: "too bulky… a lot of redundancy… I was aiming for a clean, sleek design." The
+fixes A1 (no sample stills, an empty canvas) and A2 (Generate always on screen; CI fit check at 1440×900 and 1280×800)
+ship on their own. This section is the redesign; nothing ships before the owner approves the mocks in
+`plans/design-direction/sleek/` (rendered by `design/direction/sleek.py`).
+
+- **One tool switch.** The sidebar has one item, "Suite" (renamed from "Video suite" everywhere); the nested list of
+  eight tools goes. Tools change only from the title ("Shot ▾").
+- **Presets** is one quiet text button that opens a popover: a name and a line saying what it sets up. No stills.
+- **No "Setup" / "Inputs" headings.** The rows and the slots are grouped by space.
+- **Compact.** Setting rows 32 pt with 13 pt text, label left in ink2, value right, a small chevron; no icon per row.
+  Inputs are one row of 44 pt tiles with 11 pt captions. The prompt bar is slim (13 pt text, 28 pt quiet controls, a
+  36 pt Generate). The picture is capped at 58 % of the window height; the prompt bar sits directly under it.
+- **Fewer sizes, fewer surfaces.** Three sizes on the page (17 title, 13 body, 11 caption). The prompt bar is the only
+  filled panel; the canvas is an outline on the surface tone.
+- **Android.** The same order and copy on phone and tablet, with 48 dp rows and targets (touch), 14 sp row text and the
+  44 dp tiles; Presets is the same quiet button opening a sheet.
+
+Slop check (skill §1) on this plan:
+- Icons: an icon on every row was a §1 tell; the rows lose them. The sidebar keeps one icon per destination (navigation).
+- Layout: no cards inside cards; one filled panel; grouping by space. One primary action (Generate), everything else quiet.
+- Type: no caps or tracked labels, no headings for the sake of it, three sizes from the scale.
+- Chrome: the middle dot appears only inside value pairs ("16:9 · 8 s", "8 s · 16:9") and "Generate · $price".
+- Copy: "Your shot appears here", "Start from a preset": plain, sentence case, no marketing voice.
+- Placeholder residue: no sample stills, no dead "Coming soon" tiles in the main path.
