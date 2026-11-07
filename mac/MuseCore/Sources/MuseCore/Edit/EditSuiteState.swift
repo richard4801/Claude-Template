@@ -177,15 +177,38 @@ public enum EditSuite {
 
     /// "0:18"
     public static func clock(_ s: Double) -> String {
-        let n = Int(max(0, s).rounded())
+        let n = Int(finiteSeconds(s).rounded())
         return "\(n / 60):" + (n % 60 < 10 ? "0" : "") + "\(n % 60)"
     }
 
     /// "0:04.2"
     public static func clockTenths(_ s: Double) -> String {
-        let t = Int((max(0, s) * 10).rounded())
+        let t = Int((finiteSeconds(s) * 10).rounded())
         let sec = (t / 10) % 60, m = t / 600
         return "\(m):" + (sec < 10 ? "0" : "") + "\(sec).\(t % 10)"
+    }
+
+    // MARK: Safe numbers (owner blocker 2026-11-07: Int(inf / NaN) crashed the editor on real takes)
+
+    /// Seconds a clock can show: NaN, negative and infinite become 0, and anything past 100 hours is capped.
+    public static func finiteSeconds(_ s: Double) -> Double { s.isFinite ? min(max(0, s), 360_000) : 0 }
+    /// An Int from a Double that may be NaN or infinite (`Int(x)` traps on those): nil when it isn't a finite number.
+    public static func int(_ x: Double) -> Int? { x.isFinite && abs(x) < 1e15 ? Int(x) : nil }
+    /// The most thumbnail tiles a timeline block draws.
+    public static let maxTiles = 400
+    /// Thumbnail tiles across a block `width` wide: at least 1, at most `maxTiles`, whatever the width (NaN, infinite).
+    public static func tileCount(width: Double, tileWidth: Double) -> Int {
+        guard tileWidth > 0, let n = int((width / tileWidth).rounded(.up)) else { return 1 }
+        return min(maxTiles, max(1, n))
+    }
+    /// Which of `count` frames (or waveform peaks) spread over the source shows source time `source`. The source length
+    /// is the asset's `durationSec`, else `fallbackSec`; when neither is a positive finite number, frame 0. Nil when
+    /// there are no frames. Never out of range, never traps.
+    public static func frameIndex(source: Double, durationSec: Double?, fallbackSec: Double, count: Int) -> Int? {
+        guard count > 0 else { return nil }
+        let d = [durationSec ?? .nan, fallbackSec].first { $0.isFinite && $0 > 0 }
+        guard let d, source.isFinite, let i = int(source / d * Double(count)) else { return 0 }
+        return min(count - 1, max(0, i))
     }
 
     /// One row of the timeline (top to bottom as the design draws them: hook/text, captions, overlays, stickers, video,
