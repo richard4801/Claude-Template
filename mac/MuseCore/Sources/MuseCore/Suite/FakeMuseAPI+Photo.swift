@@ -46,12 +46,15 @@ extension FakeMuseAPI {
     }
 
     public func suiteCreatePhotos(_ req: PhotoRequest) async throws -> [Take] {
+        try suiteCheckDraft(req.draft) // AI suite (workstream 1): a bad draft is refused before anything is held
         let shots = try await shoot(try photoShoot(req))
         let ids = Set(shots.map(\.id))
+        for id in ids { suiteTakeModels[id] = req.modelId }
         let titled = { (t: Take) -> Take in
             var x = t
             let rest = t.displayTitle.replacingOccurrences(of: "Photo · ", with: "").replacingOccurrences(of: "Template · ", with: "")
             x.title = "Photo · \(rest)"
+            x.draft = req.draft // every still keeps the draft ("Reuse settings")
             return x
         }
         for i in takes.indices where ids.contains(takes[i].id) { takes[i] = titled(takes[i]) }

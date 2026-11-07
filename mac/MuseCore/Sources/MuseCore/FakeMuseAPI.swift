@@ -18,7 +18,7 @@ public actor FakeMuseAPI: MuseAPI {
 
     let hub = EventHub()
 
-    var models = SampleData.models()
+    var models = FakeMuseAPI.suiteDemoModels() // AI suite (workstream 1): the demo models, one with a default rig
     var outfits = SampleData.outfits()
     var jobs: [Job]
     var takes: [Take]
@@ -71,6 +71,12 @@ public actor FakeMuseAPI: MuseAPI {
     var suiteTakeSeconds: [String: Double] = [:]
     /// AI suite (workstream 1): the demo studio's locations (@location), two to start with.
     var suiteLocationList: [SuiteLocation] = FakeMuseAPI.demoLocations
+    /// AI suite (workstream 1, build step 2): the studio's saved rigs (Suite/FakeMuseAPI+RigsFeed.swift), jobs deleted from
+    /// Queue (their takes leave the feed), each take's character (the server's take.modelId) and each shot's aspect.
+    var suiteRigList: [SuiteRigView] = FakeMuseAPI.demoRigs
+    var suiteHiddenJobs: Set<String> = []
+    var suiteTakeModels: [String: String] = FakeMuseAPI.demoTakeModels
+    var suiteJobAspects: [String: String] = [:]
 
     /// - Parameters:
     ///   - speed: simulation speed; 0 freezes the queue (tests).
@@ -125,6 +131,11 @@ public actor FakeMuseAPI: MuseAPI {
 
     /// Tests: look at the demo as a member would (members get the member view and owner_only errors).
     func setRole(_ role: String) { signedIn?.role = role }
+    /// Tests: act as another person of the demo studio (AI suite saved rigs are per person).
+    func setUser(id: String, role: String) {
+        signedIn?.id = id
+        signedIn?.role = role
+    }
 
     public func me() throws -> User {
         guard let u = signedIn else { throw ApiError("unauthorized", "Sign in to continue") }
@@ -699,6 +710,7 @@ public actor FakeMuseAPI: MuseAPI {
             runningId = nil
         }
         jobs.removeAll { $0.id == id }
+        suiteHiddenJobs.insert(id) // AI suite (workstream 1): its takes leave the feed
         pump()
     }
 
@@ -795,6 +807,7 @@ public actor FakeMuseAPI: MuseAPI {
             var t = Take(id: "t_\(j.id)_\(k)", jobId: j.id, index: k, of: n, title: j.title, label: label, engineLabel: j.engineLabel,
                          cost: j.cost / Double(n), seed: j.seed + Int64(k - 1), thumb: thumb, prompt: j.prompt, createdAt: nowMs())
             t.look = j.request.engine == "suite" ? suiteLooks[j.id] : nil // AI suite (workstream 1): the shot's Look
+            t.draft = j.draft // AI suite (workstream 1): every take keeps its job's draft ("Reuse settings")
             // Its length and stored file (Extend and Upscale work on it).
             t.durationSec = suiteTakeSeconds[j.id] ?? j.request.clipSeconds ?? j.lengthSec
             t.mediaKey = "r/\(j.id)/take_\(k).mp4"
@@ -1201,6 +1214,8 @@ public actor FakeMuseAPI: MuseAPI {
 
     // AI suite (workstream 1): hooks for Suite/FakeMuseAPI+Suite.swift. Demo suite shots run on this job pipeline.
     var suiteIsOwner: Bool { signedIn?.role != "member" }
+    /// Who is signed in (saved rigs are per person). Demo mode is the owner, u1.
+    var suiteUserId: String { signedIn?.id ?? "u1" }
     func suiteClip(_ id: String) -> Clip? { clips[id] }
     func enqueueSuiteJob(_ j: Job) throws -> Job {
         if j.cost > bal.balance + 1e-9 { throw ApiError("insufficient_balance", "Not enough in the studio balance · add a top-up in Credits") }

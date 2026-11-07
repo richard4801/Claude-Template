@@ -24,6 +24,7 @@ import { DEFAULT_LADDER, EXTEND_LADDER, inputSlotsOf, MODELS, modelById, modelVi
 import { SuiteRunner } from './runner.js';
 import { suiteSettings } from './schema.js';
 import { rigCheck } from './rigcheck.js';
+import { draftOf } from './drafts.js';
 
 /**
  * Estimate for removing the vocals of an audio reference (beat-only audio), held with the shot; the job settles the
@@ -377,10 +378,11 @@ export class SuiteService {
   /** POST /v1/suite/shots → the render Job (or, with dryRun, the estimate). */
   async create(u: AuthUser, body: unknown) {
     const r = this.parse(body, u);
+    const draft = draftOf(body); // the composer's draft (suite/drafts.ts), stored with the job for "Reuse settings"
     const p = await this.plan(u, r);
     if (p.swap) {
       if (r.dryRun) return { dryRun: true, estimate: p.view };
-      return this.ctx.jobs.create(u, p.req);
+      return this.ctx.jobs.create(u, { ...p.req, ...(draft ? { draft } : {}) });
     }
     const { plan, prefs } = p;
     const caps = await this.checkCaps(u.studioId, plan.estimate, prefs);
@@ -404,7 +406,7 @@ export class SuiteService {
     const job = await this.ctx.jobs.createInternal(u, {
       kind: 'render', title: r.title ?? (plan.recast ? 'Recast' : 'Untitled shot'), modelId: leadId ?? '', modelName: mrow?.name ?? '', outfitId: r.outfitId ?? '', request,
       cost: round2(plan.estimate * 10000) / 10000, prompt: plan.prompt, seed, thumb, totalSeconds: perTake * plan.takes, totalSteps: plan.takes, phase: 'Queued',
-      stats: { suite: { plan, mode: this.mode } },
+      stats: { suite: { plan, mode: this.mode } }, draft,
     });
     return this.ctx.jobs.view(job);
   }

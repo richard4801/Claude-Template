@@ -64,6 +64,8 @@ data class Model(
     /** Archived by the owner: hidden from every list (plans/api.md "Model tools" §7). */
     val archived: Boolean = false,
     val archivedAt: Long? = null,
+    /** AI suite (build step 2): her default rig, filled into the composer's rows still on Auto when she's @-mentioned ([applyDefaultRig]). */
+    val defaultRig: SuiteRig? = null,
 ) {
     val filled: Int get() = slots.count { it.image != null && !it.busy }
     /** The 6 original sheet images are in (a missing face ¾ is only a warning). */
@@ -210,6 +212,8 @@ data class Job(
     val errorCode: String? = null,
     /** Done replicate jobs: output seconds Replicate billed. */
     val billedSeconds: Double? = null,
+    /** AI suite (build step 2): the composer draft it was made from, as sent ("Reuse settings"). */
+    val draft: SuiteDraft? = null,
 ) {
     val paused get() = false
     val engineLabel: String get() = serverEngineLabel ?: Pricing.engineLabel(request.spec())
@@ -256,6 +260,8 @@ data class Take(
     val look: SuiteLook? = null,
     /** Edit sessions (workstream 3): an edited version's name (1–80 characters), e.g. from Claude's save_version. */
     val name: String? = null,
+    /** AI suite (build step 2): the composer draft of its job, or of the photo itself ("Reuse settings"). */
+    val draft: SuiteDraft? = null,
 ) {
     val final get() = status == "final"
     val shot get() = kind == "shot"

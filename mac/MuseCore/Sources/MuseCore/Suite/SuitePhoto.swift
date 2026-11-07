@@ -28,6 +28,8 @@ public struct PhotoRequest: Codable, Hashable, Sendable {
     public var lockSeed: Bool?
     public var shuffleSeed: Int64?
     public var title: String?
+    /// AI suite (workstream 1): the composer's full draft, stored on every still for "Reuse settings" (left out when nil).
+    public var draft: SuiteDraft?
 
     public init(modelId: String, outfitId: String? = nil, prompt: String = "", camera: CameraSpec? = nil, gradeLook: Bool? = nil, count: Int = PhotoRequest.maxCount,
                 presetId: String? = nil, productImage: ImageRef? = nil, references: [ShootRef]? = nil, seed: Int64? = nil, lockSeed: Bool? = nil,

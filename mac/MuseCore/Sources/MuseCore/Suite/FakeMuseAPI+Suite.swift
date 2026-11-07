@@ -246,14 +246,16 @@ extension FakeMuseAPI {
     }
 
     public func suiteCreateShot(_ req: ShotRequest) async throws -> Job {
+        try suiteCheckDraft(req.draft) // a bad draft is refused before anything is held
         if req.mode == "swap" {
             // The existing character swap (POST /v1/jobs, engine replicate; Cinema → HD).
             guard let mid = req.modelId, let cid = req.clipId else { throw ApiError("bad_request", "Pick a character and a clip") }
             let m = try model(mid)
             let outfit = req.outfitId ?? m.outfitIds.first ?? ""
             let q = VideoQuality(rawValue: req.quality == "cinema" ? "hd" : req.quality) ?? .draft
-            return try createJob(JobRequest.replicate(title: req.title ?? "\(m.name) · swap", modelId: mid, outfitId: outfit, clipId: cid, quality: q, takes: req.takes,
-                                                      keepAudio: req.keepAudio ?? true, clipSeconds: suiteClip(cid)?.durationSec))
+            let job = try createJob(JobRequest.replicate(title: req.title ?? "\(m.name) · swap", modelId: mid, outfitId: outfit, clipId: cid, quality: q, takes: req.takes,
+                                                         keepAudio: req.keepAudio ?? true, clipSeconds: suiteClip(cid)?.durationSec))
+            return keepSuiteDraft(req.draft, aspect: req.aspectRatio, on: job)
         }
         let e = try suitePlan(req)
         if !e.ok { throw ApiError(e.code ?? "suite_over_job_limit", e.message ?? "Over the studio's limits") }
@@ -269,6 +271,8 @@ extension FakeMuseAPI {
                     phase: MemberText.waitingToStart, secondsLeft: total, totalSeconds: total, cost: e.estimate, createdAt: nowMs(), prompt: e.prompt ?? "",
                     seed: Int64.random(in: 1000...99999), thumb: outfits.first { $0.id == outfitId }?.front ?? m?.cover)
         j.engineText = e.label
+        j.draft = req.draft // build step 2: kept with the job and copied onto its takes
+        suiteJobAspects[j.id] = req.aspectRatio
         if let look = e.look { suiteLooks[j.id] = look }
         if e.mode == "extend", let x = req.extend {
             // The take is the whole longer clip: source + extension (or the new part alone with join: false).

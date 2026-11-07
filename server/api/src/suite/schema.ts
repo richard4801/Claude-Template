@@ -1,4 +1,4 @@
-// AI suite tables (migrations 0007, 0013). Re-exported from db/schema.ts.
+// AI suite tables (migrations 0007, 0013, 0014). Re-exported from db/schema.ts.
 import { bigint, doublePrecision, index, jsonb, pgTable, text } from 'drizzle-orm/pg-core';
 import type { LadderStep, Tier } from './registry.js';
 
@@ -25,3 +25,14 @@ export const suiteLocations = pgTable('suite_locations', {
   createdBy: text('created_by'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 }, t => [index('suite_locations_studio_idx').on(t.studioId)]);
+
+/** Saved rigs (migration 0014): a named set of rig rows. Each member sees their own; the owner sees the studio's. */
+export const suiteRigs = pgTable('suite_rigs', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  userId: text('user_id').notNull(),
+  name: text('name').notNull(),
+  rig: jsonb('rig').$type<import('./drafts.js').Rig>().notNull(),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+}, t => [index('suite_rigs_studio_idx').on(t.studioId, t.userId)]);

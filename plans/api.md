@@ -1088,6 +1088,51 @@ RigWarning { id: "deep_focus"|"wide_close"|"worm_close"|"look_clash"|"prompt_mov
 - `suite.camera.*`: per-option wording as `id: wording` lines, and the per-model camera block formats.
 - `suite.shot.*`: character, character in words, outfit, extra reference, lock, keyframes, scene (the user's words), guide, camera, avoid, footer, negative; `suite.audio.dialogue`.
 
+### The new Suite's server pieces (build step 2, 2026-11-07; `plans/ai-suite-design.md`)
+Migration **0014** (`suite_drafts_rigs`): `jobs.draft`, `takes.draft`, `models.default_rig` and the `suite_rigs` table. Code: `suite/drafts.ts`, `suite/rigs.ts`, `suite/feed.ts`; tests `test/suite-drafts.test.ts`.
+
+**Types**
+- `Rig`: the composer's rig rows by catalog id, with the same names as the clients' `ComposerSettings`. Every field is optional; a missing field is Auto.
+  - Fields: `{body?, lens?, focalMm? /* 8–200 */, aperture?, height?, shotSize?, lighting?, palette?, stock?, gradeLook?, genre?, era?, tempo?, format?, moves?: {id, intensity? /* 0–1 */}[] /* ≤ 2 */}`.
+  - Ids are checked against `GET /v1/suite/camera`; hidden and merged ids are accepted. Unknown ids and unknown fields → `400` ("rig.lens: unknown lens …").
+- `Draft`: the composer's full draft, as the client sent it.
+  - Fields: `{v /* default 1 */, tool: "shot" | "photo" | "storyboard" | "swap" | "recast" | "extend" | "upscale" | "talking" | "ugc", quality?, aspect?, duration?, takes?, count?, sound?, speaking? /* true, false or null = auto */, rig?, tokens?: unknown[] /* ≤ 400, chips with their keys */, slots?, …}`.
+  - Extra fields are kept, up to 64 KB in total. The server reads only `tool` (the feed filter) and the bottom-bar values (the summary line); everything else is returned unchanged.
+- `RigView`: `{id, name, rig: Rig, userId, mine, createdAt, updatedAt}`.
+- `FeedItem`: one card in the takes rail.
+  - Common: `{id, kind: "job" | "take" | "photo", status: "queued" | "running" | "failed" | "done", tool, jobId?, title, modelId?, modelName?, createdAt, poster?: ImageRef, aspect?, durationSec?, price, summary}`.
+  - `job`: `progress`, `phase`, `secondsLeft` (running), `blocked`, `error` and `errorCode` (failed), `refunded`, `label`, `takes`.
+  - `take` and `photo`: `takeId`, `label`, `videoUrl` (videos), `index`, `of`, `final`.
+  - `summary` is the caption line, e.g. "9:16, 10 s, 1 take, sound on" or "9:16, 4 photos".
+
+**Endpoints**
+| | |
+|---|---|
+| `POST /v1/suite/shots`, `POST /v1/jobs`, `POST /v1/suite/photos` + `draft?: Draft` | The draft is stored with the job (shots, swaps) and copied onto each of its takes when it finishes. Photos store it on every still. `Job.draft` and `Take.draft` return it, so **Reuse settings** restores the composer exactly. A bad draft → `400 "Invalid draft: …"` before anything is held. Estimates ignore it. It never goes into `request`. |
+| `GET /v1/suite/rigs` | → `RigView[]`. A member gets their own rigs; the owner gets every rig in the studio, theirs first (`mine`). Ordered by last change. |
+| `POST /v1/suite/rigs {name, rig}` | → `RigView`. Name 1–60 characters, trimmed. At most 100 rigs per person (`409 too_many_rigs`). |
+| `PATCH /v1/suite/rigs/{id} {name?, rig?}` | → `RigView`. Your own rig, or any rig in the studio for the owner. Anyone else's reads as `404`. `rig` replaces the whole rig. |
+| `DELETE /v1/suite/rigs/{id}` | → `204`, with the same permissions as PATCH. |
+| `PATCH /v1/models/{id} {defaultRig: Rig \| null}` | The model's **default rig**, returned as `Model.defaultRig`. `null` or `{}` clears it. Anyone in the studio can set it, like the model's other fields. |
+| `GET /v1/suite/feed?tool=&model=&status=&cursor=&limit=` | → `{items: FeedItem[], nextCursor: string \| null}`. See below. |
+
+**The feed (`GET /v1/suite/feed`)**
+- **Order:** newest first.
+  - Queued, running and failed jobs appear as one card each. A failed card says why.
+  - Every finished video take and every photo is its own card. A done job's takes take its place.
+  - Edited versions are not listed. Jobs deleted from Queue drop out with their takes.
+- **Filters:** `tool` and `status` take comma lists (unknown values → `400`); `model` is a model id. Filters combine. Visibility is studio-wide, like `/v1/jobs` and `/v1/takes`.
+- **Tool:** the draft's `tool` when there is one. Otherwise it comes from the request (a suite `mode` of extend or recast, else shot; `upscale`; the video studio's swap), and stills are `photo`.
+- **Paging:** `limit` 1–60 (default 30). `nextCursor` is opaque; pass it back until it is `null`.
+  - A page is two queries (jobs; takes with their job and model joined), keyset-paged on `(createdAt, id)` and merged. There are no per-item queries.
+  - A job that finishes between two pages moves from its "running" card to its takes, which are newer, so those appear on the first page of a fresh load.
+- **Member-safe:** no providers or model names. `label` is the tier label ("Shot · Draft · 768p"), as on the job.
+
+**Model default rig (client rule, `plans/ai-suite-design.md` "Refinements" 3):**
+- When a model is @-mentioned, the composer fills only the rig rows still on Auto from her `defaultRig`, then shows "Applied <name>'s rig · Undo".
+- It never overwrites a row the user set. With two @ models in the prompt, nothing applies automatically.
+- `moves` in a default rig are added as `#` chips only if the prompt has no move yet.
+
 ## MCP & camera sessions (2026-11-05)
 _Workstream 2. Owner only: every endpoint below answers `owner_only` (403) to a member. Setup and architecture: `plans/mcp-bridge.md`; research: `plans/research/ai-video-suite-research.md` §3.4._ A **camera session** is the shared workspace of the Camera control's **Directed (Blender)** mode: the brief, the cast, how the camera and each character move over time, the guide renders from Blender, and a Shot **draft**. Three things write to the same session: the MUSE apps (REST below), the in-app "Direct with Claude" chat (server-side Claude with MUSE tools + Blender tools relayed to the owner's Mac), and the owner's own Claude app / Claude Code through the **MUSE MCP server** (`/mcp`). **Agents never spend:** the most any tool does is a Shot draft with a cost estimate; the owner presses Generate in the app.
 

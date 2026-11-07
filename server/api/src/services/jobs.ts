@@ -19,6 +19,7 @@ import { gpuCanRun, type JobRow } from '../gpu/controller.js';
 import { pods } from '../db/schema.js';
 import { shotPromptFor } from '../templates/service.js';
 import { OUT_OF_CREDIT as OUT_OF_CREDIT_MESSAGE } from '../images/service.js';
+import { draftOf } from '../suite/drafts.js';
 
 export const JobRequestSchema = z.object({
   title: z.string().max(200).optional(),
@@ -83,6 +84,7 @@ export class JobService {
       blocked: j.blocked, userId: j.userId, warmupCost: j.warmupCost || undefined, warm: j.warmSessionId ? true : undefined,
       engineLabel: j.kind === 'render' ? (isSuite(j) ? j.request.engineLabel : P.engineLabel(j.request)) : undefined, errorCode: (j.stats as any)?.errorCode,
       billedSeconds: j.state === 'done' ? (j.stats as any)?.replicate?.billedSeconds ?? (j.stats as any)?.suite?.billedSeconds : undefined,
+      draft: j.draft ?? undefined, // AI suite (workstream 1): the composer draft, for "Reuse settings"
     });
   }
   emitJob(j: JobRow, extra: Record<string, unknown> = {}) {
@@ -101,6 +103,7 @@ export class JobService {
   async create(user: AuthUser, body: unknown) {
     const parsed = JobRequestSchema.safeParse(body);
     if (!parsed.success) throw badRequest(`Invalid job: ${parsed.error.issues[0]?.path.join('.')} ${parsed.error.issues[0]?.message}`);
+    const draft = draftOf(body); // AI suite (workstream 1): the composer's draft, for "Reuse settings"
     const r = { ...parsed.data, engine: parsed.data.engine ?? this.ctx.config.videoEngineDefault };
     const [archived] = await this.ctx.db.select({ at: models.archivedAt }).from(models).where(and(eq(models.id, r.modelId), eq(models.studioId, user.studioId)));
     if (archived?.at) throw new ApiError(409, 'model_archived', 'This model is archived · restore her in Settings → Archived models');
@@ -150,12 +153,13 @@ export class JobService {
       outfit: { name: o?.name ?? 'outfit' }, keepAudio: r.keepAudio, keepBackground: r.background === 'keep',
       backgroundMotion: MOTION_WORDS[r.backgroundMotion], steps: r.steps, seed, direction: r.direction,
     }, texts).text;
-    const { queue, ...request } = r;
+    const { queue, draft: _draft, ...request } = r as typeof r & { draft?: unknown }; // the draft is stored on its own (jobs.draft)
     const p0 = P.progressAt(request, 0);
     const row: typeof jobs.$inferInsert = {
       id: uid('j'), studioId: user.studioId, userId: user.id, kind: 'render', title: r.title ?? 'Untitled', modelId: m.id, modelName: m.name,
       outfitId: r.outfitId ?? '', request: { ...request, ...(queue ? { queue } : {}), ...(lora ? { lora } : {}), references }, state: 'queued', ...p0, phase: 'Queued',
       totalSeconds: P.totalSeconds(request), cost, refunded: 0, prompt, seed, thumb: o?.angles?.[0] ?? m.slots[0]?.image ?? null, createdAt: Date.now(),
+      ...(draft ? { draft } : {}),
     };
     if (queue) {
       const [ins] = await this.ctx.db.insert(jobs).values(row).returning();
@@ -349,6 +353,7 @@ export class JobService {
       mediaKey: (outputs.find(x => x.name === `take_${i + 1}.mp4`)?.key as string | undefined) ?? null,
       // AI suite (workstream 1): a suite take keeps the Look it is graded with (the Edit suite opens with it applied).
       media: withLook(mediaOf(outputs.find(x => x.name === `take_${i + 1}.mp4`)), isSuite(u) ? (u.request as { look?: unknown }).look : null), createdAt: now,
+      draft: u.draft ?? null, // AI suite (workstream 1): "Reuse settings" from the take
     }));
     const inserted = await this.ctx.db.insert(takes).values(rows).returning();
     this.emitJob(u, { takes: inserted.map(t => takeView(t, this.ctx.config.PUBLIC_URL)) });
@@ -558,6 +563,7 @@ export function takeView(t: typeof takes.$inferSelect, publicUrl?: string, viewe
     videoUrl: (t.kind === 'take' || (t.kind as string) === 'edit') && t.mediaKey ? `${publicUrl ?? ''}/uploads/${t.mediaKey}` : undefined,
     durationSec: t.media?.durationSec, width: t.media?.width, height: t.media?.height,
     look: t.kind === 'take' ? t.media?.look : undefined, // AI suite (workstream 1): a suite take's Look
+    draft: t.draft ?? undefined, // AI suite (workstream 1): the composer draft it was made with ("Reuse settings")
     // Edited versions (plans/api.md "Video editor"): the source take and the edit list live in `media`.
     ...((t.kind as string) === 'edit' ? { parentTakeId: t.media?.parentTakeId, edits: t.media?.edits, fps: t.media?.fps, ...(t.media?.name ? { name: t.media.name } : {}), ...(t.media?.aiLabel ? { aiLabel: true } : {}) /* Edit suite (workstream 3) */ } : {}),
   }) as Record<string, unknown> & { jobId?: string | null };

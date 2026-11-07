@@ -218,8 +218,9 @@ data class SuiteCatalog(
 @Serializable
 data class SuiteMove(val id: String, val intensity: Double? = null, val speed: String? = null)
 
+/** A shot's `camera.rig` block (the camera spec's own names; renamed from SuiteRig, which is now a saved rig: SuiteRigsFeed.kt). */
 @Serializable
-data class SuiteRig(
+data class SuiteCameraRig(
     val body: String? = null, val lens: String? = null, val focalMm: Int? = null, val aperture: String? = null,
     val look: String? = null, val fps: String? = null, val shutter: String? = null,
 )
@@ -238,7 +239,7 @@ data class SuiteAngle(val height: String? = null, val shotSize: String? = null)
 data class SuiteCameraSpec(
     val mode: String = "preset",
     val preset: String? = null,
-    val rig: SuiteRig? = null,
+    val rig: SuiteCameraRig? = null,
     val lighting: SuiteLighting? = null,
     val palette: SuitePalette? = null,
     val move: SuiteMove? = null,
@@ -319,6 +320,8 @@ data class SuiteShotRequest(
     /** owner only */
     val engineModel: String? = null,
     val resolution: String? = null,
+    /** AI suite (build step 2): the composer's full draft, stored with the job and its takes for "Reuse settings". Estimates ignore it. */
+    val draft: SuiteDraft? = null,
 )
 
 // ---------------------------------------------------------------- the answers

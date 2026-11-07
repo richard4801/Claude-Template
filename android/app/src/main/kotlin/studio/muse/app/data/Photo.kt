@@ -30,6 +30,8 @@ data class PhotoRequest(
     val lockSeed: Boolean? = null,
     val shuffleSeed: Long? = null,
     val title: String? = null,
+    /** AI suite (build step 2): the composer's full draft, stored on every still for "Reuse settings". */
+    val draft: SuiteDraft? = null,
 )
 
 /** The preset a Photo estimate ran with (a photo template). */

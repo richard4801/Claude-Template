@@ -50,4 +50,29 @@ extension HTTPMuseAPI {
     public func deleteSuiteLocation(id: String) async throws {
         try await suiteSend("DELETE", "v1/suite/locations/\(id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? id)")
     }
+
+    // Build step 2: saved rigs, a model's default rig and the takes feed (Suite/SuiteRigsFeed.swift).
+    public func suiteRigs() async throws -> [SuiteRigView] { try await suiteCall("GET", "v1/suite/rigs") }
+    public func createSuiteRig(name: String, rig: SuiteRig) async throws -> SuiteRigView {
+        try await suiteCall("POST", "v1/suite/rigs", body: body(NewSuiteRig(name: name, rig: rig)))
+    }
+    public func updateSuiteRig(id: String, name: String?, rig: SuiteRig?) async throws -> SuiteRigView {
+        try await suiteCall("PATCH", "v1/suite/rigs/\(Self.pathKey(id))", body: body(SuiteRigPatch(name: name, rig: rig)))
+    }
+    public func deleteSuiteRig(id: String) async throws {
+        try await suiteSend("DELETE", "v1/suite/rigs/\(Self.pathKey(id))")
+    }
+    public func setModelDefaultRig(modelId: String, rig: SuiteRig?) async throws -> MuseModel {
+        absolutize(try await suiteCall("PATCH", "v1/models/\(Self.pathKey(modelId))", body: body(DefaultRigPatch(defaultRig: rig))) as MuseModel)
+    }
+    public func suiteFeed(_ q: SuiteFeedQuery) async throws -> SuiteFeedPage {
+        var page: SuiteFeedPage = try await suiteCall("GET", q.path)
+        page.items = page.items.map { item in
+            var it = item
+            it.poster = absolutize(item.poster)
+            if let v = item.videoUrl, v.hasPrefix("/") { it.videoUrl = absolutize(ImageRef(url: v)).url }
+            return it
+        }
+        return page
+    }
 }

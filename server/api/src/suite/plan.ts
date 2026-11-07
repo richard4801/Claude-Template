@@ -71,6 +71,8 @@ export const ShotRequestSchema = z.object({
   direction: z.string().max(500).optional(),
   /** Plan and price only: nothing is held or run (agents, previews). */
   dryRun: z.boolean().optional(),
+  /** AI suite (workstream 1): the composer's draft, checked by suite/drafts.ts and stored with the job. */
+  draft: z.unknown().optional(),
 }).strict();
 export type ShotRequest = z.infer<typeof ShotRequestSchema>;
 
