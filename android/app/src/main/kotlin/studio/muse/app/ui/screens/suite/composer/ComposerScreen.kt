@@ -454,7 +454,7 @@ private fun SlotThumbs(ui: ComposerUi) {
             Column(Modifier.width(72.dp).alpha(if (enabled) 1f else .45f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 val shape = RoundedCornerShape(m.radii.control)
                 Box(Modifier.padding(bottom = 6.dp).size(64.dp).clip(shape).press { ui.onSlot(s) }
-                    .let { if (filled?.first == null) it.dashed(m.t.muted.copy(alpha = .7f)) else it }
+                    .let { if (filled?.first == null) it.dashed(m.t.muted.copy(alpha = .7f), m.radii.control) else it }
                     .semantics(mergeDescendants = true) { role = Role.Button; contentDescription = "${s.label}${if (s.optional) ", optional" else ""}${filled?.let { ": " + it.second } ?: ""}" },
                     contentAlignment = Alignment.Center) {
                     val img = filled?.first
@@ -762,8 +762,11 @@ private fun SlotCard(ui: ComposerUi, s: ToolSlot, modifier: Modifier) {
     }
 }
 
-private fun Modifier.dashed(c: Color): Modifier = drawBehind {
-    drawRect(c, style = Stroke(1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx()))))
+/** A rounded dashed outline at the thumbnails' radius (the render's empty slot), drawn inside the bounds so no dash is clipped. */
+private fun Modifier.dashed(c: Color, radius: Dp = 10.dp): Modifier = drawBehind {
+    val w = 1.5.dp.toPx()
+    drawRoundRect(c, topLeft = Offset(w / 2, w / 2), size = androidx.compose.ui.geometry.Size(size.width - w, size.height - w),
+        cornerRadius = CornerRadius(radius.toPx()), style = Stroke(w, pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 4.dp.toPx()))))
 }
 
 /** The preset path: who (or the photo), the Shape tiles and Generate with the price; "Edit settings" opens the full composer. */
@@ -925,7 +928,7 @@ private fun WideComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent:
         else if (presets || ui.d.collapsed) PresetRow(ui, tileW = 150.dp, tileH = 96.dp)
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             MediaHero(ui, job, takes, openTake, {}, Modifier.weight(1f).fillMaxHeight())
-            Column(Modifier.width(300.dp).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.width(360.dp).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (ui.d.collapsed) { CollapsedBody(ui, wide = false); return@Column }
                 T("Setup", m.scale.heading, m.t.ink)
                 SettingRows(ui)
@@ -970,19 +973,13 @@ private fun WideBar(ui: ComposerUi) {
                 val items = listOf("Auto" to (d.engineModel == null)) + engines.map { e -> (e.name.ifBlank { e.model } + (e.resolution.ifBlank { null }?.let { " · $it" } ?: "")) to (e.model == d.engineModel) }
                 MenuPill("cube", d.engineLabel(ui.catalog), "Engine (owner)", items) { i -> ui.update { it.pin(engines.getOrNull(i - 1)) } }
             }
-            val range = d.lengthRange(ui.catalog)
-            if (d.tool == ComposerTool.EXTEND) {
-                // Extend: the shape comes from the source; the length is the new part's.
-                SliderPill("clock", "+${d.duration}s", "New part", d.duration, range) { v -> ui.update { it.copy(duration = v) } }
-            } else {
-                MenuPill("ratio", d.aspect, "Shape", ComposerDraft.SHAPES.map { it to (it == d.aspect) }) { i -> ui.update { it.copy(aspect = ComposerDraft.SHAPES[i]) } }
-                SliderPill("clock", "${d.duration}s", "Length", d.duration, range) { v -> ui.update { it.copy(duration = v) } }
-                Pill("volume", if (d.sound) "On" else "Off", null, "Sound") { ui.update { it.copy(sound = !it.sound) } }
+            // Shape, length and takes are in the Settings row (as on the phone); the bar keeps sound and speaking.
+            if (d.tool != ComposerTool.EXTEND) {
+                Pill(if (d.sound) "volume" else "mute", "Sound", if (d.sound) null else "off", "Sound") { ui.update { it.copy(sound = !it.sound) } }
                 val sp = listOf(null, true, false)
-                MenuPill("talk", when (d.speaking) { true -> "On"; false -> "Off"; null -> "Auto" }, "Speaking", listOf("Auto", "On", "Off").mapIndexed { i, l -> l to (sp[i] == d.speaking) }) { i -> ui.update { it.copy(speaking = sp[i]) } }
+                MenuPill(if (d.speaking == false) "mic" else "talk", when (d.speaking) { true -> "Speaking"; false -> "Not speaking"; null -> "Speaking: auto" }, "Speaking",
+                    listOf("Auto", "Speaking", "Not speaking").mapIndexed { i, l -> l to (sp[i] == d.speaking) }) { i -> ui.update { it.copy(speaking = sp[i]) } }
             }
-            val max = ui.catalog?.takesMax ?: 4
-            MenuPill("layers", "${d.takes}/$max", "Takes", (1..max).map { "$it take${if (it > 1) "s" else ""}" to (it == d.takes) }) { i -> ui.update { it.copy(takes = i + 1) } }
         }
         ui.blocker?.takeIf { !ui.empty }?.let { T(it, m.type.tiny, m.t.warn, Modifier.widthIn(max = 200.dp), maxLines = 2) }
         WideGenerate(ui)
@@ -1022,11 +1019,11 @@ private fun Pill(icon: String, label: String, value: String?, tip: String, onCli
     val m = muse
     val shape = RoundedCornerShape(if (m.isA) 0.dp else 8.dp)
     Box(Modifier.heightIn(min = 48.dp).press(onClick = onClick).semantics(mergeDescendants = true) { contentDescription = "$tip: $label ${value.orEmpty()}"; role = Role.Button }, contentAlignment = Alignment.Center) {
-        Row(Modifier.height(36.dp).clip(shape).background(m.t.bg).border(1.dp, m.t.line, shape).padding(horizontal = 11.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            SIc(icon, 15.dp, m.t.muted)
-            T(label, m.type.body.copy(fontSize = 13.sp, fontWeight = FontWeight.Medium), m.t.ink, maxLines = 1)
-            if (value != null) T(value, m.type.body.copy(fontSize = 13.sp), m.t.muted, maxLines = 1)
+        // A plain text item (the render's "HD ▾ · Sound · Not speaking"), no border or fill.
+        Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            SIc(icon, 18.dp, m.t.muted)
+            T(label, m.scale.label, m.t.ink, maxLines = 1)
+            if (value != null) T(value, m.scale.label, m.t.muted, maxLines = 1)
         }
     }
 }
