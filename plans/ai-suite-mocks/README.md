@@ -60,6 +60,13 @@ File names are `<screen>-<width>-<theme>.png`, with theme `c` = Soft Tactile and
 
   There are no stock photos or placeholder people.
 
+## Coordinator review fixes (2026-11-07)
+- The feed uses justified rows: each row is one height and spans the feed width, and the last row is left-aligned. Photo's feed works the same way.
+- The demo data is truthful: the working state's rig is "35 mm film, anamorphic, 24 mm" with "Eye level, close-up", so the check "A 24 mm lens on a close-up stretches the face" applies (on the phone sheet too).
+- Empty state: the disabled button reads "Generate", with no price, until there's a prompt.
+- The Library badge reads "3 to review".
+- The hover actions are 28 pt targets stacked down the card's right edge, each with a tooltip; the four plus More.
+
 ## Known limits of the mocks
 - The preview stills are at most 640 px wide, so the viewer's large picture is slightly soft. Real takes will be sharp.
 - The drum labels read "35mm film" (the app's current label) while the rows read "35 mm film". The rows follow the server captions, and the drum label will be aligned when it's built.

@@ -65,7 +65,7 @@ def sidebar(w):
     rows = []
     for _, name in NAV:
         on = name == "Create"
-        badge = '<span class="t11" style="margin-left:auto">3</span>' if name == "Library" else ""
+        badge = '<span class="t11" style="margin-left:auto">3 to review</span>' if name == "Library" else ""
         rows.append(f'<div class="row t13" style="gap:10px;height:30px;padding:0 10px;border-radius:8px;'
                     f'{"background:var(--field);color:var(--ink);font-weight:500" if on else "color:var(--ink2)"}">{I(NAV_ICON[name], 16)}{name}{badge}</div>')
     return (f'<div style="width:{w}px;flex:none;padding:20px 12px 16px;border-right:1px solid var(--hair);display:flex;flex-direction:column;gap:2px">'
@@ -110,7 +110,7 @@ def composer(mode="Shot", inputs=None, prompt=None, rows=None, notice=None, foot
 def footer_shot(price="$0.65", line="9:16, 10 s, 1 take, sound on", quality="HD", label=None, off=False):
     return (f'<div class="row" style="gap:4px;margin:0 -10px 10px"><div class="quiet">{quality} {I("caret-down", 12)}</div>'
             f'<div class="quiet" style="color:var(--ink2)">{line}</div></div>'
-            f'<div class="go" style="{"opacity:.4" if off else ""}">{label or "Generate · " + price}</div>')
+            f'<div class="go" style="{"opacity:.4" if off else ""}">{label or ("Generate" if off else "Generate · " + price)}</div>')
 
 def rig_check(text, fix="Fix"):
     return (f'<div class="row t13" style="gap:8px;margin-top:10px;padding:8px 10px;border-radius:8px;background:var(--field)">'
@@ -120,6 +120,9 @@ AUTO_ROWS = [("Camera", "Auto"), ("Angle", "Auto"), ("Move", "Auto"), ("Light", 
 SHOT_ROWS = [("Camera", "35 mm film, anamorphic"), ("Angle", "Eye level, medium"), ("Move", "Dolly in"), ("Light", "Window"),
              ("Look", "Golden warmth"), ("Style", "UGC, calm")]
 SHOT_INPUTS = [(MODEL, MODEL_IMG, ""), ("Start frame", None, "Optional"), ("End frame", None, "Optional"), ("References", None, "Up to 9")]
+# The working state's rig: the clash the rig check names is really there (24 mm on a close-up).
+WORKING_ROWS = [("Camera", "35 mm film, anamorphic, 24 mm"), ("Angle", "Eye level, close-up"), ("Move", "Dolly in"), ("Light", "Window"),
+                ("Look", "Golden warmth"), ("Style", "UGC, calm")]
 SHOT_PROMPT = (f'{chip(MODEL, "@")} walks out of the café into the evening street, stops at the corner and looks back over her shoulder. '
                f'{chip("Dolly in", "#")}')
 
@@ -132,9 +135,23 @@ TAKES_YDAY = [("genres/documentary.jpg", 9 / 16), ("lighting/neon.webp", 9 / 16)
 def card(img, ar, h, extra="", style=""):
     return f'<div class="card" style="width:{h * ar:.0f}px;height:{h}px;{style}"><img src="{src(img)}">{extra}</div>'
 
+def justified(items, W, target, gap=10):
+    """Rows that span the feed width (Google Photos style): each row is one height, chosen so its cards fill W; the last
+    row keeps the target height and sits left-aligned. items: (render(h) -> html, aspect)."""
+    rows, row, out = [], [], []
+    for it in items:
+        row.append(it)
+        if sum(a for _, a in row) * target + gap * (len(row) - 1) >= W:
+            rows.append((row, True)); row = []
+    if row: rows.append((row, False))
+    for r, full in rows:
+        h = (W - gap * (len(r) - 1)) / sum(a for _, a in r) if full else target
+        out.append(f'<div class="row" style="gap:{gap}px;align-items:flex-start;margin-bottom:{gap}px">{"".join(fn(h) for fn, _ in r)}</div>')
+    return "".join(out)
+
 def group(label, cards, right=""):
     return (f'<div style="margin-bottom:22px"><div class="row" style="margin-bottom:10px"><div class="glabel" style="margin:0">{label}</div>'
-            f'<div class="grow"></div>{right}</div><div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-start">{"".join(cards)}</div></div>')
+            f'<div class="grow"></div>{right}</div>{cards if isinstance(cards, str) else '<div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-start">' + "".join(cards) + "</div>"}</div>')
 
 def feed_bar(title="All takes"):
     return (f'<div class="row" style="height:56px;padding:0 24px;flex:none"><div class="quiet on" style="margin-left:-10px">{title} {I("caret-down", 12)}</div>'
@@ -152,15 +169,21 @@ def queued_card(img, ar, h):
                 '<div class="t11" style="position:absolute;left:10px;bottom:9px;color:var(--ink)">Queued</div>', "opacity:.9")
 
 def hover_card(img, ar, h):
+    """The hovered take: it plays; its prompt and specs at the bottom; the four actions and More as 28 pt targets down the
+    right edge, each with a tooltip (the one under the pointer is drawn)."""
     acts = [("shuffle", "Vary"), ("arrow-line-right", "Extend"), ("frame-corners", "Use as start frame"), ("scissors", "Open in Edit"), ("dots-three", "More")]
-    btns = "".join(f'<div title="{n}" style="width:28px;height:28px;border-radius:8px;display:grid;place-items:center;background:rgba(255,255,255,.14);color:#fff">{I(i, 16)}</div>'
-                   for i, n in acts)
-    over = (f'<div class="scrim"></div><div style="position:absolute;left:10px;right:10px;bottom:10px;color:#fff">'
-            f'<div class="t11" style="color:rgba(255,255,255,.85);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'
+    btns = "".join(f'<div title="{n}" style="width:28px;height:28px;border-radius:8px;display:grid;place-items:center;'
+                   f'background:{"rgba(255,255,255,.32)" if n == "Use as start frame" else "rgba(0,0,0,.45)"};color:#fff">{I(i, 16)}</div>' for i, n in acts)
+    over = (f'<div class="scrim"></div><div style="position:absolute;left:10px;right:44px;bottom:10px;color:#fff">'
+            f'<div class="t11" style="color:rgba(255,255,255,.9);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">'
             f'Zelphira walks out of the café into the evening street…</div>'
-            f'<div class="t11" style="color:rgba(255,255,255,.7);margin:3px 0 8px">9:16, 10 s, $0.65</div><div class="row" style="gap:4px">{btns}</div></div>'
-            f'<div style="position:absolute;right:8px;top:8px;width:22px;height:22px;border-radius:50%;border:1.5px solid rgba(255,255,255,.85)"></div>')
-    return card(img, ar, h, over, "outline:2px solid var(--ink);outline-offset:2px")
+            f'<div class="t11" style="color:rgba(255,255,255,.7);margin-top:3px">9:16, 10 s, $0.65</div></div>'
+            f'<div style="position:absolute;right:6px;top:6px;display:flex;flex-direction:column;gap:4px">{btns}</div>'
+            f'<div style="position:absolute;left:8px;top:8px;width:20px;height:20px;border-radius:50%;border:1.5px solid rgba(255,255,255,.85)"></div>')
+    c = card(img, ar, h, over, "outline:2px solid var(--ink);outline-offset:2px")
+    tip = (f'<div class="t11" style="position:absolute;left:calc(100% - 4px);top:{6 + 2 * 32 + 4}px;background:var(--ink);color:var(--canvas);'
+           f'padding:4px 8px;border-radius:6px;white-space:nowrap;z-index:4">Use as start frame</div>')
+    return f'<div style="position:relative;flex:none">{c}{tip}</div>'
 
 def tooltip(text, x, y):
     return (f'<div class="t11" style="position:absolute;left:{x}px;top:{y}px;background:var(--ink);color:var(--canvas);padding:4px 8px;border-radius:6px;'
@@ -177,39 +200,41 @@ def m_empty(t, w, h):
             f'<div class="row" style="gap:10px;margin-top:20px;justify-content:center">{sug}</div></div></div>')
     return mac_frame(t, w, h, comp, feed)
 
-def feed_today(h_card, running=True, queued=True, hover=None, extra_days=False):
+def feed_w(w): return w - (208 if w >= 1400 else 192) - (400 if w >= 1400 else 372) - 48
+
+def feed_today(h_card, W=700, running=True, queued=True, hover=None, extra_days=False):
     blocks = []
     if queued:
         blocks.append(group("Queued, 2 shots", [queued_card("lighting/neon.webp", 9 / 16, h_card * .7), queued_card("eras/1970s.jpg", 9 / 16, h_card * .7)],
                             right='<div class="outline">Run · $1.30</div>'))
-    cards = []
-    if running: cards.append(running_card("lighting/window.webp", 9 / 16, h_card, 62, "About 40 s left"))
+    items = []
+    if running: items.append((lambda h: running_card("lighting/window.webp", 9 / 16, h, 62, "About 40 s left"), 9 / 16))
     for k, (img, ar) in enumerate(TAKES_TODAY):
-        cards.append(hover_card(img, ar, h_card) if hover == k else card(img, ar, h_card))
-    blocks.append(group("Today", cards))
-    if extra_days: blocks.append(group("Yesterday", [card(i, a, h_card) for i, a in TAKES_YDAY]))
+        items.append(((lambda h, i=img, a=ar: hover_card(i, a, h)) if hover == k else (lambda h, i=img, a=ar: card(i, a, h)), ar))
+    blocks.append(group("Today", justified(items, W, h_card)))
+    if extra_days: blocks.append(group("Yesterday", justified([(lambda h, i=i, a=a: card(i, a, h), a) for i, a in TAKES_YDAY], W, h_card)))
     return blocks
 
 def m_working(t, w, h):
-    comp = composer(inputs=SHOT_INPUTS, prompt=SHOT_PROMPT, rows=SHOT_ROWS,
-                    notice=rig_check("A wide lens on a close-up stretches the face."), footer=footer_shot())
+    comp = composer(inputs=SHOT_INPUTS, prompt=SHOT_PROMPT, rows=WORKING_ROWS,
+                    notice=rig_check("A 24 mm lens on a close-up stretches the face."), footer=footer_shot())
     hc = 220 if w >= 1400 else 190
-    feed = f'<div style="position:absolute;inset:0;display:flex;flex-direction:column">{feed_bar()}<div style="padding:0 24px;overflow:hidden">{"".join(feed_today(hc, extra_days=False))}</div></div>'
+    feed = f'<div style="position:absolute;inset:0;display:flex;flex-direction:column">{feed_bar()}<div style="padding:0 24px;overflow:hidden">{"".join(feed_today(hc, feed_w(w), extra_days=False))}</div></div>'
     return mac_frame(t, w, h, comp, feed)
 
 def m_results(t, w, h):
     comp = composer(inputs=SHOT_INPUTS, prompt=SHOT_PROMPT, rows=SHOT_ROWS, footer=footer_shot())
     hc = 220 if w >= 1400 else 190
     feed = (f'<div style="position:absolute;inset:0;display:flex;flex-direction:column">{feed_bar()}'
-            f'<div style="padding:0 24px;overflow:hidden">{"".join(feed_today(hc, running=False, queued=False, hover=1, extra_days=True))}</div></div>')
-    tip = tooltip("Use as start frame", 24 + hc * 9 / 16 + 10 + 10 + 64 - 30, 56 + 28 + hc - 6)
+            f'<div style="padding:0 24px;overflow:hidden">{"".join(feed_today(hc, feed_w(w), running=False, queued=False, hover=1, extra_days=True))}</div></div>')
+    tip = ""
     return mac_frame(t, w, h, comp, feed + tip)
 
 def m_viewer(t, w, h):
     comp = composer(inputs=SHOT_INPUTS, prompt=SHOT_PROMPT, rows=SHOT_ROWS, footer=footer_shot())
     hc = 220 if w >= 1400 else 190
     feed = (f'<div style="position:absolute;inset:0;display:flex;flex-direction:column;opacity:.25">{feed_bar()}'
-            f'<div style="padding:0 24px">{"".join(feed_today(hc, running=False, queued=False, extra_days=True))}</div></div>')
+            f'<div style="padding:0 24px">{"".join(feed_today(hc, feed_w(w), running=False, queued=False, extra_days=True))}</div></div>')
     side = 208 if w >= 1400 else 192
     col = 400 if w >= 1400 else 372
     media_w = w - side - col - 48
@@ -241,7 +266,7 @@ def rig_panel(t, w, tab, body, saved=True):
 
 def m_rig_camera(t, w, h):
     comp = composer(inputs=SHOT_INPUTS, prompt=SHOT_PROMPT, rows=SHOT_ROWS, footer=footer_shot())
-    feed = f'<div style="position:absolute;inset:0;opacity:.25;display:flex;flex-direction:column">{feed_bar()}<div style="padding:0 24px">{"".join(feed_today(200, running=False, queued=False))}</div></div>'
+    feed = f'<div style="position:absolute;inset:0;opacity:.25;display:flex;flex-direction:column">{feed_bar()}<div style="padding:0 24px">{"".join(feed_today(200, feed_w(w), running=False, queued=False))}</div></div>'
     dh = h - 190
     body = (f'<div class="row t13" style="gap:8px;margin-top:16px"><span style="width:7px;height:7px;border-radius:50%;background:#F2A93B"></span>'
             f'35 mm film, anamorphic, 50 mm, f/2.8<div class="grow"></div><div class="quiet">Reset</div></div>'
@@ -256,7 +281,7 @@ MOVES = [("static", "Static"), ("dolly_in", "Dolly in"), ("dolly_out", "Dolly ou
 
 def m_rig_move(t, w, h):
     comp = composer(inputs=SHOT_INPUTS, prompt=SHOT_PROMPT, rows=SHOT_ROWS, footer=footer_shot())
-    feed = f'<div style="position:absolute;inset:0;opacity:.25;display:flex;flex-direction:column">{feed_bar()}<div style="padding:0 24px">{"".join(feed_today(200, running=False, queued=False))}</div></div>'
+    feed = f'<div style="position:absolute;inset:0;opacity:.25;display:flex;flex-direction:column">{feed_bar()}<div style="padding:0 24px">{"".join(feed_today(200, feed_w(w), running=False, queued=False))}</div></div>'
     cats = "".join(f'<div class="quiet {"on" if c == "All" else ""}">{c}</div>' for c in ["All", "Push and pull", "Orbit", "Crane", "Handheld", "Pan and tilt", "Drone"])
     cols = 5 if w >= 1400 else 4
     gw = (w - (208 if w >= 1400 else 192) - (400 if w >= 1400 else 372) - 24 - 48 - (cols - 1) * 12) / cols
@@ -288,7 +313,8 @@ def m_photo(t, w, h):
     comp = composer("Photo", inputs, prompt, rows, footer=foot)
     hc = 200 if w >= 1400 else 170
     feed = (f'<div style="position:absolute;inset:0;display:flex;flex-direction:column">{feed_bar("All photos")}<div style="padding:0 24px">'
-            f'{group("Today", [card(i, 4 / 5, hc) for i in PHOTO_TAKES[:6]])}{group("Yesterday", [card(i, 4 / 5, hc) for i in PHOTO_TAKES[4:]])}</div></div>')
+            f'{group("Today", justified([(lambda h, i=i: card(i, 4 / 5, h), 4 / 5) for i in PHOTO_TAKES[:6]], feed_w(w), hc))}'
+            f'{group("Yesterday", justified([(lambda h, i=i: card(i, 4 / 5, h), 4 / 5) for i in PHOTO_TAKES[4:]], feed_w(w), hc))}</div></div>')
     items = [("Window portrait", "Soft side light, 85 mm, 4:5"), ("Studio clean", "Three-point light, white sweep"), ("Golden hour outdoors", "Warm backlight, 50 mm"),
              ("Mirror selfie", "Phone camera, bathroom light"), ("Product in hand", "Close-up, soft top light"), ("Editorial", "Hard flash, 35 mm film")]
     cells = "".join(f'<div style="padding:7px 10px;margin:0 -10px;border-radius:8px;{"background:var(--field)" if k == 0 else ""}">'
@@ -310,7 +336,7 @@ def m_storyboard(t, w, h):
             f'<div class="quiet">9:16, 3 scenes, 10 s</div></div><div class="go">Generate · 3 shots · $1.95</div>')
     comp = composer("Storyboard", inputs, False, rows, footer=foot,
                     notice='<div class="t11" style="margin-top:8px">This rig is shared by every scene. A scene can set its own move.</div>')
-    feed = f'<div style="position:absolute;inset:0;opacity:.25;display:flex;flex-direction:column">{feed_bar()}<div style="padding:0 24px">{"".join(feed_today(200, running=False, queued=False))}</div></div>'
+    feed = f'<div style="position:absolute;inset:0;opacity:.25;display:flex;flex-direction:column">{feed_bar()}<div style="padding:0 24px">{"".join(feed_today(200, feed_w(w), running=False, queued=False))}</div></div>'
     scenes = ""
     for k, (p, ln, mv) in enumerate(SCENES):
         scenes += (f'<div class="row" style="gap:16px;padding:14px 0;border-bottom:1px solid var(--hair);align-items:flex-start">'
@@ -332,7 +358,7 @@ def m_recast(t, w, h):
     comp = composer("Recast", inputs, False, rows, footer=foot,
                     extra=f'<div class="row t13m" style="gap:6px;margin-top:12px;color:var(--accent)">{I("plus", 14)}Add direction</div>',
                     notice='<div class="t11" style="margin-top:6px">Camera, angle, move and light come from your clip.</div>')
-    feed = f'<div style="position:absolute;inset:0;opacity:.25;display:flex;flex-direction:column">{feed_bar()}<div style="padding:0 24px">{"".join(feed_today(200, running=False, queued=False))}</div></div>'
+    feed = f'<div style="position:absolute;inset:0;opacity:.25;display:flex;flex-direction:column">{feed_bar()}<div style="padding:0 24px">{"".join(feed_today(200, feed_w(w), running=False, queued=False))}</div></div>'
     side = 208 if w >= 1400 else 192
     col = 400 if w >= 1400 else 372
     area_w = w - side - col - 24 - 48
@@ -379,7 +405,7 @@ def p_feed(t):
 
 def p_sheet(t):
     rows = "".join(f'<div class="row t13" style="height:48px;gap:12px;font-size:14px;border-bottom:1px solid var(--hair)"><div class="ink2" style="width:72px">{k}</div>'
-                   f'<div class="grow" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{v}</div>{I("caret-right", 14, "var(--ink2)")}</div>' for k, v in SHOT_ROWS)
+                   f'<div class="grow" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{v}</div>{I("caret-right", 14, "var(--ink2)")}</div>' for k, v in WORKING_ROWS)
     tiles = "".join(f'<div style="width:62px"><div class="tile {"" if img else "empty"}" style="width:48px;height:48px">{"<img src=" + src(img) + ">" if img else I("plus", 16)}</div>'
                     f'<div class="t11" style="margin-top:5px;color:{"var(--ink)" if img else "var(--ink2)"};white-space:nowrap">{n}</div></div>' for n, img, _ in SHOT_INPUTS)
     return f"""
@@ -391,7 +417,7 @@ def p_sheet(t):
     <div class="row" style="gap:4px;align-items:flex-start">{tiles}</div>
     <div class="t15" style="margin-top:12px;background:var(--raised);border-radius:12px;padding:12px 14px">{SHOT_PROMPT}</div>
     <div style="margin-top:8px">{rows}</div>
-    {rig_check("A wide lens on a close-up stretches the face.")}
+    {rig_check("A 24 mm lens on a close-up stretches the face.")}
   </div>
   <div style="padding:10px 16px 24px;border-top:1px solid var(--hair)">
     <div class="row" style="gap:4px;margin:0 -10px 8px"><div class="quiet" style="height:40px">HD {I("caret-down", 12)}</div><div class="quiet" style="height:40px">9:16, 10 s, 1 take, sound on</div></div>
