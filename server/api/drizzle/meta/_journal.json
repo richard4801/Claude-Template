@@ -99,6 +99,13 @@
       "when": 1793929987397,
       "tag": "0013_suite_locations",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794077302232,
+      "tag": "0014_suite_drafts_rigs",
+      "breakpoints": true
     }
   ]
 }

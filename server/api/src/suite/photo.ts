@@ -34,6 +34,8 @@ export const PhotoRequestSchema = z.object({
   lockSeed: z.boolean().optional(),
   shuffleSeed: z.number().int().min(0).optional(),
   title: z.string().max(200).optional(),
+  /** AI suite (workstream 1): the composer's draft, checked by suite/drafts.ts and stored with every still. */
+  draft: z.unknown().optional(),
 }).strict();
 export type PhotoRequest = z.infer<typeof PhotoRequestSchema>;
 

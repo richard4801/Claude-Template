@@ -31,6 +31,7 @@ import { CatalogError } from '../replicate/catalog.js';
 import { photoLook } from '../editor/photo.js'; // Editor v2 (workstream 3)
 import type { Look } from '../editor/look.js';
 import { PhotoRequestSchema, photoButton, photoFilter, photoRigCheck, stillRig, type StillRig } from '../suite/photo.js'; // AI suite Photo tool (workstream 3)
+import { draftOf, RigSchema, type Draft } from '../suite/drafts.js';
 
 /** SSE comment interval: well under any hosting proxy's idle timeout (Koyeb, Railway, Cloudflare: 60-100 s). */
 export const SSE_KEEPALIVE_MS = 10_000;
@@ -49,7 +50,8 @@ export function modelView(m: typeof models.$inferSelect) {
   // Every model shows the 7 sheet images, also a row written before faceTq existed.
   const slots = SLOT_KEYS.map(k => m.slots.find(s => s.key === k) ?? { key: k, image: null, source: 'upload' as const, busy: false });
   return compact({ id: m.id, name: m.name, age: m.age, niche: m.niche, look: m.look, neverAdd: m.neverAdd, slots, outfitIds: m.outfitIds, personality: m.personality, notes: m.notes,
-    identityBodySlot: bodySlotOf(m), archived: !!m.archivedAt, archivedAt: m.archivedAt ?? undefined });
+    identityBodySlot: bodySlotOf(m), archived: !!m.archivedAt, archivedAt: m.archivedAt ?? undefined,
+    defaultRig: m.defaultRig ?? undefined /* AI suite (workstream 1): filled into rows still on Auto when she's @-mentioned */ });
 }
 export const outfitView = (o: typeof outfits.$inferSelect) =>
   compact({ id: o.id, modelId: o.modelId, name: o.name, mode: o.mode, description: o.description, angles: o.angles, faces: o.faces ?? undefined, state: o.state, prompt: o.prompt, cost: o.cost ?? undefined });
@@ -170,7 +172,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   app.patch<{ Params: { id: string } }>('/v1/models/:id', async req => {
     const b = parse(z.object({ name: z.string().max(80).optional(), niche: z.string().max(80).optional(), personality: z.string().max(2000).optional(),
       notes: z.string().max(4000).optional(), neverAdd: z.array(z.string().max(80)).max(50).optional(), look: z.string().max(1000).optional(),
-      identityBodySlot: z.enum(BODY_SLOTS).optional() }).passthrough(), req.body);
+      identityBodySlot: z.enum(BODY_SLOTS).optional(),
+      // AI suite (workstream 1): her default rig (suite/drafts.ts RigSchema); null clears it.
+      defaultRig: RigSchema.nullable().optional() }).passthrough(), req.body);
     const m = await model(req.user, req.params.id);
     if (typeof b.name === 'string' && !b.name.trim()) throw badRequest('Give her a name');
     const patch: Partial<typeof models.$inferInsert> = {};
@@ -181,6 +185,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     }
     for (const k of ['name', 'niche', 'personality', 'notes', 'look'] as const) if (typeof b[k] === 'string') patch[k] = b[k];
     if (b.neverAdd) patch.neverAdd = b.neverAdd.map(x => x.trim()).filter(Boolean);
+    if (b.defaultRig !== undefined) patch.defaultRig = b.defaultRig && Object.keys(b.defaultRig).length ? b.defaultRig : null;
     const [u] = Object.keys(patch).length ? await db.update(models).set(patch).where(eq(models.id, m.id)).returning() : [m];
     emitModel(u!);
     return modelView(u!);
@@ -562,9 +567,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   });
 
   /** Runs a planned shoot: holds, generates, grades and saves the stills (`/v1/shoots` and the suite's Photo tool). */
-  async function runShoot(req: { user: AuthUser }, s: Awaited<ReturnType<typeof planShoot>>, filter?: Look, o2: { noun?: string } = {}) {
+  async function runShoot(req: { user: AuthUser }, s: Awaited<ReturnType<typeof planShoot>>, filter?: Look, o2: { noun?: string; draft?: Draft | null } = {}) {
     const noun = o2.noun ?? 'Photo', billNoun = o2.noun ?? 'Photo'; // Photoshoot is gone: legacy /v1/shoots takes are "Photo" too
-    if (s.kind === 'template') return templateShoot(req.user, s, filter, noun, billNoun);
+    if (s.kind === 'template') return templateShoot(req.user, s, filter, noun, billNoun, o2.draft);
     const { b, m, o, count, plan } = s;
     const id = uid('shoot');
     const bill = await new PhotoBill(ctx, whoOf(req.user), id, count * plan.perShot, `${billNoun} · ${count} photo${count === 1 ? '' : 's'}`).start();
@@ -588,7 +593,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const rows = r.images.map((img, n) => ({
       id: uid('s'), studioId: req.user.studioId, userId: req.user.id, kind: 'shot' as const, jobId: null, modelId: m.id, index: n + 1, of: r.images.length,
       title: `${noun} · ${label}`, label: `${label} · ${n + 1}`, engineLabel: ctx.images.shotLabel(r.selection), cost: r.costs[n] ?? 0, seed: r.seed ?? seed ?? 0, status: 'test' as const,
-      thumb: img, prompt, mediaKey: ctx.images.keyOf(img), layers, refs: s.refsIn.length ? s.refsIn : null, createdAt: Date.now() + n,
+      thumb: img, prompt, mediaKey: ctx.images.keyOf(img), layers, refs: s.refsIn.length ? s.refsIn : null, createdAt: Date.now() + n, draft: o2.draft ?? null,
     }));
     const inserted = await db.insert(takes).values(rows).returning();
     emitTakes(req.user.studioId, inserted);
@@ -599,7 +604,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
    * A template shoot: every still gets its own prompt (template layers + identity/outfit/never-add + its own variation
    * draws, or the user's direction in place of pose and angle), its own seed, and the template's after-effects.
    */
-  async function templateShoot(u: AuthUser, s: Extract<Awaited<ReturnType<typeof planShoot>>, { kind: 'template' }>, filter?: Look, noun = 'Photo', billNoun = 'Photo') {
+  async function templateShoot(u: AuthUser, s: Extract<Awaited<ReturnType<typeof planShoot>>, { kind: 'template' }>, filter?: Look, noun = 'Photo', billNoun = 'Photo', draft: Draft | null = null) {
     const { b, m, o, count, plan, identity, product } = s;
     // A `filter` on the request replaces the template's own look for these stills.
     const t = filter ? { ...s.t, layers: { ...s.t.layers, afterEffects: { ...(s.t.layers.afterEffects ?? {}), look: filter } } } : s.t;
@@ -620,7 +625,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
           id: uid('s'), studioId: u.studioId, userId: u.id, kind: 'shot', jobId: null, modelId: m.id, index: n + 1, of: count,
           title: `${noun} · ${t.name}`.slice(0, 60), label: `${t.name.slice(0, 28)} · ${n + 1}`, engineLabel: ctx.images.shotLabel(r.selection), cost: r.costUsd,
           seed: p.seed ?? r.seed ?? 0, status: 'test', thumb: fx.ref, prompt: p.fullText, publicPrompt: p.visibleText, mediaKey: fx.key,
-          layers: t.layers, templateId: t.id, templateName: t.name, templateOwnerId: t.ownerId, variation: p.variation, shuffleSeed, refs: s.refsIn.length ? s.refsIn : null, createdAt: now + n,
+          layers: t.layers, templateId: t.id, templateName: t.name, templateOwnerId: t.ownerId, variation: p.variation, shuffleSeed, refs: s.refsIn.length ? s.refsIn : null, createdAt: now + n, draft,
         });
       }
     } catch (e) {
@@ -655,8 +660,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       ...(s.kind === 'template' ? { preset: { id: s.t.id, name: s.t.name } } : { prompt: s.custom ?? s.built.text }) };
   });
   app.post('/v1/suite/photos', async req => {
+    const draft = draftOf(req.body); // AI suite (workstream 1): every still keeps the composer draft ("Reuse settings")
     const { s, graded } = await photoPlan(req.user, req.body);
-    return { tool: 'photo', takes: await runShoot(req, s, graded?.filter, { noun: 'Photo' }) };
+    return { tool: 'photo', takes: await runShoot(req, s, graded?.filter, { noun: 'Photo', draft }) };
   });
 
   // ------------------------------------------------------------------ photo templates

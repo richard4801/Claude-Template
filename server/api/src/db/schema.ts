@@ -128,6 +128,8 @@ export const models = pgTable('models', {
   sheetVersions: jsonb('sheet_versions').$type<SheetVersion[]>().notNull().default([]),
   /** The one full-body sheet image her photos send (front, tq, side or back; null = front). */
   identityBodySlot: text('identity_body_slot'),
+  /** AI suite (workstream 1): her default rig, filled into the composer's rows still on Auto when she's @-mentioned. */
+  defaultRig: jsonb('default_rig').$type<import('../suite/drafts.js').Rig>(),
   createdBy: text('created_by'),
   createdAt: ms('created_at').notNull(),
 }, t => [index('models_studio_idx').on(t.studioId)]);
@@ -234,6 +236,8 @@ export const jobs = pgTable('jobs', {
   outputs: jsonb('outputs').$type<Record<string, unknown>[]>(),
   /** Worker timing stats from done: {load_s, gen_s, step_times_s, peak_vram_gb, attention}. */
   stats: jsonb('stats').$type<Record<string, unknown>>(),
+  /** AI suite (workstream 1): the composer's full draft (tokens, rig, slots, tool, bottom bar) for "Reuse settings". */
+  draft: jsonb('draft').$type<import('../suite/drafts.js').Draft>(),
 }, t => [index('jobs_studio_idx').on(t.studioId, t.createdAt), index('jobs_gpu_idx').on(t.gpuState, t.createdAt)]);
 
 export const takes = pgTable('takes', {
@@ -269,6 +273,8 @@ export const takes = pgTable('takes', {
   refs: jsonb('refs').$type<{ image: ImageRef; guides: ('pose' | 'look' | 'scene')[] }[]>(),
   /** The prompt as non-owners of the template see it ("Template: <name>" plus their own layers). */
   publicPrompt: text('public_prompt'),
+  /** AI suite (workstream 1): the composer's draft it was made with (photos carry their own; suite takes copy the job's). */
+  draft: jsonb('draft').$type<import('../suite/drafts.js').Draft>(),
   createdAt: ms('created_at').notNull(),
 }, t => [index('takes_studio_idx').on(t.studioId, t.createdAt), index('takes_template_idx').on(t.templateId, t.createdAt)]);
 
