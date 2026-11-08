@@ -289,7 +289,8 @@ final class AXWalker {
         let element: AXUIElement
         let role: String
         let label: String
-        var key: String { "\(role)|\(label)" }
+        /// History entries undo into "Undo: Undo: …" entries; the same control however deep the chain goes.
+        var key: String { "\(role)|\(label.replacingOccurrences(of: "Undo: ", with: ""))" }
         var isSlider: Bool { role == "AXSlider" }
         var isMenu: Bool { role == "AXPopUpButton" || role == "AXMenuButton" }
     }
