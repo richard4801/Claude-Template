@@ -591,14 +591,26 @@ struct RecreateStill: View {
     @State private var image: NSImage?
 
     var body: some View {
-        ZStack {
-            placeholder
-            if let image {
-                Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+        // The picture is an overlay, so it fills the frame it's given and never sizes the view: as a ZStack child, a
+        // `.fill` image made the stack as big as the picture's aspect needed, and the lanes' shot tiles drew over the
+        // player and each other (owner test 2026-11-08).
+        placeholder
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay {
+                if let image {
+                    Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                }
             }
+            .clipped()
+        .task(id: link) {
+            // Review mode's lanes check draws real portrait stills from local files (SnapshotRunner.recreateLanesShots).
+            if SnapshotRunner.probing, let link, link.hasPrefix("file://"), let u = URL(string: link) {
+                image = NSImage(contentsOf: u)
+                return
+            }
+            image = await RecreateMediaLoader.image(store.recreateMedia(link))
         }
-        .clipped()
-        .task(id: link) { image = await RecreateMediaLoader.image(store.recreateMedia(link)) }
     }
 
     private var placeholder: some View {
