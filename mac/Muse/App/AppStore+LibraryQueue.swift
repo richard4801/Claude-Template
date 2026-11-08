@@ -59,7 +59,12 @@ extension AppStore {
     func toggleInCollection(_ c: LibraryCollection, takeIds: [String], inIt: Bool) {
         guard let l = libraryAPI else { return }
         perform { [self] in
-            let out = inIt ? try await l.removeFromCollection(c.id, takeIds: takeIds) : try await l.addToCollection(c.id, takeIds: takeIds)
+            let out: LibraryCollection
+            if inIt {
+                out = try await l.removeFromCollection(c.id, takeIds: takeIds)
+            } else {
+                out = try await l.addToCollection(c.id, takeIds: takeIds)
+            }
             upsertCollection(out)
             showToast(inIt ? "Removed from \(out.name)" : "Saved to \(out.name)")
         }
