@@ -200,7 +200,12 @@ final class EditSuiteSession {
         guard isReady, !busy else { return false }
         if !playing { state.playhead = playhead }
         let before = state.project
-        let ok = f(&state)
+        // The closure works on a copy (owner crash 2026-11-08): `f(&state)` held exclusive access to the session's state for
+        // the whole closure, so any read of session.state inside it (a view helper) was a Swift exclusivity trap. Reads
+        // inside now see the state as it was before this edit; the copy is cheap (copy-on-write).
+        var next = state
+        let ok = f(&next)
+        state = next
         playhead = state.playhead
         if state.project != before { projectChanged() }
         return ok
@@ -223,7 +228,7 @@ final class EditSuiteSession {
     func endGesture() { state.endGesture() }
 
     /// View-only changes (selection, zoom, tabs, snapping…).
-    func view(_ f: (inout EditSuiteState) -> Void) { f(&state) }
+    func view(_ f: (inout EditSuiteState) -> Void) { var next = state; f(&next); state = next }   // a copy, as in edit (exclusivity)
 
     func undo() { nextChangeLabel = "Undo"; edit { $0.undo() }; nextChangeLabel = nil }
     func redo() { nextChangeLabel = "Redo"; edit { $0.redo() }; nextChangeLabel = nil }

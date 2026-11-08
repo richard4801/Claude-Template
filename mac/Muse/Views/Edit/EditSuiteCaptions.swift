@@ -192,7 +192,9 @@ struct EditSuiteCaptionsMode: View {
                 VStack(alignment: .leading, spacing: 0) {
                     SuiteLabel("Hook templates", trailing: "First 2 seconds").padding(.bottom, 10)
                     ForEach(EditV2.hooks) { h in
-                        Button { session.edit { $0.addHook(h, text: hookText(h)) } } label: {
+                        // Owner crash 2026-11-08: hookText reads session.state, so it must run BEFORE edit (which holds
+                        // exclusive access to the state while its closure runs); the closure only touches its inout state.
+                        Button { let text = hookText(h); session.edit { $0.addHook(h, text: text) } } label: {
                             HStack(spacing: 10) {
                                 HookChip(template: h).frame(width: 96, height: 32)
                                 Text(hookText(h) ?? h.label).font(t.body(13)).foregroundStyle(t.ink).lineLimit(1)

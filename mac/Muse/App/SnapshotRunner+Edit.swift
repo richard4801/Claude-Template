@@ -51,6 +51,8 @@ extension SnapshotRunner {
             ["id": "rx_turned", "kind": "take", "title": "Rotated", "videoUrl": turned.absoluteString, "durationSec": 4, "width": 640, "height": 360, "createdAt": now - 2, "look": look],
             ["id": "rx_trim", "kind": "edit", "title": "Trimmed to 8 s", "videoUrl": long.absoluteString, "parentTakeId": "rx_zero", "durationSec": 8, "createdAt": now - 3,
              "edits": ["version": 1, "sourceTakeId": "rx_zero", "sourceDurationSec": 15, "segments": [["inSec": 0, "outSec": 8, "speed": 1]], "mute": false]],
+            ["id": "rx_full", "kind": "take", "title": "Real sound", "videoUrl": long.absoluteString, "durationSec": 15, "width": 432, "height": 768, "fps": 30,
+             "createdAt": now - 5, "look": look],
             ["id": "rx_gone", "kind": "take", "title": "File missing", "videoUrl": media.appendingPathComponent("nope.mp4").absoluteString, "createdAt": now - 4],
         ]
         var made: [Take] = []
@@ -81,6 +83,8 @@ extension SnapshotRunner {
         }
         store.editor?.close()
         store.editor = nil
+        // Every control of the Edit suite, on a take with real stereo AAC sound (owner crash 2026-11-08: Hook templates).
+        await controlsCheck(store, takeId: "rx_full", note: note)
         store.takes.removeAll { $0.id.hasPrefix("rx_") }
         store.go(.home)
         note("ALL DONE")
@@ -158,5 +162,128 @@ extension SnapshotRunner {
         input.markAsFinished()
         await writer.finishWriting()
         if writer.status != .completed { throw writer.error ?? ApiError("edit_check", "Couldn't write the test video") }
+    }
+
+    // MARK: Every control (owner request 2026-11-08: "vet the entire Edit function")
+
+    /// Presses every button, checkbox, tab and radio button of the Edit suite, and nudges every slider one step, through the
+    /// app's own accessibility tree (so each control's real action runs, closures and all). It explores as panels appear
+    /// (a tab press reveals its panel's controls), handles sheets (works inside them, then closes them) and comes back if
+    /// a control leaves the editor. Each control is logged before it is used. Skipped on purpose, and logged as SKIP:
+    /// controls that open a blocking system panel (file import, the save panel behind the sheet's Export, the microphone)
+    /// and menus (their tracking loop would block this run).
+    static func controlsCheck(_ store: AppStore, takeId: String, note: (String) -> Void) async {
+        note("START controls \(takeId)")
+        store.openEdit(takeId: takeId)
+        try? await Task.sleep(for: .seconds(9))
+        let deny = ["Import", ".cube import", "Import music", "Import sound", "Record a voice-over", "Stop recording the voice-over", "Record VO",
+                    "Back", "Close editor", "Translate…"]
+        let denyInSheet = ["Export", "Save to Library"]
+        var used = Set<String>(), skipped = Set<String>(), left = Set<String>()
+        var presses = 0, nudges = 0
+        func inEditor() -> Bool { store.screen == .edit && axFind(mainWindow?.contentView, label: "Timeline ruler") }
+        guard inEditor() else { note("FAIL controls: the editor didn't open on \(takeId)"); return }
+        for _ in 0..<600 {
+            guard let w = mainWindow else { break }
+            let sheet = w.attachedSheet
+            let root: NSView? = sheet?.contentView ?? w.contentView
+            let all = axControls(root)
+            let next = all.first { c in
+                let key = (sheet == nil ? "" : "sheet:") + c.key
+                if used.contains(key) || skipped.contains(c.key) || left.contains(c.key) { return false }
+                if deny.contains(where: { c.label == $0 }) || (sheet != nil && denyInSheet.contains(c.label)) || c.isMenu {
+                    if !skipped.contains(c.key) { skipped.insert(c.key); note("SKIP \(c.role) \(c.label)") }
+                    return false
+                }
+                return true
+            }
+            guard let c = next else {
+                if let sheet {
+                    // Done with this sheet: close it like a person would.
+                    note("CLOSE sheet")
+                    if let close = all.first(where: { ["Close", "Cancel", "Use the latest", "Keep this device's changes", "Done"].contains($0.label) }) {
+                        _ = close.press()
+                    } else { w.endSheet(sheet) }
+                    try? await Task.sleep(for: .seconds(0.8))
+                    if w.attachedSheet === sheet { w.endSheet(sheet) }
+                    continue
+                }
+                break
+            }
+            let key = (sheet == nil ? "" : "sheet:") + c.key
+            used.insert(key)
+            note("\(c.isSlider ? "NUDGE" : "PRESS") \(c.role) \(c.label)")
+            if c.isSlider { _ = c.increment(); nudges += 1 } else { _ = c.press(); presses += 1 }
+            try? await Task.sleep(for: .seconds(0.45))
+            // A control that leaves the editor (navigation): note it, never press it again, and come back.
+            if mainWindow?.attachedSheet == nil, !inEditor() {
+                left.insert(c.key)
+                note("LEFT the editor via \(c.label); reopening")
+                store.openEdit(takeId: nil)
+                try? await Task.sleep(for: .seconds(0.5))
+                store.openEdit(takeId: takeId)
+                try? await Task.sleep(for: .seconds(8))
+                if !inEditor() { note("FAIL controls: couldn't get back into the editor"); return }
+            }
+        }
+        note("CONTROLS pressed \(presses), sliders nudged \(nudges), skipped \(skipped.count), left the editor via \(left.count)")
+        // The tree must really have been walked: the Edit suite has well over 40 controls across its tabs.
+        if presses + nudges < 40 { note("FAIL controls: only \(presses + nudges) controls found (accessibility tree not reachable?)") }
+        if let s = mainWindow?.attachedSheet { mainWindow?.endSheet(s) }
+        store.openEdit(takeId: nil)
+        try? await Task.sleep(for: .seconds(1))
+        note("DONE controls \(takeId)")
+    }
+
+    /// One actionable accessibility element.
+    struct AXControl {
+        let element: AnyObject
+        let role: String
+        let label: String
+        var key: String { "\(role)|\(label)" }
+        var isSlider: Bool { role == NSAccessibility.Role.slider.rawValue }
+        var isMenu: Bool { role == NSAccessibility.Role.popUpButton.rawValue || role == NSAccessibility.Role.menuButton.rawValue }
+        // Dynamic Objective-C calls: the accessibility methods exist on every AppKit / SwiftUI accessibility element.
+        func press() -> Bool { element.accessibilityPerformPress?() ?? false }
+        func increment() -> Bool { element.accessibilityPerformIncrement?() ?? false }
+    }
+
+    static let actionable: Set<NSAccessibility.Role> = [.button, .checkBox, .radioButton, .slider, .popUpButton, .menuButton, .disclosureTriangle]
+
+    /// Every enabled actionable element under `root`, in tree order (labels from the label, title or help text).
+    static func axControls(_ root: Any?) -> [AXControl] {
+        var out: [AXControl] = []
+        var seen = Set<ObjectIdentifier>()
+        func walk(_ x: Any, _ depth: Int) {
+            guard depth < 80 else { return }
+            let e = x as AnyObject
+            let id = ObjectIdentifier(e)
+            guard !seen.contains(id) else { return }
+            seen.insert(id)
+            if let role = e.accessibilityRole?() ?? nil, actionable.contains(role), (e.isAccessibilityEnabled?() ?? true) {
+                let label = [e.accessibilityLabel?() ?? nil, e.accessibilityTitle?() ?? nil, e.accessibilityHelp?() ?? nil].compactMap { $0 }.first { !$0.isEmpty } ?? ""
+                if !label.isEmpty { out.append(AXControl(element: e, role: role.rawValue, label: label)) }
+            }
+            for k in (e.accessibilityChildren?() ?? nil) ?? [] { walk(k, depth + 1) }
+        }
+        if let root { walk(root, 0) }
+        return out
+    }
+
+    /// Whether an element labelled `label` is under `root`.
+    static func axFind(_ root: Any?, label: String) -> Bool {
+        var found = false
+        var seen = Set<ObjectIdentifier>()
+        func walk(_ x: Any, _ depth: Int) {
+            guard !found, depth < 80 else { return }
+            let e = x as AnyObject
+            let id = ObjectIdentifier(e)
+            guard !seen.contains(id) else { return }
+            seen.insert(id)
+            if (e.accessibilityLabel?() ?? nil) == label { found = true; return }
+            for k in (e.accessibilityChildren?() ?? nil) ?? [] { walk(k, depth + 1) }
+        }
+        if let root { walk(root, 0) }
+        return found
     }
 }
