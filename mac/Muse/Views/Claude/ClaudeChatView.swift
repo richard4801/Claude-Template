@@ -38,14 +38,21 @@ struct ClaudeChatView: View {
     var sendBlocked = false
     var userImages: ((String) -> [String])?
     var takeFiles: ((String) -> [ClaudeAttachmentFile])?
+    /// The Suite's own routes for "+", paste and drop (it uploads); nil keeps images on this Mac.
+    var suiteAttach: (() -> Void)?
+    var suiteImages: ((_ urls: [URL], _ data: [(name: String, data: Data, mime: String)]) -> Void)?
 
     func attachments(top: AnyView?, sendBlocked: Bool, userImages: ((String) -> [String])?,
-                     takeFiles: ((String) -> [ClaudeAttachmentFile])? = nil) -> ClaudeChatView {
+                     takeFiles: ((String) -> [ClaudeAttachmentFile])? = nil,
+                     attach: (() -> Void)? = nil,
+                     images: ((_ urls: [URL], _ data: [(name: String, data: Data, mime: String)]) -> Void)? = nil) -> ClaudeChatView {
         var c = self
         c.composerTop = top
         c.sendBlocked = sendBlocked
         c.userImages = userImages
         c.takeFiles = takeFiles
+        c.suiteAttach = attach
+        c.suiteImages = images
         return c
     }
 
@@ -83,12 +90,27 @@ struct ClaudeChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(t.roles.raised)
-        .task(id: "\(contextKind)|\(contextId)|\(fallback?.id ?? "")|\(service.configured)|\(service.baseURL?.absoluteString ?? "")") {
+        .task(id: "\(contextKind)|\(contextId)|\(fallback?.id ?? "")|\(service.configured)|\(service.baseURL?.absoluteString ?? "")|\(sampleKey)") {
             model.wrapOutgoing = wrapOutgoing
+            model.unwrapShown = unwrapShown
             model.takeFiles = takeFiles
             await model.attach(service, contextKind: contextKind, contextId: contextId, fallback: fallback)
         }
         .onDisappear { model.detach() }
+        // Images dropped anywhere on the chat go with the next message.
+        .dropDestination(for: URL.self) { urls, _ in
+            let images = urls.filter(ChatImageInput.isImage)
+            guard !images.isEmpty else { return false }
+            if let suiteImages { suiteImages(images, []) } else { model.addImages(urls: images, data: []) }
+            return true
+        }
+    }
+
+    /// Review mode: the sample thread's settings, so a change shows it again.
+    private var sampleKey: String {
+        guard SnapshotRunner.probing else { return "" }
+        let s = SnapshotRunner.state
+        return "\(s.chatSample)|\(s.chatStreaming)|\(s.chatComposerText ?? "")|\(s.chatAttach)"
     }
 
     // MARK: Header
@@ -97,7 +119,7 @@ struct ClaudeChatView: View {
         HStack(alignment: .firstTextBaseline) {
             Text(title).scaled(t.scale.heading, t.roles.ink).accessibilityAddTraits(.isHeader)
             Spacer()
-            if model.busy { Text("Working…").scaled(t.scale.caption, t.roles.ink2) }
+            if model.busy { Text("Claude is working…").scaled(t.scale.caption, t.roles.ink2) }
         }
         .padding(.horizontal, Space.s4)
         .padding(.vertical, Space.s3)
@@ -173,153 +195,30 @@ struct ClaudeChatView: View {
 
     // MARK: Transcript
 
+    private var rows: [ChatRow] {
+        let tr = model.transcript
+        return ChatRow.build(tr.items, audience: store.isOwner ? .owner : .member, unwrap: unwrapShown) { item in
+            guard case .user(let id, let text, _) = item else { return [] }
+            let stored = tr.attachmentURLs(id)
+            if !stored.isEmpty { return stored.map { ChatImage(ref: ImageRef(url: $0)) } }
+            if let urls = userImages?(text), !urls.isEmpty { return urls.map { ChatImage(ref: ImageRef(url: $0)) } }
+            let shown = ChatLeakFilter.userText(unwrapShown?(text) ?? text)
+            return (model.sentLocal[shown] ?? []).map { ChatImage(data: $0) }
+        }
+    }
+
     private var transcript: some View {
-        let items = model.transcript.items
-        return ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: Space.s3) {
-                    if let accessory { accessory }
-                    if model.loading, items.isEmpty {
-                        VStack(alignment: .leading, spacing: Space.s2) {
-                            SkeletonBlock(width: 220, height: 10)
-                            SkeletonBlock(width: 260, height: 10)
-                            SkeletonBlock(width: 160, height: 10)
-                        }
-                    }
-                    if let e = model.loadError { InlineNotice("Couldn't load this chat. \(e)", tone: .danger) }
-                    if items.isEmpty, !model.loading, model.loadError == nil {
-                        Text(emptyHint ?? (contextKind == "edit"
-                             ? "Ask Claude to edit: trim, add captions, change the Look, check a frame. Every change can be undone."
-                             : "Tell Claude what happens in the shot: who walks where, when they turn, how the camera moves."))
-                            .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
-                    }
-                    ForEach(chunks(items)) { chunk in
-                        switch chunk {
-                        case .single(let item): row(item)
-                        case .chips(_, let tools): chipRow(tools)
-                        }
-                    }
-                    if let e = model.transcript.lastError, !model.busy { InlineNotice(e, tone: .danger) }
-                    Color.clear.frame(height: 1).id("end")
-                }
-                .padding(.horizontal, Space.s4)
-                .padding(.vertical, Space.s3)
-            }
-            .onChange(of: scrollKey(items)) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
-            .onAppear { proxy.scrollTo("end", anchor: .bottom) }
-        }
-        .frame(maxHeight: .infinity)
-    }
-
-    private func scrollKey(_ items: [ClaudeChatItem]) -> String {
-        var len = 0
-        if case .assistant(_, let text, _)? = items.last { len = text.count }
-        return "\(items.count)|\(len)"
-    }
-
-    /// Consecutive tool chips share one flowing row.
-    private enum Chunk: Identifiable {
-        case single(ClaudeChatItem)
-        case chips(String, [ClaudeChatItem])
-        var id: String {
-            switch self {
-            case .single(let i): return i.id
-            case .chips(let id, _): return "chips_" + id
-            }
-        }
-    }
-
-    private func chunks(_ items: [ClaudeChatItem]) -> [Chunk] {
-        var out: [Chunk] = []
-        for i in items {
-            if case .tool = i {
-                if case .chips(let id, let list)? = out.last {
-                    out[out.count - 1] = .chips(id, list + [i])
-                } else {
-                    out.append(.chips(i.id, [i]))
-                }
-            } else {
-                out.append(.single(i))
-            }
-        }
-        return out
-    }
-
-    @ViewBuilder private func row(_ item: ClaudeChatItem) -> some View {
-        switch item {
-        case .user(let id, let text, let source):
-            let stored = model.transcript.attachmentURLs(id).map { service.resolve($0) }
-            userBubble(unwrapShown?(text) ?? text, source: source, images: stored.isEmpty ? (userImages?(text) ?? []) : stored)
-        case .assistant(_, let text, let streaming): assistant(text, streaming: streaming)
-        case .image(_, let url): grabbedFrame(url)
-        case .tool: EmptyView()
-        }
-    }
-
-    private func userBubble(_ text: String, source: String, images: [String] = []) -> some View {
-        VStack(alignment: .trailing, spacing: Space.s1) {
-            Text(source == "phone" ? "You, from your phone" : "You").scaled(t.scale.micro, t.roles.ink2)
-            if !images.isEmpty {
-                HStack(spacing: Space.s1) {
-                    ForEach(images, id: \.self) { u in
-                        MuseImage(ref: ImageRef(url: service.resolve(u)), symbol: "photo")
-                            .frame(width: 56, height: 56)
-                            .clipShape(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous))
-                            .accessibilityLabel("Attached image")
-                    }
-                }
-            }
-            Text(text).scaled(t.scale.body, t.roles.ink)
-                .padding(.horizontal, Space.s3).padding(.vertical, Space.s2)
-                .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field))
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: 320, alignment: .trailing)
-        .frame(maxWidth: .infinity, alignment: .trailing)
-    }
-
-    private func assistant(_ text: String, streaming: Bool) -> some View {
-        VStack(alignment: .leading, spacing: Space.s1) {
-            Text("Claude").scaled(t.scale.micro, t.roles.ink2)
-            (Text(text) + Text(streaming ? " ▍" : "").foregroundStyle(t.roles.ink2))
-                .scaled(t.scale.body, t.roles.ink)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func chipRow(_ tools: [ClaudeChatItem]) -> some View {
-        FlowLayout(spacing: Space.s1) {
-            ForEach(tools) { item in
-                if case .tool(_, let name, let summary, let status) = item { chip(name: name, summary: summary, status: status) }
-            }
-        }
-    }
-
-    private func chip(name: String, summary: String, status: ClaudeToolStatus) -> some View {
-        let bad = status == .error
-        // A tool step: its summary in the text face; only a failure or a running step gets a mark.
-        return HStack(spacing: Space.s1) {
-            if status == .running { ProgressView().controlSize(.mini) }
-            Text(bad ? "\(summary) failed" : summary).font(t.scale.micro.font).lineLimit(1)
-        }
-        .foregroundStyle(bad ? t.roles.danger : t.roles.ink2)
-        .padding(.horizontal, Space.s2).frame(height: 22)
-        .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(t.roles.field))
-        .help(bad ? "\(summary) (\(ClaudeChipText.words(name)))" : ClaudeChipText.words(name))
-        .accessibilityLabel(bad ? "\(summary), failed" : summary)
-    }
-
-    private func grabbedFrame(_ url: String) -> some View {
-        VStack(alignment: .leading, spacing: Space.s1) {
-            Text("Frame Claude grabbed").scaled(t.scale.micro, t.roles.ink2)
-            MuseImage(ref: ImageRef(url: service.resolve(url)), symbol: "photo")
-                .frame(width: 240, height: 135)
-                .clipShape(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).strokeBorder(t.roles.hairline, lineWidth: t.isDark || t.isD ? 0 : 1))
-        }
+        let hint = emptyHint ?? (contextKind == "edit"
+            ? "Ask Claude to edit: trim, add captions, change the Look, check a frame. Every change can be undone."
+            : "Tell Claude what happens in the shot: who walks where, when they turn, how the camera moves.")
+        return ChatTranscriptView(
+            rows: rows,
+            state: ChatTranscriptState(loading: model.loading, loadError: model.loadError, offline: model.offline,
+                                       turnError: model.turnError, busy: model.busy, emptyHint: hint),
+            accessory: accessory,
+            resolve: { service.resolve($0) },
+            onRetry: { model.retry() },
+            onReload: { Task { await model.retryLoad() } })
     }
 
     // MARK: Phone strip and composer
@@ -336,58 +235,25 @@ struct ClaudeChatView: View {
     }
 
     private var composer: some View {
-        let busy = model.busy
-        let empty = model.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return VStack(alignment: .leading, spacing: Space.s2) {
-            if !suggestions.isEmpty {
-                FlowLayout(spacing: Space.s1) {
-                    ForEach(suggestions) { s in
-                        Button { model.send(s.prompt) } label: { Text(s.label).fixedSize() }
-                            .buttonStyle(RButtonStyle(kind: .quiet, small: true, off: busy || model.thread == nil))
-                            .disabled(busy || model.thread == nil)
-                            .help(s.prompt)
-                            .accessibilityLabel(s.label)
-                    }
-                }
-            }
-            if let composerTop { composerTop }
-            HStack(alignment: .bottom, spacing: Space.s2) {
-                TextField(placeholder ?? "Ask Claude…", text: $model.composer, axis: .vertical)
-                    .lineLimit(1...5)
-                    .onSubmit { if !busy && !sendBlocked { model.send() } }
-                    .roleField(multiline: true)
-                if busy {
-                    Button { model.stop() } label: {
-                        Ph("stop.fill", 13)
-                    }
-                    .buttonStyle(RButtonStyle(kind: .quiet))
-                    .frame(width: 40)
-                    .help("Stop Claude")
-                    .accessibilityLabel("Stop Claude")
-                    .keyboardShortcut(".", modifiers: .command)
-                } else {
-                    Button { model.send() } label: {
-                        Ph("paperplane.fill", 14)
-                    }
-                    .buttonStyle(RButtonStyle(kind: .action, off: empty || model.thread == nil || sendBlocked))
-                    .frame(width: 40)
-                    .disabled(empty || model.thread == nil || sendBlocked)
-                    .help("Send to Claude")
-                    .accessibilityLabel("Send to Claude")
-                    .keyboardShortcut(sendShortcut ? KeyboardShortcut(.return, modifiers: .command) : nil)
-                }
-            }
-            Text(modeLine).scaled(t.scale.micro, t.roles.ink2).lineLimit(1)
-                .help("Runs in Claude Code on this Mac, billed to the Claude account it is signed in with")
-            if let footer { Text(footer).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true) }
-        }
-        .padding(.horizontal, Space.s4).padding(.top, Space.s3).padding(.bottom, Space.s4)
-        .overlay(alignment: .top) { Rectangle().fill(t.roles.hairline).frame(height: 1) }
-    }
-
-    /// "On your Claude plan · claude-sonnet-4-5" (the model name is owner only; this view is too).
-    private var modeLine: String {
-        let model = self.model.transcript.model ?? service.info.model
-        return "On your Claude plan" + (model.map { " · \($0)" } ?? "")
+        let local = suiteAttach == nil
+        return ChatComposerBar(
+            text: $model.composer,
+            placeholder: placeholder ?? "Ask Claude…",
+            busy: model.busy,
+            held: model.thread == nil || sendBlocked,
+            suggestions: suggestions,
+            top: composerTop,
+            localImages: local ? model.localImages : [],
+            onRemoveLocal: { model.removeImage($0) },
+            attachNote: local ? model.attachNote : nil,
+            footer: ["On your Claude plan"] + (footer.map { [$0] } ?? []),
+            footerHelp: "Runs in Claude Code on this Mac, billed to the Claude account it is signed in with"
+                + ((model.transcript.model ?? service.info.model).map { " (\($0))" } ?? ""),
+            commandReturnSends: sendShortcut,
+            onSend: { model.send() },
+            onStop: { model.stop() },
+            onSuggestion: { model.send($0) },
+            onAttach: suiteAttach ?? { model.pickImages() },
+            onImages: suiteImages ?? { urls, data in model.addImages(urls: urls, data: data) })
     }
 }

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// An image saved on this Mac for a Claude Code turn: its path and the upload id Claude passes to the suite tools.
 public struct ClaudeAttachmentFile: Hashable, Sendable {
@@ -15,7 +18,8 @@ public struct ClaudeAttachmentFile: Hashable, Sendable {
 public enum ClaudeAttachmentPrompt {
     public static func text(_ text: String, _ files: [ClaudeAttachmentFile]) -> String {
         guard !files.isEmpty else { return text }
-        let list = files.map { "- \($0.path) (uploadId \($0.uploadId))" }.joined(separator: "\n")
+        // An image attached only on this Mac (Edit, Recreate, Camera) has no upload id: just its path.
+        let list = files.map { $0.uploadId.isEmpty ? "- \($0.path)" : "- \($0.path) (uploadId \($0.uploadId))" }.joined(separator: "\n")
         let head = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : text + "\n\n"
         return head + "Attached images (Read each one):\n" + list
     }

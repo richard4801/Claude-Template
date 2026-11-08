@@ -171,7 +171,8 @@ struct EditSuiteClaudePanel: View {
                 .padding(.bottom, 8)
             SuiteRule()
             if tab == 0 {
-                if let id = session.live?.sessionId {
+                // Review mode: the sample thread stands in for a live session (demo mode has none).
+                if let id = session.live?.sessionId ?? (SnapshotRunner.probing && SnapshotRunner.state.chatSample ? "es_review" : nil) {
                     // Workstream 2's chat on the owner's Claude Code, about this edit session.
                     // No second header: this panel already has one (badge, sharing state, close).
                     ClaudeChatView(contextKind: "edit", contextId: id, title: session.title, showsHeader: false)
