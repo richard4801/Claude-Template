@@ -1,5 +1,7 @@
 package studio.muse.app.data
 
+import studio.muse.core.edit.RecipeJson
+import studio.muse.core.edit.RecipeReference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job as CoJob
 import kotlinx.coroutines.delay
@@ -1117,16 +1119,16 @@ class FakeMuseApi(
     // Recreate this edit (workstream 1's /v1/recreate/references): the analysis steps the server reports, then demo's recipe.
     private val recreatePolls = HashMap<String, Int>()
     private val recreatePhases = listOf("Finding the cuts", "Listening for the beat", "Reading the text", "Reading the look", "Writing the recipe")
-    override suspend fun createReference(uploadId: String, name: String?): studio.muse.core.edit.RecipeReference = lock.withLock {
+    override suspend fun createReference(uploadId: String, name: String?): RecipeReference = lock.withLock {
         val id = "rx_${++editorSeq}"
         recreatePolls[id] = 0
-        studio.muse.core.edit.RecipeReference(id, name ?: "Reference", "analyzing", 5, "Waiting")
+        RecipeReference(id, name ?: "Reference", "analyzing", 5, "Waiting")
     }
-    override suspend fun reference(id: String): studio.muse.core.edit.RecipeReference = lock.withLock {
+    override suspend fun reference(id: String): RecipeReference = lock.withLock {
         val n = recreatePolls[id] ?: throw ApiException("not_found", "Reference not found")
         recreatePolls[id] = n + 1
-        if (n < recreatePhases.size) studio.muse.core.edit.RecipeReference(id, "Reference", "analyzing", 5 + 90 * n / recreatePhases.size, recreatePhases[n])
-        else studio.muse.core.edit.RecipeJson.reference("""{"id":"$id","name":"Reference","state":"ready","progress":100,"phase":"Done","recipe":${FakeRecipes.cafeTrendJson()}}""")
+        if (n < recreatePhases.size) RecipeReference(id, "Reference", "analyzing", 5 + 90 * n / recreatePhases.size, recreatePhases[n])
+        else RecipeJson.reference("""{"id":"$id","name":"Reference","state":"ready","progress":100,"phase":"Done","recipe":${FakeRecipes.cafeTrendJson()}}""")
     }
 
     override suspend fun uploadSuiteMedia(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit): SuiteMediaRef {
