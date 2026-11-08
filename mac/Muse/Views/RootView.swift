@@ -111,7 +111,11 @@ struct ThemeDots: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text("Theme").scaled(t.scale.micro, t.roles.ink2).padding(.trailing, 2)
+            // The label never wraps (it went one letter per line at about 1000 pt); without room it steps aside.
+            ViewThatFits(in: .horizontal) {
+                Text("Theme").scaled(t.scale.micro, t.roles.ink2).lineLimit(1).fixedSize().padding(.trailing, 2)
+                Color.clear.frame(width: 0, height: 0)
+            }
             ForEach(ThemeID.allCases) { id in
                 let th = Theme.get(id)
                 let on = id == store.themeID
