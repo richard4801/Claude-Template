@@ -314,6 +314,8 @@ struct SuiteClaudeAttachRow: View {
     }
 
     static func pick(_ store: AppStore) {
+        // Review mode never opens a modal panel (it would stop the run).
+        if SnapshotRunner.probing { return }
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false

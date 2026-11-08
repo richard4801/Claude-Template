@@ -309,6 +309,8 @@ extension SnapshotRunner {
         guard ready else { note("FAIL controls: the editor (\(editorMarker)) never appeared to accessibility on \(takeId)"); return }
         let deny: Set<String> = ["Import", ".cube import", "Import music", "Import sound", "Record a voice-over", "Stop recording the voice-over", "Record VO",
                                  "Back", "Close the editor", "Translate…",
+                                 // The Claude chat's "+" opens a file panel (a modal that would stop the walk).
+                                 "Attach images",
                                  // Paid helpers (2026-11-08: the walk skips anything that spends): background removal, tap to keep's run.
                                  "Remove background", "Run the cut-out"]
         let denyInSheet: Set<String> = ["Export", "Save to Library"]

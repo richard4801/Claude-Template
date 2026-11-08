@@ -230,6 +230,11 @@ final class ClaudeChatModel {
     }
 
     func pickImages() {
+        // Review mode never opens a modal panel (it would stop the run): a stand-in image is attached instead.
+        if SnapshotRunner.probing {
+            addImages(urls: [], data: [(name: "Reference.png", data: Self.swatch(0.85, 0.62, 0.42), mime: "image/png")])
+            return
+        }
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false

@@ -14,7 +14,7 @@ concurrency:
 jobs:
   build:
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
 
@@ -84,6 +84,7 @@ jobs:
           ditto -c -k --keepParent "$APP" MUSE-mac.zip
 
       # Review screenshots of the key screens in the four themes (SnapshotRunner, demo mode, no server). Never fails the build.
+      # 1500 s: about 17 min before the Claude chat shots (SnapshotRunner+Chat.swift) added about 2 more.
       - name: Review screenshots
         continue-on-error: true
         working-directory: mac
@@ -93,8 +94,8 @@ jobs:
           mkdir -p snapshots
           MUSE_SNAPSHOT_DIR="$PWD/snapshots" "$EXE" > snapshots.log 2>&1 &
           pid=$!
-          for i in $(seq 1 1200); do kill -0 $pid 2>/dev/null || break; sleep 1; done
-          if kill -0 $pid 2>/dev/null; then echo "review mode still running after 1200 s: stopping it"; kill $pid 2>/dev/null || true; fi
+          for i in $(seq 1 1500); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          if kill -0 $pid 2>/dev/null; then echo "review mode still running after 1500 s: stopping it"; kill $pid 2>/dev/null || true; fi
           wait $pid; echo "review mode exit status: $? (128+n = killed by signal n)"
           ls -la snapshots | head -100
           tail -n 40 snapshots.log || true
