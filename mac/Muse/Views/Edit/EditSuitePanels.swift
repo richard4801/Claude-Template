@@ -244,11 +244,121 @@ struct MaskPanel: View {
                         session.edit { s in s.changeVisual { $0.chroma?.similarity = v } }
                     }
                 }
-                SuiteToggleRow(title: "Remove background", hint: "No green screen needed", isOn: visual.chroma != nil && session.state.selectedVideo?.audioAsset != nil,
+                SuiteToggleRow(title: "Remove background", hint: "No green screen needed", isOn: session.backgroundRemoved,
                                busy: session.isRunning(.matte), trailingNote: session.estimateLabel(.matte)) { on in
                     Task { await session.setRemoveBackground(on) }
                 }
                 .task(id: session.state.selection) { await session.loadEstimate(.matte) }
+                if let k = session.keepPick, k.clipId == session.state.selection {
+                    KeepPicker(session: session, pick: k)
+                } else {
+                    SuiteToolButton(title: "Pick what to keep", icon: "plus-circle", disabled: session.isRunning(.matte), plain: true) {
+                        Task { await session.startKeepPick() }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Remove background → "Pick what to keep": the frame under the playhead; a tap adds a point to keep (or, in "Leave out",
+/// one to leave out) and a tap on a point removes it. The price shows before anything runs, and "Cut out" asks once more.
+struct KeepPicker: View {
+    @Environment(\.theme) private var t
+    @Bindable var session: EditSuiteSession
+    var pick: EditSuite.KeepPick
+
+    var body: some View {
+        let r = t.roles
+        let price = session.keepEstimate?.label
+        VStack(alignment: .leading, spacing: Space.s3) {
+            HStack(alignment: .top, spacing: Space.s2) {
+                Text("Tap what to keep on the frame. Tap a point again to remove it.")
+                    .font(t.scale.caption.font).foregroundStyle(r.ink2).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                if !pick.points.isEmpty { SuiteToolButton(title: "Clear points", plain: true) { session.clearKeep() } }
+                SuiteToolButton(title: "Cancel", plain: true) { session.cancelKeep() }
+            }
+            frame
+            HStack(spacing: Space.s2) {
+                Chip("Keep", on: !pick.leaveOut) { session.setKeepLeaveOut(false) }
+                Chip("Leave out", on: pick.leaveOut) { session.setKeepLeaveOut(true) }
+                Spacer(minLength: 0)
+                Text(pick.summary).font(t.scale.caption.font).monospacedDigit().foregroundStyle(r.ink2)
+            }
+            if pick.confirming {
+                // The second step: the price, then Run (the only thing here that spends).
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    Text("Cut out what you picked on this clip · \(price ?? "checking the price…")")
+                        .font(t.scale.label.font).foregroundStyle(r.ink).fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: Space.s2) {
+                        SuiteToolButton(title: "Run the cut-out", icon: "scissors", accent: true, disabled: price == nil || session.isRunning(.matte)) {
+                            Task { await session.runKeep() }
+                        }
+                        SuiteToolButton(title: "Not now", plain: true) { session.keepPick?.confirming = false }
+                    }
+                }
+            } else {
+                HStack(spacing: Space.s2) {
+                    SuiteToolButton(title: price.map { "Cut out · \($0)" } ?? "Cut out", icon: "scissors", accent: pick.canRun,
+                                    disabled: !pick.canRun || session.isRunning(.matte)) { session.askKeep() }
+                    Spacer(minLength: 0)
+                }
+            }
+            if session.isRunning(.matte) {
+                HStack(spacing: Space.s2) {
+                    ProgressView().controlSize(.small)
+                    Text(session.jobs[.matte]?.phase ?? "Cutting out").font(t.scale.caption.font).foregroundStyle(r.ink2)
+                }
+            }
+        }
+    }
+
+    /// The frame, fitted, with the points on it (keep: an accent dot; leave out: an outlined x).
+    @ViewBuilder private var frame: some View {
+        let r = t.roles
+        if let img = session.keepFrame {
+            let aspect = CGFloat(img.width) / CGFloat(max(1, img.height))
+            GeometryReader { geo in
+                let size = geo.size
+                ZStack(alignment: .topLeading) {
+                    Image(decorative: img, scale: 1).resizable().aspectRatio(contentMode: .fit).frame(width: size.width, height: size.height)
+                    ForEach(Array(pick.points.enumerated()), id: \.offset) { _, p in
+                        dot(p)
+                            .position(x: CGFloat(p.x) * size.width, y: CGFloat(p.y) * size.height)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture(coordinateSpace: .local) { at in
+                    guard size.width > 0, size.height > 0 else { return }
+                    session.tapKeep(x: Double(at.x / size.width), y: Double(at.y / size.height))
+                }
+            }
+            .aspectRatio(aspect, contentMode: .fit)
+            .frame(maxWidth: .infinity, maxHeight: 320)
+            .clipShape(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous))
+            // One element for accessibility: pressing it adds a point in the middle (the click-through reaches it too).
+            .accessibilityElement()
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel("Frame · tap what to keep")
+            .accessibilityValue(pick.summary)
+            .accessibilityAction { session.tapKeep(x: 0.5, y: 0.5) }
+        } else {
+            RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(r.field)
+                .frame(height: 200)
+                .overlay(ProgressView().controlSize(.small))
+        }
+    }
+
+    @ViewBuilder private func dot(_ p: KeepPoint) -> some View {
+        let r = t.roles
+        if p.keeps {
+            Circle().fill(r.accent).frame(width: 14, height: 14).overlay(Circle().strokeBorder(Color.white, lineWidth: 2))
+        } else {
+            ZStack {
+                Circle().fill(Color.black.opacity(0.55)).frame(width: 18, height: 18)
+                Ph("x", 10).foregroundStyle(Color.white)
             }
         }
     }

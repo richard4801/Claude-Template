@@ -219,7 +219,7 @@ extension EditV2 {
             guard case .video(let it) = item else { return nil }
             if it.asset != src.id || !v1Speeds.contains(it.speed) || it.inSec < prev - 1e-9 { return nil }
             let extra: [Any?] = [it.startSec, it.volume, it.fadeInSec, it.fadeOutSec, it.audioAsset, it.fit, it.transform, it.crop, it.opacity,
-                                 it.keyframes, it.filter, it.adjust, it.chroma, it.transitionIn, it.look, it.speedCurve, it.mask, it.voiceEffect, it.enhance]
+                                 it.keyframes, it.filter, it.adjust, it.chroma, it.transitionIn, it.look, it.speedCurve, it.mask, it.voiceEffect, it.enhance, it.alphaMatte]
             if extra.contains(where: { $0 != nil }) { return nil }
             prev = it.outSec
             segs.append(V1Segment(inSec: it.inSec, outSec: it.outSec, speed: it.speed, muted: it.muted == true ? true : nil))

@@ -41,6 +41,10 @@ extension FakeMuseAPI {
     public func startEditorJob(_ req: EditorJobRequest) throws -> EditorJob {
         let d = try editorSourceDuration(req.source)
         if req.kind == .matte && d > 120 { throw ApiError("bad_request", "Background removal works on videos up to 2 minutes") }
+        // Tap to keep: the points are checked before anything starts (as the server does before it holds).
+        if req.kind == .matte, let pts = req.options?.points, let problem = EditSuite.keepPointsProblem(pts, sourceSec: d) {
+            throw ApiError("bad_request", problem)
+        }
         let id = "ej_" + shortId()
         let phase: String
         switch req.kind {
@@ -87,8 +91,11 @@ extension FakeMuseAPI {
             r.beats = beats
             r.strong = beats.enumerated().filter { $0.offset % 4 == 0 }.map(\.element)
         case .matte:
+            // An alpha matte (2026-11-08 contract). The fake hands back the source itself, so its luma is the matte.
             r.asset = EditorResultAsset(kind: "video", upload: req.source.uploadId, take: req.source.takeId, durationSec: d)
-            r.chroma = EditV2.Chroma(color: "#00FF00", similarity: 0.4, smoothness: 0.08, spill: 0.5)
+            r.alpha = true
+            r.mode = req.options?.points?.isEmpty == false ? "tracked" : "person"
+            r.points = req.options?.points
         case .denoise:
             r.suggestion = DenoiseSuggestion(level: "light", reason: "Some background hum", confidence: 0.7)
             if req.options?.analyzeOnly != true {

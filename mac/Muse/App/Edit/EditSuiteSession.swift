@@ -49,6 +49,10 @@ final class EditSuiteSession {
 
     private(set) var jobs: [EditorJobKind: EditorJob] = [:]
     private(set) var estimates: [EditorJobKind: EditorEstimate] = [:]
+    /// Remove background → "Pick what to keep": the points on a frame of the selected clip, its picture and its price.
+    var keepPick: EditSuite.KeepPick?
+    private(set) var keepFrame: CGImage?
+    private(set) var keepEstimate: EditorEstimate?
     /// The newest transcript job (fillers / silences reuse it for free).
     private(set) var transcriptJobId: String?
     var lastError: String?
@@ -635,35 +639,133 @@ final class EditSuiteSession {
         notice = "Removed \(cuts.count) filler\(cuts.count == 1 ? "" : "s")"
     }
 
-    /// Remove background on the selected clip: its cut-out (person on green) replaces the clip's picture with the chroma
-    /// key; off puts the original back.
+    /// Whether the selected clip's background is removed (an alpha matte, or an older green cut-out).
+    var backgroundRemoved: Bool {
+        guard let c = state.selectedVideo else { return false }
+        return c.alphaMatte != nil || (c.chroma != nil && matteOriginal[c.id] != nil) || (c.chroma != nil && c.audioAsset != nil)
+    }
+
+    /// Remove background on the selected clip: the person, as an alpha matte on the clip (2026-11-08 contract); off takes
+    /// it away (and puts an older cut-out's original picture back).
     func setRemoveBackground(_ on: Bool) async {
         guard let c = state.selectedVideo else { return }
         if !on {
             let orig = matteOriginal[c.id]
-            edit { s in s.changeVideo { v in if let orig { v.asset = orig }; v.chroma = nil } }
+            edit { s in s.changeVideo { v in
+                if v.alphaMatte != nil { v.alphaMatte = nil; return }
+                if let orig { v.asset = orig }; v.chroma = nil
+            } }
             matteOriginal[c.id] = nil
             return
         }
         guard let a = project.asset(c.asset), let src = EditorSource(a) else { lastError = "Background removal needs a take"; return }
-        await run(.matte, source: src) { [weak self] r in
-            guard let self, let ra = r.asset else { return }
-            let id = self.project.newId("matte")
+        await run(.matte, source: src) { [weak self] r in self?.applyMatte(r, clip: c, source: a) }
+    }
+
+    /// Puts a finished matte job on the clip: an alpha matte (the clip keeps its own picture), or an older green cut-out.
+    private func applyMatte(_ r: EditorJobResult, clip c: E.VideoClip, source a: E.Asset) {
+        guard let ra = r.asset else { return }
+        if r.alpha == true {
+            let id = project.newId("bg")
             let asset = E.Asset(id: id, kind: .video, take: ra.take, upload: ra.take == nil ? ra.upload : nil, durationSec: ra.durationSec ?? a.durationSec,
                                 width: a.width, height: a.height, hasAudio: false, url: ra.url)
-            self.matteOriginal[c.id] = c.asset
-            self.state.assetNames[id] = self.state.assetNames[c.asset]
-            self.edit { s in
+            state.assetNames[id] = "Cut-out of \(state.assetNames[c.asset] ?? "the clip")"
+            edit { s in
                 s.apply { p in
                     p.addingAsset(asset).updating(c.id) { it in
                         guard case .video(var v) = it else { return }
-                        v.audioAsset = v.audioAsset ?? v.asset
-                        v.asset = id
-                        v.chroma = r.chroma ?? E.Chroma(color: "#00FF00")
+                        v.alphaMatte = E.AlphaMatte(asset: id)
+                        v.chroma = nil
                         it = .video(v)
                     }
                 }
             }
+            Task { await ensureFiles(); rebuild(immediately: true) }
+            notice = r.mode == "tracked" ? "Cut out what you picked" : "Background removed"
+            return
+        }
+        // An older result: the person on green replaces the clip's picture, keyed out with the chroma key.
+        let id = project.newId("matte")
+        let asset = E.Asset(id: id, kind: .video, take: ra.take, upload: ra.take == nil ? ra.upload : nil, durationSec: ra.durationSec ?? a.durationSec,
+                            width: a.width, height: a.height, hasAudio: false, url: ra.url)
+        matteOriginal[c.id] = c.asset
+        state.assetNames[id] = state.assetNames[c.asset]
+        edit { s in
+            s.apply { p in
+                p.addingAsset(asset).updating(c.id) { it in
+                    guard case .video(var v) = it else { return }
+                    v.audioAsset = v.audioAsset ?? v.asset
+                    v.asset = id
+                    v.chroma = r.chroma ?? E.Chroma(color: "#00FF00")
+                    it = .video(v)
+                }
+            }
+        }
+    }
+
+    // MARK: Pick what to keep (tap to keep)
+
+    /// Starts "Pick what to keep" on the selected clip, on the frame under the playhead (else the clip's first frame).
+    func startKeepPick() async {
+        guard let c = state.selectedVideo else { return }
+        guard let url = files[c.asset] else { lastError = "Pick what to keep needs the clip's video"; return }
+        pause()
+        let plan = E.renderPlan(project, media: sources.infos)
+        let seg = plan.video.first { $0.itemId == c.id && $0.contains(playhead) } ?? plan.video.first { $0.itemId == c.id }
+        let sec = seg.map { E.sourceTime($0, at: playhead) } ?? c.inSec
+        keepPick = EditSuite.KeepPick(clipId: c.id, assetId: c.asset, sourceSec: sec)
+        keepEstimate = nil
+        keepFrame = nil
+        let frame = await EditSuiteMedia.frame(url, at: sec, maxSide: 720)
+        guard keepPick?.clipId == c.id else { return }
+        keepFrame = frame
+        if frame == nil { lastError = "Couldn't show that frame · move the playhead and try again"; keepPick = nil }
+    }
+
+    /// A tap on the frame (0–1 from the top left): adds a point, or removes the one tapped.
+    func tapKeep(x: Double, y: Double) {
+        guard var k = keepPick else { return }
+        let aspect = keepFrame.map { Double($0.width) / Double(max(1, $0.height)) } ?? 1
+        guard k.tap(x: x, y: y, aspect: aspect) else {
+            if k.points.count >= EditSuite.maxKeepPoints { notice = "Up to \(EditSuite.maxKeepPoints) points" }
+            return
+        }
+        keepPick = k
+        keepEstimate = nil
+        Task { await loadKeepEstimate() }
+    }
+
+    func setKeepLeaveOut(_ on: Bool) { keepPick?.leaveOut = on }
+
+    func clearKeep() { keepPick?.clear(); keepEstimate = nil }
+
+    func cancelKeep() { keepPick = nil; keepFrame = nil; keepEstimate = nil }
+
+    /// The price of cutting out what was picked (asked with the same points the job will get).
+    func loadKeepEstimate() async {
+        guard let k = keepPick, k.canRun, let a = project.asset(k.assetId), let src = EditorSource(a) else { keepEstimate = nil; return }
+        let e = try? await api.editorEstimate(EditorJobRequest(kind: .matte, source: src, options: k.options))
+        if keepPick?.points == k.points { keepEstimate = e }
+    }
+
+    /// Shows the price and asks to confirm (nothing runs yet).
+    func askKeep() {
+        guard keepPick?.canRun == true else { return }
+        keepPick?.confirming = true
+        if keepEstimate == nil { Task { await loadKeepEstimate() } }
+    }
+
+    /// Runs the confirmed cut-out: the picked subject is followed through the clip and comes back as its alpha matte.
+    func runKeep() async {
+        guard let k = keepPick, k.canRun, k.confirming else { return }
+        guard let clip = project.tracks.lazy.compactMap({ $0.item(k.clipId)?.videoClip }).first, let a = project.asset(k.assetId), let src = EditorSource(a) else {
+            lastError = "Background removal needs a take"
+            return
+        }
+        keepPick?.confirming = false
+        await run(.matte, source: src, options: k.options) { [weak self] r in
+            self?.applyMatte(r, clip: clip, source: a)
+            self?.cancelKeep()
         }
     }
 

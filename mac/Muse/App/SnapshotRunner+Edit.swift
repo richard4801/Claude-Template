@@ -43,6 +43,7 @@ extension SnapshotRunner {
             else if !sound && !w.isEmpty { note("FAIL waveform_\(name): peaks without sound") }
             else { note("DONE waveform_\(name) (\(w.count) peaks)") }
         }
+        await matteRenderCheck(short, media: media, note: note)
         let lut = store.suite.camera.palettes.first { ($0.lut ?? "").isEmpty == false }
         let look: [String: Any] = ["id": lut?.id ?? "teal_orange", "kind": "palette", "label": lut?.label ?? "Teal & orange", "lut": lut?.lut ?? "pack:teal-orange"]
         let now = Int64(Date().timeIntervalSince1970 * 1000)
@@ -137,7 +138,7 @@ extension SnapshotRunner {
         try file.write(from: buf)
     }
 
-    static func writeFrames(_ url: URL, seconds: Double, fps: Int32, width w: Int, height h: Int, rotated: Bool) async throws {
+    static func writeFrames(_ url: URL, seconds: Double, fps: Int32, width w: Int, height h: Int, rotated: Bool, split: Bool = false) async throws {
         try? FileManager.default.removeItem(at: url)
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: w, AVVideoHeightKey: h])
@@ -156,13 +157,66 @@ extension SnapshotRunner {
             CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pb)
             guard let pb else { break }
             CVPixelBufferLockBaseAddress(pb, [])
-            if let base = CVPixelBufferGetBaseAddress(pb) { memset(base, Int32(40 + (i * 7) % 180), CVPixelBufferGetBytesPerRow(pb) * h) }
+            if let base = CVPixelBufferGetBaseAddress(pb) {
+                let row = CVPixelBufferGetBytesPerRow(pb)
+                if split {
+                    // A matte: the left half white (keep), the right half black.
+                    for y in 0..<h { memset(base + y * row, 255, w / 2 * 4); memset(base + y * row + w / 2 * 4, 0, row - w / 2 * 4) }
+                } else {
+                    memset(base, Int32(40 + (i * 7) % 180), row * h)
+                }
+            }
             CVPixelBufferUnlockBaseAddress(pb, [])
             adaptor.append(pb, withPresentationTime: CMTime(value: CMTimeValue(i), timescale: fps))
         }
         input.markAsFinished()
         await writer.finishWriting()
         if writer.status != .completed { throw writer.error ?? ApiError("edit_check", "Couldn't write the test video") }
+    }
+
+    // MARK: Remove background (2026-11-08): the alpha matte in the real renderer
+
+    /// A clip with an alpha matte whose left half is white and right half black, on a red canvas: the left of the frame must
+    /// show the clip and the right the canvas.
+    static func matteRenderCheck(_ clip: URL, media: URL, note: (String) -> Void) async {
+        note("START matte_render")
+        let matte = media.appendingPathComponent("matte.mp4")
+        do {
+            try await writeFrames(matte, seconds: 3, fps: 24, width: 360, height: 640, rotated: false, split: true)
+            var p = EditV2.fromV1(EditList(sourceTakeId: "rx_matte", sourceDurationSec: 3), EditV2.SourceFacts(width: 360, height: 640, fps: 24))
+            p.canvas.background = "#FF0000"
+            p = p.addingAsset(EditV2.Asset(id: "bg2", kind: .video, upload: "up_matte", durationSec: 3, width: 360, height: 640, hasAudio: false))
+            guard let matted = p.updating("c1", { it in
+                guard case .video(var v) = it else { return }
+                v.alphaMatte = EditV2.AlphaMatte(asset: "bg2")
+                it = .video(v)
+            }) else { note("FAIL matte_render: couldn't set the matte"); return }
+            let sources = try await EditV2Engine.load(matted, files: ["src": clip, "bg2": matte])
+            let built = try EditV2Engine.build(matted, sources: sources)
+            let gen = AVAssetImageGenerator(asset: built.composition)
+            gen.videoComposition = built.videoComposition
+            gen.requestedTimeToleranceBefore = .zero
+            gen.requestedTimeToleranceAfter = .zero
+            let cg = try await gen.image(at: CMTime(seconds: 1, preferredTimescale: 600)).image
+            guard let left = pixel(cg, 0.25, 0.5), let right = pixel(cg, 0.75, 0.5) else { note("FAIL matte_render: couldn't read the frame"); return }
+            let kept = abs(left.r - left.g) < 40 && abs(left.g - left.b) < 40   // the grey clip
+            let cut = right.r > 180 && right.g < 70 && right.b < 70             // the red canvas
+            if kept && cut { note("DONE matte_render (left \(left), right \(right))") }
+            else { note("FAIL matte_render: left \(left) should be the clip (grey), right \(right) the canvas (red)") }
+        } catch {
+            note("FAIL matte_render: \(error.localizedDescription)")
+        }
+    }
+
+    /// The colour at (x, y), 0–1 from the top left, as 0–255 sRGB.
+    static func pixel(_ img: CGImage, _ x: Double, _ y: Double) -> (r: Int, g: Int, b: Int)? {
+        var px = [UInt8](repeating: 0, count: 4)
+        guard let ctx = CGContext(data: &px, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        let w = CGFloat(img.width), h = CGFloat(img.height)
+        // Draw the image so the wanted pixel lands on the 1×1 context (CG's origin is bottom left).
+        ctx.draw(img, in: CGRect(x: -CGFloat(x) * w, y: -(1 - CGFloat(y)) * h, width: w, height: h))
+        return (Int(px[0]), Int(px[1]), Int(px[2]))
     }
 
     // MARK: Every control (owner request 2026-11-08: "vet the entire Edit function")
@@ -213,7 +267,9 @@ extension SnapshotRunner {
         note("AX nodes \(st.nodes), actionable \(st.actionable), error \(st.error), screen \(store.screen), sample: \(st.sample)")
         guard ready else { note("FAIL controls: the editor (\(editorMarker)) never appeared to accessibility on \(takeId)"); return }
         let deny: Set<String> = ["Import", ".cube import", "Import music", "Import sound", "Record a voice-over", "Stop recording the voice-over", "Record VO",
-                                 "Back", "Close the editor", "Translate…"]
+                                 "Back", "Close the editor", "Translate…",
+                                 // Paid helpers (2026-11-08: the walk skips anything that spends): background removal, tap to keep's run.
+                                 "Remove background", "Run the cut-out"]
         let denyInSheet: Set<String> = ["Export", "Save to Library"]
         let closers = ["Close", "Cancel", "Use the latest", "Keep this device's changes", "Done"]
         var used = Set<String>(), skipped = Set<String>(), left = Set<String>()
@@ -288,6 +344,9 @@ extension SnapshotRunner {
         if presses + nudges < 40 { note("FAIL controls: only \(presses + nudges) controls found") }
         // The owner's crashes must stay covered: the hook templates (exclusivity, 2026-11-08).
         if !used.contains(where: { $0.contains("Add hook") }) { note("FAIL controls: no hook template was pressed (Hook ideas → Add hook …)") }
+        // Remove background → Pick what to keep: the picker opened and a point was tapped on its frame.
+        if !used.contains(where: { $0.contains("Pick what to keep") }) { note("FAIL controls: \"Pick what to keep\" was never pressed (Video → Mask & green screen)") }
+        if !used.contains(where: { $0.contains("Frame · tap what to keep") }) { note("FAIL controls: no point was tapped on the keep picker's frame") }
         if let w = mainWindow, let sh = w.attachedSheet { w.endSheet(sh) }
         store.openEdit(takeId: nil)
         try? await Task.sleep(for: .seconds(1))
