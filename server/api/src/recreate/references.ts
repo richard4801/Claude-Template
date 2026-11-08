@@ -274,7 +274,7 @@ export class RecreateReferences {
     }));
     const m = matchSlots(recipe, cands, { leadModelId: b.modelId, top: b.top, minScore: b.minScore });
     const r = await this.row(u, id);
-    const matched = Object.fromEntries(m.slots.filter(x => x.suggested).map(x => { const c = x.candidates.find(y => y.takeId === x.suggested)!; return [x.slotId, { takeId: c.takeId, score: c.score, reasons: c.reasons }]; }));
+    const matched = Object.fromEntries(m.slots.filter(x => x.suggestion).map(x => [x.slotId, { takeId: x.suggestion!.takeId, score: x.suggestion!.score, reasons: x.suggestion!.reasons }]));
     await this.saveFill(r, { ...(r.fill ?? {}), matched, toGenerate: m.slots.filter(x => x.toGenerate).map(x => x.slotId) });
     return m;
   }
