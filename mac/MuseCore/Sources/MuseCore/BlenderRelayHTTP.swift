@@ -61,7 +61,7 @@ public final class HTTPBlenderRelayAPI: BlenderRelayAPI, @unchecked Sendable {
     private func check(_ resp: URLResponse?, _ data: Data) throws {
         guard let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) else { return }
         let err = try? decoder.decode(ErrorBody.self, from: data)
-        throw ApiError(err?.code ?? "http_\(http.statusCode)", err?.error ?? "Server error \(http.statusCode)")
+        throw ApiError(err?.code ?? "http_\(http.statusCode)", err?.error ?? ApiError.plainHTTP(http.statusCode))
     }
 
     private func call<T: Decodable>(_ method: String, _ path: String) async throws -> T {

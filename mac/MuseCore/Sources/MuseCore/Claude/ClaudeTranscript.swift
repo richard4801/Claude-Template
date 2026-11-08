@@ -42,6 +42,11 @@ public struct ClaudeTranscript: Hashable, Sendable {
     /// A stored message (`{op: "message"}`, or a reply's message).
     public mutating func upsert(_ m: ClaudeMessage) { upsertMessage(m) }
 
+    /// The image links a stored message carries (attachments with a link), for the thumbnails in its bubble.
+    public func attachmentURLs(_ messageId: String) -> [String] {
+        messages.first { $0.id == messageId }?.attachments?.compactMap { $0.url } ?? []
+    }
+
     private mutating func upsertMessage(_ m: ClaudeMessage) {
         if let i = messages.firstIndex(where: { $0.id == m.id }) {
             messages[i] = m
@@ -90,7 +95,7 @@ public struct ClaudeTranscript: Hashable, Sendable {
     /// One live event of the turn in flight.
     public mutating func apply(_ e: ClaudeEvent) {
         switch e {
-        case .user(let text):
+        case .user(let text, _):
             if live.contains(where: { if case .user(_, let t, _) = $0 { return t == text }; return false }) { streaming = true } else {
                 begin(userText: text, source: "mac")
             }

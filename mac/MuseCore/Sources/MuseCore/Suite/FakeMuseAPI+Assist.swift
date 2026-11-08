@@ -108,6 +108,13 @@ extension FakeMuseAPI: SuiteAssistAPI {
         return a.pending[i]
     }
 
+    /// Demo mode keeps the image on this Mac (a data link) and charges nothing.
+    public func uploadClaudeImage(name: String, data: Data, mime: String) async throws -> ClaudeAttachment {
+        guard let m = SuiteClaudeAttachments.mime(name: name, mime: mime) else { throw ApiError("bad_request", SuiteClaudeAttachments.refusal) }
+        guard !data.isEmpty, data.count <= SuiteClaudeAttachments.maxBytes else { throw ApiError("bad_request", SuiteClaudeAttachments.refusal) }
+        return ClaudeAttachment(uploadId: "up_" + shortId(), mimeType: m, bytes: data.count, url: "data:\(m);base64,\(data.base64EncodedString())")
+    }
+
     /// Demo mode only: Claude sets the draft (suite_set_draft) and/or asks to generate it (suite_request_shot with confirm),
     /// which adds a waiting ask priced like the shot. Nothing is held.
     public func demoClaudeAssist(id: String, draft: SuiteDraft?, generate: Bool) async throws -> SuiteAssist {

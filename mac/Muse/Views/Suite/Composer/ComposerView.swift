@@ -393,6 +393,10 @@ struct ComposerRail: View {
                 }
                 .disabled(soon)
                 .opacity(soon ? 0.55 : 1)
+                // Claude's reference images (pose, style, location, outfit) from the shared draft.
+                if !store.suite.claude.references.isEmpty {
+                    SuiteClaudeReferenceChips().padding(.top, Space.s2)
+                }
                 if let note = store.suite.composerSlots.slots.note(store.composerInputs), d.tool == .shot {
                     Text(note).font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
                         .fixedSize(horizontal: false, vertical: true)
