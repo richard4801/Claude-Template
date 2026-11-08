@@ -40,6 +40,9 @@ import studio.muse.app.ui.screens.suite.composer.PromptTokens
 import studio.muse.app.ui.screens.suite.composer.SheetKind
 import studio.muse.app.ui.screens.suite.composer.SuiteFeedView
 import studio.muse.app.ui.screens.suite.saveRig
+import studio.muse.app.ui.screens.suite.queueShot
+import studio.muse.app.ui.screens.suite.askRun
+import studio.muse.app.ui.screens.suite.createCollection
 import studio.muse.app.ui.theme.MuseTheme
 import studio.muse.app.ui.theme.ThemeId
 
@@ -53,7 +56,7 @@ import studio.muse.app.ui.theme.ThemeId
 @Config(sdk = [35], qualifiers = "w390dp-h844dp-xhdpi")
 class SuiteFeedScreenshotTest(private val theme: String, private val state: String, private val width: Int) {
     companion object {
-        private val CASES = listOf("rigs" to 360, "rig_applied" to 360, "feed" to 360, "feed" to 840, "compare" to 360, "compare" to 840, "take" to 360)
+        private val CASES = listOf("rigs" to 360, "rig_applied" to 360, "feed" to 360, "feed" to 840, "compare" to 360, "compare" to 840, "take" to 360, "feed_queue" to 360, "collections" to 360, "run_confirm" to 360)
 
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}_{1}_{2}")
@@ -95,6 +98,12 @@ class SuiteFeedScreenshotTest(private val theme: String, private val state: Stri
                 else c.suite.rigUndo.value = "Applied Golden hour handheld" to ComposerDraft()
             }
             "compare" -> c.suite.compareIds.value = listOf("t_a", "t_b")
+            "feed_queue", "run_confirm" -> runBlocking {
+                c.suite.queueShot(studio.muse.app.data.SuiteShotRequest(modelId = model.id, title = "Rain on the window", prompt = "Rain on the window, she reads by the lamp", duration = 5, quality = "draft", takes = 1))
+                c.suite.createCollection("Café series", listOf("t_a", "t_b")); c.suite.createCollection("Night walks")
+                if (state == "run_confirm") c.suite.askRun(c.suite.queued.value.first())
+            }
+            "collections" -> runBlocking { c.suite.createCollection("Café series", listOf("t_a")); c.suite.createCollection("Night walks") }
         }
         compose.setContent {
             when (state) {
@@ -104,6 +113,16 @@ class SuiteFeedScreenshotTest(private val theme: String, private val state: Stri
                     }
                 }
                 "take" -> MuseApp(c, Routes.suiteTake("ja"))
+                "feed_queue" -> MuseTheme(ThemeId.fromKey(theme)) {
+                    CompositionLocalProvider(LocalContainer provides c, LocalNav provides Nav(rememberNavController())) {
+                        SuiteFeedView(photo = false, wide = false, onOpen = {}, modifier = Modifier.fillMaxSize())
+                    }
+                }
+                "collections" -> MuseTheme(ThemeId.fromKey(theme)) {
+                    CompositionLocalProvider(LocalContainer provides c, LocalNav provides Nav(rememberNavController())) {
+                        androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) { studio.muse.app.ui.screens.suite.CollectionsSheet("t_a") {} }
+                    }
+                }
                 else -> MuseApp(c, Routes.SUITE_SHOT)
             }
         }

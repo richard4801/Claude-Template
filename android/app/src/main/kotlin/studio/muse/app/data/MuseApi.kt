@@ -304,6 +304,24 @@ interface MuseApi {
     /** The takes rail: newest first, queued/running/failed jobs as one card each, every done take and photo as its own. */
     suspend fun suiteFeed(q: SuiteFeedQuery = SuiteFeedQuery()): SuiteFeedPage = throw ApiException("not_found", "This server doesn't have the takes feed yet")
 
+    // Build step 3 (plans/api.md "Library collections and the Suite queue"). Defaults: a server without them.
+    /** Queue a shot to run later: checked and priced, nothing held. [req] is the body of POST /v1/suite/shots. */
+    suspend fun queueSuiteShot(req: SuiteShotRequest): QueuedShot = throw ApiException("not_found", "This server can't queue shots yet")
+    suspend fun suiteQueue(): List<QueuedShot> = emptyList()
+    /** Today's price for a queued shot (shown, then confirmed). */
+    suspend fun estimateQueuedShot(id: String): QueuedEstimate = throw ApiException("not_found", "This server can't queue shots yet")
+    /** Runs it, as POST /v1/suite/shots would (held and charged); the caller confirmed the price. */
+    suspend fun runQueuedShot(id: String): QueuedRun = throw ApiException("not_found", "This server can't queue shots yet")
+    suspend fun deleteQueuedShot(id: String): Unit = throw ApiException("not_found", "This server can't queue shots yet")
+    suspend fun libraryCollections(): List<LibraryCollection> = emptyList()
+    suspend fun createLibraryCollection(name: String, takeIds: List<String> = emptyList()): LibraryCollection = throw ApiException("not_found", "This server doesn't have collections yet")
+    suspend fun renameLibraryCollection(id: String, name: String): LibraryCollection = throw ApiException("not_found", "This server doesn't have collections yet")
+    suspend fun deleteLibraryCollection(id: String): Unit = throw ApiException("not_found", "This server doesn't have collections yet")
+    suspend fun addToLibraryCollection(id: String, takeIds: List<String>): LibraryCollection = throw ApiException("not_found", "This server doesn't have collections yet")
+    suspend fun removeFromLibraryCollection(id: String, takeIds: List<String>): LibraryCollection = throw ApiException("not_found", "This server doesn't have collections yet")
+    /** The collections a take or photo is in (its detail). */
+    suspend fun takeCollections(takeId: String): List<LibraryCollection> = emptyList()
+
     // AI suite · Photo tool (workstream 3, plans/api.md "Photo tool"): Photoshoot on the composer. Free estimate; create holds and makes the stills.
     suspend fun photoEstimate(req: PhotoRequest): PhotoEstimate = throw ApiException("not_found", "This server doesn't have the Photo tool yet")
     suspend fun createPhotos(req: PhotoRequest): PhotoResult = throw ApiException("not_found", "This server doesn't have the Photo tool yet")

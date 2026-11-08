@@ -80,6 +80,12 @@ class SuiteStore(private val c: AppContainer) {
     val feedFilter = MutableStateFlow(SuiteFeedFilter.ALL)
     var feedCursor: String? = null
     val compareIds = MutableStateFlow<List<String>>(emptyList())
+    // Build step 3: the Queued group (shots saved to run later), its Run confirmation, and Library collections.
+    val queued = MutableStateFlow<List<studio.muse.app.data.QueuedShot>>(emptyList())
+    val runAsk = MutableStateFlow<Pair<studio.muse.app.data.QueuedShot, studio.muse.app.data.QueuedEstimate>?>(null)
+    val collections = MutableStateFlow<List<studio.muse.app.data.LibraryCollection>>(emptyList())
+    /** The feed shows only this collection's takes (null: all, with the Queued group). */
+    val feedCollection = MutableStateFlow<String?>(null)
     /** For the AI suite plan's extensions (SuiteRigs.kt). */
     internal val app: AppContainer get() = c
 

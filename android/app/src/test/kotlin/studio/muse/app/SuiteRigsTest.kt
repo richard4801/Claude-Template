@@ -30,6 +30,11 @@ import studio.muse.app.ui.screens.suite.saveRig
 import studio.muse.app.ui.screens.suite.undoRig
 import studio.muse.app.ui.screens.suite.useAsStartFrame
 import studio.muse.app.ui.screens.suite.vary
+import studio.muse.app.ui.screens.suite.askRun
+import studio.muse.app.ui.screens.suite.confirmRun
+import studio.muse.app.ui.screens.suite.createCollection
+import studio.muse.app.ui.screens.suite.queueShot
+import studio.muse.app.ui.screens.suite.toggleInCollection
 import studio.muse.app.ui.screens.suite.composer.ComposerDraft
 import studio.muse.app.ui.screens.suite.composer.ComposerDrafts
 import studio.muse.app.ui.screens.suite.composer.ComposerSettings
@@ -108,6 +113,35 @@ class SuiteRigsTest {
         val refused = runCatching { fake.startEditorJob(studio.muse.app.data.EditorJobRequest("captions", studio.muse.app.data.EditorSourceDto(takeId = "t_j1"))) }.exceptionOrNull()
         assertEquals("editor_paid_off", (refused as studio.muse.app.data.ApiException).code)
         assertEquals(studio.muse.app.data.EditorSettings.DEFAULT_CAP, fake.patchEditorSettings(paidHelpers = "on", resetCap = true).cap, 0.0)
+    }
+
+    @Test fun aQueuedShotRunsOnlyAfterItsPriceIsConfirmed() = withSuite { c, fake ->
+        val m = c.repo.state.value.models.first()
+        val req = studio.muse.app.data.SuiteShotRequest(modelId = m.id, prompt = "Rain on the window, she reads", duration = 5, quality = "draft", takes = 1)
+        val jobsBefore = fake.listJobs().size
+        assertTrue(c.suite.queueShot(req))
+        assertTrue(c.suite.loadFeed(photo = false))
+        val q = c.suite.queued.value.single()
+        assertTrue(q.buttonLabel.startsWith("Run · $"))
+        assertEquals(jobsBefore, fake.listJobs().size) // nothing runs or is held while queued
+        c.suite.askRun(q)
+        assertNotNull(c.suite.runAsk.value)
+        val j = c.suite.confirmRun()
+        assertNotNull(j)
+        assertTrue(c.suite.queued.value.isEmpty())
+    }
+
+    @Test fun collectionsGatherTakesAndFilterTheFeed() = withSuite { c, _ ->
+        val take = c.repo.state.value.takes.first { it.kind == "take" }
+        assertTrue(c.suite.createCollection("Café series", listOf(take.id)))
+        val col = c.suite.collections.value.first()
+        assertEquals(1, col.count)
+        c.suite.feedCollection.value = col.id
+        assertTrue(c.suite.loadFeed(photo = false))
+        assertTrue(c.suite.feed.value!!.all { it.takeId == take.id })
+        assertTrue(c.suite.queued.value.isEmpty()) // a collection's feed has no queue
+        assertTrue(c.suite.toggleInCollection(col.id, take.id, inIt = true))
+        assertEquals(0, c.suite.collections.value.first().count)
     }
 
     @Test fun theFeedLoadsAndFilters() = withSuite { c, _ ->

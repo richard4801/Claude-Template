@@ -214,6 +214,18 @@ interface MuseService {
     @POST("v1/recreate/references/{id}/slots/{slot}/replace") suspend fun replaceRecipeSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: JsonObject): JsonObject
     @PATCH("v1/models/{id}") suspend fun patchModelJson(@Path("id") id: String, @Body r: JsonObject): Model
     @GET("v1/suite/feed") suspend fun suiteFeed(@QueryMap q: Map<String, String>): SuiteFeedPage
+    @POST("v1/suite/queue") suspend fun queueSuiteShot(@Body r: SuiteShotRequest): QueuedShot
+    @GET("v1/suite/queue") suspend fun suiteQueue(): List<QueuedShot>
+    @POST("v1/suite/queue/{id}/estimate") suspend fun estimateQueuedShot(@Path("id") id: String, @Body r: JsonObject): QueuedEstimate
+    @POST("v1/suite/queue/{id}/run") suspend fun runQueuedShot(@Path("id") id: String, @Body r: JsonObject): QueuedRun
+    @DELETE("v1/suite/queue/{id}") suspend fun deleteQueuedShot(@Path("id") id: String): retrofit2.Response<Unit>
+    @GET("v1/library/collections") suspend fun libraryCollections(): List<LibraryCollection>
+    @POST("v1/library/collections") suspend fun createLibraryCollection(@Body r: JsonObject): LibraryCollection
+    @PATCH("v1/library/collections/{id}") suspend fun renameLibraryCollection(@Path("id") id: String, @Body r: JsonObject): LibraryCollection
+    @DELETE("v1/library/collections/{id}") suspend fun deleteLibraryCollection(@Path("id") id: String): retrofit2.Response<Unit>
+    @POST("v1/library/collections/{id}/items") suspend fun addToLibraryCollection(@Path("id") id: String, @Body r: JsonObject): LibraryCollection
+    @POST("v1/library/collections/{id}/items/remove") suspend fun removeFromLibraryCollection(@Path("id") id: String, @Body r: JsonObject): LibraryCollection
+    @GET("v1/library/takes/{id}/collections") suspend fun takeCollections(@Path("id") id: String): List<LibraryCollection>
     // AI suite · Photo tool (workstream 3)
     @POST("v1/suite/photos/estimate") suspend fun photoEstimate(@Body r: PhotoRequest): PhotoEstimate
     @POST("v1/suite/photos") suspend fun createPhotos(@Body r: PhotoRequest): PhotoResult
@@ -614,6 +626,21 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     }
     override suspend fun suiteFeed(q: SuiteFeedQuery) = call { suiteFeed(q.params()) }
         .let { p -> p.copy(items = p.items.map { it.copy(poster = it.poster?.abs(), videoUrl = it.videoUrl?.absUrl()) }) }
+    private fun ids(takeIds: List<String>) = buildJsonObject { put("takeIds", kotlinx.serialization.json.JsonArray(takeIds.map { kotlinx.serialization.json.JsonPrimitive(it) })) }
+    override suspend fun queueSuiteShot(req: SuiteShotRequest) = call { queueSuiteShot(req) }
+    override suspend fun suiteQueue() = call { suiteQueue() }
+    override suspend fun estimateQueuedShot(id: String) = call { estimateQueuedShot(id, buildJsonObject { }) }
+    override suspend fun runQueuedShot(id: String) = call { runQueuedShot(id, buildJsonObject { put("confirm", kotlinx.serialization.json.JsonPrimitive(true)) }) }
+    override suspend fun deleteQueuedShot(id: String) { call { deleteQueuedShot(id) } }
+    override suspend fun libraryCollections() = call { libraryCollections() }.map { it.copy(cover = it.cover?.abs()) }
+    override suspend fun createLibraryCollection(name: String, takeIds: List<String>) = call {
+        createLibraryCollection(buildJsonObject { put("name", kotlinx.serialization.json.JsonPrimitive(name)); if (takeIds.isNotEmpty()) put("takeIds", kotlinx.serialization.json.JsonArray(takeIds.map { kotlinx.serialization.json.JsonPrimitive(it) })) })
+    }
+    override suspend fun renameLibraryCollection(id: String, name: String) = call { renameLibraryCollection(id, buildJsonObject { put("name", kotlinx.serialization.json.JsonPrimitive(name)) }) }
+    override suspend fun deleteLibraryCollection(id: String) { call { deleteLibraryCollection(id) } }
+    override suspend fun addToLibraryCollection(id: String, takeIds: List<String>) = call { addToLibraryCollection(id, ids(takeIds)) }
+    override suspend fun removeFromLibraryCollection(id: String, takeIds: List<String>) = call { removeFromLibraryCollection(id, ids(takeIds)) }
+    override suspend fun takeCollections(takeId: String) = call { takeCollections(takeId) }.map { it.copy(cover = it.cover?.abs()) }
     // AI suite · Photo tool (workstream 3): making the stills answers when they exist, so it gets the long read timeout (as shoots).
     override suspend fun photoEstimate(req: PhotoRequest) = call { photoEstimate(req) }
     override suspend fun createPhotos(req: PhotoRequest) = callLong { createPhotos(req) }.let { r -> r.copy(takes = r.takes.map { it.abs() }) }
