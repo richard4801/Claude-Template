@@ -156,3 +156,6 @@ No "You" / "Claude" labels on messages, as on the Mac and in the Claude app.
 - `claude/ChatAttachTest`: the attach limit wording and "Send as JPEG".
 - `claude/ClaudeChatSurfacesScreenshotTest`: 4 surfaces × 4 themes × (phone and tablet, keyboard closed and open, plus phone landscape with the keyboard), and 6 states × 4 themes. Each case also asserts that no raw marker, context line, `mcp__` name, JSON or exception text is on screen. The PNGs are `app/build/outputs/roborazzi/chat_<theme>_<surface>_<device>_<kb|nokb>.png` and `chat_<theme>_state_<state>.png`.
 - The existing `ClaudeChatScreenshotTest`, `ClaudeLogicTest` and `FakeClaudeApiTest` were updated for the new copy and the icon-only Stop button.
+
+## Screenshots
+Contact sheets in `plans/claude-chat-android/`: `<surface>_phone.png` (portrait with the keyboard closed and open, and landscape with it open) and `<surface>_tablet.png` (keyboard closed and open), for suite, recreate, edit and camera, in all four themes. `states.png` shows empty, loading, error (offline), Mac offline, streaming and failed in all four themes. The full-size PNGs come from `./gradlew :app:testDebugUnitTest --tests 'studio.muse.app.claude.ClaudeChatSurfacesScreenshotTest' -Proborazzi.test.record=true`.
