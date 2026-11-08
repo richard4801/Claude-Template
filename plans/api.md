@@ -1254,15 +1254,23 @@ The studio's editing memory, which Claude reads before every edit. The model doe
 |---|---|
 | `GET /v1/learn/recipes?q&tags=a,b&origin&limit` | → `RecipeEntry[]` (no recipe body), newest first. `q` matches the name, summary and tags; `tags` must all be present. |
 | `GET /v1/learn/recipes/{id}` | → `RecipeEntry` with `recipe`. |
+| `GET /v1/learn/tags?limit` | → `{tag, count}[]`: the most used tags across the library (default 8, at most 30), ties alphabetical. For the Recipes filter chips. |
 | `PATCH /v1/learn/recipes/{id} {name?, tags?}` · `DELETE …` | Rename or retag (lower-cased, unique; at most 30 tags of 32 characters). `DELETE` → `204`. |
 | `GET /v1/learn/recipes/nearest?recipeId|referenceId|takeId&k&origin` | → `{recipeId, nearest: (RecipeEntry & {distance})[]}`, closest first. `404` when the recipe isn't in the library. |
 | `GET /v1/learn/corrections?limit&sessionId&area` | → `Correction[]`, newest first. |
-| `GET /v1/learn/lessons` | → `{area, claudeChange, count, undos, last, examples[], ids[]}[]`: corrections grouped by area and Claude's change, the most frequent first. This is what Claude turns into rules. |
-| `GET /v1/learn/playbook?area` · `POST {text, area?, evidence?, pinned?}` · `PATCH /{id} {text?, area?, evidence?, pinned?}` · `DELETE /{id}` | → `Rule` / `Rule[]`. A rule from `POST` has source `owner`. |
+| `GET /v1/learn/lessons` | → `{area, claudeChange, count, undos, last, examples[], ids[], ruleId?}[]` (`ruleId`: a rule already cites one of its corrections as evidence): corrections grouped by area and Claude's change, the most frequent first. This is what Claude turns into rules. |
+| `GET /v1/learn/playbook?area` · `POST {text, area?, evidence?, pinned?}` · `PATCH /{id} {text?, area?, evidence?, pinned?}` · `DELETE /{id}` | → `Rule` / `Rule[]`. A rule from `POST` has source `owner`. In `GET`, correction evidence also carries `takeId` and `takeExists` (open the edit only when it does). The list is full at 200 rules (`POST` → `400`). |
 | `GET /v1/learn/gaps?limit` · `POST {key, kind?, what?, note?}` | → `Gap[]` / `Gap`. `key` looks like `"effect:lens-flare"`. |
 | `GET /v1/learn/context?recipeId|referenceId|takeId&area` | → `{playbook: Rule[] (≤ 25), recipes /* the 3 nearest, or the latest own edits */, corrections (10), lessons (8), gaps (5)}`. This is what `playbook_read` returns. |
 
-`RecipeEntry {id, origin, referenceId, takeId, name, summary, tags, features, performance | null, createdAt, updatedAt, recipe?}` · `Correction {id, sessionId, takeId, opId, claudeOpId, kind: "undo"|"change", area, what, context, createdAt}` · `Rule {id, text, area, source, pinned, evidence, createdAt, updatedAt}` · `Gap {key, kind, what, count, examples, firstAt, lastAt}`.
+`RecipeEntry {id, origin, referenceId, takeId, name, summary, tags, features, durationSec, cuts, picture: {poster: path} | {thumb: ImageRef} | null, available, performance | null, createdAt, updatedAt, recipe?}` · `Correction {id, sessionId, takeId, takeExists, opId, claudeOpId, kind: "undo"|"change", area, what, context, createdAt}` · `Rule {id, text, area, source, pinned, evidence, createdAt, updatedAt}` · `Gap {key, kind, what, count, references, asks, examples, firstAt, lastAt}`.
+
+For the screens (`plans/learning-editor-ui.md`, 2026-11-08):
+- `picture`: a reference's poster path, or an edit's take thumbnail; `null` → the `field` placeholder.
+- `durationSec` and `cuts` (shots − 1) are the tile badge ("12 s · 9 cuts").
+- `available`: a reference whose video is still kept (state `ready`; "Use in Recreate"), or an edit whose take still exists ("Open edit").
+- Gaps: `references` (recipes that needed it) + `asks` (logged directly) = `count`: "Unknown transition · 4 references", "Lens flare · asked once".
+- Areas → screen headings: captions Captions, text Text, pacing Pacing, transition Transitions, look Look, motion Motion, speed Speed, timing Timing, audio Sound, ratio Shape, other Other.
 
 **For WS1's MCP tools:**
 - `playbook_read` → `learningOf(ctx).context(user, {recipeId?, referenceId?, takeId?, area?})`.

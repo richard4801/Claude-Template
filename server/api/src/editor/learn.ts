@@ -253,8 +253,16 @@ export class Learning {
     const rows = await this.db.select().from(editCorrections).where(and(eq(editCorrections.studioId, u.studioId),
       o.sessionId ? eq(editCorrections.sessionId, o.sessionId) : undefined, o.area ? eq(editCorrections.area, o.area) : undefined))
       .orderBy(desc(editCorrections.id)).limit(Math.min(LEARN_LIMITS.corrections, Math.max(1, o.limit ?? 50)));
-    return rows.map(r => ({ id: r.id, sessionId: r.sessionId, takeId: r.takeId, opId: r.opId, claudeOpId: r.claudeOpId, kind: r.kind, area: r.area, what: r.what,
+    const live = await this.liveTakes(u.studioId, rows.map(r => r.takeId));
+    return rows.map(r => ({ id: r.id, sessionId: r.sessionId, takeId: r.takeId, takeExists: live.has(r.takeId), opId: r.opId, claudeOpId: r.claudeOpId, kind: r.kind, area: r.area, what: r.what,
       context: r.context, createdAt: r.createdAt }));
+  }
+  /** Which of these takes still exist (a correction or rule evidence opens its edit only then). */
+  private async liveTakes(studioId: string, ids: string[]) {
+    const want = [...new Set(ids.filter(Boolean))];
+    if (!want.length) return new Set<string>();
+    const rows = await this.db.select({ id: takes.id }).from(takes).where(and(eq(takes.studioId, studioId), inArray(takes.id, want)));
+    return new Set(rows.map(r => r.id));
   }
   /** Corrections grouped by area and Claude's change (most frequent first): what Claude keeps getting wrong. */
   async lessons(u: AuthUser) {
@@ -271,7 +279,13 @@ export class Learning {
       if (g.ids.length < 20) g.ids.push(r.id);
       groups.set(k, g);
     }
-    return [...groups.values()].sort((a, b) => b.count - a.count || b.last - a.last);
+    const cited = new Map<number, string>();
+    for (const r of await this.db.select({ id: playbookRules.id, evidence: playbookRules.evidence }).from(playbookRules).where(eq(playbookRules.studioId, u.studioId)))
+      for (const e of r.evidence) if (e.kind === 'correction' && typeof e.id === 'number') cited.set(e.id, r.id);
+    return [...groups.values()].sort((a, b) => b.count - a.count || b.last - a.last).map(g => {
+      const ruleId = g.ids.map(i => cited.get(i)).find(Boolean);
+      return ruleId ? { ...g, ruleId } : g;
+    });
   }
 
   // ------------------------------------------------------------------ library
@@ -330,13 +344,37 @@ export class Learning {
     return out;
   }
 
-  private view(r: typeof editRecipes.$inferSelect, perf?: Awaited<ReturnType<Learning['performance']>> extends Map<string, infer V> ? V : never, full = false) {
+  private view(r: typeof editRecipes.$inferSelect, perf?: Awaited<ReturnType<Learning['performance']>> extends Map<string, infer V> ? V : never, full = false,
+    src?: { available: boolean; thumb?: unknown }) {
+    const f = r.features ?? {};
     return { id: r.id, origin: r.origin, referenceId: r.referenceId, takeId: r.takeId, name: r.name, summary: r.summary, tags: r.tags, features: r.features,
+      // For the Recipes screens (plans/learning-editor-ui.md): the tile's picture, its badge numbers, and whether the source still exists.
+      durationSec: f.durationSec ?? 0, cuts: Math.max(0, (f.shots ?? 0) - 1),
+      picture: r.origin === 'reference' && r.referenceId ? { poster: `/v1/recreate/references/${r.referenceId}/poster` } : src?.thumb ? { thumb: src.thumb } : null,
+      available: src?.available ?? false,
       performance: perf ?? null, createdAt: r.createdAt, updatedAt: r.updatedAt, ...(full ? { recipe: r.recipe } : {}) };
   }
   private async withPerf(studioId: string, rows: (typeof editRecipes.$inferSelect)[], full = false) {
-    const perf = await this.performance(studioId, rows.map(r => r.takeId).filter((x): x is string => !!x));
-    return rows.map(r => this.view(r, r.takeId ? perf.get(r.takeId) : undefined, full));
+    const takeIds = rows.map(r => r.takeId).filter((x): x is string => !!x), refIds = rows.map(r => r.referenceId).filter((x): x is string => !!x);
+    const perf = await this.performance(studioId, takeIds);
+    const tk = takeIds.length ? await this.db.select({ id: takes.id, thumb: takes.thumb }).from(takes).where(and(eq(takes.studioId, studioId), inArray(takes.id, takeIds))) : [];
+    const rf = refIds.length ? await this.db.select({ id: recreateReferences.id, state: recreateReferences.state, deletedAt: recreateReferences.deletedAt }).from(recreateReferences)
+      .where(and(eq(recreateReferences.studioId, studioId), inArray(recreateReferences.id, refIds))) : [];
+    const takeOf = new Map(tk.map(t => [t.id, t])), refOf = new Map(rf.map(x => [x.id, x]));
+    return rows.map(r => {
+      const t = r.takeId ? takeOf.get(r.takeId) : undefined, ref = r.referenceId ? refOf.get(r.referenceId) : undefined;
+      // A reference can be used in Recreate while its video is kept (state "ready"); an edit opens while its take exists.
+      const src = r.origin === 'reference' ? { available: !!ref && !ref.deletedAt && ref.state === 'ready' } : { available: !!t, thumb: t?.thumb ?? undefined };
+      return this.view(r, r.takeId ? perf.get(r.takeId) : undefined, full, src);
+    });
+  }
+  /** The most used tags across the library, for the Recipes filter chips. */
+  async topTags(u: AuthUser, limit = 8) {
+    owner(u);
+    await this.sync(u.studioId);
+    const n = new Map<string, number>();
+    for (const r of await this.db.select({ tags: editRecipes.tags }).from(editRecipes).where(eq(editRecipes.studioId, u.studioId))) for (const t of r.tags) n.set(t, (n.get(t) ?? 0) + 1);
+    return [...n].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, Math.min(30, Math.max(1, limit))).map(([tag, count]) => ({ tag, count }));
   }
 
   /** The library: search words match name, summary and tags; `tags` must all be present. Newest first. */
@@ -409,7 +447,9 @@ export class Learning {
     owner(u);
     await this.sync(u.studioId);
     const rows = await this.db.select().from(editGaps).where(eq(editGaps.studioId, u.studioId)).orderBy(desc(editGaps.count), desc(editGaps.lastAt)).limit(Math.min(200, limit));
-    return rows.map(g => ({ key: g.key, kind: g.kind, what: g.what, count: g.count, examples: g.examples, firstAt: g.firstAt, lastAt: g.lastAt }));
+    // `references`: recipes that needed it; `asks`: times it was asked for directly (Claude or the owner). count = references + asks.
+    return rows.map(g => { const asks = g.seen.filter(x => x.startsWith('ask_')).length;
+      return { key: g.key, kind: g.kind, what: g.what, count: g.count, references: Math.max(0, g.count - asks), asks, examples: g.examples, firstAt: g.firstAt, lastAt: g.lastAt }; });
   }
   /** A gap someone asked for directly (Claude couldn't do an effect, or the owner wants one). */
   async addGap(u: AuthUser, b: { key?: unknown; kind?: unknown; what?: unknown; note?: unknown }) {
@@ -430,6 +470,16 @@ export class Learning {
     owner(u);
     const rows = await this.db.select().from(playbookRules).where(and(eq(playbookRules.studioId, u.studioId), o.area ? eq(playbookRules.area, o.area) : undefined));
     return rows.sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.evidence.length - a.evidence.length || b.updatedAt - a.updatedAt).map(this.ruleView);
+  }
+  /** The playbook as the app shows it: correction evidence carries its take and whether that take still exists. */
+  async playbookForApp(u: AuthUser, o: { area?: string } = {}) {
+    const rules = await this.playbook(u, o);
+    const ids = rules.flatMap(r => r.evidence.filter(e => e.kind === 'correction' && typeof e.id === 'number').map(e => e.id as number));
+    const cs = ids.length ? await this.db.select({ id: editCorrections.id, takeId: editCorrections.takeId }).from(editCorrections)
+      .where(and(eq(editCorrections.studioId, u.studioId), inArray(editCorrections.id, [...new Set(ids)]))) : [];
+    const takeOf = new Map(cs.map(c => [c.id, c.takeId])), live = await this.liveTakes(u.studioId, cs.map(c => c.takeId));
+    return rules.map(r => ({ ...r, evidence: r.evidence.map(e => { const t = e.kind === 'correction' && typeof e.id === 'number' ? takeOf.get(e.id) : undefined;
+      return t ? { ...e, takeId: t, takeExists: live.has(t) } : e; }) }));
   }
   private checkRule(b: { text?: unknown; area?: unknown; evidence?: unknown }, partial: boolean) {
     const out: { text?: string; area?: string; evidence?: { kind: string; id?: string | number; note: string; at: number }[] } = {};
