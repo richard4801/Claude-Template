@@ -266,3 +266,7 @@ Release 1 additions (2026-11-08):
 - Recreate from a pasted TikTok/Instagram/YouTube link, and from a saved file. Build with generated shots, Compare, and export with guide sound.
 - Android: Share → MUSE (link and file), plus a device check of alpha-matte timing/rotation and Recreate playback sync.
 - Owner test addition: one pose-guided shot with Wan Animate (~$1.16 at ×2), and one "Write the shot briefs" (~$0.10–0.20).
+- Workstream 1, Recreate swap fills (G2; Wan Animate was dropped, so the shot above is now an Edit swap at the Edit price):
+  - one "to generate" slot filled by **Swap in** with the reference's setting: check the creator's burned-in captions are gone, and that the built edit has no second zoom, ramp or look on that shot;
+  - one with **Use your own setting**: once with a studio location named in the brief (free), once with a generated background plate (about +$0.06 to members). Check that H3 actually puts her in the new background, sent as the last reference image ("background", after 5 of her references). If it ignores the background reference, tell WS1.
+  - "Write the shot briefs" measured on the server is about $0.02–0.03 per 5-shot reference at ×2.
