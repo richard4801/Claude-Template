@@ -165,3 +165,7 @@ See plans/research/platform-download-rules.md for the guardrails.
 | G6 | §2 Transitions "glitch" | The type exists, but the classifier never outputs it. | WS1 | Low |
 | G7 | Release 1 #4 "Claude button on the Recreate screens" | Claude chat threads accept only `camera` or `edit` contexts, and the API fallback works only in Camera. Recreate's tools are on the MCP server already. | WS2 (threads), WS1 (on request) | — |
 | G8 | §6 "Claude's reading of the contact sheet … or a few cents on the API fallback" | Without the owner's Claude, slots get no briefs. There is no server-side briefing (that would be paid API use). The fill prompt now falls back to the summary or a default (above). | Owner decision on spend | — |
+
+## Owner decisions (2026-11-08)
+- **Pose-guided generation (G2):** Wan 2.2 Animate, driven by a stick-figure video rendered from per-frame keypoints (never the reference's pixels). Priced at cost ×2, confirmed per shot. One paid test (~$0.58) in the owner's Release 1 test.
+- **Server-written shot briefs (G8):** yes, on Sonnet. Opt-in per reference, price shown and confirmed, ×2. About $0.10–0.20 per reference to members.

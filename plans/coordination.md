@@ -265,3 +265,4 @@ Release 1 additions (2026-11-08):
 - AI helpers calibration: run each once on a 15 s clip: Auto-captions, Remove background, Pick what to keep, Noise reduction. Then send the four jobs' numbers (estimateUsd/costUsd) to WS1, who corrects any rate more than 20% off.
 - Recreate from a pasted TikTok/Instagram/YouTube link, and from a saved file. Build with generated shots, Compare, and export with guide sound.
 - Android: Share → MUSE (link and file), plus a device check of alpha-matte timing/rotation and Recreate playback sync.
+- Owner test addition: one pose-guided shot with Wan Animate (~$1.16 at ×2), and one "Write the shot briefs" (~$0.10–0.20).
