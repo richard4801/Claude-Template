@@ -70,6 +70,8 @@ public actor FakeMuseAPI: MuseAPI {
     var sheetVersionsByModel: [String: [SheetVersion]] = [:]
     /// AI suite (workstream 1): the demo studio's suite settings (Engines), once changed.
     var suiteSettingsBox: SuiteSettings?
+    /// Settings → Default models (EngineChoice.swift): the studio's pick per purpose.
+    var engineDefaultsBox: [String: String?] = [:]
     /// AI suite (workstream 1): the Look each demo shot's takes carry (by job id), like the server's take.look.
     var suiteLooks: [String: SuiteLook] = [:]
     /// AI suite (workstream 1): a job's take length when it isn't the request's (Extend: source + extension; Upscale: the take's).

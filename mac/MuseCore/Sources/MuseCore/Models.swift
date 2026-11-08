@@ -282,6 +282,8 @@ public struct CreateOutfitRequest: Codable, Sendable {
     public var images: [ImageRef]
     /// Owner only: per-run model override (step → "owner/name").
     public var models: ModelOverrides?
+    /// Owner only: the outfit's image model (EngineChoice.swift, purpose "outfit"); nil = the studio's default.
+    public var imageModel: String?
 
     public init(modelId: String, name: String, mode: String, description: String = "", images: [ImageRef] = [], models: ModelOverrides? = nil) {
         self.models = (models?.isEmpty ?? true) ? nil : models

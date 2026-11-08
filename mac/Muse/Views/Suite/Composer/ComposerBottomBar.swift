@@ -110,12 +110,14 @@ struct ComposerBottomBar: View {
                              options: ComposerSpeaking.allCases.map { ($0.label, $0) }, selected: store.suite.swap.speaking) { store.suite.swap.speaking = $0 }
                     addOnPills(compact: compact)
                 }
+                OwnerModelPill(purpose: tool == .recast ? .recast : .swap, compact: compact) // the owner's model (WS6); members see nothing
             } else if tool == .extend {
                 // Extend: the new part's length on this quality, and takes. The shape and sound follow the video.
                 if !settingsInRail {
                     lengthPill
                     takesPill
                 }
+                OwnerModelPill(purpose: .extend, compact: compact) // the owner's model (WS6); members see nothing
             } else if tool == .photo {
                 // Photo tool (workstream 3): one Photos 1–4 count in place of Shape, Length, Sound, Speaking and Takes.
                 let n = store.suite.photo.count

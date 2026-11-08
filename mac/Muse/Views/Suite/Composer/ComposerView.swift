@@ -66,6 +66,14 @@ struct ComposerView: View {
             if SnapshotRunner.state.overlay == "tools_before" { ToolBrowser() }
             // Review only: the Model pill's list drawn in the window (a popover is its own window, which the shots and the
             // click-through walk can't reach).
+            if let o = SnapshotRunner.state.overlay, o.hasPrefix("engine_list:"), let p = EnginePurpose(rawValue: String(o.dropFirst("engine_list:".count))) {
+                EngineList(purpose: p, selected: store.enginePick(p)?.model, selectedResolution: store.enginePick(p)?.resolution) { m, r in
+                    store.setEnginePick(p, m.map { EnginePick(model: $0, resolution: r) })
+                }
+                .floatingPanel(width: 400)
+                .padding(.trailing, Space.s6).padding(.bottom, 96)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            }
             if SnapshotRunner.state.overlay == "model_picker" {
                 ModelPickerList(onPick: {})
                     .floatingPanel(width: 400)

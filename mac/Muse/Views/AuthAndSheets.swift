@@ -223,6 +223,7 @@ struct OutfitSheetView: View {
                             RButton("Save outfit", kind: .action) { store.outfitSave() }
                                 .keyboardShortcut(d.viewing == nil ? .defaultAction : nil)
                         } else {
+                            if d.mode != .own { OwnerModelPill(purpose: .outfit) } // the owner's outfit model (WS6)
                             RButton(d.mode == .own ? "Use my images" : "Make 4 angles · \(Pricing.money(store.outfitSetEstimate))", kind: .action, off: d.state == .busy) {
                                 store.outfitGenerate()
                             }

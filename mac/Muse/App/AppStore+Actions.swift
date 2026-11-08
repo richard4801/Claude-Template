@@ -130,7 +130,7 @@ extension AppStore {
         Task { @MainActor [self] in
             defer { upscaling = false }
             do {
-                let j = try await api.upscale(takeId: take.id, UpscaleRequest(size: size.id))
+                let j = try await api.upscale(takeId: take.id, UpscaleRequest(size: size.id, engineModel: enginePick(.upscale)?.model))
                 upsert(j)
                 balance = try await api.balance()
                 showToast("Upscaling to \(size.label) · \(Pricing.money(j.cost)). You'll get a notification when it's done.", action: "Open queue") { [weak self] in
@@ -559,8 +559,10 @@ extension AppStore {
                 var refs: [ImageRef] = []
                 for u in draft.images { refs.append(try await uploadImage(u)) }
                 let name = draft.name.isEmpty ? (draft.mode == .describe ? draft.description : draft.mode == .photo ? "Product look" : "My set") : draft.name
-                let o = try await api.createOutfit(CreateOutfitRequest(modelId: draft.modelId, name: String(name.prefix(32)), mode: draft.mode.rawValue,
-                                                                       description: draft.description, images: refs))
+                var req = CreateOutfitRequest(modelId: draft.modelId, name: String(name.prefix(32)), mode: draft.mode.rawValue,
+                                              description: draft.description, images: refs)
+                if draft.mode != .own { req.imageModel = enginePick(.outfit)?.model } // the owner's model (WS6)
+                let o = try await api.createOutfit(req)
                 if let i = outfits.firstIndex(where: { $0.id == o.id }) { outfits[i] = o } else { outfits.append(o) }
                 outfitSheet?.outfitId = o.id
                 if o.state == "preview" || o.state == "ready" {

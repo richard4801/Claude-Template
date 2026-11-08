@@ -86,6 +86,7 @@ enum SnapshotRunner {
             try? await Task.sleep(for: .seconds(4))
             // The composer screens need the suite's catalog (the demo draft picks its camera, light and look from it).
             await store.loadSuite()
+            await store.loadEngines()   // the owner's models per purpose (WS6)
             let shots: [(String, @MainActor () -> Void)] = [
                 ("home", { store.go(.home) }),
                 ("library", { store.go(.gallery) }),
@@ -123,6 +124,9 @@ enum SnapshotRunner {
                 // limits) and the pill's list.
                 ("composer_model", { store.openTool(.shot); fillDemoDraft(store); pinDemoModel(store) }),
                 ("composer_model_list", { store.openTool(.shot); fillDemoDraft(store); pinDemoModel(store); state.overlay = "model_picker" }),
+                // Swap and Extend: the generic Model pill's list for that purpose (WS6, "pick the model everywhere").
+                ("composer_swap_model_list", { store.openTool(.swap); state.overlay = "engine_list:swap" }),
+                ("composer_extend_model_list", { store.openTool(.extend); state.overlay = "engine_list:extend" }),
                 // Photo: the owner's photo model list.
                 ("composer_photo_model_list", { store.openPhoto(model: SampleData.demo); state.overlay = "model_picker" }),
                 ("composer_photo_preset_cleared", { store.openPhoto(model: SampleData.demo)

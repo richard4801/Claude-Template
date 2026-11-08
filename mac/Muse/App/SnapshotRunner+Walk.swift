@@ -69,6 +69,20 @@ extension SnapshotRunner {
              : "FAIL model_picker: pinned an unknown model \(pinned ?? "")")
         state.overlay = nil
         store.pinComposerModel(nil)
+        // The generic Model pill's list (Swap): Auto and every model pick without spending.
+        await walkScreen("engine_list_swap", ax: ax, minimum: 4, deny: ["Generate"],
+                         only: { $0.hasPrefix("Use ") },
+                         required: ["Use Auto"],
+                         base: { store.openTool(.swap) },
+                         open: { state.overlay = "engine_list:swap" },
+                         isOpen: { state.overlay == "engine_list:swap" && store.screen == .suite },
+                         note: note)
+        let swapPick = store.enginePick(.swap)?.model
+        note(swapPick == nil || store.engineChoice.catalog?.engines(for: .swap).contains { $0.model == swapPick } == true
+             ? "DONE engine_list_swap pick \(swapPick ?? "Auto"), request \(store.swapRequest?.engineModel ?? "none")"
+             : "FAIL engine_list_swap: picked a model the swap list doesn't have (\(swapPick ?? ""))")
+        state.overlay = nil
+        store.setEnginePick(.swap, nil)
         // Import a video from a link (demo mode imports at once, nothing is downloaded or spent). "Choose a file instead"
         // opens a modal file panel, so it's skipped.
         await walkScreen("link_import", ax: ax, minimum: 3, deny: ["Choose a file instead"],

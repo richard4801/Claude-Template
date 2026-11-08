@@ -243,6 +243,8 @@ final class AppStore {
     let recreate = RecreateState()
     /// "Import a video from a link" (WS6, AppStore+LinkImport.swift).
     let linkImport = LinkImportState()
+    /// The owner's model picks per purpose and the engine catalog (WS6, AppStore+EngineChoice.swift).
+    let engineChoice = EngineChoiceState()
     /// The learning editor in Edit: Playbook and Recipes (AppStore+Learn.swift).
     let learn = LearnState()
     /// Library collections (AppStore+LibraryQueue.swift).

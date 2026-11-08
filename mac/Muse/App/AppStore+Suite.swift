@@ -563,6 +563,7 @@ extension AppStore {
             var r = ShotRequest(mode: "swap", title: "\(character(m)?.shortName ?? "Swap") · swap", modelId: m, outfitId: d.outfitId ?? outfits(for: character(m)).first?.id,
                                 prompt: d.promptOn ? suite.composer.tokens.promptText() : "", quality: d.quality, speaking: d.speaking.value, clipId: c.id, keepAudio: d.keepAudio)
             applyLook(&r)
+            applyEnginePick(&r, .swap) // the owner's model (WS6)
             if d.promptOn, let mv = suite.composer.tokens.moves.first?.move {
                 var cam = r.camera ?? CameraSpec(mode: "preset")
                 cam.move = mv
@@ -574,6 +575,7 @@ extension AppStore {
             let cast = RecastFaces.resolveClashes(d.cast, faces: d.people.map(\.face))
             var r = ShotRequest.recast(clipId: c.id, cast: cast, quality: d.quality, keepAudio: d.keepAudio, title: "Recast · \(c.name)")
             applyLook(&r)
+            applyEnginePick(&r, .recast) // the owner's model (WS6)
             return r
         }
     }
