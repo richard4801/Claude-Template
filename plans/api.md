@@ -1138,7 +1138,7 @@ Migration **0014** (`suite_drafts_rigs`): `jobs.draft`, `takes.draft`, `models.d
 | `PATCH /v1/suite/rigs/{id} {name?, rig?}` | → `RigView`. Your own rig, or any rig in the studio for the owner. Anyone else's reads as `404`. `rig` replaces the whole rig. |
 | `DELETE /v1/suite/rigs/{id}` | → `204`, with the same permissions as PATCH. |
 | `PATCH /v1/models/{id} {defaultRig: Rig \| null}` | The model's **default rig**, returned as `Model.defaultRig`. `null` or `{}` clears it. Anyone in the studio can set it, like the model's other fields. |
-| `GET /v1/suite/feed?tool=&model=&status=&cursor=&limit=` | → `{items: FeedItem[], nextCursor: string \| null}`. See below. |
+| `GET /v1/suite/feed?tool=&model=&status=&cursor=&limit=&collection=` | → `{queued?: QueuedShot[], items: FeedItem[], nextCursor: string \| null}`. See below, and "Library collections and the Suite queue". |
 
 **The feed (`GET /v1/suite/feed`)**
 - **Order:** newest first.
@@ -1156,6 +1156,44 @@ Migration **0014** (`suite_drafts_rigs`): `jobs.draft`, `takes.draft`, `models.d
 - When a model is @-mentioned, the composer fills only the rig rows still on Auto from her `defaultRig`, then shows "Applied <name>'s rig · Undo".
 - It never overwrites a row the user set. With two @ models in the prompt, nothing applies automatically.
 - `moves` in a default rig are added as `#` chips only if the prompt has no move yet.
+
+### Library collections and the Suite queue (build step 3, 2026-11-08; `plans/ai-suite-design.md` "Refinements" 1 and 6)
+Migration **0020** (`library_collections_suite_queue`): the `library_collections`, `library_collection_items` and `suite_queue` tables. Code: `suite/collections.ts`, `suite/queue.ts`; tests `test/suite-library.test.ts`.
+
+**Library collections.** Named groups of the studio's takes and photos (any `takes` row). Everyone in the studio sees them, like the library. The one who made a collection, or the owner, renames it, deletes it and changes what's in it; anyone else gets `403 not_yours`.
+
+| Call | Notes |
+|---|---|
+| `GET /v1/library/collections` | → `Collection[]`, most recently changed first. |
+| `POST /v1/library/collections {name, takeIds?}` | → `Collection & {takeIds}`. `name` is 1–60 characters. Up to 200 collections per studio (`409 too_many_collections`). |
+| `GET /v1/library/collections/{id}` | → `Collection & {takeIds}` (newest added first). |
+| `PATCH /v1/library/collections/{id} {name}` | Rename. |
+| `DELETE /v1/library/collections/{id}` | → 204. The takes and photos stay in the library. |
+| `POST /v1/library/collections/{id}/items {takeIds}` | Add (each once; up to 200 per call, 2,000 per collection: `409 collection_full`). An id that isn't the studio's → `400 takeIds: no take or photo …`. → `Collection & {takeIds}`. |
+| `POST /v1/library/collections/{id}/items/remove {takeIds}` | Remove. → `Collection & {takeIds}`. |
+| `GET /v1/library/takes/{takeId}/collections` | → `Collection[]` the take or photo is in (its detail sheet). |
+| `GET /v1/suite/feed?collection={id}` | The feed of that collection: its takes and photos only (no pending jobs, no queue), with the usual filters and paging. An unknown collection → `400`. |
+
+```
+Collection { id, name, userId, mine, canEdit, count /* takes and photos that still exist */, cover: ImageRef | null /* the newest item's thumb */, createdAt, updatedAt }
+```
+Event `collection`: `{collection}` (created or changed) or `{deleted: id}`, to the whole studio.
+
+**The Suite queue.** A shot saved to run later. Queuing checks the shot and prices it, but holds nothing. **Run · $cost** prices it again and goes through the normal estimate → confirm → hold path. Each member sees their own queue; the owner sees the studio's.
+
+| Call | Notes |
+|---|---|
+| `POST /v1/suite/queue {…the body of POST /v1/suite/shots}` | Checked and priced like `…/shots/estimate` (same errors, `nothing_fits` included); nothing held. `queue` and `dryRun` are ignored. Up to 50 per member (`409 queue_full`). → `QueuedShot`. |
+| `GET /v1/suite/queue` | → `QueuedShot[]`, newest first. |
+| `POST /v1/suite/queue/{id}/estimate` | Today's price → `QueuedShot & {estimateView /* the shot estimate, as …/shots/estimate returns it */, changed}`. The stored price is updated. Show it, then confirm. |
+| `POST /v1/suite/queue/{id}/run {confirm: true}` | Runs it exactly as `POST /v1/suite/shots` would (caps, hold, job); the queue entry is removed. → `{queuedId, job}`. `400` without `confirm: true`. |
+| `DELETE /v1/suite/queue/{id}` | Discard → 204 (nothing was held). |
+
+```
+QueuedShot { id, kind: "queued", title, tool, modelId?, userId, mine, estimate, buttonLabel: "Run · $0.40", prompt?, draft?, createdAt }
+```
+- **In the feed:** the first page of `GET /v1/suite/feed` (no cursor, no collection) carries `queued: QueuedShot[]` above `items` (the "Queued" group), filtered by `tool`, `model` and `status` (`queued`).
+- Event `queue`: `{item}` or `{removed, jobId?}`, only to the member who queued it and the owner.
 
 ## Recreate this edit (workstream 1, 2026-11-08; `plans/recreate-edit.md`)
 A reference video (an upload, up to 60 s for now) is analysed into a versioned **recipe**. The analysis is free: ffmpeg, the beat detector and sharp on the server's CPU, one analysis at a time. Migration **0015** adds `recreate_references`. Code is in `src/recreate/` (`analyze.ts`, `signals.ts`, `frames.ts`, `text.ts`, `references.ts`); tests are `test/recreate.test.ts` (a synthetic reference) and `test/motion.test.ts`.
@@ -1341,11 +1379,13 @@ Code: `src/recreate/slots.ts` (briefs, matcher, fill request), `assemble.ts` (re
 | | |
 |---|---|
 | `PUT /v1/recreate/references/{id}/briefs {slots: {s1: Brief}, summary?, tags?}` | `summary` (≤ 200 chars) and `tags` (≤ 20 short lowercase words) go on the recipe. `Brief {shotSize?, angle?, subject?, action?, location?, notes?}`. `shotSize` is a `SHOT_SIZES` id and `angle` a `HEIGHTS` id; unknown ids → `400`. Each brief is merged into the slot, and its framing and angle go into the slot's `rig`. |
+| `POST /v1/recreate/references/{id}/briefs/estimate` | **"Write the shot briefs"** on the server (G8; for when the owner's Claude isn't there to read the contact sheet). → `{available, reason?, slots, estimateUsd, label: "Write the shot briefs · about $0.02", priceLine}`. Nothing is held. `available` is false (with `reason` to show) until the owner turns on Claude on the server (`PATCH /v1/claude/settings {apiFallback: true}`) and the server has a key. Free alternative: ask Claude on the Mac (`set_slot_briefs`). |
+| `POST /v1/recreate/references/{id}/briefs/write {confirm: true}` | One Claude call reads the contact sheet and each shot's facts, and writes every shot's brief, the summary and tags (saved as `PUT …/briefs` would). → `{referenceId, written: ["s1", …], costUsd, reference}`. Charged the call's actual cost × `EDITOR_MARKUP` from the wallet. The price is held first; it counts in the AI editing day's spend and cap (`GET /v1/editor/settings`), but isn't listed in `/v1/editor/jobs`. `400` without `confirm: true` · `503 briefs_unavailable` (switched off, with the reason) · `503 editor_paid_off` · `402 editor_daily_cap` · `502 briefs_failed` (nothing charged). The model is set by `RECREATE_BRIEF_MODEL` (default Sonnet 5.5) and never named to members. |
 | `POST /v1/recreate/references/{id}/match {modelId?, top?, minScore?}` | → `{slots: [{slotId, candidates: [{takeId, score, reasons}], suggested, suggestion: {takeId, score, reasons} | null, toGenerate}], assignment: {slotId: takeId}}`. `suggestion` is the suggested take's own score, which may rank below the top `candidates` because each take is used once. See the matcher below. |
-| `POST /v1/recreate/references/{id}/slots/{slotId}/estimate {modelId, quality?}` | → `{slotId, request: ShotRequest, promptFrom: "brief"\|"summary"\|"default", estimate: ShotEstimate}`. Nothing is held. Without a brief, the prompt comes from the reference's summary, else a neutral line (`promptFrom`): suggest writing a brief first. |
-| `POST /v1/recreate/references/{id}/slots/{slotId}/fill {modelId, quality?}` | → `{slotId, job}`: an ordinary Suite shot, held and priced like any other (the caller has confirmed the price). The slot records `fill: {jobId}`. |
+| `POST /v1/recreate/references/{id}/slots/{slotId}/estimate {modelId, quality?, method?: "swap"\|"generate", keepBackground?: boolean, outfitId?}` | Nothing is held, cut or stored. **`method: "swap"`** (the default when the reference's video is still here and a swap engine is available; G2): the model is swapped into the reference's own segment of that shot, through the Suite's Edit job (Edit on our pods, else the hosted swap). → `{slotId, method: "swap", keepBackground, segment: {startSec, endSec}, baked: ["camera","speed","look"], request, estimate: {method, label, seconds, takes, estimate, priceLine, buttonLabel: "Swap in · 2.0 s · $0.41", ok, warnings}}`. The segment is the slot plus half of each neighbouring transition, widened evenly to the engine's minimum (4 s on the hosted swap). `keepBackground: false` = **"Use your own setting"**: the slot's brief (location, notes) names the place; Edit only. **`method: "generate"`**: a new Suite shot from the brief → `{slotId, method: "generate", request: ShotRequest, promptFrom: "brief"\|"summary"\|"default", estimate: ShotEstimate, swapUnavailable?}`. Without a brief, the prompt comes from the reference's summary, else a neutral line (`promptFrom`): suggest writing a brief first. `swapUnavailable` says why the default fell back to generate. `409 swap_unavailable` when `method: "swap"` was asked for and can't run. |
+| `POST /v1/recreate/references/{id}/slots/{slotId}/fill {…same body}` | The caller has confirmed the price. Swap → `{slotId, method: "swap", segment, job}`. The segment is cut to a private clip under the reference (`rx/…`, deleted with it after 30 days). An ordinary Edit job runs on it, held and priced like any swap: video only (the edit uses the reference's sound), with the creator's burned-in captions removed in the prompt. If Edit isn't available, the hosted swap runs. Generate → `{slotId, method: "generate", job}`, an ordinary Suite shot. The slot records `fill: {jobId}`. |
 | `POST /v1/recreate/references/{id}/apply {sessionId, baseRevision?, slots: {slotId: takeId \| jobId}, options?: {camera, speed, text, look}, device?}` | Builds the edit in an edit session (owner) as one undoable change labelled "Recreated “name”". → `{sessionId, revision, durationSec, missing, waiting, notes, label, match, sources}`. See below. |
-| `POST /v1/recreate/references/{id}/slots/{slotId}/replace {sessionId, take: takeId \| jobId, baseRevision?, device?}` | **Fix this shot** (plan §4): the slot's clip in the edit built from this reference gets another take, or a finished fill job, in place, as one undoable change ("Replaced shot s2 in “name”"). Its place and length on the timeline, transition, ramp, camera keys and look stay, and the new take starts where its action peak lines up (slower if it is too short). The owner's other edits are kept. → `{sessionId, revision, slotId, itemId, takeId, inSec, label, note?}`. `409 not_built_here` (the edit wasn't built in that session), `409 slot_not_in_edit` (the shot's clip was deleted), `409 job_not_done`. Claude's tool: `replace_slot`. |
+| `POST /v1/recreate/references/{id}/slots/{slotId}/replace {sessionId, take: takeId \| jobId, baseRevision?, device?}` | **Fix this shot** (plan §4): the slot's clip in the edit built from this reference gets another take, or a finished fill job, in place, as one undoable change ("Replaced shot s2 in “name”"). Its place and length on the timeline, transition, ramp, camera keys and look stay, and the new take starts where its action peak lines up (slower if it is too short). A swapped take is baked instead (see below). The owner's other edits are kept. → `{sessionId, revision, slotId, itemId, takeId, inSec, label, baked?, note?}`. `409 not_built_here` (the edit wasn't built in that session), `409 slot_not_in_edit` (the shot's clip was deleted), `409 job_not_done`. Claude's tool: `replace_slot`. |
 
 **The matcher** scores each of the studio's video takes against a slot, 0–1, with reasons:
 - the length;
@@ -1367,10 +1407,12 @@ Pose guidance (the slot's keypoints) joins the fill request once the Suite's sho
 
 **Fill state** (`GET …/fill`; `match` keeps its last result, `fill` its jobs):
 ```
-SlotFill { slotId, state: "empty"|"matched"|"to_generate"|"generating"|"ready", takeId?, jobId?, score?, estimate?: {amount, label}, reason? }
+SlotFill { slotId, state: "empty"|"matched"|"to_generate"|"generating"|"ready", takeId?, jobId?, method?: "swap"|"generate", score?, estimate?: {amount, label}, reason?,
+  fallback?: "generate", failedJobId? /* a swap that failed (refunded): offer generate, priced on its own */ }
 ```
 - `ready`: the slot's fill job is done (its first take); `generating`: the job is still running; `matched`: the last match's suggestion; `to_generate`: nothing scored enough.
-- `applied: {sessionId, revision, at, slots: {slotId: takeId}, sources, match}` after an apply.
+- `applied: {sessionId, revision, at, slots: {slotId: takeId}, sources, match, baked?: {slotId: ["camera","speed","look"]}}` after an apply.
+- **Swapped slots are "baked" (G2):** the segment already carries the creator's zoom/shake, speed ramp and grade. So a slot filled by its own swap job gets none of them again. Its clip plays at 1× from the slot's moment in the segment, and keeps only the cut, its length and the transitions. Our editable text goes on top as usual. The apply response and `applied.baked` list those slots. The match score counts their ramp and grade as matched, and the shot as 0.95. `replace` with the slot's swap take bakes the clip (`baked` in the response); replacing a baked clip with an ordinary take brings the reference's camera keys, ramp and look back.
 
 **Match score** (returned by apply as `match`, 0–1): `{overall, cuts, text, ramps, grade, shots, perSlot: [{slotId, score}]}`.
 - `cuts`: each cut's distance from the reference's (exact = 1, two frames or more = 0), times the share of slots filled.

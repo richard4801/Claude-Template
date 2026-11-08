@@ -266,3 +266,4 @@ Release 1 additions (2026-11-08):
 - Recreate from a pasted TikTok/Instagram/YouTube link, and from a saved file. Build with generated shots, Compare, and export with guide sound.
 - Android: Share → MUSE (link and file), plus a device check of alpha-matte timing/rotation and Recreate playback sync.
 - Owner test addition: one pose-guided shot with Wan Animate (~$1.16 at ×2), and one "Write the shot briefs" (~$0.10–0.20).
+- Owner test addition: a Recreate shot filled by the H3 swap. Check that the creator's burned-in captions are gone from the swapped clip (removal relies on the prompt only), and that there's no double zoom or grade.
