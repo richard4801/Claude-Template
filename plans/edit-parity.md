@@ -283,3 +283,7 @@ The full inventory with every link is in WS8's research notes, on request. The m
   - petapixel.com (Edits Restyle)
 
 CapCut's free/paid split is contradictory across sources (its own pages vs reviews), so this document does not rely on it.
+
+## Owner's decision (2026-11-08)
+- **Build ALL functional rows, in waves, on Android and Mac:** every Missing/Partial row that needs no licensed content. Wave 1 is the suggested list above; then the rest, in size order. XL rows that need a model or vendor choice are researched and priced, and brought back to the owner before any spend.
+- **Content:** free/open libraries first: open-licence fonts (OFL), royalty-free sound effects, an open emoji set, plus effects, filters, transitions and caption templates made in-house. No paid music library and no TTS vendor for now.
