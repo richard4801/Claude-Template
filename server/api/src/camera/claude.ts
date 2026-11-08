@@ -11,6 +11,7 @@ import type { CameraService } from './service.js';
 import { parse } from './validate.js';
 import { EDIT_PROMPT, RECREATE_PROMPT } from '../recreate/assistant.js';
 import { SUITE_PROMPT } from '../suite/mcpTools.js';
+import { attachmentViews, storeAttachments, type Attachment } from './claudeAttachments.js';
 
 type ThreadRow = typeof claudeThreads.$inferSelect;
 type MessageRow = typeof claudeMessages.$inferSelect;
@@ -23,7 +24,7 @@ export const OPEN_IN_CLAUDE_URL = 'https://claude.ai/new';
 const ToolEv = z.object({ type: z.literal('tool'), id: z.string().min(1).max(100), name: z.string().min(1).max(120), status: z.enum(['running', 'done', 'error']),
   summary: z.string().max(300).optional(), input: z.unknown().optional() });
 const ClaudeEvent = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('user'), text: z.string().max(20_000) }),
+  z.object({ type: z.literal('user'), text: z.string().max(20_000), attachments: z.array(z.object({ uploadId: z.string().max(80) }).strict()).max(4).optional() /* workstream 1 */ }),
   z.object({ type: z.literal('text'), delta: z.string().max(20_000) }),
   z.object({ type: z.literal('assistant'), text: z.string().max(100_000) }),
   ToolEv,
@@ -89,9 +90,10 @@ export class ClaudeService {
     createdAt: t.createdAt, updatedAt: t.updatedAt, brief: threadBrief(t.contextKind, t.contextId) });
   private async messageView(m: MessageRow) {
     return compact({ id: m.id, threadId: m.threadId, role: m.role, source: m.source, text: m.text, turnId: m.turnId ?? undefined, tool: m.tool ?? undefined,
-      image: m.imageKey ? { url: await this.ctx.storage.presignGet(m.imageKey, 3600) } : undefined, createdAt: m.createdAt });
+      image: m.imageKey ? { url: await this.ctx.storage.presignGet(m.imageKey, 3600) } : undefined, attachments: await attachmentViews(this.ctx, m.attachments), createdAt: m.createdAt });
   }
-  turnView = (t: TurnRow) => compact({ id: t.id, threadId: t.threadId, text: t.text, from: t.from, state: t.state, error: t.error ?? undefined,
+  turnView = async (t: TurnRow) => compact({ id: t.id, threadId: t.threadId, text: t.text, from: t.from, state: t.state, error: t.error ?? undefined,
+    attachments: await attachmentViews(this.ctx, t.attachments), // workstream 1: the images the Mac downloads for its turn
     createdAt: t.createdAt, claimedAt: t.claimedAt ?? undefined, finishedAt: t.finishedAt ?? undefined });
 
   async thread(u: AuthUser, id: string) {
@@ -122,7 +124,7 @@ export class ClaudeService {
     const t = await this.thread(u, id);
     const rows = (await this.db.select().from(claudeMessages).where(eq(claudeMessages.threadId, t.id)).orderBy(desc(claudeMessages.createdAt)).limit(100)).reverse();
     const [active] = await this.db.select().from(claudeTurns).where(and(eq(claudeTurns.threadId, t.id), inArray(claudeTurns.state, ['queued', 'running']))).limit(1);
-    return { ...this.threadView(t), messages: await Promise.all(rows.map(m => this.messageView(m))), ...(active ? { activeTurn: this.turnView(active) } : {}) };
+    return { ...this.threadView(t), messages: await Promise.all(rows.map(m => this.messageView(m))), ...(active ? { activeTurn: await this.turnView(active) } : {}) };
   }
 
   async patchThread(u: AuthUser, id: string, body: unknown) {
@@ -147,18 +149,20 @@ export class ClaudeService {
   }
 
   async ask(u: AuthUser, threadId: string, body: unknown) {
-    const b = parse(z.object({ text: z.string().trim().min(1).max(8000) }).strict(), body);
+    const b = parse(z.object({ text: z.string().trim().max(8000), attachments: z.unknown().optional() }).strict(), body);
     const t = await this.thread(u, threadId);
+    if (!b.text && !(Array.isArray(b.attachments) && b.attachments.length)) throw badRequest('text: write something or attach an image');
     if (await this.activeTurn(t.id)) throw new ApiError(409, 'claude_busy', 'Claude is still answering in this chat');
     if (!this.macReady(u.id)) {
       const e = new ApiError(409, 'mac_offline', 'Your Mac is offline · open MUSE on your Mac with Claude Code signed in');
       (e as ApiError & { extra?: unknown }).extra = { fallback: { openInClaudeUrl: OPEN_IN_CLAUDE_URL, apiFallback: (await this.settings(u.studioId)).apiFallback && !!this.ctx.config.ANTHROPIC_API_KEY } };
       throw e;
     }
+    const attachments = await storeAttachments(this.ctx, u, t.id, b.attachments); // workstream 1
     const now = Date.now();
-    const [turn] = await this.db.insert(claudeTurns).values({ id: uid('tu'), threadId: t.id, ownerId: u.id, text: b.text, from: 'phone', state: 'queued', createdAt: now }).returning();
-    const message = await this.addMessage(u, t.id, { role: 'user', source: 'phone', text: b.text, turnId: turn!.id });
-    const view = this.turnView(turn!);
+    const [turn] = await this.db.insert(claudeTurns).values({ id: uid('tu'), threadId: t.id, ownerId: u.id, text: b.text, from: 'phone', state: 'queued', createdAt: now, ...(attachments.length ? { attachments } : {}) }).returning();
+    const message = await this.addMessage(u, t.id, { role: 'user', source: 'phone', text: b.text, turnId: turn!.id, ...(attachments.length ? { attachments } : {}) });
+    const view = await this.turnView(turn!);
     void this.ctx.hub.emitTo(u.id, { type: 'claude', op: 'turn', turn: view });
     this.arm(turn!.id, this.claimTimeoutMs, u, 'Your Mac didn\'t pick this up · check that MUSE is open on your Mac');
     return { message, turn: view };
@@ -166,7 +170,7 @@ export class ClaudeService {
 
   async pending(u: AuthUser) {
     const rows = await this.db.select().from(claudeTurns).where(and(eq(claudeTurns.ownerId, u.id), eq(claudeTurns.state, 'queued')));
-    return rows.filter(r => Date.now() - r.createdAt < this.claimTimeoutMs).map(this.turnView);
+    return Promise.all(rows.filter(r => Date.now() - r.createdAt < this.claimTimeoutMs).map(r => this.turnView(r)));
   }
 
   private async turnRow(u: AuthUser, id: string) {
@@ -182,7 +186,7 @@ export class ClaudeService {
     const [n] = await this.db.update(claudeTurns).set({ state: 'running', claimedAt: now, lastEventAt: now }).where(and(eq(claudeTurns.id, id), eq(claudeTurns.state, 'queued'))).returning();
     if (!n) throw new ApiError(409, 'already_claimed', 'Another Mac is answering this');
     this.arm(id, this.silentTurnMs, u, 'Your Mac stopped answering');
-    const view = this.turnView(n);
+    const view = await this.turnView(n);
     void this.ctx.hub.emitTo(u.id, { type: 'claude', op: 'turn', turn: view });
     void this.emitStatus(u);
     return view;
@@ -192,7 +196,7 @@ export class ClaudeService {
     const t = await this.turnRow(u, id);
     if (t.state === 'queued') return this.finish(u, t.id, 'stopped');
     if (t.state === 'running') void this.ctx.hub.emitTo(u.id, { type: 'claude', op: 'stop', turnId: t.id });
-    return this.turnView(t);
+    return await this.turnView(t);
   }
 
   /** Fails or ends a turn once (timers, done events, stops). */
@@ -200,8 +204,8 @@ export class ClaudeService {
     const timer = this.timers.get(id); if (timer) { clearTimeout(timer); this.timers.delete(id); }
     const [n] = await this.db.update(claudeTurns).set({ state, error: error ?? null, finishedAt: Date.now() })
       .where(and(eq(claudeTurns.id, id), inArray(claudeTurns.state, ['queued', 'running']))).returning();
-    if (!n) return this.turnView((await this.db.select().from(claudeTurns).where(eq(claudeTurns.id, id)))[0]!);
-    const view = this.turnView(n);
+    if (!n) return await this.turnView((await this.db.select().from(claudeTurns).where(eq(claudeTurns.id, id)))[0]!);
+    const view = await this.turnView(n);
     void this.ctx.hub.emitTo(u.id, { type: 'claude', op: 'turn', turn: view });
     void this.emitStatus(u);
     return view;
@@ -233,7 +237,10 @@ export class ClaudeService {
       switch (ev.type) {
         case 'user':
           // A relayed turn's user message is already stored (from the phone).
-          if (!turn) await this.addMessage(u, t.id, { role: 'user', source, text: ev.text });
+          if (!turn) {
+            const attachments = await storeAttachments(this.ctx, u, t.id, ev.attachments); // workstream 1: images typed on the Mac
+            await this.addMessage(u, t.id, { role: 'user', source, text: ev.text, ...(attachments.length ? { attachments } : {}) });
+          }
           break;
         case 'text': relay(ev); break;
         case 'assistant': if (ev.text.trim()) await this.addMessage(u, t.id, { role: 'assistant', source, text: ev.text, turnId: turn?.id }); break;
@@ -263,8 +270,9 @@ export class ClaudeService {
   }
 
   /** API-key fallback bookkeeping: the in-app chat's user and final text join the thread. */
-  async mirrorFallback(u: AuthUser, threadId: string, role: 'user' | 'assistant', text: string) {
-    if (text.trim()) await this.addMessage(u, threadId, { role, source: 'api', text });
+  async mirrorFallback(u: AuthUser, threadId: string, role: 'user' | 'assistant', text: string, attachments: Attachment[] = []) {
+    if (text.trim() || attachments.length) return this.addMessage(u, threadId, { role, source: 'api', text, ...(attachments.length ? { attachments } : {}) });
+    return null;
   }
   async fallbackAllowed(u: AuthUser) { return (await this.settings(u.studioId)).apiFallback && !!this.ctx.config.ANTHROPIC_API_KEY; }
 }
@@ -278,6 +286,6 @@ export type { CameraAssetKind };
 export function threadBrief(kind: string, contextId: string) {
   if (kind === 'recreate') return { prompt: RECREATE_PROMPT, tools: ['get_recipe', 'set_slot_briefs', 'match_slots', 'fill_slot', 'open_edit', 'apply_recipe', 'apply_edit_ops', 'playbook_read', 'playbook_add', 'report_gap'], referenceId: contextId };
   if (kind === 'edit') return { prompt: EDIT_PROMPT, tools: ['get_edit', 'apply_edit_ops', 'undo_edit', 'get_frame', 'auto_captions', 'remove_background', 'playbook_read'], sessionId: contextId };
-  if (kind === 'suite') return { prompt: SUITE_PROMPT, tools: ['suite_options', 'suite_get_draft', 'suite_set_draft', 'suite_estimate', 'suite_request_shot', 'suite_feed'], assistId: contextId };
+  if (kind === 'suite') return { prompt: SUITE_PROMPT, tools: ['suite_options', 'suite_get_draft', 'suite_set_draft', 'suite_add_reference', 'suite_estimate', 'suite_request_shot', 'suite_feed'], assistId: contextId };
   return undefined;
 }
