@@ -51,11 +51,10 @@ struct EditSuiteTimeline: View {
             tool("Split", icon: "scissors", help: "Split at the playhead (S)") { session.edit { $0.split() } }
             tool("Delete", icon: "trash", help: "Delete (⌫)", disabled: s.selection == nil) { session.edit { $0.deleteSelected() } }
             tool("Speed", icon: "gauge", help: "Speed", disabled: s.selectedVideo == nil) { session.view { $0.tab = .speed } }
-            tool("Keyframe", icon: "diamond", help: "Add a keyframe at the playhead", disabled: s.selectedVisual == nil) {
-                let v = s.selectedVisual
-                session.edit { $0.addKeyframe(.scale, value: v?.transform?.scale ?? 1) }
+            tool("Keyframe", icon: "diamond", help: "Keyframe position, scale, rotation and opacity at the playhead", disabled: s.selectedVisual == nil) {
+                session.edit { $0.addKeyframesAll() }
             }
-            tool("Crop", icon: "crop", help: "Crop and transform", disabled: s.selectedVisual == nil) { session.view { $0.tab = .video } }
+            tool("Crop", icon: "crop", help: "Crop and transform", disabled: s.selectedVisual == nil || s.selectedItem?.textItem != nil) { session.view { $0.tab = .video } }
             divider
             SuiteIconButton(systemName: "arrow-counter-clockwise", label: "Undo (⌘Z)", disabled: !s.canUndo) { session.undo() }
                 .keyboardShortcut("z", modifiers: .command)
@@ -174,6 +173,13 @@ struct TimelineCanvas: View {
     @Bindable var session: EditSuiteSession
     var lanes: [Lane]
     @State private var drag: DragState?
+    /// A main clip being dragged to a new place: how far it has moved (points).
+    @State private var reorderOffset: CGFloat = 0
+
+    /// Where a main clip dropped with its centre at timeline `centre` goes: the number of other clips whose centre is before it.
+    static func reorderIndex(blocks: [EditSuite.Block], moving id: String, centre: Double) -> Int {
+        blocks.filter { $0.itemId != id && ($0.startSec + $0.endSec) / 2 < centre }.count
+    }
 
     /// A lane of the timeline: a track, the Captions lane before there are captions, or the video's own sound.
     enum Lane: Identifiable, Hashable {
@@ -408,7 +414,8 @@ struct TimelineCanvas: View {
             }
         }
         .frame(width: w, height: h)
-        .offset(x: x, y: 6)
+        .offset(x: x + (row.kind == .main && drag?.itemId == b.itemId && drag?.kind == .move ? reorderOffset : 0), y: 6)
+        .zIndex(drag?.itemId == b.itemId ? 1 : 0)
         .contentShape(Rectangle())
         .onTapGesture {
             guard let id = b.itemId else {
@@ -531,7 +538,14 @@ struct TimelineCanvas: View {
     private func moveGesture(_ b: EditSuite.Block, row: EditSuite.Row, locked: Bool) -> some Gesture {
         DragGesture(minimumDistance: 4)
             .onChanged { v in
-                guard !locked, row.kind != .main, row.kind != .caption, let id = b.itemId else { return }
+                guard !locked, row.kind != .caption, let id = b.itemId else { return }
+                if row.kind == .main {
+                    // Main clips reorder (Mac Edit audit 2026-11-08: there was no way to change their order): the block follows
+                    // the pointer and drops into the gap it ends over.
+                    if drag == nil { drag = DragState(itemId: id, kind: .move, start: b.startSec, end: b.endSec); session.view { $0.selection = id } }
+                    reorderOffset = v.translation.width
+                    return
+                }
                 if drag == nil {
                     drag = DragState(itemId: id, kind: .move, start: b.startSec, end: b.endSec)
                     session.view { $0.selection = id }
@@ -541,7 +555,14 @@ struct TimelineCanvas: View {
                 let target = d.start + Double(v.translation.width / z)
                 session.updateGesture { $0.moving(id, to: target) }
             }
-            .onEnded { _ in
+            .onEnded { v in
+                if row.kind == .main {
+                    defer { drag = nil; reorderOffset = 0 }
+                    guard let d = drag, let id = b.itemId else { return }
+                    let to = Self.reorderIndex(blocks: s.blocks(row.trackId), moving: id, centre: (d.start + d.end) / 2 + Double(v.translation.width / z))
+                    if let from = session.project.mainClips.firstIndex(where: { $0.id == id }), to != from { session.edit { $0.moveMainClip(id, to: to) } }
+                    return
+                }
                 if drag != nil { session.endGesture() }
                 drag = nil
             }

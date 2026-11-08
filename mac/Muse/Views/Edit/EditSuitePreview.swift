@@ -12,6 +12,9 @@ struct EditSuitePreview: View {
     var showMedia: () -> Void
     @State private var actualSize = false
     @State private var muted = false
+    /// The fitted picture's size against actual size (the "Fit · 43%" label).
+    @State private var fitScale: CGFloat = 1
+    private var fitPercent: Int { max(1, Int((fitScale * 100).rounded())) }
 
     var body: some View {
         VStack(spacing: Space.s3) {
@@ -29,7 +32,7 @@ struct EditSuitePreview: View {
                 .accessibilityLabel("Safe area")
                 Spacer(minLength: Space.s2)
                 Button { actualSize.toggle() } label: {
-                    Text(actualSize ? "Actual · 100%" : "Fit · 100%").font(t.scale.caption.font).monospacedDigit()
+                    Text(actualSize ? "Actual size · 100%" : "Fit · \(fitPercent)%").font(t.scale.caption.font).monospacedDigit()
                         .foregroundStyle(t.roles.ink2).lineLimit(1)
                         .frame(minHeight: 28)
                         .contentShape(Rectangle())
@@ -44,7 +47,9 @@ struct EditSuitePreview: View {
                 let inner = CGSize(width: max(1, g.size.width - 24), height: max(1, g.size.height - 24))
                 let aspect = CGFloat(c.width) / CGFloat(max(1, c.height))
                 let fit = min(inner.width / aspect, inner.height)
-                let h = actualSize ? min(CGFloat(c.height) / (NSScreen.main?.backingScaleFactor ?? 2), fit * 1.0) : fit
+                // Actual size = one canvas pixel per screen pixel (it may be larger than the viewer: then it's cropped to it).
+                let actual = CGFloat(c.height) / (NSScreen.main?.backingScaleFactor ?? 2)
+                let h = actualSize ? actual : fit
                 let w = h * aspect
                 ZStack {
                     SuitePlayerSurface(player: session.player)
@@ -52,6 +57,9 @@ struct EditSuitePreview: View {
                 }
                 .frame(width: w, height: h)
                 .position(x: g.size.width / 2, y: g.size.height / 2)
+                .onAppear { fitScale = actual > 0 ? fit / actual : 1 }
+                .onChange(of: fit) { _, f in fitScale = actual > 0 ? f / actual : 1 }
+                .onChange(of: c.height) { _, _ in fitScale = actual > 0 ? fit / actual : 1 }
             }
             .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.editViewer))
             .clipShape(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous))
@@ -93,13 +101,57 @@ struct EditSuitePreview: View {
                     muted.toggle()
                     session.player.isMuted = muted
                 }
-                SuiteIconButton(systemName: "arrows-out-simple", label: "Full screen") {
-                    NSApp.keyWindow?.toggleFullScreen(nil)
+                SuiteIconButton(systemName: "arrows-out-simple", label: "Full screen preview (Esc to leave)") {
+                    ViewerFullScreen.toggle(player: session.player) { session.togglePlay() }
                 }
             }
             .frame(minWidth: 120, alignment: .trailing)
         }
         .frame(height: 40)
+    }
+}
+
+/// The preview on its own, filling the screen (Mac Edit audit 2026-11-08: "Full screen" made the whole window full screen).
+/// Esc (or the button again) leaves; space plays and pauses.
+@MainActor
+enum ViewerFullScreen {
+    private static var window: NSWindow?
+    private static var monitor: Any?
+
+    static var isOpen: Bool { window != nil }
+
+    static func toggle(player: AVPlayer, togglePlay: @escaping @MainActor () -> Void) {
+        if window != nil { close(); return }
+        guard let screen = NSApp.keyWindow?.screen ?? NSScreen.main else { return }
+        let w = NSWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        w.level = .mainMenu + 1
+        w.backgroundColor = .black
+        w.isReleasedWhenClosed = false
+        w.collectionBehavior = [.fullScreenAuxiliary, .canJoinAllSpaces]
+        let v = AVPlayerView()
+        v.controlsStyle = .none
+        v.videoGravity = .resizeAspect
+        v.player = player
+        w.contentView = v
+        w.setFrame(screen.frame, display: true)
+        w.orderFrontRegardless()
+        window = w
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown]) { e in
+            MainActor.assumeIsolated {
+                if e.type == .keyDown && e.keyCode == 53 { close(); return nil }        // Esc
+                if e.type == .keyDown && e.keyCode == 49 { togglePlay(); return nil }   // space
+                if e.type == .leftMouseDown && e.window === window { togglePlay(); return nil }
+                return e
+            }
+        }
+    }
+
+    static func close() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        (window?.contentView as? AVPlayerView)?.player = nil
+        window?.orderOut(nil)
+        window = nil
     }
 }
 

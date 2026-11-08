@@ -338,7 +338,13 @@ final class EditV2Scene: @unchecked Sendable {
         let key = "c|\(at.page)|\(at.word)|\(st.hashValue)"
         let fontSize = CGFloat(st.sizePct) * size.height
         let wrap = CGFloat(st.maxWidthPct ?? 0.85) * size.width
-        guard let img = cachedText(key, { EditV2TextRenderer.render(runs, style: st.textStyle, fontSize: fontSize, wrapWidth: wrap) }) else { return base }
+        var textStyle = st.textStyle
+        // Neon: the glow follows the highlight colour when it is changed (Mac Edit audit 2026-11-08).
+        if st.preset == .neon {
+            let g = textStyle.shadow
+            textStyle.shadow = E.Shadow(color: st.highlightColor, opacity: g?.opacity ?? 0.9, blurPct: g?.blurPct ?? 0.5, dyPct: 0)
+        }
+        guard let img = cachedText(key, { EditV2TextRenderer.render(runs, style: textStyle, fontSize: fontSize, wrapWidth: wrap) }) else { return base }
         // `single` (and `pop` on each new page) pops in.
         var scale = 1.0, opacity = 1.0
         if st.preset == .single || st.preset == .pop {

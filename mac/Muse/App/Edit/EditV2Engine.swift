@@ -177,7 +177,11 @@ enum EditV2Engine {
             guard let src = sources.media[seg.assetId]?.audioTrack else { continue }
             let t = try lane(seg.lane, .audio, &audioLanes)
             try placePieces(src, on: t, pieces: seg.pieces, source: seg.sourceStart, seg.sourceEnd, at: seg.timelineStart, seg.timelineEnd)
-            if let v = seg.voice { voiceSpans[seg.lane, default: []].append(EditV2VoiceTap.Span(start: seg.timelineStart, end: seg.timelineEnd, voice: v)) }
+            // Voice processing and gain above 1× both go through the lane's audio tap.
+            let boost = seg.envelope.contains { $0.gain > 1.0001 } ? seg.envelope : []
+            if seg.voice != nil || !boost.isEmpty {
+                voiceSpans[seg.lane, default: []].append(EditV2VoiceTap.Span(start: seg.timelineStart, end: seg.timelineEnd, voice: seg.voice, boost: boost))
+            }
             let p = params[seg.lane] ?? AVMutableAudioMixInputParameters(track: t)
             p.audioTimePitchAlgorithm = .spectral
             // AVAudioMix volumes are 0…1: louder than 1× (volume up to 2) plays at 1×.

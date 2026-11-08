@@ -42,42 +42,83 @@ struct TransformPanel: View {
     @Bindable var session: EditSuiteSession
     var visual: EditSuite.Visual
 
-    private func setTransform(_ f: @escaping (inout EditV2.Transform) -> Void) {
-        session.edit { s in s.changeVisual { v in var tf = v.transform ?? EditV2.Transform(); f(&tf); v.transform = tf } }
+    var body: some View {
+        let s = session.state
+        // Values at the playhead: a keyframed property shows (and edits) its key there, not the ignored static value
+        // (Mac Edit audit 2026-11-08).
+        let px = s.visualValue(.x) ?? 0.5, py = s.visualValue(.y) ?? 0.5, sc = s.visualValue(.scale) ?? 1
+        let rot = s.visualValue(.rotation) ?? 0, op = s.visualValue(.opacity) ?? 1
+        let isText = s.selectedItem?.textItem != nil
+        EditPanel(title: "Transform & keyframes") {
+            row("Position X", value: px - 0.5, range: -1...1, prop: .x, fmt: signed100) { x in session.edit { $0.setVisualValue(.x, 0.5 + x) } }
+            row("Position Y", value: py - 0.5, range: -1...1, prop: .y, fmt: signed100) { y in session.edit { $0.setVisualValue(.y, 0.5 + y) } }
+            row("Scale", value: sc, range: 0.1...4, prop: .scale, fmt: { "\(Int(($0 * 100).rounded()))%" }) { n in session.edit { $0.setVisualValue(.scale, n) } }
+            row("Rotation", value: rot, range: -180...180, prop: .rotation, fmt: { "\(Int($0.rounded()))°" }) { n in session.edit { $0.setVisualValue(.rotation, n) } }
+            row("Opacity", value: op, range: 0...1, prop: .opacity, fmt: { "\(Int(($0 * 100).rounded()))%" }) { n in session.edit { $0.setVisualValue(.opacity, n) } }
+            if visual.keyframes.map({ !$0.isEmpty }) == true {
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    Text("Ease").font(t.scale.label.font).foregroundStyle(t.roles.ink)
+                    EditSeg(options: [(EditV2.Ease.linear, "Linear"), (.easeInOut, "In-out"), (.easeOut, "Ease out"), (.hold, "Hold")],
+                             selection: visual.keyframes?.present.first?.1.first?.ease ?? .easeInOut, small: true) { e in session.edit { $0.setKeyframeEase(e) } }
+                }
+                HStack(spacing: Space.s2) {
+                    SuiteToolButton(title: "Previous key", icon: "caret-left", disabled: s.adjacentKeyframe(-1) == nil, plain: true) {
+                        if let k = session.state.adjacentKeyframe(-1) { session.seek(k) }
+                    }
+                    SuiteToolButton(title: "Next key", icon: "caret-right", disabled: s.adjacentKeyframe(1) == nil, plain: true) {
+                        if let k = session.state.adjacentKeyframe(1) { session.seek(k) }
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+            Text("The diamond adds a keyframe at the playhead, or removes the one there. With keyframes, a slider sets the value at the playhead.")
+                .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+        }
+        if !isText { CropPanel(session: session, crop: visual.crop) }
     }
 
+    private func row(_ label: String, value: Double, range: ClosedRange<Double>, prop: EditV2.KfProp,
+                     fmt: @escaping (Double) -> String, set: @escaping (Double) -> Void) -> some View {
+        let s = session.state
+        let keyed = !(session.state.selectedVisual?.keyframes?[prop]?.isEmpty ?? true)
+        let here = s.hasKeyframe(prop)
+        return HStack(alignment: .bottom, spacing: 8) {
+            SuiteSlider(label, value: min(range.upperBound, max(range.lowerBound, value)), range: range, format: fmt, onCommit: set)
+            SuiteIconButton(systemName: here ? "diamond.fill" : "diamond",
+                            label: here ? "Remove the \(label.lowercased()) keyframe at the playhead" : "Add a \(label.lowercased()) keyframe at the playhead",
+                            on: keyed, size: 28) {
+                let v = prop == .x || prop == .y ? value + 0.5 : value
+                if here { session.edit { $0.removeKeyframe(prop) } } else { session.edit { $0.addKeyframe(prop, value: v) } }
+            }
+        }
+    }
+}
+
+/// Crop (Mac Edit audit 2026-11-08: the timeline's Crop button opened the Video tab, which had no crop): each side 0–45 %.
+struct CropPanel: View {
+    @Bindable var session: EditSuiteSession
+    var crop: EditV2.Crop?
+
     var body: some View {
-        let tf = visual.transform ?? EditV2.Transform()
-        let k = visual.keyframes
-        EditPanel(title: "Transform & keyframes") {
-            row("Position X", value: (tf.x ?? 0.5) - 0.5, range: -1...1, prop: .x, keys: k?.x, fmt: signed100) { v in setTransform { $0.x = 0.5 + v } }
-            row("Position Y", value: (tf.y ?? 0.5) - 0.5, range: -1...1, prop: .y, keys: k?.y, fmt: signed100) { v in setTransform { $0.y = 0.5 + v } }
-            row("Scale", value: tf.scale ?? 1, range: 0.1...4, prop: .scale, keys: k?.scale, fmt: { "\(Int(($0 * 100).rounded()))%" }) { v in setTransform { $0.scale = v } }
-            row("Rotation", value: tf.rotation ?? 0, range: -180...180, prop: .rotation, keys: k?.rotation, fmt: { "\(Int($0.rounded()))°" }) { v in setTransform { $0.rotation = v } }
-            row("Opacity", value: visual.opacity ?? 1, range: 0...1, prop: .opacity, keys: k?.opacity, fmt: { "\(Int(($0 * 100).rounded()))%" }) { v in
-                session.edit { s in s.changeVisual { $0.opacity = v } }
+        EditPanel(title: "Crop") {
+            ForEach(EditSuiteState.CropSide.allCases, id: \.self) { side in
+                SuiteSlider(side.rawValue.capitalized, value: value(side), range: 0...0.45, format: { "\(Int(($0 * 100).rounded()))%" }) { v in
+                    session.edit { $0.setCrop(side, (v * 100).rounded() / 100) }
+                }
             }
-            VStack(alignment: .leading, spacing: Space.s2) {
-                Text("Ease").font(t.scale.label.font).foregroundStyle(t.roles.ink)
-                EditSeg(options: [(EditV2.Ease.linear, "Linear"), (.easeInOut, "In-out"), (.easeOut, "Ease out"), (.hold, "Hold")],
-                         selection: k?.present.first?.1.first?.ease ?? .easeInOut, small: true) { e in session.edit { $0.setKeyframeEase(e) } }
-            }
-            HStack(spacing: 6) {
-                Ph("diamond.fill", 9).foregroundStyle(t.roles.ink2)
-                Text("adds a keyframe at the playhead").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+            HStack {
+                SuiteToolButton(title: "Reset crop and transform", icon: "arrow-counter-clockwise", plain: true) { session.edit { $0.resetTransform() } }
+                Spacer(minLength: 0)
             }
         }
     }
 
-    private func row(_ label: String, value: Double, range: ClosedRange<Double>, prop: EditV2.KfProp, keys: [EditV2.Keyframe]?,
-                     fmt: @escaping (Double) -> String, set: @escaping (Double) -> Void) -> some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            SuiteSlider(label, value: min(range.upperBound, max(range.lowerBound, value)), range: range, format: fmt, onCommit: set)
-            SuiteIconButton(systemName: (keys?.isEmpty ?? true) ? "diamond" : "diamond.fill", label: "Add a \(label.lowercased()) keyframe at the playhead",
-                            on: !(keys?.isEmpty ?? true), size: 24) {
-                let v = prop == .x || prop == .y ? value + 0.5 : value
-                session.edit { $0.addKeyframe(prop, value: v) }
-            }
+    private func value(_ side: EditSuiteState.CropSide) -> Double {
+        switch side {
+        case .left: return crop?.left ?? 0
+        case .top: return crop?.top ?? 0
+        case .right: return crop?.right ?? 0
+        case .bottom: return crop?.bottom ?? 0
         }
     }
 }
@@ -223,6 +264,9 @@ struct MaskPanel: View {
                     setMask { $0?.width = v; $0?.height = v * ((m.height ?? 0.5) / max(0.01, m.width ?? 0.5)) }
                 }
                 SuiteSlider("Rotation", value: m.rotation ?? 0, range: -180...180, format: { "\(Int($0.rounded()))°" }) { v in setMask { $0?.rotation = v } }
+                // Where the mask sits on the picture (Mac Edit audit: it could only be centred).
+                SuiteSlider("Position X", value: (m.x ?? 0.5) - 0.5, range: -0.5...0.5, format: signed100) { v in session.edit { $0.changeMask { $0.x = 0.5 + (v * 100).rounded() / 100 } } }
+                SuiteSlider("Position Y", value: (m.y ?? 0.5) - 0.5, range: -0.5...0.5, format: signed100) { v in session.edit { $0.changeMask { $0.y = 0.5 + (v * 100).rounded() / 100 } } }
                 SuiteToggleRow(title: "Invert", isOn: m.invert == true) { on in setMask { $0?.invert = on ? true : nil } }
             }
             if isVideo {
@@ -242,6 +286,12 @@ struct MaskPanel: View {
                 if let ck {
                     SuiteSlider("Strength", value: ck.similarity ?? 0.4, range: 0...1, format: { "\(Int(($0 * 100).rounded()))" }) { v in
                         session.edit { s in s.changeVisual { $0.chroma?.similarity = v } }
+                    }
+                    SuiteSlider("Softness", value: ck.smoothness ?? 0.08, range: 0...1, format: { "\(Int(($0 * 100).rounded()))" }) { v in
+                        session.edit { $0.changeChroma { $0.smoothness = (v * 100).rounded() / 100 } }
+                    }
+                    SuiteSlider("Spill", value: ck.spill ?? 0.5, range: 0...1, format: { "\(Int(($0 * 100).rounded()))" }) { v in
+                        session.edit { $0.changeChroma { $0.spill = (v * 100).rounded() / 100 } }
                     }
                 }
                 if !session.matteAvailable && !session.backgroundRemoved {

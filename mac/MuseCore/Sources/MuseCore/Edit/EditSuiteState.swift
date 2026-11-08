@@ -317,6 +317,14 @@ public struct EditSuiteState: Sendable {
     public var export = EditSuite.ExportSettings()
     /// The last saved project (for "saved just now" / unsaved changes).
     public private(set) var savedProject: E.Project?
+    /// The suite looks ("palette:<id>") this app ships, so the validity guard accepts them (set by the app).
+    public var paletteIds: Set<String> = []
+    /// Why the last change was refused (it would have broken a rule the server checks, e.g. text running into the next
+    /// item); nil after a change that went through. The app shows it.
+    public private(set) var lastRefusal: E.EditProblem?
+    /// The project when the current drag began: trims and moves are measured from it, so a drag's target is absolute
+    /// (owner audit 2026-11-08: the start handle of a main clip measured from the already-trimmed clip and ran away).
+    public private(set) var gestureBase: E.Project?
 
     public init(_ project: E.Project) {
         history = E.History(project)
@@ -337,7 +345,18 @@ public struct EditSuiteState: Sendable {
     /// Applies an operation (nil = nothing to do); keeps the selection and playhead valid. Returns whether it changed.
     @discardableResult
     public mutating func apply(_ op: (E.Project) -> E.Project?) -> Bool {
-        guard history.apply(op) else { return false }
+        // Owner audit 2026-11-08: a change must never leave a project the server refuses (and Export blocks), e.g. a text
+        // lengthened over the next one. A project that is already off (older data) may still change.
+        let before = project
+        var refusal: E.EditProblem?
+        let pal = paletteIds
+        let ok = history.apply { p in
+            guard let next = op(p) else { return nil }
+            if let bad = E.problem(next, paletteIds: pal), E.problem(before, paletteIds: pal) == nil { refusal = bad; return nil }
+            return next
+        }
+        lastRefusal = refusal
+        guard ok else { return false }
         settle()
         return true
     }
@@ -356,13 +375,15 @@ public struct EditSuiteState: Sendable {
     @discardableResult public mutating func redo() -> Bool { guard history.redo() else { return false }; settle(); return true }
 
     /// A drag: one undo step for the whole gesture.
-    public mutating func beginGesture() { history.begin() }
+    public mutating func beginGesture() { history.begin(); gestureBase = project }
     public mutating func updateGesture(_ next: E.Project?) {
         guard let p = next, p != project else { return }
+        // A drag never goes past what the server accepts (it stops at the last valid position).
+        if E.problem(p, paletteIds: paletteIds) != nil, E.problem(project, paletteIds: paletteIds) == nil { return }
         history.update(p)
         settle()
     }
-    public mutating func endGesture() { history.end() }
+    public mutating func endGesture() { history.end(); gestureBase = nil }
 
     private mutating func settle() {
         playhead = min(max(0, playhead), duration)
@@ -573,7 +594,7 @@ public struct EditSuiteState: Sendable {
     /// clips after follow); other items change start/length. Use inside begin/updateGesture/endGesture for drags.
     public func trimming(_ itemId: String, _ edge: Edge, to rawT: Double) -> E.Project? {
         let t = snapped(rawT)
-        let p = project
+        let p = gestureBase ?? project
         guard !isLocked(itemId), let loc = p.locate(itemId) else { return nil }
         let track = p.tracks[loc.track]
         let item = track.items[loc.item]
@@ -624,7 +645,7 @@ public struct EditSuiteState: Sendable {
     public func moving(_ itemId: String, to rawT: Double, track: String? = nil) -> E.Project? {
         guard !isLocked(itemId) else { return nil }
         if let track, locked.contains(track) { return nil }
-        return project.moving(itemId, toStartSec: E.r6(max(0, snapped(rawT))), track: track)
+        return (gestureBase ?? project).moving(itemId, toStartSec: E.r6(max(0, snapped(rawT))), track: track)
     }
 
     /// Moves a main clip to another place in the sequence.
@@ -682,14 +703,16 @@ public struct EditSuiteState: Sendable {
         changeSelected { it in
             switch it {
             case .video(var c):
-                var v = EditSuite.Visual(adjust: c.adjust, look: c.look, mask: c.mask, chroma: c.chroma, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes)
+                var v = EditSuite.Visual(adjust: c.adjust, look: c.look, mask: c.mask, chroma: c.chroma, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes, crop: c.crop)
                 change(&v)
                 c.adjust = v.adjust; c.look = v.look; c.mask = v.mask; c.chroma = v.chroma; c.transform = v.transform; c.opacity = v.opacity; c.keyframes = v.keyframes
+                c.crop = v.crop
                 it = .video(c)
             case .image(var c):
-                var v = EditSuite.Visual(adjust: c.adjust, look: c.look, mask: c.mask, chroma: nil, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes)
+                var v = EditSuite.Visual(adjust: c.adjust, look: c.look, mask: c.mask, chroma: nil, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes, crop: c.crop)
                 change(&v)
                 c.adjust = v.adjust; c.look = v.look; c.mask = v.mask; c.transform = v.transform; c.opacity = v.opacity; c.keyframes = v.keyframes
+                c.crop = v.crop
                 it = .image(c)
             case .text(var c):
                 var v = EditSuite.Visual(adjust: nil, look: nil, mask: nil, chroma: nil, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes)
@@ -705,8 +728,8 @@ public struct EditSuiteState: Sendable {
     /// The selected visual's fields (nil for audio).
     public var selectedVisual: EditSuite.Visual? {
         switch selectedItem {
-        case .video(let c): return EditSuite.Visual(adjust: c.adjust, look: c.look, mask: c.mask, chroma: c.chroma, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes)
-        case .image(let c): return EditSuite.Visual(adjust: c.adjust, look: c.look, mask: c.mask, chroma: nil, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes)
+        case .video(let c): return EditSuite.Visual(adjust: c.adjust, look: c.look, mask: c.mask, chroma: c.chroma, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes, crop: c.crop)
+        case .image(let c): return EditSuite.Visual(adjust: c.adjust, look: c.look, mask: c.mask, chroma: nil, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes, crop: c.crop)
         case .text(let c): return EditSuite.Visual(adjust: nil, look: nil, mask: nil, chroma: nil, transform: c.transform, opacity: c.opacity, keyframes: c.keyframes)
         default: return nil
         }
@@ -1171,6 +1194,8 @@ extension EditSuite {
         public var transform: EditV2.Transform?
         public var opacity: Double?
         public var keyframes: EditV2.Keyframes?
+        /// Video and picture items (nil on text).
+        public var crop: EditV2.Crop? = nil
     }
 
     /// The sound fields of a clip.

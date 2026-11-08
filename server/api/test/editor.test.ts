@@ -389,6 +389,8 @@ describe('versions with a v2 project', () => {
     const up2 = await upload(a, owner, 'clip', Buffer.from('edited v2 nolabel'));
     expect((await owner.req('POST', `/v1/takes/${src}/versions`, { uploadId: up2, edits: p, durationSec: M.durationSec(p), width: 1080, height: 1920 })).body.aiLabel).toBeUndefined();
     expect((await owner.req('POST', '/v1/editor/uploads/presign', { contentType: 'video/quicktime' })).body).toMatchObject({ method: 'PUT' });
+    expect((await owner.req('POST', '/v1/editor/uploads/presign', { contentType: 'image/png', bytes: 2048 })).body).toMatchObject({ method: 'PUT' });
+    expect((await owner.req('POST', '/v1/editor/uploads/presign', { contentType: 'image/png', bytes: 40 * 1024 ** 2 })).status).toBe(400);
   });
 
   it('v1 lists still work unchanged', async () => {

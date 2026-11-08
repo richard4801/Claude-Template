@@ -10,6 +10,7 @@ struct EditSuiteCaptionsMode: View {
     @State private var picked: Set<Int> = []
     @State private var editing: Int?
     @State private var draft = ""
+    @State private var showTranslate = false
 
     var body: some View {
         GeometryReader { g in
@@ -21,6 +22,7 @@ struct EditSuiteCaptionsMode: View {
                 side.frame(width: max(300, min(380, g.size.width * 0.27)))
             }
         }
+        .sheet(isPresented: $showTranslate) { EditSuiteTranslateSheet(session: session) }
         .onKeyPress(.delete) {
             guard !picked.isEmpty, editing == nil else { return .ignored }
             deletePicked()
@@ -74,8 +76,8 @@ struct EditSuiteCaptionsMode: View {
                         SuiteToolButton(title: "Cut \(silences) silence\(silences == 1 ? "" : "s")", disabled: silences == 0) {
                             Task { await session.cutSilences() }
                         }
-                        SuiteToolButton(title: "Translate…", disabled: true) {}
-                            .help("Coming soon")
+                        SuiteToolButton(title: "Translate…") { showTranslate = true }
+                            .help("Translate the captions on this Mac (macOS 15 or later)")
                     }
                     if !picked.isEmpty {
                         HStack {

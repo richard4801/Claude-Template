@@ -195,6 +195,7 @@ extension FakeMuseAPI {
         t.parentTakeId = takeId
         t.editsV2 = req.edits
         t.name = TakeVersionV2Request.versionName(req.name)
+        t.aiLabel = req.aiLabel == true ? true : nil
         t.templateId = src.templateId
         t.templateName = src.templateName
         usedUploads.insert(req.uploadId)
