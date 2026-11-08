@@ -17,6 +17,10 @@ enum SnapshotRunner {
         var scrollTo: String?
         /// Generate's frame in the window (SwiftUI global space, top-left origin), for the composer fit check.
         var generateFrame: CGRect?
+        /// The words drawn on Generate ("Generate · $0.14", or its short form), for the fit check's price line.
+        var generateLabel: String?
+        /// The composer bar's pills ("pill quality", …) and its pricing link ("pricing"), window space (ComposerBarFrame).
+        var composerFrames: [String: CGRect] = [:]
         /// Bumped by the fit check after each screen change: Generate's probe reports its frame again.
         var probeTick = 0
         /// The rig panel's view is on screen (its onAppear / onDisappear), for the same-tick diagnosis.
@@ -211,6 +215,7 @@ enum SnapshotRunner {
                         store.suite.picker = nil
                         store.suite.browserOpen = false
                         state.generateFrame = nil
+                        state.generateLabel = nil
                         show()
                         try? await Task.sleep(for: .seconds(1.5))
                         state.probeTick += 1
@@ -224,6 +229,11 @@ enum SnapshotRunner {
                         } else {
                             lines.append("CUT \(label) generate not drawn")
                         }
+                        // The window really is this wide (the app's minimum width once clamped 1000 to 1100).
+                        if abs(content.width - CGFloat(width)) > 1 {
+                            lines.append("CUT \(label) window drawn \(Int(content.width)) wide, not \(width)")
+                        }
+                        lines.append(contentsOf: composerBarLines(label, content: content))
                         if name.contains("rig") {
                             lines.append("PANEL \(label) picker=\(store.suite.picker?.rawValue ?? "nil") bodySawPicker=\(suiteBodySawPicker) bodies=\(suiteBodyCount) appeared=\(state.rigPanelOnScreen)")
                         }
@@ -232,10 +242,36 @@ enum SnapshotRunner {
                 }
             }
         }
-        await run([.c, .b], [(1440, 900), (1280, 800), (1100, 620)], screens)
+        // 1000 × 700 and 960 × 640: the owner's window was about 1000 pt wide (coordination item 8).
+        await run([.c, .b], [(1440, 900), (1280, 800), (1100, 620), (1000, 700), (960, 640)], screens)
         w.setFrame(full, display: true)
         try? await Task.sleep(for: .seconds(1))
         try? (lines.joined(separator: "\n") + "\n").write(to: dir.appendingPathComponent("fit-check.txt"), atomically: true, encoding: .utf8)
+    }
+
+    /// The composer bar at this size (coordination item 8: "Standar/d", "Speak/ing", "Engine · A…", "GENERATE…"): every
+    /// pill drawn whole (no wrapped or cut label, not under the pricing link or Generate, inside the window), and Generate
+    /// drawn whole with its price. One FITS line, or a CUT line per problem.
+    private static func composerBarLines(_ label: String, content: CGSize) -> [String] {
+        var out: [String] = []
+        let frames = state.composerFrames
+        let pills = frames.filter { $0.key.hasPrefix("pill ") }.sorted { $0.value.minX < $1.value.minX }
+        if pills.isEmpty { out.append("CUT \(label) bar no pills drawn") }
+        let limit = frames["pricing"]?.minX ?? state.generateFrame?.minX ?? content.width
+        for (key, f) in pills where f.minX < -0.5 || f.maxX > limit + 0.5 || f.maxY > content.height + 0.5 {
+            out.append("CUT \(label) bar \(key) at \(Int(f.minX))-\(Int(f.maxX)), past \(Int(limit))")
+        }
+        for cut in truncatedLabels() where cut.hasPrefix("composer ") {
+            out.append("CUT \(label) bar \(cut.dropFirst("composer ".count))")
+        }
+        let g = state.generateLabel ?? ""
+        // The price is the last part: "Generate · $0.14", "Generate · Free", "Generate · —" while there is none yet.
+        if !g.contains(" · ") { out.append("CUT \(label) bar generate shows no price (\"\(g)\")") }
+        if out.isEmpty {
+            let names = pills.map { String($0.key.dropFirst(5)) }.joined(separator: ", ")
+            out.append("FITS \(label) bar \(pills.count) pills whole (\(names)), \"\(g)\"")
+        }
+        return out
     }
 
     // MARK: Edit layout audit
@@ -291,6 +327,15 @@ enum SnapshotRunner {
                 shot("\(theme.rawValue)_\(width)x\(height)_collapsed", "\(width)x\(height) \(theme.rawValue) collapsed")
                 state.editCollapsed = false
                 try? await Task.sleep(for: .seconds(0.5))
+            }
+            // The app now opens down to 960 pt (coordination item 8): Edit at 1000 × 700 for the record. INFO lines, not
+            // CUT: the Edit layout plan's sizes are the three above.
+            if theme == .c {
+                w.setFrame(NSRect(x: original.minX, y: original.maxY - 700, width: 1000, height: 700), display: true)
+                try? await Task.sleep(for: .seconds(1.5))
+                capture(dir.appendingPathComponent("mac_editaudit_c_1000x700.png"))
+                let cut = truncatedLabels()
+                lines.append(cut.isEmpty ? "INFO edit 1000x700 c (\(fitProbes.count) labels whole)" : cut.map { "INFO edit 1000x700 c \($0)" }.joined(separator: "\n"))
             }
             w.setFrame(original, display: true)
             store.openEdit(takeId: nil)
