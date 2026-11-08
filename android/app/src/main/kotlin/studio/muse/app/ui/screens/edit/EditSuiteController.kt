@@ -63,6 +63,7 @@ import studio.muse.core.edit.newId
 import studio.muse.core.edit.problemOf
 import studio.muse.core.edit.setTransition
 import studio.muse.core.edit.splitAt
+import studio.muse.core.edit.trimClip
 import studio.muse.core.edit.suggestCuts
 import studio.muse.core.edit.updateItem
 import studio.muse.core.edit.updateTrack
@@ -91,6 +92,13 @@ sealed interface EditAction {
     data object Redo : EditAction
     data object PlayPause : EditAction
     data class Seek(val sec: Double) : EditAction
+    /**
+     * The timeline is being dragged / flung to [sec] (playback pauses). [end]: the finger is up and the fling stopped;
+     * the playhead then lands on the nearest frame, so a split cuts on a real frame.
+     */
+    data class Scrub(val sec: Double, val end: Boolean = false) : EditAction
+    /** Dragging a selected main clip's edge: its new source in/out ([done] when the finger lifts: one undo step). */
+    data class Trim(val clipId: String, val inSec: Double, val outSec: Double, val done: Boolean = true) : EditAction
     data class Zoom(val pxPerSec: Float) : EditAction
     data class Select(val id: String?) : EditAction
     data class Open(val panel: Panel?) : EditAction
@@ -112,6 +120,8 @@ sealed interface EditAction {
     data class SetTransform(val transform: Transform, val done: Boolean = true) : EditAction
     data class AddKeyframe(val prop: KfProp) : EditAction
     data class SetMask(val mask: Mask?, val done: Boolean = true) : EditAction
+    /** Crop of the selected picture (fractions cut from each side, 0–0.45); null = no crop. */
+    data class SetCrop(val crop: studio.muse.core.edit.Crop?, val done: Boolean = true) : EditAction
     data object RemoveBackground : EditAction
     /** Turns a clip's background removal off (its alpha matte goes; the matte asset stays in the project for undo). */
     data object KeepBackground : EditAction
@@ -138,7 +148,11 @@ sealed interface EditAction {
     data class Beats(val marks: BeatMarks) : EditAction
     data class SnapToBeats(val on: Boolean) : EditAction
     data object DetectBeats : EditAction
-    data class AddAudio(val upload: String, val durationSec: Double, val voiceOver: Boolean) : EditAction
+    data class AddAudio(val upload: String, val durationSec: Double, val voiceOver: Boolean, val atSec: Double? = null) : EditAction
+    /** Detach audio: the clip's own sound becomes its own clip on the "Clip sound" lane; the video clip goes silent. */
+    data object DetachAudio : EditAction
+    /** The selected clip's (or the clip under the playhead's) sound on / off. */
+    data class MuteClip(val muted: Boolean) : EditAction
     // Text & captions
     data class AddHook(val id: String) : EditAction
     data class EditText(val id: String, val text: String) : EditAction
@@ -166,6 +180,10 @@ sealed interface EditAction {
     data class AdjustField(val field: String, val value: Double, val done: Boolean = true) : EditAction
     // Overlay, ratio, export
     data class AddPip(val take: TakeChoice) : EditAction
+    /** Another take added whole to the end of the video. */
+    data class AppendTake(val take: TakeChoice) : EditAction
+    /** Green/blue screen on the selected video: the key colour and how much around it goes (null = off). */
+    data class SetChroma(val chroma: studio.muse.core.edit.Chroma?, val done: Boolean = true) : EditAction
     data class Ratio(val shape: ExportShape) : EditAction
     data class ExportOf(val settings: ExportSettings) : EditAction
     // Edit sessions (workstream 3): owner only, handled by the session sync ([EditSuiteController.sessionActions]).
@@ -282,8 +300,9 @@ class EditSuiteController(
     private fun labelOf(a: EditAction): String? = when (a) {
         EditAction.Undo -> "Undo"; EditAction.Redo -> "Redo"
         EditAction.Split -> "Split"; EditAction.Delete -> "Delete"; EditAction.Duplicate -> "Duplicate"
+        is EditAction.Trim -> "Trim"; EditAction.DetachAudio -> "Detach audio"; is EditAction.MuteClip -> if (a.muted) "Mute" else "Unmute"
         is EditAction.Speed, is EditAction.CurvePreset, is EditAction.CurvePoint, is EditAction.AddCurvePoint -> "Speed"
-        is EditAction.SetTransform -> "Transform"; is EditAction.AddKeyframe -> "Keyframe"; is EditAction.SetMask -> "Mask"
+        is EditAction.SetTransform -> "Transform"; is EditAction.AddKeyframe -> "Keyframe"; is EditAction.SetMask -> "Mask"; is EditAction.SetCrop -> "Crop"
         EditAction.RemoveBackground, EditAction.KeepBackground -> "Remove background"; is EditAction.SetTransition, EditAction.TransitionToAll -> "Transition"
         is EditAction.Volume -> "Volume"; is EditAction.Fades -> "Fades"; is EditAction.AutoDuck, is EditAction.DuckTimes -> "Ducking"
         is EditAction.NoiseReduction -> "Noise reduction"; is EditAction.Enhance -> "Enhance voice"; is EditAction.Voice -> "Voice effect"
@@ -294,7 +313,7 @@ class EditSuiteController(
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
         is EditAction.ToggleTrackMuted -> "Mute track"; is EditAction.ToggleTrackHidden -> "Hide track"
         is EditAction.PickLook, is EditAction.LookStrength, EditAction.LookToAll, is EditAction.ImportedCube -> "Look"
-        is EditAction.AdjustField -> "Adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
+        is EditAction.AdjustField -> "Adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.AppendTake -> "Add clip"; is EditAction.SetChroma -> "Chroma key"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
         else -> null
     }
 
@@ -355,6 +374,32 @@ class EditSuiteController(
             EditAction.ClearClaudeNote -> updateSession { it.copy(claudeNote = null) }
             EditAction.PlayPause -> _ui.update { it.copy(playing = !it.playing) }
             is EditAction.Seek -> _ui.update { it.copy(playheadSec = a.sec.coerceIn(0.0, it.duration)) }
+            is EditAction.Scrub -> _ui.update {
+                val fps = it.project?.canvas?.fps ?: 30.0
+                val t = if (a.end) TimelineMath.snapFrame(a.sec, fps) else a.sec
+                it.copy(playheadSec = t.coerceIn(0.0, it.duration), playing = false, scrubbing = !a.end)
+            }
+            is EditAction.Trim -> {
+                // Lifting the finger where the last move left it is no change: the drag just ends as one step.
+                val next = project?.trimClip(a.clipId, a.inSec, a.outSec)
+                if (next == null) { if (a.done) endDrag() } else change(a.done, "The edit must stay at least 0.5 s long") { next }
+            }
+            EditAction.DetachAudio -> {
+                val c = (u.selection?.second as? VideoClip)?.takeIf { sel -> project?.main?.items?.any { it.id == sel.id } == true } ?: u.activeClip ?: return
+                val p0 = project ?: return
+                val why = when {
+                    !SuiteOps.hasSound(p0, c) -> "This clip has no sound"
+                    c.muted == true -> "This clip's sound is off · turn it on to detach it"
+                    c.speedCurve != null || c.speed != 1.0 -> "Set the clip to 1× to detach its sound"
+                    else -> "Couldn't detach the sound here"
+                }
+                var newId: String? = null
+                if (change(refused = why) { p -> SuiteOps.detachAudio(p, c.id)?.let { (np, id) -> newId = id; np } }) {
+                    _ui.update { it.copy(selectedId = newId) }
+                    say("Sound detached · it's on its own lane now")
+                }
+            }
+            is EditAction.MuteClip -> { val c = soundClip(u) ?: return; change { p -> p.updateItem(c.id) { when (it) { is VideoClip -> it.copy(muted = if (a.muted) true else null); is studio.muse.core.edit.AudioClip -> it.copy(muted = if (a.muted) true else null); else -> it } } } }
             is EditAction.Zoom -> _ui.update { it.copy(pxPerSec = a.pxPerSec.coerceIn(8f, 240f)) }
             is EditAction.Select -> _ui.update { it.copy(selectedId = a.id) }
             is EditAction.Open -> open(a.panel)
@@ -401,6 +446,12 @@ class EditSuiteController(
             is EditAction.SetTransform -> { val id = visualId(u) ?: return; change(a.done) { p -> p.updateItem(id) { withTransform(it, a.transform) } } }
             is EditAction.AddKeyframe -> addKeyframe(u, a.prop)
             is EditAction.SetMask -> { val id = visualId(u) ?: return; change(a.done) { p -> p.updateItem(id) { when (it) { is VideoClip -> it.copy(mask = a.mask); is ImageItem -> it.copy(mask = a.mask); else -> it } } } }
+            is EditAction.SetCrop -> {
+                val id = visualId(u) ?: return
+                val c = a.crop?.let { k -> studio.muse.core.edit.Crop(k.left?.let { r2(it.coerceIn(0.0, .45)) }, k.top?.let { r2(it.coerceIn(0.0, .45)) }, k.right?.let { r2(it.coerceIn(0.0, .45)) }, k.bottom?.let { r2(it.coerceIn(0.0, .45)) }) }
+                    ?.takeIf { k -> listOf(k.left, k.top, k.right, k.bottom).any { (it ?: 0.0) > 0 } }
+                change(a.done) { p -> p.updateItem(id) { when (it) { is VideoClip -> it.copy(crop = c); is ImageItem -> it.copy(crop = c); else -> it } } }
+            }
             EditAction.RemoveBackground -> if (u.matteOff == null) removeBackground(u, null)
             EditAction.KeepBackground -> u.activeClip?.takeIf { it.alphaMatte != null }?.let { clip ->
                 change { pp -> pp.updateItem(clip.id) { (it as VideoClip).copy(alphaMatte = null) } }
@@ -442,7 +493,7 @@ class EditSuiteController(
             is EditAction.SnapToBeats -> _ui.update { it.copy(snapToBeats = a.on) }
             EditAction.DetectBeats -> detectBeats()
             is EditAction.AddAudio -> {
-                val at = if (a.voiceOver) u.playheadSec else 0.0
+                val at = a.atSec ?: if (a.voiceOver) u.playheadSec else 0.0
                 if (change(refused = "Couldn't add that audio") { SuiteOps.addAudio(it, a.upload, a.durationSec, at, if (a.voiceOver) TrackKind.VOICE else TrackKind.MUSIC) })
                     say(if (a.voiceOver) "Voice-over added" else "Music added")
             }
@@ -488,6 +539,18 @@ class EditSuiteController(
                 var newId: String? = null
                 if (change(refused = "Couldn't add that overlay here") { p -> SuiteOps.addPip(p, a.take.id, a.take.durationSec ?: 5.0, u.playheadSec)?.let { (np, id) -> newId = id; np } })
                     _ui.update { it.copy(selectedId = newId) }
+            }
+            is EditAction.AppendTake -> {
+                var newId: String? = null
+                if (change(refused = "That video can't be added at the end") { p -> SuiteOps.appendTake(p, a.take.id, a.take.durationSec ?: return@change null)?.let { (np, id) -> newId = id; np } }) {
+                    _ui.update { it.copy(selectedId = newId) }
+                    say("Added to the end")
+                }
+            }
+            is EditAction.SetChroma -> {
+                val id = (u.selection?.second as? VideoClip ?: u.activeClip)?.id ?: return
+                val k = a.chroma?.let { c -> c.copy(similarity = c.similarity?.let { r2(it.coerceIn(0.0, 1.0)) }, smoothness = c.smoothness?.let { r2(it.coerceIn(0.0, 1.0)) }, spill = c.spill?.let { r2(it.coerceIn(0.0, 1.0)) }) }
+                change(a.done) { p -> p.updateItem(id) { (it as? VideoClip)?.copy(chroma = k) ?: it } }
             }
             is EditAction.Ratio -> if (change { SuiteOps.ratio(it, a.shape) }) _ui.update { it.copy(export = it.export.copy(shape = a.shape)) }
             is EditAction.ExportOf -> {

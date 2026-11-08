@@ -3,6 +3,8 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Edit: record a voice-over in the editor (asked for when Record VO is first pressed). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!-- Post handoff: target the platform's own app when it's installed (Android 11+ package visibility). -->
     <queries>

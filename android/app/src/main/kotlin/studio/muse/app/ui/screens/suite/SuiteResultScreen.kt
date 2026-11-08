@@ -49,6 +49,7 @@ import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.LocalNav
 import studio.muse.app.ui.Routes
 import studio.muse.app.ui.TabBar
+import studio.muse.app.ui.components.PlayBadge
 import studio.muse.app.ui.components.MenuItem
 import studio.muse.app.ui.components.MoreMenu
 import studio.muse.app.ui.components.RefImage
@@ -173,7 +174,7 @@ private fun TakeThumb(t: Take, on: Boolean, onClick: () -> Unit) {
     Box(Modifier.size(56.dp, 100.dp).clip(RoundedCornerShape(if (m.isA) 0.dp else 8.dp)).border(if (on) 2.dp else 0.dp, if (on) m.t.ink else Color.Transparent)
         .press(onClick = onClick).semantics { contentDescription = "Take ${t.index}"; selected = on }) {
         RefImage(t.thumb, Modifier.fillMaxSize(), 20)
-        Box(Modifier.align(Alignment.Center).size(26.dp).clip(RoundedCornerShape(999.dp)).background(Color.White.copy(alpha = .9f)), contentAlignment = Alignment.Center) { Ic("play", 12.dp, Color(0xFF141210)) }
+        PlayBadge(compact = true)
     }
 }
 

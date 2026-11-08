@@ -248,6 +248,8 @@ data class Take(
     val parentTakeId: String? = null,
     // Edit suite (workstream 3): a v2 project comes back in the same field (EditsFieldSerializer keeps it in `project`).
     @Serializable(with = EditsFieldSerializer::class) val edits: EditListDto? = null,
+    /** An edited version exported with "Label as AI-generated" (posting uses it for the platform's AI label). */
+    val aiLabel: Boolean = false,
     val fps: Double? = null,
     /** Template shots: the template's id and name, the variation draw seed, and (template owner only) what was drawn. */
     val templateId: String? = null,
@@ -1163,6 +1165,8 @@ data class TakeVersionV2Request(
     val fps: Double? = null,
     /** Edit sessions (workstream 3): the version's name, 1–80 characters trimmed (Claude's save_version name). */
     val name: String? = null,
+    /** Export's "Label as AI-generated" (off by default): only ever sent as true; null leaves it off. */
+    val aiLabel: Boolean? = null,
 )
 
 /** Edit sessions (workstream 3): a version name as the server takes it (trimmed, at most 80 characters; blank = none). */

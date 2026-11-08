@@ -3,6 +3,8 @@ package studio.muse.app
 import android.os.Looper
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollTo
 import com.github.takahirom.roborazzi.captureRoboImage
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.runBlocking
@@ -43,7 +45,7 @@ import studio.muse.app.ui.screens.suite.composer.ComposerTool
 @Config(sdk = [35], qualifiers = "w390dp-h844dp-xhdpi")
 class SuiteScreenshotTest(private val theme: String, private val screen: String, private val width: Int) {
     companion object {
-        val SCREENS = listOf("hub", "hub_off_owner", "hub_off_member", "swap", "swap_recast", "storyboard", "take_ready", "take_rendering", "take_queued", "take_failed", "engines")
+        val SCREENS = listOf("hub", "hub_recent", "hub_off_owner", "hub_off_member", "swap", "swap_recast", "storyboard", "take_ready", "take_rendering", "take_queued", "take_failed", "engines")
 
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}_{1}_{2}")
@@ -76,7 +78,7 @@ class SuiteScreenshotTest(private val theme: String, private val screen: String,
         val now = System.currentTimeMillis()
         runBlocking {
             when (screen) {
-                "hub" -> {
+                "hub", "hub_recent" -> {
                     fake.debugPut(job("jr", "Café morning", "done", 100.0, now = now - 60_000)); take("jr", 1, now).let { fake.debugPutTake(it) }
                     fake.debugPut(job("jp", "Turn to camera", "running", 62.0, take = 2, now = now - 30_000))
                     fake.debugPut(job("jq", "Selfie review", "running", 0.0, queue = 2, now = now))
@@ -119,6 +121,8 @@ class SuiteScreenshotTest(private val theme: String, private val screen: String,
         compose.setContent { MuseApp(c, route) }
         repeat(8) { idle(); compose.mainClock.advanceTimeBy(400) }
         idle()
+        // The recent takes row (play icon on each finished take) sits below the fold.
+        if (screen == "hub_recent") { compose.onNodeWithText("Recent takes", substring = true).performScrollTo(); idle() }
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/suite_${theme}_${screen}_$width.png")
     }
 }

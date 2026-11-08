@@ -73,6 +73,7 @@ import studio.muse.app.data.SuiteShotRequest
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.LocalNav
 import studio.muse.app.ui.Routes
+import studio.muse.app.ui.components.PlayBadge
 import studio.muse.app.ui.components.MenuItem
 import studio.muse.app.ui.components.MoreMenu
 import studio.muse.app.ui.components.MuseSlider
@@ -983,7 +984,7 @@ private fun RecentTakes(ui: ComposerUi, job: studio.muse.app.data.Job?, recent: 
                 Box(Modifier.size(w, w * 16 / 9).clip(RoundedCornerShape(if (m.isA) 0.dp else 8.dp)).press { openTake(j.id) }.semantics { contentDescription = j.title }) {
                     if (p.phase == StagePhase.READY) {
                         RefImage(takes.firstOrNull { it.jobId == j.id }?.thumb ?: j.thumb, Modifier.matchParentSize(), 20)
-                        Box(Modifier.align(Alignment.Center).size(30.dp).clip(CircleShape).background(Color.White.copy(alpha = .9f)), contentAlignment = Alignment.Center) { Ic("play", 14.dp, Color(0xFF141210)) }
+                        PlayBadge(compact = w < 100.dp)
                     } else {
                         BlurredStageArt(j.thumb, moving = false)
                         T(if (p.phase == StagePhase.FAILED) "Failed" else p.badge, m.scale.micro, Color.White, Modifier.align(Alignment.Center), maxLines = 1)

@@ -51,6 +51,13 @@ fun suiteTime(sec: Double): String {
     return "$m:" + String.format(java.util.Locale.ROOT, "%04.1f", s)
 }
 
+/** "0:04.27" (minutes, seconds, hundredths): the playhead while editing, fine enough to place a cut on a frame. */
+fun playheadTime(sec: Double): String {
+    val cs = kotlin.math.round(sec.coerceAtLeast(0.0) * 100).toLong()
+    val m = cs / 6000; val s = (cs % 6000) / 100; val h = cs % 100
+    return "$m:" + s.toString().padStart(2, '0') + "." + h.toString().padStart(2, '0')
+}
+
 /**
  * The editor (EM1): top bar (✕ · title · EXPORT), the preview with its safe area, the transport (time, play, undo,
  * redo, fullscreen), the multitrack timeline and the tool row; the open panel as a bottom sheet over it. On a wide
@@ -77,7 +84,7 @@ fun EditSuiteContent(
                     Transport(ui, act)
                     if (!ui.fullscreen) {
                         Box(Modifier.fillMaxWidth().height(1.dp).background(m.t.line))
-                        if (ui.project != null) SuiteTimeline(ui, frames, act)
+                        if (ui.project != null) SuiteTimeline(ui, frames, act, waves = host.waves)
                         Toolbar(ui, act)
                     }
                 }
@@ -157,7 +164,11 @@ private fun TopRow(ui: EditSuiteUi, act: (EditAction) -> Unit, onClose: () -> Un
 private fun Transport(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     val m = muse
     Row(Modifier.fillMaxWidth().height(42.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        T("${suiteTime(ui.playheadSec)} / ${suiteTime(ui.duration)}", m.scale.label.tabular(), m.t.ink, Modifier.weight(1f), maxLines = 1)
+        T("${playheadTime(ui.playheadSec)} / ${playheadTime(ui.duration)}", m.scale.label.tabular(), m.t.ink, Modifier.weight(1f), maxLines = 1)
+        // Split at the playhead, one tap away (owner report 2026-11-08: placing a cut must be direct).
+        Box(Modifier.size(48.dp).press(enabled = ui.project != null) { act(EditAction.Split) }.semantics { contentDescription = "Split at playhead" }, contentAlignment = Alignment.Center) {
+            EIc("scissors", 20.dp, m.t.ink)
+        }
         Box(Modifier.size(48.dp).press(enabled = ui.ready) { act(EditAction.PlayPause) }.semantics { contentDescription = if (ui.playing) "Pause" else "Play" }, contentAlignment = Alignment.Center) {
             EIc(if (ui.playing) "pause" else "play", 20.dp, m.t.ink)
         }
