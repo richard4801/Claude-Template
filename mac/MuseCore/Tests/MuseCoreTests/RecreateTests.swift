@@ -206,6 +206,9 @@ final class RecreateTests: XCTestCase {
         let generating = try await api.fill(ref.id)
         XCTAssertEqual(generating.slots.map(\.state), ["matched", "generating", "generating"])
         XCTAssertEqual(RecreateText.makingSummary(generating), "1 from your takes, 2 generating")
+        // Swapped shots say so (the top bar's summary when the shots will be swapped in).
+        XCTAssertEqual(RecreateText.makingSummary(before, prices: prices, swaps: ["s2", "s3"]).hasPrefix("1 from your takes, 2 to swap in"), true)
+        XCTAssertEqual(RecreateText.makingSummary(before, prices: prices, swaps: ["s2"]).hasPrefix("1 from your takes, 1 to generate, 1 to swap in"), true)
         var slots: [String: String] = ["s1": "t1"]
         for s in generating.slots where s.state == "generating" { slots[s.slotId] = s.jobId }
         let early = try await api.apply(ref.id, RecreateApplyRequest(sessionId: "es_1", slots: slots))
