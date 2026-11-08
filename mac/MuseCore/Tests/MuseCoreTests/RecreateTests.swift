@@ -80,4 +80,32 @@ final class RecreateTests: XCTestCase {
         XCTAssertNil(RecreateText.speed("none"))
         XCTAssertEqual(RecreateText.percent(nil), "–")
     }
+
+    func testDemoFakeServesTheFixtureAndAFill() async throws {
+        let api = FakeRecreateAPI()
+        let list = try await api.listReferences()
+        XCTAssertEqual(list.count, 1)
+        let ref = try XCTUnwrap(list.first)
+        XCTAssertTrue(ref.isReady)
+        XCTAssertNil(ref.videoUrl, "demo mode has no media links")
+        XCTAssertEqual(ref.recipe?.slots.count, 3)
+        let fill = try await api.fill(ref.id)
+        XCTAssertEqual(fill.slots.map(\.state), ["matched", "to_generate", "to_generate"])
+        XCTAssertEqual(fill.toGenerateTotal, 1.28, accuracy: 1e-9)
+        let applied = try await api.apply(ref.id, RecreateApplyRequest(sessionId: "es_1", baseRevision: 3, slots: ["s1": "t1"]))
+        XCTAssertEqual(applied.revision, 4)
+        XCTAssertNotNil(applied.match?.overall)
+        let kept = try await api.patchReference(ref.id, keep: true, name: "Mine")
+        XCTAssertEqual(kept.keep, true)
+        XCTAssertEqual(kept.name, "Mine")
+        try await api.deleteReference(ref.id)
+        let after = try await api.listReferences()
+        XCTAssertTrue(after.isEmpty)
+    }
+
+    func testReferenceIdsAreChecked() {
+        XCTAssertNoThrow(try RecreateIds.check("rx_example"))
+        XCTAssertThrowsError(try RecreateIds.check("../v1/admin"))
+        XCTAssertThrowsError(try RecreateIds.check("cs_123"))
+    }
 }
