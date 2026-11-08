@@ -33,6 +33,7 @@ class MainActivity : ComponentActivity() {
         }
         pendingRoute.value = intent?.getStringExtra(Notifier.EXTRA_ROUTE)
         pendingHandoff.value = intent?.getStringExtra(Notifier.EXTRA_HANDOFF)
+        intent?.let(::takeShare)
         setContent {
             val prefs by container.prefs.collectAsState()
             val dark = prefs.theme == "b"
@@ -61,5 +62,25 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         intent.getStringExtra(Notifier.EXTRA_ROUTE)?.let { pendingRoute.value = it }
         intent.getStringExtra(Notifier.EXTRA_HANDOFF)?.let { pendingHandoff.value = it }
+        takeShare(intent)
+    }
+
+    /**
+     * Share → MUSE (plans/recreate-edit.md): a shared video file or a shared link opens Edit → Recreate with it. The server
+     * decides what a link can be fetched from (plans/research/platform-download-rules.md); the app only passes it on.
+     */
+    private fun takeShare(intent: Intent) {
+        if (intent.action != Intent.ACTION_SEND) return
+        val container = (application as MuseApplication).container
+        @Suppress("DEPRECATION")
+        val stream = (if (android.os.Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, android.net.Uri::class.java)
+            else intent.getParcelableExtra(Intent.EXTRA_STREAM) as? android.net.Uri)
+        val shared = when {
+            stream != null && (intent.type ?: "").startsWith("video/") -> studio.muse.app.data.SharedReference.File(stream, intent.type)
+            else -> studio.muse.core.edit.SharedLink.first(intent.getStringExtra(Intent.EXTRA_TEXT))?.let { studio.muse.app.data.SharedReference.Link(it) }
+        } ?: return
+        container.shared.value = shared
+        pendingRoute.value = Routes.EDIT
+        intent.action = null // once
     }
 }

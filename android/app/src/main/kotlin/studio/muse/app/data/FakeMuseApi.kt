@@ -1163,6 +1163,11 @@ class FakeMuseApi(
         recreatePolls[id] = 0
         RecipeReference(id, name ?: "Reference", "analyzing", 5, "Waiting")
     }
+    /** Demo: a link with "private" in it answers like a private video; any other link runs the analysis. */
+    override suspend fun createReferenceFromLink(url: String, name: String?): RecipeReference {
+        if ("private" in url) throw ApiException("link_private", "This video is private · save it and share the file instead")
+        return createReference("link", name)
+    }
     override suspend fun reference(id: String): RecipeReference = lock.withLock {
         val n = recreatePolls[id] ?: throw ApiException("not_found", "Reference not found")
         recreatePolls[id] = n + 1

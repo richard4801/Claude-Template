@@ -112,8 +112,15 @@ fun EditSuiteScreen(takeId: String?, onBack: () -> Unit) {
     var recreating by rememberSaveable { mutableStateOf(false) } // "Recreate an edit" (plans/recreate-edit.md)
     var reference by rememberSaveable { mutableStateOf<String?>(null) } // a library reference opened in the Recipe view
     var learn by rememberSaveable { mutableStateOf<String?>(null) } // "playbook" | "recipes" (plans/learning-editor-ui.md), owner only
+    // Share → MUSE: what another app shared opens Recreate with it, once.
+    val c = LocalContainer.current
+    val sharedNow by c.shared.collectAsState()
+    var shared by remember { mutableStateOf<studio.muse.app.data.SharedReference?>(null) }
+    LaunchedEffect(sharedNow) { sharedNow?.let { shared = it; c.shared.value = null; open = null; learn = null; reference = null; recreating = true } }
     val id = open
-    if (recreating) RecipeScreen(onBack = { recreating = false; reference = null }, referenceId = reference)
+    if (recreating) androidx.compose.runtime.key(shared) {
+        RecipeScreen(onBack = { recreating = false; reference = null; shared = null }, referenceId = reference, shared = shared)
+    }
     else if (id == null && learn == "playbook") studio.muse.app.ui.screens.edit.learn.PlaybookScreen(onBack = { learn = null }, onOpenTake = { open = it })
     else if (id == null && learn == "recipes") studio.muse.app.ui.screens.edit.learn.RecipesScreen(
         onBack = { learn = null }, onOpenTake = { open = it }, onOpenReference = { reference = it; recreating = true }, onRecreate = { recreating = true })
