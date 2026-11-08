@@ -112,7 +112,11 @@ data class ComposerDraft(
     fun inputsFor(cat: SuiteCatalog?): SuiteInputs = cat?.tier(quality)?.slotsFor(engineModel) ?: SuiteInputs.NONE
 
     /** Pins one of the tier's engines (null = Auto). */
-    fun pin(m: studio.muse.app.data.SuiteTierModel?): ComposerDraft = copy(engineModel = m?.model, resolution = m?.resolution?.ifBlank { null })
+    fun pin(m: studio.muse.app.data.SuiteTierModel?): ComposerDraft = copy(engineModel = m?.model, resolution = m?.resolution?.ifBlank { null }).let { d ->
+        // The pinned engine's length limits apply at once (a 15 s take on a 10 s engine becomes 10 s).
+        val lo = m?.minSeconds; val hi = m?.maxSeconds
+        if (lo != null && hi != null && hi >= lo) d.copy(duration = d.duration.coerceIn(lo, hi)) else d
+    }
 
     /** The Settings row's value: "Auto", or the pinned engine's name (owner only: members' catalogs carry no engines). */
     fun engineLabel(cat: SuiteCatalog?): String = engineModel?.let { id -> cat?.tier(quality)?.models?.firstOrNull { it.model == id }?.let { m -> m.name.ifBlank { m.model } + (m.resolution.ifBlank { null }?.let { " · $it" } ?: "") } ?: id } ?: "Auto"
@@ -168,8 +172,10 @@ data class ComposerDraft(
     /** The Length slider's range on [tier]: the tier's min and max seconds (the catalog's), 2–15 when unknown. */
     fun lengthRange(cat: SuiteCatalog?): IntRange {
         val t = cat?.tier(quality)
-        val lo = (t?.minSeconds ?: 2).coerceAtLeast(1)
-        val hi = (t?.maxSeconds ?: 15).coerceAtLeast(lo)
+        // An engine the owner pinned has its own limits (when the server sends them); otherwise the tier's.
+        val e = engineModel?.let { id -> t?.models?.firstOrNull { it.model == id } }
+        val lo = (e?.minSeconds ?: t?.minSeconds ?: 2).coerceAtLeast(1)
+        val hi = (e?.maxSeconds ?: t?.maxSeconds ?: 15).coerceAtLeast(lo)
         return lo..hi
     }
 

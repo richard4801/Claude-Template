@@ -154,7 +154,14 @@ data class SuiteInputs(
 
 /** owner: the models a tier runs, in ladder order, each with the inputs it takes. */
 @Serializable
-data class SuiteTierModel(val model: String, val name: String = "", val resolution: String = "", val inputs: SuiteInputs? = null)
+data class SuiteTierModel(
+    val model: String, val name: String = "", val resolution: String = "", val inputs: SuiteInputs? = null,
+    // WS7 (owner model picker): the engine's own limits and price, when the server sends them (older servers don't; the tier's apply).
+    val minSeconds: Int? = null,
+    val maxSeconds: Int? = null,
+    /** Dollars per output second at [resolution], after the studio's price scale. */
+    val perSec: Double? = null,
+)
 
 /** A quality tier (Draft / Standard / HD / Cinema). */
 @Serializable

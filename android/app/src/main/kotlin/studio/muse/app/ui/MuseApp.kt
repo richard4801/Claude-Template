@@ -404,7 +404,7 @@ data class TabItem(val icon: String, val label: String, val route: String)
 
 /**
  * The bottom bar's five tabs (design/direction/render.py, approved 2026-11-06): Home, Suite, Library, Queue, You. No centre "+":
- * creating lives on Home ("New video", "New model") and in Suite (Shot, Character swap, Photo, Storyboard, Edit).
+ * creating lives on Home ("New video" opens Suite → Shot; "New model") and in Suite (Shot, Character swap, Photo, Storyboard, Edit).
  */
 val TAB_ITEMS = listOf(
     TabItem("house", "Home", Routes.HOME),
