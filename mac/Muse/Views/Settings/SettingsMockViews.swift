@@ -284,12 +284,12 @@ private struct MockDefaultModels: View {
         SectionTitle("Default models") {
             Text("All running").scaled(t.scale.caption, t.roles.positive)
         }
-        Text("What each kind of work uses unless you pick a model on the screen itself. Auto lets MUSE choose.")
+        Text("What \u{201C}Auto\u{201D} uses for each kind of work. You can still pick another model each time. Only you see models.")
             .scaled(t.scale.caption, t.roles.ink2).padding(.bottom, Space.s2)
         ForEach(Self.rows, id: \.0) { row in
             SettingRow(row.0, hint: row.2) {
                 HStack(spacing: Space.s1) {
-                    Text(row.1).scaled(t.scale.body, row.1 == "Auto" ? t.roles.ink2 : t.roles.ink)
+                    Text(row.1 == "Auto" ? "Auto: MUSE picks" : row.1).scaled(t.scale.body, row.1 == "Auto" ? t.roles.ink2 : t.roles.ink)
                     Ph("chevron.down", 10).foregroundStyle(t.roles.ink2)
                 }
                 .padding(.horizontal, Space.s3).frame(height: 30)
