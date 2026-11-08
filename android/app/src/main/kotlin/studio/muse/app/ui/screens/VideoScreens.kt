@@ -215,6 +215,18 @@ fun SourceScreen() {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) vm.pick(uri) }
     val pickVideo = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) }
     val clip = s.clip
+    val c = studio.muse.app.ui.LocalContainer.current
+    var importing by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    if (importing) ImportLinkDialog(ImportPurpose.SWAP, onClose = { importing = false }, onPickFile = { importing = false; pickVideo() }) { v ->
+        importing = false
+        val id = v.clipId
+        if (id == null) c.repo.toast("This studio server can't use an imported video for a swap yet")
+        else {
+            vm.edit { it.copy(clip = studio.muse.app.data.Clip(id, v.name, v.durationSec, v.width ?: 1080, v.height ?: 1920, 30, emptyList(), v.thumb)) }
+            c.suite.recast.update { it.copy(clipId = id) }
+            nav.back()
+        }
+    }
     ScreenBox {
         Column(Modifier.fillMaxSize()) {
             TopBar("Pick a clip", onBack = { nav.back() })
@@ -222,6 +234,8 @@ fun SourceScreen() {
                 if (clip == null) {
                     T("Pick a short vertical clip with one person. We check it before you spend anything.", m.type.body, m.t.muted)
                     EmptyClipArea(s.checking, pickVideo)
+                    // WS7: Import a video from a link, as Swap's source (the shared link flow).
+                    Opt("Paste a link", "TikTok, Instagram Reel or YouTube", icon = "link", onClick = { importing = true })
                     // The sample clip and the failing-clip preview are demo mode's only.
                     if (s.demo) {
                         Opt("Use the sample clip", "Living-room dance · 9.4s · 1080×1920", icon = "play", onClick = { vm.sample(false) })

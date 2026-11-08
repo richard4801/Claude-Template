@@ -268,6 +268,12 @@ fun GalleryScreen() {
     val vm: GalleryViewModel = viewModel { GalleryViewModel(c) }
     val s by vm.state.collectAsState()
     val nav = LocalNav.current
+    var importing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    // "Pick the saved video" (the link couldn't be fetched): the usual clip picker, which uploads and checks it.
+    if (importing) ImportLinkDialog(ImportPurpose.LIBRARY, onClose = { importing = false }, onPickFile = { importing = false; nav.go(Routes.SOURCE) }) { v ->
+        importing = false
+        c.repo.toast("Imported: ${v.name}")
+    }
     val m = muse
     val fresh = remember { s.fresh }
     LaunchedEffect(Unit) { vm.seen() }
@@ -277,7 +283,13 @@ fun GalleryScreen() {
         val rows = remember(list) { list.chunked(3) }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = MuseSpace.gutter, end = MuseSpace.gutter, top = MuseSpace.s4, bottom = 120.dp),
             verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
-            item(key = "title", contentType = "title") { DisplayTitle("Library") }
+            item(key = "title", contentType = "title") {
+                // WS7: Import a video from a link (it lands in the library, ready for a swap or an edit).
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    DisplayTitle("Library", Modifier.weight(1f))
+                    BarButton("link", "Import from link", { importing = true })
+                }
+            }
             item(key = "tabs", contentType = "tabs") {
                 Segmented(listOf("tests" to "Tests · ${s.tests.size}", "final" to "Final · ${s.finals.size}"), s.tab, vm::tab, Modifier.padding(bottom = MuseSpace.s2))
             }
