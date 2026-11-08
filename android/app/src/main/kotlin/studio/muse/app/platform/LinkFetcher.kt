@@ -15,31 +15,33 @@ sealed interface DeviceFetch {
     data class Failed(val message: String) : DeviceFetch
 }
 
-/** Fetches a TikTok, Instagram or YouTube link on the phone (Recreate's paste and Share → MUSE). */
-interface LinkFetcher {
-    suspend fun fetch(url: String, strict: Boolean, dir: File): DeviceFetch
+/**
+ * The server's link rules (GET /v1/recreate/settings) for one link: [strict] public videos only, [tiktokRefuse] refuse
+ * TikTok's "downloads off", the caps, and the link's [platform] from the server's check.
+ */
+data class LinkRules(val strict: Boolean = true, val tiktokRefuse: Boolean = true, val maxSec: Int = 60, val maxMb: Int = 80, val platform: String? = null) {
+    val maxBytes: Long get() = maxMb * 1024L * 1024L
+}
 
-    companion object {
-        /** The server's caps (plans/api.md "Recreate this edit · links"): 60 s and RECREATE_LINK_MAX_MB (80). */
-        const val MAX_SEC = 60
-        const val MAX_BYTES = 80L * 1024 * 1024
-    }
+/** Fetches a shared link on the phone (Recreate's paste and Share → MUSE). */
+interface LinkFetcher {
+    suspend fun fetch(url: String, rules: LinkRules, dir: File): DeviceFetch
 }
 
 /**
  * yt-dlp on the phone, through Chaquopy (app/src/main/python/muse_fetch.py): signed out (no cookies), one video, the
- * server's caps, public only when the owner's "Strict link rules" is on. Platforms block the studio server's address,
+ * server's caps, public only and TikTok's "downloads off" refused while the owner's "Strict link rules" is on. Platforms block the studio server's address,
  * not a phone's. Python ships for 64-bit ARM only; elsewhere this fails and the caller falls back to the server.
  */
 class PhoneLinkFetcher(context: Context) : LinkFetcher {
     private val app = context.applicationContext
 
-    override suspend fun fetch(url: String, strict: Boolean, dir: File): DeviceFetch = withContext(Dispatchers.IO) {
+    override suspend fun fetch(url: String, rules: LinkRules, dir: File): DeviceFetch = withContext(Dispatchers.IO) {
         try {
             if (!com.chaquo.python.Python.isStarted()) com.chaquo.python.Python.start(com.chaquo.python.android.AndroidPlatform(app))
             dir.mkdirs()
             val out = com.chaquo.python.Python.getInstance().getModule("muse_fetch")
-                .callAttr("fetch", url, dir.absolutePath, LinkFetcher.MAX_SEC, LinkFetcher.MAX_BYTES, strict).toString()
+                .callAttr("fetch", url, dir.absolutePath, rules.maxSec, rules.maxBytes, rules.strict, rules.tiktokRefuse, rules.platform ?: "").toString()
             parse(out)
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) {
             DeviceFetch.Failed("Couldn't get this video on the phone")

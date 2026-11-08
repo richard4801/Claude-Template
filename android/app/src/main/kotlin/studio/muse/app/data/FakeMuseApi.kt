@@ -1,6 +1,7 @@
 package studio.muse.app.data
 
 import studio.muse.core.edit.RecipeJson
+import studio.muse.core.edit.SharedLink
 import studio.muse.core.edit.RecipeReference
 import studio.muse.core.edit.RecreateBackground
 import studio.muse.core.edit.RecreateRender
@@ -995,8 +996,7 @@ class FakeMuseApi(
     override suspend fun studioSettings(): StudioSettings = lock.withLock { studio }
     override suspend fun patchStudioSettings(req: StudioSettingsPatch): StudioSettings = lock.withLock {
         studio = studio.copy(maxGpus = req.maxGpus ?: studio.maxGpus, overheadPayer = req.overheadPayer ?: studio.overheadPayer, capPerJob = req.capPerJob ?: studio.capPerJob,
-            capPerDay = req.capPerDay ?: studio.capPerDay, capPerUserDay = req.capPerUserDay ?: studio.capPerUserDay,
-            strictLinkRules = req.strictLinkRules ?: studio.strictLinkRules)
+            capPerDay = req.capPerDay ?: studio.capPerDay, capPerUserDay = req.capPerUserDay ?: studio.capPerUserDay)
         studio
     }
 
@@ -1191,6 +1191,20 @@ class FakeMuseApi(
         recreatePolls[id] = 0
         name?.let { recreateNames[id] = it }
         RecipeReference(id, name ?: "Reference", "analyzing", 5, "Waiting")
+    }
+    // Demo: Recreate's link rules (the owner can edit them).
+    private var linkSettings = RecreateLinkSettings(canEdit = true)
+    override suspend fun recreateSettings() = lock.withLock { linkSettings }
+    override suspend fun patchRecreateSettings(strictLinks: Boolean) = lock.withLock {
+        linkSettings = linkSettings.copy(strictLinks = strictLinks, platforms = if (strictLinks) listOf("tiktok", "instagram", "youtube") else listOf("any"),
+            tiktokDownloadsOff = if (strictLinks) "refuse" else "allow"); linkSettings
+    }
+    /** Demo: links from other sites are refused while strict rules are on. */
+    override suspend fun checkRecreateLink(url: String): RecreateLinkCheck {
+        val platform = SharedLink.platform(url)
+        val strict = lock.withLock { linkSettings.strictLinks }
+        return if (platform == null && strict) RecreateLinkCheck(false, url, code = "link_unsupported", reason = "Paste a TikTok, Instagram Reel or YouTube link")
+            else RecreateLinkCheck(true, url, platform ?: "other")
     }
     /** Demo: a link with "private" in it answers like a private video; any other link runs the analysis. */
     override suspend fun createReferenceFromLink(url: String, name: String?): RecipeReference {

@@ -734,9 +734,26 @@ data class StudioSettings(
     val features: StudioFeatures = StudioFeatures(),
     /** Owner only. */
     val engines: Engines? = null,
-    /** Recreate links: public videos only (not private, members-only, sign-in-walled or age-restricted). Default on. */
-    val strictLinkRules: Boolean = true,
 )
+
+/**
+ * Recreate's link rules (GET /v1/recreate/settings), which the phone applies to its own fetch too. [strictLinks] on
+ * (the default): TikTok, Instagram and YouTube only, and TikTok's "downloads off" refused. Never cookies or sign-in.
+ */
+@Serializable
+data class RecreateLinkSettings(
+    val strictLinks: Boolean = true,
+    val platforms: List<String> = listOf("tiktok", "instagram", "youtube"),
+    val tiktokDownloadsOff: String = "refuse",
+    val maxSec: Int = 60,
+    val maxMb: Int = 80,
+    val serverFetch: Boolean = true,
+    val canEdit: Boolean = false,
+)
+
+/** POST /v1/recreate/links/check: may the phone fetch this link (its normalized form), or is it already a reference? */
+data class RecreateLinkCheck(val allowed: Boolean, val url: String, val platform: String? = null,
+    val cached: studio.muse.core.edit.RecipeReference? = null, val code: String? = null, val reason: String? = null)
 
 @Serializable
 data class StudioSettingsPatch(
@@ -745,7 +762,6 @@ data class StudioSettingsPatch(
     val capPerJob: Double? = null,
     val capPerDay: Double? = null,
     val capPerUserDay: Double? = null,
-    val strictLinkRules: Boolean? = null,
 )
 
 /** GET/PATCH /v1/settings/image-engine. provider: simulated | fal | custom-http. */

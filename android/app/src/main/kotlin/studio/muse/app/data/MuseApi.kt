@@ -300,6 +300,14 @@ interface MuseApi {
         throw ApiException("not_found", "This studio server can't export recreates yet")
     suspend fun recreateExportFile(id: String, sessionId: String, sound: String, revision: Int?, into: java.io.File): Boolean = false
 
+    // Recreate links fetched on the phone (plans/api.md "Fetching on the device, and Strict link rules").
+    /** The link rules the phone applies too; null on a server without them (the defaults then apply). */
+    suspend fun recreateSettings(): RecreateLinkSettings? = null
+    /** Owner: "Strict link rules". */
+    suspend fun patchRecreateSettings(strictLinks: Boolean): RecreateLinkSettings = throw ApiException("not_found", "This studio server doesn't have link rules yet")
+    /** Before the phone downloads: allowed (the normalized link), refused (code, reason) or already a reference (cached). */
+    suspend fun checkRecreateLink(url: String): RecreateLinkCheck = RecreateLinkCheck(true, url)
+
     /** The studio's locations (`@location` in the composer's prompt). */
     suspend fun suiteLocations(): List<SuiteLocation> = throw ApiException("not_found", "This server doesn't have locations yet")
     suspend fun createSuiteLocation(req: SuiteLocationCreate): SuiteLocation = throw ApiException("not_found", "This server doesn't have locations yet")
