@@ -45,8 +45,8 @@ struct EditSuiteCaptionsMode: View {
                     Text("No captions yet. Auto-captions writes down what's said, word by word, so you can edit the video by editing the text.")
                         .font(t.body(13)).foregroundStyle(t.muted)
                     HStack {
-                        SuiteToolButton(title: session.isRunning(.captions) ? "Captioning…" : "Auto-captions", icon: "captions.bubble", accent: true,
-                                        disabled: session.isRunning(.captions)) { Task { await session.autoCaptions() } }
+                        SuiteToolButton(title: session.isRunning(.captions) ? "Captioning…" : "Auto-captions", icon: "captions.bubble", accent: session.helperAvailable(.captions),
+                                        disabled: session.isRunning(.captions) || !session.helperAvailable(.captions)) { Task { await session.autoCaptions() } }
                         if session.isRunning(.captions) {
                             ProgressView().controlSize(.small)
                             Text(session.jobs[.captions]?.phase ?? "").font(t.body(12)).foregroundStyle(t.muted)

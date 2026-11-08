@@ -84,6 +84,20 @@ final class EditSuiteKeepTests: XCTestCase {
         let on = try JSONDecoder().decode(EditorFeatures.self, from: Data(#"{"matte":{"available":true,"maxSec":120}}"#.utf8))
         XCTAssertTrue(on.matteAvailable)
         XCTAssertTrue(try JSONDecoder().decode(EditorFeatures.self, from: Data("{}".utf8)).matteAvailable, "an older server: offer it")
+        XCTAssertEqual(off.note(.matte), "Coming soon")
+        XCTAssertNil(off.note(.captions))
+    }
+
+    func testThePaidSwitchOffDisablesThePaidHelpersOnly() throws {
+        let json = #"{"paid":{"available":false,"reason":"AI editing helpers are switched off for now"},"captions":{"available":false},"cuts":{"available":true},"matte":{"available":false,"maxSec":120},"denoise":{"available":false},"beats":{"available":true,"free":true}}"#
+        let f = try JSONDecoder().decode(EditorFeatures.self, from: Data(json.utf8))
+        for k in [EditorJobKind.captions, .matte, .denoise] {
+            XCTAssertFalse(f.isAvailable(k), "\(k)")
+            XCTAssertEqual(f.note(k), "AI editing helpers are switched off for now")
+        }
+        XCTAssertTrue(f.isAvailable(.cuts))
+        XCTAssertTrue(f.isAvailable(.beats))
+        XCTAssertNil(f.note(.beats))
     }
 
     func testSourceTimeThroughPieces() {

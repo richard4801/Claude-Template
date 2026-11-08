@@ -312,8 +312,8 @@ struct TimelineCanvas: View {
         case .noCaptions:
             HStack(spacing: Space.s2) {
                 SuiteToolButton(title: session.isRunning(.captions) ? "Captioning…" : "Make captions", icon: "closed-captioning",
-                                disabled: session.isRunning(.captions), plain: true) { Task { await session.autoCaptions() } }
-                    .help(session.estimateLabel(.captions).map { "Word-timed captions from what's said, \($0)" } ?? "Word-timed captions from what's said")
+                                disabled: session.isRunning(.captions) || !session.helperAvailable(.captions), plain: true) { Task { await session.autoCaptions() } }
+                    .help(session.helperNote(.captions) ?? session.estimateLabel(.captions).map { "Word-timed captions from what's said, \($0)" } ?? "Word-timed captions from what's said")
                 if session.isRunning(.captions) { ProgressView().controlSize(.small) }
             }
             .padding(.leading, Space.s2)

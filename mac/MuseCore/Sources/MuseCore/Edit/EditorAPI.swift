@@ -64,18 +64,47 @@ public struct EditorJobRequest: Codable, Hashable, Sendable {
     public init(kind: EditorJobKind, source: EditorSource, options: EditorJobOptions? = nil) { self.kind = kind; self.source = source; self.options = options }
 }
 
-/// GET /v1/editor/features: what the server can do now. Only what the suite reads is decoded.
+/// GET /v1/editor/features: what the server can do now (paid helpers switched off by the owner, background removal not
+/// ready yet). Only what the suite reads is decoded; a missing entry means available, so an older server offers everything.
 public struct EditorFeatures: Codable, Hashable, Sendable {
-    public struct Matte: Codable, Hashable, Sendable {
-        /// False while the server can't remove backgrounds yet ("Coming soon").
+    public struct Helper: Codable, Hashable, Sendable {
         public var available: Bool?
+        /// Plain words for why it isn't available ("AI editing helpers are switched off for now").
+        public var reason: String?
         public var maxSec: Double?
-        public init(available: Bool? = nil, maxSec: Double? = nil) { self.available = available; self.maxSec = maxSec }
+        public init(available: Bool? = nil, reason: String? = nil, maxSec: Double? = nil) { self.available = available; self.reason = reason; self.maxSec = maxSec }
     }
-    public var matte: Matte?
-    public init(matte: Matte? = nil) { self.matte = matte }
+    public typealias Matte = Helper
+    /// All paid helpers at once (the owner's switch).
+    public var paid: Helper?
+    public var captions: Helper?
+    public var matte: Helper?
+    public var denoise: Helper?
+    public init(paid: Helper? = nil, captions: Helper? = nil, matte: Helper? = nil, denoise: Helper? = nil) {
+        self.paid = paid; self.captions = captions; self.matte = matte; self.denoise = denoise
+    }
     /// Background removal (and tap to keep) can run.
-    public var matteAvailable: Bool { matte?.available != false }
+    public var matteAvailable: Bool { isAvailable(.matte) }
+
+    private func helper(_ k: EditorJobKind) -> Helper? {
+        switch k {
+        case .captions: return captions
+        case .matte: return matte
+        case .denoise: return denoise
+        case .cuts, .beats: return nil   // the free passes are always offered
+        }
+    }
+    private var paidOn: Bool { paid?.available != false }
+    public func isAvailable(_ k: EditorJobKind) -> Bool {
+        guard let h = helper(k) else { return true }
+        return h.available != false && (paidOn || k == .cuts || k == .beats)
+    }
+    /// Why a helper can't run, in plain words: the owner's switch, else "Coming soon" (background removal not ready yet).
+    public func note(_ k: EditorJobKind) -> String? {
+        guard !isAvailable(k) else { return nil }
+        if !paidOn { return paid?.reason ?? helper(k)?.reason ?? "AI editing helpers are switched off for now" }
+        return helper(k)?.reason ?? "Coming soon"
+    }
 }
 
 /// POST /v1/editor/estimate.

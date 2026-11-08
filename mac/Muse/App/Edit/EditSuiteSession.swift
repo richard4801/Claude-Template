@@ -51,8 +51,23 @@ final class EditSuiteSession {
     private(set) var estimates: [EditorJobKind: EditorEstimate] = [:]
     /// Remove background → "Pick what to keep": the points on a frame of the selected clip, its picture and its price.
     var keepPick: EditSuite.KeepPick?
-    /// False while the server can't remove backgrounds yet (`/v1/editor/features`): the panel shows "Coming soon".
-    private(set) var matteAvailable = true
+    /// What the server offers now (`/v1/editor/features`): paid helpers switched off by the owner, background removal not
+    /// ready yet. Nil until asked (everything offered).
+    private(set) var features: EditorFeatures?
+    /// A paid helper's message shown at its own button (the owner switched them off, today's limit reached).
+    private(set) var helperNotes: [EditorJobKind: String] = [:]
+    /// A paid helper waiting for the owner to confirm its price (the confirmation dialog).
+    private(set) var paidAsk: PaidAsk?
+    struct PaidAsk {
+        let kind: EditorJobKind
+        let title: String
+        let price: String
+        let go: () async -> Void
+    }
+    var matteAvailable: Bool { features?.matteAvailable ?? true }
+    func helperAvailable(_ k: EditorJobKind) -> Bool { features?.isAvailable(k) ?? true }
+    /// Why a helper can't run now, or the message its last try got: shown at its button.
+    func helperNote(_ k: EditorJobKind) -> String? { features?.note(k) ?? helperNotes[k] }
     private(set) var keepFrame: CGImage?
     private(set) var keepEstimate: EditorEstimate?
     /// The newest transcript job (fillers / silences reuse it for free).
@@ -158,10 +173,7 @@ final class EditSuiteSession {
                 state.assetNames[a.id] = name(of: a)
             }
             phase = .ready
-            Task { [weak self] in
-                guard let self, let f = (try? await self.api.editorFeatures()) ?? nil else { return }
-                self.matteAvailable = f.matteAvailable
-            }
+            Task { [weak self] in await self?.refreshFeatures() }
             observeTime()
             await ensureFiles()
             rebuild(immediately: true)
@@ -575,9 +587,57 @@ final class EditSuiteSession {
         if let e = try? await api.editorEstimate(EditorJobRequest(kind: k, source: src, options: options)) { estimates[k] = e }
     }
 
-    /// Starts a job, polls it until it ends and hands the result to `apply` (on success).
-    private func run(_ k: EditorJobKind, source: EditorSource, options: EditorJobOptions? = nil, apply: @escaping (EditorJobResult) -> Void) async {
+    func refreshFeatures() async {
+        if let f = (try? await api.editorFeatures()) ?? nil { features = f }
+    }
+
+    private static func helperTitle(_ k: EditorJobKind) -> String {
+        switch k {
+        case .captions: return "Auto-captions"
+        case .matte: return "Remove background"
+        case .denoise: return "Noise reduction"
+        case .cuts: return "Cut silences"
+        case .beats: return "Detect beats"
+        }
+    }
+
+    /// Runs the paid helper the owner just confirmed.
+    func confirmPaid() {
+        guard let ask = paidAsk else { return }
+        paidAsk = nil
+        Task { await ask.go() }
+    }
+    func cancelPaid() { paidAsk = nil }
+
+    /// The guardrails' answers (2026-11-08): shown at the helper's button, and the features asked again.
+    private func helperRefused(_ k: EditorJobKind, _ error: Error) -> Bool {
+        guard let e = error as? ApiError, e.code == "editor_paid_off" || e.code == "editor_daily_cap" else { return false }
+        helperNotes[k] = e.message
+        Task { await refreshFeatures() }
+        return true
+    }
+
+    /// Starts a job, polls it until it ends and hands the result to `apply` (on success). A helper that costs money asks
+    /// first (`paidAsk`: its price, Run or Cancel) unless `confirmed` (tap to keep confirms in its own panel).
+    private func run(_ k: EditorJobKind, source: EditorSource, options: EditorJobOptions? = nil, confirmed: Bool = false,
+                     apply: @escaping (EditorJobResult) -> Void) async {
         guard !isRunning(k) else { return }
+        helperNotes[k] = nil
+        if !confirmed {
+            do {
+                let e = try await api.editorEstimate(EditorJobRequest(kind: k, source: source, options: options))
+                if !e.free && e.usd > 0 {
+                    paidAsk = PaidAsk(kind: k, title: Self.helperTitle(k), price: e.label) { [weak self] in
+                        await self?.run(k, source: source, options: options, confirmed: true, apply: apply)
+                    }
+                    return
+                }
+            } catch {
+                if helperRefused(k, error) { return }
+                lastError = (error as? ApiError)?.message ?? "That didn't work · try again"
+                return
+            }
+        }
         do {
             var job = try await api.startEditorJob(EditorJobRequest(kind: k, source: source, options: options))
             jobs[k] = job
@@ -597,6 +657,7 @@ final class EditSuiteSession {
                 j.state = "failed"
                 jobs[k] = j
             }
+            if helperRefused(k, error) { return }
             if !(error is CancellationError) { lastError = (error as? ApiError)?.message ?? "That didn't work · try again" }
         }
     }
@@ -769,7 +830,7 @@ final class EditSuiteSession {
             return
         }
         keepPick?.confirming = false
-        await run(.matte, source: src, options: k.options) { [weak self] r in
+        await run(.matte, source: src, options: k.options, confirmed: true) { [weak self] r in
             self?.applyMatte(r, clip: clip, source: a)
             self?.cancelKeep()
         }
