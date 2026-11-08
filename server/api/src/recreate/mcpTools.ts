@@ -4,6 +4,7 @@
 import { ApiError, badRequest } from '../errors.js';
 import { withImage, type EditTool, type ToolEnv } from '../editor/mcpTools.js';
 import { editSessionsOf } from '../editor/sessions.js';
+import { learningOf } from '../editor/learn.js';
 import type { Recipe } from './analyze.js';
 import { recreateOf } from './references.js';
 
@@ -110,5 +111,29 @@ export const RECREATE_TOOLS: EditTool[] = [
       const p = await sess.askOwner(s, { kind: 'recreate_fill', label, estimateUsd: usd, args: { referenceId: need(a, 'referenceId'), slotId: e.slotId, body } });
       return { waitingForOwner: true, pendingId: p.id, estimateUsd: usd, message: 'The owner has been asked in the MUSE app. When the job is done, use its job id for this slot in apply_recipe.' };
     },
+  },
+  // The playbook (workstream 3's learning editor, src/editor/learn.ts): read it before building, add what you learned.
+  {
+    name: 'playbook_read', title: 'Read the studio\'s editing playbook', scope: 'edit:read', readOnly: true, idempotent: true,
+    description: 'The studio\'s editing playbook before you build an edit: its rules (pinned first, at most 25), the 3 nearest proven recipes with how their posts performed, the latest corrections the owner made to your edits, lessons, and the top gaps. Pass the recipe, reference or take at hand to get the nearest recipes; area narrows the rules (e.g. text, pacing, look).',
+    inputSchema: obj({ recipeId: str('A recipe id'), referenceId: str('A reference id (rx_…)'), takeId: str('A take id'), area: str('Narrow the rules to one area', 40) }),
+    run: async (env, a) => {
+      rx(env);
+      const o: { recipeId?: string; referenceId?: string; takeId?: string; area?: string } = {};
+      for (const k of ['recipeId', 'referenceId', 'takeId', 'area'] as const) if (typeof a[k] === 'string' && a[k]) o[k] = a[k] as string;
+      return learningOf(env.ctx).context(env.user, o);
+    },
+  },
+  {
+    name: 'playbook_add', title: 'Add a rule to the playbook', scope: 'edit:write',
+    description: 'Adds a rule you learned (≤ 300 characters, one plain sentence, e.g. "Captions sit above the lower third on talking shots"), with its evidence: [{kind: correction|post|recipe|note, id?, note}]. Your rules arrive unpinned; the owner pins, edits or deletes them.',
+    inputSchema: obj({ text: str('The rule', 300), area: str('Its area (e.g. text, pacing, look)', 40), evidence: { type: 'array', description: '[{kind, id?, note}]' } }, ['text']),
+    run: async (env, a) => { rx(env); return learningOf(env.ctx).addRule(env.user, { text: a.text, area: a.area, evidence: a.evidence }, 'claude'); },
+  },
+  {
+    name: 'report_gap', title: 'Report something MUSE can\'t do yet', scope: 'edit:write',
+    description: 'Records a gap: an effect, transition or font in a reference that MUSE can\'t recreate. key is stable and specific (e.g. "effect:lens-flare", "transition:page-curl"); gaps are counted across references to decide what to build.',
+    inputSchema: obj({ key: str('A stable key, kind:name', 80), kind: str('transition | effect | text | font | motion | other'), what: str('What it is, in a few words', 120), note: str('Where you saw it', 300) }, ['key', 'kind', 'what']),
+    run: async (env, a) => { rx(env); return learningOf(env.ctx).addGap(env.user, { key: a.key, kind: a.kind, what: a.what, note: a.note }); },
   },
 ];

@@ -1294,7 +1294,7 @@ SlotFill { slotId, state: "empty"|"matched"|"to_generate"|"generating"|"ready", 
 - `text`: 1 for read words, 0.6 for "Text"; `ramps`: the share of ramped slots filled; `grade`: 1 − the Look's distance (0 when off or too far).
 - `overall` = 0.25 cuts + 0.35 shots + 0.15 text + 0.1 ramps + 0.15 grade.
 
-**Sources:** apply also returns `sources: {itemId: {recipeId, slotId? , transitionAt?, textId?}}`, which recipe element each item came from, for workstream 3's corrections log (passed to `edit_ops.meta` once it exists).
+**Sources:** apply also returns `sources: {itemId: {recipeId, slotId?, transitionAt?, textId?}}`, which recipe element each item came from. They are stored in the op's `meta.sources` for workstream 3's corrections log.
 
 **Applying a recipe:**
 - **Values:** each slot's value is a take, or a finished job (its first take is used). A slot whose job hasn't finished is listed in `waiting`.
@@ -1321,7 +1321,11 @@ SlotFill { slotId, state: "empty"|"matched"|"to_generate"|"generating"|"ready", 
   - with it, the owner is asked in the edit session (pending `kind: "recreate_fill"`), and their yes starts the Suite job;
   - Claude then passes the job id to `apply_recipe`.
 
-`playbook_read` and `playbook_add` come with WS3's learning storage.
+- `playbook_read(recipeId?, referenceId?, takeId?, area?)` (edit:read): the learning editor's context (workstream 3, "Learning editor"). It holds the playbook (pinned first, ≤ 25), the 3 nearest proven recipes with their Posts performance, 10 corrections, 8 lessons and 5 gaps.
+- `playbook_add(text, area?, evidence?)` (edit:write): Claude's rule arrives unpinned; the owner pins, edits or deletes it.
+- `report_gap(key, kind, what, note?)` (edit:write): an effect, transition or font MUSE can't recreate yet, e.g. `effect:lens-flare`.
+
+Applying a recipe stores `meta: {sources}` on the edit op, from Claude or from the app. The owner's later corrections to those items then carry `context.source`.
 
 ## MCP & camera sessions (2026-11-05)
 _Workstream 2. Owner only: every endpoint below answers `owner_only` (403) to a member. Setup and architecture: `plans/mcp-bridge.md`; research: `plans/research/ai-video-suite-research.md` §3.4._ A **camera session** is the shared workspace of the Camera control's **Directed (Blender)** mode: the brief, the cast, how the camera and each character move over time, the guide renders from Blender, and a Shot **draft**. Three things write to the same session: the MUSE apps (REST below), the in-app "Direct with Claude" chat (server-side Claude with MUSE tools + Blender tools relayed to the owner's Mac), and the owner's own Claude app / Claude Code through the **MUSE MCP server** (`/mcp`). **Agents never spend:** the most any tool does is a Shot draft with a cost estimate; the owner presses Generate in the app.

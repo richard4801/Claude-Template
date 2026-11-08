@@ -271,14 +271,15 @@ export class RecreateReferences {
     const out = buildProject(recipe, s.takeId, takes, (b.options ?? {}) as AssembleOptions);
     if (!out.project.tracks[0]!.items.length) throw badRequest('slots: give at least one slot a take');
     const label = `Recreated “${r.name}”`;
+    // Which recipe element each item came from: on the op, so the owner's later corrections carry it (workstream 3).
+    const sources = sourcesOf(recipe, out.project, r.id, takes);
     const res = o.by === 'claude'
       ? await svc.applyClaude(u, s.id, { baseRevision: b.baseRevision ?? s.revision, ops: [{ op: 'patch', patch: [
           { op: 'replace', path: '/canvas', value: out.project.canvas }, { op: 'replace', path: '/assets', value: out.project.assets },
-          { op: 'replace', path: '/tracks', value: out.project.tracks }] }], label })
-      : await svc.reset(u, s.id, { baseRevision: b.baseRevision ?? s.revision, project: out.project, device: o.device, label });
+          { op: 'replace', path: '/tracks', value: out.project.tracks }] }], label, meta: { sources } })
+      : await svc.reset(u, s.id, { baseRevision: b.baseRevision ?? s.revision, project: out.project, device: o.device, label }, { meta: { sources } });
     const fresh = await this.row(u, id);
     const match = matchScore(recipe, out.project, takes, fresh.fill ?? {}, (b.options ?? {}) as AssembleOptions);
-    const sources = sourcesOf(recipe, out.project, r.id, takes);
     await this.saveFill(fresh, { ...(fresh.fill ?? {}), applied: { sessionId: s.id, revision: res.revision, at: Date.now(), slots: Object.fromEntries(Object.entries(takes).filter(([, t]) => t).map(([k, t]) => [k, t!.id])), sources, match } });
     return { sessionId: s.id, revision: res.revision, durationSec: out.durationSec, missing: [...out.missing.filter(x => !waiting.includes(x)), ...waiting], waiting, notes: out.notes, label, match, sources };
   }

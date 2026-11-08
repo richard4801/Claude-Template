@@ -207,6 +207,12 @@ describe.skipIf(!hasFfmpeg)('Recreate · the flow through the API and Claude\'s 
     for (const k of ['overall', 'cuts', 'text', 'ramps', 'grade', 'shots']) { expect(out.match[k]).toBeGreaterThanOrEqual(0); expect(out.match[k]).toBeLessThanOrEqual(1); }
     expect(out.sources).toMatchObject({ c1: { recipeId: refId, slotId: 's1' }, c2: { slotId: 's2' }, c3: { slotId: 's3' } });
     expect((await owner.req('GET', `/v1/recreate/references/${refId}/fill`)).body).toMatchObject({ applied: { sessionId, slots: { s1: 't_pan', s3: 't_static' } }, match: out.match });
+    // The op carries the sources (for workstream 3's corrections), next to its own `touched`.
+    const { editOps } = await import('../src/editor/schema.js');
+    const { desc, eq: eq2 } = await import('drizzle-orm');
+    const [op] = await a.ctx.db.select().from(editOps).where(eq2(editOps.sessionId, sessionId)).orderBy(desc(editOps.id)).limit(1);
+    expect((op!.meta as any).sources).toEqual(out.sources);
+    expect((op!.meta as any).touched).toBeTruthy();
     const after = await editSessionsOf(a.ctx).row(ownerUser, sessionId);
     expect(after.revision).toBe(before.revision + 1);
     const p = after.project as M.EditProject;
@@ -242,4 +248,16 @@ describe.skipIf(!hasFfmpeg)('Recreate · the flow through the API and Claude\'s 
     expect((await owner.req('POST', `/v1/recreate/references/${refId}/apply`, { sessionId, baseRevision: 0, slots: { s1: 't_pan' } })).status).toBe(409); // stale
     expect((await member.req('POST', `/v1/recreate/references/${refId}/match`, {})).status).toBe(404); // the owner's reference
   }, 60_000);
+
+  it('the playbook tools call the learning editor: read, add a rule (unpinned), report a gap; owner only', async () => {
+    const add = await tool('playbook_add').run(env(), { text: 'Captions sit above the lower third on talking shots', area: 'text', evidence: [{ kind: 'note', note: 'Tuff edit' }] }) as any;
+    expect(add).toMatchObject({ text: 'Captions sit above the lower third on talking shots', pinned: false });
+    await tool('report_gap').run(env(), { key: 'effect:lens-flare', kind: 'effect', what: 'Lens flare', note: 'Tuff edit, s2' });
+    const ctx = await tool('playbook_read').run(env(), { referenceId: refId }) as any;
+    expect(ctx.playbook.map((r: any) => r.text)).toContain('Captions sit above the lower third on talking shots');
+    expect(Object.keys(ctx)).toEqual(expect.arrayContaining(['playbook', 'recipes', 'corrections', 'lessons', 'gaps']));
+    expect(JSON.stringify(ctx.gaps)).toContain('effect:lens-flare');
+    const memberEnv = { ...env(), user: { ...ownerUser, role: 'member' as const } };
+    await expect(tool('playbook_read').run(memberEnv, {})).rejects.toMatchObject({ status: 403 });
+  });
 });
