@@ -90,8 +90,9 @@ fun EditSuiteContent(
                 val panel = ui.panel
                 if (ui.session?.chatOpen == true) EditClaudeSheet(ui, act) // workstream 2's sheet: its own scrim and frame
                 else if (panel != null && ui.project != null) {
-                    Box(Modifier.fillMaxSize().background(Color(0x40141210)).press { act(EditAction.Open(null)) })
-                    SuiteSheet(ui, panel, host, act, Modifier.align(Alignment.BottomCenter).heightIn(max = maxHeight * .62f).navigationBarsPadding())
+                    // Tap to keep: no scrim and a shorter sheet, so the picture above it takes the taps.
+                    if (ui.keep == null) Box(Modifier.fillMaxSize().background(Color(0x40141210)).press { act(EditAction.Open(null)) })
+                    SuiteSheet(ui, panel, host, act, Modifier.align(Alignment.BottomCenter).heightIn(max = maxHeight * (if (ui.keep != null) .42f else .62f)).navigationBarsPadding())
                 }
             }
             // Edit sessions (workstream 3): Claude's change landed; a paid helper Claude asked for waits for the owner.

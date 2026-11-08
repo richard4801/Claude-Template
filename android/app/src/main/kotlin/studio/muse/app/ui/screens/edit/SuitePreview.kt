@@ -1,6 +1,10 @@
 package studio.muse.app.ui.screens.edit
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -82,6 +86,8 @@ fun SuitePreview(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier 
             picture(Modifier.fillMaxSize())
             if (p != null && drawText) Overlays(p, ui.playheadSec, w, h)
             ui.safeArea?.let { SafeAreaGuides(it) }
+            // Remove background → tap what to keep: taps on the paused picture, and where they are.
+            ui.keep?.let { k -> KeepTaps(k, act) }
         }
         // Safe-area switch: TikTok → Reels → Shorts → off.
         if (!safeChip) return@BoxWithConstraints
@@ -253,3 +259,29 @@ fun CaptionTile(style: CaptionStyle, label: String, on: Boolean, onClick: () -> 
 }
 
 
+
+/** Tap to keep: a tap adds a point (0–1 of the frame); keep taps are filled rings, leave-out taps are crossed. */
+@Composable
+private fun KeepTaps(k: KeepUi, act: (EditAction) -> Unit) {
+    val accent = muse.t.accent
+    Canvas(
+        Modifier.fillMaxSize()
+            .pointerInput(Unit) { detectTapGestures { o -> act(EditAction.KeepTapAt((o.x / size.width).toDouble(), (o.y / size.height).toDouble())) } }
+            .semantics { contentDescription = "Picture · tap what to ${if (k.keepNext) "keep" else "leave out"}" },
+    ) {
+        val r = 11.dp.toPx()
+        for (t in k.taps) {
+            val c = Offset((t.x * size.width).toFloat(), (t.y * size.height).toFloat())
+            drawCircle(Color.Black.copy(alpha = .35f), r + 2.dp.toPx(), c)
+            if (t.keep) {
+                drawCircle(accent, r, c)
+                drawCircle(Color.White, r, c, style = Stroke(2.dp.toPx()))
+            } else {
+                drawCircle(Color.White, r, c, style = Stroke(2.dp.toPx()))
+                val d = r * .6f
+                drawLine(Color.White, Offset(c.x - d, c.y - d), Offset(c.x + d, c.y + d), 2.dp.toPx())
+                drawLine(Color.White, Offset(c.x - d, c.y + d), Offset(c.x + d, c.y - d), 2.dp.toPx())
+            }
+        }
+    }
+}

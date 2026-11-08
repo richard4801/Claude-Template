@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -46,6 +47,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
@@ -58,6 +60,8 @@ import studio.muse.app.ui.components.RefImage
 import studio.muse.app.ui.components.T
 import studio.muse.app.ui.components.Toggle
 import studio.muse.app.ui.components.press
+import studio.muse.app.ui.theme.roles
+import studio.muse.app.ui.theme.scale
 import studio.muse.app.ui.theme.muse
 import studio.muse.core.edit.CaptionExport
 import studio.muse.core.edit.CaptionPreset
@@ -522,8 +526,14 @@ private fun MaskBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
             T(clip.chroma?.color ?: "Off", m.type.mono.copy(fontSize = 12.sp), m.t.muted)
         }
         val matte = ui.ai["matte"]
-        OptRow("Remove background", when { matte?.running == true -> "Cutting out · ${matte.progress} %"; else -> "No green screen needed · ${matte?.price ?: "AI"}" }, matte?.done == true,
-            { if (matte?.done != true) act(EditAction.RemoveBackground) })
+        val keyed = clip.alphaMatte != null
+        OptRow("Remove background", when { matte?.running == true -> "Cutting out · ${matte.progress} %"; keyed -> "Done · the background is gone"; else -> "The person stays · ${matte?.price ?: "priced next"}" },
+            matte?.done == true || keyed, { if (matte?.running != true && !keyed && ui.keep == null) act(EditAction.RemoveBackground) })
+        // Tap what to keep (workstream 1's tracked cut-out): a pet, a product, one of two people.
+        val k = ui.keep
+        if (k == null) {
+            SuiteLink("Tap what to keep instead") { act(EditAction.TapToKeep(true)) }
+        } else KeepPanel(ui, k, act)
     }
 }
 
@@ -712,3 +722,38 @@ private fun ExportBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Un
 }
 
 
+
+/**
+ * Tap to keep (workstream 1, plans/api.md "KeepPoint"): tap the paused picture on what to keep, switch to "Leave out" for
+ * what to drop (1–10 taps, at least one keep). The run's price is on its button: one run per press.
+ */
+@Composable
+private fun KeepPanel(ui: EditSuiteUi, k: KeepUi, act: (EditAction) -> Unit) {
+    val m = muse
+    val task = ui.ai["matte_keep"]
+    T("Pause on a frame, then tap what to keep. Switch to Leave out and tap anything that should go.", m.scale.caption, m.t.muted)
+    SuiteSeg(listOf("keep" to "Keep", "out" to "Leave out"), if (k.keepNext) "keep" else "out", { act(EditAction.KeepNext(it == "keep")) }, Modifier.fillMaxWidth(), height = 34.dp, fill = true)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        val keeps = k.taps.count { it.keep }; val outs = k.taps.size - keeps
+        T(if (k.taps.isEmpty()) "No taps yet" else listOfNotNull("$keeps to keep", outs.takeIf { it > 0 }?.let { "$it to leave out" }).joinToString(" · "),
+            m.scale.label, m.t.ink, Modifier.weight(1f), maxLines = 1)
+        if (k.taps.isNotEmpty()) SuiteLink("Undo tap") { act(EditAction.UndoKeepTap) }
+    }
+    task?.error?.let { T(it, m.scale.caption, m.t.warn) }
+    val label = when {
+        task?.running == true -> "Cutting out · ${task.progress} %"
+        !k.ready -> "Tap something to keep"
+        else -> "Cut out" + (task?.price?.let { " · $it" } ?: "")
+    }
+    SuiteButton(label, { act(EditAction.RunTapToKeep) }, Modifier.fillMaxWidth(), primary = true, enabled = k.ready && task?.running != true && task?.price != null)
+    SuiteLink("Cancel") { act(EditAction.TapToKeep(false)) }
+}
+
+/** A quiet text action (sentence case, the link colour), 48 dp tall. */
+@Composable
+private fun SuiteLink(text: String, onClick: () -> Unit) {
+    val m = muse
+    Box(Modifier.heightIn(min = 48.dp).press(onClick = onClick).semantics { role = androidx.compose.ui.semantics.Role.Button }, contentAlignment = Alignment.CenterStart) {
+        T(text, m.scale.label, m.roles.link, maxLines = 1)
+    }
+}

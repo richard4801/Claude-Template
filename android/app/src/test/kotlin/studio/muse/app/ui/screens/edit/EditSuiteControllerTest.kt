@@ -62,6 +62,43 @@ class EditSuiteControllerTest {
 
     private fun EditSuiteController.p() = project!!
 
+    /** Remove background (workstream 1): an alpha matte on the clip, and tap to keep with its own price and points. */
+    @Test fun removeBackgroundSetsAnAlphaMatte() = runTest {
+        val arrived = ArrayList<String>()
+        val b = object : EditBackend by StubBackend() {
+            val options = ArrayList<JsonObject?>()
+            override suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?) = EditorEstimate(kind, if (options?.get("points") != null) 0.04 else 0.02) to null
+            override suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?> {
+                this.options += options
+                val r = FakeEditorResults.result(kind, source.durationSec ?: 18.0, "j1", options)
+                return JsonObject(r + ("asset" to JsonObject((r["asset"] as JsonObject) + ("url" to kotlinx.serialization.json.JsonPrimitive("https://x/m.mp4"))))) to null
+            }
+            override fun assetArrived(assetId: String, url: String) { arrived += "$assetId $url" }
+        }
+        val c = controller(b)
+        c.act(EditAction.RemoveBackground); advanceUntilIdle()
+        val clip = c.p().mainClips.single()
+        val matte = clip.alphaMatte!!
+        assertEquals(studio.muse.core.edit.AssetKind.VIDEO, c.p().asset(matte.asset)!!.kind)
+        assertEquals(null, clip.chroma)
+        assertEquals(1, c.p().tracks.size) // no keyed overlay track any more
+        assertEquals("${matte.asset} https://x/m.mp4", arrived.single())
+        // Tap to keep: taps need one keep; the price comes from an estimate with the points; one run per press.
+        c.act(EditAction.Seek(4.0))
+        c.act(EditAction.TapToKeep(true))
+        c.act(EditAction.KeepNext(false)); c.act(EditAction.KeepTapAt(.2, .3))
+        c.act(EditAction.RunTapToKeep); advanceUntilIdle()
+        assertEquals("Tap at least one thing to keep", c.ui.value.message)
+        c.act(EditAction.KeepNext(true)); c.act(EditAction.KeepTapAt(.5, .6)); advanceUntilIdle()
+        assertEquals("about $0.04", c.ui.value.ai["matte_keep"]?.price)
+        c.act(EditAction.RunTapToKeep); advanceUntilIdle()
+        val pts = b.options.last()!!["points"] as kotlinx.serialization.json.JsonArray
+        assertEquals(2, pts.size)
+        assertEquals("4.0", (pts[1] as JsonObject)["t"].toString()) // the playhead's source time
+        assertEquals("false", (pts[0] as JsonObject)["keep"].toString())
+        assertEquals(null, c.ui.value.keep) // done: tap mode closes
+    }
+
     @Test fun splitDeleteUndoRedo() = runTest {
         val c = controller()
         c.act(EditAction.Seek(6.0)); c.act(EditAction.Split)
