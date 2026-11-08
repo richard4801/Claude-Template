@@ -529,18 +529,25 @@ private fun MaskBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
             T(clip.chroma?.color ?: "Off", m.type.mono.copy(fontSize = 12.sp), m.t.muted)
         }
         // The cut-out isn't live yet (the server says so): both read "Coming soon", plainly, with nothing to press.
-        ui.matteOff?.let { note ->
+        val keyed = clip.alphaMatte != null
+        // A clip already cut out keeps its toggle, so it can be turned off (WS3's contract; the Mac does the same).
+        if (!keyed) ui.matteOff?.let { note ->
             ComingSoon("Remove background", note)
             ComingSoon("Tap what to keep", note)
             return
         }
         val matte = ui.ai["matte"]
-        val keyed = clip.alphaMatte != null
         OptRow("Remove background", when { matte?.running == true -> "Cutting out · ${matte.progress} %"; keyed -> "Done · the background is gone"; else -> "The person stays · ${matte?.price ?: "priced next"}" },
-            matte?.done == true || keyed, { if (matte?.running != true && !keyed && ui.keep == null) act(EditAction.RemoveBackground) })
+            matte?.done == true || keyed, {
+                when {
+                    keyed -> act(EditAction.KeepBackground)
+                    matte?.running != true && ui.keep == null -> act(EditAction.RemoveBackground)
+                }
+            })
         // Tap what to keep (workstream 1's tracked cut-out): a pet, a product, one of two people.
         val k = ui.keep
-        if (k == null) {
+        if (ui.matteOff != null) ComingSoon("Tap what to keep", ui.matteOff)
+        else if (k == null) {
             SuiteLink("Tap what to keep instead") { act(EditAction.TapToKeep(true)) }
         } else KeepPanel(ui, k, act)
     }

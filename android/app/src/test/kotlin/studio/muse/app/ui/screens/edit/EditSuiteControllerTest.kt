@@ -79,6 +79,14 @@ class EditSuiteControllerTest {
         assertEquals(null, c.p().mainClips.first().alphaMatte)
     }
 
+    @Test fun aClipAlreadyCutOutCanBeTurnedOffEvenWhileComingSoon() = runTest {
+        val c = controller(StubBackend())
+        c.act(EditAction.RemoveBackground); advanceUntilIdle()
+        assertTrue(c.p().mainClips.single().alphaMatte != null)
+        c.act(EditAction.KeepBackground)
+        assertEquals(null, c.p().mainClips.single().alphaMatte)
+    }
+
     @Test fun removeBackgroundSetsAnAlphaMatte() = runTest {
         val arrived = ArrayList<String>()
         val b = object : EditBackend by StubBackend() {
