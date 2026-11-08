@@ -19,6 +19,13 @@ import { SOMETHING_WENT_WRONG } from './jobs.js';
 import { mediaToolsAvailable, padTo, probe, restoreAudio, stripAudio, thumbnail } from '../replicate/media.js';
 import { putFile } from '../storage/objects.js';
 import type { JobRow } from '../gpu/controller.js';
+import { modelById } from '../suite/registry.js';
+
+/** WS13: the resolution a chosen hosted swap model runs a quality at (its own list; H3 Lite has no 2K). */
+function swapResolution(id: string, quality: P.Quality) {
+  const m = modelById(id), want = P.QUALITY_INFO[quality].resolution;
+  return m?.resolutions.find(r => r.id === want)?.id ?? m?.resolutions.at(-1)?.id ?? want;
+}
 
 /** The pod id replicate jobs are claimed under (no pod row exists for it). */
 export const REPLICATE_POD = 'replicate';
@@ -166,9 +173,10 @@ export class ReplicateVideo {
         if (url) imageUrls.push(url);
       }
       const quality = P.qualityOf(r);
-      const model = quality === 'draft' ? c.REPLICATE_VIDEO_DRAFT_MODEL : c.REPLICATE_VIDEO_MODEL;
+      // WS13: the owner's swap engine (`videoModel`, a hosted H3-family model) replaces the quality's default model.
+      const model = typeof r.videoModel === 'string' && r.videoModel ? r.videoModel : quality === 'draft' ? c.REPLICATE_VIDEO_DRAFT_MODEL : c.REPLICATE_VIDEO_MODEL;
       const input = { prompt: job.prompt, reference_video_urls: [videoUrl], reference_image_urls: imageUrls, duration: D,
-        resolution: P.QUALITY_INFO[quality].resolution, ratio: '9:16' };
+        ...(r.videoNoResolution ? {} : { resolution: r.swapEngine ? swapResolution(r.swapEngine, quality) : P.QUALITY_INFO[quality].resolution }), ratio: '9:16' };
       // 4. One prediction per take, one after another.
       const outputs: Record<string, unknown>[] = [];
       const billed: number[] = [];
