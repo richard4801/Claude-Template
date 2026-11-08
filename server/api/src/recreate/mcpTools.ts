@@ -113,7 +113,7 @@ export const RECREATE_TOOLS: EditTool[] = [
       const usd = Number((e.estimate as { estimate?: number }).estimate) || 0;
       const label = `${e.method === 'swap' ? 'Swap your model into' : 'Generate'} ${e.slotId} for “${(await svc.row(env.user, need(a, 'referenceId'))).name}”`;
       // The fill runs with the method priced here, so the owner approves exactly this.
-      const fixed = { ...body, method: e.method };
+      const fixed = { ...body, method: e.method, maxUsd: usd };
       if (a.confirm !== true) {
         await sess.log(s, `Priced ${label}: about $${usd.toFixed(2)}`);
         const r = e.request as { duration?: number; prompt?: string; clipSeconds?: number };

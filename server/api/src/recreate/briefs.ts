@@ -164,6 +164,7 @@ export class BriefWriter {
     const holdTokens = await this.ctx.money.hold(whoOf(u), jobId, usd, { perJob: false, note: 'Shot briefs · hold' });
     await this.ctx.db.insert(editorJobs).values({ id: jobId, studioId: u.studioId, userId: u.id, kind: 'briefs', state: 'running', source: { durationSec: recipe.source.durationSec },
       mediaKey: null, options: { referenceId: r.id }, models: [model], estimate: usd, holdTokens, progress: 0, phase: 'Writing the briefs', createdAt: Date.now() });
+    let settled = false;
     try {
       const content: Record<string, unknown>[] = [];
       if (sheet) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: sheet.toString('base64') } });
@@ -178,13 +179,17 @@ export class BriefWriter {
       if (!Object.keys(out.slots).length) throw new Error('no usable briefs');
       const actual = briefUsd(model, { input: reply.usage.input_tokens, output: reply.usage.output_tokens }, ai.markup);
       await this.ctx.money.settle(u.studioId, u.id, jobId, holdTokens, actual, 'Shot briefs');
+      settled = true;
       await this.ctx.db.update(editorJobs).set({ state: 'done', cost: actual, progress: 100, phase: 'Done', finishedAt: Date.now(),
         result: { referenceId: r.id, slots: Object.keys(out.slots).length, usage: reply.usage } }).where(eq(editorJobs.id, jobId));
       const ref = await recreateOf(this.ctx).setBriefs(u, r.id, out);
       return { referenceId: r.id, written: Object.keys(out.slots), costUsd: actual, reference: ref };
     } catch (e) {
+      // The detail goes to the log only (it can name the model); the job row keeps a plain line.
+      this.ctx.log?.warn({ err: String((e as Error)?.message ?? e).slice(0, 300), referenceId: r.id }, 'recreate briefs');
+      if (settled) throw new ApiError(500, 'briefs_not_saved', 'The briefs were written but couldn’t be saved · try again');
       await this.ctx.money.release(u.studioId, u.id, jobId, holdTokens, 'shot briefs failed').catch(() => undefined);
-      await this.ctx.db.update(editorJobs).set({ state: 'failed', error: String((e as Error)?.message ?? e).slice(0, 300), finishedAt: Date.now() }).where(eq(editorJobs.id, jobId));
+      await this.ctx.db.update(editorJobs).set({ state: 'failed', error: 'Couldn’t write the briefs', finishedAt: Date.now() }).where(eq(editorJobs.id, jobId));
       throw new ApiError(502, 'briefs_failed', 'Couldn’t write the briefs this time · you weren’t charged');
     }
   }
