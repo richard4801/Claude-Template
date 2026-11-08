@@ -12,8 +12,8 @@ import studio.muse.core.edit.EditProject
 import java.io.File
 
 /**
- * Recreate's built edit, on the device (Release 1: Compare and export are local on both apps; there is no server
- * render). After apply, the edit session holds the recipe built from your takes and the new shots; this loads that
+ * Recreate's built edit, on the device: the fallback when the studio server can't render it ([RecreateServerRender]
+ * comes first, so pixels match across apps). After apply, the edit session holds the recipe built from your takes and the new shots; this loads that
  * project, downloads each take it uses once, and hands it to the editor's own composition engine: a preview player for
  * Compare (its timeline is the reference's, since the cuts land on the reference's times), and the export.
  */
@@ -54,23 +54,26 @@ class RecreateLocalEdit(context: Context, private val api: MuseApi) {
         val shaped = if (guide != null) { all[studio.muse.core.edit.RecreateExport.GUIDE_ASSET] = guide; studio.muse.core.edit.RecreateExport.withGuide(playableProject(p, files.keys), guideSec) }
             else studio.muse.core.edit.RecreateExport.silent(playableProject(p, files.keys))
         val made = composer.export(composer.plan(shaped, all), all, onProgress)
-        try {
-            val name = "MUSE Recreate ${System.currentTimeMillis() / 1000}"
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                val r = app.contentResolver
-                if (android.os.Build.VERSION.SDK_INT >= 29) {
-                    val v = android.content.ContentValues().apply {
-                        put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, "$name.mp4"); put(android.provider.MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                        put(android.provider.MediaStore.Video.Media.RELATIVE_PATH, "Movies/MUSE")
-                    }
-                    r.insert(android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, v)?.let { uri -> r.openOutputStream(uri)?.use { o -> made.file.inputStream().use { it.copyTo(o) } } }
-                } else {
-                    @Suppress("DEPRECATION") val dir = File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MOVIES), "MUSE").apply { mkdirs() }
-                    made.file.copyTo(File(dir, "$name.mp4"), overwrite = true)
+        try { return saveToMovies(made.file) } finally { made.file.delete() }
+    }
+
+    /** Saves a finished video to the phone (Movies/MUSE), from the server's export or the device's. Returns its name. */
+    suspend fun saveToMovies(file: File): String {
+        val name = "MUSE Recreate ${System.currentTimeMillis() / 1000}"
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val r = app.contentResolver
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                val v = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, "$name.mp4"); put(android.provider.MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                    put(android.provider.MediaStore.Video.Media.RELATIVE_PATH, "Movies/MUSE")
                 }
+                r.insert(android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, v)?.let { uri -> r.openOutputStream(uri)?.use { o -> file.inputStream().use { it.copyTo(o) } } }
+            } else {
+                @Suppress("DEPRECATION") val dir = File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MOVIES), "MUSE").apply { mkdirs() }
+                file.copyTo(File(dir, "$name.mp4"), overwrite = true)
             }
-            return name
-        } finally { made.file.delete() }
+        }
+        return name
     }
 
     /** A prepared preview player for the built edit, or null when nothing can play. The caller releases it. */

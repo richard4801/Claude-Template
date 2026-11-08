@@ -264,10 +264,11 @@ interface MuseApi {
     suspend fun referenceFill(id: String): studio.muse.core.edit.RecreateFill = throw ApiException("not_found", "This studio server can't build recipes yet")
     /** A shot's price as a new shot. Nothing is held. */
     /** [method]: "swap" | "generate" (null: the server's default, swap when it can run); [keepBackground]: swap only. */
-    suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String? = null, method: String? = null, keepBackground: Boolean? = null): studio.muse.core.edit.RecreateSlotEstimate =
+    /** [locationId]: "Use your own setting" with one of the studio's locations (free); without it the brief's place picks one, or a plate is made (priced in). */
+    suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String? = null, method: String? = null, keepBackground: Boolean? = null, locationId: String? = null): studio.muse.core.edit.RecreateSlotEstimate =
         throw ApiException("not_found", "This studio server can't build recipes yet")
     /** Makes a shot: an ordinary Suite job, held and charged. Only after the person confirmed the total. */
-    suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String? = null, method: String? = null, keepBackground: Boolean? = null): studio.muse.core.edit.RecreateFillStart =
+    suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String? = null, method: String? = null, keepBackground: Boolean? = null, locationId: String? = null): studio.muse.core.edit.RecreateFillStart =
         throw ApiException("not_found", "This studio server can't build recipes yet")
     /** Builds the edit in an edit session: [slots] is slotId → takeId or jobId. */
     suspend fun applyRecipe(id: String, sessionId: String, baseRevision: Int?, slots: Map<String, String>): studio.muse.core.edit.RecreateApplyResult =
@@ -285,6 +286,18 @@ interface MuseApi {
      */
     suspend fun replaceRecipeSlot(id: String, slotId: String, sessionId: String, take: String, baseRevision: Int?): studio.muse.core.edit.RecreateReplaceResult =
         throw ApiException("not_found", "This studio server can't fix one shot yet")
+
+    // The server's renders (plans/api.md "The built edit, rendered" and Recreate "Export"): the apps use these first so
+    // pixels match across apps, and fall back to the device's own engine when the server can't render.
+    /** Compare's preview of an edit session: [start] renders the current revision (POST); otherwise reads its state. */
+    suspend fun editPreview(sessionId: String, start: Boolean, revision: Int? = null): studio.muse.core.edit.RecreateRender =
+        throw ApiException("not_found", "This studio server can't render previews yet")
+    /** The preview's file into [into]; false when there is none. */
+    suspend fun editPreviewFile(sessionId: String, revision: Int?, into: java.io.File): Boolean = false
+    /** Recreate's export of the built edit, [sound] "guide" | "silent". 409 no_reference_sound: export silent instead. */
+    suspend fun recreateExport(id: String, sessionId: String, sound: String, start: Boolean, revision: Int? = null): studio.muse.core.edit.RecreateRender =
+        throw ApiException("not_found", "This studio server can't export recreates yet")
+    suspend fun recreateExportFile(id: String, sessionId: String, sound: String, revision: Int?, into: java.io.File): Boolean = false
 
     /** The studio's locations (`@location` in the composer's prompt). */
     suspend fun suiteLocations(): List<SuiteLocation> = throw ApiException("not_found", "This server doesn't have locations yet")

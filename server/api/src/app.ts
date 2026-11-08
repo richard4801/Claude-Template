@@ -67,6 +67,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   const hub = new EventHub();
   hub.onError = e => app.log.warn({ err: (e as Error)?.message }, 'live event failed');
   const timers = new Set<NodeJS.Timeout>();
+  let recreateSweep: NodeJS.Timeout | null = null; // Recreate retention (workstream 1)
   let boundPort = config.PORT;
   const publicBase = () => (config.PUBLIC_URL ?? `http://localhost:${boundPort}`).replace(/\/$/, '');
   const ctx = {
@@ -135,7 +136,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   });
 
   app.setErrorHandler((err: any, req, reply) => {
-    if (err instanceof ApiError) return reply.status(err.status).send({ error: err.message, code: err.code });
+    if (err instanceof ApiError) return reply.status(err.status).send({ error: err.message, code: err.code, ...((err as ApiError & { extra?: Record<string, unknown> }).extra ?? {}) });
     if (err?.name === 'ZodError') return reply.status(400).send({ error: `Invalid request: ${err.issues?.[0]?.path?.join('.') ?? ''} ${err.issues?.[0]?.message ?? ''}`.trim(), code: 'bad_request' });
     if (err?.statusCode === 429) return reply.status(429).send({ error: err.error ?? 'Too many requests', code: 'rate_limited' });
     if (err?.code === 'FST_REQ_FILE_TOO_LARGE' || err?.statusCode === 413) return reply.status(413).send({ error: 'That file is too large · use the presigned upload', code: 'too_large' });
@@ -160,11 +161,17 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   if (opts.startLoops !== false) {
     ctx.jobs.start();
     ctx.posts.start();
+    // Recreate (workstream 1): expired references lose their video on a timer, not only when someone lists them.
+    const sweep = () => { void recreateOf(ctx).sweep(Date.now(), true).catch(e => ctx.log?.warn({ err: String(e) }, 'recreate sweep')); };
+    const first = setTimeout(sweep, 60_000); first.unref?.(); timers.add(first);
+    recreateSweep = setInterval(sweep, 3_600_000);
+    recreateSweep.unref?.();
   }
 
   const close = async () => {
     ctx.jobs.stop();
     ctx.posts.stop();
+    if (recreateSweep) clearInterval(recreateSweep);
     for (const t of timers) clearTimeout(t);
     await ctx.replicateVideo.idle();
     await ctx.suite.runner.idle();

@@ -31,7 +31,17 @@ import studio.muse.core.edit.RecreateText
 enum class RecreateMode { Recipe, Compare }
 
 /** [guide]: the reference's sound as the guide track (else silent, timed for the sound). [progress]: 0–1 while exporting. */
-data class RecreateExportUi(val guide: Boolean = true, val progress: Float? = null, val error: String? = null)
+/**
+ * The export sheet. [progress]: the device's export (0..1), or null; [rendering]: the studio server is making it (no
+ * fraction). After saving, [saved] says where, and [useThisSound] is the server's reminder to post with the original
+ * sound (null: the general reminder).
+ */
+data class RecreateExportUi(
+    val guide: Boolean = true, val progress: Float? = null, val error: String? = null, val rendering: Boolean = false,
+    val saved: String? = null, val useThisSound: studio.muse.core.edit.RecreateUseSound? = null,
+) {
+    val busy: Boolean get() = progress != null || rendering
+}
 
 /** A take that can fill a shot ("Use one of my takes"). */
 /** [label]: what tells takes with the same title apart ("Take 2 of 3"). */
@@ -80,6 +90,10 @@ data class RecreateBuildUi(
     val methods: Map<String, String> = emptyMap(),
     /** G2, swap only: keep the reference's setting (true, the default) or use your own (the shot's brief). */
     val keepBackground: Map<String, Boolean> = emptyMap(),
+    /** "Use your own setting": the studio location picked per shot (absent: the brief's place, or a background made from it). */
+    val locations: Map<String, String> = emptyMap(),
+    /** The studio's locations, loaded the first time a shot uses its own setting. */
+    val places: List<RecreateCastChoice> = emptyList(),
     /** G8: "Write the shot briefs · about $0.02" while shots have no brief; its confirmation, and while it runs. */
     val briefs: studio.muse.core.edit.RecreateBriefsEstimate? = null,
     val askBriefs: Boolean = false,
@@ -197,9 +211,17 @@ class RecreateBuildModel(
     }
 
     fun openExport() = _ui.update { it.copy(export = RecreateExportUi(), playing = false) }
-    fun closeExport() = _ui.update { if (it.export?.progress != null) it else it.copy(export = null) }
-    fun setExportGuide(on: Boolean) = _ui.update { u -> u.copy(export = u.export?.copy(guide = on)) }
-    fun setExportProgress(p: Float?, error: String? = null) = _ui.update { u -> u.copy(export = u.export?.copy(progress = p, error = error)) }
+    fun closeExport() = _ui.update { if (it.export?.busy == true) it else it.copy(export = null) }
+    fun setExportGuide(on: Boolean) = _ui.update { u -> u.copy(export = u.export?.copy(guide = on, error = null)) }
+    fun setExportProgress(p: Float?, error: String? = null) = _ui.update { u -> u.copy(export = u.export?.copy(progress = p, error = error, rendering = false)) }
+    /** The studio server is rendering the export. */
+    fun setExportRendering() = _ui.update { u -> u.copy(export = u.export?.copy(rendering = true, progress = null, error = null)) }
+    /** The original's sound isn't kept any more (409 no_reference_sound): switch to silent and say so. */
+    fun exportNeedsSilent() = _ui.update { u -> u.copy(export = u.export?.copy(guide = false, rendering = false, progress = null,
+        error = "The original's sound isn't kept any more. Export it silent.")) }
+    /** Saved: the sheet stays open with where it went and how to post it with the original sound. */
+    fun exportSaved(message: String, use: studio.muse.core.edit.RecreateUseSound?) = _ui.update { u ->
+        u.copy(export = u.export?.copy(progress = null, rendering = false, error = null, saved = message, useThisSound = use)) }
     fun exportDone(message: String) = _ui.update { it.copy(export = null, message = message) }
 
     fun setJobProgress(p: Map<String, Int>) { if (p != _ui.value.jobProgress) _ui.update { it.copy(jobProgress = p) } }
@@ -274,7 +296,7 @@ class RecreateBuildModel(
         }
         val got = kotlinx.coroutines.coroutineScope {
             val u = _ui.value
-            todo.map { s -> async { s to runCatching { api.estimateReferenceSlot(id, s, model, method = u.methods[s], keepBackground = u.keepBackground[s]) }.onFailure { if (it is CancellationException) throw it } } }.awaitAll()
+            todo.map { s -> async { s to runCatching { api.estimateReferenceSlot(id, s, model, method = u.methods[s], keepBackground = u.keepBackground[s], locationId = u.locations[s]?.takeIf { u.keepBackground[s] == false }) }.onFailure { if (it is CancellationException) throw it } } }.awaitAll()
         }
         _ui.update { u ->
             val est = u.estimates.toMutableMap(); val errs = u.estimateErrors.toMutableMap()
@@ -301,6 +323,14 @@ class RecreateBuildModel(
     /** G2, swap: keep the reference's setting, or use your own (the shot's brief names the place); priced again. */
     suspend fun setKeepBackground(slotId: String, keep: Boolean) {
         _ui.update { it.copy(keepBackground = it.keepBackground + (slotId to keep), estimates = it.estimates - slotId) }
+        if (!keep && _ui.value.places.isEmpty()) runCatching { api.suiteLocations() }.onFailure { if (it is CancellationException) throw it }
+            .getOrNull()?.let { l -> _ui.update { u -> u.copy(places = l.map { RecreateCastChoice(it.id, it.name) }) } }
+        price()
+    }
+
+    /** "Use your own setting": one of the studio's locations (free), or null for the brief's place; priced again. */
+    suspend fun setLocation(slotId: String, locationId: String?) {
+        _ui.update { u -> u.copy(locations = if (locationId == null) u.locations - slotId else u.locations + (slotId to locationId), estimates = u.estimates - slotId) }
         price()
     }
 
@@ -374,13 +404,17 @@ class RecreateBuildModel(
                 if (s !in _ui.value.remake && current?.slot(s)?.state.let { it != null && it != "to_generate" }) continue
                 // The shot is made the way it was priced and confirmed (swap or generate, and its setting).
                 val e = _ui.value.estimates[s]
-                val started = api.fillReferenceSlot(id, s, model, method = e?.method, keepBackground = e?.keepBackground?.takeIf { e.method == "swap" })
+                val started = api.fillReferenceSlot(id, s, model, method = e?.method, keepBackground = e?.keepBackground?.takeIf { e.method == "swap" },
+                    locationId = e?.background?.locationId?.takeIf { e.method == "swap" && !e.keepBackground })
                 _ui.update { u ->
                     val f = u.fill
                     u.copy(fillErrors = u.fillErrors - s, picks = u.picks - s, remake = u.remake - s, fill = f?.copy(slots = f.slots.map { if (it.slotId == s) it.copy(state = "generating", jobId = started.jobId) else it }))
                 }
             } catch (e: CancellationException) { throw e } catch (e: Exception) {
-                _ui.update { u -> u.copy(fillErrors = u.fillErrors + (s to "This shot didn’t start: ${e.message ?: "try again"}")) }
+                // WS1: a background plate that couldn't be made (502 background_failed) is never charged.
+                val line = if ((e as? ApiException)?.code == "background_failed") "The background couldn’t be made, so this shot didn’t start. You weren’t charged. Try again, or pick one of your locations."
+                    else "This shot didn’t start: ${e.message ?: "try again"}"
+                _ui.update { u -> u.copy(fillErrors = u.fillErrors + (s to line)) }
             } finally {
                 _ui.update { it.copy(starting = it.starting - s) }
             }

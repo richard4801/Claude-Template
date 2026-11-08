@@ -30,3 +30,34 @@ class RecreateExportTest {
         assertTrue(plan.layers.none { it.withAudio })
     }
 }
+
+/** The server's renders (plans/api.md "The built edit, rendered" and Recreate "Export"), as the apps read them. */
+class RecreateRenderJsonTest {
+    private val json = kotlinx.serialization.json.Json
+
+    @Test fun aPreviewThatLeavesSomethingOutIsLabelled() {
+        val r = RecreateJson.render(json.parseToJsonElement("""{"sessionId":"es_1","revision":4,"state":"ready","url":"/v1/edit-sessions/es_1/preview.mp4?revision=4","durationSec":14.2,"width":405,"height":720,"unsupported":["captions","masks"]}"""))
+        assertTrue(r.ready)
+        assertEquals(4, r.revision)
+        assertEquals("Preview of the cut", r.label)
+        assertEquals(listOf("captions", "masks"), r.unsupported)
+    }
+
+    @Test fun aFullRenderHasNoLabelAndNoneIsNotReady() {
+        assertEquals(null, RecreateJson.render(json.parseToJsonElement("""{"sessionId":"es_1","revision":4,"state":"ready","unsupported":[]}""")).label)
+        val none = RecreateJson.render(json.parseToJsonElement("""{"sessionId":"es_1","revision":null,"state":"none"}"""))
+        assertTrue(none.failed); assertEquals(null, none.revision)
+    }
+
+    @Test fun anExportCarriesTheUseThisSoundReminder() {
+        val r = RecreateJson.render(json.parseToJsonElement("""{"referenceId":"rx_1","sessionId":"es_1","revision":2,"sound":"guide","state":"rendering",
+            "useThisSound":{"platform":"tiktok","sourceUrl":"https://www.tiktok.com/@a/video/1","startAtSec":0,"durationSec":14.2,"title":"Post with the original sound",
+            "steps":["Open the original on TikTok","Tap Use this sound"],"note":"The guide sound is only for timing."}}"""))
+        assertTrue(r.rendering)
+        assertEquals("guide", r.sound)
+        val u = r.useThisSound!!
+        assertEquals("tiktok", u.platform)
+        assertEquals(2, u.steps.size)
+        assertEquals("The guide sound is only for timing.", u.note)
+    }
+}
