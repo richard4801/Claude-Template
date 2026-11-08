@@ -2,6 +2,13 @@ package studio.muse.app.data
 
 import studio.muse.core.edit.RecipeJson
 import studio.muse.core.edit.RecipeReference
+import studio.muse.core.edit.RecreateMatch
+import studio.muse.core.edit.RecreateApplyResult
+import studio.muse.core.edit.RecreateFillStart
+import studio.muse.core.edit.RecreateSlotEstimate
+import studio.muse.core.edit.RecreateText
+import studio.muse.core.edit.RecreateSlotFill
+import studio.muse.core.edit.RecreateFill
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job as CoJob
 import kotlinx.coroutines.delay
@@ -1188,6 +1195,52 @@ class FakeMuseApi(
         else RecipeJson.reference("""{"id":"$id","name":"Reference","state":"ready","progress":100,"phase":"Done","recipe":${FakeRecipes.cafeTrendJson()}}""")
     }
 
+    // Recreate phases 2–3, demo mode (the Mac's FakeRecreateAPI): shots 1, 3 and 6 match the studio's takes, the others are
+    // to generate at $0.64 each. Nothing is held or charged: a filled shot reads generating on the next fill and ready on
+    // the one after (a demo job id), and apply returns a match without touching any edit.
+    private val recreateMade = HashMap<String, HashMap<String, Int>>()
+    private fun recreateSlots(id: String): List<String> {
+        if (id !in recreatePolls) throw ApiException("not_found", "Reference not found")
+        return FakeRecipes.cafeTrend().slots.map { it.id }
+    }
+    override suspend fun matchReference(id: String, modelId: String?) { lock.withLock { recreateSlots(id) } }
+    override suspend fun referenceFill(id: String): RecreateFill = lock.withLock {
+        val slots = recreateSlots(id)
+        val made = recreateMade.getOrPut(id) { HashMap() }
+        made.keys.forEach { made[it] = made.getValue(it) + 1 }
+        val videoTakes = takes.filter { it.kind == "take" }.map { it.id }
+        RecreateFill(id, slots.mapIndexed { i, s ->
+            val n = made[s]
+            when {
+                n != null && n >= 2 -> RecreateSlotFill(s, "ready", takeId = "t_rx_$s", jobId = "job_rx_$s", reason = "Generated for this shot")
+                n != null -> RecreateSlotFill(s, "generating", jobId = "job_rx_$s", estimate = RECREATE_PRICE)
+                i in listOf(0, 2, 5) && videoTakes.isNotEmpty() -> RecreateSlotFill(s, "matched", takeId = videoTakes[i % videoTakes.size],
+                    score = listOf(.82, .74, .79)[listOf(0, 2, 5).indexOf(i)], reason = listOf("Your take has the same push-in on a close-up", "Your take walks through a door in a wide shot", "Your take sits by a window, still")[listOf(0, 2, 5).indexOf(i)])
+                else -> RecreateSlotFill(s, "to_generate", estimate = RECREATE_PRICE, estimateLabel = RecreateText.money(RECREATE_PRICE))
+            }
+        })
+    }
+    override suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String?) = lock.withLock {
+        recreateSlots(id)
+        val slot = FakeRecipes.cafeTrend().slots.firstOrNull { it.id == slotId } ?: throw ApiException("not_found", "That shot is gone")
+        RecreateSlotEstimate(slotId, RECREATE_PRICE, maxOf(2.0, kotlin.math.ceil(slot.lengthSec)))
+    }
+    override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?) = lock.withLock {
+        recreateSlots(id)
+        val made = recreateMade.getOrPut(id) { HashMap() }
+        if (slotId in made) throw ApiException("already_filled", "This shot is already being made")
+        made[slotId] = 0
+        RecreateFillStart(slotId, "job_rx_$slotId")
+    }
+    override suspend fun applyRecipe(id: String, sessionId: String, baseRevision: Int?, slots: Map<String, String>) = lock.withLock {
+        val all = recreateSlots(id)
+        val made = recreateMade[id].orEmpty()
+        val waiting = slots.filter { (s, v) -> v.startsWith("job_rx_") && (made[s] ?: 0) < 2 }.keys.sorted()
+        val scores = listOf(.93, .81, .84, .77, .62, .88, .9)
+        RecreateApplyResult(sessionId, (baseRevision ?: 0) + 1, missing = all.filter { it !in slots }, waiting = waiting,
+            match = RecreateMatch(.86, .97, .9, .78, .84, .8, all.mapIndexed { i, s -> s to scores[i % scores.size] }.toMap()))
+    }
+
     override suspend fun uploadSuiteMedia(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit): SuiteMediaRef {
         onProgress(1f)
         val ext = name.substringAfterLast('.', if (mime.startsWith("audio/")) "m4a" else "mp4")
@@ -1485,6 +1538,8 @@ class FakeMuseApi(
     private fun uid() = UUID.randomUUID().toString().take(8)
 
     companion object {
+        /** Demo mode's price for a Recreate shot to generate (never charged). */
+        const val RECREATE_PRICE = 0.64
         /** `request.engine` of an Upscale job (the server's). */
         const val UPSCALE_ENGINE = "upscale"
         /** The prompt identity; names her Identity LoRA when it's trained and switched on. */

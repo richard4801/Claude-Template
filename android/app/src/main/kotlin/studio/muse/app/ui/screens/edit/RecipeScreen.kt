@@ -46,6 +46,9 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.graphics.asImageBitmap
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.components.Bar
 import studio.muse.app.ui.components.T
@@ -69,7 +72,8 @@ sealed interface RecipePhase {
     /** Nothing picked yet. */
     data object Pick : RecipePhase
     data class Analysing(val progress: Float, val step: String) : RecipePhase
-    data class Ready(val recipe: Recipe) : RecipePhase
+    /** [referenceId]: the server's reference, for building your version (phases 2–3); null for a recipe shown alone. */
+    data class Ready(val recipe: Recipe, val referenceId: String? = null) : RecipePhase
     /** [fromLink]: a link couldn't be used; the saved file is offered instead. */
     data class Failed(val message: String, val fromLink: Boolean = false) : RecipePhase
 }
@@ -78,7 +82,7 @@ data class RecipeUi(val phase: RecipePhase = RecipePhase.Pick, val referenceName
 
 /** The screen: the picker, the upload and the server's analysis, then the recipe. */
 @Composable
-fun RecipeScreen(onBack: () -> Unit, referenceId: String? = null, shared: studio.muse.app.data.SharedReference? = null) {
+fun RecipeScreen(onBack: () -> Unit, referenceId: String? = null, shared: studio.muse.app.data.SharedReference? = null, onOpenTake: (String) -> Unit = {}) {
     val c = LocalContainer.current
     val context = androidx.compose.ui.platform.LocalContext.current
     var ui by remember { mutableStateOf(RecipeUi()) }
@@ -90,7 +94,7 @@ fun RecipeScreen(onBack: () -> Unit, referenceId: String? = null, shared: studio
         val rid = referenceId ?: return@LaunchedEffect
         ui = RecipeUi(RecipePhase.Analysing(.5f, "Opening the reference"), null)
         ui = runCatching { c.repo.api.reference(rid) }.fold(
-            { ref -> ref.recipe?.let { RecipeUi(RecipePhase.Ready(it), ref.name) } ?: RecipeUi(RecipePhase.Failed(ref.error ?: "This reference has expired."), ref.name) },
+            { ref -> ref.recipe?.let { RecipeUi(RecipePhase.Ready(it, ref.id), ref.name) } ?: RecipeUi(RecipePhase.Failed(ref.error ?: "This reference has expired."), ref.name) },
             { e -> RecipeUi(RecipePhase.Failed(e.message ?: "Couldn't open the reference"), null) })
     }
     // Share → MUSE: a link. The server fetches it within the platforms' rules; when it can't, its message says why and the
@@ -124,7 +128,39 @@ fun RecipeScreen(onBack: () -> Unit, referenceId: String? = null, shared: studio
             RecipeUi(RecipePhase.Failed(e.message?.takeIf { it.isNotBlank() } ?: "Couldn't read that video · try another"), name)
         }
     }
-    RecipeContent(ui, onBack = onBack, onPick = { pick.launch("video/*") })
+    val ready = ui.phase as? RecipePhase.Ready
+    if (ready?.referenceId != null) RecreateBuild(ready.referenceId, ready.recipe, ui.referenceName, onBack, onOpenTake)
+    else RecipeContent(ui, onBack = onBack, onPick = { pick.launch("video/*") })
+}
+
+/**
+ * Phases 2–3 on a ready reference: Recipe (how each shot is made, the total beside Build) and Compare. The model runs
+ * match → estimate → one confirmation → fill → watch → apply (see [RecreateBuildModel]); demo mode runs it on FakeMuseApi,
+ * which never spends.
+ */
+@Composable
+private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, onBack: () -> Unit, onOpenTake: (String) -> Unit) {
+    val c = LocalContainer.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val model = remember(referenceId) {
+        val state = c.repo.state.value
+        val takes = state.takes.filter { it.kind == "take" }.sortedByDescending { it.createdAt }.take(12)
+            .map { RecreateTakeChoice(it.id, it.title, it.durationSec, it.thumb, it.label) }
+        RecreateBuildModel(c.repo.api, scope, RecreateBuildUi(referenceId, recipe, name, takes = takes), modelId = { c.repo.state.value.models.firstOrNull()?.id })
+    }
+    val ui by model.ui.collectAsState()
+    var poster by remember(referenceId) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    LaunchedEffect(referenceId) {
+        if (!c.repo.demo) poster = c.repo.api.referencePoster(referenceId)?.let { b -> android.graphics.BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }
+        model.load()
+    }
+    LaunchedEffect(ui.message) { ui.message?.let { c.repo.toast(it); model.consumeMessage() } }
+    RecreateBuildScreen(ui, RecreateActions(
+        onBack = onBack, onMode = model::setMode, onSelect = model::select,
+        onBuild = { scope.launch { model.requestBuild() } }, onConfirm = { model.confirmBuild() }, onCancel = model::cancelBuild,
+        onUseTake = model::useTake, onFix = model::fixWeakest,
+        onOpenEditor = { ui.builtTakeId?.let(onOpenTake) ?: c.repo.toast("The built edit opens with its take in the editor") },
+    ), picture = poster)
 }
 
 /** Polls a reference (showing the server's step) until it is ready or failed. */
@@ -136,7 +172,7 @@ private suspend fun follow(api: studio.muse.app.data.MuseApi, start: studio.muse
         ref = api.reference(ref.id)
     }
     val recipe = ref.recipe
-    return if (ref.state == "ready" && recipe != null) RecipeUi(RecipePhase.Ready(recipe), ref.name)
+    return if (ref.state == "ready" && recipe != null) RecipeUi(RecipePhase.Ready(recipe, ref.id), ref.name)
     else RecipeUi(RecipePhase.Failed(ref.error ?: if (ref.state == "expired") "This reference has expired." else "The analysis didn’t finish.", fromLink = ref.error?.contains("link", true) == true), ref.name)
 }
 

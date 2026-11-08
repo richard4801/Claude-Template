@@ -35,6 +35,8 @@ data class RecipeSlot(
     val confidence: Double = 1.0,
     /** The body pose was read (keypoints only, never the reference's pixels): it guides a generated shot. */
     val poseRead: Boolean = false,
+    /** The server's slot id ("s1"), for the fill, estimate and apply calls (phases 2–3). */
+    val id: String = "",
 ) {
     val lengthSec: Double get() = (endSec - startSec).coerceAtLeast(0.0)
 }
@@ -92,6 +94,8 @@ data class Recipe(
     val summary: String? = null,
     /** What MUSE can't recreate yet ("Body poses · Not read yet"). */
     val gaps: List<RecipeGap> = emptyList(),
+    /** The reference's shape ("9:16"), when known. */
+    val aspect: String? = null,
 ) {
     /** The cut points between shots. */
     val cuts: List<Double> get() = slots.drop(1).map { it.startSec }
@@ -169,6 +173,7 @@ object RecipeJson {
             },
             summary = o.str("summary"),
             gaps = o.arr("gaps").mapNotNull { (it as? JsonObject)?.let { g -> g.str("what")?.let { w -> RecipeGap(w, g.str("note"), g.num("atSec")) } } },
+            aspect = o.obj("source")?.str("aspect"),
         )
     }
 
@@ -189,6 +194,7 @@ object RecipeJson {
             transform = if (shake || motion == "shake") "Shake" else null,
             confidence = num("confidence") ?: 1.0,
             poseRead = obj("pose")?.str("status") == "done",
+            id = str("id") ?: "",
         )
     }
 

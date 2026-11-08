@@ -198,6 +198,11 @@ interface MuseService {
     // Recreate this edit (workstream 1): read as JSON, then studio.muse.core.edit.RecipeJson.
     @POST("v1/recreate/references") suspend fun createReference(@Body r: JsonObject): JsonObject
     @GET("v1/recreate/references/{id}") suspend fun reference(@Path("id") id: String): JsonObject
+    @POST("v1/recreate/references/{id}/match") suspend fun matchReference(@Path("id") id: String, @Body r: JsonObject): JsonObject
+    @GET("v1/recreate/references/{id}/fill") suspend fun referenceFill(@Path("id") id: String): JsonObject
+    @POST("v1/recreate/references/{id}/slots/{slot}/estimate") suspend fun estimateReferenceSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: JsonObject): JsonObject
+    @POST("v1/recreate/references/{id}/slots/{slot}/fill") suspend fun fillReferenceSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: JsonObject): JsonObject
+    @POST("v1/recreate/references/{id}/apply") suspend fun applyRecipe(@Path("id") id: String, @Body r: JsonObject): JsonObject
     @PATCH("v1/models/{id}") suspend fun patchModelJson(@Path("id") id: String, @Body r: JsonObject): Model
     @GET("v1/suite/feed") suspend fun suiteFeed(@QueryMap q: Map<String, String>): SuiteFeedPage
     // AI suite · Photo tool (workstream 3)
@@ -472,6 +477,28 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         createReference(buildJsonObject { put("uploadId", kotlinx.serialization.json.JsonPrimitive(uploadId)); if (name != null) put("name", kotlinx.serialization.json.JsonPrimitive(name.take(80))) })
     })
     override suspend fun reference(id: String) = studio.muse.core.edit.RecipeJson.reference(call { reference(id) })
+    // Recreate phases 2–3: ids are checked before they reach a URL (rx_…, s1…).
+    private fun rx(id: String) = id.also { require(Regex("^rx_[A-Za-z0-9_]{1,64}$").matches(it)) { "That isn't a reference" } }
+    private fun shotId(id: String) = id.also { require(Regex("^s[0-9]{1,4}$").matches(it)) { "That isn't a shot of the reference" } }
+    private fun slotBody(modelId: String, quality: String?) = buildJsonObject {
+        put("modelId", kotlinx.serialization.json.JsonPrimitive(modelId)); if (quality != null) put("quality", kotlinx.serialization.json.JsonPrimitive(quality))
+    }
+    override suspend fun matchReference(id: String, modelId: String?) {
+        call { matchReference(rx(id), buildJsonObject { if (modelId != null) put("modelId", kotlinx.serialization.json.JsonPrimitive(modelId)) }) }
+    }
+    override suspend fun referenceFill(id: String) = studio.muse.core.edit.RecreateJson.fill(call { referenceFill(rx(id)) })
+    override suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String?) =
+        studio.muse.core.edit.RecreateJson.estimate(call { estimateReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality)) })
+    override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?) =
+        studio.muse.core.edit.RecreateJson.fillStart(call { fillReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality)) })
+    override suspend fun applyRecipe(id: String, sessionId: String, baseRevision: Int?, slots: Map<String, String>) = studio.muse.core.edit.RecreateJson.apply(call {
+        applyRecipe(rx(id), buildJsonObject {
+            put("sessionId", kotlinx.serialization.json.JsonPrimitive(sessionId))
+            if (baseRevision != null) put("baseRevision", kotlinx.serialization.json.JsonPrimitive(baseRevision))
+            put("slots", buildJsonObject { slots.forEach { (k, v) -> put(k, kotlinx.serialization.json.JsonPrimitive(v)) } })
+            put("device", kotlinx.serialization.json.JsonPrimitive("android"))
+        })
+    })
     override suspend fun createReferenceFromLink(url: String, name: String?) = studio.muse.core.edit.RecipeJson.reference(call {
         createReference(buildJsonObject { put("url", kotlinx.serialization.json.JsonPrimitive(url)); if (name != null) put("name", kotlinx.serialization.json.JsonPrimitive(name.take(80))) })
     })
