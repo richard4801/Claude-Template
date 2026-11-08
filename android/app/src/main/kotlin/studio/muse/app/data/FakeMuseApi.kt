@@ -782,6 +782,7 @@ class FakeMuseApi(
         t
     }
 
+    override suspend fun uploadClipFile(file: java.io.File, onProgress: (Float) -> Unit): String { onProgress(1f); return "up_clip_${++editorSeq}" } // WS7
     override suspend fun uploadEditorFile(file: java.io.File, contentType: String, purpose: String?, onProgress: (Float) -> Unit): String { onProgress(1f); return "up_${purpose ?: "audio"}_${++editorSeq}" }
 
     // ---- Edit sessions (workstream 3): in memory, with the server's revision checks (plans/api.md "Edit sessions").

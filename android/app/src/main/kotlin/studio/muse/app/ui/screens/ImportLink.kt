@@ -105,7 +105,7 @@ fun ImportLinkDialog(purpose: ImportPurpose, link: String? = null, onClose: () -
 }
 
 /** Codes that mean "the video couldn't be fetched" (as opposed to "this link breaks a rule"). */
-private val FETCH_FAILED = setOf("fetch_failed", "link_fetch_failed", "offline", "provider_unreachable", "unsupported")
+private val FETCH_FAILED = setOf("fetch_failed", "link_fetch_failed", "link_blocked", "link_private", "link_downloads_off", "offline", "provider_unreachable")
 
 /** [ImportLinkDialog]'s content, without the window (screenshot tests render this). */
 @Composable

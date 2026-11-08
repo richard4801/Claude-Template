@@ -489,6 +489,13 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         val req = TakeVersionV2Request(p.uploadId, thumbId, project, video.durationSec, video.width, video.height, video.fps, name = versionName(name))
         return call { createVersionV2(takeId, req) }.abs().also { onProgress(1f) }
     }
+    // WS7: import from link: the phone's file as a clip upload (the import confirms it).
+    override suspend fun uploadClipFile(file: java.io.File, onProgress: (Float) -> Unit): String {
+        val p = call { presign(PresignRequest("clip", "video/mp4", file.length())) }
+        putToStorage(p, FileProgressBody(file, "video/mp4".toMediaType(), onProgress))
+        return p.uploadId
+    }
+
     override suspend fun uploadEditorFile(file: java.io.File, contentType: String, purpose: String?, onProgress: (Float) -> Unit): String {
         val p = call { editorPresign(EditorPresignRequest(contentType, file.length(), purpose)) }
         putToStorage(p, FileProgressBody(file, contentType.toMediaType(), onProgress))

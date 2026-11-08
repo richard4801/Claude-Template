@@ -219,13 +219,10 @@ fun SourceScreen() {
     var importing by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     if (importing) ImportLinkDialog(ImportPurpose.SWAP, onClose = { importing = false }, onPickFile = { importing = false; pickVideo() }) { v ->
         importing = false
-        val id = v.clipId
-        if (id == null) c.repo.toast("This studio server can't use an imported video for a swap yet")
-        else {
-            vm.edit { it.copy(clip = studio.muse.app.data.Clip(id, v.name, v.durationSec, v.width ?: 1080, v.height ?: 1920, 30, emptyList(), v.thumb)) }
-            c.suite.recast.update { it.copy(clipId = id) }
-            nav.back()
-        }
+        // An import is a clip (WS12): its id is the swap's source.
+        vm.edit { it.copy(clip = v.asClip()) }
+        c.suite.recast.update { it.copy(clipId = v.clipId) }
+        nav.back()
     }
     ScreenBox {
         Column(Modifier.fillMaxSize()) {

@@ -39,7 +39,7 @@ class ImportLinkScreenshotTest(private val theme: String, private val state: Str
     @get:Rule val compose = createComposeRule()
 
     @Test fun capture() {
-        val video = ImportedVideo("imp_1", "Rooftop dance at sunset", "https://www.tiktok.com/@a/video/1", "tiktok", 9.4, 1080, 1920, ImageRef.asset("g_front"), clipId = "clip_1")
+        val video = ImportedVideo("imp_1", "Rooftop dance at sunset", 9.4, 1080, 1920, sourceUrl = "https://www.tiktok.com/@a/video/1", platform = "tiktok", demoThumb = ImageRef.asset("g_front"))
         val (purpose, phase) = when (state) {
             "enter" -> ImportPurpose.LIBRARY to ImportPhase.Enter
             "working" -> ImportPurpose.SWAP to ImportPhase.Working(.12f, "Uploading the video")

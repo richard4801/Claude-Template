@@ -84,12 +84,12 @@ class LinkPipelineTest {
         val api = FakeMuseApi(MainScope(), null, speed = 0.0, genDelayMs = 0)
         val url = "https://www.instagram.com/reel/abc"
         val v = importFromLink(api, null, url, "Rooftop dance", tmp.root)
-        assertEquals("Rooftop dance", v.name); assertEquals(url, v.sourceUrl); assertTrue(v.clipId != null)
+        assertEquals("Rooftop dance", v.name); assertEquals(url, v.sourceUrl); assertEquals(v.id, v.asClip().id)
         // The same link again: already imported, nothing fetched.
-        assertEquals(v.id, importFromLink(api, null, url, null, tmp.root).id)
+        importFromLink(api, null, url, null, tmp.root).let { again -> assertEquals(v.id, again.id); assertTrue(again.cached) }
         // Strict link rules: another site is refused with the reason.
         try { importFromLink(api, null, "https://example.com/v.mp4", null, tmp.root); fail() } catch (e: ApiException) { assertEquals("link_unsupported", e.code) }
         // The server can't get it either: the error says to pick the saved video.
-        try { importFromLink(api, null, "https://www.tiktok.com/@blocked/video/2", null, tmp.root); fail() } catch (e: ApiException) { assertEquals("fetch_failed", e.code) }
+        try { importFromLink(api, null, "https://www.tiktok.com/@blocked/video/2", null, tmp.root); fail() } catch (e: ApiException) { assertEquals("link_blocked", e.code) }
     }
 }

@@ -24,42 +24,83 @@ data class LinkCheckResult(
     val allowed: Boolean = false,
     val url: String = "",
     val platform: String? = null,
+    val purpose: String? = null,
     val code: String? = null,
     val reason: String? = null,
     val cached: ImportedVideo? = null,
 )
 
-/** GET /v1/links/settings: the owner's link rules, which the phone applies to its own fetch too. */
+/** A purpose's own caps (Recreate references: 60 s, 80 MB). */
+@Serializable
+data class LinkCaps(val maxSec: Int = 60, val maxMb: Int = 80)
+
+/**
+ * GET /v1/links/settings: the owner's link rules, which the phone applies to its own fetch too. The top-level caps are
+ * for imports (30 s, 150 MB); [reference] are Recreate's. The toggle is PATCH /v1/recreate/settings {strictLinks}.
+ */
 @Serializable
 data class LinkSettings(
     val strictLinks: Boolean = true,
+    /** The platforms links may come from, or ["any"]. */
+    val platforms: List<String> = emptyList(),
     /** "refuse" | "allow": TikTok videos whose owner turned downloads off. */
     val tiktokDownloadsOff: String = "refuse",
-    val maxSec: Int = 60,
-    val maxMb: Int = 80,
-    val platforms: List<String> = emptyList(),
+    val maxSec: Int = 30,
+    val maxMb: Int = 150,
+    /** The server can fetch links itself (the fallback). */
+    val serverFetch: Boolean = true,
+    val cookies: Boolean = false,
+    val canEdit: Boolean = false,
+    val reference: LinkCaps = LinkCaps(),
 )
 
-/** POST /v1/imports. [uploadId] null = the server fetches [sourceUrl] itself (the phone couldn't). */
+/** POST /v1/imports from the phone's upload (PUT, no confirm). */
 @Serializable
-data class ImportRequest(val uploadId: String? = null, val sourceUrl: String, val name: String? = null)
+data class ImportUpload(val uploadId: String, val sourceUrl: String? = null, val name: String? = null)
 
-/** An imported video in the studio's library: usable as Swap's source ([clipId]) and in Edit. */
+/** POST /v1/imports, the server's own fetch (synchronous, about 2 min): codes link_private, link_downloads_off, link_blocked. */
+@Serializable
+data class ImportFetch(val url: String, val name: String? = null)
+
+@Serializable
+data class ImportRename(val name: String)
+
+/**
+ * An imported video (WS12): it IS a clip. [id] is the clip id for Character swap / Recast; [videoKey] is a Suite
+ * reference video ({key}); [uploadId] is the editor's media. Its first frame is [posterUrl].
+ */
 @Serializable
 data class ImportedVideo(
     val id: String,
     val name: String = "",
+    val durationSec: Double = 0.0,
+    val width: Int = 0,
+    val height: Int = 0,
+    val fps: Int = 30,
+    val checks: List<ClipCheck> = emptyList(),
+    val audio: ClipAudio? = null,
+    val source: String = "import",
     val sourceUrl: String? = null,
     val platform: String? = null,
-    val durationSec: Double = 0.0,
-    val width: Int? = null,
-    val height: Int? = null,
-    val thumb: ImageRef? = null,
+    val bytes: Long = 0,
+    val posterUrl: String? = null,
     val videoUrl: String? = null,
-    /** The same video as a source clip (Character swap / Recast take a clip). */
-    val clipId: String? = null,
+    val videoKey: String? = null,
+    val uploadId: String? = null,
+    val createdBy: String? = null,
     val createdAt: Long = 0,
-)
+    /** True when links/check found it already imported (no download). */
+    val cached: Boolean = false,
+    /** The demo's bundled frame (no poster URL in demo mode). */
+    val demoThumb: ImageRef? = null,
+) {
+    /** The clip id for Character swap / Recast. */
+    val clipId: String get() = id
+    val thumb: ImageRef? get() = demoThumb ?: posterUrl?.let { ImageRef(url = it) }
+
+    /** The same video as a clip (Swap's source, the composer's clip card). */
+    fun asClip() = Clip(id, name, durationSec, width.takeIf { it > 0 } ?: 1080, height.takeIf { it > 0 } ?: 1920, fps, checks, thumb, audio)
+}
 
 @Serializable
 data class ImportedVideos(val imports: List<ImportedVideo> = emptyList())
@@ -67,16 +108,26 @@ data class ImportedVideos(val imports: List<ImportedVideo> = emptyList())
 interface ImportsApi {
     suspend fun check(url: String): LinkCheckResult
     suspend fun settings(): LinkSettings
-    suspend fun create(req: ImportRequest): ImportedVideo
+    /** From the phone's clip upload. 400 too_long, 422 link_too_big / link_unsupported, 409 upload_used / upload_missing. */
+    suspend fun fromUpload(req: ImportUpload): ImportedVideo
+    /** The server fetches the link itself. */
+    suspend fun fromLink(req: ImportFetch): ImportedVideo
+    /** Members: their own; the owner: the studio's. */
     suspend fun list(): List<ImportedVideo>
+    suspend fun rename(id: String, name: String): ImportedVideo
+    /** 409 import_in_use. */
+    suspend fun delete(id: String)
 
     /** Servers without imports (the caller says "This studio server can't import links yet"). */
     object Unsupported : ImportsApi {
         private fun no(): Nothing = throw ApiException("unsupported", "This studio server can't import links yet")
         override suspend fun check(url: String) = no()
         override suspend fun settings() = no()
-        override suspend fun create(req: ImportRequest) = no()
+        override suspend fun fromUpload(req: ImportUpload) = no()
+        override suspend fun fromLink(req: ImportFetch) = no()
         override suspend fun list() = no()
+        override suspend fun rename(id: String, name: String) = no()
+        override suspend fun delete(id: String) = no()
     }
 }
 
@@ -84,26 +135,40 @@ class HttpImportsApi(baseUrl: String, private val client: OkHttpClient, private 
     private val base = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
     private val jsonType = "application/json".toMediaType()
 
-    private suspend fun <T> send(method: String, path: String, body: String?, out: KSerializer<T>): T = withContext(Dispatchers.IO) {
-        val rb = body?.toRequestBody(jsonType) ?: if (method == "POST") "{}".toRequestBody(jsonType) else null
-        val res = try { client.newCall(Request.Builder().url(base + path).method(method, rb).build()).execute() }
+    private suspend fun text(method: String, path: String, body: String?): String = withContext(Dispatchers.IO) {
+        val rb = body?.toRequestBody(jsonType) ?: if (method == "POST" || method == "PATCH") "{}".toRequestBody(jsonType) else null
+        // The server's own fetch takes up to about 2 minutes.
+        val c = if (path == "v1/imports" && method == "POST") client.newBuilder().readTimeout(150, java.util.concurrent.TimeUnit.SECONDS).build() else client
+        val res = try { c.newCall(Request.Builder().url(base + path).method(method, rb).build()).execute() }
             catch (e: java.io.IOException) { throw ApiException("offline", "Can't reach the server at $base") }
         res.use { r ->
-            val text = r.body.string()
+            val t = r.body.string()
             if (!r.isSuccessful) {
-                val err = runCatching { json.decodeFromString(ErrorBody.serializer(), text) }.getOrNull()
+                val err = runCatching { json.decodeFromString(ErrorBody.serializer(), t) }.getOrNull()
                 throw ApiException(err?.code ?: if (r.code == 404) "unsupported" else "http_${r.code}", err?.error ?: if (r.code == 404) "This studio server can't import links yet" else "Server error ${r.code}")
             }
-            try { json.decodeFromString(out, text) } catch (e: kotlinx.serialization.SerializationException) {
-                throw ApiException("bad_response", "The server sent something this app version can't read")
-            }
+            t
+        }
+    }
+
+    private suspend fun <T> send(method: String, path: String, body: String?, out: KSerializer<T>): T = text(method, path, body).let { t ->
+        try { json.decodeFromString(out, t) } catch (e: kotlinx.serialization.SerializationException) {
+            throw ApiException("bad_response", "The server sent something this app version can't read")
         }
     }
 
     override suspend fun check(url: String) = send("POST", "v1/links/check", json.encodeToString(LinkCheckRequest.serializer(), LinkCheckRequest(url)), LinkCheckResult.serializer())
     override suspend fun settings() = send("GET", "v1/links/settings", null, LinkSettings.serializer())
-    override suspend fun create(req: ImportRequest) = send("POST", "v1/imports", json.encodeToString(ImportRequest.serializer(), req), ImportedVideo.serializer())
-    override suspend fun list() = send("GET", "v1/imports", null, ImportedVideos.serializer()).imports
+    override suspend fun fromUpload(req: ImportUpload) = send("POST", "v1/imports", json.encodeToString(ImportUpload.serializer(), req), ImportedVideo.serializer())
+    override suspend fun fromLink(req: ImportFetch) = send("POST", "v1/imports", json.encodeToString(ImportFetch.serializer(), req), ImportedVideo.serializer())
+    override suspend fun list(): List<ImportedVideo> {
+        // A bare list or {imports: [...]}: both read.
+        val t = text("GET", "v1/imports", null)
+        return runCatching { json.decodeFromString(kotlinx.serialization.builtins.ListSerializer(ImportedVideo.serializer()), t) }
+            .getOrElse { runCatching { json.decodeFromString(ImportedVideos.serializer(), t).imports }.getOrElse { throw ApiException("bad_response", "The server sent something this app version can't read") } }
+    }
+    override suspend fun rename(id: String, name: String) = send("PATCH", "v1/imports/$id", json.encodeToString(ImportRename.serializer(), ImportRename(name)), ImportedVideo.serializer())
+    override suspend fun delete(id: String) { text("DELETE", "v1/imports/$id", null) }
 }
 
 /**
@@ -122,21 +187,29 @@ class FakeImportsApi(private val now: () -> Long) : ImportsApi {
         if (!u.startsWith("http")) return LinkCheckResult(false, u, code = "link_invalid", reason = "Paste a link that starts with https://")
         val p = platformOf(u)
         if (p == null && strict) return LinkCheckResult(false, u, code = "link_unsupported", reason = "Paste a TikTok, Instagram Reel or YouTube link")
-        return LinkCheckResult(true, u, p ?: "other", cached = made.firstOrNull { it.sourceUrl == u })
+        return LinkCheckResult(true, u, p ?: "other", "import", cached = made.firstOrNull { it.sourceUrl == u }?.copy(cached = true))
     }
 
-    override suspend fun settings() = LinkSettings(strictLinks = strict, tiktokDownloadsOff = if (strict) "refuse" else "allow")
+    override suspend fun settings() = LinkSettings(strictLinks = strict, platforms = if (strict) listOf("tiktok", "instagram", "youtube") else listOf("any"),
+        tiktokDownloadsOff = if (strict) "refuse" else "allow")
 
-    override suspend fun create(req: ImportRequest): ImportedVideo {
-        if (req.uploadId == null && "blocked" in req.sourceUrl) throw ApiException("fetch_failed", "The studio server couldn't get this video. Save it to your phone and pick it instead.")
+    private fun make(url: String?, name: String?, uploadId: String?): ImportedVideo {
         val n = made.size + 1
-        val v = ImportedVideo("imp_$n", req.name?.ifBlank { null } ?: "Imported video $n", req.sourceUrl, platformOf(req.sourceUrl), 9.4, 1080, 1920,
-            ImageRef.asset("g_front"), null, clipId = SampleData.SAMPLE_CLIP, createdAt = now())
-        made += v
-        return v
+        return ImportedVideo("imp_$n", name?.ifBlank { null } ?: "Imported video $n", 9.4, 1080, 1920, 30, sourceUrl = url, platform = url?.let(::platformOf),
+            bytes = 4_200_000, uploadId = uploadId, createdAt = now(), demoThumb = ImageRef.asset("g_front")).also { made += it }
     }
 
+    override suspend fun fromUpload(req: ImportUpload) = make(req.sourceUrl, req.name, req.uploadId)
+    override suspend fun fromLink(req: ImportFetch): ImportedVideo {
+        if ("blocked" in req.url) throw ApiException("link_blocked", "The site blocked the studio server. Save the video to your phone and pick it instead.")
+        return make(req.url, req.name, null)
+    }
     override suspend fun list() = made.toList()
+    override suspend fun rename(id: String, name: String): ImportedVideo {
+        val i = made.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: throw ApiException("not_found", "That import was deleted")
+        made[i] = made[i].copy(name = name.trim()); return made[i]
+    }
+    override suspend fun delete(id: String) { made.removeAll { it.id == id } }
 }
 
 /**
@@ -151,10 +224,11 @@ suspend fun importFromLink(
     url, name, fetcher, cacheDir,
     studio.muse.app.platform.LinkSteps(
         check = { u -> api.imports.check(u).let { c -> studio.muse.app.platform.LinkCheck(c.allowed, c.url.ifBlank { u }, c.platform, c.cached, c.code, c.reason) } },
+        // The import caps (30 s, 150 MB), not Recreate's.
         rules = { api.imports.settings().let { s -> studio.muse.app.platform.LinkRules(s.strictLinks, s.tiktokDownloadsOff == "refuse", s.maxSec, s.maxMb) } },
-        upload = { f, p -> api.uploadEditorFile(f, "video/mp4", "import", p) },
-        finish = { id, u, title -> api.imports.create(ImportRequest(id, u, title)) },
-        serverFetch = { u, title -> api.imports.create(ImportRequest(null, u, title)) },
+        upload = { f, p -> api.uploadClipFile(f, p) },
+        finish = { id, u, title -> api.imports.fromUpload(ImportUpload(id, u, title)) },
+        serverFetch = { u, title -> api.imports.fromLink(ImportFetch(u, title)) },
     ),
     onUploaded, onStep,
 )
