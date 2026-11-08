@@ -174,30 +174,39 @@ extension SnapshotRunner {
     /// It explores as panels appear (a tab press reveals its panel), works inside sheets and closes them, and comes back if a
     /// control leaves the editor. Each control is logged before it is used. Skipped on purpose (logged as SKIP): controls
     /// that open a blocking system panel (file import, the save panel behind the sheet's Export, the microphone) and menus.
+    /// The editor's own close button: present exactly while the editor is open.
+    static let editorMarker = "Close the editor"
+
     static func controlsCheck(_ store: AppStore, takeId: String, note: (String) -> Void) async {
         note("START controls \(takeId)")
         let ax = AXWalker()
         note("AX trusted \(AXIsProcessTrusted())")
+        // The app's own chrome (sidebar, title bar, theme switcher) is not the Edit suite: what's there before the editor opens
+        // is skipped, so the walk stays inside Edit.
+        store.openEdit(takeId: nil)
+        try? await Task.sleep(for: .seconds(1.5))
+        let chrome = Set(await ax.controls().controls.map(\.key))
+        note("CHROME \(chrome.count) controls outside the editor are skipped")
         store.openEdit(takeId: takeId)
         var ready = false
         for _ in 0..<50 {
             try? await Task.sleep(for: .seconds(0.5))
-            let found = await ax.find("Timeline ruler")
+            let found = await ax.find(editorMarker)
             if store.screen == .edit, found { ready = true; break }
         }
         capture(SnapshotRunner.dir!.appendingPathComponent("mac_edit_controls_start.png"))
         let st = await ax.stats()
         note("AX nodes \(st.nodes), actionable \(st.actionable), error \(st.error), screen \(store.screen), sample: \(st.sample)")
-        guard ready else { note("FAIL controls: the editor (its Timeline ruler) never appeared to accessibility on \(takeId)"); return }
+        guard ready else { note("FAIL controls: the editor (\(editorMarker)) never appeared to accessibility on \(takeId)"); return }
         let deny: Set<String> = ["Import", ".cube import", "Import music", "Import sound", "Record a voice-over", "Stop recording the voice-over", "Record VO",
-                                 "Back", "Close editor", "Translate…"]
+                                 "Back", "Close the editor", "Translate…"]
         let denyInSheet: Set<String> = ["Export", "Save to Library"]
         let closers = ["Close", "Cancel", "Use the latest", "Keep this device's changes", "Done"]
         var used = Set<String>(), skipped = Set<String>(), left = Set<String>()
         var presses = 0, nudges = 0
         func inEditor() async -> Bool {
             guard store.screen == .edit else { return false }
-            return await ax.find("Timeline ruler")
+            return await ax.find(editorMarker)
         }
         for _ in 0..<700 {
             let scan = await ax.controls()
@@ -205,7 +214,7 @@ extension SnapshotRunner {
             var pick: AXWalker.Control?
             for c in scan.controls {
                 let key = (inSheet ? "sheet:" : "") + c.key
-                if used.contains(key) || skipped.contains(c.key) || left.contains(c.key) { continue }
+                if used.contains(key) || skipped.contains(c.key) || left.contains(c.key) || (!inSheet && chrome.contains(c.key)) { continue }
                 if deny.contains(c.label) || (inSheet && denyInSheet.contains(c.label)) || c.isMenu {
                     skipped.insert(c.key)
                     note("SKIP \(c.role) \(c.label)")
@@ -313,7 +322,7 @@ final class AXWalker: @unchecked Sendable {
             var found = false
             walk(r, 0) { e in
                 if found { return false }
-                if string(e, kAXDescriptionAttribute) == label { found = true; return false }
+                if string(e, kAXDescriptionAttribute) == label || string(e, kAXTitleAttribute) == label { found = true; return false }
                 return true
             }
             return found
