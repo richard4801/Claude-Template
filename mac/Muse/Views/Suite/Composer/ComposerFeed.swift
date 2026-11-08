@@ -20,11 +20,13 @@ struct ComposerFeed: View {
     private var refreshKey: String {
         let s = store.suite
         let settled = store.jobs.filter { $0.isDone || $0.isFailed }.count
-        return "\(photo)-\(s.feedFilter.rawValue)-\(s.feedTool ?? "")-\(s.feedModel ?? "")-\(store.jobs.count)-\(settled)-\(store.takes.count)-\(store.serverKey)"
+        return "\(photo)-\(s.feedFilter.rawValue)-\(s.feedTool ?? "")-\(s.feedModel ?? "")-\(s.feedCollection ?? "")-\(store.jobs.count)-\(settled)-\(store.takes.count)-\(store.serverKey)"
     }
 
     /// No filter beyond this composer's own tools.
-    private var unfiltered: Bool { store.suite.feedFilter == .all && store.suite.feedTool == nil && store.suite.feedModel == nil }
+    private var unfiltered: Bool {
+        store.suite.feedFilter == .all && store.suite.feedTool == nil && store.suite.feedModel == nil && store.suite.feedCollection == nil
+    }
 
     /// The feed's cards; with no filter and nothing listed (takes made before the feed, the demo) the Suite takes the
     /// app already has, so the feed never contradicts the picture.
@@ -46,10 +48,11 @@ struct ComposerFeed: View {
         ZStack {
             VStack(alignment: .leading, spacing: Space.s3) {
                 header
-                if list.isEmpty {
+                if list.isEmpty && store.suite.queued.isEmpty {
                     empty
                 } else {
                     ScrollView(.vertical) {
+                        if !store.suite.queued.isEmpty { FeedQueuedGroup().padding(.bottom, Space.s2) }
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: photo ? 140 : 180), spacing: Space.s3)], alignment: .leading, spacing: Space.s3) {
                             ForEach(list) { item in
                                 card(item)
@@ -74,8 +77,21 @@ struct ComposerFeed: View {
             if Task.isCancelled { return }
             await store.loadFeed(photo: photo)
         }
+        .task(id: store.serverKey) { await store.loadCollections() }
         .onDisappear { store.suite.viewerTakeId = nil }
+        // Run on a queued shot: today's price, confirmed before anything is held.
+        .alert(runTitle, isPresented: Binding(get: { store.suite.runAsk != nil }, set: { if !$0 { store.suite.runAsk = nil } }), presenting: store.suite.runAsk) { ask in
+            Button("Run · \(Pricing.money(ask.item.estimate))") { store.confirmRunQueued() }
+                .keyboardShortcut(.defaultAction)
+            Button("Keep queued", role: .cancel) { store.suite.runAsk = nil }
+        } message: { ask in
+            Text(ask.changed
+                 ? "The price changed since you queued it. It's \(Pricing.money(ask.item.estimate)) now, held from the studio's balance when it starts."
+                 : "\(Pricing.money(ask.item.estimate)) is held from the studio's balance when it starts, and a take that fails is refunded.")
+        }
     }
+
+    private var runTitle: String { store.suite.runAsk.map { "Run \($0.item.title)?" } ?? "" }
 
     /// "Takes", then the tool and model filters and the status filter. Narrow: the status filter becomes one "All ▾".
     private var header: some View {
@@ -107,6 +123,10 @@ struct ComposerFeed: View {
         if !models.isEmpty {
             FeedScopeMenu(title: "Model", allLabel: "All models", options: models, selected: store.suite.feedModel) { store.suite.feedModel = $0 }
         }
+        if !store.library.collections.isEmpty {
+            FeedScopeMenu(title: "Collection", allLabel: "All takes", options: store.library.collections.map { ($0.id, $0.name) },
+                          selected: store.suite.feedCollection) { store.suite.feedCollection = $0 }
+        }
     }
 
     /// What this is, plus three presets to start from (the prompt is right there too).
@@ -119,6 +139,7 @@ struct ComposerFeed: View {
                     store.suite.feedFilter = .all
                     store.suite.feedTool = nil
                     store.suite.feedModel = nil
+                    store.suite.feedCollection = nil
                 }
                 .buttonStyle(.plain)
                 .font(t.scale.label.font).foregroundStyle(t.roles.link)
@@ -188,6 +209,50 @@ struct ComposerFeed: View {
         } else {
             FeedTakeCard(item: item, take: store.feedTake(item), photo: photo)
         }
+    }
+}
+
+/// The "Queued" group at the top of the feed: shots saved to run later. Each row: its title, "Run · $0.40" (prices it
+/// again, then asks before it runs) and Remove. Nothing is held until Run is confirmed.
+struct FeedQueuedGroup: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s1) {
+            Text("Queued").font(t.scale.label.font).foregroundStyle(t.roles.ink2)
+            ForEach(store.suite.queued) { q in
+                HStack(spacing: Space.s3) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(q.title).font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1)
+                        if !q.mine, let who = store.members.first(where: { $0.id == q.userId })?.email {
+                            Text("Queued by \(who)").font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: Space.s2)
+                    let pricing = store.suite.queuePricing == q.id
+                    Button { store.askRunQueued(q) } label: {
+                        HStack(spacing: Space.s1) {
+                            if pricing { ProgressView().controlSize(.small) }
+                            Text(q.buttonLabel).font(t.scale.label.font).monospacedDigit().lineLimit(1).fixedSize()
+                                .fitProbe("composer queued run")
+                        }
+                        .foregroundStyle(t.roles.ink)
+                        .padding(.horizontal, Space.s3).frame(height: 32)
+                        .background(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(pricing)
+                    .help("Price it again, then run it")
+                    .accessibilityLabel(q.buttonLabel)
+                    SuiteIconButton(systemName: "x", label: "Remove \(q.title) from the queue") { store.removeQueued(q) }
+                }
+                .padding(.horizontal, Space.s3).padding(.vertical, Space.s2)
+                .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
+            }
+        }
+        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "queued") } }
     }
 }
 
@@ -282,6 +347,9 @@ struct FeedViewer: View {
                 link(store.suite.compareIds.contains(take.id) ? "Remove from compare" : "Compare") { store.compareInSuite(take) }
                 link("Reuse settings") { if !store.reuseSettings(take) { store.showToast("This take was made before Reuse settings") } }
                 if take.isVideo { link("Open in Edit") { store.openEdit(takeId: take.id) } }
+                SaveToCollectionButton(takeIds: [take.id]) {
+                    Text("Save to collection").font(t.scale.label.font).foregroundStyle(t.roles.link).lineLimit(1).fixedSize()
+                }
                 Spacer(minLength: 0)
             }
         }
@@ -484,6 +552,7 @@ struct FeedTakeCard: View {
     var take: Take?
     var photo: Bool
     @State private var hover = false
+    @State private var saving = false
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: t.radii.control)
@@ -511,6 +580,9 @@ struct FeedTakeCard: View {
         .onTapGesture(count: 2) { open() }
         .onTapGesture { if let id = take?.id { store.suite.viewerTakeId = id } }
         .contextMenu { menu }
+        .popover(isPresented: $saving, arrowEdge: .trailing) {
+            if let take { SaveToCollectionPanel(takeIds: [take.id]) { saving = false }.environment(store).environment(\.theme, t) }
+        }
         .help(item.title.isEmpty ? item.summary : item.title)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(item.title.isEmpty ? item.summary : item.title)
@@ -537,6 +609,7 @@ struct FeedTakeCard: View {
             Button(store.suite.compareIds.contains(take.id) ? "Remove from compare" : "Compare") { store.compareInSuite(take) }
             if ExtendSource.take(take) != nil { Button("Extend") { store.openExtend(take) } }
             if take.isVideo { Button("Open in Edit") { store.openEdit(takeId: take.id) } }
+            Button("Save to collection…") { saving = true }
             Button("Post…") { store.openPostSheet(take) }
         }
         Button("Open") { open() }

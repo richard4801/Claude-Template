@@ -243,6 +243,10 @@ enum SnapshotRunner {
                             let f = state.composerFrames["viewer"]
                             lines.append("\(f != nil ? "FITS" : "CUT") \(label) large viewer \(f.map { "\(Int($0.width))x\(Int($0.height))" } ?? "not drawn")")
                         }
+                        if name == "composer_queue" {
+                            let f = state.composerFrames["queued"]
+                            lines.append("\(f != nil ? "FITS" : "CUT") \(label) queued group \(store.suite.queued.count) shots, \(store.suite.queued.first?.buttonLabel ?? "none")")
+                        }
                         if name == "composer_swap" {
                             lines.append("\(state.composerFrames["decided"] != nil ? "FITS" : "CUT") \(label) rows set by the clip shown greyed with the reason")
                         }
@@ -265,6 +269,10 @@ enum SnapshotRunner {
                 store.suite.viewerTakeId = (store.suite.feed.compactMap { store.feedTake($0) }.first ?? store.suiteTakes(photo: false).first)?.id }),
             // Swap: Camera, Light and Style are set by the clip, shown greyed with that reason.
             ("composer_swap", { store.openTool(.swap) }),
+            // Build step 3: a shot added to the queue (priced, nothing held) shows in the feed's "Queued" group.
+            ("composer_queue", { store.openTool(.shot); fillDemoDraft(store)
+                if store.suite.queued.isEmpty { store.addShotToQueue() }
+                store.suite.feedOpen = true }),
             ("composer_compare", { store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
                 let two = Array(store.suiteTakes(photo: false).prefix(2)) + Array(store.takes.filter(\.isVideo).prefix(2))
                 store.suite.compareIds = Array(two.map(\.id).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }.prefix(2)) }),
@@ -273,6 +281,20 @@ enum SnapshotRunner {
         // The last screen was the comparison: two takes were on screen (the demo has video takes).
         let compared = store.suiteComparing.count
         lines.append("\(compared == 2 ? "FITS" : "CUT") composer_compare \(compared) takes side by side, \(store.suite.feed.count) feed cards")
+        // Library's collection filter: the demo's "Client picks" shows its two takes only.
+        store.suite.compareIds = []
+        store.suite.feedOpen = false
+        for theme in [ThemeID.c, .a, .b, .d] {
+            store.themeID = theme
+            w.setFrame(NSRect(x: full.minX, y: full.maxY - 800, width: 1280, height: 800), display: true)
+            store.go(.gallery)
+            store.setGalleryCollection("col_demo_picks")
+            try? await Task.sleep(for: .seconds(1.5))
+            let n = store.galleryList.count
+            lines.append("\(n == 2 ? "FITS" : "CUT") library_collection 1280x800 \(theme.rawValue) \(n) takes in Client picks, \(store.library.collections.count) collections")
+            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_library_collection_1280x800.png"))
+            store.setGalleryCollection(nil)
+        }
         store.suite.compareIds = []
         store.suite.feedOpen = false
         w.setFrame(full, display: true)

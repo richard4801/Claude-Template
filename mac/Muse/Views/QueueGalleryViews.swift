@@ -167,12 +167,19 @@ struct GalleryView: View {
             } else {
                 ScreenPage {
                     ScreenTitle("Library", subtitle: "Tests stay separate from Final. Select takes to compare them side by side.") {
-                        RSeg([(GalleryTab.tests, "Tests \(store.takes.count)"), (GalleryTab.final, "Final \(store.takes.filter(\.isFinal).count)")], selection: $store.galleryTab)
-                            .frame(width: 240)
+                        HStack(spacing: Space.s3) {
+                            LibraryCollectionBar()
+                            RSeg([(GalleryTab.tests, "Tests \(store.takes.count)"), (GalleryTab.final, "Final \(store.takes.filter(\.isFinal).count)")], selection: $store.galleryTab)
+                                .frame(width: 240)
+                        }
                     }
                     let list = store.galleryList
                     if store.loading && store.takes.isEmpty {
                         SkeletonGrid(columns: 6, count: 12)
+                    } else if list.isEmpty, store.library.galleryCollection != nil {
+                        EmptyState("Nothing in this collection", "Use Save to collection on a take, or select takes here and save them.", actionTitle: "Show all takes") {
+                            store.setGalleryCollection(nil)
+                        }
                     } else if list.isEmpty {
                         if store.galleryTab == .final {
                             EmptyState("Nothing approved yet", "Approve a test take and it moves here, ready to post.", actionTitle: "Show tests") { store.galleryTab = .tests }
@@ -191,6 +198,9 @@ struct GalleryView: View {
                         Text("\(store.picked.count) selected").scaled(t.scale.label, t.roles.ink)
                         RButton("Compare", kind: .action, small: true, off: store.picked.count < 2) { store.openCompare() }
                             .help(store.picked.count < 2 ? "Select at least 2 takes" : "Compare the selected takes")
+                        SaveToCollectionButton(takeIds: store.picked) {
+                            Text("Save to collection").scaled(t.scale.label, t.roles.ink).padding(.horizontal, Space.s2).frame(minHeight: 28)
+                        }
                         RButton("Clear", kind: .plain, small: true) { store.picked = [] }
                             .keyboardShortcut(.cancelAction)
                     }
@@ -400,6 +410,9 @@ struct ResultView: View {
                     RButton("Retake with changes", fill: true) { store.retake(take) }
                     RButton("Export", fill: true) { store.export(take) }
                         .help("Save it to Downloads › MUSE")
+                }
+                SaveToCollectionButton(takeIds: [take.id]) {
+                    Label("Save to collection", ph: "stack").scaled(t.scale.label, t.roles.link).frame(minHeight: 28)
                 }
                 if store.canEdit(take) {
                     RButton(take.isEdit ? "Edit again" : "Edit video", fill: true) { store.openEditor(take) }

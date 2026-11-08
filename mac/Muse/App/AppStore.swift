@@ -242,6 +242,8 @@ final class AppStore {
     let recreate = RecreateState()
     /// The learning editor in Edit: Playbook and Recipes (AppStore+Learn.swift).
     let learn = LearnState()
+    /// Library collections (AppStore+LibraryQueue.swift).
+    let library = LibraryState()
     /// Owner Settings → Studio: the paid AI editing helpers' switch, daily limit and today's spend (AppStore+EditorSettings.swift).
     var editorSettings: EditorSettings?
     var editorSettingsError: String?
@@ -687,6 +689,9 @@ final class AppStore {
             posts.removeAll { $0.modelId == id && !$0.isOut }
         }
         if e.type == "post" || e.post != nil { LiveEvents.applyPosts(&posts, e) }
+        // Build step 3: a collection made, changed or deleted, or the queue changed: read them again.
+        if e.type == "collection" { Task { await loadCollections() } }
+        if e.type == "queue" { Task { await loadQueue() } }
         if e.type == "account" { LiveEvents.applyAccounts(&accounts, e) }
         if isOwner {
             if e.type == "member" { LiveEvents.applyMembers(&members, e) }
@@ -1036,7 +1041,13 @@ final class AppStore {
     }
 
     var galleryAll: [Take] { takes }
-    var galleryList: [Take] { galleryTab == .final ? takes.filter(\.isFinal) : takes }
+    var galleryList: [Take] {
+        let list = galleryTab == .final ? takes.filter(\.isFinal) : takes
+        // A collection picked in Library: its takes and photos only, in the order they were added (newest first).
+        guard library.galleryCollection != nil else { return list }
+        let byId = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return library.galleryCollectionTakes.compactMap { byId[$0] }
+    }
     var openedTake: Take? { takes.first { $0.id == openTakeId } ?? takes.first }
 
     func job(for take: Take) -> Job? { take.jobId.flatMap { id in jobs.first { $0.id == id } } }

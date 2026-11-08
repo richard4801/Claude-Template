@@ -215,7 +215,13 @@ extension FakeMuseAPI {
             cursor = v
         }
         let model = q.model.flatMap { $0.isEmpty ? nil : $0 }
-        let wantPending = ["queued", "running", "failed"].filter { statuses.isEmpty || statuses.contains($0) }
+        // A collection: its takes and photos only (no pending jobs, no queue); an unknown one is refused.
+        let inCollection: Set<String>? = try q.collection.flatMap { id -> Set<String>? in
+            if id.isEmpty { return nil }
+            guard let ids = collectionTakeIds(id) else { throw ApiError("bad_request", "Invalid feed query: unknown collection") }
+            return ids
+        }
+        let wantPending = inCollection != nil ? [] : ["queued", "running", "failed"].filter { statuses.isEmpty || statuses.contains($0) }
         let wantDone = statuses.isEmpty || statuses.contains("done")
         func older(_ at: Int64, _ id: String) -> Bool {
             guard let c = cursor else { return true }
@@ -231,6 +237,7 @@ extension FakeMuseAPI {
         }
         if wantDone {
             for t in takes where t.kind == "take" || t.kind == "shot" {
+                if let ids = inCollection, !ids.contains(t.id) { continue }
                 if let jid = t.jobId, suiteHiddenJobs.contains(jid) { continue }
                 let job = t.jobId.flatMap { id in jobs.first { $0.id == id } }
                 if let m = model, (suiteTakeModels[t.id] ?? job?.modelId) != m { continue }
@@ -242,6 +249,13 @@ extension FakeMuseAPI {
         items.sort { a, b in a.createdAt != b.createdAt ? a.createdAt > b.createdAt : a.id > b.id }
         let page = Array(items.prefix(limit))
         let next = items.count > limit ? page.last.map { SuiteFeedCursor.encode($0.createdAt, $0.id) } : nil
-        return SuiteFeedPage(items: page, nextCursor: next)
+        // The first page carries the "Queued" group, filtered like the items (status `queued`).
+        var queued: [QueuedShot] = []
+        if cursor == nil, inCollection == nil, statuses.isEmpty || statuses.contains("queued") {
+            queued = visibleQueue().filter { s in
+                (model == nil || s.modelId == model) && (tools.isEmpty || tools.contains(s.tool))
+            }
+        }
+        return SuiteFeedPage(items: page, nextCursor: next, queued: queued)
     }
 }

@@ -28,23 +28,27 @@ struct ComposerBottomBar: View {
                 pills(spacing: Space.s2, compact: false)
                 Spacer(minLength: Space.s2)
                 pricingLink(compact: false)
+                queueButton(compact: false)
                 generateButton(short: false)
             }
             HStack(spacing: 6) {
                 pills(spacing: 5, compact: true)
                 Spacer(minLength: 6)
                 pricingLink(compact: true)
+                queueButton(compact: false)
                 generateButton(short: false)
             }
             HStack(spacing: 6) {
                 pills(spacing: 5, compact: true)
                 Spacer(minLength: 6)
                 pricingLink(compact: true)
+                queueButton(compact: true)
                 generateButton(short: true)
             }
             HStack(spacing: 6) {
                 ScrollView(.horizontal, showsIndicators: false) { pills(spacing: 5, compact: true).padding(.vertical, 2) }
                 pricingLink(compact: true)
+                queueButton(compact: true)
                 generateButton(short: true)
             }
         }
@@ -61,6 +65,31 @@ struct ComposerBottomBar: View {
             .background { if SnapshotRunner.dir != nil { GenerateFrameProbe(label: shown) } } // CI fit check (owner fix A2)
             .fixedSize()
             .layoutPriority(2)
+    }
+
+    /// "Add to queue" (build step 3): the shot saved to run later, priced, nothing held. Secondary and quiet beside
+    /// Generate; an icon with its tooltip when the bar is tight.
+    @ViewBuilder private func queueButton(compact: Bool) -> some View {
+        if store.canQueue {
+            Button { store.addShotToQueue() } label: {
+                Group {
+                    if compact {
+                        Ph("clock", 15).frame(width: 28, height: 34)
+                    } else {
+                        Text("Add to queue").font(t.scale.label.font).lineLimit(1).fixedSize()
+                            .fitProbe("composer add to queue")
+                            .padding(.horizontal, Space.s2).frame(height: 34)
+                    }
+                }
+                .foregroundStyle(t.roles.ink2)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .fixedSize()
+            .disabled(!canGenerate || store.suite.generating)
+            .help("Add to queue: priced now, nothing is charged until you run it")
+            .accessibilityLabel("Add to queue")
+        }
     }
 
     private func pricingLink(compact: Bool) -> some View {

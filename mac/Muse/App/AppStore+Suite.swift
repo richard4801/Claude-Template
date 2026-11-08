@@ -160,6 +160,12 @@ final class SuiteState {
     var feedLoading = false
     /// Two takes side by side over the composer (Compare in the feed); one picked waits for the second.
     var compareIds: [String] = []
+    /// The Suite queue (build step 3): shots saved to run later, the one being priced for Run, and the fresh price the
+    /// person confirms before it runs. The feed's collection filter.
+    var queued: [QueuedShot] = []
+    var queuePricing: String?
+    var runAsk: QueuedEstimate?
+    var feedCollection: String?
     /// The character of a draft Reuse settings just restored: its default rig isn't laid over the restored rig.
     var restoredCharacterId: String?
     var estimate: ShotEstimate?

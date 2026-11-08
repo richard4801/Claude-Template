@@ -143,10 +143,13 @@ extension AppStore {
         suite.feedLoading = true
         defer { suite.feedLoading = false }
         let tools = photo ? feedTools(photo: true) : (suite.feedTool.map { [$0] } ?? feedTools(photo: false))
-        let q = SuiteFeedQuery(tool: tools, status: suite.feedFilter.statuses, model: suite.feedModel, cursor: reset ? nil : suite.feedCursor)
+        let q = SuiteFeedQuery(tool: tools, status: suite.feedFilter.statuses, model: suite.feedModel, cursor: reset ? nil : suite.feedCursor,
+                               collection: suite.feedCollection)
         guard let page = try? await api.suiteFeed(q) else { return }
         if reset {
             suite.feed = page.items
+            // The first page carries the "Queued" group (none in a collection's feed).
+            suite.queued = suite.feedCollection == nil ? page.queued : []
         } else {
             let seen = Set(suite.feed.map(\.id))
             suite.feed += page.items.filter { !seen.contains($0.id) }
