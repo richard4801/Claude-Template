@@ -255,7 +255,7 @@ private fun SlotRow(n: Int, s: RecipeSlot) {
             }
             T("${suiteTime(s.startSec)} – ${suiteTime(s.endSec)}  ·  ${fmtSec(s.lengthSec)}", m.scale.caption.tabular(), m.t.muted, maxLines = 1)
             s.brief?.let { T(it, m.scale.body, m.t.ink, maxLines = 2) }
-            val camera = listOfNotNull(s.move, s.speed, s.transform)
+            val camera = listOfNotNull(s.move, s.speed, s.transform, if (s.poseRead) "Pose read" else null)
             if (camera.isNotEmpty()) T(camera.joinToString(", "), m.scale.caption, m.t.ink2(), maxLines = 2)
         }
     }

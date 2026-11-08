@@ -25,13 +25,14 @@ class RecipeTest {
         assertNull(r.slots[0].brief) // no brief yet
         assertTrue(r.slots[1].brief!!.startsWith("She flips her hair in a studio"))
         assertEquals(listOf("Cut", "Crossfade", "Flash"), r.transitions.map { it.kind })
-        assertEquals("TUFF", r.texts.single().text)
+        assertEquals("SUMMER", r.texts.single().text)
         assertEquals("Lower third", r.texts.single().position)
         assertEquals("Teal & orange", r.grade!!.name)
         assertEquals(5, r.grade!!.swatches.size)
-        assertEquals(60.1, r.beats!!.bpm!!, 1e-9)
-        assertEquals("Original sound, 60 BPM", r.sound)
-        assertEquals("Body poses", r.gaps.single().what)
+        assertEquals(120.1, r.beats!!.bpm!!, 1e-9)
+        assertEquals("Original sound, 120 BPM", r.sound)
+        assertTrue(r.gaps.isEmpty())
+        assertEquals(listOf(false, true, false), r.slots.map { it.poseRead })
         assertEquals("Three beats: a pan, a push-in, a still with a caption.", r.summary)
     }
 

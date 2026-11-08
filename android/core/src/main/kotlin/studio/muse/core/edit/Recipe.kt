@@ -33,6 +33,8 @@ data class RecipeSlot(
     /** Zoom, shake or push in post ("Zoom 1.0 → 1.2", "Shake"); null = none. */
     val transform: String? = null,
     val confidence: Double = 1.0,
+    /** The body pose was read (keypoints only, never the reference's pixels): it guides a generated shot. */
+    val poseRead: Boolean = false,
 ) {
     val lengthSec: Double get() = (endSec - startSec).coerceAtLeast(0.0)
 }
@@ -186,6 +188,7 @@ object RecipeJson {
             speed = speed?.str("ramp")?.takeIf { it != "none" }?.let { when (it) { "speed_up" -> "Speeds up"; "slow_down" -> "Slows down"; "freeze" -> "Freeze"; else -> "Speed ramp" } },
             transform = if (shake || motion == "shake") "Shake" else null,
             confidence = num("confidence") ?: 1.0,
+            poseRead = obj("pose")?.str("status") == "done",
         )
     }
 
