@@ -108,7 +108,7 @@ struct ComposerBottomBar: View {
                 if tool == .swap {
                     listPill("speaking", icon: "text.bubble", value: store.suite.swap.speaking.label, help: "Speaking",
                              options: ComposerSpeaking.allCases.map { ($0.label, $0) }, selected: store.suite.swap.speaking) { store.suite.swap.speaking = $0 }
-                    addOnPills
+                    addOnPills(compact: compact)
                 }
             } else if tool == .extend {
                 // Extend: the new part's length on this quality, and takes. The shape and sound follow the video.
@@ -235,15 +235,17 @@ struct ComposerBottomBar: View {
 
     /// Swap's add-ons as pills (Edit, Fast · beta, Upscale), each with its own price; tapping one again goes back to
     /// the Quality ladder.
-    private var addOnPills: some View {
+    private func addOnPills(compact: Bool) -> some View {
         let pills = SwapAddOns.pills(store.videoFeatures, clipSeconds: store.clip?.durationSec, takes: store.takeCount, lipSync: store.lipSync,
                                      upscaleSeconds: swapTake?.durationSec)
         return HStack(spacing: 6) {
-            ForEach(pills) { p in addOnPill(p) }
+            ForEach(pills) { p in addOnPill(p, compact: compact) }
         }
     }
 
-    private func addOnPill(_ p: SwapAddOnPill) -> some View {
+    /// `compact` (a tight bar, about 1000 pt): the price without "about", and Upscale's "on the take" left to its
+    /// tooltip, so no pill is cut.
+    private func addOnPill(_ p: SwapAddOnPill, compact: Bool) -> some View {
         let on = p.quality != nil && p.quality == store.suite.swap.addOn
         return Button {
             if p.quality == nil {
@@ -259,8 +261,11 @@ struct ComposerBottomBar: View {
         } label: {
             HStack(spacing: 6) {
                 if !on { Ph("plus", 10) }
-                Text(p.label).font(t.body(12.5, .medium))
-                Text(p.priceText).font(t.mono(11)).foregroundStyle(t.muted)
+                Text(p.label).font(t.body(12.5, .medium)).lineLimit(1).fixedSize()
+                let price = compact ? Self.compactPrice(p) : p.priceText
+                if !price.isEmpty {
+                    Text(price).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.muted).lineLimit(1).fixedSize()
+                }
             }
             .foregroundStyle(t.ink)
             .padding(.horizontal, 10).frame(height: 34)
@@ -279,7 +284,15 @@ struct ComposerBottomBar: View {
                 .environment(\.theme, PickerTheme.dark)
                 .environment(\.colorScheme, .dark)
         }
+        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pill addon \(p.id)") } }
         .accessibilityLabel("\(p.label) add-on, \(p.priceText)\(on ? ", on" : "")")
+    }
+
+    /// "about $1.42" → "$1.42"; "on the take" → "" (the tooltip says it); "Soon", "from $0.19" and "—" stay.
+    static func compactPrice(_ p: SwapAddOnPill) -> String {
+        let s = p.priceText
+        if s == "on the take" { return "" }
+        return s.hasPrefix("about ") ? String(s.dropFirst("about ".count)) : s
     }
 
     /// What a quality takes in plain words for its card: "Start and end frame, references, clips" (from

@@ -289,7 +289,9 @@ enum SnapshotRunner {
             w.setFrame(NSRect(x: full.minX, y: full.maxY - 800, width: 1280, height: 800), display: true)
             store.go(.gallery)
             store.setGalleryCollection("col_demo_picks")
-            try? await Task.sleep(for: .seconds(1.5))
+            // The screen change animates (the sidebar cross-fades): wait it out before the shot.
+            try? await Task.sleep(for: .seconds(3))
+            w.contentView?.layoutSubtreeIfNeeded()
             let n = store.galleryList.count
             lines.append("\(n == 2 ? "FITS" : "CUT") library_collection 1280x800 \(theme.rawValue) \(n) takes in Client picks, \(store.library.collections.count) collections")
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_library_collection_1280x800.png"))
