@@ -4258,6 +4258,14 @@
         {
          "id": "person",
          "label": "Another person"
+        },
+        {
+         "id": "pose",
+         "label": "Pose"
+        },
+        {
+         "id": "outfit",
+         "label": "Outfit"
         }
        ],
        "sample": "product"

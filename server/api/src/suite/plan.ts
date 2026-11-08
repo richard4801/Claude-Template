@@ -42,7 +42,7 @@ export const ShotRequestSchema = z.object({
   prompt: z.string().max(2000).default(''),
   frames: z.object({ start: ImageRefSchema.optional(), middle: z.array(ImageRefSchema).max(8).optional(), end: ImageRefSchema.optional() }).optional(),
   references: z.object({
-    images: z.array(z.object({ image: ImageRefSchema, role: z.enum(['product', 'location', 'style', 'prop', 'person']).default('product'), label: z.string().max(80).optional() })).max(6).optional(),
+    images: z.array(z.object({ image: ImageRefSchema, role: z.enum(['product', 'location', 'style', 'prop', 'person', 'pose', 'outfit' /* workstream 1: attached in the Claude chat */]).default('product'), label: z.string().max(80).optional() })).max(6).optional(),
     videos: z.array(z.object({ video: VideoRefSchema, use: z.enum(['camera', 'motion', 'style']).default('motion') })).max(3).optional(),
     /** One audio track (an upload in this studio). Speaking: sent as is (lip sync); not speaking: only its instrumental is sent. */
     audio: z.object({ audio: VideoRefSchema }).optional(),
@@ -189,6 +189,9 @@ export const joinTokens = (t: string[]) => (t.length <= 1 ? t.join('') : `${t.sl
 const ROLE_WORDS: Record<string, [string, string]> = {
   product: ['the product', 'shape, colours, packaging and label'], location: ['the location', 'place, layout and light'], style: ['a style reference', 'colour, mood and texture'],
   prop: ['a prop', 'shape and colour'], person: ['another person in the scene', 'appearance and clothing'],
+  // workstream 1: references the owner attaches in the Claude chat. Her identity comes only from her own images.
+  pose: ['a pose reference', 'body pose, gesture and framing, never the face, body or clothing of anyone in it'],
+  outfit: ['an outfit reference', 'the clothes (cut, fabric, colour), never the face or body of anyone wearing them'],
 };
 
 /** Builds the whole plan for a picked model. */
