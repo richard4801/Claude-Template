@@ -36,23 +36,87 @@ struct RecreateView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(t.roles.canvas)
-        .alert(buildTitle, isPresented: Binding(get: { store.recreate.askBuild }, set: { store.recreate.askBuild = $0 })) {
-            Button(buildButton) { Task { await store.buildRecreate() } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(buildMessage)
+        .sheet(isPresented: Binding(get: { store.recreate.askBuild }, set: { store.recreate.askBuild = $0 })) {
+            RecreateBuildConfirm()
         }
     }
+}
 
-    private var toGenerate: Int { store.recreate.fill?.slots.filter { $0.state == "to_generate" }.count ?? 0 }
-    private var total: Double { store.recreate.fill?.toGenerateTotal ?? 0 }
-    private var buildTitle: String { toGenerate > 0 ? "Build the edit for \(RecreateText.money(total))?" : "Build the edit?" }
-    private var buildButton: String { toGenerate > 0 ? "Build · \(RecreateText.money(total))" : "Build the edit" }
-    private var buildMessage: String {
-        guard let f = store.recreate.fill else { return "" }
-        let made = toGenerate == 1 ? "The new shot is made with your model and charged to the studio." :
-            toGenerate > 1 ? "The \(toGenerate) new shots are made with your model and charged to the studio." : "Nothing is generated or charged."
-        return "\(RecreateText.makingSummary(f)). \(made)"
+/// Build's one confirmation: the real total from the slot estimates, a line per new shot, and any shot that can't be made
+/// said plainly (never offered to spend on). Nothing is spent before "Build · $x".
+struct RecreateBuildConfirm: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    var body: some View {
+        let rs = store.recreate
+        let paid = rs.confirmSlots
+        let cant = rs.toGenerate.filter { rs.estimateErrors[$0] != nil }
+        let total = rs.confirmTotal
+        VStack(alignment: .leading, spacing: Space.s4) {
+            Text(paid.isEmpty ? "Build the edit?" : "Build the edit for \(RecreateText.money(total))?")
+                .scaled(t.scale.title, t.roles.ink).lineLimit(1).fitProbe("confirm title")
+            Text(message(paid: paid.count, cant: cant.count))
+                .scaled(t.scale.body, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            if !paid.isEmpty || !cant.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(paid, id: \.self) { s in
+                        row(s, detail: rs.estimates[s]?.priceLine, price: rs.estimates[s].map { RecreateText.money($0.estimate) }, problem: nil)
+                    }
+                    ForEach(cant, id: \.self) { s in row(s, detail: nil, price: nil, problem: rs.estimateErrors[s]) }
+                }
+            }
+            HStack(spacing: Space.s3) {
+                Spacer(minLength: 0)
+                SuiteToolButton(title: "Cancel") { store.recreate.askBuild = false }
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityLabel("Cancel")
+                SuiteToolButton(title: paid.isEmpty ? "Build the edit" : "Build · \(RecreateText.money(total))", accent: true) { store.confirmRecreateBuild() }
+                    .keyboardShortcut(.defaultAction)
+                    .background(SnapshotFrame(key: "confirm"))
+            }
+        }
+        .padding(Space.s5)
+        .frame(width: 460, alignment: .leading)
+        .background(t.roles.canvas)
+    }
+
+    private func message(paid: Int, cant: Int) -> String {
+        let rs = store.recreate
+        let yours = rs.fill?.slots.filter { $0.state == "matched" || $0.state == "ready" }.count ?? 0
+        var out: [String] = []
+        if paid == 1 { out.append("The new shot is made with your model and charged to the studio.") }
+        if paid > 1 { out.append("The \(paid) new shots are made with your model and charged to the studio.") }
+        if yours > 0 { out.append(yours == 1 ? "1 shot comes from your takes." : "\(yours) shots come from your takes.") }
+        if cant > 0 { out.append(cant == 1 ? "1 shot can’t be made and is left out." : "\(cant) shots can’t be made and are left out.") }
+        if paid > 0 {
+            out.append("They take a few minutes; you can leave this page meanwhile.")
+        } else {
+            out.append("Nothing is generated or charged.")
+        }
+        return out.joined(separator: " ")
+    }
+
+    private func row(_ slotId: String, detail: String?, price: String?, problem: String?) -> some View {
+        let rs = store.recreate
+        let slot = rs.slots.first { $0.id == slotId }
+        return VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: Space.s3) {
+                Text(rs.shotName(slotId)).scaled(t.scale.label, t.roles.ink).lineLimit(1).fixedSize()
+                Text(slot.flatMap { RecreateText.brief($0.brief) } ?? slot.map { String(format: "%.1f s", $0.length) } ?? "")
+                    .scaled(t.scale.caption, t.roles.ink2).lineLimit(1)
+                Spacer(minLength: Space.s2)
+                Text(price ?? "–").scaled(t.scale.label, t.roles.ink).monospacedDigit().lineLimit(1).fixedSize().fitProbe("confirm price \(slotId)")
+            }
+            if let problem {
+                Text(problem).scaled(t.scale.caption, t.roles.caution).fixedSize(horizontal: false, vertical: true)
+            } else if let detail, !detail.isEmpty {
+                Text(detail.prefix(1).uppercased() + detail.dropFirst()).scaled(t.scale.caption, t.roles.ink2).monospacedDigit().lineLimit(1)
+            }
+        }
+        .padding(.vertical, Space.s2)
+        .overlay(alignment: .top) { SuiteRule() }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -93,16 +157,17 @@ struct RecreateTopBar: View {
                 if rs.mode == .recipe {
                     if let f = rs.fill {
                         VStack(alignment: .trailing, spacing: 0) {
-                            Text(RecreateText.makingSummary(f)).font(t.scale.label.font).monospacedDigit().foregroundStyle(t.roles.ink)
+                            Text(RecreateText.makingSummary(f, prices: rs.prices, unavailable: rs.unpriceable)).font(t.scale.label.font).monospacedDigit().foregroundStyle(t.roles.ink)
                                 .lineLimit(1).fixedSize().fitProbe("recreate cost")
-                            Text(RecreateText.approveNote).font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                            Text(note).font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
                                 .lineLimit(1).fixedSize().fitProbe("recreate approve")
                         }
                         .accessibilityElement(children: .combine)
                         .background(SnapshotFrame(key: "cost"))
                     }
-                    SuiteToolButton(title: "Build the edit", icon: "hammer", accent: true, disabled: rs.fill == nil || rs.building) {
-                        store.recreate.askBuild = true
+                    SuiteToolButton(title: rs.estimating ? "Pricing the shots" : "Build the edit", icon: "hammer", accent: true,
+                                    disabled: rs.fill == nil || rs.building || rs.estimating || rs.isGenerating) {
+                        Task { await store.requestRecreateBuild() }
                     }
                     .accessibilityLabel("Build the edit")
                     .background(SnapshotFrame(key: "build"))
@@ -116,6 +181,13 @@ struct RecreateTopBar: View {
         .padding(.horizontal, Space.s4)
         .frame(height: 56)
         .background(t.roles.canvas)
+    }
+
+    /// Under the total: the approval promise, or what happens while new shots generate.
+    private var note: String {
+        let rs = store.recreate
+        guard rs.isGenerating else { return RecreateText.approveNote }
+        return rs.reference.map { rs.buildWhenReady.contains($0.id) } == true ? "The edit is built when they’re ready." : "Build the edit once they’re ready."
     }
 
     private var title: String {
