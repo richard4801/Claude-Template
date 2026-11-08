@@ -47,6 +47,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -527,6 +528,12 @@ private fun MaskBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
             Box(Modifier.size(20.dp).background(colorOf(clip.chroma?.color ?: "#2BD15F")))
             T(clip.chroma?.color ?: "Off", m.type.mono.copy(fontSize = 12.sp), m.t.muted)
         }
+        // The cut-out isn't live yet (the server says so): both read "Coming soon", plainly, with nothing to press.
+        ui.matteOff?.let { note ->
+            ComingSoon("Remove background", note)
+            ComingSoon("Tap what to keep", note)
+            return
+        }
         val matte = ui.ai["matte"]
         val keyed = clip.alphaMatte != null
         OptRow("Remove background", when { matte?.running == true -> "Cutting out · ${matte.progress} %"; keyed -> "Done · the background is gone"; else -> "The person stays · ${matte?.price ?: "priced next"}" },
@@ -536,6 +543,16 @@ private fun MaskBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
         if (k == null) {
             SuiteLink("Tap what to keep instead") { act(EditAction.TapToKeep(true)) }
         } else KeepPanel(ui, k, act)
+    }
+}
+
+/** A helper that isn't available yet: its name and a plain line, greyed, not a button. */
+@Composable
+private fun ComingSoon(title: String, note: String) {
+    val m = muse
+    Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { stateDescription = "Not available yet" }, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        T(title, m.type.body.copy(fontSize = 13.5.sp, fontWeight = FontWeight.Bold), m.t.muted)
+        T(note, m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
     }
 }
 

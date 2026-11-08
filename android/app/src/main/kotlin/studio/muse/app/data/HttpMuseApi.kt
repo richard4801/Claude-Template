@@ -193,6 +193,7 @@ interface MuseService {
     @DELETE("v1/learn/recipes/{id}") suspend fun deleteRecipe(@Path("id") id: String): retrofit2.Response<Unit>
     @GET("v1/learn/recipes/nearest") suspend fun nearestRecipes(@retrofit2.http.Query("recipeId") id: String, @retrofit2.http.Query("k") k: Int): LearnNearest
     @GET("v1/learn/gaps") suspend fun learnGaps(@retrofit2.http.Query("limit") limit: Int): List<LearnGap>
+    @GET("v1/editor/features") suspend fun editorFeatures(): JsonObject
     @GET("v1/recreate/references/{id}/poster") suspend fun referencePoster(@Path("id") id: String): retrofit2.Response<okhttp3.ResponseBody>
     // OkHttp follows the redirect to storage and drops the Authorization header on the way to another host.
     @retrofit2.http.Streaming @GET("v1/recreate/references/{id}/video") suspend fun referenceVideo(@Path("id") id: String): retrofit2.Response<okhttp3.ResponseBody>
@@ -473,6 +474,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun learnGaps(limit: Int) = call { learnGaps(limit) }
     override suspend fun referencePoster(referenceId: String): ByteArray? =
         runCatching { call { referencePoster(referenceId) }.takeIf { it.isSuccessful }?.body()?.bytes() }.getOrNull()
+    override suspend fun editorFeatures(): JsonObject? = runCatching { call { editorFeatures() } }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; null }
     override suspend fun referenceVideo(referenceId: String, into: java.io.File): Boolean = runCatching {
         val r = call { referenceVideo(rx(referenceId)) }
         val body = r.body()?.takeIf { r.isSuccessful } ?: return@runCatching false
