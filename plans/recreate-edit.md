@@ -169,3 +169,8 @@ See plans/research/platform-download-rules.md for the guardrails.
 ## Owner decisions (2026-11-08)
 - **Pose-guided generation (G2):** Wan 2.2 Animate, driven by a stick-figure video rendered from per-frame keypoints (never the reference's pixels). Priced at cost ×2, confirmed per shot. One paid test (~$0.58) in the owner's Release 1 test.
 - **Server-written shot briefs (G8):** yes, on Sonnet. Opt-in per reference, price shown and confirmed, ×2. About $0.10–0.20 per reference to members.
+- **Pose-guided generation, revised (owner, 2026-11-08):** for an exact movement swap, Wan 2.2 Animate is driven by **the reference video's segment itself** (motion input only) plus our model's image, replacing the earlier stick-figure plan and the "never the reference's pixels" rule for motion input.
+  - The output shows only our model.
+  - The segment is sent per slot and trimmed to the slot's length.
+  - Storage is unchanged: private, deleted after 30 days.
+  - The price is confirmed per shot.
