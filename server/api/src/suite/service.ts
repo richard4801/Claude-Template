@@ -20,11 +20,12 @@ import { buildExtendPlan, pickExtend } from './extend.js';
 import { buildRecastPlan, pickRecast } from './recast.js';
 import { buildPlan, needOf, pickModel, shotLabel, ShotRequestSchema, type Character, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
 import { FalProvider, HiggsfieldProvider, MockProvider, ReplicateProvider, type VideoProvider } from './providers.js';
-import { DEFAULT_LADDER, EXTEND_LADDER, inputSlotsOf, MODELS, modelById, modelView, MOCK_MODEL, TIER_INFO, TIERS, type ProviderId, type Tier } from './registry.js';
+import { customModelsOf, DEFAULT_LADDER, EXTEND_LADDER, inputSlotsOf, MODELS, modelById, modelView, MOCK_MODEL, TIER_INFO, TIERS, type ProviderId, type Tier } from './registry.js';
 import { SuiteRunner } from './runner.js';
 import { suiteSettings } from './schema.js';
 import { rigCheck } from './rigcheck.js';
 import { draftOf } from './drafts.js';
+import { ByoService } from '../byo/service.js'; // WS5: bring your own provider
 
 /**
  * Estimate for removing the vocals of an audio reference (beat-only audio), held with the shot; the job settles the
@@ -39,9 +40,12 @@ export class SuiteService {
   readonly mock: MockProvider;
   readonly providers: Record<Exclude<ProviderId, 'runpod'>, VideoProvider>;
   readonly runner: SuiteRunner;
+  /** WS5: owner-added providers and models (custom models join the registry per studio). */
+  readonly byo: ByoService;
   constructor(private ctx: Ctx, fetchFn?: typeof fetch) {
     this.mock = new MockProvider(ctx);
-    this.providers = { replicate: new ReplicateProvider(ctx), fal: new FalProvider(ctx, fetchFn), higgsfield: new HiggsfieldProvider(ctx, fetchFn), mock: this.mock };
+    this.byo = new ByoService(ctx, fetchFn);
+    this.providers = { replicate: new ReplicateProvider(ctx), fal: new FalProvider(ctx, fetchFn), higgsfield: new HiggsfieldProvider(ctx, fetchFn), mock: this.mock, byo: this.byo.video };
     this.runner = new SuiteRunner(ctx, this);
   }
 
@@ -57,11 +61,12 @@ export class SuiteService {
   available(): Set<ProviderId> {
     if (this.mode === 'off') return new Set();
     // Higgsfield counts in mock mode only when its key is set, so test prices match what live mode would run.
-    if (this.mode === 'mock') return new Set<ProviderId>(['replicate', 'fal', 'mock', ...(this.providers.higgsfield.configured() ? ['higgsfield' as const] : [])]);
+    if (this.mode === 'mock') return new Set<ProviderId>(['replicate', 'fal', 'mock', 'byo', ...(this.providers.higgsfield.configured() ? ['higgsfield' as const] : [])]);
     const s = new Set<ProviderId>();
     if (this.providers.replicate.configured()) s.add('replicate');
     if (this.providers.fal.configured()) s.add('fal');
     if (this.providers.higgsfield.configured() && !this.isDown('higgsfield')) s.add('higgsfield');
+    if (this.byo.ready) s.add('byo'); // WS5: each custom model runs on its studio's own key
     return s;
   }
   /** A provider that refused at start (out of credit, bad key, down) is skipped for new shots for a while. */
@@ -71,8 +76,13 @@ export class SuiteService {
 
   // ------------------------------------------------------------------ settings (owner)
   async prefs(studioId: string): Promise<SuitePrefs> {
+    await this.byo.ensure(studioId); // WS5: the studio's custom models are in the registry before anything is planned
     const [r] = await this.ctx.db.select().from(suiteSettings).where(eq(suiteSettings.studioId, studioId));
-    return r ? { models: r.models, ladder: r.ladder ?? undefined, capPerJob: r.capPerJob, capPerDay: r.capPerDay } : {};
+    const p: SuitePrefs = r ? { models: r.models, ladder: r.ladder ?? undefined, capPerJob: r.capPerJob, capPerDay: r.capPerDay } : {};
+    // WS5: a custom model's markup is set on the model itself (Settings → Providers).
+    const custom = customModelsOf(studioId);
+    if (custom.length) p.models = { ...(p.models ?? {}), ...Object.fromEntries(custom.map(m => [m.id, { ...(p.models?.[m.id] ?? {}), priceScale: m.byo!.priceScale }])) };
+    return p;
   }
   caps(p: SuitePrefs) { return { perJob: p.capPerJob ?? this.ctx.config.SUITE_CAP_PER_JOB_USD, perDay: p.capPerDay ?? this.ctx.config.SUITE_CAP_PER_DAY_USD }; }
   async settingsView(studioId: string) {
@@ -91,7 +101,7 @@ export class SuiteService {
     const next: Required<Pick<SuitePrefs, 'models'>> & SuitePrefs = { ...cur, models: { ...(cur.models ?? {}) } };
     for (const [id, v] of Object.entries(b.models ?? {})) {
       const m = modelById(id);
-      if (!m || m.id === 'mock') throw badRequest(`Unknown model ${id}`);
+      if (!m || m.id === 'mock' || (m.byo && m.byo.studioId !== u.studioId)) throw badRequest(`Unknown model ${id}`);
       const e = { ...(next.models[id] ?? {}) };
       if (v.enabled !== undefined) {
         if (typeof v.enabled !== 'boolean') throw badRequest('enabled: true or false');
@@ -115,7 +125,7 @@ export class SuiteService {
           if (!Array.isArray(steps) || steps.length > 10) throw badRequest(`ladder.${tier}: up to 10 steps`);
           out[tier as Tier] = steps.map((s: any) => {
             const m = modelById(String(s?.model));
-            if (!m || m.id === 'mock' || !m.resolutions.some(r => r.id === s?.resolution)) throw badRequest(`ladder.${tier}: unknown model or resolution`);
+            if (!m || m.id === 'mock' || (m.byo && m.byo.studioId !== u.studioId) || !m.resolutions.some(r => r.id === s?.resolution)) throw badRequest(`ladder.${tier}: unknown model or resolution`);
             return { model: m.id, resolution: String(s.resolution) };
           });
         }
@@ -161,7 +171,9 @@ export class SuiteService {
       // Photo (workstream 3): stills on the shoot pipeline (POST /v1/suite/photos), so it doesn't depend on the video engines.
       { id: 'photo', available: true },
     ];
-    return { enabled: this.mode !== 'off', test: this.mode === 'mock', defaultQuality: 'draft', tiers, tools, modes: ['text', 'image', 'reference', 'swap', 'recast'], recastMaxPeople: 4,
+    // WS5: owner-added models (members: only those the owner made available, by display name).
+    const custom = this.mode === 'off' ? [] : await this.byo.catalog(u);
+    return { enabled: this.mode !== 'off', test: this.mode === 'mock', defaultQuality: 'draft', tiers, tools, custom, modes: ['text', 'image', 'reference', 'swap', 'recast'], recastMaxPeople: 4,
       aspectRatios: ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'], takesMax: 4, camera: cameraCatalog() };
   }
 
@@ -183,13 +195,19 @@ export class SuiteService {
   parse(body: unknown, u: AuthUser): ShotRequest {
     const r = ShotRequestSchema.safeParse(body ?? {});
     if (!r.success) throw badRequest(`Invalid shot: ${r.error.issues[0]?.path.join('.')} ${r.error.issues[0]?.message}`);
-    if ((r.data.engineModel || r.data.resolution) && u.role !== 'owner') throw new ApiError(403, 'owner_only', 'Only the studio owner can pick the engine');
+    // WS5: members may pick a custom model the owner made available (checked when planning); nothing else.
+    const memberCustom = !!r.data.engineModel?.startsWith('c_') && !r.data.resolution;
+    if ((r.data.engineModel || r.data.resolution) && u.role !== 'owner' && !memberCustom) throw new ApiError(403, 'owner_only', 'Only the studio owner can pick the engine');
     return r.data;
   }
 
   /** Plans the shot. Throws engine_unavailable / nothing_fits. Swap shots return the existing engine's estimate. */
   async plan(u: AuthUser, r: ShotRequest) {
     if (this.mode === 'off') throw new ApiError(400, 'engine_unavailable', "The AI suite isn't switched on yet");
+    if (r.engineModel?.startsWith('c_')) { // WS5: a custom model makes plain shots only
+      if (r.mode === 'swap' || r.mode === 'recast' || r.mode === 'extend' || r.cast?.length || r.extend) throw badRequest('That model makes shots only');
+      await this.byo.checkUse(u, r.engineModel, 'video');
+    }
     if (r.mode === 'swap') return { swap: true as const, ...(await this.swapEstimate(u, r)) };
     if (r.mode === 'recast' || r.cast?.length) return this.recastPlan(u, r);
     if (r.mode === 'extend' || r.extend) return this.extendPlan(u, r);
@@ -199,7 +217,7 @@ export class SuiteService {
     if (need.mode === 'image' && !need.start && !need.end) throw badRequest('Keyframe shots need a start or end frame');
     if (need.mode === 'reference' && !character?.images.length && !need.extraImages) throw badRequest('Reference shots need a character with a sheet, or reference images');
     if (need.mode === 'text' && !r.prompt.trim()) throw badRequest('Describe the shot');
-    const pick = pickModel(r.quality, need, { prefs, providers: this.available(), engineModel: r.engineModel, resolution: r.resolution });
+    const pick = pickModel(r.quality, need, { prefs, providers: this.available(), engineModel: r.engineModel, resolution: r.resolution, studioId: u.studioId });
     if ('error' in pick) {
       const e = new ApiError(400, 'nothing_fits', `${TIER_INFO[r.quality].label} can't make this shot · try another quality, a shorter length or fewer references`);
       (e as any).tried = pick.tried;
