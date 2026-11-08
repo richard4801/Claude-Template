@@ -60,6 +60,19 @@ class FakeSuite {
 
     private fun round4(v: Double) = kotlin.math.round(v * 10000) / 10000
 
+    /**
+     * WS7 (the demo's GET /v1/models): Character swap and Recast run the recast models (Wan Animate, Kling O1 Edit, H3 Max
+     * Recast); every other video purpose the shot engines; image purposes the image engines.
+     */
+    fun enginesFor(purpose: String, kind: String): List<SuiteCatalogEngine> {
+        val all = catalog(owner = true).engines.orEmpty()
+        if (purpose != "swap" && purpose != "recast") return all.filter { it.kind == kind }
+        return RECAST_MODEL.values.distinct().mapNotNull { id -> settings.model(id) }.map { m ->
+            SuiteCatalogEngine(m.id, m.name, "video", false, null, emptyList(), m.resolutions.lastOrNull()?.id, m.resolutions.map { it.copy(perSec = round4(it.perSec * m.priceScale)) },
+                m.resolutions.lastOrNull()?.perSec?.let(::round4), null, m.duration?.min, m.duration?.max, m.duration?.allowed, m.aspectRatios)
+        }
+    }
+
     /** The pinned engine's $/s (owner, demo): a ladder model at its resolution, or the demo custom model. */
     private fun pinnedPerSec(r: SuiteShotRequest): Double? {
         val id = r.engineModel ?: return null

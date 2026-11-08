@@ -12,6 +12,9 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.aspectRatio
+import kotlinx.coroutines.flow.update
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -268,6 +271,24 @@ fun GalleryScreen() {
     val vm: GalleryViewModel = viewModel { GalleryViewModel(c) }
     val s by vm.state.collectAsState()
     val nav = LocalNav.current
+    var importing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    // "Pick the saved video" (the link couldn't be fetched): the usual clip picker, which uploads and checks it.
+    // WS12: imported videos are clips the server lists only at GET /v1/imports: loaded here, newest first.
+    var imports by remember { mutableStateOf<List<studio.muse.app.data.ImportedVideo>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        imports = try { c.repo.api.imports.list().sortedByDescending { it.createdAt } }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { emptyList() }
+    }
+    fun useForSwap(v: studio.muse.app.data.ImportedVideo) {
+        c.drafts.video.update { it.copy(clip = v.asClip()) }
+        c.suite.recast.update { it.copy(clipId = v.clipId) }
+        nav.go(Routes.SUITE_SWAP)
+    }
+    if (importing) ImportLinkDialog(ImportPurpose.LIBRARY, onClose = { importing = false }, onPickFile = { importing = false; nav.go(Routes.SOURCE) }) { v ->
+        importing = false
+        imports = listOf(v) + imports.filterNot { it.id == v.id }
+        c.repo.toast("Imported: ${v.name}")
+    }
     val m = muse
     val fresh = remember { s.fresh }
     LaunchedEffect(Unit) { vm.seen() }
@@ -277,10 +298,17 @@ fun GalleryScreen() {
         val rows = remember(list) { list.chunked(3) }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = MuseSpace.gutter, end = MuseSpace.gutter, top = MuseSpace.s4, bottom = 120.dp),
             verticalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
-            item(key = "title", contentType = "title") { DisplayTitle("Library") }
+            item(key = "title", contentType = "title") {
+                // WS7: Import a video from a link (it lands in the library, ready for a swap or an edit).
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    DisplayTitle("Library", Modifier.weight(1f))
+                    BarButton("link", "Import from link", { importing = true })
+                }
+            }
             item(key = "tabs", contentType = "tabs") {
                 Segmented(listOf("tests" to "Tests · ${s.tests.size}", "final" to "Final · ${s.finals.size}"), s.tab, vm::tab, Modifier.padding(bottom = MuseSpace.s2))
             }
+            if (imports.isNotEmpty()) item(key = "imports", contentType = "imports") { ImportedStrip(imports, ::useForSwap) }
             if (list.isEmpty() && !s.loaded) items(2, key = { "skeleton$it" }, contentType = { "row" }) {
                 Row(Modifier.semantics { contentDescription = "Loading your renders" }, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
                     repeat(3) { Skeleton(Modifier.weight(1f).height(170.dp), containerShape()) }
@@ -363,5 +391,23 @@ fun TakeVideo(url: String, poster: studio.muse.app.data.ImageRef?, active: Boole
             modifier = Modifier.fillMaxSize(),
             update = { it.player = player },
         )
+    }
+}
+
+/** The Library's imported videos (WS12): a row of first frames with their names; a tap uses one for a swap. */
+@Composable
+private fun ImportedStrip(imports: List<studio.muse.app.data.ImportedVideo>, onUse: (studio.muse.app.data.ImportedVideo) -> Unit) {
+    val m = muse
+    Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+        Heading("Imported videos")
+        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+            items(imports, key = { it.id }) { v ->
+                Column(Modifier.width(96.dp).press { onUse(v) }.semantics(mergeDescendants = true) { contentDescription = "Use ${v.name} for a swap" },
+                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    RefImage(v.thumb, Modifier.fillMaxWidth().aspectRatio(9f / 16f).clip(containerShape()))
+                    T(v.name, m.scale.caption, m.roles.ink, maxLines = 2)
+                }
+            }
+        }
     }
 }

@@ -66,7 +66,8 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Share → MUSE (plans/recreate-edit.md): a shared video file or a shared link opens Edit → Recreate with it. The server
+     * Share → MUSE (plans/recreate-edit.md): a shared video file or a shared link opens the chooser (Recreate, Use for swap,
+     * Import to library; WS7). The server
      * decides what a link can be fetched from (plans/research/platform-download-rules.md); the app only passes it on.
      */
     private fun takeShare(intent: Intent) {
@@ -80,7 +81,8 @@ class MainActivity : ComponentActivity() {
             else -> studio.muse.core.edit.SharedLink.first(intent.getStringExtra(Intent.EXTRA_TEXT))?.let { studio.muse.app.data.SharedReference.Link(it) }
         } ?: return
         container.shared.value = shared
-        pendingRoute.value = Routes.EDIT
+        // WS7: ask what to do with it (Recreate first, and back still lands there; Use for swap; Import to library).
+        pendingRoute.value = Routes.SHARE
         intent.action = null // once
     }
 }

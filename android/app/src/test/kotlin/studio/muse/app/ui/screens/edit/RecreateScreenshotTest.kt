@@ -47,7 +47,7 @@ class RecreateScreenshotTest(private val theme: String, private val state: Strin
             val api = FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0)
             var ref = api.createReference("up_1", "Café morning")
             while (ref.state == "analyzing") ref = api.reference(ref.id)
-            val takes = api.listTakes().filter { it.kind == "take" }.map { RecreateTakeChoice(it.id, it.title, it.durationSec, label = it.label) }
+            val takes = api.listTakes().filter { it.kind == "take" }.map { RecreateTakeChoice(it.id, it.title, it.durationSec, it.thumb, label = it.label) }
             val model = RecreateBuildModel(api, work, RecreateBuildUi(ref.id, ref.recipe!!, "Café morning", takes = takes, kept = ref.keptLine(),
                 cast = api.listModels().map { RecreateCastChoice(it.id, it.name) }, castId = api.listModels().firstOrNull()?.id), defaultModelId = { "m_demo" }, pollMs = 60_000)
             model.load()

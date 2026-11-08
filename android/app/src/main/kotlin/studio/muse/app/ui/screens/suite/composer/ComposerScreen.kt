@@ -89,6 +89,7 @@ import studio.muse.app.ui.screens.suite.HardwareImage
 import studio.muse.app.ui.screens.suite.undoRig
 import studio.muse.app.ui.screens.suite.queueShot
 import studio.muse.app.ui.screens.suite.answerClaude
+import studio.muse.app.ui.screens.suite.askClaude
 import studio.muse.app.ui.screens.suite.applyAssist
 import studio.muse.app.ui.screens.suite.openClaude
 import studio.muse.app.ui.screens.suite.pushComposerToAssist
@@ -173,8 +174,13 @@ fun SuiteComposerScreen(toolId: String? = null) {
     val problem = d.problem(slots, recast, own)
     // Character swap's add-ons (Edit, Fast · beta) are priced by the add-on estimate (the video studio's), not the ladder's.
     val clipSeconds = recast.clipId?.let { id -> video.clip?.takeIf { it.id == id }?.durationSec ?: if (id == SampleData.SAMPLE_CLIP) SampleData.sampleMeta.durationSec else null }
-    val addon = d.swapAddon
-    val addonPills = if (d.tool == ComposerTool.SWAP) SwapAddons.pills(st.video ?: studio.muse.app.data.VideoFeatures.DEFAULT, prefs.fastBeta, d.takes, clipSeconds) else emptyList()
+    // WS7/WS13 (coordinator, 2026-11-08): for the owner, Swap's model list replaces the Edit / Fast·beta toggles (H3 open
+    // weights and Viggle are models in it), so there's one way to choose; Upscale stays. Members keep the pills.
+    val ownerPicks = store.owner || prefs.owner
+    LaunchedEffect(ownerPicks, d.addon) { if (ownerPicks && d.tool == ComposerTool.SWAP && SwapAddon.of(d.addon)?.let { it == SwapAddon.EDIT || it == SwapAddon.FAST } == true) store.composer.update { it.copy(addon = null) } }
+    val addon = d.swapAddon?.takeIf { !ownerPicks || it == SwapAddon.UPSCALE }
+    val addonPills = if (d.tool == ComposerTool.SWAP) SwapAddons.pills(st.video ?: studio.muse.app.data.VideoFeatures.DEFAULT, prefs.fastBeta, d.takes, clipSeconds)
+        .filter { !ownerPicks || it.addon == SwapAddon.UPSCALE } else emptyList()
     val photo = rememberPhotoTool(d) // Photo tool (workstream 3): its own estimate (POST /v1/suite/photos/estimate) and Generate
     val (suiteEst, estErr) = rememberEstimate(req.takeIf { problem == null && live && addon == null && photo == null }, catalog?.enabled == true)
     val est = if (addon != null) clipSeconds?.takeIf { problem == null }?.let { SwapAddons.estimate(addon, d.takes, it) } else photo?.est ?: suiteEst
@@ -319,6 +325,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
     // Generate waits for the owner's approval at the price shown.
     val assist by store.assist.collectAsState()
     var claudeOpen by remember { mutableStateOf(false) }
+    var chipsUsed by remember(assist?.id) { mutableStateOf(false) }
     val canClaude = owner || c.repo.demo
     LaunchedEffect(Unit) {
         c.repo.live.collect { ev ->
@@ -336,7 +343,8 @@ fun SuiteComposerScreen(toolId: String? = null) {
                     Box(Modifier.heightIn(min = 48.dp).press { showFeed = !showFeed }.padding(horizontal = 12.dp).semantics { role = Role.Button },
                         contentAlignment = Alignment.Center) { T(if (showFeed) "Composer" else "Takes", muse.scale.label, muse.t.ink, maxLines = 1) }
                     if (canClaude && !showFeed && d.tool in ComposerDraft.PROMPT_TOOLS) Box(Modifier.heightIn(min = 48.dp)
-                        .press { scope.launch { if (store.openClaude() != null) claudeOpen = true } }.padding(horizontal = 12.dp).semantics { role = Role.Button },
+                        .press { scope.launch { if (store.openClaude() != null) claudeOpen = true } }.padding(horizontal = 12.dp)
+                        .semantics { role = Role.Button; contentDescription = studio.muse.app.ui.screens.suite.SuiteClaudeWords.toggle(claudeOpen) },
                         contentAlignment = Alignment.Center) { T("Claude", muse.scale.label, muse.t.ink, maxLines = 1) }
                     MoreMenu(listOfNotNull(
                         // Build step 3: save this shot to run later (priced, nothing held; Run from Takes).
@@ -383,7 +391,10 @@ fun SuiteComposerScreen(toolId: String? = null) {
             }
             assist?.let { a ->
                 studio.muse.app.ui.screens.claude.ClaudeChatSheet(claudeOpen, { claudeOpen = false }, "suite", a.id, "Claude", heightFraction = .62f,
-                    above = if (a.pending != null || a.message != null) ({ SuiteClaudeApproval(a, { yes -> scope.launch { store.answerClaude(yes) } }, Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }) else null)
+                    above = {
+                        SuiteClaudeTop(a, showChips = !chipsUsed, onChip = { prompt -> chipsUsed = true; scope.launch { store.askClaude(prompt) } })
+                        if (a.pending != null || a.message != null) SuiteClaudeApproval(a, { yes -> scope.launch { store.answerClaude(yes) } }, Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                    })
             }
         }
     }
@@ -1062,7 +1073,7 @@ private fun WideBar(ui: ComposerUi) {
             val tiers = ui.catalog?.tiers?.ifEmpty { null }?.map { it.id } ?: SuiteRules.TIERS
             MenuPill("gauge", SuiteRules.tierLabel(d.quality), "Quality", tiers.map { t -> "${SuiteRules.tierLabel(t)} · ${ComposerPrice.short(ui.tierEstimates[t])}" to (t == d.quality) }) { i -> ui.update { it.copy(quality = tiers[i]).fit(ui.catalog) } }
             // Owner only (WS7, as the Mac's "Model" pill): any engine, this quality's ladder first, then the others, then "Your providers".
-            val groups = ModelPicker.groups(ui.catalog, d.quality)
+            val groups = ModelPicker.groups(ui.catalog, d.quality, purpose = d.pickPurpose)
             if (ui.owner && !groups.isEmpty && d.tool in ComposerDraft.PROMPT_TOOLS) {
                 MenuPill("cube", d.modelPill(ui.catalog), "Model, only you see models", modelMenuItems(d, groups)) { i -> ui.update { it.pinEngine(groups.all.getOrNull(i - 1)).fit(ui.catalog) } }
             }

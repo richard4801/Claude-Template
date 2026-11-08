@@ -358,7 +358,7 @@ private fun ColumnScope.SettingsBody(x: SheetContext) {
         }
         // Owner only (WS7, as the Mac's "Model" pill): pin any engine for this shot, this quality's ladder first, then the
         // others, then "Your providers". Members never see models; they keep the quality tiers above.
-        val groups = ModelPicker.groups(x.catalog, d.quality)
+        val groups = ModelPicker.groups(x.catalog, d.quality, purpose = d.pickPurpose)
         if (x.owner && !groups.isEmpty && d.tool in ComposerDraft.PROMPT_TOOLS) {
             var open by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(d.engineModel != null) }
             Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(12.dp)).background(m.t.surface).press { open = !open }
@@ -376,6 +376,15 @@ private fun ColumnScope.SettingsBody(x: SheetContext) {
                 T("Length, shape and the input slots follow the pinned model", m.type.tiny, m.t.muted)
             }
         }
+        // WS7: Character swap (on the ladder, not an add-on), Recast and Extend: the owner's model for that kind of work.
+        val purpose = when (d.tool) {
+            ComposerTool.SWAP -> studio.muse.app.data.ModelPurpose.SWAP
+            ComposerTool.RECAST -> studio.muse.app.data.ModelPurpose.RECAST
+            ComposerTool.EXTEND -> studio.muse.app.data.ModelPurpose.EXTEND
+            else -> null
+        }
+        if (x.owner && purpose != null) studio.muse.app.ui.screens.ModelChoiceRow(purpose, studio.muse.app.ui.screens.ModelPick(d.engineModel, d.resolution),
+            { p -> x.update { it.copy(engineModel = p.model, resolution = p.resolution, engineTool = it.tool.takeIf { _ -> p.model != null }) } }, Modifier.padding(top = 8.dp), quality = d.quality)
         // Extend: the shape, sound and speaking come from the source clip; the length is the new part's.
         val extend = d.tool == ComposerTool.EXTEND
         if (!extend) {

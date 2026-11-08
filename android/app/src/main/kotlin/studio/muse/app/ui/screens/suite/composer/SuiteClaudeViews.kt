@@ -104,7 +104,10 @@ fun SuiteClaudeApproval(a: SuiteAssistUi, onAnswer: (Boolean) -> Unit, modifier:
 fun SuiteReferenceChips(refs: List<DraftReference>, onRemove: (DraftReference) -> Unit, modifier: Modifier = Modifier) {
     val m = muse
     if (refs.isEmpty()) return
-    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+    // As on the Mac (WS2): the chips sit under "References from Claude".
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    T("References from Claude", m.scale.caption, m.roles.ink2, maxLines = 1)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         refs.forEach { r ->
             Row(Modifier.height(40.dp).clip(RoundedCornerShape(m.radii.control)).background(m.roles.field).padding(start = 4.dp)
                 .semantics(mergeDescendants = true) { contentDescription = "${r.useLabel} reference${r.label?.let { ", $it" } ?: ""}" },
@@ -113,6 +116,24 @@ fun SuiteReferenceChips(refs: List<DraftReference>, onRemove: (DraftReference) -
                 T(r.useLabel, m.scale.label, m.roles.ink, maxLines = 1)
                 Box(Modifier.size(40.dp).press { onRemove(r) }.semantics { contentDescription = "Remove the ${r.useLabel.lowercase()} reference"; role = Role.Button },
                     contentAlignment = Alignment.Center) { studio.muse.app.ui.theme.Ic("x", 14.dp, m.roles.ink2) }
+            }
+        }
+    }
+    }
+}
+
+/** The top of the Suite's Claude sheet: "Fills in this composer", and the three chips until one is used. */
+@Composable
+fun SuiteClaudeTop(a: SuiteAssistUi, showChips: Boolean, onChip: (String) -> Unit) {
+    val m = muse
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        T(studio.muse.app.ui.screens.suite.SuiteClaudeWords.SUBTITLE, m.scale.caption, m.roles.ink2, maxLines = 1)
+        if (showChips && a.pending == null) androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            studio.muse.app.ui.screens.suite.SuiteClaudeWords.suggestions.forEach { (label, prompt) ->
+                Box(Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(m.radii.control)).border(1.dp, m.roles.hairline, RoundedCornerShape(m.radii.control))
+                    .press { onChip(prompt) }.padding(horizontal = 14.dp).semantics { role = Role.Button }, contentAlignment = Alignment.Center) {
+                    T(label, m.scale.label, m.roles.ink, maxLines = 1)
+                }
             }
         }
     }

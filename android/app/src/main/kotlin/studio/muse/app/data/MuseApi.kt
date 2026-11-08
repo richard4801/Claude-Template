@@ -27,7 +27,7 @@ interface MuseApi {
     suspend fun createModel(req: CreateModelRequest): Model
     suspend fun setSlot(modelId: String, slot: String, req: SetSlotRequest): Model
     /** Generates the missing angles from the user's images ($0.02 each). Slots come back busy; a model event follows. */
-    suspend fun fillAngles(modelId: String): FillAnglesResponse
+    suspend fun fillAngles(modelId: String, imageModel: String? = null): FillAnglesResponse
     suspend fun updateModel(modelId: String, req: UpdateModelRequest): Model
     /** Deletes the model with her outfits, LoRAs, training set, accounts and unsent posts. */
     suspend fun deleteModel(modelId: String)
@@ -107,7 +107,7 @@ interface MuseApi {
     suspend fun studioBalance(): StudioBalance
     suspend fun addTopUp(req: AddTopUpRequest): StudioBalance
     /** Upscale a finished render (coming soon: the server answers upscale_unavailable). */
-    suspend fun upscale(takeId: String, size: String): Job
+    suspend fun upscale(takeId: String, size: String, engineModel: String? = null): Job
 
     // Studio settings (owner) and the image engine
     suspend fun studioSettings(): StudioSettings
@@ -164,6 +164,10 @@ interface MuseApi {
     val camera: CameraApi get() = CameraApi.Unsupported
     // WS7: bring your own provider (WS5's contract v1), owner only. See ProvidersApi.kt.
     val providers: ProvidersApi get() = ProvidersApi.Unsupported
+    // WS7: import a video from a link (WS12's contract). See ImportsApi.kt.
+    val imports: ImportsApi get() = ImportsApi.Unsupported
+    // WS7: the owner's model picker on every surface (WS13's contract). See ModelsApi.kt.
+    val modelChoice: ModelsApi get() = ModelsApi.Unsupported
     /** Claude on the owner's plan: chat threads relayed to the Mac's Claude Code (plans/api.md "Claude on the owner's plan"). See ClaudeApi.kt. */
     val claude: ClaudeApi get() = ClaudeApi.Unsupported
 
@@ -179,6 +183,9 @@ interface MuseApi {
         throw ApiException("unsupported", "Saving an edited video needs the studio server")
     /** Uploads a voice-over / music file (or with purpose "lut" a .cube) for the editor; returns the upload id. */
     suspend fun uploadEditorFile(file: java.io.File, contentType: String, purpose: String? = null, onProgress: (Float) -> Unit = {}): String =
+        throw ApiException("unsupported", "Uploading files needs the studio server")
+    /** WS7 (import from link): a phone-fetched video as a clip upload (POST /v1/uploads/presign {kind: "clip"} → PUT, no confirm); returns the upload id. */
+    suspend fun uploadClipFile(file: java.io.File, onProgress: (Float) -> Unit = {}): String =
         throw ApiException("unsupported", "Uploading files needs the studio server")
 
     // Edit sessions (workstream 3, plans/api.md "Edit sessions"), owner only. Defaults: not available (local editing only).
@@ -228,6 +235,8 @@ interface MuseApi {
     suspend fun learnGaps(limit: Int = 10): List<LearnGap> = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
     /** A reference's poster PNG (an authenticated route, so not an image URL); null when it has expired. */
     suspend fun referencePoster(referenceId: String): ByteArray? = null
+    /** A shot's keyframe from the reference (PNG; the Recipe's tiles). Null when there is none. */
+    suspend fun referenceSlotThumb(referenceId: String, slotId: String): ByteArray? = null
     /**
      * What the editor's AI helpers can do now (`GET /v1/editor/features`). `matte.available` is false while the cut-out
      * runs on the mock: Remove background and Tap to keep then read "Coming soon". A server without it: all available.
@@ -258,6 +267,8 @@ interface MuseApi {
         throw ApiException("not_found", "This studio server can't read links yet · save the video and share the file")
     /** The reference's state and step while it is analysed, and its recipe once ready. */
     suspend fun reference(id: String): studio.muse.core.edit.RecipeReference = throw ApiException("not_found", "Reference not found")
+    /** A failed reference analysed again (WS1 c47f9ef; a lighter analysis after `analysis_crashed`). 409 not_failed · 409 video_gone. */
+    suspend fun retryReference(id: String): studio.muse.core.edit.RecipeReference = throw ApiException("not_found", "This studio server can't retry an analysis yet")
     /** The studio's references, newest first (Recreate's start page). */
     suspend fun listReferences(): List<studio.muse.core.edit.RecipeReference> = emptyList()
     // Recreate phases 2–3 (plans/api.md "Recreate this edit · slots and assembly"): match (free), price (nothing held),
@@ -268,10 +279,10 @@ interface MuseApi {
     /** A shot's price as a new shot. Nothing is held. */
     /** [method]: "swap" | "generate" (null: the server's default, swap when it can run); [keepBackground]: swap only. */
     /** [locationId]: "Use your own setting" with one of the studio's locations (free); without it the brief's place picks one, or a plate is made (priced in). */
-    suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String? = null, method: String? = null, keepBackground: Boolean? = null, locationId: String? = null): studio.muse.core.edit.RecreateSlotEstimate =
+    suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String? = null, method: String? = null, keepBackground: Boolean? = null, locationId: String? = null, engineModel: String? = null, imageModel: String? = null): studio.muse.core.edit.RecreateSlotEstimate =
         throw ApiException("not_found", "This studio server can't build recipes yet")
     /** Makes a shot: an ordinary Suite job, held and charged. Only after the person confirmed the total. */
-    suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String? = null, method: String? = null, keepBackground: Boolean? = null, locationId: String? = null): studio.muse.core.edit.RecreateFillStart =
+    suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String? = null, method: String? = null, keepBackground: Boolean? = null, locationId: String? = null, engineModel: String? = null, imageModel: String? = null): studio.muse.core.edit.RecreateFillStart =
         throw ApiException("not_found", "This studio server can't build recipes yet")
     /** Builds the edit in an edit session: [slots] is slotId → takeId or jobId. */
     suspend fun applyRecipe(id: String, sessionId: String, baseRevision: Int?, slots: Map<String, String>): studio.muse.core.edit.RecreateApplyResult =
