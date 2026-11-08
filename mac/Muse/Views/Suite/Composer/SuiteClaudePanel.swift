@@ -96,20 +96,18 @@ struct SuiteClaudeAskRow: View {
 
     var body: some View {
         let c = store.suite.claude
+        let seconds = c.assist?.request?.duration ?? store.suite.composer.duration
         VStack(alignment: .leading, spacing: Space.s2) {
-            HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
-                Text(SuiteClaudeWords.askTitle).scaled(t.scale.label, t.roles.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: Space.s2)
-                Text(Pricing.money(pending.maxUsd)).font(t.scale.label.font).monospacedDigit().foregroundStyle(t.roles.ink)
-            }
-            if let note = c.priceNote { Text(note).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true) }
+            Text(SuiteClaudeWords.askTitle).scaled(t.scale.label, t.roles.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(c.priceNote ?? SuiteClaudeWords.askBody).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: Space.s2) {
                 Spacer(minLength: 0)
                 SuiteToolButton(title: "Decline", disabled: c.answering) { store.answerSuiteAsk(approve: false) }
                     .accessibilityLabel("Decline Claude's request to generate")
-                SuiteToolButton(title: "Review price", disabled: c.answering) { c.confirmOpen = true }
-                    .help("Opens the Generate confirmation. Nothing is spent until you press Generate there.")
+                // Opens the confirmation (where the press approves); the row itself never spends.
+                SuiteToolButton(title: SuiteClaudeWords.generate(seconds: seconds, usd: pending.maxUsd), disabled: c.answering) { c.confirmOpen = true }
+                    .help("Opens the confirmation. Nothing is made until you press Generate there.")
             }
         }
         .padding(Space.s3)
