@@ -87,6 +87,12 @@ extension AppStore {
             let c = try await api.checkImportLink(raw)
             if Task.isCancelled { return }
             if let p = c.problem { linkImport.problem = p; return }
+            // Imported before: that import, nothing downloaded.
+            if var hit = c.cached {
+                hit.cached = true
+                finishLinkImport(hit)
+                return
+            }
             if let u = c.url, !u.isEmpty { link = u }
             platform = c.platform
         } catch {
@@ -170,7 +176,7 @@ extension AppStore {
                 clipFile = nil
                 clipThumb = c.thumb
                 openTool(.swap)
-                showToast("Imported \(c.name). It's the clip to swap into now.")
+                showToast(r.cached ? "You imported this link before: \(c.name) is the clip to swap into now." : "Imported \(c.name). It's the clip to swap into now.")
             } else {
                 showToast("Imported. Choose it as the clip in Swap.")
             }

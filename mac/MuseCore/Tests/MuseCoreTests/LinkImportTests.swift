@@ -26,6 +26,17 @@ final class LinkImportTests: XCTestCase {
         let nested = try JSONDecoder().decode(LinkImportResult.self, from: Data(#"{"clip":\#(clip)}"#.utf8))
         XCTAssertEqual(nested.clip?.name, "Dance")
         XCTAssertNil(nested.take)
+        // WS12's Import: a bare Clip with its source fields; the poster becomes the thumb.
+        let imp = #"{"id":"imp_1","name":"Reel","durationSec":12,"width":720,"height":1280,"fps":30,"checks":[],"source":"import","sourceUrl":"https://www.instagram.com/reel/x/","platform":"instagram","bytes":1000,"posterUrl":"https://cdn/p.jpg","videoUrl":"https://cdn/v.mp4","videoKey":"imports/v.mp4","uploadId":"up_1","createdBy":"u1","createdAt":1,"cached":true}"#
+        let i = try JSONDecoder().decode(LinkImportResult.self, from: Data(imp.utf8))
+        XCTAssertEqual(i.clip?.id, "imp_1")
+        XCTAssertEqual(i.clip?.thumb?.url, "https://cdn/p.jpg")
+        XCTAssertEqual(i.videoKey, "imports/v.mp4")
+        XCTAssertTrue(i.cached)
+        let check = try JSONDecoder().decode(LinkImportCheck.self, from: Data(#"{"allowed":true,"url":"https://www.instagram.com/reel/x/","platform":"instagram","purpose":"import","cached":\#(imp)}"#.utf8))
+        XCTAssertEqual(check.cached?.clip?.id, "imp_1")
+        let no = try JSONDecoder().decode(LinkImportCheck.self, from: Data(#"{"allowed":false,"code":"too_long","reason":"Imports can be up to 30 s (this one is 42 s)"}"#.utf8))
+        XCTAssertEqual(no.problem?.code, "too_long")
     }
 
     func testDemoImportGivesTheSwapAClip() async throws {
