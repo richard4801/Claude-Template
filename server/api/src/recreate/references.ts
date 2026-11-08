@@ -20,6 +20,8 @@ import { buildProject, type AssembleOptions, type TakeInfo } from './assemble.js
 import { BriefSchema, matchSlots, shotRequestFor, withBriefs, type Candidate } from './slots.js';
 import { learningOf } from '../editor/learn.js';
 import { pinnedDirectives, provenStart } from './playbook.js';
+import { rendersOf, type RenderState } from '../editor/renders.js';
+import type { EditProject } from '../editor/model.js';
 import { checkInfo, FALLBACK, linkError, normalizeLink, tiktokDownloadsOff, ytDlp, type Resolver } from './links.js';
 import { recreateReferences } from './schema.js';
 
@@ -40,6 +42,8 @@ export type FillState = {
   applied?: { sessionId: string; revision: number; at: number; slots: Record<string, string>; sources: Record<string, RecipeSource>; match: MatchScore };
   /** Gap keys already reported to the learning editor for this reference (each once). */
   gapsReported?: string[];
+  /** Exports made from this reference (storage keys), deleted with it. */
+  exports?: string[];
 };
 export type RecipeSource = { recipeId: string; slotId?: string; textId?: string; transitionAt?: number };
 export type MatchScore = { overall: number; cuts: number; text: number; ramps: number; grade: number; shots: number; perSlot: { slotId: string; score: number }[] };
@@ -417,6 +421,62 @@ export class RecreateReferences {
     return out;
   }
 
+  // ------------------------------------------------------------------ export (plan step 7, Release 1)
+  private exportKey = (r: Row, sessionId: string, revision: number, sound: ExportSound) => `rx/${r.studioId}/${r.id}/export-${sessionId}-r${revision}-${sound}.mp4`;
+  private exportView(r: Row, sessionId: string, sound: ExportSound, st: RenderState | null, revision: number) {
+    const recipe = r.recipe as Recipe;
+    const q = `sessionId=${encodeURIComponent(sessionId)}&sound=${sound}&revision=${revision}`;
+    return {
+      referenceId: r.id, sessionId, revision, sound, state: st?.state ?? 'none',
+      ...(st?.state === 'ready' ? { url: `${this.ctx.config.PUBLIC_URL ?? ''}/v1/recreate/references/${r.id}/export.mp4?${q}`, durationSec: st.durationSec, width: st.width, height: st.height, unsupported: st.unsupported ?? [] } : {}),
+      ...(st?.error ? { error: st.error } : {}),
+      useThisSound: useThisSound(r.sourceUrl, sound, recipe.source.durationSec),
+    };
+  }
+  private exportBody(body: unknown) {
+    const b = parse(z.object({ sessionId: z.string().min(1).max(80), sound: z.enum(['guide', 'silent']).optional(), revision: z.coerce.number().int().min(0).optional() }).strict(), body);
+    return { ...b, sound: (b.sound ?? 'guide') as ExportSound };
+  }
+  /**
+   * Renders the built edit (the session's current revision) for posting, as long as the reference: with the
+   * reference's sound as a guide track, or silent. Either way the response says how to post with the original sound.
+   */
+  async exportEdit(u: AuthUser, id: string, body: unknown) {
+    const b = this.exportBody(body);
+    const { r, recipe } = await this.ready(u, id);
+    const s = await editSessionsOf(this.ctx).row(u, b.sessionId);
+    if (b.sound === 'guide' && (!r.storageKey || !recipe.source.hasAudio))
+      throw new ApiError(409, 'no_reference_sound', r.storageKey ? 'The reference has no sound · export it silent' : 'The reference’s video is gone (deleted after 30 days) · export it silent and add the sound when you post');
+    const key = this.exportKey(r, s.id, s.revision, b.sound);
+    const have = await rendersOf(this.ctx).state(key);
+    if (have && have.state !== 'failed') return this.exportView(r, s.id, b.sound, have, s.revision);
+    const fresh = await this.row(u, id);
+    await this.saveFill(fresh, { ...(fresh.fill ?? {}), exports: [...new Set([...(fresh.fill?.exports ?? []), key])].slice(-20) });
+    const st = rendersOf(this.ctx).start(r.studioId, key, s.revision, s.project as unknown as EditProject, {
+      quality: 'export', durationSec: recipe.source.durationSec, ...(b.sound === 'guide' ? { guideKey: r.storageKey! } : { audio: 'none' as const }),
+    }, async done => {
+      const now = await this.ctx.db.select().from(recreateReferences).where(eq(recreateReferences.id, r.id)).then(x => x[0]);
+      if (now) void this.ctx.hub.emit(now.studioId, v => (v.userId === now.userId || v.role === 'owner' ? { type: 'recreate', export: this.exportView(now, s.id, b.sound, done, s.revision) } : null));
+    });
+    return this.exportView(r, s.id, b.sound, st, s.revision);
+  }
+  /** An export's state (no render started); `revision` defaults to the session's current one. */
+  async exportState(u: AuthUser, id: string, query: unknown) {
+    const b = this.exportBody(query);
+    const r = await this.row(u, id);
+    const s = await editSessionsOf(this.ctx).row(u, b.sessionId);
+    const rev = b.revision ?? s.revision;
+    return this.exportView(r, s.id, b.sound, await rendersOf(this.ctx).state(this.exportKey(r, s.id, rev, b.sound)), rev);
+  }
+  async exportFile(u: AuthUser, id: string, query: unknown) {
+    const b = this.exportBody(query);
+    const r = await this.row(u, id);
+    const s = await editSessionsOf(this.ctx).row(u, b.sessionId);
+    const f = await rendersOf(this.ctx).serve(this.exportKey(r, s.id, b.revision ?? s.revision, b.sound));
+    if (!f) throw notFound('Export');
+    return f;
+  }
+
   /** One slot's thumbnail, cropped from the contact sheet (PNG). `slotId` null = the poster (the first slot). */
   async thumb(u: AuthUser, id: string, slotId: string | null) {
     const r = await this.row(u, id);
@@ -509,6 +569,7 @@ export class RecreateReferences {
   private async purge(r: Row) {
     const st = this.ctx.storage;
     if (r.sourceUrl) await st.delete(`rx/${r.studioId}/${r.id}/info.json`).catch(() => undefined);
+    for (const k of r.fill?.exports ?? []) await rendersOf(this.ctx).remove(k);
     if (r.contactSheetKey) await st.delete(r.contactSheetKey).catch(() => undefined);
     if (r.storageKey) {
       await st.delete(r.storageKey).catch(() => undefined);
@@ -562,4 +623,26 @@ export function sourcesOf(recipe: Recipe, project: import('../editor/model.js').
   // Text items keep the recipe's order (x1, x2, …).
   (project.tracks.find(t => t.kind === 'text')?.items ?? []).forEach((it, i) => { out[it.id] = { recipeId, textId: recipe.text[i]?.id ?? it.id }; });
   return out;
+}
+
+export type ExportSound = 'guide' | 'silent';
+/**
+ * How to post the export with the reference's original sound (the platform's "Use this sound"), so the post carries
+ * the sound properly instead of a copy of it. Platform from the reference's link; general steps for a file.
+ */
+export function useThisSound(sourceUrl: string | null | undefined, sound: ExportSound, durationSec: number) {
+  let platform: 'tiktok' | 'instagram' | 'youtube' | null = null;
+  try { if (sourceUrl) platform = normalizeLink(sourceUrl).platform; } catch { /* a file reference */ }
+  const steps = platform === 'tiktok' ? ['Open the reference on TikTok', 'Tap the sound at the bottom, then “Use this sound”', 'Add this video, with the sound starting at 0:00']
+    : platform === 'instagram' ? ['Open the reference reel on Instagram', 'Tap the audio name, then “Use audio”', 'Add this video, with the audio starting at 0:00']
+    : platform === 'youtube' ? ['Open the reference Short on YouTube', 'Tap “Remix”, then “Use sound”', 'Add this video, with the sound starting at 0:00']
+    : ['Find the reference’s sound on the platform you post to', 'Use it as your post’s sound, starting at 0:00', 'Add this video'];
+  return {
+    platform, ...(sourceUrl ? { sourceUrl } : {}), startAtSec: 0, durationSec,
+    title: 'Post with the original sound',
+    steps,
+    note: sound === 'guide'
+      ? 'The sound in this export is the reference’s, as a guide for the timing. Post with the platform’s own sound (above) rather than this copy: reused audio can be muted or flagged.'
+      : 'This export is silent and timed to the reference’s sound: add the sound when you post (above).',
+  };
 }
