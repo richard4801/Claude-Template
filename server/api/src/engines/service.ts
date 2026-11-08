@@ -11,7 +11,7 @@ import { modelName, type StepOverrides } from '../images/steps.js';
 import { customModelsOf, DEFAULT_LADDER, EXTEND_LADDER, inputSlotsOf, MODELS, modelById, NO_INPUTS, RECAST_LADDER, type InputSlots, type ModelSpec } from '../suite/registry.js';
 import { suiteSettings } from '../suite/schema.js';
 import { editorAi, GPU_SEC } from '../editor/service.js';
-import { IMAGE_CANDIDATES, isPurpose, PURPOSE_INFO, PURPOSES, SWAP_ENGINES, swapEngineById, TOOL_MODEL_KIND, videoPurposes, type EngineKind, type Purpose } from './purposes.js';
+import { IMAGE_CANDIDATES, isPurpose, toPurpose, PURPOSE_INFO, PURPOSES, SWAP_ENGINES, swapEngineById, TOOL_MODEL_KIND, videoPurposes, type EngineKind, type Purpose } from './purposes.js';
 
 export type Price = { basis: 'per_second' | 'per_run' | 'per_output_second'; usd: number };
 export type Engine = {
@@ -190,8 +190,13 @@ export class ModelChoice {
     return { defaults: Object.fromEntries(PURPOSES.map(p => [p, d[p] ?? null])), builtin };
   }
   /** PATCH /v1/engines/defaults (owner): {purpose: model | null}. Each model must be a candidate for its purpose. */
-  async setDefaults(u: AuthUser, body: unknown) {
-    if (!body || typeof body !== 'object' || Array.isArray(body)) throw badRequest('Send {purpose: model or null}');
+  async setDefaults(u: AuthUser, body0: unknown) {
+    if (!body0 || typeof body0 !== 'object' || Array.isArray(body0)) throw badRequest('Send {purpose: model or null}');
+    // Also {purpose, model} (one at a time, WS7's form); purpose aliases are accepted.
+    const b0 = body0 as Record<string, unknown>;
+    const one = typeof b0.purpose === 'string' && Object.keys(b0).every(k => k === 'purpose' || k === 'model');
+    const raw = one ? { [b0.purpose as string]: b0.model ?? null } : b0;
+    const body = Object.fromEntries(Object.entries(raw).map(([k, v]) => [toPurpose(k) ?? k, v]));
     const cur = await this.studioDefaults(u.studioId);
     const next: Record<string, string> = { ...cur };
     for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
@@ -215,9 +220,24 @@ export class ModelChoice {
   }
 
   /** GET /v1/engines[?purpose=]. */
+  /**
+   * The flat fields the apps' existing model picker reads (the /v1/suite/catalog engines[] shape, WS5), so WS6/WS7 reuse
+   * it unchanged: tier/tiers, per-resolution $/s, perSec/perRun, seconds and aspect ratios.
+   */
+  private async pickerFields(u: AuthUser, e: Engine) {
+    const m = e.kind === 'video' ? modelById(e.model) : undefined;
+    const prefs = m ? await this.ctx.suite.prefs(u.studioId) : undefined;
+    const scale = (m && prefs?.models?.[m.id]?.priceScale) ?? 1;
+    const tiers = m ? (['draft', 'standard', 'hd', 'cinema'] as const).filter(t => (prefs?.ladder?.[t]?.length ? prefs.ladder[t]! : DEFAULT_LADDER[t]).some(s => s.model === m.id)) : [];
+    return { tier: tiers[0] ?? null, tiers,
+      resolutions: m ? m.resolutions.map(r => ({ id: r.id, label: r.label, perSec: r4(r.perSec * scale) })) : e.limits.resolutions.map(r => ({ ...r, perSec: null })),
+      perSec: e.price?.basis === 'per_second' ? e.price.usd : null, perRun: e.price?.basis === 'per_run' ? e.price.usd : null,
+      minSeconds: e.limits.minSeconds, maxSeconds: e.limits.maxSeconds, allowedSeconds: e.limits.allowedSeconds, aspectRatios: e.limits.aspectRatios };
+  }
+
   async list(u: AuthUser, purpose?: unknown) {
-    if (purpose !== undefined && purpose !== '' && !isPurpose(purpose)) throw badRequest(`purpose: one of ${PURPOSES.join(', ')}`);
-    const only = isPurpose(purpose) ? purpose : null;
+    if (purpose !== undefined && purpose !== '' && !toPurpose(purpose)) throw badRequest(`purpose: one of ${PURPOSES.join(', ')}`);
+    const only = toPurpose(purpose);
     const studio = await this.studioDefaults(u.studioId);
     const engines = only ? await this.candidates(u, only) : await this.all(u);
     const purposes = [];
@@ -229,9 +249,11 @@ export class ModelChoice {
     }
     const def = only ? purposes[0]!.default : null;
     const shown = u.role === 'owner' ? engines : engines.map(e => this.memberView(e)).filter((e): e is Engine => !!e);
-    const view = shown.map(e => ({ ...e, ...(only ? { default: e.model === def } : {}) }));
-    if (u.role !== 'owner') return { purposes: purposes.map(p => ({ ...p, default: null, rule: p.rule })), engines: view };
-    return { purposes, engines: view };
+    const view = [];
+    for (const e of shown) view.push({ ...(await this.pickerFields(u, e)), ...e, ...(only ? { default: e.model === def } : {}) });
+    const ps = u.role === 'owner' ? purposes : purposes.map(p => ({ ...p, default: null }));
+    // With ?purpose: also `purpose`, `default` and `models` (= engines), the shape WS7 proposed.
+    return { ...(only ? { purpose: only, default: ps[0]!.default, models: view } : {}), purposes: ps, engines: view };
   }
 
   /**

@@ -1815,6 +1815,8 @@ The owner can pick the model anywhere MUSE generates or edits with an image or v
                default?: boolean }] }                     // with ?purpose: the model used when nothing is sent
 ```
 
+- **The apps' picker shape:** every entry also carries the `/v1/suite/catalog` `engines[]` fields (`tier`, `tiers`, `resolutions:[{id,label,perSec}]`, `perSec`, `perRun`, `minSeconds`, `maxSeconds`, `allowedSeconds`, `aspectRatios`). With `?purpose` the response also has `purpose`, `default` and `models` (the same list as `engines`).
+- **Purpose aliases** (WS7's ids): `recreate` = `fill`, `model_photos` = `character`, `background` = `plate`, `camera` = `guide`.
 - `rule:'ladder'`: with nothing picked, the quality ladder chooses per shot. `default` is then the first usable model on Draft.
 - `rule:'fixed'`: one model runs.
 - **Tool prices:**
@@ -1842,7 +1844,7 @@ The estimate is priced on the chosen model, so the confirm shows the right price
 
 ### Studio defaults: `GET/PATCH /v1/engines/defaults` (owner)
 - `GET` → `{ defaults:{P: model|null}, builtin:{P: model|null} }`.
-- `PATCH {swap:'h3-lite', photo:null}`:
+- `PATCH {swap:'h3-lite', photo:null}`, or one purpose at a time as `{purpose:'swap', model:'h3-lite'|null}` (aliases accepted):
   - Each model must be a candidate (`400 engine_not_allowed`).
   - `null` clears it. An unknown purpose → `400`.
 - **Order for a run:** the request's override, then the studio default (if it is still a candidate), then the built-in behaviour.

@@ -79,3 +79,8 @@ export const IMAGE_CANDIDATES = ['black-forest-labs/flux-2-pro', 'black-forest-l
 
 /** Editor helper → the provider model kind behind it (editor/providers.ts). */
 export const TOOL_MODEL_KIND = { matte: 'matte', track: 'track', captions: 'transcribe', denoise: 'separate' } as const;
+
+/** The ids WS7 (Android) proposed, accepted as aliases of the canonical purposes. */
+export const PURPOSE_ALIASES: Record<string, Purpose> = { recreate: 'fill', model_photos: 'character', background: 'plate', camera: 'guide' };
+/** A purpose id or one of its aliases → the purpose (null if neither). */
+export const toPurpose = (v: unknown): Purpose | null => isPurpose(v) ? v : typeof v === 'string' && PURPOSE_ALIASES[v] ? PURPOSE_ALIASES[v]! : null;

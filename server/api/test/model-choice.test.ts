@@ -222,6 +222,21 @@ describe('model choice · API (mock Suite, simulated GPU, fake Replicate)', () =
     expect((await member.req('POST', '/v1/editor/estimate', { kind: 'captions', engineModel: cap, source: { takeId: 't_missing' } })).status).toBe(403);
   });
 
+  it('the apps\' picker shape: catalog fields on every entry, ?purpose aliases, {purpose, default, models}, PATCH {purpose, model}', async () => {
+    const r = (await owner.req('GET', '/v1/engines?purpose=camera')).body; // alias of guide
+    expect(r).toMatchObject({ purpose: 'guide', default: expect.any(String) });
+    expect(r.models).toEqual(r.engines);
+    const k = r.models.find((e: any) => e.model === 'kling-v4');
+    expect(k).toMatchObject({ tier: 'standard', perSec: expect.any(Number), perRun: null, minSeconds: 3, maxSeconds: 30, allowedSeconds: null, aspectRatios: expect.arrayContaining(['9:16']) });
+    expect(k.resolutions[0]).toEqual({ id: '720p', label: '720p', perSec: 0.157 });
+    expect((await owner.req('GET', '/v1/engines?purpose=recreate')).body.purpose).toBe('fill');
+    expect((await owner.req('GET', '/v1/engines?purpose=model_photos')).body.purpose).toBe('character');
+    expect((await owner.req('GET', '/v1/engines?purpose=background')).body.purpose).toBe('plate');
+    const set = (await owner.req('PATCH', '/v1/engines/defaults', { purpose: 'background', model: 'black-forest-labs/flux-2-dev' })).body;
+    expect(set.defaults.plate).toBe('black-forest-labs/flux-2-dev');
+    expect((await owner.req('PATCH', '/v1/engines/defaults', { purpose: 'background', model: null })).body.defaults.plate).toBeNull();
+  });
+
   it('the Suite catalog engines[] carries purposes', async () => {
     const engines = (await owner.req('GET', '/v1/suite/catalog')).body.engines;
     expect(engines.find((e: any) => e.model === 'h3').purposes).toEqual(expect.arrayContaining(['shot', 'swap']));
