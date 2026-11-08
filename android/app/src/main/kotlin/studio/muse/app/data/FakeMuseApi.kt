@@ -94,6 +94,8 @@ class FakeMuseApi(
         FakeCameraApi(now, { models.toList().map { it.id to it.name } }, { events.tryEmit(it) }, stepDelayMs = if (speed == 0.0) 0 else 700)
     }
     override val claude: FakeClaudeApi by lazy { FakeClaudeApi(scope, now, { events.tryEmit(it) }, stepDelayMs = if (speed == 0.0) 0 else 700) }
+    // WS7: bring your own provider (a demo key, a sample catalog, two added models).
+    override val providers: FakeProvidersApi by lazy { FakeProvidersApi(now, if (speed == 0.0) 0 else 400) }
     override fun setToken(token: String?) {}
 
     override suspend fun signIn(req: SignInRequest): AuthResponse {

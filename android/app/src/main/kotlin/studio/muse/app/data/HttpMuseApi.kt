@@ -315,6 +315,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
 
     // Workstream 2: camera sessions
     override val camera: CameraApi by lazy { HttpCameraApi(base, client, json) }
+    // WS7: bring your own provider
+    override val providers: ProvidersApi by lazy { HttpProvidersApi(base, client, json) }
     override val claude: ClaudeApi by lazy { HttpClaudeApi(base, client, json) }
 
     /** Turns `{"error": "...", "code": "..."}` bodies into [ApiException]. The UI words the codes (see [ErrorText]). */

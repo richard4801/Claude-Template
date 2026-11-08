@@ -189,6 +189,20 @@ data class SuiteTier(
     fun slotsFor(engineModel: String?): SuiteInputs = engineModel?.let { id -> models?.firstOrNull { it.model == id }?.inputs } ?: slots
 }
 
+/** A custom engine (`c_…`) in the catalog: its display name, image or video, its limits and its price. Shots and photos take it as engineModel. */
+@Serializable
+data class SuiteCustomEngine(
+    val id: String,
+    val name: String = "",
+    /** image | video */
+    val kind: String = "video",
+    val inputs: ProviderInputs? = null,
+    val minSeconds: Int? = null,
+    val maxSeconds: Int? = null,
+    val aspectRatios: List<String> = emptyList(),
+    val price: MemberPrice? = null,
+)
+
 /** A composer tool the server offers now (`catalog.tools`): shot, swap, recast, storyboard, talking, ugc_ad, extend. */
 @Serializable
 data class SuiteToolInfo(val id: String, val available: Boolean = false, val comingSoon: Boolean = false)
@@ -214,6 +228,8 @@ data class SuiteCatalog(
     val camera: CameraCatalog = CameraCatalog(),
     /** Which composer tools are live; null = an older server (the apps' built-in list applies). */
     val tools: List<SuiteToolInfo>? = null,
+    /** WS7 (BYO provider, WS5 contract v1): models the studio added from its own providers. Members get the members:true ones, display name only. */
+    val custom: List<SuiteCustomEngine>? = null,
 ) {
     fun tier(id: String?) = tiers.firstOrNull { it.id == id }
     /** Whether a tool can Generate: the catalog's word, else [fallback]. */

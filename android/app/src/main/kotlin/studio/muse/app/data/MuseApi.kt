@@ -162,6 +162,8 @@ interface MuseApi {
 
     // Workstream 2: camera sessions (plans/api.md "MCP & camera sessions"), owner only. See CameraApi.kt.
     val camera: CameraApi get() = CameraApi.Unsupported
+    // WS7: bring your own provider (WS5's contract v1), owner only. See ProvidersApi.kt.
+    val providers: ProvidersApi get() = ProvidersApi.Unsupported
     /** Claude on the owner's plan: chat threads relayed to the Mac's Claude Code (plans/api.md "Claude on the owner's plan"). See ClaudeApi.kt. */
     val claude: ClaudeApi get() = ClaudeApi.Unsupported
 

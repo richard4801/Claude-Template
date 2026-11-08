@@ -217,7 +217,7 @@ fun SourceScreen() {
     val clip = s.clip
     ScreenBox {
         Column(Modifier.fillMaxSize()) {
-            TopBar("New video", onBack = { nav.back() })
+            TopBar("Pick a clip", onBack = { nav.back() })
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 130.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 if (clip == null) {
                     T("Pick a short vertical clip with one person. We check it before you spend anything.", m.type.body, m.t.muted)

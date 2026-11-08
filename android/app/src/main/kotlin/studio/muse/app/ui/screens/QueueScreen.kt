@@ -123,12 +123,12 @@ fun QueueScreen() {
             }
             if (s.empty) item(key = "empty", contentType = "empty") {
                 EmptyState("Nothing rendering", "Videos you start show up here while they render, with their price and time left. You're not being charged.",
-                    "New video", { studio.muse.app.ui.screens.suite.composer.openShot(c, nav) })
+                    "Make a video", { studio.muse.app.ui.screens.suite.composer.openShot(c, nav) })
             }
             s.failed?.let { f -> item(key = "failed", contentType = "failed") { FailCard(vm, f) } }
             items(s.all, key = { it.id }, contentType = { "job" }) { j -> JobRow(vm, j) }
             if (!s.empty && s.loaded) item(key = "new", contentType = "cta") {
-                PrimaryButton("New video", { studio.muse.app.ui.screens.suite.composer.openShot(c, nav) }, Modifier.fillMaxWidth().padding(top = MuseSpace.s5), icon = "plus")
+                PrimaryButton("Make a video", { studio.muse.app.ui.screens.suite.composer.openShot(c, nav) }, Modifier.fillMaxWidth().padding(top = MuseSpace.s5), icon = "plus")
             }
         }
         TabBar(Routes.QUEUE)
