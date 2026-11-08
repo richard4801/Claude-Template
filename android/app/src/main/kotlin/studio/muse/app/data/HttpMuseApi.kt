@@ -212,6 +212,13 @@ interface MuseService {
     @POST("v1/recreate/references/{id}/briefs/estimate") suspend fun estimateReferenceBriefs(@Path("id") id: String, @Body r: JsonObject): JsonObject
     @POST("v1/recreate/references/{id}/briefs/write") suspend fun writeReferenceBriefs(@Path("id") id: String, @Body r: JsonObject): JsonObject
     @POST("v1/recreate/references/{id}/slots/{slot}/replace") suspend fun replaceRecipeSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: JsonObject): JsonObject
+    // The server's renders (Compare's preview, Recreate's export): JSON state, then the file (a redirect to storage, or the bytes).
+    @POST("v1/edit-sessions/{id}/preview") suspend fun startEditPreview(@Path("id") id: String, @Body r: JsonObject): JsonObject
+    @GET("v1/edit-sessions/{id}/preview") suspend fun editPreview(@Path("id") id: String, @retrofit2.http.Query("revision") revision: Int?): JsonObject
+    @retrofit2.http.Streaming @GET("v1/edit-sessions/{id}/preview.mp4") suspend fun editPreviewFile(@Path("id") id: String, @retrofit2.http.Query("revision") revision: Int?): retrofit2.Response<okhttp3.ResponseBody>
+    @POST("v1/recreate/references/{id}/export") suspend fun startRecreateExport(@Path("id") id: String, @Body r: JsonObject): JsonObject
+    @GET("v1/recreate/references/{id}/export") suspend fun recreateExport(@Path("id") id: String, @retrofit2.http.Query("sessionId") sessionId: String, @retrofit2.http.Query("sound") sound: String, @retrofit2.http.Query("revision") revision: Int?): JsonObject
+    @retrofit2.http.Streaming @GET("v1/recreate/references/{id}/export.mp4") suspend fun recreateExportFile(@Path("id") id: String, @retrofit2.http.Query("sessionId") sessionId: String, @retrofit2.http.Query("sound") sound: String, @retrofit2.http.Query("revision") revision: Int?): retrofit2.Response<okhttp3.ResponseBody>
     @PATCH("v1/models/{id}") suspend fun patchModelJson(@Path("id") id: String, @Body r: JsonObject): Model
     @GET("v1/suite/feed") suspend fun suiteFeed(@QueryMap q: Map<String, String>): SuiteFeedPage
     @POST("v1/suite/queue") suspend fun queueSuiteShot(@Body r: SuiteShotRequest): QueuedShot
@@ -504,6 +511,22 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         val r = call { referenceVideo(rx(referenceId)) }
         val body = r.body()?.takeIf { r.isSuccessful } ?: return@runCatching false
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { body.byteStream().use { i -> into.outputStream().use { o -> i.copyTo(o) } } }
+        into.length() > 0
+    }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; false }
+
+    // The server's renders (plans/api.md "The built edit, rendered" and Recreate "Export").
+    override suspend fun editPreview(sessionId: String, start: Boolean, revision: Int?) = studio.muse.core.edit.RecreateJson.render(
+        if (start) call { startEditPreview(sessionId, buildJsonObject {}) } else call { editPreview(sessionId, revision) })
+    override suspend fun editPreviewFile(sessionId: String, revision: Int?, into: java.io.File) = saveBody(into) { editPreviewFile(sessionId, revision) }
+    override suspend fun recreateExport(id: String, sessionId: String, sound: String, start: Boolean, revision: Int?) = studio.muse.core.edit.RecreateJson.render(
+        if (start) call { startRecreateExport(rx(id), buildJsonObject { put("sessionId", JsonPrimitive(sessionId)); put("sound", JsonPrimitive(sound)) }) }
+        else call { recreateExport(rx(id), sessionId, sound, revision) })
+    override suspend fun recreateExportFile(id: String, sessionId: String, sound: String, revision: Int?, into: java.io.File) = saveBody(into) { recreateExportFile(rx(id), sessionId, sound, revision) }
+    /** Streams an authenticated file route into [into]; false when it isn't there. */
+    private suspend fun saveBody(into: java.io.File, get: suspend MuseService.() -> retrofit2.Response<okhttp3.ResponseBody>): Boolean = runCatching {
+        val r = call { get() }
+        val body = r.body()?.takeIf { r.isSuccessful } ?: return@runCatching false
+        withContext(Dispatchers.IO) { body.byteStream().use { i -> into.outputStream().use { o -> i.copyTo(o) } } }
         into.length() > 0
     }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; false }
 

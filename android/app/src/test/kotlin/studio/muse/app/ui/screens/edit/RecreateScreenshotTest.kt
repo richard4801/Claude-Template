@@ -34,7 +34,7 @@ class RecreateScreenshotTest(private val theme: String, private val state: Strin
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}_{1}")
         fun params(): List<Array<Any>> = listOf("a", "b", "c", "d").flatMap { t ->
-            listOf("recipe", "confirm", "generating", "waiting", "compare", "picker", "recipe_tablet", "confirm_tablet", "generating_tablet", "waiting_tablet", "compare_tablet", "export", "briefs_tablet", "briefs_confirm").map { arrayOf<Any>(t, it) }
+            listOf("recipe", "confirm", "generating", "waiting", "compare", "picker", "recipe_tablet", "confirm_tablet", "generating_tablet", "waiting_tablet", "compare_tablet", "export", "export_saved", "briefs_tablet", "briefs_confirm").map { arrayOf<Any>(t, it) }
         }
     }
 
@@ -59,11 +59,18 @@ class RecreateScreenshotTest(private val theme: String, private val state: Strin
                 // Shot 2's job reports 42% (the studio's live jobs); "waiting": its job isn't listed, a calm indeterminate state.
                 "generating", "waiting" -> base.copy(buildWhenReady = true, building = true, jobProgress = if (state.startsWith("generating")) mapOf("job_rx_s2" to 42) else emptyMap(),
                     fill = base.fill!!.copy(slots = base.fill!!.slots.map { if (it.state == "to_generate") it.copy(state = "generating", jobId = "job_rx_${it.slotId}") else it }))
-                "compare", "export" -> {
+                "compare", "export", "export_saved" -> {
                     val f = base.fill!!.copy(slots = base.fill!!.slots.map { if (it.state == "to_generate") it.copy(state = "ready", jobId = "job_rx_${it.slotId}") else it })
                     val r = api.applyRecipe(ref.id, "es_demo", 0, f.slots.associate { it.slotId to (it.jobId ?: it.takeId!!) })
                     base.copy(fill = f, match = r.match, mode = RecreateMode.Compare, builtTakeId = takes.firstOrNull()?.id,
-                        export = if (state == "export") RecreateExportUi(guide = true, progress = .4f) else null)
+                        export = when (state) {
+                            "export" -> RecreateExportUi(guide = true, progress = .4f)
+                            // The server's export, saved, with its reminder to post with the original sound.
+                            "export_saved" -> RecreateExportUi(saved = "Saved to this phone, in Movies/MUSE", useThisSound = studio.muse.core.edit.RecreateUseSound("tiktok", "Post with the original sound",
+                                listOf("Open the original on TikTok", "Tap the sound, then Use this sound", "Add this video and line it up at the start"),
+                                "The guide sound is only for timing. Post with the platform's own sound so it counts toward the trend."))
+                            else -> null
+                        })
                 }
                 "briefs", "briefs_confirm" -> base.copy(briefs = studio.muse.core.edit.RecreateBriefsEstimate(true, slots = 7, estimateUsd = .02, label = "Write the shot briefs · about $0.02"),
                     askBriefs = state == "briefs_confirm")

@@ -104,6 +104,8 @@ class RecreateMedia(
     val takeVideo: (String) -> String? = { null },
     /** The built edit, previewed on the device (Compare); without it, your edit plays each shot's take. */
     val edit: androidx.media3.common.Player? = null,
+    /** "Preview of the cut" when the server's preview leaves part of the edit out (plans/api.md "The built edit, rendered"). */
+    val editLabel: String? = null,
 )
 
 private val LocalRecreateMedia = androidx.compose.runtime.staticCompositionLocalOf { RecreateMedia() }
@@ -399,7 +401,10 @@ private fun Player(label: String, ui: RecreateBuildUi, yours: Boolean, picture: 
         else if (built != null) null
         else slot?.let { s -> ui.slotFill(s.id)?.takeId?.let(media.takeVideo)?.let { it to (t - s.startSec).coerceAtLeast(0.0) } }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        T(label, m.scale.label, m.roles.ink, maxLines = 1)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            T(label, m.scale.label, m.roles.ink, maxLines = 1)
+            if (built != null) media.editLabel?.let { T(it, m.scale.caption, m.roles.ink2, maxLines = 1) }
+        }
         Box(Modifier.fillMaxWidth().let { if (height != null) it.height(height) else it.weight(1f) }.clip(RoundedCornerShape(m.radii.container)).background(Color.Black).padding(vertical = 12.dp)
             .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
             Box(Modifier.aspectRatio(9f / 16f, matchHeightConstraintsFirst = true).clip(RoundedCornerShape(4.dp))) {
@@ -762,12 +767,26 @@ private fun ExportSheet(e: RecreateExportUi, a: RecreateActions) {
             Modifier.padding(24.dp).widthIn(max = 460.dp).fillMaxWidth().clip(RoundedCornerShape(m.radii.container)).background(m.roles.canvas).press { }.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            val saved = e.saved
+            if (saved != null) {
+                T("Saved", m.scale.title, m.roles.ink)
+                T(saved, m.scale.body, m.roles.ink2)
+                val use = e.useThisSound
+                if (use != null) {
+                    T(use.title, m.scale.heading, m.roles.ink)
+                    use.steps.forEachIndexed { i, step -> T("${i + 1}. $step", m.scale.body, m.roles.ink) }
+                    use.note?.let { T(it, m.scale.caption, m.roles.ink2) }
+                } else T(studio.muse.core.edit.RecreateExport.REMINDER, m.scale.caption, m.roles.ink2)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { Primary("Done", onClick = a.onExportClose) }
+                return@Column
+            }
             T("Export the edit", m.scale.title, m.roles.ink)
-            LearnSegmented(listOf("With its sound", "Silent"), if (e.guide) 0 else 1, Modifier.fillMaxWidth()) { if (e.progress == null) a.onExportGuide(it == 0) }
+            LearnSegmented(listOf("With its sound", "Silent"), if (e.guide) 0 else 1, Modifier.fillMaxWidth()) { if (!e.busy) a.onExportGuide(it == 0) }
             T(if (e.guide) "The original's sound plays as a guide, so you can check the cuts land on the beat." else "No sound: the cuts are timed for the original's sound.",
                 m.scale.body, m.roles.ink2)
             T(studio.muse.core.edit.RecreateExport.REMINDER, m.scale.caption, m.roles.ink2)
             e.error?.let { T(it, m.scale.caption, m.roles.caution) }
+            if (e.rendering) T("Making the video. This takes about a minute.", m.scale.caption, m.roles.ink2)
             e.progress?.let { p ->
                 Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(m.roles.raised).semantics { contentDescription = "${(p * 100).toInt()}% exported" }) {
                     Box(Modifier.fillMaxWidth(p.coerceIn(0f, 1f)).fillMaxHeight().background(m.roles.accent))
@@ -775,7 +794,7 @@ private fun ExportSheet(e: RecreateExportUi, a: RecreateActions) {
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
                 LearnQuiet("Cancel", onClick = a.onExportClose)
-                Primary(if (e.progress != null) "Exporting" else "Save to this phone", enabled = e.progress == null, onClick = a.onExportRun)
+                Primary(if (e.busy) "Exporting" else "Save to this phone", enabled = !e.busy, onClick = a.onExportRun)
             }
         }
     }

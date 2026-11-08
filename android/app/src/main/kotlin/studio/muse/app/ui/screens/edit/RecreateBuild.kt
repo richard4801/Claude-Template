@@ -31,7 +31,17 @@ import studio.muse.core.edit.RecreateText
 enum class RecreateMode { Recipe, Compare }
 
 /** [guide]: the reference's sound as the guide track (else silent, timed for the sound). [progress]: 0–1 while exporting. */
-data class RecreateExportUi(val guide: Boolean = true, val progress: Float? = null, val error: String? = null)
+/**
+ * The export sheet. [progress]: the device's export (0..1), or null; [rendering]: the studio server is making it (no
+ * fraction). After saving, [saved] says where, and [useThisSound] is the server's reminder to post with the original
+ * sound (null: the general reminder).
+ */
+data class RecreateExportUi(
+    val guide: Boolean = true, val progress: Float? = null, val error: String? = null, val rendering: Boolean = false,
+    val saved: String? = null, val useThisSound: studio.muse.core.edit.RecreateUseSound? = null,
+) {
+    val busy: Boolean get() = progress != null || rendering
+}
 
 /** A take that can fill a shot ("Use one of my takes"). */
 /** [label]: what tells takes with the same title apart ("Take 2 of 3"). */
@@ -197,9 +207,17 @@ class RecreateBuildModel(
     }
 
     fun openExport() = _ui.update { it.copy(export = RecreateExportUi(), playing = false) }
-    fun closeExport() = _ui.update { if (it.export?.progress != null) it else it.copy(export = null) }
-    fun setExportGuide(on: Boolean) = _ui.update { u -> u.copy(export = u.export?.copy(guide = on)) }
-    fun setExportProgress(p: Float?, error: String? = null) = _ui.update { u -> u.copy(export = u.export?.copy(progress = p, error = error)) }
+    fun closeExport() = _ui.update { if (it.export?.busy == true) it else it.copy(export = null) }
+    fun setExportGuide(on: Boolean) = _ui.update { u -> u.copy(export = u.export?.copy(guide = on, error = null)) }
+    fun setExportProgress(p: Float?, error: String? = null) = _ui.update { u -> u.copy(export = u.export?.copy(progress = p, error = error, rendering = false)) }
+    /** The studio server is rendering the export. */
+    fun setExportRendering() = _ui.update { u -> u.copy(export = u.export?.copy(rendering = true, progress = null, error = null)) }
+    /** The original's sound isn't kept any more (409 no_reference_sound): switch to silent and say so. */
+    fun exportNeedsSilent() = _ui.update { u -> u.copy(export = u.export?.copy(guide = false, rendering = false, progress = null,
+        error = "The original's sound isn't kept any more. Export it silent.")) }
+    /** Saved: the sheet stays open with where it went and how to post it with the original sound. */
+    fun exportSaved(message: String, use: studio.muse.core.edit.RecreateUseSound?) = _ui.update { u ->
+        u.copy(export = u.export?.copy(progress = null, rendering = false, error = null, saved = message, useThisSound = use)) }
     fun exportDone(message: String) = _ui.update { it.copy(export = null, message = message) }
 
     fun setJobProgress(p: Map<String, Int>) { if (p != _ui.value.jobProgress) _ui.update { it.copy(jobProgress = p) } }

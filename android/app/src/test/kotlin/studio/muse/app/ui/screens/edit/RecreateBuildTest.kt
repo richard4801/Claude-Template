@@ -189,4 +189,25 @@ class RecreateBuildTest {
             assertEquals("3 from your takes, 4 can’t be made · nothing to pay", model.ui.value.summary)
         } finally { scope.cancel(); work.cancel() }
     }
+
+    @Test fun theExportSheetOffersSilentThenShowsTheReminderWhenSaved() = runBlocking {
+        val api = FakeMuseApi(MainScope(), null, speed = 0.0, genDelayMs = 0)
+        val ref = ready(api)
+        val model = RecreateBuildModel(api, kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default), RecreateBuildUi(ref.id, ref.recipe!!, ref.name), defaultModelId = { "m_demo" }, pollMs = 5)
+        model.openExport()
+        model.setExportRendering()
+        assertTrue(model.ui.value.export!!.busy)
+        model.closeExport() // can't close while the server is making it (Cancel stops the job first)
+        assertNotNull(model.ui.value.export)
+        model.exportNeedsSilent()
+        val e = model.ui.value.export!!
+        assertFalse(e.guide); assertFalse(e.busy)
+        assertEquals("The original's sound isn't kept any more. Export it silent.", e.error)
+        val use = studio.muse.core.edit.RecreateUseSound("tiktok", "Post with the original sound", listOf("Tap Use this sound"), null)
+        model.exportSaved("Saved to this phone, in Movies/MUSE", use)
+        assertEquals(use, model.ui.value.export!!.useThisSound)
+        assertEquals("Saved to this phone, in Movies/MUSE", model.ui.value.export!!.saved)
+        model.closeExport()
+        assertNull(model.ui.value.export)
+    }
 }

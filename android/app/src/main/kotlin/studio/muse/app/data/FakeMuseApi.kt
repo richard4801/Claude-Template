@@ -2,6 +2,8 @@ package studio.muse.app.data
 
 import studio.muse.core.edit.RecipeJson
 import studio.muse.core.edit.RecipeReference
+import studio.muse.core.edit.RecreateRender
+import studio.muse.core.edit.RecreateUseSound
 import studio.muse.core.edit.RecreateReplaceResult
 import studio.muse.core.edit.RecreateBriefsEstimate
 import studio.muse.core.edit.RecreateMatch
@@ -1279,6 +1281,32 @@ class FakeMuseApi(
         if (slotId !in all) throw ApiException("slot_not_in_edit", "This shot isn't in the edit any more · rebuild the edit")
         if (take.startsWith("job_rx_") && (recreateMade[id]?.get(slotId) ?: 0) < 2) throw ApiException("job_not_done", "This shot is still being made")
         RecreateReplaceResult(sessionId, (baseRevision ?: 0) + 1, slotId, "Fixed shot ${all.indexOf(slotId) + 1}")
+    }
+    // Demo: the server's renders (free). The first read says rendering; the next says ready. The file is a stand-in.
+    private val renderPolls = HashMap<String, Int>()
+    /** Tests: the reference's sound isn't kept, so a guide export is refused (409 no_reference_sound). */
+    @Volatile var debugNoReferenceSound = false
+    private fun demoRender(key: String, sessionId: String, start: Boolean, sound: String?): RecreateRender {
+        val n = if (start) 0.also { renderPolls[key] = 0 } else (renderPolls[key] ?: -1) + 1
+        if (n >= 0) renderPolls[key] = n
+        val state = when { n < 0 -> "none"; n == 0 -> "rendering"; else -> "ready" }
+        val use = if (sound == null) null else RecreateUseSound(null, "Post with the original sound",
+            listOf("Open the original post", "Tap its sound, then Use this sound", "Add this video and line it up at the start"),
+            "The guide sound is only for timing. Post with the platform's own sound.")
+        return RecreateRender(sessionId, 1, state, durationSec = 14.2, unsupported = if (sound == null) listOf("captions") else emptyList(), sound = sound, useThisSound = use)
+    }
+    override suspend fun editPreview(sessionId: String, start: Boolean, revision: Int?) = lock.withLock { demoRender("p:$sessionId", sessionId, start, null) }
+    override suspend fun editPreviewFile(sessionId: String, revision: Int?, into: java.io.File): Boolean {
+        if (lock.withLock { (renderPolls["p:$sessionId"] ?: 0) < 1 }) return false
+        into.writeBytes(ByteArray(16)); return true
+    }
+    override suspend fun recreateExport(id: String, sessionId: String, sound: String, start: Boolean, revision: Int?) = lock.withLock {
+        if (sound == "guide" && debugNoReferenceSound) throw ApiException("no_reference_sound", "The original's sound isn't kept any more · export it silent")
+        demoRender("e:$id:$sessionId:$sound", sessionId, start, sound)
+    }
+    override suspend fun recreateExportFile(id: String, sessionId: String, sound: String, revision: Int?, into: java.io.File): Boolean {
+        if (lock.withLock { (renderPolls["e:$id:$sessionId:$sound"] ?: 0) < 1 }) return false
+        into.writeBytes(ByteArray(16)); return true
     }
     override suspend fun applyRecipe(id: String, sessionId: String, baseRevision: Int?, slots: Map<String, String>) = lock.withLock {
         val all = recreateSlots(id)
