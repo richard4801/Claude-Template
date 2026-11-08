@@ -26,7 +26,9 @@ ENV NODE_ENV=production \
     PORT=8000 \
     NODE_OPTIONS=--max-old-space-size=384
 # ffmpeg/ffprobe for Replicate renders: pad the source to whole seconds, trim the result back, mux the audio, thumbnails.
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+# tesseract (English) reads on-screen words for Recreate this edit (workstream 1; about +22 MB; one item at a time,
+# OMP_THREAD_LIMIT=1). Set TESSERACT_PATH to empty to switch it off.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg tesseract-ocr tesseract-ocr-eng && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist

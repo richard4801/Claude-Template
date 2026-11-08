@@ -324,7 +324,7 @@ export class RecreateReferences {
     if (!r || r.state !== 'analyzing' || !r.storageKey) return;
     const set = async (v: Partial<Row>) => { const [n] = await db.update(recreateReferences).set(v).where(eq(recreateReferences.id, id)).returning(); if (n) this.emit(n); };
     try {
-      const out = await this.withLocal(r.storageKey, f => analyzeReference({ ffmpeg: c.FFMPEG_PATH, ffprobe: c.FFPROBE_PATH }, f, {
+      const out = await this.withLocal(r.storageKey, f => analyzeReference({ ffmpeg: c.FFMPEG_PATH, ffprobe: c.FFPROBE_PATH, ...(c.TESSERACT_PATH ? { tesseract: c.TESSERACT_PATH } : {}) }, f, {
         maxSec: MAX_REFERENCE_SEC + 1, progress: (p, phase) => set({ progress: Math.round(5 + p * 90), phase }),
       }));
       let sheet: string | null = null;

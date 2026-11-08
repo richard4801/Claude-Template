@@ -1203,7 +1203,7 @@ How each part is found:
 - **Speed:** from how much the picture changes per frame against the slot's median. This is a proxy for optical flow, so `confidence` is about 0.55.
 - **Beats:** `detectBeats` on the audio. **Action peaks:** `find_action_peaks`'s detector.
 - **Text:** caption-like regions (bands of sharp edges in near-white or near-black strokes), tracked at 6 fps for their box, size, colour and in/out times.
-  - `words` stays `null` until OCR is approved; Claude reads the words from the contact sheet. This is logged in `gaps`.
+  - `words`: tesseract (English, in the API image) reads each item once, at its middle, from a frame up to 720 px wide: the box is cropped, scaled and cleaned up (the caption's fill kept as black on white), and up to three variants are tried until one reads with confidence ≥ 85. Words under 55 stay `null`, as do items past the first 20 and every item when `TESSERACT_PATH` is empty or tesseract is missing. Claude reads what is left from the contact sheet; the `text:words` gap says so.
 - **Grade:** k-means of the keyframes gives 5 swatches. The Suite's `swatchGrade` turns them into the look pack's `Grade` (the palette→LUT path), and `look` is the nearest existing palette.
 - **Pose:** `status: "pending"` until the pose engine is approved.
 

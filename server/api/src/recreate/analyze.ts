@@ -8,6 +8,7 @@ import type { Rig } from '../suite/drafts.js';
 import { contactSheet, grabFrame, gradeOf, sheetTiles, type GradeInfo } from './frames.js';
 import { cameraOf, classifyCut, findGradual, motionTracker, peaksIn, shotsOf, speedOf, transitionFrames, type CameraMotion, type Speed, type Transition } from './signals.js';
 import { findText, type TextItem } from './text.js';
+import { readWords } from './ocr.js';
 
 export const RECIPE_SCHEMA = 'muse.recipe/1';
 export const ANALYZER_VERSION = '1.0.0';
@@ -65,7 +66,7 @@ export type AnalyzeHooks = { progress?: (f: number, phase: string) => void | Pro
  * The recipe of the video at `input` (a local path or URL). Returns the recipe plus the contact sheet PNG for the
  * caller to store (its URL goes into `recipe.contactSheet`).
  */
-export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string }, input: string, o: AnalyzeHooks = {}): Promise<{ recipe: Recipe; contactSheetPng: Buffer | null }> {
+export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; tesseract?: string }, input: string, o: AnalyzeHooks = {}): Promise<{ recipe: Recipe; contactSheetPng: Buffer | null }> {
   const t0 = Date.now(), maxSec = o.maxSec ?? 61;
   const info = await probe(cfg.ffprobe, input);
   if (!info.width || !info.height) throw new Error('no video stream');
@@ -88,7 +89,8 @@ export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string },
   }
 
   await o.progress?.(0.6, 'Reading the text');
-  const text = await findText(cfg.ffmpeg, input, Math.round(192 * info.height / info.width), maxSec);
+  const found = await findText(cfg.ffmpeg, input, Math.round(192 * info.height / info.width), maxSec);
+  const text = cfg.tesseract ? await readWords({ ffmpeg: cfg.ffmpeg, tesseract: cfg.tesseract }, input, found, info) : found;
 
   await o.progress?.(0.75, 'Reading the look');
   const kw = 200, kh = Math.max(2, Math.round(kw * info.height / info.width / 2) * 2);
@@ -130,7 +132,7 @@ export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string },
   // Stable keys, so workstream 3's gap list can count them across studios.
   const gaps: Gap[] = [
     ...transitions.filter(t => t.kind === 'unknown').map((t): Gap => ({ key: `transition:unknown@${t.atSec.toFixed(2)}`, kind: 'transition', what: 'A transition MUSE couldn’t name', atSec: t.atSec, note: 'Not supported yet' })),
-    ...(text.some(x => !x.words) ? [{ key: 'text:words', kind: 'text' as const, what: 'On-screen words', note: 'Not read yet: Claude reads them from the contact sheet' }] : []),
+    ...(text.some(x => !x.words) ? [{ key: 'text:words', kind: 'text' as const, what: 'On-screen words', note: text.every(x => !x.words) ? 'Not read: Claude reads them from the contact sheet' : 'Some weren’t read: Claude reads them from the contact sheet' }] : []),
     ...(slots.some(s => s.pose.status === 'pending') ? [{ key: 'pose', kind: 'motion' as const, what: 'Body poses', note: 'Not read yet' }] : []),
   ];
 
