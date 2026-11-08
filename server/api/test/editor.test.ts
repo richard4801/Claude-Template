@@ -524,3 +524,33 @@ describe('Edit suite additions', () => {
     } finally { await a.close(); }
   });
 });
+
+// Wave 1 (plans/edit-parity.md): freeze frames, mirror, blend modes, blur fill.
+describe('editor wave 1', () => {
+  it('a hold lasts holdSec, shows one frame, is silent and has no caption words', async () => {
+    const M = await import('../src/editor/model.js');
+    const p = (JSON.parse(fs.readFileSync(path.join(FIX, 'projects.json'), 'utf8')) as { name: string; project: M.EditProject }[]).find(x => x.name.startsWith('wave 1'))!.project;
+    const hold = M.mainTrack(p).items[1] as M.VideoClip;
+    expect(M.clipLength(hold)).toBe(1.5);
+    expect(M.clipSourceAt(hold, 1.2)).toBe(hold.inSec);
+    expect(M.durationSec(p)).toBeCloseTo(4 + 1.5 - 0.4 + 6, 6);
+    const env = M.audioEnvelope(p, 'main', hold.id);
+    expect(env.every(g => g.gain === 0)).toBe(true);
+    const tl = M.timeline(p)[1]!;
+    expect(M.captionWords(p).every(w => w.startSec < tl.startSec + 1e-9 || w.startSec >= tl.endSec - 1e-9 || w.endSec <= tl.startSec + 0.4 + 1e-9)).toBe(true);
+    expect(M.validate(p).durationSec).toBeCloseTo(M.durationSec(p), 6);
+  });
+  it('blend modes match the W3C formulas', async () => {
+    const M = await import('../src/editor/model.js');
+    expect(M.blendPixel('multiply', [0.5, 0.5, 0.5], [0.4, 1, 0], 1)).toEqual([0.2, 0.5, 0]);
+    expect(M.blendPixel('screen', [0.5, 0.5, 0.5], [0.5, 0, 1], 1)).toEqual([0.75, 0.5, 1]);
+    expect(M.blendPixel('add', [0.7, 0.2, 0], [0.5, 0.2, 0], 0.5)).toEqual([0.75, 0.3, 0]);
+    expect(M.blendChannel('softLight', 0.25, 0.5)).toBeCloseTo(0.375, 9);
+  });
+  it('a flip swaps the corners about the centre', async () => {
+    const M = await import('../src/editor/model.js');
+    const plain = M.itemCorners({ width: 100, height: 100 }, 100, 100, 'contain');
+    const flipped = M.itemCorners({ width: 100, height: 100 }, 100, 100, 'contain', { flipX: true });
+    expect(flipped[0]).toEqual(plain[1]); expect(flipped[1]).toEqual(plain[0]);
+  });
+});

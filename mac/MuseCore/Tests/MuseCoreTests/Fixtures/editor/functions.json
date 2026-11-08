@@ -6745,6 +6745,1478 @@
    ]
   }
  ],
+ "wave1": {
+  "blend": [
+   {
+    "mode": "normal",
+    "top": [
+     0.2,
+     0.5,
+     0.9
+    ],
+    "below": [
+     0.6,
+     0.3,
+     0.1
+    ],
+    "a": 1,
+    "out": [
+     0.2,
+     0.5,
+     0.9
+    ]
+   },
+   {
+    "mode": "normal",
+    "top": [
+     0.8,
+     0.1,
+     0.45
+    ],
+    "below": [
+     0.2,
+     0.7,
+     0.5
+    ],
+    "a": 1,
+    "out": [
+     0.8,
+     0.1,
+     0.45
+    ]
+   },
+   {
+    "mode": "normal",
+    "top": [
+     0.6,
+     0.6,
+     0.6
+    ],
+    "below": [
+     0.1,
+     0.24,
+     0.9
+    ],
+    "a": 0.5,
+    "out": [
+     0.35,
+     0.42,
+     0.75
+    ]
+   },
+   {
+    "mode": "normal",
+    "top": [
+     1,
+     0,
+     0.5
+    ],
+    "below": [
+     0.5,
+     0.5,
+     0.5
+    ],
+    "a": 0,
+    "out": [
+     0.5,
+     0.5,
+     0.5
+    ]
+   },
+   {
+    "mode": "multiply",
+    "top": [
+     0.2,
+     0.5,
+     0.9
+    ],
+    "below": [
+     0.6,
+     0.3,
+     0.1
+    ],
+    "a": 1,
+    "out": [
+     0.12,
+     0.15,
+     0.09
+    ]
+   },
+   {
+    "mode": "multiply",
+    "top": [
+     0.8,
+     0.1,
+     0.45
+    ],
+    "below": [
+     0.2,
+     0.7,
+     0.5
+    ],
+    "a": 1,
+    "out": [
+     0.16,
+     0.07,
+     0.225
+    ]
+   },
+   {
+    "mode": "multiply",
+    "top": [
+     0.6,
+     0.6,
+     0.6
+    ],
+    "below": [
+     0.1,
+     0.24,
+     0.9
+    ],
+    "a": 0.5,
+    "out": [
+     0.08,
+     0.192,
+     0.72
+    ]
+   },
+   {
+    "mode": "multiply",
+    "top": [
+     1,
+     0,
+     0.5
+    ],
+    "below": [
+     0.5,
+     0.5,
+     0.5
+    ],
+    "a": 0,
+    "out": [
+     0.5,
+     0.5,
+     0.5
+    ]
+   },
+   {
+    "mode": "screen",
+    "top": [
+     0.2,
+     0.5,
+     0.9
+    ],
+    "below": [
+     0.6,
+     0.3,
+     0.1
+    ],
+    "a": 1,
+    "out": [
+     0.68,
+     0.65,
+     0.91
+    ]
+   },
+   {
+    "mode": "screen",
+    "top": [
+     0.8,
+     0.1,
+     0.45
+    ],
+    "below": [
+     0.2,
+     0.7,
+     0.5
+    ],
+    "a": 1,
+    "out": [
+     0.84,
+     0.73,
+     0.725
+    ]
+   },
+   {
+    "mode": "screen",
+    "top": [
+     0.6,
+     0.6,
+     0.6
+    ],
+    "below": [
+     0.1,
+     0.24,
+     0.9
+    ],
+    "a": 0.5,
+    "out": [
+     0.37,
+     0.468,
+     0.93
+    ]
+   },
+   {
+    "mode": "screen",
+    "top": [
+     1,
+     0,
+     0.5
+    ],
+    "below": [
+     0.5,
+     0.5,
+     0.5
+    ],
+    "a": 0,
+    "out": [
+     0.5,
+     0.5,
+     0.5
+    ]
+   },
+   {
+    "mode": "overlay",
+    "top": [
+     0.2,
+     0.5,
+     0.9
+    ],
+    "below": [
+     0.6,
+     0.3,
+     0.1
+    ],
+    "a": 1,
+    "out": [
+     0.36,
+     0.3,
+     0.18
+    ]
+   },
+   {
+    "mode": "overlay",
+    "top": [
+     0.8,
+     0.1,
+     0.45
+    ],
+    "below": [
+     0.2,
+     0.7,
+     0.5
+    ],
+    "a": 1,
+    "out": [
+     0.32,
+     0.46,
+     0.45
+    ]
+   },
+   {
+    "mode": "overlay",
+    "top": [
+     0.6,
+     0.6,
+     0.6
+    ],
+    "below": [
+     0.1,
+     0.24,
+     0.9
+    ],
+    "a": 0.5,
+    "out": [
+     0.11,
+     0.264,
+     0.91
+    ]
+   },
+   {
+    "mode": "overlay",
+    "top": [
+     1,
+     0,
+     0.5
+    ],
+    "below": [
+     0.5,
+     0.5,
+     0.5
+    ],
+    "a": 0,
+    "out": [
+     0.5,
+     0.5,
+     0.5
+    ]
+   },
+   {
+    "mode": "softLight",
+    "top": [
+     0.2,
+     0.5,
+     0.9
+    ],
+    "below": [
+     0.6,
+     0.3,
+     0.1
+    ],
+    "a": 1,
+    "out": [
+     0.456,
+     0.3,
+     0.2568
+    ]
+   },
+   {
+    "mode": "softLight",
+    "top": [
+     0.8,
+     0.1,
+     0.45
+    ],
+    "below": [
+     0.2,
+     0.7,
+     0.5
+    ],
+    "a": 1,
+    "out": [
+     0.3488,
+     0.532,
+     0.475
+    ]
+   },
+   {
+    "mode": "softLight",
+    "top": [
+     0.6,
+     0.6,
+     0.6
+    ],
+    "below": [
+     0.1,
+     0.24,
+     0.9
+    ],
+    "a": 0.5,
+    "out": [
+     0.1196,
+     0.264998,
+     0.904868
+    ]
+   },
+   {
+    "mode": "softLight",
+    "top": [
+     1,
+     0,
+     0.5
+    ],
+    "below": [
+     0.5,
+     0.5,
+     0.5
+    ],
+    "a": 0,
+    "out": [
+     0.5,
+     0.5,
+     0.5
+    ]
+   },
+   {
+    "mode": "darken",
+    "top": [
+     0.2,
+     0.5,
+     0.9
+    ],
+    "below": [
+     0.6,
+     0.3,
+     0.1
+    ],
+    "a": 1,
+    "out": [
+     0.2,
+     0.3,
+     0.1
+    ]
+   },
+   {
+    "mode": "darken",
+    "top": [
+     0.8,
+     0.1,
+     0.45
+    ],
+    "below": [
+     0.2,
+     0.7,
+     0.5
+    ],
+    "a": 1,
+    "out": [
+     0.2,
+     0.1,
+     0.45
+    ]
+   },
+   {
+    "mode": "darken",
+    "top": [
+     0.6,
+     0.6,
+     0.6
+    ],
+    "below": [
+     0.1,
+     0.24,
+     0.9
+    ],
+    "a": 0.5,
+    "out": [
+     0.1,
+     0.24,
+     0.75
+    ]
+   },
+   {
+    "mode": "darken",
+    "top": [
+     1,
+     0,
+     0.5
+    ],
+    "below": [
+     0.5,
+     0.5,
+     0.5
+    ],
+    "a": 0,
+    "out": [
+     0.5,
+     0.5,
+     0.5
+    ]
+   },
+   {
+    "mode": "lighten",
+    "top": [
+     0.2,
+     0.5,
+     0.9
+    ],
+    "below": [
+     0.6,
+     0.3,
+     0.1
+    ],
+    "a": 1,
+    "out": [
+     0.6,
+     0.5,
+     0.9
+    ]
+   },
+   {
+    "mode": "lighten",
+    "top": [
+     0.8,
+     0.1,
+     0.45
+    ],
+    "below": [
+     0.2,
+     0.7,
+     0.5
+    ],
+    "a": 1,
+    "out": [
+     0.8,
+     0.7,
+     0.5
+    ]
+   },
+   {
+    "mode": "lighten",
+    "top": [
+     0.6,
+     0.6,
+     0.6
+    ],
+    "below": [
+     0.1,
+     0.24,
+     0.9
+    ],
+    "a": 0.5,
+    "out": [
+     0.35,
+     0.42,
+     0.9
+    ]
+   },
+   {
+    "mode": "lighten",
+    "top": [
+     1,
+     0,
+     0.5
+    ],
+    "below": [
+     0.5,
+     0.5,
+     0.5
+    ],
+    "a": 0,
+    "out": [
+     0.5,
+     0.5,
+     0.5
+    ]
+   },
+   {
+    "mode": "add",
+    "top": [
+     0.2,
+     0.5,
+     0.9
+    ],
+    "below": [
+     0.6,
+     0.3,
+     0.1
+    ],
+    "a": 1,
+    "out": [
+     0.8,
+     0.8,
+     1
+    ]
+   },
+   {
+    "mode": "add",
+    "top": [
+     0.8,
+     0.1,
+     0.45
+    ],
+    "below": [
+     0.2,
+     0.7,
+     0.5
+    ],
+    "a": 1,
+    "out": [
+     1,
+     0.8,
+     0.95
+    ]
+   },
+   {
+    "mode": "add",
+    "top": [
+     0.6,
+     0.6,
+     0.6
+    ],
+    "below": [
+     0.1,
+     0.24,
+     0.9
+    ],
+    "a": 0.5,
+    "out": [
+     0.4,
+     0.54,
+     0.95
+    ]
+   },
+   {
+    "mode": "add",
+    "top": [
+     1,
+     0,
+     0.5
+    ],
+    "below": [
+     0.5,
+     0.5,
+     0.5
+    ],
+    "a": 0,
+    "out": [
+     0.5,
+     0.5,
+     0.5
+    ]
+   }
+  ],
+  "corners": [
+   {
+    "canvas": {
+     "width": 1080,
+     "height": 1920
+    },
+    "w": 720,
+    "h": 1280,
+    "fit": "contain",
+    "t": {},
+    "corners": [
+     [
+      0,
+      0
+     ],
+     [
+      1080,
+      0
+     ],
+     [
+      1080,
+      1920
+     ],
+     [
+      0,
+      1920
+     ]
+    ]
+   },
+   {
+    "canvas": {
+     "width": 1080,
+     "height": 1920
+    },
+    "w": 720,
+    "h": 1280,
+    "fit": "contain",
+    "t": {
+     "flipX": true
+    },
+    "corners": [
+     [
+      1080,
+      0
+     ],
+     [
+      0,
+      0
+     ],
+     [
+      0,
+      1920
+     ],
+     [
+      1080,
+      1920
+     ]
+    ]
+   },
+   {
+    "canvas": {
+     "width": 1080,
+     "height": 1920
+    },
+    "w": 512,
+    "h": 512,
+    "fit": "contain",
+    "t": {
+     "x": 0.7,
+     "y": 0.3,
+     "scale": 0.5,
+     "rotation": 15,
+     "flipX": true
+    },
+    "corners": [
+     [
+      1086.681115,
+      385.081169
+     ],
+     [
+      565.081169,
+      245.318885
+     ],
+     [
+      425.318885,
+      766.918831
+     ],
+     [
+      946.918831,
+      906.681115
+     ]
+    ]
+   },
+   {
+    "canvas": {
+     "width": 1920,
+     "height": 1080
+    },
+    "w": 1080,
+    "h": 1920,
+    "fit": "cover",
+    "t": {
+     "flipX": true,
+     "flipY": true,
+     "rotation": -90
+    },
+    "corners": [
+     [
+      2666.666667,
+      -420
+     ],
+     [
+      2666.666667,
+      1500
+     ],
+     [
+      -746.666667,
+      1500
+     ],
+     [
+      -746.666667,
+      -420
+     ]
+    ]
+   }
+  ],
+  "hold": {
+   "clip": {
+    "id": "c2",
+    "asset": "src",
+    "inSec": 4,
+    "outSec": 4.1,
+    "speed": 1,
+    "holdSec": 1.5,
+    "transitionIn": {
+     "kind": "fade",
+     "durationSec": 0.4
+    }
+   },
+   "length": 1.5,
+   "sourceAt": [
+    {
+     "t": 0,
+     "src": 4
+    },
+    {
+     "t": 0.7,
+     "src": 4
+    },
+    {
+     "t": 1.5,
+     "src": 4
+    }
+   ],
+   "timeAt": 0,
+   "cuts": [
+    {
+     "cuts": [
+      {
+       "startSec": 3.9,
+       "endSec": 4.2
+      }
+     ],
+     "project": {
+      "version": 2,
+      "sourceTakeId": "take_src",
+      "canvas": {
+       "width": 1080,
+       "height": 1920,
+       "fps": 30,
+       "background": "#000000",
+       "fill": "blur"
+      },
+      "assets": [
+       {
+        "id": "src",
+        "kind": "video",
+        "take": "take_src",
+        "durationSec": 10,
+        "width": 1080,
+        "height": 1920,
+        "hasAudio": true
+       },
+       {
+        "id": "pip",
+        "kind": "video",
+        "take": "take_pip",
+        "durationSec": 6,
+        "width": 720,
+        "height": 1280,
+        "hasAudio": true
+       },
+       {
+        "id": "logo",
+        "kind": "image",
+        "upload": "up_logo",
+        "width": 512,
+        "height": 512
+       }
+      ],
+      "tracks": [
+       {
+        "id": "main",
+        "kind": "main",
+        "items": [
+         {
+          "id": "c1",
+          "asset": "src",
+          "inSec": 0,
+          "outSec": 3.9,
+          "speed": 1
+         },
+         {
+          "id": "c3",
+          "asset": "src",
+          "inSec": 4.2,
+          "outSec": 10,
+          "speed": 1,
+          "fadeInSec": 0.5,
+          "fit": "contain"
+         }
+        ]
+       },
+       {
+        "id": "cap",
+        "kind": "caption",
+        "items": [],
+        "caption": {
+         "asset": "src",
+         "words": [
+          {
+           "text": "Okay",
+           "startSec": 0.2,
+           "endSec": 0.5
+          },
+          {
+           "text": "so",
+           "startSec": 0.55,
+           "endSec": 0.7
+          },
+          {
+           "text": "um",
+           "startSec": 0.9,
+           "endSec": 1.2
+          },
+          {
+           "text": "this",
+           "startSec": 1.6,
+           "endSec": 1.8
+          },
+          {
+           "text": "serum",
+           "startSec": 1.85,
+           "endSec": 2.3
+          },
+          {
+           "text": "changed",
+           "startSec": 2.35,
+           "endSec": 2.7
+          },
+          {
+           "text": "my",
+           "startSec": 2.75,
+           "endSec": 2.9
+          },
+          {
+           "text": "skin.",
+           "startSec": 2.95,
+           "endSec": 3.4
+          },
+          {
+           "text": "Honestly",
+           "startSec": 4.6,
+           "endSec": 5.1
+          },
+          {
+           "text": "uh",
+           "startSec": 5.2,
+           "endSec": 5.4
+          },
+          {
+           "text": "I",
+           "startSec": 5.6,
+           "endSec": 5.7
+          },
+          {
+           "text": "use",
+           "startSec": 5.75,
+           "endSec": 5.95
+          },
+          {
+           "text": "it",
+           "startSec": 6,
+           "endSec": 6.1
+          },
+          {
+           "text": "every",
+           "startSec": 6.15,
+           "endSec": 6.5
+          },
+          {
+           "text": "single",
+           "startSec": 6.55,
+           "endSec": 6.9
+          },
+          {
+           "text": "day!",
+           "startSec": 6.95,
+           "endSec": 7.4
+          },
+          {
+           "text": "Like",
+           "startSec": 8,
+           "endSec": 8.2
+          },
+          {
+           "text": "seriously",
+           "startSec": 8.25,
+           "endSec": 8.9
+          }
+         ],
+         "style": {
+          "font": "sans",
+          "weight": 900,
+          "sizePct": 0.045,
+          "color": "#FFFFFF",
+          "align": "center",
+          "maxWidthPct": 0.85,
+          "lineHeight": 1.15,
+          "stroke": {
+           "color": "#000000",
+           "widthPct": 0.12
+          },
+          "preset": "highlight",
+          "highlightColor": "#FFE600",
+          "y": 0.72,
+          "wordsPerPage": 3,
+          "maxLines": 2
+         }
+        }
+       },
+       {
+        "id": "pipt",
+        "kind": "video",
+        "items": [
+         {
+          "id": "p1",
+          "asset": "pip",
+          "startSec": 1,
+          "inSec": 0,
+          "outSec": 4,
+          "speed": 1,
+          "fit": "contain",
+          "blend": "screen",
+          "transform": {
+           "x": 0.7,
+           "y": 0.3,
+           "scale": 0.5,
+           "rotation": 15,
+           "flipX": true
+          }
+         }
+        ]
+       },
+       {
+        "id": "imgs",
+        "kind": "image",
+        "items": [
+         {
+          "id": "i1",
+          "asset": "logo",
+          "startSec": 0,
+          "durationSec": 3,
+          "blend": "multiply",
+          "transform": {
+           "scale": 0.3,
+           "flipY": true
+          }
+         }
+        ]
+       },
+       {
+        "id": "txt",
+        "kind": "text",
+        "items": [
+         {
+          "id": "t1",
+          "startSec": 0,
+          "durationSec": 2,
+          "text": "Mirror",
+          "style": {
+           "font": "sans",
+           "weight": 900,
+           "sizePct": 0.06,
+           "color": "#FFFFFF",
+           "align": "center",
+           "maxWidthPct": 0.85,
+           "lineHeight": 1.15,
+           "stroke": {
+            "color": "#000000",
+            "widthPct": 0.14
+           }
+          },
+          "transform": {
+           "flipX": true
+          }
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "cuts": [
+      {
+       "startSec": 5,
+       "endSec": 6
+      }
+     ],
+     "project": {
+      "version": 2,
+      "sourceTakeId": "take_src",
+      "canvas": {
+       "width": 1080,
+       "height": 1920,
+       "fps": 30,
+       "background": "#000000",
+       "fill": "blur"
+      },
+      "assets": [
+       {
+        "id": "src",
+        "kind": "video",
+        "take": "take_src",
+        "durationSec": 10,
+        "width": 1080,
+        "height": 1920,
+        "hasAudio": true
+       },
+       {
+        "id": "pip",
+        "kind": "video",
+        "take": "take_pip",
+        "durationSec": 6,
+        "width": 720,
+        "height": 1280,
+        "hasAudio": true
+       },
+       {
+        "id": "logo",
+        "kind": "image",
+        "upload": "up_logo",
+        "width": 512,
+        "height": 512
+       }
+      ],
+      "tracks": [
+       {
+        "id": "main",
+        "kind": "main",
+        "items": [
+         {
+          "id": "c1",
+          "asset": "src",
+          "inSec": 0,
+          "outSec": 4,
+          "speed": 1
+         },
+         {
+          "id": "c2",
+          "asset": "src",
+          "inSec": 4,
+          "outSec": 4.1,
+          "speed": 1,
+          "holdSec": 1.5,
+          "transitionIn": {
+           "kind": "fade",
+           "durationSec": 0.4
+          }
+         },
+         {
+          "id": "c3",
+          "asset": "src",
+          "inSec": 4,
+          "outSec": 5,
+          "speed": 1,
+          "fadeInSec": 0.5,
+          "fit": "contain"
+         },
+         {
+          "id": "c3.2",
+          "asset": "src",
+          "inSec": 6,
+          "outSec": 10,
+          "speed": 1,
+          "fadeInSec": 0.5,
+          "fit": "contain"
+         }
+        ]
+       },
+       {
+        "id": "cap",
+        "kind": "caption",
+        "items": [],
+        "caption": {
+         "asset": "src",
+         "words": [
+          {
+           "text": "Okay",
+           "startSec": 0.2,
+           "endSec": 0.5
+          },
+          {
+           "text": "so",
+           "startSec": 0.55,
+           "endSec": 0.7
+          },
+          {
+           "text": "um",
+           "startSec": 0.9,
+           "endSec": 1.2
+          },
+          {
+           "text": "this",
+           "startSec": 1.6,
+           "endSec": 1.8
+          },
+          {
+           "text": "serum",
+           "startSec": 1.85,
+           "endSec": 2.3
+          },
+          {
+           "text": "changed",
+           "startSec": 2.35,
+           "endSec": 2.7
+          },
+          {
+           "text": "my",
+           "startSec": 2.75,
+           "endSec": 2.9
+          },
+          {
+           "text": "skin.",
+           "startSec": 2.95,
+           "endSec": 3.4
+          },
+          {
+           "text": "Honestly",
+           "startSec": 4.6,
+           "endSec": 5.1
+          },
+          {
+           "text": "uh",
+           "startSec": 5.2,
+           "endSec": 5.4
+          },
+          {
+           "text": "I",
+           "startSec": 5.6,
+           "endSec": 5.7
+          },
+          {
+           "text": "use",
+           "startSec": 5.75,
+           "endSec": 5.95
+          },
+          {
+           "text": "it",
+           "startSec": 6,
+           "endSec": 6.1
+          },
+          {
+           "text": "every",
+           "startSec": 6.15,
+           "endSec": 6.5
+          },
+          {
+           "text": "single",
+           "startSec": 6.55,
+           "endSec": 6.9
+          },
+          {
+           "text": "day!",
+           "startSec": 6.95,
+           "endSec": 7.4
+          },
+          {
+           "text": "Like",
+           "startSec": 8,
+           "endSec": 8.2
+          },
+          {
+           "text": "seriously",
+           "startSec": 8.25,
+           "endSec": 8.9
+          }
+         ],
+         "style": {
+          "font": "sans",
+          "weight": 900,
+          "sizePct": 0.045,
+          "color": "#FFFFFF",
+          "align": "center",
+          "maxWidthPct": 0.85,
+          "lineHeight": 1.15,
+          "stroke": {
+           "color": "#000000",
+           "widthPct": 0.12
+          },
+          "preset": "highlight",
+          "highlightColor": "#FFE600",
+          "y": 0.72,
+          "wordsPerPage": 3,
+          "maxLines": 2
+         }
+        }
+       },
+       {
+        "id": "pipt",
+        "kind": "video",
+        "items": [
+         {
+          "id": "p1",
+          "asset": "pip",
+          "startSec": 1,
+          "inSec": 0,
+          "outSec": 4,
+          "speed": 1,
+          "fit": "contain",
+          "blend": "screen",
+          "transform": {
+           "x": 0.7,
+           "y": 0.3,
+           "scale": 0.5,
+           "rotation": 15,
+           "flipX": true
+          }
+         }
+        ]
+       },
+       {
+        "id": "imgs",
+        "kind": "image",
+        "items": [
+         {
+          "id": "i1",
+          "asset": "logo",
+          "startSec": 0,
+          "durationSec": 3,
+          "blend": "multiply",
+          "transform": {
+           "scale": 0.3,
+           "flipY": true
+          }
+         }
+        ]
+       },
+       {
+        "id": "txt",
+        "kind": "text",
+        "items": [
+         {
+          "id": "t1",
+          "startSec": 0,
+          "durationSec": 2,
+          "text": "Mirror",
+          "style": {
+           "font": "sans",
+           "weight": 900,
+           "sizePct": 0.06,
+           "color": "#FFFFFF",
+           "align": "center",
+           "maxWidthPct": 0.85,
+           "lineHeight": 1.15,
+           "stroke": {
+            "color": "#000000",
+            "widthPct": 0.14
+           }
+          },
+          "transform": {
+           "flipX": true
+          }
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  },
+  "blurFill": {
+   "w": 4,
+   "h": 3,
+   "radius": 1,
+   "rgb": [
+    0,
+    0.37,
+    0.74,
+    0.11,
+    0.48,
+    0.85,
+    0.22,
+    0.59,
+    0.96,
+    0.33,
+    0.7,
+    0.07,
+    0.44,
+    0.81,
+    0.18,
+    0.55,
+    0.92,
+    0.29,
+    0.66,
+    0.03,
+    0.4,
+    0.77,
+    0.14,
+    0.51,
+    0.88,
+    0.25,
+    0.62,
+    0.99,
+    0.36,
+    0.73,
+    0.1,
+    0.47,
+    0.84,
+    0.21,
+    0.58,
+    0.95
+   ],
+   "out": [
+    0.155833,
+    0.470333,
+    0.5015,
+    0.218167,
+    0.438222,
+    0.563833,
+    0.311667,
+    0.437278,
+    0.468444,
+    0.374,
+    0.405167,
+    0.341889,
+    0.405167,
+    0.436333,
+    0.4675,
+    0.373056,
+    0.404222,
+    0.529833,
+    0.372111,
+    0.403278,
+    0.528889,
+    0.34,
+    0.371167,
+    0.496778,
+    0.6545,
+    0.402333,
+    0.4335,
+    0.527944,
+    0.370222,
+    0.495833,
+    0.432556,
+    0.369278,
+    0.589333,
+    0.306,
+    0.337167,
+    0.651667
+   ],
+   "darken": 0.85,
+   "radii": [
+    {
+     "width": 1080,
+     "height": 1920,
+     "radius": 43
+    },
+    {
+     "width": 720,
+     "height": 1280,
+     "radius": 29
+    },
+    {
+     "width": 2160,
+     "height": 3840,
+     "radius": 86
+    },
+    {
+     "width": 16,
+     "height": 16,
+     "radius": 1
+    }
+   ],
+   "clipAt": [
+    {
+     "t": 0,
+     "at": {
+      "clipId": "c1",
+      "local": 0
+     }
+    },
+    {
+     "t": 3.5,
+     "at": {
+      "clipId": "c1",
+      "local": 3.5
+     }
+    },
+    {
+     "t": 3.79,
+     "at": {
+      "clipId": "c1",
+      "local": 3.79
+     }
+    },
+    {
+     "t": 3.8,
+     "at": {
+      "clipId": "c1",
+      "local": 3.8
+     }
+    },
+    {
+     "t": 3.81,
+     "at": {
+      "clipId": "c2",
+      "local": 0.21
+     }
+    },
+    {
+     "t": 4.2,
+     "at": {
+      "clipId": "c2",
+      "local": 0.6
+     }
+    },
+    {
+     "t": 5.3,
+     "at": {
+      "clipId": "c3",
+      "local": 0.2
+     }
+    },
+    {
+     "t": 5.5,
+     "at": {
+      "clipId": "c3",
+      "local": 0.4
+     }
+    },
+    {
+     "t": 8,
+     "at": {
+      "clipId": "c3",
+      "local": 2.9
+     }
+    }
+   ]
+  }
+ },
  "duckTimes": [
   {
    "duck": {
