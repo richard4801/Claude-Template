@@ -85,11 +85,23 @@ data class RecreateApplyResult(
     val baked: Map<String, List<String>> = emptyMap(),
 )
 
+/**
+ * G8, `POST …/briefs/estimate`: "Write the shot briefs · about $0.02" (one Claude call on the server). [available] false:
+ * [reason] says why (Claude on the server is off; asking Claude on the Mac is free).
+ */
+data class RecreateBriefsEstimate(val available: Boolean, val reason: String? = null, val slots: Int = 0, val estimateUsd: Double = 0.0, val label: String = "Write the shot briefs")
+
 /** `POST …/slots/{slotId}/replace`: one shot's clip swapped in the built edit (one undoable change). */
 data class RecreateReplaceResult(val sessionId: String, val revision: Int?, val slotId: String, val label: String? = null, val note: String? = null)
 
 /** The server's JSON for the above. */
 object RecreateJson {
+    fun briefsEstimate(el: JsonElement): RecreateBriefsEstimate {
+        val o = el as? JsonObject ?: throw IllegalArgumentException("briefs estimate is not an object")
+        return RecreateBriefsEstimate((o["available"] as? JsonPrimitive)?.booleanOrNull ?: false, o.str("reason"), o.num("slots")?.toInt() ?: 0,
+            o.num("estimateUsd") ?: 0.0, o.str("label") ?: "Write the shot briefs")
+    }
+
     fun replace(el: JsonElement): RecreateReplaceResult {
         val o = el as? JsonObject ?: throw IllegalArgumentException("replace is not an object")
         return RecreateReplaceResult(o.str("sessionId") ?: "", (o["revision"] as? JsonPrimitive)?.intOrNull, o.str("slotId") ?: "", o.str("label"), o.str("note"))

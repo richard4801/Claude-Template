@@ -3,6 +3,7 @@ package studio.muse.app.data
 import studio.muse.core.edit.RecipeJson
 import studio.muse.core.edit.RecipeReference
 import studio.muse.core.edit.RecreateReplaceResult
+import studio.muse.core.edit.RecreateBriefsEstimate
 import studio.muse.core.edit.RecreateMatch
 import studio.muse.core.edit.RecreateApplyResult
 import studio.muse.core.edit.RecreateFillStart
@@ -1266,6 +1267,12 @@ class FakeMuseApi(
         made[slotId] = 0
         RecreateFillStart(slotId, "job_rx_$slotId")
     }
+    /** Demo (G8): Claude on the server writes the briefs for $0.02 (never charged in demo mode). */
+    override suspend fun estimateReferenceBriefs(id: String) = lock.withLock {
+        recreateSlots(id)
+        RecreateBriefsEstimate(true, slots = FakeRecipes.cafeTrend().slots.count { it.brief == null }, estimateUsd = 0.02, label = "Write the shot briefs · about $0.02")
+    }
+    override suspend fun writeReferenceBriefs(id: String): RecipeReference = reference(id)
     /** Demo: Fix shot swaps the clip in place (a running fill's job is refused, as on the server). */
     override suspend fun replaceRecipeSlot(id: String, slotId: String, sessionId: String, take: String, baseRevision: Int?) = lock.withLock {
         val all = recreateSlots(id)

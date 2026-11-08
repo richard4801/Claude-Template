@@ -272,6 +272,12 @@ interface MuseApi {
     /** Builds the edit in an edit session: [slots] is slotId → takeId or jobId. */
     suspend fun applyRecipe(id: String, sessionId: String, baseRevision: Int?, slots: Map<String, String>): studio.muse.core.edit.RecreateApplyResult =
         throw ApiException("not_found", "This studio server can't build recipes yet")
+    /** G8: the price of having Claude (on the server) write every shot's brief. Nothing is held. */
+    suspend fun estimateReferenceBriefs(id: String): studio.muse.core.edit.RecreateBriefsEstimate =
+        throw ApiException("not_found", "This studio server can't write shot briefs yet")
+    /** G8: writes them (charged; the caller confirmed the price) and returns the updated reference. */
+    suspend fun writeReferenceBriefs(id: String): studio.muse.core.edit.RecipeReference =
+        throw ApiException("not_found", "This studio server can't write shot briefs yet")
     /**
      * Fix shot (WS1 a7302fb): swaps one shot's clip in the built edit for [take] (a take id, or a finished fill's job id),
      * keeping its timing, transition, ramp, camera moves and look, and the owner's other edits. 409 slot_not_in_edit:

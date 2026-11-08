@@ -76,6 +76,10 @@ class RecreateActions(
     val onUseTake: (String, RecreateTakeChoice) -> Unit = { _, _ -> },
     val onRemake: (String) -> Unit = {},
     val onCast: (String) -> Unit = {},
+    /** G8: "Write the shot briefs" (asks with its price), then the yes. */
+    val onBriefs: () -> Unit = {},
+    val onBriefsConfirm: () -> Unit = {},
+    val onBriefsCancel: () -> Unit = {},
     /** G2: how a shot to make is made ("swap" | "generate"), and whether a swap keeps the reference's setting. */
     val onMethod: (String, String) -> Unit = { _, _ -> },
     val onKeepBackground: (String, Boolean) -> Unit = { _, _ -> },
@@ -117,6 +121,7 @@ fun RecreateBuildScreen(ui: RecreateBuildUi, a: RecreateActions, picture: ImageB
             if (wide) TabletLayout(ui, a, picture, pickTake) else PhoneLayout(ui, a, picture, pickTake)
             ui.confirmSlots?.let { BuildConfirm(ui, it, a) }
             ui.export?.let { ExportSheet(it, a) }
+            if (ui.askBriefs) ui.briefs?.let { b -> BriefsConfirm(b, a) }
             pick?.let { s -> TakePicker(ui.takes, onPick = { t -> a.onUseTake(s, t); pick = null }, onClose = { pick = null }) }
         }
     } }
@@ -622,6 +627,12 @@ private fun WholeEdit(ui: RecreateBuildUi) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         T("The whole edit", m.scale.heading, m.roles.ink)
         r.summary?.let { T(it, m.scale.caption, m.roles.ink) }
+        // G8: shots without a brief: Claude can write them (a quiet button with its price), or says why it can't here.
+        ui.briefs?.let { b ->
+            if (ui.writingBriefs) T("Writing the shot briefs", m.scale.caption, m.roles.ink2)
+            else if (b.available) Quiet(b.label, onClick = LocalActions.current.onBriefs)
+            else b.reason?.let { T(it, m.scale.caption, m.roles.ink2) }
+        }
         T(listOfNotNull(if (r.slots.size == 1) "1 shot" else "${r.slots.size} shots", "${Math.round(r.cutsPerMinute)} cuts a minute", r.beats?.bpm?.let { "${Math.round(it)} BPM" }).joinToString(" · "),
             m.scale.caption.tabular(), m.roles.ink2, maxLines = 1)
     }
@@ -636,6 +647,24 @@ private fun WholeEdit(ui: RecreateBuildUi) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 T(g.note ?: "Not supported yet", m.scale.label, m.roles.caution)
                 T(g.atSec?.let { "${g.what} at ${suiteTime(it)}" } ?: g.what, m.scale.caption, m.roles.ink2)
+            }
+        }
+    }
+}
+
+/** G8: the one confirmation before Claude (on the server) writes the shot briefs. */
+@Composable
+private fun BriefsConfirm(b: studio.muse.core.edit.RecreateBriefsEstimate, a: RecreateActions) {
+    val m = muse
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .32f)).press(onClick = a.onBriefsCancel), contentAlignment = Alignment.Center) {
+        Column(Modifier.padding(24.dp).widthIn(max = 420.dp).fillMaxWidth().clip(RoundedCornerShape(m.radii.container)).background(m.roles.canvas).press { }.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            T("Write the shot briefs for about ${RecreateText.money(b.estimateUsd)}?", m.scale.title, m.roles.ink)
+            T("Claude reads each shot and writes what happens in it, so new shots match the reference more closely. It's charged to the studio. Asking Claude on your Mac is free.",
+                m.scale.body, m.roles.ink2)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                LearnQuiet("Cancel", onClick = a.onBriefsCancel)
+                Primary("Write · about ${RecreateText.money(b.estimateUsd)}", onClick = a.onBriefsConfirm)
             }
         }
     }

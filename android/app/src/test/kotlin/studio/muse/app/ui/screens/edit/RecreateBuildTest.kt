@@ -157,6 +157,25 @@ class RecreateBuildTest {
         } finally { scope.cancel(); work.cancel() }
     }
 
+    @Test fun claudeWritesTheMissingBriefsAfterTheOneConfirmation() = runBlocking {
+        val scope = MainScope()
+        val work = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default)
+        try {
+            val api = FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0)
+            val ref = ready(api)
+            val bare = ref.recipe!!.copy(slots = ref.recipe!!.slots.map { it.copy(brief = null) })
+            val model = RecreateBuildModel(api, work, RecreateBuildUi(ref.id, bare, ref.name), defaultModelId = { "m_demo" }, pollMs = 5)
+            model.load()
+            assertEquals("Write the shot briefs · about $0.02", model.ui.value.briefs?.label)
+            model.askBriefs(); assertTrue(model.ui.value.askBriefs)
+            model.writeBriefs()
+            assertFalse(model.ui.value.askBriefs)
+            assertNull(model.ui.value.briefs)
+            assertTrue(model.ui.value.recipe.slots.all { it.brief != null })
+            assertEquals("Briefs written for 7 shots", model.ui.value.message)
+        } finally { scope.cancel(); work.cancel() }
+    }
+
     @Test fun withoutAModelNoShotIsOfferedToSpendOn() = runBlocking {
         val scope = MainScope()
         val work = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default)

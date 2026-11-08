@@ -209,6 +209,8 @@ interface MuseService {
     @POST("v1/recreate/references/{id}/slots/{slot}/estimate") suspend fun estimateReferenceSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: JsonObject): JsonObject
     @POST("v1/recreate/references/{id}/slots/{slot}/fill") suspend fun fillReferenceSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: JsonObject): JsonObject
     @POST("v1/recreate/references/{id}/apply") suspend fun applyRecipe(@Path("id") id: String, @Body r: JsonObject): JsonObject
+    @POST("v1/recreate/references/{id}/briefs/estimate") suspend fun estimateReferenceBriefs(@Path("id") id: String, @Body r: JsonObject): JsonObject
+    @POST("v1/recreate/references/{id}/briefs/write") suspend fun writeReferenceBriefs(@Path("id") id: String, @Body r: JsonObject): JsonObject
     @POST("v1/recreate/references/{id}/slots/{slot}/replace") suspend fun replaceRecipeSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: JsonObject): JsonObject
     @PATCH("v1/models/{id}") suspend fun patchModelJson(@Path("id") id: String, @Body r: JsonObject): Model
     @GET("v1/suite/feed") suspend fun suiteFeed(@QueryMap q: Map<String, String>): SuiteFeedPage
@@ -515,6 +517,10 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         studio.muse.core.edit.RecreateJson.estimate(call { estimateReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality, method, keepBackground)) })
     override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?) =
         studio.muse.core.edit.RecreateJson.fillStart(call { fillReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality, method, keepBackground)) })
+    override suspend fun estimateReferenceBriefs(id: String) = studio.muse.core.edit.RecreateJson.briefsEstimate(call { estimateReferenceBriefs(rx(id), buildJsonObject { }) })
+    override suspend fun writeReferenceBriefs(id: String) = studio.muse.core.edit.RecipeJson.reference(
+        call { writeReferenceBriefs(rx(id), buildJsonObject { put("confirm", kotlinx.serialization.json.JsonPrimitive(true)) }) }["reference"]
+            ?: throw ApiException("briefs_failed", "The briefs came back empty · you weren't charged"))
     override suspend fun replaceRecipeSlot(id: String, slotId: String, sessionId: String, take: String, baseRevision: Int?) = studio.muse.core.edit.RecreateJson.replace(call {
         replaceRecipeSlot(rx(id), shotId(slotId), buildJsonObject {
             put("sessionId", kotlinx.serialization.json.JsonPrimitive(sessionId)); put("take", kotlinx.serialization.json.JsonPrimitive(take))

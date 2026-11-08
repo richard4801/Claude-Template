@@ -80,6 +80,10 @@ data class RecreateBuildUi(
     val methods: Map<String, String> = emptyMap(),
     /** G2, swap only: keep the reference's setting (true, the default) or use your own (the shot's brief). */
     val keepBackground: Map<String, Boolean> = emptyMap(),
+    /** G8: "Write the shot briefs · about $0.02" while shots have no brief; its confirmation, and while it runs. */
+    val briefs: studio.muse.core.edit.RecreateBriefsEstimate? = null,
+    val askBriefs: Boolean = false,
+    val writingBriefs: Boolean = false,
     val takes: List<RecreateTakeChoice> = emptyList(),
     /** One line to show once (a toast), then [RecreateBuildModel.consumeMessage]. */
     val message: String? = null,
@@ -218,6 +222,29 @@ class RecreateBuildModel(
         _ui.update { it.copy(loadingFill = false) }
         if (_ui.value.isGenerating) startWatch()
         price()
+        loadBriefs()
+    }
+
+    /** G8: offered while any shot has no brief (a closer match when shots are generated). */
+    private suspend fun loadBriefs() {
+        if (_ui.value.recipe.slots.none { it.brief == null }) { _ui.update { it.copy(briefs = null) }; return }
+        runCatching { api.estimateReferenceBriefs(id) }.onFailure { if (it is CancellationException) throw it }.getOrNull()?.let { b -> _ui.update { it.copy(briefs = b) } }
+    }
+
+    fun askBriefs() = _ui.update { if (it.briefs?.available == true) it.copy(askBriefs = true) else it.copy(message = it.briefs?.reason) }
+    fun cancelBriefs() = _ui.update { it.copy(askBriefs = false) }
+
+    /** The confirmed price: Claude writes every shot's brief, the summary and tags; the recipe on screen updates. */
+    suspend fun writeBriefs() {
+        _ui.update { it.copy(askBriefs = false, writingBriefs = true) }
+        try {
+            val ref = api.writeReferenceBriefs(id)
+            val n = _ui.value.recipe.slots.count { it.brief == null }
+            _ui.update { u -> u.copy(recipe = ref.recipe ?: u.recipe, writingBriefs = false, briefs = null, message = if (n == 1) "The brief is written" else "Briefs written for $n shots") }
+            price()
+        } catch (e: CancellationException) { throw e } catch (e: Exception) {
+            _ui.update { it.copy(writingBriefs = false, message = e.message ?: "The briefs weren't written · you weren't charged") }
+        }
     }
 
     /** A fetched fill: takes picked here stay, and a shot that was generating and came back without its version is marked. */
