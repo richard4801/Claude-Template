@@ -244,6 +244,9 @@ struct Sidebar: View {
         VStack(alignment: .leading, spacing: 2) {
             wordmark.padding(.horizontal, compact ? 0 : 10).padding(.top, 4).padding(.bottom, 18)
                 .frame(maxWidth: .infinity, alignment: compact ? .center : .leading)
+                // The same name in the icon rail ("M") as in full ("MUSE"): nothing in the chrome changes label (Edit opens it).
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("MUSE")
             ForEach(NavItem.main) { item in
                 let q = store.activeJobs.count
                 NavRow(icon: item.icon, title: item.title, on: store.screen.navParent == item.screen, compact: compact,

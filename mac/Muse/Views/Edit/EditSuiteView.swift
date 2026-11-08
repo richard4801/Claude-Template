@@ -272,7 +272,7 @@ struct EditSuiteEditor: View {
     private func topBar(width w: CGFloat) -> some View {
         let tight = w < topBarNeeds
         return HStack(spacing: Space.s3) {
-            SuiteIconButton(systemName: "caret-left", label: "Close editor", action: onClose)
+            SuiteIconButton(systemName: "caret-left", label: "Close the editor", action: onClose)
             VStack(alignment: .leading, spacing: 0) {
                 Text(session.title).font(t.scale.heading.font).foregroundStyle(t.roles.ink).lineLimit(1).fitProbe("title")
                 Text(session.saveLine).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1).fitProbe("version line")
