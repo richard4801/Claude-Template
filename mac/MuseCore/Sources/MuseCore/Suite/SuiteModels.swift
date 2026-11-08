@@ -438,6 +438,9 @@ public struct SuiteCatalog: Codable, Hashable, Sendable {
     /// Which composer tools are live (shot, swap, recast, storyboard, talking, ugc_ad, extend). Empty on older servers:
     /// the app's own "Coming soon" list then applies.
     public var tools: [SuiteToolStatus]
+    /// The owner's model picker: every model the owner can pick, video and image, built-in and custom (owner only; nil
+    /// from older servers and for members). ComposerModelPicker.swift.
+    public var engines: [SuiteModelOption]?
 
     public init(enabled: Bool, test: Bool, defaultQuality: String = "draft", tiers: [SuiteTier], modes: [String] = SuiteCatalog.allModes, recastMaxPeople: Int = 4,
                 aspectRatios: [String] = ["9:16", "16:9", "1:1", "4:3", "3:4", "21:9"], takesMax: Int = 4, camera: CameraCatalog, tools: [SuiteToolStatus] = []) {
@@ -455,7 +458,7 @@ public struct SuiteCatalog: Codable, Hashable, Sendable {
 
     public static let allModes = ["text", "image", "reference", "swap", "recast"]
 
-    enum CodingKeys: String, CodingKey { case enabled, test, defaultQuality, tiers, modes, recastMaxPeople, aspectRatios, takesMax, camera, tools }
+    enum CodingKeys: String, CodingKey { case enabled, test, defaultQuality, tiers, modes, recastMaxPeople, aspectRatios, takesMax, camera, tools, engines }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         tools = c.v(.tools, [])
@@ -468,6 +471,7 @@ public struct SuiteCatalog: Codable, Hashable, Sendable {
         aspectRatios = c.v(.aspectRatios, ["9:16"])
         takesMax = c.v(.takesMax, 4)
         camera = c.v(.camera, CameraCatalog())
+        engines = c.o(.engines)
     }
 
     public func tier(_ id: String) -> SuiteTier? { tiers.first { $0.id == id } }

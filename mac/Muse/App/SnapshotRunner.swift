@@ -123,6 +123,8 @@ enum SnapshotRunner {
                 // limits) and the pill's list.
                 ("composer_model", { store.openTool(.shot); fillDemoDraft(store); pinDemoModel(store) }),
                 ("composer_model_list", { store.openTool(.shot); fillDemoDraft(store); pinDemoModel(store); state.overlay = "model_picker" }),
+                // Photo: the owner's photo model list.
+                ("composer_photo_model_list", { store.openPhoto(model: SampleData.demo); state.overlay = "model_picker" }),
                 ("composer_photo_preset_cleared", { store.openPhoto(model: SampleData.demo)
                     if let tpl = store.templates.first { store.choosePhotoPreset(tpl) }
                     store.suite.composer.tokens = PromptTokens(); store.unselectPresetOnEmptyPrompt() }),
@@ -198,7 +200,9 @@ enum SnapshotRunner {
 
     /// Veo 3.1 Lite at 720p (4, 6 or 8 s; 9:16 and 16:9): the demo draft's 8 s and 16:9 fit it.
     static func pinDemoModel(_ store: AppStore) {
-        if let m = store.suite.settings?.models.first(where: { $0.id == "veo-3.1-lite" }) { store.pinComposerModel(m, resolution: "720p") }
+        if let m = ComposerModelPicker.engines(store.suite.catalog, store.suite.settings).first(where: { $0.model == "veo-3.1-lite" }) {
+            store.pinComposerModel(m, resolution: "720p")
+        }
     }
 
     // MARK: Fit check (CI): Generate is fully on screen at the common Mac window sizes (owner fix A2)

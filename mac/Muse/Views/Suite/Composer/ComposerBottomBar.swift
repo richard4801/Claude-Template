@@ -121,6 +121,7 @@ struct ComposerBottomBar: View {
                 let n = store.suite.photo.count
                 listPill("photos", icon: "photo.on.rectangle", value: "\(n)", help: "Photos",
                          options: PhotoDraft.counts.map { ("\($0) photo\($0 == 1 ? "" : "s")", $0) }, selected: n) { store.suite.photo.count = $0 }
+                if store.isOwner { enginePill(compact: compact) } // the owner's photo model (WS6)
             } else {
                 if !settingsInRail {
                     shapePill
@@ -309,8 +310,8 @@ struct ComposerBottomBar: View {
     /// Owner only (owner request 2026-11-08): the shot's model, "Auto" = the quality's ladder. Lists every registry model
     /// this tool can run with its limits and price (ModelPickerList); members never see it.
     private func enginePill(compact: Bool) -> some View {
-        let label = ComposerModelPicker.label(store.suite.composer, settings: store.suite.settings, tier: store.suite.catalog?.tier(store.suite.composer.quality))
-        let pinned = store.suite.composer.engineModel != nil
+        let label = store.composerModelLabel
+        let pinned = store.composerPinnedModel != nil
         // Pinned: the model's own name ("Kling 4.0, 1080p"), whole, at every width.
         return pill("model", help: "Model: \(label)") {
             Ph("cpu", 13)
@@ -409,9 +410,9 @@ struct QualityPopover: View {
         let pinned = !isSwap && store.suite.composer.engineModel != nil
         VStack(alignment: .leading, spacing: 10) {
             if pinned {
-                let engine = ComposerModelPicker.label(store.suite.composer, settings: store.suite.settings, tier: store.suite.catalog?.tier(store.suite.composer.quality))
+                let engine = store.composerModelLabel
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Model picked: \(engine). Its price and limits apply, not the quality's.").font(t.scale.label.font)
+                    Text("Model pinned: \(engine). The price follows the model.").font(t.scale.label.font)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 12) {
                         if let e = store.suite.estimate {

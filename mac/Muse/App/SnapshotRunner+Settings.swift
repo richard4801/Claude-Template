@@ -28,6 +28,7 @@ extension SnapshotRunner {
             ("spending", SettingsMockState(section: .spending)),
             ("providers_empty", SettingsMockState(section: .providers, providers: "empty")),
             ("providers_add", SettingsMockState(section: .providers, providers: "add")),
+            ("providers_nokeys", SettingsMockState(section: .providers, providers: "nokeys")),
             ("providers", SettingsMockState(section: .providers, providers: "models")),
             ("apps", SettingsMockState(section: .apps)),
             ("advanced", SettingsMockState(section: .advanced)),

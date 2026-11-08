@@ -26,7 +26,7 @@ enum SettingsMockSection: String, CaseIterable {
         case .account: return "You, how MUSE looks, and when it tells you things."
         case .studio: return "How new videos and photos start, the studio's prompts, and archived models."
         case .members: return "Who works in the studio, what each person can spend, and invitations."
-        case .spending: return "Your balance, spend caps and the AI behind each quality."
+        case .spending: return "Your balance, spend caps and the models behind each quality."
         case .providers: return "Your own accounts with AI providers. Their models join the AI Suite's model picker."
         case .apps: return "Claude, Blender and your phone working with MUSE."
         case .advanced: return "Server, testing and performance tools. Hidden unless turned on under Account."
@@ -246,14 +246,15 @@ private struct MockSpending: View {
             SettingRow("Captions, background removal and voice clean-up", hint: "Off: hidden in Edit and nothing is charged. $2.00 a day at most, $0.40 used today.") {
                 RSwitch(label: "AI editing helpers", isOn: .constant(true))
             }
-            SectionTitle("Engines") {
+            SectionTitle("Models") {
                 Text("All running").scaled(t.scale.caption, t.roles.positive)
             }
-            SettingRow("Draft", hint: "Members see the quality, never the engine") { RowValue("MiniMax H3 Lite, 768p") }
+            SettingRow("Draft", hint: "Members see the quality, never the model") { RowValue("MiniMax H3 Lite, 768p") }
             SettingRow("Standard") { RowValue("MiniMax H3, 768p") }
             SettingRow("HD") { RowValue("MiniMax H3 on Higgsfield, 2K") }
             SettingRow("Cinema") { RowValue("Kling 4.0, 1080p") }
-            disclosure("Add-on GPU engine", "2 GPUs at once, off after 15 idle minutes")
+            SettingRow("Photos") { RowValue("FLUX.2 [pro]") }
+            disclosure("Our own GPUs", "2 at once, off after 15 idle minutes")
             disclosure("Price corrections", "Every engine at its listed price")
         }
     }
@@ -291,6 +292,13 @@ private struct MockProviders: View {
                 .padding(.top, Space.s5)
         case "add":
             addForm
+        case "nokeys":
+            VStack(alignment: .leading, spacing: Space.s4) {
+                InlineNotice("Provider keys aren't set up on the server yet. Adding a key works once they are.", tone: .caution)
+                EmptyState("No providers yet", "Add an API key for an AI provider you use. Its image and video models can then be picked per shot. Members never see them.",
+                           actionTitle: "Add a provider", actionKind: .quiet) {}
+                    .frame(maxWidth: .infinity)
+            }
         default:
             connected
         }
@@ -300,9 +308,9 @@ private struct MockProviders: View {
         VStack(alignment: .leading, spacing: Space.s4) {
             Text("Add a provider").scaled(t.scale.heading, t.roles.ink)
             RField("Provider") {
-                RSeg([("replicate", "Replicate"), ("fal", "fal"), ("openai", "OpenAI"), ("other", "Other")], selection: .constant("fal")).frame(width: 360)
+                RSeg([("replicate", "Replicate"), ("fal", "fal")], selection: .constant("fal")).frame(width: 220)
             }
-            RField("API key", hint: "Saved encrypted on the MUSE server. After saving you only see its last 4 characters.") {
+            RField("API key", hint: "Saved encrypted on the MUSE server, checked with fal first. Afterwards you only see its last 4 characters.") {
                 SecureField("Paste the key", text: .constant("fal_live_1234567890abcdef"))
                     .roleField(focused: true)
                     .frame(width: 420)

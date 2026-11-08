@@ -58,7 +58,7 @@ extension SnapshotRunner {
                          isOpen: { state.overlay == "model_picker" && store.screen == .suite },
                          note: note)
         let pinned = store.suite.composer.engineModel
-        note(pinned == nil || store.suite.settings?.models.contains { $0.id == pinned } == true
+        note(pinned == nil || ComposerModelPicker.engines(store.suite.catalog, store.suite.settings).contains { $0.model == pinned }
              ? "DONE model_picker pin \(pinned ?? "Auto"), \(store.suite.composer.duration) s, \(store.suite.composer.aspect)"
              : "FAIL model_picker: pinned an unknown model \(pinned ?? "")")
         state.overlay = nil

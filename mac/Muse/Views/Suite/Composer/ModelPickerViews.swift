@@ -13,10 +13,9 @@ struct ModelPickerList: View {
 
     var body: some View {
         let d = store.suite.composer
-        let tier = store.suite.catalog?.tier(d.quality)
-        let all = ComposerModelPicker.options(store.suite.settings, tool: d.tool, tier: tier)
-        let shown = ComposerModelPicker.options(store.suite.settings, tool: d.tool, tier: tier, search: search)
-        let ladder = Set((tier?.models ?? []).map(\.model))
+        let photo = d.tool == .photo
+        let all = store.composerModelOptions()
+        let shown = store.composerModelOptions(search: search)
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Model").scaled(t.scale.label, t.roles.ink)
@@ -32,17 +31,20 @@ struct ModelPickerList: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     autoRow(d)
-                    let sections: [(String, [SuiteRegistryModel])] = [
-                        ("On \(SuiteText.tierLabel(d.quality))", shown.filter { ladder.contains($0.id) && !$0.custom }),
-                        ("Other models", shown.filter { !ladder.contains($0.id) && !$0.custom }),
+                    let sections: [(String, [SuiteModelOption])] = (photo ? [
+                        ("Photo models", shown.filter { !$0.custom }),
                         ("Your providers", shown.filter(\.custom)),
-                    ].filter { !$0.1.isEmpty }
+                    ] : [
+                        ("On \(SuiteText.tierLabel(d.quality))", shown.filter { $0.tiers.contains(d.quality) && !$0.custom }),
+                        ("Other models", shown.filter { !$0.tiers.contains(d.quality) && !$0.custom }),
+                        ("Your providers", shown.filter(\.custom)),
+                    ]).filter { !$0.1.isEmpty }
                     ForEach(sections, id: \.0) { section in
                         group(section.0)
                         ForEach(section.1, id: \.id) { m in row(m, d) }
                     }
                     if shown.isEmpty {
-                        Text(store.suite.settings == nil ? "The model list didn't load. Close this and try again." : "No model matches “\(search)”.")
+                        Text(all.isEmpty ? "The model list didn't load. Close this and try again." : "No model matches “\(search)”.")
                             .scaled(t.scale.caption, t.roles.ink2).padding(Space.s4)
                     }
                 }
@@ -51,7 +53,7 @@ struct ModelPickerList: View {
             .frame(maxHeight: 420)
         }
         .frame(width: 400, alignment: .leading)
-        .task { if store.suite.settings == nil { await store.loadSuiteSettings() } }
+        .task { if store.suite.catalog?.engines == nil && store.suite.settings == nil { await store.loadSuiteSettings() } }
     }
 
     private func group(_ title: String) -> some View {
@@ -61,7 +63,7 @@ struct ModelPickerList: View {
     }
 
     private func autoRow(_ d: ComposerDraft) -> some View {
-        let on = d.engineModel == nil
+        let on = store.composerPinnedModel == nil
         return Button {
             store.pinComposerModel(nil)
             onPick()
@@ -70,7 +72,7 @@ struct ModelPickerList: View {
                 check(on)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Auto").scaled(t.scale.body, t.roles.ink)
-                    Text("The \(SuiteText.tierLabel(d.quality)) ladder picks the model for each shot").scaled(t.scale.caption, t.roles.ink2)
+                    Text(d.tool == .photo ? "The studio's photo model" : "MUSE picks the model for this quality").scaled(t.scale.caption, t.roles.ink2)
                 }
                 Spacer(minLength: 0)
             }
@@ -83,35 +85,26 @@ struct ModelPickerList: View {
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 
-    private func row(_ m: SuiteRegistryModel, _ d: ComposerDraft) -> some View {
-        let on = d.engineModel == m.id
+    private func row(_ m: SuiteModelOption, _ d: ComposerDraft) -> some View {
+        let on = store.composerPinnedModel == m.model
+        let limits = ComposerModelPicker.limits(m)
         return HStack(alignment: .top, spacing: Space.s2) {
             check(on)
             VStack(alignment: .leading, spacing: Space.s1) {
                 Text(m.name).scaled(t.scale.body, t.roles.ink).lineLimit(1)
-                Text(ComposerModelPicker.limits(m)).scaled(t.scale.caption, t.roles.ink2).lineLimit(1)
-                HStack(spacing: Space.s1) {
-                    ForEach(m.resolutions, id: \.id) { r in
-                        let picked = on && (d.resolution ?? m.resolutions.last?.id) == r.id
-                        Button {
-                            store.pinComposerModel(m, resolution: r.id)
-                            onPick()
-                        } label: {
-                            HStack(spacing: 4) {
-                                Text(ComposerModelPicker.resLabel(r.label)).typeStep(t.scale.caption)
-                                Text(ComposerModelPicker.price(m, resolution: r.id)).monospacedDigit().typeStep(t.scale.caption)
-                                    .foregroundStyle(picked ? t.roles.ink : t.roles.ink2)
-                            }
-                            .foregroundStyle(t.roles.ink)
-                            .padding(.horizontal, Space.s2).frame(height: 24)
-                            .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(picked ? t.roles.field : .clear))
-                            .overlay(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous)
-                                .strokeBorder(picked ? t.roles.selection : t.roles.hairline, lineWidth: picked ? 2 : 1))
-                            .contentShape(Rectangle())
+                if !limits.isEmpty { Text(limits).scaled(t.scale.caption, t.roles.ink2).lineLimit(1) }
+                if m.resolutions.isEmpty {
+                    // A photo model, or a per-run model: one choice, one price.
+                    chip(ComposerModelPicker.price(m).isEmpty ? "Use" : ComposerModelPicker.price(m), picked: on,
+                         help: "Use \(m.name)", label: "Use \(m.name)") { store.pinComposerModel(m) }
+                } else {
+                    HStack(spacing: Space.s1) {
+                        ForEach(m.resolutions, id: \.id) { r in
+                            let res = ComposerModelPicker.resLabel(r.label)
+                            let price = ComposerModelPicker.price(m, resolution: r.id)
+                            chip("\(res)  \(price)", picked: on && (d.resolution ?? m.resolution) == r.id,
+                                 help: "Use \(m.name) at \(res), \(price)", label: "Use \(m.name) at \(res)") { store.pinComposerModel(m, resolution: r.id) }
                         }
-                        .buttonStyle(.plain)
-                        .help("Use \(m.name) at \(ComposerModelPicker.resLabel(r.label)), \(ComposerModelPicker.price(m, resolution: r.id))")
-                        .accessibilityLabel("Use \(m.name) at \(ComposerModelPicker.resLabel(r.label))")
                     }
                 }
             }
@@ -119,6 +112,24 @@ struct ModelPickerList: View {
         }
         .padding(.horizontal, Space.s4).padding(.vertical, Space.s2)
         .background(on ? t.roles.field.opacity(0.5) : .clear)
+    }
+
+    private func chip(_ text: String, picked: Bool, help: String, label: String, action: @escaping () -> Void) -> some View {
+        Button {
+            action()
+            onPick()
+        } label: {
+            Text(text).monospacedDigit().typeStep(t.scale.caption)
+                .foregroundStyle(t.roles.ink)
+                .padding(.horizontal, Space.s2).frame(height: 24)
+                .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(picked ? t.roles.field : .clear))
+                .overlay(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous)
+                    .strokeBorder(picked ? t.roles.selection : t.roles.hairline, lineWidth: picked ? 2 : 1))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(label)
     }
 
     private func check(_ on: Bool) -> some View {

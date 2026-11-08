@@ -334,7 +334,7 @@ extension AppStore {
             if !SuiteText.tierIds.contains(suite.composer.quality) { suite.composer.quality = c.defaultQuality }
             suite.composer.duration = ComposerBar.clampLength(suite.composer.duration, c.tier(suite.composer.quality))
             if isOwner { suite.settings = try? await api.suiteSettings() }
-            suite.composer = ComposerModelPicker.validated(suite.composer, catalog: c, settings: suite.settings) // the owner's model pin (WS6)
+            revalidateModelPins() // the owner's model pins (WS6)
             if let list = try? await api.suiteLocations() { suite.locations = list }
         } catch let e as ApiError {
             suite.catalogError = e.code == "not_found" || e.code == "http_404" ? "This server doesn't have the AI suite yet" : e.friendlyMessage
