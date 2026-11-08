@@ -1116,7 +1116,7 @@ class FakeMuseApi(
         if (!suiteOwner) throw ApiException("owner_only", "Only the studio owner can do that")
         suite.patch(req)
     }
-    // The learning editor (workstream 3's /v1/learn/*): demo's playbook, lessons, corrections, library and gaps, in memory.
+    // The learning editor (workstream 3's /v1/learn): demo's playbook, lessons, corrections, library and gaps, in memory.
     private val learnRules = FakeLearn.rules().toMutableList()
     private val learnRecipes = FakeLearn.recipes().toMutableList()
     private var learnSeq = 100

@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 
 /*
- * The learning editor (workstream 3, plans/api.md "Learning editor", `/v1/learn/*`, owner only): the playbook of rules
+ * The learning editor (workstream 3, plans/api.md "Learning editor", `/v1/learn`, owner only): the playbook of rules
  * Claude follows, the lessons and corrections they come from, the recipe library and the effects MUSE can't make yet.
  * Screens: ui/screens/edit/learn (plans/learning-editor-ui.md, the owner-approved mocks).
  */

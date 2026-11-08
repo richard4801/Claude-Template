@@ -4,7 +4,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 
-/** Demo mode's learning editor (workstream 3's `/v1/learn/*`): the studio's playbook, lessons, corrections, library and gaps. */
+/** Demo mode's learning editor (workstream 3's `/v1/learn`): the studio's playbook, lessons, corrections, library and gaps. */
 object FakeLearn {
     private const val H = 3_600_000L
     private const val D = 24 * H
