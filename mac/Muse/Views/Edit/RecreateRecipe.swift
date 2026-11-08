@@ -39,16 +39,22 @@ struct RecreatePanel: View {
 
     var body: some View {
         let rs = store.recreate
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: Space.s4) {
-                if let s = rs.selected {
-                    shot(s, index: rs.selectedSlot, of: rs.slots.count)
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: Space.s4) {
+                    if let s = rs.selected {
+                        shot(s, index: rs.selectedSlot, of: rs.slots.count)
+                    }
+                    SuiteRule()
+                    whole
                 }
-                SuiteRule()
-                whole
+                .padding(Space.s4)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(Space.s4)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // Review mode: the Look shot scrolls the panel to the swatches.
+            .onChange(of: SnapshotRunner.state.scrollTo) { _, id in
+                if id == "recreate.look" { proxy.scrollTo(id, anchor: .bottom) }
+            }
         }
         .background(t.roles.canvas)
     }
@@ -99,7 +105,15 @@ struct RecreatePanel: View {
                 .scaled(t.scale.caption, t.roles.ink2)
                 .fixedSize(horizontal: false, vertical: true)
             if rs.fill != nil {
-                RButton(state == "matched" ? "Pick another take" : "Use one of my takes", kind: .quiet, small: true) { picking = true }
+                Button { picking = true } label: {
+                    Text(state == "matched" ? "Pick another take" : "Use one of my takes")
+                        .font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1)
+                        .padding(.horizontal, Space.s3)
+                        .frame(height: 28)
+                        .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.raised))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
                     .popover(isPresented: $picking, arrowEdge: .leading) { takePicker(s) }
             } else if rs.loadingFill {
                 SkeletonBlock(height: 28)
@@ -169,6 +183,7 @@ struct RecreatePanel: View {
                     Text(g.look?.label.map { "Look · \($0)" } ?? "Look").scaled(t.scale.label, t.roles.ink).lineLimit(1)
                     RecreateSwatchStrip(swatches: g.swatches ?? [])
                 }
+                .id("recreate.look")
             }
             let general = r.gaps.filter { $0.atSec == nil }
             if !general.isEmpty {

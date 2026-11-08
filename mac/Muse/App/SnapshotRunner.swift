@@ -336,11 +336,11 @@ enum SnapshotRunner {
             return
         }
         let original = w.frame
-        func check(_ screen: String, _ theme: ThemeID, beside: Bool) {
+        func check(_ screen: String, _ theme: ThemeID, beside: Bool, primary: String = "build") {
             w.contentView?.layoutSubtreeIfNeeded()
             let content = w.contentView?.bounds.size ?? .zero
             let label = "recreate_\(screen) 1280x800 \(theme.rawValue)"
-            let keys = beside ? ["cost", "build"] : ["build"]
+            let keys = beside ? ["cost", primary] : [primary]
             for k in keys {
                 guard let f = state.recreateFrames[k], f.width > 0 else {
                     lines.append("CUT \(label) \(k) not drawn")
@@ -378,10 +378,15 @@ enum SnapshotRunner {
             try? await Task.sleep(for: .seconds(2))
             check("recipe", theme, beside: true)
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_recreate_recipe.png"))
+            // The panel scrolled to the Look (owner note 1: the swatches as the Recipe shows them).
+            state.scrollTo = "recreate.look"
+            try? await Task.sleep(for: .seconds(1))
+            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_recreate_recipe_look.png"))
+            state.scrollTo = nil
             await store.buildRecreate()
             store.selectRecreateSlot(1)
             try? await Task.sleep(for: .seconds(2))
-            check("compare", theme, beside: false)
+            check("compare", theme, beside: false, primary: "open")
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_recreate_compare.png"))
             store.closeRecreate()
             try? await Task.sleep(for: .seconds(0.5))

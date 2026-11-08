@@ -109,7 +109,7 @@ struct RecreateTopBar: View {
                 } else {
                     SuiteToolButton(title: "Open in the editor", icon: "export", accent: true) { store.openRecreateInEditor() }
                         .accessibilityLabel("Open in the editor")
-                        .background(SnapshotFrame(key: "build"))
+                        .background(SnapshotFrame(key: "open"))
                 }
             }
         }

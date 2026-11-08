@@ -6,9 +6,9 @@ import Foundation
 /// (dark to light).
 public enum RecreateSwatches {
     /// No shown swatch is more saturated than this (HSB saturation, 0–1).
-    public static let maxSaturation = 0.4
+    public static let maxSaturation = 0.38
     /// Shown swatches stay in this HSB brightness range.
-    public static let brightness: ClosedRange<Double> = 0.35...0.8
+    public static let brightness: ClosedRange<Double> = 0.35...0.76
     public static let minCount = 3
     public static let maxCount = 5
 
