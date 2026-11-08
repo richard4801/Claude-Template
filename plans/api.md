@@ -1255,7 +1255,7 @@ Slot {
   brief: {shotSize?, angle?, subject?, action?, location?, notes?} | null,
   rig: Rig | null,
   camera: {motion: "static"|"pan"|"tilt"|"zoom_in"|"zoom_out"|"shake"|"mixed", shake, keys: {t, x, y, scale}[], confidence},
-  speed: {ramp: "none"|"speed_up"|"slow_down"|"freeze"|"mixed", curve: {t, speed}[], confidence},
+  speed: {ramp: "none"|"speed_up"|"slow_down"|"freeze"|"mixed", curve: {t, speed}[], confidence, freeze?: {t, durationSec} /* where the longest hold is */},
   peaks: {t, strength}[],
   pose: {status: "pending"|"done"|"none", frameSec?, keypoints?: {name, x, y, score}[]}
 }
@@ -1386,6 +1386,7 @@ SlotFill { slotId, state: "empty"|"matched"|"to_generate"|"generating"|"ready", 
   - A take shorter than its slot plays slower to fill it.
 - **Transitions:** crossfade → `fade`, fade → `black`, flash → `white`, whip → `whip`, zoom → `zoom`, glitch → `glitch`. Cuts and unknown transitions get none.
 - **Speed ramps** become a custom `speedCurve`, and the source range is chosen so the clip still plays for exactly the slot's length.
+- **Freezes** (`speed.freeze {t, durationSec}`, from the analysis): the clip plays at the editor's slowest, 0.1×, for the freeze's length at its moment, so the held frame barely moves. The editor has no speed 0. The cuts don't move. Only freezes without a known place are logged as a gap.
 - **Action peaks** (plan §3, `options.peaks`, on by default): each take starts where its own strongest action peak, found free with `find_action_peaks`'s detector and cached per take, plays at the moment of the slot's strongest peak. The cuts don't move. A peak that would push the range past the take's end falls back to the next one, else the take starts at 0. A note says where each take starts.
 - **Camera moves** become `x`, `y` and `scale` keyframes on a clip scaled up enough that the frame stays covered.
 - **Text items** go on a text track. Text whose words weren't read says "Text".

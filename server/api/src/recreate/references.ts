@@ -477,13 +477,14 @@ export class RecreateReferences {
   }
 
   /**
-   * What the editor can't rebuild from this recipe goes to the learning editor's gaps (once per reference): freeze
-   * frames and flashes inside a shot. Unknown transitions and unread text are already counted from the recipe's gaps.
+   * What the editor can't rebuild from this recipe goes to the learning editor's gaps (once per reference): freezes
+   * without a known place, and flashes inside a shot. Unknown transitions and unread text are already counted from the recipe's gaps.
    */
   private async reportGaps(u: AuthUser, r: Row, recipe: Recipe, done: string[]) {
     if (u.role !== 'owner') return done;
     const found: { key: string; kind: string; what: string; note: string }[] = [];
-    const freeze = recipe.slots.filter(sl => sl.speed.ramp === 'freeze');
+    // Freezes are rebuilt as a 0.1× hold (G5); only those without a known place are a gap.
+    const freeze = recipe.slots.filter(sl => sl.speed.ramp === 'freeze' && !sl.speed.freeze);
     if (freeze.length) found.push({ key: 'speed:freeze-frame', kind: 'effect', what: 'Freeze frame', note: `“${r.name}”: ${freeze.map(x => x.id).join(', ')}` });
     const flashes = recipe.transitions.filter(t => t.from === t.to && t.kind === 'flash');
     if (flashes.length) found.push({ key: 'effect:flash-in-shot', kind: 'effect', what: 'A white flash inside a shot', note: `“${r.name}” at ${flashes.map(t => `${t.atSec.toFixed(2)} s`).join(', ')}` });
@@ -665,7 +666,7 @@ export function matchScore(recipe: Recipe, project: import('../editor/model.js')
   const coverage = used.length / Math.max(1, recipe.slots.length);
   const cuts = (cutErr.length ? cutErr.reduce((a, e) => a + Math.max(0, 1 - e / (2 * frame)), 0) / cutErr.length : 1) * coverage;
   const text = !recipe.text.length ? 1 : o.text === false ? 0 : recipe.text.reduce((a, x) => a + (x.words ? 1 : 0.6), 0) / recipe.text.length;
-  const ramped = recipe.slots.filter(s => s.speed.ramp !== 'none' && s.speed.ramp !== 'freeze');
+  const ramped = recipe.slots.filter(s => s.speed.ramp !== 'none' && (s.speed.ramp !== 'freeze' || s.speed.freeze));
   const ramps = !ramped.length ? 1 : o.speed === false ? 0 : ramped.filter(s => takes[s.id]).length / ramped.length;
   const look = recipe.grade.look;
   const grade = !look ? 0.5 : o.look === false || look.distance >= 0.4 ? 0 : Math.max(0, 1 - look.distance);

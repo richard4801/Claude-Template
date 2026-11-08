@@ -14,7 +14,8 @@ import { paletteIds } from '../src/editor/photo.js';
 import { editSessionsOf } from '../src/editor/sessions.js';
 import type { Recipe } from '../src/recreate/analyze.js';
 import { lutFor } from '../src/suite/looks.js';
-import { buildProject, editorTransition, peakInPoint } from '../src/recreate/assemble.js';
+import { buildProject, editorTransition, freezeCurve, peakInPoint } from '../src/recreate/assemble.js';
+import { speedOf } from '../src/recreate/signals.js';
 import { RECREATE_TOOLS } from '../src/recreate/mcpTools.js';
 import { BriefSchema, matchSlots, promptSource, scoreTake, shotRequestFor, withBriefs, type Candidate } from '../src/recreate/slots.js';
 import { putObject } from '../src/storage/objects.js';
@@ -128,6 +129,32 @@ describe('Recreate · action peaks line up (unit)', () => {
     expect(c1.outSec - c1.inSec).toBeCloseTo(d1.outSec - d1.inSec, 4);
     expect(M.timeline(on.project).map(x => x.startSec)).toEqual(M.timeline(off.project).map(x => x.startSec)); // the cuts don't move
     expect(on.notes.some(n => /s1: starts 2.00 s into the take/.test(n))).toBe(true);
+  });
+});
+
+describe('Recreate · freezes (unit)', () => {
+  it('the analysis says where the freeze is', () => {
+    const fps = 30, energy = Array.from({ length: 90 }, (_, i) => (i >= 31 && i < 46 ? 0.0005 : 0.05)); // frames 31–45 identical
+    const sp = speedOf({ startSec: 0, endSec: 3, startFrame: 0, endFrame: 90 }, { fps, energy } as never);
+    expect(sp.ramp).toBe('freeze');
+    expect(sp.freeze).toEqual({ t: 1, durationSec: 0.5 }); // differences 31..45 → the hold starts at frame 30 (1.0 s), 15 frames
+  });
+  it('a freeze plays at 0.1× for its length at its moment; the clip keeps the slot\'s length and the cuts stay', () => {
+    const slot = { ...RECIPE.slots[2]!, speed: { ramp: 'freeze' as const, curve: [{ t: 0, speed: 1 }], confidence: 0.55, freeze: { t: 0.4, durationSec: 0.5 } } };
+    const recipe = { ...RECIPE, slots: [RECIPE.slots[0]!, RECIPE.slots[1]!, slot] };
+    const out = buildProject(recipe, 'take_src', { s1: TAKE('tA'), s2: TAKE('tB'), s3: TAKE('tC', 4) }, { peaks: false });
+    const c = M.mainTrack(out.project).items[2] as M.VideoClip;
+    expect(c.speedCurve?.preset).toBe('custom');
+    const tl = M.timeline(out.project);
+    expect(tl[2]!.endSec - tl[2]!.startSec).toBeCloseTo(slot.durationSec + 0.25, 1); // + half the crossfade before it
+    // Rendered as the editor's pieces: about 0.5 s of output at ≤ 0.2×, starting around 0.4 s after the slot's start.
+    let t = 0, slow = 0, firstSlow = -1;
+    for (const p of M.speedPieces(c)) { const len = (p.outSec - p.inSec) / p.speed; if (p.speed <= 0.2) { slow += len; if (firstSlow < 0) firstSlow = t; } t += len; }
+    expect(slow).toBeGreaterThan(0.3); expect(slow).toBeLessThan(0.7);
+    expect(Math.abs(firstSlow - (0.25 + 0.4))).toBeLessThan(0.15);
+    expect(out.notes.some(n => /s3: the reference holds a frame for 0.50 s/.test(n))).toBe(true);
+    expect(freezeCurve({ t: 0, durationSec: 0.05 }, 1)).toBeUndefined(); // too short to show
+    expect(buildProject(recipe, 'take_src', { s1: TAKE('tA'), s2: TAKE('tB'), s3: TAKE('tC', 4) }, { speed: false, peaks: false }).project.tracks[0]!.items.every(x => !(x as M.VideoClip).speedCurve)).toBe(true);
   });
 });
 

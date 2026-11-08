@@ -171,7 +171,9 @@ export function cameraOf(shot: Shot, g: Global[], fps: number, skip: Set<number>
   return { motion, shake: round3(shake), keys, confidence };
 }
 
-export type Speed = { ramp: 'none' | 'speed_up' | 'slow_down' | 'freeze' | 'mixed'; curve: { t: number; speed: number }[]; confidence: number };
+export type Speed = { ramp: 'none' | 'speed_up' | 'slow_down' | 'freeze' | 'mixed'; curve: { t: number; speed: number }[]; confidence: number;
+  /** Where the longest freeze is (seconds from the shot's start), when `ramp` is "freeze". */
+  freeze?: { t: number; durationSec: number } };
 
 /**
  * A shot's playback speed, estimated from how much the picture changes per frame (relative to the shot's own median):
@@ -193,11 +195,13 @@ export function speedOf(shot: Shot, m: MotionFrames): Speed {
   const mean = (xs: number[]) => xs.reduce((x, y) => x + y, 0) / Math.max(1, xs.length);
   const first = mean(e.slice(0, third)), last = mean(e.slice(-third));
   const moving = med > 0.01;
-  let frozen = 0, run = 0;
-  for (const v of e) { run = v < 0.0015 ? run + 1 : 0; frozen = Math.max(frozen, run); }
+  let frozen = 0, run = 0, frozenEnd = 0;
+  e.forEach((v, i) => { run = v < 0.0015 ? run + 1 : 0; if (run > frozen) { frozen = run; frozenEnd = i; } });
   const ramp: Speed['ramp'] = moving && frozen >= Math.round(m.fps * 0.3) ? 'freeze'
     : moving && last > first * 2 ? 'speed_up' : moving && first > last * 2 ? 'slow_down' : 'none';
-  return { ramp, curve, confidence: moving ? 0.55 : 0.35 };
+  // The run of identical frames: the frame before it is the one held (difference i is frame i+1 against frame i).
+  const freeze = ramp === 'freeze' ? { t: round3((frozenEnd - frozen + 1) / m.fps), durationSec: round3(frozen / m.fps) } : undefined;
+  return { ramp, curve, confidence: moving ? 0.55 : 0.35, ...(freeze ? { freeze } : {}) };
 }
 
 export type Transition = { atSec: number; kind: 'cut' | 'flash' | 'whip' | 'zoom' | 'fade' | 'crossfade' | 'glitch' | 'unknown'; durationSec: number; confidence: number };
