@@ -83,6 +83,8 @@ data class ImportedVideo(
     val sourceUrl: String? = null,
     val platform: String? = null,
     val bytes: Long = 0,
+    /** The first frame, as {url} (WS12); [posterUrl] is the same frame. */
+    @kotlinx.serialization.SerialName("thumb") val thumbRef: ImageRef? = null,
     val posterUrl: String? = null,
     val videoUrl: String? = null,
     val videoKey: String? = null,
@@ -96,7 +98,7 @@ data class ImportedVideo(
 ) {
     /** The clip id for Character swap / Recast. */
     val clipId: String get() = id
-    val thumb: ImageRef? get() = demoThumb ?: posterUrl?.let { ImageRef(url = it) }
+    val thumb: ImageRef? get() = demoThumb ?: thumbRef?.takeIf { it.url != null || it.asset != null } ?: posterUrl?.let { ImageRef(url = it) }
 
     /** The same video as a clip (Swap's source, the composer's clip card). */
     fun asClip() = Clip(id, name, durationSec, width.takeIf { it > 0 } ?: 1080, height.takeIf { it > 0 } ?: 1920, fps, checks, thumb, audio)

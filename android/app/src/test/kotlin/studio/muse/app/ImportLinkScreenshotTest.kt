@@ -84,3 +84,31 @@ class ShareChooserScreenshotTest(private val theme: String, private val kind: St
         org.junit.Assert.assertEquals("swap", picked)
     }
 }
+
+/** The Library with an imported video (WS12: imports are listed by GET /v1/imports), all four themes. PNGs: library_imports_<theme>.png. */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(sdk = [35], qualifiers = "w390dp-h844dp-xhdpi")
+class LibraryImportsScreenshotTest(private val theme: String) {
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun params(): List<Array<Any>> = listOf("a", "b", "c", "d").map { arrayOf<Any>(it) }
+    }
+
+    @get:Rule val compose = createComposeRule()
+
+    @Test fun capture() {
+        val scope = kotlinx.coroutines.MainScope()
+        val fake = studio.muse.app.data.FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0)
+        kotlinx.coroutines.runBlocking { fake.imports.fromUpload(studio.muse.app.data.ImportUpload("up1", "https://www.tiktok.com/@a/video/1", "Rooftop dance")) }
+        val c = AppContainer(scope, studio.muse.app.data.MemoryPrefs(studio.muse.app.data.AppPrefs(theme = theme, useFake = true, token = "t", studioName = "Jenne Studio", role = "owner", email = "jenne@studio.com")), fake, null)
+        compose.mainClock.autoAdvance = false
+        compose.setContent { studio.muse.app.ui.MuseApp(c, studio.muse.app.ui.Routes.GALLERY) }
+        repeat(6) { shadowOf(Looper.getMainLooper()).idle(); compose.mainClock.advanceTimeBy(400) }
+        shadowOf(Looper.getMainLooper()).idle()
+        compose.onNodeWithText("Imported videos").assertIsDisplayed()
+        compose.onNodeWithText("Rooftop dance").assertIsDisplayed()
+        compose.onRoot().captureRoboImage("build/outputs/roborazzi/library_imports_$theme.png")
+    }
+}

@@ -92,4 +92,11 @@ class LinkPipelineTest {
         // The server can't get it either: the error says to pick the saved video.
         try { importFromLink(api, null, "https://www.tiktok.com/@blocked/video/2", null, tmp.root); fail() } catch (e: ApiException) { assertEquals("link_blocked", e.code) }
     }
+
+    @Test fun decodesWs12Import() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; explicitNulls = false; coerceInputValues = true }
+        val v = json.decodeFromString(studio.muse.app.data.ImportedVideo.serializer(), """{"id":"clip_9","name":"Roof","durationSec":8.2,"width":1080,"height":1920,"fps":30,"checks":[],"source":"import","sourceUrl":"https://www.tiktok.com/@a/video/1","platform":"tiktok","bytes":4200000,"thumb":{"url":"https://cdn/x.jpg"},"posterUrl":"https://cdn/x.jpg","videoUrl":"https://cdn/x.mp4","videoKey":"clips/x.mp4","uploadId":"up_1","createdBy":"u1","createdAt":1,"cached":true}""")
+        assertEquals("clip_9", v.clipId); assertEquals("https://cdn/x.jpg", v.thumb?.url); assertEquals("clips/x.mp4", v.videoKey); assertTrue(v.cached)
+        assertEquals(1080, v.asClip().width)
+    }
 }
