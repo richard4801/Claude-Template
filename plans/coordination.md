@@ -259,3 +259,10 @@ Release 1 additions (2026-11-08):
   - Members pay from their MUSE studio balance: estimate → hold → settle at cost × 2.
 - **Calibration:** about $0.25 via WS1.
 - **To turn it off:** the owner's switch in Settings, or PATCH /v1/editor/settings {paidHelpers:"off"}. Emergency: EDITOR_AI_PROVIDER=mock plus a redeploy.
+
+## Owner's Release 1 test checklist (being collected)
+- Upscale: one 5 s take → 1080p (about $0.43). WS2 watches the RunPod pod.
+- AI helpers calibration: run each once on a 15 s clip: Auto-captions, Remove background, Pick what to keep, Noise reduction. Then send the four jobs' numbers (estimateUsd/costUsd) to WS1, who corrects any rate more than 20% off.
+- Recreate from a pasted TikTok/Instagram/YouTube link, and from a saved file. Build with generated shots, Compare, and export with guide sound.
+- Android: Share → MUSE (link and file), plus a device check of alpha-matte timing/rotation and Recreate playback sync.
+- Owner test addition: one pose-guided shot with Wan Animate (~$1.16 at ×2), and one "Write the shot briefs" (~$0.10–0.20).

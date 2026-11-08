@@ -144,6 +144,19 @@ final class SuiteState {
     // The composer
     var composer = ComposerDraft()
     let composerSlots = InputSlotsModel()
+    /// Saved rigs (GET /v1/suite/rigs, the Setup rail's Rigs row): members see theirs, the owner sees all.
+    var savedRigs: [SuiteRigView] = []
+    /// The results feed beside the composer (GET /v1/suite/feed): shown in place of the picture while `feedOpen`; the
+    /// loaded cards, the next page and the filter.
+    var feedOpen = false
+    var feed: [SuiteFeedItem] = []
+    var feedCursor: String?
+    var feedFilter: SuiteFeedFilter = .all
+    var feedLoading = false
+    /// Two takes side by side over the composer (Compare in the feed); one picked waits for the second.
+    var compareIds: [String] = []
+    /// The character of a draft Reuse settings just restored: its default rig isn't laid over the restored rig.
+    var restoredCharacterId: String?
     var estimate: ShotEstimate?
     var estimateError: String?
     /// The four tiers' estimates for the Quality pill.

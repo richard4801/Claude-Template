@@ -19,36 +19,54 @@ struct ComposerBottomBar: View {
     private var isSwap: Bool { tool == .swap || tool == .recast }
 
     var body: some View {
-        // About 1000 px wide (owner): each pill is icon + value and never wraps; Generate always shows its price. When
-        // the row is still too wide the pills tighten, "How is this priced?" becomes a "?" and then the pills scroll.
+        // About 1000 pt wide (owner, coordination item 8): each pill is icon + value and never wraps; Generate always
+        // shows its price. When the row is still too wide the pills tighten, "How is this priced?" becomes a "?", then
+        // Generate drops its middle words ("Generate · 4 photos · $0.24" → "Generate · $0.24"), and last the pills scroll.
+        // The fit check (SnapshotRunner.fitCheck) shoots this at 1440 down to 960 pt and fails on a cut pill or price.
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
-                pills(spacing: 8, compact: false)
-                Spacer(minLength: 8)
-                PricingLink(estimate: estimate)
-                generateButton
+            HStack(spacing: Space.s2) {
+                pills(spacing: Space.s2, compact: false)
+                Spacer(minLength: Space.s2)
+                pricingLink(compact: false)
+                generateButton(short: false)
             }
             HStack(spacing: 6) {
                 pills(spacing: 5, compact: true)
                 Spacer(minLength: 6)
-                PricingLink(estimate: estimate, compact: true)
-                generateButton
+                pricingLink(compact: true)
+                generateButton(short: false)
+            }
+            HStack(spacing: 6) {
+                pills(spacing: 5, compact: true)
+                Spacer(minLength: 6)
+                pricingLink(compact: true)
+                generateButton(short: true)
             }
             HStack(spacing: 6) {
                 ScrollView(.horizontal, showsIndicators: false) { pills(spacing: 5, compact: true).padding(.vertical, 2) }
-                PricingLink(estimate: estimate, compact: true)
-                generateButton
+                pricingLink(compact: true)
+                generateButton(short: true)
             }
         }
         // The prompt bar around it gives the padding; the bar sits right under the prompt (owner fix 1).
         .frame(minHeight: 48)
     }
 
-    private var generateButton: some View {
-        GenerateButton(label: generateLabel, enabled: canGenerate, busy: store.suite.generating) { generate() }
-            .background { if SnapshotRunner.dir != nil { GenerateFrameProbe() } } // CI fit check (owner fix A2)
+    /// `short`: the price stays, only the words between "Generate" and it go (the full label is the tooltip and the
+    /// accessibility label).
+    private func generateButton(short: Bool) -> some View {
+        let full = generateLabel
+        let shown = short ? GenerateButton.shortLabel(full) : full
+        return GenerateButton(label: shown, accessibility: full, enabled: canGenerate, busy: store.suite.generating) { generate() }
+            .background { if SnapshotRunner.dir != nil { GenerateFrameProbe(label: shown) } } // CI fit check (owner fix A2)
             .fixedSize()
             .layoutPriority(2)
+    }
+
+    private func pricingLink(compact: Bool) -> some View {
+        PricingLink(estimate: estimate, compact: compact)
+            .fixedSize()
+            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pricing") } }
     }
 
     /// `compact`: the owner's Engine pill shows only its icon (the engine is its tooltip).
@@ -324,6 +342,7 @@ struct ComposerBottomBar: View {
             HStack(spacing: 6) { label() }
                 .lineLimit(1)
                 .fixedSize()
+                .fitProbe("composer pill \(id)") // CI fit check: a wrapped or cut label is a CUT line
                 .font(.system(size: 13))
                 .foregroundStyle(t.roles.ink)
                 // Quiet text pills on the prompt bar (the render): no box, the field tone only while its list is open.
@@ -332,6 +351,7 @@ struct ComposerBottomBar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pill \(id)") } }
         .help(help)
         .accessibilityLabel(help)
         .popover(isPresented: Binding(get: { open == id }, set: { if !$0 && open == id { open = nil } }), arrowEdge: .top) {
@@ -514,6 +534,8 @@ struct PricingLink: View {
 struct GenerateButton: View {
     @Environment(\.theme) private var t
     var label: String
+    /// The full label ("Generate · 4 photos · $0.24") when `label` is the short one; the accessibility label and tooltip.
+    var accessibility: String? = nil
     var enabled: Bool
     var busy: Bool
     var height: CGFloat = 44
@@ -523,7 +545,8 @@ struct GenerateButton: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 if busy { ProgressView().controlSize(.small).tint(t.ctaInk) }
-                Text(label).font(t.body(14, .semibold)).lineLimit(1)
+                Text(label).font(t.body(14, .semibold)).lineLimit(1).fixedSize()
+                    .fitProbe("composer generate") // CI fit check: Generate is never cut ("GENERATE…")
             }
             .foregroundStyle(t.ctaInk)
             .padding(.horizontal, 22).frame(height: height)
@@ -534,22 +557,51 @@ struct GenerateButton: View {
         .buttonStyle(.plain)
         .disabled(!enabled || busy)
         .keyboardShortcut(.return, modifiers: .command)
-        .help("Generate")
-        .accessibilityLabel(label)
+        .help(accessibility ?? "Generate")
+        .accessibilityLabel(accessibility ?? label)
+    }
+
+    /// "Generate · 4 photos · $0.24" → "Generate · $0.24": the first and last parts, so the price always shows.
+    static func shortLabel(_ label: String) -> String {
+        let parts = label.components(separatedBy: " · ")
+        guard parts.count > 2, let first = parts.first, let last = parts.last else { return label }
+        return "\(first) · \(last)"
     }
 }
 
 
 /// Review mode only (SnapshotRunner): reports where Generate sits in the window, so CI can check it is fully on screen.
 struct GenerateFrameProbe: View {
+    /// The words drawn on the button, for the fit check's "Generate shows its price" line.
+    var label: String = ""
     var body: some View {
         GeometryReader { g in
             let f = g.frame(in: .global)
             Color.clear
-                .onAppear { SnapshotRunner.state.generateFrame = f }
+                .onAppear { SnapshotRunner.state.generateFrame = f; SnapshotRunner.state.generateLabel = label }
                 .onChange(of: f) { _, v in SnapshotRunner.state.generateFrame = v }
+                .onChange(of: label) { _, v in SnapshotRunner.state.generateLabel = v }
                 // The runner asks again after each screen change (the frame may not have moved at all).
-                .onChange(of: SnapshotRunner.state.probeTick) { _, _ in SnapshotRunner.state.generateFrame = f }
+                .onChange(of: SnapshotRunner.state.probeTick) { _, _ in
+                    SnapshotRunner.state.generateFrame = f
+                    SnapshotRunner.state.generateLabel = label
+                }
+        }
+    }
+}
+
+/// Review mode only: where a bottom-bar pill or the pricing link sits in the window, so the fit check can tell a pill
+/// that runs under "How is this priced?" or Generate (or off the window) from one drawn whole.
+struct ComposerBarFrame: View {
+    var key: String
+    var body: some View {
+        GeometryReader { g in
+            let f = g.frame(in: .global)
+            Color.clear
+                .onAppear { SnapshotRunner.state.composerFrames[key] = f }
+                .onChange(of: f) { _, v in SnapshotRunner.state.composerFrames[key] = v }
+                .onChange(of: SnapshotRunner.state.probeTick) { _, _ in SnapshotRunner.state.composerFrames[key] = f }
+                .onDisappear { SnapshotRunner.state.composerFrames[key] = nil }
         }
     }
 }

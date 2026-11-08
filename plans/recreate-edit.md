@@ -165,3 +165,16 @@ See plans/research/platform-download-rules.md for the guardrails.
 | G6 | §2 Transitions "glitch" | **Done.** A burst of 3+ hard changes in under 0.6 s is a glitch. Before, it was missed by both the cut and the fade finders, so the two shots merged into one. A glitch that returns to the same shot is an effect inside it (an editor gap, like a flash). The server render still draws `glitch` as a pixelate, which reads back as a crossfade. | WS1 | — |
 | G7 | Release 1 #4 "Claude button on the Recreate screens" | Claude chat threads accept only `camera` or `edit` contexts, and the API fallback works only in Camera. Recreate's tools are on the MCP server already. | WS2 (threads), WS1 (on request) | — |
 | G8 | §6 "Claude's reading of the contact sheet … or a few cents on the API fallback" | **Done (owner: yes, on Sonnet).** "Write the shot briefs · about $…": the price first, then one confirmed Sonnet call reads the contact sheet and each shot's facts, and writes the briefs, summary and tags. Charged the actual cost × 2, held from the wallet and inside the AI editing daily cap and switch. Gated like the API fallback (the owner's Claude-on-server switch and a key). Claude on the Mac stays the free way. | WS1 | — |
+
+## Owner decisions (2026-11-08)
+- **Pose-guided generation (G2):** Wan 2.2 Animate, driven by a stick-figure video rendered from per-frame keypoints (never the reference's pixels). Priced at cost ×2, confirmed per shot. One paid test (~$0.58) in the owner's Release 1 test.
+- **Server-written shot briefs (G8):** yes, on Sonnet. Opt-in per reference, price shown and confirmed, ×2. About $0.10–0.20 per reference to members.
+- **Pose-guided generation, revised (owner, 2026-11-08):** for an exact movement swap, Wan 2.2 Animate is driven by **the reference video's segment itself** (motion input only) plus our model's image, replacing the earlier stick-figure plan and the "never the reference's pixels" rule for motion input.
+  - The output shows only our model.
+  - The segment is sent per slot and trimmed to the slot's length.
+  - Storage is unchanged: private, deleted after 30 days.
+  - The price is confirmed per shot.
+- **Pose-guided generation, final (owner, 2026-11-08):** missing shots are filled with the existing H3 Edit swap (the Suite's "Swaps her into every frame of the whole clip"), driven by the reference's slot segment.
+  - Same pricing and approval as the Suite; runs on RunPod, with the Replicate swap as fallback.
+  - Per-slot option: keep the original background, or use the owner's setting.
+  - Wan Animate is dropped.

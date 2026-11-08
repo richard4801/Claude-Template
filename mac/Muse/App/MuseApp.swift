@@ -15,7 +15,7 @@ struct MuseApp: App {
 
     private static var firstSize: CGSize {
         let vis = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1440, height: 900)
-        return CGSize(width: min(1440, max(1100, vis.width)), height: min(900, max(600, vis.height)))
+        return CGSize(width: min(1440, max(960, vis.width)), height: min(900, max(600, vis.height)))
     }
 
     var body: some Scene {
@@ -23,7 +23,7 @@ struct MuseApp: App {
             RootView()
                 .environment(store)
                 .environment(\.theme, store.theme)
-                .frame(minWidth: 1100, minHeight: 600) // 600: fits a 13" MacBook with the Dock showing (owner fix A2)
+                .frame(minWidth: 960, minHeight: 600) // 960: the owner works in a window about 1000 pt wide (coordination item 8); 600: fits a 13" MacBook with the Dock showing (owner fix A2)
                 .preferredColorScheme(store.theme.isDark ? .dark : .light)
                 .onAppear {
                     store.bootstrap()
