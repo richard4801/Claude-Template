@@ -194,13 +194,13 @@ public protocol LibraryQueueAPI: Sendable {
     func removeQueued(_ id: String) async throws
 }
 
-struct CollectionBody: Encodable {
+struct LibraryCollectionBody: Encodable {
     var name: String?
     var takeIds: [String]?
 }
 
-struct TakeIdsBody: Encodable { var takeIds: [String] }
-struct ConfirmBody: Encodable { var confirm = true }
+struct LibraryTakeIdsBody: Encodable { var takeIds: [String] }
+struct QueueRunBody: Encodable { var confirm = true }
 
 extension HTTPMuseAPI: LibraryQueueAPI {
     private func json<B: Encodable>(_ b: B) throws -> Data { try JSONEncoder().encode(b) }
@@ -214,22 +214,22 @@ extension HTTPMuseAPI: LibraryQueueAPI {
         (try await suiteCall("GET", "v1/library/collections") as [LibraryCollection]).map(fixed)
     }
     public func createCollection(name: String, takeIds: [String]) async throws -> LibraryCollection {
-        fixed(try await suiteCall("POST", "v1/library/collections", body: json(CollectionBody(name: name, takeIds: takeIds.isEmpty ? nil : takeIds))))
+        fixed(try await suiteCall("POST", "v1/library/collections", body: json(LibraryCollectionBody(name: name, takeIds: takeIds.isEmpty ? nil : takeIds))))
     }
     public func collection(_ id: String) async throws -> LibraryCollection {
         fixed(try await suiteCall("GET", "v1/library/collections/\(Self.pathKey(id))"))
     }
     public func renameCollection(_ id: String, name: String) async throws -> LibraryCollection {
-        fixed(try await suiteCall("PATCH", "v1/library/collections/\(Self.pathKey(id))", body: json(CollectionBody(name: name))))
+        fixed(try await suiteCall("PATCH", "v1/library/collections/\(Self.pathKey(id))", body: json(LibraryCollectionBody(name: name))))
     }
     public func deleteCollection(_ id: String) async throws {
         try await suiteSend("DELETE", "v1/library/collections/\(Self.pathKey(id))")
     }
     public func addToCollection(_ id: String, takeIds: [String]) async throws -> LibraryCollection {
-        fixed(try await suiteCall("POST", "v1/library/collections/\(Self.pathKey(id))/items", body: json(TakeIdsBody(takeIds: takeIds))))
+        fixed(try await suiteCall("POST", "v1/library/collections/\(Self.pathKey(id))/items", body: json(LibraryTakeIdsBody(takeIds: takeIds))))
     }
     public func removeFromCollection(_ id: String, takeIds: [String]) async throws -> LibraryCollection {
-        fixed(try await suiteCall("POST", "v1/library/collections/\(Self.pathKey(id))/items/remove", body: json(TakeIdsBody(takeIds: takeIds))))
+        fixed(try await suiteCall("POST", "v1/library/collections/\(Self.pathKey(id))/items/remove", body: json(LibraryTakeIdsBody(takeIds: takeIds))))
     }
     public func collections(ofTake takeId: String) async throws -> [LibraryCollection] {
         (try await suiteCall("GET", "v1/library/takes/\(Self.pathKey(takeId))/collections") as [LibraryCollection]).map(fixed)
@@ -245,7 +245,7 @@ extension HTTPMuseAPI: LibraryQueueAPI {
         try await suiteCall("POST", "v1/suite/queue/\(Self.pathKey(id))/estimate", body: json([String: String]()))
     }
     public func runQueued(_ id: String) async throws -> QueueRunResult {
-        var r: QueueRunResult = try await suiteCall("POST", "v1/suite/queue/\(Self.pathKey(id))/run", body: json(ConfirmBody()))
+        var r: QueueRunResult = try await suiteCall("POST", "v1/suite/queue/\(Self.pathKey(id))/run", body: json(QueueRunBody()))
         r.job = absolutize(r.job)
         return r
     }
@@ -319,7 +319,10 @@ extension FakeMuseAPI: LibraryQueueAPI {
         return collectionView(c, withItems: true)
     }
 
-    public func collection(_ id: String) async throws -> LibraryCollection { collectionView(libraryCollections[try collectionIndex(id)], withItems: true) }
+    public func collection(_ id: String) async throws -> LibraryCollection {
+        let i = try collectionIndex(id)
+        return collectionView(libraryCollections[i], withItems: true)
+    }
 
     public func renameCollection(_ id: String, name: String) async throws -> LibraryCollection {
         let clean = try LibraryCollection.cleanName(name).get()
@@ -374,7 +377,7 @@ extension FakeMuseAPI: LibraryQueueAPI {
     /// Each member sees their own queue; the owner sees the studio's.
     func visibleQueue() -> [QueuedShot] {
         let me = suiteUserId
-        return suiteQueue.filter { suiteIsOwner || $0.item.userId == me }.map(queuedView).sorted { $0.createdAt > $1.createdAt }
+        return suiteQueue.filter { suiteIsOwner || $0.item.userId == me }.map { queuedView($0) }.sorted { $0.createdAt > $1.createdAt }
     }
 
     public func queueShot(_ req: ShotRequest) async throws -> QueuedShot {
@@ -404,8 +407,10 @@ extension FakeMuseAPI: LibraryQueueAPI {
     }
 
     public func estimateQueued(_ id: String) async throws -> QueuedEstimate {
+        let at = try queueIndex(id)
+        let req = suiteQueue[at].request
+        let e = try await suiteEstimate(req)
         let i = try queueIndex(id)
-        let e = try await suiteEstimate(suiteQueue[i].request)
         let changed = abs(e.estimate - suiteQueue[i].item.estimate) > 0.0001
         suiteQueue[i].item.estimate = e.estimate
         suiteQueue[i].item.buttonLabel = QueuedShot.runLabel(e.estimate)
@@ -413,8 +418,8 @@ extension FakeMuseAPI: LibraryQueueAPI {
     }
 
     public func runQueued(_ id: String) async throws -> QueueRunResult {
-        let i = try queueIndex(id)
-        let q = suiteQueue[i]
+        let at = try queueIndex(id)
+        let q = suiteQueue[at]
         let job = try await suiteCreateShot(q.request)
         if let j = suiteQueue.firstIndex(where: { $0.item.id == id }) { suiteQueue.remove(at: j) }
         return QueueRunResult(queuedId: id, job: job)
