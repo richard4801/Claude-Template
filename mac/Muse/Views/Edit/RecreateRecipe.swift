@@ -57,6 +57,7 @@ struct RecreatePanel: View {
             // Review mode: the Look shot scrolls the panel to the swatches.
             .onChange(of: SnapshotRunner.state.scrollTo) { _, id in
                 if id == "recreate.look" { proxy.scrollTo(id, anchor: .bottom) }
+                if id == "recreate.fill" { proxy.scrollTo(id, anchor: .center) }
             }
         }
         .background(t.roles.canvas)
@@ -144,6 +145,7 @@ struct RecreatePanel: View {
         }
         .padding(Space.s3)
         .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field))
+        .id("recreate.fill")
     }
 
     /// The slot's status word: how it is made (swap or a new shot) and where it is.

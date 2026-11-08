@@ -564,6 +564,48 @@ final class RecreateTests: XCTestCase {
         XCTAssertEqual(s3.reason, FakeRecreateAPI.swapFailedReason)
     }
 
+    // MARK: Use your own setting (a location, or a plate from the brief)
+
+    func testOwnSettingBackground() async throws {
+        let json = #"""
+        {"slotId":"s2","method":"swap","keepBackground":false,"background":{"source":"generated","setting":"a rooftop at dusk","usd":0.06},
+         "estimate":{"estimate":0.47,"swapUsd":0.41,"backgroundUsd":0.06,"buttonLabel":"Swap in · 2.0 s · $0.47","priceLine":"about $0.47","ok":true}}
+        """#
+        let e = try JSONDecoder().decode(RecreateSlotEstimate.self, from: Data(json.utf8))
+        XCTAssertEqual(e.backgroundUsd, 0.06)
+        XCTAssertEqual(e.swapUsd, 0.41)
+        XCTAssertEqual(e.background?.line, "background made from the brief, +$0.06")
+        let loc = try JSONDecoder().decode(RecreateBackground.self, from: Data(#"{"source":"location","locationId":"loc1","name":"Rooftop","matched":true,"usd":0}"#.utf8))
+        XCTAssertEqual(loc.line, "in Rooftop")
+        let api = FakeRecreateAPI()
+        let plain = try await api.estimateSlot("rx_demo", slotId: "s2", modelId: "m1", quality: nil)
+        XCTAssertNil(plain.background)
+        let plate = try await api.estimateSlot("rx_demo", slotId: "s2", modelId: "m1", quality: nil, options: RecreateFillOptions(method: "swap", keepBackground: false))
+        XCTAssertEqual(plate.background?.source, "generated")
+        XCTAssertEqual(plate.backgroundUsd ?? 0, FakeRecreateAPI.demoPlatePrice, accuracy: 1e-9)
+        XCTAssertEqual(plate.estimate.estimate, FakeRecreateAPI.demoSwapPrice + FakeRecreateAPI.demoPlatePrice, accuracy: 1e-9)
+        let locId = try XCTUnwrap(FakeMuseAPI.demoLocations.first?.id)
+        let onLoc = try await api.estimateSlot("rx_demo", slotId: "s2", modelId: "m1", quality: nil,
+                                               options: RecreateFillOptions(method: "swap", keepBackground: false, locationId: locId))
+        XCTAssertEqual(onLoc.background?.source, "location")
+        XCTAssertNil(onLoc.backgroundUsd)
+        XCTAssertEqual(onLoc.estimate.estimate, FakeRecreateAPI.demoSwapPrice, accuracy: 1e-9)
+        // The confirmed price: lower than the swap and plate → price_changed; a failed plate → background_failed.
+        await assertCode("price_changed") {
+            _ = try await api.fillSlot("rx_demo", slotId: "s2", modelId: "m1", quality: nil,
+                                       options: RecreateFillOptions(method: "swap", keepBackground: false, maxUsd: FakeRecreateAPI.demoSwapPrice))
+        }
+        api.failBackground = true
+        await assertCode("background_failed") {
+            _ = try await api.fillSlot("rx_demo", slotId: "s3", modelId: "m1", quality: nil, options: RecreateFillOptions(method: "swap", keepBackground: false))
+        }
+        api.failBackground = false
+        _ = try await api.fillSlot("rx_demo", slotId: "s3", modelId: "m1", quality: nil, options: RecreateFillOptions(method: "swap", keepBackground: false, maxUsd: 0.47))
+        let again = try await api.estimateSlot("rx_demo", slotId: "s3", modelId: "m1", quality: nil, options: RecreateFillOptions(method: "swap", keepBackground: false))
+        XCTAssertEqual(again.background?.reused, true)
+        XCTAssertEqual(again.estimate.estimate, FakeRecreateAPI.demoSwapPrice, accuracy: 1e-9)
+    }
+
     // MARK: Write the shot briefs (G8)
 
     func testBriefsEstimateAndWrite() async throws {

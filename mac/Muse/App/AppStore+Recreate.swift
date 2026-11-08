@@ -76,6 +76,8 @@ final class RecreateState {
     /// your own setting instead of the reference's, and each slot's full estimate (method, button label, swap notes).
     var methods: [String: String] = [:]
     var ownSetting: Set<String> = []
+    /// "Use your own setting": the studio location picked per shot (nil = make one from the brief).
+    var locationFor: [String: String] = [:]
     var estimateInfo: [String: RecreateSlotEstimate] = [:]
     /// Swapped shots that already carry the reference's camera, speed and look (slotId → parts): "Already in the shot".
     var baked: [String: [String]] = [:]
@@ -196,6 +198,7 @@ final class RecreateState {
         briefsError = nil
         methods = [:]
         ownSetting = []
+        locationFor = [:]
         estimateInfo = [:]
         baked = [:]
         claudeAsk = nil
@@ -264,6 +267,8 @@ extension AppStore {
         recreate.error = nil
         recreate.open = true
         Task { await loadRecreateReferences() }
+        // "Use your own setting" lists the studio locations (the Suite's own list).
+        if suite.locations.isEmpty { Task { if let l = try? await api.suiteLocations() { suite.locations = l } } }
     }
 
     func closeRecreate() {
@@ -561,7 +566,8 @@ extension AppStore {
     func recreateFillOptions(_ slotId: String) -> RecreateFillOptions {
         let fell = recreate.slotFill(slotId)?.fallback == "generate"
         let method = recreate.methods[slotId] ?? (fell ? "generate" : nil)
-        return RecreateFillOptions(method: method, keepBackground: method == "generate" ? nil : (recreate.ownSetting.contains(slotId) ? false : nil))
+        let own = method != "generate" && recreate.ownSetting.contains(slotId)
+        return RecreateFillOptions(method: method, keepBackground: own ? false : nil, locationId: own ? recreate.locationFor[slotId] : nil)
     }
 
     /// "Swap into the reference shot" / "Generate a new shot": the slot is priced again (nothing is held).
@@ -576,6 +582,14 @@ extension AppStore {
     /// "Keep the reference's setting" (on) / "Use your own setting" (off) for a swap: priced again.
     func setRecreateKeepSetting(_ slotId: String, _ keep: Bool) {
         if keep { recreate.ownSetting.remove(slotId) } else { recreate.ownSetting.insert(slotId) }
+        recreate.estimates[slotId] = nil
+        recreate.estimateInfo[slotId] = nil
+        if let id = recreate.reference?.id { Task { await priceRecreateSlots(id) } }
+    }
+
+    /// "Use your own setting": one of the studio's locations (free), or nil = make one from the brief. Priced again.
+    func setRecreateLocation(_ slotId: String, _ locationId: String?) {
+        recreate.locationFor[slotId] = locationId
         recreate.estimates[slotId] = nil
         recreate.estimateInfo[slotId] = nil
         if let id = recreate.reference?.id { Task { await priceRecreateSlots(id) } }
@@ -637,6 +651,7 @@ extension AppStore {
         for s in confirmed {
             var o = recreateFillOptions(s)
             if let m = recreate.estimateInfo[s]?.method { o.method = m }
+            o.maxUsd = recreate.estimates[s]?.estimate
             opts[s] = o
         }
         let fillOpts = opts
@@ -661,9 +676,17 @@ extension AppStore {
                 } catch {
                     if self.recreate.reference?.id == id {
                         let e = error as? ApiError
-                        self.recreate.fillErrors[s] = e?.code == "swap_unavailable"
-                            ? "Swapping can’t run for this shot right now. Generate a new shot instead (it’s priced first)."
-                            : "This shot didn’t start: \(e?.friendlyMessage ?? error.localizedDescription)"
+                        switch e?.code {
+                        case "swap_unavailable":
+                            self.recreate.fillErrors[s] = "Swapping can’t run for this shot right now. Generate a new shot instead (it’s priced first)."
+                        case "background_failed", "price_changed":
+                            // The server's own words ("you weren't charged" / the new price); priced again before any retry.
+                            self.recreate.fillErrors[s] = e?.message ?? "This shot didn’t start."
+                            self.recreate.estimates[s] = nil
+                            self.recreate.estimateInfo[s] = nil
+                        default:
+                            self.recreate.fillErrors[s] = "This shot didn’t start: \(e?.friendlyMessage ?? error.localizedDescription)"
+                        }
                         if e?.code == "swap_unavailable" { self.recreate.methods[s] = "generate" }
                     }
                 }
@@ -913,6 +936,7 @@ extension AppStore {
         guard let ref = recreate.reference, let slot = recreate.fixSlot, recreate.fixEstimate != nil, let model = recreateModelId else { return }
         var opts = recreateFillOptions(slot)
         if let m = recreate.fixMethod { opts.method = m }
+        opts.maxUsd = recreate.fixEstimate?.estimate
         let fillOpts = opts
         let id = ref.id
         recreate.fixEstimate = nil
@@ -952,7 +976,8 @@ extension AppStore {
             } catch is CancellationError {
             } catch {
                 self.recreate.fixBusy = nil
-                self.recreate.fixError = (error as? ApiError)?.friendlyMessage ?? error.localizedDescription
+                let e = error as? ApiError
+                self.recreate.fixError = ["background_failed", "price_changed"].contains(e?.code ?? "") ? e?.message : (e?.friendlyMessage ?? error.localizedDescription)
             }
         }
     }

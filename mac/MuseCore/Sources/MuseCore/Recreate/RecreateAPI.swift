@@ -109,8 +109,51 @@ public struct RecreateFillOptions: Hashable, Sendable {
     public var method: String?
     public var keepBackground: Bool?
     public var outfitId: String?
-    public init(method: String? = nil, keepBackground: Bool? = nil, outfitId: String? = nil) {
-        self.method = method; self.keepBackground = keepBackground; self.outfitId = outfitId
+    /// "Use your own setting": one of the studio's locations (free); nil = the server's pick, else a plate from the brief.
+    public var locationId: String?
+    /// The fill only: the confirmed price. A swap that would cost more comes back as `409 price_changed`.
+    public var maxUsd: Double?
+    public init(method: String? = nil, keepBackground: Bool? = nil, outfitId: String? = nil, locationId: String? = nil, maxUsd: Double? = nil) {
+        self.method = method; self.keepBackground = keepBackground; self.outfitId = outfitId; self.locationId = locationId; self.maxUsd = maxUsd
+    }
+}
+
+/// "Use your own setting": where the background photo comes from (a studio location, free; or a plate made from the
+/// brief's setting, about $0.06 the first time, then reused free).
+public struct RecreateBackground: Codable, Hashable, Sendable {
+    /// location | generated
+    public var source: String
+    public var locationId: String?
+    public var name: String?
+    /// The location was matched from the brief's place (not picked).
+    public var matched: Bool?
+    public var setting: String?
+    public var usd: Double
+    public var reused: Bool?
+
+    public var isLocation: Bool { source == "location" }
+
+    public init(source: String, locationId: String? = nil, name: String? = nil, matched: Bool? = nil, setting: String? = nil, usd: Double = 0, reused: Bool? = nil) {
+        self.source = source; self.locationId = locationId; self.name = name; self.matched = matched; self.setting = setting; self.usd = usd; self.reused = reused
+    }
+
+    enum CodingKeys: String, CodingKey { case source, locationId, name, matched, setting, usd, reused }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        source = c.o(.source) ?? "generated"
+        locationId = c.o(.locationId)
+        name = c.o(.name)
+        matched = c.o(.matched)
+        setting = c.o(.setting)
+        usd = c.o(.usd) ?? 0
+        reused = c.o(.reused)
+    }
+
+    /// The confirmation's words: "in Rooftop" / "background made from the brief, +$0.06" / "…, made before".
+    public var line: String {
+        if isLocation { return "in \(name ?? "your location")" }
+        if reused == true || usd <= 0 { return "background from the brief, made before" }
+        return "background made from the brief, +\(RecreateText.money(usd))"
     }
 }
 
@@ -191,16 +234,25 @@ public struct RecreateSlotEstimate: Decodable, Hashable, Sendable {
     public var swapUnavailable: String?
     /// brief | summary | default: where a new shot's prompt came from.
     public var promptFrom: String?
+    /// "Use your own setting": the background photo, and the price split when the plate is paid (both already in `estimate`).
+    public var background: RecreateBackground?
+    public var swapUsd: Double?
+    public var backgroundUsd: Double?
 
     public var isSwap: Bool { method == "swap" }
 
     public init(slotId: String, estimate: ShotEstimate, request: JSONValue? = nil, method: String? = nil, keepBackground: Bool? = nil,
-                segment: Segment? = nil, baked: [String] = [], swapUnavailable: String? = nil, promptFrom: String? = nil) {
+                segment: Segment? = nil, baked: [String] = [], swapUnavailable: String? = nil, promptFrom: String? = nil,
+                background: RecreateBackground? = nil, swapUsd: Double? = nil, backgroundUsd: Double? = nil) {
         self.slotId = slotId; self.estimate = estimate; self.request = request; self.method = method; self.keepBackground = keepBackground
         self.segment = segment; self.baked = baked; self.swapUnavailable = swapUnavailable; self.promptFrom = promptFrom
+        self.background = background; self.swapUsd = swapUsd; self.backgroundUsd = backgroundUsd
     }
 
-    enum CodingKeys: String, CodingKey { case slotId, estimate, request, method, keepBackground, segment, baked, swapUnavailable, promptFrom }
+    /// The split of a paid plate's price, read from the estimate object.
+    private struct Split: Decodable { var swapUsd: Double?; var backgroundUsd: Double? }
+
+    enum CodingKeys: String, CodingKey { case slotId, estimate, request, method, keepBackground, segment, baked, swapUnavailable, promptFrom, background, swapUsd, backgroundUsd }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         slotId = try c.decode(String.self, forKey: .slotId)
@@ -212,6 +264,10 @@ public struct RecreateSlotEstimate: Decodable, Hashable, Sendable {
         baked = c.o(.baked) ?? []
         swapUnavailable = c.o(.swapUnavailable)
         promptFrom = c.o(.promptFrom)
+        background = c.o(.background)
+        let split: Split? = c.o(.estimate)
+        swapUsd = split?.swapUsd ?? c.o(.swapUsd)
+        backgroundUsd = split?.backgroundUsd ?? c.o(.backgroundUsd)
     }
 }
 
@@ -308,7 +364,7 @@ extension HTTPMuseAPI: RecreateAPI {
     private struct CreateBody: Encodable { var uploadId: String; var name: String? }
     private struct LinkBody: Encodable { var url: String; var name: String? }
     private struct PatchBody: Encodable { var keep: Bool?; var name: String? }
-    private struct SlotBody: Encodable { var modelId: String; var quality: String?; var method: String?; var keepBackground: Bool?; var outfitId: String? }
+    private struct SlotBody: Encodable { var modelId: String; var quality: String?; var method: String?; var keepBackground: Bool?; var outfitId: String?; var locationId: String?; var maxUsd: Double? }
     private struct MatchBody: Encodable { var modelId: String? }
 
     public func listReferences() async throws -> [RecreateReference] { try await suiteCall("GET", "v1/recreate/references") }
@@ -332,11 +388,11 @@ extension HTTPMuseAPI: RecreateAPI {
     }
     public func estimateSlot(_ id: String, slotId: String, modelId: String, quality: String?, options: RecreateFillOptions) async throws -> RecreateSlotEstimate {
         let path = "v1/recreate/references/\(try RecreateIds.check(id))/slots/\(try RecreateIds.slot(slotId))/estimate"
-        return try await suiteCall("POST", path, body: try JSONEncoder().encode(SlotBody(modelId: modelId, quality: quality, method: options.method, keepBackground: options.keepBackground, outfitId: options.outfitId)))
+        return try await suiteCall("POST", path, body: try JSONEncoder().encode(SlotBody(modelId: modelId, quality: quality, method: options.method, keepBackground: options.keepBackground, outfitId: options.outfitId, locationId: options.locationId, maxUsd: options.maxUsd)))
     }
     public func fillSlot(_ id: String, slotId: String, modelId: String, quality: String?, options: RecreateFillOptions) async throws -> RecreateSlotFillStart {
         let path = "v1/recreate/references/\(try RecreateIds.check(id))/slots/\(try RecreateIds.slot(slotId))/fill"
-        return try await suiteCall("POST", path, body: try JSONEncoder().encode(SlotBody(modelId: modelId, quality: quality, method: options.method, keepBackground: options.keepBackground, outfitId: options.outfitId)))
+        return try await suiteCall("POST", path, body: try JSONEncoder().encode(SlotBody(modelId: modelId, quality: quality, method: options.method, keepBackground: options.keepBackground, outfitId: options.outfitId, locationId: options.locationId, maxUsd: options.maxUsd)))
     }
     public func apply(_ id: String, _ req: RecreateApplyRequest) async throws -> RecreateApplyResult {
         try await suiteCall("POST", "v1/recreate/references/\(try RecreateIds.check(id))/apply", body: try JSONEncoder().encode(req))
@@ -534,6 +590,22 @@ public final class FakeRecreateAPI: RecreateAPI, @unchecked Sendable {
     /// referenceId → slotId → the method its fill used.
     private var fillMethods: [String: [String: String]] = [:]
 
+    public static let demoPlatePrice = 0.06
+    /// Tests: a generated background plate fails (502 background_failed, nothing charged).
+    public var failBackground = false
+    /// referenceId/slotId plates already made from the brief (reused free).
+    private var plates: Set<String> = []
+
+    /// "Use your own setting" in demo mode: the picked studio location (free), else a plate from the brief.
+    private func background(_ id: String, slotId: String, locationId: String?) -> RecreateBackground {
+        if let locationId {
+            let name = FakeMuseAPI.demoLocations.first { $0.id == locationId }?.name ?? "Your location"
+            return RecreateBackground(source: "location", locationId: locationId, name: name, matched: false, usd: 0)
+        }
+        let reused = with { plates.contains("\(id)/\(slotId)") }
+        return RecreateBackground(source: "generated", setting: "a bright studio", usd: reused ? 0 : Self.demoPlatePrice, reused: reused)
+    }
+
     private func method(_ asked: String?) throws -> (method: String, unavailable: String?) {
         if asked == "generate" { return ("generate", nil) }
         if swapAvailable { return ("swap", nil) }
@@ -549,12 +621,17 @@ public final class FakeRecreateAPI: RecreateAPI, @unchecked Sendable {
         if m.method == "swap" {
             let seg = RecreateSlotEstimate.Segment(startSec: s.startSec, endSec: s.endSec)
             let secs = (max(2, s.length) * 10).rounded() / 10
-            let price = RecreateText.money(Self.demoSwapPrice)
+            // "Use your own setting": a studio location (free), else a plate from the brief ($0.06 the first time).
+            let bg = options.keepBackground == false ? background(id, slotId: slotId, locationId: options.locationId) : nil
+            let total = Self.demoSwapPrice + (bg?.usd ?? 0)
+            let price = RecreateText.money(total)
             let e = ShotEstimate(quality: quality ?? "standard", label: "Swap · \(String(format: "%.1f", secs)) s", resolution: "720p", seconds: secs, takes: 1,
-                                 mode: "swap", estimate: Self.demoSwapPrice, priceLine: "about \(price) · \(String(format: "%.1f", secs)) s",
+                                 mode: "swap", estimate: total, priceLine: "about \(price) · \(String(format: "%.1f", secs)) s",
                                  buttonLabel: "Swap in · \(String(format: "%.1f", secs)) s · \(price)", test: true)
+            let paid = (bg?.usd ?? 0) > 0
             return RecreateSlotEstimate(slotId: slotId, estimate: e, method: "swap", keepBackground: options.keepBackground ?? true, segment: seg,
-                                        baked: ["camera", "speed", "look"])
+                                        baked: ["camera", "speed", "look"], background: bg,
+                                        swapUsd: paid ? Self.demoSwapPrice : nil, backgroundUsd: paid ? bg?.usd : nil)
         }
         let secs = max(2, s.length.rounded(.up))
         let price = RecreateText.money(Self.demoPrice)
@@ -569,13 +646,23 @@ public final class FakeRecreateAPI: RecreateAPI, @unchecked Sendable {
         let r = try await reference(id)
         guard let i = r.recipe?.slots.firstIndex(where: { $0.id == slotId }) else { throw ApiError("not_found", "That shot is gone") }
         let m = try method(options.method)
+        var cost = m.method == "swap" ? Self.demoSwapPrice : Self.demoPrice
+        let bg = m.method == "swap" && options.keepBackground == false ? background(id, slotId: slotId, locationId: options.locationId) : nil
+        cost += bg?.usd ?? 0
+        // The confirmed price (maxUsd): a swap that now costs more is refused with the new price.
+        if let max = options.maxUsd, cost > max + 0.005 {
+            throw ApiError("price_changed", "The price changed to \(RecreateText.money(cost)). Check it and build again.")
+        }
+        if let bg, bg.source == "generated", bg.usd > 0 {
+            if failBackground { throw ApiError("background_failed", "The background photo couldn’t be made · you weren’t charged. Try again, or pick a location") }
+            _ = with { plates.insert("\(id)/\(slotId)") }
+        }
         try with {
             // A shot still being made is never started twice; a finished one can be made again ("Regenerate this shot").
             if let n = made[id]?[slotId], n < 2 { throw ApiError("already_filled", "This shot is already being made") }
             made[id, default: [:]][slotId] = 0
             fillMethods[id, default: [:]][slotId] = m.method
         }
-        let cost = m.method == "swap" ? Self.demoSwapPrice : Self.demoPrice
         let job = Job(id: Self.demoJobId(slotId), title: "Shot \(i + 1)", modelId: modelId, modelName: "", outfitId: options.outfitId ?? "",
                       request: JobRequest(title: "Shot \(i + 1)", modelId: modelId, outfitId: options.outfitId ?? "", clipId: "", engine: "suite"),
                       state: "queued", cost: cost)

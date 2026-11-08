@@ -565,6 +565,30 @@ enum SnapshotRunner {
                 store.recreate.askBriefs = false
                 try? await Task.sleep(for: .seconds(0.8))
                 store.selectRecreateSlot(1)
+                // Use your own setting: the studio's locations and "Make one from the brief · +$0.06" (priced again).
+                if let s2 = store.recreate.slots.dropFirst().first?.id {
+                    store.setRecreateKeepSetting(s2, false)
+                    try? await Task.sleep(for: .seconds(1))
+                    state.scrollTo = "recreate.fill"
+                    try? await Task.sleep(for: .seconds(0.8))
+                    let info = store.recreate.estimateInfo[s2]
+                    let ok = info?.background?.source == "generated" && (info?.backgroundUsd ?? 0) > 0 && !store.suite.locations.isEmpty
+                    lines.append("\(ok ? "FITS" : "CUT") recreate_own_setting 1280x800 c \(store.suite.locations.count) locations, plate +\(RecreateText.money(info?.backgroundUsd ?? 0)), \(info?.estimate.buttonLabel ?? "not priced")")
+                    onScreen("plate", "recreate_own_setting 1280x800 c")
+                    check("own_setting", theme, beside: true)
+                    capture(dir.appendingPathComponent("mac_c_recreate_own_setting.png"))
+                    if let loc = store.suite.locations.first {
+                        store.setRecreateLocation(s2, loc.id)
+                        try? await Task.sleep(for: .seconds(0.8))
+                        let bg = store.recreate.estimateInfo[s2]?.background
+                        lines.append("\(bg?.source == "location" && bg?.usd == 0 ? "FITS" : "CUT") recreate_own_setting 1280x800 c on \(bg?.name ?? "no location"), free")
+                    }
+                    // Back to the reference's setting for the shots after this one.
+                    store.setRecreateLocation(s2, nil)
+                    store.setRecreateKeepSetting(s2, true)
+                    state.scrollTo = nil
+                    try? await Task.sleep(for: .seconds(0.8))
+                }
             }
             // The panel scrolled to the Look (owner note 1: the swatches as the Recipe shows them).
             state.scrollTo = "recreate.look"

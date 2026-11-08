@@ -233,11 +233,62 @@ struct RecreateMethodPicker: View {
                 .controlSize(.mini)
                 .accessibilityLabel("Keep the reference’s setting")
                 .padding(.top, Space.s1)
+                if rs.ownSetting.contains(slotId) { locations(info) }
             }
             if let note = info?.swapUnavailable, !note.isEmpty {
                 Text(note).scaled(t.scale.caption, t.roles.caution).fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    /// "Use your own setting": the studio's locations (free), then "Make one from the brief" with the plate's price from
+    /// the estimate (`backgroundUsd`; free once made). Changing it prices the shot again.
+    private func locations(_ info: RecreateSlotEstimate?) -> some View {
+        let rs = store.recreate
+        let picked = rs.locationFor[slotId]
+        let plate: String = {
+            if let bg = info?.background, bg.source == "generated", bg.reused == true || bg.usd <= 0 { return "Make one from the brief · made before" }
+            let usd = info?.backgroundUsd ?? (info?.background?.source == "generated" ? info?.background?.usd : nil)
+            return usd.map { "Make one from the brief · +\(RecreateText.money($0))" } ?? "Make one from the brief"
+        }()
+        return VStack(alignment: .leading, spacing: 2) {
+            ForEach(store.suite.locations) { loc in
+                locationRow(loc.name, image: loc.image, on: picked == loc.id) {
+                    store.setRecreateLocation(slotId, loc.id)
+                    onChange()
+                }
+            }
+            locationRow(plate, image: nil, on: picked == nil) {
+                store.setRecreateLocation(slotId, nil)
+                onChange()
+            }
+            .background(SnapshotFrame(key: "plate"))
+        }
+        .padding(.leading, Space.s3)
+    }
+
+    private func locationRow(_ title: String, image: ImageRef?, on: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            if !on { action() }
+        } label: {
+            HStack(spacing: Space.s2) {
+                ZStack {
+                    Circle().strokeBorder(on ? t.roles.ink : t.roles.ink2, lineWidth: 1.5).frame(width: 12, height: 12)
+                    if on { Circle().fill(t.roles.ink).frame(width: 6, height: 6) }
+                }
+                if let image {
+                    MuseImage(ref: image).frame(width: 28, height: 20)
+                        .clipShape(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous))
+                }
+                Text(title).scaled(t.scale.caption, t.roles.ink).lineLimit(1).fitProbe("location \(title)")
+                Spacer(minLength: 0)
+            }
+            .frame(minHeight: 24)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     private func option(_ method: String, _ title: String, _ hint: String, on: Bool) -> some View {
