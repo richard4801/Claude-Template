@@ -9,6 +9,7 @@ import { compact, uid } from '../lib/util.js';
 import { claudeMessages, claudeSettings, claudeThreads, claudeTurns, type CameraAssetKind } from './schema.js';
 import type { CameraService } from './service.js';
 import { parse } from './validate.js';
+import { EDIT_PROMPT, RECREATE_PROMPT } from '../recreate/assistant.js';
 
 type ThreadRow = typeof claudeThreads.$inferSelect;
 type MessageRow = typeof claudeMessages.$inferSelect;
@@ -84,7 +85,7 @@ export class ClaudeService {
 
   // ------------------------------------------------------------------ threads
   private threadView = (t: ThreadRow) => compact({ id: t.id, contextKind: t.contextKind, contextId: t.contextId, claudeSessionId: t.claudeSessionId ?? undefined,
-    createdAt: t.createdAt, updatedAt: t.updatedAt });
+    createdAt: t.createdAt, updatedAt: t.updatedAt, brief: threadBrief(t.contextKind, t.contextId) });
   private async messageView(m: MessageRow) {
     return compact({ id: m.id, threadId: m.threadId, role: m.role, source: m.source, text: m.text, turnId: m.turnId ?? undefined, tool: m.tool ?? undefined,
       image: m.imageKey ? { url: await this.ctx.storage.presignGet(m.imageKey, 3600) } : undefined, createdAt: m.createdAt });
@@ -99,8 +100,10 @@ export class ClaudeService {
   }
 
   async openThread(u: AuthUser, body: unknown) {
-    const b = parse(z.object({ contextKind: z.enum(['camera', 'edit']), contextId: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/) }).strict(), body);
+    const b = parse(z.object({ contextKind: z.enum(['camera', 'edit', 'recreate']), contextId: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/) }).strict(), body);
     if (b.contextKind === 'camera') await this.camera.row(u, b.contextId);
+    // workstream 1: a Recreate thread is about one of the owner's references.
+    if (b.contextKind === 'recreate') await (await import('../recreate/references.js')).recreateOf(this.ctx).row(u, b.contextId);
     const where = and(eq(claudeThreads.ownerId, u.id), eq(claudeThreads.contextKind, b.contextKind), eq(claudeThreads.contextId, b.contextId));
     const [found] = await this.db.select().from(claudeThreads).where(where);
     if (found) return this.threadView(found);
@@ -265,3 +268,13 @@ export class ClaudeService {
 }
 
 export type { CameraAssetKind };
+
+/**
+ * workstream 1: what Claude on the owner's Mac starts a Recreate or Edit thread with: the role, the MUSE tools for it
+ * (all on the MUSE MCP server) and the id they act on. Camera threads keep the Mac's own director prompt.
+ */
+export function threadBrief(kind: string, contextId: string) {
+  if (kind === 'recreate') return { prompt: RECREATE_PROMPT, tools: ['get_recipe', 'set_slot_briefs', 'match_slots', 'fill_slot', 'open_edit', 'apply_recipe', 'apply_edit_ops', 'playbook_read', 'playbook_add', 'report_gap'], referenceId: contextId };
+  if (kind === 'edit') return { prompt: EDIT_PROMPT, tools: ['get_edit', 'apply_edit_ops', 'undo_edit', 'get_frame', 'auto_captions', 'remove_background', 'playbook_read'], sessionId: contextId };
+  return undefined;
+}
