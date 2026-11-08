@@ -1,0 +1,640 @@
+{
+  "id": "rx_example",
+  "name": "Tuff edit",
+  "state": "ready",
+  "progress": 100,
+  "phase": "done",
+  "durationSec": 4.4,
+  "userId": "u_example",
+  "keep": false,
+  "createdAt": 1767225600000,
+  "expiresAt": 1769817600000,
+  "videoUrl": "https://api.example/v1/recreate/references/rx_example/video",
+  "posterUrl": "https://api.example/v1/recreate/references/rx_example/poster",
+  "recipe": {
+    "schema": "muse.recipe/1",
+    "analyzer": {
+      "version": "1.1.0",
+      "tookMs": 1476,
+      "pose": {
+        "frames": 3,
+        "ms": 96,
+        "peakRssMb": 141
+      }
+    },
+    "origin": "reference",
+    "source": {
+      "durationSec": 4.4,
+      "width": 180,
+      "height": 320,
+      "fps": 30,
+      "aspect": "9:16",
+      "hasAudio": true
+    },
+    "sound": {
+      "bpm": 120.1,
+      "beats": [
+        0.499,
+        1.01,
+        1.498,
+        2.009,
+        2.496,
+        3.007,
+        3.495,
+        4.005
+      ],
+      "strong": [
+        2.009,
+        4.005
+      ],
+      "confidence": 0.75
+    },
+    "pacing": {
+      "shots": 3,
+      "avgShotSec": 1.467,
+      "cutsPerMin": 27.273,
+      "energy": {
+        "everySec": 0.067,
+        "values": [
+          0.016,
+          0.033,
+          0.032,
+          0.068,
+          0.068,
+          0.068,
+          0.068,
+          0.068,
+          0.055,
+          0.054,
+          0.055,
+          0.054,
+          0.055,
+          0.055,
+          0.055,
+          0.056,
+          0.056,
+          0.056,
+          0.057,
+          0.058,
+          0.061,
+          0.062,
+          0.672,
+          0.028,
+          0.023,
+          0.028,
+          0.027,
+          0.025,
+          0.028,
+          0.032,
+          0.024,
+          0.026,
+          0.025,
+          0.03,
+          0.025,
+          0.026,
+          0.052,
+          0.08,
+          0.084,
+          0.078,
+          0.081,
+          0.079,
+          0.08,
+          0.084,
+          0.002,
+          0.002,
+          0.045,
+          0.002,
+          0.002,
+          0.002,
+          0.002,
+          0.002,
+          0.002,
+          0.002,
+          0.002,
+          0.002,
+          1,
+          0.003,
+          0.003,
+          0.003,
+          0.003,
+          0.003,
+          0.047,
+          0.002,
+          0.003,
+          0.003
+        ]
+      }
+    },
+    "slots": [
+      {
+        "id": "s1",
+        "index": 0,
+        "startSec": 0,
+        "endSec": 1.5,
+        "durationSec": 1.5,
+        "keyframeSec": 0.75,
+        "confidence": 0.9,
+        "brief": null,
+        "rig": {
+          "moves": [
+            {
+              "id": "pan_right"
+            }
+          ]
+        },
+        "camera": {
+          "motion": "pan",
+          "shake": 0,
+          "keys": [
+            {
+              "t": 0,
+              "x": 0,
+              "y": 0,
+              "scale": 1
+            },
+            {
+              "t": 0.267,
+              "x": -0.083,
+              "y": 0,
+              "scale": 1
+            },
+            {
+              "t": 0.533,
+              "x": -0.167,
+              "y": 0,
+              "scale": 1
+            },
+            {
+              "t": 0.8,
+              "x": -0.25,
+              "y": 0,
+              "scale": 0.997
+            },
+            {
+              "t": 1.067,
+              "x": -0.333,
+              "y": 0,
+              "scale": 0.988
+            },
+            {
+              "t": 1.333,
+              "x": -0.417,
+              "y": 0,
+              "scale": 0.988
+            }
+          ],
+          "confidence": 0.65
+        },
+        "speed": {
+          "ramp": "none",
+          "curve": [
+            {
+              "t": 0,
+              "speed": 0.826
+            },
+            {
+              "t": 0.267,
+              "speed": 1.009
+            },
+            {
+              "t": 0.533,
+              "speed": 1.086
+            },
+            {
+              "t": 0.8,
+              "speed": 0.985
+            },
+            {
+              "t": 1.067,
+              "speed": 1.011
+            },
+            {
+              "t": 1.333,
+              "speed": 1.065
+            }
+          ],
+          "confidence": 0.55
+        },
+        "peaks": [],
+        "pose": {
+          "status": "none",
+          "frameSec": 0.75
+        },
+        "thumbUrl": "https://api.example/v1/recreate/references/rx_example/slots/s1/thumb"
+      },
+      {
+        "id": "s2",
+        "index": 1,
+        "startSec": 1.5,
+        "endSec": 2.667,
+        "durationSec": 1.167,
+        "keyframeSec": 2.084,
+        "confidence": 0.9,
+        "brief": {
+          "shotSize": "cu",
+          "angle": "eye",
+          "subject": "she",
+          "action": "flips her hair",
+          "location": "a studio",
+          "notes": "soft light"
+        },
+        "rig": {
+          "moves": [
+            {
+              "id": "zoom_in"
+            }
+          ],
+          "shotSize": "cu",
+          "height": "eye"
+        },
+        "camera": {
+          "motion": "zoom_in",
+          "shake": 0,
+          "keys": [
+            {
+              "t": 0,
+              "x": 0,
+              "y": 0,
+              "scale": 1
+            },
+            {
+              "t": 0.267,
+              "x": 0,
+              "y": 0,
+              "scale": 1.01
+            },
+            {
+              "t": 0.533,
+              "x": 0,
+              "y": 0,
+              "scale": 1.051
+            },
+            {
+              "t": 0.8,
+              "x": 0,
+              "y": 0,
+              "scale": 1.093
+            }
+          ],
+          "confidence": 0.65
+        },
+        "speed": {
+          "ramp": "none",
+          "curve": [
+            {
+              "t": 0,
+              "speed": 0.984
+            },
+            {
+              "t": 0.267,
+              "speed": 0.992
+            },
+            {
+              "t": 0.533,
+              "speed": 0.99
+            },
+            {
+              "t": 0.8,
+              "speed": 1.609
+            },
+            {
+              "t": 1.067,
+              "speed": 2.371
+            }
+          ],
+          "confidence": 0.35
+        },
+        "peaks": [],
+        "pose": {
+          "status": "done",
+          "frameSec": 2.084,
+          "keypoints": [
+            {
+              "name": "nose",
+              "x": 0.501,
+              "y": 0.165,
+              "score": 0.297
+            },
+            {
+              "name": "left_eye",
+              "x": 0.518,
+              "y": 0.157,
+              "score": 0.409
+            },
+            {
+              "name": "right_eye",
+              "x": 0.476,
+              "y": 0.156,
+              "score": 0.402
+            },
+            {
+              "name": "left_ear",
+              "x": 0.549,
+              "y": 0.176,
+              "score": 0.645
+            },
+            {
+              "name": "right_ear",
+              "x": 0.449,
+              "y": 0.174,
+              "score": 0.601
+            },
+            {
+              "name": "left_shoulder",
+              "x": 0.615,
+              "y": 0.252,
+              "score": 0.65
+            },
+            {
+              "name": "right_shoulder",
+              "x": 0.391,
+              "y": 0.25,
+              "score": 0.645
+            },
+            {
+              "name": "left_elbow",
+              "x": 0.607,
+              "y": 0.377,
+              "score": 0.445
+            },
+            {
+              "name": "right_elbow",
+              "x": 0.406,
+              "y": 0.382,
+              "score": 0.262
+            },
+            {
+              "name": "left_wrist",
+              "x": 0.553,
+              "y": 0.451,
+              "score": 0.424
+            },
+            {
+              "name": "right_wrist",
+              "x": 0.451,
+              "y": 0.374,
+              "score": 0.136
+            },
+            {
+              "name": "left_hip",
+              "x": 0.554,
+              "y": 0.493,
+              "score": 0.635
+            },
+            {
+              "name": "right_hip",
+              "x": 0.441,
+              "y": 0.495,
+              "score": 0.694
+            },
+            {
+              "name": "left_knee",
+              "x": 0.548,
+              "y": 0.66,
+              "score": 0.351
+            },
+            {
+              "name": "right_knee",
+              "x": 0.457,
+              "y": 0.654,
+              "score": 0.239
+            },
+            {
+              "name": "left_ankle",
+              "x": 0.564,
+              "y": 0.728,
+              "score": 0.107
+            },
+            {
+              "name": "right_ankle",
+              "x": 0.512,
+              "y": 0.728,
+              "score": 0.096
+            }
+          ]
+        },
+        "thumbUrl": "https://api.example/v1/recreate/references/rx_example/slots/s2/thumb"
+      },
+      {
+        "id": "s3",
+        "index": 2,
+        "startSec": 2.667,
+        "endSec": 4.4,
+        "durationSec": 1.733,
+        "keyframeSec": 3.534,
+        "confidence": 0.9,
+        "brief": null,
+        "rig": {
+          "moves": [
+            {
+              "id": "static"
+            }
+          ]
+        },
+        "camera": {
+          "motion": "static",
+          "shake": 0,
+          "keys": [
+            {
+              "t": 0,
+              "x": 0,
+              "y": 0,
+              "scale": 1
+            },
+            {
+              "t": 0.533,
+              "x": 0,
+              "y": 0,
+              "scale": 1
+            },
+            {
+              "t": 0.8,
+              "x": 0,
+              "y": 0,
+              "scale": 1
+            },
+            {
+              "t": 1.333,
+              "x": 0,
+              "y": 0,
+              "scale": 1
+            },
+            {
+              "t": 1.6,
+              "x": 0,
+              "y": 0,
+              "scale": 1
+            },
+            {
+              "t": 1.7,
+              "x": 0,
+              "y": 0,
+              "scale": 1
+            }
+          ],
+          "confidence": 0.8
+        },
+        "speed": {
+          "ramp": "none",
+          "curve": [
+            {
+              "t": 0,
+              "speed": 4
+            },
+            {
+              "t": 0.267,
+              "speed": 2.449
+            },
+            {
+              "t": 0.533,
+              "speed": 0.427
+            },
+            {
+              "t": 0.8,
+              "speed": 3.766
+            },
+            {
+              "t": 1.067,
+              "speed": 4
+            },
+            {
+              "t": 1.333,
+              "speed": 4
+            },
+            {
+              "t": 1.6,
+              "speed": 0.628
+            }
+          ],
+          "confidence": 0.35
+        },
+        "peaks": [],
+        "pose": {
+          "status": "none",
+          "frameSec": 3.534
+        },
+        "thumbUrl": "https://api.example/v1/recreate/references/rx_example/slots/s3/thumb"
+      }
+    ],
+    "transitions": [
+      {
+        "atSec": 1.5,
+        "kind": "cut",
+        "durationSec": 0,
+        "confidence": 0.9,
+        "from": "s1",
+        "to": "s2"
+      },
+      {
+        "atSec": 2.65,
+        "kind": "crossfade",
+        "durationSec": 0.5,
+        "confidence": 0.7,
+        "from": "s2",
+        "to": "s3"
+      },
+      {
+        "atSec": 3.733,
+        "kind": "flash",
+        "durationSec": 0.067,
+        "confidence": 0.8,
+        "from": "s3",
+        "to": "s3"
+      }
+    ],
+    "text": [
+      {
+        "id": "x1",
+        "startSec": 3.167,
+        "endSec": 4.167,
+        "box": {
+          "x": 0.12,
+          "y": 0.702,
+          "w": 0.755,
+          "h": 0.07
+        },
+        "words": "SUMMER",
+        "sizeFrac": 0.042,
+        "color": "#FFFFFF",
+        "fontId": "sans",
+        "animIn": "cut",
+        "animOut": "cut",
+        "confidence": 0.88
+      }
+    ],
+    "grade": {
+      "swatches": [
+        "#286521",
+        "#8987ED",
+        "#0BF802",
+        "#E3CA8A",
+        "#F8FA02"
+      ],
+      "contrast": 0.78,
+      "saturation": 0.69,
+      "warmth": 0.26,
+      "look": {
+        "id": "teal_orange",
+        "kind": "palette",
+        "label": "Teal & orange",
+        "distance": 0.202
+      },
+      "grade": {
+        "temp": -0.002,
+        "sat": 0.178,
+        "contrast": -0.1,
+        "fade": 0.1,
+        "shadows": [
+          "#62BE5F",
+          0.3
+        ],
+        "highlights": [
+          "#9E9F41",
+          0.3
+        ],
+        "roll": 0.4,
+        "exposure": 0.048
+      },
+      "confidence": 0.8
+    },
+    "gaps": [],
+    "contactSheet": {
+      "url": "https://api.example/v1/recreate/references/rx_example/contact-sheet",
+      "times": [
+        0.75,
+        2.084,
+        3.534
+      ],
+      "tiles": [
+        {
+          "slotId": "s1",
+          "x": 0,
+          "y": 0,
+          "w": 200,
+          "h": 356
+        },
+        {
+          "slotId": "s2",
+          "x": 200,
+          "y": 0,
+          "w": 200,
+          "h": 356
+        },
+        {
+          "slotId": "s3",
+          "x": 400,
+          "y": 0,
+          "w": 200,
+          "h": 356
+        }
+      ]
+    },
+    "id": "rx_example",
+    "referenceId": "rx_example",
+    "createdAt": 1767225600000,
+    "summary": "Three beats: a pan, a push-in, a still with a caption.",
+    "tags": [
+      "example"
+    ]
+  }
+}

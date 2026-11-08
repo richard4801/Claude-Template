@@ -23,6 +23,28 @@ enum SnapshotRunner {
         var probeTick = 0
         /// The rig panel's view is on screen (its onAppear / onDisappear), for the same-tick diagnosis.
         var rigPanelOnScreen = false
+        /// The Edit suite hides its media panel and inspector (the `_collapsed` layout shots).
+        var editCollapsed = false
+        /// Recreate's cost line and its primary (window space), for the fit check (SnapshotFrame).
+        var recreateFrames: [String: CGRect] = [:]
+    }
+
+    /// Review mode: labels report truncation (`fitProbe`). Read once; a normal launch never probes.
+    nonisolated static let probing: Bool = !(ProcessInfo.processInfo.environment["MUSE_SNAPSHOT_DIR"] ?? "").isEmpty
+    /// The labels on screen that carry a fit probe: name, width drawn, width the text needs.
+    static var fitProbes: [UUID: (name: String, drawn: CGFloat, ideal: CGFloat)] = [:]
+    static func fitNote(_ id: UUID, _ name: String, drawn: CGFloat? = nil, ideal: CGFloat? = nil) {
+        var e = fitProbes[id] ?? (name, -1, -1)
+        e.name = name
+        if let drawn { e.drawn = drawn }
+        if let ideal { e.ideal = ideal }
+        fitProbes[id] = e
+    }
+    /// Probed labels drawn narrower than their text (truncated), as "name (drawn of ideal pt)".
+    static func truncatedLabels() -> [String] {
+        fitProbes.values.filter { $0.drawn >= 0 && $0.ideal >= 0 && $0.ideal > $0.drawn + 0.75 }
+            .map { "\($0.name) (\(Int($0.drawn.rounded())) of \(Int($0.ideal.rounded())) pt)" }
+            .sorted()
     }
 
     /// The last CinemaSuiteView body: did it see the picker open, and when (not observed: a plain static).
@@ -41,6 +63,8 @@ enum SnapshotRunner {
 
     static func runIfRequested(_ store: AppStore) {
         guard let dir else { return }
+        setvbuf(stdout, nil, _IOLBF, 0)   // line-buffered, so the CI log keeps the last lines if the app stops (Edit check)
+        installCrashLogging()
         Task { @MainActor in
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             if let w = mainWindow {
@@ -121,6 +145,8 @@ enum SnapshotRunner {
             store.themeID = .a
             await fitCheck(store, dir: dir)
             await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
+            await editLayoutShots(store, dir: dir)   // Edit layout audit (owner 2026-11-08): three window sizes, four themes
+            await recreateShots(store, dir: dir)   // Recreate this edit: Recipe and Compare in four themes, the swatches
             await scrollCheck(store, dir: dir)
             store.signOut()
             try? await Task.sleep(for: .seconds(1))
@@ -231,6 +257,161 @@ enum SnapshotRunner {
         w.setFrame(full, display: true)
         try? await Task.sleep(for: .seconds(1))
         try? (lines.joined(separator: "\n") + "\n").write(to: dir.appendingPathComponent("fit-check.txt"), atomically: true, encoding: .utf8)
+    }
+
+    // MARK: Edit layout audit
+
+    /// The Edit suite on a real-shaped take (editCheck's 15 s take with sound), at the sizes the owner uses: 1280 × 800,
+    /// 1440 × 900 and a 13" MacBook Air's window (1470 × 882: its default 1470 × 956 screen less the menu bar and Dock),
+    /// with the side panels shown and collapsed (`_collapsed`). Soft Tactile first. Rendered from the window's own drawing
+    /// (`mac_editaudit_<theme>_<w>x<h>[_collapsed].png`), so a window larger than the runner's screen still comes out whole.
+    /// Also the Edit part of the fit check: every probed label (`fitProbe`) must be drawn in full, else a CUT line in
+    /// fit-check.txt (Mac CI fails on it).
+    private static func editLayoutShots(_ store: AppStore, dir: URL) async {
+        var lines: [String] = []
+        defer {
+            let f = dir.appendingPathComponent("fit-check.txt")
+            let before = (try? String(contentsOf: f, encoding: .utf8)) ?? ""
+            try? (before + lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n")).write(to: f, atomically: true, encoding: .utf8)
+        }
+        // editCheck removes its rx_* takes when it ends; its MP4s stay in the temporary folder. Use its 15 s stereo take.
+        let long = FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-edit-check/long.mp4")
+        guard FileManager.default.fileExists(atPath: long.path), let w = mainWindow else {
+            lines.append("CUT edit not drawn (no test video or window)")
+            return
+        }
+        let raw: [String: Any] = ["id": "rx_layout", "kind": "take", "title": "Living room dance", "videoUrl": long.absoluteString,
+                                  "durationSec": 15, "width": 432, "height": 768, "fps": 30, "createdAt": Int64(Date().timeIntervalSince1970 * 1000)]
+        guard let data = try? JSONSerialization.data(withJSONObject: raw), let take = try? JSONDecoder().decode(Take.self, from: data) else { return }
+        store.takes.removeAll { $0.id == take.id }
+        store.takes.insert(take, at: 0)
+        defer { store.takes.removeAll { $0.id == take.id } }
+        let original = w.frame
+        let sizes: [(Int, Int)] = [(1280, 800), (1440, 900), (1470, 882)]
+        func shot(_ name: String, _ label: String) {
+            capture(dir.appendingPathComponent("mac_editaudit_\(name).png"))
+            let cut = truncatedLabels()
+            if cut.isEmpty {
+                lines.append("FITS edit \(label) (\(fitProbes.count) labels)")
+            } else {
+                lines.append(contentsOf: cut.map { "CUT edit \(label) \($0)" })
+            }
+        }
+        for theme in [ThemeID.c, .a, .b, .d] {
+            store.themeID = theme
+            state.editCollapsed = false
+            store.openEdit(takeId: take.id)
+            try? await Task.sleep(for: .seconds(8))
+            for (width, height) in sizes {
+                NSLog("[snapshot] editaudit %dx%d %@", width, height, theme.rawValue)
+                w.setFrame(NSRect(x: original.minX, y: original.maxY - CGFloat(height), width: CGFloat(width), height: CGFloat(height)), display: true)
+                try? await Task.sleep(for: .seconds(1.5))
+                shot("\(theme.rawValue)_\(width)x\(height)", "\(width)x\(height) \(theme.rawValue)")
+                state.editCollapsed = true
+                try? await Task.sleep(for: .seconds(1))
+                shot("\(theme.rawValue)_\(width)x\(height)_collapsed", "\(width)x\(height) \(theme.rawValue) collapsed")
+                state.editCollapsed = false
+                try? await Task.sleep(for: .seconds(0.5))
+            }
+            w.setFrame(original, display: true)
+            store.openEdit(takeId: nil)
+            try? await Task.sleep(for: .seconds(1))
+        }
+        store.themeID = .a
+    }
+
+    // MARK: Recreate this edit
+
+    /// Recipe (shot 2 selected) and Compare (after Build) on demo mode's reference, at 1280 × 800 in the four themes
+    /// (`mac_<theme>_recreate_recipe.png`, `…_recreate_compare.png`), and the Look swatches as analysed and as shown
+    /// (`mac_recreate_swatches.png`). Fit check lines: every probed label drawn in full, and the total and Build both on
+    /// screen, side by side (owner note 2); the shown swatches 3–5, calm and ordered by tone (owner note 1).
+    private static func recreateShots(_ store: AppStore, dir: URL) async {
+        var lines: [String] = []
+        defer {
+            let f = dir.appendingPathComponent("fit-check.txt")
+            let before = (try? String(contentsOf: f, encoding: .utf8)) ?? ""
+            try? (before + lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n")).write(to: f, atomically: true, encoding: .utf8)
+        }
+        guard let w = mainWindow else {
+            lines.append("CUT recreate not drawn (no window)")
+            return
+        }
+        let original = w.frame
+        func check(_ screen: String, _ theme: ThemeID, beside: Bool, primary: String = "build") {
+            w.contentView?.layoutSubtreeIfNeeded()
+            let content = w.contentView?.bounds.size ?? .zero
+            let label = "recreate_\(screen) 1280x800 \(theme.rawValue)"
+            let keys = beside ? ["cost", primary] : [primary]
+            for k in keys {
+                guard let f = state.recreateFrames[k], f.width > 0 else {
+                    lines.append("CUT \(label) \(k) not drawn")
+                    continue
+                }
+                let inside = f.minX >= 0 && f.minY >= 0 && f.maxX <= content.width + 0.5 && f.maxY <= content.height + 0.5
+                lines.append("\(inside ? "FITS" : "CUT") \(label) \(k) \(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))x\(Int(f.height)) in \(Int(content.width))x\(Int(content.height))")
+            }
+            if beside, let c = state.recreateFrames["cost"], let b = state.recreateFrames["build"] {
+                let gap = b.minX - c.maxX
+                let sameRow = c.maxY > b.minY && c.minY < b.maxY
+                lines.append("\(gap >= 0 && gap <= 24 && sameRow ? "FITS" : "CUT") \(label) cost beside build (gap \(Int(gap)) pt)")
+            }
+            let cut = truncatedLabels()
+            if cut.isEmpty {
+                lines.append("FITS \(label) (\(fitProbes.count) labels)")
+            } else {
+                lines.append(contentsOf: cut.map { "CUT \(label) \($0)" })
+            }
+        }
+        for theme in [ThemeID.c, .a, .b, .d] {
+            NSLog("[snapshot] recreate %@", theme.rawValue)
+            store.themeID = theme
+            w.setFrame(NSRect(x: original.minX, y: original.maxY - 800, width: 1280, height: 800), display: true)
+            store.openEdit(takeId: nil)
+            store.openRecreate()
+            try? await Task.sleep(for: .seconds(1))
+            let refs = (try? await store.recreateAPI.listReferences()) ?? []
+            guard let ref = refs.first else {
+                lines.append("CUT recreate no demo reference")
+                break
+            }
+            await store.openRecreateReference(ref.id)
+            store.selectRecreateSlot(1)
+            try? await Task.sleep(for: .seconds(2))
+            check("recipe", theme, beside: true)
+            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_recreate_recipe.png"))
+            // The panel scrolled to the Look (owner note 1: the swatches as the Recipe shows them).
+            state.scrollTo = "recreate.look"
+            try? await Task.sleep(for: .seconds(1))
+            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_recreate_recipe_look.png"))
+            state.scrollTo = nil
+            await store.buildRecreate()
+            store.selectRecreateSlot(1)
+            try? await Task.sleep(for: .seconds(2))
+            check("compare", theme, beside: false, primary: "open")
+            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_recreate_compare.png"))
+            store.closeRecreate()
+            try? await Task.sleep(for: .seconds(0.5))
+        }
+        // The swatches (owner note 1): the analysis's palette, then the strip the Recipe shows.
+        if let ref = try? await FakeRecreateAPI().listReferences().first, let raw = ref.recipe?.grade?.swatches {
+            let soft = RecreateSwatches.soften(raw)
+            let maxSat = soft.map(RecreateSwatches.saturation).max() ?? 1
+            let lum = soft.map(RecreateSwatches.luminance)
+            let ok = (RecreateSwatches.minCount...RecreateSwatches.maxCount).contains(soft.count) && maxSat <= RecreateSwatches.maxSaturation && lum == lum.sorted()
+            lines.append("\(ok ? "FITS" : "CUT") recreate_swatches \(soft.count) swatches, max saturation \(String(format: "%.2f", maxSat)), dark to light: \(soft.joined(separator: " "))")
+            let r = ImageRenderer(content: RecreateSwatchSheet(raw: raw, soft: soft))
+            r.scale = 2
+            if let img = r.nsImage, let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {
+                try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("mac_recreate_swatches.png"))
+            }
+        } else {
+            lines.append("CUT recreate_swatches no fixture")
+        }
+        w.setFrame(original, display: true)
+        store.themeID = .a
+        store.closeRecreate()
+        try? await Task.sleep(for: .seconds(1))
     }
 
     // MARK: Scroll check (CI): every main page and Settings pane must scroll with a real scroll event
@@ -348,6 +529,24 @@ enum SnapshotRunner {
         try? p.run()
         p.waitUntilExit()
     }
+    /// Review mode only: an uncaught Objective-C exception or a fatal signal writes its stack to the log before the app
+    /// dies, so CI shows where (the macOS crash report isn't always written on the runner).
+    nonisolated static func installCrashLogging() {
+        NSSetUncaughtExceptionHandler { e in
+            print("CRASH uncaught exception \(e.name.rawValue): \(e.reason ?? "")")
+            for s in e.callStackSymbols.prefix(60) { print("CRASH   \(s)") }
+            fflush(stdout)
+        }
+        for sig in [SIGABRT, SIGILL, SIGSEGV, SIGBUS, SIGTRAP, SIGFPE] {
+            signal(sig) { n in
+                print("CRASH signal \(n)")
+                for s in Thread.callStackSymbols.prefix(60) { print("CRASH   \(s)") }
+                fflush(stdout)
+                signal(n, SIG_DFL)
+                raise(n)
+            }
+        }
+    }
 }
 
 /// The Claude chat panel as it sits beside a camera session, for the review screenshots only.
@@ -376,6 +575,37 @@ struct SnapshotOverlay: View {
                     .museFloat(t)
             }
             .padding(.top, 52)
+        }
+    }
+
+}
+
+/// Review mode: the Look swatches as the analysis reports them and as the Recipe shows them (mac_recreate_swatches.png).
+struct RecreateSwatchSheet: View {
+    var raw: [String]
+    var soft: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            row("As analysed", raw)
+            row("As shown in the Recipe", soft)
+        }
+        .padding(24)
+        .frame(width: 640)
+        .background(Color(hex: 0xF3F0EA))
+    }
+
+    private func row(_ title: String, _ list: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: 0x23262A))
+            HStack(spacing: 0) { ForEach(list.indices, id: \.self) { i in Color(swatch: list[i]) } }
+                .frame(height: 48)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            HStack(spacing: 0) {
+                ForEach(list.indices, id: \.self) { i in
+                    Text(list[i]).font(.system(size: 11).monospacedDigit()).foregroundStyle(Color(hex: 0x5E5C57)).frame(maxWidth: .infinity)
+                }
+            }
         }
     }
 }

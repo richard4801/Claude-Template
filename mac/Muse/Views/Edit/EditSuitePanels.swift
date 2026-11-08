@@ -57,15 +57,14 @@ struct TransformPanel: View {
             row("Opacity", value: visual.opacity ?? 1, range: 0...1, prop: .opacity, keys: k?.opacity, fmt: { "\(Int(($0 * 100).rounded()))%" }) { v in
                 session.edit { s in s.changeVisual { $0.opacity = v } }
             }
-            HStack {
-                SuiteLabel("Ease")
+            VStack(alignment: .leading, spacing: Space.s2) {
+                Text("Ease").font(t.scale.label.font).foregroundStyle(t.roles.ink)
                 EditSeg(options: [(EditV2.Ease.linear, "Linear"), (.easeInOut, "In-out"), (.easeOut, "Ease out"), (.hold, "Hold")],
-                         selection: k?.present.first?.1.first?.ease ?? .easeInOut) { e in session.edit { $0.setKeyframeEase(e) } }
-                    .frame(width: 230)
+                         selection: k?.present.first?.1.first?.ease ?? .easeInOut, small: true) { e in session.edit { $0.setKeyframeEase(e) } }
             }
             HStack(spacing: 6) {
-                Ph("diamond.fill", 9).foregroundStyle(t.muted)
-                Text("adds a keyframe at the playhead").font(t.body(12)).foregroundStyle(t.muted)
+                Ph("diamond.fill", 9).foregroundStyle(t.roles.ink2)
+                Text("adds a keyframe at the playhead").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
             }
         }
     }
@@ -117,10 +116,9 @@ struct LooksPanel: View {
                     session.edit { s in s.changeVisual { vv in vv.look?.strength = (v * 100).rounded() / 100 } }
                 }
             }
-            HStack {
+            VStack(alignment: .leading, spacing: Space.s1) {
                 SuiteToolButton(title: ".cube import", icon: "square.and.arrow.down") { importCube() }
-                Spacer()
-                Text("Same looks as the Camera bag palettes").font(t.body(11.5)).foregroundStyle(t.muted)
+                Text("Same looks as the Camera bag palettes").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
             }
         }
         .task(id: session.state.selection) { session.refreshLookThumbs() }
@@ -130,15 +128,15 @@ struct LooksPanel: View {
     private func suiteLookCard(name: String) -> some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Current look").font(t.body(11)).foregroundStyle(t.muted)
-                Text("Suite look · \(name)").font(t.body(12.5, .semibold)).foregroundStyle(t.ink).lineLimit(1)
+                Text("Current look").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                Text("Suite look · \(name)").font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(1)
             }
             Spacer()
             SuiteToolButton(title: "Remove", icon: "xmark") { session.applyLook(nil) }
         }
         .padding(10)
         .background(t.surface2)
-        .overlay(Rectangle().strokeBorder(t.ink, lineWidth: 2))
+        .overlay(Rectangle().strokeBorder(t.roles.ink, lineWidth: 2))
     }
 
     private func tile(id: String?, name: String, image: CGImage?, on: Bool) -> some View {
@@ -150,8 +148,8 @@ struct LooksPanel: View {
                 .frame(height: 58)
                 .frame(maxWidth: .infinity)
                 .clipped()
-                .overlay(Rectangle().strokeBorder(on ? t.ink : .clear, lineWidth: 2))
-                Text(name).font(t.body(11.5, on ? .semibold : .regular)).foregroundStyle(on ? t.ink : t.muted).lineLimit(1)
+                .overlay(Rectangle().strokeBorder(on ? t.roles.ink : .clear, lineWidth: 2))
+                Text(name).font(t.scale.caption.font).foregroundStyle(on ? t.roles.ink : t.roles.ink2).lineLimit(1)
             }
         }
         .buttonStyle(.plain)
@@ -234,7 +232,7 @@ struct MaskPanel: View {
                     SuiteLabel("Chroma key")
                     if let ck {
                         SuiteSwatch(hex: ck.color, label: "Key colour") { c in session.edit { s in s.changeVisual { $0.chroma?.color = c } } }
-                        Text(ck.color).font(t.mono(11)).foregroundStyle(t.muted)
+                        Text(ck.color).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
                     }
                     MToggle(isOn: Binding(get: { ck != nil }, set: { on in
                         session.edit { s in s.changeVisual { $0.chroma = on ? EditV2.Chroma(color: "#2BD15F", similarity: 0.4, smoothness: 0.08, spill: 0.5) : nil } }
@@ -271,7 +269,7 @@ struct TransitionsPanel: View {
         let current = clip?.transitionIn?.kind.rawValue ?? "cut"
         EditPanel(title: "Transitions") {
             if isFirst {
-                Text("The first clip has no transition in. Select the next clip.").font(t.body(12)).foregroundStyle(t.muted)
+                Text("The first clip has no transition in. Select the next clip.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
             }
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 10) {
                 ForEach(tiles, id: \.0) { tile in
@@ -283,8 +281,8 @@ struct TransitionsPanel: View {
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 40)
                                 .background(Rectangle().fill(on ? t.surface : t.surface2))
-                                .overlay(Rectangle().strokeBorder(on ? t.ink : t.line, lineWidth: on ? 2 : 1))
-                            Text(label(key)).font(t.body(11.5)).foregroundStyle(on ? t.ink : t.muted)
+                                .overlay(Rectangle().strokeBorder(on ? t.roles.ink : t.roles.hairline, lineWidth: on ? 2 : 1))
+                            Text(label(key)).font(t.scale.caption.font).foregroundStyle(on ? t.roles.ink : t.roles.ink2)
                         }
                     }
                     .buttonStyle(.plain)
@@ -303,7 +301,7 @@ struct TransitionsPanel: View {
                     let k = clip?.transitionIn?.kind
                     session.edit { $0.applyTransitionToAll(k, duration: clip?.transitionIn?.durationSec ?? duration) }
                 }
-                Text("Whip pans live here, not in the AI shot").font(t.body(11.5)).foregroundStyle(t.muted)
+                Text("Whip pans live here, not in the AI shot").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
             }
         }
     }
@@ -368,7 +366,7 @@ struct AudioPanels: View {
         let music = session.state.musicTrack
         EditPanel(title: "Audio · mix & beats") {
             if music == nil {
-                Text("Add music (Music in the media bin) to duck it under the voice and cut on its beats.").font(t.body(12)).foregroundStyle(t.muted)
+                Text("Add music (Music in the media bin) to duck it under the voice and cut on its beats.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
             } else {
                 let duck = music?.duck
                 SuiteToggleRow(title: "Auto-duck music",
@@ -391,14 +389,14 @@ struct AudioPanels: View {
                 SuiteRule()
                 HStack {
                     SuiteLabel("Beat markers")
-                    if let bpm = session.state.bpm { Text("\(Int(bpm.rounded())) BPM").font(t.body(12)).foregroundStyle(t.muted) }
+                    if let bpm = session.state.bpm { Text("\(Int(bpm.rounded())) BPM").font(t.scale.caption.font).foregroundStyle(t.roles.ink2) }
                 }
                 if session.state.bpm == nil {
                     HStack {
                         SuiteToolButton(title: session.isRunning(.beats) ? "Finding the beat…" : "Detect beats", icon: "metronome",
                                         disabled: session.isRunning(.beats)) { Task { await session.detectBeats() } }
                         Spacer()
-                        Text("Free").font(t.mono(11)).foregroundStyle(t.muted)
+                        Text("Free").font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
                     }
                 } else {
                     EditSeg(options: [(EditSuite.BeatMarks.every, "Every beat"), (.strong, "Strong beats")], selection: session.state.beatMarks) { m in
@@ -443,15 +441,15 @@ struct SpeedPanel: View {
                         }
                     }
                 }
-                HStack {
-                    Text(session.state.speedSummary ?? "").font(t.body(13)).foregroundStyle(t.ink)
-                    Spacer()
-                    Text("Keep pitch · Drag points · double-click to add").font(t.body(11.5)).foregroundStyle(t.muted)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(session.state.speedSummary ?? "").font(t.scale.caption.font).foregroundStyle(t.roles.ink)
+                    Text("Keeps the pitch. Drag points; double-click to add one.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Smooth slow-mo").font(t.body(13.5, .semibold)).foregroundStyle(t.muted)
-                        Text("Fills in frames (AI) · Coming soon").font(t.body(12)).foregroundStyle(t.muted)
+                        Text("Smooth slow-mo").font(t.scale.label.font).foregroundStyle(t.roles.ink2)
+                        Text("Fills in frames (AI) · Coming soon").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
                     }
                     Spacer()
                     MToggle(isOn: .constant(false)).disabled(true).opacity(0.5)
@@ -493,8 +491,8 @@ struct SpeedCurveEditor: View {
                 Rectangle().fill(t.surface)
                 ForEach([10.0, 1.0, 0.1], id: \.self) { s in
                     Path { p in p.move(to: CGPoint(x: 0, y: y(s, h))); p.addLine(to: CGPoint(x: w, y: y(s, h))) }
-                        .stroke(t.line, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                    Text(s == 1 ? "1×" : s == 10 ? "10×" : "0.1×").font(t.mono(9)).foregroundStyle(t.muted)
+                        .stroke(t.roles.hairline, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    Text(s == 1 ? "1×" : s == 10 ? "10×" : "0.1×").font(t.scale.micro.font).monospacedDigit().foregroundStyle(t.roles.ink2)
                         .position(x: 16, y: min(h - 6, max(6, y(s, h) - 7)))
                 }
                 Path { p in
@@ -525,7 +523,7 @@ struct SpeedCurveEditor: View {
             .contentShape(Rectangle())
             .onTapGesture(count: 2) { loc in onCommit(EditSuiteState.addingCurvePoint(curve, x: Double(loc.x / max(1, w)))) }
         }
-        .overlay(Rectangle().strokeBorder(t.line))
+        .overlay(Rectangle().strokeBorder(t.roles.hairline))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Speed curve")
     }

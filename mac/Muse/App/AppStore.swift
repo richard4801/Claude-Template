@@ -241,6 +241,8 @@ final class AppStore {
 
     // AI suite (workstream 1): the Video suite's state (AppStore+Suite.swift).
     let suite = SuiteState()
+    /// "Recreate this edit" in Edit (AppStore+Recreate.swift).
+    let recreate = RecreateState()
 
     // MARK: Video studio
 
@@ -485,6 +487,7 @@ final class AppStore {
         resetPromptLibrary()
         resetWarm()
         suite.reset() // AI suite (workstream 1)
+        recreate.reset()
         Task { await restoreSession() }
     }
 
