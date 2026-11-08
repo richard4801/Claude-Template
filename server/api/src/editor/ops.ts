@@ -240,7 +240,9 @@ function applyOne(p: P, o: EditOp, replace: (next: P) => void): string {
     case 'add_music': {
       const ref = (o.asset ?? {}) as { upload?: string; library?: string; take?: string; durationSec?: number };
       const refs = [ref.upload, ref.library, ref.take].filter(Boolean);
-      if (refs.length !== 1) throw badRequest('add_music.asset: one of upload, library or take (with durationSec)');
+      if (refs.length !== 1) throw badRequest('add_music.asset: one of upload or take (with durationSec)');
+      // 2026-11-08 audit: there is no music library yet, so a library track would be silent in every app.
+      if (ref.library) throw badRequest('add_music.asset.library: there is no music library yet · use an upload or a take');
       const d = Number(ref.durationSec);
       if (!(d > 0)) throw badRequest('add_music.asset.durationSec: required');
       const aid = newId(p, 'm');

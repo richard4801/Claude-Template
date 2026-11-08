@@ -174,6 +174,8 @@ export class EditorAiService {
     const src = await this.source(u, body?.source);
     const d = src.source.durationSec;
     if (d > EDITOR_LIMITS.maxSourceSec) throw badRequest(`source: at most ${EDITOR_LIMITS.maxSourceSec / 60} minutes`);
+    // 2026-11-08: background removal is "coming soon" while production runs the mock (nothing real to give yet).
+    if (kind === 'matte' && !this.matteAvailable) throw badRequest('Background removal is coming soon');
     if (kind === 'matte' && d > EDITOR_LIMITS.maxMatteSec) throw badRequest(`source: background removal works on up to ${EDITOR_LIMITS.maxMatteSec} s`);
     const silenceOnly = (kind === 'cuts' && !!opts.silenceOnly) || kind === 'beats';
     if (silenceOnly && !(await mediaToolsAvailable(this.ctx.config.FFMPEG_PATH, this.ctx.config.FFPROBE_PATH))) throw badRequest(kind === 'beats' ? 'kind: beat detection is not available on this server' : 'options.silenceOnly: not available on this server');
@@ -359,6 +361,11 @@ export class EditorAiService {
     return rows.length;
   }
 
+  /** False while production runs the mock provider: the apps show Remove background as "Coming soon". Dev and tests keep it. */
+  get matteAvailable() {
+    return this.provider.name !== 'mock' || this.ctx.config.NODE_ENV !== 'production' || !!this.ctx.config.DEV_MODE;
+  }
+
   // ------------------------------------------------------------------ the owner's controls (workstream 1)
   get markup() { return this.ctx.config.EDITOR_MARKUP > 0 ? this.ctx.config.EDITOR_MARKUP : 1; }
   private async controls(studioId: string) {
@@ -410,7 +417,7 @@ export class EditorAiService {
       paid: { available: paid, ...(paid ? {} : { reason: 'AI editing helpers are switched off for now' }) },
       captions: { available: paid, languages: ['auto', 'en', 'es', 'fr', 'de', 'it', 'pt', 'nl', 'ja', 'ko', 'zh'] },
       cuts: { available: true, defaults: { ...CUT_DEFAULTS } },
-      matte: { available: paid, maxSec: EDITOR_LIMITS.maxMatteSec },
+      matte: { available: paid && this.matteAvailable, maxSec: EDITOR_LIMITS.maxMatteSec },
       denoise: { available: paid },
       beats: { available: true, free: true },
       maxSourceSec: EDITOR_LIMITS.maxSourceSec,

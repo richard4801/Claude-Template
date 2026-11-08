@@ -23,6 +23,11 @@
         "frames": 3,
         "ms": 96,
         "peakRssMb": 141
+      },
+      "poseTracks": {
+        "frames": 132,
+        "ms": 2140,
+        "peakRssMb": 118
       }
     },
     "origin": "reference",
@@ -221,7 +226,11 @@
         "peaks": [],
         "pose": {
           "status": "none",
-          "frameSec": 0.75
+          "frameSec": 0.75,
+          "track": {
+            "frames": 45,
+            "fps": 30
+          }
         },
         "thumbUrl": "https://api.example/v1/recreate/references/rx_example/slots/s1/thumb"
       },
@@ -414,7 +423,11 @@
               "y": 0.728,
               "score": 0.096
             }
-          ]
+          ],
+          "track": {
+            "frames": 35,
+            "fps": 30
+          }
         },
         "thumbUrl": "https://api.example/v1/recreate/references/rx_example/slots/s2/thumb"
       },
@@ -514,7 +527,11 @@
         "peaks": [],
         "pose": {
           "status": "none",
-          "frameSec": 3.534
+          "frameSec": 3.534,
+          "track": {
+            "frames": 52,
+            "fps": 30
+          }
         },
         "thumbUrl": "https://api.example/v1/recreate/references/rx_example/slots/s3/thumb"
       }
