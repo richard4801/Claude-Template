@@ -1196,6 +1196,17 @@ QueuedShot { id, kind: "queued", title, tool, modelId?, userId, mine, estimate, 
 - **In the feed:** the first page of `GET /v1/suite/feed` (no cursor, no collection) carries `queued: QueuedShot[]` above `items` (the "Queued" group), filtered by `tool`, `model` and `status` (`queued`).
 - Event `queue`: `{item}` or `{removed, jobId?}`, only to the member who queued it and the owner.
 
+### Images attached to Claude chat messages (workstream 1, owner-approved 2026-11-08)
+Migration **0023** (`claude_messages.attachments`, `claude_turns.attachments`). Code: `camera/claudeAttachments.ts`; tests `test/claude-attachments.test.ts`.
+
+- **Upload** with the normal flow (`POST /v1/uploads/presign {kind:"image"}` → PUT → `POST /v1/uploads/{uploadId}/confirm`). JPEG, PNG, WebP or HEIC/HEIF; ≤ 10 MB each.
+- **Send** `POST /v1/claude/threads/{id}/messages {text, attachments?: [{uploadId}]}`: ≤ 4 a message; `text` may be empty when there are images. 400 for the count, type, size or an unreadable file; 404 for another studio's upload; 409 `upload_not_ready` before confirm. All or none: a refused message queues nothing.
+- **Stored privately on the thread** under `ca/<threadId>/` (not served by `/uploads`), normalised: upright, long edge ≤ 2048 px, ≤ 5 MB (else JPEG), HEIC → JPEG (`heif-convert`, in the image). 415 `unsupported_image` if a HEIC can't be read.
+- **Views**: messages and turns carry `attachments: [{id, uploadId, mimeType, bytes, width, height, url}]` (`url` signed, 1 h). The Mac downloads them on claim and lists the local paths with their uploadIds in the Claude Code prompt. A message typed on the Mac can send `{"type":"user", text, attachments:[{uploadId}]}`.
+- **API fallback** `POST /v1/claude/threads/{id}/api-turn {text, attachments?}`: Recreate, Edit and Suite threads send them as image blocks with a line naming each uploadId; earlier attached images are replayed (the newest 8). Camera threads: 400 (text only).
+
+**`suite_add_reference {assistId, uploadId, use: pose|style|location|outfit, label?, remove?}`** puts an image into the Suite draft as `draft.references[{uploadId, url, use, label?}]` (≤ 3; the same uploadId again changes its use). The url is a studio image under `u/` (HEIC copied as JPEG). The request sends them as `references.images[{image:{url}, role: use, label}]` after her own images; roles `pose` and `outfit` tell the engine to take only the pose or the clothes, never anyone's face or body. Her identity always comes from her own references; the plan still keeps at least one of hers when room is short, and `suite_estimate` notes any left out.
+
 ### Claude in the AI Suite (owner-approved 2026-11-08)
 
 **Prompt structure.** The suite brief (`threadBrief('suite').prompt`) and the API loop's system prompt are the same text: the shot-designer rules plus §3–§7 of the owner's skill `.claude/skills/muse-prompt-structure/SKILL.md` (skeleton SUBJECT / LOCATION / ACTION + SHOT n / STYLE / CONSTRAINTS, the rig, lengths, consistency, output). The server reads its copy at `server/api/assets/skills/muse-prompt-structure.md` (the image has no `.claude`); a test fails if the copy and the repo skill differ, so edit the skill and copy it over.

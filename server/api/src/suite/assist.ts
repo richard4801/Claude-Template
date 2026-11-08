@@ -13,12 +13,21 @@ import { APERTURES, BODIES, ERAS, FOCAL_STEPS, GENRES, HEIGHTS, LENSES, LIGHTING
 import { DraftSchema, RigSchema, type Draft, type Rig } from './drafts.js';
 import { rigCheck } from './rigcheck.js';
 import { suiteAssists } from './schema.js';
+import { normaliseImage, uploadImage } from '../camera/claudeAttachments.js';
+import { putObject } from '../storage/objects.js';
 
 type Row = typeof suiteAssists.$inferSelect;
 export type AssistPending = { id: string; kind: 'suite_request_shot'; label: string; estimateUsd: number; maxUsd: number; status: 'waiting' | 'declined' | 'done' | 'failed'; jobId?: string; error?: string; createdAt: number };
 type Token = { t: 'text'; text: string } | { t: 'move'; id: string; label: string; category: string; intensity: number; key: number } | { t: 'mention'; kind: string; id: string; label: string; key: number };
 
 const QUALITIES = ['draft', 'standard', 'hd', 'cinema'] as const;
+/** workstream 1: what an image attached in the chat is for, as a reference of the shot (its role in the request). */
+export const REFERENCE_USES = ['pose', 'style', 'location', 'outfit'] as const;
+export const MAX_DRAFT_REFERENCES = 3;
+export type DraftReference = { uploadId: string; url: string; use: typeof REFERENCE_USES[number]; label?: string };
+const DraftReferenceSchema = z.object({ uploadId: z.string().max(80), url: z.string().max(2000).regex(/\/uploads\/u\/[A-Za-z0-9._-]+$/, 'a studio image (/uploads/u/…)'),
+  use: z.enum(REFERENCE_USES), label: z.string().max(80).optional() }).strict();
+export const AddReferenceBody = z.object({ uploadId: z.string().min(1).max(80), use: z.enum(REFERENCE_USES), label: z.string().trim().max(80).optional(), remove: z.boolean().optional() }).strict();
 const ASPECTS = ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'] as const;
 
 // ------------------------------------------------------------------ what members see (Claude picks only these)
@@ -84,8 +93,16 @@ export function requestOf(d: Draft) {
     prompt: promptText(toks), duration: Math.round(d.duration ?? 5), aspectRatio: d.aspect ?? '9:16', quality: d.quality ?? 'draft', takes: d.takes ?? 1,
     ...(d.sound !== undefined ? { audio: !!d.sound } : {}), ...(typeof extra.speaking === 'boolean' ? { speaking: extra.speaking } : {}),
     ...(camera ? { camera } : {}), ...(rig.gradeLook === false && (rig.palette || rig.stock) ? { gradeLook: false } : {}),
+    ...(referencesOf(d).length ? { references: { images: referencesOf(d).map(r => ({ image: { url: r.url }, role: r.use, label: r.label ?? r.use })) } } : {}),
     draft: d,
   };
+}
+
+/** The draft's chat references (workstream 1), only well-formed ones. */
+export function referencesOf(d: Draft): DraftReference[] {
+  const raw = (d as { references?: unknown }).references;
+  if (!Array.isArray(raw)) return [];
+  return raw.map(x => DraftReferenceSchema.safeParse(x)).filter(p => p.success).map(p => p.data!).slice(0, MAX_DRAFT_REFERENCES);
 }
 
 /** Claude's changes to the draft: each given field replaces the draft's; the prompt keeps the @model first and the #moves last. */
@@ -180,6 +197,42 @@ export class SuiteAssist {
     if (b.speaking !== undefined) { if (b.speaking === null) delete d.speaking; else d.speaking = b.speaking; }
     d.tool = 'shot';
     (d as Record<string, unknown>).tokens = toks;
+    return this.view(await this.save(r, { draft: parseDraft(d), revision: r.revision + 1 }));
+  }
+
+  /**
+   * suite_add_reference (workstream 1): an image the owner attached becomes a reference of the shot (pose, style,
+   * location or outfit), at most 3. A studio image under u/ (HEIC made JPEG) so the engine can be sent it; the same
+   * upload again replaces its use; remove takes it out. Her identity always comes from her own references.
+   */
+  async addReference(u: AuthUser, id: string, input: unknown) {
+    const p = AddReferenceBody.safeParse(input ?? {});
+    if (!p.success) throw badRequest(p.error.issues.map(i => (i.path.length ? `${i.path.join('.')}: ` : '') + i.message).join('; '));
+    const b = p.data;
+    const r = await this.row(u, id);
+    const d = { ...(r.draft as Draft) } as Draft & Record<string, unknown>;
+    let list = referencesOf(d);
+    const existing = list.find(x => x.uploadId === b.uploadId);
+    if (b.remove) {
+      if (!existing) throw notFound('Reference');
+      list = list.filter(x => x !== existing);
+    } else {
+      let url = existing?.url;
+      if (!url) {
+        if (list.length >= MAX_DRAFT_REFERENCES) throw new ApiError(409, 'too_many_references', `A shot takes at most ${MAX_DRAFT_REFERENCES} chat references · remove one first`);
+        const { up, buf, kind } = await uploadImage(this.ctx, u, b.uploadId);
+        if (kind !== 'heic' && up.storageKey.startsWith('u/')) url = `/uploads/${up.storageKey}`;
+        else {
+          const img = await normaliseImage(buf, kind, b.uploadId);
+          const key = `u/${uid('img')}.${img.mimeType === 'image/png' ? 'png' : img.mimeType === 'image/webp' ? 'webp' : 'jpg'}`;
+          await putObject(this.ctx, { key, body: img.buf, studioId: u.studioId, kind: 'image', userId: u.id, contentType: img.mimeType });
+          url = `/uploads/${key}`;
+        }
+      }
+      const item: DraftReference = { uploadId: b.uploadId, url, use: b.use, ...(b.label ? { label: b.label } : existing?.label && existing.use === b.use ? { label: existing.label } : {}) };
+      list = existing ? list.map(x => (x === existing ? item : x)) : [...list, item];
+    }
+    if (list.length) d.references = list; else delete d.references;
     return this.view(await this.save(r, { draft: parseDraft(d), revision: r.revision + 1 }));
   }
 

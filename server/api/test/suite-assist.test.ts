@@ -160,7 +160,7 @@ describe.skipIf(!hasFfmpeg)('Claude in the AI Suite (mock provider, fake Claude)
     expect(r.status).toBe(200);
     expect(String(r.body)).toContain('"name":"suite_set_draft","status":"done"');
     const tools = calls[0].tools as { name: string; input_schema: { properties: Record<string, unknown> } }[];
-    expect(tools.map(x => x.name).sort()).toEqual(['suite_estimate', 'suite_feed', 'suite_get_draft', 'suite_options', 'suite_request_shot', 'suite_set_draft']);
+    expect(tools.map(x => x.name).sort()).toEqual(['suite_add_reference', 'suite_estimate', 'suite_feed', 'suite_get_draft', 'suite_options', 'suite_request_shot', 'suite_set_draft']);
     expect(tools.find(x => x.name === 'suite_set_draft')!.input_schema.properties.assistId).toBeUndefined(); // the server fills it
     expect(calls[0].system[0].text).toMatch(/shot designer/);
     expect(calls[0].messages.at(-1).content[0].text).toMatch(/^\[Suite shot sa_/);

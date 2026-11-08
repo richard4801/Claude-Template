@@ -151,6 +151,8 @@ export const claudeMessages = pgTable('claude_messages', {
   turnId: text('turn_id'),
   tool: jsonb('tool').$type<{ id: string; name: string; ok?: boolean; summary?: string }>(),
   imageKey: text('image_key'),
+  /** workstream 1: reference images the owner attached (camera/claudeAttachments.ts). */
+  attachments: jsonb('attachments').$type<import('./claudeAttachments.js').Attachment[]>(),
   createdAt: ms('created_at').notNull(),
 }, t => [index('claude_messages_thread_idx').on(t.threadId, t.createdAt)]);
 
@@ -159,6 +161,8 @@ export const claudeTurns = pgTable('claude_turns', {
   threadId: text('thread_id').notNull().references(() => claudeThreads.id, { onDelete: 'cascade' }),
   ownerId: text('owner_id').notNull(),
   text: text('text').notNull(),
+  /** workstream 1: the message's attached images, for the Mac's Claude Code turn. */
+  attachments: jsonb('attachments').$type<import('./claudeAttachments.js').Attachment[]>(),
   from: text('from').notNull().$type<'phone' | 'mac'>(),
   state: text('state').notNull().$type<'queued' | 'running' | 'done' | 'failed' | 'stopped'>(),
   error: text('error'),
