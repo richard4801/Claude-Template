@@ -6,8 +6,8 @@ project (EditSuiteState), the live preview (EditV2Engine → EditV2Compositor), 
 AVAssetExportSession, then the upload and the saved version)._
 
 **Status per control**: **working** = changes the project, the preview and the export correctly; **fixed** = it was broken
-or missing, and this branch fixes it; **placeholder** = shown but does nothing (fixed unless marked *owner*); **owner** =
-needs an owner decision (a paid model or a vendor) before it can be built.
+or missing, and this branch fixes it; **placeholder** = shown but does nothing (fixed); **removed** = a placeholder for a feature that needs an owner decision (a
+paid model or a vendor), taken out until it is built (owner, 2026-11-08).
 
 **How it's proven**:
 - **Project state**: `MuseCoreTests/Edit/EditSuiteControlsTests.swift` runs each control's own EditSuiteState call and checks
@@ -123,7 +123,7 @@ needs an owner decision (a paid model or a vendor) before it can be built.
 | Control | Status | Notes |
 |---|---|---|
 | Constant / Curve, Speed slider, 0.25×–4× chips, curve editor, presets | working | Preview probe: 2× halves the length. |
-| Smooth slow-mo (AI frame interpolation) | **owner** | Disabled, "Coming soon": needs a frame-interpolation model chosen and priced (spec: not built until then). |
+| Smooth slow-mo (AI frame interpolation) | **removed** | Was a disabled "Coming soon" switch. Removed (owner: no placeholders); comes back when a frame-interpolation model is chosen (XL, being priced). |
 
 ### Animate
 | Control | Status | Notes |
@@ -147,7 +147,7 @@ needs an owner decision (a paid model or a vendor) before it can be built.
 | Resolution, Frame rate, Format | working | Export check: 720 × 1280 at 30 fps, 3 s. |
 | **Captions: .SRT file** | **fixed** | With "Save to Library" the captions went nowhere (not burnt in, no file). The Library's video now always has them burnt in; the .srt goes next to an exported file. |
 | **Label as AI-generated** | **fixed** | Did nothing (the message said the label would come when posting, but nothing kept it). It's now saved with the version (`aiLabel`, which the server already accepted), and posting that version starts with the AI label on. |
-| Content Credentials (C2PA) | **owner** | Signing needs a certificate/vendor; the switch stays and says so (owner rule: per export, off by default). |
+| Content Credentials (C2PA) | **removed** | Was a "Coming soon" switch. Removed (owner: no placeholders); comes back with signing (certificate, XL, being priced). |
 | Save to Library, Export, progress, Cancel | working | Export check runs the real path (render → upload → version). |
 
 ## Keyboard
@@ -158,6 +158,6 @@ copy/paste/duplicate, nudge, zoom to fit…) are listed in `plans/edit-parity.md
 
 ## Left for the owner
 
-1. **Smooth slow-mo**: pick a frame-interpolation model (paid) or accept a free non-AI "frame blending" mode instead.
-2. **C2PA**: a signing certificate/vendor.
+1. **Smooth slow-mo**: pick a frame-interpolation model (paid) or accept a free non-AI "frame blending" mode instead (switch removed until then).
+2. **C2PA**: a signing certificate/vendor (switch removed until then).
 3. **Sticker and music libraries**: licensed content (parity doc, licensing section).

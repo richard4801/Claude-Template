@@ -657,15 +657,6 @@ struct SpeedPanel: View {
                     Text("Keeps the pitch. Drag points; double-click to add one.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Smooth slow-mo").font(t.scale.label.font).foregroundStyle(t.roles.ink2)
-                        Text("Fills in frames (AI) · Coming soon").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
-                    }
-                    Spacer()
-                    MToggle(isOn: .constant(false)).disabled(true).opacity(0.5)
-                        .accessibilityLabel("Smooth slow-mo, coming soon")
-                }
             }
         } else {
             InspectorEmpty(text: "Select a video clip to change its speed.")
