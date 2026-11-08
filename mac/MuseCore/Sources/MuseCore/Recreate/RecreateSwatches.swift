@@ -108,17 +108,22 @@ extension RecreateText {
 
     /// "1 from your takes, 2 to generate · $1.28 in all", from the fill (never hard-coded). `prices` (slotId → amount,
     /// from the slot estimates) replace the fill's own figures; `unavailable` slots couldn't be priced and are left out.
-    public static func makingSummary(_ fill: RecreateFill, prices: [String: Double] = [:], unavailable: Set<String> = []) -> String {
+    /// `swaps` are the slots priced as a swap into the reference shot: they read "to swap in", not "to generate".
+    public static func makingSummary(_ fill: RecreateFill, prices: [String: Double] = [:], unavailable: Set<String> = [],
+                                     swaps: Set<String> = []) -> String {
         let yours = fill.slots.filter { $0.state == "matched" }.count
         let made = fill.slots.filter { $0.state == "ready" }.count
-        let generate = fill.slots.filter { $0.state == "to_generate" && !unavailable.contains($0.slotId) }.count
+        let toMake = fill.slots.filter { $0.state == "to_generate" && !unavailable.contains($0.slotId) }
+        let generate = toMake.count
+        let swapIn = toMake.filter { swaps.contains($0.slotId) }.count
         let cant = fill.slots.filter { $0.state == "to_generate" && unavailable.contains($0.slotId) }.count
         let generating = fill.slots.filter { $0.state == "generating" }.count
         let empty = fill.slots.count - yours - made - generate - cant - generating
         var parts: [String] = []
         if yours > 0 { parts.append("\(yours) from your takes") }
         if made > 0 { parts.append("\(made) generated") }
-        if generate > 0 { parts.append("\(generate) to generate") }
+        if generate - swapIn > 0 { parts.append("\(generate - swapIn) to generate") }
+        if swapIn > 0 { parts.append("\(swapIn) to swap in") }
         if generating > 0 { parts.append("\(generating) generating") }
         if cant > 0 { parts.append("\(cant) can’t be made") }
         if empty > 0 { parts.append("\(empty) to fill") }

@@ -207,7 +207,7 @@ struct RecreateTopBar: View {
                     claudeButton(iconOnly: true)
                     if let f = rs.fill {
                         VStack(alignment: .trailing, spacing: 0) {
-                            Text(RecreateText.makingSummary(f, prices: rs.prices, unavailable: rs.unpriceable)).font(t.scale.label.font).monospacedDigit().foregroundStyle(t.roles.ink)
+                            Text(RecreateText.makingSummary(f, prices: rs.prices, unavailable: rs.unpriceable, swaps: Set(rs.estimateInfo.filter { $0.value.method == "swap" }.keys))).font(t.scale.label.font).monospacedDigit().foregroundStyle(t.roles.ink)
                                 .lineLimit(1).fixedSize().fitProbe("recreate cost")
                             Text(note).font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
                                 .lineLimit(1).fixedSize().fitProbe("recreate approve")
