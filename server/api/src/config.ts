@@ -186,6 +186,8 @@ const Env = z.object({
   RECREATE_LINKS: bool(true),
   YTDLP_PATH: z.string().default('yt-dlp'),
   RECREATE_LINK_MAX_MB: num(80),
+  /** Import a video from a link (plans/api.md "Import a video from a link"): the size cap on an imported clip. */
+  IMPORT_MAX_MB: num(150),
   /** Paid AI editing helpers (workstream 1): the price is the provider's cost × this (the owner's choice, like Upscale). */
   EDITOR_MARKUP: num(2),
   /** Per studio per day (UTC), what paid AI editing helpers may charge in all; the owner can change it in the app. */

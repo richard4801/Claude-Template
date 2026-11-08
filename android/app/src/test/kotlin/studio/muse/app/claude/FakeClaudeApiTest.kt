@@ -103,7 +103,7 @@ class FakeClaudeApiTest {
         assertTrue(store.ui.value.busy)
         store.stop(); advanceUntilIdle()
         assertFalse(store.ui.value.busy)
-        assertEquals("Stopped", ClaudeText.ended(store.ui.value.turn))
+        assertEquals("Stopped. Send a message to carry on.", ClaudeText.ended(store.ui.value.turn))
     }
 
     @Test fun editThreadsShowTheGrabbedFrame() = runTest {
