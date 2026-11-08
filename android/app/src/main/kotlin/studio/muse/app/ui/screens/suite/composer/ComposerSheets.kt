@@ -384,7 +384,7 @@ private fun ColumnScope.SettingsBody(x: SheetContext) {
             else -> null
         }
         if (x.owner && purpose != null) studio.muse.app.ui.screens.ModelChoiceRow(purpose, studio.muse.app.ui.screens.ModelPick(d.engineModel, d.resolution),
-            { p -> x.update { it.copy(engineModel = p.model, resolution = p.resolution) } }, Modifier.padding(top = 8.dp), quality = d.quality)
+            { p -> x.update { it.copy(engineModel = p.model, resolution = p.resolution, engineTool = it.tool.takeIf { _ -> p.model != null }) } }, Modifier.padding(top = 8.dp), quality = d.quality)
         // Extend: the shape, sound and speaking come from the source clip; the length is the new part's.
         val extend = d.tool == ComposerTool.EXTEND
         if (!extend) {

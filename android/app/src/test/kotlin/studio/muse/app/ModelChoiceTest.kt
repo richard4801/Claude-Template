@@ -57,13 +57,15 @@ class ModelChoiceLogicTest {
     }
 
     @Test fun recastAndExtendSendThePick() {
-        val d = ComposerDraft(tool = ComposerTool.RECAST, quality = "hd", engineModel = "kling-o1", resolution = "1080p")
+        val d = ComposerDraft(tool = ComposerTool.RECAST, quality = "hd", engineModel = "kling-o1", resolution = "1080p", engineTool = ComposerTool.RECAST)
         val r = d.request(InputSlots(), cat.tier("hd")!!.slots, RecastDraft(clipId = "c1"))
         assertEquals("kling-o1", r.engineModel); assertEquals("1080p", r.resolution)
         // fit() keeps a recast model (it isn't a shot engine).
         assertEquals("kling-o1", d.fit(cat).engineModel)
         // Auto sends nothing.
         assertNull(d.copy(engineModel = null, resolution = null).request(InputSlots(), cat.tier("hd")!!.slots, RecastDraft(clipId = "c1")).engineModel)
+        // A pick made for another tool never goes out with this one.
+        assertNull(d.copy(engineTool = ComposerTool.EXTEND).request(InputSlots(), cat.tier("hd")!!.slots, RecastDraft(clipId = "c1")).engineModel)
     }
 
     @Test fun aPickDoesNotCarryToAnotherKindOfWork() {

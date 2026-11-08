@@ -597,8 +597,12 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     // Recreate phases 2–3: ids are checked before they reach a URL (rx_…, s1…).
     private fun rx(id: String) = id.also { require(Regex("^rx_[A-Za-z0-9_]{1,64}$").matches(it)) { "That isn't a reference" } }
     private fun shotId(id: String) = id.also { require(Regex("^s[0-9]{1,4}$").matches(it)) { "That isn't a shot of the reference" } }
-    private fun slotBody(modelId: String, quality: String?, method: String? = null, keepBackground: Boolean? = null, locationId: String? = null) = buildJsonObject {
+    private fun slotBody(modelId: String, quality: String?, method: String? = null, keepBackground: Boolean? = null, locationId: String? = null,
+        engineModel: String? = null, imageModel: String? = null) = buildJsonObject {
         if (locationId != null) put("locationId", kotlinx.serialization.json.JsonPrimitive(locationId))
+        // WS7/WS13 (owner): the shot's model and the plate's image model; left out = the defaults.
+        if (engineModel != null) put("engineModel", kotlinx.serialization.json.JsonPrimitive(engineModel))
+        if (imageModel != null) put("imageModel", kotlinx.serialization.json.JsonPrimitive(imageModel))
         put("modelId", kotlinx.serialization.json.JsonPrimitive(modelId)); if (quality != null) put("quality", kotlinx.serialization.json.JsonPrimitive(quality))
         if (method != null) put("method", kotlinx.serialization.json.JsonPrimitive(method))
         if (keepBackground != null) put("keepBackground", kotlinx.serialization.json.JsonPrimitive(keepBackground))
@@ -607,10 +611,10 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         call { matchReference(rx(id), buildJsonObject { if (modelId != null) put("modelId", kotlinx.serialization.json.JsonPrimitive(modelId)) }) }
     }
     override suspend fun referenceFill(id: String) = studio.muse.core.edit.RecreateJson.fill(call { referenceFill(rx(id)) })
-    override suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?, locationId: String?) =
-        studio.muse.core.edit.RecreateJson.estimate(call { estimateReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality, method, keepBackground, locationId)) })
-    override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?, locationId: String?) =
-        studio.muse.core.edit.RecreateJson.fillStart(call { fillReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality, method, keepBackground, locationId)) })
+    override suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?, locationId: String?, engineModel: String?, imageModel: String?) =
+        studio.muse.core.edit.RecreateJson.estimate(call { estimateReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality, method, keepBackground, locationId, engineModel, imageModel)) })
+    override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?, locationId: String?, engineModel: String?, imageModel: String?) =
+        studio.muse.core.edit.RecreateJson.fillStart(call { fillReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality, method, keepBackground, locationId, engineModel, imageModel)) })
     override suspend fun estimateReferenceBriefs(id: String) = studio.muse.core.edit.RecreateJson.briefsEstimate(call { estimateReferenceBriefs(rx(id), buildJsonObject { }) })
     override suspend fun writeReferenceBriefs(id: String) = studio.muse.core.edit.RecipeJson.reference(
         call { writeReferenceBriefs(rx(id), buildJsonObject { put("confirm", kotlinx.serialization.json.JsonPrimitive(true)) }) }["reference"]

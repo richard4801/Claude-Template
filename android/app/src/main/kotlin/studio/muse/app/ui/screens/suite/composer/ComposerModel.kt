@@ -101,6 +101,8 @@ data class ComposerDraft(
     val addon: String? = null,
     /** Owner only: the engine pinned for this shot (one of the tier's `models`) and its resolution; null = Auto (the ladder). */
     val engineModel: String? = null,
+    /** WS7: the tool the pick was made for (Swap / Recast / Extend send it only when it's theirs). */
+    val engineTool: ComposerTool? = null,
     val resolution: String? = null,
     /** Extend: "after" (what happens next) or "before" (what happens before). */
     val extendDirection: String = "after",
@@ -244,7 +246,7 @@ data class ComposerDraft(
         baseRequest(slots, inputs, recast, own).let { r ->
             if (tool in PROMPT_TOOLS) withLocations(r, inputs, locations).copy(engineModel = engineModel, resolution = resolution.takeIf { engineModel != null })
             // WS7: Character swap (on the quality ladder), Recast and Extend take the owner's model too (the server's pickRecast / pickExtend).
-            else if (tool in MODEL_TOOLS && engineModel != null) r.copy(engineModel = engineModel, resolution = resolution)
+            else if (tool in MODEL_TOOLS && engineModel != null && engineTool == tool) r.copy(engineModel = engineModel, resolution = resolution)
             else r
         }.let { r -> if (tool in PROMPT_TOOLS) withDraftReferences(r) else r }
             .copy(draft = ComposerDrafts.draft(this)) // Reuse settings: the composer as it was, stored with the job and its takes

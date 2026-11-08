@@ -1352,7 +1352,7 @@ class FakeMuseApi(
         })
     }
     /** Demo (G2): swap by default (your model into the reference's own segment, $0.41), or a new shot ($0.64). */
-    override suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?, locationId: String?) = lock.withLock {
+    override suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?, locationId: String?, engineModel: String?, imageModel: String?) = lock.withLock {
         recreateSlots(id)
         val slot = FakeRecipes.cafeTrend().slots.firstOrNull { it.id == slotId } ?: throw ApiException("not_found", "That shot is gone")
         if (method == "generate") RecreateSlotEstimate(slotId, RECREATE_PRICE, maxOf(2.0, kotlin.math.ceil(slot.lengthSec)), method = "generate",
@@ -1369,7 +1369,7 @@ class FakeMuseApi(
                 background = bg, swapUsd = if (bg != null && bg.usd > 0) RECREATE_SWAP_PRICE else null, backgroundUsd = bg?.usd?.takeIf { it > 0 })
         }
     }
-    override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?, locationId: String?) = lock.withLock {
+    override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?, locationId: String?, engineModel: String?, imageModel: String?) = lock.withLock {
         recreateSlots(id)
         val made = recreateMade.getOrPut(id) { HashMap() }
         // Demo: a shot still being made can't be started again; a finished one can be made anew ("Make a new one").

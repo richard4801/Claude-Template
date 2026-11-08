@@ -88,6 +88,11 @@ class RecreateActions(
     val onConfirmTick: (String) -> Unit = {},
     /** "Use your own setting": a studio location for the shot, or null for the place in its brief. */
     val onLocation: (String, String?) -> Unit = { _, _ -> },
+    /** WS7/WS13 (owner): the model for a shot (purpose fill) and for its made background (purpose plate); null = the default. */
+    val onShotModel: (String, String?) -> Unit = { _, _ -> },
+    /** Show the owner's Model rows (the app turns this on; the rows check the owner themselves). */
+    val models: Boolean = false,
+    val onPlateModel: (String, String?) -> Unit = { _, _ -> },
     val onExport: () -> Unit = {},
     /** Owner only (null: no Claude button): Claude on this reference (the "recreate" context, WS1 d7233b8). */
     val onClaude: (() -> Unit)? = null,
@@ -580,6 +585,8 @@ private fun FillBox(ui: RecreateBuildUi, s: RecipeSlot, pickTake: (String) -> Un
                 studio.muse.app.ui.screens.edit.learn.LearnChip("Generate a new shot", on = method == "generate") { if (method != "generate") acts.onMethod(s.id, "generate") }
             }
             e?.swapUnavailable?.let { T(it, m.scale.caption, m.roles.caution) }
+            // WS7/WS13: the owner's model for this shot (members never see it); the price follows it.
+            if (acts.models) studio.muse.app.ui.screens.ModelChoiceRow(studio.muse.app.data.ModelPurpose.FILL, studio.muse.app.ui.screens.ModelPick(ui.shotModels[s.id]), { p -> acts.onShotModel(s.id, p.model) })
             if (method == "swap" && e?.method == "swap") {
                 val keep = ui.keepBackground[s.id] ?: e.keepBackground
                 Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).press { acts.onKeepBackground(s.id, !keep) }
@@ -599,6 +606,8 @@ private fun FillBox(ui: RecreateBuildUi, s: RecipeSlot, pickTake: (String) -> Un
                         ui.places.forEach { p -> studio.muse.app.ui.screens.edit.learn.LearnChip(p.name, on = picked == p.id) { if (picked != p.id) acts.onLocation(s.id, p.id) } }
                     }
                     e.background?.let { T(it.line, m.scale.caption, m.roles.ink2) }
+                    // A background made from the brief: the owner's image model for it.
+                    if (acts.models && picked == null) studio.muse.app.ui.screens.ModelChoiceRow(studio.muse.app.data.ModelPurpose.PLATE, studio.muse.app.ui.screens.ModelPick(ui.plateModels[s.id]), { p -> acts.onPlateModel(s.id, p.model) })
                 }
             }
             if (method == "generate" && e?.promptFrom != null && e.promptFrom != "brief") T("Write a brief for this shot first for a closer match.", m.scale.caption, m.roles.ink2)

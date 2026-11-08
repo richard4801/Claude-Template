@@ -97,6 +97,9 @@ data class RecreateBuildUi(
     val keepBackground: Map<String, Boolean> = emptyMap(),
     /** "Use your own setting": the studio location picked per shot (absent: the brief's place, or a background made from it). */
     val locations: Map<String, String> = emptyMap(),
+    /** WS7/WS13 (owner): the model picked per shot (purpose fill) and for its background plate (purpose plate); absent = the defaults. */
+    val shotModels: Map<String, String> = emptyMap(),
+    val plateModels: Map<String, String> = emptyMap(),
     /** The studio's locations, loaded the first time a shot uses its own setting. */
     val places: List<RecreateCastChoice> = emptyList(),
     /** G8: "Write the shot briefs · about $0.02" while shots have no brief; its confirmation, and while it runs. */
@@ -303,7 +306,8 @@ class RecreateBuildModel(
         }
         val got = kotlinx.coroutines.coroutineScope {
             val u = _ui.value
-            todo.map { s -> async { s to runCatching { api.estimateReferenceSlot(id, s, model, method = u.methods[s], keepBackground = u.keepBackground[s], locationId = u.locations[s]?.takeIf { u.keepBackground[s] == false }) }.onFailure { if (it is CancellationException) throw it } } }.awaitAll()
+            todo.map { s -> async { s to runCatching { api.estimateReferenceSlot(id, s, model, method = u.methods[s], keepBackground = u.keepBackground[s], locationId = u.locations[s]?.takeIf { u.keepBackground[s] == false },
+                engineModel = u.shotModels[s], imageModel = u.plateModels[s]) }.onFailure { if (it is CancellationException) throw it } } }.awaitAll()
         }
         _ui.update { u ->
             val est = u.estimates.toMutableMap(); val errs = u.estimateErrors.toMutableMap()
@@ -332,6 +336,18 @@ class RecreateBuildModel(
         _ui.update { it.copy(keepBackground = it.keepBackground + (slotId to keep), estimates = it.estimates - slotId) }
         if (!keep && _ui.value.places.isEmpty()) runCatching { api.suiteLocations() }.onFailure { if (it is CancellationException) throw it }
             .getOrNull()?.let { l -> _ui.update { u -> u.copy(places = l.map { RecreateCastChoice(it.id, it.name) }) } }
+        price()
+    }
+
+    /** WS7/WS13 (owner): the model that makes this shot (null = the default); priced again, so the price follows the model. */
+    suspend fun setShotModel(slotId: String, model: String?) {
+        _ui.update { u -> u.copy(shotModels = if (model == null) u.shotModels - slotId else u.shotModels + (slotId to model), estimates = u.estimates - slotId) }
+        price()
+    }
+
+    /** WS7/WS13 (owner): the image model for the shot's made background (null = the default); priced again. */
+    suspend fun setPlateModel(slotId: String, model: String?) {
+        _ui.update { u -> u.copy(plateModels = if (model == null) u.plateModels - slotId else u.plateModels + (slotId to model), estimates = u.estimates - slotId) }
         price()
     }
 
@@ -421,7 +437,9 @@ class RecreateBuildModel(
                 // The shot is made the way it was priced and confirmed (swap or generate, and its setting).
                 val e = _ui.value.estimates[s]
                 val started = api.fillReferenceSlot(id, s, model, method = e?.method, keepBackground = e?.keepBackground?.takeIf { e.method == "swap" },
-                    locationId = e?.background?.locationId?.takeIf { e.method == "swap" && !e.keepBackground })
+                    locationId = e?.background?.locationId?.takeIf { e.method == "swap" && !e.keepBackground },
+                    // The models it was priced with (owner picks).
+                    engineModel = _ui.value.shotModels[s], imageModel = _ui.value.plateModels[s])
                 _ui.update { u ->
                     val f = u.fill
                     u.copy(fillErrors = u.fillErrors - s, picks = u.picks - s, remake = u.remake - s, fill = f?.copy(slots = f.slots.map { if (it.slotId == s) it.copy(state = "generating", jobId = started.jobId) else it }))
