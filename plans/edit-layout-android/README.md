@@ -27,7 +27,7 @@ WS2's approved Mac layout (`plans/edit-layout.md`), ported to Android. The vocab
 - One column as before: the title over its status line, tabular time, and tool labels at `micro` 11 in full words.
 - The ruler and the timeline's chips no longer use monospace.
 
-## Not on Android (vs the Mac mock)
+## Not on Android (vs the Mac mock): follow-ups, built only if the owner asks
 
 - **No media bin.** Android has no library panel: takes and overlays come in through the timeline's Add.
 - **No mute or visibility controls on the track headers.** The Android editor has no such actions yet; they come when it does.
