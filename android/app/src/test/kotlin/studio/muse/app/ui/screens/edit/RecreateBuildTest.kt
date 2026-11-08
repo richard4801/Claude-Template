@@ -41,7 +41,7 @@ class RecreateBuildTest {
 
             model.load()
             var ui = model.ui.value
-            assertEquals("3 from your takes, 4 to generate · $2.56 in all", ui.summary)
+            assertEquals("3 from your takes, 4 to generate · $1.64 in all", ui.summary)
             assertEquals("You approve before anything is made.", ui.note)
             assertEquals(4, ui.estimates.size)
             assertEquals("Yours", ui.tag("s1", scores = false)); assertEquals("To generate", ui.tag("s2", scores = false))
@@ -50,7 +50,7 @@ class RecreateBuildTest {
             model.requestBuild()
             ui = model.ui.value
             assertEquals(listOf("s2", "s4", "s5", "s7"), ui.confirmSlots)
-            assertEquals(2.56, ui.confirmTotal, 1e-9)
+            assertEquals(1.64, ui.confirmTotal, 1e-9)
             assertTrue(ui.fill!!.slots.none { it.state == "generating" })
 
             // Cancel spends nothing; Build again, then yes.
@@ -76,7 +76,7 @@ class RecreateBuildTest {
             assertEquals("To generate", model.ui.value.tag("s5", scores = false))
             model.requestBuild()
             assertEquals(listOf("s5"), model.ui.value.confirmSlots)
-            assertEquals(.64, model.ui.value.confirmTotal, 1e-9)
+            assertEquals(.41, model.ui.value.confirmTotal, 1e-9)
             model.confirmBuild().join()
             withTimeout(5_000) { while (model.ui.value.mode != RecreateMode.Compare) delay(5) }
             assertEquals("ready", model.ui.value.slotFill("s5")?.state)
@@ -103,8 +103,13 @@ class RecreateBuildTest {
             val model = RecreateBuildModel(api, work, RecreateBuildUi(ref.id, ref.recipe!!, ref.name), defaultModelId = { "m_demo" }, pollMs = 5)
             model.load()
             model.useTake("s2", RecreateTakeChoice("t_x", "Window light", 4.2))
-            assertEquals("4 from your takes, 3 to generate · $1.92 in all", model.ui.value.summary)
+            assertEquals("4 from your takes, 3 to generate · $1.23 in all", model.ui.value.summary)
             assertEquals("You picked “Window light”", model.ui.value.slotFill("s2")?.reason)
+            // G2: swap into the reference's own shot is the default; a new shot is priced on its own.
+            assertEquals("swap", model.ui.value.estimates["s4"]?.method)
+            model.setMethod("s4", "generate")
+            assertEquals("generate", model.ui.value.estimates["s4"]?.method)
+            assertEquals("4 from your takes, 3 to generate · $1.46 in all", model.ui.value.summary)
             // Compare waits for a build.
             model.setMode(RecreateMode.Compare)
             assertEquals(RecreateMode.Recipe, model.ui.value.mode)

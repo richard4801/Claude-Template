@@ -502,17 +502,19 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     // Recreate phases 2–3: ids are checked before they reach a URL (rx_…, s1…).
     private fun rx(id: String) = id.also { require(Regex("^rx_[A-Za-z0-9_]{1,64}$").matches(it)) { "That isn't a reference" } }
     private fun shotId(id: String) = id.also { require(Regex("^s[0-9]{1,4}$").matches(it)) { "That isn't a shot of the reference" } }
-    private fun slotBody(modelId: String, quality: String?) = buildJsonObject {
+    private fun slotBody(modelId: String, quality: String?, method: String? = null, keepBackground: Boolean? = null) = buildJsonObject {
         put("modelId", kotlinx.serialization.json.JsonPrimitive(modelId)); if (quality != null) put("quality", kotlinx.serialization.json.JsonPrimitive(quality))
+        if (method != null) put("method", kotlinx.serialization.json.JsonPrimitive(method))
+        if (keepBackground != null) put("keepBackground", kotlinx.serialization.json.JsonPrimitive(keepBackground))
     }
     override suspend fun matchReference(id: String, modelId: String?) {
         call { matchReference(rx(id), buildJsonObject { if (modelId != null) put("modelId", kotlinx.serialization.json.JsonPrimitive(modelId)) }) }
     }
     override suspend fun referenceFill(id: String) = studio.muse.core.edit.RecreateJson.fill(call { referenceFill(rx(id)) })
-    override suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String?) =
-        studio.muse.core.edit.RecreateJson.estimate(call { estimateReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality)) })
-    override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?) =
-        studio.muse.core.edit.RecreateJson.fillStart(call { fillReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality)) })
+    override suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?) =
+        studio.muse.core.edit.RecreateJson.estimate(call { estimateReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality, method, keepBackground)) })
+    override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?) =
+        studio.muse.core.edit.RecreateJson.fillStart(call { fillReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality, method, keepBackground)) })
     override suspend fun replaceRecipeSlot(id: String, slotId: String, sessionId: String, take: String, baseRevision: Int?) = studio.muse.core.edit.RecreateJson.replace(call {
         replaceRecipeSlot(rx(id), shotId(slotId), buildJsonObject {
             put("sessionId", kotlinx.serialization.json.JsonPrimitive(sessionId)); put("take", kotlinx.serialization.json.JsonPrimitive(take))

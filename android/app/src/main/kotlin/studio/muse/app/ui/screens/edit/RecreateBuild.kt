@@ -76,6 +76,10 @@ data class RecreateBuildUi(
     val remake: Set<String> = emptySet(),
     /** Shots made anew after the edit was built: swapped into it in place (Fix shot) instead of rebuilding it. */
     val fixing: Set<String> = emptySet(),
+    /** G2, per shot: "swap" (your model into the reference's own shot) or "generate"; absent = the server's default (swap). */
+    val methods: Map<String, String> = emptyMap(),
+    /** G2, swap only: keep the reference's setting (true, the default) or use your own (the shot's brief). */
+    val keepBackground: Map<String, Boolean> = emptyMap(),
     val takes: List<RecreateTakeChoice> = emptyList(),
     /** One line to show once (a toast), then [RecreateBuildModel.consumeMessage]. */
     val message: String? = null,
@@ -219,13 +223,17 @@ class RecreateBuildModel(
     /** A fetched fill: takes picked here stay, and a shot that was generating and came back without its version is marked. */
     private fun take(new: RecreateFill) = _ui.update { u ->
         val was = u.generating
-        val fillErrors = u.fillErrors.toMutableMap(); val picks = u.picks.toMutableMap()
+        val fillErrors = u.fillErrors.toMutableMap(); val picks = u.picks.toMutableMap(); val methods = u.methods.toMutableMap()
         val slots = new.slots.map { s ->
             if (s.state == "generating" || s.state == "ready") { fillErrors -= s.slotId; picks -= s.slotId; return@map s }
-            if (s.slotId in was && s.slotId !in u.starting) fillErrors[s.slotId] = "This shot didn’t generate. You weren’t charged for it."
+            // G2: a swap that didn't work (refunded) comes back to generate, which is then offered and priced on its own.
+            if (s.fallback == "generate") methods[s.slotId] = "generate"
+            if (s.slotId in was && s.slotId !in u.starting) fillErrors[s.slotId] =
+                if (s.fallback == "generate") s.reason ?: "The swap didn’t work and you weren’t charged · generate this shot instead"
+                else "This shot didn’t generate. You weren’t charged for it."
             picks[s.slotId] ?: s
         }
-        u.copy(fill = new.copy(slots = slots), fillErrors = fillErrors, picks = picks)
+        u.copy(fill = new.copy(slots = slots), fillErrors = fillErrors, picks = picks, methods = methods)
     }
 
     /** Prices every shot still to generate (free; nothing is held). */
@@ -238,7 +246,8 @@ class RecreateBuildModel(
             return
         }
         val got = kotlinx.coroutines.coroutineScope {
-            todo.map { s -> async { s to runCatching { api.estimateReferenceSlot(id, s, model) }.onFailure { if (it is CancellationException) throw it } } }.awaitAll()
+            val u = _ui.value
+            todo.map { s -> async { s to runCatching { api.estimateReferenceSlot(id, s, model, method = u.methods[s], keepBackground = u.keepBackground[s]) }.onFailure { if (it is CancellationException) throw it } } }.awaitAll()
         }
         _ui.update { u ->
             val est = u.estimates.toMutableMap(); val errs = u.estimateErrors.toMutableMap()
@@ -254,6 +263,18 @@ class RecreateBuildModel(
             }
             u.copy(estimates = est, estimateErrors = errs)
         }
+    }
+
+    /** G2: how this shot is made, swap into the reference's own shot or generate a new one; it is priced again. */
+    suspend fun setMethod(slotId: String, method: String) {
+        _ui.update { it.copy(methods = it.methods + (slotId to method), estimates = it.estimates - slotId, estimateErrors = it.estimateErrors - slotId) }
+        price()
+    }
+
+    /** G2, swap: keep the reference's setting, or use your own (the shot's brief names the place); priced again. */
+    suspend fun setKeepBackground(slotId: String, keep: Boolean) {
+        _ui.update { it.copy(keepBackground = it.keepBackground + (slotId to keep), estimates = it.estimates - slotId) }
+        price()
     }
 
     /** "Use one of my takes": the shot comes from that take (nothing to generate, nothing to pay for it). */
@@ -324,7 +345,9 @@ class RecreateBuildModel(
             try {
                 // The server's own fill decides (never a shot filled twice), unless the person asked for this one anew.
                 if (s !in _ui.value.remake && current?.slot(s)?.state.let { it != null && it != "to_generate" }) continue
-                val started = api.fillReferenceSlot(id, s, model)
+                // The shot is made the way it was priced and confirmed (swap or generate, and its setting).
+                val e = _ui.value.estimates[s]
+                val started = api.fillReferenceSlot(id, s, model, method = e?.method, keepBackground = e?.keepBackground?.takeIf { e.method == "swap" })
                 _ui.update { u ->
                     val f = u.fill
                     u.copy(fillErrors = u.fillErrors - s, picks = u.picks - s, remake = u.remake - s, fill = f?.copy(slots = f.slots.map { if (it.slotId == s) it.copy(state = "generating", jobId = started.jobId) else it }))

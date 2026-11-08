@@ -32,6 +32,11 @@ data class RecreateSlotFill(
     val estimateLabel: String? = null,
     /** One plain line on the choice ("Your take has the same pan on a wide shot"). */
     val reason: String? = null,
+    /** G2: how a new shot is made: "swap" (your model in the reference's own shot) or "generate" (a new Suite shot). */
+    val method: String? = null,
+    /** A swap that failed (refunded): "generate" is offered instead, priced on its own. */
+    val fallback: String? = null,
+    val failedJobId: String? = null,
 )
 
 /** How close the built edit is, 0–1 per element. */
@@ -53,8 +58,16 @@ data class RecreateFill(val referenceId: String, val slots: List<RecreateSlotFil
         slots.filter { it.state == "to_generate" && it.slotId !in unavailable }.mapNotNull { prices[it.slotId] ?: it.estimate }.sum()
 }
 
-/** `POST …/slots/{slotId}/estimate`: a shot's price (nothing held). [problem]: why it can't be made, in plain words. */
-data class RecreateSlotEstimate(val slotId: String, val amount: Double, val seconds: Double, val problem: String? = null) {
+/**
+ * `POST …/slots/{slotId}/estimate`: a shot's price (nothing held). [problem]: why it can't be made, in plain words.
+ * G2: [method] "swap" (the default when it can run: your model in the reference's own segment, [segmentStart]–[segmentEnd])
+ * or "generate"; [swapUnavailable]: why the default fell back to generate; [buttonLabel]: "Swap in · 2.0 s · $0.41".
+ */
+data class RecreateSlotEstimate(
+    val slotId: String, val amount: Double, val seconds: Double, val problem: String? = null,
+    val method: String = "generate", val keepBackground: Boolean = true, val segmentStart: Double? = null, val segmentEnd: Double? = null,
+    val swapUnavailable: String? = null, val buttonLabel: String? = null, val promptFrom: String? = null,
+) {
     val ok: Boolean get() = problem == null
 }
 
@@ -68,6 +81,8 @@ data class RecreateApplyResult(
     val waiting: List<String> = emptyList(),
     val notes: List<String> = emptyList(),
     val match: RecreateMatch? = null,
+    /** G2: swapped shots already carry the reference's camera, speed and look ("baked"). */
+    val baked: Map<String, List<String>> = emptyMap(),
 )
 
 /** `POST …/slots/{slotId}/replace`: one shot's clip swapped in the built edit (one undoable change). */
@@ -93,6 +108,7 @@ object RecreateJson {
                     slotId = it.str("slotId") ?: return@mapNotNull null, state = it.str("state") ?: "empty",
                     takeId = it.str("takeId"), jobId = it.str("jobId"), score = it.num("score"),
                     estimate = e?.num("amount"), estimateLabel = e?.str("label"), reason = it.str("reason"),
+                    method = it.str("method"), fallback = it.str("fallback"), failedJobId = it.str("failedJobId"),
                 )
             }
         }
@@ -109,7 +125,11 @@ object RecreateJson {
         val e = o.obj("estimate") ?: JsonObject(emptyMap())
         val ok = (e["ok"] as? JsonPrimitive)?.booleanOrNull ?: true
         val problem = if (ok) null else (e.str("message") ?: "This shot can’t be made at this length and quality.")
-        return RecreateSlotEstimate(o.str("slotId") ?: "", e.num("estimate") ?: 0.0, e.num("seconds") ?: 0.0, problem)
+        val seg = o.obj("segment")
+        return RecreateSlotEstimate(o.str("slotId") ?: "", e.num("estimate") ?: 0.0, e.num("seconds") ?: 0.0, problem,
+            method = o.str("method") ?: e.str("method") ?: "generate", keepBackground = (o["keepBackground"] as? JsonPrimitive)?.booleanOrNull ?: true,
+            segmentStart = seg?.num("startSec"), segmentEnd = seg?.num("endSec"), swapUnavailable = o.str("swapUnavailable"),
+            buttonLabel = e.str("buttonLabel"), promptFrom = o.str("promptFrom"))
     }
 
     fun fillStart(el: JsonElement): RecreateFillStart {
@@ -120,7 +140,8 @@ object RecreateJson {
     fun apply(el: JsonElement): RecreateApplyResult {
         val o = el as? JsonObject ?: throw IllegalArgumentException("apply is not an object")
         fun list(k: String) = o.arr(k).mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
-        return RecreateApplyResult(o.str("sessionId") ?: "", (o["revision"] as? JsonPrimitive)?.intOrNull, list("missing"), list("waiting"), list("notes"), o.obj("match")?.let(::match))
+        val baked = o.obj("baked")?.mapValues { (_, v) -> (v as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.content } }.orEmpty()
+        return RecreateApplyResult(o.str("sessionId") ?: "", (o["revision"] as? JsonPrimitive)?.intOrNull, list("missing"), list("waiting"), list("notes"), o.obj("match")?.let(::match), baked)
     }
 
     private fun JsonObject.str(k: String): String? = (this[k] as? JsonPrimitive)?.takeIf { it.isString }?.content

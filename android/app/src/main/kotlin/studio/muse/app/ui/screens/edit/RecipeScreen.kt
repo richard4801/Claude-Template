@@ -210,6 +210,7 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
         onBack = onBack, onMode = model::setMode, onSelect = model::select,
         onBuild = { scope.launch { model.requestBuild() } }, onConfirm = { model.confirmBuild() }, onCancel = model::cancelBuild,
         onCast = { id -> scope.launch { model.setCast(id) } },
+        onMethod = { s, m -> scope.launch { model.setMethod(s, m) } }, onKeepBackground = { s, k -> scope.launch { model.setKeepBackground(s, k) } },
         onUseTake = model::useTake, onFix = model::fixWeakest, onRemake = { s -> scope.launch { model.remake(s) } },
         onOpenEditor = { ui.builtTakeId?.let(onOpenTake) ?: c.repo.toast("The built edit opens with its take in the editor") },
         onPlay = model::togglePlay, onStep = model::step,

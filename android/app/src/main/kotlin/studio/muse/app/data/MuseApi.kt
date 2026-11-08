@@ -263,10 +263,11 @@ interface MuseApi {
     suspend fun matchReference(id: String, modelId: String?): Unit = throw ApiException("not_found", "This studio server can't build recipes yet")
     suspend fun referenceFill(id: String): studio.muse.core.edit.RecreateFill = throw ApiException("not_found", "This studio server can't build recipes yet")
     /** A shot's price as a new shot. Nothing is held. */
-    suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String? = null): studio.muse.core.edit.RecreateSlotEstimate =
+    /** [method]: "swap" | "generate" (null: the server's default, swap when it can run); [keepBackground]: swap only. */
+    suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String? = null, method: String? = null, keepBackground: Boolean? = null): studio.muse.core.edit.RecreateSlotEstimate =
         throw ApiException("not_found", "This studio server can't build recipes yet")
     /** Makes a shot: an ordinary Suite job, held and charged. Only after the person confirmed the total. */
-    suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String? = null): studio.muse.core.edit.RecreateFillStart =
+    suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String? = null, method: String? = null, keepBackground: Boolean? = null): studio.muse.core.edit.RecreateFillStart =
         throw ApiException("not_found", "This studio server can't build recipes yet")
     /** Builds the edit in an edit session: [slots] is slotId → takeId or jobId. */
     suspend fun applyRecipe(id: String, sessionId: String, baseRevision: Int?, slots: Map<String, String>): studio.muse.core.edit.RecreateApplyResult =

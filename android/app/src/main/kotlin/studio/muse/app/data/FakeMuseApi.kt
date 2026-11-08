@@ -1245,16 +1245,20 @@ class FakeMuseApi(
                 n != null -> RecreateSlotFill(s, "generating", jobId = "job_rx_$s", estimate = RECREATE_PRICE)
                 i in listOf(0, 2, 5) && videoTakes.isNotEmpty() -> RecreateSlotFill(s, "matched", takeId = videoTakes[i % videoTakes.size],
                     score = listOf(.82, .74, .79)[listOf(0, 2, 5).indexOf(i)], reason = listOf("Your take has the same push-in on a close-up", "Your take walks through a door in a wide shot", "Your take sits by a window, still")[listOf(0, 2, 5).indexOf(i)])
-                else -> RecreateSlotFill(s, "to_generate", estimate = RECREATE_PRICE, estimateLabel = RecreateText.money(RECREATE_PRICE))
+                else -> RecreateSlotFill(s, "to_generate", estimate = RECREATE_SWAP_PRICE, estimateLabel = RecreateText.money(RECREATE_SWAP_PRICE), method = "swap")
             }
         })
     }
-    override suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String?) = lock.withLock {
+    /** Demo (G2): swap by default (your model into the reference's own segment, $0.41), or a new shot ($0.64). */
+    override suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?) = lock.withLock {
         recreateSlots(id)
         val slot = FakeRecipes.cafeTrend().slots.firstOrNull { it.id == slotId } ?: throw ApiException("not_found", "That shot is gone")
-        RecreateSlotEstimate(slotId, RECREATE_PRICE, maxOf(2.0, kotlin.math.ceil(slot.lengthSec)))
+        if (method == "generate") RecreateSlotEstimate(slotId, RECREATE_PRICE, maxOf(2.0, kotlin.math.ceil(slot.lengthSec)), method = "generate",
+            buttonLabel = "Generate · ${maxOf(2.0, kotlin.math.ceil(slot.lengthSec)).toInt()} s · ${RecreateText.money(RECREATE_PRICE)}")
+        else RecreateSlotEstimate(slotId, RECREATE_SWAP_PRICE, slot.lengthSec, method = "swap", keepBackground = keepBackground ?: true,
+            segmentStart = slot.startSec, segmentEnd = slot.endSec, buttonLabel = "Swap in · ${String.format(java.util.Locale.ROOT, "%.1f", slot.lengthSec)} s · ${RecreateText.money(RECREATE_SWAP_PRICE)}")
     }
-    override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?) = lock.withLock {
+    override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?) = lock.withLock {
         recreateSlots(id)
         val made = recreateMade.getOrPut(id) { HashMap() }
         // Demo: a shot still being made can't be started again; a finished one can be made anew ("Make a new one").
@@ -1577,6 +1581,8 @@ class FakeMuseApi(
     companion object {
         /** Demo mode's price for a Recreate shot to generate (never charged). */
         const val RECREATE_PRICE = 0.64
+        /** Demo: a swap into the reference's own shot (never charged). */
+        const val RECREATE_SWAP_PRICE = 0.41
         /** `request.engine` of an Upscale job (the server's). */
         const val UPSCALE_ENGINE = "upscale"
         /** The prompt identity; names her Identity LoRA when it's trained and switched on. */
