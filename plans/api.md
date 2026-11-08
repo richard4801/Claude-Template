@@ -1546,7 +1546,8 @@ _Workstream 2. Spec: `plans/claude-editing.md` parts B–E. Owner only (members 
 
 ### Claude chat threads (one per camera or edit session; Mac runs Claude Code, the phone relays)
 ```ts
-ClaudeThread  { id: "ct_…", contextKind: "camera"|"edit", contextId, claudeSessionId?: string /* Claude Code session for --resume, set by the Mac */, createdAt, updatedAt }
+ClaudeThread  { id: "ct_…", contextKind: "camera"|"edit"|"recreate", contextId, claudeSessionId?: string /* Claude Code session for --resume, set by the Mac */, createdAt, updatedAt,
+                brief?: { prompt, tools: string[], referenceId? | sessionId? } /* recreate and edit threads (workstream 1): what Claude on the Mac starts from */ }
 ClaudeMessage { id, threadId, role: "user"|"assistant"|"tool", source: "mac"|"phone"|"api", text, turnId?,
                 tool?: { id, name, ok?: boolean, summary?: string }, image?: { url } /* a frame Claude grabbed */, createdAt }
 ClaudeTurn    { id: "tu_…", threadId, text, from: "phone"|"mac", state: "queued"|"running"|"done"|"failed"|"stopped", error?, createdAt, claimedAt?, finishedAt? }
@@ -1562,7 +1563,7 @@ ClaudeStatus  { mac: { online: boolean, claudeCode: { installed: boolean, signed
 | `GET /v1/claude/status` | → `ClaudeStatus` |
 | `PATCH /v1/claude/settings` `{apiFallback: boolean}` | → `ClaudeStatus`. The fallback is off by default and billed per use. |
 | `POST /v1/claude/mac/heartbeat` `{claudeCode: {installed, signedIn, version?, model?}}` | From the Mac app, every 20 s. The Mac counts as offline after 45 s. → `{ok, pending: ClaudeTurn[]}` |
-| `POST /v1/claude/threads` `{contextKind, contextId}` | Get or create. → `ClaudeThread`. A camera `contextId` must be one of the owner's sessions. |
+| `POST /v1/claude/threads` `{contextKind, contextId}` | Get or create. → `ClaudeThread`. A camera `contextId` must be one of the owner's sessions; a `recreate` one must be one of their references (`rx_…`), else `404`. Recreate and Edit threads carry a `brief`: the role, the MUSE MCP tools for that screen and the id they act on. The Mac seeds its Claude Code with it. |
 | `GET /v1/claude/threads/{id}` | → `ClaudeThread & {messages: ClaudeMessage[] /* last 100, oldest first */, activeTurn?: ClaudeTurn}` |
 | `PATCH /v1/claude/threads/{id}` `{claudeSessionId}` | The Mac stores Claude Code's session id. |
 | `POST /v1/claude/threads/{id}/messages` `{text}` | From a device that can't run Claude (the phone).<ul><li>→ 202 `{message, turn}`: the turn is queued for the Mac, which gets a `claude` `{op: "turn"}` event.</li><li>`mac_offline` (409) with `{fallback: {openInClaudeUrl, apiFallback: boolean}}`.</li><li>`claude_busy` (409) while a turn on that thread is queued or running.</li></ul> |
@@ -1570,7 +1571,7 @@ ClaudeStatus  { mac: { online: boolean, claudeCode: { installed: boolean, signed
 | `POST /v1/claude/turns/{id}/claim` | → `ClaudeTurn` (`running`). `already_claimed` (409), `turn_expired` (410). |
 | `POST /v1/claude/turns/{id}/stop` | The phone's Stop. Emits `claude` `{op: "stop", turnId}`; the Mac interrupts and sends `done`. |
 | `POST /v1/claude/threads/{id}/events` `{turnId?, events: ClaudeEvent[]}` | The Mac mirrors its local Claude Code stream (its own turns, without `turnId`, and claimed ones). `user`, `assistant`, `tool` and `image` events are stored as messages; `text` deltas are only relayed live. `done` ends the turn. ≤ 4 MB. |
-| `POST /v1/claude/threads/{id}/api-turn` `{text}` | The fallback when it is on and the key is set. It streams `ChatEvent`s like the camera chat. Camera threads only for now. |
+| `POST /v1/claude/threads/{id}/api-turn` `{text}` | The fallback when it is on and the key is set. It streams `ChatEvent`s like the camera chat. Camera threads run the director. Recreate and Edit threads run MUSE's editor loop (workstream 1, `src/recreate/assistant.ts`) with the Recreate tools (plus open_edit, get_edit, apply_edit_ops, undo_edit, get_frame, list_takes) or the Edit tools. The thread's reference or session is filled in. Paid steps keep their approval: `fill_slot` and the paid helpers only price, or ask the owner in the app. Each turn rebuilds the conversation from the thread's text. |
 
 **Timeouts:** a queued turn not claimed within 90 s fails with "Your Mac didn't pick this up". A running turn that sends nothing for 10 min fails.
 

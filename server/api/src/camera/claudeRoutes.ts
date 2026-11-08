@@ -4,6 +4,7 @@ import type { Ctx } from '../ctx.js';
 import { ApiError } from '../errors.js';
 import type { ChatEvent, Director } from './director.js';
 import { ClaudeService } from './claude.js';
+import { assistantOf } from '../recreate/assistant.js';
 import type { CameraService } from './service.js';
 
 type P = { Params: { id: string } };
@@ -37,21 +38,25 @@ export async function registerClaudeRoutes(app: FastifyInstance, ctx: Ctx, camer
   app.post<P>('/v1/claude/threads/:id/api-turn', owner, async (req, reply) => {
     const t = await claude.thread(req.user, req.params.id);
     if (!(await claude.fallbackAllowed(req.user))) throw new ApiError(409, 'fallback_off', 'The API fallback is off · turn it on in Settings → Connections');
-    if (t.contextKind !== 'camera') throw new ApiError(409, 'fallback_off', 'The API fallback works in Camera stage for now');
     const message = (req.body as { text?: unknown } | undefined)?.text;
-    await director.precheck(req.user, t.contextId, message);
+    // workstream 1: Recreate and Edit threads run MUSE's own editor loop; Camera threads keep the director.
+    const kind = t.contextKind === 'camera' ? null : t.contextKind;
+    if (kind) await assistantOf(ctx).precheck(req.user, kind, t.contextId, message);
+    else await director.precheck(req.user, t.contextId, message);
     reply.hijack();
     const res = reply.raw;
     req.raw.socket?.setNoDelay?.(true);
     res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-store, no-transform', connection: 'keep-alive', 'x-accel-buffering': 'no' });
     let open = true, text = '';
     req.raw.on('close', () => { open = false; });
-    await claude.mirrorFallback(req.user, t.id, 'user', String(message));
-    await director.run(req.user, t.contextId, String(message), (e: ChatEvent) => {
+    const send = (e: ChatEvent) => {
       if (e.type === 'text') text += e.delta;
       if (e.type === 'tool') text = ''; // keep only the final answer
       if (open) res.write(`data: ${JSON.stringify(e)}\n\n`);
-    });
+    };
+    await claude.mirrorFallback(req.user, t.id, 'user', String(message));
+    if (kind) text = await assistantOf(ctx).run(req.user, t.id, kind, t.contextId, String(message), send) || text;
+    else await director.run(req.user, t.contextId, String(message), send);
     await claude.mirrorFallback(req.user, t.id, 'assistant', text);
     if (open) res.end();
   });
