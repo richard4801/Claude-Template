@@ -10,6 +10,7 @@ import { claudeMessages, claudeSettings, claudeThreads, claudeTurns, type Camera
 import type { CameraService } from './service.js';
 import { parse } from './validate.js';
 import { EDIT_PROMPT, RECREATE_PROMPT } from '../recreate/assistant.js';
+import { SUITE_PROMPT } from '../suite/mcpTools.js';
 
 type ThreadRow = typeof claudeThreads.$inferSelect;
 type MessageRow = typeof claudeMessages.$inferSelect;
@@ -100,10 +101,11 @@ export class ClaudeService {
   }
 
   async openThread(u: AuthUser, body: unknown) {
-    const b = parse(z.object({ contextKind: z.enum(['camera', 'edit', 'recreate']), contextId: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/) }).strict(), body);
+    const b = parse(z.object({ contextKind: z.enum(['camera', 'edit', 'recreate', 'suite']), contextId: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/) }).strict(), body);
     if (b.contextKind === 'camera') await this.camera.row(u, b.contextId);
     // workstream 1: a Recreate thread is about one of the owner's references.
     if (b.contextKind === 'recreate') await (await import('../recreate/references.js')).recreateOf(this.ctx).row(u, b.contextId);
+    if (b.contextKind === 'suite') await (await import('../suite/assist.js')).assistOf(this.ctx).row(u, b.contextId); // workstream 1: Claude in the AI Suite
     const where = and(eq(claudeThreads.ownerId, u.id), eq(claudeThreads.contextKind, b.contextKind), eq(claudeThreads.contextId, b.contextId));
     const [found] = await this.db.select().from(claudeThreads).where(where);
     if (found) return this.threadView(found);
@@ -276,5 +278,6 @@ export type { CameraAssetKind };
 export function threadBrief(kind: string, contextId: string) {
   if (kind === 'recreate') return { prompt: RECREATE_PROMPT, tools: ['get_recipe', 'set_slot_briefs', 'match_slots', 'fill_slot', 'open_edit', 'apply_recipe', 'apply_edit_ops', 'playbook_read', 'playbook_add', 'report_gap'], referenceId: contextId };
   if (kind === 'edit') return { prompt: EDIT_PROMPT, tools: ['get_edit', 'apply_edit_ops', 'undo_edit', 'get_frame', 'auto_captions', 'remove_background', 'playbook_read'], sessionId: contextId };
+  if (kind === 'suite') return { prompt: SUITE_PROMPT, tools: ['suite_options', 'suite_get_draft', 'suite_set_draft', 'suite_estimate', 'suite_request_shot', 'suite_feed'], assistId: contextId };
   return undefined;
 }

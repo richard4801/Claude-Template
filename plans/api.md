@@ -1196,6 +1196,34 @@ QueuedShot { id, kind: "queued", title, tool, modelId?, userId, mine, estimate, 
 - **In the feed:** the first page of `GET /v1/suite/feed` (no cursor, no collection) carries `queued: QueuedShot[]` above `items` (the "Queued" group), filtered by `tool`, `model` and `status` (`queued`).
 - Event `queue`: `{item}` or `{removed, jobId?}`, only to the member who queued it and the owner.
 
+### Claude in the AI Suite (owner-approved 2026-11-08)
+
+**Prompt structure.** The suite brief (`threadBrief('suite').prompt`) and the API loop's system prompt are the same text: the shot-designer rules plus §3–§7 of the owner's skill `.claude/skills/muse-prompt-structure/SKILL.md` (skeleton SUBJECT / LOCATION / ACTION + SHOT n / STYLE / CONSTRAINTS, the rig, lengths, consistency, output). The server reads its copy at `server/api/assets/skills/muse-prompt-structure.md` (the image has no `.claude`); a test fails if the copy and the repo skill differ, so edit the skill and copy it over.
+Migration **0022** (`suite_assists`). Code: `suite/assist.ts`, `suite/mcpTools.ts`; tests `test/suite-assist.test.ts`.
+
+The owner describes a shot in words. Claude sets up the composer (the @model, the prompt, the rig with only the options members see, the moves, quality, shape, length, takes) and explains its choices. It generates only after the owner approves the price in the app.
+
+| Call | Notes |
+|---|---|
+| `POST /v1/suite/assist {draft?: Draft, fromJobId?}` | A shared composer draft: empty, the composer's current one, or a job's draft. → `Assist`. |
+| `GET /v1/suite/assist/{id}` | → `Assist` (the user's own; the owner's for the owner). |
+| `PATCH /v1/suite/assist/{id} {draft, baseRevision?}` | The owner's own composer edits, so Claude sees them. `409 stale` when Claude changed it since. |
+| `POST /v1/suite/assist/{id}/pending/{pid} {approve: boolean}` | The owner's answer to Claude's Generate. → `Pending`. Yes prices it again and runs it exactly as `POST /v1/suite/shots` would (caps, hold, job; `jobId` on the pending). It never runs above the price the owner saw (`409 price_changed {totalUsd}`). |
+| `POST /v1/claude/threads {contextKind: "suite", contextId: <assist id>}` | The Claude thread; `brief` names the tools and `assistId`. `api-turn` runs MUSE's loop with the Suite tools (the assist id filled in). |
+
+```
+Assist { id: "sa_…", userId, draft: Draft /* the Reuse-settings draft */, revision, request: ShotRequest /* what Generate sends */, warnings: RigWarning[], pending: Pending[], createdAt, updatedAt }
+Pending { id: "sp_…", kind: "suite_request_shot", label: "Generate · 5 s · $0.40", estimateUsd, maxUsd, status: "waiting"|"declined"|"done"|"failed", jobId?, error?, createdAt }
+```
+- **Live:** event `suiteAssist {assist}` after every change (Claude's or a device's), to the draft's member and the owner. The composer applies `assist.draft` as Reuse settings does. Waiting `pending` items show as "Claude wants to generate · $x · Approve / Decline".
+- **Claude's tools** (MCP, owner only):
+  - `suite_options()`: the visible options with labels and descriptions, the visible focal steps and the bar's values. Hidden ones (for example f/4) aren't listed and are refused.
+  - `suite_get_draft(assistId)`.
+  - `suite_set_draft(assistId, {modelId?, outfitId?, prompt?, rig?, moves?, quality?, aspect?, duration?, takes?, sound?, speaking?})`. It is checked against `camera.ts` and returns the assist with the rig-check warnings.
+  - `suite_estimate(assistId)`.
+  - `suite_request_shot(assistId, confirm?)`: without `confirm` it gives the price; with it, a pending approval for the owner (`maxUsd` = that price).
+  - `suite_feed(limit?, tool?)`.
+
 ## Recreate this edit (workstream 1, 2026-11-08; `plans/recreate-edit.md`)
 A reference video (an upload, up to 60 s for now) is analysed into a versioned **recipe**. The analysis is free: ffmpeg, the beat detector and sharp on the server's CPU, one analysis at a time. Migration **0015** adds `recreate_references`. Code is in `src/recreate/` (`analyze.ts`, `signals.ts`, `frames.ts`, `text.ts`, `references.ts`); tests are `test/recreate.test.ts` (a synthetic reference) and `test/motion.test.ts`.
 
