@@ -166,6 +166,8 @@ interface MuseApi {
     val providers: ProvidersApi get() = ProvidersApi.Unsupported
     // WS7: import a video from a link (WS12's contract). See ImportsApi.kt.
     val imports: ImportsApi get() = ImportsApi.Unsupported
+    // WS7: the owner's model picker on every surface (WS13's contract). See ModelsApi.kt.
+    val modelChoice: ModelsApi get() = ModelsApi.Unsupported
     /** Claude on the owner's plan: chat threads relayed to the Mac's Claude Code (plans/api.md "Claude on the owner's plan"). See ClaudeApi.kt. */
     val claude: ClaudeApi get() = ClaudeApi.Unsupported
 

@@ -200,22 +200,30 @@ fun modelMenuItems(d: ComposerDraft, groups: PickerGroups): List<Pair<String, Bo
  * each. One row per engine: name, its lengths and shapes, and its price per second at its resolution.
  */
 @Composable
-fun ModelPickerList(d: ComposerDraft, groups: PickerGroups, onPick: (PickerEngine?, String?) -> Unit) {
+fun ModelPickerList(d: ComposerDraft, groups: PickerGroups, onPick: (PickerEngine?, String?) -> Unit) =
+    ModelList(d.engineModel, d.resolution, d.quality, groups, "MUSE picks the model for this quality", onPick)
+
+/**
+ * The owner's model list, shared by every surface (WS7): Auto (with [autoLine]), then "On <Quality>" (when there's a
+ * [quality]), "Other models" (or "Models" without a quality) and "Your providers". [selected] / [selectedRes] are the
+ * pinned model and resolution (null = Auto).
+ */
+@Composable
+fun ModelList(selected: String?, selectedRes: String?, quality: String?, groups: PickerGroups, autoLine: String, onPick: (PickerEngine?, String?) -> Unit) {
     val m = muse
     Column(Modifier.fillMaxWidth().testTag("model_picker"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        ModelRow("Auto", "MUSE picks the model for this quality", emptyList(), null, d.engineModel == null, {}) { onPick(null, null) }
-        fun section(title: String, list: List<PickerEngine>) = title to list
+        ModelRow("Auto", autoLine, emptyList(), null, selected == null, {}) { onPick(null, null) }
         listOf(
-            section("On ${SuiteRules.tierLabel(d.quality)}", groups.ladder),
-            section("Other models", groups.others),
-            section("Your providers", groups.custom),
+            (quality?.let { "On ${SuiteRules.tierLabel(it)}" } ?: "") to groups.ladder,
+            (if (quality == null) "Models" else "Other models") to groups.others,
+            "Your providers" to groups.custom,
         ).filter { it.second.isNotEmpty() }.forEach { (title, list) ->
             T(title, m.scale.caption, m.t.muted, Modifier.padding(top = 10.dp, bottom = 2.dp), maxLines = 1)
             list.forEach { e ->
-                val on = e.id == d.engineModel
-                val detail = listOfNotNull(e.tier?.takeIf { d.quality !in e.tiers }?.let { SuiteRules.tierLabel(it) }, e.limits.ifBlank { null }).joinToString(", ")
+                val on = e.id == selected
+                val detail = listOfNotNull(e.tier?.takeIf { quality != null && quality !in e.tiers }?.let { SuiteRules.tierLabel(it) }, e.limits.ifBlank { null }).joinToString(", ")
                 // The chip lit is the resolution it would run at: the pinned one, else this quality's.
-                val res = if (on) d.resolution ?: e.resolutionOn(d.quality) else e.resolutionOn(d.quality)
+                val res = if (on) selectedRes ?: quality?.let(e::resolutionOn) ?: e.resolution else quality?.let(e::resolutionOn) ?: e.resolution
                 ModelRow(e.name, detail, e.chips, res, on, { r -> onPick(e, r) }) { onPick(e, null) }
             }
         }

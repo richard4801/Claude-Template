@@ -326,6 +326,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override val providers: ProvidersApi by lazy { HttpProvidersApi(base, client, json) }
     // WS7: import a video from a link
     override val imports: ImportsApi by lazy { HttpImportsApi(base, client, json) }
+    // WS7: models per purpose and the studio's defaults
+    override val modelChoice: ModelsApi by lazy { HttpModelsApi(base, client, json) }
     override val claude: ClaudeApi by lazy { HttpClaudeApi(base, client, json) }
 
     /** Turns `{"error": "...", "code": "..."}` bodies into [ApiException]. The UI words the codes (see [ErrorText]). */
