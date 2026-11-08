@@ -331,7 +331,7 @@ extension AppStore {
             if !SuiteText.tierIds.contains(suite.composer.quality) { suite.composer.quality = c.defaultQuality }
             suite.composer.duration = ComposerBar.clampLength(suite.composer.duration, c.tier(suite.composer.quality))
             if isOwner { suite.settings = try? await api.suiteSettings() }
-            suite.composer = ComposerEngines.validated(suite.composer, c)
+            suite.composer = ComposerModelPicker.validated(suite.composer, catalog: c, settings: suite.settings) // the owner's model pin (WS6)
             if let list = try? await api.suiteLocations() { suite.locations = list }
         } catch let e as ApiError {
             suite.catalogError = e.code == "not_found" || e.code == "http_404" ? "This server doesn't have the AI suite yet" : e.friendlyMessage
@@ -348,7 +348,7 @@ extension AppStore {
     // MARK: The composer (Shot)
 
     /// What the chosen quality takes (start / end frames, references, audio); the owner's pinned engine's when one is pinned.
-    var composerInputs: SuiteInputs { suite.composer.inputs(suite.catalog) }
+    var composerInputs: SuiteInputs { ComposerModelPicker.inputs(suite.composer, catalog: suite.catalog, settings: suite.settings) }
 
     var shotRequest: ShotRequest { suite.composer.request(suite.composerSlots.slots, composerInputs, locations: suite.locations) }
 
@@ -361,7 +361,7 @@ extension AppStore {
     func setComposerQuality(_ id: String) {
         suite.composer.quality = id
         suite.composer.duration = ComposerBar.clampLength(suite.composer.duration, suite.catalog?.tier(id))
-        suite.composer = ComposerEngines.validated(suite.composer, suite.catalog)
+        suite.composer = ComposerModelPicker.validated(suite.composer, catalog: suite.catalog, settings: suite.settings) // the owner's model pin (WS6)
     }
 
     /// The composer's character (the @mention the CHARACTER slot shows).

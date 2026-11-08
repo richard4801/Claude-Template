@@ -54,6 +54,14 @@ struct ComposerView: View {
             if s.browserOpen { SuiteModeMenu() }
             // Review only: the big tool and preset browser it replaced, for the before shot.
             if SnapshotRunner.state.overlay == "tools_before" { ToolBrowser() }
+            // Review only: the Model pill's list drawn in the window (a popover is its own window, which the shots and the
+            // click-through walk can't reach).
+            if SnapshotRunner.state.overlay == "model_picker" {
+                ModelPickerList(onPick: {})
+                    .floatingPanel(width: 400)
+                    .padding(.trailing, Space.s6).padding(.bottom, 96)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            }
         }
         .onAppear { presetsOpen = draftIsEmpty }
         .onChange(of: s.composer.tool) { _, _ in presetsOpen = draftIsEmpty }
@@ -667,9 +675,8 @@ struct ComposerSettingsPanel: View {
 
     var body: some View {
         let d = store.suite.composer
-        let range = ComposerBar.lengthRange(store.suite.catalog?.tier(d.quality))
-        let listed = store.suite.catalog?.aspectRatios ?? []
-        let ratios = listed.isEmpty ? ComposerBar.shapes : listed
+        let range = store.composerLengthRange // the owner's pinned model's limits, else the quality's (WS6)
+        let ratios = store.composerShapes
         let maxTakes = store.suite.catalog?.takesMax ?? 4
         VStack(alignment: .leading, spacing: Space.s4) {
             if d.tool != .extend {
@@ -685,13 +692,13 @@ struct ComposerSettingsPanel: View {
                     Spacer(minLength: Space.s2)
                     Text("\(d.duration) s").font(t.scale.label.font).monospacedDigit()
                 }
-                Slider(value: Binding(get: { Double(store.suite.composer.duration) }, set: { store.suite.composer.duration = Int($0.rounded()) }),
+                Slider(value: Binding(get: { Double(store.suite.composer.duration) }, set: { store.setComposerLength(Int($0.rounded())) }),
                        in: Double(range.lowerBound)...Double(max(range.upperBound, range.lowerBound + 1)), step: 1) { Text("Length") }
                     .labelsHidden()
                 HStack {
                     Text("\(range.lowerBound) s").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
                     Spacer()
-                    Text("\(range.upperBound) s on \(SuiteText.tierLabel(d.quality))").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                    Text("\(range.upperBound) s on \(store.composerLengthSource)").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
                 }
             }
             VStack(alignment: .leading, spacing: Space.s2) {

@@ -41,25 +41,41 @@ extension SnapshotRunner {
     static func screensWalk(_ store: AppStore, note: (String) -> Void) async {
         let ax = AXWalker()
         store.outfitSheet = nil
-        store.go(.home)
-        try? await Task.sleep(for: .seconds(1.5))
-        let home = await ax.controls().controls
-        let chrome = Set(home.map(\.key))
         // Outfits: the angle tiles open the full view; its next, previous, zoom, fit and close all work.
-        await walkScreen("outfit_lightbox", ax: ax, chrome: chrome, minimum: 6,
+        await walkScreen("outfit_lightbox", ax: ax, minimum: 6,
                          deny: ["Make 4 angles", "Retake", "Choose files", "Use my images", "Save outfit"],
                          required: ["View front full size", "Next (→)", "Previous (←)", "Zoom in (=)", "Close (Esc)"],
-                         open: { store.go(.models); store.outfitSheet = demoOutfitDraft() },
+                         base: { store.go(.models) },
+                         open: { store.outfitSheet = demoOutfitDraft() },
                          isOpen: { store.outfitSheet != nil },
                          note: note)
         store.outfitSheet = nil
+        // The owner's model picker: Auto and every model's resolutions pin without spending (Generate isn't in the list).
+        await walkScreen("model_picker", ax: ax, minimum: 8, deny: ["Generate"],
+                         required: ["Model: Auto", "Use Veo 3.1 Lite at 720p"],
+                         base: { store.openTool(.shot); fillDemoDraft(store) },
+                         open: { state.overlay = "model_picker" },
+                         isOpen: { state.overlay == "model_picker" && store.screen == .suite },
+                         note: note)
+        let pinned = store.suite.composer.engineModel
+        note(pinned == nil || store.suite.settings?.models.contains { $0.id == pinned } == true
+             ? "DONE model_picker pin \(pinned ?? "Auto"), \(store.suite.composer.duration) s, \(store.suite.composer.aspect)"
+             : "FAIL model_picker: pinned an unknown model \(pinned ?? "")")
+        state.overlay = nil
+        store.pinComposerModel(nil)
     }
 
-    /// Opens a screen and presses each of its controls once (sliders nudged), reopening it when a control leaves it.
-    /// `deny` are label prefixes never pressed (spending, file panels); `required` labels must have been pressed.
-    static func walkScreen(_ name: String, ax: AXWalker, chrome: Set<String>, minimum: Int, deny: [String], required: [String] = [],
-                           open: @MainActor () -> Void, isOpen: @MainActor () -> Bool, note: (String) -> Void) async {
+    /// Shows `base`, takes every control on it as chrome (not walked), then opens the screen under test and presses each
+    /// of its controls once (sliders nudged), reopening it when a control leaves it. `deny` are label prefixes never
+    /// pressed (spending, file panels); `required` labels must have been pressed.
+    static func walkScreen(_ name: String, ax: AXWalker, minimum: Int, deny: [String], required: [String] = [],
+                           base: @MainActor () -> Void, open: @MainActor () -> Void, isOpen: @MainActor () -> Bool,
+                           note: (String) -> Void) async {
         note("START walk_\(name)")
+        base()
+        try? await Task.sleep(for: .seconds(1.5))
+        let before = await ax.controls().controls
+        let chrome = Set(before.map(\.key))
         open()
         try? await Task.sleep(for: .seconds(1.5))
         var used = Set<String>(), skipped = Set<String>(), pressedLabels = Set<String>()
@@ -85,6 +101,7 @@ extension SnapshotRunner {
             try? await Task.sleep(for: .seconds(0.4))
             if !isOpen() {
                 note("LEFT \(name) via \(c.label); reopening")
+                base()
                 open()
                 try? await Task.sleep(for: .seconds(1))
             }

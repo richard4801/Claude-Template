@@ -1184,9 +1184,28 @@ public struct SuiteRegistryModel: Codable, Hashable, Sendable, Identifiable {
     public var priceScale: Double
     public var resolutions: [SuiteResolution]
     public var licence: SuiteLicence?
+    // Model picker (WS6, 2026-11-08): what the composer needs to offer a model and apply its limits.
+    public var modes: SuiteModelModes
+    public var frames: SuiteModelFrames
+    public var refs: SuiteModelRefs
+    public var duration: SuiteModelDuration?
+    public var aspectRatios: [String]
+    /// "video" (the registry) or "image"; a provider's own models say which (Bring your own provider).
+    public var kind: String
+    /// A model from the owner's own provider account (Bring your own provider), not MUSE's registry.
+    public var custom: Bool
 
     public init(id: String, name: String, provider: String, status: String = "active", enabled: Bool = true, blocked: Bool = false, blockedReason: String? = nil,
-                needsAck: Bool = false, configured: Bool = true, priceScale: Double = 1, resolutions: [SuiteResolution] = [], licence: SuiteLicence? = nil) {
+                needsAck: Bool = false, configured: Bool = true, priceScale: Double = 1, resolutions: [SuiteResolution] = [], licence: SuiteLicence? = nil,
+                modes: SuiteModelModes = SuiteModelModes(), frames: SuiteModelFrames = SuiteModelFrames(), refs: SuiteModelRefs = SuiteModelRefs(),
+                duration: SuiteModelDuration? = nil, aspectRatios: [String] = [], kind: String = "video", custom: Bool = false) {
+        self.modes = modes
+        self.frames = frames
+        self.refs = refs
+        self.duration = duration
+        self.aspectRatios = aspectRatios
+        self.kind = kind
+        self.custom = custom
         self.id = id
         self.name = name
         self.provider = provider
@@ -1201,7 +1220,8 @@ public struct SuiteRegistryModel: Codable, Hashable, Sendable, Identifiable {
         self.licence = licence
     }
 
-    enum CodingKeys: String, CodingKey { case id, name, provider, status, enabled, blocked, blockedReason, needsAck, configured, priceScale, resolutions, licence }
+    enum CodingKeys: String, CodingKey { case id, name, provider, status, enabled, blocked, blockedReason, needsAck, configured, priceScale, resolutions, licence,
+                                          modes, frames, refs, duration, aspectRatios, kind, custom }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -1216,6 +1236,13 @@ public struct SuiteRegistryModel: Codable, Hashable, Sendable, Identifiable {
         priceScale = c.v(.priceScale, 1)
         resolutions = c.v(.resolutions, [])
         licence = c.o(.licence)
+        modes = c.v(.modes, SuiteModelModes())
+        frames = c.v(.frames, SuiteModelFrames())
+        refs = c.v(.refs, SuiteModelRefs())
+        duration = c.o(.duration)
+        aspectRatios = c.v(.aspectRatios, [])
+        kind = c.v(.kind, "video")
+        custom = c.v(.custom, false)
     }
 
     public func perSec(_ resolution: String) -> Double? { resolutions.first { $0.id == resolution }.map { $0.perSec * priceScale } }
