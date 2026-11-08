@@ -46,6 +46,7 @@ enum EditV2Engine {
     /// Assets without a file are left out (the plan then skips them); a file that can't be read throws.
     static func load(_ project: EditV2.Project, files: [String: URL]) async throws -> Sources {
         var out = Sources()
+        _ = await filler()
         for a in project.assets {
             guard let url = files[a.id] else { continue }
             switch a.kind {
@@ -153,6 +154,16 @@ enum EditV2Engine {
             try placePieces(src, on: t, pieces: seg.pieces, source: seg.sourceStart, seg.sourceEnd, at: seg.timelineStart, seg.timelineEnd)
             trackIds[seg.lane] = t.trackID
         }
+        // Every video row hidden (or no picture at all): AVFoundation raises on a video composition without a video track
+        // (Mac Edit audit 2026-11-08), so a black filler track runs under the whole edit; the compositor still draws the
+        // background, pictures, text and captions over it (it never reads the filler's frames).
+        var fillerId: CMPersistentTrackID?
+        if videoLanes.isEmpty, let f = fillerTrack, let t = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) {
+            let one = CMTimeRange(start: .zero, duration: CMTime(value: 1, timescale: 1))
+            try t.insertTimeRange(one, of: f, at: .zero)
+            t.scaleTimeRange(one, toDuration: time(plan.durationSec))
+            fillerId = t.trackID
+        }
         // Remove background (2026-11-08): a clip's alpha matte plays on a track of its own per lane, with the clip's own
         // source times, so the compositor gets the matte frame that belongs to each picture frame.
         var matteLanes: [Int: AVMutableCompositionTrack] = [:]
@@ -222,7 +233,8 @@ enum EditV2Engine {
             let stop = i == cuts.count - 2 ? end : time(b)
             guard stop > start else { continue }
             let segs = plan.videoSegments(from: a, to: b)
-            let ids = Set(segs.compactMap { trackIds[$0.lane] } + segs.filter { matted.contains("\($0.lane)/\($0.itemId)") }.compactMap { matteIds[$0.lane] })
+            var ids = Set(segs.compactMap { trackIds[$0.lane] } + segs.filter { matted.contains("\($0.lane)/\($0.itemId)") }.compactMap { matteIds[$0.lane] })
+            if let fillerId { ids.insert(fillerId) }
             instructions.append(EditV2Instruction(timeRange: CMTimeRange(start: start, end: stop), trackIDs: ids.sorted(), scene: scene))
         }
         // Instructions must cover the timeline from 0 without gaps or overlaps, each with a positive duration (AVFoundation
@@ -240,6 +252,46 @@ enum EditV2Engine {
         }
         vc.instructions = tiled
         return Built(composition: comp, videoComposition: vc, audioMix: mix, plan: plan)
+    }
+
+    /// The filler's video track (a 1 s black 16 × 16 H.264 file made once in the temporary folder), when it could be made.
+    nonisolated(unsafe) private static var fillerTrack: AVAssetTrack?
+
+    /// Makes (once) and loads the filler track.
+    @discardableResult
+    static func filler() async -> AVAssetTrack? {
+        if let f = fillerTrack { return f }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-edit-filler.mp4")
+        if !FileManager.default.fileExists(atPath: url.path) {
+            let tmp = url.deletingLastPathComponent().appendingPathComponent("MUSE-edit-filler-\(UUID().uuidString).mp4")
+            do {
+                let writer = try AVAssetWriter(outputURL: tmp, fileType: .mp4)
+                let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 16, AVVideoHeightKey: 16])
+                let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA, kCVPixelBufferWidthKey as String: 16, kCVPixelBufferHeightKey as String: 16])
+                writer.add(input)
+                guard writer.startWriting() else { return nil }
+                writer.startSession(atSourceTime: .zero)
+                for i in 0..<2 {
+                    while !input.isReadyForMoreMediaData { try await Task.sleep(nanoseconds: 2_000_000) }
+                    guard let pool = adaptor.pixelBufferPool else { break }
+                    var pb: CVPixelBuffer?
+                    CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pb)
+                    guard let pb else { break }
+                    CVPixelBufferLockBaseAddress(pb, [])
+                    if let base = CVPixelBufferGetBaseAddress(pb) { memset(base, 0, CVPixelBufferGetBytesPerRow(pb) * 16) }
+                    CVPixelBufferUnlockBaseAddress(pb, [])
+                    adaptor.append(pb, withPresentationTime: CMTime(value: CMTimeValue(i), timescale: 1))
+                }
+                input.markAsFinished()
+                writer.endSession(atSourceTime: CMTime(value: 2, timescale: 1))
+                await writer.finishWriting()
+                guard writer.status == .completed else { return nil }
+                try? FileManager.default.moveItem(at: tmp, to: url)
+            } catch { return nil }
+        }
+        fillerTrack = try? await AVURLAsset(url: url).loadTracks(withMediaType: .video).first
+        return fillerTrack
     }
 
     /// A player item for the live preview, with pitch kept at any speed.
