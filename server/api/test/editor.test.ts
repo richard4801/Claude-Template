@@ -183,7 +183,7 @@ describe('editor AI jobs (mock provider)', () => {
     const es = await sse(base, owner.token);
     const est = (await owner.req('POST', '/v1/editor/estimate', { kind: 'captions', source: { takeId: src } })).body;
     expect(est).toMatchObject({ kind: 'captions', free: false, reusesTranscript: false, durationSec: 25 });
-    expect(est.usd).toBeCloseTo(Math.max(0.01, (8 + 0.15 * 25) * 0.0014), 3);
+    expect(est.usd).toBeCloseTo(Math.max(0.01, (8 + 0.15 * 25) * 0.0014 * 2), 3); // cost × 2 (EDITOR_MARKUP)
     const j = (await owner.req('POST', '/v1/editor/jobs', { kind: 'captions', source: { takeId: src }, options: { language: 'en' } })).body;
     expect(j).toMatchObject({ kind: 'captions', state: 'running', estimateUsd: est.usd });
     expect(j.models).toEqual(['mock/transcribe']); // owner view only
@@ -388,6 +388,7 @@ describe('versions with a v2 project', () => {
 });
 
 // ------------------------------------------------------------------ the Replicate adapter on a fake Replicate
+const PINS = { EDITOR_TRANSCRIBE_VERSION: 'v_whisper', EDITOR_MATTE_VERSION: 'v_rvm', EDITOR_SEPARATE_VERSION: 'v_demucs', EDITOR_TRACK_VERSION: 'v_sam2' };
 describe('Replicate provider (fake Replicate on localhost)', () => {
   let a: A, owner: Client, server: http.Server, studioId: string, src: string;
   const creates: any[] = [];
@@ -427,12 +428,14 @@ describe('Replicate provider (fake Replicate on localhost)', () => {
     await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
     const port = (server.address() as any).port;
     process.env.EDITOR_AI_PROVIDER = 'auto'; // the owner switched the helpers on (the default is the mock)
+    // The fake catalog's versions stand in for the pinned ones (workstream 1: production pins real version ids).
+    Object.assign(process.env, PINS);
     a = await makeApp({ REPLICATE_API_TOKEN: 'r8_editor', REPLICATE_API_URL: `http://127.0.0.1:${port}/v1`, REPLICATE_POLL_MS: '10' });
     ({ owner } = await people(a, 0) as any);
     studioId = await studioOf(a);
     src = await videoTake(a, studioId, { durationSec: 8 });
   });
-  afterAll(async () => { delete process.env.EDITOR_AI_PROVIDER; await a.close(); server.close(); });
+  afterAll(async () => { delete process.env.EDITOR_AI_PROVIDER; for (const k of Object.keys(PINS)) delete process.env[k]; await a.close(); server.close(); });
   const done = (id: string) => until(async () => { const r = (await owner.req('GET', `/v1/editor/jobs/${id}`)).body; return r.state !== 'running' ? r : null; });
 
   it('captions run the transcription model by version and settle at the billed GPU time', async () => {
@@ -441,7 +444,7 @@ describe('Replicate provider (fake Replicate on localhost)', () => {
     const r = await done(j.id);
     expect(r.state, JSON.stringify(r)).toBe('done');
     expect(r.result.words.map((w: any) => w.text)).toEqual(['Hello', 'um', 'there']);
-    expect(r.costUsd).toBeCloseTo(12.5 * 0.0014, 6);
+    expect(r.costUsd).toBeCloseTo(12.5 * 0.0014 * 2, 6); // billed GPU time × rate × 2
     const c = creates.find(x => x.version === 'v_whisper');
     expect(c.input).toMatchObject({ align_output: true, batch_size: 32 });
     expect(c.input.audio_file).toMatch(/^http/);
