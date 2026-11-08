@@ -168,6 +168,8 @@ struct GalleryView: View {
                 ScreenPage {
                     ScreenTitle("Library", subtitle: "Tests stay separate from Final. Select takes to compare them side by side.") {
                         HStack(spacing: Space.s3) {
+                            RButton("Import from link") { store.openLinkImport(.library) } // WS6: import a video from a link
+                                .help("Import a video from a TikTok, Instagram or YouTube link")
                             LibraryCollectionBar()
                             RSeg([(GalleryTab.tests, "Tests \(store.takes.count)"), (GalleryTab.final, "Final \(store.takes.filter(\.isFinal).count)")], selection: $store.galleryTab)
                                 .frame(width: 240)

@@ -312,7 +312,9 @@ extension SnapshotRunner {
         let deny: Set<String> = ["Import", ".cube import", "Import music", "Import sound", "Record a voice-over", "Stop recording the voice-over", "Record VO",
                                  "Back", "Close the editor", "Translate…",
                                  // Paid helpers (2026-11-08: the walk skips anything that spends): background removal, tap to keep's run.
-                                 "Remove background", "Run the cut-out"]
+                                 "Remove background", "Run the cut-out",
+                                 // The shared link import sheet (WS6) has its own walk (SnapshotRunner+Walk.swift).
+                                 "Import a video from a link"]
         let denyInSheet: Set<String> = ["Export", "Save to Library"]
         let closers = ["Close", "Cancel", "Use the latest", "Keep this device's changes", "Done"]
         var used = Set<String>(), skipped = Set<String>(), left = Set<String>()

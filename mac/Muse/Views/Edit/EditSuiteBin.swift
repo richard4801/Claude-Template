@@ -31,8 +31,8 @@ struct EditSuiteBin: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 ViewThatFits(in: .horizontal) {
-                    HStack(spacing: Space.s2) { importButton; recordButton }
-                    VStack(alignment: .leading, spacing: Space.s2) { importButton; recordButton }
+                    HStack(spacing: Space.s2) { importButton; linkButton; recordButton }
+                    VStack(alignment: .leading, spacing: Space.s2) { importButton; linkButton; recordButton }
                 }
                 .padding(Space.s4)
             }
@@ -42,6 +42,13 @@ struct EditSuiteBin: View {
 
     private var importButton: some View {
         SuiteToolButton(title: "Import", icon: "upload-simple") { importAudio(kind: session.binTab == .music ? .music : .voice) }
+    }
+
+    /// Import a video from a link (WS6, owner 2026-11-08): the shared sheet; the clip lands in Uploads.
+    private var linkButton: some View {
+        SuiteToolButton(title: "From a link", icon: "link") { store.openLinkImport(.edit) }
+            .help("Import a video from a link")
+            .accessibilityLabel("Import a video from a link")
     }
 
     private var recordButton: some View {

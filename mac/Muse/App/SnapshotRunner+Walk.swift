@@ -69,6 +69,50 @@ extension SnapshotRunner {
              : "FAIL model_picker: pinned an unknown model \(pinned ?? "")")
         state.overlay = nil
         store.pinComposerModel(nil)
+        // Import a video from a link (demo mode imports at once, nothing is downloaded or spent). "Choose a file instead"
+        // opens a modal file panel, so it's skipped.
+        await walkScreen("link_import", ax: ax, minimum: 3, deny: ["Choose a file instead"],
+                         required: ["Import", "Cancel"],
+                         base: { store.openTool(.swap) },
+                         open: { store.openLinkImport(.swap); store.linkImport.text = demoImportLink },
+                         isOpen: { store.linkImport.open },
+                         note: note)
+        note(store.clip != nil ? "DONE link_import swap source \(store.clip?.name ?? "")" : "FAIL link_import: no swap source after importing")
+        store.closeLinkImport()
+    }
+
+    static let demoImportLink = "https://www.tiktok.com/@muse.demo/video/7300000000000000000"
+
+    /// The import sheet over Swap, over the Library with a link that strict rules refuse, and Edit's media bin entry, at
+    /// 1280 × 800 in the four themes (`mac_<theme>_link_import.png`, `…_link_import_problem.png`).
+    static func linkImportShots(_ store: AppStore, dir: URL) async {
+        guard let w = mainWindow else { return }
+        let full = w.frame
+        w.setFrame(NSRect(x: full.minX, y: full.maxY - 800, width: 1280, height: 800), display: true)
+        defer { w.setFrame(full, display: true) }
+        store.go(.home)
+        try? await Task.sleep(for: .seconds(2))
+        for theme in [ThemeID.c, .a, .b, .d] {
+            store.themeID = theme
+            try? await Task.sleep(for: .seconds(1))
+            store.openTool(.swap)
+            try? await Task.sleep(for: .seconds(2))
+            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_swap_source.png"))
+            store.openLinkImport(.swap)
+            store.linkImport.text = demoImportLink
+            try? await Task.sleep(for: .seconds(1.2))
+            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_link_import.png"))
+            store.closeLinkImport()
+            store.go(.gallery)
+            try? await Task.sleep(for: .seconds(2.5))
+            store.openLinkImport(.library)
+            store.linkImport.text = "https://vimeo.com/123456"
+            store.startLinkImport()
+            try? await Task.sleep(for: .seconds(1.2))
+            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_link_import_problem.png"))
+            store.closeLinkImport()
+        }
+        store.themeID = .a
     }
 
     /// Shows `base`, takes every control on it as chrome (not walked), then opens the screen under test and presses each

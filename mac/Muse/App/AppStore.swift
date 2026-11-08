@@ -241,6 +241,8 @@ final class AppStore {
     let suite = SuiteState()
     /// "Recreate this edit" in Edit (AppStore+Recreate.swift).
     let recreate = RecreateState()
+    /// "Import a video from a link" (WS6, AppStore+LinkImport.swift).
+    let linkImport = LinkImportState()
     /// The learning editor in Edit: Playbook and Recipes (AppStore+Learn.swift).
     let learn = LearnState()
     /// Library collections (AppStore+LibraryQueue.swift).
