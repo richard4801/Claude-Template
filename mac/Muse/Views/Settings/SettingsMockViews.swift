@@ -341,7 +341,7 @@ private struct MockProviders: View {
                 }
             }
             SectionTitle("fal models") {
-                RSeg([("all", "All"), ("video", "Video"), ("image", "Image"), ("on", "On")], selection: .constant("all")).frame(width: 260)
+                RSeg([("all", "All"), ("video", "Video"), ("image", "Image"), ("on", "On")], selection: .constant("all")).frame(width: 300)
             }
             RTextField(placeholder: "Search 48 models", text: .constant(""))
                 .frame(maxWidth: 360)
