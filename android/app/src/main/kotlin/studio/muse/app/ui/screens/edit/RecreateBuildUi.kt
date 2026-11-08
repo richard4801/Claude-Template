@@ -74,6 +74,10 @@ class RecreateActions(
     val onCancel: () -> Unit = {},
     val onUseTake: (String, RecreateTakeChoice) -> Unit = { _, _ -> },
     val onRemake: (String) -> Unit = {},
+    val onExport: () -> Unit = {},
+    val onExportGuide: (Boolean) -> Unit = {},
+    val onExportRun: () -> Unit = {},
+    val onExportClose: () -> Unit = {},
     val onFix: () -> Unit = {},
     val onOpenEditor: () -> Unit = {},
     val onPlay: () -> Unit = {},
@@ -104,6 +108,7 @@ fun RecreateBuildScreen(ui: RecreateBuildUi, a: RecreateActions, picture: ImageB
             val pickTake: (String) -> Unit = { pick = it }
             if (wide) TabletLayout(ui, a, picture, pickTake) else PhoneLayout(ui, a, picture, pickTake)
             ui.confirmSlots?.let { BuildConfirm(ui, it, a) }
+            ui.export?.let { ExportSheet(it, a) }
             pick?.let { s -> TakePicker(ui.takes, onPick = { t -> a.onUseTake(s, t); pick = null }, onClose = { pick = null }) }
         }
     } }
@@ -140,7 +145,10 @@ private fun PhoneLayout(ui: RecreateBuildUi, a: RecreateActions, picture: ImageB
                 }
                 Transport(ui, a)
                 ShotTiles(ui, scores = true, a.onSelect)
-                ui.weakest?.let { w -> LearnQuiet("Fix shot ${w + 1}", icon = "arrows-clockwise", onClick = a.onFix) }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ui.weakest?.let { w -> LearnQuiet("Fix shot ${w + 1}", icon = "arrows-clockwise", onClick = a.onFix) }
+                    LearnQuiet("Export", icon = "download-simple", onClick = a.onExport)
+                }
             }
         }
         LearnHairline()
@@ -239,6 +247,7 @@ private fun TabletLayout(ui: RecreateBuildUi, a: RecreateActions, picture: Image
                     Row(verticalAlignment = Alignment.Bottom) {
                         Box(Modifier.weight(1f)) { Metrics(ui, phone = false) }
                         ui.weakest?.let { w -> LearnQuiet("Fix shot ${w + 1}", icon = "arrows-clockwise", onClick = a.onFix) }
+                        LearnQuiet("Export", icon = "download-simple", onClick = a.onExport)
                     }
                     Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         Player("Reference", ui, yours = false, picture, Modifier.weight(1f).fillMaxHeight())
@@ -652,6 +661,37 @@ private fun ConfirmRow(ui: RecreateBuildUi, slotId: String, problem: String?) {
             }
             if (problem != null) T(problem, m.scale.caption, m.roles.caution)
             else e?.let { RecreateText.madeLength(it.seconds, slot?.lengthSec ?: it.seconds) }?.let { T(it, m.scale.caption.tabular(), m.roles.ink2, maxLines = 1) }
+        }
+    }
+}
+
+/**
+ * Export (plan step 7): the built edit with the reference's sound as a guide track, or silent and timed for the sound,
+ * saved to the phone; with the "Use this sound" reminder either way.
+ */
+@Composable
+private fun ExportSheet(e: RecreateExportUi, a: RecreateActions) {
+    val m = muse
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .32f)).press(onClick = a.onExportClose), contentAlignment = Alignment.Center) {
+        Column(
+            Modifier.padding(24.dp).widthIn(max = 460.dp).fillMaxWidth().clip(RoundedCornerShape(m.radii.container)).background(m.roles.canvas).press { }.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            T("Export the edit", m.scale.title, m.roles.ink)
+            LearnSegmented(listOf("With its sound", "Silent"), if (e.guide) 0 else 1, Modifier.fillMaxWidth()) { if (e.progress == null) a.onExportGuide(it == 0) }
+            T(if (e.guide) "The original's sound plays as a guide, so you can check the cuts land on the beat." else "No sound: the cuts are timed for the original's sound.",
+                m.scale.body, m.roles.ink2)
+            T(studio.muse.core.edit.RecreateExport.REMINDER, m.scale.caption, m.roles.ink2)
+            e.error?.let { T(it, m.scale.caption, m.roles.caution) }
+            e.progress?.let { p ->
+                Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(m.roles.raised).semantics { contentDescription = "${(p * 100).toInt()}% exported" }) {
+                    Box(Modifier.fillMaxWidth(p.coerceIn(0f, 1f)).fillMaxHeight().background(m.roles.accent))
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                LearnQuiet("Cancel", onClick = a.onExportClose)
+                Primary(if (e.progress != null) "Exporting" else "Save to this phone", enabled = e.progress == null, onClick = a.onExportRun)
+            }
         }
     }
 }

@@ -43,6 +43,36 @@ class RecreateLocalEdit(context: Context, private val api: MuseApi) {
     /** True when the built edit has something to play (at least one take on the device). */
     val playable: Boolean get() = project != null && files.isNotEmpty()
 
+    /**
+     * Exports the built edit to an MP4 with the reference's sound as the guide track ([guide]: the reference video on
+     * this device, its sound only), or silent and timed for the sound ([guide] null), and saves it to the phone
+     * (Movies/MUSE). Returns the saved name.
+     */
+    suspend fun export(guide: File?, guideSec: Double, onProgress: (Float) -> Unit): String {
+        val p = project?.takeIf { playable } ?: throw IllegalStateException("The built edit has no video on this phone yet")
+        val all = HashMap(files)
+        val shaped = if (guide != null) { all[studio.muse.core.edit.RecreateExport.GUIDE_ASSET] = guide; studio.muse.core.edit.RecreateExport.withGuide(playableProject(p, files.keys), guideSec) }
+            else studio.muse.core.edit.RecreateExport.silent(playableProject(p, files.keys))
+        val made = composer.export(composer.plan(shaped, all), all, onProgress)
+        try {
+            val name = "MUSE Recreate ${System.currentTimeMillis() / 1000}"
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val r = app.contentResolver
+                if (android.os.Build.VERSION.SDK_INT >= 29) {
+                    val v = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, "$name.mp4"); put(android.provider.MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                        put(android.provider.MediaStore.Video.Media.RELATIVE_PATH, "Movies/MUSE")
+                    }
+                    r.insert(android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, v)?.let { uri -> r.openOutputStream(uri)?.use { o -> made.file.inputStream().use { it.copyTo(o) } } }
+                } else {
+                    @Suppress("DEPRECATION") val dir = File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MOVIES), "MUSE").apply { mkdirs() }
+                    made.file.copyTo(File(dir, "$name.mp4"), overwrite = true)
+                }
+            }
+            return name
+        } finally { made.file.delete() }
+    }
+
     /** A prepared preview player for the built edit, or null when nothing can play. The caller releases it. */
     fun player(): CompositionPlayer? {
         val p = project?.takeIf { playable } ?: return null

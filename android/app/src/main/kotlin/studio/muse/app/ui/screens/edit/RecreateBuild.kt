@@ -30,6 +30,9 @@ import studio.muse.core.edit.RecreateText
 
 enum class RecreateMode { Recipe, Compare }
 
+/** [guide]: the reference's sound as the guide track (else silent, timed for the sound). [progress]: 0–1 while exporting. */
+data class RecreateExportUi(val guide: Boolean = true, val progress: Float? = null, val error: String? = null)
+
 /** A take that can fill a shot ("Use one of my takes"). */
 /** [label]: what tells takes with the same title apart ("Take 2 of 3"). */
 data class RecreateTakeChoice(val id: String, val caption: String, val durationSec: Double?, val thumb: studio.muse.app.data.ImageRef? = null, val label: String? = null)
@@ -76,6 +79,8 @@ data class RecreateBuildUi(
     val playing: Boolean = false,
     /** jobId → 0–100, from the studio's live jobs, for shots being made; a job not listed shows a calm indeterminate state. */
     val jobProgress: Map<String, Int> = emptyMap(),
+    /** The export sheet (Compare): open, with the sound as a guide or silent, its progress while it runs. */
+    val export: RecreateExportUi? = null,
 ) {
     val duration: Double get() = recipe.durationSec.coerceAtLeast(0.1)
     /** The shot under the playhead. */
@@ -156,6 +161,12 @@ class RecreateBuildModel(
         if (t >= u.duration) t = 0.0
         u.copy(time = t).let { v -> v.copy(selected = v.slotAtTime) }
     }
+
+    fun openExport() = _ui.update { it.copy(export = RecreateExportUi(), playing = false) }
+    fun closeExport() = _ui.update { if (it.export?.progress != null) it else it.copy(export = null) }
+    fun setExportGuide(on: Boolean) = _ui.update { u -> u.copy(export = u.export?.copy(guide = on)) }
+    fun setExportProgress(p: Float?, error: String? = null) = _ui.update { u -> u.copy(export = u.export?.copy(progress = p, error = error)) }
+    fun exportDone(message: String) = _ui.update { it.copy(export = null, message = message) }
 
     fun setJobProgress(p: Map<String, Int>) { if (p != _ui.value.jobProgress) _ui.update { it.copy(jobProgress = p) } }
 

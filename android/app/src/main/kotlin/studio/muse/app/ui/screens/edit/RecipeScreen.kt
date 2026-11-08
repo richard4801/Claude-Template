@@ -180,6 +180,7 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
     // After Build: the real built edit, from the edit session, previewed on the device (Compare). Until it is ready,
     // your edit plays each shot's take.
     val local = remember(referenceId) { RecreateLocalEdit(context, c.repo.api) }
+    var exportJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var built by remember(referenceId) { mutableStateOf<androidx.media3.common.Player?>(null) }
     LaunchedEffect(ui.builtSessionId, ui.builtRevision) {
         val sid = ui.builtSessionId ?: return@LaunchedEffect
@@ -205,6 +206,20 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
         onUseTake = model::useTake, onFix = model::fixWeakest, onRemake = { s -> scope.launch { model.remake(s) } },
         onOpenEditor = { ui.builtTakeId?.let(onOpenTake) ?: c.repo.toast("The built edit opens with its take in the editor") },
         onPlay = model::togglePlay, onStep = model::step,
+        onExport = model::openExport, onExportGuide = model::setExportGuide,
+        onExportClose = { exportJob?.cancel(); exportJob = null; model.setExportProgress(null); model.closeExport() }, // Cancel stops a running export
+        onExportRun = {
+            val e = ui.export
+            if (e != null && e.progress == null) exportJob = scope.launch {
+                if (c.repo.demo || !local.playable) { model.setExportProgress(null, "The built edit's videos aren't on this phone yet. Try again in a moment."); return@launch }
+                val guide = video?.let { java.io.File(java.net.URI(it)) }?.takeIf { e.guide && it.exists() }
+                if (e.guide && guide == null) { model.setExportProgress(null, "The original's sound isn't on this phone yet. Export it silent, or try again in a moment."); return@launch }
+                model.setExportProgress(0f)
+                runCatching { local.export(guide, recipe.durationSec) { p -> model.setExportProgress(p) } }.fold(
+                    { model.exportDone("Saved to this phone, in Movies/MUSE") },
+                    { err -> if (err is kotlinx.coroutines.CancellationException) throw err; model.setExportProgress(null, "This phone couldn't make the video. Try again.") })
+            }
+        },
     ), picture = poster, media = RecreateMedia(video, { id -> studio.takes.firstOrNull { it.id == id }?.videoUrl }, built))
 }
 
