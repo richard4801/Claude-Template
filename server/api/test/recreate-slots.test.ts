@@ -19,7 +19,7 @@ import { speedOf } from '../src/recreate/signals.js';
 import { RECREATE_TOOLS } from '../src/recreate/mcpTools.js';
 import { BriefSchema, matchSlots, promptSource, scoreTake, shotRequestFor, swapDirection, swapSegment, withBriefs, type Candidate } from '../src/recreate/slots.js';
 import { putObject } from '../src/storage/objects.js';
-import { recreateOf } from '../src/recreate/references.js';
+import { matchLocation, plateSize, platePrompt, recreateOf } from '../src/recreate/references.js';
 import { makeApp, people, until, type Client } from './helpers.js';
 import { hasFfmpeg, makeReference } from './recreate-fixture.js';
 
@@ -147,6 +147,14 @@ describe('Recreate · swap fills (unit, G2)', () => {
     expect(swapSegment(RECIPE, s3, 4)).toEqual({ startSec: 0.4, endSec: 4.4 }); // held at the reference's end
     expect(swapSegment(RECIPE, s1, 1)).toEqual({ startSec: 0, endSec: 1.5 });
     expect(swapDirection(s2, true)).toMatch(/^Remove every caption/);
+    // Your own setting: the studio location the brief names (whole words; the longest name wins), and the plate's size.
+    const locs = [{ name: 'Roof' }, { name: 'Rooftop' }, { name: 'Rooftop bar' }, { name: 'Kitchen' }];
+    expect(matchLocation('a rooftop at sunset', locs)).toEqual({ name: 'Rooftop' });
+    expect(matchLocation('the rooftop bar, night', locs)).toEqual({ name: 'Rooftop bar' });
+    expect(matchLocation('a beach', locs)).toBeNull();
+    expect(plateSize('9:16')).toEqual([752, 1328]);
+    expect(plateSize('16:9')).toEqual([1328, 752]);
+    expect(platePrompt('a rooftop at sunset')).toMatch(/^An empty background plate of a rooftop at sunset, .*No people, no text/);
     expect(swapDirection({ ...s2, brief: { location: 'a rooftop at sunset' } }, false)).toMatch(/New setting: a rooftop at sunset\./);
   });
   it('a swapped slot plays its segment at 1× from the slot\'s moment: no camera keys, ramp or look a second time; the others keep theirs', () => {
@@ -489,6 +497,36 @@ describe.skipIf(!hasFfmpeg)('Recreate · the flow through the API and Claude\'s 
       const no = await owner.req('POST', `/v1/recreate/references/${refId}/slots/s2/estimate`, { modelId: model.id, method: 'swap' });
       expect([no.status, no.body.code]).toEqual([409, 'swap_unavailable']);
     } finally { a.ctx.jobs.capabilities = caps; }
+
+    // Your own setting (Edit only): a studio location the brief names (free), a picked one, else a plate made from
+    // the brief (its price in the same button; reused for free once made). It goes to the pod as the last reference.
+    await owner.req('PUT', `/v1/recreate/references/${refId}/briefs`, { slots: { s1: { location: 'a rooftop at sunset' } } });
+    const roof = (await owner.req('POST', '/v1/suite/locations', { name: 'Rooftop', image: { asset: 'g_front' } })).body;
+    const loc = (await owner.req('POST', '/v1/suite/locations', { name: 'Kitchen', image: { asset: 'g_tq' } })).body;
+    const est = (o: object) => owner.req('POST', `/v1/recreate/references/${refId}/slots/s1/estimate`, { modelId: model.id, keepBackground: false, ...o }).then(x => x.body);
+    const plain = (await owner.req('POST', `/v1/recreate/references/${refId}/slots/s1/estimate`, { modelId: model.id })).body;
+    const m1 = await est({});
+    expect(m1.background).toEqual({ source: 'location', locationId: roof.id, name: 'Rooftop', matched: true, usd: 0 });
+    expect(m1.estimate.estimate).toBe(plain.estimate.estimate); // free
+    expect((await est({ locationId: loc.id })).background).toMatchObject({ source: 'location', locationId: loc.id, matched: false });
+    expect((await owner.req('POST', `/v1/recreate/references/${refId}/slots/s1/estimate`, { modelId: model.id, keepBackground: false, locationId: 'nope' })).status).toBe(400);
+    await owner.req('DELETE', `/v1/suite/locations/${roof.id}`);
+    const gen = await est({});
+    expect(gen.background).toMatchObject({ source: 'generated', setting: 'a rooftop at sunset' });
+    expect(gen.background.usd).toBeGreaterThan(0);
+    expect(gen.estimate.estimate).toBeCloseTo(plain.estimate.estimate + gen.background.usd, 2);
+    expect(gen.estimate.buttonLabel).toBe(`Swap in · ${gen.estimate.seconds.toFixed(1)} s · $${gen.estimate.estimate.toFixed(2)}`);
+    const f2 = await owner.req('POST', `/v1/recreate/references/${refId}/slots/s1/fill`, { modelId: model.id, keepBackground: false });
+    expect(f2.status, JSON.stringify(f2.body)).toBe(200);
+    expect(f2.body.background).toMatchObject({ source: 'generated' });
+    const j2 = await a.ctx.jobs.get(f2.body.job.id);
+    expect(j2!.request).toMatchObject({ engine: 'h3', background: 'photo' });
+    const refs = j2!.request.references as { label: string }[];
+    expect(refs.at(-1)!.label).toBe('background');
+    expect(refs.length).toBeLessThanOrEqual(6);
+    expect(refs.filter(x => x.label !== 'background').length).toBeLessThanOrEqual(5);
+    expect(j2!.prompt).toMatch(/background/);
+    expect((await est({})).background).toMatchObject({ source: 'generated', usd: 0, reused: true }); // made once
 
     // The segment is the reference's pixels: it goes when the reference does (only the fill part purged here).
     const { recreateReferences } = await import('../src/recreate/schema.js');
