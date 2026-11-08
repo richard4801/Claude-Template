@@ -267,3 +267,9 @@ hammer
 book-open-text
 push-pin
 pencil-simple
+# Claude chat (plans/claude-chat-android.md)
+arrow-up
+arrow-down
+paperclip
+square
+check-square

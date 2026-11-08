@@ -90,9 +90,10 @@ data class LiveTurn(
 sealed interface ChatItem {
     val key: String
     /** [images]: the attached images' links (thumbnails). */
-    data class User(override val key: String, val text: String, val source: String, val images: List<String> = emptyList()) : ChatItem
-    data class Assistant(override val key: String, val text: String, val streaming: Boolean = false) : ChatItem
-    data class Tool(override val key: String, val text: String, val ok: Boolean, val running: Boolean = false) : ChatItem
+    data class User(override val key: String, val text: String, val source: String, val images: List<String> = emptyList(), val at: Long = 0) : ChatItem
+    data class Assistant(override val key: String, val text: String, val streaming: Boolean = false, val at: Long = 0) : ChatItem
+    /** [detail]: the short line a tap shows ("Set camera path, done"). */
+    data class Tool(override val key: String, val text: String, val ok: Boolean, val running: Boolean = false, val detail: String = "") : ChatItem
     /** A frame Claude grabbed: [url] when stored, [data] (base64) while it streams. */
     data class Image(override val key: String, val url: String? = null, val data: String? = null, val mimeType: String? = null) : ChatItem
 }
@@ -231,23 +232,43 @@ object ChatReducer {
     fun items(ui: ClaudeChatUi): List<ChatItem> {
         val out = mutableListOf<ChatItem>()
         for (m in ui.messages) when {
-            m.role == "user" -> out += ChatItem.User(m.id, m.text, m.source, m.attachments.map { it.url })
+            m.role == "user" -> out += ChatItem.User(m.id, ChatClean.userText(m.text), m.source, m.attachments.map { it.url }, m.createdAt)
             m.image != null -> out += ChatItem.Image(m.id, url = m.image.url)
-            m.role == "tool" || m.tool != null -> m.tool?.let { tl -> out += ChatItem.Tool(m.id, ChipText.of(tl.name, tl.summary ?: m.text.takeIf { it.isNotBlank() }), tl.ok != false) }
-            m.text.isNotBlank() -> out += ChatItem.Assistant(m.id, m.text)
+            m.role == "tool" || m.tool != null -> m.tool?.let { tl -> out += tool(m.id, tl.name, ChatClean.summary(tl.summary ?: m.text), if (tl.ok == false) "error" else "done") }
+            m.text.isNotBlank() -> out += ChatItem.Assistant(m.id, ChatClean.assistantText(m.text), at = m.createdAt)
         }
         val t = ui.turn ?: return out
         // The phone's message before it is stored (the API fallback stores it with the turn).
-        if (t.text.isNotBlank() && ui.messages.none { it.role == "user" && (it.turnId == t.id && t.id != null || it.text == t.text) }) out += ChatItem.User("live-user", t.text, if (t.api) "api" else "phone")
+        if (t.text.isNotBlank() && ui.messages.none { it.role == "user" && (it.turnId == t.id && t.id != null || it.text == t.text) })
+            out += ChatItem.User("live-user", ChatClean.userText(t.text), if (t.api) "api" else "phone")
         t.parts.forEachIndexed { i, p ->
             out += when (p) {
-                is LivePart.Text -> ChatItem.Assistant("live-$i", p.text.trimEnd(), streaming = t.active && i == t.parts.lastIndex)
-                is LivePart.Tool -> ChatItem.Tool("live-${p.id}", ChipText.of(p.name, p.summary, running = p.status == "running"), p.status != "error", running = p.status == "running")
+                is LivePart.Text -> ChatItem.Assistant("live-$i", ChatClean.assistantText(p.text).trimEnd(), streaming = t.active && i == t.parts.lastIndex)
+                is LivePart.Tool -> tool("live-${p.id}", p.name, ChatClean.summary(p.summary), p.status)
                 is LivePart.Image -> ChatItem.Image("live-img-$i", data = p.data, mimeType = p.mimeType)
             }
         }
-        return out.filterNot { it is ChatItem.Assistant && it.text.isBlank() }
+        return out.filterNot { it is ChatItem.Assistant && it.text.isBlank() || it is ChatItem.User && it.text.isBlank() && it.images.isEmpty() }
     }
+
+    /** A tool row: its words, and the line a tap shows. Never the raw name, input or output. */
+    private fun tool(key: String, name: String, summary: String?, status: String): ChatItem.Tool {
+        val running = status == "running"
+        val ok = status != "error"
+        val text = ChipText.of(name, summary, running)
+        val what = ChipText.of(name, null, false)
+        val detail = when {
+            running -> "$what, in progress"
+            !ok -> "$what didn't work. Claude can try another way."
+            summary != null && summary != what -> "$what: $summary"
+            else -> "$what, done"
+        }
+        return ChatItem.Tool(key, if (!ok) "$what didn't work" else text, ok, running, detail)
+    }
+
+    /** The owner's last message (for Retry): the live turn's, else the newest stored one. */
+    fun lastUserText(ui: ClaudeChatUi): String? =
+        ui.turn?.text?.takeIf { it.isNotBlank() } ?: ui.messages.lastOrNull { it.role == "user" && it.text.isNotBlank() }?.text?.let(ChatClean::userText)
 }
 
 // ---------------------------------------------------------------- the status line
@@ -257,15 +278,15 @@ enum class Tone { GOOD, WAIT, OFF }
 data class StatusLineText(val text: String, val tone: Tone)
 
 object ClaudeText {
-    const val MODE = "On your Claude plan · answered by your Mac"
-    const val ANSWERING = "Your Mac is answering · On your Claude plan"
+    const val MODE = "On your Claude plan, answered by your Mac"
+    const val ANSWERING = "Your Mac is answering"
     const val WAITING = "Waiting for your Mac…"
-    const val OFFLINE = "Your Mac is offline"
-    const val API = "Answering on the studio API key · billed per use"
+    const val OFFLINE = "Claude on your Mac is offline"
+    const val API = "Answering on the studio API key, billed per use"
     const val STOPPING = "Stopping…"
     const val CONNECTOR_NOTE = "MUSE has to be added to Claude as a connector first."
     const val FALLBACK_NOTE = "Turn on the API fallback in Settings → Connections"
-    const val NO_KEY_NOTE = "The API fallback needs ANTHROPIC_API_KEY on the server"
+    const val NO_KEY_NOTE = "The API fallback isn't set up on the server yet"
     const val EDIT_NO_API = "The studio API key works in Camera stage and the Suite for now"
 
     /** The empty chat's line, per context. */
@@ -279,8 +300,8 @@ object ClaudeText {
     fun placeholder(contextKind: String) = when (contextKind) {
         "edit" -> "Ask Claude to edit…"
         "suite" -> "Describe the shot…"
-        "recreate" -> "Ask Claude…"
-        else -> "Direct the shot…"
+        "camera" -> "Direct the shot…"
+        else -> "Message Claude…"
     }
 
     fun status(ui: ClaudeChatUi): StatusLineText {
@@ -303,7 +324,7 @@ object ClaudeText {
     /** A finished turn's line under the transcript ("Stopped", "Your Mac didn't pick this up"), or null. */
     fun ended(t: LiveTurn?): String? = when (t?.state) {
         "stopped" -> "Stopped"
-        "failed" -> t.error?.takeIf { it.isNotBlank() } ?: "Claude couldn't finish this turn"
+        "failed" -> ChatClean.error(t.error)
         else -> null
     }
 
@@ -336,4 +357,96 @@ object Fallback {
     }
 
     private const val EDIT_NOTE = ClaudeText.EDIT_NO_API
+}
+
+// ---------------------------------------------------------------- what the chat may show (plans/claude-chat-android.md)
+
+/**
+ * Keeps internal content out of the chat: the context line the Mac puts before a typed message ("[Suite · Shot …]"),
+ * system-brief tags, raw JSON, stack traces, file paths and internal ids. What's left is plain language.
+ */
+object ChatClean {
+    /** "[Suite · Shot · draft 3]", "[Camera session cs_1 · revision 4 …]": a bracketed first line the Mac adds. */
+    private val CONTEXT_LINE = Regex("""^\[[A-Z][^\]\n]{0,2000}]\s*(\n|$)""")
+    private val BRIEF_TAG = Regex("""<(system|system-reminder|muse[-_][a-z_-]+|context|brief)\b[^>]*>[\s\S]*?</\1>\s*""", RegexOption.IGNORE_CASE)
+    private val PATH = Regex("""(?<![\w.])(?:/(?:Users|home|var|tmp|private|data|opt|srv|app)/[^\s'"),]+|[A-Z]:\\[^\s'"),]+)""")
+    /** An internal id: a short prefix, an underscore, and 6+ characters with a digit in them ("tk_8a7sdf9a", "toolu_01AB…"). */
+    private val ID = Regex("""\b[a-z]{1,8}_(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{6,}\b""")
+    /** Low-level error codes and words that mean nothing to a person. */
+    private val TECH = Regex("""\bE[A-Z]{4,}\b|\b(?:errno|undefined|null pointer|NaN|stderr|stdout|exit code|status code|HTTP \d{3})\b""", RegexOption.IGNORE_CASE)
+    private val STACK = Regex("""(?m)^\s*(at [\w.$]+\(|File ".*", line \d+|Traceback \(most recent call last\)|\w+(Exception|Error):\s)""")
+    private val TOOL_NAME = Regex("""\bmcp__\w+""")
+
+    /** What the owner typed, without the context line or any brief the Mac wrapped around it. */
+    fun userText(text: String): String {
+        var t = text
+        repeat(3) { t = t.replace(BRIEF_TAG, "") }
+        while (true) { val m = CONTEXT_LINE.find(t.trimStart()) ?: break; t = t.trimStart().substring(m.range.last + 1) }
+        return t.trim()
+    }
+
+    /** Claude's reply, without system-brief tags it may have echoed. Markdown stays (the view renders it). */
+    fun assistantText(text: String): String = text.replace(BRIEF_TAG, "")
+
+    /**
+     * A tool's summary as a short line, or null when it's internal (JSON, a path, an id, a long dump): the chip then uses
+     * the tool's name in words.
+     */
+    fun summary(s: String?): String? {
+        val t = s?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        if (t.startsWith("{") || t.startsWith("[") || t.contains("\":") || STACK.containsMatchIn(t) || TOOL_NAME.containsMatchIn(t)) return null
+        val line = t.lineSequence().first().replace(PATH, "a file").replace(ID, "").replace(Regex("""\s{2,}"""), " ").trim()
+        if (line.isEmpty()) return null
+        return if (line.length > 80) line.take(77).trimEnd() + "…" else line
+    }
+
+    /**
+     * An error as one plain sentence: a timeout, the network, or the fallback. Stack traces, JSON, paths and ids never
+     * reach the screen. [fallback] when there's nothing usable.
+     */
+    fun error(raw: String?, fallback: String = FAILED): String {
+        val t = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return fallback
+        val low = t.lowercase()
+        return when {
+            "timed out" in low || "timeout" in low -> "Claude took too long to answer. Try again."
+            "unable to resolve host" in low || "failed to connect" in low || "econnrefused" in low || "econnreset" in low || "connection reset" in low ||
+                "network" in low && "error" in low -> "Couldn't reach the studio. Check your connection and try again."
+            "rate limit" in low || "429" in low || "overloaded" in low -> "Claude is busy right now. Try again in a minute."
+            STACK.containsMatchIn(t) || t.startsWith("{") || t.startsWith("[") || t.contains("\":") || TOOL_NAME.containsMatchIn(t) ||
+                PATH.containsMatchIn(t) || TECH.containsMatchIn(t) || t.startsWith("Error:") -> fallback
+            else -> {
+                val line = t.lineSequence().first().replace(PATH, "a file").replace(ID, "").replace(Regex("""\s{2,}"""), " ").trim()
+                when {
+                    line.isEmpty() -> fallback
+                    line.length > 140 -> fallback
+                    else -> line
+                }
+            }
+        }
+    }
+
+    const val FAILED = "Claude couldn't finish this reply."
+}
+
+/** Time labels between messages: "Today 14:05", "Yesterday 09:12", "Mon 3 Nov, 18:40" (24 h, the phone's zone). */
+object ChatTime {
+    /** A label goes above a message when it's the first, or more than [GAP_MS] after the one before. */
+    const val GAP_MS = 30 * 60 * 1000L
+
+    fun needsLabel(prevAt: Long, at: Long): Boolean = at > 0 && (prevAt <= 0 || at - prevAt >= GAP_MS)
+
+    fun label(at: Long, now: Long, zone: java.util.TimeZone = java.util.TimeZone.getDefault()): String {
+        val c = java.util.Calendar.getInstance(zone, Locale.UK).apply { timeInMillis = at }
+        val n = java.util.Calendar.getInstance(zone, Locale.UK).apply { timeInMillis = now }
+        val time = String.format(Locale.UK, "%02d:%02d", c.get(java.util.Calendar.HOUR_OF_DAY), c.get(java.util.Calendar.MINUTE))
+        fun dayIndex(x: java.util.Calendar) = x.get(java.util.Calendar.YEAR) * 400 + x.get(java.util.Calendar.DAY_OF_YEAR)
+        val diff = dayIndex(n) - dayIndex(c)
+        return when {
+            diff == 0 -> "Today $time"
+            diff == 1 -> "Yesterday $time"
+            c.get(java.util.Calendar.YEAR) == n.get(java.util.Calendar.YEAR) ->
+                java.text.SimpleDateFormat("EEE d MMM", Locale.UK).apply { timeZone = zone }.format(java.util.Date(at)) + ", $time"
+            else -> java.text.SimpleDateFormat("d MMM yyyy", Locale.UK).apply { timeZone = zone }.format(java.util.Date(at)) + ", $time"
+        }
+    }
 }

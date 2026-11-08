@@ -429,25 +429,5 @@ fun CameraStill(session: CameraSession, playhead: Double, modifier: Modifier = M
     }
 }
 
-/** A tool chip: cube + BUILD_STAGE ×2, red outline when it failed. */
-@Composable
-fun ToolChipView(c: ToolChip) {
-    val m = muse
-    val col = if (c.ok) m.t.muted else m.t.accent
-    Row(Modifier.height(22.dp).border(1.dp, if (c.ok) m.t.line else m.t.accent, RoundedCornerShape(if (m.isA) 2.dp else 999.dp)).padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-        CamIc("cube", 11.dp, col)
-        T(c.label, m.scale.caption.copy(fontFeatureSettings = "tnum"), col, maxLines = 1)
-    }
-}
-
-/** The send button (ink square). */
-@Composable
-fun SendButton(enabled: Boolean, onClick: () -> Unit) {
-    val m = muse
-    Box(Modifier.size(44.dp).clip(RoundedCornerShape(if (m.isA) 2.dp else 999.dp)).background(if (enabled) m.t.cta else m.t.line).press(enabled, onClick),
-        contentAlignment = Alignment.Center) { CamIc("send", 18.dp, if (enabled) m.t.ctaInk else m.t.muted) }
-}
-
 @Composable
 fun Gap(h: Dp) = Spacer(Modifier.height(h))

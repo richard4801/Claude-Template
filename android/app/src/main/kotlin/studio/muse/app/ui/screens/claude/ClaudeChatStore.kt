@@ -104,6 +104,14 @@ class ClaudeChatStore(private val api: () -> ClaudeApi, private val scope: Corou
         return true
     }
 
+    /** Retry a failed reply: the owner's last message goes again (on the studio key if that's what answered it). */
+    fun retry(): Boolean {
+        val u = _ui.value
+        if (u.busy || u.turn?.state != "failed") return false
+        val text = ChatReducer.lastUserText(u) ?: return false
+        return if (u.turn.api) { _ui.update { it.copy(refusedText = text) }; useApiKey() } else send(text)
+    }
+
     /** Stop: the Mac interrupts the turn; the API fallback's stream is cancelled. */
     fun stop() {
         val t = _ui.value.turn ?: return
