@@ -350,8 +350,10 @@ struct ComposerRail: View {
             } else {
                 if hasSetup {
                     Text("Setup").font(t.scale.heading.font).foregroundStyle(t.roles.ink).padding(.bottom, Space.s1)
-                    ForEach(Self.order.filter { d.tool.chips.contains($0) }, id: \.self) { chip in
-                        SetupChipRow(chip: chip)
+                    // Rows the tool uses; rows its input decides (the clip, the video) stay, greyed with the reason
+                    // (plans/ai-suite-design.md principle 6, "Say why, not just no").
+                    ForEach(Self.order.filter { d.tool.chips.contains($0) || Self.decidedBy($0, d.tool) != nil }, id: \.self) { chip in
+                        SetupChipRow(chip: chip, decided: d.tool.chips.contains(chip) ? nil : Self.decidedBy(chip, d.tool))
                     }
                     if hasSettingsRow { SetupSettingsRow() }
                     if hasRig { SetupRigsRow() }
@@ -379,6 +381,17 @@ struct ComposerRail: View {
     }
 
     private var hasSetup: Bool { !store.suite.composer.tool.chips.isEmpty || hasSettingsRow }
+
+    /// Why a rig row the tool doesn't take is set anyway: Swap and Recast keep the clip's camera, light and style;
+    /// Extend continues the video's. nil: the tool simply doesn't use it (the row stays hidden).
+    static func decidedBy(_ chip: ComposerChip, _ tool: ComposerTool) -> String? {
+        guard chip != .references else { return nil }
+        switch tool {
+        case .swap, .recast: return "Set by your clip"
+        case .extend: return "Set by your video"
+        default: return nil
+        }
+    }
 
     /// The tools whose Setup is a rig (camera, light, look or style rows): saved rigs apply there.
     private var hasRig: Bool {
@@ -452,9 +465,22 @@ struct SetupChipRow: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
     var chip: ComposerChip
+    /// The input that sets this row (greyed, with this reason) when the tool doesn't take it.
+    var decided: String? = nil
     @State private var refsOpen = false
 
     var body: some View {
+        if let decided {
+            ComposerSetupRow(icon: icon, name: name, value: decided, auto: true, help: "\(name): \(decided.lowercased())") {}
+                .disabled(true)
+                .opacity(0.55)
+                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "decided") } }
+        } else {
+            row
+        }
+    }
+
+    @ViewBuilder private var row: some View {
         let v = value
         // Photo tool (workstream 3): a Photo preset sets its own camera and light, so those rows show it, locked.
         let locked = (chip == .camera || chip == .lighting) && store.suite.composer.tool == .photo && store.suite.photo.presetId != nil

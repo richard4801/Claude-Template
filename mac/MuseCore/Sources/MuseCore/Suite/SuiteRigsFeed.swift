@@ -551,17 +551,21 @@ public struct SuiteFeedItem: Codable, Hashable, Sendable, Identifiable {
 public struct SuiteFeedPage: Codable, Hashable, Sendable {
     public var items: [SuiteFeedItem]
     public var nextCursor: String?
+    /// The first page only (no cursor, no collection): the "Queued" group above the items (build step 3).
+    public var queued: [QueuedShot]
 
-    public init(items: [SuiteFeedItem] = [], nextCursor: String? = nil) {
+    public init(items: [SuiteFeedItem] = [], nextCursor: String? = nil, queued: [QueuedShot] = []) {
         self.items = items
         self.nextCursor = nextCursor
+        self.queued = queued
     }
 
-    enum CodingKeys: String, CodingKey { case items, nextCursor }
+    enum CodingKeys: String, CodingKey { case items, nextCursor, queued }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         items = c.v(.items, [])
         nextCursor = c.o(.nextCursor)
+        queued = c.v(.queued, [])
     }
 }
 
@@ -576,13 +580,16 @@ public struct SuiteFeedQuery: Hashable, Sendable {
     public var model: String?
     public var cursor: String?
     public var limit: Int?
+    /// One Library collection's takes and photos only (no pending jobs, no queue).
+    public var collection: String?
 
-    public init(tool: [String] = [], status: [String] = [], model: String? = nil, cursor: String? = nil, limit: Int? = nil) {
+    public init(tool: [String] = [], status: [String] = [], model: String? = nil, cursor: String? = nil, limit: Int? = nil, collection: String? = nil) {
         self.tool = tool
         self.status = status
         self.model = model
         self.cursor = cursor
         self.limit = limit
+        self.collection = collection
     }
 
     /// The same query for the next page.
@@ -606,6 +613,7 @@ public struct SuiteFeedQuery: Hashable, Sendable {
         if let m = model, !m.isEmpty { parts.append("model=" + enc(m)) }
         if let c = cursor, !c.isEmpty { parts.append("cursor=" + enc(c)) }
         if let l = limit { parts.append("limit=\(l)") }
+        if let c = collection, !c.isEmpty { parts.append("collection=" + enc(c)) }
         return parts.joined(separator: "&")
     }
 

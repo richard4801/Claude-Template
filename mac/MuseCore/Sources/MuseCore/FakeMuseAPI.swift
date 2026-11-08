@@ -77,6 +77,12 @@ public actor FakeMuseAPI: MuseAPI {
     var suiteHiddenJobs: Set<String> = []
     var suiteTakeModels: [String: String] = FakeMuseAPI.demoTakeModels
     var suiteJobAspects: [String: String] = [:]
+    /// Build step 3 (Suite/SuiteLibraryQueue.swift): the studio's Library collections and the Suite queue.
+    var libraryCollections: [FakeCollection] = [
+        FakeCollection(id: "col_demo_picks", name: "Client picks", userId: "u1", takeIds: ["t_g1", "t_g4"],
+                       createdAt: 1_762_300_000_000, updatedAt: 1_762_600_000_000),
+    ]
+    var suiteQueue: [FakeQueued] = []
 
     /// - Parameters:
     ///   - speed: simulation speed; 0 freezes the queue (tests).
