@@ -1152,23 +1152,32 @@ A reference video (an upload, up to 60 s for now) is analysed into a versioned *
 | `PATCH /v1/recreate/references/{id} {keep?, name?}` | `keep: true` stops the 30-day deletion (`expiresAt: null`). |
 | `DELETE /v1/recreate/references/{id}` | → `204`. The video, the contact sheet and the row are deleted. |
 | `GET /v1/recreate/references/{id}/contact-sheet` | → the PNG: each slot's keyframe, labelled "2 · 1.5–2.7 s". Claude writes the shot briefs from it. |
+| `GET /v1/recreate/references/{id}/video` | The reference video for the side-by-side player (authenticated): a `302` to a 1-hour link on S3, or the bytes on local storage. `404` once expired. |
+| `GET /v1/recreate/references/{id}/poster` | → PNG: the first slot's keyframe (cropped from the contact sheet). |
+| `GET /v1/recreate/references/{id}/slots/{slotId}/thumb` | → PNG: that slot's keyframe. |
+| `GET /v1/recreate/references/{id}/fill` | → `{referenceId, slots: SlotFill[], applied?, match?}`, see below. |
 
-`Reference`: `{id, name, state: "analyzing" | "ready" | "failed" | "expired", progress, phase, error?, durationSec, userId, keep, createdAt, expiresAt | null, recipe?}`.
+**Live event:** `{type: "recreate", reference}` (the `Reference` without its recipe, with `slots`: the count) goes to its member and the owner on create, on each analysis step, when it is ready or failed, and on `PATCH`. Migration **0016** adds `recreate_references.fill`.
+
+**Fixture:** `server/api/test/fixtures/recipe-v1.json` is a `GET /v1/recreate/references/{id}` response from a real analysis of the test reference (with an example brief, words and summary), for the apps' fakes. A test fails if the API sends a field the fixture lacks.
+
+`Reference`: `{id, name, state: "analyzing" | "ready" | "failed" | "expired", progress, phase, error?, durationSec, userId, keep, createdAt, expiresAt | null, videoUrl?, posterUrl?, recipe?}`.
 
 **Recipe** (`schema: "muse.recipe/1"`; every element has a `confidence` from 0 to 1; times are seconds in the reference):
 ```
 Recipe {
-  schema, id, referenceId, createdAt, analyzer: {version, tookMs},
+  schema, id, origin: "reference" | "edit", referenceId?, takeId?, versionId? /* origin "edit": workstream 3's recipeFromProject */,
+  createdAt, analyzer: {version, tookMs}, summary?, tags?: string[],
   source: {durationSec, width, height, fps, aspect: "9:16", hasAudio},
   sound: {bpm, beats[], strong[], confidence} | null,
   pacing: {shots, avgShotSec, cutsPerMin, energy: {everySec, values[] /* 0–1 */}},
   slots: Slot[], transitions: Transition[], text: TextItem[],
   grade: {swatches: hex[5], contrast, saturation, warmth /* −1…1 */, look: {id, kind: "palette", label, distance} | null, grade: Grade, confidence},
-  contactSheet: {url, times[]} | null,
-  gaps: {what, atSec?, note}[]
+  contactSheet: {url, times[], tiles: {slotId, x, y, w, h /* px in the sheet */}[]} | null,
+  gaps: {key /* stable, e.g. "transition:unknown@2.40", "text:words", "pose" */, kind: "transition"|"effect"|"text"|"font"|"motion"|"other", what, atSec?, note}[]
 }
 Slot {
-  id: "s1", index, startSec, endSec, durationSec, keyframeSec, confidence,
+  id: "s1", index, startSec, endSec, durationSec, keyframeSec, confidence, thumbUrl?, fill?: {jobId},
   brief: {shotSize?, angle?, subject?, action?, location?, notes?} | null,
   rig: Rig | null,
   camera: {motion: "static"|"pan"|"tilt"|"zoom_in"|"zoom_out"|"shake"|"mixed", shake, keys: {t, x, y, scale}[], confidence},
@@ -1177,8 +1186,9 @@ Slot {
   pose: {status: "pending"|"done"|"none", frameSec?, keypoints?: {name, x, y, score}[]}
 }
 Transition { atSec, from, to, kind: "cut"|"flash"|"whip"|"zoom"|"fade"|"crossfade"|"glitch"|"unknown", durationSec, confidence }
-TextItem { id, startSec, endSec, box: {x, y, w, h /* 0–1 */}, words: string | null, sizeFrac, color, animIn, animOut, confidence }
+TextItem { id, startSec, endSec, box: {x, y, w, h /* 0–1 */}, words: string | null, sizeFrac, color, fontId: "sans"|"serif"|"rounded"|"condensed"|"mono"|"marker", animIn, animOut, confidence }
 ```
+**Size caps** (a recipe stays under about 256 KB): speed curves at most 48 points and camera keys at most 64 per slot (thinned, ends kept), at most 100 text items. An `unknown` transition also adds a gap.
 
 How each part is found:
 - **Shots and cuts:**
@@ -1202,11 +1212,11 @@ Code: `src/recreate/slots.ts` (briefs, matcher, fill request), `assemble.ts` (re
 
 | | |
 |---|---|
-| `PUT /v1/recreate/references/{id}/briefs {slots: {s1: Brief}}` | `Brief {shotSize?, angle?, subject?, action?, location?, notes?}`. `shotSize` is a `SHOT_SIZES` id and `angle` a `HEIGHTS` id; unknown ids → `400`. Each brief is merged into the slot, and its framing and angle go into the slot's `rig`. |
+| `PUT /v1/recreate/references/{id}/briefs {slots: {s1: Brief}, summary?, tags?}` | `summary` (≤ 200 chars) and `tags` (≤ 20 short lowercase words) go on the recipe. `Brief {shotSize?, angle?, subject?, action?, location?, notes?}`. `shotSize` is a `SHOT_SIZES` id and `angle` a `HEIGHTS` id; unknown ids → `400`. Each brief is merged into the slot, and its framing and angle go into the slot's `rig`. |
 | `POST /v1/recreate/references/{id}/match {modelId?, top?, minScore?}` | → `{slots: [{slotId, candidates: [{takeId, score, reasons}], suggested, toGenerate}], assignment: {slotId: takeId}}`. See the matcher below. |
 | `POST /v1/recreate/references/{id}/slots/{slotId}/estimate {modelId, quality?}` | → `{slotId, request: ShotRequest, estimate: ShotEstimate}`. Nothing is held. |
 | `POST /v1/recreate/references/{id}/slots/{slotId}/fill {modelId, quality?}` | → `{slotId, job}`: an ordinary Suite shot, held and priced like any other (the caller has confirmed the price). The slot records `fill: {jobId}`. |
-| `POST /v1/recreate/references/{id}/apply {sessionId, baseRevision?, slots: {slotId: takeId \| jobId}, options?: {camera, speed, text, look}, device?}` | Builds the edit in an edit session (owner) as one undoable change labelled "Recreated “name”". → `{sessionId, revision, durationSec, missing, waiting, notes, label}`. See below. |
+| `POST /v1/recreate/references/{id}/apply {sessionId, baseRevision?, slots: {slotId: takeId \| jobId}, options?: {camera, speed, text, look}, device?}` | Builds the edit in an edit session (owner) as one undoable change labelled "Recreated “name”". → `{sessionId, revision, durationSec, missing, waiting, notes, label, match, sources}`. See below. |
 
 **The matcher** scores each of the studio's video takes against a slot, 0–1, with reasons:
 - the length;
@@ -1225,6 +1235,21 @@ It suggests one take per slot, best first, using each take once. Slots where not
 - `draft: {tool: "shot", recreate: {slotId}}`.
 
 Pose guidance joins once the pose engine is approved.
+
+**Fill state** (`GET …/fill`; `match` keeps its last result, `fill` its jobs):
+```
+SlotFill { slotId, state: "empty"|"matched"|"to_generate"|"generating"|"ready", takeId?, jobId?, score?, estimate?: {amount, label}, reason? }
+```
+- `ready`: the slot's fill job is done (its first take); `generating`: the job is still running; `matched`: the last match's suggestion; `to_generate`: nothing scored enough.
+- `applied: {sessionId, revision, at, slots: {slotId: takeId}, sources, match}` after an apply.
+
+**Match score** (returned by apply as `match`, 0–1): `{overall, cuts, text, ramps, grade, shots, perSlot: [{slotId, score}]}`.
+- `cuts`: each cut's distance from the reference's (exact = 1, two frames or more = 0), times the share of slots filled.
+- `shots`: per slot, the matcher's score for its take, 0.85 for a shot generated for it, 0.6 for another take, 0 when empty.
+- `text`: 1 for read words, 0.6 for "Text"; `ramps`: the share of ramped slots filled; `grade`: 1 − the Look's distance (0 when off or too far).
+- `overall` = 0.25 cuts + 0.35 shots + 0.15 text + 0.1 ramps + 0.15 grade.
+
+**Sources:** apply also returns `sources: {itemId: {recipeId, slotId? , transitionAt?, textId?}}`, which recipe element each item came from, for workstream 3's corrections log (passed to `edit_ops.meta` once it exists).
 
 **Applying a recipe:**
 - **Values:** each slot's value is a take, or a finished job (its first take is used). A slot whose job hasn't finished is listed in `waiting`.

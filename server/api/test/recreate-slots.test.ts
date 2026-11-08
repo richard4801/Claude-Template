@@ -23,7 +23,7 @@ import { hasFfmpeg, makeReference } from './recreate-fixture.js';
 const cam = (motion: any, keys = [{ t: 0, x: 0, y: 0, scale: 1 }]) => ({ motion, shake: 0, keys, confidence: 0.6 });
 const speed = { ramp: 'none' as const, curve: [{ t: 0, speed: 1 }], confidence: 0.5 };
 const RECIPE: Recipe = {
-  schema: 'muse.recipe/1', analyzer: { version: 'test', tookMs: 0 },
+  schema: 'muse.recipe/1', analyzer: { version: 'test', tookMs: 0 }, origin: 'reference',
   source: { durationSec: 4.4, width: 1080, height: 1920, fps: 30, aspect: '9:16', hasAudio: true },
   sound: null, pacing: { shots: 3, avgShotSec: 1.47, cutsPerMin: 27, energy: { everySec: 0.5, values: [0] } },
   slots: [
@@ -40,7 +40,7 @@ const RECIPE: Recipe = {
     { atSec: 2.65, kind: 'crossfade', durationSec: 0.5, confidence: 0.7, from: 's2', to: 's3' },
     { atSec: 3.733, kind: 'flash', durationSec: 0.067, confidence: 0.8, from: 's3', to: 's3' },
   ],
-  text: [{ id: 'x1', startSec: 3.1, endSec: 4.1, box: { x: 0.125, y: 0.7, w: 0.75, h: 0.07 }, words: null, sizeFrac: 0.042, color: '#FFFFFF', animIn: 'cut', animOut: 'cut', confidence: 0.45 }],
+  text: [{ id: 'x1', startSec: 3.1, endSec: 4.1, box: { x: 0.125, y: 0.7, w: 0.75, h: 0.07 }, words: null, sizeFrac: 0.042, color: '#FFFFFF', fontId: 'sans', animIn: 'cut', animOut: 'cut', confidence: 0.45 }],
   grade: { swatches: ['#101010', '#404040', '#808080', '#C0C0C0', '#F0F0F0'], contrast: 0.5, saturation: 0.1, warmth: 0, look: { id: 'golden_warmth', kind: 'palette', label: 'Golden warmth', distance: 0.2 }, grade: null, confidence: 0.8 },
   contactSheet: null, gaps: [],
 };
@@ -166,6 +166,15 @@ describe.skipIf(!hasFfmpeg)('Recreate · the flow through the API and Claude\'s 
     const m = await tool('match_slots').run(env(), { referenceId: refId, modelId: model.id }) as any;
     expect(m.assignment).toMatchObject({ s1: 't_pan', s3: 't_static' });
     expect(m.slots.find((s: any) => s.slotId === 's2').toGenerate).toBe(true);
+    // A plain summary and tags ride along with the briefs.
+    const sb = await owner.req('PUT', `/v1/recreate/references/${refId}/briefs`, { slots: {}, summary: 'Three beats: a pan, a hair flip, a still.', tags: ['tuff', 'hair'] });
+    expect(sb.status).toBe(200);
+    expect(sb.body.recipe).toMatchObject({ summary: 'Three beats: a pan, a hair flip, a still.', tags: ['tuff', 'hair'] });
+    // The fill state remembers the match.
+    const f = (await owner.req('GET', `/v1/recreate/references/${refId}/fill`)).body;
+    expect(f.slots.map((x: any) => [x.slotId, x.state, x.takeId ?? null])).toEqual([['s1', 'matched', 't_pan'], ['s2', 'to_generate', null], ['s3', 'matched', 't_static']]);
+    expect(f.slots[0].score).toBeGreaterThan(0.6);
+    expect(f.slots[0].reason).toMatch(/long enough/);
   });
 
   it('fill_slot: the price first; confirm asks the owner in the session; their yes starts a Suite job', async () => {
@@ -184,11 +193,20 @@ describe.skipIf(!hasFfmpeg)('Recreate · the flow through the API and Claude\'s 
     expect(job.draft).toMatchObject({ tool: 'shot', recreate: { slotId: 's2' } });
     const ref = (await owner.req('GET', `/v1/recreate/references/${refId}`)).body;
     expect(ref.recipe.slots[1].fill.jobId).toBe(yes.jobId);
+    const ready = (await owner.req('GET', `/v1/recreate/references/${refId}/fill`)).body.slots[1];
+    expect(ready).toMatchObject({ slotId: 's2', state: 'ready', jobId: yes.jobId });
+    expect(ready.takeId).toBeTruthy();
 
     // apply_recipe with the two takes and the finished job: one undoable change, cuts on the reference's times.
     const before = await editSessionsOf(a.ctx).row(ownerUser, sessionId);
     const out = await tool('apply_recipe').run(env(), { referenceId: refId, sessionId, slots: { s1: 't_pan', s2: yes.jobId, s3: 't_static' } }) as any;
     expect(out).toMatchObject({ applied: true, missing: [], waiting: [] });
+    expect(out.match.perSlot.map((x: any) => x.slotId)).toEqual(['s1', 's2', 's3']);
+    expect(out.match.perSlot[1].score).toBe(0.85); // generated for the slot
+    expect(out.match.cuts).toBeGreaterThan(0.9);
+    for (const k of ['overall', 'cuts', 'text', 'ramps', 'grade', 'shots']) { expect(out.match[k]).toBeGreaterThanOrEqual(0); expect(out.match[k]).toBeLessThanOrEqual(1); }
+    expect(out.sources).toMatchObject({ c1: { recipeId: refId, slotId: 's1' }, c2: { slotId: 's2' }, c3: { slotId: 's3' } });
+    expect((await owner.req('GET', `/v1/recreate/references/${refId}/fill`)).body).toMatchObject({ applied: { sessionId, slots: { s1: 't_pan', s3: 't_static' } }, match: out.match });
     const after = await editSessionsOf(a.ctx).row(ownerUser, sessionId);
     expect(after.revision).toBe(before.revision + 1);
     const p = after.project as M.EditProject;
@@ -214,6 +232,11 @@ describe.skipIf(!hasFfmpeg)('Recreate · the flow through the API and Claude\'s 
     const r = await owner.req('POST', `/v1/recreate/references/${refId}/apply`, { sessionId, baseRevision: s.revision, slots: { s1: 't_pan', s3: 't_static' }, device: 'mac' });
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ missing: ['s2'], label: 'Recreated “Tuff edit”' });
+    // Slots without a take are skipped: the second clip came from s3.
+    expect(r.body.sources).toMatchObject({ c1: { slotId: 's1' }, c2: { slotId: 's3' } });
+    expect(r.body.sources.c3).toBeUndefined();
+    expect(r.body.match.perSlot[1]).toEqual({ slotId: 's2', score: 0 });
+    expect(r.body.match.cuts).toBeLessThan(1);
     expect((await owner.req('POST', `/v1/recreate/references/${refId}/apply`, { sessionId, slots: { s1: 'nope' } })).body.error).toMatch(/slots.s1: no video take or job nope/);
     expect((await owner.req('POST', `/v1/recreate/references/${refId}/apply`, { sessionId, slots: { s7: 't_pan' } })).body.error).toMatch(/no slot s7/);
     expect((await owner.req('POST', `/v1/recreate/references/${refId}/apply`, { sessionId, baseRevision: 0, slots: { s1: 't_pan' } })).status).toBe(409); // stale

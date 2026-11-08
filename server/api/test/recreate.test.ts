@@ -8,7 +8,8 @@ import { eq } from 'drizzle-orm';
 import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { recreateReferences, uploads } from '../src/db/schema.js';
-import { analyzeReference, aspectName, moveFor, RECIPE_SCHEMA } from '../src/recreate/analyze.js';
+import { analyzeReference, aspectName, MAX_CURVE_POINTS, moveFor, RECIPE_SCHEMA, thin } from '../src/recreate/analyze.js';
+import { MAX_TEXT_ITEMS, trackText } from '../src/recreate/text.js';
 import { paletteDistance, swatchesOf } from '../src/recreate/frames.js';
 import { recreateOf } from '../src/recreate/references.js';
 import { putObject } from '../src/storage/objects.js';
@@ -29,6 +30,22 @@ describe('Recipe helpers (unit)', () => {
     expect(paletteDistance(['#000000'], ['#FFFFFF'])).toBe(1);
     const red = { t: 0, width: 2, height: 1, rgb: new Uint8Array([255, 0, 0, 250, 5, 5]) };
     expect(swatchesOf([red], 2)).toHaveLength(2);
+  });
+});
+
+describe('Recipe size caps (unit)', () => {
+  it('curves and camera keys are thinned (ends kept); at most 100 text items', () => {
+    const xs = Array.from({ length: 300 }, (_, i) => i);
+    const t = thin(xs, MAX_CURVE_POINTS);
+    expect(t.length).toBeLessThanOrEqual(MAX_CURVE_POINTS);
+    expect(t[0]).toBe(0);
+    expect(t.at(-1)).toBe(299);
+    expect(thin([1, 2, 3], 48)).toEqual([1, 2, 3]);
+    // 150 captions, one after another, each on screen for 0.5 s.
+    const frames = Array.from({ length: 150 * 4 }, (_, f) => ({ t: f / 6, boxes: f % 4 < 3 ? [{ x: 0.1, y: (Math.floor(f / 4) % 2) * 0.4 + 0.1, w: 0.5, h: 0.05, light: true }] : [] }));
+    const items = trackText(frames);
+    expect(items.length).toBe(MAX_TEXT_ITEMS);
+    expect(items[0]).toMatchObject({ id: 'x1', fontId: 'sans', words: null });
   });
 });
 
@@ -81,7 +98,7 @@ describe.skipIf(!hasFfmpeg)('Recreate this edit · the analysis (synthetic refer
     expect(r.sound!.bpm).toBeGreaterThan(0);
     expect(r.pacing).toMatchObject({ shots: 3 });
     expect(r.pacing.energy.values.length).toBeGreaterThan(10);
-    expect(r.gaps.map(g => g.what)).toContain('pose');
+    expect(r.gaps.map(g => g.key)).toEqual(expect.arrayContaining(['pose', 'text:words']));
 
     const meta = await sharp(contactSheetPng!).metadata();
     expect(meta.width).toBe(600); // 3 keyframes, 200 px each
@@ -107,6 +124,9 @@ describe.skipIf(!hasFfmpeg)('Recreate this edit · references API', () => {
   const ready = (c: Client, id: string) => until(async () => { const r = (await c.req('GET', `/v1/recreate/references/${id}`)).body; return r.state === 'ready' || r.state === 'failed' ? r : null; }, 60_000);
 
   it('a video upload becomes a recipe; private to its member (the owner sees all); the contact sheet only through the API', async () => {
+    const seen: Record<string, any[]> = { owner: [], member: [], other: [] };
+    for (const [k, c] of [['owner', owner], ['member', member], ['other', other]] as const)
+      a.ctx.hub.subscribe(studioId, (c as any).id, line => { if (line.startsWith('data: ')) { const e = JSON.parse(line.slice(6)); if (e.type === 'recreate') seen[k]!.push(e); } }, k === 'owner' ? 'owner' : 'member');
     const r = await member.req('POST', '/v1/recreate/references', { uploadId: await uploadOf('u/rx/ref.mp4'), name: 'Tuff edit' });
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ name: 'Tuff edit', state: 'analyzing', keep: false });
@@ -116,6 +136,35 @@ describe.skipIf(!hasFfmpeg)('Recreate this edit · references API', () => {
     expect(done.recipe).toMatchObject({ schema: 'muse.recipe/1', id: r.body.id, referenceId: r.body.id, pacing: { shots: 3 } });
     expect(done.recipe.contactSheet.url).toMatch(new RegExp(`/v1/recreate/references/${r.body.id}/contact-sheet$`));
     expect(done.recipe.contactSheet.times).toHaveLength(3);
+    expect(done.recipe.contactSheet.tiles).toHaveLength(3);
+    expect(done.recipe.origin).toBe('reference');
+    const base = `/v1/recreate/references/${r.body.id}`;
+    expect(done).toMatchObject({ videoUrl: `${base}/video`, posterUrl: `${base}/poster` });
+    expect(done.recipe.slots.map((x: any) => x.thumbUrl)).toEqual(['s1', 's2', 's3'].map(sl => `${base}/slots/${sl}/thumb`));
+    const auth = { authorization: `Bearer ${(member as any).token}` };
+    const thumb = await a.app.inject({ method: 'GET', url: `${base}/slots/s2/thumb`, headers: auth });
+    expect(thumb.statusCode).toBe(200);
+    expect(thumb.headers['content-type']).toBe('image/png');
+    expect(await sharp(thumb.rawPayload).metadata()).toMatchObject({ width: 200, height: done.recipe.contactSheet.tiles[1].h });
+    expect((await a.app.inject({ method: 'GET', url: `${base}/poster`, headers: auth })).statusCode).toBe(200);
+    expect((await member.req('GET', `${base}/slots/s9/thumb`)).status).toBe(404);
+    const video = await a.app.inject({ method: 'GET', url: `${base}/video`, headers: auth });
+    expect(video.statusCode).toBe(200);
+    expect(video.rawPayload.equals(refBytes)).toBe(true);
+    expect((await other.req('GET', `${base}/video`)).status).toBe(404);
+    expect((await member.req('GET', `${base}/fill`)).body).toEqual({ referenceId: r.body.id, slots: ['s1', 's2', 's3'].map(slotId => ({ slotId, state: 'empty' })) });
+    // Live: the member and the owner hear about it (analyzing → ready), another member does not; no recipe in the event.
+    expect(seen.member!.map(e => e.reference.state)).toEqual(expect.arrayContaining(['analyzing', 'ready']));
+    expect(seen.owner!.length).toBe(seen.member!.length);
+    expect(seen.other).toEqual([]);
+    expect(seen.member!.at(-1).reference).toMatchObject({ id: r.body.id, slots: 3 });
+    expect(seen.member!.at(-1).reference.recipe).toBeUndefined();
+    // test/fixtures/recipe-v1.json (for the apps' fakes) has every field the API sends.
+    const fx = JSON.parse(fs.readFileSync(new URL('./fixtures/recipe-v1.json', import.meta.url), 'utf8'));
+    const missing = (live: any, fix: any, at: string): string[] => !live || typeof live !== 'object' || Array.isArray(live) ? [] :
+      Object.keys(live).filter(k => live[k] !== undefined).flatMap(k => (k in fix ? missing(live[k], fix[k], `${at}.${k}`) : [`${at}.${k}`]));
+    expect([...missing(done, fx, ''), ...missing(done.recipe.slots[0], fx.recipe.slots[0], 'slot'), ...missing(done.recipe.transitions[0], fx.recipe.transitions[0], 'transition'),
+      ...(done.recipe.text[0] ? missing(done.recipe.text[0], fx.recipe.text[0], 'text') : [])]).toEqual([]);
 
     const sheet = await member.req('GET', `/v1/recreate/references/${r.body.id}/contact-sheet`);
     expect(sheet.status).toBe(200);

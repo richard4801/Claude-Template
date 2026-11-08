@@ -1,4 +1,4 @@
-// Recreate this edit (workstream 1, migration 0015): a reference video and its recipe. The video is the studio's
+// Recreate this edit (workstream 1, migrations 0015, 0016): a reference video and its recipe. The video is the studio's
 // private upload, used only for analysis; it is deleted after 30 days unless kept (`keep`).
 import { bigint, boolean, doublePrecision, index, jsonb, pgTable, text } from 'drizzle-orm/pg-core';
 
@@ -17,6 +17,8 @@ export const recreateReferences = pgTable('recreate_references', {
   recipe: jsonb('recipe').$type<import('./analyze.js').Recipe>(),
   contactSheetKey: text('contact_sheet_key'),
   keep: boolean('keep').notNull().default(false),
+  /** Matching, filling and assembly state (migration 0016): kept apart from the analysis-only recipe. */
+  fill: jsonb('fill').$type<import('./references.js').FillState>(),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
   deletedAt: bigint('deleted_at', { mode: 'number' }),

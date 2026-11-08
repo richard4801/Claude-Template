@@ -5,9 +5,13 @@ import { spawn } from 'node:child_process';
 
 export type TextBox = { x: number; y: number; w: number; h: number };
 export type TextItem = { id: string; startSec: number; endSec: number; box: TextBox; words: string | null; sizeFrac: number; color: string;
+  /** The nearest editor font family (sans, serif, rounded, condensed, mono, marker). */
+  fontId: 'sans' | 'serif' | 'rounded' | 'condensed' | 'mono' | 'marker';
   animIn: 'cut' | 'fade' | null; animOut: 'cut' | 'fade' | null; confidence: number };
 
 const W = 192, BANDS = 40, FPS = 6;
+/** The recipe's size cap (≈ 256 KB in all): at most this many text items. */
+export const MAX_TEXT_ITEMS = 100;
 
 type FrameBoxes = { t: number; boxes: (TextBox & { light: boolean })[] };
 
@@ -64,11 +68,11 @@ export function trackText(frames: FrameBoxes[], fps = FPS): TextItem[] {
   }
   done.push(...open);
   const end = frames.at(-1)?.t ?? 0;
-  return done.filter(o => o.last - o.start >= 0.3 && o.seen >= 3).sort((a, b) => a.start - b.start).map((o, i) => ({
+  return done.filter(o => o.last - o.start >= 0.3 && o.seen >= 3).sort((a, b) => a.start - b.start).slice(0, MAX_TEXT_ITEMS).map((o, i): TextItem => ({
     id: `x${i + 1}`, startSec: r3(o.start), endSec: r3(Math.min(end + 1 / fps, o.last + 1 / fps)),
     box: { x: r3(o.box.x), y: r3(o.box.y), w: r3(o.box.w), h: r3(o.box.h) }, words: null,
     // A caption's cap height is about 60% of its band box.
-    sizeFrac: r3(o.box.h * 0.6), color: o.box.light ? '#FFFFFF' : '#000000', animIn: 'cut', animOut: 'cut', confidence: 0.45,
+    sizeFrac: r3(o.box.h * 0.6), color: o.box.light ? '#FFFFFF' : '#000000', fontId: 'sans' as const, animIn: 'cut' as const, animOut: 'cut' as const, confidence: 0.45,
   }));
 }
 
