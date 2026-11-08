@@ -41,6 +41,7 @@ import studio.muse.app.ui.screens.suite.composer.ModelPicker
 import studio.muse.app.ui.screens.suite.composer.PromptTokens
 import studio.muse.app.ui.screens.suite.composer.SheetKind
 import studio.muse.app.ui.screens.suite.composer.modelLabel
+import studio.muse.app.ui.screens.suite.composer.modelPill
 import studio.muse.app.ui.screens.suite.composer.pinEngine
 
 /** WS7: the owner's model picker logic (the Mac's "Model" pill on Android). */
@@ -68,7 +69,8 @@ class ModelPickerLogicTest {
         assertEquals("draft", d.quality)
         assertEquals(8, d.duration)
         assertEquals(4..8, d.lengthRange(owner))
-        assertTrue(d.modelLabel(owner).startsWith("Veo 3.1 Lite · 720"))
+        assertTrue(d.modelLabel(owner).startsWith("Veo 3.1 Lite, 720"))
+        assertEquals("4, 6 or 8 s, 9:16 and 16:9", veo.limits)
         // Exact lengths: 7 s snaps to 6 or 8.
         assertTrue(ComposerDraft(quality = "draft", duration = 7).pinEngine(veo).duration in listOf(6, 8))
         // Fit keeps the pin on its own quality, and drops it on another.
@@ -85,7 +87,8 @@ class ModelPickerLogicTest {
         assertEquals("c_demo2", d.fit(owner).engineModel)
         assertTrue(d.inputsFor(owner).start)
         assertFalse(d.inputsFor(owner).end)
-        assertEquals("$0.07/s", mine.price)
+        assertEquals("$0.070/s", mine.price)
+        assertEquals("5 or 10 s, 3 shapes", mine.limits)
     }
 
     @Test fun autoGoesBack() {
@@ -98,7 +101,7 @@ class ModelPickerLogicTest {
     @Test fun imageModelsForPhoto() {
         val img = ModelPicker.engines(owner, "image")
         assertEquals(listOf("google/nano-banana", "c_demo1"), img.map { it.id })
-        assertEquals("$0.039 a photo", img.first().price)
+        assertEquals("$0.04 a photo", img.first().price)
         val req = studio.muse.app.ui.screens.suite.composer.PhotoComposer.request(ComposerDraft(modelId = SampleData.DEMO, tool = studio.muse.app.ui.screens.suite.composer.ComposerTool.PHOTO),
             studio.muse.app.ui.screens.suite.composer.PhotoDraft(imageModel = "c_demo1"))!!
         assertEquals("c_demo1", req.imageModel)
@@ -121,9 +124,12 @@ class ModelPickerLogicTest {
     }
 
     @Test fun rates() {
-        assertEquals("$0.065", ModelPicker.rate(0.065))
-        assertEquals("$0.13", ModelPicker.rate(0.13))
-        assertEquals("$1.20", ModelPicker.rate(1.2))
+        assertEquals("$0.050/s", ModelPicker.perSec(0.05))
+        assertEquals("$0.157/s", ModelPicker.perSec(0.157))
+        assertEquals("$0.40", ModelPicker.money(0.4))
+        val kling = ModelPicker.groups(owner, "hd").ladder.first { it.id == "kling-v4" }
+        assertEquals(listOf("720p  $0.157/s", "1080p  $0.235/s"), kling.chips.map { it.second })
+        assertEquals("Model", ComposerDraft().modelPill(owner))
     }
 
     @Test fun pinnedEnginePricesTheDemoEstimate() = runBlocking {

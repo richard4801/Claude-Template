@@ -485,6 +485,10 @@ data class SuiteLadderStep(val model: String, val resolution: String)
 @Serializable
 data class SuiteResolution(val id: String, val label: String = "", val shortSide: Int = 0, val perSec: Double = 0.0)
 
+/** A registry model's lengths: min–max, or only the [allowed] ones. */
+@Serializable
+data class SuiteDurationRange(val min: Int = 0, val max: Int = 0, val allowed: List<Int>? = null)
+
 /** owner: one model of the registry, with the studio's switches. */
 @Serializable
 data class SuiteModelView(
@@ -502,6 +506,9 @@ data class SuiteModelView(
     val needsAck: Boolean = false,
     val configured: Boolean = true,
     val priceScale: Double = 1.0,
+    /** WS7: the model's lengths and shapes (the registry's), for the owner's model picker. */
+    val duration: SuiteDurationRange? = null,
+    val aspectRatios: List<String> = emptyList(),
 ) {
     fun perSec(resolution: String?) = (resolutions.firstOrNull { it.id == resolution } ?: resolutions.firstOrNull())?.perSec?.times(priceScale)
 }

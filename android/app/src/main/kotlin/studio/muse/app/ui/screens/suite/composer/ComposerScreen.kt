@@ -1063,7 +1063,7 @@ private fun WideBar(ui: ComposerUi) {
             // Owner only (WS7, as the Mac's "Model" pill): any engine, this quality's ladder first, then the others, then "Your providers".
             val groups = ModelPicker.groups(ui.catalog, d.quality)
             if (ui.owner && !groups.isEmpty && d.tool in ComposerDraft.PROMPT_TOOLS) {
-                MenuPill("cube", d.modelLabel(ui.catalog), "Model (owner)", modelMenuItems(d, groups)) { i -> ui.update { it.pinEngine(groups.all.getOrNull(i - 1)).fit(ui.catalog) } }
+                MenuPill("cube", d.modelPill(ui.catalog), "Model, only you see models", modelMenuItems(d, groups)) { i -> ui.update { it.pinEngine(groups.all.getOrNull(i - 1)).fit(ui.catalog) } }
             }
             // Shape, length and takes are in the Settings row (as on the phone); the bar keeps sound and speaking.
             if (d.tool != ComposerTool.EXTEND) {

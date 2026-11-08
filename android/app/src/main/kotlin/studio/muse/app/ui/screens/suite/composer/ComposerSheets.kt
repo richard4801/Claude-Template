@@ -341,7 +341,7 @@ private fun ColumnScope.SettingsBody(x: SheetContext) {
             T("Model pinned: ${d.modelLabel(x.catalog)}. The price follows the model${x.estimate?.let { ": ${ComposerPrice.short(it)}" } ?: ""}.",
                 m.scale.caption, m.t.ink, Modifier.weight(1f), maxLines = 3)
             Box(Modifier.heightIn(min = 48.dp).press { x.update { it.pinEngine(null).fit(x.catalog) } }.semantics { role = Role.Button }.padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
-                T("Unpin", m.scale.label, m.link, maxLines = 1)
+                T("Back to Auto", m.scale.label, m.link, maxLines = 1)
             }
         }
         tiers.forEach { t ->
@@ -362,10 +362,13 @@ private fun ColumnScope.SettingsBody(x: SheetContext) {
         if (x.owner && !groups.isEmpty && d.tool in ComposerDraft.PROMPT_TOOLS) {
             var open by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(d.engineModel != null) }
             Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(12.dp)).background(m.t.surface).press { open = !open }
-                .semantics(mergeDescendants = true) { role = Role.Button; contentDescription = "Model, owner only: ${d.modelLabel(x.catalog)}" }.padding(horizontal = 14.dp),
+                .semantics(mergeDescendants = true) { role = Role.Button; contentDescription = "Model: ${d.modelLabel(x.catalog)}. Only you see models" }.padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                T("Model · ${d.modelLabel(x.catalog)}", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, Modifier.weight(1f), maxLines = 1)
-                T("Owner", m.scale.micro, m.t.muted, maxLines = 1)
+                Column(Modifier.weight(1f)) {
+                    T("Model", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
+                    T(d.modelLabel(x.catalog), m.scale.caption, m.t.muted, maxLines = 1)
+                }
+                T("Only you see models", m.scale.micro, m.t.muted, maxLines = 1)
                 SIc(if (open) "chevd" else "chev", 16.dp, m.t.muted)
             }
             if (open) {

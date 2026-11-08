@@ -37,7 +37,7 @@ import studio.muse.app.ui.theme.muse
 import studio.muse.app.ui.theme.scale
 
 // The owner's model picker (owner request 2026-11-08, matching the Mac's "Model" pill, WS6). Owner only: members never see
-// a model or provider name and keep the quality tiers. Order: this quality's ladder, then every other engine, then the
+// a model or provider name and keep the quality tiers. Order: this quality's ladder, then every other model, then the
 // studio's own models ("Your providers", WS5). Each row says its lengths, shapes and price per second at its resolution;
 // picking one pins it for this shot and clamps Length and Shape to what it takes.
 
@@ -71,23 +71,33 @@ data class PickerEngine(
     /** $/s at [res] (the resolution's own price when the server lists it). */
     fun perSecAt(res: String?): Double? = resolutions.firstOrNull { it.id == res }?.perSec ?: perSec
 
-    /** "2–10 s · 9:16, 16:9", or "5 or 10 s" for exact lengths. */
+    /** Shared copy with the Mac (WS6): "4, 6 or 8 s, 9:16 and 16:9", "3–30 s, 4 shapes". */
     val limits: String get() = listOfNotNull(
         when {
-            !allowedSeconds.isNullOrEmpty() -> allowedSeconds.joinToString(", ").let { l -> l.substringBeforeLast(", ").let { if (allowedSeconds.size > 1) "$it or ${allowedSeconds.last()} s" else "$l s" } }
+            !allowedSeconds.isNullOrEmpty() -> if (allowedSeconds.size > 1) allowedSeconds.dropLast(1).joinToString(", ") + " or ${allowedSeconds.last()} s" else "${allowedSeconds.single()} s"
             minSeconds != null && maxSeconds != null && minSeconds != maxSeconds -> "$minSeconds–$maxSeconds s"
             maxSeconds != null -> "$maxSeconds s"
             else -> null
         },
-        aspectRatios.takeIf { it.isNotEmpty() }?.joinToString(", "),
-    ).joinToString(" · ")
+        when (aspectRatios.size) { 0 -> null; 1 -> aspectRatios[0]; 2 -> "${aspectRatios[0]} and ${aspectRatios[1]}"; else -> "${aspectRatios.size} shapes" },
+    ).joinToString(", ")
 
-    /** "$0.065/s · 720p", "$0.04 a photo", or the resolution alone when there's no price. */
-    fun price(res: String? = resolution): String = listOfNotNull(
-        perSecAt(res)?.takeIf { kind == "video" && it > 0 }?.let { "${ModelPicker.rate(it)}/s" }
-            ?: perRun?.takeIf { it > 0 }?.let { "${ModelPicker.rate(it)} ${if (kind == "image") "a photo" else "a run"}" },
-        res?.let { r -> resolutions.firstOrNull { it.id == r }?.label?.substringBefore(' ')?.ifBlank { null } ?: r },
-    ).joinToString(" · ")
+    /** A resolution's short label ("720p"). */
+    fun resLabel(r: String): String = resolutions.firstOrNull { it.id == r }?.label?.substringBefore(' ')?.ifBlank { null } ?: r
+
+    /** The row's price chips, shared with the Mac: one per resolution ("720p  $0.050/s"), or one "$0.05 a photo" / "$0.40 a run". */
+    val chips: List<Pair<String?, String>> get() {
+        val res = resolutions.filter { (it.perSec) > 0 }
+        if (kind == "video" && res.isNotEmpty()) return res.map { it.id to "${resLabel(it.id)}  ${ModelPicker.perSec(it.perSec)}" }
+        if (kind == "video" && (perSec ?: 0.0) > 0) return listOf(resolution to listOfNotNull(resolution?.let(::resLabel), ModelPicker.perSec(perSec!!)).joinToString("  "))
+        return perRun?.takeIf { it > 0 }?.let { listOf(null to "${ModelPicker.money(it)} ${if (kind == "image") "a photo" else "a run"}") } ?: emptyList()
+    }
+
+    /** One price, for menus: "720p  $0.157/s", "$0.04 a photo". */
+    fun price(res: String? = resolution): String =
+        perSecAt(res)?.takeIf { kind == "video" && it > 0 }?.let { listOfNotNull(res?.let(::resLabel), ModelPicker.perSec(it)).joinToString("  ") }
+            ?: perRun?.takeIf { it > 0 }?.let { "${ModelPicker.money(it)} ${if (kind == "image") "a photo" else "a run"}" }
+            ?: res?.let(::resLabel).orEmpty()
 
     val price: String get() = price(resolution)
 }
@@ -99,11 +109,11 @@ data class PickerGroups(val ladder: List<PickerEngine>, val others: List<PickerE
 }
 
 object ModelPicker {
-    /** Dollars with up to 3 decimals, trailing zeros trimmed past the cents: $0.065, $0.13, $1.20. */
-    fun rate(v: Double): String {
-        val s = String.format(java.util.Locale.US, "%.3f", v)
-        return "$" + if (s.endsWith("0")) s.dropLast(1) else s
-    }
+    /** Per second, always 3 decimals (shared with the Mac): "$0.050/s", "$0.157/s". */
+    fun perSec(v: Double): String = "$" + String.format(java.util.Locale.US, "%.3f", v) + "/s"
+
+    /** A photo or a run, in cents: "$0.05", "$0.40". */
+    fun money(v: Double): String = "$" + String.format(java.util.Locale.US, "%.2f", v)
 
     /**
      * Every [kind] engine in the owner's catalog: `engines[]` (WS5) when the server sends it; else, for video, each tier's
@@ -171,15 +181,18 @@ fun ComposerDraft.pinEngine(e: PickerEngine?, res: String? = null): ComposerDraf
     return d
 }
 
-/** The pill and row value: "Auto", or the pinned engine's name with its resolution. */
+/** The pinned model as the Mac writes it: "Kling 4.0, 1080p" (a comma, no middle dot); "Auto" on Auto. */
 fun ComposerDraft.modelLabel(cat: SuiteCatalog?): String =
-    ModelPicker.find(cat, engineModel)?.let { e -> e.name + ((resolution ?: e.resolution)?.let { r -> " · " + (e.resolutions.firstOrNull { it.id == r }?.label?.substringBefore(' ')?.ifBlank { null } ?: r) } ?: "") }
+    ModelPicker.find(cat, engineModel)?.let { e -> e.name + ((resolution ?: e.resolutionOn(quality))?.let { r -> ", " + e.resLabel(r) } ?: "") }
         ?: if (engineModel == null) "Auto" else engineModel
 
-/** The tablet menu's items: Auto, then every engine as "Name · 720p · $0.065/s". Index 0 is Auto. */
+/** The pill: "Model" on Auto, else the pinned model ("Kling 4.0, 1080p"). */
+fun ComposerDraft.modelPill(cat: SuiteCatalog?): String = if (engineModel == null) "Model" else modelLabel(cat)
+
+/** The tablet menu's items: Auto, then every model as "Kling 4.0, 720p  $0.157/s". Index 0 is Auto. */
 fun modelMenuItems(d: ComposerDraft, groups: PickerGroups): List<Pair<String, Boolean>> =
     listOf("Auto" to (d.engineModel == null)) + groups.all.map { e ->
-        (listOf(e.name, e.price(e.resolutionOn(d.quality))).filter { it.isNotBlank() }.joinToString(" · ") + if (e.custom) " (yours)" else "") to (e.id == d.engineModel)
+        (listOf(e.name, e.price(e.resolutionOn(d.quality))).filter { it.isNotBlank() }.joinToString(", ") + if (e.custom) " (yours)" else "") to (e.id == d.engineModel)
     }
 
 /**
@@ -190,47 +203,49 @@ fun modelMenuItems(d: ComposerDraft, groups: PickerGroups): List<Pair<String, Bo
 fun ModelPickerList(d: ComposerDraft, groups: PickerGroups, onPick: (PickerEngine?, String?) -> Unit) {
     val m = muse
     Column(Modifier.fillMaxWidth().testTag("model_picker"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        ModelRow("Auto", "MUSE picks the engine for this quality", "", d.engineModel == null) { onPick(null, null) }
+        ModelRow("Auto", "MUSE picks the model for this quality", emptyList(), null, d.engineModel == null, {}) { onPick(null, null) }
         fun section(title: String, list: List<PickerEngine>) = title to list
         listOf(
-            section("${SuiteRules.tierLabel(d.quality)} ladder", groups.ladder),
+            section("On ${SuiteRules.tierLabel(d.quality)}", groups.ladder),
             section("Other models", groups.others),
             section("Your providers", groups.custom),
         ).filter { it.second.isNotEmpty() }.forEach { (title, list) ->
             T(title, m.scale.caption, m.t.muted, Modifier.padding(top = 10.dp, bottom = 2.dp), maxLines = 1)
             list.forEach { e ->
                 val on = e.id == d.engineModel
-                val detail = listOfNotNull(e.tier?.takeIf { d.quality !in e.tiers }?.let { SuiteRules.tierLabel(it) }, e.limits.ifBlank { null }).joinToString(" · ")
-                ModelRow(e.name, detail, e.price(if (on) d.resolution ?: e.resolutionOn(d.quality) else e.resolutionOn(d.quality)), on) { onPick(e, null) }
-                // The pinned engine's resolutions, each with its own price per second.
-                if (on && e.resolutions.size > 1) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 14.dp, bottom = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    e.resolutions.forEach { r ->
-                        val label = r.label.substringBefore(' ').ifBlank { r.id } + (e.perSecAt(r.id)?.let { " · ${ModelPicker.rate(it)}/s" } ?: "")
-                        DarkChip(label, r.id == (d.resolution ?: e.resolutionOn(d.quality))) { onPick(e, r.id) }
-                    }
-                }
+                val detail = listOfNotNull(e.tier?.takeIf { d.quality !in e.tiers }?.let { SuiteRules.tierLabel(it) }, e.limits.ifBlank { null }).joinToString(", ")
+                // The chip lit is the resolution it would run at: the pinned one, else this quality's.
+                val res = if (on) d.resolution ?: e.resolutionOn(d.quality) else e.resolutionOn(d.quality)
+                ModelRow(e.name, detail, e.chips, res, on, { r -> onPick(e, r) }) { onPick(e, null) }
             }
         }
     }
 }
 
+/**
+ * One model: its name, the limits line, and its price chips (one per resolution; tapping a chip pins that resolution).
+ * Tapping the row pins it at this quality's resolution.
+ */
 @Composable
-private fun ModelRow(name: String, detail: String, price: String, on: Boolean, onClick: () -> Unit) {
+private fun ModelRow(name: String, detail: String, chips: List<Pair<String?, String>>, lit: String?, on: Boolean, onChip: (String?) -> Unit, onClick: () -> Unit) {
     val m = muse
     val shape = RoundedCornerShape(12.dp)
-    Row(
+    Column(
         Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(shape).background(if (on) m.t.surface2 else m.t.surface).press(onClick = onClick)
-            .semantics(mergeDescendants = true) { selected = on; role = Role.RadioButton; contentDescription = listOf(name, detail, price).filter { it.isNotBlank() }.joinToString(", ") }
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(Modifier.weight(1f)) {
-            T(name, m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
-            if (detail.isNotBlank()) T(detail, m.scale.caption, m.t.muted, maxLines = 1)
+        Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { selected = on; role = Role.RadioButton; contentDescription = listOf(name, detail).filter { it.isNotBlank() }.joinToString(", ") },
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.weight(1f)) {
+                T(name, m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
+                if (detail.isNotBlank()) T(detail, m.scale.caption, m.t.muted, maxLines = 1)
+            }
+            Box(Modifier.width(20.dp), contentAlignment = Alignment.Center) { if (on) SIc("check", 18.dp, m.t.accent) }
         }
-        if (price.isNotBlank()) T(price, m.scale.label.copy(fontFeatureSettings = "tnum"), m.t.ink, maxLines = 1)
-        Box(Modifier.width(20.dp), contentAlignment = Alignment.Center) { if (on) SIc("check", 18.dp, m.t.accent) }
+        if (chips.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            chips.forEach { (res, label) -> DarkChip(label, on && (chips.size == 1 || res == lit)) { onChip(res) } }
+        }
     }
 }
 
@@ -245,8 +260,10 @@ fun PhotoModelPill(ui: ComposerUi) {
     val list = ModelPicker.engines(ui.catalog, "image")
     if (list.isEmpty()) return
     val cur = list.firstOrNull { it.id == p.draft.imageModel }
-    val items = listOf("Auto" to (p.draft.imageModel == null)) + list.map { e ->
-        (listOf(e.name, e.price).filter { it.isNotBlank() }.joinToString(" · ") + if (e.custom) " (yours)" else "") to (e.id == p.draft.imageModel)
+    // Shared copy with the Mac: Auto is "the studio's photo model"; then "Photo models" and "Your providers" (custom marked).
+    val ordered = list.filterNot { it.custom } + list.filter { it.custom }
+    val items = listOf("Auto, the studio's photo model" to (p.draft.imageModel == null)) + ordered.map { e ->
+        (listOf(e.name, e.price).filter { it.isNotBlank() }.joinToString(", ") + if (e.custom) " (yours)" else "") to (e.id == p.draft.imageModel)
     }
-    MenuPill("cube", cur?.name ?: "Auto", "Model (owner)", items) { i -> p.setImageModel(list.getOrNull(i - 1)?.id) }
+    MenuPill("cube", cur?.name ?: "Model", "Model, only you see models", items) { i -> p.setImageModel(ordered.getOrNull(i - 1)?.id) }
 }

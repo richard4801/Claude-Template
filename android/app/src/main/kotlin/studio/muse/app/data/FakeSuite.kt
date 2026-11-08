@@ -46,10 +46,8 @@ class FakeSuite {
         val video = settings.models.filter { m -> m.enabled && !m.blocked && ladders.values.any { l -> l.any { it.model == m.id } } }.map { m ->
             val tiers = c.tiers.map { it.id }.filter { t -> ladders[t].orEmpty().any { it.model == m.id } }
             val res = tiers.firstNotNullOfOrNull { t -> ladders[t]?.firstOrNull { it.model == m.id }?.resolution } ?: m.resolutions.lastOrNull()?.id
-            val lim = DEMO_LIMITS[m.id]
             SuiteCatalogEngine(m.id, m.name, "video", false, tiers.firstOrNull(), tiers, res, m.resolutions.map { it.copy(perSec = round4(it.perSec * m.priceScale)) },
-                m.perSec(res)?.let(::round4), null, lim?.first, lim?.last, if (m.id == "veo-3.1-lite") listOf(4, 6, 8) else null,
-                if (m.id.startsWith("veo")) listOf("9:16", "16:9") else listOf("9:16", "16:9", "1:1"),
+                m.perSec(res)?.let(::round4), null, m.duration?.min, m.duration?.max, m.duration?.allowed, m.aspectRatios,
                 ladders.values.flatten().firstOrNull { it.model == m.id }?.inputs)
         }
         val custom = DEMO_CUSTOM.let { k -> SuiteCatalogEngine(k.id, k.name, "video", true, null, emptyList(), null, emptyList(), k.price?.usd, null, k.minSeconds, k.maxSeconds, listOf(5, 10), k.aspectRatios, k.inputs) }
@@ -258,11 +256,6 @@ class FakeSuite {
             e.estimate, createdAt = createdAt, prompt = r.prompt, seed = (1000..99000).random().toLong(), serverEngineLabel = e.label)
     }
 
-    /** Demo lengths per engine (seconds), as the registry's duration ranges (WS7). */
-    private val DEMO_LIMITS = mapOf(
-            "h3" to 1..15, "h3-lite" to 1..15, "h3-highspeed" to 1..10, "veo-3.1-lite" to 4..8, "kling-v4" to 3..15, "kling-v3-omni" to 3..15,
-            "seedance-2.0" to 4..15, "seedance-2.5" to 4..15, "wan-2.7" to 2..15, "ltx-2.3" to 2..20,
-        )
     private val DEMO_CUSTOM = SuiteCustomEngine("c_demo2", "Kling turbo", "video", SuiteInputs(start = true), 5, 10, listOf("9:16", "16:9", "1:1"), MemberPrice("per_second", 0.07))
 
     companion object {
