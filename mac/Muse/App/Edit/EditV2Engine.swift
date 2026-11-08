@@ -95,6 +95,11 @@ enum EditV2Engine {
 
     // MARK: Composition
 
+    /// The alpha matte of a segment's clip, if it has one.
+    static func matteOf(_ project: EditV2.Project, _ seg: EditV2.VideoSegment) -> EditV2.AlphaMatte? {
+        project.tracks.first { $0.id == seg.trackId }?.item(seg.itemId)?.videoClip?.alphaMatte
+    }
+
     /// The composition, video composition (custom compositor) and audio mix for a project. `burnCaptions` false leaves the
     /// captions out of the picture (they go out as an .srt).
     static func build(_ project: EditV2.Project, sources: Sources, burnCaptions: Bool = true) throws -> Built {
@@ -148,6 +153,23 @@ enum EditV2Engine {
             try placePieces(src, on: t, pieces: seg.pieces, source: seg.sourceStart, seg.sourceEnd, at: seg.timelineStart, seg.timelineEnd)
             trackIds[seg.lane] = t.trackID
         }
+        // Remove background (2026-11-08): a clip's alpha matte plays on a track of its own per lane, with the clip's own
+        // source times, so the compositor gets the matte frame that belongs to each picture frame.
+        var matteLanes: [Int: AVMutableCompositionTrack] = [:]
+        var matteIds: [Int: CMPersistentTrackID] = [:]
+        var matted = Set<String>()   // "<lane>/<itemId>" of the segments that have their matte
+        for seg in plan.video {
+            guard let m = matteOf(project, seg), let mm = sources.media[m.asset], let src = mm.videoTrack, sources.media[seg.assetId]?.videoTrack != nil else { continue }
+            // A matte a little shorter than its source (encoder rounding) plays to its end; never past it.
+            let end = mm.info.durationSec > 0 ? mm.info.durationSec - 0.001 : .infinity
+            let pieces = seg.pieces.compactMap { pc -> EditV2.Piece? in pc.inSec >= end ? nil : EditV2.Piece(inSec: pc.inSec, outSec: min(pc.outSec, end), speed: pc.speed) }
+            guard seg.sourceStart < end else { continue }
+            let t = try lane(seg.lane, .video, &matteLanes)
+            try placePieces(src, on: t, pieces: pieces,
+                            source: seg.sourceStart, min(seg.sourceEnd, end), at: seg.timelineStart, seg.timelineEnd)
+            matteIds[seg.lane] = t.trackID
+            matted.insert("\(seg.lane)/\(seg.itemId)")
+        }
 
         var params: [Int: AVMutableAudioMixInputParameters] = [:]
         var voiceSpans: [Int: [EditV2VoiceTap.Span]] = [:]
@@ -180,7 +202,8 @@ enum EditV2Engine {
             mix = m
         }
 
-        let scene = EditV2Scene(project: project, plan: plan, laneTracks: trackIds, sources: sources, burnCaptions: burnCaptions)
+        let scene = EditV2Scene(project: project, plan: plan, laneTracks: trackIds, matteTracks: matteIds, matted: matted, sources: sources,
+                                burnCaptions: burnCaptions)
         let vc = AVMutableVideoComposition()
         vc.customVideoCompositorClass = EditV2Compositor.self
         // A zero or odd render size makes AVFoundation refuse (or raise on) the video composition.
@@ -194,7 +217,8 @@ enum EditV2Engine {
             let start = time(a)
             let stop = i == cuts.count - 2 ? end : time(b)
             guard stop > start else { continue }
-            let ids = Set(plan.videoSegments(from: a, to: b).compactMap { trackIds[$0.lane] })
+            let segs = plan.videoSegments(from: a, to: b)
+            let ids = Set(segs.compactMap { trackIds[$0.lane] } + segs.filter { matted.contains("\($0.lane)/\($0.itemId)") }.compactMap { matteIds[$0.lane] })
             instructions.append(EditV2Instruction(timeRange: CMTimeRange(start: start, end: stop), trackIDs: ids.sorted(), scene: scene))
         }
         // Instructions must cover the timeline from 0 without gaps or overlaps, each with a positive duration (AVFoundation

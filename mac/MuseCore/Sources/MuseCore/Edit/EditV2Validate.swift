@@ -166,6 +166,9 @@ private struct Validator {
                     if let aa = c.audioAsset {
                         if let a = assets[aa], a.kind == .video || a.kind == .audio {} else { throw bad("\(g).audioAsset", "must be an audio or video asset") }
                     }
+                    if let m = c.alphaMatte {
+                        if let a = assets[m.asset], a.kind == .video {} else { throw bad("\(g).alphaMatte.asset", "must be a video asset") }
+                    }
                     if let ck = c.chroma {
                         try color("\(g).chroma.color", ck.color, optional: false)
                         try num("\(g).chroma.similarity", ck.similarity, 0, 1)

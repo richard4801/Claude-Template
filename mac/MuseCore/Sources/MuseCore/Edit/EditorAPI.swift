@@ -24,6 +24,17 @@ public struct EditorSource: Codable, Hashable, Sendable {
     }
 }
 
+/// Tap to keep (background removal of one subject): a point on the frame, 0–1 from the top left, at `t` seconds of the source;
+/// `keep` false = leave this out. 1–10 per job, at least one kept (plans/api.md "KeepPoint").
+public struct KeepPoint: Codable, Hashable, Sendable {
+    public var x: Double
+    public var y: Double
+    public var t: Double?
+    public var keep: Bool?
+    public init(x: Double, y: Double, t: Double? = nil, keep: Bool? = nil) { self.x = x; self.y = y; self.t = t; self.keep = keep }
+    public var keeps: Bool { keep != false }
+}
+
 public struct EditorJobOptions: Codable, Hashable, Sendable {
     public var language: String?
     public var minSilenceSec: Double?
@@ -35,8 +46,12 @@ public struct EditorJobOptions: Codable, Hashable, Sendable {
     public var silenceOnly: Bool?
     public var noiseDb: Double?
     public var analyzeOnly: Bool?
+    /// matte: tap to keep.
+    public var points: [KeepPoint]?
     public init(language: String? = nil, minSilenceSec: Double? = nil, keepPadSec: Double? = nil, fillers: Bool? = nil, repeats: Bool? = nil,
-                extraFillers: [String]? = nil, fromJobId: String? = nil, silenceOnly: Bool? = nil, noiseDb: Double? = nil, analyzeOnly: Bool? = nil) {
+                extraFillers: [String]? = nil, fromJobId: String? = nil, silenceOnly: Bool? = nil, noiseDb: Double? = nil, analyzeOnly: Bool? = nil,
+                points: [KeepPoint]? = nil) {
+        self.points = points
         self.language = language; self.minSilenceSec = minSilenceSec; self.keepPadSec = keepPadSec; self.fillers = fillers; self.repeats = repeats
         self.extraFillers = extraFillers; self.fromJobId = fromJobId; self.silenceOnly = silenceOnly; self.noiseDb = noiseDb; self.analyzeOnly = analyzeOnly
     }
@@ -99,7 +114,13 @@ public struct EditorJobResult: Codable, Hashable, Sendable {
     public var savedSec: Double?
     // matte / denoise
     public var asset: EditorResultAsset?
+    /// Older matte results: the person on green, keyed out with `chroma`.
     public var chroma: EditV2.Chroma?
+    /// matte (2026-11-08): `asset` is an alpha matte (grey, white = keep) for `alphaMatte` on the original clip.
+    public var alpha: Bool?
+    /// "person" | "tracked" (tap to keep)
+    public var mode: String?
+    public var points: [KeepPoint]?
     public var suggestion: DenoiseSuggestion?
     // beats
     public var bpm: Double?
