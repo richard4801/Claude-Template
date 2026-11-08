@@ -29,8 +29,11 @@ fun SuiteStore.applyAssist(a: SuiteAssist) {
     val cur = assist.value ?: return
     if (a.id != cur.id) return
     if (a.revision > cur.revision) {
-        composer.value = ComposerDrafts.restore(a.draft, composer.value)
+        val before = composer.value
+        composer.value = ComposerDrafts.restore(a.draft, before)
         assistSynced = ComposerDrafts.draft(composer.value).json.toString()
+        // "Claude set Camera and Light", with Undo (the Rigs row's Undo; undoing goes back to Claude as the owner's edit).
+        SuiteClaudeWords.claudeSet(SuiteClaudeWords.changed(before, composer.value))?.let { rigUndo.value = it to before }
     }
     assist.update { it?.copy(revision = maxOf(it.revision, a.revision), pending = a.waiting) }
 }
@@ -63,10 +66,57 @@ suspend fun SuiteStore.answerClaude(approve: Boolean) {
         r.jobId?.let { id -> shotJobs.update { it + id }; runCatching { app.repo.refresh() } }
         val msg = when (r.status) { "failed" -> r.error ?: "That shot didn't start · you weren't charged"; else -> null }
         assist.update { it?.copy(answering = false, pending = null, message = msg) }
+        if (!approve) app.repo.toast(SuiteClaudeWords.NOT_NOW)
     } catch (e: ApiException) {
         val msg = if (e.code == "price_changed") "${e.message ?: "The price changed"} · ask Claude again or press Generate yourself" else e.message ?: "Couldn't answer Claude"
         assist.update { it?.copy(answering = false, pending = if (e.code == "price_changed") null else it.pending, message = msg) }
     }
+}
+
+/** The Suite's Claude words, as on the Mac (WS2's SuiteAssistClaude, SuiteAssistDraft, SuiteClaudePanel). */
+object SuiteClaudeWords {
+    const val SUBTITLE = "Fills in this composer"
+    const val NOT_NOW = "Told Claude not now"
+    fun toggle(open: Boolean) = if (open) "Hide Claude" else "Show Claude"
+
+    /** The chips: what each sends to Claude. */
+    val suggestions = listOf(
+        "Fill this in from my idea" to "Fill in the composer from my idea in the prompt: the character, the prompt and every Setup row, using only options the composer offers (suite_options, then suite_set_draft). Then tell me in a few lines what you set.",
+        "Make it more cinematic" to "Make this shot more cinematic: change the camera, light, look and style rows with suite_set_draft. Keep my prompt and character. Tell me briefly what you changed.",
+        "Explain the settings" to "Explain the settings in the composer now, row by row, in plain words. Don't change anything.",
+    )
+
+    /** "Claude set Camera", "Claude set Camera and Light", "Claude set Camera, Light and Length"; null when nothing changed. */
+    fun claudeSet(changed: List<String>): String? {
+        if (changed.isEmpty()) return null
+        val list = if (changed.size == 1) changed[0] else changed.dropLast(1).joinToString(", ") + " and " + changed.last()
+        return "Claude set $list"
+    }
+
+    /** The composer's rows that differ, by their names in the composer. */
+    fun changed(a: studio.muse.app.ui.screens.suite.composer.ComposerDraft, b: studio.muse.app.ui.screens.suite.composer.ComposerDraft): List<String> = buildList {
+        val x = a.settings; val y = b.settings
+        if (a.tokens.character?.id != b.tokens.character?.id) add("Character")
+        if (a.tokens != b.tokens) add("Prompt")
+        if (listOf(x.body, x.lens, x.focalMm, x.aperture, x.height, x.shotSize) != listOf(y.body, y.lens, y.focalMm, y.aperture, y.height, y.shotSize)) add("Camera")
+        if (x.lighting != y.lighting) add("Light")
+        if (listOf(x.palette, x.stock, x.gradeLook) != listOf(y.palette, y.stock, y.gradeLook)) add("Look")
+        if (listOf(x.genre, x.era, x.tempo, x.format) != listOf(y.genre, y.era, y.tempo, y.format)) add("Style")
+        if (a.quality != b.quality) add("Quality")
+        if (a.aspect != b.aspect) add("Shape")
+        if (a.duration != b.duration) add("Length")
+        if (a.takes != b.takes) add("Takes")
+        if (a.sound != b.sound) add("Sound")
+        if (a.references != b.references) add("References")
+    }
+}
+
+/** A chip's words sent to Claude on the Suite thread (the chat shows it as the owner's message). */
+suspend fun SuiteStore.askClaude(text: String) {
+    val id = assist.value?.id ?: return
+    val (r, err) = app.repo.attemptInline { claude.post(claude.thread("suite", id).id, text) }
+    if (r == null) app.repo.toast(err ?: "Couldn't reach Claude")
+    else if (r is studio.muse.app.data.ClaudeSend.MacOffline) app.repo.toast("Claude isn't answering on your Mac · open the chat for other ways")
 }
 
 /** Removes a reference chip from the composer (and so from the shared draft on the next sync). */
