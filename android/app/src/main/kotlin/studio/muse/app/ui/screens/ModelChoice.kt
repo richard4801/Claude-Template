@@ -67,7 +67,9 @@ fun rememberModelOptions(purpose: ModelPurpose): ModelsForPurpose? {
     val cat by c.suite.catalog.collectAsState()
     return produceState<ModelsForPurpose?>(null, purpose, cat) {
         value = try { c.repo.api.modelChoice.models(purpose) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: ApiException) {
-            cat?.engines?.filter { it.kind == purpose.kind }?.let { ModelsForPurpose(purpose.id, null, it) }
+            // Before WS13: only shots and photos have a list (the catalog's engines); the rest show no row.
+            if (purpose == ModelPurpose.SHOT || purpose == ModelPurpose.PHOTO) cat?.engines?.filter { it.kind == purpose.kind }?.let { ModelsForPurpose(purpose.id, null, it) }
+            else ModelsForPurpose(purpose.id, null, emptyList())
         }
     }.value
 }

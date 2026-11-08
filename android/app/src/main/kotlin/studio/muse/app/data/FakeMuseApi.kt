@@ -100,7 +100,7 @@ class FakeMuseApi(
     // WS7: import a video from a link (TikTok, Instagram and YouTube links; the sample clip as the result).
     override val imports: FakeImportsApi by lazy { FakeImportsApi(now) }
     // WS7: models per purpose (the demo catalog's engines) and defaults.
-    override val modelChoice: FakeModelsApi by lazy { FakeModelsApi { suite.catalog(owner = true).engines.orEmpty() } }
+    override val modelChoice: FakeModelsApi by lazy { FakeModelsApi { p -> suite.enginesFor(p.id, p.kind) } }
     override fun setToken(token: String?) {}
 
     override suspend fun signIn(req: SignInRequest): AuthResponse {

@@ -78,8 +78,8 @@ class HttpModelsApi(baseUrl: String, private val client: OkHttpClient, private v
  * The demo studio's models per purpose: the Suite catalog's engines of the purpose's kind (video or image), and the
  * defaults the owner sets (kept in memory).
  */
-class FakeModelsApi(private val engines: () -> List<SuiteCatalogEngine>) : ModelsApi {
+class FakeModelsApi(private val engines: (ModelPurpose) -> List<SuiteCatalogEngine>) : ModelsApi {
     private val defaults = mutableMapOf<ModelPurpose, String?>()
-    override suspend fun models(purpose: ModelPurpose) = ModelsForPurpose(purpose.id, defaults[purpose], engines().filter { it.kind == purpose.kind })
+    override suspend fun models(purpose: ModelPurpose) = ModelsForPurpose(purpose.id, defaults[purpose], engines(purpose))
     override suspend fun setDefault(purpose: ModelPurpose, model: String?): ModelsForPurpose { defaults[purpose] = model; return models(purpose) }
 }
