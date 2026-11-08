@@ -185,8 +185,22 @@ extension SnapshotRunner {
         // is skipped, so the walk stays inside Edit.
         store.openEdit(takeId: nil)
         try? await Task.sleep(for: .seconds(1.5))
-        let chrome = Set(await ax.controls().controls.map(\.key))
+        let home = await ax.controls().controls
+        let chrome = Set(home.map(\.key))
         note("CHROME \(chrome.count) controls outside the editor are skipped")
+        // The Recreate entry on the Edit home (plans/recreate): pressed like a person would, its start page shown, then back.
+        // Its own page isn't walked: choosing a video opens a modal file panel.
+        if let r = home.first(where: { $0.label == "Recreate an edit" }) {
+            note("PRESS \(r.role) \(r.label)")
+            await ax.press(r)
+            try? await Task.sleep(for: .seconds(2.5))
+            capture(SnapshotRunner.dir!.appendingPathComponent("mac_edit_recreate_entry.png"))
+            note("DONE recreate entry (screen \(store.screen))")
+            store.openEdit(takeId: nil)
+            try? await Task.sleep(for: .seconds(1.5))
+        } else {
+            note("FAIL controls: no \"Recreate an edit\" on the Edit home")
+        }
         store.openEdit(takeId: takeId)
         var ready = false
         for _ in 0..<50 {
