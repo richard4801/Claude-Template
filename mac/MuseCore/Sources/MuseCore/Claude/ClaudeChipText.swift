@@ -68,6 +68,13 @@ public enum ClaudeChipText {
         case "confirm_guide_media": return "Guide ready"
         // Edit
         case "list_takes": return "Looked at takes"
+        // Claude in the AI Suite
+        case "suite_options": return "Read the composer's options"
+        case "suite_get_draft": return "Read the composer"
+        case "suite_set_draft": return "Filled in the composer"
+        case "suite_estimate": return "Priced the shot"
+        case "suite_request_shot": if case .bool(true)? = a["confirm"] { return "Asked you to approve the shot" }; return "Priced the shot"
+        case "suite_feed": return "Looked at your takes"
         case "open_edit": return "Opened the edit"
         case "get_edit": return "Read the edit"
         case "list_looks": return "Looked at Looks"

@@ -104,12 +104,14 @@ data class ComposerDraft(
     val resolution: String? = null,
     /** Extend: "after" (what happens next) or "before" (what happens before). */
     val extendDirection: String = "after",
+    /** Claude in the Suite: reference images on the draft (pose, style, location, outfit), ≤ 3; removable chips. */
+    val references: List<studio.muse.app.data.DraftReference> = emptyList(),
 ) {
     /** The prompt's placeholder: Extend's follows the direction. */
     val placeholder: String get() = if (tool == ComposerTool.EXTEND) studio.muse.app.data.ExtendRules.placeholder(extendDirection) else tool.placeholder
 
     /** The input slots on this quality, or on the pinned engine when the owner pinned one. */
-    fun inputsFor(cat: SuiteCatalog?): SuiteInputs = ModelPicker.find(cat, engineModel, resolution)?.inputs ?: cat?.tier(quality)?.slotsFor(engineModel) ?: SuiteInputs.NONE
+    fun inputsFor(cat: SuiteCatalog?): SuiteInputs = ModelPicker.find(cat, engineModel)?.inputs ?: cat?.tier(quality)?.slotsFor(engineModel) ?: SuiteInputs.NONE
 
     /** Pins one of the tier's engines (null = Auto). */
     fun pin(m: studio.muse.app.data.SuiteTierModel?): ComposerDraft = copy(engineModel = m?.model, resolution = m?.resolution?.ifBlank { null }).let { d ->
@@ -173,7 +175,7 @@ data class ComposerDraft(
     fun lengthRange(cat: SuiteCatalog?): IntRange {
         val t = cat?.tier(quality)
         // An engine the owner pinned has its own limits (when the server sends them); otherwise the tier's.
-        val e = ModelPicker.find(cat, engineModel, resolution)
+        val e = ModelPicker.find(cat, engineModel)
         val lo = (e?.minSeconds ?: t?.minSeconds ?: 2).coerceAtLeast(1)
         val hi = (e?.maxSeconds ?: t?.maxSeconds ?: 15).coerceAtLeast(lo)
         return lo..hi
@@ -184,8 +186,8 @@ data class ComposerDraft(
         val r = lengthRange(cat)
         val sized = if (duration in r) this else copy(duration = duration.coerceIn(r))
         // A pin the catalog doesn't have (a member's catalog has none), or a ladder engine of another quality, goes back to Auto.
-        val e = ModelPicker.find(cat, engineModel, resolution)
-        val ok = engineModel == null || (e != null && (e.custom || e.tier == null || e.tier == quality))
+        val e = ModelPicker.find(cat, engineModel)
+        val ok = engineModel == null || (e != null && (e.tiers.isEmpty() || quality in e.tiers))
         return if (ok) sized else sized.copy(engineModel = null, resolution = null)
     }
 
@@ -236,7 +238,19 @@ data class ComposerDraft(
     fun request(slots: InputSlots, inputs: SuiteInputs, recast: RecastDraft, own: InputSlots = InputSlots(), locations: List<SuiteLocation> = emptyList()): SuiteShotRequest =
         baseRequest(slots, inputs, recast, own).let { r ->
             if (tool in PROMPT_TOOLS) withLocations(r, inputs, locations).copy(engineModel = engineModel, resolution = resolution.takeIf { engineModel != null }) else r
-        }.copy(draft = ComposerDrafts.draft(this)) // Reuse settings: the composer as it was, stored with the job and its takes
+        }.let { r -> if (tool in PROMPT_TOOLS) withDraftReferences(r) else r }
+            .copy(draft = ComposerDrafts.draft(this)) // Reuse settings: the composer as it was, stored with the job and its takes
+
+    /**
+     * The draft's reference images (Claude adds the owner's photos as pose, style, location or outfit) as
+     * `references.images[{image, role: use, label}]` after the slots and @locations. The model's own references always
+     * carry her identity; the engine may send fewer when the quality has less room (the estimate says so).
+     */
+    fun withDraftReferences(r: SuiteShotRequest): SuiteShotRequest {
+        if (references.isEmpty()) return r
+        val add = references.take(3).map { SuiteRefImage(studio.muse.app.data.ImageRef(url = it.url), it.use, it.label ?: it.useLabel) }
+        return r.copy(references = (r.references ?: SuiteReferences()).copy(images = r.references?.images.orEmpty() + add))
+    }
 
     /**
      * The prompt's @locations as references: `{image, role: "location", label: name}` after the slots' images, never more

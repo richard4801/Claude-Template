@@ -7,7 +7,7 @@ import kotlinx.coroutines.delay
  * catalog of image and video models, and two models added (one on, one off). A key that doesn't start with the kind's
  * prefix is refused as invalid_key, so the error state can be shown. Nothing leaves the phone.
  */
-class FakeProvidersApi(private val now: () -> Long, private val delayMs: Long = 0) : ProvidersApi {
+class FakeProvidersApi(private val now: () -> Long, private val delayMs: Long = 0, var keysReady: Boolean = true) : ProvidersApi {
     private val kindList = listOf(
         ProviderKind("replicate", "Replicate", "Starts with r8_", "https://replicate.com/account/api-tokens"),
         ProviderKind("fal", "fal", "A key id and secret, joined with a colon", "https://fal.ai/dashboard/keys"),
@@ -51,9 +51,11 @@ class FakeProvidersApi(private val now: () -> Long, private val delayMs: Long = 
     }
 
     override suspend fun kinds() = kindList
-    override suspend fun providers(): List<Provider> { pause(); return list.map(::view) }
+    override suspend fun providers(): Providers { pause(); return Providers(list.map(::view), keysReady) }
     override suspend fun add(req: NewProvider): Provider {
-        pause(); check(req.kind, req.apiKey.trim())
+        pause()
+        if (!keysReady) throw ApiException("provider_keys_unavailable", "Provider keys aren't set up on the server yet")
+        check(req.kind, req.apiKey.trim())
         val p = Provider("p_${now()}", req.kind, req.label?.ifBlank { null } ?: kindList.first { it.kind == req.kind }.label, req.apiKey.trim().takeLast(4), "ok", now(), now())
         list += p
         return view(p)

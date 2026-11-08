@@ -189,19 +189,31 @@ data class SuiteTier(
     fun slotsFor(engineModel: String?): SuiteInputs = engineModel?.let { id -> models?.firstOrNull { it.model == id }?.inputs } ?: slots
 }
 
-/** One engine the owner can pin (`catalog.engines[]`, WS5): its quality, resolution, limits and price per second. Provisional until WS5's shape lands. */
+/**
+ * One engine the owner can pick (`catalog.engines[]`, WS5, owner only): a registry or custom model, video or image, with
+ * the qualities whose ladder runs it, its resolutions and $/s each, its lengths and shapes. Prices are after priceScale.
+ */
 @Serializable
 data class SuiteCatalogEngine(
     val model: String,
     val name: String = "",
+    /** video | image */
+    val kind: String = "video",
+    val custom: Boolean = false,
+    /** The first quality whose ladder runs it (null: on no ladder, or an image model). */
     val tier: String? = null,
-    val resolution: String = "",
+    val tiers: List<String> = emptyList(),
+    /** The resolution it runs at by default (the ladder's, else its largest). */
+    val resolution: String? = null,
+    val resolutions: List<SuiteResolution> = emptyList(),
+    val perSec: Double? = null,
+    val perRun: Double? = null,
     val minSeconds: Int? = null,
     val maxSeconds: Int? = null,
+    /** Exact lengths only (e.g. 5 and 10), when the engine has them. */
+    val allowedSeconds: List<Int>? = null,
     val aspectRatios: List<String> = emptyList(),
-    val perSec: Double? = null,
     val inputs: SuiteInputs? = null,
-    val custom: Boolean = false,
 )
 
 /** A custom engine (`c_…`) in the catalog: its display name, image or video, its limits and its price. Shots and photos take it as engineModel. */
@@ -211,11 +223,15 @@ data class SuiteCustomEngine(
     val name: String = "",
     /** image | video */
     val kind: String = "video",
-    val inputs: ProviderInputs? = null,
+    /** The composer's input slots (the server maps the model's schema). */
+    val inputs: SuiteInputs? = null,
     val minSeconds: Int? = null,
     val maxSeconds: Int? = null,
     val aspectRatios: List<String> = emptyList(),
     val price: MemberPrice? = null,
+    /** Owner only: whether members can use it, and the provider kind. */
+    val members: Boolean? = null,
+    val provider: String? = null,
 )
 
 /** A composer tool the server offers now (`catalog.tools`): shot, swap, recast, storyboard, talking, ugc_ad, extend. */

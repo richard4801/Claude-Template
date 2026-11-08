@@ -4,7 +4,7 @@
 // 2026-11-05 (replicate.com/<owner>/<name>/api, fal.ai/models/<id>/llms.txt). Member-facing data never names any of this;
 // only owner views (Settings → Engines / the suite settings) do.
 
-export type ProviderId = 'replicate' | 'fal' | 'higgsfield' | 'runpod' | 'mock';
+export type ProviderId = 'replicate' | 'fal' | 'higgsfield' | 'runpod' | 'mock' | 'byo';
 export type ShotMode = 'text' | 'image' | 'reference' | 'swap';
 export type Tier = 'draft' | 'standard' | 'hd' | 'cinema';
 export const TIERS: Tier[] = ['draft', 'standard', 'hd', 'cinema'];
@@ -20,7 +20,7 @@ export type RefStyle = 'angle' /* <Image 1>, <Video 1> */ | 'at' /* @image_1, @v
 /** Which camera wording template the compiler uses (prompt library keys suite.camera.format.*). */
 export type CameraVocab = 'kling' | 'seedance' | 'h3' | 'veo' | 'wan' | 'ltx' | 'generic';
 /** Which input mapper builds the provider input (suite/inputs.ts). */
-export type Adapter = 'minimax-h3' | 'kling-v4' | 'kling-v3-omni' | 'seedance' | 'veo' | 'wan-2.7' | 'ltx-2.3' | 'fal-h3-3d' | 'fal-h3-recast' | 'kling-o1' | 'wan-animate' | 'hf-h3' | 'mock';
+export type Adapter = 'minimax-h3' | 'kling-v4' | 'kling-v3-omni' | 'seedance' | 'veo' | 'wan-2.7' | 'ltx-2.3' | 'fal-h3-3d' | 'fal-h3-recast' | 'kling-o1' | 'wan-animate' | 'hf-h3' | 'mock' | 'byo';
 
 export type Resolution = { id: string; label: string; shortSide: number; perSec: number; perSecWithVideo?: number; audioPerSec?: number };
 
@@ -62,7 +62,12 @@ export type ModelSpec = {
     /** hidden until the owner acknowledges it in suite settings */ requiresAck?: boolean; notes?: string };
   status: 'active' | 'preview' | 'removed';
   notes?: string;
+  /** Bring your own provider (WS5): an owner-added model, run with the studio's own provider key (byo/service.ts). */
+  byo?: ByoSpec;
 };
+/** An owner-added model: whose it is, how its inputs are filled and what it costs (cost basis before priceScale). */
+export type ByoSpec = { studioId: string; providerId: string; providerKind: string; providerRef: string; version: string | null; displayName: string;
+  members: boolean; analysis: import('../byo/classify.js').Analysis; fixed: Record<string, unknown>; perRunUsd: number; perSecUsd: number; priceScale: number };
 
 const R = (id: string, label: string, shortSide: number, perSec: number, extra: Partial<Resolution> = {}): Resolution => ({ id, label, shortSide, perSec, ...extra });
 const hosted = (name: string, extra: Partial<ModelSpec['licence']> = {}): ModelSpec['licence'] => ({ kind: 'hosted', name, ...extra });
@@ -244,7 +249,14 @@ export const MOCK_MODEL: ModelSpec = {
 };
 
 const BY_ID = new Map(MODELS.map(m => [m.id, m]));
-export const modelById = (id: string) => BY_ID.get(id) ?? (id === 'mock' ? MOCK_MODEL : undefined);
+/** Bring your own provider (WS5): each studio's enabled custom video models (ids "c_…", unique across studios). */
+const CUSTOM = new Map<string, ModelSpec>();
+export function setCustomModels(studioId: string, list: ModelSpec[]) {
+  for (const [k, v] of CUSTOM) if (v.byo?.studioId === studioId) CUSTOM.delete(k);
+  for (const m of list) if (m.byo?.studioId === studioId) CUSTOM.set(m.id, m);
+}
+export const customModelsOf = (studioId: string) => [...CUSTOM.values()].filter(m => m.byo?.studioId === studioId);
+export const modelById = (id: string) => BY_ID.get(id) ?? CUSTOM.get(id) ?? (id === 'mock' ? MOCK_MODEL : undefined);
 
 export type LadderStep = { model: string; resolution: string };
 /**

@@ -50,8 +50,8 @@ class ModelPickerLogicTest {
 
     @Test fun groupsPutThisQualityFirstThenOthersThenYours() {
         val g = ModelPicker.groups(owner, "hd")
-        assertTrue(g.ladder.isNotEmpty() && g.ladder.all { it.tier == "hd" })
-        assertTrue(g.others.none { it.tier == "hd" })
+        assertTrue(g.ladder.isNotEmpty() && g.ladder.all { "hd" in it.tiers })
+        assertTrue(g.others.isNotEmpty() && g.others.none { "hd" in it.tiers })
         assertEquals(listOf("c_demo2"), g.custom.map { it.id })
         // Every ladder row carries a price per second and lengths from the demo registry.
         assertTrue(g.ladder.all { it.perSec != null && it.maxSeconds != null })
@@ -68,7 +68,9 @@ class ModelPickerLogicTest {
         assertEquals("draft", d.quality)
         assertEquals(8, d.duration)
         assertEquals(4..8, d.lengthRange(owner))
-        assertEquals("Veo 3.1 Lite · 720p", d.modelLabel(owner))
+        assertTrue(d.modelLabel(owner).startsWith("Veo 3.1 Lite · 720"))
+        // Exact lengths: 7 s snaps to 6 or 8.
+        assertTrue(ComposerDraft(quality = "draft", duration = 7).pinEngine(veo).duration in listOf(6, 8))
         // Fit keeps the pin on its own quality, and drops it on another.
         assertEquals("veo-3.1-lite", d.fit(owner).engineModel)
         assertNull(d.copy(quality = "cinema").fit(owner).engineModel)
@@ -91,6 +93,24 @@ class ModelPickerLogicTest {
         val d = ComposerDraft(quality = "hd").pinEngine(mine).pinEngine(null)
         assertNull(d.engineModel); assertNull(d.resolution)
         assertEquals("Auto", d.modelLabel(owner))
+    }
+
+    @Test fun imageModelsForPhoto() {
+        val img = ModelPicker.engines(owner, "image")
+        assertEquals(listOf("google/nano-banana", "c_demo1"), img.map { it.id })
+        assertEquals("$0.039 a photo", img.first().price)
+        val req = studio.muse.app.ui.screens.suite.composer.PhotoComposer.request(ComposerDraft(modelId = SampleData.DEMO, tool = studio.muse.app.ui.screens.suite.composer.ComposerTool.PHOTO),
+            studio.muse.app.ui.screens.suite.composer.PhotoDraft(imageModel = "c_demo1"))!!
+        assertEquals("c_demo1", req.imageModel)
+    }
+
+    @Test fun resolutionPinCarriesItsOwnPrice() {
+        val kling = ModelPicker.groups(owner, "hd").ladder.first { it.id == "kling-v4" }
+        assertTrue(kling.resolutions.size > 1)
+        val d = ComposerDraft(quality = "hd").pinEngine(kling, "720p")
+        assertEquals("720p", d.resolution)
+        assertEquals("hd", d.quality)
+        assertEquals(0.157, kling.perSecAt("720p")!!, 1e-9)
     }
 
     @Test fun rates() {
@@ -137,7 +157,7 @@ class ModelPickerScreenshotTest(private val theme: String, private val state: St
         val cat = fake.suite.catalog(owner = true)
         var d = ComposerDraft(tokens = PromptTokens().withText("She walks into a quiet café at golden hour"), modelId = SampleData.DEMO, quality = "hd", duration = 8)
         when (state) {
-            "ladder" -> d = d.pinEngine(ModelPicker.groups(cat, "hd").others.first { it.id == "kling-v4" && it.tier == "standard" })
+            "ladder" -> d = d.pinEngine(ModelPicker.groups(cat, "hd").ladder.first { it.id == "kling-v4" })
             "custom" -> d = d.pinEngine(ModelPicker.groups(cat, "hd").custom.single())
         }
         c.suite.composer.value = d

@@ -24,7 +24,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 data class ProviderKind(val kind: String, val label: String = "", val keyHint: String = "", val keyUrl: String? = null)
 
 @Serializable
-data class ProviderKinds(val kinds: List<ProviderKind> = emptyList())
+data class ProviderKinds(val kinds: List<ProviderKind> = emptyList(), val keysReady: Boolean = true)
 
 @Serializable
 data class ProviderModelCounts(val added: Int = 0, val enabled: Int = 0)
@@ -46,7 +46,11 @@ data class Provider(
 }
 
 @Serializable
-data class Providers(val providers: List<Provider> = emptyList())
+data class Providers(
+    val providers: List<Provider> = emptyList(),
+    /** False while the server has no PROVIDER_KEYS_SECRET: keys can't be saved ("Provider keys aren't set up on the server yet"). */
+    val keysReady: Boolean = true,
+)
 
 @Serializable
 data class NewProvider(val kind: String, val apiKey: String, val label: String? = null)
@@ -149,7 +153,8 @@ data class CustomModelPatch(
 
 interface ProvidersApi {
     suspend fun kinds(): List<ProviderKind>
-    suspend fun providers(): List<Provider>
+    /** The connected providers, and whether the server can store keys at all. */
+    suspend fun providers(): Providers
     /** 400 invalid_key (nothing stored), 503 provider_keys_unavailable, 502 provider_unreachable. */
     suspend fun add(req: NewProvider): Provider
     /** Rename and/or rotate the key. */
@@ -204,7 +209,7 @@ class HttpProvidersApi(baseUrl: String, private val client: OkHttpClient, privat
     private fun <B> enc(b: B, s: KSerializer<B>) = json.encodeToString(s, b)
 
     override suspend fun kinds() = send("GET", u("v1/providers/kinds"), null, ProviderKinds.serializer())!!.kinds
-    override suspend fun providers() = send("GET", u("v1/providers"), null, Providers.serializer())!!.providers
+    override suspend fun providers() = send("GET", u("v1/providers"), null, Providers.serializer())!!
     override suspend fun add(req: NewProvider) = send("POST", u("v1/providers"), enc(req, NewProvider.serializer()), Provider.serializer())!!
     override suspend fun patch(id: String, patch: ProviderPatch) = send("PATCH", u("v1/providers/$id"), enc(patch, ProviderPatch.serializer()), Provider.serializer())!!
     override suspend fun remove(id: String) { send("DELETE", u("v1/providers/$id"), null, Unit.serializer()) }

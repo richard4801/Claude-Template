@@ -369,7 +369,7 @@ private fun ColumnScope.SettingsBody(x: SheetContext) {
                 SIc(if (open) "chevd" else "chev", 16.dp, m.t.muted)
             }
             if (open) {
-                ModelPickerList(d, groups) { e -> x.update { it.pinEngine(e) } }
+                ModelPickerList(d, groups) { e, r -> x.update { it.pinEngine(e, r) } }
                 T("Length, shape and the input slots follow the pinned model", m.type.tiny, m.t.muted)
             }
         }
@@ -648,7 +648,7 @@ private fun ColumnScope.NewLocationBody(x: SheetContext) {
 }
 
 @Composable
-private fun DarkChip(label: String, on: Boolean, onClick: () -> Unit) {
+internal fun DarkChip(label: String, on: Boolean, onClick: () -> Unit) {
     val m = muse
     Box(Modifier.heightIn(min = 48.dp).press(onClick = onClick).semantics { selected = on; role = Role.RadioButton }, contentAlignment = Alignment.Center) {
         Box(Modifier.height(32.dp).clip(RoundedCornerShape(16.dp)).background(if (on) m.t.ink else m.t.surface2).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {

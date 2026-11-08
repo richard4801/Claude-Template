@@ -18,6 +18,8 @@ import { accountView, PLATFORMS, platformOf } from '../services/posts.js';
 import { takeView } from '../services/jobs.js';
 import { ASSET_DIR, ASSET_KEYS, PROVIDERS, type ShootRefIn } from '../images/service.js';
 import { PhotoBill } from '../images/bill.js';
+import { MODEL_ID_RE } from '../replicate/catalog.js'; // WS5
+import type { EngineSelection } from '../images/engines.js'; // WS5
 import { LocalStorage, contentTypeFor } from '../storage/index.js';
 import { objectInfo, putObject } from '../storage/objects.js';
 import { seedDev, SLOT_SAMPLE } from '../seed.js';
@@ -513,8 +515,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     imageEngine: ImageEngineOverride.optional() }).passthrough();
 
   /** Everything a shoot (or its preview) needs: the model, outfit, images to send, the prompt and the estimate. */
-  async function planShoot(u: AuthUser, body: unknown, still?: StillRig) {
+  async function planShoot(u: AuthUser, body: unknown, still?: StillRig, engine?: EngineSelection) {
     const b = parse(ShootBody, body);
+    if (engine) (b as { imageEngine?: unknown }).imageEngine = engine; // WS5: a custom image model (checked by the caller)
     const m = await model(u, b.modelId, true);
     const o = await outfitOf(u, b.outfitId);
     const count = Math.min(4, Math.max(1, b.count ?? 4));
@@ -648,7 +651,15 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const p = r.data, still = stillRig(p), graded = photoFilter(p);
     const shoot = { modelId: p.modelId, outfitId: p.outfitId, count: p.count, seed: p.seed, lockSeed: p.lockSeed, refs: p.references, templateId: p.presetId,
       shuffleSeed: p.shuffleSeed, productImage: p.productImage, presets: true };
-    const s = await planShoot(u, shoot, p.presetId ? undefined : still);
+    // WS5: a custom image model the user may use replaces the studio's image engine for this run.
+    // Owner only: `imageModel` picks any image model for this run (a Replicate "owner/name" or a custom "c_…").
+    if (p.imageModel && u.role !== 'owner') throw new ApiError(403, 'owner_only', 'Only the studio owner can pick the image model');
+    if (p.imageModel && p.engineModel) throw badRequest('Use imageModel or engineModel, not both');
+    const custom = p.engineModel ?? (p.imageModel?.startsWith('c_') ? p.imageModel : undefined);
+    const engine = custom ? (await ctx.suite.byo.checkUse(u, custom, 'image'), { provider: 'byo' as const, model: custom }) : undefined;
+    if (p.imageModel && !custom && !MODEL_ID_RE.test(p.imageModel)) throw badRequest('imageModel: use owner/name or a custom model id');
+    if (p.imageModel && !custom) (shoot as Record<string, unknown>).models = { shot: p.imageModel }; // priced on that model (planShoot)
+    const s = await planShoot(u, shoot, p.presetId ? undefined : still, engine);
     const notes = [...still.notes, ...(p.presetId && (still.camera || still.light || still.grade || still.direction) ? ['The preset sets its own camera and light'] : [])];
     return { p, s, notes, graded };
   };

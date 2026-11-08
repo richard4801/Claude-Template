@@ -47,18 +47,21 @@ public struct ClaudeBrief: Codable, Hashable, Sendable {
     public var tools: [String]
     public var referenceId: String?
     public var sessionId: String?
+    /// Suite threads: the shared composer draft (`sa_…`) Claude's suite tools act on.
+    public var assistId: String?
 
-    public init(prompt: String, tools: [String] = [], referenceId: String? = nil, sessionId: String? = nil) {
-        self.prompt = prompt; self.tools = tools; self.referenceId = referenceId; self.sessionId = sessionId
+    public init(prompt: String, tools: [String] = [], referenceId: String? = nil, sessionId: String? = nil, assistId: String? = nil) {
+        self.prompt = prompt; self.tools = tools; self.referenceId = referenceId; self.sessionId = sessionId; self.assistId = assistId
     }
 
-    enum CodingKeys: String, CodingKey { case prompt, tools, referenceId, sessionId }
+    enum CodingKeys: String, CodingKey { case prompt, tools, referenceId, sessionId, assistId }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         prompt = (try? c.decode(String.self, forKey: .prompt)) ?? ""
         tools = (try? c.decode([String].self, forKey: .tools)) ?? []
         referenceId = try? c.decodeIfPresent(String.self, forKey: .referenceId)
         sessionId = try? c.decodeIfPresent(String.self, forKey: .sessionId)
+        assistId = try? c.decodeIfPresent(String.self, forKey: .assistId)
     }
 
     /// What Claude Code is started with (`--append-system-prompt`): the server's prompt plus the id it acts on.
@@ -68,6 +71,7 @@ public struct ClaudeBrief: Codable, Hashable, Sendable {
         var lines = [p]
         if let r = referenceId, !r.isEmpty { lines.append("The reference: \(r).") }
         if let s = sessionId, !s.isEmpty { lines.append("The edit session: \(s).") }
+        if let a = assistId, !a.isEmpty { lines.append("The Suite draft: \(a).") }
         return lines.joined(separator: "\n\n")
     }
 }
@@ -132,6 +136,9 @@ public struct ClaudeMessage: Codable, Hashable, Sendable, Identifiable {
     /// A frame Claude grabbed.
     public var image: ClaudeImageRef?
     public var createdAt: Double
+    /// Images the owner attached (upload ids). Read leniently: `attachments: [id]`, `uploadIds` or one `uploadId`; the final
+    /// shape comes with workstream 1's suite contract.
+    public var attachments: [String]? = nil
 
     public init(id: String, threadId: String, role: String, source: String, text: String = "", turnId: String? = nil,
                 tool: ClaudeToolRef? = nil, image: ClaudeImageRef? = nil, createdAt: Double) {
@@ -146,7 +153,7 @@ public struct ClaudeMessage: Codable, Hashable, Sendable, Identifiable {
         self.createdAt = createdAt
     }
 
-    private enum K: String, CodingKey { case id, threadId, role, source, text, turnId, tool, image, createdAt }
+    private enum K: String, CodingKey { case id, threadId, role, source, text, turnId, tool, image, createdAt, attachments, uploadIds, uploadId }
 
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
@@ -159,6 +166,12 @@ public struct ClaudeMessage: Codable, Hashable, Sendable, Identifiable {
         tool = try? c.decodeIfPresent(ClaudeToolRef.self, forKey: .tool)
         image = try? c.decodeIfPresent(ClaudeImageRef.self, forKey: .image)
         createdAt = (try? c.decodeIfPresent(Double.self, forKey: .createdAt)) ?? 0
+        // Split up: one chained `??` expression here was too slow for the type checker.
+        var ids: [String]? = nil
+        if let a = try? c.decodeIfPresent([String].self, forKey: .attachments) { ids = a }
+        if ids == nil, let a = try? c.decodeIfPresent([String].self, forKey: .uploadIds) { ids = a }
+        if ids == nil, let one = try? c.decodeIfPresent(String.self, forKey: .uploadId) { ids = [one] }
+        attachments = (ids?.isEmpty ?? true) ? nil : ids
     }
 }
 

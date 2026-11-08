@@ -37,18 +37,30 @@ class FakeSuite {
     }
 
     /**
-     * WS7 (owner model picker): each ladder engine with its own lengths and $/s (from the demo registry), plus one model the
-     * studio added from its own provider ("Your providers"). Members never get any of it (memberSafe).
+     * WS7 (owner model picker), as the server's ownerEngines (WS5): every enabled registry model on a ladder, flat, with its
+     * qualities, resolutions and $/s, lengths and shapes; the studio's custom video model; and the image models (the studio's
+     * photo model and a custom one). Members never get any of it (memberSafe).
      */
-    private fun withEngineDetail(c: SuiteCatalog): SuiteCatalog = c.copy(
-        tiers = c.tiers.map { t ->
-            t.copy(models = t.models?.map { m ->
-                val lim = DEMO_LIMITS[m.model]
-                m.copy(minSeconds = m.minSeconds ?: lim?.first, maxSeconds = m.maxSeconds ?: lim?.last, perSec = m.perSec ?: settings.model(m.model)?.perSec(m.resolution))
-            })
-        },
-        custom = c.custom ?: listOf(DEMO_CUSTOM),
-    )
+    private fun withEngineDetail(c: SuiteCatalog): SuiteCatalog {
+        val ladders = c.tiers.associate { t -> t.id to t.models.orEmpty() }
+        val video = settings.models.filter { m -> m.enabled && !m.blocked && ladders.values.any { l -> l.any { it.model == m.id } } }.map { m ->
+            val tiers = c.tiers.map { it.id }.filter { t -> ladders[t].orEmpty().any { it.model == m.id } }
+            val res = tiers.firstNotNullOfOrNull { t -> ladders[t]?.firstOrNull { it.model == m.id }?.resolution } ?: m.resolutions.lastOrNull()?.id
+            val lim = DEMO_LIMITS[m.id]
+            SuiteCatalogEngine(m.id, m.name, "video", false, tiers.firstOrNull(), tiers, res, m.resolutions.map { it.copy(perSec = round4(it.perSec * m.priceScale)) },
+                m.perSec(res)?.let(::round4), null, lim?.first, lim?.last, if (m.id == "veo-3.1-lite") listOf(4, 6, 8) else null,
+                if (m.id.startsWith("veo")) listOf("9:16", "16:9") else listOf("9:16", "16:9", "1:1"),
+                ladders.values.flatten().firstOrNull { it.model == m.id }?.inputs)
+        }
+        val custom = DEMO_CUSTOM.let { k -> SuiteCatalogEngine(k.id, k.name, "video", true, null, emptyList(), null, emptyList(), k.price?.usd, null, k.minSeconds, k.maxSeconds, listOf(5, 10), k.aspectRatios, k.inputs) }
+        val image = listOf(
+            SuiteCatalogEngine("google/nano-banana", "Nano Banana", "image", perRun = 0.039, inputs = SuiteInputs(images = 6)),
+            SuiteCatalogEngine("c_demo1", "Seedream", "image", custom = true, perRun = 0.03, aspectRatios = listOf("1:1", "9:16", "16:9"), inputs = SuiteInputs(images = 6)),
+        )
+        return c.copy(custom = c.custom ?: listOf(DEMO_CUSTOM), engines = c.engines ?: (video + custom + image))
+    }
+
+    private fun round4(v: Double) = kotlin.math.round(v * 10000) / 10000
 
     /** The pinned engine's $/s (owner, demo): a ladder model at its resolution, or the demo custom model. */
     private fun pinnedPerSec(r: SuiteShotRequest): Double? {
@@ -251,7 +263,7 @@ class FakeSuite {
             "h3" to 1..15, "h3-lite" to 1..15, "h3-highspeed" to 1..10, "veo-3.1-lite" to 4..8, "kling-v4" to 3..15, "kling-v3-omni" to 3..15,
             "seedance-2.0" to 4..15, "seedance-2.5" to 4..15, "wan-2.7" to 2..15, "ltx-2.3" to 2..20,
         )
-    private val DEMO_CUSTOM = SuiteCustomEngine("c_demo2", "Kling turbo", "video", ProviderInputs(prompt = true, startImage = true), 5, 10, listOf("9:16", "16:9", "1:1"), MemberPrice("per_second", 0.07))
+    private val DEMO_CUSTOM = SuiteCustomEngine("c_demo2", "Kling turbo", "video", SuiteInputs(start = true), 5, 10, listOf("9:16", "16:9", "1:1"), MemberPrice("per_second", 0.07))
 
     companion object {
         /** $ per output second per tier (the demo ladder's first steps, as the server prices them). */
