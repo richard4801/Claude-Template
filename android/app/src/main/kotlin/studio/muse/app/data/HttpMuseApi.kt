@@ -335,8 +335,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     } catch (e: HttpException) {
         val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
         val err = runCatching { json.decodeFromString(ErrorBody.serializer(), body ?: "") }.getOrNull()
-        val code = err?.code ?: when (e.code()) { 401 -> "unauthorized"; 429 -> "rate_limited"; 413 -> "too_large"; else -> "http_${e.code()}" }
-        throw ApiException(code, err?.error ?: "Server error ${e.code()}")
+        val code = err?.code ?: ErrorText.codeOf(e.code())
+        throw ApiException(code, err?.error?.takeIf { it.isNotBlank() } ?: ErrorText.http(e.code()))
     } catch (e: java.net.SocketTimeoutException) {
         throw ApiException("still_working", "This is taking longer than usual. It keeps going on the server; the results will appear in the Library.")
     } catch (e: java.io.IOException) {

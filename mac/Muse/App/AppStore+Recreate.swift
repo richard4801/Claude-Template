@@ -34,6 +34,9 @@ final class RecreateState {
     var time: Double = 0
     var playing = false
     var error: String?
+    /// While a reference is read and the server doesn't answer (it restarted): "Reconnecting…", then a plain message.
+    var reconnecting = false
+    var pollLost: String?
     /// Build's confirmation (the total, before anything is made).
     var askBuild = false
     /// Build is pricing the shots to generate (before the confirmation).
@@ -169,6 +172,8 @@ final class RecreateState {
     }
 
     func clearReference() {
+        reconnecting = false
+        pollLost = nil
         pollTask?.cancel()
         playTask?.cancel()
         fillWatch?.cancel()
@@ -327,14 +332,60 @@ extension AppStore {
         if recreate.claudeOpen, !isDemo, recreate.claudeSessionId == nil { await ensureRecreateClaudeSession() }
     }
 
-    /// While a reference is analysed, its steps come in as `phase` / `progress`.
-    private func pollRecreateReference(_ id: String) {
+    /// A failed reference read again (WS1's retry: a lighter analysis after a crash). Watches it like a new one.
+    func retryRecreateReference() {
+        guard let id = recreate.reference?.id else { return }
+        perform { [self] in
+            do {
+                let r = try await recreateAPI.retryReference(id)
+                guard recreate.reference?.id == id else { return }
+                if let i = recreate.references.firstIndex(where: { $0.id == id }) { recreate.references[i] = r }
+                await showRecreateReference(r)
+            } catch let e as ApiError where e.code == "video_gone" {
+                showToast("The video isn’t kept any more. Drop it in again to read it.")
+            }
+        }
+    }
+
+    /// While a reference is analysed, its steps come in as `phase` / `progress`. A server restart mid-analysis (502/503/
+    /// 504, no connection) is ridden out: "Reconnecting…" while it retries with backoff for about two minutes, then a
+    /// plain message with Try again. Any other error stops with plain words.
+    func pollRecreateReference(_ id: String) {
         recreate.pollTask?.cancel()
+        recreate.reconnecting = false
+        recreate.pollLost = nil
         recreate.pollTask = Task { [weak self] in
+            var wait: Double = 2
+            var lostSince: Date?
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(2))
+                try? await Task.sleep(for: .seconds(wait))
                 guard let self, !Task.isCancelled else { return }
-                guard let r = try? await self.recreateAPI.reference(id) else { continue }
+                let r: RecreateReference
+                do {
+                    r = try await self.recreateAPI.reference(id)
+                } catch {
+                    guard self.recreate.reference?.id == id else { return }
+                    let e = error as? ApiError
+                    if e?.isTransient ?? true {
+                        let since = lostSince ?? Date()
+                        lostSince = since
+                        self.recreate.reconnecting = true
+                        if Date().timeIntervalSince(since) > 120 {
+                            self.recreate.reconnecting = false
+                            self.recreate.pollLost = "MUSE’s server isn’t answering. The video may still be read: try again in a minute."
+                            return
+                        }
+                        wait = min(wait * 2, 15)
+                    } else {
+                        self.recreate.reconnecting = false
+                        self.recreate.pollLost = e?.friendlyMessage ?? "Couldn’t check on this video. Try again."
+                        return
+                    }
+                    continue
+                }
+                wait = 2
+                lostSince = nil
+                self.recreate.reconnecting = false
                 guard self.recreate.reference?.id == id else { return }
                 self.recreate.reference = r
                 if let i = self.recreate.references.firstIndex(where: { $0.id == id }) { self.recreate.references[i] = r }

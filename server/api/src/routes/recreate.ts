@@ -19,6 +19,7 @@ export async function registerRecreateRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/v1/recreate/references/:id', async req => rx.view(await rx.row(req.user, id(req))));
   app.patch('/v1/recreate/references/:id', async req => rx.patch(req.user, id(req), req.body));
   app.delete('/v1/recreate/references/:id', async (req, reply) => { await rx.remove(req.user, id(req)); return reply.status(204).send(); });
+  app.post('/v1/recreate/references/:id/retry', async req => rx.retry(req.user, id(req))); // workstream 1: after a failed (or crashed) analysis
   // Slots (phase 3): briefs, matching to takes, filling with Suite shots, building the edit in a session.
   const slot = (req: { params: unknown }) => (req.params as { slotId: string }).slotId;
   app.put('/v1/recreate/references/:id/briefs', async req => rx.setBriefs(req.user, id(req), req.body));
