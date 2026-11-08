@@ -159,3 +159,13 @@ This covers every open item at that point:
 - **Still needs the owner's own action:**
   - typing "Go ahead and upload" in session_01Py2rxqFT9BvkxLttPb5c8Z;
   - a `MUSE_OWNER_TOKEN` GitHub secret for Mac auto-publish.
+
+## SeedVR2 upscale priced (2026-11-08)
+- **Measurement:** WS2 measured it for about $0.91 of the $5 cap. Details in gpu/pod/seedvr2/RESULTS.md.
+- **Owner's choice:** cost × 2.
+- **Railway UPSCALE_PRICES:**
+  - 1080p: $0.086/s (26 GPU s/s);
+  - 2K: $0.108/s (36 GPU s/s);
+  - 4K: $0.19/s (70 GPU s/s).
+- **A 5 s clip costs:** about $0.43, $0.54 or $0.95.
+- **Availability:** a size is offered only when a pod advertises the "upscale" capability.
