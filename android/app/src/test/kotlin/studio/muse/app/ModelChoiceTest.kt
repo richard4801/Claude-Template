@@ -49,11 +49,19 @@ class ModelChoiceLogicTest {
     }
 
     @Test fun defaultsAreWhatAutoUses() = runBlocking {
-        val o = api.modelChoice.setDefault(ModelPurpose.UPSCALE, "kling-v4")
+        val o = api.modelChoice.setDefault(ModelPurpose.EXTEND, "kling-v4")
         assertEquals("kling-v4", o.default)
         assertEquals("Auto (Kling 4.0)", o.label(ModelPick()))
         assertEquals("Kling 4.0, 1080p", o.label(ModelPick("kling-v4", "1080p")))
-        assertNull(api.modelChoice.setDefault(ModelPurpose.UPSCALE, null).default)
+        assertNull(api.modelChoice.setDefault(ModelPurpose.EXTEND, null).default)
+    }
+
+    @Test fun decodesWs13PurposeResponse() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; explicitNulls = false; coerceInputValues = true }
+        val r = json.decodeFromString(studio.muse.app.data.EnginesResponse.serializer(), """{"purpose":"upscale","default":"seedvr2","models":[{"model":"seedvr2","name":"SeedVR2","kind":"tool","custom":false,"tier":null,"tiers":[],"resolution":"1080p","resolutions":[{"id":"1080p","label":"1080p","perSec":0.05}],"perSec":0.05,"perRun":null,"minSeconds":1,"maxSeconds":30,"allowedSeconds":null,"aspectRatios":[],"inputs":null,"purposes":["upscale"],"default":true,"price":{"basis":"per_second","usd":0.05}}],"engines":[],"purposes":[{"id":"upscale","label":"Upscale","kind":"tool","default":"seedvr2","studioDefault":null,"rule":"fixed"}]}""")
+        assertEquals("seedvr2", r.models!!.single().model)
+        assertEquals(0.05, r.models!!.single().resolutions.single().perSec, 1e-9)
+        assertNull(r.purposes.single().studioDefault)
     }
 
     @Test fun recastAndExtendSendThePick() {

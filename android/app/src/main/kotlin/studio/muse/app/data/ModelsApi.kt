@@ -24,7 +24,7 @@ enum class ModelPurpose(val id: String, val label: String, val kind: String) {
     RECAST("recast", "Recast", "video"),
     EXTEND("extend", "Extend", "video"),
     FILL("fill", "Recreate shots", "video"),
-    UPSCALE("upscale", "Upscale", "video"),
+    UPSCALE("upscale", "Upscale", "tool"),
     PHOTO("photo", "Photos", "image"),
     OUTFIT("outfit", "Outfit sets", "image"),
     CHARACTER("character", "Character photos", "image"),
@@ -89,7 +89,14 @@ data class EngineEntry(
 }
 
 @Serializable
-data class EnginesResponse(val purposes: List<EnginePurposeInfo> = emptyList(), val engines: List<EngineEntry> = emptyList())
+data class EnginesResponse(
+    val purposes: List<EnginePurposeInfo> = emptyList(),
+    val engines: List<EngineEntry> = emptyList(),
+    /** With ?purpose (WS13): the same list in the catalog shape (per-resolution $/s), and the purpose's default. */
+    val purpose: String? = null,
+    val default: String? = null,
+    val models: List<SuiteCatalogEngine>? = null,
+)
 
 @Serializable
 data class EngineDefaults(val defaults: Map<String, String?> = emptyMap(), val builtin: Map<String, String?> = emptyMap())
@@ -130,11 +137,16 @@ class HttpModelsApi(baseUrl: String, private val client: OkHttpClient, private v
     override suspend fun models(purpose: ModelPurpose): ModelsForPurpose {
         val r = decode(EnginesResponse.serializer(), text("GET", "v1/engines?purpose=${purpose.id}", null))
         val info = r.purposes.firstOrNull { it.id == purpose.id }
-        return ModelsForPurpose(purpose.id, info?.studioDefault, r.engines.filter { purpose.id in it.purposes || it.purposes.isEmpty() }.map { it.asCatalogEngine() }, info?.label?.ifBlank { null })
+        // Prefer `models` (the catalog shape, with each resolution's price); else map the nested `engines` entries.
+        val list = r.models ?: r.engines.filter { purpose.id in it.purposes || it.purposes.isEmpty() }.map { it.asCatalogEngine() }
+        // Upscale and the editor helpers are "tool" purposes: their models list as video in the picker.
+        val kind = if (purpose.kind == "image") "image" else "video"
+        return ModelsForPurpose(purpose.id, info?.studioDefault, list.map { if (it.kind == kind) it else it.copy(kind = kind) }, info?.label?.ifBlank { null })
     }
 
     override suspend fun setDefault(purpose: ModelPurpose, model: String?): ModelsForPurpose {
-        val body = kotlinx.serialization.json.buildJsonObject { put(purpose.id, model?.let { kotlinx.serialization.json.JsonPrimitive(it) } ?: kotlinx.serialization.json.JsonNull) }
+        // WS13 takes {purpose, model} or {<purpose>: model}; null = Auto.
+        val body = kotlinx.serialization.json.buildJsonObject { put("purpose", kotlinx.serialization.json.JsonPrimitive(purpose.id)); put("model", model?.let { kotlinx.serialization.json.JsonPrimitive(it) } ?: kotlinx.serialization.json.JsonNull) }
         text("PATCH", "v1/engines/defaults", body.toString())
         return models(purpose)
     }
