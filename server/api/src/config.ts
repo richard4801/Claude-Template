@@ -201,6 +201,10 @@ const Env = z.object({
   // Higgsfield API (owner's account): "key-id:key-secret". Unset = Higgsfield models are skipped (Replicate runs them).
   HF_CREDENTIALS: str(),
   HIGGSFIELD_API_URL: z.string().default('https://api.higgsfield.ai'),
+  // Bring your own provider (WS5, plans/api.md "Bring your own provider"): owner-added provider keys are stored encrypted
+  // with this secret (32 bytes: 64 hex characters or base64). Unset = keys can't be added and custom models don't run.
+  PROVIDER_KEYS_SECRET: str(),
+  FAL_PLATFORM_URL: z.string().default('https://api.fal.ai/v1'),
   FAL_COST_PER_IMAGE: num(0.03),
   IMAGE_TIMEOUT_SEC: num(180),
 
@@ -303,6 +307,7 @@ export function describeConfig(c: Config) {
       WORKER_TOKEN: !!c.WORKER_TOKEN,
       OWNER_INVITE_CODE: !!c.OWNER_INVITE_CODE,
       ANTHROPIC_API_KEY: !!c.ANTHROPIC_API_KEY,
+      PROVIDER_KEYS_SECRET: !!c.PROVIDER_KEYS_SECRET, // WS5
     },
   };
 }

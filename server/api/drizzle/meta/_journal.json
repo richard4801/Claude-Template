@@ -169,6 +169,13 @@
       "when": 1794168235585,
       "tag": "0023_claude_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794170135315,
+      "tag": "0024_byo_providers",
+      "breakpoints": true
     }
   ]
 }
