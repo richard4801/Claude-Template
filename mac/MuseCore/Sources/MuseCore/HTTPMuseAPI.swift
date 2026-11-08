@@ -160,7 +160,7 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
         guard let http = resp as? HTTPURLResponse else { return data }
         if !(200..<300).contains(http.statusCode) {
             let err = try? decoder.decode(ErrorBody.self, from: data)
-            throw ApiError(err?.code ?? "http_\(http.statusCode)", err?.error ?? "Server error \(http.statusCode)")
+            throw ApiError(err?.code ?? "http_\(http.statusCode)", err?.error ?? ApiError.plainHTTP(http.statusCode))
         }
         return data
     }

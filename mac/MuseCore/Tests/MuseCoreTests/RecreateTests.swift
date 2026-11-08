@@ -666,4 +666,14 @@ final class RecreateTests: XCTestCase {
             XCTFail("expected an error", file: file, line: line)
         } catch {}
     }
+
+    /// WS1's retry (after a crash): only a failed reference can be read again.
+    func testRetryOnlyForFailedReferences() async throws {
+        let api = FakeRecreateAPI()
+        let refs = try await api.listReferences()
+        let ref = try XCTUnwrap(refs.first)
+        do { _ = try await api.retryReference(ref.id); XCTFail("a ready reference can't be retried") } catch let e as ApiError {
+            XCTAssertEqual(e.code, "not_failed")
+        }
+    }
 }
