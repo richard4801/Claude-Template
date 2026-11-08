@@ -1,13 +1,15 @@
 import Foundation
 
 // Claude in the AI Suite: reference images attached to a chat message (attach button, drag and drop, ⌘V) and the
-// references Claude puts into the shared draft (a pose, style, location or outfit), which the composer shows in its
-// References slots. Rules only; the app uploads with its usual image upload.
+// references Claude puts into the shared draft (`draft.references`, set with its `suite_add_reference` tool). Rules only;
+// the app uploads with the normal image upload (presign → PUT → confirm).
 
 public enum SuiteClaudeAttachments {
     public static let maxCount = 4
-    /// The one refusal for a wrong type or too many.
-    public static let refusal = "Up to 4 images (JPEG, PNG, WebP or HEIC)"
+    /// The server's limit per image.
+    public static let maxBytes = 10 * 1024 * 1024
+    /// The one refusal for a wrong type, too many or too big.
+    public static let refusal = "Up to 4 images (JPEG, PNG, WebP or HEIC), 10 MB each"
 
     /// Allowed file extensions and their types.
     public static let extensions: [String: String] = ["jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp",
@@ -25,13 +27,15 @@ public enum SuiteClaudeAttachments {
         return extensions[ext]
     }
 
-    /// Which of the picked files to take, in order, given how many are already attached: the allowed types while there is
-    /// room. `refusal` when anything was left out.
-    public static func check(existing: Int, picked: [(name: String, mime: String?)]) -> (take: [Int], refusal: String?) {
+    /// Which of the picked files to take, in order, given how many are already attached: allowed types up to 10 MB, while
+    /// there is room. `refusal` when anything was left out. `bytes` nil: not known yet.
+    public static func check(existing: Int, picked: [(name: String, mime: String?, bytes: Int?)]) -> (take: [Int], refusal: String?) {
         var take: [Int] = []
         var refused = false
         for (i, p) in picked.enumerated() {
-            guard mime(name: p.name, mime: p.mime) != nil, existing + take.count < maxCount else { refused = true; continue }
+            var fits = true
+            if let b = p.bytes { fits = b > 0 && b <= maxBytes }
+            guard mime(name: p.name, mime: p.mime) != nil, fits, existing + take.count < maxCount else { refused = true; continue }
             take.append(i)
         }
         return (take, refused ? refusal : nil)
@@ -57,95 +61,75 @@ public enum SuiteClaudeAttachments {
     }
 }
 
-/// A reference image Claude put into the draft (`references[]`: `{image | url, uploadId?, role, label?}`).
-public struct SuiteDraftReference: Hashable, Sendable {
-    public var image: ImageRef
-    /// pose | style | location | outfit
-    public var role: String
-    public var uploadId: String?
+/// A reference image in the shared draft: `draft.references[]` = `{uploadId, url, use: pose | style | location | outfit,
+/// label?}`, at most 3. Claude adds them (`suite_add_reference`); the owner removes one by sending the draft without it.
+public struct SuiteDraftReference: Hashable, Sendable, Identifiable {
+    public var uploadId: String
+    /// A normal /uploads image address.
+    public var url: String
+    public var use: String
     public var label: String?
 
-    public init(image: ImageRef, role: String, uploadId: String? = nil, label: String? = nil) {
-        self.image = image
-        self.role = role
+    public init(uploadId: String, url: String, use: String, label: String? = nil) {
         self.uploadId = uploadId
+        self.url = url
+        self.use = use
         self.label = label
     }
 
-    public static let roles = ["pose", "style", "location", "outfit"]
+    public var id: String { uploadId.isEmpty ? url : uploadId }
+    public static let uses = ["pose", "style", "location", "outfit"]
+    public static let maxCount = 3
 
-    /// The composer's reference role (SlotValue.role: product | location | style | prop | person) for Claude's role.
-    public var slotRole: String {
-        switch role {
-        case "style": return "style"
-        case "location": return "location"
-        default: return "person" // pose and outfit: about the person in the shot
-        }
-    }
+    /// The chip's name: "Pose", "Style", "Location" or "Outfit".
+    public var title: String { use.prefix(1).uppercased() + use.dropFirst() }
 
-    /// "Pose from Claude".
-    public var slotName: String { (role.prefix(1).uppercased() + role.dropFirst()) + " from Claude" }
+    /// The reference role a shot request uses for it: the server takes pose, style, location and outfit as they are.
+    public var requestRole: String { use }
 
     public var json: JSONValue {
-        var o: [String: JSONValue] = ["role": .string(role)]
-        var img: [String: JSONValue] = [:]
-        if let u = image.url { img["url"] = .string(u) }
-        if let a = image.asset { img["asset"] = .string(a) }
-        o["image"] = .object(img)
-        if let u = uploadId { o["uploadId"] = .string(u) }
+        var o: [String: JSONValue] = ["uploadId": .string(uploadId), "url": .string(url), "use": .string(use)]
         if let l = label { o["label"] = .string(l) }
         return .object(o)
     }
 }
 
 public extension SuiteAssistDraft {
-    /// The draft's `references`, read leniently (an entry without an image or role is skipped).
+    /// The draft's `references`, read leniently: an entry needs an upload id or a link and a known use (also read from
+    /// `role`, and the link from `image.url`). At most 3.
     static func references(_ d: SuiteDraft) -> [SuiteDraftReference] {
         guard case .array(let list)? = d.raw["references"] else { return [] }
-        return list.compactMap { v in
-            guard case .object(let o) = v else { return nil }
-            func str(_ k: String, in x: [String: JSONValue]) -> String? { if case .string(let s)? = x[k], !s.isEmpty { return s }; return nil }
-            var image: ImageRef?
-            if case .object(let i)? = o["image"] {
-                let u = str("url", in: i), a = str("asset", in: i)
-                if u != nil || a != nil { image = ImageRef(asset: a, url: u) }
-            } else if let u = str("url", in: o) {
-                image = ImageRef(url: u)
+        var out: [SuiteDraftReference] = []
+        for v in list {
+            guard case .object(let o) = v else { continue }
+            func str(_ k: String, _ x: [String: JSONValue]) -> String? {
+                if case .string(let s)? = x[k], !s.isEmpty { return s }
+                return nil
             }
-            guard let image, let role = str("role", in: o) else { return nil }
-            return SuiteDraftReference(image: image, role: role.lowercased(), uploadId: str("uploadId", in: o), label: str("label", in: o))
+            var url = str("url", o)
+            if url == nil, case .object(let img)? = o["image"] { url = str("url", img) }
+            let up = str("uploadId", o) ?? ""
+            guard let use = (str("use", o) ?? str("role", o))?.lowercased(), SuiteDraftReference.uses.contains(use), url != nil || !up.isEmpty else { continue }
+            out.append(SuiteDraftReference(uploadId: up, url: url ?? "", use: use, label: str("label", o)))
         }
+        return Array(out.prefix(SuiteDraftReference.maxCount))
     }
 
-    /// The draft with these references (demo mode's stand-in for Claude adding them).
+    /// The draft with these references (none: the key is left out).
     static func with(_ refs: [SuiteDraftReference], in d: SuiteDraft) -> SuiteDraft {
         var n = d
-        n.raw["references"] = .array(refs.map(\.json))
+        n.raw["references"] = refs.isEmpty ? nil : .array(refs.prefix(SuiteDraftReference.maxCount).map(\.json))
         return n
     }
 
-    /// Claude's references into the composer's References slots: a known role, not already there, while the quality takes
-    /// more. Anything else is refused with the reason.
-    static func place(_ refs: [SuiteDraftReference], into slots: InputSlots, capacity: Int) -> (slots: InputSlots, added: Int, rejected: [SuiteDraftRejection]) {
-        var out = slots
-        var added = 0
-        var rejected: [SuiteDraftRejection] = []
-        for r in refs {
-            let name = r.label ?? r.role
-            guard SuiteDraftReference.roles.contains(r.role) else {
-                rejected.append(SuiteDraftRejection(field: "Reference", value: name, reason: "isn't a pose, style, location or outfit reference"))
-                continue
-            }
-            let images = out.values.filter { $0.key.kind == .image }
-            if images.contains(where: { $0.value.image == r.image }) { continue }
-            guard images.count < capacity else {
-                rejected.append(SuiteDraftRejection(field: "Reference", value: name,
-                                                    reason: capacity == 0 ? "isn't taken by this quality" : "has no room: this quality takes \(capacity)"))
-                continue
-            }
-            out = out.put(SlotId(.image, images.count), SlotValue(name: r.slotName, image: r.image, role: r.slotRole))
-            added += 1
-        }
-        return (out, added, rejected)
+    /// The shot request with the references as reference images (for the composer's own Generate).
+    static func request(_ r: ShotRequest, with refs: [SuiteDraftReference]) -> ShotRequest {
+        let images = refs.filter { !$0.url.isEmpty }.map { SuiteRefImage(image: ImageRef(url: $0.url), role: $0.requestRole, label: $0.label ?? $0.title) }
+        guard !images.isEmpty else { return r }
+        var out = r
+        var refsOut = out.references ?? SuiteReferences()
+        refsOut.images = (refsOut.images ?? []) + images
+        out.references = refsOut
+        return out
     }
 }

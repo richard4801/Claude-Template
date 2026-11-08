@@ -1,0 +1,1 @@
+ALTER TABLE "recreate_references" ADD COLUMN IF NOT EXISTS "analyze_attempts" integer DEFAULT 0 NOT NULL;

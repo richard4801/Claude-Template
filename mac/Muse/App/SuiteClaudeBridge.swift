@@ -41,8 +41,14 @@ final class SuiteClaudeBridge {
     @ObservationIgnored var pushTask: Task<Void, Never>?
     /// Reference images waiting to go with the next message (up to 4), each uploaded as soon as it is attached.
     var attachments: [Attachment] = []
-    /// "Up to 4 images (JPEG, PNG, WebP or HEIC)" after something was left out.
+    /// "Up to 4 images (JPEG, PNG, WebP or HEIC), 10 MB each" after something was left out.
     var attachNote: String?
+    /// Links of the images that went with the message being sent (for its context line).
+    @ObservationIgnored var sentImages: [(uploadId: String?, url: String)] = []
+    /// The draft's reference images (pose, style, location, outfit): chips in the composer, each removable.
+    var references: [SuiteDraftReference] = []
+    /// A reference was removed (or put back) here: the next PATCH carries the list even when the composer is unchanged.
+    var refsDirty = false
 
     struct DemoLine: Identifiable, Equatable {
         let id = UUID()
@@ -56,11 +62,13 @@ final class SuiteClaudeBridge {
         var name: String
         var data: Data
         var mime: String
-        var ref: ImageRef?
+        /// Once uploaded: its upload id and address.
+        var uploaded: ClaudeAttachment?
         var error: String?
-        var uploading: Bool { ref == nil && error == nil }
-        /// What the message names it by: the upload's asset key, else its address.
-        var uploadId: String? { ref?.asset ?? ref?.url }
+        /// The server couldn't read it (`415 unsupported_image`): offered again as JPEG.
+        var unsupported = false
+        var uploading: Bool { uploaded == nil && error == nil }
+        var ref: ImageRef? { uploaded?.url.map { ImageRef(url: $0) } }
     }
 
     var uploading: Bool { attachments.contains(where: \.uploading) }
@@ -83,6 +91,9 @@ final class SuiteClaudeBridge {
         demoBusy = false
         attachments = []
         attachNote = nil
+        sentImages = []
+        references = []
+        refsDirty = false
     }
 }
 
@@ -168,21 +179,16 @@ extension AppStore {
         updateSuiteAsk(a)
         guard let d = a.draft else { return }
         let before = suite.composer
-        let slotsBefore = suite.composerSlots.slots
+        let refsBefore = c.references
         let r = SuiteAssistDraft.apply(d, to: before, options: suiteDraftOptions)
         var changed = r.changed
-        var rejected = r.rejected
-        // Reference images Claude added (a pose, style, location or outfit) go into the References slots.
+        // Reference images Claude added (a pose, style, location or outfit): chips in the composer.
         let refs = SuiteAssistDraft.references(d)
-        if !refs.isEmpty {
-            let placed = SuiteAssistDraft.place(refs, into: slotsBefore, capacity: SlotKind.image.capacity(composerInputs))
-            rejected += placed.rejected
-            if placed.added > 0 {
-                suite.composerSlots.slots = placed.slots
-                changed.append("References")
-            }
+        if refs != refsBefore {
+            c.references = refs
+            if refs.count > refsBefore.count || !refs.isEmpty { changed.append("References") }
         }
-        c.rejected = rejected
+        c.rejected = r.rejected
         if r.composer != before {
             // A character Claude picked keeps Claude's rig: no default rig is laid on top (as Reuse settings).
             if r.composer.tokens.characterId != before.tokens.characterId { suite.restoredCharacterId = r.composer.tokens.characterId }
@@ -190,8 +196,13 @@ extension AppStore {
         }
         if let text = SuiteAssistDraft.toast(changed) {
             showToast(text, action: "Undo") { [weak self] in
-                self?.suite.composer = before
-                self?.suite.composerSlots.slots = slotsBefore
+                guard let self else { return }
+                self.suite.composer = before
+                if self.suite.claude.references != refsBefore {
+                    self.suite.claude.references = refsBefore
+                    self.suite.claude.refsDirty = true
+                    self.suiteComposerChanged(now: true)
+                }
             }
         }
         c.synced = suite.composer
@@ -199,30 +210,84 @@ extension AppStore {
         if !r.rejected.isEmpty { c.synced = nil; suiteComposerChanged() }
     }
 
+    /// A reference chip's remove button: the draft goes back without it.
+    func removeSuiteClaudeReference(_ ref: SuiteDraftReference) {
+        let c = suite.claude
+        c.references.removeAll { $0.id == ref.id }
+        c.refsDirty = true
+        suiteComposerChanged(now: true)
+    }
+
     // MARK: Attached images
 
-    /// Files from the attach button, a drop or ⌘V: the allowed types while there is room (4), each uploaded with the app's
-    /// image upload right away (demo mode keeps them on this Mac and charges nothing).
+    /// Files from the attach button, a drop or ⌘V: JPEG, PNG, WebP or HEIC up to 10 MB while there is room (4), each
+    /// uploaded right away with the normal image upload (HEIC and WebP go up as JPEG). Demo mode keeps them on this Mac.
     func attachSuiteClaudeImages(_ files: [(name: String, data: Data, mime: String?)]) {
         let c = suite.claude
-        let (take, refusal) = SuiteClaudeAttachments.check(existing: c.attachments.count, picked: files.map { ($0.name, $0.mime) })
+        let (take, refusal) = SuiteClaudeAttachments.check(existing: c.attachments.count, picked: files.map { (name: $0.name, mime: $0.mime, bytes: Optional($0.data.count)) })
         c.attachNote = refusal
+        guard let uploader = suiteAssistAPI else {
+            if !take.isEmpty { c.attachNote = "This server can't take images for Claude yet." }
+            return
+        }
         for i in take {
             let f = files[i]
-            let mime = SuiteClaudeAttachments.mime(name: f.name, mime: f.mime) ?? "image/jpeg"
-            let a = SuiteClaudeBridge.Attachment(name: f.name, data: f.data, mime: mime)
+            var mime = SuiteClaudeAttachments.mime(name: f.name, mime: f.mime) ?? "image/jpeg"
+            var data = f.data
+            var name = f.name
+            if mime == "image/heic" || mime == "image/webp", let jpeg = Self.jpeg(data) {
+                data = jpeg
+                mime = "image/jpeg"
+                name = ((f.name as NSString).deletingPathExtension) + ".jpg"
+            }
+            let a = SuiteClaudeBridge.Attachment(name: name, data: data, mime: mime)
             c.attachments.append(a)
-            Task { [self] in
-                do {
-                    let ref = try await api.uploadImage(name: f.name, data: f.data, mime: mime, progress: nil)
-                    if let k = c.attachments.firstIndex(where: { $0.id == a.id }) { c.attachments[k].ref = ref }
-                } catch {
-                    if let k = c.attachments.firstIndex(where: { $0.id == a.id }) {
-                        c.attachments[k].error = (error as? ApiError)?.friendlyMessage ?? "Couldn't upload \(f.name)"
-                    }
+            uploadSuiteClaudeAttachment(a, with: uploader)
+        }
+    }
+
+    private func uploadSuiteClaudeAttachment(_ a: SuiteClaudeBridge.Attachment, with uploader: any SuiteAssistAPI) {
+        let c = suite.claude
+        Task { [self] in
+            do {
+                let up = try await uploader.uploadClaudeImage(name: a.name, data: a.data, mime: a.mime)
+                if let k = c.attachments.firstIndex(where: { $0.id == a.id }) { c.attachments[k].uploaded = up }
+            } catch let e as ApiError where e.code == "unsupported_image" {
+                if let k = c.attachments.firstIndex(where: { $0.id == a.id }) {
+                    c.attachments[k].error = "\(a.name) couldn't be read. Send it as JPEG instead."
+                    c.attachments[k].unsupported = true
+                }
+            } catch {
+                if let k = c.attachments.firstIndex(where: { $0.id == a.id }) {
+                    c.attachments[k].error = (error as? ApiError)?.friendlyMessage ?? "Couldn't upload \(a.name)"
                 }
             }
         }
+    }
+
+    /// "Send as JPEG" after `415 unsupported_image`: the image converted on this Mac and uploaded again.
+    func resendSuiteClaudeAttachmentAsJPEG(_ id: UUID) {
+        let c = suite.claude
+        guard let k = c.attachments.firstIndex(where: { $0.id == id }), let uploader = suiteAssistAPI else { return }
+        guard let jpeg = Self.jpeg(c.attachments[k].data) else {
+            c.attachments[k].error = "\(c.attachments[k].name) can't be opened on this Mac either. Try another image."
+            c.attachments[k].unsupported = false
+            return
+        }
+        var a = c.attachments[k]
+        a.data = jpeg
+        a.mime = "image/jpeg"
+        a.name = ((a.name as NSString).deletingPathExtension) + ".jpg"
+        a.error = nil
+        a.unsupported = false
+        c.attachments[k] = a
+        uploadSuiteClaudeAttachment(a, with: uploader)
+    }
+
+    /// HEIC or WebP as JPEG (the Mac decodes both).
+    private static func jpeg(_ data: Data) -> Data? {
+        guard let rep = NSBitmapImageRep(data: data) else { return nil }
+        return rep.representation(using: .jpeg, properties: [.compressionFactor: 0.9])
     }
 
     func attachSuiteClaudeImages(urls: [URL]) {
@@ -231,7 +296,6 @@ extension AppStore {
             // Only an allowed type is read; anything else is passed on empty so the refusal names it.
             let ok = SuiteClaudeAttachments.mime(name: u.lastPathComponent) != nil
             let data = ok ? ((try? Data(contentsOf: u)) ?? Data()) : Data()
-            if ok && data.isEmpty { continue }
             files.append((name: u.lastPathComponent, data: data, mime: nil))
         }
         attachSuiteClaudeImages(files)
@@ -245,15 +309,25 @@ extension AppStore {
     /// The uploaded attachments go with this message and leave the row (failed ones stay so they can be removed).
     private func takeSuiteClaudeAttachments() -> [SuiteClaudeBridge.Attachment] {
         let c = suite.claude
-        let ready = c.attachments.filter { $0.ref != nil }
-        c.attachments.removeAll { $0.ref != nil }
+        let ready = c.attachments.filter { $0.uploaded != nil }
+        c.attachments.removeAll { $0.uploaded != nil }
         c.attachNote = nil
         return ready
     }
 
+    /// Sending on this Mac: the attached images saved where Claude Code can Read them (Caches/MUSE/claude/<thread>/), with
+    /// their upload ids; the turn's prompt lists them and the mirrored message carries the ids. Their links also go on
+    /// the message's context line, for the thumbnails until the thread is read again.
+    func suiteClaudeTakeFiles(threadId: String) -> [ClaudeAttachmentFile] {
+        let taken = takeSuiteClaudeAttachments()
+        suite.claude.sentImages = taken.compactMap { a in a.uploaded.flatMap { u in u.url.map { (uploadId: Optional(u.uploadId), url: $0) } } }
+        return taken.compactMap { a in a.uploaded.flatMap { ClaudeAttachmentCache.save(a.data, attachment: $0, threadId: threadId) } }
+    }
+
     /// The message Claude gets: the context line (with the attached images' addresses and upload ids), then the text.
     func suiteClaudeOutgoing(_ text: String) -> String {
-        let images = takeSuiteClaudeAttachments().compactMap { a in a.ref?.url.map { (uploadId: a.ref?.asset, url: $0) } }
+        let images = suite.claude.sentImages
+        suite.claude.sentImages = []
         var line = suiteClaudeContext()
         if let part = SuiteClaudeAttachments.contextPart(images), line.hasSuffix("]") {
             line = String(line.dropLast()) + " · " + part + "]"
@@ -274,12 +348,12 @@ extension AppStore {
     // MARK: The owner's edits → the shared draft
 
     /// The composer changed (by hand, Undo, a picker): send it after a short pause.
-    func suiteComposerChanged() {
+    func suiteComposerChanged(now: Bool = false) {
         let c = suite.claude
-        guard c.open, c.assist != nil, suite.composer != c.synced else { return }
+        guard c.assist != nil, c.open || c.refsDirty, suite.composer != c.synced || c.refsDirty else { return }
         c.pushTask?.cancel()
         c.pushTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 700_000_000)
+            if !now { try? await Task.sleep(nanoseconds: 700_000_000) }
             guard !Task.isCancelled else { return }
             await self?.pushSuiteDraft()
         }
@@ -290,12 +364,15 @@ extension AppStore {
         let c = suite.claude
         guard let api = suiteAssistAPI, let a = c.assist else { return }
         let mine = suite.composer
-        guard mine != c.synced else { return }
+        guard mine != c.synced || c.refsDirty else { return }
+        // The draft's references ride along (the composer doesn't hold them); a removed one is left out.
+        let draft = SuiteAssistDraft.with(c.references, in: ComposerDrafts.draft(mine))
         do {
-            let n = try await api.patchSuiteAssist(id: a.id, SuiteAssistPatch(draft: ComposerDrafts.draft(mine), baseRevision: c.revision))
+            let n = try await api.patchSuiteAssist(id: a.id, SuiteAssistPatch(draft: draft, baseRevision: c.revision))
             c.assist = n
             c.revision = max(c.revision, n.revision)
             c.synced = mine
+            c.refsDirty = false
             updateSuiteAsk(n)
         } catch let e as ApiError where e.code == "stale" && attempt < 2 {
             guard let latest = try? await api.suiteAssist(id: a.id) else { return }
@@ -370,7 +447,9 @@ extension AppStore {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let c = suite.claude
         guard !text.isEmpty, !c.demoBusy, !c.uploading else { return }
-        let images = takeSuiteClaudeAttachments().compactMap(\.ref)
+        let taken = takeSuiteClaudeAttachments()
+        let images = taken.compactMap(\.ref)
+        let uploads = taken.compactMap(\.uploaded)
         c.demoLines.append(.init(fromClaude: false, text: shownDemoText(text), images: images))
         c.demoBusy = true
         Task { [self] in
@@ -378,14 +457,17 @@ extension AppStore {
             await ensureSuiteAssist()
             try? await Task.sleep(nanoseconds: 500_000_000)
             var reply = SuiteAssistClaude.demoReply(to: text, composer: suite.composer, options: suiteDraftOptions)
-            // Attached images: the stand-in adds them to the draft as references (pose, style, location or outfit, from
-            // the words; style when none is named), which land in the composer's References slots.
-            if !images.isEmpty && !reply.generate {
+            // Attached images: the stand-in adds them to the draft as references (as suite_add_reference does): pose,
+            // style, location or outfit from the words, style when none is named. At most 3.
+            if !uploads.isEmpty {
                 let low = text.lowercased()
-                let role = SuiteDraftReference.roles.first { low.contains($0) } ?? "style"
-                let refs = images.map { SuiteDraftReference(image: $0, role: role) }
-                reply.draft = SuiteAssistDraft.with(refs, in: reply.draft ?? ComposerDrafts.draft(suite.composer))
-                reply.text += images.count == 1 ? " I added your image as a \(role) reference." : " I added your \(images.count) images as \(role) references."
+                let use = SuiteDraftReference.uses.first { low.contains($0) } ?? "style"
+                let added = uploads.map { SuiteDraftReference(uploadId: $0.uploadId, url: $0.url ?? "", use: use) }
+                let refs = Array((c.references + added).suffix(SuiteDraftReference.maxCount))
+                reply.draft = SuiteAssistDraft.with(refs, in: reply.draft ?? SuiteAssistDraft.with(c.references, in: ComposerDrafts.draft(suite.composer)))
+                reply.text += uploads.count == 1 ? " I added your image as a \(use) reference." : " I added your \(uploads.count) images as \(use) references."
+            } else if let d = reply.draft {
+                reply.draft = SuiteAssistDraft.with(c.references, in: d)
             }
             guard let fake = api as? FakeMuseAPI, let a = c.assist else {
                 c.demoLines.append(.init(fromClaude: true, text: c.error ?? "The composer isn't shared yet. Close this panel and open it again."))
@@ -442,7 +524,7 @@ extension AppStore {
         if ask && c.ask == nil {
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 700_000_000)
-                self?.sendSuiteClaudeDemo("Go")
+                self?.sendSuiteClaudeDemo("Pose reference. Go")
             }
         }
     }
