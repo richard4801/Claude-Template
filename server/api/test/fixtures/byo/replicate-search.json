@@ -1,0 +1,9 @@
+{
+  "query": "motion",
+  "models": [
+    { "model": { "owner": "acme", "name": "motion-1", "description": "Text and image to video with first-frame control" },
+      "metadata": { "generated_description": "A video model", "tags": ["video"], "score": 0.92 } },
+    { "model": { "owner": "acme", "name": "still-1", "description": "Photoreal image generation with reference images" },
+      "metadata": { "tags": ["image"], "score": 0.41 } }
+  ]
+}
