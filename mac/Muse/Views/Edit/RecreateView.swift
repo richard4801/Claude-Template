@@ -402,10 +402,18 @@ struct RecreateStart: View {
                 .accessibilityLabel("Fetch the video")
             }
             if rs.fetchingLink {
-                HStack(spacing: Space.s2) {
-                    ProgressView().controlSize(.small)
-                    Text("Fetching the video").scaled(t.scale.caption, t.roles.ink2)
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    HStack(spacing: Space.s2) {
+                        ProgressView().controlSize(.small)
+                        Text(rs.linkStatus ?? "Fetching the video…").scaled(t.scale.caption, t.roles.ink2).monospacedDigit()
+                        Spacer(minLength: Space.s2)
+                        RButton("Stop", kind: .plain, small: true) { store.stopRecreateLinkFetch() }
+                            .fixedSize()
+                            .accessibilityLabel("Stop fetching")
+                    }
+                    if let v = rs.linkProgress { RProgress(value: v) }
                 }
+                .background(SnapshotFrame(key: "linkFetching"))
             } else if let p = rs.linkProblem {
                 RecreateLinkProblemNote(problem: p) { importing = true }
             } else {

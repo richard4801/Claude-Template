@@ -88,6 +88,8 @@ public actor FakeMuseAPI: MuseAPI {
                        createdAt: 1_762_300_000_000, updatedAt: 1_762_600_000_000),
     ]
     var suiteQueue: [FakeQueued] = []
+    /// Claude in the Suite (Suite/FakeMuseAPI+Assist.swift): the shared drafts by id.
+    var suiteAssists: [String: SuiteAssist] = [:]
 
     /// - Parameters:
     ///   - speed: simulation speed; 0 freezes the queue (tests).

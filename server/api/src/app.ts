@@ -34,6 +34,7 @@ import { ToolService } from './services/tools.js';
 import { EngineHealth } from './services/engines.js';
 import { SuiteService } from './suite/service.js';
 import { registerSuiteRoutes } from './routes/suite.js';
+import { registerProviderRoutes } from './routes/providers.js'; // WS5: bring your own provider
 import { recreateOf } from './recreate/references.js';
 
 declare module 'fastify' {
@@ -151,6 +152,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   await registerWorkerRoutes(app, ctx);
   await registerVersionRoutes(app, ctx);
   await registerSuiteRoutes(app, ctx); // AI suite (workstream 1)
+  await registerProviderRoutes(app, ctx); // WS5: bring your own provider
   await registerCameraRoutes(app, ctx); // workstream 2: camera sessions, Direct with Claude, Blender relay, MCP server
   await registerEditorAiRoutes(app, ctx); // Editor v2 (workstream 3)
 

@@ -1426,7 +1426,7 @@ For the screens (`plans/learning-editor-ui.md`, 2026-11-08):
 - Optionally a gap tool → `addGap(user, {key, kind, what, note})`.
 
 ### Recreate analysis on a small server: memory, crashes, Retry (workstream 1, 2026-11-08)
-Migration **0024** (`recreate_references.analyze_attempts`). Tests `test/recreate-memory.test.ts`.
+Migration **0025** (`recreate_references.analyze_attempts`). Tests `test/recreate-memory.test.ts`.
 
 Prod's first real run was killed mid-analysis (512 MB box). The text-motion step decoded the full-size video about 13 times at once, peaking at 1.6 GB for a 60 s 1080×1920 clip. Now:
 - **One decoder at a time.** Every analysis decode uses `-threads 2 -filter_threads 1`, and frames are scaled inside ffmpeg; Node only gets small frames. Text motion reads each in/out window through one pipe. Pose tracks decode each shot to a temp file at a 256 px long edge, in 24-frame jobs, so ffmpeg and the pose child never run together. The stored video is copied to a local temp file, from S3 too. A take's pose read is skipped while an analysis runs.
@@ -1702,3 +1702,58 @@ ClaudeStatus  { mac: { online: boolean, claudeCode: { installed: boolean, signed
 | `claude_busy` | 409 | a turn on that thread is already queued or running |
 | `turn_expired` | 410 | claiming a turn that timed out |
 | `fallback_off` | 409 | `api-turn` while the API fallback is off or no key is set |
+
+## Bring your own provider (WS5, 2026-11-08, owner-approved)
+In Settings, the owner adds an API key for a provider. MUSE lists that provider's models, the owner switches on the ones they want and names them, and enabled models appear in the AI Suite like built-in ones. Code: `server/api/src/byo/**`, routes `src/routes/providers.ts`, migration **0024_byo_providers**, tests `test/byo.test.ts` (recorded fixtures in `test/fixtures/byo`; no live provider calls).
+
+**Providers.** Replicate and fal.ai, both of which publish machine-readable input schemas. Each provider is an adapter (`byo/adapters.ts` `ProviderAdapter`): validate a key, search models, read one model, start/get/cancel a run. More can be added later (e.g. OpenAI-compatible image endpoints) by implementing that interface.
+
+**Keys.** A key is checked with one free read-only call before it is stored: Replicate `GET /v1/account`, fal `GET /v1/models/pricing`. It is stored AES-256-GCM encrypted with `PROVIDER_KEYS_SECRET` (32 bytes, 64 hex characters or base64), bound to its row. Without the secret, the server fails closed: 503 `provider_keys_unavailable`, and custom models don't run. A key is never returned, logged or printed; the API shows `keyLast4` and `status` only. Provider calls happen on the server only. A key is sent only to its provider's own host. A fal status URL on another host is replaced by the documented one.
+
+**Reading a model** (`byo/classify.ts`). Each input field is matched to a role: prompt, negative prompt, start/end frame, reference images (a list, or one image for image models), duration (number, integer or string enum), aspect ratio, resolution, seed, sound switch, width/height. The kind (image or video) comes from fal's category, the output schema, then the inputs and description. A required field with no role and no default makes the model `needs_setup` until the owner gives it a fixed value (`fixedInputs`). Only fields in the schema are ever sent.
+
+### Endpoints (owner only; members get 403 `owner_only`)
+| | |
+|---|---|
+| `GET /v1/providers/kinds` | `{kinds:[{kind, label, keyHint, keyUrl}], keysReady}` |
+| `GET /v1/providers` | `{providers: Provider[], keysReady}` |
+| `POST /v1/providers {kind:'replicate'\|'fal', apiKey, label?}` | 201 `Provider`. Errors: 400 `invalid_key` (nothing stored), 502 `provider_unreachable`, 503 `provider_keys_unavailable`. At most 10 per studio. |
+| `PATCH /v1/providers/:id {label?, apiKey?}` | `Provider`. A new key is validated again. |
+| `DELETE /v1/providers/:id` | 204. Its models are removed and leave the Suite. |
+| `GET /v1/providers/:id/models?q=&kind=image\|video&cursor=&limit=` | `{models: CatalogModel[], nextCursor}`. Cached for 10 min per query; limit ≤ 50. Replicate: search (or its text-to-video / image-to-video / text-to-image collections when `q` is empty). fal: model list with schemas plus prices. |
+| `POST /v1/providers/:id/models {ref, displayName?}` | 201 `CustomModel`, added switched off. Adding the same ref again returns the existing model. |
+| `GET /v1/providers/models` | `{models: CustomModel[]}` (all providers) |
+| `PATCH /v1/providers/models/:id {enabled?, displayName?, members?, price?, priceScale?, kind?, fixedInputs?}` | `CustomModel`. `enabled:true` returns 409 `needs_setup` while `missing` isn't empty, and 400 `price_required` with no price. |
+| `DELETE /v1/providers/models/:id` | 204 |
+
+- `Provider` = `{id, kind, label, keyLast4:'…a1b2', status:'ok'|'invalid', checkedAt, createdAt, models:{added, enabled}}`. A key the provider refuses during a run sets `status:'invalid'`.
+- `CatalogModel` = `{ref, name, description, kind:'image'|'video'|null, inputs: Inputs, missing:[field], ready, price: Price|null, added:{id, enabled}|null}`.
+- `Inputs` = `{prompt, negativePrompt, startImage, endImage, referenceImages:n, duration:{min,max,allowed?}|null, aspectRatios:[], resolutions:[], seed}`.
+- `Price` = `{basis:'per_run'|'per_second', costUsd, source:'provider'|'owner'}`.
+- `CustomModel` = `{id:'c_…', providerId, providerKind, ref, providerName, displayName, kind, enabled, members, status:'ready'|'needs_setup', missing, inputs, fields, fixedInputs, price, priceScale, memberPrice:{basis, usd}|null, createdAt, updatedAt}`.
+
+### Pricing and spend
+- **Cost basis:** the provider's own price where it publishes one. fal publishes it (unit `second` → per second; `image`/`video`/`request` → per run). Replicate's API has no prices, so the owner enters a per-run (or per-second) estimate, editable any time; owner prices are capped at $50.
+- **Member price:** cost × `priceScale`, the Suite's per-model markup (0.5–3, default 1), set on the custom model.
+- **Video:** a per-second price is the model's `perSec`; a per-run price is a fixed amount per take (`extraPerTake`).
+- **Photo:** priced per photo.
+- **Spend:** every run goes through the normal Suite estimate → confirm → hold → settle, and the suite and wallet daily caps. Test mode (`SUITE_MODE=mock`) runs custom models on the test renderer and calls no provider.
+
+### In the Suite
+- **Catalog:** `GET /v1/suite/catalog` adds `custom: [{id, name, kind, price:{basis, usd}, inputs: InputSlots, minSeconds, maxSeconds, aspectRatios}]`. The owner sees every enabled model, plus `members` and `provider`. Members see only models marked `members: true`, by the owner's display name, with no provider, ref or field names.
+- **Video:** `POST /v1/suite/shots/estimate` and `/v1/suite/shots` take `engineModel:'c_…'`. Members may pass it for a model available to them; built-in `engineModel`s stay owner-only. Custom models make plain shots: text, keyframe or reference, not swap, recast or extend. The owner can also put custom ids on the tier ladders in `/v1/suite/settings`.
+- **Photo:** `POST /v1/suite/photos/estimate` and `/v1/suite/photos` take `engineModel:'c_…'` (an image model). It replaces the studio's image engine for that run. References go in the model's own image field, up to its limit.
+
+### Owner's model picker (WS5, added 2026-11-08 at the coordinator's request; for the WS7/WS6 model picker)
+- **`GET /v1/suite/catalog`, owner only, adds `engines[]`:** a flat list across tiers, built-in and enabled custom, video and image. Members never get this field. Each entry is:
+
+  ```
+  {model, name, kind:'video'|'image', custom, tier|null, tiers:[...], resolution|null,
+   resolutions:[{id, label, perSec}], perSec|null, perRun|null, minSeconds, maxSeconds,
+   allowedSeconds|null, aspectRatios, inputs: InputSlots, price:{basis:'per_run'|'per_second', usd}|null}
+  ```
+
+  - **Prices** are after the model's priceScale. Video: `perSec` at `resolution`, plus `perRun` for per-run custom models. Image: `perRun` = one photo (built-in: the studio's photo model with 3 identity images; null when its price is unknown).
+  - **Video entries:** every registry model that makes shots and is enabled, licensed (acknowledged) and on a set-up provider, plus enabled custom video models. `tier` is the first tier whose ladder lists it (null if none).
+  - **Image entries:** the studio's photo model (Settings → Engines → Image models), plus enabled custom image models.
+- **`POST /v1/suite/photos/estimate` and `/v1/suite/photos` take `imageModel`, owner only (members get 403 `owner_only`):** a Replicate image model `owner/name` (priced on that model, as the per-step override) or a custom id `c_…`. Use either `imageModel` or `engineModel`, not both (400). Members can still pass `engineModel:'c_…'` for a custom image model the owner made available.

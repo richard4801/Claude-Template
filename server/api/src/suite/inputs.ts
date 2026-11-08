@@ -14,6 +14,7 @@ export function buildInput(m: ModelSpec, p: ShotPlan, u: MediaUrls): Record<stri
   const i: Record<string, unknown> = { prompt: p.prompt };
   const frames = !!(u.start || u.end);
   switch (m.adapter) {
+    case 'byo': return byoInput(m, p, u); // WS5: an owner-added model, filled from its own schema
     case 'hf-h3': // Higgsfield (api.higgsfield.ai): text-to-video / reference-to-video; 2K only; no watermark (labels are the user's choice)
       i.duration = p.seconds; i.resolution = '2K'; i.aspect_ratio = p.aspect; i.aigc_watermark = false;
       set(i, 'image_urls', u.refs.slice(0, 9)); set(i, 'video_urls', u.videos.slice(0, 3)); set(i, 'audio_urls', u.audio ? [u.audio] : undefined);
@@ -85,5 +86,34 @@ export function buildInput(m: ModelSpec, p: ShotPlan, u: MediaUrls): Record<stri
       Object.assign(i, { duration: p.seconds, resolution: p.resolution, aspect_ratio: p.aspect, start: u.start, middle: u.middle, end: u.end, refs: u.refs, videos: u.videos, audio: u.audio, ...p.params });
       break;
   }
+  return i;
+}
+
+/**
+ * Bring your own provider (WS5): fills an owner-added model's inputs from the roles its schema analysis found, on top of
+ * the owner's fixed values for fields MUSE can't fill. Nothing outside the schema is sent.
+ */
+export function byoInput(m: ModelSpec, p: Pick<ShotPlan, 'prompt' | 'negative' | 'seconds' | 'aspect' | 'resolution' | 'seed' | 'audio'>, u: MediaUrls): Record<string, unknown> {
+  const b = m.byo!, map = b.analysis.map, sh = b.analysis.shapes;
+  const i: Record<string, unknown> = { ...b.fixed };
+  if (map.prompt) i[map.prompt] = p.prompt;
+  if (map.negativePrompt && p.negative) i[map.negativePrompt] = p.negative;
+  if (map.startImage && u.start) i[map.startImage] = u.start;
+  if (map.endImage && u.end && (u.start || !map.startImage)) i[map.endImage] = u.end;
+  if (map.referenceImages) {
+    const refs = u.refs.length ? u.refs : [];
+    if (sh.referenceImages === 'single') { if (refs[0]) i[map.referenceImages] = refs[0]; }
+    else if (refs.length) i[map.referenceImages] = refs.slice(0, Math.max(1, b.analysis.inputs.referenceImages));
+  }
+  const d = b.analysis.inputs.duration;
+  if (map.duration && d) {
+    let v = Math.max(d.min, Math.min(d.max, p.seconds));
+    if (d.allowed?.length) v = d.allowed.reduce((a, c) => (Math.abs(c - p.seconds) < Math.abs(a - p.seconds) ? c : a));
+    i[map.duration] = sh.duration === 'string' ? String(v) : sh.duration === 'integer' ? Math.round(v) : v;
+  }
+  if (map.aspectRatio && (!b.analysis.inputs.aspectRatios.length || b.analysis.inputs.aspectRatios.includes(p.aspect))) i[map.aspectRatio] = p.aspect;
+  if (map.resolution && p.resolution && p.resolution !== 'auto') i[map.resolution] = p.resolution;
+  if (map.seed && p.seed != null) i[map.seed] = p.seed;
+  if (map.audio) i[map.audio] = p.audio;
   return i;
 }

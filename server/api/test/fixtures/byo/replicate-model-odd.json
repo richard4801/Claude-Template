@@ -1,0 +1,14 @@
+{
+  "owner": "acme", "name": "odd-1", "description": "Stylised video clips",
+  "latest_version": {
+    "id": "aa11bb22cc33dd44ee55ff66aa77bb88cc99dd00ee11ff22aa33bb44cc55dd66",
+    "openapi_schema": { "components": { "schemas": {
+      "Input": { "type": "object", "required": ["prompt", "style_code"], "properties": {
+        "prompt": { "type": "string" },
+        "style_code": { "type": "string", "description": "House style code" },
+        "duration": { "type": "integer", "minimum": 2, "maximum": 8, "default": 4 }
+      } },
+      "Output": { "type": "string", "format": "uri" }
+    } } }
+  }
+}

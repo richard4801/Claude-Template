@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.roborazzi)
+    alias(libs.plugins.chaquopy)
 }
 
 android {
@@ -14,13 +15,16 @@ android {
         applicationId = "studio.muse.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 3
+        versionName = "0.1.2"
         // The live MUSE API (server/api on Railway). Settings → Developer can point the app at another URL
         // (e.g. http://10.0.2.2:8787/ for a local server/api or server/mock from the emulator).
         buildConfigField("String", "DEFAULT_SERVER_URL", "\"https://angelic-elegance-production-c42b.up.railway.app/\"")
         // Demo mode (the in-process fake with the bundled sample studio) is off by default in every build.
         buildConfigField("boolean", "DEFAULT_USE_FAKE", "false")
+        // Recreate links are fetched on the phone (platforms block the studio server): Python and yt-dlp ship for
+        // 64-bit ARM phones only, to keep the APK small. Other phones fall back to the server's fetch, then the file.
+        ndk { abiFilters += listOf("arm64-v8a") }
     }
 
     // Release signing (WS4): the studio's release key comes from the environment, never from git. Without it the
@@ -65,6 +69,8 @@ android {
     }
     packaging {
         resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}", "/META-INF/LICENSE*", "/META-INF/NOTICE*")
+        // The phone's Python (Recreate links) is ~12 MB of native libraries: compressed in the APK, so the download stays smaller.
+        jniLibs.useLegacyPackaging = true
     }
     sourceSets["main"].assets.srcDir("../../server/api/assets/lookpack") // the look pack (single copy) → assets/looks/…
     // AI suite: the composer's preview loops and stills (design/previews, rendered in Blender) → assets/previews/…
@@ -79,6 +85,15 @@ val copyComposerPreviews by tasks.registering(Sync::class) {
     into(layout.buildDirectory.dir("generated/composerPreviews/previews"))
 }
 tasks.named("preBuild") { dependsOn(copyComposerPreviews) }
+
+// Recreate links on the phone (WS4): yt-dlp, pinned to the server's version, with no ffmpeg (formats that already
+// carry video and sound). Chaquopy (MIT) runs it; app/src/main/python/muse_fetch.py is the entry point.
+chaquopy {
+    defaultConfig {
+        version = "3.13"
+        pip { install("yt-dlp==2026.10.26") }
+    }
+}
 
 kotlin {
     jvmToolchain(21)
