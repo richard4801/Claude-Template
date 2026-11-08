@@ -240,6 +240,8 @@ final class AppStore {
     let suite = SuiteState()
     /// "Recreate this edit" in Edit (AppStore+Recreate.swift).
     let recreate = RecreateState()
+    /// The learning editor in Edit: Playbook and Recipes (AppStore+Learn.swift).
+    let learn = LearnState()
 
     // MARK: Video studio
 
@@ -485,6 +487,7 @@ final class AppStore {
         resetWarm()
         suite.reset() // AI suite (workstream 1)
         recreate.reset()
+        learn.reset()
         Task { await restoreSession() }
     }
 
