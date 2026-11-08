@@ -112,11 +112,11 @@ public enum ChatLeakFilter {
         return s
     }
 
+    /// A context line the app put in front: one bracketed line starting with a capital ("[Suite …]", "[Camera session …]",
+    /// "[Recreate …]", "[Edit …]"); the same rule as the Android chat (^\[[A-Z][^\]]*\]$).
     private static func contextLine(_ line: String) -> Bool {
         let t = line.trimmingCharacters(in: .whitespaces)
-        guard t.hasPrefix("["), t.hasSuffix("]") else { return false }
-        let head = t.dropFirst().prefix { $0.isLetter }
-        return ["Suite", "Recreate", "Camera", "Edit", "MUSE", "Muse", "Context", "System"].contains(String(head))
+        return t.range(of: #"^\[[A-Z][^\]]*\]$"#, options: .regularExpression) != nil
     }
 
     /// Line by line: context lines, raw JSON, stack traces. Lines inside a code fence are left alone, except a fence that

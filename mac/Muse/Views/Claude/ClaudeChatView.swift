@@ -238,7 +238,7 @@ struct ClaudeChatView: View {
         let local = suiteAttach == nil
         return ChatComposerBar(
             text: $model.composer,
-            placeholder: placeholder ?? "Ask Claude…",
+            placeholder: placeholder ?? "Message Claude…",
             busy: model.busy,
             held: model.thread == nil || sendBlocked,
             suggestions: suggestions,
