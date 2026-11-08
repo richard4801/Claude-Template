@@ -110,9 +110,14 @@ import kotlin.math.roundToInt
 fun EditSuiteScreen(takeId: String?, onBack: () -> Unit) {
     var open by rememberSaveable(takeId) { mutableStateOf(takeId) }
     var recreating by rememberSaveable { mutableStateOf(false) } // "Recreate an edit" (plans/recreate-edit.md)
+    var reference by rememberSaveable { mutableStateOf<String?>(null) } // a library reference opened in the Recipe view
+    var learn by rememberSaveable { mutableStateOf<String?>(null) } // "playbook" | "recipes" (plans/learning-editor-ui.md), owner only
     val id = open
-    if (recreating) RecipeScreen(onBack = { recreating = false })
-    else if (id == null) EditHome(onBack, onRecreate = { recreating = true }) { open = it }
+    if (recreating) RecipeScreen(onBack = { recreating = false; reference = null }, referenceId = reference)
+    else if (id == null && learn == "playbook") studio.muse.app.ui.screens.edit.learn.PlaybookScreen(onBack = { learn = null }, onOpenTake = { open = it })
+    else if (id == null && learn == "recipes") studio.muse.app.ui.screens.edit.learn.RecipesScreen(
+        onBack = { learn = null }, onOpenTake = { open = it }, onOpenReference = { reference = it; recreating = true }, onRecreate = { recreating = true })
+    else if (id == null) EditHome(onBack, onRecreate = { recreating = true }, onLearn = { learn = it }) { open = it }
     else EditSuiteEditor(id, onBack = { if (takeId == null) open = null else onBack() })
 }
 
@@ -123,15 +128,17 @@ fun editableTakes(takes: List<Take>): List<TakeChoice> = takes.filter { it.kind 
 }
 
 @Composable
-fun EditHome(onBack: () -> Unit, onRecreate: () -> Unit, onOpen: (String) -> Unit) {
+fun EditHome(onBack: () -> Unit, onRecreate: () -> Unit, onLearn: (String) -> Unit = {}, onOpen: (String) -> Unit) {
     val c = LocalContainer.current
     val state by c.repo.state.collectAsState()
+    val prefs by c.prefs.collectAsState()
+    val owner = c.repo.demo || prefs.owner // the learning editor is the owner's (the server answers members 403)
     // "Recreate an edit": WS1's /v1/recreate/references (demo mode: FakeMuseApi's).
-    EditHomeContent(editableTakes(state.takes), onBack, onOpen, onRecreate = onRecreate)
+    EditHomeContent(editableTakes(state.takes), onBack, onOpen, onRecreate = onRecreate, onLearn = onLearn.takeIf { owner })
 }
 
 @Composable
-fun EditHomeContent(takes: List<TakeChoice>, onBack: () -> Unit, onOpen: (String) -> Unit, onRecreate: (() -> Unit)? = null) {
+fun EditHomeContent(takes: List<TakeChoice>, onBack: () -> Unit, onOpen: (String) -> Unit, onRecreate: (() -> Unit)? = null, onLearn: ((String) -> Unit)? = null) {
     val m = muse
     ScreenBox(statusPad = true) {
         Column(Modifier.fillMaxSize()) {
@@ -151,6 +158,13 @@ fun EditHomeContent(takes: List<TakeChoice>, onBack: () -> Unit, onOpen: (String
                             T("Pick an edit you love and see its recipe: shots, beats, text and grade", m.scale.caption, m.t.muted, maxLines = 2)
                         }
                         EIc("chev-r", 16.dp, m.t.muted)
+                    }
+                }
+                // The learning editor (plans/learning-editor-ui.md): two quiet text buttons, owner only.
+                if (onLearn != null) item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        studio.muse.app.ui.screens.edit.learn.LearnQuiet("Playbook", "book-open-text") { onLearn("playbook") }
+                        studio.muse.app.ui.screens.edit.learn.LearnQuiet("Recipes", "stack") { onLearn("recipes") }
                     }
                 }
                 val edited = takes.filter { it.edited }; val renders = takes.filter { !it.edited }

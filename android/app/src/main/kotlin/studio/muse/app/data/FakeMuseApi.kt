@@ -1116,6 +1116,45 @@ class FakeMuseApi(
         if (!suiteOwner) throw ApiException("owner_only", "Only the studio owner can do that")
         suite.patch(req)
     }
+    // The learning editor (workstream 3's /v1/learn/*): demo's playbook, lessons, corrections, library and gaps, in memory.
+    private val learnRules = FakeLearn.rules().toMutableList()
+    private val learnRecipes = FakeLearn.recipes().toMutableList()
+    private var learnSeq = 100
+    override suspend fun playbook(): List<LearnRule> = lock.withLock { learnRules.sortedWith(compareByDescending<LearnRule> { it.pinned }.thenByDescending { it.evidence.size }.thenByDescending { it.createdAt }) }
+    override suspend fun addRule(req: LearnRuleRequest): LearnRule = lock.withLock {
+        val text = req.text?.trim().orEmpty()
+        if (text.isEmpty()) throw ApiException("bad_request", "Say what Claude should do")
+        if (learnRules.size >= 200) throw ApiException("limit", "The playbook holds 200 rules · delete some first")
+        val now = System.currentTimeMillis()
+        LearnRule("rule_${++learnSeq}", text.take(300), req.area ?: "other", "owner", req.pinned ?: false, req.evidence.orEmpty(), now, now).also { learnRules += it }
+    }
+    override suspend fun patchRule(id: String, req: LearnRuleRequest): LearnRule = lock.withLock {
+        val i = learnRules.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: throw ApiException("not_found", "Rule not found")
+        val r = learnRules[i]
+        learnRules[i] = r.copy(text = req.text?.trim()?.take(300) ?: r.text, area = req.area ?: r.area, evidence = req.evidence ?: r.evidence, pinned = req.pinned ?: r.pinned, updatedAt = System.currentTimeMillis())
+        learnRules[i]
+    }
+    override suspend fun deleteRule(id: String) { lock.withLock { learnRules.removeAll { it.id == id } } }
+    override suspend fun lessons(): List<LearnLesson> = FakeLearn.lessons()
+    override suspend fun corrections(limit: Int): List<LearnCorrection> = FakeLearn.corrections().take(limit)
+    override suspend fun recipes(q: String?, tags: List<String>, origin: String?): List<LearnRecipeEntry> = lock.withLock {
+        learnRecipes.filter { r ->
+            (q.isNullOrBlank() || listOf(r.name, r.summary).plus(r.tags).any { it.contains(q.trim(), ignoreCase = true) }) &&
+                r.tags.containsAll(tags) && (origin == null || r.origin == origin)
+        }.sortedByDescending { it.createdAt }.map { it.copy(recipe = null) }
+    }
+    override suspend fun recipe(id: String): LearnRecipeEntry = lock.withLock { learnRecipes.firstOrNull { it.id == id } ?: throw ApiException("not_found", "Recipe not found") }
+    override suspend fun patchRecipe(id: String, req: LearnRecipePatch): LearnRecipeEntry = lock.withLock {
+        val i = learnRecipes.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: throw ApiException("not_found", "Recipe not found")
+        learnRecipes[i] = learnRecipes[i].let { r -> r.copy(name = req.name?.trim()?.take(80) ?: r.name, tags = req.tags?.map { it.lowercase().trim() }?.filter { it.isNotEmpty() }?.distinct() ?: r.tags) }
+        learnRecipes[i]
+    }
+    override suspend fun deleteRecipe(id: String) { lock.withLock { learnRecipes.removeAll { it.id == id } } }
+    override suspend fun nearestRecipes(id: String, k: Int): LearnNearest = lock.withLock {
+        LearnNearest(id, learnRecipes.filter { it.id != id }.mapIndexed { i, r -> r.copy(recipe = null, distance = .2 + i * .25) }.take(k))
+    }
+    override suspend fun learnGaps(limit: Int): List<LearnGap> = FakeLearn.gaps().take(limit)
+
     // Recreate this edit (workstream 1's /v1/recreate/references): the analysis steps the server reports, then demo's recipe.
     private val recreatePolls = HashMap<String, Int>()
     private val recreatePhases = listOf("Finding the cuts", "Listening for the beat", "Reading the text", "Reading the look", "Writing the recipe")
