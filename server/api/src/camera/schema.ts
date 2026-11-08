@@ -135,7 +135,7 @@ export const claudeThreads = pgTable('claude_threads', {
   id: text('id').primaryKey(),
   studioId: text('studio_id').notNull(),
   ownerId: text('owner_id').notNull(),
-  contextKind: text('context_kind').notNull().$type<'camera' | 'edit'>(),
+  contextKind: text('context_kind').notNull().$type<'camera' | 'edit' | 'recreate' /* workstream 1: a Recreate reference */>(),
   contextId: text('context_id').notNull(),
   claudeSessionId: text('claude_session_id'),
   createdAt: ms('created_at').notNull(),

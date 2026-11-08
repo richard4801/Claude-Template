@@ -467,7 +467,8 @@ private fun RecipeDetail(d: RecipeDetailUi, picture: RecipePicture, panel: Boole
                 }
             }
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                val usable = if (e.isReference) e.referenceId != null else e.takeId != null
+                val usable = e.available && if (e.isReference) e.referenceId != null else e.takeId != null
+                if (!e.available) T(if (e.isReference) "The reference video has expired. The recipe stays." else "This edit isn't in your studio any more.", m.scale.caption, m.roles.ink2)
                 if (usable) LearnPrimary(if (e.isReference) "Use in Recreate" else "Open edit", Modifier.fillMaxWidth()) { act(RecipesAction.Use) }
                 LearnQuiet("Delete recipe", color = m.roles.danger) { act(RecipesAction.AskDelete) }
             }

@@ -186,6 +186,10 @@ const Env = z.object({
   RECREATE_LINKS: bool(true),
   YTDLP_PATH: z.string().default('yt-dlp'),
   RECREATE_LINK_MAX_MB: num(80),
+  /** Paid AI editing helpers (workstream 1): the price is the provider's cost × this (the owner's choice, like Upscale). */
+  EDITOR_MARKUP: num(2),
+  /** Per studio per day (UTC), what paid AI editing helpers may charge in all; the owner can change it in the app. */
+  EDITOR_CAP_PER_DAY_USD: num(5),
 
   // Images
   /** Unset: "replicate" when REPLICATE_API_TOKEN is set, else "simulated". */
@@ -232,6 +236,8 @@ const Env = z.object({
   /** Claude API key for the in-app Direct with Claude chat. Unset: the chat answers director_unavailable. */
   ANTHROPIC_API_KEY: str(),
   DIRECTOR_MODEL: z.string().default('claude-opus-5-5'),
+  /** workstream 1 (G8): the model that writes Recreate shot briefs on the server (opt-in, priced, in the editor's daily cap). */
+  RECREATE_BRIEF_MODEL: z.string().default('claude-sonnet-5-5'),
   DIRECTOR_EFFORT: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).default('high'),
   DIRECTOR_MAX_TOKENS: num(32000),
   /** Most model turns (tool rounds) in one chat message. */

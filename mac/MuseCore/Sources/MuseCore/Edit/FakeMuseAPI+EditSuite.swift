@@ -33,13 +33,48 @@ extension FakeMuseAPI {
         return out
     }
 
+    /// Takes the app made up for a check (the Mac's Edit check), so the editor jobs on them find their source.
+    public func adoptTakes(_ ts: [Take]) {
+        for t in ts where !takes.contains(where: { $0.id == t.id }) { takes.append(t) }
+    }
+
+    /// Sets the fake's guardrails (see `editorPriceUsd`): the Mac's Edit check tries the confirm and refusal states with them.
+    public func setEditorGuardrails(priceUsd: Double = 0, paidOff: Bool = false, capHit: Bool = false) {
+        editorPriceUsd = priceUsd; editorPaidOff = paidOff; editorCapHit = capHit
+    }
+
+    /// A run that would cost money on the server (not the free passes).
+    private func isPaid(_ req: EditorJobRequest) -> Bool {
+        switch req.kind {
+        case .captions, .matte: return true
+        case .denoise: return req.options?.analyzeOnly != true
+        case .cuts, .beats: return false
+        }
+    }
+
+    /// The server's answers when the owner switched paid helpers off or today's cap is reached (WS1's guardrails).
+    private func checkGuardrails(_ req: EditorJobRequest) throws {
+        guard isPaid(req) else { return }
+        if editorPaidOff { throw ApiError("editor_paid_off", "AI editing helpers are switched off for now · the owner can switch them back on") }
+        if editorCapHit { throw ApiError("editor_daily_cap", "Today’s AI editing limit ($5.00) is reached · try tomorrow, or the owner can raise it") }
+    }
+
+    public func editorFeatures() throws -> EditorFeatures? {
+        guard editorPaidOff else { return nil }
+        let off = EditorFeatures.Helper(available: false)
+        return EditorFeatures(paid: EditorFeatures.Helper(available: false, reason: "AI editing helpers are switched off for now"), captions: off, matte: off, denoise: off)
+    }
+
     public func editorEstimate(_ req: EditorJobRequest) throws -> EditorEstimate {
         let d = try editorSourceDuration(req.source)
-        return EditorEstimate(kind: req.kind, usd: 0, tokens: 0, free: true, reusesTranscript: false, durationSec: d)
+        try checkGuardrails(req)
+        let usd = isPaid(req) ? editorPriceUsd : 0
+        return EditorEstimate(kind: req.kind, usd: usd, tokens: usd > 0 ? usd * 100 : 0, free: usd <= 0, reusesTranscript: false, durationSec: d)
     }
 
     public func startEditorJob(_ req: EditorJobRequest) throws -> EditorJob {
         let d = try editorSourceDuration(req.source)
+        try checkGuardrails(req)
         if req.kind == .matte && d > 120 { throw ApiError("bad_request", "Background removal works on videos up to 2 minutes") }
         // Tap to keep: the points are checked before anything starts (as the server does before it holds).
         if req.kind == .matte, let pts = req.options?.points, let problem = EditSuite.keepPointsProblem(pts, sourceSec: d) {

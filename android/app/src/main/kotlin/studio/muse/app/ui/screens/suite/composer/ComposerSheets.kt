@@ -194,6 +194,7 @@ fun BoxScope.ComposerSheetHost(sheet: ComposerSheet, x: SheetContext) {
         SheetKind.PEOPLE -> PickerShell("People", x.wide, x.close) { PeopleBody(x) }
         SheetKind.NEW_LOCATION -> PickerShell("New location", x.wide, x.close, heightFraction = .7f) { NewLocationBody(x) }
         SheetKind.VIDEO -> PickerShell("Video", x.wide, x.close, heightFraction = .75f) { VideoBody(x) }
+        SheetKind.RIGS -> PickerShell("Rigs", x.wide, x.close, heightFraction = .7f) { RigsBody(x) }
     }
 }
 

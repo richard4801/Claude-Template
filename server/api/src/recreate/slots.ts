@@ -42,7 +42,7 @@ const category = (moveId?: string) => MOVES.find(m => m.id === moveId)?.category
  * How well a take fits a slot, 0–1, with the reasons: long enough, the right shape, the same move, the same framing
  * and angle (from the take's draft), the chosen lead, kept takes first. Claude makes the final choice.
  */
-export function scoreTake(slot: Slot, aspect: string, t: Candidate, o: { leadModelId?: string } = {}): Scored {
+export function scoreTake(slot: Slot, aspect: string, t: Candidate, o: { leadModelId?: string; pose?: { score: number } } = {}): Scored {
   const reasons: string[] = [];
   let s = 0, w = 0;
   const add = (weight: number, v: number, why?: string) => { s += weight * v; w += weight; if (why) reasons.push(why); };
@@ -61,6 +61,8 @@ export function scoreTake(slot: Slot, aspect: string, t: Candidate, o: { leadMod
   }
   if (slot.brief?.angle && rig.height) add(1, rig.height === slot.brief.angle ? 1 : 0.3, rig.height === slot.brief.angle ? `same angle (${rig.height})` : undefined);
   if (o.leadModelId) add(3, t.modelId === o.leadModelId ? 1 : 0, t.modelId === o.leadModelId ? 'your lead' : undefined);
+  // The per-frame movement against the shot's (when both were read): the strongest single sign that a take fits.
+  if (o.pose) add(3, o.pose.score, o.pose.score >= 0.6 ? `moves alike (${Math.round(o.pose.score * 100)}%)` : undefined);
   if (t.status === 'final') add(0.5, 1, 'kept');
   return { takeId: t.id, score: Math.round((s / Math.max(w, 1)) * 1000) / 1000, reasons };
 }
@@ -69,9 +71,11 @@ export function scoreTake(slot: Slot, aspect: string, t: Candidate, o: { leadMod
  * The best takes for every slot (top `top` each), and a suggested assignment: best first, each take used once, a slot
  * left "to generate" when nothing scores at least `minScore`.
  */
-export function matchSlots(recipe: Recipe, takes: Candidate[], o: { leadModelId?: string; top?: number; minScore?: number } = {}) {
+export function matchSlots(recipe: Recipe, takes: Candidate[], o: { leadModelId?: string; top?: number; minScore?: number;
+  /** Pose similarity per slot and take (references.ts reads it for the best few takes). */
+  pose?: Record<string, Record<string, { score: number }>> } = {}) {
   const top = o.top ?? 3, min = o.minScore ?? 0.6;
-  const per = recipe.slots.map(slot => ({ slot, list: takes.map(t => scoreTake(slot, recipe.source.aspect, t, o)).sort((a, b) => b.score - a.score) }));
+  const per = recipe.slots.map(slot => ({ slot, list: takes.map(t => scoreTake(slot, recipe.source.aspect, t, { leadModelId: o.leadModelId, pose: o.pose?.[slot.id]?.[t.id] })).sort((a, b) => b.score - a.score) }));
   const pairs = per.flatMap(p => p.list.map(c => ({ slotId: p.slot.id, ...c }))).sort((a, b) => b.score - a.score);
   const assigned: Record<string, string> = {}, usedTakes = new Set<string>();
   for (const p of pairs) {
@@ -86,6 +90,19 @@ export function matchSlots(recipe: Recipe, takes: Candidate[], o: { leadModelId?
     }),
     assignment: assigned,
   };
+}
+
+/** Where a slot's prompt comes from: its brief, else the reference's summary, else a neutral default (no brief yet). */
+export function promptSource(recipe: Recipe, slot: Slot): 'brief' | 'summary' | 'default' {
+  const b = slot.brief ?? {};
+  if ([b.subject, b.action, b.location, b.notes].some(x => (x ?? '').trim())) return 'brief';
+  return recipe.summary?.trim() ? 'summary' : 'default';
+}
+/** The shot's words: the brief's, else the reference's summary, else a neutral line (the framing and move travel separately in `camera`). */
+function promptFor(recipe: Recipe, words: string) {
+  const w = words || recipe.summary?.trim() || 'The model moves naturally, matching the reference shot';
+  const t = `${w.charAt(0).toUpperCase()}${w.slice(1)}`;
+  return /[.!?]$/.test(t) ? t : `${t}.`;
 }
 
 /** What Suite length a slot needs: whole seconds, at least the tier's minimum (the clip is cut back to the slot). */
@@ -106,9 +123,46 @@ export function shotRequestFor(recipe: Recipe, slot: Slot, o: { modelId: string;
   const seconds = slotSeconds(slot, o.minSeconds);
   return {
     modelId: o.modelId, quality: o.quality, duration: seconds, aspectRatio: recipe.source.aspect, takes: 1,
-    prompt: words ? `${words.charAt(0).toUpperCase()}${words.slice(1)}.` : '',
+    prompt: promptFor(recipe, words),
     title: `${o.referenceName ?? 'Recreate'} · ${slot.id}`,
     ...(Object.keys(camera).length ? { camera } : {}),
     draft: { v: 1, tool: 'shot', quality: o.quality, aspect: recipe.source.aspect, duration: seconds, takes: 1, rig: slot.rig ?? {}, recreate: { slotId: slot.id } },
   };
+}
+
+// ------------------------------------------------------------------ G2: swap the model into the reference's own shot
+/** The longest segment the swap engines take (seconds). */
+export const SWAP_MAX_SEC = 15;
+/**
+ * The part of the reference a swap fill uses: the slot, plus half of each neighbouring transition (the clip overlaps
+ * its neighbours there), widened evenly to the engine's minimum length within the reference.
+ */
+export function swapSegment(recipe: Recipe, slot: Slot, minSec = 2): { startSec: number; endSec: number } {
+  const half = (t: Recipe['transitions'][number] | undefined) => (t && t.kind !== 'cut' && t.kind !== 'unknown' ? (t.durationSec || 0.2) / 2 : 0);
+  const into = recipe.transitions.find(t => t.to === slot.id && t.from !== t.to);
+  const out = recipe.transitions.find(t => t.from === slot.id && t.from !== t.to);
+  const total = recipe.source.durationSec;
+  let a = Math.max(0, slot.startSec - half(into)), b = Math.min(total, slot.endSec + half(out));
+  const want = Math.min(Math.max(minSec, b - a), total, SWAP_MAX_SEC);
+  if (b - a > want) b = a + want; // a slot longer than the engine takes: its start
+  const grow = want - (b - a);
+  if (grow > 0) {
+    a = Math.max(0, a - grow / 2); b = Math.min(total, a + want); a = Math.max(0, b - want);
+  }
+  const r3 = (x: number) => Math.round(x * 1000) / 1000;
+  return { startSec: r3(a), endSec: r3(b) };
+}
+
+/**
+ * The swap's direction: the creator's burned-in captions come out (our own editable text goes on top), and with "Use
+ * your own setting" the slot's brief names the new place.
+ */
+export function swapDirection(slot: Slot, keepBackground: boolean): string {
+  const lines = ['Remove every caption, sticker, watermark and piece of on-screen text from the video; no text anywhere in the result.'];
+  if (!keepBackground) {
+    const b = slot.brief ?? {};
+    const where = [b.location, b.notes].map(x => (x ?? '').trim()).filter(Boolean).join(', ');
+    lines.push(`New setting: ${where || 'a clean, bright everyday room that suits the moment'}.`);
+  }
+  return lines.join(' ').slice(0, 500);
 }

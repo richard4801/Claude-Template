@@ -227,6 +227,16 @@ interface MuseApi {
     /** A reference's poster PNG (an authenticated route, so not an image URL); null when it has expired. */
     suspend fun referencePoster(referenceId: String): ByteArray? = null
     /**
+     * What the editor's AI helpers can do now (`GET /v1/editor/features`). `matte.available` is false while the cut-out
+     * runs on the mock: Remove background and Tap to keep then read "Coming soon". A server without it: all available.
+     */
+    suspend fun editorFeatures(): kotlinx.serialization.json.JsonObject? = null
+    /** Owner: the paid AI editing helpers' switch and daily limit (WS1 guardrails; members get 403). */
+    suspend fun editorSettings(): EditorSettings = throw ApiException("not_found", "This studio server doesn't have AI editing settings yet")
+    /** [paidHelpers]: "on" | "off" (null = unchanged). [cap]: the daily limit in dollars; [resetCap] puts back the default ($5). */
+    suspend fun patchEditorSettings(paidHelpers: String? = null, cap: Double? = null, resetCap: Boolean = false): EditorSettings =
+        throw ApiException("not_found", "This studio server doesn't have AI editing settings yet")
+    /**
      * The reference video (an authenticated route: a redirect to storage, or the bytes), saved into [into] for the
      * player, which then needs no token. False when there is none (demo mode, expired).
      */
@@ -245,6 +255,8 @@ interface MuseApi {
         throw ApiException("not_found", "This studio server can't read links yet · save the video and share the file")
     /** The reference's state and step while it is analysed, and its recipe once ready. */
     suspend fun reference(id: String): studio.muse.core.edit.RecipeReference = throw ApiException("not_found", "Reference not found")
+    /** The studio's references, newest first (Recreate's start page). */
+    suspend fun listReferences(): List<studio.muse.core.edit.RecipeReference> = emptyList()
     // Recreate phases 2–3 (plans/api.md "Recreate this edit · slots and assembly"): match (free), price (nothing held),
     // fill (a paid Suite shot, only after the person confirmed its price), apply into an edit session.
     /** Scores the studio's takes against each shot (free); the fill then says which shots are yours and which to make. */
@@ -259,6 +271,13 @@ interface MuseApi {
     /** Builds the edit in an edit session: [slots] is slotId → takeId or jobId. */
     suspend fun applyRecipe(id: String, sessionId: String, baseRevision: Int?, slots: Map<String, String>): studio.muse.core.edit.RecreateApplyResult =
         throw ApiException("not_found", "This studio server can't build recipes yet")
+    /**
+     * Fix shot (WS1 a7302fb): swaps one shot's clip in the built edit for [take] (a take id, or a finished fill's job id),
+     * keeping its timing, transition, ramp, camera moves and look, and the owner's other edits. 409 slot_not_in_edit:
+     * rebuild the edit instead.
+     */
+    suspend fun replaceRecipeSlot(id: String, slotId: String, sessionId: String, take: String, baseRevision: Int?): studio.muse.core.edit.RecreateReplaceResult =
+        throw ApiException("not_found", "This studio server can't fix one shot yet")
 
     /** The studio's locations (`@location` in the composer's prompt). */
     suspend fun suiteLocations(): List<SuiteLocation> = throw ApiException("not_found", "This server doesn't have locations yet")

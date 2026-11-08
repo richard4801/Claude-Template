@@ -156,6 +156,10 @@ data class EditSuiteUi(
     val claudeOwner: Boolean = false,
     /** Remove background → tap what to keep (workstream 1's tracked matte): the taps so far, while it is on. */
     val keep: KeepUi? = null,
+    /** Background removal can't run yet (the server's `matte.available` is false): the line shown instead. */
+    val matteOff: String? = null,
+    /** Paid helpers that can't run now (captions, matte, denoise), each with its plain line (WS1 guardrails). */
+    val helpersOff: Map<String, String> = emptyMap(),
     /** Tablet (plans/edit-layout.md): the inspector is hidden ("Show inspector" in the top bar). It starts shown. */
     val inspectorHidden: Boolean = false,
 ) {

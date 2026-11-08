@@ -1,5 +1,5 @@
-// AI suite tables (migrations 0007, 0013, 0014). Re-exported from db/schema.ts.
-import { bigint, doublePrecision, index, jsonb, pgTable, text } from 'drizzle-orm/pg-core';
+// AI suite tables (migrations 0007, 0013, 0014, 0020). Re-exported from db/schema.ts.
+import { bigint, doublePrecision, index, jsonb, pgTable, primaryKey, text } from 'drizzle-orm/pg-core';
 import type { LadderStep, Tier } from './registry.js';
 
 /**
@@ -36,3 +36,39 @@ export const suiteRigs = pgTable('suite_rigs', {
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 }, t => [index('suite_rigs_studio_idx').on(t.studioId, t.userId)]);
+
+/**
+ * Library collections (migration 0020; plans/ai-suite-design.md "Refinements" 6): named groups of the studio's takes
+ * and photos. Everyone in the studio sees them, like the library; the one who made a collection, or the owner, changes it.
+ */
+export const libraryCollections = pgTable('library_collections', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  userId: text('user_id').notNull(),
+  name: text('name').notNull(),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+}, t => [index('library_collections_studio_idx').on(t.studioId, t.updatedAt)]);
+/** A take or photo (a `takes` row) in a collection; once per collection. */
+export const libraryCollectionItems = pgTable('library_collection_items', {
+  collectionId: text('collection_id').notNull(),
+  takeId: text('take_id').notNull(),
+  addedBy: text('added_by').notNull(),
+  addedAt: bigint('added_at', { mode: 'number' }).notNull(),
+}, t => [primaryKey({ columns: [t.collectionId, t.takeId] }), index('library_collection_items_take_idx').on(t.takeId)]);
+
+/**
+ * The Suite queue (migration 0020; "Refinements" 1): a shot saved to run later. Nothing is held; "Run" prices it again
+ * and goes through the normal estimate → confirm → hold path. Each member sees their own; the owner sees the studio's.
+ */
+export const suiteQueue = pgTable('suite_queue', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  userId: text('user_id').notNull(),
+  title: text('title').notNull(),
+  /** The shot request as POST /v1/suite/shots takes it (draft included), run as is. */
+  body: jsonb('body').$type<Record<string, unknown>>().notNull(),
+  /** The price when it was queued (shown until it is priced again). */
+  estimate: doublePrecision('estimate').notNull(),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+}, t => [index('suite_queue_studio_idx').on(t.studioId, t.createdAt)]);

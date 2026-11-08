@@ -126,7 +126,10 @@ fun EditSuiteScreen(takeId: String?, onBack: () -> Unit) {
     else if (id == null && learn == "recipes") studio.muse.app.ui.screens.edit.learn.RecipesScreen(
         onBack = { learn = null }, onOpenTake = { open = it }, onOpenReference = { reference = it; recreating = true }, onRecreate = { recreating = true })
     else if (id == null) EditHome(onBack, onRecreate = { recreating = true }, onLearn = { learn = it }) { open = it }
-    else EditSuiteEditor(id, onBack = { if (takeId == null) open = null else onBack() })
+    // "Open playbook" in the editor's Claude sheet leaves the editor for the Playbook.
+    else androidx.compose.runtime.CompositionLocalProvider(LocalOpenPlaybook provides { open = null; learn = "playbook" }) {
+        EditSuiteEditor(id, onBack = { if (takeId == null) open = null else onBack() })
+    }
 }
 
 // ======================================================================= home
@@ -256,6 +259,23 @@ private fun PlayerSurface(player: CompositionPlayer, modifier: Modifier) {
 /** The AI helpers through the app's repository (the real API, or the demo backend), polled to their result. */
 class RepoEditBackend(private val c: AppContainer, private val pollMs: Long = 700, private val onAsset: (String, String) -> Unit = { _, _ -> }) : EditBackend {
     override fun assetArrived(assetId: String, url: String) = onAsset(assetId, url)
+
+    /**
+     * WS1 guardrails (`GET /v1/editor/features`): paid helpers switched off by the owner read "Turned off by the studio
+     * owner" (or the server's reason); a helper the server can't run yet (the cut-out on the mock) reads "Coming soon".
+     */
+    override suspend fun helpersOff(): Map<String, String> {
+        val f = c.repo.api.editorFeatures() ?: return emptyMap()
+        fun obj(k: String) = f[k] as? kotlinx.serialization.json.JsonObject
+        fun off(o: kotlinx.serialization.json.JsonObject?) = (o?.get("available") as? kotlinx.serialization.json.JsonPrimitive)?.content == "false"
+        fun note(o: kotlinx.serialization.json.JsonObject?, k: String) = (o?.get(k) as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
+        val paid = obj("paid")
+        val paidOff = if (off(paid)) note(paid, "reason") ?: "Turned off by the studio owner" else null
+        return listOf("captions", "matte", "denoise").mapNotNull { k ->
+            val o = obj(k)
+            (paidOff ?: if (off(o)) (note(o, "note") ?: "Coming soon") else null)?.let { k to it }
+        }.toMap()
+    }
 
     override suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?): Pair<EditorEstimate?, String?> =
         runCatching { c.repo.attemptInline { editorEstimate(EditorJobRequest(kind, source, options)) } }.getOrElse { null to "Couldn't reach the studio · try again" }
@@ -399,18 +419,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         }
     }
 
-    /** The project with only what has a local file (assets made on the server without a URL are left out of the preview/export). */
-    private fun playable(p: EditProject): EditProject {
-        val have = files.keys
-        val tracks = p.tracks.mapNotNull { t ->
-            val items = t.items.filter { it ->
-                when (it) { is VideoClip -> it.asset in have; is AudioClip -> it.asset in have; is ImageItem -> it.asset in have; else -> true }
-            }.map { if (it is VideoClip && it.audioAsset != null && it.audioAsset !in have) it.copy(audioAsset = null) else it }
-            if (t.kind == TrackKind.MAIN || items.isNotEmpty() || t.kind == TrackKind.CAPTION) t.copy(items = items) else null
-        }
-        val looksOk = tracks.map { t -> t.copy(items = t.items.map { it -> if (it is VideoClip && it.look?.lutAssetId?.let { l -> l !in have } == true) it.copy(look = it.look!!.copy(lut = null)) else it }) }
-        return p.copy(tracks = looksOk)
-    }
+    private fun playable(p: EditProject): EditProject = playableProject(p, files.keys)
 
     private fun rebuildPreview(p: EditProject) {
         if (sourceFile == null) return
@@ -592,3 +601,14 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
     }
 }
 
+/** The project with only what has a local file in [have] (assets made on the server without a URL are left out of the preview/export). */
+fun playableProject(p: EditProject, have: Set<String>): EditProject {
+    val tracks = p.tracks.mapNotNull { t ->
+        val items = t.items.filter { it ->
+            when (it) { is VideoClip -> it.asset in have; is AudioClip -> it.asset in have; is ImageItem -> it.asset in have; else -> true }
+        }.map { if (it is VideoClip && it.audioAsset != null && it.audioAsset !in have) it.copy(audioAsset = null) else it }
+        if (t.kind == TrackKind.MAIN || items.isNotEmpty() || t.kind == TrackKind.CAPTION) t.copy(items = items) else null
+    }
+    val looksOk = tracks.map { t -> t.copy(items = t.items.map { it -> if (it is VideoClip && it.look?.lutAssetId?.let { l -> l !in have } == true) it.copy(look = it.look!!.copy(lut = null)) else it }) }
+    return p.copy(tracks = looksOk)
+}

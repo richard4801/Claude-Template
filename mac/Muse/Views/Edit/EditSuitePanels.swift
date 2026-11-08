@@ -244,19 +244,55 @@ struct MaskPanel: View {
                         session.edit { s in s.changeVisual { $0.chroma?.similarity = v } }
                     }
                 }
-                SuiteToggleRow(title: "Remove background", hint: "No green screen needed", isOn: session.backgroundRemoved,
-                               busy: session.isRunning(.matte), trailingNote: session.estimateLabel(.matte)) { on in
-                    Task { await session.setRemoveBackground(on) }
-                }
-                .task(id: session.state.selection) { await session.loadEstimate(.matte) }
-                if let k = session.keepPick, k.clipId == session.state.selection {
-                    KeepPicker(session: session, pick: k)
+                if !session.matteAvailable && !session.backgroundRemoved {
+                    // Not ready yet ("Coming soon"), or the owner switched paid helpers off: say so instead of offering a no-op.
+                    HelperUnavailableRow(title: "Remove background", note: session.helperNote(.matte))
                 } else {
-                    SuiteToolButton(title: "Pick what to keep", icon: "plus-circle", disabled: session.isRunning(.matte), plain: true) {
-                        Task { await session.startKeepPick() }
+                    SuiteToggleRow(title: "Remove background", hint: "No green screen needed", isOn: session.backgroundRemoved,
+                                   busy: session.isRunning(.matte), trailingNote: session.estimateLabel(.matte)) { on in
+                        Task { await session.setRemoveBackground(on) }
+                    }
+                    .task(id: session.state.selection) { await session.loadEstimate(.matte) }
+                    HelperNote(text: session.helperNotes[.matte])
+                    if let k = session.keepPick, k.clipId == session.state.selection {
+                        KeepPicker(session: session, pick: k)
+                    } else {
+                        SuiteToolButton(title: "Pick what to keep", icon: "plus-circle", disabled: session.isRunning(.matte) || !session.matteAvailable, plain: true) {
+                            Task { await session.startKeepPick() }
+                        }
                     }
                 }
             }
+        }
+    }
+}
+
+/// A paid helper that can't run now: its name and why, in plain words ("Coming soon", switched off by the owner).
+struct HelperUnavailableRow: View {
+    @Environment(\.theme) private var t
+    var title: String
+    var note: String?
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(t.scale.label.font).foregroundStyle(t.roles.ink)
+                Text(note ?? "Coming soon").font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// A helper's message at its own button (the owner switched paid helpers off, today's limit reached).
+struct HelperNote: View {
+    @Environment(\.theme) private var t
+    var text: String?
+
+    var body: some View {
+        if let text {
+            Text(text).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -457,11 +493,16 @@ struct AudioPanels: View {
                 }
             }
             SuiteToggleRow(title: "Mute", isOn: snd.muted == true) { on in setSound { $0.muted = on ? true : nil } }
-            SuiteToggleRow(title: "Noise reduction", hint: "Removes background noise and music", isOn: denoised,
-                           busy: session.isRunning(.denoise), trailingNote: session.estimateLabel(.denoise)) { on in
-                Task { await session.setNoiseReduction(on) }
+            if !session.helperAvailable(.denoise) && !denoised {
+                HelperUnavailableRow(title: "Noise reduction", note: session.helperNote(.denoise))
+            } else {
+                SuiteToggleRow(title: "Noise reduction", hint: "Removes background noise and music", isOn: denoised,
+                               busy: session.isRunning(.denoise), trailingNote: session.estimateLabel(.denoise)) { on in
+                    Task { await session.setNoiseReduction(on) }
+                }
+                .task(id: session.state.selection) { await session.loadEstimate(.denoise) }
+                HelperNote(text: session.helperNotes[.denoise])
             }
-            .task(id: session.state.selection) { await session.loadEstimate(.denoise) }
             SuiteToggleRow(title: "Voice enhance", hint: "Clearer speech", isOn: snd.enhance == true) { on in setSound { $0.enhance = on ? true : nil } }
             SuiteLabel("Voice effect")
             FlowLayout(spacing: 6) {

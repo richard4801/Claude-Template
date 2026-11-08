@@ -272,6 +272,14 @@ struct EditSuiteEditor: View {
             }
         }
         .sheet(item: $session.askPending) { p in EditSuiteClaudeAsk(session: session, pending: p) }
+        // A paid AI helper asks first, with its price (2026-11-08: real AI editing). Free ones run at once.
+        .alert(session.paidAsk.map { "\($0.title) · \($0.price)" } ?? "",
+               isPresented: Binding(get: { session.paidAsk != nil }, set: { if !$0 { session.cancelPaid() } }),
+               actions: {
+                   Button("Run · \(session.paidAsk?.price ?? "")") { session.confirmPaid() }
+                   Button("Cancel", role: .cancel) { session.cancelPaid() }
+               },
+               message: { Text("Paid from the studio balance. The change lands in the edit when it's done, and you can undo it.") })
         // Edits this Mac never got to the server, and the session moved on: never dropped without asking.
         .alert("This Mac has changes that aren't in the latest edit",
                isPresented: Binding(get: { session.draftAsk != nil }, set: { _ in }),

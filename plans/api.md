@@ -559,7 +559,8 @@ DenoiseResult  { asset?: { kind: "audio", upload | take, url?, durationSec }, su
 | `POST /v1/takes/{id}/versions` `{…, aiLabel?: boolean}` | Edit suite export "Label as AI-generated" (default off): kept with the version and returned as `Take.aiLabel: true`; posting uses it for the platform's AI label. C2PA signing is not implemented yet. |
 | `POST /v1/takes/{id}/versions` `{…, name?: string}` | Optional version name, 1–80 characters after trimming (the Edit suite's save, or the `name` in Claude's `save_version` request). Kept with the version and returned as `Take.name`. |
 | `POST /v1/editor/validate` `{project}` | → `{ok: true, durationSec}` or `bad_request` naming the first broken field (`edits.tracks.2.items.0.speed: …`). Free. |
-| `GET /v1/editor/features` | → `{captions: {available, languages}, cuts: {available, defaults}, matte: {available, maxSec: 120}, denoise: {available}, maxSourceSec: 600}` |
+| `GET /v1/editor/features` | → `{paid: {available, reason?}, captions: {available, languages}, cuts: {available, defaults}, matte: {available, maxSec: 120}, denoise: {available}, beats, maxSourceSec: 600}`. `available` is false for the paid helpers while the owner has them switched off: hide them. |
+| `GET /v1/editor/settings` · `PATCH {paidHelpers?: "on"\|"off", capPerDayUsd?: number\|null}` (owner) | → `{paidHelpers, capPerDayUsd, todayUsd, markup, provider}`. The owner's runtime switch for paid helpers (no redeploy) and the studio's daily spend cap on them (`null` = `EDITOR_CAP_PER_DAY_USD`, default $5). Members get `403`. |
 | `GET /v1/editor/presets` | → `{filters, captionStyles, hooks}` (the same tables the apps carry). |
 | `POST /v1/editor/uploads/presign` `{contentType: "audio/mp4"|"audio/mpeg"|"audio/wav"|…, bytes?}` | → `{uploadId, method: "PUT", url, headers, expiresAt, fileUrl}` for a voice-over or music file (≤ 200 MB), or a video (`video/mp4`, `video/quicktime`, ≤ 2 GB) for the media bin. Use `uploadId` as an audio `Asset.upload`. |
 | `POST /v1/editor/estimate` `{kind, source, options?}` | → `{kind, usd, tokens, free, reusesTranscript, durationSec}`. Free. |
@@ -573,6 +574,7 @@ DenoiseResult  { asset?: { kind: "audio", upload | take, url?, durationSec }, su
 - `cuts` `{minSilenceSec? 0.25–5 (0.7), keepPadSec? 0–0.5 (0.12), fillers? (true), repeats? (false), extraFillers?: string[] ≤ 50, fromJobId?, silenceOnly?, noiseDb? −60…−10 (−35)}` → `CutsResult`: suggested source ranges to remove (silences longer than `minSilenceSec`, keeping `keepPadSec` of each side; "um/uh/er/ah/hmm…" + `extraFillers`; a word said twice in a row). Free when a transcript exists (`fromJobId`, or the newest one of that video); otherwise it transcribes first (priced like captions). **`silenceOnly: true`** is always free and needs no transcript: the server reads the audio level (ffmpeg `silencedetect`, analysis only, nothing encoded) and returns silence cuts only (`words: []`); quieter than `noiseDb` counts as silence. The app shows the cuts and applies the accepted ones with `applyCuts(project, assetId, cuts)`.
 - `beats` (free; music or any video/audio, ≤ 10 min) → `{bpm, beats: number[], strong: number[] /* source s */, durationSec}`: beat marks for the music track (ffmpeg decode + onset/tempo analysis on the server; nothing encoded). The tempo is checked against half, double and 3:2 readings: if the points between the grid's beats are onsets too, the faster tempo wins, up to 180 bpm (`test/beats.test.ts`: click tracks at 60–180 bpm, off-beats, music).
 - `matte` (video ≤ 120 s) → `MatteResult`, priced per second of video (workstream 1, 2026-11-08: fix 1 and option 2, approved by the owner):
+  - **Coming soon while production runs the mock** (WS3, 2026-11-08): `GET /v1/editor/features` → `matte.available: false`, and matte estimates/jobs answer `400` "Background removal is coming soon". The mock's matte is all white (the clip unchanged), never the source. Dev and tests keep it available.
   - **The result is an alpha matte**: a grey video the same length as the source, white = keep. It is not a green composite, so green clothes and hair edges survive.
   - The app keeps the original clip and sets `alphaMatte: {asset}` on it, with the matte asset added to the project. A finished job in an edit session does this itself; `chroma` is removed.
   - Old clips with `chroma` keep working.
@@ -588,9 +590,17 @@ DenoiseResult  { asset?: { kind: "audio", upload | take, url?, durationSec }, su
 - Apps render it: Mac (AVFoundation/Core Image `blendWithMask`, or a Metal pass) and Android (a luma-to-alpha shader on the matte's frame at the same time).
 - An app that doesn't know the field shows the clip unmatted.
 - `denoise` `{analyzeOnly?}`: `analyzeOnly: true` is free and needs a transcript → `{suggestion}` from how clearly the words were heard. Otherwise → the voice alone (music and noise removed) as an audio asset + the suggestion; the app sets it as the clip's `audioAsset`.
-- Estimates: GPU seconds (captions 8 + 0.15·d, matte 10 + 4·d, voice 5 + 0.3·d, d = media seconds) × the GPU's $/s; at least $0.01. Jobs on the server run 2 at a time (others wait in `phase: "Waiting"`); after a restart running jobs end `failed` ("Interrupted · try again") and their holds go back.
+- **Estimates** (workstream 1, 2026-11-08):
+  - The formula is GPU seconds × the GPU's $/s × `EDITOR_MARKUP` (2: the owner's choice, like Upscale), at least $0.01. Jobs settle the same way at the GPU seconds the provider billed.
+  - GPU seconds: captions 8 + 0.15·d, matte 10 + 4·d, tap to keep 15 + 3·d, voice 5 + 0.3·d (d = media seconds).
+  - The rates are checked on each model's page: captions $0.0014 (A100 80 GB), matte and tap to keep $0.000975 (L40S), voice $0.00115 (A100 40 GB).
+- **The owner's controls:**
+  - With paid helpers switched off (`PATCH /v1/editor/settings {paidHelpers: "off"}`), a new paid job gets `503 editor_paid_off`.
+  - Past the day's cap (UTC, counting done jobs' charges plus running jobs' estimates), it gets `402 editor_daily_cap` ("Today's AI editing limit ($5.00) is reached · …").
+  - Both apply to Claude's helpers too. Free work (reused transcripts, silence cuts, beats, the voice check) is never blocked.
+- **Pinned versions:** each default model runs a pinned version (its latest on 2026-11-08), so a new upstream version can't change the output or the price. `EDITOR_*_VERSION` overrides one, and a newer upstream version is only logged. Jobs on the server run 2 at a time (others wait in `phase: "Waiting"`); after a restart running jobs end `failed` ("Interrupted · try again") and their holds go back.
 - **Events:** `{type: "editor", editorJob: EditorJob}` to the job's user and the owners; `{type: "editor", op: "delete", id}` when one is removed.
-- **Server config** (env, optional): `EDITOR_AI_PROVIDER` = `mock` (the default, production included, until the owner turns the helpers on; in production the mock is free: no hold, no charge) | `auto` (Replicate when `REPLICATE_API_TOKEN` is set, else the mock) | `replicate`; `EDITOR_TRANSCRIBE_MODEL`, `EDITOR_MATTE_MODEL`, `EDITOR_SEPARATE_MODEL` (defaults: a WhisperX transcription model, a robust video matting model with alpha-mask output, a stem separation model); `EDITOR_TRACK_MODEL` (default: a SAM 2 video segmentation model, for tap to keep); `EDITOR_*_USD_PER_SEC`. Inputs are renamed to the model's own field names from its published schema. Outputs are copied into storage byte for byte (`g/edit_*.mp4|mp3`) and recorded as studio uploads.
+- **Server config** (env, optional): `EDITOR_AI_PROVIDER` = `mock` (the default, production included, until the owner turns the helpers on; in production the mock is free: no hold, no charge) | `auto` (Replicate when `REPLICATE_API_TOKEN` is set, else the mock) | `replicate`; `EDITOR_TRANSCRIBE_MODEL`, `EDITOR_MATTE_MODEL`, `EDITOR_SEPARATE_MODEL` (defaults: a WhisperX transcription model, a robust video matting model with alpha-mask output, a stem separation model); `EDITOR_TRACK_MODEL` (default: a SAM 2 video segmentation model, for tap to keep); `EDITOR_*_VERSION` (pins; see above); `EDITOR_MARKUP` (2); `EDITOR_CAP_PER_DAY_USD` (5). Migration **0019** adds `studio_settings.editor_paid_off` and `editor_cap_per_day`; `EDITOR_*_USD_PER_SEC`. Inputs are renamed to the model's own field names from its published schema. Outputs are copied into storage byte for byte (`g/edit_*.mp4|mp3`) and recorded as studio uploads.
 
 **Looks (filters, 2026-11-05)** — spec `plans/video-editor.md` "Looks". A `look` (LUT + curves + texture effects) on video/image items; asset kind `"lut"` for imported .cube files.
 
@@ -1129,7 +1139,7 @@ Migration **0014** (`suite_drafts_rigs`): `jobs.draft`, `takes.draft`, `models.d
 | `PATCH /v1/suite/rigs/{id} {name?, rig?}` | → `RigView`. Your own rig, or any rig in the studio for the owner. Anyone else's reads as `404`. `rig` replaces the whole rig. |
 | `DELETE /v1/suite/rigs/{id}` | → `204`, with the same permissions as PATCH. |
 | `PATCH /v1/models/{id} {defaultRig: Rig \| null}` | The model's **default rig**, returned as `Model.defaultRig`. `null` or `{}` clears it. Anyone in the studio can set it, like the model's other fields. |
-| `GET /v1/suite/feed?tool=&model=&status=&cursor=&limit=` | → `{items: FeedItem[], nextCursor: string \| null}`. See below. |
+| `GET /v1/suite/feed?tool=&model=&status=&cursor=&limit=&collection=` | → `{queued?: QueuedShot[], items: FeedItem[], nextCursor: string \| null}`. See below, and "Library collections and the Suite queue". |
 
 **The feed (`GET /v1/suite/feed`)**
 - **Order:** newest first.
@@ -1147,6 +1157,44 @@ Migration **0014** (`suite_drafts_rigs`): `jobs.draft`, `takes.draft`, `models.d
 - When a model is @-mentioned, the composer fills only the rig rows still on Auto from her `defaultRig`, then shows "Applied <name>'s rig · Undo".
 - It never overwrites a row the user set. With two @ models in the prompt, nothing applies automatically.
 - `moves` in a default rig are added as `#` chips only if the prompt has no move yet.
+
+### Library collections and the Suite queue (build step 3, 2026-11-08; `plans/ai-suite-design.md` "Refinements" 1 and 6)
+Migration **0020** (`library_collections_suite_queue`): the `library_collections`, `library_collection_items` and `suite_queue` tables. Code: `suite/collections.ts`, `suite/queue.ts`; tests `test/suite-library.test.ts`.
+
+**Library collections.** Named groups of the studio's takes and photos (any `takes` row). Everyone in the studio sees them, like the library. The one who made a collection, or the owner, renames it, deletes it and changes what's in it; anyone else gets `403 not_yours`.
+
+| Call | Notes |
+|---|---|
+| `GET /v1/library/collections` | → `Collection[]`, most recently changed first. |
+| `POST /v1/library/collections {name, takeIds?}` | → `Collection & {takeIds}`. `name` is 1–60 characters. Up to 200 collections per studio (`409 too_many_collections`). |
+| `GET /v1/library/collections/{id}` | → `Collection & {takeIds}` (newest added first). |
+| `PATCH /v1/library/collections/{id} {name}` | Rename. |
+| `DELETE /v1/library/collections/{id}` | → 204. The takes and photos stay in the library. |
+| `POST /v1/library/collections/{id}/items {takeIds}` | Add (each once; up to 200 per call, 2,000 per collection: `409 collection_full`). An id that isn't the studio's → `400 takeIds: no take or photo …`. → `Collection & {takeIds}`. |
+| `POST /v1/library/collections/{id}/items/remove {takeIds}` | Remove. → `Collection & {takeIds}`. |
+| `GET /v1/library/takes/{takeId}/collections` | → `Collection[]` the take or photo is in (its detail sheet). |
+| `GET /v1/suite/feed?collection={id}` | The feed of that collection: its takes and photos only (no pending jobs, no queue), with the usual filters and paging. An unknown collection → `400`. |
+
+```
+Collection { id, name, userId, mine, canEdit, count /* takes and photos that still exist */, cover: ImageRef | null /* the newest item's thumb */, createdAt, updatedAt }
+```
+Event `collection`: `{collection}` (created or changed) or `{deleted: id}`, to the whole studio.
+
+**The Suite queue.** A shot saved to run later. Queuing checks the shot and prices it, but holds nothing. **Run · $cost** prices it again and goes through the normal estimate → confirm → hold path. Each member sees their own queue; the owner sees the studio's.
+
+| Call | Notes |
+|---|---|
+| `POST /v1/suite/queue {…the body of POST /v1/suite/shots}` | Checked and priced like `…/shots/estimate` (same errors, `nothing_fits` included); nothing held. `queue` and `dryRun` are ignored. Up to 50 per member (`409 queue_full`). → `QueuedShot`. |
+| `GET /v1/suite/queue` | → `QueuedShot[]`, newest first. |
+| `POST /v1/suite/queue/{id}/estimate` | Today's price → `QueuedShot & {estimateView /* the shot estimate, as …/shots/estimate returns it */, changed}`. The stored price is updated. Show it, then confirm. |
+| `POST /v1/suite/queue/{id}/run {confirm: true}` | Runs it exactly as `POST /v1/suite/shots` would (caps, hold, job); the queue entry is removed. → `{queuedId, job}`. `400` without `confirm: true`. |
+| `DELETE /v1/suite/queue/{id}` | Discard → 204 (nothing was held). |
+
+```
+QueuedShot { id, kind: "queued", title, tool, modelId?, userId, mine, estimate, buttonLabel: "Run · $0.40", prompt?, draft?, createdAt }
+```
+- **In the feed:** the first page of `GET /v1/suite/feed` (no cursor, no collection) carries `queued: QueuedShot[]` above `items` (the "Queued" group), filtered by `tool`, `model` and `status` (`queued`).
+- Event `queue`: `{item}` or `{removed, jobId?}`, only to the member who queued it and the owner.
 
 ## Recreate this edit (workstream 1, 2026-11-08; `plans/recreate-edit.md`)
 A reference video (an upload, up to 60 s for now) is analysed into a versioned **recipe**. The analysis is free: ffmpeg, the beat detector and sharp on the server's CPU, one analysis at a time. Migration **0015** adds `recreate_references`. Code is in `src/recreate/` (`analyze.ts`, `signals.ts`, `frames.ts`, `text.ts`, `references.ts`); tests are `test/recreate.test.ts` (a synthetic reference) and `test/motion.test.ts`.
@@ -1190,6 +1238,38 @@ A reference video (an upload, up to 60 s for now) is analysed into a versioned *
 - **Reference fields:** `source: "file" | "link"`, `sourceUrl?`, `errorCode?`. Claude's `analyze_reference` takes `url` as well as `uploadId`.
 - **Config:** `RECREATE_LINKS` (default on), `YTDLP_PATH`, `RECREATE_LINK_MAX_MB`. The image pins yt-dlp 2026.10.26 and yt-dlp-ejs 0.8.0 from PyPI (both sha256-checked at build, unpacked to /opt/yt-dlp/lib) and adds python3, about +30 MB (an estimate: no Docker daemon was available to measure). CI never calls a platform; a fake yt-dlp replays `test/fixtures/links`.
 
+**Export** (plan step 7, workstream 1, Release 1):
+
+| | |
+|---|---|
+| `POST /v1/recreate/references/{id}/export {sessionId, sound?: "guide"\|"silent"}` | Renders the edit session's current revision, as long as the reference, at the canvas's size. `guide` (the default) uses the reference's own sound as the track; `silent` has no sound. → `Export` (`state: "rendering"`, or `"ready"` when that revision is already exported). Without the reference's video (after 30 days) or sound, a guide export gets `409 no_reference_sound`; export silent instead. |
+| `GET /v1/recreate/references/{id}/export?sessionId&sound&revision?` | → `Export`. Polling, or wait for the live event `{type: "recreate", export: Export}`. |
+| `GET /v1/recreate/references/{id}/export.mp4?sessionId&sound&revision?` | The file (authenticated, as an attachment): a `302` to a 1-hour link on S3, or the bytes. |
+
+`Export {referenceId, sessionId, revision, sound, state: "none"|"rendering"|"ready"|"failed", url?, durationSec?, width?, height?, unsupported?, error?, useThisSound}`
+`useThisSound {platform: "tiktok"|"instagram"|"youtube"|null, sourceUrl?, startAtSec: 0, durationSec, title: "Post with the original sound", steps: string[], note}`
+- `useThisSound` is the reminder the apps show next to the export. For a link reference the steps name its platform's "Use this sound", "Use audio" or "Remix · Use sound"; for a file reference they are general.
+- The note explains that the guide sound is only for timing, so post with the platform's own sound.
+- Exports are stored privately under `rx/` and deleted with the reference.
+
+**The built edit, rendered** (`src/editor/render.ts`, `renders.ts`; `test/render.test.ts`; for Compare on both apps):
+
+| | |
+|---|---|
+| `POST /v1/edit-sessions/{id}/preview` (owner) | Renders the session's current revision as a preview: the longest side 720 px, 30 fps, with the project's sound. → `Preview` (`rendering`, or `ready` if this revision is done). Each revision is rendered once; a newer revision's preview replaces the older one when it is ready. |
+| `GET /v1/edit-sessions/{id}/preview?revision?` | → `Preview` (`state: "none"` before any). Live event: `{type: "edit", sessionId, op: "render", render: Preview}`. |
+| `GET /v1/edit-sessions/{id}/preview.mp4?revision?` | The file (authenticated): a `302` to a 1-hour link on S3, or the bytes. |
+
+`Preview {sessionId, revision, state, url?, durationSec?, width?, height?, unsupported?, error?}`
+- **Drawn:**
+  - the main track: trims, speed and speed curves, cover/contain fit, transform and x/y/scale keyframes, and transitions (xfade);
+  - the Look's LUT at its strength;
+  - text items, in the apps' fonts (bundled in `assets/fonts`, OFL);
+  - the clips' sound at their speed, plus music, voice and sfx clips.
+- **Not drawn, and listed in `unsupported`:** rotation, opacity, crop, colour adjustments, filters, masks, chroma, background removal, overlays, captions, text animation, look details beyond the LUT, ducking and library music. Show "Preview of the cut" when the list isn't empty.
+- **Frame-exact:** each clip gets exactly its frames on the timeline, so the cuts in a render match the edit.
+- **Cost:** one render at a time on the server's CPU, with no GPU and no charge.
+
 **Live event:** `{type: "recreate", reference}` (the `Reference` without its recipe, with `slots`: the count) goes to its member and the owner on create, on each analysis step, when it is ready or failed, and on `PATCH`. Migration **0016** adds `recreate_references.fill`.
 
 **Fixture:** `server/api/test/fixtures/recipe-v1.json` is a `GET /v1/recreate/references/{id}` response from a real analysis of the test reference (with an example brief, words and summary), for the apps' fakes. A test fails if the API sends a field the fixture lacks.
@@ -1214,12 +1294,14 @@ Slot {
   brief: {shotSize?, angle?, subject?, action?, location?, notes?} | null,
   rig: Rig | null,
   camera: {motion: "static"|"pan"|"tilt"|"zoom_in"|"zoom_out"|"shake"|"mixed", shake, keys: {t, x, y, scale}[], confidence},
-  speed: {ramp: "none"|"speed_up"|"slow_down"|"freeze"|"mixed", curve: {t, speed}[], confidence},
+  speed: {ramp: "none"|"speed_up"|"slow_down"|"freeze"|"mixed", curve: {t, speed}[], confidence, freeze?: {t, durationSec} /* where the longest hold is */},
   peaks: {t, strength}[],
-  pose: {status: "pending"|"done"|"none", frameSec?, keypoints?: {name, x, y, score}[]}
+  pose: {status: "pending"|"done"|"none", frameSec?, keypoints?: {name, x, y, score}[],
+    track?: {frames, fps} /* every frame of the shot was read (keypoints only, stored privately next to the reference, deleted with it); used to match takes by movement */}
 }
 Transition { atSec, from, to, kind: "cut"|"flash"|"whip"|"zoom"|"fade"|"crossfade"|"glitch"|"unknown", durationSec, confidence }
-TextItem { id, startSec, endSec, box: {x, y, w, h /* 0–1 */}, words: string | null, sizeFrac, color, fontId: "sans"|"serif"|"rounded"|"condensed"|"mono"|"marker", animIn, animOut, confidence }
+// glitch: a burst of 3+ hard changes in under 0.6 s (the picture flickering between shots). One that returns to the same shot has from = to (an effect inside the shot, logged as an editor gap).
+TextItem { id, startSec, endSec, box: {x, y, w, h /* 0–1 */}, words: string | null, sizeFrac, color, fontId: "sans"|"serif"|"rounded"|"condensed"|"mono"|"marker" /* nearest editor font to the read words' shape; "sans" when unsure */, animIn: "cut"|"fade"|"typewriter"|null, animOut: "cut"|"fade"|null, animInSec?, animOutSec? /* how long the fade or typing takes */, confidence }
 ```
 **Size caps** (a recipe stays under about 256 KB): speed curves at most 48 points and camera keys at most 64 per slot (thinned, ends kept), at most 100 text items. An `unknown` transition also adds a gap.
 
@@ -1299,10 +1381,13 @@ Code: `src/recreate/slots.ts` (briefs, matcher, fill request), `assemble.ts` (re
 | | |
 |---|---|
 | `PUT /v1/recreate/references/{id}/briefs {slots: {s1: Brief}, summary?, tags?}` | `summary` (≤ 200 chars) and `tags` (≤ 20 short lowercase words) go on the recipe. `Brief {shotSize?, angle?, subject?, action?, location?, notes?}`. `shotSize` is a `SHOT_SIZES` id and `angle` a `HEIGHTS` id; unknown ids → `400`. Each brief is merged into the slot, and its framing and angle go into the slot's `rig`. |
-| `POST /v1/recreate/references/{id}/match {modelId?, top?, minScore?}` | → `{slots: [{slotId, candidates: [{takeId, score, reasons}], suggested, suggestion: {takeId, score, reasons} | null, toGenerate}], assignment: {slotId: takeId}}`. `suggestion` is the suggested take's own score, which may rank below the top `candidates` because each take is used once. See the matcher below. |
-| `POST /v1/recreate/references/{id}/slots/{slotId}/estimate {modelId, quality?}` | → `{slotId, request: ShotRequest, estimate: ShotEstimate}`. Nothing is held. |
-| `POST /v1/recreate/references/{id}/slots/{slotId}/fill {modelId, quality?}` | → `{slotId, job}`: an ordinary Suite shot, held and priced like any other (the caller has confirmed the price). The slot records `fill: {jobId}`. |
+| `POST /v1/recreate/references/{id}/briefs/estimate` | **"Write the shot briefs"** on the server (G8; for when the owner's Claude isn't there to read the contact sheet). → `{available, reason?, slots, estimateUsd, label: "Write the shot briefs · about $0.02", priceLine}`. Nothing is held. `available` is false (with `reason` to show) until the owner turns on Claude on the server (`PATCH /v1/claude/settings {apiFallback: true}`) and the server has a key. Free alternative: ask Claude on the Mac (`set_slot_briefs`). |
+| `POST /v1/recreate/references/{id}/briefs/write {confirm: true}` | One Claude call reads the contact sheet and each shot's facts, and writes every shot's brief, the summary and tags (saved as `PUT …/briefs` would). → `{referenceId, written: ["s1", …], costUsd, reference}`. Charged the call's actual cost × `EDITOR_MARKUP` from the wallet. The price is held first; it counts in the AI editing day's spend and cap (`GET /v1/editor/settings`), but isn't listed in `/v1/editor/jobs`. `400` without `confirm: true` · `503 briefs_unavailable` (switched off, with the reason) · `503 editor_paid_off` · `402 editor_daily_cap` · `502 briefs_failed` (nothing charged). The model is set by `RECREATE_BRIEF_MODEL` (default Sonnet 5.5) and never named to members. |
+| `POST /v1/recreate/references/{id}/match {modelId?, top?, minScore?, poses?: boolean}` | → `{slots: [{slotId, candidates: [{takeId, score, reasons}], suggested, suggestion: {takeId, score, reasons} | null, toGenerate}], assignment: {slotId: takeId}}`. `suggestion` is the suggested take's own score, which may rank below the top `candidates` because each take is used once. See the matcher below. **Movement** (`poses`, default true): for shots whose every frame was read, the best 8 takes on everything else are read too (10 fps, their first 6 s, cached per take; free CPU under the memory guard). Their per-frame poses are compared with the shot's: pose in the body's own frame, how much it moves, and how the body travels through the frame. That adds a strong term (weight 3) and the reason "moves alike (82%)". The first match on new takes takes a few seconds longer. |
+| `POST /v1/recreate/references/{id}/slots/{slotId}/estimate {modelId, quality?, method?: "swap"\|"generate", keepBackground?: boolean, outfitId?}` | Nothing is held, cut or stored. **`method: "swap"`** (the default when the reference's video is still here and a swap engine is available; G2): the model is swapped into the reference's own segment of that shot, through the Suite's Edit job (Edit on our pods, else the hosted swap). → `{slotId, method: "swap", keepBackground, segment: {startSec, endSec}, baked: ["camera","speed","look"], request, estimate: {method, label, seconds, takes, estimate, priceLine, buttonLabel: "Swap in · 2.0 s · $0.41", ok, warnings}}`. The segment is the slot plus half of each neighbouring transition, widened evenly to the engine's minimum (4 s on the hosted swap). `keepBackground: false` = **"Use your own setting"**: the slot's brief (location, notes) names the place; Edit only. **`method: "generate"`**: a new Suite shot from the brief → `{slotId, method: "generate", request: ShotRequest, promptFrom: "brief"\|"summary"\|"default", estimate: ShotEstimate, swapUnavailable?}`. Without a brief, the prompt comes from the reference's summary, else a neutral line (`promptFrom`): suggest writing a brief first. `swapUnavailable` says why the default fell back to generate. `409 swap_unavailable` when `method: "swap"` was asked for and can't run. |
+| `POST /v1/recreate/references/{id}/slots/{slotId}/fill {…same body}` | The caller has confirmed the price. Swap → `{slotId, method: "swap", segment, job}`. The segment is cut to a private clip under the reference (`rx/…`, deleted with it after 30 days). An ordinary Edit job runs on it, held and priced like any swap: video only (the edit uses the reference's sound), with the creator's burned-in captions removed in the prompt. If Edit isn't available, the hosted swap runs. Generate → `{slotId, method: "generate", job}`, an ordinary Suite shot. The slot records `fill: {jobId}`. |
 | `POST /v1/recreate/references/{id}/apply {sessionId, baseRevision?, slots: {slotId: takeId \| jobId}, options?: {camera, speed, text, look}, device?}` | Builds the edit in an edit session (owner) as one undoable change labelled "Recreated “name”". → `{sessionId, revision, durationSec, missing, waiting, notes, label, match, sources}`. See below. |
+| `POST /v1/recreate/references/{id}/slots/{slotId}/replace {sessionId, take: takeId \| jobId, baseRevision?, device?}` | **Fix this shot** (plan §4): the slot's clip in the edit built from this reference gets another take, or a finished fill job, in place, as one undoable change ("Replaced shot s2 in “name”"). Its place and length on the timeline, transition, ramp, camera keys and look stay, and the new take starts where its action peak lines up (slower if it is too short). A swapped take is baked instead (see below). The owner's other edits are kept. → `{sessionId, revision, slotId, itemId, takeId, inSec, label, baked?, note?}`. `409 not_built_here` (the edit wasn't built in that session), `409 slot_not_in_edit` (the shot's clip was deleted), `409 job_not_done`. Claude's tool: `replace_slot`. |
 
 **The matcher** scores each of the studio's video takes against a slot, 0–1, with reasons:
 - the length;
@@ -1324,10 +1409,12 @@ Pose guidance (the slot's keypoints) joins the fill request once the Suite's sho
 
 **Fill state** (`GET …/fill`; `match` keeps its last result, `fill` its jobs):
 ```
-SlotFill { slotId, state: "empty"|"matched"|"to_generate"|"generating"|"ready", takeId?, jobId?, score?, estimate?: {amount, label}, reason? }
+SlotFill { slotId, state: "empty"|"matched"|"to_generate"|"generating"|"ready", takeId?, jobId?, method?: "swap"|"generate", score?, estimate?: {amount, label}, reason?,
+  fallback?: "generate", failedJobId? /* a swap that failed (refunded): offer generate, priced on its own */ }
 ```
 - `ready`: the slot's fill job is done (its first take); `generating`: the job is still running; `matched`: the last match's suggestion; `to_generate`: nothing scored enough.
-- `applied: {sessionId, revision, at, slots: {slotId: takeId}, sources, match}` after an apply.
+- `applied: {sessionId, revision, at, slots: {slotId: takeId}, sources, match, baked?: {slotId: ["camera","speed","look"]}}` after an apply.
+- **Swapped slots are "baked" (G2):** the segment already carries the creator's zoom/shake, speed ramp and grade. So a slot filled by its own swap job gets none of them again. Its clip plays at 1× from the slot's moment in the segment, and keeps only the cut, its length and the transitions. Our editable text goes on top as usual. The apply response and `applied.baked` list those slots. The match score counts their ramp and grade as matched, and the shot as 0.95. `replace` with the slot's swap take bakes the clip (`baked` in the response); replacing a baked clip with an ordinary take brings the reference's camera keys, ramp and look back.
 
 **Match score** (returned by apply as `match`, 0–1): `{overall, cuts, text, ramps, grade, shots, perSlot: [{slotId, score}]}`.
 - `cuts`: each cut's distance from the reference's (exact = 1, two frames or more = 0), times the share of slots filled.
@@ -1344,8 +1431,10 @@ SlotFill { slotId, state: "empty"|"matched"|"to_generate"|"generating"|"ready", 
   - A take shorter than its slot plays slower to fill it.
 - **Transitions:** crossfade → `fade`, fade → `black`, flash → `white`, whip → `whip`, zoom → `zoom`, glitch → `glitch`. Cuts and unknown transitions get none.
 - **Speed ramps** become a custom `speedCurve`, and the source range is chosen so the clip still plays for exactly the slot's length.
+- **Freezes** (`speed.freeze {t, durationSec}`, from the analysis): the clip plays at the editor's slowest, 0.1×, for the freeze's length at its moment, so the held frame barely moves. The editor has no speed 0. The cuts don't move. Only freezes without a known place are logged as a gap.
+- **Action peaks** (plan §3, `options.peaks`, on by default): each take starts where its own strongest action peak, found free with `find_action_peaks`'s detector and cached per take, plays at the moment of the slot's strongest peak. The cuts don't move. A peak that would push the range past the take's end falls back to the next one, else the take starts at 0. A note says where each take starts.
 - **Camera moves** become `x`, `y` and `scale` keyframes on a clip scaled up enough that the frame stays covered.
-- **Text items** go on a text track. Text whose words weren't read says "Text".
+- **Text items** go on a text track. Text whose words weren't read says "Text". A fade or typewriter in and a fade out become the item's `animIn`/`animOut` (length 0.1–2 s), and the matched font its `style.font`.
 - **The Look:** the nearest palette's LUT at 0.8, when its distance is under 0.4.
 - **Missing slots** are left out and listed in `missing`.
 - **Revision:** `baseRevision` must be current (`409` otherwise).
@@ -1505,7 +1594,8 @@ _Workstream 2. Spec: `plans/claude-editing.md` parts B–E. Owner only (members 
 
 ### Claude chat threads (one per camera or edit session; Mac runs Claude Code, the phone relays)
 ```ts
-ClaudeThread  { id: "ct_…", contextKind: "camera"|"edit", contextId, claudeSessionId?: string /* Claude Code session for --resume, set by the Mac */, createdAt, updatedAt }
+ClaudeThread  { id: "ct_…", contextKind: "camera"|"edit"|"recreate", contextId, claudeSessionId?: string /* Claude Code session for --resume, set by the Mac */, createdAt, updatedAt,
+                brief?: { prompt, tools: string[], referenceId? | sessionId? } /* recreate and edit threads (workstream 1): what Claude on the Mac starts from */ }
 ClaudeMessage { id, threadId, role: "user"|"assistant"|"tool", source: "mac"|"phone"|"api", text, turnId?,
                 tool?: { id, name, ok?: boolean, summary?: string }, image?: { url } /* a frame Claude grabbed */, createdAt }
 ClaudeTurn    { id: "tu_…", threadId, text, from: "phone"|"mac", state: "queued"|"running"|"done"|"failed"|"stopped", error?, createdAt, claimedAt?, finishedAt? }
@@ -1521,7 +1611,7 @@ ClaudeStatus  { mac: { online: boolean, claudeCode: { installed: boolean, signed
 | `GET /v1/claude/status` | → `ClaudeStatus` |
 | `PATCH /v1/claude/settings` `{apiFallback: boolean}` | → `ClaudeStatus`. The fallback is off by default and billed per use. |
 | `POST /v1/claude/mac/heartbeat` `{claudeCode: {installed, signedIn, version?, model?}}` | From the Mac app, every 20 s. The Mac counts as offline after 45 s. → `{ok, pending: ClaudeTurn[]}` |
-| `POST /v1/claude/threads` `{contextKind, contextId}` | Get or create. → `ClaudeThread`. A camera `contextId` must be one of the owner's sessions. |
+| `POST /v1/claude/threads` `{contextKind, contextId}` | Get or create. → `ClaudeThread`. A camera `contextId` must be one of the owner's sessions; a `recreate` one must be one of their references (`rx_…`), else `404`. Recreate and Edit threads carry a `brief`: the role, the MUSE MCP tools for that screen and the id they act on. The Mac seeds its Claude Code with it. |
 | `GET /v1/claude/threads/{id}` | → `ClaudeThread & {messages: ClaudeMessage[] /* last 100, oldest first */, activeTurn?: ClaudeTurn}` |
 | `PATCH /v1/claude/threads/{id}` `{claudeSessionId}` | The Mac stores Claude Code's session id. |
 | `POST /v1/claude/threads/{id}/messages` `{text}` | From a device that can't run Claude (the phone).<ul><li>→ 202 `{message, turn}`: the turn is queued for the Mac, which gets a `claude` `{op: "turn"}` event.</li><li>`mac_offline` (409) with `{fallback: {openInClaudeUrl, apiFallback: boolean}}`.</li><li>`claude_busy` (409) while a turn on that thread is queued or running.</li></ul> |
@@ -1529,7 +1619,7 @@ ClaudeStatus  { mac: { online: boolean, claudeCode: { installed: boolean, signed
 | `POST /v1/claude/turns/{id}/claim` | → `ClaudeTurn` (`running`). `already_claimed` (409), `turn_expired` (410). |
 | `POST /v1/claude/turns/{id}/stop` | The phone's Stop. Emits `claude` `{op: "stop", turnId}`; the Mac interrupts and sends `done`. |
 | `POST /v1/claude/threads/{id}/events` `{turnId?, events: ClaudeEvent[]}` | The Mac mirrors its local Claude Code stream (its own turns, without `turnId`, and claimed ones). `user`, `assistant`, `tool` and `image` events are stored as messages; `text` deltas are only relayed live. `done` ends the turn. ≤ 4 MB. |
-| `POST /v1/claude/threads/{id}/api-turn` `{text}` | The fallback when it is on and the key is set. It streams `ChatEvent`s like the camera chat. Camera threads only for now. |
+| `POST /v1/claude/threads/{id}/api-turn` `{text}` | The fallback when it is on and the key is set. It streams `ChatEvent`s like the camera chat. Camera threads run the director. Recreate and Edit threads run MUSE's editor loop (workstream 1, `src/recreate/assistant.ts`) with the Recreate tools (plus open_edit, get_edit, apply_edit_ops, undo_edit, get_frame, list_takes) or the Edit tools. The thread's reference or session is filled in. Paid steps keep their approval: `fill_slot` and the paid helpers only price, or ask the owner in the app. Each turn rebuilds the conversation from the thread's text. |
 
 **Timeouts:** a queued turn not claimed within 90 s fails with "Your Mac didn't pick this up". A running turn that sends nothing for 10 min fails.
 

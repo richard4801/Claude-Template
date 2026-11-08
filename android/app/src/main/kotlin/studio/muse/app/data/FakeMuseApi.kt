@@ -2,6 +2,7 @@ package studio.muse.app.data
 
 import studio.muse.core.edit.RecipeJson
 import studio.muse.core.edit.RecipeReference
+import studio.muse.core.edit.RecreateReplaceResult
 import studio.muse.core.edit.RecreateMatch
 import studio.muse.core.edit.RecreateApplyResult
 import studio.muse.core.edit.RecreateFillStart
@@ -742,6 +743,8 @@ class FakeMuseApi(
 
     override suspend fun startEditorJob(req: EditorJobRequest): EditorJob = lock.withLock {
         checkKeepPoints(req)
+        // WS1 guardrails: paid helpers switched off by the owner (the free ones, cuts and beats, still run).
+        if (!editorSettingsDemo.on && req.kind in listOf("captions", "matte", "denoise")) throw ApiException("editor_paid_off", "AI editing helpers are switched off for this studio")
         if (failNext) { failNext = false; throw ApiException("failed", "Something went wrong · try again") }
         val d = editorDuration(req.source)
         val id = "ej_${++editorSeq}"
@@ -1176,11 +1179,12 @@ class FakeMuseApi(
     override suspend fun learnGaps(limit: Int): List<LearnGap> = FakeLearn.gaps().take(limit)
 
     // Recreate this edit (workstream 1's /v1/recreate/references): the analysis steps the server reports, then demo's recipe.
-    private val recreatePolls = HashMap<String, Int>()
+    private val recreatePolls = LinkedHashMap<String, Int>()
     private val recreatePhases = listOf("Finding the cuts", "Listening for the beat", "Reading the text", "Reading the look", "Writing the recipe")
     override suspend fun createReference(uploadId: String, name: String?): RecipeReference = lock.withLock {
         val id = "rx_${++editorSeq}"
         recreatePolls[id] = 0
+        name?.let { recreateNames[id] = it }
         RecipeReference(id, name ?: "Reference", "analyzing", 5, "Waiting")
     }
     /** Demo: a link with "private" in it answers like a private video; any other link runs the analysis. */
@@ -1188,11 +1192,19 @@ class FakeMuseApi(
         if ("private" in url) throw ApiException("link_private", "This video is private · save it and share the file instead")
         return createReference("link", name)
     }
+    /** Demo: the references made this session, newest first, each ready (its recipe) once its analysis has run. */
+    override suspend fun listReferences(): List<RecipeReference> = lock.withLock {
+        recreatePolls.entries.reversed().map { (id, n) ->
+            if (n < recreatePhases.size) RecipeReference(id, recreateNames[id] ?: "Reference", "analyzing", 5 + 90 * n / recreatePhases.size, recreatePhases[n.coerceAtMost(recreatePhases.size - 1)])
+            else RecipeReference(id, recreateNames[id] ?: "Reference", "ready", 100, durationSec = 15.0, createdAt = now(), expiresAt = now() + 30L * 86_400_000)
+        }
+    }
+    private val recreateNames = HashMap<String, String>()
     override suspend fun reference(id: String): RecipeReference = lock.withLock {
         val n = recreatePolls[id] ?: throw ApiException("not_found", "Reference not found")
         recreatePolls[id] = n + 1
         if (n < recreatePhases.size) RecipeReference(id, "Reference", "analyzing", 5 + 90 * n / recreatePhases.size, recreatePhases[n])
-        else RecipeJson.reference("""{"id":"$id","name":"Reference","state":"ready","progress":100,"phase":"Done","recipe":${FakeRecipes.cafeTrendJson()}}""")
+        else RecipeJson.reference("""{"id":"$id","name":"${recreateNames[id] ?: "Reference"}","state":"ready","progress":100,"phase":"Done","durationSec":15.0,"keep":false,"createdAt":${now()},"expiresAt":${now() + 30L * 86_400_000},"recipe":${FakeRecipes.cafeTrendJson()}}""")
     }
 
     // Recreate phases 2–3, demo mode (the Mac's FakeRecreateAPI): shots 1, 3 and 6 match the studio's takes, the others are
@@ -1203,6 +1215,23 @@ class FakeMuseApi(
         if (id !in recreatePolls) throw ApiException("not_found", "Reference not found")
         return FakeRecipes.cafeTrend().slots.map { it.id }
     }
+    // WS1 guardrails, demo: the paid helpers' switch and daily limit (nothing is ever charged in demo mode).
+    private var editorSettingsDemo = EditorSettings(paidHelpers = "on", capPerDayUsd = null, todayUsd = 0.42, markup = 2.0, provider = "mock")
+    override suspend fun editorSettings() = lock.withLock { editorSettingsDemo }
+    override suspend fun patchEditorSettings(paidHelpers: String?, cap: Double?, resetCap: Boolean) = lock.withLock {
+        if (paidHelpers != null && paidHelpers != "on" && paidHelpers != "off") throw ApiException("bad_request", "paidHelpers: on or off")
+        if (cap != null && (cap < 0 || cap > 1000)) throw ApiException("bad_request", "capPerDayUsd: 0 to 1000")
+        editorSettingsDemo = editorSettingsDemo.copy(paidHelpers = paidHelpers ?: editorSettingsDemo.paidHelpers,
+            capPerDayUsd = if (resetCap) null else cap ?: editorSettingsDemo.capPerDayUsd)
+        editorSettingsDemo
+    }
+    /** Demo: the editor's features follow the switch (paid helpers off: captions, matte and denoise unavailable). */
+    override suspend fun editorFeatures(): kotlinx.serialization.json.JsonObject = lock.withLock {
+        val on = editorSettingsDemo.on
+        fun avail(b: Boolean) = kotlinx.serialization.json.JsonObject(mapOf("available" to kotlinx.serialization.json.JsonPrimitive(b)))
+        kotlinx.serialization.json.JsonObject(mapOf("paid" to avail(on), "captions" to avail(on), "matte" to avail(on), "denoise" to avail(on), "cuts" to avail(true)))
+    }
+
     override suspend fun matchReference(id: String, modelId: String?) { lock.withLock { recreateSlots(id) } }
     override suspend fun referenceFill(id: String): RecreateFill = lock.withLock {
         val slots = recreateSlots(id)
@@ -1228,9 +1257,17 @@ class FakeMuseApi(
     override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?) = lock.withLock {
         recreateSlots(id)
         val made = recreateMade.getOrPut(id) { HashMap() }
-        if (slotId in made) throw ApiException("already_filled", "This shot is already being made")
+        // Demo: a shot still being made can't be started again; a finished one can be made anew ("Make a new one").
+        if ((made[slotId] ?: 2) < 2) throw ApiException("already_filled", "This shot is already being made")
         made[slotId] = 0
         RecreateFillStart(slotId, "job_rx_$slotId")
+    }
+    /** Demo: Fix shot swaps the clip in place (a running fill's job is refused, as on the server). */
+    override suspend fun replaceRecipeSlot(id: String, slotId: String, sessionId: String, take: String, baseRevision: Int?) = lock.withLock {
+        val all = recreateSlots(id)
+        if (slotId !in all) throw ApiException("slot_not_in_edit", "This shot isn't in the edit any more · rebuild the edit")
+        if (take.startsWith("job_rx_") && (recreateMade[id]?.get(slotId) ?: 0) < 2) throw ApiException("job_not_done", "This shot is still being made")
+        RecreateReplaceResult(sessionId, (baseRevision ?: 0) + 1, slotId, "Fixed shot ${all.indexOf(slotId) + 1}")
     }
     override suspend fun applyRecipe(id: String, sessionId: String, baseRevision: Int?, slots: Map<String, String>) = lock.withLock {
         val all = recreateSlots(id)

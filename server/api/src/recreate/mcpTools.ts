@@ -98,24 +98,38 @@ export const RECREATE_TOOLS: EditTool[] = [
     },
   },
   {
-    name: 'fill_slot', title: 'Generate a missing shot', scope: 'edit:write',
-    description: 'Generates a Suite shot for a slot nothing fits: the brief as the prompt, the reference\'s shape, the slot\'s framing, angle and move, long enough for the slot, with the lead model. Paid: without confirm it returns the price; with confirm: true it asks the owner in the MUSE app (in this edit session) and runs after they approve. When the job is done, pass its job id to apply_recipe for that slot.',
+    name: 'fill_slot', title: 'Fill a missing shot', scope: 'edit:write',
+    description: 'Fills a slot nothing fits. By default (method swap) the model is swapped into the reference\'s own segment of that shot, so the motion matches exactly; the creator\'s zoom, speed and look are already in it, and burned-in captions are removed. method generate makes a new Suite shot from the brief instead (also the fallback when the reference video is gone or swapping is off). keepBackground false = the owner\'s own setting from the brief (swap only). Paid: without confirm it returns the price; with confirm: true it asks the owner in the MUSE app (in this edit session) and runs after they approve. When the job is done, pass its job id to apply_recipe for that slot.',
     inputSchema: obj({ referenceId: RID, slotId: str('The slot (s1, s2, …)'), modelId: str('The model who plays it'), quality: str('draft | standard | hd | cinema (default standard)'),
+      method: str('swap (default when possible) | generate', 10), keepBackground: bool('Swap: keep the reference\'s setting (default true)'), outfitId: str('Swap: the outfit to wear'),
       sessionId: str('The edit session to ask the owner in'), confirm: bool('Ask the owner to approve the price') }, ['referenceId', 'slotId', 'modelId', 'sessionId']),
     run: async (env, a) => {
       const svc = rx(env), sess = editSessionsOf(env.ctx);
       const s = await sess.row(env.user, need(a, 'sessionId'));
-      const body = { modelId: need(a, 'modelId'), ...(typeof a.quality === 'string' ? { quality: a.quality } : {}) };
+      const body = { modelId: need(a, 'modelId'), ...(typeof a.quality === 'string' ? { quality: a.quality } : {}),
+        ...(a.method === 'swap' || a.method === 'generate' ? { method: a.method } : {}), ...(typeof a.keepBackground === 'boolean' ? { keepBackground: a.keepBackground } : {}),
+        ...(typeof a.outfitId === 'string' && a.outfitId ? { outfitId: a.outfitId } : {}) };
       const e = await svc.estimateSlot(env.user, need(a, 'referenceId'), need(a, 'slotId'), body);
       const usd = Number((e.estimate as { estimate?: number }).estimate) || 0;
-      const label = `Generate ${e.slotId} for “${(await svc.row(env.user, need(a, 'referenceId'))).name}”`;
+      const label = `${e.method === 'swap' ? 'Swap your model into' : 'Generate'} ${e.slotId} for “${(await svc.row(env.user, need(a, 'referenceId'))).name}”`;
+      // The fill runs with the method priced here, so the owner approves exactly this.
+      const fixed = { ...body, method: e.method };
       if (a.confirm !== true) {
         await sess.log(s, `Priced ${label}: about $${usd.toFixed(2)}`);
-        return { needsConfirmation: true, estimateUsd: usd, seconds: e.request.duration, prompt: e.request.prompt, message: `${label} costs about $${usd.toFixed(2)}. Call again with confirm: true to ask the owner; it runs only after they approve it in the MUSE app.` };
+        const r = e.request as { duration?: number; prompt?: string; clipSeconds?: number };
+        return { needsConfirmation: true, method: e.method, estimateUsd: usd, seconds: r.duration ?? r.clipSeconds, ...(r.prompt ? { prompt: r.prompt } : {}),
+          ...('swapUnavailable' in e ? { swapUnavailable: e.swapUnavailable } : {}),
+          message: `${label} costs about $${usd.toFixed(2)}. Call again with confirm: true to ask the owner; it runs only after they approve it in the MUSE app.` };
       }
-      const p = await sess.askOwner(s, { kind: 'recreate_fill', label, estimateUsd: usd, args: { referenceId: need(a, 'referenceId'), slotId: e.slotId, body } });
+      const p = await sess.askOwner(s, { kind: 'recreate_fill', label, estimateUsd: usd, args: { referenceId: need(a, 'referenceId'), slotId: e.slotId, body: fixed } });
       return { waitingForOwner: true, pendingId: p.id, estimateUsd: usd, message: 'The owner has been asked in the MUSE app. When the job is done, use its job id for this slot in apply_recipe.' };
     },
+  },
+  {
+    name: 'replace_slot', title: 'Fix a shot', scope: 'edit:write',
+    description: 'Swaps one shot of the built edit for another take (or a finished fill_slot job id), in place, as one undoable change: its place, length, transition, ramp, camera moves and look stay (a swapped-in shot of the reference gets none of them again, its pixels have them), the new take starts where its action lines up, and the owner\'s other edits are kept. Use it after apply_recipe.',
+    inputSchema: obj({ referenceId: RID, slotId: str('The slot (s1, s2, …)'), sessionId: str('The edit session the edit was built in'), take: str('A take id, or a finished job id'), baseRevision: { type: 'number' } }, ['referenceId', 'slotId', 'sessionId', 'take']),
+    run: async (env, a) => rx(env).replaceSlot(env.user, need(a, 'referenceId'), need(a, 'slotId'), { sessionId: need(a, 'sessionId'), take: need(a, 'take'), ...(typeof a.baseRevision === 'number' ? { baseRevision: a.baseRevision } : {}) }, { by: 'claude' }),
   },
   // The playbook (workstream 3's learning editor, src/editor/learn.ts): read it before building, add what you learned.
   {
