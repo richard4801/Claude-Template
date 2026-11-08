@@ -56,6 +56,12 @@ object ComposerDrafts {
         val extra = buildMap<String, JsonElement> {
             put("tokens", encode(d.tokens))
             d.outfitId?.let { put("outfitId", JsonPrimitive(it)) }
+            if (d.references.isNotEmpty()) put("references", JsonArray(d.references.map { r ->
+                JsonObject(buildMap {
+                    put("uploadId", JsonPrimitive(r.uploadId)); put("url", JsonPrimitive(r.url)); put("use", JsonPrimitive(r.use))
+                    r.label?.let { put("label", JsonPrimitive(it)) }
+                })
+            }))
             presetId?.let { put("presetId", JsonPrimitive(it)) }
             // Speaking: on or off; Auto is left out (the strict server refuses nulls), and reads back as Auto.
             if (d.tool != ComposerTool.PHOTO) d.speaking?.let { put("speaking", JsonPrimitive(it)) }
@@ -78,6 +84,13 @@ object ComposerDrafts {
         s.rig?.let { out = out.copy(settings = it.toSettings()) }
         (s["tokens"] as? JsonArray)?.let { out = out.copy(tokens = decode(it)) }
         (s["outfitId"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.let { out = out.copy(outfitId = it) }
+        // Claude in the Suite: the draft's reference images; a draft without the field has none.
+        out = out.copy(references = (s["references"] as? JsonArray).orEmpty().mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            fun str(k: String) = (o[k] as? JsonPrimitive)?.takeIf { it.isString }?.content
+            val url = str("url") ?: return@mapNotNull null
+            studio.muse.app.data.DraftReference(str("uploadId").orEmpty(), url, str("use") ?: "style", str("label"))
+        })
         return out.copy(collapsed = false, directed = null)
     }
 

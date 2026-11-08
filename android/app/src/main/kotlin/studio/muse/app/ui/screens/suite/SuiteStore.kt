@@ -88,6 +88,9 @@ class SuiteStore(private val c: AppContainer) {
     val feedCollection = MutableStateFlow<String?>(null)
     /** For the AI suite plan's extensions (SuiteRigs.kt). */
     internal val app: AppContainer get() = c
+    /** Claude in the Suite (SuiteClaude.kt): the shared draft open in the Claude sheet, and the draft last synced with it. */
+    val assist = MutableStateFlow<SuiteAssistUi?>(null)
+    internal var assistSynced: String? = null
 
     /** Puts [t] in Extend's VIDEO slot. False when the take has no stored video to continue from. */
     fun pickExtendTake(t: studio.muse.app.data.Take): Boolean {
