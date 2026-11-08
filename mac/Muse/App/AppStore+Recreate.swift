@@ -79,6 +79,8 @@ final class RecreateState {
     var exportProgress: Double?
     var exportedFile: URL?
     var exportError: String?
+    /// The server's "Post with the original sound" steps (with its export), when it sends them.
+    var useThisSound: UseThisSound?
     @ObservationIgnored var exportTask: Task<Void, Never>?
 
     /// Claude on the Recreate screens (Release 1 item C).
@@ -151,6 +153,7 @@ final class RecreateState {
         exportProgress = nil
         exportedFile = nil
         exportError = nil
+        useThisSound = nil
         claudeAsk = nil
         claudeRevision = nil
     }
@@ -717,6 +720,21 @@ extension AppStore {
         recreate.built = nil
         recreate.loadingBuilt = true
         defer { recreate.loadingBuilt = false }
+        // A server that renders previews: its render of the session's revision (what Export makes too). An older server
+        // (404) or a failed render falls back to this Mac's render with the editor's engine.
+        if !isDemo, let sid = recreate.sessionId {
+            if let b = try? await serverBuiltPreview(sid) {
+                guard recreate.reference?.id == id else { b.close(); return }
+                await b.load()
+                if b.phase == .ready {
+                    b.seek(recreate.time)
+                    recreate.built = b
+                    return
+                }
+                b.close()
+            }
+            guard recreate.reference?.id == id else { return }
+        }
         do {
             guard let got = try await recreateBuiltProject(), recreate.reference?.id == id else { return }
             let b = RecreateBuiltPreview(project: got.project, files: got.files)
@@ -730,6 +748,22 @@ extension AppStore {
         }
     }
 
+    /// `POST …/preview`, then the state every 2 s (up to 3 minutes) until it is ready; its file downloaded with the token.
+    /// nil when the server has no previews, the render failed or took too long.
+    private func serverBuiltPreview(_ sid: String) async throws -> RecreateBuiltPreview? {
+        let api = recreateAPI
+        var r = try await api.startPreview(sessionId: sid)
+        var polls = 0
+        while !r.isReady {
+            if r.isFailed || polls >= 90 || recreate.sessionId != sid { return nil }
+            try await Task.sleep(for: .seconds(2))
+            r = try await api.preview(sessionId: sid, revision: r.revision)
+            polls += 1
+        }
+        guard let file = await RecreateMediaLoader.video(recreateMedia(r.url)) else { return nil }
+        return RecreateBuiltPreview(render: r, file: file)
+    }
+
     // MARK: Export (plans/recreate-edit.md step 7)
 
     func openRecreateExport() {
@@ -740,6 +774,16 @@ extension AppStore {
         // Without the reference's sound on this Mac (demo mode), the silent export is the one on offer.
         if !recreateHasReferenceSound { recreate.exportSound = .silent }
         recreate.exportOpen = true
+        // Demo mode: the fake's steps, shaped like the server's.
+        if isDemo, let r = recreate.reference { recreate.useThisSound = FakeRecreateAPI.useThisSound(r) }
+        // The server's "Post with the original sound" steps for this reference, before anything is exported.
+        if !isDemo, let sid = recreate.sessionId, let rid = recreate.reference?.id {
+            let sound = recreate.exportSound.rawValue
+            Task { [weak self] in
+                guard let self, let e = try? await self.recreateAPI.exportState(rid, sessionId: sid, sound: sound) else { return }
+                if let u = e.useThisSound { self.recreate.useThisSound = u }
+            }
+        }
     }
 
     /// The reference's sound can go under the edit: a server reference with its video and sound.
@@ -748,18 +792,28 @@ extension AppStore {
         return recreateMedia(r.videoUrl) != nil && r.recipe?.source?.hasAudio != false
     }
 
-    /// Renders the built edit on this Mac with the editor's engine, with the reference's sound as the only audio (guide)
-    /// or no audio (silent), into `dest`. Nothing is uploaded or charged.
+    /// Exports the built edit into `dest`: the server's render when it has the export route (workstream 1), else this
+    /// Mac's render with the editor's engine, with the reference's sound as the only audio (guide) or none (silent).
+    /// Nothing is uploaded or charged. A guide export without the reference's sound offers the silent one.
     func exportRecreate(to dest: URL) {
         guard recreate.exportProgress == nil else { return }
         let sound = recreate.exportSound
         let link = recreate.reference?.videoUrl
+        let rid = recreate.reference?.id
+        let sid = isDemo ? nil : recreate.sessionId
         recreate.exportError = nil
         recreate.exportedFile = nil
         recreate.exportProgress = 0
         recreate.exportTask = Task { [weak self] in
             guard let self else { return }
             do {
+                if let rid, let sid, let file = try await self.serverExport(rid, sessionId: sid, sound: sound) {
+                    try? FileManager.default.removeItem(at: dest)
+                    try FileManager.default.copyItem(at: file, to: dest)
+                    self.recreate.exportedFile = dest
+                    self.recreate.exportProgress = nil
+                    return
+                }
                 guard let got = try await self.recreateBuiltProject() else {
                     throw ApiError("no_edit", "There’s no built edit to export yet. Build the edit first.")
                 }
@@ -773,11 +827,41 @@ extension AppStore {
                 }
                 self.recreate.exportedFile = dest
             } catch is CancellationError {
+            } catch let e as ApiError where e.code == "no_reference_sound" {
+                self.recreate.exportSound = .silent
+                self.recreate.exportError = "The reference’s sound is gone (references are kept 30 days). Export silent instead: the cuts are still timed for it."
             } catch {
                 self.recreate.exportError = (error as? ApiError)?.message ?? error.localizedDescription
             }
             self.recreate.exportProgress = nil
         }
+    }
+
+    /// The server's export: started, then its state every 2 s (up to 5 minutes), then its file downloaded with the token.
+    /// nil when the server has no export route (an older server): the Mac renders it instead.
+    private func serverExport(_ rid: String, sessionId sid: String, sound: RecreateExport.Sound) async throws -> URL? {
+        let api = recreateAPI
+        var e: RecreateServerExport
+        do {
+            e = try await api.startExport(rid, sessionId: sid, sound: sound.rawValue)
+        } catch where RecreateExport.serverLacksRender(error) {
+            return nil
+        }
+        if let u = e.useThisSound { recreate.useThisSound = u }
+        var polls = 0
+        while !e.isReady {
+            if e.isFailed { throw ApiError("export_failed", e.error ?? "The export didn’t render. Try again.") }
+            if polls >= 150 { throw ApiError("export_slow", "The export is taking too long. Try again in a moment.") }
+            try await Task.sleep(for: .seconds(2))
+            e = try await api.exportState(rid, sessionId: sid, sound: sound.rawValue)
+            if let u = e.useThisSound { recreate.useThisSound = u }
+            polls += 1
+            recreate.exportProgress = min(0.9, Double(polls) / 30)
+        }
+        guard let file = await RecreateMediaLoader.video(recreateMedia(e.url)) else {
+            throw ApiError("download_failed", "The export couldn’t be downloaded. Try again.")
+        }
+        return file
     }
 
     func cancelRecreateExport() {

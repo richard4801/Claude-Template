@@ -392,6 +392,64 @@ final class RecreateTests: XCTestCase {
         XCTAssertTrue(fix.contains("I confirm before anything is spent"))
     }
 
+    // MARK: Server renders (Compare's preview, export)
+
+    func testPreviewAndExportDecodeLeniently() throws {
+        let p = try JSONDecoder().decode(EditPreviewRender.self, from: Data(#"{"sessionId":"es_1","revision":3,"state":"ready","url":"/v1/edit-sessions/es_1/preview.mp4?revision=3","durationSec":4.4,"width":406,"height":720,"unsupported":["captions"],"new":1}"#.utf8))
+        XCTAssertTrue(p.isReady)
+        XCTAssertTrue(p.isCutOnly)
+        let none = try JSONDecoder().decode(EditPreviewRender.self, from: Data(#"{"sessionId":"es_1","state":"none"}"#.utf8))
+        XCTAssertFalse(none.isReady)
+        XCTAssertFalse(none.isCutOnly)
+        let e = try JSONDecoder().decode(RecreateServerExport.self, from: Data(#"""
+        {"referenceId":"rx_1","sessionId":"es_1","revision":2,"sound":"guide","state":"ready","url":"/v1/recreate/references/rx_1/export.mp4?sessionId=es_1&sound=guide",
+         "durationSec":4.4,"unsupported":[],"useThisSound":{"platform":"tiktok","sourceUrl":"https://www.tiktok.com/@a/video/1","startAtSec":0,"durationSec":4.4,
+         "title":"Post with the original sound","steps":["Tap the sound","Tap Use this sound"],"note":"Only for timing"}}
+        """#.utf8))
+        XCTAssertTrue(e.isReady)
+        XCTAssertEqual(e.useThisSound?.platform, "tiktok")
+        let lines = RecreateExport.reminderLines(e.useThisSound, reference: nil)
+        XCTAssertEqual(lines.title, "Post with the original sound")
+        XCTAssertEqual(lines.steps.count, 2)
+        XCTAssertEqual(lines.note, "Only for timing")
+        let plain = RecreateExport.reminderLines(nil, reference: nil)
+        XCTAssertEqual(plain.steps, ["Post with TikTok’s “Use this sound” so the real sound plays."])
+        let sparse = try JSONDecoder().decode(RecreateServerExport.self, from: Data(#"{"state":"rendering","useThisSound":{"platform":null}}"#.utf8))
+        XCTAssertTrue(sparse.isRendering)
+        XCTAssertEqual(sparse.useThisSound?.title, "Post with the original sound")
+        XCTAssertTrue(RecreateExport.serverLacksRender(ApiError("http_404", "Server error 404")))
+        XCTAssertFalse(RecreateExport.serverLacksRender(ApiError("not_found", "Edit session not found")))
+        XCTAssertFalse(RecreateExport.serverLacksRender(ApiError("no_reference_sound", "x")))
+        XCTAssertThrowsError(try EditSessionIds.check("../x"))
+    }
+
+    func testDemoRendersLikeTheServer() async throws {
+        let api = FakeRecreateAPI()
+        let p0 = try await api.preview(sessionId: "es_1", revision: nil)
+        XCTAssertEqual(p0.state, "none")
+        let p1 = try await api.startPreview(sessionId: "es_1")
+        XCTAssertTrue(p1.isRendering)
+        let p2 = try await api.preview(sessionId: "es_1", revision: nil)
+        XCTAssertTrue(p2.isReady)
+        // The demo reference has no video: a guide export is refused, silent works.
+        do {
+            _ = try await api.startExport("rx_demo", sessionId: "es_1", sound: "guide")
+            XCTFail("guide without the reference's sound")
+        } catch let e as ApiError {
+            XCTAssertEqual(e.code, "no_reference_sound")
+        }
+        let s1 = try await api.startExport("rx_demo", sessionId: "es_1", sound: "silent")
+        XCTAssertTrue(s1.isRendering)
+        let s2 = try await api.exportState("rx_demo", sessionId: "es_1", sound: "silent")
+        XCTAssertTrue(s2.isReady)
+        XCTAssertFalse(s2.useThisSound?.steps.isEmpty ?? true)
+        // A link reference names its platform's steps.
+        let link = try await api.createReference(link: FakeRecreateAPI.demoLink, name: nil)
+        let g = try await api.startExport(link.id, sessionId: "es_1", sound: "guide")
+        XCTAssertEqual(g.useThisSound?.platform, "tiktok")
+        XCTAssertTrue(g.useThisSound?.steps.contains { $0.contains("Use this sound") } ?? false)
+    }
+
     private func XCTAssertThrowsErrorAsync(_ body: () async throws -> Void, file: StaticString = #filePath, line: UInt = #line) async {
         do {
             try await body()

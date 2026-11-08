@@ -166,7 +166,7 @@ struct RecreateExportSheet: View {
                 Text(hasSound ? rs.exportSound.hint : "The reference’s sound isn’t on this Mac, so the export is silent. The cuts are timed for the sound.")
                     .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
             }
-            InlineNotice(RecreateExport.reminder(rs.reference), tone: .neutral)
+            reminder
                 .background(SnapshotFrame(key: "reminder"))
             if let p = rs.exportProgress {
                 VStack(alignment: .leading, spacing: Space.s2) {
@@ -201,6 +201,31 @@ struct RecreateExportSheet: View {
         .padding(Space.s5)
         .frame(width: 480, alignment: .leading)
         .background(t.roles.canvas)
+    }
+
+    /// "Post with the original sound": the server's steps for this reference's platform, or the plain reminder.
+    private var reminder: some View {
+        let lines = RecreateExport.reminderLines(store.recreate.useThisSound, reference: store.recreate.reference)
+        return VStack(alignment: .leading, spacing: Space.s2) {
+            Text(lines.title).scaled(t.scale.label, t.roles.ink)
+            if lines.steps.count == 1 {
+                Text(lines.steps[0]).scaled(t.scale.body, t.roles.ink).fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(Array(lines.steps.enumerated()), id: \.offset) { i, s in
+                    HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+                        Text("\(i + 1).").scaled(t.scale.caption, t.roles.ink2).monospacedDigit()
+                        Text(s).scaled(t.scale.body, t.roles.ink).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            if let n = lines.note, !n.isEmpty {
+                Text(n).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(Space.s3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field))
+        .accessibilityElement(children: .combine)
     }
 
     private func chooseFile() {

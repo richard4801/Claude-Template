@@ -19,6 +19,15 @@ public protocol RecreateAPI: Sendable {
     /// Makes one slot as a new shot: a Suite job, held and charged like any shot. Only after the person confirmed the price.
     func fillSlot(_ id: String, slotId: String, modelId: String, quality: String?) async throws -> RecreateSlotFillStart
     func apply(_ id: String, _ req: RecreateApplyRequest) async throws -> RecreateApplyResult
+    /// `POST /v1/edit-sessions/{id}/preview` (owner): renders the session's current revision (once per revision).
+    func startPreview(sessionId: String) async throws -> EditPreviewRender
+    /// `GET /v1/edit-sessions/{id}/preview?revision`.
+    func preview(sessionId: String, revision: Int?) async throws -> EditPreviewRender
+    /// `POST /v1/recreate/references/{id}/export {sessionId, sound}`: the built edit with the guide sound, or silent.
+    /// A guide export without the reference's sound gets `409 no_reference_sound`.
+    func startExport(_ id: String, sessionId: String, sound: String) async throws -> RecreateServerExport
+    /// `GET /v1/recreate/references/{id}/export?sessionId&sound`.
+    func exportState(_ id: String, sessionId: String, sound: String) async throws -> RecreateServerExport
 }
 
 /// `POST …/slots/{slotId}/estimate`: the shot request the slot becomes, and its price (nothing held).
@@ -154,6 +163,24 @@ extension HTTPMuseAPI: RecreateAPI {
     }
     public func apply(_ id: String, _ req: RecreateApplyRequest) async throws -> RecreateApplyResult {
         try await suiteCall("POST", "v1/recreate/references/\(try RecreateIds.check(id))/apply", body: try JSONEncoder().encode(req))
+    }
+
+    private struct ExportBody: Encodable { var sessionId: String; var sound: String }
+
+    public func startPreview(sessionId: String) async throws -> EditPreviewRender {
+        try await suiteCall("POST", "v1/edit-sessions/\(try EditSessionIds.check(sessionId))/preview", body: Data("{}".utf8))
+    }
+    public func preview(sessionId: String, revision: Int?) async throws -> EditPreviewRender {
+        let q = revision.map { "?revision=\($0)" } ?? ""
+        return try await suiteCall("GET", "v1/edit-sessions/\(try EditSessionIds.check(sessionId))/preview\(q)")
+    }
+    public func startExport(_ id: String, sessionId: String, sound: String) async throws -> RecreateServerExport {
+        let body = try JSONEncoder().encode(ExportBody(sessionId: try EditSessionIds.check(sessionId), sound: sound == "silent" ? "silent" : "guide"))
+        return try await suiteCall("POST", "v1/recreate/references/\(try RecreateIds.check(id))/export", body: body)
+    }
+    public func exportState(_ id: String, sessionId: String, sound: String) async throws -> RecreateServerExport {
+        let s = sound == "silent" ? "silent" : "guide"
+        return try await suiteCall("GET", "v1/recreate/references/\(try RecreateIds.check(id))/export?sessionId=\(try EditSessionIds.check(sessionId))&sound=\(s)")
     }
 
     /// Absolute URL for an authenticated reference route ("/v1/recreate/…/video" or a full link); load with `sessionToken`.
@@ -313,6 +340,61 @@ public final class FakeRecreateAPI: RecreateAPI, @unchecked Sendable {
         let job = Job(id: Self.demoJobId(slotId), title: "Shot \(i + 1)", modelId: modelId, modelName: "", outfitId: "",
                       request: JobRequest(title: "Shot \(i + 1)", modelId: modelId, outfitId: "", clipId: "", engine: "suite"), state: "queued", cost: Self.demoPrice)
         return RecreateSlotFillStart(slotId: slotId, job: job)
+    }
+
+    // Server renders: the fake answers like the server (rendering on the first POST, ready on the next read) with links
+    // that only a server can serve. The app never uses them in demo mode: it renders on the Mac there.
+    private var renders: Set<String> = []
+
+    public func startPreview(sessionId: String) async throws -> EditPreviewRender {
+        let id = try EditSessionIds.check(sessionId)
+        let fresh: Bool = with { renders.insert("p/\(id)").inserted }
+        return fresh ? EditPreviewRender(sessionId: id, revision: 1, state: "rendering") : try await preview(sessionId: id, revision: nil)
+    }
+    public func preview(sessionId: String, revision: Int?) async throws -> EditPreviewRender {
+        let id = try EditSessionIds.check(sessionId)
+        guard with({ renders.contains("p/\(id)") }) else { return EditPreviewRender(sessionId: id, revision: revision, state: "none") }
+        return EditPreviewRender(sessionId: id, revision: 1, state: "ready", url: "/v1/edit-sessions/\(id)/preview.mp4?revision=1",
+                                 durationSec: 4.4, width: 406, height: 720, unsupported: [])
+    }
+    public func startExport(_ id: String, sessionId: String, sound: String) async throws -> RecreateServerExport {
+        let r = try await reference(id)
+        if sound != "silent", r.videoUrl == nil, r.sourceUrl == nil {
+            throw ApiError("no_reference_sound", "The reference’s video is gone, so there’s no sound to use. Export silent instead.")
+        }
+        let key = "e/\(id)/\(sessionId)/\(sound)"
+        let fresh: Bool = with { renders.insert(key).inserted }
+        if fresh { return Self.export(r, sessionId: sessionId, sound: sound, ready: false) }
+        return try await exportState(id, sessionId: sessionId, sound: sound)
+    }
+    public func exportState(_ id: String, sessionId: String, sound: String) async throws -> RecreateServerExport {
+        let r = try await reference(id)
+        let made = with { renders.contains("e/\(id)/\(sessionId)/\(sound)") }
+        var e = Self.export(r, sessionId: sessionId, sound: sound, ready: made)
+        if !made { e.state = "none" }
+        return e
+    }
+
+    /// The server's useThisSound: the platform's own steps for a link reference, general ones for a file.
+    public static func useThisSound(_ r: RecreateReference) -> UseThisSound {
+        let platform = r.sourceUrl.flatMap { RecreateLinks.platform($0) }
+        let steps: [String]
+        switch platform {
+        case "TikTok": steps = ["Open the reference on TikTok and tap the sound", "Tap “Use this sound”", "Upload your export and line it up at 0:00"]
+        case "Instagram": steps = ["Open the reference Reel and tap the audio", "Tap “Use audio”", "Add your export and line it up at 0:00"]
+        case "YouTube": steps = ["Open the reference Short", "Tap “Remix” then “Use sound”", "Add your export and line it up at 0:00"]
+        default: steps = ["Find the original sound on the platform you post to", "Use it on your post", "Line your export up at 0:00"]
+        }
+        return UseThisSound(platform: platform?.lowercased(), sourceUrl: r.sourceUrl, startAtSec: 0, durationSec: r.durationSec,
+                            title: "Post with the original sound", steps: steps,
+                            note: "The guide sound is only for timing. Post with the platform’s own sound so it plays for everyone.")
+    }
+
+    static func export(_ r: RecreateReference, sessionId: String, sound: String, ready: Bool) -> RecreateServerExport {
+        let q = "sessionId=\(sessionId)&sound=\(sound)"
+        return RecreateServerExport(referenceId: r.id, sessionId: sessionId, revision: 1, sound: sound, state: ready ? "ready" : "rendering",
+                                    url: ready ? "/v1/recreate/references/\(r.id)/export.mp4?\(q)" : nil, durationSec: r.durationSec,
+                                    useThisSound: useThisSound(r))
     }
 
     public func apply(_ id: String, _ req: RecreateApplyRequest) async throws -> RecreateApplyResult {

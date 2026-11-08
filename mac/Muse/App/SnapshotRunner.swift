@@ -462,7 +462,7 @@ enum SnapshotRunner {
             for _ in 0..<24 where store.recreate.built?.phase != .ready { try? await Task.sleep(for: .seconds(0.5)) }
             try? await Task.sleep(for: .seconds(1))
             let built = store.recreate.built
-            lines.append("\(built?.phase == .ready ? "FITS" : "CUT") recreate_compare 1280x800 \(theme.rawValue) your edit is the built edit (\(built.map { "\($0.project.mainClips.count) clips, \(String(format: "%.1f", $0.duration)) s" } ?? "not built"))")
+            lines.append("\(built?.phase == .ready ? "FITS" : "CUT") recreate_compare 1280x800 \(theme.rawValue) your edit is the built edit (\(built.map { "\($0.clipCount) clips, \(String(format: "%.1f", $0.duration)) s" } ?? "not built"))")
             check("compare", theme, beside: false, primary: "export")
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_recreate_compare.png"))
             if theme == .c, let built {

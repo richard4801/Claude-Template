@@ -634,7 +634,7 @@ struct RecreatePlayer: View {
         let rs = store.recreate
         let aspect = aspectRatio
         VStack(alignment: .leading, spacing: Space.s2) {
-            Text(label).scaled(t.scale.label, t.roles.ink).lineLimit(1)
+            Text(yours && rs.built?.cutOnly == true ? "Preview of the cut" : label).scaled(t.scale.label, t.roles.ink).lineLimit(1)
             ZStack {
                 t.editViewer
                 ZStack {

@@ -13,22 +13,56 @@ final class RecreateBuiltPreview {
 
     private(set) var phase: Phase = .loading
     private(set) var duration: Double = 0
-    let project: EditV2.Project
+    /// The project rendered on this Mac (nil when the server's render plays).
+    let project: EditV2.Project?
+    /// The server's render (workstream 1, "The built edit, rendered"), played from its downloaded file.
+    let serverRender: EditPreviewRender?
     let player = AVPlayer()
     private let files: [String: URL]
+    private let file: URL?
 
+    /// The built edit rendered on this Mac by the editor's engine (demo mode, and servers without previews).
     init(project: EditV2.Project, files: [String: URL]) {
         self.project = project
         self.files = files
+        self.serverRender = nil
+        self.file = nil
         player.actionAtItemEnd = .pause
         // The reference plays its sound beside it; the built edit is posted with that sound, so it plays muted here.
         player.isMuted = true
     }
 
-    var aspect: CGFloat { CGFloat(project.canvas.width) / CGFloat(max(1, project.canvas.height)) }
+    /// The server's preview of the edit session's revision, downloaded to `file`.
+    init(render: EditPreviewRender, file: URL) {
+        self.project = nil
+        self.files = [:]
+        self.serverRender = render
+        self.file = file
+        player.actionAtItemEnd = .pause
+        player.isMuted = true
+    }
+
+    /// The server's picture leaves something out (rotation, masks, captions…): the player says "Preview of the cut".
+    var cutOnly: Bool { serverRender?.isCutOnly ?? false }
+    var clipCount: Int { project?.mainClips.count ?? 0 }
+
+    var aspect: CGFloat {
+        if let p = project { return CGFloat(p.canvas.width) / CGFloat(max(1, p.canvas.height)) }
+        if let r = serverRender, let w = r.width, let h = r.height, w > 0, h > 0 { return CGFloat(w) / CGFloat(h) }
+        return 9 / 16
+    }
 
     func load() async {
         phase = .loading
+        if let file {
+            let item = AVPlayerItem(url: file)
+            player.replaceCurrentItem(with: item)
+            let secs = (try? await item.asset.load(.duration).seconds) ?? 0
+            duration = secs.isFinite && secs > 0 ? secs : (serverRender?.durationSec ?? 0)
+            phase = duration > 0 ? .ready : .failed("Couldn’t play the rendered edit")
+            return
+        }
+        guard let project else { phase = .failed("Nothing to play"); return }
         do {
             let sources = try await EditV2Engine.load(project, files: files)
             let built = try EditV2Engine.build(project, sources: sources)
