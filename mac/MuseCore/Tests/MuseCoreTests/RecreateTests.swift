@@ -564,6 +564,32 @@ final class RecreateTests: XCTestCase {
         XCTAssertEqual(s3.reason, FakeRecreateAPI.swapFailedReason)
     }
 
+    // MARK: Write the shot briefs (G8)
+
+    func testBriefsEstimateAndWrite() async throws {
+        let e = try JSONDecoder().decode(RecreateBriefsEstimate.self, from: Data(#"{"available":true,"slots":2,"estimateUsd":0.02,"label":"Write the shot briefs · about $0.02","priceLine":"about $0.02"}"#.utf8))
+        XCTAssertTrue(e.available)
+        XCTAssertEqual(e.slots, 2)
+        let off = try JSONDecoder().decode(RecreateBriefsEstimate.self, from: Data(#"{"available":false,"reason":"Turn on Claude in Settings","slots":["s1","s3"]}"#.utf8))
+        XCTAssertFalse(off.available)
+        XCTAssertEqual(off.slots, 2)
+        XCTAssertEqual(off.label, "Write the shot briefs")
+        let api = FakeRecreateAPI()
+        let ref = try await api.reference("rx_demo")
+        XCTAssertEqual(ref.recipe?.slotsWithoutBriefs, ["s1", "s3"])
+        let est = try await api.briefsEstimate("rx_demo")
+        XCTAssertEqual(est.label, "Write the shot briefs · about $0.02")
+        XCTAssertEqual(est.slots, 2)
+        let done = try await api.writeBriefs("rx_demo")
+        XCTAssertEqual(done.written, ["s1", "s3"])
+        XCTAssertEqual(done.reference?.recipe?.slotsWithoutBriefs, [])
+        api.briefsAvailable = false
+        let none = try await api.briefsEstimate("rx_demo")
+        XCTAssertFalse(none.available)
+        XCTAssertNotNil(none.reason)
+        await assertCode("briefs_unavailable") { _ = try await api.writeBriefs("rx_demo") }
+    }
+
     // MARK: Claude's recreate thread (workstream 1's brief)
 
     func testRecreateThreadBriefSeedsClaudeCode() async throws {

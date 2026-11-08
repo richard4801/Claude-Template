@@ -80,6 +80,12 @@ final class RecreateState {
     /// Swapped shots that already carry the reference's camera, speed and look (slotId → parts): "Already in the shot".
     var baked: [String: [String]] = [:]
 
+    /// "Write the shot briefs" (G8): its price or why it's off, the confirmation, and the write in progress.
+    var briefs: RecreateBriefsEstimate?
+    var askBriefs = false
+    var writingBriefs = false
+    var briefsError: String?
+
     /// "Fix shot N" in Compare: the shot the sheet is open for, what it is doing, its price and any problem.
     var fixSlot: String?
     var fixBusy: String?
@@ -184,6 +190,10 @@ final class RecreateState {
         fixError = nil
         fixNeedsRebuild = false
         demoSwaps = [:]
+        briefs = nil
+        askBriefs = false
+        writingBriefs = false
+        briefsError = nil
         methods = [:]
         ownSetting = []
         estimateInfo = [:]
@@ -286,6 +296,7 @@ extension AppStore {
             pollRecreateReference(r.id)
         } else if r.isReady {
             await loadRecreateFill(r.id)
+            await loadRecreateBriefs()
         }
         if recreate.claudeOpen, !isDemo, recreate.claudeSessionId == nil { await ensureRecreateClaudeSession() }
     }
@@ -753,6 +764,53 @@ extension AppStore {
     func fixWeakestRecreateShot() {
         if let i = recreate.weakestSlot { selectRecreateSlot(i) }
         recreate.mode = .recipe
+    }
+
+    // MARK: Write the shot briefs (G8)
+
+    /// Shots without a brief ("Not described yet"): the button's price, or why it's off. Free; nothing is held. Older
+    /// servers (404) just don't show the button.
+    func loadRecreateBriefs() async {
+        guard let ref = recreate.reference, !(ref.recipe?.slotsWithoutBriefs.isEmpty ?? true) else { recreate.briefs = nil; return }
+        let e = try? await recreateAPI.briefsEstimate(ref.id)
+        guard recreate.reference?.id == ref.id else { return }
+        recreate.briefs = e
+    }
+
+    func requestRecreateBriefs() {
+        guard recreate.briefs?.available == true, !recreate.writingBriefs else { return }
+        recreate.briefsError = nil
+        recreate.askBriefs = true
+    }
+
+    /// The owner said yes to the price: one call writes every brief (charged from the wallet). The returned reference
+    /// replaces the one on screen, and the new shots are priced again from their briefs.
+    func confirmRecreateBriefs() {
+        guard let ref = recreate.reference else { return }
+        recreate.askBriefs = false
+        recreate.writingBriefs = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.recreate.writingBriefs = false }
+            do {
+                let w = try await self.recreateAPI.writeBriefs(ref.id)
+                if !self.isDemo, let b = try? await self.api.balance() { self.balance = b }
+                guard self.recreate.reference?.id == ref.id else { return }
+                let fresh: RecreateReference
+                if let r = w.reference { fresh = r } else { fresh = try await self.recreateAPI.reference(ref.id) }
+                self.recreate.reference = fresh
+                if let i = self.recreate.references.firstIndex(where: { $0.id == fresh.id }) { self.recreate.references[i] = fresh }
+                self.recreate.briefs = nil
+                let n = w.written.count
+                self.showToast(n == 1 ? "1 shot described" : "\(n) shots described")
+                self.recreate.estimates = [:]
+                self.recreate.estimateInfo = [:]
+                await self.priceRecreateSlots(ref.id)
+            } catch {
+                // briefs_unavailable / editor_paid_off (503), editor_daily_cap (402), briefs_failed (502, nothing charged).
+                self.recreate.briefsError = (error as? ApiError)?.message ?? error.localizedDescription
+            }
+        }
     }
 
     // MARK: Fix shot N (Compare: replace one shot in the built edit)

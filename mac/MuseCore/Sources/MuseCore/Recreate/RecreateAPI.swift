@@ -33,6 +33,64 @@ public protocol RecreateAPI: Sendable {
     /// undoable change; its timing, transition, ramp, camera and look stay. 409 `not_built_here`, `slot_not_in_edit`,
     /// `job_not_done`; 400 for an unknown take.
     func replaceSlot(_ id: String, slotId: String, sessionId: String, take: String, baseRevision: Int?) async throws -> RecreateReplaceResult
+    /// "Write the shot briefs" (G8): its price, or why it isn't available. Nothing is held.
+    func briefsEstimate(_ id: String) async throws -> RecreateBriefsEstimate
+    /// The owner confirmed the price: one call writes every shot's brief, the summary and tags. Charged from the wallet.
+    func writeBriefs(_ id: String) async throws -> RecreateBriefsWritten
+}
+
+/// `POST …/briefs/estimate` → this.
+public struct RecreateBriefsEstimate: Codable, Hashable, Sendable {
+    public var available: Bool
+    /// Why it isn't available (points to Settings → Claude, or to asking Claude on the Mac for free).
+    public var reason: String?
+    /// How many shots it writes.
+    public var slots: Int?
+    public var estimateUsd: Double
+    /// "Write the shot briefs · about $0.02"
+    public var label: String
+    public var priceLine: String?
+
+    public init(available: Bool, reason: String? = nil, slots: Int? = nil, estimateUsd: Double, label: String, priceLine: String? = nil) {
+        self.available = available; self.reason = reason; self.slots = slots; self.estimateUsd = estimateUsd; self.label = label; self.priceLine = priceLine
+    }
+
+    enum CodingKeys: String, CodingKey { case available, reason, slots, estimateUsd, label, priceLine }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        available = c.o(.available) ?? false
+        reason = c.o(.reason)
+        if let n: Int = c.o(.slots) { slots = n } else if let a: [String] = c.o(.slots) { slots = a.count } else { slots = nil }
+        estimateUsd = c.o(.estimateUsd) ?? 0
+        label = c.o(.label) ?? "Write the shot briefs"
+        priceLine = c.o(.priceLine)
+    }
+}
+
+/// `POST …/briefs/write {confirm: true}` → this; `reference` replaces the one on screen.
+public struct RecreateBriefsWritten: Decodable, Hashable, Sendable {
+    public var referenceId: String?
+    public var written: [String]
+    public var costUsd: Double?
+    public var reference: RecreateReference?
+
+    public init(referenceId: String? = nil, written: [String], costUsd: Double? = nil, reference: RecreateReference? = nil) {
+        self.referenceId = referenceId; self.written = written; self.costUsd = costUsd; self.reference = reference
+    }
+
+    enum CodingKeys: String, CodingKey { case referenceId, written, costUsd, reference }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        referenceId = c.o(.referenceId)
+        written = c.o(.written) ?? []
+        costUsd = c.o(.costUsd)
+        reference = c.o(.reference)
+    }
+}
+
+extension Recipe {
+    /// Shots the analysis couldn't describe yet ("Not described yet"): "Write the shot briefs" is offered for them.
+    public var slotsWithoutBriefs: [String] { slots.filter { RecreateText.brief($0.brief) == nil }.map(\.id) }
 }
 
 extension RecreateAPI {
@@ -287,6 +345,13 @@ extension HTTPMuseAPI: RecreateAPI {
     private struct ExportBody: Encodable { var sessionId: String; var sound: String }
     /// The server's body is strict: sessionId, take and baseRevision only.
     private struct ReplaceBody: Encodable { var sessionId: String; var take: String; var baseRevision: Int? }
+
+    public func briefsEstimate(_ id: String) async throws -> RecreateBriefsEstimate {
+        try await suiteCall("POST", "v1/recreate/references/\(try RecreateIds.check(id))/briefs/estimate", body: Data("{}".utf8))
+    }
+    public func writeBriefs(_ id: String) async throws -> RecreateBriefsWritten {
+        try await suiteCall("POST", "v1/recreate/references/\(try RecreateIds.check(id))/briefs/write", body: Data(#"{"confirm":true}"#.utf8))
+    }
 
     public func replaceSlot(_ id: String, slotId: String, sessionId: String, take: String, baseRevision: Int?) async throws -> RecreateReplaceResult {
         let path = "v1/recreate/references/\(try RecreateIds.check(id))/slots/\(try RecreateIds.slot(slotId))/replace"
@@ -572,6 +637,38 @@ public final class FakeRecreateAPI: RecreateAPI, @unchecked Sendable {
         return RecreateServerExport(referenceId: r.id, sessionId: sessionId, revision: 1, sound: sound, state: ready ? "ready" : "rendering",
                                     url: ready ? "/v1/recreate/references/\(r.id)/export.mp4?\(q)" : nil, durationSec: r.durationSec,
                                     useThisSound: useThisSound(r))
+    }
+
+    /// Demo mode can write briefs (priced, nothing charged). Tests turn it off to see the reason.
+    public var briefsAvailable = true
+    public static let demoBriefsPrice = 0.02
+
+    public func briefsEstimate(_ id: String) async throws -> RecreateBriefsEstimate {
+        let r = try await reference(id)
+        let missing = r.recipe?.slotsWithoutBriefs ?? []
+        guard briefsAvailable else {
+            return RecreateBriefsEstimate(available: false, reason: "Turn on Claude on the server in Settings → Claude, or ask Claude on this Mac to write them for free.",
+                                          slots: missing.count, estimateUsd: 0, label: "Write the shot briefs")
+        }
+        let price = RecreateText.money(Self.demoBriefsPrice)
+        return RecreateBriefsEstimate(available: true, slots: missing.count, estimateUsd: Self.demoBriefsPrice,
+                                      label: "Write the shot briefs · about \(price)", priceLine: "about \(price) for \(missing.count == 1 ? "1 shot" : "\(missing.count) shots")")
+    }
+
+    public func writeBriefs(_ id: String) async throws -> RecreateBriefsWritten {
+        guard briefsAvailable else { throw ApiError("briefs_unavailable", "Writing briefs on the server is off. Turn it on in Settings → Claude.") }
+        return try with {
+            guard let i = refs.firstIndex(where: { $0.id == id }), var recipe = refs[i].recipe else { throw ApiError("not_found", "That reference is gone") }
+            var written: [String] = []
+            for k in recipe.slots.indices where RecreateText.brief(recipe.slots[k].brief) == nil {
+                let n = k + 1
+                recipe.slots[k].brief = Recipe.Slot.Brief(shotSize: n == 1 ? "ls" : "ms", angle: "eye", subject: "she",
+                                                          action: n == 1 ? "walks into frame" : "turns to camera", location: "a studio", notes: nil)
+                written.append(recipe.slots[k].id)
+            }
+            refs[i].recipe = recipe
+            return RecreateBriefsWritten(referenceId: id, written: written, costUsd: written.isEmpty ? 0 : Self.demoBriefsPrice, reference: refs[i])
+        }
     }
 
     /// referenceId → the session it was built into, its revision, and the slots in the edit (Fix shot).

@@ -78,6 +78,7 @@ struct RecreatePanel: View {
                     Text(b).scaled(t.scale.caption, t.roles.ink).fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text("Not described yet").scaled(t.scale.caption, t.roles.ink2)
+                    RecreateBriefsButton()
                 }
                 Text("Camera: \(camera.lowercased()) · Speed: \(speed)").scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
             }

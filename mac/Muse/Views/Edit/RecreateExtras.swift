@@ -136,6 +136,64 @@ struct RecreateClaudeAsk: View {
     }
 }
 
+// MARK: Write the shot briefs (G8)
+
+/// Under "Not described yet": the server writes every missing brief for its price (asked first), or says why it can't
+/// (Settings → Claude, or ask Claude on this Mac for free). Hidden on servers without it.
+struct RecreateBriefsButton: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    var body: some View {
+        let rs = store.recreate
+        if let b = rs.briefs {
+            VStack(alignment: .leading, spacing: Space.s1) {
+                if rs.writingBriefs {
+                    HStack(spacing: Space.s2) {
+                        ProgressView().controlSize(.small)
+                        Text("Writing the shot briefs").scaled(t.scale.caption, t.roles.ink2)
+                    }
+                } else if b.available {
+                    SuiteToolButton(title: b.label, icon: "pencil-simple", plain: true) { store.requestRecreateBriefs() }
+                        .accessibilityLabel(b.label)
+                        .background(SnapshotFrame(key: "briefs"))
+                } else if let reason = b.reason, !reason.isEmpty {
+                    Text(reason).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                }
+                if let e = rs.briefsError { Text(e).scaled(t.scale.caption, t.roles.caution).fixedSize(horizontal: false, vertical: true) }
+            }
+        }
+    }
+}
+
+/// "Write the shot briefs?": the price before anything is charged.
+struct RecreateBriefsConfirm: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    var body: some View {
+        let b = store.recreate.briefs
+        let n = b?.slots ?? 0
+        VStack(alignment: .leading, spacing: Space.s4) {
+            Text("Write the shot briefs?").scaled(t.scale.title, t.roles.ink).lineLimit(1).fitProbe("briefs title")
+            Text("Claude reads the reference’s frames and describes \(n == 1 ? "the shot" : "the \(n) shots") without a brief: framing, angle, what happens and where. New shots are made from these. It’s charged to the studio\(b?.priceLine.map { ", \($0)" } ?? "").")
+                .scaled(t.scale.body, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: Space.s3) {
+                Spacer(minLength: 0)
+                SuiteToolButton(title: "Cancel") { store.recreate.askBriefs = false }
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityLabel("Cancel")
+                SuiteToolButton(title: "Write · \(RecreateText.money(b?.estimateUsd ?? 0))", accent: true) { store.confirmRecreateBriefs() }
+                    .keyboardShortcut(.defaultAction)
+                    .background(SnapshotFrame(key: "briefsConfirm"))
+            }
+        }
+        .padding(Space.s5)
+        .frame(width: 440, alignment: .leading)
+        .background(t.roles.canvas)
+    }
+}
+
 // MARK: How a shot is made (G2)
 
 /// "Swap into the reference shot" (the default: the lead goes into the reference's own shot, which keeps its camera, speed

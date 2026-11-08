@@ -489,6 +489,21 @@ enum SnapshotRunner {
                 capture(dir.appendingPathComponent("mac_c_recreate_claude.png"))
                 store.recreate.closeClaude()
                 try? await Task.sleep(for: .seconds(0.5))
+                // Write the shot briefs (G8): shot 1 has none, so its price shows; the confirmation, closed with Cancel
+                // (nothing is written or charged in review mode).
+                store.selectRecreateSlot(0)
+                try? await Task.sleep(for: .seconds(1))
+                let b = store.recreate.briefs
+                lines.append("\(b?.available == true && (b?.label.contains("$") ?? false) ? "FITS" : "CUT") recreate_briefs 1280x800 c \(b?.label ?? "no estimate") for \(b?.slots ?? 0) shots")
+                onScreen("briefs", "recreate_briefs 1280x800 c")
+                check("briefs", theme, beside: true)
+                capture(dir.appendingPathComponent("mac_c_recreate_briefs.png"))
+                store.requestRecreateBriefs()
+                try? await Task.sleep(for: .seconds(1.2))
+                captureWithSheet(dir.appendingPathComponent("mac_c_recreate_briefs_confirm.png"), lines: &lines, label: "recreate_briefs_confirm c")
+                store.recreate.askBriefs = false
+                try? await Task.sleep(for: .seconds(0.8))
+                store.selectRecreateSlot(1)
             }
             // The panel scrolled to the Look (owner note 1: the swatches as the Recipe shows them).
             state.scrollTo = "recreate.look"

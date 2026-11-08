@@ -53,6 +53,9 @@ struct RecreateView: View {
         .sheet(isPresented: Binding(get: { store.recreate.exportOpen }, set: { store.recreate.exportOpen = $0 })) {
             RecreateExportSheet()
         }
+        .sheet(isPresented: Binding(get: { store.recreate.askBriefs }, set: { store.recreate.askBriefs = $0 })) {
+            RecreateBriefsConfirm()
+        }
         .sheet(isPresented: Binding(get: { store.recreate.fixSlot != nil }, set: { if !$0 { store.closeRecreateFix() } })) {
             RecreateFixSheet()
         }
