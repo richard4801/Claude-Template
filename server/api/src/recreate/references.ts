@@ -5,14 +5,18 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { and, desc, eq, isNull, lt } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt } from 'drizzle-orm';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { uploads } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
 import { uid } from '../lib/util.js';
 import { probe } from '../replicate/media.js';
+import { takes as takesTable, jobs } from '../db/schema.js';
+import { editSessionsOf } from '../editor/sessions.js';
 import { analyzeReference, type Recipe } from './analyze.js';
+import { buildProject, type AssembleOptions, type TakeInfo } from './assemble.js';
+import { BriefSchema, matchSlots, shotRequestFor, withBriefs, type Candidate } from './slots.js';
 import { recreateReferences } from './schema.js';
 
 export const MAX_REFERENCE_SEC = 60;
@@ -112,6 +116,103 @@ export class RecreateReferences {
     const obj = await this.ctx.storage.get(r.contactSheetKey);
     if (!obj) throw notFound('Contact sheet');
     return obj;
+  }
+
+  // ------------------------------------------------------------------ slots: briefs, matching, filling, assembly
+  private async ready(u: AuthUser, id: string) {
+    const r = await this.row(u, id);
+    if (r.state !== 'ready' || !r.recipe) throw new ApiError(409, 'not_ready', r.state === 'failed' ? 'The analysis failed · add the reference again' : 'The recipe isn’t ready yet');
+    return { r, recipe: r.recipe as Recipe };
+  }
+  private async saveRecipe(id: string, recipe: Recipe) {
+    const [n] = await this.ctx.db.update(recreateReferences).set({ recipe }).where(eq(recreateReferences.id, id)).returning();
+    return n!;
+  }
+
+  /** Claude's (or the owner's) shot briefs: `{slots: {s1: {shotSize, angle, subject, action, location, notes}}}`. */
+  async setBriefs(u: AuthUser, id: string, body: unknown) {
+    const b = parse(z.object({ slots: z.record(z.string(), BriefSchema) }).strict(), body);
+    const { r, recipe } = await this.ready(u, id);
+    let next: Recipe;
+    try { next = withBriefs(recipe, b.slots); } catch (e) { throw badRequest(`slots: ${(e as Error).message}`); }
+    return this.view(await this.saveRecipe(r.id, next));
+  }
+
+  /** The studio's video takes that could fill each slot, scored, plus a suggested assignment (each take once). */
+  async match(u: AuthUser, id: string, body: unknown) {
+    const b = parse(z.object({ modelId: z.string().max(80).optional(), top: z.number().int().min(1).max(10).optional(), minScore: z.number().min(0).max(1).optional() }).strict(), body);
+    const { recipe } = await this.ready(u, id);
+    const rows = await this.ctx.db.select().from(takesTable).where(and(eq(takesTable.studioId, u.studioId), eq(takesTable.kind, 'take'))).orderBy(desc(takesTable.createdAt)).limit(300);
+    const cands: Candidate[] = rows.filter(t => t.mediaKey && Number(t.media?.durationSec) > 0).map(t => ({
+      id: t.id, modelId: t.modelId, durationSec: Number(t.media!.durationSec), width: Number(t.media?.width) || 0, height: Number(t.media?.height) || 0,
+      status: t.status, createdAt: t.createdAt, draft: t.draft ?? null, title: t.title,
+    }));
+    return matchSlots(recipe, cands, { leadModelId: b.modelId, top: b.top, minScore: b.minScore });
+  }
+
+  private fillRequest(recipe: Recipe, r: Row, slotId: string, body: unknown) {
+    const b = parse(z.object({ modelId: z.string().min(1).max(80), quality: z.enum(['draft', 'standard', 'hd', 'cinema']).default('standard') }).strict(), body);
+    const slot = recipe.slots.find(s => s.id === slotId);
+    if (!slot) throw notFound('Slot');
+    return { slot, request: shotRequestFor(recipe, slot, { modelId: b.modelId, quality: b.quality ?? 'standard', referenceName: r.name }) };
+  }
+  /** The price of filling a slot with a new Suite shot (nothing is held). */
+  async estimateSlot(u: AuthUser, id: string, slotId: string, body: unknown) {
+    const { r, recipe } = await this.ready(u, id);
+    const { request } = this.fillRequest(recipe, r, slotId, body);
+    return { slotId, request, estimate: await this.ctx.suite.estimate(u, request) };
+  }
+  /** Fills a slot with a new Suite shot: an ordinary job, held and priced like any shot (the caller confirmed the price). */
+  async fillSlot(u: AuthUser, id: string, slotId: string, body: unknown) {
+    const { r, recipe } = await this.ready(u, id);
+    const { request } = this.fillRequest(recipe, r, slotId, body);
+    const job = await this.ctx.suite.create(u, request) as { id: string };
+    const next = { ...recipe, slots: recipe.slots.map(s => (s.id === slotId ? { ...s, fill: { jobId: job.id, at: Date.now() } } : s)) } as Recipe;
+    await this.saveRecipe(r.id, next);
+    return { slotId, job };
+  }
+
+  /**
+   * Builds the edit from the recipe and a take (or a finished fill job) per slot, and puts it in an edit session as one
+   * undoable change (Claude's, or the owner's from the app). Slots without a take are left out.
+   */
+  async apply(u: AuthUser, id: string, body: unknown, o: { by: 'claude' | 'app'; device?: string } = { by: 'app' }) {
+    const b = parse(z.object({
+      sessionId: z.string().min(1), baseRevision: z.number().int().min(0).optional(),
+      slots: z.record(z.string(), z.string().min(1).max(80)),
+      options: z.object({ camera: z.boolean().optional(), speed: z.boolean().optional(), text: z.boolean().optional(), look: z.boolean().optional() }).strict().optional(),
+    }).strict(), body);
+    const { r, recipe } = await this.ready(u, id);
+    const svc = editSessionsOf(this.ctx);
+    const s = await svc.row(u, b.sessionId);
+    const ids = Object.values(b.slots);
+    const unknownSlot = Object.keys(b.slots).find(k => !recipe.slots.some(x => x.id === k));
+    if (unknownSlot) throw badRequest(`slots: no slot ${unknownSlot}`);
+    // A value is a take, or a finished job whose first take fills the slot.
+    const doneJobs = await this.ctx.db.select({ id: jobs.id, state: jobs.state }).from(jobs).where(and(eq(jobs.studioId, u.studioId), inArray(jobs.id, ids.length ? ids : ['-'])));
+    const rows = await this.ctx.db.select().from(takesTable).where(and(eq(takesTable.studioId, u.studioId), eq(takesTable.kind, 'take')));
+    const byId = new Map(rows.map(t => [t.id, t]));
+    const takes: Record<string, TakeInfo | undefined> = {};
+    const waiting: string[] = [];
+    for (const [slotId, v] of Object.entries(b.slots)) {
+      let t = byId.get(v);
+      if (!t && doneJobs.some(j => j.id === v)) {
+        t = rows.filter(x => x.jobId === v).sort((x, y) => x.index - y.index)[0];
+        if (!t) { waiting.push(slotId); continue; }
+      }
+      if (!t) throw badRequest(`slots.${slotId}: no video take or job ${v}`);
+      if (!t.mediaKey) throw badRequest(`slots.${slotId}: the take has no video yet`);
+      takes[slotId] = { id: t.id, durationSec: Number(t.media?.durationSec) || 1, width: Number(t.media?.width) || 1080, height: Number(t.media?.height) || 1920, hasAudio: true };
+    }
+    const out = buildProject(recipe, s.takeId, takes, (b.options ?? {}) as AssembleOptions);
+    if (!out.project.tracks[0]!.items.length) throw badRequest('slots: give at least one slot a take');
+    const label = `Recreated “${r.name}”`;
+    const res = o.by === 'claude'
+      ? await svc.applyClaude(u, s.id, { baseRevision: b.baseRevision ?? s.revision, ops: [{ op: 'patch', patch: [
+          { op: 'replace', path: '/canvas', value: out.project.canvas }, { op: 'replace', path: '/assets', value: out.project.assets },
+          { op: 'replace', path: '/tracks', value: out.project.tracks }] }], label })
+      : await svc.reset(u, s.id, { baseRevision: b.baseRevision ?? s.revision, project: out.project, device: o.device, label });
+    return { sessionId: s.id, revision: res.revision, durationSec: out.durationSec, missing: [...out.missing.filter(x => !waiting.includes(x)), ...waiting], waiting, notes: out.notes, label };
   }
 
   /** Waits for the analysis queue to empty (tests, shutdown). */
