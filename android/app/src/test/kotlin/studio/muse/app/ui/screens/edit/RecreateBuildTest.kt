@@ -36,7 +36,7 @@ class RecreateBuildTest {
             val api = FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0)
             val ref = ready(api)
             val takes = api.listTakes().filter { it.kind == "take" }.map { RecreateTakeChoice(it.id, it.title, it.durationSec) }
-            val model = RecreateBuildModel(api, work, RecreateBuildUi(ref.id, ref.recipe!!, ref.name, takes = takes), modelId = { "m_demo" }, pollMs = 5)
+            val model = RecreateBuildModel(api, work, RecreateBuildUi(ref.id, ref.recipe!!, ref.name, takes = takes), defaultModelId = { "m_demo" }, pollMs = 5)
             val before = api.balance()
 
             model.load()
@@ -92,7 +92,7 @@ class RecreateBuildTest {
         try {
             val api = FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0)
             val ref = ready(api)
-            val model = RecreateBuildModel(api, work, RecreateBuildUi(ref.id, ref.recipe!!, ref.name), modelId = { "m_demo" }, pollMs = 5)
+            val model = RecreateBuildModel(api, work, RecreateBuildUi(ref.id, ref.recipe!!, ref.name), defaultModelId = { "m_demo" }, pollMs = 5)
             model.load()
             model.useTake("s2", RecreateTakeChoice("t_x", "Window light", 4.2))
             assertEquals("4 from your takes, 3 to generate · $1.92 in all", model.ui.value.summary)
@@ -110,7 +110,7 @@ class RecreateBuildTest {
         try {
             val api = FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0)
             val ref = ready(api)
-            val model = RecreateBuildModel(api, work, RecreateBuildUi(ref.id, ref.recipe!!, ref.name), modelId = { "m_demo" }, pollMs = 5)
+            val model = RecreateBuildModel(api, work, RecreateBuildUi(ref.id, ref.recipe!!, ref.name), defaultModelId = { "m_demo" }, pollMs = 5)
             val slots = ref.recipe!!.slots
             model.select(2)
             assertEquals((slots[2].startSec + slots[2].endSec) / 2, model.ui.value.time, 1e-9)
@@ -125,13 +125,32 @@ class RecreateBuildTest {
         } finally { scope.cancel(); work.cancel() }
     }
 
+    @Test fun aNewLeadMatchesAndPricesAgain() = runBlocking {
+        val scope = MainScope()
+        val work = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default)
+        try {
+            val api = FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0)
+            val ref = ready(api)
+            val models = api.listModels()
+            val model = RecreateBuildModel(api, work, RecreateBuildUi(ref.id, ref.recipe!!, ref.name, cast = models.map { RecreateCastChoice(it.id, it.name) }, castId = models.first().id),
+                defaultModelId = { null }, pollMs = 5)
+            model.load()
+            assertEquals(4, model.ui.value.estimates.size)
+            val other = models.last().id
+            model.setCast(other)
+            assertEquals(other, model.ui.value.castId)
+            assertEquals(4, model.ui.value.estimates.size) // priced again for the new lead
+            assertFalse(model.ui.value.loadingFill)
+        } finally { scope.cancel(); work.cancel() }
+    }
+
     @Test fun withoutAModelNoShotIsOfferedToSpendOn() = runBlocking {
         val scope = MainScope()
         val work = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default)
         try {
             val api = FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0)
             val ref = ready(api)
-            val model = RecreateBuildModel(api, work, RecreateBuildUi(ref.id, ref.recipe!!, ref.name), modelId = { null }, pollMs = 5)
+            val model = RecreateBuildModel(api, work, RecreateBuildUi(ref.id, ref.recipe!!, ref.name), defaultModelId = { null }, pollMs = 5)
             model.load()
             model.requestBuild()
             assertEquals(emptyList<String>(), model.ui.value.confirmSlots)

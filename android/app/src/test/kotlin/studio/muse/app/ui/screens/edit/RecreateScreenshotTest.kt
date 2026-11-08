@@ -48,7 +48,8 @@ class RecreateScreenshotTest(private val theme: String, private val state: Strin
             var ref = api.createReference("up_1", "Café morning")
             while (ref.state == "analyzing") ref = api.reference(ref.id)
             val takes = api.listTakes().filter { it.kind == "take" }.map { RecreateTakeChoice(it.id, it.title, it.durationSec, label = it.label) }
-            val model = RecreateBuildModel(api, work, RecreateBuildUi(ref.id, ref.recipe!!, "Café morning", takes = takes, kept = ref.keptLine()), modelId = { "m_demo" }, pollMs = 60_000)
+            val model = RecreateBuildModel(api, work, RecreateBuildUi(ref.id, ref.recipe!!, "Café morning", takes = takes, kept = ref.keptLine(),
+                cast = api.listModels().map { RecreateCastChoice(it.id, it.name) }, castId = api.listModels().firstOrNull()?.id), defaultModelId = { "m_demo" }, pollMs = 60_000)
             model.load()
             model.select(1)
             val base = model.ui.value

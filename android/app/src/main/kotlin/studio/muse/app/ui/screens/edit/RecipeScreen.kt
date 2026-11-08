@@ -160,7 +160,9 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
         val state = c.repo.state.value
         val takes = state.takes.filter { it.kind == "take" }.sortedByDescending { it.createdAt }.take(12)
             .map { RecreateTakeChoice(it.id, it.title, it.durationSec, it.thumb, it.label) }
-        RecreateBuildModel(c.repo.api, scope, RecreateBuildUi(referenceId, recipe, name, takes = takes, kept = kept), modelId = { c.repo.state.value.models.firstOrNull()?.id })
+        RecreateBuildModel(c.repo.api, scope, RecreateBuildUi(referenceId, recipe, name, takes = takes, kept = kept,
+            cast = state.models.map { RecreateCastChoice(it.id, it.name) }, castId = state.models.firstOrNull()?.id),
+            defaultModelId = { c.repo.state.value.models.firstOrNull()?.id })
     }
     val ui by model.ui.collectAsState()
     val studio by c.repo.state.collectAsState()
@@ -203,6 +205,7 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
     RecreateBuildScreen(ui, RecreateActions(
         onBack = onBack, onMode = model::setMode, onSelect = model::select,
         onBuild = { scope.launch { model.requestBuild() } }, onConfirm = { model.confirmBuild() }, onCancel = model::cancelBuild,
+        onCast = { id -> scope.launch { model.setCast(id) } },
         onUseTake = model::useTake, onFix = model::fixWeakest, onRemake = { s -> scope.launch { model.remake(s) } },
         onOpenEditor = { ui.builtTakeId?.let(onOpenTake) ?: c.repo.toast("The built edit opens with its take in the editor") },
         onPlay = model::togglePlay, onStep = model::step,

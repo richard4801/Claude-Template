@@ -35,6 +35,9 @@ data class RecreateExportUi(val guide: Boolean = true, val progress: Float? = nu
 
 /** A take that can fill a shot ("Use one of my takes"). */
 /** [label]: what tells takes with the same title apart ("Take 2 of 3"). */
+/** A character who can play the lead. */
+data class RecreateCastChoice(val id: String, val name: String)
+
 data class RecreateTakeChoice(val id: String, val caption: String, val durationSec: Double?, val thumb: studio.muse.app.data.ImageRef? = null, val label: String? = null)
 
 data class RecreateBuildUi(
@@ -81,6 +84,9 @@ data class RecreateBuildUi(
     val jobProgress: Map<String, Int> = emptyMap(),
     /** The export sheet (Compare): open, with the sound as a guide or silent, its progress while it runs. */
     val export: RecreateExportUi? = null,
+    /** Cast (plan step 3): the studio's characters, and who plays the lead (new shots are made with them, takes matched to them). */
+    val cast: List<RecreateCastChoice> = emptyList(),
+    val castId: String? = null,
 ) {
     val duration: Double get() = recipe.durationSec.coerceAtLeast(0.1)
     /** The shot under the playhead. */
@@ -125,13 +131,31 @@ class RecreateBuildModel(
     private val api: MuseApi,
     private val scope: CoroutineScope,
     start: RecreateBuildUi,
-    private val modelId: () -> String?,
+    /** The default lead when none is picked (the studio's current character). */
+    private val defaultModelId: () -> String?,
     private val pollMs: Long = 3_000,
 ) {
     private val _ui = MutableStateFlow(start)
     val ui: StateFlow<RecreateBuildUi> = _ui
     private var watch: Job? = null
     private val id get() = _ui.value.referenceId
+    private fun modelId(): String? = _ui.value.castId ?: defaultModelId()
+
+    /**
+     * Cast: a new lead. The takes are matched again for them (free) and every shot to generate is priced again; takes
+     * picked here stay.
+     */
+    suspend fun setCast(modelId: String) {
+        if (modelId == _ui.value.castId || _ui.value.building || _ui.value.isGenerating) return
+        _ui.update { it.copy(castId = modelId, estimates = emptyMap(), estimateErrors = emptyMap(), loadingFill = true) }
+        try {
+            api.matchReference(id, modelId)
+            take(api.referenceFill(id))
+        } catch (e: CancellationException) { throw e } catch (e: Exception) {
+            _ui.update { it.copy(message = e.message ?: "Couldn’t match your takes for the new lead") }
+        } finally { _ui.update { it.copy(loadingFill = false) } }
+        price()
+    }
 
     fun consumeMessage() = _ui.update { it.copy(message = null) }
     fun setMode(m: RecreateMode) {

@@ -74,6 +74,7 @@ class RecreateActions(
     val onCancel: () -> Unit = {},
     val onUseTake: (String, RecreateTakeChoice) -> Unit = { _, _ -> },
     val onRemake: (String) -> Unit = {},
+    val onCast: (String) -> Unit = {},
     val onExport: () -> Unit = {},
     val onExportGuide: (Boolean) -> Unit = {},
     val onExportRun: () -> Unit = {},
@@ -129,6 +130,7 @@ private fun PhoneLayout(ui: RecreateBuildUi, a: RecreateActions, picture: ImageB
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
             if (ui.mode == RecreateMode.Recipe) {
+                Cast(ui, a.onCast)
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Player("Reference", ui, yours = false, picture, Modifier.fillMaxWidth(), height = 300.dp)
                     Transport(ui, a)
@@ -238,6 +240,8 @@ private fun TabletLayout(ui: RecreateBuildUi, a: RecreateActions, picture: Image
                 }
                 Box(Modifier.width(1.dp).fillMaxHeight().background(m.roles.hairline))
                 Column(Modifier.width(328.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Cast(ui, a.onCast)
+                    LearnHairline()
                     ui.slots.getOrNull(ui.selected)?.let { ShotPanel(ui, it, ui.selected, pickTake, a.onBuild) }
                     LearnHairline()
                     WholeEdit(ui)
@@ -547,6 +551,21 @@ private fun ShotProgress(percent: Int?) {
     BoxWithConstraints(track.semantics { contentDescription = "Being made" }) {
         val w = maxWidth * .3f
         Box(Modifier.offset(x = (maxWidth - w) * x).width(w).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(m.roles.accent.copy(alpha = .6f)))
+    }
+}
+
+/** Cast (plan step 3): who plays the lead. New shots are made with them, and your takes of them are matched first. */
+@Composable
+private fun Cast(ui: RecreateBuildUi, onCast: (String) -> Unit) {
+    val m = muse
+    if (ui.cast.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        T("Who plays the lead", m.scale.label, m.roles.ink)
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ui.cast.forEach { c ->
+                studio.muse.app.ui.screens.edit.learn.LearnChip(c.name, on = c.id == ui.castId) { if (!ui.buildBusy || ui.fill == null) onCast(c.id) }
+            }
+        }
     }
 }
 
