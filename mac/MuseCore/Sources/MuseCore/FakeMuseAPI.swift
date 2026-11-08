@@ -13,6 +13,11 @@ public actor FakeMuseAPI: MuseAPI {
     /// Edit suite (workstream 3): editor AI jobs in demo mode, and editor uploads (music, voice-overs, .cube) by id.
     var editorJobs: [String: EditorJob] = [:]
     var editorFiles: [String: URL] = [:]
+    /// The server's guardrails for paid helpers, to try the app's states without money (2026-11-08): a price per paid run
+    /// (0 = free, as before), the owner's switch off, today's cap reached.
+    var editorPriceUsd: Double = 0
+    var editorPaidOff = false
+    var editorCapHit = false
     /// Edit sessions (workstream 3): the live edits shared with Claude, in memory (Edit/FakeMuseAPI+EditSessions.swift).
     var editSessions: [String: FakeEditSessionRecord] = [:]
 

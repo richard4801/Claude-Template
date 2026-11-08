@@ -17,6 +17,7 @@ import { editorAi } from './service.js';
 import { learningOf, touched } from './learn.js';
 import { CAPTION_STYLES } from './presets.js';
 import type { Word } from './cuts.js';
+import { sourceMatteCandidates, stripSourceMattes } from './repair.js';
 
 type Session = typeof editSessions.$inferSelect;
 type OpRow = typeof editOps.$inferSelect;
@@ -129,8 +130,24 @@ export class EditSessions {
     await this.prune(s.id);
     if (patch.length) this.emit(u, { op: 'patch', revision: rev, baseRevision: s.revision, patch, entry: this.entryView(entry!) });
     // The learning editor (workstream 3): the owner's change to one of Claude's becomes a correction. Never blocks.
-    if (patch.length && o.author !== 'claude') void learningOf(this.ctx).observe(s, s.project as M.EditProject, next, entry!);
+    if (patch.length && o.author !== 'claude' && !o.author.startsWith('system:')) void learningOf(this.ctx).observe(s, s.project as M.EditProject, next, entry!);
     return { session: u, entry: entry!, patch };
+  }
+  /**
+   * One-off repair (WS3, 2026-11-08, repair.ts): removes alphaMatte entries whose matte is the clip's own source, as an
+   * ordinary change ("Removed a broken cut-out", undoable, sent to the apps). Returns how many sessions changed.
+   */
+  async repairSourceMattes(): Promise<number> {
+    let n = 0;
+    for (const id of await sourceMatteCandidates(this.ctx)) {
+      const [s] = await this.ctx.db.select().from(editSessions).where(eq(editSessions.id, id));
+      if (!s) continue;
+      const { project, removed } = stripSourceMattes(s.project as unknown as M.EditProject);
+      if (!removed) continue;
+      try { await this.commit(s, project, { author: 'system:repair', kind: 'edit', label: 'Removed a broken cut-out' }); n++; }
+      catch (e) { if (!(e instanceof ApiError)) throw e; } // moved on meanwhile: the next start tries again
+    }
+    return n;
   }
   private async stale(id: string, baseRevision: number) {
     const [cur] = await this.ctx.db.select().from(editSessions).where(eq(editSessions.id, id));

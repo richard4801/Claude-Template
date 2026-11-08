@@ -161,11 +161,12 @@ struct CaptionsPanel: View {
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: Space.s2) {
                         SuiteToolButton(title: session.isRunning(.captions) ? "Captioning…" : "Make captions", icon: "closed-captioning",
-                                        disabled: session.isRunning(.captions)) { Task { await session.autoCaptions() } }
+                                        disabled: session.isRunning(.captions) || !session.helperAvailable(.captions)) { Task { await session.autoCaptions() } }
                         if session.isRunning(.captions) { ProgressView().controlSize(.small) }
                         Spacer(minLength: 0)
                         Text(session.estimateLabel(.captions) ?? "").font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
                     }
+                    HelperNote(text: session.helperNote(.captions))
                 }
             }
             VStack(alignment: .leading, spacing: Space.s3) {

@@ -78,6 +78,28 @@ final class EditSuiteKeepTests: XCTestCase {
         XCTAssertEqual((opts?["points"] as? [[String: Any]])?.first?["t"] as? Double, 2)
     }
 
+    func testFeaturesSayWhenBackgroundRemovalIsComingSoon() throws {
+        let off = try JSONDecoder().decode(EditorFeatures.self, from: Data(#"{"captions":{"available":true},"matte":{"available":false,"maxSec":120},"maxSourceSec":600}"#.utf8))
+        XCTAssertFalse(off.matteAvailable)
+        let on = try JSONDecoder().decode(EditorFeatures.self, from: Data(#"{"matte":{"available":true,"maxSec":120}}"#.utf8))
+        XCTAssertTrue(on.matteAvailable)
+        XCTAssertTrue(try JSONDecoder().decode(EditorFeatures.self, from: Data("{}".utf8)).matteAvailable, "an older server: offer it")
+        XCTAssertEqual(off.note(.matte), "Coming soon")
+        XCTAssertNil(off.note(.captions))
+    }
+
+    func testThePaidSwitchOffDisablesThePaidHelpersOnly() throws {
+        let json = #"{"paid":{"available":false,"reason":"AI editing helpers are switched off for now"},"captions":{"available":false},"cuts":{"available":true},"matte":{"available":false,"maxSec":120},"denoise":{"available":false},"beats":{"available":true,"free":true}}"#
+        let f = try JSONDecoder().decode(EditorFeatures.self, from: Data(json.utf8))
+        for k in [EditorJobKind.captions, .matte, .denoise] {
+            XCTAssertFalse(f.isAvailable(k), "\(k)")
+            XCTAssertEqual(f.note(k), "AI editing helpers are switched off for now")
+        }
+        XCTAssertTrue(f.isAvailable(.cuts))
+        XCTAssertTrue(f.isAvailable(.beats))
+        XCTAssertNil(f.note(.beats))
+    }
+
     func testSourceTimeThroughPieces() {
         // 4 s of source played as 2 s at 2× then 2 s at 1×: [0, 4) at 2× = 2 s, [4, 6) at 1× = 2 s.
         let seg = E.VideoSegment(trackId: "main", itemId: "c1", assetId: "src", lane: 0, mainIndex: 0, layer: 0, timelineStart: 10, timelineEnd: 14,

@@ -13,8 +13,8 @@ import * as M from '../src/editor/model.js';
 import { FILTERS } from '../src/editor/presets.js';
 import { LOOK_IDS } from '../src/editor/lookpack.js';
 import { suggestCuts } from '../src/editor/cuts.js';
-import { WHITE_MATTE, adaptInput, makeProvider, mockWords, parseTranscript, pickFile } from '../src/editor/providers.js';
-import { noiseSuggestion } from '../src/editor/service.js';
+import { MockProvider, WHITE_MATTE, adaptInput, makeProvider, mockWords, parseTranscript, pickFile } from '../src/editor/providers.js';
+import { EditorAiService, noiseSuggestion } from '../src/editor/service.js';
 import { editorJobs } from '../src/editor/schema.js';
 import { parseSilenceDetect, silenceCuts } from '../src/editor/silence.js';
 import { makeApp, people, sse, until, type Client } from './helpers.js';
@@ -45,7 +45,7 @@ async function upload(a: A, c: Client, kind: 'clip' | 'image', body: Buffer, con
 describe('shared fixtures', () => {
   it('are what the reference implementation gives today (regenerate with scripts/editor-fixtures.ts) and the app copies are identical', () => {
     const dirs = ['android/core/src/test/resources/editor', 'mac/MuseCore/Tests/MuseCoreTests/Fixtures/editor'].map(d => path.join(repo, d));
-    const before = Object.fromEntries(['presets.json', 'projects.json', 'validation.json', 'functions.json', 'looks.json', 'jsonpatch.json'].map(n => [n, fs.readFileSync(path.join(FIX, n), 'utf8')]));
+    const before = Object.fromEntries(['presets.json', 'projects.json', 'validation.json', 'functions.json', 'looks.json', 'jsonpatch.json', 'ops.json'].map(n => [n, fs.readFileSync(path.join(FIX, n), 'utf8')]));
     for (const d of dirs) for (const [n, body] of Object.entries(before)) expect(fs.readFileSync(path.join(d, n), 'utf8'), `${d}/${n}`).toBe(body);
     execFileSync(process.execPath, ['--import', 'tsx', path.join(here, '../scripts/editor-fixtures.ts')], { cwd: path.join(here, '..'), stdio: 'pipe' });
     for (const [n, body] of Object.entries(before)) expect(fs.readFileSync(path.join(FIX, n), 'utf8'), `${n} changed: commit the regenerated fixtures`).toBe(body);
@@ -167,6 +167,17 @@ describe('editor AI jobs (mock provider)', () => {
   });
   afterAll(async () => { await a.close(); });
   const done = (id: string, c = owner) => until(async () => { const r = (await c.req('GET', `/v1/editor/jobs/${id}`)).body; return r.state !== 'running' ? r : null; });
+
+  it('background removal is "coming soon" while production runs the mock (2026-11-08), and available otherwise', async () => {
+    const prodCtx = { ...a.ctx, config: { ...a.ctx.config, NODE_ENV: 'production', DEV_MODE: false } } as typeof a.ctx;
+    const prodMock = new EditorAiService(prodCtx, new MockProvider(5));
+    expect((await prodMock.features()).matte).toMatchObject({ available: false });
+    await expect(prodMock.estimate({ id: 'u', studioId, role: 'owner' } as any, { kind: 'matte', source: { takeId: src } })).rejects.toThrow(/coming soon/);
+    const real = new EditorAiService(prodCtx, Object.assign(new MockProvider(5), { name: 'replicate' }) as any);
+    expect((await real.features()).matte.available).toBe(true);
+    expect((await new EditorAiService(a.ctx, new MockProvider(5)).features()).matte.available).toBe(true); // dev and tests keep it
+    expect((await member.req('GET', '/v1/editor/features')).body.matte.available).toBe(true);
+  });
 
   it('features and presets', async () => {
     const f = (await member.req('GET', '/v1/editor/features')).body;
