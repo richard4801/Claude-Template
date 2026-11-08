@@ -1197,6 +1197,62 @@ How each part is found:
 - **Grade:** k-means of the keyframes gives 5 swatches. The Suite's `swatchGrade` turns them into the look pack's `Grade` (the palette→LUT path), and `look` is the nearest existing palette.
 - **Pose:** `status: "pending"` until the pose engine is approved.
 
+### Recreate this edit · slots and assembly (phase 3)
+Code: `src/recreate/slots.ts` (briefs, matcher, fill request), `assemble.ts` (recipe → edit project), `mcpTools.ts`. Tests: `test/recreate-slots.test.ts`.
+
+| | |
+|---|---|
+| `PUT /v1/recreate/references/{id}/briefs {slots: {s1: Brief}}` | `Brief {shotSize?, angle?, subject?, action?, location?, notes?}`. `shotSize` is a `SHOT_SIZES` id and `angle` a `HEIGHTS` id; unknown ids → `400`. Each brief is merged into the slot, and its framing and angle go into the slot's `rig`. |
+| `POST /v1/recreate/references/{id}/match {modelId?, top?, minScore?}` | → `{slots: [{slotId, candidates: [{takeId, score, reasons}], suggested, toGenerate}], assignment: {slotId: takeId}}`. See the matcher below. |
+| `POST /v1/recreate/references/{id}/slots/{slotId}/estimate {modelId, quality?}` | → `{slotId, request: ShotRequest, estimate: ShotEstimate}`. Nothing is held. |
+| `POST /v1/recreate/references/{id}/slots/{slotId}/fill {modelId, quality?}` | → `{slotId, job}`: an ordinary Suite shot, held and priced like any other (the caller has confirmed the price). The slot records `fill: {jobId}`. |
+| `POST /v1/recreate/references/{id}/apply {sessionId, baseRevision?, slots: {slotId: takeId \| jobId}, options?: {camera, speed, text, look}, device?}` | Builds the edit in an edit session (owner) as one undoable change labelled "Recreated “name”". → `{sessionId, revision, durationSec, missing, waiting, notes, label}`. See below. |
+
+**The matcher** scores each of the studio's video takes against a slot, 0–1, with reasons:
+- the length;
+- the shape;
+- the move, framing and angle from the take's draft;
+- the lead model;
+- kept takes first.
+
+It suggests one take per slot, best first, using each take once. Slots where nothing scores `minScore` (default 0.6) are marked `toGenerate`. Claude or the owner makes the final choice.
+
+**The fill request** builds a Suite shot for a slot:
+- the brief becomes the prompt;
+- the reference's shape;
+- the slot's framing, angle and move;
+- whole seconds, at least the tier's minimum, because the clip is cut back to the slot;
+- `draft: {tool: "shot", recreate: {slotId}}`.
+
+Pose guidance joins once the pose engine is approved.
+
+**Applying a recipe:**
+- **Values:** each slot's value is a take, or a finished job (its first take is used). A slot whose job hasn't finished is listed in `waiting`.
+- **Timing:**
+  - The cuts land on the reference's times. A clip with a transition in starts that much early, so each clip is lengthened by half of each neighbouring transition.
+  - A take shorter than its slot plays slower to fill it.
+- **Transitions:** crossfade → `fade`, fade → `black`, flash → `white`, whip → `whip`, zoom → `zoom`, glitch → `glitch`. Cuts and unknown transitions get none.
+- **Speed ramps** become a custom `speedCurve`, and the source range is chosen so the clip still plays for exactly the slot's length.
+- **Camera moves** become `x`, `y` and `scale` keyframes on a clip scaled up enough that the frame stays covered.
+- **Text items** go on a text track. Text whose words weren't read says "Text".
+- **The Look:** the nearest palette's LUT at 0.8, when its distance is under 0.4.
+- **Missing slots** are left out and listed in `missing`.
+- **Revision:** `baseRevision` must be current (`409` otherwise).
+- **Who made it:** from the app it is the owner's change (a reset); from Claude's tool it is Claude's change.
+
+**Claude's tools** (owner only; MCP, in the edit scopes):
+- `analyze_reference(uploadId, name?)`: free; waits up to a minute; returns the summary.
+- `get_recipe(referenceId, contactSheet?)`: returns the contact sheet as an image block.
+- `set_slot_briefs(referenceId, slots)`.
+- `match_slots(referenceId, modelId?, top?)`.
+- `apply_recipe(referenceId, sessionId, slots, options?, baseRevision?)`.
+- `fill_slot(referenceId, slotId, modelId, sessionId, quality?, confirm?)`:
+  - without `confirm`, it returns the price;
+  - with it, the owner is asked in the edit session (pending `kind: "recreate_fill"`), and their yes starts the Suite job;
+  - Claude then passes the job id to `apply_recipe`.
+
+`playbook_read` and `playbook_add` come with WS3's learning storage.
+
 ## MCP & camera sessions (2026-11-05)
 _Workstream 2. Owner only: every endpoint below answers `owner_only` (403) to a member. Setup and architecture: `plans/mcp-bridge.md`; research: `plans/research/ai-video-suite-research.md` §3.4._ A **camera session** is the shared workspace of the Camera control's **Directed (Blender)** mode: the brief, the cast, how the camera and each character move over time, the guide renders from Blender, and a Shot **draft**. Three things write to the same session: the MUSE apps (REST below), the in-app "Direct with Claude" chat (server-side Claude with MUSE tools + Blender tools relayed to the owner's Mac), and the owner's own Claude app / Claude Code through the **MUSE MCP server** (`/mcp`). **Agents never spend:** the most any tool does is a Shot draft with a cost estimate; the owner presses Generate in the app.
 
