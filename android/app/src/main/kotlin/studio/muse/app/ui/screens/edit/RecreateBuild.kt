@@ -411,7 +411,10 @@ class RecreateBuildModel(
                     u.copy(fillErrors = u.fillErrors - s, picks = u.picks - s, remake = u.remake - s, fill = f?.copy(slots = f.slots.map { if (it.slotId == s) it.copy(state = "generating", jobId = started.jobId) else it }))
                 }
             } catch (e: CancellationException) { throw e } catch (e: Exception) {
-                _ui.update { u -> u.copy(fillErrors = u.fillErrors + (s to "This shot didn’t start: ${e.message ?: "try again"}")) }
+                // WS1: a background plate that couldn't be made (502 background_failed) is never charged.
+                val line = if ((e as? ApiException)?.code == "background_failed") "The background couldn’t be made, so this shot didn’t start. You weren’t charged. Try again, or pick one of your locations."
+                    else "This shot didn’t start: ${e.message ?: "try again"}"
+                _ui.update { u -> u.copy(fillErrors = u.fillErrors + (s to line)) }
             } finally {
                 _ui.update { it.copy(starting = it.starting - s) }
             }
