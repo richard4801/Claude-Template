@@ -161,7 +161,10 @@ export function buildProject(recipe: Recipe, sourceTakeId: string, takes: Record
     tracks.push({ id: 'text', kind: 'text', items: recipe.text.map((x, i): M.TextItem => ({
       id: `x${i + 1}`, startSec: r4(Math.max(0, x.startSec - firstStart)), durationSec: r4(Math.max(M.LIMITS.minItemSec, x.endSec - x.startSec)),
       text: x.words?.trim() || 'Text',
-      style: { font: 'sans', weight: 900, sizePct: r4(clamp(x.sizeFrac, 0.015, 0.25)), color: x.color, align: 'center', maxWidthPct: r4(clamp(x.box.w + 0.05, 0.1, 1)),
+      // The detected animation in and out (G4), and the nearest editor font.
+      ...(x.animIn === 'fade' || x.animIn === 'typewriter' ? { animIn: { kind: x.animIn, durationSec: r4(clamp(x.animInSec ?? 0.3, 0.1, 2)) } } : {}),
+      ...(x.animOut === 'fade' ? { animOut: { kind: 'fade' as const, durationSec: r4(clamp(x.animOutSec ?? 0.3, 0.1, 2)) } } : {}),
+      style: { font: x.fontId ?? 'sans', weight: 900, sizePct: r4(clamp(x.sizeFrac, 0.015, 0.25)), color: x.color, align: 'center', maxWidthPct: r4(clamp(x.box.w + 0.05, 0.1, 1)),
         ...(x.color === '#FFFFFF' ? { stroke: { color: '#000000', widthPct: 0.08 } } : {}) },
       transform: { x: r4(x.box.x + x.box.w / 2), y: r4(x.box.y + x.box.h / 2) },
     })) });
