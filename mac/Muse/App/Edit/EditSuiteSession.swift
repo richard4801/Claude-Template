@@ -51,6 +51,8 @@ final class EditSuiteSession {
     private(set) var estimates: [EditorJobKind: EditorEstimate] = [:]
     /// Remove background → "Pick what to keep": the points on a frame of the selected clip, its picture and its price.
     var keepPick: EditSuite.KeepPick?
+    /// False while the server can't remove backgrounds yet (`/v1/editor/features`): the panel shows "Coming soon".
+    private(set) var matteAvailable = true
     private(set) var keepFrame: CGImage?
     private(set) var keepEstimate: EditorEstimate?
     /// The newest transcript job (fillers / silences reuse it for free).
@@ -156,6 +158,10 @@ final class EditSuiteSession {
                 state.assetNames[a.id] = name(of: a)
             }
             phase = .ready
+            Task { [weak self] in
+                guard let self, let f = (try? await self.api.editorFeatures()) ?? nil else { return }
+                self.matteAvailable = f.matteAvailable
+            }
             observeTime()
             await ensureFiles()
             rebuild(immediately: true)

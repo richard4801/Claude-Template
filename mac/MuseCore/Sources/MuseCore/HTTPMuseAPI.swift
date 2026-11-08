@@ -346,6 +346,7 @@ public final class HTTPMuseAPI: MuseAPI, @unchecked Sendable {
     private struct StateReply: Decodable { var state: String? }
 
     public func editorEstimate(_ req: EditorJobRequest) async throws -> EditorEstimate { try await call("POST", "v1/editor/estimate", req) }
+    public func editorFeatures() async throws -> EditorFeatures? { try await call("GET", "v1/editor/features") }
     public func startEditorJob(_ req: EditorJobRequest) async throws -> EditorJob { try await call("POST", "v1/editor/jobs", req) }
     public func editorJob(id: String) async throws -> EditorJob { try await call("GET", "v1/editor/jobs/\(Self.pathKey(id))") }
     public func cancelEditorJob(id: String) async throws { let _: StateReply = try await call("DELETE", "v1/editor/jobs/\(Self.pathKey(id))") }

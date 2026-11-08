@@ -64,6 +64,20 @@ public struct EditorJobRequest: Codable, Hashable, Sendable {
     public init(kind: EditorJobKind, source: EditorSource, options: EditorJobOptions? = nil) { self.kind = kind; self.source = source; self.options = options }
 }
 
+/// GET /v1/editor/features: what the server can do now. Only what the suite reads is decoded.
+public struct EditorFeatures: Codable, Hashable, Sendable {
+    public struct Matte: Codable, Hashable, Sendable {
+        /// False while the server can't remove backgrounds yet ("Coming soon").
+        public var available: Bool?
+        public var maxSec: Double?
+        public init(available: Bool? = nil, maxSec: Double? = nil) { self.available = available; self.maxSec = maxSec }
+    }
+    public var matte: Matte?
+    public init(matte: Matte? = nil) { self.matte = matte }
+    /// Background removal (and tap to keep) can run.
+    public var matteAvailable: Bool { matte?.available != false }
+}
+
 /// POST /v1/editor/estimate.
 public struct EditorEstimate: Codable, Hashable, Sendable {
     public var kind: EditorJobKind

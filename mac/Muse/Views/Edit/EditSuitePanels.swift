@@ -244,16 +244,28 @@ struct MaskPanel: View {
                         session.edit { s in s.changeVisual { $0.chroma?.similarity = v } }
                     }
                 }
-                SuiteToggleRow(title: "Remove background", hint: "No green screen needed", isOn: session.backgroundRemoved,
-                               busy: session.isRunning(.matte), trailingNote: session.estimateLabel(.matte)) { on in
-                    Task { await session.setRemoveBackground(on) }
-                }
-                .task(id: session.state.selection) { await session.loadEstimate(.matte) }
-                if let k = session.keepPick, k.clipId == session.state.selection {
-                    KeepPicker(session: session, pick: k)
+                if !session.matteAvailable && !session.backgroundRemoved {
+                    // The server can't remove backgrounds yet (2026-11-08): say so instead of offering a no-op.
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Remove background").font(t.scale.label.font).foregroundStyle(t.roles.ink)
+                            Text("Coming soon").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .accessibilityElement(children: .combine)
                 } else {
-                    SuiteToolButton(title: "Pick what to keep", icon: "plus-circle", disabled: session.isRunning(.matte), plain: true) {
-                        Task { await session.startKeepPick() }
+                    SuiteToggleRow(title: "Remove background", hint: "No green screen needed", isOn: session.backgroundRemoved,
+                                   busy: session.isRunning(.matte), trailingNote: session.estimateLabel(.matte)) { on in
+                        Task { await session.setRemoveBackground(on) }
+                    }
+                    .task(id: session.state.selection) { await session.loadEstimate(.matte) }
+                    if let k = session.keepPick, k.clipId == session.state.selection {
+                        KeepPicker(session: session, pick: k)
+                    } else {
+                        SuiteToolButton(title: "Pick what to keep", icon: "plus-circle", disabled: session.isRunning(.matte) || !session.matteAvailable, plain: true) {
+                            Task { await session.startKeepPick() }
+                        }
                     }
                 }
             }
