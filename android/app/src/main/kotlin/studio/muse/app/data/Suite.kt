@@ -214,6 +214,8 @@ data class SuiteCatalogEngine(
     val allowedSeconds: List<Int>? = null,
     val aspectRatios: List<String> = emptyList(),
     val inputs: SuiteInputs? = null,
+    /** WS13: the purposes it serves (shot, talking, ugc…); empty = an older server (any). */
+    val purposes: List<String> = emptyList(),
 )
 
 /** A custom engine (`c_…`) in the catalog: its display name, image or video, its limits and its price. Shots and photos take it as engineModel. */

@@ -50,6 +50,9 @@ data class RecreateCastChoice(val id: String, val name: String)
 
 data class RecreateTakeChoice(val id: String, val caption: String, val durationSec: Double?, val thumb: studio.muse.app.data.ImageRef? = null, val label: String? = null)
 
+/** A build the server refused (a validator's text, any 4xx): what the owner sees; the detail goes to the log. */
+const val BUILD_FAILED = "Couldn't build this edit. Try again, or change a shot."
+
 data class RecreateBuildUi(
     val referenceId: String,
     val recipe: Recipe,
@@ -94,6 +97,9 @@ data class RecreateBuildUi(
     val keepBackground: Map<String, Boolean> = emptyMap(),
     /** "Use your own setting": the studio location picked per shot (absent: the brief's place, or a background made from it). */
     val locations: Map<String, String> = emptyMap(),
+    /** WS7/WS13 (owner): the model picked per shot (purpose fill) and for its background plate (purpose plate); absent = the defaults. */
+    val shotModels: Map<String, String> = emptyMap(),
+    val plateModels: Map<String, String> = emptyMap(),
     /** The studio's locations, loaded the first time a shot uses its own setting. */
     val places: List<RecreateCastChoice> = emptyList(),
     /** G8: "Write the shot briefs · about $0.02" while shots have no brief; its confirmation, and while it runs. */
@@ -180,7 +186,7 @@ class RecreateBuildModel(
             api.matchReference(id, modelId)
             take(api.referenceFill(id))
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
-            _ui.update { it.copy(message = e.message ?: "Couldn’t match your takes for the new lead") }
+            _ui.update { it.copy(message = studio.muse.app.data.ErrorText.plain(e, "Couldn’t match your takes for the new lead")) }
         } finally { _ui.update { it.copy(loadingFill = false) } }
         price()
     }
@@ -242,7 +248,7 @@ class RecreateBuildModel(
             take(f)
             f.match?.let { m -> _ui.update { it.copy(match = m) } }
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
-            _ui.update { it.copy(loadingFill = false, message = e.message ?: "Couldn’t load how the shots are made") }
+            _ui.update { it.copy(loadingFill = false, message = studio.muse.app.data.ErrorText.plain(e, "Couldn’t load how the shots are made")) }
             return
         }
         _ui.update { it.copy(loadingFill = false) }
@@ -300,7 +306,8 @@ class RecreateBuildModel(
         }
         val got = kotlinx.coroutines.coroutineScope {
             val u = _ui.value
-            todo.map { s -> async { s to runCatching { api.estimateReferenceSlot(id, s, model, method = u.methods[s], keepBackground = u.keepBackground[s], locationId = u.locations[s]?.takeIf { u.keepBackground[s] == false }) }.onFailure { if (it is CancellationException) throw it } } }.awaitAll()
+            todo.map { s -> async { s to runCatching { api.estimateReferenceSlot(id, s, model, method = u.methods[s], keepBackground = u.keepBackground[s], locationId = u.locations[s]?.takeIf { u.keepBackground[s] == false },
+                engineModel = u.shotModels[s], imageModel = u.plateModels[s]) }.onFailure { if (it is CancellationException) throw it } } }.awaitAll()
         }
         _ui.update { u ->
             val est = u.estimates.toMutableMap(); val errs = u.estimateErrors.toMutableMap()
@@ -329,6 +336,18 @@ class RecreateBuildModel(
         _ui.update { it.copy(keepBackground = it.keepBackground + (slotId to keep), estimates = it.estimates - slotId) }
         if (!keep && _ui.value.places.isEmpty()) runCatching { api.suiteLocations() }.onFailure { if (it is CancellationException) throw it }
             .getOrNull()?.let { l -> _ui.update { u -> u.copy(places = l.map { RecreateCastChoice(it.id, it.name) }) } }
+        price()
+    }
+
+    /** WS7/WS13 (owner): the model that makes this shot (null = the default); priced again, so the price follows the model. */
+    suspend fun setShotModel(slotId: String, model: String?) {
+        _ui.update { u -> u.copy(shotModels = if (model == null) u.shotModels - slotId else u.shotModels + (slotId to model), estimates = u.estimates - slotId) }
+        price()
+    }
+
+    /** WS7/WS13 (owner): the image model for the shot's made background (null = the default); priced again. */
+    suspend fun setPlateModel(slotId: String, model: String?) {
+        _ui.update { u -> u.copy(plateModels = if (model == null) u.plateModels - slotId else u.plateModels + (slotId to model), estimates = u.estimates - slotId) }
         price()
     }
 
@@ -363,7 +382,7 @@ class RecreateBuildModel(
             true
         } catch (e: CancellationException) { throw e } catch (e: ApiException) {
             if (e.code == "slot_not_in_edit" || e.code == "not_built_here") false
-            else { _ui.update { it.copy(message = e.message ?: "Couldn’t swap the shot") }; true }
+            else { _ui.update { it.copy(message = studio.muse.app.data.ErrorText.plain(e, "Couldn’t swap the shot")) }; true }
         }
     }
 
@@ -418,7 +437,9 @@ class RecreateBuildModel(
                 // The shot is made the way it was priced and confirmed (swap or generate, and its setting).
                 val e = _ui.value.estimates[s]
                 val started = api.fillReferenceSlot(id, s, model, method = e?.method, keepBackground = e?.keepBackground?.takeIf { e.method == "swap" },
-                    locationId = e?.background?.locationId?.takeIf { e.method == "swap" && !e.keepBackground })
+                    locationId = e?.background?.locationId?.takeIf { e.method == "swap" && !e.keepBackground },
+                    // The models it was priced with (owner picks).
+                    engineModel = _ui.value.shotModels[s], imageModel = _ui.value.plateModels[s])
                 _ui.update { u ->
                     val f = u.fill
                     u.copy(fillErrors = u.fillErrors - s, picks = u.picks - s, remake = u.remake - s, fill = f?.copy(slots = f.slots.map { if (it.slotId == s) it.copy(state = "generating", jobId = started.jobId) else it }))
@@ -426,7 +447,7 @@ class RecreateBuildModel(
             } catch (e: CancellationException) { throw e } catch (e: Exception) {
                 // WS1: a background plate that couldn't be made (502 background_failed) is never charged.
                 val line = if ((e as? ApiException)?.code == "background_failed") "The background couldn’t be made, so this shot didn’t start. You weren’t charged. Try again, or pick one of your locations."
-                    else "This shot didn’t start: ${e.message ?: "try again"}"
+                    else "This shot didn’t start: ${studio.muse.app.data.ErrorText.plain(e, "try again")}"
                 _ui.update { u -> u.copy(fillErrors = u.fillErrors + (s to line)) }
             } finally {
                 _ui.update { it.copy(starting = it.starting - s) }
@@ -495,7 +516,11 @@ class RecreateBuildModel(
                     message = r.waiting.takeIf { it.isNotEmpty() }?.let { w -> "${w.joinToString(" and ") { v.shotName(it) }} isn’t ready yet, so the edit leaves it out for now" })
             }
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
-            _ui.update { it.copy(building = false, message = e.message ?: "Couldn’t build the edit") }
+            // A validator's or other internal text never reaches the owner (it goes to the log): plain words instead.
+            val code = (e as? ApiException)?.code.orEmpty()
+            val invalid = code == "bad_request" || code == "validation" || code == "conflict" || code.matches(Regex("http_4\\d\\d"))
+            _ui.update { it.copy(building = false, message = if (invalid || studio.muse.app.data.ErrorText.looksInternal(e.message)) {
+                studio.muse.app.data.ErrorText.plain(Exception(e.message), BUILD_FAILED); BUILD_FAILED } else studio.muse.app.data.ErrorText.plain(e, BUILD_FAILED)) }
         }
     }
 

@@ -106,6 +106,8 @@ data class OutfitDraft(
     val name: String = "Cream knit + jeans",
     val previewId: String? = null,
     val images: List<ImageRef> = emptyList(),
+    /** WS7/WS13: the owner's model for the set (null = the studio's default). */
+    val imageModel: String? = null,
 )
 
 /** Cross-screen selections and drafts (the prototype's global `S`), shared by the screen ViewModels. */

@@ -86,7 +86,7 @@ class OutfitViewModel(private val c: AppContainer) : ViewModel() {
             c.repo.toast(if (s.draft.mode == "own") "Upload front, ¾, side and back first" else "Upload a product or outfit photo first")
             return@launch
         }
-        val o = c.repo.createOutfit(CreateOutfitRequest(model.id, s.draft.name, s.draft.mode, s.draft.description, s.draft.images)) ?: return@launch
+        val o = c.repo.createOutfit(CreateOutfitRequest(model.id, s.draft.name, s.draft.mode, s.draft.description, s.draft.images, s.draft.imageModel.takeIf { s.draft.mode != "own" })) ?: return@launch
         edit { it.copy(previewId = o.id) }
     }
 
@@ -145,6 +145,8 @@ fun OutfitScreen() {
                     }
                 }
                 Labeled("Name") { Input(s.draft.name, { v -> vm.edit { it.copy(name = v) } }, calm = true) }
+                // WS7/WS13: the owner's model for the set (not for "My own set": nothing is generated).
+                if (s.draft.mode != "own") ModelChoiceRow(studio.muse.app.data.ModelPurpose.OUTFIT, ModelPick(s.draft.imageModel), { p -> vm.edit { it.copy(imageModel = p.model) } })
                 Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
                     OutfitAngle.entries.chunked(2).forEachIndexed { r, row ->
                         Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s3)) {
