@@ -43,6 +43,8 @@ import studio.muse.app.ui.screens.suite.saveRig
 import studio.muse.app.ui.screens.suite.queueShot
 import studio.muse.app.ui.screens.suite.askRun
 import studio.muse.app.ui.screens.suite.createCollection
+import studio.muse.app.ui.screens.suite.openClaude
+import studio.muse.app.ui.screens.suite.applyAssist
 import studio.muse.app.ui.theme.MuseTheme
 import studio.muse.app.ui.theme.ThemeId
 
@@ -56,7 +58,7 @@ import studio.muse.app.ui.theme.ThemeId
 @Config(sdk = [35], qualifiers = "w390dp-h844dp-xhdpi")
 class SuiteFeedScreenshotTest(private val theme: String, private val state: String, private val width: Int) {
     companion object {
-        private val CASES = listOf("rigs" to 360, "rig_applied" to 360, "feed" to 360, "feed" to 840, "compare" to 360, "compare" to 840, "take" to 360, "feed_queue" to 360, "collections" to 360, "run_confirm" to 360)
+        private val CASES = listOf("rigs" to 360, "rig_applied" to 360, "feed" to 360, "feed" to 840, "compare" to 360, "compare" to 840, "take" to 360, "feed_queue" to 360, "collections" to 360, "run_confirm" to 360, "claude_approve" to 360, "claude_approve" to 840)
 
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}_{1}_{2}")
@@ -104,6 +106,17 @@ class SuiteFeedScreenshotTest(private val theme: String, private val state: Stri
                 if (state == "run_confirm") c.suite.askRun(c.suite.queued.value.first())
             }
             "collections" -> runBlocking { c.suite.createCollection("Café series", listOf("t_a")); c.suite.createCollection("Night walks") }
+            // Claude in the Suite: Claude set up the shot with the owner's photo as the pose, and waits for the yes.
+            "claude_approve" -> runBlocking {
+                c.suite.openClaude()
+                c.suite.composer.value = c.suite.composer.value.copy(quality = "hd", duration = 8,
+                    tokens = PromptTokens(listOf(PromptPart.Mention("character", model.id, model.name.substringBefore(' '), 1), PromptPart.Text(" sits by the café window in soft morning light"))),
+                    references = listOf(studio.muse.app.data.DraftReference("up_1", "asset:g_front", "pose", "Your photo")))
+                val id = c.suite.assist.value!!.id
+                fake.patchSuiteAssist(id, studio.muse.app.ui.screens.suite.composer.ComposerDrafts.draft(c.suite.composer.value), null)
+                fake.debugAssistPending(id, studio.muse.app.data.SuitePending("sp_1", label = "Generate · 8 s · $1.04", estimateUsd = 1.04, maxUsd = 1.04))
+                c.suite.applyAssist(fake.suiteAssist(id))
+            }
         }
         compose.setContent {
             when (state) {

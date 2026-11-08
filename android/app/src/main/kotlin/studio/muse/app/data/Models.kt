@@ -910,6 +910,8 @@ data class ApiEvent(
     val width: Int? = null,
     val device: String? = null,
     val request: EditAppRequest? = null,
+    /** Claude in the AI Suite: type "suiteAssist", the shared composer draft after any change. */
+    val assist: SuiteAssist? = null,
 ) {
     companion object {
         /** Not from the server: the stream (re)connected, so the app refetches what it may have missed. */

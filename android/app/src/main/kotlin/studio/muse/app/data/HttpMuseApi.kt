@@ -211,6 +211,10 @@ interface MuseService {
     @POST("v1/recreate/references/{id}/apply") suspend fun applyRecipe(@Path("id") id: String, @Body r: JsonObject): JsonObject
     @POST("v1/recreate/references/{id}/briefs/estimate") suspend fun estimateReferenceBriefs(@Path("id") id: String, @Body r: JsonObject): JsonObject
     @POST("v1/recreate/references/{id}/briefs/write") suspend fun writeReferenceBriefs(@Path("id") id: String, @Body r: JsonObject): JsonObject
+    @POST("v1/suite/assist") suspend fun createSuiteAssist(@Body r: JsonObject): SuiteAssist
+    @GET("v1/suite/assist/{id}") suspend fun suiteAssist(@Path("id") id: String): SuiteAssist
+    @PATCH("v1/suite/assist/{id}") suspend fun patchSuiteAssist(@Path("id") id: String, @Body r: JsonObject): SuiteAssist
+    @POST("v1/suite/assist/{id}/pending/{pid}") suspend fun answerSuitePending(@Path("id") id: String, @Path("pid") pid: String, @Body r: JsonObject): SuitePending
     @GET("v1/recreate/settings") suspend fun recreateSettings(): RecreateLinkSettings
     @PATCH("v1/recreate/settings") suspend fun patchRecreateSettings(@Body r: JsonObject): RecreateLinkSettings
     @POST("v1/recreate/links/check") suspend fun checkRecreateLink(@Body r: JsonObject): JsonObject
@@ -516,6 +520,22 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { body.byteStream().use { i -> into.outputStream().use { o -> i.copyTo(o) } } }
         into.length() > 0
     }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; false }
+
+    // Claude in the AI Suite: the shared composer draft.
+    override suspend fun createSuiteAssist(draft: SuiteDraft?, fromJobId: String?) = call {
+        createSuiteAssist(buildJsonObject { draft?.let { put("draft", it.json) }; fromJobId?.let { put("fromJobId", JsonPrimitive(it)) } })
+    }
+    override suspend fun suiteAssist(id: String) = call { suiteAssist(id) }
+    override suspend fun patchSuiteAssist(id: String, draft: SuiteDraft, baseRevision: Int?) = call {
+        patchSuiteAssist(id, buildJsonObject { put("draft", draft.json); baseRevision?.let { put("baseRevision", JsonPrimitive(it)) } })
+    }
+    override suspend fun answerSuitePending(id: String, pendingId: String, approve: Boolean) = call { answerSuitePending(id, pendingId, buildJsonObject { put("approve", JsonPrimitive(approve)) }) }
+    override suspend fun uploadClaudeImage(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit): String {
+        val id = putPresigned("image", mime, bytes, onProgress)
+        call { confirmImage(id, JsonObject(emptyMap())) }
+        onProgress(1f)
+        return id
+    }
 
     // Recreate links on the phone: the rules, and the check before a download.
     override suspend fun recreateSettings(): RecreateLinkSettings? = try { call { recreateSettings() } } catch (e: ApiException) {

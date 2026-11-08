@@ -94,7 +94,7 @@ class FakeMuseApi(
     override val camera: FakeCameraApi by lazy {
         FakeCameraApi(now, { models.toList().map { it.id to it.name } }, { events.tryEmit(it) }, stepDelayMs = if (speed == 0.0) 0 else 700)
     }
-    override val claude: FakeClaudeApi by lazy { FakeClaudeApi(scope, now, { events.tryEmit(it) }, stepDelayMs = if (speed == 0.0) 0 else 700) }
+    override val claude: FakeClaudeApi by lazy { FakeClaudeApi(scope, now, { events.tryEmit(it) }, stepDelayMs = if (speed == 0.0) 0 else 700).also { it.suiteTurn = ::demoSuiteTurn } }
     override fun setToken(token: String?) {}
 
     override suspend fun signIn(req: SignInRequest): AuthResponse {
@@ -1192,6 +1192,73 @@ class FakeMuseApi(
         name?.let { recreateNames[id] = it }
         RecipeReference(id, name ?: "Reference", "analyzing", 5, "Waiting")
     }
+    // Claude in the AI Suite (demo): the shared draft. Claude's turn sets it up and asks to generate; only the owner's
+    // approval runs it (in demo, the fake suite, which never spends).
+    private val assists = LinkedHashMap<String, SuiteAssist>()
+    private fun pushAssist(a: SuiteAssist): SuiteAssist { assists[a.id] = a; events.tryEmit(ApiEvent("suiteAssist", assist = a)); return a }
+    override suspend fun createSuiteAssist(draft: SuiteDraft?, fromJobId: String?) = lock.withLock {
+        val d = draft ?: fromJobId?.let { id -> jobs.firstOrNull { it.id == id }?.draft } ?: SuiteDrafts.of("shot", "draft", "9:16", 5.0, 1, sound = true)
+        SuiteAssist("sa_${++editorSeq}", "u_demo", d, 1, updatedAt = now()).also { assists[it.id] = it }
+    }
+    override suspend fun suiteAssist(id: String) = lock.withLock { assists[id] ?: throw ApiException("not_found", "Assist not found") }
+    override suspend fun patchSuiteAssist(id: String, draft: SuiteDraft, baseRevision: Int?) = lock.withLock {
+        val a = assists[id] ?: throw ApiException("not_found", "Assist not found")
+        if (baseRevision != null && baseRevision != a.revision) throw ApiException("stale", "Claude changed the shot meanwhile · reload it")
+        pushAssist(a.copy(draft = draft, revision = a.revision + 1, updatedAt = now()))
+    }
+    override suspend fun answerSuitePending(id: String, pendingId: String, approve: Boolean): SuitePending {
+        val (a, p) = lock.withLock {
+            val a = assists[id] ?: throw ApiException("not_found", "Assist not found")
+            a to (a.pending.firstOrNull { it.id == pendingId } ?: throw ApiException("not_found", "Nothing waiting"))
+        }
+        if (p.status != "waiting") return p
+        val done = if (!approve) p.copy(status = "declined") else {
+            val req = demoAssistRequest(a.draft)
+            val price = suiteEstimate(req).estimate
+            if (price > p.maxUsd + 1e-9) throw ApiException("price_changed", "The price rose to ${Pricing.money(price)} · nothing was generated")
+            p.copy(status = "done", jobId = createSuiteShot(req).id)
+        }
+        lock.withLock { assists[id]?.let { cur -> pushAssist(cur.copy(pending = cur.pending.map { if (it.id == pendingId) done else it }, updatedAt = now())) } }
+        return done
+    }
+    /** Tests: Claude's Generate waiting on an assist (as `suite_request_shot` with confirm leaves it). */
+    suspend fun debugAssistPending(id: String, p: SuitePending) = lock.withLock { assists[id]?.let { pushAssist(it.copy(pending = it.pending + p, revision = it.revision + 1, draft = it.draft)) } }
+    override suspend fun uploadClaudeImage(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit): String {
+        if (bytes.size > 10 * 1024 * 1024) throw ApiException("bad_request", "Images can be up to 10 MB")
+        onProgress(1f); return "up_img_${++editorSeq}"
+    }
+    /** What Generate would send for a demo draft. */
+    private fun demoAssistRequest(d: SuiteDraft): SuiteShotRequest {
+        val toks = (d["tokens"] as? kotlinx.serialization.json.JsonArray).orEmpty().mapNotNull { it as? kotlinx.serialization.json.JsonObject }
+        fun s(o: kotlinx.serialization.json.JsonObject, k: String) = (o[k] as? kotlinx.serialization.json.JsonPrimitive)?.content
+        val model = toks.firstOrNull { s(it, "t") == "mention" && s(it, "kind") == "character" }?.let { s(it, "id") }
+        val prompt = toks.joinToString("") { o -> when (s(o, "t")) { "text" -> s(o, "text").orEmpty(); "mention" -> " ${s(o, "label").orEmpty()} "; else -> " " } }.replace(Regex("\\s+"), " ").trim()
+        return SuiteShotRequest(modelId = model, prompt = prompt, duration = (d.duration ?: 5.0).toInt(), aspectRatio = d.aspect ?: "9:16", quality = d.quality ?: "draft", takes = d.takes ?: 1, draft = d)
+    }
+    /** Claude's demo turn: the first character at a café window, HD, 8 s; any attached photo as the pose reference; then it asks. */
+    private suspend fun demoSuiteTurn(assistId: String, text: String, attachments: List<String>) {
+        val m = lock.withLock { models.firstOrNull() }
+        val a = lock.withLock { assists[assistId] } ?: return
+        val j = kotlinx.serialization.json.Json
+        val tokens = j.parseToJsonElement(buildString {
+            append("[")
+            if (m != null) append("""{"t":"mention","kind":"character","id":"${m.id}","label":"${m.name.substringBefore(' ')}","key":1},""")
+            append("""{"t":"text","text":" sits by the café window in soft morning light, looks up and smiles"}]""")
+        })
+        val refs = kotlinx.serialization.json.JsonArray(attachments.take(3).map { id ->
+            j.parseToJsonElement("""{"uploadId":"$id","url":"https://demo.muse.studio/uploads/$id.jpg","use":"pose","label":"Your photo"}""")
+        })
+        val draft = SuiteDraft(kotlinx.serialization.json.JsonObject(a.draft.json + mapOf("tokens" to tokens, "quality" to kotlinx.serialization.json.JsonPrimitive("hd"),
+            "duration" to kotlinx.serialization.json.JsonPrimitive(8.0)) + (if (attachments.isNotEmpty()) mapOf("references" to refs) else emptyMap())))
+        val price = runCatching { suiteEstimate(demoAssistRequest(draft)).estimate }.getOrDefault(1.04)
+        val label = "Generate · 8 s · ${Pricing.money(price)}"
+        lock.withLock {
+            val cur = assists[assistId] ?: return
+            pushAssist(cur.copy(draft = draft, revision = cur.revision + 1, updatedAt = now(),
+                pending = cur.pending + SuitePending("sp_${++editorSeq}", label = label, estimateUsd = price, maxUsd = price, createdAt = now())))
+        }
+    }
+
     // Demo: Recreate's link rules (the owner can edit them).
     private var linkSettings = RecreateLinkSettings(canEdit = true)
     override suspend fun recreateSettings() = lock.withLock { linkSettings }
