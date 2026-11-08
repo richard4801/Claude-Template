@@ -42,8 +42,7 @@ struct SuiteRootView: View {
             switch s.mode {
             case .hub: SuiteHubView()
             case .shot, .swap, .talking, .ugc, .extend, .photo:
-                // Owner switch "Try the new Suite": Shot and Photo in the cinematic Suite (build step 1).
-                if store.usesCinema(s.mode) { CinemaSuiteView() } else { ComposerView() }
+                ComposerView()
             case .storyboard: StoryboardView()
             case .cameraStage: CameraStageView()
             }

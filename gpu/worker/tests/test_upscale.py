@@ -1,5 +1,6 @@
 """Upscale job (SeedVR2): params, the output size rule, and a CPU run with the ffmpeg stand-in."""
 
+import shlex
 import threading
 from pathlib import Path
 
@@ -47,3 +48,14 @@ def test_cpu_run_upscales_and_keeps_the_sound(tmp_path):
     assert info.has_audio
     assert ctx.stats["upscale"]["size"] == "1080p"
     assert seen and seen[-1]["phase"] == "finishing"
+
+
+def test_default_command_matches_the_standalone_cli(tmp_path):
+    # numz ComfyUI-SeedVR2_VideoUpscaler v2.5: positional input, --dit_model / --model_dir (not --video_path / --model).
+    r = SeedVR2(root=tmp_path, python=tmp_path / "py", cmd=None)
+    args = shlex.split(r.cmd.format(python=r.python, input="in.mp4", output="out.mp4", short_side=1440))
+    assert args[1:3] == ["inference_cli.py", "in.mp4"]
+    assert args[args.index("--resolution") + 1] == "1440"
+    assert args[args.index("--dit_model") + 1] == "seedvr2_ema_3b_fp16.safetensors"
+    assert "--video_path" not in args and "--model" not in args
+    assert "SeedVR2 not installed" in r.availability()  # the checkout has no inference_cli.py

@@ -94,8 +94,14 @@ export function errorFor(stderr: string): ApiError {
   return linkError('link_blocked', FALLBACK);
 }
 
-/** Flags that keep yt-dlp to one public video: no config files, no cookies, no cache, no lists. */
-export const BASE_ARGS = ['--ignore-config', '--no-cookies', '--no-cookies-from-browser', '--no-cache-dir', '--no-playlist', '--no-warnings', '--socket-timeout', '20'];
+/**
+ * Flags that keep yt-dlp to one public video (no config files, no cookies, no cache, no lists), with the server's own
+ * Node as its JavaScript runtime (YouTube needs one; only deno is on by default) and no code fetched at run time: the
+ * yt-dlp-ejs scripts are pinned in the image next to yt-dlp.
+ */
+export const baseArgs = (node = process.execPath) => ['--ignore-config', '--no-cookies', '--no-cookies-from-browser', '--no-cache-dir', '--no-playlist', '--no-warnings',
+  '--socket-timeout', '20', '--no-js-runtimes', '--js-runtimes', `node:${node}`, '--no-remote-components'];
+export const BASE_ARGS = baseArgs();
 
 export type Resolver = {
   /** The video's metadata (one request to the platform). */

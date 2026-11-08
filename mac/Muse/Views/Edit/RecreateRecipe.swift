@@ -90,37 +90,77 @@ struct RecreatePanel: View {
         let f = rs.slotFill(s.id)
         let state = f?.state ?? "empty"
         let aspect = rs.recipe?.source?.aspect ?? "9:16"
+        let failed = rs.fillErrors[s.id]
+        let cant = state == "to_generate" ? rs.estimateErrors[s.id] : nil
+        let starting = rs.generatingSlots.contains(s.id) && state != "generating"
+        let shown = failed != nil ? "Didn’t generate" : (starting ? "Generating" : RecreateText.fill(state))
         VStack(alignment: .leading, spacing: Space.s2) {
             HStack {
-                Text(RecreateText.fill(state)).scaled(t.scale.label, t.roles.ink).lineLimit(1)
+                Text(shown).scaled(t.scale.label, failed != nil ? t.roles.caution : t.roles.ink).lineLimit(1)
                 Spacer(minLength: Space.s2)
-                if state == "to_generate", let e = f?.estimate {
-                    Text(e.label ?? RecreateText.money(e.amount)).scaled(t.scale.label, t.roles.ink).monospacedDigit()
-                } else if let sc = f?.score {
+                if state == "to_generate", cant == nil, failed == nil, let amount = price(s.id, f) {
+                    Text(amount).scaled(t.scale.label, t.roles.ink).monospacedDigit()
+                } else if state == "generating" || starting, let p = progress(f) {
+                    Text("\(p)%").scaled(t.scale.label, t.roles.ink).monospacedDigit()
+                } else if state == "matched", let sc = f?.score {
                     Text("\(RecreateText.percent(sc)) alike").scaled(t.scale.label, t.roles.ink).monospacedDigit()
                 }
             }
-            Text(f?.reason ?? (state == "to_generate" ? "Made with your model: \(String(format: "%.1f", s.length)) s, \(aspect)." :
-                    state == "matched" ? "From one of your takes." : "Pick a take for this shot."))
-                .scaled(t.scale.caption, t.roles.ink2)
+            Text(line(s, state: state, f: f, aspect: aspect, failed: failed, cant: cant, starting: starting))
+                .scaled(t.scale.caption, cant != nil ? t.roles.caution : t.roles.ink2)
                 .fixedSize(horizontal: false, vertical: true)
-            if rs.fill != nil {
-                Button { picking = true } label: {
-                    Text(state == "matched" ? "Pick another take" : "Use one of my takes")
-                        .font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1)
-                        .padding(.horizontal, Space.s3)
-                        .frame(height: 28)
-                        .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.raised))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+            if state == "generating" || starting, let p = progress(f) {
+                RProgress(value: Double(p) / 100)
+            }
+            if rs.fill != nil, state != "generating", !starting {
+                HStack(spacing: Space.s2) {
+                    if failed != nil {
+                        SuiteToolButton(title: "Try again", disabled: rs.building || rs.estimating || rs.isGenerating) {
+                            Task { await store.requestRecreateBuild() }
+                        }
+                    }
+                    Button { picking = true } label: {
+                        Text(state == "matched" ? "Pick another take" : "Use one of my takes")
+                            .font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1)
+                            .padding(.horizontal, Space.s3)
+                            .frame(height: 28)
+                            .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.raised))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                     .popover(isPresented: $picking, arrowEdge: .leading) { takePicker(s) }
+                }
             } else if rs.loadingFill {
                 SkeletonBlock(height: 28)
             }
         }
         .padding(Space.s3)
         .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field))
+    }
+
+    /// The slot's price: its estimate when priced, else the fill's own figure.
+    private func price(_ slotId: String, _ f: RecreateFill.SlotFill?) -> String? {
+        if let e = store.recreate.estimates[slotId], e.ok { return RecreateText.money(e.estimate) }
+        return f?.estimate.map { $0.label ?? RecreateText.money($0.amount) }
+    }
+
+    /// The job's progress from the live job events (0–100), when the app has the job.
+    private func progress(_ f: RecreateFill.SlotFill?) -> Int? {
+        guard let id = f?.jobId, let j = store.jobs.first(where: { $0.id == id }), j.progress > 0 else { return nil }
+        return Int(j.progress.rounded())
+    }
+
+    private func line(_ s: Recipe.Slot, state: String, f: RecreateFill.SlotFill?, aspect: String, failed: String?, cant: String?, starting: Bool) -> String {
+        if let failed { return failed }
+        if let cant { return cant }
+        if state == "generating" || starting { return "Being made with your model. You can leave this page; it carries on." }
+        if state == "ready" { return "Generated for this shot." }
+        if let r = f?.reason { return r }
+        switch state {
+        case "to_generate": return "Made with your model: \(String(format: "%.1f", s.length)) s, \(aspect)."
+        case "matched": return "From one of your takes."
+        default: return "Pick a take for this shot."
+        }
     }
 
     private func takePicker(_ s: Recipe.Slot) -> some View {
@@ -384,10 +424,13 @@ struct RecreateLanes: View {
     private func tag(_ s: Recipe.Slot) -> String {
         let rs = store.recreate
         if scores, let sc = rs.score(s.id) { return RecreateText.percent(sc) }
+        if rs.fillErrors[s.id] != nil { return "Didn’t generate" }
+        if rs.generatingSlots.contains(s.id) { return "Generating" }
         guard let state = rs.slotFill(s.id)?.state else { return "…" }
         switch state {
-        case "matched", "ready": return "Yours"
-        case "to_generate": return "To generate"
+        case "matched": return "Yours"
+        case "ready": return "Ready"
+        case "to_generate": return rs.estimateErrors[s.id] != nil ? "Can’t be made" : "To generate"
         case "generating": return "Generating"
         default: return "To fill"
         }

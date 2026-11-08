@@ -25,9 +25,12 @@ from .base import VIDEO_EXT, JobContext, JobFailure, JobHandler, ProducedOutput
 
 SIZES = {"1080p": (1080, 1920), "2k": (1440, 2560), "4k": (2160, 3840)}
 _TQDM = re.compile(r"(\d+)/(\d+) \[")
-# ⚠ Unverified default (numz ComfyUI-SeedVR2_VideoUpscaler CLI); override with SEEDVR2_CMD on the pod.
-DEFAULT_CMD = ("{python} inference_cli.py --video_path {input} --output {output} --resolution {short_side} "
-               "--model seedvr2_ema_3b_fp16.safetensors")
+# The numz ComfyUI-SeedVR2_VideoUpscaler standalone CLI (v2.5): the input is positional, the weights live in
+# models/SEEDVR2 under the checkout. Large frames tile the VAE so 2K/4K fit. Still unverified on a pod (timing run
+# pending); override with SEEDVR2_CMD on the pod.
+DEFAULT_CMD = ("{python} inference_cli.py {input} --output {output} --resolution {short_side} "
+               "--dit_model seedvr2_ema_3b_fp16.safetensors --model_dir models/SEEDVR2 --batch_size 21 "
+               "--vae_encode_tiled --vae_decode_tiled")
 
 
 # -- pure helpers --------------------------------------------------------------
@@ -61,7 +64,7 @@ class SeedVR2:
         self.cmd = cmd or os.environ.get("SEEDVR2_CMD", DEFAULT_CMD)
 
     def availability(self) -> str | None:
-        need = [self.root, self.python]
+        need = [self.root, self.python, self.root / "inference_cli.py"]
         missing = [str(p) for p in need if not p.exists()]
         return f"SeedVR2 not installed on this pod yet (missing: {', '.join(missing)})" if missing else None
 

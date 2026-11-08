@@ -548,7 +548,8 @@ EditorJob    { id, kind, state: "running"|"done"|"failed"|"cancelled", progress 
                models?: string[] /* owners only */ }
 CaptionsResult { language, words: { text, startSec, endSec, score? }[] /* SOURCE seconds */, durationSec, reused: boolean }
 CutsResult     { cuts: { startSec, endSec, reason: "silence"|"filler"|"repeat", text? }[] /* source s */, savedSec, words, language, options, durationSec }
-MatteResult    { asset: { kind: "video", upload | take, url?, durationSec }, chroma: { color: "#00FF00", similarity: 0.4, smoothness: 0.08, spill: 0.5 } }
+MatteResult    { asset: { kind: "video", upload | take, url?, durationSec }, alpha: true, mode: "person" | "tracked", points?: KeepPoint[] }   // workstream 1: an alpha matte
+KeepPoint      { x: 0–1, y: 0–1 /* of the frame */, t: seconds into the source (default 0), keep: boolean (default true) }
 DenoiseResult  { asset?: { kind: "audio", upload | take, url?, durationSec }, suggestion: { level: "none"|"light"|"strong", reason, confidence: number|null } }
 ```
 
@@ -571,11 +572,25 @@ DenoiseResult  { asset?: { kind: "audio", upload | take, url?, durationSec }, su
 - `captions` `{language?: "auto"|"en"|…}` → `CaptionsResult`. Word timestamps of the source's speech. Free (reused, cost 0) when the same video already has a transcript from the last 30 days in that language.
 - `cuts` `{minSilenceSec? 0.25–5 (0.7), keepPadSec? 0–0.5 (0.12), fillers? (true), repeats? (false), extraFillers?: string[] ≤ 50, fromJobId?, silenceOnly?, noiseDb? −60…−10 (−35)}` → `CutsResult`: suggested source ranges to remove (silences longer than `minSilenceSec`, keeping `keepPadSec` of each side; "um/uh/er/ah/hmm…" + `extraFillers`; a word said twice in a row). Free when a transcript exists (`fromJobId`, or the newest one of that video); otherwise it transcribes first (priced like captions). **`silenceOnly: true`** is always free and needs no transcript: the server reads the audio level (ffmpeg `silencedetect`, analysis only, nothing encoded) and returns silence cuts only (`words: []`); quieter than `noiseDb` counts as silence. The app shows the cuts and applies the accepted ones with `applyCuts(project, assetId, cuts)`.
 - `beats` (free; music or any video/audio, ≤ 10 min) → `{bpm, beats: number[], strong: number[] /* source s */, durationSec}`: beat marks for the music track (ffmpeg decode + onset/tempo analysis on the server; nothing encoded). The tempo is checked against half, double and 3:2 readings: if the points between the grid's beats are onsets too, the faster tempo wins, up to 180 bpm (`test/beats.test.ts`: click tracks at 60–180 bpm, off-beats, music).
-- `matte` (video ≤ 120 s) → `MatteResult`: the person on pure green; the app adds the asset (usually on an overlay/PiP track) with the given `chroma`. Priced per second of video.
+- `matte` (video ≤ 120 s) → `MatteResult`, priced per second of video (workstream 1, 2026-11-08: fix 1 and option 2, approved by the owner):
+  - **The result is an alpha matte**: a grey video the same length as the source, white = keep. It is not a green composite, so green clothes and hair edges survive.
+  - The app keeps the original clip and sets `alphaMatte: {asset}` on it, with the matte asset added to the project. A finished job in an edit session does this itself; `chroma` is removed.
+  - Old clips with `chroma` keep working.
+  - **`options.points: KeepPoint[]`** (1–10, at least one `keep`) is **tap to keep**. The owner taps what to keep (a pet, a product, one of two people) on one or more frames, and taps `keep: false` on what to leave out. That subject is tracked through the clip and comes back as the same kind of matte (`mode: "tracked"`).
+  - Tap to keep has its own price: GPU 15 + 3·d seconds. Estimate it with the same `options`. It runs as an ordinary paid job: estimate → hold → settle at the billed time, or release on failure or cancel.
+  - Points are checked (0–1, `t` inside the clip) before anything is held.
+  - Owner views list the model; member views never name it.
+
+**`VideoClip.alphaMatte {asset, invert?}`** (project model v2, workstream 1):
+- `asset` is a video asset of the project, aligned with the clip's own asset (the same source times).
+- Its luma is the clip's alpha: white = opaque. With `invert`, black is opaque.
+- It is applied before the clip's look, mask and transform. Validation: the asset must exist and be a video.
+- Apps render it: Mac (AVFoundation/Core Image `blendWithMask`, or a Metal pass) and Android (a luma-to-alpha shader on the matte's frame at the same time).
+- An app that doesn't know the field shows the clip unmatted.
 - `denoise` `{analyzeOnly?}`: `analyzeOnly: true` is free and needs a transcript → `{suggestion}` from how clearly the words were heard. Otherwise → the voice alone (music and noise removed) as an audio asset + the suggestion; the app sets it as the clip's `audioAsset`.
 - Estimates: GPU seconds (captions 8 + 0.15·d, matte 10 + 4·d, voice 5 + 0.3·d, d = media seconds) × the GPU's $/s; at least $0.01. Jobs on the server run 2 at a time (others wait in `phase: "Waiting"`); after a restart running jobs end `failed` ("Interrupted · try again") and their holds go back.
 - **Events:** `{type: "editor", editorJob: EditorJob}` to the job's user and the owners; `{type: "editor", op: "delete", id}` when one is removed.
-- **Server config** (env, optional): `EDITOR_AI_PROVIDER` = `mock` (the default, production included, until the owner turns the helpers on; in production the mock is free: no hold, no charge) | `auto` (Replicate when `REPLICATE_API_TOKEN` is set, else the mock) | `replicate`; `EDITOR_TRANSCRIBE_MODEL`, `EDITOR_MATTE_MODEL`, `EDITOR_SEPARATE_MODEL` (defaults: a WhisperX transcription model, a robust video matting model with green-screen output, a stem separation model); `EDITOR_*_USD_PER_SEC`. Inputs are renamed to the model's own field names from its published schema. Outputs are copied into storage byte for byte (`g/edit_*.mp4|mp3`) and recorded as studio uploads.
+- **Server config** (env, optional): `EDITOR_AI_PROVIDER` = `mock` (the default, production included, until the owner turns the helpers on; in production the mock is free: no hold, no charge) | `auto` (Replicate when `REPLICATE_API_TOKEN` is set, else the mock) | `replicate`; `EDITOR_TRANSCRIBE_MODEL`, `EDITOR_MATTE_MODEL`, `EDITOR_SEPARATE_MODEL` (defaults: a WhisperX transcription model, a robust video matting model with alpha-mask output, a stem separation model); `EDITOR_TRACK_MODEL` (default: a SAM 2 video segmentation model, for tap to keep); `EDITOR_*_USD_PER_SEC`. Inputs are renamed to the model's own field names from its published schema. Outputs are copied into storage byte for byte (`g/edit_*.mp4|mp3`) and recorded as studio uploads.
 
 **Looks (filters, 2026-11-05)** — spec `plans/video-editor.md` "Looks". A `look` (LUT + curves + texture effects) on video/image items; asset kind `"lut"` for imported .cube files.
 
@@ -1161,6 +1176,7 @@ A reference video (an upload, up to 60 s for now) is analysed into a versioned *
 **From a link** (migration **0018**, `src/recreate/links.ts`, `test/recreate-links.test.ts`). The owner chose to keep link fetching after reading the platforms' terms, and the risk is theirs (`plans/research/platform-download-rules.md`). Guardrails:
 - **Public only.**
   - MUSE never uses sign-ins or cookies. yt-dlp runs with `--ignore-config --no-cookies --no-cookies-from-browser` and none of the server's environment.
+  - YouTube needs a JavaScript runtime. yt-dlp gets the server's own Node (`--no-js-runtimes --js-runtimes node:<node>`; only deno is on by default) and the pinned `yt-dlp-ejs` 0.8.0 scripts. `--no-remote-components` means no code is fetched at run time.
   - Private, members-only, sign-in-walled and age-restricted videos are refused (`link_private`).
 - **The creator's setting.** For TikTok, MUSE reads the video's public page. If the creator turned downloads off (`downloadSetting` ≠ 0, or an explicit false), the video is refused (`link_downloads_off`). A page MUSE can't read counts as a blocked fetch; a page that doesn't say is treated as allowed.
 - **One fetch per link.**
@@ -1172,7 +1188,7 @@ A reference video (an upload, up to 60 s for now) is analysed into a versioned *
 - **Blocked** (a server address the platform blocks, 403, sign-in wall, rate limit, timeout, removed video): `link_blocked` (`502`) with the message "Couldn't fetch this link — save the video and drop the file in". The apps show it and offer the file drop. If the download itself is blocked, the reference turns `failed` with `errorCode: "link_blocked"`.
 - **Codes:** `link_unsupported` · `link_private` · `link_downloads_off` · `link_too_big` (all `422`) · `link_blocked` (`502`) · `too_long` (`400`).
 - **Reference fields:** `source: "file" | "link"`, `sourceUrl?`, `errorCode?`. Claude's `analyze_reference` takes `url` as well as `uploadId`.
-- **Config:** `RECREATE_LINKS` (default on), `YTDLP_PATH`, `RECREATE_LINK_MAX_MB`. The image pins yt-dlp 2026.10.26 from PyPI (sha256-checked at build) and adds python3, about +30 MB (an estimate: no Docker daemon was available to measure). CI never calls a platform; a fake yt-dlp replays `test/fixtures/links`.
+- **Config:** `RECREATE_LINKS` (default on), `YTDLP_PATH`, `RECREATE_LINK_MAX_MB`. The image pins yt-dlp 2026.10.26 and yt-dlp-ejs 0.8.0 from PyPI (both sha256-checked at build, unpacked to /opt/yt-dlp/lib) and adds python3, about +30 MB (an estimate: no Docker daemon was available to measure). CI never calls a platform; a fake yt-dlp replays `test/fixtures/links`.
 
 **Live event:** `{type: "recreate", reference}` (the `Reference` without its recipe, with `slots`: the count) goes to its member and the owner on create, on each analysis step, when it is ready or failed, and on `PATCH`. Migration **0016** adds `recreate_references.fill`.
 
@@ -1254,15 +1270,23 @@ The studio's editing memory, which Claude reads before every edit. The model doe
 |---|---|
 | `GET /v1/learn/recipes?q&tags=a,b&origin&limit` | → `RecipeEntry[]` (no recipe body), newest first. `q` matches the name, summary and tags; `tags` must all be present. |
 | `GET /v1/learn/recipes/{id}` | → `RecipeEntry` with `recipe`. |
+| `GET /v1/learn/tags?limit` | → `{tag, count}[]`: the most used tags across the library (default 8, at most 30), ties alphabetical. For the Recipes filter chips. |
 | `PATCH /v1/learn/recipes/{id} {name?, tags?}` · `DELETE …` | Rename or retag (lower-cased, unique; at most 30 tags of 32 characters). `DELETE` → `204`. |
 | `GET /v1/learn/recipes/nearest?recipeId|referenceId|takeId&k&origin` | → `{recipeId, nearest: (RecipeEntry & {distance})[]}`, closest first. `404` when the recipe isn't in the library. |
 | `GET /v1/learn/corrections?limit&sessionId&area` | → `Correction[]`, newest first. |
-| `GET /v1/learn/lessons` | → `{area, claudeChange, count, undos, last, examples[], ids[]}[]`: corrections grouped by area and Claude's change, the most frequent first. This is what Claude turns into rules. |
-| `GET /v1/learn/playbook?area` · `POST {text, area?, evidence?, pinned?}` · `PATCH /{id} {text?, area?, evidence?, pinned?}` · `DELETE /{id}` | → `Rule` / `Rule[]`. A rule from `POST` has source `owner`. |
+| `GET /v1/learn/lessons` | → `{area, claudeChange, count, undos, last, examples[], ids[], ruleId?}[]` (`ruleId`: a rule already cites one of its corrections as evidence): corrections grouped by area and Claude's change, the most frequent first. This is what Claude turns into rules. |
+| `GET /v1/learn/playbook?area` · `POST {text, area?, evidence?, pinned?}` · `PATCH /{id} {text?, area?, evidence?, pinned?}` · `DELETE /{id}` | → `Rule` / `Rule[]`. A rule from `POST` has source `owner`. In `GET`, correction evidence also carries `takeId` and `takeExists` (open the edit only when it does). The list is full at 200 rules (`POST` → `400`). |
 | `GET /v1/learn/gaps?limit` · `POST {key, kind?, what?, note?}` | → `Gap[]` / `Gap`. `key` looks like `"effect:lens-flare"`. |
 | `GET /v1/learn/context?recipeId|referenceId|takeId&area` | → `{playbook: Rule[] (≤ 25), recipes /* the 3 nearest, or the latest own edits */, corrections (10), lessons (8), gaps (5)}`. This is what `playbook_read` returns. |
 
-`RecipeEntry {id, origin, referenceId, takeId, name, summary, tags, features, performance | null, createdAt, updatedAt, recipe?}` · `Correction {id, sessionId, takeId, opId, claudeOpId, kind: "undo"|"change", area, what, context, createdAt}` · `Rule {id, text, area, source, pinned, evidence, createdAt, updatedAt}` · `Gap {key, kind, what, count, examples, firstAt, lastAt}`.
+`RecipeEntry {id, origin, referenceId, takeId, name, summary, tags, features, durationSec, cuts, picture: {poster: path} | {thumb: ImageRef} | null, available, performance | null, createdAt, updatedAt, recipe?}` · `Correction {id, sessionId, takeId, takeExists, opId, claudeOpId, kind: "undo"|"change", area, what, context, createdAt}` · `Rule {id, text, area, source, pinned, evidence, createdAt, updatedAt}` · `Gap {key, kind, what, count, references, asks, examples, firstAt, lastAt}`.
+
+For the screens (`plans/learning-editor-ui.md`, 2026-11-08):
+- `picture`: a reference's poster path, or an edit's take thumbnail; `null` → the `field` placeholder.
+- `durationSec` and `cuts` (shots − 1) are the tile badge ("12 s · 9 cuts").
+- `available`: a reference whose video is still kept (state `ready`; "Use in Recreate"), or an edit whose take still exists ("Open edit").
+- Gaps: `references` (recipes that needed it) + `asks` (logged directly) = `count`: "Unknown transition · 4 references", "Lens flare · asked once".
+- Areas → screen headings: captions Captions, text Text, pacing Pacing, transition Transitions, look Look, motion Motion, speed Speed, timing Timing, audio Sound, ratio Shape, other Other.
 
 **For WS1's MCP tools:**
 - `playbook_read` → `learningOf(ctx).context(user, {recipeId?, referenceId?, takeId?, area?})`.
@@ -1275,7 +1299,7 @@ Code: `src/recreate/slots.ts` (briefs, matcher, fill request), `assemble.ts` (re
 | | |
 |---|---|
 | `PUT /v1/recreate/references/{id}/briefs {slots: {s1: Brief}, summary?, tags?}` | `summary` (≤ 200 chars) and `tags` (≤ 20 short lowercase words) go on the recipe. `Brief {shotSize?, angle?, subject?, action?, location?, notes?}`. `shotSize` is a `SHOT_SIZES` id and `angle` a `HEIGHTS` id; unknown ids → `400`. Each brief is merged into the slot, and its framing and angle go into the slot's `rig`. |
-| `POST /v1/recreate/references/{id}/match {modelId?, top?, minScore?}` | → `{slots: [{slotId, candidates: [{takeId, score, reasons}], suggested, toGenerate}], assignment: {slotId: takeId}}`. See the matcher below. |
+| `POST /v1/recreate/references/{id}/match {modelId?, top?, minScore?}` | → `{slots: [{slotId, candidates: [{takeId, score, reasons}], suggested, suggestion: {takeId, score, reasons} | null, toGenerate}], assignment: {slotId: takeId}}`. `suggestion` is the suggested take's own score, which may rank below the top `candidates` because each take is used once. See the matcher below. |
 | `POST /v1/recreate/references/{id}/slots/{slotId}/estimate {modelId, quality?}` | → `{slotId, request: ShotRequest, estimate: ShotEstimate}`. Nothing is held. |
 | `POST /v1/recreate/references/{id}/slots/{slotId}/fill {modelId, quality?}` | → `{slotId, job}`: an ordinary Suite shot, held and priced like any other (the caller has confirmed the price). The slot records `fill: {jobId}`. |
 | `POST /v1/recreate/references/{id}/apply {sessionId, baseRevision?, slots: {slotId: takeId \| jobId}, options?: {camera, speed, text, look}, device?}` | Builds the edit in an edit session (owner) as one undoable change labelled "Recreated “name”". → `{sessionId, revision, durationSec, missing, waiting, notes, label, match, sources}`. See below. |
