@@ -107,6 +107,7 @@ enum SnapshotRunner {
             store.themeID = .a
             await fitCheck(store, dir: dir)
             await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
+            await editLayoutShots(store, dir: dir)   // Edit layout audit (owner 2026-11-08): three window sizes, four themes
             await scrollCheck(store, dir: dir)
             store.signOut()
             try? await Task.sleep(for: .seconds(1))
@@ -217,6 +218,33 @@ enum SnapshotRunner {
         w.setFrame(full, display: true)
         try? await Task.sleep(for: .seconds(1))
         try? (lines.joined(separator: "\n") + "\n").write(to: dir.appendingPathComponent("fit-check.txt"), atomically: true, encoding: .utf8)
+    }
+
+    // MARK: Edit layout audit
+
+    /// The Edit suite on a real-shaped take (editCheck's 15 s take with sound), at the sizes the owner uses: 1280 × 800,
+    /// 1440 × 900 and a 13" MacBook Air's window (1470 × 882: its default 1470 × 956 screen less the menu bar and Dock).
+    /// Soft Tactile first. Rendered from the window's own drawing (`mac_editaudit_<theme>_<w>x<h>.png`), so a window larger
+    /// than the runner's screen still comes out whole.
+    private static func editLayoutShots(_ store: AppStore, dir: URL) async {
+        guard let take = store.takes.first(where: { $0.id == "rx_zero" }) ?? store.takes.first(where: { $0.kind == "take" && $0.videoUrl != nil }),
+              let w = mainWindow else { return }
+        let original = w.frame
+        let sizes: [(Int, Int)] = [(1280, 800), (1440, 900), (1470, 882)]
+        for theme in [ThemeID.c, .a, .b, .d] {
+            store.themeID = theme
+            store.openEdit(takeId: take.id)
+            try? await Task.sleep(for: .seconds(8))
+            for (width, height) in sizes {
+                w.setFrame(NSRect(x: original.minX, y: original.maxY - CGFloat(height), width: CGFloat(width), height: CGFloat(height)), display: true)
+                try? await Task.sleep(for: .seconds(1.5))
+                capture(dir.appendingPathComponent("mac_editaudit_\(theme.rawValue)_\(width)x\(height).png"))
+            }
+            w.setFrame(original, display: true)
+            store.openEdit(takeId: nil)
+            try? await Task.sleep(for: .seconds(1))
+        }
+        store.themeID = .a
     }
 
     // MARK: Scroll check (CI): every main page and Settings pane must scroll with a real scroll event
