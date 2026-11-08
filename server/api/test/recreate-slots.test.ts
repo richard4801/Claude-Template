@@ -16,7 +16,7 @@ import type { Recipe } from '../src/recreate/analyze.js';
 import { lutFor } from '../src/suite/looks.js';
 import { buildProject, editorTransition } from '../src/recreate/assemble.js';
 import { RECREATE_TOOLS } from '../src/recreate/mcpTools.js';
-import { BriefSchema, matchSlots, scoreTake, shotRequestFor, withBriefs, type Candidate } from '../src/recreate/slots.js';
+import { BriefSchema, matchSlots, promptSource, scoreTake, shotRequestFor, withBriefs, type Candidate } from '../src/recreate/slots.js';
 import { putObject } from '../src/storage/objects.js';
 import { makeApp, people, until, type Client } from './helpers.js';
 import { hasFfmpeg, makeReference } from './recreate-fixture.js';
@@ -141,6 +141,13 @@ describe('Recreate · briefs, matching and the fill request (unit)', () => {
     expect(q).toMatchObject({ modelId: 'm1', quality: 'hd', duration: 2, aspectRatio: '9:16', takes: 1, prompt: 'She, flips her hair, in a rooftop at dusk.', title: 'Tuff edit · s2',
       camera: { angle: { height: 'low', shotSize: 'cu' }, move: { id: 'zoom_in', intensity: 0.5 } }, draft: { tool: 'shot', recreate: { slotId: 's2' } } });
     expect(shotRequestFor(r, r.slots[2]!, { modelId: 'm1', quality: 'draft', minSeconds: 4 }).duration).toBe(4);
+    // No brief yet: never an empty prompt. The reference's summary, else a neutral line; the framing and move still apply.
+    expect(promptSource(r, r.slots[1]!)).toBe('brief');
+    expect(shotRequestFor(r, r.slots[0]!, { modelId: 'm1', quality: 'hd' }).prompt).toBe('The model moves naturally, matching the reference shot.');
+    expect(promptSource(r, r.slots[0]!)).toBe('default');
+    const withSummary = { ...r, summary: 'A mirror outfit check with a hair flip' };
+    expect(shotRequestFor(withSummary, withSummary.slots[0]!, { modelId: 'm1', quality: 'hd' }).prompt).toBe('A mirror outfit check with a hair flip.');
+    expect(promptSource(withSummary, withSummary.slots[0]!)).toBe('summary');
   });
 });
 
