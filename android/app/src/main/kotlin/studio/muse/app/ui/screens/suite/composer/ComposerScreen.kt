@@ -1024,10 +1024,10 @@ private fun WideBar(ui: ComposerUi) {
             ui.photo?.let { p -> MenuPill("layers", photoCountLabel(p.draft.count), "Photos", PhotoComposer.countItems(p.draft.count)) { i -> p.setCount(i + 1) }; return@Row }
             val tiers = ui.catalog?.tiers?.ifEmpty { null }?.map { it.id } ?: SuiteRules.TIERS
             MenuPill("gauge", SuiteRules.tierLabel(d.quality), "Quality", tiers.map { t -> "${SuiteRules.tierLabel(t)} · ${ComposerPrice.short(ui.tierEstimates[t])}" to (t == d.quality) }) { i -> ui.update { it.copy(quality = tiers[i]).fit(ui.catalog) } }
-            val engines = ui.catalog?.tier(d.quality)?.models.orEmpty()
-            if (ui.owner && engines.isNotEmpty() && d.tool in ComposerDraft.PROMPT_TOOLS) {
-                val items = listOf("Auto" to (d.engineModel == null)) + engines.map { e -> (e.name.ifBlank { e.model } + (e.resolution.ifBlank { null }?.let { " · $it" } ?: "")) to (e.model == d.engineModel) }
-                MenuPill("cube", d.engineLabel(ui.catalog), "Engine (owner)", items) { i -> ui.update { it.pin(engines.getOrNull(i - 1)) } }
+            // Owner only (WS7, as the Mac's "Model" pill): any engine, this quality's ladder first, then the others, then "Your providers".
+            val groups = ModelPicker.groups(ui.catalog, d.quality)
+            if (ui.owner && !groups.isEmpty && d.tool in ComposerDraft.PROMPT_TOOLS) {
+                MenuPill("cube", d.modelLabel(ui.catalog), "Model (owner)", modelMenuItems(d, groups)) { i -> ui.update { it.pinEngine(groups.all.getOrNull(i - 1)).fit(ui.catalog) } }
             }
             // Shape, length and takes are in the Settings row (as on the phone); the bar keeps sound and speaking.
             if (d.tool != ComposerTool.EXTEND) {

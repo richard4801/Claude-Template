@@ -189,6 +189,21 @@ data class SuiteTier(
     fun slotsFor(engineModel: String?): SuiteInputs = engineModel?.let { id -> models?.firstOrNull { it.model == id }?.inputs } ?: slots
 }
 
+/** One engine the owner can pin (`catalog.engines[]`, WS5): its quality, resolution, limits and price per second. Provisional until WS5's shape lands. */
+@Serializable
+data class SuiteCatalogEngine(
+    val model: String,
+    val name: String = "",
+    val tier: String? = null,
+    val resolution: String = "",
+    val minSeconds: Int? = null,
+    val maxSeconds: Int? = null,
+    val aspectRatios: List<String> = emptyList(),
+    val perSec: Double? = null,
+    val inputs: SuiteInputs? = null,
+    val custom: Boolean = false,
+)
+
 /** A custom engine (`c_…`) in the catalog: its display name, image or video, its limits and its price. Shots and photos take it as engineModel. */
 @Serializable
 data class SuiteCustomEngine(
@@ -230,6 +245,8 @@ data class SuiteCatalog(
     val tools: List<SuiteToolInfo>? = null,
     /** WS7 (BYO provider, WS5 contract v1): models the studio added from its own providers. Members get the members:true ones, display name only. */
     val custom: List<SuiteCustomEngine>? = null,
+    /** WS7/WS5 (owner only): every engine the studio can pin, across qualities. Null = an older server (the tiers' models are used). Provisional shape. */
+    val engines: List<SuiteCatalogEngine>? = null,
 ) {
     fun tier(id: String?) = tiers.firstOrNull { it.id == id }
     /** Whether a tool can Generate: the catalog's word, else [fallback]. */
@@ -559,7 +576,7 @@ object SuiteRules {
     }
 
     /** The member's view of the catalog: tiers without their models. */
-    fun memberSafe(c: SuiteCatalog): SuiteCatalog = c.copy(tiers = c.tiers.map { it.copy(models = null) })
+    fun memberSafe(c: SuiteCatalog): SuiteCatalog = c.copy(tiers = c.tiers.map { it.copy(models = null) }, engines = null)
 
     /** The server variable the owner sets to turn the suite on, and its two values. */
     const val MODE_VAR = "SUITE_MODE"

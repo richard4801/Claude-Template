@@ -109,7 +109,7 @@ data class ComposerDraft(
     val placeholder: String get() = if (tool == ComposerTool.EXTEND) studio.muse.app.data.ExtendRules.placeholder(extendDirection) else tool.placeholder
 
     /** The input slots on this quality, or on the pinned engine when the owner pinned one. */
-    fun inputsFor(cat: SuiteCatalog?): SuiteInputs = cat?.tier(quality)?.slotsFor(engineModel) ?: SuiteInputs.NONE
+    fun inputsFor(cat: SuiteCatalog?): SuiteInputs = ModelPicker.find(cat, engineModel, resolution)?.inputs ?: cat?.tier(quality)?.slotsFor(engineModel) ?: SuiteInputs.NONE
 
     /** Pins one of the tier's engines (null = Auto). */
     fun pin(m: studio.muse.app.data.SuiteTierModel?): ComposerDraft = copy(engineModel = m?.model, resolution = m?.resolution?.ifBlank { null }).let { d ->
@@ -119,7 +119,7 @@ data class ComposerDraft(
     }
 
     /** The Settings row's value: "Auto", or the pinned engine's name (owner only: members' catalogs carry no engines). */
-    fun engineLabel(cat: SuiteCatalog?): String = engineModel?.let { id -> cat?.tier(quality)?.models?.firstOrNull { it.model == id }?.let { m -> m.name.ifBlank { m.model } + (m.resolution.ifBlank { null }?.let { " · $it" } ?: "") } ?: id } ?: "Auto"
+    fun engineLabel(cat: SuiteCatalog?): String = modelLabel(cat)
     /** The picked add-on of Character swap (null on other tools or on the quality ladder). */
     val swapAddon: SwapAddon? get() = if (tool == ComposerTool.SWAP) SwapAddon.of(addon)?.takeIf { it.option != null } else null
     /** The tool card's name and tagline: the preset's when one was picked, else the tool's. */
@@ -173,7 +173,7 @@ data class ComposerDraft(
     fun lengthRange(cat: SuiteCatalog?): IntRange {
         val t = cat?.tier(quality)
         // An engine the owner pinned has its own limits (when the server sends them); otherwise the tier's.
-        val e = engineModel?.let { id -> t?.models?.firstOrNull { it.model == id } }
+        val e = ModelPicker.find(cat, engineModel, resolution)
         val lo = (e?.minSeconds ?: t?.minSeconds ?: 2).coerceAtLeast(1)
         val hi = (e?.maxSeconds ?: t?.maxSeconds ?: 15).coerceAtLeast(lo)
         return lo..hi
@@ -183,8 +183,9 @@ data class ComposerDraft(
     fun fit(cat: SuiteCatalog?): ComposerDraft {
         val r = lengthRange(cat)
         val sized = if (duration in r) this else copy(duration = duration.coerceIn(r))
-        // A pin that isn't one of this quality's engines (or a catalog without engines, a member's) goes back to Auto.
-        val ok = engineModel == null || cat?.tier(quality)?.models?.any { it.model == engineModel } == true
+        // A pin the catalog doesn't have (a member's catalog has none), or a ladder engine of another quality, goes back to Auto.
+        val e = ModelPicker.find(cat, engineModel, resolution)
+        val ok = engineModel == null || (e != null && (e.custom || e.tier == null || e.tier == quality))
         return if (ok) sized else sized.copy(engineModel = null, resolution = null)
     }
 

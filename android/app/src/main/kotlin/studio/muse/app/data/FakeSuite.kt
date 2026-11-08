@@ -33,7 +33,28 @@ class FakeSuite {
 
     fun catalog(owner: Boolean): SuiteCatalog {
         val c = bundle.catalog.copy(enabled = true, test = true, camera = camera)
-        return if (owner) c else SuiteRules.memberSafe(c)
+        return if (owner) withEngineDetail(c) else SuiteRules.memberSafe(c)
+    }
+
+    /**
+     * WS7 (owner model picker): each ladder engine with its own lengths and $/s (from the demo registry), plus one model the
+     * studio added from its own provider ("Your providers"). Members never get any of it (memberSafe).
+     */
+    private fun withEngineDetail(c: SuiteCatalog): SuiteCatalog = c.copy(
+        tiers = c.tiers.map { t ->
+            t.copy(models = t.models?.map { m ->
+                val lim = DEMO_LIMITS[m.model]
+                m.copy(minSeconds = m.minSeconds ?: lim?.first, maxSeconds = m.maxSeconds ?: lim?.last, perSec = m.perSec ?: settings.model(m.model)?.perSec(m.resolution))
+            })
+        },
+        custom = c.custom ?: listOf(DEMO_CUSTOM),
+    )
+
+    /** The pinned engine's $/s (owner, demo): a ladder model at its resolution, or the demo custom model. */
+    private fun pinnedPerSec(r: SuiteShotRequest): Double? {
+        val id = r.engineModel ?: return null
+        if (id == DEMO_CUSTOM.id) return DEMO_CUSTOM.price?.usd
+        return settings.model(id)?.perSec(r.resolution)
     }
 
     fun settings(): SuiteSettings = settings.copy(spentToday = round2(spentToday))
@@ -80,7 +101,7 @@ class FakeSuite {
         val min = if (recast) 4.0 else (bundle.catalog.tier(tier)?.minSeconds ?: 4).toDouble()
         val seconds = ceil(wanted).coerceAtLeast(min)
         val takes = if (recast) (r.takes ?: 1) else (r.takes ?: 1)
-        val perSec = (if (recast) RECAST_PER_SEC else PER_SEC)[tier] ?: 0.02
+        val perSec = (if (owner && !recast) pinnedPerSec(r) else null) ?: (if (recast) RECAST_PER_SEC else PER_SEC)[tier] ?: 0.02
         val estimate = round2(perSec * seconds * takes)
         val res = (if (recast) RECAST_RES_LABEL else RES_LABEL)[tier] ?: "768p"
         val kind = if (recast) "Recast" else "Shot"
@@ -224,6 +245,13 @@ class FakeSuite {
         return Job(id, r.title ?: "Untitled shot", model?.id ?: "", model?.name ?: "", req.outfitId, req, "running", 0.0, 1, 0, p.totalSteps, p.phase, total, total,
             e.estimate, createdAt = createdAt, prompt = r.prompt, seed = (1000..99000).random().toLong(), serverEngineLabel = e.label)
     }
+
+    /** Demo lengths per engine (seconds), as the registry's duration ranges (WS7). */
+    private val DEMO_LIMITS = mapOf(
+            "h3" to 1..15, "h3-lite" to 1..15, "h3-highspeed" to 1..10, "veo-3.1-lite" to 4..8, "kling-v4" to 3..15, "kling-v3-omni" to 3..15,
+            "seedance-2.0" to 4..15, "seedance-2.5" to 4..15, "wan-2.7" to 2..15, "ltx-2.3" to 2..20,
+        )
+    private val DEMO_CUSTOM = SuiteCustomEngine("c_demo2", "Kling turbo", "video", ProviderInputs(prompt = true, startImage = true), 5, 10, listOf("9:16", "16:9", "1:1"), MemberPrice("per_second", 0.07))
 
     companion object {
         /** $ per output second per tier (the demo ladder's first steps, as the server prices them). */
