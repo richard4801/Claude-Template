@@ -173,8 +173,13 @@ fun SuiteComposerScreen(toolId: String? = null) {
     val problem = d.problem(slots, recast, own)
     // Character swap's add-ons (Edit, Fast · beta) are priced by the add-on estimate (the video studio's), not the ladder's.
     val clipSeconds = recast.clipId?.let { id -> video.clip?.takeIf { it.id == id }?.durationSec ?: if (id == SampleData.SAMPLE_CLIP) SampleData.sampleMeta.durationSec else null }
-    val addon = d.swapAddon
-    val addonPills = if (d.tool == ComposerTool.SWAP) SwapAddons.pills(st.video ?: studio.muse.app.data.VideoFeatures.DEFAULT, prefs.fastBeta, d.takes, clipSeconds) else emptyList()
+    // WS7/WS13 (coordinator, 2026-11-08): for the owner, Swap's model list replaces the Edit / Fast·beta toggles (H3 open
+    // weights and Viggle are models in it), so there's one way to choose; Upscale stays. Members keep the pills.
+    val ownerPicks = store.owner || prefs.owner
+    LaunchedEffect(ownerPicks, d.addon) { if (ownerPicks && d.tool == ComposerTool.SWAP && SwapAddon.of(d.addon)?.let { it == SwapAddon.EDIT || it == SwapAddon.FAST } == true) store.composer.update { it.copy(addon = null) } }
+    val addon = d.swapAddon?.takeIf { !ownerPicks || it == SwapAddon.UPSCALE }
+    val addonPills = if (d.tool == ComposerTool.SWAP) SwapAddons.pills(st.video ?: studio.muse.app.data.VideoFeatures.DEFAULT, prefs.fastBeta, d.takes, clipSeconds)
+        .filter { !ownerPicks || it.addon == SwapAddon.UPSCALE } else emptyList()
     val photo = rememberPhotoTool(d) // Photo tool (workstream 3): its own estimate (POST /v1/suite/photos/estimate) and Generate
     val (suiteEst, estErr) = rememberEstimate(req.takeIf { problem == null && live && addon == null && photo == null }, catalog?.enabled == true)
     val est = if (addon != null) clipSeconds?.takeIf { problem == null }?.let { SwapAddons.estimate(addon, d.takes, it) } else photo?.est ?: suiteEst
@@ -1067,7 +1072,7 @@ private fun WideBar(ui: ComposerUi) {
             val tiers = ui.catalog?.tiers?.ifEmpty { null }?.map { it.id } ?: SuiteRules.TIERS
             MenuPill("gauge", SuiteRules.tierLabel(d.quality), "Quality", tiers.map { t -> "${SuiteRules.tierLabel(t)} · ${ComposerPrice.short(ui.tierEstimates[t])}" to (t == d.quality) }) { i -> ui.update { it.copy(quality = tiers[i]).fit(ui.catalog) } }
             // Owner only (WS7, as the Mac's "Model" pill): any engine, this quality's ladder first, then the others, then "Your providers".
-            val groups = ModelPicker.groups(ui.catalog, d.quality, purpose = d.tool.modelPurpose)
+            val groups = ModelPicker.groups(ui.catalog, d.quality, purpose = d.pickPurpose)
             if (ui.owner && !groups.isEmpty && d.tool in ComposerDraft.PROMPT_TOOLS) {
                 MenuPill("cube", d.modelPill(ui.catalog), "Model, only you see models", modelMenuItems(d, groups)) { i -> ui.update { it.pinEngine(groups.all.getOrNull(i - 1)).fit(ui.catalog) } }
             }

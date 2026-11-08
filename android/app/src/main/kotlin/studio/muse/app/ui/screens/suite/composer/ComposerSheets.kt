@@ -358,7 +358,7 @@ private fun ColumnScope.SettingsBody(x: SheetContext) {
         }
         // Owner only (WS7, as the Mac's "Model" pill): pin any engine for this shot, this quality's ladder first, then the
         // others, then "Your providers". Members never see models; they keep the quality tiers above.
-        val groups = ModelPicker.groups(x.catalog, d.quality, purpose = d.tool.modelPurpose)
+        val groups = ModelPicker.groups(x.catalog, d.quality, purpose = d.pickPurpose)
         if (x.owner && !groups.isEmpty && d.tool in ComposerDraft.PROMPT_TOOLS) {
             var open by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(d.engineModel != null) }
             Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(12.dp)).background(m.t.surface).press { open = !open }

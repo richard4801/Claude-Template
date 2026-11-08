@@ -31,6 +31,7 @@ import studio.muse.app.ui.screens.label
 import studio.muse.app.ui.screens.suite.InputSlots
 import studio.muse.app.ui.screens.suite.composer.ComposerDraft
 import studio.muse.app.ui.screens.suite.composer.ComposerTool
+import studio.muse.app.ui.screens.suite.composer.pickPurpose
 import studio.muse.app.ui.screens.suite.RecastDraft
 import studio.muse.app.ui.theme.MuseTheme
 import studio.muse.app.ui.theme.ThemeId
@@ -82,6 +83,17 @@ class ModelChoiceLogicTest {
         assertEquals("viggle", r.engineModel)
         // A pick made for another tool stays home.
         assertNull(studio.muse.app.ui.screens.suite.composer.SwapAddons.request(d.copy(engineTool = ComposerTool.RECAST), RecastDraft(clipId = "c1"), studio.muse.app.ui.screens.suite.composer.SwapAddon.FAST, 8.0).engineModel)
+    }
+
+    @Test fun aDirectedShotPicksFromTheGuideModels() {
+        assertEquals("guide", ComposerDraft(tool = ComposerTool.SHOT, directed = "{}").pickPurpose)
+        assertEquals("shot", ComposerDraft(tool = ComposerTool.SHOT).pickPurpose)
+        val cat = studio.muse.app.data.SuiteCatalog(engines = listOf(
+            studio.muse.app.data.SuiteCatalogEngine("a", "A", purposes = listOf("shot", "guide")),
+            studio.muse.app.data.SuiteCatalogEngine("b", "B", purposes = listOf("shot")),
+        ))
+        assertEquals(listOf("a"), studio.muse.app.ui.screens.suite.composer.ModelPicker.groups(cat, "hd", purpose = "guide").all.map { it.id })
+        assertEquals(listOf("a", "b"), studio.muse.app.ui.screens.suite.composer.ModelPicker.groups(cat, "hd", purpose = "shot").all.map { it.id })
     }
 
     @Test fun aPickDoesNotCarryToAnotherKindOfWork() {

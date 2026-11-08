@@ -287,3 +287,6 @@ val ComposerTool.modelPurpose: String? get() = when (this) {
     ComposerTool.PHOTO -> "photo"
     else -> null
 }
+
+/** The draft's model list: a Shot with a Directed camera (the Camera stage's guide) picks from WS13's "guide" models. */
+val ComposerDraft.pickPurpose: String? get() = if (tool == ComposerTool.SHOT && directed != null) "guide" else tool.modelPurpose
