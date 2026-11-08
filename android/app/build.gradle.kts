@@ -15,8 +15,8 @@ android {
         applicationId = "studio.muse.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.1.2"
+        versionCode = 4
+        versionName = "0.1.3"
         // The live MUSE API (server/api on Railway). Settings → Developer can point the app at another URL
         // (e.g. http://10.0.2.2:8787/ for a local server/api or server/mock from the emulator).
         buildConfigField("String", "DEFAULT_SERVER_URL", "\"https://angelic-elegance-production-c42b.up.railway.app/\"")

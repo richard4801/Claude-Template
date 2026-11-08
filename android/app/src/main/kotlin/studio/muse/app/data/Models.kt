@@ -1036,7 +1036,12 @@ data class DevFailRequest(val failNext: Boolean)
 @Serializable
 data class ErrorBody(val error: String, val code: String? = null)
 
-class ApiException(val code: String, message: String) : Exception(message)
+class ApiException(val code: String, message: String) : Exception(message) {
+    /** The server restarting or the network dropping: worth retrying in a moment (polls keep going). */
+    val transient: Boolean get() = code in TRANSIENT
+
+    companion object { val TRANSIENT = setOf("server_restarting", "offline", "still_working", "http_502", "http_503", "http_504") }
+}
 
 // ---------------------------------------------------------------- Prompt scripts (workstream 4)
 // plans/api.md "Prompt scripts (2026-11-05)": inputs → rules → blocks. Owner only (Settings → Prompts → Scripts).
