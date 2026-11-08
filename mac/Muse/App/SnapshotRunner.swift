@@ -287,6 +287,13 @@ enum SnapshotRunner {
             let names = pills.map { String($0.key.dropFirst(5)) }.joined(separator: ", ")
             out.append("FITS \(label) bar \(pills.count) pills whole (\(names)), \"\(g)\"")
         }
+        // The feed's filter (composer_feed): inside the feed's header row; its labels are probed whole above (12 pt
+        // padding each side by construction; under that width it becomes one "All ▾").
+        if let f = frames["feed filter"], let h = frames["feed header"] {
+            let inside = f.minX >= h.minX - 0.5 && f.maxX <= h.maxX + 0.5 && f.height <= 36
+            let form = f.width > 120 ? "segments" : "menu"
+            out.append("\(inside ? "FITS" : "CUT") \(label) feed filter (\(form)) \(Int(f.width))x\(Int(f.height)) in the header \(Int(h.width)) wide")
+        }
         return out
     }
 

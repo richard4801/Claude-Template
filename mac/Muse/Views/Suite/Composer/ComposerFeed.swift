@@ -40,10 +40,14 @@ struct ComposerFeed: View {
             HStack(spacing: Space.s3) {
                 Text(photo ? "Photos" : "Takes").font(t.scale.heading.font).foregroundStyle(t.roles.ink)
                 Spacer(minLength: Space.s2)
-                SuiteSeg(options: SuiteFeedFilter.allCases.map { ($0, $0.label) }, selection: store.suite.feedFilter) { store.suite.feedFilter = $0 }
-                    .fixedSize()
-                    .accessibilityLabel("Show")
+                // The four filters with room around each label; when the feed is narrow, one "All ▾" that opens them.
+                ViewThatFits(in: .horizontal) {
+                    FeedFilterSegments()
+                    FeedFilterMenu()
+                }
+                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "feed filter") } }
             }
+            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "feed header") } }
             if list.isEmpty {
                 empty
             } else {
@@ -97,6 +101,68 @@ struct ComposerFeed: View {
             }
         } else {
             FeedTakeCard(item: item, take: store.feedTake(item), photo: photo)
+        }
+    }
+}
+
+/// All · Rendering · Finished · Failed as one segmented control: each label whole with 12 pt either side.
+struct FeedFilterSegments: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(SuiteFeedFilter.allCases) { f in
+                let on = f == store.suite.feedFilter
+                Button { store.suite.feedFilter = f } label: {
+                    Text(f.label).font(t.scale.caption.font.weight(on ? .semibold : .regular))
+                        .foregroundStyle(on ? t.roles.ink : t.roles.ink2)
+                        .lineLimit(1).fixedSize()
+                        .fitProbe("composer feed filter \(f.label)")
+                        .padding(.horizontal, Space.s3).frame(height: 28)
+                        .background(RoundedRectangle(cornerRadius: t.radii.chip).fill(on ? t.roles.canvas : Color.clear))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(f.label)\(on ? ", selected" : "")")
+            }
+        }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
+        .fixedSize()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Show")
+    }
+}
+
+/// The narrow form: the current filter and a caret; the list opens in a popover.
+struct FeedFilterMenu: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    @State private var open = false
+
+    var body: some View {
+        Button { open.toggle() } label: {
+            HStack(spacing: Space.s1) {
+                Text(store.suite.feedFilter.label).font(t.scale.caption.font.weight(.medium)).lineLimit(1).fixedSize()
+                    .fitProbe("composer feed filter menu")
+                Ph("caret-down", 11)
+            }
+            .foregroundStyle(t.roles.ink)
+            .padding(.horizontal, Space.s3).frame(height: 28)
+            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .help("Show")
+        .accessibilityLabel("Show \(store.suite.feedFilter.label)")
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            PillList(title: "Show", options: SuiteFeedFilter.allCases.map { ($0.label, $0) }, selected: store.suite.feedFilter) {
+                store.suite.feedFilter = $0
+                open = false
+            }
+            .environment(\.theme, t)
         }
     }
 }
