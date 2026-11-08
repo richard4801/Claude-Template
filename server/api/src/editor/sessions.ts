@@ -14,6 +14,7 @@ import { LOOK_IDS } from './lookpack.js';
 import { paletteIds } from './photo.js';
 import { editOps, editSessions } from './schema.js';
 import { editorAi } from './service.js';
+import { learningOf, touched } from './learn.js';
 import { CAPTION_STYLES } from './presets.js';
 import type { Word } from './cuts.js';
 
@@ -115,7 +116,7 @@ export class EditSessions {
 
   // ------------------------------------------------------------------ changes
   /** Stores a new project (already validated) with its patch and inverse; tells the apps. */
-  private async commit(s: Session, next: M.EditProject, o: { author: string; kind: OpRow['kind']; label: string; undoes?: number }) {
+  private async commit(s: Session, next: M.EditProject, o: { author: string; kind: OpRow['kind']; label: string; undoes?: number; meta?: Record<string, unknown> }) {
     const patch = diff(s.project, next), inverse = diff(next, s.project);
     if (!patch.length && o.kind !== 'tool') return { session: s, entry: null as OpRow | null, patch };
     const now = Date.now(), rev = s.revision + (patch.length ? 1 : 0);
@@ -123,10 +124,12 @@ export class EditSessions {
       .where(and(eq(editSessions.id, s.id), eq(editSessions.revision, s.revision))).returning();
     if (!u) throw await this.stale(s.id, s.revision); // someone else committed in between
     const [entry] = await this.ctx.db.insert(editOps).values({ sessionId: s.id, revision: rev, author: o.author, kind: o.kind, label: o.label.slice(0, 200),
-      patch, inverse, undoes: o.undoes ?? null, createdAt: now }).returning();
+      patch, inverse, undoes: o.undoes ?? null, meta: patch.length ? { ...(o.meta ?? {}), touched: touched(s.project as M.EditProject, next) } : (o.meta ?? null), createdAt: now }).returning();
     if (o.undoes) await this.ctx.db.update(editOps).set({ undone: 1 }).where(eq(editOps.id, o.undoes));
     await this.prune(s.id);
     if (patch.length) this.emit(u, { op: 'patch', revision: rev, baseRevision: s.revision, patch, entry: this.entryView(entry!) });
+    // The learning editor (workstream 3): the owner's change to one of Claude's becomes a correction. Never blocks.
+    if (patch.length && o.author !== 'claude') void learningOf(this.ctx).observe(s, s.project as M.EditProject, next, entry!);
     return { session: u, entry: entry!, patch };
   }
   private async stale(id: string, baseRevision: number) {
@@ -162,13 +165,13 @@ export class EditSessions {
     return { revision: r.session.revision, entry: r.entry ? this.entryView(r.entry) : null };
   }
   /** Claude's ops (MCP apply_edit_ops): applied, validated, committed as one undoable change. */
-  async applyClaude(u: AuthUser, id: string, b: { baseRevision?: unknown; ops?: unknown; label?: string }) {
+  async applyClaude(u: AuthUser, id: string, b: { baseRevision?: unknown; ops?: unknown; label?: string; meta?: Record<string, unknown> }) {
     const s = await this.row(u, id), base = this.revOf(b);
     if (base !== s.revision) throw await this.stale(id, base);
     this.limit(id);
     const { project, labels } = applyOps(s.project as M.EditProject, b.ops as EditOp[]);
     this.check(project, s.takeId);
-    const r = await this.commit(s, project, { author: 'claude', kind: 'edit', label: b.label ?? labels.join(' · ') }); // label: a tool's own name for the change (workstream 1)
+    const r = await this.commit(s, project, { author: 'claude', kind: 'edit', label: b.label ?? labels.join(' · '), ...(b.meta ? { meta: b.meta } : {}) }); // label: a tool's own name for the change (workstream 1)
     return { revision: r.session.revision, changes: labels, entry: r.entry ? this.entryView(r.entry) : null, durationSec: M.durationSec(project) };
   }
   private limit(id: string) {
