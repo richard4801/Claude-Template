@@ -91,7 +91,7 @@ fun EditTabletLayout(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap>>, ho
                 Hairline()
                 TimelineToolbar(ui, act, labels = roomy)
                 Hairline()
-                if (ui.project != null) SuiteTimeline(ui, frames, act, headers = true)
+                if (ui.project != null) SuiteTimeline(ui, frames, act, headers = true, waves = host.waves)
             }
         }
     }

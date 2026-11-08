@@ -766,12 +766,12 @@ class FakeMuseApi(
 
     override suspend fun cancelEditorJob(id: String) { lock.withLock { editorJobs[id]?.let { editorJobs[id] = it.copy(state = "cancelled", result = null) } } }
 
-    override suspend fun saveProjectVersion(takeId: String, video: EditedVideo, project: kotlinx.serialization.json.JsonObject, name: String?, onProgress: (Float) -> Unit): Take = lock.withLock {
+    override suspend fun saveProjectVersion(takeId: String, video: EditedVideo, project: kotlinx.serialization.json.JsonObject, name: String?, onProgress: (Float) -> Unit, aiLabel: Boolean): Take = lock.withLock {
         val src = takes.firstOrNull { it.id == takeId } ?: throw ApiException("not_found", "Take not found")
         onProgress(1f)
         val dto = EditListDto(2, takeId, 0.0, emptyList(), false).also { it.project = project }
         val t = src.copy(
-            id = "t_edit_${now()}", kind = "edit", parentTakeId = takeId, label = "Edited", edits = dto, createdAt = now(), cost = 0.0,
+            id = "t_edit_${now()}", kind = "edit", parentTakeId = takeId, label = "Edited", edits = dto, createdAt = now(), cost = 0.0, aiLabel = aiLabel,
             videoUrl = "file://" + video.file.absolutePath, durationSec = video.durationSec, width = video.width, height = video.height, fps = video.fps,
             name = versionName(name), // Edit sessions (workstream 3)
         )

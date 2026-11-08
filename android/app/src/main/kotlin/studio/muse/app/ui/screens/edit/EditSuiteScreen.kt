@@ -51,12 +51,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import studio.muse.app.AppContainer
 import studio.muse.app.data.EditorEstimate
@@ -99,6 +101,7 @@ import studio.muse.core.edit.problemOf
 import studio.muse.core.edit.toSrt
 import java.io.File
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 
 /**
  * The Edit suite (designs EM1–EM5 / E1–E4), the editor for every video take and edited version. With a [takeId] it
@@ -215,22 +218,30 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
     val frames by vm.frames.collectAsState()
     val thumbs by vm.lookThumbs.collectAsState()
     val player by vm.player.collectAsState()
+    val waves by vm.waves.collectAsState()
     LaunchedEffect(ui.message) { ui.message?.let { c.repo.toast(it); vm.controller.act(EditAction.ClearMessage) } }
     LaunchedEffect(ui.panel) { if (ui.panel == Panel.FILTERS) vm.renderLookThumbs() }
     androidx.lifecycle.compose.LifecycleResumeEffect(vm) { onPauseOrDispose { vm.pause() } }
     val audio = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let { vm.addAudio(it, voiceOver = false) } }
-    val record = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r -> r.data?.data?.let { vm.addAudio(it, voiceOver = true) } }
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) vm.startVoiceOver() else c.repo.toast("Record VO needs the microphone · allow it in the phone's settings")
+    }
     val cube = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let { vm.importCube(it) } }
     val host = SuiteHost(
         pickAudio = { audio.launch("audio/*") },
+        // Record VO: records in the editor from the playhead (the phone's own recorder app isn't there on most phones).
         recordVo = {
-            val i = Intent(MediaStore.Audio.Media.RECORD_SOUND_ACTION)
-            if (i.resolveActivity(context.packageManager) != null) record.launch(i) else c.repo.toast("No voice recorder on this phone · pick a recording with Music from uploads")
+            when {
+                ui.recordingAt != null -> vm.stopVoiceOver()
+                androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED -> vm.startVoiceOver()
+                else -> micPermission.launch(android.Manifest.permission.RECORD_AUDIO)
+            }
         },
         importCube = { cube.launch("*/*") },
         export = vm::export,
         cancelExport = vm::cancelExport,
         lookThumbs = thumbs,
+        waves = waves,
     )
     EditSuiteContent(ui, frames, host, vm.controller::act, onClose = onBack, drawText = player == null) { mod ->
         val p = player
@@ -319,6 +330,9 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
     val frames: StateFlow<Map<String, List<ImageBitmap>>> = _frames.asStateFlow()
     private val _thumbs = MutableStateFlow<Map<String, ImageBitmap>>(emptyMap())
     val lookThumbs: StateFlow<Map<String, ImageBitmap>> = _thumbs.asStateFlow()
+    private val _waves = MutableStateFlow<Map<String, Peaks>>(emptyMap())
+    /** Decoded sound levels per asset (the timeline's sound lanes). */
+    val waves: StateFlow<Map<String, Peaks>> = _waves.asStateFlow()
     private val _player = MutableStateFlow<CompositionPlayer?>(null)
     val player: StateFlow<CompositionPlayer?> = _player.asStateFlow()
     private var work: Job? = null
@@ -329,12 +343,26 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
 
     init {
         load()
-        viewModelScope.launch { controller.ui.map { it.project }.distinctUntilChanged().debounce(500).collect { p -> if (p != null) rebuildPreview(p) } }
+        viewModelScope.launch {
+            controller.ui.map { it.project }.distinctUntilChanged().debounce(500).collect { p ->
+                if (p == null) return@collect
+                // A take added while editing (an overlay, or a clip at the end): its file first, so the preview and the
+                // export include it (before, only takes in the project when it opened were fetched).
+                if (sourceFile != null && p.assets.any { it.take != null && it.id !in files }) { fetchTakeAssets(p); loadWaves(p) }
+                rebuildPreview(p)
+            }
+        }
         viewModelScope.launch { controller.ui.map { it.playing }.distinctUntilChanged().collect { on -> _player.value?.let { if (on) it.play() else it.pause() } } }
         viewModelScope.launch {
-            controller.ui.map { it.playheadSec to it.playing }.distinctUntilChanged().collect { (t, playing) ->
+            // Scrubbing: the preview follows the playhead frame by frame. Seeks are conflated (only the latest position
+            // waits while one is being decoded), so a fast drag never queues up stale frames; when the finger stops,
+            // the last seek is the exact frame. Paused, anything more than half a frame away is sought.
+            controller.ui.map { Triple(it.playheadSec, it.playing, it.project?.canvas?.fps ?: 30.0) }.distinctUntilChanged().conflate().collect { (t, playing, fps) ->
                 val p = _player.value ?: return@collect
-                if (!playing && kotlin.math.abs(p.currentPosition / 1000.0 - t) > 0.05) p.seekTo((t * 1000).toLong())
+                if (playing) return@collect
+                if (kotlin.math.abs(p.currentPosition / 1000.0 - t) * fps < 0.5) return@collect
+                p.seekTo((t * 1000).roundToLong())
+                withTimeoutOrNull(250) { while (p.playbackState == androidx.media3.common.Player.STATE_BUFFERING) delay(8) }
             }
         }
         viewModelScope.launch {
@@ -373,6 +401,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                 startSession(source.id, project, fromVersion = if (target?.initial != null && take.kind == "edit") take.id else null)
                 loadFrames(project)
                 fetchTakeAssets(controller.project ?: project)
+                loadWaves(controller.project ?: project)
             } catch (e: kotlinx.coroutines.CancellationException) { throw e
             } catch (e: Exception) {
                 controller.setPhase(SuitePhase.Failed("Couldn't open the video · check your connection and try again"))
@@ -400,12 +429,23 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         _frames.value = _frames.value + (src to bmps)
     }
 
+    /** The timeline's waveforms: every asset with a local file and sound, decoded once. */
+    private fun loadWaves(p: EditProject) {
+        viewModelScope.launch {
+            for (a in p.assets) {
+                if (a.id in _waves.value || a.hasAudio == false || (a.kind != AssetKind.VIDEO && a.kind != AssetKind.AUDIO)) continue
+                val f = files[a.id] ?: continue
+                studio.muse.app.platform.edit.WaveformDecoder.peaks(f)?.let { _waves.value = _waves.value + (a.id to it) }
+            }
+        }
+    }
+
     /** A helper's new asset (background removal's matte): its file, then the preview again with it. */
     private fun fetchAsset(assetId: String, url: String) {
         viewModelScope.launch {
             val f = runCatching { engine.fetchSource(url) {} }.getOrNull() ?: return@launch c.repo.toast("Couldn't download the cut-out · try again")
             files[assetId] = f
-            controller.project?.let { rebuildPreview(it) }
+            controller.project?.let { rebuildPreview(it); loadWaves(it) }
         }
     }
 
@@ -446,7 +486,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         }.getOrNull()
     }
 
-    fun addAudio(uri: Uri, voiceOver: Boolean) {
+    fun addAudio(uri: Uri, voiceOver: Boolean, atSec: Double? = null) {
         viewModelScope.launch {
             val f = copyIn(uri, "audio_${System.currentTimeMillis()}") ?: return@launch c.repo.toast("Couldn't read that file")
             val dur = withContext(Dispatchers.IO) {
@@ -455,9 +495,45 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
             val mime = app.contentResolver.getType(uri) ?: "audio/mp4"
             val (id, err) = runCatching { c.repo.attemptInline { uploadEditorFile(f, mime) } }.getOrElse { null to "Couldn't upload · try again" }
             if (id == null) return@launch c.repo.toast(err ?: "Couldn't upload · try again")
-            controller.act(EditAction.AddAudio(id, (dur * 1000).roundToInt() / 1000.0, voiceOver))
+            controller.act(EditAction.AddAudio(id, (dur * 1000).roundToInt() / 1000.0, voiceOver, atSec))
             controller.project?.assets?.firstOrNull { it.upload == id }?.let { files[it.id] = f }
+            controller.project?.let { loadWaves(it) }
         }
+    }
+
+    // ------------------------------------------------------------ voice-over
+    private var recorder: android.media.MediaRecorder? = null
+    private var voFile: File? = null
+
+    /** Starts recording a voice-over at the playhead (the preview pauses so its sound isn't recorded). */
+    fun startVoiceOver() {
+        if (recorder != null) return
+        pause()
+        val f = File(app.cacheDir, "edit-suite/vo_${System.currentTimeMillis()}.m4a").apply { parentFile?.mkdirs() }
+        val r = (if (Build.VERSION.SDK_INT >= 31) android.media.MediaRecorder(app) else @Suppress("DEPRECATION") android.media.MediaRecorder())
+        try {
+            r.setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+            r.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
+            r.setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
+            r.setAudioEncodingBitRate(128_000); r.setAudioSamplingRate(44_100)
+            r.setOutputFile(f.absolutePath)
+            r.prepare(); r.start()
+        } catch (e: Exception) { r.release(); f.delete(); c.repo.toast("Couldn't start the microphone · try again"); return }
+        recorder = r; voFile = f
+        controller.update { it.copy(recordingAt = it.playheadSec) }
+    }
+
+    /** Stops the voice-over and adds it to the Voice-over lane where recording started. */
+    fun stopVoiceOver() {
+        val r = recorder ?: return
+        val f = voFile
+        val at = controller.ui.value.recordingAt
+        recorder = null; voFile = null
+        val ok = runCatching { r.stop() }.isSuccess
+        r.release()
+        controller.update { it.copy(recordingAt = null) }
+        if (!ok || f == null || f.length() == 0L) { f?.delete(); c.repo.toast("That recording was too short · hold on a little longer"); return }
+        addAudio(Uri.fromFile(f), voiceOver = true, atSec = at)
     }
 
     fun importCube(uri: Uri) {
@@ -550,7 +626,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         try {
             // The saved project is the edit as made (canvas = the exported size and fps; captions kept for reopening).
             val saved = p.copy(canvas = p.canvas.copy(width = made.width, height = made.height, fps = s.fps.toDouble()))
-            val (take, err) = c.repo.attemptInline { saveProjectVersion(u.sourceTakeId, made, EditJson.encode(saved), name) { pr -> controller.setPhase(SuitePhase.Saving(pr)) } }
+            val (take, err) = c.repo.attemptInline { saveProjectVersion(u.sourceTakeId, made, EditJson.encode(saved), name, { pr -> controller.setPhase(SuitePhase.Saving(pr)) }, aiLabel = s.aiLabel) }
             if (toPhone) withContext(Dispatchers.IO) { saveToPhone(made.file, srt, u.title) }
             if (take == null) { lastExportError = err ?: "Couldn't save the video"; controller.setPhase(SuitePhase.Failed(lastExportError!!)); return null }
             exportGate.exported(take.id) // answers an export Claude asked for, before the sheet closes
@@ -582,6 +658,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
     }
 
     override fun onCleared() {
+        recorder?.let { runCatching { it.stop() }; it.release() }; recorder = null
         work?.cancel(); exporting?.cancel()
         sync?.stop(c.scope); sync = null
         _player.value?.release(); _player.value = null
