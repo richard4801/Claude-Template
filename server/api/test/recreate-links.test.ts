@@ -52,6 +52,12 @@ describe('Links (unit)', () => {
     expect(errorFor('timed out')).toMatchObject({ code: 'link_blocked', status: 502, message: FALLBACK });
     // No sign-ins: never cookies, never the user's config.
     expect(BASE_ARGS).toEqual(expect.arrayContaining(['--ignore-config', '--no-cookies', '--no-cookies-from-browser', '--no-playlist']));
+    // YouTube needs a JavaScript runtime: the server's own Node, after clearing the default (deno); nothing fetched at run time.
+    const js = BASE_ARGS.indexOf('--js-runtimes');
+    expect(BASE_ARGS.indexOf('--no-js-runtimes')).toBeGreaterThanOrEqual(0);
+    expect(BASE_ARGS.indexOf('--no-js-runtimes')).toBeLessThan(js);
+    expect(BASE_ARGS[js + 1]).toBe(`node:${process.execPath}`);
+    expect(BASE_ARGS).toContain('--no-remote-components');
   });
 });
 
@@ -117,7 +123,7 @@ describe.skipIf(!hasFfmpeg)('Recreate · references from links (fake yt-dlp, no 
     expect(calls[1]!.args).toContain('--load-info-json');
     expect(calls[1]!.args.some(x => x.startsWith('https://'))).toBe(false);
     for (const c of calls) {
-      expect(c.args).toEqual(expect.arrayContaining(['--ignore-config', '--no-cookies', '--no-cookies-from-browser', '--no-playlist']));
+      expect(c.args).toEqual(expect.arrayContaining(['--ignore-config', '--no-cookies', '--no-cookies-from-browser', '--no-playlist', '--no-js-runtimes', '--js-runtimes', `node:${process.execPath}`, '--no-remote-components']));
       expect(c.env.filter(k => !['PATH', 'HOME', 'LANG', 'PWD', 'SHLVL', '_'].includes(k))).toEqual([]); // nothing of the server's leaks in
     }
     expect(pages).toEqual(['https://www.tiktok.com/@muse.studio/video/7431234567890123456']);
