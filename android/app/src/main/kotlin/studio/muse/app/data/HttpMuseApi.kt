@@ -531,8 +531,11 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; false }
 
     // Recreate this edit (workstream 1)
-    override suspend fun createReference(uploadId: String, name: String?) = studio.muse.core.edit.RecipeJson.reference(call {
-        createReference(buildJsonObject { put("uploadId", kotlinx.serialization.json.JsonPrimitive(uploadId)); if (name != null) put("name", kotlinx.serialization.json.JsonPrimitive(name.take(80))) })
+    override suspend fun createReference(uploadId: String, name: String?, sourceUrl: String?) = studio.muse.core.edit.RecipeJson.reference(call {
+        createReference(buildJsonObject {
+            put("uploadId", kotlinx.serialization.json.JsonPrimitive(uploadId)); if (name != null) put("name", kotlinx.serialization.json.JsonPrimitive(name.take(80)))
+            if (sourceUrl != null) put("sourceUrl", kotlinx.serialization.json.JsonPrimitive(sourceUrl))
+        })
     })
     override suspend fun reference(id: String) = studio.muse.core.edit.RecipeJson.reference(call { reference(id) })
     override suspend fun listReferences() = studio.muse.core.edit.RecipeJson.references(call { listReferences() })

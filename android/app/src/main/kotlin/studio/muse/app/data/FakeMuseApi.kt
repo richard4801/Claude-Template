@@ -995,7 +995,8 @@ class FakeMuseApi(
     override suspend fun studioSettings(): StudioSettings = lock.withLock { studio }
     override suspend fun patchStudioSettings(req: StudioSettingsPatch): StudioSettings = lock.withLock {
         studio = studio.copy(maxGpus = req.maxGpus ?: studio.maxGpus, overheadPayer = req.overheadPayer ?: studio.overheadPayer, capPerJob = req.capPerJob ?: studio.capPerJob,
-            capPerDay = req.capPerDay ?: studio.capPerDay, capPerUserDay = req.capPerUserDay ?: studio.capPerUserDay)
+            capPerDay = req.capPerDay ?: studio.capPerDay, capPerUserDay = req.capPerUserDay ?: studio.capPerUserDay,
+            strictLinkRules = req.strictLinkRules ?: studio.strictLinkRules)
         studio
     }
 
@@ -1185,7 +1186,7 @@ class FakeMuseApi(
     // Recreate this edit (workstream 1's /v1/recreate/references): the analysis steps the server reports, then demo's recipe.
     private val recreatePolls = LinkedHashMap<String, Int>()
     private val recreatePhases = listOf("Finding the cuts", "Listening for the beat", "Reading the text", "Reading the look", "Writing the recipe")
-    override suspend fun createReference(uploadId: String, name: String?): RecipeReference = lock.withLock {
+    override suspend fun createReference(uploadId: String, name: String?, sourceUrl: String?): RecipeReference = lock.withLock {
         val id = "rx_${++editorSeq}"
         recreatePolls[id] = 0
         name?.let { recreateNames[id] = it }

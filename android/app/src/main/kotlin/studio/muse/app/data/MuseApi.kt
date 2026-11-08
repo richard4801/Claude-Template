@@ -244,7 +244,8 @@ interface MuseApi {
 
     // Recreate this edit (workstream 1, plans/api.md "Recreate this edit"). Defaults: a server without it.
     /** A studio video upload (≤ 60 s, from [uploadEditorFile]) becomes a reference; its analysis runs on the server. */
-    suspend fun createReference(uploadId: String, name: String?): studio.muse.core.edit.RecipeReference =
+    /** [sourceUrl]: the link the phone downloaded it from (a link reference, fetched on the device). */
+    suspend fun createReference(uploadId: String, name: String?, sourceUrl: String? = null): studio.muse.core.edit.RecipeReference =
         throw ApiException("not_found", "This studio server can't read edits yet")
     /**
      * A shared link (TikTok, Instagram Reel, YouTube) becomes a reference: the server fetches it within the platforms'

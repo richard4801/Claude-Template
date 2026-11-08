@@ -734,6 +734,8 @@ data class StudioSettings(
     val features: StudioFeatures = StudioFeatures(),
     /** Owner only. */
     val engines: Engines? = null,
+    /** Recreate links: public videos only (not private, members-only, sign-in-walled or age-restricted). Default on. */
+    val strictLinkRules: Boolean = true,
 )
 
 @Serializable
@@ -743,6 +745,7 @@ data class StudioSettingsPatch(
     val capPerJob: Double? = null,
     val capPerDay: Double? = null,
     val capPerUserDay: Double? = null,
+    val strictLinkRules: Boolean? = null,
 )
 
 /** GET/PATCH /v1/settings/image-engine. provider: simulated | fal | custom-http. */

@@ -424,6 +424,11 @@ private fun StudioForm(vm: OwnerViewModel, st: StudioSettings, s: OwnerState) {
         vm.saveStudio(StudioSettingsPatch(capPerJob = perJob.toDoubleOrNull(), capPerDay = perDay.toDoubleOrNull(), capPerUserDay = perUser.toDoubleOrNull()))
     }, Modifier.fillMaxWidth(), busy = s.busy)
     s.note?.takeIf { it.first == "studio" }?.let { InlineNote(it.second, it.third) }
+    // Recreate links (owner's decision, Release 1 test): public videos only while this is on.
+    RowItem("Strict link rules", if (st.strictLinkRules) "Recreate takes public videos only" else "Recreate takes any video the link opens",
+        onClick = { vm.saveStudio(StudioSettingsPatch(strictLinkRules = !st.strictLinkRules)) }) {
+        Toggle(st.strictLinkRules, { vm.saveStudio(StudioSettingsPatch(strictLinkRules = !st.strictLinkRules)) })
+    }
     if (!st.features.replaceAudio) Caption("Replace audio isn't available yet: turning Keep audio off gives a silent take.", color = m.roles.ink2)
 }
 
