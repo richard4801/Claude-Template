@@ -47,6 +47,8 @@ extension SnapshotRunner {
                          // would close it or clear the angles (Close, the mode switch): the walk is about the full view.
                          deny: ["Make 4 angles", "Retake", "Choose files", "Use my images", "Save outfit", "Drop "],
                          denyExact: ["Close", "Describe it", "From a photo", "My own set"],
+                         // The viewer's own Close goes last, after its arrows and zoom (the top bar comes first in tree order).
+                         last: ["Close (Esc)"],
                          required: ["View front full size", "Next (→)", "Previous (←)", "Zoom in (=)", "Close (Esc)"],
                          base: { store.go(.models) },
                          open: { store.outfitSheet = demoOutfitDraft() },
@@ -72,7 +74,7 @@ extension SnapshotRunner {
     /// Shows `base`, takes every control on it as chrome (not walked), then opens the screen under test and presses each
     /// of its controls once (sliders nudged), reopening it when a control leaves it. `only` limits it to its own controls. `deny` are label parts never
     /// pressed (spending, file panels); `required` labels must have been pressed.
-    static func walkScreen(_ name: String, ax: AXWalker, minimum: Int, deny: [String], denyExact: Set<String> = [], only: ((String) -> Bool)? = nil, required: [String] = [],
+    static func walkScreen(_ name: String, ax: AXWalker, minimum: Int, deny: [String], denyExact: Set<String> = [], only: ((String) -> Bool)? = nil, last: Set<String> = [], required: [String] = [],
                            base: @MainActor () -> Void, open: @MainActor () -> Void, isOpen: @MainActor () -> Bool,
                            note: (String) -> Void) async {
         note("START walk_\(name)")
@@ -87,16 +89,21 @@ extension SnapshotRunner {
         for _ in 0..<300 {
             let scan = await ax.controls().controls
             var pick: AXWalker.Control?
+            var deferred: AXWalker.Control?
             for c in scan where !used.contains(c.key) && !skipped.contains(c.key) && !chrome.contains(c.key) && (only?(c.label) ?? true) {
                 if c.isMenu || denyExact.contains(c.label) || deny.contains(where: { c.label.hasPrefix($0) || c.label.contains($0) }) {
                     skipped.insert(c.key)
                     note("SKIP \(c.role) \(c.label)")
                     continue
                 }
+                if last.contains(c.label) {
+                    if deferred == nil { deferred = c }
+                    continue
+                }
                 pick = c
                 break
             }
-            guard let c = pick else { break }
+            guard let c = pick ?? deferred else { break }
             used.insert(c.key)
             pressedLabels.insert(c.label)
             note("\(c.isSlider ? "NUDGE" : "PRESS") \(c.role) \(c.label)")
