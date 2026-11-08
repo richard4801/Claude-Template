@@ -106,12 +106,14 @@ Every analysed reference and every finished edit, so the owner can find what wor
 | UI | Endpoint |
 |---|---|
 | Rules list, add, edit, pin, delete | `GET/POST /v1/learn/playbook`, `PATCH/DELETE /v1/learn/playbook/{id}` |
-| Suggestions | `GET /v1/learn/lessons` |
+| Suggestions | `GET /v1/learn/lessons` (a lesson with `ruleId` already has a rule: show "See rule" instead of "Make a rule") |
 | History | `GET /v1/learn/corrections?limit=50` |
-| Recipes grid, search, filters | `GET /v1/learn/recipes?q&tags&origin` (sort "Most viewed" in the app by `performance.views`) |
+| Recipes grid, search, filters | `GET /v1/learn/recipes?q&tags&origin` (sort "Most viewed" in the app by `performance.views`); the tile uses `picture`, `durationSec`, `cuts`; the primary action needs `available` |
+| Tag chips | `GET /v1/learn/tags?limit=8` |
 | Recipe detail, rename, tags, delete | `GET/PATCH/DELETE /v1/learn/recipes/{id}` |
 | Closest recipes | `GET /v1/learn/recipes/nearest?recipeId={id}&k=3` |
-| Gaps | `GET /v1/learn/gaps?limit=10` |
+| Gaps | `GET /v1/learn/gaps?limit=10` (`references` / `asks` for the words) |
+| Evidence and History taps | `takeExists` on corrections and on correction evidence in the playbook |
 | Claude panel's Playbook tab | `GET /v1/learn/playbook` (pinned first; show the first 10) |
 
 ## Checked against the skill

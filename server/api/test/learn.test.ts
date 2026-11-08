@@ -204,6 +204,37 @@ describe('learning editor · API', () => {
     expect((await owner.req('DELETE', `/v1/learn/playbook/${r1.id}`)).status).toBe(404);
   });
 
+  it('what the screens need: tile picture and badge, source still there, top tags, gap counts, evidence takes, lessons already ruled', async () => {
+    const all = (await owner.req('GET', '/v1/learn/recipes')).body as any[];
+    const ref = all.find(r => r.referenceId === 'ref_a'), edit = all.find(r => r.origin === 'edit');
+    expect(ref).toMatchObject({ picture: { poster: '/v1/recreate/references/ref_a/poster' }, available: true, durationSec: expect.any(Number), cuts: expect.any(Number) });
+    expect(ref.cuts).toBe(Math.max(0, ref.features.shots - 1));
+    expect(edit).toMatchObject({ available: true, picture: null }); // the take has no thumbnail
+    await a.ctx.db.update(recreateReferences).set({ state: 'expired' }).where(eq(recreateReferences.id, 'ref_b'));
+    expect((await owner.req('GET', '/v1/learn/recipes')).body.find((r: any) => r.referenceId === 'ref_b').available).toBe(false);
+
+    const tags = (await owner.req('GET', '/v1/learn/tags?limit=3')).body;
+    expect(tags).toHaveLength(3);
+    // Both references share their derived tags (the edit's were replaced above): most used first, ties alphabetical.
+    expect(tags.map((t: any) => t.count)).toEqual([2, 2, 2]);
+    expect(tags.map((t: any) => t.tag)).toEqual([...tags.map((t: any) => t.tag)].sort());
+
+    const gaps = (await owner.req('GET', '/v1/learn/gaps')).body;
+    expect(gaps.find((g: any) => g.key === 'transition:unknown')).toMatchObject({ count: 2, references: 2, asks: 0 });
+    expect(gaps.find((g: any) => g.key === 'effect:lens-flare')).toMatchObject({ count: 1, references: 0, asks: 1 });
+
+    const cs = await corrections();
+    expect(cs.every(c => c.takeExists === true)).toBe(true);
+    const lesson = (await owner.req('GET', '/v1/learn/lessons')).body.find((l: any) => l.area === 'look');
+    expect(lesson.ruleId).toBeUndefined();
+    const rule = (await owner.req('POST', '/v1/learn/playbook', { text: 'Leave the look strength as set', area: 'look',
+      evidence: lesson.ids.map((id: number) => ({ kind: 'correction', id, note: 'from a suggestion' })) })).body;
+    expect((await owner.req('GET', '/v1/learn/lessons')).body.find((l: any) => l.area === 'look').ruleId).toBe(rule.id);
+    const shown = (await owner.req('GET', '/v1/learn/playbook')).body.find((r: any) => r.id === rule.id);
+    expect(shown.evidence[0]).toMatchObject({ kind: 'correction', takeId, takeExists: true });
+    await owner.req('DELETE', `/v1/learn/playbook/${rule.id}`);
+  });
+
   it('the context Claude reads: playbook, nearest proven recipes, corrections, lessons, gaps', async () => {
     const c = (await owner.req('GET', '/v1/learn/context?referenceId=ref_b')).body;
     expect(c.playbook[0]).toMatchObject({ text: 'First cut by 0.8 s at most', pinned: true });
@@ -217,7 +248,7 @@ describe('learning editor · API', () => {
   });
 
   it('owner only', async () => {
-    for (const [m, p] of [['GET', '/v1/learn/recipes'], ['GET', '/v1/learn/playbook'], ['POST', '/v1/learn/playbook'], ['GET', '/v1/learn/gaps'], ['GET', '/v1/learn/context'], ['GET', '/v1/learn/corrections']] as const)
+    for (const [m, p] of [['GET', '/v1/learn/recipes'], ['GET', '/v1/learn/playbook'], ['POST', '/v1/learn/playbook'], ['GET', '/v1/learn/gaps'], ['GET', '/v1/learn/context'], ['GET', '/v1/learn/corrections'], ['GET', '/v1/learn/tags']] as const)
       expect((await member.req(m, p, m === 'POST' ? { text: 'x' } : undefined)).status, `${m} ${p}`).toBe(403);
   });
 });
