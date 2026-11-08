@@ -506,6 +506,8 @@ private fun MaskBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     val p = ui.project ?: return
     val id = (ui.selection?.second?.takeIf { it is Visual } ?: ui.activeClip)?.id ?: return
     val v = p.tracks.flatMap { it.items }.firstOrNull { it.id == id } as? Visual ?: return
+    // Tap to keep is on: only its controls, so they sit right under the picture being tapped.
+    ui.keep?.let { k -> if (v is VideoClip) { SuiteLabel("Tap what to keep"); KeepPanel(ui, k, act); return } }
     val mask = v.mask
     SuiteLabel("Mask")
     SuiteChips(listOf("none" to "None") + MaskShape.entries.map { it.wire to it.wire.replaceFirstChar(Char::uppercase) }, mask?.shape?.wire ?: "none", { w ->
