@@ -72,12 +72,12 @@ struct MuseCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("New Video") { store.go(.studio) }.keyboardShortcut("n").disabled(!signedIn)
+            Button("New Shot") { store.openTool(.shot) }.keyboardShortcut("n").disabled(!signedIn)
             Button("New Model") { store.go(.create) }.keyboardShortcut("n", modifiers: [.command, .shift]).disabled(!signedIn)
             Button("New Outfit Set…") { store.openOutfitSheet(for: nil) }.disabled(!signedIn)
             Divider()
             Button("Choose Clip…") {
-                store.go(.studio)
+                store.openTool(.swap)
                 store.pickClip()
             }
             .keyboardShortcut("o")
@@ -98,12 +98,7 @@ struct MuseCommands: Commands {
             Button("Command Palette…") { store.openPalette() }.keyboardShortcut("k").disabled(!signedIn)
         }
         CommandMenu("Render") {
-            Button(store.screen == .studio ? Pricing.genLabel(store.spec) : "Generate") {
-                if store.screen == .studio { store.generate() } else { store.go(.studio) }
-            }
-            .keyboardShortcut(.return)
-            .disabled(!signedIn)
-            Divider()
+            // Generate (⌘↩) lives on the AI Suite composer's own button; the classic studio's menu item is gone (owner 2026-11-08).
             Button("Run Queue") { store.runQueue() }.disabled(!signedIn || !store.jobs.contains(where: \.isQueued))
         }
         CommandMenu("Theme") {

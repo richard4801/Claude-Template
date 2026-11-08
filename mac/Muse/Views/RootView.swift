@@ -73,7 +73,6 @@ struct Shell: View {
         case .models: ModelsView()
         case .profile: ProfileView()
         case .create: CreateModelView()
-        case .studio: StudioView()
         case .queue: QueueView()
         case .gallery: GalleryView()
         case .result: ResultView()
@@ -272,7 +271,6 @@ struct Sidebar: View {
             } else {
                 Divider().padding(.vertical, 8)
             }
-            NavRow(icon: "plus", title: "New video", on: false, compact: compact, trailing: .key("⌘N")) { store.go(.studio) }
             NavRow(icon: "person.badge.plus", title: "New model", on: store.screen == .create, compact: compact, trailing: .none) { store.go(.create) }
             if store.isOwner {
                 if !compact {

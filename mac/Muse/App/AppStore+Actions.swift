@@ -43,27 +43,7 @@ extension AppStore {
         }
     }
 
-    /// Demo mode only: swaps between the good sample clip and the failing example.
-    func toggleBadSample() {
-        guard isDemo else { return }
-        let bad = !clipBad
-        Task { await useSampleClip(bad: bad) }
-    }
-
-    // MARK: Studio
-
-    func setTakes(_ n: Int) { takeCount = Pricing.clampTakes(n) }
-
-    func resetStudio() {
-        quality = videoFeatures.isAvailable(defaultQuality) ? defaultQuality : videoFeatures.defaultOption
-        takeCount = 1
-        lipSync = false
-        keepAudio = true
-        background = "keep"
-        speaking = PerformerSpeaking.preset(clip) // prompt scripts (workstream 4)
-        speakingTouched = false
-        showToast("Settings reset")
-    }
+    // MARK: Models
 
     func selectModel(_ m: MuseModel) {
         if m.isDraft || m.filled == 0 {
@@ -128,8 +108,9 @@ extension AppStore {
         if let i = jobs.firstIndex(where: { $0.id == j.id }) { jobs[i] = j } else { jobs.insert(j, at: 0) }
     }
 
-    /// Loads a finished job's settings back into the studio ("Retake with changes").
-    func loadIntoStudio(_ j: Job) {
+    /// Loads a finished clip job's settings back into the AI Suite's Swap ("Retake with changes"): the classic studio is
+    /// gone (owner 2026-11-08), Swap is where a model goes into a clip now.
+    func loadIntoSwap(_ j: Job) {
         modelId = j.modelId
         outfitIdByModel[j.modelId] = j.outfitId
         quality = videoFeatures.isAvailable(j.videoQuality) ? j.videoQuality : quality
@@ -138,7 +119,7 @@ extension AppStore {
         lipSync = j.request.lipSync
         background = j.request.background
         motion = j.request.backgroundMotion
-        go(.studio)
+        openTool(.swap)
     }
 
     /// Upscale a finished take (1080p / 2K / 4K): a job held at the size's price × the take's length, followed like any render.
@@ -302,9 +283,9 @@ extension AppStore {
         // A Suite take: its exact composer comes back (Reuse settings, plans/ai-suite-design.md).
         if reuseSettings(t) { return }
         if t.isVideo, let j = job(for: t) {
-            loadIntoStudio(j)
+            loadIntoSwap(j)
         } else if t.isVideo {
-            go(.studio)
+            openTool(.swap)
         } else {
             openPhoto(model: model(for: t)?.id) // a still: the AI suite's Photo tool (workstream 3)
         }
@@ -811,7 +792,7 @@ extension AppStore {
 
     var paletteCommands: [PaletteCommand] {
         var all: [PaletteCommand] = [
-            PaletteCommand(title: "New video", icon: "video", shortcut: "⌘N") { [weak self] in self?.go(.studio) },
+            PaletteCommand(title: "New shot", icon: "video", shortcut: "⌘N") { [weak self] in self?.openTool(.shot) },
             PaletteCommand(title: "Photo", icon: "camera", shortcut: "") { [weak self] in self?.openTool(.photo) }, // the AI suite's Photo tool (workstream 3)
             PaletteCommand(title: "Templates", icon: "square.on.square.dashed", shortcut: "⇧⌘T") { [weak self] in self?.openTemplates() },
             PaletteCommand(title: "New template", icon: "plus.square.on.square", shortcut: "") { [weak self] in self?.newTemplate() },
@@ -828,7 +809,7 @@ extension AppStore {
             PaletteCommand(title: "Settings", icon: "slider.horizontal.3", shortcut: "⌘,") { [weak self] in self?.go(.settings) },
             PaletteCommand(title: "Credit", icon: "dollarsign.circle", shortcut: "") { [weak self] in self?.go(.credits) },
             PaletteCommand(title: "New outfit set", icon: "tshirt", shortcut: "") { [weak self] in self?.openOutfitSheet(for: nil) },
-            PaletteCommand(title: "Choose a clip…", icon: "film", shortcut: "") { [weak self] in self?.go(.studio); self?.pickClip() },
+            PaletteCommand(title: "Choose a clip…", icon: "film", shortcut: "") { [weak self] in self?.openTool(.swap); self?.pickClip() },
             PaletteCommand(title: "Run queue", icon: "play.fill", shortcut: "") { [weak self] in self?.runQueue() },
         ]
         if isOwner {

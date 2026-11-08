@@ -145,9 +145,11 @@ struct ProfileView: View {
                     .overlay(Text(m.initial).font(t.scale.display.font).foregroundStyle(t.roles.ink2))
             }
             HStack(spacing: Space.s2) {
-                RButton("New video", kind: .action, fill: true) {
+                // The AI Suite's Shot tool with her as the character (the classic studio is gone, owner 2026-11-08).
+                RButton("Shot", kind: .action, fill: true) {
                     store.selectModel(m)
-                    store.go(.studio)
+                    store.openTool(.shot)
+                    store.setComposerCharacter(m)
                 }
                 // Photoshoot is the AI suite's Photo tool now (workstream 3): it opens with her preselected.
                 RButton("Photo", fill: true) {
