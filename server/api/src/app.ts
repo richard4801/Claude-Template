@@ -169,6 +169,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     await ctx.replicateVideo.idle();
     await ctx.suite.runner.idle();
     await recreateOf(ctx).idle(); // Recreate this edit (workstream 1)
+    await (await import('./editor/renders.js')).rendersOf(ctx).idle(); // edit renders (workstream 1)
     await ctx.gpu.shutdown();
     await app.close();
     if (!opts.db) await dbh.close();

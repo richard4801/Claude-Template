@@ -1199,6 +1199,38 @@ A reference video (an upload, up to 60 s for now) is analysed into a versioned *
 - **Reference fields:** `source: "file" | "link"`, `sourceUrl?`, `errorCode?`. Claude's `analyze_reference` takes `url` as well as `uploadId`.
 - **Config:** `RECREATE_LINKS` (default on), `YTDLP_PATH`, `RECREATE_LINK_MAX_MB`. The image pins yt-dlp 2026.10.26 and yt-dlp-ejs 0.8.0 from PyPI (both sha256-checked at build, unpacked to /opt/yt-dlp/lib) and adds python3, about +30 MB (an estimate: no Docker daemon was available to measure). CI never calls a platform; a fake yt-dlp replays `test/fixtures/links`.
 
+**Export** (plan step 7, workstream 1, Release 1):
+
+| | |
+|---|---|
+| `POST /v1/recreate/references/{id}/export {sessionId, sound?: "guide"\|"silent"}` | Renders the edit session's current revision, as long as the reference, at the canvas's size. `guide` (the default) uses the reference's own sound as the track; `silent` has no sound. → `Export` (`state: "rendering"`, or `"ready"` when that revision is already exported). Without the reference's video (after 30 days) or sound, a guide export gets `409 no_reference_sound`; export silent instead. |
+| `GET /v1/recreate/references/{id}/export?sessionId&sound&revision?` | → `Export`. Polling, or wait for the live event `{type: "recreate", export: Export}`. |
+| `GET /v1/recreate/references/{id}/export.mp4?sessionId&sound&revision?` | The file (authenticated, as an attachment): a `302` to a 1-hour link on S3, or the bytes. |
+
+`Export {referenceId, sessionId, revision, sound, state: "none"|"rendering"|"ready"|"failed", url?, durationSec?, width?, height?, unsupported?, error?, useThisSound}`
+`useThisSound {platform: "tiktok"|"instagram"|"youtube"|null, sourceUrl?, startAtSec: 0, durationSec, title: "Post with the original sound", steps: string[], note}`
+- `useThisSound` is the reminder the apps show next to the export. For a link reference the steps name its platform's "Use this sound", "Use audio" or "Remix · Use sound"; for a file reference they are general.
+- The note explains that the guide sound is only for timing, so post with the platform's own sound.
+- Exports are stored privately under `rx/` and deleted with the reference.
+
+**The built edit, rendered** (`src/editor/render.ts`, `renders.ts`; `test/render.test.ts`; for Compare on both apps):
+
+| | |
+|---|---|
+| `POST /v1/edit-sessions/{id}/preview` (owner) | Renders the session's current revision as a preview: the longest side 720 px, 30 fps, with the project's sound. → `Preview` (`rendering`, or `ready` if this revision is done). Each revision is rendered once; a newer revision's preview replaces the older one when it is ready. |
+| `GET /v1/edit-sessions/{id}/preview?revision?` | → `Preview` (`state: "none"` before any). Live event: `{type: "edit", sessionId, op: "render", render: Preview}`. |
+| `GET /v1/edit-sessions/{id}/preview.mp4?revision?` | The file (authenticated): a `302` to a 1-hour link on S3, or the bytes. |
+
+`Preview {sessionId, revision, state, url?, durationSec?, width?, height?, unsupported?, error?}`
+- **Drawn:**
+  - the main track: trims, speed and speed curves, cover/contain fit, transform and x/y/scale keyframes, and transitions (xfade);
+  - the Look's LUT at its strength;
+  - text items, in the apps' fonts (bundled in `assets/fonts`, OFL);
+  - the clips' sound at their speed, plus music, voice and sfx clips.
+- **Not drawn, and listed in `unsupported`:** rotation, opacity, crop, colour adjustments, filters, masks, chroma, background removal, overlays, captions, text animation, look details beyond the LUT, ducking and library music. Show "Preview of the cut" when the list isn't empty.
+- **Frame-exact:** each clip gets exactly its frames on the timeline, so the cuts in a render match the edit.
+- **Cost:** one render at a time on the server's CPU, with no GPU and no charge.
+
 **Live event:** `{type: "recreate", reference}` (the `Reference` without its recipe, with `slots`: the count) goes to its member and the owner on create, on each analysis step, when it is ready or failed, and on `PATCH`. Migration **0016** adds `recreate_references.fill`.
 
 **Fixture:** `server/api/test/fixtures/recipe-v1.json` is a `GET /v1/recreate/references/{id}` response from a real analysis of the test reference (with an example brief, words and summary), for the apps' fakes. A test fails if the API sends a field the fixture lacks.
