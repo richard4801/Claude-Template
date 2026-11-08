@@ -118,6 +118,15 @@ jobs:
           if grep -q '^FAIL' "$f"; then exit 1; fi
           if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during: $(grep '^START' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
 
+      # When review mode stops early, the crash report says where (thread, frames, exception).
+      - name: Crash report
+        if: failure()
+        run: |
+          d=~/Library/Logs/DiagnosticReports
+          f=$(ls -t "$d" 2>/dev/null | grep -i -E '^MUSE' | head -n 1)
+          if [ -z "$f" ]; then echo "no MUSE crash report"; exit 0; fi
+          echo "== $f"; head -c 60000 "$d/$f"
+
       # Every main page and Settings pane must scroll with a real scroll event (owner blocker 2026-11-07). Fails on a STUCK
       # page as long as at least one page MOVED (so the synthetic events themselves work on this runner).
       - name: Scroll check

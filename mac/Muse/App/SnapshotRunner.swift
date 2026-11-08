@@ -41,6 +41,7 @@ enum SnapshotRunner {
 
     static func runIfRequested(_ store: AppStore) {
         guard let dir else { return }
+        setvbuf(stdout, nil, _IOLBF, 0)   // line-buffered, so the CI log keeps the last lines if the app stops (Edit check)
         Task { @MainActor in
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             if let w = mainWindow {
