@@ -150,6 +150,9 @@ private fun TopRow(ui: EditSuiteUi, act: (EditAction) -> Unit, onClose: () -> Un
             studio.muse.app.ui.components.FitText(ui.title.ifBlank { "Edit" }, m.scale.heading, m.t.ink)
             T(if (ui.reopened) "Edited version" else "Not exported yet", m.scale.caption, m.t.muted, maxLines = 1)
         }
+        if (ui.session != null) Box(Modifier.size(44.dp, 48.dp).press { act(EditAction.Open(if (ui.panel == Panel.HISTORY) null else Panel.HISTORY)) }.semantics { contentDescription = "History" }, contentAlignment = Alignment.Center) {
+            EIc("clock", 20.dp, if (ui.panel == Panel.HISTORY) m.t.accent else m.t.ink)
+        }
         if (ui.claudeOwner || ui.session != null) { EditClaudeButton(ui, act); Spacer(Modifier.width(8.dp)) }
         val shape = RoundedCornerShape(if (m.isA) 0.dp else if (m.isB) 8.dp else 999.dp)
         Box(
@@ -163,22 +166,23 @@ private fun TopRow(ui: EditSuiteUi, act: (EditAction) -> Unit, onClose: () -> Un
 @Composable
 private fun Transport(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     val m = muse
-    Row(Modifier.fillMaxWidth().height(42.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        T("${playheadTime(ui.playheadSec)} / ${playheadTime(ui.duration)}", m.scale.label.tabular(), m.t.ink, Modifier.weight(1f), maxLines = 1)
-        // Split at the playhead, one tap away (owner report 2026-11-08: placing a cut must be direct).
-        Box(Modifier.size(48.dp).press(enabled = ui.project != null) { act(EditAction.Split) }.semantics { contentDescription = "Split at playhead" }, contentAlignment = Alignment.Center) {
-            EIc("scissors", 20.dp, m.t.ink)
-        }
-        Box(Modifier.size(48.dp).press(enabled = ui.ready) { act(EditAction.PlayPause) }.semantics { contentDescription = if (ui.playing) "Pause" else "Play" }, contentAlignment = Alignment.Center) {
-            EIc(if (ui.playing) "pause" else "play", 20.dp, m.t.ink)
-        }
-        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-            if (ui.session != null) Box(Modifier.size(42.dp, 48.dp).press { act(EditAction.Open(if (ui.panel == Panel.HISTORY) null else Panel.HISTORY)) }.semantics { contentDescription = "History" }, contentAlignment = Alignment.Center) {
-                EIc("clock", 18.dp, if (ui.panel == Panel.HISTORY) m.t.accent else m.t.ink)
-            }
-            Box(Modifier.size(42.dp, 48.dp).press(enabled = ui.canUndo) { act(EditAction.Undo) }.semantics { contentDescription = "Undo" }, contentAlignment = Alignment.Center) { EIc("undo", 18.dp, if (ui.canUndo) m.t.ink else m.t.muted) }
-            Box(Modifier.size(42.dp, 48.dp).press(enabled = ui.canRedo) { act(EditAction.Redo) }.semantics { contentDescription = "Redo" }, contentAlignment = Alignment.Center) { EIc("redo", 18.dp, if (ui.canRedo) m.t.ink else m.t.muted) }
-            Box(Modifier.size(42.dp, 48.dp).press { act(EditAction.Fullscreen) }.semantics { contentDescription = "Fullscreen" }, contentAlignment = Alignment.Center) { EIc("expand", 18.dp, if (ui.fullscreen) m.t.ink else m.t.muted) }
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        // Narrow phones show the playhead time only; the edit's length is on the ruler.
+        val time = if (maxWidth < 380.dp) playheadTime(ui.playheadSec) else "${playheadTime(ui.playheadSec)} / ${playheadTime(ui.duration)}"
+        Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            T(time, m.scale.label.tabular(), m.t.ink, Modifier.weight(1f), maxLines = 1)
+            @Composable
+            fun b(icon: String, label: String, enabled: Boolean, tint: androidx.compose.ui.graphics.Color = m.t.ink, size: androidx.compose.ui.unit.Dp = 18.dp, onClick: () -> Unit) =
+                Box(Modifier.size(42.dp, 48.dp).press(enabled = enabled, onClick = onClick).semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
+                    EIc(icon, size, if (enabled) tint else m.t.muted)
+                }
+            // Split at the playhead, one tap away (owner report 2026-11-08: placing a cut must be direct).
+            b("scissors", "Split at playhead", ui.project != null, size = 20.dp) { act(EditAction.Split) }
+            b("caret-left", "Previous frame", ui.project != null) { act(EditAction.StepFrame(-1)) }
+            b(if (ui.playing) "pause" else "play", if (ui.playing) "Pause" else "Play", ui.ready, size = 20.dp) { act(EditAction.PlayPause) }
+            b("caret-right", "Next frame", ui.project != null) { act(EditAction.StepFrame(1)) }
+            b("undo", "Undo", ui.canUndo) { act(EditAction.Undo) }
+            b("redo", "Redo", ui.canRedo) { act(EditAction.Redo) }
         }
     }
 }

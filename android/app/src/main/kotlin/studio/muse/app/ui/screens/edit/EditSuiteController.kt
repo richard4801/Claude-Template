@@ -62,6 +62,7 @@ import studio.muse.core.edit.locate
 import studio.muse.core.edit.newId
 import studio.muse.core.edit.problemOf
 import studio.muse.core.edit.setTransition
+import studio.muse.core.edit.freezeAt
 import studio.muse.core.edit.splitAt
 import studio.muse.core.edit.trimClip
 import studio.muse.core.edit.suggestCuts
@@ -97,6 +98,12 @@ sealed interface EditAction {
      * the playhead then lands on the nearest frame, so a split cuts on a real frame.
      */
     data class Scrub(val sec: Double, val end: Boolean = false) : EditAction
+    /** Long-press drag of a non-main item: moved by [deltaSec] from where the drag began (snaps within [snapSec]). */
+    data class MoveBy(val itemId: String, val deltaSec: Double, val snapSec: Double = 0.0, val done: Boolean = true) : EditAction
+    /** Long-press drag of a main clip: it goes to position [toIndex]. */
+    data class Reorder(val clipId: String, val toIndex: Int, val done: Boolean = true) : EditAction
+    /** Dragging a selected item's [left] or right edge by [deltaSec] from where the drag began. */
+    data class TrimBy(val itemId: String, val left: Boolean, val deltaSec: Double, val done: Boolean = true) : EditAction
     /** Dragging a selected main clip's edge: its new source in/out ([done] when the finger lifts: one undo step). */
     data class Trim(val clipId: String, val inSec: Double, val outSec: Double, val done: Boolean = true) : EditAction
     data class Zoom(val pxPerSec: Float) : EditAction
@@ -119,6 +126,26 @@ sealed interface EditAction {
     data class AddCurvePoint(val x: Double) : EditAction
     data class SetTransform(val transform: Transform, val done: Boolean = true) : EditAction
     data class AddKeyframe(val prop: KfProp) : EditAction
+    /** Removes the selected item's keyframes at the playhead ([prop] null = every property). */
+    data class RemoveKeyframes(val prop: KfProp? = null) : EditAction
+    /** Easing of the keyframes at the playhead, and of the next ones added. */
+    data class KeyEase(val ease: studio.muse.core.edit.Ease) : EditAction
+    /** Opacity of the selected picture or text (a keyframe at the playhead when opacity is keyframed). */
+    data class SetOpacity(val opacity: Double, val done: Boolean = true) : EditAction
+    /** Mirror the selected picture or text (null leaves that axis as it is). */
+    data class Mirror(val x: Boolean? = null, val y: Boolean? = null) : EditAction
+    /** Freeze frame: a hold of the frame under the playhead, [durationSec] long, cut into the main track. */
+    data class Freeze(val durationSec: Double = 1.0) : EditAction
+    /** The selected freeze frame's length. */
+    data class HoldLength(val sec: Double, val done: Boolean = true) : EditAction
+    /** What fills the frame around a contain-fitted clip: the colour or a blur of the clip. */
+    data class Fill(val fill: studio.muse.core.edit.CanvasFill) : EditAction
+    /** The selected (or current) main clip: fill the frame (cover) or show the whole picture (contain). */
+    data class ClipFit(val fit: studio.muse.core.edit.Fit) : EditAction
+    /** −1 / +1 frame. */
+    data class StepFrame(val frames: Int) : EditAction
+    /** The canvas colour behind the picture ("#RRGGBB"). */
+    data class Background(val color: String) : EditAction
     data class SetMask(val mask: Mask?, val done: Boolean = true) : EditAction
     /** Crop of the selected picture (fractions cut from each side, 0–0.45); null = no crop. */
     data class SetCrop(val crop: studio.muse.core.edit.Crop?, val done: Boolean = true) : EditAction
@@ -156,6 +183,12 @@ sealed interface EditAction {
     // Text & captions
     data class AddHook(val id: String) : EditAction
     data class EditText(val id: String, val text: String) : EditAction
+    /** New plain text at the playhead (selected, so its style shows). */
+    data object AddText : EditAction
+    /** The selected text's whole style ([done] false while a slider moves). */
+    data class SetTextStyle(val id: String, val style: studio.muse.core.edit.TextStyle, val done: Boolean = true) : EditAction
+    /** The selected text's or image's in / out animation (null = none). */
+    data class SetAnim(val id: String, val animIn: studio.muse.core.edit.Anim?, val animOut: studio.muse.core.edit.Anim?, val done: Boolean = true) : EditAction
     data object AutoCaptions : EditAction
     data class CaptionTab(val tab: String) : EditAction
     data class CaptionStyleOf(val preset: CaptionPreset) : EditAction
@@ -300,14 +333,15 @@ class EditSuiteController(
     private fun labelOf(a: EditAction): String? = when (a) {
         EditAction.Undo -> "Undo"; EditAction.Redo -> "Redo"
         EditAction.Split -> "Split"; EditAction.Delete -> "Delete"; EditAction.Duplicate -> "Duplicate"
-        is EditAction.Trim -> "Trim"; EditAction.DetachAudio -> "Detach audio"; is EditAction.MuteClip -> if (a.muted) "Mute" else "Unmute"
+        is EditAction.Trim, is EditAction.TrimBy -> "Trim"; is EditAction.MoveBy -> "Move"; is EditAction.Reorder -> "Reorder"; EditAction.DetachAudio -> "Detach audio"; is EditAction.MuteClip -> if (a.muted) "Mute" else "Unmute"
         is EditAction.Speed, is EditAction.CurvePreset, is EditAction.CurvePoint, is EditAction.AddCurvePoint -> "Speed"
-        is EditAction.SetTransform -> "Transform"; is EditAction.AddKeyframe -> "Keyframe"; is EditAction.SetMask -> "Mask"; is EditAction.SetCrop -> "Crop"
+        is EditAction.SetTransform -> "Transform"; is EditAction.AddKeyframe, is EditAction.RemoveKeyframes, is EditAction.KeyEase -> "Keyframe"; is EditAction.SetOpacity -> "Opacity"; is EditAction.Background, is EditAction.Fill -> "Background";
+        is EditAction.Mirror -> "Mirror"; is EditAction.Freeze, is EditAction.HoldLength -> "Freeze frame"; is EditAction.ClipFit -> "Fit"; is EditAction.SetMask -> "Mask"; is EditAction.SetCrop -> "Crop"
         EditAction.RemoveBackground, EditAction.KeepBackground -> "Remove background"; is EditAction.SetTransition, EditAction.TransitionToAll -> "Transition"
         is EditAction.Volume -> "Volume"; is EditAction.Fades -> "Fades"; is EditAction.AutoDuck, is EditAction.DuckTimes -> "Ducking"
         is EditAction.NoiseReduction -> "Noise reduction"; is EditAction.Enhance -> "Enhance voice"; is EditAction.Voice -> "Voice effect"
         EditAction.DetectBeats -> "Beats"; is EditAction.AddAudio -> if (a.voiceOver) "Voice-over" else "Music"
-        is EditAction.AddHook -> "Hook"; is EditAction.EditText -> "Text"; EditAction.AutoCaptions -> "Captions"
+        is EditAction.AddHook -> "Hook"; is EditAction.EditText, EditAction.AddText, is EditAction.SetTextStyle -> "Text"; is EditAction.SetAnim -> "Animation"; EditAction.AutoCaptions -> "Captions"
         is EditAction.CaptionStyleOf, is EditAction.CaptionFont, is EditAction.CaptionColors, is EditAction.CaptionY,
         is EditAction.CaptionWordsPerPage, is EditAction.WordHighlight -> "Caption style"
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
@@ -379,6 +413,19 @@ class EditSuiteController(
                 val t = if (a.end) TimelineMath.snapFrame(a.sec, fps) else a.sec
                 it.copy(playheadSec = t.coerceIn(0.0, it.duration), playing = false, scrubbing = !a.end)
             }
+            is EditAction.MoveBy -> {
+                val base = dragBase ?: project ?: return
+                val next = SuiteOps.moveBy(base, a.itemId, a.deltaSec, snapPoints(base, a.itemId, u), a.snapSec)
+                if (next == null) { if (a.done) endDrag() } else change(a.done, "That doesn't fit there · try another spot") { next }
+            }
+            is EditAction.Reorder -> {
+                val next = SuiteOps.reorder(dragBase ?: project ?: return, a.clipId, a.toIndex)
+                if (next == null) { if (a.done) endDrag() } else change(a.done) { next }
+            }
+            is EditAction.TrimBy -> {
+                val next = SuiteOps.trimBy(dragBase ?: project ?: return, a.itemId, a.left, a.deltaSec)
+                if (next == null) { if (a.done) endDrag() } else change(a.done, "That doesn't fit there") { next }
+            }
             is EditAction.Trim -> {
                 // Lifting the finger where the last move left it is no change: the drag just ends as one step.
                 val next = project?.trimClip(a.clipId, a.inSec, a.outSec)
@@ -443,7 +490,44 @@ class EditSuiteController(
                 val pts = (curve.points + SpeedPoint(r3(a.x), r3(studio.muse.core.edit.curveSpeed(curve, a.x)))).sortedBy { it.x }
                 change { SuiteOps.setCurve(it, c.id, SpeedCurve(SpeedPreset.CUSTOM, pts)) }
             }
-            is EditAction.SetTransform -> { val id = visualId(u) ?: return; change(a.done) { p -> p.updateItem(id) { withTransform(it, a.transform) } } }
+            is EditAction.SetTransform -> setTransform(u, a)
+            is EditAction.SetOpacity -> setOpacity(u, a)
+            is EditAction.RemoveKeyframes -> {
+                val id = transformId(u) ?: return
+                val local = localAt(u, id) ?: return say("Move the playhead over this item")
+                if (!change { SuiteOps.removeKeysAt(it, id, local, a.prop) }) say("No keyframe at the playhead")
+            }
+            is EditAction.KeyEase -> {
+                _ui.update { it.copy(keyEase = a.ease) }
+                val id = transformId(u) ?: return
+                val local = localAt(u, id) ?: return
+                change { SuiteOps.easeAt(it, id, local, a.ease) }
+            }
+            is EditAction.Mirror -> {
+                val id = transformId(u) ?: return
+                change { p -> p.updateItem(id) { it ->
+                    val tr = when (it) { is studio.muse.core.edit.Visual -> it.transform; is TextItem -> it.transform; else -> null } ?: Transform()
+                    withTransform(it, tr.copy(flipX = (a.x ?: (tr.flipX == true)).takeIf { v -> v }, flipY = (a.y ?: (tr.flipY == true)).takeIf { v -> v }))
+                } }
+            }
+            is EditAction.Freeze -> {
+                var newId: String? = null
+                if (change(refused = "Move the playhead over a clip to freeze a frame") { p -> p.freezeAt(u.playheadSec, a.durationSec)?.let { (np, id) -> newId = id; np } }) {
+                    _ui.update { it.copy(selectedId = newId) }
+                    say("Freeze frame added · drag its edge to change its length")
+                }
+            }
+            is EditAction.HoldLength -> {
+                val c = (u.selection?.second as? VideoClip)?.takeIf { it.holdSec != null } ?: return
+                change(a.done) { p -> p.updateItem(c.id) { (it as VideoClip).copy(holdSec = r2(a.sec.coerceIn(studio.muse.core.edit.HOLD_MIN_SEC, studio.muse.core.edit.HOLD_MAX_SEC))) } }
+            }
+            is EditAction.Fill -> change { p -> val f = a.fill.takeIf { it == studio.muse.core.edit.CanvasFill.BLUR }; if (p.canvas.fill == f) null else p.copy(canvas = p.canvas.copy(fill = f)) }
+            is EditAction.ClipFit -> {
+                val c = (u.selection?.second as? VideoClip)?.takeIf { s -> project?.main?.items?.any { it.id == s.id } == true } ?: u.activeClip ?: return
+                change { p -> p.updateItem(c.id) { (it as VideoClip).copy(fit = a.fit.takeIf { f -> f == studio.muse.core.edit.Fit.CONTAIN }) } }
+            }
+            is EditAction.StepFrame -> { val fps = u.project?.canvas?.fps ?: 30.0; act(EditAction.Scrub(TimelineMath.snapFrame(u.playheadSec, fps) + a.frames / fps, end = true)) }
+            is EditAction.Background -> change { p -> if (p.canvas.background.equals(a.color, true)) null else p.copy(canvas = p.canvas.copy(background = a.color)) }
             is EditAction.AddKeyframe -> addKeyframe(u, a.prop)
             is EditAction.SetMask -> { val id = visualId(u) ?: return; change(a.done) { p -> p.updateItem(id) { when (it) { is VideoClip -> it.copy(mask = a.mask); is ImageItem -> it.copy(mask = a.mask); else -> it } } } }
             is EditAction.SetCrop -> {
@@ -481,7 +565,15 @@ class EditSuiteController(
             }
             is EditAction.EffectsTab -> { _ui.update { it.copy(effectsTab = a.tab) }; if (a.tab == "Mask") matteTab() }
 
-            is EditAction.Volume -> { val c = soundClip(u) ?: return; change(a.done) { p -> p.updateItem(c.id) { setVolume(it, SuiteOps.dbToGain(a.db).coerceIn(0.0, 2.0)) } } }
+            is EditAction.Volume -> {
+                val c = soundClip(u) ?: return
+                val gain = SuiteOps.dbToGain(a.db).coerceIn(0.0, 2.0)
+                val keys = c.keyframes?.get(KfProp.VOLUME)
+                val local = localAt(u, c.id)
+                // Volume keyframed: the slider sets the key at the playhead (keys multiply the clip's own volume).
+                if (!keys.isNullOrEmpty() && local != null) change(a.done) { p -> SuiteOps.keyframe(p, c.id, KfProp.VOLUME, local, r2((gain / (c.volume ?: 1.0).coerceAtLeast(.01)).coerceIn(0.0, 2.0)), u.keyEase) }
+                else change(a.done) { p -> p.updateItem(c.id) { setVolume(it, gain) } }
+            }
             is EditAction.Fades -> { val c = soundClip(u) ?: return; change(a.done) { p -> p.updateItem(c.id) { setFades(it, a.inSec, a.outSec) } } }
             is EditAction.AutoDuck -> if (SuiteOps.musicTrack(project ?: return) == null) say("Add music first · Audio → Music") else change { SuiteOps.duck(it, a.on) }
             is EditAction.DuckTimes -> change(a.done) { p -> val t = SuiteOps.musicTrack(p) ?: return@change null; val d = t.duck ?: return@change null
@@ -502,6 +594,14 @@ class EditSuiteController(
                 val hook = Presets.hook(a.id) ?: return
                 var newId: String? = null
                 if (change(refused = "No room for text there") { p -> SuiteOps.addHook(p, hook, u.playheadSec)?.let { (np, id) -> newId = id; np } }) _ui.update { it.copy(selectedId = newId) }
+            }
+            EditAction.AddText -> {
+                var newId: String? = null
+                if (change(refused = "No room for text there") { p -> SuiteOps.addText(p, u.playheadSec)?.let { (np, id) -> newId = id; np } }) _ui.update { it.copy(selectedId = newId) }
+            }
+            is EditAction.SetTextStyle -> change(a.done, "That style can't be used") { p -> p.updateItem(a.id) { (it as? TextItem)?.copy(style = a.style) ?: it } }
+            is EditAction.SetAnim -> change(a.done, "That animation is too long for the item") { p ->
+                p.updateItem(a.id) { when (it) { is TextItem -> it.copy(animIn = a.animIn, animOut = a.animOut); is ImageItem -> it.copy(animIn = a.animIn, animOut = a.animOut); else -> it } }
             }
             is EditAction.EditText -> change(done = true) { p -> p.updateItem(a.id) { (it as? TextItem)?.copy(text = a.text.take(500).ifBlank { it.text }) ?: it } }
             EditAction.AutoCaptions -> u.helpersOff["captions"]?.let { say(it) } ?: autoCaptions()
@@ -861,20 +961,76 @@ class EditSuiteController(
         }
     }
 
+    /** The item the Transform panel acts on: the selected picture or text, else the clip under the playhead. */
+    private fun transformId(u: EditSuiteUi): String? = (u.selection?.second?.takeIf { it is studio.muse.core.edit.Visual || it is TextItem } ?: u.activeClip)?.id
+
+    /** Seconds from item [id]'s start to the playhead, or null when the playhead isn't over it. */
+    private fun localAt(u: EditSuiteUi, id: String): Double? {
+        val p = project ?: return null
+        val (t, i) = p.locate(id) ?: return null
+        val sp = itemSpan(p, t, t.items[i])
+        return if (u.playheadSec < sp.startSec - 1e-6 || u.playheadSec > sp.endSec + 1e-6) null else u.playheadSec - sp.startSec
+    }
+
+    /** Position/scale/rotation: a keyframed property gets a key at the playhead (else the static value changes). */
+    private fun setTransform(u: EditSuiteUi, a: EditAction.SetTransform) {
+        val id = transformId(u) ?: return
+        val p0 = project ?: return
+        val item = p0.locate(id)?.let { (t, i) -> t.items[i] } ?: return
+        val keys = when (item) { is studio.muse.core.edit.Visual -> item.keyframes; is TextItem -> item.keyframes; else -> null }
+        val cur = when (item) { is studio.muse.core.edit.Visual -> item.transform; is TextItem -> item.transform; else -> null } ?: Transform()
+        val local = localAt(u, id)
+        change(a.done) { p ->
+            var n: EditProject = p
+            var static = cur
+            fun prop(kp: KfProp, old: Double?, new: Double?, def: Double, setStatic: (Transform, Double?) -> Transform) {
+                if (new == null || new == (old ?: def)) return
+                if (!keys?.get(kp).isNullOrEmpty() && local != null) n = SuiteOps.keyframe(n, id, kp, local, new, u.keyEase) ?: n
+                else static = setStatic(static, new)
+            }
+            prop(KfProp.X, cur.x, a.transform.x, .5) { t, v -> t.copy(x = v) }
+            prop(KfProp.Y, cur.y, a.transform.y, .5) { t, v -> t.copy(y = v) }
+            prop(KfProp.SCALE, cur.scale, a.transform.scale, 1.0) { t, v -> t.copy(scale = v) }
+            prop(KfProp.ROTATION, cur.rotation, a.transform.rotation, 0.0) { t, v -> t.copy(rotation = v) }
+            if (static != cur) n = n.updateItem(id) { withTransform(it, static) } ?: n
+            n
+        }
+    }
+
+    private fun setOpacity(u: EditSuiteUi, a: EditAction.SetOpacity) {
+        val id = transformId(u) ?: return
+        val v = r2(a.opacity.coerceIn(0.0, 1.0))
+        val item = project?.locate(id)?.let { (t, i) -> t.items[i] } ?: return
+        val keys = when (item) { is studio.muse.core.edit.Visual -> item.keyframes; is TextItem -> item.keyframes; else -> null }
+        val local = localAt(u, id)
+        if (!keys?.get(KfProp.OPACITY).isNullOrEmpty() && local != null) change(a.done) { SuiteOps.keyframe(it, id, KfProp.OPACITY, local, v, u.keyEase) }
+        else change(a.done) { p -> p.updateItem(id) { when (it) { is VideoClip -> it.copy(opacity = v.takeIf { o -> o < 1 }); is ImageItem -> it.copy(opacity = v.takeIf { o -> o < 1 }); is TextItem -> it.copy(opacity = v.takeIf { o -> o < 1 }); else -> it } } }
+    }
+
     private fun addKeyframe(u: EditSuiteUi, prop: KfProp) {
         val p = project ?: return
-        val id = visualId(u) ?: return
+        if (prop == KfProp.VOLUME) {
+            val c = soundClip(u) ?: return
+            val local = localAt(u, c.id) ?: return say("Move the playhead over this clip to add a keyframe")
+            val v = c.keyframes?.get(KfProp.VOLUME)?.let { studio.muse.core.edit.keyframeValue(it, local) } ?: 1.0
+            if (change { SuiteOps.keyframe(it, c.id, prop, local, v, u.keyEase) }) say("Volume keyframe at ${"%.1f".format(local)} s")
+            return
+        }
+        val id = transformId(u) ?: return
         val (t, item) = p.locate(id)?.let { (tr, i) -> tr to tr.items[i] } ?: return
         val span = itemSpan(p, t, item)
         if (u.playheadSec < span.startSec || u.playheadSec > span.endSec) return say("Move the playhead over this clip to add a keyframe")
         val local = u.playheadSec - span.startSec
-        val vis = item as? studio.muse.core.edit.Visual ?: return
-        val tr = vis.transform
-        val v = when (prop) {
+        val tr = when (item) { is studio.muse.core.edit.Visual -> item.transform; is TextItem -> item.transform; else -> return }
+        val keys = when (item) { is studio.muse.core.edit.Visual -> item.keyframes; is TextItem -> item.keyframes; else -> null }
+        val op = when (item) { is studio.muse.core.edit.Visual -> item.opacity; is TextItem -> item.opacity; else -> null }
+        val static = when (prop) {
             KfProp.X -> tr?.x ?: 0.5; KfProp.Y -> tr?.y ?: 0.5; KfProp.SCALE -> tr?.scale ?: 1.0; KfProp.ROTATION -> tr?.rotation ?: 0.0
-            KfProp.OPACITY -> vis.opacity ?: 1.0; KfProp.VOLUME -> (item as? MediaClip)?.volume ?: 1.0
+            KfProp.OPACITY -> op ?: 1.0; KfProp.VOLUME -> 1.0
         }
-        if (change { SuiteOps.keyframe(it, id, prop, local, v) }) say("Keyframe added at ${"%.1f".format(local)} s")
+        // The value showing now (the curve's, when the property is already keyframed).
+        val v = studio.muse.core.edit.propAt(keys, prop, static, local)
+        if (change { SuiteOps.keyframe(it, id, prop, local, v, u.keyEase) }) say("Keyframe added at ${"%.1f".format(local)} s")
     }
 
     private fun withTransform(it: studio.muse.core.edit.Item, t: Transform) = when (it) {
@@ -900,6 +1056,15 @@ class EditSuiteController(
         is VideoClip -> it.copy(voiceEffect = effect?.takeIf { e -> e != VoiceEffect.NONE } ?: if (effect != null) null else it.voiceEffect, enhance = if (enhance != null) enhance.takeIf { x -> x } else it.enhance)
         is AudioClip -> it.copy(voiceEffect = effect?.takeIf { e -> e != VoiceEffect.NONE } ?: if (effect != null) null else it.voiceEffect, enhance = if (enhance != null) enhance.takeIf { x -> x } else it.enhance)
         else -> it
+    }
+
+    /** Where a moved item's edges snap: the playhead, every other item's edges, the main clips' cuts and the beats. */
+    private fun snapPoints(p: EditProject, movingId: String, u: EditSuiteUi): List<Double> {
+        val out = ArrayList<Double>()
+        out += u.playheadSec; out += 0.0
+        for (t in p.tracks) for (it in t.items) if (it.id != movingId) { val sp = itemSpan(p, t, it); out += sp.startSec; out += sp.endSec }
+        out += SuiteOps.beatTimes(p, u.beatMarks == BeatMarks.STRONG)
+        return out
     }
 
     private fun beatsShown(u: EditSuiteUi) = project?.let { SuiteOps.beatTimes(it, u.beatMarks == BeatMarks.STRONG) }.orEmpty()

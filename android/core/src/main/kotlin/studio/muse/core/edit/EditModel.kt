@@ -75,14 +75,17 @@ fun speedPieces(inSec: Double, outSec: Double, speed: Double?, curve: SpeedCurve
     return List(n) { i -> Piece(r6(inSec + i * len), r6(if (i == n - 1) outSec else inSec + (i + 1) * len), r6(curveSpeed(curve, (i + 0.5) / n))) }
 }
 
-fun speedPieces(c: MediaClip): List<Piece> = speedPieces(c.inSec, c.outSec, c.speedOrNull, (c as? VideoClip)?.speedCurve)
+fun speedPieces(c: MediaClip): List<Piece> = (c as? VideoClip)?.holdSec?.let { listOf(Piece(c.inSec, c.inSec, 1.0)) }
+    ?: speedPieces(c.inSec, c.outSec, c.speedOrNull, (c as? VideoClip)?.speedCurve)
 
 fun clipLength(inSec: Double, outSec: Double, speed: Double?, curve: SpeedCurve? = null): Double =
     if (curve != null) speedPieces(inSec, outSec, speed, curve).sumOf { (it.outSec - it.inSec) / it.speed } else (outSec - inSec) / (speed ?: 1.0)
-fun clipLength(c: MediaClip): Double = clipLength(c.inSec, c.outSec, c.speedOrNull, (c as? VideoClip)?.speedCurve)
+/** A hold (freeze frame) lasts holdSec whatever its source range. */
+fun clipLength(c: MediaClip): Double = (c as? VideoClip)?.holdSec ?: clipLength(c.inSec, c.outSec, c.speedOrNull, (c as? VideoClip)?.speedCurve)
 
 /** Seconds from the clip's start on the timeline at source time [sec] (clamped to the clip). */
 fun clipTimeAt(c: MediaClip, sec: Double): Double {
+    if ((c as? VideoClip)?.holdSec != null) return 0.0
     var acc = 0.0
     for (p in speedPieces(c)) {
         if (sec <= p.outSec) return acc + max(0.0, sec - p.inSec) / p.speed
@@ -93,6 +96,7 @@ fun clipTimeAt(c: MediaClip, sec: Double): Double {
 
 /** The source time of the clip at [local] seconds from its start on the timeline (the inverse of [clipTimeAt]). */
 fun clipSourceAt(c: MediaClip, local: Double): Double {
+    if ((c as? VideoClip)?.holdSec != null) return c.inSec
     var acc = 0.0
     for (p in speedPieces(c)) {
         val len = (p.outSec - p.inSec) / p.speed
@@ -213,6 +217,8 @@ fun applyCuts(p: EditProject, assetId: String, cuts: List<Range>): EditProject {
     val items = ArrayList<VideoClip>()
     for (it in p.mainClips) {
         if (it.asset != assetId) { items += it; continue }
+        // A hold (freeze frame) has no source span: it goes when a cut covers its frame, else it stays as it is.
+        if (it.holdSec != null) { if (rs.none { r -> it.inSec >= r.startSec && it.inSec < r.endSec }) items += it; continue }
         var pieces = listOf(Range(it.inSec, it.outSec))
         for (r in rs) {
             pieces = pieces.flatMap { pc ->
@@ -253,7 +259,7 @@ fun captionWords(p: EditProject): List<TimedWord> {
     val spans = timeline(p)
     val out = ArrayList<TimedWord>()
     p.mainClips.forEachIndexed { i, c ->
-        if (c.asset != ct.asset) return@forEachIndexed
+        if (c.asset != ct.asset || c.holdSec != null) return@forEachIndexed // a hold has no speech
         val s = spans[i]
         ct.words.forEachIndexed { idx, w ->
             val mid = (w.startSec + w.endSec) / 2
@@ -513,7 +519,7 @@ fun duckRegions(p: EditProject, duck: Duck): List<Range> {
 
 /** Base gain of a clip at timeline t, without ducking (volume, keyframes, fades, transition crossfade). */
 private fun baseGain(p: EditProject, track: Track, item: MediaClip, t: Double, spans: List<MainSpan>): Double {
-    if (p.mute == true || track.muted == true || item.muted == true) return 0.0
+    if (p.mute == true || track.muted == true || item.muted == true || (item as? VideoClip)?.holdSec != null) return 0.0 // a hold is silent
     val span = itemSpan(p, track, item)
     if (t < span.startSec - 1e-9 || t > span.endSec + 1e-9) return 0.0
     val local = t - span.startSec; val len = span.endSec - span.startSec

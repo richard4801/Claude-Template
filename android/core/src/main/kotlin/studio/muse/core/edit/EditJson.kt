@@ -33,7 +33,7 @@ object EditJson {
         put("version", p.version)
         put("sourceTakeId", p.sourceTakeId)
         put("canvas", buildJsonObject {
-            put("width", p.canvas.width); put("height", p.canvas.height); num("fps", p.canvas.fps); str("background", p.canvas.background)
+            put("width", p.canvas.width); put("height", p.canvas.height); num("fps", p.canvas.fps); str("background", p.canvas.background); str("fill", p.canvas.fill?.wire)
         })
         put("assets", JsonArray(p.assets.map(::encodeAsset)))
         put("tracks", JsonArray(p.tracks.map(::encodeTrack)))
@@ -66,7 +66,7 @@ object EditJson {
         return EditProject(
             version = o.int("version"),
             sourceTakeId = o.str("sourceTakeId"),
-            canvas = Canvas(cv.int("width"), cv.int("height"), cv.num("fps"), cv.strOrNull("background")),
+            canvas = Canvas(cv.int("width"), cv.int("height"), cv.num("fps"), cv.strOrNull("background"), cv.enumOrNull("fill", "must be color or blur")),
             assets = o.arr("assets").map { (e, f) -> asset(Obj.of(e, f)) },
             tracks = o.arr("tracks").map { (e, f) -> track(Obj.of(e, f)) },
             mute = o.boolOrNull("mute"),
@@ -117,12 +117,14 @@ object EditJson {
         chroma = o.objOrNull("chroma")?.let { Chroma(it.str("color"), it.numOrNull("similarity"), it.numOrNull("smoothness"), it.numOrNull("spill")) },
         alphaMatte = o.objOrNull("alphaMatte")?.let { AlphaMatte(it.str("asset"), it.boolOrNull("invert")) },
         transitionIn = o.objOrNull("transitionIn")?.let { Transition(it.enum("kind", "unknown transition"), it.num("durationSec")) },
+        holdSec = o.numOrNull("holdSec"), blend = o.enumOrNull("blend", "one of ${BlendMode.entries.joinToString(", ") { it.wire }}"),
     )
 
     private fun imageItem(o: Obj) = ImageItem(
         id = o.str("id"), asset = o.str("asset"), startSec = o.num("startSec"), durationSec = o.num("durationSec"),
         fit = o.enumOrNull("fit", "must be cover or contain"), transform = transform(o), crop = crop(o), opacity = o.numOrNull("opacity"),
         keyframes = keyframes(o), filter = filter(o), adjust = adjust(o), look = look(o), mask = mask(o), animIn = anim(o, "animIn"), animOut = anim(o, "animOut"),
+        blend = o.enumOrNull("blend", "one of ${BlendMode.entries.joinToString(", ") { it.wire }}"),
     )
 
     private fun textItem(o: Obj) = TextItem(
@@ -157,7 +159,7 @@ object EditJson {
         )
     }
 
-    private fun transform(o: Obj) = o.objOrNull("transform")?.let { Transform(it.numOrNull("x"), it.numOrNull("y"), it.numOrNull("scale"), it.numOrNull("rotation")) }
+    private fun transform(o: Obj) = o.objOrNull("transform")?.let { Transform(it.numOrNull("x"), it.numOrNull("y"), it.numOrNull("scale"), it.numOrNull("rotation"), it.boolOrNull("flipX"), it.boolOrNull("flipY")) }
     private fun crop(o: Obj) = o.objOrNull("crop")?.let { Crop(it.numOrNull("left"), it.numOrNull("top"), it.numOrNull("right"), it.numOrNull("bottom")) }
     private fun adjust(o: Obj) = o.objOrNull("adjust")?.let(::adjustOf)
     private fun adjustOf(a: Obj) = Adjust(
@@ -257,10 +259,11 @@ object EditJson {
             it.chroma?.let { c -> put("chroma", buildJsonObject { put("color", c.color); num("similarity", c.similarity); num("smoothness", c.smoothness); num("spill", c.spill) }) }
             it.alphaMatte?.let { m -> put("alphaMatte", buildJsonObject { put("asset", m.asset); bool("invert", m.invert) }) }
             it.transitionIn?.let { tr -> put("transitionIn", buildJsonObject { put("kind", tr.kind.wire); num("durationSec", tr.durationSec) }) }
+            num("holdSec", it.holdSec); str("blend", it.blend?.wire)
         }
         is ImageItem -> buildJsonObject {
             put("id", it.id); put("asset", it.asset); num("startSec", it.startSec); num("durationSec", it.durationSec); visual(it)
-            anim("animIn", it.animIn); anim("animOut", it.animOut)
+            anim("animIn", it.animIn); anim("animOut", it.animOut); str("blend", it.blend?.wire)
         }
         is TextItem -> buildJsonObject {
             put("id", it.id); num("startSec", it.startSec); num("durationSec", it.durationSec); put("text", it.text); put("style", encodeTextStyle(it.style))
@@ -321,7 +324,7 @@ object EditJson {
         t?.let { put("transform", encodeTransform(it)) }
     }
 
-    fun encodeTransform(t: Transform) = buildJsonObject { num("x", t.x); num("y", t.y); num("scale", t.scale); num("rotation", t.rotation) }
+    fun encodeTransform(t: Transform) = buildJsonObject { num("x", t.x); num("y", t.y); num("scale", t.scale); num("rotation", t.rotation); bool("flipX", t.flipX); bool("flipY", t.flipY) }
 
     private fun JsonObjectBuilder.keyframes(k: Keyframes?) {
         k ?: return

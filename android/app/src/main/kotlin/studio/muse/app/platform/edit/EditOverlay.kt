@@ -55,7 +55,7 @@ class EditOverlay(private val plan: RenderPlan) : CanvasOverlay(/* useInputFrame
                 if (a > 0) canvas.drawColor(withAlpha(if (piece.flash.kind == TransitionKind.WHITE) Color.WHITE else Color.BLACK, a))
             }
             is TextPiece -> plan.textFrame(piece, t)?.let { f ->
-                drawText(canvas, f.text, piece.item.style, f.centerX, f.centerY, f.scale, f.rotationCw, f.alpha, highlight = null)
+                drawText(canvas, f.text, piece.item.style, f.centerX, f.centerY, f.scale, f.rotationCw, f.alpha, highlight = null, flipX = f.flipX, flipY = f.flipY)
             }
             is CaptionPiece -> plan.captionFrame(piece, t)?.let { f ->
                 val st = piece.style
@@ -70,7 +70,7 @@ class EditOverlay(private val plan: RenderPlan) : CanvasOverlay(/* useInputFrame
 
     private fun drawText(
         canvas: Canvas, text: String, s: TextStyle, cx: Double, cy: Double, scale: Double, rotationCw: Double, alpha: Double,
-        highlight: Highlight?, maxLines: Int = Int.MAX_VALUE,
+        highlight: Highlight?, maxLines: Int = Int.MAX_VALUE, flipX: Boolean = false, flipY: Boolean = false,
     ) {
         val w = canvas.width; val h = canvas.height
         val px = (s.sizePct * h * scale).toFloat().coerceAtLeast(1f)
@@ -103,6 +103,7 @@ class EditOverlay(private val plan: RenderPlan) : CanvasOverlay(/* useInputFrame
         canvas.save()
         canvas.translate((cx * w).toFloat(), (cy * h).toFloat())
         canvas.rotate(rotationCw.toFloat())
+        if (flipX || flipY) canvas.scale(if (flipX) -1f else 1f, if (flipY) -1f else 1f) // mirror (wave 1), about the text's centre
         // The layout is maxW wide; its text block is centred on the item's position.
         val left = when (s.align) { Align.LEFT -> -lw / 2; Align.CENTER -> -maxW / 2f; Align.RIGHT -> lw / 2 - maxW }
         canvas.translate(left, -lh / 2)

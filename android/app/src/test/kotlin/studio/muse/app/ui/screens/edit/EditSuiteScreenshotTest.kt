@@ -63,7 +63,10 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 "matte_soon",
                 // The owner's report (2026-11-08): one 15 s 9:16 take — the start state, a split with the second clip
                 // selected (trim handles), and its sound detached to its own lane.
-                "take_start", "take_split", "take_detached").map { arrayOf<Any>(t, it) }
+                "take_start", "take_split", "take_detached",
+                // Wave 1 (plans/edit-parity.md): text style editor, transform with mirror and opacity, ratio with the
+                // blur fill, and a timeline with a freeze frame and a selected text item.
+                "w1_text", "w1_transform", "w1_ratio", "w1_timeline").map { arrayOf<Any>(t, it) }
         }
 
         /** The design's project: four takes (3.0 / 4.2 / 5.2 / 5.6 s), captions, a hook, music with beats, a voice-over. */
@@ -148,6 +151,26 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 host = host.copy(lookThumbs = thumbs())
             }
             "export" -> ui = ui.copy(panel = Panel.EXPORT)
+            "w1_text", "w1_transform", "w1_ratio", "w1_timeline" -> {
+                val one = EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1080, 1920, 30.0, true))
+                val c = EditSuiteController(kotlinx.coroutines.MainScope(), object : EditBackend {
+                    override suspend fun estimate(kind: String, source: studio.muse.app.data.EditorSourceDto, options: kotlinx.serialization.json.JsonObject?) = null to "off"
+                    override suspend fun run(kind: String, source: studio.muse.app.data.EditorSourceDto, options: kotlinx.serialization.json.JsonObject?, onProgress: (studio.muse.app.data.EditorJob) -> Unit) = null to "off"
+                }, ui.copy(project = one, playheadSec = 0.0, selectedId = null))
+                c.act(EditAction.Scrub(4.0, end = true)); c.act(EditAction.Freeze(1.5))
+                c.act(EditAction.Scrub(1.0, end = true)); c.act(EditAction.AddText)
+                val tid = c.ui.value.selectedId!!
+                val st = (c.project!!.tracks.first { it.kind == TrackKind.TEXT }.items.single() as studio.muse.core.edit.TextItem).style
+                c.act(EditAction.EditText(tid, "Day one in Lisbon"))
+                c.act(EditAction.SetTextStyle(tid, st.copy(stroke = studio.muse.core.edit.Stroke("#000000", .08), uppercase = true)))
+                when (state) {
+                    "w1_text" -> c.act(EditAction.Open(Panel.TEXT))
+                    "w1_transform" -> { c.act(EditAction.Select(c.project!!.mainClips[0].id)); c.act(EditAction.Mirror(x = true)); c.act(EditAction.SetOpacity(.8)); c.act(EditAction.Open(Panel.TRANSFORM)) }
+                    "w1_ratio" -> { c.act(EditAction.Select(c.project!!.mainClips[0].id)); c.act(EditAction.ClipFit(studio.muse.core.edit.Fit.CONTAIN)); c.act(EditAction.Fill(studio.muse.core.edit.CanvasFill.BLUR)); c.act(EditAction.Open(Panel.RATIO)) }
+                    else -> c.act(EditAction.Scrub(2.0, end = true))
+                }
+                ui = c.ui.value.copy(message = null)
+            }
             "take_start", "take_split", "take_detached" -> {
                 val one = EditSuiteViewModel.newProject("take_1", 15.0, SourceSize(1080, 1920, 30.0, true))
                 ui = ui.copy(project = one, playheadSec = 0.0, canUndo = false, selectedId = null)

@@ -71,7 +71,9 @@ import studio.muse.core.edit.ExportCodec
 import studio.muse.core.edit.ExportResolution
 import studio.muse.core.edit.ExportSettings
 import studio.muse.core.edit.ExportShape
+import studio.muse.core.edit.AnimKind
 import studio.muse.core.edit.Font
+import studio.muse.core.edit.Ease
 import studio.muse.core.edit.KfProp
 import studio.muse.core.edit.Mask
 import studio.muse.core.edit.MaskShape
@@ -105,6 +107,8 @@ data class SuiteHost(
     val lookThumbs: Map<String, ImageBitmap> = emptyMap(),
     /** Decoded sound levels per asset id, for the timeline's sound lanes. */
     val waves: Map<String, Peaks> = emptyMap(),
+    /** Saves the frame under the playhead as a photo on the phone (Pictures/MUSE). */
+    val saveFrame: () -> Unit = {},
 )
 
 /** The open panel as a bottom sheet. */
@@ -123,7 +127,7 @@ fun SuiteSheet(ui: EditSuiteUi, panel: Panel, host: SuiteHost, act: (EditAction)
 fun ColumnScope.PanelBody(ui: EditSuiteUi, panel: Panel, host: SuiteHost, act: (EditAction) -> Unit) {
     run {
         when (panel) {
-            Panel.EDIT -> EditBody(ui, act)
+            Panel.EDIT -> EditBody(ui, host, act)
             Panel.SPEED -> SpeedBody(ui, act)
             Panel.TRANSFORM -> TransformBody(ui, act)
             Panel.AUDIO -> AudioBody(ui, host, act)
@@ -147,7 +151,7 @@ private fun signed(v: Int) = if (v > 0) "+$v" else if (v < 0) "−${-v}" else "0
 
 // ======================================================================= Edit
 @Composable
-private fun EditBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
+private fun EditBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Unit) {
     val m = muse
     val sel = ui.selection?.second
     val clip = ui.activeClip
@@ -167,6 +171,11 @@ private fun EditBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         tools.forEach { (icon, label, a) -> ToolTile(icon, label, false, { act(a) }, Modifier.weight(1f)) }
     }
+    T("Hold a clip on the timeline to move it; drag the edges of the selected one to trim.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+    val hold = (sel as? VideoClip)?.holdSec
+    if (hold != null) SuiteSlider(((hold - .1) / 9.9).toFloat(), { f, done -> act(EditAction.HoldLength(.1 + f * 9.9, done)) }, label = "Freeze frame length", valueText = "${fmt1(hold)} s")
+    SuiteButton("Freeze frame", { act(EditAction.Freeze()) }, Modifier.fillMaxWidth(), icon = "pause")
+    SuiteButton("Save frame as photo", host.saveFrame, Modifier.fillMaxWidth(), icon = "image")
     OptRow("Ripple", "Deleting closes the gap on that track", ui.ripple, { act(EditAction.Ripple(!ui.ripple)) })
     OptRow("Snap cuts to beats", if (ui.project?.let { SuiteOps.beatTimes(it, false).isNotEmpty() } == true) "Split lands on the nearest beat" else "Detect beats in Audio first", ui.snapToBeats,
         { act(EditAction.SnapToBeats(!ui.snapToBeats)) })
@@ -291,12 +300,35 @@ private fun TransformBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
             }
         }
     }
-    val x = tr.x ?: .5; val y = tr.y ?: .5; val sc = tr.scale ?: 1.0; val rot = tr.rotation ?: 0.0
+    // Values at the playhead: a keyframed property shows its curve's value there (moving the slider sets that key).
+    val span = p.locate(id)?.let { (t, i) -> itemSpan(p, t, t.items[i]) }
+    val local = span?.let { (ui.playheadSec - it.startSec).coerceIn(0.0, it.endSec - it.startSec) } ?: 0.0
+    fun at(prop: KfProp, static: Double) = studio.muse.core.edit.propAt(keys, prop, static, local)
+    val x = at(KfProp.X, tr.x ?: .5); val y = at(KfProp.Y, tr.y ?: .5); val sc = at(KfProp.SCALE, tr.scale ?: 1.0); val rot = at(KfProp.ROTATION, tr.rotation ?: 0.0)
+    val op = at(KfProp.OPACITY, when (item) { is Visual -> item.opacity; is TextItem -> item.opacity; else -> null } ?: 1.0)
     line("Position x", KfProp.X, "${((x - .5) * 200).roundToInt()}", ((x + .5) / 2).toFloat()) { f -> tr.copy(x = r2(f * 2.0 - .5)) }
     line("Position y", KfProp.Y, "${((y - .5) * 200).roundToInt()}", ((y + .5) / 2).toFloat()) { f -> tr.copy(y = r2(f * 2.0 - .5)) }
     line("Scale", KfProp.SCALE, "${(sc * 100).roundToInt()}%", ((sc - .1) / 2.9).toFloat()) { f -> tr.copy(scale = r2(.1 + f * 2.9)) }
     line("Rotation", KfProp.ROTATION, "${rot.roundToInt()}°", ((rot + 180) / 360).toFloat()) { f -> tr.copy(rotation = (f * 360.0 - 180).roundToInt().toDouble()) }
-    T("◆ adds a keyframe at the playhead", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        SuiteSlider(op.toFloat(), { f, done -> act(EditAction.SetOpacity(f.toDouble(), done)) }, Modifier.weight(1f), label = "Opacity", valueText = "${(op * 100).roundToInt()}%")
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.size(48.dp).press { act(EditAction.AddKeyframe(KfProp.OPACITY)) }.semantics { contentDescription = "Keyframe Opacity" }, contentAlignment = Alignment.Center) {
+            EIc(if (keys?.get(KfProp.OPACITY).isNullOrEmpty()) "keyframe" else "diamond", 14.dp, if (keys?.get(KfProp.OPACITY).isNullOrEmpty()) m.t.muted else m.t.accent)
+        }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        SuiteChip("Flip horizontally", tr.flipX == true, { act(EditAction.Mirror(x = tr.flipX != true)) })
+        SuiteChip("Flip vertically", tr.flipY == true, { act(EditAction.Mirror(y = tr.flipY != true)) })
+    }
+    T("◆ adds a keyframe at the playhead; a keyframed slider sets the key there", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+    if (!keys.isNullOrEmpty()) {
+        SuiteLabel("Easing")
+        SuiteChips(listOf(Ease.LINEAR to "Linear", Ease.EASE_IN to "Ease in", Ease.EASE_OUT to "Ease out", Ease.EASE_IN_OUT to "Smooth", Ease.HOLD to "Hold").map { it.first.wire to it.second },
+            ui.keyEase.wire, { w -> act(EditAction.KeyEase(Ease.entries.first { it.wire == w })) })
+        val here = keys.values.flatten().any { kotlin.math.abs(it.t - local) <= .05 }
+        if (here) SuiteLink("Remove keyframes here") { act(EditAction.RemoveKeyframes()) }
+    }
     // Crop (pictures only): how much is cut from each side, 0–45 %.
     if (item is Visual) {
         val cr = item.crop ?: studio.muse.core.edit.Crop()
@@ -324,7 +356,11 @@ private fun AudioBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Uni
     val clip = SuiteOps.soundClip(p, ui.selectedId, ui.activeClip)
     val music = SuiteOps.musicTrack(p)
     val name = if (clip is VideoClip) "clip sound" else "clip"
-    val gain = clip?.let { if (it.muted == true) 0.0 else it.volume ?: 1.0 } ?: 1.0
+    // With volume keyframes, the gain at the playhead (the clip's volume × the curve there).
+    val keyGain = clip?.keyframes?.get(KfProp.VOLUME)?.takeIf { it.isNotEmpty() }?.let { k ->
+        p.locate(clip.id)?.let { (t, i) -> itemSpan(p, t, t.items[i]) }?.let { sp -> studio.muse.core.edit.keyframeValue(k, (ui.playheadSec - sp.startSec).coerceAtLeast(0.0)) }
+    } ?: 1.0
+    val gain = clip?.let { if (it.muted == true) 0.0 else (it.volume ?: 1.0) * keyGain } ?: 1.0
     // The clip's own sound (owner report 2026-11-08): on/off, and detach it to its own lane.
     if (clip != null) {
         val on = clip.muted != true
@@ -335,8 +371,15 @@ private fun AudioBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Uni
             SuiteButton("Detach audio", { act(EditAction.DetachAudio) }, Modifier.fillMaxWidth(), icon = "waveform", enabled = on)
     }
     val db = SuiteOps.gainToDb(gain).coerceIn(-24.0, 6.0)
-    SuiteSlider(((db + 24) / 30).toFloat(), { f, done -> act(EditAction.Volume(f * 30.0 - 24, done)) }, label = "Volume · $name",
-        valueText = if (gain <= 0) "Muted" else "${if (db < -0.05) "−" else if (db > 0.05) "+" else ""}${fmt1(kotlin.math.abs(db)).removeSuffix(".0")} dB")
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        SuiteSlider(((db + 24) / 30).toFloat(), { f, done -> act(EditAction.Volume(f * 30.0 - 24, done)) }, Modifier.weight(1f), label = "Volume · $name",
+            valueText = if (gain <= 0) "Muted" else "${if (db < -0.05) "−" else if (db > 0.05) "+" else ""}${fmt1(kotlin.math.abs(db)).removeSuffix(".0")} dB")
+        Spacer(Modifier.width(10.dp))
+        val vk = clip?.keyframes?.get(KfProp.VOLUME)
+        Box(Modifier.size(48.dp).press(enabled = clip != null) { act(EditAction.AddKeyframe(KfProp.VOLUME)) }.semantics { contentDescription = "Keyframe Volume" }, contentAlignment = Alignment.Center) {
+            EIc(if (vk.isNullOrEmpty()) "keyframe" else "diamond", 14.dp, if (vk.isNullOrEmpty()) m.t.muted else m.t.accent)
+        }
+    }
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         val fi = clip?.fadeInSec ?: 0.0; val fo = clip?.fadeOutSec ?: 0.0
         SuiteSlider((fi / 3).toFloat(), { f, done -> act(EditAction.Fades(r1(f * 3.0), fo, done)) }, Modifier.weight(1f), label = "Fade in", valueText = "${fmt1(fi)} s")
@@ -382,14 +425,17 @@ private fun r1(v: Double) = Math.round(v * 10) / 10.0
 private fun TextBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     val m = muse
     val sel = ui.selection?.second as? TextItem
+    SuiteButton("Add text", { act(EditAction.AddText) }, Modifier.fillMaxWidth(), icon = "text-t", primary = sel == null)
     if (sel != null) {
         SuiteLabel("Text")
         var text by remember(sel.id) { mutableStateOf(sel.text) }
         BasicTextField(
             text, { text = it; act(EditAction.EditText(sel.id, it)) },
-            Modifier.fillMaxWidth().background(m.t.surface).border(1.dp, m.t.line).padding(12.dp),
+            Modifier.fillMaxWidth().background(m.t.surface).border(1.dp, m.t.line).padding(12.dp).semantics { contentDescription = "Text" },
             textStyle = m.type.body.copy(color = m.t.ink), cursorBrush = SolidColor(m.t.accent),
         )
+        TextStyleEditor(sel, act)
+        AnimPicker(sel.id, sel.animIn, sel.animOut, sel.durationSec, text = true, act = act)
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         SuiteLabel("Hook templates", Modifier.weight(1f))
@@ -407,6 +453,69 @@ private fun TextBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
             EIc("plus", 16.dp, m.t.ink)
         }
     }
+}
+
+private val TEXT_COLOURS = listOf("#FFFFFF", "#111111", "#FFE600", "#FF2D87", "#22D3EE", "#4ADE80")
+
+/** Font, weight, size, colour, alignment, outline, shadow and background of a text item (every field of the contract's TextStyle). */
+@Composable
+private fun TextStyleEditor(t: TextItem, act: (EditAction) -> Unit) {
+    val m = muse
+    val st = t.style
+    fun set(n: studio.muse.core.edit.TextStyle, done: Boolean = true) = act(EditAction.SetTextStyle(t.id, n, done))
+    SuiteLabel("Font")
+    SuiteChips(Font.entries.map { it.wire to it.wire.replaceFirstChar(Char::uppercase) }, st.font.wire, { w -> set(st.copy(font = Font.entries.first { it.wire == w })) })
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        SuiteSeg(listOf("400" to "Regular", "700" to "Bold", "900" to "Black"), st.weight.toString(), { set(st.copy(weight = it.toInt())) }, Modifier.weight(1f), height = 34.dp, fill = true)
+        SuiteSeg(listOf("left" to "Left", "center" to "Centre", "right" to "Right"), st.align.wire, { w -> set(st.copy(align = studio.muse.core.edit.Align.entries.first { it.wire == w })) }, Modifier.weight(1f), height = 34.dp, fill = true)
+    }
+    SuiteSlider(((st.sizePct - .015) / (.25 - .015)).toFloat(), { f, done -> set(st.copy(sizePct = r3s(.015 + f * (.25 - .015))), done) }, label = "Size", valueText = "${(st.sizePct * 1000).roundToInt() / 10.0}%")
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        T("Colour", m.type.body.copy(fontSize = 13.sp), m.t.muted, Modifier.width(64.dp))
+        TEXT_COLOURS.forEach { c -> Swatch(c, st.color.equals(c, true)) { set(st.copy(color = c)) } }
+    }
+    SuiteSlider((((st.letterSpacing ?: 0.0) + .1) / .6).toFloat(), { f, done -> set(st.copy(letterSpacing = r3s(-.1 + f * .6)), done) }, label = "Letter spacing", valueText = "${((st.letterSpacing ?: 0.0) * 100).roundToInt()}")
+    OptRow("Capitals", "Shows the text in capitals", st.uppercase == true, { set(st.copy(uppercase = if (st.uppercase == true) null else true)) })
+    OptRow("Outline", "A line around each letter", st.stroke != null, { set(st.copy(stroke = if (st.stroke != null) null else studio.muse.core.edit.Stroke("#000000", .08))) })
+    st.stroke?.let { k ->
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            T("Outline", m.type.body.copy(fontSize = 13.sp), m.t.muted, Modifier.width(64.dp))
+            TEXT_COLOURS.forEach { c -> Swatch(c, k.color.equals(c, true)) { set(st.copy(stroke = k.copy(color = c))) } }
+        }
+        SuiteSlider((k.widthPct / .3).toFloat(), { f, done -> set(st.copy(stroke = k.copy(widthPct = r3s(f * .3))), done) }, label = "Outline width", valueText = "${(k.widthPct * 100).roundToInt()}")
+    }
+    OptRow("Shadow", "A soft shadow under the text", st.shadow != null, { set(st.copy(shadow = if (st.shadow != null) null else studio.muse.core.edit.Shadow("#000000", .5, .08, .04))) })
+    OptRow("Background", "A box behind the text", st.background != null, { set(st.copy(background = if (st.background != null) null else studio.muse.core.edit.TextBackground("#000000", .6, .25, .2))) })
+    st.background?.let { b ->
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            T("Box", m.type.body.copy(fontSize = 13.sp), m.t.muted, Modifier.width(64.dp))
+            TEXT_COLOURS.forEach { c -> Swatch(c, b.color.equals(c, true)) { set(st.copy(background = b.copy(color = c))) } }
+        }
+        SuiteSlider(b.opacity.toFloat(), { f, done -> set(st.copy(background = b.copy(opacity = r3s(f.toDouble()))), done) }, label = "Box opacity", valueText = "${(b.opacity * 100).roundToInt()}%")
+    }
+}
+
+private fun r3s(v: Double) = Math.round(v * 1000) / 1000.0
+
+private val ANIMS = listOf(AnimKind.NONE to "None", AnimKind.FADE to "Fade", AnimKind.POP to "Pop", AnimKind.SLIDE_UP to "Slide up", AnimKind.SLIDE_DOWN to "Slide down", AnimKind.ZOOM to "Zoom", AnimKind.TYPEWRITER to "Typewriter")
+
+/** In / out animation of a text or image item: kind and duration (typewriter is for text only). */
+@Composable
+fun AnimPicker(id: String, animIn: studio.muse.core.edit.Anim?, animOut: studio.muse.core.edit.Anim?, itemSec: Double, text: Boolean, act: (EditAction) -> Unit) {
+    val kinds = ANIMS.filter { text || it.first != AnimKind.TYPEWRITER }
+    val maxD = minOf(2.0, itemSec / 2).coerceAtLeast(.1)
+    @Composable
+    fun side(label: String, cur: studio.muse.core.edit.Anim?, set: (studio.muse.core.edit.Anim?, Boolean) -> Unit) {
+        SuiteLabel(label)
+        SuiteChips(kinds.map { it.first.wire to it.second }, (cur?.kind ?: AnimKind.NONE).wire, { w ->
+            val k = AnimKind.entries.first { it.wire == w }
+            set(if (k == AnimKind.NONE) null else studio.muse.core.edit.Anim(k, minOf(cur?.durationSec ?: .4, maxD)), true)
+        })
+        if (cur != null) SuiteSlider(((cur.durationSec - .1) / (maxD - .1).coerceAtLeast(.01)).toFloat(), { f, done -> set(cur.copy(durationSec = r3s(.1 + f * (maxD - .1))), done) },
+            label = "$label length", valueText = "${fmt1(cur.durationSec)} s")
+    }
+    side("Animation in", animIn) { a, done -> act(EditAction.SetAnim(id, a, animOut, done)) }
+    side("Animation out", animOut) { a, done -> act(EditAction.SetAnim(id, animIn, a, done)) }
 }
 
 // ======================================================================= Captions (EM2, E3)
@@ -731,6 +840,21 @@ private fun RatioBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     val p = ui.project ?: return
     ShapeTiles(ExportShape.of(p.canvas.width, p.canvas.height)) { act(EditAction.Ratio(it)) }
     T("Changing shape re-frames each clip to keep it centred. Captions move with the safe area.", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+    SuiteLabel("Background")
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        listOf("#000000", "#FFFFFF", "#1B1916", "#F2EDE4", "#0E3B2E", "#3A2A5A", "#B4483A").forEach { c ->
+            Swatch(c, (p.canvas.background ?: "#000000").equals(c, true)) { act(EditAction.Background(c)) }
+        }
+    }
+    SuiteSeg(listOf("color" to "Colour", "blur" to "Blur of the clip"), if (p.canvas.fill == studio.muse.core.edit.CanvasFill.BLUR) "blur" else "color",
+        { act(EditAction.Fill(if (it == "blur") studio.muse.core.edit.CanvasFill.BLUR else studio.muse.core.edit.CanvasFill.COLOR)) }, Modifier.fillMaxWidth(), height = 34.dp, fill = true)
+    T("Shows where the picture doesn't fill the frame", m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
+    val clip = (ui.selection?.second as? VideoClip)?.takeIf { s -> p.main.items.any { it.id == s.id } } ?: ui.activeClip
+    if (clip != null) {
+        SuiteLabel("This clip")
+        SuiteSeg(listOf("cover" to "Fill the frame", "contain" to "Whole picture"), if (clip.fit == studio.muse.core.edit.Fit.CONTAIN) "contain" else "cover",
+            { act(EditAction.ClipFit(if (it == "contain") studio.muse.core.edit.Fit.CONTAIN else studio.muse.core.edit.Fit.COVER)) }, Modifier.fillMaxWidth(), height = 34.dp, fill = true)
+    }
 }
 
 @Composable

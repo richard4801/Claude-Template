@@ -242,6 +242,7 @@ private fun EditSuiteEditor(takeId: String, onBack: () -> Unit) {
         cancelExport = vm::cancelExport,
         lookThumbs = thumbs,
         waves = waves,
+        saveFrame = vm::saveFrame,
     )
     EditSuiteContent(ui, frames, host, vm.controller::act, onClose = onBack, drawText = player == null) { mod ->
         val p = player
@@ -498,6 +499,29 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
             controller.act(EditAction.AddAudio(id, (dur * 1000).roundToInt() / 1000.0, voiceOver, atSec))
             controller.project?.assets?.firstOrNull { it.upload == id }?.let { files[it.id] = f }
             controller.project?.let { loadWaves(it) }
+        }
+    }
+
+    /** The frame under the playhead, rendered like the export (looks, text, captions), into Pictures/MUSE. */
+    fun saveFrame() {
+        val p = controller.project ?: return
+        if (sourceFile == null) return c.repo.toast("This video has no file to take a frame from")
+        val t = controller.ui.value.playheadSec
+        viewModelScope.launch {
+            val png = runCatching {
+                studio.muse.app.platform.edit.FrameStill(app, looks).png(composer.plan(playable(p), files), files, t, minOf(p.canvas.width, 2160))
+            }.getOrNull() ?: return@launch c.repo.toast("Couldn't take that frame · try again")
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    val v = ContentValues().apply {
+                        put(MediaStore.Images.Media.DISPLAY_NAME, "MUSE frame ${System.currentTimeMillis() / 1000}.png"); put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                        if (Build.VERSION.SDK_INT >= 29) put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/MUSE")
+                    }
+                    val uri = app.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v) ?: return@runCatching false
+                    app.contentResolver.openOutputStream(uri)?.use { it.write(png) } != null
+                }.getOrDefault(false)
+            }
+            c.repo.toast(if (ok) "Frame saved to Photos · Pictures/MUSE" else "Couldn't save the frame to this phone")
         }
     }
 

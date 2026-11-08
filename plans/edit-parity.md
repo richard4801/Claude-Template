@@ -34,28 +34,28 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 |---|---|---|---|---|
 | Multi-track timeline (main + overlay, audio, text, captions) | Has | Has | — | |
 | Magnetic main track (no gaps) | Has | Has | — | |
-| Trim by dragging edges, frame-snapped | Has | Has | — | Main clips (WS8). Audio, text and overlay items have no handles yet: S. Mac: Every item has handles; the main-clip start trim was fixed in WS9. |
+| Trim by dragging edges, frame-snapped | Has | Has | — | Main clips (WS8). Audio, text and overlay items have no handles yet: S. Mac: Every item has handles; the main-clip start trim was fixed in WS9. Android: Every item (wave 1). |
 | Split at the playhead | Has | Has | — | One tap in the transport. Mac: S key, or the toolbar |
 | Delete / ripple delete | Has | Has | — | Mac: ⌫; Ripple toggle |
-| **Reorder clips (long-press and drag)** | Missing | Has | S | Engine `moveMainClip` exists; there is no gesture. Mac: Drag a main clip (WS9) |
-| **Move items in time** (text, music, overlays) | Missing | Has | S | Engine `moveItem` exists; there is no gesture. Important for serious editing. Mac: Drag on its row; not between rows |
+| **Reorder clips (long-press and drag)** | Has | Has | S | Engine `moveMainClip` exists; there is no gesture. Mac: Drag a main clip (WS9). Android: Long-press a main clip and drag (wave 1). |
+| **Move items in time** (text, music, overlays) | Has | Has | S | Engine `moveItem` exists; there is no gesture. Important for serious editing. Mac: Drag on its row; not between rows. Android: Long-press and drag; snaps to the playhead, edges and beats (wave 1). |
 | Duplicate | Has | Missing | — | |
 | Replace clip (keep edits) | Missing | Missing | S | |
-| **Freeze frame** | Missing | Missing | M | A still item from the current frame |
+| **Freeze frame** | Has | Missing | M | A still item from the current frame. Android: `holdSec` hold clip; Edit → Freeze frame, length by slider or edges (wave 1). |
 | **Reverse** | Missing | Missing | L | Needs a reversed proxy render on the device |
 | Slip edit | Missing | Missing | S | `trimClip` both ends at once |
 | Snapping (to the playhead, edges, beats) | Partial | Partial | S | Beats only. Mac: Beats only |
 | Timeline zoom (pinch) | Has | Has | — | 8–480 dp/s. Mac: Slider and ± buttons, 12–400 pt/s |
-| Frame-by-frame stepping buttons | Missing | Has | S | Scrub is frame-exact; ±1 frame buttons would help. Mac: ← / → keys |
+| Frame-by-frame stepping buttons | Has | Has | S | Scrub is frame-exact; ±1 frame buttons would help. Mac: ← / → keys. Android: ◀ ▶ in the transport (wave 1). |
 | Crop / rotate | Has | Has | — | Crop added in WS8. Mac: Crop section added in WS9 |
-| Mirror / flip | Missing | Missing | S | Transform `scaleX −1`; needs a contract field |
+| Mirror / flip | Has | Missing | S | Transform `scaleX −1`; needs a contract field. Android: `transform.flipX/flipY`; Transform panel (wave 1). |
 | Layers (overlay / PiP) | Has | Has | — | |
 | Hide or mute tracks | Partial | Has | S | Track headers are tablet-only; phone has none. Mac: And lock |
 | Adjustment layer | Missing | Missing | M | |
 | Undo / redo (100 steps), shared history with Claude | Has | Has | — | Mac: ⌘Z / ⇧⌘Z |
 | Drafts / autosave | Has | Has | — | Edit sessions and local drafts |
 | Apply to all (looks, transitions) | Has | Partial | — | Mac: Transitions only; looks per clip |
-| Extract frame as a photo | Missing | Missing | S | `FrameStill` exists |
+| Extract frame as a photo | Has | Missing | S | `FrameStill` exists. Android: Edit → Save frame as photo, rendered like the export (wave 1). |
 | Social safe-zone guides | Has | Has | — | |
 | Teleprompter, in-app camera | Missing | Missing | L | Outside Edit; the camera lives in the Suite |
 
@@ -83,14 +83,14 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 
 | Feature | Android | Mac | Size | Notes |
 |---|---|---|---|---|
-| **Add plain text** | Partial | Has | S | Only through hook templates. "Add text" plus a style editor is needed. Mac: Add text at the playhead |
-| **Text styling** (font, colour, stroke, shadow, background, spacing, size) | Partial | Partial | M | The model has all of it; the UI only edits the text itself. Mac: Font, colour, weight, size, align, outline, box, upper case; no outline colour, shadow or spacing |
+| **Add plain text** | Has | Has | S | Only through hook templates. "Add text" plus a style editor is needed. Mac: Add text at the playhead. Android: Text → Add text at the playhead (wave 1). |
+| **Text styling** (font, colour, stroke, shadow, background, spacing, size) | Has | Partial | M | The model has all of it; the UI only edits the text itself. Mac: Font, colour, weight, size, align, outline, box, upper case; no outline colour, shadow or spacing. Android: Font, weight, size, colour, alignment, spacing, capitals, outline, shadow, box (wave 1). |
 | Fonts library | Partial | Partial | M | Six bundled families. More fonts: **Content** (open licences, e.g. OFL, are an option). Mac: Same six families |
 | Import own fonts | Missing | Missing | M | |
 | Text templates / hooks | Has | Has | — | 10 hooks; more is **Content** |
-| In/out text animations | Partial | Has | S | The model has 7 kinds; there is no picker. Mac: Animate panel |
+| In/out text animations | Has | Has | S | The model has 7 kinds; there is no picker. Mac: Animate panel. Android: In / out picker with lengths (wave 1). |
 | Loop animations | Missing | Missing | M | |
-| Keyframed text | Partial | Has | S | Engine yes; the Transform panel works on text, but there is no text selection on the phone timeline lane yet |
+| Keyframed text | Has | Has | S | Engine yes; the Transform panel works on text, but there is no text selection on the phone timeline lane yet. Android: The Transform panel acts on the selected text (wave 1 fixed it moving the clip). |
 | Auto captions | Has | Has | — | Server helper |
 | Caption styles (word pop, karaoke, box, minimal, highlighter, neon) | Has | Has | — | |
 | Caption language choice | Missing | Missing | S | Server parameter |
@@ -107,7 +107,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Clip sound lane, detach / extract audio | Has | Partial | — | WS8. Mac: Sound lane with waveform and mute; no detach |
 | Extract audio from another video | Missing | Missing | S | Add another take's sound only |
 | Volume, mute, fade in/out | Has | Has | — | Mac: Up to +6 dB (fixed in WS9) |
-| Volume keyframes | Partial | Partial | S | Engine has `volume` keys; no UI. Mac: Engine only |
+| Volume keyframes | Has | Partial | S | Engine has `volume` keys; no UI. Mac: Engine only. Android: ◆ next to Volume; the slider sets the key at the playhead (wave 1). |
 | Auto-ducking under voice and speech | Has | Has | — | The research found no confirmed ducking in the other apps; MUSE leads here |
 | Beat detection, beat marks, snap to beats | Has | Has | — | |
 | Manual beat marks (tap) | Missing | Missing | S | |
@@ -145,10 +145,10 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Feature | Android | Mac | Size | Notes |
 |---|---|---|---|---|
 | Position, scale, rotation | Has | Has | — | Mac: Sliders set the key at the playhead once keyed (fixed in WS9) |
-| Opacity | Partial | Has | S | Engine yes; no button |
+| Opacity | Has | Has | S | Engine yes; no button. Android: Transform → Opacity with ◆ (wave 1). |
 | Volume | Partial | Partial | S | See Audio. Mac: Engine only |
 | Look / adjust / mask / crop keyframes | Missing | Missing | M each | |
-| Easing choice | Partial | Has | S | Engine has 5 eases; the UI always uses ease-in-out. Mac: Linear, in-out, ease out, hold |
+| Easing choice | Has | Has | S | Engine has 5 eases; the UI always uses ease-in-out. Mac: Linear, in-out, ease out, hold. Android: Linear, ease in, ease out, smooth, hold (wave 1). |
 | Keyframe list / move / delete on the timeline | Missing | Partial | M | Engine has `remove_keyframe`. Mac: Delete at the playhead, previous / next key (WS9); no timeline list |
 
 ## 8. Masks, chroma key and background removal
@@ -170,8 +170,8 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 |---|---|---|---|---|
 | Overlay video / PiP; add another take to the end | Has | Has | — | Fixed in WS8 |
 | Overlay photos / images | Partial | Has | S | The model has image items; the phone can't pick a photo yet. Mac: Import picture (WS9) |
-| Opacity | Partial | Has | S | Model yes; no slider |
-| **Blend modes** (multiply, screen, overlay, soft light, …) | Missing | Missing | M | New compositor mode (GL / Core Image) and a contract field |
+| Opacity | Has | Has | S | Model yes; no slider. Android: Transform → Opacity with ◆ (wave 1). |
+| **Blend modes** (multiply, screen, overlay, soft light, …) | Partial | Missing | M | New compositor mode (GL / Core Image) and a contract field. Android: Contract and reference done (wave 1); Android rendering needs a custom compositor (L), no control until then. |
 | Move an overlay to the main track and back | Missing | Missing | S | |
 | Split-screen layouts | Missing | Missing | M | |
 | Motion tracking (text or sticker follows an object) | Missing | Missing | XL | Tracker model |
@@ -182,9 +182,9 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 |---|---|---|---|---|
 | 9:16, 1:1, 4:5, 16:9 | Has | Has | — | |
 | More ratios (4:3, 2.35:1) | Missing | Missing | S | |
-| Background colour | Partial | Partial | S | `canvas.background` exists; no picker. Mac: Engine only |
-| Background blur fill | Missing | Missing | M | |
-| Fit / fill per clip | Partial | Partial | S | Model `fit`; no toggle. Mac: Engine only |
+| Background colour | Has | Partial | S | `canvas.background` exists; no picker. Mac: Engine only. Android: Ratio → Background (wave 1). |
+| Background blur fill | Has | Missing | M | Android: Ratio → Blur of the clip (`canvas.fill`, wave 1). |
+| Fit / fill per clip | Has | Partial | S | Model `fit`; no toggle. Mac: Engine only. Android: Ratio → This clip: Fill the frame / Whole picture (wave 1). |
 | Auto reframe (faces) | Partial | Has | M | Re-centring on ratio change exists; face-aware reframe is in the spec but not on Android. Mac: Vision faces on a ratio change |
 
 ## 11. Stickers

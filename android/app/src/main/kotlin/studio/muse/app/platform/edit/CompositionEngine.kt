@@ -267,6 +267,12 @@ class EditCompositionEngine(private val context: Context, private val looks: Loo
             // Keyed first (on the source colours), then the look in the contract's order; the colour matrix is baked
             // into the look's LUT when it has one.
             addAll(LookEffects.effects(LookEffects.stages(look.colorMatrix, look.look, looks.lutFor(look.look, files), fps, look.tone)))
+            // Wave 1, blur fill: blurred (a Gaussian with the box's variance, σ = r / √3) and darkened ×0.85.
+            look.fillBlur?.let { r ->
+                add(androidx.media3.effect.GaussianBlur((r / kotlin.math.sqrt(3.0)).toFloat().coerceAtLeast(1f)))
+                val k = studio.muse.core.edit.BLUR_FILL_DARKEN.toFloat()
+                add(androidx.media3.effect.RgbMatrix { _, _ -> floatArrayOf(k, 0f, 0f, 0f, 0f, k, 0f, 0f, 0f, 0f, k, 0f, 0f, 0f, 0f, 1f) })
+            }
         }
     }
 

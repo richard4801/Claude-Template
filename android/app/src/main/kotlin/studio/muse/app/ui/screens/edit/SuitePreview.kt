@@ -91,6 +91,13 @@ fun SuitePreview(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier 
         }
         // Safe-area switch: TikTok → Reels → Shorts → off.
         if (!safeChip) return@BoxWithConstraints
+        // Fullscreen (the phone): hides the timeline and tools; tap again to bring them back.
+        Box(Modifier.align(Alignment.TopEnd).padding(4.dp).size(48.dp).press { act(EditAction.Fullscreen) }.semantics { contentDescription = if (ui.fullscreen) "Exit fullscreen" else "Fullscreen" },
+            contentAlignment = Alignment.Center) {
+            Box(Modifier.size(32.dp).clip(RoundedCornerShape(2.dp)).background(Color.Black.copy(alpha = .45f)), contentAlignment = Alignment.Center) {
+                EIc("expand", 16.dp, Color.White)
+            }
+        }
         val next = when (ui.safeArea) { SafeArea.TIKTOK -> SafeArea.REELS; SafeArea.REELS -> SafeArea.SHORTS; SafeArea.SHORTS -> null; null -> SafeArea.TIKTOK }
         Row(
             Modifier.align(Alignment.TopStart).padding(10.dp).clip(RoundedCornerShape(2.dp)).background(Color.Black.copy(alpha = .45f))
@@ -134,7 +141,7 @@ private fun Overlays(p: EditProject, t: Double, w: Dp, h: Dp) {
                 a.chars?.let { n -> text = text.take(n) }
                 if (alpha <= 0f || text.isEmpty()) continue
                 Placed(propAt(k, KfProp.X, tr?.x ?: .5, local), propAt(k, KfProp.Y, tr?.y ?: .5, local) + a.dy, w, h,
-                    (propAt(k, KfProp.SCALE, tr?.scale ?: 1.0, local) * a.scale).toFloat(), propAt(k, KfProp.ROTATION, tr?.rotation ?: 0.0, local).toFloat()) {
+                    (propAt(k, KfProp.SCALE, tr?.scale ?: 1.0, local) * a.scale).toFloat(), propAt(k, KfProp.ROTATION, tr?.rotation ?: 0.0, local).toFloat(), tr?.flipX == true, tr?.flipY == true) {
                     StyledText(text, item.style, h, alpha, w * (item.style.maxWidthPct ?: .85).toFloat())
                 }
             }
@@ -157,8 +164,8 @@ private fun Overlays(p: EditProject, t: Double, w: Dp, h: Dp) {
 
 /** Puts [content] centred on (x, y) of the canvas (fractions). */
 @Composable
-private fun Placed(x: Double, y: Double, w: Dp, h: Dp, scale: Float, rotation: Float, content: @Composable () -> Unit) {
-    androidx.compose.ui.layout.Layout(content = { Box(Modifier.scale(scale).rotate(rotation)) { content() } }, modifier = Modifier.size(w, h)) { ms, c ->
+private fun Placed(x: Double, y: Double, w: Dp, h: Dp, scale: Float, rotation: Float, flipX: Boolean = false, flipY: Boolean = false, content: @Composable () -> Unit) {
+    androidx.compose.ui.layout.Layout(content = { Box(Modifier.rotate(rotation).scale(if (flipX) -scale else scale, if (flipY) -scale else scale)) { content() } }, modifier = Modifier.size(w, h)) { ms, c ->
         val pl = ms.first().measure(androidx.compose.ui.unit.Constraints(maxWidth = c.maxWidth))
         layout(c.maxWidth, c.maxHeight) { pl.place((x * c.maxWidth - pl.width / 2.0).toInt(), (y * c.maxHeight - pl.height / 2.0).toInt()) }
     }

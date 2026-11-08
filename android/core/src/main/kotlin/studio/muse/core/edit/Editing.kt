@@ -1,6 +1,7 @@
 package studio.muse.core.edit
 
 import kotlin.math.abs
+import kotlin.math.min
 
 /*
  * A small immutable editing API for the editor screens (which wait for the Figma review): every operation returns a
@@ -157,6 +158,13 @@ fun EditProject.splitAt(t: Double): EditProject? {
     spans.getOrNull(i + 1)?.let { if (t >= it.startSec) return null }
     val c = mainClips[i]
     val local = t - s.startSec
+    c.holdSec?.let { hold ->
+        // A freeze frame splits into two holds of the same frame.
+        val a = r6(local); val b = r6(hold - local)
+        if (a < HOLD_MIN_SEC - 1e-9 || b < HOLD_MIN_SEC - 1e-9 || main.items.size >= EditLimits.MAX_ITEMS_PER_TRACK) return null
+        val items = main.items.toMutableList().apply { set(i, c.copy(holdSec = a, fadeOutSec = null)); add(i + 1, c.copy(id = newId(c.id, dotted = true), holdSec = b, fadeInSec = null, transitionIn = null)) }
+        return replaceTrack(main, main.copy(items = items))
+    }
     val src = clipSourceAt(c, local)
     if (src - c.inSec < EditLimits.MIN_CLIP_SOURCE_SEC - 1e-9 || c.outSec - src < EditLimits.MIN_CLIP_SOURCE_SEC - 1e-9) return null
     if (main.items.size >= EditLimits.MAX_ITEMS_PER_TRACK) return null
@@ -174,6 +182,38 @@ private fun splitKeys(k: Keyframes?, at: Double, first: Boolean): Keyframes? = k
     val v = keyframeValue(keys, at)
     if (first) keys.filter { it.t < at - 1e-9 } + Keyframe(r6(at), r6(v))
     else listOf(Keyframe(0.0, r6(v), keys.lastOrNull { it.t <= at }?.ease)) + keys.filter { it.t > at + 1e-9 }.map { it.copy(t = r6(it.t - at)) }
+}
+
+/**
+ * Freeze frame (wave 1, the `freeze` op): at timeline [t] the main clip there is cut at that frame and a hold of the frame
+ * ([durationSec], 0.1–30) goes between the two pieces (at a clip's very start or end it goes before / after it).
+ * Returns the project and the hold's id; null outside the clips or when the hold is out of range.
+ */
+fun EditProject.freezeAt(t: Double, durationSec: Double = 1.0): Pair<EditProject, String>? {
+    if (durationSec < HOLD_MIN_SEC - 1e-9 || durationSec > HOLD_MAX_SEC + 1e-9) return null
+    val spans = timeline(this)
+    val k = spans.indexOfFirst { t >= it.startSec && t < it.endSec }.takeIf { it >= 0 } ?: return null
+    val c = mainClips[k]
+    val local = t - spans[k].startSec
+    val src = clipSourceAt(c, local)
+    val dur0 = asset(c.asset)?.durationSec ?: c.outSec
+    val frame = Math.round(min(src, dur0 - EditLimits.MIN_CLIP_SOURCE_SEC) * 1000) / 1000.0
+    val holdId = newId("c")
+    val hold = c.copy(id = holdId, inSec = frame, outSec = Math.round((frame + EditLimits.MIN_CLIP_SOURCE_SEC) * 1000) / 1000.0, speed = 1.0, speedCurve = null,
+        keyframes = null, fadeInSec = null, fadeOutSec = null, transitionIn = null, holdSec = Math.round(durationSec * 1000) / 1000.0)
+    val items = main.items.toMutableList()
+    var insertAt = if (local < 0.05) k else k + 1
+    if (local >= 0.05 && spans[k].endSec - t >= 0.05 && c.holdSec == null &&
+        src - c.inSec >= EditLimits.MIN_CLIP_SOURCE_SEC - 1e-9 && c.outSec - src >= EditLimits.MIN_CLIP_SOURCE_SEC - 1e-9) {
+        val x = (src - c.inSec) / (c.outSec - c.inSec)
+        val right = c.copy(id = newId(c.id, dotted = true), inSec = r6(src), transitionIn = null, fadeInSec = null,
+            speedCurve = c.speedCurve?.let { subCurve(it, x, 1.0) })
+        items[k] = c.copy(outSec = r6(src), fadeOutSec = null, speedCurve = c.speedCurve?.let { subCurve(it, 0.0, x) })
+        items.add(k + 1, right)
+        insertAt = k + 1
+    }
+    items.add(insertAt, hold)
+    return replaceTrack(main, main.copy(items = dropBadTransitions(items))) to holdId
 }
 
 /** Sets (or with null removes) the transition into main clip [clipId]. Refused on the first clip or when too long. */

@@ -209,6 +209,11 @@ private class Validator(val p: EditProject, presets: List<FilterPreset>, private
     private fun videoClip(g: String, t: Track, ii: Int, c: VideoClip) {
         clipBase(g, c, setOf(AssetKind.VIDEO))
         num("$g.speed", c.speed, EditLimits.MIN_SPEED, EditLimits.MAX_SPEED, false)
+        c.holdSec?.let { h ->
+            num("$g.holdSec", h, HOLD_MIN_SEC, HOLD_MAX_SEC, false)
+            if (c.speed != 1.0 || c.speedCurve != null) bad("$g.holdSec", "a freeze frame plays at 1× without a speed curve")
+        }
+        if (c.blend != null && t.kind != TrackKind.VIDEO) bad("$g.blend", "only on overlay tracks (video, image)")
         c.speedCurve?.let { sc ->
             if (sc.points.size < 2 || sc.points.size > 16) bad("$g.speedCurve.points", "2–16 points")
             sc.points.forEachIndexed { j, pt ->
