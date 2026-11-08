@@ -334,7 +334,7 @@ struct TimelineCanvas: View {
                 if let id = b.itemId, let c = session.project.track(trackId)?.item(id)?.videoClip {
                     let x = CGFloat(EditSuite.finiteSeconds(b.startSec)) * z
                     let w = max(4, CGFloat(EditSuite.finiteSeconds(b.endSec - b.startSec)) * z)
-                    wave(asset: c.asset, inSec: c.inSec, outSec: c.outSec, width: w - 12, height: h, kind: .main)
+                    wave(asset: c.asset, inSec: c.inSec, outSec: c.outSec, width: max(1, w - 12), height: h, kind: .main)
                         .padding(.horizontal, 6)
                         .frame(width: w, height: h)
                         .background(RoundedRectangle(cornerRadius: min(t.radii.control, 8), style: .continuous).fill(t.roles.field))

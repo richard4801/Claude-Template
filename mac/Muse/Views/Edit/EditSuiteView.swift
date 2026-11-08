@@ -270,7 +270,7 @@ struct EditSuiteEditor: View {
     /// Back, the title over its version line, the aspect ratio in the centre, Claude / Templates / Hook ideas as quiet
     /// buttons and Export as the one primary. Narrow (the Claude panel open, a small window): the quiet ones go icon-only.
     private func topBar(width w: CGFloat) -> some View {
-        let tight = w < 1080
+        let tight = w < topBarNeeds
         return HStack(spacing: Space.s3) {
             SuiteIconButton(systemName: "caret-left", label: "Close editor", action: onClose)
             VStack(alignment: .leading, spacing: 0) {
@@ -293,18 +293,8 @@ struct EditSuiteEditor: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel("Aspect ratio")
                 Spacer(minLength: Space.s2)
-                HStack(spacing: Space.s1) {
-                    if session.isOwner {
-                        SuiteToolButton(title: "Claude", icon: "chat-circle-text", filled: showClaude, plain: !showClaude, iconOnly: tight) { showClaude.toggle() }
-                            .accessibilityLabel(showClaude ? "Hide Claude" : "Show Claude")
-                            .help(session.liveConnected ? "This edit is shared live with Claude" : "Claude")
-                    }
-                    SuiteToolButton(title: "Templates", icon: "stack", plain: true, iconOnly: tight) { setMedia(true); session.binTab = .templates }
-                    SuiteToolButton(title: "Hook ideas", icon: "lightbulb", plain: true, iconOnly: tight) { session.mode = .captions }
-                    if !showInspector {
-                        SuiteToolButton(title: "Show inspector", icon: "sidebar-simple", plain: true, iconOnly: tight) { setInspector(true) }
-                    }
-                }
+                // Labelled when there's room, icon-only (tooltip + label) when not: never cut.
+                quietButtons(iconOnly: tight)
                 SuiteToolButton(title: "Export", icon: "export", accent: true) { showExport = true }
                     .keyboardShortcut("e", modifiers: .command)
                     .accessibilityLabel("Export")
@@ -313,6 +303,32 @@ struct EditSuiteEditor: View {
         .padding(.horizontal, Space.s4)
         .frame(height: 56)
         .background(t.roles.canvas)
+    }
+
+    /// The width the top bar needs with the quiet buttons labelled (text at about 7.4 pt a character in `label`, 9 in
+    /// `heading`); under it they go icon-only.
+    private var topBarNeeds: CGFloat {
+        let titles = ["Templates", "Hook ideas"] + (session.isOwner ? ["Claude"] : []) + (showInspector ? [] : ["Show inspector"])
+        let quiet = titles.reduce(CGFloat(0)) { $0 + 51 + CGFloat($1.count) * 7.4 + 4 }
+        let title = min(360, max(CGFloat(session.title.count) * 9, CGFloat(session.saveLine.count) * 7.2))
+        let ratio = CGFloat(EditSuite.Ratio.allCases.count) * 56 + 4
+        return 32 + 32 + 12 + title + 12 + 8 + 12 + ratio + 12 + 8 + 12 + quiet + 12 + 100 + 24
+    }
+
+    /// Claude (owner only), Templates, Hook ideas and, while the inspector is hidden, Show inspector.
+    private func quietButtons(iconOnly: Bool) -> some View {
+        HStack(spacing: Space.s1) {
+            if session.isOwner {
+                SuiteToolButton(title: "Claude", icon: "chat-circle-text", filled: showClaude, plain: !showClaude, iconOnly: iconOnly) { showClaude.toggle() }
+                    .accessibilityLabel(showClaude ? "Hide Claude" : "Show Claude")
+                    .help(session.liveConnected ? "This edit is shared live with Claude" : "Claude")
+            }
+            SuiteToolButton(title: "Templates", icon: "stack", plain: true, iconOnly: iconOnly) { setMedia(true); session.binTab = .templates }
+            SuiteToolButton(title: "Hook ideas", icon: "lightbulb", plain: true, iconOnly: iconOnly) { session.mode = .captions }
+            if !showInspector {
+                SuiteToolButton(title: "Show inspector", icon: "sidebar-simple", plain: true, iconOnly: iconOnly) { setInspector(true) }
+            }
+        }
     }
 
     // MARK: Messages

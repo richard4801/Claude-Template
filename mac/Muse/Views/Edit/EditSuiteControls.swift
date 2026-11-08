@@ -192,7 +192,7 @@ struct SuiteToolButton: View {
         let button = Button(action: action) {
             HStack(spacing: Space.s2) {
                 if let icon { Ph(icon, 15) }
-                if !iconOnly { Text(title).font(t.scale.label.font).lineLimit(1).fitProbe(title) }
+                if !iconOnly { Text(title).font(t.scale.label.font).lineLimit(1).fixedSize().fitProbe(title) }
             }
             .foregroundStyle(fg)
             .padding(.horizontal, iconOnly ? 0 : Space.s3)
