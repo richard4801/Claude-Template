@@ -13,10 +13,12 @@ import type { ChatEvent, DirectorClient } from '../camera/director.js';
 import { claudeMessages } from '../camera/schema.js';
 import { EDIT_TOOLS, type EditTool } from '../editor/mcpTools.js';
 import { RECREATE_TOOLS } from './mcpTools.js';
+import { SUITE_PROMPT, SUITE_TOOLS } from '../suite/mcpTools.js';
+import { assistOf } from '../suite/assist.js';
 import { recreateOf } from './references.js';
 import { editSessionsOf } from '../editor/sessions.js';
 
-export type AssistantContext = 'recreate' | 'edit';
+export type AssistantContext = 'recreate' | 'edit' | 'suite';
 /** The edit tools Claude also gets in a recreate thread (open the edit, read it, change it, undo). */
 const EDIT_IN_RECREATE = new Set(['list_takes', 'open_edit', 'get_edit', 'apply_edit_ops', 'undo_edit', 'get_frame']);
 
@@ -50,9 +52,9 @@ export class EditAssistant {
 
   /** The thread's tools, with its reference id (recreate) or session id (edit) taken out of the schema and filled in. */
   toolsFor(kind: AssistantContext): EditTool[] {
-    return kind === 'recreate' ? [...RECREATE_TOOLS, ...EDIT_TOOLS.filter(t => EDIT_IN_RECREATE.has(t.name))] : EDIT_TOOLS;
+    return kind === 'recreate' ? [...RECREATE_TOOLS, ...EDIT_TOOLS.filter(t => EDIT_IN_RECREATE.has(t.name))] : kind === 'suite' ? SUITE_TOOLS : EDIT_TOOLS;
   }
-  private fixed(kind: AssistantContext) { return kind === 'recreate' ? 'referenceId' : 'sessionId'; }
+  private fixed(kind: AssistantContext) { return kind === 'recreate' ? 'referenceId' : kind === 'suite' ? 'assistId' : 'sessionId'; }
   tools(kind: AssistantContext): BetaToolUnion[] {
     const key = this.fixed(kind);
     return this.toolsFor(kind).map(t => {
@@ -67,7 +69,7 @@ export class EditAssistant {
   async precheck(u: AuthUser, kind: AssistantContext, contextId: string, message: unknown) {
     if (typeof message !== 'string' || !message.trim()) throw new ApiError(400, 'bad_request', 'message: write something');
     if (message.length > 8000) throw new ApiError(400, 'bad_request', 'message: at most 8000 characters');
-    if (kind === 'recreate') await recreateOf(this.ctx).row(u, contextId); else await editSessionsOf(this.ctx).row(u, contextId);
+    if (kind === 'recreate') await recreateOf(this.ctx).row(u, contextId); else if (kind === 'suite') await assistOf(this.ctx).row(u, contextId); else await editSessionsOf(this.ctx).row(u, contextId);
     this.getClient();
     if (this.busy.has(contextId)) throw new ApiError(409, 'chat_busy', 'Claude is still working on this · wait for the reply');
   }
@@ -103,7 +105,9 @@ export class EditAssistant {
       const history = await this.history(threadId, message);
       const facts = kind === 'recreate'
         ? await (async () => { const r = await recreateOf(this.ctx).row(u, contextId); return `[Reference ${r.id} “${r.name}” · ${r.state}${r.recipe ? ` · ${r.recipe.slots.length} shots, ${r.recipe.source.durationSec} s` : ''}]`; })()
-        : await (async () => { const s = await editSessionsOf(this.ctx).row(u, contextId); return `[Edit session ${s.id} · revision ${s.revision}]`; })();
+        : kind === 'suite'
+          ? await (async () => { const v = await assistOf(this.ctx).get(u, contextId); return `[Suite shot ${v.id} · revision ${v.revision} · the prompt now: “${v.request.prompt.slice(0, 200)}”${v.pending.some(p => p.status === 'waiting') ? ' · waiting for the owner\'s approval' : ''}]`; })()
+          : await (async () => { const s = await editSessionsOf(this.ctx).row(u, contextId); return `[Edit session ${s.id} · revision ${s.revision}]`; })();
       history.push({ role: 'user', content: [{ type: 'text', text: `${facts}\n\n${message}` }] });
       const c = this.ctx.config;
       let stopReason = 'end_turn';
@@ -111,7 +115,7 @@ export class EditAssistant {
         if (step >= c.DIRECTOR_MAX_STEPS) { stopReason = 'max_steps'; finalText += '\n\n(I stopped after many steps · tell me to continue.)'; break; }
         const stream = client.beta.messages.stream({
           model: c.DIRECTOR_MODEL, max_tokens: c.DIRECTOR_MAX_TOKENS,
-          system: [{ type: 'text', text: kind === 'recreate' ? RECREATE_PROMPT : EDIT_PROMPT, cache_control: { type: 'ephemeral' } }],
+          system: [{ type: 'text', text: kind === 'recreate' ? RECREATE_PROMPT : kind === 'suite' ? SUITE_PROMPT : EDIT_PROMPT, cache_control: { type: 'ephemeral' } }],
           tools: this.tools(kind), messages: history, output_config: { effort: c.DIRECTOR_EFFORT }, cache_control: { type: 'ephemeral' },
           ...(c.DIRECTOR_FALLBACKS ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } : {}),
         });

@@ -9,6 +9,9 @@ import { createLocation, deleteLocation, listLocations } from '../suite/location
 import { createRig, deleteRig, listRigs, patchRig } from '../suite/rigs.js';
 import { addToCollection, collectionsOf, createCollection, deleteCollection, getCollection, listCollections, removeFromCollection, renameCollection } from '../suite/collections.js';
 import { discardQueued, listQueue, queueEstimate, queueShot, runQueued } from '../suite/queue.js';
+import { assistOf } from '../suite/assist.js';
+import { SUITE_TOOLS } from '../suite/mcpTools.js';
+import * as mcpTools from '../mcp/tools.js';
 
 export async function registerSuiteRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/v1/suite/catalog', async req => ctx.suite.catalog(req.user));
@@ -60,6 +63,14 @@ export async function registerSuiteRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post('/v1/library/collections/:id/items', async req => addToCollection(ctx, req.user, qid(req), req.body));
   app.post('/v1/library/collections/:id/items/remove', async req => removeFromCollection(ctx, req.user, qid(req), req.body));
   app.get('/v1/library/takes/:id/collections', async req => collectionsOf(ctx, req.user, qid(req)));
+  // Claude in the AI Suite: the shared composer draft, and the owner's yes to Claude's Generate.
+  const as = assistOf(ctx);
+  app.post('/v1/suite/assist', async req => as.create(req.user, req.body));
+  app.get('/v1/suite/assist/:id', async req => as.get(req.user, qid(req)));
+  app.patch('/v1/suite/assist/:id', async req => as.patch(req.user, qid(req), req.body));
+  app.post('/v1/suite/assist/:id/pending/:pid', async req => as.answer(req.user, qid(req), (req.params as { pid: string }).pid, req.body));
+  const register = (mcpTools as { registerMcpTools?: (tools: unknown[]) => void }).registerMcpTools;
+  if (register) register(SUITE_TOOLS);
   await registerRecreateRoutes(app, ctx); // Recreate this edit (workstream 1)
   app.get('/v1/suite/settings', { config: { owner: true } }, async req => ctx.suite.settingsView(req.user.studioId));
   app.patch('/v1/suite/settings', { config: { owner: true } }, async req => ctx.suite.updateSettings(req.user, req.body));
