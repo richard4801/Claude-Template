@@ -254,7 +254,7 @@ class ClaudeChatSurfacesScreenshotTest(private val theme: String, private val su
             "state_error" -> { has("You're offline"); has("The chat comes back when the connection does.") }
             "state_offline" -> { has("Claude on your Mac is offline"); has("Use the studio API key") }
             "state_streaming" -> { has("Stop"); has("Grabbing a frame") }
-            "state_failed" -> { has("Claude stopped before finishing. Try again."); has("Try again") }
+            "state_failed" -> { has("Claude couldn't finish this reply."); has("Try again") }
             else -> { has("Send"); if (!keyboard) has("Copy") }
         }
         val name = if (surface.startsWith("state_")) "chat_${theme}_$surface" else "chat_${theme}_${surface}_${device}_${if (keyboard) "kb" else "nokb"}"

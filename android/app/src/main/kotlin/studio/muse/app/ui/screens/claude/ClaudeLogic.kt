@@ -592,7 +592,7 @@ object ChatClean {
         return out.joinToString("\n")
     }
 
-    const val FAILED = "Claude stopped before finishing. Try again."
+    const val FAILED = "Claude couldn't finish this reply."
     const val NETWORK = "Couldn't reach the server. Check your connection, then try again."
 }
 

@@ -73,7 +73,7 @@ The old Camera chat pieces (`YouBubble`, `ClaudeBlock`, `WorkingBlock`, `NoticeV
   - Timeouts: "Claude took too long to answer. Try again."
   - Network: "Couldn't reach the studio. Check your connection and try again."
   - Rate limits: "Claude is busy right now. Try again in a minute."
-  - Anything technical (traces, JSON, paths, error codes, "Error:" lines): "Claude stopped before finishing. Try again."
+  - Anything technical (traces, JSON, paths, error codes, "Error:" lines): "Claude couldn't finish this reply."
   - This applies to failed turns, notices, upload errors and the load error. Failed turns use the fuller list in "Copy and rules" below.
 - **Copy:** the API fallback note no longer names an environment variable ("The API fallback isn't set up on the server yet"). The chat names no model or provider. Claude chat is owner-only, as before.
 
@@ -133,7 +133,7 @@ On the phone, "this Mac" reads "your Mac".
 | Studio key answering | Answering on the studio API key, billed per use |
 | Before the first words | Waiting for your Mac… · Claude is working… |
 | Tool detail | `<Tool>: <summary>. Finished.` · `Still running.` · `This step didn't work; Claude usually tries another way.` |
-| Failed turn (+ Try again) | Claude stopped before finishing. Try again. · Couldn't reach the server. Check your connection, then try again. · Claude took too long to answer. Try again. · Your Claude plan has reached its limit for now. Try again in a little while. · Claude Code is signed out on your Mac. Sign in again, then try again. · Claude Code isn't ready on your Mac. Open MUSE on your Mac to set it up, then try again. · That message waited too long and expired. Send it again. · Your Mac stopped answering. Check MUSE on your Mac, then try again. |
+| Failed turn (+ Try again) | Claude couldn't finish this reply. · Couldn't reach the server. Check your connection, then try again. · Claude took too long to answer. Try again. · Your Claude plan has reached its limit for now. Try again in a little while. · Claude Code is signed out on your Mac. Sign in again, then try again. · Claude Code isn't ready on your Mac. Open MUSE on your Mac to set it up, then try again. · That message waited too long and expired. Send it again. · Your Mac stopped answering. Check MUSE on your Mac, then try again. |
 | Stopped | Stopped. Send a message to carry on. |
 | Phone offline (the chat can't load) | You're offline · The chat comes back when the connection does. |
 | Empty | Chat with Claude + the surface's hint |
