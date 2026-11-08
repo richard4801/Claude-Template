@@ -293,8 +293,8 @@ extension AppStore {
         suite.browserOpen = false
         if tool == .swap || tool == .recast {
             suite.swap.kind = tool == .recast ? .recast : .swap
+            suite.swap.addOn = nil // Edit / Fast are swap models in the Model list now (coordinator 2026-11-08)
             if tool == .recast {
-                suite.swap.addOn = nil
                 if suite.swap.cast.isEmpty { addRecastPerson() }
             }
             if clip == nil && isDemo { Task { await useSampleClip(bad: false, quiet: true) } }

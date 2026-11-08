@@ -235,11 +235,11 @@ struct ComposerBottomBar: View {
         }
     }
 
-    /// Swap's add-ons as pills (Edit, Fast · beta, Upscale), each with its own price; tapping one again goes back to
-    /// the Quality ladder.
+    /// Swap's Upscale pill (on the finished swap take). The Edit and Fast · beta add-ons are models now: the owner picks
+    /// them in the Model list (coordinator decision 2026-11-08, as on Android), so their pills are gone.
     private func addOnPills(compact: Bool) -> some View {
         let pills = SwapAddOns.pills(store.videoFeatures, clipSeconds: store.clip?.durationSec, takes: store.takeCount, lipSync: store.lipSync,
-                                     upscaleSeconds: swapTake?.durationSec)
+                                     upscaleSeconds: swapTake?.durationSec).filter { $0.quality == nil }
         return HStack(spacing: 6) {
             ForEach(pills) { p in addOnPill(p, compact: compact) }
         }
