@@ -198,6 +198,15 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
         if (!c.repo.demo) poster = c.repo.api.referencePoster(referenceId)?.let { b -> android.graphics.BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }
         model.load()
     }
+    // Each shot's keyframe for the tiles (the authenticated thumb route), loaded once.
+    var slotThumbs by remember(referenceId) { mutableStateOf<Map<String, androidx.compose.ui.graphics.ImageBitmap>>(emptyMap()) }
+    LaunchedEffect(referenceId) {
+        if (c.repo.demo) return@LaunchedEffect
+        for (s in recipe.slots) {
+            val b = c.repo.api.referenceSlotThumb(referenceId, s.id) ?: continue
+            android.graphics.BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap()?.let { img -> slotThumbs = slotThumbs + (s.id to img) }
+        }
+    }
     // The reference video, from its authenticated route into the cache (≤ 60 s), so the player needs no token.
     LaunchedEffect(referenceId) {
         if (c.repo.demo) return@LaunchedEffect
@@ -281,7 +290,7 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
                     { err -> if (err is kotlinx.coroutines.CancellationException) throw err; model.setExportProgress(null, "This phone couldn't make the video. Try again.") })
             }
         },
-    ), picture = poster, media = RecreateMedia(video, { id -> studio.takes.firstOrNull { it.id == id }?.videoUrl }, built, editLabel))
+    ), picture = poster, media = RecreateMedia(video, { id -> studio.takes.firstOrNull { it.id == id }?.videoUrl }, built, editLabel, slotThumbs))
     // The chat refreshes the recipe's fill when Claude has matched or priced shots.
     ClaudeChatSheet(open = claude, onDismiss = { claude = false; scope.launch { model.load() } },
         contextKind = "recreate", contextId = referenceId, title = name ?: "Recreate")

@@ -111,6 +111,8 @@ class RecreateMedia(
     val edit: androidx.media3.common.Player? = null,
     /** "Preview of the cut" when the server's preview leaves part of the edit out (plans/api.md "The built edit, rendered"). */
     val editLabel: String? = null,
+    /** Each shot's keyframe from the reference (slotId → picture), for the tiles. */
+    val slotThumbs: Map<String, ImageBitmap> = emptyMap(),
 )
 
 private val LocalRecreateMedia = androidx.compose.runtime.staticCompositionLocalOf { RecreateMedia() }
@@ -362,7 +364,15 @@ private fun Tile(ui: RecreateBuildUi, s: RecipeSlot, i: Int, scores: Boolean, se
         modifier.clip(shape).border(if (selected) 2.dp else 0.dp, if (selected) m.roles.selection else Color.Transparent, shape)
             .press(onClick = onClick).semantics(mergeDescendants = true) { contentDescription = "Shot ${i + 1}, $tag"; this.selected = selected; role = Role.Button },
     ) {
-        StandIn(ui, i, Modifier.fillMaxSize())
+        // The picture: your take's thumbnail when the shot comes from it, else the reference's own frame, else a calm tone.
+        val media = LocalRecreateMedia.current
+        val takeThumb = ui.slotFill(s.id)?.takeId?.let { id -> ui.takes.firstOrNull { it.id == id }?.thumb }
+        val frame = media.slotThumbs[s.id]
+        when {
+            takeThumb != null -> studio.muse.app.ui.components.RefImage(takeThumb, Modifier.fillMaxSize())
+            frame != null -> Image(frame, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            else -> StandIn(ui, i, Modifier.fillMaxSize())
+        }
         Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Box(Modifier.clip(RoundedCornerShape(m.radii.chip)).background(Color.Black.copy(alpha = .6f)).padding(horizontal = 6.dp, vertical = 2.dp)) {
                 T("${i + 1}", m.scale.micro.tabular(), Color.White, maxLines = 1)

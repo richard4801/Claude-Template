@@ -228,6 +228,8 @@ interface MuseApi {
     suspend fun learnGaps(limit: Int = 10): List<LearnGap> = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
     /** A reference's poster PNG (an authenticated route, so not an image URL); null when it has expired. */
     suspend fun referencePoster(referenceId: String): ByteArray? = null
+    /** A shot's keyframe from the reference (PNG; the Recipe's tiles). Null when there is none. */
+    suspend fun referenceSlotThumb(referenceId: String, slotId: String): ByteArray? = null
     /**
      * What the editor's AI helpers can do now (`GET /v1/editor/features`). `matte.available` is false while the cut-out
      * runs on the mock: Remove background and Tap to keep then read "Coming soon". A server without it: all available.
