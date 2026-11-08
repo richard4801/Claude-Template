@@ -124,6 +124,8 @@ struct OutfitDraft {
     var state: ShootState = .idle
     var outfitId: String?
     var angles: [ImageRef?] = [nil, nil, nil, nil]
+    /// The angle open full size (ImageLightbox), an index into `lightboxItems`.
+    var viewing: Int?
 }
 
 enum Niches {

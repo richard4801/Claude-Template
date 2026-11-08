@@ -93,6 +93,8 @@ extension SnapshotRunner {
         await paidHelpersCheck(store, takeId: "rx_full", note: note)
         store.takes.removeAll { $0.id.hasPrefix("rx_") }
         store.go(.home)
+        // Round 2's new screens (outfit full view, Settings, the model picker): every control pressed once.
+        await screensWalk(store, note: note)
         note("ALL DONE")
     }
 

@@ -149,7 +149,8 @@ enum SnapshotRunner {
             store.suite.picker = nil
             state.overlay = nil
             store.themeID = .a
-            await settingsMockShots(store, dir: dir)   // Settings redesign (owner 2026-11-08): before and the proposed mock
+            await settingsMockShots(store, dir: dir)
+            await outfitShots(store, dir: dir)   // Outfits: the new outfit's angles full size (owner 2026-11-08)   // Settings redesign (owner 2026-11-08): before and the proposed mock
             await fitCheck(store, dir: dir)
             await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
             await editLayoutShots(store, dir: dir)   // Edit layout audit (owner 2026-11-08): three window sizes, four themes
