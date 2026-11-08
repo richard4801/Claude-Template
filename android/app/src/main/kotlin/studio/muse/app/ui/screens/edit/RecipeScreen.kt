@@ -223,9 +223,15 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
     val prefs by c.prefs.collectAsState()
     var claude by remember { mutableStateOf(false) }
     var built by remember(referenceId) { mutableStateOf<androidx.media3.common.Player?>(null) }
-    LaunchedEffect(ui.builtSessionId, ui.builtRevision) {
+    // The built edit plays as itself or not at all: "Preparing the preview…" while it renders or downloads, "The preview
+    // didn't render · Retry" when neither the server's render nor the phone's (all takes' real video) is there.
+    var editStatus by remember(referenceId) { mutableStateOf<String?>(null) }
+    var previewTry by remember(referenceId) { mutableStateOf(0) }
+    LaunchedEffect(ui.builtSessionId, ui.builtRevision, previewTry) {
         val sid = ui.builtSessionId ?: return@LaunchedEffect
         if (c.repo.demo) return@LaunchedEffect // demo mode has no media to build from
+        built?.release(); built = null
+        editStatus = PREVIEW_PREPARING
         val rendered = server.preview(sid)
         val next: androidx.media3.common.Player? = if (rendered != null) {
             androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
@@ -235,9 +241,9 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
             runCatching { local.load(sid) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
             local.player()
         }
-        built?.release()
         built = next
         editLabel = rendered?.render?.label
+        editStatus = if (next == null) PREVIEW_FAILED else null
     }
     androidx.compose.runtime.DisposableEffect(referenceId) { onDispose { built?.release() } }
     // Shots being made: their progress from the studio's live jobs.
@@ -290,11 +296,14 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
                     { err -> if (err is kotlinx.coroutines.CancellationException) throw err; model.setExportProgress(null, "This phone couldn't make the video. Try again.") })
             }
         },
-    ), picture = poster, media = RecreateMedia(video, { id -> studio.takes.firstOrNull { it.id == id }?.videoUrl }, built, editLabel, slotThumbs))
+    ), picture = poster, media = RecreateMedia(video, { id -> studio.takes.firstOrNull { it.id == id }?.videoUrl }, built, editLabel, slotThumbs, editStatus, onRetryEdit = { previewTry++ }))
     // The chat refreshes the recipe's fill when Claude has matched or priced shots.
     ClaudeChatSheet(open = claude, onDismiss = { claude = false; scope.launch { model.load() } },
         contextKind = "recreate", contextId = referenceId, title = name ?: "Recreate")
 }
+
+const val PREVIEW_PREPARING = "Preparing the preview…"
+const val PREVIEW_FAILED = "The preview didn't render"
 
 /** When the server restarted while reading the video and didn't come back in time. */
 const val RECIPE_RESTARTED = "The server restarted while reading this video. Try again"

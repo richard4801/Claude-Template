@@ -113,6 +113,9 @@ class RecreateMedia(
     val editLabel: String? = null,
     /** Each shot's keyframe from the reference (slotId → picture), for the tiles. */
     val slotThumbs: Map<String, ImageBitmap> = emptyMap(),
+    /** The built edit isn't playable yet: "Preparing the preview…" or "The preview didn't render" (with [onRetryEdit]). */
+    val editStatus: String? = null,
+    val onRetryEdit: () -> Unit = {},
 )
 
 private val LocalRecreateMedia = androidx.compose.runtime.staticCompositionLocalOf { RecreateMedia() }
@@ -423,15 +426,23 @@ private fun Player(label: String, ui: RecreateBuildUi, yours: Boolean, picture: 
         Box(Modifier.fillMaxWidth().let { if (height != null) it.height(height) else it.weight(1f) }.clip(RoundedCornerShape(m.radii.container)).background(Color.Black).padding(vertical = 12.dp)
             .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
             Box(Modifier.aspectRatio(9f / 16f, matchHeightConstraintsFirst = true).clip(RoundedCornerShape(4.dp))) {
+                val status = if (yours && built == null) media.editStatus else null
                 when {
                     // The real built edit: its own cuts, speed, camera moves, text and Look, on the reference's timeline.
                     built != null -> SyncedSurface(built, t, ui.playing, muted = true, Modifier.fillMaxSize())
+                    // Built but not playable yet: say so; never pictures or takes standing in for the edit.
+                    status != null -> Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically),
+                        horizontalAlignment = Alignment.CenterHorizontally) {
+                        T(status, m.scale.caption, Color.White, maxLines = 2)
+                        if (status == PREVIEW_FAILED) Box(Modifier.heightIn(min = 48.dp).press(onClick = media.onRetryEdit).padding(horizontal = 12.dp)
+                            .semantics { role = Role.Button; contentDescription = "Retry the preview" }, contentAlignment = Alignment.Center) { T("Retry", m.scale.label, Color.White, maxLines = 1) }
+                    }
                     video != null -> SyncedVideo(video.first, video.second, ui.playing, muted = yours, Modifier.fillMaxSize())
                     picture != null && !yours -> Image(picture, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                     else -> StandIn(ui, i + (if (yours) 1 else 0), Modifier.fillMaxSize(), icon = false)
                 }
                 // The reference's own video already shows its text; elsewhere the recipe's text stands in for it.
-                if ((yours && built == null) || (!yours && media.reference == null)) ui.recipe.texts.firstOrNull { it.startSec <= t && t < it.endSec && it.text != studio.muse.core.edit.RecipeJson.UNREAD_WORDS }?.let { x ->
+                if ((yours && built == null && status == null) || (!yours && media.reference == null)) ui.recipe.texts.firstOrNull { it.startSec <= t && t < it.endSec && it.text != studio.muse.core.edit.RecipeJson.UNREAD_WORDS }?.let { x ->
                     val bias = when (x.position) { "Top" -> -.7f; "Middle" -> 0f; else -> .6f }
                     T(x.text, m.scale.caption.copy(fontWeight = FontWeight.Bold), Color.White, Modifier.align(androidx.compose.ui.BiasAlignment(0f, bias)).padding(horizontal = 8.dp), maxLines = 2)
                 }
