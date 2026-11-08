@@ -13,14 +13,62 @@ public struct ClaudeThread: Codable, Hashable, Sendable, Identifiable {
     public var claudeSessionId: String?
     public var createdAt: Double
     public var updatedAt: Double
+    /// Recreate and edit threads (workstream 1): the role, the MUSE tools for that screen and the id they act on. The Mac
+    /// seeds its Claude Code with it. nil on older servers and camera threads.
+    public var brief: ClaudeBrief?
 
-    public init(id: String, contextKind: String, contextId: String, claudeSessionId: String? = nil, createdAt: Double, updatedAt: Double) {
+    public init(id: String, contextKind: String, contextId: String, claudeSessionId: String? = nil, createdAt: Double, updatedAt: Double,
+                brief: ClaudeBrief? = nil) {
         self.id = id
         self.contextKind = contextKind
         self.contextId = contextId
         self.claudeSessionId = claudeSessionId
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.brief = brief
+    }
+
+    enum CodingKeys: String, CodingKey { case id, contextKind, contextId, claudeSessionId, createdAt, updatedAt, brief }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        contextKind = (try? c.decode(String.self, forKey: .contextKind)) ?? ""
+        contextId = (try? c.decode(String.self, forKey: .contextId)) ?? ""
+        claudeSessionId = try? c.decodeIfPresent(String.self, forKey: .claudeSessionId)
+        createdAt = (try? c.decode(Double.self, forKey: .createdAt)) ?? 0
+        updatedAt = (try? c.decode(Double.self, forKey: .updatedAt)) ?? 0
+        brief = try? c.decodeIfPresent(ClaudeBrief.self, forKey: .brief)
+    }
+}
+
+/// `ClaudeThread.brief`: `{prompt, tools[], referenceId}` (recreate) or `{prompt, tools[], sessionId}` (edit).
+public struct ClaudeBrief: Codable, Hashable, Sendable {
+    public var prompt: String
+    public var tools: [String]
+    public var referenceId: String?
+    public var sessionId: String?
+
+    public init(prompt: String, tools: [String] = [], referenceId: String? = nil, sessionId: String? = nil) {
+        self.prompt = prompt; self.tools = tools; self.referenceId = referenceId; self.sessionId = sessionId
+    }
+
+    enum CodingKeys: String, CodingKey { case prompt, tools, referenceId, sessionId }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        prompt = (try? c.decode(String.self, forKey: .prompt)) ?? ""
+        tools = (try? c.decode([String].self, forKey: .tools)) ?? []
+        referenceId = try? c.decodeIfPresent(String.self, forKey: .referenceId)
+        sessionId = try? c.decodeIfPresent(String.self, forKey: .sessionId)
+    }
+
+    /// What Claude Code is started with (`--append-system-prompt`): the server's prompt plus the id it acts on.
+    public var systemPrompt: String? {
+        let p = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !p.isEmpty else { return nil }
+        var lines = [p]
+        if let r = referenceId, !r.isEmpty { lines.append("The reference: \(r).") }
+        if let s = sessionId, !s.isEmpty { lines.append("The edit session: \(s).") }
+        return lines.joined(separator: "\n\n")
     }
 }
 

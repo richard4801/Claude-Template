@@ -42,6 +42,9 @@ struct RecreatePanel: View {
         ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: Space.s4) {
+                    // The Cast step (Release 1 item E): who plays the lead in the new shots, chosen before Build.
+                    RecreateCastRow()
+                    SuiteRule()
                     if let s = rs.selected {
                         shot(s, index: rs.selectedSlot, of: rs.slots.count)
                     }
@@ -75,6 +78,7 @@ struct RecreatePanel: View {
                     Text(b).scaled(t.scale.caption, t.roles.ink).fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text("Not described yet").scaled(t.scale.caption, t.roles.ink2)
+                    RecreateBriefsButton()
                 }
                 Text("Camera: \(camera.lowercased()) · Speed: \(speed)").scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
             }
@@ -93,7 +97,8 @@ struct RecreatePanel: View {
         let failed = rs.fillErrors[s.id]
         let cant = state == "to_generate" ? rs.estimateErrors[s.id] : nil
         let starting = rs.generatingSlots.contains(s.id) && state != "generating"
-        let shown = failed != nil ? "Didn’t generate" : (starting ? "Generating" : RecreateText.fill(state))
+        let swapping = (f?.method ?? rs.estimateInfo[s.id]?.method) == "swap"
+        let shown = status(state: state, swapping: swapping, failed: failed != nil, swapFailed: f?.fallback == "generate", starting: starting)
         VStack(alignment: .leading, spacing: Space.s2) {
             HStack {
                 Text(shown).scaled(t.scale.label, failed != nil ? t.roles.caution : t.roles.ink).lineLimit(1)
@@ -111,6 +116,9 @@ struct RecreatePanel: View {
                 .fixedSize(horizontal: false, vertical: true)
             if state == "generating" || starting, let p = progress(f) {
                 RProgress(value: Double(p) / 100)
+            }
+            if state == "to_generate", !starting {
+                RecreateMethodPicker(slotId: s.id)
             }
             if rs.fill != nil, state != "generating", !starting {
                 HStack(spacing: Space.s2) {
@@ -138,6 +146,15 @@ struct RecreatePanel: View {
         .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field))
     }
 
+    /// The slot's status word: how it is made (swap or a new shot) and where it is.
+    private func status(state: String, swapping: Bool, failed: Bool, swapFailed: Bool, starting: Bool) -> String {
+        if failed { return swapFailed ? "Swap didn’t work" : "Didn’t generate" }
+        if starting || state == "generating" { return swapping ? "Swapping in" : "Generating" }
+        if swapping && state == "to_generate" { return "To swap in" }
+        if swapping && state == "ready" { return "Swapped in" }
+        return RecreateText.fill(state)
+    }
+
     /// The slot's price: its estimate when priced, else the fill's own figure.
     private func price(_ slotId: String, _ f: RecreateFill.SlotFill?) -> String? {
         if let e = store.recreate.estimates[slotId], e.ok { return RecreateText.money(e.estimate) }
@@ -153,11 +170,17 @@ struct RecreatePanel: View {
     private func line(_ s: Recipe.Slot, state: String, f: RecreateFill.SlotFill?, aspect: String, failed: String?, cant: String?, starting: Bool) -> String {
         if let failed { return failed }
         if let cant { return cant }
-        if state == "generating" || starting { return "Being made with your model. You can leave this page; it carries on." }
-        if state == "ready" { return "Generated for this shot." }
+        let swap = (f?.method ?? store.recreate.estimateInfo[s.id]?.method) == "swap"
+        if state == "generating" || starting {
+            return swap ? "Your lead is being swapped into this shot. You can leave this page; it carries on."
+                        : "Being made with your model. You can leave this page; it carries on."
+        }
+        if state == "ready" { return swap ? "Swapped into the reference shot." : "Generated for this shot." }
         if let r = f?.reason { return r }
         switch state {
-        case "to_generate": return "Made with your model: \(String(format: "%.1f", s.length)) s, \(aspect)."
+        case "to_generate":
+            if swap { return "Your lead in the reference’s own \(String(format: "%.1f", s.length)) s: its camera, speed and look come with it." }
+            return "Made with your model: \(String(format: "%.1f", s.length)) s, \(aspect)."
         case "matched": return "From one of your takes."
         default: return "Pick a take for this shot."
         }
@@ -283,8 +306,13 @@ struct RecreateCompare: View {
                     metric("Shots", rs.match?.shots)
                     Spacer(minLength: Space.s2)
                     if let w = rs.weakestSlot {
-                        SuiteToolButton(title: "Fix shot \(w + 1)", icon: "arrows-clockwise", plain: true) { store.fixWeakestRecreateShot() }
+                        SuiteToolButton(title: "Fix shot \(w + 1)", icon: "arrows-clockwise", plain: true) { store.openRecreateFix(w) }
                     }
+                }
+                if let line = bakedLine {
+                    // Swapped shots (G2): their camera, speed and look are the reference's own, so they count as matched.
+                    Text(line).scaled(t.scale.caption, t.roles.ink2).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityLabel(line)
                 }
                 HStack(spacing: Space.s4) {
                     RecreatePlayer(label: "Reference")
@@ -299,6 +327,17 @@ struct RecreateCompare: View {
             RecreateLanes(scores: true)
                 .frame(height: EditSuiteEditor.timelineHeight)
         }
+    }
+
+    /// "Already in the shot: shot 2's camera, speed and look (swapped into the reference shot)."
+    private var bakedLine: String? {
+        let rs = store.recreate
+        let parts = rs.slots.compactMap { s -> String? in
+            guard let b = rs.baked[s.id], !b.isEmpty else { return nil }
+            return "\(rs.shotName(s.id).lowercased())’s \(RecreateBaked.words(b))"
+        }
+        guard !parts.isEmpty else { return nil }
+        return "Already in the shot: " + parts.joined(separator: "; ") + ". They come from the reference itself, so they match."
     }
 
     private func metric(_ name: String, _ v: Double?, big: Bool = false) -> some View {

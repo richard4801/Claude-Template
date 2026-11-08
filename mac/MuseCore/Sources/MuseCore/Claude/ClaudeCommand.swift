@@ -14,12 +14,15 @@ public struct ClaudeCommand: Hashable, Sendable {
     public var token: String
     public var blender: Blender?
     public var resume: String?
+    /// The thread's brief (recreate and edit threads): appended to Claude Code's system prompt.
+    public var appendSystemPrompt: String?
 
-    public init(mcpURL: String, token: String, blender: Blender? = nil, resume: String? = nil) {
+    public init(mcpURL: String, token: String, blender: Blender? = nil, resume: String? = nil, appendSystemPrompt: String? = nil) {
         self.mcpURL = mcpURL
         self.token = token
         self.blender = blender
         self.resume = resume
+        self.appendSystemPrompt = appendSystemPrompt
     }
 
     public static let disallowed = ["Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch"]
@@ -33,6 +36,7 @@ public struct ClaudeCommand: Hashable, Sendable {
         a.append("--disallowedTools")
         a += Self.disallowed
         a += ["--permission-mode", "dontAsk", "--setting-sources", "user"]
+        if let p = appendSystemPrompt, !p.isEmpty { a += ["--append-system-prompt", p] }
         if let resume, !resume.isEmpty { a += ["--resume", resume] }
         return a
     }

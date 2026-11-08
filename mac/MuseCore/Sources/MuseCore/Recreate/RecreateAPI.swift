@@ -6,50 +6,234 @@ public protocol RecreateAPI: Sendable {
     func reference(_ id: String) async throws -> RecreateReference
     /// Uploads the video (≤ 60 s) and starts its analysis; returns the reference in `analyzing`.
     func createReference(file: URL, contentType: String, name: String?, progress: UploadProgress?) async throws -> RecreateReference
+    /// A public TikTok, Instagram Reel or YouTube link: the server fetches it (`source: "link"`, phase "Fetching the
+    /// video"), or returns the member's reference from the same link (`cached: true`). Refusals throw `link_*` / `too_long`.
+    func createReference(link: String, name: String?) async throws -> RecreateReference
     func patchReference(_ id: String, keep: Bool?, name: String?) async throws -> RecreateReference
     func deleteReference(_ id: String) async throws
     func fill(_ id: String) async throws -> RecreateFill
     /// Scores the studio's takes against each slot (free); the fill then says which slots are matched and which to generate.
     func matchSlots(_ id: String, modelId: String?) async throws
-    /// The price of making one slot as a new shot. Nothing is held. `quality` nil = the server's default.
-    func estimateSlot(_ id: String, slotId: String, modelId: String, quality: String?) async throws -> RecreateSlotEstimate
-    /// Makes one slot as a new shot: a Suite job, held and charged like any shot. Only after the person confirmed the price.
-    func fillSlot(_ id: String, slotId: String, modelId: String, quality: String?) async throws -> RecreateSlotFillStart
+    /// The price of making one slot: swapped into the reference's own shot (the server's default) or a new shot. Nothing is
+    /// held. `quality` nil = the server's default; `options.method` nil = the server's default (swap where it can run).
+    func estimateSlot(_ id: String, slotId: String, modelId: String, quality: String?, options: RecreateFillOptions) async throws -> RecreateSlotEstimate
+    /// Makes one slot: a swap or a Suite shot, held and charged like any job. Only after the person confirmed the price.
+    func fillSlot(_ id: String, slotId: String, modelId: String, quality: String?, options: RecreateFillOptions) async throws -> RecreateSlotFillStart
     func apply(_ id: String, _ req: RecreateApplyRequest) async throws -> RecreateApplyResult
+    /// `POST /v1/edit-sessions/{id}/preview` (owner): renders the session's current revision (once per revision).
+    func startPreview(sessionId: String) async throws -> EditPreviewRender
+    /// `GET /v1/edit-sessions/{id}/preview?revision`.
+    func preview(sessionId: String, revision: Int?) async throws -> EditPreviewRender
+    /// `POST /v1/recreate/references/{id}/export {sessionId, sound}`: the built edit with the guide sound, or silent.
+    /// A guide export without the reference's sound gets `409 no_reference_sound`.
+    func startExport(_ id: String, sessionId: String, sound: String) async throws -> RecreateServerExport
+    /// `GET /v1/recreate/references/{id}/export?sessionId&sound`.
+    func exportState(_ id: String, sessionId: String, sound: String) async throws -> RecreateServerExport
+    /// "Fix shot N" in Compare: swaps that shot's clip in the built edit for a take (or a finished fill job's take), as one
+    /// undoable change; its timing, transition, ramp, camera and look stay. 409 `not_built_here`, `slot_not_in_edit`,
+    /// `job_not_done`; 400 for an unknown take.
+    func replaceSlot(_ id: String, slotId: String, sessionId: String, take: String, baseRevision: Int?) async throws -> RecreateReplaceResult
+    /// "Write the shot briefs" (G8): its price, or why it isn't available. Nothing is held.
+    func briefsEstimate(_ id: String) async throws -> RecreateBriefsEstimate
+    /// The owner confirmed the price: one call writes every shot's brief, the summary and tags. Charged from the wallet.
+    func writeBriefs(_ id: String) async throws -> RecreateBriefsWritten
 }
 
-/// `POST …/slots/{slotId}/estimate`: the shot request the slot becomes, and its price (nothing held).
+/// `POST …/briefs/estimate` → this.
+public struct RecreateBriefsEstimate: Codable, Hashable, Sendable {
+    public var available: Bool
+    /// Why it isn't available (points to Settings → Claude, or to asking Claude on the Mac for free).
+    public var reason: String?
+    /// How many shots it writes.
+    public var slots: Int?
+    public var estimateUsd: Double
+    /// "Write the shot briefs · about $0.02"
+    public var label: String
+    public var priceLine: String?
+
+    public init(available: Bool, reason: String? = nil, slots: Int? = nil, estimateUsd: Double, label: String, priceLine: String? = nil) {
+        self.available = available; self.reason = reason; self.slots = slots; self.estimateUsd = estimateUsd; self.label = label; self.priceLine = priceLine
+    }
+
+    enum CodingKeys: String, CodingKey { case available, reason, slots, estimateUsd, label, priceLine }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        available = c.o(.available) ?? false
+        reason = c.o(.reason)
+        if let n: Int = c.o(.slots) { slots = n } else if let a: [String] = c.o(.slots) { slots = a.count } else { slots = nil }
+        estimateUsd = c.o(.estimateUsd) ?? 0
+        label = c.o(.label) ?? "Write the shot briefs"
+        priceLine = c.o(.priceLine)
+    }
+}
+
+/// `POST …/briefs/write {confirm: true}` → this; `reference` replaces the one on screen.
+public struct RecreateBriefsWritten: Decodable, Hashable, Sendable {
+    public var referenceId: String?
+    public var written: [String]
+    public var costUsd: Double?
+    public var reference: RecreateReference?
+
+    public init(referenceId: String? = nil, written: [String], costUsd: Double? = nil, reference: RecreateReference? = nil) {
+        self.referenceId = referenceId; self.written = written; self.costUsd = costUsd; self.reference = reference
+    }
+
+    enum CodingKeys: String, CodingKey { case referenceId, written, costUsd, reference }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        referenceId = c.o(.referenceId)
+        written = c.o(.written) ?? []
+        costUsd = c.o(.costUsd)
+        reference = c.o(.reference)
+    }
+}
+
+extension Recipe {
+    /// Shots the analysis couldn't describe yet ("Not described yet"): "Write the shot briefs" is offered for them.
+    public var slotsWithoutBriefs: [String] { slots.filter { RecreateText.brief($0.brief) == nil }.map(\.id) }
+}
+
+extension RecreateAPI {
+    /// The server's default method (swap where it can run, else generate).
+    public func estimateSlot(_ id: String, slotId: String, modelId: String, quality: String?) async throws -> RecreateSlotEstimate {
+        try await estimateSlot(id, slotId: slotId, modelId: modelId, quality: quality, options: RecreateFillOptions())
+    }
+    public func fillSlot(_ id: String, slotId: String, modelId: String, quality: String?) async throws -> RecreateSlotFillStart {
+        try await fillSlot(id, slotId: slotId, modelId: modelId, quality: quality, options: RecreateFillOptions())
+    }
+}
+
+/// How a slot is made (G2): `method` swap (the lead put into the reference's own shot) or generate (a new shot);
+/// `keepBackground` false = "Use your own setting" (swap only); `outfitId` the lead's outfit when one is chosen.
+public struct RecreateFillOptions: Hashable, Sendable {
+    public var method: String?
+    public var keepBackground: Bool?
+    public var outfitId: String?
+    public init(method: String? = nil, keepBackground: Bool? = nil, outfitId: String? = nil) {
+        self.method = method; self.keepBackground = keepBackground; self.outfitId = outfitId
+    }
+}
+
+/// What a swap leaves baked in: the reference's camera, speed and look are already in the shot.
+public enum RecreateBaked {
+    public static func words(_ parts: [String]) -> String {
+        let names = parts.map { p -> String in
+            switch p {
+            case "camera": return "camera"
+            case "speed": return "speed"
+            case "look": return "look"
+            default: return p.replacingOccurrences(of: "_", with: " ")
+            }
+        }
+        switch names.count {
+        case 0: return ""
+        case 1: return names[0]
+        default: return names.dropLast().joined(separator: ", ") + " and " + names.last!
+        }
+    }
+}
+
+/// `POST …/slots/{slotId}/replace` → this.
+public struct RecreateReplaceResult: Codable, Hashable, Sendable {
+    public var sessionId: String
+    public var revision: Int?
+    public var slotId: String
+    public var itemId: String?
+    public var takeId: String?
+    public var inSec: Double?
+    public var label: String?
+    /// "The take is shorter than the shot, so it plays at 80%".
+    public var note: String?
+    /// A swapped take is baked: what it already carries (camera, speed, look).
+    public var baked: [String]?
+
+    public init(sessionId: String, revision: Int?, slotId: String, itemId: String? = nil, takeId: String? = nil, inSec: Double? = nil,
+                label: String? = nil, note: String? = nil, baked: [String]? = nil) {
+        self.sessionId = sessionId; self.revision = revision; self.slotId = slotId; self.itemId = itemId; self.takeId = takeId
+        self.inSec = inSec; self.label = label; self.note = note; self.baked = baked
+    }
+
+    enum CodingKeys: String, CodingKey { case sessionId, revision, slotId, itemId, takeId, inSec, label, note, baked }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        sessionId = c.o(.sessionId) ?? ""
+        revision = c.o(.revision)
+        slotId = c.o(.slotId) ?? ""
+        itemId = c.o(.itemId)
+        takeId = c.o(.takeId)
+        inSec = c.o(.inSec)
+        label = c.o(.label)
+        note = c.o(.note)
+        baked = c.o(.baked)
+    }
+}
+
+/// `POST …/slots/{slotId}/estimate`: what the slot becomes (a swap of the reference's own segment, or a new shot), and its
+/// price (nothing held).
 public struct RecreateSlotEstimate: Decodable, Hashable, Sendable {
+    public struct Segment: Codable, Hashable, Sendable {
+        public var startSec: Double
+        public var endSec: Double
+        public init(startSec: Double, endSec: Double) { self.startSec = startSec; self.endSec = endSec }
+    }
     public var slotId: String
     public var estimate: ShotEstimate
     /// The ShotRequest the slot becomes (kept as sent; the app only shows the price).
     public var request: JSONValue?
+    /// swap | generate (nil from an older server: generate).
+    public var method: String?
+    public var keepBackground: Bool?
+    /// The reference's own stretch a swap uses.
+    public var segment: Segment?
+    /// What a swap carries from the reference (camera, speed, look).
+    public var baked: [String]
+    /// Why the default fell back to generate (a message to show).
+    public var swapUnavailable: String?
+    /// brief | summary | default: where a new shot's prompt came from.
+    public var promptFrom: String?
 
-    public init(slotId: String, estimate: ShotEstimate, request: JSONValue? = nil) {
-        self.slotId = slotId; self.estimate = estimate; self.request = request
+    public var isSwap: Bool { method == "swap" }
+
+    public init(slotId: String, estimate: ShotEstimate, request: JSONValue? = nil, method: String? = nil, keepBackground: Bool? = nil,
+                segment: Segment? = nil, baked: [String] = [], swapUnavailable: String? = nil, promptFrom: String? = nil) {
+        self.slotId = slotId; self.estimate = estimate; self.request = request; self.method = method; self.keepBackground = keepBackground
+        self.segment = segment; self.baked = baked; self.swapUnavailable = swapUnavailable; self.promptFrom = promptFrom
     }
 
-    enum CodingKeys: String, CodingKey { case slotId, estimate, request }
+    enum CodingKeys: String, CodingKey { case slotId, estimate, request, method, keepBackground, segment, baked, swapUnavailable, promptFrom }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         slotId = try c.decode(String.self, forKey: .slotId)
         estimate = try c.decode(ShotEstimate.self, forKey: .estimate)
         request = c.o(.request)
+        method = c.o(.method)
+        keepBackground = c.o(.keepBackground)
+        segment = c.o(.segment)
+        baked = c.o(.baked) ?? []
+        swapUnavailable = c.o(.swapUnavailable)
+        promptFrom = c.o(.promptFrom)
     }
 }
 
-/// `POST …/slots/{slotId}/fill`: the Suite job making the slot. The fill then reports the slot `generating`, then `ready`.
+/// `POST …/slots/{slotId}/fill`: the job making the slot (a swap or a Suite shot). The fill then reports the slot
+/// `generating`, then `ready`.
 public struct RecreateSlotFillStart: Decodable, Hashable, Sendable {
     public var slotId: String
     public var job: Job
+    public var method: String?
+    public var segment: RecreateSlotEstimate.Segment?
 
-    public init(slotId: String, job: Job) { self.slotId = slotId; self.job = job }
+    public init(slotId: String, job: Job, method: String? = nil, segment: RecreateSlotEstimate.Segment? = nil) {
+        self.slotId = slotId; self.job = job; self.method = method; self.segment = segment
+    }
 
-    enum CodingKeys: String, CodingKey { case slotId, job }
+    enum CodingKeys: String, CodingKey { case slotId, job, method, segment }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         slotId = try c.decode(String.self, forKey: .slotId)
         job = try c.decode(Job.self, forKey: .job)
+        method = c.o(.method)
+        segment = c.o(.segment)
     }
 }
 
@@ -59,8 +243,10 @@ public struct RecreateApplyRequest: Codable, Hashable, Sendable {
         public var speed: Bool?
         public var text: Bool?
         public var look: Bool?
-        public init(camera: Bool? = nil, speed: Bool? = nil, text: Bool? = nil, look: Bool? = nil) {
-            self.camera = camera; self.speed = speed; self.text = text; self.look = look
+        /// Line each take's action peak up with its slot (the server's default: on).
+        public var peaks: Bool?
+        public init(camera: Bool? = nil, speed: Bool? = nil, text: Bool? = nil, look: Bool? = nil, peaks: Bool? = nil) {
+            self.camera = camera; self.speed = speed; self.text = text; self.look = look; self.peaks = peaks
         }
     }
     public var sessionId: String
@@ -84,8 +270,10 @@ public struct RecreateApplyResult: Codable, Hashable, Sendable {
     public var notes: [String]?
     public var label: String?
     public var match: RecreateMatch?
+    /// Swapped slots: what each already carries from the reference (slotId → ["camera", "speed", "look"]).
+    public var baked: [String: [String]]?
 
-    enum CodingKeys: String, CodingKey { case sessionId, revision, durationSec, missing, waiting, notes, label, match }
+    enum CodingKeys: String, CodingKey { case sessionId, revision, durationSec, missing, waiting, notes, label, match, baked }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         sessionId = try c.decode(String.self, forKey: .sessionId)
@@ -96,6 +284,7 @@ public struct RecreateApplyResult: Codable, Hashable, Sendable {
         notes = c.o(.notes)
         label = c.o(.label)
         match = c.o(.match)
+        baked = c.o(.baked)
     }
 }
 
@@ -117,8 +306,9 @@ public enum RecreateIds {
 
 extension HTTPMuseAPI: RecreateAPI {
     private struct CreateBody: Encodable { var uploadId: String; var name: String? }
+    private struct LinkBody: Encodable { var url: String; var name: String? }
     private struct PatchBody: Encodable { var keep: Bool?; var name: String? }
-    private struct SlotBody: Encodable { var modelId: String; var quality: String? }
+    private struct SlotBody: Encodable { var modelId: String; var quality: String?; var method: String?; var keepBackground: Bool?; var outfitId: String? }
     private struct MatchBody: Encodable { var modelId: String? }
 
     public func listReferences() async throws -> [RecreateReference] { try await suiteCall("GET", "v1/recreate/references") }
@@ -126,6 +316,11 @@ extension HTTPMuseAPI: RecreateAPI {
     public func createReference(file: URL, contentType: String, name: String?, progress: UploadProgress?) async throws -> RecreateReference {
         let uploadId = try await uploadVideoForAnalysis(file, contentType: contentType, progress: progress)
         return try await suiteCall("POST", "v1/recreate/references", body: try JSONEncoder().encode(CreateBody(uploadId: uploadId, name: name)))
+    }
+    public func createReference(link: String, name: String?) async throws -> RecreateReference {
+        let url = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !url.isEmpty else { throw ApiError("link_unsupported", "Paste a link first") }
+        return try await suiteCall("POST", "v1/recreate/references", body: try JSONEncoder().encode(LinkBody(url: url, name: name)))
     }
     public func patchReference(_ id: String, keep: Bool?, name: String?) async throws -> RecreateReference {
         try await suiteCall("PATCH", "v1/recreate/references/\(try RecreateIds.check(id))", body: try JSONEncoder().encode(PatchBody(keep: keep, name: name)))
@@ -135,16 +330,49 @@ extension HTTPMuseAPI: RecreateAPI {
     public func matchSlots(_ id: String, modelId: String?) async throws {
         let _: JSONValue = try await suiteCall("POST", "v1/recreate/references/\(try RecreateIds.check(id))/match", body: try JSONEncoder().encode(MatchBody(modelId: modelId)))
     }
-    public func estimateSlot(_ id: String, slotId: String, modelId: String, quality: String?) async throws -> RecreateSlotEstimate {
+    public func estimateSlot(_ id: String, slotId: String, modelId: String, quality: String?, options: RecreateFillOptions) async throws -> RecreateSlotEstimate {
         let path = "v1/recreate/references/\(try RecreateIds.check(id))/slots/\(try RecreateIds.slot(slotId))/estimate"
-        return try await suiteCall("POST", path, body: try JSONEncoder().encode(SlotBody(modelId: modelId, quality: quality)))
+        return try await suiteCall("POST", path, body: try JSONEncoder().encode(SlotBody(modelId: modelId, quality: quality, method: options.method, keepBackground: options.keepBackground, outfitId: options.outfitId)))
     }
-    public func fillSlot(_ id: String, slotId: String, modelId: String, quality: String?) async throws -> RecreateSlotFillStart {
+    public func fillSlot(_ id: String, slotId: String, modelId: String, quality: String?, options: RecreateFillOptions) async throws -> RecreateSlotFillStart {
         let path = "v1/recreate/references/\(try RecreateIds.check(id))/slots/\(try RecreateIds.slot(slotId))/fill"
-        return try await suiteCall("POST", path, body: try JSONEncoder().encode(SlotBody(modelId: modelId, quality: quality)))
+        return try await suiteCall("POST", path, body: try JSONEncoder().encode(SlotBody(modelId: modelId, quality: quality, method: options.method, keepBackground: options.keepBackground, outfitId: options.outfitId)))
     }
     public func apply(_ id: String, _ req: RecreateApplyRequest) async throws -> RecreateApplyResult {
         try await suiteCall("POST", "v1/recreate/references/\(try RecreateIds.check(id))/apply", body: try JSONEncoder().encode(req))
+    }
+
+    private struct ExportBody: Encodable { var sessionId: String; var sound: String }
+    /// The server's body is strict: sessionId, take and baseRevision only.
+    private struct ReplaceBody: Encodable { var sessionId: String; var take: String; var baseRevision: Int? }
+
+    public func briefsEstimate(_ id: String) async throws -> RecreateBriefsEstimate {
+        try await suiteCall("POST", "v1/recreate/references/\(try RecreateIds.check(id))/briefs/estimate", body: Data("{}".utf8))
+    }
+    public func writeBriefs(_ id: String) async throws -> RecreateBriefsWritten {
+        try await suiteCall("POST", "v1/recreate/references/\(try RecreateIds.check(id))/briefs/write", body: Data(#"{"confirm":true}"#.utf8))
+    }
+
+    public func replaceSlot(_ id: String, slotId: String, sessionId: String, take: String, baseRevision: Int?) async throws -> RecreateReplaceResult {
+        let path = "v1/recreate/references/\(try RecreateIds.check(id))/slots/\(try RecreateIds.slot(slotId))/replace"
+        let body = try JSONEncoder().encode(ReplaceBody(sessionId: try EditSessionIds.check(sessionId), take: take, baseRevision: baseRevision))
+        return try await suiteCall("POST", path, body: body)
+    }
+
+    public func startPreview(sessionId: String) async throws -> EditPreviewRender {
+        try await suiteCall("POST", "v1/edit-sessions/\(try EditSessionIds.check(sessionId))/preview", body: Data("{}".utf8))
+    }
+    public func preview(sessionId: String, revision: Int?) async throws -> EditPreviewRender {
+        let q = revision.map { "?revision=\($0)" } ?? ""
+        return try await suiteCall("GET", "v1/edit-sessions/\(try EditSessionIds.check(sessionId))/preview\(q)")
+    }
+    public func startExport(_ id: String, sessionId: String, sound: String) async throws -> RecreateServerExport {
+        let body = try JSONEncoder().encode(ExportBody(sessionId: try EditSessionIds.check(sessionId), sound: sound == "silent" ? "silent" : "guide"))
+        return try await suiteCall("POST", "v1/recreate/references/\(try RecreateIds.check(id))/export", body: body)
+    }
+    public func exportState(_ id: String, sessionId: String, sound: String) async throws -> RecreateServerExport {
+        let s = sound == "silent" ? "silent" : "guide"
+        return try await suiteCall("GET", "v1/recreate/references/\(try RecreateIds.check(id))/export?sessionId=\(try EditSessionIds.check(sessionId))&sound=\(s)")
     }
 
     /// Absolute URL for an authenticated reference route ("/v1/recreate/…/video" or a full link); load with `sessionToken`.
@@ -161,7 +389,11 @@ public final class FakeRecreateAPI: RecreateAPI, @unchecked Sendable {
     private var refs: [RecreateReference]
     /// referenceId → slotId → `fill()` calls since the slot was filled.
     private var made: [String: [String: Int]] = [:]
+    /// Link references whose fetch fails on the next read (demo: a link with "fails" in it).
+    private var failing: Set<String> = []
     public static let demoPrice = 0.64
+    /// Demo mode's link (any TikTok link reads the sample at once).
+    public static let demoLink = "https://www.tiktok.com/@muse.demo/video/7400000000000000001"
 
     public init() {
         let sample = try? JSONDecoder().decode(RecreateReference.self, from: Data(RecreateDemo.referenceJSON.utf8))
@@ -172,17 +404,71 @@ public final class FakeRecreateAPI: RecreateAPI, @unchecked Sendable {
 
     public func listReferences() async throws -> [RecreateReference] { with { refs } }
     public func reference(_ id: String) async throws -> RecreateReference {
-        try with { guard let r = refs.first(where: { $0.id == id }) else { throw ApiError("not_found", "That reference is gone") }; return r }
+        try with {
+            guard let i = refs.firstIndex(where: { $0.id == id }) else { throw ApiError("not_found", "That reference is gone") }
+            // A link whose download is blocked: the next read reports the failure.
+            if failing.remove(id) != nil {
+                refs[i].state = "failed"
+                refs[i].phase = "Failed"
+                refs[i].error = RecreateLinks.fallback
+                refs[i].errorCode = "link_blocked"
+            }
+            return refs[i]
+        }
     }
     public func createReference(file: URL, contentType: String, name: String?, progress: UploadProgress?) async throws -> RecreateReference {
         try with {
-            guard var r = refs.first else { throw ApiError("not_found", "No sample in demo mode") }
+            guard var r = refs.first(where: { $0.recipe != nil }) else { throw ApiError("not_found", "No sample in demo mode") }
             r.id = "rx_demo\(refs.count + 1)"
             r.name = name ?? file.deletingPathExtension().lastPathComponent
+            r.source = "file"
+            r.sourceUrl = nil
+            r.cached = nil
             refs.insert(r, at: 0)
             return r
         }
     }
+
+    /// Demo mode's links: any TikTok, Instagram or YouTube link reads the sample at once (`source: "link"`); the same link
+    /// again returns it with `cached: true`. Words in the link try the refusals: "private", "downloads-off", "too-big",
+    /// "too-long", "blocked" (refused at once) and "fails" (accepted, then the fetch fails with `link_blocked`).
+    public func createReference(link: String, name: String?) async throws -> RecreateReference {
+        let url = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard RecreateLinks.platform(url) != nil else {
+            throw ApiError("link_unsupported", RecreateLinks.message(code: "link_unsupported", message: nil))
+        }
+        let low = url.lowercased()
+        let refusals: [(String, String, String?)] = [
+            ("private", "link_private", nil), ("downloads-off", "link_downloads_off", nil),
+            ("too-big", "link_too_big", "This video is too big to fetch (212 MB; the limit is 80 MB)"),
+            ("too-long", "too_long", "References can be up to 60 s for now (this one is 94 s)"), ("blocked", "link_blocked", nil),
+        ]
+        for (word, code, message) in refusals where low.contains(word) {
+            throw ApiError(code, RecreateLinks.message(code: code, message: message))
+        }
+        return try with {
+            if var hit = refs.first(where: { $0.sourceUrl == url }) {
+                hit.cached = true
+                return hit
+            }
+            guard var r = refs.first(where: { $0.recipe != nil }) else { throw ApiError("not_found", "No sample in demo mode") }
+            r.id = "rx_demo\(refs.count + 1)"
+            r.name = name ?? "\(RecreateLinks.platform(url) ?? "Link") video"
+            r.source = "link"
+            r.sourceUrl = url
+            r.cached = nil
+            if low.contains("fails") {
+                r.state = "analyzing"
+                r.phase = "Fetching the video"
+                r.progress = 0
+                r.recipe = nil
+                failing.insert(r.id)
+            }
+            refs.insert(r, at: 0)
+            return r
+        }
+    }
+
     public func patchReference(_ id: String, keep: Bool?, name: String?) async throws -> RecreateReference {
         try with {
             guard let i = refs.firstIndex(where: { $0.id == id }) else { throw ApiError("not_found", "That reference is gone") }
@@ -200,18 +486,33 @@ public final class FakeRecreateAPI: RecreateAPI, @unchecked Sendable {
     public func fill(_ id: String) async throws -> RecreateFill {
         let r = try await reference(id)
         let slots = r.recipe?.slots ?? []
-        let counts: [String: Int] = with {
+        let failSwaps = self.failSwaps
+        let (counts, methods, failed): ([String: Int], [String: String], Set<String>) = with {
             for k in (made[id] ?? [:]).keys { made[id]?[k, default: 0] += 1 }
-            return made[id] ?? [:]
+            // A swap that fails (tests): refunded on its second read, and the slot is to be generated instead.
+            var gone = Set<String>()
+            if failSwaps {
+                for (k, n) in made[id] ?? [:] where n >= 2 && fillMethods[id]?[k] == "swap" {
+                    made[id]?[k] = nil
+                    fillMethods[id]?[k] = nil
+                    gone.insert(k)
+                }
+            }
+            return (made[id] ?? [:], fillMethods[id] ?? [:], gone)
         }
         var rows: [[String: Any]] = []
         for (i, s) in slots.enumerated() {
             let estimate: [String: Any] = ["amount": Self.demoPrice, "label": RecreateText.money(Self.demoPrice)]
-            if let n = counts[s.id] {
+            if failed.contains(s.id) {
+                rows.append(["slotId": s.id, "state": "to_generate", "method": "generate", "fallback": "generate", "failedJobId": Self.demoJobId(s.id),
+                             "reason": Self.swapFailedReason, "estimate": estimate])
+            } else if let n = counts[s.id] {
+                let m = methods[s.id] ?? "generate"
                 if n >= 2 {
-                    rows.append(["slotId": s.id, "state": "ready", "jobId": Self.demoJobId(s.id), "takeId": "t_rx_\(s.id)", "reason": "Generated for this shot"])
+                    rows.append(["slotId": s.id, "state": "ready", "method": m, "jobId": Self.demoJobId(s.id), "takeId": "t_rx_\(s.id)",
+                                 "reason": m == "swap" ? "Swapped into the reference shot" : "Generated for this shot"])
                 } else {
-                    rows.append(["slotId": s.id, "state": "generating", "jobId": Self.demoJobId(s.id), "estimate": estimate])
+                    rows.append(["slotId": s.id, "state": "generating", "method": m, "jobId": Self.demoJobId(s.id), "estimate": estimate])
                 }
             } else if i == 0 {
                 rows.append(["slotId": s.id, "state": "matched", "takeId": "t1", "score": 0.82, "reason": "Your take has the same pan on a wide shot"])
@@ -224,28 +525,181 @@ public final class FakeRecreateAPI: RecreateAPI, @unchecked Sendable {
     }
     public func matchSlots(_ id: String, modelId: String?) async throws { _ = try await reference(id) }
 
-    public func estimateSlot(_ id: String, slotId: String, modelId: String, quality: String?) async throws -> RecreateSlotEstimate {
+    /// Demo mode can swap (G2): the default method. Tests turn it off to see the fallback to generate.
+    public var swapAvailable = true
+    /// Tests: swaps fail on their second fill read (refunded), and the slot offers generate instead.
+    public var failSwaps = false
+    public static let demoSwapPrice = 0.41
+    public static let swapFailedReason = "The swap didn’t work and you weren’t charged · generate this shot instead"
+    /// referenceId → slotId → the method its fill used.
+    private var fillMethods: [String: [String: String]] = [:]
+
+    private func method(_ asked: String?) throws -> (method: String, unavailable: String?) {
+        if asked == "generate" { return ("generate", nil) }
+        if swapAvailable { return ("swap", nil) }
+        if asked == "swap" { throw ApiError("swap_unavailable", "Swapping isn’t available right now · generate this shot instead") }
+        return ("generate", "Swapping isn’t available right now, so this shot is generated")
+    }
+
+    public func estimateSlot(_ id: String, slotId: String, modelId: String, quality: String?, options: RecreateFillOptions) async throws -> RecreateSlotEstimate {
         _ = try RecreateIds.slot(slotId)
         let r = try await reference(id)
         guard let s = r.recipe?.slots.first(where: { $0.id == slotId }) else { throw ApiError("not_found", "That shot is gone") }
+        let m = try method(options.method)
+        if m.method == "swap" {
+            let seg = RecreateSlotEstimate.Segment(startSec: s.startSec, endSec: s.endSec)
+            let secs = (max(2, s.length) * 10).rounded() / 10
+            let price = RecreateText.money(Self.demoSwapPrice)
+            let e = ShotEstimate(quality: quality ?? "standard", label: "Swap · \(String(format: "%.1f", secs)) s", resolution: "720p", seconds: secs, takes: 1,
+                                 mode: "swap", estimate: Self.demoSwapPrice, priceLine: "about \(price) · \(String(format: "%.1f", secs)) s",
+                                 buttonLabel: "Swap in · \(String(format: "%.1f", secs)) s · \(price)", test: true)
+            return RecreateSlotEstimate(slotId: slotId, estimate: e, method: "swap", keepBackground: options.keepBackground ?? true, segment: seg,
+                                        baked: ["camera", "speed", "look"])
+        }
         let secs = max(2, s.length.rounded(.up))
         let price = RecreateText.money(Self.demoPrice)
         let e = ShotEstimate(quality: quality ?? "standard", label: "Shot · Standard", resolution: "768p", seconds: secs, takes: 1, mode: "reference",
                              estimate: Self.demoPrice, priceLine: "about \(price) · \(Int(secs)) s", buttonLabel: "Generate · \(Int(secs)) s · \(price)", test: true)
-        return RecreateSlotEstimate(slotId: slotId, estimate: e)
+        return RecreateSlotEstimate(slotId: slotId, estimate: e, method: "generate", swapUnavailable: m.unavailable,
+                                    promptFrom: s.brief == nil ? "summary" : "brief")
     }
 
-    public func fillSlot(_ id: String, slotId: String, modelId: String, quality: String?) async throws -> RecreateSlotFillStart {
+    public func fillSlot(_ id: String, slotId: String, modelId: String, quality: String?, options: RecreateFillOptions) async throws -> RecreateSlotFillStart {
         _ = try RecreateIds.slot(slotId)
         let r = try await reference(id)
         guard let i = r.recipe?.slots.firstIndex(where: { $0.id == slotId }) else { throw ApiError("not_found", "That shot is gone") }
+        let m = try method(options.method)
         try with {
-            if made[id]?[slotId] != nil { throw ApiError("already_filled", "This shot is already being made") }
+            // A shot still being made is never started twice; a finished one can be made again ("Regenerate this shot").
+            if let n = made[id]?[slotId], n < 2 { throw ApiError("already_filled", "This shot is already being made") }
             made[id, default: [:]][slotId] = 0
+            fillMethods[id, default: [:]][slotId] = m.method
         }
-        let job = Job(id: Self.demoJobId(slotId), title: "Shot \(i + 1)", modelId: modelId, modelName: "", outfitId: "",
-                      request: JobRequest(title: "Shot \(i + 1)", modelId: modelId, outfitId: "", clipId: "", engine: "suite"), state: "queued", cost: Self.demoPrice)
-        return RecreateSlotFillStart(slotId: slotId, job: job)
+        let cost = m.method == "swap" ? Self.demoSwapPrice : Self.demoPrice
+        let job = Job(id: Self.demoJobId(slotId), title: "Shot \(i + 1)", modelId: modelId, modelName: "", outfitId: options.outfitId ?? "",
+                      request: JobRequest(title: "Shot \(i + 1)", modelId: modelId, outfitId: options.outfitId ?? "", clipId: "", engine: "suite"),
+                      state: "queued", cost: cost)
+        let s = r.recipe!.slots[i]
+        return RecreateSlotFillStart(slotId: slotId, job: job, method: m.method,
+                                     segment: m.method == "swap" ? RecreateSlotEstimate.Segment(startSec: s.startSec, endSec: s.endSec) : nil)
+    }
+
+    // Server renders: the fake answers like the server (rendering on the first POST, ready on the next read) with links
+    // that only a server can serve. The app never uses them in demo mode: it renders on the Mac there.
+    private var renders: Set<String> = []
+
+    public func startPreview(sessionId: String) async throws -> EditPreviewRender {
+        let id = try EditSessionIds.check(sessionId)
+        let fresh: Bool = with { renders.insert("p/\(id)").inserted }
+        return fresh ? EditPreviewRender(sessionId: id, revision: 1, state: "rendering") : try await preview(sessionId: id, revision: nil)
+    }
+    public func preview(sessionId: String, revision: Int?) async throws -> EditPreviewRender {
+        let id = try EditSessionIds.check(sessionId)
+        guard with({ renders.contains("p/\(id)") }) else { return EditPreviewRender(sessionId: id, revision: revision, state: "none") }
+        return EditPreviewRender(sessionId: id, revision: 1, state: "ready", url: "/v1/edit-sessions/\(id)/preview.mp4?revision=1",
+                                 durationSec: 4.4, width: 406, height: 720, unsupported: [])
+    }
+    public func startExport(_ id: String, sessionId: String, sound: String) async throws -> RecreateServerExport {
+        let r = try await reference(id)
+        if sound != "silent", r.videoUrl == nil, r.sourceUrl == nil {
+            throw ApiError("no_reference_sound", "The reference’s video is gone, so there’s no sound to use. Export silent instead.")
+        }
+        let key = "e/\(id)/\(sessionId)/\(sound)"
+        let fresh: Bool = with { renders.insert(key).inserted }
+        if fresh { return Self.export(r, sessionId: sessionId, sound: sound, ready: false) }
+        return try await exportState(id, sessionId: sessionId, sound: sound)
+    }
+    public func exportState(_ id: String, sessionId: String, sound: String) async throws -> RecreateServerExport {
+        let r = try await reference(id)
+        let made = with { renders.contains("e/\(id)/\(sessionId)/\(sound)") }
+        var e = Self.export(r, sessionId: sessionId, sound: sound, ready: made)
+        if !made { e.state = "none" }
+        return e
+    }
+
+    /// The server's useThisSound: the platform's own steps for a link reference, general ones for a file.
+    public static func useThisSound(_ r: RecreateReference) -> UseThisSound {
+        let platform = r.sourceUrl.flatMap { RecreateLinks.platform($0) }
+        let steps: [String]
+        switch platform {
+        case "TikTok": steps = ["Open the reference on TikTok and tap the sound", "Tap “Use this sound”", "Upload your export and line it up at 0:00"]
+        case "Instagram": steps = ["Open the reference Reel and tap the audio", "Tap “Use audio”", "Add your export and line it up at 0:00"]
+        case "YouTube": steps = ["Open the reference Short", "Tap “Remix” then “Use sound”", "Add your export and line it up at 0:00"]
+        default: steps = ["Find the original sound on the platform you post to", "Use it on your post", "Line your export up at 0:00"]
+        }
+        return UseThisSound(platform: platform?.lowercased(), sourceUrl: r.sourceUrl, startAtSec: 0, durationSec: r.durationSec,
+                            title: "Post with the original sound", steps: steps,
+                            note: "The guide sound is only for timing. Post with the platform’s own sound so it plays for everyone.")
+    }
+
+    static func export(_ r: RecreateReference, sessionId: String, sound: String, ready: Bool) -> RecreateServerExport {
+        let q = "sessionId=\(sessionId)&sound=\(sound)"
+        return RecreateServerExport(referenceId: r.id, sessionId: sessionId, revision: 1, sound: sound, state: ready ? "ready" : "rendering",
+                                    url: ready ? "/v1/recreate/references/\(r.id)/export.mp4?\(q)" : nil, durationSec: r.durationSec,
+                                    useThisSound: useThisSound(r))
+    }
+
+    /// Demo mode can write briefs (priced, nothing charged). Tests turn it off to see the reason.
+    public var briefsAvailable = true
+    public static let demoBriefsPrice = 0.02
+
+    public func briefsEstimate(_ id: String) async throws -> RecreateBriefsEstimate {
+        let r = try await reference(id)
+        let missing = r.recipe?.slotsWithoutBriefs ?? []
+        guard briefsAvailable else {
+            return RecreateBriefsEstimate(available: false, reason: "Turn on Claude on the server in Settings → Claude, or ask Claude on this Mac to write them for free.",
+                                          slots: missing.count, estimateUsd: 0, label: "Write the shot briefs")
+        }
+        let price = RecreateText.money(Self.demoBriefsPrice)
+        return RecreateBriefsEstimate(available: true, slots: missing.count, estimateUsd: Self.demoBriefsPrice,
+                                      label: "Write the shot briefs · about \(price)", priceLine: "about \(price) for \(missing.count == 1 ? "1 shot" : "\(missing.count) shots")")
+    }
+
+    public func writeBriefs(_ id: String) async throws -> RecreateBriefsWritten {
+        guard briefsAvailable else { throw ApiError("briefs_unavailable", "Writing briefs on the server is off. Turn it on in Settings → Claude.") }
+        return try with {
+            guard let i = refs.firstIndex(where: { $0.id == id }), var recipe = refs[i].recipe else { throw ApiError("not_found", "That reference is gone") }
+            var written: [String] = []
+            for k in recipe.slots.indices where RecreateText.brief(recipe.slots[k].brief) == nil {
+                let n = k + 1
+                recipe.slots[k].brief = Recipe.Slot.Brief(shotSize: n == 1 ? "ls" : "ms", angle: "eye", subject: "she",
+                                                          action: n == 1 ? "walks into frame" : "turns to camera", location: "a studio", notes: nil)
+                written.append(recipe.slots[k].id)
+            }
+            refs[i].recipe = recipe
+            return RecreateBriefsWritten(referenceId: id, written: written, costUsd: written.isEmpty ? 0 : Self.demoBriefsPrice, reference: refs[i])
+        }
+    }
+
+    /// referenceId → the session it was built into, its revision, and the slots in the edit (Fix shot).
+    private var built: [String: (session: String, revision: Int, slots: Set<String>)] = [:]
+
+    public func replaceSlot(_ id: String, slotId: String, sessionId: String, take: String, baseRevision: Int?) async throws -> RecreateReplaceResult {
+        _ = try RecreateIds.slot(slotId)
+        let r = try await reference(id)
+        guard let i = r.recipe?.slots.firstIndex(where: { $0.id == slotId }) else { throw ApiError("not_found", "Slot not found") }
+        return try with {
+            guard let b = built[id], b.session == sessionId else {
+                throw ApiError("not_built_here", "Build the edit from this reference in this session first")
+            }
+            guard b.slots.contains(slotId) else {
+                throw ApiError("slot_not_in_edit", "Shot \(slotId) isn’t in the edit any more · rebuild the edit to put it back")
+            }
+            if take.hasPrefix("job_rx_") {
+                let slot = String(take.dropFirst("job_rx_".count))
+                guard let n = made[id]?[slot] else { throw ApiError("bad_request", "take: no video take or job \(take)") }
+                if n < 2 { throw ApiError("job_not_done", "That shot is still being made · try again when it’s done") }
+            } else if take.isEmpty || take.contains("unknown") {
+                throw ApiError("bad_request", "take: no video take or job \(take)")
+            }
+            let rev = b.revision + 1
+            built[id]?.revision = rev
+            let takeId = take.hasPrefix("job_rx_") ? "t_rx_\(take.dropFirst("job_rx_".count))" : take
+            // The slot's own swap is baked in; any other take brings the reference's camera keys, ramp and look back.
+            let ownSwap = take == Self.demoJobId(slotId) && fillMethods[id]?[slotId] == "swap"
+            return RecreateReplaceResult(sessionId: sessionId, revision: rev, slotId: slotId, itemId: "c\(i + 1)", takeId: takeId, inSec: 0,
+                                         label: "Replaced shot \(slotId) in “\(r.name ?? "Reference")”", baked: ownSwap ? ["camera", "speed", "look"] : nil)
+        }
     }
 
     public func apply(_ id: String, _ req: RecreateApplyRequest) async throws -> RecreateApplyResult {
@@ -257,7 +711,14 @@ public final class FakeRecreateAPI: RecreateAPI, @unchecked Sendable {
         let perSlot: [[String: Any]] = slots.enumerated().map { i, s in ["slotId": s, "score": scores[i % scores.count]] }
         let match: [String: Any] = ["overall": 0.86, "cuts": 0.97, "text": 0.9, "ramps": 0.78, "grade": 0.84, "shots": 0.8, "perSlot": perSlot]
         let none: [String] = []
-        let json: [String: Any] = ["sessionId": req.sessionId, "revision": (req.baseRevision ?? 0) + 1, "label": "Recreated", "missing": none, "waiting": waiting, "match": match]
+        let inEdit = Set(req.slots.keys).subtracting(waiting)
+        // Slots filled by their own finished swap carry the reference's camera, speed and look already.
+        let swapped: [String: String] = with { fillMethods[id] ?? [:] }
+        var baked: [String: [String]] = [:]
+        for (slot, v) in req.slots where inEdit.contains(slot) && v == Self.demoJobId(slot) && swapped[slot] == "swap" { baked[slot] = ["camera", "speed", "look"] }
+        with { built[id] = (req.sessionId, (req.baseRevision ?? 0) + 1, inEdit) }
+        let json: [String: Any] = ["sessionId": req.sessionId, "revision": (req.baseRevision ?? 0) + 1, "label": "Recreated", "missing": none, "waiting": waiting,
+                                   "match": match, "baked": baked]
         return try JSONDecoder().decode(RecreateApplyResult.self, from: JSONSerialization.data(withJSONObject: json))
     }
 }

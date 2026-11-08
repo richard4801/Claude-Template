@@ -8,13 +8,17 @@ public struct ClaudeRunRequest: Hashable, Sendable {
     /// Claude Code's session id to `--resume`.
     public var resume: String?
     public var blender: ClaudeCommand.Blender?
+    /// The thread's brief as a system prompt (recreate and edit threads; workstream 1).
+    public var systemPrompt: String?
 
-    public init(threadId: String, turnId: String? = nil, text: String, resume: String? = nil, blender: ClaudeCommand.Blender? = nil) {
+    public init(threadId: String, turnId: String? = nil, text: String, resume: String? = nil, blender: ClaudeCommand.Blender? = nil,
+                systemPrompt: String? = nil) {
         self.threadId = threadId
         self.turnId = turnId
         self.text = text
         self.resume = resume
         self.blender = blender
+        self.systemPrompt = systemPrompt
     }
 }
 
@@ -107,7 +111,7 @@ public final class ClaudeTurnRunner: @unchecked Sendable {
         let config = dir.appendingPathComponent(".mcp-\(UUID().uuidString.lowercased()).json")
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            let cmd = ClaudeCommand(mcpURL: token.mcpUrl.isEmpty ? "" : token.mcpUrl, token: token.token, blender: req.blender, resume: req.resume)
+            let cmd = ClaudeCommand(mcpURL: token.mcpUrl.isEmpty ? "" : token.mcpUrl, token: token.token, blender: req.blender, resume: req.resume, appendSystemPrompt: req.systemPrompt)
             try Self.writePrivate(cmd.mcpConfigJSON(), to: config)
         } catch {
             return await fail("Couldn't prepare ~/MUSE/Claude: \(error.localizedDescription)")
@@ -131,7 +135,7 @@ public final class ClaudeTurnRunner: @unchecked Sendable {
 
     private func once(_ req: ClaudeRunRequest, token: McpSessionToken, config: URL, resume: String?, mirror: Mirror,
                       onEvent: @escaping @Sendable (ClaudeEvent) -> Void) async throws -> Attempt {
-        let cmd = ClaudeCommand(mcpURL: token.mcpUrl, token: token.token, blender: req.blender, resume: resume)
+        let cmd = ClaudeCommand(mcpURL: token.mcpUrl, token: token.token, blender: req.blender, resume: resume, appendSystemPrompt: req.systemPrompt)
         let (lines, cont) = AsyncStream<String>.makeStream(bufferingPolicy: .unbounded)
         let exit = ExitBox()
         let h = try launcher.launch(executable: executable, arguments: cmd.arguments(configPath: config.path), cwd: config.deletingLastPathComponent(),

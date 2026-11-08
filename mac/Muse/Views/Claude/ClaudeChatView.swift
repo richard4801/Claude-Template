@@ -22,6 +22,14 @@ struct ClaudeChatView: View {
     var placeholder: String?
     /// Above the transcript, inside the scroll view (Camera stage: the Guides ready card).
     var accessory: AnyView?
+    /// Recreate: the context to fall back to when the server doesn't accept `contextKind` yet.
+    var fallback: (kind: String, id: String)?
+    /// Chips over the composer, sent as if typed.
+    var suggestions: [RecreateClaude.Suggestion] = []
+    /// Recreate: what each sent message carries in front, and how a stored message is shown without it.
+    var wrapOutgoing: ((String) -> String)?
+    var unwrapShown: ((String) -> String)?
+    var emptyHint: String?
 
     init(contextKind: String, contextId: String, title: String) {
         self.contextKind = contextKind
@@ -29,7 +37,9 @@ struct ClaudeChatView: View {
         self.title = title
     }
 
-    init(contextKind: String, contextId: String, title: String, showsHeader: Bool, footer: String? = nil, placeholder: String? = nil, accessory: AnyView? = nil) {
+    init(contextKind: String, contextId: String, title: String, showsHeader: Bool, footer: String? = nil, placeholder: String? = nil, accessory: AnyView? = nil,
+         fallback: (kind: String, id: String)? = nil, suggestions: [RecreateClaude.Suggestion] = [], emptyHint: String? = nil,
+         wrapOutgoing: ((String) -> String)? = nil, unwrapShown: ((String) -> String)? = nil) {
         self.contextKind = contextKind
         self.contextId = contextId
         self.title = title
@@ -37,6 +47,11 @@ struct ClaudeChatView: View {
         self.footer = footer
         self.placeholder = placeholder
         self.accessory = accessory
+        self.fallback = fallback
+        self.suggestions = suggestions
+        self.emptyHint = emptyHint
+        self.wrapOutgoing = wrapOutgoing
+        self.unwrapShown = unwrapShown
     }
 
     var body: some View {
@@ -49,8 +64,9 @@ struct ClaudeChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(t.roles.raised)
-        .task(id: "\(contextKind)|\(contextId)|\(service.configured)|\(service.baseURL?.absoluteString ?? "")") {
-            await model.attach(service, contextKind: contextKind, contextId: contextId)
+        .task(id: "\(contextKind)|\(contextId)|\(fallback?.id ?? "")|\(service.configured)|\(service.baseURL?.absoluteString ?? "")") {
+            model.wrapOutgoing = wrapOutgoing
+            await model.attach(service, contextKind: contextKind, contextId: contextId, fallback: fallback)
         }
         .onDisappear { model.detach() }
     }
@@ -152,9 +168,9 @@ struct ClaudeChatView: View {
                     }
                     if let e = model.loadError { InlineNotice("Couldn't load this chat. \(e)", tone: .danger) }
                     if items.isEmpty, !model.loading, model.loadError == nil {
-                        Text(contextKind == "edit"
+                        Text(emptyHint ?? (contextKind == "edit"
                              ? "Ask Claude to edit: trim, add captions, change the Look, check a frame. Every change can be undone."
-                             : "Tell Claude what happens in the shot: who walks where, when they turn, how the camera moves.")
+                             : "Tell Claude what happens in the shot: who walks where, when they turn, how the camera moves."))
                             .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
                     }
                     ForEach(chunks(items)) { chunk in
@@ -211,7 +227,7 @@ struct ClaudeChatView: View {
 
     @ViewBuilder private func row(_ item: ClaudeChatItem) -> some View {
         switch item {
-        case .user(_, let text, let source): userBubble(text, source: source)
+        case .user(_, let text, let source): userBubble(unwrapShown?(text) ?? text, source: source)
         case .assistant(_, let text, let streaming): assistant(text, streaming: streaming)
         case .image(_, let url): grabbedFrame(url)
         case .tool: EmptyView()
@@ -291,6 +307,17 @@ struct ClaudeChatView: View {
         let busy = model.busy
         let empty = model.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return VStack(alignment: .leading, spacing: Space.s2) {
+            if !suggestions.isEmpty {
+                FlowLayout(spacing: Space.s1) {
+                    ForEach(suggestions) { s in
+                        Button { model.send(s.prompt) } label: { Text(s.label).fixedSize() }
+                            .buttonStyle(RButtonStyle(kind: .quiet, small: true, off: busy || model.thread == nil))
+                            .disabled(busy || model.thread == nil)
+                            .help(s.prompt)
+                            .accessibilityLabel(s.label)
+                    }
+                }
+            }
             HStack(alignment: .bottom, spacing: Space.s2) {
                 TextField(placeholder ?? "Ask Claude…", text: $model.composer, axis: .vertical)
                     .lineLimit(1...5)

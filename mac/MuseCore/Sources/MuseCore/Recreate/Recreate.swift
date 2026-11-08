@@ -23,12 +23,62 @@ public struct RecreateReference: Codable, Hashable, Sendable, Identifiable {
     public var videoUrl: String?
     public var posterUrl: String?
     public var recipe: Recipe?
+    /// "file" | "link" (plans/api.md "From a link").
+    public var source: String?
+    /// The public link the video was fetched from.
+    public var sourceUrl: String?
+    /// Why it failed, as a code (`link_blocked` when the link's download was blocked).
+    public var errorCode: String?
+    /// The same link again: the member's reference made before (nothing is fetched twice).
+    public var cached: Bool?
+    /// A "Use this sound" reminder the server may add later, read leniently from `soundReminder` or `useThisSound`.
+    public var soundReminder: String?
 
     public var isAnalyzing: Bool { state == "analyzing" }
     public var isReady: Bool { state == "ready" && recipe != nil }
     public var isFailed: Bool { state == "failed" }
+    public var isLink: Bool { source == "link" || (source == nil && sourceUrl != nil) }
+    /// Failed because the link couldn't be fetched: the page offers the file drop instead.
+    public var failedFetchingLink: Bool { isFailed && RecreateLinks.offersFile(errorCode) }
 
-    enum CodingKeys: String, CodingKey { case id, name, state, progress, phase, error, durationSec, keep, createdAt, expiresAt, videoUrl, posterUrl, recipe }
+    enum CodingKeys: String, CodingKey {
+        case id, name, state, progress, phase, error, durationSec, keep, createdAt, expiresAt, videoUrl, posterUrl, recipe
+        case source, sourceUrl, errorCode, cached, soundReminder, useThisSound
+    }
+
+    public func encode(to e: Encoder) throws {
+        var c = e.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encodeIfPresent(name, forKey: .name)
+        try c.encode(state, forKey: .state)
+        try c.encodeIfPresent(progress, forKey: .progress)
+        try c.encodeIfPresent(phase, forKey: .phase)
+        try c.encodeIfPresent(error, forKey: .error)
+        try c.encodeIfPresent(durationSec, forKey: .durationSec)
+        try c.encodeIfPresent(keep, forKey: .keep)
+        try c.encodeIfPresent(createdAt, forKey: .createdAt)
+        try c.encodeIfPresent(expiresAt, forKey: .expiresAt)
+        try c.encodeIfPresent(videoUrl, forKey: .videoUrl)
+        try c.encodeIfPresent(posterUrl, forKey: .posterUrl)
+        try c.encodeIfPresent(recipe, forKey: .recipe)
+        try c.encodeIfPresent(source, forKey: .source)
+        try c.encodeIfPresent(sourceUrl, forKey: .sourceUrl)
+        try c.encodeIfPresent(errorCode, forKey: .errorCode)
+        try c.encodeIfPresent(cached, forKey: .cached)
+        try c.encodeIfPresent(soundReminder, forKey: .soundReminder)
+    }
+
+    /// `useThisSound` as a string, or an object with `reminder`, `text` or `label`.
+    static func reminderText(_ v: JSONValue) -> String? {
+        switch v {
+        case .string(let s): return s.isEmpty ? nil : s
+        case .object(let o):
+            for k in ["reminder", "text", "label"] { if case .string(let s)? = o[k], !s.isEmpty { return s } }
+            return nil
+        default: return nil
+        }
+    }
+
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -44,6 +94,15 @@ public struct RecreateReference: Codable, Hashable, Sendable, Identifiable {
         videoUrl = c.o(.videoUrl)
         posterUrl = c.o(.posterUrl)
         recipe = c.o(.recipe)
+        source = c.o(.source)
+        sourceUrl = c.o(.sourceUrl)
+        errorCode = c.o(.errorCode)
+        cached = c.o(.cached)
+        if let s: String = c.o(.soundReminder), !s.isEmpty {
+            soundReminder = s
+        } else if let v: JSONValue = c.o(.useThisSound) {
+            soundReminder = Self.reminderText(v)
+        }
     }
 }
 
@@ -295,7 +354,37 @@ public struct RecreateFill: Codable, Hashable, Sendable {
         public var estimate: Estimate?
         /// Claude's one line on the choice, in plain words.
         public var reason: String?
+        /// swap (the model put into the reference's own shot) | generate (a new shot).
+        public var method: String?
+        /// "generate" after a swap that failed (refunded): offer generate, priced on its own.
+        public var fallback: String?
+        public var failedJobId: String?
         public var id: String { slotId }
+
+        enum CodingKeys: String, CodingKey { case slotId, state, takeId, jobId, score, estimate, reason, method, fallback, failedJobId }
+        public init(from d: Decoder) throws {
+            let c = try d.container(keyedBy: CodingKeys.self)
+            slotId = try c.decode(String.self, forKey: .slotId)
+            state = c.o(.state) ?? "empty"
+            takeId = c.o(.takeId)
+            jobId = c.o(.jobId)
+            score = c.o(.score)
+            estimate = c.o(.estimate)
+            reason = c.o(.reason)
+            method = c.o(.method)
+            fallback = c.o(.fallback)
+            failedJobId = c.o(.failedJobId)
+        }
+    }
+
+    /// `applied.baked`: slots whose swapped shot already carries the reference's camera, speed and look.
+    public var baked: [String: [String]] {
+        guard case .object(let o)? = applied, case .object(let b)? = o["baked"] else { return [:] }
+        var out: [String: [String]] = [:]
+        for (k, v) in b {
+            if case .array(let a) = v { out[k] = a.compactMap { if case .string(let s) = $0 { return s }; return nil } }
+        }
+        return out
     }
     public var referenceId: String
     public var slots: [SlotFill]

@@ -264,7 +264,7 @@ final class ClaudeCodeService: ObservableObject {
         guard let api else { throw ApiError("offline", "Sign in to your MUSE server first") }
         let t = try await api.thread(contextKind: contextKind, contextId: contextId)
         let d = try await api.threadDetail(t.id)
-        await relay?.remember(threadId: t.id, claudeSessionId: d.thread.claudeSessionId)
+        await relay?.remember(threadId: t.id, claudeSessionId: d.thread.claudeSessionId, brief: d.thread.brief ?? t.brief)
         return d
     }
 

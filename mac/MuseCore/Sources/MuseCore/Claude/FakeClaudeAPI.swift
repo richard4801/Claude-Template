@@ -70,10 +70,18 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
     }
 
     public func thread(contextKind: String, contextId: String) async throws -> ClaudeThread {
-        guard contextKind == "camera" || contextKind == "edit" else { throw ApiError("bad_request", "contextKind") }
+        guard ["camera", "edit", "recreate"].contains(contextKind) else { throw ApiError("bad_request", "contextKind") }
+        // A recreate thread is on one of the owner's references (rx_…), else 404 (as the server).
+        if contextKind == "recreate", !contextId.hasPrefix("rx_") { throw ApiError("not_found", "Reference not found") }
         return locked {
             if let t = threads.values.first(where: { $0.contextKind == contextKind && $0.contextId == contextId }) { return t }
-            let t = ClaudeThread(id: nextId("ct"), contextKind: contextKind, contextId: contextId, createdAt: now(), updatedAt: now())
+            let brief: ClaudeBrief? = switch contextKind {
+            case "recreate": ClaudeBrief(prompt: "You help the studio owner recreate a reference video's edit with MUSE's recreate tools. Price new shots first; the owner approves them in the app.",
+                                         tools: ["get_recipe", "set_slot_briefs", "match_slots", "fill_slot", "open_edit", "apply_recipe", "apply_edit_ops"], referenceId: contextId)
+            case "edit": ClaudeBrief(prompt: "You edit the studio owner's video in MUSE's editor.", tools: ["apply_edit_ops"], sessionId: contextId)
+            default: nil
+            }
+            let t = ClaudeThread(id: nextId("ct"), contextKind: contextKind, contextId: contextId, createdAt: now(), updatedAt: now(), brief: brief)
             threads[t.id] = t
             return t
         }
