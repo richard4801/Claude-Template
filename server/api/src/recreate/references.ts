@@ -18,6 +18,8 @@ import { timeline } from '../editor/model.js';
 import { analyzeReference, type Recipe } from './analyze.js';
 import { buildProject, type AssembleOptions, type TakeInfo } from './assemble.js';
 import { BriefSchema, matchSlots, shotRequestFor, withBriefs, type Candidate } from './slots.js';
+import { learningOf } from '../editor/learn.js';
+import { pinnedDirectives, provenStart } from './playbook.js';
 import { recreateReferences } from './schema.js';
 
 export const MAX_REFERENCE_SEC = 60;
@@ -35,6 +37,8 @@ export type FillState = {
   jobs?: Record<string, { jobId: string; estimate?: number; at: number }>;
   /** The last assembly: where, which take per slot, which project item came from which recipe element, and the score. */
   applied?: { sessionId: string; revision: number; at: number; slots: Record<string, string>; sources: Record<string, RecipeSource>; match: MatchScore };
+  /** Gap keys already reported to the learning editor for this reference (each once). */
+  gapsReported?: string[];
 };
 export type RecipeSource = { recipeId: string; slotId?: string; textId?: string; transitionAt?: number };
 export type MatchScore = { overall: number; cuts: number; text: number; ramps: number; grade: number; shots: number; perSlot: { slotId: string; score: number }[] };
@@ -244,7 +248,9 @@ export class RecreateReferences {
     const b = parse(z.object({
       sessionId: z.string().min(1), baseRevision: z.number().int().min(0).optional(),
       slots: z.record(z.string(), z.string().min(1).max(80)),
-      options: z.object({ camera: z.boolean().optional(), speed: z.boolean().optional(), text: z.boolean().optional(), look: z.boolean().optional() }).strict().optional(),
+      options: z.object({ camera: z.boolean().optional(), speed: z.boolean().optional(), text: z.boolean().optional(), look: z.boolean().optional(), transitions: z.boolean().optional() }).strict().optional(),
+      /** A proven recipe of the studio's to start from (its look fills in when the reference's can't be mapped); false = none; omitted = the nearest that fits. */
+      startFrom: z.union([z.string().min(1).max(80), z.literal(false)]).optional(),
     }).strict(), body);
     const { r, recipe } = await this.ready(u, id);
     const svc = editSessionsOf(this.ctx);
@@ -268,7 +274,15 @@ export class RecreateReferences {
       if (!t.mediaKey) throw badRequest(`slots.${slotId}: the take has no video yet`);
       takes[slotId] = { id: t.id, durationSec: Number(t.media?.durationSec) || 1, width: Number(t.media?.width) || 1080, height: Number(t.media?.height) || 1920, hasAudio: true };
     }
-    const out = buildProject(recipe, s.takeId, takes, (b.options ?? {}) as AssembleOptions);
+    // The playbook (workstream 3's learning editor): the owner's pinned rules shape the plan. Claude can't override them;
+    // the owner's own explicit options in the app can.
+    const pb = await pinnedDirectives(this.ctx, u);
+    const fromRules: AssembleOptions = { ...pb.directives };
+    const opts: AssembleOptions = o.by === 'claude' ? { ...(b.options ?? {}), ...fromRules } : { ...fromRules, ...(b.options ?? {}) };
+    const start = b.startFrom === false ? null : await this.startFrom(u, r.id, b.startFrom);
+    const ownLookUsable = !!recipe.grade.look && recipe.grade.look.distance < 0.4;
+    if (start?.look && !ownLookUsable && opts.look !== false) opts.fallbackLook = start.look;
+    const out = buildProject(recipe, s.takeId, takes, opts);
     if (!out.project.tracks[0]!.items.length) throw badRequest('slots: give at least one slot a take');
     const label = `Recreated “${r.name}”`;
     // Which recipe element each item came from: on the op, so the owner's later corrections carry it (workstream 3).
@@ -279,9 +293,39 @@ export class RecreateReferences {
           { op: 'replace', path: '/tracks', value: out.project.tracks }] }], label, meta: { sources } })
       : await svc.reset(u, s.id, { baseRevision: b.baseRevision ?? s.revision, project: out.project, device: o.device, label }, { meta: { sources } });
     const fresh = await this.row(u, id);
-    const match = matchScore(recipe, out.project, takes, fresh.fill ?? {}, (b.options ?? {}) as AssembleOptions);
-    await this.saveFill(fresh, { ...(fresh.fill ?? {}), applied: { sessionId: s.id, revision: res.revision, at: Date.now(), slots: Object.fromEntries(Object.entries(takes).filter(([, t]) => t).map(([k, t]) => [k, t!.id])), sources, match } });
-    return { sessionId: s.id, revision: res.revision, durationSec: out.durationSec, missing: [...out.missing.filter(x => !waiting.includes(x)), ...waiting], waiting, notes: out.notes, label, match, sources };
+    const match = matchScore(recipe, out.project, takes, fresh.fill ?? {}, opts);
+    const gapsReported = await this.reportGaps(u, r, recipe, fresh.fill?.gapsReported ?? []);
+    await this.saveFill(fresh, { ...(fresh.fill ?? {}), applied: { sessionId: s.id, revision: res.revision, at: Date.now(), slots: Object.fromEntries(Object.entries(takes).filter(([, t]) => t).map(([k, t]) => [k, t!.id])), sources, match }, gapsReported });
+    const borrowed = opts.fallbackLook && start ? ['look'] : [];
+    return { sessionId: s.id, revision: res.revision, durationSec: out.durationSec, missing: [...out.missing.filter(x => !waiting.includes(x)), ...waiting], waiting, notes: out.notes, label, match, sources,
+      playbook: { followed: pb.followed, followYourself: pb.toFollow },
+      startedFrom: start ? { recipeId: start.recipeId, name: start.name, distance: start.distance, borrowed } : null };
+  }
+
+  /** The proven recipe to start from: the one asked for (it must be in the library), else the nearest that fits. */
+  private async startFrom(u: AuthUser, referenceId: string, id?: string) {
+    if (!id) return provenStart(this.ctx, u, referenceId);
+    const e = await learningOf(this.ctx).recipe(u, id) as { id: string; name: string; recipe?: Recipe };
+    const look = e.recipe?.grade?.look;
+    return { recipeId: e.id, name: e.name, distance: 0, look: look?.id ? { id: look.id, label: look.label } : null };
+  }
+
+  /**
+   * What the editor can't rebuild from this recipe goes to the learning editor's gaps (once per reference): freeze
+   * frames and flashes inside a shot. Unknown transitions and unread text are already counted from the recipe's gaps.
+   */
+  private async reportGaps(u: AuthUser, r: Row, recipe: Recipe, done: string[]) {
+    if (u.role !== 'owner') return done;
+    const found: { key: string; kind: string; what: string; note: string }[] = [];
+    const freeze = recipe.slots.filter(sl => sl.speed.ramp === 'freeze');
+    if (freeze.length) found.push({ key: 'speed:freeze-frame', kind: 'effect', what: 'Freeze frame', note: `“${r.name}”: ${freeze.map(x => x.id).join(', ')}` });
+    const flashes = recipe.transitions.filter(t => t.from === t.to && t.kind === 'flash');
+    if (flashes.length) found.push({ key: 'effect:flash-in-shot', kind: 'effect', what: 'A white flash inside a shot', note: `“${r.name}” at ${flashes.map(t => `${t.atSec.toFixed(2)} s`).join(', ')}` });
+    const out = [...done];
+    for (const g of found.filter(x => !done.includes(x.key))) {
+      try { await learningOf(this.ctx).addGap(u, g); out.push(g.key); } catch { /* the gap list is best effort */ }
+    }
+    return out;
   }
 
   /** One slot's thumbnail, cropped from the contact sheet (PNG). `slotId` null = the poster (the first slot). */

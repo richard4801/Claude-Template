@@ -171,6 +171,8 @@ export class EditSessions {
     this.limit(id);
     const { project, labels } = applyOps(s.project as M.EditProject, b.ops as EditOp[]);
     this.check(project, s.takeId);
+    // workstream 1: the owner's pinned playbook rules (no ramps, cuts only, …) hold for every change of Claude's.
+    await (await import('../recreate/playbook.js')).guardClaudeChange(this.ctx, u, s.project as M.EditProject, project);
     const r = await this.commit(s, project, { author: 'claude', kind: 'edit', label: b.label ?? labels.join(' · '), ...(b.meta ? { meta: b.meta } : {}) }); // label: a tool's own name for the change (workstream 1)
     return { revision: r.session.revision, changes: labels, entry: r.entry ? this.entryView(r.entry) : null, durationSec: M.durationSec(project) };
   }

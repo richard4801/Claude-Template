@@ -15,6 +15,12 @@ export type AssembleOptions = {
   text?: boolean;
   /** Grade every clip with the nearest Look (default true). */
   look?: boolean;
+  /** Keep the reference's transitions (default true); false = hard cuts only. */
+  transitions?: boolean;
+  /** The longest a transition may be (seconds); longer ones are shortened. */
+  maxTransitionSec?: number;
+  /** A palette to grade with when the reference's own look is too far to map (from a proven recipe). */
+  fallbackLook?: { id: string; label?: string };
 };
 
 const CANVAS: Record<string, [number, number]> = { '9:16': [1080, 1920], '16:9': [1920, 1080], '1:1': [1080, 1080], '4:5': [1080, 1350], '3:4': [1080, 1440], '4:3': [1440, 1080], '21:9': [2520, 1080] };
@@ -63,8 +69,15 @@ export function buildProject(recipe: Recipe, sourceTakeId: string, takes: Record
   };
   const used = recipe.slots.filter(s => takes[s.id]);
   const missing = recipe.slots.filter(s => !takes[s.id]).map(s => s.id);
-  const trIn = (slotId: string, prev?: string) => recipe.transitions.find(t => t.to === slotId && t.from === prev && t.from !== t.to);
-  const lutId = o.look !== false && recipe.grade.look && recipe.grade.look.distance < 0.4 ? lutFor('palettes', recipe.grade.look.id) : null;
+  const trIn0 = (slotId: string, prev?: string) => recipe.transitions.find(t => t.to === slotId && t.from === prev && t.from !== t.to);
+  // Playbook directives (workstream 1): cuts only, or transitions no longer than a limit.
+  const trIn = (slotId: string, prev?: string) => {
+    const t = trIn0(slotId, prev);
+    if (!t || o.transitions === false) return undefined;
+    return o.maxTransitionSec != null ? { ...t, durationSec: Math.min(t.durationSec || 0.2, o.maxTransitionSec) } : t;
+  };
+  const ownLook = recipe.grade.look && recipe.grade.look.distance < 0.4 ? recipe.grade.look.id : null;
+  const lutId = o.look === false ? null : ownLook ? lutFor('palettes', ownLook) : o.fallbackLook ? lutFor('palettes', o.fallbackLook.id) : null;
   const notes: string[] = [];
 
   const clips: M.VideoClip[] = used.map((s, i) => {

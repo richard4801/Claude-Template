@@ -1325,6 +1325,27 @@ SlotFill { slotId, state: "empty"|"matched"|"to_generate"|"generating"|"ready", 
 - `playbook_add(text, area?, evidence?)` (edit:write): Claude's rule arrives unpinned; the owner pins, edits or deletes it.
 - `report_gap(key, kind, what, note?)` (edit:write): an effect, transition or font MUSE can't recreate yet, e.g. `effect:lens-flare`.
 
+**Claude follows the playbook** (workstream 1, `src/recreate/playbook.ts`, `test/playbook.test.ts`):
+- **Directives.** The owner's *pinned* rules that say one plain, checkable thing become directives. A rule with a qualifier, like "Never put text over her face", is never turned into a blanket ban; Claude gets it in `followYourself` and applies it itself.
+
+  | Pinned rule (examples) | Directive |
+  |---|---|
+  | "No speed ramps", "Avoid slow-mo", "Keep normal speed" | no new speed curves |
+  | "No camera moves", "No zooms", "Keep the camera still" | no new x/y/scale/rotation keyframes |
+  | "No text", "Never use captions on my reels" | no new text or caption items |
+  | "No looks", "No LUTs", "Keep the natural colours" | no new or changed looks |
+  | "Hard cuts only", "No transitions" | no transitions |
+  | "Keep transitions under 0.25 s" | transitions at most that long |
+- **Every change of Claude's** (`applyClaude`: `apply_edit_ops`, `apply_recipe`, any patch) is checked against the directives, by what it adds or alters. A change that breaks one is refused with `409 playbook_rule`, which names the rule. Changes the owner makes in the apps are never checked.
+- **`open_edit`** returns `playbook {note, enforced, followYourself, otherRules, lessons}`. `analyze_reference` returns it too, with `startFrom`.
+- **`apply_recipe` / `POST …/apply`:**
+  - The directives shape the plan: transitions dropped or shortened, no camera keyframes, no ramps, no text, no Look.
+  - For Claude the rules win over its `options`; in the app the owner's explicit `options` win.
+  - The response adds `playbook {followed, followYourself}` and `startedFrom {recipeId, name, distance, borrowed[]} | null`.
+  - New body fields: `options.transitions`, and `startFrom: recipeId | false`.
+- **Starting from a proven recipe.** The nearest of the studio's own posted edits (`origin: "edit"`, at least one post, distance ≤ 0.6) is the default start. When the reference's own look can't be mapped (distance ≥ 0.4), the start recipe's palette grades the edit.
+- **Gaps.** What the editor can't rebuild is logged once per reference: `speed:freeze-frame` and `effect:flash-in-shot`. Unknown transitions and unread words are already counted from the recipe's own gaps. Claude logs anything else with `report_gap`.
+
 Applying a recipe stores `meta: {sources}` on the edit op, from Claude or from the app. The owner's later corrections to those items then carry `context.source`.
 
 ## MCP & camera sessions (2026-11-05)
