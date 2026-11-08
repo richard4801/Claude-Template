@@ -41,7 +41,7 @@ import studio.muse.app.ui.screens.suite.composer.SheetKind
 @Config(sdk = [35], qualifiers = "w390dp-h844dp-xhdpi")
 class SuiteComposerScreenshotTest(private val theme: String, private val screen: String, private val width: Int) {
     companion object {
-        val SCREENS = listOf("empty", "filled", "preset", "camera_setup", "camera_angle", "camera_movement", "style", "look", "lighting", "settings")
+        val SCREENS = listOf("empty", "filled", "preset", "camera_setup", "camera_angle", "camera_movement", "style", "look", "lighting", "settings", "tools")
 
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}_{1}_{2}")
@@ -86,6 +86,7 @@ class SuiteComposerScreenshotTest(private val theme: String, private val screen:
             "look" -> ComposerSheet(SheetKind.LOOK, "palette")
             "lighting" -> ComposerSheet(SheetKind.LIGHTING)
             "settings" -> ComposerSheet(SheetKind.SETTINGS)
+            "tools" -> ComposerSheet(SheetKind.TOOLS) // the title's mode menu (owner decision 2026-11-08)
             else -> null
         }
         compose.mainClock.autoAdvance = false
