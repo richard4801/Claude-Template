@@ -94,7 +94,8 @@ jobs:
           MUSE_SNAPSHOT_DIR="$PWD/snapshots" "$EXE" > snapshots.log 2>&1 &
           pid=$!
           for i in $(seq 1 900); do kill -0 $pid 2>/dev/null || break; sleep 1; done
-          kill $pid 2>/dev/null || true
+          if kill -0 $pid 2>/dev/null; then echo "review mode still running after 900 s: stopping it"; kill $pid 2>/dev/null || true; fi
+          wait $pid; echo "review mode exit status: $? (128+n = killed by signal n)"
           ls -la snapshots | head -100
           tail -n 40 snapshots.log || true
 
@@ -117,6 +118,19 @@ jobs:
           cat "$f"
           if grep -q '^FAIL' "$f"; then exit 1; fi
           if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during: $(grep '^START' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
+
+      # When review mode stops early, the crash report says where (thread, frames, exception).
+      - name: Crash report
+        if: failure()
+        run: |
+          grep -E "uncaught|signal|CRASH" mac/snapshots.log | head -n 80 || true
+          for i in $(seq 1 20); do
+            f=$(ls -t ~/Library/Logs/DiagnosticReports /Library/Logs/DiagnosticReports 2>/dev/null | grep -i -E '^MUSE' | head -n 1)
+            [ -n "$f" ] && break; sleep 1
+          done
+          if [ -z "$f" ]; then echo "no MUSE crash report"; exit 0; fi
+          p=$(ls ~/Library/Logs/DiagnosticReports/"$f" /Library/Logs/DiagnosticReports/"$f" 2>/dev/null | head -n 1)
+          echo "== $p"; head -c 60000 "$p"
 
       # Every main page and Settings pane must scroll with a real scroll event (owner blocker 2026-11-07). Fails on a STUCK
       # page as long as at least one page MOVED (so the synthetic events themselves work on this runner).

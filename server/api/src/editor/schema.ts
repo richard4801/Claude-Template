@@ -67,5 +67,10 @@ export const editOps = pgTable('edit_ops', {
   /** For kind "undo": the change it reverted. */
   undoes: integer('undoes'),
   undone: integer('undone').notNull().default(0),
+  /** Where a change came from (migration 0017): e.g. Recreate's sources {itemId: {recipeId, slotId?, textId?, transitionAt?}}. */
+  meta: jsonb('meta').$type<Record<string, unknown>>(),
   createdAt: ms('created_at').notNull(),
 }, t => [index('edit_ops_session_idx').on(t.sessionId, t.id)]);
+
+// The learning editor (migration 0017).
+export * from './learnSchema.js';

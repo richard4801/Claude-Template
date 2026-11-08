@@ -63,6 +63,8 @@ enum SnapshotRunner {
 
     static func runIfRequested(_ store: AppStore) {
         guard let dir else { return }
+        setvbuf(stdout, nil, _IOLBF, 0)   // line-buffered, so the CI log keeps the last lines if the app stops (Edit check)
+        installCrashLogging()
         Task { @MainActor in
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             if let w = mainWindow {
@@ -597,6 +599,25 @@ enum SnapshotRunner {
         let inside = r.minX >= 0 && r.minY >= 0 && r.maxX <= size.width + 0.5 && r.maxY <= size.height + 0.5
         lines.append("\(inside ? "FITS" : "CUT") \(label) sheet \(Int(r.width))x\(Int(r.height)) in \(Int(size.width))x\(Int(size.height))")
     }
+
+    /// Review mode only: an uncaught Objective-C exception or a fatal signal writes its stack to the log before the app
+    /// dies, so CI shows where (the macOS crash report isn't always written on the runner).
+    nonisolated static func installCrashLogging() {
+        NSSetUncaughtExceptionHandler { e in
+            print("CRASH uncaught exception \(e.name.rawValue): \(e.reason ?? "")")
+            for s in e.callStackSymbols.prefix(60) { print("CRASH   \(s)") }
+            fflush(stdout)
+        }
+        for sig in [SIGABRT, SIGILL, SIGSEGV, SIGBUS, SIGTRAP, SIGFPE] {
+            signal(sig) { n in
+                print("CRASH signal \(n)")
+                for s in Thread.callStackSymbols.prefix(60) { print("CRASH   \(s)") }
+                fflush(stdout)
+                signal(n, SIG_DFL)
+                raise(n)
+            }
+        }
+    }
 }
 
 /// The Claude chat panel as it sits beside a camera session, for the review screenshots only.
@@ -627,6 +648,7 @@ struct SnapshotOverlay: View {
             .padding(.top, 52)
         }
     }
+
 }
 
 /// Review mode: the Look swatches as the analysis reports them and as the Recipe shows them (mac_recreate_swatches.png).

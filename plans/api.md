@@ -1213,6 +1213,45 @@ How each part is found:
   - `RECREATE_POSE=false` turns poses off.
   - The API image carries onnxruntime-node (CPU, this platform only, about 47 MB) and the 9.4 MB model.
 
+## Learning editor (workstream 3, 2026-11-08; `plans/recreate-edit.md` §5)
+The studio's editing memory, which Claude reads before every edit. The model doesn't change; MUSE's memory does. It is owner only: members get `403 owner_only`. Migration **0017** adds `edit_recipes`, `edit_corrections`, `playbook_rules`, `edit_gaps` and `edit_ops.meta`. Code: `src/editor/learn.ts`, `learnRoutes.ts`, `learnSchema.ts`. Tests: `test/learn.test.ts`.
+
+**Recipe library.** Every analysed reference and every finished edit is kept as a recipe (`muse.recipe/1`).
+- References are copied from `recreate_references` when ready, and the copy outlives the reference's 30 days.
+- Finished edits are the studio's edited versions with a v2 project. `recipeFromProject` turns one into a recipe with `origin: "edit"`: main clips become slots (speed curves become ramps, transform keyframes become camera keys), `transitionIn` becomes transitions, text items become text, the look and adjustments become the grade, and the music clip's beats become the sound.
+- The library syncs when it is read, so nothing else has to call it. Claude's `summary` and `tags` on a reference are refreshed on sync.
+- **Tags** are derived (`reference` / `own-edit`; `slow-cuts`, `medium-cuts` or `fast-cuts`; `short`, `medium-length` or `long`; `tempo-slow`, `tempo-mid` or `tempo-fast`; `high-energy` / `calm`; `transition-<kind>`; `text`; `speed-ramps`; `look-<palette>`), plus Claude's tags and the owner's.
+- **Features** (for nearest): `durationSec`, `shots`, `cutsPerMin`, `avgShotSec`, `bpm`, `energy`, `text`, `fancyTransitions`, `warmth`, `saturation`, `contrast`. **Distance** is the RMS of the scaled differences plus 0.5 × (1 − tag Jaccard).
+- **Performance** comes from Posts through the recipe's `takeId`: `{posts, views, likes, comments, saves?, avgWatchSec?, completion?}`. `saves`, `watchTimeSec` and `completion` are read from `posts.stats` when the platforms report them.
+
+**Corrections.** Every change in an edit session stores what it really touched in `edit_ops.meta.touched`: `"<itemId>/<key>"`, `"<itemId>/*"` when an item was added or removed, `"track:<id>/<key>"` and `"canvas/<key>"`.
+- A correction is logged when the owner (any app, not Claude) changes something one of Claude's last 20 not-undone changes touched (same item, and the same key or the whole item), or undoes one of Claude's changes.
+- A correction holds the area (captions, text, transition, look, motion, speed, timing, audio, pacing, ratio, other), plain words ("Changed the look after Claude's “…”"), Claude's label, before/after (short), and the recipe element from `edit_ops.meta.sources` (Recreate's apply passes `meta: {sources}` to `applyClaude`).
+- A drag is one lesson: one correction per Claude change and area per minute.
+
+**Playbook.** Plain-language rules (≤ 300 characters, ≤ 200 per studio). Each has an `area`, a `source` (`owner` / `claude` / `learned`), `pinned`, and `evidence[] {kind: correction|post|recipe|note, id?, note, at}`. The list is pinned first, then by most evidence, then newest. Claude's rules come in unpinned, and the owner pins, edits or deletes any rule.
+
+**Gaps.** Recipe gaps are counted per studio by their key without `@time` (`transition:unknown`), once per recipe, keeping the last 5 examples. Claude or the owner can also log a gap directly. The list is most requested first.
+
+| | |
+|---|---|
+| `GET /v1/learn/recipes?q&tags=a,b&origin&limit` | → `RecipeEntry[]` (no recipe body), newest first. `q` matches the name, summary and tags; `tags` must all be present. |
+| `GET /v1/learn/recipes/{id}` | → `RecipeEntry` with `recipe`. |
+| `PATCH /v1/learn/recipes/{id} {name?, tags?}` · `DELETE …` | Rename or retag (lower-cased, unique; at most 30 tags of 32 characters). `DELETE` → `204`. |
+| `GET /v1/learn/recipes/nearest?recipeId|referenceId|takeId&k&origin` | → `{recipeId, nearest: (RecipeEntry & {distance})[]}`, closest first. `404` when the recipe isn't in the library. |
+| `GET /v1/learn/corrections?limit&sessionId&area` | → `Correction[]`, newest first. |
+| `GET /v1/learn/lessons` | → `{area, claudeChange, count, undos, last, examples[], ids[]}[]`: corrections grouped by area and Claude's change, the most frequent first. This is what Claude turns into rules. |
+| `GET /v1/learn/playbook?area` · `POST {text, area?, evidence?, pinned?}` · `PATCH /{id} {text?, area?, evidence?, pinned?}` · `DELETE /{id}` | → `Rule` / `Rule[]`. A rule from `POST` has source `owner`. |
+| `GET /v1/learn/gaps?limit` · `POST {key, kind?, what?, note?}` | → `Gap[]` / `Gap`. `key` looks like `"effect:lens-flare"`. |
+| `GET /v1/learn/context?recipeId|referenceId|takeId&area` | → `{playbook: Rule[] (≤ 25), recipes /* the 3 nearest, or the latest own edits */, corrections (10), lessons (8), gaps (5)}`. This is what `playbook_read` returns. |
+
+`RecipeEntry {id, origin, referenceId, takeId, name, summary, tags, features, performance | null, createdAt, updatedAt, recipe?}` · `Correction {id, sessionId, takeId, opId, claudeOpId, kind: "undo"|"change", area, what, context, createdAt}` · `Rule {id, text, area, source, pinned, evidence, createdAt, updatedAt}` · `Gap {key, kind, what, count, examples, firstAt, lastAt}`.
+
+**For WS1's MCP tools:**
+- `playbook_read` → `learningOf(ctx).context(user, {recipeId?, referenceId?, takeId?, area?})`.
+- `playbook_add` → `learningOf(ctx).addRule(user, {text, area?, evidence?}, 'claude')`.
+- Optionally a gap tool → `addGap(user, {key, kind, what, note})`.
+
 ### Recreate this edit · slots and assembly (phase 3)
 Code: `src/recreate/slots.ts` (briefs, matcher, fill request), `assemble.ts` (recipe → edit project), `mcpTools.ts`. Tests: `test/recreate-slots.test.ts`.
 
@@ -1255,7 +1294,7 @@ SlotFill { slotId, state: "empty"|"matched"|"to_generate"|"generating"|"ready", 
 - `text`: 1 for read words, 0.6 for "Text"; `ramps`: the share of ramped slots filled; `grade`: 1 − the Look's distance (0 when off or too far).
 - `overall` = 0.25 cuts + 0.35 shots + 0.15 text + 0.1 ramps + 0.15 grade.
 
-**Sources:** apply also returns `sources: {itemId: {recipeId, slotId? , transitionAt?, textId?}}`, which recipe element each item came from, for workstream 3's corrections log (passed to `edit_ops.meta` once it exists).
+**Sources:** apply also returns `sources: {itemId: {recipeId, slotId?, transitionAt?, textId?}}`, which recipe element each item came from. They are stored in the op's `meta.sources` for workstream 3's corrections log.
 
 **Applying a recipe:**
 - **Values:** each slot's value is a take, or a finished job (its first take is used). A slot whose job hasn't finished is listed in `waiting`.
@@ -1282,7 +1321,32 @@ SlotFill { slotId, state: "empty"|"matched"|"to_generate"|"generating"|"ready", 
   - with it, the owner is asked in the edit session (pending `kind: "recreate_fill"`), and their yes starts the Suite job;
   - Claude then passes the job id to `apply_recipe`.
 
-`playbook_read` and `playbook_add` come with WS3's learning storage.
+- `playbook_read(recipeId?, referenceId?, takeId?, area?)` (edit:read): the learning editor's context (workstream 3, "Learning editor"). It holds the playbook (pinned first, ≤ 25), the 3 nearest proven recipes with their Posts performance, 10 corrections, 8 lessons and 5 gaps.
+- `playbook_add(text, area?, evidence?)` (edit:write): Claude's rule arrives unpinned; the owner pins, edits or deletes it.
+- `report_gap(key, kind, what, note?)` (edit:write): an effect, transition or font MUSE can't recreate yet, e.g. `effect:lens-flare`.
+
+**Claude follows the playbook** (workstream 1, `src/recreate/playbook.ts`, `test/playbook.test.ts`):
+- **Directives.** The owner's *pinned* rules that say one plain, checkable thing become directives. A rule with a qualifier, like "Never put text over her face", is never turned into a blanket ban; Claude gets it in `followYourself` and applies it itself.
+
+  | Pinned rule (examples) | Directive |
+  |---|---|
+  | "No speed ramps", "Avoid slow-mo", "Keep normal speed" | no new speed curves |
+  | "No camera moves", "No zooms", "Keep the camera still" | no new x/y/scale/rotation keyframes |
+  | "No text", "Never use captions on my reels" | no new text or caption items |
+  | "No looks", "No LUTs", "Keep the natural colours" | no new or changed looks |
+  | "Hard cuts only", "No transitions" | no transitions |
+  | "Keep transitions under 0.25 s" | transitions at most that long |
+- **Every change of Claude's** (`applyClaude`: `apply_edit_ops`, `apply_recipe`, any patch) is checked against the directives, by what it adds or alters. A change that breaks one is refused with `409 playbook_rule`, which names the rule. Changes the owner makes in the apps are never checked.
+- **`open_edit`** returns `playbook {note, enforced, followYourself, otherRules, lessons}`. `analyze_reference` returns it too, with `startFrom`.
+- **`apply_recipe` / `POST …/apply`:**
+  - The directives shape the plan: transitions dropped or shortened, no camera keyframes, no ramps, no text, no Look.
+  - For Claude the rules win over its `options`; in the app the owner's explicit `options` win.
+  - The response adds `playbook {followed, followYourself}` and `startedFrom {recipeId, name, distance, borrowed[]} | null`.
+  - New body fields: `options.transitions`, and `startFrom: recipeId | false`.
+- **Starting from a proven recipe.** The nearest of the studio's own posted edits (`origin: "edit"`, at least one post, distance ≤ 0.6) is the default start. When the reference's own look can't be mapped (distance ≥ 0.4), the start recipe's palette grades the edit.
+- **Gaps.** What the editor can't rebuild is logged once per reference: `speed:freeze-frame` and `effect:flash-in-shot`. Unknown transitions and unread words are already counted from the recipe's own gaps. Claude logs anything else with `report_gap`.
+
+Applying a recipe stores `meta: {sources}` on the edit op, from Claude or from the app. The owner's later corrections to those items then carry `context.source`.
 
 ## MCP & camera sessions (2026-11-05)
 _Workstream 2. Owner only: every endpoint below answers `owner_only` (403) to a member. Setup and architecture: `plans/mcp-bridge.md`; research: `plans/research/ai-video-suite-research.md` §3.4._ A **camera session** is the shared workspace of the Camera control's **Directed (Blender)** mode: the brief, the cast, how the camera and each character move over time, the guide renders from Blender, and a Shot **draft**. Three things write to the same session: the MUSE apps (REST below), the in-app "Direct with Claude" chat (server-side Claude with MUSE tools + Blender tools relayed to the owner's Mac), and the owner's own Claude app / Claude Code through the **MUSE MCP server** (`/mcp`). **Agents never spend:** the most any tool does is a Shot draft with a cost estimate; the owner presses Generate in the app.

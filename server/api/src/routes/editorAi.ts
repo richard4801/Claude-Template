@@ -13,6 +13,7 @@ import { LOOK_DIR } from '../editor/photo.js';
 import { uid } from '../lib/util.js';
 import { editorAi } from '../editor/service.js';
 import { registerEditSessionRoutes } from '../editor/sessionRoutes.js';
+import { registerLearnRoutes } from '../editor/learnRoutes.js';
 import { EDIT_TOOLS } from '../editor/mcpTools.js';
 import * as mcpTools from '../mcp/tools.js';
 import { checkProject, lutOfUpload } from '../editor/versions.js';
@@ -24,6 +25,7 @@ const AUDIO_EXT: Record<string, string> = { 'audio/mp4': 'm4a', 'audio/aac': 'aa
 export async function registerEditorAiRoutes(app: FastifyInstance, ctx: Ctx) {
   const svc = editorAi(ctx);
   registerEditSessionRoutes(app, ctx); // Edit sessions shared with Claude (plans/claude-editing.md A)
+  registerLearnRoutes(app, ctx); // the learning editor (workstream 3)
   // Claude's editing tools on MUSE's MCP server: workstream 2's registry (mcp/tools.ts registerMcpTools) when it exists.
   const register = (mcpTools as { registerMcpTools?: (tools: unknown[]) => void }).registerMcpTools;
   if (register) register(EDIT_TOOLS);
