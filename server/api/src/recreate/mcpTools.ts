@@ -35,11 +35,12 @@ const rx = (env: ToolEnv) => {
 export const RECREATE_TOOLS: EditTool[] = [
   {
     name: 'analyze_reference', title: 'Analyse a reference edit (free)', scope: 'edit:write',
-    description: 'Turns a reference video (an upload in the studio, up to 60 s) into its edit recipe: shots and cut times, transitions, camera moves, speed ramps, action peaks, beats, on-screen text, the grade. Free (server CPU). Waits up to a minute; returns the referenceId, a summary, the studio\'s playbook (follow the owner\'s pinned rules) and startFrom: the studio\'s own posted edit closest to it, when one fits (apply_recipe starts from it unless you pass startFrom: false). Then call get_recipe to see the contact sheet and write each slot\'s brief with set_slot_briefs. Anything in the reference MUSE can\'t rebuild (an effect, a transition, a font): log it with report_gap.',
-    inputSchema: obj({ uploadId: str('A video upload id (up_…)'), name: str('A short name for it', 80) }, ['uploadId']),
+    description: 'Turns a reference video (an upload in the studio, or a public TikTok, Instagram Reel or YouTube Shorts link; up to 60 s) into its edit recipe. A link that can\'t be fetched (private, age-restricted, downloads turned off by the creator, or blocked) is refused with a code: ask the owner to save the video and drop the file in. The recipe has: shots and cut times, transitions, camera moves, speed ramps, action peaks, beats, on-screen text, the grade. Free (server CPU). Waits up to a minute; returns the referenceId, a summary, the studio\'s playbook (follow the owner\'s pinned rules) and startFrom: the studio\'s own posted edit closest to it, when one fits (apply_recipe starts from it unless you pass startFrom: false). Then call get_recipe to see the contact sheet and write each slot\'s brief with set_slot_briefs. Anything in the reference MUSE can\'t rebuild (an effect, a transition, a font): log it with report_gap.',
+    inputSchema: obj({ uploadId: str('A video upload id (up_…)'), url: str('Or a public TikTok, Instagram Reel or YouTube Shorts link', 500), name: str('A short name for it', 80) }),
     run: async (env, a) => {
       const svc = rx(env);
-      const r = await svc.create(env.user, { uploadId: need(a, 'uploadId'), ...(typeof a.name === 'string' ? { name: a.name } : {}) });
+      const src = typeof a.url === 'string' && a.url ? { url: a.url } : { uploadId: need(a, 'uploadId') };
+      const r = await svc.create(env.user, { ...src, ...(typeof a.name === 'string' ? { name: a.name } : {}) });
       const t0 = Date.now();
       for (;;) {
         const row = await svc.row(env.user, r.id);

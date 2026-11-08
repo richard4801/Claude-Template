@@ -33,7 +33,16 @@ ENV NODE_ENV=production \
 # ffmpeg/ffprobe for Replicate renders: pad the source to whole seconds, trim the result back, mux the audio, thumbnails.
 # tesseract (English) reads on-screen words for Recreate this edit (workstream 1; about +22 MB; one item at a time,
 # OMP_THREAD_LIMIT=1). Set TESSERACT_PATH to empty to switch it off.
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg tesseract-ocr tesseract-ocr-eng && rm -rf /var/lib/apt/lists/*
+# python3 + yt-dlp (pinned, checksum-verified) fetch public reference videos from links for Recreate this edit
+# (workstream 1; plans/research/platform-download-rules.md: public only, no cookies, one fetch per link). About +30 MB.
+# Set RECREATE_LINKS=false to switch link fetching off.
+ARG YTDLP_VERSION=2026.10.26
+ARG YTDLP_SHA256=a05c5b5d8562f7e8a62f5334348b406af4930d56d3a65f8021d14af0e22339ae
+ARG YTDLP_URL=https://files.pythonhosted.org/packages/7f/3d/16ea7d5638cf585991f2c5705e8083688dde633d32d0871f2404e0f4d827/yt_dlp-2026.10.26-py3-none-any.whl
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg tesseract-ocr tesseract-ocr-eng python3 ca-certificates && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /opt/yt-dlp \
+ && python3 -c "import hashlib,sys,urllib.request; d=urllib.request.urlopen(sys.argv[1], timeout=60).read(); h=hashlib.sha256(d).hexdigest(); assert h==sys.argv[2], 'yt-dlp checksum mismatch: '+h; open('/opt/yt-dlp/yt_dlp.whl','wb').write(d)" "$YTDLP_URL" "$YTDLP_SHA256" \
+ && printf '#!/bin/sh\nPYTHONPATH=/opt/yt-dlp/yt_dlp.whl exec python3 -m yt_dlp "$@"\n' > /usr/local/bin/yt-dlp && chmod 755 /usr/local/bin/yt-dlp
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
