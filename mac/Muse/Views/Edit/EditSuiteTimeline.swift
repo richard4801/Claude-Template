@@ -51,6 +51,9 @@ struct EditSuiteTimeline: View {
             tool("Split", icon: "scissors", help: "Split at the playhead (S)") { session.edit { $0.split() } }
             tool("Delete", icon: "trash", help: "Delete (⌫)", disabled: s.selection == nil) { session.edit { $0.deleteSelected() } }
             tool("Speed", icon: "gauge", help: "Speed", disabled: s.selectedVideo == nil) { session.view { $0.tab = .speed } }
+            tool("Freeze frame", icon: "pause", help: "Freeze frame at the playhead (1 s)", disabled: session.project.mainClips.isEmpty) {
+                session.edit { $0.freezeFrame(durationSec: 1) }
+            }
             tool("Keyframe", icon: "diamond", help: "Keyframe position, scale, rotation and opacity at the playhead", disabled: s.selectedVisual == nil) {
                 session.edit { $0.addKeyframesAll() }
             }

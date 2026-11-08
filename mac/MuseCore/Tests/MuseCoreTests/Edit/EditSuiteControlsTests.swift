@@ -492,3 +492,81 @@ extension EditSuiteControlsTests {
         XCTAssertEqual(s.selectedVideo?.keyframes?.volume?.count, 2)
     }
 }
+
+// MARK: Parity wave 1 (contract): mirror, freeze frame, blend, background fill, fit
+
+extension EditSuiteControlsTests {
+    private func base() -> EditSuiteState {
+        EditSuiteState(EditV2.fromV1(EditList(sourceTakeId: "tk", sourceDurationSec: 10), EditV2.SourceFacts(width: 1080, height: 1920, fps: 30, hasAudio: true)))
+    }
+
+    func testMirror() {
+        var s = base()
+        XCTAssertTrue(s.setFlip(x: true))
+        XCTAssertEqual(s.selectedVideo?.transform?.flipX, true)
+        XCTAssertTrue(s.setFlip(y: true))
+        XCTAssertTrue(s.selectedFlip.x && s.selectedFlip.y)
+        XCTAssertTrue(s.setFlip(x: false))
+        XCTAssertNil(s.selectedVideo?.transform?.flipX, "only true is written")
+        XCTAssertNil(EditV2.problem(s.project))
+    }
+
+    func testFreezeFrameCutsAndHolds() throws {
+        var s = base()
+        s.playhead = 4
+        XCTAssertTrue(s.freezeFrame(durationSec: 1.5))
+        let clips = s.project.mainClips
+        XCTAssertEqual(clips.count, 3)
+        XCTAssertEqual(clips[0].outSec, 4, accuracy: 1e-6)
+        XCTAssertEqual(clips[1].holdSec, 1.5)
+        XCTAssertEqual(clips[1].inSec, 4, accuracy: 1e-6)
+        XCTAssertEqual(clips[2].inSec, 4, accuracy: 1e-6)
+        XCTAssertEqual(s.selection, clips[1].id, "the hold is selected")
+        XCTAssertEqual(s.duration, 11.5, accuracy: 1e-6)
+        XCTAssertNil(EditV2.problem(s.project))
+        // Silent, and the engines get one frame stretched over the hold.
+        let env = EditV2.audioEnvelope(s.project, trackId: s.project.mainTrack!.id, itemId: clips[1].id)
+        XCTAssertTrue(env.allSatisfy { $0.gain == 0 })
+        let plan = EditV2.renderPlan(s.project, media: ["src": EditV2.MediaInfo(durationSec: 10, hasVideo: true, hasAudio: true, width: 1080, height: 1920)])
+        let seg = try XCTUnwrap(plan.video.first { $0.itemId == clips[1].id })
+        XCTAssertEqual(seg.timelineEnd - seg.timelineStart, 1.5, accuracy: 1e-6)
+        XCTAssertEqual(seg.sourceStart, 4, accuracy: 1e-6)
+        XCTAssertFalse(plan.audio.contains { $0.itemId == clips[1].id })
+        // Its length, trimming it, splitting it.
+        XCTAssertTrue(s.setHoldDuration(2))
+        XCTAssertEqual(s.duration, 12, accuracy: 1e-6)
+        s.beginGesture(); s.updateGesture(s.trimming(clips[1].id, .end, to: 4 + 1)); s.endGesture()
+        XCTAssertEqual(s.selectedVideo?.holdSec, 1)
+        s.playhead = 4.4
+        XCTAssertTrue(s.split())
+        XCTAssertEqual(s.project.mainClips.compactMap(\.holdSec), [0.4, 0.6])
+        XCTAssertNil(EditV2.problem(s.project))
+        // Cutting its frame out removes it.
+        let cut = EditV2.applyCuts(s.project, assetId: "src", cuts: [EditV2.SecRange(startSec: 3.9, endSec: 4.1)])
+        XCTAssertTrue(cut.mainClips.allSatisfy { $0.holdSec == nil })
+    }
+
+    func testBlendOnOverlaysOnly() {
+        var s = base()
+        XCTAssertFalse(s.setBlend(.multiply), "the main track doesn't blend")
+        s.playhead = 1
+        XCTAssertTrue(s.addVideo(EditV2.Asset(id: "o", kind: .video, take: "t2", durationSec: 3, width: 1080, height: 1920, hasAudio: false), overlay: true))
+        XCTAssertTrue(s.setBlend(.screen))
+        XCTAssertEqual(s.selectedBlend, .screen)
+        XCTAssertNil(EditV2.problem(s.project))
+        XCTAssertTrue(s.setBlend(.normal))
+        XCTAssertNil(s.selectedVideo?.blend, "normal clears it")
+    }
+
+    func testBackgroundFillAndFit() {
+        var s = base()
+        XCTAssertTrue(s.setFit(.contain))
+        XCTAssertEqual(s.selectedVideo?.fit, .contain)
+        XCTAssertTrue(s.setBackground(fill: .blur))
+        XCTAssertEqual(s.project.canvas.fill, .blur)
+        XCTAssertTrue(s.setBackground(fill: .color, color: "#223344"))
+        XCTAssertNil(s.project.canvas.fill)
+        XCTAssertEqual(s.project.canvas.background, "#223344")
+        XCTAssertNil(EditV2.problem(s.project))
+    }
+}

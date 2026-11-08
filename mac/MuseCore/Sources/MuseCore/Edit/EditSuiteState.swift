@@ -602,6 +602,13 @@ public struct EditSuiteState: Sendable {
         let minLen = 0.1
         return p.updating(itemId) { it in
             switch it {
+            case .video(var c) where c.holdSec != nil:
+                // Wave 1: trimming a freeze frame changes how long it holds.
+                let len = edge == .start ? span.endSec - t : t - span.startSec
+                let h = E.r3(min(E.holdMaxSec, max(E.holdMinSec, len)))
+                if edge == .start && track.kind != .main { c.startSec = E.r6(span.endSec - h) }
+                c.holdSec = h
+                it = .video(c)
             case .video(var c):
                 let dur = p.asset(c.asset)?.durationSec ?? .infinity
                 let sp = edge == .start ? (E.speedPieces(c).first?.speed ?? c.speed) : (E.speedPieces(c).last?.speed ?? c.speed)

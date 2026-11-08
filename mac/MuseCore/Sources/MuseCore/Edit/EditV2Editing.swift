@@ -177,6 +177,19 @@ extension EditV2.Project {
               case .video(let c) = tracks[mi].items[i] else { return nil }
         let fps = canvas.fps > 0 ? canvas.fps : 30
         let local = (rawLocal * fps).rounded() / fps
+        if let h = c.holdSec {
+            // Wave 1: a freeze frame splits into two holds of the same frame (as ops.ts split).
+            let la = EditV2.r3(local), lb = EditV2.r3(h - local)
+            guard la >= EditV2.holdMinSec - 1e-9, lb >= EditV2.holdMinSec - 1e-9 else { return nil }
+            var a = c, b = c
+            let nid = newId(c.id + ".")
+            a.holdSec = la; a.fadeOutSec = nil; a.keyframes = nil
+            b.id = nid; b.holdSec = lb; b.transitionIn = nil; b.fadeInSec = nil; b.keyframes = nil
+            var p = self
+            p.tracks[mi].items.replaceSubrange(i...i, with: [.video(a), .video(b)])
+            p.tracks[mi].items = Self.fixTransitions(p.tracks[mi].items)
+            return (p, nid)
+        }
         let src = EditV2.r6(EditV2.clipSourceAt(c, local))
         guard src - c.inSec >= EditV2.minClipSourceSec - 1e-9, c.outSec - src >= EditV2.minClipSourceSec - 1e-9 else { return nil }
         var a = c, b = c

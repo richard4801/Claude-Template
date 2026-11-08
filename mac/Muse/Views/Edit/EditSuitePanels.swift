@@ -25,6 +25,8 @@ struct VideoPanels: View {
     var body: some View {
         if let v = session.state.selectedVisual {
             TransformPanel(session: session, visual: v)
+            if session.state.selectedBlend != nil { BlendPanel(session: session) }
+            if session.state.selectedIsMain { BackgroundPanel(session: session) }
             if session.state.selectedItem?.textItem == nil {
                 LooksPanel(session: session, visual: v)
                 AdjustPanel(session: session, visual: v)
@@ -71,10 +73,42 @@ struct TransformPanel: View {
                     Spacer(minLength: 0)
                 }
             }
+            // Parity wave 1: mirror, and fit / fill for pictures.
+            HStack(spacing: Space.s2) {
+                SuiteToolButton(title: "Mirror", icon: "arrows-left-right", filled: s.selectedFlip.x, plain: !s.selectedFlip.x) {
+                    let on = session.state.selectedFlip.x
+                    session.edit { $0.setFlip(x: !on) }
+                }
+                .accessibilityLabel("Mirror horizontally")
+                .accessibilityValue(s.selectedFlip.x ? "On" : "Off")
+                SuiteToolButton(title: "Flip", icon: "swap", filled: s.selectedFlip.y, plain: !s.selectedFlip.y) {
+                    let on = session.state.selectedFlip.y
+                    session.edit { $0.setFlip(y: !on) }
+                }
+                .accessibilityLabel("Mirror vertically")
+                .accessibilityValue(s.selectedFlip.y ? "On" : "Off")
+                Spacer(minLength: 0)
+            }
+            if !isText {
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    Text("Frame").font(t.scale.label.font).foregroundStyle(t.roles.ink)
+                    EditSeg(options: [(EditV2.Fit.cover, "Fill"), (.contain, "Fit")], selection: fitNow, small: true) { f in session.edit { $0.setFit(f) } }
+                        .accessibilityLabel("Fill or fit the frame")
+                }
+            }
             Text("The diamond adds a keyframe at the playhead, or removes the one there. With keyframes, a slider sets the value at the playhead.")
                 .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
         }
         if !isText { CropPanel(session: session, crop: visual.crop) }
+    }
+
+    /// The selected video's or picture's fit (main clips fill by default, overlays fit).
+    private var fitNow: EditV2.Fit {
+        switch session.state.selectedItem {
+        case .video(let c): return c.fit ?? (session.state.selectedIsMain ? .cover : .contain)
+        case .image(let c): return c.fit ?? .contain
+        default: return .cover
+        }
     }
 
     private func row(_ label: String, value: Double, range: ClosedRange<Double>, prop: EditV2.KfProp,
@@ -90,6 +124,63 @@ struct TransformPanel: View {
                 let v = prop == .x || prop == .y ? value + 0.5 : value
                 if here { session.edit { $0.removeKeyframe(prop) } } else { session.edit { $0.addKeyframe(prop, value: v) } }
             }
+        }
+    }
+}
+
+/// Blend modes for overlays (parity wave 1): how the picture mixes with the layers below.
+struct BlendPanel: View {
+    @Bindable var session: EditSuiteSession
+
+    static func label(_ m: EditV2.BlendMode) -> String {
+        switch m {
+        case .normal: return "Normal"
+        case .multiply: return "Multiply"
+        case .screen: return "Screen"
+        case .overlay: return "Overlay"
+        case .softLight: return "Soft light"
+        case .darken: return "Darken"
+        case .lighten: return "Lighten"
+        case .add: return "Add"
+        }
+    }
+
+    var body: some View {
+        let cur = session.state.selectedBlend ?? .normal
+        EditPanel(title: "Blend") {
+            FlowLayout(spacing: 6) {
+                ForEach(EditV2.BlendMode.allCases, id: \.self) { m in
+                    Chip(Self.label(m), on: cur == m) { session.edit { $0.setBlend(m) } }
+                        .accessibilityLabel("Blend \(Self.label(m))")
+                }
+            }
+        }
+    }
+}
+
+/// The background behind the main clips (parity wave 1): a colour, or a blurred copy of the clip. It shows where a clip is
+/// fitted (Frame: Fit) or moved and scaled.
+struct BackgroundPanel: View {
+    @Environment(\.theme) private var t
+    @Bindable var session: EditSuiteSession
+
+    var body: some View {
+        let cv = session.project.canvas
+        let blur = cv.fill == .blur
+        EditPanel(title: "Background") {
+            HStack(spacing: Space.s2) {
+                EditSeg(options: [(EditV2.CanvasFill.color, "Colour"), (.blur, "Blur")], selection: blur ? .blur : .color, small: true) { f in
+                    session.edit { $0.setBackground(fill: f) }
+                }
+                .fixedSize()
+                .accessibilityLabel("Background")
+                if !blur {
+                    SuiteSwatch(hex: cv.background ?? "#000000", label: "Background colour") { c in session.edit { $0.setBackground(fill: .color, color: c) } }
+                }
+                Spacer(minLength: 0)
+            }
+            Text("Shows where a clip doesn't fill the frame (Frame: Fit, or scaled down).")
+                .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -629,7 +720,16 @@ struct SpeedPanel: View {
     @Bindable var session: EditSuiteSession
 
     var body: some View {
-        if let c = session.state.selectedVideo {
+        if let c = session.state.selectedVideo, let hold = c.holdSec {
+            // Parity wave 1: a freeze frame has a length, not a speed.
+            EditPanel(title: "Freeze frame") {
+                SuiteSlider("Length", value: hold, range: EditV2.holdMinSec...10, format: { String(format: "%.1f s", $0) }) { v in
+                    session.edit { $0.setHoldDuration((v * 10).rounded() / 10) }
+                }
+                Text("Holds this frame, silent. Drag its edges on the timeline to change the length.")
+                    .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
+        } else if let c = session.state.selectedVideo {
             EditPanel(title: "Speed") {
                 EditSeg(options: [(false, "Constant"), (true, "Curve")], selection: c.speedCurve != nil) { curve in
                     session.edit { $0.setSpeedPreset(curve ? .custom : nil) }

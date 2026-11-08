@@ -253,6 +253,59 @@ extension SnapshotRunner {
         check("project: two volume keys", s.project.mainClips.first?.keyframes?.volume?.count == 2)
         s.undo(); s.undo()
 
+        // Parity wave 1 (contract): mirror, freeze frame, blend, blur fill.
+        step("Mirror")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.edit { $0.setFlip(x: true) }
+        check("project: mirrored", s.project.mainClips.first?.transform?.flipX == true)
+        let qm = await previewPixel(s, at: 1)
+        check("preview still shows the take", isRed(qm), describe(qm))
+        s.undo()
+
+        step("Freeze frame 1 s at 1 s")
+        s.seek(1)
+        s.edit { $0.freezeFrame(durationSec: 1) }
+        check("project: a 1 s hold between two pieces", s.project.mainClips.count == 3 && s.project.mainClips[1].holdSec == 1 && abs(s.duration - 5) < 0.05,
+              "\(s.project.mainClips.map { $0.holdSec.map { "hold \($0)" } ?? "\($0.inSec)–\($0.outSec)" }) · \(s.duration)")
+        let qf = await previewPixel(s, at: 1.5)
+        check("preview shows the held frame", isRed(qf), describe(qf))
+        let fd = s.player.currentItem?.asset.duration.seconds ?? 0
+        check("preview 1 s longer", abs(fd - 5) < 0.15, "\(fd)")
+        s.undo()
+
+        step("Blend multiply (blue overlay)")
+        s.seek(0.5)
+        s.addTake(blue, overlay: true)
+        s.edit { $0.setFit(.cover) }
+        s.edit { $0.setVisualValue(.scale, 1) }
+        s.edit { $0.setVisualValue(.x, 0.5) }
+        s.edit { $0.setVisualValue(.y, 0.5) }
+        let qn = await previewPixel(s, at: 1)
+        check("preview: the overlay covers the take", isBlue(qn), describe(qn))
+        s.edit { $0.setBlend(.multiply) }
+        check("project: multiply", s.state.selectedBlend == .multiply)
+        let qb = await previewPixel(s, at: 1)
+        // red (220, 30, 30) × blue (30, 40, 220) ≈ (26, 5, 26): dark, neither red nor blue.
+        check("preview: multiplied", qb.map { $0.r < 60 && $0.g < 30 && $0.b < 60 } ?? false, describe(qb))
+        s.edit { $0.setBlend(.screen) }
+        let qs = await previewPixel(s, at: 1)
+        check("preview: screen is lighter than both", qs.map { $0.r > 200 && $0.b > 200 } ?? false, describe(qs))
+        for _ in 0..<7 { s.undo() }
+
+        step("Blur fill behind a scaled-down clip")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.edit { $0.setVisualValue(.scale, 0.5) }
+        let qc = await previewPixel(s, at: 1, 0.05, 0.05)
+        check("preview: background colour at the corner", isBlack(qc), describe(qc))
+        s.edit { $0.setBackground(fill: .blur) }
+        check("project: canvas fill blur", s.project.canvas.fill == .blur)
+        let qbf = await previewPixel(s, at: 1, 0.05, 0.05)
+        check("preview: the blurred, darkened take at the corner", qbf.map { $0.r > 120 && $0.r < 215 && $0.g < 60 } ?? false, describe(qbf))
+        s.edit { $0.setBackground(fill: .color, color: "#2040FF") }
+        let qcol = await previewPixel(s, at: 1, 0.05, 0.05)
+        check("preview: background colour", isBlue(qcol), describe(qcol))
+        for _ in 0..<3 { s.undo() }
+
         step("Back to the take")
         check("every change undone", s.project == base, "the project differs from the take after undoing everything")
     }

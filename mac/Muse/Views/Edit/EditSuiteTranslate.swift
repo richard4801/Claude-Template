@@ -39,7 +39,7 @@ struct EditSuiteTranslateSheet: View {
             HStack {
                 Spacer()
                 if running { ProgressView().controlSize(.small) }
-                SuiteToolButton(title: running ? "Translating…" : "Translate", icon: "translate", accent: true, disabled: running || !Self.available) { start() }
+                SuiteToolButton(title: running ? "Translating…" : "Translate", icon: "chat-circle-text", accent: true, disabled: running || !Self.available) { start() }
             }
             if !Self.available {
                 Text("Translation needs macOS 15 or later.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)

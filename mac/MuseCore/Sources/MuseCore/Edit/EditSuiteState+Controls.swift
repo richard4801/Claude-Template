@@ -310,3 +310,116 @@ extension EditSuiteState {
         }
     }
 }
+
+// MARK: Wave 1 contract: mirror, freeze frame, blend, background fill, fit
+
+extension EditSuiteState {
+    /// Mirror the selected item (video, picture or text) horizontally and/or vertically (nil leaves that axis).
+    @discardableResult
+    public mutating func setFlip(x: Bool? = nil, y: Bool? = nil) -> Bool {
+        changeVisual { v in
+            var tf = v.transform ?? E.Transform()
+            if let x { tf.flipX = x ? true : nil }
+            if let y { tf.flipY = y ? true : nil }
+            v.transform = tf
+        }
+    }
+
+    public var selectedFlip: (x: Bool, y: Bool) {
+        let tf = selectedVisual?.transform
+        return (tf?.flipX == true, tf?.flipY == true)
+    }
+
+    /// Freeze frame at the playhead (ops.ts `freeze`): the main clip there is cut at that frame and a hold of it (durationSec,
+    /// 0.1–30 s, silent) goes between the two pieces. The hold is selected.
+    @discardableResult
+    public mutating func freezeFrame(durationSec: Double = 1) -> Bool {
+        let at = playhead
+        let dur = E.r3(min(E.holdMaxSec, max(E.holdMinSec, durationSec)))
+        var holdId: String?
+        let ok = apply { p in
+            guard let mi = p.tracks.firstIndex(where: { $0.kind == .main }) else { return nil }
+            let spans = E.timeline(p)
+            guard let k = spans.firstIndex(where: { at >= $0.startSec && at < $0.endSec }), case .video(let c) = p.tracks[mi].items[k] else { return nil }
+            let local = at - spans[k].startSec, src = E.clipSourceAt(c, local)
+            let dur0 = p.asset(c.asset)?.durationSec ?? c.outSec
+            let frame = E.r3(min(src, dur0 - E.minClipSourceSec))
+            var q = p
+            var hold = c
+            hold.id = q.newId("c")
+            hold.inSec = frame; hold.outSec = E.r3(frame + E.minClipSourceSec); hold.speed = 1; hold.holdSec = dur
+            hold.transitionIn = nil; hold.speedCurve = nil; hold.keyframes = nil; hold.fadeInSec = nil; hold.fadeOutSec = nil
+            if local >= 0.05, spans[k].endSec - at >= 0.05, c.holdSec == nil,
+               src - c.inSec >= E.minClipSourceSec, c.outSec - src >= E.minClipSourceSec {
+                // Cut the clip at the frame; the hold goes between the two pieces.
+                var a = c, b = c
+                let x = (src - c.inSec) / (c.outSec - c.inSec)
+                a.outSec = E.r6(src)
+                b.inSec = E.r6(src); b.transitionIn = nil
+                if let sc = c.speedCurve { a.speedCurve = E.subCurve(sc, 0, x); b.speedCurve = E.subCurve(sc, x, 1) }
+                q.tracks[mi].items.replaceSubrange(k...k, with: [.video(a), .video(hold)])
+                b.id = q.newId("c")
+                q.tracks[mi].items.insert(.video(b), at: k + 2)
+            } else {
+                q.tracks[mi].items.insert(.video(hold), at: local < 0.05 && c.holdSec == nil ? k : k + 1)
+            }
+            q.tracks[mi].items = E.Project.fixTransitions(q.tracks[mi].items)
+            holdId = hold.id
+            return q
+        }
+        if ok { selection = holdId }
+        return ok
+    }
+
+    /// A freeze frame's length (the selected hold).
+    @discardableResult
+    public mutating func setHoldDuration(_ sec: Double) -> Bool {
+        let d = E.r3(min(E.holdMaxSec, max(E.holdMinSec, sec)))
+        return changeVideo { c in if c.holdSec != nil { c.holdSec = d } }
+    }
+
+    /// Blend mode of the selected overlay (video or picture on an overlay row); normal clears it.
+    @discardableResult
+    public mutating func setBlend(_ mode: E.BlendMode) -> Bool {
+        guard let t = selectedTrack, t.kind == .video || t.kind == .image else { return false }
+        return changeSelected { it in
+            switch it {
+            case .video(var c): c.blend = mode == .normal ? nil : mode; it = .video(c)
+            case .image(var c): c.blend = mode == .normal ? nil : mode; it = .image(c)
+            default: break
+            }
+        }
+    }
+
+    public var selectedBlend: E.BlendMode? {
+        guard let t = selectedTrack, t.kind == .video || t.kind == .image else { return nil }
+        switch selectedItem {
+        case .video(let c): return c.blend ?? .normal
+        case .image(let c): return c.blend ?? .normal
+        default: return nil
+        }
+    }
+
+    /// The background behind contain-fitted clips: a colour, or a blurred copy of the clip (ops.ts `fill`).
+    @discardableResult
+    public mutating func setBackground(fill: E.CanvasFill, color: String? = nil) -> Bool {
+        apply { p in
+            var q = p
+            if let color { q.canvas.background = color }
+            q.canvas.fill = fill == .blur ? .blur : nil
+            return q == p ? nil : q
+        }
+    }
+
+    /// Fit (contain) or fill (cover) for the selected video or picture.
+    @discardableResult
+    public mutating func setFit(_ fit: E.Fit) -> Bool {
+        changeSelected { it in
+            switch it {
+            case .video(var c): c.fit = fit; it = .video(c)
+            case .image(var c): c.fit = fit; it = .image(c)
+            default: break
+            }
+        }
+    }
+}
