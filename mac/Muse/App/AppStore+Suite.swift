@@ -491,13 +491,13 @@ extension AppStore {
         let ugc = target == .composer && suite.composer.tool == .ugc
         let photo = target == .composer && suite.composer.tool == .photo // Photo tool (workstream 3)
         suite.pickerStep = step ?? p.steps(owner: isOwner, target: target, ugc: ugc, photo: photo).first?.id ?? ""
-        // The cinematic Suite's rig panel has no fade. Set inside withAnimation in the same tick as a tool switch, the
-        // change sometimes never reached its views (CI, PANEL lines), so it is set plainly there.
-        if cinemaSuite { suite.picker = p } else { withAnimation(.easeOut(duration: 0.18)) { suite.picker = p } }
+        // Set plainly, never inside withAnimation: in the same tick as a tool switch the animated change sometimes never
+        // reached the views that draw the picker (CI reproduced it; the PANEL lines in fit-check.txt). No fade, then.
+        suite.picker = p
     }
 
     func closePicker() {
-        if cinemaSuite { suite.picker = nil } else { withAnimation(.easeIn(duration: 0.14)) { suite.picker = nil } }
+        suite.picker = nil // plainly, as openPicker
     }
 
     /// Movement: a move tile puts a #move chip in the prompt and closes the picker.

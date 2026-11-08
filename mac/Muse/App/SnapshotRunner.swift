@@ -157,6 +157,8 @@ enum SnapshotRunner {
                 try? await Task.sleep(for: .seconds(0.4))
                 store.openTool(.shot); store.suite.composer.tokens = PromptTokens(); store.suite.composer.collapsed = nil } }),
             ("composer_photo", { store.openPhoto(model: SampleData.demo) }),
+            // Regression (the old composer): Photo drawn, then Shot and the Style picker in one tick (PANEL line).
+            ("composer_rig_sametick", { store.openTool(.shot); fillDemoDraft(store); store.openPicker(.style) }),
         ]
         func run(_ themes: [ThemeID], _ sizes: [(Int, Int)], _ screens: [(String, @MainActor () -> Void)]) async {
             for theme in themes {

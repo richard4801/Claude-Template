@@ -130,6 +130,9 @@ struct PickerShell: View {
         .onExitCommand { store.closePicker() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(picker.title) picker")
+        // Review mode only: the same-tick regression shot checks the picker really appeared (PANEL lines).
+        .onAppear { if SnapshotRunner.dir != nil { SnapshotRunner.state.rigPanelOnScreen = true } }
+        .onDisappear { if SnapshotRunner.dir != nil { SnapshotRunner.state.rigPanelOnScreen = false } }
     }
 
     private var header: some View {
