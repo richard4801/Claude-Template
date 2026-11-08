@@ -287,3 +287,7 @@ Release 1 additions (2026-11-08):
 - **The asks:** bubbles; tool chips; markdown rendered properly (no raw asterisks); no internal leaks; a growing composer; keyboard-safe; plus whatever else a good chat needs.
 - **WS10, Android:** session_01Py2rxndMvVe4pcHym1etXT, branch claude/muse-android-chat.
 - **WS11, Mac:** session_01Py2rxocJTVPKL6rpkkyqtE, branch claude/muse-mac-chat. It takes over ClaudeChatView after WS2's phase B.
+
+## Import a video from a link (owner, 2026-11-08), for character swap and edit
+- **WS12, server:** session_01Py2rxoqyyhZ1HMNrW8hBys, branch claude/muse-link-import. General link check, link settings, and POST /v1/imports.
+- **Apps:** WS6 (Mac) and WS7 (Android) build it, reusing the on-device fetch. Entry points: Swap source "Paste a link", Library "Import from link", the Edit media bin, and Android Share.
