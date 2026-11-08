@@ -185,7 +185,8 @@ final class RecreateTests: XCTestCase {
     /// Demo mode: priced at $0.64 a shot, generating then ready on the following fills, and the build gets job ids.
     func testDemoGeneratesThenBuilds() async throws {
         let api = FakeRecreateAPI()
-        let ref = try XCTUnwrap(try await api.listReferences().first)
+        let refs = try await api.listReferences()
+        let ref = try XCTUnwrap(refs.first)
         let before = try await api.fill(ref.id)
         let toMake = before.slots.filter { $0.state == "to_generate" }.map(\.slotId)
         XCTAssertEqual(toMake, ["s2", "s3"])
