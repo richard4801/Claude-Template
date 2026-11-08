@@ -125,6 +125,16 @@ object RecreateJson {
 object RecreateText {
     const val APPROVE_NOTE = "You approve before anything is made."
 
+    /** The analysis steps, in the order the server reports them as `phase` (server/api/src/recreate/analyze.ts). */
+    val ANALYSIS_STEPS = listOf("Finding the cuts", "Listening for the beat", "Reading the text", "Reading the look", "Reading the poses", "Writing the recipe")
+
+    /** The step the analysis is on (its index in [ANALYSIS_STEPS]): -1 before the first, the size once done. */
+    fun analysisStep(phase: String?, state: String = "analyzing"): Int {
+        if (state == "ready") return ANALYSIS_STEPS.size
+        val i = ANALYSIS_STEPS.indexOfFirst { it.equals(phase, ignoreCase = true) }
+        return if (i >= 0) i else if (phase.equals("done", true)) ANALYSIS_STEPS.size else -1
+    }
+
     /** "$1.28". */
     fun money(amount: Double): String = "$" + String.format(java.util.Locale.ROOT, "%.2f", amount)
 

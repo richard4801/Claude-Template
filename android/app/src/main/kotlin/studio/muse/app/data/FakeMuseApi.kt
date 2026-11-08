@@ -1176,11 +1176,12 @@ class FakeMuseApi(
     override suspend fun learnGaps(limit: Int): List<LearnGap> = FakeLearn.gaps().take(limit)
 
     // Recreate this edit (workstream 1's /v1/recreate/references): the analysis steps the server reports, then demo's recipe.
-    private val recreatePolls = HashMap<String, Int>()
+    private val recreatePolls = LinkedHashMap<String, Int>()
     private val recreatePhases = listOf("Finding the cuts", "Listening for the beat", "Reading the text", "Reading the look", "Writing the recipe")
     override suspend fun createReference(uploadId: String, name: String?): RecipeReference = lock.withLock {
         val id = "rx_${++editorSeq}"
         recreatePolls[id] = 0
+        name?.let { recreateNames[id] = it }
         RecipeReference(id, name ?: "Reference", "analyzing", 5, "Waiting")
     }
     /** Demo: a link with "private" in it answers like a private video; any other link runs the analysis. */
@@ -1188,11 +1189,19 @@ class FakeMuseApi(
         if ("private" in url) throw ApiException("link_private", "This video is private · save it and share the file instead")
         return createReference("link", name)
     }
+    /** Demo: the references made this session, newest first, each ready (its recipe) once its analysis has run. */
+    override suspend fun listReferences(): List<RecipeReference> = lock.withLock {
+        recreatePolls.entries.reversed().map { (id, n) ->
+            if (n < recreatePhases.size) RecipeReference(id, recreateNames[id] ?: "Reference", "analyzing", 5 + 90 * n / recreatePhases.size, recreatePhases[n.coerceAtMost(recreatePhases.size - 1)])
+            else RecipeReference(id, recreateNames[id] ?: "Reference", "ready", 100, durationSec = 15.0, createdAt = now(), expiresAt = now() + 30L * 86_400_000)
+        }
+    }
+    private val recreateNames = HashMap<String, String>()
     override suspend fun reference(id: String): RecipeReference = lock.withLock {
         val n = recreatePolls[id] ?: throw ApiException("not_found", "Reference not found")
         recreatePolls[id] = n + 1
         if (n < recreatePhases.size) RecipeReference(id, "Reference", "analyzing", 5 + 90 * n / recreatePhases.size, recreatePhases[n])
-        else RecipeJson.reference("""{"id":"$id","name":"Reference","state":"ready","progress":100,"phase":"Done","recipe":${FakeRecipes.cafeTrendJson()}}""")
+        else RecipeJson.reference("""{"id":"$id","name":"${recreateNames[id] ?: "Reference"}","state":"ready","progress":100,"phase":"Done","durationSec":15.0,"keep":false,"createdAt":${now()},"expiresAt":${now() + 30L * 86_400_000},"recipe":${FakeRecipes.cafeTrendJson()}}""")
     }
 
     // Recreate phases 2–3, demo mode (the Mac's FakeRecreateAPI): shots 1, 3 and 6 match the studio's takes, the others are

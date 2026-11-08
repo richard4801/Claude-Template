@@ -38,6 +38,8 @@ data class RecreateBuildUi(
     val referenceId: String,
     val recipe: Recipe,
     val referenceName: String? = null,
+    /** "kept 12 days" / "kept" (the reference is deleted after 30 days unless kept); null when unknown. */
+    val kept: String? = null,
     val fill: RecreateFill? = null,
     val loadingFill: Boolean = false,
     val mode: RecreateMode = RecreateMode.Recipe,

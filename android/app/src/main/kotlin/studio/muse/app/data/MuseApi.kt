@@ -250,6 +250,8 @@ interface MuseApi {
         throw ApiException("not_found", "This studio server can't read links yet · save the video and share the file")
     /** The reference's state and step while it is analysed, and its recipe once ready. */
     suspend fun reference(id: String): studio.muse.core.edit.RecipeReference = throw ApiException("not_found", "Reference not found")
+    /** The studio's references, newest first (Recreate's start page). */
+    suspend fun listReferences(): List<studio.muse.core.edit.RecipeReference> = emptyList()
     // Recreate phases 2–3 (plans/api.md "Recreate this edit · slots and assembly"): match (free), price (nothing held),
     // fill (a paid Suite shot, only after the person confirmed its price), apply into an edit session.
     /** Scores the studio's takes against each shot (free); the fill then says which shots are yours and which to make. */

@@ -169,7 +169,7 @@ private fun Header(ui: RecreateBuildUi, onBack: () -> Unit) {
 
 /** "Reference · 4.4 s · 3 shots · kept 30 days". */
 private fun facts(ui: RecreateBuildUi): String =
-    listOf("Reference", String.format(java.util.Locale.ROOT, "%.1f s", ui.recipe.durationSec), if (ui.slots.size == 1) "1 shot" else "${ui.slots.size} shots", "kept 30 days").joinToString(" · ")
+    listOfNotNull("Reference", String.format(java.util.Locale.ROOT, "%.1f s", ui.recipe.durationSec), if (ui.slots.size == 1) "1 shot" else "${ui.slots.size} shots", ui.kept).joinToString(" · ")
 
 @Composable
 private fun CostLine(ui: RecreateBuildUi, modifier: Modifier, end: Boolean) {

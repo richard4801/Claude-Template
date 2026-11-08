@@ -74,7 +74,20 @@ data class RecipeReference(
     val phase: String? = null,
     val error: String? = null,
     val recipe: Recipe? = null,
-)
+    val durationSec: Double? = null,
+    /** Kept past the 30 days (the owner chose to). */
+    val keep: Boolean = false,
+    /** Epoch ms; deleted at [expiresAt] unless kept. */
+    val createdAt: Long? = null,
+    val expiresAt: Long? = null,
+) {
+    /** "kept", "kept 12 days", or null when the dates aren't known. */
+    fun keptLine(nowMs: Long = System.currentTimeMillis()): String? = when {
+        keep -> "kept"
+        expiresAt != null -> "kept ${((expiresAt - nowMs).coerceAtLeast(0) / 86_400_000.0).let { kotlin.math.ceil(it).toInt() }.coerceAtLeast(1)} days"
+        else -> null
+    }
+}
 
 /** The sound's beat map: tempo, every beat and the strong ones (seconds). */
 data class RecipeBeats(val bpm: Double?, val beats: List<Double> = emptyList(), val strong: List<Double> = emptyList(), val confidence: Double = 1.0)
@@ -135,6 +148,10 @@ object RecipeJson {
     /** A `GET /v1/recreate/references/{id}` response (or a bare recipe, which reads as a ready reference). */
     fun reference(text: String): RecipeReference = reference(json.parseToJsonElement(text))
 
+    /** `GET /v1/recreate/references`: a list, or `{references: [...]}`. */
+    fun references(el: JsonElement): List<RecipeReference> =
+        ((el as? JsonArray) ?: ((el as? JsonObject)?.get("references") as? JsonArray)).orEmpty().mapNotNull { runCatching { reference(it) }.getOrNull() }
+
     fun reference(el: JsonElement): RecipeReference {
         val o = el as? JsonObject ?: throw IllegalArgumentException("reference is not an object")
         if (o.str("schema") != null) return RecipeReference(o.str("id") ?: "", o.str("summary") ?: "Reference", "ready", 100, recipe = parse(o))
@@ -142,6 +159,7 @@ object RecipeJson {
         return RecipeReference(
             id = o.str("id") ?: "", name = name, state = o.str("state") ?: "analyzing", progress = o.num("progress")?.toInt() ?: 0,
             phase = o.str("phase"), error = o.str("error"), recipe = o.obj("recipe")?.let { parse(it, name) },
+            durationSec = o.num("durationSec"), keep = o.bool("keep") == true, createdAt = o.num("createdAt")?.toLong(), expiresAt = o.num("expiresAt")?.toLong(),
         )
     }
 
