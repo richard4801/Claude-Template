@@ -708,13 +708,25 @@ class FakeMuseApi(
     private fun editorDuration(src: EditorSourceDto): Double =
         src.durationSec ?: takes.firstOrNull { it.id == src.takeId }?.durationSec ?: 8.0
 
+    /** Tap to keep's points (workstream 1): 1–10, 0–1 of the frame, at least one keep; the server's plain messages. */
+    private fun checkKeepPoints(req: EditorJobRequest) {
+        val pts = (req.options?.get("points") as? JsonArray) ?: return
+        if (pts.isEmpty() || pts.size > 10) throw ApiException("bad_request", "Tap 1 to 10 points")
+        val objs = pts.map { it as? kotlinx.serialization.json.JsonObject ?: throw ApiException("bad_request", "Each tap needs x and y") }
+        fun n(o: kotlinx.serialization.json.JsonObject, k: String) = (o[k] as? JsonPrimitive)?.content?.toDoubleOrNull()
+        if (objs.any { o -> listOf("x", "y").any { k -> n(o, k)?.let { it !in 0.0..1.0 } ?: true } }) throw ApiException("bad_request", "Taps must be inside the frame")
+        if (objs.none { (it["keep"] as? JsonPrimitive)?.content != "false" }) throw ApiException("bad_request", "Tap at least one thing to keep")
+    }
+
     override suspend fun editorEstimate(req: EditorJobRequest): EditorEstimate {
         val d = editorDuration(req.source)
+        checkKeepPoints(req)
         val silenceOnly = (req.options?.get("silenceOnly") as? kotlinx.serialization.json.JsonPrimitive)?.content == "true"
         val usd = when (req.kind) {
             "beats" -> 0.0
             "cuts" -> if (silenceOnly || editorJobs.values.any { it.kind == "captions" && it.state == "done" }) 0.0 else 0.02
-            "matte" -> maxOf(0.01, Math.round((10 + 4 * d) * 0.00025 * 100) / 100.0)
+            // Tap to keep has its own price: GPU 15 + 3·d seconds (plans/api.md).
+            "matte" -> if (req.options?.get("points") != null) maxOf(0.01, Math.round((15 + 3 * d) * 0.0004 * 100) / 100.0) else maxOf(0.01, Math.round((10 + 4 * d) * 0.00025 * 100) / 100.0)
             "denoise" -> if ((req.options?.get("analyzeOnly") as? kotlinx.serialization.json.JsonPrimitive)?.content == "true") 0.0 else maxOf(0.01, Math.round((5 + 0.3 * d) * 0.00025 * 100) / 100.0)
             else -> 0.02
         }
@@ -722,6 +734,7 @@ class FakeMuseApi(
     }
 
     override suspend fun startEditorJob(req: EditorJobRequest): EditorJob = lock.withLock {
+        checkKeepPoints(req)
         if (failNext) { failNext = false; throw ApiException("failed", "Something went wrong · try again") }
         val d = editorDuration(req.source)
         val id = "ej_${++editorSeq}"
@@ -1537,10 +1550,14 @@ object FakeEditorResults {
                 "asset" to obj("kind" to p("audio"), "upload" to p("up_voice_$id"), "durationSec" to p(d)),
                 "suggestion" to obj("level" to p("light"), "reason" to p("Some background hum")),
             )
-            "matte" -> obj(
-                "asset" to obj("kind" to p("video"), "upload" to p("up_matte_$id"), "durationSec" to p(d)),
-                "chroma" to obj("color" to p("#00FF00"), "similarity" to p(0.4), "smoothness" to p(0.08), "spill" to p(0.5)),
-            )
+            // Workstream 1's alpha matte: a grey video aligned with the source, white = keep; tracked when there are taps.
+            "matte" -> {
+                val pts = options?.get("points") as? JsonArray
+                obj(
+                    "asset" to obj("kind" to p("video"), "upload" to p("up_matte_$id"), "durationSec" to p(d)),
+                    "alpha" to p(true), "mode" to p(if (pts != null) "tracked" else "person"),
+                ).let { if (pts != null) kotlinx.serialization.json.JsonObject(it + ("points" to pts)) else it }
+            }
             else -> obj()
         }
     }

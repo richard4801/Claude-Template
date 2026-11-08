@@ -253,7 +253,9 @@ private fun PlayerSurface(player: CompositionPlayer, modifier: Modifier) {
 
 // ======================================================================= backend over the repository
 /** The AI helpers through the app's repository (the real API, or the demo backend), polled to their result. */
-class RepoEditBackend(private val c: AppContainer, private val pollMs: Long = 700) : EditBackend {
+class RepoEditBackend(private val c: AppContainer, private val pollMs: Long = 700, private val onAsset: (String, String) -> Unit = { _, _ -> }) : EditBackend {
+    override fun assetArrived(assetId: String, url: String) = onAsset(assetId, url)
+
     override suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?): Pair<EditorEstimate?, String?> =
         runCatching { c.repo.attemptInline { editorEstimate(EditorJobRequest(kind, source, options)) } }.getOrElse { null to "Couldn't reach the studio · try again" }
 
@@ -286,7 +288,7 @@ class RepoEditBackend(private val c: AppContainer, private val pollMs: Long = 70
 class EditSuiteViewModel(private val c: AppContainer, private val takeId: String, context: Context) : ViewModel() {
     private val app = context.applicationContext
     private val looks = LookLibrary(app)
-    val controller = EditSuiteController(viewModelScope, RepoEditBackend(c), lookOf = { id -> runCatching { looks.pack.packLook(id) }.getOrNull() })
+    val controller = EditSuiteController(viewModelScope, RepoEditBackend(c, onAsset = { id, url -> fetchAsset(id, url) }), lookOf = { id -> runCatching { looks.pack.packLook(id) }.getOrNull() })
     private val engine = VideoEditEngine(app)
     private val composer by lazy { EditCompositionEngine(app, looks) }
     private val files = HashMap<String, File>()
@@ -375,6 +377,15 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         val bmps = runCatching { engine.frames(f, times, px).mapNotNull { it?.asImageBitmap() } }.getOrDefault(emptyList())
         val src = p.assets.firstOrNull { it.take == p.sourceTakeId }?.id ?: return
         _frames.value = _frames.value + (src to bmps)
+    }
+
+    /** A helper's new asset (background removal's matte): its file, then the preview again with it. */
+    private fun fetchAsset(assetId: String, url: String) {
+        viewModelScope.launch {
+            val f = runCatching { engine.fetchSource(url) {} }.getOrNull() ?: return@launch c.repo.toast("Couldn't download the cut-out · try again")
+            files[assetId] = f
+            controller.project?.let { rebuildPreview(it) }
+        }
     }
 
     /** PiP takes: their files (for preview/export). */

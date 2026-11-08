@@ -56,7 +56,9 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
             listOf("editor", "editor_360", "captions", "audio", "speed", "looks", "export", "home",
                 // The approved Edit layout (plans/edit-layout.md) on a tablet: landscape 1280 × 800 and portrait 800 × 1280; the
                 // inspector hidden.
-                "tablet", "tablet_captions", "tablet_portrait", "tablet_collapsed").map { arrayOf<Any>(t, it) }
+                "tablet", "tablet_captions", "tablet_portrait", "tablet_collapsed",
+                // Remove background → tap what to keep (workstream 1's tracked cut-out), phone and tablet.
+                "keep", "tablet_keep").map { arrayOf<Any>(t, it) }
         }
 
         /** The design's project: four takes (3.0 / 4.2 / 5.2 / 5.6 s), captions, a hook, music with beats, a voice-over. */
@@ -104,7 +106,7 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
 
     @Test fun capture() {
         if (state == "editor_360") org.robolectric.RuntimeEnvironment.setQualifiers("w360dp-h780dp-xhdpi")
-        if (state == "tablet" || state == "tablet_captions" || state == "tablet_collapsed") org.robolectric.RuntimeEnvironment.setQualifiers("w1280dp-h800dp-mdpi")
+        if (state == "tablet" || state == "tablet_captions" || state == "tablet_collapsed" || state == "tablet_keep") org.robolectric.RuntimeEnvironment.setQualifiers("w1280dp-h800dp-mdpi")
         if (state == "tablet_portrait") org.robolectric.RuntimeEnvironment.setQualifiers("w800dp-h1280dp-mdpi")
         var p = sampleProject()
         val lib = LookLibrary(ApplicationProvider.getApplicationContext())
@@ -134,6 +136,9 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
             "editor", "editor_360", "tablet", "tablet_portrait" -> ui = ui.copy(selectedId = "c2")
             "tablet_captions" -> ui = ui.copy(panel = Panel.CAPTIONS, ai = mapOf("silences" to AiTask("silences", price = "Free")))
             "tablet_collapsed" -> ui = ui.copy(selectedId = "c2", inspectorHidden = true)
+            "keep", "tablet_keep" -> ui = ui.copy(panel = Panel.EFFECTS, effectsTab = "Mask", selectedId = "c2",
+                keep = KeepUi(listOf(KeepTap(.48, .34, 6.6), KeepTap(.52, .62, 6.6), KeepTap(.84, .5, 6.6, keep = false))),
+                ai = mapOf("matte" to AiTask("matte", price = "about $0.03"), "matte_keep" to AiTask("matte_keep", price = "about $0.04")))
         }
         compose.setContent {
             MuseTheme(ThemeId.fromKey(theme)) {
