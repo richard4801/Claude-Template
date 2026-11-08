@@ -258,6 +258,8 @@ interface MuseApi {
         throw ApiException("not_found", "This studio server can't read links yet · save the video and share the file")
     /** The reference's state and step while it is analysed, and its recipe once ready. */
     suspend fun reference(id: String): studio.muse.core.edit.RecipeReference = throw ApiException("not_found", "Reference not found")
+    /** A failed reference analysed again (WS1 c47f9ef; a lighter analysis after `analysis_crashed`). 409 not_failed · 409 video_gone. */
+    suspend fun retryReference(id: String): studio.muse.core.edit.RecipeReference = throw ApiException("not_found", "This studio server can't retry an analysis yet")
     /** The studio's references, newest first (Recreate's start page). */
     suspend fun listReferences(): List<studio.muse.core.edit.RecipeReference> = emptyList()
     // Recreate phases 2–3 (plans/api.md "Recreate this edit · slots and assembly"): match (free), price (nothing held),

@@ -204,6 +204,7 @@ interface MuseService {
     @POST("v1/recreate/references") suspend fun createReference(@Body r: JsonObject): JsonObject
     @GET("v1/recreate/references/{id}") suspend fun reference(@Path("id") id: String): JsonObject
     @GET("v1/recreate/references") suspend fun listReferences(): kotlinx.serialization.json.JsonElement
+    @POST("v1/recreate/references/{id}/retry") suspend fun retryReference(@Path("id") id: String, @Body r: JsonObject): JsonObject
     @POST("v1/recreate/references/{id}/match") suspend fun matchReference(@Path("id") id: String, @Body r: JsonObject): JsonObject
     @GET("v1/recreate/references/{id}/fill") suspend fun referenceFill(@Path("id") id: String): JsonObject
     @POST("v1/recreate/references/{id}/slots/{slot}/estimate") suspend fun estimateReferenceSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: JsonObject): JsonObject
@@ -578,6 +579,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     })
     override suspend fun reference(id: String) = studio.muse.core.edit.RecipeJson.reference(call { reference(id) })
     override suspend fun listReferences() = studio.muse.core.edit.RecipeJson.references(call { listReferences() })
+    override suspend fun retryReference(id: String) = studio.muse.core.edit.RecipeJson.reference(call { retryReference(rx(id), JsonObject(emptyMap())) })
     // Recreate phases 2–3: ids are checked before they reach a URL (rx_…, s1…).
     private fun rx(id: String) = id.also { require(Regex("^rx_[A-Za-z0-9_]{1,64}$").matches(it)) { "That isn't a reference" } }
     private fun shotId(id: String) = id.also { require(Regex("^s[0-9]{1,4}$").matches(it)) { "That isn't a shot of the reference" } }
