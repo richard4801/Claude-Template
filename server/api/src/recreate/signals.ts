@@ -237,6 +237,10 @@ export function classifyCut(c: Cut & { flash?: boolean }, m: MotionFrames, g: Gl
   const prevFlash = cuts.find(x => x.flash && Math.abs(Math.round(x.t * fps) - f) <= 3 && x.t < c.t);
   if (c.flash || prevFlash || (m.luma[f] ?? 0) > 0.9) return { atSec: c.t, kind: 'flash', durationSec: round3(2 / fps), confidence: 0.8 };
   const around = (k: number) => { const xs: Global[] = []; for (let i = f - k; i <= f + k; i++) if (i !== f && g[i]) xs.push(g[i]!); return xs; };
+  // A glitch drawn as the apps and our render draw it (G6): a hard switch with the picture jittering sideways, in no
+  // steady direction, only around the cut (handheld shake jitters all through the shot; a whip moves one way).
+  const jitter = glitchJitter(g, f);
+  if (jitter) return { atSec: c.t, kind: 'glitch', durationSec: round3(Math.max(2, jitter.frames) / fps), confidence: 0.55 };
   const near = around(3);
   const speed = near.length ? near.reduce((a, x) => a + Math.hypot(x.dx, x.dy), 0) / near.length : 0;
   const zoom = near.length ? near.reduce((a, x) => a + Math.abs(Math.log(x.scale)), 0) / near.length : 0;
@@ -244,6 +248,26 @@ export function classifyCut(c: Cut & { flash?: boolean }, m: MotionFrames, g: Gl
   if (speed > 0.035 && blur > 0.04) return { atSec: c.t, kind: 'whip', durationSec: round3(6 / fps), confidence: 0.6 };
   if (zoom > 0.025) return { atSec: c.t, kind: 'zoom', durationSec: round3(6 / fps), confidence: 0.55 };
   return { atSec: c.t, kind: 'cut', durationSec: 0, confidence: 0.9 };
+}
+
+/**
+ * Sideways jitter around cut frame `f` (G6): mean |dx| within ±5 frames well above the calm ±8–20 frames out, with
+ * little net direction. The frames it spans, or null.
+ */
+export function glitchJitter(g: Global[], f: number): { frames: number } | null {
+  const near: number[] = [], far: number[] = [];
+  for (let k = -20; k <= 20; k++) {
+    const m = g[f + k];
+    if (!m || k === 0) continue;
+    if (Math.abs(k) <= 5) near.push(m.dx); else if (Math.abs(k) >= 8) far.push(m.dx);
+  }
+  if (near.length < 6) return null;
+  const meanAbs = (xs: number[]) => xs.reduce((a, x) => a + Math.abs(x), 0) / Math.max(1, xs.length);
+  const n = meanAbs(near), fr = meanAbs(far), net = Math.abs(near.reduce((a, x) => a + x, 0)) / Math.max(1e-9, near.reduce((a, x) => a + Math.abs(x), 0));
+  if (n < 0.008 || n < 3 * fr + 0.004 || net > 0.6) return null;
+  let first = 0, last = 0;
+  for (let k = -5; k <= 5; k++) if (k !== 0 && Math.abs(g[f + k]?.dx ?? 0) > 0.005) { if (!first || k < first) first = k; last = k; }
+  return { frames: last - first + 1 };
 }
 
 export const peaksIn = (peaks: Peak[], shot: Shot) => peaks.filter(p => p.t >= shot.startSec && p.t < shot.endSec).map(p => ({ t: round3(p.t - shot.startSec), strength: p.strength }));
