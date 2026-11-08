@@ -69,7 +69,7 @@ fun EditSuiteContent(
     val m = muse
     ScreenBox(statusPad = true) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            val wide = maxWidth >= 840.dp
+            val wide = maxWidth >= 720.dp // tablets in portrait too (800 dp) get the approved layout
             val editor = @Composable { mod: Modifier ->
                 Column(mod) {
                     TopRow(ui, act, onClose)

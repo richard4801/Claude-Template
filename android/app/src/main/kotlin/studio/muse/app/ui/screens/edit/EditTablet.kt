@@ -40,7 +40,7 @@ import studio.muse.app.ui.theme.muse
 import studio.muse.app.ui.theme.scale
 import studio.muse.core.edit.ExportShape
 
-// The Edit suite on a tablet (≥ 840 dp): WS2's approved layout (plans/edit-layout.md), adapted to Android. A 56 dp top bar
+// The Edit suite on a tablet (≥ 720 dp, portrait included): WS2's approved layout (plans/edit-layout.md), adapted to Android. A 56 dp top bar
 // (back, the title over its status line, the shape as one segmented control, Hook ideas, Claude, Export as the one primary);
 // the viewer with "Safe area" as one segmented control and the transport under it; the inspector on the right (its sections
 // as a 3 × 2 grid of labelled buttons, then that section's settings), which hides; and the timeline below with a labelled
@@ -61,7 +61,7 @@ fun inspectorPanel(ui: EditSuiteUi): Panel = ui.panel ?: Panel.CAPTIONS
 
 /** The 4/8 grid's panel padding and the inspector's width. */
 private val Pad = 16.dp
-private val InspectorWidth = 344.dp
+private val InspectorWidth = 368.dp
 
 @Composable
 fun EditTabletLayout(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap>>, host: SuiteHost, act: (EditAction) -> Unit, onClose: () -> Unit,
