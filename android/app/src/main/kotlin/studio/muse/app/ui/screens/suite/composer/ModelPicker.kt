@@ -109,8 +109,8 @@ data class PickerGroups(val ladder: List<PickerEngine>, val others: List<PickerE
 }
 
 object ModelPicker {
-    /** Per second, always 3 decimals (shared with the Mac): "$0.050/s", "$0.157/s". */
-    fun perSec(v: Double): String = "$" + String.format(java.util.Locale.US, "%.3f", v) + "/s"
+    /** Per second, as the Mac: 3 decimals below $0.10 ("$0.050/s", "$0.065/s"), cents from $0.10 ("$0.16/s"). */
+    fun perSec(v: Double): String = "$" + String.format(java.util.Locale.US, if (v < 0.1) "%.3f" else "%.2f", v) + "/s"
 
     /** A photo or a run, in cents: "$0.05", "$0.40". */
     fun money(v: Double): String = "$" + String.format(java.util.Locale.US, "%.2f", v)

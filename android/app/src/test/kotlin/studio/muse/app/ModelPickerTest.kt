@@ -125,10 +125,11 @@ class ModelPickerLogicTest {
 
     @Test fun rates() {
         assertEquals("$0.050/s", ModelPicker.perSec(0.05))
-        assertEquals("$0.157/s", ModelPicker.perSec(0.157))
+        assertEquals("$0.16/s", ModelPicker.perSec(0.157))
+        assertEquals("$0.065/s", ModelPicker.perSec(0.065))
         assertEquals("$0.40", ModelPicker.money(0.4))
         val kling = ModelPicker.groups(owner, "hd").ladder.first { it.id == "kling-v4" }
-        assertEquals(listOf("720p  $0.157/s", "1080p  $0.235/s"), kling.chips.map { it.second })
+        assertEquals(listOf("720p  $0.16/s", "1080p  $0.24/s"), kling.chips.map { it.second })
         assertEquals("Model", ComposerDraft().modelPill(owner))
     }
 
@@ -181,7 +182,7 @@ class ModelPickerScreenshotTest(private val theme: String, private val state: St
         idle()
         // Let the clock run for the interactions (scrolling waits for idle).
         compose.mainClock.autoAdvance = true
-        if (state == "auto") { compose.onAllNodesWithText("Model · Auto", useUnmergedTree = true).onFirst().performClick(); compose.waitForIdle() }
+        if (state == "auto") { compose.onAllNodesWithText("Only you see models", useUnmergedTree = true).onFirst().performClick(); compose.waitForIdle() }
         assertEquals(1, compose.onAllNodesWithTag("model_picker", useUnmergedTree = true).fetchSemanticsNodes().size)
         // Scroll the sheet so the list's end ("Your providers") is in view.
         compose.onAllNodesWithText("Your providers", useUnmergedTree = true).onFirst().performScrollTo()
