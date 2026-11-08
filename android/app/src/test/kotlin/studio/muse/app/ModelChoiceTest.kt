@@ -76,6 +76,14 @@ class ModelChoiceLogicTest {
         assertNull(d.copy(engineTool = ComposerTool.EXTEND).request(InputSlots(), cat.tier("hd")!!.slots, RecastDraft(clipId = "c1")).engineModel)
     }
 
+    @Test fun swapAddOnsSendTheSwapModelOnTheClassicPath() {
+        val d = ComposerDraft(tool = ComposerTool.SWAP, modelId = "m1", engineModel = "viggle", engineTool = ComposerTool.SWAP)
+        val r = studio.muse.app.ui.screens.suite.composer.SwapAddons.request(d, RecastDraft(clipId = "c1"), studio.muse.app.ui.screens.suite.composer.SwapAddon.FAST, 8.0)
+        assertEquals("viggle", r.engineModel)
+        // A pick made for another tool stays home.
+        assertNull(studio.muse.app.ui.screens.suite.composer.SwapAddons.request(d.copy(engineTool = ComposerTool.RECAST), RecastDraft(clipId = "c1"), studio.muse.app.ui.screens.suite.composer.SwapAddon.FAST, 8.0).engineModel)
+    }
+
     @Test fun aPickDoesNotCarryToAnotherKindOfWork() {
         val shot = ComposerDraft(tool = ComposerTool.SHOT, engineModel = "kling-v4", resolution = "720p")
         assertNull(shot.withTool(ComposerTool.RECAST).engineModel)

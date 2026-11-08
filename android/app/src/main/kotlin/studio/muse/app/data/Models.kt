@@ -170,6 +170,8 @@ data class JobRequest(
     /** Set by the server on upscale jobs (`engine: "upscale"`): the take being sharpened and the size (1080p | 2k | 4k). */
     val takeId: String? = null,
     val size: String? = null,
+    /** WS13 (owner): Character swap's model on the classic path (h3-open = Edit, viggle = Fast·beta…); null = the default. */
+    val engineModel: String? = null,
 ) {
     fun spec() = RenderSpec(Engine.fromId(engine), ClipUse.fromId(use), steps, lipSync, takes, clipSeconds, Quality.fromId(quality), pricePerSec)
 }

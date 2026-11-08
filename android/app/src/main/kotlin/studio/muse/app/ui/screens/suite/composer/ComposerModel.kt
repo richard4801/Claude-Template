@@ -396,6 +396,7 @@ object SwapAddons {
     fun request(d: ComposerDraft, recast: RecastDraft, a: SwapAddon, clipSeconds: Double?): JobRequest =
         draft(a, d.takes, recast.keepAudio, d.speaking).request(d.title.trim().ifBlank { "Character swap · ${a.label}" }, d.characterId.orEmpty(),
             d.characterOutfit.orEmpty(), recast.clipId.orEmpty(), clipSeconds)
+            .copy(engineModel = d.engineModel.takeIf { d.engineTool == ComposerTool.SWAP }) // WS13: the owner's swap model
 }
 
 /**

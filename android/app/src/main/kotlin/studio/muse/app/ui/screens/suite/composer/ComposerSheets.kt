@@ -378,7 +378,7 @@ private fun ColumnScope.SettingsBody(x: SheetContext) {
         }
         // WS7: Character swap (on the ladder, not an add-on), Recast and Extend: the owner's model for that kind of work.
         val purpose = when (d.tool) {
-            ComposerTool.SWAP -> studio.muse.app.data.ModelPurpose.SWAP.takeIf { d.swapAddon == null }
+            ComposerTool.SWAP -> studio.muse.app.data.ModelPurpose.SWAP
             ComposerTool.RECAST -> studio.muse.app.data.ModelPurpose.RECAST
             ComposerTool.EXTEND -> studio.muse.app.data.ModelPurpose.EXTEND
             else -> null
