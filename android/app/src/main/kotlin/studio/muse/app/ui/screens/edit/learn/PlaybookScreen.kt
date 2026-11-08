@@ -106,6 +106,10 @@ sealed interface PlaybookAction {
     data object SaveRule : PlaybookAction
     data object CloseEditor : PlaybookAction
     data class OpenCorrection(val c: LearnCorrection) : PlaybookAction
+    /** "See rule": the rule that already cites a suggestion's corrections. */
+    data class SeeRule(val ruleId: String) : PlaybookAction
+    /** A correction cited as a rule's evidence: open that edit. */
+    data class OpenEvidence(val e: LearnEvidence) : PlaybookAction
 }
 
 /** The most rules a studio keeps (the server's limit). */
@@ -153,7 +157,14 @@ class PlaybookModel(private val api: () -> MuseApi, private val toast: (String) 
                 val ok = call { if (d.id == null) api().addRule(req) else api().patchRule(d.id, req) }
                 ui = ui.copy(busy = false, editor = if (ok) null else ui.editor)
             }
-            is PlaybookAction.OpenCorrection -> a.c.takeId?.let(openTake)
+            is PlaybookAction.OpenCorrection -> a.c.takeId?.takeIf { a.c.takeExists }?.let(openTake)
+            is PlaybookAction.SeeRule -> ui.rules?.firstOrNull { it.id == a.ruleId }?.let { r ->
+                ui = ui.copy(tab = PlaybookTab.RULES, editor = RuleDraft(r.id, r.text, r.area, r.evidence))
+            } ?: toast("That rule is gone")
+            is PlaybookAction.OpenEvidence -> {
+                val c = a.e.id?.toLongOrNull()?.let { id -> ui.corrections?.firstOrNull { it.id == id } }
+                c?.takeId?.takeIf { c.takeExists }?.let(openTake) ?: toast("That edit isn't in your studio any more")
+            }
         }
     }
 
@@ -283,7 +294,8 @@ private fun SuggestionsList(lessons: List<LearnLesson>, act: (PlaybookAction) ->
                 T(l.sentence, m.scale.body, m.roles.ink)
                 // The latest example, in the correction's own words, and when.
                 l.examples.firstOrNull()?.let { T(listOf(it, relativeTime(l.last)).joinToString(" · "), m.scale.caption, m.roles.ink2, maxLines = 2) }
-                LearnLink("Make a rule") { act(PlaybookAction.MakeRule(l)) }
+                if (l.ruleId != null) LearnLink("See rule") { act(PlaybookAction.SeeRule(l.ruleId)) }
+                else LearnLink("Make a rule") { act(PlaybookAction.MakeRule(l)) }
             }
         }
     }
@@ -295,7 +307,7 @@ private fun HistoryList(corrections: List<LearnCorrection>, act: (PlaybookAction
     Column {
         corrections.forEach { c ->
             Row(
-                Modifier.fillMaxWidth().heightIn(min = 56.dp).let { if (c.takeId != null) it.press { act(PlaybookAction.OpenCorrection(c)) } else it }.padding(vertical = 6.dp),
+                Modifier.fillMaxWidth().heightIn(min = 56.dp).let { if (c.takeId != null && c.takeExists) it.press { act(PlaybookAction.OpenCorrection(c)) } else it }.padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -340,7 +352,11 @@ private fun RuleEditor(d: RuleDraft, wide: Boolean, busy: Boolean, act: (Playboo
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     d.evidence.take(6).forEach { e ->
                         val kind = when (e.kind) { "correction" -> "Correction"; "post" -> "Post"; "recipe" -> "Recipe"; else -> "Note" }
-                        T(listOfNotNull(kind, e.note, e.at?.let(::relativeTime)).joinToString(" · "), m.scale.caption, m.roles.ink2, maxLines = 2)
+                        val opens = e.kind == "correction" && e.id != null
+                        Box(Modifier.fillMaxWidth().let { if (opens) it.heightIn(min = 40.dp).press { act(PlaybookAction.OpenEvidence(e)) }.semantics { role = Role.Button } else it },
+                            contentAlignment = Alignment.CenterStart) {
+                            T(listOfNotNull(kind, e.note, e.at?.let(::relativeTime)).joinToString(" · "), m.scale.caption, if (opens) m.roles.link else m.roles.ink2, maxLines = 2)
+                        }
                     }
                 }
             }

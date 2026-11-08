@@ -1237,7 +1237,8 @@ class FakeMuseApi(
     override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?) = lock.withLock {
         recreateSlots(id)
         val made = recreateMade.getOrPut(id) { HashMap() }
-        if (slotId in made) throw ApiException("already_filled", "This shot is already being made")
+        // Demo: a shot still being made can't be started again; a finished one can be made anew ("Make a new one").
+        if ((made[slotId] ?: 2) < 2) throw ApiException("already_filled", "This shot is already being made")
         made[slotId] = 0
         RecreateFillStart(slotId, "job_rx_$slotId")
     }

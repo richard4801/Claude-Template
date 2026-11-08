@@ -181,7 +181,7 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
     // your edit plays each shot's take.
     val local = remember(referenceId) { RecreateLocalEdit(context, c.repo.api) }
     var built by remember(referenceId) { mutableStateOf<androidx.media3.common.Player?>(null) }
-    LaunchedEffect(ui.builtSessionId) {
+    LaunchedEffect(ui.builtSessionId, ui.builtRevision) {
         val sid = ui.builtSessionId ?: return@LaunchedEffect
         if (c.repo.demo) return@LaunchedEffect // demo mode has no media to build from
         runCatching { local.load(sid) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
@@ -202,7 +202,7 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
     RecreateBuildScreen(ui, RecreateActions(
         onBack = onBack, onMode = model::setMode, onSelect = model::select,
         onBuild = { scope.launch { model.requestBuild() } }, onConfirm = { model.confirmBuild() }, onCancel = model::cancelBuild,
-        onUseTake = model::useTake, onFix = model::fixWeakest,
+        onUseTake = model::useTake, onFix = model::fixWeakest, onRemake = { s -> scope.launch { model.remake(s) } },
         onOpenEditor = { ui.builtTakeId?.let(onOpenTake) ?: c.repo.toast("The built edit opens with its take in the editor") },
         onPlay = model::togglePlay, onStep = model::step,
     ), picture = poster, media = RecreateMedia(video, { id -> studio.takes.firstOrNull { it.id == id }?.videoUrl }, built))

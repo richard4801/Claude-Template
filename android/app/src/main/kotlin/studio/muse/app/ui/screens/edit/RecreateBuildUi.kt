@@ -73,6 +73,7 @@ class RecreateActions(
     val onConfirm: () -> Unit = {},
     val onCancel: () -> Unit = {},
     val onUseTake: (String, RecreateTakeChoice) -> Unit = { _, _ -> },
+    val onRemake: (String) -> Unit = {},
     val onFix: () -> Unit = {},
     val onOpenEditor: () -> Unit = {},
     val onPlay: () -> Unit = {},
@@ -91,12 +92,13 @@ class RecreateMedia(
 )
 
 private val LocalRecreateMedia = androidx.compose.runtime.staticCompositionLocalOf { RecreateMedia() }
+private val LocalRemake = androidx.compose.runtime.staticCompositionLocalOf<(String) -> Unit> { {} }
 
 /** The whole screen as a function of [ui] (screenshots render it). [picture]: the reference's poster, when the server has it. */
 @Composable
 fun RecreateBuildScreen(ui: RecreateBuildUi, a: RecreateActions, picture: ImageBitmap? = null, picking: String? = null, media: RecreateMedia = RecreateMedia()) {
     var pick by remember(picking) { mutableStateOf(picking) }
-    androidx.compose.runtime.CompositionLocalProvider(LocalRecreateMedia provides media) { ScreenBox(statusPad = true) {
+    androidx.compose.runtime.CompositionLocalProvider(LocalRecreateMedia provides media, LocalRemake provides a.onRemake) { ScreenBox(statusPad = true) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wide = maxWidth >= 720.dp
             val pickTake: (String) -> Unit = { pick = it }
@@ -479,6 +481,7 @@ private fun ShotPanel(ui: RecreateBuildUi, s: RecipeSlot, index: Int, pickTake: 
 @Composable
 private fun FillBox(ui: RecreateBuildUi, s: RecipeSlot, pickTake: (String) -> Unit, onRetry: () -> Unit) {
     val m = muse
+    val remakeShot = LocalRemake.current
     val f = ui.slotFill(s.id)
     val state = f?.state ?: "empty"
     val failed = ui.fillErrors[s.id]
@@ -511,6 +514,8 @@ private fun FillBox(ui: RecreateBuildUi, s: RecipeSlot, pickTake: (String) -> Un
         if (ui.fill != null && !making) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (failed != null) Quiet("Try again", enabled = !ui.buildBusy, onClick = onRetry)
             Quiet(if (state == "matched") "Pick another take" else "Use one of my takes") { pickTake(s.id) }
+            // Fix a shot: make it anew (priced, and confirmed with the next Build).
+            if (state == "matched" || state == "ready") Quiet("Make a new one") { remakeShot(s.id) }
         }
     }
 }

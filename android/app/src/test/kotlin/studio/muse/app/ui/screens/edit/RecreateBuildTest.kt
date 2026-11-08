@@ -70,6 +70,19 @@ class RecreateBuildTest {
 
             model.fixWeakest()
             assertEquals(RecreateMode.Recipe, model.ui.value.mode); assertEquals(4, model.ui.value.selected)
+
+            // Fix shot 5: make it anew. It is priced, confirmed with the next Build, generated, and the edit rebuilt.
+            model.remake("s5")
+            assertEquals("To generate", model.ui.value.tag("s5", scores = false))
+            model.requestBuild()
+            assertEquals(listOf("s5"), model.ui.value.confirmSlots)
+            assertEquals(.64, model.ui.value.confirmTotal, 1e-9)
+            model.confirmBuild().join()
+            withTimeout(5_000) { while (model.ui.value.mode != RecreateMode.Compare) delay(5) }
+            assertEquals("ready", model.ui.value.slotFill("s5")?.state)
+            assertEquals(RecreateMode.Compare, model.ui.value.mode)
+            assertTrue(model.ui.value.remake.isEmpty())
+            assertEquals(before, api.balance())
         } finally { scope.cancel(); work.cancel() }
     }
 

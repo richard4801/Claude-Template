@@ -63,8 +63,11 @@ data class RecreateBuildUi(
     val match: RecreateMatch? = null,
     /** The take the built edit lives on (Open in the editor). */
     val builtTakeId: String? = null,
-    /** The edit session the recipe was built into (Compare previews it on the device). */
+    /** The edit session the recipe was built into (Compare previews it on the device), and its revision. */
     val builtSessionId: String? = null,
+    val builtRevision: Int? = null,
+    /** Shots to make again ("Make a new one"): filled before, generated anew on the next Build. */
+    val remake: Set<String> = emptySet(),
     val takes: List<RecreateTakeChoice> = emptyList(),
     /** One line to show once (a toast), then [RecreateBuildModel.consumeMessage]. */
     val message: String? = null,
@@ -260,11 +263,12 @@ class RecreateBuildModel(
         val current = runCatching { api.referenceFill(id) }.getOrNull()
         for (s in confirmed) {
             try {
-                if (current?.slot(s)?.state.let { it != null && it != "to_generate" }) continue
+                // The server's own fill decides (never a shot filled twice), unless the person asked for this one anew.
+                if (s !in _ui.value.remake && current?.slot(s)?.state.let { it != null && it != "to_generate" }) continue
                 val started = api.fillReferenceSlot(id, s, model)
                 _ui.update { u ->
                     val f = u.fill
-                    u.copy(fillErrors = u.fillErrors - s, fill = f?.copy(slots = f.slots.map { if (it.slotId == s) it.copy(state = "generating", jobId = started.jobId) else it }))
+                    u.copy(fillErrors = u.fillErrors - s, picks = u.picks - s, remake = u.remake - s, fill = f?.copy(slots = f.slots.map { if (it.slotId == s) it.copy(state = "generating", jobId = started.jobId) else it }))
                 }
             } catch (e: CancellationException) { throw e } catch (e: Exception) {
                 _ui.update { u -> u.copy(fillErrors = u.fillErrors + (s to "This shot didn’t start: ${e.message ?: "try again"}")) }
@@ -326,7 +330,7 @@ class RecreateBuildModel(
             val session = api.openEditSession(OpenEditSessionRequest(takeId = base, device = "android"))
             val r = api.applyRecipe(id, session.id, session.revision, slots)
             _ui.update { v ->
-                v.copy(building = false, match = r.match ?: v.match, builtTakeId = base, builtSessionId = session.id, mode = RecreateMode.Compare,
+                v.copy(building = false, match = r.match ?: v.match, builtTakeId = base, builtSessionId = session.id, builtRevision = r.revision, mode = RecreateMode.Compare,
                     message = r.waiting.takeIf { it.isNotEmpty() }?.let { w -> "${w.joinToString(" and ") { v.shotName(it) }} isn’t ready yet, so the edit leaves it out for now" })
             }
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
@@ -334,6 +338,21 @@ class RecreateBuildModel(
         }
     }
 
-    /** "Fix shot 2": back to the recipe on the weakest shot, to pick another take for it. */
+    /**
+     * "Make a new one": a shot that comes from a take (or was generated) is made anew. It reads "To generate" with its
+     * price, and the next Build confirms and generates it like any other new shot.
+     */
+    suspend fun remake(slotId: String) {
+        _ui.update { u ->
+            val f = u.fill ?: return@update u
+            val s = f.slot(slotId) ?: return@update u
+            val p = s.copy(state = "to_generate", takeId = null, jobId = null, score = null, reason = "A new shot will be made for this one")
+            u.copy(fill = f.copy(slots = f.slots.map { if (it.slotId == slotId) p else it }), picks = u.picks + (slotId to p), remake = u.remake + slotId,
+                fillErrors = u.fillErrors - slotId)
+        }
+        price()
+    }
+
+    /** "Fix shot 2": back to the recipe on the weakest shot, to pick another take for it or make it anew. */
     fun fixWeakest() = _ui.update { u -> u.copy(selected = u.weakest ?: u.selected, mode = RecreateMode.Recipe) }
 }
