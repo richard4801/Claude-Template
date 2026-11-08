@@ -8,7 +8,7 @@ import { pipeline } from 'node:stream/promises';
 import { and, desc, eq, inArray, isNull, lt } from 'drizzle-orm';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
-import { clips as clipsTable, models, suiteLocations, uploads } from '../db/schema.js';
+import { clips as clipsTable, models, studioSettings, suiteLocations, uploads } from '../db/schema.js';
 import { EDITOR_LIMITS } from '../editor/service.js';
 import { whoOf } from '../money/money.js';
 import * as P from '../pricing.js';
@@ -29,10 +29,12 @@ import { learningOf } from '../editor/learn.js';
 import { pinnedDirectives, provenStart } from './playbook.js';
 import { rendersOf, type RenderState } from '../editor/renders.js';
 import type { EditProject } from '../editor/model.js';
-import { checkInfo, FALLBACK, linkError, normalizeLink, tiktokDownloadsOff, ytDlp, type Resolver } from './links.js';
+import { assertPublicHost, checkInfo, FALLBACK, linkError, linkFor, normalizeLink, tiktokDownloadsOff, ytDlp, type Resolver } from './links.js';
 import { recreateReferences } from './schema.js';
 
 export const MAX_REFERENCE_SEC = 60;
+/** Analysis runs before a reference fails for good: the second one is lite (workstream 1, the 512 MB box). */
+export const MAX_ANALYZE_ATTEMPTS = 2;
 /** Matching by movement: at most this many takes are read for poses per match, over their first seconds. */
 export const POSE_MATCH_TAKES = 8, POSE_TAKE_SEC = 6;
 export const KEEP_DAYS = 30;
@@ -115,7 +117,8 @@ export type RecipeSource = { recipeId: string; slotId?: string; textId?: string;
 export type MatchScore = { overall: number; cuts: number; text: number; ramps: number; grade: number; shots: number; perSlot: { slotId: string; score: number }[] };
 
 const CreateBody = z.union([
-  z.object({ uploadId: z.string().min(1).max(80), name: z.string().trim().max(80).optional() }).strict(),
+  /** `sourceUrl`: the link a device fetched this file from (the studio's link rules apply; keeps the link for caching and "Use this sound"). */
+  z.object({ uploadId: z.string().min(1).max(80), name: z.string().trim().max(80).optional(), sourceUrl: z.string().trim().min(8).max(500).optional() }).strict(),
   z.object({ url: z.string().trim().min(8).max(500), name: z.string().trim().max(80).optional() }).strict(),
 ]);
 const PatchBody = z.object({ keep: z.boolean().optional(), name: z.string().trim().max(80).optional() }).strict();
@@ -132,13 +135,48 @@ export class RecreateReferences {
   private resumed = false;
   constructor(private ctx: Ctx) {}
 
-  /** After a restart: analyses that were running start again (once, on first use). */
+  /**
+   * After a restart (at startup, else on first use): analyses that were running start again. One that had already
+   * started was running when the server went down (most likely out of memory, killed without a log): it runs again
+   * once in lite mode (required steps only); after a second such stop it fails with Retry (workstream 1).
+   */
   private async resume() {
     if (this.resumed) return;
     this.resumed = true;
-    const rows = await this.ctx.db.select({ id: recreateReferences.id }).from(recreateReferences).where(eq(recreateReferences.state, 'analyzing'));
-    for (const r of rows) if (!this.queue.includes(r.id)) this.enqueue(r.id);
+    const rows = await this.ctx.db.select({ id: recreateReferences.id, attempts: recreateReferences.analyzeAttempts }).from(recreateReferences)
+      .where(and(eq(recreateReferences.state, 'analyzing'), isNull(recreateReferences.deletedAt)));
+    for (const r of rows) {
+      if (r.attempts >= MAX_ANALYZE_ATTEMPTS) {
+        const [n] = await this.ctx.db.update(recreateReferences).set({ state: 'failed', phase: 'Failed', errorCode: 'analysis_crashed',
+          error: 'The analysis stopped the server twice · tap Retry for a lighter analysis' }).where(eq(recreateReferences.id, r.id)).returning();
+        if (n) this.emit(n);
+        this.ctx.log?.warn({ referenceId: r.id, attempts: r.attempts }, 'recreate analysis crashed twice: failed');
+        continue;
+      }
+      if (r.attempts > 0) this.ctx.log?.warn({ referenceId: r.id, attempts: r.attempts }, 'recreate analysis was running when the server stopped: resuming lite');
+      if (!this.queue.includes(r.id)) this.enqueue(r.id);
+    }
   }
+  /** At server start (app.ts): picks up analyses a crash or deploy left running. */
+  async startup() { await this.resume(); }
+
+  /**
+   * POST /v1/recreate/references/{id}/retry: a failed analysis runs again (the video is kept, or the link fetched
+   * again). After a crash it runs lite (required steps only).
+   */
+  async retry(u: AuthUser, id: string) {
+    const r = await this.row(u, id);
+    if (r.state !== 'failed') throw new ApiError(409, 'not_failed', 'Only a failed analysis can be retried');
+    if (!r.storageKey && !r.sourceUrl) throw new ApiError(409, 'video_gone', 'The video is gone · add the reference again');
+    const [n] = await this.ctx.db.update(recreateReferences).set({ state: 'analyzing', progress: 0, phase: 'Waiting', error: null, errorCode: null,
+      analyzeAttempts: r.errorCode === 'analysis_crashed' ? MAX_ANALYZE_ATTEMPTS - 1 : 0 }).where(and(eq(recreateReferences.id, r.id), eq(recreateReferences.state, 'failed'))).returning();
+    if (!n) throw new ApiError(409, 'not_failed', 'Only a failed analysis can be retried');
+    this.emit(n);
+    if (!this.queue.includes(n.id)) this.enqueue(n.id);
+    return this.view(n);
+  }
+  /** True while an analysis decodes video: other heavy reads (a take's poses) wait their turn by skipping. */
+  private heavyBusy = false;
 
   view(r: Row) {
     const base = `${this.ctx.config.PUBLIC_URL ?? ''}/v1/recreate/references/${r.id}`;
@@ -192,10 +230,19 @@ export class RecreateReferences {
     const info = await this.withLocal(up.storageKey, f => probe(c.FFPROBE_PATH, f)).catch(() => null);
     if (!info?.width) throw badRequest('That file isn’t a video MUSE can read');
     if (info.duration > MAX_REFERENCE_SEC + 0.5) throw badRequest(`References can be up to ${MAX_REFERENCE_SEC} s for now (this one is ${Math.round(info.duration)} s)`);
+    // Fetched on the device from a link: the studio's link rules and the size cap still apply; the link is kept.
+    let sourceUrl: string | null = null;
+    if ('sourceUrl' in b && b.sourceUrl) {
+      sourceUrl = linkFor(b.sourceUrl, { strict: await this.strictLinks(u.studioId) }).url;
+      const bytes = up.bytes ?? (await this.ctx.storage.head(up.storageKey))?.size ?? 0;
+      if (bytes > this.maxLinkBytes) throw linkError('link_too_big', `This video is too big (${Math.round(bytes / 1048576)} MB; the limit is ${Math.round(this.maxLinkBytes / 1048576)} MB)`);
+      const hit = await this.cachedLink(u, sourceUrl);
+      if (hit) return { ...this.view(hit), cached: true };
+    }
     const now = Date.now();
     const [r] = await this.ctx.db.insert(recreateReferences).values({
       id: uid('rx'), studioId: u.studioId, userId: u.id, name: b.name || 'Reference', uploadId: up.id, storageKey: up.storageKey, durationSec: Math.round(info.duration * 1000) / 1000,
-      state: 'analyzing', phase: 'Waiting', createdAt: now, expiresAt: now + KEEP_DAYS * DAY,
+      state: 'analyzing', phase: 'Waiting', createdAt: now, expiresAt: now + KEEP_DAYS * DAY, ...(sourceUrl ? { sourceUrl } : {}),
     }).returning();
     this.enqueue(r!.id);
     this.emit(r!);
@@ -220,6 +267,46 @@ export class RecreateReferences {
   }
   private get links() { return this.resolver ?? ytDlp(this.ctx.config.YTDLP_PATH); }
   private get maxLinkBytes() { return this.ctx.config.RECREATE_LINK_MAX_MB * 1048576; }
+  /** The host check for "other" links (tests replace it). */
+  publicHost = (url: string) => assertPublicHost(url);
+  /** Why a server-side fetch failed: the platform and yt-dlp's failure in a word, never the link. */
+  private logLinkFailure(platform: string, step: 'info' | 'download', e: unknown) {
+    const err = e as ApiError & { failure?: string };
+    this.ctx.log?.warn({ platform, step, code: err?.code ?? 'error', failure: err?.failure ?? 'other' }, 'recreate link fetch failed');
+  }
+  /** The studio's "Strict link rules" (default on). */
+  async strictLinks(studioId: string) {
+    const [s] = await this.ctx.db.select({ v: studioSettings.recreateStrictLinks }).from(studioSettings).where(eq(studioSettings.studioId, studioId));
+    return s?.v ?? true;
+  }
+  /** GET /v1/recreate/settings: the link rules, for the apps to apply on the device too. */
+  async settings(u: AuthUser) {
+    const strict = await this.strictLinks(u.studioId);
+    return { strictLinks: strict, platforms: strict ? ['tiktok', 'instagram', 'youtube'] : ['any'], tiktokDownloadsOff: strict ? 'refuse' : 'allow',
+      maxSec: MAX_REFERENCE_SEC, maxMb: this.ctx.config.RECREATE_LINK_MAX_MB, serverFetch: this.ctx.config.RECREATE_LINKS, cookies: false, canEdit: u.role === 'owner' };
+  }
+  /** PATCH /v1/recreate/settings {strictLinks} (owner). */
+  async patchSettings(u: AuthUser, body: unknown) {
+    if (u.role !== 'owner') throw new ApiError(403, 'owner_only', 'Only the studio owner can change this');
+    const b = parse(z.object({ strictLinks: z.boolean() }).strict(), body);
+    await this.ctx.db.insert(studioSettings).values({ studioId: u.studioId, recreateStrictLinks: b.strictLinks })
+      .onConflictDoUpdate({ target: studioSettings.studioId, set: { recreateStrictLinks: b.strictLinks } });
+    const out = await this.settings(u);
+    this.ctx.hub.emit(u.studioId, { type: 'recreate', settings: { ...out, canEdit: undefined } });
+    return out;
+  }
+  /** POST /v1/recreate/links/check {url}: before a device downloads, the link under the studio's rules, and this member's reference from it if there is one. */
+  async checkLink(u: AuthUser, body: unknown) {
+    const b = parse(z.object({ url: z.string().trim().min(8).max(500) }).strict(), body);
+    try {
+      const n = linkFor(b.url, { strict: await this.strictLinks(u.studioId) });
+      const hit = await this.cachedLink(u, n.url);
+      return { allowed: true, url: n.url, platform: n.platform, ...(hit ? { cached: this.view(hit) } : {}) };
+    } catch (e) {
+      if (e instanceof ApiError) return { allowed: false, code: e.code, reason: e.message };
+      throw e;
+    }
+  }
   /** The member's own live reference from the same link (fetched once; deleted or expired ones don't count). */
   private async cachedLink(u: AuthUser, url: string) {
     const [r] = await this.ctx.db.select().from(recreateReferences).where(and(eq(recreateReferences.studioId, u.studioId), eq(recreateReferences.userId, u.id),
@@ -234,15 +321,18 @@ export class RecreateReferences {
    */
   private async createFromLink(u: AuthUser, b: { url: string; name?: string }) {
     if (!this.ctx.config.RECREATE_LINKS) throw linkError('link_blocked', FALLBACK);
-    const n = normalizeLink(b.url);
+    const strict = await this.strictLinks(u.studioId);
+    const n = linkFor(b.url, { strict });
     const hit = await this.cachedLink(u, n.url);
     if (hit) return { ...this.view(hit), cached: true };
-    const info = await this.serial(() => this.links.info(n.url));
+    if (n.platform === 'other') await this.publicHost(n.url);
+    const info = await this.serial(() => this.links.info(n.url)).catch(e => { this.logLinkFailure(n.platform, 'info', e); throw e; });
     let url = n.url;
-    try { if (info.webpage_url) url = normalizeLink(info.webpage_url).url; } catch { /* keep the pasted form */ }
+    try { if (info.webpage_url) url = linkFor(info.webpage_url, { strict }).url; } catch { /* keep the pasted form */ }
     if (url !== n.url) { const again = await this.cachedLink(u, url); if (again) return { ...this.view(again), cached: true }; }
     checkInfo(info, { maxSec: MAX_REFERENCE_SEC, maxBytes: this.maxLinkBytes });
-    if (n.platform === 'tiktok') {
+    // Strict rules honour TikTok's "downloads off"; the owner can switch that off ("Strict link rules").
+    if (n.platform === 'tiktok' && strict) {
       const html = await this.serial(() => this.fetchPage(url)).catch(e => { throw e instanceof ApiError ? e : linkError('link_blocked', FALLBACK); });
       if (tiktokDownloadsOff(html) === true) throw linkError('link_downloads_off', 'The creator turned downloads off for this video, so MUSE won’t fetch it. Use another video, or ask the creator');
     }
@@ -266,7 +356,8 @@ export class RecreateReferences {
       if (!obj) throw linkError('link_blocked', FALLBACK);
       const infoFile = path.join(dir, 'info.json');
       await pipeline(obj.body as NodeJS.ReadableStream, fs.createWriteStream(infoFile));
-      const file = await this.serial(() => this.links.download(infoFile, dir, { maxBytes: this.maxLinkBytes, ffmpeg: this.ctx.config.FFMPEG_PATH }));
+      const file = await this.serial(() => this.links.download(infoFile, dir, { maxBytes: this.maxLinkBytes, ffmpeg: this.ctx.config.FFMPEG_PATH }))
+        .catch(e => { this.logLinkFailure(r.sourceUrl ? linkFor(r.sourceUrl, { strict: false }).platform : 'other', 'download', e); throw e; });
       const info = await probe(this.ctx.config.FFPROBE_PATH, file).catch(() => null);
       if (!info?.width) throw linkError('link_blocked', FALLBACK);
       if (info.duration > MAX_REFERENCE_SEC + 0.5) throw linkError('too_long', `References can be up to ${MAX_REFERENCE_SEC} s for now (this one is ${Math.round(info.duration)} s)`, 400);
@@ -387,6 +478,7 @@ export class RecreateReferences {
   private async takeTrack(t: typeof takesTable.$inferSelect): Promise<PoseTrack | null> {
     const k = `${t.id}:${t.mediaKey}`;
     if (this.trackCache.has(k)) return this.trackCache.get(k)!;
+    if (this.heavyBusy) return null; // an analysis is decoding: match without poses this time (not cached)
     const c = this.ctx.config;
     const w = Number(t.media?.width) || 720, h = Number(t.media?.height) || 1280, d = Number(t.media?.durationSec) || POSE_TAKE_SEC;
     const run = await this.withLocal(t.mediaKey!, f => readPoseTracks({ ffmpeg: c.FFMPEG_PATH, minFreeMb: c.RECREATE_POSE_MIN_FREE_MB }, f, [{ startSec: 0, endSec: Math.min(d, POSE_TAKE_SEC) }],
@@ -907,8 +999,11 @@ export class RecreateReferences {
   private async analyze(id: string) {
     const db = this.ctx.db, c = this.ctx.config;
     let [r] = await db.select().from(recreateReferences).where(eq(recreateReferences.id, id));
-    if (!r || r.state !== 'analyzing') return;
+    if (!r || r.state !== 'analyzing' || r.deletedAt) return;
     const set = async (v: Partial<Row>) => { const [n] = await db.update(recreateReferences).set(v).where(eq(recreateReferences.id, id)).returning(); if (n) this.emit(n); };
+    // Counted before any heavy work: if the server dies during it, the restart knows (resume()).
+    const attempts = r.analyzeAttempts + 1, lite = attempts >= MAX_ANALYZE_ATTEMPTS;
+    await set({ analyzeAttempts: attempts, ...(lite ? { phase: 'Starting again (a lighter analysis)' } : {}) });
     if (!r.storageKey) {
       if (!r.sourceUrl) return;
       const got = await this.fetchLinkVideo(r, set);
@@ -916,11 +1011,13 @@ export class RecreateReferences {
       r = got;
     }
     const storageKey = r.storageKey!;
+    this.heavyBusy = true;
     try {
       const out = await this.withLocal(storageKey, f => analyzeReference({ ffmpeg: c.FFMPEG_PATH, ffprobe: c.FFPROBE_PATH, ...(c.TESSERACT_PATH ? { tesseract: c.TESSERACT_PATH } : {}),
         ...(c.RECREATE_POSE ? { pose: { minFreeMb: c.RECREATE_POSE_MIN_FREE_MB } } : {}) }, f, {
-        maxSec: MAX_REFERENCE_SEC + 1, progress: (p, phase) => set({ progress: Math.round(5 + p * 90), phase }),
+        maxSec: MAX_REFERENCE_SEC + 1, progress: (p, phase) => set({ progress: Math.round(5 + p * 90), phase }), lite,
       }));
+      if (out.recipe.analyzer.skipped?.length) this.ctx.log?.warn({ referenceId: r.id, skipped: out.recipe.analyzer.skipped }, 'recreate analysis skipped optional steps');
       // The pose child's peak memory, for sizing the instance (plans/recreate-edit.md "Pose").
       if (out.recipe.analyzer.pose) this.ctx.log?.info({ referenceId: r.id, pose: out.recipe.analyzer.pose }, 'recreate pose');
       // Per-frame poses (keypoints only), private next to the reference and deleted with it; read when matching takes.
@@ -937,11 +1034,11 @@ export class RecreateReferences {
       }
     } catch (e) {
       await set({ state: 'failed', phase: 'Failed', error: `The analysis didn’t finish: ${(e as Error).message.slice(0, 200)}` });
-    }
+    } finally { this.heavyBusy = false; }
   }
 
+  /** The stored video as a local file for ffmpeg (streamed to disk, never held in memory; also from S3, so each of the many reads is local). */
   private async withLocal<T>(key: string, fn: (input: string) => Promise<T>): Promise<T> {
-    if (this.ctx.storage.kind === 's3') return fn(await this.ctx.storage.presignGet(key, 900));
     const obj = await this.ctx.storage.get(key);
     if (!obj) throw new Error('media missing');
     const file = path.join(os.tmpdir(), `${uid('rxin')}${path.extname(key) || '.mp4'}`);

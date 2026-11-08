@@ -120,6 +120,7 @@ export class SuiteRunner {
     const cancelled = () => st.cancelled;
     try {
       if (!plan) throw new Error('the shot plan is missing');
+      if (plan.provider === 'byo') await this.suite.byo.ensure(job.studioId, true); // WS5: custom models are per studio
       let model = modelById(plan.modelId);
       if (!model) throw new ReplicateError('model no longer in the registry', 'unavailable');
       let provider = this.suite.providerFor(plan);

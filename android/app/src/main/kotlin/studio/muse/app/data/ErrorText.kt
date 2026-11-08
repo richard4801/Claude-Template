@@ -16,6 +16,23 @@ object ErrorText {
 
     fun of(e: ApiException): String = of(e.code, e.message)
 
+    /**
+     * Plain words for an HTTP status that came without the server's own message (a proxy's page, a restart): members
+     * never see "Server error 502". 502/503/504 are the code `server_restarting` (transient: retried where it matters).
+     */
+    fun http(status: Int): String = when (status) {
+        502, 503, 504 -> RESTARTING
+        500 -> "Something went wrong on the studio server. Try again."
+        404 -> "That's no longer there."
+        403 -> "You don't have access to that."
+        408 -> "The studio server took too long to answer. Try again."
+        413 -> "That file is too large to upload."
+        else -> "The studio server couldn't do that. Try again."
+    }
+    /** The code for a status without the server's own code. */
+    fun codeOf(status: Int): String = when (status) { 401 -> "unauthorized"; 429 -> "rate_limited"; 413 -> "too_large"; 502, 503, 504 -> "server_restarting"; else -> "http_$status" }
+    const val RESTARTING = "The studio server is restarting. Try again in a moment."
+
     fun of(code: String, serverMessage: String?): String {
         val server = serverMessage?.trim().orEmpty()
         return when (code) {
@@ -58,13 +75,16 @@ object ErrorText {
             "still_working" -> "Still working on it. It keeps going on the server, and the photos will appear in the Library. No need to press Generate again."
             "bad_response" -> "The server sent something this app version can't read. Update MUSE."
             "server_error" -> "Something went wrong on the server. Try again."
+            "server_restarting" -> RESTARTING
             "bad_signature" -> "The upload link expired. Try again."
             "warm_not_allowed" -> "Only the studio owner can do that."
             "owner_balance_low" -> NOT_ENOUGH_STUDIO
             "no_gpu_free" -> "Every add-on engine is busy right now. Try again when a render finishes."
             "no_gpu_available" -> "No add-on engine is free right now. Try again in a minute."
             "not_warm" -> "The add-on engine isn't on any more."
-            else -> Credit.dollarize(server).ifBlank { "Something went wrong." }
+            // Never a raw "Server error 502" or a bare status (older builds and proxies said so).
+            else -> Credit.dollarize(server).takeUnless { it.isBlank() || Regex("""^(Server error|HTTP)\s*\d{3}""", RegexOption.IGNORE_CASE).containsMatchIn(it) }
+                ?: Regex("""\d{3}""").find(server)?.value?.toIntOrNull()?.let(::http) ?: "Something went wrong."
         }
     }
 }

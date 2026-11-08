@@ -13,10 +13,16 @@ import type { ChatEvent, DirectorClient } from '../camera/director.js';
 import { claudeMessages } from '../camera/schema.js';
 import { EDIT_TOOLS, type EditTool } from '../editor/mcpTools.js';
 import { RECREATE_TOOLS } from './mcpTools.js';
+import { SUITE_PROMPT, SUITE_TOOLS } from '../suite/mcpTools.js';
+import { assistOf } from '../suite/assist.js';
 import { recreateOf } from './references.js';
 import { editSessionsOf } from '../editor/sessions.js';
+import { attachmentLine, imageBlocks, type Attachment } from '../camera/claudeAttachments.js';
 
-export type AssistantContext = 'recreate' | 'edit';
+/** workstream 1: at most this many attached images are replayed from earlier messages (newest first). */
+const HISTORY_IMAGES = 8;
+
+export type AssistantContext = 'recreate' | 'edit' | 'suite';
 /** The edit tools Claude also gets in a recreate thread (open the edit, read it, change it, undo). */
 const EDIT_IN_RECREATE = new Set(['list_takes', 'open_edit', 'get_edit', 'apply_edit_ops', 'undo_edit', 'get_frame']);
 
@@ -50,9 +56,9 @@ export class EditAssistant {
 
   /** The thread's tools, with its reference id (recreate) or session id (edit) taken out of the schema and filled in. */
   toolsFor(kind: AssistantContext): EditTool[] {
-    return kind === 'recreate' ? [...RECREATE_TOOLS, ...EDIT_TOOLS.filter(t => EDIT_IN_RECREATE.has(t.name))] : EDIT_TOOLS;
+    return kind === 'recreate' ? [...RECREATE_TOOLS, ...EDIT_TOOLS.filter(t => EDIT_IN_RECREATE.has(t.name))] : kind === 'suite' ? SUITE_TOOLS : EDIT_TOOLS;
   }
-  private fixed(kind: AssistantContext) { return kind === 'recreate' ? 'referenceId' : 'sessionId'; }
+  private fixed(kind: AssistantContext) { return kind === 'recreate' ? 'referenceId' : kind === 'suite' ? 'assistId' : 'sessionId'; }
   tools(kind: AssistantContext): BetaToolUnion[] {
     const key = this.fixed(kind);
     return this.toolsFor(kind).map(t => {
@@ -64,23 +70,32 @@ export class EditAssistant {
   }
 
   /** Checks before streaming starts (plain JSON errors). */
-  async precheck(u: AuthUser, kind: AssistantContext, contextId: string, message: unknown) {
-    if (typeof message !== 'string' || !message.trim()) throw new ApiError(400, 'bad_request', 'message: write something');
+  async precheck(u: AuthUser, kind: AssistantContext, contextId: string, message: unknown, hasImages = false) {
+    if (hasImages && (message === undefined || message === null || message === '')) message = ' ';
+    if (typeof message !== 'string' || !message.trim() && !hasImages) throw new ApiError(400, 'bad_request', 'message: write something');
     if (message.length > 8000) throw new ApiError(400, 'bad_request', 'message: at most 8000 characters');
-    if (kind === 'recreate') await recreateOf(this.ctx).row(u, contextId); else await editSessionsOf(this.ctx).row(u, contextId);
+    if (kind === 'recreate') await recreateOf(this.ctx).row(u, contextId); else if (kind === 'suite') await assistOf(this.ctx).row(u, contextId); else await editSessionsOf(this.ctx).row(u, contextId);
     this.getClient();
     if (this.busy.has(contextId)) throw new ApiError(409, 'chat_busy', 'Claude is still working on this · wait for the reply');
   }
 
   /** The conversation so far, from the thread's stored text (tool calls aren't replayed; Claude reads again what it needs). */
-  private async history(threadId: string, message?: string): Promise<BetaMessageParam[]> {
-    const rows = await this.ctx.db.select().from(claudeMessages).where(and(eq(claudeMessages.threadId, threadId))).orderBy(asc(claudeMessages.createdAt));
+  private async history(threadId: string, message?: string, skipId?: string): Promise<BetaMessageParam[]> {
+    const rows = (await this.ctx.db.select().from(claudeMessages).where(and(eq(claudeMessages.threadId, threadId))).orderBy(asc(claudeMessages.createdAt))).slice(-40);
+    // workstream 1: earlier attached images come back too (the newest HISTORY_IMAGES), with their uploadIds.
+    let room = HISTORY_IMAGES;
+    const withImages = new Set<string>();
+    for (const m of [...rows].reverse()) if (m.id !== skipId && m.role === 'user' && m.attachments?.length && room >= m.attachments.length) { withImages.add(m.id); room -= m.attachments.length; }
     const out: BetaMessageParam[] = [];
-    for (const m of rows.slice(-40)) {
-      if ((m.role !== 'user' && m.role !== 'assistant') || !m.text.trim()) continue;
+    for (const m of rows) {
+      if (m.id === skipId) continue;
+      const imgs = withImages.has(m.id) ? m.attachments! : [];
+      if ((m.role !== 'user' && m.role !== 'assistant') || (!m.text.trim() && !imgs.length)) continue;
+      const blocks: BetaContentBlockParam[] = [...(await imageBlocks(this.ctx, imgs)) as BetaContentBlockParam[],
+        ...(imgs.length ? [{ type: 'text' as const, text: attachmentLine(imgs) }] : []), ...(m.text.trim() ? [{ type: 'text' as const, text: m.text }] : [])];
       const last = out.at(-1);
-      if (last && last.role === m.role) (last.content as BetaContentBlockParam[]).push({ type: 'text', text: m.text });
-      else out.push({ role: m.role, content: [{ type: 'text', text: m.text }] });
+      if (last && last.role === m.role) (last.content as BetaContentBlockParam[]).push(...blocks);
+      else out.push({ role: m.role, content: blocks });
     }
     while (out[0] && out[0].role !== 'user') out.shift();
     // This turn's own line is already stored (the route mirrors it first): the turn adds it again with the facts.
@@ -93,25 +108,32 @@ export class EditAssistant {
   }
 
   /** One turn: runs until Claude ends it (or the step cap). Never throws; errors become an `error` event. Returns the final text. */
-  async run(u: AuthUser, threadId: string, kind: AssistantContext, contextId: string, message: string, emit: (e: ChatEvent) => void): Promise<string> {
+  async run(u: AuthUser, threadId: string, kind: AssistantContext, contextId: string, message: string, emit: (e: ChatEvent) => void,
+    o: { attachments?: Attachment[]; skipMessageId?: string } = {}): Promise<string> {
     if (this.busy.has(contextId)) { emit({ type: 'error', code: 'chat_busy', error: 'Claude is still working on this · wait for the reply' }); return ''; }
     this.busy.add(contextId);
     let finalText = '';
     const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
     try {
       const client = this.getClient();
-      const history = await this.history(threadId, message);
+      const history = await this.history(threadId, o.skipMessageId ? undefined : message, o.skipMessageId);
       const facts = kind === 'recreate'
         ? await (async () => { const r = await recreateOf(this.ctx).row(u, contextId); return `[Reference ${r.id} “${r.name}” · ${r.state}${r.recipe ? ` · ${r.recipe.slots.length} shots, ${r.recipe.source.durationSec} s` : ''}]`; })()
-        : await (async () => { const s = await editSessionsOf(this.ctx).row(u, contextId); return `[Edit session ${s.id} · revision ${s.revision}]`; })();
-      history.push({ role: 'user', content: [{ type: 'text', text: `${facts}\n\n${message}` }] });
+        : kind === 'suite'
+          ? await (async () => { const v = await assistOf(this.ctx).get(u, contextId); return `[Suite shot ${v.id} · revision ${v.revision} · the prompt now: “${v.request.prompt.slice(0, 200)}”${v.pending.some(p => p.status === 'waiting') ? ' · waiting for the owner\'s approval' : ''}]`; })()
+          : await (async () => { const s = await editSessionsOf(this.ctx).row(u, contextId); return `[Edit session ${s.id} · revision ${s.revision}]`; })();
+      const imgs = o.attachments ?? [];
+      const turnBlocks: BetaContentBlockParam[] = [...(await imageBlocks(this.ctx, imgs)) as BetaContentBlockParam[],
+        { type: 'text', text: [facts, attachmentLine(imgs), message.trim()].filter(Boolean).join('\n\n') }];
+      const prev = history.at(-1);
+      if (prev?.role === 'user') (prev.content as BetaContentBlockParam[]).push(...turnBlocks); else history.push({ role: 'user', content: turnBlocks });
       const c = this.ctx.config;
       let stopReason = 'end_turn';
       for (let step = 0; ; step++) {
         if (step >= c.DIRECTOR_MAX_STEPS) { stopReason = 'max_steps'; finalText += '\n\n(I stopped after many steps · tell me to continue.)'; break; }
         const stream = client.beta.messages.stream({
           model: c.DIRECTOR_MODEL, max_tokens: c.DIRECTOR_MAX_TOKENS,
-          system: [{ type: 'text', text: kind === 'recreate' ? RECREATE_PROMPT : EDIT_PROMPT, cache_control: { type: 'ephemeral' } }],
+          system: [{ type: 'text', text: kind === 'recreate' ? RECREATE_PROMPT : kind === 'suite' ? SUITE_PROMPT : EDIT_PROMPT, cache_control: { type: 'ephemeral' } }],
           tools: this.tools(kind), messages: history, output_config: { effort: c.DIRECTOR_EFFORT }, cache_control: { type: 'ephemeral' },
           ...(c.DIRECTOR_FALLBACKS ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } : {}),
         });

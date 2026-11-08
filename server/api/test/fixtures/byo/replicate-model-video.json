@@ -1,0 +1,24 @@
+{
+  "url": "https://replicate.com/acme/motion-1", "owner": "acme", "name": "motion-1",
+  "description": "Text and image to video with first-frame control", "visibility": "public", "run_count": 1200,
+  "latest_version": {
+    "id": "5c7d5dc6dd8bf75c1acaa8565735e7986bc5b66206b55cca93cb72c9bf15ccaa",
+    "openapi_schema": {
+      "openapi": "3.0.2",
+      "components": { "schemas": {
+        "Input": { "type": "object", "title": "Input", "required": ["prompt"], "properties": {
+          "prompt": { "type": "string", "title": "Prompt", "x-order": 0 },
+          "negative_prompt": { "type": "string", "title": "Negative Prompt", "default": "" },
+          "start_image": { "type": "string", "format": "uri", "title": "Start Image", "description": "First frame of the video" },
+          "duration": { "allOf": [{ "$ref": "#/components/schemas/duration" }], "default": 5 },
+          "aspect_ratio": { "allOf": [{ "$ref": "#/components/schemas/aspect_ratio" }], "default": "16:9" },
+          "seed": { "type": "integer", "title": "Seed" },
+          "motion_strength": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1 }
+        } },
+        "duration": { "enum": [5, 10], "type": "integer", "title": "duration" },
+        "aspect_ratio": { "enum": ["16:9", "9:16", "1:1"], "type": "string", "title": "aspect_ratio" },
+        "Output": { "type": "string", "title": "Output", "format": "uri" }
+      } }
+    }
+  }
+}

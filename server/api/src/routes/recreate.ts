@@ -19,10 +19,15 @@ export async function registerRecreateRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/v1/recreate/references/:id', async req => rx.view(await rx.row(req.user, id(req))));
   app.patch('/v1/recreate/references/:id', async req => rx.patch(req.user, id(req), req.body));
   app.delete('/v1/recreate/references/:id', async (req, reply) => { await rx.remove(req.user, id(req)); return reply.status(204).send(); });
+  app.post('/v1/recreate/references/:id/retry', async req => rx.retry(req.user, id(req))); // workstream 1: after a failed (or crashed) analysis
   // Slots (phase 3): briefs, matching to takes, filling with Suite shots, building the edit in a session.
   const slot = (req: { params: unknown }) => (req.params as { slotId: string }).slotId;
   app.put('/v1/recreate/references/:id/briefs', async req => rx.setBriefs(req.user, id(req), req.body));
   app.post('/v1/recreate/references/:id/match', async req => rx.match(req.user, id(req), req.body));
+  // "Strict link rules" (owner) and the link check before a device downloads (Release 1 fix: platforms block server IPs).
+  app.get('/v1/recreate/settings', async req => rx.settings(req.user));
+  app.patch('/v1/recreate/settings', async req => rx.patchSettings(req.user, req.body));
+  app.post('/v1/recreate/links/check', async req => rx.checkLink(req.user, req.body));
   // Shot briefs written on the server (G8): the price first, then a confirmed run.
   app.post('/v1/recreate/references/:id/briefs/estimate', async req => briefsOf(ctx).estimate(req.user, id(req)));
   app.post('/v1/recreate/references/:id/briefs/write', async req => briefsOf(ctx).write(req.user, id(req), req.body));

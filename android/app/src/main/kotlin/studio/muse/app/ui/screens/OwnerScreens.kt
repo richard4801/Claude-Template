@@ -424,6 +424,7 @@ private fun StudioForm(vm: OwnerViewModel, st: StudioSettings, s: OwnerState) {
         vm.saveStudio(StudioSettingsPatch(capPerJob = perJob.toDoubleOrNull(), capPerDay = perDay.toDoubleOrNull(), capPerUserDay = perUser.toDoubleOrNull()))
     }, Modifier.fillMaxWidth(), busy = s.busy)
     s.note?.takeIf { it.first == "studio" }?.let { InlineNote(it.second, it.third) }
+    LinkRulesRow()
     if (!st.features.replaceAudio) Caption("Replace audio isn't available yet: turning Keep audio off gives a silent take.", color = m.roles.ink2)
 }
 
@@ -512,6 +513,24 @@ private fun EditorHelpersSection() {
         if (e.capPerDayUsd != null) TextAction("Use the default limit", { patch { patchEditorSettings(resetCap = true) } })
         note?.let { Caption(it) }
     }
+}
+
+/**
+ * Recreate's "Strict link rules" (owner; GET/PATCH /v1/recreate/settings): on, TikTok, Instagram Reels and YouTube only,
+ * and a TikTok whose creator turned downloads off is refused; off, any public web link. Hidden on a server without it.
+ */
+@Composable
+private fun LinkRulesRow() {
+    val c = LocalContainer.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var rules by remember { mutableStateOf<studio.muse.app.data.RecreateLinkSettings?>(null) }
+    var note by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { rules = runCatching { c.repo.api.recreateSettings() }.getOrNull() }
+    val r = rules?.takeIf { it.canEdit } ?: return
+    fun flip() { scope.launch { val (v, err) = c.repo.attemptInline { patchRecreateSettings(!r.strictLinks) }; if (v != null) { rules = v; note = null } else note = err } }
+    RowItem("Strict link rules", if (r.strictLinks) "Recreate takes TikTok, Instagram Reels and YouTube links, and respects a creator's \"downloads off\""
+        else "Recreate takes any public web link", onClick = ::flip) { Toggle(r.strictLinks, { flip() }) }
+    note?.let { Caption(it) }
 }
 
 @Composable

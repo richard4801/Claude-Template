@@ -5,12 +5,12 @@ import { decodeMono, detectBeats } from '../editor/audio.js';
 import { energyCurve, findCuts, findPeaks, measureMotion, type Cut } from '../editor/motion.js';
 import { probe } from '../replicate/media.js';
 import type { Rig } from '../suite/drafts.js';
-import { contactSheet, grabFrame, gradeOf, sheetTiles, type GradeInfo } from './frames.js';
+import { contactSheet, DECODE_ARGS, grabFrame, gradeOf, sheetTiles, type GradeInfo } from './frames.js';
 import { cameraOf, classifyCut, findGlitches, findGradual, motionTracker, peaksIn, shotsOf, speedOf, transitionFrames, type CameraMotion, type Speed, type Transition } from './signals.js';
 import { findText, type TextItem } from './text.js';
 import { readWords } from './ocr.js';
 import { textMotions } from './textMotion.js';
-import { readPoses, type PoseRun } from './pose.js';
+import { freeMemoryMb, readPoses, type PoseRun } from './pose.js';
 import { readPoseTracks, type PoseTrack, type TrackRun } from './poseTrack.js';
 
 export const RECIPE_SCHEMA = 'muse.recipe/1';
@@ -34,7 +34,9 @@ export type Gap = { key: string; kind: 'transition' | 'effect' | 'text' | 'font'
 export type Recipe = {
   schema: typeof RECIPE_SCHEMA; analyzer: { version: string; tookMs: number; pose?: { frames: number; ms: number; peakRssMb: number } | { skipped: string; peakRssMb?: number };
     /** The per-frame pose read (every frame of each shot, for matching takes by movement). */
-    poseTracks?: { frames: number; ms: number; peakRssMb: number } | { skipped: string } };
+    poseTracks?: { frames: number; ms: number; peakRssMb: number } | { skipped: string };
+    /** Optional steps left out to keep the server alive (workstream 1): "lite" after a crash, "memory" when free memory was short. */
+    skipped?: { step: 'words' | 'textMotion' | 'pose' | 'poseTracks'; why: 'lite' | 'memory' }[]; lite?: boolean };
   /** Where it came from: a reference video (this analysis) or one of the studio's own edits (workstream 3's converter). */
   origin: 'reference' | 'edit'; referenceId?: string; takeId?: string; versionId?: string;
   /** Claude's one-line read of the contact sheet, and free tags ("street", "dance", "outfit-transition"). */
@@ -68,7 +70,13 @@ export function moveFor(c: CameraMotion): Rig['moves'] {
   return id ? [{ id }] : [];
 }
 
-export type AnalyzeHooks = { progress?: (f: number, phase: string) => void | Promise<void>; maxSec?: number };
+export type AnalyzeHooks = { progress?: (f: number, phase: string) => void | Promise<void>; maxSec?: number;
+  /** Required steps only (cuts, beats, peaks, text boxes, the look, the contact sheet): after an analysis that took the server down. */
+  lite?: boolean;
+  /** Optional steps (words, text motion, poses) run only with at least this much free memory (MB). Default OPTIONAL_MIN_FREE_MB. */
+  minFreeMb?: number };
+/** Free memory an optional step needs before it starts (the server, one ffmpeg and tesseract or the pose child fit in 512 MB). */
+export const OPTIONAL_MIN_FREE_MB = 150;
 
 /**
  * The recipe of the video at `input` (a local path or URL). Returns the recipe plus the contact sheet PNG for the
@@ -76,11 +84,19 @@ export type AnalyzeHooks = { progress?: (f: number, phase: string) => void | Pro
  */
 export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; tesseract?: string; pose?: boolean | { model?: string; minFreeMb?: number; trackFrames?: number } }, input: string, o: AnalyzeHooks = {}): Promise<{ recipe: Recipe; contactSheetPng: Buffer | null; poseTracks?: (PoseTrack | null)[] }> {
   const t0 = Date.now(), maxSec = o.maxSec ?? 61;
+  // Workstream 1 (512 MB box): every step runs alone, one decoder at a time; optional ones only with room to spare.
+  const skipped: NonNullable<Recipe['analyzer']['skipped']> = [];
+  const minFree = o.minFreeMb ?? OPTIONAL_MIN_FREE_MB;
+  const may = (step: NonNullable<Recipe['analyzer']['skipped']>[number]['step']) => {
+    if (o.lite) { skipped.push({ step, why: 'lite' }); return false; }
+    if (freeMemoryMb() < minFree) { skipped.push({ step, why: 'memory' }); return false; }
+    return true;
+  };
   const info = await probe(cfg.ffprobe, input);
   if (!info.width || !info.height) throw new Error('no video stream');
   await o.progress?.(0.05, 'Finding the cuts');
   const tracker = motionTracker();
-  const m = await measureMotion(cfg.ffmpeg, cfg.ffprobe, input, { maxSec, onFrame: tracker.hook });
+  const m = await measureMotion(cfg.ffmpeg, cfg.ffprobe, input, { maxSec, onFrame: tracker.hook, inputArgs: DECODE_ARGS });
   const g = tracker.g;
   // Glitch bursts first (G6): the cut finder may take a burst's edge frames for cuts, which then belong to the glitch.
   const glitches = findGlitches(m);
@@ -103,9 +119,12 @@ export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; t
 
   await o.progress?.(0.6, 'Reading the text');
   const found = await findText(cfg.ffmpeg, input, Math.round(192 * info.height / info.width), maxSec);
-  const read = cfg.tesseract ? await readWords({ ffmpeg: cfg.ffmpeg, tesseract: cfg.tesseract }, input, found, info) : found;
+  const read = cfg.tesseract && found.length && may('words') ? await readWords({ ffmpeg: cfg.ffmpeg, tesseract: cfg.tesseract }, input, found, info) : found;
   // How each comes in and goes out (fade, typewriter, cut), from the contrast in its box around those times (G4).
-  const text = await textMotions(cfg.ffmpeg, input, read, { width: info.width, height: info.height, durationSec: Math.min(info.duration || maxSec, maxSec) });
+  let motionCut = false;
+  const text = read.length && may('textMotion') ? await textMotions(cfg.ffmpeg, input, read, { width: info.width, height: info.height, durationSec: Math.min(info.duration || maxSec, maxSec) },
+    { stop: () => (freeMemoryMb() < minFree ? (motionCut = true) : false) }) : read;
+  if (motionCut) skipped.push({ step: 'textMotion', why: 'memory' });
 
   await o.progress?.(0.75, 'Reading the look');
   const kw = 200, kh = Math.max(2, Math.round(kw * info.height / info.width / 2) * 2);
@@ -116,13 +135,13 @@ export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; t
   const grade = gradeOf(got);
 
   let poseRun: PoseRun | null = null;
-  if (cfg.pose) {
+  if (cfg.pose && may('pose')) {
     await o.progress?.(0.85, 'Reading the poses');
     poseRun = await readPoses({ ffmpeg: cfg.ffmpeg, ...(typeof cfg.pose === 'object' ? cfg.pose : {}) }, input, keyTimes, info).catch(e => ({ skipped: 'failed' as const, detail: String(e?.message ?? e) }));
   }
   // Every frame of each shot, for matching takes by movement (only when the keyframe poses could be read).
   let trackRun: TrackRun | null = null;
-  if (cfg.pose && poseRun && 'poses' in poseRun) {
+  if (cfg.pose && poseRun && 'poses' in poseRun && may('poseTracks')) {
     await o.progress?.(0.9, 'Following the movement');
     const pc = typeof cfg.pose === 'object' ? cfg.pose : {};
     trackRun = await readPoseTracks({ ffmpeg: cfg.ffmpeg, ...pc }, input, shots.map(s => ({ startSec: s.startSec, endSec: s.endSec })),
@@ -168,9 +187,10 @@ export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; t
   // Stable keys, so workstream 3's gap list can count them across studios.
   const gaps: Gap[] = [
     ...transitions.filter(t => t.kind === 'unknown').map((t): Gap => ({ key: `transition:unknown@${t.atSec.toFixed(2)}`, kind: 'transition', what: 'A transition MUSE couldn’t name', atSec: t.atSec, note: 'Not supported yet' })),
+    ...(skipped.some(x => x.step === 'textMotion') ? [{ key: 'text:motion', kind: 'text' as const, what: 'How the text comes in and goes out', note: skipped.find(x => x.step === 'textMotion')!.why === 'lite' ? 'Not read: a lighter analysis after the last one stopped' : 'Not read: the server was short of memory' }] : []),
     ...(text.some(x => !x.words) ? [{ key: 'text:words', kind: 'text' as const, what: 'On-screen words', note: text.every(x => !x.words) ? 'Not read: Claude reads them from the contact sheet' : 'Some weren’t read: Claude reads them from the contact sheet' }] : []),
     ...(slots.some(s => s.pose.status === 'pending') ? [{ key: 'pose', kind: 'motion' as const, what: 'Body poses',
-      note: !poseRun ? 'Not read' : 'skipped' in poseRun ? (poseRun.skipped === 'memory' ? 'Not read: the server was short of memory' : 'Not read') : 'Read for the first 20 shots only' }] : []),
+      note: !poseRun ? (skipped.find(x => x.step === 'pose')?.why === 'lite' ? 'Not read: a lighter analysis after the last one stopped' : skipped.some(x => x.step === 'pose') ? 'Not read: the server was short of memory' : 'Not read') : 'skipped' in poseRun ? (poseRun.skipped === 'memory' ? 'Not read: the server was short of memory' : 'Not read') : 'Read for the first 20 shots only' }] : []),
   ];
 
   const png = got.length ? await contactSheet(got, got.map(f => { const i = keyTimes.indexOf(f.t); const s = slots[i]!; return `${i + 1} · ${s.startSec.toFixed(1)}–${s.endSec.toFixed(1)} s`; })) : null;
@@ -178,7 +198,8 @@ export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; t
   const recipe: Recipe = {
     schema: RECIPE_SCHEMA, analyzer: { version: ANALYZER_VERSION, tookMs: Date.now() - t0,
       ...(poseRun ? { pose: 'poses' in poseRun ? { frames: poseRun.poses.length, ms: poseRun.ms, peakRssMb: poseRun.peakRssMb } : { skipped: poseRun.skipped, ...(poseRun.peakRssMb ? { peakRssMb: poseRun.peakRssMb } : {}) } } : {}),
-      ...(trackRun ? { poseTracks: 'tracks' in trackRun ? { frames: trackRun.frames, ms: trackRun.ms, peakRssMb: trackRun.peakRssMb } : { skipped: trackRun.skipped } } : {}) }, origin: 'reference',
+      ...(trackRun ? { poseTracks: 'tracks' in trackRun ? { frames: trackRun.frames, ms: trackRun.ms, peakRssMb: trackRun.peakRssMb } : { skipped: trackRun.skipped } } : {}),
+      ...(skipped.length ? { skipped } : {}), ...(o.lite ? { lite: true } : {}) }, origin: 'reference',
     source: { durationSec, width: info.width, height: info.height, fps: r3(info.fps || m.fps), aspect: aspectName(info.width, info.height), hasAudio: !!info.audioCodec },
     sound,
     pacing: { shots: slots.length, avgShotSec: r3(durationSec / Math.max(1, slots.length)), cutsPerMin: r3((slots.length - 1) / Math.max(durationSec, 1) * 60), energy: energyCurve(m) },

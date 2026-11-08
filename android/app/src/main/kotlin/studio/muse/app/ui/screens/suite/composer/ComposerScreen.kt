@@ -87,6 +87,11 @@ import studio.muse.app.ui.screens.StagePhase
 import studio.muse.app.ui.screens.suite.HardwareImage
 import studio.muse.app.ui.screens.suite.undoRig
 import studio.muse.app.ui.screens.suite.queueShot
+import studio.muse.app.ui.screens.suite.answerClaude
+import studio.muse.app.ui.screens.suite.applyAssist
+import studio.muse.app.ui.screens.suite.openClaude
+import studio.muse.app.ui.screens.suite.pushComposerToAssist
+import studio.muse.app.ui.screens.suite.removeDraftReference
 import studio.muse.app.ui.screens.suite.applyDefaultRigIfAny
 import studio.muse.app.ui.screens.suite.ComposerRigRow
 import studio.muse.app.ui.screens.suite.InputSlotUploader
@@ -278,7 +283,12 @@ fun SuiteComposerScreen(toolId: String? = null) {
         catalogNote = if (catalog == null) catalogError ?: "" else null, onRetryCatalog = { scope.launch { store.load() } },
         photo = photo, // Photo tool (workstream 3)
         onPromptEmptied = { if (d.tool == ComposerTool.PHOTO) c.suite.photo.clearPreset() else update { it.unselectingPreset() } },
-        rigRow = { w -> if (photo != null) PhotoRigRow(photo, w) else ComposerRigRow(req.takeIf { live && addon == null && d.tool in ComposerDraft.PROMPT_TOOLS }, suiteEst, suiteEst == null && (estErr != null || problem != null), w) },
+        refChips = { SuiteReferenceChips(d.references, { r -> store.removeDraftReference(r.uploadId, r.url) }) },
+        rigRow = { w ->
+            // Claude in the Suite: the draft's reference images (Claude adds the owner's photos), removable.
+            if (w && photo == null && d.references.isNotEmpty()) SuiteReferenceChips(d.references, { r -> store.removeDraftReference(r.uploadId, r.url) }, Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp))
+            if (photo != null) PhotoRigRow(photo, w) else ComposerRigRow(req.takeIf { live && addon == null && d.tool in ComposerDraft.PROMPT_TOOLS }, suiteEst, suiteEst == null && (estErr != null || problem != null), w)
+        },
         update = ::update, open = ::open, onGenerate = ::generate, onSlot = ::onSlot, onClearSlot = { k ->
             when (k) {
                 "start" -> store.composerSlots.update { it.clear(SlotId(SlotKind.START)) }
@@ -304,6 +314,18 @@ fun SuiteComposerScreen(toolId: String? = null) {
         },
     )
     val recent = st.jobs.filter { it.request.engine == SuiteRules.ENGINE && it.id != job?.id }.take(8)
+    // Claude in the AI Suite (owner): a shared draft Claude fills in live; the owner's own edits go back to it; Claude's
+    // Generate waits for the owner's approval at the price shown.
+    val assist by store.assist.collectAsState()
+    var claudeOpen by remember { mutableStateOf(false) }
+    val canClaude = owner || c.repo.demo
+    LaunchedEffect(Unit) {
+        c.repo.live.collect { ev ->
+            if (ev.type == "suiteAssist") ev.assist?.let { store.applyAssist(it) }
+            else if (ev.type == studio.muse.app.data.ApiEvent.CONNECTED) store.assist.value?.let { a -> runCatching { c.repo.api.suiteAssist(a.id) }.getOrNull()?.let { store.applyAssist(it) } }
+        }
+    }
+    LaunchedEffect(d, assist?.id) { if (assist != null) { delay(600); store.pushComposerToAssist() } }
     ScreenBox {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wide = ComposerLayout.wide(maxWidth.value.toInt())
@@ -312,6 +334,9 @@ fun SuiteComposerScreen(toolId: String? = null) {
                     onTitle = if (wide || showFeed) null else ({ open(ComposerSheet(SheetKind.TOOLS)) })) {
                     Box(Modifier.heightIn(min = 48.dp).press { showFeed = !showFeed }.padding(horizontal = 12.dp).semantics { role = Role.Button },
                         contentAlignment = Alignment.Center) { T(if (showFeed) "Composer" else "Takes", muse.scale.label, muse.t.ink, maxLines = 1) }
+                    if (canClaude && !showFeed && d.tool in ComposerDraft.PROMPT_TOOLS) Box(Modifier.heightIn(min = 48.dp)
+                        .press { scope.launch { if (store.openClaude() != null) claudeOpen = true } }.padding(horizontal = 12.dp).semantics { role = Role.Button },
+                        contentAlignment = Alignment.Center) { T("Claude", muse.scale.label, muse.t.ink, maxLines = 1) }
                     MoreMenu(listOfNotNull(
                         // Build step 3: save this shot to run later (priced, nothing held; Run from Takes).
                         if (live && problem == null && photo == null && addon == null && d.tool in ComposerDraft.PROMPT_TOOLS)
@@ -351,6 +376,14 @@ fun SuiteComposerScreen(toolId: String? = null) {
             upscaleFor?.let { id -> UpscaleSheet(id, wide) { j -> nav.go(Routes.suiteTake(j.id)) } }
             SuiteCompareOverlay(wide) { showFeed = false }
             SuiteRunConfirm { j -> nav.go(Routes.suiteTake(j)) }
+            // Claude's Generate while the sheet is closed: the approval over the composer's bar.
+            assist?.takeIf { !claudeOpen && (it.pending != null || it.message != null) }?.let { a ->
+                SuiteClaudeApproval(a, { yes -> scope.launch { store.answerClaude(yes) } }, Modifier.align(Alignment.BottomCenter).padding(16.dp).padding(bottom = 88.dp).widthIn(max = 520.dp))
+            }
+            assist?.let { a ->
+                studio.muse.app.ui.screens.claude.ClaudeChatSheet(claudeOpen, { claudeOpen = false }, "suite", a.id, "Claude", heightFraction = .62f,
+                    above = if (a.pending != null || a.message != null) ({ SuiteClaudeApproval(a, { yes -> scope.launch { store.answerClaude(yes) } }, Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }) else null)
+            }
         }
     }
 }
@@ -388,6 +421,8 @@ class ComposerUi(
     /** Character swap's add-on pills (empty on other tools). */
     val addons: List<AddonPill> = emptyList(),
     val onAddon: (SwapAddon) -> Unit = {},
+    /** Claude in the Suite: the draft's reference chips (phone: under the prompt). */
+    val refChips: @Composable () -> Unit = {},
     /** The rig check's warning row (RigCheckRow.kt), drawn just above the bottom bar; the argument is `wide`. */
     val rigRow: @Composable (Boolean) -> Unit = {},
     /** Photo tool (workstream 3): its draft, estimate and Generate; null on the other tools. */
@@ -427,6 +462,7 @@ private fun PhoneComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent
             if (ui.d.tool == ComposerTool.EXTEND) ExtendDirection(ui)
             // The prompt sits on the raised tone, as in the render.
             if (ui.showPrompt) Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(m.radii.control)).background(m.roles.raised).padding(horizontal = 14.dp, vertical = 12.dp)) { Prompt(ui) }
+            if (ui.photo == null && ui.d.references.isNotEmpty()) ui.refChips()
             if (ui.photo != null) PhotoSlotRow(ui, wide = false) // Photo tool (workstream 3)
             else SlotThumbs(ui)
             if (ui.d.tool == ComposerTool.EXTEND) ExtendLength(ui, Modifier.fillMaxWidth())
@@ -596,7 +632,7 @@ private fun PhoneBar(ui: ComposerUi) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         // Photo tool (workstream 3): one Photos 1–4 list in place of Quality and sound.
         val p = ui.photo
-        if (p != null) MenuPill("layers", photoCountLabel(p.draft.count), "Photos", PhotoComposer.countItems(p.draft.count)) { i -> p.setCount(i + 1) }
+        if (p != null) { MenuPill("layers", photoCountLabel(p.draft.count), "Photos", PhotoComposer.countItems(p.draft.count)) { i -> p.setCount(i + 1) }; PhotoModelPill(ui) }
         else {
             Row(Modifier.heightIn(min = 48.dp).press { ui.open(ComposerSheet(SheetKind.SETTINGS)) }.semantics { contentDescription = "Quality ${SuiteRules.tierLabel(ui.d.quality)}"; role = Role.Button }
                 .padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1021,13 +1057,13 @@ private fun WideBar(ui: ComposerUi) {
         val scroll = rememberScrollState()
         Row(Modifier.weight(1f).barScrollFade(scroll).horizontalScroll(scroll), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             // Photo tool (workstream 3): one Photos 1–4 list; no Quality, Shape, Length, Sound, Speaking or Takes (stills render at the shoot's size).
-            ui.photo?.let { p -> MenuPill("layers", photoCountLabel(p.draft.count), "Photos", PhotoComposer.countItems(p.draft.count)) { i -> p.setCount(i + 1) }; return@Row }
+            ui.photo?.let { p -> MenuPill("layers", photoCountLabel(p.draft.count), "Photos", PhotoComposer.countItems(p.draft.count)) { i -> p.setCount(i + 1) }; PhotoModelPill(ui); return@Row }
             val tiers = ui.catalog?.tiers?.ifEmpty { null }?.map { it.id } ?: SuiteRules.TIERS
             MenuPill("gauge", SuiteRules.tierLabel(d.quality), "Quality", tiers.map { t -> "${SuiteRules.tierLabel(t)} · ${ComposerPrice.short(ui.tierEstimates[t])}" to (t == d.quality) }) { i -> ui.update { it.copy(quality = tiers[i]).fit(ui.catalog) } }
-            val engines = ui.catalog?.tier(d.quality)?.models.orEmpty()
-            if (ui.owner && engines.isNotEmpty() && d.tool in ComposerDraft.PROMPT_TOOLS) {
-                val items = listOf("Auto" to (d.engineModel == null)) + engines.map { e -> (e.name.ifBlank { e.model } + (e.resolution.ifBlank { null }?.let { " · $it" } ?: "")) to (e.model == d.engineModel) }
-                MenuPill("cube", d.engineLabel(ui.catalog), "Engine (owner)", items) { i -> ui.update { it.pin(engines.getOrNull(i - 1)) } }
+            // Owner only (WS7, as the Mac's "Model" pill): any engine, this quality's ladder first, then the others, then "Your providers".
+            val groups = ModelPicker.groups(ui.catalog, d.quality)
+            if (ui.owner && !groups.isEmpty && d.tool in ComposerDraft.PROMPT_TOOLS) {
+                MenuPill("cube", d.modelPill(ui.catalog), "Model, only you see models", modelMenuItems(d, groups)) { i -> ui.update { it.pinEngine(groups.all.getOrNull(i - 1)).fit(ui.catalog) } }
             }
             // Shape, length and takes are in the Settings row (as on the phone); the bar keeps sound and speaking.
             if (d.tool != ComposerTool.EXTEND) {
@@ -1085,7 +1121,7 @@ private fun Pill(icon: String, label: String, value: String?, tip: String, onCli
 }
 
 @Composable
-private fun MenuPill(icon: String, label: String, tip: String, items: List<Pair<String, Boolean>>, onPick: (Int) -> Unit) {
+internal fun MenuPill(icon: String, label: String, tip: String, items: List<Pair<String, Boolean>>, onPick: (Int) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         Pill(icon, label, null, tip) { open = true }

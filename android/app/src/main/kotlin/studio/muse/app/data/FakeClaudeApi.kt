@@ -31,6 +31,8 @@ class FakeClaudeApi(
         private set
     /** Tests: hold queued turns (the Mac never claims them) to see the "Waiting for your Mac…" state. */
     @Volatile var macClaims = true
+    /** Claude in the Suite (demo): FakeMuseApi sets up the shared draft when a "suite" turn runs (contextId = the assist id). */
+    @Volatile var suiteTurn: (suspend (assistId: String, text: String, attachments: List<String>) -> Unit)? = null
 
     private val threads = mutableListOf<ClaudeThread>()
     private val messages = mutableMapOf<String, MutableList<ClaudeMessage>>()
@@ -55,8 +57,8 @@ class FakeClaudeApi(
     override suspend fun setApiFallback(on: Boolean): ClaudePlanStatus { fallback = fallback.copy(enabled = on); pushStatus(); return statusNow() }
 
     override suspend fun thread(contextKind: String, contextId: String): ClaudeThread = lock.withLock {
-        // WS4: "recreate" (WS1 d7233b8): Claude on a Recreate reference, as on the server.
-        if (contextKind != "camera" && contextKind != "edit" && contextKind != "recreate") throw ApiException("bad_request", "contextKind: camera, edit or recreate")
+        // WS4: "recreate" (WS1 d7233b8): Claude on a Recreate reference; "suite" (WS1 1eda187): Claude in the AI Suite.
+        if (contextKind !in setOf("camera", "edit", "recreate", "suite")) throw ApiException("bad_request", "contextKind: camera, edit, recreate or suite")
         threads.firstOrNull { it.contextKind == contextKind && it.contextId == contextId } ?: run {
             val t = ClaudeThread(uid("ct_"), contextKind, contextId, null, now(), now())
             threads += t
@@ -71,15 +73,18 @@ class FakeClaudeApi(
         t.copy(messages = messages[id].orEmpty().takeLast(100), activeTurn = turns.values.firstOrNull { it.threadId == id && it.active })
     }
 
-    override suspend fun post(threadId: String, text: String): ClaudeSend {
+    override suspend fun post(threadId: String, text: String, attachments: List<String>): ClaudeSend {
         val (m, turn) = lock.withLock {
-            threads.firstOrNull { it.id == threadId } ?: throw ApiException("not_found", "No such thread")
-            if (text.isBlank()) throw ApiException("bad_request", "text: required")
+            val th = threads.firstOrNull { it.id == threadId } ?: throw ApiException("not_found", "No such thread")
+            if (text.isBlank() && attachments.isEmpty()) throw ApiException("bad_request", "text: required")
+            if (attachments.size > 4) throw ApiException("bad_request", "attachments: at most 4 images per message")
+            if (attachments.isNotEmpty() && th.contextKind == "camera") throw ApiException("bad_request", "attachments: not in Camera stage yet")
             if (!mac.ready) return ClaudeSend.MacOffline(ClaudeFallback(OPEN_IN_CLAUDE_URL, fallback.usable))
             if (turns.values.any { it.threadId == threadId && it.active }) return ClaudeSend.Busy
             val turn = ClaudeTurn(uid("tu_"), threadId, text.take(8000), "phone", "queued", createdAt = now())
             turns[turn.id] = turn
-            val m = ClaudeMessage(uid("cmsg_"), threadId, "user", "phone", turn.text, turn.id, createdAt = now())
+            val m = ClaudeMessage(uid("cmsg_"), threadId, "user", "phone", turn.text, turn.id, createdAt = now(), attachments = attachments.map(::demoAttachment))
+            turnAttachments[turn.id] = attachments
             messages.getOrPut(threadId) { mutableListOf() } += m
             m to turn
         }
@@ -98,20 +103,36 @@ class FakeClaudeApi(
         live(ClaudeLive("event", threadId = t.threadId, turnId = turnId, event = ClaudeEvent("done", ok = false, error = "Stopped")))
     }
 
-    override fun apiTurn(threadId: String, text: String): Flow<ChatEvent> = flow {
+    private val turnAttachments = mutableMapOf<String, List<String>>()
+    private fun demoAttachment(uploadId: String) = ClaudeAttachment(uid("att_"), uploadId, "image/jpeg", 120_000, 1080, 1350, "https://demo.muse.studio/uploads/$uploadId.jpg")
+
+    override fun apiTurn(threadId: String, text: String, attachments: List<String>): Flow<ChatEvent> = flow {
         val refusal = lock.withLock {
             val t = threads.firstOrNull { it.id == threadId }
             when {
                 t == null -> ChatEvent("error", code = "not_found", error = "No such thread")
                 !fallback.usable -> ChatEvent("error", code = "fallback_off", error = "Turn on the API fallback in Settings → Connections")
-                t.contextKind != "camera" -> ChatEvent("error", code = "bad_request", error = "The API fallback works in Camera stage for now")
+                t.contextKind != "camera" && t.contextKind != "suite" -> ChatEvent("error", code = "bad_request", error = "The API fallback works in Camera stage and the Suite for now")
                 turns.values.any { it.threadId == threadId && it.active } -> ChatEvent("error", code = "claude_busy", error = "Claude is still answering")
-                text.isBlank() -> ChatEvent("error", code = "bad_request", error = "text: required")
+                text.isBlank() && attachments.isEmpty() -> ChatEvent("error", code = "bad_request", error = "text: required")
                 else -> null
             }
         }
         if (refusal != null) { emit(refusal); return@flow }
-        store(ClaudeMessage(uid("cmsg_"), threadId, "user", "api", text, createdAt = now()))
+        store(ClaudeMessage(uid("cmsg_"), threadId, "user", "api", text, createdAt = now(), attachments = attachments.map(::demoAttachment)))
+        val suite = lock.withLock { threads.firstOrNull { it.id == threadId }?.takeIf { it.contextKind == "suite" } }
+        if (suite != null) {
+            delay(stepDelayMs)
+            val tid = uid("tool_")
+            emit(ChatEvent("tool", id = tid, name = "suite_set_draft", status = "running"))
+            suiteTurn?.invoke(suite.contextId, text, attachments)
+            store(ClaudeMessage(uid("cmsg_"), threadId, "tool", "api", "", tool = ClaudeToolRef(tid, "suite_set_draft", true, REPLY_SUITE.summary), createdAt = now()))
+            emit(ChatEvent("tool", id = tid, name = "suite_set_draft", status = "done", summary = REPLY_SUITE.summary))
+            emit(ChatEvent("text", delta = REPLY_SUITE.last))
+            store(ClaudeMessage(uid("cmsg_"), threadId, "assistant", "api", REPLY_SUITE.last, createdAt = now()))
+            emit(ChatEvent("done", stopReason = "end_turn"))
+            return@flow
+        }
         delay(stepDelayMs)
         emit(ChatEvent("text", delta = "On the studio key: "))
         val tid = uid("tool_")
@@ -145,12 +166,13 @@ class FakeClaudeApi(
         val th = t.threadId
         fun ev(e: ClaudeEvent) = live(ClaudeLive("event", threadId = th, turnId = t.id, event = e))
         val kind = lock.withLock { threads.firstOrNull { it.id == th }?.contextKind } ?: "camera"
-        val (first, tool, summary, last) = when (kind) { "edit" -> REPLY_EDIT; "recreate" -> REPLY_RECREATE; else -> REPLY_CAMERA }
+        val (first, tool, summary, last) = when (kind) { "edit" -> REPLY_EDIT; "recreate" -> REPLY_RECREATE; "suite" -> REPLY_SUITE; else -> REPLY_CAMERA }
         for (w in first.split(" ")) { delay(stepDelayMs / 6); ev(ClaudeEvent("text", delta = "$w ")) }
         store(ClaudeMessage(uid("cmsg_"), th, "assistant", "mac", first, t.id, createdAt = now()))
         val toolId = uid("toolu_")
         ev(ClaudeEvent("tool", id = toolId, name = "mcp__muse__$tool", status = "running"))
         delay(stepDelayMs)
+        if (kind == "suite") suiteTurn?.invoke(lock.withLock { threads.first { it.id == th }.contextId }, t.text, lock.withLock { turnAttachments.remove(t.id).orEmpty() })
         ev(ClaudeEvent("tool", id = toolId, name = "mcp__muse__$tool", status = "done", summary = summary))
         store(ClaudeMessage(uid("cmsg_"), th, "tool", "mac", "", t.id, ClaudeToolRef(toolId, "mcp__muse__$tool", true, summary), createdAt = now()))
         if (kind == "edit") {
@@ -189,6 +211,11 @@ class FakeClaudeApi(
         private val REPLY_RECREATE = Reply(
             "Reading the recipe and your takes.", "match_slots", "Matched 3 of 7 shots to your takes",
             "Three shots come from your takes; the other four would be made new, about \$0.64 each. Say the word and I'll price them for you to approve.",
+        )
+        /** Claude in the AI Suite (demo): it sets up the composer and asks before generating; it never spends on its own. */
+        private val REPLY_SUITE = Reply(
+            "Setting up the shot: Demo model at a café window, morning light.", "suite_set_draft", "Set the prompt, rig and length",
+            "Handheld on a 35 mm at eye level, soft window light, 8 s in HD. Change anything in the composer; when you're happy, approve the Generate below.",
         )
         private val REPLY_EDIT = Reply(
             "Trimming the pause before the hook.", "apply_edit_ops", "Trimmed 0:03–0:05",

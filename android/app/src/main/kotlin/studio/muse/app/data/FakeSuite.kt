@@ -33,7 +33,38 @@ class FakeSuite {
 
     fun catalog(owner: Boolean): SuiteCatalog {
         val c = bundle.catalog.copy(enabled = true, test = true, camera = camera)
-        return if (owner) c else SuiteRules.memberSafe(c)
+        return if (owner) withEngineDetail(c) else SuiteRules.memberSafe(c)
+    }
+
+    /**
+     * WS7 (owner model picker), as the server's ownerEngines (WS5): every enabled registry model on a ladder, flat, with its
+     * qualities, resolutions and $/s, lengths and shapes; the studio's custom video model; and the image models (the studio's
+     * photo model and a custom one). Members never get any of it (memberSafe).
+     */
+    private fun withEngineDetail(c: SuiteCatalog): SuiteCatalog {
+        val ladders = c.tiers.associate { t -> t.id to t.models.orEmpty() }
+        val video = settings.models.filter { m -> m.enabled && !m.blocked && ladders.values.any { l -> l.any { it.model == m.id } } }.map { m ->
+            val tiers = c.tiers.map { it.id }.filter { t -> ladders[t].orEmpty().any { it.model == m.id } }
+            val res = tiers.firstNotNullOfOrNull { t -> ladders[t]?.firstOrNull { it.model == m.id }?.resolution } ?: m.resolutions.lastOrNull()?.id
+            SuiteCatalogEngine(m.id, m.name, "video", false, tiers.firstOrNull(), tiers, res, m.resolutions.map { it.copy(perSec = round4(it.perSec * m.priceScale)) },
+                m.perSec(res)?.let(::round4), null, m.duration?.min, m.duration?.max, m.duration?.allowed, m.aspectRatios,
+                ladders.values.flatten().firstOrNull { it.model == m.id }?.inputs)
+        }
+        val custom = DEMO_CUSTOM.let { k -> SuiteCatalogEngine(k.id, k.name, "video", true, null, emptyList(), null, emptyList(), k.price?.usd, null, k.minSeconds, k.maxSeconds, listOf(5, 10), k.aspectRatios, k.inputs) }
+        val image = listOf(
+            SuiteCatalogEngine("google/nano-banana", "Nano Banana", "image", perRun = 0.039, inputs = SuiteInputs(images = 6)),
+            SuiteCatalogEngine("c_demo1", "Seedream", "image", custom = true, perRun = 0.03, aspectRatios = listOf("1:1", "9:16", "16:9"), inputs = SuiteInputs(images = 6)),
+        )
+        return c.copy(custom = c.custom ?: listOf(DEMO_CUSTOM), engines = c.engines ?: (video + custom + image))
+    }
+
+    private fun round4(v: Double) = kotlin.math.round(v * 10000) / 10000
+
+    /** The pinned engine's $/s (owner, demo): a ladder model at its resolution, or the demo custom model. */
+    private fun pinnedPerSec(r: SuiteShotRequest): Double? {
+        val id = r.engineModel ?: return null
+        if (id == DEMO_CUSTOM.id) return DEMO_CUSTOM.price?.usd
+        return settings.model(id)?.perSec(r.resolution)
     }
 
     fun settings(): SuiteSettings = settings.copy(spentToday = round2(spentToday))
@@ -80,7 +111,7 @@ class FakeSuite {
         val min = if (recast) 4.0 else (bundle.catalog.tier(tier)?.minSeconds ?: 4).toDouble()
         val seconds = ceil(wanted).coerceAtLeast(min)
         val takes = if (recast) (r.takes ?: 1) else (r.takes ?: 1)
-        val perSec = (if (recast) RECAST_PER_SEC else PER_SEC)[tier] ?: 0.02
+        val perSec = (if (owner && !recast) pinnedPerSec(r) else null) ?: (if (recast) RECAST_PER_SEC else PER_SEC)[tier] ?: 0.02
         val estimate = round2(perSec * seconds * takes)
         val res = (if (recast) RECAST_RES_LABEL else RES_LABEL)[tier] ?: "768p"
         val kind = if (recast) "Recast" else "Shot"
@@ -224,6 +255,8 @@ class FakeSuite {
         return Job(id, r.title ?: "Untitled shot", model?.id ?: "", model?.name ?: "", req.outfitId, req, "running", 0.0, 1, 0, p.totalSteps, p.phase, total, total,
             e.estimate, createdAt = createdAt, prompt = r.prompt, seed = (1000..99000).random().toLong(), serverEngineLabel = e.label)
     }
+
+    private val DEMO_CUSTOM = SuiteCustomEngine("c_demo2", "Kling turbo", "video", SuiteInputs(start = true), 5, 10, listOf("9:16", "16:9", "1:1"), MemberPrice("per_second", 0.07))
 
     companion object {
         /** $ per output second per tier (the demo ladder's first steps, as the server prices them). */

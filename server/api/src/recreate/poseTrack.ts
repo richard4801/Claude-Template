@@ -3,7 +3,10 @@
 // with a one-euro filter (little lag) and with low-confidence joints dropped, never invented. Used to match the
 // studio's takes to a shot by movement (a pose-similarity term in the take score). Free: CPU.
 import { spawn } from 'node:child_process';
+import { DECODE_ARGS } from './frames.js';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { freeMemoryMb, MIN_POSE_SCORE, POSE_MIN_FREE_MB, POSE_MODEL, runPoseJob } from './pose.js';
 import { KEYPOINTS, type Keypoint } from './poseWorker.js';
 
@@ -15,7 +18,8 @@ export type PoseTrack = { fps: number; frames: (Joint[] | null)[] };
 /** Joints under this score are dropped. */
 export const MIN_JOINT_SCORE = 0.3;
 /** Frames per child-process job (≈ 23 MB of 256-px frames), and the most read at most this fast. */
-export const POSE_CHUNK = 48, TRACK_MAX_FPS = 30;
+/** Frames per pose-child job (each ≤ 256 px on its long edge: ~110 KB; the model letterboxes to 192 px anyway). */
+export const POSE_CHUNK = 24, TRACK_MAX_FPS = 30, TRACK_LONG_EDGE = 256;
 
 /** The one-euro filter (Casiez et al. 2012): smooths jitter at rest, follows fast moves with little lag. */
 export class OneEuro {
@@ -136,7 +140,9 @@ export async function readPoseTracks(cfg: { ffmpeg: string; model?: string; minF
   if (!fs.existsSync(model)) return { skipped: 'model' };
   const minFree = cfg.minFreeMb ?? POSE_MIN_FREE_MB;
   const fps = Math.min(TRACK_MAX_FPS, Math.max(1, Math.round(src.fps || 30)));
-  const w = Math.min(o.frameW ?? 256, src.width - (src.width % 2)), h = Math.max(2, Math.round(w * src.height / src.width / 2) * 2);
+  // Workstream 1 (512 MB box): decoded small inside ffmpeg (the long edge TRACK_LONG_EDGE), never full-size frames in Node.
+  const w = o.frameW ? Math.min(o.frameW, src.width - (src.width % 2)) : Math.max(2, Math.round(TRACK_LONG_EDGE * src.width / Math.max(src.width, src.height) / 2) * 2);
+  const h = Math.max(2, Math.round(w * src.height / src.width / 2) * 2);
   let budget = o.maxFrames ?? 1800, peak = 0, total = 0;
   const t0 = Date.now(), tracks: (PoseTrack | null)[] = [];
   for (const seg of segments) {
@@ -170,30 +176,29 @@ export async function readPoseTracks(cfg: { ffmpeg: string; model?: string; minF
   return { tracks, frames: total, ms: Date.now() - t0, peakRssMb: peak };
 }
 
-/** Decodes `len` seconds from `start` at `fps` as w×h RGB frames, one at a time (the pipe pauses while `each` works). */
-function readFrames(ffmpeg: string, input: string, start: number, len: number, fps: number, w: number, h: number, each: (rgb: Uint8Array) => Promise<void>): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const p = spawn(ffmpeg, ['-v', 'error', '-ss', String(Math.max(0, start)), '-i', input, '-t', String(len), '-an',
-      '-vf', `fps=${fps},scale=${w}:${h}:flags=area,format=rgb24`, '-f', 'rawvideo', 'pipe:1']);
-    const size = w * h * 3;
-    let buf: Buffer = Buffer.alloc(0), err = '', busy: Promise<void> = Promise.resolve(), failed: unknown = null;
-    p.stdout.on('data', (c: Buffer) => {
-      buf = buf.length ? Buffer.concat([buf, c]) : c;
-      while (buf.length >= size) {
-        const frame = new Uint8Array(buf.subarray(0, size));
-        buf = buf.subarray(size);
-        p.stdout.pause();
-        busy = busy.then(() => each(frame)).catch(e => { failed = e; p.kill('SIGKILL'); }).finally(() => p.stdout.resume());
+/**
+ * Decodes `len` seconds from `start` at `fps` as w×h RGB frames and hands them to `each` one at a time. Workstream 1
+ * (512 MB box): ffmpeg writes the small frames to a temporary file and exits before the first one is used, so the
+ * decoder and the pose child never hold memory at the same time; the file is read back one frame at a time.
+ */
+async function readFrames(ffmpeg: string, input: string, start: number, len: number, fps: number, w: number, h: number, each: (rgb: Uint8Array) => Promise<void>): Promise<void> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-pose-')), raw = path.join(dir, 'frames.rgb');
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const p = spawn(ffmpeg, ['-v', 'error', ...DECODE_ARGS, '-ss', String(Math.max(0, start)), '-i', input, '-t', String(len), '-an',
+        '-vf', `fps=${fps},scale=${w}:${h}:flags=area,format=rgb24`, '-f', 'rawvideo', '-y', raw]);
+      let err = '';
+      p.stderr.on('data', d => { err = (err + String(d)).slice(-2000); });
+      p.on('error', reject);
+      p.on('close', code => (code === 0 ? resolve() : reject(new Error(`ffmpeg failed: ${err.trim().split('\n').slice(-1)[0]?.slice(0, 200)}`))));
+    });
+    const size = w * h * 3, fd = fs.openSync(raw, 'r');
+    try {
+      for (let pos = 0; ; pos += size) {
+        const frame = new Uint8Array(size);
+        if (fs.readSync(fd, frame, 0, size, pos) < size) break;
+        await each(frame);
       }
-    });
-    p.stderr.on('data', d => { err += String(d); });
-    p.on('error', reject);
-    p.on('close', code => {
-      busy.then(() => {
-        if (failed) reject(failed);
-        else if (code === 0) resolve();
-        else reject(new Error(`ffmpeg failed: ${err.trim().split('\n').slice(-1)[0]?.slice(0, 200)}`));
-      });
-    });
-  });
+    } finally { fs.closeSync(fd); }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }

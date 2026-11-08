@@ -32,6 +32,8 @@ class AppContainer(
     val postAlarms: studio.muse.app.platform.PostAlarms? = null,
     /** The real-API client for a server URL (tests swap in a stand-in; the app always uses HttpMuseApi). */
     httpFactory: ((String) -> MuseApi)? = null,
+    /** Recreate links fetched on the phone (null in tests: the server's fetch is used). */
+    val linkFetcher: studio.muse.app.platform.LinkFetcher? = null,
 ) {
     val prefs: StateFlow<AppPrefs> = prefsStore.prefs.stateIn(scope, SharingStarted.Eagerly, initialPrefs)
     /** Share → MUSE: a link or video another app shared, until Edit → Recreate takes it (MainActivity sets it). */
@@ -79,7 +81,8 @@ class AppContainer(
             // WAVs left by the removed UI sound effects: deleted off the main thread (no disk I/O on the launch path).
             scope.launch(Dispatchers.IO) { File(context.cacheDir, "sfx").deleteRecursively() }
             val fake = FakeMuseApi(scope, File(context.filesDir, "uploads"))
-            return AppContainer(scope, DataStorePrefs(context), fake, Notifier(context), studio.muse.app.platform.MediaReader(context), postAlarms = studio.muse.app.platform.PostAlarms(context))
+            return AppContainer(scope, DataStorePrefs(context), fake, Notifier(context), studio.muse.app.platform.MediaReader(context), postAlarms = studio.muse.app.platform.PostAlarms(context),
+                linkFetcher = studio.muse.app.platform.PhoneLinkFetcher(context))
         }
     }
 }
