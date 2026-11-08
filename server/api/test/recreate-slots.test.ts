@@ -71,6 +71,12 @@ describe('Recreate · assembly (unit)', () => {
     const text = p.tracks.find(t => t.kind === 'text')!.items[0] as M.TextItem;
     expect(text).toMatchObject({ startSec: 3.1, durationSec: 1, text: 'Text', transform: { x: 0.5, y: 0.735 } });
     expect(out.notes.join(' ')).toMatch(/says "Text"/);
+    expect(text.animIn).toBeUndefined(); // a cut in
+    expect(text.style.font).toBe('sans');
+    // G4: a caption that typed on and faded out, set in the condensed face.
+    const typed = buildProject({ ...RECIPE, text: [{ ...RECIPE.text[0]!, words: 'SUMMER', fontId: 'condensed', animIn: 'typewriter', animInSec: 0.42, animOut: 'fade', animOutSec: 5 }] }, 'take_src', { s1: TAKE('tA'), s2: TAKE('tB'), s3: TAKE('tC') });
+    const t2 = typed.project.tracks.find(t => t.kind === 'text')!.items[0] as M.TextItem;
+    expect(t2).toMatchObject({ text: 'SUMMER', animIn: { kind: 'typewriter', durationSec: 0.42 }, animOut: { kind: 'fade', durationSec: 2 }, style: { font: 'condensed' } });
   });
 
   it('options switch parts off; a short take plays slower; slots without a take are left out', () => {

@@ -9,6 +9,7 @@ import { contactSheet, grabFrame, gradeOf, sheetTiles, type GradeInfo } from './
 import { cameraOf, classifyCut, findGradual, motionTracker, peaksIn, shotsOf, speedOf, transitionFrames, type CameraMotion, type Speed, type Transition } from './signals.js';
 import { findText, type TextItem } from './text.js';
 import { readWords } from './ocr.js';
+import { textMotions } from './textMotion.js';
 import { readPoses, type PoseRun } from './pose.js';
 
 export const RECIPE_SCHEMA = 'muse.recipe/1';
@@ -92,7 +93,9 @@ export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; t
 
   await o.progress?.(0.6, 'Reading the text');
   const found = await findText(cfg.ffmpeg, input, Math.round(192 * info.height / info.width), maxSec);
-  const text = cfg.tesseract ? await readWords({ ffmpeg: cfg.ffmpeg, tesseract: cfg.tesseract }, input, found, info) : found;
+  const read = cfg.tesseract ? await readWords({ ffmpeg: cfg.ffmpeg, tesseract: cfg.tesseract }, input, found, info) : found;
+  // How each comes in and goes out (fade, typewriter, cut), from the contrast in its box around those times (G4).
+  const text = await textMotions(cfg.ffmpeg, input, read, { width: info.width, height: info.height, durationSec: Math.min(info.duration || maxSec, maxSec) });
 
   await o.progress?.(0.75, 'Reading the look');
   const kw = 200, kh = Math.max(2, Math.round(kw * info.height / info.width / 2) * 2);
