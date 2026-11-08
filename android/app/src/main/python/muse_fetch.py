@@ -11,8 +11,8 @@ Codes: too_long, link_too_big, link_private, link_downloads_off (rules; the call
 fetch_failed (the caller falls back to the server, then to the saved file).
 
 With `tiktok_refuse` (strict rules), a TikTok video whose creator turned downloads off is refused, read from its public
-page exactly as the server reads it (server/api/src/recreate/links.ts tiktokDownloadsOff); a page that can't be read is
-fetch_failed, so the phone never downloads a TikTok it couldn't check.
+page exactly as the server reads it (server/api/src/recreate/links.ts tiktokDownloadsOff). A page that doesn't say is
+allowed; a page that can't be read is fetch_failed, so the phone never downloads a TikTok it couldn't check.
 """
 import json
 import os
@@ -85,10 +85,8 @@ def fetch(url, out_dir, max_sec, max_bytes, strict, tiktok_refuse=False, platfor
                     html = ydl.urlopen(page_url).read().decode("utf-8", "replace")
                 except Exception:
                     return _fail("fetch_failed", "Couldn't check this TikTok's download setting")
-                off = tiktok_downloads_off(html)
-                if off is None:
-                    return _fail("fetch_failed", "Couldn't check this TikTok's download setting")
-                if off:
+                # As the server: a page that doesn't say counts as allowed; one that can't be read isn't downloaded.
+                if tiktok_downloads_off(html) is True:
                     return _fail("link_downloads_off", "The creator turned downloads off for this video, so MUSE won't fetch it. Use another video, or ask the creator")
             size = info.get("filesize") or info.get("filesize_approx")
             if size and int(size) > int(max_bytes):
