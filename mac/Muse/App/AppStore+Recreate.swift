@@ -332,6 +332,21 @@ extension AppStore {
         if recreate.claudeOpen, !isDemo, recreate.claudeSessionId == nil { await ensureRecreateClaudeSession() }
     }
 
+    /// A failed reference read again (WS1's retry: a lighter analysis after a crash). Watches it like a new one.
+    func retryRecreateReference() {
+        guard let id = recreate.reference?.id else { return }
+        perform { [self] in
+            do {
+                let r = try await recreateAPI.retryReference(id)
+                guard recreate.reference?.id == id else { return }
+                if let i = recreate.references.firstIndex(where: { $0.id == id }) { recreate.references[i] = r }
+                await showRecreateReference(r)
+            } catch let e as ApiError where e.code == "video_gone" {
+                showToast("The video isn’t kept any more. Drop it in again to read it.")
+            }
+        }
+    }
+
     /// While a reference is analysed, its steps come in as `phase` / `progress`. A server restart mid-analysis (502/503/
     /// 504, no connection) is ridden out: "Reconnecting…" while it retries with backoff for about two minutes, then a
     /// plain message with Try again. Any other error stops with plain words.

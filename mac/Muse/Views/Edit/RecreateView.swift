@@ -25,8 +25,11 @@ struct RecreateView: View {
                         } else if ref.failedFetchingLink {
                             RecreateLinkFailed(reference: ref)
                         } else if ref.isFailed {
-                            ErrorState("The analysis didn’t finish", ref.error ?? "This video couldn’t be read. Try another one.",
-                                       actionTitle: "Back to references") { store.leaveRecreateReference() }
+                            VStack(alignment: .leading, spacing: Space.s3) {
+                                ErrorState("The analysis didn’t finish", ref.error ?? "This video couldn’t be read. Try again, or try another one.",
+                                           actionTitle: "Retry") { store.retryRecreateReference() }
+                                RButton("Back to references", kind: .plain, small: true) { store.leaveRecreateReference() }
+                            }
                                 .padding(Space.s6)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         } else {
