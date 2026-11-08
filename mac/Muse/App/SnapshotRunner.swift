@@ -216,6 +216,9 @@ enum SnapshotRunner {
                         store.suite.browserOpen = false
                         store.suite.feedOpen = false
                         store.suite.compareIds = []
+                        store.suite.viewerTakeId = nil
+                        store.suite.feedTool = nil
+                        store.suite.feedModel = nil
                         state.generateFrame = nil
                         state.generateLabel = nil
                         show()
@@ -236,6 +239,13 @@ enum SnapshotRunner {
                             lines.append("CUT \(label) window drawn \(Int(content.width)) wide, not \(width)")
                         }
                         lines.append(contentsOf: composerBarLines(label, content: content))
+                        if name == "composer_feed_viewer" {
+                            let f = state.composerFrames["viewer"]
+                            lines.append("\(f != nil ? "FITS" : "CUT") \(label) large viewer \(f.map { "\(Int($0.width))x\(Int($0.height))" } ?? "not drawn")")
+                        }
+                        if name == "composer_swap" {
+                            lines.append("\(state.composerFrames["decided"] != nil ? "FITS" : "CUT") \(label) rows set by the clip shown greyed with the reason")
+                        }
                         if name.contains("rig") {
                             lines.append("PANEL \(label) picker=\(store.suite.picker?.rawValue ?? "nil") bodySawPicker=\(suiteBodySawPicker) bodies=\(suiteBodyCount) appeared=\(state.rigPanelOnScreen)")
                         }
@@ -250,6 +260,11 @@ enum SnapshotRunner {
         // Setup rail's Rigs row, in the four themes.
         let feedScreens: [(String, @MainActor () -> Void)] = [
             ("composer_feed", { store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true }),
+            // A card clicked: the take large over the feed (← → move through the takes).
+            ("composer_feed_viewer", { store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
+                store.suite.viewerTakeId = (store.suite.feed.compactMap { store.feedTake($0) }.first ?? store.suiteTakes(photo: false).first)?.id }),
+            // Swap: Camera, Light and Style are set by the clip, shown greyed with that reason.
+            ("composer_swap", { store.openTool(.swap) }),
             ("composer_compare", { store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
                 let two = Array(store.suiteTakes(photo: false).prefix(2)) + Array(store.takes.filter(\.isVideo).prefix(2))
                 store.suite.compareIds = Array(two.map(\.id).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }.prefix(2)) }),

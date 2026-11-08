@@ -142,7 +142,8 @@ extension AppStore {
         guard !suite.feedLoading else { return }
         suite.feedLoading = true
         defer { suite.feedLoading = false }
-        let q = SuiteFeedQuery(tool: feedTools(photo: photo), status: suite.feedFilter.statuses, cursor: reset ? nil : suite.feedCursor)
+        let tools = photo ? feedTools(photo: true) : (suite.feedTool.map { [$0] } ?? feedTools(photo: false))
+        let q = SuiteFeedQuery(tool: tools, status: suite.feedFilter.statuses, model: suite.feedModel, cursor: reset ? nil : suite.feedCursor)
         guard let page = try? await api.suiteFeed(q) else { return }
         if reset {
             suite.feed = page.items

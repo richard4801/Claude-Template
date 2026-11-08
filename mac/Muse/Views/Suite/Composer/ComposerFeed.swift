@@ -5,8 +5,10 @@ import SwiftUI
 // The results feed beside the composer (plans/ai-suite-design.md §2 "Feed", approved for the current Suite on
 // 2026-11-08): the header's "Takes" swaps the picture for the feed, in the picture's place beside the Setup rail and
 // the prompt bar. Rendering and failed renders first as one card each, then every take, newest first, a page at a time
-// (GET /v1/suite/feed). A take's actions: Vary, Use as start frame and Compare on hover, and all of them (with Reuse
-// settings, Open in Edit and Open) in its context menu. Compare puts two takes side by side over the composer.
+// (GET /v1/suite/feed), filtered by status, tool and model. Only the hovered card plays (muted); a click opens it large
+// over the feed (← → move through the takes). A take's actions: Vary, Use as start frame and Compare on hover, and all
+// of them (with Reuse settings, Extend, Open in Edit, Post and Open) in its context menu. Compare puts two takes side by
+// side over the composer. Empty: the line and three presets to start from.
 
 struct ComposerFeed: View {
     @Environment(AppStore.self) private var store
@@ -14,16 +16,20 @@ struct ComposerFeed: View {
 
     private var photo: Bool { store.suite.composer.tool == .photo }
 
-    /// Reload when the tool, the filter or the studio's renders change (a job starts, finishes or fails; takes land).
+    /// Reload when the tool, a filter or the studio's renders change (a job starts, finishes or fails; takes land).
     private var refreshKey: String {
+        let s = store.suite
         let settled = store.jobs.filter { $0.isDone || $0.isFailed }.count
-        return "\(photo)-\(store.suite.feedFilter.rawValue)-\(store.jobs.count)-\(settled)-\(store.takes.count)-\(store.serverKey)"
+        return "\(photo)-\(s.feedFilter.rawValue)-\(s.feedTool ?? "")-\(s.feedModel ?? "")-\(store.jobs.count)-\(settled)-\(store.takes.count)-\(store.serverKey)"
     }
 
-    /// The feed's cards; on "All" with nothing listed (takes made before the feed, the demo) the Suite takes the app
-    /// already has, so the feed never contradicts the picture.
+    /// No filter beyond this composer's own tools.
+    private var unfiltered: Bool { store.suite.feedFilter == .all && store.suite.feedTool == nil && store.suite.feedModel == nil }
+
+    /// The feed's cards; with no filter and nothing listed (takes made before the feed, the demo) the Suite takes the
+    /// app already has, so the feed never contradicts the picture.
     private var items: [SuiteFeedItem] {
-        if !store.suite.feed.isEmpty || store.suite.feedFilter != .all { return store.suite.feed }
+        if !store.suite.feed.isEmpty || !unfiltered { return store.suite.feed }
         return store.suiteTakes(photo: photo).prefix(40).map { tk in
             var it = SuiteFeedItem(id: "local-\(tk.id)", kind: photo ? "photo" : "take", status: "done", tool: photo ? "photo" : "shot", jobId: tk.jobId,
                                    title: tk.displayLabel, createdAt: tk.createdAt, poster: tk.thumb,
@@ -36,58 +42,138 @@ struct ComposerFeed: View {
 
     var body: some View {
         let list = items
-        VStack(alignment: .leading, spacing: Space.s3) {
-            HStack(spacing: Space.s3) {
-                Text(photo ? "Photos" : "Takes").font(t.scale.heading.font).foregroundStyle(t.roles.ink)
-                Spacer(minLength: Space.s2)
-                // The four filters with room around each label; when the feed is narrow, one "All ▾" that opens them.
-                ViewThatFits(in: .horizontal) {
-                    FeedFilterSegments()
-                    FeedFilterMenu()
-                }
-                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "feed filter") } }
-            }
-            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "feed header") } }
-            if list.isEmpty {
-                empty
-            } else {
-                ScrollView(.vertical) {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: photo ? 140 : 180), spacing: Space.s3)], alignment: .leading, spacing: Space.s3) {
-                        ForEach(list) { item in
-                            card(item)
-                                .onAppear { if item.id == list.last?.id { Task { await store.loadFeed(photo: photo, reset: false) } } }
+        let viewTakes = list.compactMap { store.feedTake($0) }
+        ZStack {
+            VStack(alignment: .leading, spacing: Space.s3) {
+                header
+                if list.isEmpty {
+                    empty
+                } else {
+                    ScrollView(.vertical) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: photo ? 140 : 180), spacing: Space.s3)], alignment: .leading, spacing: Space.s3) {
+                            ForEach(list) { item in
+                                card(item)
+                                    .onAppear { if item.id == list.last?.id { Task { await store.loadFeed(photo: photo, reset: false) } } }
+                            }
                         }
+                        .padding(.bottom, Space.s3)
                     }
-                    .padding(.bottom, Space.s3)
                 }
+            }
+            .padding(Space.s4)
+            // A card's large viewer, over the feed; the arrow keys move through the takes.
+            if let id = store.suite.viewerTakeId, let i = viewTakes.firstIndex(where: { $0.id == id }) {
+                FeedViewer(takes: viewTakes, index: i, photo: photo)
             }
         }
-        .padding(Space.s4)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: t.radii.container).fill(t.roles.raised))
+        .clipShape(RoundedRectangle(cornerRadius: t.radii.container))
         .task(id: refreshKey) {
             try? await Task.sleep(nanoseconds: 350_000_000)
             if Task.isCancelled { return }
             await store.loadFeed(photo: photo)
         }
+        .onDisappear { store.suite.viewerTakeId = nil }
     }
 
-    /// What this is, plus where to start (the prompt is right there).
-    private var empty: some View {
-        VStack(spacing: Space.s2) {
-            Text(store.suite.feedLoading ? "Loading…" : emptyLine).font(t.scale.body.font).foregroundStyle(t.roles.ink2)
-                .multilineTextAlignment(.center)
-            if store.suite.feedFilter != .all {
-                Button("Show all") { store.suite.feedFilter = .all }.buttonStyle(.plain)
-                    .font(t.scale.label.font).foregroundStyle(t.roles.link)
+    /// "Takes", then the tool and model filters and the status filter. Narrow: the status filter becomes one "All ▾".
+    private var header: some View {
+        HStack(spacing: Space.s3) {
+            Text(photo ? "Photos" : "Takes").font(t.scale.heading.font).foregroundStyle(t.roles.ink).lineLimit(1).fixedSize()
+            Spacer(minLength: Space.s2)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Space.s2) {
+                    scopeMenus
+                    FeedFilterSegments()
+                        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "feed filter") } }
+                }
+                HStack(spacing: Space.s2) {
+                    scopeMenus
+                    FeedFilterMenu()
+                        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "feed filter") } }
+                }
             }
         }
+        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "feed header") } }
+    }
+
+    /// Which tool (the video tools only; Photo has one) and which model.
+    @ViewBuilder private var scopeMenus: some View {
+        if !photo {
+            FeedScopeMenu(title: "Tool", allLabel: "All tools", options: FeedScope.tools, selected: store.suite.feedTool) { store.suite.feedTool = $0 }
+        }
+        let models = store.suiteCharacters.map { ($0.id, $0.shortName) }
+        if !models.isEmpty {
+            FeedScopeMenu(title: "Model", allLabel: "All models", options: models, selected: store.suite.feedModel) { store.suite.feedModel = $0 }
+        }
+    }
+
+    /// What this is, plus three presets to start from (the prompt is right there too).
+    private var empty: some View {
+        VStack(spacing: Space.s3) {
+            Text(store.suite.feedLoading ? "Loading…" : emptyLine).font(t.scale.body.font).foregroundStyle(t.roles.ink2)
+                .multilineTextAlignment(.center)
+            if !unfiltered {
+                Button("Show everything") {
+                    store.suite.feedFilter = .all
+                    store.suite.feedTool = nil
+                    store.suite.feedModel = nil
+                }
+                .buttonStyle(.plain)
+                .font(t.scale.label.font).foregroundStyle(t.roles.link)
+            } else if !store.suite.feedLoading {
+                presetSuggestions
+            }
+        }
+        .padding(Space.s4)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var emptyLine: String {
         if store.suite.feedFilter != .all { return "Nothing \(store.suite.feedFilter.label.lowercased()) right now" }
+        if !unfiltered { return "Nothing made like that yet" }
         return photo ? "Your photos appear here" : "Your takes appear here"
+    }
+
+    /// Three presets (Shot) or photo presets (Photo): one click puts it in the composer.
+    @ViewBuilder private var presetSuggestions: some View {
+        let shot = Array(store.suite.camera.presets.prefix(3))
+        let stills = Array(store.templates.prefix(3))
+        if photo ? !stills.isEmpty : !shot.isEmpty {
+            VStack(spacing: Space.s2) {
+                Text("Or start from a preset").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                HStack(spacing: Space.s2) {
+                    if photo {
+                        ForEach(stills) { tpl in
+                            suggestion(tpl.name) {
+                                store.choosePhotoPreset(tpl)
+                                store.suite.feedOpen = false
+                            }
+                        }
+                    } else {
+                        ForEach(shot) { p in
+                            suggestion(p.label) {
+                                if store.suite.composer.tool != .shot { store.openTool(.shot) }
+                                store.applyPreset(p)
+                                store.suite.feedOpen = false
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func suggestion(_ name: String, _ run: @escaping () -> Void) -> some View {
+        Button(action: run) {
+            Text(name).font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1).fixedSize()
+                .padding(.horizontal, Space.s3).frame(height: 32)
+                .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Start from \(name)")
     }
 
     @ViewBuilder private func card(_ item: SuiteFeedItem) -> some View {
@@ -101,6 +187,167 @@ struct ComposerFeed: View {
             }
         } else {
             FeedTakeCard(item: item, take: store.feedTake(item), photo: photo)
+        }
+    }
+}
+
+enum FeedScope {
+    /// The video tools a feed can narrow to (ids as the server's `tool`).
+    static let tools: [(String, String)] = [("shot", "Shot"), ("extend", "Extend"), ("upscale", "Upscale"), ("swap", "Character swap"), ("recast", "Recast")]
+}
+
+/// "All tools ▾" / "All models ▾": the current choice and a caret; the list opens in a popover.
+struct FeedScopeMenu: View {
+    @Environment(\.theme) private var t
+    var title: String
+    var allLabel: String
+    var options: [(String, String)]
+    var selected: String?
+    var onPick: (String?) -> Void
+    @State private var open = false
+
+    var body: some View {
+        let current = options.first { $0.0 == selected }?.1 ?? allLabel
+        Button { open.toggle() } label: {
+            HStack(spacing: Space.s1) {
+                Text(current).font(t.scale.caption.font.weight(.medium)).lineLimit(1).fixedSize()
+                    .fitProbe("composer feed \(title.lowercased()) menu")
+                Ph("caret-down", 11)
+            }
+            .foregroundStyle(selected == nil ? t.roles.ink2 : t.roles.ink)
+            .padding(.horizontal, Space.s3).frame(height: 28)
+            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .help(title)
+        .accessibilityLabel("\(title): \(current)")
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            PillList(title: title, options: [(allLabel, String?.none)] + options.map { ($0.1, String?.some($0.0)) }, selected: selected) {
+                onPick($0)
+                open = false
+            }
+            .environment(\.theme, t)
+        }
+    }
+}
+
+/// A take large over the feed: the video playing (or the photo), its line, and its actions. ← and → move through the
+/// feed's takes; Esc or Close goes back to the grid.
+struct FeedViewer: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    var takes: [Take]
+    var index: Int
+    var photo: Bool
+    @State private var player: AVPlayer?
+
+    private var take: Take { takes[index] }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s3) {
+            HStack(spacing: Space.s2) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(take.displayLabel).font(t.scale.heading.font).foregroundStyle(t.roles.ink).lineLimit(1)
+                    Text(SuiteFeedText.summary(take.draft ?? store.job(for: take)?.draft, seconds: take.durationSec))
+                        .font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2).lineLimit(1)
+                }
+                Spacer(minLength: Space.s2)
+                Text("\(index + 1) of \(takes.count)").font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
+                    .lineLimit(1).fixedSize()
+                SuiteIconButton(systemName: "caret-left", label: "Previous take") { move(-1) }
+                    .keyboardShortcut(.leftArrow, modifiers: [])
+                    .disabled(index == 0)
+                SuiteIconButton(systemName: "caret-right", label: "Next take") { move(1) }
+                    .keyboardShortcut(.rightArrow, modifiers: [])
+                    .disabled(index >= takes.count - 1)
+                SuiteIconButton(systemName: "x", label: "Close the viewer") { store.suite.viewerTakeId = nil }
+                    .keyboardShortcut(.cancelAction)
+            }
+            Group {
+                if let player {
+                    VideoPlayer(player: player)
+                } else {
+                    MuseImage(ref: take.thumb)
+                }
+            }
+            .aspectRatio(ratio, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: t.radii.container))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityLabel(take.displayLabel)
+            HStack(spacing: Space.s4) {
+                link("Vary") { store.vary(take) }
+                if !photo { link("Use as start frame") { store.useAsStartFrame(take) } }
+                link(store.suite.compareIds.contains(take.id) ? "Remove from compare" : "Compare") { store.compareInSuite(take) }
+                link("Reuse settings") { if !store.reuseSettings(take) { store.showToast("This take was made before Reuse settings") } }
+                if take.isVideo { link("Open in Edit") { store.openEdit(takeId: take.id) } }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(Space.s4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(RoundedRectangle(cornerRadius: t.radii.container).fill(t.roles.raised))
+        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "viewer") } }
+        .onAppear { load() }
+        .onChange(of: take.id) { _, _ in load() }
+        .onDisappear { release() }
+    }
+
+    private var ratio: CGFloat {
+        if let w = take.width, let h = take.height, w > 0, h > 0 { return CGFloat(w) / CGFloat(h) }
+        return take.isVideo ? 9.0 / 16.0 : 4.0 / 5.0
+    }
+
+    private func link(_ title: String, _ run: @escaping () -> Void) -> some View {
+        Button(title, action: run).buttonStyle(.plain).font(t.scale.label.font).foregroundStyle(t.roles.link).lineLimit(1).fixedSize()
+    }
+
+    private func move(_ by: Int) {
+        let i = index + by
+        guard takes.indices.contains(i) else { return }
+        store.suite.viewerTakeId = takes[i].id
+    }
+
+    private func load() {
+        release()
+        guard let v = take.videoUrl, let u = URL(string: v) else { return }
+        let p = AVPlayer(url: u)
+        p.actionAtItemEnd = .pause
+        player = p
+        p.play()
+    }
+
+    private func release() {
+        player?.pause()
+        player?.replaceCurrentItem(with: nil)
+        player = nil
+    }
+}
+
+/// Only the hovered card plays: muted, looping, released when the pointer leaves (plans/ai-suite-design.md refinement 7).
+struct FeedHoverPlayer: View {
+    var url: URL
+    @State private var queue: AVQueuePlayer?
+    @State private var looper: AVPlayerLooper?
+
+    var body: some View {
+        Group {
+            if let queue { PlayerLayerView(player: queue).allowsHitTesting(false) }
+        }
+        .onAppear {
+            let q = AVQueuePlayer()
+            q.isMuted = true
+            looper = AVPlayerLooper(player: q, templateItem: AVPlayerItem(url: url))
+            queue = q
+            q.play()
+        }
+        .onDisappear {
+            queue?.pause()
+            looper?.disableLooping()
+            queue?.removeAllItems()
+            looper = nil
+            queue = nil
         }
     }
 }
@@ -245,6 +492,7 @@ struct FeedTakeCard: View {
             ZStack(alignment: .bottomLeading) {
                 shape.fill(t.roles.field)
                 Color.clear.overlay(MuseImage(ref: item.poster ?? take?.thumb)).clipped()
+                if hover, let v = take?.videoUrl, let u = URL(string: v) { FeedHoverPlayer(url: u) }
                 if hover, take != nil {
                     HStack(spacing: Space.s1) { quickActions }
                         .padding(Space.s2)
@@ -261,12 +509,14 @@ struct FeedTakeCard: View {
         .contentShape(Rectangle())
         .onHover { hover = $0 }
         .onTapGesture(count: 2) { open() }
+        .onTapGesture { if let id = take?.id { store.suite.viewerTakeId = id } }
         .contextMenu { menu }
         .help(item.title.isEmpty ? item.summary : item.title)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(item.title.isEmpty ? item.summary : item.title)
         .accessibilityAddTraits(comparing ? AccessibilityTraits([.isButton, .isSelected]) : AccessibilityTraits.isButton)
         .accessibilityAction(named: "Open") { open() }
+        .accessibilityAction(named: "View large") { if let id = take?.id { store.suite.viewerTakeId = id } }
     }
 
     private func open() { if let id = item.takeId { store.openTake(id) } }
