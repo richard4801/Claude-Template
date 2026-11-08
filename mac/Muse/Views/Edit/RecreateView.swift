@@ -73,13 +73,16 @@ struct RecreateBuildConfirm: View {
 
     var body: some View {
         let rs = store.recreate
-        let paid = rs.confirmSlots
+        let offered = rs.confirmSlots
+        let paid = rs.confirmPicked
+        let skipped = offered.count - paid.count
         let cant = rs.toGenerate.filter { rs.estimateErrors[$0] != nil }
         let total = rs.confirmTotal
+        let noneTicked = !offered.isEmpty && paid.isEmpty
         VStack(alignment: .leading, spacing: Space.s4) {
-            Text(paid.isEmpty ? "Build the edit?" : "Build the edit for \(RecreateText.money(total))?")
+            Text(paid.isEmpty || noneTicked ? "Build the edit?" : "Build the edit for \(RecreateText.money(total))?")
                 .scaled(t.scale.title, t.roles.ink).lineLimit(1).fitProbe("confirm title")
-            Text(message(paid: paid.count, cant: cant.count))
+            Text(message(paid: paid.count, cant: cant.count, skipped: skipped))
                 .scaled(t.scale.body, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
             if !paid.isEmpty, let lead = store.recreateLead {
                 // The Cast step's choice (Release 1 item E): who the new shots are made with.
@@ -92,21 +95,28 @@ struct RecreateBuildConfirm: View {
                 }
                 .accessibilityElement(children: .combine)
             }
-            if !paid.isEmpty || !cant.isEmpty {
+            if !offered.isEmpty || !cant.isEmpty {
                 VStack(spacing: 0) {
-                    ForEach(paid, id: \.self) { s in
-                        row(s, detail: length(s), price: rs.estimates[s].map { RecreateText.money($0.estimate) }, problem: nil)
+                    // "Generate all the missing shots, or pick which ones": each shot can be unticked (all ticked at first).
+                    ForEach(offered, id: \.self) { s in
+                        row(s, detail: length(s), price: rs.estimates[s].map { RecreateText.money($0.estimate) }, problem: nil,
+                            ticked: Binding(get: { !store.recreate.confirmSkipped.contains(s) },
+                                            set: { on in if on { store.recreate.confirmSkipped.remove(s) } else { store.recreate.confirmSkipped.insert(s) } }))
                     }
                     ForEach(cant, id: \.self) { s in row(s, detail: nil, price: nil, problem: rs.estimateErrors[s]) }
                 }
             }
             HStack(spacing: Space.s3) {
+                if noneTicked {
+                    Text("Tick at least one shot").scaled(t.scale.caption, t.roles.caution).lineLimit(1).fixedSize()
+                }
                 Spacer(minLength: 0)
                 SuiteToolButton(title: "Cancel") { store.recreate.askBuild = false }
                     .keyboardShortcut(.cancelAction)
                     .accessibilityLabel("Cancel")
                 SuiteToolButton(title: paid.isEmpty ? "Build the edit" : "Build · \(RecreateText.money(total))", accent: true) { store.confirmRecreateBuild() }
                     .keyboardShortcut(.defaultAction)
+                    .disabled(noneTicked)
                     .background(SnapshotFrame(key: "confirm"))
             }
         }
@@ -115,7 +125,7 @@ struct RecreateBuildConfirm: View {
         .background(t.roles.canvas)
     }
 
-    private func message(paid: Int, cant: Int) -> String {
+    private func message(paid: Int, cant: Int, skipped: Int = 0) -> String {
         let rs = store.recreate
         let yours = rs.fill?.slots.filter { $0.state == "matched" || $0.state == "ready" }.count ?? 0
         var out: [String] = []
@@ -124,6 +134,7 @@ struct RecreateBuildConfirm: View {
         if paid > 1 { out.append("The \(paid) new shots are made with \(who) and charged to the studio.") }
         if yours > 0 { out.append(yours == 1 ? "1 shot comes from your takes." : "\(yours) shots come from your takes.") }
         if cant > 0 { out.append(cant == 1 ? "1 shot can’t be made and is left out." : "\(cant) shots can’t be made and are left out.") }
+        if skipped > 0 { out.append(skipped == 1 ? "1 unticked shot stays to generate later." : "\(skipped) unticked shots stay to generate later.") }
         if paid > 0 {
             out.append("They take a few minutes; you can leave this page meanwhile.")
         } else {
@@ -146,16 +157,21 @@ struct RecreateBuildConfirm: View {
         return "\(made), cut to \(String(format: "%.1f", slot.length)) s"
     }
 
-    private func row(_ slotId: String, detail: String?, price: String?, problem: String?) -> some View {
+    private func row(_ slotId: String, detail: String?, price: String?, problem: String?, ticked: Binding<Bool>? = nil) -> some View {
         let rs = store.recreate
         let slot = rs.slots.first { $0.id == slotId }
         return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: Space.s3) {
+                if let ticked {
+                    Toggle("Make \(rs.shotName(slotId))", isOn: ticked).toggleStyle(.checkbox).labelsHidden()
+                        .help(ticked.wrappedValue ? "Untick to leave this shot for later" : "Tick to make this shot now")
+                        .accessibilityLabel("Make \(rs.shotName(slotId))")
+                }
                 Text(rs.shotName(slotId)).scaled(t.scale.label, t.roles.ink).lineLimit(1).fixedSize()
                 Text(slot.flatMap { RecreateText.brief($0.brief) } ?? slot.map { String(format: "%.1f s", $0.length) } ?? "")
                     .scaled(t.scale.caption, t.roles.ink2).lineLimit(1)
                 Spacer(minLength: Space.s2)
-                Text(price ?? "–").scaled(t.scale.label, t.roles.ink).monospacedDigit().lineLimit(1).fixedSize().fitProbe("confirm price \(slotId)")
+                Text(price ?? "–").scaled(t.scale.label, ticked?.wrappedValue == false ? t.roles.ink2 : t.roles.ink).monospacedDigit().lineLimit(1).fixedSize().fitProbe("confirm price \(slotId)")
             }
             if let problem {
                 Text(problem).scaled(t.scale.caption, t.roles.caution).fixedSize(horizontal: false, vertical: true)
@@ -165,7 +181,7 @@ struct RecreateBuildConfirm: View {
         }
         .padding(.vertical, Space.s2)
         .overlay(alignment: .top) { SuiteRule() }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: ticked == nil ? .combine : .contain)
     }
 }
 

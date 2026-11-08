@@ -47,6 +47,8 @@ final class RecreateState {
     var estimateErrors: [String: String] = [:]
     /// The slots the open confirmation covers (priced, to generate), frozen when it opened.
     var confirmSlots: [String] = []
+    /// Shots unticked in the confirmation ("pick which ones"): they stay to generate for later and aren't charged.
+    var confirmSkipped: Set<String> = []
     /// Slots whose new shot didn't generate (refunded by the server), in plain words.
     var fillErrors: [String: String] = [:]
     /// Takes picked here ("Use one of my takes"), kept over each fill refresh.
@@ -172,6 +174,7 @@ final class RecreateState {
         estimates = [:]
         estimateErrors = [:]
         confirmSlots = []
+        confirmSkipped = []
         fillErrors = [:]
         picks = [:]
         linkProblem = nil
@@ -230,7 +233,9 @@ final class RecreateState {
     var prices: [String: Double] { estimates.filter { $0.value.ok }.mapValues(\.estimate) }
     var unpriceable: Set<String> { Set(estimateErrors.keys) }
     /// The total the confirmation shows: the confirmed slots' estimates.
-    var confirmTotal: Double { confirmSlots.compactMap { estimates[$0]?.estimate }.reduce(0, +) }
+    var confirmTotal: Double { confirmPicked.compactMap { estimates[$0]?.estimate }.reduce(0, +) }
+    /// The ticked shots of the open confirmation (all of them unless the person unticked some).
+    var confirmPicked: [String] { confirmSlots.filter { !confirmSkipped.contains($0) } }
     /// "Shot 2".
     func shotName(_ slotId: String) -> String { slots.firstIndex { $0.id == slotId }.map { "Shot \($0 + 1)" } ?? "A shot" }
 
@@ -625,6 +630,7 @@ extension AppStore {
         recreate.estimating = false
         guard recreate.reference?.id == ref.id else { return }
         recreate.confirmSlots = recreate.toGenerate.filter { recreate.estimates[$0]?.ok == true && recreate.estimateErrors[$0] == nil }
+        recreate.confirmSkipped = []
         recreate.askBuild = true
     }
 
@@ -634,9 +640,12 @@ extension AppStore {
     func confirmRecreateBuild() {
         guard let ref = recreate.reference, !recreate.building else { return }
         let id = ref.id
-        let confirmed = recreate.confirmSlots
+        // Only the ticked shots are made; unticked ones stay "to generate" for later. At least one must be ticked.
+        guard recreate.confirmSlots.isEmpty || !recreate.confirmPicked.isEmpty else { return }
+        let confirmed = recreate.confirmPicked
         recreate.askBuild = false
         recreate.confirmSlots = []
+        recreate.confirmSkipped = []
         recreate.building = true
         recreate.buildWhenReady.insert(id)
         guard !confirmed.isEmpty, let model = recreateModelId else {
