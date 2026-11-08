@@ -180,9 +180,11 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
         val f = java.io.File(context.cacheDir, "recreate_$referenceId.mp4")
         if ((f.length() > 0) || c.repo.api.referenceVideo(referenceId, f)) video = f.toURI().toString()
     }
-    // After Build: the real built edit, from the edit session, previewed on the device (Compare). Until it is ready,
-    // your edit plays each shot's take.
+    // After Build: the real built edit (Compare). The studio server's preview comes first, so pixels match across
+    // apps; the device's own engine is the fallback. Until either is ready, your edit plays each shot's take.
     val local = remember(referenceId) { RecreateLocalEdit(context, c.repo.api) }
+    val server = remember(referenceId) { RecreateServerRender(c.repo.api, context.cacheDir) }
+    var editLabel by remember(referenceId) { mutableStateOf<String?>(null) }
     var exportJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     // Claude on this reference (owner only; the server answers members 403).
     val prefs by c.prefs.collectAsState()
@@ -191,10 +193,18 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
     LaunchedEffect(ui.builtSessionId, ui.builtRevision) {
         val sid = ui.builtSessionId ?: return@LaunchedEffect
         if (c.repo.demo) return@LaunchedEffect // demo mode has no media to build from
-        runCatching { local.load(sid) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
-        val next = local.player()
+        val rendered = server.preview(sid)
+        val next: androidx.media3.common.Player? = if (rendered != null) {
+            androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+                setMediaItem(androidx.media3.common.MediaItem.fromUri(android.net.Uri.fromFile(rendered.file))); prepare()
+            }
+        } else {
+            runCatching { local.load(sid) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+            local.player()
+        }
         built?.release()
         built = next
+        editLabel = rendered?.render?.label
     }
     androidx.compose.runtime.DisposableEffect(referenceId) { onDispose { built?.release() } }
     // Shots being made: their progress from the studio's live jobs.
@@ -212,6 +222,7 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
         onCast = { id -> scope.launch { model.setCast(id) } },
         onBriefs = model::askBriefs, onBriefsCancel = model::cancelBriefs, onBriefsConfirm = { scope.launch { model.writeBriefs() } },
         onMethod = { s, m -> scope.launch { model.setMethod(s, m) } }, onKeepBackground = { s, k -> scope.launch { model.setKeepBackground(s, k) } },
+        onLocation = { s, l -> scope.launch { model.setLocation(s, l) } },
         onUseTake = model::useTake, onFix = model::fixWeakest, onRemake = { s -> scope.launch { model.remake(s) } },
         onOpenEditor = { ui.builtTakeId?.let(onOpenTake) ?: c.repo.toast("The built edit opens with its take in the editor") },
         onPlay = model::togglePlay, onStep = model::step,
@@ -220,17 +231,32 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
         onExportClose = { exportJob?.cancel(); exportJob = null; model.setExportProgress(null); model.closeExport() }, // Cancel stops a running export
         onExportRun = {
             val e = ui.export
-            if (e != null && e.progress == null) exportJob = scope.launch {
-                if (c.repo.demo || !local.playable) { model.setExportProgress(null, "The built edit's videos aren't on this phone yet. Try again in a moment."); return@launch }
+            if (e != null && !e.busy) exportJob = scope.launch {
+                if (c.repo.demo) { model.exportSaved("Demo mode doesn't save videos", null); return@launch }
+                // The studio server first (the same pixels as the Mac); the phone's own engine when it can't.
+                val sid = ui.builtSessionId
+                if (sid != null) {
+                    val fromServer = try { server.export(referenceId, sid, e.guide) { model.setExportRendering() } }
+                        catch (err: studio.muse.app.data.ApiException) { model.exportNeedsSilent(); return@launch }
+                    if (fromServer != null) {
+                        runCatching { local.saveToMovies(fromServer.file) }.fold(
+                            { model.exportSaved("Saved to this phone, in Movies/MUSE", fromServer.render.useThisSound) },
+                            { err -> if (err is kotlinx.coroutines.CancellationException) throw err; model.setExportProgress(null, "This phone couldn't save the video. Try again.") })
+                        fromServer.file.delete()
+                        return@launch
+                    }
+                    if (!local.playable) runCatching { local.load(sid) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+                }
+                if (!local.playable) { model.setExportProgress(null, "The built edit's videos aren't on this phone yet. Try again in a moment."); return@launch }
                 val guide = video?.let { java.io.File(java.net.URI(it)) }?.takeIf { e.guide && it.exists() }
                 if (e.guide && guide == null) { model.setExportProgress(null, "The original's sound isn't on this phone yet. Export it silent, or try again in a moment."); return@launch }
                 model.setExportProgress(0f)
                 runCatching { local.export(guide, recipe.durationSec) { p -> model.setExportProgress(p) } }.fold(
-                    { model.exportDone("Saved to this phone, in Movies/MUSE") },
+                    { model.exportSaved("Saved to this phone, in Movies/MUSE", null) },
                     { err -> if (err is kotlinx.coroutines.CancellationException) throw err; model.setExportProgress(null, "This phone couldn't make the video. Try again.") })
             }
         },
-    ), picture = poster, media = RecreateMedia(video, { id -> studio.takes.firstOrNull { it.id == id }?.videoUrl }, built))
+    ), picture = poster, media = RecreateMedia(video, { id -> studio.takes.firstOrNull { it.id == id }?.videoUrl }, built, editLabel))
     // The chat refreshes the recipe's fill when Claude has matched or priced shots.
     ClaudeChatSheet(open = claude, onDismiss = { claude = false; scope.launch { model.load() } },
         contextKind = "recreate", contextId = referenceId, title = name ?: "Recreate")

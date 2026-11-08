@@ -83,6 +83,8 @@ class RecreateActions(
     /** G2: how a shot to make is made ("swap" | "generate"), and whether a swap keeps the reference's setting. */
     val onMethod: (String, String) -> Unit = { _, _ -> },
     val onKeepBackground: (String, Boolean) -> Unit = { _, _ -> },
+    /** "Use your own setting": a studio location for the shot, or null for the place in its brief. */
+    val onLocation: (String, String?) -> Unit = { _, _ -> },
     val onExport: () -> Unit = {},
     /** Owner only (null: no Claude button): Claude on this reference (the "recreate" context, WS1 d7233b8). */
     val onClaude: (() -> Unit)? = null,
@@ -104,6 +106,8 @@ class RecreateMedia(
     val takeVideo: (String) -> String? = { null },
     /** The built edit, previewed on the device (Compare); without it, your edit plays each shot's take. */
     val edit: androidx.media3.common.Player? = null,
+    /** "Preview of the cut" when the server's preview leaves part of the edit out (plans/api.md "The built edit, rendered"). */
+    val editLabel: String? = null,
 )
 
 private val LocalRecreateMedia = androidx.compose.runtime.staticCompositionLocalOf { RecreateMedia() }
@@ -399,7 +403,10 @@ private fun Player(label: String, ui: RecreateBuildUi, yours: Boolean, picture: 
         else if (built != null) null
         else slot?.let { s -> ui.slotFill(s.id)?.takeId?.let(media.takeVideo)?.let { it to (t - s.startSec).coerceAtLeast(0.0) } }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        T(label, m.scale.label, m.roles.ink, maxLines = 1)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            T(label, m.scale.label, m.roles.ink, maxLines = 1)
+            if (built != null) media.editLabel?.let { T(it, m.scale.caption, m.roles.ink2, maxLines = 1) }
+        }
         Box(Modifier.fillMaxWidth().let { if (height != null) it.height(height) else it.weight(1f) }.clip(RoundedCornerShape(m.radii.container)).background(Color.Black).padding(vertical = 12.dp)
             .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
             Box(Modifier.aspectRatio(9f / 16f, matchHeightConstraintsFirst = true).clip(RoundedCornerShape(4.dp))) {
@@ -558,6 +565,16 @@ private fun FillBox(ui: RecreateBuildUi, s: RecipeSlot, pickTake: (String) -> Un
                         T(if (keep) "Your model, in their place" else "The place from this shot's brief", m.scale.caption, m.roles.ink2, maxLines = 1)
                     }
                     studio.muse.app.ui.components.Toggle(keep, { acts.onKeepBackground(s.id, !keep) })
+                }
+                // Use your own setting: pick one of the studio's locations (free), or let the brief's place choose; a
+                // background made from the brief is priced into the shot.
+                if (!keep) {
+                    val picked = ui.locations[s.id]
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        studio.muse.app.ui.screens.edit.learn.LearnChip("From the brief", on = picked == null) { if (picked != null) acts.onLocation(s.id, null) }
+                        ui.places.forEach { p -> studio.muse.app.ui.screens.edit.learn.LearnChip(p.name, on = picked == p.id) { if (picked != p.id) acts.onLocation(s.id, p.id) } }
+                    }
+                    e.background?.let { T(it.line, m.scale.caption, m.roles.ink2) }
                 }
             }
             if (method == "generate" && e?.promptFrom != null && e.promptFrom != "brief") T("Write a brief for this shot first for a closer match.", m.scale.caption, m.roles.ink2)
@@ -746,6 +763,8 @@ private fun ConfirmRow(ui: RecreateBuildUi, slotId: String, problem: String?) {
                 if (it.method == "swap") "Swapped into the reference, ${suiteTime(it.segmentStart ?: slot?.startSec ?: 0.0)}–${suiteTime(it.segmentEnd ?: slot?.endSec ?: 0.0)}"
                 else RecreateText.madeLength(it.seconds, slot?.lengthSec ?: it.seconds)
             }?.let { T(it, m.scale.caption.tabular(), m.roles.ink2, maxLines = 1) }
+            // Use your own setting: the background's part of the price (a plate made from the brief), or the location used.
+            if (problem == null) e?.background?.let { T(it.line, m.scale.caption.tabular(), m.roles.ink2, maxLines = 2) }
         }
     }
 }
@@ -762,12 +781,26 @@ private fun ExportSheet(e: RecreateExportUi, a: RecreateActions) {
             Modifier.padding(24.dp).widthIn(max = 460.dp).fillMaxWidth().clip(RoundedCornerShape(m.radii.container)).background(m.roles.canvas).press { }.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            val saved = e.saved
+            if (saved != null) {
+                T("Saved", m.scale.title, m.roles.ink)
+                T(saved, m.scale.body, m.roles.ink2)
+                val use = e.useThisSound
+                if (use != null) {
+                    T(use.title, m.scale.heading, m.roles.ink)
+                    use.steps.forEachIndexed { i, step -> T("${i + 1}. $step", m.scale.body, m.roles.ink) }
+                    use.note?.let { T(it, m.scale.caption, m.roles.ink2) }
+                } else T(studio.muse.core.edit.RecreateExport.REMINDER, m.scale.caption, m.roles.ink2)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { Primary("Done", onClick = a.onExportClose) }
+                return@Column
+            }
             T("Export the edit", m.scale.title, m.roles.ink)
-            LearnSegmented(listOf("With its sound", "Silent"), if (e.guide) 0 else 1, Modifier.fillMaxWidth()) { if (e.progress == null) a.onExportGuide(it == 0) }
+            LearnSegmented(listOf("With its sound", "Silent"), if (e.guide) 0 else 1, Modifier.fillMaxWidth()) { if (!e.busy) a.onExportGuide(it == 0) }
             T(if (e.guide) "The original's sound plays as a guide, so you can check the cuts land on the beat." else "No sound: the cuts are timed for the original's sound.",
                 m.scale.body, m.roles.ink2)
             T(studio.muse.core.edit.RecreateExport.REMINDER, m.scale.caption, m.roles.ink2)
             e.error?.let { T(it, m.scale.caption, m.roles.caution) }
+            if (e.rendering) T("Making the video. This takes about a minute.", m.scale.caption, m.roles.ink2)
             e.progress?.let { p ->
                 Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(m.roles.raised).semantics { contentDescription = "${(p * 100).toInt()}% exported" }) {
                     Box(Modifier.fillMaxWidth(p.coerceIn(0f, 1f)).fillMaxHeight().background(m.roles.accent))
@@ -775,7 +808,7 @@ private fun ExportSheet(e: RecreateExportUi, a: RecreateActions) {
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
                 LearnQuiet("Cancel", onClick = a.onExportClose)
-                Primary(if (e.progress != null) "Exporting" else "Save to this phone", enabled = e.progress == null, onClick = a.onExportRun)
+                Primary(if (e.busy) "Exporting" else "Save to this phone", enabled = !e.busy, onClick = a.onExportRun)
             }
         }
     }
