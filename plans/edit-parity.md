@@ -65,7 +65,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 |---|---|---|---|---|
 | Constant speed 0.1–10×, pitch kept | Has | Has | — | |
 | Speed curves (presets + custom graph) | Has | Has | — | |
-| **Smooth slow-mo (frame interpolation)** | Missing | Missing | XL | Needs a model choice (server job like denoise, or on-device). The "Coming soon" switch was removed in WS8. Mac: Still shows a disabled "Coming soon" switch; to remove to match Android |
+| **Smooth slow-mo (frame interpolation)** | Missing | Missing | XL | Needs a model choice (server job like denoise, or on-device). The "Coming soon" switch was removed in WS8. Mac: The "Coming soon" switch was removed (WS9) |
 | Speed on audio-only clips | Missing | Missing | M | The contract says audio plays at 1×; needs a contract change. |
 | Set the duration (speed computed) | Missing | Missing | S | |
 
@@ -225,7 +225,7 @@ _WS8, 2026-11-08. **For the owner to prioritise. Nothing in this document gets b
 | Size estimate | Has | Has | — | |
 | Captions burnt in or .SRT | Has | Has | — | Mac: Save to Library always burns them in (WS9) |
 | Label as AI-generated | Has | Has | — | Sent with the version (fixed in WS8). Mac: Sent with the version (WS9) |
-| Content Credentials (C2PA) | Missing | Missing | L | Signing needs a certificate decision. The "Coming soon" switch was removed in WS8. Mac: Still a "Coming soon" switch; to remove to match Android |
+| Content Credentials (C2PA) | Missing | Missing | L | Signing needs a certificate decision. The "Coming soon" switch was removed in WS8. Mac: The "Coming soon" switch was removed (WS9) |
 | 2K, bitrate choice | Missing | Missing | S | |
 | HDR export | Missing | Missing | L | |
 | Share straight to TikTok / IG / Shorts | Partial | Partial | — | MUSE Socials (posting) |
