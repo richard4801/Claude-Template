@@ -34,7 +34,7 @@ public enum RecreateDeviceFetch {
     }
 
     /// What happened when the Mac couldn't make the file.
-    public enum Failure: Equatable, Sendable {
+    public enum Failure: Error, Equatable, Sendable {
         /// The video itself is refused (private, too long, too big, downloads off, a list, a live stream): the server
         /// would refuse it too, so this is shown at once, without the server fallback.
         case refused(RecreateLinkProblem)

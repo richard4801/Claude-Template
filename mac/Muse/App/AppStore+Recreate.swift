@@ -546,7 +546,7 @@ extension AppStore {
             defer { try? FileManager.default.removeItem(at: f.file.deletingLastPathComponent()) }
             recreate.linkStatus = "Uploading the video…"
             recreate.linkProgress = 0
-            let title = f.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let title = (f.title ?? "").trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
             let name: String? = title.isEmpty ? nil : String(title.prefix(80))
             do {
                 let r = try await recreateAPI.createReference(file: f.file, contentType: RecreateDeviceFetch.contentType(f.file), name: name,
