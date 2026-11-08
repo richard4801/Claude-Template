@@ -530,9 +530,19 @@ struct AudioPanels: View {
         let audioAsset = snd.audioAsset.flatMap { session.project.asset($0) }
         let denoised = audioAsset?.kind == .audio
         return EditPanel(title: "Audio · clip") {
-            SuiteSlider("Volume", value: EditSuite.db(gain: snd.volume ?? 1), range: -30...6, format: { $0 == 0 ? "0 dB" : String(format: "%+.0f dB", $0) }) { v in
-                let g = v <= -29.5 ? 0 : EditSuite.gain(db: v.rounded())
-                setSound { $0.volume = min(2, g) == 1 ? nil : min(2, g) }
+            // Keyframe aware (parity wave 1): with volume keys the slider sets the key at the playhead.
+            let st = session.state
+            HStack(alignment: .bottom, spacing: 8) {
+                SuiteSlider("Volume", value: EditSuite.db(gain: st.volumeAtPlayhead ?? snd.volume ?? 1), range: -30...6,
+                            format: { $0 == 0 ? "0 dB" : String(format: "%+.0f dB", $0) }) { v in
+                    let g = v <= -29.5 ? 0 : EditSuite.gain(db: v.rounded())
+                    session.edit { $0.setVolumeValue(g) }
+                }
+                SuiteIconButton(systemName: st.hasVolumeKeyHere ? "diamond.fill" : "diamond",
+                                label: st.hasVolumeKeyHere ? "Remove the volume keyframe at the playhead" : "Add a volume keyframe at the playhead",
+                                on: st.hasVolumeKeys, size: 28) {
+                    if session.state.hasVolumeKeyHere { session.edit { $0.removeVolumeKey() } } else { session.edit { $0.addVolumeKey() } }
+                }
             }
             HStack(spacing: 14) {
                 SuiteSlider("Fade in", value: snd.fadeInSec ?? 0, range: 0...5, format: { String(format: "%.1f s", $0) }) { v in

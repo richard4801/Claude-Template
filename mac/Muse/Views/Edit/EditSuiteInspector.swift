@@ -292,6 +292,35 @@ struct TextPanel: View {
             }
             EditSeg(options: [(EditV2.Align.left, "Left"), (.center, "Centre"), (.right, "Right")], selection: st.align, mono: false) { a in change { $0.style.align = a } }
             SuiteToggleRow(title: "Outline", isOn: st.stroke != nil) { on in change { $0.style.stroke = on ? EditV2.Stroke(color: "#000000", widthPct: 0.12) : nil } }
+            if let sk = st.stroke {
+                // Parity wave 1: the outline's colour and width.
+                HStack(alignment: .bottom, spacing: Space.s2) {
+                    SuiteSlider("Outline width", value: sk.widthPct, range: 0.02...0.3, format: { "\(Int(($0 * 100).rounded()))%" }) { v in
+                        change { $0.style.stroke?.widthPct = (v * 100).rounded() / 100 }
+                    }
+                    SuiteSwatch(hex: sk.color, label: "Outline colour") { c in change { $0.style.stroke?.color = c } }
+                }
+            }
+            SuiteToggleRow(title: "Shadow", isOn: st.shadow != nil) { on in
+                change { $0.style.shadow = on ? EditV2.Shadow(color: "#000000", opacity: 0.6, blurPct: 0.15, dyPct: 0.06) : nil }
+            }
+            if let sh = st.shadow {
+                HStack(alignment: .bottom, spacing: Space.s2) {
+                    SuiteSlider("Shadow blur", value: sh.blurPct, range: 0...0.5, format: { "\(Int(($0 * 100).rounded()))%" }) { v in
+                        change { $0.style.shadow?.blurPct = (v * 100).rounded() / 100 }
+                    }
+                    SuiteSwatch(hex: sh.color, label: "Shadow colour") { c in change { $0.style.shadow?.color = c } }
+                }
+                SuiteSlider("Shadow strength", value: sh.opacity, range: 0...1, format: { "\(Int(($0 * 100).rounded()))%" }) { v in
+                    change { $0.style.shadow?.opacity = (v * 100).rounded() / 100 }
+                }
+            }
+            SuiteSlider("Letter spacing", value: st.letterSpacing ?? 0, range: -0.1...0.5, format: { String(format: "%.2f em", $0) }) { v in
+                change { $0.style.letterSpacing = abs(v) < 0.005 ? nil : (v * 100).rounded() / 100 }
+            }
+            SuiteSlider("Line height", value: st.lineHeight ?? 1.15, range: 0.8...2, format: { String(format: "%.2f", $0) }) { v in
+                change { $0.style.lineHeight = (v * 100).rounded() / 100 }
+            }
             SuiteToggleRow(title: "Background box", isOn: st.background != nil) { on in
                 change { $0.style.background = on ? EditV2.TextBackground(color: "#FFFFFF", opacity: 1, paddingPct: 0.3, radiusPct: 0.2) : nil }
             }

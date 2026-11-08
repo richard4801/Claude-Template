@@ -238,6 +238,21 @@ extension SnapshotRunner {
         check("preview square", sz.map { abs($0.width - $0.height) < 2 } ?? false, "\(String(describing: sz))")
         s.undo()
 
+        step("Save this frame (extract frame)")
+        let png = FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-edit-ops-frame.png")
+        try? FileManager.default.removeItem(at: png)
+        let saveErr = await s.saveFrame(at: 1, to: png)
+        let saved = NSImage(contentsOf: png)?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        let sp = saved.flatMap { pixel($0, 0.5, 0.5) }
+        check("frame saved as a PNG of the edit", saveErr == nil && isRed(sp), saveErr ?? describe(sp))
+
+        step("Volume keyframes")
+        s.view { $0.selection = s.project.mainClips.first?.id }
+        s.seek(1); s.edit { $0.addVolumeKey() }
+        s.seek(3); s.edit { $0.setVolumeValue(0.2) }
+        check("project: two volume keys", s.project.mainClips.first?.keyframes?.volume?.count == 2)
+        s.undo(); s.undo()
+
         step("Back to the take")
         check("every change undone", s.project == base, "the project differs from the take after undoing everything")
     }

@@ -399,6 +399,23 @@ final class EditSuiteSession {
         seek(playhead + Double(dir) / max(1, project.canvas.fps))
     }
 
+    /// Writes the edit's frame at timeline `t` (the preview's render: looks, text, captions) as a PNG. Nil on success, else why.
+    func saveFrame(at t: Double, to url: URL) async -> String? {
+        guard let item = player.currentItem else { return "The preview isn't ready yet" }
+        let gen = AVAssetImageGenerator(asset: item.asset)
+        gen.videoComposition = item.videoComposition
+        gen.requestedTimeToleranceBefore = .zero
+        gen.requestedTimeToleranceAfter = .zero
+        do {
+            let cg = try await gen.image(at: CMTime(seconds: t, preferredTimescale: 600)).image
+            guard let data = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) else { return "Couldn't make the picture" }
+            try data.write(to: url)
+            return nil
+        } catch {
+            return "Couldn't save the frame (\(error.localizedDescription))"
+        }
+    }
+
     // MARK: Media (strips, waveforms, Looks thumbnails)
 
     private func refreshMedia() {

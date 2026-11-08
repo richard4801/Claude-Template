@@ -310,7 +310,7 @@ extension SnapshotRunner {
         let deny: Set<String> = ["Import", ".cube import", "Import video or picture", "Import picture", "Import music", "Import sound", "Record a voice-over", "Stop recording the voice-over", "Record VO",
                                  "Back", "Close the editor", "Translate…",
                                  // A full-screen window over the app (checked on its own in the Edit operations check).
-                                 "Full screen preview (Esc to leave)",
+                                 "Full screen preview (Esc to leave)", "Save this frame as a picture",
                                  // Paid helpers (2026-11-08: the walk skips anything that spends): background removal, tap to keep's run.
                                  "Remove background", "Run the cut-out"]
         let denyInSheet: Set<String> = ["Export", "Save to Library"]

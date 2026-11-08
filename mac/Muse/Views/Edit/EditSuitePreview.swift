@@ -1,6 +1,7 @@
 import AVKit
 import MuseCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The viewer (E1, plans/edit-layout.md): "Safe area" as one segmented control (Off · TikTok · Reels · Shorts) and Fit ·
 /// 100 %; the live edit on the viewer tone at the canvas shape with the platform's safe-area guide; the transport below
@@ -70,6 +71,19 @@ struct EditSuitePreview: View {
         .background(t.roles.canvas)
     }
 
+    /// Parity wave 1 "extract frame": the edit's frame at the playhead (with every look, text and caption) as a PNG.
+    private func saveFrame() {
+        session.pause()
+        let t = session.playhead
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.png]
+        panel.nameFieldStringValue = "\(session.title) \(EditSuite.clockTenths(t).replacingOccurrences(of: ":", with: ".")).png"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            if let msg = await session.saveFrame(at: t, to: url) { session.lastError = msg } else { session.notice = "Saved the frame" }
+        }
+    }
+
     /// Off, then each platform's guide (the same state as the guides before: nil is off).
     private var safeAreas: [(EditSuite.SafeArea?, String)] {
         [(nil, "Off")] + EditSuite.SafeArea.allCases.map { a -> (EditSuite.SafeArea?, String) in (a, a.label) }
@@ -84,6 +98,7 @@ struct EditSuitePreview: View {
                 .frame(minWidth: 120, alignment: .leading)
             Spacer(minLength: 0)
             SuiteIconButton(systemName: "skip-back", label: "Back to the start") { session.seek(0) }
+            SuiteIconButton(systemName: "caret-left", label: "Back one frame (←)") { session.step(-1) }
             Button { session.togglePlay() } label: {
                 Ph(session.playing ? "pause" : "play", 16)
                     .foregroundStyle(t.roles.canvas)
@@ -94,9 +109,11 @@ struct EditSuitePreview: View {
             .buttonStyle(.plain)
             .help(session.playing ? "Pause (space)" : "Play (space)")
             .accessibilityLabel(session.playing ? "Pause" : "Play")
+            SuiteIconButton(systemName: "caret-right", label: "Forward one frame (→)") { session.step(1) }
             SuiteIconButton(systemName: "skip-forward", label: "Forward one second") { session.seek(session.playhead + 1) }
             Spacer(minLength: 0)
             HStack(spacing: Space.s1) {
+                SuiteIconButton(systemName: "camera", label: "Save this frame as a picture") { saveFrame() }
                 SuiteIconButton(systemName: muted ? "speaker-slash" : "speaker-high", label: muted ? "Unmute the preview" : "Mute the preview") {
                     muted.toggle()
                     session.player.isMuted = muted

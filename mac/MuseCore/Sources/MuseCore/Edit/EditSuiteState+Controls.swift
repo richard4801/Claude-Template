@@ -228,3 +228,85 @@ extension EditSuiteState {
         }
     }
 }
+
+// MARK: Volume keyframes (parity wave 1)
+
+extension EditSuiteState {
+    /// Changes the selected video or audio clip's keyframes.
+    private mutating func changeSoundKeys(_ change: @escaping (inout E.Keyframes) -> Void) -> Bool {
+        changeSelected { it in
+            switch it {
+            case .video(var c): var k = c.keyframes ?? E.Keyframes(); change(&k); c.keyframes = k.isEmpty ? nil : k; it = .video(c)
+            case .audio(var c): var k = c.keyframes ?? E.Keyframes(); change(&k); c.keyframes = k.isEmpty ? nil : k; it = .audio(c)
+            default: break
+            }
+        }
+    }
+
+    private var selectedVolumeKeys: [E.Keyframe]? {
+        switch selectedItem {
+        case .video(let c): return c.keyframes?.volume
+        case .audio(let c): return c.keyframes?.volume
+        default: return nil
+        }
+    }
+
+    /// The selected clip's volume at the playhead (its volume keys there when it has any), 0–2.
+    public var volumeAtPlayhead: Double? {
+        guard let snd = selectedSound else { return nil }
+        if let keys = selectedVolumeKeys, !keys.isEmpty, let t = selectedLocalTime { return E.keyframeValue(keys, t) }
+        return snd.volume ?? 1
+    }
+
+    public var hasVolumeKeys: Bool { !(selectedVolumeKeys?.isEmpty ?? true) }
+
+    /// Whether there is a volume key at the playhead (within half a frame).
+    public var hasVolumeKeyHere: Bool {
+        guard let keys = selectedVolumeKeys, let t = selectedLocalTime else { return false }
+        return keys.contains { abs($0.t - t) <= 0.5 / max(1, project.canvas.fps) }
+    }
+
+    /// The Volume slider: with volume keys it sets the key at the playhead, else the clip's volume (nil at 1×).
+    @discardableResult
+    public mutating func setVolumeValue(_ gain: Double) -> Bool {
+        let g = E.r6(min(2, max(0, gain)))
+        if hasVolumeKeys { return addVolumeKey(g) }
+        return changeSound { $0.volume = abs(g - 1) < 1e-6 ? nil : g }
+    }
+
+    /// Adds (or replaces) a volume key at the playhead; the value defaults to the level heard there.
+    @discardableResult
+    public mutating func addVolumeKey(_ gain: Double? = nil) -> Bool {
+        guard let t = selectedLocalTime, let v = gain ?? volumeAtPlayhead else { return false }
+        let tol = 0.5 / max(1, project.canvas.fps)
+        return changeSoundKeys { k in
+            var list = (k.volume ?? []).filter { abs($0.t - t) > tol }
+            list.append(E.Keyframe(t: t, v: E.r6(min(2, max(0, v))), ease: list.first?.ease ?? .linear))
+            list.sort { $0.t < $1.t }
+            k.volume = list
+        }
+    }
+
+    /// Removes the volume key at the playhead; the last one's level becomes the clip's volume.
+    @discardableResult
+    public mutating func removeVolumeKey() -> Bool {
+        guard let t = selectedLocalTime, let keys = selectedVolumeKeys else { return false }
+        let tol = 0.5 / max(1, project.canvas.fps)
+        let left = keys.filter { abs($0.t - t) > tol }
+        guard left.count != keys.count else { return false }
+        let last = keys.first { abs($0.t - t) <= tol }!.v
+        return changeSelected { it in
+            switch it {
+            case .video(var c):
+                if left.isEmpty { c.volume = abs(last - 1) < 1e-6 ? nil : last }
+                var k = c.keyframes ?? E.Keyframes(); k.volume = left.isEmpty ? nil : left; c.keyframes = k.isEmpty ? nil : k
+                it = .video(c)
+            case .audio(var c):
+                if left.isEmpty { c.volume = abs(last - 1) < 1e-6 ? nil : last }
+                var k = c.keyframes ?? E.Keyframes(); k.volume = left.isEmpty ? nil : left; c.keyframes = k.isEmpty ? nil : k
+                it = .audio(c)
+            default: break
+            }
+        }
+    }
+}

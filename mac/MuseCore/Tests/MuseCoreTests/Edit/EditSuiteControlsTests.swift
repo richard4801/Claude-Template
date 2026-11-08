@@ -466,3 +466,29 @@ extension EditSuiteControlsTests {
         XCTAssertEqual(s.project, before)
     }
 }
+
+extension EditSuiteControlsTests {
+    func testVolumeKeyframesShapeTheEnvelope() {
+        var s = EditSuiteState(EditV2.fromV1(EditList(sourceTakeId: "tk", sourceDurationSec: 10), EditV2.SourceFacts(width: 1080, height: 1920, fps: 30, hasAudio: true)))
+        s.playhead = 2
+        XCTAssertTrue(s.addVolumeKey())
+        XCTAssertTrue(s.hasVolumeKeyHere)
+        s.playhead = 6
+        XCTAssertTrue(s.setVolumeValue(0.25), "with keys, the slider sets a key at the playhead")
+        XCTAssertEqual(s.selectedVideo?.keyframes?.volume?.map(\.t), [2, 6])
+        XCTAssertNil(s.selectedVideo?.volume, "the clip's own volume is untouched")
+        s.playhead = 4
+        XCTAssertEqual(s.volumeAtPlayhead ?? 0, 0.625, accuracy: 1e-6, "linear between 1 and 0.25")
+        let env = EditV2.audioEnvelope(s.project, trackId: s.project.mainTrack!.id, itemId: s.project.mainClips[0].id)
+        XCTAssertLessThan(env.last?.gain ?? 1, 0.3, "the sound ends at the last key's level")
+        XCTAssertNil(EditV2.problem(s.project))
+        s.playhead = 6
+        XCTAssertTrue(s.removeVolumeKey())
+        s.playhead = 2
+        XCTAssertTrue(s.removeVolumeKey())
+        XCTAssertNil(s.selectedVideo?.keyframes)
+        XCTAssertNil(s.selectedVideo?.volume, "the last key was at 1×")
+        XCTAssertTrue(s.undo()); XCTAssertTrue(s.undo())
+        XCTAssertEqual(s.selectedVideo?.keyframes?.volume?.count, 2)
+    }
+}
