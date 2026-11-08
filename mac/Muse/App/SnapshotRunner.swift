@@ -537,7 +537,7 @@ enum SnapshotRunner {
                 lines.append("\(lead != nil && store.recreateModelId == lead?.id ? "FITS" : "CUT") recreate_cast 1280x800 c lead \(lead?.name ?? "none") prices the shots")
                 store.recreate.castOpen = true
                 try? await Task.sleep(for: .seconds(0.8))
-                onScreen("cast", "recreate_cast 1280x800 c")
+                onScreen("castDone", "recreate_cast 1280x800 c")
                 check("cast", theme, beside: true)
                 capture(dir.appendingPathComponent("mac_c_recreate_cast.png"))
                 store.recreate.castOpen = false

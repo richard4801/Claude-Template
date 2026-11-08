@@ -24,7 +24,7 @@ struct RecreateCastRow: View {
                 if rs.castOpen {
                     SuiteToolButton(title: "Done", plain: true) { rs.castOpen = false }
                         .accessibilityLabel("Done choosing the lead")
-                        .background(SnapshotFrame(key: "cast"))
+                        .background(SnapshotFrame(key: "castDone"))
                 }
             }
             // Chosen: one row. Choosing: only the list (the lead marked), never both.
@@ -42,7 +42,7 @@ struct RecreateCastRow: View {
                     if !cast.isEmpty {
                         SuiteToolButton(title: "Change", plain: true) { rs.castOpen = true }
                             .accessibilityLabel("Change the lead")
-                            .background(SnapshotFrame(key: "cast"))
+                            .background(SnapshotFrame(key: "castChange"))
                     }
                 }
                 .accessibilityElement(children: .contain)
