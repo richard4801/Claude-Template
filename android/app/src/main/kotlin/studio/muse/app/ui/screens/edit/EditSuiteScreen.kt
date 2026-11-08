@@ -119,7 +119,8 @@ fun EditSuiteScreen(takeId: String?, onBack: () -> Unit) {
     LaunchedEffect(sharedNow) { sharedNow?.let { shared = it; c.shared.value = null; open = null; learn = null; reference = null; recreating = true } }
     val id = open
     if (recreating) androidx.compose.runtime.key(shared) {
-        RecipeScreen(onBack = { recreating = false; reference = null; shared = null }, referenceId = reference, shared = shared)
+        RecipeScreen(onBack = { recreating = false; reference = null; shared = null }, referenceId = reference, shared = shared,
+            onOpenTake = { recreating = false; reference = null; shared = null; open = it })
     }
     else if (id == null && learn == "playbook") studio.muse.app.ui.screens.edit.learn.PlaybookScreen(onBack = { learn = null }, onOpenTake = { open = it })
     else if (id == null && learn == "recipes") studio.muse.app.ui.screens.edit.learn.RecipesScreen(

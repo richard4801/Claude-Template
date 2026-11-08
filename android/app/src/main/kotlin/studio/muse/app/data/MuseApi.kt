@@ -240,6 +240,20 @@ interface MuseApi {
         throw ApiException("not_found", "This studio server can't read links yet · save the video and share the file")
     /** The reference's state and step while it is analysed, and its recipe once ready. */
     suspend fun reference(id: String): studio.muse.core.edit.RecipeReference = throw ApiException("not_found", "Reference not found")
+    // Recreate phases 2–3 (plans/api.md "Recreate this edit · slots and assembly"): match (free), price (nothing held),
+    // fill (a paid Suite shot, only after the person confirmed its price), apply into an edit session.
+    /** Scores the studio's takes against each shot (free); the fill then says which shots are yours and which to make. */
+    suspend fun matchReference(id: String, modelId: String?): Unit = throw ApiException("not_found", "This studio server can't build recipes yet")
+    suspend fun referenceFill(id: String): studio.muse.core.edit.RecreateFill = throw ApiException("not_found", "This studio server can't build recipes yet")
+    /** A shot's price as a new shot. Nothing is held. */
+    suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String? = null): studio.muse.core.edit.RecreateSlotEstimate =
+        throw ApiException("not_found", "This studio server can't build recipes yet")
+    /** Makes a shot: an ordinary Suite job, held and charged. Only after the person confirmed the total. */
+    suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String? = null): studio.muse.core.edit.RecreateFillStart =
+        throw ApiException("not_found", "This studio server can't build recipes yet")
+    /** Builds the edit in an edit session: [slots] is slotId → takeId or jobId. */
+    suspend fun applyRecipe(id: String, sessionId: String, baseRevision: Int?, slots: Map<String, String>): studio.muse.core.edit.RecreateApplyResult =
+        throw ApiException("not_found", "This studio server can't build recipes yet")
 
     /** The studio's locations (`@location` in the composer's prompt). */
     suspend fun suiteLocations(): List<SuiteLocation> = throw ApiException("not_found", "This server doesn't have locations yet")
