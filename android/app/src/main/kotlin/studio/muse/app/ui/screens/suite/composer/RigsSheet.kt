@@ -75,7 +75,7 @@ internal fun ColumnScope.RigsBody(x: SheetContext) {
             T("Save this rig", m.scale.label, m.roles.ink)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(m.radii.control)).background(m.roles.field).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
-                    BasicTextField(name, { name = it.take(40) }, Modifier.fillMaxWidth().semantics { contentDescription = "Rig name" }, singleLine = true,
+                    BasicTextField(name, { name = it.take(40) }, Modifier.fillMaxWidth().semantics { contentDescription = "Name this rig" }, singleLine = true,
                         textStyle = m.scale.body.copy(color = m.roles.ink), cursorBrush = SolidColor(m.roles.accent),
                         decorationBox = { inner -> Box { if (name.isEmpty()) T("Golden hour handheld", m.scale.body, m.roles.ink2, maxLines = 1); inner() } })
                 }

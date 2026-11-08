@@ -76,6 +76,8 @@ data class RecreateBuildUi(
     val buildWhenReady: Boolean = false,
     /** The confirmation is open, covering these shots (priced, to generate), frozen when it opened. */
     val confirmSlots: List<String>? = null,
+    /** "Pick which shots to make": shots unticked in the confirmation (they stay to generate). */
+    val confirmSkip: Set<String> = emptySet(),
     val match: RecreateMatch? = null,
     /** The take the built edit lives on (Open in the editor). */
     val builtTakeId: String? = null,
@@ -125,9 +127,11 @@ data class RecreateBuildUi(
     /** The shots to generate, not yet started. */
     val toGenerate: List<String> get() = fill?.slots.orEmpty().filter { it.state == "to_generate" && it.slotId !in starting }.map { it.slotId }
     val prices: Map<String, Double> get() = estimates.filterValues { it.ok }.mapValues { it.value.amount }
-    val confirmTotal: Double get() = confirmSlots.orEmpty().mapNotNull { estimates[it]?.amount }.sum()
+    /** The shots ticked in the Build confirmation (all by default; at least one stays ticked). */
+    val confirmChosen: List<String> get() = confirmSlots.orEmpty().filter { it !in confirmSkip }
+    val confirmTotal: Double get() = confirmChosen.mapNotNull { estimates[it]?.amount }.sum()
     /** "1 from your takes, 2 to generate · $1.28 in all", beside Build. */
-    val summary: String? get() = fill?.let { RecreateText.makingSummary(it, prices, estimateErrors.keys, starting) }
+    val summary: String? get() = fill?.let { RecreateText.makingSummary(it, prices, estimateErrors.keys, starting, estimates.mapValues { e -> e.value.method } + methods) }
     /** Under the total: the approval promise, or what happens while new shots generate. */
     val note: String get() = when {
         !isGenerating -> RecreateText.APPROVE_NOTE
@@ -377,10 +381,18 @@ class RecreateBuildModel(
         }
         _ui.update { it.copy(estimating = true) }
         price()
-        _ui.update { v -> v.copy(estimating = false, confirmSlots = v.toGenerate.filter { v.estimates[it]?.ok == true && v.estimateErrors[it] == null }) }
+        _ui.update { v -> v.copy(estimating = false, confirmSkip = emptySet(), confirmSlots = v.toGenerate.filter { v.estimates[it]?.ok == true && v.estimateErrors[it] == null }) }
     }
 
-    fun cancelBuild() = _ui.update { it.copy(confirmSlots = null) }
+    fun cancelBuild() = _ui.update { it.copy(confirmSlots = null, confirmSkip = emptySet()) }
+
+    /** Ticks or unticks a shot in the Build confirmation; the last ticked shot can't be unticked. */
+    fun toggleConfirmShot(slotId: String) = _ui.update { u ->
+        if (u.confirmSlots?.contains(slotId) != true) u
+        else if (slotId in u.confirmSkip) u.copy(confirmSkip = u.confirmSkip - slotId)
+        else if (u.confirmChosen.size <= 1) u
+        else u.copy(confirmSkip = u.confirmSkip + slotId)
+    }
 
     /**
      * The yes to the total: each confirmed shot is made (one at a time; the server holds and charges it), then, once all
@@ -388,11 +400,12 @@ class RecreateBuildModel(
      * never filled again.
      */
     fun confirmBuild(): Job = scope.launch {
-        val confirmed = _ui.value.confirmSlots ?: return@launch
+        if (_ui.value.confirmSlots == null) return@launch
+        val confirmed = _ui.value.confirmChosen // unticked shots stay to generate
         val model = modelId()
         // Shots made anew after a build go into that edit in place when they're ready.
         _ui.update { u -> u.copy(fixing = if (u.builtSessionId != null) confirmed.filter { it in u.remake }.toSet() else emptySet()) }
-        _ui.update { it.copy(confirmSlots = null, building = true, buildWhenReady = true, starting = if (model != null) it.starting + confirmed else it.starting) }
+        _ui.update { it.copy(confirmSlots = null, confirmSkip = emptySet(), building = true, buildWhenReady = true, starting = if (model != null) it.starting + confirmed else it.starting) }
         if (confirmed.isEmpty() || model == null) {
             if (_ui.value.isGenerating) startWatch() else { _ui.update { it.copy(building = false) }; apply() }
             return@launch
