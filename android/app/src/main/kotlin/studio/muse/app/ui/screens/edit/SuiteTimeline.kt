@@ -38,6 +38,8 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -120,13 +122,20 @@ fun SuiteTimeline(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap>>, act: 
     if (headers) {
         val h = (lanes.lastOrNull()?.let { it.top + it.height } ?: 100f) + 8f
         Row(modifier.fillMaxWidth().height(h.dp.coerceAtMost(300.dp)).background(m.t.bg)) {
-            Box(Modifier.width(160.dp).fillMaxHeight()) {
+            Box(Modifier.width(196.dp).fillMaxHeight()) {
                 for (lane in lanes) {
                     val t = lane.track ?: continue
                     Row(Modifier.offset(y = lane.top.dp).height(lane.height.dp).fillMaxWidth().padding(start = 16.dp, end = 8.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         EIc(trackIcon(t), 16.dp, m.t.muted)
-                        studio.muse.app.ui.components.T(trackName(t), m.scale.caption, m.t.ink, maxLines = 1)
+                        studio.muse.app.ui.components.T(trackName(t), m.scale.caption, m.t.ink, Modifier.weight(1f), maxLines = 1)
+                        // Mute a track with sound, hide a track with pictures (one undo step each, as on the Mac).
+                        val name = trackName(t).lowercase()
+                        if (t.kind.isAudio || t.kind == studio.muse.core.edit.TrackKind.MAIN) HeaderToggle(if (t.muted == true) "speaker-slash" else "speaker-high",
+                            if (t.muted == true) "Unmute $name" else "Mute $name", t.muted == true) { act(EditAction.ToggleTrackMuted(t.id)) }
+                        if (!t.kind.isAudio) HeaderToggle(if (t.hidden == true) "eye-slash" else "eye", if (t.hidden == true) "Show $name" else "Hide $name", t.hidden == true) {
+                            act(EditAction.ToggleTrackHidden(t.id))
+                        }
                     }
                 }
             }
@@ -320,3 +329,10 @@ private fun DrawScope.waveform(l: Float, r: Float, top: Float, h: Float, color: 
     }
 }
 
+/** A track header's small toggle (mute, hide): 32 dp, tinted when on. */
+@Composable
+private fun HeaderToggle(icon: String, label: String, on: Boolean, onClick: () -> Unit) {
+    val m = muse
+    Box(Modifier.size(32.dp).press(onClick = onClick).semantics { contentDescription = label; role = androidx.compose.ui.semantics.Role.Switch; stateDescription = if (on) "On" else "Off" },
+        contentAlignment = Alignment.Center) { EIc(icon, 16.dp, if (on) m.t.accent else m.t.muted) }
+}

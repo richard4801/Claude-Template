@@ -79,6 +79,15 @@ class EditSuiteControllerTest {
         assertEquals(null, c.p().mainClips.first().alphaMatte)
     }
 
+    @Test fun trackHeadersMuteAndHideAsOneUndoEach() = runTest {
+        val c = controller(StubBackend())
+        val main = c.p().main.id
+        c.act(EditAction.ToggleTrackMuted(main)); assertEquals(true, c.p().main.muted)
+        c.act(EditAction.ToggleTrackHidden(main)); assertEquals(true, c.p().main.hidden)
+        c.act(EditAction.Undo); assertEquals(null, c.p().main.hidden)
+        c.act(EditAction.Undo); assertEquals(null, c.p().main.muted)
+    }
+
     @Test fun aClipAlreadyCutOutCanBeTurnedOffEvenWhileComingSoon() = runTest {
         val c = controller(StubBackend())
         c.act(EditAction.RemoveBackground); advanceUntilIdle()

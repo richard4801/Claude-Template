@@ -149,6 +149,9 @@ sealed interface EditAction {
     data class WordHighlight(val on: Boolean) : EditAction
     data class DeleteWord(val index: Int) : EditAction
     data object CutSilences : EditAction
+    /** Tablet track headers (plans/edit-layout.md): a track's sound on / off, and a picture track shown / hidden. */
+    data class ToggleTrackMuted(val trackId: String) : EditAction
+    data class ToggleTrackHidden(val trackId: String) : EditAction
     data object RemoveFillers : EditAction
     // Looks & adjust
     data class FiltersTab(val tab: String) : EditAction
@@ -286,6 +289,7 @@ class EditSuiteController(
         is EditAction.CaptionStyleOf, is EditAction.CaptionFont, is EditAction.CaptionColors, is EditAction.CaptionY,
         is EditAction.CaptionWordsPerPage, is EditAction.WordHighlight -> "Caption style"
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
+        is EditAction.ToggleTrackMuted -> "Mute track"; is EditAction.ToggleTrackHidden -> "Hide track"
         is EditAction.PickLook, is EditAction.LookStrength, EditAction.LookToAll, is EditAction.ImportedCube -> "Look"
         is EditAction.AdjustField -> "Adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
         else -> null
@@ -458,6 +462,8 @@ class EditSuiteController(
             }
             is EditAction.DeleteWord -> deleteWord(a.index)
             EditAction.CutSilences -> cutSilences()
+            is EditAction.ToggleTrackMuted -> change { pp -> pp.copy(tracks = pp.tracks.map { t -> if (t.id == a.trackId) t.copy(muted = if (t.muted == true) null else true) else t }) }
+            is EditAction.ToggleTrackHidden -> change { pp -> pp.copy(tracks = pp.tracks.map { t -> if (t.id == a.trackId) t.copy(hidden = if (t.hidden == true) null else true) else t }) }
             EditAction.RemoveFillers -> removeFillers()
 
             is EditAction.FiltersTab -> _ui.update { it.copy(filtersTab = a.tab) }
