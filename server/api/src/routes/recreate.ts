@@ -24,6 +24,11 @@ export async function registerRecreateRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post('/v1/recreate/references/:id/match', async req => rx.match(req.user, id(req), req.body));
   app.post('/v1/recreate/references/:id/slots/:slotId/estimate', async req => rx.estimateSlot(req.user, id(req), slot(req), req.body));
   app.post('/v1/recreate/references/:id/slots/:slotId/fill', async req => rx.fillSlot(req.user, id(req), slot(req), req.body));
+  // "Fix this shot": one slot's clip swapped in place (plan §4).
+  app.post('/v1/recreate/references/:id/slots/:slotId/replace', async req => {
+    const { device, ...body } = (req.body ?? {}) as { device?: string };
+    return rx.replaceSlot(req.user, id(req), slot(req), body, { by: 'app', device });
+  });
   app.post('/v1/recreate/references/:id/apply', async req => {
     const { device, ...body } = (req.body ?? {}) as { device?: string };
     return rx.apply(req.user, id(req), body, { by: 'app', device });

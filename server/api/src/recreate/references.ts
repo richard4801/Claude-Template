@@ -14,10 +14,10 @@ import { uid } from '../lib/util.js';
 import { probe } from '../replicate/media.js';
 import { takes as takesTable, jobs } from '../db/schema.js';
 import { editSessionsOf } from '../editor/sessions.js';
-import { timeline } from '../editor/model.js';
+import { clipLength, timeline } from '../editor/model.js';
 import { findPeaks, measureMotion } from '../editor/motion.js';
 import { analyzeReference, type Recipe } from './analyze.js';
-import { buildProject, type AssembleOptions, type TakeInfo } from './assemble.js';
+import { buildProject, peakInPoint, rangeFor, type AssembleOptions, type TakeInfo } from './assemble.js';
 import { BriefSchema, matchSlots, promptSource, shotRequestFor, withBriefs, type Candidate } from './slots.js';
 import { learningOf } from '../editor/learn.js';
 import { pinnedDirectives, provenStart } from './playbook.js';
@@ -416,6 +416,56 @@ export class RecreateReferences {
     this.peakCache.set(k, out);
     if (this.peakCache.size > 500) this.peakCache.delete(this.peakCache.keys().next().value!);
     return out;
+  }
+
+  /**
+   * "Fix this shot" (plan §4): one slot's clip in the built edit gets another take (or a finished fill job), in place,
+   * as one undoable change. Its place and length on the timeline, transition, ramp, camera keys and look stay; the new
+   * take starts where its action peak lines up. Later hand edits elsewhere are kept.
+   */
+  async replaceSlot(u: AuthUser, id: string, slotId: string, body: unknown, o: { by: 'claude' | 'app'; device?: string } = { by: 'app' }) {
+    const b = parse(z.object({ sessionId: z.string().min(1), take: z.string().min(1).max(80), baseRevision: z.number().int().min(0).optional() }).strict(), body);
+    const { r, recipe } = await this.ready(u, id);
+    const slot = recipe.slots.find(x => x.id === slotId);
+    if (!slot) throw notFound('Slot');
+    const svc = editSessionsOf(this.ctx);
+    const s = await svc.row(u, b.sessionId);
+    const applied = r.fill?.applied;
+    if (!applied || applied.sessionId !== s.id) throw new ApiError(409, 'not_built_here', 'Build the edit from this reference in this session first');
+    const itemId = Object.entries(applied.sources ?? {}).find(([, src]) => src.slotId === slotId)?.[0];
+    const p = structuredClone(s.project) as unknown as EditProject;
+    const ti = p.tracks.findIndex(t => t.kind === 'main'), ii = ti < 0 ? -1 : p.tracks[ti]!.items.findIndex(x => (x as { id: string }).id === itemId);
+    if (!itemId || ii < 0) throw new ApiError(409, 'slot_not_in_edit', `Shot ${slotId} isn’t in the edit any more · rebuild the edit to put it back`);
+    // The take: a take id, or a finished job's first take.
+    let t = (await this.ctx.db.select().from(takesTable).where(and(eq(takesTable.id, b.take), eq(takesTable.studioId, u.studioId), eq(takesTable.kind, 'take'))))[0];
+    if (!t) {
+      const [job] = await this.ctx.db.select({ id: jobs.id, state: jobs.state }).from(jobs).where(and(eq(jobs.id, b.take), eq(jobs.studioId, u.studioId)));
+      if (job && job.state !== 'done') throw new ApiError(409, 'job_not_done', 'That shot is still being made · try again when it’s done');
+      if (job) t = (await this.ctx.db.select().from(takesTable).where(and(eq(takesTable.jobId, job.id), eq(takesTable.studioId, u.studioId)))).sort((x, y) => x.index - y.index)[0];
+    }
+    if (!t) throw badRequest(`take: no video take or job ${b.take}`);
+    if (!t.mediaKey) throw badRequest('take: it has no video yet');
+    const info: TakeInfo = { id: t.id, durationSec: Number(t.media?.durationSec) || 1, width: Number(t.media?.width) || 1080, height: Number(t.media?.height) || 1920, hasAudio: true,
+      peaks: await this.takePeaks(t.id, t.mediaKey).catch(() => []) };
+    const old = p.tracks[ti]!.items[ii] as import('../editor/model.js').VideoClip;
+    let asset = p.assets.find(a => a.take === t!.id);
+    if (!asset) { asset = { id: `a${p.assets.length + 1}`, kind: 'video', take: t.id, durationSec: info.durationSec, width: info.width, height: info.height, hasAudio: true }; p.assets.push(asset); }
+    // The same length on the timeline, from the new take (slower if it is too short), starting at its action peak.
+    const len = clipLength(old);
+    const range = rangeFor(0, len, info.durationSec, old.speedCurve);
+    const off = old.transitionIn ? old.transitionIn.durationSec / 2 : 0;
+    const inSec = peakInPoint(slot, info, range, off);
+    const next: import('../editor/model.js').VideoClip = { ...old, asset: asset.id, inSec, outSec: Math.round((inSec + range.outSec) * 10000) / 10000, speed: range.speed };
+    if (range.curve) next.speedCurve = range.curve; else delete next.speedCurve;
+    delete next.audioAsset; delete next.alphaMatte; delete next.chroma;
+    p.tracks[ti]!.items[ii] = next;
+    const label = `Replaced shot ${slotId} in “${r.name}”`, sources = { [old.id]: { recipeId: r.id, slotId } };
+    const res = o.by === 'claude'
+      ? await svc.applyClaude(u, s.id, { baseRevision: b.baseRevision ?? s.revision, ops: [{ op: 'patch', patch: [{ op: 'replace', path: '/assets', value: p.assets }, { op: 'replace', path: `/tracks/${ti}/items/${ii}`, value: next }] }], label, meta: { sources } })
+      : await svc.reset(u, s.id, { baseRevision: b.baseRevision ?? s.revision, project: p, device: o.device, label }, { meta: { sources } });
+    const fresh = await this.row(u, id);
+    if (fresh.fill?.applied) await this.saveFill(fresh, { ...fresh.fill, applied: { ...fresh.fill.applied, revision: res.revision, slots: { ...fresh.fill.applied.slots, [slotId]: t.id } } });
+    return { sessionId: s.id, revision: res.revision, slotId, itemId: old.id, takeId: t.id, inSec, label, ...(range.speed < 1 ? { note: `The take is shorter than the shot, so it plays at ${Math.round(range.speed * 100)}%` } : {}) };
   }
 
   /** The proven recipe to start from: the one asked for (it must be in the library), else the nearest that fits. */

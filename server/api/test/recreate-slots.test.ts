@@ -310,6 +310,38 @@ describe.skipIf(!hasFfmpeg)('Recreate · the flow through the API and Claude\'s 
     expect((await member.req('POST', `/v1/recreate/references/${refId}/match`, {})).status).toBe(404); // the owner's reference
   }, 60_000);
 
+  it('fix one shot in place: another take for s1, the timeline and the owner\'s other edits kept, one undoable change', async () => {
+    const row = () => editSessionsOf(a.ctx).row(ownerUser, sessionId);
+    let p = (await row()).project as M.EditProject;
+    const before = M.timeline(p);
+    // The owner turns c2 (shot s3) down by hand first.
+    const s0 = await row();
+    const vol = await owner.req('POST', `/v1/edit-sessions/${sessionId}/patch`, { baseRevision: s0.revision, device: 'mac', patch: [{ op: 'add', path: '/tracks/0/items/1/volume', value: 0.3 }] });
+    expect(vol.status).toBe(200);
+    const r = await owner.req('POST', `/v1/recreate/references/${refId}/slots/s1/replace`, { sessionId, take: 't_static', device: 'mac' });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body).toMatchObject({ slotId: 's1', itemId: 'c1', takeId: 't_static', label: 'Replaced shot s1 in “Tuff edit”' });
+    p = (await row()).project as M.EditProject;
+    const c1 = M.mainTrack(p).items[0] as M.VideoClip, c2 = M.mainTrack(p).items[1] as M.VideoClip;
+    expect(p.assets.find(x => x.id === c1.asset)!.take).toBe('t_static');
+    expect(c2.volume).toBe(0.3); // the hand edit stays
+    M.timeline(p).forEach((x, i) => expect(x.startSec).toBeCloseTo(before[i]!.startSec, 4)); // nothing moves
+    expect((await owner.req('GET', `/v1/recreate/references/${refId}/fill`)).body.applied.slots.s1).toBe('t_static');
+    // One undoable change.
+    const hist = (await owner.req('GET', `/v1/edit-sessions/${sessionId}/history`)).body;
+    expect(hist[0]).toMatchObject({ label: 'Replaced shot s1 in “Tuff edit”' });
+    // Checks: a shot that isn't in this build, another session, an unknown take or shot.
+    expect((await owner.req('POST', `/v1/recreate/references/${refId}/slots/s2/replace`, { sessionId, take: 't_pan' })).body.code).toBe('slot_not_in_edit');
+    const other = (await owner.req('POST', '/v1/edit-sessions', { takeId: 't_pan' })).body.id;
+    expect((await owner.req('POST', `/v1/recreate/references/${refId}/slots/s1/replace`, { sessionId: other, take: 't_pan' })).body.code).toBe('not_built_here');
+    expect((await owner.req('POST', `/v1/recreate/references/${refId}/slots/s1/replace`, { sessionId, take: 'nope' })).status).toBe(400);
+    expect((await owner.req('POST', `/v1/recreate/references/${refId}/slots/s9/replace`, { sessionId, take: 't_pan' })).status).toBe(404);
+    // Claude's tool does the same, as Claude's change.
+    const back = await tool('replace_slot').run(env(), { referenceId: refId, slotId: 's1', sessionId, take: 't_pan' }) as any;
+    expect(back).toMatchObject({ takeId: 't_pan' });
+    expect((await owner.req('GET', `/v1/edit-sessions/${sessionId}/history`)).body[0]).toMatchObject({ byClaude: true });
+  });
+
   it('pinned rules change Claude\'s plan: cuts only and a still camera; the owner\'s own options in the app win; gaps reported once', async () => {
     const pinRule = async (text: string) => (await owner.req('POST', '/v1/learn/playbook', { text, pinned: true })).body.id;
     const slots = { s1: 't_pan', s3: 't_static' };

@@ -40,7 +40,7 @@ export function editorTransition(t: RecipeTransition | undefined): M.Transition 
 }
 
 /** The source range that plays for exactly `len` seconds with this speed curve (binary search on the source length). */
-function rangeFor(inSec: number, len: number, available: number, curve?: M.SpeedCurve): { outSec: number; speed: number; curve?: M.SpeedCurve } {
+export function rangeFor(inSec: number, len: number, available: number, curve?: M.SpeedCurve): { outSec: number; speed: number; curve?: M.SpeedCurve } {
   if (!curve) {
     if (available - inSec >= len) return { outSec: r4(inSec + len), speed: 1 };
     // A take shorter than its slot plays slower to fill it.
