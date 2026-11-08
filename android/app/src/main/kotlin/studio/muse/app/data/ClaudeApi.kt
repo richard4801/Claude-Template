@@ -195,8 +195,8 @@ class HttpClaudeApi(baseUrl: String, private val client: OkHttpClient, private v
 
     private fun errorOf(code: Int, text: String?): ApiException {
         val err = runCatching { json.decodeFromString(RefusalBody.serializer(), text ?: "") }.getOrNull()
-        val c = err?.code ?: when (code) { 401 -> "unauthorized"; 429 -> "rate_limited"; else -> "http_$code" }
-        return ApiException(c, err?.error?.takeIf { it.isNotBlank() } ?: "Server error $code")
+        val c = err?.code ?: ErrorText.codeOf(code)
+        return ApiException(c, err?.error?.takeIf { it.isNotBlank() } ?: ErrorText.http(code))
     }
 
     private fun <T> decode(out: KSerializer<T>, text: String): T = try { json.decodeFromString(out, text) } catch (e: kotlinx.serialization.SerializationException) {

@@ -22,17 +22,44 @@ const FRAME_W = 256;
 export type SlotPose = { status: 'done'; frameSec: number; keypoints: Keypoint[] } | { status: 'none'; frameSec: number };
 export type PoseRun = { poses: SlotPose[]; peakRssMb: number; ms: number } | { skipped: 'memory' | 'model' | 'failed'; detail?: string; peakRssMb?: number };
 
-/** Free memory in MB: the cgroup's limit minus its use when there is one (containers), else the machine's. */
+/**
+ * Free memory in MB: the cgroup's limit minus its use when there is one (containers), else the machine's. The use
+ * leaves out inactive page cache (the video file just read), which the kernel gives back before it kills anything.
+ * Tests (and a box without a cgroup limit) can cap it with MUSE_MEMORY_LIMIT_MB: limit minus this process tree's RSS.
+ */
 export function freeMemoryMb(): number {
+  const cap = Number(process.env.MUSE_MEMORY_LIMIT_MB);
+  if (cap > 0) return Math.round(cap - treeRssMb(process.pid));
   try {
     const max = fs.readFileSync('/sys/fs/cgroup/memory.max', 'utf8').trim();
     if (max !== 'max') {
       const cur = Number(fs.readFileSync('/sys/fs/cgroup/memory.current', 'utf8').trim());
+      let cache = 0;
+      try { cache = Number(/^inactive_file (\d+)$/m.exec(fs.readFileSync('/sys/fs/cgroup/memory.stat', 'utf8'))?.[1] ?? 0); } catch { /* no stat */ }
       const n = Number(max);
-      if (Number.isFinite(n) && Number.isFinite(cur)) return Math.round((n - cur) / 1048576);
+      if (Number.isFinite(n) && Number.isFinite(cur)) return Math.round((n - cur + cache) / 1048576);
     }
   } catch { /* not a cgroup v2 container */ }
   return Math.round(os.freemem() / 1048576);
+}
+
+/** RSS in MB of a process and all its descendants (Linux /proc; 0 elsewhere). */
+export function treeRssMb(root: number): number {
+  try {
+    const kids = new Map<number, number[]>();
+    for (const d of fs.readdirSync('/proc')) {
+      if (!/^\d+$/.test(d)) continue;
+      try { const st = fs.readFileSync(`/proc/${d}/stat`, 'utf8'); const ppid = Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]); (kids.get(ppid) ?? kids.set(ppid, []).get(ppid)!).push(Number(d)); } catch { /* gone */ }
+    }
+    let kb = 0;
+    const stack = [root];
+    while (stack.length) {
+      const p = stack.pop()!;
+      try { kb += Number(/^VmRSS:\s+(\d+)/m.exec(fs.readFileSync(`/proc/${p}/status`, 'utf8'))?.[1] ?? 0); } catch { /* gone */ }
+      stack.push(...(kids.get(p) ?? []));
+    }
+    return Math.round(kb / 1024);
+  } catch { return 0; }
 }
 
 /** No person: the mean keypoint score is under this. */
