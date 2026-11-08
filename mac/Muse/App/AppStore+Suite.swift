@@ -484,6 +484,18 @@ extension AppStore {
         suite.composer = suite.composer.applying(preset: p, suite.camera)
     }
 
+    /// Backspace cleared the prompt (owner decision 2026-11-08): the selected preset is unselected and the composer is back
+    /// to normal (Shot lets go of `collapsed` and the preset's rows; Photo of its preset).
+    func unselectPresetOnEmptyPrompt() {
+        guard suite.composer.tokens.isEmpty else { return }
+        if suite.composer.tool == .photo {
+            suite.photo.presetId = nil
+        } else {
+            let d = suite.composer.unselectingPreset()
+            if d != suite.composer { suite.composer = d }
+        }
+    }
+
     // MARK: The picker shell
 
     func openPicker(_ p: ComposerPicker, step: String? = nil, target: PickerTarget = .composer) {

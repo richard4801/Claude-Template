@@ -78,6 +78,20 @@ enum SnapshotRunner {
                 ("composer", { store.openTool(.shot); fillDemoDraft(store) }),
                 ("composer_photo", { store.openPhoto(model: SampleData.demo) }),
                 ("camera_setup", { store.openTool(.shot); fillDemoDraft(store); store.openPicker(.camera, step: "setup") }),
+                // Owner decision 2026-11-08: the title's mode menu (after) and the big browser it replaced (before); a preset
+                // picked, then the prompt backspaced to empty (the preset lets go, the composer is the normal one again).
+                ("composer_menu", { store.openTool(.shot); fillDemoDraft(store); store.suite.browserOpen = true }),
+                ("composer_tools_before", { store.openTool(.shot); fillDemoDraft(store); state.overlay = "tools_before" }),
+                ("composer_preset", { store.openTool(.shot); fillDemoDraft(store)
+                    if let p = store.suite.camera.presets.first { store.applyPreset(p) } }),
+                ("composer_preset_cleared", { store.openTool(.shot); fillDemoDraft(store)
+                    if let p = store.suite.camera.presets.first { store.applyPreset(p) }
+                    store.suite.composer.tokens = PromptTokens(); store.unselectPresetOnEmptyPrompt() }),
+                ("composer_photo_preset", { store.openPhoto(model: SampleData.demo)
+                    if let tpl = store.templates.first { store.choosePhotoPreset(tpl) } }),
+                ("composer_photo_preset_cleared", { store.openPhoto(model: SampleData.demo)
+                    if let tpl = store.templates.first { store.choosePhotoPreset(tpl) }
+                    store.suite.composer.tokens = PromptTokens(); store.unselectPresetOnEmptyPrompt() }),
             ]
             /// Also shot at 1000 × 800.
             let narrow: Set<String> = ["composer", "composer_photo", "camera_setup"]
