@@ -55,7 +55,8 @@ class FakeClaudeApi(
     override suspend fun setApiFallback(on: Boolean): ClaudePlanStatus { fallback = fallback.copy(enabled = on); pushStatus(); return statusNow() }
 
     override suspend fun thread(contextKind: String, contextId: String): ClaudeThread = lock.withLock {
-        if (contextKind != "camera" && contextKind != "edit") throw ApiException("bad_request", "contextKind: camera or edit")
+        // WS4: "recreate" (WS1 d7233b8): Claude on a Recreate reference, as on the server.
+        if (contextKind != "camera" && contextKind != "edit" && contextKind != "recreate") throw ApiException("bad_request", "contextKind: camera, edit or recreate")
         threads.firstOrNull { it.contextKind == contextKind && it.contextId == contextId } ?: run {
             val t = ClaudeThread(uid("ct_"), contextKind, contextId, null, now(), now())
             threads += t
@@ -144,7 +145,7 @@ class FakeClaudeApi(
         val th = t.threadId
         fun ev(e: ClaudeEvent) = live(ClaudeLive("event", threadId = th, turnId = t.id, event = e))
         val kind = lock.withLock { threads.firstOrNull { it.id == th }?.contextKind } ?: "camera"
-        val (first, tool, summary, last) = if (kind == "edit") REPLY_EDIT else REPLY_CAMERA
+        val (first, tool, summary, last) = when (kind) { "edit" -> REPLY_EDIT; "recreate" -> REPLY_RECREATE; else -> REPLY_CAMERA }
         for (w in first.split(" ")) { delay(stepDelayMs / 6); ev(ClaudeEvent("text", delta = "$w ")) }
         store(ClaudeMessage(uid("cmsg_"), th, "assistant", "mac", first, t.id, createdAt = now()))
         val toolId = uid("toolu_")
@@ -183,6 +184,11 @@ class FakeClaudeApi(
         private val REPLY_CAMERA = Reply(
             "Pushing in slower over the first 3 s and keeping both faces in frame.", "set_camera_path", "Saved camera path",
             "Saved. The push ends at 3.5 s, just as she turns to camera.",
+        )
+        /** WS4: Claude on a Recreate reference (demo): it reads the recipe and matches takes; it never spends. */
+        private val REPLY_RECREATE = Reply(
+            "Reading the recipe and your takes.", "match_slots", "Matched 3 of 7 shots to your takes",
+            "Three shots come from your takes; the other four would be made new, about \$0.64 each. Say the word and I'll price them for you to approve.",
         )
         private val REPLY_EDIT = Reply(
             "Trimming the pause before the hook.", "apply_edit_ops", "Trimmed 0:03–0:05",

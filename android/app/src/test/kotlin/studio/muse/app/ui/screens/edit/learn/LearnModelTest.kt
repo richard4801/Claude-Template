@@ -18,6 +18,22 @@ class LearnModelTest {
     private val toasts = mutableListOf<String>()
     private val opened = mutableListOf<String>()
 
+    @Test fun seeRuleOpensTheRuleAndEvidenceOpensItsEdit() = runBlocking {
+        val api = studio.muse.app.data.FakeMuseApi(kotlinx.coroutines.MainScope(), null, speed = 0.0, genDelayMs = 0)
+        val toasts = ArrayList<String>(); val opened = ArrayList<String>()
+        val m = PlaybookModel({ api }, { toasts += it }, { opened += it })
+        m.load()
+        val r = m.ui.rules!!.first()
+        m.act(PlaybookAction.SeeRule(r.id))
+        assertEquals(r.id, m.ui.editor?.id)
+        m.act(PlaybookAction.SeeRule("gone"))
+        assertEquals("That rule is gone", toasts.last())
+        m.act(PlaybookAction.Tab(PlaybookTab.HISTORY))
+        val c = m.ui.corrections?.firstOrNull { it.takeId != null } ?: return@runBlocking
+        m.act(PlaybookAction.OpenEvidence(studio.muse.app.data.LearnEvidence("correction", c.id.toString())))
+        assertEquals(c.takeId, opened.last())
+    }
+
     @Test fun `suggestion copy is plain`() {
         assertEquals("You changed Claude's look 4 times", LearnLesson("look", count = 4, undos = 1).sentence)
         assertEquals("You undid Claude's transitions 2 times", LearnLesson("transition", count = 2, undos = 2).sentence)

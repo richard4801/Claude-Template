@@ -273,6 +273,9 @@ private fun TimelineToolbar(ui: EditSuiteUi, act: (EditAction) -> Unit, labels: 
         Tool("redo", "Redo", false, ui.canRedo) { act(EditAction.Redo) }
         Divider()
         Toggle("Ripple", null, ui.ripple) { act(EditAction.Ripple(!ui.ripple)) }
+        // Cut silences (free): removes long pauses; the sheet (Captions) has the rest.
+        val cutting = ui.ai["silences"]?.running == true
+        Tool("waveform", if (cutting) "Cutting" else "Cut silences", labels, ok && !cutting) { act(EditAction.CutSilences) }
         Toggle("Snap to beat", "magnet", ui.snapToBeats) { act(EditAction.SnapToBeats(!ui.snapToBeats)) }
         Tool("plus", "Add", true, ui.project != null, lit = ui.panel == Panel.OVERLAY) { open(Panel.OVERLAY) }
         Spacer(Modifier.weight(1f))

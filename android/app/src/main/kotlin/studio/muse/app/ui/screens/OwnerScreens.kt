@@ -398,6 +398,7 @@ fun StudioSettingsScreen() {
                 val st = s.settings
                 if (st == null) repeat(3) { SkeletonLines(3) } else {
                     StudioForm(vm, st, s)
+                    EditorHelpersSection()
                     // Engines: the only place provider names, GPUs and start-up appear (owner only; plans/api.md "App clean-up" §5).
                     EnginesSection(vm, st, s)
                 }
@@ -478,6 +479,39 @@ private fun EnginesSection(vm: OwnerViewModel, st: StudioSettings, s: OwnerState
 
 fun engineStatusLabel(status: String) = when (status) {
     "ready" -> "Ready"; "no_key" -> "No key"; "simulated" -> "Simulated"; "out_of_credit" -> "Out of credit"; "no_gpu" -> "No GPU free"; else -> status
+}
+
+/**
+ * AI editing helpers (WS1 guardrails, plans/api.md "Editor v2"): the owner's switch for the paid helpers (captions,
+ * background removal, noise reduction) and their daily limit, with today's spend. Members never see this.
+ */
+@Composable
+private fun EditorHelpersSection() {
+    val c = LocalContainer.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var es by remember { mutableStateOf<studio.muse.app.data.EditorSettings?>(null) }
+    var note by remember { mutableStateOf<String?>(null) }
+    var limit by remember(es) { mutableStateOf(es?.let { Pricing.toFixed(it.cap, 2) } ?: "") }
+    LaunchedEffect(Unit) { runCatching { c.repo.api.editorSettings() }.onSuccess { es = it }.onFailure { note = it.message } }
+    fun patch(f: suspend studio.muse.app.data.MuseApi.() -> studio.muse.app.data.EditorSettings) {
+        scope.launch { val (r, err) = c.repo.attemptInline(f); if (r != null) { es = r; note = null } else note = err }
+    }
+    Column(Modifier.padding(top = MuseSpace.s4), verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+        Heading("AI editing helpers")
+        Caption("Captions, background removal and noise reduction are charged per use. Cuts and beats stay free.")
+        val e = es
+        if (e == null) { note?.let { Caption(it) } ?: SkeletonLines(2); return@Column }
+        RowItem("Paid helpers", if (e.on) "On for everyone in the studio" else "Off: the editor shows them as turned off", onClick = { patch { patchEditorSettings(paidHelpers = if (e.on) "off" else "on") } }) {
+            Toggle(e.on, { patch { patchEditorSettings(paidHelpers = if (e.on) "off" else "on") } })
+        }
+        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            CapInput("Daily limit ($)", limit, { limit = it }, Modifier.weight(1f))
+            SecondaryButton("Save limit", { limit.toDoubleOrNull()?.let { v -> patch { patchEditorSettings(cap = v) } } ?: run { note = "Enter the limit in dollars" } })
+        }
+        Caption("Today ${Pricing.money(e.todayUsd)} of ${Pricing.money(e.cap)}" + if (e.capPerDayUsd == null) " (the default)" else "")
+        if (e.capPerDayUsd != null) TextAction("Use the default limit", { patch { patchEditorSettings(resetCap = true) } })
+        note?.let { Caption(it) }
+    }
 }
 
 @Composable

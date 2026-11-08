@@ -206,6 +206,8 @@ public protocol MuseAPI: AnyObject, Sendable {
     // Edit/EditorAPI.swift; the fake in Edit/FakeMuseAPI+EditSuite.swift.
     /// POST /v1/editor/estimate
     func editorEstimate(_ req: EditorJobRequest) async throws -> EditorEstimate
+    /// GET /v1/editor/features (nil: not known, so everything is offered)
+    func editorFeatures() async throws -> EditorFeatures?
     /// POST /v1/editor/jobs
     func startEditorJob(_ req: EditorJobRequest) async throws -> EditorJob
     /// GET /v1/editor/jobs/{id}
@@ -342,3 +344,8 @@ public final class EventHub: @unchecked Sendable {
 
 func nowMs() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
 func shortId() -> String { String(UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: "").prefix(8)) }
+
+// Edit suite (workstream 3, 2026-11-08): a default for implementations that don't ask the server.
+public extension MuseAPI {
+    func editorFeatures() async throws -> EditorFeatures? { nil }
+}

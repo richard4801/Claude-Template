@@ -14,6 +14,7 @@ import { EDIT_TOOLS } from '../src/editor/mcpTools.js';
 import * as M from '../src/editor/model.js';
 import { applyOps, OP_NAMES, type EditOp } from '../src/editor/ops.js';
 import { editSessionsOf } from '../src/editor/sessions.js';
+import { repairSourceMatteVersions, stripSourceMattes } from '../src/editor/repair.js';
 import { makeApp, people, until, type Client } from './helpers.js';
 
 type A = Awaited<ReturnType<typeof makeApp>>;
@@ -50,9 +51,9 @@ describe('edit ops', () => {
     keyframe: [{ op: 'keyframe', itemId: 'p1', prop: 'opacity', t: 1, v: 0.5, ease: 'easeOut' }],
     remove_keyframe: [{ op: 'remove_keyframe', itemId: 'p1', prop: 'scale', t: 0.5 }],
     volume: [{ op: 'volume', itemId: 'c1', volume: 0.6, fadeInSec: 0.5 }],
-    duck: [{ op: 'add_music', asset: { library: 'music_x', durationSec: 30 }, startSec: 0 }, { op: 'duck', levelDb: -12, attackSec: 0.2, releaseSec: 0.6 }],
+    duck: [{ op: 'add_music', asset: { upload: 'up_music', durationSec: 30 }, startSec: 0 }, { op: 'duck', levelDb: -12, attackSec: 0.2, releaseSec: 0.6 }],
     voice: [{ op: 'voice', itemId: 'c1', effect: 'radio', enhance: true }],
-    add_music: [{ op: 'add_music', asset: { library: 'music_x', durationSec: 30 }, startSec: 1 }],
+    add_music: [{ op: 'add_music', asset: { upload: 'up_music', durationSec: 30 }, startSec: 1 }],
     ratio: [{ op: 'ratio', ratio: '1:1' }],
     patch: [{ op: 'patch', patch: [{ op: 'replace', path: '/canvas/background', value: '#111111' }] }],
   };
@@ -72,6 +73,8 @@ describe('edit ops', () => {
     expect(() => applyOps(base, [{ op: 'split', at: 0.01 }])).toThrow(/ops\.0\.split\.at/);
     expect(() => applyOps(base, [{ op: 'caption_style', preset: 'pop' }])).toThrow(/no captions yet/);
     expect(() => applyOps(base, [{ op: 'look', itemId: 'c1', look: 'nope' }])).toThrow(/look id from list_looks/);
+    // No music library yet (2026-11-08 audit): a library track would be silent in every app.
+    expect(() => applyOps(base, [{ op: 'add_music', asset: { library: 'music_x', durationSec: 30 } }])).toThrow(/no music library yet/);
   });
 });
 
@@ -255,5 +258,35 @@ describe('edit sessions API and Claude tools', () => {
     expect(h.some((e: any) => e.kind === 'tool' && /Opened the edit|Started Cut silences/.test(e.label))).toBe(true);
     expect(EDIT_TOOLS.every(t => t.scope === (t.readOnly ? 'edit:read' : 'edit:write'))).toBe(true);
     expect(EDIT_TOOLS.map(t => t.name)).not.toContain('delete_take');
+  });
+  it('one-off repair (2026-11-08): cut-outs whose matte is the source itself are removed, once; real mattes stay', async () => {
+    const svc = editSessionsOf(a.ctx);
+    const s = (await owner.req('POST', '/v1/edit-sessions', { takeId })).body;
+    const src = (s.project as M.EditProject).assets.find(x => x.take === takeId)!;
+    const next = structuredClone(s.project) as M.EditProject;
+    next.assets.push({ id: 'bg_src', kind: 'video', take: takeId, durationSec: 6 } as M.Asset, { id: 'bg_real', kind: 'video', upload: 'up_real', durationSec: 6 } as M.Asset);
+    const clips = next.tracks[0]!.items as M.VideoClip[];
+    clips[0]!.alphaMatte = { asset: 'bg_src' };
+    expect(stripSourceMattes(next).removed).toBe(1);
+    const r = await owner.req('POST', `/v1/edit-sessions/${s.id}/patch`, { baseRevision: s.revision, patch: diff(s.project, next), label: 'Remove background' });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(await svc.repairSourceMattes()).toBe(1);
+    const after = (await svc.row(ownerUser, s.id)).project as M.EditProject;
+    expect((after.tracks[0]!.items[0] as M.VideoClip).alphaMatte).toBeUndefined();
+    expect(after.assets.some(x => x.id === src.id)).toBe(true);
+    const h = (await owner.req('GET', `/v1/edit-sessions/${s.id}/history`)).body as any[];
+    expect(h.some(e => e.label === 'Removed a broken cut-out')).toBe(true);
+    expect(await svc.repairSourceMattes()).toBe(0); // idempotent
+    // A real matte (its own upload) is left alone.
+    const real = structuredClone(after);
+    (real.tracks[0]!.items[0] as M.VideoClip).alphaMatte = { asset: 'bg_real' };
+    expect(stripSourceMattes(real).removed).toBe(0);
+    // Saved edited versions are repaired in place.
+    await a.ctx.db.insert(takes).values({ id: 'take_ver_matte', studioId, userId: null, kind: 'edit' as never, jobId: null, modelId: null, index: 1, of: 1, title: 'Matted', label: 'Edit',
+      engineLabel: '', cost: 0, seed: 0, status: 'final', thumb: null, prompt: '', mediaKey: null, media: { durationSec: 6, parentTakeId: takeId, edits: next } as never, createdAt: Date.now() });
+    expect(await repairSourceMatteVersions(a.ctx)).toBe(1);
+    const [v] = await a.ctx.db.select().from(takes).where(eq(takes.id, 'take_ver_matte'));
+    expect(((v!.media as any).edits.tracks[0].items[0] as M.VideoClip).alphaMatte).toBeUndefined();
+    expect(await repairSourceMatteVersions(a.ctx)).toBe(0);
   });
 });

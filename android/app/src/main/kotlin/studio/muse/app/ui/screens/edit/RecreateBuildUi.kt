@@ -41,6 +41,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -73,6 +74,23 @@ class RecreateActions(
     val onConfirm: () -> Unit = {},
     val onCancel: () -> Unit = {},
     val onUseTake: (String, RecreateTakeChoice) -> Unit = { _, _ -> },
+    val onRemake: (String) -> Unit = {},
+    val onCast: (String) -> Unit = {},
+    /** G8: "Write the shot briefs" (asks with its price), then the yes. */
+    val onBriefs: () -> Unit = {},
+    val onBriefsConfirm: () -> Unit = {},
+    val onBriefsCancel: () -> Unit = {},
+    /** G2: how a shot to make is made ("swap" | "generate"), and whether a swap keeps the reference's setting. */
+    val onMethod: (String, String) -> Unit = { _, _ -> },
+    val onKeepBackground: (String, Boolean) -> Unit = { _, _ -> },
+    /** "Use your own setting": a studio location for the shot, or null for the place in its brief. */
+    val onLocation: (String, String?) -> Unit = { _, _ -> },
+    val onExport: () -> Unit = {},
+    /** Owner only (null: no Claude button): Claude on this reference (the "recreate" context, WS1 d7233b8). */
+    val onClaude: (() -> Unit)? = null,
+    val onExportGuide: (Boolean) -> Unit = {},
+    val onExportRun: () -> Unit = {},
+    val onExportClose: () -> Unit = {},
     val onFix: () -> Unit = {},
     val onOpenEditor: () -> Unit = {},
     val onPlay: () -> Unit = {},
@@ -83,20 +101,31 @@ class RecreateActions(
  * What the players can play: [reference] is the reference video saved from its authenticated route (a local file), and
  * [takeVideo] a take's video link. Without them (demo mode, screenshots) the players show the poster or stand-in tones.
  */
-class RecreateMedia(val reference: String? = null, val takeVideo: (String) -> String? = { null })
+class RecreateMedia(
+    val reference: String? = null,
+    val takeVideo: (String) -> String? = { null },
+    /** The built edit, previewed on the device (Compare); without it, your edit plays each shot's take. */
+    val edit: androidx.media3.common.Player? = null,
+    /** "Preview of the cut" when the server's preview leaves part of the edit out (plans/api.md "The built edit, rendered"). */
+    val editLabel: String? = null,
+)
 
 private val LocalRecreateMedia = androidx.compose.runtime.staticCompositionLocalOf { RecreateMedia() }
+private val LocalRemake = androidx.compose.runtime.staticCompositionLocalOf<(String) -> Unit> { {} }
+private val LocalActions = androidx.compose.runtime.staticCompositionLocalOf { RecreateActions() }
 
 /** The whole screen as a function of [ui] (screenshots render it). [picture]: the reference's poster, when the server has it. */
 @Composable
 fun RecreateBuildScreen(ui: RecreateBuildUi, a: RecreateActions, picture: ImageBitmap? = null, picking: String? = null, media: RecreateMedia = RecreateMedia()) {
     var pick by remember(picking) { mutableStateOf(picking) }
-    androidx.compose.runtime.CompositionLocalProvider(LocalRecreateMedia provides media) { ScreenBox(statusPad = true) {
+    androidx.compose.runtime.CompositionLocalProvider(LocalRecreateMedia provides media, LocalRemake provides a.onRemake, LocalActions provides a) { ScreenBox(statusPad = true) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wide = maxWidth >= 720.dp
             val pickTake: (String) -> Unit = { pick = it }
             if (wide) TabletLayout(ui, a, picture, pickTake) else PhoneLayout(ui, a, picture, pickTake)
             ui.confirmSlots?.let { BuildConfirm(ui, it, a) }
+            ui.export?.let { ExportSheet(it, a) }
+            if (ui.askBriefs) ui.briefs?.let { b -> BriefsConfirm(b, a) }
             pick?.let { s -> TakePicker(ui.takes, onPick = { t -> a.onUseTake(s, t); pick = null }, onClose = { pick = null }) }
         }
     } }
@@ -108,7 +137,7 @@ fun RecreateBuildScreen(ui: RecreateBuildUi, a: RecreateActions, picture: ImageB
 private fun PhoneLayout(ui: RecreateBuildUi, a: RecreateActions, picture: ImageBitmap?, pickTake: (String) -> Unit) {
     val m = muse
     Column(Modifier.fillMaxSize()) {
-        Header(ui, a.onBack)
+        Header(ui, a.onBack, a.onClaude)
         LearnSegmented(listOf("Recipe", "Compare"), if (ui.mode == RecreateMode.Recipe) 0 else 1, Modifier.padding(horizontal = 16.dp).fillMaxWidth()) {
             a.onMode(if (it == 0) RecreateMode.Recipe else RecreateMode.Compare)
         }
@@ -117,6 +146,7 @@ private fun PhoneLayout(ui: RecreateBuildUi, a: RecreateActions, picture: ImageB
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
             if (ui.mode == RecreateMode.Recipe) {
+                Cast(ui, a.onCast)
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Player("Reference", ui, yours = false, picture, Modifier.fillMaxWidth(), height = 300.dp)
                     Transport(ui, a)
@@ -133,7 +163,10 @@ private fun PhoneLayout(ui: RecreateBuildUi, a: RecreateActions, picture: ImageB
                 }
                 Transport(ui, a)
                 ShotTiles(ui, scores = true, a.onSelect)
-                ui.weakest?.let { w -> LearnQuiet("Fix shot ${w + 1}", icon = "arrows-clockwise", onClick = a.onFix) }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ui.weakest?.let { w -> LearnQuiet("Fix shot ${w + 1}", icon = "arrows-clockwise", onClick = a.onFix) }
+                    LearnQuiet("Export", icon = "download-simple", onClick = a.onExport)
+                }
             }
         }
         LearnHairline()
@@ -149,7 +182,7 @@ private fun PhoneLayout(ui: RecreateBuildUi, a: RecreateActions, picture: ImageB
 }
 
 @Composable
-private fun Header(ui: RecreateBuildUi, onBack: () -> Unit) {
+private fun Header(ui: RecreateBuildUi, onBack: () -> Unit, onClaude: (() -> Unit)? = null) {
     val m = muse
     Row(Modifier.fillMaxWidth().height(56.dp).padding(end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(48.dp).press(onClick = onBack).semantics { contentDescription = "Back to references"; role = Role.Button }, contentAlignment = Alignment.Center) {
@@ -159,12 +192,14 @@ private fun Header(ui: RecreateBuildUi, onBack: () -> Unit) {
             T(ui.referenceName ?: ui.recipe.title ?: "Reference", m.scale.heading, m.roles.ink, maxLines = 1)
             T(facts(ui), m.scale.caption.tabular(), m.roles.ink2, maxLines = 1)
         }
+        // Claude runs the flow with you here (explains the recipe, matches, fixes a shot); paid steps still ask you.
+        if (onClaude != null) studio.muse.app.ui.screens.claude.ClaudeButton(onClaude)
     }
 }
 
 /** "Reference · 4.4 s · 3 shots · kept 30 days". */
 private fun facts(ui: RecreateBuildUi): String =
-    listOf("Reference", String.format(java.util.Locale.ROOT, "%.1f s", ui.recipe.durationSec), if (ui.slots.size == 1) "1 shot" else "${ui.slots.size} shots", "kept 30 days").joinToString(" · ")
+    listOfNotNull("Reference", String.format(java.util.Locale.ROOT, "%.1f s", ui.recipe.durationSec), if (ui.slots.size == 1) "1 shot" else "${ui.slots.size} shots", ui.kept).joinToString(" · ")
 
 @Composable
 private fun CostLine(ui: RecreateBuildUi, modifier: Modifier, end: Boolean) {
@@ -203,7 +238,7 @@ private fun TabletLayout(ui: RecreateBuildUi, a: RecreateActions, picture: Image
     val m = muse
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().height(64.dp).padding(end = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Box(Modifier.weight(1f)) { Header(ui, a.onBack) }
+            Box(Modifier.weight(1f)) { Header(ui, a.onBack, a.onClaude) }
             LearnSegmented(listOf("Recipe", "Compare"), if (ui.mode == RecreateMode.Recipe) 0 else 1, Modifier.width(240.dp)) {
                 a.onMode(if (it == 0) RecreateMode.Recipe else RecreateMode.Compare)
             }
@@ -223,6 +258,8 @@ private fun TabletLayout(ui: RecreateBuildUi, a: RecreateActions, picture: Image
                 }
                 Box(Modifier.width(1.dp).fillMaxHeight().background(m.roles.hairline))
                 Column(Modifier.width(328.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Cast(ui, a.onCast)
+                    LearnHairline()
                     ui.slots.getOrNull(ui.selected)?.let { ShotPanel(ui, it, ui.selected, pickTake, a.onBuild) }
                     LearnHairline()
                     WholeEdit(ui)
@@ -232,6 +269,7 @@ private fun TabletLayout(ui: RecreateBuildUi, a: RecreateActions, picture: Image
                     Row(verticalAlignment = Alignment.Bottom) {
                         Box(Modifier.weight(1f)) { Metrics(ui, phone = false) }
                         ui.weakest?.let { w -> LearnQuiet("Fix shot ${w + 1}", icon = "arrows-clockwise", onClick = a.onFix) }
+                        LearnQuiet("Export", icon = "download-simple", onClick = a.onExport)
                     }
                     Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         Player("Reference", ui, yours = false, picture, Modifier.weight(1f).fillMaxHeight())
@@ -360,20 +398,27 @@ private fun Player(label: String, ui: RecreateBuildUi, yours: Boolean, picture: 
     val i = ui.slotAtTime
     val slot = ui.slots.getOrNull(i)
     val t = ui.time
+    val built = if (yours) media.edit else null
     val video: Pair<String, Double>? = if (!yours) media.reference?.let { it to t }
+        else if (built != null) null
         else slot?.let { s -> ui.slotFill(s.id)?.takeId?.let(media.takeVideo)?.let { it to (t - s.startSec).coerceAtLeast(0.0) } }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        T(label, m.scale.label, m.roles.ink, maxLines = 1)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            T(label, m.scale.label, m.roles.ink, maxLines = 1)
+            if (built != null) media.editLabel?.let { T(it, m.scale.caption, m.roles.ink2, maxLines = 1) }
+        }
         Box(Modifier.fillMaxWidth().let { if (height != null) it.height(height) else it.weight(1f) }.clip(RoundedCornerShape(m.radii.container)).background(Color.Black).padding(vertical = 12.dp)
             .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
             Box(Modifier.aspectRatio(9f / 16f, matchHeightConstraintsFirst = true).clip(RoundedCornerShape(4.dp))) {
                 when {
+                    // The real built edit: its own cuts, speed, camera moves, text and Look, on the reference's timeline.
+                    built != null -> SyncedSurface(built, t, ui.playing, muted = true, Modifier.fillMaxSize())
                     video != null -> SyncedVideo(video.first, video.second, ui.playing, muted = yours, Modifier.fillMaxSize())
                     picture != null && !yours -> Image(picture, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                     else -> StandIn(ui, i + (if (yours) 1 else 0), Modifier.fillMaxSize(), icon = false)
                 }
                 // The reference's own video already shows its text; elsewhere the recipe's text stands in for it.
-                if (yours || media.reference == null) ui.recipe.texts.firstOrNull { it.startSec <= t && t < it.endSec && it.text != studio.muse.core.edit.RecipeJson.UNREAD_WORDS }?.let { x ->
+                if ((yours && built == null) || (!yours && media.reference == null)) ui.recipe.texts.firstOrNull { it.startSec <= t && t < it.endSec && it.text != studio.muse.core.edit.RecipeJson.UNREAD_WORDS }?.let { x ->
                     val bias = when (x.position) { "Top" -> -.7f; "Middle" -> 0f; else -> .6f }
                     T(x.text, m.scale.caption.copy(fontWeight = FontWeight.Bold), Color.White, Modifier.align(androidx.compose.ui.BiasAlignment(0f, bias)).padding(horizontal = 8.dp), maxLines = 2)
                 }
@@ -398,6 +443,13 @@ private fun SyncedVideo(uri: String, sourceSec: Double, playing: Boolean, muted:
         }
     }
     androidx.compose.runtime.DisposableEffect(player) { onDispose { player.release() } }
+    SyncedSurface(player, sourceSec, playing, muted, modifier)
+}
+
+/** A player someone else owns, held on the shared playhead like [SyncedVideo]. */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun SyncedSurface(player: androidx.media3.common.Player, sourceSec: Double, playing: Boolean, muted: Boolean, modifier: Modifier) {
     androidx.compose.runtime.LaunchedEffect(player, muted) { player.volume = if (muted) 0f else 1f }
     androidx.compose.runtime.LaunchedEffect(player, playing) { player.playWhenReady = playing }
     androidx.compose.runtime.LaunchedEffect(player, sourceSec, playing) {
@@ -463,6 +515,8 @@ private fun ShotPanel(ui: RecreateBuildUi, s: RecipeSlot, index: Int, pickTake: 
 @Composable
 private fun FillBox(ui: RecreateBuildUi, s: RecipeSlot, pickTake: (String) -> Unit, onRetry: () -> Unit) {
     val m = muse
+    val remakeShot = LocalRemake.current
+    val acts = LocalActions.current
     val f = ui.slotFill(s.id)
     val state = f?.state ?: "empty"
     val failed = ui.fillErrors[s.id]
@@ -477,7 +531,9 @@ private fun FillBox(ui: RecreateBuildUi, s: RecipeSlot, pickTake: (String) -> Un
         making -> "Being made with your model. You can leave this page; it carries on."
         state == "ready" -> "Generated for this shot."
         f?.reason != null -> f.reason!!
-        state == "to_generate" -> "Made with your model: ${String.format(java.util.Locale.ROOT, "%.1f", s.lengthSec)} s, ${ui.recipe.aspect ?: "9:16"}."
+        state == "to_generate" && ui.estimates[s.id]?.method == "swap" ->
+            "Your model is swapped into the reference's own shot, ${suiteTime(ui.estimates[s.id]?.segmentStart ?: s.startSec)}–${suiteTime(ui.estimates[s.id]?.segmentEnd ?: s.endSec)}. Its camera, speed and look come with it."
+        state == "to_generate" -> "A new shot made with your model: ${String.format(java.util.Locale.ROOT, "%.1f", s.lengthSec)} s, ${ui.recipe.aspect ?: "9:16"}."
         state == "matched" -> "From one of your takes."
         else -> "Pick a take for this shot."
     }
@@ -491,10 +547,44 @@ private fun FillBox(ui: RecreateBuildUi, s: RecipeSlot, pickTake: (String) -> Un
             }
         }
         T(line, m.scale.caption, if (cant != null) m.roles.caution else m.roles.ink2)
+        // G2: swap into the reference's own shot (the default) or generate a new one; a swap can keep the reference's setting.
+        if (state == "to_generate" && !making && ui.fill != null) {
+            val e = ui.estimates[s.id]
+            val method = ui.methods[s.id] ?: e?.method ?: "swap"
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                studio.muse.app.ui.screens.edit.learn.LearnChip("Swap into the reference shot", on = method == "swap") { if (method != "swap") acts.onMethod(s.id, "swap") }
+                studio.muse.app.ui.screens.edit.learn.LearnChip("Generate a new shot", on = method == "generate") { if (method != "generate") acts.onMethod(s.id, "generate") }
+            }
+            e?.swapUnavailable?.let { T(it, m.scale.caption, m.roles.caution) }
+            if (method == "swap" && e?.method == "swap") {
+                val keep = ui.keepBackground[s.id] ?: e.keepBackground
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).press { acts.onKeepBackground(s.id, !keep) }
+                    .semantics(mergeDescendants = true) { role = Role.Switch; stateDescription = if (keep) "On" else "Off" }, verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        T(if (keep) "Keep the reference's setting" else "Use your own setting", m.scale.label, m.roles.ink, maxLines = 1)
+                        T(if (keep) "Your model, in their place" else "The place from this shot's brief", m.scale.caption, m.roles.ink2, maxLines = 1)
+                    }
+                    studio.muse.app.ui.components.Toggle(keep, { acts.onKeepBackground(s.id, !keep) })
+                }
+                // Use your own setting: pick one of the studio's locations (free), or let the brief's place choose; a
+                // background made from the brief is priced into the shot.
+                if (!keep) {
+                    val picked = ui.locations[s.id]
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        studio.muse.app.ui.screens.edit.learn.LearnChip("From the brief", on = picked == null) { if (picked != null) acts.onLocation(s.id, null) }
+                        ui.places.forEach { p -> studio.muse.app.ui.screens.edit.learn.LearnChip(p.name, on = picked == p.id) { if (picked != p.id) acts.onLocation(s.id, p.id) } }
+                    }
+                    e.background?.let { T(it.line, m.scale.caption, m.roles.ink2) }
+                }
+            }
+            if (method == "generate" && e?.promptFrom != null && e.promptFrom != "brief") T("Write a brief for this shot first for a closer match.", m.scale.caption, m.roles.ink2)
+        }
         if (making) ShotProgress(ui.progress(s.id))
         if (ui.fill != null && !making) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (failed != null) Quiet("Try again", enabled = !ui.buildBusy, onClick = onRetry)
             Quiet(if (state == "matched") "Pick another take" else "Use one of my takes") { pickTake(s.id) }
+            // Fix a shot: make it anew (priced, and confirmed with the next Build).
+            if (state == "matched" || state == "ready") Quiet("Make a new one") { remakeShot(s.id) }
         }
     }
 }
@@ -520,6 +610,21 @@ private fun ShotProgress(percent: Int?) {
     }
 }
 
+/** Cast (plan step 3): who plays the lead. New shots are made with them, and your takes of them are matched first. */
+@Composable
+private fun Cast(ui: RecreateBuildUi, onCast: (String) -> Unit) {
+    val m = muse
+    if (ui.cast.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        T("Who plays the lead", m.scale.label, m.roles.ink)
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ui.cast.forEach { c ->
+                studio.muse.app.ui.screens.edit.learn.LearnChip(c.name, on = c.id == ui.castId) { if (!ui.buildBusy || ui.fill == null) onCast(c.id) }
+            }
+        }
+    }
+}
+
 /** A quiet button on the raised tone. */
 @Composable
 private fun Quiet(label: String, enabled: Boolean = true, onClick: () -> Unit) {
@@ -539,6 +644,12 @@ private fun WholeEdit(ui: RecreateBuildUi) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         T("The whole edit", m.scale.heading, m.roles.ink)
         r.summary?.let { T(it, m.scale.caption, m.roles.ink) }
+        // G8: shots without a brief: Claude can write them (a quiet button with its price), or says why it can't here.
+        ui.briefs?.let { b ->
+            if (ui.writingBriefs) T("Writing the shot briefs", m.scale.caption, m.roles.ink2)
+            else if (b.available) Quiet(b.label, onClick = LocalActions.current.onBriefs)
+            else b.reason?.let { T(it, m.scale.caption, m.roles.ink2) }
+        }
         T(listOfNotNull(if (r.slots.size == 1) "1 shot" else "${r.slots.size} shots", "${Math.round(r.cutsPerMinute)} cuts a minute", r.beats?.bpm?.let { "${Math.round(it)} BPM" }).joinToString(" · "),
             m.scale.caption.tabular(), m.roles.ink2, maxLines = 1)
     }
@@ -553,6 +664,24 @@ private fun WholeEdit(ui: RecreateBuildUi) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 T(g.note ?: "Not supported yet", m.scale.label, m.roles.caution)
                 T(g.atSec?.let { "${g.what} at ${suiteTime(it)}" } ?: g.what, m.scale.caption, m.roles.ink2)
+            }
+        }
+    }
+}
+
+/** G8: the one confirmation before Claude (on the server) writes the shot briefs. */
+@Composable
+private fun BriefsConfirm(b: studio.muse.core.edit.RecreateBriefsEstimate, a: RecreateActions) {
+    val m = muse
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .32f)).press(onClick = a.onBriefsCancel), contentAlignment = Alignment.Center) {
+        Column(Modifier.padding(24.dp).widthIn(max = 420.dp).fillMaxWidth().clip(RoundedCornerShape(m.radii.container)).background(m.roles.canvas).press { }.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            T("Write the shot briefs for about ${RecreateText.money(b.estimateUsd)}?", m.scale.title, m.roles.ink)
+            T("Claude reads each shot and writes what happens in it, so new shots match the reference more closely. It's charged to the studio. Asking Claude on your Mac is free.",
+                m.scale.body, m.roles.ink2)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                LearnQuiet("Cancel", onClick = a.onBriefsCancel)
+                Primary("Write · about ${RecreateText.money(b.estimateUsd)}", onClick = a.onBriefsConfirm)
             }
         }
     }
@@ -630,7 +759,57 @@ private fun ConfirmRow(ui: RecreateBuildUi, slotId: String, problem: String?) {
                 T(e?.takeIf { problem == null }?.let { RecreateText.money(it.amount) } ?: "–", m.scale.label.tabular(), m.roles.ink, maxLines = 1)
             }
             if (problem != null) T(problem, m.scale.caption, m.roles.caution)
-            else e?.let { RecreateText.madeLength(it.seconds, slot?.lengthSec ?: it.seconds) }?.let { T(it, m.scale.caption.tabular(), m.roles.ink2, maxLines = 1) }
+            else e?.let {
+                if (it.method == "swap") "Swapped into the reference, ${suiteTime(it.segmentStart ?: slot?.startSec ?: 0.0)}–${suiteTime(it.segmentEnd ?: slot?.endSec ?: 0.0)}"
+                else RecreateText.madeLength(it.seconds, slot?.lengthSec ?: it.seconds)
+            }?.let { T(it, m.scale.caption.tabular(), m.roles.ink2, maxLines = 1) }
+            // Use your own setting: the background's part of the price (a plate made from the brief), or the location used.
+            if (problem == null) e?.background?.let { T(it.line, m.scale.caption.tabular(), m.roles.ink2, maxLines = 2) }
+        }
+    }
+}
+
+/**
+ * Export (plan step 7): the built edit with the reference's sound as a guide track, or silent and timed for the sound,
+ * saved to the phone; with the "Use this sound" reminder either way.
+ */
+@Composable
+private fun ExportSheet(e: RecreateExportUi, a: RecreateActions) {
+    val m = muse
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .32f)).press(onClick = a.onExportClose), contentAlignment = Alignment.Center) {
+        Column(
+            Modifier.padding(24.dp).widthIn(max = 460.dp).fillMaxWidth().clip(RoundedCornerShape(m.radii.container)).background(m.roles.canvas).press { }.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            val saved = e.saved
+            if (saved != null) {
+                T("Saved", m.scale.title, m.roles.ink)
+                T(saved, m.scale.body, m.roles.ink2)
+                val use = e.useThisSound
+                if (use != null) {
+                    T(use.title, m.scale.heading, m.roles.ink)
+                    use.steps.forEachIndexed { i, step -> T("${i + 1}. $step", m.scale.body, m.roles.ink) }
+                    use.note?.let { T(it, m.scale.caption, m.roles.ink2) }
+                } else T(studio.muse.core.edit.RecreateExport.REMINDER, m.scale.caption, m.roles.ink2)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { Primary("Done", onClick = a.onExportClose) }
+                return@Column
+            }
+            T("Export the edit", m.scale.title, m.roles.ink)
+            LearnSegmented(listOf("With its sound", "Silent"), if (e.guide) 0 else 1, Modifier.fillMaxWidth()) { if (!e.busy) a.onExportGuide(it == 0) }
+            T(if (e.guide) "The original's sound plays as a guide, so you can check the cuts land on the beat." else "No sound: the cuts are timed for the original's sound.",
+                m.scale.body, m.roles.ink2)
+            T(studio.muse.core.edit.RecreateExport.REMINDER, m.scale.caption, m.roles.ink2)
+            e.error?.let { T(it, m.scale.caption, m.roles.caution) }
+            if (e.rendering) T("Making the video. This takes about a minute.", m.scale.caption, m.roles.ink2)
+            e.progress?.let { p ->
+                Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(m.roles.raised).semantics { contentDescription = "${(p * 100).toInt()}% exported" }) {
+                    Box(Modifier.fillMaxWidth(p.coerceIn(0f, 1f)).fillMaxHeight().background(m.roles.accent))
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                LearnQuiet("Cancel", onClick = a.onExportClose)
+                Primary(if (e.busy) "Exporting" else "Save to this phone", enabled = !e.busy, onClick = a.onExportRun)
+            }
         }
     }
 }

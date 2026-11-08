@@ -43,6 +43,11 @@ export const JobRequestSchema = z.object({
   direction: z.string().max(500).optional(),
   /** Prompt scripts: the studio's "Performer is speaking" switch. Absent: the clip's detection. */
   speaking: z.boolean().nullish(),
+  /**
+   * Edit with `background: "photo"` (workstream 1, Recreate's "Use your own setting"): the new background, sent as the
+   * last reference image labelled "background" (the model's own references then stop at 5).
+   */
+  backgroundImage: z.object({ asset: z.string().max(500).optional(), url: z.string().max(2000).optional() }).strict().optional(),
 }).passthrough();
 
 const MOTION_WORDS: Record<string, string> = { still: 'still', subtle: 'subtly alive', busy: 'busy' };
@@ -138,6 +143,8 @@ export class JobService {
     // front, ¾ and back if it has them, otherwise the body slots. Replicate: the five locked shots, then the outfit (≤ 9).
     // <Image n> in the prompt follows this order.
     const references = replicate ? replicateReferencesFor(m, o) : referencesFor(m, o);
+    if (!replicate && r.background === 'photo' && r.backgroundImage && (r.backgroundImage.asset || r.backgroundImage.url))
+      references.splice(5, references.length, { label: 'background', image: r.backgroundImage });
     const texts = await this.ctx.prompts.texts(user.studioId);
     // Lip-sync fix: speaking decides the prompt's mouth wording and whether the model hears the clip's audio.
     const sp = await resolveSpeaking(this.ctx, clip, r.speaking);

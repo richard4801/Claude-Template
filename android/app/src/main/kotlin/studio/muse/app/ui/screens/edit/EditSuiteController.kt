@@ -78,6 +78,11 @@ interface EditBackend {
     suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?>
     /** A helper's result added an asset the device doesn't have yet (background removal's matte): fetch [url] for it. */
     fun assetArrived(assetId: String, url: String) {}
+    /**
+     * The paid helpers that can't run now, each with the plain line shown instead (WS1 guardrails: `GET /v1/editor/features`
+     * paid.available and each helper's available): captions, matte, denoise. Empty = all available.
+     */
+    suspend fun helpersOff(): Map<String, String> = emptyMap()
 }
 
 /** Everything the editor can be asked to do (one sealed list, so the screen is a pure function of state + [act]). */
@@ -108,6 +113,8 @@ sealed interface EditAction {
     data class AddKeyframe(val prop: KfProp) : EditAction
     data class SetMask(val mask: Mask?, val done: Boolean = true) : EditAction
     data object RemoveBackground : EditAction
+    /** Turns a clip's background removal off (its alpha matte goes; the matte asset stays in the project for undo). */
+    data object KeepBackground : EditAction
     /** Remove background → tap what to keep (workstream 1, plans/api.md "KeepPoint"): on / off. */
     data class TapToKeep(val on: Boolean) : EditAction
     /** A tap on the paused picture at (x, y), 0–1 of the frame. */
@@ -145,6 +152,9 @@ sealed interface EditAction {
     data class WordHighlight(val on: Boolean) : EditAction
     data class DeleteWord(val index: Int) : EditAction
     data object CutSilences : EditAction
+    /** Tablet track headers (plans/edit-layout.md): a track's sound on / off, and a picture track shown / hidden. */
+    data class ToggleTrackMuted(val trackId: String) : EditAction
+    data class ToggleTrackHidden(val trackId: String) : EditAction
     data object RemoveFillers : EditAction
     // Looks & adjust
     data class FiltersTab(val tab: String) : EditAction
@@ -274,7 +284,7 @@ class EditSuiteController(
         EditAction.Split -> "Split"; EditAction.Delete -> "Delete"; EditAction.Duplicate -> "Duplicate"
         is EditAction.Speed, is EditAction.CurvePreset, is EditAction.CurvePoint, is EditAction.AddCurvePoint -> "Speed"
         is EditAction.SetTransform -> "Transform"; is EditAction.AddKeyframe -> "Keyframe"; is EditAction.SetMask -> "Mask"
-        EditAction.RemoveBackground -> "Remove background"; is EditAction.SetTransition, EditAction.TransitionToAll -> "Transition"
+        EditAction.RemoveBackground, EditAction.KeepBackground -> "Remove background"; is EditAction.SetTransition, EditAction.TransitionToAll -> "Transition"
         is EditAction.Volume -> "Volume"; is EditAction.Fades -> "Fades"; is EditAction.AutoDuck, is EditAction.DuckTimes -> "Ducking"
         is EditAction.NoiseReduction -> "Noise reduction"; is EditAction.Enhance -> "Enhance voice"; is EditAction.Voice -> "Voice effect"
         EditAction.DetectBeats -> "Beats"; is EditAction.AddAudio -> if (a.voiceOver) "Voice-over" else "Music"
@@ -282,6 +292,7 @@ class EditSuiteController(
         is EditAction.CaptionStyleOf, is EditAction.CaptionFont, is EditAction.CaptionColors, is EditAction.CaptionY,
         is EditAction.CaptionWordsPerPage, is EditAction.WordHighlight -> "Caption style"
         is EditAction.DeleteWord -> "Cut word"; EditAction.CutSilences -> "Cut silences"; EditAction.RemoveFillers -> "Remove fillers"
+        is EditAction.ToggleTrackMuted -> "Mute track"; is EditAction.ToggleTrackHidden -> "Hide track"
         is EditAction.PickLook, is EditAction.LookStrength, EditAction.LookToAll, is EditAction.ImportedCube -> "Look"
         is EditAction.AdjustField -> "Adjust"; is EditAction.AddPip -> "Overlay"; is EditAction.Ratio, is EditAction.ExportOf -> "Ratio"
         else -> null
@@ -390,8 +401,11 @@ class EditSuiteController(
             is EditAction.SetTransform -> { val id = visualId(u) ?: return; change(a.done) { p -> p.updateItem(id) { withTransform(it, a.transform) } } }
             is EditAction.AddKeyframe -> addKeyframe(u, a.prop)
             is EditAction.SetMask -> { val id = visualId(u) ?: return; change(a.done) { p -> p.updateItem(id) { when (it) { is VideoClip -> it.copy(mask = a.mask); is ImageItem -> it.copy(mask = a.mask); else -> it } } } }
-            EditAction.RemoveBackground -> removeBackground(u, null)
-            is EditAction.TapToKeep -> {
+            EditAction.RemoveBackground -> if (u.matteOff == null) removeBackground(u, null)
+            EditAction.KeepBackground -> u.activeClip?.takeIf { it.alphaMatte != null }?.let { clip ->
+                change { pp -> pp.updateItem(clip.id) { (it as VideoClip).copy(alphaMatte = null) } }
+            }
+            is EditAction.TapToKeep -> if (u.matteOff == null || !a.on) {
                 if (u.playing && a.on) act(EditAction.PlayPause) // taps go on a paused frame
                 _ui.update { it.copy(keep = if (a.on) KeepUi() else null) }
             }
@@ -414,14 +428,14 @@ class EditSuiteController(
                 val tr = u.activeClip?.transitionIn
                 if (change { SuiteOps.transitionAll(it, tr) }) say(if (tr == null) "Cuts on every clip" else "Applied to all cuts")
             }
-            is EditAction.EffectsTab -> { _ui.update { it.copy(effectsTab = a.tab) }; if (a.tab == "Mask") estimate("matte") }
+            is EditAction.EffectsTab -> { _ui.update { it.copy(effectsTab = a.tab) }; if (a.tab == "Mask") matteTab() }
 
             is EditAction.Volume -> { val c = soundClip(u) ?: return; change(a.done) { p -> p.updateItem(c.id) { setVolume(it, SuiteOps.dbToGain(a.db).coerceIn(0.0, 2.0)) } } }
             is EditAction.Fades -> { val c = soundClip(u) ?: return; change(a.done) { p -> p.updateItem(c.id) { setFades(it, a.inSec, a.outSec) } } }
             is EditAction.AutoDuck -> if (SuiteOps.musicTrack(project ?: return) == null) say("Add music first · Audio → Music") else change { SuiteOps.duck(it, a.on) }
             is EditAction.DuckTimes -> change(a.done) { p -> val t = SuiteOps.musicTrack(p) ?: return@change null; val d = t.duck ?: return@change null
                 p.updateTrack(t.id) { it.copy(duck = d.copy(attackSec = r2(a.attackSec.coerceIn(0.05, 2.0)), releaseSec = r2(a.releaseSec.coerceIn(0.05, 3.0)))) } }
-            is EditAction.NoiseReduction -> noiseReduction(u, a.on)
+            is EditAction.NoiseReduction -> u.helpersOff["denoise"]?.takeIf { a.on }?.let { say(it) } ?: noiseReduction(u, a.on)
             is EditAction.Enhance -> { val c = soundClip(u) ?: return; change { p -> p.updateItem(c.id) { setVoice(it, enhance = a.on) } } }
             is EditAction.Voice -> { val c = soundClip(u) ?: return; change { p -> p.updateItem(c.id) { setVoice(it, effect = a.effect) } } }
             is EditAction.Beats -> _ui.update { it.copy(beatMarks = a.marks) }
@@ -439,7 +453,7 @@ class EditSuiteController(
                 if (change(refused = "No room for text there") { p -> SuiteOps.addHook(p, hook, u.playheadSec)?.let { (np, id) -> newId = id; np } }) _ui.update { it.copy(selectedId = newId) }
             }
             is EditAction.EditText -> change(done = true) { p -> p.updateItem(a.id) { (it as? TextItem)?.copy(text = a.text.take(500).ifBlank { it.text }) ?: it } }
-            EditAction.AutoCaptions -> autoCaptions()
+            EditAction.AutoCaptions -> u.helpersOff["captions"]?.let { say(it) } ?: autoCaptions()
             is EditAction.CaptionTab -> _ui.update { it.copy(captionTab = a.tab) }
             is EditAction.CaptionStyleOf -> if (u.captionTrack == null) say("Make captions first · Auto-captions") else change { p -> SuiteOps.captionStyle(p) { SuiteOps.switchPreset(it, a.preset) } }
             is EditAction.CaptionFont -> change { p -> SuiteOps.captionStyle(p) { it.copy(text = it.text.copy(font = a.font, weight = if (a.font == Font.MARKER || a.font == Font.SERIF) 400 else it.text.weight.coerceAtLeast(700))) } }
@@ -451,6 +465,8 @@ class EditSuiteController(
             }
             is EditAction.DeleteWord -> deleteWord(a.index)
             EditAction.CutSilences -> cutSilences()
+            is EditAction.ToggleTrackMuted -> change { pp -> pp.copy(tracks = pp.tracks.map { t -> if (t.id == a.trackId) t.copy(muted = if (t.muted == true) null else true) else t }) }
+            is EditAction.ToggleTrackHidden -> change { pp -> pp.copy(tracks = pp.tracks.map { t -> if (t.id == a.trackId) t.copy(hidden = if (t.hidden == true) null else true) else t }) }
             EditAction.RemoveFillers -> removeFillers()
 
             is EditAction.FiltersTab -> _ui.update { it.copy(filtersTab = a.tab) }
@@ -486,13 +502,32 @@ class EditSuiteController(
     private fun open(panel: Panel?) {
         _ui.update { it.copy(panel = panel) }
         when (panel) {
-            Panel.CAPTIONS -> { if (_ui.value.captionTrack == null) estimate("captions"); estimate("cuts", silenceOnly()) }
-            Panel.AUDIO -> { estimate("denoise"); if (SuiteOps.musicTrack(project ?: return) != null) estimate("beats", source = musicSource()) }
-            Panel.EFFECTS -> if (_ui.value.effectsTab == "Mask") estimate("matte")
+            Panel.CAPTIONS -> { checkHelpers { if (_ui.value.captionTrack == null && "captions" !in _ui.value.helpersOff) estimate("captions") }; estimate("cuts", silenceOnly()) }
+            Panel.AUDIO -> { checkHelpers { if ("denoise" !in _ui.value.helpersOff) estimate("denoise") }; if (SuiteOps.musicTrack(project ?: return) != null) estimate("beats", source = musicSource()) }
+            Panel.EFFECTS -> if (_ui.value.effectsTab == "Mask") matteTab()
             Panel.SPEED -> _ui.update { it.copy(speedCurveTab = it.activeClip?.speedCurve != null) }
             else -> {}
         }
     }
+
+    private var helpersChecked = false
+
+    /**
+     * Which paid helpers can run (asked once per editor), then [then]. While the server says one can't (the owner
+     * switched paid helpers off, or the cut-out is still the mock), it reads as a plain line and nothing is priced.
+     */
+    private fun checkHelpers(then: () -> Unit) {
+        if (helpersChecked) { then(); return }
+        helpersChecked = true
+        scope.launch {
+            val off = runCatching { backend.helpersOff() }.getOrDefault(emptyMap())
+            _ui.update { it.copy(helpersOff = off, matteOff = off["matte"], keep = if (off["matte"] != null) null else it.keep) }
+            then()
+        }
+    }
+
+    /** The Mask tab: background removal's availability, then its price. */
+    private fun matteTab() = checkHelpers { if (_ui.value.matteOff == null) estimate("matte") }
 
     private fun silenceOnly() = JsonObject(mapOf("silenceOnly" to JsonPrimitive(true)))
 

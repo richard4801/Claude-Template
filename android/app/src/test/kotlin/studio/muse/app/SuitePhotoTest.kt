@@ -132,9 +132,9 @@ class SuitePhotoTest {
     @Test fun `the request's JSON carries only fields the strict server knows`() {
         val r = PhotoComposer.request(draft(ComposerSettings(body = "phone"), moves = listOf("dolly_in")), PhotoDraft(presetId = null, refs = listOf(ref("c_front", "pose"))))!!
         val o = json.encodeToJsonElement(PhotoRequest.serializer(), r).jsonObject
-        val allowed = setOf("modelId", "outfitId", "prompt", "camera", "gradeLook", "count", "presetId", "productImage", "references", "seed", "lockSeed", "shuffleSeed", "title")
+        val allowed = setOf("modelId", "outfitId", "prompt", "camera", "gradeLook", "count", "presetId", "productImage", "references", "seed", "lockSeed", "shuffleSeed", "title", "draft")
         assertTrue(o.keys.toString(), allowed.containsAll(o.keys))
-        assertEquals(setOf("modelId", "outfitId", "prompt", "camera", "count", "references"), o.keys)
+        assertEquals(setOf("modelId", "outfitId", "prompt", "camera", "count", "references", "draft"), o.keys) // draft: Reuse settings
         assertEquals(setOf("image", "guides"), (o["references"] as kotlinx.serialization.json.JsonArray)[0].jsonObject.keys)
     }
 

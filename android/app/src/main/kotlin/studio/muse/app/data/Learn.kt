@@ -65,6 +65,8 @@ data class LearnLesson(
     val last: Long = 0,
     val examples: List<String> = emptyList(),
     val ids: List<Long> = emptyList(),
+    /** A rule already cites one of these corrections: "See rule" instead of "Make a rule". */
+    val ruleId: String? = null,
 ) {
     /** Plain words: "You changed Claude's look 4 times" ("undid" when every one was an undo). */
     val sentence: String get() {
@@ -83,6 +85,8 @@ data class LearnCorrection(
     val area: String = "other",
     val what: String,
     val createdAt: Long = 0,
+    /** The edited video still exists (false: the row doesn't open anything). */
+    val takeExists: Boolean = true,
 )
 
 @Serializable
@@ -115,6 +119,8 @@ data class LearnRecipeEntry(
     val recipe: JsonObject? = null,
     /** Nearest only: 0 = the same. */
     val distance: Double? = null,
+    /** The reference video (or the edit) can still be opened; false once the reference has expired. */
+    val available: Boolean = true,
 ) {
     val isReference: Boolean get() = origin == "reference"
 }

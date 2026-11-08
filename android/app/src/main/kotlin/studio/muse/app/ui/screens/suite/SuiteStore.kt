@@ -71,6 +71,23 @@ class SuiteStore(private val c: AppContainer) {
     /** The take the Upscale sheet is open for (null = closed); [upscaleSoon]: the server just said Upscale is coming soon. */
     val upscaleFor = MutableStateFlow<String?>(null)
     val upscaleSoon = MutableStateFlow(false)
+    // AI suite plan (plans/ai-suite-design.md; SuiteRigs.kt): saved rigs, the Undo of a rig just applied, the results
+    // feed and the two takes being compared.
+    val savedRigs = MutableStateFlow<List<studio.muse.app.data.SuiteRigView>>(emptyList())
+    /** The composer before a rig was applied (saved or a model's default): "Undo" puts it back. */
+    val rigUndo = MutableStateFlow<Pair<String, ComposerDraft>?>(null)
+    val feed = MutableStateFlow<List<studio.muse.app.data.SuiteFeedItem>?>(null)
+    val feedFilter = MutableStateFlow(SuiteFeedFilter.ALL)
+    var feedCursor: String? = null
+    val compareIds = MutableStateFlow<List<String>>(emptyList())
+    // Build step 3: the Queued group (shots saved to run later), its Run confirmation, and Library collections.
+    val queued = MutableStateFlow<List<studio.muse.app.data.QueuedShot>>(emptyList())
+    val runAsk = MutableStateFlow<Pair<studio.muse.app.data.QueuedShot, studio.muse.app.data.QueuedEstimate>?>(null)
+    val collections = MutableStateFlow<List<studio.muse.app.data.LibraryCollection>>(emptyList())
+    /** The feed shows only this collection's takes (null: all, with the Queued group). */
+    val feedCollection = MutableStateFlow<String?>(null)
+    /** For the AI suite plan's extensions (SuiteRigs.kt). */
+    internal val app: AppContainer get() = c
 
     /** Puts [t] in Extend's VIDEO slot. False when the take has no stored video to continue from. */
     fun pickExtendTake(t: studio.muse.app.data.Take): Boolean {

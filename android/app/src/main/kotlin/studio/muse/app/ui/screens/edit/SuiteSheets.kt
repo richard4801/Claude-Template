@@ -47,6 +47,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -322,7 +323,9 @@ private fun AudioBody(ui: EditSuiteUi, host: SuiteHost, act: (EditAction) -> Uni
     }
     val denoise = ui.ai["denoise"]
     val cleaned = (clip as? VideoClip)?.audioAsset != null
-    OptRow(
+    // Paid helpers off (or not available): a plain line; already cleaned audio keeps its toggle, to turn it off.
+    val denoiseOff = ui.helpersOff["denoise"]?.takeIf { !cleaned }
+    if (denoiseOff != null) ComingSoon("Noise reduction", denoiseOff) else OptRow(
         "Noise reduction",
         when { denoise?.running == true -> "Cleaning the voice · ${denoise.progress} %"; cleaned -> "Background noise removed"; else -> "Removes background noise · ${denoise?.price ?: "AI"}" },
         cleaned, { act(EditAction.NoiseReduction(!cleaned)) },
@@ -386,7 +389,7 @@ private fun CaptionsBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     val ct = ui.captionTrack?.caption
     if (ct == null) {
         T("Word-timed captions from the speech, in the style you pick.", m.type.body.copy(fontSize = 13.5.sp), m.t.muted)
-        AiButton("Auto-captions", ui.ai["captions"], { act(EditAction.AutoCaptions) }, icon = "cc")
+        ui.helpersOff["captions"]?.let { ComingSoon("Auto-captions", it) } ?: AiButton("Auto-captions", ui.ai["captions"], { act(EditAction.AutoCaptions) }, icon = "cc")
         AiButton("Cut silences", ui.ai["silences"], { act(EditAction.CutSilences) }, icon = "scissors")
         return
     }
@@ -527,15 +530,38 @@ private fun MaskBody(ui: EditSuiteUi, act: (EditAction) -> Unit) {
             Box(Modifier.size(20.dp).background(colorOf(clip.chroma?.color ?: "#2BD15F")))
             T(clip.chroma?.color ?: "Off", m.type.mono.copy(fontSize = 12.sp), m.t.muted)
         }
-        val matte = ui.ai["matte"]
+        // The cut-out isn't live yet (the server says so): both read "Coming soon", plainly, with nothing to press.
         val keyed = clip.alphaMatte != null
+        // A clip already cut out keeps its toggle, so it can be turned off (WS3's contract; the Mac does the same).
+        if (!keyed) ui.matteOff?.let { note ->
+            ComingSoon("Remove background", note)
+            ComingSoon("Tap what to keep", note)
+            return
+        }
+        val matte = ui.ai["matte"]
         OptRow("Remove background", when { matte?.running == true -> "Cutting out · ${matte.progress} %"; keyed -> "Done · the background is gone"; else -> "The person stays · ${matte?.price ?: "priced next"}" },
-            matte?.done == true || keyed, { if (matte?.running != true && !keyed && ui.keep == null) act(EditAction.RemoveBackground) })
+            matte?.done == true || keyed, {
+                when {
+                    keyed -> act(EditAction.KeepBackground)
+                    matte?.running != true && ui.keep == null -> act(EditAction.RemoveBackground)
+                }
+            })
         // Tap what to keep (workstream 1's tracked cut-out): a pet, a product, one of two people.
         val k = ui.keep
-        if (k == null) {
+        if (ui.matteOff != null) ComingSoon("Tap what to keep", ui.matteOff)
+        else if (k == null) {
             SuiteLink("Tap what to keep instead") { act(EditAction.TapToKeep(true)) }
         } else KeepPanel(ui, k, act)
+    }
+}
+
+/** A helper that isn't available yet: its name and a plain line, greyed, not a button. */
+@Composable
+private fun ComingSoon(title: String, note: String) {
+    val m = muse
+    Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { stateDescription = "Not available yet" }, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        T(title, m.type.body.copy(fontSize = 13.5.sp, fontWeight = FontWeight.Bold), m.t.muted)
+        T(note, m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
     }
 }
 

@@ -189,7 +189,9 @@ describe.skipIf(!hasFfmpeg)('lip-sync fix: speaking decides what the model hears
   it('beat-only audio: the editor separator (no_vocals) gives the instrumental, stored audio-only and priced from GPU time', async () => {
     const key = 'c/beat_source.wav';
     writeWav(path.join(a.dir, key), musicLike(3, 5, true));
+    process.env.EDITOR_SEPARATE_VERSION = 'v_demucs'; // the fake catalog's version stands in for the pinned one
     const provider = new ReplicateProvider(a.ctx);
+    delete process.env.EDITOR_SEPARATE_VERSION;
     const r = await beatOnlyAudio(a.ctx, { studioId: 's', jobId: 'jbeat', audioKey: key, durationSec: 3, provider });
     const p = fake.state.creates.at(-1)!;
     expect(p).toMatchObject({ model: 'ryan5453/demucs', version: 'v_demucs' });

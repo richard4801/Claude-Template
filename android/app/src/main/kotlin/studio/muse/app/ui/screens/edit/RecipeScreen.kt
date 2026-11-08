@@ -44,12 +44,15 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.graphics.asImageBitmap
 import studio.muse.app.ui.LocalContainer
+import studio.muse.app.ui.screens.claude.ClaudeChatSheet
 import studio.muse.app.ui.components.Bar
 import studio.muse.app.ui.components.T
 import studio.muse.app.ui.components.TopBar
@@ -57,6 +60,8 @@ import studio.muse.app.ui.components.press
 import studio.muse.app.ui.screens.ScreenBox
 import studio.muse.app.ui.theme.muse
 import studio.muse.app.ui.theme.scale
+import studio.muse.app.ui.theme.roles
+import studio.muse.app.ui.theme.radii
 import studio.muse.core.edit.Recipe
 import studio.muse.core.edit.RecipeConfidence
 import studio.muse.core.edit.RecipeSlot
@@ -71,14 +76,16 @@ import studio.muse.core.edit.RecipeSlot
 sealed interface RecipePhase {
     /** Nothing picked yet. */
     data object Pick : RecipePhase
-    data class Analysing(val progress: Float, val step: String) : RecipePhase
+    /** [phase]: the server's step, for the checklist (null before the server reports one). */
+    data class Analysing(val progress: Float, val step: String, val phase: String? = null) : RecipePhase
     /** [referenceId]: the server's reference, for building your version (phases 2–3); null for a recipe shown alone. */
-    data class Ready(val recipe: Recipe, val referenceId: String? = null) : RecipePhase
+    data class Ready(val recipe: Recipe, val referenceId: String? = null, val kept: String? = null) : RecipePhase
     /** [fromLink]: a link couldn't be used; the saved file is offered instead. */
     data class Failed(val message: String, val fromLink: Boolean = false) : RecipePhase
 }
 
-data class RecipeUi(val phase: RecipePhase = RecipePhase.Pick, val referenceName: String? = null)
+/** [references]: the studio's references, newest first, on the start page (null while loading). */
+data class RecipeUi(val phase: RecipePhase = RecipePhase.Pick, val referenceName: String? = null, val references: List<studio.muse.core.edit.RecipeReference>? = null)
 
 /** The screen: the picker, the upload and the server's analysis, then the recipe. */
 @Composable
@@ -89,18 +96,26 @@ fun RecipeScreen(onBack: () -> Unit, referenceId: String? = null, shared: studio
     var picked by remember { mutableStateOf((shared as? studio.muse.app.data.SharedReference.File)?.uri) } // Share → MUSE: a saved video
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) picked = uri }
     BackHandler(onBack = onBack)
-    // A reference from the library (Recipes → "Use in Recreate"): its recipe straight away.
-    LaunchedEffect(referenceId) {
-        val rid = referenceId ?: return@LaunchedEffect
+    // A reference from the library (Recipes → "Use in Recreate") or the start page's list: its recipe straight away, or
+    // its analysis while it still runs.
+    var opened by remember { mutableStateOf(referenceId) }
+    LaunchedEffect(Unit) {
+        if (opened == null && shared == null) runCatching { c.repo.api.listReferences() }.getOrNull()?.let { list -> if (ui.phase == RecipePhase.Pick) ui = ui.copy(references = list) }
+    }
+    LaunchedEffect(opened) {
+        val rid = opened ?: return@LaunchedEffect
         ui = RecipeUi(RecipePhase.Analysing(.5f, "Opening the reference"), null)
         ui = runCatching { c.repo.api.reference(rid) }.fold(
-            { ref -> ref.recipe?.let { RecipeUi(RecipePhase.Ready(it, ref.id), ref.name) } ?: RecipeUi(RecipePhase.Failed(ref.error ?: "This reference has expired."), ref.name) },
+            { ref -> if (ref.state == "analyzing") follow(c.repo.api, ref) { ui = it }
+                else ref.recipe?.let { RecipeUi(RecipePhase.Ready(it, ref.id, ref.keptLine()), ref.name) } ?: RecipeUi(RecipePhase.Failed(ref.error ?: "This reference has expired."), ref.name) },
             { e -> RecipeUi(RecipePhase.Failed(e.message ?: "Couldn't open the reference"), null) })
     }
     // Share → MUSE: a link. The server fetches it within the platforms' rules; when it can't, its message says why and the
     // saved file is offered instead.
-    LaunchedEffect(shared) {
-        val url = (shared as? studio.muse.app.data.SharedReference.Link)?.url ?: return@LaunchedEffect
+    // A link: shared from another app, or pasted on the start page.
+    var link by remember { mutableStateOf((shared as? studio.muse.app.data.SharedReference.Link)?.url) }
+    LaunchedEffect(link) {
+        val url = link ?: return@LaunchedEffect
         val name = studio.muse.core.edit.SharedLink.name(url)
         ui = RecipeUi(RecipePhase.Analysing(.05f, "Getting the video from the link"), name)
         ui = runCatching { follow(c.repo.api, c.repo.api.createReferenceFromLink(url, name)) { ui = it } }.getOrElse { e ->
@@ -129,8 +144,8 @@ fun RecipeScreen(onBack: () -> Unit, referenceId: String? = null, shared: studio
         }
     }
     val ready = ui.phase as? RecipePhase.Ready
-    if (ready?.referenceId != null) RecreateBuild(ready.referenceId, ready.recipe, ui.referenceName, onBack, onOpenTake)
-    else RecipeContent(ui, onBack = onBack, onPick = { pick.launch("video/*") })
+    if (ready?.referenceId != null) RecreateBuild(ready.referenceId, ready.recipe, ui.referenceName, ready.kept, onBack, onOpenTake)
+    else RecipeContent(ui, onBack = onBack, onPick = { pick.launch("video/*") }, onLink = { link = it }, onOpen = { opened = it })
 }
 
 /**
@@ -139,14 +154,16 @@ fun RecipeScreen(onBack: () -> Unit, referenceId: String? = null, shared: studio
  * which never spends.
  */
 @Composable
-private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, onBack: () -> Unit, onOpenTake: (String) -> Unit) {
+private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, kept: String?, onBack: () -> Unit, onOpenTake: (String) -> Unit) {
     val c = LocalContainer.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val model = remember(referenceId) {
         val state = c.repo.state.value
         val takes = state.takes.filter { it.kind == "take" }.sortedByDescending { it.createdAt }.take(12)
             .map { RecreateTakeChoice(it.id, it.title, it.durationSec, it.thumb, it.label) }
-        RecreateBuildModel(c.repo.api, scope, RecreateBuildUi(referenceId, recipe, name, takes = takes), modelId = { c.repo.state.value.models.firstOrNull()?.id })
+        RecreateBuildModel(c.repo.api, scope, RecreateBuildUi(referenceId, recipe, name, takes = takes, kept = kept,
+            cast = state.models.map { RecreateCastChoice(it.id, it.name) }, castId = state.models.firstOrNull()?.id),
+            defaultModelId = { c.repo.state.value.models.firstOrNull()?.id })
     }
     val ui by model.ui.collectAsState()
     val studio by c.repo.state.collectAsState()
@@ -163,6 +180,33 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, on
         val f = java.io.File(context.cacheDir, "recreate_$referenceId.mp4")
         if ((f.length() > 0) || c.repo.api.referenceVideo(referenceId, f)) video = f.toURI().toString()
     }
+    // After Build: the real built edit (Compare). The studio server's preview comes first, so pixels match across
+    // apps; the device's own engine is the fallback. Until either is ready, your edit plays each shot's take.
+    val local = remember(referenceId) { RecreateLocalEdit(context, c.repo.api) }
+    val server = remember(referenceId) { RecreateServerRender(c.repo.api, context.cacheDir) }
+    var editLabel by remember(referenceId) { mutableStateOf<String?>(null) }
+    var exportJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    // Claude on this reference (owner only; the server answers members 403).
+    val prefs by c.prefs.collectAsState()
+    var claude by remember { mutableStateOf(false) }
+    var built by remember(referenceId) { mutableStateOf<androidx.media3.common.Player?>(null) }
+    LaunchedEffect(ui.builtSessionId, ui.builtRevision) {
+        val sid = ui.builtSessionId ?: return@LaunchedEffect
+        if (c.repo.demo) return@LaunchedEffect // demo mode has no media to build from
+        val rendered = server.preview(sid)
+        val next: androidx.media3.common.Player? = if (rendered != null) {
+            androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+                setMediaItem(androidx.media3.common.MediaItem.fromUri(android.net.Uri.fromFile(rendered.file))); prepare()
+            }
+        } else {
+            runCatching { local.load(sid) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+            local.player()
+        }
+        built?.release()
+        built = next
+        editLabel = rendered?.render?.label
+    }
+    androidx.compose.runtime.DisposableEffect(referenceId) { onDispose { built?.release() } }
     // Shots being made: their progress from the studio's live jobs.
     LaunchedEffect(studio.jobs) { model.setJobProgress(studio.jobs.filter { it.running }.associate { it.id to it.progress.toInt() }) }
     // The shared playhead while playing (both players follow it).
@@ -175,28 +219,65 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, on
     RecreateBuildScreen(ui, RecreateActions(
         onBack = onBack, onMode = model::setMode, onSelect = model::select,
         onBuild = { scope.launch { model.requestBuild() } }, onConfirm = { model.confirmBuild() }, onCancel = model::cancelBuild,
-        onUseTake = model::useTake, onFix = model::fixWeakest,
+        onCast = { id -> scope.launch { model.setCast(id) } },
+        onBriefs = model::askBriefs, onBriefsCancel = model::cancelBriefs, onBriefsConfirm = { scope.launch { model.writeBriefs() } },
+        onMethod = { s, m -> scope.launch { model.setMethod(s, m) } }, onKeepBackground = { s, k -> scope.launch { model.setKeepBackground(s, k) } },
+        onLocation = { s, l -> scope.launch { model.setLocation(s, l) } },
+        onUseTake = model::useTake, onFix = model::fixWeakest, onRemake = { s -> scope.launch { model.remake(s) } },
         onOpenEditor = { ui.builtTakeId?.let(onOpenTake) ?: c.repo.toast("The built edit opens with its take in the editor") },
         onPlay = model::togglePlay, onStep = model::step,
-    ), picture = poster, media = RecreateMedia(video) { id -> studio.takes.firstOrNull { it.id == id }?.videoUrl })
+        onClaude = if (c.repo.demo || prefs.owner) ({ claude = true }) else null,
+        onExport = model::openExport, onExportGuide = model::setExportGuide,
+        onExportClose = { exportJob?.cancel(); exportJob = null; model.setExportProgress(null); model.closeExport() }, // Cancel stops a running export
+        onExportRun = {
+            val e = ui.export
+            if (e != null && !e.busy) exportJob = scope.launch {
+                if (c.repo.demo) { model.exportSaved("Demo mode doesn't save videos", null); return@launch }
+                // The studio server first (the same pixels as the Mac); the phone's own engine when it can't.
+                val sid = ui.builtSessionId
+                if (sid != null) {
+                    val fromServer = try { server.export(referenceId, sid, e.guide) { model.setExportRendering() } }
+                        catch (err: studio.muse.app.data.ApiException) { model.exportNeedsSilent(); return@launch }
+                    if (fromServer != null) {
+                        runCatching { local.saveToMovies(fromServer.file) }.fold(
+                            { model.exportSaved("Saved to this phone, in Movies/MUSE", fromServer.render.useThisSound) },
+                            { err -> if (err is kotlinx.coroutines.CancellationException) throw err; model.setExportProgress(null, "This phone couldn't save the video. Try again.") })
+                        fromServer.file.delete()
+                        return@launch
+                    }
+                    if (!local.playable) runCatching { local.load(sid) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+                }
+                if (!local.playable) { model.setExportProgress(null, "The built edit's videos aren't on this phone yet. Try again in a moment."); return@launch }
+                val guide = video?.let { java.io.File(java.net.URI(it)) }?.takeIf { e.guide && it.exists() }
+                if (e.guide && guide == null) { model.setExportProgress(null, "The original's sound isn't on this phone yet. Export it silent, or try again in a moment."); return@launch }
+                model.setExportProgress(0f)
+                runCatching { local.export(guide, recipe.durationSec) { p -> model.setExportProgress(p) } }.fold(
+                    { model.exportSaved("Saved to this phone, in Movies/MUSE", null) },
+                    { err -> if (err is kotlinx.coroutines.CancellationException) throw err; model.setExportProgress(null, "This phone couldn't make the video. Try again.") })
+            }
+        },
+    ), picture = poster, media = RecreateMedia(video, { id -> studio.takes.firstOrNull { it.id == id }?.videoUrl }, built, editLabel))
+    // The chat refreshes the recipe's fill when Claude has matched or priced shots.
+    ClaudeChatSheet(open = claude, onDismiss = { claude = false; scope.launch { model.load() } },
+        contextKind = "recreate", contextId = referenceId, title = name ?: "Recreate")
 }
 
 /** Polls a reference (showing the server's step) until it is ready or failed. */
 private suspend fun follow(api: studio.muse.app.data.MuseApi, start: studio.muse.core.edit.RecipeReference, show: (RecipeUi) -> Unit): RecipeUi {
     var ref = start
     while (ref.state == "analyzing") {
-        show(RecipeUi(RecipePhase.Analysing(.2f + .8f * ref.progress / 100f, ref.phase?.takeIf { it != "Waiting" } ?: "Waiting for its turn"), ref.name))
+        show(RecipeUi(RecipePhase.Analysing(.2f + .8f * ref.progress / 100f, ref.phase?.takeIf { it != "Waiting" } ?: "Waiting for its turn", ref.phase), ref.name))
         delay(1500)
         ref = api.reference(ref.id)
     }
     val recipe = ref.recipe
-    return if (ref.state == "ready" && recipe != null) RecipeUi(RecipePhase.Ready(recipe, ref.id), ref.name)
+    return if (ref.state == "ready" && recipe != null) RecipeUi(RecipePhase.Ready(recipe, ref.id, ref.keptLine()), ref.name)
     else RecipeUi(RecipePhase.Failed(ref.error ?: if (ref.state == "expired") "This reference has expired." else "The analysis didn’t finish.", fromLink = ref.error?.contains("link", true) == true), ref.name)
 }
 
 /** The screen as a function of [ui] (screenshots render it). */
 @Composable
-fun RecipeContent(ui: RecipeUi, onBack: () -> Unit, onPick: () -> Unit) {
+fun RecipeContent(ui: RecipeUi, onBack: () -> Unit, onPick: () -> Unit, onLink: (String) -> Unit = {}, draftLink: String = "", onOpen: (String) -> Unit = {}) {
     val m = muse
     ScreenBox(statusPad = true) {
         Column(Modifier.fillMaxSize()) {
@@ -210,7 +291,7 @@ fun RecipeContent(ui: RecipeUi, onBack: () -> Unit, onPick: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(24.dp),
                 ) {
                     when (val ph = ui.phase) {
-                        RecipePhase.Pick -> PickBody(onPick)
+                        RecipePhase.Pick -> { PickBody(onPick, onLink, draftLink); ui.references?.takeIf { it.isNotEmpty() }?.let { YourReferences(it, wide, onOpen) } }
                         is RecipePhase.Analysing -> AnalysingBody(ui.referenceName, ph)
                         is RecipePhase.Failed -> {
                             T(ph.message, m.scale.body, m.t.ink)
@@ -227,7 +308,7 @@ fun RecipeContent(ui: RecipeUi, onBack: () -> Unit, onPick: () -> Unit) {
 }
 
 @Composable
-private fun ColumnScope.PickBody(onPick: () -> Unit) {
+private fun ColumnScope.PickBody(onPick: () -> Unit, onLink: (String) -> Unit, draftLink: String) {
     val m = muse
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         T("See how an edit is made", m.scale.title, m.t.ink)
@@ -236,15 +317,94 @@ private fun ColumnScope.PickBody(onPick: () -> Unit) {
         T("The video stays private to your studio and is only used to read the recipe.", m.scale.caption, m.t.muted)
     }
     Primary("Pick a video", onPick)
+    LinkField(onLink, draftLink)
+}
+
+/**
+ * Or paste a link (TikTok, Instagram Reel, YouTube). The server fetches it within each platform's rules; when it can't,
+ * it says why and the saved file is the way in. The button wakes up once the text holds a link.
+ */
+@Composable
+private fun LinkField(onLink: (String) -> Unit, draft: String) {
+    val m = muse
+    var text by remember { mutableStateOf(draft) }
+    val url = studio.muse.core.edit.SharedLink.first(text)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        T("Or paste a link", m.scale.label, m.t.ink)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(m.radii.control)).background(m.roles.field).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
+                androidx.compose.foundation.text.BasicTextField(text, { text = it.take(500) }, Modifier.fillMaxWidth().semantics { contentDescription = "Link to a video" }, singleLine = true,
+                    textStyle = m.scale.body.copy(color = m.roles.ink), cursorBrush = androidx.compose.ui.graphics.SolidColor(m.roles.accent),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri, imeAction = androidx.compose.ui.text.input.ImeAction.Go),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = { url?.let(onLink) }),
+                    decorationBox = { inner -> Box { if (text.isEmpty()) T("TikTok, Reel or YouTube link", m.scale.body, m.roles.ink2, maxLines = 1); inner() } })
+            }
+            Box(Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(m.radii.control)).border(1.dp, m.roles.hairline, RoundedCornerShape(m.radii.control))
+                .press(enabled = url != null) { url?.let(onLink) }.padding(horizontal = 16.dp).semantics { role = Role.Button }, contentAlignment = Alignment.Center) {
+                T("Read it", m.scale.label, if (url != null) m.roles.ink else m.roles.ink2, maxLines = 1)
+            }
+        }
+        T("MUSE fetches it only where the platform allows; otherwise save the video and pick it.", m.scale.caption, m.t.muted)
+    }
 }
 
 @Composable
 private fun AnalysingBody(name: String?, ph: RecipePhase.Analysing) {
     val m = muse
+    val current = studio.muse.core.edit.RecreateText.analysisStep(ph.phase)
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         T(name ?: "Your reference", m.scale.heading, m.t.ink, maxLines = 1)
         T(ph.step + "…", m.scale.body, m.t.ink2())
-        Bar(ph.progress)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.weight(1f)) { Bar(ph.progress) }
+            T("${(ph.progress * 100).toInt()}%", m.scale.caption.tabular(), m.roles.ink2, maxLines = 1)
+        }
+        T("About a minute. You can leave this page; it carries on.", m.scale.caption, m.roles.ink2)
+    }
+    // The server's steps as they finish (once it reports one): done, in progress, waiting.
+    if (current >= 0) Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        studio.muse.core.edit.RecreateText.ANALYSIS_STEPS.forEachIndexed { i, step ->
+            Row(Modifier.semantics(mergeDescendants = true) { stateDescription = when { i < current -> "Done"; i == current -> "In progress"; else -> "Waiting" } },
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+                    when {
+                        i < current -> EIc("check", 16.dp, m.roles.ink)
+                        i == current -> Box(Modifier.size(10.dp).clip(androidx.compose.foundation.shape.CircleShape).background(m.roles.accent))
+                        else -> Box(Modifier.size(14.dp).clip(androidx.compose.foundation.shape.CircleShape).border(1.5.dp, m.roles.hairline, androidx.compose.foundation.shape.CircleShape))
+                    }
+                }
+                T(step, m.scale.body, if (i <= current) m.roles.ink else m.roles.ink2, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** The studio's references, newest first: open one to see its recipe (or its analysis while it runs). */
+@Composable
+private fun YourReferences(refs: List<studio.muse.core.edit.RecipeReference>, wide: Boolean, onOpen: (String) -> Unit) {
+    val m = muse
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        T("Your references", m.scale.heading, m.roles.ink)
+        refs.chunked(if (wide) 5 else 3).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                row.forEach { r ->
+                    Column(Modifier.weight(1f).press { onOpen(r.id) }.semantics(mergeDescendants = true) { contentDescription = "Open ${r.name}"; role = Role.Button },
+                        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Box(Modifier.fillMaxWidth().aspectRatio(9f / 16f).clip(RoundedCornerShape(m.radii.container)).background(m.roles.field), contentAlignment = Alignment.Center) {
+                            EIc("film-strip", 22.dp, m.roles.ink2)
+                        }
+                        T(r.name, m.scale.label, m.roles.ink, maxLines = 1)
+                        T(when (r.state) {
+                            "analyzing" -> "Reading · ${r.progress}%"
+                            "failed" -> "Couldn’t be read"
+                            "expired" -> "Expired"
+                            else -> r.durationSec?.let { String.format(java.util.Locale.ROOT, "%.1f s", it) } ?: "Ready"
+                        }, m.scale.caption.tabular(), m.roles.ink2, maxLines = 1)
+                    }
+                }
+                repeat((if (wide) 5 else 3) - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
     }
 }
 

@@ -1,8 +1,11 @@
 // Recreate this edit routes (workstream 1, plans/api.md "Recreate this edit"): references and their recipes.
+import { briefsOf } from '../recreate/briefs.js';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../ctx.js';
 import { RECREATE_TOOLS } from '../recreate/mcpTools.js';
 import { recreateOf } from '../recreate/references.js';
+import { rendersOf } from '../editor/renders.js';
+import { notFound } from '../errors.js';
 import * as mcpTools from '../mcp/tools.js';
 
 export async function registerRecreateRoutes(app: FastifyInstance, ctx: Ctx) {
@@ -20,8 +23,16 @@ export async function registerRecreateRoutes(app: FastifyInstance, ctx: Ctx) {
   const slot = (req: { params: unknown }) => (req.params as { slotId: string }).slotId;
   app.put('/v1/recreate/references/:id/briefs', async req => rx.setBriefs(req.user, id(req), req.body));
   app.post('/v1/recreate/references/:id/match', async req => rx.match(req.user, id(req), req.body));
+  // Shot briefs written on the server (G8): the price first, then a confirmed run.
+  app.post('/v1/recreate/references/:id/briefs/estimate', async req => briefsOf(ctx).estimate(req.user, id(req)));
+  app.post('/v1/recreate/references/:id/briefs/write', async req => briefsOf(ctx).write(req.user, id(req), req.body));
   app.post('/v1/recreate/references/:id/slots/:slotId/estimate', async req => rx.estimateSlot(req.user, id(req), slot(req), req.body));
   app.post('/v1/recreate/references/:id/slots/:slotId/fill', async req => rx.fillSlot(req.user, id(req), slot(req), req.body));
+  // "Fix this shot": one slot's clip swapped in place (plan §4).
+  app.post('/v1/recreate/references/:id/slots/:slotId/replace', async req => {
+    const { device, ...body } = (req.body ?? {}) as { device?: string };
+    return rx.replaceSlot(req.user, id(req), slot(req), body, { by: 'app', device });
+  });
   app.post('/v1/recreate/references/:id/apply', async req => {
     const { device, ...body } = (req.body ?? {}) as { device?: string };
     return rx.apply(req.user, id(req), body, { by: 'app', device });
@@ -40,4 +51,23 @@ export async function registerRecreateRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/v1/recreate/references/:id/poster', async (req, reply) => png(reply, await rx.thumb(req.user, id(req), null)));
   app.get('/v1/recreate/references/:id/slots/:slotId/thumb', async (req, reply) => png(reply, await rx.thumb(req.user, id(req), slot(req))));
   app.get('/v1/recreate/references/:id/fill', async req => rx.fillView(req.user, id(req)));
+  // Export (plan step 7): the built edit as long as the reference, with its sound as a guide track or silent.
+  app.post('/v1/recreate/references/:id/export', async req => rx.exportEdit(req.user, id(req), req.body));
+  app.get('/v1/recreate/references/:id/export', async req => rx.exportState(req.user, id(req), req.query));
+  app.get('/v1/recreate/references/:id/export.mp4', async (req, reply) => {
+    const f = await rx.exportFile(req.user, id(req), req.query);
+    if ('redirect' in f) return reply.redirect(f.redirect, 302);
+    return reply.header('content-type', f.contentType).header('content-disposition', 'attachment; filename="recreated.mp4"').send(f.body);
+  });
+  // Server renders of edit sessions (workstream 1, Release 1): "Your edit" in Compare plays the real built edit.
+  const renders = rendersOf(ctx);
+  const rev = (req: { query: unknown }) => { const r = Number((req.query as { revision?: string } | undefined)?.revision); return Number.isInteger(r) && r >= 0 ? r : undefined; };
+  app.post('/v1/edit-sessions/:id/preview', async req => renders.preview(req.user, id(req)));
+  app.get('/v1/edit-sessions/:id/preview', async req => renders.previewState(req.user, id(req), rev(req)));
+  app.get('/v1/edit-sessions/:id/preview.mp4', async (req, reply) => {
+    const f = await renders.previewFile(req.user, id(req), rev(req));
+    if (!f) throw notFound('Preview');
+    if ('redirect' in f) return reply.redirect(f.redirect, 302);
+    return reply.header('content-type', f.contentType).header('cache-control', 'private, max-age=3600').send(f.body);
+  });
 }

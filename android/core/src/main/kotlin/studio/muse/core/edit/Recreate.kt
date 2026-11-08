@@ -32,6 +32,11 @@ data class RecreateSlotFill(
     val estimateLabel: String? = null,
     /** One plain line on the choice ("Your take has the same pan on a wide shot"). */
     val reason: String? = null,
+    /** G2: how a new shot is made: "swap" (your model in the reference's own shot) or "generate" (a new Suite shot). */
+    val method: String? = null,
+    /** A swap that failed (refunded): "generate" is offered instead, priced on its own. */
+    val fallback: String? = null,
+    val failedJobId: String? = null,
 )
 
 /** How close the built edit is, 0–1 per element. */
@@ -53,9 +58,35 @@ data class RecreateFill(val referenceId: String, val slots: List<RecreateSlotFil
         slots.filter { it.state == "to_generate" && it.slotId !in unavailable }.mapNotNull { prices[it.slotId] ?: it.estimate }.sum()
 }
 
-/** `POST …/slots/{slotId}/estimate`: a shot's price (nothing held). [problem]: why it can't be made, in plain words. */
-data class RecreateSlotEstimate(val slotId: String, val amount: Double, val seconds: Double, val problem: String? = null) {
+/**
+ * `POST …/slots/{slotId}/estimate`: a shot's price (nothing held). [problem]: why it can't be made, in plain words.
+ * G2: [method] "swap" (the default when it can run: your model in the reference's own segment, [segmentStart]–[segmentEnd])
+ * or "generate"; [swapUnavailable]: why the default fell back to generate; [buttonLabel]: "Swap in · 2.0 s · $0.41".
+ */
+data class RecreateSlotEstimate(
+    val slotId: String, val amount: Double, val seconds: Double, val problem: String? = null,
+    val method: String = "generate", val keepBackground: Boolean = true, val segmentStart: Double? = null, val segmentEnd: Double? = null,
+    val swapUnavailable: String? = null, val buttonLabel: String? = null, val promptFrom: String? = null,
+    /** "Use your own setting" (a swap with keepBackground false): where the background comes from, and its part of the price. */
+    val background: RecreateBackground? = null, val swapUsd: Double? = null, val backgroundUsd: Double? = null,
+) {
     val ok: Boolean get() = problem == null
+}
+
+/**
+ * The background a swap uses for "Use your own setting": one of the studio's locations ([source] "location", free; [matched]
+ * when the brief's place named it), or a plate made from the brief's setting ([source] "generated", [usd] added to the
+ * price, free when [reused]).
+ */
+data class RecreateBackground(val source: String, val locationId: String? = null, val name: String? = null, val matched: Boolean = false,
+    val setting: String? = null, val usd: Double = 0.0, val reused: Boolean = false) {
+    /** Plain words for the shot's card. */
+    val line: String get() = when {
+        source == "location" && matched -> "Background: ${name ?: "your location"}, from the brief"
+        source == "location" -> "Background: ${name ?: "your location"}"
+        reused -> "Background: made from the brief earlier, free"
+        else -> String.format(java.util.Locale.ROOT, "A background is made from the brief · $%.2f", usd)
+    }
 }
 
 /** `POST …/slots/{slotId}/fill`: the Suite job making the shot. */
@@ -68,10 +99,62 @@ data class RecreateApplyResult(
     val waiting: List<String> = emptyList(),
     val notes: List<String> = emptyList(),
     val match: RecreateMatch? = null,
+    /** G2: swapped shots already carry the reference's camera, speed and look ("baked"). */
+    val baked: Map<String, List<String>> = emptyMap(),
 )
 
+/**
+ * G8, `POST …/briefs/estimate`: "Write the shot briefs · about $0.02" (one Claude call on the server). [available] false:
+ * [reason] says why (Claude on the server is off; asking Claude on the Mac is free).
+ */
+data class RecreateBriefsEstimate(val available: Boolean, val reason: String? = null, val slots: Int = 0, val estimateUsd: Double = 0.0, val label: String = "Write the shot briefs")
+
+/** `POST …/slots/{slotId}/replace`: one shot's clip swapped in the built edit (one undoable change). */
+data class RecreateReplaceResult(val sessionId: String, val revision: Int?, val slotId: String, val label: String? = null, val note: String? = null)
+
 /** The server's JSON for the above. */
+/**
+ * The server's render of a built edit (plans/api.md "The built edit, rendered" and Recreate "Export"): a Compare
+ * preview of an edit session's revision, or a Recreate export (then [sound] and [useThisSound] are set).
+ * [state]: none | rendering | ready | failed. When [unsupported] isn't empty the render leaves out some of the edit,
+ * so a preview is labelled "Preview of the cut".
+ */
+data class RecreateRender(
+    val sessionId: String, val revision: Int?, val state: String, val url: String? = null, val durationSec: Double? = null,
+    val unsupported: List<String> = emptyList(), val error: String? = null, val sound: String? = null, val useThisSound: RecreateUseSound? = null,
+) {
+    val ready: Boolean get() = state == "ready"
+    val rendering: Boolean get() = state == "rendering"
+    val failed: Boolean get() = state == "failed" || state == "none"
+    /** The label over a preview that leaves part of the edit out. */
+    val label: String? get() = if (unsupported.isEmpty()) null else "Preview of the cut"
+}
+
+/** The reminder shown next to an export: post with the platform's own sound (the guide sound is only for timing). */
+data class RecreateUseSound(val platform: String?, val title: String, val steps: List<String>, val note: String?, val sourceUrl: String? = null)
+
 object RecreateJson {
+    fun render(el: JsonElement): RecreateRender {
+        val o = el as? JsonObject ?: throw IllegalArgumentException("render is not an object")
+        val use = o.obj("useThisSound")?.let { u ->
+            RecreateUseSound(u.str("platform"), u.str("title") ?: "Post with the original sound",
+                u.arr("steps").mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }, u.str("note"), u.str("sourceUrl"))
+        }
+        return RecreateRender(o.str("sessionId") ?: "", (o["revision"] as? JsonPrimitive)?.intOrNull, o.str("state") ?: "none", o.str("url"), o.num("durationSec"),
+            o.arr("unsupported").mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }, o.str("error"), o.str("sound"), use)
+    }
+
+    fun briefsEstimate(el: JsonElement): RecreateBriefsEstimate {
+        val o = el as? JsonObject ?: throw IllegalArgumentException("briefs estimate is not an object")
+        return RecreateBriefsEstimate((o["available"] as? JsonPrimitive)?.booleanOrNull ?: false, o.str("reason"), o.num("slots")?.toInt() ?: 0,
+            o.num("estimateUsd") ?: 0.0, o.str("label") ?: "Write the shot briefs")
+    }
+
+    fun replace(el: JsonElement): RecreateReplaceResult {
+        val o = el as? JsonObject ?: throw IllegalArgumentException("replace is not an object")
+        return RecreateReplaceResult(o.str("sessionId") ?: "", (o["revision"] as? JsonPrimitive)?.intOrNull, o.str("slotId") ?: "", o.str("label"), o.str("note"))
+    }
+
     private val json = Json { ignoreUnknownKeys = true }
 
     fun fill(text: String): RecreateFill = fill(json.parseToJsonElement(text))
@@ -85,6 +168,7 @@ object RecreateJson {
                     slotId = it.str("slotId") ?: return@mapNotNull null, state = it.str("state") ?: "empty",
                     takeId = it.str("takeId"), jobId = it.str("jobId"), score = it.num("score"),
                     estimate = e?.num("amount"), estimateLabel = e?.str("label"), reason = it.str("reason"),
+                    method = it.str("method"), fallback = it.str("fallback"), failedJobId = it.str("failedJobId"),
                 )
             }
         }
@@ -101,7 +185,16 @@ object RecreateJson {
         val e = o.obj("estimate") ?: JsonObject(emptyMap())
         val ok = (e["ok"] as? JsonPrimitive)?.booleanOrNull ?: true
         val problem = if (ok) null else (e.str("message") ?: "This shot can’t be made at this length and quality.")
-        return RecreateSlotEstimate(o.str("slotId") ?: "", e.num("estimate") ?: 0.0, e.num("seconds") ?: 0.0, problem)
+        val seg = o.obj("segment")
+        return RecreateSlotEstimate(o.str("slotId") ?: "", e.num("estimate") ?: 0.0, e.num("seconds") ?: 0.0, problem,
+            method = o.str("method") ?: e.str("method") ?: "generate", keepBackground = (o["keepBackground"] as? JsonPrimitive)?.booleanOrNull ?: true,
+            segmentStart = seg?.num("startSec"), segmentEnd = seg?.num("endSec"), swapUnavailable = o.str("swapUnavailable"),
+            buttonLabel = e.str("buttonLabel"), promptFrom = o.str("promptFrom"),
+            background = o.obj("background")?.let { b ->
+                RecreateBackground(b.str("source") ?: "generated", b.str("locationId"), b.str("name"), (b["matched"] as? JsonPrimitive)?.booleanOrNull ?: false,
+                    b.str("setting"), b.num("usd") ?: 0.0, (b["reused"] as? JsonPrimitive)?.booleanOrNull ?: false)
+            },
+            swapUsd = e.num("swapUsd"), backgroundUsd = e.num("backgroundUsd"))
     }
 
     fun fillStart(el: JsonElement): RecreateFillStart {
@@ -112,7 +205,8 @@ object RecreateJson {
     fun apply(el: JsonElement): RecreateApplyResult {
         val o = el as? JsonObject ?: throw IllegalArgumentException("apply is not an object")
         fun list(k: String) = o.arr(k).mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
-        return RecreateApplyResult(o.str("sessionId") ?: "", (o["revision"] as? JsonPrimitive)?.intOrNull, list("missing"), list("waiting"), list("notes"), o.obj("match")?.let(::match))
+        val baked = o.obj("baked")?.mapValues { (_, v) -> (v as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.content } }.orEmpty()
+        return RecreateApplyResult(o.str("sessionId") ?: "", (o["revision"] as? JsonPrimitive)?.intOrNull, list("missing"), list("waiting"), list("notes"), o.obj("match")?.let(::match), baked)
     }
 
     private fun JsonObject.str(k: String): String? = (this[k] as? JsonPrimitive)?.takeIf { it.isString }?.content
@@ -124,6 +218,16 @@ object RecreateJson {
 /** Plain words for Recreate's build and compare (members see these: no model, provider or GPU names). */
 object RecreateText {
     const val APPROVE_NOTE = "You approve before anything is made."
+
+    /** The analysis steps, in the order the server reports them as `phase` (server/api/src/recreate/analyze.ts). */
+    val ANALYSIS_STEPS = listOf("Finding the cuts", "Listening for the beat", "Reading the text", "Reading the look", "Reading the poses", "Writing the recipe")
+
+    /** The step the analysis is on (its index in [ANALYSIS_STEPS]): -1 before the first, the size once done. */
+    fun analysisStep(phase: String?, state: String = "analyzing"): Int {
+        if (state == "ready") return ANALYSIS_STEPS.size
+        val i = ANALYSIS_STEPS.indexOfFirst { it.equals(phase, ignoreCase = true) }
+        return if (i >= 0) i else if (phase.equals("done", true)) ANALYSIS_STEPS.size else -1
+    }
 
     /** "$1.28". */
     fun money(amount: Double): String = "$" + String.format(java.util.Locale.ROOT, "%.2f", amount)
@@ -279,4 +383,33 @@ object RecreateSwatches {
         val p = v * (1 - s); val q = v * (1 - s * f); val t = v * (1 - s * (1 - f))
         return when (i) { 0 -> Triple(v, t, p); 1 -> Triple(q, v, p); 2 -> Triple(p, v, t); 3 -> Triple(p, q, v); 4 -> Triple(t, p, v); else -> Triple(v, p, q) }
     }
+}
+
+/**
+ * Recreate's export (plans/recreate-edit.md step 7; Release 1): the built edit with the reference's sound as a guide
+ * track, so it lands on the beat (then post it with the platform's "Use this sound"), or silent, timed for the sound.
+ */
+object RecreateExport {
+    /** The guide's asset: the reference video saved on the device (its sound only is used). */
+    const val GUIDE_ASSET = "recreate_guide"
+    const val GUIDE_TRACK = "recreate_guide_track"
+
+    /** Plain words for the reminder shown with the export. */
+    const val REMINDER = "When you post, tap Use this sound on the original so your edit plays with its sound."
+
+    /**
+     * The edit's own sound is muted and the reference's sound plays under it from the start, for [durationSec] (the
+     * reference's length, which the built edit matches).
+     */
+    fun withGuide(p: EditProject, durationSec: Double): EditProject {
+        val muted = p.tracks.filter { it.id != GUIDE_TRACK }.map { if (it.kind == TrackKind.CAPTION) it else it.copy(muted = true) }
+        val guide = Track(GUIDE_TRACK, TrackKind.MUSIC, name = "Guide sound",
+            items = listOf(AudioClip("recreate_guide_clip", GUIDE_ASSET, 0.0, 0.0, durationSec)))
+        val assets = p.assets.filter { it.id != GUIDE_ASSET } + Asset(GUIDE_ASSET, AssetKind.AUDIO, upload = "local:$GUIDE_ASSET", durationSec = durationSec) // on this device only; never saved
+        return p.copy(assets = assets, tracks = muted + guide, mute = null)
+    }
+
+    /** No sound at all: the edit is timed for the sound, which is attached when posting. */
+    fun silent(p: EditProject): EditProject = p.copy(tracks = p.tracks.filter { it.id != GUIDE_TRACK }.map { if (it.kind == TrackKind.CAPTION) it else it.copy(muted = true) },
+        assets = p.assets.filter { it.id != GUIDE_ASSET }, mute = true)
 }

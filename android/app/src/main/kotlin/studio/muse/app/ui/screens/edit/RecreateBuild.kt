@@ -30,14 +30,32 @@ import studio.muse.core.edit.RecreateText
 
 enum class RecreateMode { Recipe, Compare }
 
+/** [guide]: the reference's sound as the guide track (else silent, timed for the sound). [progress]: 0–1 while exporting. */
+/**
+ * The export sheet. [progress]: the device's export (0..1), or null; [rendering]: the studio server is making it (no
+ * fraction). After saving, [saved] says where, and [useThisSound] is the server's reminder to post with the original
+ * sound (null: the general reminder).
+ */
+data class RecreateExportUi(
+    val guide: Boolean = true, val progress: Float? = null, val error: String? = null, val rendering: Boolean = false,
+    val saved: String? = null, val useThisSound: studio.muse.core.edit.RecreateUseSound? = null,
+) {
+    val busy: Boolean get() = progress != null || rendering
+}
+
 /** A take that can fill a shot ("Use one of my takes"). */
 /** [label]: what tells takes with the same title apart ("Take 2 of 3"). */
+/** A character who can play the lead. */
+data class RecreateCastChoice(val id: String, val name: String)
+
 data class RecreateTakeChoice(val id: String, val caption: String, val durationSec: Double?, val thumb: studio.muse.app.data.ImageRef? = null, val label: String? = null)
 
 data class RecreateBuildUi(
     val referenceId: String,
     val recipe: Recipe,
     val referenceName: String? = null,
+    /** "kept 12 days" / "kept" (the reference is deleted after 30 days unless kept); null when unknown. */
+    val kept: String? = null,
     val fill: RecreateFill? = null,
     val loadingFill: Boolean = false,
     val mode: RecreateMode = RecreateMode.Recipe,
@@ -61,6 +79,25 @@ data class RecreateBuildUi(
     val match: RecreateMatch? = null,
     /** The take the built edit lives on (Open in the editor). */
     val builtTakeId: String? = null,
+    /** The edit session the recipe was built into (Compare previews it on the device), and its revision. */
+    val builtSessionId: String? = null,
+    val builtRevision: Int? = null,
+    /** Shots to make again ("Make a new one"): filled before, generated anew on the next Build. */
+    val remake: Set<String> = emptySet(),
+    /** Shots made anew after the edit was built: swapped into it in place (Fix shot) instead of rebuilding it. */
+    val fixing: Set<String> = emptySet(),
+    /** G2, per shot: "swap" (your model into the reference's own shot) or "generate"; absent = the server's default (swap). */
+    val methods: Map<String, String> = emptyMap(),
+    /** G2, swap only: keep the reference's setting (true, the default) or use your own (the shot's brief). */
+    val keepBackground: Map<String, Boolean> = emptyMap(),
+    /** "Use your own setting": the studio location picked per shot (absent: the brief's place, or a background made from it). */
+    val locations: Map<String, String> = emptyMap(),
+    /** The studio's locations, loaded the first time a shot uses its own setting. */
+    val places: List<RecreateCastChoice> = emptyList(),
+    /** G8: "Write the shot briefs · about $0.02" while shots have no brief; its confirmation, and while it runs. */
+    val briefs: studio.muse.core.edit.RecreateBriefsEstimate? = null,
+    val askBriefs: Boolean = false,
+    val writingBriefs: Boolean = false,
     val takes: List<RecreateTakeChoice> = emptyList(),
     /** One line to show once (a toast), then [RecreateBuildModel.consumeMessage]. */
     val message: String? = null,
@@ -69,6 +106,11 @@ data class RecreateBuildUi(
     val playing: Boolean = false,
     /** jobId → 0–100, from the studio's live jobs, for shots being made; a job not listed shows a calm indeterminate state. */
     val jobProgress: Map<String, Int> = emptyMap(),
+    /** The export sheet (Compare): open, with the sound as a guide or silent, its progress while it runs. */
+    val export: RecreateExportUi? = null,
+    /** Cast (plan step 3): the studio's characters, and who plays the lead (new shots are made with them, takes matched to them). */
+    val cast: List<RecreateCastChoice> = emptyList(),
+    val castId: String? = null,
 ) {
     val duration: Double get() = recipe.durationSec.coerceAtLeast(0.1)
     /** The shot under the playhead. */
@@ -113,13 +155,31 @@ class RecreateBuildModel(
     private val api: MuseApi,
     private val scope: CoroutineScope,
     start: RecreateBuildUi,
-    private val modelId: () -> String?,
+    /** The default lead when none is picked (the studio's current character). */
+    private val defaultModelId: () -> String?,
     private val pollMs: Long = 3_000,
 ) {
     private val _ui = MutableStateFlow(start)
     val ui: StateFlow<RecreateBuildUi> = _ui
     private var watch: Job? = null
     private val id get() = _ui.value.referenceId
+    private fun modelId(): String? = _ui.value.castId ?: defaultModelId()
+
+    /**
+     * Cast: a new lead. The takes are matched again for them (free) and every shot to generate is priced again; takes
+     * picked here stay.
+     */
+    suspend fun setCast(modelId: String) {
+        if (modelId == _ui.value.castId || _ui.value.building || _ui.value.isGenerating) return
+        _ui.update { it.copy(castId = modelId, estimates = emptyMap(), estimateErrors = emptyMap(), loadingFill = true) }
+        try {
+            api.matchReference(id, modelId)
+            take(api.referenceFill(id))
+        } catch (e: CancellationException) { throw e } catch (e: Exception) {
+            _ui.update { it.copy(message = e.message ?: "Couldn’t match your takes for the new lead") }
+        } finally { _ui.update { it.copy(loadingFill = false) } }
+        price()
+    }
 
     fun consumeMessage() = _ui.update { it.copy(message = null) }
     fun setMode(m: RecreateMode) {
@@ -150,6 +210,20 @@ class RecreateBuildModel(
         u.copy(time = t).let { v -> v.copy(selected = v.slotAtTime) }
     }
 
+    fun openExport() = _ui.update { it.copy(export = RecreateExportUi(), playing = false) }
+    fun closeExport() = _ui.update { if (it.export?.busy == true) it else it.copy(export = null) }
+    fun setExportGuide(on: Boolean) = _ui.update { u -> u.copy(export = u.export?.copy(guide = on, error = null)) }
+    fun setExportProgress(p: Float?, error: String? = null) = _ui.update { u -> u.copy(export = u.export?.copy(progress = p, error = error, rendering = false)) }
+    /** The studio server is rendering the export. */
+    fun setExportRendering() = _ui.update { u -> u.copy(export = u.export?.copy(rendering = true, progress = null, error = null)) }
+    /** The original's sound isn't kept any more (409 no_reference_sound): switch to silent and say so. */
+    fun exportNeedsSilent() = _ui.update { u -> u.copy(export = u.export?.copy(guide = false, rendering = false, progress = null,
+        error = "The original's sound isn't kept any more. Export it silent.")) }
+    /** Saved: the sheet stays open with where it went and how to post it with the original sound. */
+    fun exportSaved(message: String, use: studio.muse.core.edit.RecreateUseSound?) = _ui.update { u ->
+        u.copy(export = u.export?.copy(progress = null, rendering = false, error = null, saved = message, useThisSound = use)) }
+    fun exportDone(message: String) = _ui.update { it.copy(export = null, message = message) }
+
     fun setJobProgress(p: Map<String, Int>) { if (p != _ui.value.jobProgress) _ui.update { it.copy(jobProgress = p) } }
 
     /** The fill; when nothing is scored yet, the takes are matched once (free) first. Then every shot to generate is priced. */
@@ -170,18 +244,45 @@ class RecreateBuildModel(
         _ui.update { it.copy(loadingFill = false) }
         if (_ui.value.isGenerating) startWatch()
         price()
+        loadBriefs()
+    }
+
+    /** G8: offered while any shot has no brief (a closer match when shots are generated). */
+    private suspend fun loadBriefs() {
+        if (_ui.value.recipe.slots.none { it.brief == null }) { _ui.update { it.copy(briefs = null) }; return }
+        runCatching { api.estimateReferenceBriefs(id) }.onFailure { if (it is CancellationException) throw it }.getOrNull()?.let { b -> _ui.update { it.copy(briefs = b) } }
+    }
+
+    fun askBriefs() = _ui.update { if (it.briefs?.available == true) it.copy(askBriefs = true) else it.copy(message = it.briefs?.reason) }
+    fun cancelBriefs() = _ui.update { it.copy(askBriefs = false) }
+
+    /** The confirmed price: Claude writes every shot's brief, the summary and tags; the recipe on screen updates. */
+    suspend fun writeBriefs() {
+        _ui.update { it.copy(askBriefs = false, writingBriefs = true) }
+        try {
+            val ref = api.writeReferenceBriefs(id)
+            val n = _ui.value.recipe.slots.count { it.brief == null }
+            _ui.update { u -> u.copy(recipe = ref.recipe ?: u.recipe, writingBriefs = false, briefs = null, message = if (n == 1) "The brief is written" else "Briefs written for $n shots") }
+            price()
+        } catch (e: CancellationException) { throw e } catch (e: Exception) {
+            _ui.update { it.copy(writingBriefs = false, message = e.message ?: "The briefs weren't written · you weren't charged") }
+        }
     }
 
     /** A fetched fill: takes picked here stay, and a shot that was generating and came back without its version is marked. */
     private fun take(new: RecreateFill) = _ui.update { u ->
         val was = u.generating
-        val fillErrors = u.fillErrors.toMutableMap(); val picks = u.picks.toMutableMap()
+        val fillErrors = u.fillErrors.toMutableMap(); val picks = u.picks.toMutableMap(); val methods = u.methods.toMutableMap()
         val slots = new.slots.map { s ->
             if (s.state == "generating" || s.state == "ready") { fillErrors -= s.slotId; picks -= s.slotId; return@map s }
-            if (s.slotId in was && s.slotId !in u.starting) fillErrors[s.slotId] = "This shot didn’t generate. You weren’t charged for it."
+            // G2: a swap that didn't work (refunded) comes back to generate, which is then offered and priced on its own.
+            if (s.fallback == "generate") methods[s.slotId] = "generate"
+            if (s.slotId in was && s.slotId !in u.starting) fillErrors[s.slotId] =
+                if (s.fallback == "generate") s.reason ?: "The swap didn’t work and you weren’t charged · generate this shot instead"
+                else "This shot didn’t generate. You weren’t charged for it."
             picks[s.slotId] ?: s
         }
-        u.copy(fill = new.copy(slots = slots), fillErrors = fillErrors, picks = picks)
+        u.copy(fill = new.copy(slots = slots), fillErrors = fillErrors, picks = picks, methods = methods)
     }
 
     /** Prices every shot still to generate (free; nothing is held). */
@@ -194,7 +295,8 @@ class RecreateBuildModel(
             return
         }
         val got = kotlinx.coroutines.coroutineScope {
-            todo.map { s -> async { s to runCatching { api.estimateReferenceSlot(id, s, model) }.onFailure { if (it is CancellationException) throw it } } }.awaitAll()
+            val u = _ui.value
+            todo.map { s -> async { s to runCatching { api.estimateReferenceSlot(id, s, model, method = u.methods[s], keepBackground = u.keepBackground[s], locationId = u.locations[s]?.takeIf { u.keepBackground[s] == false }) }.onFailure { if (it is CancellationException) throw it } } }.awaitAll()
         }
         _ui.update { u ->
             val est = u.estimates.toMutableMap(); val errs = u.estimateErrors.toMutableMap()
@@ -212,6 +314,26 @@ class RecreateBuildModel(
         }
     }
 
+    /** G2: how this shot is made, swap into the reference's own shot or generate a new one; it is priced again. */
+    suspend fun setMethod(slotId: String, method: String) {
+        _ui.update { it.copy(methods = it.methods + (slotId to method), estimates = it.estimates - slotId, estimateErrors = it.estimateErrors - slotId) }
+        price()
+    }
+
+    /** G2, swap: keep the reference's setting, or use your own (the shot's brief names the place); priced again. */
+    suspend fun setKeepBackground(slotId: String, keep: Boolean) {
+        _ui.update { it.copy(keepBackground = it.keepBackground + (slotId to keep), estimates = it.estimates - slotId) }
+        if (!keep && _ui.value.places.isEmpty()) runCatching { api.suiteLocations() }.onFailure { if (it is CancellationException) throw it }
+            .getOrNull()?.let { l -> _ui.update { u -> u.copy(places = l.map { RecreateCastChoice(it.id, it.name) }) } }
+        price()
+    }
+
+    /** "Use your own setting": one of the studio's locations (free), or null for the brief's place; priced again. */
+    suspend fun setLocation(slotId: String, locationId: String?) {
+        _ui.update { u -> u.copy(locations = if (locationId == null) u.locations - slotId else u.locations + (slotId to locationId), estimates = u.estimates - slotId) }
+        price()
+    }
+
     /** "Use one of my takes": the shot comes from that take (nothing to generate, nothing to pay for it). */
     fun useTake(slotId: String, t: RecreateTakeChoice) = _ui.update { u ->
         val f = u.fill ?: return@update u
@@ -219,6 +341,26 @@ class RecreateBuildModel(
         val p = s.copy(state = "matched", takeId = t.id, jobId = null, estimate = null, estimateLabel = null, score = null, reason = "You picked “${t.caption}”")
         u.copy(fill = f.copy(slots = f.slots.map { if (it.slotId == slotId) p else it }), picks = u.picks + (slotId to p),
             fillErrors = u.fillErrors - slotId, estimateErrors = u.estimateErrors - slotId)
+    }.also {
+        // Fix shot: once the edit is built, the take goes straight into it, in place (or the edit is rebuilt).
+        if (_ui.value.builtSessionId != null) scope.launch { if (!replace(slotId, t.id)) apply() }
+    }
+
+    /**
+     * Fix shot (WS1 a7302fb): swaps one shot in the built edit, keeping its timing, transition, ramp, camera moves and
+     * look and the owner's other edits. False when the shot isn't in that edit any more (the caller rebuilds it).
+     */
+    private suspend fun replace(slotId: String, take: String): Boolean {
+        val u = _ui.value
+        val sid = u.builtSessionId ?: return false
+        return try {
+            val r = api.replaceRecipeSlot(id, slotId, sid, take, u.builtRevision)
+            _ui.update { it.copy(builtRevision = r.revision ?: it.builtRevision, message = r.note ?: "${it.shotName(slotId)} is swapped in the edit") }
+            true
+        } catch (e: CancellationException) { throw e } catch (e: ApiException) {
+            if (e.code == "slot_not_in_edit" || e.code == "not_built_here") false
+            else { _ui.update { it.copy(message = e.message ?: "Couldn’t swap the shot") }; true }
+        }
     }
 
     /**
@@ -248,6 +390,8 @@ class RecreateBuildModel(
     fun confirmBuild(): Job = scope.launch {
         val confirmed = _ui.value.confirmSlots ?: return@launch
         val model = modelId()
+        // Shots made anew after a build go into that edit in place when they're ready.
+        _ui.update { u -> u.copy(fixing = if (u.builtSessionId != null) confirmed.filter { it in u.remake }.toSet() else emptySet()) }
         _ui.update { it.copy(confirmSlots = null, building = true, buildWhenReady = true, starting = if (model != null) it.starting + confirmed else it.starting) }
         if (confirmed.isEmpty() || model == null) {
             if (_ui.value.isGenerating) startWatch() else { _ui.update { it.copy(building = false) }; apply() }
@@ -256,14 +400,21 @@ class RecreateBuildModel(
         val current = runCatching { api.referenceFill(id) }.getOrNull()
         for (s in confirmed) {
             try {
-                if (current?.slot(s)?.state.let { it != null && it != "to_generate" }) continue
-                val started = api.fillReferenceSlot(id, s, model)
+                // The server's own fill decides (never a shot filled twice), unless the person asked for this one anew.
+                if (s !in _ui.value.remake && current?.slot(s)?.state.let { it != null && it != "to_generate" }) continue
+                // The shot is made the way it was priced and confirmed (swap or generate, and its setting).
+                val e = _ui.value.estimates[s]
+                val started = api.fillReferenceSlot(id, s, model, method = e?.method, keepBackground = e?.keepBackground?.takeIf { e.method == "swap" },
+                    locationId = e?.background?.locationId?.takeIf { e.method == "swap" && !e.keepBackground })
                 _ui.update { u ->
                     val f = u.fill
-                    u.copy(fillErrors = u.fillErrors - s, fill = f?.copy(slots = f.slots.map { if (it.slotId == s) it.copy(state = "generating", jobId = started.jobId) else it }))
+                    u.copy(fillErrors = u.fillErrors - s, picks = u.picks - s, remake = u.remake - s, fill = f?.copy(slots = f.slots.map { if (it.slotId == s) it.copy(state = "generating", jobId = started.jobId) else it }))
                 }
             } catch (e: CancellationException) { throw e } catch (e: Exception) {
-                _ui.update { u -> u.copy(fillErrors = u.fillErrors + (s to "This shot didn’t start: ${e.message ?: "try again"}")) }
+                // WS1: a background plate that couldn't be made (502 background_failed) is never charged.
+                val line = if ((e as? ApiException)?.code == "background_failed") "The background couldn’t be made, so this shot didn’t start. You weren’t charged. Try again, or pick one of your locations."
+                    else "This shot didn’t start: ${e.message ?: "try again"}"
+                _ui.update { u -> u.copy(fillErrors = u.fillErrors + (s to line)) }
             } finally {
                 _ui.update { it.copy(starting = it.starting - s) }
             }
@@ -297,8 +448,13 @@ class RecreateBuildModel(
             return
         }
         _ui.update { it.copy(building = false) }
-        apply()
-        _ui.update { it.copy(buildWhenReady = false) }
+        val fix = u.fixing
+        // Fix shot: only shots made anew after the build, each swapped into the edit in place; otherwise a full build.
+        val toBuild = u.toGenerate.isNotEmpty() || u.slots.any { s -> u.slotFill(s.id)?.state == "ready" && s.id !in fix && u.builtSessionId == null }
+        val swapped = fix.isNotEmpty() && u.builtSessionId != null && !toBuild &&
+            fix.all { s -> u.slotFill(s)?.jobId?.let { j -> replace(s, j) } == true }
+        if (swapped) _ui.update { it.copy(mode = RecreateMode.Compare) } else apply()
+        _ui.update { it.copy(buildWhenReady = false, fixing = emptySet()) }
     }
 
     /** Builds the edit in an edit session on the take the first shot comes from, then shows Compare. */
@@ -322,7 +478,7 @@ class RecreateBuildModel(
             val session = api.openEditSession(OpenEditSessionRequest(takeId = base, device = "android"))
             val r = api.applyRecipe(id, session.id, session.revision, slots)
             _ui.update { v ->
-                v.copy(building = false, match = r.match ?: v.match, builtTakeId = base, mode = RecreateMode.Compare,
+                v.copy(building = false, match = r.match ?: v.match, builtTakeId = base, builtSessionId = session.id, builtRevision = r.revision, mode = RecreateMode.Compare,
                     message = r.waiting.takeIf { it.isNotEmpty() }?.let { w -> "${w.joinToString(" and ") { v.shotName(it) }} isn’t ready yet, so the edit leaves it out for now" })
             }
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
@@ -330,6 +486,21 @@ class RecreateBuildModel(
         }
     }
 
-    /** "Fix shot 2": back to the recipe on the weakest shot, to pick another take for it. */
+    /**
+     * "Make a new one": a shot that comes from a take (or was generated) is made anew. It reads "To generate" with its
+     * price, and the next Build confirms and generates it like any other new shot.
+     */
+    suspend fun remake(slotId: String) {
+        _ui.update { u ->
+            val f = u.fill ?: return@update u
+            val s = f.slot(slotId) ?: return@update u
+            val p = s.copy(state = "to_generate", takeId = null, jobId = null, score = null, reason = "A new shot will be made for this one")
+            u.copy(fill = f.copy(slots = f.slots.map { if (it.slotId == slotId) p else it }), picks = u.picks + (slotId to p), remake = u.remake + slotId,
+                fillErrors = u.fillErrors - slotId)
+        }
+        price()
+    }
+
+    /** "Fix shot 2": back to the recipe on the weakest shot, to pick another take for it or make it anew. */
     fun fixWeakest() = _ui.update { u -> u.copy(selected = u.weakest ?: u.selected, mode = RecreateMode.Recipe) }
 }

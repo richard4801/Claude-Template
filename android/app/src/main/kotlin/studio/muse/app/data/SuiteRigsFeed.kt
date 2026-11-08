@@ -234,7 +234,50 @@ data class SuiteFeedItem(
 
 /** `GET /v1/suite/feed`: a page, newest first. Pass [nextCursor] back until it is null. */
 @Serializable
-data class SuiteFeedPage(val items: List<SuiteFeedItem> = emptyList(), val nextCursor: String? = null)
+data class SuiteFeedPage(val items: List<SuiteFeedItem> = emptyList(), val nextCursor: String? = null,
+    /** Build step 3: the "Queued" group, on the first page only (no cursor, no collection). */
+    val queued: List<QueuedShot> = emptyList())
+
+/** Build step 3 (plans/api.md "The Suite queue"): a shot saved to run later. Nothing is held until Run. */
+@Serializable
+data class QueuedShot(
+    val id: String,
+    val kind: String = "queued",
+    val title: String = "",
+    val tool: String = "shot",
+    val modelId: String? = null,
+    val userId: String = "",
+    val mine: Boolean = true,
+    val estimate: Double = 0.0,
+    /** "Run · $0.40". */
+    val buttonLabel: String = "Run",
+    val prompt: String? = null,
+    val draft: SuiteDraft? = null,
+    val createdAt: Long = 0,
+)
+
+/** `POST /v1/suite/queue/{id}/estimate`: today's price ([changed]: it moved since queuing). */
+@Serializable
+data class QueuedEstimate(val id: String, val estimate: Double = 0.0, val buttonLabel: String = "Run", val changed: Boolean = false)
+
+/** `POST /v1/suite/queue/{id}/run`: the job that started. */
+@Serializable
+data class QueuedRun(val queuedId: String, val job: Job)
+
+/** Build step 3 (plans/api.md "Library collections"): a named group of the studio's takes and photos. */
+@Serializable
+data class LibraryCollection(
+    val id: String,
+    val name: String,
+    val userId: String = "",
+    val mine: Boolean = false,
+    val canEdit: Boolean = false,
+    val count: Int = 0,
+    val cover: ImageRef? = null,
+    val createdAt: Long = 0,
+    val updatedAt: Long = 0,
+    val takeIds: List<String>? = null,
+)
 
 /** The feed's filters and paging. [tool] and [status] are sent as comma lists; empty = all. [limit] 1–60 (server default 30). */
 data class SuiteFeedQuery(
@@ -243,6 +286,8 @@ data class SuiteFeedQuery(
     val model: String? = null,
     val cursor: String? = null,
     val limit: Int? = null,
+    /** Only this collection's takes and photos (no pending jobs, no queue). */
+    val collection: String? = null,
 ) {
     /** The query parameters, in a fixed order, without empty ones. */
     fun params(): Map<String, String> = buildMap {
@@ -251,6 +296,7 @@ data class SuiteFeedQuery(
         model?.takeIf { it.isNotBlank() }?.let { put("model", it) }
         cursor?.takeIf { it.isNotBlank() }?.let { put("cursor", it) }
         limit?.let { put("limit", it.toString()) }
+        collection?.takeIf { it.isNotBlank() }?.let { put("collection", it) }
     }
 
     /** "tool=shot,photo&status=done&limit=30" (unencoded; for logs and tests). */

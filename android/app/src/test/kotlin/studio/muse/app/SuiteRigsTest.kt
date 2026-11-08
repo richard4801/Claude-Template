@@ -1,0 +1,154 @@
+package studio.muse.app
+
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+import studio.muse.app.data.AppPrefs
+import studio.muse.app.data.FakeMuseApi
+import studio.muse.app.data.MemoryPrefs
+import studio.muse.app.data.SuiteRig
+import studio.muse.app.ui.screens.suite.SlotId
+import studio.muse.app.ui.screens.suite.SlotKind
+import studio.muse.app.ui.screens.suite.SuiteFeedFilter
+import studio.muse.app.ui.screens.suite.applyDefaultRigIfAny
+import studio.muse.app.ui.screens.suite.applySavedRig
+import studio.muse.app.ui.screens.suite.compare
+import studio.muse.app.ui.screens.suite.loadFeed
+import studio.muse.app.ui.screens.suite.loadSavedRigs
+import studio.muse.app.ui.screens.suite.reuseSettings
+import studio.muse.app.ui.screens.suite.saveRig
+import studio.muse.app.ui.screens.suite.undoRig
+import studio.muse.app.ui.screens.suite.useAsStartFrame
+import studio.muse.app.ui.screens.suite.vary
+import studio.muse.app.ui.screens.suite.askRun
+import studio.muse.app.ui.screens.suite.confirmRun
+import studio.muse.app.ui.screens.suite.createCollection
+import studio.muse.app.ui.screens.suite.queueShot
+import studio.muse.app.ui.screens.suite.toggleInCollection
+import studio.muse.app.ui.screens.suite.composer.ComposerDraft
+import studio.muse.app.ui.screens.suite.composer.ComposerDrafts
+import studio.muse.app.ui.screens.suite.composer.ComposerSettings
+import studio.muse.app.ui.screens.suite.composer.PromptPart
+import studio.muse.app.ui.screens.suite.composer.PromptTokens
+
+/** The AI suite plan in the current Suite on demo mode: Reuse settings, Vary, start frame, Compare, rigs and the feed. Nothing spends. */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
+class SuiteRigsTest {
+    private fun <T> withSuite(f: suspend (AppContainer, FakeMuseApi) -> T): T = runBlocking {
+        val scope = MainScope()
+        try {
+            val fake = FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0)
+            val c = AppContainer(scope, MemoryPrefs(AppPrefs(useFake = true, token = "t", role = "owner")), fake, null)
+            c.repo.refresh()
+            c.suite.load()
+            f(c, fake)
+        } finally { scope.cancel() }
+    }
+
+    @Test fun reuseSettingsAndVaryPutTheTakesComposerBack() = withSuite { c, _ ->
+        val model = c.repo.state.value.models.first()
+        val d = ComposerDraft(tokens = PromptTokens(listOf(PromptPart.Mention("character", model.id, model.name, 1), PromptPart.Text(" on the pier at sunset"))),
+            settings = ComposerSettings(body = "phone"), aspect = "16:9", duration = 6)
+        val take = c.repo.state.value.takes.first { it.kind == "take" }.copy(draft = ComposerDrafts.draft(d))
+        c.suite.composer.value = ComposerDraft()
+        assertNotNull(c.suite.reuseSettings(take))
+        assertEquals("16:9", c.suite.composer.value.aspect)
+        assertEquals(d.tokens, c.suite.composer.value.tokens)
+        c.suite.composer.value = ComposerDraft()
+        c.suite.vary(take)
+        assertEquals(6, c.suite.composer.value.duration)
+        assertNull(c.suite.vary(take.copy(draft = null, jobId = null))) // made before Reuse settings
+    }
+
+    @Test fun startFrameAndCompare() = withSuite { c, _ ->
+        val takes = c.repo.state.value.takes.filter { it.kind == "take" }
+        c.suite.useAsStartFrame(takes[0])
+        assertEquals(takes[0].thumb, c.suite.composerSlots.value[SlotId(SlotKind.START)]?.image)
+        assertFalse(c.suite.compare(takes[0]))
+        assertTrue(c.suite.compare(takes[1]))
+        assertEquals(listOf(takes[0].id, takes[1].id), c.suite.compareIds.value)
+        c.suite.compare(takes[1]) // tapping one again takes it out
+        assertEquals(listOf(takes[0].id), c.suite.compareIds.value)
+    }
+
+    @Test fun savedRigsApplyWithUndoAndDefaultRigsFillOnlyAuto() = withSuite { c, fake ->
+        val cam = fake.suite.camera
+        val body = cam.bodies.first().id; val lens = cam.lenses.first().id; val otherBody = cam.bodies.last().id; val otherLens = cam.lenses.last().id
+        c.suite.composer.value = ComposerDraft(settings = ComposerSettings(body = body, lens = lens))
+        assertTrue(c.suite.saveRig("Golden hour"))
+        c.suite.loadSavedRigs()
+        val r = c.suite.savedRigs.value.first { it.name == "Golden hour" }
+        c.suite.composer.value = ComposerDraft()
+        c.suite.applySavedRig(r)
+        assertEquals(body, c.suite.composer.value.settings.body)
+        c.suite.undoRig()
+        assertNull(c.suite.composer.value.settings.body)
+        // A model's default rig fills only the rows still on Auto.
+        val m = c.repo.state.value.models.first()
+        fake.setModelDefaultRig(m.id, SuiteRig(body = otherBody, lens = otherLens))
+        c.repo.refresh()
+        c.suite.composer.value = ComposerDraft(tokens = PromptTokens(listOf(PromptPart.Mention("character", m.id, m.name, 1))), settings = ComposerSettings(lens = lens))
+        assertTrue(c.suite.applyDefaultRigIfAny())
+        assertEquals(otherBody, c.suite.composer.value.settings.body) // Auto row filled
+        assertEquals(lens, c.suite.composer.value.settings.lens) // the user's row kept
+    }
+
+    @Test fun theOwnerSwitchesPaidHelpersOffAndSetsTheLimit() = withSuite { _, fake ->
+        assertTrue(fake.editorSettings().on)
+        val off = fake.patchEditorSettings(paidHelpers = "off", cap = 3.0)
+        assertFalse(off.on); assertEquals(3.0, off.cap, 0.0)
+        val f = fake.editorFeatures()
+        assertEquals("false", (f["captions"] as kotlinx.serialization.json.JsonObject)["available"].toString())
+        val refused = runCatching { fake.startEditorJob(studio.muse.app.data.EditorJobRequest("captions", studio.muse.app.data.EditorSourceDto(takeId = "t_j1"))) }.exceptionOrNull()
+        assertEquals("editor_paid_off", (refused as studio.muse.app.data.ApiException).code)
+        assertEquals(studio.muse.app.data.EditorSettings.DEFAULT_CAP, fake.patchEditorSettings(paidHelpers = "on", resetCap = true).cap, 0.0)
+    }
+
+    @Test fun aQueuedShotRunsOnlyAfterItsPriceIsConfirmed() = withSuite { c, fake ->
+        val m = c.repo.state.value.models.first()
+        val req = studio.muse.app.data.SuiteShotRequest(modelId = m.id, prompt = "Rain on the window, she reads", duration = 5, quality = "draft", takes = 1)
+        val jobsBefore = fake.listJobs().size
+        assertTrue(c.suite.queueShot(req))
+        assertTrue(c.suite.loadFeed(photo = false))
+        val q = c.suite.queued.value.single()
+        assertTrue(q.buttonLabel.startsWith("Run · $"))
+        assertEquals(jobsBefore, fake.listJobs().size) // nothing runs or is held while queued
+        c.suite.askRun(q)
+        assertNotNull(c.suite.runAsk.value)
+        val j = c.suite.confirmRun()
+        assertNotNull(j)
+        assertTrue(c.suite.queued.value.isEmpty())
+    }
+
+    @Test fun collectionsGatherTakesAndFilterTheFeed() = withSuite { c, _ ->
+        val take = c.repo.state.value.takes.first { it.kind == "take" }
+        assertTrue(c.suite.createCollection("Café series", listOf(take.id)))
+        val col = c.suite.collections.value.first()
+        assertEquals(1, col.count)
+        c.suite.feedCollection.value = col.id
+        assertTrue(c.suite.loadFeed(photo = false))
+        assertTrue(c.suite.feed.value!!.all { it.takeId == take.id })
+        assertTrue(c.suite.queued.value.isEmpty()) // a collection's feed has no queue
+        assertTrue(c.suite.toggleInCollection(col.id, take.id, inIt = true))
+        assertEquals(0, c.suite.collections.value.first().count)
+    }
+
+    @Test fun theFeedLoadsAndFilters() = withSuite { c, _ ->
+        assertTrue(c.suite.loadFeed(photo = false))
+        assertNotNull(c.suite.feed.value)
+        c.suite.feedFilter.value = SuiteFeedFilter.FAILED
+        assertTrue(c.suite.loadFeed(photo = false))
+        assertTrue(c.suite.feed.value!!.all { it.status == "failed" })
+    }
+}

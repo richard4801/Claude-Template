@@ -7,7 +7,9 @@ export type TextBox = { x: number; y: number; w: number; h: number };
 export type TextItem = { id: string; startSec: number; endSec: number; box: TextBox; words: string | null; sizeFrac: number; color: string;
   /** The nearest editor font family (sans, serif, rounded, condensed, mono, marker). */
   fontId: 'sans' | 'serif' | 'rounded' | 'condensed' | 'mono' | 'marker';
-  animIn: 'cut' | 'fade' | null; animOut: 'cut' | 'fade' | null; confidence: number };
+  animIn: 'cut' | 'fade' | 'typewriter' | null; animOut: 'cut' | 'fade' | null;
+  /** How long the fade or typewriter in and the fade out take (G4). */
+  animInSec?: number; animOutSec?: number; confidence: number };
 
 const W = 192, BANDS = 40, FPS = 6;
 /** The recipe's size cap (≈ 256 KB in all): at most this many text items. */

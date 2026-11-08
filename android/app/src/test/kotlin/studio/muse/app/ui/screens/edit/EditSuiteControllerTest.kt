@@ -63,6 +63,53 @@ class EditSuiteControllerTest {
     private fun EditSuiteController.p() = project!!
 
     /** Remove background (workstream 1): an alpha matte on the clip, and tap to keep with its own price and points. */
+    @Test fun removeBackgroundWaitsWhileTheServerSaysItIsComingSoon() = runTest {
+        var runs = 0; var estimates = 0
+        val b = object : EditBackend by StubBackend() {
+            override suspend fun helpersOff() = mapOf("matte" to "Coming soon")
+            override suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?): Pair<EditorEstimate?, String?> { if (kind == "matte") estimates++; return EditorEstimate(kind, 0.02) to null }
+            override suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?> { runs++; return null to "no" }
+        }
+        val c = controller(b)
+        c.act(EditAction.EffectsTab("Mask")); advanceUntilIdle()
+        assertEquals("Coming soon", c.ui.value.matteOff)
+        c.act(EditAction.RemoveBackground); c.act(EditAction.TapToKeep(true)); advanceUntilIdle()
+        assertEquals(0, runs); assertEquals(0, estimates) // nothing priced, nothing run
+        assertEquals(null, c.ui.value.keep)
+        assertEquals(null, c.p().mainClips.first().alphaMatte)
+    }
+
+    @Test fun paidHelpersOffReadPlainlyAndNeverRun() = runTest {
+        var runs = 0
+        val b = object : EditBackend by StubBackend() {
+            override suspend fun helpersOff() = mapOf("captions" to "Turned off by the studio owner", "denoise" to "Turned off by the studio owner", "matte" to "Turned off by the studio owner")
+            override suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?> { runs++; return null to "no" }
+        }
+        val c = controller(b)
+        c.act(EditAction.Open(Panel.CAPTIONS)); advanceUntilIdle()
+        assertEquals("Turned off by the studio owner", c.ui.value.helpersOff["captions"])
+        c.act(EditAction.AutoCaptions); c.act(EditAction.NoiseReduction(true)); c.act(EditAction.RemoveBackground); advanceUntilIdle()
+        assertEquals(0, runs)
+        assertEquals("Turned off by the studio owner", c.ui.value.message)
+    }
+
+    @Test fun trackHeadersMuteAndHideAsOneUndoEach() = runTest {
+        val c = controller(StubBackend())
+        val main = c.p().main.id
+        c.act(EditAction.ToggleTrackMuted(main)); assertEquals(true, c.p().main.muted)
+        c.act(EditAction.ToggleTrackHidden(main)); assertEquals(true, c.p().main.hidden)
+        c.act(EditAction.Undo); assertEquals(null, c.p().main.hidden)
+        c.act(EditAction.Undo); assertEquals(null, c.p().main.muted)
+    }
+
+    @Test fun aClipAlreadyCutOutCanBeTurnedOffEvenWhileComingSoon() = runTest {
+        val c = controller(StubBackend())
+        c.act(EditAction.RemoveBackground); advanceUntilIdle()
+        assertTrue(c.p().mainClips.single().alphaMatte != null)
+        c.act(EditAction.KeepBackground)
+        assertEquals(null, c.p().mainClips.single().alphaMatte)
+    }
+
     @Test fun removeBackgroundSetsAnAlphaMatte() = runTest {
         val arrived = ArrayList<String>()
         val b = object : EditBackend by StubBackend() {

@@ -67,6 +67,8 @@ extension SnapshotRunner {
         }
         store.takes.removeAll { $0.id.hasPrefix("rx_") }
         store.takes.insert(contentsOf: made, at: 0)
+        // The demo API must know them too, or every AI helper on them fails with "Take not found" (found 2026-11-08).
+        await (store.api as? FakeMuseAPI)?.adoptTakes(made)
 
         func step(_ name: String, wait: Double, _ show: @MainActor () -> Void) async {
             note("START \(name)")
@@ -87,6 +89,8 @@ extension SnapshotRunner {
         store.editor = nil
         // Every control of the Edit suite, on a take with real stereo AAC sound (owner crash 2026-11-08: Hook templates).
         await controlsCheck(store, takeId: "rx_full", note: note)
+        // Real AI editing (2026-11-08): paid helpers ask first with their price; the guardrails' answers show at the button.
+        await paidHelpersCheck(store, takeId: "rx_full", note: note)
         store.takes.removeAll { $0.id.hasPrefix("rx_") }
         store.go(.home)
         note("ALL DONE")
@@ -172,6 +176,43 @@ extension SnapshotRunner {
         input.markAsFinished()
         await writer.finishWriting()
         if writer.status != .completed { throw writer.error ?? ApiError("edit_check", "Couldn't write the test video") }
+    }
+
+    // MARK: Paid AI helpers (2026-11-08): confirm with the price, and the guardrails' answers
+
+    /// With the fake priced (no money moves), a paid helper waits for the owner: Cancel starts nothing, Run starts it and its
+    /// result lands. With paid helpers switched off, the helpers are unavailable with the reason; with today's cap reached,
+    /// the refusal shows at the helper.
+    static func paidHelpersCheck(_ store: AppStore, takeId: String, note: (String) -> Void) async {
+        note("START paid_helpers")
+        guard let fake = store.api as? FakeMuseAPI else { note("DONE paid_helpers (skipped: not the demo API)"); return }
+        guard let s = store.makeEditSuiteSession(takeId: takeId) else { note("FAIL paid_helpers: no session for \(takeId)"); return }
+        defer { s.close() }
+        await s.load()
+        guard s.isReady else { note("FAIL paid_helpers: the edit didn't open"); return }
+        await fake.setEditorGuardrails(priceUsd: 0.05)
+        await s.autoCaptions()
+        guard let ask = s.paidAsk else { note("FAIL paid_helpers: a priced helper started without asking (last error: \(s.lastError ?? "none"), job: \(s.jobs[.captions]?.state ?? "none"))"); await fake.setEditorGuardrails(); return }
+        if ask.title != "Auto-captions" || !ask.price.contains("0.05") { note("FAIL paid_helpers: asked \(ask.title) · \(ask.price)") }
+        s.cancelPaid()
+        if s.paidAsk != nil || s.jobs[.captions] != nil { note("FAIL paid_helpers: Cancel started the helper") }
+        await s.autoCaptions()
+        s.confirmPaid()
+        for _ in 0..<100 where s.project.captionTrack == nil { try? await Task.sleep(for: .milliseconds(100)) }
+        guard s.project.captionTrack != nil else { note("FAIL paid_helpers: Run didn't add the captions"); await fake.setEditorGuardrails(); return }
+        // Today's cap reached: the refusal shows at the helper, nothing asks.
+        await fake.setEditorGuardrails(priceUsd: 0.05, capHit: true)
+        await s.autoCaptions()
+        if s.paidAsk != nil { note("FAIL paid_helpers: asked although today's cap is reached") }
+        if !(s.helperNote(.captions) ?? "").contains("limit") { note("FAIL paid_helpers: no cap note at the button (\(s.helperNote(.captions) ?? "none"))") }
+        // Paid helpers switched off: unavailable, with the reason.
+        await fake.setEditorGuardrails(priceUsd: 0.05, paidOff: true)
+        await s.refreshFeatures()
+        if s.helperAvailable(.captions) || s.helperAvailable(.matte) || s.helperAvailable(.denoise) { note("FAIL paid_helpers: helpers still offered while switched off") }
+        if !(s.helperNote(.denoise) ?? "").contains("switched off") { note("FAIL paid_helpers: no switched-off reason (\(s.helperNote(.denoise) ?? "none"))") }
+        if !s.helperAvailable(.beats) { note("FAIL paid_helpers: the free beat detection went too") }
+        await fake.setEditorGuardrails()
+        note("DONE paid_helpers")
     }
 
     // MARK: Remove background (2026-11-08): the alpha matte in the real renderer

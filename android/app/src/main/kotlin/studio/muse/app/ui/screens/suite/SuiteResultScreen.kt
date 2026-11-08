@@ -80,6 +80,7 @@ fun SuiteResultScreen(jobId: String) {
     val job = st.job(jobId)
     val takes = st.takes.filter { it.jobId == jobId && it.kind == "take" }.sortedBy { it.index }
     var picked by remember { mutableStateOf<String?>(null) }
+    var collecting by remember { mutableStateOf(false) } // build step 3: Library collections
     val take = takes.firstOrNull { it.id == picked } ?: takes.firstOrNull()
     val pane = SuitePane.of(job, st.takes, job?.modelName)
     val retake: () -> Unit = {
@@ -92,6 +93,15 @@ fun SuiteResultScreen(jobId: String) {
         Column(Modifier.fillMaxSize()) {
             TopBar(job?.title ?: "Take", onBack = { nav.back() }) {
                 MoreMenu(listOfNotNull(
+                    // The AI suite plan: the rest of a take's actions (Vary, Extend and Edit are in the row below).
+                    take?.let { t -> MenuItem("image", "Use as start frame") { store.useAsStartFrame(t); nav.go(Routes.suiteCompose("shot")) } },
+                    take?.let { t -> MenuItem("sliders", "Reuse settings") {
+                        val tool = store.reuseSettings(t)
+                        if (tool != null) nav.go(Routes.suiteCompose(tool.id)) else c.repo.toast("This take was made before Reuse settings")
+                    } },
+                    take?.let { t -> MenuItem("columns", if (t.id in store.compareIds.value) "Stop comparing" else "Compare") { if (store.compare(t)) nav.go(Routes.suiteCompose("shot")) } },
+                    take?.let { MenuItem("stack", "Add to collection") { collecting = true } },
+                    MenuItem("refresh", "Retake now", onClick = retake),
                     MenuItem("grid", "Library") { nav.tab(Routes.GALLERY) },
                     if (store.owner) MenuItem("quality", "Engines (owner)") { nav.go(Routes.SUITE_ENGINES) } else null,
                 ))
@@ -139,7 +149,8 @@ fun SuiteResultScreen(jobId: String) {
         Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 92.dp).fillMaxWidth().background(m.t.bg).drawBehind {
             drawLine(m.t.line, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }.padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             Action("heart", if (take?.final == true) "Kept" else "Keep", take != null) { take?.let { t -> scope.launch { c.repo.setTakeStatus(t.id, if (t.final) "test" else "final") } } }
-            Action("refresh", "Retake", true, retake)
+            // Vary: this take's settings back in the composer; nothing renders until Generate (which shows the price).
+            Action("shuffle", "Vary", take != null) { take?.let { t -> store.vary(t)?.let { tool -> nav.go(Routes.suiteCompose(tool.id)) } } }
             Action("scissors", "Edit", take != null) { take?.let { nav.go(Routes.editTake(it.id)) } }
             Action("extend", "Extend", canExtend) {
                 take?.let { t ->
@@ -152,6 +163,7 @@ fun SuiteResultScreen(jobId: String) {
         }
         TabBar(Routes.SUITE)
         upscaleFor?.let { id -> UpscaleSheet(id, androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 600) { j -> nav.go(Routes.suiteTake(j.id)) } }
+        if (collecting) take?.let { t -> CollectionsSheet(t.id) { collecting = false } }
     }
 }
 

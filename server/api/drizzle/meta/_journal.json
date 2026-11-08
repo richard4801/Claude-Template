@@ -134,6 +134,20 @@
       "when": 1794135843453,
       "tag": "0018_recreate_links",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794143585608,
+      "tag": "0019_editor_controls",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794149573727,
+      "tag": "0020_library_collections_suite_queue",
+      "breakpoints": true
     }
   ]
 }
