@@ -77,13 +77,21 @@ data class RecipeUi(val phase: RecipePhase = RecipePhase.Pick, val referenceName
 
 /** The screen: the picker, the upload and the server's analysis, then the recipe. */
 @Composable
-fun RecipeScreen(onBack: () -> Unit) {
+fun RecipeScreen(onBack: () -> Unit, referenceId: String? = null) {
     val c = LocalContainer.current
     val context = androidx.compose.ui.platform.LocalContext.current
     var ui by remember { mutableStateOf(RecipeUi()) }
     var picked by remember { mutableStateOf<Uri?>(null) }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) picked = uri }
     BackHandler(onBack = onBack)
+    // A reference from the library (Recipes → "Use in Recreate"): its recipe straight away.
+    LaunchedEffect(referenceId) {
+        val rid = referenceId ?: return@LaunchedEffect
+        ui = RecipeUi(RecipePhase.Analysing(.5f, "Opening the reference"), null)
+        ui = runCatching { c.repo.api.reference(rid) }.fold(
+            { ref -> ref.recipe?.let { RecipeUi(RecipePhase.Ready(it), ref.name) } ?: RecipeUi(RecipePhase.Failed(ref.error ?: "This reference has expired."), ref.name) },
+            { e -> RecipeUi(RecipePhase.Failed(e.message ?: "Couldn't open the reference"), null) })
+    }
     LaunchedEffect(picked) {
         val uri = picked ?: return@LaunchedEffect
         val name = c.media?.displayName(uri)?.substringBeforeLast('.')?.take(80) ?: "Your reference"

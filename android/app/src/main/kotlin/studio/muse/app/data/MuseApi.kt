@@ -211,6 +211,22 @@ interface MuseApi {
     suspend fun uploadSuiteMedia(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit = {}): SuiteMediaRef =
         throw ApiException("unsupported", "Uploading files needs the studio server")
 
+    // The learning editor (workstream 3, plans/api.md "Learning editor", owner only). Defaults: a server without it.
+    suspend fun playbook(): List<LearnRule> = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    suspend fun addRule(req: LearnRuleRequest): LearnRule = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    suspend fun patchRule(id: String, req: LearnRuleRequest): LearnRule = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    suspend fun deleteRule(id: String) { throw ApiException("not_found", "This studio server doesn't have the playbook yet") }
+    suspend fun lessons(): List<LearnLesson> = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    suspend fun corrections(limit: Int = 50): List<LearnCorrection> = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    suspend fun recipes(q: String? = null, tags: List<String> = emptyList(), origin: String? = null): List<LearnRecipeEntry> = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    suspend fun recipe(id: String): LearnRecipeEntry = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    suspend fun patchRecipe(id: String, req: LearnRecipePatch): LearnRecipeEntry = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    suspend fun deleteRecipe(id: String) { throw ApiException("not_found", "This studio server doesn't have the playbook yet") }
+    suspend fun nearestRecipes(id: String, k: Int = 3): LearnNearest = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    suspend fun learnGaps(limit: Int = 10): List<LearnGap> = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    /** A reference's poster PNG (an authenticated route, so not an image URL); null when it has expired. */
+    suspend fun referencePoster(referenceId: String): ByteArray? = null
+
     // Recreate this edit (workstream 1, plans/api.md "Recreate this edit"). Defaults: a server without it.
     /** A studio video upload (≤ 60 s, from [uploadEditorFile]) becomes a reference; its analysis runs on the server. */
     suspend fun createReference(uploadId: String, name: String?): studio.muse.core.edit.RecipeReference =
