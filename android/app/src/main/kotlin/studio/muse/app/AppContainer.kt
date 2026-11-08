@@ -34,6 +34,8 @@ class AppContainer(
     httpFactory: ((String) -> MuseApi)? = null,
 ) {
     val prefs: StateFlow<AppPrefs> = prefsStore.prefs.stateIn(scope, SharingStarted.Eagerly, initialPrefs)
+    /** Share → MUSE: a link or video another app shared, until Edit → Recreate takes it (MainActivity sets it). */
+    val shared = kotlinx.coroutines.flow.MutableStateFlow<studio.muse.app.data.SharedReference?>(null)
     val repo = if (httpFactory != null) MuseRepository(scope, prefsStore, fake, httpFactory) else MuseRepository(scope, prefsStore, fake)
     val drafts = Drafts()
     val warmUi = studio.muse.app.data.WarmUi()

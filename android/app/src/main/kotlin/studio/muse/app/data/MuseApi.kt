@@ -231,6 +231,13 @@ interface MuseApi {
     /** A studio video upload (≤ 60 s, from [uploadEditorFile]) becomes a reference; its analysis runs on the server. */
     suspend fun createReference(uploadId: String, name: String?): studio.muse.core.edit.RecipeReference =
         throw ApiException("not_found", "This studio server can't read edits yet")
+    /**
+     * A shared link (TikTok, Instagram Reel, YouTube) becomes a reference: the server fetches it within the platforms'
+     * rules. A link it can't use answers in words (link_unsupported, link_private, link_downloads_off, link_too_big,
+     * link_blocked, too_long): show the message and offer the saved file instead.
+     */
+    suspend fun createReferenceFromLink(url: String, name: String?): studio.muse.core.edit.RecipeReference =
+        throw ApiException("not_found", "This studio server can't read links yet · save the video and share the file")
     /** The reference's state and step while it is analysed, and its recipe once ready. */
     suspend fun reference(id: String): studio.muse.core.edit.RecipeReference = throw ApiException("not_found", "Reference not found")
 

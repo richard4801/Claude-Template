@@ -472,6 +472,9 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         createReference(buildJsonObject { put("uploadId", kotlinx.serialization.json.JsonPrimitive(uploadId)); if (name != null) put("name", kotlinx.serialization.json.JsonPrimitive(name.take(80))) })
     })
     override suspend fun reference(id: String) = studio.muse.core.edit.RecipeJson.reference(call { reference(id) })
+    override suspend fun createReferenceFromLink(url: String, name: String?) = studio.muse.core.edit.RecipeJson.reference(call {
+        createReference(buildJsonObject { put("url", kotlinx.serialization.json.JsonPrimitive(url)); if (name != null) put("name", kotlinx.serialization.json.JsonPrimitive(name.take(80))) })
+    })
 
     // Edit sessions (workstream 3)
     override suspend fun openEditSession(req: OpenEditSessionRequest) = call { openEditSession(req) }
