@@ -115,7 +115,7 @@ class ClaudeLogicTest {
         ui = ChatReducer.loaded(ui, thread.copy(messages = ui.messages))
         assertEquals("Stopped. Send a message to carry on.", ClaudeText.ended(ui.turn))
         val failed = ChatReducer.live(base().copy(turn = LiveTurn("tu_2", "queued")), ClaudeLive("turn", turn = ClaudeTurn("tu_2", "ct_1", state = "failed", error = "Your Mac didn't pick this up")))
-        assertEquals("Your Mac didn't pick this up", ClaudeText.ended(failed.turn))
+        assertEquals("Your Mac didn't pick this up.", ClaudeText.ended(failed.turn))
     }
 
     @Test fun statusLines() {

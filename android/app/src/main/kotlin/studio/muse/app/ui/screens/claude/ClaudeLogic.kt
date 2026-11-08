@@ -381,6 +381,8 @@ object ChatClean {
     private val ID = Regex("""`?\b(?:[a-z]{1,8}_)+(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{1,40}\b`?""")
     private val HEX = Regex("""\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{16,}\b""")
     private val LABELLED_ID = Regex("""(?i)\b(?:upload ?id|thread ?id|session ?id|turn ?id|id)\s*[:=]?\s*$""")
+    private val MUSE_TAG = Regex("""<(muse[-_][a-z_-]+)\b[^>]*>[\s\S]*?</\1>""", RegexOption.IGNORE_CASE)
+    private val MUSE_OPEN = Regex("""<muse[-_][a-z_-]+\b""", RegexOption.IGNORE_CASE)
     private val TOOL_WORD = Regex("""\b[a-z]+(?:_[a-z]+)+\b""")
 
     /** Claude's reply, ready for ChatMarkdown. Safe mid-stream: an unfinished brief or JSON line is hidden. */
@@ -403,7 +405,7 @@ object ChatClean {
     /** A tool's summary as one short line, or null when nothing usable is left (the row then uses the tool's name in words). */
     fun summary(s: String?): String? {
         val t = s?.let { tidy(scrub(stripTags(it))).trim() }?.takeIf { it.isNotEmpty() } ?: return null
-        if (looksLikeJson(t) || t.startsWith("{") || t.startsWith("[{") || t.contains("\":") || TRACE.containsMatchIn(t.lineSequence().first().trim())) return null
+        if (Regex("""^(?i)(error|exception|traceback|fatal)\b""").containsMatchIn(t) || looksLikeJson(t) || t.startsWith("{") || t.startsWith("[{") || t.contains("\":") || TRACE.containsMatchIn(t.lineSequence().first().trim())) return null
         val line = t.lineSequence().first().trim()
         return if (line.length > 80) line.take(77).trimEnd() + "…" else line
     }
@@ -469,7 +471,8 @@ object ChatClean {
     /** `<system-reminder>…</system-reminder>`, `<thinking>…`, tool markup: removed with what they hold; an unclosed one hides the rest. */
     fun stripTags(text: String): String {
         if ('<' !in text) return text
-        var s = text
+        // MUSE's own wrappers (<muse-brief>, <muse_context>…), closed or still open.
+        var s = MUSE_TAG.replace(text, "").let { t -> MUSE_OPEN.find(t)?.let { t.substring(0, it.range.first) } ?: t }
         for (name in TAGS) {
             while (true) {
                 val open = s.indexOf("<$name", ignoreCase = true)

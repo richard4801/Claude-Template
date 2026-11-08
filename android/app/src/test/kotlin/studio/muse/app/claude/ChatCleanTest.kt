@@ -94,7 +94,7 @@ class ChatCleanTest {
         assertEquals("Working", ChatClean.assistantText("Working<system-reminder>half a brief, still strea"))
         assertEquals("Set.\n\nNext.", ChatClean.assistantText("Set.\n\n```json\n{\"a\":1}\n```\n\nNext."))
         assertEquals("Saved.", ChatClean.assistantText("Saved.\n{\"ok\":true}"))
-        assertEquals("Exported Final cut.mp4.", ChatClean.assistantText("Exported /Users/jenne/Movies/Final cut.mp4."))
+        assertEquals("Exported Final-cut.mp4.", ChatClean.assistantText("Exported /Users/jenne/Movies/Final-cut.mp4."))
         assertEquals("```sh\nls /Users/jenne\n```", ChatClean.assistantText("```sh\nls /Users/jenne\n```"))
         assertEquals("Failed.", ChatClean.assistantText("Failed.\nTraceback (most recent call last):\n  File \"x.py\", line 3"))
     }
