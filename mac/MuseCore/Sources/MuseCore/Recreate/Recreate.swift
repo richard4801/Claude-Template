@@ -312,7 +312,13 @@ public struct RecreateFill: Codable, Hashable, Sendable {
     }
 
     /// The total the "to generate" slots would cost, from the server's own estimates.
-    public var toGenerateTotal: Double { slots.filter { $0.state == "to_generate" }.compactMap { $0.estimate?.amount }.reduce(0, +) }
+    public var toGenerateTotal: Double { generateTotal() }
+
+    /// The same total with the slot estimates' prices where there are some, leaving out slots that can't be made.
+    public func generateTotal(prices: [String: Double] = [:], unavailable: Set<String> = []) -> Double {
+        slots.filter { $0.state == "to_generate" && !unavailable.contains($0.slotId) }
+            .compactMap { prices[$0.slotId] ?? $0.estimate?.amount }.reduce(0, +)
+    }
 }
 
 /// How close our version is to the reference, 0–1 per element (after apply).

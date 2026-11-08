@@ -144,4 +144,91 @@ final class RecreateTests: XCTestCase {
         let applied = try await api.apply(ref.id, RecreateApplyRequest(sessionId: "es_1", slots: [:]))
         XCTAssertEqual(applied.match?.perSlot?.count, 3)
     }
+
+    // MARK: Making the missing shots (estimate → confirm → fill → apply)
+
+    func testSlotEstimateAndFillStartDecode() throws {
+        // The server's shapes: a full ShotRequest and ShotEstimate, plus fields this app doesn't know.
+        let est = #"""
+        {"slotId":"s2","request":{"mode":"reference","prompt":"Close-up, eye level: she flips her hair","duration":2,"quality":"standard"},
+         "estimate":{"quality":"standard","label":"Shot · Standard · 768p","resolution":"768p","seconds":2,"takes":1,"mode":"reference",
+           "estimate":0.64,"priceLine":"about $0.64 · 2 s","buttonLabel":"Generate · 2 s · $0.64","ok":true,"warnings":["length set to 2 s"],
+           "camera":{"moves":[],"guideUsed":false},"test":false,"rig":[],"somethingNew":1}}
+        """#
+        let e = try JSONDecoder().decode(RecreateSlotEstimate.self, from: Data(est.utf8))
+        XCTAssertEqual(e.slotId, "s2")
+        XCTAssertEqual(e.estimate.estimate, 0.64, accuracy: 1e-9)
+        XCTAssertEqual(e.estimate.priceLine, "about $0.64 · 2 s")
+        XCTAssertNil(e.estimate.problem)
+        XCTAssertNotNil(e.request)
+        // A sparse estimate still decodes (lenient), and a capped one says why.
+        let capped = #"{"slotId":"s3","estimate":{"estimate":4.1,"ok":false,"message":"Over the studio's daily limit"}}"#
+        let c = try JSONDecoder().decode(RecreateSlotEstimate.self, from: Data(capped.utf8))
+        XCTAssertEqual(c.estimate.problem, "Over the studio's daily limit")
+        let fill = #"{"slotId":"s2","job":{"id":"job_9","state":"queued","cost":0.64,"engineLabel":"Shot · Standard · 768p","request":{"engine":"suite"},"extra":true}}"#
+        let f = try JSONDecoder().decode(RecreateSlotFillStart.self, from: Data(fill.utf8))
+        XCTAssertEqual(f.slotId, "s2")
+        XCTAssertEqual(f.job.id, "job_9")
+        XCTAssertEqual(f.job.cost, 0.64, accuracy: 1e-9)
+        XCTAssertTrue(f.job.isActive)
+    }
+
+    func testSlotIdsAreChecked() {
+        XCTAssertNoThrow(try RecreateIds.slot("s1"))
+        XCTAssertNoThrow(try RecreateIds.slot("s1234"))
+        XCTAssertThrowsError(try RecreateIds.slot("s12345"))
+        XCTAssertThrowsError(try RecreateIds.slot("../fill"))
+        XCTAssertThrowsError(try RecreateIds.slot("s1/estimate"))
+        XCTAssertThrowsError(try RecreateIds.slot(""))
+    }
+
+    /// Demo mode: priced at $0.64 a shot, generating then ready on the following fills, and the build gets job ids.
+    func testDemoGeneratesThenBuilds() async throws {
+        let api = FakeRecreateAPI()
+        let refs = try await api.listReferences()
+        let ref = try XCTUnwrap(refs.first)
+        let before = try await api.fill(ref.id)
+        let toMake = before.slots.filter { $0.state == "to_generate" }.map(\.slotId)
+        XCTAssertEqual(toMake, ["s2", "s3"])
+        var prices: [String: Double] = [:]
+        for s in toMake { prices[s] = try await api.estimateSlot(ref.id, slotId: s, modelId: "m1", quality: nil).estimate.estimate }
+        XCTAssertEqual(before.generateTotal(prices: prices), 1.28, accuracy: 1e-9)
+        XCTAssertEqual(RecreateText.makingSummary(before, prices: prices, unavailable: ["s3"]), "1 from your takes, 1 to generate, 1 can’t be made · $0.64 in all")
+        for s in toMake {
+            let started = try await api.fillSlot(ref.id, slotId: s, modelId: "m1", quality: nil)
+            XCTAssertEqual(started.slotId, s)
+        }
+        // Never twice: a slot already being made is refused.
+        do {
+            _ = try await api.fillSlot(ref.id, slotId: "s2", modelId: "m1", quality: nil)
+            XCTFail("filled twice")
+        } catch {}
+        let generating = try await api.fill(ref.id)
+        XCTAssertEqual(generating.slots.map(\.state), ["matched", "generating", "generating"])
+        XCTAssertEqual(RecreateText.makingSummary(generating), "1 from your takes, 2 generating")
+        var slots: [String: String] = ["s1": "t1"]
+        for s in generating.slots where s.state == "generating" { slots[s.slotId] = s.jobId }
+        let early = try await api.apply(ref.id, RecreateApplyRequest(sessionId: "es_1", slots: slots))
+        XCTAssertEqual(early.waiting, ["s2", "s3"])
+        let ready = try await api.fill(ref.id)
+        XCTAssertEqual(ready.slots.map(\.state), ["matched", "ready", "ready"])
+        XCTAssertEqual(RecreateText.makingSummary(ready), "1 from your takes, 2 generated · nothing to pay")
+        slots = ["s1": "t1"]
+        for s in ready.slots where s.state == "ready" { slots[s.slotId] = s.jobId }
+        XCTAssertEqual(slots["s2"], FakeRecreateAPI.demoJobId("s2"))
+        let built = try await api.apply(ref.id, RecreateApplyRequest(sessionId: "es_1", baseRevision: 1, slots: slots))
+        XCTAssertEqual(built.waiting ?? [], [])
+        XCTAssertEqual(built.revision, 2)
+        api.forgetMade()
+        let again = try await api.fill(ref.id)
+        XCTAssertEqual(again.slots.map(\.state), ["matched", "to_generate", "to_generate"])
+        await XCTAssertThrowsErrorAsync { _ = try await api.estimateSlot(ref.id, slotId: "nope", modelId: "m1", quality: nil) }
+    }
+
+    private func XCTAssertThrowsErrorAsync(_ body: () async throws -> Void, file: StaticString = #filePath, line: UInt = #line) async {
+        do {
+            try await body()
+            XCTFail("expected an error", file: file, line: line)
+        } catch {}
+    }
 }

@@ -9,7 +9,48 @@ public protocol RecreateAPI: Sendable {
     func patchReference(_ id: String, keep: Bool?, name: String?) async throws -> RecreateReference
     func deleteReference(_ id: String) async throws
     func fill(_ id: String) async throws -> RecreateFill
+    /// Scores the studio's takes against each slot (free); the fill then says which slots are matched and which to generate.
+    func matchSlots(_ id: String, modelId: String?) async throws
+    /// The price of making one slot as a new shot. Nothing is held. `quality` nil = the server's default.
+    func estimateSlot(_ id: String, slotId: String, modelId: String, quality: String?) async throws -> RecreateSlotEstimate
+    /// Makes one slot as a new shot: a Suite job, held and charged like any shot. Only after the person confirmed the price.
+    func fillSlot(_ id: String, slotId: String, modelId: String, quality: String?) async throws -> RecreateSlotFillStart
     func apply(_ id: String, _ req: RecreateApplyRequest) async throws -> RecreateApplyResult
+}
+
+/// `POST …/slots/{slotId}/estimate`: the shot request the slot becomes, and its price (nothing held).
+public struct RecreateSlotEstimate: Decodable, Hashable, Sendable {
+    public var slotId: String
+    public var estimate: ShotEstimate
+    /// The ShotRequest the slot becomes (kept as sent; the app only shows the price).
+    public var request: JSONValue?
+
+    public init(slotId: String, estimate: ShotEstimate, request: JSONValue? = nil) {
+        self.slotId = slotId; self.estimate = estimate; self.request = request
+    }
+
+    enum CodingKeys: String, CodingKey { case slotId, estimate, request }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        slotId = try c.decode(String.self, forKey: .slotId)
+        estimate = try c.decode(ShotEstimate.self, forKey: .estimate)
+        request = c.o(.request)
+    }
+}
+
+/// `POST …/slots/{slotId}/fill`: the Suite job making the slot. The fill then reports the slot `generating`, then `ready`.
+public struct RecreateSlotFillStart: Decodable, Hashable, Sendable {
+    public var slotId: String
+    public var job: Job
+
+    public init(slotId: String, job: Job) { self.slotId = slotId; self.job = job }
+
+    enum CodingKeys: String, CodingKey { case slotId, job }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        slotId = try c.decode(String.self, forKey: .slotId)
+        job = try c.decode(Job.self, forKey: .job)
+    }
 }
 
 public struct RecreateApplyRequest: Codable, Hashable, Sendable {
@@ -64,6 +105,12 @@ public enum RecreateIds {
         guard id.range(of: #"^rx_[A-Za-z0-9_]{1,64}$"#, options: .regularExpression) != nil else { throw ApiError("bad_id", "That isn't a reference") }
         return id
     }
+
+    /// Slot ids are `s1`, `s2`… (the analysis numbers them); anything else is refused before it reaches a URL.
+    public static func slot(_ id: String) throws -> String {
+        guard id.range(of: #"^s[0-9]{1,4}$"#, options: .regularExpression) != nil else { throw ApiError("bad_id", "That isn't a shot of the reference") }
+        return id
+    }
 }
 
 // MARK: HTTP
@@ -71,6 +118,8 @@ public enum RecreateIds {
 extension HTTPMuseAPI: RecreateAPI {
     private struct CreateBody: Encodable { var uploadId: String; var name: String? }
     private struct PatchBody: Encodable { var keep: Bool?; var name: String? }
+    private struct SlotBody: Encodable { var modelId: String; var quality: String? }
+    private struct MatchBody: Encodable { var modelId: String? }
 
     public func listReferences() async throws -> [RecreateReference] { try await suiteCall("GET", "v1/recreate/references") }
     public func reference(_ id: String) async throws -> RecreateReference { try await suiteCall("GET", "v1/recreate/references/\(try RecreateIds.check(id))") }
@@ -83,6 +132,17 @@ extension HTTPMuseAPI: RecreateAPI {
     }
     public func deleteReference(_ id: String) async throws { try await suiteSend("DELETE", "v1/recreate/references/\(try RecreateIds.check(id))") }
     public func fill(_ id: String) async throws -> RecreateFill { try await suiteCall("GET", "v1/recreate/references/\(try RecreateIds.check(id))/fill") }
+    public func matchSlots(_ id: String, modelId: String?) async throws {
+        let _: JSONValue = try await suiteCall("POST", "v1/recreate/references/\(try RecreateIds.check(id))/match", body: try JSONEncoder().encode(MatchBody(modelId: modelId)))
+    }
+    public func estimateSlot(_ id: String, slotId: String, modelId: String, quality: String?) async throws -> RecreateSlotEstimate {
+        let path = "v1/recreate/references/\(try RecreateIds.check(id))/slots/\(try RecreateIds.slot(slotId))/estimate"
+        return try await suiteCall("POST", path, body: try JSONEncoder().encode(SlotBody(modelId: modelId, quality: quality)))
+    }
+    public func fillSlot(_ id: String, slotId: String, modelId: String, quality: String?) async throws -> RecreateSlotFillStart {
+        let path = "v1/recreate/references/\(try RecreateIds.check(id))/slots/\(try RecreateIds.slot(slotId))/fill"
+        return try await suiteCall("POST", path, body: try JSONEncoder().encode(SlotBody(modelId: modelId, quality: quality)))
+    }
     public func apply(_ id: String, _ req: RecreateApplyRequest) async throws -> RecreateApplyResult {
         try await suiteCall("POST", "v1/recreate/references/\(try RecreateIds.check(id))/apply", body: try JSONEncoder().encode(req))
     }
@@ -94,10 +154,14 @@ extension HTTPMuseAPI: RecreateAPI {
 // MARK: Demo
 
 /// Demo mode: one ready reference (workstream 1's fixture) and a fill that matches one slot from the takes and leaves
-/// two to generate. Nothing is uploaded or charged; a new reference is analysed instantly.
+/// two to generate. Nothing is uploaded or charged; a new reference is analysed instantly. Each shot is priced $0.64; a
+/// filled slot reads `generating` on the next `fill()` and `ready` on the one after (a fake job id, nothing spent).
 public final class FakeRecreateAPI: RecreateAPI, @unchecked Sendable {
     private let lock = NSLock()
     private var refs: [RecreateReference]
+    /// referenceId → slotId → `fill()` calls since the slot was filled.
+    private var made: [String: [String: Int]] = [:]
+    public static let demoPrice = 0.64
 
     public init() {
         let sample = try? JSONDecoder().decode(RecreateReference.self, from: Data(RecreateDemo.referenceJSON.utf8))
@@ -128,28 +192,72 @@ public final class FakeRecreateAPI: RecreateAPI, @unchecked Sendable {
         }
     }
     public func deleteReference(_ id: String) async throws { with { refs.removeAll { $0.id == id } } }
+    /// Review mode: every theme starts from the same fill (nothing made yet).
+    public func forgetMade() { with { made = [:] } }
+
+    public static func demoJobId(_ slotId: String) -> String { "job_rx_\(slotId)" }
+
     public func fill(_ id: String) async throws -> RecreateFill {
         let r = try await reference(id)
         let slots = r.recipe?.slots ?? []
+        let counts: [String: Int] = with {
+            for k in (made[id] ?? [:]).keys { made[id]?[k, default: 0] += 1 }
+            return made[id] ?? [:]
+        }
         var rows: [[String: Any]] = []
         for (i, s) in slots.enumerated() {
-            if i == 0 {
+            let estimate: [String: Any] = ["amount": Self.demoPrice, "label": RecreateText.money(Self.demoPrice)]
+            if let n = counts[s.id] {
+                if n >= 2 {
+                    rows.append(["slotId": s.id, "state": "ready", "jobId": Self.demoJobId(s.id), "takeId": "t_rx_\(s.id)", "reason": "Generated for this shot"])
+                } else {
+                    rows.append(["slotId": s.id, "state": "generating", "jobId": Self.demoJobId(s.id), "estimate": estimate])
+                }
+            } else if i == 0 {
                 rows.append(["slotId": s.id, "state": "matched", "takeId": "t1", "score": 0.82, "reason": "Your take has the same pan on a wide shot"])
             } else {
-                let estimate: [String: Any] = ["amount": 0.64, "label": "$0.64"]
                 rows.append(["slotId": s.id, "state": "to_generate", "estimate": estimate])
             }
         }
         let json: [String: Any] = ["referenceId": id, "slots": rows]
         return try JSONDecoder().decode(RecreateFill.self, from: JSONSerialization.data(withJSONObject: json))
     }
+    public func matchSlots(_ id: String, modelId: String?) async throws { _ = try await reference(id) }
+
+    public func estimateSlot(_ id: String, slotId: String, modelId: String, quality: String?) async throws -> RecreateSlotEstimate {
+        _ = try RecreateIds.slot(slotId)
+        let r = try await reference(id)
+        guard let s = r.recipe?.slots.first(where: { $0.id == slotId }) else { throw ApiError("not_found", "That shot is gone") }
+        let secs = max(2, s.length.rounded(.up))
+        let price = RecreateText.money(Self.demoPrice)
+        let e = ShotEstimate(quality: quality ?? "standard", label: "Shot · Standard", resolution: "768p", seconds: secs, takes: 1, mode: "reference",
+                             estimate: Self.demoPrice, priceLine: "about \(price) · \(Int(secs)) s", buttonLabel: "Generate · \(Int(secs)) s · \(price)", test: true)
+        return RecreateSlotEstimate(slotId: slotId, estimate: e)
+    }
+
+    public func fillSlot(_ id: String, slotId: String, modelId: String, quality: String?) async throws -> RecreateSlotFillStart {
+        _ = try RecreateIds.slot(slotId)
+        let r = try await reference(id)
+        guard let i = r.recipe?.slots.firstIndex(where: { $0.id == slotId }) else { throw ApiError("not_found", "That shot is gone") }
+        try with {
+            if made[id]?[slotId] != nil { throw ApiError("already_filled", "This shot is already being made") }
+            made[id, default: [:]][slotId] = 0
+        }
+        let job = Job(id: Self.demoJobId(slotId), title: "Shot \(i + 1)", modelId: modelId, modelName: "", outfitId: "",
+                      request: JobRequest(title: "Shot \(i + 1)", modelId: modelId, outfitId: "", clipId: "", engine: "suite"), state: "queued", cost: Self.demoPrice)
+        return RecreateSlotFillStart(slotId: slotId, job: job)
+    }
+
     public func apply(_ id: String, _ req: RecreateApplyRequest) async throws -> RecreateApplyResult {
         let slots = (try? await reference(id))?.recipe?.slots.map(\.id) ?? []
+        // A finished job's first take fills its slot; one still running is listed in `waiting` (as the server does).
+        let done: [String: Int] = with { made[id] ?? [:] }
+        let waiting = req.slots.filter { slot, v in v.hasPrefix("job_rx_") && (done[slot] ?? 0) < 2 }.map(\.key).sorted()
         let scores = [0.93, 0.81, 0.84]
         let perSlot: [[String: Any]] = slots.enumerated().map { i, s in ["slotId": s, "score": scores[i % scores.count]] }
         let match: [String: Any] = ["overall": 0.86, "cuts": 0.97, "text": 0.9, "ramps": 0.78, "grade": 0.84, "shots": 0.8, "perSlot": perSlot]
         let none: [String] = []
-        let json: [String: Any] = ["sessionId": req.sessionId, "revision": (req.baseRevision ?? 0) + 1, "label": "Recreated", "missing": none, "waiting": none, "match": match]
+        let json: [String: Any] = ["sessionId": req.sessionId, "revision": (req.baseRevision ?? 0) + 1, "label": "Recreated", "missing": none, "waiting": waiting, "match": match]
         return try JSONDecoder().decode(RecreateApplyResult.self, from: JSONSerialization.data(withJSONObject: json))
     }
 }
