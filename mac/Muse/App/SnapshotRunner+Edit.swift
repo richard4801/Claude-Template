@@ -232,7 +232,9 @@ extension SnapshotRunner {
             var pick: AXWalker.Control?
             while pick == nil, let g = groups.last {
                 let want = Set(g)
-                pick = scan.controls.first { want.contains($0.key) && usable($0) }
+                // Bottom-up within a group: a panel's contents (hook templates, caption styles) come after the mode switch
+                // that revealed them in tree order, and must be used before it can switch the mode back.
+                pick = scan.controls.last { want.contains($0.key) && usable($0) }
                 if pick == nil { groups.removeLast() }
             }
             if pick == nil { pick = scan.controls.first(where: usable) }
