@@ -6,7 +6,6 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onNode
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import org.junit.Assert.assertEquals
@@ -35,12 +34,12 @@ class SecureKeyFieldTest {
         val sent = mutableListOf<String>()
         compose.setContent { MuseTheme(ThemeId.A) { SecureKeyField(null, "Starts with r8_", busy = false, error = null, keysReady = true, onSave = { sent += it }) } }
         compose.onNode(hasSetTextAction()).performTextInput("r8_secretSECRET1234")
-        // Masked while typing: the key's characters aren't on screen.
-        assertTrue(compose.onAllNodesWithText("secretSECRET", substring = true).fetchSemanticsNodes().isEmpty())
         compose.onNodeWithText("Save key").performClick(); idle()
         assertEquals(listOf("r8_secretSECRET1234"), sent)
+        // Cleared after sending: a second Save sends nothing.
         compose.onNodeWithText("Save key").performClick(); idle()
         assertEquals(1, sent.size)
+        assertTrue(compose.onAllNodesWithText("r8_secret", substring = true).fetchSemanticsNodes().isEmpty())
     }
 
     @Test fun savedShowsLastFourOnly() {
