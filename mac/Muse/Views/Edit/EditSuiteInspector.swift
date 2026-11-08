@@ -2,30 +2,46 @@ import AppKit
 import MuseCore
 import SwiftUI
 
-/// The inspector (E1 right, E2 panels): one tab at a time — Captions · Text · Video · Audio · Speed · Anim.
+/// The inspector (E1 right, E2 panels; plans/edit-layout.md): "Inspector" with "Hide inspector", its sections as a 3 × 2
+/// grid of labelled buttons (Captions, Text, Video, Audio, Speed, Animate), then the section's settings scrolling inside.
 struct EditSuiteInspector: View {
     @Environment(\.theme) private var t
     @Bindable var session: EditSuiteSession
+    var hide: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 14) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: Space.s2) {
+                Text("Inspector").font(t.scale.heading.font).foregroundStyle(t.roles.ink).lineLimit(1)
+                Spacer(minLength: 0)
+                SuiteIconButton(systemName: "sidebar-simple", label: "Hide inspector", tint: t.roles.ink2, action: hide)
+            }
+            .padding(.horizontal, Space.s4)
+            .padding(.top, Space.s3)
+            .padding(.bottom, Space.s2)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.s1), count: 3), alignment: .leading, spacing: Space.s1) {
                 ForEach(EditSuite.InspectorTab.allCases) { tab in
                     let on = session.state.tab == tab
                     Button { session.view { $0.tab = tab } } label: {
-                        Text(tab.label).font(t.body(13.5, on ? .semibold : .regular))
-                            .foregroundStyle(on ? t.ink : t.muted)
-                            .padding(.vertical, 12)
-                            .overlay(alignment: .bottom) { Rectangle().fill(on ? t.accent : .clear).frame(height: 2) }
-                            .contentShape(Rectangle())
+                        HStack(spacing: Space.s1 + 2) {
+                            Ph(icon(tab), 14)
+                            Text(tab.label).font(t.scale.label.font).lineLimit(1).fitProbe("inspector \(tab.label)")
+                        }
+                        .foregroundStyle(on ? t.roles.ink : t.roles.ink2)
+                        .padding(.horizontal, Space.s1 + 2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(height: 36)
+                        .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(on ? t.roles.field : .clear))
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(tab.label)
                     .accessibilityAddTraits(on ? .isSelected : [])
                 }
-                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 14)
-            SuiteRule()
+            .padding(.horizontal, Space.s4)
+            .padding(.bottom, Space.s3)
+            SuiteRule().padding(.horizontal, Space.s4)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     switch session.state.tab {
@@ -37,10 +53,22 @@ struct EditSuiteInspector: View {
                     case .anim: AnimPanel(session: session)
                     }
                 }
+                .padding(.vertical, Space.s1)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .background(t.chrome)
+        .background(t.roles.canvas)
+    }
+
+    private func icon(_ tab: EditSuite.InspectorTab) -> String {
+        switch tab {
+        case .captions: return "closed-captioning"
+        case .text: return "text-t"
+        case .video: return "film-strip"
+        case .audio: return "waveform"
+        case .speed: return "timer"
+        case .anim: return "arrows-clockwise"
+        }
     }
 }
 
@@ -49,7 +77,7 @@ struct InspectorEmpty: View {
     @Environment(\.theme) private var t
     var text: String
     var body: some View {
-        Text(text).font(t.body(13)).foregroundStyle(t.muted).padding(18).frame(maxWidth: .infinity, alignment: .leading)
+        Text(text).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).padding(Space.s4).frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -68,7 +96,7 @@ struct CaptionStyleTile: View {
         let font = Font.system(size: 12, weight: .black)
         VStack(alignment: .leading, spacing: 5) {
             ZStack {
-                Rectangle().fill(Color(hex: 0x141210))
+                RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.editViewer)
                 HStack(spacing: 3) {
                     switch preset {
                     case .plain:
@@ -96,9 +124,9 @@ struct CaptionStyleTile: View {
                 .minimumScaleFactor(0.6)
                 .padding(.horizontal, 6)
             }
-            .frame(height: 58)
-            .overlay(Rectangle().strokeBorder(on ? t.accent : .clear, lineWidth: 2).padding(-3))
-            Text(EditV2.captionStyleLabel(preset)).font(t.body(12.5, on ? .semibold : .regular)).foregroundStyle(on ? t.ink : t.muted)
+            .frame(height: 56)
+            .overlay(RoundedRectangle(cornerRadius: t.radii.control + 3, style: .continuous).strokeBorder(on ? t.roles.selection : .clear, lineWidth: 2).padding(-3))
+            Text(EditV2.captionStyleLabel(preset)).font(t.scale.caption.font).foregroundStyle(on ? t.roles.ink : t.roles.ink2).lineLimit(1)
         }
     }
 }
@@ -107,7 +135,7 @@ struct CaptionStyleGrid: View {
     @Bindable var session: EditSuiteSession
     var body: some View {
         let current = session.state.captionStyle?.preset
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 12) {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: Space.s3), GridItem(.flexible(), spacing: Space.s3)], spacing: Space.s3) {
             ForEach(EditV2.suiteCaptionStyles, id: \.self) { p in
                 Button { session.edit { $0.setCaptionPreset(p) } } label: { CaptionStyleTile(preset: p, on: current == p) }
                     .buttonStyle(.plain)
@@ -128,37 +156,38 @@ struct CaptionsPanel: View {
         VStack(alignment: .leading, spacing: 0) {
             if style == nil {
                 EditPanel(title: "Auto-captions") {
-                    Text("Word-timed captions from what's said in the video. Edit the words in Captions & hooks.")
-                        .font(t.body(12.5)).foregroundStyle(t.muted)
-                    HStack {
-                        SuiteToolButton(title: session.isRunning(.captions) ? "Captioning…" : "Auto-captions", icon: "captions.bubble", accent: true,
+                    Text("Word-timed captions from what's said in the video. Edit the words in Captions and hooks.")
+                        .font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: Space.s2) {
+                        SuiteToolButton(title: session.isRunning(.captions) ? "Captioning…" : "Make captions", icon: "closed-captioning",
                                         disabled: session.isRunning(.captions)) { Task { await session.autoCaptions() } }
                         if session.isRunning(.captions) { ProgressView().controlSize(.small) }
-                        Spacer()
-                        Text(session.estimateLabel(.captions) ?? "").font(t.mono(11)).foregroundStyle(t.muted)
+                        Spacer(minLength: 0)
+                        Text(session.estimateLabel(.captions) ?? "").font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
                     }
                 }
             }
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: Space.s3) {
                 SuiteLabel("Style", trailing: style == nil ? nil : "Word-by-word")
                 CaptionStyleGrid(session: session)
             }
-            .padding(18)
-            SuiteRule()
+            .padding(.horizontal, Space.s4)
+            .padding(.vertical, Space.s3)
             if let st = style {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: Space.s4) {
                     HStack(spacing: 8) {
                         Menu {
                             ForEach(EditV2.Font.allCases, id: \.self) { f in
                                 Button(fontName(f)) { session.edit { $0.changeCaptionStyle { $0.font = f } } }
                             }
                         } label: {
-                            Text("\(fontName(st.font)) · \(Int((st.sizePct * 1920 / 1.35).rounded()))").font(t.body(13)).frame(maxWidth: .infinity, alignment: .leading)
+                            Text("\(fontName(st.font)) · \(Int((st.sizePct * 1920 / 1.35).rounded()))").font(t.scale.caption.font).frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .menuStyle(.borderlessButton)
-                        .padding(.horizontal, 10)
+                        .padding(.horizontal, Space.s3)
                         .frame(height: 32)
-                        .overlay(Rectangle().strokeBorder(t.line))
+                        .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field))
                         .accessibilityLabel("Caption font")
                         SuiteSwatch(hex: st.color, label: "Text colour") { c in session.edit { $0.changeCaptionStyle { $0.color = c } } }
                         SuiteSwatch(hex: st.highlightColor, label: "Highlight colour") { c in session.edit { $0.changeCaptionStyle { $0.highlightColor = c } } }
@@ -169,21 +198,22 @@ struct CaptionsPanel: View {
                     SuiteSlider("Size", value: st.sizePct, range: 0.02...0.09, format: { "\(Int(($0 * 1000).rounded()) / 10) %" }) { v in
                         session.edit { $0.changeCaptionStyle { $0.sizePct = (v * 1000).rounded() / 1000 } }
                     }
-                    HStack {
-                        SuiteLabel("Position")
+                    VStack(alignment: .leading, spacing: Space.s2) {
+                        Text("Position").font(t.scale.label.font).foregroundStyle(t.roles.ink)
                         EditSeg(options: EditSuite.CaptionPosition.allCases.map { ($0, $0.label) },
                                  selection: EditSuite.CaptionPosition.nearest(st.y ?? 0.72)) { pos in
                             session.edit { $0.changeCaptionStyle { $0.y = pos.y } }
                         }
-                        .frame(width: 200)
                     }
                     SuiteToggleRow(title: "Word-by-word highlight", hint: "Active word pops in the highlight colour", isOn: st.preset != .plain) { on in
                         session.edit { $0.setCaptionPreset(on ? .pop : .plain) }
                     }
                     SuiteToggleRow(title: "Upper case", isOn: st.uppercase == true) { on in session.edit { $0.changeCaptionStyle { $0.uppercase = on ? true : nil } } }
-                    SuiteToolButton(title: "Edit words · Captions & hooks", icon: "text.cursor") { session.mode = .captions }
+                    SuiteToolButton(title: "Edit the words", icon: "text.cursor") { session.mode = .captions }
+                        .help("Edit the words in Captions and hooks")
                 }
-                .padding(18)
+                .padding(.horizontal, Space.s4)
+                .padding(.vertical, Space.s3)
             }
         }
     }
@@ -218,7 +248,7 @@ struct TextPanel: View {
                     SuiteToolButton(title: "Add text at the playhead", icon: "plus") { session.edit { $0.addText() } }
                     SuiteToolButton(title: "Hook ideas", icon: "sparkles") { session.mode = .captions }
                 }
-                .padding(.horizontal, 18)
+                .padding(.horizontal, Space.s4)
             }
         }
     }
@@ -233,9 +263,9 @@ struct TextPanel: View {
             TextField("Text", text: Binding(get: { editingId == tx.id ? draft : tx.text }, set: { draft = $0; editingId = tx.id }), axis: .vertical)
                 .lineLimit(1...4)
                 .textFieldStyle(.plain)
-                .font(t.body(14))
-                .padding(8)
-                .overlay(Rectangle().strokeBorder(t.line))
+                .font(t.scale.label.font)
+                .padding(Space.s2)
+                .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field))
                 .onSubmit { commitText(tx) }
                 .onChange(of: session.state.selection) { _, _ in editingId = nil }
             HStack {
@@ -244,16 +274,18 @@ struct TextPanel: View {
             }
         }
         EditPanel(title: "Style") {
-            HStack(spacing: 8) {
+            HStack(spacing: Space.s2) {
                 Menu {
                     ForEach(EditV2.Font.allCases, id: \.self) { f in Button(f.rawValue.capitalized) { change { $0.style.font = f } } }
-                } label: { Text(st.font.rawValue.capitalized).font(t.body(13)) }
+                } label: { Text(st.font.rawValue.capitalized).font(t.scale.caption.font).frame(maxWidth: .infinity, alignment: .leading) }
                     .menuStyle(.borderlessButton)
-                    .frame(width: 110)
+                    .padding(.horizontal, Space.s3)
+                    .frame(height: 32)
+                    .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field))
                     .accessibilityLabel("Font")
-                EditSeg(options: [(400, "Reg"), (700, "Bold"), (900, "Black")], selection: st.weight) { w in change { $0.style.weight = w } }
                 SuiteSwatch(hex: st.color, label: "Text colour") { c in change { $0.style.color = c } }
             }
+            EditSeg(options: [(400, "Regular"), (700, "Bold"), (900, "Black")], selection: st.weight) { w in change { $0.style.weight = w } }
             SuiteSlider("Size", value: st.sizePct, range: 0.015...0.15, format: { "\(Int(($0 * 1000).rounded()) / 10) %" }) { v in
                 change { $0.style.sizePct = (v * 1000).rounded() / 1000 }
             }
@@ -264,7 +296,7 @@ struct TextPanel: View {
             }
             if let bg = st.background {
                 HStack {
-                    Text("Box colour").font(t.body(12.5)).foregroundStyle(t.muted)
+                    Text("Box colour").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
                     Spacer()
                     SuiteSwatch(hex: bg.color, label: "Box colour") { c in change { $0.style.background?.color = c } }
                 }

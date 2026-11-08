@@ -94,7 +94,7 @@ struct EditSuiteHome: View {
                             .clipShape(RoundedRectangle(cornerRadius: t.imageRadius))
                             .overlay(alignment: .bottomTrailing) {
                                 if let d = tk.durationSec {
-                                    Text(String(format: "%.1fs", d)).font(t.mono(10.5)).foregroundStyle(.white)
+                                    Text(String(format: "%.1fs", d)).font(t.scale.micro.font).monospacedDigit().foregroundStyle(.white)
                                         .padding(.horizontal, 5).padding(.vertical, 2).background(Color.black.opacity(0.55)).padding(6)
                                 }
                             }
@@ -110,7 +110,9 @@ struct EditSuiteHome: View {
     }
 }
 
-/// The editor (E1): top bar, media bin, preview, inspector and the multitrack timeline; or captions & hooks (E3).
+/// The editor (E1, plans/edit-layout.md): a 56 pt top bar; media (304 pt), the viewer and the inspector (328 pt), both side
+/// panels collapsible; the 268 pt timeline. Or captions & hooks (E3). Under ~1180 pt the media panel collapses on its own,
+/// then the inspector.
 struct EditSuiteEditor: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
@@ -118,15 +120,28 @@ struct EditSuiteEditor: View {
     var onClose: () -> Void
     @FocusState private var focused: Bool
     @State private var showExport = false
-    @State private var showBin = true
+    @State private var showMedia = true
+    /// Starts expanded (WS3's click-through walks it).
+    @State private var showInspector = true
+    /// Hidden by the window getting narrow (shown again when it widens), not by the person.
+    @State private var mediaAutoHidden = false
+    @State private var inspectorAutoHidden = false
     /// The Claude panel on the right (owner only).
     @State private var showClaude = false
+
+    static let mediaWidth: CGFloat = 304
+    static let inspectorWidth: CGFloat = 328
+    static let timelineHeight: CGFloat = 268
+    /// Editor widths under which the media panel, then the inspector, collapse (a window of about 1180 and 950 pt with
+    /// the 72 pt sidebar rail).
+    static let mediaFits: CGFloat = 1108
+    static let inspectorFits: CGFloat = 880
 
     var body: some View {
         Group {
             switch session.phase {
             case .loading(let what):
-                VStack(spacing: 12) { ProgressView(); Text(what).font(t.body(13)).foregroundStyle(t.muted) }
+                VStack(spacing: 12) { ProgressView(); Text(what).font(t.scale.caption.font).foregroundStyle(t.roles.ink2) }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .failed(let why):
                 VStack(spacing: 14) {
@@ -148,17 +163,16 @@ struct EditSuiteEditor: View {
         .onChange(of: session.exportAsk) { _, ask in if ask != nil { showExport = true } }
     }
 
+    private var claudeOpen: Bool { showClaude && session.isOwner }
+
     private var editor: some View {
         GeometryReader { g in
             let full = g.size.width
+            let claudeW: CGFloat = full >= 1300 ? 360 : 320
             // The Claude panel takes its width from the editor.
-            let w = showClaude && session.isOwner ? full - (full >= 1300 ? 360 : 320) : full
-            let binW: CGFloat = w >= 1300 ? 300 : w >= 1080 ? 248 : 220
-            let inspW: CGFloat = w >= 1300 ? 360 : 300
-            let bin = showBin && w >= 900
-            let timelineH = max(220, min(330, g.size.height * 0.36))
+            let w = claudeOpen ? full - claudeW - 1 : full
             VStack(spacing: 0) {
-                topBar
+                topBar(width: w)
                 SuiteRule()
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
@@ -166,29 +180,47 @@ struct EditSuiteEditor: View {
                             EditSuiteCaptionsMode(session: session)
                         } else {
                             HStack(spacing: 0) {
-                                if bin {
-                                    EditSuiteBin(session: session).frame(width: binW)
+                                if showMedia {
+                                    EditSuiteBin(session: session) { setMedia(false) }
+                                        .frame(width: Self.mediaWidth)
                                     SuiteRule(vertical: true)
                                 }
-                                EditSuitePreview(session: session, showBin: $showBin, binHidden: !bin)
+                                EditSuitePreview(session: session, mediaHidden: !showMedia, showMedia: { setMedia(true) })
                                     .frame(minWidth: 320, maxWidth: .infinity)
-                                SuiteRule(vertical: true)
-                                EditSuiteInspector(session: session).frame(width: inspW)
+                                if showInspector {
+                                    SuiteRule(vertical: true)
+                                    EditSuiteInspector(session: session) { setInspector(false) }
+                                        .frame(width: Self.inspectorWidth)
+                                }
                             }
                             .frame(maxHeight: .infinity)
                             SuiteRule()
-                            EditSuiteTimeline(session: session).frame(height: timelineH)
+                            EditSuiteTimeline(session: session, wide: w >= 1360, narrow: w < 760)
+                                .frame(height: Self.timelineHeight)
                         }
                     }
-                    if showClaude && session.isOwner {
+                    if claudeOpen {
                         SuiteRule(vertical: true)
                         EditSuiteClaudePanel(session: session) { showClaude = false }
-                            .frame(width: full >= 1300 ? 360 : 320)
+                            .frame(width: claudeW)
                     }
                 }
             }
+            .onChange(of: w < Self.mediaFits, initial: true) { _, narrow in
+                if narrow, showMedia { showMedia = false; mediaAutoHidden = true }
+                else if !narrow, mediaAutoHidden { showMedia = true; mediaAutoHidden = false }
+            }
+            .onChange(of: w < Self.inspectorFits, initial: true) { _, narrow in
+                if narrow, showInspector { showInspector = false; inspectorAutoHidden = true }
+                else if !narrow, inspectorAutoHidden { showInspector = true; inspectorAutoHidden = false }
+            }
         }
-        .background(t.bg)
+        .background(t.roles.canvas)
+        // Review mode (SnapshotRunner.editLayoutShots): the collapsed shots.
+        .onChange(of: SnapshotRunner.state.editCollapsed) { _, collapsed in
+            setMedia(!collapsed)
+            setInspector(!collapsed)
+        }
         .focusable()
         .focusEffectDisabled()
         .focused($focused)
@@ -212,7 +244,7 @@ struct EditSuiteEditor: View {
         .overlay(alignment: .bottom) { messages.padding(.bottom, 16) }
         .overlay(alignment: .top) {
             if let text = session.claudeToast {
-                EditSuiteClaudeToast(text: text) { session.claudeToast = nil }.padding(.top, 62)
+                EditSuiteClaudeToast(text: text) { session.claudeToast = nil }.padding(.top, 64)
             }
         }
         .sheet(item: $session.askPending) { p in EditSuiteClaudeAsk(session: session, pending: p) }
@@ -229,61 +261,74 @@ struct EditSuiteEditor: View {
         .overlay { if session.busy { EditSuiteExportProgress(session: session) } }
     }
 
+    /// The person's choice (a later resize doesn't undo it).
+    private func setMedia(_ on: Bool) { showMedia = on; mediaAutoHidden = false }
+    private func setInspector(_ on: Bool) { showInspector = on; inspectorAutoHidden = false }
+
     // MARK: Top bar
 
-    private var topBar: some View {
-        HStack(spacing: 14) {
-            SuiteIconButton(systemName: "chevron.left", label: "Close the editor", action: onClose)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(session.title).font(t.body(15, .semibold)).foregroundStyle(t.ink).lineLimit(1)
-                Text(session.saveLine).font(t.body(12)).foregroundStyle(t.muted).lineLimit(1)
+    /// Back, the title over its version line, the aspect ratio in the centre, Claude / Templates / Hook ideas as quiet
+    /// buttons and Export as the one primary. Narrow (the Claude panel open, a small window): the quiet ones go icon-only.
+    private func topBar(width w: CGFloat) -> some View {
+        let tight = w < topBarNeeds
+        return HStack(spacing: Space.s3) {
+            SuiteIconButton(systemName: "caret-left", label: "Close the editor", action: onClose)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(session.title).font(t.scale.heading.font).foregroundStyle(t.roles.ink).lineLimit(1).fitProbe("title")
+                Text(session.saveLine).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1).fitProbe("version line")
             }
-            .frame(minWidth: 120, alignment: .leading)
-            if session.isOwner {
-                SuiteToolButton(title: "Claude", icon: "sparkle", filled: showClaude) { showClaude.toggle() }
-                    .accessibilityLabel(showClaude ? "Hide Claude" : "Show Claude")
-                    .help(session.liveConnected ? "This edit is shared live with Claude" : "Claude")
-            }
-            Spacer(minLength: 8)
+            .frame(maxWidth: 360, alignment: .leading)
+            .layoutPriority(1)
+            Spacer(minLength: Space.s2)
             if session.mode == .captions {
                 EditSeg(options: [(EditSuiteSession.Mode.captions, "Transcript"), (.timeline, "Timeline")], selection: session.mode) { session.mode = $0 }
-                    .frame(width: 200)
-                Spacer(minLength: 8)
-                Button { session.mode = .timeline } label: {
-                    Text("Done").font(t.body(13, .semibold)).foregroundStyle(t.bg)
-                        .padding(.horizontal, 16).frame(height: 36).background(Rectangle().fill(t.ink))
-                }
-                .buttonStyle(.plain)
+                    .fixedSize()
+                Spacer(minLength: Space.s2)
+                SuiteToolButton(title: "Done", accent: true) { session.mode = .timeline }
             } else {
-                SuiteIconButton(systemName: "arrow.uturn.backward", label: "Undo", disabled: !session.state.canUndo) { session.undo() }
-                    .keyboardShortcut("z", modifiers: .command)
-                SuiteIconButton(systemName: "arrow.uturn.forward", label: "Redo", disabled: !session.state.canRedo) { session.redo() }
-                    .keyboardShortcut("z", modifiers: [.command, .shift])
                 EditSeg(options: EditSuite.Ratio.allCases.map { ($0, $0.label) }, selection: session.state.export.ratio) { r in
                     Task { await session.setRatio(r) }
                 }
-                .frame(width: 236)
-                Spacer(minLength: 8)
-                SuiteToolButton(title: "Templates", icon: "rectangle.stack") { session.binTab = .templates }
-                SuiteToolButton(title: "Hook ideas", icon: "sparkles") { session.mode = .captions }
-                Button { showExport = true } label: {
-                    HStack(spacing: 8) {
-                        Ph("square.and.arrow.up", 13)
-                        Text("Export").font(t.body(13, .semibold))
-                    }
-                    .foregroundStyle(t.bg)
-                    .padding(.horizontal, 18)
-                    .frame(height: 36)
-                    .background(Rectangle().fill(t.ink))
-                }
-                .buttonStyle(.plain)
-                .keyboardShortcut("e", modifiers: .command)
-                .accessibilityLabel("Export")
+                .fixedSize()
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Aspect ratio")
+                Spacer(minLength: Space.s2)
+                // Labelled when there's room, icon-only (tooltip + label) when not: never cut.
+                quietButtons(iconOnly: tight)
+                SuiteToolButton(title: "Export", icon: "export", accent: true) { showExport = true }
+                    .keyboardShortcut("e", modifiers: .command)
+                    .accessibilityLabel("Export")
             }
         }
-        .padding(.horizontal, 16)
-        .frame(height: 54)
-        .background(t.chrome)
+        .padding(.horizontal, Space.s4)
+        .frame(height: 56)
+        .background(t.roles.canvas)
+    }
+
+    /// The width the top bar needs with the quiet buttons labelled (text at about 7.4 pt a character in `label`, 9 in
+    /// `heading`); under it they go icon-only.
+    private var topBarNeeds: CGFloat {
+        let titles = ["Templates", "Hook ideas"] + (session.isOwner ? ["Claude"] : []) + (showInspector ? [] : ["Show inspector"])
+        let quiet = titles.reduce(CGFloat(0)) { $0 + 51 + CGFloat($1.count) * 7.4 + 4 }
+        let title = min(360, max(CGFloat(session.title.count) * 9, CGFloat(session.saveLine.count) * 7.2))
+        let ratio = CGFloat(EditSuite.Ratio.allCases.count) * 56 + 4
+        return 32 + 32 + 12 + title + 12 + 8 + 12 + ratio + 12 + 8 + 12 + quiet + 12 + 100 + 24
+    }
+
+    /// Claude (owner only), Templates, Hook ideas and, while the inspector is hidden, Show inspector.
+    private func quietButtons(iconOnly: Bool) -> some View {
+        HStack(spacing: Space.s1) {
+            if session.isOwner {
+                SuiteToolButton(title: "Claude", icon: "chat-circle-text", filled: showClaude, plain: !showClaude, iconOnly: iconOnly) { showClaude.toggle() }
+                    .accessibilityLabel(showClaude ? "Hide Claude" : "Show Claude")
+                    .help(session.liveConnected ? "This edit is shared live with Claude" : "Claude")
+            }
+            SuiteToolButton(title: "Templates", icon: "stack", plain: true, iconOnly: iconOnly) { setMedia(true); session.binTab = .templates }
+            SuiteToolButton(title: "Hook ideas", icon: "lightbulb", plain: true, iconOnly: iconOnly) { session.mode = .captions }
+            if !showInspector {
+                SuiteToolButton(title: "Show inspector", icon: "sidebar-simple", plain: true, iconOnly: iconOnly) { setInspector(true) }
+            }
+        }
     }
 
     // MARK: Messages
@@ -298,14 +343,14 @@ struct EditSuiteEditor: View {
 
     private func message(_ text: String, warn: Bool, dismiss: @escaping () -> Void) -> some View {
         HStack(spacing: 10) {
-            Ph(warn ? "exclamationmark.triangle" : "checkmark.circle").foregroundStyle(warn ? t.warn : t.good)
-            Text(text).font(t.body(13)).foregroundStyle(t.ink).lineLimit(2)
-            SuiteIconButton(systemName: "xmark", label: "Dismiss", size: 22, action: dismiss)
+            Ph(warn ? "exclamationmark.triangle" : "checkmark.circle").foregroundStyle(warn ? t.roles.caution : t.roles.positive)
+            Text(text).font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(2)
+            SuiteIconButton(systemName: "xmark", label: "Dismiss", size: 28, action: dismiss)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: t.controlRadius).fill(t.surface))
-        .overlay(RoundedRectangle(cornerRadius: t.controlRadius).strokeBorder(t.line))
+        .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.raised))
+        .overlay(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).strokeBorder(t.roles.hairline))
         .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
         .task(id: text) {
             try? await Task.sleep(nanoseconds: 5_000_000_000)

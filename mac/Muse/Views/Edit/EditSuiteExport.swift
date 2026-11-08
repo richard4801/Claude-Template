@@ -57,7 +57,7 @@ struct EditSuiteExportSheet: View {
                     HStack {
                         Text(settings.summary(durationSec: session.duration)).font(t.body(13)).foregroundStyle(t.ink)
                         Spacer()
-                        Text(settings.sizeLabel(durationSec: session.duration)).font(t.mono(12)).foregroundStyle(t.ink)
+                        Text(settings.sizeLabel(durationSec: session.duration)).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.ink)
                     }
                     if let p = session.exportProblem { Note(warn: true, p) }
                     HStack(spacing: 12) {
@@ -104,7 +104,7 @@ struct EditSuiteExportSheet: View {
         } label: {
             VStack(spacing: 8) {
                 Rectangle().fill(on ? t.ink : .clear).overlay(Rectangle().strokeBorder(t.ink, lineWidth: 2)).frame(width: w, height: h)
-                Text(r.label).font(t.mono(12)).foregroundStyle(t.ink)
+                Text(r.label).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.ink)
             }
             .frame(width: 92, height: 88)
             .background(on ? t.surface2 : t.bg)
@@ -171,7 +171,7 @@ struct EditSuiteExportProgress: View {
                 Text(title).font(t.body(15, .bold))
                 ProgressLine(value: value)
                 HStack {
-                    Text("\(Int((value * 100).rounded())) %").font(t.mono(12)).foregroundStyle(t.muted)
+                    Text("\(Int((value * 100).rounded())) %").font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.muted)
                     Spacer()
                     MButton("Cancel", size: .small) { session.cancelExport() }.keyboardShortcut(.cancelAction)
                 }
