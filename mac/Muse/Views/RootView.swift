@@ -427,10 +427,12 @@ struct ToastView: View {
                 .id(toast.id)
                 .transition(.opacity)
                 .accessibilityElement(children: .combine)
+                .background(SnapshotFrame(key: "toast"))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        .padding(.top, 66)
+        // Recreate's 56 pt top bar holds the cost line and Build on the right: the toast sits under it there.
+        .padding(.top, store.screen == .edit && store.recreate.open ? 66 + 56 : 66)
         .padding(.trailing, 20)
         .animation(.easeOut(duration: 0.2), value: store.toast?.id)
     }

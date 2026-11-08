@@ -415,11 +415,15 @@ enum SnapshotRunner {
         }
         // Compare's "Your edit" plays the built edit: demo mode builds it on a video take, editCheck's 15 s take (its MP4
         // stays in the temporary folder), added for these shots only.
-        let long = FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-edit-check/long.mp4")
+        // A patterned take (stripes and a moving square, colours changing over time), so the built edit's frame shows the
+        // camera moves, cuts and Look on real picture detail; editCheck's flat test video if it can't be written.
+        var long = FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-edit-check/long.mp4")
+        let pattern = FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-recreate-pattern.mp4")
+        if (try? await writePatternVideo(pattern, seconds: 6, fps: 30, width: 432, height: 768)) != nil { long = pattern }
         let demoTakeId = "rx_recreate"
         if FileManager.default.fileExists(atPath: long.path) {
             let raw: [String: Any] = ["id": demoTakeId, "kind": "take", "title": "Living room dance", "videoUrl": long.absoluteString,
-                                      "durationSec": 15, "width": 432, "height": 768, "fps": 30, "createdAt": Int64(Date().timeIntervalSince1970 * 1000)]
+                                      "durationSec": long == pattern ? 6 : 15, "width": 432, "height": 768, "fps": 30, "createdAt": Int64(Date().timeIntervalSince1970 * 1000)]
             if let data = try? JSONSerialization.data(withJSONObject: raw), let take = try? JSONDecoder().decode(Take.self, from: data) {
                 store.takes.removeAll { $0.id == take.id }
                 store.takes.insert(take, at: 0)
@@ -472,6 +476,18 @@ enum SnapshotRunner {
             check("recipe", theme, beside: true)
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_recreate_recipe.png"))
             if theme == .c {
+                // A toast on Recreate never covers the cost line or Build: it sits under the top bar.
+                store.showToast("Shot 2 replaced. Undo it in the editor’s history.")
+                try? await Task.sleep(for: .seconds(0.6))
+                if let toast = state.recreateFrames["toast"], let c = state.recreateFrames["cost"], let b = state.recreateFrames["build"] {
+                    let clear = !toast.intersects(c) && !toast.intersects(b)
+                    lines.append("\(clear ? "FITS" : "CUT") recreate_toast 1280x800 c toast \(Int(toast.minX)),\(Int(toast.minY)) \(Int(toast.width))x\(Int(toast.height)) clear of the cost line and Build")
+                } else {
+                    lines.append("CUT recreate_toast 1280x800 c toast, cost or build not drawn")
+                }
+                capture(dir.appendingPathComponent("mac_c_recreate_toast.png"))
+                store.toast = nil
+                try? await Task.sleep(for: .seconds(0.4))
                 // The Cast step (Release 1 item E): the lead, and the studio's cast open under it.
                 let lead = store.recreateLead
                 lines.append("\(lead != nil && store.recreateModelId == lead?.id ? "FITS" : "CUT") recreate_cast 1280x800 c lead \(lead?.name ?? "none") prices the shots")
@@ -556,10 +572,14 @@ enum SnapshotRunner {
                 if store.recreate.playing { store.toggleRecreatePlay() }
                 // The exact frame the player shows (screen grabs leave video layers out): the built composition at 3.5 s,
                 // where the reference's caption is on screen.
-                if let img = await built.frame(at: 3.5) {
+                if let img = await built.frame(at: 3.6) {
                     let rep = NSBitmapImageRep(cgImage: img)
                     try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("mac_c_recreate_compare_frame.png"))
                     lines.append("FITS recreate_compare_frame c the built edit renders (\(img.width)x\(img.height))")
+                    // The demo take's picture is in it (not a flat fill), and whether this Mac has the reference's Look.
+                    let detail = frameDetail(img)
+                    let look = built.project?.mainClips.first?.look?.lut ?? "none (this Mac doesn't have the reference's Look)"
+                    lines.append("\(detail > 12 ? "FITS" : "CUT") recreate_compare_frame c picture detail \(String(format: "%.0f", detail)) (a flat fill is ~0), Look \(look)")
                 } else {
                     lines.append("CUT recreate_compare_frame c the built edit didn't render a frame")
                 }
