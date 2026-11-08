@@ -88,6 +88,19 @@ export function matchSlots(recipe: Recipe, takes: Candidate[], o: { leadModelId?
   };
 }
 
+/** Where a slot's prompt comes from: its brief, else the reference's summary, else a neutral default (no brief yet). */
+export function promptSource(recipe: Recipe, slot: Slot): 'brief' | 'summary' | 'default' {
+  const b = slot.brief ?? {};
+  if ([b.subject, b.action, b.location, b.notes].some(x => (x ?? '').trim())) return 'brief';
+  return recipe.summary?.trim() ? 'summary' : 'default';
+}
+/** The shot's words: the brief's, else the reference's summary, else a neutral line (the framing and move travel separately in `camera`). */
+function promptFor(recipe: Recipe, words: string) {
+  const w = words || recipe.summary?.trim() || 'The model moves naturally, matching the reference shot';
+  const t = `${w.charAt(0).toUpperCase()}${w.slice(1)}`;
+  return /[.!?]$/.test(t) ? t : `${t}.`;
+}
+
 /** What Suite length a slot needs: whole seconds, at least the tier's minimum (the clip is cut back to the slot). */
 export const slotSeconds = (slot: Slot, minSeconds = 2) => Math.max(minSeconds, Math.ceil(slot.durationSec));
 
@@ -106,7 +119,7 @@ export function shotRequestFor(recipe: Recipe, slot: Slot, o: { modelId: string;
   const seconds = slotSeconds(slot, o.minSeconds);
   return {
     modelId: o.modelId, quality: o.quality, duration: seconds, aspectRatio: recipe.source.aspect, takes: 1,
-    prompt: words ? `${words.charAt(0).toUpperCase()}${words.slice(1)}.` : '',
+    prompt: promptFor(recipe, words),
     title: `${o.referenceName ?? 'Recreate'} · ${slot.id}`,
     ...(Object.keys(camera).length ? { camera } : {}),
     draft: { v: 1, tool: 'shot', quality: o.quality, aspect: recipe.source.aspect, duration: seconds, takes: 1, rig: slot.rig ?? {}, recreate: { slotId: slot.id } },

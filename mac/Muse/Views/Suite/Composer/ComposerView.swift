@@ -47,6 +47,9 @@ struct ComposerView: View {
                 .scrollDisabled(fits)
             }
             ComposerPickerHost()
+            // Compare in the feed: two takes side by side over the composer.
+            let comparing = store.suiteComparing
+            if comparing.count == 2 { ComposerCompare(takes: comparing) }
             // The title's mode menu (owner decision 2026-11-08: a plain grouped list, no presets; they stay in the strip).
             if s.browserOpen { SuiteModeMenu() }
             // Review only: the big tool and preset browser it replaced, for the before shot.
@@ -54,6 +57,9 @@ struct ComposerView: View {
         }
         .onAppear { presetsOpen = draftIsEmpty }
         .onChange(of: s.composer.tool) { _, _ in presetsOpen = draftIsEmpty }
+        // Saved rigs for the Setup rail's Rigs row; a model's default rig when she is @-mentioned (fills Auto rows only).
+        .task(id: store.serverKey) { await store.loadSavedRigs() }
+        .onChange(of: s.composer.tokens.characterId) { _, new in if new != nil { store.applyDefaultRigIfAny() } }
         .task(id: ComposerPriceKey(draft: s.composer, slots: s.composerSlots.slots, swap: s.swap, clipId: store.clip?.id, catalogLoaded: s.catalog != nil, photo: s.photo)) {
             try? await Task.sleep(nanoseconds: 300_000_000)
             if Task.isCancelled { return }
@@ -105,7 +111,12 @@ struct ComposerView: View {
                 }
             }
             HStack(alignment: .top, spacing: Space.s4) {
-                ComposerMediaPane()
+                // The results feed takes the picture's place beside the rail (header "Takes").
+                if store.suite.feedOpen {
+                    ComposerFeed()
+                } else {
+                    ComposerMediaPane()
+                }
                 ScrollView(.vertical, showsIndicators: false) {
                     ComposerRail(narrow: narrow)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -164,6 +175,14 @@ struct ComposerView: View {
                 .buttonStyle(.plain).foregroundStyle(t.roles.ink2).help("Engines")
                 .accessibilityLabel("Engines (owner)")
             }
+            Button { store.suite.feedOpen.toggle() } label: {
+                Text(store.suite.feedOpen ? "Hide takes" : (d.tool == .photo ? "Photos" : "Takes")).font(t.scale.label.font).foregroundStyle(t.roles.ink2)
+                    .lineLimit(1).fixedSize()
+                    .frame(minHeight: 32).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(store.suite.feedOpen ? "Back to the picture" : "Everything you made with this tool, newest first")
+            .accessibilityLabel(store.suite.feedOpen ? "Hide takes" : "Show takes")
             if hasPresets {
                 Button { presetsOpen.toggle() } label: {
                     Text(presetsOpen ? "Hide presets" : "Presets").font(t.scale.label.font).foregroundStyle(t.roles.ink2)
@@ -331,6 +350,7 @@ struct ComposerRail: View {
                         SetupChipRow(chip: chip)
                     }
                     if hasSettingsRow { SetupSettingsRow() }
+                    if hasRig { SetupRigsRow() }
                 }
                 Text("Inputs").font(t.scale.heading.font).foregroundStyle(t.roles.ink)
                     .padding(.top, hasSetup ? Space.s5 : 0).padding(.bottom, Space.s2)
@@ -355,6 +375,12 @@ struct ComposerRail: View {
     }
 
     private var hasSetup: Bool { !store.suite.composer.tool.chips.isEmpty || hasSettingsRow }
+
+    /// The tools whose Setup is a rig (camera, light, look or style rows): saved rigs apply there.
+    private var hasRig: Bool {
+        let chips = store.suite.composer.tool.chips
+        return chips.contains(.camera) || chips.contains(.lighting) || chips.contains(.look) || chips.contains(.style)
+    }
 
     /// Shape, length and takes: the tools that render a new video of their own length.
     private var hasSettingsRow: Bool {
@@ -492,6 +518,115 @@ struct SetupSettingsRow: View {
             .popover(isPresented: $open, arrowEdge: .leading) {
                 ComposerSettingsPanel().environment(store).environment(\.theme, t)
             }
+    }
+}
+
+/// Saved rigs (plans/ai-suite-design.md: "A whole rig can be saved", for everyone): apply one (Undo in the toast), save
+/// this one under a name, and with one character in the prompt make it her default rig (it then fills her Auto rows
+/// whenever she is @-mentioned).
+struct SetupRigsRow: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    @State private var open = false
+    @State private var naming = false
+    @State private var name = ""
+
+    var body: some View {
+        let rigs = store.suite.savedRigs
+        let value = rigs.isEmpty ? "None saved" : "\(rigs.count) saved"
+        ComposerSetupRow(icon: "faders", name: "Rigs", value: value, auto: rigs.isEmpty, help: "Saved rigs") { open = true }
+            .popover(isPresented: $open, arrowEdge: .leading) { panel.environment(\.theme, t) }
+    }
+
+    private var panel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Saved rigs").font(t.scale.label.font).foregroundStyle(t.roles.ink2)
+                .padding(.horizontal, Space.s4).padding(.top, Space.s3).padding(.bottom, Space.s2)
+            if store.suite.savedRigs.isEmpty {
+                Text("Save the camera, light, look and style you have now, then apply them to any shot in one click.")
+                    .font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, Space.s4).padding(.bottom, Space.s2)
+            } else {
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(store.suite.savedRigs) { r in rigRow(r) }
+                    }
+                }
+                .frame(maxHeight: 260)
+            }
+            Divider().padding(.vertical, Space.s1)
+            if naming {
+                HStack(spacing: Space.s2) {
+                    TextField("Name this rig", text: $name)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(save)
+                    Button("Save", action: save)
+                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .keyboardShortcut(.defaultAction)
+                }
+                .padding(.horizontal, Space.s4).padding(.vertical, Space.s2)
+            } else {
+                action("Save this rig…", icon: "plus") { naming = true }
+            }
+            if let m = store.soleMentionedCharacter {
+                action("Make it \(m.shortName)’s default", icon: "user") {
+                    store.setDefaultRig(for: m)
+                    open = false
+                }
+                .help("Whenever \(m.shortName) is in a prompt, this rig fills the rows still on Auto")
+            }
+        }
+        .padding(.bottom, Space.s2)
+        .frame(width: 300, alignment: .leading)
+        .foregroundStyle(t.roles.ink)
+    }
+
+    private func rigRow(_ r: SuiteRigView) -> some View {
+        HStack(spacing: Space.s2) {
+            Button {
+                store.applySavedRig(r)
+                open = false
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(r.name).font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1)
+                    if !r.mine { Text("From the studio").font(t.scale.caption.font).foregroundStyle(t.roles.ink2) }
+                }
+                .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Apply \(r.name)")
+            if r.mine || store.isOwner {
+                Button { store.deleteSavedRig(r) } label: {
+                    Ph("trash", 14).foregroundStyle(t.roles.ink2).frame(width: 28, height: 28).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Delete \(r.name)")
+                .accessibilityLabel("Delete \(r.name)")
+            }
+        }
+        .padding(.horizontal, Space.s4)
+    }
+
+    private func action(_ title: String, icon: String, run: @escaping () -> Void) -> some View {
+        Button(action: run) {
+            HStack(spacing: Space.s2) {
+                Ph(icon, 14).foregroundStyle(t.roles.ink2)
+                Text(title).font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Space.s4).frame(height: 36)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func save() {
+        store.saveRig(named: name)
+        name = ""
+        naming = false
+        open = false
     }
 }
 

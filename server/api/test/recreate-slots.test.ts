@@ -14,9 +14,10 @@ import { paletteIds } from '../src/editor/photo.js';
 import { editSessionsOf } from '../src/editor/sessions.js';
 import type { Recipe } from '../src/recreate/analyze.js';
 import { lutFor } from '../src/suite/looks.js';
-import { buildProject, editorTransition } from '../src/recreate/assemble.js';
+import { buildProject, editorTransition, freezeCurve, peakInPoint } from '../src/recreate/assemble.js';
+import { speedOf } from '../src/recreate/signals.js';
 import { RECREATE_TOOLS } from '../src/recreate/mcpTools.js';
-import { BriefSchema, matchSlots, scoreTake, shotRequestFor, withBriefs, type Candidate } from '../src/recreate/slots.js';
+import { BriefSchema, matchSlots, promptSource, scoreTake, shotRequestFor, withBriefs, type Candidate } from '../src/recreate/slots.js';
 import { putObject } from '../src/storage/objects.js';
 import { makeApp, people, until, type Client } from './helpers.js';
 import { hasFfmpeg, makeReference } from './recreate-fixture.js';
@@ -102,6 +103,61 @@ describe('Recreate · assembly under playbook directives (unit)', () => {
   });
 });
 
+describe('Recreate · action peaks line up (unit)', () => {
+  const slot = { ...RECIPE.slots[0]!, peaks: [{ t: 0.5, strength: 1 }, { t: 0.2, strength: 0.3 }] };
+  it('the take starts where its strongest usable peak plays at the slot\'s peak moment', () => {
+    const take = { ...TAKE('tA'), durationSec: 3, peaks: [{ t: 2.0, strength: 0.9 }, { t: 0.3, strength: 0.5 }] };
+    expect(peakInPoint(slot, take, { outSec: 1, speed: 1 }, 0)).toBe(1.5); // 2.0 − 0.5
+    expect(peakInPoint(slot, take, { outSec: 1, speed: 1 }, 0.2)).toBe(1.3); // half a transition in: the moment is 0.7 s into the clip
+    // A peak too late to keep the whole range inside the take falls back to the next one that fits, else 0.
+    expect(peakInPoint(slot, { ...take, peaks: [{ t: 2.9, strength: 1 }, { t: 0.9, strength: 0.2 }] }, { outSec: 1, speed: 1 }, 0)).toBe(0.4);
+    expect(peakInPoint(slot, { ...take, peaks: [{ t: 0.1, strength: 1 }] }, { outSec: 1, speed: 1 }, 0)).toBe(0);
+    expect(peakInPoint(slot, { ...take, peaks: [] }, { outSec: 1, speed: 1 }, 0)).toBe(0);
+    expect(peakInPoint({ ...slot, peaks: [] }, take, { outSec: 1, speed: 1 }, 0)).toBe(0);
+    // A take that already plays slower to fill the slot has no room to move.
+    expect(peakInPoint(slot, take, { outSec: 1, speed: 0.8 }, 0)).toBe(0);
+  });
+  it('in the built edit: the clip starts at that in-point and keeps its length; off with peaks: false', () => {
+    const recipe = { ...RECIPE, slots: RECIPE.slots.map((x, i) => (i === 0 ? { ...x, peaks: [{ t: 0.5, strength: 1 }] } : x)) };
+    const takes = { s1: { ...TAKE('tA', 4), peaks: [{ t: 2.5, strength: 1 }] }, s2: TAKE('tB'), s3: TAKE('tC') };
+    const on = buildProject(recipe, 'take_src', takes);
+    const c1 = M.mainTrack(on.project).items[0] as M.VideoClip;
+    expect(c1.inSec).toBe(2);
+    const off = buildProject(recipe, 'take_src', takes, { peaks: false });
+    const d1 = M.mainTrack(off.project).items[0] as M.VideoClip;
+    expect(d1.inSec).toBe(0);
+    expect(c1.outSec - c1.inSec).toBeCloseTo(d1.outSec - d1.inSec, 4);
+    expect(M.timeline(on.project).map(x => x.startSec)).toEqual(M.timeline(off.project).map(x => x.startSec)); // the cuts don't move
+    expect(on.notes.some(n => /s1: starts 2.00 s into the take/.test(n))).toBe(true);
+  });
+});
+
+describe('Recreate · freezes (unit)', () => {
+  it('the analysis says where the freeze is', () => {
+    const fps = 30, energy = Array.from({ length: 90 }, (_, i) => (i >= 31 && i < 46 ? 0.0005 : 0.05)); // frames 31–45 identical
+    const sp = speedOf({ startSec: 0, endSec: 3, startFrame: 0, endFrame: 90 }, { fps, energy } as never);
+    expect(sp.ramp).toBe('freeze');
+    expect(sp.freeze).toEqual({ t: 1, durationSec: 0.5 }); // differences 31..45 → the hold starts at frame 30 (1.0 s), 15 frames
+  });
+  it('a freeze plays at 0.1× for its length at its moment; the clip keeps the slot\'s length and the cuts stay', () => {
+    const slot = { ...RECIPE.slots[2]!, speed: { ramp: 'freeze' as const, curve: [{ t: 0, speed: 1 }], confidence: 0.55, freeze: { t: 0.4, durationSec: 0.5 } } };
+    const recipe = { ...RECIPE, slots: [RECIPE.slots[0]!, RECIPE.slots[1]!, slot] };
+    const out = buildProject(recipe, 'take_src', { s1: TAKE('tA'), s2: TAKE('tB'), s3: TAKE('tC', 4) }, { peaks: false });
+    const c = M.mainTrack(out.project).items[2] as M.VideoClip;
+    expect(c.speedCurve?.preset).toBe('custom');
+    const tl = M.timeline(out.project);
+    expect(tl[2]!.endSec - tl[2]!.startSec).toBeCloseTo(slot.durationSec + 0.25, 1); // + half the crossfade before it
+    // Rendered as the editor's pieces: about 0.5 s of output at ≤ 0.2×, starting around 0.4 s after the slot's start.
+    let t = 0, slow = 0, firstSlow = -1;
+    for (const p of M.speedPieces(c)) { const len = (p.outSec - p.inSec) / p.speed; if (p.speed <= 0.2) { slow += len; if (firstSlow < 0) firstSlow = t; } t += len; }
+    expect(slow).toBeGreaterThan(0.3); expect(slow).toBeLessThan(0.7);
+    expect(Math.abs(firstSlow - (0.25 + 0.4))).toBeLessThan(0.15);
+    expect(out.notes.some(n => /s3: the reference holds a frame for 0.50 s/.test(n))).toBe(true);
+    expect(freezeCurve({ t: 0, durationSec: 0.05 }, 1)).toBeUndefined(); // too short to show
+    expect(buildProject(recipe, 'take_src', { s1: TAKE('tA'), s2: TAKE('tB'), s3: TAKE('tC', 4) }, { speed: false, peaks: false }).project.tracks[0]!.items.every(x => !(x as M.VideoClip).speedCurve)).toBe(true);
+  });
+});
+
 describe('Recreate · briefs, matching and the fill request (unit)', () => {
   const cand = (id: string, o: Partial<Candidate> = {}): Candidate => ({ id, modelId: 'm1', durationSec: 3, width: 720, height: 1280, status: 'test', createdAt: 0, draft: null, title: id, ...o });
   it('briefs are checked and add framing and angle to the rig', () => {
@@ -141,6 +197,13 @@ describe('Recreate · briefs, matching and the fill request (unit)', () => {
     expect(q).toMatchObject({ modelId: 'm1', quality: 'hd', duration: 2, aspectRatio: '9:16', takes: 1, prompt: 'She, flips her hair, in a rooftop at dusk.', title: 'Tuff edit · s2',
       camera: { angle: { height: 'low', shotSize: 'cu' }, move: { id: 'zoom_in', intensity: 0.5 } }, draft: { tool: 'shot', recreate: { slotId: 's2' } } });
     expect(shotRequestFor(r, r.slots[2]!, { modelId: 'm1', quality: 'draft', minSeconds: 4 }).duration).toBe(4);
+    // No brief yet: never an empty prompt. The reference's summary, else a neutral line; the framing and move still apply.
+    expect(promptSource(r, r.slots[1]!)).toBe('brief');
+    expect(shotRequestFor(r, r.slots[0]!, { modelId: 'm1', quality: 'hd' }).prompt).toBe('The model moves naturally, matching the reference shot.');
+    expect(promptSource(r, r.slots[0]!)).toBe('default');
+    const withSummary = { ...r, summary: 'A mirror outfit check with a hair flip' };
+    expect(shotRequestFor(withSummary, withSummary.slots[0]!, { modelId: 'm1', quality: 'hd' }).prompt).toBe('A mirror outfit check with a hair flip.');
+    expect(promptSource(withSummary, withSummary.slots[0]!)).toBe('summary');
   });
 });
 
@@ -273,6 +336,38 @@ describe.skipIf(!hasFfmpeg)('Recreate · the flow through the API and Claude\'s 
     expect((await owner.req('POST', `/v1/recreate/references/${refId}/apply`, { sessionId, baseRevision: 0, slots: { s1: 't_pan' } })).status).toBe(409); // stale
     expect((await member.req('POST', `/v1/recreate/references/${refId}/match`, {})).status).toBe(404); // the owner's reference
   }, 60_000);
+
+  it('fix one shot in place: another take for s1, the timeline and the owner\'s other edits kept, one undoable change', async () => {
+    const row = () => editSessionsOf(a.ctx).row(ownerUser, sessionId);
+    let p = (await row()).project as M.EditProject;
+    const before = M.timeline(p);
+    // The owner turns c2 (shot s3) down by hand first.
+    const s0 = await row();
+    const vol = await owner.req('POST', `/v1/edit-sessions/${sessionId}/patch`, { baseRevision: s0.revision, device: 'mac', patch: [{ op: 'add', path: '/tracks/0/items/1/volume', value: 0.3 }] });
+    expect(vol.status).toBe(200);
+    const r = await owner.req('POST', `/v1/recreate/references/${refId}/slots/s1/replace`, { sessionId, take: 't_static', device: 'mac' });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body).toMatchObject({ slotId: 's1', itemId: 'c1', takeId: 't_static', label: 'Replaced shot s1 in “Tuff edit”' });
+    p = (await row()).project as M.EditProject;
+    const c1 = M.mainTrack(p).items[0] as M.VideoClip, c2 = M.mainTrack(p).items[1] as M.VideoClip;
+    expect(p.assets.find(x => x.id === c1.asset)!.take).toBe('t_static');
+    expect(c2.volume).toBe(0.3); // the hand edit stays
+    M.timeline(p).forEach((x, i) => expect(x.startSec).toBeCloseTo(before[i]!.startSec, 4)); // nothing moves
+    expect((await owner.req('GET', `/v1/recreate/references/${refId}/fill`)).body.applied.slots.s1).toBe('t_static');
+    // One undoable change.
+    const hist = (await owner.req('GET', `/v1/edit-sessions/${sessionId}/history`)).body;
+    expect(hist[0]).toMatchObject({ label: 'Replaced shot s1 in “Tuff edit”' });
+    // Checks: a shot that isn't in this build, another session, an unknown take or shot.
+    expect((await owner.req('POST', `/v1/recreate/references/${refId}/slots/s2/replace`, { sessionId, take: 't_pan' })).body.code).toBe('slot_not_in_edit');
+    const other = (await owner.req('POST', '/v1/edit-sessions', { takeId: 't_pan' })).body.id;
+    expect((await owner.req('POST', `/v1/recreate/references/${refId}/slots/s1/replace`, { sessionId: other, take: 't_pan' })).body.code).toBe('not_built_here');
+    expect((await owner.req('POST', `/v1/recreate/references/${refId}/slots/s1/replace`, { sessionId, take: 'nope' })).status).toBe(400);
+    expect((await owner.req('POST', `/v1/recreate/references/${refId}/slots/s9/replace`, { sessionId, take: 't_pan' })).status).toBe(404);
+    // Claude's tool does the same, as Claude's change.
+    const back = await tool('replace_slot').run(env(), { referenceId: refId, slotId: 's1', sessionId, take: 't_pan' }) as any;
+    expect(back).toMatchObject({ takeId: 't_pan' });
+    expect((await owner.req('GET', `/v1/edit-sessions/${sessionId}/history`)).body[0]).toMatchObject({ byClaude: true });
+  });
 
   it('pinned rules change Claude\'s plan: cuts only and a still camera; the owner\'s own options in the app win; gaps reported once', async () => {
     const pinRule = async (text: string) => (await owner.req('POST', '/v1/learn/playbook', { text, pinned: true })).body.id;
