@@ -58,4 +58,6 @@ kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+# Recreate links fetched on the phone (WS4): Python + yt-dlp in the app. Chaquopy is MIT; yt-dlp is Unlicense.
+chaquopy = { id = "com.chaquo.python", version = "17.2.0" }
 roborazzi = { id = "io.github.takahirom.roborazzi", version.ref = "roborazzi" }

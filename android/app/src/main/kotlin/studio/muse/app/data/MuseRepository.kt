@@ -266,6 +266,7 @@ class MuseRepository(
         if (ev.type in setOf("member", "invite", "settings", "studio", "prompts", "promptScript", "clip")) _live.tryEmit(ev)
         if (ev.type == "camera" || ev.type == "blender" || ev.type == "claude") _live.tryEmit(ev) // Workstream 2: camera sessions, Claude chat
         if (ev.type == "edit") _live.tryEmit(ev) // Edit sessions (workstream 3): the open Edit suite applies them
+        if (ev.type == "suiteAssist") _live.tryEmit(ev) // Claude in the AI Suite: the composer applies Claude's draft
     }
 
     /** A `wallet` event: refresh the balance, and say so when the owner sent or took back tokens. */

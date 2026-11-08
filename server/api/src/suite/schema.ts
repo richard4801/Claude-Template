@@ -1,4 +1,4 @@
-// AI suite tables (migrations 0007, 0013, 0014, 0020). Re-exported from db/schema.ts.
+// AI suite tables (migrations 0007, 0013, 0014, 0020, 0022). Re-exported from db/schema.ts.
 import { bigint, doublePrecision, index, jsonb, pgTable, primaryKey, text } from 'drizzle-orm/pg-core';
 import type { LadderStep, Tier } from './registry.js';
 
@@ -72,3 +72,20 @@ export const suiteQueue = pgTable('suite_queue', {
   estimate: doublePrecision('estimate').notNull(),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 }, t => [index('suite_queue_studio_idx').on(t.studioId, t.createdAt)]);
+
+/**
+ * Claude in the AI Suite (migration 0022): the composer draft Claude and the owner share in one conversation. Claude
+ * sets it through MCP tools, the app shows it live and sends the owner's own edits back; generating waits for the
+ * owner's yes (`pending`).
+ */
+export const suiteAssists = pgTable('suite_assists', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  userId: text('user_id').notNull(),
+  /** The composer's draft (suite/drafts.ts DraftSchema, the Reuse-settings format). */
+  draft: jsonb('draft').$type<Record<string, unknown>>().notNull(),
+  revision: bigint('revision', { mode: 'number' }).notNull().default(0),
+  pending: jsonb('pending').$type<Record<string, unknown>[]>().notNull().default([]),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+}, t => [index('suite_assists_user_idx').on(t.studioId, t.userId, t.updatedAt)]);

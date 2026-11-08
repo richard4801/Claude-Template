@@ -74,6 +74,8 @@ export const studioSettings = pgTable('studio_settings', {
   /** workstream 1: the owner's runtime switch for paid AI editing helpers (no redeploy), and their daily spend cap (null = EDITOR_CAP_PER_DAY_USD). */
   editorPaidOff: boolean('editor_paid_off').notNull().default(false),
   editorCapPerDay: money('editor_cap_per_day'),
+  /** workstream 1: Recreate's "Strict link rules" (on: TikTok, Instagram Reels and YouTube only, and TikTok's downloads-off honoured). */
+  recreateStrictLinks: boolean('recreate_strict_links').notNull().default(true),
   imageEngine: jsonb('image_engine').$type<{ provider: string; model: string; url?: string }>(),
   capPerJob: money('cap_per_job'),
   capPerDay: money('cap_per_day'),
@@ -518,3 +520,6 @@ export * from '../editor/schema.js';
 
 // Prompt scripts (workstream 4): the owner's rule edits per script.
 export * from '../prompt/scripts/schema.js';
+
+// Bring your own provider (WS5, migration 0024).
+export * from '../byo/schema.js';

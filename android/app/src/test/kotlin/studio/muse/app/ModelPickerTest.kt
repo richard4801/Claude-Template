@@ -1,0 +1,192 @@
+package studio.muse.app
+
+import android.os.Looper
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
+import com.github.takahirom.roborazzi.captureRoboImage
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.ParameterizedRobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+import studio.muse.app.data.AppPrefs
+import studio.muse.app.data.FakeMuseApi
+import studio.muse.app.data.FakeSuite
+import studio.muse.app.data.MemoryPrefs
+import studio.muse.app.data.SampleData
+import studio.muse.app.data.SuiteRules
+import studio.muse.app.ui.MuseApp
+import studio.muse.app.ui.Routes
+import studio.muse.app.ui.screens.suite.composer.ComposerDraft
+import studio.muse.app.ui.screens.suite.composer.ComposerSheet
+import studio.muse.app.ui.screens.suite.composer.ModelPicker
+import studio.muse.app.ui.screens.suite.composer.PromptTokens
+import studio.muse.app.ui.screens.suite.composer.SheetKind
+import studio.muse.app.ui.screens.suite.composer.modelLabel
+import studio.muse.app.ui.screens.suite.composer.modelPill
+import studio.muse.app.ui.screens.suite.composer.pinEngine
+
+/** WS7: the owner's model picker logic (the Mac's "Model" pill on Android). */
+class ModelPickerLogicTest {
+    private val owner = FakeSuite().catalog(owner = true)
+    private val member = FakeSuite().catalog(owner = false)
+
+    @Test fun groupsPutThisQualityFirstThenOthersThenYours() {
+        val g = ModelPicker.groups(owner, "hd")
+        assertTrue(g.ladder.isNotEmpty() && g.ladder.all { "hd" in it.tiers })
+        assertTrue(g.others.isNotEmpty() && g.others.none { "hd" in it.tiers })
+        assertEquals(listOf("c_demo2"), g.custom.map { it.id })
+        // Every ladder row carries a price per second and lengths from the demo registry.
+        assertTrue(g.ladder.all { it.perSec != null && it.maxSeconds != null })
+    }
+
+    @Test fun membersGetNoModels() {
+        assertTrue(ModelPicker.groups(member, "hd").isEmpty)
+        assertNull(member.engines)
+    }
+
+    @Test fun pickingALadderEngineMovesQualityAndClampsLength() {
+        val veo = ModelPicker.groups(owner, "standard").all.first { it.id == "veo-3.1-lite" && it.tier == "draft" }
+        val d = ComposerDraft(quality = "standard", duration = 12).pinEngine(veo)
+        assertEquals("draft", d.quality)
+        assertEquals(8, d.duration)
+        assertEquals(4..8, d.lengthRange(owner))
+        assertTrue(d.modelLabel(owner).startsWith("Veo 3.1 Lite, 720"))
+        assertEquals("4, 6 or 8 s, 9:16 and 16:9", veo.limits)
+        // Exact lengths: 7 s snaps to 6 or 8.
+        assertTrue(ComposerDraft(quality = "draft", duration = 7).pinEngine(veo).duration in listOf(6, 8))
+        // Fit keeps the pin on its own quality, and drops it on another.
+        assertEquals("veo-3.1-lite", d.fit(owner).engineModel)
+        assertNull(d.copy(quality = "cinema").fit(owner).engineModel)
+    }
+
+    @Test fun customModelKeepsQualityAndClampsShape() {
+        val mine = ModelPicker.groups(owner, "hd").custom.single()
+        val d = ComposerDraft(quality = "hd", duration = 15, aspect = "4:5").pinEngine(mine)
+        assertEquals("hd", d.quality)
+        assertEquals(10, d.duration)
+        assertEquals("9:16", d.aspect)
+        assertEquals("c_demo2", d.fit(owner).engineModel)
+        assertTrue(d.inputsFor(owner).start)
+        assertFalse(d.inputsFor(owner).end)
+        assertEquals("$0.070/s", mine.price)
+        assertEquals("5 or 10 s, 3 shapes", mine.limits)
+    }
+
+    @Test fun autoGoesBack() {
+        val mine = ModelPicker.groups(owner, "hd").custom.single()
+        val d = ComposerDraft(quality = "hd").pinEngine(mine).pinEngine(null)
+        assertNull(d.engineModel); assertNull(d.resolution)
+        assertEquals("Auto", d.modelLabel(owner))
+    }
+
+    @Test fun imageModelsForPhoto() {
+        val img = ModelPicker.engines(owner, "image")
+        assertEquals(listOf("google/nano-banana", "c_demo1"), img.map { it.id })
+        assertEquals("$0.04 a photo", img.first().price)
+        val req = studio.muse.app.ui.screens.suite.composer.PhotoComposer.request(ComposerDraft(modelId = SampleData.DEMO, tool = studio.muse.app.ui.screens.suite.composer.ComposerTool.PHOTO),
+            studio.muse.app.ui.screens.suite.composer.PhotoDraft(imageModel = "c_demo1"))!!
+        assertEquals("c_demo1", req.imageModel)
+    }
+
+    @Test fun resolutionPinCarriesItsOwnPrice() {
+        val kling = ModelPicker.groups(owner, "hd").ladder.first { it.id == "kling-v4" }
+        assertTrue(kling.resolutions.size > 1)
+        val d = ComposerDraft(quality = "hd").pinEngine(kling, "720p")
+        assertEquals("720p", d.resolution)
+        assertEquals("hd", d.quality)
+        assertEquals(0.157, kling.perSecAt("720p")!!, 1e-9)
+    }
+
+    @Test fun ladderRowsUseThatQualitysResolution() {
+        val h3 = ModelPicker.groups(owner, "hd").ladder.first { it.id == "h3" }
+        assertEquals("2K", h3.resolutionOn("hd"))
+        assertEquals("2K", ComposerDraft(quality = "hd").pinEngine(h3).resolution)
+        assertEquals("768P", ComposerDraft(quality = "standard").pinEngine(h3).resolution)
+    }
+
+    @Test fun rates() {
+        assertEquals("$0.050/s", ModelPicker.perSec(0.05))
+        assertEquals("$0.16/s", ModelPicker.perSec(0.157))
+        assertEquals("$0.065/s", ModelPicker.perSec(0.065))
+        assertEquals("$0.40", ModelPicker.money(0.4))
+        val kling = ModelPicker.groups(owner, "hd").ladder.first { it.id == "kling-v4" }
+        assertEquals(listOf("720p  $0.16/s", "1080p  $0.24/s"), kling.chips.map { it.second })
+        assertEquals("Model", ComposerDraft().modelPill(owner))
+    }
+
+    @Test fun pinnedEnginePricesTheDemoEstimate() = runBlocking {
+        val api = FakeSuite()
+        val base = studio.muse.app.data.SuiteShotRequest(prompt = "x", quality = "hd", duration = 5)
+        val auto = api.estimate(base, true, emptyList(), null)
+        val mine = api.estimate(base.copy(engineModel = "c_demo2"), true, emptyList(), null)
+        assertEquals(0.65, auto.estimate, 1e-9)
+        assertEquals(0.35, mine.estimate, 1e-9)
+    }
+}
+
+/**
+ * The model list in the composer's Settings sheet (phone), all four themes at 390 dp: Auto opened by tapping the row, a
+ * this quality's Kling pinned (its resolutions shown), a custom model pinned. Members get no models (ModelPickerLogicTest).
+ * PNGs: app/build/outputs/roborazzi/model_picker_<theme>_<state>.png.
+ */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(sdk = [35], qualifiers = "w390dp-h844dp-xhdpi")
+class ModelPickerScreenshotTest(private val theme: String, private val state: String) {
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}_{1}")
+        fun params(): List<Array<Any>> = listOf("a", "b", "c", "d").flatMap { t -> listOf("auto", "ladder", "custom").map { s -> arrayOf<Any>(t, s) } }
+    }
+
+    @get:Rule val compose = createComposeRule()
+
+    private fun idle() = shadowOf(Looper.getMainLooper()).idle()
+
+    @Test fun capture() {
+        RuntimeEnvironment.setQualifiers("w390dp-h1640dp-xhdpi")
+        val scope = MainScope()
+        val fake = FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0)
+        val role = "owner"
+        val c = AppContainer(scope, MemoryPrefs(AppPrefs(theme = theme, useFake = true, token = "t", studioName = "Jenne Studio", role = role, email = "jenne@studio.com")), fake, null)
+        val cat = fake.suite.catalog(owner = true)
+        var d = ComposerDraft(tokens = PromptTokens().withText("She walks into a quiet café at golden hour"), modelId = SampleData.DEMO, quality = "hd", duration = 8)
+        when (state) {
+            "ladder" -> d = d.pinEngine(ModelPicker.groups(cat, "hd").ladder.first { it.id == "kling-v4" })
+            "custom" -> d = d.pinEngine(ModelPicker.groups(cat, "hd").custom.single())
+        }
+        c.suite.composer.value = d
+        c.suite.sheet.value = ComposerSheet(SheetKind.SETTINGS)
+        compose.mainClock.autoAdvance = false
+        compose.setContent { MuseApp(c, Routes.SUITE_SHOT) }
+        repeat(8) { idle(); compose.mainClock.advanceTimeBy(400) }
+        idle()
+        // Let the clock run for the interactions (scrolling waits for idle).
+        compose.mainClock.autoAdvance = true
+        if (state == "auto") { compose.onAllNodesWithText("Only you see models", useUnmergedTree = true).onFirst().performClick(); compose.waitForIdle() }
+        assertEquals(1, compose.onAllNodesWithTag("model_picker", useUnmergedTree = true).fetchSemanticsNodes().size)
+        // Scroll the sheet so the list's end ("Your providers") is in view.
+        compose.onAllNodesWithText("Your providers", useUnmergedTree = true).onFirst().performScrollTo()
+        compose.waitForIdle()
+        compose.onRoot().captureRoboImage("build/outputs/roborazzi/model_picker_${theme}_$state.png")
+    }
+}

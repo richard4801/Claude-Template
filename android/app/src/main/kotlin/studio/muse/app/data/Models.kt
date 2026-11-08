@@ -736,6 +736,25 @@ data class StudioSettings(
     val engines: Engines? = null,
 )
 
+/**
+ * Recreate's link rules (GET /v1/recreate/settings), which the phone applies to its own fetch too. [strictLinks] on
+ * (the default): TikTok, Instagram and YouTube only, and TikTok's "downloads off" refused. Never cookies or sign-in.
+ */
+@Serializable
+data class RecreateLinkSettings(
+    val strictLinks: Boolean = true,
+    val platforms: List<String> = listOf("tiktok", "instagram", "youtube"),
+    val tiktokDownloadsOff: String = "refuse",
+    val maxSec: Int = 60,
+    val maxMb: Int = 80,
+    val serverFetch: Boolean = true,
+    val canEdit: Boolean = false,
+)
+
+/** POST /v1/recreate/links/check: may the phone fetch this link (its normalized form), or is it already a reference? */
+data class RecreateLinkCheck(val allowed: Boolean, val url: String, val platform: String? = null,
+    val cached: studio.muse.core.edit.RecipeReference? = null, val code: String? = null, val reason: String? = null)
+
 @Serializable
 data class StudioSettingsPatch(
     val maxGpus: Int? = null,
@@ -891,6 +910,8 @@ data class ApiEvent(
     val width: Int? = null,
     val device: String? = null,
     val request: EditAppRequest? = null,
+    /** Claude in the AI Suite: type "suiteAssist", the shared composer draft after any change. */
+    val assist: SuiteAssist? = null,
 ) {
     companion object {
         /** Not from the server: the stream (re)connected, so the app refetches what it may have missed. */
@@ -1015,7 +1036,12 @@ data class DevFailRequest(val failNext: Boolean)
 @Serializable
 data class ErrorBody(val error: String, val code: String? = null)
 
-class ApiException(val code: String, message: String) : Exception(message)
+class ApiException(val code: String, message: String) : Exception(message) {
+    /** The server restarting or the network dropping: worth retrying in a moment (polls keep going). */
+    val transient: Boolean get() = code in TRANSIENT
+
+    companion object { val TRANSIENT = setOf("server_restarting", "offline", "still_working", "http_502", "http_503", "http_504") }
+}
 
 // ---------------------------------------------------------------- Prompt scripts (workstream 4)
 // plans/api.md "Prompt scripts (2026-11-05)": inputs → rules → blocks. Owner only (Settings → Prompts → Scripts).

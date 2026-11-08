@@ -335,13 +335,13 @@ private fun ColumnScope.SettingsBody(x: SheetContext) {
     val tiers = x.catalog?.tiers?.ifEmpty { null } ?: SuiteRules.TIERS.map { studio.muse.app.data.SuiteTier(it, SuiteRules.tierLabel(it), available = true) }
     Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         SheetLabel("Quality", "per ${d.duration} s take", Modifier.padding(top = 4.dp, bottom = 4.dp))
-        // An engine pinned by the owner sets the quality: every tier would show the same price, so say so once (owner bug).
+        // A model pinned by the owner sets the quality: every tier would show the same price, so say so once (owner bug).
         val pinned = x.owner && d.engineModel != null
         if (pinned) Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            T("Engine pinned: ${d.engineLabel(x.catalog)}. Quality is set by the engine${x.estimate?.let { ", ${ComposerPrice.short(it)}" } ?: ""}.",
+            T("Model pinned: ${d.modelLabel(x.catalog)}. The price follows the model${x.estimate?.let { ": ${ComposerPrice.short(it)}" } ?: ""}.",
                 m.scale.caption, m.t.ink, Modifier.weight(1f), maxLines = 3)
-            Box(Modifier.heightIn(min = 48.dp).press { x.update { it.pin(null) } }.semantics { role = Role.Button }.padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
-                T("Unpin", m.scale.label, m.link, maxLines = 1)
+            Box(Modifier.heightIn(min = 48.dp).press { x.update { it.pinEngine(null).fit(x.catalog) } }.semantics { role = Role.Button }.padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
+                T("Back to Auto", m.scale.label, m.link, maxLines = 1)
             }
         }
         tiers.forEach { t ->
@@ -356,22 +356,25 @@ private fun ColumnScope.SettingsBody(x: SheetContext) {
                 Box(Modifier.width(20.dp)) { if (on) SIc("check", 18.dp, m.t.accent) }
             }
         }
-        // Owner only: pin an engine of this quality for this shot ("Engine · Auto"). Members never see engines.
-        val engines = x.catalog?.tier(d.quality)?.models.orEmpty()
-        if (x.owner && engines.isNotEmpty() && d.tool in ComposerDraft.PROMPT_TOOLS) {
-            var open by androidx.compose.runtime.remember(d.quality) { androidx.compose.runtime.mutableStateOf(d.engineModel != null) }
+        // Owner only (WS7, as the Mac's "Model" pill): pin any engine for this shot, this quality's ladder first, then the
+        // others, then "Your providers". Members never see models; they keep the quality tiers above.
+        val groups = ModelPicker.groups(x.catalog, d.quality)
+        if (x.owner && !groups.isEmpty && d.tool in ComposerDraft.PROMPT_TOOLS) {
+            var open by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(d.engineModel != null) }
             Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(12.dp)).background(m.t.surface).press { open = !open }
-                .semantics(mergeDescendants = true) { role = Role.Button; contentDescription = "Engine, owner only: ${d.engineLabel(x.catalog)}" }.padding(horizontal = 14.dp),
+                .semantics(mergeDescendants = true) { role = Role.Button; contentDescription = "Model: ${d.modelLabel(x.catalog)}. Only you see models" }.padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                T("Engine · ${d.engineLabel(x.catalog)}", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, Modifier.weight(1f), maxLines = 1)
-                T("Owner", m.scale.micro, m.t.muted, maxLines = 1)
+                Column(Modifier.weight(1f)) {
+                    T("Model", m.type.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
+                    T(d.modelLabel(x.catalog), m.scale.caption, m.t.muted, maxLines = 1)
+                }
+                T("Only you see models", m.scale.micro, m.t.muted, maxLines = 1)
                 SIc(if (open) "chevd" else "chev", 16.dp, m.t.muted)
             }
-            if (open) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                DarkChip("Auto", d.engineModel == null) { x.update { it.pin(null) } }
-                engines.forEach { e -> DarkChip(e.name.ifBlank { e.model } + (e.resolution.ifBlank { null }?.let { " · $it" } ?: ""), e.model == d.engineModel) { x.update { it.pin(e) } } }
+            if (open) {
+                ModelPickerList(d, groups) { e, r -> x.update { it.pinEngine(e, r) } }
+                T("Length, shape and the input slots follow the pinned model", m.type.tiny, m.t.muted)
             }
-            if (open) T("The input slots follow the pinned engine", m.type.tiny, m.t.muted)
         }
         // Extend: the shape, sound and speaking come from the source clip; the length is the new part's.
         val extend = d.tool == ComposerTool.EXTEND
@@ -648,7 +651,7 @@ private fun ColumnScope.NewLocationBody(x: SheetContext) {
 }
 
 @Composable
-private fun DarkChip(label: String, on: Boolean, onClick: () -> Unit) {
+internal fun DarkChip(label: String, on: Boolean, onClick: () -> Unit) {
     val m = muse
     Box(Modifier.heightIn(min = 48.dp).press(onClick = onClick).semantics { selected = on; role = Role.RadioButton }, contentAlignment = Alignment.Center) {
         Box(Modifier.height(32.dp).clip(RoundedCornerShape(16.dp)).background(if (on) m.t.ink else m.t.surface2).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {

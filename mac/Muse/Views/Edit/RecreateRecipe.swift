@@ -355,23 +355,26 @@ struct RecreateCompare: View {
 
 /// Under the players: a time ruler, then one lane each for the shots (picture, number, and whether it comes from your
 /// takes or will be generated, or its score after Build), the text, the transitions and the beats. Click a shot to
-/// select it.
+/// select it. Every item sits strictly on its own time span (RecreateLaneLayout) and each lane clips to its row, so
+/// nothing draws over the player or another lane, and selecting a shot only changes its border (owner test 2026-11-08).
 struct RecreateLanes: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
     var scores: Bool
 
     static let labelWidth: CGFloat = 176
+    /// The shot tiles' height inside their 104 pt lane.
+    static let tileHeight: CGFloat = 92
 
     var body: some View {
         let rs = store.recreate
         let bpm = rs.recipe?.sound?.bpm.map { "Beats · \(Int($0.rounded())) BPM" } ?? "Beats"
         VStack(spacing: 0) {
-            lane(28, icon: nil, label: nil) { w in ruler(w) }
+            lane(28, icon: nil, label: nil, probe: "laneRuler") { w in ruler(w) }
             SuiteRule()
-            lane(104, icon: "film-strip", label: "Shots") { w in shots(w) }
+            lane(104, icon: "film-strip", label: "Shots", probe: "laneShots") { w in shots(w) }
             SuiteRule()
-            lane(40, icon: "text-t", label: "Text") { w in texts(w) }
+            lane(40, icon: "text-t", label: "Text", probe: "laneText") { w in texts(w) }
             SuiteRule()
             lane(36, icon: "arrows-left-right", label: "Transitions") { w in transitions(w) }
             SuiteRule()
@@ -386,9 +389,13 @@ struct RecreateLanes: View {
         .background(t.roles.canvas)
     }
 
-    private func x(_ sec: Double, _ w: CGFloat) -> CGFloat { CGFloat(sec / store.recreate.duration) * w }
+    private func x(_ sec: Double, _ w: CGFloat) -> CGFloat {
+        CGFloat(RecreateLaneLayout.x(sec, duration: store.recreate.duration, width: Double(w)))
+    }
 
-    private func lane<C: View>(_ h: CGFloat, icon: String?, label: String?, @ViewBuilder _ content: @escaping (CGFloat) -> C) -> some View {
+    /// One lane: its name on the left, then its content and the playhead, clipped to the row.
+    private func lane<C: View>(_ h: CGFloat, icon: String?, label: String?, probe: String? = nil,
+                               @ViewBuilder _ content: @escaping (CGFloat) -> C) -> some View {
         HStack(spacing: 0) {
             HStack(spacing: Space.s2) {
                 if let icon { Ph(icon, 16).foregroundStyle(t.roles.ink2) }
@@ -407,6 +414,8 @@ struct RecreateLanes: View {
                         .allowsHitTesting(false)
                 }
                 .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
+                .background(probe.map { SnapshotFrame(key: $0) })
+                .clipped()
             }
             .padding(.horizontal, Space.s2)
             .frame(height: h)
@@ -414,60 +423,54 @@ struct RecreateLanes: View {
         .frame(height: h)
     }
 
+    /// Labels every 0.5, 1, 2, 5, 10, 15 or 30 s, whichever keeps them at least 48 pt apart.
     private func ruler(_ w: CGFloat) -> some View {
-        let whole = Int(store.recreate.duration.rounded(.down))
+        let d = store.recreate.duration
+        let step = RecreateLaneLayout.rulerStep(duration: d, width: Double(w))
+        let marks = RecreateLaneLayout.rulerMarks(duration: d, width: Double(w))
         return ZStack(alignment: .topLeading) {
-            ForEach(0...max(0, whole), id: \.self) { s in
-                Text(RecreateText.time(Double(s))).scaled(t.scale.micro, t.roles.ink2).monospacedDigit().fixedSize()
-                    .offset(x: x(Double(s), w), y: 7)
+            ForEach(marks.indices, id: \.self) { i in
+                let at = x(marks[i], w)
+                Text(RecreateLaneLayout.rulerLabel(marks[i], step: step))
+                    .scaled(t.scale.micro, t.roles.ink2).monospacedDigit().lineLimit(1).fixedSize()
+                    .background(SnapshotFrame(key: "rulerLabel\(i)"))
+                    .alignmentGuide(.leading) { _ in -at }
+                    .alignmentGuide(.top) { _ in -7 }
             }
         }
     }
 
     private func shots(_ w: CGFloat) -> some View {
         let rs = store.recreate
+        let spans = RecreateLaneLayout.tiles(rs.slots.map { (start: $0.startSec, end: $0.endSec) }, duration: rs.duration, width: Double(w))
         return ZStack(alignment: .topLeading) {
             ForEach(rs.slots.indices, id: \.self) { i in
                 let s = rs.slots[i]
-                let left = x(s.startSec, w) + 2
-                let width = max(8, x(s.endSec, w) - x(s.startSec, w) - 4)
-                Button { store.selectRecreateSlot(i) } label: { tile(s, i, selected: i == rs.selectedSlot) }
-                    .buttonStyle(.plain)
-                    .frame(width: width, height: 92)
-                    .offset(x: left, y: 6)
-                    .accessibilityLabel("Shot \(i + 1)")
-                    .accessibilityAddTraits(i == rs.selectedSlot ? .isSelected : [])
+                let span = spans.indices.contains(i) ? spans[i] : RecreateLaneLayout.Span(x: 0, width: 0)
+                let tagText = tag(s)
+                Button { store.selectRecreateSlot(i) } label: {
+                    RecreateShotTile(slot: s, index: i, tag: tagText, selected: i == rs.selectedSlot)
+                }
+                .buttonStyle(.plain)
+                .frame(width: CGFloat(span.width), height: Self.tileHeight)
+                .background(SnapshotFrame(key: "laneShot\(i)"))
+                .help(tagText.map { "Shot \(i + 1): \($0)" } ?? "Shot \(i + 1)")
+                .accessibilityLabel("Shot \(i + 1)")
+                .accessibilityValue(tagText ?? "")
+                .accessibilityAddTraits(i == rs.selectedSlot ? .isSelected : [])
+                .position(x: CGFloat(span.x + span.width / 2), y: 6 + Self.tileHeight / 2)
             }
         }
     }
 
-    private func tile(_ s: Recipe.Slot, _ i: Int, selected: Bool) -> some View {
-        let shape = RoundedRectangle(cornerRadius: min(t.radii.container, 10), style: .continuous)
-        return RecreateStill(link: s.thumbUrl, tone: i)
-            .overlay(alignment: .bottom) {
-                HStack(spacing: Space.s1) {
-                    Text("\(i + 1)").font(t.scale.micro.font).monospacedDigit().foregroundStyle(.white)
-                        .padding(.horizontal, Space.s2).padding(.vertical, 2)
-                        .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(Color.black.opacity(0.6)))
-                    Spacer(minLength: 0)
-                    Text(tag(s)).font(t.scale.micro.font).monospacedDigit().foregroundStyle(t.roles.ink).lineLimit(1).fixedSize()
-                        .padding(.horizontal, Space.s2).padding(.vertical, 2)
-                        .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(t.roles.raised))
-                }
-                .padding(6)
-            }
-            .clipShape(shape)
-            .overlay(shape.strokeBorder(t.roles.selection, lineWidth: selected ? 2 : 0).padding(-1))
-            .contentShape(shape)
-    }
-
-    private func tag(_ s: Recipe.Slot) -> String {
+    /// The tile's tag: "Yours", "To swap in", "To generate", … (its score after Build); nil before the fill is read.
+    private func tag(_ s: Recipe.Slot) -> String? {
         let rs = store.recreate
         if scores, let sc = rs.score(s.id) { return RecreateText.percent(sc) }
         let swap = (rs.slotFill(s.id)?.method ?? rs.estimateInfo[s.id]?.method) == "swap"
         if rs.fillErrors[s.id] != nil { return swap ? "Swap didn’t work" : "Didn’t generate" }
         if rs.generatingSlots.contains(s.id) { return swap ? "Swapping in" : "Generating" }
-        guard let state = rs.slotFill(s.id)?.state else { return "…" }
+        guard let state = rs.slotFill(s.id)?.state else { return nil }
         switch state {
         case "matched": return "Yours"
         case "ready": return swap ? "Swapped in" : "Ready"
@@ -477,30 +480,61 @@ struct RecreateLanes: View {
         }
     }
 
+    /// Each text item on its time span: its words when they fit, else a "T" marker, else a dot; the tooltip has the words.
     private func texts(_ w: CGFloat) -> some View {
-        let items = store.recreate.recipe?.text ?? []
+        let rs = store.recreate
+        let items = rs.recipe?.text ?? []
+        let spans = RecreateLaneLayout.texts(items.map { (start: $0.startSec, end: $0.endSec) }, duration: rs.duration, width: Double(w))
         return ZStack(alignment: .topLeading) {
-            ForEach(items) { item in
-                let words = item.words.map { $0.prefix(1).uppercased() + $0.dropFirst().lowercased() }
-                Text(words.map { "“\($0)”" } ?? "Words not read")
-                    .scaled(t.scale.micro, t.roles.ink).lineLimit(1)
-                    .padding(.horizontal, Space.s2)
-                    .frame(width: max(24, x(item.endSec, w) - x(item.startSec, w)), height: 24, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: min(t.radii.control, 8), style: .continuous).fill(t.roles.field))
-                    .offset(x: x(item.startSec, w), y: 8)
+            ForEach(items.indices, id: \.self) { i in
+                let span = spans.indices.contains(i) ? spans[i] : RecreateLaneLayout.Span(x: 0, width: 0)
+                let shown = RecreateLanes.words(items[i].words)
+                if span.width >= 4 {
+                    RecreateTextChip(text: shown)
+                        .frame(width: CGFloat(span.width), height: 24)
+                        .background(SnapshotFrame(key: "laneText\(i)"))
+                        .help(shown)
+                        .accessibilityElement()
+                        .accessibilityLabel("Text at \(RecreateText.time(items[i].startSec))")
+                        .accessibilityValue(shown)
+                        .position(x: CGFloat(span.x + span.width / 2), y: 8 + 12)
+                }
             }
         }
     }
 
+    /// A text item's words as the lane and its tooltip show them: “Summer”, or "Words not read yet".
+    static func words(_ raw: String?) -> String {
+        guard let raw, !raw.isEmpty else { return "Words not read yet" }
+        let cased = raw.prefix(1).uppercased() + raw.dropFirst().lowercased()
+        return "“\(cased)”"
+    }
+
+    /// Each transition in the room around its moment: its name when it fits, else a marker; the tooltip names it.
     private func transitions(_ w: CGFloat) -> some View {
-        let items = store.recreate.recipe?.transitions ?? []
+        let rs = store.recreate
+        let items = rs.recipe?.transitions ?? []
+        let spans = RecreateLaneLayout.points(items.map(\.atSec), duration: rs.duration, width: Double(w))
         return ZStack(alignment: .topLeading) {
             ForEach(items.indices, id: \.self) { i in
-                Text(RecreateText.transition(items[i].kind))
-                    .scaled(t.scale.micro, t.roles.ink).lineLimit(1).fixedSize()
-                    .padding(.horizontal, Space.s2).padding(.vertical, 2)
-                    .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(t.roles.field))
-                    .position(x: x(items[i].atSec, w), y: 18)
+                let span = spans.indices.contains(i) ? spans[i] : RecreateLaneLayout.Span(x: 0, width: 0)
+                let name = RecreateText.transition(items[i].kind)
+                let said = "\(name) at \(RecreateText.time(items[i].atSec))"
+                if span.width >= 8 {
+                    ViewThatFits(in: .horizontal) {
+                        Text(name).scaled(t.scale.micro, t.roles.ink).lineLimit(1).fixedSize()
+                            .padding(.horizontal, Space.s2).padding(.vertical, 2)
+                            .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(t.roles.field))
+                        Ph("diamond", 12).foregroundStyle(t.roles.ink2).frame(width: 12, height: 20)
+                        Color.clear.frame(width: 0, height: 0)
+                    }
+                    .frame(width: CGFloat(span.width), height: 24)
+                    .contentShape(Rectangle())
+                    .help(said)
+                    .accessibilityElement()
+                    .accessibilityLabel(said)
+                    .position(x: CGFloat(span.x + span.width / 2), y: 18)
+                }
             }
         }
     }
@@ -517,6 +551,87 @@ struct RecreateLanes: View {
                     .frame(width: 2, height: on ? 24 : 18)
                     .offset(x: x(beats[i], w) - 1, y: on ? 10 : 16)
             }
+        }
+    }
+}
+
+/// A shot tile, exactly its slot's span: the picture, the number and the tag when there is room (the number alone when
+/// narrower, a bare strip when narrower still). Hover and selection change only the border.
+struct RecreateShotTile: View {
+    @Environment(\.theme) private var t
+    var slot: Recipe.Slot
+    var index: Int
+    var tag: String?
+    var selected: Bool
+    @State private var hovering = false
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: min(t.radii.container, 8), style: .continuous)
+        let border: Color = selected ? t.roles.selection : (hovering ? t.roles.ink2 : .clear)
+        GeometryReader { g in
+            RecreateStill(link: slot.thumbUrl, tone: index, icon: g.size.width >= 44)
+                .frame(width: g.size.width, height: g.size.height)
+                .overlay(alignment: .bottomLeading) {
+                    if g.size.width >= 24 { badges.padding(4) }
+                }
+        }
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(border, lineWidth: selected ? 2 : 1))
+        .contentShape(shape)
+        .onHover { hovering = $0 }
+    }
+
+    /// The number and tag when both fit whole, else the number alone, else nothing (the tooltip and the accessibility
+    /// value carry the tag).
+    @ViewBuilder private var badges: some View {
+        if let tag {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Space.s1) {
+                    number
+                    Spacer(minLength: Space.s1)
+                    Text(tag).font(t.scale.micro.font).monospacedDigit().foregroundStyle(t.roles.ink).lineLimit(1).fixedSize()
+                        .padding(.horizontal, Space.s2).padding(.vertical, 2)
+                        .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(t.roles.raised))
+                }
+                numberOnly
+            }
+        } else {
+            numberOnly
+        }
+    }
+
+    private var numberOnly: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 0) { number; Spacer(minLength: 0) }
+            Color.clear.frame(width: 0, height: 0)
+        }
+    }
+
+    private var number: some View {
+        Text("\(index + 1)").font(t.scale.micro.font).monospacedDigit().foregroundStyle(.white).lineLimit(1).fixedSize()
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(Color.black.opacity(0.6)))
+    }
+}
+
+/// A text item on its span: the words when they fit whole, else a small "T" marker, else a dot. Never a cut-off word.
+struct RecreateTextChip: View {
+    @Environment(\.theme) private var t
+    var text: String
+
+    var body: some View {
+        let chip = RoundedRectangle(cornerRadius: min(t.radii.control, 6), style: .continuous)
+        ViewThatFits(in: .horizontal) {
+            Text(text).scaled(t.scale.micro, t.roles.ink).lineLimit(1).fixedSize()
+                .padding(.horizontal, Space.s2)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .background(chip.fill(t.roles.field))
+            Ph("text-t", 12).foregroundStyle(t.roles.ink2)
+                .frame(width: 20, height: 24)
+                .background(chip.fill(t.roles.field))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Circle().fill(t.roles.ink2).frame(width: 4, height: 4)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }

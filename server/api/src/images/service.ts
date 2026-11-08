@@ -78,6 +78,8 @@ export class ImageService {
           maxRefs: k.REPLICATE_IMAGE_MAX_REFS, safety: k.REPLICATE_IMAGE_SAFETY, pollMs: Math.min(k.REPLICATE_POLL_MS, 1500), timeoutMs: k.IMAGE_TIMEOUT_SEC * 1000,
           maxWaitMs: k.REPLICATE_IMAGE_MAX_WAIT_SEC * 1000, loraUrl: k.REPLICATE_IMAGE_LORA_URL, loraScale: k.REPLICATE_IMAGE_LORA_SCALE };
       }),
+      // WS5: an owner-added image model, run with the studio's own provider key (byo/service.ts).
+      byo: { provider: 'byo', generate: (req, sel) => ctx.suite.byo.image.generate(req, sel) },
     };
   }
   /** Shrunk references already in storage: storage key → megapixels. */
@@ -119,6 +121,7 @@ export class ImageService {
   async shotInputs(studioId: string, override?: Partial<EngineSelection> | null, models?: StepOverrides | null): Promise<{ capacity: number; sheet: boolean }> {
     const sel = await this.selection(studioId, override, models);
     const max = this.ctx.config.REPLICATE_IMAGE_MAX_INPUTS;
+    if (sel.provider === 'byo') return { capacity: await this.ctx.suite.byo.photoCapacity(studioId, sel.model), sheet: false }; // WS5
     if (sel.provider !== 'replicate' || this.ctx.imageModels.isRecipe('shot', sel.model) || !this.toolsLive) return { capacity: max, sheet: false };
     try {
       const m = mapModel(await this.ctx.imageModels.info(sel.model), 'shot').mapping;
@@ -136,7 +139,8 @@ export class ImageService {
     const sel = await this.selection(studioId, override, models);
     const n = plan.images.length;
     const sheet = inputs.sheet && n > 1;
-    const perShot = sel.provider !== 'replicate' || this.ctx.imageModels.isRecipe('shot', sel.model) ? P.newShotEstimateImages(this.photoPrices(), outMp, n)
+    const perShot = sel.provider === 'byo' ? await this.ctx.suite.byo.photoPerShot(studioId, sel.model) // WS5: its per-run price × markup
+      : sel.provider !== 'replicate' || this.ctx.imageModels.isRecipe('shot', sel.model) ? P.newShotEstimateImages(this.photoPrices(), outMp, n)
       : await this.ctx.imageModels.estimate(sel.model, { outMp, inMp: this.inputMp(n, sheet) });
     return { ...plan, perShot, sheet, panels: planPanels(identity, plan) };
   }
@@ -172,7 +176,7 @@ export class ImageService {
   }
 
   available() {
-    return { simulated: true, fal: !!this.ctx.config.FAL_KEY, 'custom-http': true, replicate: this.ctx.replicate.configured };
+    return { simulated: true, fal: !!this.ctx.config.FAL_KEY, 'custom-http': true, replicate: this.ctx.replicate.configured, byo: this.ctx.suite.byo.ready };
   }
 
   /** The bytes of an image ref: from our storage (bundled stills copied in first) or its own https URL. */

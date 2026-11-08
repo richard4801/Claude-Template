@@ -1196,6 +1196,45 @@ QueuedShot { id, kind: "queued", title, tool, modelId?, userId, mine, estimate, 
 - **In the feed:** the first page of `GET /v1/suite/feed` (no cursor, no collection) carries `queued: QueuedShot[]` above `items` (the "Queued" group), filtered by `tool`, `model` and `status` (`queued`).
 - Event `queue`: `{item}` or `{removed, jobId?}`, only to the member who queued it and the owner.
 
+### Images attached to Claude chat messages (workstream 1, owner-approved 2026-11-08)
+Migration **0023** (`claude_messages.attachments`, `claude_turns.attachments`). Code: `camera/claudeAttachments.ts`; tests `test/claude-attachments.test.ts`.
+
+- **Upload** with the normal flow (`POST /v1/uploads/presign {kind:"image"}` → PUT → `POST /v1/uploads/{uploadId}/confirm`). JPEG, PNG, WebP or HEIC/HEIF; ≤ 10 MB each.
+- **Send** `POST /v1/claude/threads/{id}/messages {text, attachments?: [{uploadId}]}`: ≤ 4 a message; `text` may be empty when there are images. 400 for the count, type, size or an unreadable file; 404 for another studio's upload; 409 `upload_not_ready` before confirm. All or none: a refused message queues nothing.
+- **Stored privately on the thread** under `ca/<threadId>/` (not served by `/uploads`), normalised: upright, long edge ≤ 2048 px, ≤ 5 MB (else JPEG), HEIC → JPEG (`heif-convert`, in the image). 415 `unsupported_image` if a HEIC can't be read.
+- **Views**: messages and turns carry `attachments: [{id, uploadId, mimeType, bytes, width, height, url}]` (`url` signed, 1 h). The Mac downloads them on claim and lists the local paths with their uploadIds in the Claude Code prompt. A message typed on the Mac can send `{"type":"user", text, attachments:[{uploadId}]}`.
+- **API fallback** `POST /v1/claude/threads/{id}/api-turn {text, attachments?}`: Recreate, Edit and Suite threads send them as image blocks with a line naming each uploadId; earlier attached images are replayed (the newest 8). Camera threads: 400 (text only).
+
+**`suite_add_reference {assistId, uploadId, use: pose|style|location|outfit, label?, remove?}`** puts an image into the Suite draft as `draft.references[{uploadId, url, use, label?}]` (≤ 3; the same uploadId again changes its use). The url is a studio image under `u/` (HEIC copied as JPEG). The request sends them as `references.images[{image:{url}, role: use, label}]` after her own images; roles `pose` and `outfit` tell the engine to take only the pose or the clothes, never anyone's face or body. Her identity always comes from her own references; the plan still keeps at least one of hers when room is short, and `suite_estimate` notes any left out.
+
+### Claude in the AI Suite (owner-approved 2026-11-08)
+
+**Prompt structure.** The suite brief (`threadBrief('suite').prompt`) and the API loop's system prompt are the same text: the shot-designer rules plus §3–§7 of the owner's skill `.claude/skills/muse-prompt-structure/SKILL.md` (skeleton SUBJECT / LOCATION / ACTION + SHOT n / STYLE / CONSTRAINTS, the rig, lengths, consistency, output). The server reads its copy at `server/api/assets/skills/muse-prompt-structure.md` (the image has no `.claude`); a test fails if the copy and the repo skill differ, so edit the skill and copy it over.
+Migration **0022** (`suite_assists`). Code: `suite/assist.ts`, `suite/mcpTools.ts`; tests `test/suite-assist.test.ts`.
+
+The owner describes a shot in words. Claude sets up the composer (the @model, the prompt, the rig with only the options members see, the moves, quality, shape, length, takes) and explains its choices. It generates only after the owner approves the price in the app.
+
+| Call | Notes |
+|---|---|
+| `POST /v1/suite/assist {draft?: Draft, fromJobId?}` | A shared composer draft: empty, the composer's current one, or a job's draft. → `Assist`. |
+| `GET /v1/suite/assist/{id}` | → `Assist` (the user's own; the owner's for the owner). |
+| `PATCH /v1/suite/assist/{id} {draft, baseRevision?}` | The owner's own composer edits, so Claude sees them. `409 stale` when Claude changed it since. |
+| `POST /v1/suite/assist/{id}/pending/{pid} {approve: boolean}` | The owner's answer to Claude's Generate. → `Pending`. Yes prices it again and runs it exactly as `POST /v1/suite/shots` would (caps, hold, job; `jobId` on the pending). It never runs above the price the owner saw (`409 price_changed {totalUsd}`). |
+| `POST /v1/claude/threads {contextKind: "suite", contextId: <assist id>}` | The Claude thread; `brief` names the tools and `assistId`. `api-turn` runs MUSE's loop with the Suite tools (the assist id filled in). |
+
+```
+Assist { id: "sa_…", userId, draft: Draft /* the Reuse-settings draft */, revision, request: ShotRequest /* what Generate sends */, warnings: RigWarning[], pending: Pending[], createdAt, updatedAt }
+Pending { id: "sp_…", kind: "suite_request_shot", label: "Generate · 5 s · $0.40", estimateUsd, maxUsd, status: "waiting"|"declined"|"done"|"failed", jobId?, error?, createdAt }
+```
+- **Live:** event `suiteAssist {assist}` after every change (Claude's or a device's), to the draft's member and the owner. The composer applies `assist.draft` as Reuse settings does. Waiting `pending` items show as "Claude wants to generate · $x · Approve / Decline".
+- **Claude's tools** (MCP, owner only):
+  - `suite_options()`: the visible options with labels and descriptions, the visible focal steps and the bar's values. Hidden ones (for example f/4) aren't listed and are refused.
+  - `suite_get_draft(assistId)`.
+  - `suite_set_draft(assistId, {modelId?, outfitId?, prompt?, rig?, moves?, quality?, aspect?, duration?, takes?, sound?, speaking?})`. It is checked against `camera.ts` and returns the assist with the rig-check warnings.
+  - `suite_estimate(assistId)`.
+  - `suite_request_shot(assistId, confirm?)`: without `confirm` it gives the price; with it, a pending approval for the owner (`maxUsd` = that price).
+  - `suite_feed(limit?, tool?)`.
+
 ## Recreate this edit (workstream 1, 2026-11-08; `plans/recreate-edit.md`)
 A reference video (an upload, up to 60 s for now) is analysed into a versioned **recipe**. The analysis is free: ffmpeg, the beat detector and sharp on the server's CPU, one analysis at a time. Migration **0015** adds `recreate_references`. Code is in `src/recreate/` (`analyze.ts`, `signals.ts`, `frames.ts`, `text.ts`, `references.ts`); tests are `test/recreate.test.ts` (a synthetic reference) and `test/motion.test.ts`.
 
@@ -1209,7 +1248,7 @@ A reference video (an upload, up to 60 s for now) is analysed into a versioned *
 **Endpoints**
 | | |
 |---|---|
-| `POST /v1/recreate/references {uploadId, name?}` | → `Reference` with `state: "analyzing"`. The upload must be a video of this studio, at most 60 s (`400 "References can be up to 60 s for now (this one is 62 s)"`). |
+| `POST /v1/recreate/references {uploadId, name?, sourceUrl?}` | → `Reference` with `state: "analyzing"`. The upload must be a video of this studio, at most 60 s (`400 "References can be up to 60 s for now (this one is 62 s)"`). **`sourceUrl`** is set when the device fetched the video from a link (Release 1 fix: platforms block server addresses). The studio's link rules apply to it (`link_unsupported`), and so does the size cap (`link_too_big`). It's kept on the reference for caching and "Use this sound". The same link again from the same member → that member's reference, with `cached: true`. |
 | `POST /v1/recreate/references {url, name?}` | A **public** TikTok, Instagram Reel or YouTube link (see "From a link" below). → `Reference` with `source: "link"`, `state: "analyzing"`, `phase: "Fetching the video"`. The same link again, from the same member, → that member's existing reference with `cached: true`. Refusals come before anything is downloaded (codes below). |
 | `GET /v1/recreate/references` | → `Reference[]` without the recipe (with `slots`: the number of slots), newest first. |
 | `GET /v1/recreate/references/{id}` | → `Reference` with its `recipe` once `ready`. |
@@ -1235,6 +1274,17 @@ A reference video (an upload, up to 60 s for now) is analysed into a versioned *
 - **Storage.** The file is stored privately at `rx/{studio}/{id}/source.mp4` (not served by `/uploads`) and deleted after 30 days like any reference. The metadata is deleted as soon as the file is stored.
 - **Blocked** (a server address the platform blocks, 403, sign-in wall, rate limit, timeout, removed video): `link_blocked` (`502`) with the message "Couldn't fetch this link — save the video and drop the file in". The apps show it and offer the file drop. If the download itself is blocked, the reference turns `failed` with `errorCode: "link_blocked"`.
 - **Codes:** `link_unsupported` · `link_private` · `link_downloads_off` · `link_too_big` (all `422`) · `link_blocked` (`502`) · `too_long` (`400`).
+
+**Fetching on the device, and "Strict link rules"** (Release 1 fix, migration **0021**). Platforms answer server addresses with sign-in or bot checks (YouTube: "Sign in to confirm you're not a bot"), so the apps download the video themselves. Then they upload it with `sourceUrl`. The server fetch stays as a fallback.
+
+| Call | Notes |
+|---|---|
+| `GET /v1/recreate/settings` | → `{strictLinks, platforms: ["tiktok","instagram","youtube"] \| ["any"], tiktokDownloadsOff: "refuse"\|"allow", maxSec: 60, maxMb, serverFetch, cookies: false, canEdit}`. These are the rules the apps apply on the device too. |
+| `PATCH /v1/recreate/settings {strictLinks}` | Owner only (`403 owner_only`). **On (default):** only TikTok, Instagram Reels and YouTube; TikTok's "downloads off" is refused. **Off:** any public web link yt-dlp reads (platform `"other"`, tracking parameters removed), and TikTok's setting isn't refused. Either way: no cookies or logins, 60 s, and the size cap. Event `recreate` `{settings}`. |
+| `POST /v1/recreate/links/check {url}` | Before a device downloads: → `{allowed: true, url /* normalized */, platform: "tiktok"\|"instagram"\|"youtube"\|"other", cached?: Reference}` or `{allowed: false, code, reason}`. `cached` is this member's live reference from that link: use it and skip the download. |
+
+- **Public hosts only (strict off).** A link must be https/http on the standard ports, with a public host name. No addresses, no localhost or internal names, no user:password. On the server, the name must also resolve only to public addresses before yt-dlp runs.
+- **Why a server fetch failed** is logged as `recreate link fetch failed {platform, step, code, failure}`. `failure` is one of `bot_check` · `login` · `rate_limited` · `forbidden` · `not_found` · `geo` · `timeout` · `private` · `age` · `too_big` · `unsupported` · `no_ytdlp` · `other`. The link itself is never logged.
 - **Reference fields:** `source: "file" | "link"`, `sourceUrl?`, `errorCode?`. Claude's `analyze_reference` takes `url` as well as `uploadId`.
 - **Config:** `RECREATE_LINKS` (default on), `YTDLP_PATH`, `RECREATE_LINK_MAX_MB`. The image pins yt-dlp 2026.10.26 and yt-dlp-ejs 0.8.0 from PyPI (both sha256-checked at build, unpacked to /opt/yt-dlp/lib) and adds python3, about +30 MB (an estimate: no Docker daemon was available to measure). CI never calls a platform; a fake yt-dlp replays `test/fixtures/links`.
 
@@ -1374,6 +1424,16 @@ For the screens (`plans/learning-editor-ui.md`, 2026-11-08):
 - `playbook_read` → `learningOf(ctx).context(user, {recipeId?, referenceId?, takeId?, area?})`.
 - `playbook_add` → `learningOf(ctx).addRule(user, {text, area?, evidence?}, 'claude')`.
 - Optionally a gap tool → `addGap(user, {key, kind, what, note})`.
+
+### Recreate analysis on a small server: memory, crashes, Retry (workstream 1, 2026-11-08)
+Migration **0025** (`recreate_references.analyze_attempts`). Tests `test/recreate-memory.test.ts`.
+
+Prod's first real run was killed mid-analysis (512 MB box). The text-motion step decoded the full-size video about 13 times at once, peaking at 1.6 GB for a 60 s 1080×1920 clip. Now:
+- **One decoder at a time.** Every analysis decode uses `-threads 2 -filter_threads 1`, and frames are scaled inside ffmpeg; Node only gets small frames. Text motion reads each in/out window through one pipe. Pose tracks decode each shot to a temp file at a 256 px long edge, in 24-frame jobs, so ffmpeg and the pose child never run together. The stored video is copied to a local temp file, from S3 too. A take's pose read is skipped while an analysis runs.
+- **Optional steps need free memory** (`OPTIONAL_MIN_FREE_MB` = 150, from the cgroup limit minus use, page cache excluded): words (OCR), text motion, poses, pose tracks. Short of memory, a step is skipped. The recipe says so in `analyzer.skipped[{step, why: "memory"|"lite"}]` and as a gap (`text:motion`, `pose`).
+- Measured on a 60 s 1080×1920 30 fps clip: peak process-tree RSS went from 1667 MB to 328 MB, and the run from 223 s to 134 s.
+- **After a crash.** At startup, references still `analyzing` resume. One that had started (`analyze_attempts` ≥ 1) runs again **lite**, required steps only (`analyzer.lite: true`). After a second stop it fails with `errorCode: "analysis_crashed"`.
+- **`POST /v1/recreate/references/{id}/retry`** reruns any failed reference whose video or link is still there (409 `not_failed` or `video_gone` otherwise). After `analysis_crashed` the rerun is lite. Apps: show Retry on a failed reference.
 
 ### Recreate this edit · slots and assembly (phase 3)
 Code: `src/recreate/slots.ts` (briefs, matcher, fill request), `assemble.ts` (recipe → edit project), `mcpTools.ts`. Tests: `test/recreate-slots.test.ts`.
@@ -1642,3 +1702,58 @@ ClaudeStatus  { mac: { online: boolean, claudeCode: { installed: boolean, signed
 | `claude_busy` | 409 | a turn on that thread is already queued or running |
 | `turn_expired` | 410 | claiming a turn that timed out |
 | `fallback_off` | 409 | `api-turn` while the API fallback is off or no key is set |
+
+## Bring your own provider (WS5, 2026-11-08, owner-approved)
+In Settings, the owner adds an API key for a provider. MUSE lists that provider's models, the owner switches on the ones they want and names them, and enabled models appear in the AI Suite like built-in ones. Code: `server/api/src/byo/**`, routes `src/routes/providers.ts`, migration **0024_byo_providers**, tests `test/byo.test.ts` (recorded fixtures in `test/fixtures/byo`; no live provider calls).
+
+**Providers.** Replicate and fal.ai, both of which publish machine-readable input schemas. Each provider is an adapter (`byo/adapters.ts` `ProviderAdapter`): validate a key, search models, read one model, start/get/cancel a run. More can be added later (e.g. OpenAI-compatible image endpoints) by implementing that interface.
+
+**Keys.** A key is checked with one free read-only call before it is stored: Replicate `GET /v1/account`, fal `GET /v1/models/pricing`. It is stored AES-256-GCM encrypted with `PROVIDER_KEYS_SECRET` (32 bytes, 64 hex characters or base64), bound to its row. Without the secret, the server fails closed: 503 `provider_keys_unavailable`, and custom models don't run. A key is never returned, logged or printed; the API shows `keyLast4` and `status` only. Provider calls happen on the server only. A key is sent only to its provider's own host. A fal status URL on another host is replaced by the documented one.
+
+**Reading a model** (`byo/classify.ts`). Each input field is matched to a role: prompt, negative prompt, start/end frame, reference images (a list, or one image for image models), duration (number, integer or string enum), aspect ratio, resolution, seed, sound switch, width/height. The kind (image or video) comes from fal's category, the output schema, then the inputs and description. A required field with no role and no default makes the model `needs_setup` until the owner gives it a fixed value (`fixedInputs`). Only fields in the schema are ever sent.
+
+### Endpoints (owner only; members get 403 `owner_only`)
+| | |
+|---|---|
+| `GET /v1/providers/kinds` | `{kinds:[{kind, label, keyHint, keyUrl}], keysReady}` |
+| `GET /v1/providers` | `{providers: Provider[], keysReady}` |
+| `POST /v1/providers {kind:'replicate'\|'fal', apiKey, label?}` | 201 `Provider`. Errors: 400 `invalid_key` (nothing stored), 502 `provider_unreachable`, 503 `provider_keys_unavailable`. At most 10 per studio. |
+| `PATCH /v1/providers/:id {label?, apiKey?}` | `Provider`. A new key is validated again. |
+| `DELETE /v1/providers/:id` | 204. Its models are removed and leave the Suite. |
+| `GET /v1/providers/:id/models?q=&kind=image\|video&cursor=&limit=` | `{models: CatalogModel[], nextCursor}`. Cached for 10 min per query; limit ≤ 50. Replicate: search (or its text-to-video / image-to-video / text-to-image collections when `q` is empty). fal: model list with schemas plus prices. |
+| `POST /v1/providers/:id/models {ref, displayName?}` | 201 `CustomModel`, added switched off. Adding the same ref again returns the existing model. |
+| `GET /v1/providers/models` | `{models: CustomModel[]}` (all providers) |
+| `PATCH /v1/providers/models/:id {enabled?, displayName?, members?, price?, priceScale?, kind?, fixedInputs?}` | `CustomModel`. `enabled:true` returns 409 `needs_setup` while `missing` isn't empty, and 400 `price_required` with no price. |
+| `DELETE /v1/providers/models/:id` | 204 |
+
+- `Provider` = `{id, kind, label, keyLast4:'…a1b2', status:'ok'|'invalid', checkedAt, createdAt, models:{added, enabled}}`. A key the provider refuses during a run sets `status:'invalid'`.
+- `CatalogModel` = `{ref, name, description, kind:'image'|'video'|null, inputs: Inputs, missing:[field], ready, price: Price|null, added:{id, enabled}|null}`.
+- `Inputs` = `{prompt, negativePrompt, startImage, endImage, referenceImages:n, duration:{min,max,allowed?}|null, aspectRatios:[], resolutions:[], seed}`.
+- `Price` = `{basis:'per_run'|'per_second', costUsd, source:'provider'|'owner'}`.
+- `CustomModel` = `{id:'c_…', providerId, providerKind, ref, providerName, displayName, kind, enabled, members, status:'ready'|'needs_setup', missing, inputs, fields, fixedInputs, price, priceScale, memberPrice:{basis, usd}|null, createdAt, updatedAt}`.
+
+### Pricing and spend
+- **Cost basis:** the provider's own price where it publishes one. fal publishes it (unit `second` → per second; `image`/`video`/`request` → per run). Replicate's API has no prices, so the owner enters a per-run (or per-second) estimate, editable any time; owner prices are capped at $50.
+- **Member price:** cost × `priceScale`, the Suite's per-model markup (0.5–3, default 1), set on the custom model.
+- **Video:** a per-second price is the model's `perSec`; a per-run price is a fixed amount per take (`extraPerTake`).
+- **Photo:** priced per photo.
+- **Spend:** every run goes through the normal Suite estimate → confirm → hold → settle, and the suite and wallet daily caps. Test mode (`SUITE_MODE=mock`) runs custom models on the test renderer and calls no provider.
+
+### In the Suite
+- **Catalog:** `GET /v1/suite/catalog` adds `custom: [{id, name, kind, price:{basis, usd}, inputs: InputSlots, minSeconds, maxSeconds, aspectRatios}]`. The owner sees every enabled model, plus `members` and `provider`. Members see only models marked `members: true`, by the owner's display name, with no provider, ref or field names.
+- **Video:** `POST /v1/suite/shots/estimate` and `/v1/suite/shots` take `engineModel:'c_…'`. Members may pass it for a model available to them; built-in `engineModel`s stay owner-only. Custom models make plain shots: text, keyframe or reference, not swap, recast or extend. The owner can also put custom ids on the tier ladders in `/v1/suite/settings`.
+- **Photo:** `POST /v1/suite/photos/estimate` and `/v1/suite/photos` take `engineModel:'c_…'` (an image model). It replaces the studio's image engine for that run. References go in the model's own image field, up to its limit.
+
+### Owner's model picker (WS5, added 2026-11-08 at the coordinator's request; for the WS7/WS6 model picker)
+- **`GET /v1/suite/catalog`, owner only, adds `engines[]`:** a flat list across tiers, built-in and enabled custom, video and image. Members never get this field. Each entry is:
+
+  ```
+  {model, name, kind:'video'|'image', custom, tier|null, tiers:[...], resolution|null,
+   resolutions:[{id, label, perSec}], perSec|null, perRun|null, minSeconds, maxSeconds,
+   allowedSeconds|null, aspectRatios, inputs: InputSlots, price:{basis:'per_run'|'per_second', usd}|null}
+  ```
+
+  - **Prices** are after the model's priceScale. Video: `perSec` at `resolution`, plus `perRun` for per-run custom models. Image: `perRun` = one photo (built-in: the studio's photo model with 3 identity images; null when its price is unknown).
+  - **Video entries:** every registry model that makes shots and is enabled, licensed (acknowledged) and on a set-up provider, plus enabled custom video models. `tier` is the first tier whose ladder lists it (null if none).
+  - **Image entries:** the studio's photo model (Settings → Engines → Image models), plus enabled custom image models.
+- **`POST /v1/suite/photos/estimate` and `/v1/suite/photos` take `imageModel`, owner only (members get 403 `owner_only`):** a Replicate image model `owner/name` (priced on that model, as the per-step override) or a custom id `c_…`. Use either `imageModel` or `engineModel`, not both (400). Members can still pass `engineModel:'c_…'` for a custom image model the owner made available.

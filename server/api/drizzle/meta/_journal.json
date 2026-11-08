@@ -148,6 +148,41 @@
       "when": 1794149573727,
       "tag": "0020_library_collections_suite_queue",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794166125815,
+      "tag": "0021_recreate_strict_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1794166679887,
+      "tag": "0022_suite_assists",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794168235585,
+      "tag": "0023_claude_attachments",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794170135315,
+      "tag": "0024_byo_providers",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1794174712932,
+      "tag": "0025_recreate_analyze_attempts",
+      "breakpoints": true
     }
   ]
 }

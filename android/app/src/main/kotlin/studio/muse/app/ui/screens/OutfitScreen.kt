@@ -20,6 +20,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
@@ -107,6 +114,11 @@ fun OutfitScreen() {
     val pickOne = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u -> if (u != null) vm.addImages(listOf(u)) }
     val pickFour = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(4)) { us -> if (us.isNotEmpty()) vm.addImages(us) }
     val name = s.model?.name?.substringBefore(' ') ?: "Her"
+    // The four angles as they show in the grid; a tap opens them full size (pinch to zoom, swipe between angles).
+    val angles: List<ImageRef?> = OutfitAngle.entries.indices.map { idx ->
+        if (s.done) s.preview?.angles?.getOrNull(idx) else if (s.draft.mode == "own") s.draft.images.getOrNull(idx) else null
+    }
+    var viewing by remember { mutableStateOf<Int?>(null) }
     ScreenBox(bg = m.roles.canvas) {
         Column(Modifier.fillMaxSize()) {
             CalmTopBar("New outfit", onBack = { nav.back() })
@@ -139,10 +151,15 @@ fun OutfitScreen() {
                             row.forEachIndexed { i, a ->
                                 val idx = r * 2 + i
                                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
-                                    val ref: ImageRef? = if (s.done) s.preview?.angles?.getOrNull(idx) else if (s.draft.mode == "own") s.draft.images.getOrNull(idx) else null
+                                    val ref: ImageRef? = angles[idx]
                                     val tile = Modifier.fillMaxWidth().aspectRatio(3f / 4f)
                                     if (s.busy && ref == null) Skeleton(tile, containerShape())
-                                    else Box(tile.clip(containerShape()).background(m.roles.field)) { if (ref != null) RefImage(ref, Modifier.fillMaxSize()) }
+                                    else Box(
+                                        tile.clip(containerShape()).background(m.roles.field).let { t ->
+                                            if (ref == null) t else t.press { viewing = angles.filterNotNull().indexOf(ref) }
+                                                .semantics { contentDescription = "${a.label}, view full size"; role = Role.Button }
+                                        },
+                                    ) { if (ref != null) RefImage(ref, Modifier.fillMaxSize()) }
                                     Caption(a.label)
                                 }
                             }
@@ -153,6 +170,10 @@ fun OutfitScreen() {
                 RowItem("Dress up the whole character sheet", "One outfit photo: all 7 sheet photos made again wearing it, saved as a new outfit",
                     onClick = { nav.go(studio.muse.app.ui.Routes.DRESSUP) }) { Chevron() }
             }
+        }
+        viewing?.let { start ->
+            val shown = OutfitAngle.entries.mapIndexedNotNull { i, a -> angles[i]?.let { ViewerImage(it, a.label) } }
+            if (shown.isNotEmpty()) ImageViewer(shown, start) { viewing = null }
         }
         ActionDock {
             if (s.done) {

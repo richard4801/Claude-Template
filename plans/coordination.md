@@ -144,6 +144,7 @@ When resuming:
         - The SDK setup and the example are in `server/api/examples/higgsfield/`. The API account has no credit yet.
 
 ## Status (each session updates its own line)
+- 5 · Bring your own provider (2026-11-08) on `claude/muse-providers`: Settings → Providers (Replicate, fal) with encrypted owner keys, catalog from provider schemas, custom models in the Suite (video shots and Photo) under the owner's names. Migration **0024_byo_providers**. Needs `PROVIDER_KEYS_SECRET` on Railway. Contract: plans/api.md "Bring your own provider".
 - 1 · Video composer follow-ups (2026-11-06) on `claude/muse-suite-core`: Recast tap-a-face (faceCrop + personHint), swap add-on pills, Era decade slider, UGC ad format wheel (`ugcFormats`, `camera.style.format`), @location (`/v1/suite/locations`, **migration 0013 after 0011/0012**), drag-to-reorder tokens, owner engine pin; catalog `tools` (Talking and UGC ad live, Extend coming soon); real Webcam/CCTV/Swirl/Tilt-shift renders; Blender previews bundled (`previews/`, catalog `preview` per move/light/angle); first-run HTTP checks on both apps. Server 359 green; Android 1305 green (release APK 30.7 MB, +9.5 MB previews); Mac CI green (run 42152398143). Next: Extend & upscale backend.
 - 2 · MCP + Blender bridge: resumed 2026-11-06. Item 7 done: `server/api/README.md` "Railway: move off railway.json before 1 December 2026" (railway.json still valid today; the owner runs `railway config migrate` → plan → cutover → apply; set restart policy On Failure / 5 in the dashboard first: IaC has no key for it). Items 2–3: `plans/claude-editing.md` first-run checklist re-checked against the current apps and ready to hand over. Item 6 (RunPod SeedVR2) waits for the owner's OK on spend.
 - 3 · Editor engine v2 / **Edit crash fixed, ready on `claude/muse-editor-v2`** (2026-11-07). Cause (owner's crash report): the waveform reader asked AVAssetReaderTrackOutput for 2 kHz mono LPCM, which raises an uncatchable ObjC exception on real 44.1/48 kHz AAC; it now decodes at the track's native rate and channels and down-mixes in Swift (MuseCore `EditSuite.Peaks`). Also: hardening against 0/NaN/inf/missing media facts on Mac and server, single-parse LUT cache with a byte-scanner .cube fast path (3.8 s → 0.7 s for all bundled LUTs), and a CI **Edit check** (real AAC 48 kHz stereo / 44.1 kHz mono fixtures, waveforms, every Edit path). Photo tool live (prod c4c7588). Server 401 green; Android 1529 green; Mac CI green (run 42355408773, MuseCore 512, Edit check ALL DONE).
@@ -270,3 +271,19 @@ Release 1 additions (2026-11-08):
   - one "to generate" slot filled by **Swap in** with the reference's setting: check the creator's burned-in captions are gone, and that the built edit has no second zoom, ramp or look on that shot;
   - one with **Use your own setting**: once with a studio location named in the brief (free), once with a generated background plate (about +$0.06 to members). Check that H3 actually puts her in the new background, sent as the last reference image ("background", after 5 of her references). If it ignores the background reference, tell WS1.
   - "Write the shot briefs" measured on the server is about $0.02–0.03 per 5-shot reference at ×2.
+
+## Round 2 (owner, 2026-11-08): new sessions per the owner ("once their job's done, use a different session")
+- **WS5, server:** Bring your own provider (keys + model catalog). session_01Py2rxoN8RqLay22aH1cio9, branch claude/muse-providers.
+- **WS6, Mac:** owner model picker in the Suite; remove "+ Select → New video"; Settings redesign (mock first, the owner approves); outfit full view. session_01Py2rxqPqvWiWuiv6U5c2wr, branch claude/muse-mac-r2.
+- **WS7, Android:** the same as WS6 for Android. session_01Py2rxngd8dggBVUEdbnrKE, branch claude/muse-android-r2.
+- WS1–WS4 finish their in-flight work (Claude in the Suite, attachments, the device link-fetch fixes), then stop. The owner deletes the old sessions when everything is done.
+
+## Edit parity (owner, 2026-11-08): "not every feature on the edit actually works… grab CapCut, see every feature, nothing must be missing"
+- **WS8, Android Edit:** fix the reported bugs (thumbnail play icon; timeline scrubbing and start position; separate audio lane), audit every control, then a parity inventory in plans/edit-parity.md. session_01Py2rxmaRnqc2HBmNzZqzt3, branch claude/muse-android-edit.
+- **WS9, Mac Edit:** audit every control (project, preview and export), fix placeholders, and add the Mac column to the parity doc. session_01Py2rxoyr17gkJgGcBWUuy9, branch claude/muse-mac-edit.
+- **The owner prioritises the parity gaps before they're built.** Functionality is rebuilt in MUSE's own design; licensed content (music, stickers, effect and template packs) is listed separately.
+
+## Claude chat polish (owner, 2026-11-08): "same behaviour as a regular Claude app"
+- **The asks:** bubbles; tool chips; markdown rendered properly (no raw asterisks); no internal leaks; a growing composer; keyboard-safe; plus whatever else a good chat needs.
+- **WS10, Android:** session_01Py2rxndMvVe4pcHym1etXT, branch claude/muse-android-chat.
+- **WS11, Mac:** session_01Py2rxocJTVPKL6rpkkyqtE, branch claude/muse-mac-chat. It takes over ClaudeChatView after WS2's phase B.

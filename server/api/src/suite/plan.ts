@@ -42,7 +42,7 @@ export const ShotRequestSchema = z.object({
   prompt: z.string().max(2000).default(''),
   frames: z.object({ start: ImageRefSchema.optional(), middle: z.array(ImageRefSchema).max(8).optional(), end: ImageRefSchema.optional() }).optional(),
   references: z.object({
-    images: z.array(z.object({ image: ImageRefSchema, role: z.enum(['product', 'location', 'style', 'prop', 'person']).default('product'), label: z.string().max(80).optional() })).max(6).optional(),
+    images: z.array(z.object({ image: ImageRefSchema, role: z.enum(['product', 'location', 'style', 'prop', 'person', 'pose', 'outfit' /* workstream 1: attached in the Claude chat */]).default('product'), label: z.string().max(80).optional() })).max(6).optional(),
     videos: z.array(z.object({ video: VideoRefSchema, use: z.enum(['camera', 'motion', 'style']).default('motion') })).max(3).optional(),
     /** One audio track (an upload in this studio). Speaking: sent as is (lip sync); not speaking: only its instrumental is sent. */
     audio: z.object({ audio: VideoRefSchema }).optional(),
@@ -126,14 +126,14 @@ export function fit(m: ModelSpec, resolution: string, n: Need): { why: string | 
 export type Pick = { model: ModelSpec; resolution: Resolution; seconds: number; tried: { model: string; resolution: string; why: string }[] };
 
 /** The model for a tier: the first ladder step that is allowed, set up and fits. */
-export function pickModel(tier: Tier, n: Need, o: { prefs?: SuitePrefs; providers: Set<ProviderId>; engineModel?: string; resolution?: string }): Pick | { error: string; tried: Pick['tried'] } {
+export function pickModel(tier: Tier, n: Need, o: { prefs?: SuitePrefs; providers: Set<ProviderId>; engineModel?: string; resolution?: string; studioId?: string }): Pick | { error: string; tried: Pick['tried'] } {
   const ladder: LadderStep[] = o.engineModel
     ? [{ model: o.engineModel, resolution: o.resolution ?? modelById(o.engineModel)?.resolutions.at(-1)?.id ?? '' }]
     : o.prefs?.ladder?.[tier]?.length ? o.prefs.ladder[tier]! : DEFAULT_LADDER[tier];
   const tried: Pick['tried'] = [];
   for (const step of ladder) {
     const m = modelById(step.model);
-    if (!m) { tried.push({ ...step, why: 'unknown model' }); continue; }
+    if (!m || (m.byo && m.byo.studioId !== o.studioId)) { tried.push({ ...step, why: 'unknown model' }); continue; }
     const pref = o.prefs?.models?.[m.id];
     if (pref?.enabled === false) { tried.push({ ...step, why: 'switched off' }); continue; }
     if (m.licence.requiresAck && !pref?.acknowledgedAt) { tried.push({ ...step, why: 'licence not acknowledged' }); continue; }
@@ -165,7 +165,8 @@ export function billedSeconds(m: ModelSpec, seconds: number, o: { videoInput: bo
 }
 /** Fixed extra per take (fal H3 Max reference tokens, an estimate). */
 /** Higgsfield H3: the first 5 reference images are included, each further one costs $0.08 per take. */
-export const extraPerTake = (m: ModelSpec, refImages = 0) => (m.adapter === 'fal-h3-3d' ? 0.5 : m.adapter === 'hf-h3' ? 0.08 * Math.max(0, refImages - 5) : 0);
+/** An owner-added model priced per run (WS5): its per-run cost. */
+export const extraPerTake = (m: ModelSpec, refImages = 0) => (m.adapter === 'fal-h3-3d' ? 0.5 : m.adapter === 'hf-h3' ? 0.08 * Math.max(0, refImages - 5) : m.byo ? m.byo.perRunUsd : 0);
 
 export type ImagePlan = { start?: ImageRef; middle: ImageRef[]; end?: ImageRef; refs: { label: string; role: string; image: ImageRef }[] };
 export type ShotPlan = {
@@ -189,6 +190,9 @@ export const joinTokens = (t: string[]) => (t.length <= 1 ? t.join('') : `${t.sl
 const ROLE_WORDS: Record<string, [string, string]> = {
   product: ['the product', 'shape, colours, packaging and label'], location: ['the location', 'place, layout and light'], style: ['a style reference', 'colour, mood and texture'],
   prop: ['a prop', 'shape and colour'], person: ['another person in the scene', 'appearance and clothing'],
+  // workstream 1: references the owner attaches in the Claude chat. Her identity comes only from her own images.
+  pose: ['a pose reference', 'body pose, gesture and framing, never the face, body or clothing of anyone in it'],
+  outfit: ['an outfit reference', 'the clothes (cut, fabric, colour), never the face or body of anyone wearing them'],
 };
 
 /** Builds the whole plan for a picked model. */
@@ -288,7 +292,7 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
   const perSec = perSecond(m, p.resolution, { videoInput, audio: r.audio, kind }) * (o.priceScale ?? 1);
   const guideSeconds = videos[0]?.video.seconds;
   const billed = billedSeconds(m, p.seconds, { videoInput, guideSeconds });
-  const extraCost = extraPerTake(m, images.refs.length);
+  const extraCost = extraPerTake(m, images.refs.length) * (m.byo ? o.priceScale ?? 1 : 1); // WS5: a custom model's per-run price takes its markup too
   const separation = audioPlan?.beatOnly ? o.separationUsd ?? 0 : 0;
   const estimate = Math.round(((perSec * billed + extraCost) * r.takes + separation) * 10000) / 10000;
 

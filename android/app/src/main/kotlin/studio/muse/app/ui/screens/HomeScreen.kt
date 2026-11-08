@@ -145,7 +145,7 @@ fun HomeScreen() {
                         s.featured?.let { f ->
                             Column(verticalArrangement = Arrangement.spacedBy(MuseSpace.s4)) {
                                 Featured(f, s.featuredOutfits) { vm.open(f, nav) }
-                                PrimaryButton("New video", { nav.go(Routes.SOURCE) }, Modifier.fillMaxWidth(), icon = "studio")
+                                PrimaryButton("New shot", { studio.muse.app.ui.screens.suite.composer.openShot(c, nav, f.id) }, Modifier.fillMaxWidth(), icon = "studio")
                             }
                         }
                         if (s.recent.isNotEmpty()) RecentTakes(s.recent, onLibrary = { nav.tab(Routes.GALLERY) }) { t -> nav.go(Routes.result(t.jobId ?: t.id)) }

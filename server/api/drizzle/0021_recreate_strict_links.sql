@@ -1,0 +1,1 @@
+ALTER TABLE "studio_settings" ADD COLUMN IF NOT EXISTS "recreate_strict_links" boolean DEFAULT true NOT NULL;

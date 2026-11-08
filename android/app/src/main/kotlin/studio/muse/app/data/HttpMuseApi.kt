@@ -211,6 +211,13 @@ interface MuseService {
     @POST("v1/recreate/references/{id}/apply") suspend fun applyRecipe(@Path("id") id: String, @Body r: JsonObject): JsonObject
     @POST("v1/recreate/references/{id}/briefs/estimate") suspend fun estimateReferenceBriefs(@Path("id") id: String, @Body r: JsonObject): JsonObject
     @POST("v1/recreate/references/{id}/briefs/write") suspend fun writeReferenceBriefs(@Path("id") id: String, @Body r: JsonObject): JsonObject
+    @POST("v1/suite/assist") suspend fun createSuiteAssist(@Body r: JsonObject): SuiteAssist
+    @GET("v1/suite/assist/{id}") suspend fun suiteAssist(@Path("id") id: String): SuiteAssist
+    @PATCH("v1/suite/assist/{id}") suspend fun patchSuiteAssist(@Path("id") id: String, @Body r: JsonObject): SuiteAssist
+    @POST("v1/suite/assist/{id}/pending/{pid}") suspend fun answerSuitePending(@Path("id") id: String, @Path("pid") pid: String, @Body r: JsonObject): SuitePending
+    @GET("v1/recreate/settings") suspend fun recreateSettings(): RecreateLinkSettings
+    @PATCH("v1/recreate/settings") suspend fun patchRecreateSettings(@Body r: JsonObject): RecreateLinkSettings
+    @POST("v1/recreate/links/check") suspend fun checkRecreateLink(@Body r: JsonObject): JsonObject
     @POST("v1/recreate/references/{id}/slots/{slot}/replace") suspend fun replaceRecipeSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: JsonObject): JsonObject
     // The server's renders (Compare's preview, Recreate's export): JSON state, then the file (a redirect to storage, or the bytes).
     @POST("v1/edit-sessions/{id}/preview") suspend fun startEditPreview(@Path("id") id: String, @Body r: JsonObject): JsonObject
@@ -315,6 +322,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
 
     // Workstream 2: camera sessions
     override val camera: CameraApi by lazy { HttpCameraApi(base, client, json) }
+    // WS7: bring your own provider
+    override val providers: ProvidersApi by lazy { HttpProvidersApi(base, client, json) }
     override val claude: ClaudeApi by lazy { HttpClaudeApi(base, client, json) }
 
     /** Turns `{"error": "...", "code": "..."}` bodies into [ApiException]. The UI words the codes (see [ErrorText]). */
@@ -326,8 +335,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     } catch (e: HttpException) {
         val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
         val err = runCatching { json.decodeFromString(ErrorBody.serializer(), body ?: "") }.getOrNull()
-        val code = err?.code ?: when (e.code()) { 401 -> "unauthorized"; 429 -> "rate_limited"; 413 -> "too_large"; else -> "http_${e.code()}" }
-        throw ApiException(code, err?.error ?: "Server error ${e.code()}")
+        val code = err?.code ?: ErrorText.codeOf(e.code())
+        throw ApiException(code, err?.error?.takeIf { it.isNotBlank() } ?: ErrorText.http(e.code()))
     } catch (e: java.net.SocketTimeoutException) {
         throw ApiException("still_working", "This is taking longer than usual. It keeps going on the server; the results will appear in the Library.")
     } catch (e: java.io.IOException) {
@@ -514,6 +523,36 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         into.length() > 0
     }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; false }
 
+    // Claude in the AI Suite: the shared composer draft.
+    override suspend fun createSuiteAssist(draft: SuiteDraft?, fromJobId: String?) = call {
+        createSuiteAssist(buildJsonObject { draft?.let { put("draft", it.json) }; fromJobId?.let { put("fromJobId", JsonPrimitive(it)) } })
+    }
+    override suspend fun suiteAssist(id: String) = call { suiteAssist(id) }
+    override suspend fun patchSuiteAssist(id: String, draft: SuiteDraft, baseRevision: Int?) = call {
+        patchSuiteAssist(id, buildJsonObject { put("draft", draft.json); baseRevision?.let { put("baseRevision", JsonPrimitive(it)) } })
+    }
+    override suspend fun answerSuitePending(id: String, pendingId: String, approve: Boolean) = call { answerSuitePending(id, pendingId, buildJsonObject { put("approve", JsonPrimitive(approve)) }) }
+    override suspend fun uploadClaudeImage(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit): String {
+        val id = putPresigned("image", mime, bytes, onProgress)
+        call { confirmImage(id, JsonObject(emptyMap())) }
+        onProgress(1f)
+        return id
+    }
+
+    // Recreate links on the phone: the rules, and the check before a download.
+    override suspend fun recreateSettings(): RecreateLinkSettings? = try { call { recreateSettings() } } catch (e: ApiException) {
+        if (e.code == "not_found" || e.code == "http_404") null else throw e
+    }
+    override suspend fun patchRecreateSettings(strictLinks: Boolean) = call { patchRecreateSettings(buildJsonObject { put("strictLinks", JsonPrimitive(strictLinks)) }) }
+    override suspend fun checkRecreateLink(url: String): RecreateLinkCheck {
+        val o = try { call { checkRecreateLink(buildJsonObject { put("url", JsonPrimitive(url)) }) } } catch (e: ApiException) {
+            if (e.code == "not_found" || e.code == "http_404") return RecreateLinkCheck(true, url) else throw e // an older server: no check
+        }
+        fun s(k: String) = (o[k] as? JsonPrimitive)?.takeIf { it.isString }?.content
+        val allowed = (o["allowed"] as? JsonPrimitive)?.content == "true"
+        return RecreateLinkCheck(allowed, s("url") ?: url, s("platform"), (o["cached"] as? JsonObject)?.let { studio.muse.core.edit.RecipeJson.reference(it) }, s("code"), s("reason"))
+    }
+
     // The server's renders (plans/api.md "The built edit, rendered" and Recreate "Export").
     override suspend fun editPreview(sessionId: String, start: Boolean, revision: Int?) = studio.muse.core.edit.RecreateJson.render(
         if (start) call { startEditPreview(sessionId, buildJsonObject {}) } else call { editPreview(sessionId, revision) })
@@ -531,8 +570,11 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; false }
 
     // Recreate this edit (workstream 1)
-    override suspend fun createReference(uploadId: String, name: String?) = studio.muse.core.edit.RecipeJson.reference(call {
-        createReference(buildJsonObject { put("uploadId", kotlinx.serialization.json.JsonPrimitive(uploadId)); if (name != null) put("name", kotlinx.serialization.json.JsonPrimitive(name.take(80))) })
+    override suspend fun createReference(uploadId: String, name: String?, sourceUrl: String?) = studio.muse.core.edit.RecipeJson.reference(call {
+        createReference(buildJsonObject {
+            put("uploadId", kotlinx.serialization.json.JsonPrimitive(uploadId)); if (name != null) put("name", kotlinx.serialization.json.JsonPrimitive(name.take(80)))
+            if (sourceUrl != null) put("sourceUrl", kotlinx.serialization.json.JsonPrimitive(sourceUrl))
+        })
     })
     override suspend fun reference(id: String) = studio.muse.core.edit.RecipeJson.reference(call { reference(id) })
     override suspend fun listReferences() = studio.muse.core.edit.RecipeJson.references(call { listReferences() })

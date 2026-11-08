@@ -154,7 +154,14 @@ data class SuiteInputs(
 
 /** owner: the models a tier runs, in ladder order, each with the inputs it takes. */
 @Serializable
-data class SuiteTierModel(val model: String, val name: String = "", val resolution: String = "", val inputs: SuiteInputs? = null)
+data class SuiteTierModel(
+    val model: String, val name: String = "", val resolution: String = "", val inputs: SuiteInputs? = null,
+    // WS7 (owner model picker): the engine's own limits and price, when the server sends them (older servers don't; the tier's apply).
+    val minSeconds: Int? = null,
+    val maxSeconds: Int? = null,
+    /** Dollars per output second at [resolution], after the studio's price scale. */
+    val perSec: Double? = null,
+)
 
 /** A quality tier (Draft / Standard / HD / Cinema). */
 @Serializable
@@ -182,6 +189,51 @@ data class SuiteTier(
     fun slotsFor(engineModel: String?): SuiteInputs = engineModel?.let { id -> models?.firstOrNull { it.model == id }?.inputs } ?: slots
 }
 
+/**
+ * One engine the owner can pick (`catalog.engines[]`, WS5, owner only): a registry or custom model, video or image, with
+ * the qualities whose ladder runs it, its resolutions and $/s each, its lengths and shapes. Prices are after priceScale.
+ */
+@Serializable
+data class SuiteCatalogEngine(
+    val model: String,
+    val name: String = "",
+    /** video | image */
+    val kind: String = "video",
+    val custom: Boolean = false,
+    /** The first quality whose ladder runs it (null: on no ladder, or an image model). */
+    val tier: String? = null,
+    val tiers: List<String> = emptyList(),
+    /** The resolution it runs at by default (the ladder's, else its largest). */
+    val resolution: String? = null,
+    val resolutions: List<SuiteResolution> = emptyList(),
+    val perSec: Double? = null,
+    val perRun: Double? = null,
+    val minSeconds: Int? = null,
+    val maxSeconds: Int? = null,
+    /** Exact lengths only (e.g. 5 and 10), when the engine has them. */
+    val allowedSeconds: List<Int>? = null,
+    val aspectRatios: List<String> = emptyList(),
+    val inputs: SuiteInputs? = null,
+)
+
+/** A custom engine (`c_…`) in the catalog: its display name, image or video, its limits and its price. Shots and photos take it as engineModel. */
+@Serializable
+data class SuiteCustomEngine(
+    val id: String,
+    val name: String = "",
+    /** image | video */
+    val kind: String = "video",
+    /** The composer's input slots (the server maps the model's schema). */
+    val inputs: SuiteInputs? = null,
+    val minSeconds: Int? = null,
+    val maxSeconds: Int? = null,
+    val aspectRatios: List<String> = emptyList(),
+    val price: MemberPrice? = null,
+    /** Owner only: whether members can use it, and the provider kind. */
+    val members: Boolean? = null,
+    val provider: String? = null,
+)
+
 /** A composer tool the server offers now (`catalog.tools`): shot, swap, recast, storyboard, talking, ugc_ad, extend. */
 @Serializable
 data class SuiteToolInfo(val id: String, val available: Boolean = false, val comingSoon: Boolean = false)
@@ -207,6 +259,10 @@ data class SuiteCatalog(
     val camera: CameraCatalog = CameraCatalog(),
     /** Which composer tools are live; null = an older server (the apps' built-in list applies). */
     val tools: List<SuiteToolInfo>? = null,
+    /** WS7 (BYO provider, WS5 contract v1): models the studio added from its own providers. Members get the members:true ones, display name only. */
+    val custom: List<SuiteCustomEngine>? = null,
+    /** WS7/WS5 (owner only): every engine the studio can pin, across qualities. Null = an older server (the tiers' models are used). Provisional shape. */
+    val engines: List<SuiteCatalogEngine>? = null,
 ) {
     fun tier(id: String?) = tiers.firstOrNull { it.id == id }
     /** Whether a tool can Generate: the catalog's word, else [fallback]. */
@@ -429,6 +485,10 @@ data class SuiteLadderStep(val model: String, val resolution: String)
 @Serializable
 data class SuiteResolution(val id: String, val label: String = "", val shortSide: Int = 0, val perSec: Double = 0.0)
 
+/** A registry model's lengths: min–max, or only the [allowed] ones. */
+@Serializable
+data class SuiteDurationRange(val min: Int = 0, val max: Int = 0, val allowed: List<Int>? = null)
+
 /** owner: one model of the registry, with the studio's switches. */
 @Serializable
 data class SuiteModelView(
@@ -446,6 +506,9 @@ data class SuiteModelView(
     val needsAck: Boolean = false,
     val configured: Boolean = true,
     val priceScale: Double = 1.0,
+    /** WS7: the model's lengths and shapes (the registry's), for the owner's model picker. */
+    val duration: SuiteDurationRange? = null,
+    val aspectRatios: List<String> = emptyList(),
 ) {
     fun perSec(resolution: String?) = (resolutions.firstOrNull { it.id == resolution } ?: resolutions.firstOrNull())?.perSec?.times(priceScale)
 }
@@ -536,7 +599,7 @@ object SuiteRules {
     }
 
     /** The member's view of the catalog: tiers without their models. */
-    fun memberSafe(c: SuiteCatalog): SuiteCatalog = c.copy(tiers = c.tiers.map { it.copy(models = null) })
+    fun memberSafe(c: SuiteCatalog): SuiteCatalog = c.copy(tiers = c.tiers.map { it.copy(models = null) }, engines = null)
 
     /** The server variable the owner sets to turn the suite on, and its two values. */
     const val MODE_VAR = "SUITE_MODE"

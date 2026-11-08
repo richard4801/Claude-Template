@@ -89,7 +89,8 @@ data class LiveTurn(
 /** One row of the transcript. */
 sealed interface ChatItem {
     val key: String
-    data class User(override val key: String, val text: String, val source: String) : ChatItem
+    /** [images]: the attached images' links (thumbnails). */
+    data class User(override val key: String, val text: String, val source: String, val images: List<String> = emptyList()) : ChatItem
     data class Assistant(override val key: String, val text: String, val streaming: Boolean = false) : ChatItem
     data class Tool(override val key: String, val text: String, val ok: Boolean, val running: Boolean = false) : ChatItem
     /** A frame Claude grabbed: [url] when stored, [data] (base64) while it streams. */
@@ -97,6 +98,9 @@ sealed interface ChatItem {
 }
 
 /** The chat's state for one thread. */
+/** An image picked for the next message: its local [preview] and, once uploaded, its [uploadId]. */
+data class ChatAttachment(val key: String, val preview: String, val uploadId: String? = null, val error: String? = null)
+
 data class ClaudeChatUi(
     val contextKind: String = "camera",
     val contextId: String = "",
@@ -112,8 +116,14 @@ data class ClaudeChatUi(
     val notice: String? = null,
     val loaded: Boolean = false,
     val error: String? = null,
+    /** Images picked for the next message (Recreate, Edit and Suite threads; ≤ 4): uploading until [ChatAttachment.uploadId]. */
+    val attachments: List<ChatAttachment> = emptyList(),
 ) {
     val busy get() = turn?.active == true
+    /** Attaching images: not in Camera stage yet (the server refuses them there). */
+    val canAttach get() = contextKind != "camera"
+    val uploading get() = attachments.any { it.uploadId == null && it.error == null }
+    val canSend get() = loaded && thread != null && !busy && !uploading && (draft.isNotBlank() || attachments.any { it.uploadId != null })
     val items get() = ChatReducer.items(this)
 }
 
@@ -221,7 +231,7 @@ object ChatReducer {
     fun items(ui: ClaudeChatUi): List<ChatItem> {
         val out = mutableListOf<ChatItem>()
         for (m in ui.messages) when {
-            m.role == "user" -> out += ChatItem.User(m.id, m.text, m.source)
+            m.role == "user" -> out += ChatItem.User(m.id, m.text, m.source, m.attachments.map { it.url })
             m.image != null -> out += ChatItem.Image(m.id, url = m.image.url)
             m.role == "tool" || m.tool != null -> m.tool?.let { tl -> out += ChatItem.Tool(m.id, ChipText.of(tl.name, tl.summary ?: m.text.takeIf { it.isNotBlank() }), tl.ok != false) }
             m.text.isNotBlank() -> out += ChatItem.Assistant(m.id, m.text)
@@ -256,7 +266,22 @@ object ClaudeText {
     const val CONNECTOR_NOTE = "MUSE has to be added to Claude as a connector first."
     const val FALLBACK_NOTE = "Turn on the API fallback in Settings → Connections"
     const val NO_KEY_NOTE = "The API fallback needs ANTHROPIC_API_KEY on the server"
-    const val EDIT_NO_API = "The studio API key works in Camera stage for now"
+    const val EDIT_NO_API = "The studio API key works in Camera stage and the Suite for now"
+
+    /** The empty chat's line, per context. */
+    fun empty(contextKind: String) = when (contextKind) {
+        "edit" -> "Tell Claude what to change: trims, captions, the look, the music. Every change can be undone."
+        "recreate" -> "Ask Claude about this reference: which takes fit, what each new shot would cost, how to write the briefs."
+        "suite" -> "Describe the shot you want. Claude sets up the composer: the model, the prompt and the rig. You approve the price before anything is made."
+        else -> "Tell Claude what happens in the shot: who moves where, when, and how the camera moves."
+    }
+
+    fun placeholder(contextKind: String) = when (contextKind) {
+        "edit" -> "Ask Claude to edit…"
+        "suite" -> "Describe the shot…"
+        "recreate" -> "Ask Claude…"
+        else -> "Direct the shot…"
+    }
 
     fun status(ui: ClaudeChatUi): StatusLineText {
         val t = ui.turn
@@ -302,7 +327,8 @@ object Fallback {
         val url = refusal?.openInClaudeUrl?.takeIf { it.isNotBlank() } ?: status?.openInClaudeUrl?.takeIf { it.isNotBlank() } ?: "https://claude.ai/new"
         val api = refusal?.apiFallback ?: (status?.apiFallback?.usable == true)
         return when {
-            contextKind != "camera" -> FallbackChoice(url, false, EDIT_NOTE)
+            // The studio API key answers Camera stage and Claude in the Suite (WS1 1eda187: api-turn with the Suite tools).
+            contextKind != "camera" && contextKind != "suite" -> FallbackChoice(url, false, EDIT_NOTE)
             api -> FallbackChoice(url, true, null)
             status != null && !status.apiFallback.available -> FallbackChoice(url, false, ClaudeText.NO_KEY_NOTE)
             else -> FallbackChoice(url, false, ClaudeText.FALLBACK_NOTE)

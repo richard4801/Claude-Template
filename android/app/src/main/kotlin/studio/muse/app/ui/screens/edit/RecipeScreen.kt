@@ -48,6 +48,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import studio.muse.app.data.ApiException
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.graphics.asImageBitmap
@@ -81,8 +82,12 @@ sealed interface RecipePhase {
     /** [referenceId]: the server's reference, for building your version (phases 2–3); null for a recipe shown alone. */
     data class Ready(val recipe: Recipe, val referenceId: String? = null, val kept: String? = null) : RecipePhase
     /** [fromLink]: a link couldn't be used; the saved file is offered instead. */
-    data class Failed(val message: String, val fromLink: Boolean = false) : RecipePhase
+    /** [retry]: "Try again" picks the analysis up again (the server restarted while reading the video). */
+    data class Failed(val message: String, val fromLink: Boolean = false, val retry: RecipeRetry? = null) : RecipePhase
 }
+
+/** What "Try again" picks up: the reference, and the upload it was made from (to make it again if the analysis was lost). */
+data class RecipeRetry(val referenceId: String, val uploadId: String?, val name: String?)
 
 /** [references]: the studio's references, newest first, on the start page (null while loading). */
 data class RecipeUi(val phase: RecipePhase = RecipePhase.Pick, val referenceName: String? = null, val references: List<studio.muse.core.edit.RecipeReference>? = null)
@@ -106,9 +111,9 @@ fun RecipeScreen(onBack: () -> Unit, referenceId: String? = null, shared: studio
         val rid = opened ?: return@LaunchedEffect
         ui = RecipeUi(RecipePhase.Analysing(.5f, "Opening the reference"), null)
         ui = runCatching { c.repo.api.reference(rid) }.fold(
-            { ref -> if (ref.state == "analyzing") follow(c.repo.api, ref) { ui = it }
+            { ref -> if (ref.state == "analyzing") follow(c.repo.api, ref, show = { ui = it })
                 else ref.recipe?.let { RecipeUi(RecipePhase.Ready(it, ref.id, ref.keptLine()), ref.name) } ?: RecipeUi(RecipePhase.Failed(ref.error ?: "This reference has expired."), ref.name) },
-            { e -> RecipeUi(RecipePhase.Failed(e.message ?: "Couldn't open the reference"), null) })
+            { e -> RecipeUi(RecipePhase.Failed(e.message ?: "Couldn't open the reference", retry = if ((e as? ApiException)?.transient == true) RecipeRetry(rid, null, null) else null), null) })
     }
     // Share → MUSE: a link. The server fetches it within the platforms' rules; when it can't, its message says why and the
     // saved file is offered instead.
@@ -118,7 +123,12 @@ fun RecipeScreen(onBack: () -> Unit, referenceId: String? = null, shared: studio
         val url = link ?: return@LaunchedEffect
         val name = studio.muse.core.edit.SharedLink.name(url)
         ui = RecipeUi(RecipePhase.Analysing(.05f, "Getting the video from the link"), name)
-        ui = runCatching { follow(c.repo.api, c.repo.api.createReferenceFromLink(url, name)) { ui = it } }.getOrElse { e ->
+        // The phone fetches it first (platforms block the studio server), then the server, then the saved file.
+        ui = runCatching {
+            var uploadId: String? = null
+            val ref = referenceFromLink(c.repo.api, c.linkFetcher.takeIf { !c.repo.demo }, url, name, context.cacheDir, onUploaded = { uploadId = it }) { p, step -> ui = RecipeUi(RecipePhase.Analysing(p, step), name) }
+            follow(c.repo.api, ref, uploadId, show = { ui = it })
+        }.getOrElse { e ->
             if (e is kotlinx.coroutines.CancellationException) throw e
             RecipeUi(RecipePhase.Failed(e.message?.takeIf { it.isNotBlank() } ?: "Couldn't fetch this link — save the video and drop the file in", fromLink = true), name)
         }
@@ -137,15 +147,24 @@ fun RecipeScreen(onBack: () -> Unit, referenceId: String? = null, shared: studio
             val uploadId = try {
                 c.repo.api.uploadEditorFile(file, mime) { p -> ui = RecipeUi(RecipePhase.Analysing(p * .2f, "Uploading the video"), name) }
             } finally { file.delete() }
-            follow(c.repo.api, c.repo.api.createReference(uploadId, name)) { ui = it }
+            follow(c.repo.api, c.repo.api.createReference(uploadId, name), uploadId, show = { ui = it })
         }.getOrElse { e ->
             if (e is kotlinx.coroutines.CancellationException) throw e
             RecipeUi(RecipePhase.Failed(e.message?.takeIf { it.isNotBlank() } ?: "Couldn't read that video · try another"), name)
         }
     }
+    // "Try again" after the server restarted mid-analysis: the same reference if it is still there, else made again from
+    // the same upload (nothing is uploaded twice).
+    var retry by remember { mutableStateOf<Pair<Int, RecipeRetry>?>(null) }
+    LaunchedEffect(retry) {
+        val r = retry?.second ?: return@LaunchedEffect
+        ui = RecipeUi(RecipePhase.Analysing(.2f, "Reconnecting…"), r.name ?: ui.referenceName)
+        ui = resume(c.repo.api, r) { ui = it }
+    }
     val ready = ui.phase as? RecipePhase.Ready
     if (ready?.referenceId != null) RecreateBuild(ready.referenceId, ready.recipe, ui.referenceName, ready.kept, onBack, onOpenTake)
-    else RecipeContent(ui, onBack = onBack, onPick = { pick.launch("video/*") }, onLink = { link = it }, onOpen = { opened = it })
+    else RecipeContent(ui, onBack = onBack, onPick = { pick.launch("video/*") }, onLink = { link = it }, onOpen = { opened = it },
+        onRetry = { r -> retry = (retry?.first ?: 0) + 1 to r })
 }
 
 /**
@@ -263,22 +282,60 @@ private fun RecreateBuild(referenceId: String, recipe: Recipe, name: String?, ke
         contextKind = "recreate", contextId = referenceId, title = name ?: "Recreate")
 }
 
-/** Polls a reference (showing the server's step) until it is ready or failed. */
-private suspend fun follow(api: studio.muse.app.data.MuseApi, start: studio.muse.core.edit.RecipeReference, show: (RecipeUi) -> Unit): RecipeUi {
+/** When the server restarted while reading the video and didn't come back in time. */
+const val RECIPE_RESTARTED = "The server restarted while reading this video. Try again"
+
+/**
+ * Polls a reference (showing the server's step) until it is ready or failed. The server restarting or the network
+ * dropping ([ApiException.transient]) doesn't end it: "Reconnecting…" and polling again with backoff for up to
+ * [maxWaitMs], then [RECIPE_RESTARTED] with Try again. [uploadId]: the upload it came from, so Try again can make it again.
+ */
+internal suspend fun follow(
+    api: studio.muse.app.data.MuseApi, start: studio.muse.core.edit.RecipeReference, uploadId: String? = null,
+    maxWaitMs: Long = 120_000, pause: suspend (Long) -> Unit = { delay(it) }, show: (RecipeUi) -> Unit,
+): RecipeUi {
     var ref = start
+    val again = RecipeRetry(start.id, uploadId, start.name)
+    var lostMs = 0L
+    var backoff = 2_000L
     while (ref.state == "analyzing") {
         show(RecipeUi(RecipePhase.Analysing(.2f + .8f * ref.progress / 100f, ref.phase?.takeIf { it != "Waiting" } ?: "Waiting for its turn", ref.phase), ref.name))
-        delay(1500)
-        ref = api.reference(ref.id)
+        pause(1500)
+        ref = try {
+            api.reference(ref.id).also { lostMs = 0; backoff = 2_000 }
+        } catch (e: ApiException) {
+            if (!e.transient) throw e
+            if (lostMs >= maxWaitMs) return RecipeUi(RecipePhase.Failed(RECIPE_RESTARTED, retry = again), ref.name)
+            show(RecipeUi(RecipePhase.Analysing(.2f + .8f * ref.progress / 100f, "Reconnecting…", ref.phase), ref.name))
+            pause(backoff); lostMs += 1500 + backoff; backoff = (backoff * 2).coerceAtMost(15_000)
+            ref
+        }
     }
     val recipe = ref.recipe
     return if (ref.state == "ready" && recipe != null) RecipeUi(RecipePhase.Ready(recipe, ref.id, ref.keptLine()), ref.name)
-    else RecipeUi(RecipePhase.Failed(ref.error ?: if (ref.state == "expired") "This reference has expired." else "The analysis didn’t finish.", fromLink = ref.error?.contains("link", true) == true), ref.name)
+    else RecipeUi(RecipePhase.Failed(ref.error ?: if (ref.state == "expired") "This reference has expired." else "The analysis didn’t finish.", fromLink = ref.error?.contains("link", true) == true,
+        // A failed analysis can be made again from the same upload.
+        retry = if (ref.state == "failed" && uploadId != null) again else null), ref.name)
+}
+
+/** Try again: the reference if it is still being read or ready, else a new one from the same upload. */
+internal suspend fun resume(api: studio.muse.app.data.MuseApi, r: RecipeRetry, pause: suspend (Long) -> Unit = { delay(it) }, show: (RecipeUi) -> Unit): RecipeUi = try {
+    val ref = api.reference(r.referenceId)
+    when {
+        ref.state == "analyzing" || ref.state == "ready" -> follow(api, ref, r.uploadId, pause = pause, show = show)
+        r.uploadId != null -> follow(api, api.createReference(r.uploadId, r.name), r.uploadId, pause = pause, show = show)
+        else -> RecipeUi(RecipePhase.Failed(ref.error ?: "The analysis didn’t finish."), r.name)
+    }
+} catch (e: ApiException) {
+    if (e.code == "not_found" && r.uploadId != null) runCatching { follow(api, api.createReference(r.uploadId, r.name), r.uploadId, pause = pause, show = show) }
+        .getOrElse { RecipeUi(RecipePhase.Failed(if ((it as? ApiException)?.transient == true) RECIPE_RESTARTED else it.message ?: RECIPE_RESTARTED, retry = r), r.name) }
+    else RecipeUi(RecipePhase.Failed(if (e.transient) RECIPE_RESTARTED else e.message ?: RECIPE_RESTARTED, retry = r.takeIf { e.transient }), r.name)
 }
 
 /** The screen as a function of [ui] (screenshots render it). */
 @Composable
-fun RecipeContent(ui: RecipeUi, onBack: () -> Unit, onPick: () -> Unit, onLink: (String) -> Unit = {}, draftLink: String = "", onOpen: (String) -> Unit = {}) {
+fun RecipeContent(ui: RecipeUi, onBack: () -> Unit, onPick: () -> Unit, onLink: (String) -> Unit = {}, draftLink: String = "", onOpen: (String) -> Unit = {},
+    onRetry: (RecipeRetry) -> Unit = {}) {
     val m = muse
     ScreenBox(statusPad = true) {
         Column(Modifier.fillMaxSize()) {
@@ -296,8 +353,11 @@ fun RecipeContent(ui: RecipeUi, onBack: () -> Unit, onPick: () -> Unit, onLink: 
                         is RecipePhase.Analysing -> AnalysingBody(ui.referenceName, ph)
                         is RecipePhase.Failed -> {
                             T(ph.message, m.scale.body, m.t.ink)
+                            val r = ph.retry
+                            // The server restarted mid-analysis: Try again is the one action; another video stays possible.
+                            if (r != null) { Primary("Try again") { onRetry(r) }; Secondary("Pick another video", onPick) }
                             // A link MUSE couldn't use: the saved video is the way in (the one action here).
-                            if (ph.fromLink) Primary("Pick the saved video", onPick) else Secondary("Pick another video", onPick)
+                            else if (ph.fromLink) Primary("Pick the saved video", onPick) else Secondary("Pick another video", onPick)
                         }
                         is RecipePhase.Ready -> RecipeBody(ph.recipe, ui.referenceName, wide, onPick)
                     }
