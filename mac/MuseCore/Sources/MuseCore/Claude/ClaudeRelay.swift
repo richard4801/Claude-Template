@@ -118,9 +118,14 @@ public actor ClaudeRelay {
     }
 
     /// The thread's known Claude Code session (from its detail); saves a lookup when the turn runs.
-    public func remember(threadId: String, claudeSessionId: String?) {
+    public func remember(threadId: String, claudeSessionId: String?, brief: ClaudeBrief? = nil) {
         if let s = claudeSessionId, !s.isEmpty { sessions[threadId] = s }
+        if let p = brief?.systemPrompt { briefs[threadId] = p }
     }
+
+    /// The thread's brief as a system prompt (recreate and edit threads); "" = looked up, none.
+    private var briefs: [String: String] = [:]
+    public func systemPrompt(threadId: String) -> String? { briefs[threadId].flatMap { $0.isEmpty ? nil : $0 } }
 
     /// A turn typed on this Mac. Returns its local id.
     @discardableResult
@@ -209,8 +214,12 @@ public actor ClaudeRelay {
         }
         runners[tid] = runner
         if stopPending.remove(tid) != nil { runner.stop() }
-        if sessions[tid] == nil, let d = try? await api.threadDetail(tid), let s = d.thread.claudeSessionId, !s.isEmpty { sessions[tid] = s }
-        let req = ClaudeRunRequest(threadId: tid, turnId: job.turnId, text: job.text, resume: sessions[tid], blender: await blender())
+        if sessions[tid] == nil || briefs[tid] == nil, let d = try? await api.threadDetail(tid) {
+            if sessions[tid] == nil, let s = d.thread.claudeSessionId, !s.isEmpty { sessions[tid] = s }
+            briefs[tid] = d.thread.brief?.systemPrompt ?? ""
+        }
+        let req = ClaudeRunRequest(threadId: tid, turnId: job.turnId, text: job.text, resume: sessions[tid], blender: await blender(),
+                                   systemPrompt: systemPrompt(threadId: tid))
         let onEvent = self.onEvent
         let turnId = job.turnId
         let outcome = await runner.run(req) { e in onEvent(tid, turnId, e) }

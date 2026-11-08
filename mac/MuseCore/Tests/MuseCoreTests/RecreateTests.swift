@@ -450,6 +450,31 @@ final class RecreateTests: XCTestCase {
         XCTAssertTrue(g.useThisSound?.steps.contains { $0.contains("Use this sound") } ?? false)
     }
 
+    // MARK: Claude's recreate thread (workstream 1's brief)
+
+    func testRecreateThreadBriefSeedsClaudeCode() async throws {
+        let json = #"{"id":"ct_1","contextKind":"recreate","contextId":"rx_1","createdAt":1,"updatedAt":2,"brief":{"prompt":"You recreate edits.","tools":["get_recipe","fill_slot"],"referenceId":"rx_1"}}"#
+        let t = try JSONDecoder().decode(ClaudeThread.self, from: Data(json.utf8))
+        XCTAssertEqual(t.brief?.tools, ["get_recipe", "fill_slot"])
+        XCTAssertEqual(t.brief?.systemPrompt, "You recreate edits.\n\nThe reference: rx_1.")
+        // An older server: no brief, odd fields; never fails.
+        let old = try JSONDecoder().decode(ClaudeThread.self, from: Data(#"{"id":"ct_2","contextKind":"edit","contextId":"es_1","createdAt":1,"updatedAt":2,"brief":"?"}"#.utf8))
+        XCTAssertNil(old.brief)
+        XCTAssertNil(ClaudeBrief(prompt: "  ").systemPrompt)
+        let cmd = ClaudeCommand(mcpURL: "u", token: "t", resume: "s1", appendSystemPrompt: "Brief")
+        let args = cmd.arguments(configPath: "/c.json")
+        XCTAssertEqual(Array(args.suffix(4)), ["--append-system-prompt", "Brief", "--resume", "s1"])
+        XCTAssertFalse(ClaudeCommand(mcpURL: "u", token: "t").arguments(configPath: "/c.json").contains("--append-system-prompt"))
+        // The demo fake: a recreate thread needs a reference id, and carries the brief.
+        let api = FakeClaudeAPI()
+        let th = try await api.thread(contextKind: "recreate", contextId: "rx_demo")
+        XCTAssertEqual(th.brief?.referenceId, "rx_demo")
+        do {
+            _ = try await api.thread(contextKind: "recreate", contextId: "start")
+            XCTFail("a recreate thread without a reference")
+        } catch {}
+    }
+
     private func XCTAssertThrowsErrorAsync(_ body: () async throws -> Void, file: StaticString = #filePath, line: UInt = #line) async {
         do {
             try await body()
