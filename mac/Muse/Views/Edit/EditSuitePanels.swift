@@ -252,7 +252,7 @@ struct MaskPanel: View {
                 if let k = session.keepPick, k.clipId == session.state.selection {
                     KeepPicker(session: session, pick: k)
                 } else {
-                    SuiteToolButton(title: "Pick what to keep", icon: "plus-circle", plain: true, disabled: session.isRunning(.matte)) {
+                    SuiteToolButton(title: "Pick what to keep", icon: "plus-circle", disabled: session.isRunning(.matte), plain: true) {
                         Task { await session.startKeepPick() }
                     }
                 }
