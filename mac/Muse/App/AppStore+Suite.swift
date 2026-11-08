@@ -144,13 +144,6 @@ final class SuiteState {
     // The composer
     var composer = ComposerDraft()
     let composerSlots = InputSlotsModel()
-    /// The cinematic Suite's saved rigs (GET /v1/suite/rigs): members see theirs, the owner sees all.
-    var savedRigs: [SuiteRigView] = []
-    /// The cinematic Suite's takes rail (GET /v1/suite/feed): the loaded cards, the next page and the rail's filter.
-    var feed: [SuiteFeedItem] = []
-    var feedCursor: String?
-    var feedFilter: CinemaFeedFilter = .all
-    var feedLoading = false
     var estimate: ShotEstimate?
     var estimateError: String?
     /// The four tiers' estimates for the Quality pill.
@@ -452,9 +445,6 @@ extension AppStore {
         }
     }
 
-    /// The cinematic Suite is on (owner switch) for this tool: Shot and Photo only in build step 1.
-    var cinemaSuite: Bool { newSuite && isOwner }
-    func usesCinema(_ mode: SuiteMode) -> Bool { cinemaSuite && (mode == .shot || mode == .photo) }
 
     /// The composer's newest job.
     var shotJob: Job? { suite.shotJobIds.last.flatMap { id in jobs.first { $0.id == id } } }

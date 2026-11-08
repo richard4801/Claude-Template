@@ -128,12 +128,6 @@ struct SettingsView: View {
             if let msg = store.offlineMessage {
                 InlineNotice("\(msg) Check the address, then Test connection.", tone: .caution).padding(.top, Space.s2)
             }
-            if store.isOwner {
-                SectionTitle("Previews")
-                SettingRow("Try the new Suite", hint: "Shot and Photo in the new cinematic design. The other tools keep the current composer. Only on this Mac, for the owner.") {
-                    RSwitch(label: "Try the new Suite", isOn: $store.newSuite)
-                }
-            }
             SectionTitle("Testing")
             SettingRow("Fail the next render", hint: "It stops partway and the cost is refunded, to test failure handling and notifications. Demo mode, server/mock and dev servers only.") {
                 RButton("Fail next render", small: true) { store.setFailNext() }

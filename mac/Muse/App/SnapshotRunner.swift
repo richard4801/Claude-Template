@@ -17,8 +17,6 @@ enum SnapshotRunner {
         var scrollTo: String?
         /// Generate's frame in the window (SwiftUI global space, top-left origin), for the composer fit check.
         var generateFrame: CGRect?
-        /// The cinematic Suite shows its empty state (the demo studio already has takes).
-        var cinemaEmpty = false
         /// Bumped by the fit check after each screen change: Generate's probe reports its frame again.
         var probeTick = 0
         /// The rig panel's view is on screen (its onAppear / onDisappear), for the same-tick diagnosis.
@@ -49,7 +47,7 @@ enum SnapshotRunner {
             .sorted()
     }
 
-    /// The last CinemaSuiteView body: did it see the picker open, and when (not observed: a plain static).
+    /// The last Suite body that reported (noteSuiteBody): did it see the picker open (not observed: a plain static).
     static var suiteBodySawPicker = false
     static var suiteBodyCount = 0
     static func noteSuiteBody(pickerOpen: Bool) {
@@ -235,28 +233,6 @@ enum SnapshotRunner {
             }
         }
         await run([.c, .b], [(1440, 900), (1280, 800), (1100, 620)], screens)
-        // The cinematic Suite (owner switch "Try the new Suite"): Shot, its empty state and Photo in all four themes.
-        let cinema: [(String, @MainActor () -> Void)] = [
-            ("cinema_shot", { store.newSuite = true; state.cinemaEmpty = false; store.openTool(.shot); fillDemoDraft(store) }),
-            ("cinema_empty", { store.newSuite = true; state.cinemaEmpty = true; store.openTool(.shot); store.suite.composer.tokens = PromptTokens() }),
-            ("cinema_photo", { store.newSuite = true; state.cinemaEmpty = false; store.openPhoto(model: SampleData.demo) }),
-            // Build step 3: the rig panel on Style (arc carousel, era ruler, tempo) and on Camera (the drums).
-            // The picker opens a moment after the tool switch, as a person would (switching from Photo and opening the
-            // panel in the same tick sometimes drew the room without it).
-            ("cinema_rig_style", { store.newSuite = true; state.cinemaEmpty = false; store.openTool(.shot); fillDemoDraft(store)
-                Task { @MainActor in try? await Task.sleep(for: .seconds(0.6)); store.openPicker(.style) } }),
-            ("cinema_rig_camera", { store.newSuite = true; state.cinemaEmpty = false; store.openTool(.shot); fillDemoDraft(store)
-                Task { @MainActor in try? await Task.sleep(for: .seconds(0.6)); store.openPicker(.camera, step: "setup") } }),
-            // Diagnosis (coordinator): Photo, then Shot and the panel in the same tick. The fit check logs whether the
-            // body saw the picker and whether the panel's view appeared (PANEL lines).
-            // The original failure: the Photo screen fully drawn, then Shot and the panel in one tick.
-            ("cinema_photo_again", { store.newSuite = true; state.cinemaEmpty = false; store.openPhoto(model: SampleData.demo) }),
-            ("cinema_rig_sametick", { store.newSuite = true; state.cinemaEmpty = false; store.openTool(.shot); fillDemoDraft(store); store.openPicker(.style) }),
-        ]
-        // The runner's screen clamps the window's height (the 1440 × 900 and 1280 × 800 shots are about 684 pt tall).
-        await run(ThemeID.allCases, [(1440, 900), (1280, 800)], cinema)
-        store.newSuite = false
-        state.cinemaEmpty = false
         w.setFrame(full, display: true)
         try? await Task.sleep(for: .seconds(1))
         try? (lines.joined(separator: "\n") + "\n").write(to: dir.appendingPathComponent("fit-check.txt"), atomically: true, encoding: .utf8)

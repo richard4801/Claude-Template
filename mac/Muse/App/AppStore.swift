@@ -148,9 +148,6 @@ final class AppStore {
     var notifyLowBalance: Bool { didSet { defaults.set(notifyLowBalance, forKey: "muse.notifyLow") } }
     var notifyPhone: Bool { didSet { defaults.set(notifyPhone, forKey: "muse.notifyPhone") } }
     var warnOverBudget: Bool { didSet { defaults.set(warnOverBudget, forKey: "muse.warnBudget") } }
-    /// Settings → Developer (owner): "Try the new Suite". Shot and Photo use the cinematic Suite (plans/ai-suite-design.md,
-    /// build step 1); off by default, and the old composer stays as it is while it's off.
-    var newSuite: Bool { didSet { defaults.set(newSuite, forKey: "muse.newSuite") } }
     var dataSource: DataSource { didSet { defaults.set(dataSource.rawValue, forKey: "muse.dataSource.v2") } }
     /// "Remember me" on sign-in (default on). On: the session stays in the Keychain across launches and the email is pre-filled.
     /// Off: the token lives in memory only (quitting signs out) and the email isn't saved. The password is never stored by MUSE;
@@ -395,7 +392,7 @@ final class AppStore {
         notifyLowBalance = d.object(forKey: "muse.notifyLow") as? Bool ?? true
         notifyPhone = d.object(forKey: "muse.notifyPhone") as? Bool ?? true
         warnOverBudget = d.object(forKey: "muse.warnBudget") as? Bool ?? true
-        newSuite = d.bool(forKey: "muse.newSuite")
+        d.removeObject(forKey: "muse.newSuite") // the cinematic Suite preview was removed (the owner kept this Suite)
         // v2 keys: the real server is the default now (older builds defaulted to the in-process fake and localhost).
         dataSource = DataSource(rawValue: d.string(forKey: "muse.dataSource.v2") ?? "http") ?? .http
         baseURL = d.string(forKey: "muse.baseURL.v2") ?? defaultServerURL
