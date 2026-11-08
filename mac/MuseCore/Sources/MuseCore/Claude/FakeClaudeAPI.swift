@@ -70,7 +70,7 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
     }
 
     public func thread(contextKind: String, contextId: String) async throws -> ClaudeThread {
-        guard ["camera", "edit", "recreate"].contains(contextKind) else { throw ApiError("bad_request", "contextKind") }
+        guard ["camera", "edit", "recreate", "suite"].contains(contextKind) else { throw ApiError("bad_request", "contextKind") }
         // A recreate thread is on one of the owner's references (rx_…), else 404 (as the server).
         if contextKind == "recreate", !contextId.hasPrefix("rx_") { throw ApiError("not_found", "Reference not found") }
         return locked {
@@ -79,6 +79,8 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
             case "recreate": ClaudeBrief(prompt: "You help the studio owner recreate a reference video's edit with MUSE's recreate tools. Price new shots first; the owner approves them in the app.",
                                          tools: ["get_recipe", "set_slot_briefs", "match_slots", "fill_slot", "open_edit", "apply_recipe", "apply_edit_ops"], referenceId: contextId)
             case "edit": ClaudeBrief(prompt: "You edit the studio owner's video in MUSE's editor.", tools: ["apply_edit_ops"], sessionId: contextId)
+            case "suite": ClaudeBrief(prompt: "You fill in the studio owner's AI Suite composer with options it offers. Generating waits for the owner's approval in the app.",
+                                      tools: ["suite_options", "suite_get_draft", "suite_set_draft", "suite_estimate", "suite_request_shot", "suite_feed"], assistId: contextId)
             default: nil
             }
             let t = ClaudeThread(id: nextId("ct"), contextKind: contextKind, contextId: contextId, createdAt: now(), updatedAt: now(), brief: brief)

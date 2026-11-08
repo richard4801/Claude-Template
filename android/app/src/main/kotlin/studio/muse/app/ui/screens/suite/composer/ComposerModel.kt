@@ -104,6 +104,8 @@ data class ComposerDraft(
     val resolution: String? = null,
     /** Extend: "after" (what happens next) or "before" (what happens before). */
     val extendDirection: String = "after",
+    /** Claude in the Suite: reference images on the draft (pose, style, location, outfit), ≤ 3; removable chips. */
+    val references: List<studio.muse.app.data.DraftReference> = emptyList(),
 ) {
     /** The prompt's placeholder: Extend's follows the direction. */
     val placeholder: String get() = if (tool == ComposerTool.EXTEND) studio.muse.app.data.ExtendRules.placeholder(extendDirection) else tool.placeholder
@@ -229,7 +231,19 @@ data class ComposerDraft(
     fun request(slots: InputSlots, inputs: SuiteInputs, recast: RecastDraft, own: InputSlots = InputSlots(), locations: List<SuiteLocation> = emptyList()): SuiteShotRequest =
         baseRequest(slots, inputs, recast, own).let { r ->
             if (tool in PROMPT_TOOLS) withLocations(r, inputs, locations).copy(engineModel = engineModel, resolution = resolution.takeIf { engineModel != null }) else r
-        }.copy(draft = ComposerDrafts.draft(this)) // Reuse settings: the composer as it was, stored with the job and its takes
+        }.let { r -> if (tool in PROMPT_TOOLS) withDraftReferences(r) else r }
+            .copy(draft = ComposerDrafts.draft(this)) // Reuse settings: the composer as it was, stored with the job and its takes
+
+    /**
+     * The draft's reference images (Claude adds the owner's photos as pose, style, location or outfit) as
+     * `references.images[{image, role: use, label}]` after the slots and @locations. The model's own references always
+     * carry her identity; the engine may send fewer when the quality has less room (the estimate says so).
+     */
+    fun withDraftReferences(r: SuiteShotRequest): SuiteShotRequest {
+        if (references.isEmpty()) return r
+        val add = references.take(3).map { SuiteRefImage(studio.muse.app.data.ImageRef(url = it.url), it.use, it.label ?: it.useLabel) }
+        return r.copy(references = (r.references ?: SuiteReferences()).copy(images = r.references?.images.orEmpty() + add))
+    }
 
     /**
      * The prompt's @locations as references: `{image, role: "location", label: name}` after the slots' images, never more

@@ -118,7 +118,11 @@ fun RecipeScreen(onBack: () -> Unit, referenceId: String? = null, shared: studio
         val url = link ?: return@LaunchedEffect
         val name = studio.muse.core.edit.SharedLink.name(url)
         ui = RecipeUi(RecipePhase.Analysing(.05f, "Getting the video from the link"), name)
-        ui = runCatching { follow(c.repo.api, c.repo.api.createReferenceFromLink(url, name)) { ui = it } }.getOrElse { e ->
+        // The phone fetches it first (platforms block the studio server), then the server, then the saved file.
+        ui = runCatching {
+            val ref = referenceFromLink(c.repo.api, c.linkFetcher.takeIf { !c.repo.demo }, url, name, context.cacheDir) { p, step -> ui = RecipeUi(RecipePhase.Analysing(p, step), name) }
+            follow(c.repo.api, ref) { ui = it }
+        }.getOrElse { e ->
             if (e is kotlinx.coroutines.CancellationException) throw e
             RecipeUi(RecipePhase.Failed(e.message?.takeIf { it.isNotBlank() } ?: "Couldn't fetch this link — save the video and drop the file in", fromLink = true), name)
         }
