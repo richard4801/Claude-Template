@@ -1202,7 +1202,7 @@ A reference video (an upload, up to 60 s for now) is analysed into a versioned *
 **Privacy and retention:**
 - Each member sees their own references; the owner sees all of them. Another member's reference reads as `404`.
 - The contact sheet is stored under `rx/`, which is not served by `/uploads/*`. It is served only by the authenticated route below.
-- After **30 days**, unless `keep: true`, the reference video (its upload) and the contact sheet are deleted. The row turns `expired` and leaves the lists, and the recipe JSON stays, since it holds no pixels.
+- After **30 days**, unless `keep: true`, everything made from the reference's pixels is deleted: the video (its upload, or `rx/…/source.mp4` from a link), the contact sheet, the per-frame poses (`rx/…/poses.json`), the swap segments and the exports. A server timer runs this hourly. The row turns `expired` and leaves the lists, and the recipe JSON stays, since it holds no pixels. Background plates and the swapped takes are the studio's own and stay.
 - `DELETE` removes everything at once.
 - Pose keypoints are body points only; reference pixels are never stored in a recipe.
 
@@ -1214,7 +1214,7 @@ A reference video (an upload, up to 60 s for now) is analysed into a versioned *
 | `GET /v1/recreate/references` | → `Reference[]` without the recipe (with `slots`: the number of slots), newest first. |
 | `GET /v1/recreate/references/{id}` | → `Reference` with its `recipe` once `ready`. |
 | `PATCH /v1/recreate/references/{id} {keep?, name?}` | `keep: true` stops the 30-day deletion (`expiresAt: null`). |
-| `DELETE /v1/recreate/references/{id}` | → `204`. The video, the contact sheet and the row are deleted. |
+| `DELETE /v1/recreate/references/{id}` | → `204`. The row and everything listed above are deleted. An analysis, link fetch or export still running when it is deleted removes its own files when it finishes. |
 | `GET /v1/recreate/references/{id}/contact-sheet` | → the PNG: each slot's keyframe, labelled "2 · 1.5–2.7 s". Claude writes the shot briefs from it. |
 | `GET /v1/recreate/references/{id}/video` | The reference video for the side-by-side player (authenticated): a `302` to a 1-hour link on S3, or the bytes on local storage. `404` once expired. |
 | `GET /v1/recreate/references/{id}/poster` | → PNG: the first slot's keyframe (cropped from the contact sheet). |
@@ -1242,7 +1242,7 @@ A reference video (an upload, up to 60 s for now) is analysed into a versioned *
 
 | | |
 |---|---|
-| `POST /v1/recreate/references/{id}/export {sessionId, sound?: "guide"\|"silent"}` | Renders the edit session's current revision, as long as the reference, at the canvas's size. `guide` (the default) uses the reference's own sound as the track; `silent` has no sound. → `Export` (`state: "rendering"`, or `"ready"` when that revision is already exported). Without the reference's video (after 30 days) or sound, a guide export gets `409 no_reference_sound`; export silent instead. |
+| `POST /v1/recreate/references/{id}/export {sessionId, sound?: "guide"\|"silent"}` | Renders the edit session's current revision, as long as the reference, at the canvas's size. `guide` (the default) uses the reference's own sound as the track; `silent` has no sound. → `Export` (`state: "rendering"`, or `"ready"` when that revision is already exported). A reference without sound gets `409 no_reference_sound` for a guide export; export it silent instead. Expired references leave the lists (`404`), so export before the 30 days are up, or keep the reference. |
 | `GET /v1/recreate/references/{id}/export?sessionId&sound&revision?` | → `Export`. Polling, or wait for the live event `{type: "recreate", export: Export}`. |
 | `GET /v1/recreate/references/{id}/export.mp4?sessionId&sound&revision?` | The file (authenticated, as an attachment): a `302` to a 1-hour link on S3, or the bytes. |
 
@@ -1390,7 +1390,7 @@ Code: `src/recreate/slots.ts` (briefs, matcher, fill request), `assemble.ts` (re
   - else a plate generated from the brief's setting with the Suite's image engine, at its cost × `EDITOR_MARKUP` (about $0.06). It is added to the same estimate and button and held, made and settled before the swap starts (`502 background_failed`, not charged). It is made once per slot and setting, then reused free.
 
   The response then has `background: {source: "location", locationId, name, matched, usd: 0} | {source: "generated", setting, usd, reused?}`, and the estimate has `swapUsd` and `backgroundUsd` when the plate is paid. **`method: "generate"`**: a new Suite shot from the brief → `{slotId, method: "generate", request: ShotRequest, promptFrom: "brief"\|"summary"\|"default", estimate: ShotEstimate, swapUnavailable?}`. Without a brief, the prompt comes from the reference's summary, else a neutral line (`promptFrom`): suggest writing a brief first. `swapUnavailable` says why the default fell back to generate. `409 swap_unavailable` when `method: "swap"` was asked for and can't run. |
-| `POST /v1/recreate/references/{id}/slots/{slotId}/fill {…same body}` | The caller has confirmed the price. Swap → `{slotId, method: "swap", segment, job}`. The segment is cut to a private clip under the reference (`rx/…`, deleted with it after 30 days). An ordinary Edit job runs on it, held and priced like any swap: video only (the edit uses the reference's sound), with the creator's burned-in captions removed in the prompt. If Edit isn't available, the hosted swap runs. Generate → `{slotId, method: "generate", job}`, an ordinary Suite shot. The slot records `fill: {jobId}`. |
+| `POST /v1/recreate/references/{id}/slots/{slotId}/fill {…same body, maxUsd?}` | The caller has confirmed the price; send it as `maxUsd`. If Edit refuses at the last moment, the hosted swap (its own price, at least 4 s) only runs when it fits `maxUsd`. Otherwise `409 price_changed {totalUsd, estimate}`: show the new price, then fill again with it. Swap → `{slotId, method: "swap", segment, job}`. The segment is cut to a private clip under the reference (`rx/…`, deleted with it after 30 days). An ordinary Edit job runs on it, held and priced like any swap: video only (the edit uses the reference's sound), with the creator's burned-in captions removed in the prompt. If Edit isn't available, the hosted swap runs. Generate → `{slotId, method: "generate", job}`, an ordinary Suite shot. The slot records `fill: {jobId}`. |
 | `POST /v1/recreate/references/{id}/apply {sessionId, baseRevision?, slots: {slotId: takeId \| jobId}, options?: {camera, speed, text, look}, device?}` | Builds the edit in an edit session (owner) as one undoable change labelled "Recreated “name”". → `{sessionId, revision, durationSec, missing, waiting, notes, label, match, sources}`. See below. |
 | `POST /v1/recreate/references/{id}/slots/{slotId}/replace {sessionId, take: takeId \| jobId, baseRevision?, device?}` | **Fix this shot** (plan §4): the slot's clip in the edit built from this reference gets another take, or a finished fill job, in place, as one undoable change ("Replaced shot s2 in “name”"). Its place and length on the timeline, transition, ramp, camera keys and look stay, and the new take starts where its action peak lines up (slower if it is too short). A swapped take is baked instead (see below). The owner's other edits are kept. → `{sessionId, revision, slotId, itemId, takeId, inSec, label, baked?, note?}`. `409 not_built_here` (the edit wasn't built in that session), `409 slot_not_in_edit` (the shot's clip was deleted), `409 job_not_done`. Claude's tool: `replace_slot`. |
 
@@ -1410,7 +1410,6 @@ It suggests one take per slot, best first, using each take once. Slots where not
 - whole seconds, at least the tier's minimum, because the clip is cut back to the slot;
 - `draft: {tool: "shot", recreate: {slotId}}`.
 
-Pose guidance (the slot's keypoints) joins the fill request once the Suite's shot tool takes a pose.
 
 **Fill state** (`GET …/fill`; `match` keeps its last result, `fill` its jobs):
 ```
@@ -1446,15 +1445,16 @@ SlotFill { slotId, state: "empty"|"matched"|"to_generate"|"generating"|"ready", 
 - **Who made it:** from the app it is the owner's change (a reset); from Claude's tool it is Claude's change.
 
 **Claude's tools** (owner only; MCP, in the edit scopes):
-- `analyze_reference(uploadId, name?)`: free; waits up to a minute; returns the summary.
+- `analyze_reference(uploadId | url, name?)`: free; waits up to a minute; returns the summary, the playbook and `startFrom`.
 - `get_recipe(referenceId, contactSheet?)`: returns the contact sheet as an image block.
 - `set_slot_briefs(referenceId, slots)`.
 - `match_slots(referenceId, modelId?, top?)`.
 - `apply_recipe(referenceId, sessionId, slots, options?, baseRevision?)`.
-- `fill_slot(referenceId, slotId, modelId, sessionId, quality?, confirm?)`:
-  - without `confirm`, it returns the price;
-  - with it, the owner is asked in the edit session (pending `kind: "recreate_fill"`), and their yes starts the Suite job;
+- `fill_slot(referenceId, slotId, modelId, sessionId, quality?, method?, keepBackground?, outfitId?, locationId?, confirm?)`:
+  - without `confirm`, it returns the price (`method` swap or generate);
+  - with it, the owner is asked in the edit session (pending `kind: "recreate_fill"`), and their yes starts the job at that method and at most that price;
   - Claude then passes the job id to `apply_recipe`.
+- `replace_slot(referenceId, slotId, sessionId, take, baseRevision?)`: "Fix this shot", as Claude's change.
 
 - `playbook_read(recipeId?, referenceId?, takeId?, area?)` (edit:read): the learning editor's context (workstream 3, "Learning editor"). It holds the playbook (pinned first, ≤ 25), the 3 nearest proven recipes with their Posts performance, 10 corrections, 8 lessons and 5 gaps.
 - `playbook_add(text, area?, evidence?)` (edit:write): Claude's rule arrives unpinned; the owner pins, edits or deletes it.
@@ -1479,7 +1479,7 @@ SlotFill { slotId, state: "empty"|"matched"|"to_generate"|"generating"|"ready", 
   - The response adds `playbook {followed, followYourself}` and `startedFrom {recipeId, name, distance, borrowed[]} | null`.
   - New body fields: `options.transitions`, and `startFrom: recipeId | false`.
 - **Starting from a proven recipe.** The nearest of the studio's own posted edits (`origin: "edit"`, at least one post, distance ≤ 0.6) is the default start. When the reference's own look can't be mapped (distance ≥ 0.4), the start recipe's palette grades the edit.
-- **Gaps.** What the editor can't rebuild is logged once per reference: `speed:freeze-frame` and `effect:flash-in-shot`. Unknown transitions and unread words are already counted from the recipe's own gaps. Claude logs anything else with `report_gap`.
+- **Gaps.** What the editor can't rebuild is logged once per reference: `speed:freeze-frame` (only a freeze whose place is unknown), `effect:flash-in-shot` and `effect:glitch-in-shot`. Unknown transitions and unread words are already counted from the recipe's own gaps. Claude logs anything else with `report_gap`.
 
 Applying a recipe stores `meta: {sources}` on the edit op, from Claude or from the app. The owner's later corrections to those items then carry `context.source`.
 

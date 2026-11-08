@@ -528,11 +528,32 @@ describe.skipIf(!hasFfmpeg)('Recreate · the flow through the API and Claude\'s 
     expect(j2!.prompt).toMatch(/background/);
     expect((await est({})).background).toMatchObject({ source: 'generated', usd: 0, reused: true }); // made once
 
+    // Edit refuses at the last moment: the hosted swap has its own price, so it only runs within the confirmed one.
+    const create0 = a.ctx.jobs.create.bind(a.ctx.jobs);
+    Object.defineProperty(a.ctx.replicate, 'configured', { get: () => true, configurable: true });
+    (a.ctx.jobs as any).create = async (u: any, body: any) => {
+      if (body.engine === 'h3') throw Object.assign(new (await import('../src/errors.js')).ApiError(400, 'engine_unavailable', "Edit isn't available right now"));
+      return { id: 'j_hosted', cost: 0.5, request: body };
+    };
+    try {
+      const pc = await owner.req('POST', `/v1/recreate/references/${refId}/slots/s3/fill`, { modelId: model.id });
+      expect([pc.status, pc.body.code]).toEqual([409, 'price_changed']);
+      expect(pc.body.totalUsd).toBeGreaterThan(0);
+      expect(pc.body.estimate.seconds).toBeGreaterThanOrEqual(4); // the hosted swap's minimum
+      const ok = await owner.req('POST', `/v1/recreate/references/${refId}/slots/s3/fill`, { modelId: model.id, maxUsd: pc.body.totalUsd });
+      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+      expect(ok.body.job.request.engine).toBe('replicate');
+    } finally { (a.ctx.jobs as any).create = create0; delete (a.ctx.replicate as any).configured; }
+    // Every segment made is remembered, re-fills and refused ones included, so all of them go with the reference.
+    const rowNow = (await a.ctx.db.select().from((await import('../src/recreate/schema.js')).recreateReferences).where(eq3((await import('../src/recreate/schema.js')).recreateReferences.id, refId)))[0]!;
+    expect(rowNow.fill!.clips!.length).toBeGreaterThanOrEqual(4);
+
     // The segment is the reference's pixels: it goes when the reference does (only the fill part purged here).
     const { recreateReferences } = await import('../src/recreate/schema.js');
     const [row] = await a.ctx.db.select().from(recreateReferences).where(eq3(recreateReferences.id, refId));
-    await (recreateOf(a.ctx) as any).purge({ ...row, storageKey: null, contactSheetKey: null, sourceUrl: null, uploadId: null, fill: { jobs: row!.fill!.jobs } });
+    await (recreateOf(a.ctx) as any).purge({ ...row, storageKey: null, contactSheetKey: null, sourceUrl: null, uploadId: null, fill: { jobs: row!.fill!.jobs, clips: row!.fill!.clips } });
     expect(await a.ctx.storage.head(clip!.storageKey!)).toBeFalsy();
+    for (const c of row!.fill!.clips!) expect(await a.ctx.storage.head(c.key)).toBeFalsy();
     expect(await a.ctx.db.select().from(clips).where(eq3(clips.id, clip!.id))).toEqual([]);
   }, 60_000);
 

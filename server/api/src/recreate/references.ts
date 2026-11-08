@@ -51,12 +51,16 @@ export type FillState = {
    */
   jobs?: Record<string, { jobId: string; estimate?: number; at: number; method?: 'swap' | 'generate'; segment?: { startSec: number; endSec: number }; clipId?: string; clipKey?: string;
     background?: { source: 'location' | 'generated'; locationId?: string } }>;
+  /** Every swap segment clip made for this reference (re-fills replace `jobs` entries); all deleted with it. */
+  clips?: { id: string; key: string }[];
   /** Background plates made for "Use your own setting" (paid once; reused while the setting is the same). */
   plates?: Record<string, { setting: string; image: { asset?: string; url?: string }; at: number }>;
   /** The last assembly: where, which take per slot, which project item came from which recipe element, and the score. */
   applied?: { sessionId: string; revision: number; at: number; slots: Record<string, string>; sources: Record<string, RecipeSource>; match: MatchScore;
     /** Swapped slots and what their pixels already carry from the reference (not applied again). */
-    baked?: Record<string, string[]> };
+    baked?: Record<string, string[]>;
+    /** The options the edit was built with (the owner's choices and the playbook's rules), reused by "Fix this shot". */
+    options?: AssembleOptions };
   /** Gap keys already reported to the learning editor for this reference (each once). */
   gapsReported?: string[];
   /** Exports made from this reference (storage keys), deleted with it. */
@@ -71,6 +75,8 @@ const FillBody = z.object({
   keepBackground: z.boolean().default(true),
   /** Your own setting: one of the studio's locations as the background (else one matching the brief, else a generated one). */
   locationId: z.string().max(80).optional(),
+  /** The price the member confirmed (the estimate's `estimate`): a fill that would cost more is refused with the new price. */
+  maxUsd: z.number().min(0).max(1000).optional(),
 }).strict();
 type FillBody = z.infer<typeof FillBody>;
 type Location = typeof suiteLocations.$inferSelect;
@@ -268,6 +274,7 @@ export class RecreateReferences {
       await this.ctx.storage.putStream(key, fs.createReadStream(file), 'video/mp4', size);
       const [n] = await this.ctx.db.update(recreateReferences).set({ storageKey: key, durationSec: Math.round(info.duration * 1000) / 1000, phase: 'Fetched' })
         .where(eq(recreateReferences.id, r.id)).returning();
+      if (!n) { await this.ctx.storage.delete(key).catch(() => undefined); await this.ctx.storage.delete(infoKey).catch(() => undefined); } // deleted meanwhile
       return n ?? null;
     } catch (e) {
       const err = e instanceof ApiError ? e : linkError('link_blocked', FALLBACK);
@@ -516,9 +523,18 @@ export class RecreateReferences {
     const bg = b.keepBackground ? null : await this.backgroundFor(u, r, recipe, slot, b);
     const bgImage = bg ? await this.backgroundImage(u, r, recipe, slot, bg) : null;
     let last: unknown = null;
-    for (const engine of this.swapEngines(b.keepBackground)) {
+    const engines = this.swapEngines(b.keepBackground);
+    for (const engine of engines) {
       const plan = this.swapPlan(recipe, r, slot, b, engine);
+      // The other engine has its own price (and a longer minimum): never charged unless it fits what was confirmed.
+      const total = Math.round((plan.estimate.estimate + (bg?.usd ?? 0)) * 100) / 100;
+      if (engine !== engines[0] && (b.maxUsd == null || total > b.maxUsd + 0.005)) {
+        const e = new ApiError(409, 'price_changed', `This shot now costs about $${total.toFixed(2)} · confirm the new price to go on`);
+        (e as ApiError & { extra?: unknown }).extra = { estimate: bg ? withBackground(plan.estimate, { ...bg, usd: 0 } as Background) : plan.estimate, totalUsd: total };
+        throw e;
+      }
       const clip = await this.segmentClip(u, r, recipe, slot.id, plan.segment);
+      { const f0 = await this.row(u, r.id); await this.saveFill(f0, { ...(f0.fill ?? {}), clips: [...(f0.fill?.clips ?? []), { id: clip.id, key: clip.key }] }); }
       try {
         const job = await this.ctx.jobs.create(u, { ...plan.request, clipId: clip.id, ...(bgImage ? { backgroundImage: bgImage } : {}) }) as { id: string; cost?: number };
         const fresh = await this.row(u, r.id);
@@ -562,6 +578,7 @@ export class RecreateReferences {
     if (bg.reused) return bg.reused;
     const id = uid('rxbg'), [w, h] = plateSize(recipe.source.aspect);
     const hold = await this.ctx.money.hold(whoOf(u), id, bg.usd, { perJob: false, note: 'Background for your own setting · hold' });
+    let settled = false;
     try {
       const out = await this.ctx.images.generate({ studioId: u.studioId, userId: u.id, purpose: 'recreate_background', refId: r.id,
         req: { prompt: platePrompt(bg.setting), width: w, height: h, count: 1 } });
@@ -569,10 +586,12 @@ export class RecreateReferences {
       if (!image) throw new Error('no image');
       const actual = Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(out.costUsd * this.ctx.config.EDITOR_MARKUP * 10000) / 10000);
       await this.ctx.money.settle(u.studioId, u.id, id, hold, actual, 'Background for your own setting');
+      settled = true;
       const fresh = await this.row(u, r.id);
       await this.saveFill(fresh, { ...(fresh.fill ?? {}), plates: { ...(fresh.fill?.plates ?? {}), [slot.id]: { setting: bg.setting, image, at: Date.now() } } });
       return image;
     } catch (e) {
+      if (settled) throw e; // made and paid for; only saving it failed
       await this.ctx.money.release(u.studioId, u.id, id, hold, 'background not made').catch(() => undefined);
       this.ctx.log?.warn({ err: String((e as Error)?.message ?? e) }, 'recreate background');
       throw new ApiError(502, 'background_failed', 'Couldn’t make the background for your setting · you weren’t charged · try again, or pick one of your locations');
@@ -654,6 +673,7 @@ export class RecreateReferences {
     if (Object.keys(baked).length) opts.baked = baked;
     const out = buildProject(recipe, s.takeId, takes, opts);
     if (!out.project.tracks[0]!.items.length) throw badRequest('slots: give at least one slot a take');
+    const { baked: _b, ...optsKept } = opts;
     const label = `Recreated “${r.name}”`;
     // Which recipe element each item came from: on the op, so the owner's later corrections carry it (workstream 3).
     const sources = sourcesOf(recipe, out.project, r.id, takes);
@@ -666,7 +686,7 @@ export class RecreateReferences {
     const match = matchScore(recipe, out.project, takes, fresh.fill ?? {}, opts);
     const gapsReported = await this.reportGaps(u, r, recipe, fresh.fill?.gapsReported ?? []);
     const bakedView = Object.fromEntries(Object.keys(baked).map(k => [k, [...BAKED_ELEMENTS]]));
-    await this.saveFill(fresh, { ...(fresh.fill ?? {}), applied: { sessionId: s.id, revision: res.revision, at: Date.now(), slots: Object.fromEntries(Object.entries(takes).filter(([, t]) => t).map(([k, t]) => [k, t!.id])), sources, match,
+    await this.saveFill(fresh, { ...(fresh.fill ?? {}), applied: { sessionId: s.id, revision: res.revision, at: Date.now(), slots: Object.fromEntries(Object.entries(takes).filter(([, t]) => t).map(([k, t]) => [k, t!.id])), sources, match, options: optsKept,
       ...(Object.keys(bakedView).length ? { baked: bakedView } : {}) }, gapsReported });
     const borrowed = opts.fallbackLook && start ? ['look'] : [];
     return { sessionId: s.id, revision: res.revision, durationSec: out.durationSec, missing: [...out.missing.filter(x => !waiting.includes(x)), ...waiting], waiting, notes: out.notes, label, match, sources, baked: bakedView,
@@ -733,7 +753,8 @@ export class RecreateReferences {
     } else if (wasBaked) {
       // A swapped shot replaced by an ordinary take: the reference's camera, speed and look come back, as a build would.
       const used = Object.fromEntries(Object.keys(applied.slots).map(k => [k, info]));
-      const built = buildProject(recipe, s.takeId, used, { peaks: true })
+      const pb = await pinnedDirectives(this.ctx, u);
+      const built = buildProject(recipe, s.takeId, used, { ...(applied.options ?? {}), ...pb.directives, peaks: applied.options?.peaks ?? true })
         .project.tracks[0]!.items[recipe.slots.filter(x => applied.slots[x.id]).findIndex(x => x.id === slotId)] as import('../editor/model.js').VideoClip | undefined;
       inSec = built?.inSec ?? 0;
       range = { outSec: (built?.outSec ?? len) - inSec, speed: built?.speed ?? 1, ...(built?.speedCurve ? { curve: built.speedCurve } : {}) };
@@ -821,12 +842,13 @@ export class RecreateReferences {
     const have = await rendersOf(this.ctx).state(key);
     if (have && have.state !== 'failed') return this.exportView(r, s.id, b.sound, have, s.revision);
     const fresh = await this.row(u, id);
-    await this.saveFill(fresh, { ...(fresh.fill ?? {}), exports: [...new Set([...(fresh.fill?.exports ?? []), key])].slice(-20) });
+    await this.saveFill(fresh, { ...(fresh.fill ?? {}), exports: [...new Set([...(fresh.fill?.exports ?? []), key])] });
     const st = rendersOf(this.ctx).start(r.studioId, key, s.revision, s.project as unknown as EditProject, {
       quality: 'export', durationSec: recipe.source.durationSec, ...(b.sound === 'guide' ? { guideKey: r.storageKey! } : { audio: 'none' as const }),
     }, async done => {
       const now = await this.ctx.db.select().from(recreateReferences).where(eq(recreateReferences.id, r.id)).then(x => x[0]);
-      if (now) void this.ctx.hub.emit(now.studioId, v => (v.userId === now.userId || v.role === 'owner' ? { type: 'recreate', export: this.exportView(now, s.id, b.sound, done, s.revision) } : null));
+      if (!now) { await rendersOf(this.ctx).remove(key).catch(() => undefined); return; } // deleted while it rendered
+      void this.ctx.hub.emit(now.studioId, v => (v.userId === now.userId || v.role === 'owner' ? { type: 'recreate', export: this.exportView(now, s.id, b.sound, done, s.revision) } : null));
     });
     return this.exportView(r, s.id, b.sound, st, s.revision);
   }
@@ -909,6 +931,10 @@ export class RecreateReferences {
         await this.ctx.storage.put(sheet, out.contactSheetPng, 'image/png');
       }
       await set({ state: 'ready', progress: 100, phase: 'Done', recipe: out.recipe as Recipe, contactSheetKey: sheet, error: null });
+      // Deleted while it was analysed: what was just written goes too.
+      if (!(await this.ctx.db.select({ id: recreateReferences.id }).from(recreateReferences).where(eq(recreateReferences.id, r.id)))[0]) {
+        for (const k of [this.posesKey(r), sheet]) if (k) await this.ctx.storage.delete(k).catch(() => undefined);
+      }
     } catch (e) {
       await set({ state: 'failed', phase: 'Failed', error: `The analysis didn’t finish: ${(e as Error).message.slice(0, 200)}` });
     }
@@ -943,7 +969,10 @@ export class RecreateReferences {
     if (r.sourceUrl) await st.delete(`rx/${r.studioId}/${r.id}/info.json`).catch(() => undefined);
     for (const k of r.fill?.exports ?? []) await rendersOf(this.ctx).remove(k);
     // The swap segments (G2): the reference's pixels, so they go with it. The swapped takes are the studio's own.
-    for (const j of Object.values(r.fill?.jobs ?? {})) if (j.clipId && j.clipKey) await this.dropClip(j.clipId, j.clipKey);
+    const segs = new Map<string, string>();
+    for (const j of Object.values(r.fill?.jobs ?? {})) if (j.clipId && j.clipKey) segs.set(j.clipId, j.clipKey);
+    for (const c of r.fill?.clips ?? []) segs.set(c.id, c.key);
+    for (const [id, key] of segs) await this.dropClip(id, key);
     if (r.contactSheetKey) await st.delete(r.contactSheetKey).catch(() => undefined);
     await st.delete(this.posesKey(r)).catch(() => undefined);
     if (r.storageKey) {
