@@ -61,7 +61,7 @@ struct RecreateBuildConfirm: View {
             if !paid.isEmpty || !cant.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(paid, id: \.self) { s in
-                        row(s, detail: rs.estimates[s]?.priceLine, price: rs.estimates[s].map { RecreateText.money($0.estimate) }, problem: nil)
+                        row(s, detail: length(s), price: rs.estimates[s].map { RecreateText.money($0.estimate) }, problem: nil)
                     }
                     ForEach(cant, id: \.self) { s in row(s, detail: nil, price: nil, problem: rs.estimateErrors[s]) }
                 }
@@ -97,6 +97,15 @@ struct RecreateBuildConfirm: View {
         return out.joined(separator: " ")
     }
 
+    /// "A 2 s shot, cut to 1.2 s": what is made, and how much of it the edit uses.
+    private func length(_ slotId: String) -> String? {
+        let rs = store.recreate
+        guard let e = rs.estimates[slotId], e.seconds > 0 else { return nil }
+        let made = "A \(Int(e.seconds.rounded())) s shot"
+        guard let slot = rs.slots.first(where: { $0.id == slotId }), slot.length < e.seconds - 0.05 else { return made }
+        return "\(made), cut to \(String(format: "%.1f", slot.length)) s"
+    }
+
     private func row(_ slotId: String, detail: String?, price: String?, problem: String?) -> some View {
         let rs = store.recreate
         let slot = rs.slots.first { $0.id == slotId }
@@ -111,7 +120,7 @@ struct RecreateBuildConfirm: View {
             if let problem {
                 Text(problem).scaled(t.scale.caption, t.roles.caution).fixedSize(horizontal: false, vertical: true)
             } else if let detail, !detail.isEmpty {
-                Text(detail.prefix(1).uppercased() + detail.dropFirst()).scaled(t.scale.caption, t.roles.ink2).monospacedDigit().lineLimit(1)
+                Text(detail).scaled(t.scale.caption, t.roles.ink2).monospacedDigit().lineLimit(1)
             }
         }
         .padding(.vertical, Space.s2)
@@ -165,8 +174,9 @@ struct RecreateTopBar: View {
                         .accessibilityElement(children: .combine)
                         .background(SnapshotFrame(key: "cost"))
                     }
-                    SuiteToolButton(title: rs.estimating ? "Pricing the shots" : "Build the edit", icon: "hammer", accent: true,
-                                    disabled: rs.fill == nil || rs.building || rs.estimating || rs.isGenerating) {
+                    // Disabled (pricing, generating, building), it steps back from the accent so its label stays readable.
+                    let busy = rs.fill == nil || rs.building || rs.estimating || rs.isGenerating
+                    SuiteToolButton(title: rs.estimating ? "Pricing the shots" : "Build the edit", icon: "hammer", accent: !busy, disabled: busy) {
                         Task { await store.requestRecreateBuild() }
                     }
                     .accessibilityLabel("Build the edit")
