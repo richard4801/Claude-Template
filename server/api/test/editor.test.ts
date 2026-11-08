@@ -45,7 +45,7 @@ async function upload(a: A, c: Client, kind: 'clip' | 'image', body: Buffer, con
 describe('shared fixtures', () => {
   it('are what the reference implementation gives today (regenerate with scripts/editor-fixtures.ts) and the app copies are identical', () => {
     const dirs = ['android/core/src/test/resources/editor', 'mac/MuseCore/Tests/MuseCoreTests/Fixtures/editor'].map(d => path.join(repo, d));
-    const before = Object.fromEntries(['presets.json', 'projects.json', 'validation.json', 'functions.json', 'looks.json', 'jsonpatch.json'].map(n => [n, fs.readFileSync(path.join(FIX, n), 'utf8')]));
+    const before = Object.fromEntries(['presets.json', 'projects.json', 'validation.json', 'functions.json', 'looks.json', 'jsonpatch.json', 'ops.json'].map(n => [n, fs.readFileSync(path.join(FIX, n), 'utf8')]));
     for (const d of dirs) for (const [n, body] of Object.entries(before)) expect(fs.readFileSync(path.join(d, n), 'utf8'), `${d}/${n}`).toBe(body);
     execFileSync(process.execPath, ['--import', 'tsx', path.join(here, '../scripts/editor-fixtures.ts')], { cwd: path.join(here, '..'), stdio: 'pipe' });
     for (const [n, body] of Object.entries(before)) expect(fs.readFileSync(path.join(FIX, n), 'utf8'), `${n} changed: commit the regenerated fixtures`).toBe(body);

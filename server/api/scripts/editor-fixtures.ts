@@ -8,7 +8,7 @@ import { CAPTION_STYLES, CAPTION_STYLE_LABELS, FILTERS, HOOKS, TRANSITION_LABELS
 import { suggestCuts } from '../src/editor/cuts.js';
 import { runChain, voiceChain } from '../src/editor/audio.js';
 import { applyPatch, diff } from '../src/editor/jsonpatch.js';
-import { applyOps } from '../src/editor/ops.js';
+import { applyOps, OP_NAMES } from '../src/editor/ops.js';
 import * as K from '../src/editor/look.js';
 import { CUBE_SIZE, LOOK_IDS, grade, packLook } from '../src/editor/lookpack.js';
 
@@ -289,8 +289,33 @@ const patchPairs: { name: string; a: unknown; b: unknown }[] = [
 ];
 const jsonpatch = patchPairs.map(c => { const d = diff(c.a, c.b); const back = applyPatch(c.a, d); if (JSON.stringify(back) !== JSON.stringify(c.b) && c.name !== 'same') throw new Error(`patch ${c.name}`); return { ...c, patch: d, inverse: diff(c.b, c.a) }; });
 
+// Every op Claude can apply (apply_edit_ops), on one project: what the apps must decode, validate and play (2026-11-08 audit).
+const opsBase = projects[8]!.project;
+const opsFor: Record<string, unknown[]> = {
+  trim: [{ op: 'trim', clipId: 'c1', inSec: 1, outSec: 8 }], split: [{ op: 'split', at: 4 }], delete: [{ op: 'split', at: 4 }, { op: 'delete', itemId: 'c2' }],
+  move: [{ op: 'move', itemId: 't2', startSec: 6 }], speed: [{ op: 'speed', clipId: 'c1', curve: 'hero' }],
+  add_text: [{ op: 'add_text', text: 'Hello', startSec: 7, durationSec: 2 }], add_hook: [{ op: 'add_hook', template: 'hook-stop' }],
+  edit_text: [{ op: 'edit_text', itemId: 't1', text: 'New hook', style: { color: '#FFE600' } }],
+  look: [{ op: 'look', itemId: 'all', look: 'film-gold', strength: 0.6, grain: { amount: 0.3 } }], adjust: [{ op: 'adjust', itemId: 'c1', exposure: 0.2, highlights: -0.3 }],
+  transition: [{ op: 'split', at: 4 }, { op: 'transition', clipId: 'all', kind: 'whip', durationSec: 0.3 }],
+  mask: [{ op: 'mask', itemId: 'p1', mask: { shape: 'circle', feather: 0.2 } }], transform: [{ op: 'transform', itemId: 'p1', transform: { x: 0.3 } }],
+  keyframe: [{ op: 'keyframe', itemId: 'p1', prop: 'opacity', t: 1, v: 0.5, ease: 'easeOut' }], remove_keyframe: [{ op: 'remove_keyframe', itemId: 'p1', prop: 'scale', t: 0.5 }],
+  volume: [{ op: 'volume', itemId: 'c1', volume: 0.6, fadeInSec: 0.5 }],
+  duck: [{ op: 'add_music', asset: { library: 'music_x', durationSec: 30 }, startSec: 0 }, { op: 'duck', levelDb: -12, attackSec: 0.2, releaseSec: 0.6 }],
+  voice: [{ op: 'voice', itemId: 'c1', effect: 'radio', enhance: true }], add_music: [{ op: 'add_music', asset: { library: 'music_x', durationSec: 30 }, startSec: 1 }],
+  ratio: [{ op: 'ratio', ratio: '1:1' }], patch: [{ op: 'patch', patch: [{ op: 'replace', path: '/canvas/background', value: '#111111' }] }],
+};
+for (const n of OP_NAMES) if (n !== 'caption_style' && !opsFor[n]?.length) throw new Error(`ops fixture: no case for ${n}`);
+const opsFixture = OP_NAMES.map(name => {
+  // caption_style needs captions: it runs on the first project that has them.
+  const base = name === 'caption_style' ? projects.find(x => x.project.tracks.some(t => t.kind === 'caption' && t.caption))!.project : opsBase;
+  const ops = name === 'caption_style' ? [{ op: 'caption_style', preset: 'karaoke', wordsPerPage: 2 }] : opsFor[name]!;
+  return { name, ops, project: applyOps(base, ops as never).project };
+});
+
 const files: Record<string, unknown> = {
   'jsonpatch.json': jsonpatch,
+  'ops.json': opsFixture,
   'looks.json': looks,
   'presets.json': { filters: FILTERS, captionStyles: CAPTION_STYLES, hooks: HOOKS, captionStyleLabels: CAPTION_STYLE_LABELS, transitionLabels: TRANSITION_LABELS },
   'projects.json': projects.map(x => ({ ...x, expect: expectFor(x.project) })),
