@@ -134,6 +134,13 @@
       "when": 1794135843453,
       "tag": "0018_recreate_links",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794143585608,
+      "tag": "0019_editor_controls",
+      "breakpoints": true
     }
   ]
 }
