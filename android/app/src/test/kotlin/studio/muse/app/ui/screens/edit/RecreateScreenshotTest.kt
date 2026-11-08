@@ -34,11 +34,12 @@ class RecreateScreenshotTest(private val theme: String, private val state: Strin
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}_{1}")
         fun params(): List<Array<Any>> = listOf("a", "b", "c", "d").flatMap { t ->
-            listOf("recipe", "confirm", "generating", "compare", "picker", "recipe_tablet", "confirm_tablet", "generating_tablet", "compare_tablet").map { arrayOf<Any>(t, it) }
+            listOf("recipe", "confirm", "generating", "waiting", "compare", "picker", "recipe_tablet", "confirm_tablet", "generating_tablet", "waiting_tablet", "compare_tablet").map { arrayOf<Any>(t, it) }
         }
     }
 
     @get:Rule val compose = createComposeRule()
+    init { compose.mainClock.autoAdvance = false } // the indeterminate progress animates forever
 
     private fun ui(): RecreateBuildUi = runBlocking {
         val scope = MainScope(); val work = CoroutineScope(Dispatchers.Default)
@@ -54,7 +55,8 @@ class RecreateScreenshotTest(private val theme: String, private val state: Strin
             when (state.removeSuffix("_tablet")) {
                 "confirm" -> { model.requestBuild(); model.ui.value }
                 // Confirmed: the new shots are generating; the edit is built when they're ready.
-                "generating" -> base.copy(buildWhenReady = true, building = true,
+                // Shot 2's job reports 42% (the studio's live jobs); "waiting": its job isn't listed, a calm indeterminate state.
+                "generating", "waiting" -> base.copy(buildWhenReady = true, building = true, jobProgress = if (state.startsWith("generating")) mapOf("job_rx_s2" to 42) else emptyMap(),
                     fill = base.fill!!.copy(slots = base.fill!!.slots.map { if (it.state == "to_generate") it.copy(state = "generating", jobId = "job_rx_${it.slotId}") else it }))
                 "compare" -> {
                     val f = base.fill!!.copy(slots = base.fill!!.slots.map { if (it.state == "to_generate") it.copy(state = "ready", jobId = "job_rx_${it.slotId}") else it })

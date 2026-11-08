@@ -91,6 +91,27 @@ class RecreateBuildTest {
         } finally { scope.cancel(); work.cancel() }
     }
 
+    @Test fun thePlayheadDrivesBothPlayersAndTheSelectedShot() = runBlocking {
+        val scope = MainScope()
+        val work = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default)
+        try {
+            val api = FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0)
+            val ref = ready(api)
+            val model = RecreateBuildModel(api, work, RecreateBuildUi(ref.id, ref.recipe!!, ref.name), modelId = { "m_demo" }, pollMs = 5)
+            val slots = ref.recipe!!.slots
+            model.select(2)
+            assertEquals((slots[2].startSec + slots[2].endSec) / 2, model.ui.value.time, 1e-9)
+            model.advance(1.0); assertEquals((slots[2].startSec + slots[2].endSec) / 2, model.ui.value.time, 1e-9) // paused: no move
+            model.togglePlay(); assertTrue(model.ui.value.playing)
+            model.advance(slots[3].startSec - model.ui.value.time + 0.01)
+            assertEquals(3, model.ui.value.selected) // the selected shot follows the playhead
+            model.advance(100.0); assertEquals(0.0, model.ui.value.time, 1e-9) // loops at the end
+            model.step(3); assertFalse(model.ui.value.playing); assertEquals(0.1, model.ui.value.time, 1e-9)
+            model.setJobProgress(mapOf("job_rx_s2" to 42))
+            assertNull(model.ui.value.progress("s2")) // not being made: no job yet
+        } finally { scope.cancel(); work.cancel() }
+    }
+
     @Test fun withoutAModelNoShotIsOfferedToSpendOn() = runBlocking {
         val scope = MainScope()
         val work = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default)
