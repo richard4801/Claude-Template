@@ -2,6 +2,7 @@
 // big, what colour, and when it comes in and goes out, from text-like regions tracked over time. The words need OCR
 // (pending the owner's/coordinator's choice); until then `words` is null and Claude reads them off the contact sheet.
 import { spawn } from 'node:child_process';
+import { DECODE_ARGS } from './frames.js';
 
 export type TextBox = { x: number; y: number; w: number; h: number };
 export type TextItem = { id: string; startSec: number; endSec: number; box: TextBox; words: string | null; sizeFrac: number; color: string;
@@ -82,7 +83,7 @@ export function trackText(frames: FrameBoxes[], fps = FPS): TextItem[] {
 export function findText(ffmpeg: string, input: string, height: number, maxSec = 600): Promise<TextItem[]> {
   return new Promise((resolve, reject) => {
     const h = Math.max(2, Math.round(height / 2) * 2), frame = W * h;
-    const p = spawn(ffmpeg, ['-v', 'error', '-i', input, '-t', String(maxSec), '-an', '-vf', `fps=${FPS},scale=${W}:${h}:flags=area,format=gray`, '-f', 'rawvideo', 'pipe:1']);
+    const p = spawn(ffmpeg, ['-v', 'error', ...DECODE_ARGS, '-i', input, '-t', String(maxSec), '-an', '-vf', `fps=${FPS},scale=${W}:${h}:flags=area,format=gray`, '-f', 'rawvideo', 'pipe:1']);
     const frames: FrameBoxes[] = [];
     let buf: Buffer = Buffer.alloc(0), err = '';
     p.stdout.on('data', (c: Buffer) => {

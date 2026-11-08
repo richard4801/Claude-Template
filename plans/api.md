@@ -1425,6 +1425,16 @@ For the screens (`plans/learning-editor-ui.md`, 2026-11-08):
 - `playbook_add` → `learningOf(ctx).addRule(user, {text, area?, evidence?}, 'claude')`.
 - Optionally a gap tool → `addGap(user, {key, kind, what, note})`.
 
+### Recreate analysis on a small server: memory, crashes, Retry (workstream 1, 2026-11-08)
+Migration **0024** (`recreate_references.analyze_attempts`). Tests `test/recreate-memory.test.ts`.
+
+Prod's first real run was killed mid-analysis (512 MB box). The text-motion step decoded the full-size video about 13 times at once, peaking at 1.6 GB for a 60 s 1080×1920 clip. Now:
+- **One decoder at a time.** Every analysis decode uses `-threads 2 -filter_threads 1`, and frames are scaled inside ffmpeg; Node only gets small frames. Text motion reads each in/out window through one pipe. Pose tracks decode each shot to a temp file at a 256 px long edge, in 24-frame jobs, so ffmpeg and the pose child never run together. The stored video is copied to a local temp file, from S3 too. A take's pose read is skipped while an analysis runs.
+- **Optional steps need free memory** (`OPTIONAL_MIN_FREE_MB` = 150, from the cgroup limit minus use, page cache excluded): words (OCR), text motion, poses, pose tracks. Short of memory, a step is skipped. The recipe says so in `analyzer.skipped[{step, why: "memory"|"lite"}]` and as a gap (`text:motion`, `pose`).
+- Measured on a 60 s 1080×1920 30 fps clip: peak process-tree RSS went from 1667 MB to 328 MB, and the run from 223 s to 134 s.
+- **After a crash.** At startup, references still `analyzing` resume. One that had started (`analyze_attempts` ≥ 1) runs again **lite**, required steps only (`analyzer.lite: true`). After a second stop it fails with `errorCode: "analysis_crashed"`.
+- **`POST /v1/recreate/references/{id}/retry`** reruns any failed reference whose video or link is still there (409 `not_failed` or `video_gone` otherwise). After `analysis_crashed` the rerun is lite. Apps: show Retry on a failed reference.
+
 ### Recreate this edit · slots and assembly (phase 3)
 Code: `src/recreate/slots.ts` (briefs, matcher, fill request), `assemble.ts` (recipe → edit project), `mcpTools.ts`. Tests: `test/recreate-slots.test.ts`.
 

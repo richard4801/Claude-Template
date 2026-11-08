@@ -164,6 +164,9 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     // Recreate (workstream 1): expired references lose their video on a timer, not only when someone lists them.
     const sweep = () => { void recreateOf(ctx).sweep(Date.now(), true).catch(e => ctx.log?.warn({ err: String(e) }, 'recreate sweep')); };
     const first = setTimeout(sweep, 60_000); first.unref?.(); timers.add(first);
+    // Recreate (workstream 1): analyses a crash or deploy left "analyzing" resume (lite after a crash) or fail with Retry.
+    const resume = setTimeout(() => { void recreateOf(ctx).startup().catch(e => ctx.log?.warn({ err: String(e) }, 'recreate resume')); }, 2_000);
+    resume.unref?.(); timers.add(resume);
     recreateSweep = setInterval(sweep, 3_600_000);
     recreateSweep.unref?.();
   }
