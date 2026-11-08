@@ -63,7 +63,9 @@ public enum ChatLeakFilter {
     public static func errorWords(_ raw: String?) -> String {
         let r = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let l = r.lowercased()
-        if r.isEmpty { return "Claude stopped before finishing. Try again." }
+        if r.isEmpty { return "Claude couldn't finish this reply. Try again." }
+        // The server's silent-turn timeout (same check as Android), before the owner's own Stop.
+        if l.contains("stopped answering") { return "Claude on this Mac stopped answering. Try again." }
         if l.contains("stopped") || l.contains("interrupt") || l.contains("cancel") || l.contains("aborted") { return "Stopped. Send a message to carry on." }
         if l.contains("isn't ready") || l.contains("not installed") || l.contains("enoent") || l.contains("command not found") {
             return "Claude Code isn't ready on this Mac. Open Settings to set it up, then try again."
@@ -83,7 +85,7 @@ public enum ChatLeakFilter {
         let cleaned = tidy(scrub(stripLines(stripTaggedBlocks(r), dropContext: true)))
         let technical = cleaned.isEmpty || cleaned.count > 160 || looksLikeJSON(cleaned) || !MemberText.isSafe(cleaned)
             || cleaned.range(of: #"(?i)\b(error|exception|errno|exit code|status \d{3}|http \d{3}|traceback|panic|fatal|undefined|null|nil)\b"#, options: .regularExpression) != nil
-        if technical { return "Claude stopped before finishing. Try again." }
+        if technical { return "Claude couldn't finish this reply. Try again." }
         return cleaned.hasSuffix(".") ? cleaned : cleaned + "."
     }
 

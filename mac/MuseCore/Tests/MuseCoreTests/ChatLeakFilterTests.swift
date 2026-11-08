@@ -88,12 +88,13 @@ final class ChatLeakFilterTests: XCTestCase {
     }
 
     func testErrorsInPlainWords() {
-        XCTAssertEqual(ChatLeakFilter.errorWords(nil), "Claude stopped before finishing. Try again.")
+        XCTAssertEqual(ChatLeakFilter.errorWords(nil), "Claude couldn't finish this reply. Try again.")
         XCTAssertEqual(ChatLeakFilter.errorWords("Error: 429 rate_limit_error"), "Your Claude plan has reached its limit for now. Try again in a little while.")
         XCTAssertEqual(ChatLeakFilter.errorWords("NSURLErrorDomain -1009"), "Couldn't reach the server. Check your connection, then try again.")
         XCTAssertEqual(ChatLeakFilter.errorWords("Claude Code isn't ready on this Mac"), "Claude Code isn't ready on this Mac. Open Settings to set it up, then try again.")
         XCTAssertEqual(ChatLeakFilter.errorWords("Stopped by the owner"), "Stopped. Send a message to carry on.")
-        XCTAssertEqual(ChatLeakFilter.errorWords("TypeError: x is undefined\n    at run (/app/a.js:1:2)"), "Claude stopped before finishing. Try again.")
+        XCTAssertEqual(ChatLeakFilter.errorWords("Your Mac stopped answering"), "Claude on this Mac stopped answering. Try again.")
+        XCTAssertEqual(ChatLeakFilter.errorWords("TypeError: x is undefined\n    at run (/app/a.js:1:2)"), "Claude couldn't finish this reply. Try again.")
         XCTAssertEqual(ChatLeakFilter.errorWords("The take is still rendering"), "The take is still rendering.")
         for raw in ["exit code 1", "{\"error\":\"boom\"}", "spawn /usr/local/bin/claude ENOENT", "The GPU disconnected"] {
             let w = ChatLeakFilter.errorWords(raw)

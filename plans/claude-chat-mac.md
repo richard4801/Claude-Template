@@ -59,7 +59,7 @@ The shared parts are in `mac/Muse/Views/Claude/`: `ChatTranscriptView` (rows, st
    - **Paths:** shown as their file name, or "a file on this Mac" when the name is an id. Paths inside a code block are kept.
    - **MCP tool names:** turned into words.
    - **Your bubbles:** without the suggestion instructions or the image list.
-   - **Errors:** in plain words with what to do: limit reached, signed out, offline, timed out, stopped, not set up. Anything technical becomes "Claude stopped before finishing. Try again."
+   - **Errors:** in plain words with what to do: limit reached, signed out, offline, timed out, stopped, not set up. A turn the server timed out reads "Claude on this Mac stopped answering. Try again." Anything technical becomes "Claude couldn't finish this reply. Try again." (the same sentences as Android).
    - **Members:** never see provider, model or GPU names. The chat is owner-only today, but the rule is in place for when that changes.
    - **Mode line:** says "On your Claude plan"; the model name is only in its tooltip.
 4. **Composer** (`ChatComposer.swift`):
