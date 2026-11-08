@@ -792,7 +792,13 @@ extension AppStore {
 
     // MARK: Storyboard
 
-    func boardRequests() -> [ShotRequest] { suite.board.toGenerate.map { suite.board.request(for: $0) } }
+    func boardRequests() -> [ShotRequest] { suite.board.toGenerate.map { boardRequest($0) } }
+    /// A storyboard shot's request with the owner's storyboard model (WS6).
+    func boardRequest(_ s: StoryShot) -> ShotRequest {
+        var r = suite.board.request(for: s)
+        applyEnginePick(&r, .storyboard)
+        return r
+    }
 
     func estimateBoard() async {
         guard suite.enabled, suite.catalog != nil else { return }
@@ -822,7 +828,7 @@ extension AppStore {
         perform { [self] in
             defer { suite.generating = false }
             for s in list {
-                let j = try await api.suiteCreateShot(suite.board.request(for: s))
+                let j = try await api.suiteCreateShot(boardRequest(s))
                 upsert(j)
                 if let i = suite.board.shots.firstIndex(where: { $0.id == s.id }) { suite.board.shots[i].jobId = j.id }
             }
