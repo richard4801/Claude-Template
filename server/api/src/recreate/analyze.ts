@@ -9,9 +9,10 @@ import { contactSheet, grabFrame, gradeOf, sheetTiles, type GradeInfo } from './
 import { cameraOf, classifyCut, findGradual, motionTracker, peaksIn, shotsOf, speedOf, transitionFrames, type CameraMotion, type Speed, type Transition } from './signals.js';
 import { findText, type TextItem } from './text.js';
 import { readWords } from './ocr.js';
+import { readPoses, type PoseRun } from './pose.js';
 
 export const RECIPE_SCHEMA = 'muse.recipe/1';
-export const ANALYZER_VERSION = '1.0.0';
+export const ANALYZER_VERSION = '1.1.0'; // 1.1: words (OCR) and poses
 
 export type Slot = {
   id: string; index: number; startSec: number; endSec: number; durationSec: number; keyframeSec: number; confidence: number;
@@ -20,13 +21,14 @@ export type Slot = {
   /** The Suite rig that recreates it (moves from the camera motion; Claude's brief adds framing and angle). */
   rig: Rig | null;
   camera: CameraMotion; speed: Speed; peaks: { t: number; strength: number }[];
-  /** Body keypoints only (never pixels). "pending" until the pose engine is approved. */
+  /** Body keypoints only (never pixels), 0–1 in the frame: MoveNet's 17 points at the keyframe. "none": no person found;
+   * "pending": not read (memory was tight, past the first 20 slots, or the pose engine is off). */
   pose: { status: 'pending' | 'done' | 'none'; frameSec?: number; keypoints?: { name: string; x: number; y: number; score: number }[] };
 };
 export type RecipeTransition = Transition & { from: string; to: string };
 export type Gap = { key: string; kind: 'transition' | 'effect' | 'text' | 'font' | 'motion' | 'other'; what: string; atSec?: number; note: string };
 export type Recipe = {
-  schema: typeof RECIPE_SCHEMA; analyzer: { version: string; tookMs: number };
+  schema: typeof RECIPE_SCHEMA; analyzer: { version: string; tookMs: number; pose?: { frames: number; ms: number; peakRssMb: number } | { skipped: string; peakRssMb?: number } };
   /** Where it came from: a reference video (this analysis) or one of the studio's own edits (workstream 3's converter). */
   origin: 'reference' | 'edit'; referenceId?: string; takeId?: string; versionId?: string;
   /** Claude's one-line read of the contact sheet, and free tags ("street", "dance", "outfit-transition"). */
@@ -66,7 +68,7 @@ export type AnalyzeHooks = { progress?: (f: number, phase: string) => void | Pro
  * The recipe of the video at `input` (a local path or URL). Returns the recipe plus the contact sheet PNG for the
  * caller to store (its URL goes into `recipe.contactSheet`).
  */
-export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; tesseract?: string }, input: string, o: AnalyzeHooks = {}): Promise<{ recipe: Recipe; contactSheetPng: Buffer | null }> {
+export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; tesseract?: string; pose?: boolean | { model?: string; minFreeMb?: number } }, input: string, o: AnalyzeHooks = {}): Promise<{ recipe: Recipe; contactSheetPng: Buffer | null }> {
   const t0 = Date.now(), maxSec = o.maxSec ?? 61;
   const info = await probe(cfg.ffprobe, input);
   if (!info.width || !info.height) throw new Error('no video stream');
@@ -100,6 +102,12 @@ export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; t
   const got = frames.filter((f): f is NonNullable<typeof f> => !!f);
   const grade = gradeOf(got);
 
+  let poseRun: PoseRun | null = null;
+  if (cfg.pose) {
+    await o.progress?.(0.85, 'Reading the poses');
+    poseRun = await readPoses({ ffmpeg: cfg.ffmpeg, ...(typeof cfg.pose === 'object' ? cfg.pose : {}) }, input, keyTimes, info).catch(e => ({ skipped: 'failed' as const, detail: String(e?.message ?? e) }));
+  }
+
   // Shots → slots; boundaries → transitions.
   const slots: Slot[] = shots.map((s, i) => {
     const cam0 = cameraOf(s, g, m.fps, skip);
@@ -108,7 +116,7 @@ export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; t
     return {
       id: `s${i + 1}`, index: i, startSec: s.startSec, endSec: s.endSec, durationSec: r3(s.endSec - s.startSec), keyframeSec: keyTimes[i]!,
       confidence: s.endSec - s.startSec < 0.15 ? 0.5 : 0.9, brief: null, rig: { moves: moveFor(camera) }, camera, speed: { ...sp, curve: thin(sp.curve, MAX_CURVE_POINTS) }, peaks: peaksIn(peaks, s),
-      pose: { status: 'pending' },
+      pose: (poseRun && 'poses' in poseRun ? poseRun.poses[i] : undefined) ?? { status: 'pending' },
     };
   });
   const transitions: RecipeTransition[] = [];
@@ -133,13 +141,15 @@ export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; t
   const gaps: Gap[] = [
     ...transitions.filter(t => t.kind === 'unknown').map((t): Gap => ({ key: `transition:unknown@${t.atSec.toFixed(2)}`, kind: 'transition', what: 'A transition MUSE couldn’t name', atSec: t.atSec, note: 'Not supported yet' })),
     ...(text.some(x => !x.words) ? [{ key: 'text:words', kind: 'text' as const, what: 'On-screen words', note: text.every(x => !x.words) ? 'Not read: Claude reads them from the contact sheet' : 'Some weren’t read: Claude reads them from the contact sheet' }] : []),
-    ...(slots.some(s => s.pose.status === 'pending') ? [{ key: 'pose', kind: 'motion' as const, what: 'Body poses', note: 'Not read yet' }] : []),
+    ...(slots.some(s => s.pose.status === 'pending') ? [{ key: 'pose', kind: 'motion' as const, what: 'Body poses',
+      note: !poseRun ? 'Not read' : 'skipped' in poseRun ? (poseRun.skipped === 'memory' ? 'Not read: the server was short of memory' : 'Not read') : 'Read for the first 20 shots only' }] : []),
   ];
 
   const png = got.length ? await contactSheet(got, got.map(f => { const i = keyTimes.indexOf(f.t); const s = slots[i]!; return `${i + 1} · ${s.startSec.toFixed(1)}–${s.endSec.toFixed(1)} s`; })) : null;
   await o.progress?.(0.95, 'Writing the recipe');
   const recipe: Recipe = {
-    schema: RECIPE_SCHEMA, analyzer: { version: ANALYZER_VERSION, tookMs: Date.now() - t0 }, origin: 'reference',
+    schema: RECIPE_SCHEMA, analyzer: { version: ANALYZER_VERSION, tookMs: Date.now() - t0,
+      ...(poseRun ? { pose: 'poses' in poseRun ? { frames: poseRun.poses.length, ms: poseRun.ms, peakRssMb: poseRun.peakRssMb } : { skipped: poseRun.skipped, ...(poseRun.peakRssMb ? { peakRssMb: poseRun.peakRssMb } : {}) } } : {}) }, origin: 'reference',
     source: { durationSec, width: info.width, height: info.height, fps: r3(info.fps || m.fps), aspect: aspectName(info.width, info.height), hasAudio: !!info.audioCodec },
     sound,
     pacing: { shots: slots.length, avgShotSec: r3(durationSec / Math.max(1, slots.length)), cutsPerMin: r3((slots.length - 1) / Math.max(durationSec, 1) * 60), energy: energyCurve(m) },
