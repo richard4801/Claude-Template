@@ -33,6 +33,11 @@ extension FakeMuseAPI {
         return out
     }
 
+    /// Takes the app made up for a check (the Mac's Edit check), so the editor jobs on them find their source.
+    public func adoptTakes(_ ts: [Take]) {
+        for t in ts where !takes.contains(where: { $0.id == t.id }) { takes.append(t) }
+    }
+
     /// Sets the fake's guardrails (see `editorPriceUsd`): the Mac's Edit check tries the confirm and refusal states with them.
     public func setEditorGuardrails(priceUsd: Double = 0, paidOff: Bool = false, capHit: Bool = false) {
         editorPriceUsd = priceUsd; editorPaidOff = paidOff; editorCapHit = capHit

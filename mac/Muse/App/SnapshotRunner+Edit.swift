@@ -67,6 +67,8 @@ extension SnapshotRunner {
         }
         store.takes.removeAll { $0.id.hasPrefix("rx_") }
         store.takes.insert(contentsOf: made, at: 0)
+        // The demo API must know them too, or every AI helper on them fails with "Take not found" (found 2026-11-08).
+        await (store.api as? FakeMuseAPI)?.adoptTakes(made)
 
         func step(_ name: String, wait: Double, _ show: @MainActor () -> Void) async {
             note("START \(name)")
@@ -190,7 +192,7 @@ extension SnapshotRunner {
         guard s.isReady else { note("FAIL paid_helpers: the edit didn't open"); return }
         await fake.setEditorGuardrails(priceUsd: 0.05)
         await s.autoCaptions()
-        guard let ask = s.paidAsk else { note("FAIL paid_helpers: a priced helper started without asking"); await fake.setEditorGuardrails(); return }
+        guard let ask = s.paidAsk else { note("FAIL paid_helpers: a priced helper started without asking (last error: \(s.lastError ?? "none"), job: \(s.jobs[.captions]?.state ?? "none"))"); await fake.setEditorGuardrails(); return }
         if ask.title != "Auto-captions" || !ask.price.contains("0.05") { note("FAIL paid_helpers: asked \(ask.title) · \(ask.price)") }
         s.cancelPaid()
         if s.paidAsk != nil || s.jobs[.captions] != nil { note("FAIL paid_helpers: Cancel started the helper") }
