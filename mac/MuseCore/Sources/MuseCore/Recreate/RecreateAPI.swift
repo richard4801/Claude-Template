@@ -144,7 +144,10 @@ public final class FakeRecreateAPI: RecreateAPI, @unchecked Sendable {
         return try JSONDecoder().decode(RecreateFill.self, from: JSONSerialization.data(withJSONObject: json))
     }
     public func apply(_ id: String, _ req: RecreateApplyRequest) async throws -> RecreateApplyResult {
-        let match: [String: Any] = ["overall": 0.86, "cuts": 0.97, "text": 0.9, "ramps": 0.78, "grade": 0.84, "shots": 0.8]
+        let slots = (try? await reference(id))?.recipe?.slots.map(\.id) ?? []
+        let scores = [0.93, 0.81, 0.84]
+        let perSlot: [[String: Any]] = slots.enumerated().map { i, s in ["slotId": s, "score": scores[i % scores.count]] }
+        let match: [String: Any] = ["overall": 0.86, "cuts": 0.97, "text": 0.9, "ramps": 0.78, "grade": 0.84, "shots": 0.8, "perSlot": perSlot]
         let none: [String] = []
         let json: [String: Any] = ["sessionId": req.sessionId, "revision": (req.baseRevision ?? 0) + 1, "label": "Recreated", "missing": none, "waiting": none, "match": match]
         return try JSONDecoder().decode(RecreateApplyResult.self, from: JSONSerialization.data(withJSONObject: json))

@@ -108,4 +108,40 @@ final class RecreateTests: XCTestCase {
         XCTAssertThrowsError(try RecreateIds.check("../v1/admin"))
         XCTAssertThrowsError(try RecreateIds.check("cs_123"))
     }
+    /// Owner note 1: the Look swatches are never garish. The fixture's palette has pure green and yellow.
+    func testLookSwatchesAreSoftened() throws {
+        let raw = try XCTUnwrap(try fixture().recipe?.grade?.swatches)
+        XCTAssertTrue(raw.contains { RecreateSwatches.saturation($0) > 0.9 }, "the fixture has a garish colour to soften")
+        let shown = RecreateSwatches.soften(raw)
+        XCTAssertTrue((3...5).contains(shown.count), "\(shown)")
+        let lum = shown.map(RecreateSwatches.luminance)
+        XCTAssertEqual(lum, lum.sorted(), "ordered by tone, dark to light")
+        for h in shown {
+            XCTAssertLessThanOrEqual(RecreateSwatches.saturation(h), RecreateSwatches.maxSaturation, h)
+            let v = try XCTUnwrap(RecreateSwatches.rgb(h).map { RecreateSwatches.toHSB($0).v })
+            XCTAssertGreaterThanOrEqual(v, RecreateSwatches.brightness.lowerBound - 0.01, h)
+            XCTAssertLessThanOrEqual(v, RecreateSwatches.brightness.upperBound + 0.01, h)
+        }
+        // Hue is kept: the pure green stays a green.
+        XCTAssertTrue(shown.contains { h in RecreateSwatches.rgb(h).map { $0.g > $0.r && $0.g > $0.b } ?? false })
+        // Short and long palettes still give 3–5; nothing readable gives none.
+        XCTAssertEqual(RecreateSwatches.soften(["#00FF00"]).count, 3)
+        XCTAssertEqual(RecreateSwatches.soften((0..<8).map { String(format: "#%02X%02X%02X", $0 * 30, 255 - $0 * 30, 128) }).count, 5)
+        XCTAssertTrue(RecreateSwatches.soften(["nope"]).isEmpty)
+    }
+
+    /// Owner note 2: the total before Build comes from the fill.
+    func testMakingLineComesFromTheFill() async throws {
+        let api = FakeRecreateAPI()
+        let list = try await api.listReferences()
+        let ref = try XCTUnwrap(list.first)
+        let fill = try await api.fill(ref.id)
+        XCTAssertEqual(RecreateText.makingLine(fill), "1 from your takes, 2 to generate · $1.28 in all. You approve before anything is made.")
+        XCTAssertEqual(RecreateText.brief(ref.recipe?.slots[1].brief), "Close-up · eye level · flips her hair")
+        XCTAssertEqual(RecreateText.analysisStep(phase: "Reading the text", state: "analyzing"), 2)
+        XCTAssertEqual(RecreateText.analysisStep(phase: "Waiting", state: "analyzing"), -1)
+        XCTAssertEqual(RecreateText.analysisStep(phase: "Done", state: "ready"), RecreateText.analysisSteps.count)
+        let applied = try await api.apply(ref.id, RecreateApplyRequest(sessionId: "es_1", slots: [:]))
+        XCTAssertEqual(applied.match?.perSlot?.count, 3)
+    }
 }
