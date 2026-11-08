@@ -6,7 +6,7 @@ import { energyCurve, findCuts, findPeaks, measureMotion, type Cut } from '../ed
 import { probe } from '../replicate/media.js';
 import type { Rig } from '../suite/drafts.js';
 import { contactSheet, grabFrame, gradeOf, sheetTiles, type GradeInfo } from './frames.js';
-import { cameraOf, classifyCut, findGradual, motionTracker, peaksIn, shotsOf, speedOf, transitionFrames, type CameraMotion, type Speed, type Transition } from './signals.js';
+import { cameraOf, classifyCut, findGlitches, findGradual, motionTracker, peaksIn, shotsOf, speedOf, transitionFrames, type CameraMotion, type Speed, type Transition } from './signals.js';
 import { findText, type TextItem } from './text.js';
 import { readWords } from './ocr.js';
 import { textMotions } from './textMotion.js';
@@ -77,11 +77,16 @@ export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; t
   const tracker = motionTracker();
   const m = await measureMotion(cfg.ffmpeg, cfg.ffprobe, input, { maxSec, onFrame: tracker.hook });
   const g = tracker.g;
-  const cuts = findCuts(m);
-  const gradual = findGradual(m, cuts, g);
+  // Glitch bursts first (G6): the cut finder may take a burst's edge frames for cuts, which then belong to the glitch.
+  const glitches = findGlitches(m);
+  const inGlitch = (t: number) => glitches.some(x => t * m.fps >= x.startFrame - 1 && t * m.fps <= x.endFrame + 1);
+  const cuts = findCuts(m).filter(c => !inGlitch(c.t));
+  const gradual = [...findGradual(m, cuts, g), ...glitches.filter(x => !x.inShot)];
   const shots = shotsOf(m, cuts, gradual);
-  const skip = transitionFrames(m, cuts, gradual);
-  const peaks = findPeaks(m, { cuts });
+  const skip = transitionFrames(m, cuts, [...gradual, ...glitches.filter(x => x.inShot)]);
+  // A glitch's flicker isn't action: its frames are kept out of the peaks like a cut's.
+  const glitchFrames = glitches.flatMap(x => Array.from({ length: x.endFrame - x.startFrame + 1 }, (_, i) => ({ t: (x.startFrame + i) / m.fps, strength: 1 })));
+  const peaks = findPeaks(m, { cuts: [...cuts, ...glitchFrames] });
   const durationSec = r3(Math.min(info.duration || m.energy.length / m.fps, maxSec));
 
   await o.progress?.(0.45, 'Listening for the beat');
@@ -127,7 +132,7 @@ export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; t
     const at = slots[i]!.startSec;
     const gr = gradual.find(x => Math.abs(x.atSec - at) < 2 / m.fps);
     const cut = cuts.filter(c => !c.flash).find(c => Math.abs(c.t - at) < 1.5 / m.fps) as Cut | undefined;
-    const t: Transition = gr ? { atSec: gr.atSec, kind: gr.kind, durationSec: r3((gr.endFrame - gr.startFrame) / m.fps), confidence: 0.7 }
+    const t: Transition = gr ? { atSec: gr.atSec, kind: gr.kind, durationSec: r3((gr.endFrame - gr.startFrame) / m.fps), confidence: gr.kind === 'glitch' ? 0.6 : 0.7 }
       : cut ? classifyCut(cut, m, g, cuts) : { atSec: at, kind: 'unknown', durationSec: 0, confidence: 0.3 };
     transitions.push({ ...t, from: slots[i - 1]!.id, to: slots[i]!.id });
   }
@@ -137,6 +142,11 @@ export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; t
       const s = slots.find(x => c.t >= x.startSec && c.t < x.endSec);
       if (s) transitions.push({ atSec: c.t, kind: 'flash', durationSec: r3(2 / m.fps), confidence: 0.8, from: s.id, to: s.id });
     }
+  }
+  // So is a glitch that comes back to the same picture.
+  for (const x of glitches.filter(y => y.inShot)) {
+    const s = slots.find(y => x.atSec >= y.startSec && x.atSec < y.endSec);
+    if (s) transitions.push({ atSec: x.atSec, kind: 'glitch', durationSec: r3((x.endFrame - x.startFrame) / m.fps), confidence: 0.55, from: s.id, to: s.id });
   }
   transitions.sort((a, b) => a.atSec - b.atSec);
 
