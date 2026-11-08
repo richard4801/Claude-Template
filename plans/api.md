@@ -1203,9 +1203,15 @@ How each part is found:
 - **Speed:** from how much the picture changes per frame against the slot's median. This is a proxy for optical flow, so `confidence` is about 0.55.
 - **Beats:** `detectBeats` on the audio. **Action peaks:** `find_action_peaks`'s detector.
 - **Text:** caption-like regions (bands of sharp edges in near-white or near-black strokes), tracked at 6 fps for their box, size, colour and in/out times.
-  - `words` stays `null` until OCR is approved; Claude reads the words from the contact sheet. This is logged in `gaps`.
+  - `words`: tesseract (English, in the API image) reads each item once, at its middle, from a frame up to 720 px wide: the box is cropped, scaled and cleaned up (the caption's fill kept as black on white), and up to three variants are tried until one reads with confidence ≥ 85. Words under 55 stay `null`, as do items past the first 20 and every item when `TESSERACT_PATH` is empty or tesseract is missing. Claude reads what is left from the contact sheet; the `text:words` gap says so.
 - **Grade:** k-means of the keyframes gives 5 swatches. The Suite's `swatchGrade` turns them into the look pack's `Grade` (the palette→LUT path), and `look` is the nearest existing palette.
-- **Pose:** `status: "pending"` until the pose engine is approved.
+- **Pose:** MoveNet SinglePose Lightning (`assets/pose/`, Apache-2.0) gives 17 body keypoints at each slot's keyframe, 0–1 in the frame; points only, never pixels.
+  - `status: "done"` when the mean score is ≥ 0.25, `"none"` when no person is found, and `"pending"` when the pose wasn't read.
+  - It runs in a child process, one job at a time, and the model is loaded only for that job. At most 20 keyframes per reference.
+  - The child's peak RSS is about 125–160 MB. It is logged ("recreate pose") and recorded in `analyzer.pose {frames, ms, peakRssMb}`.
+  - When the container has less than `RECREATE_POSE_MIN_FREE_MB` (200) free, poses are skipped: `analyzer.pose {skipped: "memory"}`, the slots stay `pending`, and the `pose` gap says why.
+  - `RECREATE_POSE=false` turns poses off.
+  - The API image carries onnxruntime-node (CPU, this platform only, about 47 MB) and the 9.4 MB model.
 
 ### Recreate this edit · slots and assembly (phase 3)
 Code: `src/recreate/slots.ts` (briefs, matcher, fill request), `assemble.ts` (recipe → edit project), `mcpTools.ts`. Tests: `test/recreate-slots.test.ts`.
@@ -1234,7 +1240,7 @@ It suggests one take per slot, best first, using each take once. Slots where not
 - whole seconds, at least the tier's minimum, because the clip is cut back to the slot;
 - `draft: {tool: "shot", recreate: {slotId}}`.
 
-Pose guidance joins once the pose engine is approved.
+Pose guidance (the slot's keypoints) joins the fill request once the Suite's shot tool takes a pose.
 
 **Fill state** (`GET …/fill`; `match` keeps its last result, `fill` its jobs):
 ```

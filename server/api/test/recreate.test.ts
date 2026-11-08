@@ -10,6 +10,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { recreateReferences, uploads } from '../src/db/schema.js';
 import { analyzeReference, aspectName, MAX_CURVE_POINTS, moveFor, RECIPE_SCHEMA, thin } from '../src/recreate/analyze.js';
 import { MAX_TEXT_ITEMS, trackText } from '../src/recreate/text.js';
+import { hasTesseract, parseTsv, variantsFor } from '../src/recreate/ocr.js';
+import { execFileSync } from 'node:child_process';
+const TESSERACT = (() => { try { execFileSync('tesseract', ['--version']); return true; } catch { return false; } })();
 import { paletteDistance, swatchesOf } from '../src/recreate/frames.js';
 import { recreateOf } from '../src/recreate/references.js';
 import { putObject } from '../src/storage/objects.js';
@@ -30,6 +33,21 @@ describe('Recipe helpers (unit)', () => {
     expect(paletteDistance(['#000000'], ['#FFFFFF'])).toBe(1);
     const red = { t: 0, width: 2, height: 1, rgb: new Uint8Array([255, 0, 0, 250, 5, 5]) };
     expect(swatchesOf([red], 2)).toHaveLength(2);
+  });
+});
+
+describe('OCR helpers (unit)', () => {
+  it('reads tesseract TSV: words joined, stray marks dropped, mean confidence; nothing = null', () => {
+    const row = (conf: number, text: string) => ['5', '1', '1', '1', '1', '1', '0', '0', '10', '10', String(conf), text].join('\t');
+    const tsv = ['level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext', ['4', '1', '1', '1', '1', '0', '0', '0', '1', '1', '-1', ''].join('\t'),
+      row(90, 'HOT'), row(80, 'GIRL'), row(30, '|'), row(70, 'SUMMER!')].join('\n');
+    expect(parseTsv(tsv)).toEqual({ words: 'HOT GIRL SUMMER!', conf: 80 });
+    expect(parseTsv('level\n')).toBeNull();
+    expect(variantsFor('#FFFFFF')[0]).toEqual({ fill: 'light', cut: 235 });
+    expect(variantsFor('#000000')[0]).toEqual({ fill: 'dark', cut: 25 });
+  });
+  it('a missing tesseract is noticed (the words then stay null)', async () => {
+    expect(await hasTesseract('/nonexistent/tesseract')).toBe(false);
   });
 });
 
@@ -84,7 +102,7 @@ describe.skipIf(!hasFfmpeg)('Recreate this edit · the analysis (synthetic refer
 
     if (FONT) {
       expect(r.text).toHaveLength(1);
-      expect(r.text[0]).toMatchObject({ words: null, color: '#FFFFFF' });
+      expect(r.text[0]).toMatchObject({ words: null, color: '#FFFFFF' }); // no tesseract given: the words stay null
       expect(Math.abs(r.text[0]!.startSec - 3.1)).toBeLessThanOrEqual(0.2);
       expect(Math.abs(r.text[0]!.endSec - 4.1)).toBeLessThanOrEqual(0.2);
       expect(r.text[0]!.box.y).toBeGreaterThan(0.6);
@@ -102,6 +120,13 @@ describe.skipIf(!hasFfmpeg)('Recreate this edit · the analysis (synthetic refer
 
     const meta = await sharp(contactSheetPng!).metadata();
     expect(meta.width).toBe(600); // 3 keyframes, 200 px each
+  }, 60_000);
+
+  it.skipIf(!TESSERACT || !FONT)('with tesseract, the caption\'s words are read and the words gap goes', async () => {
+    const { recipe: r } = await analyzeReference({ ffmpeg: 'ffmpeg', ffprobe: 'ffprobe', tesseract: 'tesseract' }, ref);
+    expect(r.text[0]!.words).toBe('SUMMER');
+    expect(r.text[0]!.confidence).toBeGreaterThan(0.8);
+    expect(r.gaps.map(g => g.key)).not.toContain('text:words');
   }, 60_000);
 });
 

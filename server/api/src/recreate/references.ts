@@ -324,9 +324,12 @@ export class RecreateReferences {
     if (!r || r.state !== 'analyzing' || !r.storageKey) return;
     const set = async (v: Partial<Row>) => { const [n] = await db.update(recreateReferences).set(v).where(eq(recreateReferences.id, id)).returning(); if (n) this.emit(n); };
     try {
-      const out = await this.withLocal(r.storageKey, f => analyzeReference({ ffmpeg: c.FFMPEG_PATH, ffprobe: c.FFPROBE_PATH }, f, {
+      const out = await this.withLocal(r.storageKey, f => analyzeReference({ ffmpeg: c.FFMPEG_PATH, ffprobe: c.FFPROBE_PATH, ...(c.TESSERACT_PATH ? { tesseract: c.TESSERACT_PATH } : {}),
+        ...(c.RECREATE_POSE ? { pose: { minFreeMb: c.RECREATE_POSE_MIN_FREE_MB } } : {}) }, f, {
         maxSec: MAX_REFERENCE_SEC + 1, progress: (p, phase) => set({ progress: Math.round(5 + p * 90), phase }),
       }));
+      // The pose child's peak memory, for sizing the instance (plans/recreate-edit.md "Pose").
+      if (out.recipe.analyzer.pose) this.ctx.log?.info({ referenceId: r.id, pose: out.recipe.analyzer.pose }, 'recreate pose');
       let sheet: string | null = null;
       if (out.contactSheetPng) {
         sheet = `rx/${r.studioId}/${r.id}/contact.png`;
