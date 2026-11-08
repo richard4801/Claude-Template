@@ -13,7 +13,7 @@ import * as M from '../src/editor/model.js';
 import { FILTERS } from '../src/editor/presets.js';
 import { LOOK_IDS } from '../src/editor/lookpack.js';
 import { suggestCuts } from '../src/editor/cuts.js';
-import { adaptInput, makeProvider, mockWords, parseTranscript, pickFile } from '../src/editor/providers.js';
+import { WHITE_MATTE, adaptInput, makeProvider, mockWords, parseTranscript, pickFile } from '../src/editor/providers.js';
 import { noiseSuggestion } from '../src/editor/service.js';
 import { editorJobs } from '../src/editor/schema.js';
 import { parseSilenceDetect, silenceCuts } from '../src/editor/silence.js';
@@ -218,8 +218,14 @@ describe('editor AI jobs (mock provider)', () => {
   it('matte and voice clean-up give an asset the app can use; matte is an alpha matte (no chroma key)', async () => {
     const m = (await owner.req('POST', '/v1/editor/jobs', { kind: 'matte', source: { takeId: src } })).body;
     const mr = await done(m.id);
-    expect(mr.result).toMatchObject({ asset: { kind: 'video', take: src }, alpha: true, mode: 'person' });
+    expect(mr.result).toMatchObject({ asset: { kind: 'video' }, alpha: true, mode: 'person' });
     expect(mr.result.chroma).toBeUndefined();
+    // 2026-11-08: the mock's matte is its own all-white video (keep everything), never the source: with the apps applying
+    // alphaMatte, the source as a matte made the clip's dark areas see-through.
+    expect(mr.result.asset.take).toBeUndefined();
+    expect(mr.result.asset.upload).toEqual(expect.any(String));
+    expect(mr.result.asset.url).toMatch(/\/uploads\/g\/edit_[^/]+\.mp4$/);
+    expect(fs.existsSync(WHITE_MATTE)).toBe(true);
     const v = (await owner.req('POST', '/v1/editor/jobs', { kind: 'denoise', source: { takeId: src } })).body;
     const vr = await done(v.id);
     expect(vr.result.asset).toMatchObject({ kind: 'audio' });
@@ -237,6 +243,8 @@ describe('editor AI jobs (mock provider)', () => {
     const r = await done(j.id);
     expect(r.state, JSON.stringify(r)).toBe('done');
     expect(r.result).toMatchObject({ alpha: true, mode: 'tracked', points: [{ x: 0.5, y: 0.4, t: 1, keep: true }, { x: 0.1, y: 0.9, t: 0, keep: false }] });
+    expect(r.result.asset.take).toBeUndefined(); // the white matte, not the source
+    expect(r.result.asset.upload).toEqual(expect.any(String));
     const bad = (o: unknown) => owner.req('POST', '/v1/editor/estimate', { kind: 'matte', source: { takeId: src }, options: { points: o } }).then(x => x.body.error as string);
     expect(await bad([])).toMatch(/1 to 10 points/);
     expect(await bad([{ x: 2, y: 0 }])).toMatch(/points.0.x/);
