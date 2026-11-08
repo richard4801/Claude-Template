@@ -257,6 +257,12 @@ private fun PlayerSurface(player: CompositionPlayer, modifier: Modifier) {
 class RepoEditBackend(private val c: AppContainer, private val pollMs: Long = 700, private val onAsset: (String, String) -> Unit = { _, _ -> }) : EditBackend {
     override fun assetArrived(assetId: String, url: String) = onAsset(assetId, url)
 
+    override suspend fun matteUnavailable(): String? {
+        val m = c.repo.api.editorFeatures()?.get("matte") as? kotlinx.serialization.json.JsonObject ?: return null
+        if ((m["available"] as? kotlinx.serialization.json.JsonPrimitive)?.content != "false") return null
+        return (m["note"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() } ?: "Coming soon"
+    }
+
     override suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?): Pair<EditorEstimate?, String?> =
         runCatching { c.repo.attemptInline { editorEstimate(EditorJobRequest(kind, source, options)) } }.getOrElse { null to "Couldn't reach the studio · try again" }
 
