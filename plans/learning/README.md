@@ -66,3 +66,14 @@ Regenerate with `PHOSPHOR=<unpacked @phosphor-icons/core 2.1.1> python3 design/l
 ## Open questions for the owner
 - **Pin colour in Soft Tactile.** The pinned (`accent` green) and unpinned (`ink2` grey) pins are hard to tell apart at a glance, because the two colours are close in tone. Should a pinned pin use Phosphor's Fill weight? That would be the one exception to "Regular only", and it is the usual Mac convention.
 - **Which editor to approve.** The new-rule editor, shown here, or should I also mock the edit-an-existing-rule variant, with "280 / 300" and "Delete rule"?
+
+## Built (Mac CI run 42480381888, demo mode, 1280 × 800)
+`built_<screen>_<theme>.png`, from the app's own review mode (`SnapshotRunner.learnShots`):
+- `playbook`: Rules, grouped by area, pinned first, "Add rule" top right.
+- `playbook_editor`: the rule editor on the long learned rule (counter "271 / 300", evidence, "Add a note", "Delete rule").
+- `suggestions`: the lessons in plain words ("You changed Claude's look 4 times") with "Make a rule".
+- `recipes`: the grid with search, the two segmented filters and the top tags; "Effects MUSE can't make yet" below the fold.
+- `recipe_detail`: "Living room dance" in the right-hand panel.
+- `claude_tab`: the editor's Claude panel on its Playbook tab.
+
+Pictures: demo mode has no video files, so edits show the bundled Blender mannequin stills and references show `field` with the film-strip icon. With a server, edits show their take's thumbnail and references their poster.
