@@ -30,4 +30,14 @@ export async function registerRecreateRoutes(app: FastifyInstance, ctx: Ctx) {
     const obj = await rx.contactSheet(req.user, id(req));
     return reply.header('content-type', 'image/png').header('cache-control', 'private, max-age=3600').send(obj.body);
   });
+  // For the apps' side-by-side view (workstream 2): the reference video, its poster, each slot's thumbnail, fill state.
+  app.get('/v1/recreate/references/:id/video', async (req, reply) => {
+    const v = await rx.video(req.user, id(req));
+    if ('redirect' in v) return reply.redirect(v.redirect, 302);
+    return reply.header('content-type', v.contentType).header('cache-control', 'private, max-age=3600').send(v.body);
+  });
+  const png = (reply: import('fastify').FastifyReply, b: Buffer) => reply.header('content-type', 'image/png').header('cache-control', 'private, max-age=3600').send(b);
+  app.get('/v1/recreate/references/:id/poster', async (req, reply) => png(reply, await rx.thumb(req.user, id(req), null)));
+  app.get('/v1/recreate/references/:id/slots/:slotId/thumb', async (req, reply) => png(reply, await rx.thumb(req.user, id(req), slot(req))));
+  app.get('/v1/recreate/references/:id/fill', async req => rx.fillView(req.user, id(req)));
 }

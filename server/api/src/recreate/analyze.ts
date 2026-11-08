@@ -5,7 +5,7 @@ import { decodeMono, detectBeats } from '../editor/audio.js';
 import { energyCurve, findCuts, findPeaks, measureMotion, type Cut } from '../editor/motion.js';
 import { probe } from '../replicate/media.js';
 import type { Rig } from '../suite/drafts.js';
-import { contactSheet, grabFrame, gradeOf, type GradeInfo } from './frames.js';
+import { contactSheet, grabFrame, gradeOf, sheetTiles, type GradeInfo } from './frames.js';
 import { cameraOf, classifyCut, findGradual, motionTracker, peaksIn, shotsOf, speedOf, transitionFrames, type CameraMotion, type Speed, type Transition } from './signals.js';
 import { findText, type TextItem } from './text.js';
 
@@ -23,16 +23,25 @@ export type Slot = {
   pose: { status: 'pending' | 'done' | 'none'; frameSec?: number; keypoints?: { name: string; x: number; y: number; score: number }[] };
 };
 export type RecipeTransition = Transition & { from: string; to: string };
+export type Gap = { key: string; kind: 'transition' | 'effect' | 'text' | 'font' | 'motion' | 'other'; what: string; atSec?: number; note: string };
 export type Recipe = {
   schema: typeof RECIPE_SCHEMA; analyzer: { version: string; tookMs: number };
+  /** Where it came from: a reference video (this analysis) or one of the studio's own edits (workstream 3's converter). */
+  origin: 'reference' | 'edit'; referenceId?: string; takeId?: string; versionId?: string;
+  /** Claude's one-line read of the contact sheet, and free tags ("street", "dance", "outfit-transition"). */
+  summary?: string; tags?: string[];
   source: { durationSec: number; width: number; height: number; fps: number; aspect: string; hasAudio: boolean };
   sound: { bpm: number; beats: number[]; strong: number[]; confidence: number } | null;
   pacing: { shots: number; avgShotSec: number; cutsPerMin: number; energy: { everySec: number; values: number[] } };
   slots: Slot[]; transitions: RecipeTransition[]; text: TextItem[];
   grade: Omit<GradeInfo, 'confidence'> & { confidence: number };
-  contactSheet: { url: string; times: number[] } | null;
-  gaps: { what: string; atSec?: number; note: string }[];
+  contactSheet: { url: string; times: number[]; tiles?: { slotId: string; x: number; y: number; w: number; h: number }[] } | null;
+  gaps: Gap[];
 };
+/** The recipe's size caps (≈ 256 KB in all, workstream 3's library keeps many): per slot. */
+export const MAX_CURVE_POINTS = 48, MAX_CAMERA_KEYS = 64;
+/** Every `step`-th item, always keeping the last, so at most `max` remain. */
+export const thin = <T>(xs: T[], max: number) => { if (xs.length <= max) return xs; const step = Math.ceil(xs.length / max); return xs.filter((_, i) => i % step === 0 || i === xs.length - 1).slice(-max); };
 
 /** The composer shape closest to w×h. */
 export function aspectName(w: number, h: number) {
@@ -91,10 +100,12 @@ export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string },
 
   // Shots → slots; boundaries → transitions.
   const slots: Slot[] = shots.map((s, i) => {
-    const camera = cameraOf(s, g, m.fps, skip);
+    const cam0 = cameraOf(s, g, m.fps, skip);
+    const camera = { ...cam0, keys: thin(cam0.keys, MAX_CAMERA_KEYS) };
+    const sp = speedOf(s, m);
     return {
       id: `s${i + 1}`, index: i, startSec: s.startSec, endSec: s.endSec, durationSec: r3(s.endSec - s.startSec), keyframeSec: keyTimes[i]!,
-      confidence: s.endSec - s.startSec < 0.15 ? 0.5 : 0.9, brief: null, rig: { moves: moveFor(camera) }, camera, speed: speedOf(s, m), peaks: peaksIn(peaks, s),
+      confidence: s.endSec - s.startSec < 0.15 ? 0.5 : 0.9, brief: null, rig: { moves: moveFor(camera) }, camera, speed: { ...sp, curve: thin(sp.curve, MAX_CURVE_POINTS) }, peaks: peaksIn(peaks, s),
       pose: { status: 'pending' },
     };
   });
@@ -116,20 +127,22 @@ export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string },
   }
   transitions.sort((a, b) => a.atSec - b.atSec);
 
-  const gaps: Recipe['gaps'] = [
-    ...transitions.filter(t => t.kind === 'unknown' || t.kind === 'glitch').map(t => ({ what: `transition:${t.kind}`, atSec: t.atSec, note: 'A transition the editor can’t make yet' })),
-    ...(text.length ? [{ what: 'text:words', note: 'The words of on-screen text need OCR (pending); Claude reads them from the contact sheet' }] : []),
-    { what: 'pose', note: 'Pose skeletons need the pose engine (pending)' },
+  // Stable keys, so workstream 3's gap list can count them across studios.
+  const gaps: Gap[] = [
+    ...transitions.filter(t => t.kind === 'unknown').map((t): Gap => ({ key: `transition:unknown@${t.atSec.toFixed(2)}`, kind: 'transition', what: 'A transition MUSE couldn’t name', atSec: t.atSec, note: 'Not supported yet' })),
+    ...(text.some(x => !x.words) ? [{ key: 'text:words', kind: 'text' as const, what: 'On-screen words', note: 'Not read yet: Claude reads them from the contact sheet' }] : []),
+    ...(slots.some(s => s.pose.status === 'pending') ? [{ key: 'pose', kind: 'motion' as const, what: 'Body poses', note: 'Not read yet' }] : []),
   ];
 
   const png = got.length ? await contactSheet(got, got.map(f => { const i = keyTimes.indexOf(f.t); const s = slots[i]!; return `${i + 1} · ${s.startSec.toFixed(1)}–${s.endSec.toFixed(1)} s`; })) : null;
   await o.progress?.(0.95, 'Writing the recipe');
   const recipe: Recipe = {
-    schema: RECIPE_SCHEMA, analyzer: { version: ANALYZER_VERSION, tookMs: Date.now() - t0 },
+    schema: RECIPE_SCHEMA, analyzer: { version: ANALYZER_VERSION, tookMs: Date.now() - t0 }, origin: 'reference',
     source: { durationSec, width: info.width, height: info.height, fps: r3(info.fps || m.fps), aspect: aspectName(info.width, info.height), hasAudio: !!info.audioCodec },
     sound,
     pacing: { shots: slots.length, avgShotSec: r3(durationSec / Math.max(1, slots.length)), cutsPerMin: r3((slots.length - 1) / Math.max(durationSec, 1) * 60), energy: energyCurve(m) },
-    slots, transitions, text, grade, contactSheet: null, gaps,
+    slots, transitions, text, grade, gaps,
+    contactSheet: png ? { url: '', times: keyTimes, tiles: sheetTiles(slots.length, kw, kh).map((t, i) => ({ slotId: slots[i]!.id, ...t })) } : null,
   };
   return { recipe, contactSheetPng: png };
 }

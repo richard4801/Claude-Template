@@ -14,6 +14,7 @@ import { uid } from '../lib/util.js';
 import { probe } from '../replicate/media.js';
 import { takes as takesTable, jobs } from '../db/schema.js';
 import { editSessionsOf } from '../editor/sessions.js';
+import { timeline } from '../editor/model.js';
 import { analyzeReference, type Recipe } from './analyze.js';
 import { buildProject, type AssembleOptions, type TakeInfo } from './assemble.js';
 import { BriefSchema, matchSlots, shotRequestFor, withBriefs, type Candidate } from './slots.js';
@@ -24,6 +25,19 @@ export const KEEP_DAYS = 30;
 const DAY = 86_400_000;
 
 type Row = typeof recreateReferences.$inferSelect;
+
+/** Matching, filling and assembly state, kept apart from the recipe (the analysis). */
+export type FillState = {
+  /** The last match: the suggested take per slot, with its score and reasons. */
+  matched?: Record<string, { takeId: string; score: number; reasons: string[] }>;
+  toGenerate?: string[];
+  /** Slots being filled by a Suite shot. */
+  jobs?: Record<string, { jobId: string; estimate?: number; at: number }>;
+  /** The last assembly: where, which take per slot, which project item came from which recipe element, and the score. */
+  applied?: { sessionId: string; revision: number; at: number; slots: Record<string, string>; sources: Record<string, RecipeSource>; match: MatchScore };
+};
+export type RecipeSource = { recipeId: string; slotId?: string; textId?: string; transitionAt?: number };
+export type MatchScore = { overall: number; cuts: number; text: number; ramps: number; grade: number; shots: number; perSlot: { slotId: string; score: number }[] };
 
 const CreateBody = z.object({ uploadId: z.string().min(1).max(80), name: z.string().trim().max(80).optional() }).strict();
 const PatchBody = z.object({ keep: z.boolean().optional(), name: z.string().trim().max(80).optional() }).strict();
@@ -49,12 +63,25 @@ export class RecreateReferences {
   }
 
   view(r: Row) {
+    const base = `${this.ctx.config.PUBLIC_URL ?? ''}/v1/recreate/references/${r.id}`;
+    const recipe = r.recipe as Recipe | null;
+    const sheet = r.contactSheetKey ? recipe?.contactSheet : null;
     return {
       id: r.id, name: r.name, state: r.state, progress: Math.round(r.progress), phase: r.phase, error: r.error ?? undefined, durationSec: r.durationSec ?? undefined,
       userId: r.userId, keep: r.keep, createdAt: r.createdAt, expiresAt: r.keep ? null : r.expiresAt,
-      recipe: r.recipe ? { ...r.recipe, id: r.id, referenceId: r.id, createdAt: r.createdAt,
-        contactSheet: r.contactSheetKey ? { url: `${this.ctx.config.PUBLIC_URL ?? ''}/v1/recreate/references/${r.id}/contact-sheet`, times: r.recipe.slots.map(s => s.keyframeSec) } : null } : undefined,
+      // Authenticated (the reference stays private): the side-by-side player and its poster.
+      videoUrl: r.storageKey ? `${base}/video` : undefined, posterUrl: sheet ? `${base}/poster` : undefined,
+      recipe: recipe ? { ...recipe, id: r.id, origin: recipe.origin ?? 'reference', referenceId: r.id, createdAt: r.createdAt,
+        slots: recipe.slots.map(sl => { const job = r.fill?.jobs?.[sl.id];
+          return { ...sl, thumbUrl: sheet ? `${base}/slots/${sl.id}/thumb` : undefined, ...(job ? { fill: { jobId: job.jobId } } : {}) }; }),
+        contactSheet: sheet ? { url: `${base}/contact-sheet`, times: sheet.times ?? recipe.slots.map(x => x.keyframeSec), tiles: sheet.tiles ?? [] } : null } : undefined,
     };
+  }
+
+  /** Live progress to whoever may see it (the creator and the owner): `{type: "recreate", reference}`. */
+  private emit(r: Row) {
+    const v = this.view(r);
+    void this.ctx.hub.emit(r.studioId, viewer => (viewer.userId === r.userId || viewer.role === 'owner' ? { type: 'recreate', reference: { ...v, recipe: undefined, slots: r.recipe?.slots.length } } : null));
   }
 
   /** A reference this user may see: their own, or any in the studio for the owner. */
@@ -91,6 +118,7 @@ export class RecreateReferences {
       state: 'analyzing', phase: 'Waiting', createdAt: now, expiresAt: now + KEEP_DAYS * DAY,
     }).returning();
     this.enqueue(r!.id);
+    this.emit(r!);
     return this.view(r!);
   }
 
@@ -99,6 +127,7 @@ export class RecreateReferences {
     const r = await this.row(u, id);
     const [n] = await this.ctx.db.update(recreateReferences).set({ ...(b.keep !== undefined ? { keep: b.keep, ...(b.keep ? {} : { expiresAt: Math.max(r.expiresAt, Date.now() + KEEP_DAYS * DAY) }) } : {}),
       ...(b.name !== undefined ? { name: b.name || 'Reference' } : {}) }).where(eq(recreateReferences.id, r.id)).returning();
+    this.emit(n!);
     return this.view(n!);
   }
 
@@ -131,10 +160,13 @@ export class RecreateReferences {
 
   /** Claude's (or the owner's) shot briefs: `{slots: {s1: {shotSize, angle, subject, action, location, notes}}}`. */
   async setBriefs(u: AuthUser, id: string, body: unknown) {
-    const b = parse(z.object({ slots: z.record(z.string(), BriefSchema) }).strict(), body);
+    const b = parse(z.object({ slots: z.record(z.string(), BriefSchema).optional(), summary: z.string().trim().max(200).optional(),
+      tags: z.array(z.string().trim().toLowerCase().regex(/^[a-z0-9][a-z0-9 -]{0,39}$/, 'tags are short words or phrases')).max(20).optional() }).strict(), body);
     const { r, recipe } = await this.ready(u, id);
     let next: Recipe;
-    try { next = withBriefs(recipe, b.slots); } catch (e) { throw badRequest(`slots: ${(e as Error).message}`); }
+    try { next = withBriefs(recipe, b.slots ?? {}); } catch (e) { throw badRequest(`slots: ${(e as Error).message}`); }
+    if (b.summary !== undefined) next = { ...next, summary: b.summary };
+    if (b.tags) next = { ...next, tags: [...new Set(b.tags)] };
     return this.view(await this.saveRecipe(r.id, next));
   }
 
@@ -147,7 +179,39 @@ export class RecreateReferences {
       id: t.id, modelId: t.modelId, durationSec: Number(t.media!.durationSec), width: Number(t.media?.width) || 0, height: Number(t.media?.height) || 0,
       status: t.status, createdAt: t.createdAt, draft: t.draft ?? null, title: t.title,
     }));
-    return matchSlots(recipe, cands, { leadModelId: b.modelId, top: b.top, minScore: b.minScore });
+    const m = matchSlots(recipe, cands, { leadModelId: b.modelId, top: b.top, minScore: b.minScore });
+    const r = await this.row(u, id);
+    const matched = Object.fromEntries(m.slots.filter(x => x.suggested).map(x => { const c = x.candidates.find(y => y.takeId === x.suggested)!; return [x.slotId, { takeId: c.takeId, score: c.score, reasons: c.reasons }]; }));
+    await this.saveFill(r, { ...(r.fill ?? {}), matched, toGenerate: m.slots.filter(x => x.toGenerate).map(x => x.slotId) });
+    return m;
+  }
+  private async saveFill(r: Row, fill: FillState) {
+    await this.ctx.db.update(recreateReferences).set({ fill }).where(eq(recreateReferences.id, r.id));
+  }
+
+  /**
+   * Each slot's state for the app: ready (its fill job is done), generating, matched (the last match's take), to
+   * generate, or empty; with the last assembly's match score and sources.
+   */
+  async fillView(u: AuthUser, id: string) {
+    const r = await this.row(u, id);
+    const recipe = r.recipe as Recipe | null, f = r.fill ?? {};
+    const jobIds = Object.values(f.jobs ?? {}).map(j => j.jobId);
+    const js = jobIds.length ? await this.ctx.db.select({ id: jobs.id, state: jobs.state }).from(jobs).where(inArray(jobs.id, jobIds)) : [];
+    const ts = jobIds.length ? await this.ctx.db.select({ id: takesTable.id, jobId: takesTable.jobId, index: takesTable.index }).from(takesTable).where(inArray(takesTable.jobId, jobIds)) : [];
+    const slots = (recipe?.slots ?? []).map(sl => {
+      const job = f.jobs?.[sl.id], m = f.matched?.[sl.id];
+      if (job) {
+        const st = js.find(x => x.id === job.jobId)?.state;
+        const take = ts.filter(x => x.jobId === job.jobId).sort((a, b) => a.index - b.index)[0];
+        if (st === 'done' && take) return { slotId: sl.id, state: 'ready' as const, takeId: take.id, jobId: job.jobId, reason: 'Generated for this slot' };
+        if (st !== 'failed') return { slotId: sl.id, state: 'generating' as const, jobId: job.jobId, ...(job.estimate != null ? { estimate: { amount: job.estimate, label: `about $${job.estimate.toFixed(2)}` } } : {}) };
+      }
+      if (m) return { slotId: sl.id, state: 'matched' as const, takeId: m.takeId, score: m.score, reason: m.reasons.join(', ') };
+      if (f.toGenerate?.includes(sl.id)) return { slotId: sl.id, state: 'to_generate' as const, reason: 'None of your takes fits this shot' };
+      return { slotId: sl.id, state: 'empty' as const };
+    });
+    return { referenceId: r.id, slots, ...(f.applied ? { applied: f.applied, match: f.applied.match } : {}) };
   }
 
   private fillRequest(recipe: Recipe, r: Row, slotId: string, body: unknown) {
@@ -166,9 +230,9 @@ export class RecreateReferences {
   async fillSlot(u: AuthUser, id: string, slotId: string, body: unknown) {
     const { r, recipe } = await this.ready(u, id);
     const { request } = this.fillRequest(recipe, r, slotId, body);
-    const job = await this.ctx.suite.create(u, request) as { id: string };
-    const next = { ...recipe, slots: recipe.slots.map(s => (s.id === slotId ? { ...s, fill: { jobId: job.id, at: Date.now() } } : s)) } as Recipe;
-    await this.saveRecipe(r.id, next);
+    const job = await this.ctx.suite.create(u, request) as { id: string; cost?: number };
+    const fresh = await this.row(u, id);
+    await this.saveFill(fresh, { ...(fresh.fill ?? {}), jobs: { ...(fresh.fill?.jobs ?? {}), [slotId]: { jobId: job.id, estimate: job.cost, at: Date.now() } } });
     return { slotId, job };
   }
 
@@ -212,7 +276,34 @@ export class RecreateReferences {
           { op: 'replace', path: '/canvas', value: out.project.canvas }, { op: 'replace', path: '/assets', value: out.project.assets },
           { op: 'replace', path: '/tracks', value: out.project.tracks }] }], label })
       : await svc.reset(u, s.id, { baseRevision: b.baseRevision ?? s.revision, project: out.project, device: o.device, label });
-    return { sessionId: s.id, revision: res.revision, durationSec: out.durationSec, missing: [...out.missing.filter(x => !waiting.includes(x)), ...waiting], waiting, notes: out.notes, label };
+    const fresh = await this.row(u, id);
+    const match = matchScore(recipe, out.project, takes, fresh.fill ?? {}, (b.options ?? {}) as AssembleOptions);
+    const sources = sourcesOf(recipe, out.project, r.id, takes);
+    await this.saveFill(fresh, { ...(fresh.fill ?? {}), applied: { sessionId: s.id, revision: res.revision, at: Date.now(), slots: Object.fromEntries(Object.entries(takes).filter(([, t]) => t).map(([k, t]) => [k, t!.id])), sources, match } });
+    return { sessionId: s.id, revision: res.revision, durationSec: out.durationSec, missing: [...out.missing.filter(x => !waiting.includes(x)), ...waiting], waiting, notes: out.notes, label, match, sources };
+  }
+
+  /** One slot's thumbnail, cropped from the contact sheet (PNG). `slotId` null = the poster (the first slot). */
+  async thumb(u: AuthUser, id: string, slotId: string | null) {
+    const r = await this.row(u, id);
+    const recipe = r.recipe as Recipe | null;
+    const tiles = recipe?.contactSheet?.tiles ?? [];
+    const tile = slotId ? tiles.find(t => t.slotId === slotId) : tiles[0];
+    if (!r.contactSheetKey || !tile) throw notFound(slotId ? 'Slot' : 'Poster');
+    const obj = await this.ctx.storage.get(r.contactSheetKey);
+    if (!obj) throw notFound('Contact sheet');
+    const chunks: Buffer[] = []; for await (const c of obj.body as AsyncIterable<Buffer>) chunks.push(Buffer.from(c));
+    const sharp = (await import('sharp')).default;
+    return sharp(Buffer.concat(chunks)).extract({ left: tile.x, top: tile.y, width: tile.w, height: tile.h }).png().toBuffer();
+  }
+  /** The reference video for the side-by-side player (authenticated; a short-lived link on S3). */
+  async video(u: AuthUser, id: string): Promise<{ redirect: string } | { body: NodeJS.ReadableStream; contentType: string }> {
+    const r = await this.row(u, id);
+    if (!r.storageKey) throw notFound('Reference video');
+    if (this.ctx.storage.kind === 's3') return { redirect: await this.ctx.storage.presignGet(r.storageKey, 3600) };
+    const obj = await this.ctx.storage.get(r.storageKey);
+    if (!obj) throw notFound('Reference video');
+    return { body: obj.body as NodeJS.ReadableStream, contentType: obj.contentType };
   }
 
   /** Waits for the analysis queue to empty (tests, shutdown). */
@@ -231,10 +322,10 @@ export class RecreateReferences {
     const db = this.ctx.db, c = this.ctx.config;
     const [r] = await db.select().from(recreateReferences).where(eq(recreateReferences.id, id));
     if (!r || r.state !== 'analyzing' || !r.storageKey) return;
-    const set = (v: Partial<Row>) => db.update(recreateReferences).set(v).where(eq(recreateReferences.id, id));
+    const set = async (v: Partial<Row>) => { const [n] = await db.update(recreateReferences).set(v).where(eq(recreateReferences.id, id)).returning(); if (n) this.emit(n); };
     try {
       const out = await this.withLocal(r.storageKey, f => analyzeReference({ ffmpeg: c.FFMPEG_PATH, ffprobe: c.FFPROBE_PATH }, f, {
-        maxSec: MAX_REFERENCE_SEC + 1, progress: (p, phase) => set({ progress: Math.round(5 + p * 90), phase }).then(() => undefined),
+        maxSec: MAX_REFERENCE_SEC + 1, progress: (p, phase) => set({ progress: Math.round(5 + p * 90), phase }),
       }));
       let sheet: string | null = null;
       if (out.contactSheetPng) {
@@ -283,3 +374,47 @@ export class RecreateReferences {
 
 const services = new WeakMap<Ctx, RecreateReferences>();
 export const recreateOf = (ctx: Ctx) => { let s = services.get(ctx); if (!s) { s = new RecreateReferences(ctx); services.set(ctx, s); } return s; };
+
+/** How close the assembled edit is to the reference, per element (0–1). */
+export function matchScore(recipe: Recipe, project: import('../editor/model.js').EditProject, takes: Record<string, TakeInfo | undefined>, fill: FillState, o: AssembleOptions): MatchScore {
+  const r2 = (x: number) => Math.round(x * 100) / 100;
+  const used = recipe.slots.filter(s => takes[s.id]);
+  // Cuts: each used slot's start on the timeline against the reference (exact = 1, off by 2 frames or more = 0).
+  const tl = timeline(project);
+  const frame = 1 / Math.max(1, recipe.source.fps || 30);
+  const cutErr = used.slice(1).map((s, i) => Math.abs((tl[i + 1]?.startSec ?? 0) + (tl[i + 1]?.transitionSec ?? 0) / 2 - s.startSec));
+  const coverage = used.length / Math.max(1, recipe.slots.length);
+  const cuts = (cutErr.length ? cutErr.reduce((a, e) => a + Math.max(0, 1 - e / (2 * frame)), 0) / cutErr.length : 1) * coverage;
+  const text = !recipe.text.length ? 1 : o.text === false ? 0 : recipe.text.reduce((a, x) => a + (x.words ? 1 : 0.6), 0) / recipe.text.length;
+  const ramped = recipe.slots.filter(s => s.speed.ramp !== 'none' && s.speed.ramp !== 'freeze');
+  const ramps = !ramped.length ? 1 : o.speed === false ? 0 : ramped.filter(s => takes[s.id]).length / ramped.length;
+  const look = recipe.grade.look;
+  const grade = !look ? 0.5 : o.look === false || look.distance >= 0.4 ? 0 : Math.max(0, 1 - look.distance);
+  const perSlot = recipe.slots.map(s => {
+    const t = takes[s.id];
+    if (!t) return { slotId: s.id, score: 0 };
+    const m = fill.matched?.[s.id];
+    const generated = !!fill.jobs?.[s.id];
+    return { slotId: s.id, score: r2(m && m.takeId === t.id ? m.score : generated ? 0.85 : 0.6) };
+  });
+  const shots = perSlot.reduce((a, x) => a + x.score, 0) / Math.max(1, perSlot.length);
+  const overall = 0.25 * cuts + 0.35 * shots + 0.15 * text + 0.1 * ramps + 0.15 * grade;
+  return { overall: r2(overall), cuts: r2(cuts), text: r2(text), ramps: r2(ramps), grade: r2(grade), shots: r2(shots), perSlot };
+}
+
+/** Which recipe element each item of the assembled project came from (for workstream 3's corrections log). */
+export function sourcesOf(recipe: Recipe, project: import('../editor/model.js').EditProject, recipeId: string, takes: Record<string, TakeInfo | undefined>): Record<string, RecipeSource> {
+  const out: Record<string, RecipeSource> = {};
+  const main = project.tracks.find(t => t.kind === 'main')?.items ?? [];
+  // Main clips are in slot order; slots without a take were left out.
+  const used = recipe.slots.filter(s => takes[s.id]);
+  used.forEach((s, k) => {
+    const it = main[k] as { id: string; transitionIn?: unknown } | undefined;
+    if (!it) return;
+    const tr = it.transitionIn ? recipe.transitions.find(t => t.to === s.id && t.from !== t.to) : undefined;
+    out[it.id] = { recipeId, slotId: s.id, ...(tr ? { transitionAt: tr.atSec } : {}) };
+  });
+  // Text items keep the recipe's order (x1, x2, …).
+  (project.tracks.find(t => t.kind === 'text')?.items ?? []).forEach((it, i) => { out[it.id] = { recipeId, textId: recipe.text[i]?.id ?? it.id }; });
+  return out;
+}

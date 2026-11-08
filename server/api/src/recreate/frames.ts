@@ -95,9 +95,13 @@ export function gradeOf(frames: Rgb[]): GradeInfo {
 }
 
 /** The contact sheet: each slot's keyframe, labelled "1 · 0.0–1.4 s", in rows of `cols`, for Claude's shot briefs. */
-export async function contactSheet(frames: Rgb[], labels: string[], cols = 5): Promise<Buffer> {
+export const SHEET_COLS = 5, SHEET_LABEL_PX = 18;
+/** Where each frame's picture sits in the contact sheet (without its label), for cropping one slot's thumbnail. */
+export const sheetTiles = (n: number, w: number, h: number, cols = SHEET_COLS) =>
+  Array.from({ length: n }, (_, i) => ({ x: (i % cols) * w, y: Math.floor(i / cols) * (h + SHEET_LABEL_PX), w, h }));
+export async function contactSheet(frames: Rgb[], labels: string[], cols = SHEET_COLS): Promise<Buffer> {
   if (!frames.length) throw new Error('no frames');
-  const tw = frames[0]!.width, th = frames[0]!.height, lab = 18;
+  const tw = frames[0]!.width, th = frames[0]!.height, lab = SHEET_LABEL_PX;
   const tiles = await Promise.all(frames.map(async (f, i) => {
     const label = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${tw}" height="${lab}"><rect width="100%" height="100%" fill="#111"/><text x="4" y="13" font-size="12" fill="#fff" font-family="DejaVu Sans Mono, monospace">${escapeXml(labels[i] ?? '')}</text></svg>`);
     const img = sharp(Buffer.from(f.rgb), { raw: { width: f.width, height: f.height, channels: 3 } }).resize(tw, th, { fit: 'fill' });
