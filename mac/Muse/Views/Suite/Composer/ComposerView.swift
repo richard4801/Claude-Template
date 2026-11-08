@@ -59,7 +59,11 @@ struct ComposerView: View {
         .onChange(of: s.composer.tool) { _, _ in presetsOpen = draftIsEmpty }
         // Saved rigs for the Setup rail's Rigs row; a model's default rig when she is @-mentioned (fills Auto rows only).
         .task(id: store.serverKey) { await store.loadSavedRigs() }
-        .onChange(of: s.composer.tokens.characterId) { _, new in if new != nil { store.applyDefaultRigIfAny() } }
+        .onChange(of: s.composer.tokens.characterId) { _, new in
+            // A take's settings just came back (Reuse settings): keep them exactly, no default rig on top.
+            if let r = s.restoredCharacterId { s.restoredCharacterId = nil; if r == new { return } }
+            if new != nil { store.applyDefaultRigIfAny() }
+        }
         .task(id: ComposerPriceKey(draft: s.composer, slots: s.composerSlots.slots, swap: s.swap, clipId: store.clip?.id, catalogLoaded: s.catalog != nil, photo: s.photo)) {
             try? await Task.sleep(nanoseconds: 300_000_000)
             if Task.isCancelled { return }
@@ -535,7 +539,7 @@ struct SetupRigsRow: View {
         let rigs = store.suite.savedRigs
         let value = rigs.isEmpty ? "None saved" : "\(rigs.count) saved"
         ComposerSetupRow(icon: "faders", name: "Rigs", value: value, auto: rigs.isEmpty, help: "Saved rigs") { open = true }
-            .popover(isPresented: $open, arrowEdge: .leading) { panel.environment(\.theme, t) }
+            .popover(isPresented: $open, arrowEdge: .leading) { panel.environment(store).environment(\.theme, t) }
     }
 
     private var panel: some View {
