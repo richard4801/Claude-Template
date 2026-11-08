@@ -1740,7 +1740,7 @@ In Settings, the owner adds an API key for a provider. MUSE lists that provider'
   ```
   {model, name, kind:'video'|'image', custom, tier|null, tiers:[...], resolution|null,
    resolutions:[{id, label, perSec}], perSec|null, perRun|null, minSeconds, maxSeconds,
-   allowedSeconds|null, aspectRatios, inputs: InputSlots}
+   allowedSeconds|null, aspectRatios, inputs: InputSlots, price:{basis:'per_run'|'per_second', usd}|null}
   ```
 
   - **Prices** are after the model's priceScale. Video: `perSec` at `resolution`, plus `perRun` for per-run custom models. Image: `perRun` = one photo (built-in: the studio's photo model with 3 identity images; null when its price is unknown).

@@ -212,7 +212,9 @@ export class SuiteService {
     for (const c of await this.byo.catalog({ studioId, role: 'owner' } as AuthUser)) if (c.kind === 'image')
       image.push({ model: c.id, name: c.name, kind: 'image', custom: true, tier: null, tiers: [], resolution: null, resolutions: [], perSec: null, perRun: c.price.usd,
         minSeconds: null, maxSeconds: null, allowedSeconds: null, aspectRatios: c.aspectRatios, inputs: c.inputs });
-    return [...video, ...image];
+    // One price per entry for the picker: per run for per-run custom models and image models, else per second.
+    return [...video, ...image].map(e => ({ ...e, price: e.perRun != null ? { basis: 'per_run' as const, usd: e.perRun as number }
+      : e.perSec != null ? { basis: 'per_second' as const, usd: e.perSec as number } : null }));
   }
 
   // ------------------------------------------------------------------ character
