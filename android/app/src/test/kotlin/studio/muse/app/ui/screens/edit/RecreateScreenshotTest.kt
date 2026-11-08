@@ -34,7 +34,7 @@ class RecreateScreenshotTest(private val theme: String, private val state: Strin
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}_{1}")
         fun params(): List<Array<Any>> = listOf("a", "b", "c", "d").flatMap { t ->
-            listOf("recipe", "confirm", "generating", "waiting", "compare", "picker", "recipe_tablet", "confirm_tablet", "generating_tablet", "waiting_tablet", "compare_tablet", "export").map { arrayOf<Any>(t, it) }
+            listOf("recipe", "confirm", "generating", "waiting", "compare", "picker", "recipe_tablet", "confirm_tablet", "generating_tablet", "waiting_tablet", "compare_tablet", "export", "briefs_tablet", "briefs_confirm").map { arrayOf<Any>(t, it) }
         }
     }
 
@@ -65,6 +65,8 @@ class RecreateScreenshotTest(private val theme: String, private val state: Strin
                     base.copy(fill = f, match = r.match, mode = RecreateMode.Compare, builtTakeId = takes.firstOrNull()?.id,
                         export = if (state == "export") RecreateExportUi(guide = true, progress = .4f) else null)
                 }
+                "briefs", "briefs_confirm" -> base.copy(briefs = studio.muse.core.edit.RecreateBriefsEstimate(true, slots = 7, estimateUsd = .02, label = "Write the shot briefs · about $0.02"),
+                    askBriefs = state == "briefs_confirm")
                 else -> base
             }
         } finally { scope.cancel(); work.cancel() }

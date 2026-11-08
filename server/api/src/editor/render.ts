@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LOOK_IDS } from './lookpack.js';
 import * as M from './model.js';
+import { hash01 } from './look.js';
 import { LOOK_DIR, PALETTE_DIR, paletteFiles } from './photo.js';
 import { probe } from '../replicate/media.js';
 
@@ -35,6 +36,43 @@ const XFADE: Record<M.TransitionKind, string> = {
   fade: 'fade', black: 'fadeblack', white: 'fadewhite', slideLeft: 'slideleft', slideRight: 'slideright', slideUp: 'slideup', slideDown: 'slidedown',
   zoom: 'zoomin', whip: 'smoothleft', spin: 'radial', glitch: 'pixelize',
 };
+
+/**
+ * The editor's glitch as the apps draw it (model.ts transitionState): a hard switch at the middle of the transition,
+ * the picture jittering sideways (up to 4 % of the width) with red and blue pulled apart (up to 2 %), both strongest
+ * at the switch. The switch is a one-frame fade at the middle, with both clips trimmed so the length and the cut times
+ * are exactly a full xfade's, and both streams read together as in any xfade. `start` and `d` are frames on the
+ * timeline.
+ */
+export function glitchSwitch(a: string, b: string, out: string, start: number, d: number, i: number, FPS: number): string[] {
+  const half = Math.floor(d / 2);
+  return [
+    `[${a}]trim=end_frame=${start + half + 1}[gx${i}]`,
+    `[${b}]trim=start_frame=${half},setpts=PTS-STARTPTS[gy${i}]`,
+    `[gx${i}][gy${i}]xfade=transition=fade:duration=${n4(1 / FPS)}:offset=${n4((start + half) / FPS)}[${out}]`,
+  ];
+}
+/**
+ * The glitches' jitter and colour split, frame by frame, as rgbashift commands (one filter on the joined picture; a
+ * per-pixel xfade expression took ~45 s for 0.4 s at 1080 × 1920). Red, green and blue move by the jitter, red and
+ * blue a little further apart; back to rest after each window.
+ */
+export function glitchShifts(windows: { start: number; d: number }[], W: number, FPS: number, name: string): string {
+  const cmds: string[] = [];
+  const set = (f: number, r: number, g: number, bl: number) =>
+    cmds.push(`${n4(f / FPS)} ${name} rh ${r}, ${name} gh ${g}, ${name} bh ${bl}`);
+  for (const w of windows) {
+    for (let k = 0; k < w.d; k++) {
+      const p = (k + 0.5) / w.d, peak = Math.sin(Math.PI * p);
+      const jit = (hash01(Math.floor(p * 24), p < 0.5 ? 1 : 2, 7) - 0.5) * 2;
+      const dx = Math.round(0.04 * W * peak * jit), split = Math.round(0.02 * W * peak);
+      const c = (v: number) => Math.max(-255, Math.min(255, v));
+      set(w.start + k, c(dx + split), c(dx), c(dx - split));
+    }
+    set(w.start + w.d, 0, 0, 0);
+  }
+  return cmds.join(';');
+}
 
 /** A look's LUT file: a pack look, a palette, or an imported .cube (asset id → file from `files`). */
 function lutFile(ref: string, files: Record<string, string>): string | null {
@@ -153,13 +191,21 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
   });
   // Join: a cut is a concat, a transition an xfade at the clip's place on the timeline.
   let acc = 'v0';
+  const glitches: { start: number; d: number }[] = [];
   for (let i = 1; i < clips.length; i++) {
     const t = clips[i]!.transitionIn, next = `j${i}`;
-    if (t && tl[i]!.transitionSec > 0) g.push(`[${acc}][v${i}]xfade=transition=${XFADE[t.kind] ?? 'fade'}:duration=${n4((fr(tl[i - 1]!.endSec) - fr(tl[i]!.startSec)) / FPS)}:offset=${n4(fr(tl[i]!.startSec) / FPS)}[${next}]`);
+    const d = t && tl[i]!.transitionSec > 0 ? fr(tl[i - 1]!.endSec) - fr(tl[i]!.startSec) : 0;
+    if (t?.kind === 'glitch' && d >= 2) { g.push(...glitchSwitch(acc, `v${i}`, next, fr(tl[i]!.startSec), d, i, FPS)); glitches.push({ start: fr(tl[i]!.startSec), d }); }
+    else if (t && d > 0) g.push(`[${acc}][v${i}]xfade=transition=${XFADE[t.kind] ?? 'fade'}:duration=${n4(d / FPS)}:offset=${n4(fr(tl[i]!.startSec) / FPS)}[${next}]`);
     else g.push(`[${acc}][v${i}]concat=n=2:v=1:a=0[${next}]`);
     acc = next;
   }
 
+  // The glitches' jitter and colour split, on the joined picture.
+  if (glitches.length) {
+    g.push(`[${acc}]format=gbrp,sendcmd=c='${glitchShifts(glitches, W, FPS, 'rgbashift@glitch')}',rgbashift@glitch=rh=0:gh=0:bh=0:edge=smear,format=yuv420p[gfx]`);
+    acc = 'gfx';
+  }
   // Text items: one drawtext per line (centred by its own width; works on ffmpeg 5.1).
   let vlast = acc, ti = 0;
   for (const tr of p.tracks) {

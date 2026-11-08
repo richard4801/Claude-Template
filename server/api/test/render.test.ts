@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as M from '../src/editor/model.js';
-import { atempo, kfExpr, renderProject, wrap } from '../src/editor/render.js';
+import { atempo, glitchShifts, glitchSwitch, kfExpr, renderProject, wrap } from '../src/editor/render.js';
 import { grabFrame } from '../src/recreate/frames.js';
 import { probe } from '../src/replicate/media.js';
 import { ENC, ff, hasFfmpeg } from './recreate-fixture.js';
@@ -22,6 +22,20 @@ describe('render helpers (unit)', () => {
     expect(atempo(0.25)).toEqual(['atempo=0.5', 'atempo=0.5']);
     expect(atempo(1.5)).toEqual(['atempo=1.5']);
     expect(wrap('the oat flat white is back', 40, 400)).toEqual(['the oat flat white', 'is back']); // 18 characters a line
+  });
+});
+
+describe('the glitch, as the apps draw it (unit)', () => {
+  it('one command set per frame of the window, strongest at the switch, at rest after; the switch keeps the xfade\'s timing', () => {
+    const c = glitchShifts([{ start: 18, d: 12 }], 1080, 30, 'rgbashift@glitch').split(';');
+    expect(c).toHaveLength(13);
+    expect(c[0]).toMatch(/^0\.6 rgbashift@glitch rh -?\d+, rgbashift@glitch gh -?\d+, rgbashift@glitch bh -?\d+$/);
+    expect(c.at(-1)).toBe('1 rgbashift@glitch rh 0, rgbashift@glitch gh 0, rgbashift@glitch bh 0');
+    const v = c.slice(0, -1).map(x => x.match(/-?\d+/g)!.slice(-3).map(Number));
+    for (const [r, g, b] of v) { expect(Math.abs(g!)).toBeLessThanOrEqual(Math.round(0.04 * 1080)); expect(r! - g!).toBe(g! - b!); }
+    expect(v[5]![0]! - v[5]![1]!).toBeGreaterThan(v[0]![0]! - v[0]![1]!); // the split peaks at the switch
+    expect(glitchSwitch('v0', 'v1', 'j1', 18, 12, 1, 30)).toEqual([
+      '[v0]trim=end_frame=25[gx1]', '[v1]trim=start_frame=6,setpts=PTS-STARTPTS[gy1]', '[gx1][gy1]xfade=transition=fade:duration=0.0333:offset=0.8[j1]']);
   });
 });
 
@@ -89,6 +103,28 @@ describe.skipIf(!hasFfmpeg)('render an edit project (ffmpeg)', () => {
     expect(white).toBeGreaterThan(50);
     const [rb, gb] = await px(out, 0.1, 0.5, 0.5);
     expect(rb).toBeGreaterThan(200); expect(gb).toBeLessThan(60);
+  }, 120_000);
+
+  it('a glitch is a hard switch at the middle (no mixing), jittered and colour-split, with the same length and cut times as any transition', async () => {
+    const p = project();
+    (p.tracks[0]!.items[1] as M.VideoClip).transitionIn = { kind: 'glitch', durationSec: 0.4 };
+    M.validate(p);
+    const tl = M.timeline(p);
+    const out = path.join(dir, 'glitch.mp4');
+    const t0 = Date.now();
+    const r = await renderProject({ ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' }, p, files, out, { maxSide: 640 });
+    expect(Date.now() - t0).toBeLessThan(30_000); // fast filters, not a per-pixel expression
+    expect(r.unsupported).toEqual([]);
+    const info = await probe('ffprobe', out);
+    expect(Math.abs(info.duration - tl.at(-1)!.endSec)).toBeLessThan(0.1);
+    const mid = tl[1]!.startSec + tl[1]!.transitionSec / 2;
+    const [ra, ga] = await px(out, mid - 0.1, 0.1, 0.1), [rb, gb] = await px(out, mid + 0.1, 0.1, 0.1); // off the text
+    expect(ra).toBeGreaterThan(200); expect(ga).toBeLessThan(60); // still all red: no fade
+    expect(gb).toBeGreaterThan(100); expect(rb).toBeLessThan(60); // then all green
+    const [r2, g2] = await px(out, tl[1]!.startSec + 1, 0.1, 0.1);
+    expect(g2).toBeGreaterThan(100); expect(r2).toBeLessThan(60);
+    const [r3, g3, b3] = await px(out, tl[2]!.startSec + 0.5, 0.5, 0.5); // clip 3 is where it was: blue through its black-and-white look
+    expect(Math.abs(g3 - b3)).toBeLessThan(25); expect(Math.abs(r3 - b3)).toBeLessThan(25);
   }, 120_000);
 
   it('a guide track replaces the project\'s sound, padded to a set length; what can\'t be drawn is listed', async () => {

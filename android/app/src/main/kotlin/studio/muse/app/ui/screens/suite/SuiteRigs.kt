@@ -138,9 +138,79 @@ fun feedTools(photo: Boolean): List<String> = if (photo) listOf("photo") else li
 /** First page ([reset]) or the next one. False when the server has no feed (an older server: the recent jobs stand in). */
 suspend fun SuiteStore.loadFeed(photo: Boolean, reset: Boolean = true): Boolean {
     if (!reset && feedCursor == null) return true
-    val q = SuiteFeedQuery(tool = feedTools(photo), status = feedFilter.value.statuses, cursor = if (reset) null else feedCursor)
+    val q = SuiteFeedQuery(tool = feedTools(photo), status = feedFilter.value.statuses, cursor = if (reset) null else feedCursor, collection = feedCollection.value)
     val page = runCatching { app.repo.api.suiteFeed(q) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrNull() ?: return false
     feed.value = if (reset) page.items else feed.value.orEmpty().let { have -> have + page.items.filter { i -> have.none { it.id == i.id } } }
+    if (reset) queued.value = if (feedCollection.value == null) page.queued else emptyList()
     feedCursor = page.nextCursor
     return true
+}
+
+// ---------------------------------------------------------------- the Suite queue (build step 3)
+
+/** Queue the composer's shot to run later: checked and priced, nothing held. */
+suspend fun SuiteStore.queueShot(req: studio.muse.app.data.SuiteShotRequest): Boolean {
+    val (q, err) = app.repo.attemptInline { queueSuiteShot(req) }
+    if (q == null) { app.repo.toast(err ?: "Couldn't queue the shot"); return false }
+    queued.update { listOf(q) + it.filter { x -> x.id != q.id } }
+    app.repo.toast("Queued. Run it from Takes when you're ready")
+    return true
+}
+
+/** Run · $x: today's price first (it may have changed), then one confirmation. */
+suspend fun SuiteStore.askRun(q: studio.muse.app.data.QueuedShot) {
+    val (e, err) = app.repo.attemptInline { estimateQueuedShot(q.id) }
+    if (e == null) return app.repo.toast(err ?: "Couldn't price the shot")
+    runAsk.value = q to e
+}
+
+/** The yes: it runs as a normal shot (held and charged); the queue entry goes. */
+suspend fun SuiteStore.confirmRun(): studio.muse.app.data.Job? {
+    val (q, _) = runAsk.value ?: return null
+    runAsk.value = null
+    val (r, err) = app.repo.attemptInline { runQueuedShot(q.id) }
+    if (r == null) { app.repo.toast(err ?: "Couldn't run the shot"); return null }
+    queued.update { it.filter { x -> x.id != q.id } }
+    shotJobs.update { (it - r.job.id) + r.job.id }
+    return r.job
+}
+
+suspend fun SuiteStore.discardQueued(q: studio.muse.app.data.QueuedShot) {
+    val (_, err) = app.repo.attemptInline { deleteQueuedShot(q.id) }
+    if (err != null) return app.repo.toast(err)
+    queued.update { it.filter { x -> x.id != q.id } }
+}
+
+// ---------------------------------------------------------------- Library collections (build step 3)
+
+suspend fun SuiteStore.loadCollections() { runCatching { app.repo.api.libraryCollections() }.getOrNull()?.let { collections.value = it } }
+
+suspend fun SuiteStore.createCollection(name: String, takeIds: List<String> = emptyList()): Boolean {
+    val n = name.trim()
+    if (n.isEmpty() || n.length > 60) { app.repo.toast("Name the collection (up to 60 characters)"); return false }
+    val (col, err) = app.repo.attemptInline { createLibraryCollection(n, takeIds) }
+    if (col == null) { app.repo.toast(err ?: "Couldn't make the collection"); return false }
+    collections.update { listOf(col) + it.filter { c -> c.id != col.id } }
+    return true
+}
+
+/** Adds the take to the collection, or takes it out when it's in. */
+suspend fun SuiteStore.toggleInCollection(collectionId: String, takeId: String, inIt: Boolean): Boolean {
+    val (col, err) = app.repo.attemptInline { if (inIt) removeFromLibraryCollection(collectionId, listOf(takeId)) else addToLibraryCollection(collectionId, listOf(takeId)) }
+    if (col == null) { app.repo.toast(err ?: "Couldn't change the collection"); return false }
+    collections.update { it.map { c -> if (c.id == col.id) col else c } }
+    return true
+}
+
+suspend fun SuiteStore.renameCollection(id: String, name: String) {
+    val (col, err) = app.repo.attemptInline { renameLibraryCollection(id, name.trim().take(60)) }
+    if (col == null) return app.repo.toast(err ?: "Couldn't rename it")
+    collections.update { it.map { c -> if (c.id == col.id) col else c } }
+}
+
+suspend fun SuiteStore.deleteCollection(id: String) {
+    val (_, err) = app.repo.attemptInline { deleteLibraryCollection(id) }
+    if (err != null) return app.repo.toast(err)
+    collections.update { it.filter { c -> c.id != id } }
+    if (feedCollection.value == id) feedCollection.value = null
 }

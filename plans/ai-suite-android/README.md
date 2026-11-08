@@ -16,3 +16,10 @@ The approved plans/ai-suite-design.md features, in the current composer's style 
   with Play both and Reuse settings under each.
 
 PNGs: `suiteplan_<theme>_<state>_<width>.png` (rigs, rig_applied, feed, compare, take; 360 and 840 dp).
+
+## Build step 3: the Suite queue and Library collections
+- **Queue this shot** (composer, More): checked and priced, nothing held. It appears in Takes under **Queued** with
+  "Run · $x"; Run prices it again (saying when the price changed) and asks once before it runs. × discards it.
+- **Collections:** "Add to collection" on a take (More) ticks it into collections or makes a new one with it in. In
+  Takes, a row of collections filters the feed to one; your own (or, for the owner, any) can be renamed or deleted.
+PNGs: `suiteplan_<theme>_feed_queue_360.png`, `_collections_360.png`, `_run_confirm_360.png`.

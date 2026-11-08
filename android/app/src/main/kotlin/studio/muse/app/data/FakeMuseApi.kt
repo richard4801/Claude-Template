@@ -3,6 +3,7 @@ package studio.muse.app.data
 import studio.muse.core.edit.RecipeJson
 import studio.muse.core.edit.RecipeReference
 import studio.muse.core.edit.RecreateReplaceResult
+import studio.muse.core.edit.RecreateBriefsEstimate
 import studio.muse.core.edit.RecreateMatch
 import studio.muse.core.edit.RecreateApplyResult
 import studio.muse.core.edit.RecreateFillStart
@@ -1245,16 +1246,20 @@ class FakeMuseApi(
                 n != null -> RecreateSlotFill(s, "generating", jobId = "job_rx_$s", estimate = RECREATE_PRICE)
                 i in listOf(0, 2, 5) && videoTakes.isNotEmpty() -> RecreateSlotFill(s, "matched", takeId = videoTakes[i % videoTakes.size],
                     score = listOf(.82, .74, .79)[listOf(0, 2, 5).indexOf(i)], reason = listOf("Your take has the same push-in on a close-up", "Your take walks through a door in a wide shot", "Your take sits by a window, still")[listOf(0, 2, 5).indexOf(i)])
-                else -> RecreateSlotFill(s, "to_generate", estimate = RECREATE_PRICE, estimateLabel = RecreateText.money(RECREATE_PRICE))
+                else -> RecreateSlotFill(s, "to_generate", estimate = RECREATE_SWAP_PRICE, estimateLabel = RecreateText.money(RECREATE_SWAP_PRICE), method = "swap")
             }
         })
     }
-    override suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String?) = lock.withLock {
+    /** Demo (G2): swap by default (your model into the reference's own segment, $0.41), or a new shot ($0.64). */
+    override suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?) = lock.withLock {
         recreateSlots(id)
         val slot = FakeRecipes.cafeTrend().slots.firstOrNull { it.id == slotId } ?: throw ApiException("not_found", "That shot is gone")
-        RecreateSlotEstimate(slotId, RECREATE_PRICE, maxOf(2.0, kotlin.math.ceil(slot.lengthSec)))
+        if (method == "generate") RecreateSlotEstimate(slotId, RECREATE_PRICE, maxOf(2.0, kotlin.math.ceil(slot.lengthSec)), method = "generate",
+            buttonLabel = "Generate · ${maxOf(2.0, kotlin.math.ceil(slot.lengthSec)).toInt()} s · ${RecreateText.money(RECREATE_PRICE)}")
+        else RecreateSlotEstimate(slotId, RECREATE_SWAP_PRICE, slot.lengthSec, method = "swap", keepBackground = keepBackground ?: true,
+            segmentStart = slot.startSec, segmentEnd = slot.endSec, buttonLabel = "Swap in · ${String.format(java.util.Locale.ROOT, "%.1f", slot.lengthSec)} s · ${RecreateText.money(RECREATE_SWAP_PRICE)}")
     }
-    override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?) = lock.withLock {
+    override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?) = lock.withLock {
         recreateSlots(id)
         val made = recreateMade.getOrPut(id) { HashMap() }
         // Demo: a shot still being made can't be started again; a finished one can be made anew ("Make a new one").
@@ -1262,6 +1267,12 @@ class FakeMuseApi(
         made[slotId] = 0
         RecreateFillStart(slotId, "job_rx_$slotId")
     }
+    /** Demo (G8): Claude on the server writes the briefs for $0.02 (never charged in demo mode). */
+    override suspend fun estimateReferenceBriefs(id: String) = lock.withLock {
+        recreateSlots(id)
+        RecreateBriefsEstimate(true, slots = FakeRecipes.cafeTrend().slots.count { it.brief == null }, estimateUsd = 0.02, label = "Write the shot briefs · about $0.02")
+    }
+    override suspend fun writeReferenceBriefs(id: String): RecipeReference = reference(id)
     /** Demo: Fix shot swaps the clip in place (a running fill's job is refused, as on the server). */
     override suspend fun replaceRecipeSlot(id: String, slotId: String, sessionId: String, take: String, baseRevision: Int?) = lock.withLock {
         val all = recreateSlots(id)
@@ -1316,8 +1327,63 @@ class FakeMuseApi(
         return m
     }
     override suspend fun suiteFeed(q: SuiteFeedQuery): SuiteFeedPage = lock.withLock {
-        FakeSuiteFeed.page(q, jobs.toList(), takes.toList(), models.toList(), hiddenJobs.toSet(), takeModels.toMap())
+        val page = FakeSuiteFeed.page(q.copy(collection = null), jobs.toList(), takes.toList(), models.toList(), hiddenJobs.toSet(), takeModels.toMap())
+        val coll = q.collection?.let { id -> collections.firstOrNull { it.id == id } ?: throw ApiException("bad_request", "collection: unknown") }
+        when {
+            // A collection's feed: its takes and photos only (no pending jobs, no queue).
+            coll != null -> page.copy(items = page.items.filter { it.takeId != null && it.takeId in coll.takeIds.orEmpty() })
+            q.cursor == null -> page.copy(queued = queue.filter { q.status.isEmpty() || "queued" in q.status })
+            else -> page
+        }
     }
+
+    // Build step 3, demo (plans/api.md "Library collections and the Suite queue"): nothing is held until Run.
+    private val queue = mutableListOf<QueuedShot>()
+    private val collections = mutableListOf<LibraryCollection>()
+    override suspend fun queueSuiteShot(req: SuiteShotRequest): QueuedShot {
+        val e = suiteEstimate(req)
+        return lock.withLock {
+            if (queue.size >= 50) throw ApiException("queue_full", "Up to 50 shots in the queue")
+            QueuedShot("q_" + uid(), title = req.title ?: req.prompt?.take(60)?.ifBlank { null } ?: "Shot", modelId = req.modelId, estimate = e.estimate,
+                buttonLabel = "Run · ${RecreateText.money(e.estimate)}", prompt = req.prompt, draft = req.draft, createdAt = now()).also { queue.add(0, it); queuedReqs[it.id] = req }
+        }
+    }
+    private val queuedReqs = HashMap<String, SuiteShotRequest>()
+    override suspend fun suiteQueue() = lock.withLock { queue.toList() }
+    override suspend fun estimateQueuedShot(id: String): QueuedEstimate {
+        val q = lock.withLock { queue.firstOrNull { it.id == id } } ?: throw ApiException("not_found", "That queued shot is gone")
+        val e = suiteEstimate(queuedReqs.getValue(id))
+        return QueuedEstimate(id, e.estimate, "Run · ${RecreateText.money(e.estimate)}", changed = e.estimate != q.estimate)
+    }
+    override suspend fun runQueuedShot(id: String): QueuedRun {
+        val req = lock.withLock { queuedReqs[id]?.takeIf { queue.any { q -> q.id == id } } } ?: throw ApiException("not_found", "That queued shot is gone")
+        val j = createSuiteShot(req)
+        lock.withLock { queue.removeAll { it.id == id }; queuedReqs.remove(id) }
+        return QueuedRun(id, j)
+    }
+    override suspend fun deleteQueuedShot(id: String) { lock.withLock { queue.removeAll { it.id == id }; queuedReqs.remove(id) } }
+    private fun collectionView(c: LibraryCollection) = c.copy(count = c.takeIds.orEmpty().count { id -> takes.any { it.id == id } },
+        cover = c.takeIds.orEmpty().firstNotNullOfOrNull { id -> takes.firstOrNull { it.id == id }?.thumb })
+    override suspend fun libraryCollections() = lock.withLock { collections.sortedByDescending { it.updatedAt }.map(::collectionView) }
+    override suspend fun createLibraryCollection(name: String, takeIds: List<String>) = lock.withLock {
+        val n = name.trim()
+        if (n.isEmpty() || n.length > 60) throw ApiException("bad_request", "name: 1–60 characters")
+        LibraryCollection("col_" + uid(), n, "u_demo", mine = true, canEdit = true, createdAt = now(), updatedAt = now(), takeIds = takeIds.distinct())
+            .also { collections.add(0, it) }.let(::collectionView)
+    }
+    private fun editCollection(id: String, f: (LibraryCollection) -> LibraryCollection): LibraryCollection {
+        val i = collections.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: throw ApiException("not_found", "That collection is gone")
+        collections[i] = f(collections[i]).copy(updatedAt = now())
+        return collectionView(collections[i])
+    }
+    override suspend fun renameLibraryCollection(id: String, name: String) = lock.withLock { editCollection(id) { it.copy(name = name.trim().take(60)) } }
+    override suspend fun deleteLibraryCollection(id: String) { lock.withLock { collections.removeAll { it.id == id } } }
+    override suspend fun addToLibraryCollection(id: String, takeIds: List<String>) = lock.withLock {
+        takeIds.firstOrNull { t -> takes.none { it.id == t } }?.let { throw ApiException("bad_request", "takeIds: no take or photo $it") }
+        editCollection(id) { c -> c.copy(takeIds = (takeIds + c.takeIds.orEmpty()).distinct()) }
+    }
+    override suspend fun removeFromLibraryCollection(id: String, takeIds: List<String>) = lock.withLock { editCollection(id) { c -> c.copy(takeIds = c.takeIds.orEmpty() - takeIds.toSet()) } }
+    override suspend fun takeCollections(takeId: String) = lock.withLock { collections.filter { takeId in it.takeIds.orEmpty() }.map(::collectionView) }
 
     // ---- AI suite · Photo tool (workstream 3): the shoot pipeline above, priced like its preview, with the still rig check.
     /** The Photo request as the shoot it runs: the prompt is the scene, the preset is the template. */
@@ -1577,6 +1643,8 @@ class FakeMuseApi(
     companion object {
         /** Demo mode's price for a Recreate shot to generate (never charged). */
         const val RECREATE_PRICE = 0.64
+        /** Demo: a swap into the reference's own shot (never charged). */
+        const val RECREATE_SWAP_PRICE = 0.41
         /** `request.engine` of an Upscale job (the server's). */
         const val UPSCALE_ENGINE = "upscale"
         /** The prompt identity; names her Identity LoRA when it's trained and switched on. */

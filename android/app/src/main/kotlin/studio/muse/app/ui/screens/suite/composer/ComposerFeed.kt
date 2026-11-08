@@ -53,6 +53,14 @@ import studio.muse.app.ui.screens.edit.tabular
 import studio.muse.app.ui.screens.suite.SuiteFeedFilter
 import studio.muse.app.ui.screens.suite.compare
 import studio.muse.app.ui.screens.suite.loadFeed
+import studio.muse.app.ui.screens.suite.deleteCollection
+import studio.muse.app.ui.screens.suite.renameCollection
+import studio.muse.app.ui.screens.suite.loadCollections
+import studio.muse.app.ui.screens.suite.discardQueued
+import studio.muse.app.ui.screens.suite.confirmRun
+import studio.muse.app.ui.screens.suite.askRun
+import androidx.compose.foundation.horizontalScroll
+import studio.muse.app.ui.screens.edit.learn.LearnChip
 import studio.muse.app.ui.screens.suite.reuseSettings
 import studio.muse.app.ui.theme.muse
 import studio.muse.app.ui.theme.radii
@@ -77,7 +85,11 @@ fun SuiteFeedView(photo: Boolean, wide: Boolean, onOpen: (String) -> Unit, modif
     val comparing by store.compareIds.collectAsState()
     val st by c.repo.state.collectAsState()
     var older by remember { mutableStateOf(false) } // an older server without the feed: the Suite's jobs stand in
-    LaunchedEffect(filter, photo) { older = !store.loadFeed(photo) }
+    val collection by store.feedCollection.collectAsState()
+    val collections by store.collections.collectAsState()
+    val queued by store.queued.collectAsState()
+    LaunchedEffect(Unit) { store.loadCollections() }
+    LaunchedEffect(filter, photo, collection) { older = !store.loadFeed(photo) }
     // The feed's stand-in: the Suite's recent jobs, as cards.
     val shown: List<SuiteFeedItem> = items?.takeIf { !older } ?: st.jobs.filter { it.request.engine == studio.muse.app.data.SuiteRules.ENGINE }.map { j ->
         val t = st.takes.firstOrNull { it.jobId == j.id }
@@ -85,11 +97,22 @@ fun SuiteFeedView(photo: Boolean, wide: Boolean, onOpen: (String) -> Unit, modif
             poster = t?.thumb ?: j.thumb, progress = j.progress, takeId = t?.id, createdAt = j.createdAt)
     }.filter { filter.statuses.isEmpty() || it.status in filter.statuses }
     Column(modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Library collections: all takes, or one collection's.
+        if (collections.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LearnChip("All takes", on = collection == null) { store.feedCollection.value = null }
+            collections.forEach { col -> LearnChip("${col.name} (${col.count})", on = collection == col.id) { store.feedCollection.value = col.id } }
+        }
+        collections.firstOrNull { it.id == collection && it.canEdit }?.let { col -> CollectionTools(col) }
         LearnSegmented(SuiteFeedFilter.entries.map { it.label }, filter.ordinal, Modifier.fillMaxWidth().widthIn(max = 520.dp)) { store.feedFilter.value = SuiteFeedFilter.entries[it] }
         if (comparing.size == 1) T("Pick a second take to compare", m.scale.caption, m.roles.ink2)
         if (shown.isEmpty()) T(if (items == null && !older) "Loading your takes" else "No takes here yet. Generate one and it appears here.", m.scale.body, m.roles.ink2)
         val cols = if (wide) 4 else 2
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Queued: shots saved to run later; nothing is held until Run (priced again, then confirmed).
+            if (queued.isNotEmpty() && collection == null) Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                T("Queued", m.scale.label, m.roles.ink)
+                queued.forEach { q -> QueuedRow(q) }
+            }
             shown.chunked(cols).forEach { row ->
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     row.forEach { item ->
@@ -104,6 +127,69 @@ fun SuiteFeedView(photo: Boolean, wide: Boolean, onOpen: (String) -> Unit, modif
             if (!older && store.feedCursor != null) Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).press { scope.launch { store.loadFeed(photo, reset = false) } }
                 .semantics { role = Role.Button }, contentAlignment = Alignment.Center) { T("Show older takes", m.scale.label, m.roles.link) }
             Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+private fun QueuedRow(q: studio.muse.app.data.QueuedShot) {
+    val m = muse
+    val store = LocalContainer.current.suite
+    val scope = rememberCoroutineScope()
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.weight(1f)) {
+            T(q.title.ifBlank { "Shot" }, m.scale.label, m.roles.ink, maxLines = 1)
+            q.prompt?.takeIf { it.isNotBlank() }?.let { T(it, m.scale.caption, m.roles.ink2, maxLines = 1) }
+        }
+        Box(Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(m.radii.control)).background(m.roles.raised).press { scope.launch { store.askRun(q) } }
+            .padding(horizontal = 14.dp).semantics { role = Role.Button }, contentAlignment = Alignment.Center) { T(q.buttonLabel, m.scale.label.tabular(), m.roles.ink, maxLines = 1) }
+        Box(Modifier.size(44.dp).press { scope.launch { store.discardQueued(q) } }.semantics { contentDescription = "Remove ${q.title} from the queue"; role = Role.Button },
+            contentAlignment = Alignment.Center) { EIc("x", 18.dp, m.roles.ink2) }
+    }
+}
+
+/** A collection the viewer made (or the owner): rename it or delete it (its takes stay in the library). */
+@Composable
+private fun CollectionTools(col: studio.muse.app.data.LibraryCollection) {
+    val m = muse
+    val store = LocalContainer.current.suite
+    val scope = rememberCoroutineScope()
+    var renaming by remember(col.id) { mutableStateOf(false) }
+    var name by remember(col.id) { mutableStateOf(col.name) }
+    if (renaming) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(m.radii.control)).background(m.roles.field).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
+            androidx.compose.foundation.text.BasicTextField(name, { name = it.take(60) }, Modifier.fillMaxWidth().semantics { contentDescription = "Collection name" }, singleLine = true,
+                textStyle = m.scale.body.copy(color = m.roles.ink), cursorBrush = androidx.compose.ui.graphics.SolidColor(m.roles.accent))
+        }
+        Box(Modifier.heightIn(min = 44.dp).press { scope.launch { store.renameCollection(col.id, name); renaming = false } }.padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
+            T("Save", m.scale.label, m.roles.link, maxLines = 1)
+        }
+    } else Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Box(Modifier.heightIn(min = 44.dp).press { renaming = true }, contentAlignment = Alignment.Center) { T("Rename", m.scale.label, m.roles.link, maxLines = 1) }
+        Box(Modifier.heightIn(min = 44.dp).press { scope.launch { store.deleteCollection(col.id) } }, contentAlignment = Alignment.Center) {
+            T("Delete collection", m.scale.label, m.roles.danger, maxLines = 1)
+        }
+    }
+}
+
+/** Run · $x's one confirmation: today's price (and whether it changed since queuing). */
+@Composable
+fun SuiteRunConfirm(onRan: (String) -> Unit) {
+    val m = muse
+    val store = LocalContainer.current.suite
+    val scope = rememberCoroutineScope()
+    val ask by store.runAsk.collectAsState()
+    val (q, e) = ask ?: return
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .32f)).press { store.runAsk.value = null }, contentAlignment = Alignment.Center) {
+        Column(Modifier.padding(24.dp).widthIn(max = 420.dp).fillMaxWidth().clip(RoundedCornerShape(m.radii.container)).background(m.roles.canvas).press { }.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            T("Run this shot for ${studio.muse.core.edit.RecreateText.money(e.estimate)}?", m.scale.title, m.roles.ink)
+            T(q.title.ifBlank { "Shot" } + if (e.changed) ". The price changed since you queued it." else ".", m.scale.body, m.roles.ink2)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.heightIn(min = 48.dp).press { store.runAsk.value = null }.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) { T("Cancel", m.scale.label, m.roles.ink) }
+                Box(Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(m.radii.control)).background(m.roles.action).press { scope.launch { store.confirmRun()?.let { onRan(it.id) } } }
+                    .padding(horizontal = 18.dp).semantics { role = Role.Button }, contentAlignment = Alignment.Center) { T(e.buttonLabel, m.scale.label, m.roles.onAction, maxLines = 1) }
+            }
         }
     }
 }
