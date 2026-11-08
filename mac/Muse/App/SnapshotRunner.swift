@@ -23,6 +23,26 @@ enum SnapshotRunner {
         var probeTick = 0
         /// The rig panel's view is on screen (its onAppear / onDisappear), for the same-tick diagnosis.
         var rigPanelOnScreen = false
+        /// The Edit suite hides its media panel and inspector (the `_collapsed` layout shots).
+        var editCollapsed = false
+    }
+
+    /// Review mode: labels report truncation (`fitProbe`). Read once; a normal launch never probes.
+    nonisolated static let probing: Bool = !(ProcessInfo.processInfo.environment["MUSE_SNAPSHOT_DIR"] ?? "").isEmpty
+    /// The labels on screen that carry a fit probe: name, width drawn, width the text needs.
+    static var fitProbes: [UUID: (name: String, drawn: CGFloat, ideal: CGFloat)] = [:]
+    static func fitNote(_ id: UUID, _ name: String, drawn: CGFloat? = nil, ideal: CGFloat? = nil) {
+        var e = fitProbes[id] ?? (name, -1, -1)
+        e.name = name
+        if let drawn { e.drawn = drawn }
+        if let ideal { e.ideal = ideal }
+        fitProbes[id] = e
+    }
+    /// Probed labels drawn narrower than their text (truncated), as "name (drawn of ideal pt)".
+    static func truncatedLabels() -> [String] {
+        fitProbes.values.filter { $0.drawn >= 0 && $0.ideal >= 0 && $0.ideal > $0.drawn + 0.75 }
+            .map { "\($0.name) (\(Int($0.drawn.rounded())) of \(Int($0.ideal.rounded())) pt)" }
+            .sorted()
     }
 
     /// The last CinemaSuiteView body: did it see the picker open, and when (not observed: a plain static).
@@ -237,13 +257,24 @@ enum SnapshotRunner {
     // MARK: Edit layout audit
 
     /// The Edit suite on a real-shaped take (editCheck's 15 s take with sound), at the sizes the owner uses: 1280 × 800,
-    /// 1440 × 900 and a 13" MacBook Air's window (1470 × 882: its default 1470 × 956 screen less the menu bar and Dock).
-    /// Soft Tactile first. Rendered from the window's own drawing (`mac_editaudit_<theme>_<w>x<h>.png`), so a window larger
-    /// than the runner's screen still comes out whole.
+    /// 1440 × 900 and a 13" MacBook Air's window (1470 × 882: its default 1470 × 956 screen less the menu bar and Dock),
+    /// with the side panels shown and collapsed (`_collapsed`). Soft Tactile first. Rendered from the window's own drawing
+    /// (`mac_editaudit_<theme>_<w>x<h>[_collapsed].png`), so a window larger than the runner's screen still comes out whole.
+    /// Also the Edit part of the fit check: every probed label (`fitProbe`) must be drawn in full, else a CUT line in
+    /// fit-check.txt (Mac CI fails on it).
     private static func editLayoutShots(_ store: AppStore, dir: URL) async {
+        var lines: [String] = []
+        defer {
+            let f = dir.appendingPathComponent("fit-check.txt")
+            let before = (try? String(contentsOf: f, encoding: .utf8)) ?? ""
+            try? (before + lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n")).write(to: f, atomically: true, encoding: .utf8)
+        }
         // editCheck removes its rx_* takes when it ends; its MP4s stay in the temporary folder. Use its 15 s stereo take.
         let long = FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-edit-check/long.mp4")
-        guard FileManager.default.fileExists(atPath: long.path), let w = mainWindow else { return }
+        guard FileManager.default.fileExists(atPath: long.path), let w = mainWindow else {
+            lines.append("CUT edit not drawn (no test video or window)")
+            return
+        }
         let raw: [String: Any] = ["id": "rx_layout", "kind": "take", "title": "Living room dance", "videoUrl": long.absoluteString,
                                   "durationSec": 15, "width": 432, "height": 768, "fps": 30, "createdAt": Int64(Date().timeIntervalSince1970 * 1000)]
         guard let data = try? JSONSerialization.data(withJSONObject: raw), let take = try? JSONDecoder().decode(Take.self, from: data) else { return }
@@ -252,14 +283,30 @@ enum SnapshotRunner {
         defer { store.takes.removeAll { $0.id == take.id } }
         let original = w.frame
         let sizes: [(Int, Int)] = [(1280, 800), (1440, 900), (1470, 882)]
+        func shot(_ name: String, _ label: String) {
+            capture(dir.appendingPathComponent("mac_editaudit_\(name).png"))
+            let cut = truncatedLabels()
+            if cut.isEmpty {
+                lines.append("FITS edit \(label) (\(fitProbes.count) labels)")
+            } else {
+                lines.append(contentsOf: cut.map { "CUT edit \(label) \($0)" })
+            }
+        }
         for theme in [ThemeID.c, .a, .b, .d] {
             store.themeID = theme
+            state.editCollapsed = false
             store.openEdit(takeId: take.id)
             try? await Task.sleep(for: .seconds(8))
             for (width, height) in sizes {
+                NSLog("[snapshot] editaudit %dx%d %@", width, height, theme.rawValue)
                 w.setFrame(NSRect(x: original.minX, y: original.maxY - CGFloat(height), width: CGFloat(width), height: CGFloat(height)), display: true)
                 try? await Task.sleep(for: .seconds(1.5))
-                capture(dir.appendingPathComponent("mac_editaudit_\(theme.rawValue)_\(width)x\(height).png"))
+                shot("\(theme.rawValue)_\(width)x\(height)", "\(width)x\(height) \(theme.rawValue)")
+                state.editCollapsed = true
+                try? await Task.sleep(for: .seconds(1))
+                shot("\(theme.rawValue)_\(width)x\(height)_collapsed", "\(width)x\(height) \(theme.rawValue) collapsed")
+                state.editCollapsed = false
+                try? await Task.sleep(for: .seconds(0.5))
             }
             w.setFrame(original, display: true)
             store.openEdit(takeId: nil)

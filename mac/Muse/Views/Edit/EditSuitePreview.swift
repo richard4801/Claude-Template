@@ -2,52 +2,48 @@ import AVKit
 import MuseCore
 import SwiftUI
 
-/// The preview (E1): the live edit on the dark stage at the canvas shape, platform safe-area guides (TikTok / Reels /
-/// Shorts), Fit · 100 %, and the transport (time, back, play/pause, forward, mute, full screen).
+/// The viewer (E1, plans/edit-layout.md): "Safe area" as one segmented control (Off · TikTok · Reels · Shorts) and Fit ·
+/// 100 %; the live edit on the viewer tone at the canvas shape with the platform's safe-area guide; the transport below
+/// (timecode in tabular figures, back, a 40 pt play, forward, sound, full screen).
 struct EditSuitePreview: View {
     @Environment(\.theme) private var t
     @Bindable var session: EditSuiteSession
-    @Binding var showBin: Bool
-    var binHidden: Bool
+    var mediaHidden: Bool
+    var showMedia: () -> Void
     @State private var actualSize = false
     @State private var muted = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                if binHidden {
-                    SuiteIconButton(systemName: "sidebar.left", label: showBin ? "Hide the media bin" : "Show the media bin", tint: .white) { showBin.toggle() }
+        VStack(spacing: Space.s3) {
+            HStack(spacing: Space.s2) {
+                if mediaHidden {
+                    SuiteIconButton(systemName: "caret-double-right", label: "Show media", tint: t.roles.ink2, action: showMedia)
                 }
-                ForEach(EditSuite.SafeArea.allCases) { a in
-                    let on = session.state.safeArea == a
-                    Button { session.view { $0.safeArea = on ? nil : a } } label: {
-                        HStack(spacing: 5) {
-                            if a == .tiktok { Ph("music.note", 9) }
-                            Text(a.label).font(t.scale.micro.font)
-                        }
-                        .foregroundStyle(on ? Color(hex: 0xFF5A5F) : Color(hex: 0xA9A6A0))
-                        .padding(.horizontal, 9)
-                        .frame(height: 24)
-                        .overlay(Rectangle().strokeBorder(on ? Color(hex: 0xFF5A5F) : Color(hex: 0x4A4642), lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(a.label) guide")
-                    .accessibilityAddTraits(on ? .isSelected : [])
+                Text("Safe area").font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1).fitProbe("safe area")
+                EditSeg(options: safeAreas,
+                        selection: session.state.safeArea, height: 28, small: true) { a in
+                    session.view { $0.safeArea = a }
                 }
-                Spacer()
+                .fixedSize()
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Safe area")
+                Spacer(minLength: Space.s2)
                 Button { actualSize.toggle() } label: {
-                    Text(actualSize ? "Actual · 100%" : "Fit · 100%").font(t.mono(11)).foregroundStyle(Color(hex: 0xA9A6A0))
+                    Text(actualSize ? "Actual · 100%" : "Fit · 100%").font(t.scale.caption.font).monospacedDigit()
+                        .foregroundStyle(t.roles.ink2).lineLimit(1)
+                        .frame(minHeight: 28)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Fit the preview or show it at its actual size")
+                .accessibilityLabel(actualSize ? "Actual size" : "Fit")
             }
-            .padding(.horizontal, 14)
-            .frame(height: 40)
 
             GeometryReader { g in
                 let c = session.project.canvas
+                let inner = CGSize(width: max(1, g.size.width - 24), height: max(1, g.size.height - 24))
                 let aspect = CGFloat(c.width) / CGFloat(max(1, c.height))
-                let fit = min(g.size.width / aspect, g.size.height)
+                let fit = min(inner.width / aspect, inner.height)
                 let h = actualSize ? min(CGFloat(c.height) / (NSScreen.main?.backingScaleFactor ?? 2), fit * 1.0) : fit
                 let w = h * aspect
                 ZStack {
@@ -57,32 +53,53 @@ struct EditSuitePreview: View {
                 .frame(width: w, height: h)
                 .position(x: g.size.width / 2, y: g.size.height / 2)
             }
-            .padding(.horizontal, 16)
+            .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.editViewer))
+            .clipShape(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous))
 
             transport
         }
-        .background(suiteStage)
+        .padding(Space.s4)
+        .background(t.roles.canvas)
+    }
+
+    /// Off, then each platform's guide (the same state as the guides before: nil is off).
+    private var safeAreas: [(EditSuite.SafeArea?, String)] {
+        [(nil, "Off")] + EditSuite.SafeArea.allCases.map { a -> (EditSuite.SafeArea?, String) in (a, a.label) }
     }
 
     private var transport: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: Space.s2) {
             Text("\(EditSuite.clockTenths(session.playhead)) / \(EditSuite.clockTenths(session.duration))")
-                .font(t.mono(12.5)).foregroundStyle(Color(hex: 0xE7E1D6))
-                .monospacedDigit()
-            SuiteIconButton(systemName: "backward.fill", label: "Back to the start", tint: Color(hex: 0xE7E1D6)) { session.seek(0) }
-            SuiteIconButton(systemName: session.playing ? "pause.fill" : "play.fill", label: session.playing ? "Pause" : "Play",
-                            size: 34, tint: .white) { session.togglePlay() }
-            SuiteIconButton(systemName: "forward.fill", label: "Forward one second", tint: Color(hex: 0xE7E1D6)) { session.seek(session.playhead + 1) }
-            SuiteIconButton(systemName: muted ? "speaker.slash" : "speaker.wave.2", label: muted ? "Unmute the preview" : "Mute the preview",
-                            tint: Color(hex: 0xE7E1D6)) {
-                muted.toggle()
-                session.player.isMuted = muted
+                .font(t.scale.label.font).monospacedDigit().foregroundStyle(t.roles.ink)
+                .lineLimit(1)
+                .fitProbe("timecode")
+                .frame(minWidth: 120, alignment: .leading)
+            Spacer(minLength: 0)
+            SuiteIconButton(systemName: "skip-back", label: "Back to the start") { session.seek(0) }
+            Button { session.togglePlay() } label: {
+                Ph(session.playing ? "pause" : "play", 16)
+                    .foregroundStyle(t.roles.canvas)
+                    .frame(width: 40, height: 40)
+                    .background(Circle().fill(t.roles.ink))
+                    .contentShape(Circle())
             }
-            SuiteIconButton(systemName: "arrow.up.left.and.arrow.down.right", label: "Full screen", tint: Color(hex: 0xE7E1D6)) {
-                NSApp.keyWindow?.toggleFullScreen(nil)
+            .buttonStyle(.plain)
+            .help(session.playing ? "Pause (space)" : "Play (space)")
+            .accessibilityLabel(session.playing ? "Pause" : "Play")
+            SuiteIconButton(systemName: "skip-forward", label: "Forward one second") { session.seek(session.playhead + 1) }
+            Spacer(minLength: 0)
+            HStack(spacing: Space.s1) {
+                SuiteIconButton(systemName: muted ? "speaker-slash" : "speaker-high", label: muted ? "Unmute the preview" : "Mute the preview") {
+                    muted.toggle()
+                    session.player.isMuted = muted
+                }
+                SuiteIconButton(systemName: "arrows-out-simple", label: "Full screen") {
+                    NSApp.keyWindow?.toggleFullScreen(nil)
+                }
             }
+            .frame(minWidth: 120, alignment: .trailing)
         }
-        .frame(height: 48)
+        .frame(height: 40)
     }
 }
 

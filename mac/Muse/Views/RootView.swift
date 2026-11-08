@@ -46,7 +46,8 @@ struct Shell: View {
             VStack(spacing: 0) {
                 TitleBar()
                 HStack(spacing: 0) {
-                    Sidebar(compact: g.size.width < 1240)
+                    // The Edit suite needs the width (plans/edit-layout.md): the sidebar is its icon rail there.
+                    Sidebar(compact: g.size.width < 1240 || store.screen == .edit || store.screen == .editor)
                     ZStack(alignment: .top) {
                         screen
                             .id(store.screen)

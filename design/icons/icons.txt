@@ -248,3 +248,16 @@ coins
 microphone-slash
 images
 warning
+# Edit suite layout (plans/edit-layout.md)
+caret-double-left
+caret-double-right
+music-notes
+text-aa
+sticker
+lightbulb
+skip-back
+skip-forward
+magnifying-glass-minus
+magnifying-glass-plus
+lock
+lock-open

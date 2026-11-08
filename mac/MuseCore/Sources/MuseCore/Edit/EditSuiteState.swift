@@ -68,7 +68,7 @@ public enum EditSuite {
             case .video: return "Video"
             case .audio: return "Audio"
             case .speed: return "Speed"
-            case .anim: return "Anim"
+            case .anim: return "Animate"
             }
         }
     }
@@ -83,7 +83,7 @@ public enum EditSuite {
             case .music: return "Music"
             case .text: return "Text"
             case .stickers: return "Stickers"
-            case .templates: return "Templ."
+            case .templates: return "Templates"
             }
         }
     }
@@ -94,7 +94,7 @@ public enum EditSuite {
         public var id: String { rawValue }
         public var label: String {
             switch self {
-            case .tiktok: return "TikTok safe area"
+            case .tiktok: return "TikTok"
             case .reels: return "Reels"
             case .shorts: return "Shorts"
             }
@@ -427,7 +427,7 @@ public struct EditSuiteState: Sendable {
             // Later tracks draw on top: show them higher (the Hook row always first).
             let tracks = project.tracks.reversed().filter { $0.kind == k }
             for t in tracks.filter({ $0.name == "Hook" }) + tracks.filter({ $0.name != "Hook" }) {
-                out.append(EditSuite.Row(trackId: t.id, kind: t.kind, label: (t.name ?? Self.defaultLabel(t.kind)).uppercased(), icon: Self.icon(t.kind)))
+                out.append(EditSuite.Row(trackId: t.id, kind: t.kind, label: t.name ?? Self.defaultLabel(t.kind), icon: Self.icon(t.kind)))
             }
         }
         return out

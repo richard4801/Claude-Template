@@ -8,24 +8,36 @@ import SwiftUI
 /// The dark stage behind the preview (E1/E3).
 let suiteStage = Color(hex: 0x1A1816)
 
-/// An icon-only button: tooltip + VoiceOver label.
+/// The viewer's tone behind the picture (plans/edit-layout.md): near-black in every theme.
+extension Theme {
+    var editViewer: Color {
+        switch id {
+        case .c: return Color(hex: 0x1C1E21)
+        case .a: return Color(hex: 0x141210)
+        case .b: return Color(hex: 0x000000)
+        case .d: return Color(hex: 0x111111)
+        }
+    }
+}
+
+/// An icon-only button: tooltip + VoiceOver label. 32 pt target by default (28 pt minimum), Phosphor at 16–20 pt.
 struct SuiteIconButton: View {
     @Environment(\.theme) private var t
     var systemName: String
     var label: String
     var on = false
     var disabled = false
-    var size: CGFloat = 30
+    var size: CGFloat = 32
     var tint: Color?
     var action: () -> Void
     @State private var hover = false
 
     var body: some View {
         Button(action: action) {
-            Ph(systemName, size * 0.46)
-                .foregroundStyle(disabled ? t.muted.opacity(0.45) : (on ? t.accent : (tint ?? t.ink)))
-                .frame(width: size, height: size)
-                .background(RoundedRectangle(cornerRadius: t.controlRadius).fill(hover && !disabled ? t.surface2 : .clear))
+            Ph(systemName, min(16, max(12, size * 0.5)))
+                .foregroundStyle(disabled ? t.roles.ink2.opacity(0.45) : (on ? t.roles.accent : (tint ?? t.roles.ink)))
+                .frame(width: max(28, size), height: max(28, size))
+                .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(hover && !disabled ? t.roles.field : .clear))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -36,7 +48,7 @@ struct SuiteIconButton: View {
     }
 }
 
-/// Upper-case section label ("STYLE", "POSITION").
+/// A section title in `heading` ("Style", "Hooks"), with an optional `caption` note on the right.
 struct SuiteLabel: View {
     @Environment(\.theme) private var t
     var text: String
@@ -44,46 +56,49 @@ struct SuiteLabel: View {
     init(_ text: String, trailing: String? = nil) { self.text = text; self.trailing = trailing }
     var body: some View {
         HStack {
-            Text(text).font(t.scale.label.font).foregroundStyle(t.ink)
+            Text(text).font(t.scale.heading.font).foregroundStyle(t.roles.ink).lineLimit(1)
             Spacer(minLength: 4)
-            if let trailing { Text(trailing).font(t.body(12)).foregroundStyle(t.muted) }
+            if let trailing { Text(trailing).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1) }
         }
     }
 }
 
-/// A row of boxed choices (ratio, resolution, format…): the chosen one filled with ink.
+/// A segmented control (ratio, resolution, format…) on the `field` track; the chosen segment is `raised`.
 struct EditSeg<T: Hashable>: View {
     @Environment(\.theme) private var t
     var options: [(T, String)]
     var selection: T?
-    var mono = true
-    var height: CGFloat = 30
+    var mono = true // kept for old call sites: sentence case in the text face everywhere (design direction)
+    var height: CGFloat = 32
+    var small = false
     var action: (T) -> Void
 
     var body: some View {
-        HStack(spacing: 0) {
+        let r = t.roles
+        let inner = RoundedRectangle(cornerRadius: max(0, t.radii.control - 2), style: .continuous)
+        HStack(spacing: 2) {
             ForEach(options.indices, id: \.self) { i in
                 let (v, l) = options[i]
                 let on = v == selection
                 Button { action(v) } label: {
-                    Text(l) // sentence case everywhere (design direction); `mono` is kept for old call sites
-                        .font(t.body(13, on ? .semibold : .regular))
+                    Text(l)
+                        .font(small ? t.scale.caption.font : t.scale.label.font)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .foregroundStyle(on ? t.bg : t.muted)
+                        .fitProbe("segment \(l)")
+                        .foregroundStyle(on ? r.ink : r.ink2)
+                        .padding(.horizontal, small ? Space.s2 + 2 : Space.s3)
                         .frame(maxWidth: .infinity)
-                        .frame(height: height)
-                        .padding(.horizontal, 6)
-                        .background(Rectangle().fill(on ? t.ink : t.surface))
+                        .frame(height: max(24, height - 4))
+                        .background(inner.fill(on ? (t.isDark ? r.hairline : r.raised) : .clear))
+                        .overlay(inner.strokeBorder(r.selection, lineWidth: on && t.isD ? 2 : 0))
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(on ? .isSelected : [])
-                if i < options.count - 1 { Rectangle().fill(t.line).frame(width: 1, height: height) }
             }
         }
-        .overlay(RoundedRectangle(cornerRadius: t.isA ? 0 : 6).strokeBorder(t.line, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: t.isA ? 0 : 6))
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(r.field))
     }
 }
 
@@ -109,9 +124,9 @@ struct SuiteSlider: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(label).font(t.scale.label.font).foregroundStyle(t.ink)
+                Text(label).font(t.scale.label.font).foregroundStyle(t.roles.ink)
                 Spacer(minLength: 4)
-                Text(format(draft ?? value)).font(t.mono(11.5)).foregroundStyle(t.ink)
+                Text(format(draft ?? value)).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
             }
             Slider(value: Binding(get: { draft ?? value }, set: { draft = $0 }), in: range, onEditingChanged: { editing in
                 if !editing, let d = draft {
@@ -140,11 +155,11 @@ struct SuiteToggleRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(t.body(13.5, .semibold)).foregroundStyle(t.ink)
-                if let hint { Text(hint).font(t.body(12)).foregroundStyle(t.muted) }
+                Text(title).font(t.scale.label.font).foregroundStyle(t.roles.ink)
+                if let hint { Text(hint).font(t.scale.caption.font).foregroundStyle(t.roles.ink2) }
             }
             Spacer(minLength: 6)
-            if let trailingNote { Text(trailingNote).font(t.mono(11)).foregroundStyle(t.muted) }
+            if let trailingNote { Text(trailingNote).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2) }
             if busy { ProgressView().controlSize(.small) }
             MToggle(isOn: Binding(get: { isOn }, set: { action($0) }))
                 .accessibilityLabel(title)
@@ -154,7 +169,8 @@ struct SuiteToggleRow: View {
     }
 }
 
-/// A small text button with a border (Ripple, Cut silences…), optionally filled.
+/// A text button with an optional icon (Ripple, Cut silences, Import…): `field` by default, `filled` (ink) when a toggle is
+/// on, `accent` for the one action, `plain` without a fill. 32 pt tall, `label` type, Phosphor at 18–20 pt.
 struct SuiteToolButton: View {
     @Environment(\.theme) private var t
     var title: String
@@ -162,32 +178,47 @@ struct SuiteToolButton: View {
     var filled = false
     var accent = false
     var disabled = false
+    var plain = false
+    /// Icon only (the title becomes the tooltip and the accessibility label).
+    var iconOnly = false
     var action: () -> Void
+    @State private var hover = false
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                if let icon { Ph(icon, 11.5) }
-                Text(title).font(t.body(12.5, .medium)).lineLimit(1)
+        let r = t.roles
+        let shape = RoundedRectangle(cornerRadius: t.radii.control, style: .continuous)
+        let bg: Color = accent ? r.action : filled ? r.ink : plain ? (hover && !disabled ? r.field : .clear) : r.field
+        let fg: Color = disabled ? r.ink2.opacity(0.5) : accent ? r.onAction : filled ? r.canvas : r.ink
+        let button = Button(action: action) {
+            HStack(spacing: Space.s2) {
+                if let icon { Ph(icon, 15) }
+                if !iconOnly { Text(title).font(t.scale.label.font).lineLimit(1).fitProbe(title) }
             }
-            .foregroundStyle(disabled ? t.muted.opacity(0.5) : (accent ? t.accentInk : filled ? t.bg : t.ink))
-            .padding(.horizontal, 10)
-            .frame(height: 28)
-            .background(RoundedRectangle(cornerRadius: t.isA ? 0 : 6).fill(accent ? t.accentFill : (filled ? t.ink : t.surface)))
-            .overlay(RoundedRectangle(cornerRadius: t.isA ? 0 : 6).strokeBorder(filled || accent ? .clear : t.line, lineWidth: 1))
-            .contentShape(Rectangle())
+            .foregroundStyle(fg)
+            .padding(.horizontal, iconOnly ? 0 : Space.s3)
+            .frame(minWidth: iconOnly ? 32 : nil)
+            .frame(height: 32)
+            .background(shape.fill(bg))
+            .overlay(shape.strokeBorder(r.ink, lineWidth: accent && t.isD ? 2 : 0))
+            .contentShape(shape)
         }
         .buttonStyle(.plain)
         .disabled(disabled)
+        .onHover { hover = $0 }
+        if iconOnly {
+            button.help(title).accessibilityLabel(title)
+        } else {
+            button
+        }
     }
 }
 
-/// A divider line in the theme's colour.
+/// A hairline in the theme's colour.
 struct SuiteRule: View {
     @Environment(\.theme) private var t
     var vertical = false
     var body: some View {
-        Rectangle().fill(t.line).frame(width: vertical ? 1 : nil, height: vertical ? nil : 1)
+        Rectangle().fill(t.roles.hairline).frame(width: vertical ? 1 : nil, height: vertical ? nil : 1)
     }
 }
 
@@ -214,7 +245,7 @@ struct SuiteSwatch: View {
     }
 }
 
-/// "MUST"-style corner card title used by the inspector panels (E2): a title row and the panel's content.
+/// An inspector group (E2): a `heading` title and its settings, grouped by space (no box, no rule).
 struct EditPanel<Content: View>: View {
     @Environment(\.theme) private var t
     var title: String
@@ -222,16 +253,49 @@ struct EditPanel<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Space.s3) {
             HStack {
-                Text(title).font(t.body(14.5, .semibold)).foregroundStyle(t.ink)
+                Text(title).font(t.scale.heading.font).foregroundStyle(t.roles.ink).lineLimit(1)
                 Spacer()
-                if let trailing { Text(trailing).font(t.body(12)).foregroundStyle(t.muted) }
+                if let trailing { Text(trailing).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1) }
             }
             content()
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
-        .overlay(alignment: .bottom) { SuiteRule() }
+        .padding(.horizontal, Space.s4)
+        .padding(.vertical, Space.s3)
+    }
+}
+
+// MARK: Fit probe (review mode)
+
+extension View {
+    /// Review mode only (`MUSE_SNAPSHOT_DIR`): reports this single-line label when it's drawn narrower than its text needs,
+    /// i.e. truncated. The fit check writes a CUT line for each (SnapshotRunner.editLayoutShots). A no-op otherwise.
+    @ViewBuilder func fitProbe(_ name: String) -> some View {
+        if SnapshotRunner.probing { modifier(FitProbe(name: name)) } else { self }
+    }
+}
+
+/// Measures the label as drawn and its ideal width (a hidden fixed-size copy).
+struct FitProbe: ViewModifier {
+    let name: String
+    @State private var id = UUID()
+
+    func body(content: Content) -> some View {
+        content
+            .background(GeometryReader { g in
+                Color.clear
+                    .onAppear { SnapshotRunner.fitNote(id, name, drawn: g.size.width) }
+                    .onChange(of: g.size.width) { _, w in SnapshotRunner.fitNote(id, name, drawn: w) }
+            })
+            .background(
+                content.fixedSize().hidden().allowsHitTesting(false).accessibilityHidden(true)
+                    .background(GeometryReader { g in
+                        Color.clear
+                            .onAppear { SnapshotRunner.fitNote(id, name, ideal: g.size.width) }
+                            .onChange(of: g.size.width) { _, w in SnapshotRunner.fitNote(id, name, ideal: w) }
+                    })
+            )
+            .onDisappear { SnapshotRunner.fitProbes[id] = nil }
     }
 }

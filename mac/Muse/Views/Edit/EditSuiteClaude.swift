@@ -11,7 +11,7 @@ struct ClaudeBadge: View {
     var body: some View {
         HStack(spacing: 3) {
             Ph("sparkle", 8.5).accessibilityHidden(true)
-            Text("Claude").font(t.mono(10.5, .semibold))
+            Text("Claude").font(t.scale.micro.font).monospacedDigit()
         }
         .foregroundStyle(t.accentInk)
         .padding(.horizontal, 6)

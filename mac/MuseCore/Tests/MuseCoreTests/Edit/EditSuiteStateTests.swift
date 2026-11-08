@@ -236,7 +236,7 @@ final class EditSuiteStateTests: XCTestCase {
         s.playhead = 5
         XCTAssertTrue(s.addText("hello"))
         assertValid(s)
-        XCTAssertEqual(s.rows.first?.label, "HOOK", "hook row on top")
+        XCTAssertEqual(s.rows.first?.label, "Hook", "hook row on top")
         XCTAssertEqual(s.rows.last?.kind, .main)
     }
 
