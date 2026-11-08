@@ -42,6 +42,7 @@ enum SnapshotRunner {
     static func runIfRequested(_ store: AppStore) {
         guard let dir else { return }
         setvbuf(stdout, nil, _IOLBF, 0)   // line-buffered, so the CI log keeps the last lines if the app stops (Edit check)
+        installCrashLogging()
         Task { @MainActor in
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             if let w = mainWindow {
@@ -363,6 +364,25 @@ struct SnapshotOverlay: View {
                     .museFloat(t)
             }
             .padding(.top, 52)
+        }
+    }
+
+    /// Review mode only: an uncaught Objective-C exception or a fatal signal writes its stack to the log before the app
+    /// dies, so CI shows where (the macOS crash report isn't always written on the runner).
+    static func installCrashLogging() {
+        NSSetUncaughtExceptionHandler { e in
+            print("CRASH uncaught exception \(e.name.rawValue): \(e.reason ?? "")")
+            for s in e.callStackSymbols.prefix(60) { print("CRASH   \(s)") }
+            fflush(stdout)
+        }
+        for sig in [SIGABRT, SIGILL, SIGSEGV, SIGBUS, SIGTRAP, SIGFPE] {
+            signal(sig) { n in
+                print("CRASH signal \(n)")
+                for s in Thread.callStackSymbols.prefix(60) { print("CRASH   \(s)") }
+                fflush(stdout)
+                signal(n, SIG_DFL)
+                raise(n)
+            }
         }
     }
 }
