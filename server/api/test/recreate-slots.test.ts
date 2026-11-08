@@ -13,6 +13,7 @@ import { LOOK_IDS } from '../src/editor/lookpack.js';
 import { paletteIds } from '../src/editor/photo.js';
 import { editSessionsOf } from '../src/editor/sessions.js';
 import type { Recipe } from '../src/recreate/analyze.js';
+import { lutFor } from '../src/suite/looks.js';
 import { buildProject, editorTransition } from '../src/recreate/assemble.js';
 import { RECREATE_TOOLS } from '../src/recreate/mcpTools.js';
 import { BriefSchema, matchSlots, scoreTake, shotRequestFor, withBriefs, type Candidate } from '../src/recreate/slots.js';
@@ -83,6 +84,21 @@ describe('Recreate · assembly (unit)', () => {
     expect(editorTransition({ ...RECIPE.transitions[0]!, kind: 'whip', durationSec: 0.2 })).toEqual({ kind: 'whip', durationSec: 0.2 });
     expect(editorTransition({ ...RECIPE.transitions[0]!, kind: 'fade', durationSec: 5 })).toEqual({ kind: 'black', durationSec: 2 });
     expect(editorTransition({ ...RECIPE.transitions[0]!, kind: 'unknown' })).toBeUndefined();
+  });
+});
+
+describe('Recreate · assembly under playbook directives (unit)', () => {
+  it('cuts only, a transition limit, and a proven recipe\'s look when the reference\'s can\'t be mapped', () => {
+    const takes = { s1: TAKE('tA'), s2: TAKE('tB'), s3: TAKE('tC') };
+    const cuts = buildProject(RECIPE, 'take_src', takes, { transitions: false });
+    expect(M.mainTrack(cuts.project).items.map(c => (c as M.VideoClip).transitionIn)).toEqual([undefined, undefined, undefined]);
+    expect(M.timeline(cuts.project)[2]!.startSec).toBeCloseTo(RECIPE.slots[2]!.startSec, 2); // still on the reference's cut
+    const short = buildProject(RECIPE, 'take_src', takes, { maxTransitionSec: 0.2 });
+    expect((M.mainTrack(short.project).items[2] as M.VideoClip).transitionIn).toEqual({ kind: 'fade', durationSec: 0.2 });
+    const far = { ...RECIPE, grade: { ...RECIPE.grade, look: { ...RECIPE.grade.look!, distance: 0.7 } } };
+    expect((M.mainTrack(buildProject(far, 'take_src', takes).project).items[0] as M.VideoClip).look).toBeUndefined();
+    const borrowed = buildProject(far, 'take_src', takes, { fallbackLook: { id: 'golden_warmth' } });
+    expect((M.mainTrack(borrowed.project).items[0] as M.VideoClip).look?.lut).toBe(lutFor('palettes', 'golden_warmth')); // its pack twin
   });
 });
 
@@ -248,6 +264,36 @@ describe.skipIf(!hasFfmpeg)('Recreate · the flow through the API and Claude\'s 
     expect((await owner.req('POST', `/v1/recreate/references/${refId}/apply`, { sessionId, baseRevision: 0, slots: { s1: 't_pan' } })).status).toBe(409); // stale
     expect((await member.req('POST', `/v1/recreate/references/${refId}/match`, {})).status).toBe(404); // the owner's reference
   }, 60_000);
+
+  it('pinned rules change Claude\'s plan: cuts only and a still camera; the owner\'s own options in the app win; gaps reported once', async () => {
+    const pinRule = async (text: string) => (await owner.req('POST', '/v1/learn/playbook', { text, pinned: true })).body.id;
+    const slots = { s1: 't_pan', s3: 't_static' };
+    const plain = await tool('apply_recipe').run(env(), { referenceId: refId, sessionId, slots, baseRevision: (await editSessionsOf(a.ctx).row(ownerUser, sessionId)).revision }) as any;
+    const p0 = (await editSessionsOf(a.ctx).row(ownerUser, sessionId)).project as M.EditProject;
+    expect(plain.playbook).toEqual({ followed: [], followYourself: [] });
+    expect((M.mainTrack(p0).items[0] as M.VideoClip).keyframes?.x?.length).toBeGreaterThan(1); // the pan is replayed
+
+    const ids = [await pinRule('Hard cuts only'), await pinRule('Keep the camera still'), await pinRule('Open on her face')];
+    const out = await tool('apply_recipe').run(env(), { referenceId: refId, sessionId, slots, options: { camera: true, transitions: true } }) as any;
+    expect(out.playbook.followed.map((f: any) => f.effect).sort()).toEqual(['hard cuts only', 'no camera moves']);
+    expect(out.playbook.followYourself.map((f: any) => f.text)).toEqual(['Open on her face']);
+    const p1 = (await editSessionsOf(a.ctx).row(ownerUser, sessionId)).project as M.EditProject;
+    for (const c of M.mainTrack(p1).items as M.VideoClip[]) { expect(c.transitionIn).toBeUndefined(); expect(c.keyframes?.x).toBeUndefined(); }
+    // Claude can't add one back afterwards.
+    await expect(editSessionsOf(a.ctx).applyClaude(ownerUser, sessionId, { baseRevision: out.revision, ops: [{ op: 'transition', clipId: 'all', kind: 'fade', durationSec: 0.3 }] }))
+      .rejects.toMatchObject({ code: 'playbook_rule' });
+
+    // The owner, in the app, asks for the camera moves explicitly: their choice wins over their own rule.
+    const app = (await owner.req('POST', `/v1/recreate/references/${refId}/apply`, { sessionId, baseRevision: out.revision, slots, options: { camera: true } })).body;
+    expect(app.playbook.followed).toHaveLength(2);
+    const p2 = (await editSessionsOf(a.ctx).row(ownerUser, sessionId)).project as M.EditProject;
+    expect((M.mainTrack(p2).items[0] as M.VideoClip).keyframes?.x?.length).toBeGreaterThan(1);
+
+    // The flash inside s3 is something the editor can't do: one gap, however many times the recipe is applied.
+    const gaps = (await owner.req('GET', '/v1/learn/gaps')).body as any[];
+    expect(gaps.find(g => g.key === 'effect:flash-in-shot')).toMatchObject({ count: 1, kind: 'effect' });
+    for (const id of ids) await owner.req('DELETE', `/v1/learn/playbook/${id}`);
+  });
 
   it('the playbook tools call the learning editor: read, add a rule (unpinned), report a gap; owner only', async () => {
     const add = await tool('playbook_add').run(env(), { text: 'Captions sit above the lower third on talking shots', area: 'text', evidence: [{ kind: 'note', note: 'Tuff edit' }] }) as any;
