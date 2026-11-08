@@ -154,6 +154,8 @@ data class EditSuiteUi(
     val session: SessionUi? = null,
     /** The owner's editor: the Claude button shows (dimmed until the session is there). */
     val claudeOwner: Boolean = false,
+    /** Tablet (plans/edit-layout.md): the inspector is hidden ("Show inspector" in the top bar). It starts shown. */
+    val inspectorHidden: Boolean = false,
 ) {
     val duration: Double get() = project?.let(::durationSec) ?: 0.0
     val ready: Boolean get() = phase == SuitePhase.Ready && project != null
