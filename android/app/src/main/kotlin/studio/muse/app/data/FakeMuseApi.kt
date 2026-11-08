@@ -742,6 +742,8 @@ class FakeMuseApi(
 
     override suspend fun startEditorJob(req: EditorJobRequest): EditorJob = lock.withLock {
         checkKeepPoints(req)
+        // WS1 guardrails: paid helpers switched off by the owner (the free ones, cuts and beats, still run).
+        if (!editorSettingsDemo.on && req.kind in listOf("captions", "matte", "denoise")) throw ApiException("editor_paid_off", "AI editing helpers are switched off for this studio")
         if (failNext) { failNext = false; throw ApiException("failed", "Something went wrong · try again") }
         val d = editorDuration(req.source)
         val id = "ej_${++editorSeq}"
@@ -1212,6 +1214,23 @@ class FakeMuseApi(
         if (id !in recreatePolls) throw ApiException("not_found", "Reference not found")
         return FakeRecipes.cafeTrend().slots.map { it.id }
     }
+    // WS1 guardrails, demo: the paid helpers' switch and daily limit (nothing is ever charged in demo mode).
+    private var editorSettingsDemo = EditorSettings(paidHelpers = "on", capPerDayUsd = null, todayUsd = 0.42, markup = 2.0, provider = "mock")
+    override suspend fun editorSettings() = lock.withLock { editorSettingsDemo }
+    override suspend fun patchEditorSettings(paidHelpers: String?, cap: Double?, resetCap: Boolean) = lock.withLock {
+        if (paidHelpers != null && paidHelpers != "on" && paidHelpers != "off") throw ApiException("bad_request", "paidHelpers: on or off")
+        if (cap != null && (cap < 0 || cap > 1000)) throw ApiException("bad_request", "capPerDayUsd: 0 to 1000")
+        editorSettingsDemo = editorSettingsDemo.copy(paidHelpers = paidHelpers ?: editorSettingsDemo.paidHelpers,
+            capPerDayUsd = if (resetCap) null else cap ?: editorSettingsDemo.capPerDayUsd)
+        editorSettingsDemo
+    }
+    /** Demo: the editor's features follow the switch (paid helpers off: captions, matte and denoise unavailable). */
+    override suspend fun editorFeatures(): kotlinx.serialization.json.JsonObject = lock.withLock {
+        val on = editorSettingsDemo.on
+        fun avail(b: Boolean) = kotlinx.serialization.json.JsonObject(mapOf("available" to kotlinx.serialization.json.JsonPrimitive(b)))
+        kotlinx.serialization.json.JsonObject(mapOf("paid" to avail(on), "captions" to avail(on), "matte" to avail(on), "denoise" to avail(on), "cuts" to avail(true)))
+    }
+
     override suspend fun matchReference(id: String, modelId: String?) { lock.withLock { recreateSlots(id) } }
     override suspend fun referenceFill(id: String): RecreateFill = lock.withLock {
         val slots = recreateSlots(id)

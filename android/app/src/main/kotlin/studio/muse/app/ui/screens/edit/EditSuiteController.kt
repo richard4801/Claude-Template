@@ -78,8 +78,11 @@ interface EditBackend {
     suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?>
     /** A helper's result added an asset the device doesn't have yet (background removal's matte): fetch [url] for it. */
     fun assetArrived(assetId: String, url: String) {}
-    /** Null while background removal can run; otherwise the plain line to show instead ("Coming soon"). */
-    suspend fun matteUnavailable(): String? = null
+    /**
+     * The paid helpers that can't run now, each with the plain line shown instead (WS1 guardrails: `GET /v1/editor/features`
+     * paid.available and each helper's available): captions, matte, denoise. Empty = all available.
+     */
+    suspend fun helpersOff(): Map<String, String> = emptyMap()
 }
 
 /** Everything the editor can be asked to do (one sealed list, so the screen is a pure function of state + [act]). */
@@ -432,7 +435,7 @@ class EditSuiteController(
             is EditAction.AutoDuck -> if (SuiteOps.musicTrack(project ?: return) == null) say("Add music first · Audio → Music") else change { SuiteOps.duck(it, a.on) }
             is EditAction.DuckTimes -> change(a.done) { p -> val t = SuiteOps.musicTrack(p) ?: return@change null; val d = t.duck ?: return@change null
                 p.updateTrack(t.id) { it.copy(duck = d.copy(attackSec = r2(a.attackSec.coerceIn(0.05, 2.0)), releaseSec = r2(a.releaseSec.coerceIn(0.05, 3.0)))) } }
-            is EditAction.NoiseReduction -> noiseReduction(u, a.on)
+            is EditAction.NoiseReduction -> u.helpersOff["denoise"]?.takeIf { a.on }?.let { say(it) } ?: noiseReduction(u, a.on)
             is EditAction.Enhance -> { val c = soundClip(u) ?: return; change { p -> p.updateItem(c.id) { setVoice(it, enhance = a.on) } } }
             is EditAction.Voice -> { val c = soundClip(u) ?: return; change { p -> p.updateItem(c.id) { setVoice(it, effect = a.effect) } } }
             is EditAction.Beats -> _ui.update { it.copy(beatMarks = a.marks) }
@@ -450,7 +453,7 @@ class EditSuiteController(
                 if (change(refused = "No room for text there") { p -> SuiteOps.addHook(p, hook, u.playheadSec)?.let { (np, id) -> newId = id; np } }) _ui.update { it.copy(selectedId = newId) }
             }
             is EditAction.EditText -> change(done = true) { p -> p.updateItem(a.id) { (it as? TextItem)?.copy(text = a.text.take(500).ifBlank { it.text }) ?: it } }
-            EditAction.AutoCaptions -> autoCaptions()
+            EditAction.AutoCaptions -> u.helpersOff["captions"]?.let { say(it) } ?: autoCaptions()
             is EditAction.CaptionTab -> _ui.update { it.copy(captionTab = a.tab) }
             is EditAction.CaptionStyleOf -> if (u.captionTrack == null) say("Make captions first · Auto-captions") else change { p -> SuiteOps.captionStyle(p) { SuiteOps.switchPreset(it, a.preset) } }
             is EditAction.CaptionFont -> change { p -> SuiteOps.captionStyle(p) { it.copy(text = it.text.copy(font = a.font, weight = if (a.font == Font.MARKER || a.font == Font.SERIF) 400 else it.text.weight.coerceAtLeast(700))) } }
@@ -499,29 +502,32 @@ class EditSuiteController(
     private fun open(panel: Panel?) {
         _ui.update { it.copy(panel = panel) }
         when (panel) {
-            Panel.CAPTIONS -> { if (_ui.value.captionTrack == null) estimate("captions"); estimate("cuts", silenceOnly()) }
-            Panel.AUDIO -> { estimate("denoise"); if (SuiteOps.musicTrack(project ?: return) != null) estimate("beats", source = musicSource()) }
+            Panel.CAPTIONS -> { checkHelpers { if (_ui.value.captionTrack == null && "captions" !in _ui.value.helpersOff) estimate("captions") }; estimate("cuts", silenceOnly()) }
+            Panel.AUDIO -> { checkHelpers { if ("denoise" !in _ui.value.helpersOff) estimate("denoise") }; if (SuiteOps.musicTrack(project ?: return) != null) estimate("beats", source = musicSource()) }
             Panel.EFFECTS -> if (_ui.value.effectsTab == "Mask") matteTab()
             Panel.SPEED -> _ui.update { it.copy(speedCurveTab = it.activeClip?.speedCurve != null) }
             else -> {}
         }
     }
 
-    private var matteChecked = false
+    private var helpersChecked = false
 
     /**
-     * The Mask tab: whether background removal can run (asked once), then its price. While the server says it can't
-     * (the cut-out is still the mock), Remove background and Tap to keep read "Coming soon" and nothing is priced.
+     * Which paid helpers can run (asked once per editor), then [then]. While the server says one can't (the owner
+     * switched paid helpers off, or the cut-out is still the mock), it reads as a plain line and nothing is priced.
      */
-    private fun matteTab() {
-        if (matteChecked) { if (_ui.value.matteOff == null) estimate("matte"); return }
-        matteChecked = true
+    private fun checkHelpers(then: () -> Unit) {
+        if (helpersChecked) { then(); return }
+        helpersChecked = true
         scope.launch {
-            val off = backend.matteUnavailable()
-            _ui.update { it.copy(matteOff = off, keep = if (off != null) null else it.keep) }
-            if (off == null) estimate("matte")
+            val off = runCatching { backend.helpersOff() }.getOrDefault(emptyMap())
+            _ui.update { it.copy(helpersOff = off, matteOff = off["matte"], keep = if (off["matte"] != null) null else it.keep) }
+            then()
         }
     }
+
+    /** The Mask tab: background removal's availability, then its price. */
+    private fun matteTab() = checkHelpers { if (_ui.value.matteOff == null) estimate("matte") }
 
     private fun silenceOnly() = JsonObject(mapOf("silenceOnly" to JsonPrimitive(true)))
 

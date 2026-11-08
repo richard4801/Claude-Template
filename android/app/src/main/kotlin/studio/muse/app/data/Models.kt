@@ -1229,3 +1229,19 @@ data class EditRequestAnswer(val status: String, val versionId: String? = null, 
 
 @Serializable
 data class EditPendingAnswer(val approve: Boolean)
+
+/** WS1 guardrails, `GET /v1/editor/settings` (owner): paid AI editing helpers on or off, the daily limit and today's spend. */
+@Serializable
+data class EditorSettings(
+    val paidHelpers: String = "on",
+    /** Dollars per day; the server's default ($5) when null. */
+    val capPerDayUsd: Double? = null,
+    val todayUsd: Double = 0.0,
+    val markup: Double = 2.0,
+    /** Owner only: which provider runs the helpers (mock until they are switched on for real). */
+    val provider: String = "",
+) {
+    val on: Boolean get() = paidHelpers != "off"
+    val cap: Double get() = capPerDayUsd ?: DEFAULT_CAP
+    companion object { const val DEFAULT_CAP = 5.0 }
+}

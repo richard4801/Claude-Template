@@ -231,6 +231,11 @@ interface MuseApi {
      * runs on the mock: Remove background and Tap to keep then read "Coming soon". A server without it: all available.
      */
     suspend fun editorFeatures(): kotlinx.serialization.json.JsonObject? = null
+    /** Owner: the paid AI editing helpers' switch and daily limit (WS1 guardrails; members get 403). */
+    suspend fun editorSettings(): EditorSettings = throw ApiException("not_found", "This studio server doesn't have AI editing settings yet")
+    /** [paidHelpers]: "on" | "off" (null = unchanged). [cap]: the daily limit in dollars; [resetCap] puts back the default ($5). */
+    suspend fun patchEditorSettings(paidHelpers: String? = null, cap: Double? = null, resetCap: Boolean = false): EditorSettings =
+        throw ApiException("not_found", "This studio server doesn't have AI editing settings yet")
     /**
      * The reference video (an authenticated route: a redirect to storage, or the bytes), saved into [into] for the
      * player, which then needs no token. False when there is none (demo mode, expired).

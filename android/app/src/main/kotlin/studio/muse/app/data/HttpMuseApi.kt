@@ -194,6 +194,8 @@ interface MuseService {
     @GET("v1/learn/recipes/nearest") suspend fun nearestRecipes(@retrofit2.http.Query("recipeId") id: String, @retrofit2.http.Query("k") k: Int): LearnNearest
     @GET("v1/learn/gaps") suspend fun learnGaps(@retrofit2.http.Query("limit") limit: Int): List<LearnGap>
     @GET("v1/editor/features") suspend fun editorFeatures(): JsonObject
+    @GET("v1/editor/settings") suspend fun editorSettings(): EditorSettings
+    @PATCH("v1/editor/settings") suspend fun patchEditorSettings(@Body r: JsonObject): EditorSettings
     @GET("v1/recreate/references/{id}/poster") suspend fun referencePoster(@Path("id") id: String): retrofit2.Response<okhttp3.ResponseBody>
     // OkHttp follows the redirect to storage and drops the Authorization header on the way to another host.
     @retrofit2.http.Streaming @GET("v1/recreate/references/{id}/video") suspend fun referenceVideo(@Path("id") id: String): retrofit2.Response<okhttp3.ResponseBody>
@@ -475,6 +477,13 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun learnGaps(limit: Int) = call { learnGaps(limit) }
     override suspend fun referencePoster(referenceId: String): ByteArray? =
         runCatching { call { referencePoster(referenceId) }.takeIf { it.isSuccessful }?.body()?.bytes() }.getOrNull()
+    override suspend fun editorSettings() = call { editorSettings() }
+    override suspend fun patchEditorSettings(paidHelpers: String?, cap: Double?, resetCap: Boolean) = call {
+        patchEditorSettings(buildJsonObject {
+            if (paidHelpers != null) put("paidHelpers", kotlinx.serialization.json.JsonPrimitive(paidHelpers))
+            if (resetCap) put("capPerDayUsd", kotlinx.serialization.json.JsonNull) else if (cap != null) put("capPerDayUsd", kotlinx.serialization.json.JsonPrimitive(cap))
+        })
+    }
     override suspend fun editorFeatures(): JsonObject? = runCatching { call { editorFeatures() } }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; null }
     override suspend fun referenceVideo(referenceId: String, into: java.io.File): Boolean = runCatching {
         val r = call { referenceVideo(rx(referenceId)) }

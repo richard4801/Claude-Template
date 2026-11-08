@@ -158,6 +158,8 @@ data class EditSuiteUi(
     val keep: KeepUi? = null,
     /** Background removal can't run yet (the server's `matte.available` is false): the line shown instead. */
     val matteOff: String? = null,
+    /** Paid helpers that can't run now (captions, matte, denoise), each with its plain line (WS1 guardrails). */
+    val helpersOff: Map<String, String> = emptyMap(),
     /** Tablet (plans/edit-layout.md): the inspector is hidden ("Show inspector" in the top bar). It starts shown. */
     val inspectorHidden: Boolean = false,
 ) {
