@@ -253,7 +253,7 @@ public struct InputSlots: Hashable, Sendable {
     }
 
     /// Image roles a reference can have, as the server names them.
-    public static let roles = ["product", "location", "style", "prop", "person"]
+    public static let roles = ["product", "location", "style", "prop", "person", "pose", "outfit"]
     /// What a reference video is for.
     public static let uses = ["motion", "camera", "style"]
     public static let maxImageBytes = 20 * 1024 * 1024

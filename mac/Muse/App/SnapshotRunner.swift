@@ -258,6 +258,7 @@ enum SnapshotRunner {
                             let drawn = state.composerFrames["claude panel"] != nil
                             lines.append("\(drawn && filled ? "FITS" : "CUT") \(label) Claude panel \(drawn ? "drawn" : "not drawn"), composer \(filled ? "filled" : "not filled"), \(c.demoLines.count) lines, \(c.rejected.count) refused, revision \(c.revision)")
                             if name == "composer_claude_ask" {
+                                lines.append("INFO \(label) reference chips: \(c.references.map(\.title).joined(separator: ", ")) \(state.composerFrames["claude references"] != nil ? "drawn" : "not drawn")")
                                 lines.append("\(c.ask != nil && !c.confirmOpen ? "FITS" : "CUT") \(label) Claude's ask waits for the owner (\(c.ask.map { Pricing.money($0.estimateUsd) } ?? "none"), confirmation \(c.confirmOpen ? "open" : "closed"))")
                             }
                             if name == "composer_claude_attach" {

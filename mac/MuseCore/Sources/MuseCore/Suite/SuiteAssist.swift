@@ -135,6 +135,8 @@ public protocol SuiteAssistAPI: Sendable {
     func patchSuiteAssist(id: String, _ body: SuiteAssistPatch) async throws -> SuiteAssist
     /// Approve runs the shot at the approved price (`409 price_changed` when it moved); decline tells Claude not now.
     func answerSuitePending(assistId: String, pendingId: String, approve: Bool) async throws -> SuitePending
+    /// An image for a Claude message: the normal image upload (presign → PUT → confirm). → its upload id and address.
+    func uploadClaudeImage(name: String, data: Data, mime: String) async throws -> ClaudeAttachment
 }
 
 extension HTTPMuseAPI: SuiteAssistAPI {
@@ -151,5 +153,12 @@ extension HTTPMuseAPI: SuiteAssistAPI {
     }
     public func answerSuitePending(assistId: String, pendingId: String, approve: Bool) async throws -> SuitePending {
         try await suiteCall("POST", "v1/suite/assist/\(Self.pathKey(assistId))/pending/\(Self.pathKey(pendingId))", body: assistBody(SuitePendingAnswer(approve: approve)))
+    }
+    public func uploadClaudeImage(name: String, data: Data, mime: String) async throws -> ClaudeAttachment {
+        guard let id = try await presignAndPut(kind: "image", contentType: mime, body: .data(data), progress: nil) else {
+            throw ApiError("upload_failed", "This server can't take images for Claude yet")
+        }
+        let ref: ImageRef = try await suiteCall("POST", "v1/uploads/\(Self.pathKey(id))/confirm", body: assistBody(ConfirmBody(meta: nil)))
+        return ClaudeAttachment(uploadId: id, mimeType: mime, bytes: data.count, url: absolutize(ref).url)
     }
 }

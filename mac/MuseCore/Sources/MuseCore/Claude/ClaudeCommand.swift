@@ -16,6 +16,8 @@ public struct ClaudeCommand: Hashable, Sendable {
     public var resume: String?
     /// The thread's brief (recreate and edit threads): appended to Claude Code's system prompt.
     public var appendSystemPrompt: String?
+    /// The folder of the turn's attached images: Claude Code may Read there (and nowhere else).
+    public var readDirectory: String?
 
     public init(mcpURL: String, token: String, blender: Blender? = nil, resume: String? = nil, appendSystemPrompt: String? = nil) {
         self.mcpURL = mcpURL
@@ -33,6 +35,7 @@ public struct ClaudeCommand: Hashable, Sendable {
                  "--mcp-config", configPath, "--strict-mcp-config",
                  "--allowedTools", "mcp__muse"]
         if blender != nil { a.append("mcp__blender") }
+        if let d = readDirectory, d.hasPrefix("/") { a.append("Read(/\(d)/**)") }
         a.append("--disallowedTools")
         a += Self.disallowed
         a += ["--permission-mode", "dontAsk", "--setting-sources", "user"]
