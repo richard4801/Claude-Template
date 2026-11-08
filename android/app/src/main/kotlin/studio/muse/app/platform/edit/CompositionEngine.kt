@@ -77,7 +77,7 @@ import kotlin.math.roundToInt
  *  - each plan layer → an EditedMediaItemSequence (gaps via `addGap`, stills as image items at the canvas fps), all
  *    composited by [PlanCompositorSettings] (per-frame alpha/position/scale/rotation from the plan);
  *  - each clip → clipping + `SpeedParameters(…, shouldMaintainPitch = true)` + FrameDropEffect when faster (like v1),
- *    Crop → Presentation (texture size) → [ChromaKeyEffect] → its look ([LookEffects]: sharpen → chromatic → one
+ *    [AlphaMatteEffect] (background removal's matte) → Crop → Presentation (texture size) → [ChromaKeyEffect] → its look ([LookEffects]: sharpen → chromatic → one
  *    baked colour LUT, or just [ColorMatrixEffect] → halation → leak/vignette/grain), and its sound through an
  *    [EnvelopeAudioProcessor];
  *  - each audio lane → an audio-only sequence;
@@ -257,6 +257,8 @@ class EditCompositionEngine(private val context: Context, private val looks: Loo
         val look = c.look ?: return emptyList()
         return buildList {
             c.frameDropFps?.let { add(FrameDropEffect.createDefaultFrameDropEffect(it.toFloat())) }
+            // Background removal's matte first, on the source frame it is aligned with (before crop, look, mask, transform).
+            look.alphaMatte?.let { m -> files[m.asset]?.let { add(AlphaMatteEffect(it, c, m.invert == true)) } }
             look.crop?.let { add(Crop(it.left.toFloat(), it.right.toFloat(), it.bottom.toFloat(), it.top.toFloat())) }
             add(Presentation.createForWidthAndHeight(look.textureWidth, look.textureHeight, Presentation.LAYOUT_STRETCH_TO_FIT))
             look.chroma?.let { add(ChromaKeyEffect(it)) }

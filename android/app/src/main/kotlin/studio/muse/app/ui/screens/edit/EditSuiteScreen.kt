@@ -110,9 +110,22 @@ import kotlin.math.roundToInt
 fun EditSuiteScreen(takeId: String?, onBack: () -> Unit) {
     var open by rememberSaveable(takeId) { mutableStateOf(takeId) }
     var recreating by rememberSaveable { mutableStateOf(false) } // "Recreate an edit" (plans/recreate-edit.md)
+    var reference by rememberSaveable { mutableStateOf<String?>(null) } // a library reference opened in the Recipe view
+    var learn by rememberSaveable { mutableStateOf<String?>(null) } // "playbook" | "recipes" (plans/learning-editor-ui.md), owner only
+    // Share → MUSE: what another app shared opens Recreate with it, once.
+    val c = LocalContainer.current
+    val sharedNow by c.shared.collectAsState()
+    var shared by remember { mutableStateOf<studio.muse.app.data.SharedReference?>(null) }
+    LaunchedEffect(sharedNow) { sharedNow?.let { shared = it; c.shared.value = null; open = null; learn = null; reference = null; recreating = true } }
     val id = open
-    if (recreating) RecipeScreen(onBack = { recreating = false })
-    else if (id == null) EditHome(onBack, onRecreate = { recreating = true }) { open = it }
+    if (recreating) androidx.compose.runtime.key(shared) {
+        RecipeScreen(onBack = { recreating = false; reference = null; shared = null }, referenceId = reference, shared = shared,
+            onOpenTake = { recreating = false; reference = null; shared = null; open = it })
+    }
+    else if (id == null && learn == "playbook") studio.muse.app.ui.screens.edit.learn.PlaybookScreen(onBack = { learn = null }, onOpenTake = { open = it })
+    else if (id == null && learn == "recipes") studio.muse.app.ui.screens.edit.learn.RecipesScreen(
+        onBack = { learn = null }, onOpenTake = { open = it }, onOpenReference = { reference = it; recreating = true }, onRecreate = { recreating = true })
+    else if (id == null) EditHome(onBack, onRecreate = { recreating = true }, onLearn = { learn = it }) { open = it }
     else EditSuiteEditor(id, onBack = { if (takeId == null) open = null else onBack() })
 }
 
@@ -123,15 +136,17 @@ fun editableTakes(takes: List<Take>): List<TakeChoice> = takes.filter { it.kind 
 }
 
 @Composable
-fun EditHome(onBack: () -> Unit, onRecreate: () -> Unit, onOpen: (String) -> Unit) {
+fun EditHome(onBack: () -> Unit, onRecreate: () -> Unit, onLearn: (String) -> Unit = {}, onOpen: (String) -> Unit) {
     val c = LocalContainer.current
     val state by c.repo.state.collectAsState()
+    val prefs by c.prefs.collectAsState()
+    val owner = c.repo.demo || prefs.owner // the learning editor is the owner's (the server answers members 403)
     // "Recreate an edit": WS1's /v1/recreate/references (demo mode: FakeMuseApi's).
-    EditHomeContent(editableTakes(state.takes), onBack, onOpen, onRecreate = onRecreate)
+    EditHomeContent(editableTakes(state.takes), onBack, onOpen, onRecreate = onRecreate, onLearn = onLearn.takeIf { owner })
 }
 
 @Composable
-fun EditHomeContent(takes: List<TakeChoice>, onBack: () -> Unit, onOpen: (String) -> Unit, onRecreate: (() -> Unit)? = null) {
+fun EditHomeContent(takes: List<TakeChoice>, onBack: () -> Unit, onOpen: (String) -> Unit, onRecreate: (() -> Unit)? = null, onLearn: ((String) -> Unit)? = null) {
     val m = muse
     ScreenBox(statusPad = true) {
         Column(Modifier.fillMaxSize()) {
@@ -151,6 +166,13 @@ fun EditHomeContent(takes: List<TakeChoice>, onBack: () -> Unit, onOpen: (String
                             T("Pick an edit you love and see its recipe: shots, beats, text and grade", m.scale.caption, m.t.muted, maxLines = 2)
                         }
                         EIc("chev-r", 16.dp, m.t.muted)
+                    }
+                }
+                // The learning editor (plans/learning-editor-ui.md): two quiet text buttons, owner only.
+                if (onLearn != null) item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        studio.muse.app.ui.screens.edit.learn.LearnQuiet("Playbook", "book-open-text") { onLearn("playbook") }
+                        studio.muse.app.ui.screens.edit.learn.LearnQuiet("Recipes", "stack") { onLearn("recipes") }
                     }
                 }
                 val edited = takes.filter { it.edited }; val renders = takes.filter { !it.edited }
@@ -232,7 +254,9 @@ private fun PlayerSurface(player: CompositionPlayer, modifier: Modifier) {
 
 // ======================================================================= backend over the repository
 /** The AI helpers through the app's repository (the real API, or the demo backend), polled to their result. */
-class RepoEditBackend(private val c: AppContainer, private val pollMs: Long = 700) : EditBackend {
+class RepoEditBackend(private val c: AppContainer, private val pollMs: Long = 700, private val onAsset: (String, String) -> Unit = { _, _ -> }) : EditBackend {
+    override fun assetArrived(assetId: String, url: String) = onAsset(assetId, url)
+
     override suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?): Pair<EditorEstimate?, String?> =
         runCatching { c.repo.attemptInline { editorEstimate(EditorJobRequest(kind, source, options)) } }.getOrElse { null to "Couldn't reach the studio · try again" }
 
@@ -265,7 +289,7 @@ class RepoEditBackend(private val c: AppContainer, private val pollMs: Long = 70
 class EditSuiteViewModel(private val c: AppContainer, private val takeId: String, context: Context) : ViewModel() {
     private val app = context.applicationContext
     private val looks = LookLibrary(app)
-    val controller = EditSuiteController(viewModelScope, RepoEditBackend(c), lookOf = { id -> runCatching { looks.pack.packLook(id) }.getOrNull() })
+    val controller = EditSuiteController(viewModelScope, RepoEditBackend(c, onAsset = { id, url -> fetchAsset(id, url) }), lookOf = { id -> runCatching { looks.pack.packLook(id) }.getOrNull() })
     private val engine = VideoEditEngine(app)
     private val composer by lazy { EditCompositionEngine(app, looks) }
     private val files = HashMap<String, File>()
@@ -354,6 +378,15 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         val bmps = runCatching { engine.frames(f, times, px).mapNotNull { it?.asImageBitmap() } }.getOrDefault(emptyList())
         val src = p.assets.firstOrNull { it.take == p.sourceTakeId }?.id ?: return
         _frames.value = _frames.value + (src to bmps)
+    }
+
+    /** A helper's new asset (background removal's matte): its file, then the preview again with it. */
+    private fun fetchAsset(assetId: String, url: String) {
+        viewModelScope.launch {
+            val f = runCatching { engine.fetchSource(url) {} }.getOrNull() ?: return@launch c.repo.toast("Couldn't download the cut-out · try again")
+            files[assetId] = f
+            controller.project?.let { rebuildPreview(it) }
+        }
     }
 
     /** PiP takes: their files (for preview/export). */

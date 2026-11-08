@@ -167,6 +167,12 @@ data class VideoClip(
     override val look: Look? = null,
     override val mask: Mask? = null,
     val chroma: Chroma? = null,
+    /**
+     * Background removal's result (workstream 1, plans/api.md "VideoClip.alphaMatte"): a video asset aligned with this
+     * clip's source whose luma is the clip's alpha (white = opaque; [AlphaMatte.invert] flips it). Applied before the look,
+     * mask and transform. Replaces the older green composite + [chroma].
+     */
+    val alphaMatte: AlphaMatte? = null,
     /** Main track, clip ≥ 2. */
     val transitionIn: Transition? = null,
     val voiceEffect: VoiceEffect? = null,
@@ -340,3 +346,6 @@ val SPEED_PRESETS: Map<SpeedPreset, List<SpeedPoint>> = linkedMapOf(
     SpeedPreset.FLASH_IN to listOf(SpeedPoint(0.0, 6.0), SpeedPoint(0.4, 6.0), SpeedPoint(0.6, 1.0), SpeedPoint(1.0, 1.0)),
     SpeedPreset.FLASH_OUT to listOf(SpeedPoint(0.0, 1.0), SpeedPoint(0.4, 1.0), SpeedPoint(0.6, 6.0), SpeedPoint(1.0, 6.0)),
 )
+
+/** A clip's alpha from a matte video (plans/api.md "VideoClip.alphaMatte"). */
+data class AlphaMatte(val asset: String, val invert: Boolean? = null)

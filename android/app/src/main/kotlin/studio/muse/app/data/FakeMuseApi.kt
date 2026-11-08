@@ -2,6 +2,13 @@ package studio.muse.app.data
 
 import studio.muse.core.edit.RecipeJson
 import studio.muse.core.edit.RecipeReference
+import studio.muse.core.edit.RecreateMatch
+import studio.muse.core.edit.RecreateApplyResult
+import studio.muse.core.edit.RecreateFillStart
+import studio.muse.core.edit.RecreateSlotEstimate
+import studio.muse.core.edit.RecreateText
+import studio.muse.core.edit.RecreateSlotFill
+import studio.muse.core.edit.RecreateFill
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job as CoJob
 import kotlinx.coroutines.delay
@@ -708,13 +715,25 @@ class FakeMuseApi(
     private fun editorDuration(src: EditorSourceDto): Double =
         src.durationSec ?: takes.firstOrNull { it.id == src.takeId }?.durationSec ?: 8.0
 
+    /** Tap to keep's points (workstream 1): 1–10, 0–1 of the frame, at least one keep; the server's plain messages. */
+    private fun checkKeepPoints(req: EditorJobRequest) {
+        val pts = (req.options?.get("points") as? JsonArray) ?: return
+        if (pts.isEmpty() || pts.size > 10) throw ApiException("bad_request", "Tap 1 to 10 points")
+        val objs = pts.map { it as? kotlinx.serialization.json.JsonObject ?: throw ApiException("bad_request", "Each tap needs x and y") }
+        fun n(o: kotlinx.serialization.json.JsonObject, k: String) = (o[k] as? JsonPrimitive)?.content?.toDoubleOrNull()
+        if (objs.any { o -> listOf("x", "y").any { k -> n(o, k)?.let { it !in 0.0..1.0 } ?: true } }) throw ApiException("bad_request", "Taps must be inside the frame")
+        if (objs.none { (it["keep"] as? JsonPrimitive)?.content != "false" }) throw ApiException("bad_request", "Tap at least one thing to keep")
+    }
+
     override suspend fun editorEstimate(req: EditorJobRequest): EditorEstimate {
         val d = editorDuration(req.source)
+        checkKeepPoints(req)
         val silenceOnly = (req.options?.get("silenceOnly") as? kotlinx.serialization.json.JsonPrimitive)?.content == "true"
         val usd = when (req.kind) {
             "beats" -> 0.0
             "cuts" -> if (silenceOnly || editorJobs.values.any { it.kind == "captions" && it.state == "done" }) 0.0 else 0.02
-            "matte" -> maxOf(0.01, Math.round((10 + 4 * d) * 0.00025 * 100) / 100.0)
+            // Tap to keep has its own price: GPU 15 + 3·d seconds (plans/api.md).
+            "matte" -> if (req.options?.get("points") != null) maxOf(0.01, Math.round((15 + 3 * d) * 0.0004 * 100) / 100.0) else maxOf(0.01, Math.round((10 + 4 * d) * 0.00025 * 100) / 100.0)
             "denoise" -> if ((req.options?.get("analyzeOnly") as? kotlinx.serialization.json.JsonPrimitive)?.content == "true") 0.0 else maxOf(0.01, Math.round((5 + 0.3 * d) * 0.00025 * 100) / 100.0)
             else -> 0.02
         }
@@ -722,6 +741,7 @@ class FakeMuseApi(
     }
 
     override suspend fun startEditorJob(req: EditorJobRequest): EditorJob = lock.withLock {
+        checkKeepPoints(req)
         if (failNext) { failNext = false; throw ApiException("failed", "Something went wrong · try again") }
         val d = editorDuration(req.source)
         val id = "ej_${++editorSeq}"
@@ -1116,6 +1136,45 @@ class FakeMuseApi(
         if (!suiteOwner) throw ApiException("owner_only", "Only the studio owner can do that")
         suite.patch(req)
     }
+    // The learning editor (workstream 3's /v1/learn): demo's playbook, lessons, corrections, library and gaps, in memory.
+    private val learnRules = FakeLearn.rules().toMutableList()
+    private val learnRecipes = FakeLearn.recipes().toMutableList()
+    private var learnSeq = 100
+    override suspend fun playbook(): List<LearnRule> = lock.withLock { learnRules.sortedWith(compareByDescending<LearnRule> { it.pinned }.thenByDescending { it.evidence.size }.thenByDescending { it.createdAt }) }
+    override suspend fun addRule(req: LearnRuleRequest): LearnRule = lock.withLock {
+        val text = req.text?.trim().orEmpty()
+        if (text.isEmpty()) throw ApiException("bad_request", "Say what Claude should do")
+        if (learnRules.size >= 200) throw ApiException("limit", "The playbook holds 200 rules · delete some first")
+        val now = System.currentTimeMillis()
+        LearnRule("rule_${++learnSeq}", text.take(300), req.area ?: "other", "owner", req.pinned ?: false, req.evidence.orEmpty(), now, now).also { learnRules += it }
+    }
+    override suspend fun patchRule(id: String, req: LearnRuleRequest): LearnRule = lock.withLock {
+        val i = learnRules.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: throw ApiException("not_found", "Rule not found")
+        val r = learnRules[i]
+        learnRules[i] = r.copy(text = req.text?.trim()?.take(300) ?: r.text, area = req.area ?: r.area, evidence = req.evidence ?: r.evidence, pinned = req.pinned ?: r.pinned, updatedAt = System.currentTimeMillis())
+        learnRules[i]
+    }
+    override suspend fun deleteRule(id: String) { lock.withLock { learnRules.removeAll { it.id == id } } }
+    override suspend fun lessons(): List<LearnLesson> = FakeLearn.lessons()
+    override suspend fun corrections(limit: Int): List<LearnCorrection> = FakeLearn.corrections().take(limit)
+    override suspend fun recipes(q: String?, tags: List<String>, origin: String?): List<LearnRecipeEntry> = lock.withLock {
+        learnRecipes.filter { r ->
+            (q.isNullOrBlank() || listOf(r.name, r.summary).plus(r.tags).any { it.contains(q.trim(), ignoreCase = true) }) &&
+                r.tags.containsAll(tags) && (origin == null || r.origin == origin)
+        }.sortedByDescending { it.createdAt }.map { it.copy(recipe = null) }
+    }
+    override suspend fun recipe(id: String): LearnRecipeEntry = lock.withLock { learnRecipes.firstOrNull { it.id == id } ?: throw ApiException("not_found", "Recipe not found") }
+    override suspend fun patchRecipe(id: String, req: LearnRecipePatch): LearnRecipeEntry = lock.withLock {
+        val i = learnRecipes.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: throw ApiException("not_found", "Recipe not found")
+        learnRecipes[i] = learnRecipes[i].let { r -> r.copy(name = req.name?.trim()?.take(80) ?: r.name, tags = req.tags?.map { it.lowercase().trim() }?.filter { it.isNotEmpty() }?.distinct() ?: r.tags) }
+        learnRecipes[i]
+    }
+    override suspend fun deleteRecipe(id: String) { lock.withLock { learnRecipes.removeAll { it.id == id } } }
+    override suspend fun nearestRecipes(id: String, k: Int): LearnNearest = lock.withLock {
+        LearnNearest(id, learnRecipes.filter { it.id != id }.mapIndexed { i, r -> r.copy(recipe = null, distance = .2 + i * .25) }.take(k))
+    }
+    override suspend fun learnGaps(limit: Int): List<LearnGap> = FakeLearn.gaps().take(limit)
+
     // Recreate this edit (workstream 1's /v1/recreate/references): the analysis steps the server reports, then demo's recipe.
     private val recreatePolls = HashMap<String, Int>()
     private val recreatePhases = listOf("Finding the cuts", "Listening for the beat", "Reading the text", "Reading the look", "Writing the recipe")
@@ -1124,11 +1183,62 @@ class FakeMuseApi(
         recreatePolls[id] = 0
         RecipeReference(id, name ?: "Reference", "analyzing", 5, "Waiting")
     }
+    /** Demo: a link with "private" in it answers like a private video; any other link runs the analysis. */
+    override suspend fun createReferenceFromLink(url: String, name: String?): RecipeReference {
+        if ("private" in url) throw ApiException("link_private", "This video is private · save it and share the file instead")
+        return createReference("link", name)
+    }
     override suspend fun reference(id: String): RecipeReference = lock.withLock {
         val n = recreatePolls[id] ?: throw ApiException("not_found", "Reference not found")
         recreatePolls[id] = n + 1
         if (n < recreatePhases.size) RecipeReference(id, "Reference", "analyzing", 5 + 90 * n / recreatePhases.size, recreatePhases[n])
         else RecipeJson.reference("""{"id":"$id","name":"Reference","state":"ready","progress":100,"phase":"Done","recipe":${FakeRecipes.cafeTrendJson()}}""")
+    }
+
+    // Recreate phases 2–3, demo mode (the Mac's FakeRecreateAPI): shots 1, 3 and 6 match the studio's takes, the others are
+    // to generate at $0.64 each. Nothing is held or charged: a filled shot reads generating on the next fill and ready on
+    // the one after (a demo job id), and apply returns a match without touching any edit.
+    private val recreateMade = HashMap<String, HashMap<String, Int>>()
+    private fun recreateSlots(id: String): List<String> {
+        if (id !in recreatePolls) throw ApiException("not_found", "Reference not found")
+        return FakeRecipes.cafeTrend().slots.map { it.id }
+    }
+    override suspend fun matchReference(id: String, modelId: String?) { lock.withLock { recreateSlots(id) } }
+    override suspend fun referenceFill(id: String): RecreateFill = lock.withLock {
+        val slots = recreateSlots(id)
+        val made = recreateMade.getOrPut(id) { HashMap() }
+        made.keys.forEach { made[it] = made.getValue(it) + 1 }
+        val videoTakes = takes.filter { it.kind == "take" }.map { it.id }
+        RecreateFill(id, slots.mapIndexed { i, s ->
+            val n = made[s]
+            when {
+                n != null && n >= 2 -> RecreateSlotFill(s, "ready", takeId = "t_rx_$s", jobId = "job_rx_$s", reason = "Generated for this shot")
+                n != null -> RecreateSlotFill(s, "generating", jobId = "job_rx_$s", estimate = RECREATE_PRICE)
+                i in listOf(0, 2, 5) && videoTakes.isNotEmpty() -> RecreateSlotFill(s, "matched", takeId = videoTakes[i % videoTakes.size],
+                    score = listOf(.82, .74, .79)[listOf(0, 2, 5).indexOf(i)], reason = listOf("Your take has the same push-in on a close-up", "Your take walks through a door in a wide shot", "Your take sits by a window, still")[listOf(0, 2, 5).indexOf(i)])
+                else -> RecreateSlotFill(s, "to_generate", estimate = RECREATE_PRICE, estimateLabel = RecreateText.money(RECREATE_PRICE))
+            }
+        })
+    }
+    override suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String?) = lock.withLock {
+        recreateSlots(id)
+        val slot = FakeRecipes.cafeTrend().slots.firstOrNull { it.id == slotId } ?: throw ApiException("not_found", "That shot is gone")
+        RecreateSlotEstimate(slotId, RECREATE_PRICE, maxOf(2.0, kotlin.math.ceil(slot.lengthSec)))
+    }
+    override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?) = lock.withLock {
+        recreateSlots(id)
+        val made = recreateMade.getOrPut(id) { HashMap() }
+        if (slotId in made) throw ApiException("already_filled", "This shot is already being made")
+        made[slotId] = 0
+        RecreateFillStart(slotId, "job_rx_$slotId")
+    }
+    override suspend fun applyRecipe(id: String, sessionId: String, baseRevision: Int?, slots: Map<String, String>) = lock.withLock {
+        val all = recreateSlots(id)
+        val made = recreateMade[id].orEmpty()
+        val waiting = slots.filter { (s, v) -> v.startsWith("job_rx_") && (made[s] ?: 0) < 2 }.keys.sorted()
+        val scores = listOf(.93, .81, .84, .77, .62, .88, .9)
+        RecreateApplyResult(sessionId, (baseRevision ?: 0) + 1, missing = all.filter { it !in slots }, waiting = waiting,
+            match = RecreateMatch(.86, .97, .9, .78, .84, .8, all.mapIndexed { i, s -> s to scores[i % scores.size] }.toMap()))
     }
 
     override suspend fun uploadSuiteMedia(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit): SuiteMediaRef {
@@ -1428,6 +1538,8 @@ class FakeMuseApi(
     private fun uid() = UUID.randomUUID().toString().take(8)
 
     companion object {
+        /** Demo mode's price for a Recreate shot to generate (never charged). */
+        const val RECREATE_PRICE = 0.64
         /** `request.engine` of an Upscale job (the server's). */
         const val UPSCALE_ENGINE = "upscale"
         /** The prompt identity; names her Identity LoRA when it's trained and switched on. */
@@ -1493,10 +1605,14 @@ object FakeEditorResults {
                 "asset" to obj("kind" to p("audio"), "upload" to p("up_voice_$id"), "durationSec" to p(d)),
                 "suggestion" to obj("level" to p("light"), "reason" to p("Some background hum")),
             )
-            "matte" -> obj(
-                "asset" to obj("kind" to p("video"), "upload" to p("up_matte_$id"), "durationSec" to p(d)),
-                "chroma" to obj("color" to p("#00FF00"), "similarity" to p(0.4), "smoothness" to p(0.08), "spill" to p(0.5)),
-            )
+            // Workstream 1's alpha matte: a grey video aligned with the source, white = keep; tracked when there are taps.
+            "matte" -> {
+                val pts = options?.get("points") as? JsonArray
+                obj(
+                    "asset" to obj("kind" to p("video"), "upload" to p("up_matte_$id"), "durationSec" to p(d)),
+                    "alpha" to p(true), "mode" to p(if (pts != null) "tracked" else "person"),
+                ).let { if (pts != null) kotlinx.serialization.json.JsonObject(it + ("points" to pts)) else it }
+            }
             else -> obj()
         }
     }

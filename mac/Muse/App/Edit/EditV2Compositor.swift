@@ -76,6 +76,9 @@ final class EditV2Scene: @unchecked Sendable {
     let project: E.Project
     let plan: E.RenderPlan
     let laneTracks: [Int: CMPersistentTrackID]
+    /// Remove background: the matte track of each lane, and the "<lane>/<itemId>" segments that have their matte there.
+    let matteTracks: [Int: CMPersistentTrackID]
+    let matted: Set<String>
     let sources: EditV2Engine.Sources
     let pages: [E.CaptionPage]
     let size: CGSize
@@ -89,8 +92,11 @@ final class EditV2Scene: @unchecked Sendable {
     /// Edit suite: false when captions go out as an .srt instead of being drawn.
     let burnCaptions: Bool
 
-    init(project: E.Project, plan: E.RenderPlan, laneTracks: [Int: CMPersistentTrackID], sources: EditV2Engine.Sources, burnCaptions: Bool = true) {
+    init(project: E.Project, plan: E.RenderPlan, laneTracks: [Int: CMPersistentTrackID], matteTracks: [Int: CMPersistentTrackID] = [:],
+         matted: Set<String> = [], sources: EditV2Engine.Sources, burnCaptions: Bool = true) {
         self.burnCaptions = burnCaptions
+        self.matteTracks = matteTracks
+        self.matted = matted
         self.project = project
         self.plan = plan
         self.laneTracks = laneTracks
@@ -126,7 +132,7 @@ final class EditV2Scene: @unchecked Sendable {
             let c = clips[i]
             let pl = E.placement(c, local: t - layer.segment.timelineStart)
             image = draw(frame, crop: c.crop, fit: c.fit ?? .cover, placement: pl, state: layer.state, adjust: c.adjust, filter: c.filter, look: c.look,
-                         chroma: c.chroma, mask: c.mask, frame: frameNo, fps: fps, over: image)
+                         chroma: c.chroma, matte: matteImage(request, layer.segment, c), mask: c.mask, frame: frameNo, fps: fps, over: image)
         }
 
         // Other tracks, bottom to top.
@@ -137,7 +143,7 @@ final class EditV2Scene: @unchecked Sendable {
                     guard let c = track.item(seg.itemId)?.videoClip, let frame = sourceImage(request, seg) else { continue }
                     let pl = E.placement(c, local: t - seg.timelineStart)
                     image = draw(frame, crop: c.crop, fit: c.fit ?? .contain, placement: pl, state: E.LayerState(), adjust: c.adjust, filter: c.filter,
-                                 look: c.look, chroma: c.chroma, mask: c.mask, frame: frameNo, fps: fps, over: image)
+                                 look: c.look, chroma: c.chroma, matte: matteImage(request, seg, c), mask: c.mask, frame: frameNo, fps: fps, over: image)
                 }
             case .image:
                 for case .image(let im) in track.items where t >= im.startSec && t < im.startSec + im.durationSec {
@@ -164,26 +170,52 @@ final class EditV2Scene: @unchecked Sendable {
         return CIImage(cvPixelBuffer: buf).transformed(by: orient)
     }
 
+    /// The clip's alpha matte frame at this time (upright, as its own file stores it; inverted when asked), or nil.
+    private func matteImage(_ request: AVAsynchronousVideoCompositionRequest, _ seg: E.VideoSegment, _ c: E.VideoClip) -> CIImage? {
+        guard let m = c.alphaMatte, matted.contains("\(seg.lane)/\(seg.itemId)"), let id = matteTracks[seg.lane],
+              let buf = request.sourceFrame(byTrackID: id) else { return nil }
+        let orient = sources.media[m.asset]?.orient ?? .identity
+        let img = CIImage(cvPixelBuffer: buf).transformed(by: orient)
+        return m.invert == true ? img.applyingFilter("CIColorInvert") : img
+    }
+
     // MARK: Pictures
 
     /// Draws a picture (origin 0,0): crop → chroma key → look (sharpen, chromatic, colour matrix + curves + LUT + lift,
     /// halation, leak, vignette, grain; just the colour matrix without a look) → fit → scale/rotate/move → opacity, over `base`.
     private func draw(_ src: CIImage, crop: E.Crop?, fit: E.Fit, placement pl: E.Placement, state: E.LayerState, adjust: E.Adjust?, filter: E.FilterRef?,
-                      look: E.Look?, chroma: E.Chroma?, mask: E.Mask? = nil, frame: Int, fps: Double, over base: CIImage) -> CIImage {
+                      look: E.Look?, chroma: E.Chroma?, matte: CIImage? = nil, mask: E.Mask? = nil, frame: Int, fps: Double, over base: CIImage) -> CIImage {
         let opacity = pl.opacity * state.opacity
         guard opacity > 0.001 else { return base }
         var img = src
         let e = src.extent
+        // The matte, stretched over the picture's own frame (a matte made at another size still lines up), cropped with it.
+        var alpha: CIImage?
+        if let matte, matte.extent.width > 0, matte.extent.height > 0, e.width > 0, e.height > 0 {
+            alpha = matte.transformed(by: CGAffineTransform(translationX: -matte.extent.minX, y: -matte.extent.minY)
+                .concatenating(CGAffineTransform(scaleX: e.width / matte.extent.width, y: e.height / matte.extent.height))
+                .concatenating(CGAffineTransform(translationX: e.minX, y: e.minY)))
+        }
         if let c = crop {
             let l = c.left ?? 0, r = c.right ?? 0, tp = c.top ?? 0, b = c.bottom ?? 0
             let rect = CGRect(x: e.minX + e.width * l, y: e.minY + e.height * b, width: e.width * max(0.1, 1 - l - r), height: e.height * max(0.1, 1 - tp - b))
             img = img.cropped(to: rect)
+            alpha = alpha?.cropped(to: rect)
         }
-        img = img.transformed(by: CGAffineTransform(translationX: -img.extent.minX, y: -img.extent.minY))
+        let origin = CGAffineTransform(translationX: -img.extent.minX, y: -img.extent.minY)
+        img = img.transformed(by: origin)
+        alpha = alpha?.transformed(by: origin)
         let w = img.extent.width, h = img.extent.height
         guard w > 0, h > 0, w.isFinite, h.isFinite else { return base }
         if let chroma, let cube = cube(chroma) {
             img = img.applyingFilter("CIColorCube", parameters: ["inputCubeDimension": 32, "inputCubeData": cube])
+        }
+        // Remove background: the matte's luma is the alpha (white = keep), before the look, mask and transform.
+        if let alpha {
+            img = img.applyingFilter("CIBlendWithMask", parameters: [
+                kCIInputBackgroundImageKey: CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0)).cropped(to: img.extent),
+                kCIInputMaskImageKey: alpha,
+            ]).cropped(to: img.extent)
         }
         img = looks.apply(look, matrix: E.colorMatrix(adjust, filter), tone: E.Tone(adjust), to: img, frame: frame, fps: fps)
         // Edit suite: the mask multiplies the alpha (after the chroma key).

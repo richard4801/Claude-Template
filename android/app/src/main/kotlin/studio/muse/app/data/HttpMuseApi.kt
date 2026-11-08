@@ -180,9 +180,31 @@ interface MuseService {
     @POST("v1/suite/rigs") suspend fun createSuiteRig(@Body r: SuiteRigCreate): SuiteRigView
     @PATCH("v1/suite/rigs/{id}") suspend fun updateSuiteRig(@Path("id") id: String, @Body r: SuiteRigPatch): SuiteRigView
     @DELETE("v1/suite/rigs/{id}") suspend fun deleteSuiteRig(@Path("id") id: String): retrofit2.Response<Unit>
+    // The learning editor (workstream 3), owner only.
+    @GET("v1/learn/playbook") suspend fun playbook(): List<LearnRule>
+    @POST("v1/learn/playbook") suspend fun addRule(@Body r: LearnRuleRequest): LearnRule
+    @PATCH("v1/learn/playbook/{id}") suspend fun patchRule(@Path("id") id: String, @Body r: LearnRuleRequest): LearnRule
+    @DELETE("v1/learn/playbook/{id}") suspend fun deleteRule(@Path("id") id: String): retrofit2.Response<Unit>
+    @GET("v1/learn/lessons") suspend fun lessons(): List<LearnLesson>
+    @GET("v1/learn/corrections") suspend fun corrections(@retrofit2.http.Query("limit") limit: Int): List<LearnCorrection>
+    @GET("v1/learn/recipes") suspend fun recipes(@retrofit2.http.Query("q") q: String?, @retrofit2.http.Query("tags") tags: String?, @retrofit2.http.Query("origin") origin: String?): List<LearnRecipeEntry>
+    @GET("v1/learn/recipes/{id}") suspend fun recipe(@Path("id") id: String): LearnRecipeEntry
+    @PATCH("v1/learn/recipes/{id}") suspend fun patchRecipe(@Path("id") id: String, @Body r: LearnRecipePatch): LearnRecipeEntry
+    @DELETE("v1/learn/recipes/{id}") suspend fun deleteRecipe(@Path("id") id: String): retrofit2.Response<Unit>
+    @GET("v1/learn/recipes/nearest") suspend fun nearestRecipes(@retrofit2.http.Query("recipeId") id: String, @retrofit2.http.Query("k") k: Int): LearnNearest
+    @GET("v1/learn/gaps") suspend fun learnGaps(@retrofit2.http.Query("limit") limit: Int): List<LearnGap>
+    @GET("v1/recreate/references/{id}/poster") suspend fun referencePoster(@Path("id") id: String): retrofit2.Response<okhttp3.ResponseBody>
+    // OkHttp follows the redirect to storage and drops the Authorization header on the way to another host.
+    @retrofit2.http.Streaming @GET("v1/recreate/references/{id}/video") suspend fun referenceVideo(@Path("id") id: String): retrofit2.Response<okhttp3.ResponseBody>
+
     // Recreate this edit (workstream 1): read as JSON, then studio.muse.core.edit.RecipeJson.
     @POST("v1/recreate/references") suspend fun createReference(@Body r: JsonObject): JsonObject
     @GET("v1/recreate/references/{id}") suspend fun reference(@Path("id") id: String): JsonObject
+    @POST("v1/recreate/references/{id}/match") suspend fun matchReference(@Path("id") id: String, @Body r: JsonObject): JsonObject
+    @GET("v1/recreate/references/{id}/fill") suspend fun referenceFill(@Path("id") id: String): JsonObject
+    @POST("v1/recreate/references/{id}/slots/{slot}/estimate") suspend fun estimateReferenceSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: JsonObject): JsonObject
+    @POST("v1/recreate/references/{id}/slots/{slot}/fill") suspend fun fillReferenceSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: JsonObject): JsonObject
+    @POST("v1/recreate/references/{id}/apply") suspend fun applyRecipe(@Path("id") id: String, @Body r: JsonObject): JsonObject
     @PATCH("v1/models/{id}") suspend fun patchModelJson(@Path("id") id: String, @Body r: JsonObject): Model
     @GET("v1/suite/feed") suspend fun suiteFeed(@QueryMap q: Map<String, String>): SuiteFeedPage
     // AI suite · Photo tool (workstream 3)
@@ -436,11 +458,58 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         return p.uploadId
     }
 
+    // The learning editor (workstream 3)
+    override suspend fun playbook() = call { playbook() }
+    override suspend fun addRule(req: LearnRuleRequest) = call { addRule(req) }
+    override suspend fun patchRule(id: String, req: LearnRuleRequest) = call { patchRule(id, req) }
+    override suspend fun deleteRule(id: String) { call { deleteRule(id) } }
+    override suspend fun lessons() = call { lessons() }
+    override suspend fun corrections(limit: Int) = call { corrections(limit) }
+    override suspend fun recipes(q: String?, tags: List<String>, origin: String?) = call { recipes(q?.ifBlank { null }, tags.joinToString(",").ifBlank { null }, origin) }
+    override suspend fun recipe(id: String) = call { recipe(id) }
+    override suspend fun patchRecipe(id: String, req: LearnRecipePatch) = call { patchRecipe(id, req) }
+    override suspend fun deleteRecipe(id: String) { call { deleteRecipe(id) } }
+    override suspend fun nearestRecipes(id: String, k: Int) = call { nearestRecipes(id, k) }
+    override suspend fun learnGaps(limit: Int) = call { learnGaps(limit) }
+    override suspend fun referencePoster(referenceId: String): ByteArray? =
+        runCatching { call { referencePoster(referenceId) }.takeIf { it.isSuccessful }?.body()?.bytes() }.getOrNull()
+    override suspend fun referenceVideo(referenceId: String, into: java.io.File): Boolean = runCatching {
+        val r = call { referenceVideo(rx(referenceId)) }
+        val body = r.body()?.takeIf { r.isSuccessful } ?: return@runCatching false
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { body.byteStream().use { i -> into.outputStream().use { o -> i.copyTo(o) } } }
+        into.length() > 0
+    }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; false }
+
     // Recreate this edit (workstream 1)
     override suspend fun createReference(uploadId: String, name: String?) = studio.muse.core.edit.RecipeJson.reference(call {
         createReference(buildJsonObject { put("uploadId", kotlinx.serialization.json.JsonPrimitive(uploadId)); if (name != null) put("name", kotlinx.serialization.json.JsonPrimitive(name.take(80))) })
     })
     override suspend fun reference(id: String) = studio.muse.core.edit.RecipeJson.reference(call { reference(id) })
+    // Recreate phases 2–3: ids are checked before they reach a URL (rx_…, s1…).
+    private fun rx(id: String) = id.also { require(Regex("^rx_[A-Za-z0-9_]{1,64}$").matches(it)) { "That isn't a reference" } }
+    private fun shotId(id: String) = id.also { require(Regex("^s[0-9]{1,4}$").matches(it)) { "That isn't a shot of the reference" } }
+    private fun slotBody(modelId: String, quality: String?) = buildJsonObject {
+        put("modelId", kotlinx.serialization.json.JsonPrimitive(modelId)); if (quality != null) put("quality", kotlinx.serialization.json.JsonPrimitive(quality))
+    }
+    override suspend fun matchReference(id: String, modelId: String?) {
+        call { matchReference(rx(id), buildJsonObject { if (modelId != null) put("modelId", kotlinx.serialization.json.JsonPrimitive(modelId)) }) }
+    }
+    override suspend fun referenceFill(id: String) = studio.muse.core.edit.RecreateJson.fill(call { referenceFill(rx(id)) })
+    override suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String?) =
+        studio.muse.core.edit.RecreateJson.estimate(call { estimateReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality)) })
+    override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?) =
+        studio.muse.core.edit.RecreateJson.fillStart(call { fillReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality)) })
+    override suspend fun applyRecipe(id: String, sessionId: String, baseRevision: Int?, slots: Map<String, String>) = studio.muse.core.edit.RecreateJson.apply(call {
+        applyRecipe(rx(id), buildJsonObject {
+            put("sessionId", kotlinx.serialization.json.JsonPrimitive(sessionId))
+            if (baseRevision != null) put("baseRevision", kotlinx.serialization.json.JsonPrimitive(baseRevision))
+            put("slots", buildJsonObject { slots.forEach { (k, v) -> put(k, kotlinx.serialization.json.JsonPrimitive(v)) } })
+            put("device", kotlinx.serialization.json.JsonPrimitive("android"))
+        })
+    })
+    override suspend fun createReferenceFromLink(url: String, name: String?) = studio.muse.core.edit.RecipeJson.reference(call {
+        createReference(buildJsonObject { put("url", kotlinx.serialization.json.JsonPrimitive(url)); if (name != null) put("name", kotlinx.serialization.json.JsonPrimitive(name.take(80))) })
+    })
 
     // Edit sessions (workstream 3)
     override suspend fun openEditSession(req: OpenEditSessionRequest) = call { openEditSession(req) }

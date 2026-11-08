@@ -117,3 +117,10 @@ Assignments:
 Mocks: plans/recreate/ on claude/muse-mcp-bridge @4c2f3f9 (Recipe and Compare). The notes:
 1. The Look swatches are never garish: they show the grade's real colours, softened for display.
 2. The total cost ("N from your takes, M to generate · $X in all") is always visible next to "Build the edit", which still confirms before spending.
+
+## Android Playbook and Recipes mocks APPROVED (2026-11-08): "Approve with my 2 notes"
+1. Real thumbnails from the owner's own videos, never sample people.
+2. Suggestion copy is plain, for example "You changed Claude's look 4 times".
+
+## Link fetching: the owner chose "Keep link fetching" (2026-11-08)
+See plans/research/platform-download-rules.md for the guardrails.

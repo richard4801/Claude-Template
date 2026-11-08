@@ -150,7 +150,7 @@ describe('which provider runs the AI helpers (EDITOR_AI_PROVIDER)', () => {
     expect(pick('something-else', ctxOf(true)).name).toBe('mock');
   });
   it('the mock is free in production (no hold, no charge) and priced elsewhere (tests exercise the money path)', () => {
-    expect(pick(undefined, ctxOf(true, 'production')).rates).toEqual({ transcribe: 0, matte: 0, separate: 0 });
+    expect(pick(undefined, ctxOf(true, 'production')).rates).toEqual({ transcribe: 0, matte: 0, separate: 0, track: 0 });
     expect(pick(undefined, ctxOf(true, 'production', true)).rates.transcribe).toBeGreaterThan(0);
     expect(pick(undefined, ctxOf(true)).rates.transcribe).toBeGreaterThan(0);
   });
@@ -215,14 +215,34 @@ describe('editor AI jobs (mock provider)', () => {
     expect(dr.costUsd).toBe(0);
   });
 
-  it('matte and voice clean-up give an asset the app can use; matte comes with the chroma key', async () => {
+  it('matte and voice clean-up give an asset the app can use; matte is an alpha matte (no chroma key)', async () => {
     const m = (await owner.req('POST', '/v1/editor/jobs', { kind: 'matte', source: { takeId: src } })).body;
     const mr = await done(m.id);
-    expect(mr.result).toMatchObject({ asset: { kind: 'video', take: src }, chroma: { color: '#00FF00' } });
+    expect(mr.result).toMatchObject({ asset: { kind: 'video', take: src }, alpha: true, mode: 'person' });
+    expect(mr.result.chroma).toBeUndefined();
     const v = (await owner.req('POST', '/v1/editor/jobs', { kind: 'denoise', source: { takeId: src } })).body;
     const vr = await done(v.id);
     expect(vr.result.asset).toMatchObject({ kind: 'audio' });
     expect(vr.costUsd).toBeGreaterThan(0);
+  });
+
+  it('tap to keep (workstream 1): points on a frame, priced first, tracked through the clip; checks', async () => {
+    const pts = [{ x: 0.5, y: 0.4, t: 1 }, { x: 0.1, y: 0.9, keep: false }];
+    const est = (await owner.req('POST', '/v1/editor/estimate', { kind: 'matte', source: { takeId: src }, options: { points: pts } })).body;
+    const plain = (await owner.req('POST', '/v1/editor/estimate', { kind: 'matte', source: { takeId: src } })).body;
+    expect(est.usd).toBeGreaterThan(0);
+    expect(est.tokens).toBeGreaterThan(0);
+    expect(est.usd).not.toBe(plain.usd); // its own price
+    const j = (await owner.req('POST', '/v1/editor/jobs', { kind: 'matte', source: { takeId: src }, options: { points: pts } })).body;
+    const r = await done(j.id);
+    expect(r.state, JSON.stringify(r)).toBe('done');
+    expect(r.result).toMatchObject({ alpha: true, mode: 'tracked', points: [{ x: 0.5, y: 0.4, t: 1, keep: true }, { x: 0.1, y: 0.9, t: 0, keep: false }] });
+    const bad = (o: unknown) => owner.req('POST', '/v1/editor/estimate', { kind: 'matte', source: { takeId: src }, options: { points: o } }).then(x => x.body.error as string);
+    expect(await bad([])).toMatch(/1 to 10 points/);
+    expect(await bad([{ x: 2, y: 0 }])).toMatch(/points.0.x/);
+    expect(await bad([{ x: 0.5, y: 0.5, keep: false }])).toMatch(/at least one thing to keep/);
+    expect(await bad([{ x: 0.5, y: 0.5, t: 100 }])).toMatch(/within the clip/);
+    expect(await bad(Array.from({ length: 11 }, () => ({ x: 0.5, y: 0.5 })))).toMatch(/1 to 10 points/);
   });
 
   it('cancel gives the hold back; finished jobs can be removed; members only see their own', async () => {
@@ -370,6 +390,7 @@ describe('Replicate provider (fake Replicate on localhost)', () => {
       'victor-upmeet/whisperx': { owner: 'victor-upmeet', name: 'whisperx', latest_version: { id: 'v_whisper', openapi_schema: schema(['audio_file', 'language', 'align_output', 'batch_size']) } },
       'arielreplicate/robust_video_matting': { owner: 'arielreplicate', name: 'robust_video_matting', latest_version: { id: 'v_rvm', openapi_schema: schema(['input_video', 'output_type']) } },
       'ryan5453/demucs': { owner: 'ryan5453', name: 'demucs', latest_version: { id: 'v_demucs', openapi_schema: schema(['audio', 'stem', 'output_format']) } },
+      'meta/sam-2-video': { owner: 'meta', name: 'sam-2-video', latest_version: { id: 'v_sam2', openapi_schema: schema(['input_video', 'click_coordinates', 'click_labels', 'click_frames', 'click_object_ids', 'mask_type', 'output_video']) } },
     };
     const preds = new Map<string, any>();
     server = http.createServer((req, res) => {
@@ -386,7 +407,7 @@ describe('Replicate provider (fake Replicate on localhost)', () => {
           const b = JSON.parse(body); creates.push(b);
           const id = `p${++n}`, port = (server.address() as any).port;
           const out = b.version === 'v_whisper' ? { detected_language: 'en', segments: [{ start: 0.2, end: 1.5, words: [{ word: 'Hello', start: 0.2, end: 0.6, score: 0.9 }, { word: 'um', start: 0.7, end: 0.9, score: 0.5 }, { word: 'there', start: 1.1, end: 1.5, score: 0.9 }] }] }
-            : b.version === 'v_rvm' ? `http://127.0.0.1:${port}/files/green.mp4` : { vocals: `http://127.0.0.1:${port}/files/vocals.mp3`, no_vocals: `http://127.0.0.1:${port}/files/rest.mp3` };
+            : b.version === 'v_rvm' ? `http://127.0.0.1:${port}/files/green.mp4` : b.version === 'v_sam2' ? `http://127.0.0.1:${port}/files/tracked.mp4` : { vocals: `http://127.0.0.1:${port}/files/vocals.mp3`, no_vocals: `http://127.0.0.1:${port}/files/rest.mp3` };
           preds.set(id, { id, status: 'succeeded', output: out, metrics: { predict_time: 12.5 } });
           return json(201, { id, status: 'starting' });
         }
@@ -423,9 +444,17 @@ describe('Replicate provider (fake Replicate on localhost)', () => {
     const mr = await done(m.id);
     expect(mr.state, JSON.stringify(mr)).toBe('done');
     expect(mr.result.asset).toMatchObject({ kind: 'video', upload: expect.stringMatching(/^up_/) });
-    expect(creates.find(x => x.version === 'v_rvm').input).toMatchObject({ output_type: 'green-screen' });
+    expect(creates.find(x => x.version === 'v_rvm').input).toMatchObject({ output_type: 'alpha-mask' }); // fix 1: the matte, not a green composite
     const stored = await a.app.inject({ method: 'GET', url: new URL(mr.result.asset.url, 'http://x').pathname });
     expect(stored.body).toBe('file /files/green.mp4');
+    // Tap to keep: the points in pixels and frames of the source (1080 × 1920 at 30 fps here), one object, a binary mask.
+    const t = (await owner.req('POST', '/v1/editor/jobs', { kind: 'matte', source: { takeId: src }, options: { points: [{ x: 0.5, y: 0.25, t: 2 }, { x: 0, y: 1, keep: false }] } })).body;
+    expect(t.models).toEqual(['meta/sam-2-video']); // the owner sees the model
+    const tr = await done(t.id);
+    expect(tr.state, JSON.stringify(tr)).toBe('done');
+    expect(creates.find(x => x.version === 'v_sam2').input).toMatchObject({ click_coordinates: '[540,480],[0,1919]', click_labels: '1,0', click_frames: '60,0', mask_type: 'binary', output_video: true });
+    expect(tr.result).toMatchObject({ alpha: true, mode: 'tracked', asset: { kind: 'video', upload: expect.stringMatching(/^up_/) } });
+    expect(tr.costUsd).toBeGreaterThan(0);
     const d = (await owner.req('POST', '/v1/editor/jobs', { kind: 'denoise', source: { takeId: src } })).body;
     const dr = await done(d.id);
     expect(dr.result.asset).toMatchObject({ kind: 'audio', upload: expect.stringMatching(/^up_/) });

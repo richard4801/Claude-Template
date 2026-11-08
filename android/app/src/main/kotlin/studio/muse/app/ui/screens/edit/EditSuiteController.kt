@@ -12,10 +12,15 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import studio.muse.app.data.EditorEstimate
 import studio.muse.app.data.EditorJob
 import studio.muse.app.data.EditorSourceDto
 import studio.muse.core.edit.Adjust
+import studio.muse.core.edit.AlphaMatte
 
 import studio.muse.core.edit.Asset
 import studio.muse.core.edit.AssetKind
@@ -71,6 +76,8 @@ import kotlin.math.roundToInt
 interface EditBackend {
     suspend fun estimate(kind: String, source: EditorSourceDto, options: JsonObject?): Pair<EditorEstimate?, String?>
     suspend fun run(kind: String, source: EditorSourceDto, options: JsonObject?, onProgress: (EditorJob) -> Unit): Pair<JsonObject?, String?>
+    /** A helper's result added an asset the device doesn't have yet (background removal's matte): fetch [url] for it. */
+    fun assetArrived(assetId: String, url: String) {}
 }
 
 /** Everything the editor can be asked to do (one sealed list, so the screen is a pure function of state + [act]). */
@@ -101,6 +108,15 @@ sealed interface EditAction {
     data class AddKeyframe(val prop: KfProp) : EditAction
     data class SetMask(val mask: Mask?, val done: Boolean = true) : EditAction
     data object RemoveBackground : EditAction
+    /** Remove background → tap what to keep (workstream 1, plans/api.md "KeepPoint"): on / off. */
+    data class TapToKeep(val on: Boolean) : EditAction
+    /** A tap on the paused picture at (x, y), 0–1 of the frame. */
+    data class KeepTapAt(val x: Double, val y: Double) : EditAction
+    /** Whether the next tap keeps (true) or leaves out. */
+    data class KeepNext(val keep: Boolean) : EditAction
+    data object UndoKeepTap : EditAction
+    /** Runs the tracked cut-out (its price is on the button: one run per press). */
+    data object RunTapToKeep : EditAction
     data class SetTransition(val kind: TransitionKind?, val durationSec: Double = 0.4, val done: Boolean = true) : EditAction
     data object TransitionToAll : EditAction
     data class EffectsTab(val tab: String) : EditAction
@@ -374,7 +390,19 @@ class EditSuiteController(
             is EditAction.SetTransform -> { val id = visualId(u) ?: return; change(a.done) { p -> p.updateItem(id) { withTransform(it, a.transform) } } }
             is EditAction.AddKeyframe -> addKeyframe(u, a.prop)
             is EditAction.SetMask -> { val id = visualId(u) ?: return; change(a.done) { p -> p.updateItem(id) { when (it) { is VideoClip -> it.copy(mask = a.mask); is ImageItem -> it.copy(mask = a.mask); else -> it } } } }
-            EditAction.RemoveBackground -> removeBackground(u)
+            EditAction.RemoveBackground -> removeBackground(u, null)
+            is EditAction.TapToKeep -> {
+                if (u.playing && a.on) act(EditAction.PlayPause) // taps go on a paused frame
+                _ui.update { it.copy(keep = if (a.on) KeepUi() else null) }
+            }
+            is EditAction.KeepTapAt -> keepTap(u, a.x, a.y)
+            is EditAction.KeepNext -> _ui.update { it.copy(keep = it.keep?.copy(keepNext = a.keep)) }
+            EditAction.UndoKeepTap -> { _ui.update { it.copy(keep = it.keep?.copy(taps = it.keep.taps.dropLast(1))) }; estimateKeep() }
+            EditAction.RunTapToKeep -> {
+                val k = u.keep ?: return
+                if (!k.ready) return say("Tap at least one thing to keep")
+                removeBackground(u, k.taps)
+            }
             is EditAction.SetTransition -> {
                 val c = u.activeClip ?: return
                 val p = project ?: return
@@ -483,7 +511,11 @@ class EditSuiteController(
         return sourceOf(p.asset(clip.asset))
     }
 
-    private fun aiKey(kind: String, options: JsonObject?) = if (kind == "cuts" && options?.get("silenceOnly") != null) "silences" else kind
+    private fun aiKey(kind: String, options: JsonObject?) = when {
+        kind == "cuts" && options?.get("silenceOnly") != null -> "silences"
+        kind == "matte" && options?.get("points") != null -> "matte_keep" // tap to keep has its own price
+        else -> kind
+    }
 
     /** Fetches what a helper costs, for its button ("about $0.02" / "Free"). */
     fun estimate(kind: String, options: JsonObject? = null, source: EditorSourceDto? = mainSource()) {
@@ -614,29 +646,76 @@ class EditSuiteController(
         }
     }
 
-    private fun removeBackground(u: EditSuiteUi) {
+    /** Tap to keep: a tap at the playhead's source time of the clip being cut out (1–10 taps). */
+    private fun keepTap(u: EditSuiteUi, x: Double, y: Double) {
+        val k = u.keep ?: return
+        if (k.taps.size >= 10) return say("Ten taps at most · undo one first")
+        val p = project ?: return
+        val clip = u.activeClip ?: return
+        val span = itemSpan(p, p.main, p.main.items.firstOrNull { it.id == clip.id } ?: return)
+        val t = (clip.inSec + (u.playheadSec - span.startSec).coerceAtLeast(0.0) * clip.speed).coerceIn(clip.inSec, clip.outSec)
+        _ui.update { it.copy(keep = k.copy(taps = k.taps + KeepTap(x.coerceIn(0.0, 1.0), y.coerceIn(0.0, 1.0), Math.round(t * 1000) / 1000.0, k.keepNext))) }
+        estimateKeep()
+    }
+
+    private fun keepOptions(taps: List<KeepTap>): JsonObject = buildJsonObject {
+        put("points", buildJsonArray {
+            taps.forEach { tp -> add(buildJsonObject { put("x", tp.x); put("y", tp.y); put("t", tp.t); put("keep", tp.keep) }) }
+        })
+    }
+
+    /** The tracked cut-out's price, once there is something to keep (its own price: plans/api.md). */
+    private fun estimateKeep() {
+        val k = _ui.value.keep ?: return
+        if (!k.ready) return
+        val clip = _ui.value.activeClip ?: return
+        estimate("matte", keepOptions(k.taps), sourceOf(project?.asset(clip.asset)))
+    }
+
+    /**
+     * Remove background (workstream 1): the person ([taps] null), or what the owner tapped (tracked). The result is an
+     * alpha matte: the original clip gets `alphaMatte {asset}` (its chroma key goes) and the matte joins the project's
+     * assets; the device fetches it to render. An older server's green composite still goes on a keyed overlay track.
+     */
+    private fun removeBackground(u: EditSuiteUi, taps: List<KeepTap>?) {
         val p = project ?: return
         val clip = u.activeClip ?: return
         val src = sourceOf(p.asset(clip.asset))
-        runAi("matte", null, src) { r ->
+        runAi("matte", taps?.let(::keepOptions), src) { r ->
             val a = r["asset"] as? JsonObject ?: return@runAi
             val upload = (a["upload"] as? JsonPrimitive)?.content
             val take = (a["take"] as? JsonPrimitive)?.content
-            val ch = r["chroma"] as? JsonObject
-            val chroma = Chroma((ch?.get("color") as? JsonPrimitive)?.content ?: "#00FF00", (ch?.get("similarity") as? JsonPrimitive)?.doubleOrNull,
-                (ch?.get("smoothness") as? JsonPrimitive)?.doubleOrNull, (ch?.get("spill") as? JsonPrimitive)?.doubleOrNull)
-            change { pp ->
-                // The cut-out person goes on an overlay track over the same span of the timeline, keyed.
-                val id = SuiteOps.newAssetId(pp, "matte")
-                val withAsset = pp.copy(assets = pp.assets + Asset(id, AssetKind.VIDEO, take = take, upload = if (take == null) upload else null,
-                    durationSec = (a["durationSec"] as? JsonPrimitive)?.doubleOrNull, hasAudio = false))
-                val span = itemSpan(withAsset, withAsset.main, withAsset.main.items.first { it.id == clip.id })
-                val track = Track(withAsset.newId("cutout"), TrackKind.VIDEO, name = "Cut-out")
-                val c = VideoClip(withAsset.newId("k"), id, clip.inSec, clip.outSec, clip.speed, speedCurve = clip.speedCurve,
-                    startSec = span.startSec, muted = true, chroma = chroma)
-                withAsset.copy(tracks = withAsset.tracks + track.copy(items = listOf(c)))
+            val url = (a["url"] as? JsonPrimitive)?.content
+            val alpha = (r["alpha"] as? JsonPrimitive)?.content == "true"
+            var matteId: String? = null
+            if (alpha) {
+                change { pp ->
+                    val id = SuiteOps.newAssetId(pp, "matte").also { matteId = it }
+                    val withAsset = pp.copy(assets = pp.assets + Asset(id, AssetKind.VIDEO, take = take, upload = if (take == null) upload else null,
+                        durationSec = (a["durationSec"] as? JsonPrimitive)?.doubleOrNull, hasAudio = false))
+                    withAsset.updateItem(clip.id) { it2 -> (it2 as VideoClip).copy(alphaMatte = AlphaMatte(id), chroma = null) }
+                }
+                _ui.update { it.copy(keep = null) }
+                say(if (taps != null) "Cut out · what you tapped stays" else "Background removed")
+            } else {
+                val ch = r["chroma"] as? JsonObject
+                val chroma = Chroma((ch?.get("color") as? JsonPrimitive)?.content ?: "#00FF00", (ch?.get("similarity") as? JsonPrimitive)?.doubleOrNull,
+                    (ch?.get("smoothness") as? JsonPrimitive)?.doubleOrNull, (ch?.get("spill") as? JsonPrimitive)?.doubleOrNull)
+                change { pp ->
+                    // An older server: the cut-out person goes on an overlay track over the same span of the timeline, keyed.
+                    val id = SuiteOps.newAssetId(pp, "matte").also { matteId = it }
+                    val withAsset = pp.copy(assets = pp.assets + Asset(id, AssetKind.VIDEO, take = take, upload = if (take == null) upload else null,
+                        durationSec = (a["durationSec"] as? JsonPrimitive)?.doubleOrNull, hasAudio = false))
+                    val span = itemSpan(withAsset, withAsset.main, withAsset.main.items.first { it.id == clip.id })
+                    val track = Track(withAsset.newId("cutout"), TrackKind.VIDEO, name = "Cut-out")
+                    val c = VideoClip(withAsset.newId("k"), id, clip.inSec, clip.outSec, clip.speed, speedCurve = clip.speedCurve,
+                        startSec = span.startSec, muted = true, chroma = chroma)
+                    withAsset.copy(tracks = withAsset.tracks + track.copy(items = listOf(c)))
+                }
+                say("Background removed · the person is on an overlay track")
             }
-            say("Background removed · the person is on an overlay track")
+            val id = matteId
+            if (id != null && url != null) backend.assetArrived(id, url)
         }
     }
 

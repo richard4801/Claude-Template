@@ -211,12 +211,54 @@ interface MuseApi {
     suspend fun uploadSuiteMedia(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit = {}): SuiteMediaRef =
         throw ApiException("unsupported", "Uploading files needs the studio server")
 
+    // The learning editor (workstream 3, plans/api.md "Learning editor", owner only). Defaults: a server without it.
+    suspend fun playbook(): List<LearnRule> = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    suspend fun addRule(req: LearnRuleRequest): LearnRule = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    suspend fun patchRule(id: String, req: LearnRuleRequest): LearnRule = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    suspend fun deleteRule(id: String) { throw ApiException("not_found", "This studio server doesn't have the playbook yet") }
+    suspend fun lessons(): List<LearnLesson> = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    suspend fun corrections(limit: Int = 50): List<LearnCorrection> = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    suspend fun recipes(q: String? = null, tags: List<String> = emptyList(), origin: String? = null): List<LearnRecipeEntry> = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    suspend fun recipe(id: String): LearnRecipeEntry = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    suspend fun patchRecipe(id: String, req: LearnRecipePatch): LearnRecipeEntry = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    suspend fun deleteRecipe(id: String) { throw ApiException("not_found", "This studio server doesn't have the playbook yet") }
+    suspend fun nearestRecipes(id: String, k: Int = 3): LearnNearest = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    suspend fun learnGaps(limit: Int = 10): List<LearnGap> = throw ApiException("not_found", "This studio server doesn't have the playbook yet")
+    /** A reference's poster PNG (an authenticated route, so not an image URL); null when it has expired. */
+    suspend fun referencePoster(referenceId: String): ByteArray? = null
+    /**
+     * The reference video (an authenticated route: a redirect to storage, or the bytes), saved into [into] for the
+     * player, which then needs no token. False when there is none (demo mode, expired).
+     */
+    suspend fun referenceVideo(referenceId: String, into: java.io.File): Boolean = false
+
     // Recreate this edit (workstream 1, plans/api.md "Recreate this edit"). Defaults: a server without it.
     /** A studio video upload (≤ 60 s, from [uploadEditorFile]) becomes a reference; its analysis runs on the server. */
     suspend fun createReference(uploadId: String, name: String?): studio.muse.core.edit.RecipeReference =
         throw ApiException("not_found", "This studio server can't read edits yet")
+    /**
+     * A shared link (TikTok, Instagram Reel, YouTube) becomes a reference: the server fetches it within the platforms'
+     * rules. A link it can't use answers in words (link_unsupported, link_private, link_downloads_off, link_too_big,
+     * link_blocked, too_long): show the message and offer the saved file instead.
+     */
+    suspend fun createReferenceFromLink(url: String, name: String?): studio.muse.core.edit.RecipeReference =
+        throw ApiException("not_found", "This studio server can't read links yet · save the video and share the file")
     /** The reference's state and step while it is analysed, and its recipe once ready. */
     suspend fun reference(id: String): studio.muse.core.edit.RecipeReference = throw ApiException("not_found", "Reference not found")
+    // Recreate phases 2–3 (plans/api.md "Recreate this edit · slots and assembly"): match (free), price (nothing held),
+    // fill (a paid Suite shot, only after the person confirmed its price), apply into an edit session.
+    /** Scores the studio's takes against each shot (free); the fill then says which shots are yours and which to make. */
+    suspend fun matchReference(id: String, modelId: String?): Unit = throw ApiException("not_found", "This studio server can't build recipes yet")
+    suspend fun referenceFill(id: String): studio.muse.core.edit.RecreateFill = throw ApiException("not_found", "This studio server can't build recipes yet")
+    /** A shot's price as a new shot. Nothing is held. */
+    suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String? = null): studio.muse.core.edit.RecreateSlotEstimate =
+        throw ApiException("not_found", "This studio server can't build recipes yet")
+    /** Makes a shot: an ordinary Suite job, held and charged. Only after the person confirmed the total. */
+    suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String? = null): studio.muse.core.edit.RecreateFillStart =
+        throw ApiException("not_found", "This studio server can't build recipes yet")
+    /** Builds the edit in an edit session: [slots] is slotId → takeId or jobId. */
+    suspend fun applyRecipe(id: String, sessionId: String, baseRevision: Int?, slots: Map<String, String>): studio.muse.core.edit.RecreateApplyResult =
+        throw ApiException("not_found", "This studio server can't build recipes yet")
 
     /** The studio's locations (`@location` in the composer's prompt). */
     suspend fun suiteLocations(): List<SuiteLocation> = throw ApiException("not_found", "This server doesn't have locations yet")

@@ -54,6 +54,8 @@ data class VideoLook(
     val tone: Tone? = null,
     /** Edit suite: the item's shape mask (alpha), null when none. */
     val mask: Mask? = null,
+    /** Background removal's matte (the clip's alpha from a video aligned with its source), null when none. */
+    val alphaMatte: AlphaMatte? = null,
 )
 
 /** A clip or image in a layer or lane, placed on the timeline. */
@@ -87,6 +89,21 @@ data class PlannedClip(
 
 /** A constant-speed sub-clip of a [PlannedClip] (source microseconds). */
 data class PlannedPiece(val clipStartUs: Long, val clipEndUs: Long, val speed: Double)
+
+/**
+ * The source time (µs) this clip shows at timeline time [timelineUs] (µs): its pieces play back to back from [PlannedClip.startUs],
+ * each at its own speed. Clamped to the clip. Background removal's matte is sampled at this time (it is aligned with the
+ * source), so trims and speed changes keep it on the subject.
+ */
+fun PlannedClip.sourceUsAt(timelineUs: Long): Long {
+    var t = (timelineUs - startUs).coerceAtLeast(0).toDouble()
+    for (p in pieces) {
+        val len = (p.clipEndUs - p.clipStartUs) / p.speed
+        if (t <= len) return (p.clipStartUs + t * p.speed).toLong().coerceIn(p.clipStartUs, p.clipEndUs)
+        t -= len
+    }
+    return pieces.lastOrNull()?.clipEndUs ?: clipEndUs
+}
 
 sealed interface LaneEntry { val startUs: Long; val endUs: Long; val durationUs: Long get() = endUs - startUs }
 data class Gap(override val startUs: Long, override val endUs: Long) : LaneEntry
@@ -330,7 +347,7 @@ fun planRender(project: EditProject, infos: Map<String, MediaInfo>, presets: Lis
         }
         val crop = if (l > 1e-9 || r > 1e-9 || t > 1e-9 || b > 1e-9) CropNdc(-1 + 2 * l, 1 - 2 * r, -1 + 2 * b, 1 - 2 * t) else null
         val m = colorMatrix(v.adjust, v.filter, presets).takeUnless(::isIdentityMatrix)
-        return VideoLook(crop, tw, th, base, m, (v as? VideoClip)?.chroma, v.look?.takeUnless { it.isNoop() }, Tone.of(v.adjust), v.mask)
+        return VideoLook(crop, tw, th, base, m, (v as? VideoClip)?.chroma, v.look?.takeUnless { it.isNoop() }, Tone.of(v.adjust), v.mask, (v as? VideoClip)?.alphaMatte)
     }
 
     /** A clip limited to the project's end; null when it starts after it. */

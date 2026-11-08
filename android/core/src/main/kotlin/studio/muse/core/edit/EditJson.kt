@@ -115,6 +115,7 @@ object EditJson {
         keyframes = keyframes(o), filter = filter(o), adjust = adjust(o), look = look(o), mask = mask(o),
         voiceEffect = o.enumOrNull("voiceEffect", "one of ${VoiceEffect.entries.joinToString(", ") { it.wire }}"), enhance = o.boolOrNull("enhance"),
         chroma = o.objOrNull("chroma")?.let { Chroma(it.str("color"), it.numOrNull("similarity"), it.numOrNull("smoothness"), it.numOrNull("spill")) },
+        alphaMatte = o.objOrNull("alphaMatte")?.let { AlphaMatte(it.str("asset"), it.boolOrNull("invert")) },
         transitionIn = o.objOrNull("transitionIn")?.let { Transition(it.enum("kind", "unknown transition"), it.num("durationSec")) },
     )
 
@@ -254,6 +255,7 @@ object EditJson {
             num("startSec", it.startSec); num("volume", it.volume); bool("muted", it.muted); num("fadeInSec", it.fadeInSec); num("fadeOutSec", it.fadeOutSec)
             str("audioAsset", it.audioAsset); visual(it)
             it.chroma?.let { c -> put("chroma", buildJsonObject { put("color", c.color); num("similarity", c.similarity); num("smoothness", c.smoothness); num("spill", c.spill) }) }
+            it.alphaMatte?.let { m -> put("alphaMatte", buildJsonObject { put("asset", m.asset); bool("invert", m.invert) }) }
             it.transitionIn?.let { tr -> put("transitionIn", buildJsonObject { put("kind", tr.kind.wire); num("durationSec", tr.durationSec) }) }
         }
         is ImageItem -> buildJsonObject {

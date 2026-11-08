@@ -24,3 +24,12 @@ Sources are partly secondary (vendor blogs quoting the terms). The direction is 
 - https://scrapeops.io/websites/instagram/
 - https://uwaterloo.ca/copyright-at-waterloo/catalogs/frequently-asked-questions/27-my-course-i-link-youtube-videos-some-students-are-not
 - https://web-wp.archive.org/web/20210416000515/https:/www.youtube.com/t/terms
+
+## Owner's decision (2026-11-08): "Keep link fetching"
+The owner chose to keep link fetching after seeing the terms. The risk is theirs: a terms breach (a contract matter) could get the server or their accounts blocked. Guardrails:
+- **Personal reference only:** the video is stored privately, used only for analysis, never posted or used as footage, and deleted after 30 days. This is unchanged.
+- **Respect the creator:** where the platform exposes a downloads-off flag (for example TikTok's download setting in the video's metadata), MUSE refuses that video.
+- **No sign-ins:** MUSE never uses the owner's platform logins or cookies and never bypasses private or age-gated videos. Public videos only.
+- **Polite access:** one fetch per request, no crawling, cached by URL.
+- **Fallback:** when a fetch is blocked or refused, MUSE says so plainly and offers "drop the saved file" instead.
+- WS1 builds it server-side (one resolver for Mac and Android). The phone share target accepts both links and files.

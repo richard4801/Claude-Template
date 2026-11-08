@@ -99,6 +99,14 @@ extension EditV2 {
         public init(id: String, amount: Double) { self.id = id; self.amount = amount }
     }
 
+    /// A clip's alpha from a matte video (white = opaque; `invert`: black = opaque), sampled at the clip's own source time and
+    /// applied before its look, mask and transform (plans/api.md "VideoClip.alphaMatte").
+    public struct AlphaMatte: Codable, Hashable, Sendable {
+        public var asset: String
+        public var invert: Bool?
+        public init(asset: String, invert: Bool? = nil) { self.asset = asset; self.invert = invert }
+    }
+
     public struct Chroma: Codable, Hashable, Sendable {
         public var color: String
         public var similarity: Double?
@@ -243,6 +251,8 @@ extension EditV2 {
         public var mask: Mask?
         public var voiceEffect: VoiceEffect?
         public var enhance: Bool?
+        /// Remove background (workstream 1 contract, 2026-11-08): a grey matte video aligned with `asset`; its luma is the alpha.
+        public var alphaMatte: AlphaMatte?
         public init(id: String, asset: String, inSec: Double, outSec: Double, speed: Double = 1, startSec: Double? = nil, volume: Double? = nil,
                     muted: Bool? = nil, fadeInSec: Double? = nil, fadeOutSec: Double? = nil, audioAsset: String? = nil, fit: Fit? = nil,
                     transform: Transform? = nil, crop: Crop? = nil, opacity: Double? = nil, keyframes: Keyframes? = nil, filter: FilterRef? = nil,

@@ -367,7 +367,9 @@ export class EditSessions {
         const id = `bg${p.assets.length + 1}`;
         p.assets.push({ id, kind: 'video', ...(a.upload ? { upload: a.upload } : { take: a.take! }), durationSec: a.durationSec, ...(a.url ? { url: a.url } : {}) });
         for (const t of p.tracks) for (const it of t.items as M.VideoClip[]) if (it.asset === asset.id && (t.kind === 'main' || t.kind === 'video') && (!w.itemId || it.id === w.itemId)) {
-          it.asset = id; it.audioAsset ??= asset.id; it.chroma = result.chroma as M.Chroma;
+          // workstream 1: an alpha matte on the original clip (fix 1, and tap to keep); older results were green composites.
+          if (result.alpha) { it.alphaMatte = { asset: id }; delete it.chroma; }
+          else { it.asset = id; it.audioAsset ??= asset.id; it.chroma = result.chroma as M.Chroma; }
         }
         return p;
       }

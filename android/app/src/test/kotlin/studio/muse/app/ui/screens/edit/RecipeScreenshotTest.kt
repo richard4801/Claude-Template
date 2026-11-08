@@ -32,7 +32,7 @@ class RecipeScreenshotTest(private val theme: String, private val state: String)
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}_{1}")
         fun params(): List<Array<Any>> = listOf("a", "b", "c", "d").flatMap { t ->
-            listOf("pick", "analysing", "ready", "ready_full", "ready_tablet", "home").map { arrayOf<Any>(t, it) }
+            listOf("pick", "analysing", "ready", "ready_full", "ready_tablet", "home", "link_analysing", "link_failed").map { arrayOf<Any>(t, it) }
         }
     }
 
@@ -47,6 +47,9 @@ class RecipeScreenshotTest(private val theme: String, private val state: String)
         val ui = when (state) {
             "pick" -> RecipeUi()
             "analysing" -> RecipeUi(RecipePhase.Analysing(.6f, "Reading the text"), "cafe_morning.mp4")
+            // Share → MUSE with a link: fetching it, and a link the server can't use (its message, then the saved file).
+            "link_analysing" -> RecipeUi(RecipePhase.Analysing(.05f, "Getting the video from the link"), "TikTok link")
+            "link_failed" -> RecipeUi(RecipePhase.Failed("This video's creator turned downloads off · save it and share the file instead", fromLink = true), "TikTok link")
             else -> RecipeUi(RecipePhase.Ready(recipe), "cafe_morning.mp4")
         }
         compose.setContent {
@@ -73,6 +76,15 @@ class RecipeScreenshotTest(private val theme: String, private val state: String)
         assertEquals("ready", ref.state)
         assertTrue("Listening for the beat" in phases)
         assertEquals(7, ref.recipe!!.slots.size)
+    }
+
+    @Test fun `a shared link runs the same flow, and a private one answers in words`() = kotlinx.coroutines.runBlocking {
+        val api = studio.muse.app.data.FakeMuseApi(kotlinx.coroutines.MainScope(), null, speed = 0.0, genDelayMs = 0)
+        var ref = api.createReferenceFromLink("https://vm.tiktok.com/ZM1/", "TikTok link")
+        while (ref.state == "analyzing") ref = api.reference(ref.id)
+        assertEquals("ready", ref.state)
+        val e = runCatching { api.createReferenceFromLink("https://www.instagram.com/reel/private1", "Instagram link") }.exceptionOrNull()
+        assertEquals("link_private", (e as studio.muse.app.data.ApiException).code)
     }
 
     @Test fun `the stand-in recipe reads like the plan`() {

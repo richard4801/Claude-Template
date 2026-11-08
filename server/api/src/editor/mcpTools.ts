@@ -194,9 +194,11 @@ const TOOLS: EditTool[] = [
   },
   {
     name: 'remove_background', title: 'Remove background', scope: 'edit:write',
-    description: 'Cuts the person out of a clip (green screen without a green screen). Paid: estimate first, then confirm: true; it runs after the owner approves in the app.',
-    inputSchema: obj({ sessionId: SID, itemId: str('The clip (default: the main video)'), confirm: bool('Ask the owner to approve the cost') }, ['sessionId']),
-    run: (env, a) => helper(env, a, { kind: 'matte', label: 'Remove background' }),
+    description: 'Cuts the person out of a clip (green screen without a green screen): the clip gets an alpha matte, so green clothes and hair edges survive. To keep something else (a pet, a product, one of two people), pass points: where it is on a frame, [{x, y} 0–1 of the frame, t seconds into the clip, keep false for what to leave out]; it is followed through the clip. Paid: estimate first, then confirm: true; it runs after the owner approves in the app.',
+    inputSchema: obj({ sessionId: SID, itemId: str('The clip (default: the main video)'),
+      points: { type: 'array', maxItems: 10, items: { type: 'object' }, description: 'Tap to keep: [{x, y, t?, keep?}] (0–1 of the frame; t seconds into the source)' },
+      confirm: bool('Ask the owner to approve the cost') }, ['sessionId']),
+    run: (env, a) => helper(env, a, { kind: 'matte', label: Array.isArray(a.points) ? 'Keep what you tapped' : 'Remove background', ...(Array.isArray(a.points) ? { options: { points: a.points } } : {}) }),
   },
   {
     name: 'detect_beats', title: 'Detect beats (free)', scope: 'edit:write',
