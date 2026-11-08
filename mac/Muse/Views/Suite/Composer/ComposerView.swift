@@ -46,6 +46,16 @@ struct ComposerView: View {
                 }
                 .scrollDisabled(fits)
             }
+            // Claude's paid ask (owner only): the composer's Generate confirmation. Never in review mode (nothing the walk
+            // presses may spend).
+            .sheet(isPresented: Binding(get: { store.isOwner && s.claude.confirmOpen && s.claude.ask != nil && SnapshotRunner.dir == nil },
+                                        set: { if !$0 { s.claude.confirmOpen = false } })) {
+                if let p = s.claude.ask {
+                    SuiteClaudeGenerateSheet(pending: p)
+                        .environment(store)
+                        .environment(\.theme, t)
+                }
+            }
             ComposerPickerHost()
             // Compare in the feed: two takes side by side over the composer.
             let comparing = store.suiteComparing
@@ -64,7 +74,9 @@ struct ComposerView: View {
             }
         }
         .onAppear { presetsOpen = draftIsEmpty }
-        .onChange(of: s.composer.tool) { _, _ in presetsOpen = draftIsEmpty }
+        .onChange(of: s.composer.tool) { _, _ in presetsOpen = draftIsEmpty; store.suiteClaudeToolChanged() }
+        // Claude in the Suite: the owner's own edits go to the shared draft, so Claude sees them on its next turn.
+        .onChange(of: s.composer) { _, _ in store.suiteComposerChanged() }
         // Saved rigs for the Setup rail's Rigs row; a model's default rig when she is @-mentioned (fills Auto rows only).
         .task(id: store.serverKey) { await store.loadSavedRigs() }
         .onChange(of: s.composer.tokens.characterId) { _, new in
@@ -123,8 +135,11 @@ struct ComposerView: View {
                 }
             }
             HStack(alignment: .top, spacing: Space.s4) {
-                // The results feed takes the picture's place beside the rail (header "Takes").
-                if store.suite.feedOpen {
+                // The results feed takes the picture's place beside the rail (header "Takes"); so does Claude's panel,
+                // which keeps the rows it fills in view.
+                if store.suite.claude.open && store.isOwner {
+                    SuiteClaudePanel()
+                } else if store.suite.feedOpen {
                     ComposerFeed()
                 } else {
                     ComposerMediaPane()
@@ -187,7 +202,16 @@ struct ComposerView: View {
                 .buttonStyle(.plain).foregroundStyle(t.roles.ink2).help("Engines")
                 .accessibilityLabel("Engines (owner)")
             }
-            Button { store.suite.feedOpen.toggle() } label: {
+            if store.isOwner {
+                let on = store.suite.claude.open
+                SuiteToolButton(title: "Claude", icon: "chat-circle-text", filled: on, plain: !on) { store.toggleSuiteClaude() }
+                    .accessibilityLabel(on ? "Hide Claude" : "Show Claude")
+                    .help(on ? "Hide Claude" : "Claude fills in the composer from your idea. Nothing is generated until you confirm the price.")
+            }
+            Button {
+                store.suite.feedOpen.toggle()
+                if store.suite.feedOpen { store.suite.claude.open = false }
+            } label: {
                 Text(store.suite.feedOpen ? "Hide takes" : (d.tool == .photo ? "Photos" : "Takes")).font(t.scale.label.font).foregroundStyle(t.roles.ink2)
                     .lineLimit(1).fixedSize()
                     .frame(minHeight: 32).contentShape(Rectangle())

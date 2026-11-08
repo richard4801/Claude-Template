@@ -691,6 +691,8 @@ final class AppStore {
         // Build step 3: a collection made, changed or deleted, or the queue changed: read them again.
         if e.type == "collection" { Task { await loadCollections() } }
         if e.type == "queue" { Task { await loadQueue() } }
+        // Claude in the Suite: Claude or another device changed the shared composer draft.
+        if e.type == "suiteAssist", let a = e.assist { suiteAssistEvent(a) }
         if e.type == "account" { LiveEvents.applyAccounts(&accounts, e) }
         if isOwner {
             if e.type == "member" { LiveEvents.applyMembers(&members, e) }

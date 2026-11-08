@@ -244,7 +244,8 @@ interface MuseApi {
 
     // Recreate this edit (workstream 1, plans/api.md "Recreate this edit"). Defaults: a server without it.
     /** A studio video upload (≤ 60 s, from [uploadEditorFile]) becomes a reference; its analysis runs on the server. */
-    suspend fun createReference(uploadId: String, name: String?): studio.muse.core.edit.RecipeReference =
+    /** [sourceUrl]: the link the phone downloaded it from (a link reference, fetched on the device). */
+    suspend fun createReference(uploadId: String, name: String?, sourceUrl: String? = null): studio.muse.core.edit.RecipeReference =
         throw ApiException("not_found", "This studio server can't read edits yet")
     /**
      * A shared link (TikTok, Instagram Reel, YouTube) becomes a reference: the server fetches it within the platforms'
@@ -298,6 +299,26 @@ interface MuseApi {
     suspend fun recreateExport(id: String, sessionId: String, sound: String, start: Boolean, revision: Int? = null): studio.muse.core.edit.RecreateRender =
         throw ApiException("not_found", "This studio server can't export recreates yet")
     suspend fun recreateExportFile(id: String, sessionId: String, sound: String, revision: Int?, into: java.io.File): Boolean = false
+
+    // Recreate links fetched on the phone (plans/api.md "Fetching on the device, and Strict link rules").
+    /** The link rules the phone applies too; null on a server without them (the defaults then apply). */
+    suspend fun recreateSettings(): RecreateLinkSettings? = null
+    /** Owner: "Strict link rules". */
+    suspend fun patchRecreateSettings(strictLinks: Boolean): RecreateLinkSettings = throw ApiException("not_found", "This studio server doesn't have link rules yet")
+    /** Before the phone downloads: allowed (the normalized link), refused (code, reason) or already a reference (cached). */
+    suspend fun checkRecreateLink(url: String): RecreateLinkCheck = RecreateLinkCheck(true, url)
+
+    // Claude in the AI Suite (WS1 1eda187): the shared composer draft. Defaults: a server without it.
+    /** A shared draft: the composer's current [draft], or a job's ([fromJobId]). */
+    suspend fun createSuiteAssist(draft: SuiteDraft?, fromJobId: String? = null): SuiteAssist = throw ApiException("not_found", "This studio server doesn't have Claude in the Suite yet")
+    suspend fun suiteAssist(id: String): SuiteAssist = throw ApiException("not_found", "Assist not found")
+    /** The owner's own composer edits, so Claude sees them. `stale` (409): Claude changed it since; re-read it. */
+    suspend fun patchSuiteAssist(id: String, draft: SuiteDraft, baseRevision: Int?): SuiteAssist = throw ApiException("not_found", "Assist not found")
+    /** The owner's answer to Claude's Generate. `price_changed` (409): the price rose above the approved one; nothing ran. */
+    suspend fun answerSuitePending(id: String, pendingId: String, approve: Boolean): SuitePending = throw ApiException("not_found", "Assist not found")
+    /** An image for a Claude message (presign → PUT → confirm); returns its upload id. ≤ 10 MB, JPEG, PNG, WebP or HEIC. */
+    suspend fun uploadClaudeImage(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit = {}): String =
+        throw ApiException("not_found", "This studio server can't take images for Claude yet")
 
     /** The studio's locations (`@location` in the composer's prompt). */
     suspend fun suiteLocations(): List<SuiteLocation> = throw ApiException("not_found", "This server doesn't have locations yet")

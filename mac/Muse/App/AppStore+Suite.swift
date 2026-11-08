@@ -181,6 +181,8 @@ final class SuiteState {
     var extendUpload: Double?
     /// Owner: the Engines sheet (D9).
     var showEngines = false
+    /// Claude in the Suite (owner only): the panel, the shared draft and Claude's paid asks (SuiteClaudeBridge.swift).
+    let claude = SuiteClaudeBridge()
 
     // Photo tool (workstream 3): the count, preset and references; the estimate from POST /v1/suite/photos/estimate.
     var photo = PhotoDraft()
@@ -219,6 +221,7 @@ final class SuiteState {
     var swapUsesStage = false
 
     func reset() {
+        claude.reset()
         catalog = nil
         catalogError = nil
         estimate = nil

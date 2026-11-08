@@ -37,11 +37,18 @@ data class ClaudeToolRef(val id: String = "", val name: String = "", val ok: Boo
 @Serializable
 data class ClaudeImageRef(val url: String = "")
 
+/** An image the owner attached to a message (a copy stored on the thread; [url] is a private link, valid 1 h). */
+@Serializable
+data class ClaudeAttachment(val id: String = "", val uploadId: String = "", val mimeType: String = "image/jpeg", val bytes: Long = 0,
+    val width: Int? = null, val height: Int? = null, val url: String = "")
+
 /** role: user | assistant | tool; source: mac | phone | api. */
 @Serializable
 data class ClaudeMessage(
     val id: String, val threadId: String = "", val role: String = "assistant", val source: String = "mac", val text: String = "",
     val turnId: String? = null, val tool: ClaudeToolRef? = null, val image: ClaudeImageRef? = null, val createdAt: Long = 0,
+    /** Up to 4 images the owner attached (Recreate, Edit and Suite threads). */
+    val attachments: List<ClaudeAttachment> = emptyList(),
 )
 
 /** state: queued | running | done | failed | stopped; from: phone | mac. */
@@ -118,7 +125,8 @@ sealed interface ClaudeSend {
 }
 
 @Serializable private data class ThreadBody(val contextKind: String, val contextId: String)
-@Serializable private data class TextBody(val text: String)
+@Serializable private data class TextBody(val text: String, val attachments: List<UploadRef>? = null)
+@Serializable private data class UploadRef(val uploadId: String)
 @Serializable private data class FallbackBody(val apiFallback: Boolean)
 @Serializable private data class SentBody(val message: ClaudeMessage, val turn: ClaudeTurn)
 @Serializable private data class RefusalBody(val error: String = "", val code: String? = null, val fallback: ClaudeFallback? = null)
@@ -134,11 +142,11 @@ interface ClaudeApi {
     /** With the last 100 messages and the active turn. */
     suspend fun getThread(id: String): ClaudeThread
     /** A message from the phone: queued for the Mac, or refused (Mac offline, busy). Other errors throw [ApiException]. */
-    suspend fun post(threadId: String, text: String): ClaudeSend
+    suspend fun post(threadId: String, text: String, attachments: List<String> = emptyList()): ClaudeSend
     /** The phone's Stop: the Mac interrupts the turn and sends `done`. */
     suspend fun stop(turnId: String)
     /** The fallback on the studio API key (camera threads for now). Refusals (`fallback_off`) arrive as one `error` event. */
-    fun apiTurn(threadId: String, text: String): Flow<ChatEvent>
+    fun apiTurn(threadId: String, text: String, attachments: List<String> = emptyList()): Flow<ChatEvent>
 
     object Unsupported : ClaudeApi {
         private fun no(): Nothing = throw ApiException("unsupported", "Claude chat needs the studio server")
@@ -146,15 +154,18 @@ interface ClaudeApi {
         override suspend fun setApiFallback(on: Boolean) = no()
         override suspend fun thread(contextKind: String, contextId: String) = no()
         override suspend fun getThread(id: String) = no()
-        override suspend fun post(threadId: String, text: String) = no()
+        override suspend fun post(threadId: String, text: String, attachments: List<String>) = no()
         override suspend fun stop(turnId: String) = no()
-        override fun apiTurn(threadId: String, text: String): Flow<ChatEvent> = flowOf(ChatEvent("error", code = "unsupported", error = "Claude chat needs the studio server"))
+        override fun apiTurn(threadId: String, text: String, attachments: List<String>): Flow<ChatEvent> = flowOf(ChatEvent("error", code = "unsupported", error = "Claude chat needs the studio server"))
     }
 }
 
 /** Relative upload URLs ("/uploads/…") made absolute against [base]. */
-fun ClaudeMessage.absolute(base: String): ClaudeMessage =
-    if (image?.url?.startsWith("/") == true) copy(image = ClaudeImageRef(base.trimEnd('/') + image.url)) else this
+fun ClaudeMessage.absolute(base: String): ClaudeMessage {
+    fun abs(u: String) = if (u.startsWith("/")) base.trimEnd('/') + u else u
+    val m = if (image?.url?.startsWith("/") == true) copy(image = ClaudeImageRef(abs(image.url))) else this
+    return if (m.attachments.any { it.url.startsWith("/") }) m.copy(attachments = m.attachments.map { it.copy(url = abs(it.url)) }) else m
+}
 
 fun ClaudeThread.absolute(base: String) = copy(messages = messages?.map { it.absolute(base) })
 
@@ -208,8 +219,8 @@ class HttpClaudeApi(baseUrl: String, private val client: OkHttpClient, private v
         call("POST", "v1/claude/threads", json.encodeToString(ThreadBody.serializer(), ThreadBody(contextKind, contextId)), ClaudeThread.serializer()).absolute(origin)
     override suspend fun getThread(id: String) = call("GET", "v1/claude/threads/${enc(id)}", null, ClaudeThread.serializer()).absolute(origin)
 
-    override suspend fun post(threadId: String, text: String): ClaudeSend {
-        val a = raw("POST", "v1/claude/threads/${enc(threadId)}/messages", json.encodeToString(TextBody.serializer(), TextBody(text)))
+    override suspend fun post(threadId: String, text: String, attachments: List<String>): ClaudeSend {
+        val a = raw("POST", "v1/claude/threads/${enc(threadId)}/messages", json.encodeToString(TextBody.serializer(), body(text, attachments)))
         if (a.code in 200..299) return decode(SentBody.serializer(), a.text).let { ClaudeSend.Sent(it.message.absolute(origin), it.turn) }
         val r = runCatching { json.decodeFromString(RefusalBody.serializer(), a.text) }.getOrNull()
         return when (r?.code) {
@@ -224,9 +235,11 @@ class HttpClaudeApi(baseUrl: String, private val client: OkHttpClient, private v
         if (a.code !in 200..299) throw errorOf(a.code, a.text)
     }
 
-    override fun apiTurn(threadId: String, text: String): Flow<ChatEvent> = callbackFlow {
+    private fun body(text: String, attachments: List<String>) = TextBody(text, attachments.takeIf { it.isNotEmpty() }?.map { UploadRef(it) })
+
+    override fun apiTurn(threadId: String, text: String, attachments: List<String>): Flow<ChatEvent> = callbackFlow {
         val req = Request.Builder().url(base + "v1/claude/threads/${enc(threadId)}/api-turn")
-            .post(json.encodeToString(TextBody.serializer(), TextBody(text)).toRequestBody(jsonType)).build()
+            .post(json.encodeToString(TextBody.serializer(), body(text, attachments)).toRequestBody(jsonType)).build()
         val sse = client.newBuilder().readTimeout(60, TimeUnit.SECONDS).build()
         val source = EventSources.createFactory(sse).newEventSource(req, object : EventSourceListener() {
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {

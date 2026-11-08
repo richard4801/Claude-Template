@@ -11,6 +11,12 @@ object SharedLink {
     /** The first http(s) link in [text], without trailing punctuation; null when there is none. */
     fun first(text: String?): String? = text?.let { URL.find(it)?.value?.trimEnd('.', ',', ')', '!', '?', ';', ':') }
 
+    /** "tiktok" | "instagram" | "youtube" from the link's host, or null for any other site. */
+    fun platform(url: String): String? {
+        val host = Regex("""https?://([^/]+)""").find(url)?.groupValues?.get(1)?.lowercase() ?: return null
+        return when { "tiktok" in host -> "tiktok"; "instagram" in host -> "instagram"; "youtu" in host -> "youtube"; else -> null }
+    }
+
     /** A short name for the reference from where it came ("TikTok link"). */
     fun name(url: String): String {
         val host = Regex("""https?://([^/]+)""").find(url)?.groupValues?.get(1)?.lowercase()?.removePrefix("www.")?.removePrefix("m.") ?: return "Shared link"

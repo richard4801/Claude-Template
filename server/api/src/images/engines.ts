@@ -25,7 +25,7 @@ export type ImageRequest = {
 export type PhotoBillInfo = { kind: 'shot' | 'edit'; inMp: number; outMp: number; metrics?: PhotoMetrics | null };
 export type EngineImage = { url?: string; b64?: string; asset?: string; bill?: PhotoBillInfo };
 export type ImageResult = { images: EngineImage[]; seed?: number; costUsd?: number };
-export type EngineSelection = { provider: 'simulated' | 'fal' | 'custom-http' | 'replicate'; model: string; url?: string;
+export type EngineSelection = { provider: 'simulated' | 'fal' | 'custom-http' | 'replicate' | 'byo' /* WS5: an owner-added model, `model` = its id */; model: string; url?: string;
   /** Replicate: the model for edits of an existing photo. */
   editModel?: string };
 

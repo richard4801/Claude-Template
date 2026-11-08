@@ -126,14 +126,14 @@ export function fit(m: ModelSpec, resolution: string, n: Need): { why: string | 
 export type Pick = { model: ModelSpec; resolution: Resolution; seconds: number; tried: { model: string; resolution: string; why: string }[] };
 
 /** The model for a tier: the first ladder step that is allowed, set up and fits. */
-export function pickModel(tier: Tier, n: Need, o: { prefs?: SuitePrefs; providers: Set<ProviderId>; engineModel?: string; resolution?: string }): Pick | { error: string; tried: Pick['tried'] } {
+export function pickModel(tier: Tier, n: Need, o: { prefs?: SuitePrefs; providers: Set<ProviderId>; engineModel?: string; resolution?: string; studioId?: string }): Pick | { error: string; tried: Pick['tried'] } {
   const ladder: LadderStep[] = o.engineModel
     ? [{ model: o.engineModel, resolution: o.resolution ?? modelById(o.engineModel)?.resolutions.at(-1)?.id ?? '' }]
     : o.prefs?.ladder?.[tier]?.length ? o.prefs.ladder[tier]! : DEFAULT_LADDER[tier];
   const tried: Pick['tried'] = [];
   for (const step of ladder) {
     const m = modelById(step.model);
-    if (!m) { tried.push({ ...step, why: 'unknown model' }); continue; }
+    if (!m || (m.byo && m.byo.studioId !== o.studioId)) { tried.push({ ...step, why: 'unknown model' }); continue; }
     const pref = o.prefs?.models?.[m.id];
     if (pref?.enabled === false) { tried.push({ ...step, why: 'switched off' }); continue; }
     if (m.licence.requiresAck && !pref?.acknowledgedAt) { tried.push({ ...step, why: 'licence not acknowledged' }); continue; }
@@ -165,7 +165,8 @@ export function billedSeconds(m: ModelSpec, seconds: number, o: { videoInput: bo
 }
 /** Fixed extra per take (fal H3 Max reference tokens, an estimate). */
 /** Higgsfield H3: the first 5 reference images are included, each further one costs $0.08 per take. */
-export const extraPerTake = (m: ModelSpec, refImages = 0) => (m.adapter === 'fal-h3-3d' ? 0.5 : m.adapter === 'hf-h3' ? 0.08 * Math.max(0, refImages - 5) : 0);
+/** An owner-added model priced per run (WS5): its per-run cost. */
+export const extraPerTake = (m: ModelSpec, refImages = 0) => (m.adapter === 'fal-h3-3d' ? 0.5 : m.adapter === 'hf-h3' ? 0.08 * Math.max(0, refImages - 5) : m.byo ? m.byo.perRunUsd : 0);
 
 export type ImagePlan = { start?: ImageRef; middle: ImageRef[]; end?: ImageRef; refs: { label: string; role: string; image: ImageRef }[] };
 export type ShotPlan = {
@@ -291,7 +292,7 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
   const perSec = perSecond(m, p.resolution, { videoInput, audio: r.audio, kind }) * (o.priceScale ?? 1);
   const guideSeconds = videos[0]?.video.seconds;
   const billed = billedSeconds(m, p.seconds, { videoInput, guideSeconds });
-  const extraCost = extraPerTake(m, images.refs.length);
+  const extraCost = extraPerTake(m, images.refs.length) * (m.byo ? o.priceScale ?? 1 : 1); // WS5: a custom model's per-run price takes its markup too
   const separation = audioPlan?.beatOnly ? o.separationUsd ?? 0 : 0;
   const estimate = Math.round(((perSec * billed + extraCost) * r.takes + separation) * 10000) / 10000;
 

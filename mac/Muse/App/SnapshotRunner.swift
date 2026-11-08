@@ -236,6 +236,7 @@ enum SnapshotRunner {
                         store.suite.viewerTakeId = nil
                         store.suite.feedTool = nil
                         store.suite.feedModel = nil
+                        store.suite.claude.open = false
                         state.generateFrame = nil
                         state.generateLabel = nil
                         show()
@@ -264,6 +265,22 @@ enum SnapshotRunner {
                             let f = state.composerFrames["queued"]
                             lines.append("\(f != nil ? "FITS" : "CUT") \(label) queued group \(store.suite.queued.count) shots, \(store.suite.queued.first?.buttonLabel ?? "none")")
                         }
+                        if name.hasPrefix("composer_claude") {
+                            // Claude in the Suite: the panel beside the rail, the composer filled by demo mode's stand-in
+                            // reply through the shared draft's checks; with the ask, its row waits (no confirmation opens
+                            // in review mode, so nothing here can spend).
+                            let c = store.suite.claude
+                            let s = store.suite.composer.settings
+                            let filled = s.body != nil && s.lighting != nil && s.palette != nil && s.genre != nil
+                            let drawn = state.composerFrames["claude panel"] != nil
+                            lines.append("\(drawn && filled ? "FITS" : "CUT") \(label) Claude panel \(drawn ? "drawn" : "not drawn"), composer \(filled ? "filled" : "not filled"), \(c.demoLines.count) lines, \(c.rejected.count) refused, revision \(c.revision)")
+                            if name == "composer_claude_ask" {
+                                lines.append("\(c.ask != nil && !c.confirmOpen ? "FITS" : "CUT") \(label) Claude's ask waits for the owner (\(c.ask.map { Pricing.money($0.estimateUsd) } ?? "none"), confirmation \(c.confirmOpen ? "open" : "closed"))")
+                            }
+                            if name == "composer_claude_attach" {
+                                lines.append("\(c.attachments.count == 2 && state.composerFrames["claude attachments"] != nil ? "FITS" : "CUT") \(label) \(c.attachments.count) images attached before sending")
+                            }
+                        }
                         if name == "composer_swap" {
                             lines.append("\(state.composerFrames["decided"] != nil ? "FITS" : "CUT") \(label) rows set by the clip shown greyed with the reason")
                         }
@@ -290,6 +307,12 @@ enum SnapshotRunner {
             ("composer_queue", { store.openTool(.shot); fillDemoDraft(store)
                 if store.suite.queued.isEmpty { store.addShotToQueue() }
                 store.suite.feedOpen = true }),
+            // Claude in the Suite (owner): the panel in the picture's place, the composer filled from the typed idea.
+            ("composer_claude", { store.openTool(.shot); fillDemoDraft(store); store.showSuiteClaudeForReview() }),
+            // …two reference images attached, waiting to be sent (removable thumbnails).
+            ("composer_claude_attach", { store.openTool(.shot); fillDemoDraft(store); store.showSuiteClaudeForReview(attach: true) }),
+            // …and after "go": Claude's ask waits in the panel for the owner's confirmation (never approved here).
+            ("composer_claude_ask", { store.openTool(.shot); fillDemoDraft(store); store.showSuiteClaudeForReview(ask: true) }),
             ("composer_compare", { store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
                 let two = Array(store.suiteTakes(photo: false).prefix(2)) + Array(store.takes.filter(\.isVideo).prefix(2))
                 store.suite.compareIds = Array(two.map(\.id).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }.prefix(2)) }),
@@ -316,6 +339,10 @@ enum SnapshotRunner {
         }
         store.suite.compareIds = []
         store.suite.feedOpen = false
+        // Claude's ask from the review shots is declined (it was never approved), and the panel closed.
+        if store.suite.claude.ask != nil { store.answerSuiteAsk(approve: false) }
+        store.suite.claude.attachments = []
+        store.suite.claude.open = false
         w.setFrame(full, display: true)
         try? await Task.sleep(for: .seconds(1))
         try? (lines.joined(separator: "\n") + "\n").write(to: dir.appendingPathComponent("fit-check.txt"), atomically: true, encoding: .utf8)
@@ -505,6 +532,18 @@ enum SnapshotRunner {
             store.openRecreate()
             try? await Task.sleep(for: .seconds(1))
             if theme == .c {
+                // A link being fetched on this Mac (faked: review mode never runs the download): the progress line and Stop.
+                store.recreate.fetchingLink = true
+                store.recreate.linkStatus = RecreateDeviceFetch.statusLine(fetched: 0.42)
+                store.recreate.linkProgress = 0.42
+                try? await Task.sleep(for: .seconds(0.6))
+                onScreen("linkFetching", "recreate_fetching 1280x800 c")
+                check("fetching", theme, beside: false, primary: "linkFetching")
+                capture(dir.appendingPathComponent("mac_c_recreate_fetching.png"))
+                store.recreate.fetchingLink = false
+                store.recreate.linkStatus = nil
+                store.recreate.linkProgress = nil
+                try? await Task.sleep(for: .seconds(0.3))
                 // Paste a link (Release 1 gap 3): demo mode's private link is refused, with the file offered right there.
                 // Pasted into the empty field: fetched at once.
                 store.recreate.linkText = "https://www.tiktok.com/@muse.demo/video/7400000000000000002-private"
