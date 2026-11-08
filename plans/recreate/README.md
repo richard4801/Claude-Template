@@ -21,7 +21,7 @@ Themes: `c` Soft Tactile, `a` Editorial, `b` Camera Body, `d` Creator Pop; 1280 
   - **Fix shot 2** re-picks or regenerates the weakest shot. Export stays the one primary.
 - Anything the editor can't do yet shows in the panel as "Not supported yet", with the moment it happens.
 
-## Release 1 on the Mac (built, demo mode, Mac CI run 42492773570)
+## Release 1 on the Mac (built, demo mode, Mac CI run 42501748862 on 4132cbd)
 - **Paste a link** (`built_link_c`): the start page takes a TikTok, Instagram Reel or YouTube link (field, ⌘V, or dropped),
   as well as a dropped or chosen file anywhere on the page. Each refusal shows the server's words, with "Choose the file" beside it.
   A link whose download is blocked later shows the same and a drop zone.
@@ -38,3 +38,7 @@ Themes: `c` Soft Tactile, `a` Editorial, `b` Camera Body, `d` Creator Pop; 1280 
 - **Fix shot N** (`built_fix_c`): another take, or the shot made again (priced, confirmed), swapped into the edit as one undo step.
 - **Export** (`built_export_c`): the primary after Build; the reference's sound as a guide track or silent, with the
   "Post with the original sound" steps. The server export when there is one, else made on the Mac.
+- **Use your own setting** (`built_own_setting_c`): a swap can use one of the studio's locations (free) or "Make one
+  from the brief · +$0.06" (the plate's price from the estimate); the confirmation names the background. Fills send the
+  confirmed price; a new price (`price_changed`) or a failed background says so and asks again before anything is spent.
+- Toasts on Recreate sit under its top bar, clear of the cost line and Build (`built_toast_c`).
