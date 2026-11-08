@@ -286,7 +286,7 @@ struct RecreateCompare: View {
                     metric("Shots", rs.match?.shots)
                     Spacer(minLength: Space.s2)
                     if let w = rs.weakestSlot {
-                        SuiteToolButton(title: "Fix shot \(w + 1)", icon: "arrows-clockwise", plain: true) { store.fixWeakestRecreateShot() }
+                        SuiteToolButton(title: "Fix shot \(w + 1)", icon: "arrows-clockwise", plain: true) { store.openRecreateFix(w) }
                     }
                 }
                 HStack(spacing: Space.s4) {

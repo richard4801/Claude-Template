@@ -72,6 +72,17 @@ final class RecreateState {
     var built: RecreateBuiltPreview?
     var loadingBuilt = false
 
+    /// "Fix shot N" in Compare: the shot the sheet is open for, what it is doing, its price and any problem.
+    var fixSlot: String?
+    var fixBusy: String?
+    var fixEstimate: ShotEstimate?
+    var fixError: String?
+    /// The shot isn't in the edit any more (slot_not_in_edit): the sheet offers "Rebuild the edit".
+    var fixNeedsRebuild = false
+    /// Demo mode: shots swapped for a take, kept on this Mac so "Your edit" shows them (slotId → takeId).
+    var demoSwaps: [String: String] = [:]
+    @ObservationIgnored var fixTask: Task<Void, Never>?
+
     /// Export (plans/recreate-edit.md step 7).
     var exportOpen = false
     var exportSound: RecreateExport.Sound = .guide
@@ -154,6 +165,14 @@ final class RecreateState {
         exportedFile = nil
         exportError = nil
         useThisSound = nil
+        fixTask?.cancel()
+        fixTask = nil
+        fixSlot = nil
+        fixBusy = nil
+        fixEstimate = nil
+        fixError = nil
+        fixNeedsRebuild = false
+        demoSwaps = [:]
         claudeAsk = nil
         claudeRevision = nil
     }
@@ -668,6 +687,141 @@ extension AppStore {
         recreate.mode = .recipe
     }
 
+    // MARK: Fix shot N (Compare: replace one shot in the built edit)
+
+    /// The session the edit was built into (demo mode: the fake's).
+    private var recreateBuiltSession: String? { recreate.sessionId ?? (isDemo && recreate.match != nil ? "es_demo" : nil) }
+
+    /// Compare → "Fix shot N": the sheet with "Use one of my takes" and "Regenerate this shot".
+    func openRecreateFix(_ i: Int) {
+        guard recreate.slots.indices.contains(i) else { return }
+        recreate.playing = false
+        selectRecreateSlot(i)
+        recreate.fixSlot = recreate.slots[i].id
+        recreate.fixBusy = nil
+        recreate.fixEstimate = nil
+        recreate.fixError = nil
+        recreate.fixNeedsRebuild = false
+    }
+
+    func closeRecreateFix() {
+        // A shot already being made carries on; it goes into the edit when it's done.
+        recreate.fixSlot = nil
+    }
+
+    /// Swaps the shot's clip in the built edit for `take` (a take id, or a finished fill job id) as one undoable change, then
+    /// plays the new revision in Compare.
+    @discardableResult
+    func replaceRecreateSlot(_ slotId: String, take: String) async -> String? {
+        guard let ref = recreate.reference, let sid = recreateBuiltSession else {
+            recreate.fixError = "Build the edit first."
+            return "not_built"
+        }
+        recreate.fixError = nil
+        recreate.fixNeedsRebuild = false
+        recreate.fixBusy = "Putting it in the edit"
+        defer { recreate.fixBusy = nil }
+        do {
+            let r = try await recreateAPI.replaceSlot(ref.id, slotId: slotId, sessionId: sid, take: take, baseRevision: nil)
+            guard recreate.reference?.id == ref.id else { return nil }
+            if isDemo, let t = r.takeId { recreate.demoSwaps[slotId] = t }
+            if recreate.fixSlot == slotId { recreate.fixSlot = nil }
+            showToast(r.note ?? "\(recreate.shotName(slotId)) replaced. Undo it in the editor’s history.")
+            await loadRecreateBuilt()
+            return nil
+        } catch let e as ApiError {
+            switch e.code {
+            case "slot_not_in_edit":
+                recreate.fixNeedsRebuild = true
+                recreate.fixError = "\(recreate.shotName(slotId)) isn’t in the edit any more. Rebuild the edit to put it back."
+            case "not_built_here":
+                recreate.fixError = "This edit wasn’t built from this reference here. Build the edit again first."
+            case "job_not_done":
+                recreate.fixError = nil
+            case "bad_request", "http_400":
+                recreate.fixError = "That take can’t be used: it has no video yet, or it’s gone."
+            default:
+                recreate.fixError = e.friendlyMessage
+            }
+            return e.code
+        } catch {
+            recreate.fixError = error.localizedDescription
+            return "failed"
+        }
+    }
+
+    /// slot_not_in_edit → "Rebuild the edit": the recipe applied again with the current fill.
+    func rebuildRecreateFromFix() {
+        recreate.fixSlot = nil
+        Task { await applyRecreate() }
+    }
+
+    /// "Regenerate this shot", step 1: its price (nothing is held).
+    func priceRecreateFix() async {
+        guard let ref = recreate.reference, let slot = recreate.fixSlot else { return }
+        guard let model = recreateModelId else { recreate.fixError = "Add a model first: new shots are made with her."; return }
+        recreate.fixError = nil
+        recreate.fixBusy = "Pricing the shot"
+        defer { recreate.fixBusy = nil }
+        do {
+            let e = try await recreateAPI.estimateSlot(ref.id, slotId: slot, modelId: model, quality: nil)
+            if let p = e.estimate.problem {
+                recreate.fixError = p
+            } else {
+                recreate.fixEstimate = e.estimate
+            }
+        } catch {
+            recreate.fixError = (error as? ApiError)?.friendlyMessage ?? error.localizedDescription
+        }
+    }
+
+    /// "Regenerate this shot", step 2, after the owner saw the price and said yes: the shot is made (held and charged like
+    /// any shot), its fill is read every 3 s until it's ready, then it replaces the shot in the edit.
+    func confirmRecreateFix() {
+        guard let ref = recreate.reference, let slot = recreate.fixSlot, recreate.fixEstimate != nil, let model = recreateModelId else { return }
+        let id = ref.id
+        recreate.fixEstimate = nil
+        recreate.fixBusy = "Generating \(recreate.shotName(slot).lowercased())"
+        recreate.fixTask?.cancel()
+        recreate.fixTask = Task { [weak self] in
+            guard let self else { return }
+            let api = self.recreateAPI
+            do {
+                let started = try await api.fillSlot(id, slotId: slot, modelId: model, quality: nil)
+                if !self.isDemo { self.upsert(started.job) }
+                if !self.isDemo, let b = try? await self.api.balance() { self.balance = b }
+                var job = started.job.id
+                for _ in 0..<400 {
+                    try await Task.sleep(for: .seconds(3))
+                    guard let f = try? await api.fill(id), let s = f.slots.first(where: { $0.slotId == slot }) else { continue }
+                    if self.recreate.reference?.id == id { self.takeRecreateFill(f) }
+                    if s.state == "ready" {
+                        job = s.jobId ?? job
+                        // The job may still be finishing on the server: job_not_done means read again.
+                        while true {
+                            guard self.recreate.reference?.id == id else { return }
+                            let code = await self.replaceRecreateSlot(slot, take: job)
+                            guard code == "job_not_done" else { return }
+                            self.recreate.fixBusy = "Finishing the new shot"
+                            try await Task.sleep(for: .seconds(3))
+                        }
+                    }
+                    if s.state == "to_generate" || s.state == "empty" {
+                        self.recreate.fixBusy = nil
+                        self.recreate.fixError = "\(self.recreate.shotName(slot)) didn’t generate. You weren’t charged for it."
+                        return
+                    }
+                }
+                self.recreate.fixBusy = nil
+                self.recreate.fixError = "\(self.recreate.shotName(slot)) is taking long. It goes into the edit when you fix it again once it’s ready."
+            } catch is CancellationError {
+            } catch {
+                self.recreate.fixBusy = nil
+                self.recreate.fixError = (error as? ApiError)?.friendlyMessage ?? error.localizedDescription
+            }
+        }
+    }
+
     /// Compare → the built edit in the editor (where it is exported).
     func openRecreateInEditor() {
         guard let id = recreate.builtTakeId, takes.contains(where: { $0.id == id }) else {
@@ -688,14 +842,31 @@ extension AppStore {
         if isDemo {
             guard let recipe = recreate.recipe, let take = editSuiteTakes.first(where: { !$0.isEdit }),
                   let v = take.videoUrl, let url = URL(string: v) else { return nil }
-            let local = try await EditSuiteMedia.localCopy(url, key: take.id)
-            let info = try await VideoEditEngine.info(AVURLAsset(url: local))
-            let facts = RecreateAssembly.TakeInfo(id: take.id, durationSec: info.duration, width: info.width, height: info.height)
-            var takes: [String: RecreateAssembly.TakeInfo] = [:]
-            for s in recipe.slots { takes[s.id] = facts }
-            project = RecreateAssembly.project(recipe, sourceTakeId: take.id, takes: takes, paletteIds: EditV2LookLibrary.shared.paletteIds,
+            var locals: [String: URL] = [:]
+            var facts: [String: RecreateAssembly.TakeInfo] = [:]
+            func load(_ t: Take, _ url: URL) async throws {
+                guard facts[t.id] == nil else { return }
+                let local = try await EditSuiteMedia.localCopy(url, key: t.id)
+                let info = try await VideoEditEngine.info(AVURLAsset(url: local))
+                locals[t.id] = local
+                facts[t.id] = RecreateAssembly.TakeInfo(id: t.id, durationSec: info.duration, width: info.width, height: info.height)
+            }
+            try await load(take, url)
+            var slotTakes: [String: RecreateAssembly.TakeInfo] = [:]
+            for s in recipe.slots {
+                // "Fix shot N" swapped this shot for one of the takes (demo mode keeps the swap on this Mac).
+                if let id = recreate.demoSwaps[s.id], let t = self.takes.first(where: { $0.id == id }), let v = t.videoUrl, let u = URL(string: v) {
+                    try await load(t, u)
+                    slotTakes[s.id] = facts[t.id]
+                } else {
+                    slotTakes[s.id] = facts[take.id]
+                }
+            }
+            project = RecreateAssembly.project(recipe, sourceTakeId: take.id, takes: slotTakes, paletteIds: EditV2LookLibrary.shared.paletteIds,
                                                startAtSlot: true).project
-            return (project, [project.assets.first?.id ?? "a1": local])
+            var files: [String: URL] = [:]
+            for a in project.assets { if let t = a.take, let f = locals[t] { files[a.id] = f } }
+            return (project, files)
         }
         guard let sid = recreate.sessionId else { return nil }
         let session = try await api.editSession(id: sid)

@@ -28,6 +28,42 @@ public protocol RecreateAPI: Sendable {
     func startExport(_ id: String, sessionId: String, sound: String) async throws -> RecreateServerExport
     /// `GET /v1/recreate/references/{id}/export?sessionId&sound`.
     func exportState(_ id: String, sessionId: String, sound: String) async throws -> RecreateServerExport
+    /// "Fix shot N" in Compare: swaps that shot's clip in the built edit for a take (or a finished fill job's take), as one
+    /// undoable change; its timing, transition, ramp, camera and look stay. 409 `not_built_here`, `slot_not_in_edit`,
+    /// `job_not_done`; 400 for an unknown take.
+    func replaceSlot(_ id: String, slotId: String, sessionId: String, take: String, baseRevision: Int?) async throws -> RecreateReplaceResult
+}
+
+/// `POST …/slots/{slotId}/replace` → this.
+public struct RecreateReplaceResult: Codable, Hashable, Sendable {
+    public var sessionId: String
+    public var revision: Int?
+    public var slotId: String
+    public var itemId: String?
+    public var takeId: String?
+    public var inSec: Double?
+    public var label: String?
+    /// "The take is shorter than the shot, so it plays at 80%".
+    public var note: String?
+
+    public init(sessionId: String, revision: Int?, slotId: String, itemId: String? = nil, takeId: String? = nil, inSec: Double? = nil,
+                label: String? = nil, note: String? = nil) {
+        self.sessionId = sessionId; self.revision = revision; self.slotId = slotId; self.itemId = itemId; self.takeId = takeId
+        self.inSec = inSec; self.label = label; self.note = note
+    }
+
+    enum CodingKeys: String, CodingKey { case sessionId, revision, slotId, itemId, takeId, inSec, label, note }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        sessionId = c.o(.sessionId) ?? ""
+        revision = c.o(.revision)
+        slotId = c.o(.slotId) ?? ""
+        itemId = c.o(.itemId)
+        takeId = c.o(.takeId)
+        inSec = c.o(.inSec)
+        label = c.o(.label)
+        note = c.o(.note)
+    }
 }
 
 /// `POST …/slots/{slotId}/estimate`: the shot request the slot becomes, and its price (nothing held).
@@ -71,8 +107,10 @@ public struct RecreateApplyRequest: Codable, Hashable, Sendable {
         public var speed: Bool?
         public var text: Bool?
         public var look: Bool?
-        public init(camera: Bool? = nil, speed: Bool? = nil, text: Bool? = nil, look: Bool? = nil) {
-            self.camera = camera; self.speed = speed; self.text = text; self.look = look
+        /// Line each take's action peak up with its slot (the server's default: on).
+        public var peaks: Bool?
+        public init(camera: Bool? = nil, speed: Bool? = nil, text: Bool? = nil, look: Bool? = nil, peaks: Bool? = nil) {
+            self.camera = camera; self.speed = speed; self.text = text; self.look = look; self.peaks = peaks
         }
     }
     public var sessionId: String
@@ -166,6 +204,14 @@ extension HTTPMuseAPI: RecreateAPI {
     }
 
     private struct ExportBody: Encodable { var sessionId: String; var sound: String }
+    /// The server's body is strict: sessionId, take and baseRevision only.
+    private struct ReplaceBody: Encodable { var sessionId: String; var take: String; var baseRevision: Int? }
+
+    public func replaceSlot(_ id: String, slotId: String, sessionId: String, take: String, baseRevision: Int?) async throws -> RecreateReplaceResult {
+        let path = "v1/recreate/references/\(try RecreateIds.check(id))/slots/\(try RecreateIds.slot(slotId))/replace"
+        let body = try JSONEncoder().encode(ReplaceBody(sessionId: try EditSessionIds.check(sessionId), take: take, baseRevision: baseRevision))
+        return try await suiteCall("POST", path, body: body)
+    }
 
     public func startPreview(sessionId: String) async throws -> EditPreviewRender {
         try await suiteCall("POST", "v1/edit-sessions/\(try EditSessionIds.check(sessionId))/preview", body: Data("{}".utf8))
@@ -334,7 +380,8 @@ public final class FakeRecreateAPI: RecreateAPI, @unchecked Sendable {
         let r = try await reference(id)
         guard let i = r.recipe?.slots.firstIndex(where: { $0.id == slotId }) else { throw ApiError("not_found", "That shot is gone") }
         try with {
-            if made[id]?[slotId] != nil { throw ApiError("already_filled", "This shot is already being made") }
+            // A shot still being made is never started twice; a finished one can be made again ("Regenerate this shot").
+            if let n = made[id]?[slotId], n < 2 { throw ApiError("already_filled", "This shot is already being made") }
             made[id, default: [:]][slotId] = 0
         }
         let job = Job(id: Self.demoJobId(slotId), title: "Shot \(i + 1)", modelId: modelId, modelName: "", outfitId: "",
@@ -397,6 +444,35 @@ public final class FakeRecreateAPI: RecreateAPI, @unchecked Sendable {
                                     useThisSound: useThisSound(r))
     }
 
+    /// referenceId → the session it was built into, its revision, and the slots in the edit (Fix shot).
+    private var built: [String: (session: String, revision: Int, slots: Set<String>)] = [:]
+
+    public func replaceSlot(_ id: String, slotId: String, sessionId: String, take: String, baseRevision: Int?) async throws -> RecreateReplaceResult {
+        _ = try RecreateIds.slot(slotId)
+        let r = try await reference(id)
+        guard let i = r.recipe?.slots.firstIndex(where: { $0.id == slotId }) else { throw ApiError("not_found", "Slot not found") }
+        return try with {
+            guard let b = built[id], b.session == sessionId else {
+                throw ApiError("not_built_here", "Build the edit from this reference in this session first")
+            }
+            guard b.slots.contains(slotId) else {
+                throw ApiError("slot_not_in_edit", "Shot \(slotId) isn’t in the edit any more · rebuild the edit to put it back")
+            }
+            if take.hasPrefix("job_rx_") {
+                let slot = String(take.dropFirst("job_rx_".count))
+                guard let n = made[id]?[slot] else { throw ApiError("bad_request", "take: no video take or job \(take)") }
+                if n < 2 { throw ApiError("job_not_done", "That shot is still being made · try again when it’s done") }
+            } else if take.isEmpty || take.contains("unknown") {
+                throw ApiError("bad_request", "take: no video take or job \(take)")
+            }
+            let rev = b.revision + 1
+            built[id]?.revision = rev
+            let takeId = take.hasPrefix("job_rx_") ? "t_rx_\(take.dropFirst("job_rx_".count))" : take
+            return RecreateReplaceResult(sessionId: sessionId, revision: rev, slotId: slotId, itemId: "c\(i + 1)", takeId: takeId, inSec: 0,
+                                         label: "Replaced shot \(slotId) in “\(r.name ?? "Reference")”")
+        }
+    }
+
     public func apply(_ id: String, _ req: RecreateApplyRequest) async throws -> RecreateApplyResult {
         let slots = (try? await reference(id))?.recipe?.slots.map(\.id) ?? []
         // A finished job's first take fills its slot; one still running is listed in `waiting` (as the server does).
@@ -406,6 +482,8 @@ public final class FakeRecreateAPI: RecreateAPI, @unchecked Sendable {
         let perSlot: [[String: Any]] = slots.enumerated().map { i, s in ["slotId": s, "score": scores[i % scores.count]] }
         let match: [String: Any] = ["overall": 0.86, "cuts": 0.97, "text": 0.9, "ramps": 0.78, "grade": 0.84, "shots": 0.8, "perSlot": perSlot]
         let none: [String] = []
+        let inEdit = Set(req.slots.keys).subtracting(waiting)
+        with { built[id] = (req.sessionId, (req.baseRevision ?? 0) + 1, inEdit) }
         let json: [String: Any] = ["sessionId": req.sessionId, "revision": (req.baseRevision ?? 0) + 1, "label": "Recreated", "missing": none, "waiting": waiting, "match": match]
         return try JSONDecoder().decode(RecreateApplyResult.self, from: JSONSerialization.data(withJSONObject: json))
     }

@@ -136,6 +136,98 @@ struct RecreateClaudeAsk: View {
     }
 }
 
+// MARK: Fix shot N
+
+/// Compare → "Fix shot N": swap the shot in the built edit for one of your takes, or make it again (priced, then confirmed:
+/// nothing is spent before "Generate · $x"). The shot's timing, transition, ramp, camera and look stay; it's one undoable
+/// change in the edit.
+struct RecreateFixSheet: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    var body: some View {
+        let rs = store.recreate
+        let slot = rs.fixSlot ?? ""
+        let name = rs.shotName(slot)
+        let busy = rs.fixBusy != nil
+        VStack(alignment: .leading, spacing: Space.s4) {
+            VStack(alignment: .leading, spacing: Space.s1) {
+                Text("Fix \(name.lowercased())").scaled(t.scale.title, t.roles.ink).lineLimit(1).fitProbe("fix title")
+                Text(rs.score(slot).map { "It matches the reference \(RecreateText.percent($0)). Its timing, transition, speed, camera and look stay." }
+                     ?? "Its timing, transition, speed, camera and look stay.")
+                    .scaled(t.scale.body, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: Space.s2) {
+                Text("Use one of my takes").scaled(t.scale.label, t.roles.ink)
+                let choices = store.recreateTakeChoices
+                if choices.isEmpty {
+                    Text("No video takes yet. Make one in the Video suite, or regenerate this shot.")
+                        .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: Space.s3) {
+                            ForEach(choices) { tk in
+                                Button { Task { await store.replaceRecreateSlot(slot, take: tk.id) } } label: {
+                                    VStack(alignment: .leading, spacing: Space.s1) {
+                                        MuseImage(ref: tk.thumb, symbol: "film")
+                                            .frame(width: 72, height: 128)
+                                            .clipShape(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous))
+                                        Text(tk.caption).scaled(t.scale.caption, t.roles.ink).lineLimit(1).frame(width: 72, alignment: .leading)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(busy)
+                                .accessibilityLabel("Use \(tk.caption) for \(name.lowercased())")
+                            }
+                        }
+                    }
+                    .frame(height: 152)
+                }
+            }
+            SuiteRule()
+            VStack(alignment: .leading, spacing: Space.s2) {
+                Text("Regenerate this shot").scaled(t.scale.label, t.roles.ink)
+                Text("A new shot made with \(store.recreateLead?.shortName ?? "your model") from this shot’s brief, charged to the studio.")
+                    .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                if let e = rs.fixEstimate {
+                    HStack(spacing: Space.s3) {
+                        Text(e.priceLine).scaled(t.scale.label, t.roles.ink).monospacedDigit().lineLimit(1).fitProbe("fix price")
+                        Spacer(minLength: 0)
+                        SuiteToolButton(title: "Generate · \(RecreateText.money(e.estimate))", accent: true, disabled: busy) { store.confirmRecreateFix() }
+                            .accessibilityLabel("Generate the new shot for \(RecreateText.money(e.estimate))")
+                    }
+                } else {
+                    SuiteToolButton(title: "Price a new shot", disabled: busy) { Task { await store.priceRecreateFix() } }
+                        .accessibilityLabel("Price a new shot")
+                        .background(SnapshotFrame(key: "fixPrice"))
+                }
+            }
+            if let b = rs.fixBusy {
+                HStack(spacing: Space.s2) {
+                    ProgressView().controlSize(.small)
+                    Text(b).scaled(t.scale.caption, t.roles.ink2)
+                }
+            }
+            if let e = rs.fixError {
+                if rs.fixNeedsRebuild {
+                    InlineNotice(e, tone: .caution, actionTitle: "Rebuild the edit") { store.rebuildRecreateFromFix() }
+                } else {
+                    InlineNotice(e, tone: .caution)
+                }
+            }
+            HStack {
+                Spacer(minLength: 0)
+                SuiteToolButton(title: "Close") { store.closeRecreateFix() }
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityLabel("Close")
+            }
+        }
+        .padding(Space.s5)
+        .frame(width: 500, alignment: .leading)
+        .background(t.roles.canvas)
+    }
+}
+
 // MARK: Export
 
 /// Export after Build (plans/recreate-edit.md step 7): the built edit with the reference's sound as a guide track, or

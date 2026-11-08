@@ -547,6 +547,25 @@ enum SnapshotRunner {
                 } else {
                     lines.append("CUT recreate_compare_frame c the built edit didn't render a frame")
                 }
+                // Fix shot N: the sheet (your takes, or regenerate after its price), then a take swapped in for real (demo:
+                // the fake's replace; nothing is spent) and "Your edit" rebuilt with it.
+                if let w = store.recreate.weakestSlot {
+                    store.openRecreateFix(w)
+                    try? await Task.sleep(for: .seconds(1.2))
+                    let slot = store.recreate.fixSlot
+                    lines.append("\(slot != nil ? "FITS" : "CUT") recreate_fix 1280x800 c sheet for \(slot ?? "none"), \(store.recreateTakeChoices.count) takes to choose")
+                    captureWithSheet(dir.appendingPathComponent("mac_c_recreate_fix.png"), lines: &lines, label: "recreate_fix c")
+                    check("fix", theme, beside: false, primary: "export")
+                    if let slot {
+                        let code = await store.replaceRecreateSlot(slot, take: demoTakeId)
+                        for _ in 0..<20 where store.recreate.built?.phase != .ready { try? await Task.sleep(for: .seconds(0.5)) }
+                        lines.append("\(code == nil && store.recreate.demoSwaps[slot] == demoTakeId && store.recreate.built?.phase == .ready ? "FITS" : "CUT") recreate_fix_replace 1280x800 c \(slot) now plays \(demoTakeId) (\(code ?? "ok"))")
+                    }
+                    store.closeRecreateFix()
+                    try? await Task.sleep(for: .seconds(0.8))
+                } else {
+                    lines.append("CUT recreate_fix 1280x800 c no weakest shot after Build")
+                }
                 // Export (gap 2): the sheet, closed with Cancel (nothing is saved in review mode).
                 store.openRecreateExport()
                 try? await Task.sleep(for: .seconds(1.2))

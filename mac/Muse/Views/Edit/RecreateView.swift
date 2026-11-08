@@ -53,6 +53,9 @@ struct RecreateView: View {
         .sheet(isPresented: Binding(get: { store.recreate.exportOpen }, set: { store.recreate.exportOpen = $0 })) {
             RecreateExportSheet()
         }
+        .sheet(isPresented: Binding(get: { store.recreate.fixSlot != nil }, set: { if !$0 { store.closeRecreateFix() } })) {
+            RecreateFixSheet()
+        }
         .sheet(item: Binding(get: { store.recreate.claudeAsk }, set: { store.recreate.claudeAsk = $0 })) { p in
             RecreateClaudeAsk(pending: p)
         }

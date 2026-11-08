@@ -450,6 +450,50 @@ final class RecreateTests: XCTestCase {
         XCTAssertTrue(g.useThisSound?.steps.contains { $0.contains("Use this sound") } ?? false)
     }
 
+    // MARK: Fix shot N (replace one shot in the built edit)
+
+    func testReplaceDecodesLeniently() throws {
+        let r = try JSONDecoder().decode(RecreateReplaceResult.self, from: Data(#"{"sessionId":"es_1","revision":4,"slotId":"s2","itemId":"c2","takeId":"t9","inSec":1.2,"label":"Replaced shot s2","note":"plays at 80%","x":1}"#.utf8))
+        XCTAssertEqual(r.revision, 4)
+        XCTAssertEqual(r.note, "plays at 80%")
+        let sparse = try JSONDecoder().decode(RecreateReplaceResult.self, from: Data(#"{"slotId":"s1"}"#.utf8))
+        XCTAssertNil(sparse.revision)
+    }
+
+    func testDemoReplaceFollowsTheServerRules() async throws {
+        let api = FakeRecreateAPI()
+        // Not built in this session yet.
+        await assertCode("not_built_here") { _ = try await api.replaceSlot("rx_demo", slotId: "s2", sessionId: "es_1", take: "t1", baseRevision: nil) }
+        // Built with s1 and s2 only: s3 isn't in the edit.
+        _ = try await api.apply("rx_demo", RecreateApplyRequest(sessionId: "es_1", baseRevision: 1, slots: ["s1": "t1", "s2": "t1"]))
+        await assertCode("slot_not_in_edit") { _ = try await api.replaceSlot("rx_demo", slotId: "s3", sessionId: "es_1", take: "t1", baseRevision: nil) }
+        await assertCode("bad_request") { _ = try await api.replaceSlot("rx_demo", slotId: "s2", sessionId: "es_1", take: "unknown_take", baseRevision: nil) }
+        let a = try await api.replaceSlot("rx_demo", slotId: "s2", sessionId: "es_1", take: "t7", baseRevision: 2)
+        XCTAssertEqual(a.revision, 3)
+        XCTAssertEqual(a.takeId, "t7")
+        XCTAssertEqual(a.itemId, "c2")
+        // Regenerate: the job must be done first (job_not_done while generating), then its take goes in.
+        _ = try await api.fillSlot("rx_demo", slotId: "s2", modelId: "m1", quality: nil)
+        let job = FakeRecreateAPI.demoJobId("s2")
+        await assertCode("job_not_done") { _ = try await api.replaceSlot("rx_demo", slotId: "s2", sessionId: "es_1", take: job, baseRevision: nil) }
+        _ = try await api.fill("rx_demo")
+        _ = try await api.fill("rx_demo")
+        let b = try await api.replaceSlot("rx_demo", slotId: "s2", sessionId: "es_1", take: job, baseRevision: nil)
+        XCTAssertEqual(b.revision, 4)
+        XCTAssertEqual(b.takeId, "t_rx_s2")
+    }
+
+    private func assertCode(_ code: String, file: StaticString = #filePath, line: UInt = #line, _ body: () async throws -> Void) async {
+        do {
+            try await body()
+            XCTFail("expected \(code)", file: file, line: line)
+        } catch let e as ApiError {
+            XCTAssertEqual(e.code, code, file: file, line: line)
+        } catch {
+            XCTFail("\(error)", file: file, line: line)
+        }
+    }
+
     // MARK: Claude's recreate thread (workstream 1's brief)
 
     func testRecreateThreadBriefSeedsClaudeCode() async throws {
