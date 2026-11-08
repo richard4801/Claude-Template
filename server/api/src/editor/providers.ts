@@ -14,19 +14,28 @@ export type Hooks = {
   onProgress?: (p: number, phase: string) => void | Promise<void>;
 };
 export type Stem = 'vocals' | 'no_vocals';
+export type TrackPoint = { x: number; y: number; frame: number; keep: boolean };
 export type Transcript = { words: Word[]; language: string; gpuSec: number | null };
 /** A produced file on local disk (deleted by the caller), and the GPU seconds the provider billed (null = unknown). */
 export type Produced = { file: string | null; contentType: string; gpuSec: number | null };
 
 export interface EditorProvider {
   readonly name: 'mock' | 'replicate';
-  /** Model ids per kind (owner views). */
-  models: { transcribe: string; matte: string; separate: string };
+  /** Model ids per kind (owner views). `track`: tap-to-keep (workstream 1). */
+  models: { transcribe: string; matte: string; separate: string; track: string };
   /** $/GPU-second per kind, for estimates and settling. */
-  rates: { transcribe: number; matte: number; separate: number };
+  rates: { transcribe: number; matte: number; separate: number; track: number };
   transcribe(mediaUrl: string, durationSec: number, language: string | null, h: Hooks): Promise<Transcript>;
-  /** Person matted onto pure green (#00FF00) video; the apps key it out (chroma). */
+  /**
+   * The alpha matte of the person (workstream 1, "fix 1"): a grey video the same length as the source, white = keep.
+   * The apps apply it to the original clip (`alphaMatte`), so green clothes and hair edges survive (no chroma key).
+   */
   matte(mediaUrl: string, durationSec: number, h: Hooks): Promise<Produced>;
+  /**
+   * Tap to keep (workstream 1, "option 2"): the subject under the owner's points, tracked through the clip, as the same
+   * kind of alpha matte. Points are in pixels on the given frames; `keep: false` points mark what to leave out.
+   */
+  track(mediaUrl: string, durationSec: number, points: TrackPoint[], h: Hooks): Promise<Produced>;
   /** The voice alone (music and noise removed), or with `stem: "no_vocals"` everything but the voice (beat-only audio). */
   separate(mediaUrl: string, durationSec: number, h: Hooks, stem?: Stem): Promise<Produced>;
 }
@@ -35,8 +44,8 @@ const env = (k: string, d: string) => process.env[k]?.trim() || d;
 const envNum = (k: string, d: number) => { const v = Number(process.env[k]); return Number.isFinite(v) && v > 0 ? v : d; };
 
 /** Replicate's per-second GPU prices (replicate.com/pricing, 2026-11): A100 80 GB $0.0014, L40S $0.000975. */
-export const DEFAULT_RATES = { transcribe: 0.0014, matte: 0.000975, separate: 0.0014 };
-export const DEFAULT_MODELS = { transcribe: 'victor-upmeet/whisperx', matte: 'arielreplicate/robust_video_matting', separate: 'ryan5453/demucs' };
+export const DEFAULT_RATES = { transcribe: 0.0014, matte: 0.000975, separate: 0.0014, track: 0.0014 };
+export const DEFAULT_MODELS = { transcribe: 'victor-upmeet/whisperx', matte: 'arielreplicate/robust_video_matting', separate: 'ryan5453/demucs', track: 'meta/sam-2-video' };
 
 // ------------------------------------------------------------------ mock
 const SCRIPT = 'Okay so um this is the one product I keep coming back to. Honestly uh it changed my whole routine. You put a little on like this and you just wait. Look at that glow! I I use it every single day. Um anyway link is in my bio.';
@@ -56,7 +65,7 @@ export function mockWords(durationSec: number): Word[] {
 
 export class MockProvider implements EditorProvider {
   readonly name = 'mock' as const;
-  models = { transcribe: 'mock/transcribe', matte: 'mock/matte', separate: 'mock/separate' };
+  models = { transcribe: 'mock/transcribe', matte: 'mock/matte', separate: 'mock/separate', track: 'mock/track' };
   rates = { ...DEFAULT_RATES };
   constructor(private stepMs: number, private sleep: (ms: number) => Promise<void> = ms => new Promise(r => setTimeout(r, ms))) {}
   private async steps(h: Hooks, phase: string) {
@@ -76,6 +85,12 @@ export class MockProvider implements EditorProvider {
   async matte(_url: string, durationSec: number, h: Hooks): Promise<Produced> {
     await this.steps(h, 'Cutting out the background');
     return { file: null, contentType: 'video/mp4', gpuSec: 10 + 4 * durationSec };
+  }
+  /** The mock's tracked matte: no file either (the job points the result at the source). */
+  async track(_url: string, durationSec: number, points: TrackPoint[], h: Hooks): Promise<Produced> {
+    if (!points.some(p => p.keep)) throw new ReplicateError('No point to keep', 'failed');
+    await this.steps(h, 'Following what you tapped');
+    return { file: null, contentType: 'video/mp4', gpuSec: 15 + 3 * durationSec };
   }
   async separate(_url: string, durationSec: number, h: Hooks, _stem: Stem = 'vocals'): Promise<Produced> {
     await this.steps(h, 'Cleaning up the voice');
@@ -131,8 +146,10 @@ export class ReplicateProvider implements EditorProvider {
     transcribe: env('EDITOR_TRANSCRIBE_MODEL', DEFAULT_MODELS.transcribe),
     matte: env('EDITOR_MATTE_MODEL', DEFAULT_MODELS.matte),
     separate: env('EDITOR_SEPARATE_MODEL', DEFAULT_MODELS.separate),
+    track: env('EDITOR_TRACK_MODEL', DEFAULT_MODELS.track),
   };
-  rates = { transcribe: envNum('EDITOR_TRANSCRIBE_USD_PER_SEC', DEFAULT_RATES.transcribe), matte: envNum('EDITOR_MATTE_USD_PER_SEC', DEFAULT_RATES.matte), separate: envNum('EDITOR_SEPARATE_USD_PER_SEC', DEFAULT_RATES.separate) };
+  rates = { transcribe: envNum('EDITOR_TRANSCRIBE_USD_PER_SEC', DEFAULT_RATES.transcribe), matte: envNum('EDITOR_MATTE_USD_PER_SEC', DEFAULT_RATES.matte), separate: envNum('EDITOR_SEPARATE_USD_PER_SEC', DEFAULT_RATES.separate),
+    track: envNum('EDITOR_TRACK_USD_PER_SEC', DEFAULT_RATES.track) };
   constructor(private ctx: Ctx) {}
 
   /** Community models run by version: the latest one from the catalog (cached there), and its input names. */
@@ -170,9 +187,21 @@ export class ReplicateProvider implements EditorProvider {
     return { words: t.words, language: t.language ?? language ?? 'en', gpuSec: this.gpu(p) };
   }
   async matte(url: string, durationSec: number, h: Hooks): Promise<Produced> {
-    const p = await this.run(this.models.matte, { input_video: url, output_type: 'green-screen' }, h, 600 + durationSec * 20);
+    // The alpha matte (white = person), not a green composite: the apps apply it, so nothing green is keyed out.
+    const p = await this.run(this.models.matte, { input_video: url, output_type: 'alpha-mask' }, h, 600 + durationSec * 20);
     const u = pickFile(p.output);
     if (!u) throw new ReplicateError('The background removal returned no video', 'failed');
+    return { file: await this.fetch(u, 'mp4'), contentType: 'video/mp4', gpuSec: this.gpu(p) };
+  }
+  async track(url: string, durationSec: number, points: TrackPoint[], h: Hooks): Promise<Produced> {
+    // One object, the points the owner tapped (1 = keep, 0 = leave out), a black-and-white mask video back.
+    const p = await this.run(this.models.track, {
+      input_video: url, click_coordinates: points.map(q => `[${Math.round(q.x)},${Math.round(q.y)}]`).join(','),
+      click_labels: points.map(q => (q.keep ? 1 : 0)).join(','), click_frames: points.map(q => q.frame).join(','),
+      click_object_ids: points.map(() => 'keep').join(','), mask_type: 'binary', output_video: true,
+    }, h, 600 + durationSec * 20);
+    const u = pickFile(p.output);
+    if (!u) throw new ReplicateError('The tracking returned no video', 'failed');
     return { file: await this.fetch(u, 'mp4'), contentType: 'video/mp4', gpuSec: this.gpu(p) };
   }
   async separate(url: string, durationSec: number, h: Hooks, stem: Stem = 'vocals'): Promise<Produced> {
@@ -216,7 +245,7 @@ export function makeProvider(ctx: Ctx): EditorProvider {
   const want = env('EDITOR_AI_PROVIDER', 'mock');
   if (want === 'replicate' || (want === 'auto' && ctx.replicate.configured)) return new ReplicateProvider(ctx);
   const mock = new MockProvider(Math.max(5, ctx.config.GEN_MS));
-  if (ctx.config.NODE_ENV === 'production' && !ctx.config.DEV_MODE) mock.rates = { transcribe: 0, matte: 0, separate: 0 };
+  if (ctx.config.NODE_ENV === 'production' && !ctx.config.DEV_MODE) mock.rates = { transcribe: 0, matte: 0, separate: 0, track: 0 };
   return mock;
 }
 
