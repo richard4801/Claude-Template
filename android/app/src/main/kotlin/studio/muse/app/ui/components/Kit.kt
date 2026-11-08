@@ -78,6 +78,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -639,16 +640,21 @@ fun ClipPlaceholder(modifier: Modifier = Modifier, seed: Int = 0, label: String?
     )
     val p = palettes[((seed % palettes.size) + palettes.size) % palettes.size]
     Box(modifier.background(Brush.linearGradient(p)), contentAlignment = Alignment.Center) {
-        if (showPlay) Box(Modifier.size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = .22f)), contentAlignment = Alignment.Center) { Ic("play", 18.dp, Color.White) }
+        if (showPlay) PlayBadge()
         if (label != null) T(label, muse.type.tiny.copy(fontSize = 11.sp), Color.White.copy(alpha = .9f), Modifier.align(Alignment.BottomStart).padding(8.dp))
     }
 }
 
-/** "Video" marker over a render thumbnail. */
+/**
+ * The one "this is a video" marker over a poster thumbnail, everywhere in the app: a light disc with a dark play glyph,
+ * always in the centre of the poster (never over the label area). [compact] for posters narrower than ~100 dp
+ * (28 dp disc, 14 dp glyph); else 36 dp / 16 dp.
+ */
 @Composable
-fun BoxScope.PlayBadge() {
-    Box(Modifier.align(Alignment.Center).size(34.dp).clip(CircleShape).background(Color.Black.copy(alpha = .35f)), contentAlignment = Alignment.Center) {
-        Ic("play", 16.dp, Color.White)
+fun BoxScope.PlayBadge(compact: Boolean = false) {
+    val d = if (compact) 28.dp else 36.dp
+    Box(Modifier.align(Alignment.Center).size(d).clip(CircleShape).background(Color.White.copy(alpha = .9f)).semantics { testTag = "play-badge" }, contentAlignment = Alignment.Center) {
+        Ic("play", if (compact) 14.dp else 16.dp, Color(0xFF141210))
     }
 }
 

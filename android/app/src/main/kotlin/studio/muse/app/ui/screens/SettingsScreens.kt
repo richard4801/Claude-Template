@@ -171,6 +171,7 @@ fun SettingsScreen() {
                 RowItem("Members", "Send credit, set caps, switch accounts off", onClick = { nav.go(Routes.MEMBERS) }) { Chevron() }
                 RowItem("Invite someone", onClick = { nav.go(Routes.INVITE) }) { Chevron() }
                 RowItem("Studio settings", "Caps and engines", onClick = { nav.go(Routes.STUDIO) }) { Chevron() }
+                RowItem("Default models", "What Auto uses for shots, photos, swaps and the rest", onClick = { nav.go(Routes.DEFAULT_MODELS) }) { Chevron() } // WS7
                 RowItem("Prompts", "Every prompt the studio sends: edit or reset", onClick = { nav.go(Routes.PROMPTS) }) { Chevron() }
                 RowItem("Connections", "Claude, MCP and the Blender relay", onClick = { nav.go(Routes.CONNECTIONS) }) { Chevron() } // AI suite (workstream 1 → 2)
             }

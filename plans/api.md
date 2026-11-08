@@ -1378,6 +1378,25 @@ How each part is found:
   - `RECREATE_POSE=false` turns poses off.
   - The API image carries onnxruntime-node (CPU, this platform only, about 47 MB) and the 9.4 MB model.
 
+## Import a video from a link (WS12, owner-approved 2026-11-08)
+A member pastes a TikTok, Instagram, YouTube or (with Strict link rules off) other public link, and the video becomes an ordinary **Library clip**. It is the same `clips` row an upload makes, so it works as the Suite's **Swap**/**Edit** source (`clipId`), as a Suite reference or recast video (`{key: videoKey}`), and in the editor's media bin (`uploadId`). As with Recreate, the **device** downloads, because platforms block cloud servers. The server checks the file, stores it, makes a poster and dedupes. Code: `src/imports/service.ts`, `src/routes/imports.ts`. Tests: `test/imports.test.ts` (recorded-shape fixtures and a fake yt-dlp; no live fetches). No migration: the import fields live in `clips.meta`.
+
+_Terms note:_ Recreate's link fetching was approved as a "personal reference only, never used as footage, deleted after 30 days" (`plans/research/platform-download-rules.md`). Imports go beyond that: they are kept and used as source footage. The owner approved this feature knowing that, and the risk of a terms breach is theirs. The other guardrails stay the same: public videos only, no sign-ins or cookies, and TikTok's "downloads off" refused under Strict link rules.
+
+| Call | Notes |
+|---|---|
+| `GET /v1/links/settings` | → `{strictLinks, platforms, tiktokDownloadsOff: "refuse"\|"allow", maxSec: 30, maxMb: 150, serverFetch, cookies: false, canEdit, reference: {maxSec: 60, maxMb: 80}}`. The top-level `maxSec`/`maxMb` are the **import** limits. 30 s is the longest source the Suite's swap/recast engines take (registry `recast.sourceSeconds` / `refs.videoSecondsMax`), and the size cap is `IMPORT_MAX_MB` (150). `reference` holds the Recreate limits. The owner changes `strictLinks` with `PATCH /v1/recreate/settings`; one setting covers both. |
+| `POST /v1/links/check {url, purpose?: "import"\|"reference"}` | Default `"import"`. → `{allowed: true, url /* normalised */, platform: "tiktok"\|"instagram"\|"youtube"\|"other", purpose, cached?}` or `{allowed: false, code, reason}`. `cached` is this member's `Import` from that link (or `Reference`, for `"reference"`): use it and skip the download. `POST /v1/recreate/links/check {url}` still works (same as `purpose: "reference"`, without the `purpose` field). |
+| `POST /v1/imports {uploadId, sourceUrl?, name?}` | After the device downloaded the video (≤ `maxSec`, ≤ `maxMb`; TikTok "downloads off" refused when `tiktokDownloadsOff` is `"refuse"`), then `POST /v1/uploads/presign {kind: "clip", contentType: "video/mp4"}` (or `/v1/editor/uploads/presign`) and the PUT. **Don't call `/confirm`.** → `Import`. `sourceUrl` must pass the studio's link rules (`422 link_unsupported`). The file is probed: `400 bad_request` if it isn't a readable video; `400 too_long` "Imports can be up to 30 s (this one is 42 s)"; `422 link_too_big`. Also `404` (an unknown upload), `409 upload_missing` (the PUT hasn't arrived), `409 upload_used` (the upload is already another clip). The same `uploadId` again returns the same import (safe to retry). The same `sourceUrl` again from the same member returns their existing import with `cached: true`, and the new upload is deleted. Without `sourceUrl` it is a plain import of a saved file. |
+| `POST /v1/imports {url, name?}` (or `{sourceUrl, name?}` with no `uploadId`) | **Server fallback** (often blocked: offer the file drop). It uses the Recreate guardrails: public only, no cookies, TikTok's downloads-off refused under strict rules, metadata read once and the download made from it, one platform request at a time, `≤ 30 s` and the size cap checked before the download and again on the file. It is **synchronous** and can take a minute or two. Codes: `link_unsupported` · `link_private` · `link_downloads_off` · `link_too_big` (`422`) · `too_long` (`400`) · `link_blocked` (`502`, "Couldn't fetch this link — save the video and drop the file in"; also when `RECREATE_LINKS` is off). The name defaults to the video's title. |
+| `GET /v1/imports` | → `Import[]`, newest first. A member gets their own; the owner gets the whole studio. |
+| `GET /v1/imports/{id}` · `PATCH /v1/imports/{id} {name}` · `DELETE /v1/imports/{id}` | Another member's import reads as `404`. `DELETE` → `204` and removes the clip, its file and its poster. `409 import_in_use` while a queued or running job uses it. |
+
+`Import = Clip + {source: "import", sourceUrl?, platform?, bytes, posterUrl, thumb /* {url: posterUrl} */, videoUrl, videoKey, uploadId, createdBy, createdAt, cached?}`. `Clip` here is `{id, name, durationSec, width, height, fps, checks, audio?}`; the checks are the usual clip advice, with people and watermark unknown. `posterUrl` is a JPEG frame at 0.5 s (`/uploads/c/<id>_poster.jpg`), and `videoUrl` is `/uploads/<videoKey>`. Its default name is "TikTok video", "Instagram video", "YouTube video" or "Imported video". Talking detection runs in the background, like an upload, and a second `clip` event carries `audio`.
+
+**Events** (to the importer and the owner): `{type: "clip", clip: Import}` on create, rename and when talking detection finishes; `{type: "clip", op: "delete", id}` on delete.
+**Config:** `IMPORT_MAX_MB` (150). The server fallback shares `RECREATE_LINKS` and `YTDLP_PATH` with Recreate.
+
 ## Learning editor (workstream 3, 2026-11-08; `plans/recreate-edit.md` §5)
 The studio's editing memory, which Claude reads before every edit. The model doesn't change; MUSE's memory does. It is owner only: members get `403 owner_only`. Migration **0017** adds `edit_recipes`, `edit_corrections`, `playbook_rules`, `edit_gaps` and `edit_ops.meta`. Code: `src/editor/learn.ts`, `learnRoutes.ts`, `learnSchema.ts`. Tests: `test/learn.test.ts`.
 
@@ -1434,6 +1453,20 @@ Prod's first real run was killed mid-analysis (512 MB box). The text-motion step
 - Measured on a 60 s 1080×1920 30 fps clip: peak process-tree RSS went from 1667 MB to 328 MB, and the run from 223 s to 134 s.
 - **After a crash.** At startup, references still `analyzing` resume. One that had started (`analyze_attempts` ≥ 1) runs again **lite**, required steps only (`analyzer.lite: true`). After a second stop it fails with `errorCode: "analysis_crashed"`.
 - **`POST /v1/recreate/references/{id}/retry`** reruns any failed reference whose video or link is still there (409 `not_failed` or `video_gone` otherwise). After `analysis_crashed` the rerun is lite. Apps: show Retry on a failed reference.
+
+### Built edits are always valid (workstream 1, 2026-11-08)
+`buildProject` always produces a project the editor accepts. A property test (`test/recreate-assemble-valid.test.ts`) runs 400 random recipes plus the owner's 7-shot, 182 BPM case.
+- **Captions on screen together** go on their own text tracks (`text`, `text2`, … at most 4). If all four are busy, a caption starts when one frees, or is left out (with a note).
+- **Transitions** are at most half of each clip beside them, else a cut.
+- **One-frame shots** play their 0.1 s of source faster, keeping their length on screen.
+- **Long speed curves** are thinned to 16 points.
+- **A take too short even at 0.1×** ends with its source; it never reads past the end.
+
+`apply` checks the project before saving it:
+- **400 `edit_too_short`** when the filled shots make less than 0.5 s.
+- **422 `edit_invalid`** with a plain message; the rule broken is logged, never shown.
+
+Apps: show `error` as is.
 
 ### Recreate this edit · slots and assembly (phase 3)
 Code: `src/recreate/slots.ts` (briefs, matcher, fill request), `assemble.ts` (recipe → edit project), `mcpTools.ts`. Tests: `test/recreate-slots.test.ts`.
@@ -1757,3 +1790,68 @@ In Settings, the owner adds an API key for a provider. MUSE lists that provider'
   - **Video entries:** every registry model that makes shots and is enabled, licensed (acknowledged) and on a set-up provider, plus enabled custom video models. `tier` is the first tier whose ladder lists it (null if none).
   - **Image entries:** the studio's photo model (Settings → Engines → Image models), plus enabled custom image models.
 - **`POST /v1/suite/photos/estimate` and `/v1/suite/photos` take `imageModel`, owner only (members get 403 `owner_only`):** a Replicate image model `owner/name` (priced on that model, as the per-step override) or a custom id `c_…`. Use either `imageModel` or `engineModel`, not both (400). Members can still pass `engineModel:'c_…'` for a custom image model the owner made available.
+
+## Model choice (WS13, 2026-11-08)
+The owner can pick the model anywhere MUSE generates or edits with an image or video model. The inventory and gaps are in `plans/model-choice.md`; the code is in `server/api/src/engines/`. `GET /v1/models` is the character list, so the catalog lives at **`/v1/engines`**.
+
+**Purposes:**
+- **Video:** `shot`, `talking`, `ugc`, `storyboard`, `guide`, `recast`, `extend`, `swap`, `fill`.
+- **Image:** `photo`, `outfit`, `character`, `plate`.
+- **Tools:** `upscale`, `matte`, `track`, `captions`, `denoise`.
+
+### `GET /v1/engines[?purpose=P]`
+- **Owner:** every candidate.
+- **Members:** only the custom models the owner made available (`members:true`), with no `provider`, `notice` or `members` field. Their purpose defaults are `null`.
+- **Unknown purpose:** `400`.
+
+```
+{ purposes: [{ id, label, kind:'video'|'image'|'tool', default: model|null, studioDefault: model|null, rule:'ladder'|'fixed' }],
+  engines:  [{ model, name, kind, purposes:[P…], custom,
+               provider, notice|null, members?,          // owner only
+               limits: { minSeconds, maxSeconds, allowedSeconds|null, aspectRatios[], resolutions:[{id,label}], maxInputSeconds|null },
+               resolution|null,                           // the resolution it runs at by default
+               price: { basis:'per_second'|'per_run'|'per_output_second', usd } | null,   // after priceScale / markup
+               inputs: InputSlots,
+               default?: boolean }] }                     // with ?purpose: the model used when nothing is sent
+```
+
+- **The apps' picker shape:** every entry also carries the `/v1/suite/catalog` `engines[]` fields (`tier`, `tiers`, `resolutions:[{id,label,perSec}]`, `perSec`, `perRun`, `minSeconds`, `maxSeconds`, `allowedSeconds`, `aspectRatios`). With `?purpose` the response also has `purpose`, `default` and `models` (the same list as `engines`).
+- **Purpose aliases** (WS7's ids): `recreate` = `fill`, `model_photos` = `character`, `background` = `plate`, `camera` = `guide`.
+- `rule:'ladder'`: with nothing picked, the quality ladder chooses per shot. `default` is then the first usable model on Draft.
+- `rule:'fixed'`: one model runs.
+- **Tool prices:**
+  - Editor helpers: `per_second` of source media, for a one-minute clip (start-up included, × `EDITOR_MARKUP`).
+  - Upscale: `per_output_second` (the cheapest size).
+  - Edit / Fast swap: an estimate per second of the clip.
+
+### Overrides on each endpoint (optional, owner only)
+Validation:
+- A model that isn't a candidate for the purpose → `400 engine_not_allowed`, with `valid:[model…]` and `purpose`.
+- A member → `403 owner_only`, unless the model is a custom one they may use.
+
+The estimate is priced on the chosen model, so the confirm shows the right price. For the owner, the Suite's estimate also carries `engine:{model, name, provider, …}`; for swaps it adds `source:'request'|'studio'`.
+
+| Endpoint | Field | Purpose |
+|---|---|---|
+| `POST /v1/suite/shots(/estimate)` | `engineModel` (+`resolution`) | `shot`; `talking` (audio reference or `draft.tool:'talking'`); `ugc` (`draft.tool:'ugc_ad'`); `storyboard` (`draft.tool:'storyboard'`); `guide` (`camera.mode:'directed'` or a guide); `recast`; `extend`; **`swap` (`mode:'swap'`)** |
+| `POST /v1/jobs` (classic swap) | `engineModel` | `swap`. `h3` / `h3-lite` / `h3-highspeed` run hosted; `h3-open` (Edit) and `viggle` (Fast · beta) run on our GPU. `videoModel` / `swapEngine` sent by a client are ignored |
+| `POST /v1/suite/photos(/estimate)` | `imageModel` (as before); `engineModel` for custom models | `photo` (any Replicate `owner/name` is accepted, checked when it runs) |
+| `POST /v1/outfits` | `imageModel` (or the existing `models:{step}`) | `outfit` |
+| `POST /v1/models/:id/fill-angles` | `imageModel` (or `models:{shot}`) | `character` |
+| Recreate `POST …/slots/:slotId/estimate` and `/fill` | `engineModel`, `imageModel` | `engineModel`: a swap engine → swap fill on it; any other model (or `method:'generate'`) → a generated fill (checked as `shot`). `imageModel` → the background plate (`plate`) |
+| `POST /v1/takes/:id/upscale` | `engineModel` | `upscale` (today `seedvr2`) |
+| `POST /v1/editor/estimate` and `/v1/editor/jobs` | `engineModel` | `captions` (captions, cuts), `matte`, `track` (matte with points), `denoise`. Beats run no model (400) |
+
+### Studio defaults: `GET/PATCH /v1/engines/defaults` (owner)
+- `GET` → `{ defaults:{P: model|null}, builtin:{P: model|null} }`.
+- `PATCH {swap:'h3-lite', photo:null}`, or one purpose at a time as `{purpose:'swap', model:'h3-lite'|null}` (aliases accepted):
+  - Each model must be a candidate (`400 engine_not_allowed`).
+  - `null` clears it. An unknown purpose → `400`.
+- **Order for a run:** the request's override, then the studio default (if it is still a candidate), then the built-in behaviour.
+- **Members run on the studio default too.** The exception is a custom model the owner kept to themselves.
+- **Ladder purposes:** if the studio default can't make a particular shot, the ladder picks one and the estimate warns *"The studio's chosen engine can't make this shot · the quality's usual engine is used"*.
+- **Swap:** the default applies to the hosted swap. A request that names Edit or Fast (`engine:'h3'|'viggle'`) keeps it.
+- **Storage:** `suite_settings.engine_defaults` (migration **0026_engine_defaults**).
+
+### `/v1/suite/catalog`
+`engines[]` entries (owner) gain `purposes[]`.

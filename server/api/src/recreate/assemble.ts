@@ -53,7 +53,8 @@ export function rangeFor(inSec: number, len: number, available: number, curve?: 
     if (available - inSec >= len) return { outSec: r4(inSec + len), speed: 1 };
     // A take shorter than its slot plays slower to fill it.
     const speed = clamp((available - inSec) / len, M.LIMITS.minSpeed, 1);
-    return { outSec: r4(inSec + len * speed), speed: r4(speed) };
+    // Even the slowest speed can't fill the slot: the clip ends with its source (shorter than the slot), never past it.
+    return { outSec: r4(Math.min(available, inSec + len * speed)), speed: r4(speed) };
   }
   let lo = 0.05, hi = available - inSec;
   if (M.clipLength({ inSec, outSec: inSec + hi, speedCurve: curve }) < len) return rangeFor(inSec, len, available); // too short for the ramp
@@ -125,24 +126,39 @@ export function buildProject(recipe: Recipe, sourceTakeId: string, takes: Record
   const lutId = o.look === false ? null : ownLook ? lutFor('palettes', ownLook) : o.fallbackLook ? lutFor('palettes', o.fallbackLook.id) : null;
   const notes: string[] = [];
 
+  // Each boundary's transition, at most 0.6 of the shorter shot beside it: a clip is its shot plus half of each
+  // transition, and the editor allows a transition at most half of each clip (d ≤ ⅔ of the shot). Too short to show
+  // (under the editor's minimum): a cut (workstream 1, the owner's invalid builds).
+  const bounds: (M.Transition | undefined)[] = used.map((s, i) => {
+    if (i === 0) return undefined;
+    const t = editorTransition(trIn(s.id, used[i - 1]!.id));
+    if (!t) return undefined;
+    const d = r4(Math.min(t.durationSec, 0.6 * Math.min(s.durationSec, used[i - 1]!.durationSec)));
+    return d >= M.LIMITS.minTransitionSec ? { ...t, durationSec: d } : undefined;
+  });
   const clips: M.VideoClip[] = used.map((s, i) => {
     const t = takes[s.id]!;
-    const into = i > 0 ? editorTransition(trIn(s.id, used[i - 1]!.id)) : undefined;
-    const next = used[i + 1] ? editorTransition(trIn(used[i + 1]!.id, s.id)) : undefined;
+    const into = bounds[i];
+    const next = bounds[i + 1];
     const len = s.durationSec + (into ? into.durationSec / 2 : 0) + (next ? next.durationSec / 2 : 0);
     const baked = o.baked?.[s.id];
     if (baked) {
       // The reference's own shot with our model in it: start at the moment this clip begins in the reference, 1×.
-      const inSec = r4(clamp(s.startSec - (into ? into.durationSec / 2 : 0) - baked.startSec, 0, Math.max(0, t.durationSec - 0.05)));
+      const inSec = r4(clamp(s.startSec - (into ? into.durationSec / 2 : 0) - baked.startSec, 0, Math.max(0, t.durationSec - 2 * M.LIMITS.minClipSourceSec)));
       const r = rangeFor(inSec, len, t.durationSec);
       notes.push(`${s.id}: swapped into the reference’s own shot, so its camera, speed and look are already in the picture`);
       if (r.speed < 1) notes.push(`${s.id}: the swap is shorter than the slot, so it plays at ${Math.round(r.speed * 100)}%`);
-      return { id: `c${i + 1}`, asset: assetOf(t).id, inSec, outSec: r.outSec, speed: r.speed, ...(into ? { transitionIn: into } : {}) };
+      return keepSource({ id: `c${i + 1}`, asset: assetOf(t).id, inSec, outSec: r.outSec, speed: r.speed, ...(into ? { transitionIn: into } : {}) }, len, t.durationSec);
     }
     const curve = o.speed !== false && s.speed.ramp !== 'none' && s.speed.ramp !== 'freeze' && s.speed.curve.length >= 2
       ? { preset: 'custom' as const, points: s.speed.curve.map(p => [r4(clamp(p.t / Math.max(s.durationSec, 0.001), 0, 1)), r4(clamp(p.speed, 0.25, 4))] as [number, number]) }
       : undefined;
-    if (curve) { curve.points[0]![0] = 0; curve.points[curve.points.length - 1]![0] = 1; }
+    if (curve) {
+      // The editor takes 2–16 points: a long shot's curve (4 a second) is thinned evenly, keeping both ends.
+      if (curve.points.length > 16) { const ps = curve.points; curve.points = Array.from({ length: 16 }, (_, k) => ps[Math.round(k * (ps.length - 1) / 15)]!); }
+      curve.points[0]![0] = 0; curve.points[curve.points.length - 1]![0] = 1;
+      curve.points = curve.points.filter((pt, k, ps) => k === 0 || k === ps.length - 1 ? true : pt[0] > ps[k - 1]![0] && pt[0] < 1);
+    }
     // A freeze: the clip slows to the editor's slowest (0.1×) for the freeze's length at its moment, so the held frame
     // barely moves (the editor has no speed 0); the cuts don't move.
     const held = o.speed !== false && s.speed.ramp === 'freeze' && s.speed.freeze ? freezeCurve(s.speed.freeze, len, into ? into.durationSec / 2 : 0) : undefined;
@@ -169,13 +185,14 @@ export function buildProject(recipe: Recipe, sourceTakeId: string, takes: Record
         scale: kf(k => clamp(base * k.scale, 0.05, 10)),
       };
     }
-    return clip;
+    return keepSource(clip, len, t.durationSec);
   });
 
+  tidyClips(clips);
   const tracks: M.Track[] = [{ id: 'main', kind: 'main', items: clips }];
   if (o.text !== false && recipe.text.length) {
     const firstStart = used[0]?.startSec ?? 0;
-    tracks.push({ id: 'text', kind: 'text', items: recipe.text.map((x, i): M.TextItem => ({
+    const items = recipe.text.map((x, i): M.TextItem => ({
       id: `x${i + 1}`, startSec: r4(Math.max(0, x.startSec - firstStart)), durationSec: r4(Math.max(M.LIMITS.minItemSec, x.endSec - x.startSec)),
       text: x.words?.trim() || 'Text',
       // The detected animation in and out (G4), and the nearest editor font.
@@ -184,9 +201,81 @@ export function buildProject(recipe: Recipe, sourceTakeId: string, takes: Record
       style: { font: x.fontId ?? 'sans', weight: 900, sizePct: r4(clamp(x.sizeFrac, 0.015, 0.25)), color: x.color, align: 'center', maxWidthPct: r4(clamp(x.box.w + 0.05, 0.1, 1)),
         ...(x.color === '#FFFFFF' ? { stroke: { color: '#000000', widthPct: 0.08 } } : {}) },
       transform: { x: r4(x.box.x + x.box.w / 2), y: r4(x.box.y + x.box.h / 2) },
-    })) });
+    }));
+    // Captions on screen together (top and bottom, or one appearing before the other goes) can't share a track: a
+    // track's items must be in order and not overlap. Each goes on the first text track that is free by then
+    // (workstream 1: the owner's "items on a track must be in order and not overlap").
+    const lanes = packText(items);
+    lanes.tracks.forEach((laneItems, k) => tracks.push({ id: k === 0 ? 'text' : `text${k + 1}`, kind: 'text', items: laneItems }));
+    notes.push(...lanes.notes);
     if (recipe.text.some(x => !x.words)) notes.push('Text the analysis couldn’t read says "Text": change the words');
   }
   const project: M.EditProject = { version: 2, sourceTakeId, canvas: { width: cw, height: ch, fps, background: '#000000' }, assets, tracks };
   return { project, missing, notes, durationSec: M.durationSec(project) };
+}
+
+/**
+ * A clip shorter on screen than the editor's least source (0.1 s; a one-frame shot) plays that much source faster, so
+ * it keeps `len` on screen and stays valid (workstream 1). Speed curves are dropped for it (nothing to ramp in a frame).
+ */
+export function keepSource(c: M.VideoClip, len: number, available: number): M.VideoClip {
+  const min = M.LIMITS.minClipSourceSec;
+  if (c.outSec - c.inSec >= min - 1e-9 || available < min) return c;
+  const speed = clamp(min / Math.max(len, 1e-3), M.LIMITS.minSpeed, M.LIMITS.maxSpeed);
+  const inSec = r4(Math.min(c.inSec, Math.max(0, available - len * speed)));
+  const { speedCurve: _c, ...rest } = c;
+  return { ...rest, inSec, outSec: r4(inSec + len * speed), speed: r4(speed) };
+}
+
+/**
+ * The last pass over the main track, on the clips as built (a take too short for its slot makes its clip shorter):
+ * each transition at most half of each clip beside it (or a cut when that is under the editor's minimum), and
+ * keyframes only within their clip (workstream 1: every built project passes the editor's validator).
+ */
+export function tidyClips(clips: M.VideoClip[]) {
+  clips.forEach((c, i) => {
+    const len = M.clipLength(c);
+    if (c.transitionIn) {
+      const lim = i > 0 ? Math.min(len, M.clipLength(clips[i - 1]!)) / 2 : 0;
+      if (c.transitionIn.durationSec > lim - 1e-4) {
+        const d = Math.floor((lim - 1e-3) * 1000) / 1000;
+        if (d >= M.LIMITS.minTransitionSec) c.transitionIn = { ...c.transitionIn, durationSec: d }; else delete c.transitionIn;
+      }
+    }
+    if (c.keyframes) {
+      const kf = c.keyframes as Record<string, { t: number }[] | undefined>;
+      for (const [k, list] of Object.entries(kf)) {
+        const keep = (list ?? []).filter(x => x.t <= len);
+        if (keep.length >= 2) kf[k] = keep; else delete kf[k];
+      }
+      if (!Object.keys(kf).length) delete c.keyframes;
+    }
+  });
+}
+
+/** Text tracks the built edit uses at most for captions on screen at the same time. */
+export const MAX_TEXT_LANES = 4;
+/**
+ * Captions laid out on text tracks so none overlaps another on the same track: in time order, each on the first track
+ * free by its start. With every track busy it starts when the earliest one frees (shortened), or is left out when too
+ * little of it is left.
+ */
+export function packText(items: M.TextItem[], maxLanes = MAX_TEXT_LANES): { tracks: M.TextItem[][]; notes: string[] } {
+  const lanes: M.TextItem[][] = [], ends: number[] = [], notes: string[] = [];
+  const sorted = [...items].sort((a, b) => a.startSec - b.startSec || a.id.localeCompare(b.id));
+  for (const it of sorted) {
+    let k = ends.findIndex(e => e <= it.startSec + 1e-6);
+    if (k < 0 && lanes.length < maxLanes) { lanes.push([]); ends.push(0); k = lanes.length - 1; }
+    let item = it;
+    if (k < 0) {
+      k = ends.indexOf(Math.min(...ends));
+      const start = r4(ends[k]!), end = it.startSec + it.durationSec;
+      if (end - start < M.LIMITS.minItemSec) { notes.push(`Text “${it.text}” left out: too many captions on screen at once`); continue; }
+      item = { ...it, startSec: start, durationSec: r4(end - start) };
+      notes.push(`Text “${it.text}” starts a little later: too many captions on screen at once`);
+    }
+    lanes[k]!.push(item);
+    ends[k] = item.startSec + item.durationSec;
+  }
+  return { tracks: lanes.filter(l => l.length), notes };
 }

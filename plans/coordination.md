@@ -144,6 +144,7 @@ When resuming:
         - The SDK setup and the example are in `server/api/examples/higgsfield/`. The API account has no credit yet.
 
 ## Status (each session updates its own line)
+- 13 · Model choice everywhere (2026-11-08) on `claude/muse-model-choice`: GET /v1/engines[?purpose=] (18 purposes), an owner-only `engineModel`/`imageModel` override on every generate path (Suite incl. swap, /v1/jobs swap on H3/H3 Lite/H3 Highspeed/Edit/Fast, Recreate fills and plates, Photo, outfits, character photos, upscale, editor helpers), studio defaults GET/PATCH /v1/engines/defaults. Migration **0026_engine_defaults**. Inventory and gaps: plans/model-choice.md; contract: plans/api.md "Model choice (WS13)".
 - 5 · Bring your own provider (2026-11-08) on `claude/muse-providers`: Settings → Providers (Replicate, fal) with encrypted owner keys, catalog from provider schemas, custom models in the Suite (video shots and Photo) under the owner's names. Migration **0024_byo_providers**. Needs `PROVIDER_KEYS_SECRET` on Railway. Contract: plans/api.md "Bring your own provider".
 - 1 · Video composer follow-ups (2026-11-06) on `claude/muse-suite-core`: Recast tap-a-face (faceCrop + personHint), swap add-on pills, Era decade slider, UGC ad format wheel (`ugcFormats`, `camera.style.format`), @location (`/v1/suite/locations`, **migration 0013 after 0011/0012**), drag-to-reorder tokens, owner engine pin; catalog `tools` (Talking and UGC ad live, Extend coming soon); real Webcam/CCTV/Swirl/Tilt-shift renders; Blender previews bundled (`previews/`, catalog `preview` per move/light/angle); first-run HTTP checks on both apps. Server 359 green; Android 1305 green (release APK 30.7 MB, +9.5 MB previews); Mac CI green (run 42152398143). Next: Extend & upscale backend.
 - 2 · MCP + Blender bridge: resumed 2026-11-06. Item 7 done: `server/api/README.md` "Railway: move off railway.json before 1 December 2026" (railway.json still valid today; the owner runs `railway config migrate` → plan → cutover → apply; set restart policy On Failure / 5 in the dashboard first: IaC has no key for it). Items 2–3: `plans/claude-editing.md` first-run checklist re-checked against the current apps and ready to hand over. Item 6 (RunPod SeedVR2) waits for the owner's OK on spend.
@@ -287,3 +288,7 @@ Release 1 additions (2026-11-08):
 - **The asks:** bubbles; tool chips; markdown rendered properly (no raw asterisks); no internal leaks; a growing composer; keyboard-safe; plus whatever else a good chat needs.
 - **WS10, Android:** session_01Py2rxndMvVe4pcHym1etXT, branch claude/muse-android-chat.
 - **WS11, Mac:** session_01Py2rxocJTVPKL6rpkkyqtE, branch claude/muse-mac-chat. It takes over ClaudeChatView after WS2's phase B.
+
+## Import a video from a link (owner, 2026-11-08), for character swap and edit
+- **WS12, server:** session_01Py2rxoqyyhZ1HMNrW8hBys, branch claude/muse-link-import. General link check, link settings, and POST /v1/imports.
+- **Apps:** WS6 (Mac) and WS7 (Android) build it, reusing the on-device fetch. Entry points: Swap source "Paste a link", Library "Import from link", the Edit media bin, and Android Share.

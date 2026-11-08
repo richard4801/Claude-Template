@@ -359,8 +359,10 @@ struct SuiteClaudeReferenceChips: View {
 
     var body: some View {
         let refs = store.suite.claude.references
-        FlowLayout(spacing: Space.s1) {
+        HStack(spacing: Space.s1) {
+            Text("References from Claude").font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize()
             ForEach(refs) { r in chip(r) }
+            Spacer(minLength: 0)
         }
         .background { if SnapshotRunner.probing && !refs.isEmpty { ComposerBarFrame(key: "claude references") } }
     }

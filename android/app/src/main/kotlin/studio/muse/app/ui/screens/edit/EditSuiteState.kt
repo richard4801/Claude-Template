@@ -110,6 +110,10 @@ data class EditSuiteUi(
     val project: EditProject? = null,
     val playheadSec: Double = 0.0,
     val playing: Boolean = false,
+    /** The timeline is being dragged or flung (the preview seeks to the nearest key frame until it stops, then exactly). */
+    val scrubbing: Boolean = false,
+    /** A voice-over is being recorded (since this time on the playhead): Record VO reads "Stop recording". */
+    val recordingAt: Double? = null,
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
     /** The item the edit tools act on (a main clip by default: the one under the playhead). */

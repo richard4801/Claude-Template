@@ -126,55 +126,6 @@ fun SessionHeader(s: CameraSession) {
     }
 }
 
-@Composable
-fun YouBubble(text: String, label: String?, maxW: Dp) {
-    val m = muse
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (label != null) Lbl(label)
-        Box(Modifier.widthIn(max = maxW).clip(RoundedCornerShape(if (m.isA) 0.dp else m.t.r * .6f)).background(m.t.ink).padding(horizontal = 12.dp, vertical = 10.dp)) {
-            T(text, m.type.body.copy(fontSize = 13.5.sp, lineHeight = 19.sp), m.t.bg)
-        }
-    }
-}
-
-@Composable
-fun ClaudeBlock(c: Turn.Claude) {
-    val m = muse
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Lbl("Claude")
-        if (c.text.isNotBlank()) T(c.text, m.type.body.copy(fontSize = 13.5.sp, lineHeight = 19.sp), m.t.ink)
-        if (c.tools.isNotEmpty()) androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            c.tools.forEach { ToolChipView(it) }
-        }
-    }
-}
-
-/** CLAUDE · WORKING (phone) / CLAUDE · WORKING ON REV n+1 (panel): the quote, the progress bar and the percent. */
-@Composable
-fun WorkingBlock(t: ChatTurn, compact: Boolean) {
-    val m = muse
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Lbl(if (compact) "Claude · working" else t.title, Modifier.weight(1f), color = if (compact) m.t.muted else m.t.ink)
-            if (!compact) T(t.percent, m.scale.caption.copy(fontFeatureSettings = "tnum"), m.t.ink)
-        }
-        T(if (compact) t.quote else "↳ “${t.message.take(60)}” — ${t.quote}", m.type.body.copy(fontSize = 13.5.sp, lineHeight = 19.sp), m.t.ink)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Bar(t.progress, Modifier.weight(1f), color = m.t.accent, height = 3.dp, track = m.t.line)
-            T(if (compact) t.percent else if (t.waitingMac) "waiting for the Mac" else "step ${t.toolsDone} / ${t.toolsSeen.coerceAtLeast(1)}", m.scale.caption.copy(fontFeatureSettings = "tnum"), if (compact) m.t.ink else m.t.muted)
-        }
-    }
-}
-
-@Composable
-fun NoticeView(n: ChatNotice, actions: ChatActions) {
-    val m = muse
-    Column(Modifier.fillMaxWidth().camBox(if (n.directorUnavailable) m.t.surface else m.t.surface2).padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        T(n.text, m.type.tiny, if (n.directorUnavailable) m.t.ink else m.t.accent)
-        if (n.directorUnavailable) T("Open Connections →", m.type.tiny, m.t.accent, Modifier.press(onClick = actions.openConnections), weight = FontWeight.SemiBold)
-    }
-}
-
 /** Phone: three guide thumbnails and "rev 4 guides · Greybox · depth · pose · 3 keyframes · Use for Shot 01 →". */
 @Composable
 fun GuidesRow(s: CameraSession, actions: ChatActions) {
@@ -186,22 +137,6 @@ fun GuidesRow(s: CameraSession, actions: ChatActions) {
             T(SessionText.guidesLine(s.assets), m.type.tiny, m.t.muted)
             actions.use?.let { u -> T("${actions.useLabel} →", m.type.tiny, m.t.accent, Modifier.press(onClick = u), weight = FontWeight.SemiBold) }
         }
-    }
-}
-
-/** The composer: field + send (disabled while Claude works), and the "never spends" footer. */
-@Composable
-fun Composer(placeholder: String, busy: Boolean, footer: String?, onSend: (String) -> Boolean, horizontal: Dp, surface: Boolean = false) {
-    val m = muse
-    var text by rememberSaveable { mutableStateOf("") }
-    Column(Modifier.fillMaxWidth().background(m.t.bg).drawBehind { drawLine(m.t.line, Offset(0f, 0f), Offset(size.width, 0f), 1f) }
-        .padding(horizontal = horizontal, vertical = 10.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            CamField(text, { text = it }, placeholder, Modifier.weight(1f))
-            SendButton(!busy && text.isNotBlank()) { if (onSend(text.trim())) text = "" }
-        }
-        if (busy) T(ChatNotice.BUSY, m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
-        if (footer != null) T(footer, m.type.tiny.copy(fontSize = 12.sp), m.t.muted)
     }
 }
 
@@ -265,21 +200,4 @@ fun SmallBtn(text: String, primary: Boolean = false, icon: String? = null, onCli
         if (icon != null) CamIc(icon, 14.dp, if (primary) m.t.ctaInk else m.t.ink)
         T(text, m.type.body.copy(fontSize = 12.5.sp), if (primary) m.t.ctaInk else m.t.ink, weight = FontWeight.SemiBold, maxLines = 1)
     }
-}
-
-/** The composer's field: one line, a smaller placeholder so the example fits the 404 dp panel. */
-@Composable
-fun CamField(value: String, onChange: (String) -> Unit, placeholder: String, modifier: Modifier = Modifier) {
-    val m = muse
-    androidx.compose.foundation.text.BasicTextField(
-        value, onChange, modifier.height(46.dp).camBox(m.t.surface),
-        textStyle = m.type.body.copy(fontSize = 14.sp, color = m.t.ink), singleLine = true,
-        cursorBrush = androidx.compose.ui.graphics.SolidColor(m.t.accent),
-        decorationBox = { inner ->
-            Box(Modifier.fillMaxSize().padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
-                if (value.isEmpty()) T(placeholder, m.type.body.copy(fontSize = 14.sp), m.t.muted, maxLines = 1)
-                inner()
-            }
-        },
-    )
 }

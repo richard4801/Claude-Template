@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -70,7 +71,10 @@ fun SuiteStoryboardScreen() {
     val cam = catalog?.camera ?: studio.muse.app.data.CameraCatalog()
     val board = b0
     val pending = board?.pending(st.jobs).orEmpty()
-    val reqs = board?.let { b -> pending.map { s -> s.id to b.request(s, shot.settings, b.shots.indexOf(s)) } }.orEmpty()
+    // WS7/WS13: the owner's storyboard model, for every shot Generate makes (null = the studio's default).
+    var pick by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(studio.muse.app.ui.screens.ModelPick()) }
+    val reqs = board?.let { b -> pending.map { s -> s.id to b.request(s, shot.settings, b.shots.indexOf(s)).let { r ->
+        if (pick.model != null) r.copy(engineModel = pick.model, resolution = pick.resolution) else r } } }.orEmpty()
     // The price of every shot Generate makes: the sum of their estimates.
     val total = produceState<Pair<Double?, String?>>(null to null, reqs, catalog?.enabled) {
         if (reqs.isEmpty() || catalog?.enabled != true) { value = null to null; return@produceState }
@@ -107,6 +111,7 @@ fun SuiteStoryboardScreen() {
                 board.shots.forEachIndexed { i, s -> StoryRow(i, s, st, cam) }
                 SLbl("Quality")
                 Seg(SuiteRules.TIERS.map { it to SuiteRules.tierLabel(it).let { l -> if (l == "Standard") "Std" else l } }, board.quality, { q -> store.board.update { it?.copy(quality = q) } }, Modifier.fillMaxWidth(), small = true)
+                studio.muse.app.ui.screens.ModelChoiceRow(studio.muse.app.data.ModelPurpose.STORYBOARD, pick, { pick = it }, quality = board.quality)
                 Tiny("Same cast, look and lens across all shots.")
             }
             Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp)) {

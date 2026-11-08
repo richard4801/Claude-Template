@@ -2,7 +2,6 @@ package studio.muse.app.ui.screens.edit
 
 import studio.muse.app.data.ApiException
 import studio.muse.app.data.MuseApi
-import studio.muse.app.platform.DeviceFetch
 import studio.muse.app.platform.LinkFetcher
 import studio.muse.app.platform.LinkRules
 import studio.muse.core.edit.RecipeReference
@@ -22,29 +21,19 @@ suspend fun referenceFromLink(
     /** The phone's upload, for Try again after a server restart (made again from it, not uploaded twice). */
     onUploaded: (String) -> Unit = {},
     onStep: (Float, String) -> Unit = { _, _ -> },
-): RecipeReference {
-    onStep(.02f, "Checking the link")
-    val check = api.checkRecreateLink(url)
-    if (!check.allowed) throw ApiException(check.code ?: "link_unsupported", check.reason ?: "This link can't be used")
-    check.cached?.let { return it }
-    if (fetcher != null) {
-        val s = runCatching { api.recreateSettings() }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrNull()
-        val rules = if (s == null) LinkRules(platform = check.platform)
-            else LinkRules(s.strictLinks, s.tiktokDownloadsOff == "refuse", s.maxSec, s.maxMb, check.platform)
-        onStep(.03f, "Getting the video from the link")
-        when (val got = fetcher.fetch(check.url, rules, File(cacheDir, "links"))) {
-            is DeviceFetch.Got -> try {
-                val uploadId = api.uploadEditorFile(got.file, "video/mp4") { p -> onStep(.05f + p * .15f, "Uploading the video") }
-                onUploaded(uploadId)
-                val title = name ?: got.title.take(80).ifBlank { null }
-                // A server without `sourceUrl` yet refuses the field: the reference is still made, as a file.
-                return try { api.createReference(uploadId, title, sourceUrl = url) }
-                catch (e: ApiException) { if (e.code == "bad_request" || e.code == "validation") api.createReference(uploadId, title) else throw e }
-            } finally { got.file.delete() }
-            is DeviceFetch.Refused -> throw ApiException(got.code, got.message)
-            is DeviceFetch.Failed -> Unit // the server's fetch next
-        }
-    }
-    onStep(.05f, "Getting the video from the link")
-    return api.createReferenceFromLink(url, name)
-}
+): RecipeReference = studio.muse.app.platform.fetchLink(
+    // The shared link flow (platform/LinkPipeline.kt, WS7): the same steps, also used by "Import a video from a link".
+    url, name, fetcher, cacheDir,
+    studio.muse.app.platform.LinkSteps(
+        check = { u -> api.checkRecreateLink(u).let { c -> studio.muse.app.platform.LinkCheck(c.allowed, c.url, c.platform, c.cached, c.code, c.reason) } },
+        rules = { api.recreateSettings()?.let { s -> LinkRules(s.strictLinks, s.tiktokDownloadsOff == "refuse", s.maxSec, s.maxMb) } },
+        upload = { f, p -> api.uploadEditorFile(f, "video/mp4") { x -> p(x) } },
+        // A server without `sourceUrl` yet refuses the field: the reference is still made, as a file.
+        finish = { uploadId, u, title ->
+            try { api.createReference(uploadId, title, sourceUrl = u) }
+            catch (e: ApiException) { if (e.code == "bad_request" || e.code == "validation") api.createReference(uploadId, title) else throw e }
+        },
+        serverFetch = { u, title -> api.createReferenceFromLink(u, title) },
+    ),
+    onUploaded, onStep,
+)

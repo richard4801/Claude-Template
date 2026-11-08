@@ -53,7 +53,7 @@ interface MuseService {
     @GET("v1/models") suspend fun models(): List<Model>
     @POST("v1/models") suspend fun createModel(@Body r: CreateModelRequest): Model
     @PUT("v1/models/{id}/slots/{slot}") suspend fun setSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: SetSlotRequest): Model
-    @POST("v1/models/{id}/fill-angles") suspend fun fillAngles(@Path("id") id: String): FillAnglesResponse
+    @POST("v1/models/{id}/fill-angles") suspend fun fillAngles(@Path("id") id: String, @Body r: FillAnglesRequest = FillAnglesRequest()): FillAnglesResponse
     @GET("v1/outfits") suspend fun outfits(): List<Outfit>
     @POST("v1/outfits") suspend fun createOutfit(@Body r: CreateOutfitRequest): Outfit
     @POST("v1/outfits/{id}/save") suspend fun saveOutfit(@Path("id") id: String): Outfit
@@ -197,6 +197,7 @@ interface MuseService {
     @GET("v1/editor/settings") suspend fun editorSettings(): EditorSettings
     @PATCH("v1/editor/settings") suspend fun patchEditorSettings(@Body r: JsonObject): EditorSettings
     @GET("v1/recreate/references/{id}/poster") suspend fun referencePoster(@Path("id") id: String): retrofit2.Response<okhttp3.ResponseBody>
+    @GET("v1/recreate/references/{id}/slots/{slot}/thumb") suspend fun referenceSlotThumb(@Path("id") id: String, @Path("slot") slot: String): retrofit2.Response<okhttp3.ResponseBody>
     // OkHttp follows the redirect to storage and drops the Authorization header on the way to another host.
     @retrofit2.http.Streaming @GET("v1/recreate/references/{id}/video") suspend fun referenceVideo(@Path("id") id: String): retrofit2.Response<okhttp3.ResponseBody>
 
@@ -204,6 +205,7 @@ interface MuseService {
     @POST("v1/recreate/references") suspend fun createReference(@Body r: JsonObject): JsonObject
     @GET("v1/recreate/references/{id}") suspend fun reference(@Path("id") id: String): JsonObject
     @GET("v1/recreate/references") suspend fun listReferences(): kotlinx.serialization.json.JsonElement
+    @POST("v1/recreate/references/{id}/retry") suspend fun retryReference(@Path("id") id: String, @Body r: JsonObject): JsonObject
     @POST("v1/recreate/references/{id}/match") suspend fun matchReference(@Path("id") id: String, @Body r: JsonObject): JsonObject
     @GET("v1/recreate/references/{id}/fill") suspend fun referenceFill(@Path("id") id: String): JsonObject
     @POST("v1/recreate/references/{id}/slots/{slot}/estimate") suspend fun estimateReferenceSlot(@Path("id") id: String, @Path("slot") slot: String, @Body r: JsonObject): JsonObject
@@ -324,6 +326,10 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override val camera: CameraApi by lazy { HttpCameraApi(base, client, json) }
     // WS7: bring your own provider
     override val providers: ProvidersApi by lazy { HttpProvidersApi(base, client, json) }
+    // WS7: import a video from a link
+    override val imports: ImportsApi by lazy { HttpImportsApi(base, client, json) }
+    // WS7: models per purpose and the studio's defaults
+    override val modelChoice: ModelsApi by lazy { HttpModelsApi(base, client, json) }
     override val claude: ClaudeApi by lazy { HttpClaudeApi(base, client, json) }
 
     /** Turns `{"error": "...", "code": "..."}` bodies into [ApiException]. The UI words the codes (see [ErrorText]). */
@@ -356,7 +362,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun listModels() = shared("models") { call { models() }.map { it.abs() } }
     override suspend fun createModel(req: CreateModelRequest) = call { createModel(req) }.abs()
     override suspend fun setSlot(modelId: String, slot: String, req: SetSlotRequest) = call { setSlot(modelId, slot, req) }.abs()
-    override suspend fun fillAngles(modelId: String) = call { fillAngles(modelId) }.let { it.copy(model = it.model.abs()) }
+    override suspend fun fillAngles(modelId: String, imageModel: String?) = call { fillAngles(modelId, FillAnglesRequest(imageModel)) }.let { it.copy(model = it.model.abs()) }
     override suspend fun listOutfits() = shared("outfits") { call { outfits() }.map { it.abs() } }
     override suspend fun createOutfit(req: CreateOutfitRequest) = callLong { createOutfit(req) }.abs()
     override suspend fun saveOutfit(outfitId: String) = call { saveOutfit(outfitId) }.abs()
@@ -459,7 +465,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun wallet() = shared("wallet") { call { wallet() } }
     override suspend fun studioBalance() = shared("studio-balance") { call { studioBalance() } }
     override suspend fun addTopUp(req: AddTopUpRequest) = call { addTopUp(req) }
-    override suspend fun upscale(takeId: String, size: String) = call { upscale(takeId, UpscaleRequest(size)) }
+    override suspend fun upscale(takeId: String, size: String, engineModel: String?) = call { upscale(takeId, UpscaleRequest(size, engineModel)) }
     override suspend fun listMembers() = shared("members") { call { members() } }
     override suspend fun transfer(req: TransferRequest) = call { transfer(req) }
     override suspend fun reclaim(req: ReclaimRequest) = call { reclaim(req) }
@@ -480,13 +486,20 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun startEditorJob(req: EditorJobRequest) = call { startEditorJob(req) }
     override suspend fun editorJob(id: String) = call { editorJob(id) }
     override suspend fun cancelEditorJob(id: String) { call { cancelEditorJob(id) } }
-    override suspend fun saveProjectVersion(takeId: String, video: EditedVideo, project: JsonObject, name: String?, onProgress: (Float) -> Unit): Take {
+    override suspend fun saveProjectVersion(takeId: String, video: EditedVideo, project: JsonObject, name: String?, onProgress: (Float) -> Unit, aiLabel: Boolean): Take {
         val p = call { presign(PresignRequest("clip", "video/mp4", video.file.length())) }
         putToStorage(p, FileProgressBody(video.file, "video/mp4".toMediaType()) { onProgress(it * .97f) })
         val thumbId = video.thumbJpeg?.let { putPresigned("image", "image/jpeg", it) {} }
-        val req = TakeVersionV2Request(p.uploadId, thumbId, project, video.durationSec, video.width, video.height, video.fps, name = versionName(name))
+        val req = TakeVersionV2Request(p.uploadId, thumbId, project, video.durationSec, video.width, video.height, video.fps, name = versionName(name), aiLabel = true.takeIf { aiLabel })
         return call { createVersionV2(takeId, req) }.abs().also { onProgress(1f) }
     }
+    // WS7: import from link: the phone's file as a clip upload (the import confirms it).
+    override suspend fun uploadClipFile(file: java.io.File, onProgress: (Float) -> Unit): String {
+        val p = call { presign(PresignRequest("clip", "video/mp4", file.length())) }
+        putToStorage(p, FileProgressBody(file, "video/mp4".toMediaType(), onProgress))
+        return p.uploadId
+    }
+
     override suspend fun uploadEditorFile(file: java.io.File, contentType: String, purpose: String?, onProgress: (Float) -> Unit): String {
         val p = call { editorPresign(EditorPresignRequest(contentType, file.length(), purpose)) }
         putToStorage(p, FileProgressBody(file, contentType.toMediaType(), onProgress))
@@ -506,6 +519,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun deleteRecipe(id: String) { call { deleteRecipe(id) } }
     override suspend fun nearestRecipes(id: String, k: Int) = call { nearestRecipes(id, k) }
     override suspend fun learnGaps(limit: Int) = call { learnGaps(limit) }
+    override suspend fun referenceSlotThumb(referenceId: String, slotId: String): ByteArray? =
+        runCatching { call { referenceSlotThumb(rx(referenceId), shotId(slotId)) }.takeIf { it.isSuccessful }?.body()?.bytes() }.getOrNull()
     override suspend fun referencePoster(referenceId: String): ByteArray? =
         runCatching { call { referencePoster(referenceId) }.takeIf { it.isSuccessful }?.body()?.bytes() }.getOrNull()
     override suspend fun editorSettings() = call { editorSettings() }
@@ -578,11 +593,16 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     })
     override suspend fun reference(id: String) = studio.muse.core.edit.RecipeJson.reference(call { reference(id) })
     override suspend fun listReferences() = studio.muse.core.edit.RecipeJson.references(call { listReferences() })
+    override suspend fun retryReference(id: String) = studio.muse.core.edit.RecipeJson.reference(call { retryReference(rx(id), JsonObject(emptyMap())) })
     // Recreate phases 2–3: ids are checked before they reach a URL (rx_…, s1…).
     private fun rx(id: String) = id.also { require(Regex("^rx_[A-Za-z0-9_]{1,64}$").matches(it)) { "That isn't a reference" } }
     private fun shotId(id: String) = id.also { require(Regex("^s[0-9]{1,4}$").matches(it)) { "That isn't a shot of the reference" } }
-    private fun slotBody(modelId: String, quality: String?, method: String? = null, keepBackground: Boolean? = null, locationId: String? = null) = buildJsonObject {
+    private fun slotBody(modelId: String, quality: String?, method: String? = null, keepBackground: Boolean? = null, locationId: String? = null,
+        engineModel: String? = null, imageModel: String? = null) = buildJsonObject {
         if (locationId != null) put("locationId", kotlinx.serialization.json.JsonPrimitive(locationId))
+        // WS7/WS13 (owner): the shot's model and the plate's image model; left out = the defaults.
+        if (engineModel != null) put("engineModel", kotlinx.serialization.json.JsonPrimitive(engineModel))
+        if (imageModel != null) put("imageModel", kotlinx.serialization.json.JsonPrimitive(imageModel))
         put("modelId", kotlinx.serialization.json.JsonPrimitive(modelId)); if (quality != null) put("quality", kotlinx.serialization.json.JsonPrimitive(quality))
         if (method != null) put("method", kotlinx.serialization.json.JsonPrimitive(method))
         if (keepBackground != null) put("keepBackground", kotlinx.serialization.json.JsonPrimitive(keepBackground))
@@ -591,10 +611,10 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         call { matchReference(rx(id), buildJsonObject { if (modelId != null) put("modelId", kotlinx.serialization.json.JsonPrimitive(modelId)) }) }
     }
     override suspend fun referenceFill(id: String) = studio.muse.core.edit.RecreateJson.fill(call { referenceFill(rx(id)) })
-    override suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?, locationId: String?) =
-        studio.muse.core.edit.RecreateJson.estimate(call { estimateReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality, method, keepBackground, locationId)) })
-    override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?, locationId: String?) =
-        studio.muse.core.edit.RecreateJson.fillStart(call { fillReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality, method, keepBackground, locationId)) })
+    override suspend fun estimateReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?, locationId: String?, engineModel: String?, imageModel: String?) =
+        studio.muse.core.edit.RecreateJson.estimate(call { estimateReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality, method, keepBackground, locationId, engineModel, imageModel)) })
+    override suspend fun fillReferenceSlot(id: String, slotId: String, modelId: String, quality: String?, method: String?, keepBackground: Boolean?, locationId: String?, engineModel: String?, imageModel: String?) =
+        studio.muse.core.edit.RecreateJson.fillStart(call { fillReferenceSlot(rx(id), shotId(slotId), slotBody(modelId, quality, method, keepBackground, locationId, engineModel, imageModel)) })
     override suspend fun estimateReferenceBriefs(id: String) = studio.muse.core.edit.RecreateJson.briefsEstimate(call { estimateReferenceBriefs(rx(id), buildJsonObject { }) })
     override suspend fun writeReferenceBriefs(id: String) = studio.muse.core.edit.RecipeJson.reference(
         call { writeReferenceBriefs(rx(id), buildJsonObject { put("confirm", kotlinx.serialization.json.JsonPrimitive(true)) }) }["reference"]

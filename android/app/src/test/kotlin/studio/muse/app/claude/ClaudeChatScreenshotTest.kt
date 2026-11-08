@@ -12,6 +12,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
@@ -130,10 +131,11 @@ class ClaudeChatScreenshotTest(private val theme: String, private val screen: St
         }
         repeat(4) { idle(); compose.mainClock.advanceTimeBy(400) }
         idle()
-        fun has(text: String) = check(compose.onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()) { "missing: $text" }
+        fun has(text: String) = check(compose.onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty() ||
+            compose.onAllNodesWithContentDescription(text, substring = true).fetchSemanticsNodes().isNotEmpty()) { "missing: $text" }
         when (screen) {
             "streaming", "sheet", "panel" -> { has("Your Mac is answering"); has("Stop"); has("Saved camera path"); has("Making a shot draft") }
-            "idle" -> { has("On your Claude plan · answered by your Mac"); has("Shot draft · $1.92") }
+            "idle" -> { has("On your Claude plan, answered by your Mac"); has("Shot draft · $1.92") }
             "offline" -> { has("Open in Claude"); has("Turn on the API fallback") }
             "offline_api" -> has("Use the studio API key")
             "connections" -> { has("Claude on your plan"); has("Add MUSE to Claude"); has("billed per use") }

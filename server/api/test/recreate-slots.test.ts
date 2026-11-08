@@ -557,6 +557,27 @@ describe.skipIf(!hasFfmpeg)('Recreate · the flow through the API and Claude\'s 
     expect(await a.ctx.db.select().from(clips).where(eq3(clips.id, clip!.id))).toEqual([]);
   }, 60_000);
 
+  it('WS13 model choice: a swap fill on a chosen swap engine, a generate fill on a chosen shot model, a plate model; refused otherwise', async () => {
+    const est = (o: object) => owner.req('POST', `/v1/recreate/references/${refId}/slots/s2/estimate`, { modelId: model.id, quality: 'draft', ...o });
+    const fast = (await est({ engineModel: 'viggle' })).body;
+    expect(fast).toMatchObject({ method: 'swap', request: { engine: 'viggle' }, estimate: { label: 'Fast · beta' } });
+    const edit = (await est({})).body;
+    expect(fast.estimate.estimate).not.toBe(edit.estimate.estimate); // priced on Fast, not Edit
+    const gen = (await est({ engineModel: 'kling-v4', resolution: undefined })).body;
+    expect(gen).toMatchObject({ method: 'generate', request: { engineModel: 'kling-v4' } });
+    expect(gen.estimate.engine.model).toBe('kling-v4');
+    const bad = await est({ engineModel: 'kling-v4', method: 'swap' });
+    expect([bad.status, bad.body.code]).toEqual([400, 'engine_not_allowed']);
+    expect(bad.body.valid).toContain('viggle');
+    // Fast can't take a new background: own setting with Fast falls back to generating, saying why.
+    expect((await est({ engineModel: 'viggle', keepBackground: false })).body.method).toBe('generate');
+    // The background plate on a picked image model (owner only).
+    await owner.req('PUT', `/v1/recreate/references/${refId}/briefs`, { slots: { s2: { location: 'a neon arcade' } } });
+    const plate = (await est({ keepBackground: false, imageModel: 'black-forest-labs/flux-2-dev' })).body;
+    expect(plate.background).toMatchObject({ source: 'generated', setting: 'a neon arcade' });
+    expect((await est({ keepBackground: false, imageModel: 'not a model' })).body.code).toBe('engine_not_allowed');
+  });
+
   it('pinned rules change Claude\'s plan: cuts only and a still camera; the owner\'s own options in the app win; gaps reported once', async () => {
     const pinRule = async (text: string) => (await owner.req('POST', '/v1/learn/playbook', { text, pinned: true })).body.id;
     const slots = { s1: 't_pan', s3: 't_static' };
