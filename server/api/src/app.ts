@@ -34,6 +34,7 @@ import { ToolService } from './services/tools.js';
 import { EngineHealth } from './services/engines.js';
 import { SuiteService } from './suite/service.js';
 import { registerSuiteRoutes } from './routes/suite.js';
+import { recreateOf } from './recreate/references.js';
 
 declare module 'fastify' {
   interface FastifyRequest { user: AuthUser }
@@ -167,6 +168,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     for (const t of timers) clearTimeout(t);
     await ctx.replicateVideo.idle();
     await ctx.suite.runner.idle();
+    await recreateOf(ctx).idle(); // Recreate this edit (workstream 1)
     await ctx.gpu.shutdown();
     await app.close();
     if (!opts.db) await dbh.close();

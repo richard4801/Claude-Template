@@ -46,7 +46,8 @@ struct Shell: View {
             VStack(spacing: 0) {
                 TitleBar()
                 HStack(spacing: 0) {
-                    Sidebar(compact: g.size.width < 1240)
+                    // The Edit suite needs the width (plans/edit-layout.md): the sidebar is its icon rail there.
+                    Sidebar(compact: g.size.width < 1240 || store.screen == .edit || store.screen == .editor)
                     ZStack(alignment: .top) {
                         screen
                             .id(store.screen)
@@ -243,6 +244,9 @@ struct Sidebar: View {
         VStack(alignment: .leading, spacing: 2) {
             wordmark.padding(.horizontal, compact ? 0 : 10).padding(.top, 4).padding(.bottom, 18)
                 .frame(maxWidth: .infinity, alignment: compact ? .center : .leading)
+                // The same name in the icon rail ("M") as in full ("MUSE"): nothing in the chrome changes label (Edit opens it).
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("MUSE")
             ForEach(NavItem.main) { item in
                 let q = store.activeJobs.count
                 NavRow(icon: item.icon, title: item.title, on: store.screen.navParent == item.screen, compact: compact,
@@ -250,9 +254,8 @@ struct Sidebar: View {
                     // AI suite (workstream 1): Video suite opens its hub.
                     if item.screen == .suite { store.openSuite(.hub) } else { store.go(item.screen) }
                 }
-                // AI suite (workstream 1): the Video suite's modes under it (Photo among them, workstream 3), then Templates (the
-                // Photo presets) and the top-level Edit. Photoshoot is gone: it is the Photo tool.
-                if item.screen == .suite && !compact { SuiteNavGroup() }
+                // AI suite: Templates (the Photo presets) and the top-level Edit under Video suite. The modes are no longer listed
+                // here (owner decision 2026-11-08): the composer title's menu chooses them (SuiteModeMenu).
                 if item.screen == .suite {
                     NavRow(icon: "square.on.square.dashed", title: "Templates", on: store.screen.navParent == .templates, compact: compact,
                            trailing: .key("⇧⌘T")) { store.openTemplates() }

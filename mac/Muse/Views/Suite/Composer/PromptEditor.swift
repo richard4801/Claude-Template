@@ -46,7 +46,8 @@ struct ComposerPromptBox: View {
                 if tr != typed { highlight = 0 }
                 typed = tr
                 controller.suggesting = tr != nil && !suggestions.isEmpty
-            }, onTokenClick: { key, rect, view in showTokenMenu(key, rect, view) })
+            }, onTokenClick: { key, rect, view in showTokenMenu(key, rect, view) },
+               onBackspaceEmpty: { store.unselectPresetOnEmptyPrompt() })
             if store.suite.composer.tokens.isEmpty {
                 HStack(spacing: 0) {
                     Rectangle().fill(t.accent).frame(width: 2, height: 21)
@@ -288,6 +289,13 @@ final class TokenTextView: NSTextView {
     var onTokenClick: ((Int, NSRect) -> Void)?
     /// A chip dragged to a new place: its key and the character index it was dropped at.
     var onTokenDrop: ((Int, Int) -> Void)?
+    /// Backspace left the prompt empty (or was pressed in an empty one): the composer lets go of its preset.
+    var onBackspaceEmpty: (() -> Void)?
+
+    override func deleteBackward(_ sender: Any?) {
+        super.deleteBackward(sender)
+        if (textStorage?.length ?? 0) == 0 { onBackspaceEmpty?() }
+    }
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
@@ -361,6 +369,7 @@ struct TokenTextEditor: NSViewRepresentable {
     var theme: Theme
     var onTrigger: (TypedTrigger?) -> Void
     var onTokenClick: (Int, NSRect, NSView) -> Void
+    var onBackspaceEmpty: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -394,6 +403,7 @@ struct TokenTextEditor: NSViewRepresentable {
             guard let tv else { return }
             coord.parent.onTokenClick(key, rect, tv)
         }
+        tv.onBackspaceEmpty = { coord.parent.onBackspaceEmpty?() }
         tv.onTokenDrop = { [weak tv] key, index in
             guard let tv else { return }
             coord.drop(key: key, at: index, in: tv)

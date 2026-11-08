@@ -6,6 +6,7 @@ export type EventType = 'job' | 'take' | 'balance' | 'wallet' | 'model' | 'outfi
   | 'editor' /* Editor v2 AI jobs (workstream 3) */
   | 'edit' /* Edit sessions shared with Claude (workstream 3) */
   | 'promptScript' // prompt scripts (workstream 4)
+  | 'recreate' // Recreate this edit: references and their recipes (workstream 1)
   ;
 export type ApiEvent = { type: EventType; [k: string]: unknown };
 export type Viewer = { userId: string; studioId: string; role: 'owner' | 'member' };

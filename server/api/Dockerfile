@@ -14,10 +14,15 @@ FROM node:22-bookworm-slim AS build
 ARG APP_DIR
 WORKDIR /app
 COPY ${APP_DIR}/package.json ${APP_DIR}/package-lock.json ./
+# onnxruntime-node (Recreate's pose model, workstream 1): no CUDA download (CPU only).
+ENV ONNXRUNTIME_NODE_INSTALL=skip
 RUN npm ci --no-audit --no-fund
 COPY ${APP_DIR}/tsconfig.json ${APP_DIR}/tsconfig.build.json ./
 COPY ${APP_DIR}/src ./src
-RUN npm run build && npm prune --omit=dev && npm cache clean --force
+# ...and only this platform's onnxruntime binaries (about 47 MB of 294 MB on linux/x64).
+RUN npm run build && npm prune --omit=dev && npm cache clean --force \
+ && ORT=node_modules/onnxruntime-node/bin/napi-v6 && ARCH=$(node -p process.arch) \
+ && rm -rf $ORT/darwin $ORT/win32 && find $ORT/linux -mindepth 1 -maxdepth 1 ! -name "$ARCH" -exec rm -rf {} +
 
 FROM node:22-bookworm-slim
 ARG APP_DIR
@@ -26,7 +31,9 @@ ENV NODE_ENV=production \
     PORT=8000 \
     NODE_OPTIONS=--max-old-space-size=384
 # ffmpeg/ffprobe for Replicate renders: pad the source to whole seconds, trim the result back, mux the audio, thumbnails.
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+# tesseract (English) reads on-screen words for Recreate this edit (workstream 1; about +22 MB; one item at a time,
+# OMP_THREAD_LIMIT=1). Set TESSERACT_PATH to empty to switch it off.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg tesseract-ocr tesseract-ocr-eng && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist

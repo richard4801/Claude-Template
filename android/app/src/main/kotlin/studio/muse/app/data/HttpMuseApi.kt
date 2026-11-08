@@ -180,6 +180,9 @@ interface MuseService {
     @POST("v1/suite/rigs") suspend fun createSuiteRig(@Body r: SuiteRigCreate): SuiteRigView
     @PATCH("v1/suite/rigs/{id}") suspend fun updateSuiteRig(@Path("id") id: String, @Body r: SuiteRigPatch): SuiteRigView
     @DELETE("v1/suite/rigs/{id}") suspend fun deleteSuiteRig(@Path("id") id: String): retrofit2.Response<Unit>
+    // Recreate this edit (workstream 1): read as JSON, then studio.muse.core.edit.RecipeJson.
+    @POST("v1/recreate/references") suspend fun createReference(@Body r: JsonObject): JsonObject
+    @GET("v1/recreate/references/{id}") suspend fun reference(@Path("id") id: String): JsonObject
     @PATCH("v1/models/{id}") suspend fun patchModelJson(@Path("id") id: String, @Body r: JsonObject): Model
     @GET("v1/suite/feed") suspend fun suiteFeed(@QueryMap q: Map<String, String>): SuiteFeedPage
     // AI suite · Photo tool (workstream 3)
@@ -432,6 +435,12 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         putToStorage(p, FileProgressBody(file, contentType.toMediaType(), onProgress))
         return p.uploadId
     }
+
+    // Recreate this edit (workstream 1)
+    override suspend fun createReference(uploadId: String, name: String?) = studio.muse.core.edit.RecipeJson.reference(call {
+        createReference(buildJsonObject { put("uploadId", kotlinx.serialization.json.JsonPrimitive(uploadId)); if (name != null) put("name", kotlinx.serialization.json.JsonPrimitive(name.take(80))) })
+    })
+    override suspend fun reference(id: String) = studio.muse.core.edit.RecipeJson.reference(call { reference(id) })
 
     // Edit sessions (workstream 3)
     override suspend fun openEditSession(req: OpenEditSessionRequest) = call { openEditSession(req) }

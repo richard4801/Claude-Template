@@ -2,113 +2,169 @@ import AppKit
 import MuseCore
 import SwiftUI
 
-/// The multitrack timeline (E1): tools (split, delete, speed, keyframe, undo/redo), Ripple, Cut silences, Snap to beat,
-/// Auto-captions; the ruler with the playhead; one row per track (eye = hide, lock) with its blocks: frame strips and
-/// transition diamonds on the video row, caption pages, hooks/text, overlays, waveforms with beat marks on music.
+/// The multitrack timeline (E1, plans/edit-layout.md): a 48 pt toolbar (Split, Delete, Speed, Keyframe, Crop; Undo /
+/// Redo; Ripple, Cut silences and Snap to beat as toggles; zoom), the ruler with the playhead, and one lane per track with
+/// a 176 pt header (name in full, mute / visibility / lock): frame strips and transition diamonds on Video, caption
+/// pages, hooks/text, overlays, waveforms with beat marks on music, and the video's own sound as the Sound lane.
 /// Click to seek and select, drag a block to move it, drag its edges to trim. Zoom with the slider (points per second).
 struct EditSuiteTimeline: View {
     @Environment(\.theme) private var t
     @Bindable var session: EditSuiteSession
-    static let headerWidth: CGFloat = 150
+    /// ≥ 1440 pt windows: the edit tools show their labels.
+    var wide = false
+    /// Very narrow: the toggles go icon-only too (never hidden).
+    var narrow = false
+    static let headerWidth: CGFloat = 176
 
     private var s: EditSuiteState { session.state }
 
     var body: some View {
+        let lanes = TimelineCanvas.lanes(session)
         VStack(spacing: 0) {
             toolbar
             SuiteRule()
             ScrollView(.vertical) {
                 HStack(alignment: .top, spacing: 0) {
                     VStack(spacing: 0) {
-                        Color.clear.frame(height: 22)
-                        ForEach(s.rows) { row in
-                            rowHeader(row).frame(height: height(row))
+                        Color.clear.frame(height: TimelineCanvas.rulerHeight)
+                        SuiteRule()
+                        ForEach(lanes) { lane in
+                            header(lane).frame(height: TimelineCanvas.laneHeight(lane))
                             SuiteRule()
                         }
                     }
                     .frame(width: Self.headerWidth)
-                    .background(t.chrome)
                     SuiteRule(vertical: true)
                     ScrollView(.horizontal) {
-                        TimelineCanvas(session: session)
+                        TimelineCanvas(session: session, lanes: lanes)
                     }
                 }
             }
         }
-        .background(t.bg)
+        .background(t.roles.canvas)
     }
-
-    func height(_ row: EditSuite.Row) -> CGFloat { TimelineCanvas.rowHeight(row.kind) }
 
     // MARK: Toolbar
 
     private var toolbar: some View {
-        HStack(spacing: 6) {
-            SuiteIconButton(systemName: "scissors", label: "Split at the playhead (S)") { session.edit { $0.split() } }
-            SuiteIconButton(systemName: "trash", label: "Delete (⌫)", disabled: s.selection == nil) { session.edit { $0.deleteSelected() } }
-            SuiteIconButton(systemName: "speedometer", label: "Speed", disabled: s.selectedVideo == nil) { session.view { $0.tab = .speed } }
-            SuiteIconButton(systemName: "diamond", label: "Add a keyframe at the playhead", disabled: s.selectedVisual == nil) {
+        HStack(spacing: Space.s1) {
+            tool("Split", icon: "scissors", help: "Split at the playhead (S)") { session.edit { $0.split() } }
+            tool("Delete", icon: "trash", help: "Delete (⌫)", disabled: s.selection == nil) { session.edit { $0.deleteSelected() } }
+            tool("Speed", icon: "gauge", help: "Speed", disabled: s.selectedVideo == nil) { session.view { $0.tab = .speed } }
+            tool("Keyframe", icon: "diamond", help: "Add a keyframe at the playhead", disabled: s.selectedVisual == nil) {
                 let v = s.selectedVisual
                 session.edit { $0.addKeyframe(.scale, value: v?.transform?.scale ?? 1) }
             }
-            SuiteIconButton(systemName: "crop", label: "Transform", disabled: s.selectedVisual == nil) { session.view { $0.tab = .video } }
-            SuiteIconButton(systemName: "arrow.uturn.backward", label: "Undo (⌘Z)", disabled: !s.canUndo) { session.undo() }
-            SuiteIconButton(systemName: "arrow.uturn.forward", label: "Redo (⇧⌘Z)", disabled: !s.canRedo) { session.redo() }
-            SuiteRule(vertical: true).frame(height: 20).padding(.horizontal, 4)
-            SuiteToolButton(title: "Ripple", icon: "rectangle.split.3x1", filled: s.ripple) { session.view { $0.ripple.toggle() } }
+            tool("Crop", icon: "crop", help: "Crop and transform", disabled: s.selectedVisual == nil) { session.view { $0.tab = .video } }
+            divider
+            SuiteIconButton(systemName: "arrow-counter-clockwise", label: "Undo (⌘Z)", disabled: !s.canUndo) { session.undo() }
+                .keyboardShortcut("z", modifiers: .command)
+            SuiteIconButton(systemName: "arrow-clockwise", label: "Redo (⇧⌘Z)", disabled: !s.canRedo) { session.redo() }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+            divider
+            SuiteToolButton(title: "Ripple", icon: "magnet", filled: s.ripple, plain: !s.ripple, iconOnly: narrow) { session.view { $0.ripple.toggle() } }
                 .accessibilityValue(s.ripple ? "On" : "Off")
-            SuiteToolButton(title: session.isRunning(.cuts) ? "Cutting…" : "Cut silences", icon: "scissors", disabled: session.isRunning(.cuts)) {
+                .help("Ripple: closing a gap moves what follows")
+            SuiteToolButton(title: session.isRunning(.cuts) ? "Cutting…" : "Cut silences", icon: "scissors", disabled: session.isRunning(.cuts),
+                            plain: true, iconOnly: narrow) {
                 Task { await session.cutSilences() }
             }
-            .help("Free · removes long pauses (silences first; filler words in Captions & hooks)")
-            SuiteToolButton(title: "Snap to beat", icon: "metronome", filled: s.snapToBeats) { session.view { $0.snapToBeats.toggle() } }
-                .accessibilityValue(s.snapToBeats ? "On" : "Off")
-            SuiteToolButton(title: session.isRunning(.captions) ? "Captioning…" : "Auto-captions", icon: "captions.bubble",
-                            disabled: session.isRunning(.captions)) {
-                Task { await session.autoCaptions() }
+            .help("Free. Removes long pauses (silences first; filler words in Captions and hooks)")
+            SuiteToolButton(title: "Snap to beat", icon: "music-note", filled: s.snapToBeats, plain: !s.snapToBeats, iconOnly: !wide) {
+                session.view { $0.snapToBeats.toggle() }
             }
-            .help(session.estimateLabel(.captions).map { "Word-timed captions · \($0)" } ?? "Word-timed captions")
-            if let e = session.estimateLabel(.captions), !session.isRunning(.captions) {
-                Text(e).font(t.mono(10.5)).foregroundStyle(t.muted)
-            }
-            Spacer(minLength: 6)
-            Text(EditSuite.clockTenths(session.duration)).font(t.mono(12)).foregroundStyle(t.muted).monospacedDigit()
-            Ph("magnifyingglass", 11).foregroundStyle(t.muted).accessibilityHidden(true)
-            Slider(value: Binding(get: { log(s.zoom) }, set: { v in session.view { $0.zoom = exp(v) } }),
-                   in: log(EditSuiteState.zoomRange.lowerBound)...log(EditSuiteState.zoomRange.upperBound))
-                .controlSize(.mini)
-                .frame(width: 110)
-                .accessibilityLabel("Timeline zoom")
+            .accessibilityValue(s.snapToBeats ? "On" : "Off")
+            Spacer(minLength: Space.s2)
+            zoom
         }
-        .padding(.horizontal, 10)
-        .frame(height: 42)
+        .padding(.horizontal, Space.s3)
+        .frame(height: 48)
         .task { await session.loadEstimate(.captions) }
     }
 
-    // MARK: Row headers
+    private var divider: some View {
+        Rectangle().fill(t.roles.hairline).frame(width: 1, height: 20).padding(.horizontal, Space.s1 + 2)
+    }
+
+    /// An edit tool: icon and label when there's room (≥ 1440 pt windows), icon with a tooltip below.
+    @ViewBuilder private func tool(_ title: String, icon: String, help: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {
+        if wide {
+            SuiteToolButton(title: title, icon: icon, disabled: disabled, plain: true, action: action)
+                .help(help)
+                .accessibilityLabel(help)
+        } else {
+            SuiteIconButton(systemName: icon, label: help, disabled: disabled, action: action)
+        }
+    }
+
+    private var zoom: some View {
+        let range = log(EditSuiteState.zoomRange.lowerBound)...log(EditSuiteState.zoomRange.upperBound)
+        let step = (range.upperBound - range.lowerBound) / 8
+        return HStack(spacing: Space.s1) {
+            SuiteIconButton(systemName: "magnifying-glass-minus", label: "Zoom out", tint: t.roles.ink2) {
+                session.view { $0.zoom = exp(max(range.lowerBound, log($0.zoom) - step)) }
+            }
+            Slider(value: Binding(get: { log(s.zoom) }, set: { v in session.view { $0.zoom = exp(v) } }), in: range)
+                .controlSize(.mini)
+                .tint(t.roles.accent)
+                .frame(width: 96)
+                .accessibilityLabel("Timeline zoom")
+            SuiteIconButton(systemName: "magnifying-glass-plus", label: "Zoom in", tint: t.roles.ink2) {
+                session.view { $0.zoom = exp(min(range.upperBound, log($0.zoom) + step)) }
+            }
+        }
+    }
+
+    // MARK: Lane headers
+
+    @ViewBuilder private func header(_ lane: TimelineCanvas.Lane) -> some View {
+        switch lane {
+        case .track(let row): rowHeader(row)
+        case .noCaptions:
+            headerLabel("Captions", icon: "closed-captioning")
+        case .sound(let trackId):
+            let muted = session.project.track(trackId)?.muted == true
+            HStack(spacing: 0) {
+                headerLabel("Sound", icon: "waveform")
+                SuiteIconButton(systemName: muted ? "speaker-slash" : "speaker-high", label: muted ? "Unmute the sound" : "Mute the sound",
+                                on: muted, size: 28, tint: t.roles.ink2) { session.edit { $0.toggleMuted(trackId) } }
+            }
+            .padding(.trailing, Space.s2)
+        }
+    }
+
+    private func headerLabel(_ name: String, icon: String) -> some View {
+        HStack(spacing: Space.s2) {
+            Ph(icon, 15).foregroundStyle(t.roles.ink2).frame(width: 20).accessibilityHidden(true)
+            Text(name).font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1).fitProbe("track \(name)")
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, Space.s3)
+        .frame(maxHeight: .infinity)
+    }
 
     private func rowHeader(_ row: EditSuite.Row) -> some View {
         let track = session.project.track(row.trackId)
         let hidden = track?.hidden == true
         let locked = s.locked.contains(row.trackId)
-        return HStack(spacing: 6) {
-            Ph(row.icon, 11).foregroundStyle(t.muted).frame(width: 16).accessibilityHidden(true)
-            Text(row.label).font(t.scale.micro.font).foregroundStyle(t.ink).lineLimit(1)
-            Spacer(minLength: 2)
-            if row.kind.isAudio || row.kind == .main {
-                SuiteIconButton(systemName: track?.muted == true ? "speaker.slash" : "speaker.wave.1",
-                                label: track?.muted == true ? "Unmute \(row.label.lowercased())" : "Mute \(row.label.lowercased())",
-                                on: track?.muted == true, size: 22) { session.edit { $0.toggleMuted(row.trackId) } }
+        let name = row.label.lowercased()
+        // The main track's sound has its own lane (Sound) when the video has sound: its mute lives there.
+        let soundLane = row.kind == .main && TimelineCanvas.soundTrack(session) == row.trackId
+        return HStack(spacing: 0) {
+            headerLabel(row.label, icon: TimelineCanvas.icon(row.kind))
+            if row.kind.isAudio || (row.kind == .main && !soundLane) {
+                SuiteIconButton(systemName: track?.muted == true ? "speaker-slash" : "speaker-high",
+                                label: track?.muted == true ? "Unmute \(name)" : "Mute \(name)",
+                                on: track?.muted == true, size: 28, tint: t.roles.ink2) { session.edit { $0.toggleMuted(row.trackId) } }
             }
             if !row.kind.isAudio {
-                SuiteIconButton(systemName: hidden ? "eye.slash" : "eye", label: hidden ? "Show \(row.label.lowercased())" : "Hide \(row.label.lowercased())",
-                                on: hidden, size: 22) { session.edit { $0.toggleHidden(row.trackId) } }
+                SuiteIconButton(systemName: hidden ? "eye-slash" : "eye", label: hidden ? "Show \(name)" : "Hide \(name)",
+                                on: hidden, size: 28, tint: t.roles.ink2) { session.edit { $0.toggleHidden(row.trackId) } }
             }
-            SuiteIconButton(systemName: locked ? "lock.fill" : "lock.open", label: locked ? "Unlock \(row.label.lowercased())" : "Lock \(row.label.lowercased())",
-                            on: locked, size: 22) { session.view { $0.toggleLocked(row.trackId) } }
+            SuiteIconButton(systemName: locked ? "lock" : "lock-open", label: locked ? "Unlock \(name)" : "Lock \(name)",
+                            on: locked, size: 28, tint: t.roles.ink2) { session.view { $0.toggleLocked(row.trackId) } }
         }
-        .padding(.leading, 10)
-        .padding(.trailing, 4)
+        .padding(.trailing, Space.s2)
     }
 }
 
@@ -116,7 +172,71 @@ struct EditSuiteTimeline: View {
 struct TimelineCanvas: View {
     @Environment(\.theme) private var t
     @Bindable var session: EditSuiteSession
+    var lanes: [Lane]
     @State private var drag: DragState?
+
+    /// A lane of the timeline: a track, the Captions lane before there are captions, or the video's own sound.
+    enum Lane: Identifiable, Hashable {
+        case track(EditSuite.Row)
+        case noCaptions
+        case sound(trackId: String)
+        var id: String {
+            switch self {
+            case .track(let r): return r.id
+            case .noCaptions: return "#captions"
+            case .sound(let id): return "#sound-\(id)"
+            }
+        }
+    }
+
+    static let rulerHeight: CGFloat = 28
+
+    /// The main track, when its clips have sound (the Sound lane draws their waveform; its mute is the main track's).
+    static func soundTrack(_ session: EditSuiteSession) -> String? {
+        guard let main = session.project.mainTrack else { return nil }
+        let sounding = main.items.contains { it in
+            guard let c = it.videoClip else { return false }
+            return session.project.asset(c.asset)?.hasAudio != false
+        }
+        return sounding ? main.id : nil
+    }
+
+    /// The rows in the design's order with the Captions lane (made or not) and the Sound lane under the video.
+    static func lanes(_ session: EditSuiteSession) -> [Lane] {
+        let rows = session.state.rows
+        var out: [Lane] = []
+        if !rows.contains(where: { $0.kind == .caption }) {
+            let firstVisual = rows.firstIndex { $0.kind != .text } ?? rows.count
+            out = rows[..<firstVisual].map { Lane.track($0) } + [Lane.noCaptions] + rows[firstVisual...].map { Lane.track($0) }
+        } else {
+            out = rows.map { Lane.track($0) }
+        }
+        if let sound = soundTrack(session), let i = out.firstIndex(where: { if case .track(let r) = $0 { return r.trackId == sound }; return false }) {
+            out.insert(.sound(trackId: sound), at: i + 1)
+        }
+        return out
+    }
+
+    static func laneHeight(_ lane: Lane) -> CGFloat {
+        switch lane {
+        case .track(let r): return rowHeight(r.kind)
+        case .noCaptions: return 44
+        case .sound: return 56
+        }
+    }
+
+    static func icon(_ k: EditV2.TrackKind) -> String {
+        switch k {
+        case .main: return "film-strip"
+        case .video: return "stack"
+        case .image: return "sticker"
+        case .text: return "text-t"
+        case .caption: return "closed-captioning"
+        case .music: return "music-notes"
+        case .voice: return "microphone"
+        case .sfx: return "speaker-high"
+        }
+    }
 
     private struct DragState: Equatable {
         enum Kind: Equatable { case move, trimStart, trimEnd }
@@ -128,9 +248,9 @@ struct TimelineCanvas: View {
 
     static func rowHeight(_ k: EditV2.TrackKind) -> CGFloat {
         switch k {
-        case .main: return 48
-        case .music, .voice: return 36
-        default: return 28
+        case .main: return 72
+        case .music, .voice, .video, .image: return 56
+        default: return 44
         }
     }
 
@@ -141,8 +261,9 @@ struct TimelineCanvas: View {
         let width = min(2_000_000, max(600, CGFloat(EditSuite.finiteSeconds(session.duration)) * z + 160)) // finite (owner blocker 2026-11-07)
         VStack(alignment: .leading, spacing: 0) {
             ruler(width: width)
-            ForEach(s.rows) { row in
-                rowView(row, width: width).frame(width: width, height: Self.rowHeight(row.kind), alignment: .leading)
+            SuiteRule()
+            ForEach(lanes) { lane in
+                laneView(lane, width: width).frame(width: width, height: Self.laneHeight(lane), alignment: .leading)
                 SuiteRule()
             }
         }
@@ -159,13 +280,15 @@ struct TimelineCanvas: View {
             while CGFloat(tt) * z <= size.width, ticks < 20_000, z > 0 {
                 ticks += 1
                 let x = CGFloat(tt) * z
-                ctx.stroke(Path { p in p.move(to: CGPoint(x: x, y: 12)); p.addLine(to: CGPoint(x: x, y: size.height)) }, with: .color(t.line), lineWidth: 1)
-                ctx.draw(Text(EditSuite.clockTenths(tt).replacingOccurrences(of: ".0", with: "")).font(t.mono(9.5)).foregroundColor(t.muted),
-                         at: CGPoint(x: x + 3, y: 6), anchor: .leading)
+                ctx.stroke(Path { p in p.move(to: CGPoint(x: x, y: size.height - 6)); p.addLine(to: CGPoint(x: x, y: size.height)) },
+                           with: .color(t.roles.hairline), lineWidth: 1)
+                ctx.draw(Text(EditSuite.clockTenths(tt).replacingOccurrences(of: ".0", with: "")).font(t.scale.micro.font).monospacedDigit()
+                            .foregroundColor(t.roles.ink2),
+                         at: CGPoint(x: x + 4, y: size.height / 2 - 2), anchor: .leading)
                 tt += step
             }
         }
-        .frame(width: width, height: 22)
+        .frame(width: width, height: Self.rulerHeight)
         .contentShape(Rectangle())
         .gesture(DragGesture(minimumDistance: 0).onChanged { v in session.seek(Double(max(0, v.location.x) / z)) })
         .accessibilityLabel("Timeline ruler")
@@ -174,18 +297,56 @@ struct TimelineCanvas: View {
 
     private var playhead: some View {
         let x = CGFloat(EditSuite.finiteSeconds(session.playhead)) * z
-        return ZStack(alignment: .top) {
-            Rectangle().fill(t.accent).frame(width: 1.5)
-            Text(EditSuite.clockTenths(session.playhead)).font(t.mono(10, .semibold)).foregroundStyle(.white)
-                .padding(.horizontal, 4).frame(height: 16).background(t.accent)
-        }
+        return Rectangle().fill(t.roles.accent).frame(width: 2)
         .frame(maxHeight: .infinity)
-        .offset(x: x - 0.75)
+        .offset(x: x - 1)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 
     // MARK: Rows
+
+    @ViewBuilder private func laneView(_ lane: Lane, width: CGFloat) -> some View {
+        switch lane {
+        case .track(let row): rowView(row, width: width)
+        case .noCaptions:
+            HStack(spacing: Space.s2) {
+                SuiteToolButton(title: session.isRunning(.captions) ? "Captioning…" : "Make captions", icon: "closed-captioning",
+                                disabled: session.isRunning(.captions), plain: true) { Task { await session.autoCaptions() } }
+                    .help(session.estimateLabel(.captions).map { "Word-timed captions from what's said, \($0)" } ?? "Word-timed captions from what's said")
+                if session.isRunning(.captions) { ProgressView().controlSize(.small) }
+            }
+            .padding(.leading, Space.s2)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        case .sound(let trackId): soundLane(trackId, width: width)
+        }
+    }
+
+    /// The main clips' own sound, under each clip.
+    private func soundLane(_ trackId: String, width: CGFloat) -> some View {
+        let h = Self.laneHeight(.sound(trackId: trackId)) - 12
+        let muted = session.project.track(trackId)?.muted == true
+        return ZStack(alignment: .topLeading) {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { loc in session.scrub(to: Double(loc.x / z), trackId: trackId) }
+            ForEach(s.blocks(trackId)) { b in
+                if let id = b.itemId, let c = session.project.track(trackId)?.item(id)?.videoClip {
+                    let x = CGFloat(EditSuite.finiteSeconds(b.startSec)) * z
+                    let w = max(4, CGFloat(EditSuite.finiteSeconds(b.endSec - b.startSec)) * z)
+                    wave(asset: c.asset, inSec: c.inSec, outSec: c.outSec, width: max(1, w - 12), height: h, kind: .main)
+                        .padding(.horizontal, 6)
+                        .frame(width: w, height: h)
+                        .background(RoundedRectangle(cornerRadius: min(t.radii.control, 8), style: .continuous).fill(t.roles.field))
+                        .offset(x: x, y: 6)
+                        .allowsHitTesting(false)
+                }
+            }
+        }
+        .opacity(muted ? 0.4 : 1)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(muted ? "Sound, muted" : "Sound")
+    }
 
     @ViewBuilder private func rowView(_ row: EditSuite.Row, width: CGFloat) -> some View {
         let blocks = s.blocks(row.trackId)
@@ -208,7 +369,7 @@ struct TimelineCanvas: View {
             for b in beats {
                 let x = CGFloat(b.t) * z
                 ctx.stroke(Path { p in p.move(to: CGPoint(x: x, y: 0)); p.addLine(to: CGPoint(x: x, y: b.strong ? 7 : 4)) },
-                           with: .color(t.accent), lineWidth: b.strong ? 2 : 1)
+                           with: .color(t.roles.accent), lineWidth: b.strong ? 2 : 1)
             }
         }
         .frame(height: height)
@@ -217,10 +378,10 @@ struct TimelineCanvas: View {
 
     private func color(_ k: EditV2.TrackKind) -> Color {
         switch k {
-        case .main: return Color(hex: 0x23262A)
-        case .text: return t.accent.opacity(0.15)
-        case .caption: return t.surface
-        case .video, .image: return t.surface2
+        case .main: return t.editViewer
+        case .text: return t.roles.accent.opacity(0.15)
+        case .caption: return t.roles.field
+        case .video, .image: return t.roles.field
         case .voice: return Color(hex: 0x6E6AE0).opacity(0.18)
         case .music: return Color(hex: 0x2F9E57).opacity(0.18)
         case .sfx: return Color(hex: 0xF2A93B).opacity(0.25)
@@ -230,13 +391,14 @@ struct TimelineCanvas: View {
     @ViewBuilder private func block(_ b: EditSuite.Block, row: EditSuite.Row, locked: Bool) -> some View {
         let x = CGFloat(EditSuite.finiteSeconds(b.startSec)) * z
         let w = max(4, CGFloat(EditSuite.finiteSeconds(b.endSec - b.startSec)) * z)
-        let h = Self.rowHeight(row.kind) - 6
+        let h = Self.rowHeight(row.kind) - 12
         let selected = b.itemId != nil && b.itemId == s.selection
+        let shape = RoundedRectangle(cornerRadius: min(t.radii.control, 8), style: .continuous)
         ZStack(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 3).fill(color(row.kind))
+            shape.fill(color(row.kind))
             blockContent(b, row: row, width: w, height: h)
-                .clipShape(RoundedRectangle(cornerRadius: 3))
-            RoundedRectangle(cornerRadius: 3).strokeBorder(selected ? t.accent : t.line.opacity(0.7), lineWidth: selected ? 2 : 1)
+                .clipShape(shape)
+            shape.strokeBorder(selected ? t.roles.selection : .clear, lineWidth: 2)
             if selected && !locked && b.itemId != nil {
                 HStack(spacing: 0) {
                     trimHandle(b, edge: .start, height: h)
@@ -246,7 +408,7 @@ struct TimelineCanvas: View {
             }
         }
         .frame(width: w, height: h)
-        .offset(x: x, y: 3)
+        .offset(x: x, y: 6)
         .contentShape(Rectangle())
         .onTapGesture {
             guard let id = b.itemId else {
@@ -258,8 +420,8 @@ struct TimelineCanvas: View {
         .gesture(moveGesture(b, row: row, locked: locked))
         .overlay(alignment: .topLeading) {
             if row.kind == .main, let tr = b.transition {
-                Ph("diamond.fill", 13).foregroundStyle(t.accent)
-                    .offset(x: x - 7, y: 3 + h / 2 - 7)
+                Ph("diamond.fill", 13).foregroundStyle(t.roles.accent)
+                    .offset(x: x - 8, y: 6 + h / 2 - 8)
                     .help(EditV2.transitionLabel(tr))
                     .accessibilityLabel("Transition: \(EditV2.transitionLabel(tr))")
                     .onTapGesture {
@@ -270,7 +432,7 @@ struct TimelineCanvas: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(row.label.capitalized): \(b.label)")
+        .accessibilityLabel("\(row.label): \(b.label)")
         .accessibilityValue("\(EditSuite.clockTenths(b.startSec)) to \(EditSuite.clockTenths(b.endSec))")
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
@@ -281,7 +443,7 @@ struct TimelineCanvas: View {
             if let id = b.itemId, let c = session.project.track(row.trackId)?.item(id)?.videoClip {
                 strip(c, width: width, height: height)
                     .overlay(alignment: .topLeading) {
-                        Text(b.label).font(t.mono(9.5)).foregroundStyle(.white).lineLimit(1).padding(.horizontal, 4).padding(.top, 2)
+                        Text(b.label).font(t.scale.micro.font).foregroundStyle(.white).lineLimit(1).padding(.horizontal, Space.s1 + 2).padding(.top, 2)
                             .shadow(color: .black, radius: 1)
                     }
             }
@@ -289,11 +451,11 @@ struct TimelineCanvas: View {
             if let id = b.itemId, let c = session.project.track(row.trackId)?.item(id)?.audioClip {
                 wave(asset: c.asset, inSec: c.inSec, outSec: c.outSec, width: width, height: height, kind: row.kind)
                     .overlay(alignment: .leading) {
-                        if row.kind == .sfx { Text(b.label).font(t.mono(9.5)).foregroundStyle(t.ink).lineLimit(1).padding(.horizontal, 4) }
+                        if row.kind == .sfx { Text(b.label).font(t.scale.micro.font).foregroundStyle(t.roles.ink).lineLimit(1).padding(.horizontal, Space.s1) }
                     }
             }
         default:
-            Text(b.label).font(t.mono(10)).foregroundStyle(row.kind == .text ? t.accent : t.ink).lineLimit(1).padding(.horizontal, 5)
+            Text(b.label).font(t.scale.micro.font).foregroundStyle(row.kind == .text ? t.roles.accent : t.roles.ink).lineLimit(1).padding(.horizontal, Space.s2)
         }
     }
 
@@ -326,7 +488,7 @@ struct TimelineCanvas: View {
     private func wave(asset: String, inSec: Double, outSec: Double, width: CGFloat, height: CGFloat, kind: EditV2.TrackKind) -> some View {
         let peaks = session.waves[asset] ?? []
         let dur = session.project.asset(asset)?.durationSec
-        let tint: Color = kind == .music ? Color(hex: 0x2F9E57) : kind == .voice ? Color(hex: 0x6E6AE0) : Color(hex: 0xB45A00)
+        let tint: Color = kind == .music ? Color(hex: 0x2F9E57) : kind == .voice ? Color(hex: 0x6E6AE0) : kind == .main ? t.roles.ink2.opacity(0.7) : Color(hex: 0xB45A00)
         return Canvas { ctx, size in
             guard !peaks.isEmpty else { return }
             let bars = EditSuite.tileCount(width: Double(size.width), tileWidth: 3)
@@ -345,7 +507,7 @@ struct TimelineCanvas: View {
     // MARK: Gestures
 
     private func trimHandle(_ b: EditSuite.Block, edge: EditSuiteState.Edge, height: CGFloat) -> some View {
-        Rectangle().fill(t.accent).frame(width: 6, height: height)
+        Rectangle().fill(t.roles.selection).frame(width: 6, height: height)
             .contentShape(Rectangle().inset(by: -4))
             .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
             .gesture(DragGesture(minimumDistance: 1)

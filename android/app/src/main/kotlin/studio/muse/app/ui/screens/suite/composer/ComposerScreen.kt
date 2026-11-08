@@ -267,6 +267,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
         models = st.models, outfits = st.outfitsOf(d.characterId),
         catalogNote = if (catalog == null) catalogError ?: "" else null, onRetryCatalog = { scope.launch { store.load() } },
         photo = photo, // Photo tool (workstream 3)
+        onPromptEmptied = { if (d.tool == ComposerTool.PHOTO) c.suite.photo.clearPreset() else update { it.unselectingPreset() } },
         rigRow = { w -> if (photo != null) PhotoRigRow(photo, w) else ComposerRigRow(req.takeIf { live && addon == null && d.tool in ComposerDraft.PROMPT_TOOLS }, suiteEst, suiteEst == null && (estErr != null || problem != null), w) },
         update = ::update, open = ::open, onGenerate = ::generate, onSlot = ::onSlot, onClearSlot = { k ->
             when (k) {
@@ -312,7 +313,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
                     estimate = est, blocker = blocker, tierEstimates = tierEstimates, update = ::update, updateRecast = { f -> store.recast.update(f) },
                     setTab = { t -> store.sheet.update { it?.copy(tab = t) } }, open = { open(it) }, close = { open(null) }, onMove = ::onMove,
                     onPickSlot = { id -> pickFile(id) }, onClearSlot = { id -> store.composerSlots.update { it.clear(id) } },
-                    onPickCharacter = { id, o -> pickCharacter(id, o) }, onGenerate = ::generate, onStoryboard = { nav.go(Routes.SUITE_STORYBOARD) },
+                    onPickCharacter = { id, o -> pickCharacter(id, o) }, onGenerate = ::generate, onStoryboard = { nav.go(Routes.SUITE_STORYBOARD) }, onCameraStage = { nav.go(Routes.CAMERA_STAGE) },
                     frame = frame, onTapFace = ::tapFace,
                     takes = ExtendSlot.candidates(st.takes, c.repo.demo), extendKey = extendSlots[ToolSlots.EXTEND_VIDEO]?.media?.key,
                     onPickTake = { t -> if (store.pickExtendTake(t)) open(null) else c.repo.toast("This take has no video to extend yet") },
@@ -375,6 +376,8 @@ class ComposerUi(
     /** The catalog isn't here yet: "" while it loads, else why it couldn't load. null = loaded. */
     val catalogNote: String? = null,
     val onRetryCatalog: () -> Unit = {},
+    /** Backspace cleared the prompt (owner decision 2026-11-08): the preset is unselected. */
+    val onPromptEmptied: () -> Unit = {},
 ) {
     /** No price yet and no reason why: the estimate is on its way (the button says "Pricing…"). */
     val pricing: Boolean get() = live && est == null && blocker == null
@@ -613,7 +616,7 @@ private fun ToolRow(ui: ComposerUi, wide: Boolean) {
             T(if (ui.live) d.cardTagline(ui.cat) else "Coming soon · ${d.tool.tagline}", m.type.body.copy(fontSize = 13.sp), m.t.muted, maxLines = 1)
         }
         val shape = RoundedCornerShape(if (m.isA) 0.dp else 8.dp)
-        Box(Modifier.heightIn(min = 48.dp).press { ui.open(ComposerSheet(SheetKind.TOOLS)) }.semantics { contentDescription = "Change tool"; role = Role.Button }, contentAlignment = Alignment.Center) {
+        Box(Modifier.heightIn(min = 48.dp).press { ui.open(ComposerSheet(SheetKind.TOOLS)) }.semantics { contentDescription = "Change mode"; role = Role.Button }, contentAlignment = Alignment.Center) {
             Row(Modifier.height(36.dp).clip(shape).background(m.t.surface).border(1.dp, m.t.line, shape).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 SIc("swap", 15.dp, m.t.ink); T("Change", m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), m.t.ink, maxLines = 1)
@@ -685,7 +688,7 @@ private fun Prompt(ui: ComposerUi, modifier: Modifier = Modifier, maxHeight: Dp 
     PromptBox(ui.d.tokens, ui.d.placeholder, ui.models, ui.outfits, ui.cat, ui.d.tool == ComposerTool.TALKING,
         onChange = { t -> ui.update { it.copy(tokens = t, modelId = if (it.tokens.character != null && t.character == null && it.modelId == it.tokens.character?.id) null else (t.character?.id ?: it.modelId)) } },
         onPick = ui.onPick, onToken = { k -> ui.open(ComposerSheet(SheetKind.TOKEN, token = k)) }, modifier = modifier.fillMaxWidth(), maxHeight = maxHeight,
-        locations = ui.locations)
+        locations = ui.locations, onEmptied = ui.onPromptEmptied)
 }
 
 @Composable
@@ -932,7 +935,7 @@ private fun WideComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent:
     var presets by remember { mutableStateOf(ui.empty) }
     Column(Modifier.fillMaxSize().padding(horizontal = 24.dp).padding(top = 8.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Row(Modifier.heightIn(min = 48.dp).press { ui.open(ComposerSheet(SheetKind.TOOLS)) }.semantics { contentDescription = "${ui.d.tool.title}, change tool"; role = Role.Button },
+            Row(Modifier.heightIn(min = 48.dp).press { ui.open(ComposerSheet(SheetKind.TOOLS)) }.semantics { contentDescription = "${ui.d.tool.title}, change mode"; role = Role.Button },
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 T(ui.d.tool.title, m.scale.title, m.t.ink, maxLines = 1); SIc("chevd", 16.dp, m.t.muted)
             }

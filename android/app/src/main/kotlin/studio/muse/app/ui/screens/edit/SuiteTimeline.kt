@@ -6,7 +6,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -44,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import studio.muse.app.ui.components.press
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.scale
 import studio.muse.core.edit.AudioClip
 import studio.muse.core.edit.EditProject
 import studio.muse.core.edit.Item
@@ -61,17 +66,36 @@ import kotlin.math.roundToInt
 /** One horizontal lane of the phone timeline: its track (null = ruler), top and height in dp. */
 data class Lane(val track: Track?, val top: Float, val height: Float)
 
-/** The lanes for [p]: ruler, main video, captions, overlays, music, voice, sfx, text (design EM1 order). */
-fun lanesOf(p: EditProject): List<Lane> {
+/**
+ * The lanes for [p]: ruler, main video, captions, overlays, music, voice, sfx, text (design EM1 order). [roomy]: the
+ * tablet's taller lanes beside their named headers (plans/edit-layout.md).
+ */
+fun lanesOf(p: EditProject, roomy: Boolean = false): List<Lane> {
     val out = ArrayList<Lane>()
     var y = 30f
     fun add(t: Track, h: Float, gap: Float = 6f) { out += Lane(t, y, h); y += h + gap }
-    add(p.main, 52f, 8f)
+    add(p.main, if (roomy) 60f else 52f, 8f)
     val order = listOf(TrackKind.CAPTION, TrackKind.VIDEO, TrackKind.IMAGE, TrackKind.MUSIC, TrackKind.VOICE, TrackKind.SFX, TrackKind.TEXT)
-    for (k in order) for (t in p.tracks) if (t.kind == k) add(t, when (k) { TrackKind.CAPTION, TrackKind.TEXT, TrackKind.SFX -> 20f; TrackKind.MUSIC -> 26f; TrackKind.VOICE -> 22f; else -> 26f },
-        if (k == TrackKind.CAPTION) 6f else 4f)
+    for (k in order) for (t in p.tracks) if (t.kind == k) add(t,
+        if (roomy) when (k) { TrackKind.CAPTION, TrackKind.TEXT, TrackKind.SFX -> 28f; else -> 32f }
+        else when (k) { TrackKind.CAPTION, TrackKind.TEXT, TrackKind.SFX -> 20f; TrackKind.MUSIC -> 26f; TrackKind.VOICE -> 22f; else -> 26f },
+        if (roomy) 6f else if (k == TrackKind.CAPTION) 6f else 4f)
     return out
 }
+
+/** A track's name in the tablet's header column. */
+fun trackName(t: Track): String = when (t.kind) {
+    TrackKind.MAIN -> "Video"; TrackKind.CAPTION -> "Captions"; TrackKind.MUSIC -> "Music"; TrackKind.VOICE -> "Voice-over"
+    TrackKind.SFX -> "Sound effects"; TrackKind.TEXT -> "Text"; TrackKind.IMAGE -> "Image"; else -> if (t.name == "Cut-out") "Cut-out" else "Overlay"
+}
+
+private fun trackIcon(t: Track): String = when (t.kind) {
+    TrackKind.MAIN -> "film-strip"; TrackKind.CAPTION -> "closed-captioning"; TrackKind.MUSIC -> "music"; TrackKind.VOICE -> "mic"
+    TrackKind.SFX -> "waveform"; TrackKind.TEXT -> "text-t"; else -> "layers"
+}
+
+/** "0:02" for the ruler (tabular figures, no monospace). */
+private fun rulerTime(s: Int): String = "${s / 60}:" + (s % 60).toString().padStart(2, '0')
 
 /** Colours of the audio/text lanes (design: music green, voice violet, hook rose), darker on dark themes. */
 private data class LaneColors(val music: Color, val musicWave: Color, val voice: Color, val voiceWave: Color, val hook: Color, val pip: Color)
@@ -87,10 +111,38 @@ else LaneColors(Color(0xFFDCEBDD), Color(0xFF2F6B3A), Color(0xFFE6E0F2), Color(0
  * [frames]: frames of each video asset spread evenly over its length (none in tests → plain tiles).
  */
 @Composable
-fun SuiteTimeline(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap>>, act: (EditAction) -> Unit, modifier: Modifier = Modifier) {
+fun SuiteTimeline(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap>>, act: (EditAction) -> Unit, modifier: Modifier = Modifier,
+                  /** Tablet: named track headers on the left, taller lanes, no floating "+" (the toolbar has Add). */
+                  headers: Boolean = false) {
     val m = muse
     val p = ui.project ?: return
-    val lanes = remember(p) { lanesOf(p) }
+    val lanes = remember(p, headers) { lanesOf(p, headers) }
+    if (headers) {
+        val h = (lanes.lastOrNull()?.let { it.top + it.height } ?: 100f) + 8f
+        Row(modifier.fillMaxWidth().height(h.dp.coerceAtMost(300.dp)).background(m.t.bg)) {
+            Box(Modifier.width(160.dp).fillMaxHeight()) {
+                for (lane in lanes) {
+                    val t = lane.track ?: continue
+                    Row(Modifier.offset(y = lane.top.dp).height(lane.height.dp).fillMaxWidth().padding(start = 16.dp, end = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        EIc(trackIcon(t), 16.dp, m.t.muted)
+                        studio.muse.app.ui.components.T(trackName(t), m.scale.caption, m.t.ink, maxLines = 1)
+                    }
+                }
+            }
+            Box(Modifier.width(1.dp).fillMaxHeight().background(m.t.line))
+            TimelineCanvas(ui, frames, act, lanes, Modifier.weight(1f), plus = false)
+        }
+        return
+    }
+    TimelineCanvas(ui, frames, act, lanes, modifier, plus = true)
+}
+
+@Composable
+private fun TimelineCanvas(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap>>, act: (EditAction) -> Unit, lanes: List<Lane>, modifier: Modifier, plus: Boolean) {
+    val m = muse
+    val p = ui.project ?: return
+    val roomy = !plus
     val height = (lanes.lastOrNull()?.let { it.top + it.height } ?: 100f).coerceAtLeast(200f - 8f) + 8f
     val measurer = rememberTextMeasurer()
     val colors = laneColors()
@@ -100,7 +152,7 @@ fun SuiteTimeline(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap>>, act: 
     val state by rememberUpdatedState(ui)
     val actNow by rememberUpdatedState(act)
     val dragStart = remember { mutableFloatStateOf(0f) }
-    BoxWithConstraints(modifier.fillMaxWidth().height(height.dp.coerceAtMost(260.dp)).background(m.t.bg)) {
+    BoxWithConstraints(modifier.fillMaxWidth().let { if (roomy) it.fillMaxHeight() else it.height(height.dp.coerceAtMost(260.dp)) }.background(m.t.bg)) {
         val widthPx = constraints.maxWidth.toFloat()
         Canvas(
             Modifier.fillMaxSize()
@@ -121,7 +173,7 @@ fun SuiteTimeline(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap>>, act: 
                         val pps = s.pxPerSec * density
                         val t = s.playheadSec + (o.x - size.width / 2f) / pps
                         val yDp = o.y / density
-                        val lane = lanesOf(proj).firstOrNull { yDp >= it.top - 2 && yDp <= it.top + it.height + 2 }?.track
+                        val lane = lanesOf(proj, roomy).firstOrNull { yDp >= it.top - 2 && yDp <= it.top + it.height + 2 }?.track
                         val hit = lane?.items?.firstOrNull { val sp = itemSpan(proj, lane, it); t >= sp.startSec && t < sp.endSec }
                         val captionHit = lane?.kind == TrackKind.CAPTION
                         when {
@@ -142,8 +194,8 @@ fun SuiteTimeline(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap>>, act: 
             while (s <= ui.duration + step) {
                 val x = xOf(s.toDouble())
                 if (x > -40 && x < size.width + 40) {
-                    val label = if (s % (step * 2) == 0) "$s s" else "·"
-                    drawText(measurer.measure(label, TextStyle(fontFamily = m.t.mono, fontSize = 9.5.sp, color = m.t.muted), softWrap = false), topLeft = Offset(x, 6 * dp))
+                    if (s % (step * 2) == 0) drawText(measurer.measure(rulerTime(s), TextStyle(fontFamily = m.t.body, fontSize = 11.sp, color = m.t.muted, fontFeatureSettings = "tnum"), softWrap = false), topLeft = Offset(x + 3 * dp, 5 * dp))
+                    drawRect(m.t.line, Offset(x, if (s % (step * 2) == 0) 4 * dp else 14 * dp), Size(1 * dp, if (s % (step * 2) == 0) 18 * dp else 8 * dp))
                 }
                 s += step
             }
@@ -160,7 +212,7 @@ fun SuiteTimeline(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap>>, act: 
                         if (ui.selectedId == c.id) drawRoundRect(m.t.accent, Offset(l, top), Size(r - l, h), CornerRadius(4 * dp), style = Stroke(2 * dp))
                         if (c.speedCurve != null || c.speed != 1.0) {
                             val lbl = if (c.speedCurve != null) "curve" else "${trim(c.speed)}×"
-                            val tl = measurer.measure(lbl, TextStyle(fontFamily = m.t.mono, fontSize = 8.5.sp, color = Color.White))
+                            val tl = measurer.measure(lbl, TextStyle(fontFamily = m.t.body, fontSize = 11.sp, color = Color.White, fontFeatureSettings = "tnum"))
                             drawRect(Color.Black.copy(alpha = .55f), Offset(l + 3 * dp, top + h - tl.size.height - 4 * dp), Size(tl.size.width + 6f * dp, tl.size.height.toFloat()))
                             drawText(tl, topLeft = Offset(l + 6 * dp, top + h - tl.size.height - 4 * dp))
                         }
@@ -168,7 +220,7 @@ fun SuiteTimeline(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap>>, act: 
                     TrackKind.CAPTION -> for (pg in pages) {
                         val l = xOf(pg.startSec); val r = xOf(pg.endSec) - 2 * dp
                         if (r < 0 || l > size.width) continue
-                        chip(measurer, pg.words.joinToString(" ") { it.text }, l, r, top, h, m.t.surface2, m.t.line, m.t.ink, m.t.mono)
+                        chip(measurer, pg.words.joinToString(" ") { it.text }, l, r, top, h, m.t.surface2, m.t.line, m.t.ink, m.t.body)
                     }
                     TrackKind.MUSIC, TrackKind.VOICE, TrackKind.SFX -> for (it in t.items) {
                         val sp = itemSpan(p, t, it)
@@ -184,7 +236,7 @@ fun SuiteTimeline(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap>>, act: 
                         val sp = itemSpan(p, t, it)
                         val l = xOf(sp.startSec); val r = xOf(sp.endSec) - 2 * dp
                         if (r < 0 || l > size.width) continue
-                        chip(measurer, "T " + (it as studio.muse.core.edit.TextItem).text, l, r, top, h, colors.hook, if (ui.selectedId == it.id) m.t.accent else Color.Transparent, m.t.accent, m.t.mono)
+                        chip(measurer, "T " + (it as studio.muse.core.edit.TextItem).text, l, r, top, h, colors.hook, if (ui.selectedId == it.id) m.t.accent else Color.Transparent, m.t.accent, m.t.body)
                     }
                     TrackKind.VIDEO, TrackKind.IMAGE -> for (it in t.items) {
                         val sp = itemSpan(p, t, it)
@@ -209,8 +261,8 @@ fun SuiteTimeline(ui: EditSuiteUi, frames: Map<String, List<ImageBitmap>>, act: 
             // The playhead, fixed in the centre.
             drawRect(m.t.ink, Offset(size.width / 2f - 1 * dp, 0f), Size(2 * dp, size.height))
         }
-        // "+": add a clip or an overlay.
-        Box(
+        // "+": add a clip or an overlay (the tablet's toolbar has Add instead).
+        if (plus) Box(
             Modifier.align(Alignment.TopEnd).offset(x = (-4).dp, y = 32.dp).size(48.dp).press { act(EditAction.Open(Panel.OVERLAY)) }.padding(8.dp).background(m.t.surface).border(1.dp, m.t.line)
                 .semantics { contentDescription = "Add" },
             contentAlignment = Alignment.Center,
@@ -248,7 +300,7 @@ private fun DrawScope.chip(
     clipRect(l, top, r, top + h) {
         drawRect(bg, Offset(l, top), Size(r - l, h))
         if (border != Color.Transparent) drawRect(border, Offset(l, top), Size(r - l, h), style = Stroke(1 * density))
-        val tl = measurer.measure(text, TextStyle(fontFamily = font, fontSize = 9.sp, color = ink), maxLines = 1, softWrap = false)
+        val tl = measurer.measure(text, TextStyle(fontFamily = font, fontSize = 11.sp, color = ink), maxLines = 1, softWrap = false)
         drawText(tl, topLeft = Offset(l + 4 * density, top + (h - tl.size.height) / 2))
     }
 }
