@@ -1,4 +1,5 @@
 // Recreate this edit routes (workstream 1, plans/api.md "Recreate this edit"): references and their recipes.
+import { briefsOf } from '../recreate/briefs.js';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../ctx.js';
 import { RECREATE_TOOLS } from '../recreate/mcpTools.js';
@@ -22,6 +23,9 @@ export async function registerRecreateRoutes(app: FastifyInstance, ctx: Ctx) {
   const slot = (req: { params: unknown }) => (req.params as { slotId: string }).slotId;
   app.put('/v1/recreate/references/:id/briefs', async req => rx.setBriefs(req.user, id(req), req.body));
   app.post('/v1/recreate/references/:id/match', async req => rx.match(req.user, id(req), req.body));
+  // Shot briefs written on the server (G8): the price first, then a confirmed run.
+  app.post('/v1/recreate/references/:id/briefs/estimate', async req => briefsOf(ctx).estimate(req.user, id(req)));
+  app.post('/v1/recreate/references/:id/briefs/write', async req => briefsOf(ctx).write(req.user, id(req), req.body));
   app.post('/v1/recreate/references/:id/slots/:slotId/estimate', async req => rx.estimateSlot(req.user, id(req), slot(req), req.body));
   app.post('/v1/recreate/references/:id/slots/:slotId/fill', async req => rx.fillSlot(req.user, id(req), slot(req), req.body));
   // "Fix this shot": one slot's clip swapped in place (plan §4).
