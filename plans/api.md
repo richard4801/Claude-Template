@@ -1197,6 +1197,8 @@ QueuedShot { id, kind: "queued", title, tool, modelId?, userId, mine, estimate, 
 - Event `queue`: `{item}` or `{removed, jobId?}`, only to the member who queued it and the owner.
 
 ### Claude in the AI Suite (owner-approved 2026-11-08)
+
+**Prompt structure.** The suite brief (`threadBrief('suite').prompt`) and the API loop's system prompt are the same text: the shot-designer rules plus §3–§7 of the owner's skill `.claude/skills/muse-prompt-structure/SKILL.md` (skeleton SUBJECT / LOCATION / ACTION + SHOT n / STYLE / CONSTRAINTS, the rig, lengths, consistency, output). The server reads its copy at `server/api/assets/skills/muse-prompt-structure.md` (the image has no `.claude`); a test fails if the copy and the repo skill differ, so edit the skill and copy it over.
 Migration **0022** (`suite_assists`). Code: `suite/assist.ts`, `suite/mcpTools.ts`; tests `test/suite-assist.test.ts`.
 
 The owner describes a shot in words. Claude sets up the composer (the @model, the prompt, the rig with only the options members see, the moves, quality, shape, length, takes) and explains its choices. It generates only after the owner approves the price in the app.
