@@ -320,9 +320,9 @@ describe('Bring your own provider · API against a FAKE Replicate and fal (recor
       // The owner's flat engine list (built-in and custom, video and image); members never get it.
       const engines = (await owner.req('GET', '/v1/suite/catalog')).body.engines;
       const cv = engines.find((e: any) => e.model === vm.id);
-      expect(cv).toMatchObject({ name: 'House Motion', kind: 'video', custom: true, tier: null, perSec: 0, perRun: 0.6, minSeconds: 5, maxSeconds: 10, allowedSeconds: [5, 10] });
+      expect(cv).toMatchObject({ name: 'House Motion', kind: 'video', custom: true, tier: null, perSec: 0, perRun: 0.6, price: { basis: 'per_run', usd: 0.6 }, minSeconds: 5, maxSeconds: 10, allowedSeconds: [5, 10] });
       const lite = engines.find((e: any) => e.model === 'h3-lite');
-      expect(lite).toMatchObject({ kind: 'video', custom: false, tier: 'draft', resolution: '768P', perSec: 0.02, perRun: null });
+      expect(lite).toMatchObject({ kind: 'video', custom: false, tier: 'draft', resolution: '768P', perSec: 0.02, perRun: null, price: { basis: 'per_second', usd: 0.02 } });
       expect(engines.find((e: any) => e.model === 'h3-open')).toBeUndefined(); // licence-blocked
       expect(engines.filter((e: any) => e.kind === 'image').map((e: any) => [e.name, e.custom])).toEqual([[expect.any(String), false], ['House Still', true]]);
       expect(engines.find((e: any) => e.model === im.id).perRun).toBeCloseTo(0.05, 6);
