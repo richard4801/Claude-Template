@@ -104,7 +104,10 @@ fun SuiteClaudeApproval(a: SuiteAssistUi, onAnswer: (Boolean) -> Unit, modifier:
 fun SuiteReferenceChips(refs: List<DraftReference>, onRemove: (DraftReference) -> Unit, modifier: Modifier = Modifier) {
     val m = muse
     if (refs.isEmpty()) return
-    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+    // As on the Mac (WS2): the chips sit under "References from Claude".
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    T("References from Claude", m.scale.caption, m.roles.ink2, maxLines = 1)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         refs.forEach { r ->
             Row(Modifier.height(40.dp).clip(RoundedCornerShape(m.radii.control)).background(m.roles.field).padding(start = 4.dp)
                 .semantics(mergeDescendants = true) { contentDescription = "${r.useLabel} reference${r.label?.let { ", $it" } ?: ""}" },
@@ -115,6 +118,7 @@ fun SuiteReferenceChips(refs: List<DraftReference>, onRemove: (DraftReference) -
                     contentAlignment = Alignment.Center) { studio.muse.app.ui.theme.Ic("x", 14.dp, m.roles.ink2) }
             }
         }
+    }
     }
 }
 
