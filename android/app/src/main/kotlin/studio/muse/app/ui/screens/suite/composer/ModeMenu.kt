@@ -63,7 +63,7 @@ fun BoxScope.ModeMenu(x: SheetContext) {
     BackHandler(onBack = x.close)
     Box(Modifier.matchParentSize().clickable(remember { MutableInteractionSource() }, null) { x.close() }.semantics { contentDescription = "Close the modes" })
     val shape = RoundedCornerShape(12.dp)
-    Column(Modifier.align(Alignment.TopStart).padding(start = if (x.wide) 20.dp else 12.dp, top = if (x.wide) 64.dp else 56.dp).width(248.dp)
+    Column(Modifier.align(Alignment.TopStart).padding(start = if (x.wide) 20.dp else 12.dp, top = if (x.wide) 92.dp else 56.dp).width(248.dp)
         .shadow(12.dp, shape).clip(shape).background(m.t.surface).border(1.dp, m.t.line, shape)
         .clickable(remember { MutableInteractionSource() }, null) {}.padding(vertical = 4.dp)) {
         ModeItem.GROUPS.forEachIndexed { i, (title, items) ->
@@ -88,9 +88,8 @@ private fun ModeRow(item: ModeItem, x: SheetContext) {
         }
     }.padding(horizontal = 16.dp).semantics(mergeDescendants = true) { selected = on; role = Role.Button },
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        T(item.title, m.type.body.copy(fontSize = 15.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal), m.t.ink, Modifier.weight(1f, fill = false), maxLines = 1)
+        T(item.title, m.type.body.copy(fontSize = 15.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal), m.t.ink, Modifier.weight(1f), maxLines = 1)
         if (soon) T("Soon", m.scale.caption, m.t.muted, maxLines = 1)
-        Box(Modifier.weight(1f))
         if (on) SIc("check", 18.dp, m.t.ink)
     }
 }
