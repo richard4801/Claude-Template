@@ -8,7 +8,9 @@ import { pipeline } from 'node:stream/promises';
 import { and, desc, eq, inArray, isNull, lt } from 'drizzle-orm';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
-import { clips as clipsTable, models, uploads } from '../db/schema.js';
+import { clips as clipsTable, models, suiteLocations, uploads } from '../db/schema.js';
+import { EDITOR_LIMITS } from '../editor/service.js';
+import { whoOf } from '../money/money.js';
 import * as P from '../pricing.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -47,7 +49,10 @@ export type FillState = {
    * Slots being filled: by a Suite shot (method "generate"), or by swapping the model into the reference's own segment
    * (method "swap", G2: the segment's place in the reference, and the private segment clip deleted with the reference).
    */
-  jobs?: Record<string, { jobId: string; estimate?: number; at: number; method?: 'swap' | 'generate'; segment?: { startSec: number; endSec: number }; clipId?: string; clipKey?: string }>;
+  jobs?: Record<string, { jobId: string; estimate?: number; at: number; method?: 'swap' | 'generate'; segment?: { startSec: number; endSec: number }; clipId?: string; clipKey?: string;
+    background?: { source: 'location' | 'generated'; locationId?: string } }>;
+  /** Background plates made for "Use your own setting" (paid once; reused while the setting is the same). */
+  plates?: Record<string, { setting: string; image: { asset?: string; url?: string }; at: number }>;
   /** The last assembly: where, which take per slot, which project item came from which recipe element, and the score. */
   applied?: { sessionId: string; revision: number; at: number; slots: Record<string, string>; sources: Record<string, RecipeSource>; match: MatchScore;
     /** Swapped slots and what their pixels already carry from the reference (not applied again). */
@@ -64,8 +69,41 @@ const FillBody = z.object({
   outfitId: z.string().max(80).optional(),
   /** Swap: keep the reference's setting (default), or "Use your own setting" from the slot's brief (needs Edit). */
   keepBackground: z.boolean().default(true),
+  /** Your own setting: one of the studio's locations as the background (else one matching the brief, else a generated one). */
+  locationId: z.string().max(80).optional(),
 }).strict();
 type FillBody = z.infer<typeof FillBody>;
+type Location = typeof suiteLocations.$inferSelect;
+type Background = { source: 'location'; location: Location; usd: 0; matched: boolean } | { source: 'generated'; setting: string; usd: number; reused?: { asset?: string; url?: string } };
+/** The place a slot's brief names (its location, else its notes), for "Use your own setting". */
+export const settingOf = (slot: Recipe['slots'][number]) => [slot.brief?.location, slot.brief?.notes].map(x => (x ?? '').trim()).filter(Boolean).join(', ') || 'a clean, bright everyday room';
+/** A studio location the setting names: its name inside the setting, or the setting inside its name (case-insensitive). */
+export function matchLocation<T extends { name: string }>(setting: string, locs: T[]): T | null {
+  const s = ` ${setting.toLowerCase().replace(/[^a-z0-9]+/g, ' ')} `;
+  const norm = (n: string) => n.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return locs.filter(l => norm(l.name).length >= 3 && (s.includes(` ${norm(l.name)} `) || norm(l.name).includes(s.trim())))
+    .sort((a, b) => b.name.length - a.name.length)[0] ?? null;
+}
+/** A background plate: the place only, no people, as a phone video would frame it. */
+export const platePrompt = (setting: string) =>
+  `An empty background plate of ${setting}, for a vertical phone video. No people, no text, no logos. Natural light, realistic photo, eye-level, the whole place in focus.`;
+/** About 1 MP at the reference's shape (multiples of 16). */
+export function plateSize(aspect: string): [number, number] {
+  const [a, b] = aspect.split(':').map(Number) as [number, number];
+  const r = a && b ? a / b : 9 / 16, h = Math.sqrt(1_000_000 / r), w = h * r;
+  const s16 = (x: number) => Math.max(256, Math.round(x / 16) * 16);
+  return [s16(w), s16(h)];
+}
+const backgroundView = (bg: Background) => bg.source === 'location'
+  ? { source: 'location' as const, locationId: bg.location.id, name: bg.location.name, matched: bg.matched, usd: 0 }
+  : { source: 'generated' as const, setting: bg.setting, usd: bg.usd, ...(bg.reused ? { reused: true } : {}) };
+/** The swap's price with the background's added, in the same confirmation. */
+function withBackground(e: { estimate: number; seconds: number; priceLine: string; buttonLabel: string } & Record<string, unknown>, bg: Background) {
+  if (!bg.usd) return e;
+  const total = Math.round((e.estimate + bg.usd) * 100) / 100, m = (v: number) => `$${v.toFixed(2)}`;
+  return { ...e, estimate: total, swapUsd: e.estimate, backgroundUsd: bg.usd, priceLine: `about ${m(total)} · ${e.seconds.toFixed(1)} s · background ${m(bg.usd)}`,
+    buttonLabel: `Swap in · ${e.seconds.toFixed(1)} s · ${m(total)}` };
+}
 const run = promisify(execFile);
 export type RecipeSource = { recipeId: string; slotId?: string; textId?: string; transitionAt?: number };
 export type MatchScore = { overall: number; cuts: number; text: number; ramps: number; grade: number; shots: number; perSlot: { slotId: string; score: number }[] };
@@ -451,7 +489,9 @@ export class RecreateReferences {
     if (method === 'swap') {
       await this.checkModel(u, b.modelId);
       const plan = this.swapPlan(recipe, r, slot, b, this.swapEngines(b.keepBackground)[0]!);
-      return { slotId, method, keepBackground: b.keepBackground, segment: plan.segment, baked: [...BAKED_ELEMENTS], request: plan.request, estimate: plan.estimate };
+      const bg = b.keepBackground ? null : await this.backgroundFor(u, r, recipe, slot, b);
+      return { slotId, method, keepBackground: b.keepBackground, segment: plan.segment, baked: [...BAKED_ELEMENTS], request: plan.request,
+        estimate: bg ? withBackground(plan.estimate, bg) : plan.estimate, ...(bg ? { background: backgroundView(bg) } : {}) };
     }
     // promptFrom: "brief", or "summary"/"default" while the slot has no brief yet (the apps suggest writing one).
     return { slotId, method, ...(blocked ? { swapUnavailable: blocked } : {}), request, promptFrom: promptSource(recipe, slot), estimate: await this.ctx.suite.estimate(u, request) };
@@ -472,16 +512,20 @@ export class RecreateReferences {
   }
   private async fillBySwap(u: AuthUser, r: Row, recipe: Recipe, slot: Recipe['slots'][number], b: FillBody) {
     await this.checkModel(u, b.modelId);
+    // Your own setting: the background photo first (a studio location, else a plate made now and charged on its own).
+    const bg = b.keepBackground ? null : await this.backgroundFor(u, r, recipe, slot, b);
+    const bgImage = bg ? await this.backgroundImage(u, r, recipe, slot, bg) : null;
     let last: unknown = null;
     for (const engine of this.swapEngines(b.keepBackground)) {
       const plan = this.swapPlan(recipe, r, slot, b, engine);
       const clip = await this.segmentClip(u, r, recipe, slot.id, plan.segment);
       try {
-        const job = await this.ctx.jobs.create(u, { ...plan.request, clipId: clip.id }) as { id: string; cost?: number };
+        const job = await this.ctx.jobs.create(u, { ...plan.request, clipId: clip.id, ...(bgImage ? { backgroundImage: bgImage } : {}) }) as { id: string; cost?: number };
         const fresh = await this.row(u, r.id);
         await this.saveFill(fresh, { ...(fresh.fill ?? {}), jobs: { ...(fresh.fill?.jobs ?? {}), [slot.id]: {
-          jobId: job.id, estimate: job.cost, at: Date.now(), method: 'swap', segment: plan.segment, clipId: clip.id, clipKey: clip.key } } });
-        return { slotId: slot.id, method: 'swap' as const, segment: plan.segment, job };
+          jobId: job.id, estimate: job.cost, at: Date.now(), method: 'swap', segment: plan.segment, clipId: clip.id, clipKey: clip.key,
+          ...(bg ? { background: { source: bg.source, ...(bg.source === 'location' ? { locationId: bg.location.id } : {}) } } : {}) } } });
+        return { slotId: slot.id, method: 'swap' as const, segment: plan.segment, job, ...(bg ? { background: backgroundView(bg) } : {}) };
       } catch (e) {
         await this.dropClip(clip.id, clip.key);
         // Edit not available right now: try the hosted swap. Anything else (a cap, the wallet) stops here.
@@ -491,6 +535,50 @@ export class RecreateReferences {
     }
     throw last ?? new ApiError(409, 'swap_unavailable', 'Swapping isn’t available right now · generate this shot instead');
   }
+  /**
+   * "Use your own setting": the background photo for a swap slot. A studio location picked by `locationId`, else one
+   * whose name the brief's place mentions (free); else a plate made from the brief's setting with the Suite's image
+   * engine: priced at its cost × EDITOR_MARKUP and shown in the same confirmation (free again when this reference
+   * already has a plate for that setting).
+   */
+  private async backgroundFor(u: AuthUser, r: Row, recipe: Recipe, slot: Recipe['slots'][number], b: FillBody): Promise<Background> {
+    const locs = await this.ctx.db.select().from(suiteLocations).where(eq(suiteLocations.studioId, u.studioId));
+    if (b.locationId) {
+      const l = locs.find(x => x.id === b.locationId);
+      if (!l) throw badRequest('locationId: no such location in the studio');
+      return { source: 'location', location: l, usd: 0, matched: false };
+    }
+    const setting = settingOf(slot);
+    const match = matchLocation(setting, locs);
+    if (match) return { source: 'location', location: match, usd: 0, matched: true };
+    const plate = r.fill?.plates?.[slot.id];
+    if (plate && plate.setting === setting) return { source: 'generated', setting, usd: 0, reused: plate.image };
+    const usd = Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(P.newShotEstimateImages(this.ctx.images.photoPrices(), 1, 0) * this.ctx.config.EDITOR_MARKUP * 100) / 100);
+    return { source: 'generated', setting, usd };
+  }
+  /** The background image itself: the location's photo, a plate already made, or a new plate (held, made, settled). */
+  private async backgroundImage(u: AuthUser, r: Row, recipe: Recipe, slot: Recipe['slots'][number], bg: Background): Promise<{ asset?: string; url?: string }> {
+    if (bg.source === 'location') return bg.location.image;
+    if (bg.reused) return bg.reused;
+    const id = uid('rxbg'), [w, h] = plateSize(recipe.source.aspect);
+    const hold = await this.ctx.money.hold(whoOf(u), id, bg.usd, { perJob: false, note: 'Background for your own setting · hold' });
+    try {
+      const out = await this.ctx.images.generate({ studioId: u.studioId, userId: u.id, purpose: 'recreate_background', refId: r.id,
+        req: { prompt: platePrompt(bg.setting), width: w, height: h, count: 1 } });
+      const image = out.images[0];
+      if (!image) throw new Error('no image');
+      const actual = Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(out.costUsd * this.ctx.config.EDITOR_MARKUP * 10000) / 10000);
+      await this.ctx.money.settle(u.studioId, u.id, id, hold, actual, 'Background for your own setting');
+      const fresh = await this.row(u, r.id);
+      await this.saveFill(fresh, { ...(fresh.fill ?? {}), plates: { ...(fresh.fill?.plates ?? {}), [slot.id]: { setting: bg.setting, image, at: Date.now() } } });
+      return image;
+    } catch (e) {
+      await this.ctx.money.release(u.studioId, u.id, id, hold, 'background not made').catch(() => undefined);
+      this.ctx.log?.warn({ err: String((e as Error)?.message ?? e) }, 'recreate background');
+      throw new ApiError(502, 'background_failed', 'Couldn’t make the background for your setting · you weren’t charged · try again, or pick one of your locations');
+    }
+  }
+
   /** The reference's segment as a private clip (rx/…, deleted with the reference): video only, cut frame-exact. */
   private async segmentClip(u: AuthUser, r: Row, recipe: Recipe, slotId: string, seg: { startSec: number; endSec: number }) {
     if (!r.storageKey) throw new ApiError(409, 'swap_unavailable', 'The reference’s video is gone (deleted after 30 days) · generate this shot instead');
