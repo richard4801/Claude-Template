@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -104,7 +105,16 @@ data class SuiteHost(
 fun SuiteSheet(ui: EditSuiteUi, panel: Panel, host: SuiteHost, act: (EditAction) -> Unit, modifier: Modifier = Modifier) {
     val close = { act(EditAction.Open(null)) }
     val back = { act(EditAction.Open(Panel.EDIT)) }
-    SheetFrame(panel.title, if (panel == Panel.SPEED || panel == Panel.TRANSFORM) back else close, modifier) {
+    SheetFrame(panel.title, if (panel == Panel.SPEED || panel == Panel.TRANSFORM) back else close, modifier) { PanelBody(ui, panel, host, act) }
+}
+
+/**
+ * A panel's settings without the sheet around them: the tablet inspector (plans/edit-layout.md) shows them under its own
+ * section grid, scrolling inside the inspector.
+ */
+@Composable
+fun ColumnScope.PanelBody(ui: EditSuiteUi, panel: Panel, host: SuiteHost, act: (EditAction) -> Unit) {
+    run {
         when (panel) {
             Panel.EDIT -> EditBody(ui, act)
             Panel.SPEED -> SpeedBody(ui, act)

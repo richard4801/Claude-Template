@@ -162,13 +162,13 @@ export class EditSessions {
     return { revision: r.session.revision, entry: r.entry ? this.entryView(r.entry) : null };
   }
   /** Claude's ops (MCP apply_edit_ops): applied, validated, committed as one undoable change. */
-  async applyClaude(u: AuthUser, id: string, b: { baseRevision?: unknown; ops?: unknown }) {
+  async applyClaude(u: AuthUser, id: string, b: { baseRevision?: unknown; ops?: unknown; label?: string }) {
     const s = await this.row(u, id), base = this.revOf(b);
     if (base !== s.revision) throw await this.stale(id, base);
     this.limit(id);
     const { project, labels } = applyOps(s.project as M.EditProject, b.ops as EditOp[]);
     this.check(project, s.takeId);
-    const r = await this.commit(s, project, { author: 'claude', kind: 'edit', label: labels.join(' · ') });
+    const r = await this.commit(s, project, { author: 'claude', kind: 'edit', label: b.label ?? labels.join(' · ') }); // label: a tool's own name for the change (workstream 1)
     return { revision: r.session.revision, changes: labels, entry: r.entry ? this.entryView(r.entry) : null, durationSec: M.durationSec(project) };
   }
   private limit(id: string) {
@@ -180,6 +180,7 @@ export class EditSessions {
   async undo(u: AuthUser, id: string, b: { entryId?: unknown; device?: unknown; author?: string }) {
     const s = await this.row(u, id);
     const entryId = Number(b.entryId);
+    if (!Number.isInteger(entryId) || entryId <= 0) throw badRequest('entryId: required (from the history)'); // was a 500 on a missing id
     const [e] = await this.ctx.db.select().from(editOps).where(and(eq(editOps.id, entryId), eq(editOps.sessionId, id)));
     if (!e) throw notFound('Change');
     if (e.undone) throw new ApiError(409, 'already_undone', 'That change was already undone');
@@ -280,7 +281,12 @@ export class EditSessions {
     const p = list.find(x => x.id === pid);
     if (!p || p.status !== 'waiting') throw notFound('Waiting request');
     if (b.approve !== true) p.status = 'declined';
-    else {
+    else if (p.kind === 'recreate_fill') {
+      // Workstream 1 (Recreate this edit): a missing slot filled with a Suite shot. An ordinary job with its own events.
+      const { recreateOf } = await import('../recreate/references.js');
+      const r = await recreateOf(this.ctx).fillSlot(u, String(p.args.referenceId), String(p.args.slotId), p.args.body);
+      p.status = 'done'; p.jobId = String((r.job as { id: string }).id);
+    } else {
       const job = await editorAi(this.ctx).start(u, p.args);
       p.status = 'running'; p.jobId = String(job.id);
     }

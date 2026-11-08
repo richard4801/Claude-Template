@@ -69,7 +69,9 @@ val StageColor = Color(0xFF1B1916)
  * draws its own), plus the platform safe area and its switch.
  */
 @Composable
-fun SuitePreview(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier = Modifier, drawText: Boolean = true, picture: @Composable (Modifier) -> Unit) {
+fun SuitePreview(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier = Modifier, drawText: Boolean = true, picture: @Composable (Modifier) -> Unit,
+    /** The phone's safe-area chip over the picture; the tablet has its own segmented control (plans/edit-layout.md). */
+    safeChip: Boolean = true) {
     val p = ui.project
     BoxWithConstraints(modifier.background(StageColor), contentAlignment = Alignment.Center) {
         val aspect = p?.let { it.canvas.width.toFloat() / it.canvas.height } ?: (9f / 16f)
@@ -82,6 +84,7 @@ fun SuitePreview(ui: EditSuiteUi, act: (EditAction) -> Unit, modifier: Modifier 
             ui.safeArea?.let { SafeAreaGuides(it) }
         }
         // Safe-area switch: TikTok → Reels → Shorts → off.
+        if (!safeChip) return@BoxWithConstraints
         val next = when (ui.safeArea) { SafeArea.TIKTOK -> SafeArea.REELS; SafeArea.REELS -> SafeArea.SHORTS; SafeArea.SHORTS -> null; null -> SafeArea.TIKTOK }
         Row(
             Modifier.align(Alignment.TopStart).padding(10.dp).clip(RoundedCornerShape(2.dp)).background(Color.Black.copy(alpha = .45f))

@@ -7,6 +7,7 @@ import { takes, uploads } from '../db/schema.js';
 import { ApiError, badRequest } from '../errors.js';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { approximateFrame, contactSheet } from './frame.js';
+import { energyCurve, findCuts, findPeaks, measureMotion } from './motion.js';
 import { LOOKS } from './lookpack.js';
 import * as M from './model.js';
 import { OP_NAMES } from './ops.js';
@@ -200,6 +201,26 @@ const TOOLS: EditTool[] = [
     description: 'Finds the tempo and beats of a music clip and marks them on the timeline (for cutting to the beat).',
     inputSchema: obj({ sessionId: SID, itemId: str('The music clip') }, ['sessionId', 'itemId']),
     run: (env, a) => helper(env, a, { kind: 'beats', label: 'Detect beats' }),
+  },
+  {
+    // Workstream 1 (plans/recreate-edit.md "Action peaks"): frame-difference energy on a small grey proxy. Free.
+    name: 'find_action_peaks', title: 'Find action peaks (free)', scope: 'edit:read', readOnly: true, idempotent: true,
+    description: 'Finds the moments of strongest motion in a clip (a jump, a turn, a hair flip), for landing actions on beats. Free: frame differencing on a small proxy of the clip. Returns peaks [{t, strength 0–1}] in the clip\'s own seconds (not timeline seconds), the hard cuts it saw (left out of the peaks; flash: true for a one-frame flash), and an energy curve for drawing. Changes nothing.',
+    inputSchema: obj({ sessionId: SID, itemId: str('The clip (default: the main video)'), minGapSec: num('Smallest gap between two peaks (default 0.25)', 0.05, 10),
+      sensitivity: num('Higher finds fewer, bigger peaks (default 4)', 1, 12), max: num('At most this many peaks, strongest kept (default 200)', 1, 500) }, ['sessionId']),
+    run: async (env, a) => {
+      const svc = editSessionsOf(env.ctx), ai = editorAi(env.ctx);
+      const s = await svc.row(env.user, sessionId(env, a));
+      const asset = svc.sourceAsset(s.project as M.EditProject, s.takeId, typeof a.itemId === 'string' ? a.itemId : undefined);
+      if (asset.kind !== 'video' || !(asset.take || asset.upload)) throw badRequest('That item has no stored video to analyse');
+      const src = await ai.source(env.user, asset.take ? { takeId: asset.take } : { uploadId: asset.upload, durationSec: asset.durationSec });
+      const c = env.ctx.config;
+      const m = await ai.withLocalInput(src.key, input => measureMotion(c.FFMPEG_PATH, c.FFPROBE_PATH, input, { maxSec: 600 }));
+      const cuts = findCuts(m);
+      const peaks = findPeaks(m, { cuts, minGapSec: Number(a.minGapSec) || undefined, sensitivity: Number(a.sensitivity) || undefined, max: Number(a.max) || undefined });
+      await svc.log(s, `Found ${peaks.length} action peak${peaks.length === 1 ? '' : 's'}`);
+      return { itemId: a.itemId ?? null, assetId: asset.id, fps: m.fps, durationSec: Math.round(m.energy.length / m.fps * 1000) / 1000, peaks, cuts, energy: energyCurve(m) };
+    },
   },
   {
     name: 'denoise', title: 'Clean up the voice', scope: 'edit:write',

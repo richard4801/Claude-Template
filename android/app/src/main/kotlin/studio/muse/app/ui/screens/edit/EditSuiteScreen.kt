@@ -78,6 +78,7 @@ import studio.muse.app.ui.components.TopBar
 import studio.muse.app.ui.components.press
 import studio.muse.app.ui.screens.ScreenBox
 import studio.muse.app.ui.theme.muse
+import studio.muse.app.ui.theme.scale
 import studio.muse.core.edit.Asset
 import studio.muse.core.edit.AssetKind
 import studio.muse.core.edit.AudioClip
@@ -108,8 +109,10 @@ import kotlin.math.roundToInt
 @Composable
 fun EditSuiteScreen(takeId: String?, onBack: () -> Unit) {
     var open by rememberSaveable(takeId) { mutableStateOf(takeId) }
+    var recreating by rememberSaveable { mutableStateOf(false) } // "Recreate an edit" (plans/recreate-edit.md)
     val id = open
-    if (id == null) EditHome(onBack) { open = it }
+    if (recreating) RecipeScreen(onBack = { recreating = false })
+    else if (id == null) EditHome(onBack, onRecreate = { recreating = true }) { open = it }
     else EditSuiteEditor(id, onBack = { if (takeId == null) open = null else onBack() })
 }
 
@@ -120,20 +123,36 @@ fun editableTakes(takes: List<Take>): List<TakeChoice> = takes.filter { it.kind 
 }
 
 @Composable
-fun EditHome(onBack: () -> Unit, onOpen: (String) -> Unit) {
+fun EditHome(onBack: () -> Unit, onRecreate: () -> Unit, onOpen: (String) -> Unit) {
     val c = LocalContainer.current
     val state by c.repo.state.collectAsState()
-    EditHomeContent(editableTakes(state.takes), onBack, onOpen)
+    // "Recreate an edit" shows in demo mode only until the analysis service lands (its recipe is a stand-in for now).
+    EditHomeContent(editableTakes(state.takes), onBack, onOpen, onRecreate = onRecreate.takeIf { c.repo.demo })
 }
 
 @Composable
-fun EditHomeContent(takes: List<TakeChoice>, onBack: () -> Unit, onOpen: (String) -> Unit) {
+fun EditHomeContent(takes: List<TakeChoice>, onBack: () -> Unit, onOpen: (String) -> Unit, onRecreate: (() -> Unit)? = null) {
     val m = muse
     ScreenBox(statusPad = true) {
         Column(Modifier.fillMaxSize()) {
             TopBar("Edit", onBack = onBack)
             LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 item { T("Open a video to cut, caption, grade and export it. Edits are saved as new versions; the original stays.", m.type.body.copy(fontSize = 13.5.sp), m.t.muted) }
+                // "Recreate an edit" (plans/recreate-edit.md): an edit you love, broken into its recipe.
+                if (onRecreate != null) item {
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(m.t.r)).background(m.t.surface).press(onClick = onRecreate).padding(14.dp)
+                            .semantics(mergeDescendants = true) { contentDescription = "Recreate an edit" },
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        EIc("film-strip", 22.dp, m.t.ink)
+                        Column(Modifier.weight(1f)) {
+                            T("Recreate an edit", m.scale.label, m.t.ink, maxLines = 1)
+                            T("Pick an edit you love and see its recipe: shots, beats, text and grade", m.scale.caption, m.t.muted, maxLines = 2)
+                        }
+                        EIc("chev-r", 16.dp, m.t.muted)
+                    }
+                }
                 val edited = takes.filter { it.edited }; val renders = takes.filter { !it.edited }
                 if (takes.isEmpty()) item { T("No videos yet · make one in the Video suite", m.type.body, m.t.muted) }
                 if (edited.isNotEmpty()) { item { SuiteLabel("Edited versions", color = m.t.muted) }; edited.forEach { t -> item(t.id) { HomeRow(t, onOpen) } } }

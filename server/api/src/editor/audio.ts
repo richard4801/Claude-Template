@@ -81,9 +81,25 @@ export function detectBeats(x: Float32Array, sr = BEAT_SR): Beats {
     if (score > best) { best = score; bestLag = lag; }
   }
   if (!bestLag) return { bpm: 0, beats: [], strong: [] };
-  let bestPhase = 0, bestSum = -1;
-  for (let ph = 0; ph < bestLag; ph += 0.5) { let s = 0; for (let t = ph; t < n; t += bestLag) s += env[Math.round(t)] ?? 0; if (s > bestSum) { bestSum = s; bestPhase = ph; } }
   const snap = Math.round(0.07 * fps), beatsF: number[] = [];
+  // workstream 1: octave check. The autocorrelation scores a pulse and half of it alike, so a 140 bpm track could read
+  // as 70. If the points halfway between the grid's beats are onsets too (at least half as strong), the tempo is the
+  // double, as long as that stays at most 180 bpm.
+  const near = (t: number) => { const c = Math.round(t); let m = 0; for (let k = Math.max(0, c - snap); k <= Math.min(n - 1, c + snap); k++) m = Math.max(m, env[k]!); return m; };
+  const gridMean = (lag: number, ph: number) => { let s = 0, c = 0; for (let t = ph; t < n; t += lag) { s += near(t); c++; } return c ? s / c : 0; };
+  const phaseOf = (lag: number) => { let bp = 0, bs = -1; for (let ph = 0; ph < lag; ph += 0.5) { let s = 0; for (let t = ph; t < n; t += lag) s += env[Math.round(t)] ?? 0; if (s > bs) { bs = s; bp = ph; } } return bp; };
+  let bestPhase = phaseOf(bestLag);
+  // A pulse with off-beats (eighth notes) also lines up every 1.5 beats (120 bpm read as 80): if a grid two thirds as
+  // long lands on onsets just as well, that is the beat.
+  {
+    const l2 = (bestLag * 2) / 3, p2 = phaseOf(l2);
+    if ((60 * fps) / l2 <= 180.5 && gridMean(l2, p2) >= 0.8 * gridMean(bestLag, bestPhase)) { bestLag = l2; bestPhase = p2; }
+  }
+  while ((60 * fps) / (bestLag / 2) <= 180.5) {
+    const on = gridMean(bestLag, bestPhase), mid = gridMean(bestLag, bestPhase + bestLag / 2);
+    if (!(on > 0 && mid >= 0.5 * on)) break;
+    bestLag /= 2; bestPhase = phaseOf(bestLag);
+  }
   // Track: each beat is looked for around the previous beat + one period, so a slightly wrong tempo doesn't drift.
   for (let t = bestPhase; t < n; ) {
     const c = Math.round(t); let m = Math.min(n - 1, c);

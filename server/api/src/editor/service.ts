@@ -266,7 +266,8 @@ export class EditorAiService {
   }
 
   /** The media as something ffmpeg can read: a presigned URL on R2, else a temporary copy of the local object. */
-  private async withLocalInput<T>(key: string, fn: (input: string) => Promise<T>): Promise<T> {
+  /** The stored media as a local path (or a short-lived URL on S3) for ffmpeg; temporary copies are removed after. */
+  async withLocalInput<T>(key: string, fn: (input: string) => Promise<T>): Promise<T> {
     if (this.ctx.storage.kind === 's3') return fn(await this.ctx.storage.presignGet(key, 900));
     const obj = await this.ctx.storage.get(key);
     if (!obj) throw new Error('media missing');
