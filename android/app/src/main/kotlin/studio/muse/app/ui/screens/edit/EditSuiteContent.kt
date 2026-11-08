@@ -83,15 +83,8 @@ fun EditSuiteContent(
                 }
             }
             if (wide) {
-                Row(Modifier.fillMaxSize()) {
-                    editor(Modifier.weight(1f).fillMaxHeight())
-                    Box(Modifier.width(1.dp).fillMaxHeight().background(m.t.line))
-                    Box(Modifier.width(380.dp).fillMaxHeight()) {
-                        // Edit sessions (workstream 3): the Claude panel takes the inspector's place while open.
-                        if (ui.session?.chatOpen == true) EditClaudePanel(ui, Modifier.fillMaxSize())
-                        else if (ui.project != null) SuiteSheet(ui, ui.panel ?: Panel.EDIT, host, act, Modifier.fillMaxSize())
-                    }
-                }
+                // The approved Edit layout (plans/edit-layout.md, WS2's Mac design adapted): EditTablet.kt.
+                EditTabletLayout(ui, frames, host, act, onClose, drawText, picture)
             } else {
                 editor(Modifier.fillMaxSize())
                 val panel = ui.panel
@@ -142,16 +135,17 @@ private fun Status(text: String, progress: Float?) {
 @Composable
 private fun TopRow(ui: EditSuiteUi, act: (EditAction) -> Unit, onClose: () -> Unit) {
     val m = muse
-    Row(Modifier.fillMaxWidth().height(50.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(48.dp).press(onClick = onClose).semantics { contentDescription = "Close" }, contentAlignment = Alignment.CenterStart) { EIc("x", 22.dp, m.t.ink) }
-        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-            studio.muse.app.ui.components.FitText(ui.title.ifBlank { "Edit" }, m.type.body.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold), m.t.ink, Modifier.weight(1f, fill = false))
-            if (ui.reopened) { Spacer(Modifier.width(6.dp)); Pill("Edited", "good") }
+        // The title over its status line (plans/edit-layout.md), on the type scale.
+        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+            studio.muse.app.ui.components.FitText(ui.title.ifBlank { "Edit" }, m.scale.heading, m.t.ink)
+            T(if (ui.reopened) "Edited version" else "Not exported yet", m.scale.caption, m.t.muted, maxLines = 1)
         }
         if (ui.claudeOwner || ui.session != null) { EditClaudeButton(ui, act); Spacer(Modifier.width(8.dp)) }
         val shape = RoundedCornerShape(if (m.isA) 0.dp else if (m.isB) 8.dp else 999.dp)
         Box(
-            Modifier.height(30.dp).clip(shape).background(m.t.cta).press(enabled = ui.project != null) { act(EditAction.Open(Panel.EXPORT)) }.padding(horizontal = 12.dp)
+            Modifier.height(36.dp).clip(shape).background(m.t.cta).press(enabled = ui.project != null) { act(EditAction.Open(Panel.EXPORT)) }.padding(horizontal = 14.dp)
                 .semantics { contentDescription = "Export" },
             contentAlignment = Alignment.Center,
         ) { T("Export", m.scale.label, m.t.ctaInk, maxLines = 1) }
@@ -162,7 +156,7 @@ private fun TopRow(ui: EditSuiteUi, act: (EditAction) -> Unit, onClose: () -> Un
 private fun Transport(ui: EditSuiteUi, act: (EditAction) -> Unit) {
     val m = muse
     Row(Modifier.fillMaxWidth().height(42.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        T("${suiteTime(ui.playheadSec)} / ${suiteTime(ui.duration)}", m.type.mono.copy(fontSize = 12.5.sp), m.t.ink, Modifier.weight(1f), maxLines = 1)
+        T("${suiteTime(ui.playheadSec)} / ${suiteTime(ui.duration)}", m.scale.label.tabular(), m.t.ink, Modifier.weight(1f), maxLines = 1)
         Box(Modifier.size(48.dp).press(enabled = ui.ready) { act(EditAction.PlayPause) }.semantics { contentDescription = if (ui.playing) "Pause" else "Play" }, contentAlignment = Alignment.Center) {
             EIc(if (ui.playing) "pause" else "play", 20.dp, m.t.ink)
         }
@@ -195,7 +189,7 @@ private fun Toolbar(ui: EditSuiteUi, act: (EditAction) -> Unit) {
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 EIc(tool.icon, 20.dp, c)
-                T(tool.label, m.type.body.copy(fontSize = 9.5.sp, fontWeight = FontWeight.Medium), c, maxLines = 1)
+                T(tool.label, m.scale.micro, c, maxLines = 1) // `micro` 11, full words (plans/edit-layout.md)
             }
         }
     }

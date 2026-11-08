@@ -84,6 +84,8 @@ sealed interface EditAction {
     data class Open(val panel: Panel?) : EditAction
     data class SafeAreaOf(val area: SafeArea?) : EditAction
     data object Fullscreen : EditAction
+    /** Tablet: "Hide inspector" / "Show inspector" (plans/edit-layout.md). */
+    data class InspectorHidden(val hidden: Boolean) : EditAction
     data object ClearMessage : EditAction
     // Edit
     data object Split : EditAction
@@ -331,6 +333,7 @@ class EditSuiteController(
             is EditAction.Open -> open(a.panel)
             is EditAction.SafeAreaOf -> _ui.update { it.copy(safeArea = a.area) }
             EditAction.Fullscreen -> _ui.update { it.copy(fullscreen = !it.fullscreen) }
+            is EditAction.InspectorHidden -> _ui.update { it.copy(inspectorHidden = a.hidden) }
             EditAction.ClearMessage -> _ui.update { it.copy(message = null) }
 
             EditAction.Split -> {
