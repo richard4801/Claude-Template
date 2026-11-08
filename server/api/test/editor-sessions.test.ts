@@ -220,6 +220,23 @@ describe('edit sessions API and Claude tools', () => {
     expect(M.durationSec(s.project as M.EditProject)).toBeLessThan(5);
   }, 30_000);
 
+  // Workstream 1 (plans/recreate-edit.md): action peaks on the session's video, free, changing nothing.
+  it('find_action_peaks reads the clip on the server (free, read-only, logged)', async () => {
+    if (!hasFfmpeg) return;
+    const opened = await tool('open_edit').run(env(), { takeId, fresh: true }) as any;
+    const before = await editSessionsOf(a.ctx).row(ownerUser, opened.sessionId);
+    const r = await tool('find_action_peaks').run(env(), { sessionId: opened.sessionId, minGapSec: 0.5 }) as any;
+    expect(r.fps).toBeGreaterThan(0);
+    expect(r.durationSec).toBeGreaterThan(1);
+    expect(Array.isArray(r.peaks) && Array.isArray(r.cuts)).toBe(true);
+    for (const p of r.peaks) { expect(p.t).toBeGreaterThanOrEqual(0); expect(p.strength).toBeGreaterThan(0); expect(p.strength).toBeLessThanOrEqual(1); }
+    expect(r.energy.values.length).toBeLessThanOrEqual(120);
+    const after = await editSessionsOf(a.ctx).row(ownerUser, opened.sessionId);
+    expect(after.revision).toBe(before.revision);
+    expect(tool('find_action_peaks')).toMatchObject({ scope: 'edit:read', readOnly: true });
+    await expect(tool('find_action_peaks').run(env(), { sessionId: opened.sessionId, itemId: 'nope' })).rejects.toThrow(/no item nope/);
+  }, 30_000);
+
   it('every Claude call is logged; read tools are edit:read, the rest edit:write; nothing deletes takes', async () => {
     const sid = (await owner.req('POST', '/v1/edit-sessions', { takeId })).body.id;
     const h = (await owner.req('GET', `/v1/edit-sessions/${sid}/history`)).body;
