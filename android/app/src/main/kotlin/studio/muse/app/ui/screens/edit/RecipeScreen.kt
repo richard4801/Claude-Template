@@ -57,6 +57,8 @@ import studio.muse.app.ui.components.press
 import studio.muse.app.ui.screens.ScreenBox
 import studio.muse.app.ui.theme.muse
 import studio.muse.app.ui.theme.scale
+import studio.muse.app.ui.theme.roles
+import studio.muse.app.ui.theme.radii
 import studio.muse.core.edit.Recipe
 import studio.muse.core.edit.RecipeConfidence
 import studio.muse.core.edit.RecipeSlot
@@ -99,8 +101,10 @@ fun RecipeScreen(onBack: () -> Unit, referenceId: String? = null, shared: studio
     }
     // Share → MUSE: a link. The server fetches it within the platforms' rules; when it can't, its message says why and the
     // saved file is offered instead.
-    LaunchedEffect(shared) {
-        val url = (shared as? studio.muse.app.data.SharedReference.Link)?.url ?: return@LaunchedEffect
+    // A link: shared from another app, or pasted on the start page.
+    var link by remember { mutableStateOf((shared as? studio.muse.app.data.SharedReference.Link)?.url) }
+    LaunchedEffect(link) {
+        val url = link ?: return@LaunchedEffect
         val name = studio.muse.core.edit.SharedLink.name(url)
         ui = RecipeUi(RecipePhase.Analysing(.05f, "Getting the video from the link"), name)
         ui = runCatching { follow(c.repo.api, c.repo.api.createReferenceFromLink(url, name)) { ui = it } }.getOrElse { e ->
@@ -130,7 +134,7 @@ fun RecipeScreen(onBack: () -> Unit, referenceId: String? = null, shared: studio
     }
     val ready = ui.phase as? RecipePhase.Ready
     if (ready?.referenceId != null) RecreateBuild(ready.referenceId, ready.recipe, ui.referenceName, onBack, onOpenTake)
-    else RecipeContent(ui, onBack = onBack, onPick = { pick.launch("video/*") })
+    else RecipeContent(ui, onBack = onBack, onPick = { pick.launch("video/*") }, onLink = { link = it })
 }
 
 /**
@@ -196,7 +200,7 @@ private suspend fun follow(api: studio.muse.app.data.MuseApi, start: studio.muse
 
 /** The screen as a function of [ui] (screenshots render it). */
 @Composable
-fun RecipeContent(ui: RecipeUi, onBack: () -> Unit, onPick: () -> Unit) {
+fun RecipeContent(ui: RecipeUi, onBack: () -> Unit, onPick: () -> Unit, onLink: (String) -> Unit = {}, draftLink: String = "") {
     val m = muse
     ScreenBox(statusPad = true) {
         Column(Modifier.fillMaxSize()) {
@@ -210,7 +214,7 @@ fun RecipeContent(ui: RecipeUi, onBack: () -> Unit, onPick: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(24.dp),
                 ) {
                     when (val ph = ui.phase) {
-                        RecipePhase.Pick -> PickBody(onPick)
+                        RecipePhase.Pick -> PickBody(onPick, onLink, draftLink)
                         is RecipePhase.Analysing -> AnalysingBody(ui.referenceName, ph)
                         is RecipePhase.Failed -> {
                             T(ph.message, m.scale.body, m.t.ink)
@@ -227,7 +231,7 @@ fun RecipeContent(ui: RecipeUi, onBack: () -> Unit, onPick: () -> Unit) {
 }
 
 @Composable
-private fun ColumnScope.PickBody(onPick: () -> Unit) {
+private fun ColumnScope.PickBody(onPick: () -> Unit, onLink: (String) -> Unit, draftLink: String) {
     val m = muse
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         T("See how an edit is made", m.scale.title, m.t.ink)
@@ -236,6 +240,35 @@ private fun ColumnScope.PickBody(onPick: () -> Unit) {
         T("The video stays private to your studio and is only used to read the recipe.", m.scale.caption, m.t.muted)
     }
     Primary("Pick a video", onPick)
+    LinkField(onLink, draftLink)
+}
+
+/**
+ * Or paste a link (TikTok, Instagram Reel, YouTube). The server fetches it within each platform's rules; when it can't,
+ * it says why and the saved file is the way in. The button wakes up once the text holds a link.
+ */
+@Composable
+private fun LinkField(onLink: (String) -> Unit, draft: String) {
+    val m = muse
+    var text by remember { mutableStateOf(draft) }
+    val url = studio.muse.core.edit.SharedLink.first(text)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        T("Or paste a link", m.scale.label, m.t.ink)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(m.radii.control)).background(m.roles.field).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
+                androidx.compose.foundation.text.BasicTextField(text, { text = it.take(500) }, Modifier.fillMaxWidth().semantics { contentDescription = "Link to a video" }, singleLine = true,
+                    textStyle = m.scale.body.copy(color = m.roles.ink), cursorBrush = androidx.compose.ui.graphics.SolidColor(m.roles.accent),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri, imeAction = androidx.compose.ui.text.input.ImeAction.Go),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = { url?.let(onLink) }),
+                    decorationBox = { inner -> Box { if (text.isEmpty()) T("TikTok, Reel or YouTube link", m.scale.body, m.roles.ink2, maxLines = 1); inner() } })
+            }
+            Box(Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(m.radii.control)).border(1.dp, m.roles.hairline, RoundedCornerShape(m.radii.control))
+                .press(enabled = url != null) { url?.let(onLink) }.padding(horizontal = 16.dp).semantics { role = Role.Button }, contentAlignment = Alignment.Center) {
+                T("Read it", m.scale.label, if (url != null) m.roles.ink else m.roles.ink2, maxLines = 1)
+            }
+        }
+        T("MUSE fetches it only where the platform allows; otherwise save the video and pick it.", m.scale.caption, m.t.muted)
+    }
 }
 
 @Composable
