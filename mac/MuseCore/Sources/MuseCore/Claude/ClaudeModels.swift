@@ -166,10 +166,12 @@ public struct ClaudeMessage: Codable, Hashable, Sendable, Identifiable {
         tool = try? c.decodeIfPresent(ClaudeToolRef.self, forKey: .tool)
         image = try? c.decodeIfPresent(ClaudeImageRef.self, forKey: .image)
         createdAt = (try? c.decodeIfPresent(Double.self, forKey: .createdAt)) ?? 0
-        let ids = ((try? c.decodeIfPresent([String].self, forKey: .attachments)) ?? nil)
-            ?? ((try? c.decodeIfPresent([String].self, forKey: .uploadIds)) ?? nil)
-            ?? ((try? c.decodeIfPresent(String.self, forKey: .uploadId)) ?? nil).map { [$0] }
-        attachments = ids.flatMap { $0.isEmpty ? nil : $0 }
+        // Split up: one chained `??` expression here was too slow for the type checker.
+        var ids: [String]? = nil
+        if let a = try? c.decodeIfPresent([String].self, forKey: .attachments) { ids = a }
+        if ids == nil, let a = try? c.decodeIfPresent([String].self, forKey: .uploadIds) { ids = a }
+        if ids == nil, let one = try? c.decodeIfPresent(String.self, forKey: .uploadId) { ids = [one] }
+        attachments = (ids?.isEmpty ?? true) ? nil : ids
     }
 }
 
